@@ -61,13 +61,13 @@ function image_path_for(string $programKey, int $externalLessonId, int $pageNumb
     $page = str_pad((string)$pageNumber, 3, '0', STR_PAD_LEFT);
     $folder = program_folder_for_images($programKey);
 
-    return sprintf(
-        'ks_images/%s/lesson_%d/lesson_%d_page_%s.png',
-        $folder,
-        $externalLessonId,
-        $externalLessonId,
-        $page
-    );
+return sprintf(
+  'ks_images/%s/lesson_%d/lesson_%d_page_%s.png',
+  $programKey,  // this is already lowercase: private/instrument/commercial
+  $externalLessonId,
+  $externalLessonId,
+  $page
+);
 }
 
 function video_path_for(string $programKey, int $externalLessonId, string $filename): string
