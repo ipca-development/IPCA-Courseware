@@ -23,9 +23,11 @@ function cw_header(string $title): void {
   <div class="shell">
     <nav class="sidebar">
       <a href="/admin/dashboard.php">Dashboard</a>
+      <a href="/admin/import_lab.php">Import Lab</a>
       <a href="/admin/courses.php">Courses</a>
       <a href="/admin/lessons.php">Lessons</a>
       <a href="/admin/slides.php">Slides</a>
+        
     </nav>
     <main class="main">
       <h1><?= h($title) ?></h1>
