@@ -15,14 +15,18 @@ function cw_render_slide_html(string $cdnBase, array $slide, ?array $templateRow
     $css = $templateRow ? (string)($templateRow['css'] ?? '') : '';
 
     if ($tpl === '') {
-        $tpl = '<div class="cw-grid"><div>{{MEDIA_LEFT}}</div><div>{{HTML_RIGHT}}</div></div>';
+        $tpl = '<div class="ipca-canvas tpl-mltr"><div class="ipca-content"><div class="ipca-media-left">{{MEDIA_LEFT}}</div><div class="ipca-text-right">{{HTML_RIGHT}}</div></div></div>';
     }
 
     $imgUrl = cdn_url($cdnBase, (string)$slide['image_path']);
-    $mediaImg = '<img src="' . h($imgUrl) . '" style="width:100%;border-radius:12px;">';
+    $mediaImg = '<img src="' . h($imgUrl) . '" alt="">';
 
     $htmlLeft  = (string)($slide['html_left'] ?? '');
     $htmlRight = (string)($slide['html_right'] ?? '');
+
+    // Remove script tags for safety
+    $htmlLeft  = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $htmlLeft ?? '');
+    $htmlRight = preg_replace('/<script\b[^>]*>(.*?)<\/script>/is', '', $htmlRight ?? '');
 
     $out = $tpl;
     $out = str_replace('{{MEDIA_LEFT}}', $mediaImg, $out);
@@ -32,7 +36,7 @@ function cw_render_slide_html(string $cdnBase, array $slide, ?array $templateRow
     $out = str_replace('{{HTML_RIGHT}}', $htmlRight, $out);
 
     if ($css !== '') {
-        $out = "<style>{$css}</style>" . $out;
+        $out = "<style>\n{$css}\n</style>\n" . $out;
     }
 
     return $out;

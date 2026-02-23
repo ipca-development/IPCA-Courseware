@@ -4,7 +4,6 @@ cw_require_admin();
 
 header('Content-Type: text/html; charset=utf-8');
 
-// Accept JSON payload
 $raw = file_get_contents('php://input');
 $data = json_decode($raw, true);
 
@@ -19,24 +18,20 @@ if ($imagePath === '') {
     exit;
 }
 
-// Load template
 $templateRow = cw_get_template($pdo, $templateKey);
 
-// Render using your existing renderer
 $slide = [
     'image_path' => $imagePath,
     'html_left'  => $htmlLeft,
     'html_right' => $htmlRight,
 ];
 
-// Wrap in a minimal preview container so it looks nice in an iframe
 echo "<!doctype html><html><head><meta charset='utf-8'>";
-echo "<style>
-body{margin:0;padding:12px;background:#f4f6ff;font-family:system-ui;}
-.preview-wrap{background:white;border-radius:14px;padding:14px;box-shadow:0 6px 18px rgba(0,0,0,.08);}
-</style>";
-echo "</head><body><div class='preview-wrap'>";
+echo "<meta name='viewport' content='width=device-width, initial-scale=1'>";
+echo "<link rel='stylesheet' href='/assets/app.css'>";
+echo "<style>body{margin:0;padding:12px;background:#f4f6ff;}</style>";
+echo "</head><body>";
 
 echo cw_render_slide_html($CDN_BASE, $slide, $templateRow);
 
-echo "</div></body></html>";
+echo "</body></html>";

@@ -10,7 +10,6 @@ session_start();
 
 $CDN_BASE = rtrim(getenv('CW_CDN_BASE') ?: '', '/');
 if ($CDN_BASE === '') {
-    // You can hardcode temporarily if you want
     $CDN_BASE = 'https://ipca-media.nyc3.cdn.digitaloceanspaces.com';
 }
 
