@@ -1,8 +1,12 @@
 FROM php:8.2-apache
 
-# System deps + PHP extensions (MySQL)
+# System deps + PHP extensions (MySQL) + OCR tools
 RUN apt-get update \
- && apt-get install -y --no-install-recommends libmariadb-dev \
+ && apt-get install -y --no-install-recommends \
+      libmariadb-dev \
+      tesseract-ocr \
+      tesseract-ocr-eng \
+      procps \
  && docker-php-ext-install pdo_mysql mysqli \
  && docker-php-ext-enable pdo_mysql mysqli \
  && rm -rf /var/lib/apt/lists/*

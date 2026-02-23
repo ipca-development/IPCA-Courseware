@@ -12,7 +12,11 @@ $imagePath   = (string)($data['image_path'] ?? '');
 $htmlLeft    = (string)($data['html_left'] ?? '');
 $htmlRight   = (string)($data['html_right'] ?? '');
 
-if ($imagePath === '') { http_response_code(400); exit("Missing image_path"); }
+if ($imagePath === '') {
+    http_response_code(400);
+    echo "Missing image_path";
+    exit;
+}
 
 $templateRow = cw_get_template($pdo, $templateKey);
 

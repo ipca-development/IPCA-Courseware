@@ -15,19 +15,19 @@ $stmt = $pdo->prepare("
   WHERE s.id=?
 ");
 $stmt->execute([$slideId]);
-$slide = $stmt->fetch();
+$slide = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$slide) exit('Slide not found');
 
 $templates = $pdo->query("SELECT template_key, name FROM templates WHERE is_active=1 ORDER BY sort_order")->fetchAll();
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'save') {
     $tpl = (string)($_POST['template_key'] ?? $slide['template_key']);
     $htmlLeft = (string)($_POST['html_left'] ?? '');
     $htmlRight = (string)($_POST['html_right'] ?? '');
     $mentor = trim((string)($_POST['mentor_video_path'] ?? ''));
     $video = trim((string)($_POST['video_path'] ?? ''));
 
-    // Save also html_rendered (so slide list can show fast mini preview)
+    // store html_rendered too (fast mini previews)
     $templateRow = cw_get_template($pdo, $tpl);
     $rendered = cw_render_slide_html($CDN_BASE, [
         'image_path' => $slide['image_path'],
@@ -41,10 +41,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       WHERE id=?
     ");
     $stmt->execute([
-        $tpl,
-        $htmlLeft,
-        $htmlRight,
-        $rendered,
+        $tpl, $htmlLeft, $htmlRight, $rendered,
         ($mentor !== '' ? $mentor : null),
         ($video !== '' ? $video : null),
         $slideId
@@ -62,13 +59,13 @@ $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
     Program: <?= h($slide['program_key']) ?> • Lesson <?= (int)$slide['external_lesson_id'] ?> • Page <?= (int)$slide['page_number'] ?>
   </p>
 
-  <div style="display:grid; grid-template-columns: 1.1fr 0.9fr; gap:16px; align-items:start;">
-    <!-- LEFT: editor -->
+  <div style="display:grid;grid-template-columns:1.1fr 0.9fr;gap:16px;align-items:start;">
     <div>
       <h2>Screenshot reference</h2>
-      <a target="_blank" href="<?= h($imgUrl) ?>"><img src="<?= h($imgUrl) ?>" style="width:100%; border-radius:12px;"></a>
+      <a target="_blank" href="<?= h($imgUrl) ?>"><img src="<?= h($imgUrl) ?>" style="width:100%;border-radius:12px;"></a>
 
       <form method="post" id="slideForm" style="margin-top:12px;">
+        <input type="hidden" name="action" value="save">
         <div class="form-grid">
           <label>Template</label>
           <select name="template_key" id="template_key">
@@ -79,11 +76,11 @@ $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
             <?php endforeach; ?>
           </select>
 
-          <label>Video path (optional)</label>
-          <input name="video_path" value="<?= h((string)($slide['video_path'] ?? '')) ?>" placeholder="ks_videos/private/...mp4">
+          <label>Video path</label>
+          <input name="video_path" id="video_path" value="<?= h((string)($slide['video_path'] ?? '')) ?>" placeholder="ks_videos/private/...mp4">
 
-          <label>Mentor video path</label>
-          <input name="mentor_video_path" value="<?= h((string)($slide['mentor_video_path'] ?? '')) ?>" placeholder="mentor/private/...mp4">
+          <label>Mentor path</label>
+          <input name="mentor_video_path" id="mentor_video_path" value="<?= h((string)($slide['mentor_video_path'] ?? '')) ?>" placeholder="mentor/private/...mp4">
         </div>
 
         <hr>
@@ -126,19 +123,26 @@ $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
         </div>
         <textarea id="html_right" name="html_right" rows="10" style="width:100%;"><?= h((string)($slide['html_right'] ?? '')) ?></textarea>
 
-        <div style="margin-top:12px; display:flex; gap:10px;">
+        <div style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;">
           <button class="btn" type="submit">Save</button>
           <button class="btn btn-sm" type="button" id="refreshPreview">Refresh preview</button>
+
+          <button class="btn btn-sm" type="button" id="ocrRight">OCR → Right</button>
+          <button class="btn btn-sm" type="button" id="ocrLeft">OCR → Left</button>
+          <label class="muted" style="display:flex;gap:6px;align-items:center;">
+            <input type="checkbox" id="ocrFillHtml" checked> fill HTML
+          </label>
+
           <a class="btn btn-sm" href="/admin/slides.php?lesson_id=<?= (int)$slide['lesson_id'] ?>">Back</a>
         </div>
       </form>
     </div>
 
-    <!-- RIGHT: live preview -->
     <div>
       <h2>Live preview</h2>
-      <iframe id="previewFrame" style="width:100%; height:740px; border:1px solid #e5e5e5; border-radius:12px; background:#f4f6ff;"></iframe>
-      <p class="muted" style="margin-top:8px;">Preview updates on refresh (and also automatically after typing pauses).</p>
+      <iframe id="previewFrame" style="width:100%;height:740px;border:1px solid #e5e5e5;border-radius:12px;background:#f4f6ff;"></iframe>
+      <p class="muted" style="margin-top:8px;">Preview uses your real IPCA background + template.</p>
+      <div id="ocrStatus" class="muted"></div>
     </div>
   </div>
 </div>
@@ -149,8 +153,7 @@ function wrapSelection(textarea, before, after){
   const end = textarea.selectionEnd;
   const value = textarea.value;
   const selected = value.substring(start, end);
-  const newText = before + selected + after;
-  textarea.value = value.substring(0, start) + newText + value.substring(end);
+  textarea.value = value.substring(0, start) + before + selected + after + value.substring(end);
   textarea.focus();
   textarea.selectionStart = start + before.length;
   textarea.selectionEnd = start + before.length + selected.length;
@@ -163,13 +166,10 @@ function listify(textarea, ordered){
   const selected = value.substring(start, end) || '';
   const lines = selected.split(/\r?\n/).filter(l => l.trim() !== '');
   if (!lines.length) return;
-
   const tagOpen = ordered ? "<ol>\n" : "<ul>\n";
   const tagClose = ordered ? "</ol>" : "</ul>";
   const items = lines.map(l => "  <li>" + l.replace(/<\/?[^>]+>/g,'') + "</li>").join("\n");
-  const html = tagOpen + items + "\n" + tagClose;
-
-  textarea.value = value.substring(0, start) + html + value.substring(end);
+  textarea.value = value.substring(0, start) + tagOpen + items + "\n" + tagClose + value.substring(end);
   textarea.focus();
 }
 
@@ -179,13 +179,9 @@ function indentBlock(textarea, dir){
   const value = textarea.value;
   const selected = value.substring(start, end);
   if (!selected) return;
-
-  if (dir === 'in') {
-    wrapSelection(textarea, '<div style="margin-left:24px;">\n', '\n</div>');
-  } else {
-    const newSel = selected
-      .replace(/^<div style="margin-left:24px;">\s*/,'')
-      .replace(/\s*<\/div>\s*$/,'');
+  if (dir === 'in') wrapSelection(textarea, '<div style="margin-left:24px;">\n', '\n</div>');
+  else {
+    const newSel = selected.replace(/^<div style="margin-left:24px;">\s*/,'').replace(/\s*<\/div>\s*$/,'');
     textarea.value = value.substring(0, start) + newSel + value.substring(end);
     textarea.focus();
   }
@@ -199,12 +195,12 @@ function setFontSize(textarea, px){
 function installToolbar(toolbar){
   const targetId = toolbar.dataset.target;
   const ta = document.getElementById(targetId);
+
   toolbar.addEventListener('click', (e)=>{
     const btn = e.target.closest('button');
     if (!btn) return;
     const cmd = btn.dataset.cmd;
     if (!cmd) return;
-
     if (cmd === 'b') wrapSelection(ta, '<b>', '</b>');
     if (cmd === 'i') wrapSelection(ta, '<i>', '</i>');
     if (cmd === 'u') wrapSelection(ta, '<u>', '</u>');
@@ -222,7 +218,6 @@ function installToolbar(toolbar){
     });
   }
 
-  // TAB inserts spaces instead of focus change
   ta.addEventListener('keydown', (e)=>{
     if (e.key === 'Tab') {
       e.preventDefault();
@@ -234,14 +229,13 @@ function installToolbar(toolbar){
     }
   });
 }
-
 document.querySelectorAll('.cw-toolbar').forEach(installToolbar);
 
-// Preview logic
+// Preview
 const previewFrame = document.getElementById('previewFrame');
 const refreshBtn = document.getElementById('refreshPreview');
+let timer = null;
 
-let t = null;
 async function refreshPreview(){
   const payload = {
     template_key: document.getElementById('template_key').value,
@@ -258,23 +252,43 @@ async function refreshPreview(){
 
   const html = await res.text();
   const doc = previewFrame.contentWindow.document;
-  doc.open();
-  doc.write(html);
-  doc.close();
+  doc.open(); doc.write(html); doc.close();
 }
+refreshBtn.addEventListener('click', refreshPreview);
 
-refreshBtn.addEventListener('click', ()=>refreshPreview());
-
-// Auto-refresh after typing pauses
 ['html_left','html_right','template_key'].forEach(id=>{
-  const el = document.getElementById(id);
-  el.addEventListener('input', ()=>{
-    if (t) clearTimeout(t);
-    t = setTimeout(()=>refreshPreview(), 700);
+  document.getElementById(id).addEventListener('input', ()=>{
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(refreshPreview, 700);
   });
 });
 
-// Initial load
+// OCR
+async function runOCR(target){
+  const status = document.getElementById('ocrStatus');
+  status.textContent = "Running OCR…";
+  const fill = document.getElementById('ocrFillHtml').checked ? '1' : '';
+  const form = new FormData();
+  form.append('slide_id', <?= (int)$slideId ?>);
+  form.append('target', target);
+  if (fill) form.append('fill_html', '1');
+
+  const res = await fetch('/admin/api/ocr_slide.php', { method:'POST', body: form });
+  const j = await res.json();
+  if (!j.ok) {
+    status.textContent = "OCR error: " + (j.error || 'unknown');
+    return;
+  }
+  status.textContent = "OCR done. chars=" + j.raw_ocr_chars + " fill_html=" + j.filled_html;
+
+  // Reload page to show updated html fields if filled
+  location.reload();
+}
+
+document.getElementById('ocrRight').addEventListener('click', ()=>runOCR('right'));
+document.getElementById('ocrLeft').addEventListener('click', ()=>runOCR('left'));
+
+// initial preview
 refreshPreview();
 </script>
 
