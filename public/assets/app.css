@@ -24,3 +24,5 @@ input,select{padding:9px 10px;border:1px solid #ddd;border-radius:10px;font-size
 .login{display:grid;place-items:center;height:100vh}
 .login .card{width:min(420px,92vw)}
 .alert{background:#ffe7e7;color:#7b1b1b;padding:10px;border-radius:10px;margin:10px 0}
+.slide-item{background:#fff;padding:10px;margin-bottom:10px;border-radius:10px;border:1px solid #ddd;cursor:move}
+.slide-item.deleted{opacity:.4}
