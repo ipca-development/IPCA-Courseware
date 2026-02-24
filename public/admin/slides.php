@@ -76,10 +76,10 @@ cw_header('Slides');
   border-radius: 12px;
   background: #fff;
   border: 1px solid #eee;
-  display:flex;
-  align-items:center;
-  justify-content:center;
+  position: relative; /* IMPORTANT: for absolute thumb-stage */
 }
+
+/* Screenshot image fills viewport with contain */
 .thumb-viewport img{
   width: 100%;
   height: 100%;
@@ -87,8 +87,11 @@ cw_header('Slides');
   display:block;
 }
 
-/* HTML stage: fixed 1600x900 internally, scaled down into viewport */
+/* HTML stage pinned to top-left, scaled down into viewport */
 .thumb-stage{
+  position:absolute;
+  left:0;
+  top:0;
   width:1600px;
   height:900px;
   transform: scale(0.2625); /* 420/1600 */
@@ -148,6 +151,12 @@ cw_header('Slides');
       <?php
         $isDeleted = ((int)$s['is_deleted'] === 1);
         $imgUrl = cdn_url($CDN_BASE, (string)$s['image_path']);
+
+        // show html_rendered if present, else show message
+        $thumbHtml = '';
+        if (!empty($s['html_rendered'])) {
+            $thumbHtml = (string)$s['html_rendered'];
+        }
       ?>
       <div class="cw-slide-card <?= $isDeleted ? 'cw-deleted' : '' ?>">
         <div class="cw-slide-top">
@@ -178,7 +187,7 @@ cw_header('Slides');
         </div>
 
         <div class="cw-slide-body" style="grid-template-columns: 420px 420px; gap:12px;">
-          <!-- Screenshot thumb (fixed 420x236) -->
+          <!-- Screenshot thumb -->
           <div class="cw-shot" ondblclick="location.href='/admin/slide_designer.php?slide_id=<?= (int)$s['id'] ?>'">
             <a target="_blank" href="<?= h($imgUrl) ?>">
               <div class="thumb-viewport">
@@ -187,12 +196,12 @@ cw_header('Slides');
             </a>
           </div>
 
-          <!-- HTML thumb (fixed 420x236) -->
+          <!-- HTML thumb -->
           <div class="cw-mini">
-            <?php if (!empty($s['html_rendered'])): ?>
+            <?php if ($thumbHtml !== ''): ?>
               <div class="thumb-viewport">
                 <div class="thumb-stage">
-                  <?= $s['html_rendered'] ?>
+                  <?= $thumbHtml ?>
                 </div>
               </div>
             <?php else: ?>
