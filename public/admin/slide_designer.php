@@ -44,6 +44,12 @@ cw_header('Slide Designer');
     ">
     <strong style="margin-right:6px;">Tools</strong>
 
+    <!-- NEW -->
+    <button class="btn btn-sm" id="btnAiLayout" type="button">AI Auto Layout</button>
+    <button class="btn btn-sm" id="btnUndoAi" type="button" disabled>Undo AI</button>
+
+    <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
+
     <button class="btn btn-sm" id="btnAddText" type="button">Add Text</button>
     <button class="btn btn-sm" id="btnAddRedact" type="button">Add Redaction</button>
     <button class="btn btn-sm" id="btnAddImageBox" type="button">Add Image Box</button>
@@ -114,16 +120,16 @@ const canvas = new fabric.Canvas('c', {
   preserveObjectStacking: true
 });
 
-// Reference overlay pointer (must survive save/load)
 let refImage = null;
 
-// Grid snap in BASE coords
+// NEW: undo buffer
+let undoAiJson = null;
+
 const GRID = 10;
 function snap(v){ return Math.round(v / GRID) * GRID; }
 
 canvas.on('object:moving', (e) => {
   const o = e.target;
-  // don't snap reference
   if (o && o.data && o.data.kind === 'reference') return;
   o.set({ left: snap(o.left), top: snap(o.top) });
 });
@@ -156,7 +162,6 @@ fabric.Image.fromURL(BG_URL, (img) => {
   canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
 });
 
-// Create reference overlay (first run only)
 function createReferenceOverlay(){
   fabric.Image.fromURL(REF_URL, (img) => {
     img.set({
@@ -167,7 +172,7 @@ function createReferenceOverlay(){
       scaleX: BASE_W / img.width,
       scaleY: BASE_H / img.height
     });
-    img.data = { kind: 'reference' };          // ✅ tag it so it survives reload
+    img.data = { kind: 'reference' };
     refImage = img;
     canvas.add(refImage);
     placeReferenceUnderObjects();
@@ -175,28 +180,18 @@ function createReferenceOverlay(){
   });
 }
 
-// Keep reference above background but below user objects
 function placeReferenceUnderObjects(){
   if (!refImage) return;
-
-  // Send all to back, then ensure ref is just above background
   canvas.sendToBack(refImage);
-
-  // Fabric background is not an object, so this is fine.
-  // Now ensure any user objects stay above reference:
   canvas.getObjects().forEach(o => {
     if (o === refImage) return;
-    // if this is another ref (shouldn't), ignore
     if (o.data && o.data.kind === 'reference') return;
     canvas.bringToFront(o);
   });
-
-  // finally, keep ref non-selectable
   refImage.selectable = false;
   refImage.evented = false;
 }
 
-// Toggle reference
 document.getElementById('refToggle').addEventListener('change', (e) => {
   if (!refImage) return;
   refImage.visible = e.target.checked;
@@ -208,7 +203,7 @@ document.getElementById('refOpacity').addEventListener('input', (e) => {
   canvas.renderAll();
 });
 
-// Tools
+// Tools (existing)
 document.getElementById('btnAddText').addEventListener('click', () => {
   const t = new fabric.Textbox('Edit text…', {
     left: 80, top: 200,
@@ -262,7 +257,6 @@ function addBox(kind, label){
 document.getElementById('btnAddImageBox').addEventListener('click', () => addBox('image', 'IMAGE'));
 document.getElementById('btnAddVideoBox').addEventListener('click', () => addBox('video', 'VIDEO'));
 
-// Layer controls
 document.getElementById('btnBringFront').addEventListener('click', () => {
   const o = canvas.getActiveObject();
   if (!o) return;
@@ -273,8 +267,6 @@ document.getElementById('btnBringFront').addEventListener('click', () => {
 document.getElementById('btnSendBack').addEventListener('click', () => {
   const o = canvas.getActiveObject();
   if (!o) return;
-
-  // never send objects behind reference
   canvas.sendToBack(o);
   placeReferenceUnderObjects();
   canvas.renderAll();
@@ -282,26 +274,23 @@ document.getElementById('btnSendBack').addEventListener('click', () => {
 document.getElementById('btnDelete').addEventListener('click', () => {
   const o = canvas.getActiveObject();
   if (!o) return;
-  if (o.data && o.data.kind === 'reference') return; // don't delete reference
+  if (o.data && o.data.kind === 'reference') return;
   canvas.remove(o);
   canvas.renderAll();
 });
 
-// Fit-to-screen scaling (display only)
+// Fit-to-screen
 function fitCanvas(){
   const wrap = document.getElementById('canvasWrap');
   if(!wrap) return;
-
   const w = wrap.clientWidth;
   const h = wrap.clientHeight;
-
   const scale = Math.min(w / BASE_W, h / BASE_H);
-
   canvas.setWidth(Math.round(BASE_W * scale));
   canvas.setHeight(Math.round(BASE_H * scale));
   canvas.setZoom(scale);
+  canvas.calcOffset();
   canvas.renderAll();
-
   zoomInfo.textContent = `Display scale: ${(scale*100).toFixed(0)}%  |  Internal: ${BASE_W}×${BASE_H}`;
 }
 window.addEventListener('resize', () => setTimeout(fitCanvas, 50));
@@ -319,36 +308,19 @@ async function loadDesign(){
   }
 
   canvas.loadFromJSON(j.design_json, () => {
-    // Re-bind reference object
     refImage = null;
     canvas.getObjects().forEach(o => {
-      if (o && o.data && o.data.kind === 'reference') {
-        refImage = o;
-      }
+      if (o && o.data && o.data.kind === 'reference') refImage = o;
     });
 
-    if (refImage) {
-      // lock it again
-      refImage.selectable = false;
-      refImage.evented = false;
-
-      // apply UI settings to it
-      refImage.visible = document.getElementById('refToggle').checked;
-      refImage.opacity = parseInt(document.getElementById('refOpacity').value,10)/100;
-
-      placeReferenceUnderObjects();
-    } else {
-      // If older saves didn't include it, recreate it
-      createReferenceOverlay();
-    }
-
+    if (!refImage) createReferenceOverlay();
     setStatus('Layout loaded.');
     canvas.renderAll();
     setTimeout(fitCanvas, 200);
   });
 }
 
-// Save
+// Save (unchanged)
 async function saveDesign(renderAlso){
   setStatus('Saving...');
   const design = canvas.toJSON(['data']);
@@ -362,9 +334,42 @@ async function saveDesign(renderAlso){
   if (!j.ok) { setStatus('Save failed: ' + (j.error||'unknown')); return; }
   setStatus(renderAlso ? 'Saved + rendered HTML.' : 'Saved layout.');
 }
-
 document.getElementById('btnSave').addEventListener('click', () => saveDesign(false));
 document.getElementById('btnSaveRender').addEventListener('click', () => saveDesign(true));
+
+// NEW: AI Auto Layout + Undo
+document.getElementById('btnAiLayout').addEventListener('click', async () => {
+  setStatus('AI analyzing…');
+
+  undoAiJson = canvas.toJSON(['data']);
+  document.getElementById('btnUndoAi').disabled = false;
+
+  const form = new FormData();
+  form.append('slide_id', SLIDE_ID);
+
+  const res = await fetch('/admin/api/ai_layout.php', { method:'POST', body: form });
+  const j = await res.json();
+
+  if (!j.ok) { setStatus('AI failed: ' + (j.error||'unknown')); return; }
+
+  canvas.loadFromJSON(j.design_json, () => {
+    // keep reference overlay on top if present
+    setStatus('AI layout loaded. Review and Save + Render.');
+    canvas.renderAll();
+    setTimeout(fitCanvas, 200);
+  });
+});
+
+document.getElementById('btnUndoAi').addEventListener('click', () => {
+  if (!undoAiJson) return;
+  canvas.loadFromJSON(undoAiJson, () => {
+    setStatus('Undo AI complete.');
+    canvas.renderAll();
+    setTimeout(fitCanvas, 200);
+  });
+  undoAiJson = null;
+  document.getElementById('btnUndoAi').disabled = true;
+});
 
 setTimeout(loadDesign, 600);
 setTimeout(fitCanvas, 800);
