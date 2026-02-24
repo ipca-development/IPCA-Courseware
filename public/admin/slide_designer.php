@@ -32,10 +32,10 @@ cw_header('Slide Designer');
       <h2>Tools</h2>
 
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn btn-sm" id="btnAddText">Add Text</button>
-        <button class="btn btn-sm" id="btnAddRedact">Add Redaction</button>
-        <button class="btn btn-sm" id="btnAddImageBox">Add Image Box</button>
-        <button class="btn btn-sm" id="btnAddVideoBox">Add Video Box</button>
+        <button class="btn btn-sm" id="btnAddText" type="button">Add Text</button>
+        <button class="btn btn-sm" id="btnAddRedact" type="button">Add Redaction</button>
+        <button class="btn btn-sm" id="btnAddImageBox" type="button">Add Image Box</button>
+        <button class="btn btn-sm" id="btnAddVideoBox" type="button">Add Video Box</button>
       </div>
 
       <hr>
@@ -53,27 +53,36 @@ cw_header('Slide Designer');
       <div class="muted" id="selInfo">None</div>
 
       <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-        <button class="btn btn-sm" id="btnBringFront">Bring Front</button>
-        <button class="btn btn-sm" id="btnSendBack">Send Back</button>
-        <button class="btn btn-sm" id="btnDelete">Delete</button>
+        <button class="btn btn-sm" id="btnBringFront" type="button">Bring Front</button>
+        <button class="btn btn-sm" id="btnSendBack" type="button">Send Back</button>
+        <button class="btn btn-sm" id="btnDelete" type="button">Delete</button>
       </div>
 
       <hr>
 
       <h3>Save</h3>
       <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn" id="btnSave">Save Layout</button>
-        <button class="btn btn-sm" id="btnSaveRender">Save + Render HTML</button>
+        <button class="btn" id="btnSave" type="button">Save Layout</button>
+        <button class="btn btn-sm" id="btnSaveRender" type="button">Save + Render HTML</button>
         <a class="btn btn-sm" href="/admin/slides.php?lesson_id=<?= (int)$slide['lesson_id'] ?>">Back</a>
       </div>
 
       <div class="muted" id="status" style="margin-top:10px;"></div>
+      <div class="muted" id="zoomInfo" style="margin-top:6px;"></div>
     </div>
 
     <div>
       <h2>Canvas</h2>
-      <div class="muted">Drag/resize objects. Grid snap = 10px. Canvas is 1600×900 (16:9).</div>
-      <div style="border:1px solid #e6e6e6; border-radius:12px; overflow:hidden; background:#f4f6ff;">
+      <div class="muted">Internal layout is always 1600×900 (16:9). Display auto-scales to fit your screen.</div>
+
+      <div id="canvasWrap"
+           style="width:100%;
+                  height: calc(100vh - 220px);
+                  border:1px solid #e6e6e6;
+                  border-radius:12px;
+                  overflow:hidden;
+                  background:#f4f6ff;
+                  position:relative;">
         <canvas id="c" width="1600" height="900"></canvas>
       </div>
     </div>
@@ -88,15 +97,20 @@ const REF_URL  = <?= json_encode($imgUrl) ?>;
 
 const statusEl = document.getElementById('status');
 const selInfo  = document.getElementById('selInfo');
+const zoomInfo = document.getElementById('zoomInfo');
 
 function setStatus(msg){ statusEl.textContent = msg; }
 
+const BASE_W = 1600;
+const BASE_H = 900;
+
+// Fabric canvas in base coordinate space
 const canvas = new fabric.Canvas('c', {
   selection: true,
   preserveObjectStacking: true
 });
 
-// --- grid snap ---
+// Grid snap in BASE coordinates
 const GRID = 10;
 function snap(v){ return Math.round(v / GRID) * GRID; }
 
@@ -116,36 +130,35 @@ canvas.on('selection:cleared', () => selInfo.textContent = 'None');
 function updateSel(){
   const o = canvas.getActiveObject();
   if (!o) return;
-  selInfo.textContent = `${o.type} (${Math.round(o.left)},${Math.round(o.top)}) ${Math.round(o.width*o.scaleX)}×${Math.round(o.height*o.scaleY)}`;
+  const w = Math.round(o.width * o.scaleX);
+  const h = Math.round(o.height * o.scaleY);
+  selInfo.textContent = `${o.type} (${Math.round(o.left)},${Math.round(o.top)}) ${w}×${h}`;
 }
 
-// --- background ---
+// Background and reference overlay
+let refImage = null;
+
 fabric.Image.fromURL(BG_URL, (img) => {
   img.set({
     left: 0, top: 0,
-    selectable: false,
-    evented: false,
-    scaleX: 1600 / img.width,
-    scaleY: 900 / img.height
+    selectable: false, evented: false,
+    scaleX: BASE_W / img.width,
+    scaleY: BASE_H / img.height
   });
   canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
 });
 
-// --- reference overlay image ---
-let refImage = null;
 fabric.Image.fromURL(REF_URL, (img) => {
   img.set({
     left: 0, top: 0,
-    selectable: false,
-    evented: false,
+    selectable: false, evented: false,
     opacity: 0.35,
-    scaleX: 1600 / img.width,
-    scaleY: 900 / img.height
+    scaleX: BASE_W / img.width,
+    scaleY: BASE_H / img.height
   });
   refImage = img;
   canvas.add(refImage);
-  canvas.sendToBack(refImage); // behind objects, above background (we’ll keep it just above bg)
-  // ensure bg remains bg
+  canvas.sendToBack(refImage);
   canvas.renderAll();
 });
 
@@ -161,7 +174,7 @@ document.getElementById('refOpacity').addEventListener('input', (e) => {
   canvas.renderAll();
 });
 
-// --- tools ---
+// Tools
 document.getElementById('btnAddText').addEventListener('click', () => {
   const t = new fabric.Textbox('Edit text…', {
     left: 80, top: 200,
@@ -171,7 +184,7 @@ document.getElementById('btnAddText').addEventListener('click', () => {
     backgroundColor: 'rgba(255,255,255,0.75)',
     padding: 8
   });
-  t.data = { kind: 'text', html: '<p>Edit text…</p>' };
+  t.data = { kind: 'text' };
   canvas.add(t);
   canvas.setActiveObject(t);
   canvas.renderAll();
@@ -193,7 +206,7 @@ document.getElementById('btnAddRedact').addEventListener('click', () => {
 
 function addBox(kind, label){
   const rect = new fabric.Rect({
-    left: 900, top: 240,
+    left: 0, top: 0,
     width: 520, height: 320,
     fill: 'rgba(0,0,0,0.03)',
     stroke: '#0b2a4a',
@@ -201,7 +214,7 @@ function addBox(kind, label){
     rx: 12, ry: 12
   });
   const text = new fabric.Text(label, {
-    left: 920, top: 260,
+    left: 18, top: 18,
     fontSize: 24,
     fill: '#0b2a4a'
   });
@@ -226,7 +239,6 @@ document.getElementById('btnSendBack').addEventListener('click', () => {
   const o = canvas.getActiveObject();
   if (!o) return;
   canvas.sendToBack(o);
-  // don’t allow it under background; if reference exists, keep reference above background
   if (refImage) canvas.sendToBack(refImage);
   canvas.renderAll();
 });
@@ -237,27 +249,43 @@ document.getElementById('btnDelete').addEventListener('click', () => {
   canvas.renderAll();
 });
 
-// --- load existing design_json ---
+// Fit-to-screen scaling (display only; base coordinates remain 1600×900)
+function fitCanvas(){
+  const wrap = document.getElementById('canvasWrap');
+  if(!wrap) return;
+
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+
+  const scale = Math.min(w / BASE_W, h / BASE_H);
+
+  canvas.setWidth(Math.round(BASE_W * scale));
+  canvas.setHeight(Math.round(BASE_H * scale));
+  canvas.setZoom(scale);
+  canvas.renderAll();
+
+  zoomInfo.textContent = `Display scale: ${(scale*100).toFixed(0)}%  |  Internal: ${BASE_W}×${BASE_H}`;
+}
+
+window.addEventListener('resize', () => setTimeout(fitCanvas, 50));
+
+// Load existing layout
 async function loadDesign(){
   const res = await fetch('/admin/api/load_design.php?slide_id=' + SLIDE_ID);
   const j = await res.json();
-  if (!j.ok) { setStatus('No saved layout yet.'); return; }
-  if (!j.design_json) { setStatus('No saved layout yet.'); return; }
-
-  // Remove all objects except refImage (if exists, keep it) and background (bg)
-  const keep = new Set();
-  if (refImage) keep.add(refImage);
-  canvas.getObjects().forEach(o => {
-    if (!keep.has(o)) canvas.remove(o);
-  });
-
+  if (!j.ok || !j.design_json) {
+    setStatus('No saved layout yet.');
+    setTimeout(fitCanvas, 200);
+    return;
+  }
   canvas.loadFromJSON(j.design_json, () => {
-    // Ensure reference visibility/opacity stays controlled by UI if exists
     setStatus('Layout loaded.');
     canvas.renderAll();
+    setTimeout(fitCanvas, 200);
   });
 }
 
+// Save
 async function saveDesign(renderAlso){
   setStatus('Saving...');
   const design = canvas.toJSON(['data']);
@@ -275,6 +303,8 @@ async function saveDesign(renderAlso){
 document.getElementById('btnSave').addEventListener('click', () => saveDesign(false));
 document.getElementById('btnSaveRender').addEventListener('click', () => saveDesign(true));
 
-setTimeout(loadDesign, 800);
+setTimeout(loadDesign, 600);
+setTimeout(fitCanvas, 800);
 </script>
+
 <?php cw_footer(); ?>
