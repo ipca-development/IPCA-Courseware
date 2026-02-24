@@ -16,34 +16,31 @@ try {
 
     $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
 
+    // JSON schema (strict)
     $schema = [
-        "name" => "slide_layout_v1",
-        "strict" => true,
-        "schema" => [
-            "type" => "object",
-            "additionalProperties" => false,
-            "properties" => [
-                "title" => ["type" => "string"],
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => [
+            "title" => ["type" => "string"],
+            "items" => [
+                "type" => "array",
                 "items" => [
-                    "type" => "array",
-                    "items" => [
-                        "type" => "object",
-                        "additionalProperties" => false,
-                        "properties" => [
-                            "kind" => ["type" => "string", "enum" => ["redact","title","text","bullets","image","video"]],
-                            "x" => ["type" => "number"],
-                            "y" => ["type" => "number"],
-                            "w" => ["type" => "number"],
-                            "h" => ["type" => "number"],
-                            "text" => ["type" => "string"],
-                            "confidence" => ["type" => "number"]
-                        ],
-                        "required" => ["kind","x","y","w","h","confidence"]
-                    ]
+                    "type" => "object",
+                    "additionalProperties" => false,
+                    "properties" => [
+                        "kind" => ["type" => "string", "enum" => ["redact","title","text","bullets","image","video"]],
+                        "x" => ["type" => "number"],
+                        "y" => ["type" => "number"],
+                        "w" => ["type" => "number"],
+                        "h" => ["type" => "number"],
+                        "text" => ["type" => "string"],
+                        "confidence" => ["type" => "number"]
+                    ],
+                    "required" => ["kind","x","y","w","h","confidence"]
                 ]
-            ],
-            "required" => ["title","items"]
-        ]
+            ]
+        ],
+        "required" => ["title","items"]
     ];
 
     $instructions = <<<TXT
@@ -53,8 +50,8 @@ Return ALL real instructional content with approximate bounding boxes.
 
 IMPORTANT: DO NOT include UI chrome text:
 - MAIN MENU, HOW TO USE THIS COURSE, SAVE & EXIT
-- breadcrumb path lines with "/"
-- footer / copyright / page controls
+- breadcrumb path lines with "/" separators
+- footer/copyright/page controls
 
 Instead, mark those UI areas as redaction rectangles: kind="redact".
 
@@ -68,6 +65,7 @@ Detect:
 Coordinates must be in the 1600x900 coordinate system.
 TXT;
 
+    // ✅ Correct Responses API structured outputs shape:
     $payload = [
         "model" => cw_openai_model(),
         "input" => [
@@ -88,7 +86,9 @@ TXT;
         "text" => [
             "format" => [
                 "type" => "json_schema",
-                "json_schema" => $schema
+                "name" => "slide_layout_v1",
+                "schema" => $schema,
+                "strict" => true
             ]
         ],
         "temperature" => 0.2
@@ -100,11 +100,11 @@ TXT;
     $objects = [];
 
     foreach (($layout['items'] ?? []) as $it) {
-        $kind = (string)$it['kind'];
-        $x = max(0, min(1600, (float)$it['x']));
-        $y = max(0, min(900,  (float)$it['y']));
-        $w = max(10, min(1600, (float)$it['w']));
-        $h = max(10, min(900,  (float)$it['h']));
+        $kind = (string)($it['kind'] ?? '');
+        $x = max(0, min(1600, (float)($it['x'] ?? 0)));
+        $y = max(0, min(900,  (float)($it['y'] ?? 0)));
+        $w = max(10, min(1600, (float)($it['w'] ?? 100)));
+        $h = max(10, min(900,  (float)($it['h'] ?? 50)));
         $text = (string)($it['text'] ?? '');
 
         if ($kind === 'redact') {
@@ -159,6 +159,7 @@ TXT;
         "design_json"=>["version"=>"5.3.0", "objects"=>$objects],
         "layout"=>$layout
     ]);
+
 } catch (Throwable $e) {
     http_response_code(400);
     echo json_encode(["ok"=>false,"error"=>$e->getMessage()]);
