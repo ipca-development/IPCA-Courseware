@@ -4,44 +4,72 @@ require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/spaces.php';
 cw_require_admin();
 
+// Increase runtime limits for uploads
 @ini_set('upload_max_filesize', '32M');
 @ini_set('post_max_size', '32M');
 @ini_set('memory_limit', '256M');
 @set_time_limit(120);
 
+function upload_err_text(int $code): string {
+    $map = [
+        UPLOAD_ERR_OK => 'OK',
+        UPLOAD_ERR_INI_SIZE => 'UPLOAD_ERR_INI_SIZE (exceeds upload_max_filesize)',
+        UPLOAD_ERR_FORM_SIZE => 'UPLOAD_ERR_FORM_SIZE',
+        UPLOAD_ERR_PARTIAL => 'UPLOAD_ERR_PARTIAL',
+        UPLOAD_ERR_NO_FILE => 'UPLOAD_ERR_NO_FILE',
+        UPLOAD_ERR_NO_TMP_DIR => 'UPLOAD_ERR_NO_TMP_DIR',
+        UPLOAD_ERR_CANT_WRITE => 'UPLOAD_ERR_CANT_WRITE',
+        UPLOAD_ERR_EXTENSION => 'UPLOAD_ERR_EXTENSION',
+    ];
+    return $map[$code] ?? ('Unknown upload error ' . $code);
+}
+
 $msg = '';
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'upload') {
-    if (!isset($_FILES['bg_file']) || $_FILES['bg_file']['error'] !== UPLOAD_ERR_OK) {
-        $msg = "Upload failed. Try again.";
+    if (!isset($_FILES['bg_file'])) {
+        $msg = "No file field received.";
     } else {
-        $name = trim((string)($_POST['name'] ?? ''));
-        if ($name === '') $name = 'Background ' . date('Y-m-d H:i');
-
-        $tmp = $_FILES['bg_file']['tmp_name'];
-        $orig = $_FILES['bg_file']['name'] ?? 'bg';
-        $bytes = file_get_contents($tmp);
-
-        // validate simple type
-        $finfo = new finfo(FILEINFO_MIME_TYPE);
-        $mime = (string)$finfo->file($tmp);
-        if (!in_array($mime, ['image/jpeg','image/png','image/webp'], true)) {
-            $msg = "Unsupported file type: {$mime}. Use JPG/PNG/WEBP.";
+        $err = (int)$_FILES['bg_file']['error'];
+        if ($err !== UPLOAD_ERR_OK) {
+            $msg = "Upload failed at PHP upload stage: " . upload_err_text($err) .
+                   " | upload_max_filesize=" . ini_get('upload_max_filesize') .
+                   " post_max_size=" . ini_get('post_max_size');
         } else {
-            // normalized filename
-            $ext = ($mime === 'image/png') ? 'png' : (($mime === 'image/webp') ? 'webp' : 'jpg');
-            $safe = preg_replace('/[^a-zA-Z0-9._-]+/', '_', pathinfo($orig, PATHINFO_FILENAME));
-            $key = "bg/" . date('Ymd_His') . "_" . $safe . "." . $ext;
+            $name = trim((string)($_POST['name'] ?? ''));
+            if ($name === '') $name = 'Background ' . date('Y-m-d H:i');
 
-            try {
-                $up = cw_spaces_put_object($key, $bytes, $mime);
+            $tmp = $_FILES['bg_file']['tmp_name'];
+            $orig = $_FILES['bg_file']['name'] ?? 'bg';
+            $bytes = file_get_contents($tmp);
 
-                $stmt = $pdo->prepare("INSERT INTO backgrounds (name, bg_path, sort_order, is_active) VALUES (?,?,?,1)");
-                $stmt->execute([$name, $key, (int)($_POST['sort_order'] ?? 0)]);
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $mime = (string)$finfo->file($tmp);
 
-                $msg = "Uploaded OK: {$up['cdn_url']}";
-            } catch (Exception $e) {
-                $msg = "Upload error: " . $e->getMessage();
+            if (!in_array($mime, ['image/jpeg','image/png','image/webp'], true)) {
+                $msg = "Unsupported type: {$mime}. Use JPG/PNG/WEBP.";
+            } else {
+                $ext = ($mime === 'image/png') ? 'png' : (($mime === 'image/webp') ? 'webp' : 'jpg');
+                $safe = preg_replace('/[^a-zA-Z0-9._-]+/', '_', pathinfo($orig, PATHINFO_FILENAME));
+                $key = "bg/" . date('Ymd_His') . "_" . $safe . "." . $ext;
+
+                try {
+                    // This is where cURL/signing issues show up
+                    $up = cw_spaces_put_object($key, $bytes, $mime);
+
+                    // Verify CDN sees it (helps catch ACL issues)
+                    $headers = @get_headers($up['cdn_url']);
+                    $ok = $headers && isset($headers[0]) && (strpos($headers[0], '200') !== false);
+                    if (!$ok) {
+                        throw new RuntimeException("Upload verification failed: CDN not returning 200 for " . $up['cdn_url']);
+                    }
+
+                    $stmt = $pdo->prepare("INSERT INTO backgrounds (name, bg_path, sort_order, is_active) VALUES (?,?,?,1)");
+                    $stmt->execute([$name, $key, (int)($_POST['sort_order'] ?? 0)]);
+
+                    $msg = "Uploaded OK: " . $up['cdn_url'];
+                } catch (Exception $e) {
+                    $msg = "Spaces upload error: " . $e->getMessage();
+                }
             }
         }
     }
@@ -69,6 +97,12 @@ cw_header('Backgrounds');
 <div class="card">
   <h2>Upload Background (to Spaces)</h2>
   <?php if ($msg): ?><div class="alert"><?= h($msg) ?></div><?php endif; ?>
+
+  <p class="muted">
+    Limits: upload_max_filesize=<?= h((string)ini_get('upload_max_filesize')) ?>,
+    post_max_size=<?= h((string)ini_get('post_max_size')) ?>
+  </p>
+
   <form method="post" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="action" value="upload">
 
@@ -84,8 +118,6 @@ cw_header('Backgrounds');
     <div></div>
     <button class="btn" type="submit">Upload</button>
   </form>
-
-  <p class="muted">Stored in Spaces under <code>bg/</code>. You can select per Course/Lesson/Slide.</p>
 </div>
 
 <div class="card">
