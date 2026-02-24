@@ -67,6 +67,31 @@ if ($lessonId > 0) {
 cw_header('Slides');
 ?>
 
+<style>
+/* Thumbnail stage: fixed 1600x900 internally, scaled down, clipped */
+.thumb-viewport{
+  width: 420px;          /* thumbnail size */
+  height: 236px;         /* 16:9 */
+  overflow: hidden;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #eee;
+}
+.thumb-stage{
+  width:1600px;
+  height:900px;
+  transform: scale(0.2625); /* 420/1600 */
+  transform-origin: top left;
+}
+
+/* Force IPCA canvas to fixed pixels INSIDE thumbnails only */
+.thumb-stage .ipca-canvas{
+  width:1600px !important;
+  height:900px !important;
+  aspect-ratio: auto !important;
+}
+</style>
+
 <div class="card">
   <h2>Slides</h2>
 
@@ -151,8 +176,8 @@ cw_header('Slides');
           <div class="cw-mini">
             <?php if (!empty($s['html_rendered'])): ?>
               <div class="cw-mini-preview" style="background:#fff;">
-                <div style="width:100%; overflow:hidden; border-radius:12px;">
-                  <div style="width:1600px;height:900px; transform:scale(0.25); transform-origin:top left;">
+                <div class="thumb-viewport">
+                  <div class="thumb-stage">
                     <?= $s['html_rendered'] ?>
                   </div>
                 </div>
@@ -162,6 +187,7 @@ cw_header('Slides');
             <?php endif; ?>
           </div>
         </div>
+
       </div>
     <?php endforeach; ?>
   </div>
