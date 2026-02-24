@@ -16,7 +16,7 @@ try {
 
     $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
 
-    // JSON schema (strict)
+    // Strict schema: every property must be in required (text included)
     $schema = [
         "type" => "object",
         "additionalProperties" => false,
@@ -33,10 +33,10 @@ try {
                         "y" => ["type" => "number"],
                         "w" => ["type" => "number"],
                         "h" => ["type" => "number"],
-                        "text" => ["type" => "string"],
-                        "confidence" => ["type" => "number"]
+                        "text" => ["type" => "string"],        // must exist even if ""
+                        "confidence" => ["type" => "number"]   // 0..1
                     ],
-                    "required" => ["kind","x","y","w","h","confidence"]
+                    "required" => ["kind","x","y","w","h","confidence","text"]
                 ]
             ]
         ],
@@ -63,9 +63,11 @@ Detect:
 - video region (kind="video") if play button or embedded player
 
 Coordinates must be in the 1600x900 coordinate system.
+
+For items where text is not applicable (redact/image/video), set text to "".
+Confidence must be between 0 and 1.
 TXT;
 
-    // ✅ Correct Responses API structured outputs shape:
     $payload = [
         "model" => cw_openai_model(),
         "input" => [
