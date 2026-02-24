@@ -28,7 +28,6 @@ cw_header('Slide Designer');
     Program: <?= h($slide['program_key']) ?> • Lesson <?= (int)$slide['external_lesson_id'] ?> • Page <?= (int)$slide['page_number'] ?> • Slide ID <?= (int)$slideId ?>
   </p>
 
-  <!-- TOP TOOLBAR -->
   <div style="
       position: sticky;
       top: 0;
@@ -79,7 +78,6 @@ cw_header('Slide Designer');
   <div class="muted" id="status" style="margin-top:10px;"></div>
   <div class="muted" id="zoomInfo" style="margin-top:6px;"></div>
 
-  <!-- CANVAS AREA -->
   <div id="canvasWrap"
        style="
          width:100%;
@@ -116,16 +114,22 @@ const canvas = new fabric.Canvas('c', {
   preserveObjectStacking: true
 });
 
-// Grid snap in BASE coordinates
+// Reference overlay pointer (must survive save/load)
+let refImage = null;
+
+// Grid snap in BASE coords
 const GRID = 10;
 function snap(v){ return Math.round(v / GRID) * GRID; }
 
 canvas.on('object:moving', (e) => {
   const o = e.target;
+  // don't snap reference
+  if (o && o.data && o.data.kind === 'reference') return;
   o.set({ left: snap(o.left), top: snap(o.top) });
 });
 canvas.on('object:scaling', (e) => {
   const o = e.target;
+  if (o && o.data && o.data.kind === 'reference') return;
   o.set({ left: snap(o.left), top: snap(o.top) });
 });
 
@@ -141,9 +145,7 @@ function updateSel(){
   selInfo.textContent = `${o.type} (${Math.round(o.left)},${Math.round(o.top)}) ${w}×${h}`;
 }
 
-// Background + ref overlay
-let refImage = null;
-
+// Background
 fabric.Image.fromURL(BG_URL, (img) => {
   img.set({
     left: 0, top: 0,
@@ -154,20 +156,47 @@ fabric.Image.fromURL(BG_URL, (img) => {
   canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
 });
 
-fabric.Image.fromURL(REF_URL, (img) => {
-  img.set({
-    left: 0, top: 0,
-    selectable: false, evented: false,
-    opacity: 0.35,
-    scaleX: BASE_W / img.width,
-    scaleY: BASE_H / img.height
+// Create reference overlay (first run only)
+function createReferenceOverlay(){
+  fabric.Image.fromURL(REF_URL, (img) => {
+    img.set({
+      left: 0, top: 0,
+      selectable: false,
+      evented: false,
+      opacity: 0.35,
+      scaleX: BASE_W / img.width,
+      scaleY: BASE_H / img.height
+    });
+    img.data = { kind: 'reference' };          // ✅ tag it so it survives reload
+    refImage = img;
+    canvas.add(refImage);
+    placeReferenceUnderObjects();
+    canvas.renderAll();
   });
-  refImage = img;
-  canvas.add(refImage);
-  canvas.sendToBack(refImage);
-  canvas.renderAll();
-});
+}
 
+// Keep reference above background but below user objects
+function placeReferenceUnderObjects(){
+  if (!refImage) return;
+
+  // Send all to back, then ensure ref is just above background
+  canvas.sendToBack(refImage);
+
+  // Fabric background is not an object, so this is fine.
+  // Now ensure any user objects stay above reference:
+  canvas.getObjects().forEach(o => {
+    if (o === refImage) return;
+    // if this is another ref (shouldn't), ignore
+    if (o.data && o.data.kind === 'reference') return;
+    canvas.bringToFront(o);
+  });
+
+  // finally, keep ref non-selectable
+  refImage.selectable = false;
+  refImage.evented = false;
+}
+
+// Toggle reference
 document.getElementById('refToggle').addEventListener('change', (e) => {
   if (!refImage) return;
   refImage.visible = e.target.checked;
@@ -238,18 +267,22 @@ document.getElementById('btnBringFront').addEventListener('click', () => {
   const o = canvas.getActiveObject();
   if (!o) return;
   canvas.bringToFront(o);
+  placeReferenceUnderObjects();
   canvas.renderAll();
 });
 document.getElementById('btnSendBack').addEventListener('click', () => {
   const o = canvas.getActiveObject();
   if (!o) return;
+
+  // never send objects behind reference
   canvas.sendToBack(o);
-  if (refImage) canvas.sendToBack(refImage);
+  placeReferenceUnderObjects();
   canvas.renderAll();
 });
 document.getElementById('btnDelete').addEventListener('click', () => {
   const o = canvas.getActiveObject();
   if (!o) return;
+  if (o.data && o.data.kind === 'reference') return; // don't delete reference
   canvas.remove(o);
   canvas.renderAll();
 });
@@ -277,12 +310,38 @@ window.addEventListener('resize', () => setTimeout(fitCanvas, 50));
 async function loadDesign(){
   const res = await fetch('/admin/api/load_design.php?slide_id=' + SLIDE_ID);
   const j = await res.json();
+
   if (!j.ok || !j.design_json) {
     setStatus('No saved layout yet.');
+    createReferenceOverlay();
     setTimeout(fitCanvas, 200);
     return;
   }
+
   canvas.loadFromJSON(j.design_json, () => {
+    // Re-bind reference object
+    refImage = null;
+    canvas.getObjects().forEach(o => {
+      if (o && o.data && o.data.kind === 'reference') {
+        refImage = o;
+      }
+    });
+
+    if (refImage) {
+      // lock it again
+      refImage.selectable = false;
+      refImage.evented = false;
+
+      // apply UI settings to it
+      refImage.visible = document.getElementById('refToggle').checked;
+      refImage.opacity = parseInt(document.getElementById('refOpacity').value,10)/100;
+
+      placeReferenceUnderObjects();
+    } else {
+      // If older saves didn't include it, recreate it
+      createReferenceOverlay();
+    }
+
     setStatus('Layout loaded.');
     canvas.renderAll();
     setTimeout(fitCanvas, 200);
