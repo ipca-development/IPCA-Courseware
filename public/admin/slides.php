@@ -110,6 +110,28 @@ cw_header('Slides');
           <div><strong>Page <?= (int)$s['page_number'] ?></strong> • <?= h($s['template_key']) ?></div>
           <div class="cw-actions">
             <a class="btn btn-sm" href="/admin/slide_edit.php?slide_id=<?= (int)$s['id'] ?>">Edit</a>
+			  
+			<div class="cw-actions">
+  <a class="btn btn-sm" href="/admin/slide_edit.php?slide_id=<?= (int)$s['id'] ?>">Edit</a>
+
+  <a class="btn btn-sm" href="/admin/slide_designer.php?slide_id=<?= (int)$s['id'] ?>">Designer</a>
+
+  <?php if (!$isDeleted): ?>
+    <form method="post" style="display:inline">
+      <input type="hidden" name="action" value="delete_slide">
+      <input type="hidden" name="slide_id" value="<?= (int)$s['id'] ?>">
+      <input type="hidden" name="lesson_id" value="<?= (int)$lessonId ?>">
+      <button class="btn btn-sm" type="submit">Delete</button>
+    </form>
+  <?php else: ?>
+    <form method="post" style="display:inline">
+      <input type="hidden" name="action" value="restore_slide">
+      <input type="hidden" name="slide_id" value="<?= (int)$s['id'] ?>">
+      <input type="hidden" name="lesson_id" value="<?= (int)$lessonId ?>">
+      <button class="btn btn-sm" type="submit">Restore</button>
+    </form>
+  <?php endif; ?>
+</div>  
 
             <?php if (!$isDeleted): ?>
               <form method="post" style="display:inline">
