@@ -4,6 +4,11 @@ require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/spaces.php';
 cw_require_admin();
 
+@ini_set('upload_max_filesize', '32M');
+@ini_set('post_max_size', '32M');
+@ini_set('memory_limit', '256M');
+@set_time_limit(120);
+
 $msg = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'upload') {
