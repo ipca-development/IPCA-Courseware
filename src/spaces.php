@@ -4,12 +4,13 @@ declare(strict_types=1);
 /**
  * Minimal S3-compatible PUT uploader for DigitalOcean Spaces (AWS SigV4).
  * Uploads a binary string to: s3://{bucket}/{key}
+ * and sets ACL to public-read so CDN URLs work without signed URLs.
  */
 
 function cw_spaces_config(): array {
     $key = getenv('CW_SPACES_KEY') ?: '';
     $secret = getenv('CW_SPACES_SECRET') ?: '';
-    $region = getenv('CW_SPACES_REGION') ?: 'nyc3';
+    $region = getenv('CW_SPACES_REGION') ?: 'us-east-1'; // safest default for Spaces signing
     $bucket = getenv('CW_SPACES_BUCKET') ?: '';
     $endpoint = getenv('CW_SPACES_ENDPOINT') ?: 'nyc3.digitaloceanspaces.com';
     $cdnBase = rtrim(getenv('CW_SPACES_CDN_BASE') ?: '', '/');
@@ -41,6 +42,7 @@ function cw_sigv4_signing_key(string $secret, string $date, string $region, stri
 
 /**
  * Upload bytes to Spaces and return the key + CDN URL.
+ * IMPORTANT: sets x-amz-acl: public-read so objects are publicly retrievable.
  */
 function cw_spaces_put_object(string $objectKey, string $bytes, string $contentType): array {
     $cfg = cw_spaces_config();
@@ -55,10 +57,12 @@ function cw_spaces_put_object(string $objectKey, string $bytes, string $contentT
     $date = gmdate('Ymd', $t);
 
     $payloadHash = hash('sha256', $bytes);
+    $acl = 'public-read';
 
     $headers = [
         'content-type' => $contentType,
         'host' => $host,
+        'x-amz-acl' => $acl,
         'x-amz-content-sha256' => $payloadHash,
         'x-amz-date' => $amzDate,
     ];
@@ -75,7 +79,7 @@ function cw_spaces_put_object(string $objectKey, string $bytes, string $contentT
     $canonicalRequest =
         $method . "\n" .
         $uri . "\n" .
-        "" . "\n" . // query string
+        "" . "\n" .
         $canonicalHeaders . "\n" .
         $signedHeaders . "\n" .
         $payloadHash;
@@ -100,6 +104,7 @@ function cw_spaces_put_object(string $objectKey, string $bytes, string $contentT
         "Authorization: {$authorization}",
         "x-amz-date: {$amzDate}",
         "x-amz-content-sha256: {$payloadHash}",
+        "x-amz-acl: {$acl}",
         "Content-Type: {$contentType}",
     ];
 
