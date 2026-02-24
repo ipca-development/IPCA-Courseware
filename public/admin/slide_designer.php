@@ -19,74 +19,81 @@ $slide = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$slide) exit('Slide not found');
 
 $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
-$bgUrl  = "/assets/bg/ipca_bg.jpeg"; // must exist in public/assets/bg/
+$bgUrl  = "/assets/bg/ipca_bg.jpeg";
+
 cw_header('Slide Designer');
 ?>
 <div class="card">
-  <p class="muted">
+  <p class="muted" style="margin:0 0 10px 0;">
     Program: <?= h($slide['program_key']) ?> • Lesson <?= (int)$slide['external_lesson_id'] ?> • Page <?= (int)$slide['page_number'] ?> • Slide ID <?= (int)$slideId ?>
   </p>
 
-  <div style="display:grid; grid-template-columns: 320px 1fr; gap:14px;">
-    <div>
-      <h2>Tools</h2>
+  <!-- TOP TOOLBAR -->
+  <div style="
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      background: rgba(255,255,255,0.95);
+      backdrop-filter: blur(6px);
+      border: 1px solid #eee;
+      border-radius: 12px;
+      padding: 10px;
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      align-items:center;
+    ">
+    <strong style="margin-right:6px;">Tools</strong>
 
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn btn-sm" id="btnAddText" type="button">Add Text</button>
-        <button class="btn btn-sm" id="btnAddRedact" type="button">Add Redaction</button>
-        <button class="btn btn-sm" id="btnAddImageBox" type="button">Add Image Box</button>
-        <button class="btn btn-sm" id="btnAddVideoBox" type="button">Add Video Box</button>
-      </div>
+    <button class="btn btn-sm" id="btnAddText" type="button">Add Text</button>
+    <button class="btn btn-sm" id="btnAddRedact" type="button">Add Redaction</button>
+    <button class="btn btn-sm" id="btnAddImageBox" type="button">Add Image Box</button>
+    <button class="btn btn-sm" id="btnAddVideoBox" type="button">Add Video Box</button>
 
-      <hr>
+    <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
 
-      <h3>Reference layer</h3>
-      <label class="muted" style="display:flex; gap:8px; align-items:center;">
-        <input type="checkbox" id="refToggle" checked> Show screenshot overlay
-      </label>
-      <label class="muted">Opacity</label>
-      <input type="range" id="refOpacity" min="0" max="100" value="35" style="width:100%;">
+    <label class="muted" style="display:flex; gap:6px; align-items:center;">
+      <input type="checkbox" id="refToggle" checked> Screenshot overlay
+    </label>
 
-      <hr>
+    <label class="muted" style="display:flex; gap:6px; align-items:center;">
+      Opacity
+      <input type="range" id="refOpacity" min="0" max="100" value="35">
+    </label>
 
-      <h3>Selected object</h3>
-      <div class="muted" id="selInfo">None</div>
+    <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
 
-      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-        <button class="btn btn-sm" id="btnBringFront" type="button">Bring Front</button>
-        <button class="btn btn-sm" id="btnSendBack" type="button">Send Back</button>
-        <button class="btn btn-sm" id="btnDelete" type="button">Delete</button>
-      </div>
+    <button class="btn btn-sm" id="btnBringFront" type="button">Bring Front</button>
+    <button class="btn btn-sm" id="btnSendBack" type="button">Send Back</button>
+    <button class="btn btn-sm" id="btnDelete" type="button">Delete</button>
 
-      <hr>
+    <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
 
-      <h3>Save</h3>
-      <div style="display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn" id="btnSave" type="button">Save Layout</button>
-        <button class="btn btn-sm" id="btnSaveRender" type="button">Save + Render HTML</button>
-        <a class="btn btn-sm" href="/admin/slides.php?lesson_id=<?= (int)$slide['lesson_id'] ?>">Back</a>
-      </div>
+    <button class="btn" id="btnSave" type="button">Save Layout</button>
+    <button class="btn btn-sm" id="btnSaveRender" type="button">Save + Render HTML</button>
+    <a class="btn btn-sm" href="/admin/slides.php?lesson_id=<?= (int)$slide['lesson_id'] ?>">Back</a>
 
-      <div class="muted" id="status" style="margin-top:10px;"></div>
-      <div class="muted" id="zoomInfo" style="margin-top:6px;"></div>
-    </div>
-
-    <div>
-      <h2>Canvas</h2>
-      <div class="muted">Internal layout is always 1600×900 (16:9). Display auto-scales to fit your screen.</div>
-
-      <div id="canvasWrap"
-           style="width:100%;
-                  height: calc(100vh - 220px);
-                  border:1px solid #e6e6e6;
-                  border-radius:12px;
-                  overflow:hidden;
-                  background:#f4f6ff;
-                  position:relative;">
-        <canvas id="c" width="1600" height="900"></canvas>
-      </div>
-    </div>
+    <span class="muted" id="selInfo" style="margin-left:auto;">None</span>
   </div>
+
+  <div class="muted" id="status" style="margin-top:10px;"></div>
+  <div class="muted" id="zoomInfo" style="margin-top:6px;"></div>
+
+  <!-- CANVAS AREA -->
+  <div id="canvasWrap"
+       style="
+         width:100%;
+         height: calc(100vh - 260px);
+         margin-top: 12px;
+         border:1px solid #e6e6e6;
+         border-radius:12px;
+         overflow:hidden;
+         background:#f4f6ff;
+         position:relative;
+       ">
+    <canvas id="c" width="1600" height="900"></canvas>
+  </div>
+
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
@@ -104,7 +111,6 @@ function setStatus(msg){ statusEl.textContent = msg; }
 const BASE_W = 1600;
 const BASE_H = 900;
 
-// Fabric canvas in base coordinate space
 const canvas = new fabric.Canvas('c', {
   selection: true,
   preserveObjectStacking: true
@@ -135,7 +141,7 @@ function updateSel(){
   selInfo.textContent = `${o.type} (${Math.round(o.left)},${Math.round(o.top)}) ${w}×${h}`;
 }
 
-// Background and reference overlay
+// Background + ref overlay
 let refImage = null;
 
 fabric.Image.fromURL(BG_URL, (img) => {
@@ -162,7 +168,6 @@ fabric.Image.fromURL(REF_URL, (img) => {
   canvas.renderAll();
 });
 
-// Toggle reference
 document.getElementById('refToggle').addEventListener('change', (e) => {
   if (!refImage) return;
   refImage.visible = e.target.checked;
@@ -249,7 +254,7 @@ document.getElementById('btnDelete').addEventListener('click', () => {
   canvas.renderAll();
 });
 
-// Fit-to-screen scaling (display only; base coordinates remain 1600×900)
+// Fit-to-screen scaling (display only)
 function fitCanvas(){
   const wrap = document.getElementById('canvasWrap');
   if(!wrap) return;
@@ -266,7 +271,6 @@ function fitCanvas(){
 
   zoomInfo.textContent = `Display scale: ${(scale*100).toFixed(0)}%  |  Internal: ${BASE_W}×${BASE_H}`;
 }
-
 window.addEventListener('resize', () => setTimeout(fitCanvas, 50));
 
 // Load existing layout

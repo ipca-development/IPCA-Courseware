@@ -6,7 +6,6 @@ cw_require_admin();
 $lessonId = (int)($_GET['lesson_id'] ?? 0);
 $courseId = (int)($_GET['course_id'] ?? 0);
 
-// Load courses
 $courses = $pdo->query("
   SELECT c.id, c.title, p.program_key
   FROM courses c
@@ -14,14 +13,12 @@ $courses = $pdo->query("
   ORDER BY p.sort_order, c.sort_order, c.id
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// If lesson_id is provided but course_id not, infer course_id
 if ($lessonId > 0 && $courseId === 0) {
     $stmt = $pdo->prepare("SELECT course_id FROM lessons WHERE id=? LIMIT 1");
     $stmt->execute([$lessonId]);
     $courseId = (int)$stmt->fetchColumn();
 }
 
-// Load lessons for selected course
 $lessons = [];
 if ($courseId > 0) {
     $stmt = $pdo->prepare("
@@ -34,7 +31,6 @@ if ($courseId > 0) {
     $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-// Handle soft delete / restore
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     $lessonId = (int)($_POST['lesson_id'] ?? $lessonId);
@@ -43,17 +39,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $pdo->prepare("UPDATE slides SET is_deleted=1 WHERE id=?")->execute([(int)$_POST['slide_id']]);
         redirect('/admin/slides.php?course_id='.$courseId.'&lesson_id='.$lessonId);
     }
-
     if ($action === 'restore_slide') {
         $pdo->prepare("UPDATE slides SET is_deleted=0 WHERE id=?")->execute([(int)$_POST['slide_id']]);
         redirect('/admin/slides.php?course_id='.$courseId.'&lesson_id='.$lessonId);
     }
 }
 
-// Load lesson + slides
 $lesson = null;
 $slides = [];
-
 if ($lessonId > 0) {
     $stmt = $pdo->prepare("
       SELECT l.*, c.title AS course_title, p.program_key
@@ -112,7 +105,7 @@ cw_header('Slides');
 <?php if ($lesson): ?>
 <div class="card">
   <h2>Slide overview</h2>
-  <p class="muted">Only the Designer is used. “Edit” is removed. Double-click a slide thumbnail to open Designer quickly.</p>
+  <p class="muted">Designer only. Double-click screenshot to open Designer.</p>
 
   <div class="cw-slides-grid">
     <?php foreach ($slides as $s): ?>
@@ -157,9 +150,9 @@ cw_header('Slides');
 
           <div class="cw-mini">
             <?php if (!empty($s['html_rendered'])): ?>
-              <div class="cw-mini-preview">
-                <div class="stage-wrap">
-                  <div class="stage" style="transform:scale(0.25); transform-origin:top left; width:1600px; height:900px;">
+              <div class="cw-mini-preview" style="background:#fff;">
+                <div style="width:100%; overflow:hidden; border-radius:12px;">
+                  <div style="width:1600px;height:900px; transform:scale(0.25); transform-origin:top left;">
                     <?= $s['html_rendered'] ?>
                   </div>
                 </div>
@@ -173,13 +166,6 @@ cw_header('Slides');
     <?php endforeach; ?>
   </div>
 </div>
-
-<style>
-/* force fixed stage scaling inside preview */
-.stage-wrap{width:100%; overflow:hidden;}
-.stage{width:1600px;height:900px;}
-</style>
-
 <?php endif; ?>
 
 <?php cw_footer(); ?>
