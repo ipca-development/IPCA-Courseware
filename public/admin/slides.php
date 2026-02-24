@@ -68,15 +68,26 @@ cw_header('Slides');
 ?>
 
 <style>
-/* Thumbnail stage: fixed 1600x900 internally, scaled down, clipped */
+/* Both thumbs use the same 16:9 viewport */
 .thumb-viewport{
-  width: 420px;          /* thumbnail size */
-  height: 236px;         /* 16:9 */
+  width: 420px;
+  height: 236px;
   overflow: hidden;
   border-radius: 12px;
   background: #fff;
   border: 1px solid #eee;
+  display:flex;
+  align-items:center;
+  justify-content:center;
 }
+.thumb-viewport img{
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display:block;
+}
+
+/* HTML stage: fixed 1600x900 internally, scaled down into viewport */
 .thumb-stage{
   width:1600px;
   height:900px;
@@ -166,24 +177,31 @@ cw_header('Slides');
           </div>
         </div>
 
-        <div class="cw-slide-body">
+        <div class="cw-slide-body" style="grid-template-columns: 420px 420px; gap:12px;">
+          <!-- Screenshot thumb (fixed 420x236) -->
           <div class="cw-shot" ondblclick="location.href='/admin/slide_designer.php?slide_id=<?= (int)$s['id'] ?>'">
             <a target="_blank" href="<?= h($imgUrl) ?>">
-              <img src="<?= h($imgUrl) ?>" alt="" style="max-height:220px; object-fit:contain;">
+              <div class="thumb-viewport">
+                <img src="<?= h($imgUrl) ?>" alt="">
+              </div>
             </a>
           </div>
 
+          <!-- HTML thumb (fixed 420x236) -->
           <div class="cw-mini">
             <?php if (!empty($s['html_rendered'])): ?>
-              <div class="cw-mini-preview" style="background:#fff;">
-                <div class="thumb-viewport">
-                  <div class="thumb-stage">
-                    <?= $s['html_rendered'] ?>
-                  </div>
+              <div class="thumb-viewport">
+                <div class="thumb-stage">
+                  <?= $s['html_rendered'] ?>
                 </div>
               </div>
             <?php else: ?>
-              <div class="cw-mini-preview muted">No rendered HTML yet. Use “Save + Render HTML” in Designer.</div>
+              <div class="thumb-viewport" style="display:flex;align-items:center;justify-content:center;">
+                <div class="muted" style="padding:10px;text-align:center;">
+                  No rendered HTML yet.<br>
+                  Use “Save + Render HTML” in Designer.
+                </div>
+              </div>
             <?php endif; ?>
           </div>
         </div>
