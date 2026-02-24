@@ -3,70 +3,48 @@ require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 cw_require_admin();
 
-// programs for dropdown
-$programs = $pdo->query("SELECT id, program_key, name FROM programs ORDER BY sort_order")->fetchAll();
+$programs = $pdo->query("SELECT id, program_key, name FROM programs ORDER BY sort_order")->fetchAll(PDO::FETCH_ASSOC);
+$backgrounds = $pdo->query("SELECT id, name FROM backgrounds WHERE is_active=1 ORDER BY sort_order, id")->fetchAll(PDO::FETCH_ASSOC);
 
-// CREATE
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'create_course') {
     $programId = (int)($_POST['program_id'] ?? 0);
     $title = trim((string)($_POST['title'] ?? ''));
     $slug = trim((string)($_POST['slug'] ?? ''));
     $order = (int)($_POST['sort_order'] ?? 0);
     $published = isset($_POST['is_published']) ? 1 : 0;
+    $bgId = (int)($_POST['background_id'] ?? 0);
 
     if ($slug === '') $slug = slugify($title);
 
-    $stmt = $pdo->prepare("INSERT INTO courses (program_id, title, slug, sort_order, is_published, revision) VALUES (?,?,?,?,?, '1.0')");
-    $stmt->execute([$programId, $title, $slug, $order, $published]);
+    $stmt = $pdo->prepare("INSERT INTO courses (program_id, title, slug, sort_order, is_published, revision, background_id) VALUES (?,?,?,?,?,'1.0',?)");
+    $stmt->execute([$programId, $title, $slug, $order, $published, ($bgId>0?$bgId:null)]);
     redirect('/admin/courses.php');
 }
 
-// INLINE UPDATE
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'update_course') {
     $id = (int)($_POST['id'] ?? 0);
     $title = trim((string)($_POST['title'] ?? ''));
     $slug = trim((string)($_POST['slug'] ?? ''));
     $order = (int)($_POST['sort_order'] ?? 0);
     $published = isset($_POST['is_published']) ? 1 : 0;
+    $bgId = (int)($_POST['background_id'] ?? 0);
 
     if ($slug === '') $slug = slugify($title);
 
-    $stmt = $pdo->prepare("UPDATE courses SET title=?, slug=?, sort_order=?, is_published=? WHERE id=?");
-    $stmt->execute([$title, $slug, $order, $published, $id]);
+    $stmt = $pdo->prepare("UPDATE courses SET title=?, slug=?, sort_order=?, is_published=?, background_id=? WHERE id=?");
+    $stmt->execute([$title, $slug, $order, $published, ($bgId>0?$bgId:null), $id]);
     redirect('/admin/courses.php');
 }
 
-// DELETE (optional – safe, will fail if lessons exist because of FK)
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'delete_course') {
-    $id = (int)($_POST['id'] ?? 0);
-    try {
-        $stmt = $pdo->prepare("DELETE FROM courses WHERE id=?");
-        $stmt->execute([$id]);
-    } catch (Exception $e) {
-        // ignore and show message
-        $_SESSION['cw_flash'] = "Could not delete course (likely has lessons).";
-    }
-    redirect('/admin/courses.php');
-}
-
-// fetch courses
 $courses = $pdo->query("
   SELECT c.*, p.program_key
   FROM courses c
   JOIN programs p ON p.id = c.program_id
   ORDER BY p.sort_order, c.sort_order, c.id
-")->fetchAll();
-
-$flash = $_SESSION['cw_flash'] ?? '';
-unset($_SESSION['cw_flash']);
+")->fetchAll(PDO::FETCH_ASSOC);
 
 cw_header('Courses');
 ?>
-
-<?php if ($flash): ?>
-  <div class="card"><div class="alert"><?= h($flash) ?></div></div>
-<?php endif; ?>
-
 <div class="card">
   <h2>Create course</h2>
   <form method="post" class="form-grid">
@@ -91,6 +69,14 @@ cw_header('Courses');
     <label>Published</label>
     <input name="is_published" type="checkbox">
 
+    <label>Background</label>
+    <select name="background_id">
+      <option value="0">— Inherit default —</option>
+      <?php foreach ($backgrounds as $b): ?>
+        <option value="<?= (int)$b['id'] ?>"><?= h($b['name']) ?></option>
+      <?php endforeach; ?>
+    </select>
+
     <div></div>
     <button class="btn" type="submit">Create</button>
   </form>
@@ -100,7 +86,7 @@ cw_header('Courses');
   <h2>Edit courses (inline)</h2>
   <table>
     <tr>
-      <th>ID</th><th>Program</th><th>Title</th><th>Slug</th><th>Order</th><th>Published</th><th>Save</th><th>Delete</th>
+      <th>ID</th><th>Program</th><th>Title</th><th>Slug</th><th>Order</th><th>Published</th><th>Background</th><th>Save</th>
     </tr>
 
     <?php foreach ($courses as $c): ?>
@@ -117,19 +103,22 @@ cw_header('Courses');
           <td><input name="sort_order" type="number" value="<?= (int)$c['sort_order'] ?>" style="width:80px"></td>
 
           <td style="text-align:center;">
-            <input name="is_published" type="checkbox" <?= ((int)$c['is_published'] === 1) ? 'checked' : '' ?>>
+            <input name="is_published" type="checkbox" <?= ((int)$c['is_published']===1)?'checked':'' ?>>
+          </td>
+
+          <td>
+            <select name="background_id">
+              <option value="0">— inherit —</option>
+              <?php foreach ($backgrounds as $b): ?>
+                <option value="<?= (int)$b['id'] ?>" <?= ((int)$c['background_id']===(int)$b['id'])?'selected':'' ?>>
+                  <?= h($b['name']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
           </td>
 
           <td><button class="btn btn-sm" type="submit">Save</button></td>
         </form>
-
-        <td>
-          <form method="post" onsubmit="return confirm('Delete course? This will fail if lessons exist.');">
-            <input type="hidden" name="action" value="delete_course">
-            <input type="hidden" name="id" value="<?= (int)$c['id'] ?>">
-            <button class="btn btn-sm" type="submit">Delete</button>
-          </form>
-        </td>
       </tr>
     <?php endforeach; ?>
   </table>

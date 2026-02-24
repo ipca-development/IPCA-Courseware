@@ -26,8 +26,9 @@ function cw_header(string $title): void {
       <a href="/admin/courses.php">Courses</a>
       <a href="/admin/lessons.php">Lessons</a>
       <a href="/admin/slides.php">Slides</a>
-	  <a href="/admin/templates.php">Templates</a>
       <a href="/admin/import_lab.php">Import Lab</a>
+	  <a href="/admin/backgrounds.php">Backgrounds</a>	  
+	  <a href="/admin/templates.php">Templates</a>	
         
     </nav>
     <main class="main">
