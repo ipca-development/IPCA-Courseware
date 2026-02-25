@@ -317,7 +317,8 @@ async function loadDesign(){
   });
 }
 
-// ✅ Save (fixed: do not trust stale refImage)
+//UPDATED Manual Safe Object Serializer
+	
 async function saveDesign(renderAlso){
   try {
     setStatus('Saving...');
@@ -325,28 +326,33 @@ async function saveDesign(renderAlso){
     canvas.discardActiveObject();
     canvas.requestRenderAll();
 
-    // find the CURRENT reference overlay in canvas
-    let currentRef = null;
+    // Build clean JSON manually (no Fabric full serializer)
+    const objects = [];
+
     canvas.getObjects().forEach(o => {
-      if (o && o.data && o.data.kind === 'reference') currentRef = o;
+      if (!o) return;
+
+      // Skip reference overlay
+      if (o.data && o.data.kind === 'reference') return;
+
+      try {
+        const obj = o.toObject(['data']);
+        objects.push(obj);
+      } catch(e) {
+        console.warn('Skipping problematic object during save:', e);
+      }
     });
 
-    let removedRef = null;
-    if (currentRef) {
-      removedRef = currentRef;
-      canvas.remove(currentRef);
-    }
+    const design = {
+      version: '5.3.0',
+      objects: objects
+    };
 
-    const design = canvas.toDatalessJSON(['data']);
-
-    if (removedRef) {
-      canvas.add(removedRef);
-      refImage = removedRef; // refresh pointer
-      placeReferenceUnderObjects();
-      canvas.requestRenderAll();
-    }
-
-    const payload = { slide_id: SLIDE_ID, design_json: design, render: renderAlso ? 1 : 0 };
+    const payload = {
+      slide_id: SLIDE_ID,
+      design_json: design,
+      render: renderAlso ? 1 : 0
+    };
 
     const res = await fetch('/admin/api/save_design.php', {
       method:'POST',
@@ -356,8 +362,13 @@ async function saveDesign(renderAlso){
 
     const txt = await res.text();
     let j = null;
-    try { j = JSON.parse(txt); }
-    catch(e){ j = { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
+
+    try {
+      j = JSON.parse(txt);
+    } catch(e) {
+      setStatus('Save failed: Invalid JSON response');
+      return;
+    }
 
     if (!j.ok) {
       setStatus('Save failed: ' + (j.error || 'unknown'));
@@ -365,6 +376,7 @@ async function saveDesign(renderAlso){
     }
 
     setStatus(renderAlso ? 'Saved + rendered HTML.' : 'Saved layout.');
+
   } catch (err) {
     setStatus('Save exception: ' + err);
   }
