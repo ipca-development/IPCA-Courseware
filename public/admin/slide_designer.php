@@ -29,18 +29,14 @@ cw_header('Slide Designer');
   </p>
 
   <div style="
-      position: sticky;
-      top: 0;
-      z-index: 50;
+      position: sticky; top: 0; z-index: 50;
       background: rgba(255,255,255,0.95);
       backdrop-filter: blur(6px);
       border: 1px solid #eee;
       border-radius: 12px;
       padding: 10px;
-      display:flex;
-      flex-wrap:wrap;
-      gap:10px;
-      align-items:center;
+      display:flex; flex-wrap:wrap;
+      gap:10px; align-items:center;
     ">
     <strong style="margin-right:6px;">Tools</strong>
 
@@ -49,7 +45,6 @@ cw_header('Slide Designer');
 
     <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
 
-    <!-- Text styling controls -->
     <label class="muted" style="display:flex; gap:6px; align-items:center;">
       Font
       <select id="fontFamily" class="input" style="height:32px;">
@@ -61,12 +56,8 @@ cw_header('Slide Designer');
     <label class="muted" style="display:flex; gap:6px; align-items:center;">
       Size
       <select id="fontSize" class="input" style="height:32px;">
-        <option value="18">18</option>
-        <option value="20">20</option>
-        <option value="22">22</option>
-        <option value="24">24</option>
-        <option value="26" selected>26</option>
-        <option value="28">28</option>
+        <option value="18">18</option><option value="20">20</option><option value="22">22</option>
+        <option value="24">24</option><option value="26" selected>26</option><option value="28">28</option>
       </select>
     </label>
 
@@ -74,12 +65,34 @@ cw_header('Slide Designer');
     <button class="btn btn-sm" id="btnItalic" type="button"><em>I</em></button>
     <button class="btn btn-sm" id="btnUnderline" type="button"><u>U</u></button>
 
-    <!-- NEW: list/indent/background tools -->
+    <!-- Quick style -->
+    <label class="muted" style="display:flex; gap:6px; align-items:center;">
+      Style
+      <select id="quickStyle" class="input" style="height:32px;">
+        <option value="">—</option>
+        <option value="TITLE">Title</option>
+        <option value="BODY_LEFT">Body Left</option>
+        <option value="BODY_RIGHT">Body Right</option>
+        <option value="CAPTION">Caption</option>
+      </select>
+    </label>
+
+    <!-- Lists / indentation -->
     <button class="btn btn-sm" id="btnBullets" type="button">• Bullets</button>
     <button class="btn btn-sm" id="btnNumbered" type="button">1. Numbered</button>
     <button class="btn btn-sm" id="btnIndent" type="button">Indent</button>
     <button class="btn btn-sm" id="btnOutdent" type="button">Outdent</button>
-    <button class="btn btn-sm" id="btnToggleBg" type="button">Text BG</button>
+
+    <!-- Text background controls -->
+    <button class="btn btn-sm" id="btnToggleBg" type="button">BG On/Off</button>
+    <label class="muted" style="display:flex; gap:6px; align-items:center;">
+      BG #
+      <input id="bgHex" class="input" style="width:105px;height:32px;" value="#FFFFFF">
+    </label>
+    <label class="muted" style="display:flex; gap:6px; align-items:center;">
+      α
+      <input id="bgAlpha" type="range" min="0" max="100" value="75" style="width:110px;">
+    </label>
 
     <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
 
@@ -93,10 +106,8 @@ cw_header('Slide Designer');
     <label class="muted" style="display:flex; gap:6px; align-items:center;">
       <input type="checkbox" id="refToggle" checked> Screenshot overlay
     </label>
-
     <label class="muted" style="display:flex; gap:6px; align-items:center;">
-      Opacity
-      <input type="range" id="refOpacity" min="0" max="100" value="35">
+      Opacity <input type="range" id="refOpacity" min="0" max="100" value="35">
     </label>
 
     <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
@@ -114,10 +125,8 @@ cw_header('Slide Designer');
     <span class="muted" id="selInfo" style="margin-left:auto;">None</span>
   </div>
 
-  <!-- Inspector row -->
   <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
     <div class="muted" id="status"></div>
-
     <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
       <span class="muted">X</span><input id="insX" class="input" style="width:80px;" type="number" step="1">
       <span class="muted">Y</span><input id="insY" class="input" style="width:80px;" type="number" step="1">
@@ -129,20 +138,10 @@ cw_header('Slide Designer');
 
   <div class="muted" id="zoomInfo" style="margin-top:6px;"></div>
 
-  <div id="canvasWrap"
-       style="
-         width:100%;
-         height: calc(100vh - 310px);
-         margin-top: 12px;
-         border:1px solid #e6e6e6;
-         border-radius:12px;
-         overflow:hidden;
-         background:#f4f6ff;
-         position:relative;
-       ">
+  <div id="canvasWrap" style="width:100%; height: calc(100vh - 330px); margin-top: 12px;
+         border:1px solid #e6e6e6; border-radius:12px; overflow:hidden; background:#f4f6ff; position:relative;">
     <canvas id="c" width="1600" height="900"></canvas>
   </div>
-
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/fabric@5.3.0/dist/fabric.min.js"></script>
@@ -157,544 +156,400 @@ const zoomInfo = document.getElementById('zoomInfo');
 
 function setStatus(msg){ statusEl.textContent = msg; }
 
-const BASE_W = 1600;
-const BASE_H = 900;
-
-const canvas = new fabric.Canvas('c', {
-  selection: true,
-  preserveObjectStacking: true
-});
+const BASE_W = 1600, BASE_H = 900;
+const canvas = new fabric.Canvas('c', { selection:true, preserveObjectStacking:true });
 
 let refImage = null;
 let undoAiJson = null;
 
-// Inspector inputs
+// inspector
 const insX = document.getElementById('insX');
 const insY = document.getElementById('insY');
 const insW = document.getElementById('insW');
 const insH = document.getElementById('insH');
-const insApply = document.getElementById('insApply');
+document.getElementById('insApply').addEventListener('click', () => {
+  const o = canvas.getActiveObject(); if(!o) return;
+  const x = parseInt(insX.value||'0',10);
+  const y = parseInt(insY.value||'0',10);
+  const w = parseInt(insW.value||'0',10);
+  const h = parseInt(insH.value||'0',10);
+  if(!isNaN(x)) o.set('left', x);
+  if(!isNaN(y)) o.set('top', y);
+  if(!isNaN(w) && w>0 && o.width) o.set('scaleX', w/o.width);
+  if(!isNaN(h) && h>0 && o.height) o.set('scaleY', h/o.height);
+  o.setCoords();
+  canvas.requestRenderAll();
+});
 
+function updateInspector(){
+  const o = canvas.getActiveObject();
+  if(!o){ insX.value='';insY.value='';insW.value='';insH.value=''; return; }
+  insX.value = Math.round(o.left||0);
+  insY.value = Math.round(o.top||0);
+  insW.value = Math.round((o.width||0)*(o.scaleX||1));
+  insH.value = Math.round((o.height||0)*(o.scaleY||1));
+}
+
+// background
 function applyBackground(){
   fabric.Image.fromURL(BG_URL, (img) => {
-    img.set({
-      left: 0, top: 0,
-      selectable: false, evented: false,
-      scaleX: BASE_W / img.width,
-      scaleY: BASE_H / img.height
-    });
+    img.set({ left:0, top:0, selectable:false, evented:false, scaleX:BASE_W/img.width, scaleY:BASE_H/img.height });
     canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
   });
 }
 applyBackground();
 
-// Grid snap
+// grid snap
 const GRID = 10;
-function snap(v){ return Math.round(v / GRID) * GRID; }
+function snap(v){ return Math.round(v/GRID)*GRID; }
+canvas.on('object:moving', (e)=>{ const o=e.target; if(o?.data?.kind==='reference') return; o.set({left:snap(o.left), top:snap(o.top)}); updateInspector(); });
+canvas.on('object:scaling',(e)=>{ const o=e.target; if(o?.data?.kind==='reference') return; updateInspector(); });
 
-canvas.on('object:moving', (e) => {
-  const o = e.target;
-  if (o && o.data && o.data.kind === 'reference') return;
-  o.set({ left: snap(o.left), top: snap(o.top) });
-  updateInspectorFromSelection();
-});
-canvas.on('object:scaling', (e) => {
-  const o = e.target;
-  if (o && o.data && o.data.kind === 'reference') return;
-  o.set({ left: snap(o.left), top: snap(o.top) });
-  updateInspectorFromSelection();
-});
-
-canvas.on('selection:created', () => { updateSel(); updateInspectorFromSelection(); syncTextControlsToSelection(); });
-canvas.on('selection:updated', () => { updateSel(); updateInspectorFromSelection(); syncTextControlsToSelection(); });
-canvas.on('selection:cleared', () => { selInfo.textContent='None'; clearInspector(); });
+canvas.on('selection:created', ()=>{ updateSel(); updateInspector(); syncTextUI(); });
+canvas.on('selection:updated', ()=>{ updateSel(); updateInspector(); syncTextUI(); });
+canvas.on('selection:cleared', ()=>{ selInfo.textContent='None'; updateInspector(); });
 
 function updateSel(){
-  const o = canvas.getActiveObject();
-  if (!o) return;
-  const w = Math.round(o.width * o.scaleX);
-  const h = Math.round(o.height * o.scaleY);
-  selInfo.textContent = `${o.type} (${Math.round(o.left)},${Math.round(o.top)}) ${w}×${h}`;
+  const o = canvas.getActiveObject(); if(!o) return;
+  const w = Math.round((o.width||0)*(o.scaleX||1));
+  const h = Math.round((o.height||0)*(o.scaleY||1));
+  selInfo.textContent = `${o.type} (${Math.round(o.left||0)},${Math.round(o.top||0)}) ${w}×${h}`;
 }
 
-function clearInspector(){
-  insX.value = '';
-  insY.value = '';
-  insW.value = '';
-  insH.value = '';
-}
-
-function updateInspectorFromSelection(){
-  const o = canvas.getActiveObject();
-  if (!o) { clearInspector(); return; }
-  const w = Math.round(o.width * o.scaleX);
-  const h = Math.round(o.height * o.scaleY);
-  insX.value = String(Math.round(o.left));
-  insY.value = String(Math.round(o.top));
-  insW.value = String(w);
-  insH.value = String(h);
-}
-
-function applyInspectorToSelection(){
-  const o = canvas.getActiveObject();
-  if (!o) return;
-
-  const x = parseInt(insX.value || '0', 10);
-  const y = parseInt(insY.value || '0', 10);
-  const w = parseInt(insW.value || '0', 10);
-  const h = parseInt(insH.value || '0', 10);
-
-  if (!isNaN(x)) o.set('left', x);
-  if (!isNaN(y)) o.set('top', y);
-
-  if (!isNaN(w) && w > 0 && o.width) o.set('scaleX', w / o.width);
-  if (!isNaN(h) && h > 0 && o.height) o.set('scaleY', h / o.height);
-
-  o.setCoords();
-  canvas.requestRenderAll();
-  updateSel();
-}
-insApply.addEventListener('click', applyInspectorToSelection);
-
-// Reference overlay
+// overlay
 function createReferenceOverlay(){
   fabric.Image.fromURL(REF_URL, (img) => {
-    img.set({
-      left: 0, top: 0,
-      selectable: false,
-      evented: false,
-      opacity: 0.35,
-      scaleX: BASE_W / img.width,
-      scaleY: BASE_H / img.height
-    });
-    img.data = { kind: 'reference' };
+    img.set({ left:0, top:0, selectable:false, evented:false, opacity:0.35, scaleX:BASE_W/img.width, scaleY:BASE_H/img.height });
+    img.data = { kind:'reference' };
     refImage = img;
     canvas.add(refImage);
-    placeReferenceUnderObjects();
+    placeRef();
     canvas.renderAll();
   });
 }
-
-function placeReferenceUnderObjects(){
-  if (!refImage) return;
+function placeRef(){
+  if(!refImage) return;
   canvas.sendToBack(refImage);
-  canvas.getObjects().forEach(o => {
-    if (o === refImage) return;
-    if (o.data && o.data.kind === 'reference') return;
+  canvas.getObjects().forEach(o=>{
+    if(o===refImage) return;
+    if(o?.data?.kind==='reference') return;
     canvas.bringToFront(o);
   });
-  refImage.selectable = false;
-  refImage.evented = false;
+  refImage.selectable=false; refImage.evented=false;
 }
+document.getElementById('refToggle').addEventListener('change',(e)=>{ if(!refImage) return; refImage.visible=e.target.checked; canvas.renderAll(); });
+document.getElementById('refOpacity').addEventListener('input',(e)=>{ if(!refImage) return; refImage.opacity=parseInt(e.target.value,10)/100; canvas.renderAll(); });
 
-document.getElementById('refToggle').addEventListener('change', (e) => {
-  if (!refImage) return;
-  refImage.visible = e.target.checked;
-  canvas.renderAll();
-});
-document.getElementById('refOpacity').addEventListener('input', (e) => {
-  if (!refImage) return;
-  refImage.opacity = parseInt(e.target.value,10)/100;
-  canvas.renderAll();
-});
-
-// Text style controls
+// text ui
 const fontFamilyEl = document.getElementById('fontFamily');
 const fontSizeEl = document.getElementById('fontSize');
 const btnBold = document.getElementById('btnBold');
 const btnItalic = document.getElementById('btnItalic');
 const btnUnderline = document.getElementById('btnUnderline');
+const quickStyle = document.getElementById('quickStyle');
 
-function getActiveTextbox(){
+const bgHex = document.getElementById('bgHex');
+const bgAlpha = document.getElementById('bgAlpha');
+
+function activeText(){
   const o = canvas.getActiveObject();
-  if (!o) return null;
-  if (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text') return o;
+  if(!o) return null;
+  if(o.type==='textbox'||o.type==='i-text'||o.type==='text') return o;
   return null;
 }
-
-function syncTextControlsToSelection(){
-  const t = getActiveTextbox();
-  if (!t) return;
+function syncTextUI(){
+  const t = activeText(); if(!t) return;
   fontFamilyEl.value = (t.fontFamily === 'Manrope') ? 'Manrope' : 'Arial';
-
-  const sizes = [18,20,22,24,26,28];
-  let best = sizes[0], bestDiff = 9999;
-  sizes.forEach(s=>{
-    const d = Math.abs((t.fontSize||26) - s);
-    if (d < bestDiff) { bestDiff = d; best = s; }
-  });
-  fontSizeEl.value = String(best);
+  fontSizeEl.value = String(t.fontSize || 26);
 }
 
-function applyFontFamily(){
-  const t = getActiveTextbox();
-  if (!t) return;
-  t.set('fontFamily', fontFamilyEl.value);
+function hexToRgb(hex){
+  hex = (hex||'').replace('#','').trim();
+  if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
+  if(hex.length!==6) return {r:255,g:255,b:255};
+  return {
+    r: parseInt(hex.substring(0,2),16),
+    g: parseInt(hex.substring(2,4),16),
+    b: parseInt(hex.substring(4,6),16),
+  };
+}
+function setTextboxBg(t, on){
+  if(!t) return;
+  if(!on){ t.backgroundColor = null; canvas.requestRenderAll(); return; }
+  const rgb = hexToRgb(bgHex.value);
+  const a = parseInt(bgAlpha.value,10)/100;
+  t.backgroundColor = `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`;
   canvas.requestRenderAll();
 }
-function applyFontSize(){
-  const t = getActiveTextbox();
-  if (!t) return;
-  t.set('fontSize', parseInt(fontSizeEl.value, 10));
+
+fontFamilyEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontFamily=fontFamilyEl.value; canvas.requestRenderAll(); });
+fontSizeEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontSize=parseInt(fontSizeEl.value,10); canvas.requestRenderAll(); });
+btnBold.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontWeight = (t.fontWeight==='bold')?'normal':'bold'; canvas.requestRenderAll(); });
+btnItalic.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontStyle = (t.fontStyle==='italic')?'normal':'italic'; canvas.requestRenderAll(); });
+btnUnderline.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.underline = !t.underline; canvas.requestRenderAll(); });
+
+document.getElementById('btnToggleBg').addEventListener('click', ()=>{ const t=activeText(); if(!t) return; setTextboxBg(t, !t.backgroundColor); });
+bgHex.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; if(t.backgroundColor) setTextboxBg(t,true); });
+bgAlpha.addEventListener('input', ()=>{ const t=activeText(); if(!t) return; if(t.backgroundColor) setTextboxBg(t,true); });
+
+// Quick styles: snap position + typography
+const STYLE_PRESETS = {
+  TITLE:      { x:80,y:110,w:1440,h:90, fontFamily:'Manrope', fontSize:40, fontWeight:'bold', fontStyle:'normal', underline:false },
+  BODY_LEFT:  { x:80,y:240,w:680,h:560,  fontFamily:'Manrope', fontSize:26, fontWeight:'normal', fontStyle:'normal', underline:false },
+  BODY_RIGHT: { x:840,y:240,w:680,h:560, fontFamily:'Manrope', fontSize:26, fontWeight:'normal', fontStyle:'normal', underline:false },
+  CAPTION:    { x:80,y:820,w:1440,h:60,  fontFamily:'Manrope', fontSize:20, fontWeight:'normal', fontStyle:'italic', underline:false }
+};
+
+quickStyle.addEventListener('change', ()=>{
+  const key = quickStyle.value;
+  if(!key) return;
+  const t = activeText(); if(!t) return;
+  const s = STYLE_PRESETS[key];
+
+  t.left = s.x; t.top = s.y;
+  if(t.width) t.scaleX = s.w / t.width;
+  if(t.height) t.scaleY = s.h / t.height;
+
+  t.fontFamily = s.fontFamily;
+  t.fontSize = s.fontSize;
+  t.fontWeight = s.fontWeight;
+  t.fontStyle = s.fontStyle;
+  t.underline = !!s.underline;
+
+  // default bg OFF
+  t.backgroundColor = null;
+
+  t.setCoords();
   canvas.requestRenderAll();
+  updateInspector();
+  syncTextUI();
+  quickStyle.value = '';
+});
+
+// Bullets / numbered preserve indentation
+function getIndentPrefix(line){
+  const m = line.match(/^(\s*)/);
+  return m ? m[1] : '';
 }
-
-fontFamilyEl.addEventListener('change', applyFontFamily);
-fontSizeEl.addEventListener('change', applyFontSize);
-
-btnBold.addEventListener('click', ()=>{
-  const t = getActiveTextbox();
-  if (!t) return;
-  t.set('fontWeight', (t.fontWeight === 'bold') ? 'normal' : 'bold');
-  canvas.requestRenderAll();
-});
-btnItalic.addEventListener('click', ()=>{
-  const t = getActiveTextbox();
-  if (!t) return;
-  t.set('fontStyle', (t.fontStyle === 'italic') ? 'normal' : 'italic');
-  canvas.requestRenderAll();
-});
-btnUnderline.addEventListener('click', ()=>{
-  const t = getActiveTextbox();
-  if (!t) return;
-  t.set('underline', !t.underline);
-  canvas.requestRenderAll();
-});
-
-/* ===== NEW: Bullets / Numbered / Indent / Outdent / Text BG ===== */
 document.getElementById('btnBullets').addEventListener('click', ()=>{
-  const t = getActiveTextbox(); if(!t) return;
-  const lines = (t.text || '').split('\n');
-  t.text = lines.map(line => {
-    if (!line.trim()) return line;
-    return '• ' + line.replace(/^•\s*/, '');
+  const t=activeText(); if(!t) return;
+  const lines=(t.text||'').split('\n');
+  t.text = lines.map(line=>{
+    if(!line.trim()) return line;
+    const indent = getIndentPrefix(line);
+    const content = line.trim().replace(/^•\s*/, '');
+    return indent + '• ' + content;
   }).join('\n');
   canvas.requestRenderAll();
 });
-
 document.getElementById('btnNumbered').addEventListener('click', ()=>{
-  const t = getActiveTextbox(); if(!t) return;
-  const lines = (t.text || '').split('\n');
-  let n = 1;
-  t.text = lines.map(line => {
-    if (!line.trim()) return line;
-    const clean = line.replace(/^\d+\.\s*/, '');
-    return (n++) + '. ' + clean;
+  const t=activeText(); if(!t) return;
+  const lines=(t.text||'').split('\n');
+  let n=1;
+  t.text = lines.map(line=>{
+    if(!line.trim()) return line;
+    const indent = getIndentPrefix(line);
+    const content = line.trim().replace(/^\d+\.\s*/, '');
+    return indent + (n++) + '. ' + content;
   }).join('\n');
   canvas.requestRenderAll();
 });
-
 document.getElementById('btnIndent').addEventListener('click', ()=>{
-  const t = getActiveTextbox(); if(!t) return;
-  const lines = (t.text || '').split('\n');
-  t.text = lines.map(line => line.trim() ? ('  ' + line) : line).join('\n');
+  const t=activeText(); if(!t) return;
+  t.text = (t.text||'').split('\n').map(line => line.trim() ? ('  ' + line) : line).join('\n');
   canvas.requestRenderAll();
 });
-
 document.getElementById('btnOutdent').addEventListener('click', ()=>{
-  const t = getActiveTextbox(); if(!t) return;
-  const lines = (t.text || '').split('\n');
-  t.text = lines.map(line => line.replace(/^ {1,2}/, '')).join('\n');
+  const t=activeText(); if(!t) return;
+  t.text = (t.text||'').split('\n').map(line => line.replace(/^ {1,2}/,'')).join('\n');
   canvas.requestRenderAll();
 });
 
-document.getElementById('btnToggleBg').addEventListener('click', ()=>{
-  const t = getActiveTextbox(); if(!t) return;
-  t.set('backgroundColor', t.backgroundColor ? null : 'rgba(255,255,255,0.75)');
-  canvas.requestRenderAll();
-});
-
-// Tab inserts indent while editing
-canvas.on('text:editing:entered', (e) => {
-  const t = e.target;
-  if (!t || !t.hiddenTextarea) return;
-
-  // Prevent attaching multiple times
-  if (t.hiddenTextarea._ipcaTabHooked) return;
+// Tab inserts two spaces while editing
+canvas.on('text:editing:entered', (e)=>{
+  const t=e.target;
+  if(!t || !t.hiddenTextarea) return;
+  if(t.hiddenTextarea._ipcaTabHooked) return;
   t.hiddenTextarea._ipcaTabHooked = true;
-
   t.hiddenTextarea.addEventListener('keydown', function(ev){
-    if (ev.key === 'Tab') {
+    if(ev.key === 'Tab'){
       ev.preventDefault();
       const start = t.selectionStart;
       const end = t.selectionEnd;
       const txt = t.text || '';
-      t.text = txt.substring(0, start) + '  ' + txt.substring(end);
+      t.text = txt.substring(0,start) + '  ' + txt.substring(end);
       t.selectionStart = t.selectionEnd = start + 2;
       canvas.requestRenderAll();
     }
   });
 });
-/* ===== END NEW ===== */
 
-// Tools
-document.getElementById('btnAddText').addEventListener('click', () => {
-  const t = new fabric.Textbox('Edit text…', {
-    left: 80, top: 200,
-    width: 520,
-    fontSize: 26,
-    fontFamily: 'Manrope',
-    fill: '#0b2a4a',
-    backgroundColor: null, // ✅ default OFF
-    padding: 8
-  });
-  t.data = { kind: 'text' };
-  canvas.add(t);
-  canvas.setActiveObject(t);
-  syncTextControlsToSelection();
-  updateInspectorFromSelection();
+// Basic buttons
+document.getElementById('btnAddText').addEventListener('click', ()=>{
+  const t=new fabric.Textbox('Edit text…',{left:80,top:200,width:520,fontSize:26,fontFamily:'Manrope',fill:'#0b2a4a',backgroundColor:null,padding:8});
+  t.data={kind:'text'};
+  canvas.add(t); canvas.setActiveObject(t);
+  syncTextUI(); updateInspector();
   canvas.renderAll();
 });
-
-document.getElementById('btnAddRedact').addEventListener('click', () => {
-  const r = new fabric.Rect({
-    left: 80, top: 80,
-    width: 420, height: 80,
-    fill: 'rgba(255,255,255,0.96)',
-    stroke: '#dddddd',
-    strokeWidth: 1
-  });
-  r.data = { kind: 'redact' };
-  canvas.add(r);
-  canvas.setActiveObject(r);
-  updateInspectorFromSelection();
-  canvas.renderAll();
+document.getElementById('btnAddRedact').addEventListener('click', ()=>{
+  const r=new fabric.Rect({left:80,top:80,width:420,height:80,fill:'rgba(255,255,255,0.96)',stroke:'#ddd',strokeWidth:1});
+  r.data={kind:'redact'}; canvas.add(r); canvas.setActiveObject(r);
+  updateInspector(); canvas.renderAll();
 });
-
-function addBox(kind, label){
-  const rect = new fabric.Rect({
-    left: 0, top: 0,
-    width: 520, height: 320,
-    fill: 'rgba(0,0,0,0.03)',
-    stroke: '#0b2a4a',
-    strokeWidth: 2,
-    rx: 12, ry: 12
-  });
-  const text = new fabric.Text(label, {
-    left: 18, top: 18,
-    fontSize: 24,
-    fill: '#0b2a4a'
-  });
-  const group = new fabric.Group([rect, text], { left: 900, top: 240 });
-  group.data = { kind, src: '' };
-  canvas.add(group);
-  canvas.setActiveObject(group);
-  updateInspectorFromSelection();
-  canvas.renderAll();
+function addBox(kind,label){
+  const rect=new fabric.Rect({left:0,top:0,width:520,height:320,fill:'rgba(0,0,0,0.03)',stroke:'#0b2a4a',strokeWidth:2,rx:12,ry:12});
+  const text=new fabric.Text(label,{left:18,top:18,fontSize:24,fill:'#0b2a4a'});
+  const group=new fabric.Group([rect,text],{left:900,top:240});
+  group.data={kind,src:''};
+  canvas.add(group); canvas.setActiveObject(group);
+  updateInspector(); canvas.renderAll();
 }
-document.getElementById('btnAddImageBox').addEventListener('click', () => addBox('image', 'IMAGE'));
-document.getElementById('btnAddVideoBox').addEventListener('click', () => addBox('video', 'VIDEO'));
+document.getElementById('btnAddImageBox').addEventListener('click',()=>addBox('image','IMAGE'));
+document.getElementById('btnAddVideoBox').addEventListener('click',()=>addBox('video','VIDEO'));
 
-document.getElementById('btnBringFront').addEventListener('click', () => {
-  const o = canvas.getActiveObject();
-  if (!o) return;
-  canvas.bringToFront(o);
-  placeReferenceUnderObjects();
-  canvas.renderAll();
-});
-document.getElementById('btnSendBack').addEventListener('click', () => {
-  const o = canvas.getActiveObject();
-  if (!o) return;
-  canvas.sendToBack(o);
-  placeReferenceUnderObjects();
-  canvas.renderAll();
-});
-document.getElementById('btnDelete').addEventListener('click', () => {
-  const o = canvas.getActiveObject();
-  if (!o) return;
-  if (o.data && o.data.kind === 'reference') return;
-  canvas.remove(o);
-  canvas.renderAll();
-  updateInspectorFromSelection();
-});
+document.getElementById('btnBringFront').addEventListener('click',()=>{ const o=canvas.getActiveObject(); if(!o) return; canvas.bringToFront(o); placeRef(); canvas.renderAll(); });
+document.getElementById('btnSendBack').addEventListener('click',()=>{ const o=canvas.getActiveObject(); if(!o) return; canvas.sendToBack(o); placeRef(); canvas.renderAll(); });
+document.getElementById('btnDelete').addEventListener('click',()=>{ const o=canvas.getActiveObject(); if(!o) return; if(o?.data?.kind==='reference') return; canvas.remove(o); canvas.renderAll(); updateInspector(); });
 
-// Fit-to-screen
 function fitCanvas(){
-  const wrap = document.getElementById('canvasWrap');
-  if(!wrap) return;
-  const w = wrap.clientWidth;
-  const h = wrap.clientHeight;
-  const scale = Math.min(w / BASE_W, h / BASE_H);
-  canvas.setWidth(Math.round(BASE_W * scale));
-  canvas.setHeight(Math.round(BASE_H * scale));
+  const wrap=document.getElementById('canvasWrap');
+  const w=wrap.clientWidth, h=wrap.clientHeight;
+  const scale=Math.min(w/BASE_W, h/BASE_H);
+  canvas.setWidth(Math.round(BASE_W*scale));
+  canvas.setHeight(Math.round(BASE_H*scale));
   canvas.setZoom(scale);
   canvas.calcOffset();
   canvas.renderAll();
   zoomInfo.textContent = `Display scale: ${(scale*100).toFixed(0)}%  |  Internal: ${BASE_W}×${BASE_H}`;
 }
-window.addEventListener('resize', () => setTimeout(fitCanvas, 50));
+window.addEventListener('resize',()=>setTimeout(fitCanvas,50));
 
-// Load existing layout
 async function loadDesign(){
-  const res = await fetch('/admin/api/load_design.php?slide_id=' + SLIDE_ID);
+  const res = await fetch('/admin/api/load_design.php?slide_id='+SLIDE_ID);
   const j = await res.json();
-
-  if (!j.ok || !j.design_json) {
+  if(!j.ok || !j.design_json){
     setStatus('No saved layout yet.');
     createReferenceOverlay();
-    setTimeout(fitCanvas, 200);
+    setTimeout(fitCanvas,200);
     return;
   }
-
-  canvas.loadFromJSON(j.design_json, () => {
+  canvas.loadFromJSON(j.design_json, ()=>{
     applyBackground();
-
-    refImage = null;
-    canvas.getObjects().forEach(o => {
-      if (o && o.data && o.data.kind === 'reference') refImage = o;
-    });
-
-    if (!refImage) createReferenceOverlay();
+    refImage=null;
+    canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
+    if(!refImage) createReferenceOverlay();
     setStatus('Layout loaded.');
     canvas.renderAll();
-    setTimeout(fitCanvas, 200);
+    setTimeout(fitCanvas,200);
   });
 }
 
-// Save (manual serialize; textboxes always saved) — default BG off behavior included
+// Save (manual serialize; default bg OFF)
 async function saveDesign(renderAlso){
-  try {
+  try{
     setStatus('Saving...');
-
     canvas.discardActiveObject();
     canvas.requestRenderAll();
 
-    canvas.getObjects().forEach(o => {
-      if (o && (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text') && o.isEditing) {
-        o.exitEditing();
-      }
+    canvas.getObjects().forEach(o=>{
+      if(o && (o.type==='textbox'||o.type==='i-text'||o.type==='text') && o.isEditing) o.exitEditing();
     });
 
     const objects = [];
+    canvas.getObjects().forEach(o=>{
+      if(!o) return;
+      if(o?.data?.kind==='reference') return;
 
-    canvas.getObjects().forEach(o => {
-      if (!o) return;
-      if (o.data && o.data.kind === 'reference') return;
-
-      const isText = (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text');
-
-      if (isText) {
+      const isText = (o.type==='textbox'||o.type==='i-text'||o.type==='text');
+      if(isText){
         objects.push({
-          type: 'textbox',
-          left: o.left ?? 0,
-          top: o.top ?? 0,
-          width: o.width ?? 520,
-          height: o.height ?? 120,
-          scaleX: o.scaleX ?? 1,
-          scaleY: o.scaleY ?? 1,
-          angle: o.angle ?? 0,
-
-          text: o.text || '',
-          fontFamily: o.fontFamily || 'Manrope',
-          fontSize: o.fontSize || 26,
-          fontWeight: o.fontWeight || 'normal',
-          fontStyle: o.fontStyle || 'normal',
-          underline: !!o.underline,
-          textAlign: o.textAlign || 'left',
-          lineHeight: o.lineHeight || 1.16,
-          charSpacing: o.charSpacing || 0,
-
-          fill: o.fill || '#0b2a4a',
-          backgroundColor: o.backgroundColor || null,
-
-          data: o.data || {}
+          type:'textbox',
+          left:o.left??0, top:o.top??0,
+          width:o.width??520, height:o.height??120,
+          scaleX:o.scaleX??1, scaleY:o.scaleY??1,
+          angle:o.angle??0,
+          text:o.text||'',
+          fontFamily:o.fontFamily||'Manrope',
+          fontSize:o.fontSize||26,
+          fontWeight:o.fontWeight||'normal',
+          fontStyle:o.fontStyle||'normal',
+          underline:!!o.underline,
+          textAlign:o.textAlign||'left',
+          lineHeight:o.lineHeight||1.16,
+          charSpacing:o.charSpacing||0,
+          fill:o.fill||'#0b2a4a',
+          backgroundColor:o.backgroundColor||null,
+          data:o.data||{}
         });
         return;
       }
-
-      try {
-        objects.push(o.toObject(['data']));
-      } catch (e) {}
+      try{ objects.push(o.toObject(['data'])); } catch(e){}
     });
 
-    const design = { version: '5.3.0', objects };
+    const payload = { slide_id: SLIDE_ID, design_json: {version:'5.3.0', objects}, render: renderAlso?1:0 };
 
-    const payload = { slide_id: SLIDE_ID, design_json: design, render: renderAlso ? 1 : 0 };
-
-    const res = await fetch('/admin/api/save_design.php', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(payload)
-    });
-
+    const res = await fetch('/admin/api/save_design.php', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
     const txt = await res.text();
-    let j;
-    try { j = JSON.parse(txt); }
-    catch(e){ j = { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
-
-    if (!j.ok) {
-      setStatus('Save failed: ' + (j.error || 'unknown'));
-      return;
-    }
-
+    let jr; try{ jr=JSON.parse(txt);}catch(e){ jr={ok:false,error:'Non-JSON response: '+txt.slice(0,200)};}
+    if(!jr.ok){ setStatus('Save failed: '+(jr.error||'unknown')); return; }
     setStatus(renderAlso ? 'Saved + rendered HTML.' : 'Saved layout.');
-  } catch (err) {
-    setStatus('Save exception: ' + err);
+  }catch(err){
+    setStatus('Save exception: '+err);
   }
 }
-
-document.getElementById('btnSave').addEventListener('click', () => saveDesign(false));
-document.getElementById('btnSaveRender').addEventListener('click', () => saveDesign(true));
+document.getElementById('btnSave').addEventListener('click',()=>saveDesign(false));
+document.getElementById('btnSaveRender').addEventListener('click',()=>saveDesign(true));
 
 // AI Auto Layout + Undo
-document.getElementById('btnAiLayout').addEventListener('click', async () => {
+document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
   setStatus('AI analyzing…');
+  undoAiJson = { version:'5.3.0', objects: canvas.getObjects().filter(o=>!(o&&o.data&&o.data.kind==='reference')).map(o=>o.toObject(['data'])) };
+  document.getElementById('btnUndoAi').disabled=false;
 
-  undoAiJson = { version:'5.3.0', objects: canvas.getObjects().filter(o => !(o && o.data && o.data.kind==='reference')).map(o => o.toObject(['data'])) };
-  document.getElementById('btnUndoAi').disabled = false;
+  const form=new FormData(); form.append('slide_id',SLIDE_ID);
+  const res=await fetch('/admin/api/ai_layout.php',{method:'POST',body:form});
+  const j=await res.json();
+  if(!j.ok){ setStatus('AI failed: '+(j.error||'unknown')); return; }
 
-  const form = new FormData();
-  form.append('slide_id', SLIDE_ID);
-
-  const res = await fetch('/admin/api/ai_layout.php', { method:'POST', body: form });
-  const j = await res.json();
-
-  if (!j.ok) { setStatus('AI failed: ' + (j.error||'unknown')); return; }
-
-  canvas.loadFromJSON(j.design_json, () => {
+  canvas.loadFromJSON(j.design_json, ()=>{
     applyBackground();
 
-    // ✅ default text bg OFF for AI textboxes
-    canvas.getObjects().forEach(o => {
-      if (o && (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text')) {
+    // enforce default text bg OFF
+    canvas.getObjects().forEach(o=>{
+      if(o && (o.type==='textbox'||o.type==='i-text'||o.type==='text')){
         o.backgroundColor = null;
         o.fontFamily = o.fontFamily || 'Manrope';
       }
     });
 
-    refImage = null;
-    canvas.getObjects().forEach(o => {
-      if (o && o.data && o.data.kind === 'reference') refImage = o;
-    });
-    if (!refImage) createReferenceOverlay();
+    refImage=null;
+    canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
+    if(!refImage) createReferenceOverlay();
 
     setStatus('AI layout loaded. Review and Save + Render.');
     canvas.renderAll();
-    setTimeout(fitCanvas, 200);
+    setTimeout(fitCanvas,200);
   });
 });
 
-document.getElementById('btnUndoAi').addEventListener('click', () => {
-  if (!undoAiJson) return;
-  canvas.loadFromJSON(undoAiJson, () => {
+document.getElementById('btnUndoAi').addEventListener('click', ()=>{
+  if(!undoAiJson) return;
+  canvas.loadFromJSON(undoAiJson, ()=>{
     applyBackground();
-
-    refImage = null;
-    canvas.getObjects().forEach(o => {
-      if (o && o.data && o.data.kind === 'reference') refImage = o;
-    });
-    if (!refImage) createReferenceOverlay();
-
+    refImage=null;
+    canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
+    if(!refImage) createReferenceOverlay();
     setStatus('Undo AI complete.');
     canvas.renderAll();
-    setTimeout(fitCanvas, 200);
+    setTimeout(fitCanvas,200);
   });
-  undoAiJson = null;
-  document.getElementById('btnUndoAi').disabled = true;
+  undoAiJson=null;
+  document.getElementById('btnUndoAi').disabled=true;
 });
 
-setTimeout(loadDesign, 600);
-setTimeout(fitCanvas, 800);
+setTimeout(loadDesign,600);
+setTimeout(fitCanvas,800);
 createReferenceOverlay();
 </script>
 

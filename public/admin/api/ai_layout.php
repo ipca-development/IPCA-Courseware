@@ -47,11 +47,10 @@ You are laying out an aviation training slide on a fixed 1600x900 canvas.
 
 Return ALL real instructional content with approximate bounding boxes.
 
-IMPORTANT:
-- DO NOT include UI chrome text or buttons as content.
-- If you detect repeated UI areas (menus/breadcrumb/footer), you may output kind="redact" but the app may ignore them.
-- Coordinates must be in 1600x900 coordinate system.
-- For image/video/redact items, set text="".
+- Do NOT include UI chrome text/buttons (main menu, breadcrumbs with '/', footer).
+- If detected, you may output kind="redact" but the app will ignore it.
+- For bullet lists, output text with lines separated by "\\n" and include the bullets as "• " prefix.
+- Coordinates are in 1600x900.
 TXT;
 
     $payload = [
@@ -95,10 +94,8 @@ TXT;
         $h = max(10, min(900,  (float)($it['h'] ?? 50)));
         $text = (string)($it['text'] ?? '');
 
-        // ✅ We DO NOT want redaction boxes (IPCA background already defines layout)
-        if ($kind === 'redact') {
-            continue;
-        }
+        // ignore redactions (IPCA background already handles it)
+        if ($kind === 'redact') continue;
 
         if ($kind === 'title' || $kind === 'text' || $kind === 'bullets') {
             $fs = ($kind === 'title') ? 40 : 26;
@@ -107,9 +104,10 @@ TXT;
                 "left"=>$x, "top"=>$y, "width"=>$w, "height"=>$h,
                 "scaleX"=>1, "scaleY"=>1,
                 "text"=>$text,
+                "fontFamily"=>"Manrope",
                 "fontSize"=>$fs,
                 "fill"=>"#0b2a4a",
-                "backgroundColor"=>"rgba(255,255,255,0.75)",
+                "backgroundColor"=>null,   // ✅ OFF by default
                 "editable"=>true,
                 "selectable"=>true,
                 "evented"=>true,
