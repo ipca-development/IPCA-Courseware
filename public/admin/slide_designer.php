@@ -56,14 +56,20 @@ cw_header('Slide Designer');
     <label class="muted" style="display:flex; gap:6px; align-items:center;">
       Size
       <select id="fontSize" class="input" style="height:32px;">
-        <option value="18">18</option><option value="20">20</option><option value="22">22</option>
-        <option value="24">24</option><option value="26" selected>26</option><option value="28">28</option>
+        <?php for ($i=12; $i<=60; $i+=2): ?>
+          <option value="<?= $i ?>" <?= ($i===26?'selected':'') ?>><?= $i ?></option>
+        <?php endfor; ?>
       </select>
     </label>
 
     <button class="btn btn-sm" id="btnBold" type="button"><strong>B</strong></button>
     <button class="btn btn-sm" id="btnItalic" type="button"><em>I</em></button>
     <button class="btn btn-sm" id="btnUnderline" type="button"><u>U</u></button>
+
+    <label class="muted" style="display:flex; gap:6px; align-items:center;">
+      Text color
+      <input id="textColor" type="color" value="#0b2a4a" style="height:32px; width:44px; padding:0; border:1px solid #ddd; border-radius:8px;">
+    </label>
 
     <!-- Quick style -->
     <label class="muted" style="display:flex; gap:6px; align-items:center;">
@@ -77,12 +83,6 @@ cw_header('Slide Designer');
       </select>
     </label>
 
-    <!-- Lists / indentation -->
-    <button class="btn btn-sm" id="btnBullets" type="button">• Bullets</button>
-    <button class="btn btn-sm" id="btnNumbered" type="button">1. Numbered</button>
-    <button class="btn btn-sm" id="btnIndent" type="button">Indent</button>
-    <button class="btn btn-sm" id="btnOutdent" type="button">Outdent</button>
-
     <!-- Text background controls -->
     <button class="btn btn-sm" id="btnToggleBg" type="button">BG On/Off</button>
     <label class="muted" style="display:flex; gap:6px; align-items:center;">
@@ -93,6 +93,11 @@ cw_header('Slide Designer');
       α
       <input id="bgAlpha" type="range" min="0" max="100" value="75" style="width:110px;">
     </label>
+
+    <!-- Guides -->
+    <button class="btn btn-sm" id="btnGuideV" type="button">+ V Guide</button>
+    <button class="btn btn-sm" id="btnGuideH" type="button">+ H Guide</button>
+    <button class="btn btn-sm" id="btnGuideDel" type="button">Del Guide</button>
 
     <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
 
@@ -138,7 +143,7 @@ cw_header('Slide Designer');
 
   <div class="muted" id="zoomInfo" style="margin-top:6px;"></div>
 
-  <div id="canvasWrap" style="width:100%; height: calc(100vh - 330px); margin-top: 12px;
+  <div id="canvasWrap" style="width:100%; height: calc(100vh - 360px); margin-top: 12px;
          border:1px solid #e6e6e6; border-radius:12px; overflow:hidden; background:#f4f6ff; position:relative;">
     <canvas id="c" width="1600" height="900"></canvas>
   </div>
@@ -153,7 +158,6 @@ const REF_URL  = <?= json_encode($imgUrl) ?>;
 const statusEl = document.getElementById('status');
 const selInfo  = document.getElementById('selInfo');
 const zoomInfo = document.getElementById('zoomInfo');
-
 function setStatus(msg){ statusEl.textContent = msg; }
 
 const BASE_W = 1600, BASE_H = 900;
@@ -161,12 +165,14 @@ const canvas = new fabric.Canvas('c', { selection:true, preserveObjectStacking:t
 
 let refImage = null;
 let undoAiJson = null;
+let guideObjects = [];
 
-// inspector
+// Inspector
 const insX = document.getElementById('insX');
 const insY = document.getElementById('insY');
 const insW = document.getElementById('insW');
 const insH = document.getElementById('insH');
+
 document.getElementById('insApply').addEventListener('click', () => {
   const o = canvas.getActiveObject(); if(!o) return;
   const x = parseInt(insX.value||'0',10);
@@ -179,6 +185,7 @@ document.getElementById('insApply').addEventListener('click', () => {
   if(!isNaN(h) && h>0 && o.height) o.set('scaleY', h/o.height);
   o.setCoords();
   canvas.requestRenderAll();
+  canvas.calcOffset();
 });
 
 function updateInspector(){
@@ -189,6 +196,26 @@ function updateInspector(){
   insW.value = Math.round((o.width||0)*(o.scaleX||1));
   insH.value = Math.round((o.height||0)*(o.scaleY||1));
 }
+
+function isTextObj(o){
+  return o && (o.type==='textbox' || o.type==='i-text' || o.type==='text');
+}
+
+// ✅ Fix “click like a fool” editing: double-click + Enter
+canvas.on('mouse:dblclick', () => {
+  const o = canvas.getActiveObject();
+  if (!isTextObj(o)) return;
+  if (o.enterEditing) o.enterEditing();
+  if (o.hiddenTextarea) o.hiddenTextarea.focus();
+});
+document.addEventListener('keydown', (e) => {
+  const o = canvas.getActiveObject();
+  if (e.key === 'Enter' && isTextObj(o) && !o.isEditing) {
+    e.preventDefault();
+    if (o.enterEditing) o.enterEditing();
+    if (o.hiddenTextarea) o.hiddenTextarea.focus();
+  }
+});
 
 // background
 function applyBackground(){
@@ -202,11 +229,22 @@ applyBackground();
 // grid snap
 const GRID = 10;
 function snap(v){ return Math.round(v/GRID)*GRID; }
-canvas.on('object:moving', (e)=>{ const o=e.target; if(o?.data?.kind==='reference') return; o.set({left:snap(o.left), top:snap(o.top)}); updateInspector(); });
-canvas.on('object:scaling',(e)=>{ const o=e.target; if(o?.data?.kind==='reference') return; updateInspector(); });
 
-canvas.on('selection:created', ()=>{ updateSel(); updateInspector(); syncTextUI(); });
-canvas.on('selection:updated', ()=>{ updateSel(); updateInspector(); syncTextUI(); });
+canvas.on('object:moving', (e)=>{ 
+  const o=e.target; 
+  if(o?.data?.kind==='reference') return;
+  if(o?.data?.kind==='guide') return; // guides move freely (exact)
+  o.set({left:snap(o.left), top:snap(o.top)}); 
+  updateInspector(); 
+});
+canvas.on('object:scaling',(e)=>{ 
+  const o=e.target; 
+  if(o?.data?.kind==='reference') return; 
+  updateInspector(); 
+});
+
+canvas.on('selection:created', ()=>{ updateSel(); updateInspector(); syncTextUI(); syncColorUI(); });
+canvas.on('selection:updated', ()=>{ updateSel(); updateInspector(); syncTextUI(); syncColorUI(); });
 canvas.on('selection:cleared', ()=>{ selInfo.textContent='None'; updateInspector(); });
 
 function updateSel(){
@@ -235,12 +273,60 @@ function placeRef(){
     if(o?.data?.kind==='reference') return;
     canvas.bringToFront(o);
   });
+  // keep guides above everything
+  guideObjects.forEach(g => canvas.bringToFront(g));
   refImage.selectable=false; refImage.evented=false;
 }
+
 document.getElementById('refToggle').addEventListener('change',(e)=>{ if(!refImage) return; refImage.visible=e.target.checked; canvas.renderAll(); });
 document.getElementById('refOpacity').addEventListener('input',(e)=>{ if(!refImage) return; refImage.opacity=parseInt(e.target.value,10)/100; canvas.renderAll(); });
 
-// text ui
+// ===== Guides (global) =====
+function clearGuides(){
+  guideObjects.forEach(g => canvas.remove(g));
+  guideObjects = [];
+}
+function drawGuide(g){
+  const axis = g.axis;
+  const pos = parseInt(g.pos,10) || 0;
+  const color = g.color || '#ABCDE0';
+  let line;
+  if(axis === 'v'){
+    line = new fabric.Line([pos, 0, pos, 900], { stroke: color, strokeWidth: 2, selectable:true, evented:true });
+  } else {
+    line = new fabric.Line([0, pos, 1600, pos], { stroke: color, strokeWidth: 2, selectable:true, evented:true });
+  }
+  line.data = { kind:'guide', guide_id: g.id, axis: axis };
+  canvas.add(line);
+  guideObjects.push(line);
+}
+async function loadGuides(){
+  const res = await fetch('/admin/api/guides_get.php');
+  const j = await res.json();
+  if(!j.ok) return;
+  clearGuides();
+  (j.guides||[]).forEach(drawGuide);
+  // keep guides on top
+  guideObjects.forEach(g => canvas.bringToFront(g));
+  canvas.requestRenderAll();
+}
+
+document.getElementById('btnGuideV').addEventListener('click', async ()=>{
+  await fetch('/admin/api/guides_save.php', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'add', axis:'v', pos:80, color:'#ABCDE0'})});
+  await loadGuides();
+});
+document.getElementById('btnGuideH').addEventListener('click', async ()=>{
+  await fetch('/admin/api/guides_save.php', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'add', axis:'h', pos:80, color:'#ABCDE0'})});
+  await loadGuides();
+});
+document.getElementById('btnGuideDel').addEventListener('click', async ()=>{
+  const o = canvas.getActiveObject();
+  if(!o || !o.data || o.data.kind !== 'guide') return;
+  await fetch('/admin/api/guides_save.php', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({action:'delete', id:o.data.guide_id})});
+  await loadGuides();
+});
+
+// ===== Text UI =====
 const fontFamilyEl = document.getElementById('fontFamily');
 const fontSizeEl = document.getElementById('fontSize');
 const btnBold = document.getElementById('btnBold');
@@ -251,18 +337,43 @@ const quickStyle = document.getElementById('quickStyle');
 const bgHex = document.getElementById('bgHex');
 const bgAlpha = document.getElementById('bgAlpha');
 
+const textColorEl = document.getElementById('textColor');
+
 function activeText(){
   const o = canvas.getActiveObject();
   if(!o) return null;
-  if(o.type==='textbox'||o.type==='i-text'||o.type==='text') return o;
+  if(isTextObj(o)) return o;
   return null;
 }
+
 function syncTextUI(){
   const t = activeText(); if(!t) return;
   fontFamilyEl.value = (t.fontFamily === 'Manrope') ? 'Manrope' : 'Arial';
   fontSizeEl.value = String(t.fontSize || 26);
 }
 
+function syncColorUI(){
+  const t = activeText(); if(!t) return;
+  // only sync if hex, else leave current picker value
+  if (typeof t.fill === 'string' && t.fill.startsWith('#') && t.fill.length === 7) {
+    textColorEl.value = t.fill;
+  }
+}
+
+fontFamilyEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontFamily=fontFamilyEl.value; canvas.requestRenderAll(); });
+fontSizeEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontSize=parseInt(fontSizeEl.value,10); canvas.requestRenderAll(); });
+
+btnBold.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontWeight = (t.fontWeight==='bold')?'normal':'bold'; canvas.requestRenderAll(); });
+btnItalic.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontStyle = (t.fontStyle==='italic')?'normal':'italic'; canvas.requestRenderAll(); });
+btnUnderline.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.underline = !t.underline; canvas.requestRenderAll(); });
+
+textColorEl.addEventListener('input', ()=>{
+  const t = activeText(); if(!t) return;
+  t.fill = textColorEl.value;
+  canvas.requestRenderAll();
+});
+
+// background color helpers
 function hexToRgb(hex){
   hex = (hex||'').replace('#','').trim();
   if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
@@ -281,13 +392,6 @@ function setTextboxBg(t, on){
   t.backgroundColor = `rgba(${rgb.r},${rgb.g},${rgb.b},${a})`;
   canvas.requestRenderAll();
 }
-
-fontFamilyEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontFamily=fontFamilyEl.value; canvas.requestRenderAll(); });
-fontSizeEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontSize=parseInt(fontSizeEl.value,10); canvas.requestRenderAll(); });
-btnBold.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontWeight = (t.fontWeight==='bold')?'normal':'bold'; canvas.requestRenderAll(); });
-btnItalic.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontStyle = (t.fontStyle==='italic')?'normal':'italic'; canvas.requestRenderAll(); });
-btnUnderline.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.underline = !t.underline; canvas.requestRenderAll(); });
-
 document.getElementById('btnToggleBg').addEventListener('click', ()=>{ const t=activeText(); if(!t) return; setTextboxBg(t, !t.backgroundColor); });
 bgHex.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; if(t.backgroundColor) setTextboxBg(t,true); });
 bgAlpha.addEventListener('input', ()=>{ const t=activeText(); if(!t) return; if(t.backgroundColor) setTextboxBg(t,true); });
@@ -326,75 +430,18 @@ quickStyle.addEventListener('change', ()=>{
   quickStyle.value = '';
 });
 
-// Bullets / numbered preserve indentation
-function getIndentPrefix(line){
-  const m = line.match(/^(\s*)/);
-  return m ? m[1] : '';
-}
-document.getElementById('btnBullets').addEventListener('click', ()=>{
-  const t=activeText(); if(!t) return;
-  const lines=(t.text||'').split('\n');
-  t.text = lines.map(line=>{
-    if(!line.trim()) return line;
-    const indent = getIndentPrefix(line);
-    const content = line.trim().replace(/^•\s*/, '');
-    return indent + '• ' + content;
-  }).join('\n');
-  canvas.requestRenderAll();
-});
-document.getElementById('btnNumbered').addEventListener('click', ()=>{
-  const t=activeText(); if(!t) return;
-  const lines=(t.text||'').split('\n');
-  let n=1;
-  t.text = lines.map(line=>{
-    if(!line.trim()) return line;
-    const indent = getIndentPrefix(line);
-    const content = line.trim().replace(/^\d+\.\s*/, '');
-    return indent + (n++) + '. ' + content;
-  }).join('\n');
-  canvas.requestRenderAll();
-});
-document.getElementById('btnIndent').addEventListener('click', ()=>{
-  const t=activeText(); if(!t) return;
-  t.text = (t.text||'').split('\n').map(line => line.trim() ? ('  ' + line) : line).join('\n');
-  canvas.requestRenderAll();
-});
-document.getElementById('btnOutdent').addEventListener('click', ()=>{
-  const t=activeText(); if(!t) return;
-  t.text = (t.text||'').split('\n').map(line => line.replace(/^ {1,2}/,'')).join('\n');
-  canvas.requestRenderAll();
-});
-
-// Tab inserts two spaces while editing
-canvas.on('text:editing:entered', (e)=>{
-  const t=e.target;
-  if(!t || !t.hiddenTextarea) return;
-  if(t.hiddenTextarea._ipcaTabHooked) return;
-  t.hiddenTextarea._ipcaTabHooked = true;
-  t.hiddenTextarea.addEventListener('keydown', function(ev){
-    if(ev.key === 'Tab'){
-      ev.preventDefault();
-      const start = t.selectionStart;
-      const end = t.selectionEnd;
-      const txt = t.text || '';
-      t.text = txt.substring(0,start) + '  ' + txt.substring(end);
-      t.selectionStart = t.selectionEnd = start + 2;
-      canvas.requestRenderAll();
-    }
-  });
-});
-
-// Basic buttons
+// Buttons
 document.getElementById('btnAddText').addEventListener('click', ()=>{
   const t=new fabric.Textbox('Edit text…',{left:80,top:200,width:520,fontSize:26,fontFamily:'Manrope',fill:'#0b2a4a',backgroundColor:null,padding:8});
   t.data={kind:'text'};
   canvas.add(t); canvas.setActiveObject(t);
-  syncTextUI(); updateInspector();
+  syncTextUI(); syncColorUI(); updateInspector();
   canvas.renderAll();
 });
 document.getElementById('btnAddRedact').addEventListener('click', ()=>{
   const r=new fabric.Rect({left:80,top:80,width:420,height:80,fill:'rgba(255,255,255,0.96)',stroke:'#ddd',strokeWidth:1});
-  r.data={kind:'redact'}; canvas.add(r); canvas.setActiveObject(r);
+  r.data={kind:'redact'};
+  canvas.add(r); canvas.setActiveObject(r);
   updateInspector(); canvas.renderAll();
 });
 function addBox(kind,label){
@@ -441,11 +488,12 @@ async function loadDesign(){
     if(!refImage) createReferenceOverlay();
     setStatus('Layout loaded.');
     canvas.renderAll();
+    canvas.calcOffset();
     setTimeout(fitCanvas,200);
   });
 }
 
-// Save (manual serialize; default bg OFF)
+// Save: manual serialize; skip guides + overlay
 async function saveDesign(renderAlso){
   try{
     setStatus('Saving...');
@@ -453,15 +501,16 @@ async function saveDesign(renderAlso){
     canvas.requestRenderAll();
 
     canvas.getObjects().forEach(o=>{
-      if(o && (o.type==='textbox'||o.type==='i-text'||o.type==='text') && o.isEditing) o.exitEditing();
+      if(o && isTextObj(o) && o.isEditing) o.exitEditing();
     });
 
     const objects = [];
     canvas.getObjects().forEach(o=>{
       if(!o) return;
       if(o?.data?.kind==='reference') return;
+      if(o?.data?.kind==='guide') return; // ✅ do NOT save guides
 
-      const isText = (o.type==='textbox'||o.type==='i-text'||o.type==='text');
+      const isText = isTextObj(o);
       if(isText){
         objects.push({
           type:'textbox',
@@ -478,7 +527,7 @@ async function saveDesign(renderAlso){
           textAlign:o.textAlign||'left',
           lineHeight:o.lineHeight||1.16,
           charSpacing:o.charSpacing||0,
-          fill:o.fill||'#0b2a4a',
+          fill:(typeof o.fill==='string' ? o.fill : '#0b2a4a'),
           backgroundColor:o.backgroundColor||null,
           data:o.data||{}
         });
@@ -504,7 +553,7 @@ document.getElementById('btnSaveRender').addEventListener('click',()=>saveDesign
 // AI Auto Layout + Undo
 document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
   setStatus('AI analyzing…');
-  undoAiJson = { version:'5.3.0', objects: canvas.getObjects().filter(o=>!(o&&o.data&&o.data.kind==='reference')).map(o=>o.toObject(['data'])) };
+  undoAiJson = { version:'5.3.0', objects: canvas.getObjects().filter(o=>!(o&&o.data&&o.data.kind==='reference') && !(o&&o.data&&o.data.kind==='guide')).map(o=>o.toObject(['data'])) };
   document.getElementById('btnUndoAi').disabled=false;
 
   const form=new FormData(); form.append('slide_id',SLIDE_ID);
@@ -512,14 +561,15 @@ document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
   const j=await res.json();
   if(!j.ok){ setStatus('AI failed: '+(j.error||'unknown')); return; }
 
-  canvas.loadFromJSON(j.design_json, ()=>{
+  canvas.loadFromJSON(j.design_json, async ()=>{
     applyBackground();
 
     // enforce default text bg OFF
     canvas.getObjects().forEach(o=>{
-      if(o && (o.type==='textbox'||o.type==='i-text'||o.type==='text')){
+      if(o && isTextObj(o)){
         o.backgroundColor = null;
         o.fontFamily = o.fontFamily || 'Manrope';
+        if (!o.fill) o.fill = '#0b2a4a';
       }
     });
 
@@ -527,30 +577,38 @@ document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
     canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
     if(!refImage) createReferenceOverlay();
 
+    await loadGuides(); // keep global guides always
+
     setStatus('AI layout loaded. Review and Save + Render.');
     canvas.renderAll();
+    canvas.calcOffset();
     setTimeout(fitCanvas,200);
   });
 });
 
 document.getElementById('btnUndoAi').addEventListener('click', ()=>{
   if(!undoAiJson) return;
-  canvas.loadFromJSON(undoAiJson, ()=>{
+  canvas.loadFromJSON(undoAiJson, async ()=>{
     applyBackground();
     refImage=null;
     canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
     if(!refImage) createReferenceOverlay();
+    await loadGuides();
     setStatus('Undo AI complete.');
     canvas.renderAll();
+    canvas.calcOffset();
     setTimeout(fitCanvas,200);
   });
   undoAiJson=null;
   document.getElementById('btnUndoAi').disabled=true;
 });
 
-setTimeout(loadDesign,600);
-setTimeout(fitCanvas,800);
-createReferenceOverlay();
+setTimeout(async ()=>{
+  await loadDesign();
+  await loadGuides();
+  createReferenceOverlay();
+  setTimeout(fitCanvas, 300);
+}, 400);
 </script>
 
 <?php cw_footer(); ?>
