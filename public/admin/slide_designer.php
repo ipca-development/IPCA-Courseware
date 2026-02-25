@@ -317,16 +317,20 @@ async function loadDesign(){
   });
 }
 
-//UPDATED Manual Safe Object Serializer
+//UPDATED Manual Safe Object Serializer version 2 
 	
 async function saveDesign(renderAlso){
   try {
     setStatus('Saving...');
 
-    canvas.discardActiveObject();
+    // 0) Ensure text edits are committed
+    const active = canvas.getActiveObject();
+    if (active && active.type === 'textbox' && active.isEditing) {
+      active.exitEditing();
+      canvas.discardActiveObject();
+    }
     canvas.requestRenderAll();
 
-    // Build clean JSON manually (no Fabric full serializer)
     const objects = [];
 
     canvas.getObjects().forEach(o => {
@@ -335,12 +339,39 @@ async function saveDesign(renderAlso){
       // Skip reference overlay
       if (o.data && o.data.kind === 'reference') return;
 
+      // Serialize base object
+      let obj = null;
       try {
-        const obj = o.toObject(['data']);
-        objects.push(obj);
-      } catch(e) {
-        console.warn('Skipping problematic object during save:', e);
+        obj = o.toObject(['data']);
+      } catch (e) {
+        console.warn('Skipping object (toObject failed):', o, e);
+        return;
       }
+
+      // ✅ Force textbox properties into JSON (guarantees saving)
+      if (o.type === 'textbox') {
+        obj.type = 'textbox';
+        obj.text = o.text || '';
+        obj.fontSize = o.fontSize || 26;
+        obj.fill = o.fill || '#0b2a4a';
+        obj.backgroundColor = o.backgroundColor || 'rgba(255,255,255,0.75)';
+        obj.width = o.width;
+        obj.height = o.height;
+        obj.left = o.left;
+        obj.top = o.top;
+        obj.scaleX = o.scaleX;
+        obj.scaleY = o.scaleY;
+        obj.angle = o.angle || 0;
+        obj.textAlign = o.textAlign || 'left';
+        obj.lineHeight = o.lineHeight || 1.16;
+        obj.charSpacing = o.charSpacing || 0;
+        obj.fontFamily = o.fontFamily || 'sans-serif';
+        obj.fontWeight = o.fontWeight || 'normal';
+        obj.fontStyle = o.fontStyle || 'normal';
+        obj.underline = !!o.underline;
+      }
+
+      objects.push(obj);
     });
 
     const design = {
@@ -362,13 +393,8 @@ async function saveDesign(renderAlso){
 
     const txt = await res.text();
     let j = null;
-
-    try {
-      j = JSON.parse(txt);
-    } catch(e) {
-      setStatus('Save failed: Invalid JSON response');
-      return;
-    }
+    try { j = JSON.parse(txt); }
+    catch(e){ setStatus('Save failed: Invalid JSON response'); return; }
 
     if (!j.ok) {
       setStatus('Save failed: ' + (j.error || 'unknown'));
@@ -376,7 +402,6 @@ async function saveDesign(renderAlso){
     }
 
     setStatus(renderAlso ? 'Saved + rendered HTML.' : 'Saved layout.');
-
   } catch (err) {
     setStatus('Save exception: ' + err);
   }
