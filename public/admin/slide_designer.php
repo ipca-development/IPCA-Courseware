@@ -49,6 +49,33 @@ cw_header('Slide Designer');
 
     <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
 
+    <!-- Text styling controls -->
+    <label class="muted" style="display:flex; gap:6px; align-items:center;">
+      Font
+      <select id="fontFamily" class="input" style="height:32px;">
+        <option value="Manrope">Manrope</option>
+        <option value="Arial">Arial</option>
+      </select>
+    </label>
+
+    <label class="muted" style="display:flex; gap:6px; align-items:center;">
+      Size
+      <select id="fontSize" class="input" style="height:32px;">
+        <option value="18">18</option>
+        <option value="20">20</option>
+        <option value="22">22</option>
+        <option value="24">24</option>
+        <option value="26" selected>26</option>
+        <option value="28">28</option>
+      </select>
+    </label>
+
+    <button class="btn btn-sm" id="btnBold" type="button"><strong>B</strong></button>
+    <button class="btn btn-sm" id="btnItalic" type="button"><em>I</em></button>
+    <button class="btn btn-sm" id="btnUnderline" type="button"><u>U</u></button>
+
+    <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
+
     <button class="btn btn-sm" id="btnAddText" type="button">Add Text</button>
     <button class="btn btn-sm" id="btnAddRedact" type="button">Add Redaction</button>
     <button class="btn btn-sm" id="btnAddImageBox" type="button">Add Image Box</button>
@@ -80,13 +107,25 @@ cw_header('Slide Designer');
     <span class="muted" id="selInfo" style="margin-left:auto;">None</span>
   </div>
 
-  <div class="muted" id="status" style="margin-top:10px;"></div>
+  <!-- Inspector row -->
+  <div style="margin-top:10px; display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+    <div class="muted" id="status"></div>
+
+    <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
+      <span class="muted">X</span><input id="insX" class="input" style="width:80px;" type="number" step="1">
+      <span class="muted">Y</span><input id="insY" class="input" style="width:80px;" type="number" step="1">
+      <span class="muted">W</span><input id="insW" class="input" style="width:90px;" type="number" step="1" min="1">
+      <span class="muted">H</span><input id="insH" class="input" style="width:90px;" type="number" step="1" min="1">
+      <button class="btn btn-sm" id="insApply" type="button">Apply</button>
+    </div>
+  </div>
+
   <div class="muted" id="zoomInfo" style="margin-top:6px;"></div>
 
   <div id="canvasWrap"
        style="
          width:100%;
-         height: calc(100vh - 260px);
+         height: calc(100vh - 310px);
          margin-top: 12px;
          border:1px solid #e6e6e6;
          border-radius:12px;
@@ -122,6 +161,13 @@ const canvas = new fabric.Canvas('c', {
 let refImage = null;
 let undoAiJson = null;
 
+// Inspector inputs
+const insX = document.getElementById('insX');
+const insY = document.getElementById('insY');
+const insW = document.getElementById('insW');
+const insH = document.getElementById('insH');
+const insApply = document.getElementById('insApply');
+
 function applyBackground(){
   fabric.Image.fromURL(BG_URL, (img) => {
     img.set({
@@ -135,6 +181,7 @@ function applyBackground(){
 }
 applyBackground();
 
+// Grid snap
 const GRID = 10;
 function snap(v){ return Math.round(v / GRID) * GRID; }
 
@@ -142,16 +189,18 @@ canvas.on('object:moving', (e) => {
   const o = e.target;
   if (o && o.data && o.data.kind === 'reference') return;
   o.set({ left: snap(o.left), top: snap(o.top) });
+  updateInspectorFromSelection();
 });
 canvas.on('object:scaling', (e) => {
   const o = e.target;
   if (o && o.data && o.data.kind === 'reference') return;
   o.set({ left: snap(o.left), top: snap(o.top) });
+  updateInspectorFromSelection();
 });
 
-canvas.on('selection:created', updateSel);
-canvas.on('selection:updated', updateSel);
-canvas.on('selection:cleared', () => selInfo.textContent = 'None');
+canvas.on('selection:created', () => { updateSel(); updateInspectorFromSelection(); syncTextControlsToSelection(); });
+canvas.on('selection:updated', () => { updateSel(); updateInspectorFromSelection(); syncTextControlsToSelection(); });
+canvas.on('selection:cleared', () => { selInfo.textContent='None'; clearInspector(); });
 
 function updateSel(){
   const o = canvas.getActiveObject();
@@ -161,6 +210,48 @@ function updateSel(){
   selInfo.textContent = `${o.type} (${Math.round(o.left)},${Math.round(o.top)}) ${w}×${h}`;
 }
 
+function clearInspector(){
+  insX.value = '';
+  insY.value = '';
+  insW.value = '';
+  insH.value = '';
+}
+
+function updateInspectorFromSelection(){
+  const o = canvas.getActiveObject();
+  if (!o) { clearInspector(); return; }
+  const w = Math.round(o.width * o.scaleX);
+  const h = Math.round(o.height * o.scaleY);
+  insX.value = String(Math.round(o.left));
+  insY.value = String(Math.round(o.top));
+  insW.value = String(w);
+  insH.value = String(h);
+}
+
+function applyInspectorToSelection(){
+  const o = canvas.getActiveObject();
+  if (!o) return;
+
+  const x = parseInt(insX.value || '0', 10);
+  const y = parseInt(insY.value || '0', 10);
+  const w = parseInt(insW.value || '0', 10);
+  const h = parseInt(insH.value || '0', 10);
+
+  // Move
+  if (!isNaN(x)) o.set('left', x);
+  if (!isNaN(y)) o.set('top', y);
+
+  // Resize: adjust scale to match desired w/h
+  if (!isNaN(w) && w > 0 && o.width) o.set('scaleX', w / o.width);
+  if (!isNaN(h) && h > 0 && o.height) o.set('scaleY', h / o.height);
+
+  o.setCoords();
+  canvas.requestRenderAll();
+  updateSel();
+}
+insApply.addEventListener('click', applyInspectorToSelection);
+
+// Reference overlay
 function createReferenceOverlay(){
   fabric.Image.fromURL(REF_URL, (img) => {
     img.set({
@@ -202,12 +293,79 @@ document.getElementById('refOpacity').addEventListener('input', (e) => {
   canvas.renderAll();
 });
 
+// Text style controls
+const fontFamilyEl = document.getElementById('fontFamily');
+const fontSizeEl = document.getElementById('fontSize');
+const btnBold = document.getElementById('btnBold');
+const btnItalic = document.getElementById('btnItalic');
+const btnUnderline = document.getElementById('btnUnderline');
+
+function selectedTextbox(){
+  const o = canvas.getActiveObject();
+  if (!o) return null;
+  if (o.type === 'textbox') return o;
+  return null;
+}
+
+function syncTextControlsToSelection(){
+  const t = selectedTextbox();
+  if (!t) return;
+
+  // Font
+  fontFamilyEl.value = (t.fontFamily === 'Manrope') ? 'Manrope' : 'Arial';
+
+  // Size (snap to nearest option)
+  const sizes = [18,20,22,24,26,28];
+  let best = sizes[0], bestDiff = 9999;
+  sizes.forEach(s=>{
+    const d = Math.abs((t.fontSize||26) - s);
+    if (d < bestDiff) { bestDiff = d; best = s; }
+  });
+  fontSizeEl.value = String(best);
+}
+
+function applyFontFamily(){
+  const t = selectedTextbox();
+  if (!t) return;
+  t.set('fontFamily', fontFamilyEl.value);
+  canvas.requestRenderAll();
+}
+function applyFontSize(){
+  const t = selectedTextbox();
+  if (!t) return;
+  t.set('fontSize', parseInt(fontSizeEl.value, 10));
+  canvas.requestRenderAll();
+}
+
+fontFamilyEl.addEventListener('change', applyFontFamily);
+fontSizeEl.addEventListener('change', applyFontSize);
+
+btnBold.addEventListener('click', ()=>{
+  const t = selectedTextbox();
+  if (!t) return;
+  t.set('fontWeight', (t.fontWeight === 'bold') ? 'normal' : 'bold');
+  canvas.requestRenderAll();
+});
+btnItalic.addEventListener('click', ()=>{
+  const t = selectedTextbox();
+  if (!t) return;
+  t.set('fontStyle', (t.fontStyle === 'italic') ? 'normal' : 'italic');
+  canvas.requestRenderAll();
+});
+btnUnderline.addEventListener('click', ()=>{
+  const t = selectedTextbox();
+  if (!t) return;
+  t.set('underline', !t.underline);
+  canvas.requestRenderAll();
+});
+
 // Tools
 document.getElementById('btnAddText').addEventListener('click', () => {
   const t = new fabric.Textbox('Edit text…', {
     left: 80, top: 200,
     width: 520,
-    fontSize: 28,
+    fontSize: 26,
+    fontFamily: 'Manrope',
     fill: '#0b2a4a',
     backgroundColor: 'rgba(255,255,255,0.75)',
     padding: 8
@@ -215,6 +373,8 @@ document.getElementById('btnAddText').addEventListener('click', () => {
   t.data = { kind: 'text' };
   canvas.add(t);
   canvas.setActiveObject(t);
+  syncTextControlsToSelection();
+  updateInspectorFromSelection();
   canvas.renderAll();
 });
 
@@ -229,6 +389,7 @@ document.getElementById('btnAddRedact').addEventListener('click', () => {
   r.data = { kind: 'redact' };
   canvas.add(r);
   canvas.setActiveObject(r);
+  updateInspectorFromSelection();
   canvas.renderAll();
 });
 
@@ -250,9 +411,9 @@ function addBox(kind, label){
   group.data = { kind, src: '' };
   canvas.add(group);
   canvas.setActiveObject(group);
+  updateInspectorFromSelection();
   canvas.renderAll();
 }
-
 document.getElementById('btnAddImageBox').addEventListener('click', () => addBox('image', 'IMAGE'));
 document.getElementById('btnAddVideoBox').addEventListener('click', () => addBox('video', 'VIDEO'));
 
@@ -276,6 +437,7 @@ document.getElementById('btnDelete').addEventListener('click', () => {
   if (o.data && o.data.kind === 'reference') return;
   canvas.remove(o);
   canvas.renderAll();
+  updateInspectorFromSelection();
 });
 
 // Fit-to-screen
@@ -321,7 +483,7 @@ async function loadDesign(){
   });
 }
 
-// ✅ Save: manual object serialization (textboxes always saved)
+// ✅ Save (manual serialize; textboxes always saved)
 async function saveDesign(renderAlso){
   try {
     setStatus('Saving...');
@@ -331,9 +493,7 @@ async function saveDesign(renderAlso){
 
     // commit any textbox edits
     canvas.getObjects().forEach(o => {
-      if (o && o.type === 'textbox' && o.isEditing) {
-        o.exitEditing();
-      }
+      if (o && o.type === 'textbox' && o.isEditing) o.exitEditing();
     });
 
     const objects = [];
@@ -342,36 +502,24 @@ async function saveDesign(renderAlso){
       if (o.data && o.data.kind === 'reference') return;
 
       let obj = null;
-      try {
-        obj = o.toObject(['data']);
-      } catch(e) {
-        return;
-      }
+      try { obj = o.toObject(['data']); } catch(e) { return; }
 
       if (o.type === 'textbox') {
         obj.type = 'textbox';
         obj.text = o.text || '';
+        obj.fontFamily = o.fontFamily || 'Manrope';
         obj.fontSize = o.fontSize || 26;
-        obj.fill = o.fill || '#0b2a4a';
-        obj.backgroundColor = o.backgroundColor || 'rgba(255,255,255,0.75)';
-        obj.left = o.left; obj.top = o.top;
-        obj.width = o.width; obj.height = o.height;
-        obj.scaleX = o.scaleX; obj.scaleY = o.scaleY;
-        obj.angle = o.angle || 0;
-        obj.textAlign = o.textAlign || 'left';
-        obj.lineHeight = o.lineHeight || 1.16;
-        obj.charSpacing = o.charSpacing || 0;
-        obj.fontFamily = o.fontFamily || 'sans-serif';
         obj.fontWeight = o.fontWeight || 'normal';
         obj.fontStyle = o.fontStyle || 'normal';
         obj.underline = !!o.underline;
+        obj.fill = o.fill || '#0b2a4a';
+        obj.backgroundColor = o.backgroundColor || 'rgba(255,255,255,0.75)';
       }
 
       objects.push(obj);
     });
 
     const design = { version:'5.3.0', objects: objects };
-
     const payload = { slide_id: SLIDE_ID, design_json: design, render: renderAlso ? 1 : 0 };
 
     const res = await fetch('/admin/api/save_design.php', {
@@ -399,7 +547,7 @@ async function saveDesign(renderAlso){
 document.getElementById('btnSave').addEventListener('click', () => saveDesign(false));
 document.getElementById('btnSaveRender').addEventListener('click', () => saveDesign(true));
 
-// ✅ AI Auto Layout + Undo (re-apply background + restore overlay)
+// ✅ AI Auto Layout + Undo (background persists; overlay restored)
 document.getElementById('btnAiLayout').addEventListener('click', async () => {
   setStatus('AI analyzing…');
 
