@@ -491,35 +491,64 @@ async function saveDesign(renderAlso){
     canvas.discardActiveObject();
     canvas.requestRenderAll();
 
-    // commit any textbox edits
+    // Commit any ongoing edits
     canvas.getObjects().forEach(o => {
-      if (o && o.type === 'textbox' && o.isEditing) o.exitEditing();
+      if (o && (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text') && o.isEditing) {
+        o.exitEditing();
+      }
     });
 
     const objects = [];
+
     canvas.getObjects().forEach(o => {
       if (!o) return;
+
+      // Skip screenshot overlay
       if (o.data && o.data.kind === 'reference') return;
 
-      let obj = null;
-      try { obj = o.toObject(['data']); } catch(e) { return; }
+      const isText = (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text');
 
-      if (o.type === 'textbox') {
-        obj.type = 'textbox';
-        obj.text = o.text || '';
-        obj.fontFamily = o.fontFamily || 'Manrope';
-        obj.fontSize = o.fontSize || 26;
-        obj.fontWeight = o.fontWeight || 'normal';
-        obj.fontStyle = o.fontStyle || 'normal';
-        obj.underline = !!o.underline;
-        obj.fill = o.fill || '#0b2a4a';
-        obj.backgroundColor = o.backgroundColor || 'rgba(255,255,255,0.75)';
+      // ✅ Text objects: build JSON manually (most reliable)
+      if (isText) {
+        objects.push({
+          type: 'textbox',                    // always save as textbox
+          left: o.left ?? 0,
+          top: o.top ?? 0,
+          width: o.width ?? 520,
+          height: o.height ?? 120,
+          scaleX: o.scaleX ?? 1,
+          scaleY: o.scaleY ?? 1,
+          angle: o.angle ?? 0,
+
+          text: o.text || '',
+          fontFamily: o.fontFamily || 'Manrope',
+          fontSize: o.fontSize || 26,
+          fontWeight: o.fontWeight || 'normal',
+          fontStyle: o.fontStyle || 'normal',
+          underline: !!o.underline,
+          textAlign: o.textAlign || 'left',
+          lineHeight: o.lineHeight || 1.16,
+          charSpacing: o.charSpacing || 0,
+
+          fill: o.fill || '#0b2a4a',
+          backgroundColor: o.backgroundColor || 'rgba(255,255,255,0.75)',
+
+          // keep your custom metadata
+          data: o.data || {}
+        });
+        return;
       }
 
-      objects.push(obj);
+      // ✅ Non-text objects: use Fabric serialization
+      try {
+        objects.push(o.toObject(['data']));
+      } catch (e) {
+        console.warn('Skipping object (toObject failed):', o, e);
+      }
     });
 
-    const design = { version:'5.3.0', objects: objects };
+    const design = { version: '5.3.0', objects };
+
     const payload = { slide_id: SLIDE_ID, design_json: design, render: renderAlso ? 1 : 0 };
 
     const res = await fetch('/admin/api/save_design.php', {
@@ -529,7 +558,7 @@ async function saveDesign(renderAlso){
     });
 
     const txt = await res.text();
-    let j = null;
+    let j;
     try { j = JSON.parse(txt); }
     catch(e){ j = { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
 
