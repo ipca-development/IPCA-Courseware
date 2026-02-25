@@ -45,12 +45,15 @@ try {
     $instructions = <<<TXT
 You are laying out an aviation training slide on a fixed 1600x900 canvas.
 
-Return ALL real instructional content with approximate bounding boxes.
-
-- Do NOT include UI chrome text/buttons (main menu, breadcrumbs with '/', footer).
-- If detected, you may output kind="redact" but the app will ignore it.
-- For bullet lists, output text with lines separated by "\\n" and include the bullets as "• " prefix.
-- Coordinates are in 1600x900.
+IMPORTANT OUTPUT RULES:
+- DO NOT include UI chrome (main menu/buttons, breadcrumb path with '/', footer/copyright) as content.
+- If you detect repeated chrome areas, you may output kind="redact" but the app will ignore them.
+- Prefer splitting content into multiple items:
+  * One item for "intro paragraph(s)" above bullets (kind="text")
+  * One item for the bullet list (kind="bullets")
+  * If sub-bullets exist (visibly more indented), output them as separate kind="bullets" items (separate bbox if possible)
+- For kind="bullets", return text lines separated by "\\n". Preserve indentation by prefixing sub-bullets with 2 or 4 leading spaces.
+- Coordinates must be in 1600x900.
 TXT;
 
     $payload = [
@@ -84,6 +87,41 @@ TXT;
     $resp = cw_openai_responses($payload);
     $layout = cw_openai_extract_json_text($resp);
 
+    // Helper: split bullet text into groups by indent changes
+    $splitBulletsByIndent = function(string $text): array {
+        $lines = preg_split("/\r\n|\n|\r/", $text);
+        $lines = array_values(array_filter($lines, fn($l)=>trim($l)!==''));
+        if (!$lines) return [];
+
+        $groups = [];
+        $curIndent = null;
+        $cur = [];
+
+        foreach ($lines as $l) {
+            // normalize tabs to 2 spaces
+            $l = str_replace("\t", "  ", $l);
+
+            preg_match('/^(\s*)/', $l, $m);
+            $indent = strlen($m[1] ?? '');
+
+            // collapse indent to 0/2/4/6 buckets
+            $bucket = (int)(floor($indent / 2) * 2);
+
+            if ($curIndent === null) {
+                $curIndent = $bucket;
+                $cur[] = $l;
+            } elseif ($bucket === $curIndent) {
+                $cur[] = $l;
+            } else {
+                $groups[] = ["indent"=>$curIndent, "lines"=>$cur];
+                $curIndent = $bucket;
+                $cur = [$l];
+            }
+        }
+        $groups[] = ["indent"=>$curIndent ?? 0, "lines"=>$cur];
+        return $groups;
+    };
+
     $objects = [];
 
     foreach (($layout['items'] ?? []) as $it) {
@@ -94,10 +132,9 @@ TXT;
         $h = max(10, min(900,  (float)($it['h'] ?? 50)));
         $text = (string)($it['text'] ?? '');
 
-        // ignore redactions (IPCA background already handles it)
         if ($kind === 'redact') continue;
 
-        if ($kind === 'title' || $kind === 'text' || $kind === 'bullets') {
+        if ($kind === 'title' || $kind === 'text') {
             $fs = ($kind === 'title') ? 40 : 26;
             $objects[] = [
                 "type"=>"textbox",
@@ -107,12 +144,52 @@ TXT;
                 "fontFamily"=>"Manrope",
                 "fontSize"=>$fs,
                 "fill"=>"#0b2a4a",
-                "backgroundColor"=>null,   // ✅ OFF by default
+                "backgroundColor"=>null,
                 "editable"=>true,
                 "selectable"=>true,
                 "evented"=>true,
                 "data"=>["kind"=>"ai_text"]
             ];
+            continue;
+        }
+
+        if ($kind === 'bullets') {
+            // If AI already split into separate items, we keep each item.
+            // If not, we split by indent transitions into multiple textboxes.
+            $groups = $splitBulletsByIndent($text);
+            if (!$groups) continue;
+
+            $totalLines = 0;
+            foreach ($groups as $g) $totalLines += count($g['lines']);
+            if ($totalLines <= 0) $totalLines = 1;
+
+            $yCursor = $y;
+
+            foreach ($groups as $g) {
+                $linesCount = max(1, count($g['lines']));
+                $blockH = $h * ($linesCount / $totalLines);
+
+                $indentPx = min(120, (int)$g['indent'] * 10); // 2 spaces -> 20px, 4 -> 40px, etc.
+                $bx = $x + $indentPx;
+                $bw = max(50, $w - $indentPx);
+
+                $objects[] = [
+                    "type"=>"textbox",
+                    "left"=>$bx, "top"=>$yCursor, "width"=>$bw, "height"=>$blockH,
+                    "scaleX"=>1, "scaleY"=>1,
+                    "text"=>implode("\n", $g['lines']),
+                    "fontFamily"=>"Manrope",
+                    "fontSize"=>26,
+                    "fill"=>"#0b2a4a",
+                    "backgroundColor"=>null,
+                    "editable"=>true,
+                    "selectable"=>true,
+                    "evented"=>true,
+                    "data"=>["kind"=>"ai_bullets", "indent"=>$g['indent']]
+                ];
+
+                $yCursor += $blockH;
+            }
             continue;
         }
 
