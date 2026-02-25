@@ -74,6 +74,13 @@ cw_header('Slide Designer');
     <button class="btn btn-sm" id="btnItalic" type="button"><em>I</em></button>
     <button class="btn btn-sm" id="btnUnderline" type="button"><u>U</u></button>
 
+    <!-- NEW: list/indent/background tools -->
+    <button class="btn btn-sm" id="btnBullets" type="button">• Bullets</button>
+    <button class="btn btn-sm" id="btnNumbered" type="button">1. Numbered</button>
+    <button class="btn btn-sm" id="btnIndent" type="button">Indent</button>
+    <button class="btn btn-sm" id="btnOutdent" type="button">Outdent</button>
+    <button class="btn btn-sm" id="btnToggleBg" type="button">Text BG</button>
+
     <span style="width:1px;height:26px;background:#e6e6e6;margin:0 6px;"></span>
 
     <button class="btn btn-sm" id="btnAddText" type="button">Add Text</button>
@@ -237,11 +244,9 @@ function applyInspectorToSelection(){
   const w = parseInt(insW.value || '0', 10);
   const h = parseInt(insH.value || '0', 10);
 
-  // Move
   if (!isNaN(x)) o.set('left', x);
   if (!isNaN(y)) o.set('top', y);
 
-  // Resize: adjust scale to match desired w/h
   if (!isNaN(w) && w > 0 && o.width) o.set('scaleX', w / o.width);
   if (!isNaN(h) && h > 0 && o.height) o.set('scaleY', h / o.height);
 
@@ -300,21 +305,18 @@ const btnBold = document.getElementById('btnBold');
 const btnItalic = document.getElementById('btnItalic');
 const btnUnderline = document.getElementById('btnUnderline');
 
-function selectedTextbox(){
+function getActiveTextbox(){
   const o = canvas.getActiveObject();
   if (!o) return null;
-  if (o.type === 'textbox') return o;
+  if (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text') return o;
   return null;
 }
 
 function syncTextControlsToSelection(){
-  const t = selectedTextbox();
+  const t = getActiveTextbox();
   if (!t) return;
-
-  // Font
   fontFamilyEl.value = (t.fontFamily === 'Manrope') ? 'Manrope' : 'Arial';
 
-  // Size (snap to nearest option)
   const sizes = [18,20,22,24,26,28];
   let best = sizes[0], bestDiff = 9999;
   sizes.forEach(s=>{
@@ -325,13 +327,13 @@ function syncTextControlsToSelection(){
 }
 
 function applyFontFamily(){
-  const t = selectedTextbox();
+  const t = getActiveTextbox();
   if (!t) return;
   t.set('fontFamily', fontFamilyEl.value);
   canvas.requestRenderAll();
 }
 function applyFontSize(){
-  const t = selectedTextbox();
+  const t = getActiveTextbox();
   if (!t) return;
   t.set('fontSize', parseInt(fontSizeEl.value, 10));
   canvas.requestRenderAll();
@@ -341,23 +343,89 @@ fontFamilyEl.addEventListener('change', applyFontFamily);
 fontSizeEl.addEventListener('change', applyFontSize);
 
 btnBold.addEventListener('click', ()=>{
-  const t = selectedTextbox();
+  const t = getActiveTextbox();
   if (!t) return;
   t.set('fontWeight', (t.fontWeight === 'bold') ? 'normal' : 'bold');
   canvas.requestRenderAll();
 });
 btnItalic.addEventListener('click', ()=>{
-  const t = selectedTextbox();
+  const t = getActiveTextbox();
   if (!t) return;
   t.set('fontStyle', (t.fontStyle === 'italic') ? 'normal' : 'italic');
   canvas.requestRenderAll();
 });
 btnUnderline.addEventListener('click', ()=>{
-  const t = selectedTextbox();
+  const t = getActiveTextbox();
   if (!t) return;
   t.set('underline', !t.underline);
   canvas.requestRenderAll();
 });
+
+/* ===== NEW: Bullets / Numbered / Indent / Outdent / Text BG ===== */
+document.getElementById('btnBullets').addEventListener('click', ()=>{
+  const t = getActiveTextbox(); if(!t) return;
+  const lines = (t.text || '').split('\n');
+  t.text = lines.map(line => {
+    if (!line.trim()) return line;
+    return '• ' + line.replace(/^•\s*/, '');
+  }).join('\n');
+  canvas.requestRenderAll();
+});
+
+document.getElementById('btnNumbered').addEventListener('click', ()=>{
+  const t = getActiveTextbox(); if(!t) return;
+  const lines = (t.text || '').split('\n');
+  let n = 1;
+  t.text = lines.map(line => {
+    if (!line.trim()) return line;
+    const clean = line.replace(/^\d+\.\s*/, '');
+    return (n++) + '. ' + clean;
+  }).join('\n');
+  canvas.requestRenderAll();
+});
+
+document.getElementById('btnIndent').addEventListener('click', ()=>{
+  const t = getActiveTextbox(); if(!t) return;
+  const lines = (t.text || '').split('\n');
+  t.text = lines.map(line => line.trim() ? ('  ' + line) : line).join('\n');
+  canvas.requestRenderAll();
+});
+
+document.getElementById('btnOutdent').addEventListener('click', ()=>{
+  const t = getActiveTextbox(); if(!t) return;
+  const lines = (t.text || '').split('\n');
+  t.text = lines.map(line => line.replace(/^ {1,2}/, '')).join('\n');
+  canvas.requestRenderAll();
+});
+
+document.getElementById('btnToggleBg').addEventListener('click', ()=>{
+  const t = getActiveTextbox(); if(!t) return;
+  t.set('backgroundColor', t.backgroundColor ? null : 'rgba(255,255,255,0.75)');
+  canvas.requestRenderAll();
+});
+
+// Tab inserts indent while editing
+canvas.on('text:editing:entered', (e) => {
+  const t = e.target;
+  if (!t || !t.hiddenTextarea) return;
+
+  // Prevent attaching multiple times
+  if (t.hiddenTextarea._ipcaTabHooked) return;
+  t.hiddenTextarea._ipcaTabHooked = true;
+
+  t.hiddenTextarea.addEventListener('keydown', function(ev){
+    if (ev.key === 'Tab') {
+      ev.preventDefault();
+      const start = t.selectionStart;
+      const end = t.selectionEnd;
+      const txt = t.text || '';
+      t.text = txt.substring(0, start) + '  ' + txt.substring(end);
+      t.selectionStart = t.selectionEnd = start + 2;
+      canvas.requestRenderAll();
+    }
+  });
+});
+/* ===== END NEW ===== */
 
 // Tools
 document.getElementById('btnAddText').addEventListener('click', () => {
@@ -367,7 +435,7 @@ document.getElementById('btnAddText').addEventListener('click', () => {
     fontSize: 26,
     fontFamily: 'Manrope',
     fill: '#0b2a4a',
-    backgroundColor: 'rgba(255,255,255,0.75)',
+    backgroundColor: null, // ✅ default OFF
     padding: 8
   });
   t.data = { kind: 'text' };
@@ -483,7 +551,7 @@ async function loadDesign(){
   });
 }
 
-// ✅ Save (manual serialize; textboxes always saved)
+// Save (manual serialize; textboxes always saved) — default BG off behavior included
 async function saveDesign(renderAlso){
   try {
     setStatus('Saving...');
@@ -491,7 +559,6 @@ async function saveDesign(renderAlso){
     canvas.discardActiveObject();
     canvas.requestRenderAll();
 
-    // Commit any ongoing edits
     canvas.getObjects().forEach(o => {
       if (o && (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text') && o.isEditing) {
         o.exitEditing();
@@ -502,16 +569,13 @@ async function saveDesign(renderAlso){
 
     canvas.getObjects().forEach(o => {
       if (!o) return;
-
-      // Skip screenshot overlay
       if (o.data && o.data.kind === 'reference') return;
 
       const isText = (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text');
 
-      // ✅ Text objects: build JSON manually (most reliable)
       if (isText) {
         objects.push({
-          type: 'textbox',                    // always save as textbox
+          type: 'textbox',
           left: o.left ?? 0,
           top: o.top ?? 0,
           width: o.width ?? 520,
@@ -531,20 +595,16 @@ async function saveDesign(renderAlso){
           charSpacing: o.charSpacing || 0,
 
           fill: o.fill || '#0b2a4a',
-          backgroundColor: o.backgroundColor || 'rgba(255,255,255,0.75)',
+          backgroundColor: o.backgroundColor || null,
 
-          // keep your custom metadata
           data: o.data || {}
         });
         return;
       }
 
-      // ✅ Non-text objects: use Fabric serialization
       try {
         objects.push(o.toObject(['data']));
-      } catch (e) {
-        console.warn('Skipping object (toObject failed):', o, e);
-      }
+      } catch (e) {}
     });
 
     const design = { version: '5.3.0', objects };
@@ -576,7 +636,7 @@ async function saveDesign(renderAlso){
 document.getElementById('btnSave').addEventListener('click', () => saveDesign(false));
 document.getElementById('btnSaveRender').addEventListener('click', () => saveDesign(true));
 
-// ✅ AI Auto Layout + Undo (background persists; overlay restored)
+// AI Auto Layout + Undo
 document.getElementById('btnAiLayout').addEventListener('click', async () => {
   setStatus('AI analyzing…');
 
@@ -593,6 +653,14 @@ document.getElementById('btnAiLayout').addEventListener('click', async () => {
 
   canvas.loadFromJSON(j.design_json, () => {
     applyBackground();
+
+    // ✅ default text bg OFF for AI textboxes
+    canvas.getObjects().forEach(o => {
+      if (o && (o.type === 'textbox' || o.type === 'i-text' || o.type === 'text')) {
+        o.backgroundColor = null;
+        o.fontFamily = o.fontFamily || 'Manrope';
+      }
+    });
 
     refImage = null;
     canvas.getObjects().forEach(o => {
