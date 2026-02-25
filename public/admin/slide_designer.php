@@ -71,7 +71,6 @@ cw_header('Slide Designer');
       <input id="textColor" type="color" value="#0b2a4a" style="height:32px; width:44px; padding:0; border:1px solid #ddd; border-radius:8px;">
     </label>
 
-    <!-- Quick style -->
     <label class="muted" style="display:flex; gap:6px; align-items:center;">
       Style
       <select id="quickStyle" class="input" style="height:32px;">
@@ -201,22 +200,6 @@ function isTextObj(o){
   return o && (o.type==='textbox' || o.type==='i-text' || o.type==='text');
 }
 
-// ✅ Fix “click like a fool” editing: double-click + Enter
-canvas.on('mouse:dblclick', () => {
-  const o = canvas.getActiveObject();
-  if (!isTextObj(o)) return;
-  if (o.enterEditing) o.enterEditing();
-  if (o.hiddenTextarea) o.hiddenTextarea.focus();
-});
-document.addEventListener('keydown', (e) => {
-  const o = canvas.getActiveObject();
-  if (e.key === 'Enter' && isTextObj(o) && !o.isEditing) {
-    e.preventDefault();
-    if (o.enterEditing) o.enterEditing();
-    if (o.hiddenTextarea) o.hiddenTextarea.focus();
-  }
-});
-
 // background
 function applyBackground(){
   fabric.Image.fromURL(BG_URL, (img) => {
@@ -232,8 +215,8 @@ function snap(v){ return Math.round(v/GRID)*GRID; }
 
 canvas.on('object:moving', (e)=>{ 
   const o=e.target; 
-  if(o?.data?.kind==='reference') return;
-  if(o?.data?.kind==='guide') return; // guides move freely (exact)
+  if(o?.data?.kind==='reference') return; 
+  if(o?.data?.kind==='guide') return; 
   o.set({left:snap(o.left), top:snap(o.top)}); 
   updateInspector(); 
 });
@@ -273,11 +256,9 @@ function placeRef(){
     if(o?.data?.kind==='reference') return;
     canvas.bringToFront(o);
   });
-  // keep guides above everything
   guideObjects.forEach(g => canvas.bringToFront(g));
   refImage.selectable=false; refImage.evented=false;
 }
-
 document.getElementById('refToggle').addEventListener('change',(e)=>{ if(!refImage) return; refImage.visible=e.target.checked; canvas.renderAll(); });
 document.getElementById('refOpacity').addEventListener('input',(e)=>{ if(!refImage) return; refImage.opacity=parseInt(e.target.value,10)/100; canvas.renderAll(); });
 
@@ -306,7 +287,6 @@ async function loadGuides(){
   if(!j.ok) return;
   clearGuides();
   (j.guides||[]).forEach(drawGuide);
-  // keep guides on top
   guideObjects.forEach(g => canvas.bringToFront(g));
   canvas.requestRenderAll();
 }
@@ -326,7 +306,7 @@ document.getElementById('btnGuideDel').addEventListener('click', async ()=>{
   await loadGuides();
 });
 
-// ===== Text UI =====
+// text ui
 const fontFamilyEl = document.getElementById('fontFamily');
 const fontSizeEl = document.getElementById('fontSize');
 const btnBold = document.getElementById('btnBold');
@@ -336,7 +316,6 @@ const quickStyle = document.getElementById('quickStyle');
 
 const bgHex = document.getElementById('bgHex');
 const bgAlpha = document.getElementById('bgAlpha');
-
 const textColorEl = document.getElementById('textColor');
 
 function activeText(){
@@ -345,16 +324,13 @@ function activeText(){
   if(isTextObj(o)) return o;
   return null;
 }
-
 function syncTextUI(){
   const t = activeText(); if(!t) return;
   fontFamilyEl.value = (t.fontFamily === 'Manrope') ? 'Manrope' : 'Arial';
   fontSizeEl.value = String(t.fontSize || 26);
 }
-
 function syncColorUI(){
   const t = activeText(); if(!t) return;
-  // only sync if hex, else leave current picker value
   if (typeof t.fill === 'string' && t.fill.startsWith('#') && t.fill.length === 7) {
     textColorEl.value = t.fill;
   }
@@ -362,7 +338,6 @@ function syncColorUI(){
 
 fontFamilyEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontFamily=fontFamilyEl.value; canvas.requestRenderAll(); });
 fontSizeEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontSize=parseInt(fontSizeEl.value,10); canvas.requestRenderAll(); });
-
 btnBold.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontWeight = (t.fontWeight==='bold')?'normal':'bold'; canvas.requestRenderAll(); });
 btnItalic.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontStyle = (t.fontStyle==='italic')?'normal':'italic'; canvas.requestRenderAll(); });
 btnUnderline.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.underline = !t.underline; canvas.requestRenderAll(); });
@@ -373,16 +348,11 @@ textColorEl.addEventListener('input', ()=>{
   canvas.requestRenderAll();
 });
 
-// background color helpers
 function hexToRgb(hex){
   hex = (hex||'').replace('#','').trim();
   if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
   if(hex.length!==6) return {r:255,g:255,b:255};
-  return {
-    r: parseInt(hex.substring(0,2),16),
-    g: parseInt(hex.substring(2,4),16),
-    b: parseInt(hex.substring(4,6),16),
-  };
+  return { r:parseInt(hex.substring(0,2),16), g:parseInt(hex.substring(2,4),16), b:parseInt(hex.substring(4,6),16) };
 }
 function setTextboxBg(t, on){
   if(!t) return;
@@ -396,14 +366,13 @@ document.getElementById('btnToggleBg').addEventListener('click', ()=>{ const t=a
 bgHex.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; if(t.backgroundColor) setTextboxBg(t,true); });
 bgAlpha.addEventListener('input', ()=>{ const t=activeText(); if(!t) return; if(t.backgroundColor) setTextboxBg(t,true); });
 
-// Quick styles: snap position + typography
+// Quick styles
 const STYLE_PRESETS = {
   TITLE:      { x:80,y:110,w:1440,h:90, fontFamily:'Manrope', fontSize:40, fontWeight:'bold', fontStyle:'normal', underline:false },
   BODY_LEFT:  { x:80,y:240,w:680,h:560,  fontFamily:'Manrope', fontSize:26, fontWeight:'normal', fontStyle:'normal', underline:false },
   BODY_RIGHT: { x:840,y:240,w:680,h:560, fontFamily:'Manrope', fontSize:26, fontWeight:'normal', fontStyle:'normal', underline:false },
   CAPTION:    { x:80,y:820,w:1440,h:60,  fontFamily:'Manrope', fontSize:20, fontWeight:'normal', fontStyle:'italic', underline:false }
 };
-
 quickStyle.addEventListener('change', ()=>{
   const key = quickStyle.value;
   if(!key) return;
@@ -419,8 +388,6 @@ quickStyle.addEventListener('change', ()=>{
   t.fontWeight = s.fontWeight;
   t.fontStyle = s.fontStyle;
   t.underline = !!s.underline;
-
-  // default bg OFF
   t.backgroundColor = null;
 
   t.setCoords();
@@ -430,7 +397,7 @@ quickStyle.addEventListener('change', ()=>{
   quickStyle.value = '';
 });
 
-// Buttons
+// Tools
 document.getElementById('btnAddText').addEventListener('click', ()=>{
   const t=new fabric.Textbox('Edit text…',{left:80,top:200,width:520,fontSize:26,fontFamily:'Manrope',fill:'#0b2a4a',backgroundColor:null,padding:8});
   t.data={kind:'text'};
@@ -478,14 +445,16 @@ async function loadDesign(){
   if(!j.ok || !j.design_json){
     setStatus('No saved layout yet.');
     createReferenceOverlay();
+    await loadGuides();
     setTimeout(fitCanvas,200);
     return;
   }
-  canvas.loadFromJSON(j.design_json, ()=>{
+  canvas.loadFromJSON(j.design_json, async ()=>{
     applyBackground();
     refImage=null;
     canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
     if(!refImage) createReferenceOverlay();
+    await loadGuides();
     setStatus('Layout loaded.');
     canvas.renderAll();
     canvas.calcOffset();
@@ -508,7 +477,7 @@ async function saveDesign(renderAlso){
     canvas.getObjects().forEach(o=>{
       if(!o) return;
       if(o?.data?.kind==='reference') return;
-      if(o?.data?.kind==='guide') return; // ✅ do NOT save guides
+      if(o?.data?.kind==='guide') return;
 
       const isText = isTextObj(o);
       if(isText){
@@ -563,8 +532,6 @@ document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
 
   canvas.loadFromJSON(j.design_json, async ()=>{
     applyBackground();
-
-    // enforce default text bg OFF
     canvas.getObjects().forEach(o=>{
       if(o && isTextObj(o)){
         o.backgroundColor = null;
@@ -572,13 +539,10 @@ document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
         if (!o.fill) o.fill = '#0b2a4a';
       }
     });
-
     refImage=null;
     canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
     if(!refImage) createReferenceOverlay();
-
-    await loadGuides(); // keep global guides always
-
+    await loadGuides();
     setStatus('AI layout loaded. Review and Save + Render.');
     canvas.renderAll();
     canvas.calcOffset();
