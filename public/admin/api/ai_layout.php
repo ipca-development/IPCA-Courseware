@@ -16,7 +16,6 @@ try {
 
     $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
 
-    // Strict schema: every property must be in required (text included)
     $schema = [
         "type" => "object",
         "additionalProperties" => false,
@@ -33,8 +32,8 @@ try {
                         "y" => ["type" => "number"],
                         "w" => ["type" => "number"],
                         "h" => ["type" => "number"],
-                        "text" => ["type" => "string"],        // must exist even if ""
-                        "confidence" => ["type" => "number"]   // 0..1
+                        "text" => ["type" => "string"],
+                        "confidence" => ["type" => "number"]
                     ],
                     "required" => ["kind","x","y","w","h","confidence","text"]
                 ]
@@ -48,24 +47,11 @@ You are laying out an aviation training slide on a fixed 1600x900 canvas.
 
 Return ALL real instructional content with approximate bounding boxes.
 
-IMPORTANT: DO NOT include UI chrome text:
-- MAIN MENU, HOW TO USE THIS COURSE, SAVE & EXIT
-- breadcrumb path lines with "/" separators
-- footer/copyright/page controls
-
-Instead, mark those UI areas as redaction rectangles: kind="redact".
-
-Detect:
-- title (kind="title")
-- text paragraphs (kind="text")
-- bullet lists (kind="bullets") with bullet lines separated by "\\n"
-- images/diagrams (kind="image")
-- video region (kind="video") if play button or embedded player
-
-Coordinates must be in the 1600x900 coordinate system.
-
-For items where text is not applicable (redact/image/video), set text to "".
-Confidence must be between 0 and 1.
+IMPORTANT:
+- DO NOT include UI chrome text or buttons as content.
+- If you detect repeated UI areas (menus/breadcrumb/footer), you may output kind="redact" but the app may ignore them.
+- Coordinates must be in 1600x900 coordinate system.
+- For image/video/redact items, set text="".
 TXT;
 
     $payload = [
@@ -109,16 +95,8 @@ TXT;
         $h = max(10, min(900,  (float)($it['h'] ?? 50)));
         $text = (string)($it['text'] ?? '');
 
+        // ✅ We DO NOT want redaction boxes (IPCA background already defines layout)
         if ($kind === 'redact') {
-            $objects[] = [
-                "type"=>"rect",
-                "left"=>$x, "top"=>$y, "width"=>$w, "height"=>$h,
-                "scaleX"=>1, "scaleY"=>1,
-                "fill"=>"rgba(255,255,255,0.96)",
-                "stroke"=>"#dddddd", "strokeWidth"=>1,
-                "selectable"=>true, "evented"=>true,
-                "data"=>["kind"=>"redact"]
-            ];
             continue;
         }
 
@@ -150,7 +128,7 @@ TXT;
                 "stroke"=>"#0b2a4a", "strokeWidth"=>2,
                 "rx"=>12,"ry"=>12,
                 "selectable"=>true, "evented"=>true,
-                "data"=>["kind"=>($kind==='video'?'video':'image'), "label"=>$label]
+                "data"=>["kind"=>($kind==='video'?'video_box':'image_box'), "label"=>$label]
             ];
         }
     }

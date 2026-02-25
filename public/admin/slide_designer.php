@@ -122,6 +122,19 @@ const canvas = new fabric.Canvas('c', {
 let refImage = null;
 let undoAiJson = null;
 
+function applyBackground(){
+  fabric.Image.fromURL(BG_URL, (img) => {
+    img.set({
+      left: 0, top: 0,
+      selectable: false, evented: false,
+      scaleX: BASE_W / img.width,
+      scaleY: BASE_H / img.height
+    });
+    canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
+  });
+}
+applyBackground();
+
 const GRID = 10;
 function snap(v){ return Math.round(v / GRID) * GRID; }
 
@@ -147,17 +160,6 @@ function updateSel(){
   const h = Math.round(o.height * o.scaleY);
   selInfo.textContent = `${o.type} (${Math.round(o.left)},${Math.round(o.top)}) ${w}×${h}`;
 }
-
-// Background
-fabric.Image.fromURL(BG_URL, (img) => {
-  img.set({
-    left: 0, top: 0,
-    selectable: false, evented: false,
-    scaleX: BASE_W / img.width,
-    scaleY: BASE_H / img.height
-  });
-  canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
-});
 
 function createReferenceOverlay(){
   fabric.Image.fromURL(REF_URL, (img) => {
@@ -305,6 +307,8 @@ async function loadDesign(){
   }
 
   canvas.loadFromJSON(j.design_json, () => {
+    applyBackground();
+
     refImage = null;
     canvas.getObjects().forEach(o => {
       if (o && o.data && o.data.kind === 'reference') refImage = o;
@@ -317,50 +321,42 @@ async function loadDesign(){
   });
 }
 
-//UPDATED Manual Safe Object Serializer version 2 
-	
+// ✅ Save: manual object serialization (textboxes always saved)
 async function saveDesign(renderAlso){
   try {
     setStatus('Saving...');
 
-    // 0) Ensure text edits are committed
-    const active = canvas.getActiveObject();
-    if (active && active.type === 'textbox' && active.isEditing) {
-      active.exitEditing();
-      canvas.discardActiveObject();
-    }
+    canvas.discardActiveObject();
     canvas.requestRenderAll();
 
-    const objects = [];
+    // commit any textbox edits
+    canvas.getObjects().forEach(o => {
+      if (o && o.type === 'textbox' && o.isEditing) {
+        o.exitEditing();
+      }
+    });
 
+    const objects = [];
     canvas.getObjects().forEach(o => {
       if (!o) return;
-
-      // Skip reference overlay
       if (o.data && o.data.kind === 'reference') return;
 
-      // Serialize base object
       let obj = null;
       try {
         obj = o.toObject(['data']);
-      } catch (e) {
-        console.warn('Skipping object (toObject failed):', o, e);
+      } catch(e) {
         return;
       }
 
-      // ✅ Force textbox properties into JSON (guarantees saving)
       if (o.type === 'textbox') {
         obj.type = 'textbox';
         obj.text = o.text || '';
         obj.fontSize = o.fontSize || 26;
         obj.fill = o.fill || '#0b2a4a';
         obj.backgroundColor = o.backgroundColor || 'rgba(255,255,255,0.75)';
-        obj.width = o.width;
-        obj.height = o.height;
-        obj.left = o.left;
-        obj.top = o.top;
-        obj.scaleX = o.scaleX;
-        obj.scaleY = o.scaleY;
+        obj.left = o.left; obj.top = o.top;
+        obj.width = o.width; obj.height = o.height;
+        obj.scaleX = o.scaleX; obj.scaleY = o.scaleY;
         obj.angle = o.angle || 0;
         obj.textAlign = o.textAlign || 'left';
         obj.lineHeight = o.lineHeight || 1.16;
@@ -374,16 +370,9 @@ async function saveDesign(renderAlso){
       objects.push(obj);
     });
 
-    const design = {
-      version: '5.3.0',
-      objects: objects
-    };
+    const design = { version:'5.3.0', objects: objects };
 
-    const payload = {
-      slide_id: SLIDE_ID,
-      design_json: design,
-      render: renderAlso ? 1 : 0
-    };
+    const payload = { slide_id: SLIDE_ID, design_json: design, render: renderAlso ? 1 : 0 };
 
     const res = await fetch('/admin/api/save_design.php', {
       method:'POST',
@@ -394,7 +383,7 @@ async function saveDesign(renderAlso){
     const txt = await res.text();
     let j = null;
     try { j = JSON.parse(txt); }
-    catch(e){ setStatus('Save failed: Invalid JSON response'); return; }
+    catch(e){ j = { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
 
     if (!j.ok) {
       setStatus('Save failed: ' + (j.error || 'unknown'));
@@ -410,11 +399,11 @@ async function saveDesign(renderAlso){
 document.getElementById('btnSave').addEventListener('click', () => saveDesign(false));
 document.getElementById('btnSaveRender').addEventListener('click', () => saveDesign(true));
 
-// ✅ AI Auto Layout + Undo (fixed: rebind/recreate overlay after load)
+// ✅ AI Auto Layout + Undo (re-apply background + restore overlay)
 document.getElementById('btnAiLayout').addEventListener('click', async () => {
   setStatus('AI analyzing…');
 
-  undoAiJson = canvas.toJSON(['data']);
+  undoAiJson = { version:'5.3.0', objects: canvas.getObjects().filter(o => !(o && o.data && o.data.kind==='reference')).map(o => o.toObject(['data'])) };
   document.getElementById('btnUndoAi').disabled = false;
 
   const form = new FormData();
@@ -426,7 +415,8 @@ document.getElementById('btnAiLayout').addEventListener('click', async () => {
   if (!j.ok) { setStatus('AI failed: ' + (j.error||'unknown')); return; }
 
   canvas.loadFromJSON(j.design_json, () => {
-    // rebind overlay
+    applyBackground();
+
     refImage = null;
     canvas.getObjects().forEach(o => {
       if (o && o.data && o.data.kind === 'reference') refImage = o;
@@ -442,7 +432,8 @@ document.getElementById('btnAiLayout').addEventListener('click', async () => {
 document.getElementById('btnUndoAi').addEventListener('click', () => {
   if (!undoAiJson) return;
   canvas.loadFromJSON(undoAiJson, () => {
-    // rebind overlay
+    applyBackground();
+
     refImage = null;
     canvas.getObjects().forEach(o => {
       if (o && o.data && o.data.kind === 'reference') refImage = o;
@@ -459,6 +450,7 @@ document.getElementById('btnUndoAi').addEventListener('click', () => {
 
 setTimeout(loadDesign, 600);
 setTimeout(fitCanvas, 800);
+createReferenceOverlay();
 </script>
 
 <?php cw_footer(); ?>
