@@ -44,7 +44,6 @@ cw_header('Slide Designer');
     ">
     <strong style="margin-right:6px;">Tools</strong>
 
-    <!-- NEW -->
     <button class="btn btn-sm" id="btnAiLayout" type="button">AI Auto Layout</button>
     <button class="btn btn-sm" id="btnUndoAi" type="button" disabled>Undo AI</button>
 
@@ -121,8 +120,6 @@ const canvas = new fabric.Canvas('c', {
 });
 
 let refImage = null;
-
-// NEW: undo buffer
 let undoAiJson = null;
 
 const GRID = 10;
@@ -203,7 +200,7 @@ document.getElementById('refOpacity').addEventListener('input', (e) => {
   canvas.renderAll();
 });
 
-// Tools (existing)
+// Tools
 document.getElementById('btnAddText').addEventListener('click', () => {
   const t = new fabric.Textbox('Edit text…', {
     left: 80, top: 200,
@@ -320,24 +317,63 @@ async function loadDesign(){
   });
 }
 
-// Save (unchanged)
+// ✅ Save (fixed: do not trust stale refImage)
 async function saveDesign(renderAlso){
-  setStatus('Saving...');
-  const design = canvas.toJSON(['data']);
-  const payload = { slide_id: SLIDE_ID, design_json: design, render: renderAlso ? 1 : 0 };
-  const res = await fetch('/admin/api/save_design.php', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(payload)
-  });
-  const j = await res.json();
-  if (!j.ok) { setStatus('Save failed: ' + (j.error||'unknown')); return; }
-  setStatus(renderAlso ? 'Saved + rendered HTML.' : 'Saved layout.');
+  try {
+    setStatus('Saving...');
+
+    canvas.discardActiveObject();
+    canvas.requestRenderAll();
+
+    // find the CURRENT reference overlay in canvas
+    let currentRef = null;
+    canvas.getObjects().forEach(o => {
+      if (o && o.data && o.data.kind === 'reference') currentRef = o;
+    });
+
+    let removedRef = null;
+    if (currentRef) {
+      removedRef = currentRef;
+      canvas.remove(currentRef);
+    }
+
+    const design = canvas.toDatalessJSON(['data']);
+
+    if (removedRef) {
+      canvas.add(removedRef);
+      refImage = removedRef; // refresh pointer
+      placeReferenceUnderObjects();
+      canvas.requestRenderAll();
+    }
+
+    const payload = { slide_id: SLIDE_ID, design_json: design, render: renderAlso ? 1 : 0 };
+
+    const res = await fetch('/admin/api/save_design.php', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(payload)
+    });
+
+    const txt = await res.text();
+    let j = null;
+    try { j = JSON.parse(txt); }
+    catch(e){ j = { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
+
+    if (!j.ok) {
+      setStatus('Save failed: ' + (j.error || 'unknown'));
+      return;
+    }
+
+    setStatus(renderAlso ? 'Saved + rendered HTML.' : 'Saved layout.');
+  } catch (err) {
+    setStatus('Save exception: ' + err);
+  }
 }
+
 document.getElementById('btnSave').addEventListener('click', () => saveDesign(false));
 document.getElementById('btnSaveRender').addEventListener('click', () => saveDesign(true));
 
-// NEW: AI Auto Layout + Undo
+// ✅ AI Auto Layout + Undo (fixed: rebind/recreate overlay after load)
 document.getElementById('btnAiLayout').addEventListener('click', async () => {
   setStatus('AI analyzing…');
 
@@ -353,7 +389,13 @@ document.getElementById('btnAiLayout').addEventListener('click', async () => {
   if (!j.ok) { setStatus('AI failed: ' + (j.error||'unknown')); return; }
 
   canvas.loadFromJSON(j.design_json, () => {
-    // keep reference overlay on top if present
+    // rebind overlay
+    refImage = null;
+    canvas.getObjects().forEach(o => {
+      if (o && o.data && o.data.kind === 'reference') refImage = o;
+    });
+    if (!refImage) createReferenceOverlay();
+
     setStatus('AI layout loaded. Review and Save + Render.');
     canvas.renderAll();
     setTimeout(fitCanvas, 200);
@@ -363,6 +405,13 @@ document.getElementById('btnAiLayout').addEventListener('click', async () => {
 document.getElementById('btnUndoAi').addEventListener('click', () => {
   if (!undoAiJson) return;
   canvas.loadFromJSON(undoAiJson, () => {
+    // rebind overlay
+    refImage = null;
+    canvas.getObjects().forEach(o => {
+      if (o && o.data && o.data.kind === 'reference') refImage = o;
+    });
+    if (!refImage) createReferenceOverlay();
+
     setStatus('Undo AI complete.');
     canvas.renderAll();
     setTimeout(fitCanvas, 200);
