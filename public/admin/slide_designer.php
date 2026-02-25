@@ -171,6 +171,7 @@ function isTextObj(o){
 }
 function activeText(){
   const o = canvas.getActiveObject();
+  if(!o) return null;
   return isTextObj(o) ? o : null;
 }
 function forceTextEditable(){
