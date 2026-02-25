@@ -441,13 +441,30 @@ quickStyle.addEventListener('change', ()=>{
 });
 
 // Tools
+
+
 document.getElementById('btnAddText').addEventListener('click', ()=>{
-  const t=new fabric.Textbox('Edit text…',{left:80,top:200,width:520,fontSize:26,fontFamily:'Manrope',fill:'#0b2a4a',backgroundColor:null,padding:8});
-  t.data={kind:'text'};
-  canvas.add(t); canvas.setActiveObject(t);
-  syncTextUI(); syncColorUI(); updateInspector();
-  canvas.renderAll();
+  const t = new fabric.Textbox('Edit text…', {
+    left: 80,
+    top: 200,
+    width: 520,
+    fontSize: 26,
+    fontFamily: 'Manrope',
+    fill: '#0b2a4a',
+    backgroundColor: null,
+    padding: 8
+  });
+  t.data = { kind: 'text' };
+  canvas.add(t);
+  canvas.setActiveObject(t);
+
+  // ✅ ensure UI controls update and can edit immediately
+  syncTextUI();
+  syncColorUI();
+  updateInspector();
+  canvas.requestRenderAll();
 });
+
 document.getElementById('btnAddRedact').addEventListener('click', ()=>{
   const r=new fabric.Rect({left:80,top:80,width:420,height:80,fill:'rgba(255,255,255,0.96)',stroke:'#ddd',strokeWidth:1});
   r.data={kind:'redact'};
