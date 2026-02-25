@@ -166,6 +166,23 @@ let refImage = null;
 let undoAiJson = null;
 let guideObjects = [];
 
+function isTextObj(o){
+  return o && (o.type==='textbox' || o.type==='i-text' || o.type==='text');
+}
+function activeText(){
+  const o = canvas.getActiveObject();
+  return isTextObj(o) ? o : null;
+}
+function forceTextEditable(){
+  canvas.getObjects().forEach(o=>{
+    if(isTextObj(o)){
+      o.selectable = true;
+      o.evented = true;
+      o.editable = true;
+    }
+  });
+}
+
 // Inspector
 const insX = document.getElementById('insX');
 const insY = document.getElementById('insY');
@@ -196,9 +213,41 @@ function updateInspector(){
   insH.value = Math.round((o.height||0)*(o.scaleY||1));
 }
 
-function isTextObj(o){
-  return o && (o.type==='textbox' || o.type==='i-text' || o.type==='text');
+// ✅ KEY FIX: deterministic enter editing
+function enterEdit(o){
+  if(!isTextObj(o)) return;
+  if (o.enterEditing) o.enterEditing();
+  if (o.hiddenTextarea) o.hiddenTextarea.focus();
 }
+
+// double click enters edit
+canvas.on('mouse:dblclick', () => {
+  const o = canvas.getActiveObject();
+  enterEdit(o);
+});
+
+// single-click twice quickly enters edit (more forgiving than dblclick)
+let _lastClickObj = null;
+let _lastClickAt = 0;
+canvas.on('mouse:down', () => {
+  const o = canvas.getActiveObject();
+  if (!isTextObj(o)) { _lastClickObj = null; return; }
+  const now = Date.now();
+  if (_lastClickObj === o && (now - _lastClickAt) < 500) {
+    enterEdit(o);
+  }
+  _lastClickObj = o;
+  _lastClickAt = now;
+});
+
+// Enter key starts editing if textbox selected
+document.addEventListener('keydown', (e)=>{
+  const o = canvas.getActiveObject();
+  if(e.key === 'Enter' && isTextObj(o) && !o.isEditing){
+    e.preventDefault();
+    enterEdit(o);
+  }
+});
 
 // background
 function applyBackground(){
@@ -212,7 +261,6 @@ applyBackground();
 // grid snap
 const GRID = 10;
 function snap(v){ return Math.round(v/GRID)*GRID; }
-
 canvas.on('object:moving', (e)=>{ 
   const o=e.target; 
   if(o?.data?.kind==='reference') return; 
@@ -289,6 +337,7 @@ async function loadGuides(){
   (j.guides||[]).forEach(drawGuide);
   guideObjects.forEach(g => canvas.bringToFront(g));
   canvas.requestRenderAll();
+  canvas.calcOffset();
 }
 
 document.getElementById('btnGuideV').addEventListener('click', async ()=>{
@@ -318,12 +367,6 @@ const bgHex = document.getElementById('bgHex');
 const bgAlpha = document.getElementById('bgAlpha');
 const textColorEl = document.getElementById('textColor');
 
-function activeText(){
-  const o = canvas.getActiveObject();
-  if(!o) return null;
-  if(isTextObj(o)) return o;
-  return null;
-}
 function syncTextUI(){
   const t = activeText(); if(!t) return;
   fontFamilyEl.value = (t.fontFamily === 'Manrope') ? 'Manrope' : 'Arial';
@@ -451,6 +494,7 @@ async function loadDesign(){
   }
   canvas.loadFromJSON(j.design_json, async ()=>{
     applyBackground();
+    forceTextEditable();
     refImage=null;
     canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
     if(!refImage) createReferenceOverlay();
@@ -479,8 +523,7 @@ async function saveDesign(renderAlso){
       if(o?.data?.kind==='reference') return;
       if(o?.data?.kind==='guide') return;
 
-      const isText = isTextObj(o);
-      if(isText){
+      if(isTextObj(o)){
         objects.push({
           type:'textbox',
           left:o.left??0, top:o.top??0,
@@ -532,8 +575,9 @@ document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
 
   canvas.loadFromJSON(j.design_json, async ()=>{
     applyBackground();
+    forceTextEditable();
     canvas.getObjects().forEach(o=>{
-      if(o && isTextObj(o)){
+      if(isTextObj(o)){
         o.backgroundColor = null;
         o.fontFamily = o.fontFamily || 'Manrope';
         if (!o.fill) o.fill = '#0b2a4a';
@@ -543,7 +587,7 @@ document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
     canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
     if(!refImage) createReferenceOverlay();
     await loadGuides();
-    setStatus('AI layout loaded. Review and Save + Render.');
+    setStatus('AI layout loaded. Double-click (or click twice) to edit text.');
     canvas.renderAll();
     canvas.calcOffset();
     setTimeout(fitCanvas,200);
@@ -554,6 +598,7 @@ document.getElementById('btnUndoAi').addEventListener('click', ()=>{
   if(!undoAiJson) return;
   canvas.loadFromJSON(undoAiJson, async ()=>{
     applyBackground();
+    forceTextEditable();
     refImage=null;
     canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
     if(!refImage) createReferenceOverlay();
