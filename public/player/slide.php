@@ -46,22 +46,39 @@ $esText = (string)($es->fetchColumn() ?: '');
   <title>Slide</title>
   <link rel="stylesheet" href="/assets/app.css">
   <style>
-    body{ margin:0; background:#0e1520; color:#fff; font-family: Manrope, Arial, sans-serif; }
-    .shell{ display:grid; grid-template-columns: 1fr 420px; gap:14px; padding:14px; }
+    body{
+      margin:0;
+      background:#ffffff;              /* ✅ no black */
+      color:#111;
+      font-family: Manrope, Arial, sans-serif;
+    }
+
+    .shell{
+      display:grid;
+      grid-template-columns: 1fr 420px;
+      gap:14px;
+      padding:14px;
+      background:#ffffff;              /* ✅ no black */
+    }
 
     .viewport{
       width:100%;
       aspect-ratio: 16/9;
       overflow:hidden;
       border-radius: 14px;
-      border:1px solid rgba(255,255,255,0.12);
-      background:#000;
+      border:1px solid rgba(0,0,0,0.10);
+      background:#ffffff;              /* ✅ no black */
       position:relative;
     }
+
     .stage{
-      width:1600px; height:900px;
+      width:1600px;
+      height:900px;
       transform-origin: top left;
-      position:absolute; left:0; top:0;
+      position:absolute;
+      left:0;
+      top:0;
+      background:#ffffff;              /* ✅ no black */
     }
 
     /* Screenshot exact sizing: 1315x900 centered */
@@ -72,6 +89,7 @@ $esText = (string)($es->fetchColumn() ?: '');
       left: calc((1600px - 1315px)/2);
       top: 0;
       object-fit: contain;
+      background:#ffffff;              /* ✅ no black behind transparent pixels */
     }
 
     /* Header/Footer fixed dims */
@@ -90,9 +108,9 @@ $esText = (string)($es->fetchColumn() ?: '');
 
     .hotspot{
       position:absolute;
-      border:2px solid rgba(0,255,255,0.85);
+      border:2px solid rgba(0,120,255,0.85);
       border-radius:10px;
-      background: rgba(0,255,255,0.08);
+      background: rgba(0,120,255,0.08);
       cursor:pointer;
     }
     .hotspot .tag{
@@ -100,18 +118,54 @@ $esText = (string)($es->fetchColumn() ?: '');
       font-size:14px; padding:4px 8px;
       border-radius:10px;
       background: rgba(0,0,0,0.6);
+      color:#fff;
     }
 
-    .panel{ background: rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.10); border-radius: 14px; padding:12px; }
-    pre{ white-space: pre-wrap; word-break: break-word; font-family: Manrope, Arial, sans-serif; font-size: 14px; line-height: 1.35; margin:0; }
+    .panel{
+      background:#f6f8fc;              /* ✅ light panel */
+      border:1px solid rgba(0,0,0,0.10);
+      border-radius: 14px;
+      padding:12px;
+    }
+
+    pre{
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Manrope, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.35;
+      margin:0;
+      color:#111;
+    }
 
     .row{ display:flex; gap:8px; align-items:center; margin-bottom:10px; }
-    .btnx{ background: rgba(255,255,255,0.10); border:1px solid rgba(255,255,255,0.18); color:#fff; padding:8px 10px; border-radius:10px; cursor:pointer; }
-    .btnx:hover{ background: rgba(255,255,255,0.14); }
 
-    .modal{ position:fixed; inset:0; display:none; align-items:center; justify-content:center; background: rgba(0,0,0,0.7); }
-    .modal .box{ width:min(960px, 92vw); background:#0b1220; border:1px solid rgba(255,255,255,0.12); border-radius:16px; overflow:hidden; }
-    .modal video{ width:100%; height:auto; display:block; }
+    .btnx{
+      background:#1e3c72;
+      border:1px solid rgba(0,0,0,0.10);
+      color:#fff;
+      padding:8px 10px;
+      border-radius:10px;
+      cursor:pointer;
+    }
+    .btnx:hover{ background:#16305a; }
+
+    .modal{
+      position:fixed;
+      inset:0;
+      display:none;
+      align-items:center;
+      justify-content:center;
+      background: rgba(0,0,0,0.7);     /* ok to keep dark */
+    }
+    .modal .box{
+      width:min(960px, 92vw);
+      background:#ffffff;              /* ✅ white player box */
+      border:1px solid rgba(0,0,0,0.10);
+      border-radius:16px;
+      overflow:hidden;
+    }
+    .modal video{ width:100%; height:auto; display:block; background:#000; }
   </style>
 </head>
 <body>

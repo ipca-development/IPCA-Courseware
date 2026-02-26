@@ -36,13 +36,14 @@ cw_header('Overlay Slide Editor');
     overflow: hidden;
     border:1px solid #e6e6e6;
     border-radius: 14px;
-    background:#111;
+    background:#ffffff; /* ✅ was #111 */
     position:relative;
   }
   .stage{
     width:1600px; height:900px;
     transform-origin: top left;
     position:absolute; left:0; top:0;
+    background:#ffffff; /* ✅ ensure behind everything is white */
   }
   .layer{ position:absolute; inset:0; }
 
@@ -54,7 +55,7 @@ cw_header('Overlay Slide Editor');
     left: calc((1600px - 1315px)/2);
     top: 0;
     object-fit: contain; /* no stretching */
-    background: transparent;
+    background: #ffffff; /* ✅ was transparent */
   }
 
   /* Overlays (sit on top of screenshot) */
