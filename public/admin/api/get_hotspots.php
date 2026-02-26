@@ -28,20 +28,28 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 // Find suggested src from manifest
 $suggested = '';
 $manifestPath = __DIR__ . '/../../assets/kings_videos_manifest.json';
+
 if (file_exists($manifestPath)) {
     $raw = file_get_contents($manifestPath);
     $arr = json_decode($raw, true);
+
     if (is_array($arr)) {
         foreach ($arr as $item) {
             $lid = (int)($item['lessonId'] ?? 0);
             $pg  = (int)($item['page'] ?? 0);
+
             if ($lid === $lessonId && $pg === $pageNum) {
                 $urls = $item['videoUrls'] ?? [];
                 if (is_array($urls) && count($urls) > 0) {
                     $u = (string)$urls[0];
                     $base = basename(parse_url($u, PHP_URL_PATH) ?: $u);
+
                     $videosBase = getenv('CW_VIDEOS_BASE') ?: 'ks_videos/private';
-                    $suggested = rtrim($videosBase,'/') . '/lesson_' . $lessonId . '/' . $base;
+
+                    // ✅ IMPORTANT: your actual stored filename format includes page prefix
+                    $pagePrefix = 'page_' . str_pad((string)$pageNum, 3, '0', STR_PAD_LEFT) . '__';
+
+                    $suggested = rtrim($videosBase,'/') . '/lesson_' . $lessonId . '/' . $pagePrefix . $base;
                 }
                 break;
             }
