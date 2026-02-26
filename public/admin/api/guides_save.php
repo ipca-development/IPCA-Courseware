@@ -15,6 +15,7 @@ try {
         $axis = (string)($data['axis'] ?? '');
         $pos  = (int)($data['pos'] ?? 0);
         $color = (string)($data['color'] ?? '#ABCDE0');
+
         if (!in_array($axis, ['v','h'], true)) throw new RuntimeException("Invalid axis");
         if ($pos < 0 || $pos > ($axis==='v' ? 1600 : 900)) throw new RuntimeException("pos out of range");
         if (!preg_match('/^#[0-9A-Fa-f]{6}$/', $color)) $color = '#ABCDE0';
@@ -37,6 +38,7 @@ try {
         $id = (int)($data['id'] ?? 0);
         $pos = (int)($data['pos'] ?? 0);
         $color = (string)($data['color'] ?? '#ABCDE0');
+
         if ($id <= 0) throw new RuntimeException("Missing id");
         if (!preg_match('/^#[0-9A-Fa-f]{6}$/', $color)) $color = '#ABCDE0';
 
