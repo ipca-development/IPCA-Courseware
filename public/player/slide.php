@@ -234,9 +234,29 @@ document.querySelectorAll('.hotspot').forEach(h=>{
   h.addEventListener('click', ()=>{
     const src = h.dataset.src || '';
     if (!src) return alert('No video linked yet.');
-    vid.src = src.startsWith('http') ? src : (CDN_BASE + '/' + src.replace(/^\/+/, ''));
-    modal.style.display = 'flex';
-    vid.play().catch(()=>{});
+    const url = src.startsWith('http') ? src : (CDN_BASE + '/' + src.replace(/^\/+/, ''));
+console.log('[VIDEO]', url);
+
+modal.style.display = 'flex';
+vid.src = url;
+vid.load();
+
+// show video element errors
+vid.onerror = () => {
+  console.error('VIDEO ERROR:', vid.error);
+  alert('Video failed to load. Check console for details.\nURL:\n' + url);
+};
+
+vid.onloadedmetadata = () => console.log('loadedmetadata', vid.videoWidth, vid.videoHeight);
+vid.oncanplay = () => console.log('canplay');
+vid.onplay = () => console.log('play');
+vid.onstalled = () => console.log('stalled');
+vid.onwaiting = () => console.log('waiting');
+
+vid.play().catch((e)=>{
+  console.error('play() failed', e);
+  alert('play() failed: ' + e);
+});
   });
 });
 modal.addEventListener('click', (e)=>{
