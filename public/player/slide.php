@@ -262,6 +262,16 @@ vid.play().catch((e)=>{
 modal.addEventListener('click', (e)=>{
   if (e.target === modal){
     vid.pause();
+	  // Quick diagnostics
+fetch(url, { method: 'HEAD' })
+  .then(r => {
+    console.log('HEAD status:', r.status);
+    console.log('Content-Type:', r.headers.get('content-type'));
+    console.log('Accept-Ranges:', r.headers.get('accept-ranges'));
+    console.log('Content-Length:', r.headers.get('content-length'));
+  })
+  .catch(e => console.log('HEAD failed:', e));
+	  
     vid.src = '';
     modal.style.display = 'none';
   }
