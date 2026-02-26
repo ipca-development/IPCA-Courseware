@@ -76,7 +76,7 @@ cw_header('Slides');
   border-radius: 12px;
   background: #fff;
   border: 1px solid #eee;
-  position: relative; /* IMPORTANT: for absolute thumb-stage */
+  position: relative;
 }
 
 /* Screenshot image fills viewport with contain */
@@ -87,7 +87,7 @@ cw_header('Slides');
   display:block;
 }
 
-/* HTML stage pinned to top-left, scaled down into viewport */
+/* Overlay thumbnail stage: fixed 1600x900 internally, scaled down */
 .thumb-stage{
   position:absolute;
   left:0;
@@ -96,13 +96,32 @@ cw_header('Slides');
   height:900px;
   transform: scale(0.2625); /* 420/1600 */
   transform-origin: top left;
+  background:#ffffff;
 }
 
-/* Force IPCA canvas to fixed pixels INSIDE thumbnails only */
-.thumb-stage .ipca-canvas{
-  width:1600px !important;
-  height:900px !important;
-  aspect-ratio: auto !important;
+/* Overlay geometry */
+.thumb-stage .ov-content{
+  position:absolute;
+  width:1315px;
+  height:900px;
+  left: calc((1600px - 1315px)/2);
+  top:0;
+  object-fit: contain;
+  background:#ffffff;
+}
+.thumb-stage .ov-header{
+  position:absolute;
+  left:0; top:0;
+  width:1600px; height:125px;
+  object-fit: cover;
+  pointer-events:none;
+}
+.thumb-stage .ov-footer{
+  position:absolute;
+  left:0; bottom:0;
+  width:1600px; height:90px;
+  object-fit: cover;
+  pointer-events:none;
 }
 </style>
 
@@ -144,19 +163,18 @@ cw_header('Slides');
 <?php if ($lesson): ?>
 <div class="card">
   <h2>Slide overview</h2>
-  <p class="muted">Designer only. Double-click screenshot to open Designer.</p>
+  <p class="muted">Designer is the Overlay Slide Editor. Double-click screenshot to open.</p>
 
   <div class="cw-slides-grid">
     <?php foreach ($slides as $s): ?>
       <?php
         $isDeleted = ((int)$s['is_deleted'] === 1);
         $imgUrl = cdn_url($CDN_BASE, (string)$s['image_path']);
+        $overlayEditorUrl = '/admin/slide_overlay_editor.php?slide_id='.(int)$s['id'];
 
-        // show html_rendered if present, else show message
-        $thumbHtml = '';
-        if (!empty($s['html_rendered'])) {
-            $thumbHtml = (string)$s['html_rendered'];
-        }
+        // Overlay assets (same as editor)
+        $headerUrl = '/assets/overlay/header.png';
+        $footerUrl = '/assets/overlay/footer.png';
       ?>
       <div class="cw-slide-card <?= $isDeleted ? 'cw-deleted' : '' ?>">
         <div class="cw-slide-top">
@@ -166,7 +184,7 @@ cw_header('Slides');
           </div>
 
           <div class="cw-actions">
-            <a class="btn btn-sm" href="/admin/slide_designer.php?slide_id=<?= (int)$s['id'] ?>">Designer</a>
+            <a class="btn btn-sm" href="<?= h($overlayEditorUrl) ?>">Designer</a>
 
             <?php if (!$isDeleted): ?>
               <form method="post" style="display:inline">
@@ -188,7 +206,7 @@ cw_header('Slides');
 
         <div class="cw-slide-body" style="grid-template-columns: 420px 420px; gap:12px;">
           <!-- Screenshot thumb -->
-          <div class="cw-shot" ondblclick="location.href='/admin/slide_designer.php?slide_id=<?= (int)$s['id'] ?>'">
+          <div class="cw-shot" ondblclick="location.href='<?= h($overlayEditorUrl) ?>'">
             <a target="_blank" href="<?= h($imgUrl) ?>">
               <div class="thumb-viewport">
                 <img src="<?= h($imgUrl) ?>" alt="">
@@ -196,22 +214,15 @@ cw_header('Slides');
             </a>
           </div>
 
-          <!-- HTML thumb -->
-          <div class="cw-mini">
-            <?php if ($thumbHtml !== ''): ?>
-              <div class="thumb-viewport">
-                <div class="thumb-stage">
-                  <?= $thumbHtml ?>
-                </div>
+          <!-- Overlay thumb (what student sees) -->
+          <div class="cw-mini" ondblclick="location.href='<?= h($overlayEditorUrl) ?>'">
+            <div class="thumb-viewport">
+              <div class="thumb-stage">
+                <img class="ov-content" src="<?= h($imgUrl) ?>" alt="">
+                <img class="ov-header" src="<?= h($headerUrl) ?>" alt="">
+                <img class="ov-footer" src="<?= h($footerUrl) ?>" alt="">
               </div>
-            <?php else: ?>
-              <div class="thumb-viewport" style="display:flex;align-items:center;justify-content:center;">
-                <div class="muted" style="padding:10px;text-align:center;">
-                  No rendered HTML yet.<br>
-                  Use “Save + Render HTML” in Designer.
-                </div>
-              </div>
-            <?php endif; ?>
+            </div>
           </div>
         </div>
 
