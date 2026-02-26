@@ -19,12 +19,17 @@ $slide = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$slide) exit('Slide not found');
 
 $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
-$overlayUrl = "/assets/bg/ipca_bg.jpeg";
+
+// Fixed overlays (your provided dims)
+$HEADER = "/assets/overlay/header.png"; // 1600x125
+$FOOTER = "/assets/overlay/footer.png"; // 1600x90
 
 cw_header('Overlay Slide Editor');
 ?>
 <style>
   .editor-wrap{ display:grid; grid-template-columns: 1fr 420px; gap:14px; }
+
+  /* Viewport scales the whole 1600x900 stage, and clips it */
   .viewport{
     width: 100%;
     aspect-ratio: 16 / 9;
@@ -40,15 +45,37 @@ cw_header('Overlay Slide Editor');
     position:absolute; left:0; top:0;
   }
   .layer{ position:absolute; inset:0; }
-  .overlay-img{ position:absolute; inset:0; width:1600px; height:900px; object-fit:cover; }
-  /* content image placed inside "safe area" – tweak these once to match your overlay */
+
+  /* Screenshot centered at exact size (no warping) */
   .content-img{
     position:absolute;
-    left: 80px; top: 95px;   /* safe area start */
-    width: 1440px; height: 730px; /* safe area size */
-    object-fit: contain;
+    width:1315px;
+    height:900px;
+    left: calc((1600px - 1315px)/2);
+    top: 0;
+    object-fit: contain; /* no stretching */
     background: transparent;
   }
+
+  /* Overlays (sit on top of screenshot) */
+  .header-img{
+    position:absolute;
+    left:0; top:0;
+    width:1600px;
+    height:125px;
+    object-fit: cover;
+    pointer-events:none;
+  }
+  .footer-img{
+    position:absolute;
+    left:0; bottom:0;
+    width:1600px;
+    height:90px;
+    object-fit: cover;
+    pointer-events:none;
+  }
+
+  /* Hotspots */
   .hotspot{
     position:absolute;
     border: 2px dashed rgba(255,255,255,0.85);
@@ -66,6 +93,15 @@ cw_header('Overlay Slide Editor');
     background: rgba(0,0,0,0.65);
     color:#fff;
   }
+  .hotspot .resize{
+    position:absolute;
+    right:-6px; bottom:-6px;
+    width:14px; height:14px;
+    background: rgba(0,255,255,0.9);
+    border-radius: 4px;
+    cursor: nwse-resize;
+  }
+
   .draw-rect{
     position:absolute;
     border:2px solid rgba(0,255,255,0.9);
@@ -73,10 +109,12 @@ cw_header('Overlay Slide Editor');
     background: rgba(0,255,255,0.08);
     pointer-events:none;
   }
+
   textarea{ width:100%; min-height:120px; }
   .small{ font-size: 12px; opacity: .75; }
   .row{ display:flex; gap:8px; align-items:center; }
   .row input[type="text"]{ width: 100%; }
+  code{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 </style>
 
 <div class="card">
@@ -89,21 +127,24 @@ cw_header('Overlay Slide Editor');
       <div class="viewport" id="viewport">
         <div class="stage" id="stage">
           <div class="layer">
-            <img class="overlay-img" src="<?= h($overlayUrl) ?>" alt="">
             <img class="content-img" id="contentImg" src="<?= h($imgUrl) ?>" alt="">
+            <img class="header-img" src="<?= h($HEADER) ?>" alt="">
+            <img class="footer-img" src="<?= h($FOOTER) ?>" alt="">
           </div>
           <div class="layer" id="hotspotLayer"></div>
         </div>
       </div>
 
       <div class="muted small" style="margin-top:8px;">
-        Draw hotspot: click+drag on the slide. Hotspots are saved in 1600×900 coordinates.
+        Draw hotspot: click+drag on the slide. Resize using the cyan corner.
+        (All coordinates are saved in 1600×900 space.)
       </div>
     </div>
 
     <div>
       <div class="card" style="margin-bottom:12px;">
         <h2 style="margin:0 0 8px 0;">Hotspots</h2>
+        <div class="small muted" id="suggestedBox"></div>
         <div id="hotspotList" class="small muted">Loading…</div>
         <div class="row" style="margin-top:10px;">
           <button class="btn" id="btnSaveHotspots" type="button">Save hotspots</button>
@@ -139,6 +180,7 @@ cw_header('Overlay Slide Editor');
 const SLIDE_ID = <?= (int)$slideId ?>;
 const hotspotLayer = document.getElementById('hotspotLayer');
 const hotspotList = document.getElementById('hotspotList');
+const suggestedBox = document.getElementById('suggestedBox');
 const statusEl = document.getElementById('status');
 
 const viewport = document.getElementById('viewport');
@@ -156,7 +198,12 @@ setTimeout(fitStage, 50);
 
 function setStatus(msg){ statusEl.textContent = msg; }
 
-let hotspots = []; // {id,label,src,x,y,w,h,is_deleted}
+let hotspots = [];
+let suggestedSrc = '';
+
+function escapeHtml(s){
+  return (s||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+}
 
 function renderHotspots(){
   hotspotLayer.innerHTML = '';
@@ -174,23 +221,45 @@ function renderHotspots(){
     tag.textContent = h.label || 'Video';
     d.appendChild(tag);
 
-    // drag move
+    const rez = document.createElement('div');
+    rez.className = 'resize';
+    d.appendChild(rez);
+
     let drag = null;
     d.addEventListener('mousedown', (ev) => {
+      if (ev.target === rez) return;
       ev.preventDefault();
       drag = { sx: ev.clientX, sy: ev.clientY, ox: h.x, oy: h.y };
     });
-    window.addEventListener('mousemove', (ev) => {
-      if (!drag) return;
-      const dx = (ev.clientX - drag.sx) / scale;
-      const dy = (ev.clientY - drag.sy) / scale;
-      h.x = Math.round(drag.ox + dx);
-      h.y = Math.round(drag.oy + dy);
-      d.style.left = h.x + 'px';
-      d.style.top  = h.y + 'px';
-      renderHotspotList(); // keep list updated
+
+    let rsz = null;
+    rez.addEventListener('mousedown', (ev)=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      rsz = { sx: ev.clientX, sy: ev.clientY, ow: h.w, oh: h.h };
     });
-    window.addEventListener('mouseup', () => drag = null);
+
+    window.addEventListener('mousemove', (ev) => {
+      if (drag) {
+        const dx = (ev.clientX - drag.sx) / scale;
+        const dy = (ev.clientY - drag.sy) / scale;
+        h.x = Math.round(drag.ox + dx);
+        h.y = Math.round(drag.oy + dy);
+        d.style.left = h.x + 'px';
+        d.style.top  = h.y + 'px';
+        renderHotspotList();
+      }
+      if (rsz) {
+        const dx = (ev.clientX - rsz.sx) / scale;
+        const dy = (ev.clientY - rsz.sy) / scale;
+        h.w = Math.max(30, Math.round(rsz.ow + dx));
+        h.h = Math.max(30, Math.round(rsz.oh + dy));
+        d.style.width = h.w + 'px';
+        d.style.height = h.h + 'px';
+        renderHotspotList();
+      }
+    });
+    window.addEventListener('mouseup', () => { drag = null; rsz = null; });
 
     hotspotLayer.appendChild(d);
   });
@@ -205,12 +274,11 @@ function renderHotspotList(){
       </div>
       <div class="row" style="margin-top:6px;">
         <strong style="min-width:54px;">Video</strong>
-        <input type="text" placeholder="videos/private/lesson_10002/xxx.mp4" value="${escapeHtml(h.src||'')}" data-k="src" data-id="${h.id}">
+        <input type="text" placeholder="ks_videos/private/lesson_10002/AN00001_vA.mp4" value="${escapeHtml(h.src||'')}" data-k="src" data-id="${h.id}">
       </div>
-      <div class="small muted" style="margin-top:6px;">
-        x=${h.x}, y=${h.y}, w=${h.w}, h=${h.h}
-      </div>
+      <div class="small muted" style="margin-top:6px;">x=${h.x}, y=${h.y}, w=${h.w}, h=${h.h}</div>
       <div class="row" style="margin-top:8px;">
+        ${(!h.src && suggestedSrc) ? `<button class="btn btn-sm" type="button" data-use="${h.id}">Use suggested</button>` : ``}
         <button class="btn btn-sm" type="button" data-del="${h.id}">Delete</button>
       </div>
     </div>
@@ -227,6 +295,18 @@ function renderHotspotList(){
       renderHotspots();
     });
   });
+
+  hotspotList.querySelectorAll('button[data-use]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.use,10);
+      const h = hotspots.find(x=>x.id===id);
+      if (!h) return;
+      h.src = suggestedSrc;
+      renderHotspots();
+      renderHotspotList();
+    });
+  });
+
   hotspotList.querySelectorAll('button[data-del]').forEach(btn=>{
     btn.addEventListener('click', ()=>{
       const id = parseInt(btn.dataset.del,10);
@@ -239,15 +319,13 @@ function renderHotspotList(){
   });
 }
 
-function escapeHtml(s){
-  return (s||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
-}
-
 async function loadHotspots(){
   const res = await fetch('/admin/api/get_hotspots.php?slide_id=' + SLIDE_ID);
   const j = await res.json();
   if (!j.ok) { hotspotList.textContent = 'Failed to load hotspots'; return; }
   hotspots = j.hotspots || [];
+  suggestedSrc = j.suggested_src || '';
+  suggestedBox.innerHTML = suggestedSrc ? `Suggested video: <code>${escapeHtml(suggestedSrc)}</code>` : `Suggested video: <span class="muted">none</span>`;
   renderHotspots();
   renderHotspotList();
 }
@@ -272,7 +350,6 @@ let drawing = null;
 let drawEl = null;
 
 stage.addEventListener('mousedown', (ev)=>{
-  // avoid starting draw if clicking an existing hotspot
   if (ev.target.closest('.hotspot')) return;
 
   const rect = stage.getBoundingClientRect();
@@ -307,9 +384,9 @@ window.addEventListener('mouseup', ()=>{
 
   if (w < 30 || h < 30) return;
 
-  // create local hotspot entry with temp negative id until saved
   const tempId = -Math.floor(Math.random()*1000000);
-  hotspots.push({ id: tempId, kind:'video', label:'Video', src:'', x,y,w,h, is_deleted:0 });
+  const autoSrc = suggestedSrc || '';
+  hotspots.push({ id: tempId, kind:'video', label:'Video', src:autoSrc, x,y,w,h, is_deleted:0 });
   renderHotspots();
   renderHotspotList();
 });
