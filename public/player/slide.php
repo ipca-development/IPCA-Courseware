@@ -259,23 +259,26 @@ vid.play().catch((e)=>{
 });
   });
 });
+
+function closeModal(){
+  try { vid.pause(); } catch(e){}
+  vid.removeAttribute('src');
+  vid.load(); // ensures it fully stops
+  modal.style.display = 'none';
+}
+
+// Close when clicking backdrop
 modal.addEventListener('click', (e)=>{
-  if (e.target === modal){
-    vid.pause();
-	  // Quick diagnostics
-fetch(url, { method: 'HEAD' })
-  .then(r => {
-    console.log('HEAD status:', r.status);
-    console.log('Content-Type:', r.headers.get('content-type'));
-    console.log('Accept-Ranges:', r.headers.get('accept-ranges'));
-    console.log('Content-Length:', r.headers.get('content-length'));
-  })
-  .catch(e => console.log('HEAD failed:', e));
-	  
-    vid.src = '';
-    modal.style.display = 'none';
-  }
+  // If you clicked OUTSIDE the video box, close
+  if (e.target.id === 'modal') closeModal();
 });
+
+// Close on ESC
+document.addEventListener('keydown', (e)=>{
+  if (e.key === 'Escape' && modal.style.display === 'flex') closeModal();
+});	
+	
+	
 </script>
 </body>
 </html>
