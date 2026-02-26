@@ -29,10 +29,7 @@ cw_header('Slide Designer');
   </p>
 
   <style>
-    .btn-on{
-      border-color:#1e3c72 !important;
-      background: rgba(30,60,114,0.12) !important;
-    }
+    .btn-on{ border-color:#1e3c72 !important; background: rgba(30,60,114,0.12) !important; }
     .mini-label{ font-size:12px; opacity:.75; }
   </style>
 
@@ -92,7 +89,6 @@ cw_header('Slide Designer');
       </select>
     </label>
 
-    <!-- BG controls -->
     <button class="btn btn-sm" id="btnToggleBg" type="button">BG</button>
     <label class="muted" style="display:flex; gap:6px; align-items:center;">
       <span class="mini-label">BG</span>
@@ -103,7 +99,6 @@ cw_header('Slide Designer');
       <input id="bgAlpha" type="range" min="0" max="100" value="75" style="width:110px;">
     </label>
 
-    <!-- Guides -->
     <button class="btn btn-sm" id="btnGuideV" type="button">+ V Guide</button>
     <button class="btn btn-sm" id="btnGuideH" type="button">+ H Guide</button>
     <button class="btn btn-sm" id="btnGuideDel" type="button">Del Guide</button>
@@ -172,6 +167,7 @@ const REF_URL  = <?= json_encode($imgUrl) ?>;
 const statusEl = document.getElementById('status');
 const selInfo  = document.getElementById('selInfo');
 const zoomInfo = document.getElementById('zoomInfo');
+
 function setStatus(msg){ statusEl.textContent = msg; }
 
 const BASE_W = 1600, BASE_H = 900;
@@ -189,17 +185,14 @@ function forceTextEditable(){
     if(isTextObj(o)){ o.selectable=true; o.evented=true; o.editable=true; }
   });
 }
-
 function enterEdit(o){
   if(!isTextObj(o)) return;
   if(o.enterEditing) o.enterEditing();
   if(o.hiddenTextarea) o.hiddenTextarea.focus();
 }
 
-// dblclick
+// Editing UX: dblclick + click-twice + Enter
 canvas.on('mouse:dblclick', ()=> enterEdit(canvas.getActiveObject()));
-
-// click twice fast
 let _lastClickObj=null, _lastClickAt=0;
 canvas.on('mouse:down', ()=>{
   const o = canvas.getActiveObject();
@@ -208,8 +201,6 @@ canvas.on('mouse:down', ()=>{
   if(_lastClickObj===o && (now-_lastClickAt)<500){ enterEdit(o); }
   _lastClickObj=o; _lastClickAt=now;
 });
-
-// Enter starts editing
 document.addEventListener('keydown',(e)=>{
   const o=canvas.getActiveObject();
   if(e.key==='Enter' && isTextObj(o) && !o.isEditing){
@@ -222,6 +213,7 @@ const insX=document.getElementById('insX');
 const insY=document.getElementById('insY');
 const insW=document.getElementById('insW');
 const insH=document.getElementById('insH');
+
 document.getElementById('insApply').addEventListener('click', ()=>{
   const o=canvas.getActiveObject(); if(!o) return;
   const x=parseInt(insX.value||'0',10), y=parseInt(insY.value||'0',10);
@@ -230,7 +222,9 @@ document.getElementById('insApply').addEventListener('click', ()=>{
   if(!isNaN(y)) o.set('top',y);
   if(!isNaN(w)&&w>0&&o.width) o.set('scaleX', w/o.width);
   if(!isNaN(h)&&h>0&&o.height) o.set('scaleY', h/o.height);
-  o.setCoords(); canvas.requestRenderAll(); canvas.calcOffset();
+  o.setCoords();
+  canvas.renderAll();
+  canvas.calcOffset();
 });
 
 function updateInspector(){
@@ -244,7 +238,7 @@ function updateInspector(){
 
 canvas.on('selection:created', ()=>{ updateSel(); updateInspector(); syncTextUI(); syncColorUI(); syncBgBtnUI(); });
 canvas.on('selection:updated', ()=>{ updateSel(); updateInspector(); syncTextUI(); syncColorUI(); syncBgBtnUI(); });
-canvas.on('selection:cleared', ()=>{ document.getElementById('selInfo').textContent='None'; updateInspector(); syncBgBtnUI(); });
+canvas.on('selection:cleared', ()=>{ selInfo.textContent='None'; updateInspector(); syncBgBtnUI(); });
 
 function updateSel(){
   const o=canvas.getActiveObject(); if(!o) return;
@@ -253,7 +247,7 @@ function updateSel(){
   selInfo.textContent = `${o.type} (${Math.round(o.left||0)},${Math.round(o.top||0)}) ${w}×${h}`;
 }
 
-// background
+// Background
 function applyBackground(){
   fabric.Image.fromURL(BG_URL, (img)=>{
     img.set({left:0,top:0,selectable:false,evented:false,scaleX:BASE_W/img.width,scaleY:BASE_H/img.height});
@@ -262,17 +256,7 @@ function applyBackground(){
 }
 applyBackground();
 
-// overlay
-function createReferenceOverlay(){
-  fabric.Image.fromURL(REF_URL, (img)=>{
-    img.set({left:0,top:0,selectable:false,evented:false,opacity:0.35,scaleX:BASE_W/img.width,scaleY:BASE_H/img.height});
-    img.data={kind:'reference'};
-    refImage=img;
-    canvas.add(refImage);
-    placeRef();
-    canvas.renderAll();
-  });
-}
+// Overlay
 function placeRef(){
   if(!refImage) return;
   canvas.sendToBack(refImage);
@@ -285,7 +269,6 @@ function placeRef(){
   refImage.selectable=false; refImage.evented=false;
 }
 
-// overlay toggle + disable slider
 const refToggle=document.getElementById('refToggle');
 const refOpacity=document.getElementById('refOpacity');
 
@@ -299,13 +282,24 @@ function applyOverlayUI(){
     refOpacity.disabled=false;
     refImage.opacity=parseInt(refOpacity.value,10)/100;
   }
-  canvas.requestRenderAll();
+  canvas.renderAll();
 }
 
-refToggle.addEventListener('change', ()=>{ applyOverlayUI(); });
-refOpacity.addEventListener('input', ()=>{ applyOverlayUI(); });
+function createReferenceOverlay(){
+  fabric.Image.fromURL(REF_URL, (img)=>{
+    img.set({left:0,top:0,selectable:false,evented:false,opacity:0.35,scaleX:BASE_W/img.width,scaleY:BASE_H/img.height});
+    img.data={kind:'reference'};
+    refImage=img;
+    canvas.add(refImage);
+    placeRef();
+    applyOverlayUI(); // ✅ critical: respects checkbox state
+    canvas.renderAll();
+  });
+}
+refToggle.addEventListener('change', ()=> applyOverlayUI());
+refOpacity.addEventListener('input', ()=> applyOverlayUI());
 
-// ===== Guides =====
+// Guides as THIN RECTS (stable positions)
 function clearGuides(){
   guideObjects.forEach(g=>canvas.remove(g));
   guideObjects=[];
@@ -314,11 +308,15 @@ function drawGuide(g){
   const axis=g.axis;
   const pos=parseInt(g.pos,10)||0;
   const color=g.color||'#ABCDE0';
-  let line;
-  if(axis==='v') line=new fabric.Line([pos,0,pos,900],{stroke:color,strokeWidth:2,selectable:true,evented:true});
-  else line=new fabric.Line([0,pos,1600,pos],{stroke:color,strokeWidth:2,selectable:true,evented:true});
-  line.data={kind:'guide',guide_id:g.id,axis:axis};
-  canvas.add(line); guideObjects.push(line);
+  let rect;
+  if(axis==='v'){
+    rect=new fabric.Rect({ left:pos, top:0, width:2, height:900, fill:color, selectable:true, evented:true });
+  } else {
+    rect=new fabric.Rect({ left:0, top:pos, width:1600, height:2, fill:color, selectable:true, evented:true });
+  }
+  rect.data={kind:'guide',guide_id:g.id,axis:axis,pos:pos};
+  canvas.add(rect);
+  guideObjects.push(rect);
 }
 async function loadGuides(){
   const res=await fetch('/admin/api/guides_get.php');
@@ -327,27 +325,24 @@ async function loadGuides(){
   clearGuides();
   (j.guides||[]).forEach(drawGuide);
   guideObjects.forEach(g=>canvas.bringToFront(g));
-  canvas.requestRenderAll();
+  canvas.renderAll();
   canvas.calcOffset();
-  applyOverlayUI();
 }
-function existingGuidePositions(axis){
-  return guideObjects.filter(g=>g?.data?.axis===axis).map(g=>Math.round(g.x1||g.y1||0));
-}
+
 function nextFreePos(axis){
-  const used=new Set(existingGuidePositions(axis));
+  const used=new Set(guideObjects.filter(g=>g?.data?.axis===axis).map(g=>g.data.pos));
   let p=80;
-  while(used.has(p)) p += 20;
+  while(used.has(p)) p+=20;
   return p;
 }
 
 document.getElementById('btnGuideV').addEventListener('click', async ()=>{
-  const pos = nextFreePos('v');
+  const pos=nextFreePos('v');
   await fetch('/admin/api/guides_save.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',axis:'v',pos:pos,color:'#ABCDE0'})});
   await loadGuides();
 });
 document.getElementById('btnGuideH').addEventListener('click', async ()=>{
-  const pos = nextFreePos('h');
+  const pos=nextFreePos('h');
   await fetch('/admin/api/guides_save.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'add',axis:'h',pos:pos,color:'#ABCDE0'})});
   await loadGuides();
 });
@@ -358,14 +353,13 @@ document.getElementById('btnGuideDel').addEventListener('click', async ()=>{
   await loadGuides();
 });
 
-// guide recolor / move persist
 const guideColor=document.getElementById('guideColor');
 document.getElementById('btnGuideApply').addEventListener('click', async ()=>{
   const o=canvas.getActiveObject();
   if(!o || o?.data?.kind!=='guide') return;
   const id=o.data.guide_id;
   const axis=o.data.axis;
-  const pos = axis==='v' ? Math.round(o.x1) : Math.round(o.y1);
+  const pos = (axis==='v') ? Math.round(o.left) : Math.round(o.top);
   const color = guideColor.value || '#ABCDE0';
   await fetch('/admin/api/guides_save.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'update',id:id,pos:pos,color:color})});
   await loadGuides();
@@ -373,11 +367,11 @@ document.getElementById('btnGuideApply').addEventListener('click', async ()=>{
 canvas.on('selection:updated', ()=>{
   const o=canvas.getActiveObject();
   if(o?.data?.kind==='guide'){
-    guideColor.value = (o.stroke && typeof o.stroke==='string' && o.stroke.startsWith('#')) ? o.stroke : '#abcde0';
+    guideColor.value = (o.fill && typeof o.fill==='string' && o.fill.startsWith('#')) ? o.fill : '#abcde0';
   }
 });
 
-// ===== Text styling =====
+// Text styling
 const fontFamilyEl=document.getElementById('fontFamily');
 const fontSizeEl=document.getElementById('fontSize');
 const btnBold=document.getElementById('btnBold');
@@ -391,8 +385,8 @@ const textColorEl=document.getElementById('textColor');
 
 function syncTextUI(){
   const t=activeText(); if(!t) return;
-  fontFamilyEl.value = (t.fontFamily==='Manrope')?'Manrope':'Arial';
-  fontSizeEl.value = String(t.fontSize||26);
+  fontFamilyEl.value=(t.fontFamily==='Manrope')?'Manrope':'Arial';
+  fontSizeEl.value=String(t.fontSize||26);
 }
 function syncColorUI(){
   const t=activeText(); if(!t) return;
@@ -401,40 +395,34 @@ function syncColorUI(){
 function syncBgBtnUI(){
   const t=activeText();
   if(!t){ btnToggleBg.classList.remove('btn-on'); return; }
-  if(t.backgroundColor) btnToggleBg.classList.add('btn-on');
-  else btnToggleBg.classList.remove('btn-on');
+  if(t.backgroundColor) btnToggleBg.classList.add('btn-on'); else btnToggleBg.classList.remove('btn-on');
 }
 
-fontFamilyEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontFamily=fontFamilyEl.value; canvas.requestRenderAll(); });
-fontSizeEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontSize=parseInt(fontSizeEl.value,10); canvas.requestRenderAll(); });
-
-btnBold.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontWeight=(t.fontWeight==='bold')?'normal':'bold'; canvas.requestRenderAll(); });
-btnItalic.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontStyle=(t.fontStyle==='italic')?'normal':'italic'; canvas.requestRenderAll(); });
-btnUnderline.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.underline=!t.underline; canvas.requestRenderAll(); });
-
-textColorEl.addEventListener('input', ()=>{ const t=activeText(); if(!t) return; t.fill=textColorEl.value; canvas.requestRenderAll(); });
+fontFamilyEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontFamily=fontFamilyEl.value; canvas.renderAll(); });
+fontSizeEl.addEventListener('change', ()=>{ const t=activeText(); if(!t) return; t.fontSize=parseInt(fontSizeEl.value,10); canvas.renderAll(); });
+btnBold.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontWeight=(t.fontWeight==='bold')?'normal':'bold'; canvas.renderAll(); });
+btnItalic.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.fontStyle=(t.fontStyle==='italic')?'normal':'italic'; canvas.renderAll(); });
+btnUnderline.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; t.underline=!t.underline; canvas.renderAll(); });
+textColorEl.addEventListener('input', ()=>{ const t=activeText(); if(!t) return; t.fill=textColorEl.value; canvas.renderAll(); });
 
 function applyTextboxBg(t, on){
   if(!t) return;
-  if(!on){ t.backgroundColor=null; canvas.requestRenderAll(); syncBgBtnUI(); return; }
+  if(!on){ t.backgroundColor=null; canvas.renderAll(); syncBgBtnUI(); return; }
   const a=parseInt(bgAlpha.value,10)/100;
-  // convert hex to rgb
   const hex=bgColor.value.replace('#','');
   const r=parseInt(hex.substring(0,2),16), g=parseInt(hex.substring(2,4),16), b=parseInt(hex.substring(4,6),16);
-  t.backgroundColor = `rgba(${r},${g},${b},${a})`;
-  canvas.requestRenderAll();
-  syncBgBtnUI();
+  t.backgroundColor=`rgba(${r},${g},${b},${a})`;
+  canvas.renderAll(); syncBgBtnUI();
 }
 btnToggleBg.addEventListener('click', ()=>{ const t=activeText(); if(!t) return; applyTextboxBg(t, !t.backgroundColor); });
 bgColor.addEventListener('input', ()=>{ const t=activeText(); if(!t) return; if(t.backgroundColor) applyTextboxBg(t,true); });
 bgAlpha.addEventListener('input', ()=>{ const t=activeText(); if(!t) return; if(t.backgroundColor) applyTextboxBg(t,true); });
 
-// Quick styles
 const STYLE_PRESETS = {
-  TITLE:      { x:80,y:110,w:1440,h:90, fontFamily:'Manrope', fontSize:40, fontWeight:'bold', fontStyle:'normal', underline:false },
-  BODY_LEFT:  { x:80,y:240,w:680,h:560,  fontFamily:'Manrope', fontSize:26, fontWeight:'normal', fontStyle:'normal', underline:false },
-  BODY_RIGHT: { x:840,y:240,w:680,h:560, fontFamily:'Manrope', fontSize:26, fontWeight:'normal', fontStyle:'normal', underline:false },
-  CAPTION:    { x:80,y:820,w:1440,h:60,  fontFamily:'Manrope', fontSize:20, fontWeight:'normal', fontStyle:'italic', underline:false }
+  TITLE:{x:80,y:110,w:1440,h:90,fontFamily:'Manrope',fontSize:40,fontWeight:'bold',fontStyle:'normal',underline:false},
+  BODY_LEFT:{x:80,y:240,w:680,h:560,fontFamily:'Manrope',fontSize:26,fontWeight:'normal',fontStyle:'normal',underline:false},
+  BODY_RIGHT:{x:840,y:240,w:680,h:560,fontFamily:'Manrope',fontSize:26,fontWeight:'normal',fontStyle:'normal',underline:false},
+  CAPTION:{x:80,y:820,w:1440,h:60,fontFamily:'Manrope',fontSize:20,fontWeight:'normal',fontStyle:'italic',underline:false}
 };
 quickStyle.addEventListener('change', ()=>{
   const key=quickStyle.value; if(!key) return;
@@ -446,7 +434,7 @@ quickStyle.addEventListener('change', ()=>{
   t.fontFamily=s.fontFamily; t.fontSize=s.fontSize;
   t.fontWeight=s.fontWeight; t.fontStyle=s.fontStyle; t.underline=!!s.underline;
   t.backgroundColor=null;
-  t.setCoords(); canvas.requestRenderAll();
+  t.setCoords(); canvas.renderAll();
   updateInspector(); syncTextUI(); syncBgBtnUI();
   quickStyle.value='';
 });
@@ -458,12 +446,12 @@ document.getElementById('btnAddText').addEventListener('click', ()=>{
   canvas.add(t); canvas.setActiveObject(t);
   forceTextEditable();
   syncTextUI(); syncColorUI(); syncBgBtnUI(); updateInspector();
-  canvas.requestRenderAll();
+  canvas.renderAll();
 });
 document.getElementById('btnAddRedact').addEventListener('click', ()=>{
   const r=new fabric.Rect({left:80,top:80,width:420,height:80,fill:'rgba(255,255,255,0.96)',stroke:'#ddd',strokeWidth:1});
   r.data={kind:'redact'}; canvas.add(r); canvas.setActiveObject(r);
-  updateInspector(); canvas.requestRenderAll();
+  updateInspector(); canvas.renderAll();
 });
 function addBox(kind,label){
   const rect=new fabric.Rect({left:0,top:0,width:520,height:320,fill:'rgba(0,0,0,0.03)',stroke:'#0b2a4a',strokeWidth:2,rx:12,ry:12});
@@ -471,15 +459,16 @@ function addBox(kind,label){
   const group=new fabric.Group([rect,text],{left:900,top:240});
   group.data={kind,src:''};
   canvas.add(group); canvas.setActiveObject(group);
-  updateInspector(); canvas.requestRenderAll();
+  updateInspector(); canvas.renderAll();
 }
 document.getElementById('btnAddImageBox').addEventListener('click',()=>addBox('image','IMAGE'));
 document.getElementById('btnAddVideoBox').addEventListener('click',()=>addBox('video','VIDEO'));
 
-document.getElementById('btnBringFront').addEventListener('click',()=>{ const o=canvas.getActiveObject(); if(!o) return; canvas.bringToFront(o); placeRef(); canvas.requestRenderAll(); });
-document.getElementById('btnSendBack').addEventListener('click',()=>{ const o=canvas.getActiveObject(); if(!o) return; canvas.sendToBack(o); placeRef(); canvas.requestRenderAll(); });
-document.getElementById('btnDelete').addEventListener('click',()=>{ const o=canvas.getActiveObject(); if(!o) return; if(o?.data?.kind==='reference') return; canvas.remove(o); canvas.requestRenderAll(); updateInspector(); });
+document.getElementById('btnBringFront').addEventListener('click',()=>{ const o=canvas.getActiveObject(); if(!o) return; canvas.bringToFront(o); placeRef(); canvas.renderAll(); });
+document.getElementById('btnSendBack').addEventListener('click',()=>{ const o=canvas.getActiveObject(); if(!o) return; canvas.sendToBack(o); placeRef(); canvas.renderAll(); });
+document.getElementById('btnDelete').addEventListener('click',()=>{ const o=canvas.getActiveObject(); if(!o) return; if(o?.data?.kind==='reference') return; canvas.remove(o); canvas.renderAll(); updateInspector(); });
 
+// Fit (keep your existing scaling if you have it elsewhere; here we keep base)
 function fitCanvas(){
   const wrap=document.getElementById('canvasWrap');
   const w=wrap.clientWidth, h=wrap.clientHeight;
@@ -488,11 +477,12 @@ function fitCanvas(){
   canvas.setHeight(Math.round(BASE_H*scale));
   canvas.setZoom(scale);
   canvas.calcOffset();
-  canvas.requestRenderAll();
+  canvas.renderAll();
   zoomInfo.textContent = `Display scale: ${(scale*100).toFixed(0)}%  |  Internal: ${BASE_W}×${BASE_H}`;
 }
 window.addEventListener('resize',()=>setTimeout(fitCanvas,50));
 
+// Load / Save
 async function loadDesign(){
   const res=await fetch('/admin/api/load_design.php?slide_id='+SLIDE_ID);
   const j=await res.json();
@@ -510,19 +500,18 @@ async function loadDesign(){
     canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
     if(!refImage) createReferenceOverlay();
     await loadGuides();
-    setStatus('Layout loaded. Double-click or press Enter to edit text.');
-    canvas.requestRenderAll();
+    setStatus('Layout loaded.');
     canvas.calcOffset();
-    setTimeout(fitCanvas,200);
+    fitCanvas();
   });
 }
 
-// Save: manual serialize; skip guides + overlay
 async function saveDesign(renderAlso){
   try{
     setStatus('Saving...');
     canvas.discardActiveObject();
-    canvas.requestRenderAll();
+    canvas.renderAll();
+
     canvas.getObjects().forEach(o=>{ if(o && isTextObj(o) && o.isEditing) o.exitEditing(); });
 
     const objects=[];
@@ -561,14 +550,11 @@ async function saveDesign(renderAlso){
     let jr; try{ jr=JSON.parse(txt);}catch(e){ jr={ok:false,error:'Non-JSON response: '+txt.slice(0,200)};}
     if(!jr.ok){ setStatus('Save failed: '+(jr.error||'unknown')); return; }
     setStatus(renderAlso?'Saved + rendered HTML.':'Saved layout.');
-  }catch(err){
-    setStatus('Save exception: '+err);
-  }
+  }catch(err){ setStatus('Save exception: '+err); }
 }
 document.getElementById('btnSave').addEventListener('click',()=>saveDesign(false));
 document.getElementById('btnSaveRender').addEventListener('click',()=>saveDesign(true));
 
-// AI
 document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
   setStatus('AI analyzing…');
   undoAiJson={version:'5.3.0',objects:canvas.getObjects().filter(o=>!(o&&o.data&&o.data.kind==='reference') && !(o&&o.data&&o.data.kind==='guide')).map(o=>o.toObject(['data']))};
@@ -583,20 +569,15 @@ document.getElementById('btnAiLayout').addEventListener('click', async ()=>{
     applyBackground();
     forceTextEditable();
     canvas.getObjects().forEach(o=>{
-      if(isTextObj(o)){
-        o.backgroundColor=null;
-        o.fontFamily=o.fontFamily||'Manrope';
-        if(!o.fill) o.fill='#0b2a4a';
-      }
+      if(isTextObj(o)){ o.backgroundColor=null; o.fontFamily=o.fontFamily||'Manrope'; if(!o.fill) o.fill='#0b2a4a'; }
     });
     refImage=null;
     canvas.getObjects().forEach(o=>{ if(o?.data?.kind==='reference') refImage=o; });
     if(!refImage) createReferenceOverlay();
     await loadGuides();
-    setStatus('AI layout loaded. Double-click (or click twice) / press Enter to edit.');
-    canvas.requestRenderAll();
+    setStatus('AI layout loaded.');
     canvas.calcOffset();
-    setTimeout(fitCanvas,200);
+    fitCanvas();
   });
 });
 
@@ -610,9 +591,8 @@ document.getElementById('btnUndoAi').addEventListener('click', ()=>{
     if(!refImage) createReferenceOverlay();
     await loadGuides();
     setStatus('Undo AI complete.');
-    canvas.requestRenderAll();
     canvas.calcOffset();
-    setTimeout(fitCanvas,200);
+    fitCanvas();
   });
   undoAiJson=null;
   document.getElementById('btnUndoAi').disabled=true;
@@ -623,8 +603,7 @@ setTimeout(async ()=>{
   await loadGuides();
   createReferenceOverlay();
   applyOverlayUI();
-  setTimeout(fitCanvas,300);
+  setTimeout(fitCanvas, 200);
 }, 400);
 </script>
-
 <?php cw_footer(); ?>
