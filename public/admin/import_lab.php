@@ -23,14 +23,22 @@ function progress(string $msg): void {
     @flush();
 }
 
+/**
+ * IMPORTANT:
+ * Many CDNs mishandle HEAD (return 403/405/302 even though GET works).
+ * So we probe existence using GET with Range bytes=0-0.
+ * Accept 200 OK or 206 Partial Content as "exists".
+ */
 function http_head_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): bool {
     for ($attempt = 1; $attempt <= $retries; $attempt++) {
         $ctx = stream_context_create([
             'http' => [
-                'method' => 'HEAD',
+                'method' => 'GET',
                 'timeout' => $timeoutSeconds,
                 'ignore_errors' => true,
-                'header' => "User-Agent: IPCA-Courseware\r\n"
+                'header' =>
+                    "User-Agent: IPCA-Courseware\r\n" .
+                    "Range: bytes=0-0\r\n"
             ]
         ]);
 
@@ -38,10 +46,13 @@ function http_head_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): b
 
         if ($headers) {
             $first = is_array($headers) ? ($headers[0] ?? '') : '';
-            if (is_string($first) && strpos($first, '200') !== false) return true;
+            if (is_string($first)) {
+                // Treat 200 OK and 206 Partial Content as success
+                if (strpos($first, '200') !== false || strpos($first, '206') !== false) return true;
 
-            // definitive negatives
-            if (is_string($first) && (strpos($first, '404') !== false || strpos($first, '403') !== false)) return false;
+                // Definitive negatives
+                if (strpos($first, '404') !== false || strpos($first, '403') !== false) return false;
+            }
         }
 
         usleep(250000); // 250ms
@@ -305,10 +316,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             progress("Lesson {$extLessonId}: probing page_count…");
             $pageCount = detect_page_count($CDN_BASE, $programKey, $extLessonId, 300);
 
-            // default title (fallback)
             $title = "Lesson {$extLessonId}";
 
-            // AI title detection on page 001 screenshot
             if ($aiTitles && $pageCount > 0) {
                 $imgPath = image_path_for($programKey, $extLessonId, 1);
                 $imgUrl = cdn_url($CDN_BASE, $imgPath);
