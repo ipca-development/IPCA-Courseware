@@ -6,9 +6,9 @@ require_once __DIR__ . '/../../src/openai.php';
 cw_require_admin();
 
 // --- keep long-running requests alive ---
-@set_time_limit(600);
-@ini_set('max_execution_time', '600');
-@ini_set('default_socket_timeout', '20');
+@set_time_limit(1200);
+@ini_set('max_execution_time', '1200');
+@ini_set('default_socket_timeout', '30');
 @ini_set('output_buffering', 'off');
 @ini_set('zlib.output_compression', '0');
 
@@ -24,41 +24,13 @@ function progress(string $msg): void {
 }
 
 /**
- * IMPORTANT:
- * Many CDNs mishandle HEAD (return 403/405/302 even though GET works).
- * So we probe existence using GET with Range bytes=0-0.
- * Accept 200 OK or 206 Partial Content as "exists".
+ * CDN existence probe
+ * Use GET + Range (CDNs often mishandle HEAD).
  */
-
-
-function http_head_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): bool {
-    // Prefer cURL if available (most reliable with CDNs)
+function http_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): bool {
+    // Prefer cURL if available
     if (function_exists('curl_init')) {
         for ($attempt = 1; $attempt <= $retries; $attempt++) {
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_NOBODY, true);           // HEAD-like
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);   // follow 301/302
-            curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
-            curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSeconds);
-            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeoutSeconds);
-            curl_setopt($ch, CURLOPT_USERAGENT, 'IPCA-Courseware');
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
-
-            // Some CDNs are weird with HEAD; if HEAD fails, we retry with a tiny GET range.
-            $ok = false;
-
-            $resp = curl_exec($ch);
-            $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-            curl_close($ch);
-
-            if ($code === 200 || $code === 206) return true;
-            if ($code === 404) return false;
-            if ($code === 403) return false;
-
-            // Retry with small GET range (0-0) if HEAD not accepted
             $ch = curl_init();
             curl_setopt($ch, CURLOPT_URL, $url);
             curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -67,23 +39,13 @@ function http_head_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): b
             curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSeconds);
             curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeoutSeconds);
             curl_setopt($ch, CURLOPT_USERAGENT, 'IPCA-Courseware');
-            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
-            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
-            curl_setopt($ch, CURLOPT_HTTPHEADER, [
-                'Range: bytes=0-0'
-            ]);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, ['Range: bytes=0-0']);
 
-            $resp = curl_exec($ch);
+            curl_exec($ch);
             $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
             curl_close($ch);
 
-            // ✅ Accept 200 OK or 206 Partial Content as exists
-            if ($code === 200 || $code === 206) return true;
-
-            // ✅ Some CDNs return 416 for range (still means object exists)
-            if ($code === 416) return true;
-
-            // Definitive negatives
+            if ($code === 200 || $code === 206 || $code === 416) return true;
             if ($code === 404 || $code === 403) return false;
 
             usleep(250000);
@@ -91,7 +53,7 @@ function http_head_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): b
         return false;
     }
 
-    // Fallback if curl not available: GET + Range with get_headers (less reliable)
+    // Fallback: get_headers
     for ($attempt = 1; $attempt <= $retries; $attempt++) {
         $ctx = stream_context_create([
             'http' => [
@@ -108,8 +70,7 @@ function http_head_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): b
         if ($headers) {
             $first = is_array($headers) ? ($headers[0] ?? '') : '';
             if (is_string($first)) {
-                if (strpos($first, '200') !== false || strpos($first, '206') !== false) return true;
-                if (strpos($first, '416') !== false) return true;
+                if (strpos($first, '200') !== false || strpos($first, '206') !== false || strpos($first, '416') !== false) return true;
                 if (strpos($first, '404') !== false || strpos($first, '403') !== false) return false;
             }
         }
@@ -118,41 +79,36 @@ function http_head_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): b
     return false;
 }
 
-
 function detect_page_count(string $cdnBase, string $programKey, int $externalLessonId, int $maxCap = 300): int {
     $p1 = image_path_for($programKey, $externalLessonId, 1);
-    if (!http_head_ok(cdn_url($cdnBase, $p1))) {
+    if (!http_ok(cdn_url($cdnBase, $p1))) {
         return 0;
     }
 
+    // Exponential search
     $lo = 1;
     $hi = 2;
 
     while ($hi <= $maxCap) {
         $path = image_path_for($programKey, $externalLessonId, $hi);
-        if (http_head_ok(cdn_url($cdnBase, $path))) {
+        if (http_ok(cdn_url($cdnBase, $path))) {
             $lo = $hi;
             $hi *= 2;
         } else {
             break;
         }
     }
-
     if ($hi > $maxCap) $hi = $maxCap;
 
+    // Binary search
     $left = $lo;
     $right = $hi;
-
     while ($left < $right) {
         $mid = intdiv($left + $right + 1, 2);
         $path = image_path_for($programKey, $externalLessonId, $mid);
-        if (http_head_ok(cdn_url($cdnBase, $path))) {
-            $left = $mid;
-        } else {
-            $right = $mid - 1;
-        }
+        if (http_ok(cdn_url($cdnBase, $path))) $left = $mid;
+        else $right = $mid - 1;
     }
-
     return $left;
 }
 
@@ -166,20 +122,17 @@ function parse_lesson_ids(string $raw): array {
     if (isset($data['lessonIds']) && is_array($data['lessonIds'])) {
         return array_values(array_map('intval', array_filter($data['lessonIds'], 'is_numeric')));
     }
-
     if (isset($data[0]) && is_numeric($data[0])) {
         return array_values(array_map('intval', array_filter($data, 'is_numeric')));
     }
-
     return [];
 }
 
 /**
- * Parse bulk labs JSON:
- * [
- *   {"labId":10001,"courseTitle":"...","courseSlug":"...","courseOrder":0,"lessonIds":[10002,10003]},
- *   ...
- * ]
+ * Parse your manifest as-is:
+ * { "labs": [ { "labId":10009, "lessonIds":[...] }, ... ], ... }
+ * courseTitle is NOT required (we AI-generate it).
+ * Empty labs are skipped.
  */
 function parse_labs_json(string $raw): array {
     $raw = trim($raw);
@@ -188,32 +141,78 @@ function parse_labs_json(string $raw): array {
     $data = json_decode($raw, true);
     if (!is_array($data)) return [];
 
-    // allow wrapper {labs:[...]}
     if (isset($data['labs']) && is_array($data['labs'])) $data = $data['labs'];
 
     $out = [];
     foreach ($data as $row) {
         if (!is_array($row)) continue;
         $labId = (int)($row['labId'] ?? 0);
-        $title = trim((string)($row['courseTitle'] ?? $row['course_title'] ?? ''));
-        $slug  = trim((string)($row['courseSlug'] ?? $row['course_slug'] ?? ''));
-        $order = (int)($row['courseOrder'] ?? $row['course_order'] ?? 0);
         $lessonIds = $row['lessonIds'] ?? $row['lesson_ids'] ?? [];
         if (!is_array($lessonIds)) $lessonIds = [];
 
         $lessonIds = array_values(array_map('intval', array_filter($lessonIds, 'is_numeric')));
 
-        if ($labId <= 0 || $title === '' || !$lessonIds) continue;
+        if ($labId <= 0) continue;
+        if (!$lessonIds) continue; // skip empty labs
 
         $out[] = [
             'lab_id' => $labId,
-            'course_title' => $title,
-            'course_slug' => $slug,
-            'course_order' => $order,
-            'lesson_ids' => $lessonIds,
+            'lesson_ids' => $lessonIds
         ];
     }
     return $out;
+}
+
+/**
+ * AI: extract course title from the seed lesson page 001 screenshot.
+ * We want the big centered course title (e.g. "Getting To Know Your Airplane").
+ * Ignore phase titles and UI chrome.
+ */
+function ai_detect_course_title(string $imageUrl): string {
+    $schema = [
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => [
+            "course_title" => ["type" => "string"]
+        ],
+        "required" => ["course_title"]
+    ];
+
+    $instructions = <<<TXT
+Extract the COURSE TITLE from this screenshot.
+
+The COURSE TITLE is the big centered title of the module (example: "Getting To Know Your Airplane").
+Ignore:
+- "Learning Your Airplane" (phase/group title)
+- "MAIN MENU / HOW TO USE THIS COURSE / SAVE & EXIT"
+- breadcrumb paths with "/"
+- footer controls / page numbers
+Return only the course title text.
+TXT;
+
+    $payload = [
+        "model" => cw_openai_model(),
+        "input" => [
+            ["role"=>"system","content"=>[["type"=>"input_text","text"=>$instructions]]],
+            ["role"=>"user","content"=>[
+                ["type"=>"input_text","text"=>"Extract the course title."],
+                ["type"=>"input_image","image_url"=>$imageUrl]
+            ]]
+        ],
+        "text" => [
+            "format" => [
+                "type" => "json_schema",
+                "name" => "course_title_v1",
+                "schema" => $schema,
+                "strict" => true
+            ]
+        ],
+        "temperature" => 0.2
+    ];
+
+    $resp = cw_openai_responses($payload);
+    $json = cw_openai_extract_json_text($resp);
+    return trim((string)($json['course_title'] ?? ''));
 }
 
 /**
@@ -261,25 +260,24 @@ TXT;
 
     $resp = cw_openai_responses($payload);
     $json = cw_openai_extract_json_text($resp);
-    $t = trim((string)($json['title'] ?? ''));
-    return $t;
+    return trim((string)($json['title'] ?? ''));
 }
 
-$msg = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // IMPORTANT: render streaming output page
     echo "<!doctype html><html><head><meta charset='utf-8'><title>Importing…</title></head><body style='padding:16px'>";
     progress("Starting import…");
 
     $programKey = trim($_POST['program_key'] ?? 'private');
     $defaultTpl = trim($_POST['default_template_key'] ?? 'MEDIA_LEFT_TEXT_RIGHT');
-    $aiTitles   = isset($_POST['ai_titles']) ? 1 : 0;
+
+    $aiCourseTitles = isset($_POST['ai_course_titles']) ? 1 : 0;
+    $aiLessonTitles = isset($_POST['ai_titles']) ? 1 : 0;
 
     // Bulk mode
     $bulkRaw = (string)($_POST['labs_json'] ?? '');
     $labs = parse_labs_json($bulkRaw);
 
-    // Fallback: single lab mode (existing fields)
+    // Single-lab mode fallback
     if (!$labs) {
         $labId = (int)($_POST['lab_id'] ?? 0);
         $courseTitle = trim($_POST['course_title'] ?? '');
@@ -288,19 +286,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lessonIds = parse_lesson_ids((string)($_POST['lesson_ids_json'] ?? ''));
 
         if ($labId <= 0 || $courseTitle === '' || !$lessonIds) {
-            progress("ERROR: Provide either Bulk Labs JSON OR Lab ID + Course Title + Lesson IDs JSON.");
+            progress("ERROR: Provide Bulk Labs JSON (manifest) OR Lab ID + Course Title + Lesson IDs JSON.");
             echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
             exit;
         }
-
         if ($courseSlug === '') $courseSlug = slugify($courseTitle);
 
         $labs = [[
             'lab_id' => $labId,
+            'lesson_ids' => $lessonIds,
+            // single-lab uses provided title
             'course_title' => $courseTitle,
             'course_slug' => $courseSlug,
-            'course_order' => $courseOrder,
-            'lesson_ids' => $lessonIds,
+            'course_order' => $courseOrder
         ]];
     }
 
@@ -349,13 +347,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $totalLessons = 0;
     $totalCourses = 0;
 
+    $labOrder = 10;
+
     foreach ($labs as $lab) {
         $labId = (int)$lab['lab_id'];
-        $courseTitle = (string)$lab['course_title'];
-        $courseSlug  = trim((string)$lab['course_slug']);
-        $courseOrder = (int)$lab['course_order'];
-        $lessonIds   = (array)$lab['lesson_ids'];
+        $lessonIds = (array)$lab['lesson_ids'];
+        if (!$lessonIds) continue;
 
+        // Determine course title
+        $courseTitle = trim((string)($lab['course_title'] ?? ''));
+        $courseSlug  = trim((string)($lab['course_slug'] ?? ''));
+        $courseOrder = (int)($lab['course_order'] ?? $labOrder);
+
+        if ($courseTitle === '' && $aiCourseTitles) {
+            $seedLessonId = (int)$lessonIds[0];
+            $seedPath = image_path_for($programKey, $seedLessonId, 1);
+            $seedUrl  = cdn_url($CDN_BASE, $seedPath);
+
+            progress("Lab {$labId}: AI detecting COURSE title from lesson {$seedLessonId} page 001…");
+
+            try {
+                $t = ai_detect_course_title($seedUrl);
+                if ($t !== '') {
+                    $courseTitle = $t;
+                    progress("Lab {$labId}: Course title = {$courseTitle}");
+                } else {
+                    $courseTitle = "Lab {$labId}";
+                    progress("Lab {$labId}: AI returned empty, using {$courseTitle}");
+                }
+            } catch (Throwable $e) {
+                $courseTitle = "Lab {$labId}";
+                progress("Lab {$labId}: AI course title failed, using {$courseTitle} (" . $e->getMessage() . ")");
+            }
+        }
+
+        if ($courseTitle === '') $courseTitle = "Lab {$labId}";
         if ($courseSlug === '') $courseSlug = slugify($courseTitle);
 
         progress("----");
@@ -373,12 +399,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($lessonIds as $extLessonId) {
             $totalLessons++;
             progress("Lesson {$extLessonId}: probing page_count…");
-            $pageCount = detect_page_count($CDN_BASE, $programKey, $extLessonId, 300);
+            $pageCount = detect_page_count($CDN_BASE, $programKey, (int)$extLessonId, 300);
 
             $title = "Lesson {$extLessonId}";
 
-            if ($aiTitles && $pageCount > 0) {
-                $imgPath = image_path_for($programKey, $extLessonId, 1);
+            if ($aiLessonTitles && $pageCount > 0) {
+                $imgPath = image_path_for($programKey, (int)$extLessonId, 1);
                 $imgUrl = cdn_url($CDN_BASE, $imgPath);
 
                 try {
@@ -395,15 +421,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            $insLesson->execute([$courseId, $extLessonId, $title, $sort, $pageCount, $defaultTpl]);
-            $getLessonId->execute([$courseId, $extLessonId]);
+            $insLesson->execute([$courseId, (int)$extLessonId, $title, $sort, $pageCount, $defaultTpl]);
+            $getLessonId->execute([$courseId, (int)$extLessonId]);
             $lessonRowId = (int)$getLessonId->fetchColumn();
 
             progress("Lesson {$extLessonId}: page_count={$pageCount} (lesson_row_id={$lessonRowId})");
 
             if ($pageCount > 0) {
                 for ($p = 1; $p <= $pageCount; $p++) {
-                    $imgPath = image_path_for($programKey, $extLessonId, $p);
+                    $imgPath = image_path_for($programKey, (int)$extLessonId, $p);
                     $insSlide->execute([$lessonRowId, $p, $defaultTpl, $imgPath]);
                     $totalSlides++;
                 }
@@ -413,6 +439,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         progress("Lab {$labId} complete. Slides so far: {$totalSlides}");
+        $labOrder += 10;
     }
 
     progress("----");
@@ -431,8 +458,8 @@ cw_header('Import Lab');
 ?>
 <div class="card">
   <p class="muted">
-    Import Labs. This tool will create Course → Lessons → Slides and auto-detect page_count by probing your CDN.
-    Optionally, it can AI-detect lesson titles from the page 001 screenshot.
+    Bulk import from your KS manifest. This will create Course → Lessons → Slides and detect page_count via CDN.
+    Optionally AI-detects course titles (per lab) and lesson titles (per lesson).
   </p>
 
   <form method="post" class="form-grid">
@@ -450,12 +477,15 @@ cw_header('Import Lab');
       <?php endforeach; ?>
     </select>
 
-    <label>AI detect lesson titles</label>
-    <input type="checkbox" name="ai_titles" value="1">
+    <label>AI detect COURSE titles (per lab)</label>
+    <input type="checkbox" name="ai_course_titles" value="1" checked>
 
-    <label>Bulk Labs JSON</label>
-    <textarea name="labs_json" rows="10" style="width:100%; grid-column: 2 / 3;"
-      placeholder='Paste array: [{"labId":10001,"courseTitle":"Getting to Know your Airplane","courseOrder":10,"lessonIds":[10002,10003,...]}, {...}]'></textarea>
+    <label>AI detect LESSON titles (per lesson)</label>
+    <input type="checkbox" name="ai_titles" value="1" checked>
+
+    <label>Bulk Labs JSON (your manifest)</label>
+    <textarea name="labs_json" rows="12" style="width:100%; grid-column: 2 / 3;"
+      placeholder='Paste your manifest JSON here. Example: {"labs":[{"labId":10009,"lessonIds":[10102,10103]}], "lab_range":[10001,10026]}'></textarea>
 
     <div class="muted" style="grid-column:1/-1; padding:6px 0;">
       If Bulk Labs JSON is provided, the single-lab fields below are ignored.
@@ -465,7 +495,7 @@ cw_header('Import Lab');
     <input name="lab_id" type="number" placeholder="Single lab mode">
 
     <label>Course title</label>
-    <input name="course_title" placeholder="Single lab mode: e.g. Airspace">
+    <input name="course_title" placeholder="Single lab mode">
 
     <label>Course slug</label>
     <input name="course_slug" placeholder="auto from title">
