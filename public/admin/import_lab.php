@@ -29,7 +29,69 @@ function progress(string $msg): void {
  * So we probe existence using GET with Range bytes=0-0.
  * Accept 200 OK or 206 Partial Content as "exists".
  */
+
+
 function http_head_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): bool {
+    // Prefer cURL if available (most reliable with CDNs)
+    if (function_exists('curl_init')) {
+        for ($attempt = 1; $attempt <= $retries; $attempt++) {
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_NOBODY, true);           // HEAD-like
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);   // follow 301/302
+            curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
+            curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSeconds);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeoutSeconds);
+            curl_setopt($ch, CURLOPT_USERAGENT, 'IPCA-Courseware');
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+
+            // Some CDNs are weird with HEAD; if HEAD fails, we retry with a tiny GET range.
+            $ok = false;
+
+            $resp = curl_exec($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            curl_close($ch);
+
+            if ($code === 200 || $code === 206) return true;
+            if ($code === 404) return false;
+            if ($code === 403) return false;
+
+            // Retry with small GET range (0-0) if HEAD not accepted
+            $ch = curl_init();
+            curl_setopt($ch, CURLOPT_URL, $url);
+            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
+            curl_setopt($ch, CURLOPT_MAXREDIRS, 5);
+            curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSeconds);
+            curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, $timeoutSeconds);
+            curl_setopt($ch, CURLOPT_USERAGENT, 'IPCA-Courseware');
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
+            curl_setopt($ch, CURLOPT_HTTPHEADER, [
+                'Range: bytes=0-0'
+            ]);
+
+            $resp = curl_exec($ch);
+            $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+            curl_close($ch);
+
+            // ✅ Accept 200 OK or 206 Partial Content as exists
+            if ($code === 200 || $code === 206) return true;
+
+            // ✅ Some CDNs return 416 for range (still means object exists)
+            if ($code === 416) return true;
+
+            // Definitive negatives
+            if ($code === 404 || $code === 403) return false;
+
+            usleep(250000);
+        }
+        return false;
+    }
+
+    // Fallback if curl not available: GET + Range with get_headers (less reliable)
     for ($attempt = 1; $attempt <= $retries; $attempt++) {
         $ctx = stream_context_create([
             'http' => [
@@ -43,22 +105,19 @@ function http_head_ok(string $url, int $timeoutSeconds = 8, int $retries = 3): b
         ]);
 
         $headers = @get_headers($url, 1, $ctx);
-
         if ($headers) {
             $first = is_array($headers) ? ($headers[0] ?? '') : '';
             if (is_string($first)) {
-                // Treat 200 OK and 206 Partial Content as success
                 if (strpos($first, '200') !== false || strpos($first, '206') !== false) return true;
-
-                // Definitive negatives
+                if (strpos($first, '416') !== false) return true;
                 if (strpos($first, '404') !== false || strpos($first, '403') !== false) return false;
             }
         }
-
-        usleep(250000); // 250ms
+        usleep(250000);
     }
     return false;
 }
+
 
 function detect_page_count(string $cdnBase, string $programKey, int $externalLessonId, int $maxCap = 300): int {
     $p1 = image_path_for($programKey, $externalLessonId, 1);
