@@ -189,43 +189,45 @@ foreach ($slides as $row) {
 
     if ($doEN || $doNarr || $doRefs) {
         $schema = [
-            "type" => "object",
-            "additionalProperties" => false,
-            "properties" => [
-                "english_text" => ["type" => "string"],
-                "narration_script_en" => ["type" => "string"],
-                "phak" => [
-                    "type" => "array",
-                    "items" => [
-                        "type" => "object",
-                        "additionalProperties" => false,
-                        "properties" => [
-                            "chapter" => ["type"=>"string"],
-                            "section" => ["type"=>"string"],
-                            "title" => ["type"=>"string"],
-                            "confidence" => ["type"=>"number"],
-                            "notes" => ["type"=>"string"]
-                        ],
-                        "required" => ["chapter","section","title","confidence"]
-                    ]
-                ],
-                "acs" => [
-                    "type" => "array",
-                    "items" => [
-                        "type" => "object",
-                        "additionalProperties" => false,
-                        "properties" => [
-                            "code" => ["type"=>"string"],
-                            "task" => ["type"=>"string"],
-                            "confidence" => ["type"=>"number"],
-                            "notes" => ["type"=>"string"]
-                        ],
-                        "required" => ["code","task","confidence"]
-                    ]
-                ]
-            ],
-            "required" => ["english_text","narration_script_en","phak","acs"]
-        ];
+  "type" => "object",
+  "additionalProperties" => false,
+  "properties" => [
+    "english_text" => ["type" => "string"],
+    "narration_script_en" => ["type" => "string"],
+    "phak" => [
+      "type" => "array",
+      "items" => [
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => [
+          "chapter" => ["type"=>"string"],
+          "section" => ["type"=>"string"],
+          "title" => ["type"=>"string"],
+          "confidence" => ["type"=>"number"],
+          "notes" => ["type"=>"string"]
+        ],
+        // ✅ strict requires ALL keys listed here
+        "required" => ["chapter","section","title","confidence","notes"]
+      ]
+    ],
+    "acs" => [
+      "type" => "array",
+      "items" => [
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => [
+          "code" => ["type"=>"string"],
+          "task" => ["type"=>"string"],
+          "confidence" => ["type"=>"number"],
+          "notes" => ["type"=>"string"]
+        ],
+        // ✅ strict requires ALL keys listed here
+        "required" => ["code","task","confidence","notes"]
+      ]
+    ]
+  ],
+  "required" => ["english_text","narration_script_en","phak","acs"]
+];
 
         $instructions = <<<TXT
 You are extracting canonical training content from a flight training slide screenshot.
