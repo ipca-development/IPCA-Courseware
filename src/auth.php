@@ -12,6 +12,10 @@ function cw_current_user(PDO $pdo): ?array {
     return $u ?: null;
 }
 
+function cw_is_logged_in(): bool {
+    return !empty($_SESSION['user_id']);
+}
+
 function cw_login(PDO $pdo, string $email, string $password): bool {
     $stmt = $pdo->prepare("SELECT * FROM users WHERE email=? LIMIT 1");
     $stmt->execute([$email]);
