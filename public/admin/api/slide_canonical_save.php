@@ -15,7 +15,9 @@ $narrEs = (string)($data['narration_es'] ?? '');
 $stmt = $pdo->prepare("
   INSERT INTO slide_enrichment (slide_id, narration_en, narration_es)
   VALUES (?,?,?)
-  ON DUPLICATE KEY UPDATE narration_en=VALUES(narration_en), narration_es=VALUES(narration_es)
+  ON DUPLICATE KEY UPDATE
+    narration_en=VALUES(narration_en),
+    narration_es=VALUES(narration_es)
 ");
 $stmt->execute([$slideId, $narrEn, $narrEs]);
 

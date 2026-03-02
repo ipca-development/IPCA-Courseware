@@ -23,16 +23,23 @@ function sc_upsert(PDO $pdo, int $slideId, string $lang, array $contentJson, str
       VALUES (?,?,?,?)
       ON DUPLICATE KEY UPDATE content_json=VALUES(content_json), plain_text=VALUES(plain_text)
     ");
-    $stmt->execute([$slideId, $lang, json_encode($contentJson, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES), $plainText]);
+    $stmt->execute([
+        $slideId,
+        $lang,
+        json_encode($contentJson, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),
+        $plainText
+    ]);
 }
 
-function set_narration(PDO $pdo, int $slideId, string $narrationEn): void {
+function set_narration(PDO $pdo, int $slideId, string $narrationEn, string $narrationEs): void {
     $stmt = $pdo->prepare("
-      INSERT INTO slide_enrichment (slide_id, narration_en)
-      VALUES (?,?)
-      ON DUPLICATE KEY UPDATE narration_en=VALUES(narration_en)
+      INSERT INTO slide_enrichment (slide_id, narration_en, narration_es)
+      VALUES (?,?,?)
+      ON DUPLICATE KEY UPDATE
+        narration_en=VALUES(narration_en),
+        narration_es=VALUES(narration_es)
     ");
-    $stmt->execute([$slideId, $narrationEn]);
+    $stmt->execute([$slideId, $narrationEn, $narrationEs]);
 }
 
 function replace_refs(PDO $pdo, int $slideId, array $phak, array $acs): void {
@@ -47,13 +54,27 @@ function replace_refs(PDO $pdo, int $slideId, array $phak, array $acs): void {
         $code = trim((string)($r['chapter'] ?? '')) . (trim((string)($r['section'] ?? '')) !== '' ? (' ' . trim((string)$r['section'])) : '');
         $code = trim($code);
         if ($code === '') $code = 'PHAK';
-        $ins->execute([$slideId, 'PHAK', $code, (string)($r['title'] ?? ''), (float)($r['confidence'] ?? 0.6), (string)($r['notes'] ?? '')]);
+        $ins->execute([
+            $slideId,
+            'PHAK',
+            $code,
+            (string)($r['title'] ?? ''),
+            (float)($r['confidence'] ?? 0.6),
+            (string)($r['notes'] ?? '')
+        ]);
     }
 
     foreach ($acs as $r) {
         $code = trim((string)($r['code'] ?? ''));
         if ($code === '') continue;
-        $ins->execute([$slideId, 'ACS', $code, (string)($r['task'] ?? ''), (float)($r['confidence'] ?? 0.6), (string)($r['notes'] ?? '')]);
+        $ins->execute([
+            $slideId,
+            'ACS',
+            $code,
+            (string)($r['task'] ?? ''),
+            (float)($r['confidence'] ?? 0.6),
+            (string)($r['notes'] ?? '')
+        ]);
     }
 }
 
@@ -86,13 +107,12 @@ function read_manifest_match(int $extLessonId, int $pageNum, string $programKey)
 function ensure_hotspot(PDO $pdo, int $slideId, string $src): void {
     if ($src === '') return;
 
-    // only create if none exist
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM slide_hotspots WHERE slide_id=? AND is_deleted=0");
     $stmt->execute([$slideId]);
     $cnt = (int)$stmt->fetchColumn();
     if ($cnt > 0) return;
 
-    // default box inside content region (safe)
+    // default box inside content region
     $x = 900; $y = 280; $w = 520; $h = 320;
 
     $ins = $pdo->prepare("
@@ -100,6 +120,42 @@ function ensure_hotspot(PDO $pdo, int $slideId, string $src): void {
       VALUES (?,?,?,?,?,?,?,?,0)
     ");
     $ins->execute([$slideId, 'video', 'Video', $src, $x, $y, $w, $h]);
+}
+
+/**
+ * Translate a text block to Spanish via strict json_schema.
+ */
+function ai_translate_es(string $text): string {
+    $text = trim($text);
+    if ($text === '') return '';
+
+    $schemaT = [
+        "type"=>"object",
+        "additionalProperties"=>false,
+        "properties"=>["spanish_text"=>["type"=>"string"]],
+        "required"=>["spanish_text"]
+    ];
+
+    $payloadT = [
+        "model" => cw_openai_model(),
+        "input" => [
+            ["role"=>"system","content"=>[["type"=>"input_text","text"=>"Translate to Spanish. Preserve line breaks. Keep aviation terms clear and natural."]]],
+            ["role"=>"user","content"=>[["type"=>"input_text","text"=>$text]]]
+        ],
+        "text" => [
+            "format" => [
+                "type"=>"json_schema",
+                "name"=>"translate_es_v1",
+                "schema"=>$schemaT,
+                "strict"=>true
+            ]
+        ],
+        "temperature"=>0.2
+    ];
+
+    $respT = cw_openai_responses($payloadT);
+    $jsonT = cw_openai_extract_json_text($respT);
+    return trim((string)($jsonT['spanish_text'] ?? ''));
 }
 
 // --- Input
@@ -172,7 +228,7 @@ foreach ($slides as $row) {
 
     progress("Slide {$slideId} (lesson {$extLessonId} page {$pageNum})…");
 
-    // 6) Hotspot auto-create if video exists
+    // Hotspot auto-create if video exists
     if ($doHotspots) {
         $src = read_manifest_match($extLessonId, $pageNum, $programKey);
         if ($src !== '') {
@@ -181,53 +237,52 @@ foreach ($slides as $row) {
         }
     }
 
-    // 1 + 3 + 4 + 5 in one AI call (vision)
+    // AI extract canonical (EN + narration EN + refs)
     $englishText = '';
-    $narration = '';
+    $narrationEn = '';
+    $narrationEs = '';
     $phak = [];
     $acs = [];
 
     if ($doEN || $doNarr || $doRefs) {
         $schema = [
-  "type" => "object",
-  "additionalProperties" => false,
-  "properties" => [
-    "english_text" => ["type" => "string"],
-    "narration_script_en" => ["type" => "string"],
-    "phak" => [
-      "type" => "array",
-      "items" => [
-        "type" => "object",
-        "additionalProperties" => false,
-        "properties" => [
-          "chapter" => ["type"=>"string"],
-          "section" => ["type"=>"string"],
-          "title" => ["type"=>"string"],
-          "confidence" => ["type"=>"number"],
-          "notes" => ["type"=>"string"]
-        ],
-        // ✅ strict requires ALL keys listed here
-        "required" => ["chapter","section","title","confidence","notes"]
-      ]
-    ],
-    "acs" => [
-      "type" => "array",
-      "items" => [
-        "type" => "object",
-        "additionalProperties" => false,
-        "properties" => [
-          "code" => ["type"=>"string"],
-          "task" => ["type"=>"string"],
-          "confidence" => ["type"=>"number"],
-          "notes" => ["type"=>"string"]
-        ],
-        // ✅ strict requires ALL keys listed here
-        "required" => ["code","task","confidence","notes"]
-      ]
-    ]
-  ],
-  "required" => ["english_text","narration_script_en","phak","acs"]
-];
+            "type" => "object",
+            "additionalProperties" => false,
+            "properties" => [
+                "english_text" => ["type" => "string"],
+                "narration_script_en" => ["type" => "string"],
+                "phak" => [
+                    "type" => "array",
+                    "items" => [
+                        "type" => "object",
+                        "additionalProperties" => false,
+                        "properties" => [
+                            "chapter" => ["type"=>"string"],
+                            "section" => ["type"=>"string"],
+                            "title" => ["type"=>"string"],
+                            "confidence" => ["type"=>"number"],
+                            "notes" => ["type"=>"string"]
+                        ],
+                        "required" => ["chapter","section","title","confidence","notes"]
+                    ]
+                ],
+                "acs" => [
+                    "type" => "array",
+                    "items" => [
+                        "type" => "object",
+                        "additionalProperties" => false,
+                        "properties" => [
+                            "code" => ["type"=>"string"],
+                            "task" => ["type"=>"string"],
+                            "confidence" => ["type"=>"number"],
+                            "notes" => ["type"=>"string"]
+                        ],
+                        "required" => ["code","task","confidence","notes"]
+                    ]
+                ]
+            ],
+            "required" => ["english_text","narration_script_en","phak","acs"]
+        ];
 
         $instructions = <<<TXT
 You are extracting canonical training content from a flight training slide screenshot.
@@ -235,12 +290,11 @@ You are extracting canonical training content from a flight training slide scree
 RULES:
 - Extract ONLY instructional content. Ignore UI chrome (menus, breadcrumbs, footers, buttons, page controls).
 - english_text should be clean, readable, preserving bullets as "• " and line breaks.
-- narration_script_en should be slightly more explanatory than english_text, suitable for an instructor/voiceover reading aloud.
+- narration_script_en should be slightly more explanatory than english_text, suitable for instructor/voiceover reading aloud.
 - Provide references:
   * PHAK references: Chapter and Section titles where this content is taught (best effort).
   * ACS references: ACS codes that map to this content (best effort).
-- If unsure, still provide best guess with lower confidence.
-
+- Always include notes fields (use empty string if none).
 Return JSON that matches the schema.
 TXT;
 
@@ -269,7 +323,7 @@ TXT;
             $json = cw_openai_extract_json_text($resp);
 
             $englishText = trim((string)($json['english_text'] ?? ''));
-            $narration   = trim((string)($json['narration_script_en'] ?? ''));
+            $narrationEn = trim((string)($json['narration_script_en'] ?? ''));
             $phak        = is_array($json['phak'] ?? null) ? $json['phak'] : [];
             $acs         = is_array($json['acs'] ?? null) ? $json['acs'] : [];
 
@@ -282,19 +336,28 @@ TXT;
             sc_upsert($pdo, $slideId, 'en', ['blocks'=>[['type'=>'raw','text'=>$englishText]]], $englishText);
             progress("  + saved EN text");
         }
-        if ($doNarr && $narration !== '') {
-            set_narration($pdo, $slideId, $narration);
-            progress("  + saved narration");
+
+        // Narration EN + Narration ES (translated from narration EN)
+        if ($doNarr && $narrationEn !== '') {
+            if ($doES) {
+                try {
+                    $narrationEs = ai_translate_es($narrationEn);
+                } catch (Throwable $e) {
+                    $narrationEs = '';
+                }
+            }
+            set_narration($pdo, $slideId, $narrationEn, $narrationEs);
+            progress("  + saved narration (EN" . ($narrationEs !== '' ? "+ES" : "") . ")");
         }
+
         if ($doRefs) {
             replace_refs($pdo, $slideId, $phak, $acs);
             progress("  + saved refs (PHAK/ACS)");
         }
     }
 
-    // 2) Spanish translation (from EN)
+    // Spanish translation (from EN slide text)
     if ($doES) {
-        // Load EN if we didn't extract it in this run
         if ($englishText === '') {
             $stmt = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='en' LIMIT 1");
             $stmt->execute([$slideId]);
@@ -302,35 +365,8 @@ TXT;
         }
 
         if ($englishText !== '') {
-            $schemaT = [
-                "type"=>"object",
-                "additionalProperties"=>false,
-                "properties"=>["spanish_text"=>["type"=>"string"]],
-                "required"=>["spanish_text"]
-            ];
-
-            $payloadT = [
-                "model" => cw_openai_model(),
-                "input" => [
-                    ["role"=>"system","content"=>[["type"=>"input_text","text"=>"Translate to Spanish. Preserve bullet formatting and line breaks. Keep aviation terms clear."]]],
-                    ["role"=>"user","content"=>[["type"=>"input_text","text"=>$englishText]]]
-                ],
-                "text" => [
-                    "format" => [
-                        "type"=>"json_schema",
-                        "name"=>"translate_es_v1",
-                        "schema"=>$schemaT,
-                        "strict"=>true
-                    ]
-                ],
-                "temperature"=>0.2
-            ];
-
             try {
-                $respT = cw_openai_responses($payloadT);
-                $jsonT = cw_openai_extract_json_text($respT);
-                $spanishText = trim((string)($jsonT['spanish_text'] ?? ''));
-
+                $spanishText = ai_translate_es($englishText);
                 sc_upsert($pdo, $slideId, 'es', ['blocks'=>[['type'=>'raw','text'=>$spanishText]]], $spanishText);
                 progress("  + saved ES translation");
             } catch (Throwable $e) {
