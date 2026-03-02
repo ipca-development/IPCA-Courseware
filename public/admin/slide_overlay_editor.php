@@ -116,11 +116,27 @@ cw_header('Overlay Slide Editor');
     pointer-events:none;
   }
 
-  textarea{ width:100%; min-height:120px; }
+  textarea{ width:100%; min-height:110px; }
   .small{ font-size: 12px; opacity: .75; }
   .row{ display:flex; gap:8px; align-items:center; }
   .row input[type="text"]{ width: 100%; }
   code{ font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+
+  .pill{
+    display:inline-block;
+    padding:3px 8px;
+    border-radius:999px;
+    border:1px solid #ddd;
+    background:#f7f7f7;
+    font-size:12px;
+    margin: 2px 6px 2px 0;
+  }
+  .refs-box{
+    border:1px solid #eee;
+    border-radius:12px;
+    padding:10px;
+    background:#fff;
+  }
 </style>
 
 <div class="card">
@@ -165,20 +181,32 @@ cw_header('Overlay Slide Editor');
       </div>
 
       <div class="card">
-        <h2 style="margin:0 0 8px 0;">Canonical content</h2>
+        <h2 style="margin:0 0 8px 0;">Canonical data</h2>
+
         <div class="row" style="margin-bottom:8px;">
           <button class="btn" id="btnExtractEN" type="button">AI Extract (EN)</button>
           <button class="btn btn-sm" id="btnExtractES" type="button">AI Translate (ES)</button>
         </div>
 
         <label class="small muted">English (editable)</label>
-        <textarea id="taEN" placeholder="AI extracted content will appear here…"></textarea>
+        <textarea id="taEN" placeholder="English extracted content…"></textarea>
 
         <label class="small muted" style="margin-top:10px;">Spanish (editable)</label>
-        <textarea id="taES" placeholder="AI translated content will appear here…"></textarea>
+        <textarea id="taES" placeholder="Spanish translation…"></textarea>
+
+        <label class="small muted" style="margin-top:10px;">Narration script (EN)</label>
+        <textarea id="taNarr" placeholder="Narration script…"></textarea>
+
+        <div class="refs-box" style="margin-top:10px;">
+          <div class="small muted" style="margin-bottom:6px;">PHAK references</div>
+          <div id="phakRefs" class="small muted">Loading…</div>
+          <div class="small muted" style="margin-top:10px;margin-bottom:6px;">ACS references</div>
+          <div id="acsRefs" class="small muted">Loading…</div>
+        </div>
 
         <div class="row" style="margin-top:10px;">
-          <button class="btn" id="btnSaveContent" type="button">Save content</button>
+          <button class="btn" id="btnSaveCanonical" type="button">Save canonical data</button>
+          <button class="btn btn-sm" id="btnReloadCanonical" type="button">Reload</button>
         </div>
 
         <div class="small muted" id="status" style="margin-top:10px;"></div>
@@ -188,11 +216,19 @@ cw_header('Overlay Slide Editor');
 </div>
 
 <script>
-/* Your existing JS stays exactly the same below — no functional changes. */
 const SLIDE_ID = <?= (int)$slideId ?>;
+const PROGRAM_KEY = <?= json_encode((string)$slide['program_key']) ?>;
+
 const hotspotLayer = document.getElementById('hotspotLayer');
 const hotspotList = document.getElementById('hotspotList');
 const suggestedBox = document.getElementById('suggestedBox');
+
+const taEN = document.getElementById('taEN');
+const taES = document.getElementById('taES');
+const taNarr = document.getElementById('taNarr');
+const phakRefsEl = document.getElementById('phakRefs');
+const acsRefsEl = document.getElementById('acsRefs');
+
 const statusEl = document.getElementById('status');
 
 const viewport = document.getElementById('viewport');
@@ -210,8 +246,315 @@ setTimeout(fitStage, 50);
 
 function setStatus(msg){ statusEl.textContent = msg; }
 
-/* The rest of your existing hotspot/content JS should remain unchanged.
-   Keep whatever you currently have below this line. */
+// ------------------------
+// Hotspots (existing logic)
+// ------------------------
+let hotspots = [];
+let suggestedSrc = '';
+
+function escapeHtml(s){
+  return (s||'').replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;');
+}
+
+function renderHotspots(){
+  hotspotLayer.innerHTML = '';
+  hotspots.filter(h=>!h.is_deleted).forEach(h => {
+    const d = document.createElement('div');
+    d.className = 'hotspot';
+    d.dataset.id = h.id;
+    d.style.left = h.x + 'px';
+    d.style.top  = h.y + 'px';
+    d.style.width  = h.w + 'px';
+    d.style.height = h.h + 'px';
+
+    const tag = document.createElement('div');
+    tag.className = 'tag';
+    tag.textContent = h.label || 'Video';
+    d.appendChild(tag);
+
+    const rez = document.createElement('div');
+    rez.className = 'resize';
+    d.appendChild(rez);
+
+    let drag = null;
+    d.addEventListener('mousedown', (ev) => {
+      if (ev.target === rez) return;
+      ev.preventDefault();
+      drag = { sx: ev.clientX, sy: ev.clientY, ox: h.x, oy: h.y };
+    });
+
+    let rsz = null;
+    rez.addEventListener('mousedown', (ev)=>{
+      ev.preventDefault();
+      ev.stopPropagation();
+      rsz = { sx: ev.clientX, sy: ev.clientY, ow: h.w, oh: h.h };
+    });
+
+    window.addEventListener('mousemove', (ev) => {
+      if (drag) {
+        const dx = (ev.clientX - drag.sx) / scale;
+        const dy = (ev.clientY - drag.sy) / scale;
+        h.x = Math.round(drag.ox + dx);
+        h.y = Math.round(drag.oy + dy);
+        d.style.left = h.x + 'px';
+        d.style.top  = h.y + 'px';
+        renderHotspotList();
+      }
+      if (rsz) {
+        const dx = (ev.clientX - rsz.sx) / scale;
+        const dy = (ev.clientY - rsz.sy) / scale;
+        h.w = Math.max(30, Math.round(rsz.ow + dx));
+        h.h = Math.max(30, Math.round(rsz.oh + dy));
+        d.style.width = h.w + 'px';
+        d.style.height = h.h + 'px';
+        renderHotspotList();
+      }
+    });
+    window.addEventListener('mouseup', () => { drag = null; rsz = null; });
+
+    hotspotLayer.appendChild(d);
+  });
+}
+
+function renderHotspotList(){
+  const rows = hotspots.filter(h=>!h.is_deleted).map(h => `
+    <div style="border:1px solid #eee; border-radius:12px; padding:10px; margin-bottom:8px;">
+      <div class="row">
+        <strong style="min-width:54px;">Label</strong>
+        <input type="text" value="${escapeHtml(h.label||'')}" data-k="label" data-id="${h.id}">
+      </div>
+      <div class="row" style="margin-top:6px;">
+        <strong style="min-width:54px;">Video</strong>
+        <input type="text" placeholder="ks_videos/${escapeHtml(PROGRAM_KEY)}/lesson_10002/page_001__file.mp4" value="${escapeHtml(h.src||'')}" data-k="src" data-id="${h.id}">
+      </div>
+      <div class="small muted" style="margin-top:6px;">x=${h.x}, y=${h.y}, w=${h.w}, h=${h.h}</div>
+      <div class="row" style="margin-top:8px;">
+        ${(!h.src && suggestedSrc) ? `<button class="btn btn-sm" type="button" data-use="${h.id}">Use suggested</button>` : ``}
+        <button class="btn btn-sm" type="button" data-del="${h.id}">Delete</button>
+      </div>
+    </div>
+  `).join('');
+  hotspotList.innerHTML = rows || '<span class="muted">No hotspots yet.</span>';
+
+  hotspotList.querySelectorAll('input[data-k]').forEach(inp => {
+    inp.addEventListener('input', () => {
+      const id = parseInt(inp.dataset.id,10);
+      const k = inp.dataset.k;
+      const h = hotspots.find(x=>x.id===id);
+      if (!h) return;
+      h[k] = inp.value;
+      renderHotspots();
+    });
+  });
+
+  hotspotList.querySelectorAll('button[data-use]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.use,10);
+      const h = hotspots.find(x=>x.id===id);
+      if (!h) return;
+      h.src = suggestedSrc;
+      renderHotspots();
+      renderHotspotList();
+    });
+  });
+
+  hotspotList.querySelectorAll('button[data-del]').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      const id = parseInt(btn.dataset.del,10);
+      const h = hotspots.find(x=>x.id===id);
+      if (!h) return;
+      h.is_deleted = 1;
+      renderHotspots();
+      renderHotspotList();
+    });
+  });
+}
+
+async function loadHotspots(){
+  const res = await fetch('/admin/api/get_hotspots.php?slide_id=' + SLIDE_ID);
+  const j = await res.json();
+  if (!j.ok) { hotspotList.textContent = 'Failed to load hotspots'; return; }
+  hotspots = j.hotspots || [];
+  suggestedSrc = j.suggested_src || '';
+  suggestedBox.innerHTML = suggestedSrc ? `Suggested video: <code>${escapeHtml(suggestedSrc)}</code>` : `Suggested video: <span class="muted">none</span>`;
+  renderHotspots();
+  renderHotspotList();
+}
+
+document.getElementById('btnReloadHotspots').addEventListener('click', loadHotspots);
+
+document.getElementById('btnSaveHotspots').addEventListener('click', async ()=>{
+  setStatus('Saving hotspots…');
+  const res = await fetch('/admin/api/save_hotspots.php', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ slide_id: SLIDE_ID, hotspots })
+  });
+  const j = await res.json();
+  if (!j.ok) { setStatus('Hotspot save failed: ' + (j.error||'')); return; }
+  setStatus('Hotspots saved.');
+  await loadHotspots();
+});
+
+// draw hotspot
+let drawing = null;
+let drawEl = null;
+
+stage.addEventListener('mousedown', (ev)=>{
+  if (ev.target.closest('.hotspot')) return;
+
+  const rect = stage.getBoundingClientRect();
+  const x = (ev.clientX - rect.left) / scale;
+  const y = (ev.clientY - rect.top) / scale;
+
+  drawing = { x0: x, y0: y, x1: x, y1: y };
+
+  drawEl = document.createElement('div');
+  drawEl.className = 'draw-rect';
+  hotspotLayer.appendChild(drawEl);
+  updateDrawEl();
+});
+
+window.addEventListener('mousemove', (ev)=>{
+  if (!drawing) return;
+  const rect = stage.getBoundingClientRect();
+  drawing.x1 = (ev.clientX - rect.left) / scale;
+  drawing.y1 = (ev.clientY - rect.top) / scale;
+  updateDrawEl();
+});
+
+window.addEventListener('mouseup', ()=>{
+  if (!drawing) return;
+
+  const x = Math.round(Math.min(drawing.x0, drawing.x1));
+  const y = Math.round(Math.min(drawing.y0, drawing.y1));
+  const w = Math.round(Math.abs(drawing.x1 - drawing.x0));
+  const h = Math.round(Math.abs(drawing.y1 - drawing.y0));
+  drawing = null;
+
+  if (drawEl) drawEl.remove();
+  drawEl = null;
+
+  if (w < 30 || h < 30) return;
+
+  const tempId = -Math.floor(Math.random()*1000000);
+  const autoSrc = suggestedSrc || '';
+  hotspots.push({ id: tempId, kind:'video', label:'Video', src:autoSrc, x,y,w,h, is_deleted:0 });
+
+  renderHotspots();
+  renderHotspotList();
+});
+
+function updateDrawEl(){
+  if (!drawEl || !drawing) return;
+  const x = Math.min(drawing.x0, drawing.x1);
+  const y = Math.min(drawing.y0, drawing.y1);
+  const w = Math.abs(drawing.x1 - drawing.x0);
+  const h = Math.abs(drawing.y1 - drawing.y0);
+  drawEl.style.left = x + 'px';
+  drawEl.style.top = y + 'px';
+  drawEl.style.width = w + 'px';
+  drawEl.style.height = h + 'px';
+}
+
+// ------------------------
+// Canonical loading/saving
+// ------------------------
+async function loadCanonical(){
+  setStatus('Loading canonical…');
+
+  // EN/ES
+  const res = await fetch('/admin/api/ai_extract_content.php?slide_id=' + SLIDE_ID);
+  const j = await res.json();
+  if (j.ok) {
+    taEN.value = j.en_plain || '';
+    taES.value = j.es_plain || '';
+  }
+
+  // Narration + refs
+  const res2 = await fetch('/admin/api/slide_canonical_get.php?slide_id=' + SLIDE_ID);
+  const j2 = await res2.json();
+  if (j2.ok) {
+    taNarr.value = j2.narration_en || '';
+    renderRefs(phakRefsEl, j2.phak || []);
+    renderRefs(acsRefsEl, j2.acs || []);
+  } else {
+    phakRefsEl.textContent = '—';
+    acsRefsEl.textContent = '—';
+  }
+
+  setStatus('Ready.');
+}
+
+function renderRefs(container, refs){
+  if (!Array.isArray(refs) || refs.length === 0) {
+    container.innerHTML = '<span class="muted">—</span>';
+    return;
+  }
+  container.innerHTML = refs.map(r => {
+    const code = escapeHtml(r.ref_code || '');
+    const title = escapeHtml(r.ref_title || '');
+    const conf = (r.confidence !== null && r.confidence !== undefined) ? String(r.confidence) : '';
+    return `<span class="pill">${code}${title ? ' — ' + title : ''}${conf ? ' ('+conf+')' : ''}</span>`;
+  }).join(' ');
+}
+
+document.getElementById('btnReloadCanonical').addEventListener('click', loadCanonical);
+
+document.getElementById('btnSaveCanonical').addEventListener('click', async ()=>{
+  setStatus('Saving canonical…');
+
+  // save EN/ES
+  const res = await fetch('/admin/api/ai_extract_content.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ slide_id: SLIDE_ID, action:'save_manual', en_plain: taEN.value, es_plain: taES.value })
+  });
+  const j = await res.json();
+  if (!j.ok) { setStatus('Save EN/ES failed: ' + (j.error||'')); return; }
+
+  // save narration + refs (refs are read-only here; updated by bulk/AI)
+  const res2 = await fetch('/admin/api/slide_canonical_save.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ slide_id: SLIDE_ID, narration_en: taNarr.value })
+  });
+  const j2 = await res2.json();
+  if (!j2.ok) { setStatus('Save narration failed: ' + (j2.error||'')); return; }
+
+  setStatus('Saved canonical data.');
+});
+
+// keep your AI buttons
+document.getElementById('btnExtractEN').addEventListener('click', async ()=>{
+  setStatus('AI extracting EN…');
+  const res = await fetch('/admin/api/ai_extract_content.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ slide_id: SLIDE_ID, lang:'en', action:'extract' })
+  });
+  const j = await res.json();
+  if (!j.ok) { setStatus('AI EN failed: ' + (j.error||'')); return; }
+  taEN.value = j.plain_text || '';
+  setStatus('EN extracted.');
+});
+
+document.getElementById('btnExtractES').addEventListener('click', async ()=>{
+  setStatus('AI translating ES…');
+  const res = await fetch('/admin/api/ai_extract_content.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ slide_id: SLIDE_ID, lang:'es', action:'translate' })
+  });
+  const j = await res.json();
+  if (!j.ok) { setStatus('AI ES failed: ' + (j.error||'')); return; }
+  taES.value = j.plain_text || '';
+  setStatus('ES translated.');
+});
+
+// init
+loadHotspots();
+loadCanonical();
 </script>
 
 <?php cw_footer(); ?>
