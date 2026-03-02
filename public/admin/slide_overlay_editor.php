@@ -29,6 +29,19 @@ if ($courseId <= 0) $courseId = (int)$slide['course_id'];
 
 $backUrl = '/admin/slides.php?course_id='.(int)$courseId.'&lesson_id='.(int)$lessonId;
 
+// Prev/Next slide in this lesson (skip deleted slides)
+$prevId = 0; $nextId = 0;
+$stmt = $pdo->prepare("SELECT id FROM slides WHERE lesson_id=? AND is_deleted=0 AND page_number < ? ORDER BY page_number DESC LIMIT 1");
+$stmt->execute([(int)$lessonId, (int)$slide['page_number']]);
+$prevId = (int)$stmt->fetchColumn();
+
+$stmt = $pdo->prepare("SELECT id FROM slides WHERE lesson_id=? AND is_deleted=0 AND page_number > ? ORDER BY page_number ASC LIMIT 1");
+$stmt->execute([(int)$lessonId, (int)$slide['page_number']]);
+$nextId = (int)$stmt->fetchColumn();
+
+$prevUrl = $prevId ? '/admin/slide_overlay_editor.php?slide_id='.$prevId.'&course_id='.(int)$courseId.'&lesson_id='.(int)$lessonId : '';
+$nextUrl = $nextId ? '/admin/slide_overlay_editor.php?slide_id='.$nextId.'&course_id='.(int)$courseId.'&lesson_id='.(int)$lessonId : '';
+
 // Fixed overlays
 $HEADER = "/assets/overlay/header.png"; // 1600x125
 $FOOTER = "/assets/overlay/footer.png"; // 1600x90
@@ -145,7 +158,13 @@ cw_header('Overlay Slide Editor');
       <?= h($slide['program_key']) ?> • <?= h($slide['course_title']) ?> • Lesson <?= (int)$slide['external_lesson_id'] ?> • Page <?= (int)$slide['page_number'] ?> • Slide ID <?= (int)$slideId ?>
     </div>
     <div class="row">
-      <a class="btn btn-sm" href="<?= h($backUrl) ?>">← Back to Slides</a>
+      <?php if ($prevUrl): ?>
+        <a class="btn btn-sm navlink" href="<?= h($prevUrl) ?>">← Prev</a>
+      <?php endif; ?>
+      <?php if ($nextUrl): ?>
+        <a class="btn btn-sm navlink" href="<?= h($nextUrl) ?>">Next →</a>
+      <?php endif; ?>
+      <a class="btn btn-sm navlink" href="<?= h($backUrl) ?>">← Back to Slides</a>
       <a class="btn btn-sm" target="_blank" href="/player/slide.php?slide_id=<?= (int)$slideId ?>">Student View</a>
     </div>
   </div>
@@ -195,7 +214,10 @@ cw_header('Overlay Slide Editor');
         <textarea id="taES" placeholder="Spanish translation…"></textarea>
 
         <label class="small muted" style="margin-top:10px;">Narration script (EN)</label>
-        <textarea id="taNarr" placeholder="Narration script…"></textarea>
+        <textarea id="taNarrEN" placeholder="Narration script in English…"></textarea>
+
+        <label class="small muted" style="margin-top:10px;">Narration script (ES)</label>
+        <textarea id="taNarrES" placeholder="Narration script in Spanish…"></textarea>
 
         <div class="refs-box" style="margin-top:10px;">
           <div class="small muted" style="margin-bottom:6px;">PHAK references</div>
@@ -225,7 +247,8 @@ const suggestedBox = document.getElementById('suggestedBox');
 
 const taEN = document.getElementById('taEN');
 const taES = document.getElementById('taES');
-const taNarr = document.getElementById('taNarr');
+const taNarrEN = document.getElementById('taNarrEN');
+const taNarrES = document.getElementById('taNarrES');
 const phakRefsEl = document.getElementById('phakRefs');
 const acsRefsEl = document.getElementById('acsRefs');
 
@@ -247,7 +270,35 @@ setTimeout(fitStage, 50);
 function setStatus(msg){ statusEl.textContent = msg; }
 
 // ------------------------
-// Hotspots (existing logic)
+// Unsaved changes tracking
+// ------------------------
+let dirty = false;
+function markDirty(){ dirty = true; }
+function markSaved(){ dirty = false; }
+
+['taEN','taES','taNarrEN','taNarrES'].forEach(id=>{
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', markDirty);
+});
+
+window.addEventListener('beforeunload', (e)=>{
+  if (!dirty) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+
+// Intercept navigation links (Prev/Next/Back)
+document.querySelectorAll('a.navlink').forEach(a=>{
+  a.addEventListener('click', (e)=>{
+    if (!dirty) return;
+    if (!confirm('You have unsaved changes. Leave without saving?')) {
+      e.preventDefault();
+    }
+  });
+});
+
+// ------------------------
+// Hotspots
 // ------------------------
 let hotspots = [];
 let suggestedSrc = '';
@@ -299,6 +350,7 @@ function renderHotspots(){
         d.style.left = h.x + 'px';
         d.style.top  = h.y + 'px';
         renderHotspotList();
+        markDirty();
       }
       if (rsz) {
         const dx = (ev.clientX - rsz.sx) / scale;
@@ -308,6 +360,7 @@ function renderHotspots(){
         d.style.width = h.w + 'px';
         d.style.height = h.h + 'px';
         renderHotspotList();
+        markDirty();
       }
     });
     window.addEventListener('mouseup', () => { drag = null; rsz = null; });
@@ -344,6 +397,7 @@ function renderHotspotList(){
       if (!h) return;
       h[k] = inp.value;
       renderHotspots();
+      markDirty();
     });
   });
 
@@ -355,6 +409,7 @@ function renderHotspotList(){
       h.src = suggestedSrc;
       renderHotspots();
       renderHotspotList();
+      markDirty();
     });
   });
 
@@ -366,6 +421,7 @@ function renderHotspotList(){
       h.is_deleted = 1;
       renderHotspots();
       renderHotspotList();
+      markDirty();
     });
   });
 }
@@ -393,6 +449,7 @@ document.getElementById('btnSaveHotspots').addEventListener('click', async ()=>{
   const j = await res.json();
   if (!j.ok) { setStatus('Hotspot save failed: ' + (j.error||'')); return; }
   setStatus('Hotspots saved.');
+  markSaved();
   await loadHotspots();
 });
 
@@ -443,6 +500,7 @@ window.addEventListener('mouseup', ()=>{
 
   renderHotspots();
   renderHotspotList();
+  markDirty();
 });
 
 function updateDrawEl(){
@@ -463,7 +521,7 @@ function updateDrawEl(){
 async function loadCanonical(){
   setStatus('Loading canonical…');
 
-  // EN/ES
+  // EN/ES (slide_content)
   const res = await fetch('/admin/api/ai_extract_content.php?slide_id=' + SLIDE_ID);
   const j = await res.json();
   if (j.ok) {
@@ -471,11 +529,12 @@ async function loadCanonical(){
     taES.value = j.es_plain || '';
   }
 
-  // Narration + refs
+  // Narration + refs (slide_enrichment + slide_references)
   const res2 = await fetch('/admin/api/slide_canonical_get.php?slide_id=' + SLIDE_ID);
   const j2 = await res2.json();
   if (j2.ok) {
-    taNarr.value = j2.narration_en || '';
+    taNarrEN.value = j2.narration_en || '';
+    taNarrES.value = j2.narration_es || '';
     renderRefs(phakRefsEl, j2.phak || []);
     renderRefs(acsRefsEl, j2.acs || []);
   } else {
@@ -484,6 +543,7 @@ async function loadCanonical(){
   }
 
   setStatus('Ready.');
+  markSaved();
 }
 
 function renderRefs(container, refs){
@@ -513,19 +573,20 @@ document.getElementById('btnSaveCanonical').addEventListener('click', async ()=>
   const j = await res.json();
   if (!j.ok) { setStatus('Save EN/ES failed: ' + (j.error||'')); return; }
 
-  // save narration + refs (refs are read-only here; updated by bulk/AI)
+  // save narration EN/ES
   const res2 = await fetch('/admin/api/slide_canonical_save.php', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ slide_id: SLIDE_ID, narration_en: taNarr.value })
+    body: JSON.stringify({ slide_id: SLIDE_ID, narration_en: taNarrEN.value, narration_es: taNarrES.value })
   });
   const j2 = await res2.json();
   if (!j2.ok) { setStatus('Save narration failed: ' + (j2.error||'')); return; }
 
   setStatus('Saved canonical data.');
+  markSaved();
 });
 
-// keep your AI buttons
+// AI buttons (EN extract / ES translate)
 document.getElementById('btnExtractEN').addEventListener('click', async ()=>{
   setStatus('AI extracting EN…');
   const res = await fetch('/admin/api/ai_extract_content.php', {
@@ -537,6 +598,7 @@ document.getElementById('btnExtractEN').addEventListener('click', async ()=>{
   if (!j.ok) { setStatus('AI EN failed: ' + (j.error||'')); return; }
   taEN.value = j.plain_text || '';
   setStatus('EN extracted.');
+  markDirty();
 });
 
 document.getElementById('btnExtractES').addEventListener('click', async ()=>{
@@ -550,6 +612,7 @@ document.getElementById('btnExtractES').addEventListener('click', async ()=>{
   if (!j.ok) { setStatus('AI ES failed: ' + (j.error||'')); return; }
   taES.value = j.plain_text || '';
   setStatus('ES translated.');
+  markDirty();
 });
 
 // init
