@@ -1,7 +1,17 @@
 <?php
 declare(strict_types=1);
 
-function cw_current_user(PDO $pdo): ?array {
+function cw_current_user(PDO $pdo = null): ?array {
+    // Allow old calls cw_current_user() without args
+    if ($pdo === null) {
+        // bootstrap.php sets $pdo globally
+        if (isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
+            $pdo = $GLOBALS['pdo'];
+        } else {
+            return null;
+        }
+    }
+
     if (empty($_SESSION['user_id'])) return null;
     $uid = (int)$_SESSION['user_id'];
     if ($uid <= 0) return null;
