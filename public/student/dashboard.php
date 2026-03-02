@@ -2,8 +2,12 @@
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 
-$u = cw_current_user();
-if (($u['role'] ?? '') !== 'student') {
+cw_require_login();
+
+$u = cw_current_user($pdo);
+$role = (string)($u['role'] ?? '');
+
+if ($role !== 'student' && $role !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
 }
@@ -35,7 +39,6 @@ cw_header('My Dashboard');
 <?php else: ?>
   <?php foreach ($cohorts as $co): ?>
     <?php
-      // progress summary
       $total = $pdo->prepare("SELECT COUNT(*) FROM cohort_lesson_deadlines WHERE cohort_id=?");
       $total->execute([(int)$co['id']]);
       $totalLessons = (int)$total->fetchColumn();
@@ -51,7 +54,6 @@ cw_header('My Dashboard');
 
       $pct = ($totalLessons > 0) ? (int)round(($passedLessons / $totalLessons) * 100) : 0;
 
-      // next deadline
       $next = $pdo->prepare("
         SELECT d.deadline_utc, l.title, l.external_lesson_id, l.id AS lesson_id
         FROM cohort_lesson_deadlines d

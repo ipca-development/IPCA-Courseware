@@ -2,8 +2,12 @@
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 
-$u = cw_current_user();
-if (($u['role'] ?? '') !== 'student') {
+cw_require_login();
+
+$u = cw_current_user($pdo);
+$role = (string)($u['role'] ?? '');
+
+if ($role !== 'student' && $role !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
 }
@@ -54,6 +58,9 @@ cw_header('Course');
     <?= h($cohort['program_key']) ?> — <?= h($cohort['course_title']) ?> • Cohort: <?= h($cohort['name']) ?><br>
     Deadlines: 00:00 UTC
   </div>
+  <p style="margin-top:10px;">
+    <a class="btn btn-sm" href="/student/dashboard.php">← Back</a>
+  </p>
 </div>
 
 <div class="card">
@@ -70,7 +77,6 @@ cw_header('Course');
 
         $status = $passed ? 'passed' : ($locked ? 'locked' : 'unlocked');
 
-        // link to first slide of the lesson
         $first = $pdo->prepare("SELECT id FROM slides WHERE lesson_id=? AND is_deleted=0 ORDER BY page_number ASC LIMIT 1");
         $first->execute([(int)$l['lesson_id']]);
         $slideId = (int)$first->fetchColumn();
@@ -89,10 +95,6 @@ cw_header('Course');
       </tr>
     <?php endforeach; ?>
   </table>
-
-  <p class="muted" style="margin-top:10px;">
-    Next: we’ll add the “Study Summary” box + AI grading + Oral Progress Test unlock flow.
-  </p>
 </div>
 
 <?php cw_footer(); ?>
