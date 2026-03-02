@@ -16,12 +16,16 @@ $userId = (int)$u['id'];
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 if ($cohortId <= 0) exit('Missing cohort_id');
 
-$check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
-$check->execute([$cohortId,$userId]);
-if (!$check->fetchColumn()) {
-    http_response_code(403);
-    exit('Not enrolled in this cohort');
+if ($role === 'student') {
+    // student must be enrolled
+    $check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
+    $check->execute([$cohortId,$userId]);
+    if (!$check->fetchColumn()) {
+        http_response_code(403);
+        exit('Not enrolled in this cohort');
+    }
 }
+// admin bypass: no enrollment required
 
 $co = $pdo->prepare("
   SELECT co.*, c.title AS course_title, p.program_key
@@ -69,13 +73,18 @@ cw_header('Course');
     <tr><th>Lesson</th><th>Deadline (UTC)</th><th>Status</th><th>Action</th></tr>
     <?php foreach ($lessons as $l): ?>
       <?php
+        // In admin view, show everything unlocked.
         $locked = false;
-        if (!empty($l['unlock_after_lesson_id'])) {
-            $locked = !lesson_passed($pdo, $userId, (int)$l['unlock_after_lesson_id']);
-        }
-        $passed = lesson_passed($pdo, $userId, (int)$l['lesson_id']);
+        $passed = false;
 
-        $status = $passed ? 'passed' : ($locked ? 'locked' : 'unlocked');
+        if ($role === 'student') {
+            if (!empty($l['unlock_after_lesson_id'])) {
+                $locked = !lesson_passed($pdo, $userId, (int)$l['unlock_after_lesson_id']);
+            }
+            $passed = lesson_passed($pdo, $userId, (int)$l['lesson_id']);
+        }
+
+        $status = ($role === 'admin') ? 'admin_view' : ($passed ? 'passed' : ($locked ? 'locked' : 'unlocked'));
 
         $first = $pdo->prepare("SELECT id FROM slides WHERE lesson_id=? AND is_deleted=0 ORDER BY page_number ASC LIMIT 1");
         $first->execute([(int)$l['lesson_id']]);
@@ -86,8 +95,10 @@ cw_header('Course');
         <td><?= h($l['deadline_utc']) ?></td>
         <td><?= h($status) ?></td>
         <td>
-          <?php if ($locked || $slideId <= 0): ?>
+          <?php if ($slideId <= 0): ?>
             <span class="muted">—</span>
+          <?php elseif ($role === 'student' && $locked): ?>
+            <span class="muted">Locked</span>
           <?php else: ?>
             <a class="btn btn-sm" href="/player/slide.php?slide_id=<?= (int)$slideId ?>">Start</a>
           <?php endif; ?>

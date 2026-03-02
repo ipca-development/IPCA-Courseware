@@ -14,43 +14,91 @@ if ($role !== 'student' && $role !== 'admin') {
 
 $userId = (int)$u['id'];
 
-$cohorts = $pdo->prepare("
-  SELECT co.id, co.name, co.start_date, co.end_date, c.title AS course_title, p.program_key
-  FROM cohort_students cs
-  JOIN cohorts co ON co.id=cs.cohort_id
-  JOIN courses c ON c.id=co.course_id
-  JOIN programs p ON p.id=c.program_id
-  WHERE cs.user_id=?
-  ORDER BY co.id DESC
-");
-$cohorts->execute([$userId]);
-$cohorts = $cohorts->fetchAll(PDO::FETCH_ASSOC);
+// Admin: allow selecting any cohort
+$selectedCohortId = (int)($_GET['cohort_id'] ?? 0);
+
+if ($role === 'admin') {
+    // list all cohorts
+    $stmt = $pdo->query("
+      SELECT co.id, co.name, co.start_date, co.end_date, c.title AS course_title, p.program_key
+      FROM cohorts co
+      JOIN courses c ON c.id=co.course_id
+      JOIN programs p ON p.id=c.program_id
+      ORDER BY co.id DESC
+    ");
+    $cohorts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // if none selected, show all; else filter to one
+    if ($selectedCohortId > 0) {
+        $cohorts = array_values(array_filter($cohorts, function($r) use ($selectedCohortId){
+            return (int)$r['id'] === $selectedCohortId;
+        }));
+    }
+} else {
+    // Student: only their cohorts
+    $stmt = $pdo->prepare("
+      SELECT co.id, co.name, co.start_date, co.end_date, c.title AS course_title, p.program_key
+      FROM cohort_students cs
+      JOIN cohorts co ON co.id=cs.cohort_id
+      JOIN courses c ON c.id=co.course_id
+      JOIN programs p ON p.id=c.program_id
+      WHERE cs.user_id=?
+      ORDER BY co.id DESC
+    ");
+    $stmt->execute([$userId]);
+    $cohorts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
 
 cw_header('My Dashboard');
 ?>
+
 <div class="card">
   <p class="muted">
     This is your study dashboard (optimized for iPad landscape). Deadlines are in UTC.
   </p>
+
+  <?php if ($role === 'admin'): ?>
+    <form method="get" class="form-grid" style="margin-top:10px;">
+      <label>Admin: view cohort</label>
+      <select name="cohort_id" onchange="this.form.submit()">
+        <option value="0">— All cohorts —</option>
+        <?php
+          $all = $pdo->query("SELECT id, name FROM cohorts ORDER BY id DESC")->fetchAll(PDO::FETCH_ASSOC);
+          foreach ($all as $x):
+        ?>
+          <option value="<?= (int)$x['id'] ?>" <?= ($selectedCohortId === (int)$x['id']) ? 'selected' : '' ?>>
+            <?= (int)$x['id'] ?> — <?= h($x['name']) ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+      <div></div><div></div>
+    </form>
+  <?php endif; ?>
 </div>
 
 <?php if (!$cohorts): ?>
-  <div class="card"><p class="muted">No cohort assigned yet.</p></div>
+  <div class="card"><p class="muted">No cohort found.</p></div>
 <?php else: ?>
   <?php foreach ($cohorts as $co): ?>
     <?php
+      $cohortId = (int)$co['id'];
+
       $total = $pdo->prepare("SELECT COUNT(*) FROM cohort_lesson_deadlines WHERE cohort_id=?");
-      $total->execute([(int)$co['id']]);
+      $total->execute([$cohortId]);
       $totalLessons = (int)$total->fetchColumn();
 
-      $passed = $pdo->prepare("
-        SELECT COUNT(*)
-        FROM lesson_activity
-        WHERE user_id=? AND status='passed'
-        AND lesson_id IN (SELECT lesson_id FROM cohort_lesson_deadlines WHERE cohort_id=?)
-      ");
-      $passed->execute([$userId, (int)$co['id']]);
-      $passedLessons = (int)$passed->fetchColumn();
+      // If admin, show progress as 0% (no specific student); if student show their passed lessons
+      $passedLessons = 0;
+      if ($role === 'student') {
+          $passed = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM lesson_activity
+            WHERE user_id=? AND status='passed'
+            AND lesson_id IN (SELECT lesson_id FROM cohort_lesson_deadlines WHERE cohort_id=?)
+          ");
+          $passed->execute([$userId, $cohortId]);
+          $passedLessons = (int)$passed->fetchColumn();
+      }
 
       $pct = ($totalLessons > 0) ? (int)round(($passedLessons / $totalLessons) * 100) : 0;
 
@@ -62,7 +110,7 @@ cw_header('My Dashboard');
         ORDER BY d.deadline_utc ASC
         LIMIT 1
       ");
-      $next->execute([(int)$co['id']]);
+      $next->execute([$cohortId]);
       $nextRow = $next->fetch(PDO::FETCH_ASSOC);
     ?>
     <div class="card">
@@ -72,7 +120,14 @@ cw_header('My Dashboard');
       </div>
 
       <div style="margin-top:10px;">
-        <div class="muted">Progress: <?= $pct ?>% (<?= $passedLessons ?>/<?= $totalLessons ?>)</div>
+        <div class="muted">
+          <?php if ($role === 'student'): ?>
+            Progress: <?= $pct ?>% (<?= $passedLessons ?>/<?= $totalLessons ?>)
+          <?php else: ?>
+            Admin view: schedule overview (progress shown per student later)
+          <?php endif; ?>
+        </div>
+
         <div style="height:10px;background:#eee;border-radius:999px;overflow:hidden;margin-top:6px;">
           <div style="height:10px;width:<?= $pct ?>%;background:#1e3c72;"></div>
         </div>
@@ -85,7 +140,7 @@ cw_header('My Dashboard');
       <?php endif; ?>
 
       <div style="margin-top:12px;">
-        <a class="btn" href="/student/course.php?cohort_id=<?= (int)$co['id'] ?>">Open course</a>
+        <a class="btn" href="/student/course.php?cohort_id=<?= $cohortId ?>">Open course</a>
       </div>
     </div>
   <?php endforeach; ?>
