@@ -74,7 +74,7 @@ $hs = $pdo->prepare("SELECT id, label, src, x,y,w,h FROM slide_hotspots WHERE sl
 $hs->execute([$slideId]);
 $hotspots = $hs->fetchAll(PDO::FETCH_ASSOC);
 
-// Content EN/ES (for ES popup and fallback)
+// Content EN/ES
 $en = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='en' LIMIT 1");
 $en->execute([$slideId]);
 $enText = (string)($en->fetchColumn() ?: '');
@@ -82,6 +82,13 @@ $enText = (string)($en->fetchColumn() ?: '');
 $es = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='es' LIMIT 1");
 $es->execute([$slideId]);
 $esText = (string)($es->fetchColumn() ?: '');
+
+// Narration EN/ES (optional; for now we keep)
+$narr = $pdo->prepare("SELECT narration_en, narration_es FROM slide_enrichment WHERE slide_id=? LIMIT 1");
+$narr->execute([$slideId]);
+$narrRow = $narr->fetch(PDO::FETCH_ASSOC) ?: [];
+$narrEn = (string)($narrRow['narration_en'] ?? '');
+$narrEs = (string)($narrRow['narration_es'] ?? '');
 
 // References
 $refsStmt = $pdo->prepare("
@@ -148,6 +155,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     }
     .btnx:hover{ background: rgba(30,60,114,0.14); }
     .btnx:disabled{ opacity:.4; cursor:not-allowed; }
+    .btnx.on{ background: rgba(30,60,114,0.20); border-color: rgba(30,60,114,0.45); }
 
     .meta{
       margin-left:auto;
@@ -190,7 +198,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       -webkit-user-drag: none;
       user-select: none;
       -webkit-user-select: none;
-      pointer-events:none;
+      pointer-events:none; /* prevent direct interaction */
     }
     .header-img{
       position:absolute; left:0; top:0;
@@ -209,6 +217,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       -webkit-user-drag:none;
     }
 
+    /* Invisible shield layer to block clicks/drag/save menu on the slide image */
     .shield{
       position:absolute;
       inset:0;
@@ -288,6 +297,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     }
     .vbox video{ width:100%; height:auto; display:block; }
 
+    /* Summary drawer */
     .drawer{
       position: fixed;
       right: 14px;
@@ -382,9 +392,6 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     </div>
   </div>
 
-  <!-- Audio element for OpenAI TTS (real voice) -->
-  <audio id="ttsAudio" preload="none"></audio>
-
   <button class="fab" id="btnSummary" title="My Study Summary">📝</button>
 
   <div class="drawer" id="drawer">
@@ -429,8 +436,6 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
   </div>
 
 <script>
-const SLIDE_ID = <?= (int)$slideId ?>;
-
 const viewport = document.getElementById('viewport');
 const stage = document.getElementById('stage');
 let scale = 1;
@@ -447,6 +452,7 @@ setTimeout(fitStage, 30);
 // Prevent context menu (basic deterrent)
 document.getElementById('shield').addEventListener('contextmenu', (e)=>e.preventDefault());
 document.addEventListener('contextmenu', (e)=>{
+  // prevent right click on slide area
   if (e.target.closest && e.target.closest('#viewport')) e.preventDefault();
 });
 
@@ -459,14 +465,18 @@ function tickClock(){
 }
 tickClock(); setInterval(tickClock, 10000);
 
-// Language dropdown
+// Language dropdown (extensible)
 const PREF_KEY = 'ipca_lang_pref';
 let lang = localStorage.getItem(PREF_KEY) || 'en';
 const langSel = document.getElementById('langSel');
 langSel.value = (lang === 'es') ? 'es' : 'en';
 
 const btnTxtES  = document.getElementById('btnTxtES');
+
+const EN_TEXT = <?= json_encode($enText) ?>;
 const ES_TEXT = <?= json_encode($esText) ?>;
+const NARR_EN = <?= json_encode($narrEn) ?>;
+const NARR_ES = <?= json_encode($narrEs) ?>;
 
 function applyLangUI(){
   btnTxtES.style.display = (lang==='es') ? 'inline-block' : 'none';
@@ -476,40 +486,44 @@ function setLang(newLang){
   localStorage.setItem(PREF_KEY, lang);
   applyLangUI();
 }
-langSel.addEventListener('change', ()=>{
-  setLang(langSel.value);
-  // stop audio when switching language
-  ttsAudio.pause();
-  ttsAudio.currentTime = 0;
-  ttsAudio.removeAttribute('src');
-  ttsAudio.dataset.src = '';
-});
+langSel.addEventListener('change', ()=>setLang(langSel.value));
 applyLangUI();
 
-// ---- AI Voice (OpenAI TTS MP3 via API) ----
-const ttsAudio = document.getElementById('ttsAudio');
-
-function ttsUrl() {
-  return `/player/api/tts.php?slide_id=${SLIDE_ID}&lang=${encodeURIComponent(lang)}`;
+// ---- Audio (temporary browser TTS; will be replaced with AI voice) ----
+let utter = null;
+function getNarrationText(){
+  if (lang === 'es') return (NARR_ES || ES_TEXT || '');
+  return (NARR_EN || EN_TEXT || '');
 }
-
-async function playTTS() {
-  const want = ttsUrl();
-  if (ttsAudio.dataset.src !== want) {
-    ttsAudio.pause();
-    ttsAudio.currentTime = 0;
-    ttsAudio.src = want;
-    ttsAudio.dataset.src = want;
-  }
-  try { await ttsAudio.play(); } catch(e) { /* user gesture may be required */ }
+function pickVoiceForLang(targetLang){
+  const voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+  if (!voices || voices.length===0) return null;
+  const want = (targetLang === 'es') ? 'es' : 'en';
+  return voices.find(v => (v.lang||'').toLowerCase().startsWith(want)) || null;
 }
+function speakFromStart(){
+  if (!window.speechSynthesis) { alert('Audio not supported.'); return; }
+  const text = getNarrationText().trim();
+  if (!text) { alert('No narration text yet.'); return; }
 
-document.getElementById('btnAudioPlay').onclick = ()=> playTTS();
-document.getElementById('btnAudioPause').onclick = ()=> ttsAudio.pause();
-document.getElementById('btnAudioRew').onclick = ()=>{
-  ttsAudio.currentTime = 0;
-  playTTS();
+  speechSynthesis.cancel();
+  utter = new SpeechSynthesisUtterance(text);
+  const v = pickVoiceForLang(lang);
+  if (v) utter.voice = v;
+  utter.rate = 1.0;
+  utter.pitch = 1.0;
+  speechSynthesis.speak(utter);
+}
+document.getElementById('btnAudioPlay').onclick = ()=>{
+  if (!window.speechSynthesis) return alert('Audio not supported.');
+  if (speechSynthesis.paused) return speechSynthesis.resume();
+  speakFromStart();
 };
+document.getElementById('btnAudioPause').onclick = ()=>{
+  if (!window.speechSynthesis) return;
+  if (speechSynthesis.speaking && !speechSynthesis.paused) speechSynthesis.pause();
+};
+document.getElementById('btnAudioRew').onclick = ()=>{ speakFromStart(); };
 
 // ---- Video modal ----
 const CDN_BASE = <?= json_encode(rtrim($CDN_BASE,'/')) ?>;
