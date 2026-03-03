@@ -187,7 +187,26 @@ cw_header('Course');
             <div class="smallmuted">Attempts left: <?= (int)$attemptsLeft ?></div>
 
             <?php if ($canTest && $attemptsLeft > 0): ?>
-              <a class="btn btn-sm" href="<?= h($ptUrl) ?>">Take Progress Test</a>
+              <?php if ($canTest && $attemptsLeft > 0): ?>
+  <?php $ptUrl = '/student/progress_test.php'; ?>
+  <form method="get" action="<?= h($ptUrl) ?>" style="display:inline; position:relative; z-index:50;">
+    <input type="hidden" name="cohort_id" value="<?= (int)$cohortId ?>">
+    <input type="hidden" name="lesson_id" value="<?= (int)$l['lesson_id'] ?>">
+    <button class="btn btn-sm" type="submit" style="pointer-events:auto;">
+      Take Progress Test
+    </button>
+  </form>
+
+  <a class="btn btn-sm" target="_blank"
+     href="/student/progress_test.php?cohort_id=<?= (int)$cohortId ?>&lesson_id=<?= (int)$l['lesson_id'] ?>"
+     style="margin-left:6px; position:relative; z-index:50; pointer-events:auto;">
+    Open
+  </a>
+
+  <div class="smallmuted" style="user-select:text; position:relative; z-index:50;">
+    /student/progress_test.php?cohort_id=<?= (int)$cohortId ?>&lesson_id=<?= (int)$l['lesson_id'] ?>
+  </div>
+<?php endif; ?>
               <a class="btn btn-sm" target="_blank" href="<?= h($ptUrl) ?>" style="margin-left:6px;">Open</a>
               <div class="smallmuted"><?= h($ptUrl) ?></div>
             <?php elseif ($locked): ?>
