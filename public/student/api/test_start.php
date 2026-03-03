@@ -30,7 +30,7 @@ try {
 
     $userId = (int)$u['id'];
 
-    // Student must be enrolled in cohort
+    // Student must be enrolled in cohort and lesson must be in cohort schedule
     if ($role === 'student') {
         $chk = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
         $chk->execute([$cohortId, $userId]);
@@ -39,44 +39,122 @@ try {
             echo json_encode(['ok'=>false,'error'=>'Not enrolled']);
             exit;
         }
+
+        $chk2 = $pdo->prepare("SELECT 1 FROM cohort_lesson_deadlines WHERE cohort_id=? AND lesson_id=? LIMIT 1");
+        $chk2->execute([$cohortId, $lessonId]);
+        if (!$chk2->fetchColumn()) {
+            http_response_code(403);
+            echo json_encode(['ok'=>false,'error'=>'Lesson not in cohort']);
+            exit;
+        }
     }
 
-    // Determine next attempt number
-    $stmt = $pdo->prepare("SELECT MAX(attempt) FROM progress_tests WHERE user_id=? AND cohort_id=? AND lesson_id=?");
-    $stmt->execute([$userId, $cohortId, $lessonId]);
-    $maxAttempt = (int)($stmt->fetchColumn() ?: 0);
-    $attempt = $maxAttempt + 1;
+    // Helper: return first unanswered item (or first item if none unanswered)
+    $returnItem = function(int $testId) use ($pdo) {
+        $q = $pdo->prepare("
+          SELECT id, idx, kind, prompt, options_json
+          FROM progress_test_items
+          WHERE test_id=? AND (student_json IS NULL OR student_json = 'null')
+          ORDER BY idx ASC
+          LIMIT 1
+        ");
+        $q->execute([$testId]);
+        $it = $q->fetch(PDO::FETCH_ASSOC);
 
-    // Hard cap: 3 automatic attempts (for students)
-    if ($role === 'student' && $attempt > 3) {
-        echo json_encode(['ok'=>false,'error'=>'No attempts left']);
-        exit;
-    }
+        if (!$it) {
+            // if none unanswered, return first item (edge case)
+            $q2 = $pdo->prepare("
+              SELECT id, idx, kind, prompt, options_json
+              FROM progress_test_items
+              WHERE test_id=?
+              ORDER BY idx ASC
+              LIMIT 1
+            ");
+            $q2->execute([$testId]);
+            $it = $q2->fetch(PDO::FETCH_ASSOC);
+        }
 
-    // Create test row
-    $seed = bin2hex(random_bytes(16));
-    $ins = $pdo->prepare("
-      INSERT INTO progress_tests (user_id, cohort_id, lesson_id, attempt, status, seed, started_at)
-      VALUES (?,?,?,?, 'in_progress', ?, NOW())
+        if (!$it) {
+            throw new RuntimeException('No test items found');
+        }
+
+        return [
+            'item_id' => (int)$it['id'],
+            'idx' => (int)$it['idx'],
+            'kind' => (string)$it['kind'],
+            'prompt' => (string)$it['prompt'],
+            'options' => json_decode((string)($it['options_json'] ?? 'null'), true) ?: []
+        ];
+    };
+
+    $pdo->beginTransaction();
+
+    // 1) Resume existing in_progress test if present (prevents duplicates)
+    $resume = $pdo->prepare("
+      SELECT id
+      FROM progress_tests
+      WHERE user_id=? AND cohort_id=? AND lesson_id=? AND status='in_progress'
+      ORDER BY id DESC
+      LIMIT 1
     ");
-    $ins->execute([$userId, $cohortId, $lessonId, $attempt, $seed]);
-    $testId = (int)$pdo->lastInsertId();
+    $resume->execute([$userId, $cohortId, $lessonId]);
+    $existingTestId = (int)($resume->fetchColumn() ?: 0);
 
-    // Build a simple test (MVP)
+    if ($existingTestId > 0) {
+        // If it already has items, just return first unanswered item
+        $cnt = $pdo->prepare("SELECT COUNT(*) FROM progress_test_items WHERE test_id=?");
+        $cnt->execute([$existingTestId]);
+        $hasItems = ((int)$cnt->fetchColumn() > 0);
+
+        if ($hasItems) {
+            $item = $returnItem($existingTestId);
+            $pdo->commit();
+            echo json_encode(['ok'=>true,'test_id'=>$existingTestId,'item'=>$item]);
+            exit;
+        }
+
+        // If no items (partial failure earlier), we will build them below
+        $testId = $existingTestId;
+    } else {
+        // 2) Create new test row
+        $stmt = $pdo->prepare("SELECT MAX(attempt) FROM progress_tests WHERE user_id=? AND cohort_id=? AND lesson_id=?");
+        $stmt->execute([$userId, $cohortId, $lessonId]);
+        $maxAttempt = (int)($stmt->fetchColumn() ?: 0);
+        $attempt = $maxAttempt + 1;
+
+        if ($role === 'student' && $attempt > 3) {
+            $pdo->rollBack();
+            echo json_encode(['ok'=>false,'error'=>'No attempts left']);
+            exit;
+        }
+
+        $seed = bin2hex(random_bytes(16));
+        $ins = $pdo->prepare("
+          INSERT INTO progress_tests (user_id, cohort_id, lesson_id, attempt, status, seed, started_at)
+          VALUES (?,?,?,?, 'in_progress', ?, NOW())
+        ");
+        $ins->execute([$userId, $cohortId, $lessonId, $attempt, $seed]);
+        $testId = (int)$pdo->lastInsertId();
+    }
+
+    // ✅ Always clear any stray items for this testId before building
+    $pdo->prepare("DELETE FROM progress_test_items WHERE test_id=?")->execute([$testId]);
+
+    // 3) Build MVP items
     $items = [];
 
     $items[] = [
         'kind' => 'info',
-        'prompt' => "Progress Test started. Answer carefully — minimal hints. Ready?",
+        'prompt' => "Progress Test started.\n\nAnswer carefully — minimal hints.\n\nTap Continue to begin.",
         'options' => [],
-        'correct' => ['value'=>true]
+        'correct' => ['value'=>true],
     ];
 
     $items[] = [
         'kind' => 'yesno',
         'prompt' => "TRUE or FALSE (answer Yes for True, No for False): A stall can happen at any airspeed.",
         'options' => [],
-        'correct' => ['value'=>true]
+        'correct' => ['value'=>true],
     ];
 
     $items[] = [
@@ -88,14 +166,14 @@ try {
             "The angle between the runway and the airplane’s flight path",
             "The angle between the propeller disk and the airflow"
         ],
-        'correct' => ['index'=>0]
+        'correct' => ['index'=>0],
     ];
 
     $items[] = [
         'kind' => 'yesno',
         'prompt' => "TRUE or FALSE (Yes=True, No=False): In a coordinated turn, the inclinometer ball is centered.",
         'options' => [],
-        'correct' => ['value'=>true]
+        'correct' => ['value'=>true],
     ];
 
     $items[] = [
@@ -107,11 +185,17 @@ try {
             "Add power to eliminate the crosswind effect",
             "Use rudder only; ailerons are ineffective"
         ],
-        'correct' => ['index'=>1]
+        'correct' => ['index'=>1],
     ];
 
-    // Insert items with idx starting at 1
-    // IMPORTANT: your table requires correct_answer_json (NOT NULL)
+    $items[] = [
+        'kind' => 'info',
+        'prompt' => "End of test.\n\nTap Continue to finish and receive your score + debrief.",
+        'options' => [],
+        'correct' => ['value'=>true],
+    ];
+
+    // Insert items
     $insItem = $pdo->prepare("
       INSERT INTO progress_test_items
         (test_id, idx, kind, question_order, prompt, options_json, correct_json, correct_answer_json, student_json, student_answer_json, is_correct, created_at)
@@ -130,14 +214,14 @@ try {
         $correctJson = json_encode($it['correct'], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
         if ($correctJson === false) $correctJson = '{}';
 
-        // store same payload into both columns (your schema has both)
+        // your schema requires NOT NULL correct_answer_json
         $correctAnswerJson = $correctJson;
 
         $insItem->execute([
             $testId,
             $idx,
             $kind,
-            $idx, // question_order mirrors idx
+            $idx,
             $prompt,
             $optionsJson,
             $correctJson,
@@ -147,26 +231,20 @@ try {
         $idx++;
     }
 
-    // Return first item (idx=1)
-    $stmt = $pdo->prepare("SELECT id, idx, kind, prompt, options_json FROM progress_test_items WHERE test_id=? AND idx=1 LIMIT 1");
-    $stmt->execute([$testId]);
-    $first = $stmt->fetch(PDO::FETCH_ASSOC);
-    if (!$first) throw new RuntimeException("Failed to create first item");
+    $item = $returnItem($testId);
+
+    $pdo->commit();
 
     echo json_encode([
         'ok' => true,
         'test_id' => $testId,
-        'attempt' => $attempt,
-        'item' => [
-            'item_id' => (int)$first['id'],
-            'idx' => (int)$first['idx'],
-            'kind' => (string)$first['kind'],
-            'prompt' => (string)$first['prompt'],
-            'options' => json_decode((string)$first['options_json'], true) ?: []
-        ]
+        'item' => $item
     ]);
+    exit;
 
 } catch (Throwable $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
     http_response_code(400);
     echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+    exit;
 }
