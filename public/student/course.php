@@ -146,48 +146,41 @@ cw_header('Course');
         <td><?= h($status) ?></td>
 
         <td>
-          <?php if ($role === 'admin'): ?>
-            <span class="muted">admin</span>
-          <?php else: ?>
-            <?php if ($sumLen <= 0): ?>
-              <span class="muted">missing</span>
-            <?php elseif ($summaryOk): ?>
-              <span>ok</span> <span class="muted">(<?= (int)$sumLen ?> chars)</span>
-            <?php else: ?>
-              <span class="muted">too short</span> <span class="muted">(<?= (int)$sumLen ?> chars)</span>
-            <?php endif; ?>
-          <?php endif; ?>
-        </td>
+  <?php if ($role === 'admin'): ?>
+    <span class="muted">admin</span>
+  <?php else: ?>
+    <?php if ($last): ?>
+      <div class="muted" style="font-size:12px;">
+        Last: <?= h($last['status']) ?>
+        <?= $last['score_pct'] !== null ? (' • '.(int)$last['score_pct'].'%') : '' ?>
+        • Attempt <?= (int)$last['attempt'] ?>/3
+      </div>
+    <?php else: ?>
+      <div class="muted" style="font-size:12px;">Not started</div>
+    <?php endif; ?>
 
-        <td>
-          <?php if ($role === 'admin'): ?>
-            <span class="muted">admin</span>
-          <?php else: ?>
-            <?php if ($last): ?>
-              <div class="muted" style="font-size:12px;">
-                Last: <?= h($last['status']) ?>
-                <?= $last['score_pct'] !== null ? (' • '.$last['score_pct'].'%') : '' ?>
-                • Attempt <?= (int)$last['attempt'] ?>/3
-              </div>
-            <?php else: ?>
-              <div class="muted" style="font-size:12px;">Not started</div>
-            <?php endif; ?>
+    <div class="muted" style="font-size:12px;">Attempts left: <?= (int)$attemptsLeft ?></div>
 
-            <div class="muted" style="font-size:12px;">Attempts left: <?= (int)$attemptsLeft ?></div>
+    <?php
+      $ptUrl = '/student/progress_test.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$l['lesson_id'];
+    ?>
 
-            <?php if ($canTest && $attemptsLeft > 0): ?>
-              <a class="btn btn-sm" href="/student/progress_test.php?cohort_id=<?= (int)$cohortId ?>&lesson_id=<?= (int)$l['lesson_id'] ?>">
-                Take Progress Test
-              </a>
-            <?php elseif ($locked): ?>
-              <span class="muted">Locked</span>
-            <?php elseif (!$summaryOk): ?>
-              <span class="muted">Complete summary first</span>
-            <?php else: ?>
-              <span class="muted">No attempts left</span>
-            <?php endif; ?>
-          <?php endif; ?>
-        </td>
+    <?php if ($canTest && $attemptsLeft > 0): ?>
+      <a class="btn btn-sm" href="<?= h($ptUrl) ?>">Take Progress Test</a>
+      <div class="muted" style="font-size:11px; margin-top:6px;">
+        <?= h($ptUrl) ?>
+      </div>
+    <?php elseif ($locked): ?>
+      <span class="muted">Locked</span>
+    <?php elseif (!$summaryOk): ?>
+      <span class="muted">Complete summary first</span>
+    <?php else: ?>
+      <span class="muted">No attempts left</span>
+    <?php endif; ?>
+  <?php endif; ?>
+</td>
+
+        
 
         <td>
           <?php if ($slideId <= 0): ?>
