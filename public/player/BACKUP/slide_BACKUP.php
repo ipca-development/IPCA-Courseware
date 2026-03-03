@@ -15,7 +15,7 @@ $slideId = (int)($_GET['slide_id'] ?? 0);
 if ($slideId <= 0) exit('Missing slide_id');
 
 $stmt = $pdo->prepare("
-  SELECT s.*, l.id AS lesson_id, l.course_id, l.external_lesson_id, c.title AS course_title, p.program_key
+  SELECT s.*, l.id AS lesson_id, l.external_lesson_id, c.title AS course_title, p.program_key
   FROM slides s
   JOIN lessons l ON l.id=s.lesson_id
   JOIN courses c ON c.id=l.course_id
@@ -27,49 +27,13 @@ $slide = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$slide) exit('Slide not found');
 
 $lessonId = (int)$slide['lesson_id'];
-$courseId = (int)$slide['course_id'];
 $pageNum  = (int)$slide['page_number'];
-
-//
-// SECURITY: students may only access slides that belong to a cohort they are enrolled in,
-// and that cohort contains this lesson in its schedule.
-// (Admin bypasses.)
-//
-$cohortId = 0;
-if ($role === 'student') {
-    $uid = (int)$u['id'];
-    $chk = $pdo->prepare("
-      SELECT cs.cohort_id
-      FROM cohort_students cs
-      JOIN cohorts co ON co.id = cs.cohort_id
-      JOIN cohort_lesson_deadlines d ON d.cohort_id = cs.cohort_id
-      WHERE cs.user_id = ?
-        AND co.course_id = ?
-        AND d.lesson_id = ?
-      ORDER BY cs.id DESC
-      LIMIT 1
-    ");
-    $chk->execute([$uid, $courseId, $lessonId]);
-    $cohortId = (int)($chk->fetchColumn() ?: 0);
-    if ($cohortId <= 0) {
-        http_response_code(403);
-        exit('Forbidden');
-    }
-} else {
-    // Admin: try to find any cohort for this course (for back link convenience)
-    $c = $pdo->prepare("SELECT id FROM cohorts WHERE course_id=? ORDER BY id DESC LIMIT 1");
-    $c->execute([$courseId]);
-    $cohortId = (int)($c->fetchColumn() ?: 0);
-}
-
-$backUrl = $cohortId > 0 ? ('/student/course.php?cohort_id='.(int)$cohortId) : '/student/dashboard.php';
-
-$imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
+$imgUrl   = cdn_url($CDN_BASE, (string)$slide['image_path']);
 
 $HEADER = "/assets/overlay/header.png"; // 1600x125
 $FOOTER = "/assets/overlay/footer.png"; // 1600x90
 
-// Hotspots
+// Hotspots (video boxes)
 $hs = $pdo->prepare("SELECT id, label, src, x,y,w,h FROM slide_hotspots WHERE slide_id=? AND is_deleted=0 ORDER BY id ASC");
 $hs->execute([$slideId]);
 $hotspots = $hs->fetchAll(PDO::FETCH_ASSOC);
@@ -83,14 +47,14 @@ $es = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND l
 $es->execute([$slideId]);
 $esText = (string)($es->fetchColumn() ?: '');
 
-// Narration EN/ES (optional; for now we keep)
+// Narration EN/ES (optional)
 $narr = $pdo->prepare("SELECT narration_en, narration_es FROM slide_enrichment WHERE slide_id=? LIMIT 1");
 $narr->execute([$slideId]);
 $narrRow = $narr->fetch(PDO::FETCH_ASSOC) ?: [];
 $narrEn = (string)($narrRow['narration_en'] ?? '');
 $narrEs = (string)($narrRow['narration_es'] ?? '');
 
-// References
+// References (PHAK/ACS/FAR_AIM if present in your DB)
 $refsStmt = $pdo->prepare("
   SELECT ref_type, ref_code, ref_title, confidence, notes
   FROM slide_references
@@ -100,7 +64,7 @@ $refsStmt = $pdo->prepare("
 $refsStmt->execute([$slideId]);
 $refs = $refsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Prev/Next within lesson
+// Prev/Next within lesson, skip deleted
 $prevStmt = $pdo->prepare("
   SELECT id FROM slides
   WHERE lesson_id=? AND is_deleted=0 AND page_number < ?
@@ -167,6 +131,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     }
     .meta .tiny{ font-size:12px; opacity:.7; white-space:nowrap; }
 
+    /* Slide viewport */
     .wrap{ padding:14px; }
     .viewport{
       width:100%;
@@ -194,35 +159,18 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       top: 0;
       object-fit: contain;
       background:#ffffff;
-      user-drag: none;
-      -webkit-user-drag: none;
-      user-select: none;
-      -webkit-user-select: none;
-      pointer-events:none; /* prevent direct interaction */
     }
     .header-img{
       position:absolute; left:0; top:0;
       width:1600px; height:125px;
       object-fit:cover;
       pointer-events:none;
-      user-select:none;
-      -webkit-user-drag:none;
     }
     .footer-img{
       position:absolute; left:0; bottom:0;
       width:1600px; height:90px;
       object-fit:cover;
       pointer-events:none;
-      user-select:none;
-      -webkit-user-drag:none;
-    }
-
-    /* Invisible shield layer to block clicks/drag/save menu on the slide image */
-    .shield{
-      position:absolute;
-      inset:0;
-      background: transparent;
-      z-index: 5;
     }
 
     .hotspot{
@@ -231,7 +179,6 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       border-radius:10px;
       background: rgba(0,255,255,0.08);
       cursor:pointer;
-      z-index: 10;
     }
     .hotspot .tag{
       position:absolute; left:8px; top:8px;
@@ -241,6 +188,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       color:#fff;
     }
 
+    /* Floating buttons */
     .fab{
       position: fixed;
       right: 14px;
@@ -259,7 +207,9 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       box-shadow: 0 12px 26px rgba(0,0,0,0.18);
       z-index: 120;
     }
+    .fab:hover{ filter: brightness(1.05); }
 
+    /* Modals */
     .modal{
       position:fixed; inset:0;
       display:none;
@@ -288,6 +238,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       margin:0;
     }
 
+    /* Video modal */
     .vbox{
       width:min(960px, 92vw);
       background:#0b1220;
@@ -302,7 +253,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       position: fixed;
       right: 14px;
       bottom: 80px;
-      width: min(560px, 94vw);
+      width: min(520px, 92vw);
       height: min(520px, 70vh);
       background:#fff;
       border:1px solid #eee;
@@ -321,18 +272,13 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       justify-content:space-between;
       gap:10px;
     }
-    .drawer .tools{
-      display:flex; gap:6px; flex-wrap:wrap;
-      padding:8px 12px;
-      border-bottom:1px solid #eee;
-    }
-    .rte{
+    .drawer textarea{
       border:none;
       outline:none;
-      padding:12px;
+      resize:none;
       width:100%;
       height:100%;
-      overflow:auto;
+      padding:12px;
       font-family: Manrope, Arial, sans-serif;
       font-size: 14px;
       line-height: 1.35;
@@ -343,27 +289,22 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
 <body>
 
   <div class="topbar2">
-    <button class="btnx" onclick="location.href='<?= htmlspecialchars($backUrl) ?>'">Lesson Menu</button>
+    <button class="btnx" onclick="location.href='/student/dashboard.php'">← Back</button>
 
     <button class="btnx" <?= $prevId ? '' : 'disabled' ?>
-      onclick="location.href='/player/slide.php?slide_id=<?= (int)$prevId ?>'">◀ Prev</button>
+      onclick="location.href='/player/slide.php?slide_id=<?= (int)$prevId ?>'">⬅ Prev</button>
 
     <button class="btnx" <?= $nextId ? '' : 'disabled' ?>
-      onclick="location.href='/player/slide.php?slide_id=<?= (int)$nextId ?>'">Next ▶</button>
+      onclick="location.href='/player/slide.php?slide_id=<?= (int)$nextId ?>'">Next ➜</button>
 
-    <label class="muted" style="display:flex;align-items:center;gap:6px;">
-      <span style="font-weight:700; color:#1e3c72;">Lang</span>
-      <select id="langSel" class="input" style="height:34px;">
-        <option value="en">English</option>
-        <option value="es">Español</option>
-      </select>
-    </label>
+    <button class="btnx" id="btnLangEN">EN</button>
+    <button class="btnx" id="btnLangES">ES</button>
 
     <button class="btnx" id="btnAudioPlay">▶︎ Audio</button>
     <button class="btnx" id="btnAudioPause">⏸︎</button>
     <button class="btnx" id="btnAudioRew">↺</button>
 
-    <button class="btnx" id="btnRefs">Study Refs</button>
+    <button class="btnx" id="btnRefs">FAA refs</button>
     <button class="btnx" id="btnTxtES" style="display:none;">Spanish text</button>
 
     <div class="meta">
@@ -378,7 +319,6 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
         <img class="content-img" src="<?= htmlspecialchars($imgUrl) ?>" alt="">
         <img class="header-img" src="<?= htmlspecialchars($HEADER) ?>" alt="">
         <img class="footer-img" src="<?= htmlspecialchars($FOOTER) ?>" alt="">
-        <div class="shield" id="shield"></div>
 
         <?php foreach ($hotspots as $h): ?>
           <div class="hotspot"
@@ -392,25 +332,23 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     </div>
   </div>
 
+  <!-- Summary floating button -->
   <button class="fab" id="btnSummary" title="My Study Summary">📝</button>
 
+  <!-- Summary drawer -->
   <div class="drawer" id="drawer">
     <div class="head">
-      <strong>My Study Summary (Lesson)</strong>
+      <strong>My Study Summary</strong>
       <span class="muted" id="sumStatus">Saved</span>
       <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
     </div>
-    <div class="tools">
-      <button class="btnx" type="button" data-cmd="bold" style="padding:6px 10px;">B</button>
-      <button class="btnx" type="button" data-cmd="italic" style="padding:6px 10px;">I</button>
-      <button class="btnx" type="button" data-cmd="insertUnorderedList" style="padding:6px 10px;">•</button>
-    </div>
-    <div id="rte" class="rte" contenteditable="true"></div>
+    <textarea id="taSummary" placeholder="Write your summary in your own words while studying…"></textarea>
   </div>
 
+  <!-- Refs modal -->
   <div class="modal" id="modalRefs">
     <div class="box">
-      <h3>Study References</h3>
+      <h3>FAA References</h3>
       <div class="muted" style="margin-bottom:10px;">PHAK / ACS (and others if present)</div>
       <div id="refsBody"></div>
       <div style="margin-top:12px; text-align:right;">
@@ -419,6 +357,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     </div>
   </div>
 
+  <!-- Spanish text modal -->
   <div class="modal" id="modalES">
     <div class="box">
       <h3>Spanish Translation</h3>
@@ -429,6 +368,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     </div>
   </div>
 
+  <!-- Video modal -->
   <div class="modal" id="modalVid">
     <div class="vbox">
       <video id="vid" controls playsinline></video>
@@ -449,13 +389,6 @@ function fitStage(){
 window.addEventListener('resize', ()=>setTimeout(fitStage, 60));
 setTimeout(fitStage, 30);
 
-// Prevent context menu (basic deterrent)
-document.getElementById('shield').addEventListener('contextmenu', (e)=>e.preventDefault());
-document.addEventListener('contextmenu', (e)=>{
-  // prevent right click on slide area
-  if (e.target.closest && e.target.closest('#viewport')) e.preventDefault();
-});
-
 // Clock
 function tickClock(){
   const d = new Date();
@@ -465,12 +398,12 @@ function tickClock(){
 }
 tickClock(); setInterval(tickClock, 10000);
 
-// Language dropdown (extensible)
+// Language preference
 const PREF_KEY = 'ipca_lang_pref';
 let lang = localStorage.getItem(PREF_KEY) || 'en';
-const langSel = document.getElementById('langSel');
-langSel.value = (lang === 'es') ? 'es' : 'en';
 
+const btnLangEN = document.getElementById('btnLangEN');
+const btnLangES = document.getElementById('btnLangES');
 const btnTxtES  = document.getElementById('btnTxtES');
 
 const EN_TEXT = <?= json_encode($enText) ?>;
@@ -479,6 +412,8 @@ const NARR_EN = <?= json_encode($narrEn) ?>;
 const NARR_ES = <?= json_encode($narrEs) ?>;
 
 function applyLangUI(){
+  btnLangEN.classList.toggle('on', lang==='en');
+  btnLangES.classList.toggle('on', lang==='es');
   btnTxtES.style.display = (lang==='es') ? 'inline-block' : 'none';
 }
 function setLang(newLang){
@@ -486,44 +421,72 @@ function setLang(newLang){
   localStorage.setItem(PREF_KEY, lang);
   applyLangUI();
 }
-langSel.addEventListener('change', ()=>setLang(langSel.value));
+btnLangEN.onclick = ()=>setLang('en');
+btnLangES.onclick = ()=>setLang('es');
 applyLangUI();
 
-// ---- Audio (temporary browser TTS; will be replaced with AI voice) ----
+// ---- Audio (MVP using SpeechSynthesis) ----
 let utter = null;
+let speaking = false;
+
 function getNarrationText(){
   if (lang === 'es') return (NARR_ES || ES_TEXT || '');
   return (NARR_EN || EN_TEXT || '');
 }
+
 function pickVoiceForLang(targetLang){
   const voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
   if (!voices || voices.length===0) return null;
+
+  // Prefer language match
   const want = (targetLang === 'es') ? 'es' : 'en';
-  return voices.find(v => (v.lang||'').toLowerCase().startsWith(want)) || null;
+  let v = voices.find(x => (x.lang||'').toLowerCase().startsWith(want) && /google|natural|premium|enhanced/i.test(x.name||'')) ||
+          voices.find(x => (x.lang||'').toLowerCase().startsWith(want)) ||
+          null;
+  return v;
 }
+
 function speakFromStart(){
-  if (!window.speechSynthesis) { alert('Audio not supported.'); return; }
+  if (!window.speechSynthesis) { alert('Audio not supported in this browser.'); return; }
   const text = getNarrationText().trim();
-  if (!text) { alert('No narration text yet.'); return; }
+  if (!text) { alert('No narration text yet for this slide.'); return; }
 
   speechSynthesis.cancel();
   utter = new SpeechSynthesisUtterance(text);
-  const v = pickVoiceForLang(lang);
-  if (v) utter.voice = v;
   utter.rate = 1.0;
   utter.pitch = 1.0;
+
+  const v = pickVoiceForLang(lang);
+  if (v) utter.voice = v;
+
+  utter.onend = ()=>{ speaking=false; };
+  utter.onerror = ()=>{ speaking=false; };
+
+  speaking = true;
   speechSynthesis.speak(utter);
 }
+
 document.getElementById('btnAudioPlay').onclick = ()=>{
   if (!window.speechSynthesis) return alert('Audio not supported.');
-  if (speechSynthesis.paused) return speechSynthesis.resume();
+  const text = getNarrationText().trim();
+  if (!text) return alert('No narration text yet.');
+  // If paused, resume; else start
+  if (speechSynthesis.paused) {
+    speechSynthesis.resume();
+    return;
+  }
   speakFromStart();
 };
+
 document.getElementById('btnAudioPause').onclick = ()=>{
   if (!window.speechSynthesis) return;
   if (speechSynthesis.speaking && !speechSynthesis.paused) speechSynthesis.pause();
 };
-document.getElementById('btnAudioRew').onclick = ()=>{ speakFromStart(); };
+
+document.getElementById('btnAudioRew').onclick = ()=>{
+  if (!window.speechSynthesis) return;
+  speakFromStart();
+};
 
 // ---- Video modal ----
 const CDN_BASE = <?= json_encode(rtrim($CDN_BASE,'/')) ?>;
@@ -547,7 +510,7 @@ modalVid.addEventListener('click', (e)=>{
   }
 });
 
-// ---- Study refs modal ----
+// ---- FAA refs modal ----
 const REFS = <?= json_encode($refs) ?>;
 const modalRefs = document.getElementById('modalRefs');
 const refsBody = document.getElementById('refsBody');
@@ -577,7 +540,7 @@ document.getElementById('btnRefs').onclick = ()=>{
 document.getElementById('btnCloseRefs').onclick = ()=> modalRefs.style.display='none';
 modalRefs.addEventListener('click', (e)=>{ if(e.target===modalRefs) modalRefs.style.display='none'; });
 
-// ---- Spanish text modal ----
+// ---- Spanish text modal (only useful when ES selected) ----
 const modalES = document.getElementById('modalES');
 document.getElementById('esBody').textContent = ES_TEXT || '(No Spanish text yet)';
 btnTxtES.onclick = ()=>{
@@ -587,50 +550,45 @@ btnTxtES.onclick = ()=>{
 document.getElementById('btnCloseES').onclick = ()=> modalES.style.display='none';
 modalES.addEventListener('click', (e)=>{ if(e.target===modalES) modalES.style.display='none'; });
 
-// ---- Summary (lesson-level rich text, autosave localStorage) ----
-const LESSON_SUM_KEY = 'ipca_summary_lesson_' + <?= (int)$lessonId ?>;
+// ---- Summary drawer (autosave localStorage MVP) ----
+const SUM_KEY = 'ipca_summary_slide_' + <?= (int)$slideId ?>;
 const drawer = document.getElementById('drawer');
-const rte = document.getElementById('rte');
+const taSummary = document.getElementById('taSummary');
 const sumStatus = document.getElementById('sumStatus');
 
 function loadSummary(){
-  rte.innerHTML = localStorage.getItem(LESSON_SUM_KEY) || '';
+  const v = localStorage.getItem(SUM_KEY) || '';
+  taSummary.value = v;
 }
 let saveTimer = null;
+function markSaving(){ sumStatus.textContent = 'Saving…'; }
+function markSaved(){ sumStatus.textContent = 'Saved'; }
+
 function scheduleSave(){
   if (saveTimer) clearTimeout(saveTimer);
-  sumStatus.textContent = 'Saving…';
+  markSaving();
   saveTimer = setTimeout(()=>{
-    localStorage.setItem(LESSON_SUM_KEY, rte.innerHTML || '');
-    sumStatus.textContent = 'Saved';
+    localStorage.setItem(SUM_KEY, taSummary.value || '');
+    markSaved();
   }, 500);
 }
-rte.addEventListener('input', scheduleSave);
-
-document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    const cmd = btn.getAttribute('data-cmd');
-    document.execCommand(cmd, false, null);
-    rte.focus();
-    scheduleSave();
-  });
-});
+taSummary.addEventListener('input', scheduleSave);
 
 document.getElementById('btnSummary').onclick = ()=>{
   drawer.style.display = (drawer.style.display==='flex') ? 'none' : 'flex';
-  if (drawer.style.display==='flex') setTimeout(()=>rte.focus(), 80);
+  if (drawer.style.display==='flex') setTimeout(()=>taSummary.focus(), 80);
 };
 document.getElementById('btnCloseDrawer').onclick = ()=> drawer.style.display='none';
 loadSummary();
 
-// utils
+// utilities
 function escapeHtml(s){
   return (s||'').toString()
     .replaceAll('&','&amp;').replaceAll('<','&lt;')
     .replaceAll('>','&gt;').replaceAll('"','&quot;');
 }
 
-// Keyboard nav
+// Keyboard navigation
 document.addEventListener('keydown', (e)=>{
   if (e.key === 'ArrowLeft') {
     <?php if ($prevId): ?> location.href='/player/slide.php?slide_id=<?= (int)$prevId ?>'; <?php endif; ?>
