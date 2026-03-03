@@ -17,6 +17,7 @@ $cohortId = (int)($_GET['cohort_id'] ?? 0);
 if ($cohortId <= 0) exit('Missing cohort_id');
 
 if ($role === 'student') {
+    // student must be enrolled
     $check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
     $check->execute([$cohortId,$userId]);
     if (!$check->fetchColumn()) {
@@ -24,6 +25,7 @@ if ($role === 'student') {
         exit('Not enrolled in this cohort');
     }
 }
+// admin bypass: no enrollment required
 
 $co = $pdo->prepare("
   SELECT co.*, c.title AS course_title, p.program_key
@@ -83,7 +85,6 @@ function get_test_status(PDO $pdo, int $userId, int $cohortId, int $lessonId): a
 
 cw_header('Course');
 ?>
-
 <style>
   table td, table th { vertical-align: top; }
   .smallmuted { font-size: 11px; opacity: .75; margin-top: 6px; }
@@ -116,6 +117,8 @@ cw_header('Course');
 
     <?php foreach ($lessons as $l): ?>
       <?php
+        $lessonRowId = (int)$l['lesson_id'];
+
         $locked = false;
         $passed = false;
 
@@ -123,19 +126,19 @@ cw_header('Course');
             if (!empty($l['unlock_after_lesson_id'])) {
                 $locked = !lesson_passed($pdo, $userId, (int)$l['unlock_after_lesson_id']);
             }
-            $passed = lesson_passed($pdo, $userId, (int)$l['lesson_id']);
+            $passed = lesson_passed($pdo, $userId, $lessonRowId);
         }
 
         $status = ($role === 'admin') ? 'admin_view' : ($passed ? 'passed' : ($locked ? 'locked' : 'unlocked'));
 
         $first = $pdo->prepare("SELECT id FROM slides WHERE lesson_id=? AND is_deleted=0 ORDER BY page_number ASC LIMIT 1");
-        $first->execute([(int)$l['lesson_id']]);
+        $first->execute([$lessonRowId]);
         $firstSlideId = (int)$first->fetchColumn();
 
-        $sumLen = ($role === 'admin') ? 9999 : get_summary_len($pdo, $userId, $cohortId, (int)$l['lesson_id']);
+        $sumLen = ($role === 'admin') ? 9999 : get_summary_len($pdo, $userId, $cohortId, $lessonRowId);
         $summaryOk = ($sumLen >= 400);
 
-        $test = ($role === 'admin') ? ['max_attempt'=>0,'last'=>null] : get_test_status($pdo, $userId, $cohortId, (int)$l['lesson_id']);
+        $test = ($role === 'admin') ? ['max_attempt'=>0,'last'=>null] : get_test_status($pdo, $userId, $cohortId, $lessonRowId);
         $last = $test['last'];
 
         $attemptsUsed = (int)$test['max_attempt'];
@@ -145,7 +148,7 @@ cw_header('Course');
         if ($role === 'student' && $locked) $canTest = false;
         if ($role === 'student' && !$summaryOk) $canTest = false;
 
-        $ptUrl = '/student/progress_test.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$l['lesson_id'];
+        $ptUrlFull = '/student/progress_test.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$lessonRowId;
       ?>
       <tr>
         <td>
@@ -187,28 +190,15 @@ cw_header('Course');
             <div class="smallmuted">Attempts left: <?= (int)$attemptsLeft ?></div>
 
             <?php if ($canTest && $attemptsLeft > 0): ?>
-              <?php if ($canTest && $attemptsLeft > 0): ?>
-  <?php $ptUrl = '/student/progress_test.php'; ?>
-  <form method="get" action="<?= h($ptUrl) ?>" style="display:inline; position:relative; z-index:50;">
-    <input type="hidden" name="cohort_id" value="<?= (int)$cohortId ?>">
-    <input type="hidden" name="lesson_id" value="<?= (int)$l['lesson_id'] ?>">
-    <button class="btn btn-sm" type="submit" style="pointer-events:auto;">
-      Take Progress Test
-    </button>
-  </form>
+              <form method="get" action="/student/progress_test.php" style="display:inline; position:relative; z-index:50;">
+                <input type="hidden" name="cohort_id" value="<?= (int)$cohortId ?>">
+                <input type="hidden" name="lesson_id" value="<?= (int)$lessonRowId ?>">
+                <button class="btn btn-sm" type="submit" style="pointer-events:auto;">Take Progress Test</button>
+              </form>
 
-  <a class="btn btn-sm" target="_blank"
-     href="/student/progress_test.php?cohort_id=<?= (int)$cohortId ?>&lesson_id=<?= (int)$l['lesson_id'] ?>"
-     style="margin-left:6px; position:relative; z-index:50; pointer-events:auto;">
-    Open
-  </a>
+              <a class="btn btn-sm" target="_blank" href="<?= h($ptUrlFull) ?>" style="margin-left:6px;">Open</a>
+              <div class="smallmuted" style="user-select:text;"><?= h($ptUrlFull) ?></div>
 
-  <div class="smallmuted" style="user-select:text; position:relative; z-index:50;">
-    /student/progress_test.php?cohort_id=<?= (int)$cohortId ?>&lesson_id=<?= (int)$l['lesson_id'] ?>
-  </div>
-<?php endif; ?>
-              <a class="btn btn-sm" target="_blank" href="<?= h($ptUrl) ?>" style="margin-left:6px;">Open</a>
-              <div class="smallmuted"><?= h($ptUrl) ?></div>
             <?php elseif ($locked): ?>
               <span class="muted">Locked</span>
             <?php elseif (!$summaryOk): ?>
