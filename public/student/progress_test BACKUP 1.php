@@ -13,13 +13,14 @@ if ($role !== 'student' && $role !== 'admin') {
 
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 $lessonId = (int)($_GET['lesson_id'] ?? 0);
+
 if ($cohortId <= 0 || $lessonId <= 0) exit('Missing cohort_id or lesson_id');
 
 cw_header('Progress Test');
 ?>
 <div class="card">
   <div class="muted">
-    Timed Progress Test (≤ 10 minutes). Prefer speaking your answers. Buttons are backup.
+    This is a timed Progress Test (target ≤ 10 minutes). Answer carefully — minimal hints.
   </div>
 
   <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
@@ -39,7 +40,7 @@ cw_header('Progress Test');
     </span>
   </div>
 
-  <div class="muted" id="topStatus" style="margin-top:10px;">JS READY</div>
+  <div class="muted" id="topStatus" style="margin-top:10px;"></div>
 </div>
 
 <div class="card" id="quizCard" style="display:none;">
@@ -47,26 +48,6 @@ cw_header('Progress Test');
 
   <div id="promptBox" style="white-space:pre-wrap; font-size:16px; line-height:1.35;"></div>
 
-  <!-- Push to talk area -->
-  <div style="margin-top:12px; border:1px solid #eee; border-radius:14px; padding:12px; background:#fafafa;">
-    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-      <button class="btn" id="btnRecord" type="button">🎙 Record</button>
-      <button class="btn btn-sm" id="btnStop" type="button" disabled>Stop</button>
-      <button class="btn btn-sm" id="btnTranscribe" type="button" disabled>Transcribe</button>
-      <span class="muted" id="recStatus">Ready</span>
-    </div>
-
-    <label class="muted" style="display:block; margin-top:10px;">Your spoken answer (transcript)</label>
-    <textarea id="taTranscript" class="input" style="width:100%; min-height:90px;"></textarea>
-
-    <div style="display:flex; gap:10px; margin-top:10px; flex-wrap:wrap; align-items:center;">
-      <button class="btn" id="btnSendSpoken" type="button">Send spoken answer</button>
-      <button class="btn btn-sm" id="btnClear" type="button">Clear</button>
-      <span class="muted" style="font-size:12px;">Tip: If transcription is slightly off, fix it before sending.</span>
-    </div>
-  </div>
-
-  <!-- Buttons fallback -->
   <div id="answerArea" style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;"></div>
 
   <div class="muted" id="status" style="margin-top:10px;"></div>
@@ -80,6 +61,7 @@ cw_header('Progress Test');
   </div>
 </div>
 
+<!-- TTS Audio element -->
 <audio id="ttsAudio" preload="none"></audio>
 
 <script>
@@ -97,170 +79,92 @@ const statusEl = document.getElementById('status');
 const topStatusEl = document.getElementById('topStatus');
 const resultBox = document.getElementById('resultBox');
 
+const ttsAudio = document.getElementById('ttsAudio');
+const voiceLangSel = document.getElementById('voiceLang');
+const btnSpeakToggle = document.getElementById('btnSpeakToggle');
+const btnMute = document.getElementById('btnMute');
+
+let speakEnabled = true;
+let muted = false;
+
 function setStatus(s){ statusEl.textContent = s || ''; }
 function setTopStatus(s){ topStatusEl.textContent = s || ''; }
+
 function escapeHtml(s){
   return (s||'').toString()
     .replaceAll('&','&amp;').replaceAll('<','&lt;')
     .replaceAll('>','&gt;').replaceAll('"','&quot;');
 }
 
-// -------- TTS (same as before) --------
-const ttsAudio = document.getElementById('ttsAudio');
-const voiceLangSel = document.getElementById('voiceLang');
-const btnSpeakToggle = document.getElementById('btnSpeakToggle');
-const btnMute = document.getElementById('btnMute');
-let speakEnabled = true;
-let muted = false;
-
+// ---- TTS helpers ----
+// We reuse your existing slide-player TTS endpoint pattern.
+// You can implement a dedicated endpoint later, but for MVP we speak the prompt text via querystring.
 function ttsUrlFromText(text){
+  // If you already have /player/api/tts.php that accepts `text=...`, use that.
+  // If it only accepts slide_id, you can implement /student/api/tts_prompt.php later.
+  // For now we call a lightweight URL that your backend should support.
+  // Fallback: if it doesn't exist, we just don't play audio.
   const lang = encodeURIComponent(voiceLangSel.value || 'en');
   return `/student/api/tts_prompt.php?lang=${lang}&text=${encodeURIComponent(text || '')}`;
 }
+
 async function speak(text){
   if (!speakEnabled || muted) return;
   const t = (text || '').trim();
   if (!t) return;
 
   try {
+    const url = ttsUrlFromText(t);
     ttsAudio.pause();
     ttsAudio.currentTime = 0;
-    ttsAudio.src = ttsUrlFromText(t);
+    ttsAudio.src = url;
+
     await ttsAudio.play();
-  } catch(e) {}
+  } catch (e) {
+    // no autoplay / endpoint missing / etc.
+    // show minimal hint in UI
+    setTopStatus('Audio not available yet (or blocked by browser).');
+  }
 }
-btnSpeakToggle.onclick = ()=>{
+
+btnSpeakToggle.addEventListener('click', ()=>{
   speakEnabled = !speakEnabled;
   btnSpeakToggle.textContent = speakEnabled ? '🔊 Speak: ON' : '🔇 Speak: OFF';
-  if (!speakEnabled) { ttsAudio.pause(); ttsAudio.removeAttribute('src'); }
-};
-btnMute.onclick = ()=>{
+  if (!speakEnabled) {
+    ttsAudio.pause();
+    ttsAudio.currentTime = 0;
+    ttsAudio.removeAttribute('src');
+  }
+});
+btnMute.addEventListener('click', ()=>{
   muted = !muted;
   btnMute.textContent = muted ? 'Unmute' : 'Mute';
-  if (muted) ttsAudio.pause();
-};
-voiceLangSel.onchange = ()=>{
+  if (muted) {
+    ttsAudio.pause();
+  }
+});
+
+// If language changes, stop current audio
+voiceLangSel.addEventListener('change', ()=>{
   ttsAudio.pause();
+  ttsAudio.currentTime = 0;
   ttsAudio.removeAttribute('src');
-};
+});
 
-// -------- ASR (push-to-talk) --------
-const btnRecord = document.getElementById('btnRecord');
-const btnStop = document.getElementById('btnStop');
-const btnTranscribe = document.getElementById('btnTranscribe');
-const recStatus = document.getElementById('recStatus');
-const taTranscript = document.getElementById('taTranscript');
-const btnSendSpoken = document.getElementById('btnSendSpoken');
-const btnClear = document.getElementById('btnClear');
-
-let mediaStream = null;
-let recorder = null;
-let chunks = [];
-let lastBlob = null;
-
-function canRecord(){
-  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-}
-
-btnRecord.onclick = async ()=>{
-  if (!canRecord()) { alert('Mic not supported in this browser.'); return; }
-  try {
-    recStatus.textContent = 'Requesting mic…';
-    mediaStream = await navigator.mediaDevices.getUserMedia({ audio:true });
-    chunks = [];
-    lastBlob = null;
-
-    // Safari may use audio/mp4; others use audio/webm
-    const mime = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '';
-    recorder = new MediaRecorder(mediaStream, mime ? { mimeType: mime } : undefined);
-
-    recorder.ondataavailable = (e)=>{ if (e.data && e.data.size > 0) chunks.push(e.data); };
-    recorder.onstart = ()=>{ recStatus.textContent = 'Recording…'; };
-    recorder.onstop = ()=>{
-      recStatus.textContent = 'Recorded. Transcribe?';
-      lastBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-      btnTranscribe.disabled = !lastBlob;
-      // stop tracks
-      if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
-      mediaStream = null;
-    };
-
-    recorder.start();
-    btnStop.disabled = false;
-    btnRecord.disabled = true;
-  } catch (e) {
-    recStatus.textContent = 'Mic denied or error.';
-    btnStop.disabled = true;
-    btnRecord.disabled = false;
-  }
-};
-
-btnStop.onclick = ()=>{
-  try {
-    if (recorder && recorder.state !== 'inactive') recorder.stop();
-  } catch(e){}
-  btnStop.disabled = true;
-  btnRecord.disabled = false;
-};
-
-btnTranscribe.onclick = async ()=>{
-  if (!lastBlob) return;
-  recStatus.textContent = 'Transcribing…';
-  btnTranscribe.disabled = true;
-
-  const fd = new FormData();
-  const lang = voiceLangSel.value || 'en';
-  fd.append('lang', lang);
-
-  // filename hint
-  const ext = (lastBlob.type && lastBlob.type.indexOf('mp4') !== -1) ? 'm4a' : 'webm';
-  fd.append('audio', lastBlob, 'recording.' + ext);
-
-  const res = await fetch('/student/api/asr.php', {
-    method:'POST',
-    credentials:'same-origin',
-    body: fd
-  });
-
-  const txt = await res.text();
-  let j;
-  try { j = JSON.parse(txt); } catch(e){ j = {ok:false, error:'Non-JSON: '+txt.slice(0,200)}; }
-
-  if (!j.ok) {
-    recStatus.textContent = 'ASR failed: ' + (j.error||'');
-    btnTranscribe.disabled = false;
-    return;
-  }
-
-  taTranscript.value = j.text || '';
-  recStatus.textContent = 'Transcribed. You can edit then Send.';
-  btnTranscribe.disabled = false;
-};
-
-btnClear.onclick = ()=>{
-  taTranscript.value = '';
-  recStatus.textContent = 'Ready';
-};
-
-// -------- Quiz rendering & flow --------
+// ---- Render items ----
 function renderItem(item){
   CURRENT_ITEM = item;
   promptBox.textContent = item.prompt || '';
   answerArea.innerHTML = '';
 
-  // speak prompt after any user gesture (start/answer)
+  // Speak prompt (triggered after a user gesture: Start click / answer click)
   speak(item.prompt || '');
 
-  // Reset transcript box for each new question
-  taTranscript.value = '';
-  recStatus.textContent = 'Ready';
-
-  // Buttons fallback
   if (item.kind === 'info') {
     const b = document.createElement('button');
     b.className = 'btn';
-    b.type = 'button';
     b.textContent = 'Continue';
+    b.type = 'button';
     b.onclick = ()=> submitAnswer({action:'continue'});
     answerArea.appendChild(b);
     return;
@@ -270,8 +174,8 @@ function renderItem(item){
     ['Yes','No'].forEach(v=>{
       const b = document.createElement('button');
       b.className = 'btn';
-      b.type = 'button';
       b.textContent = v;
+      b.type = 'button';
       b.onclick = ()=> submitAnswer({value: v.toLowerCase() === 'yes'});
       answerArea.appendChild(b);
     });
@@ -282,8 +186,8 @@ function renderItem(item){
     (item.options || []).forEach((opt, idx)=>{
       const b = document.createElement('button');
       b.className = 'btn';
-      b.type = 'button';
       b.textContent = opt;
+      b.type = 'button';
       b.onclick = ()=> submitAnswer({index: idx});
       answerArea.appendChild(b);
     });
@@ -291,12 +195,9 @@ function renderItem(item){
   }
 }
 
-async function safeJson(res){
-  const txt = await res.text();
-  try { return JSON.parse(txt); } catch(e){ return { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
-}
-
+// ---- Start / Answer flow ----
 async function startTest(){
+  setTopStatus('');
   setStatus('Starting…');
 
   const res = await fetch('/student/api/test_start.php', {
@@ -306,19 +207,21 @@ async function startTest(){
     body: JSON.stringify({ cohort_id: COHORT_ID, lesson_id: LESSON_ID })
   });
 
-  const j = await safeJson(res);
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
+
   if (!j.ok) { setStatus('Start failed: ' + (j.error||'')); return; }
 
   TEST_ID = j.test_id;
   quizCard.style.display = 'block';
-  resultCard.style.display = 'none';
   renderItem(j.item);
   setStatus('');
 }
 
 async function submitAnswer(answer){
   if (!TEST_ID || !CURRENT_ITEM) return;
-  setStatus('Saving…');
+  setStatus('Saving answer…');
 
   const res = await fetch('/student/api/test_answer.php', {
     method:'POST',
@@ -331,7 +234,10 @@ async function submitAnswer(answer){
     })
   });
 
-  const j = await safeJson(res);
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
+
   if (!j.ok) { setStatus('Answer failed: ' + (j.error||'')); return; }
 
   if (j.done) {
@@ -342,8 +248,9 @@ async function submitAnswer(answer){
       <div style="margin-top:10px;"><strong>AI Summary</strong><br><div style="white-space:pre-wrap;">${escapeHtml(j.ai_summary||'')}</div></div>
       <div style="margin-top:10px;"><strong>Weak Areas</strong><br><div style="white-space:pre-wrap;">${escapeHtml(j.weak_areas||'')}</div></div>
     `;
-    speak(`Test complete. Your score is ${j.score_pct} percent.`);
     setStatus('');
+    // speak a short closing line
+    speak(`Test complete. Your score is ${j.score_pct} percent.`);
     return;
   }
 
@@ -351,15 +258,7 @@ async function submitAnswer(answer){
   setStatus('');
 }
 
-// Send spoken answer (transcript)
-btnSendSpoken.onclick = ()=>{
-  const t = (taTranscript.value || '').trim();
-  if (!t) { alert('Record + Transcribe first (or type your answer).'); return; }
-  // We send as {text:"..."} and let server map for yesno/mcq later.
-  submitAnswer({ text: t });
-};
-
 document.getElementById('btnStart').onclick = startTest;
+setTopStatus('JS READY');
 </script>
-
 <?php cw_footer(); ?>
