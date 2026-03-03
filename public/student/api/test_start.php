@@ -47,7 +47,7 @@ try {
     $maxAttempt = (int)($stmt->fetchColumn() ?: 0);
     $attempt = $maxAttempt + 1;
 
-    // Hard cap: 3 automatic attempts
+    // Hard cap: 3 automatic attempts (for students)
     if ($role === 'student' && $attempt > 3) {
         echo json_encode(['ok'=>false,'error'=>'No attempts left']);
         exit;
@@ -62,18 +62,16 @@ try {
     $ins->execute([$userId, $cohortId, $lessonId, $attempt, $seed]);
     $testId = (int)$pdo->lastInsertId();
 
-    // Build a simple 10-min test (mix: info + yes/no + mcq)
-    // Later we'll feed lesson content + summary; for now generic aviation knowledge prompts.
+    // Build a simple test (MVP)
     $items = [];
 
     $items[] = [
         'kind' => 'info',
         'prompt' => "Progress Test started. Answer carefully — minimal hints. Ready?",
         'options' => [],
-        'correct' => ['value'=>true] // irrelevant for info
+        'correct' => ['value'=>true]
     ];
 
-    // YES/NO
     $items[] = [
         'kind' => 'yesno',
         'prompt' => "TRUE or FALSE (answer Yes for True, No for False): A stall can happen at any airspeed.",
@@ -81,7 +79,6 @@ try {
         'correct' => ['value'=>true]
     ];
 
-    // MCQ
     $items[] = [
         'kind' => 'mcq',
         'prompt' => "Which of these best defines angle of attack (AoA)?",
@@ -94,7 +91,6 @@ try {
         'correct' => ['index'=>0]
     ];
 
-    // YES/NO
     $items[] = [
         'kind' => 'yesno',
         'prompt' => "TRUE or FALSE (Yes=True, No=False): In a coordinated turn, the inclinometer ball is centered.",
@@ -102,7 +98,6 @@ try {
         'correct' => ['value'=>true]
     ];
 
-    // MCQ
     $items[] = [
         'kind' => 'mcq',
         'prompt' => "On final approach in a crosswind, the primary goal is to…",
@@ -116,19 +111,27 @@ try {
     ];
 
     // Insert items with idx starting at 1
+    // IMPORTANT: your table requires correct_answer_json (NOT NULL)
     $insItem = $pdo->prepare("
       INSERT INTO progress_test_items
-        (test_id, idx, kind, question_order, prompt, options_json, correct_json, student_json, is_correct, created_at)
+        (test_id, idx, kind, question_order, prompt, options_json, correct_json, correct_answer_json, student_json, student_answer_json, is_correct, created_at)
       VALUES
-        (?, ?, ?, ?, ?, ?, ?, NULL, NULL, NOW())
+        (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NOW())
     ");
 
     $idx = 1;
     foreach ($items as $it) {
         $kind = (string)$it['kind'];
         $prompt = (string)$it['prompt'];
+
         $optionsJson = json_encode($it['options'], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        if ($optionsJson === false) $optionsJson = '[]';
+
         $correctJson = json_encode($it['correct'], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        if ($correctJson === false) $correctJson = '{}';
+
+        // store same payload into both columns (your schema has both)
+        $correctAnswerJson = $correctJson;
 
         $insItem->execute([
             $testId,
@@ -137,8 +140,10 @@ try {
             $idx, // question_order mirrors idx
             $prompt,
             $optionsJson,
-            $correctJson
+            $correctJson,
+            $correctAnswerJson
         ]);
+
         $idx++;
     }
 
