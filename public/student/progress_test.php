@@ -24,16 +24,12 @@ cw_header('Progress Test');
   </div>
 
   <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-    <!-- Inline onclick fallback ensures it works even if JS binding breaks -->
+    <!-- inline onclick fallback + forced type button -->
     <button class="btn" id="btnStart" type="button" onclick="window.__ptStart && window.__ptStart();">
       Start Progress Test
     </button>
-
     <a class="btn btn-sm" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>">Back to Lesson Menu</a>
-  </div>
-
-  <div class="muted" id="jsState" style="margin-top:10px;">
-    JS status: <strong>loading…</strong>
+    <span class="muted" id="jsReady" style="margin-left:6px;">JS…</span>
   </div>
 </div>
 
@@ -62,23 +58,22 @@ cw_header('Progress Test');
   let TEST_ID = 0;
   let CURRENT_ITEM = null;
 
+  const btnStart = document.getElementById('btnStart');
+  const jsReady = document.getElementById('jsReady');
+
   const quizCard = document.getElementById('quizCard');
   const resultCard = document.getElementById('resultCard');
   const promptBox = document.getElementById('promptBox');
   const answerArea = document.getElementById('answerArea');
   const statusEl = document.getElementById('status');
   const resultBox = document.getElementById('resultBox');
-  const jsState = document.getElementById('jsState');
-  const btnStart = document.getElementById('btnStart');
 
   function setStatus(s){ statusEl.textContent = s || ''; }
 
   function escapeHtml(s){
     return (s||'').toString()
-      .replace(/&/g,'&amp;')
-      .replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;');
+      .replaceAll('&','&amp;').replaceAll('<','&lt;')
+      .replaceAll('>','&gt;').replaceAll('"','&quot;');
   }
 
   function renderItem(item){
@@ -131,53 +126,52 @@ cw_header('Progress Test');
 
   async function safeJson(res){
     const txt = await res.text();
-    try { return { ok:true, json: JSON.parse(txt) }; }
-    catch(e){ return { ok:false, error: 'Non-JSON response', txt: txt.slice(0, 600) }; }
+    try { return JSON.parse(txt); }
+    catch(e){ return { ok:false, error:'Invalid JSON', raw: txt.slice(0,300) }; }
   }
 
   async function startTest(){
+    // immediate UI feedback so you KNOW click worked
+    quizCard.style.display = 'block';
+    resultCard.style.display = 'none';
+    promptBox.textContent = '';
+    answerArea.innerHTML = '';
     setStatus('Starting…');
 
-    let res;
     try {
-      res = await fetch('/student/api/test_start.php', {
+      const res = await fetch('/student/api/test_start.php', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         credentials:'same-origin',
         cache:'no-store',
         body: JSON.stringify({ cohort_id: COHORT_ID, lesson_id: LESSON_ID })
       });
+
+      const j = await safeJson(res);
+      if (!j.ok) {
+        setStatus('Start failed: ' + (j.error||'') + (j.raw ? (' | ' + j.raw) : ''));
+        return;
+      }
+
+      TEST_ID = j.test_id || 0;
+      if (!TEST_ID) {
+        setStatus('Start failed: missing test_id');
+        return;
+      }
+
+      renderItem(j.item || {kind:'info', prompt:'No question returned.'});
+      setStatus('');
     } catch (e) {
-      setStatus('Start failed (network): ' + e);
-      return;
+      setStatus('Start failed (network): ' + (e && e.message ? e.message : e));
     }
-
-    const parsed = await safeJson(res);
-    if (!parsed.ok) {
-      setStatus('Start failed: ' + parsed.error + ' — ' + parsed.txt);
-      return;
-    }
-
-    const j = parsed.json;
-    if (!res.ok || !j.ok) {
-      setStatus('Start failed: HTTP ' + res.status + ' — ' + (j.error||'unknown'));
-      return;
-    }
-
-    TEST_ID = j.test_id;
-    quizCard.style.display = 'block';
-    resultCard.style.display = 'none';
-    renderItem(j.item);
-    setStatus('');
   }
 
   async function submitAnswer(answer){
     if (!TEST_ID || !CURRENT_ITEM) return;
     setStatus('Saving answer…');
 
-    let res;
     try {
-      res = await fetch('/student/api/test_answer.php', {
+      const res = await fetch('/student/api/test_answer.php', {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         credentials:'same-origin',
@@ -188,53 +182,48 @@ cw_header('Progress Test');
           answer: answer
         })
       });
-    } catch (e) {
-      setStatus('Answer failed (network): ' + e);
-      return;
-    }
 
-    const parsed = await safeJson(res);
-    if (!parsed.ok) {
-      setStatus('Answer failed: ' + parsed.error + ' — ' + parsed.txt);
-      return;
-    }
+      const j = await safeJson(res);
+      if (!j.ok) {
+        setStatus('Answer failed: ' + (j.error||'') + (j.raw ? (' | ' + j.raw) : ''));
+        return;
+      }
 
-    const j = parsed.json;
-    if (!res.ok || !j.ok) {
-      setStatus('Answer failed: HTTP ' + res.status + ' — ' + (j.error||'unknown'));
-      return;
-    }
+      if (j.done) {
+        quizCard.style.display = 'none';
+        resultCard.style.display = 'block';
+        resultBox.innerHTML = `
+          <div><strong>Score:</strong> ${j.score_pct}%</div>
+          <div style="margin-top:10px;"><strong>AI Summary</strong><br>
+            <div style="white-space:pre-wrap;">${escapeHtml(j.ai_summary||'')}</div>
+          </div>
+          <div style="margin-top:10px;"><strong>Weak Areas</strong><br>
+            <div style="white-space:pre-wrap;">${escapeHtml(j.weak_areas||'')}</div>
+          </div>
+        `;
+        return;
+      }
 
-    if (j.done) {
-      quizCard.style.display = 'none';
-      resultCard.style.display = 'block';
-      resultBox.innerHTML = `
-        <div><strong>Score:</strong> ${j.score_pct}%</div>
-        <div style="margin-top:10px;"><strong>AI Summary</strong><br>
-          <div style="white-space:pre-wrap;">${escapeHtml(j.ai_summary||'')}</div>
-        </div>
-        <div style="margin-top:10px;"><strong>Weak Areas</strong><br>
-          <div style="white-space:pre-wrap;">${escapeHtml(j.weak_areas||'')}</div>
-        </div>
-      `;
+      renderItem(j.item || {kind:'info', prompt:'No next question returned.'});
       setStatus('');
-      return;
+    } catch (e) {
+      setStatus('Answer failed (network): ' + (e && e.message ? e.message : e));
     }
-
-    renderItem(j.item);
-    setStatus('');
   }
 
-  // Expose a global start function for the inline onclick fallback
+  // expose for inline onclick fallback
   window.__ptStart = startTest;
 
-  document.addEventListener('DOMContentLoaded', function(){
-    jsState.innerHTML = 'JS status: <strong style="color:#1e3c72;">ready</strong>';
-    if (btnStart) {
-      btnStart.addEventListener('click', startTest);
-    }
-  });
+  // bind reliably after DOM loaded
+  function bind(){
+    if (btnStart) btnStart.onclick = startTest;
+    if (jsReady) jsReady.textContent = 'JS READY';
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bind);
+  } else {
+    bind();
+  }
 })();
 </script>
-
 <?php cw_footer(); ?>
