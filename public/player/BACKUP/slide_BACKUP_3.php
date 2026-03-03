@@ -74,7 +74,7 @@ $hs = $pdo->prepare("SELECT id, label, src, x,y,w,h FROM slide_hotspots WHERE sl
 $hs->execute([$slideId]);
 $hotspots = $hs->fetchAll(PDO::FETCH_ASSOC);
 
-// Content EN/ES (for ES popup)
+// Content EN/ES (for ES popup and fallback)
 $en = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='en' LIMIT 1");
 $en->execute([$slideId]);
 $enText = (string)($en->fetchColumn() ?: '');
@@ -145,11 +145,9 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       cursor:pointer;
       font-weight:700;
       user-select:none;
-      white-space:nowrap;
     }
     .btnx:hover{ background: rgba(30,60,114,0.14); }
     .btnx:disabled{ opacity:.4; cursor:not-allowed; }
-    .btnx.on{ background: rgba(30,60,114,0.20); border-color: rgba(30,60,114,0.45); }
 
     .meta{
       margin-left:auto;
@@ -337,8 +335,11 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
   <div class="topbar2">
     <button class="btnx" onclick="location.href='<?= htmlspecialchars($backUrl) ?>'">Lesson Menu</button>
 
-    <button class="btnx" id="btnPrev" <?= $prevId ? '' : 'disabled' ?>>◀ Prev</button>
-    <button class="btnx" id="btnNext" <?= $nextId ? '' : 'disabled' ?>>Next ▶</button>
+    <button class="btnx" <?= $prevId ? '' : 'disabled' ?>
+      onclick="location.href='/player/slide.php?slide_id=<?= (int)$prevId ?>'">◀ Prev</button>
+
+    <button class="btnx" <?= $nextId ? '' : 'disabled' ?>
+      onclick="location.href='/player/slide.php?slide_id=<?= (int)$nextId ?>'">Next ▶</button>
 
     <label class="muted" style="display:flex;align-items:center;gap:6px;">
       <span style="font-weight:700; color:#1e3c72;">Lang</span>
@@ -351,7 +352,6 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     <button class="btnx" id="btnAudioPlay">▶︎ Audio</button>
     <button class="btnx" id="btnAudioPause">⏸︎</button>
     <button class="btnx" id="btnAudioRew">↺</button>
-    <button class="btnx" id="btnAudioMute">Mute</button>
 
     <button class="btnx" id="btnRefs">Study Refs</button>
     <button class="btnx" id="btnTxtES" style="display:none;">Spanish text</button>
@@ -382,7 +382,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     </div>
   </div>
 
-  <!-- Audio element for OpenAI TTS -->
+  <!-- Audio element for OpenAI TTS (real voice) -->
   <audio id="ttsAudio" preload="none"></audio>
 
   <button class="fab" id="btnSummary" title="My Study Summary">📝</button>
@@ -430,8 +430,6 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
 
 <script>
 const SLIDE_ID = <?= (int)$slideId ?>;
-const PREV_ID = <?= (int)$prevId ?>;
-const NEXT_ID = <?= (int)$nextId ?>;
 
 const viewport = document.getElementById('viewport');
 const stage = document.getElementById('stage');
@@ -478,124 +476,39 @@ function setLang(newLang){
   localStorage.setItem(PREF_KEY, lang);
   applyLangUI();
 }
-
-// Autoplay arm
-const AUTO_KEY = 'ipca_autoplay_next';
-function armAutoplay(){ localStorage.setItem(AUTO_KEY, '1'); }
-function consumeAutoplay(){
-  const v = localStorage.getItem(AUTO_KEY);
-  if (v === '1') {
-    localStorage.removeItem(AUTO_KEY);
-    setTimeout(()=>playTTS(), 350);
-  }
-}
-
 langSel.addEventListener('change', ()=>{
   setLang(langSel.value);
-
   // stop audio when switching language
   ttsAudio.pause();
   ttsAudio.currentTime = 0;
   ttsAudio.removeAttribute('src');
   ttsAudio.dataset.src = '';
-  setPlayLabel('idle');
-
-  // Prefetch neighbors in the new language
-  prefetchNeighborAudio();
 });
 applyLangUI();
 
 // ---- AI Voice (OpenAI TTS MP3 via API) ----
 const ttsAudio = document.getElementById('ttsAudio');
-const btnPlay  = document.getElementById('btnAudioPlay');
-const btnMute  = document.getElementById('btnAudioMute');
 
-const MUTE_KEY = 'ipca_tts_muted';
-
-function setPlayLabel(state){
-  if (state === 'generating') btnPlay.textContent = 'Generating Audio…';
-  else btnPlay.textContent = '▶︎ Audio';
+function ttsUrl() {
+  return `/player/api/tts.php?slide_id=${SLIDE_ID}&lang=${encodeURIComponent(lang)}`;
 }
 
-function applyMuteUI(){
-  const muted = (localStorage.getItem(MUTE_KEY) === '1');
-  ttsAudio.muted = muted;
-  btnMute.classList.toggle('on', muted);
-  btnMute.textContent = muted ? 'Unmute' : 'Mute';
-}
-
-function ttsUrl(prefetch=false, slideId=SLIDE_ID, useLang=lang){
-  const p = prefetch ? '&prefetch=1' : '';
-  return `/player/api/tts.php?slide_id=${slideId}&lang=${encodeURIComponent(useLang)}${p}`;
-}
-
-async function playTTS(){
-  const want = ttsUrl(false, SLIDE_ID, lang);
-
-  const isNew = (ttsAudio.dataset.src !== want);
-  if (isNew) {
-    setPlayLabel('generating');
+async function playTTS() {
+  const want = ttsUrl();
+  if (ttsAudio.dataset.src !== want) {
     ttsAudio.pause();
     ttsAudio.currentTime = 0;
     ttsAudio.src = want;
     ttsAudio.dataset.src = want;
   }
-
-  try {
-    await ttsAudio.play();
-    setPlayLabel('idle');
-  } catch(e) {
-    setPlayLabel('idle');
-  }
+  try { await ttsAudio.play(); } catch(e) { /* user gesture may be required */ }
 }
 
-// Button handlers
 document.getElementById('btnAudioPlay').onclick = ()=> playTTS();
 document.getElementById('btnAudioPause').onclick = ()=> ttsAudio.pause();
 document.getElementById('btnAudioRew').onclick = ()=>{
   ttsAudio.currentTime = 0;
   playTTS();
-};
-
-btnMute.onclick = ()=>{
-  const muted = !(ttsAudio.muted);
-  ttsAudio.muted = muted;
-  localStorage.setItem(MUTE_KEY, muted ? '1' : '0');
-  applyMuteUI();
-};
-
-// audio events
-ttsAudio.addEventListener('waiting', ()=> setPlayLabel('generating'));
-ttsAudio.addEventListener('canplay', ()=> setPlayLabel('idle'));
-ttsAudio.addEventListener('playing', ()=> setPlayLabel('idle'));
-ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
-
-applyMuteUI();
-consumeAutoplay();
-
-// ---- Prefetch next/prev slide audio (warm cache) ----
-async function prefetchOne(slideId){
-  if (!slideId || slideId <= 0) return;
-  try {
-    await fetch(ttsUrl(true, slideId, lang), { method:'GET', credentials:'same-origin' });
-  } catch(e) {}
-}
-async function prefetchNeighborAudio(){
-  if (NEXT_ID > 0) prefetchOne(NEXT_ID);
-  if (PREV_ID > 0) prefetchOne(PREV_ID);
-}
-setTimeout(prefetchNeighborAudio, 600);
-
-// ---- Prev/Next clicks: arm autoplay + navigate ----
-document.getElementById('btnPrev').onclick = (e)=>{
-  if (PREV_ID <= 0) return;
-  armAutoplay();
-  location.href = '/player/slide.php?slide_id=' + PREV_ID;
-};
-document.getElementById('btnNext').onclick = (e)=>{
-  if (NEXT_ID <= 0) return;
-  armAutoplay();
-  location.href = '/player/slide.php?slide_id=' + NEXT_ID;
 };
 
 // ---- Video modal ----
@@ -706,10 +619,10 @@ function escapeHtml(s){
 // Keyboard nav
 document.addEventListener('keydown', (e)=>{
   if (e.key === 'ArrowLeft') {
-    if (PREV_ID > 0) { armAutoplay(); location.href='/player/slide.php?slide_id=' + PREV_ID; }
+    <?php if ($prevId): ?> location.href='/player/slide.php?slide_id=<?= (int)$prevId ?>'; <?php endif; ?>
   }
   if (e.key === 'ArrowRight') {
-    if (NEXT_ID > 0) { armAutoplay(); location.href='/player/slide.php?slide_id=' + NEXT_ID; }
+    <?php if ($nextId): ?> location.href='/player/slide.php?slide_id=<?= (int)$nextId ?>'; <?php endif; ?>
   }
 });
 </script>

@@ -12,12 +12,10 @@ if ($role !== 'student' && $role !== 'admin') {
 
 $slideId = (int)($_GET['slide_id'] ?? 0);
 $lang = strtolower(trim((string)($_GET['lang'] ?? 'en')));
-$prefetch = (int)($_GET['prefetch'] ?? 0);
-
 if ($slideId <= 0) { http_response_code(400); exit('Missing slide_id'); }
 if (!in_array($lang, ['en','es'], true)) $lang = 'en';
 
-// Security: student must be in cohort that contains lesson schedule
+// Security: same as player – student must be enrolled in a cohort containing this lesson/course
 $stmt = $pdo->prepare("
   SELECT s.id, l.id AS lesson_id, l.course_id
   FROM slides s
@@ -50,7 +48,7 @@ if ($role === 'student') {
     }
 }
 
-// Pick text: narration if present else slide text
+// Choose text source: narration if present, else slide_content plain_text
 $narrStmt = $pdo->prepare("SELECT narration_en, narration_es FROM slide_enrichment WHERE slide_id=? LIMIT 1");
 $narrStmt->execute([$slideId]);
 $narr = $narrStmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -85,7 +83,7 @@ if ($apiKey === '') {
 }
 
 $model = 'gpt-4o-mini-tts';
-$voice = 'coral';
+$voice = 'coral'; // high-quality voice per OpenAI docs
 $instructions = ($lang === 'es')
   ? "Habla con un tono profesional, claro, didáctico, como instructor de vuelo. Mantén un ritmo natural."
   : "Speak in a professional, clear, friendly flight-instructor tone. Natural pacing, crisp articulation.";
@@ -103,10 +101,6 @@ $cache->execute([$slideId, $lang, $voice, $model, $sha]);
 $blob = $cache->fetchColumn();
 
 if ($blob !== false && $blob !== null) {
-    if ($prefetch === 1) {
-        http_response_code(204);
-        exit;
-    }
     header('Content-Type: audio/mpeg');
     header('Cache-Control: private, max-age=31536000');
     echo $blob;
@@ -150,11 +144,6 @@ $ins = $pdo->prepare("
   ON DUPLICATE KEY UPDATE audio_mp3=VALUES(audio_mp3)
 ");
 $ins->execute([$slideId, $lang, $voice, $model, $sha, $resp]);
-
-if ($prefetch === 1) {
-    http_response_code(204);
-    exit;
-}
 
 header('Content-Type: audio/mpeg');
 header('Cache-Control: private, max-age=31536000');
