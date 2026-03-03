@@ -660,47 +660,23 @@ btnTxtES.onclick = ()=>{
 document.getElementById('btnCloseES').onclick = ()=> modalES.style.display='none';
 modalES.addEventListener('click', (e)=>{ if(e.target===modalES) modalES.style.display='none'; });
 
-// ---- Summary (lesson-level rich text, autosave to DB) ----
-const COHORT_ID = <?= (int)$cohortId ?>;
-const LESSON_ID = <?= (int)$lessonId ?>;
-
+// ---- Summary (lesson-level rich text, autosave localStorage) ----
+const LESSON_SUM_KEY = 'ipca_summary_lesson_' + <?= (int)$lessonId ?>;
 const drawer = document.getElementById('drawer');
 const rte = document.getElementById('rte');
 const sumStatus = document.getElementById('sumStatus');
 
-async function loadSummaryFromDb(){
-  try{
-    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {credentials:'same-origin'});
-    const j = await res.json();
-    if (j.ok) {
-      rte.innerHTML = j.summary_html || '';
-      sumStatus.textContent = 'Loaded';
-    }
-  }catch(e){}
+function loadSummary(){
+  rte.innerHTML = localStorage.getItem(LESSON_SUM_KEY) || '';
 }
-
 let saveTimer = null;
 function scheduleSave(){
   if (saveTimer) clearTimeout(saveTimer);
   sumStatus.textContent = 'Saving…';
-  saveTimer = setTimeout(async ()=>{
-    try{
-      const res = await fetch('/student/api/summary_save.php', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        credentials:'same-origin',
-        body: JSON.stringify({
-          cohort_id: COHORT_ID,
-          lesson_id: LESSON_ID,
-          summary_html: rte.innerHTML || ''
-        })
-      });
-      const j = await res.json();
-      sumStatus.textContent = j.ok ? 'Saved' : ('Save failed');
-    }catch(e){
-      sumStatus.textContent = 'Save failed';
-    }
-  }, 800);
+  saveTimer = setTimeout(()=>{
+    localStorage.setItem(LESSON_SUM_KEY, rte.innerHTML || '');
+    sumStatus.textContent = 'Saved';
+  }, 500);
 }
 rte.addEventListener('input', scheduleSave);
 
@@ -718,8 +694,7 @@ document.getElementById('btnSummary').onclick = ()=>{
   if (drawer.style.display==='flex') setTimeout(()=>rte.focus(), 80);
 };
 document.getElementById('btnCloseDrawer').onclick = ()=> drawer.style.display='none';
-
-loadSummaryFromDb();
+loadSummary();
 
 // utils
 function escapeHtml(s){
