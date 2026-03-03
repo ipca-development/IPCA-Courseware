@@ -23,18 +23,29 @@ cw_header('Progress Test');
     This is a timed Progress Test (target ≤ 10 minutes). Answer carefully — minimal hints.
   </div>
 
-  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-    <!-- inline onclick fallback + forced type button -->
-    <button class="btn" id="btnStart" type="button" onclick="window.__ptStart && window.__ptStart();">
-      Start Progress Test
-    </button>
+  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+    <button class="btn" id="btnStart" type="button">Start Progress Test</button>
     <a class="btn btn-sm" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>">Back to Lesson Menu</a>
-    <span class="muted" id="jsReady" style="margin-left:6px;">JS…</span>
+
+    <span style="margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <label class="muted" style="display:flex; gap:6px; align-items:center;">
+        <span style="font-weight:700;">Voice</span>
+        <select id="voiceLang" class="input" style="height:34px;">
+          <option value="en" selected>English</option>
+          <option value="es">Español</option>
+        </select>
+      </label>
+      <button class="btn btn-sm" id="btnSpeakToggle" type="button">🔊 Speak: ON</button>
+      <button class="btn btn-sm" id="btnMute" type="button">Mute</button>
+    </span>
   </div>
+
+  <div class="muted" id="topStatus" style="margin-top:10px;"></div>
 </div>
 
 <div class="card" id="quizCard" style="display:none;">
   <h2 style="margin-top:0;">AI Instructor</h2>
+
   <div id="promptBox" style="white-space:pre-wrap; font-size:16px; line-height:1.35;"></div>
 
   <div id="answerArea" style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;"></div>
@@ -50,180 +61,204 @@ cw_header('Progress Test');
   </div>
 </div>
 
+<!-- TTS Audio element -->
+<audio id="ttsAudio" preload="none"></audio>
+
 <script>
-(function(){
-  const COHORT_ID = <?= (int)$cohortId ?>;
-  const LESSON_ID = <?= (int)$lessonId ?>;
+const COHORT_ID = <?= (int)$cohortId ?>;
+const LESSON_ID = <?= (int)$lessonId ?>;
 
-  let TEST_ID = 0;
-  let CURRENT_ITEM = null;
+let TEST_ID = 0;
+let CURRENT_ITEM = null;
 
-  const btnStart = document.getElementById('btnStart');
-  const jsReady = document.getElementById('jsReady');
+const quizCard = document.getElementById('quizCard');
+const resultCard = document.getElementById('resultCard');
+const promptBox = document.getElementById('promptBox');
+const answerArea = document.getElementById('answerArea');
+const statusEl = document.getElementById('status');
+const topStatusEl = document.getElementById('topStatus');
+const resultBox = document.getElementById('resultBox');
 
-  const quizCard = document.getElementById('quizCard');
-  const resultCard = document.getElementById('resultCard');
-  const promptBox = document.getElementById('promptBox');
-  const answerArea = document.getElementById('answerArea');
-  const statusEl = document.getElementById('status');
-  const resultBox = document.getElementById('resultBox');
+const ttsAudio = document.getElementById('ttsAudio');
+const voiceLangSel = document.getElementById('voiceLang');
+const btnSpeakToggle = document.getElementById('btnSpeakToggle');
+const btnMute = document.getElementById('btnMute');
 
-  function setStatus(s){ statusEl.textContent = s || ''; }
+let speakEnabled = true;
+let muted = false;
 
-  function escapeHtml(s){
-    return (s||'').toString()
-      .replaceAll('&','&amp;').replaceAll('<','&lt;')
-      .replaceAll('>','&gt;').replaceAll('"','&quot;');
+function setStatus(s){ statusEl.textContent = s || ''; }
+function setTopStatus(s){ topStatusEl.textContent = s || ''; }
+
+function escapeHtml(s){
+  return (s||'').toString()
+    .replaceAll('&','&amp;').replaceAll('<','&lt;')
+    .replaceAll('>','&gt;').replaceAll('"','&quot;');
+}
+
+// ---- TTS helpers ----
+// We reuse your existing slide-player TTS endpoint pattern.
+// You can implement a dedicated endpoint later, but for MVP we speak the prompt text via querystring.
+function ttsUrlFromText(text){
+  // If you already have /player/api/tts.php that accepts `text=...`, use that.
+  // If it only accepts slide_id, you can implement /student/api/tts_prompt.php later.
+  // For now we call a lightweight URL that your backend should support.
+  // Fallback: if it doesn't exist, we just don't play audio.
+  const lang = encodeURIComponent(voiceLangSel.value || 'en');
+  return `/student/api/tts_prompt.php?lang=${lang}&text=${encodeURIComponent(text || '')}`;
+}
+
+async function speak(text){
+  if (!speakEnabled || muted) return;
+  const t = (text || '').trim();
+  if (!t) return;
+
+  try {
+    const url = ttsUrlFromText(t);
+    ttsAudio.pause();
+    ttsAudio.currentTime = 0;
+    ttsAudio.src = url;
+
+    await ttsAudio.play();
+  } catch (e) {
+    // no autoplay / endpoint missing / etc.
+    // show minimal hint in UI
+    setTopStatus('Audio not available yet (or blocked by browser).');
   }
+}
 
-  function renderItem(item){
-    CURRENT_ITEM = item;
-    promptBox.textContent = item.prompt || '';
-    answerArea.innerHTML = '';
+btnSpeakToggle.addEventListener('click', ()=>{
+  speakEnabled = !speakEnabled;
+  btnSpeakToggle.textContent = speakEnabled ? '🔊 Speak: ON' : '🔇 Speak: OFF';
+  if (!speakEnabled) {
+    ttsAudio.pause();
+    ttsAudio.currentTime = 0;
+    ttsAudio.removeAttribute('src');
+  }
+});
+btnMute.addEventListener('click', ()=>{
+  muted = !muted;
+  btnMute.textContent = muted ? 'Unmute' : 'Mute';
+  if (muted) {
+    ttsAudio.pause();
+  }
+});
 
-    if (item.kind === 'info') {
-      const b = document.createElement('button');
-      b.className = 'btn';
-      b.type = 'button';
-      b.textContent = 'Continue';
-      b.onclick = ()=> submitAnswer({action:'continue'});
-      answerArea.appendChild(b);
-      return;
-    }
+// If language changes, stop current audio
+voiceLangSel.addEventListener('change', ()=>{
+  ttsAudio.pause();
+  ttsAudio.currentTime = 0;
+  ttsAudio.removeAttribute('src');
+});
 
-    if (item.kind === 'yesno') {
-      ['Yes','No'].forEach(v=>{
-        const b = document.createElement('button');
-        b.className = 'btn';
-        b.type = 'button';
-        b.textContent = v;
-        b.onclick = ()=> submitAnswer({value: v.toLowerCase() === 'yes'});
-        answerArea.appendChild(b);
-      });
-      return;
-    }
+// ---- Render items ----
+function renderItem(item){
+  CURRENT_ITEM = item;
+  promptBox.textContent = item.prompt || '';
+  answerArea.innerHTML = '';
 
-    if (item.kind === 'mcq') {
-      (item.options || []).forEach((opt, idx)=>{
-        const b = document.createElement('button');
-        b.className = 'btn';
-        b.type = 'button';
-        b.textContent = opt;
-        b.onclick = ()=> submitAnswer({index: idx});
-        answerArea.appendChild(b);
-      });
-      return;
-    }
+  // Speak prompt (triggered after a user gesture: Start click / answer click)
+  speak(item.prompt || '');
 
-    // fallback
+  if (item.kind === 'info') {
     const b = document.createElement('button');
     b.className = 'btn';
-    b.type = 'button';
     b.textContent = 'Continue';
+    b.type = 'button';
     b.onclick = ()=> submitAnswer({action:'continue'});
     answerArea.appendChild(b);
+    return;
   }
 
-  async function safeJson(res){
-    const txt = await res.text();
-    try { return JSON.parse(txt); }
-    catch(e){ return { ok:false, error:'Invalid JSON', raw: txt.slice(0,300) }; }
+  if (item.kind === 'yesno') {
+    ['Yes','No'].forEach(v=>{
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = v;
+      b.type = 'button';
+      b.onclick = ()=> submitAnswer({value: v.toLowerCase() === 'yes'});
+      answerArea.appendChild(b);
+    });
+    return;
   }
 
-  async function startTest(){
-    // immediate UI feedback so you KNOW click worked
-    quizCard.style.display = 'block';
-    resultCard.style.display = 'none';
-    promptBox.textContent = '';
-    answerArea.innerHTML = '';
-    setStatus('Starting…');
+  if (item.kind === 'mcq') {
+    (item.options || []).forEach((opt, idx)=>{
+      const b = document.createElement('button');
+      b.className = 'btn';
+      b.textContent = opt;
+      b.type = 'button';
+      b.onclick = ()=> submitAnswer({index: idx});
+      answerArea.appendChild(b);
+    });
+    return;
+  }
+}
 
-    try {
-      const res = await fetch('/student/api/test_start.php', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        credentials:'same-origin',
-        cache:'no-store',
-        body: JSON.stringify({ cohort_id: COHORT_ID, lesson_id: LESSON_ID })
-      });
+// ---- Start / Answer flow ----
+async function startTest(){
+  setTopStatus('');
+  setStatus('Starting…');
 
-      const j = await safeJson(res);
-      if (!j.ok) {
-        setStatus('Start failed: ' + (j.error||'') + (j.raw ? (' | ' + j.raw) : ''));
-        return;
-      }
+  const res = await fetch('/student/api/test_start.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    credentials:'same-origin',
+    body: JSON.stringify({ cohort_id: COHORT_ID, lesson_id: LESSON_ID })
+  });
 
-      TEST_ID = j.test_id || 0;
-      if (!TEST_ID) {
-        setStatus('Start failed: missing test_id');
-        return;
-      }
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
 
-      renderItem(j.item || {kind:'info', prompt:'No question returned.'});
-      setStatus('');
-    } catch (e) {
-      setStatus('Start failed (network): ' + (e && e.message ? e.message : e));
-    }
+  if (!j.ok) { setStatus('Start failed: ' + (j.error||'')); return; }
+
+  TEST_ID = j.test_id;
+  quizCard.style.display = 'block';
+  renderItem(j.item);
+  setStatus('');
+}
+
+async function submitAnswer(answer){
+  if (!TEST_ID || !CURRENT_ITEM) return;
+  setStatus('Saving answer…');
+
+  const res = await fetch('/student/api/test_answer.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    credentials:'same-origin',
+    body: JSON.stringify({
+      test_id: TEST_ID,
+      item_id: CURRENT_ITEM.item_id,
+      answer: answer
+    })
+  });
+
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch(e){ j = { ok:false, error:'Non-JSON response: ' + txt.slice(0,200) }; }
+
+  if (!j.ok) { setStatus('Answer failed: ' + (j.error||'')); return; }
+
+  if (j.done) {
+    quizCard.style.display = 'none';
+    resultCard.style.display = 'block';
+    resultBox.innerHTML = `
+      <div><strong>Score:</strong> ${j.score_pct}%</div>
+      <div style="margin-top:10px;"><strong>AI Summary</strong><br><div style="white-space:pre-wrap;">${escapeHtml(j.ai_summary||'')}</div></div>
+      <div style="margin-top:10px;"><strong>Weak Areas</strong><br><div style="white-space:pre-wrap;">${escapeHtml(j.weak_areas||'')}</div></div>
+    `;
+    setStatus('');
+    // speak a short closing line
+    speak(`Test complete. Your score is ${j.score_pct} percent.`);
+    return;
   }
 
-  async function submitAnswer(answer){
-    if (!TEST_ID || !CURRENT_ITEM) return;
-    setStatus('Saving answer…');
+  renderItem(j.item);
+  setStatus('');
+}
 
-    try {
-      const res = await fetch('/student/api/test_answer.php', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        credentials:'same-origin',
-        cache:'no-store',
-        body: JSON.stringify({
-          test_id: TEST_ID,
-          item_id: CURRENT_ITEM.item_id,
-          answer: answer
-        })
-      });
-
-      const j = await safeJson(res);
-      if (!j.ok) {
-        setStatus('Answer failed: ' + (j.error||'') + (j.raw ? (' | ' + j.raw) : ''));
-        return;
-      }
-
-      if (j.done) {
-        quizCard.style.display = 'none';
-        resultCard.style.display = 'block';
-        resultBox.innerHTML = `
-          <div><strong>Score:</strong> ${j.score_pct}%</div>
-          <div style="margin-top:10px;"><strong>AI Summary</strong><br>
-            <div style="white-space:pre-wrap;">${escapeHtml(j.ai_summary||'')}</div>
-          </div>
-          <div style="margin-top:10px;"><strong>Weak Areas</strong><br>
-            <div style="white-space:pre-wrap;">${escapeHtml(j.weak_areas||'')}</div>
-          </div>
-        `;
-        return;
-      }
-
-      renderItem(j.item || {kind:'info', prompt:'No next question returned.'});
-      setStatus('');
-    } catch (e) {
-      setStatus('Answer failed (network): ' + (e && e.message ? e.message : e));
-    }
-  }
-
-  // expose for inline onclick fallback
-  window.__ptStart = startTest;
-
-  // bind reliably after DOM loaded
-  function bind(){
-    if (btnStart) btnStart.onclick = startTest;
-    if (jsReady) jsReady.textContent = 'JS READY';
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bind);
-  } else {
-    bind();
-  }
-})();
+document.getElementById('btnStart').onclick = startTest;
+setTopStatus('JS READY');
 </script>
 <?php cw_footer(); ?>
