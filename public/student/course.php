@@ -17,7 +17,6 @@ $cohortId = (int)($_GET['cohort_id'] ?? 0);
 if ($cohortId <= 0) exit('Missing cohort_id');
 
 if ($role === 'student') {
-    // student must be enrolled
     $check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
     $check->execute([$cohortId,$userId]);
     if (!$check->fetchColumn()) {
@@ -25,7 +24,6 @@ if ($role === 'student') {
         exit('Not enrolled in this cohort');
     }
 }
-// admin bypass: no enrollment required
 
 $co = $pdo->prepare("
   SELECT co.*, c.title AS course_title, p.program_key
@@ -59,12 +57,10 @@ function get_summary_len(PDO $pdo, int $userId, int $cohortId, int $lessonId): i
     $st = $pdo->prepare("SELECT summary_plain FROM lesson_summaries WHERE user_id=? AND cohort_id=? AND lesson_id=? LIMIT 1");
     $st->execute([$userId, $cohortId, $lessonId]);
     $plain = (string)($st->fetchColumn() ?: '');
-    $plain = trim($plain);
-    return mb_strlen($plain);
+    return mb_strlen(trim($plain));
 }
 
 function get_test_status(PDO $pdo, int $userId, int $cohortId, int $lessonId): array {
-    // last attempt
     $st = $pdo->prepare("
       SELECT attempt, status, score_pct, started_at, completed_at
       FROM progress_tests
@@ -87,6 +83,15 @@ function get_test_status(PDO $pdo, int $userId, int $cohortId, int $lessonId): a
 
 cw_header('Course');
 ?>
+
+<style>
+  table td, table th { vertical-align: top; }
+  .smallmuted { font-size: 11px; opacity: .75; margin-top: 6px; }
+  .tag-ok{ color:#1e3c72; font-weight:700; }
+  .tag-bad{ color:#b45309; font-weight:700; }
+  .tag-miss{ color:#6b7280; font-weight:700; }
+</style>
+
 <div class="card">
   <div class="muted">
     <?= h($cohort['program_key']) ?> — <?= h($cohort['course_title']) ?> • Cohort: <?= h($cohort['name']) ?><br>
@@ -101,12 +106,12 @@ cw_header('Course');
   <h2>Lessons</h2>
   <table>
     <tr>
-      <th>Lesson</th>
-      <th>Deadline (UTC)</th>
-      <th>Status</th>
-      <th>Summary</th>
-      <th>Progress Test</th>
-      <th>Action</th>
+      <th style="width:34%;">Lesson</th>
+      <th style="width:16%;">Deadline (UTC)</th>
+      <th style="width:10%;">Status</th>
+      <th style="width:12%;">Summary</th>
+      <th style="width:18%;">Progress Test</th>
+      <th style="width:10%;">Action</th>
     </tr>
 
     <?php foreach ($lessons as $l): ?>
@@ -125,7 +130,7 @@ cw_header('Course');
 
         $first = $pdo->prepare("SELECT id FROM slides WHERE lesson_id=? AND is_deleted=0 ORDER BY page_number ASC LIMIT 1");
         $first->execute([(int)$l['lesson_id']]);
-        $slideId = (int)$first->fetchColumn();
+        $firstSlideId = (int)$first->fetchColumn();
 
         $sumLen = ($role === 'admin') ? 9999 : get_summary_len($pdo, $userId, $cohortId, (int)$l['lesson_id']);
         $summaryOk = ($sumLen >= 400);
@@ -139,56 +144,70 @@ cw_header('Course');
         $canTest = true;
         if ($role === 'student' && $locked) $canTest = false;
         if ($role === 'student' && !$summaryOk) $canTest = false;
+
+        $ptUrl = '/student/progress_test.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$l['lesson_id'];
       ?>
       <tr>
-        <td><?= (int)$l['external_lesson_id'] ?> — <?= h($l['title']) ?></td>
+        <td>
+          <div><strong><?= (int)$l['external_lesson_id'] ?></strong> — <?= h($l['title']) ?></div>
+        </td>
+
         <td><?= h($l['deadline_utc']) ?></td>
+
         <td><?= h($status) ?></td>
 
         <td>
-  <?php if ($role === 'admin'): ?>
-    <span class="muted">admin</span>
-  <?php else: ?>
-    <?php if ($last): ?>
-      <div class="muted" style="font-size:12px;">
-        Last: <?= h($last['status']) ?>
-        <?= $last['score_pct'] !== null ? (' • '.(int)$last['score_pct'].'%') : '' ?>
-        • Attempt <?= (int)$last['attempt'] ?>/3
-      </div>
-    <?php else: ?>
-      <div class="muted" style="font-size:12px;">Not started</div>
-    <?php endif; ?>
-
-    <div class="muted" style="font-size:12px;">Attempts left: <?= (int)$attemptsLeft ?></div>
-
-    <?php
-      $ptUrl = '/student/progress_test.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$l['lesson_id'];
-    ?>
-
-    <?php if ($canTest && $attemptsLeft > 0): ?>
-      <a class="btn btn-sm" href="<?= h($ptUrl) ?>">Take Progress Test</a>
-      <div class="muted" style="font-size:11px; margin-top:6px;">
-        <?= h($ptUrl) ?>
-      </div>
-    <?php elseif ($locked): ?>
-      <span class="muted">Locked</span>
-    <?php elseif (!$summaryOk): ?>
-      <span class="muted">Complete summary first</span>
-    <?php else: ?>
-      <span class="muted">No attempts left</span>
-    <?php endif; ?>
-  <?php endif; ?>
-</td>
-
-        
+          <?php if ($role === 'admin'): ?>
+            <span class="muted">admin</span>
+          <?php else: ?>
+            <?php if ($sumLen <= 0): ?>
+              <span class="tag-miss">missing</span>
+            <?php elseif ($summaryOk): ?>
+              <span class="tag-ok">ok</span> <span class="smallmuted">(<?= (int)$sumLen ?> chars)</span>
+            <?php else: ?>
+              <span class="tag-bad">too short</span> <span class="smallmuted">(<?= (int)$sumLen ?> chars)</span>
+            <?php endif; ?>
+          <?php endif; ?>
+        </td>
 
         <td>
-          <?php if ($slideId <= 0): ?>
+          <?php if ($role === 'admin'): ?>
+            <span class="muted">admin</span>
+          <?php else: ?>
+            <?php if ($last): ?>
+              <div class="smallmuted">
+                Last: <?= h($last['status']) ?>
+                <?= $last['score_pct'] !== null ? (' • '.(int)$last['score_pct'].'%') : '' ?>
+                • Attempt <?= (int)$last['attempt'] ?>/3
+              </div>
+            <?php else: ?>
+              <div class="smallmuted">Not started</div>
+            <?php endif; ?>
+
+            <div class="smallmuted">Attempts left: <?= (int)$attemptsLeft ?></div>
+
+            <?php if ($canTest && $attemptsLeft > 0): ?>
+              <a class="btn btn-sm" href="<?= h($ptUrl) ?>">Take Progress Test</a>
+              <a class="btn btn-sm" target="_blank" href="<?= h($ptUrl) ?>" style="margin-left:6px;">Open</a>
+              <div class="smallmuted"><?= h($ptUrl) ?></div>
+            <?php elseif ($locked): ?>
+              <span class="muted">Locked</span>
+            <?php elseif (!$summaryOk): ?>
+              <span class="muted">Complete summary first</span>
+              <div class="smallmuted">Need ≥ 400 chars</div>
+            <?php else: ?>
+              <span class="muted">No attempts left</span>
+            <?php endif; ?>
+          <?php endif; ?>
+        </td>
+
+        <td>
+          <?php if ($firstSlideId <= 0): ?>
             <span class="muted">—</span>
           <?php elseif ($role === 'student' && $locked): ?>
             <span class="muted">Locked</span>
           <?php else: ?>
-            <a class="btn btn-sm" href="/player/slide.php?slide_id=<?= (int)$slideId ?>">Start</a>
+            <a class="btn btn-sm" href="/player/slide.php?slide_id=<?= (int)$firstSlideId ?>">Start</a>
           <?php endif; ?>
         </td>
       </tr>
