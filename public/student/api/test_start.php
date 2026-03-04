@@ -67,7 +67,6 @@ function json_ok(array $x): void {
 }
 
 function clamp_questions(array $questions, int $target = 10): array {
-    // Ensure exactly $target questions (pad or trim)
     $out = [];
     foreach ($questions as $q) {
         if (!is_array($q)) continue;
@@ -207,28 +206,40 @@ try {
 
     // --------------------------
     // AI: generate questions (truth-first)
+    // STRICT SCHEMA: additionalProperties=false everywhere
+    // correct object always contains the same keys to avoid conditional schema issues.
     // --------------------------
     $schema = [
-      "type"=>"object",
-      "additionalProperties"=>false,
-      "properties"=>[
-        "questions"=>[
-          "type"=>"array",
-          "items"=>[
-            "type"=>"object",
-            "additionalProperties"=>false,
-            "properties"=>[
-              "kind"=>["type"=>"string","enum"=>["yesno","mcq","open"]],
-              "prompt"=>["type"=>"string"],
-              "options"=>["type"=>"array","items"=>["type"=>"string"]],
-              "correct"=>["type"=>"object"],   // for yesno/mcq/open rubric
-              "rubric"=>["type"=>"object"]     // optional for open
+      "type" => "object",
+      "additionalProperties" => false,
+      "properties" => [
+        "questions" => [
+          "type" => "array",
+          "items" => [
+            "type" => "object",
+            "additionalProperties" => false,
+            "properties" => [
+              "kind"   => ["type"=>"string","enum"=>["yesno","mcq","open"]],
+              "prompt" => ["type"=>"string"],
+              "options"=> ["type"=>"array","items"=>["type"=>"string"]],
+              "correct"=> [
+                "type"=>"object",
+                "additionalProperties"=>false,
+                "properties"=>[
+                  "value"=>["type"=>["boolean","null"]],
+                  "index"=>["type"=>["integer","null"]],
+                  "type"=>["type"=>"string","enum"=>["rubric","none"]],
+                  "key_points"=>["type"=>"array","items"=>["type"=>"string"]],
+                  "min_points_to_pass"=>["type"=>"integer"]
+                ],
+                "required"=>["value","index","type","key_points","min_points_to_pass"]
+              ]
             ],
-            "required"=>["kind","prompt","options","correct","rubric"]
+            "required" => ["kind","prompt","options","correct"]
           ]
         ]
       ],
-      "required"=>["questions"]
+      "required" => ["questions"]
     ];
 
     $instructions = <<<TXT
@@ -243,18 +254,16 @@ Generate exactly 10 questions, all derived ONLY from the LESSON NARRATION.
 Questions must be scenario-based, realistic, and test understanding.
 
 TYPES:
-- yesno: correct must be {"value": true/false}
-- mcq: 4 options; correct must be {"index": 0..3}
-- open: options must be []; correct must include a rubric:
-    correct = {"type":"rubric","key_points":[...],"min_points_to_pass":2}
+- yesno: options must be [] ; correct.value must be true/false ; correct.index must be null ; correct.type="none" ; key_points=[]
+- mcq: exactly 4 options ; correct.index 0..3 ; correct.value null ; correct.type="none" ; key_points=[]
+- open: options must be [] ; correct.type="rubric" ; correct.key_points (3-6 strings) ; correct.min_points_to_pass usually 2 ; correct.value null ; correct.index null
 
 RULES:
 - Do NOT introduce new facts not supported by narration.
-- If summary contains a misconception, ask a question that tests it against narration.
+- If summary contains a misconception, ask a question that probes it against narration.
 - Keep prompts concise (spoken).
-- Prefer aviation context, risk/safety thinking, and correct procedures.
-
-Return JSON matching schema.
+- Avoid "What is your answer <name>" in prompt; the TTS layer handles that.
+- Return JSON matching schema EXACTLY.
 TXT;
 
     $payload = [
@@ -289,9 +298,9 @@ TXT;
     if (count($questions) < 3) {
         // fail-safe minimal questions
         $questions = [
-          ["kind"=>"yesno","prompt"=>"Based on the lesson, is the checklist used to reduce errors?","options"=>[],"correct"=>["value"=>true],"rubric"=>["type"=>"none"]],
-          ["kind"=>"mcq","prompt"=>"Based on the lesson, which part is primarily responsible for lift?","options"=>["Wings","Brakes","Seat","Spinner"],"correct"=>["index"=>0],"rubric"=>["type"=>"none"]],
-          ["kind"=>"open","prompt"=>"Explain why pilots use checklists.","options"=>[],"correct"=>["type"=>"rubric","key_points"=>["reduce errors","standardize","safety"],"min_points_to_pass"=>2],"rubric"=>["type"=>"none"]],
+          ["kind"=>"yesno","prompt"=>"Based on the lesson, is the checklist used to reduce errors?","options"=>[],"correct"=>["value"=>true,"index"=>null,"type"=>"none","key_points"=>[],"min_points_to_pass"=>1]],
+          ["kind"=>"mcq","prompt"=>"Based on the lesson, which part is primarily responsible for lift?","options"=>["Wings","Brakes","Seat","Spinner"],"correct"=>["value"=>null,"index"=>0,"type"=>"none","key_points"=>[],"min_points_to_pass"=>1]],
+          ["kind"=>"open","prompt"=>"Explain why pilots use checklists.","options"=>[],"correct"=>["value"=>null,"index"=>null,"type"=>"rubric","key_points"=>["reduce errors","standardize","safety"],"min_points_to_pass"=>2]],
         ];
     }
 
@@ -313,41 +322,56 @@ TXT;
 
         $options = $q['options'] ?? [];
         if (!is_array($options)) $options = [];
-        // enforce 4 options for mcq
-        if ($k === 'mcq') {
+
+        $correct = $q['correct'] ?? [];
+        if (!is_array($correct)) $correct = ["value"=>null,"index"=>null,"type"=>"none","key_points"=>[],"min_points_to_pass"=>1];
+
+        // Normalize to DB-safe structures
+        if ($k === 'yesno') {
+            $correct = [
+              "value" => (bool)($correct['value'] ?? false),
+              "index" => null,
+              "type"  => "none",
+              "key_points" => [],
+              "min_points_to_pass" => 1
+            ];
+            $options = [];
+        } elseif ($k === 'mcq') {
             $opts = [];
             foreach ($options as $o) { $o = trim((string)$o); if ($o !== '') $opts[] = $o; }
             while (count($opts) < 4) $opts[] = "Option " . (count($opts)+1);
             if (count($opts) > 4) $opts = array_slice($opts, 0, 4);
             $options = $opts;
-        } else {
-            $options = []; // yesno/open should have none
-        }
 
-        $correct = $q['correct'] ?? [];
-        if (!is_array($correct)) $correct = [];
-
-        // Normalize correct structure
-        if ($k === 'yesno') {
-            $correct = ["value" => (bool)($correct['value'] ?? false)];
-        } elseif ($k === 'mcq') {
             $ci = (int)($correct['index'] ?? 0);
             if ($ci < 0) $ci = 0;
             if ($ci > 3) $ci = 3;
-            $correct = ["index" => $ci];
-        } elseif ($k === 'open') {
-            // accept correct already rubric; enforce required fields
-            $keyPoints = $correct['key_points'] ?? [];
-            if (!is_array($keyPoints)) $keyPoints = [];
+
+            $correct = [
+              "value" => null,
+              "index" => $ci,
+              "type"  => "none",
+              "key_points" => [],
+              "min_points_to_pass" => 1
+            ];
+        } else { // open
+            $kp = $correct['key_points'] ?? [];
+            if (!is_array($kp)) $kp = [];
             $kpClean = [];
-            foreach ($keyPoints as $p) {
-                $p = trim((string)$p);
-                if ($p !== '') $kpClean[] = $p;
-            }
+            foreach ($kp as $p) { $p = trim((string)$p); if ($p !== '') $kpClean[] = $p; }
             if (!$kpClean) $kpClean = ["key point 1", "key point 2", "key point 3"];
+
             $minPts = (int)($correct['min_points_to_pass'] ?? 2);
             if ($minPts < 1) $minPts = 1;
-            $correct = ["type"=>"rubric","key_points"=>$kpClean,"min_points_to_pass"=>$minPts];
+
+            $correct = [
+              "value" => null,
+              "index" => null,
+              "type"  => "rubric",
+              "key_points" => $kpClean,
+              "min_points_to_pass" => $minPts
+            ];
+            $options = [];
         }
 
         $optsJson = json_encode($options, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
@@ -400,5 +424,5 @@ TXT;
 
 } catch (Throwable $e) {
     http_response_code(400);
-    echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
+    echo json_encode(['ok'=>false,'error'=>$e->getMessage()], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
 }
