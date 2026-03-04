@@ -193,6 +193,9 @@ const LESSON_ID = <?= (int)$lessonId ?>;
 let TEST_ID = 0;
 let CURRENT_ITEM = null;
 
+// Track last audio request so Replay works for INTRO too
+let LAST_AUDIO = { kind: null, item_id: 0 };
+
 const btnStart = document.getElementById('btnStart');
 const btnReplay = document.getElementById('btnReplay');
 
@@ -217,42 +220,29 @@ const jsLed = document.getElementById('jsLed');
 const jsLedTxt = document.getElementById('jsLedTxt');
 
 function setSys(s){ sysline.textContent = s || ''; }
-
 function setJsReady(ok){
   if (ok) { jsLed.classList.add('on'); jsLedTxt.textContent = 'JS OK'; }
   else { jsLed.classList.remove('on'); jsLedTxt.textContent = 'JS ERR'; }
 }
-
 function setSpeaking(on){
   if (on) instructorBadge.classList.add('talking');
   else instructorBadge.classList.remove('talking');
 }
 
-// ✅ iPad SAFE audio unlock using WebAudio (no base64)
+// iPad SAFE audio unlock using WebAudio
 let audioUnlocked = false;
 async function unlockAudio(){
   if (audioUnlocked) return true;
-
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return false;
-
     const ctx = new AudioContext();
-    if (ctx.state === 'suspended') {
-      await ctx.resume();
-    }
-
-    // tiny near-silent oscillator burst (inaudible)
+    if (ctx.state === 'suspended') await ctx.resume();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     gain.gain.value = 0.0001;
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    osc.start();
-    osc.stop(ctx.currentTime + 0.02);
-
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime + 0.02);
     audioUnlocked = true;
     return true;
   } catch (e) {
@@ -285,21 +275,34 @@ function ttsUrl(testId, itemId, kind){
   return `/student/api/tts_prompt.php?test_id=${encodeURIComponent(testId)}&item_id=${encodeURIComponent(itemId)}&kind=${encodeURIComponent(kind)}&voice=${encodeURIComponent(voice)}&speed=1.00`;
 }
 
+// Play audio with extra iPad-friendly steps
 async function playPromptAudio(testId, itemId, kind){
+  LAST_AUDIO = { kind, item_id: itemId };
+
   return new Promise((resolve) => {
     setSpeaking(true);
-
     qAudio.pause();
     qAudio.currentTime = 0;
+
     qAudio.src = ttsUrl(testId, itemId, kind);
+    qAudio.load(); // IMPORTANT for iPad
 
-    qAudio.onended = () => { setSpeaking(false); resolve(true); };
-    qAudio.onerror = () => { setSpeaking(false); resolve(false); };
-
-    qAudio.play().then(()=>{}).catch(()=>{
+    let settled = false;
+    const done = (ok) => {
+      if (settled) return;
+      settled = true;
       setSpeaking(false);
-      resolve(false);
-    });
+      resolve(ok);
+    };
+
+    qAudio.onended = () => done(true);
+    qAudio.onerror = () => done(false);
+
+    // Attempt play
+    const p = qAudio.play();
+    if (p && p.catch) {
+      p.catch(() => done(false));
+    }
   });
 }
 
@@ -316,21 +319,16 @@ function resetTimer(){
   timerFill.classList.remove('danger');
   timerText.textContent = timerLeft + 's';
 }
-function stopAnswerTimer(){
-  if (timerInt) clearInterval(timerInt);
-  timerInt = null;
-}
+function stopAnswerTimer(){ if (timerInt) clearInterval(timerInt); timerInt = null; }
 async function startAnswerTimer(){
   resetTimer();
   timerInt = setInterval(async ()=>{
     timerLeft -= 1;
     if (timerLeft < 0) timerLeft = 0;
-
     const pct = Math.round(((timerMax - timerLeft) / timerMax) * 100);
     timerFill.style.width = pct + '%';
     timerText.textContent = timerLeft + 's';
     if (timerLeft <= 10) timerFill.classList.add('danger');
-
     if (timerLeft <= 0) {
       stopAnswerTimer();
       if (!isRecording) {
@@ -461,16 +459,15 @@ async function startTest(){
   if (startingLock) return;
   startingLock = true;
 
-  // Make sure button really works + show feedback
+  // unlock audio on same gesture
+  await unlockAudio();
+
   btnStart.disabled = true;
   btnStart.textContent = 'Loading…';
   btnReplay.disabled = true;
 
   quizCard.style.display = 'block';
   resultCard.style.display = 'none';
-
-  // Unlock audio on same tap gesture (iPad)
-  await unlockAudio();
 
   await startStudentCam();
 
@@ -499,6 +496,7 @@ async function startTest(){
   btnReplay.style.display = 'inline-block';
   renderQStrip(10);
 
+  // INTRO
   setSys('Maya is speaking…');
   const okIntro = await playPromptAudio(TEST_ID, 0, 'intro');
   if (!okIntro) {
@@ -509,6 +507,7 @@ async function startTest(){
     return;
   }
 
+  // FIRST QUESTION
   renderItem(j.item);
   setSys('Maya is speaking…');
   const okQ = await playPromptAudio(TEST_ID, j.item.item_id, 'item');
@@ -588,13 +587,38 @@ async function submitAnswer(answer){
 }
 
 btnStart.onclick = startTest;
+
+// ✅ Replay now replays INTRO too (or whatever last audio was)
 btnReplay.onclick = async ()=>{
-  if (!TEST_ID || !CURRENT_ITEM) return;
+  if (!TEST_ID) return;
+
+  // try unlock again on this tap (often succeeds on iPad)
+  await unlockAudio();
+
   stopAnswerTimer();
   setSys('Replaying…');
-  await playPromptAudio(TEST_ID, CURRENT_ITEM.item_id, 'item');
-  setSys('Your turn.');
-  await startAnswerTimer();
+
+  let kind = LAST_AUDIO.kind || 'intro';
+  let itemId = (kind === 'item') ? (LAST_AUDIO.item_id || (CURRENT_ITEM ? CURRENT_ITEM.item_id : 0)) : 0;
+
+  if (kind === 'item' && itemId <= 0) {
+    // nothing to replay yet -> intro
+    kind = 'intro';
+    itemId = 0;
+  }
+
+  const ok = await playPromptAudio(TEST_ID, itemId, kind);
+  if (!ok) {
+    setSys('Audio still blocked. Tap Start again (or check iPad silent mode).');
+    return;
+  }
+
+  if (kind === 'item') {
+    setSys('Your turn.');
+    await startAnswerTimer();
+  } else {
+    setSys('Ready.');
+  }
 };
 
 function escapeHtml(s){
@@ -603,7 +627,7 @@ function escapeHtml(s){
     .replaceAll('>','&gt;').replaceAll('"','&quot;');
 }
 
-// Mark JS ok only after bindings are set (helps debugging)
+// JS OK only once handlers are attached
 setJsReady(true);
 </script>
 
