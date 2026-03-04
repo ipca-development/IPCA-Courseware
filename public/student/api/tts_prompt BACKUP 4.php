@@ -42,11 +42,14 @@ if ($kind === 'intro') {
     if (!$row) { http_response_code(404); exit('Test not found'); }
 
     $score = ($row['score_pct'] !== null) ? (int)$row['score_pct'] : 0;
+    $st = (string)($row['status'] ?? 'in_progress');
     $deb = trim((string)($row['debrief_spoken'] ?? ''));
 
     if ($deb === '') {
+        // fallback if not stored
         $text = "Your score is {$score} percent. Please review the feedback in your debrief notes.";
     } else {
+        // prepend score
         $text = "Your score is {$score} percent. " . $deb;
     }
 } else {
@@ -77,30 +80,14 @@ $apiKey = getenv('OPENAI_API_KEY');
 if (!$apiKey) $apiKey = getenv('CW_OPENAI_API_KEY');
 if (!$apiKey) { http_response_code(500); exit('Missing OPENAI_API_KEY'); }
 
-// TTS model
+// TTS model/voice
 $model = getenv('CW_OPENAI_TTS_MODEL') ?: 'gpt-4o-mini-tts';
-
-// ✅ Voice override via query param
-// (Keep strict allow-list style: letters only; fallback to env)
-$voice = (string)($_GET['voice'] ?? '');
-$voice = trim($voice);
-if ($voice !== '' && !preg_match('/^[a-zA-Z0-9_-]{1,32}$/', $voice)) {
-    $voice = '';
-}
-if ($voice === '') {
-    $voice = getenv('CW_OPENAI_TTS_VOICE') ?: 'alloy';
-}
-
-// Optional: speed override (safe bounds)
-$speed = (float)($_GET['speed'] ?? 1.0);
-if ($speed < 0.80) $speed = 0.80;
-if ($speed > 1.20) $speed = 1.20;
+$voice = getenv('CW_OPENAI_TTS_VOICE') ?: 'alloy';
 
 $payload = json_encode([
     'model' => $model,
     'voice' => $voice,
     'format' => 'mp3',
-    'speed' => $speed,
     'input' => $text,
 ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
