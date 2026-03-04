@@ -5,7 +5,7 @@ cw_require_login();
 
 $testId = (int)($_GET['test_id'] ?? 0);
 $itemId = (int)($_GET['item_id'] ?? 0);
-$kind   = (string)($_GET['kind'] ?? 'item');
+$kind   = (string)($_GET['kind'] ?? 'item'); // intro | item | outro
 
 $u = cw_current_user($pdo);
 $role = (string)($u['role'] ?? '');
@@ -24,14 +24,21 @@ if ($role === 'student') {
     if (!$own->fetchColumn()) { http_response_code(403); exit('Forbidden'); }
 }
 
-// Build text
+// Build speech text
+$name = trim((string)($u['name'] ?? 'student'));
+if ($name === '') $name = 'student';
+
 $text = '';
+
 if ($kind === 'intro') {
-    $name = (string)($u['name'] ?? 'student');
-    $text = "Okay {$name}, I will take your intermediate progress test to check your understanding. "
-          . "I will ask you a question. Use the buttons to answer. Here we go.";
+    $text = "Okay {$name}. I will now take your intermediate progress test to check your understanding. "
+          . "I will ask you a question. Tap the push to talk button to start speaking, and tap again to stop. "
+          . "Just like the radio in your airplane. Here we go.";
+} elseif ($kind === 'outro') {
+    $text = "Thank you {$name}. That was the last question. I will now evaluate your results and provide feedback.";
 } else {
     if ($itemId <= 0) { http_response_code(400); exit('Missing item_id'); }
+
     $stmt = $pdo->prepare("SELECT prompt, idx FROM progress_test_items WHERE id=? AND test_id=? LIMIT 1");
     $stmt->execute([$itemId, $testId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -39,19 +46,19 @@ if ($kind === 'intro') {
 
     $idx = (int)($row['idx'] ?? 0);
     $prompt = trim((string)($row['prompt'] ?? ''));
-    $name = (string)($u['name'] ?? 'student');
 
+    // Spoken framing
     $text = "Question {$idx}. {$prompt} What is your answer, {$name}?";
 }
 
-// OpenAI API key
+// OpenAI key
 $apiKey = getenv('OPENAI_API_KEY');
 if (!$apiKey) $apiKey = getenv('CW_OPENAI_API_KEY');
 if (!$apiKey) { http_response_code(500); exit('Missing OPENAI_API_KEY'); }
 
-// TTS model/voice (override via env if desired)
+// TTS model/voice
 $model = getenv('CW_OPENAI_TTS_MODEL') ?: 'gpt-4o-mini-tts';
-$voice = getenv('CW_OPENAI_TTS_VOICE') ?: 'alloy'; // safe default; change later per Maya/Kevin
+$voice = getenv('CW_OPENAI_TTS_VOICE') ?: 'alloy'; // later: per cohort (Maya/Kevin)
 
 $payload = json_encode([
     'model' => $model,
