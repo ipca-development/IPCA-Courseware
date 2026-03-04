@@ -46,12 +46,12 @@ cw_header('Progress Test');
   .hero{
     display:flex;
     gap:14px;
-    align-items:center;
+    align-items:flex-start; /* important for iPad weird stretching */
     flex-wrap:wrap;
     margin-top:12px;
   }
 
-  /* Force perfect circles everywhere */
+  /* PERFECT circles: lock square geometry in ALL browsers */
   .ring-wrap{
     width:120px !important;
     height:120px !important;
@@ -61,7 +61,8 @@ cw_header('Progress Test');
     display:flex;
     align-items:center;
     justify-content:center;
-    flex: 0 0 auto;
+    flex: 0 0 120px !important; /* prevents flex stretch */
+    align-self:flex-start;
   }
 
   /* Instructor speaking ring: GREEN pulsing */
@@ -109,11 +110,11 @@ cw_header('Progress Test');
     width:100% !important;
     height:100% !important;
     object-fit:cover !important;
-    transform:none !important;
     border-radius:999px !important;
     user-select:none;
     -webkit-user-drag:none;
     pointer-events:none;
+    display:block;
   }
 
   .cam{
@@ -146,7 +147,7 @@ cw_header('Progress Test');
     text-shadow:0 1px 2px rgba(0,0,0,0.6);box-sizing:border-box;
   }
 
-  .meta{ line-height:1.1; }
+  .meta{ line-height:1.1; padding-top:6px; }
   .meta .name{ font-weight:900; color:#1e3c72; font-size:18px; }
   .meta .role{ font-size:12px; opacity:.75; }
 
@@ -189,15 +190,6 @@ cw_header('Progress Test');
 
   .pinrow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
   .pinrow input{ height:36px; }
-
-  .debugline{
-    margin-top:8px;
-    font-size:12px;
-    opacity:.75;
-    word-break: break-all;
-    display:none;
-  }
-  .debugline a{ color:#1e3c72; font-weight:800; }
 </style>
 
 <div class="wrap">
@@ -246,10 +238,6 @@ cw_header('Progress Test');
 
       <div class="sysline" id="sysline">Ready.</div>
 
-      <div class="debugline" id="dbgLine">
-        Audio URL: <a id="dbgUrl" href="#" target="_blank">open</a>
-      </div>
-
       <div class="qstrip" id="qstrip" style="display:none;"></div>
 
       <button class="ptt" id="btnPTT" type="button" disabled>🎙 Tap to Start Talking</button>
@@ -283,6 +271,11 @@ const LESSON_ID = <?= (int)$lessonId ?>;
 let TEST_ID = 0;
 let CURRENT_ITEM = null;
 let LAST_AUDIO = { kind: null, item_id: 0 };
+let FIRST_ITEM_ID = 0;
+let NEXT_ITEM_ID = 0;
+
+// flow state
+let FLOW = 'idle'; // idle | intro_done_wait_ready | asking | answering | done
 
 const btnStart = document.getElementById('btnStart');
 const btnReplay = document.getElementById('btnReplay');
@@ -313,9 +306,6 @@ const jsLedTxt = document.getElementById('jsLedTxt');
 const pinRow = document.getElementById('pinRow');
 const pinInput = document.getElementById('pinInput');
 const pinMsg = document.getElementById('pinMsg');
-
-const dbgLine = document.getElementById('dbgLine');
-const dbgUrl = document.getElementById('dbgUrl');
 
 function setSys(s){ sysline.textContent = s || ''; }
 function setJsReady(ok){
@@ -377,14 +367,7 @@ function ttsUrl(testId, itemId, kind){
   return `/student/api/tts_prompt.php?test_id=${encodeURIComponent(testId)}&item_id=${encodeURIComponent(itemId)}&kind=${encodeURIComponent(kind)}&voice=${encodeURIComponent(voice)}&speed=1.00`;
 }
 
-function showDbg(url){
-  if (!url) { dbgLine.style.display='none'; return; }
-  dbgUrl.href = url;
-  dbgUrl.textContent = url;
-  dbgLine.style.display='block';
-}
-
-// Safari-friendly preload using hidden audio element
+// Safari-friendly preload
 let preloadUrl = '';
 function preloadTTS(url){
   if (!url) return;
@@ -406,7 +389,6 @@ async function playPromptAudio(testId, itemId, kind){
     btnPTT.disabled = true;
 
     const url = ttsUrl(testId, itemId, kind);
-    showDbg(url);
 
     qAudio.pause();
     qAudio.currentTime = 0;
@@ -527,7 +509,19 @@ async function stopRecording(){
 }
 
 btnPTT.addEventListener('click', async ()=>{
+  // READY gate
+  if (FLOW === 'intro_done_wait_ready') {
+    // Student acknowledged readiness -> ask first question
+    btnPTT.disabled = true;
+    btnPTT.textContent = 'Loading…';
+    await askFirstQuestion();
+    return;
+  }
+
+  // speaking gate
+  if (btnPTT.disabled) return;
   if (timerLeft <= 0) return;
+
   stopAnswerTimer();
   if (!isRecording) await startRecording();
   else await stopRecording();
@@ -596,7 +590,43 @@ document.getElementById('btnPin').addEventListener('click', async ()=>{
   await submitPin(pin);
 });
 
-// Start test (hardened)
+// Ask first question after "I am Ready"
+async function askFirstQuestion(){
+  if (!TEST_ID || !FIRST_ITEM_ID) {
+    setSys('Missing first question. Please restart test.');
+    btnPTT.disabled = false;
+    btnPTT.textContent = '✅ I am Ready';
+    FLOW = 'intro_done_wait_ready';
+    return;
+  }
+
+  FLOW = 'asking';
+
+  // preload current question and next
+  preloadTTS(ttsUrl(TEST_ID, FIRST_ITEM_ID, 'item'));
+  if (NEXT_ITEM_ID) preloadTTS(ttsUrl(TEST_ID, NEXT_ITEM_ID, 'item'));
+
+  renderItem({ item_id: FIRST_ITEM_ID, idx: 1 });
+  setSys('Maya is speaking…');
+
+  const okQ = await playPromptAudio(TEST_ID, FIRST_ITEM_ID, 'item');
+  if (!okQ) {
+    setSys('Question audio failed. Tap Replay.');
+    btnReplay.disabled = false;
+    btnPTT.disabled = false;
+    btnPTT.textContent = '✅ I am Ready';
+    FLOW = 'intro_done_wait_ready';
+    return;
+  }
+
+  btnPTT.disabled = false;
+  btnPTT.textContent = '🎙 Tap to Start Talking';
+  setSys('Your turn.');
+  FLOW = 'answering';
+  await startAnswerTimer();
+}
+
+// Start test
 let startingLock=false;
 
 async function startTest(){
@@ -642,9 +672,8 @@ async function startTest(){
     return;
   }
 
-  // validate payload
   if (!j.test_id || !j.item || !j.item.item_id) {
-    setSys('Start failed: server returned no first question (item_id missing).');
+    setSys('Start failed: server returned no first question.');
     btnStart.disabled=false;
     btnStart.textContent='Start Progress Test';
     btnReplay.disabled=false;
@@ -653,11 +682,16 @@ async function startTest(){
   }
 
   TEST_ID = parseInt(j.test_id,10);
+  FIRST_ITEM_ID = parseInt(j.item.item_id,10);
+  NEXT_ITEM_ID  = j.next_item_id ? parseInt(j.next_item_id,10) : 0;
+
   btnReplay.style.display='inline-block';
   renderQStrip(j.total_questions ? parseInt(j.total_questions,10) : 10);
 
-  // preload intro
+  // preload intro + first/next while intro is playing
   preloadTTS(ttsUrl(TEST_ID, 0, 'intro'));
+  preloadTTS(ttsUrl(TEST_ID, FIRST_ITEM_ID, 'item'));
+  if (NEXT_ITEM_ID) preloadTTS(ttsUrl(TEST_ID, NEXT_ITEM_ID, 'item'));
 
   setSys('Maya is speaking…');
   const okIntro = await playPromptAudio(TEST_ID, 0, 'intro');
@@ -666,29 +700,16 @@ async function startTest(){
     btnReplay.disabled=false;
     btnStart.textContent='Started';
     startingLock=false;
+    FLOW = 'idle';
     return;
   }
 
-  // ensure we still have first item
-  renderItem(j.item);
-
-  // preload question
-  preloadTTS(ttsUrl(TEST_ID, j.item.item_id, 'item'));
-  if (j.next_item_id) preloadTTS(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
-
-  setSys('Maya is speaking…');
-  const okQ = await playPromptAudio(TEST_ID, j.item.item_id, 'item');
-  if (!okQ) {
-    setSys('Question audio failed. Tap Replay (or open URL above).');
-    btnReplay.disabled=false;
-    btnStart.textContent='Started';
-    startingLock=false;
-    return;
-  }
-
-  btnPTT.disabled=false;
-  setSys('Your turn.');
-  await startAnswerTimer();
+  // require user action to proceed
+  stopAnswerTimer();
+  btnPTT.disabled = false;
+  btnPTT.textContent = '✅ I am Ready';
+  setSys('When you are ready, tap “I am Ready”.');
+  FLOW = 'intro_done_wait_ready';
 
   btnReplay.disabled=false;
   btnStart.textContent='Started';
@@ -740,6 +761,7 @@ async function submitAnswer(answer){
       <div style="margin-top:10px;"><strong>Weak Areas</strong><br><div style="white-space:pre-wrap;">${escapeHtml(j.weak_areas||'')}</div></div>
     `;
     setSys('Completed.');
+    FLOW = 'done';
     return;
   }
 
@@ -749,20 +771,25 @@ async function submitAnswer(answer){
     return;
   }
 
-  renderItem(j.item);
+  // Preload the next if provided
+  if (j.next_item_id) {
+    preloadTTS(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
+  }
 
-  if (j.next_item_id) preloadTTS(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
+  renderItem(j.item);
 
   setSys('Maya is speaking…');
   const ok = await playPromptAudio(TEST_ID, j.item.item_id, 'item');
   if (!ok) {
-    setSys('Question audio failed. Tap Replay (or open URL above).');
+    setSys('Question audio failed. Tap Replay.');
     btnReplay.disabled=false;
     return;
   }
 
   btnPTT.disabled=false;
+  btnPTT.textContent='🎙 Tap to Start Talking';
   setSys('Your turn.');
+  FLOW = 'answering';
   await startAnswerTimer();
 }
 
@@ -772,29 +799,39 @@ btnStart.onclick = startTest;
 btnReplay.onclick = async ()=>{
   if (!TEST_ID) return;
   await unlockAudio();
-
   stopAnswerTimer();
   setSys('Replaying…');
 
   let kind = LAST_AUDIO.kind || 'intro';
-  let itemId = (kind === 'item') ? (LAST_AUDIO.item_id || (CURRENT_ITEM ? CURRENT_ITEM.item_id : 0)) : 0;
-  if (kind === 'item' && itemId <= 0) { kind='intro'; itemId=0; }
+  let itemId = 0;
+
+  if (kind === 'item') {
+    itemId = (LAST_AUDIO.item_id || (CURRENT_ITEM ? CURRENT_ITEM.item_id : 0));
+    if (itemId <= 0) { kind='intro'; itemId=0; }
+  }
 
   preloadTTS(ttsUrl(TEST_ID, itemId, kind));
-
   const ok = await playPromptAudio(TEST_ID, itemId, kind);
   if (!ok) {
-    setSys('Audio still blocked. Check iPad silent mode.');
+    setSys('Audio blocked. Tap Replay again.');
     return;
   }
 
-  if (kind === 'item') {
-    btnPTT.disabled=false;
-    setSys('Your turn.');
-    await startAnswerTimer();
-  } else {
-    setSys('Ready.');
+  // After replaying intro, restore Ready button (do NOT auto-play question)
+  if (kind === 'intro') {
+    btnPTT.disabled = false;
+    btnPTT.textContent = '✅ I am Ready';
+    setSys('When you are ready, tap “I am Ready”.');
+    FLOW = 'intro_done_wait_ready';
+    return;
   }
+
+  // After replaying question, resume answering
+  btnPTT.disabled=false;
+  btnPTT.textContent='🎙 Tap to Start Talking';
+  setSys('Your turn.');
+  FLOW = 'answering';
+  await startAnswerTimer();
 };
 
 function escapeHtml(s){
