@@ -61,25 +61,40 @@ function policy_row(PDO $pdo, int $cohortId, int $userId): array {
     return $r ?: ['mode'=>'any','allowed_cidrs'=>null,'pin_hash'=>null];
 }
 
+function json_ok(array $x): void {
+    echo json_encode($x, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+function clamp_questions(array $questions, int $target = 10): array {
+    // Ensure exactly $target questions (pad or trim)
+    $out = [];
+    foreach ($questions as $q) {
+        if (!is_array($q)) continue;
+        $out[] = $q;
+    }
+    if (count($out) > $target) $out = array_slice($out, 0, $target);
+    return $out;
+}
+
 try {
     $u = cw_current_user($pdo);
     $role = (string)($u['role'] ?? '');
     if ($role !== 'student' && $role !== 'admin') {
         http_response_code(403);
-        echo json_encode(['ok'=>false,'error'=>'Forbidden']);
-        exit;
+        json_ok(['ok'=>false,'error'=>'Forbidden']);
     }
 
     $raw = file_get_contents('php://input');
     $data = json_decode($raw, true);
-    if (!is_array($data)) { echo json_encode(['ok'=>false,'error'=>'Invalid JSON']); exit; }
+    if (!is_array($data)) json_ok(['ok'=>false,'error'=>'Invalid JSON']);
 
     $cohortId = (int)($data['cohort_id'] ?? 0);
     $lessonId = (int)($data['lesson_id'] ?? 0);
     $mode = (string)($data['mode'] ?? '');
     $pin  = trim((string)($data['pin'] ?? ''));
 
-    if ($cohortId <= 0 || $lessonId <= 0) { echo json_encode(['ok'=>false,'error'=>'Missing cohort_id or lesson_id']); exit; }
+    if ($cohortId <= 0 || $lessonId <= 0) json_ok(['ok'=>false,'error'=>'Missing cohort_id or lesson_id']);
 
     $userId = (int)$u['id'];
 
@@ -88,12 +103,13 @@ try {
         $en->execute([$cohortId, $userId]);
         if (!$en->fetchColumn()) {
             http_response_code(403);
-            echo json_encode(['ok'=>false,'error'=>'Not enrolled']);
-            exit;
+            json_ok(['ok'=>false,'error'=>'Not enrolled']);
         }
     }
 
-    // --- Policy enforcement (school_ip + PIN override) ---
+    // --------------------------
+    // Policy enforcement (school_ip + PIN override)
+    // --------------------------
     $pol = policy_row($pdo, $cohortId, $userId);
     $polMode = (string)($pol['mode'] ?? 'any');
 
@@ -113,11 +129,9 @@ try {
 
             if (!$allowed) {
                 if (!empty($pol['pin_hash'])) {
-                    echo json_encode(['ok'=>false,'code'=>'NEED_PIN','error'=>'PIN required outside school network']);
-                    exit;
+                    json_ok(['ok'=>false,'code'=>'NEED_PIN','error'=>'PIN required outside school network']);
                 }
-                echo json_encode(['ok'=>false,'error'=>'Not allowed from this location']);
-                exit;
+                json_ok(['ok'=>false,'error'=>'Not allowed from this location']);
             }
         }
     }
@@ -127,18 +141,18 @@ try {
             // ok
         } else {
             if ($mode === 'check_pin') {
-                if ($pin === '' || empty($pol['pin_hash'])) { echo json_encode(['ok'=>false,'error'=>'Invalid PIN']); exit; }
-                if (!password_verify($pin, (string)$pol['pin_hash'])) { echo json_encode(['ok'=>false,'error'=>'Invalid PIN']); exit; }
+                if ($pin === '' || empty($pol['pin_hash'])) json_ok(['ok'=>false,'error'=>'Invalid PIN']);
+                if (!password_verify($pin, (string)$pol['pin_hash'])) json_ok(['ok'=>false,'error'=>'Invalid PIN']);
                 $_SESSION['cw_pin_ok'] = '1';
-                echo json_encode(['ok'=>true]);
-                exit;
+                json_ok(['ok'=>true]);
             }
-            echo json_encode(['ok'=>false,'code'=>'NEED_PIN','error'=>'PIN required']);
-            exit;
+            json_ok(['ok'=>false,'code'=>'NEED_PIN','error'=>'PIN required']);
         }
     }
 
-    // --- Create progress_tests row (attempt) ---
+    // --------------------------
+    // Create progress_tests row (attempt)
+    // --------------------------
     $mx = $pdo->prepare("SELECT MAX(attempt) FROM progress_tests WHERE user_id=? AND cohort_id=? AND lesson_id=?");
     $mx->execute([$userId, $cohortId, $lessonId]);
     $attempt = (int)$mx->fetchColumn() + 1;
@@ -153,78 +167,137 @@ try {
     $ins->execute([$userId, $cohortId, $lessonId, $attempt, $seed]);
     $testId = (int)$pdo->lastInsertId();
 
-    // Clear any items just in case
+    // Ensure clean slate
     $pdo->prepare("DELETE FROM progress_test_items WHERE test_id=?")->execute([$testId]);
 
-    // --- Build 10 items: 1 info + 9 scored (yesno/mcq/open) ---
-    // NOTE: kind must be in ENUM('info','yesno','mcq','open')
-    $items = [];
+    // --------------------------
+    // LOAD TRUTH (narration scripts)
+    // --------------------------
+    $nq = $pdo->prepare("
+      SELECT s.page_number, e.narration_en
+      FROM slides s
+      JOIN slide_enrichment e ON e.slide_id = s.id
+      WHERE s.lesson_id=? AND s.is_deleted=0 AND e.narration_en IS NOT NULL AND e.narration_en <> ''
+      ORDER BY s.page_number ASC
+    ");
+    $nq->execute([$lessonId]);
+    $nrows = $nq->fetchAll(PDO::FETCH_ASSOC);
 
-    // idx=1 informational (not scored)
-    $items[] = [
-        'idx'=>1, 'kind'=>'info',
-        'prompt'=>'We will begin now.',
-        'options'=>[],
-        'correct'=>['type'=>'none']
-    ];
+    $truthBlocks = [];
+    foreach ($nrows as $r) {
+        $pg = (int)($r['page_number'] ?? 0);
+        $tx = trim((string)($r['narration_en'] ?? ''));
+        if ($tx !== '') $truthBlocks[] = "Slide {$pg}: {$tx}";
+    }
+    $truthText = implode("\n\n", $truthBlocks);
+    if ($truthText === '') $truthText = "(No narration scripts available.)";
 
-    // Simple + scenario mix (MVP)
-    $items[] = ['idx'=>2,'kind'=>'yesno','prompt'=>'A Cessna 172 is an airplane. Yes or no?','options'=>[],'correct'=>['value'=>true]];
-    $items[] = ['idx'=>3,'kind'=>'mcq','prompt'=>'Which part provides lift?','options'=>['Wings','Brakes','Seat','Spinner'],'correct'=>['index'=>0]];
+    // --------------------------
+    // LOAD student summary (claims / misconceptions only)
+    // --------------------------
+    $sq = $pdo->prepare("
+      SELECT summary_plain
+      FROM lesson_summaries
+      WHERE user_id=? AND cohort_id=? AND lesson_id=?
+      LIMIT 1
+    ");
+    $sq->execute([$userId, $cohortId, $lessonId]);
+    $summaryPlain = trim((string)($sq->fetchColumn() ?: ''));
+    if ($summaryPlain === '') $summaryPlain = "(No student summary.)";
 
-    // OPEN (scorable via rubric)
-    $items[] = [
-        'idx'=>4,'kind'=>'open',
-        'prompt'=>'Explain briefly what a checklist is used for.',
-        'options'=>[],
-        'correct'=>[
-            'type'=>'rubric',
-            'key_points'=>[
-                'standardizes actions',
-                'reduces errors / omissions',
-                'ensures safety / verification',
+    // --------------------------
+    // AI: generate questions (truth-first)
+    // --------------------------
+    $schema = [
+      "type"=>"object",
+      "additionalProperties"=>false,
+      "properties"=>[
+        "questions"=>[
+          "type"=>"array",
+          "items"=>[
+            "type"=>"object",
+            "additionalProperties"=>false,
+            "properties"=>[
+              "kind"=>["type"=>"string","enum"=>["yesno","mcq","open"]],
+              "prompt"=>["type"=>"string"],
+              "options"=>["type"=>"array","items"=>["type"=>"string"]],
+              "correct"=>["type"=>"object"],   // for yesno/mcq/open rubric
+              "rubric"=>["type"=>"object"]     // optional for open
             ],
-            'min_points_to_pass'=>2
+            "required"=>["kind","prompt","options","correct","rubric"]
+          ]
         ]
+      ],
+      "required"=>["questions"]
     ];
 
-    $items[] = ['idx'=>5,'kind'=>'yesno','prompt'=>'The horizontal stabilizer is part of the tail. Yes or no?','options'=>[],'correct'=>['value'=>true]];
-    $items[] = ['idx'=>6,'kind'=>'mcq','prompt'=>'What is the fuselage?','options'=>['Main body','A type of wing','A brake part','A tire'],'correct'=>['index'=>0]];
+    $instructions = <<<TXT
+You generate a strict oral progress test for a flight training student.
 
-    $items[] = [
-        'idx'=>7,'kind'=>'open',
-        'prompt'=>'Scenario: You notice a crack in a spinner before flight. What should you do and why?',
-        'options'=>[],
-        'correct'=>[
-            'type'=>'rubric',
-            'key_points'=>[
-                'do not fly / consult maintenance',
-                'treat as airworthiness / safety issue',
-                'document / report',
-            ],
-            'min_points_to_pass'=>2
+SOURCE OF TRUTH HIERARCHY:
+1) LESSON NARRATION is the ONLY truth source.
+2) STUDENT SUMMARY is NOT truth. Use it only to detect misconceptions to probe.
+
+GOAL:
+Generate exactly 10 questions, all derived ONLY from the LESSON NARRATION.
+Questions must be scenario-based, realistic, and test understanding.
+
+TYPES:
+- yesno: correct must be {"value": true/false}
+- mcq: 4 options; correct must be {"index": 0..3}
+- open: options must be []; correct must include a rubric:
+    correct = {"type":"rubric","key_points":[...],"min_points_to_pass":2}
+
+RULES:
+- Do NOT introduce new facts not supported by narration.
+- If summary contains a misconception, ask a question that tests it against narration.
+- Keep prompts concise (spoken).
+- Prefer aviation context, risk/safety thinking, and correct procedures.
+
+Return JSON matching schema.
+TXT;
+
+    $payload = [
+      "model" => cw_openai_model(),
+      "input" => [
+        ["role"=>"system","content"=>[
+          ["type"=>"input_text","text"=>$instructions]
+        ]],
+        ["role"=>"user","content"=>[
+          ["type"=>"input_text","text"=>
+"LESSON NARRATION (TRUTH):\n{$truthText}\n\nSTUDENT SUMMARY (NOT TRUTH):\n{$summaryPlain}\n\nGenerate the 10 questions now."
+          ]
+        ]]
+      ],
+      "text" => [
+        "format" => [
+          "type"=>"json_schema",
+          "name"=>"ipca_progress_test_q_v1",
+          "schema"=>$schema,
+          "strict"=>true
         ]
+      ],
+      "temperature" => 0.2
     ];
 
-    $items[] = ['idx'=>8,'kind'=>'mcq','prompt'=>'Which control surface primarily controls roll?','options'=>['Ailerons','Rudder','Elevator','Flaps'],'correct'=>['index'=>0]];
-    $items[] = ['idx'=>9,'kind'=>'yesno','prompt'=>'Flaps increase lift and drag. Yes or no?','options'=>[],'correct'=>['value'=>true]];
+    $resp = cw_openai_responses($payload);
+    $j = cw_openai_extract_json_text($resp);
 
-    $items[] = [
-        'idx'=>10,'kind'=>'open',
-        'prompt'=>'In your own words, why do pilots use checklists even for familiar airplanes?',
-        'options'=>[],
-        'correct'=>[
-            'type'=>'rubric',
-            'key_points'=>[
-                'humans forget / complacency',
-                'consistency',
-                'safety barriers',
-            ],
-            'min_points_to_pass'=>2
-        ]
-    ];
+    $questions = is_array($j['questions'] ?? null) ? $j['questions'] : [];
+    $questions = clamp_questions($questions, 10);
 
-    // Insert items (NOTE: correct_answer_json is NOT NULL in your schema)
+    if (count($questions) < 3) {
+        // fail-safe minimal questions
+        $questions = [
+          ["kind"=>"yesno","prompt"=>"Based on the lesson, is the checklist used to reduce errors?","options"=>[],"correct"=>["value"=>true],"rubric"=>["type"=>"none"]],
+          ["kind"=>"mcq","prompt"=>"Based on the lesson, which part is primarily responsible for lift?","options"=>["Wings","Brakes","Seat","Spinner"],"correct"=>["index"=>0],"rubric"=>["type"=>"none"]],
+          ["kind"=>"open","prompt"=>"Explain why pilots use checklists.","options"=>[],"correct"=>["type"=>"rubric","key_points"=>["reduce errors","standardize","safety"],"min_points_to_pass"=>2],"rubric"=>["type"=>"none"]],
+        ];
+    }
+
+    // --------------------------
+    // Insert questions into progress_test_items
+    // --------------------------
     $insI = $pdo->prepare("
       INSERT INTO progress_test_items
         (test_id, idx, kind, question_order, prompt, options_json, correct_json, correct_answer_json, student_json, student_answer_json, is_correct)
@@ -232,74 +305,99 @@ try {
         (?,?,?,?,?,?,?,?,?,?,NULL)
     ");
 
-    foreach ($items as $it) {
-        $kind = (string)$it['kind'];
+    $idx = 1;
+    foreach ($questions as $q) {
+        $k = (string)($q['kind'] ?? 'yesno');
+        $prompt = trim((string)($q['prompt'] ?? ''));
+        if ($prompt === '') $prompt = "Question {$idx}.";
 
-        $options = $it['options'] ?? [];
+        $options = $q['options'] ?? [];
         if (!is_array($options)) $options = [];
-
-        $correct = $it['correct'] ?? [];
-        if (!is_array($correct)) $correct = [];
-
-        // Ensure NOT NULL correct_answer_json for ALL types
-        // - yesno/mcq/open use $correct
-        // - info uses {"type":"none"}
-        if ($kind === 'info' && empty($correct)) {
-            $correct = ['type'=>'none'];
+        // enforce 4 options for mcq
+        if ($k === 'mcq') {
+            $opts = [];
+            foreach ($options as $o) { $o = trim((string)$o); if ($o !== '') $opts[] = $o; }
+            while (count($opts) < 4) $opts[] = "Option " . (count($opts)+1);
+            if (count($opts) > 4) $opts = array_slice($opts, 0, 4);
+            $options = $opts;
+        } else {
+            $options = []; // yesno/open should have none
         }
 
-        $correctJson = json_encode($correct, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-        if ($correctJson === false) $correctJson = '{}';
+        $correct = $q['correct'] ?? [];
+        if (!is_array($correct)) $correct = [];
+
+        // Normalize correct structure
+        if ($k === 'yesno') {
+            $correct = ["value" => (bool)($correct['value'] ?? false)];
+        } elseif ($k === 'mcq') {
+            $ci = (int)($correct['index'] ?? 0);
+            if ($ci < 0) $ci = 0;
+            if ($ci > 3) $ci = 3;
+            $correct = ["index" => $ci];
+        } elseif ($k === 'open') {
+            // accept correct already rubric; enforce required fields
+            $keyPoints = $correct['key_points'] ?? [];
+            if (!is_array($keyPoints)) $keyPoints = [];
+            $kpClean = [];
+            foreach ($keyPoints as $p) {
+                $p = trim((string)$p);
+                if ($p !== '') $kpClean[] = $p;
+            }
+            if (!$kpClean) $kpClean = ["key point 1", "key point 2", "key point 3"];
+            $minPts = (int)($correct['min_points_to_pass'] ?? 2);
+            if ($minPts < 1) $minPts = 1;
+            $correct = ["type"=>"rubric","key_points"=>$kpClean,"min_points_to_pass"=>$minPts];
+        }
 
         $optsJson = json_encode($options, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
         if ($optsJson === false) $optsJson = '[]';
 
+        $corrJson = json_encode($correct, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        if ($corrJson === false) $corrJson = '{}';
+
         $insI->execute([
-            $testId,
-            (int)$it['idx'],
-            $kind,
-            (int)$it['idx'],
-            (string)$it['prompt'],
-            $optsJson,
-            $correctJson,
-            $correctJson,
-            null,
-            null
+          $testId,
+          $idx,
+          $k,
+          $idx,
+          $prompt,
+          $optsJson,
+          $corrJson,
+          $corrJson,
+          null,
+          null
         ]);
+
+        $idx++;
+        if ($idx > 10) break;
     }
 
-    // First scored item (skip info idx=1)
-    $first = $pdo->prepare("SELECT id, idx, kind, prompt, options_json FROM progress_test_items WHERE test_id=? AND idx>=2 ORDER BY idx ASC LIMIT 1");
+    // First item
+    $first = $pdo->prepare("SELECT id, idx, kind, prompt, options_json FROM progress_test_items WHERE test_id=? ORDER BY idx ASC LIMIT 1");
     $first->execute([$testId]);
     $f = $first->fetch(PDO::FETCH_ASSOC);
-    if (!$f) {
-        echo json_encode(['ok'=>false,'error'=>'No items generated']);
-        exit;
-    }
+    if (!$f) json_ok(['ok'=>false,'error'=>'No items generated']);
 
     // Next id for prefetch
     $next = $pdo->prepare("SELECT id FROM progress_test_items WHERE test_id=? AND idx>? ORDER BY idx ASC LIMIT 1");
     $next->execute([$testId, (int)$f['idx']]);
     $nextId = (int)($next->fetchColumn() ?: 0);
 
-    // total questions = scored count (exclude info)
-    $totalQStmt = $pdo->prepare("SELECT COUNT(*) FROM progress_test_items WHERE test_id=? AND kind IN ('yesno','mcq','open')");
-    $totalQStmt->execute([$testId]);
-    $totalQ = (int)$totalQStmt->fetchColumn();
-
-    echo json_encode([
+    json_ok([
       'ok'=>true,
       'test_id'=>$testId,
-      'total_questions'=>$totalQ,
+      'total_questions'=>10,
       'next_item_id'=>$nextId ?: null,
       'item'=>[
         'item_id'=>(int)$f['id'],
         'idx'=>(int)$f['idx'],
         'kind'=>(string)$f['kind'],
         'prompt'=>(string)$f['prompt'],
-        'options'=> json_decode((string)$f['options_json'], true) ?: []
+        'options'=> json_decode((string)($f['options_json'] ?? '[]'), true) ?: []
       ]
     ]);
+
 } catch (Throwable $e) {
     http_response_code(400);
     echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);

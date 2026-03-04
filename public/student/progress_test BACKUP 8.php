@@ -45,56 +45,30 @@ cw_header('Progress Test');
 
   .hero{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:12px; }
 
-  /* ===== RING WRAPPERS (NOT CLIPPED) ===== */
-  .ring-wrap{
-    width:120px;height:120px;border-radius:999px;
-    position:relative;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    /* IMPORTANT: no overflow hidden here */
-  }
-
-  /* Instructor speaking ring: GREEN pulsing */
-  .ring-wrap.talking::after{
-    content:"";
-    position:absolute; inset:-10px; border-radius:999px;
-    border: 4px solid rgba(22,163,74,0.75);
-    box-shadow: 0 0 26px rgba(22,163,74,0.45);
-    animation:pulseG 0.95s infinite;
-    pointer-events:none;
-  }
-  @keyframes pulseG{
-    0%{ transform:scale(0.98); opacity:0.25; }
-    50%{ transform:scale(1.06); opacity:0.95; }
-    100%{ transform:scale(0.98); opacity:0.25; }
-  }
-
-  /* Student speaking ring: RED pulsing */
-  .ring-wrap.rec::after{
-    content:"";
-    position:absolute; inset:-10px; border-radius:999px;
-    border: 4px solid rgba(220,38,38,0.80);
-    box-shadow: 0 0 26px rgba(220,38,38,0.45);
-    animation:pulseR 0.85s infinite;
-    pointer-events:none;
-  }
-  @keyframes pulseR{
-    0%{ transform:scale(0.98); opacity:0.25; }
-    50%{ transform:scale(1.06); opacity:0.98; }
-    100%{ transform:scale(0.98); opacity:0.25; }
-  }
-
-  /* ===== INNER CIRCLES (CLIPPED) ===== */
   .avatar-badge{
     width:120px;height:120px;border-radius:999px;
     background: linear-gradient(135deg,#1e3c72,#2a5298);
     display:flex;align-items:center;justify-content:center;
     overflow:hidden;
-    border:4px solid rgba(255,255,255,0.90);
+    border:4px solid rgba(255,255,255,0.85);
     box-shadow:0 10px 30px rgba(0,0,0,0.12);
+    position:relative;
   }
   .avatar-badge img{ width:120%;height:120%;object-fit:cover; transform: translateY(6px); user-select:none;-webkit-user-drag:none;pointer-events:none; }
+
+  /* Instructor speaking ring: GREEN pulsing */
+  .talking::after{
+    content:"";
+    position:absolute; inset:-10px; border-radius:999px;
+    border: 4px solid rgba(22,163,74,0.65);
+    box-shadow: 0 0 22px rgba(22,163,74,0.35);
+    animation:pulseG 0.95s infinite;
+  }
+  @keyframes pulseG{
+    0%{ transform:scale(0.98); opacity:0.25; }
+    50%{ transform:scale(1.06); opacity:0.90; }
+    100%{ transform:scale(0.98); opacity:0.25; }
+  }
 
   .cam{
     width:120px;height:120px;border-radius:999px;
@@ -104,8 +78,23 @@ cw_header('Progress Test');
     position:relative;
   }
   .cam video{ width:100%;height:100%;object-fit:cover;border-radius:999px; }
-  .cam .fallback{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:900; letter-spacing:1px; opacity:.85; border-radius:999px; background:#000; }
+  .cam .fallback{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:900; letter-spacing:1px; opacity:.85; border-radius:999px; }
   .cam .label{ position:absolute;left:0;right:0;bottom:6px;text-align:center;font-size:12px;color:#fff;padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,0.6);box-sizing:border-box; }
+
+  /* Student speaking ring: RED pulsing */
+  .cam.rec::after{
+    content:"";
+    position:absolute; inset:-10px; border-radius:999px;
+    border: 4px solid rgba(220,38,38,0.70);
+    box-shadow: 0 0 22px rgba(220,38,38,0.35);
+    animation:pulseR 0.85s infinite;
+    pointer-events:none;
+  }
+  @keyframes pulseR{
+    0%{ transform:scale(0.98); opacity:0.25; }
+    50%{ transform:scale(1.06); opacity:0.95; }
+    100%{ transform:scale(0.98); opacity:0.25; }
+  }
 
   .meta{ line-height:1.1; }
   .meta .name{ font-weight:900; color:#1e3c72; font-size:18px; }
@@ -173,22 +162,14 @@ cw_header('Progress Test');
 
     <div id="quizCard" style="display:none; margin-top:14px;">
       <div class="hero">
-        <!-- Instructor ring wrapper -->
-        <div class="ring-wrap" id="instructorRing">
-          <div class="avatar-badge">
-            <img src="<?= h($INSTRUCTOR_AVATAR) ?>" alt="Instructor">
-          </div>
+        <div class="avatar-badge" id="instructorBadge">
+          <img src="<?= h($INSTRUCTOR_AVATAR) ?>" alt="Instructor">
         </div>
-
-        <!-- Student ring wrapper -->
-        <div class="ring-wrap" id="studentRing">
-          <div class="cam">
-            <video id="studentCam" autoplay playsinline muted></video>
-            <div class="fallback" id="camFallback">CAM</div>
-            <div class="label"><?= h($userName) ?></div>
-          </div>
+        <div class="cam" id="camBox">
+          <video id="studentCam" autoplay playsinline muted></video>
+          <div class="fallback" id="camFallback">CAM</div>
+          <div class="label"><?= h($userName) ?></div>
         </div>
-
         <div class="meta">
           <div class="name"><?= h($INSTRUCTOR_NAME) ?></div>
           <div class="role">AI Instructor</div>
@@ -222,7 +203,6 @@ cw_header('Progress Test');
 </div>
 
 <audio id="qAudio" preload="auto"></audio>
-<audio id="qPreload" preload="auto"></audio>
 
 <script>
 const COHORT_ID = <?= (int)$cohortId ?>;
@@ -240,12 +220,8 @@ const quizCard = document.getElementById('quizCard');
 const resultCard = document.getElementById('resultCard');
 const resultBox = document.getElementById('resultBox');
 
-const instructorRing = document.getElementById('instructorRing');
-const studentRing = document.getElementById('studentRing');
-
+const instructorBadge = document.getElementById('instructorBadge');
 const qAudio = document.getElementById('qAudio');
-const qPreload = document.getElementById('qPreload');
-
 const sysline = document.getElementById('sysline');
 
 const timerFill = document.getElementById('timerFill');
@@ -254,6 +230,7 @@ const timerText = document.getElementById('timerText');
 const camStatus = document.getElementById('camStatus');
 const camFallback = document.getElementById('camFallback');
 const studentCam = document.getElementById('studentCam');
+const camBox = document.getElementById('camBox');
 
 const jsLed = document.getElementById('jsLed');
 const jsLedTxt = document.getElementById('jsLedTxt');
@@ -268,12 +245,8 @@ function setJsReady(ok){
   else { jsLed.classList.remove('on'); jsLedTxt.textContent = 'JS ERR'; }
 }
 function setSpeaking(on){
-  if (on) instructorRing.classList.add('talking');
-  else instructorRing.classList.remove('talking');
-}
-function setStudentRec(on){
-  if (on) studentRing.classList.add('rec');
-  else studentRing.classList.remove('rec');
+  if (on) instructorBadge.classList.add('talking');
+  else instructorBadge.classList.remove('talking');
 }
 
 // iPad SAFE audio unlock
@@ -322,18 +295,10 @@ function ttsUrl(testId, itemId, kind){
   return `/student/api/tts_prompt.php?test_id=${encodeURIComponent(testId)}&item_id=${encodeURIComponent(itemId)}&kind=${encodeURIComponent(kind)}&voice=${encodeURIComponent(voice)}&speed=1.00`;
 }
 
-// ✅ Safari-friendly preload (warm cache using hidden audio element)
-let preloadUrl = '';
-function preloadTTS(url){
-  if (!url) return;
-  if (preloadUrl === url) return;
-  preloadUrl = url;
-
-  try{
-    qPreload.pause();
-    qPreload.currentTime = 0;
-    qPreload.src = url;
-    qPreload.load();
+// Prefetch audio (warm cache)
+async function prefetchAudio(url){
+  try {
+    await fetch(url, { credentials:'same-origin', cache:'no-store' });
   } catch(e) {}
 }
 
@@ -342,7 +307,7 @@ async function playPromptAudio(testId, itemId, kind){
 
   return new Promise((resolve) => {
     setSpeaking(true);
-    btnPTT.disabled = true; // disable until question finished
+    btnPTT.disabled = true; // (4) disable until question finished
 
     qAudio.pause();
     qAudio.currentTime = 0;
@@ -397,7 +362,7 @@ async function startAnswerTimer(){
   }, 1000);
 }
 
-// Dots
+// Dots default 10 for now
 function renderQStrip(total){
   const el = document.getElementById('qstrip');
   el.innerHTML = '';
@@ -437,20 +402,20 @@ async function startRecording(){
       if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
       mediaStream=null;
 
-      setStudentRec(false); // stop red ring
+      camBox.classList.remove('rec'); // (6) stop red ring
       setSys('Transcribing…');
       await transcribeAndSubmit();
     };
 
     recorder.start();
     isRecording=true;
-    setStudentRec(true);        // ✅ red glow while recording
+    camBox.classList.add('rec'); // (6) red ring on
     btnPTT.classList.add('rec');
     btnPTT.textContent='⏺ Recording… Tap to Stop';
   } catch(e) {
     setSys('Mic denied or error.');
     isRecording=false;
-    setStudentRec(false);
+    camBox.classList.remove('rec');
     btnPTT.classList.remove('rec');
     btnPTT.textContent='🎙 Tap to Start Talking';
   }
@@ -510,7 +475,7 @@ function renderItem(item){
   lastBlob=null;
 }
 
-// PIN flow
+// PIN flow (7)
 async function submitPin(pin){
   pinMsg.textContent = 'Checking PIN…';
   const res = await fetch('/student/api/test_start.php', {
@@ -564,6 +529,7 @@ async function startTest(){
   let j=null; try{ j=JSON.parse(txt);}catch(e){ j={ok:false,error:'Non-JSON: '+txt.slice(0,200)}; }
 
   if (!j.ok) {
+    // If blocked by policy, show PIN UI
     if ((j.code||'') === 'NEED_PIN') {
       setSys('This test requires a Training PIN.');
       pinRow.style.display = 'flex';
@@ -585,9 +551,9 @@ async function startTest(){
   btnReplay.style.display='inline-block';
   renderQStrip(j.total_questions ? parseInt(j.total_questions,10) : 10);
 
-  // ✅ Preload intro immediately
+  // (3) Prefetch intro immediately
   const introUrl = ttsUrl(TEST_ID, 0, 'intro');
-  preloadTTS(introUrl);
+  prefetchAudio(introUrl);
 
   setSys('Maya is speaking…');
   const okIntro = await playPromptAudio(TEST_ID, 0, 'intro');
@@ -602,8 +568,9 @@ async function startTest(){
   // First question
   renderItem(j.item);
 
-  // ✅ Preload the first question audio
-  preloadTTS(ttsUrl(TEST_ID, j.item.item_id, 'item'));
+  // (3) Prefetch first question (already known)
+  const qUrl = ttsUrl(TEST_ID, j.item.item_id, 'item');
+  prefetchAudio(qUrl);
 
   setSys('Maya is speaking…');
   const okQ = await playPromptAudio(TEST_ID, j.item.item_id, 'item');
@@ -624,9 +591,10 @@ async function startTest(){
   btnStart.textContent='Started';
   startingLock=false;
 
-  // ✅ Preload next item if provided
+  // (3) Prefetch next item audio if provided
   if (j.next_item_id) {
-    preloadTTS(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
+    const nextUrl = ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item');
+    prefetchAudio(nextUrl);
   }
 }
 
@@ -680,9 +648,9 @@ async function submitAnswer(answer){
 
   renderItem(j.item);
 
-  // ✅ Preload next item if provided (chain-preload)
+  // Prefetch next
   if (j.next_item_id) {
-    preloadTTS(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
+    prefetchAudio(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
   }
 
   setSys('Maya is speaking…');
@@ -711,8 +679,6 @@ btnReplay.onclick = async ()=>{
   let kind = LAST_AUDIO.kind || 'intro';
   let itemId = (kind === 'item') ? (LAST_AUDIO.item_id || (CURRENT_ITEM ? CURRENT_ITEM.item_id : 0)) : 0;
   if (kind === 'item' && itemId <= 0) { kind='intro'; itemId=0; }
-
-  preloadTTS(ttsUrl(TEST_ID, itemId, kind));
 
   const ok = await playPromptAudio(TEST_ID, itemId, kind);
   if (!ok) {
