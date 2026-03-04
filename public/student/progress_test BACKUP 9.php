@@ -43,39 +43,30 @@ cw_header('Progress Test');
   .btn-start-green{ background:#16a34a !important; border-color:#12813c !important; color:#fff !important; }
   .btn-start-green:hover{ background:#138a3f !important; }
 
-  .hero{
-    display:flex;
-    gap:14px;
-    align-items:center;
-    flex-wrap:wrap;
-    margin-top:12px;
-  }
+  .hero{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:12px; }
 
-  /* Force perfect circles everywhere */
+  /* ===== RING WRAPPERS (NOT CLIPPED) ===== */
   .ring-wrap{
-    width:120px !important;
-    height:120px !important;
-    aspect-ratio: 1 / 1 !important;
-    border-radius:999px !important;
+    width:120px;height:120px;border-radius:999px;
     position:relative;
     display:flex;
     align-items:center;
     justify-content:center;
-    flex: 0 0 auto;
+    /* IMPORTANT: no overflow hidden here */
   }
 
   /* Instructor speaking ring: GREEN pulsing */
   .ring-wrap.talking::after{
     content:"";
     position:absolute; inset:-10px; border-radius:999px;
-    border: 4px solid rgba(22,163,74,0.78);
-    box-shadow: 0 0 26px rgba(22,163,74,0.48);
+    border: 4px solid rgba(22,163,74,0.75);
+    box-shadow: 0 0 26px rgba(22,163,74,0.45);
     animation:pulseG 0.95s infinite;
     pointer-events:none;
   }
   @keyframes pulseG{
     0%{ transform:scale(0.98); opacity:0.25; }
-    50%{ transform:scale(1.06); opacity:0.98; }
+    50%{ transform:scale(1.06); opacity:0.95; }
     100%{ transform:scale(0.98); opacity:0.25; }
   }
 
@@ -83,68 +74,38 @@ cw_header('Progress Test');
   .ring-wrap.rec::after{
     content:"";
     position:absolute; inset:-10px; border-radius:999px;
-    border: 4px solid rgba(220,38,38,0.82);
-    box-shadow: 0 0 26px rgba(220,38,38,0.48);
+    border: 4px solid rgba(220,38,38,0.80);
+    box-shadow: 0 0 26px rgba(220,38,38,0.45);
     animation:pulseR 0.85s infinite;
     pointer-events:none;
   }
   @keyframes pulseR{
     0%{ transform:scale(0.98); opacity:0.25; }
-    50%{ transform:scale(1.06); opacity:1.0; }
+    50%{ transform:scale(1.06); opacity:0.98; }
     100%{ transform:scale(0.98); opacity:0.25; }
   }
 
+  /* ===== INNER CIRCLES (CLIPPED) ===== */
   .avatar-badge{
-    width:120px !important;
-    height:120px !important;
-    aspect-ratio: 1 / 1 !important;
-    border-radius:999px !important;
+    width:120px;height:120px;border-radius:999px;
     background: linear-gradient(135deg,#1e3c72,#2a5298);
     display:flex;align-items:center;justify-content:center;
     overflow:hidden;
     border:4px solid rgba(255,255,255,0.90);
     box-shadow:0 10px 30px rgba(0,0,0,0.12);
   }
-  .avatar-badge img{
-    width:100% !important;
-    height:100% !important;
-    object-fit:cover !important;
-    transform:none !important;
-    border-radius:999px !important;
-    user-select:none;
-    -webkit-user-drag:none;
-    pointer-events:none;
-  }
+  .avatar-badge img{ width:120%;height:120%;object-fit:cover; transform: translateY(6px); user-select:none;-webkit-user-drag:none;pointer-events:none; }
 
   .cam{
-    width:120px !important;
-    height:120px !important;
-    aspect-ratio: 1 / 1 !important;
-    border-radius:999px !important;
-    overflow:hidden;
-    background:#000;
+    width:120px;height:120px;border-radius:999px;
+    overflow:hidden;background:#000;
     border:4px solid rgba(30,60,114,0.30);
     box-shadow:0 10px 30px rgba(0,0,0,0.12);
     position:relative;
   }
-  .cam video{
-    width:100% !important;
-    height:100% !important;
-    object-fit:cover !important;
-    border-radius:999px !important;
-    display:block;
-  }
-  .cam .fallback{
-    position:absolute; inset:0;
-    display:flex; align-items:center; justify-content:center;
-    color:#fff; font-weight:900; letter-spacing:1px; opacity:.85;
-    border-radius:999px; background:#000;
-  }
-  .cam .label{
-    position:absolute;left:0;right:0;bottom:6px;text-align:center;
-    font-size:12px;color:#fff;padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
-    text-shadow:0 1px 2px rgba(0,0,0,0.6);box-sizing:border-box;
-  }
+  .cam video{ width:100%;height:100%;object-fit:cover;border-radius:999px; }
+  .cam .fallback{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:900; letter-spacing:1px; opacity:.85; border-radius:999px; background:#000; }
+  .cam .label{ position:absolute;left:0;right:0;bottom:6px;text-align:center;font-size:12px;color:#fff;padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,0.6);box-sizing:border-box; }
 
   .meta{ line-height:1.1; }
   .meta .name{ font-weight:900; color:#1e3c72; font-size:18px; }
@@ -161,9 +122,7 @@ cw_header('Progress Test');
   }
 
   .ptt{
-    width:100%;
-    margin-top:14px;
-    padding:16px 14px;
+    width:100%; margin-top:14px; padding:16px 14px;
     border-radius:16px;
     border:2px solid rgba(30,60,114,0.25);
     background: rgba(30,60,114,0.08);
@@ -189,15 +148,6 @@ cw_header('Progress Test');
 
   .pinrow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
   .pinrow input{ height:36px; }
-
-  .debugline{
-    margin-top:8px;
-    font-size:12px;
-    opacity:.75;
-    word-break: break-all;
-    display:none;
-  }
-  .debugline a{ color:#1e3c72; font-weight:800; }
 </style>
 
 <div class="wrap">
@@ -223,12 +173,14 @@ cw_header('Progress Test');
 
     <div id="quizCard" style="display:none; margin-top:14px;">
       <div class="hero">
+        <!-- Instructor ring wrapper -->
         <div class="ring-wrap" id="instructorRing">
           <div class="avatar-badge">
             <img src="<?= h($INSTRUCTOR_AVATAR) ?>" alt="Instructor">
           </div>
         </div>
 
+        <!-- Student ring wrapper -->
         <div class="ring-wrap" id="studentRing">
           <div class="cam">
             <video id="studentCam" autoplay playsinline muted></video>
@@ -245,10 +197,6 @@ cw_header('Progress Test');
       </div>
 
       <div class="sysline" id="sysline">Ready.</div>
-
-      <div class="debugline" id="dbgLine">
-        Audio URL: <a id="dbgUrl" href="#" target="_blank">open</a>
-      </div>
 
       <div class="qstrip" id="qstrip" style="display:none;"></div>
 
@@ -314,9 +262,6 @@ const pinRow = document.getElementById('pinRow');
 const pinInput = document.getElementById('pinInput');
 const pinMsg = document.getElementById('pinMsg');
 
-const dbgLine = document.getElementById('dbgLine');
-const dbgUrl = document.getElementById('dbgUrl');
-
 function setSys(s){ sysline.textContent = s || ''; }
 function setJsReady(ok){
   if (ok) { jsLed.classList.add('on'); jsLedTxt.textContent = 'JS OK'; }
@@ -377,19 +322,13 @@ function ttsUrl(testId, itemId, kind){
   return `/student/api/tts_prompt.php?test_id=${encodeURIComponent(testId)}&item_id=${encodeURIComponent(itemId)}&kind=${encodeURIComponent(kind)}&voice=${encodeURIComponent(voice)}&speed=1.00`;
 }
 
-function showDbg(url){
-  if (!url) { dbgLine.style.display='none'; return; }
-  dbgUrl.href = url;
-  dbgUrl.textContent = url;
-  dbgLine.style.display='block';
-}
-
-// Safari-friendly preload using hidden audio element
+// ✅ Safari-friendly preload (warm cache using hidden audio element)
 let preloadUrl = '';
 function preloadTTS(url){
   if (!url) return;
   if (preloadUrl === url) return;
   preloadUrl = url;
+
   try{
     qPreload.pause();
     qPreload.currentTime = 0;
@@ -403,14 +342,11 @@ async function playPromptAudio(testId, itemId, kind){
 
   return new Promise((resolve) => {
     setSpeaking(true);
-    btnPTT.disabled = true;
-
-    const url = ttsUrl(testId, itemId, kind);
-    showDbg(url);
+    btnPTT.disabled = true; // disable until question finished
 
     qAudio.pause();
     qAudio.currentTime = 0;
-    qAudio.src = url;
+    qAudio.src = ttsUrl(testId, itemId, kind);
     qAudio.load();
 
     let settled = false;
@@ -501,14 +437,14 @@ async function startRecording(){
       if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
       mediaStream=null;
 
-      setStudentRec(false);
+      setStudentRec(false); // stop red ring
       setSys('Transcribing…');
       await transcribeAndSubmit();
     };
 
     recorder.start();
     isRecording=true;
-    setStudentRec(true);
+    setStudentRec(true);        // ✅ red glow while recording
     btnPTT.classList.add('rec');
     btnPTT.textContent='⏺ Recording… Tap to Stop';
   } catch(e) {
@@ -567,7 +503,7 @@ async function transcribeAndSubmit(){
 
 function renderItem(item){
   CURRENT_ITEM=item;
-  btnPTT.disabled=true;
+  btnPTT.disabled=true; // stays disabled until question audio completes
   btnPTT.classList.remove('rec');
   btnPTT.textContent='🎙 Tap to Start Talking';
   isRecording=false;
@@ -590,13 +526,14 @@ async function submitPin(pin){
   pinRow.style.display = 'none';
   return true;
 }
+
 document.getElementById('btnPin').addEventListener('click', async ()=>{
   const pin = (pinInput.value||'').trim();
   if (pin==='') return;
   await submitPin(pin);
 });
 
-// Start test (hardened)
+// Start test
 let startingLock=false;
 
 async function startTest(){
@@ -613,6 +550,7 @@ async function startTest(){
   resultCard.style.display='none';
 
   await startStudentCam();
+
   setSys('Maya is preparing your test…');
 
   const res = await fetch('/student/api/test_start.php', {
@@ -634,6 +572,7 @@ async function startTest(){
       startingLock = false;
       return;
     }
+
     setSys('Start failed: ' + (j.error||''));
     btnStart.disabled=false;
     btnStart.textContent='Start Progress Test';
@@ -642,50 +581,41 @@ async function startTest(){
     return;
   }
 
-  // validate payload
-  if (!j.test_id || !j.item || !j.item.item_id) {
-    setSys('Start failed: server returned no first question (item_id missing).');
-    btnStart.disabled=false;
-    btnStart.textContent='Start Progress Test';
-    btnReplay.disabled=false;
-    startingLock=false;
-    return;
-  }
-
-  TEST_ID = parseInt(j.test_id,10);
+  TEST_ID = j.test_id;
   btnReplay.style.display='inline-block';
   renderQStrip(j.total_questions ? parseInt(j.total_questions,10) : 10);
 
-  // preload intro
-  preloadTTS(ttsUrl(TEST_ID, 0, 'intro'));
+  // ✅ Preload intro immediately
+  const introUrl = ttsUrl(TEST_ID, 0, 'intro');
+  preloadTTS(introUrl);
 
   setSys('Maya is speaking…');
   const okIntro = await playPromptAudio(TEST_ID, 0, 'intro');
   if (!okIntro) {
-    setSys('Intro audio failed. Tap Replay.');
+    setSys('Audio blocked. Tap Replay to hear the intro.');
     btnReplay.disabled=false;
     btnStart.textContent='Started';
     startingLock=false;
     return;
   }
 
-  // ensure we still have first item
+  // First question
   renderItem(j.item);
 
-  // preload question
+  // ✅ Preload the first question audio
   preloadTTS(ttsUrl(TEST_ID, j.item.item_id, 'item'));
-  if (j.next_item_id) preloadTTS(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
 
   setSys('Maya is speaking…');
   const okQ = await playPromptAudio(TEST_ID, j.item.item_id, 'item');
   if (!okQ) {
-    setSys('Question audio failed. Tap Replay (or open URL above).');
+    setSys('Audio blocked. Tap Replay to hear the question.');
     btnReplay.disabled=false;
     btnStart.textContent='Started';
     startingLock=false;
     return;
   }
 
+  // Now student can talk
   btnPTT.disabled=false;
   setSys('Your turn.');
   await startAnswerTimer();
@@ -693,6 +623,11 @@ async function startTest(){
   btnReplay.disabled=false;
   btnStart.textContent='Started';
   startingLock=false;
+
+  // ✅ Preload next item if provided
+  if (j.next_item_id) {
+    preloadTTS(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
+  }
 }
 
 async function submitAnswer(answer){
@@ -743,20 +678,17 @@ async function submitAnswer(answer){
     return;
   }
 
-  if (!j.item || !j.item.item_id) {
-    setSys('Error: next question missing. Tap Replay.');
-    btnReplay.disabled=false;
-    return;
-  }
-
   renderItem(j.item);
 
-  if (j.next_item_id) preloadTTS(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
+  // ✅ Preload next item if provided (chain-preload)
+  if (j.next_item_id) {
+    preloadTTS(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
+  }
 
   setSys('Maya is speaking…');
   const ok = await playPromptAudio(TEST_ID, j.item.item_id, 'item');
   if (!ok) {
-    setSys('Question audio failed. Tap Replay (or open URL above).');
+    setSys('Audio blocked. Tap Replay.');
     btnReplay.disabled=false;
     return;
   }
@@ -768,7 +700,7 @@ async function submitAnswer(answer){
 
 btnStart.onclick = startTest;
 
-// Replay last audio
+// Replay last audio (intro or current item)
 btnReplay.onclick = async ()=>{
   if (!TEST_ID) return;
   await unlockAudio();
@@ -784,7 +716,7 @@ btnReplay.onclick = async ()=>{
 
   const ok = await playPromptAudio(TEST_ID, itemId, kind);
   if (!ok) {
-    setSys('Audio still blocked. Check iPad silent mode.');
+    setSys('Audio still blocked. Please check iPad silent mode.');
     return;
   }
 
@@ -803,6 +735,7 @@ function escapeHtml(s){
     .replaceAll('>','&gt;').replaceAll('"','&quot;');
 }
 
+// JS OK after binding
 setJsReady(true);
 </script>
 
