@@ -148,7 +148,7 @@ cw_header('Course');
         if ($role === 'student' && $locked) $canTest = false;
         if ($role === 'student' && !$summaryOk) $canTest = false;
 
-        $ptUrlFull = '/student/progress_test.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$l['lesson_id'].'&from=menu';
+        $ptUrlFull = '/student/progress_test.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$lessonRowId;
       ?>
       <tr>
         <td>

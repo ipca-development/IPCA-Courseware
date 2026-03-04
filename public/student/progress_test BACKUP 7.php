@@ -54,21 +54,21 @@ cw_header('Progress Test');
     box-shadow:0 10px 30px rgba(0,0,0,0.12);
     position:relative;
   }
-  .avatar-badge img{ width:120%;height:120%;object-fit:cover; transform: translateY(6px); user-select:none;-webkit-user-drag:none;pointer-events:none; }
+  .avatar-badge img{
+    width:120%;height:120%;
+    object-fit:cover;
+    transform: translateY(6px);
+    user-select:none;-webkit-user-drag:none;pointer-events:none;
+  }
 
-  /* Instructor speaking ring: GREEN pulsing */
   .talking::after{
     content:"";
     position:absolute; inset:-10px; border-radius:999px;
-    border: 4px solid rgba(22,163,74,0.65);
-    box-shadow: 0 0 22px rgba(22,163,74,0.35);
-    animation:pulseG 0.95s infinite;
+    border: 4px solid rgba(46,128,255,0.55);
+    box-shadow: 0 0 18px rgba(46,128,255,0.25);
+    animation:pulse 0.95s infinite;
   }
-  @keyframes pulseG{
-    0%{ transform:scale(0.98); opacity:0.25; }
-    50%{ transform:scale(1.06); opacity:0.90; }
-    100%{ transform:scale(0.98); opacity:0.25; }
-  }
+  @keyframes pulse{ 0%{transform:scale(0.98);opacity:0.25} 50%{transform:scale(1.06);opacity:0.80} 100%{transform:scale(0.98);opacity:0.25} }
 
   .cam{
     width:120px;height:120px;border-radius:999px;
@@ -79,21 +79,12 @@ cw_header('Progress Test');
   }
   .cam video{ width:100%;height:100%;object-fit:cover;border-radius:999px; }
   .cam .fallback{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#fff; font-weight:900; letter-spacing:1px; opacity:.85; border-radius:999px; }
-  .cam .label{ position:absolute;left:0;right:0;bottom:6px;text-align:center;font-size:12px;color:#fff;padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px rgba(0,0,0,0.6);box-sizing:border-box; }
-
-  /* Student speaking ring: RED pulsing */
-  .cam.rec::after{
-    content:"";
-    position:absolute; inset:-10px; border-radius:999px;
-    border: 4px solid rgba(220,38,38,0.70);
-    box-shadow: 0 0 22px rgba(220,38,38,0.35);
-    animation:pulseR 0.85s infinite;
-    pointer-events:none;
-  }
-  @keyframes pulseR{
-    0%{ transform:scale(0.98); opacity:0.25; }
-    50%{ transform:scale(1.06); opacity:0.95; }
-    100%{ transform:scale(0.98); opacity:0.25; }
+  .cam .label{
+    position:absolute;left:0;right:0;bottom:6px;
+    text-align:center;font-size:12px;color:#fff;
+    padding:0 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    text-shadow:0 1px 2px rgba(0,0,0,0.6);
+    box-sizing:border-box;
   }
 
   .meta{ line-height:1.1; }
@@ -134,9 +125,6 @@ cw_header('Progress Test');
   .qstrip{ display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
   .qdot{ width:28px;height:28px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:900;background:rgba(30,60,114,0.10);border:2px solid rgba(30,60,114,0.35); color:#1e3c72; }
   .qdot.done{ background:rgba(22,163,74,0.14); border-color:rgba(22,163,74,0.55); color:#166534; }
-
-  .pinrow{ display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:10px; }
-  .pinrow input{ height:36px; }
 </style>
 
 <div class="wrap">
@@ -154,18 +142,12 @@ cw_header('Progress Test');
       </span>
     </div>
 
-    <div class="pinrow" id="pinRow" style="display:none;">
-      <input class="input" id="pinInput" type="password" placeholder="Training PIN (optional)" style="width:220px;">
-      <button class="btn btn-sm" id="btnPin" type="button">Submit PIN</button>
-      <span class="muted" id="pinMsg"></span>
-    </div>
-
     <div id="quizCard" style="display:none; margin-top:14px;">
       <div class="hero">
         <div class="avatar-badge" id="instructorBadge">
           <img src="<?= h($INSTRUCTOR_AVATAR) ?>" alt="Instructor">
         </div>
-        <div class="cam" id="camBox">
+        <div class="cam">
           <video id="studentCam" autoplay playsinline muted></video>
           <div class="fallback" id="camFallback">CAM</div>
           <div class="label"><?= h($userName) ?></div>
@@ -210,11 +192,12 @@ const LESSON_ID = <?= (int)$lessonId ?>;
 
 let TEST_ID = 0;
 let CURRENT_ITEM = null;
+
+// Track last audio request so Replay works for INTRO too
 let LAST_AUDIO = { kind: null, item_id: 0 };
 
 const btnStart = document.getElementById('btnStart');
 const btnReplay = document.getElementById('btnReplay');
-const btnPTT = document.getElementById('btnPTT');
 
 const quizCard = document.getElementById('quizCard');
 const resultCard = document.getElementById('resultCard');
@@ -222,6 +205,8 @@ const resultBox = document.getElementById('resultBox');
 
 const instructorBadge = document.getElementById('instructorBadge');
 const qAudio = document.getElementById('qAudio');
+
+const btnPTT = document.getElementById('btnPTT');
 const sysline = document.getElementById('sysline');
 
 const timerFill = document.getElementById('timerFill');
@@ -230,14 +215,9 @@ const timerText = document.getElementById('timerText');
 const camStatus = document.getElementById('camStatus');
 const camFallback = document.getElementById('camFallback');
 const studentCam = document.getElementById('studentCam');
-const camBox = document.getElementById('camBox');
 
 const jsLed = document.getElementById('jsLed');
 const jsLedTxt = document.getElementById('jsLedTxt');
-
-const pinRow = document.getElementById('pinRow');
-const pinInput = document.getElementById('pinInput');
-const pinMsg = document.getElementById('pinMsg');
 
 function setSys(s){ sysline.textContent = s || ''; }
 function setJsReady(ok){
@@ -249,7 +229,7 @@ function setSpeaking(on){
   else instructorBadge.classList.remove('talking');
 }
 
-// iPad SAFE audio unlock
+// iPad SAFE audio unlock using WebAudio
 let audioUnlocked = false;
 async function unlockAudio(){
   if (audioUnlocked) return true;
@@ -265,7 +245,7 @@ async function unlockAudio(){
     osc.start(); osc.stop(ctx.currentTime + 0.02);
     audioUnlocked = true;
     return true;
-  } catch(e) {
+  } catch (e) {
     audioUnlocked = false;
     return false;
   }
@@ -295,24 +275,17 @@ function ttsUrl(testId, itemId, kind){
   return `/student/api/tts_prompt.php?test_id=${encodeURIComponent(testId)}&item_id=${encodeURIComponent(itemId)}&kind=${encodeURIComponent(kind)}&voice=${encodeURIComponent(voice)}&speed=1.00`;
 }
 
-// Prefetch audio (warm cache)
-async function prefetchAudio(url){
-  try {
-    await fetch(url, { credentials:'same-origin', cache:'no-store' });
-  } catch(e) {}
-}
-
+// Play audio with extra iPad-friendly steps
 async function playPromptAudio(testId, itemId, kind){
   LAST_AUDIO = { kind, item_id: itemId };
 
   return new Promise((resolve) => {
     setSpeaking(true);
-    btnPTT.disabled = true; // (4) disable until question finished
-
     qAudio.pause();
     qAudio.currentTime = 0;
+
     qAudio.src = ttsUrl(testId, itemId, kind);
-    qAudio.load();
+    qAudio.load(); // IMPORTANT for iPad
 
     let settled = false;
     const done = (ok) => {
@@ -325,8 +298,11 @@ async function playPromptAudio(testId, itemId, kind){
     qAudio.onended = () => done(true);
     qAudio.onerror = () => done(false);
 
+    // Attempt play
     const p = qAudio.play();
-    if (p && p.catch) p.catch(()=>done(false));
+    if (p && p.catch) {
+      p.catch(() => done(false));
+    }
   });
 }
 
@@ -337,7 +313,8 @@ let timerInt = null;
 
 function resetTimer(){
   stopAnswerTimer();
-  timerMax = 60; timerLeft = 60;
+  timerMax = 60;
+  timerLeft = 60;
   timerFill.style.width = '0%';
   timerFill.classList.remove('danger');
   timerText.textContent = timerLeft + 's';
@@ -362,7 +339,7 @@ async function startAnswerTimer(){
   }, 1000);
 }
 
-// Dots default 10 for now
+// Dots (default 10)
 function renderQStrip(total){
   const el = document.getElementById('qstrip');
   el.innerHTML = '';
@@ -382,12 +359,19 @@ function markAnswered(idx){
 }
 
 // Tap-to-record
-let mediaStream=null, recorder=null, chunks=[], lastBlob=null, isRecording=false;
+let mediaStream = null;
+let recorder = null;
+let chunks = [];
+let lastBlob = null;
+let isRecording = false;
+
+function canRecord(){ return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia); }
 
 async function startRecording(){
+  if (!canRecord()) { setSys('Mic not supported.'); return; }
   try {
     setSys('Recording… tap again to stop.');
-    chunks=[]; lastBlob=null;
+    chunks = []; lastBlob = null;
 
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
     mediaStream = stream;
@@ -398,35 +382,31 @@ async function startRecording(){
     recorder.ondataavailable = (e)=>{ if (e.data && e.data.size > 0) chunks.push(e.data); };
     recorder.onstop = async ()=>{
       lastBlob = new Blob(chunks, { type: recorder.mimeType || 'audio/webm' });
-      chunks=[];
+      chunks = [];
       if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
-      mediaStream=null;
+      mediaStream = null;
 
-      camBox.classList.remove('rec'); // (6) stop red ring
       setSys('Transcribing…');
       await transcribeAndSubmit();
     };
 
     recorder.start();
-    isRecording=true;
-    camBox.classList.add('rec'); // (6) red ring on
+    isRecording = true;
     btnPTT.classList.add('rec');
-    btnPTT.textContent='⏺ Recording… Tap to Stop';
-  } catch(e) {
+    btnPTT.textContent = '⏺ Recording… Tap to Stop';
+  } catch (e) {
     setSys('Mic denied or error.');
-    isRecording=false;
-    camBox.classList.remove('rec');
+    isRecording = false;
     btnPTT.classList.remove('rec');
-    btnPTT.textContent='🎙 Tap to Start Talking';
+    btnPTT.textContent = '🎙 Tap to Start Talking';
   }
 }
 async function stopRecording(){
   try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch(e){}
-  isRecording=false;
+  isRecording = false;
   btnPTT.classList.remove('rec');
-  btnPTT.textContent='🎙 Tap to Start Talking';
+  btnPTT.textContent = '🎙 Tap to Start Talking';
 }
-
 btnPTT.addEventListener('click', async ()=>{
   if (timerLeft <= 0) return;
   stopAnswerTimer();
@@ -435,10 +415,10 @@ btnPTT.addEventListener('click', async ()=>{
 });
 
 async function transcribeAndSubmit(){
-  if (!lastBlob) { setSys('No audio captured.'); btnPTT.disabled=false; await startAnswerTimer(); return; }
+  if (!lastBlob) { setSys('No audio captured.'); await startAnswerTimer(); return; }
 
-  const fd=new FormData();
-  fd.append('lang','en');
+  const fd = new FormData();
+  fd.append('lang', 'en');
   fd.append('audio', lastBlob, 'answer.webm');
 
   const res = await fetch('/student/api/asr.php', { method:'POST', credentials:'same-origin', body: fd });
@@ -447,17 +427,15 @@ async function transcribeAndSubmit(){
 
   if (!j.ok) {
     setSys('ASR failed: ' + (j.error||''));
-    btnPTT.disabled=false;
-    timerLeft=Math.max(timerLeft,20);
+    timerLeft = Math.max(timerLeft, 20);
     await startAnswerTimer();
     return;
   }
 
-  const transcript=(j.text||'').trim();
+  const transcript = (j.text || '').trim();
   if (!transcript) {
     setSys('No speech detected. Try again.');
-    btnPTT.disabled=false;
-    timerLeft=Math.max(timerLeft,20);
+    timerLeft = Math.max(timerLeft, 20);
     await startAnswerTimer();
     return;
   }
@@ -467,52 +445,29 @@ async function transcribeAndSubmit(){
 }
 
 function renderItem(item){
-  CURRENT_ITEM=item;
-  btnPTT.disabled=true; // stays disabled until question audio completes
+  CURRENT_ITEM = item;
+  btnPTT.disabled = false;
   btnPTT.classList.remove('rec');
-  btnPTT.textContent='🎙 Tap to Start Talking';
-  isRecording=false;
-  lastBlob=null;
+  btnPTT.textContent = '🎙 Tap to Start Talking';
+  isRecording = false;
+  lastBlob = null;
 }
 
-// PIN flow (7)
-async function submitPin(pin){
-  pinMsg.textContent = 'Checking PIN…';
-  const res = await fetch('/student/api/test_start.php', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    credentials:'same-origin',
-    body: JSON.stringify({ cohort_id: COHORT_ID, lesson_id: LESSON_ID, pin: pin, mode:'check_pin' })
-  });
-  const txt = await res.text();
-  let j=null; try{ j=JSON.parse(txt);}catch(e){ j={ok:false,error:'Non-JSON: '+txt.slice(0,200)}; }
-  if (!j.ok) { pinMsg.textContent = j.error || 'PIN failed'; return false; }
-  pinMsg.textContent = 'PIN accepted.';
-  pinRow.style.display = 'none';
-  return true;
-}
-
-document.getElementById('btnPin').addEventListener('click', async ()=>{
-  const pin = (pinInput.value||'').trim();
-  if (pin==='') return;
-  await submitPin(pin);
-});
-
-// Start test
-let startingLock=false;
+let startingLock = false;
 
 async function startTest(){
   if (startingLock) return;
-  startingLock=true;
+  startingLock = true;
 
+  // unlock audio on same gesture
   await unlockAudio();
 
-  btnStart.disabled=true;
-  btnStart.textContent='Loading…';
-  btnReplay.disabled=true;
+  btnStart.disabled = true;
+  btnStart.textContent = 'Loading…';
+  btnReplay.disabled = true;
 
-  quizCard.style.display='block';
-  resultCard.style.display='none';
+  quizCard.style.display = 'block';
+  resultCard.style.display = 'none';
 
   await startStudentCam();
 
@@ -529,79 +484,53 @@ async function startTest(){
   let j=null; try{ j=JSON.parse(txt);}catch(e){ j={ok:false,error:'Non-JSON: '+txt.slice(0,200)}; }
 
   if (!j.ok) {
-    // If blocked by policy, show PIN UI
-    if ((j.code||'') === 'NEED_PIN') {
-      setSys('This test requires a Training PIN.');
-      pinRow.style.display = 'flex';
-      btnStart.disabled = false;
-      btnStart.textContent = 'Start Progress Test';
-      startingLock = false;
-      return;
-    }
-
     setSys('Start failed: ' + (j.error||''));
-    btnStart.disabled=false;
-    btnStart.textContent='Start Progress Test';
-    btnReplay.disabled=false;
-    startingLock=false;
+    btnStart.disabled = false;
+    btnStart.textContent = 'Start Progress Test';
+    btnReplay.disabled = false;
+    startingLock = false;
     return;
   }
 
   TEST_ID = j.test_id;
-  btnReplay.style.display='inline-block';
-  renderQStrip(j.total_questions ? parseInt(j.total_questions,10) : 10);
+  btnReplay.style.display = 'inline-block';
+  renderQStrip(10);
 
-  // (3) Prefetch intro immediately
-  const introUrl = ttsUrl(TEST_ID, 0, 'intro');
-  prefetchAudio(introUrl);
-
+  // INTRO
   setSys('Maya is speaking…');
   const okIntro = await playPromptAudio(TEST_ID, 0, 'intro');
   if (!okIntro) {
     setSys('Audio blocked. Tap Replay to hear the intro.');
-    btnReplay.disabled=false;
-    btnStart.textContent='Started';
-    startingLock=false;
+    btnReplay.disabled = false;
+    btnStart.textContent = 'Started';
+    startingLock = false;
     return;
   }
 
-  // First question
+  // FIRST QUESTION
   renderItem(j.item);
-
-  // (3) Prefetch first question (already known)
-  const qUrl = ttsUrl(TEST_ID, j.item.item_id, 'item');
-  prefetchAudio(qUrl);
-
   setSys('Maya is speaking…');
   const okQ = await playPromptAudio(TEST_ID, j.item.item_id, 'item');
   if (!okQ) {
     setSys('Audio blocked. Tap Replay to hear the question.');
-    btnReplay.disabled=false;
-    btnStart.textContent='Started';
-    startingLock=false;
+    btnReplay.disabled = false;
+    btnStart.textContent = 'Started';
+    startingLock = false;
     return;
   }
 
-  // Now student can talk
-  btnPTT.disabled=false;
   setSys('Your turn.');
   await startAnswerTimer();
 
-  btnReplay.disabled=false;
-  btnStart.textContent='Started';
-  startingLock=false;
-
-  // (3) Prefetch next item audio if provided
-  if (j.next_item_id) {
-    const nextUrl = ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item');
-    prefetchAudio(nextUrl);
-  }
+  btnReplay.disabled = false;
+  btnStart.textContent = 'Started';
+  startingLock = false;
 }
 
 async function submitAnswer(answer){
   if (!TEST_ID || !CURRENT_ITEM) return;
 
-  btnPTT.disabled=true;
+  btnPTT.disabled = true;
   setSys('Saving your answer…');
 
   const res = await fetch('/student/api/test_answer.php', {
@@ -616,8 +545,8 @@ async function submitAnswer(answer){
 
   if (!j.ok) {
     setSys('Answer failed: ' + (j.error||''));
-    btnPTT.disabled=false;
-    timerLeft=Math.max(timerLeft,20);
+    btnPTT.disabled = false;
+    timerLeft = Math.max(timerLeft, 20);
     await startAnswerTimer();
     return;
   }
@@ -626,7 +555,7 @@ async function submitAnswer(answer){
 
   if (j.done) {
     stopAnswerTimer();
-    btnPTT.disabled=true;
+    btnPTT.disabled = true;
 
     setSys('Maya is evaluating…');
     await playPromptAudio(TEST_ID, 0, 'outro');
@@ -634,8 +563,8 @@ async function submitAnswer(answer){
     setSys('Maya is speaking…');
     await playPromptAudio(TEST_ID, 0, 'debrief');
 
-    quizCard.style.display='none';
-    resultCard.style.display='block';
+    quizCard.style.display = 'none';
+    resultCard.style.display = 'block';
 
     resultBox.innerHTML = `
       <div><strong>Score:</strong> ${j.score_pct}%</div>
@@ -647,30 +576,23 @@ async function submitAnswer(answer){
   }
 
   renderItem(j.item);
-
-  // Prefetch next
-  if (j.next_item_id) {
-    prefetchAudio(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
-  }
+  setSys('Loading next question…');
+  await new Promise(r=>setTimeout(r, 250));
 
   setSys('Maya is speaking…');
-  const ok = await playPromptAudio(TEST_ID, j.item.item_id, 'item');
-  if (!ok) {
-    setSys('Audio blocked. Tap Replay.');
-    btnReplay.disabled=false;
-    return;
-  }
+  await playPromptAudio(TEST_ID, j.item.item_id, 'item');
 
-  btnPTT.disabled=false;
   setSys('Your turn.');
   await startAnswerTimer();
 }
 
 btnStart.onclick = startTest;
 
-// Replay last audio (intro or current item)
+// ✅ Replay now replays INTRO too (or whatever last audio was)
 btnReplay.onclick = async ()=>{
   if (!TEST_ID) return;
+
+  // try unlock again on this tap (often succeeds on iPad)
   await unlockAudio();
 
   stopAnswerTimer();
@@ -678,16 +600,20 @@ btnReplay.onclick = async ()=>{
 
   let kind = LAST_AUDIO.kind || 'intro';
   let itemId = (kind === 'item') ? (LAST_AUDIO.item_id || (CURRENT_ITEM ? CURRENT_ITEM.item_id : 0)) : 0;
-  if (kind === 'item' && itemId <= 0) { kind='intro'; itemId=0; }
+
+  if (kind === 'item' && itemId <= 0) {
+    // nothing to replay yet -> intro
+    kind = 'intro';
+    itemId = 0;
+  }
 
   const ok = await playPromptAudio(TEST_ID, itemId, kind);
   if (!ok) {
-    setSys('Audio still blocked. Please check iPad silent mode.');
+    setSys('Audio still blocked. Tap Start again (or check iPad silent mode).');
     return;
   }
 
   if (kind === 'item') {
-    btnPTT.disabled=false;
     setSys('Your turn.');
     await startAnswerTimer();
   } else {
@@ -701,7 +627,7 @@ function escapeHtml(s){
     .replaceAll('>','&gt;').replaceAll('"','&quot;');
 }
 
-// JS OK after binding
+// JS OK only once handlers are attached
 setJsReady(true);
 </script>
 
