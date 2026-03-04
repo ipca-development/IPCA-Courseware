@@ -18,18 +18,24 @@ if ($cohortId <= 0 || $lessonId <= 0) exit('Missing cohort_id or lesson_id');
 cw_header('Progress Test');
 ?>
 <div class="card">
-  <div class="muted">Timed Progress Test (≤ 10 minutes). Voice is optional; buttons always work.</div>
+  <div class="muted">Timed Progress Test (≤ 10 minutes). Strict and scenario-based.</div>
 
   <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-    <!-- Inline fallback guarantees click works even if binding breaks -->
-    <button class="btn" id="btnStart" type="button"
-            onclick="window.__ptStart && window.__ptStart();">
-      Start Progress Test
-    </button>
-
+    <button class="btn" id="btnStart" type="button" onclick="window.__ptStart && window.__ptStart();">Start Progress Test</button>
     <a class="btn btn-sm" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>">Back to Lesson Menu</a>
 
-    <span class="muted" id="jsState" style="margin-left:auto;">JS: loading…</span>
+    <span style="margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <label class="muted" style="display:flex; gap:6px; align-items:center;">
+        <span style="font-weight:700;">Voice</span>
+        <select id="voiceLang" class="input" style="height:34px;">
+          <option value="en" selected>English</option>
+          <option value="es">Español</option>
+        </select>
+      </label>
+      <button class="btn btn-sm" id="btnSpeakToggle" type="button">🔊 Speak: ON</button>
+      <button class="btn btn-sm" id="btnMute" type="button">Mute</button>
+      <span class="muted" id="jsState">JS: loading…</span>
+    </span>
   </div>
 
   <div class="muted" id="topStatus" style="margin-top:10px;"></div>
@@ -38,7 +44,6 @@ cw_header('Progress Test');
 <div class="card" id="quizCard" style="display:none;">
   <h2 style="margin-top:0;">AI Instructor</h2>
   <div id="promptBox" style="white-space:pre-wrap; font-size:16px; line-height:1.35;"></div>
-
   <div id="answerArea" style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;"></div>
   <div class="muted" id="status" style="margin-top:10px;"></div>
 </div>
@@ -50,6 +55,8 @@ cw_header('Progress Test');
     <a class="btn" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>">Back to Lesson Menu</a>
   </div>
 </div>
+
+<audio id="ttsAudio" preload="none"></audio>
 
 <script>
 (function(){
@@ -79,27 +86,62 @@ cw_header('Progress Test');
       .replaceAll('>','&gt;').replaceAll('"','&quot;');
   }
 
-  async function fetchJson(url, payload){
-    let res;
-    try {
-      res = await fetch(url, {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        credentials:'same-origin',
-        cache:'no-store',
-        body: JSON.stringify(payload)
-      });
-    } catch (e) {
-      return { ok:false, error:'Network error: ' + (e && e.message ? e.message : e) };
-    }
+  // ---- TTS ----
+  const ttsAudio = document.getElementById('ttsAudio');
+  const voiceLang = document.getElementById('voiceLang');
+  const btnSpeakToggle = document.getElementById('btnSpeakToggle');
+  const btnMute = document.getElementById('btnMute');
 
+  let speakEnabled = true;
+  let muted = false;
+
+  function ttsUrl(text){
+    const lang = encodeURIComponent(voiceLang.value || 'en');
+    return '/student/api/tts_prompt.php?lang=' + lang + '&text=' + encodeURIComponent(text || '');
+  }
+
+  async function speak(text){
+    if (!speakEnabled || muted) return;
+    const t = (text || '').trim();
+    if (!t) return;
+
+    try {
+      ttsAudio.pause();
+      ttsAudio.currentTime = 0;
+      ttsAudio.src = ttsUrl(t);
+      await ttsAudio.play();
+    } catch(e) {
+      // iOS might block until user gesture; but Start/Answer are gestures.
+    }
+  }
+
+  btnSpeakToggle.addEventListener('click', ()=>{
+    speakEnabled = !speakEnabled;
+    btnSpeakToggle.textContent = speakEnabled ? '🔊 Speak: ON' : '🔇 Speak: OFF';
+    if (!speakEnabled) { ttsAudio.pause(); ttsAudio.removeAttribute('src'); }
+  });
+  btnMute.addEventListener('click', ()=>{
+    muted = !muted;
+    btnMute.textContent = muted ? 'Unmute' : 'Mute';
+    if (muted) ttsAudio.pause();
+  });
+  voiceLang.addEventListener('change', ()=>{
+    ttsAudio.pause();
+    ttsAudio.removeAttribute('src');
+  });
+
+  async function fetchJson(url, payload){
+    const res = await fetch(url, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'same-origin',
+      cache:'no-store',
+      body: JSON.stringify(payload)
+    });
     const txt = await res.text();
     let j;
     try { j = JSON.parse(txt); }
-    catch(e){
-      return { ok:false, error:'Non-JSON response (HTTP '+res.status+'): ' + txt.slice(0,300) };
-    }
-
+    catch(e){ return { ok:false, error:'Non-JSON response: ' + txt.slice(0,300) }; }
     if (!res.ok && j && j.error) return { ok:false, error:'HTTP '+res.status+': '+j.error };
     return j;
   }
@@ -108,6 +150,9 @@ cw_header('Progress Test');
     CURRENT_ITEM = item;
     promptBox.textContent = item.prompt || '';
     answerArea.innerHTML = '';
+
+    // speak every prompt (after Start/Answer user gesture)
+    speak(item.prompt || '');
 
     if (item.kind === 'info') {
       const b = document.createElement('button');
@@ -145,7 +190,6 @@ cw_header('Progress Test');
   }
 
   async function startTest(){
-    // immediate visual feedback = confirms click is happening
     setTop('');
     quizCard.style.display = 'block';
     resultCard.style.display = 'none';
@@ -164,10 +208,7 @@ cw_header('Progress Test');
     }
 
     TEST_ID = j.test_id || 0;
-    if (!TEST_ID) {
-      setStatus('Start failed: missing test_id');
-      return;
-    }
+    if (!TEST_ID) { setStatus('Start failed: missing test_id'); return; }
 
     renderItem(j.item);
     setStatus('');
@@ -200,6 +241,7 @@ cw_header('Progress Test');
           <div style="white-space:pre-wrap;">${escapeHtml(j.weak_areas||'')}</div>
         </div>
       `;
+      speak('Test complete.');
       setStatus('');
       return;
     }
@@ -208,20 +250,15 @@ cw_header('Progress Test');
     setStatus('');
   }
 
-  // Expose for inline onclick fallback
   window.__ptStart = startTest;
 
-  // Bind as well
   function bind(){
     jsState.textContent = 'JS: READY';
-    if (btnStart) btnStart.addEventListener('click', startTest);
+    btnStart.addEventListener('click', startTest);
   }
 
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bind);
-  } else {
-    bind();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', bind);
+  else bind();
 })();
 </script>
 <?php cw_footer(); ?>
