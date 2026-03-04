@@ -53,31 +53,65 @@ try {
 
     $studentJson = is_array($answer) ? $answer : ['value'=>$answer];
 
-    // TIMEOUT handling
+    // ✅ Timeout handling
     if (!empty($studentJson['timeout'])) {
         $studentJson = ['timeout'=>true];
+        $isCorrect = ($kind === 'info') ? 1 : 0;
+
+        $sj = json_encode($studentJson, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+
+        $upd = $pdo->prepare("
+          UPDATE progress_test_items
+          SET student_json=?, student_answer_json=?, is_correct=?, answered_at=NOW(), updated_at=NOW()
+          WHERE id=?
+        ");
+        $upd->execute([$sj, $sj, $isCorrect, $itemId]);
+
+        // Next item
+        $next = $pdo->prepare("SELECT id, idx, kind, prompt, options_json FROM progress_test_items WHERE test_id=? AND idx>? ORDER BY idx ASC LIMIT 1");
+        $next->execute([$testId, (int)$it['idx']]);
+        $n = $next->fetch(PDO::FETCH_ASSOC);
+
+        if ($n) {
+            echo json_encode([
+              'ok'=>true,
+              'done'=>false,
+              'item'=>[
+                'item_id'=>(int)$n['id'],
+                'idx'=>(int)$n['idx'],
+                'kind'=>(string)$n['kind'],
+                'prompt'=>(string)$n['prompt'],
+                'options'=> json_decode((string)($n['options_json'] ?? 'null'), true) ?: []
+              ]
+            ]);
+            exit;
+        }
+
+        // Finished
+        // (falls through to score calculation below)
     }
 
-    // Spoken mapping
+    // ✅ Spoken text mapping (best effort)
     if (isset($studentJson['text']) && is_string($studentJson['text'])) {
         $t = norm($studentJson['text']);
 
         if ($kind === 'yesno') {
-            $isYes = (strpos($t,'yes') !== false) || (strpos($t,'true') !== false);
-            $isNo  = (strpos($t,'no') !== false) || (strpos($t,'false') !== false);
+            $isYes = (strpos($t, 'yes') !== false) || (strpos($t, 'true') !== false) || (strpos($t, 'correct') !== false);
+            $isNo  = (strpos($t, 'no') !== false)  || (strpos($t, 'false') !== false) || (strpos($t, 'incorrect') !== false);
             if ($isYes && !$isNo) $studentJson['value'] = true;
             if ($isNo && !$isYes) $studentJson['value'] = false;
         }
 
         if ($kind === 'mcq') {
             if (preg_match('/\b(1|2|3|4)\b/', $t, $m)) {
-                $studentJson['index'] = (int)$m[1] - 1;
+                $studentJson['index'] = (int)$m[1]-1;
             } elseif (preg_match('/\b(a|b|c|d)\b/', $t, $m)) {
                 $map = ['a'=>0,'b'=>1,'c'=>2,'d'=>3];
                 $studentJson['index'] = $map[$m[1]];
             } else {
-                // simple fuzzy
-                $bestIdx = -1; $bestScore = 0;
+                // fuzzy match
+                $bestIdx = -1;
+                $bestScore = 0;
                 foreach ($options as $i=>$opt) {
                     $o = norm((string)$opt);
                     if ($o === '') continue;
@@ -98,10 +132,7 @@ try {
 
     // Grade
     $isCorrect = null;
-
-    if (!empty($studentJson['timeout'])) {
-        $isCorrect = ($kind === 'info') ? 1 : 0;
-    } elseif ($kind === 'info') {
+    if ($kind === 'info') {
         $isCorrect = 1;
     } elseif ($kind === 'yesno') {
         $cv = (bool)($correct['value'] ?? false);
@@ -142,7 +173,7 @@ try {
         exit;
     }
 
-    // FINISH -> score
+    // Finished -> score
     $tot = $pdo->prepare("SELECT COUNT(*) FROM progress_test_items WHERE test_id=? AND kind IN ('yesno','mcq')");
     $tot->execute([$testId]);
     $totalQ = (int)$tot->fetchColumn();
@@ -154,85 +185,20 @@ try {
     $scorePct = ($totalQ > 0) ? (int)round(($correctQ / $totalQ) * 100) : 0;
     $status = ($scorePct >= 85) ? 'passed' : 'failed';
 
-    // Build detailed debrief via AI
-    $items = $pdo->prepare("
-      SELECT idx, kind, prompt, options_json, correct_json, student_json, is_correct
-      FROM progress_test_items
-      WHERE test_id=?
-      ORDER BY idx ASC
-    ");
-    $items->execute([$testId]);
-    $log = $items->fetchAll(PDO::FETCH_ASSOC);
+    // Basic AI summary (optional)
+    $aiSummary = "Score {$scorePct}% ({$correctQ}/{$totalQ}).";
+    $weakAreas = ($status === 'passed') ? "No major weak areas detected." : "Review missed topics and retake.";
 
-    $schema = [
-      "type"=>"object",
-      "additionalProperties"=>false,
-      "properties"=>[
-        "written_debrief"=>["type"=>"string"],
-        "spoken_debrief"=>["type"=>"string"],
-        "weak_areas"=>["type"=>"string"]
-      ],
-      "required"=>["written_debrief","spoken_debrief","weak_areas"]
-    ];
-
-    $payload = [
-      "model" => cw_openai_model(),
-      "input" => [
-        ["role"=>"system","content"=>[
-          ["type"=>"input_text","text"=>
-"You're a strict, professional flight instructor.
-Create:
-1) written_debrief: detailed, readable feedback with concrete remediation steps.
-2) spoken_debrief: short spoken version (30–60 seconds) to read aloud.
-3) weak_areas: bullet list of weak areas.
-
-Use ONLY the test log provided. Reference question numbers. Do not invent outside content."
-          ]
-        ]],
-        ["role"=>"user","content"=>[
-          ["type"=>"input_text","text"=>"SCORE: {$scorePct}%\nTEST LOG JSON:\n".json_encode($log, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)]
-        ]]
-      ],
-      "text" => [
-        "format" => [
-          "type"=>"json_schema",
-          "name"=>"debrief_v1",
-          "schema"=>$schema,
-          "strict"=>true
-        ]
-      ],
-      "temperature" => 0.2
-    ];
-
-    $written = "Score {$scorePct}% ({$correctQ}/{$totalQ}).";
-    $weak = ($status==='passed') ? "No major weak areas detected." : "Review missed topics.";
-    $spoken = "Your score is {$scorePct} percent. Please review your debrief notes.";
-
-    try {
-        $resp = cw_openai_responses($payload);
-        $j = cw_openai_extract_json_text($resp);
-        $written = trim((string)($j['written_debrief'] ?? $written));
-        $weak    = trim((string)($j['weak_areas'] ?? $weak));
-        $spoken  = trim((string)($j['spoken_debrief'] ?? $spoken));
-    } catch (Throwable $e) {
-        // keep fallbacks
-    }
-
-    $updT = $pdo->prepare("
-      UPDATE progress_tests
-      SET status=?, score_pct=?, completed_at=NOW(),
-          ai_summary=?, weak_areas=?, debrief_spoken=?
-      WHERE id=?
-    ");
-    $updT->execute([$status, $scorePct, $written, $weak, $spoken, $testId]);
+    $updT = $pdo->prepare("UPDATE progress_tests SET status=?, score_pct=?, completed_at=NOW(), ai_summary=?, weak_areas=? WHERE id=?");
+    $updT->execute([$status, $scorePct, $aiSummary, $weakAreas, $testId]);
 
     echo json_encode([
       'ok'=>true,
       'done'=>true,
       'score_pct'=>$scorePct,
       'status'=>$status,
-      'ai_summary'=>$written,
-      'weak_areas'=>$weak
+      'ai_summary'=>$aiSummary,
+      'weak_areas'=>$weakAreas
     ]);
 
 } catch (Throwable $e) {
