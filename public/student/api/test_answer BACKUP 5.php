@@ -32,22 +32,16 @@ try {
 
     $userId = (int)$u['id'];
 
-    // verify ownership (student)
     if ($role === 'student') {
         $own = $pdo->prepare("SELECT 1 FROM progress_tests WHERE id=? AND user_id=? LIMIT 1");
         $own->execute([$testId, $userId]);
-        if (!$own->fetchColumn()) { http_response_code(403); echo json_encode(['ok'=>false,'error'=>'Forbidden']); exit; }
+        if (!$own->fetchColumn()) {
+            http_response_code(403);
+            echo json_encode(['ok'=>false,'error'=>'Forbidden']);
+            exit;
+        }
     }
 
-    // Load test row (need cohort_id, lesson_id)
-    $trow = $pdo->prepare("SELECT cohort_id, lesson_id FROM progress_tests WHERE id=? LIMIT 1");
-    $trow->execute([$testId]);
-    $testRow = $trow->fetch(PDO::FETCH_ASSOC);
-    if (!$testRow) { echo json_encode(['ok'=>false,'error'=>'Test not found']); exit; }
-    $cohortId = (int)$testRow['cohort_id'];
-    $lessonId = (int)$testRow['lesson_id'];
-
-    // Load item
     $item = $pdo->prepare("SELECT * FROM progress_test_items WHERE id=? AND test_id=? LIMIT 1");
     $item->execute([$itemId, $testId]);
     $it = $item->fetch(PDO::FETCH_ASSOC);
@@ -82,6 +76,7 @@ try {
                 $map = ['a'=>0,'b'=>1,'c'=>2,'d'=>3];
                 $studentJson['index'] = $map[$m[1]];
             } else {
+                // simple fuzzy
                 $bestIdx = -1; $bestScore = 0;
                 foreach ($options as $i=>$opt) {
                     $o = norm((string)$opt);
@@ -159,7 +154,7 @@ try {
     $scorePct = ($totalQ > 0) ? (int)round(($correctQ / $totalQ) * 100) : 0;
     $status = ($scorePct >= 85) ? 'passed' : 'failed';
 
-    // Build test log
+    // Build detailed debrief via AI
     $items = $pdo->prepare("
       SELECT idx, kind, prompt, options_json, correct_json, student_json, is_correct
       FROM progress_test_items
@@ -169,51 +164,15 @@ try {
     $items->execute([$testId]);
     $log = $items->fetchAll(PDO::FETCH_ASSOC);
 
-    // Load TRUTH source (lesson narration)
-    $nq = $pdo->prepare("
-      SELECT s.page_number, e.narration_en
-      FROM slides s
-      JOIN slide_enrichment e ON e.slide_id = s.id
-      WHERE s.lesson_id=? AND s.is_deleted=0 AND e.narration_en IS NOT NULL AND e.narration_en <> ''
-      ORDER BY s.page_number ASC
-    ");
-    $nq->execute([$lessonId]);
-    $nrows = $nq->fetchAll(PDO::FETCH_ASSOC);
-
-    $truthBlocks = [];
-    foreach ($nrows as $r) {
-        $pg = (int)($r['page_number'] ?? 0);
-        $tx = trim((string)($r['narration_en'] ?? ''));
-        if ($tx !== '') $truthBlocks[] = "Slide {$pg}: {$tx}";
-    }
-    $truthText = implode("\n\n", $truthBlocks);
-    if ($truthText === '') $truthText = "(No narration scripts available.)";
-
-    // Load student summary (NOT truth)
-    $sq = $pdo->prepare("
-      SELECT summary_plain
-      FROM lesson_summaries
-      WHERE user_id=? AND cohort_id=? AND lesson_id=?
-      LIMIT 1
-    ");
-    $sq->execute([$userId, $cohortId, $lessonId]);
-    $summaryPlain = trim((string)($sq->fetchColumn() ?: ''));
-    if ($summaryPlain === '') $summaryPlain = "(No student summary.)";
-
-    // AI debrief schema: includes summary corrections
     $schema = [
       "type"=>"object",
       "additionalProperties"=>false,
       "properties"=>[
         "written_debrief"=>["type"=>"string"],
         "spoken_debrief"=>["type"=>"string"],
-        "weak_areas"=>["type"=>"string"],
-        "summary_corrections"=>[
-          "type"=>"array",
-          "items"=>["type"=>"string"]
-        ]
+        "weak_areas"=>["type"=>"string"]
       ],
-      "required"=>["written_debrief","spoken_debrief","weak_areas","summary_corrections"]
+      "required"=>["written_debrief","spoken_debrief","weak_areas"]
     ];
 
     $payload = [
@@ -222,31 +181,22 @@ try {
         ["role"=>"system","content"=>[
           ["type"=>"input_text","text"=>
 "You're a strict, professional flight instructor.
-
-SOURCE OF TRUTH:
-- Lesson narration scripts are the ONLY truth source.
-- Student summary may be incorrect and must NEVER be treated as truth.
-
-TASK:
-1) written_debrief: detailed readable feedback (what was strong/weak) + concrete remediation.
-2) spoken_debrief: 30–60 second spoken debrief to read aloud.
+Create:
+1) written_debrief: detailed, readable feedback with concrete remediation steps.
+2) spoken_debrief: short spoken version (30–60 seconds) to read aloud.
 3) weak_areas: bullet list of weak areas.
-4) summary_corrections: list of corrections where the student's summary contradicts lesson scripts.
-   Format each as: 'Your summary says X. Lesson material indicates Y. Update your summary.'
 
-IMPORTANT:
-- Only call out summary errors if you can support the correction from lesson narration scripts.
-- Do NOT penalize the student just because summary is wrong, unless their ANSWERS also show the same misconception."
+Use ONLY the test log provided. Reference question numbers. Do not invent outside content."
           ]
         ]],
         ["role"=>"user","content"=>[
-          ["type"=>"input_text","text"=>"SCORE: {$scorePct}%\n\nLESSON NARRATION (TRUTH):\n{$truthText}\n\nSTUDENT SUMMARY (NOT TRUTH):\n{$summaryPlain}\n\nTEST LOG JSON:\n".json_encode($log, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)]
+          ["type"=>"input_text","text"=>"SCORE: {$scorePct}%\nTEST LOG JSON:\n".json_encode($log, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)]
         ]]
       ],
       "text" => [
         "format" => [
           "type"=>"json_schema",
-          "name"=>"debrief_truth_v1",
+          "name"=>"debrief_v1",
           "schema"=>$schema,
           "strict"=>true
         ]
@@ -254,11 +204,9 @@ IMPORTANT:
       "temperature" => 0.2
     ];
 
-    // Fallbacks
     $written = "Score {$scorePct}% ({$correctQ}/{$totalQ}).";
     $weak = ($status==='passed') ? "No major weak areas detected." : "Review missed topics.";
     $spoken = "Your score is {$scorePct} percent. Please review your debrief notes.";
-    $summaryCorrections = [];
 
     try {
         $resp = cw_openai_responses($payload);
@@ -266,23 +214,9 @@ IMPORTANT:
         $written = trim((string)($j['written_debrief'] ?? $written));
         $weak    = trim((string)($j['weak_areas'] ?? $weak));
         $spoken  = trim((string)($j['spoken_debrief'] ?? $spoken));
-        $summaryCorrections = is_array($j['summary_corrections'] ?? null) ? $j['summary_corrections'] : [];
     } catch (Throwable $e) {
         // keep fallbacks
     }
-
-    // Append summary corrections to weak areas (readable later)
-    $corrBlock = '';
-    $cleanCorr = [];
-    foreach ($summaryCorrections as $c) {
-        $c = trim((string)$c);
-        if ($c !== '') $cleanCorr[] = $c;
-    }
-    if (count($cleanCorr) > 0) {
-        $corrBlock = "\n\nSummary corrections:\n- " . implode("\n- ", $cleanCorr);
-    }
-
-    $weakStored = trim($weak . $corrBlock);
 
     $updT = $pdo->prepare("
       UPDATE progress_tests
@@ -290,7 +224,7 @@ IMPORTANT:
           ai_summary=?, weak_areas=?, debrief_spoken=?
       WHERE id=?
     ");
-    $updT->execute([$status, $scorePct, $written, $weakStored, $spoken, $testId]);
+    $updT->execute([$status, $scorePct, $written, $weak, $spoken, $testId]);
 
     echo json_encode([
       'ok'=>true,
@@ -298,7 +232,7 @@ IMPORTANT:
       'score_pct'=>$scorePct,
       'status'=>$status,
       'ai_summary'=>$written,
-      'weak_areas'=>$weakStored
+      'weak_areas'=>$weak
     ]);
 
 } catch (Throwable $e) {
