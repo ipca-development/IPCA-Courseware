@@ -15,7 +15,6 @@ $cohortId = (int)($_GET['cohort_id'] ?? 0);
 $lessonId = (int)($_GET['lesson_id'] ?? 0);
 if ($cohortId <= 0 || $lessonId <= 0) exit('Missing cohort_id or lesson_id');
 
-// Student must be enrolled
 if ($role === 'student') {
     $check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
     $check->execute([$cohortId, (int)$u['id']]);
@@ -45,6 +44,7 @@ cw_header('Progress Test');
   .btn-start-green:hover{ background:#138a3f !important; }
 
   .hero{ display:flex; gap:14px; align-items:center; flex-wrap:wrap; margin-top:12px; }
+
   .avatar-badge{
     width:120px;height:120px;border-radius:999px;
     background: linear-gradient(135deg,#1e3c72,#2a5298);
@@ -54,7 +54,12 @@ cw_header('Progress Test');
     box-shadow:0 10px 30px rgba(0,0,0,0.12);
     position:relative;
   }
-  .avatar-badge img{ width:120%;height:120%;object-fit:cover; transform: translateY(6px); user-select:none;-webkit-user-drag:none;pointer-events:none; }
+  .avatar-badge img{
+    width:120%;height:120%;
+    object-fit:cover;
+    transform: translateY(6px);
+    user-select:none;-webkit-user-drag:none;pointer-events:none;
+  }
 
   .talking::after{
     content:"";
@@ -212,35 +217,45 @@ const jsLed = document.getElementById('jsLed');
 const jsLedTxt = document.getElementById('jsLedTxt');
 
 function setSys(s){ sysline.textContent = s || ''; }
+
 function setJsReady(ok){
   if (ok) { jsLed.classList.add('on'); jsLedTxt.textContent = 'JS OK'; }
   else { jsLed.classList.remove('on'); jsLedTxt.textContent = 'JS ERR'; }
 }
-setJsReady(true);
 
 function setSpeaking(on){
   if (on) instructorBadge.classList.add('talking');
   else instructorBadge.classList.remove('talking');
 }
 
-// ✅ iPad autoplay unlock: play a tiny silent audio within the click gesture
+// ✅ iPad SAFE audio unlock using WebAudio (no base64)
 let audioUnlocked = false;
 async function unlockAudio(){
   if (audioUnlocked) return true;
 
   try {
-    // tiny silent mp3 (very short)
-    const silent = "data:audio/mp3;base64,//uQZAAAAAAAAAAAAAAAAAAAA...";
-    qAudio.src = silent;
-    qAudio.volume = 0.0;
-    await qAudio.play();
-    qAudio.pause();
-    qAudio.currentTime = 0;
-    qAudio.volume = 1.0;
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return false;
+
+    const ctx = new AudioContext();
+    if (ctx.state === 'suspended') {
+      await ctx.resume();
+    }
+
+    // tiny near-silent oscillator burst (inaudible)
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0001;
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start();
+    osc.stop(ctx.currentTime + 0.02);
+
     audioUnlocked = true;
     return true;
   } catch (e) {
-    // if unlock fails, we still continue; replay will allow user gesture later
     audioUnlocked = false;
     return false;
   }
@@ -326,7 +341,7 @@ async function startAnswerTimer(){
   }, 1000);
 }
 
-// Dots (still 10 default)
+// Dots (default 10)
 function renderQStrip(total){
   const el = document.getElementById('qstrip');
   el.innerHTML = '';
@@ -446,15 +461,16 @@ async function startTest(){
   if (startingLock) return;
   startingLock = true;
 
-  // IMPORTANT: unlock audio in the SAME user tap gesture (fix iPad skipping)
-  await unlockAudio();
-
+  // Make sure button really works + show feedback
   btnStart.disabled = true;
   btnStart.textContent = 'Loading…';
   btnReplay.disabled = true;
 
   quizCard.style.display = 'block';
   resultCard.style.display = 'none';
+
+  // Unlock audio on same tap gesture (iPad)
+  await unlockAudio();
 
   await startStudentCam();
 
@@ -483,7 +499,6 @@ async function startTest(){
   btnReplay.style.display = 'inline-block';
   renderQStrip(10);
 
-  // Intro MUST play; if it fails, we clearly tell the user and enable Replay
   setSys('Maya is speaking…');
   const okIntro = await playPromptAudio(TEST_ID, 0, 'intro');
   if (!okIntro) {
@@ -587,6 +602,9 @@ function escapeHtml(s){
     .replaceAll('&','&amp;').replaceAll('<','&lt;')
     .replaceAll('>','&gt;').replaceAll('"','&quot;');
 }
+
+// Mark JS ok only after bindings are set (helps debugging)
+setJsReady(true);
 </script>
 
 <?php cw_footer(); ?>
