@@ -31,12 +31,12 @@ $text = '';
 
 if ($kind === 'intro') {
     $text = "Okay {$name}. I will now conduct your intermediate progress test to check your understanding. "
-          . "I will ask you several questions. Tap the push to talk button to start speaking, and tap again to stop. "
+          . "I will ask you several questions. Tap once to start speaking, and tap again to stop. "
           . "When you are ready, let's begin.";
 } elseif ($kind === 'outro') {
     $text = "Thank you {$name}. That was the last question. I will now evaluate your results and provide feedback.";
 } elseif ($kind === 'debrief') {
-    $stmt = $pdo->prepare("SELECT score_pct, status, debrief_spoken FROM progress_tests WHERE id=? LIMIT 1");
+    $stmt = $pdo->prepare("SELECT score_pct, debrief_spoken FROM progress_tests WHERE id=? LIMIT 1");
     $stmt->execute([$testId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
     if (!$row) { http_response_code(404); exit('Test not found'); }
@@ -44,11 +44,10 @@ if ($kind === 'intro') {
     $score = ($row['score_pct'] !== null) ? (int)$row['score_pct'] : 0;
     $deb = trim((string)($row['debrief_spoken'] ?? ''));
 
-    if ($deb === '') {
-        $text = "Your score is {$score} percent. Please review the feedback in your debrief notes.";
-    } else {
-        $text = "Your score is {$score} percent. " . $deb;
-    }
+    $text = ($deb === '')
+      ? "Your score is {$score} percent. Please review the feedback in your debrief notes."
+      : "Your score is {$score} percent. " . $deb;
+
 } else {
     if ($itemId <= 0) { http_response_code(400); exit('Missing item_id'); }
 
@@ -61,7 +60,6 @@ if ($kind === 'intro') {
     $prompt = trim((string)($row['prompt'] ?? ''));
     $qKind = (string)($row['kind'] ?? '');
 
-    // Ensure yes/no ends with "yes or no?"
     if ($qKind === 'yesno') {
         $pLow = strtolower($prompt);
         if (strpos($pLow, 'yes or no') === false) {
@@ -80,28 +78,26 @@ if (!$apiKey) { http_response_code(500); exit('Missing OPENAI_API_KEY'); }
 // TTS model
 $model = getenv('CW_OPENAI_TTS_MODEL') ?: 'gpt-4o-mini-tts';
 
-// ✅ Voice override via query param
-// (Keep strict allow-list style: letters only; fallback to env)
-$voice = (string)($_GET['voice'] ?? '');
-$voice = trim($voice);
-if ($voice !== '' && !preg_match('/^[a-zA-Z0-9_-]{1,32}$/', $voice)) {
-    $voice = '';
-}
+// Voice: allow override via query param
+$voice = trim((string)($_GET['voice'] ?? ''));
+if ($voice !== '' && !preg_match('/^[a-zA-Z0-9_-]{1,32}$/', $voice)) $voice = '';
+
 if ($voice === '') {
-    $voice = getenv('CW_OPENAI_TTS_VOICE') ?: 'alloy';
+    // default to best-quality voice; per OpenAI docs: marin/cedar recommended
+    $voice = getenv('CW_OPENAI_TTS_VOICE') ?: 'marin';
 }
 
-// Optional: speed override (safe bounds)
+// Optional speed
 $speed = (float)($_GET['speed'] ?? 1.0);
 if ($speed < 0.80) $speed = 0.80;
 if ($speed > 1.20) $speed = 1.20;
 
 $payload = json_encode([
-    'model' => $model,
-    'voice' => $voice,
+    'model'  => $model,
+    'voice'  => $voice,
     'format' => 'mp3',
-    'speed' => $speed,
-    'input' => $text,
+    'speed'  => $speed,
+    'input'  => $text,
 ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
 $ch = curl_init('https://api.openai.com/v1/audio/speech');
