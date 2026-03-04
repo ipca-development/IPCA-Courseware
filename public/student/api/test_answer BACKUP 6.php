@@ -11,39 +11,6 @@ function norm(string $s): string {
     return $s;
 }
 
-/**
- * Very simple rubric matcher:
- * - key point can be a short phrase
- * - we count it as matched if ALL meaningful words (len>=4) appear in student answer
- */
-function rubric_score(string $studentText, array $keyPoints): int {
-    $t = norm($studentText);
-    if ($t === '') return 0;
-
-    $matched = 0;
-    foreach ($keyPoints as $kp) {
-        $kp = norm((string)$kp);
-        if ($kp === '') continue;
-
-        $words = array_values(array_filter(explode(' ', $kp), function($w){
-            return strlen($w) >= 4;
-        }));
-
-        if (!$words) {
-            // If keypoint is too short, do substring
-            if (strpos($t, $kp) !== false) $matched++;
-            continue;
-        }
-
-        $all = true;
-        foreach ($words as $w) {
-            if (strpos($t, $w) === false) { $all = false; break; }
-        }
-        if ($all) $matched++;
-    }
-    return $matched;
-}
-
 try {
     $u = cw_current_user($pdo);
     $role = (string)($u['role'] ?? '');
@@ -87,16 +54,8 @@ try {
     if (!$it) { echo json_encode(['ok'=>false,'error'=>'Item not found']); exit; }
 
     $kind = (string)$it['kind'];
-
-    // Prefer correct_answer_json (NOT NULL) when available; fallback to correct_json
-    $correct = json_decode((string)($it['correct_answer_json'] ?? 'null'), true);
-    if (!is_array($correct)) {
-        $correct = json_decode((string)($it['correct_json'] ?? 'null'), true);
-        if (!is_array($correct)) $correct = [];
-    }
-
-    $options = json_decode((string)($it['options_json'] ?? 'null'), true);
-    if (!is_array($options)) $options = [];
+    $correct = json_decode((string)($it['correct_json'] ?? 'null'), true) ?: [];
+    $options = json_decode((string)($it['options_json'] ?? 'null'), true) ?: [];
 
     $studentJson = is_array($answer) ? $answer : ['value'=>$answer];
 
@@ -105,13 +64,13 @@ try {
         $studentJson = ['timeout'=>true];
     }
 
-    // Spoken mapping (from ASR text)
+    // Spoken mapping
     if (isset($studentJson['text']) && is_string($studentJson['text'])) {
         $t = norm($studentJson['text']);
 
         if ($kind === 'yesno') {
             $isYes = (strpos($t,'yes') !== false) || (strpos($t,'true') !== false);
-            $isNo  = (strpos($t,'no') !== false)  || (strpos($t,'false') !== false);
+            $isNo  = (strpos($t,'no') !== false) || (strpos($t,'false') !== false);
             if ($isYes && !$isNo) $studentJson['value'] = true;
             if ($isNo && !$isYes) $studentJson['value'] = false;
         }
@@ -140,11 +99,6 @@ try {
                 if ($bestIdx >= 0 && $bestScore > 0) $studentJson['index'] = $bestIdx;
             }
         }
-
-        // Open: store normalized text too
-        if ($kind === 'open') {
-            $studentJson['value'] = (string)$studentJson['text'];
-        }
     }
 
     // Grade
@@ -152,49 +106,16 @@ try {
 
     if (!empty($studentJson['timeout'])) {
         $isCorrect = ($kind === 'info') ? 1 : 0;
-
     } elseif ($kind === 'info') {
         $isCorrect = 1;
-
     } elseif ($kind === 'yesno') {
         $cv = (bool)($correct['value'] ?? false);
         $sv = (bool)($studentJson['value'] ?? false);
         $isCorrect = ($cv === $sv) ? 1 : 0;
-
     } elseif ($kind === 'mcq') {
         $ci = (int)($correct['index'] ?? -1);
         $si = (int)($studentJson['index'] ?? -1);
         $isCorrect = ($ci === $si) ? 1 : 0;
-
-    } elseif ($kind === 'open') {
-        // OPEN scoring: rubric first, else fallback length threshold
-        $textAnswer = '';
-        if (isset($studentJson['text']) && is_string($studentJson['text'])) $textAnswer = $studentJson['text'];
-        elseif (isset($studentJson['value']) && is_string($studentJson['value'])) $textAnswer = $studentJson['value'];
-
-        $textAnswer = trim((string)$textAnswer);
-
-        if ($textAnswer === '') {
-            $isCorrect = 0;
-        } else {
-            if ((string)($correct['type'] ?? '') === 'rubric') {
-                $keyPoints = $correct['key_points'] ?? [];
-                if (!is_array($keyPoints)) $keyPoints = [];
-                $minPts = (int)($correct['min_points_to_pass'] ?? 1);
-                if ($minPts < 1) $minPts = 1;
-
-                $matched = rubric_score($textAnswer, $keyPoints);
-                $studentJson['rubric_matched'] = $matched;
-                $studentJson['rubric_required'] = $minPts;
-
-                $isCorrect = ($matched >= $minPts) ? 1 : 0;
-            } else {
-                // fallback: length based
-                $len = mb_strlen($textAnswer);
-                $studentJson['len'] = $len;
-                $isCorrect = ($len >= 20) ? 1 : 0; // adjust if desired
-            }
-        }
     }
 
     $sj = json_encode($studentJson, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
@@ -212,15 +133,9 @@ try {
     $n = $next->fetch(PDO::FETCH_ASSOC);
 
     if ($n) {
-        // also return next-next id for prefetch
-        $next2 = $pdo->prepare("SELECT id FROM progress_test_items WHERE test_id=? AND idx>? ORDER BY idx ASC LIMIT 1");
-        $next2->execute([$testId, (int)$n['idx']]);
-        $next2Id = (int)($next2->fetchColumn() ?: 0);
-
         echo json_encode([
           'ok'=>true,
           'done'=>false,
-          'next_item_id'=> $next2Id ?: null,
           'item'=>[
             'item_id'=>(int)$n['id'],
             'idx'=>(int)$n['idx'],
@@ -232,12 +147,12 @@ try {
         exit;
     }
 
-    // FINISH -> score (NOW includes OPEN)
-    $tot = $pdo->prepare("SELECT COUNT(*) FROM progress_test_items WHERE test_id=? AND kind IN ('yesno','mcq','open')");
+    // FINISH -> score
+    $tot = $pdo->prepare("SELECT COUNT(*) FROM progress_test_items WHERE test_id=? AND kind IN ('yesno','mcq')");
     $tot->execute([$testId]);
     $totalQ = (int)$tot->fetchColumn();
 
-    $cor = $pdo->prepare("SELECT COUNT(*) FROM progress_test_items WHERE test_id=? AND kind IN ('yesno','mcq','open') AND is_correct=1");
+    $cor = $pdo->prepare("SELECT COUNT(*) FROM progress_test_items WHERE test_id=? AND kind IN ('yesno','mcq') AND is_correct=1");
     $cor->execute([$testId]);
     $correctQ = (int)$cor->fetchColumn();
 
@@ -246,7 +161,7 @@ try {
 
     // Build test log
     $items = $pdo->prepare("
-      SELECT idx, kind, prompt, options_json, correct_answer_json, student_json, is_correct
+      SELECT idx, kind, prompt, options_json, correct_json, student_json, is_correct
       FROM progress_test_items
       WHERE test_id=?
       ORDER BY idx ASC
@@ -339,6 +254,7 @@ IMPORTANT:
       "temperature" => 0.2
     ];
 
+    // Fallbacks
     $written = "Score {$scorePct}% ({$correctQ}/{$totalQ}).";
     $weak = ($status==='passed') ? "No major weak areas detected." : "Review missed topics.";
     $spoken = "Your score is {$scorePct} percent. Please review your debrief notes.";
@@ -351,8 +267,11 @@ IMPORTANT:
         $weak    = trim((string)($j['weak_areas'] ?? $weak));
         $spoken  = trim((string)($j['spoken_debrief'] ?? $spoken));
         $summaryCorrections = is_array($j['summary_corrections'] ?? null) ? $j['summary_corrections'] : [];
-    } catch (Throwable $e) {}
+    } catch (Throwable $e) {
+        // keep fallbacks
+    }
 
+    // Append summary corrections to weak areas (readable later)
     $corrBlock = '';
     $cleanCorr = [];
     foreach ($summaryCorrections as $c) {
@@ -362,6 +281,7 @@ IMPORTANT:
     if (count($cleanCorr) > 0) {
         $corrBlock = "\n\nSummary corrections:\n- " . implode("\n- ", $cleanCorr);
     }
+
     $weakStored = trim($weak . $corrBlock);
 
     $updT = $pdo->prepare("
