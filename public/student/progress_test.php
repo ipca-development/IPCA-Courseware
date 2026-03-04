@@ -13,180 +13,71 @@ if ($role !== 'student' && $role !== 'admin') {
 
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 $lessonId = (int)($_GET['lesson_id'] ?? 0);
-
 if ($cohortId <= 0 || $lessonId <= 0) exit('Missing cohort_id or lesson_id');
 
-$userName = (string)($u['name'] ?? 'Student');
-
-// For now: choose instructor avatar (later you can store per cohort/course)
-$INSTRUCTOR_NAME = 'Maya';
-$INSTRUCTOR_AVATAR = '/assets/avatars/maya.png'; // or '/assets/avatars/kevin.png'
+// If student, must be enrolled
+if ($role === 'student') {
+    $check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
+    $check->execute([$cohortId, (int)$u['id']]);
+    if (!$check->fetchColumn()) {
+        http_response_code(403);
+        exit('Not enrolled in this cohort');
+    }
+}
 
 cw_header('Progress Test');
 ?>
-<style>
-  /* Page layout */
-  .pt-wrap{ max-width: 1100px; margin: 0 auto; }
-  .pt-top{
-    display:flex;
-    gap:14px;
-    align-items:flex-start;
-    flex-wrap:wrap;
-  }
-  .pt-card{ flex: 1 1 520px; }
-  .pt-side{ width: 320px; min-width: 280px; }
+<div class="card">
+  <div class="muted">
+    Progress Test (target ≤ 10 minutes). Audio-first. Click <strong>Start</strong> to begin.
+  </div>
 
-  /* Avatars */
-  .avatar-stack{ display:flex; flex-direction:column; gap:12px; }
-  .avatar-row{ display:flex; align-items:center; gap:10px; }
-  .avatar-meta{ line-height:1.1; }
-  .avatar-meta .name{ font-weight:800; }
-  .avatar-meta .role{ font-size:12px; opacity:.7; }
+  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
+    <button class="btn" id="btnStart" type="button">Start Progress Test</button>
+    <button class="btn btn-sm" id="btnReplay" type="button" style="display:none;">Replay</button>
+    <a class="btn btn-sm" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>">Back to Lesson Menu</a>
+  </div>
 
-  .avatar-badge{
-    width:120px; height:120px;
-    border-radius:999px;
-    background: linear-gradient(135deg, #1e3c72, #2a5298);
-    display:flex; align-items:center; justify-content:center;
-    overflow:hidden;
-    border: 4px solid rgba(255,255,255,0.75);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.12);
-    position:relative;
-  }
-  .avatar-badge img{
-    width:120%; height:120%;
-    object-fit:cover;
-    transform: translateY(6px);
-    user-select:none;
-    -webkit-user-drag:none;
-    pointer-events:none;
-  }
+  <div class="muted" id="status" style="margin-top:10px;"></div>
+</div>
 
-  /* "Speaking" animation (simple pulse ring) */
-  .talking::after{
-    content:"";
-    position:absolute;
-    inset:-8px;
-    border-radius:999px;
-    border: 3px solid rgba(46,128,255,0.45);
-    animation: pulse 1.2s infinite;
-  }
-  @keyframes pulse{
-    0%{ transform:scale(0.98); opacity:0.2; }
-    50%{ transform:scale(1.04); opacity:0.55; }
-    100%{ transform:scale(0.98); opacity:0.2; }
-  }
+<div class="card" id="quizCard" style="display:none;">
+  <div style="display:flex; gap:16px; align-items:center; flex-wrap:wrap;">
+    <div style="display:flex; align-items:center; gap:10px;">
+      <div style="width:54px; height:54px; border-radius:999px; overflow:hidden; background:#1e3c72; border:1px solid #e6e6e6;">
+        <img src="/assets/avatars/Maya.png" alt="Instructor" style="width:100%; height:100%; object-fit:cover;">
+      </div>
+      <div>
+        <div style="font-weight:800;">Maya</div>
+        <div class="muted" style="font-size:12px;">AI Instructor</div>
+      </div>
+    </div>
 
-  /* Student camera bubble */
-  .student-cam{
-    width:120px; height:120px;
-    border-radius:999px;
-    overflow:hidden;
-    background:#111;
-    border: 4px solid rgba(30,60,114,0.30);
-    box-shadow: 0 10px 30px rgba(0,0,0,0.12);
-    position:relative;
-  }
-  .student-cam video{
-    width:100%; height:100%;
-    object-fit:cover;
-  }
-  .student-cam .cam-label{
-    position:absolute; left:0; right:0; bottom:6px;
-    text-align:center;
-    font-size:12px;
-    color:#fff;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
-  }
-  .student-cam .cam-fallback{
-    position:absolute; inset:0;
-    display:flex; align-items:center; justify-content:center;
-    color:#fff; font-weight:800;
-    opacity:.85;
-  }
-
-  /* Quiz UI */
-  .pt-prompt{
-    white-space:pre-wrap;
-    font-size:16px;
-    line-height:1.35;
-    min-height: 120px;
-  }
-  .pt-actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
-  .pt-answer{ display:flex; gap:10px; flex-wrap:wrap; margin-top:14px; }
-</style>
-
-<div class="pt-wrap">
-
-  <div class="card">
-    <h1 style="margin:0 0 6px 0;">Progress Test</h1>
-    <div class="muted">
-      Timed Progress Test (target ≤ 10 minutes). Minimal hints. Answer carefully.
+    <div style="margin-left:auto; display:flex; gap:10px; align-items:center;">
+      <div class="muted" style="font-size:12px;">Time</div>
+      <div id="timer" style="font-weight:800;">00:00</div>
     </div>
   </div>
 
-  <div class="pt-top">
-    <div class="card pt-card">
-      <div class="pt-actions">
-        <button class="btn" id="btnStart" type="button">Start Progress Test</button>
-        <a class="btn btn-sm" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>">Back to Lesson Menu</a>
-        <span class="muted" id="jsReady">JS READY</span>
-      </div>
+  <div style="margin-top:12px;">
+    <!-- Audio-only experience: keep text minimal -->
+    <div class="muted" id="promptText" style="display:none; white-space:pre-wrap;"></div>
 
-      <div id="quizCard" style="display:none; margin-top:14px;">
-        <h2 style="margin:0 0 8px 0;">AI Instructor</h2>
-        <div class="pt-prompt" id="promptBox"></div>
-        <div class="pt-answer" id="answerArea"></div>
-        <div class="muted" id="status" style="margin-top:10px;"></div>
-      </div>
+    <div id="answerArea" style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;"></div>
 
-      <div id="resultCard" style="display:none; margin-top:14px;">
-        <h2 style="margin:0 0 8px 0;">Result</h2>
-        <div id="resultBox"></div>
-        <div style="margin-top:12px;">
-          <a class="btn" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>">Back to Lesson Menu</a>
-        </div>
-      </div>
-    </div>
-
-    <div class="card pt-side">
-      <h2 style="margin:0 0 10px 0;">Presence</h2>
-
-      <div class="avatar-stack">
-
-        <div class="avatar-row">
-          <div class="avatar-badge" id="instructorBadge">
-            <img src="<?= h($INSTRUCTOR_AVATAR) ?>" alt="Instructor">
-          </div>
-          <div class="avatar-meta">
-            <div class="name"><?= h($INSTRUCTOR_NAME) ?></div>
-            <div class="role">AI Instructor</div>
-          </div>
-        </div>
-
-        <div class="avatar-row">
-          <div class="student-cam" id="studentCamWrap">
-            <video id="studentCam" autoplay playsinline muted></video>
-            <div class="cam-fallback" id="camFallback">CAM</div>
-            <div class="cam-label"><?= h($userName) ?></div>
-          </div>
-          <div class="avatar-meta">
-            <div class="name"><?= h($userName) ?></div>
-            <div class="role">Student camera</div>
-            <div class="muted" style="margin-top:6px;" id="camStatus">Camera will ask permission when you start.</div>
-          </div>
-        </div>
-
-      </div>
-
-      <hr style="margin:14px 0;">
-
-      <div class="muted">
-        Note: camera is used to support supervised study. (No face matching yet.)
-      </div>
-    </div>
+    <div class="muted" id="status2" style="margin-top:10px;"></div>
   </div>
 </div>
+
+<div class="card" id="resultCard" style="display:none;">
+  <h2 style="margin-top:0;">Result</h2>
+  <div id="resultBox"></div>
+  <div style="margin-top:12px;">
+    <a class="btn" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>">Back to Lesson Menu</a>
+  </div>
+</div>
+
+<audio id="qAudio" preload="none"></audio>
 
 <script>
 const COHORT_ID = <?= (int)$cohortId ?>;
@@ -195,51 +86,62 @@ const LESSON_ID = <?= (int)$lessonId ?>;
 let TEST_ID = 0;
 let CURRENT_ITEM = null;
 
+const btnStart = document.getElementById('btnStart');
+const btnReplay = document.getElementById('btnReplay');
+
 const quizCard = document.getElementById('quizCard');
 const resultCard = document.getElementById('resultCard');
-const promptBox = document.getElementById('promptBox');
 const answerArea = document.getElementById('answerArea');
 const statusEl = document.getElementById('status');
+const status2 = document.getElementById('status2');
 const resultBox = document.getElementById('resultBox');
-const instructorBadge = document.getElementById('instructorBadge');
+const timerEl = document.getElementById('timer');
+const qAudio = document.getElementById('qAudio');
 
-const camStatus = document.getElementById('camStatus');
-const camFallback = document.getElementById('camFallback');
-const studentCam = document.getElementById('studentCam');
+let t0 = 0;
+let timerInt = null;
 
 function setStatus(s){ statusEl.textContent = s || ''; }
-function escapeHtml(s){
-  return (s||'').toString()
-    .replaceAll('&','&amp;').replaceAll('<','&lt;')
-    .replaceAll('>','&gt;').replaceAll('"','&quot;');
+function setStatus2(s){ status2.textContent = s || ''; }
+
+function startTimer(){
+  t0 = Date.now();
+  if (timerInt) clearInterval(timerInt);
+  timerInt = setInterval(()=>{
+    const sec = Math.floor((Date.now()-t0)/1000);
+    const mm = String(Math.floor(sec/60)).padStart(2,'0');
+    const ss = String(sec%60).padStart(2,'0');
+    timerEl.textContent = mm+':'+ss;
+  }, 250);
 }
 
-/* Camera: only ask on user gesture */
-async function startStudentCam(){
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-    camStatus.textContent = 'Camera not supported on this browser.';
-    return;
-  }
-  try{
-    camStatus.textContent = 'Requesting camera permission…';
-    const stream = await navigator.mediaDevices.getUserMedia({ video:true, audio:false });
-    studentCam.srcObject = stream;
-    camFallback.style.display = 'none';
-    camStatus.textContent = 'Camera active.';
-  }catch(e){
-    camStatus.textContent = 'Camera denied (ok).';
-    camFallback.style.display = 'flex';
-  }
+function stopTimer(){
+  if (timerInt) clearInterval(timerInt);
+  timerInt = null;
+}
+
+function ttsUrl(testId, itemId, kind){
+  // kind can be "intro" or "item"
+  return `/student/api/tts_prompt.php?test_id=${encodeURIComponent(testId)}&item_id=${encodeURIComponent(itemId)}&kind=${encodeURIComponent(kind)}`;
+}
+
+async function playPromptAudio(testId, itemId, kind){
+  return new Promise((resolve) => {
+    qAudio.pause();
+    qAudio.currentTime = 0;
+    qAudio.src = ttsUrl(testId, itemId, kind);
+    qAudio.onended = ()=> resolve(true);
+    qAudio.onerror = ()=> resolve(false);
+    qAudio.play().then(()=>{}).catch(()=> resolve(false));
+  });
 }
 
 function renderItem(item){
   CURRENT_ITEM = item;
-  promptBox.textContent = item.prompt || '';
   answerArea.innerHTML = '';
 
-  // simple "speaking" pulse while prompt is on screen (visual only)
-  instructorBadge.classList.add('talking');
-  setTimeout(()=>instructorBadge.classList.remove('talking'), 900);
+  // Audio-only: keep prompt hidden, but still available for debugging if needed
+  // document.getElementById('promptText').textContent = item.prompt || '';
 
   if (item.kind === 'info') {
     const b = document.createElement('button');
@@ -275,9 +177,7 @@ function renderItem(item){
 
 async function startTest(){
   setStatus('Starting…');
-
-  // request camera now (user gesture = button click)
-  await startStudentCam();
+  btnStart.disabled = true;
 
   const res = await fetch('/student/api/test_start.php', {
     method:'POST',
@@ -286,18 +186,37 @@ async function startTest(){
     body: JSON.stringify({ cohort_id: COHORT_ID, lesson_id: LESSON_ID })
   });
 
-  const j = await res.json();
-  if (!j.ok) { setStatus('Start failed: ' + (j.error||'')); return; }
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch(e){ j = {ok:false, error:'Non-JSON: '+txt.slice(0,200)}; }
+
+  if (!j.ok) {
+    setStatus('Start failed: ' + (j.error||''));
+    btnStart.disabled = false;
+    return;
+  }
 
   TEST_ID = j.test_id;
   quizCard.style.display = 'block';
-  renderItem(j.item);
+  btnReplay.style.display = 'inline-block';
+
+  startTimer();
   setStatus('');
+  setStatus2('Playing intro…');
+
+  // 1) Intro
+  await playPromptAudio(TEST_ID, 0, 'intro');
+
+  // 2) First question prompt
+  renderItem(j.item);
+  setStatus2('Playing question…');
+  await playPromptAudio(TEST_ID, j.item.item_id, 'item');
+  setStatus2('');
 }
 
 async function submitAnswer(answer){
   if (!TEST_ID || !CURRENT_ITEM) return;
-  setStatus('Saving answer…');
+  setStatus2('Saving answer…');
 
   const res = await fetch('/student/api/test_answer.php', {
     method:'POST',
@@ -310,10 +229,14 @@ async function submitAnswer(answer){
     })
   });
 
-  const j = await res.json();
-  if (!j.ok) { setStatus('Answer failed: ' + (j.error||'')); return; }
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch(e){ j = {ok:false, error:'Non-JSON: '+txt.slice(0,200)}; }
+
+  if (!j.ok) { setStatus2('Answer failed: ' + (j.error||'')); return; }
 
   if (j.done) {
+    stopTimer();
     quizCard.style.display = 'none';
     resultCard.style.display = 'block';
     resultBox.innerHTML = `
@@ -321,15 +244,26 @@ async function submitAnswer(answer){
       <div style="margin-top:10px;"><strong>AI Summary</strong><br><div style="white-space:pre-wrap;">${escapeHtml(j.ai_summary||'')}</div></div>
       <div style="margin-top:10px;"><strong>Weak Areas</strong><br><div style="white-space:pre-wrap;">${escapeHtml(j.weak_areas||'')}</div></div>
     `;
-    setStatus('');
     return;
   }
 
   renderItem(j.item);
-  setStatus('');
+  setStatus2('Playing next question…');
+  await playPromptAudio(TEST_ID, j.item.item_id, 'item');
+  setStatus2('');
 }
 
-document.getElementById('btnStart').onclick = startTest;
-</script>
+function escapeHtml(s){
+  return (s||'').toString()
+    .replaceAll('&','&amp;').replaceAll('<','&lt;')
+    .replaceAll('>','&gt;').replaceAll('"','&quot;');
+}
 
+btnStart.onclick = startTest;
+btnReplay.onclick = async ()=>{
+  if (!TEST_ID) return;
+  if (!CURRENT_ITEM) return;
+  await playPromptAudio(TEST_ID, CURRENT_ITEM.item_id, 'item');
+};
+</script>
 <?php cw_footer(); ?>

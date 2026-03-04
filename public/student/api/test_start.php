@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/openai.php';
 
 cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
@@ -13,12 +14,8 @@ try {
         exit;
     }
 
-    $raw = file_get_contents('php://input');
-    $data = json_decode($raw, true);
-    if (!is_array($data)) {
-        echo json_encode(['ok'=>false,'error'=>'Invalid JSON']);
-        exit;
-    }
+    $data = json_decode(file_get_contents('php://input'), true);
+    if (!is_array($data)) { echo json_encode(['ok'=>false,'error'=>'Invalid JSON']); exit; }
 
     $cohortId = (int)($data['cohort_id'] ?? 0);
     $lessonId = (int)($data['lesson_id'] ?? 0);
@@ -29,193 +26,145 @@ try {
 
     $userId = (int)$u['id'];
 
+    // If student, must be enrolled
     if ($role === 'student') {
         $chk = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
-        $chk->execute([$cohortId, $userId]);
+        $chk->execute([$cohortId,$userId]);
         if (!$chk->fetchColumn()) {
             http_response_code(403);
             echo json_encode(['ok'=>false,'error'=>'Not enrolled']);
             exit;
         }
-        $chk2 = $pdo->prepare("SELECT 1 FROM cohort_lesson_deadlines WHERE cohort_id=? AND lesson_id=? LIMIT 1");
-        $chk2->execute([$cohortId, $lessonId]);
-        if (!$chk2->fetchColumn()) {
-            http_response_code(403);
-            echo json_encode(['ok'=>false,'error'=>'Lesson not in cohort']);
-            exit;
-        }
     }
 
-    $pdo->beginTransaction();
-
-    // 1) Resume existing in_progress test (prevents duplicates and double click issues)
-    $resume = $pdo->prepare("
-        SELECT id
-        FROM progress_tests
-        WHERE user_id=? AND cohort_id=? AND lesson_id=? AND status='in_progress'
-        ORDER BY id DESC
-        LIMIT 1
+    // 1) If there is an existing in_progress test, reuse it.
+    $reuse = $pdo->prepare("
+      SELECT id, attempt
+      FROM progress_tests
+      WHERE user_id=? AND cohort_id=? AND lesson_id=? AND status='in_progress'
+      ORDER BY id DESC
+      LIMIT 1
     ");
-    $resume->execute([$userId, $cohortId, $lessonId]);
-    $testId = (int)($resume->fetchColumn() ?: 0);
+    $reuse->execute([$userId,$cohortId,$lessonId]);
+    $row = $reuse->fetch(PDO::FETCH_ASSOC);
 
-    $getFirstUnanswered = function(int $testId) use ($pdo) {
-        $q = $pdo->prepare("
-          SELECT id, idx, kind, prompt, options_json
-          FROM progress_test_items
-          WHERE test_id=? AND (student_json IS NULL OR student_json='null')
-          ORDER BY idx ASC
-          LIMIT 1
-        ");
-        $q->execute([$testId]);
-        $it = $q->fetch(PDO::FETCH_ASSOC);
-
-        if (!$it) {
-            // if none unanswered, return first
-            $q2 = $pdo->prepare("
-              SELECT id, idx, kind, prompt, options_json
-              FROM progress_test_items
-              WHERE test_id=?
-              ORDER BY idx ASC
-              LIMIT 1
-            ");
-            $q2->execute([$testId]);
-            $it = $q2->fetch(PDO::FETCH_ASSOC);
-        }
-
-        if (!$it) throw new RuntimeException('No items found for test');
-
-        return [
-            'item_id' => (int)$it['id'],
-            'idx' => (int)$it['idx'],
-            'kind' => (string)$it['kind'],
-            'prompt' => (string)$it['prompt'],
-            'options' => json_decode((string)($it['options_json'] ?? 'null'), true) ?: []
-        ];
-    };
-
-    if ($testId > 0) {
-        // If items exist, just resume
+    if ($row) {
+        $testId = (int)$row['id'];
+        // ensure it has items; if not, create them
         $cnt = $pdo->prepare("SELECT COUNT(*) FROM progress_test_items WHERE test_id=?");
         $cnt->execute([$testId]);
-        if ((int)$cnt->fetchColumn() > 0) {
-            $item = $getFirstUnanswered($testId);
-            $pdo->commit();
-            echo json_encode(['ok'=>true,'test_id'=>$testId,'item'=>$item]);
-            exit;
-        }
-        // else fall through: build items for this existing testId
-    } else {
-        // 2) Create new test row safely (lock + retry)
-        $attempt = 0;
+        $has = (int)$cnt->fetchColumn();
 
-        // lock rows for this user/cohort/lesson to make MAX(attempt) stable
-        $mx = $pdo->prepare("
-          SELECT COALESCE(MAX(attempt),0)
-          FROM progress_tests
-          WHERE user_id=? AND cohort_id=? AND lesson_id=?
-          FOR UPDATE
-        ");
-        $mx->execute([$userId, $cohortId, $lessonId]);
-        $attempt = (int)$mx->fetchColumn() + 1;
-
-        if ($role === 'student' && $attempt > 3) {
-            $pdo->rollBack();
-            echo json_encode(['ok'=>false,'error'=>'No attempts left']);
-            exit;
-        }
-
-        $seed = bin2hex(random_bytes(16));
-
-        // retry insert if uniqueness trips for any reason
-        for ($tries = 0; $tries < 3; $tries++) {
-            try {
-                $ins = $pdo->prepare("
-                  INSERT INTO progress_tests (user_id, cohort_id, lesson_id, attempt, status, seed, started_at)
-                  VALUES (?,?,?,?, 'in_progress', ?, NOW())
-                ");
-                $ins->execute([$userId, $cohortId, $lessonId, $attempt, $seed]);
-                $testId = (int)$pdo->lastInsertId();
-                break;
-            } catch (PDOException $e) {
-                // duplicate attempt - bump and retry
-                if (strpos($e->getMessage(), 'uq_attempt') !== false || strpos($e->getMessage(), 'Duplicate entry') !== false) {
-                    $attempt++;
-                    continue;
-                }
-                throw $e;
+        if ($has <= 0) {
+            // fall through to create items below
+        } else {
+            // return first item
+            $first = $pdo->prepare("SELECT id, idx, kind, prompt, options_json FROM progress_test_items WHERE test_id=? ORDER BY idx ASC LIMIT 1");
+            $first->execute([$testId]);
+            $it = $first->fetch(PDO::FETCH_ASSOC);
+            if ($it) {
+                echo json_encode([
+                    'ok'=>true,
+                    'test_id'=>$testId,
+                    'item'=>[
+                        'item_id'=>(int)$it['id'],
+                        'idx'=>(int)$it['idx'],
+                        'kind'=>(string)$it['kind'],
+                        'prompt'=>(string)$it['prompt'],
+                        'options'=> json_decode((string)($it['options_json'] ?? ''), true) ?: []
+                    ]
+                ]);
+                exit;
             }
-        }
-
-        if ($testId <= 0) {
-            throw new RuntimeException('Failed to create test (attempt collision)');
         }
     }
 
-    // 3) Build items (always rebuild items for this testId safely)
+    // 2) Create NEW attempt safely: attempt = MAX(attempt)+1
+    $max = $pdo->prepare("SELECT MAX(attempt) FROM progress_tests WHERE user_id=? AND cohort_id=? AND lesson_id=?");
+    $max->execute([$userId,$cohortId,$lessonId]);
+    $attempt = (int)($max->fetchColumn() ?: 0) + 1;
+
+    // Insert progress_tests (unique key uq_attempt safe because attempt is max+1)
+    $seed = bin2hex(random_bytes(16));
+
+    $insT = $pdo->prepare("
+      INSERT INTO progress_tests (user_id, cohort_id, lesson_id, attempt, status, started_at, seed)
+      VALUES (?,?,?,?, 'in_progress', NOW(), ?)
+    ");
+    $insT->execute([$userId,$cohortId,$lessonId,$attempt,$seed]);
+    $testId = (int)$pdo->lastInsertId();
+
+    // 3) (Re)build items for this test (guarantee no duplicate idx)
     $pdo->prepare("DELETE FROM progress_test_items WHERE test_id=?")->execute([$testId]);
 
-    $items = [];
+    // Simple deterministic starter set (MVP)
+    // Later we’ll swap to “lesson content + summary” prompts.
+    $items = [
+        [
+            'kind' => 'info',
+            'prompt' => 'Progress test starting.',
+            'options' => [],
+            'correct' => ['value'=>true],
+        ],
+        [
+            'kind' => 'yesno',
+            'prompt' => 'Yes or no: The airplane has wings.',
+            'options' => [],
+            'correct' => ['value'=>true],
+        ],
+        [
+            'kind' => 'mcq',
+            'prompt' => 'Which is most important to keep an engine running?',
+            'options' => ['Fuel system','Paint','Cup holders','Seat fabric'],
+            'correct' => ['index'=>0],
+        ],
+    ];
 
-    $items[] = ['kind'=>'info','prompt'=>"Progress Test started.\n\nTap Continue to begin.", 'options'=>[], 'correct'=>['value'=>true]];
-
-    $items[] = ['kind'=>'yesno','prompt'=>"TRUE or FALSE (Yes=True, No=False): A stall can happen at any airspeed.", 'options'=>[], 'correct'=>['value'=>true]];
-
-    $items[] = ['kind'=>'mcq','prompt'=>"Which best defines angle of attack (AoA)?", 'options'=>[
-        "The angle between the wing chord line and the relative wind",
-        "The angle between the horizon and the airplane’s longitudinal axis",
-        "The angle between the runway and the airplane’s flight path",
-        "The angle between the propeller disk and the airflow"
-    ], 'correct'=>['index'=>0]];
-
-    $items[] = ['kind'=>'yesno','prompt'=>"TRUE or FALSE (Yes=True, No=False): In a coordinated turn, the inclinometer ball is centered.", 'options'=>[], 'correct'=>['value'=>true]];
-
-    $items[] = ['kind'=>'mcq','prompt'=>"On final approach in a crosswind, the primary goal is to…", 'options'=>[
-        "Keep the wings level at all times",
-        "Maintain runway alignment and control drift",
-        "Add power to eliminate the crosswind effect",
-        "Use rudder only; ailerons are ineffective"
-    ], 'correct'=>['index'=>1]];
-
-    $items[] = ['kind'=>'info','prompt'=>"End of test.\n\nTap Continue to finish and receive your score + debrief.", 'options'=>[], 'correct'=>['value'=>true]];
-
-    $insItem = $pdo->prepare("
+    $insI = $pdo->prepare("
       INSERT INTO progress_test_items
-        (test_id, idx, kind, question_order, prompt, options_json, correct_json, correct_answer_json, student_json, student_answer_json, is_correct, created_at)
+        (test_id, idx, question_order, kind, prompt, options_json, correct_json, correct_answer_json, student_json, student_answer_json, is_correct, created_at, updated_at)
       VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NOW())
+        (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NOW(), NOW())
     ");
 
     $idx = 1;
-    foreach ($items as $it) {
-        $optionsJson = json_encode($it['options'], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-        if ($optionsJson === false) $optionsJson = '[]';
+    foreach ($items as $q) {
+        $optionsJson = !empty($q['options']) ? json_encode($q['options'], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES) : null;
+        $correctJson = json_encode($q['correct'], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        // satisfy NOT NULL column in your schema
+        $correctAnswerJson = $correctJson;
 
-        $correctJson = json_encode($it['correct'], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-        if ($correctJson === false) $correctJson = '{}';
-
-        $insItem->execute([
+        $insI->execute([
             $testId,
             $idx,
-            $it['kind'],
-            $idx,
-            $it['prompt'],
+            $idx, // question_order mirrors idx for now
+            (string)$q['kind'],
+            (string)$q['prompt'],
             $optionsJson,
             $correctJson,
-            $correctJson // correct_answer_json required NOT NULL
+            $correctAnswerJson
         ]);
         $idx++;
     }
 
-    $item = $getFirstUnanswered($testId);
+    // Return first item
+    $first = $pdo->prepare("SELECT id, idx, kind, prompt, options_json FROM progress_test_items WHERE test_id=? ORDER BY idx ASC LIMIT 1");
+    $first->execute([$testId]);
+    $it = $first->fetch(PDO::FETCH_ASSOC);
+    if (!$it) throw new RuntimeException("No items created");
 
-    $pdo->commit();
-    echo json_encode(['ok'=>true,'test_id'=>$testId,'item'=>$item]);
-    exit;
-
+    echo json_encode([
+        'ok'=>true,
+        'test_id'=>$testId,
+        'item'=>[
+            'item_id'=>(int)$it['id'],
+            'idx'=>(int)$it['idx'],
+            'kind'=>(string)$it['kind'],
+            'prompt'=>(string)$it['prompt'],
+            'options'=> json_decode((string)($it['options_json'] ?? ''), true) ?: []
+        ]
+    ]);
 } catch (Throwable $e) {
-    if ($pdo->inTransaction()) $pdo->rollBack();
     http_response_code(400);
     echo json_encode(['ok'=>false,'error'=>$e->getMessage()]);
-    exit;
 }
