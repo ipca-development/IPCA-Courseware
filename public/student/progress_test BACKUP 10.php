@@ -47,51 +47,7 @@ cw_header('Progress Test');
 
   .hero{ display:flex; gap:16px; align-items:center; flex-wrap:wrap; margin-top:12px; }
 
-  /* Outer ring wrapper MUST NOT be clipped */
-  .ring-wrap{
-    width:120px;height:120px;
-    min-width:120px;min-height:120px;
-    flex:0 0 120px;
-    position:relative;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    transform: translateZ(0);
-  }
-
-  /* GREEN ring (instructor speaking) */
-  .ring-wrap.talking::after{
-    content:"";
-    position:absolute; inset:-10px;
-    border-radius:999px;
-    border: 4px solid rgba(22,163,74,0.70);
-    box-shadow: 0 0 24px rgba(22,163,74,0.45);
-    animation:pulseG 0.95s infinite;
-    pointer-events:none;
-  }
-  @keyframes pulseG{
-    0%{ transform:scale(0.98); opacity:0.25; }
-    50%{ transform:scale(1.06); opacity:0.98; }
-    100%{ transform:scale(0.98); opacity:0.25; }
-  }
-
-  /* RED ring (student recording) */
-  .ring-wrap.rec::after{
-    content:"";
-    position:absolute; inset:-10px;
-    border-radius:999px;
-    border: 4px solid rgba(220,38,38,0.78);
-    box-shadow: 0 0 24px rgba(220,38,38,0.45);
-    animation:pulseR 0.85s infinite;
-    pointer-events:none;
-  }
-  @keyframes pulseR{
-    0%{ transform:scale(0.98); opacity:0.25; }
-    50%{ transform:scale(1.06); opacity:1.0; }
-    100%{ transform:scale(0.98); opacity:0.25; }
-  }
-
-  /* Perfect circle clip on inner bubble only */
+  /* ---- SAFARI "PERFECT CIRCLE" NUCLEAR OPTIONS ---- */
   .circle-lock{
     width:120px; height:120px;
     min-width:120px; min-height:120px;
@@ -100,6 +56,7 @@ cw_header('Progress Test');
     clip-path: circle(50% at 50% 50%);
     overflow:hidden;
     transform: translateZ(0);
+    flex: 0 0 120px;
     line-height:0;
     position:relative;
   }
@@ -119,6 +76,24 @@ cw_header('Progress Test');
     pointer-events:none;
     display:block;
     transform: translateZ(0);
+  }
+
+  
+/* Instructor speaking ring: GREEN pulsing (robust selector) */
+#instructorBadge.talking::after{
+  content:"";
+  position:absolute; inset:-10px;
+  border-radius:999px;
+  border: 4px solid rgba(22,163,74,0.65);
+  box-shadow: 0 0 22px rgba(22,163,74,0.35);
+  animation:pulseG 0.95s infinite;
+  pointer-events:none;
+}	
+	
+  @keyframes pulseG{
+    0%{ transform:scale(0.98); opacity:0.25; }
+    50%{ transform:scale(1.06); opacity:0.90; }
+    100%{ transform:scale(0.98); opacity:0.25; }
   }
 
   /* Student cam bubble */
@@ -149,6 +124,22 @@ cw_header('Progress Test');
     box-sizing:border-box;
     pointer-events:none;
     line-height: 1.1;
+  }
+
+/* Student speaking ring: RED pulsing (robust selector) */
+#camBox.rec::after{
+  content:"";
+  position:absolute; inset:-10px;
+  border-radius:999px;
+  border: 4px solid rgba(220,38,38,0.70);
+  box-shadow: 0 0 22px rgba(220,38,38,0.35);
+  animation:pulseR 0.85s infinite;
+  pointer-events:none;
+}
+  @keyframes pulseR{
+    0%{ transform:scale(0.98); opacity:0.25; }
+    50%{ transform:scale(1.06); opacity:0.95; }
+    100%{ transform:scale(0.98); opacity:0.25; }
   }
 
   .meta{ line-height:1.1; }
@@ -219,18 +210,14 @@ cw_header('Progress Test');
 
     <div id="quizCard" style="display:none; margin-top:14px;">
       <div class="hero">
-        <div class="ring-wrap" id="instructorRing">
-          <div class="avatar-badge circle-lock" id="instructorBadge">
-            <img src="<?= h($INSTRUCTOR_AVATAR) ?>" alt="Instructor">
-          </div>
+        <div class="avatar-badge circle-lock" id="instructorBadge">
+          <img src="<?= h($INSTRUCTOR_AVATAR) ?>" alt="Instructor">
         </div>
 
-        <div class="ring-wrap" id="studentRing">
-          <div class="cam circle-lock" id="camBox">
-            <video id="studentCam" autoplay playsinline muted></video>
-            <div class="fallback" id="camFallback">CAM</div>
-            <div class="label"><?= h($userName) ?></div>
-          </div>
+        <div class="cam circle-lock" id="camBox">
+          <video id="studentCam" autoplay playsinline muted></video>
+          <div class="fallback" id="camFallback">CAM</div>
+          <div class="label"><?= h($userName) ?></div>
         </div>
 
         <div class="meta">
@@ -270,6 +257,7 @@ cw_header('Progress Test');
 <script>
 const COHORT_ID = <?= (int)$cohortId ?>;
 const LESSON_ID = <?= (int)$lessonId ?>;
+const USER_FIRST = <?= json_encode($firstName) ?>;
 
 let TEST_ID = 0;
 let CURRENT_ITEM = null;
@@ -284,9 +272,7 @@ const quizCard = document.getElementById('quizCard');
 const resultCard = document.getElementById('resultCard');
 const resultBox = document.getElementById('resultBox');
 
-const instructorRing = document.getElementById('instructorRing');
-const studentRing = document.getElementById('studentRing');
-
+const instructorBadge = document.getElementById('instructorBadge');
 const qAudio = document.getElementById('qAudio');
 const sysline = document.getElementById('sysline');
 
@@ -296,6 +282,7 @@ const timerText = document.getElementById('timerText');
 const camStatus = document.getElementById('camStatus');
 const camFallback = document.getElementById('camFallback');
 const studentCam = document.getElementById('studentCam');
+const camBox = document.getElementById('camBox');
 
 const jsLed = document.getElementById('jsLed');
 const jsLedTxt = document.getElementById('jsLedTxt');
@@ -312,12 +299,8 @@ function setJsReady(ok){
 }
 
 function setSpeaking(on){
-  if (on) instructorRing.classList.add('talking');
-  else instructorRing.classList.remove('talking');
-}
-function setStudentRec(on){
-  if (on) studentRing.classList.add('rec');
-  else studentRing.classList.remove('rec');
+  if (on) instructorBadge.classList.add('talking');
+  else instructorBadge.classList.remove('talking');
 }
 
 /* ---------- “fake progress percent” helper ---------- */
@@ -328,6 +311,7 @@ function startProgress(label){
   progPct = 0;
   setSys(label + " 0%");
   progTimer = setInterval(()=>{
+    // ramp quickly to 85%, then slow
     if (progPct < 85) progPct += 5;
     else if (progPct < 95) progPct += 1;
     setSys(label + " " + progPct + "%");
@@ -381,9 +365,10 @@ async function startStudentCam(){
 
 /* ---- TTS URL ---- */
 function ttsUrl(testId, itemId, kind){
-  const voice = 'marin';
+  const voice = 'marin'; // your server can map this to a US female voice
   return `/student/api/tts_prompt.php?test_id=${encodeURIComponent(testId)}&item_id=${encodeURIComponent(itemId)}&kind=${encodeURIComponent(kind)}&voice=${encodeURIComponent(voice)}&speed=1.00`;
 }
+
 async function prefetchAudio(url){
   try { await fetch(url, { credentials:'same-origin', cache:'no-store' }); } catch(e) {}
 }
@@ -393,7 +378,6 @@ async function playPromptAudio(testId, itemId, kind){
 
   return new Promise((resolve) => {
     setSpeaking(true);
-
     qAudio.pause();
     qAudio.currentTime = 0;
     qAudio.src = ttsUrl(testId, itemId, kind);
@@ -497,12 +481,14 @@ async function startRecording(){
       if (mediaStream) mediaStream.getTracks().forEach(t=>t.stop());
       mediaStream=null;
 
-      setStudentRec(false);
+      camBox.classList.remove('rec');
       btnPTT.classList.remove('rec');
       btnPTT.textContent='⏳ Reviewing…';
 
+      // user-friendly label
       startProgress('I am reviewing your answer…');
 
+      // watchdog: if ASR hangs, allow retry
       stopWatchdog();
       transcribeWatchdog = setTimeout(()=>{
         stopProgress('I had trouble reviewing that. Please try again.');
@@ -515,13 +501,13 @@ async function startRecording(){
 
     recorder.start();
     isRecording=true;
-    setStudentRec(true);
+    camBox.classList.add('rec');
     btnPTT.classList.add('rec');
     btnPTT.textContent='⏹ Recording… Tap to Stop';
   } catch(e) {
     stopProgress('Mic denied or error.');
     isRecording=false;
-    setStudentRec(false);
+    camBox.classList.remove('rec');
     btnPTT.classList.remove('rec');
     btnPTT.textContent='🎙 Tap to Start Talking';
   }
@@ -533,6 +519,9 @@ async function stopRecording(){
 }
 
 btnPTT.addEventListener('click', async ()=>{
+  // Two modes:
+  // 1) After intro -> "I am Ready" triggers first question
+  // 2) After question -> acts as tap-to-talk
   if (btnPTT.dataset.mode === 'ready') {
     btnPTT.disabled = true;
     btnPTT.dataset.mode = 'talk';
@@ -585,7 +574,7 @@ async function transcribeAndSubmit(){
   await submitAnswer({ text: transcript });
 }
 
-/* ---- PIN flow ---- */
+/* ---- PIN flow (optional) ---- */
 async function submitPin(pin){
   pinMsg.textContent = 'Checking PIN…';
   const res = await fetch('/student/api/test_start.php', {
@@ -601,6 +590,7 @@ async function submitPin(pin){
   pinRow.style.display = 'none';
   return true;
 }
+
 document.getElementById('btnPin').addEventListener('click', async ()=>{
   const pin = (pinInput.value||'').trim();
   if (pin==='') return;
@@ -609,6 +599,7 @@ document.getElementById('btnPin').addEventListener('click', async ()=>{
 
 /* ---- State ---- */
 let startingLock=false;
+let introPlayed=false;
 let firstItemFromStart=null;
 
 /* ---- Start test ---- */
@@ -641,17 +632,14 @@ async function startTest(){
 
   if (!j.ok) {
     stopProgress();
-
-    const code = String(j.code || j.error_code || '').toUpperCase();
-    if (code === 'NEED_PIN') {
-      setSys(j.error || 'PIN required.');
+    if ((j.code||'') === 'NEED_PIN') {
+      setSys('This test requires a Training PIN.');
       pinRow.style.display = 'flex';
       btnStart.disabled = false;
       btnStart.textContent = 'Start Progress Test';
       startingLock = false;
       return;
     }
-
     setSys('Start failed: ' + (j.error||''));
     btnStart.disabled=false;
     btnStart.textContent='Start Progress Test';
@@ -664,12 +652,15 @@ async function startTest(){
   btnReplay.style.display='inline-block';
   renderQStrip(j.total_questions ? parseInt(j.total_questions,10) : 10);
 
+  // store first item from server
   firstItemFromStart = j.item || null;
 
+  // prefetch intro
   prefetchAudio(ttsUrl(TEST_ID, 0, 'intro'));
 
   stopProgress('Maya is speaking…');
   const okIntro = await playPromptAudio(TEST_ID, 0, 'intro');
+  introPlayed = okIntro;
 
   if (!okIntro) {
     setSys('Audio blocked. Tap Replay to hear the intro.');
@@ -680,6 +671,7 @@ async function startTest(){
     return;
   }
 
+  // Gate: require "I am Ready" tap before first question (fix iPad)
   setSys('When you are ready, tap “I am Ready”.');
   btnPTT.disabled=false;
   btnPTT.dataset.mode = 'ready';
@@ -691,6 +683,7 @@ async function startTest(){
   btnStart.disabled=true;
   startingLock=false;
 
+  // Prefetch first question audio in background
   if (firstItemFromStart && firstItemFromStart.item_id) {
     prefetchAudio(ttsUrl(TEST_ID, firstItemFromStart.item_id, 'item'));
   }
@@ -706,9 +699,12 @@ async function playNextQuestion(){
     return;
   }
 
+  // render item
   CURRENT_ITEM = firstItemFromStart;
 
+  // speaking state
   startProgress('I am thinking…');
+  // (we already prefetched; but keep it safe)
   prefetchAudio(ttsUrl(TEST_ID, CURRENT_ITEM.item_id, 'item'));
   stopProgress('Maya is speaking…');
 
@@ -721,6 +717,7 @@ async function playNextQuestion(){
     return;
   }
 
+  // enable talking
   btnPTT.dataset.mode = 'talk';
   btnPTT.disabled=false;
   btnPTT.textContent='🎙 Tap to Start Talking';
@@ -778,11 +775,14 @@ async function submitAnswer(answer){
     return;
   }
 
+  // next item returned
   firstItemFromStart = j.item;
   CURRENT_ITEM = j.item;
 
+  // prefetch next after that (if provided)
   if (j.next_item_id) prefetchAudio(ttsUrl(TEST_ID, parseInt(j.next_item_id,10), 'item'));
 
+  // play next question
   startProgress('I am thinking…');
   stopProgress('Maya is speaking…');
   const ok = await playPromptAudio(TEST_ID, j.item.item_id, 'item');
@@ -818,6 +818,7 @@ btnReplay.onclick = async ()=>{
     return;
   }
 
+  // After replaying intro: return to Ready gate
   if (kind === 'intro') {
     setSys('When you are ready, tap “I am Ready”.');
     btnPTT.disabled=false;
@@ -827,6 +828,7 @@ btnReplay.onclick = async ()=>{
     return;
   }
 
+  // After replaying question: allow talk
   btnPTT.dataset.mode = 'talk';
   btnPTT.disabled=false;
   btnPTT.textContent='🎙 Tap to Start Talking';
@@ -840,6 +842,7 @@ function escapeHtml(s){
     .replaceAll('>','&gt;').replaceAll('"','&quot;');
 }
 
+// JS OK after binding
 setJsReady(true);
 </script>
 
