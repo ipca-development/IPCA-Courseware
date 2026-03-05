@@ -127,18 +127,7 @@ try {
             }
 
             if (!$allowed) {
-                // ✅ FIX: allow PIN verification when outside school network
                 if (!empty($pol['pin_hash'])) {
-
-                    // If client is trying to validate PIN, do it here
-                    if ($mode === 'check_pin') {
-                        if ($pin === '') json_ok(['ok'=>false,'error'=>'Invalid PIN']);
-                        if (!password_verify($pin, (string)$pol['pin_hash'])) json_ok(['ok'=>false,'error'=>'Invalid PIN']);
-                        $_SESSION['cw_pin_ok'] = '1';
-                        json_ok(['ok'=>true]);
-                    }
-
-                    // Otherwise request PIN
                     json_ok(['ok'=>false,'code'=>'NEED_PIN','error'=>'PIN required outside school network']);
                 }
                 json_ok(['ok'=>false,'error'=>'Not allowed from this location']);
