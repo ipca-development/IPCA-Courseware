@@ -1,7 +1,6 @@
 <?php
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
-require_once __DIR__ . '/../../src/schedule.php';
 
 cw_require_login();
 
@@ -76,8 +75,6 @@ if ($cohortId <= 0) $cohortId = (int)($_GET['id'] ?? 0);
 if ($cohortId <= 0) exit('Missing id');
 
 $msg = '';
-$scheduleSummary = null;
-
 $programs = programs($pdo);
 
 $stmt = $pdo->prepare("
@@ -136,6 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($programId <= 0) {
             $msg = 'Missing program.';
         } else {
+            // save selection
             save_course_selection($pdo, $cohortId, $programId, $courseIds);
 
             // set primary course_id to first enabled (required by schema)
@@ -178,12 +176,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($action === 'recalc_deadlines') {
-        try {
-            $scheduleSummary = cw_recalculate_cohort_deadlines($pdo, $cohortId);
-            $msg = "Deadlines recalculated successfully.";
-        } catch (Throwable $e) {
-            $msg = "Deadline recalculation failed: " . $e->getMessage();
-        }
+        // We assume you already have scheduling logic in src/schedule.php.
+        // If you have an endpoint, call it here; otherwise leave a safe placeholder.
+        // IMPORTANT: This does NOT affect student-side unless you already use cohort_lesson_deadlines.
+
+        // If you already have a script that recalcs deadlines, uncomment and implement:
+        // require_once __DIR__ . '/../../src/schedule.php';
+        // cw_recalculate_cohort_deadlines($pdo, $cohortId);
+
+        $msg = "Deadline recalculation not wired yet (hook your src/schedule.php here).";
     }
 }
 
@@ -205,19 +206,6 @@ $studentsStmt = $pdo->prepare("
 $studentsStmt->execute([$cohortId]);
 $students = $studentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// deadline preview
-$deadlines = $pdo->prepare("
-  SELECT d.deadline_utc, d.sort_order, d.unlock_after_lesson_id,
-         l.external_lesson_id, l.title
-  FROM cohort_lesson_deadlines d
-  JOIN lessons l ON l.id = d.lesson_id
-  WHERE d.cohort_id=?
-  ORDER BY d.sort_order, d.id
-  LIMIT 12
-");
-$deadlines->execute([$cohortId]);
-$deadlineRows = $deadlines->fetchAll(PDO::FETCH_ASSOC);
-
 cw_header('Theory Training');
 ?>
 <div class="card">
@@ -238,32 +226,6 @@ cw_header('Theory Training');
 
   <?php if ($msg): ?>
     <div class="alert" style="margin-top:10px;"><?= h($msg) ?></div>
-  <?php endif; ?>
-
-  <?php if (is_array($scheduleSummary) && !empty($scheduleSummary['ok'])): ?>
-    <div class="card" style="margin-top:12px;">
-      <h3 style="margin:0 0 8px 0;">Schedule summary</h3>
-      <div class="muted">
-        Lessons scheduled: <strong><?= (int)$scheduleSummary['lessons'] ?></strong><br>
-        Total study minutes (est.): <strong><?= (int)$scheduleSummary['total_minutes'] ?></strong><br>
-        Usable days: <strong><?= (int)$scheduleSummary['usable_days'] ?></strong><br>
-        Max minutes/day: <strong><?= (int)$scheduleSummary['max_minutes_per_day'] ?></strong><br>
-        Factor: <strong><?= h((string)$scheduleSummary['study_factor']) ?></strong>
-        • WPM: <strong><?= (int)$scheduleSummary['wpm'] ?></strong>
-        • Progress Test minutes: <strong><?= (int)$scheduleSummary['progress_test_minutes'] ?></strong>
-      </div>
-
-      <?php if (!empty($scheduleSummary['warnings']) && is_array($scheduleSummary['warnings'])): ?>
-        <div style="margin-top:10px;">
-          <h3 style="margin:0 0 6px 0;">Notes</h3>
-          <ul style="margin:0; padding-left:18px;">
-            <?php foreach ($scheduleSummary['warnings'] as $w): ?>
-              <li class="muted"><?= h((string)$w) ?></li>
-            <?php endforeach; ?>
-          </ul>
-        </div>
-      <?php endif; ?>
-    </div>
   <?php endif; ?>
 </div>
 
@@ -346,38 +308,14 @@ cw_header('Theory Training');
 <div class="card">
   <h2 style="margin:0 0 10px 0;">Schedule</h2>
   <p class="muted" style="margin-top:0;">
-    Recalculate lesson deadlines based on selected courses + narration length × factor + progress test minutes.
-    Deadlines are stored at <strong>00:00 UTC</strong>.
+    Recalculate lesson deadlines based on selected courses + your schedule logic.
   </p>
 
   <form method="post" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
     <input type="hidden" name="action" value="recalc_deadlines">
     <button class="btn" type="submit">Recalculate deadlines</button>
+    <span class="muted">Hook this to your <code>src/schedule.php</code> function.</span>
   </form>
-
-  <div style="margin-top:12px;">
-    <h3 style="margin:0 0 8px 0;">Preview (first 12)</h3>
-    <?php if (!$deadlineRows): ?>
-      <div class="muted">No deadlines generated yet. Click “Recalculate deadlines”.</div>
-    <?php else: ?>
-      <table>
-        <tr>
-          <th>Order</th>
-          <th>Lesson</th>
-          <th>Deadline (UTC)</th>
-          <th>Unlock after</th>
-        </tr>
-        <?php foreach ($deadlineRows as $d): ?>
-          <tr>
-            <td><?= (int)$d['sort_order'] ?></td>
-            <td><?= (int)$d['external_lesson_id'] ?> — <?= h((string)$d['title']) ?></td>
-            <td><?= h((string)$d['deadline_utc']) ?></td>
-            <td><?= $d['unlock_after_lesson_id'] ? (int)$d['unlock_after_lesson_id'] : '<span class="muted">—</span>' ?></td>
-          </tr>
-        <?php endforeach; ?>
-      </table>
-    <?php endif; ?>
-  </div>
 </div>
 
 <div class="card">
