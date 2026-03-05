@@ -639,26 +639,30 @@ async function startTest(){
   const txt = await res.text();
   let j=null; try{ j=JSON.parse(txt);}catch(e){ j={ok:false,error:'Non-JSON: '+txt.slice(0,200)}; }
 
-  if (!j.ok) {
-    stopProgress();
+if (!j.ok) {
+  stopProgress();
 
-    const code = String(j.code || j.error_code || '').toUpperCase();
-    if (code === 'NEED_PIN') {
-      setSys(j.error || 'PIN required.');
-      pinRow.style.display = 'flex';
-      btnStart.disabled = false;
-      btnStart.textContent = 'Start Progress Test';
-      startingLock = false;
-      return;
-    }
+  const code = String(j.code || j.error_code || j.reason || '').toUpperCase();
+  const msg  = String(j.error || j.message || '').toLowerCase();
 
-    setSys('Start failed: ' + (j.error||''));
-    btnStart.disabled=false;
-    btnStart.textContent='Start Progress Test';
-    btnReplay.disabled=false;
-    startingLock=false;
+  // Show PIN UI if backend indicates it in ANY way
+  if (code === 'NEED_PIN' || msg.includes('pin')) {
+    setSys(j.error || 'PIN required to start this test.');
+    pinRow.style.display = 'flex';
+    pinMsg.textContent = '';
+    btnStart.disabled = false;
+    btnStart.textContent = 'Start Progress Test';
+    startingLock = false;
     return;
   }
+
+  setSys('Start failed: ' + (j.error || j.message || 'Unknown error'));
+  btnStart.disabled = false;
+  btnStart.textContent = 'Start Progress Test';
+  btnReplay.disabled = false;
+  startingLock = false;
+  return;
+}
 
   TEST_ID = j.test_id;
   btnReplay.style.display='inline-block';
