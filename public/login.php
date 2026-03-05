@@ -2,61 +2,60 @@
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/layout.php';
 
-// If already logged in, go to correct portal (NOT always admin!)
-if (cw_is_logged_in()) {
-    $u = cw_current_user($pdo);
-    if ($u) {
-        redirect(cw_home_path_for_role((string)($u['role'] ?? '')));
-    }
-    // If session exists but user not found, logout and continue
-    cw_logout();
-}
-
 $error = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+
     $email = trim((string)($_POST['email'] ?? ''));
-    $pass  = (string)($_POST['password'] ?? '');
+    $pass  = trim((string)($_POST['password'] ?? ''));
 
-    if ($email === '' || $pass === '') {
-        $error = 'Please enter email and password.';
-    } else {
-        if (cw_login($pdo, $email, $pass)) {
-            $u = cw_current_user($pdo);
-            if ($u) {
-                redirect(cw_home_path_for_role((string)($u['role'] ?? '')));
-            }
-            // fallback
-            redirect('/admin/dashboard.php');
-        } else {
-            $error = 'Invalid credentials.';
-        }
+    if (cw_login($pdo,$email,$pass)) {
+        header("Location: /");
+        exit;
     }
+
+    $error = "Invalid email or password.";
 }
-
-cw_header('Login');
 ?>
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IPCA Courseware Login</title>
+<link rel="stylesheet" href="/assets/app.css">
+</head>
 
-<div class="card" style="max-width:520px;">
-  <h2 style="margin-top:0;">Login</h2>
+<body class="login-bg">
 
-  <?php if ($error !== ''): ?>
-    <div class="card" style="border-color:#f2c2c2;background:#fff5f5;">
-      <strong style="color:#a00000;">Error:</strong>
-      <span><?= h($error) ?></span>
-    </div>
-  <?php endif; ?>
+<div class="login-wrap">
 
-  <form method="post" class="form-grid" style="grid-template-columns: 140px 1fr;">
-    <label>Email</label>
-    <input name="email" type="email" required autofocus>
+  <!-- Updated logo path -->
+  <img class="login-logo" src="/assets/logo/ipca_logo_white.png">
 
-    <label>Password</label>
-    <input name="password" type="password" required>
+  <div class="login-card">
 
-    <div></div>
-    <button class="btn" type="submit">Login</button>
-  </form>
+      <div class="login-title">IPCA Courseware</div>
+
+      <?php if($error): ?>
+        <div class="alert"><?= htmlspecialchars($error) ?></div>
+      <?php endif; ?>
+
+      <form method="post">
+
+        <label>Email</label>
+        <input type="email" name="email" required>
+
+        <label style="margin-top:10px;">Password</label>
+        <input type="password" name="password" required>
+
+        <button class="btn" type="submit">Login</button>
+
+      </form>
+
+  </div>
+
 </div>
 
-<?php cw_footer(); ?>
+</body>
+</html>

@@ -277,3 +277,120 @@ a:focus, button:focus, input:focus, select:focus, textarea:focus{
 table tr:hover td{
   background:rgba(30,60,114,.04);
 }
+
+
+/* =========================
+   Login Screen (IPCA style)
+   ========================= */
+
+.login-bg{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+
+  background:
+    radial-gradient(circle at 20% 20%, rgba(255,255,255,0.08), transparent 40%),
+    radial-gradient(circle at 80% 30%, rgba(255,255,255,0.06), transparent 45%),
+    linear-gradient(135deg,#0b2a4a,#0f355f 60%,#1e3c72);
+
+  padding:30px;
+}
+
+/* centered login container */
+.login-wrap{
+  width:min(420px,92vw);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+}
+
+/* IPCA logo */
+.login-logo{
+  width:200px;
+  margin-bottom:22px;
+  filter: drop-shadow(0 6px 18px rgba(0,0,0,0.35));
+}
+
+/* login card */
+.login-card{
+  width:100%;
+  background:#fff;
+  border-radius:16px;
+  padding:24px;
+  box-shadow:0 18px 45px rgba(0,0,0,0.22);
+}
+
+/* login inputs spacing */
+.login-card input{
+  width:100%;
+  margin-top:8px;
+}
+
+/* login button */
+.login-card .btn{
+  width:100%;
+  margin-top:14px;
+}
+
+/* small subtitle */
+.login-title{
+  font-weight:800;
+  margin-bottom:10px;
+  color:#0b2a4a;
+  text-align:center;
+}
+
+/* =========================
+   Login: subtle animated light (Apple-ish polish)
+   ========================= */
+
+.login-bg{
+  position: relative;
+  overflow: hidden;
+}
+
+/* soft moving light blobs */
+.login-bg::before,
+.login-bg::after{
+  content:"";
+  position:absolute;
+  width:520px;
+  height:520px;
+  border-radius:999px;
+  background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.12), rgba(255,255,255,0) 60%);
+  filter: blur(2px);
+  pointer-events:none;
+  z-index:0;
+  animation: ipcaGlow 12s ease-in-out infinite;
+}
+
+.login-bg::before{
+  left:-180px;
+  top:-140px;
+}
+
+.login-bg::after{
+  right:-220px;
+  bottom:-180px;
+  animation-duration: 14s;
+  animation-direction: reverse;
+}
+
+@keyframes ipcaGlow{
+  0%   { transform: translate3d(0,0,0) scale(1);   opacity: .70; }
+  50%  { transform: translate3d(60px,40px,0) scale(1.06); opacity: .95; }
+  100% { transform: translate3d(0,0,0) scale(1);   opacity: .70; }
+}
+
+/* ensure login content sits above the glow */
+.login-wrap,
+.login-card{
+  position: relative;
+  z-index: 1;
+}
+
+/* premium logo shadow */
+.login-logo{
+  filter: drop-shadow(0 6px 18px rgba(0,0,0,0.35));
+}
