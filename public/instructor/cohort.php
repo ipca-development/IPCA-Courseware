@@ -6,122 +6,180 @@ cw_require_login();
 
 $u = cw_current_user($pdo);
 $role = (string)($u['role'] ?? '');
-if ($role !== 'admin' && $role !== 'supervisor') {
+if ($role !== 'supervisor' && $role !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
 }
 
-$cohortId = (int)($_GET['id'] ?? 0);
+// Accept both ?cohort_id= and legacy ?id=
+$cohortId = (int)($_GET['cohort_id'] ?? 0);
+if ($cohortId <= 0) $cohortId = (int)($_GET['id'] ?? 0);
 if ($cohortId <= 0) exit('Missing id');
 
-function cw_column_exists(PDO $pdo, string $table, string $col): bool {
-    $stmt = $pdo->prepare("
-        SELECT COUNT(*)
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME = ?
-          AND COLUMN_NAME = ?
-    ");
-    $stmt->execute([$table, $col]);
-    return ((int)$stmt->fetchColumn() > 0);
-}
+$msg = '';
 
-$hasTimezone = cw_column_exists($pdo, 'cohorts', 'timezone');
-$hasSortOrder = cw_column_exists($pdo, 'cohort_lesson_deadlines', 'sort_order');
-
-$selectTimezone = $hasTimezone ? "co.timezone" : "'UTC' AS timezone";
-
+// Load cohort
 $stmt = $pdo->prepare("
-  SELECT co.*, c.title AS course_title, c.id AS course_id, p.program_key, {$selectTimezone}
+  SELECT co.*,
+         p.program_key,
+         c.title AS primary_course_title
   FROM cohorts co
-  JOIN courses c ON c.id=co.course_id
-  JOIN programs p ON p.id=c.program_id
-  WHERE co.id=? LIMIT 1
+  LEFT JOIN programs p ON p.id = co.program_id
+  LEFT JOIN courses c ON c.id = co.course_id
+  WHERE co.id=?
+  LIMIT 1
 ");
 $stmt->execute([$cohortId]);
 $cohort = $stmt->fetch(PDO::FETCH_ASSOC);
 if (!$cohort) exit('Cohort not found');
 
-// Students in cohort
+// Selected courses (program-level selection)
+$selectedCourses = [];
+if (!empty($cohort['program_id'])) {
+    $stmt = $pdo->prepare("
+      SELECT cc.course_id, cc.is_enabled, c.title
+      FROM cohort_courses cc
+      JOIN courses c ON c.id = cc.course_id
+      WHERE cc.cohort_id=?
+      ORDER BY c.sort_order, c.id
+    ");
+    $stmt->execute([$cohortId]);
+    $selectedCourses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+// Handle add/remove student
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = (string)($_POST['action'] ?? '');
+
+    if ($action === 'add_student') {
+        $email = strtolower(trim((string)($_POST['email'] ?? '')));
+        if ($email === '') {
+            $msg = 'Enter an email address.';
+        } else {
+            $st = $pdo->prepare("SELECT id,email,name,role FROM users WHERE email=? LIMIT 1");
+            $st->execute([$email]);
+            $userRow = $st->fetch(PDO::FETCH_ASSOC);
+
+            if (!$userRow) {
+                $msg = "No user found for: {$email}";
+            } else {
+                $uid = (int)$userRow['id'];
+
+                // Insert if not exists
+                $ins = $pdo->prepare("
+                  INSERT INTO cohort_students (cohort_id, user_id, status, enrolled_at, created_at)
+                  VALUES (?, ?, 'active', NOW(), NOW())
+                  ON DUPLICATE KEY UPDATE status='active'
+                ");
+                $ins->execute([$cohortId, $uid]);
+
+                $msg = "Student added: " . $userRow['email'];
+            }
+        }
+    }
+
+    if ($action === 'remove_student') {
+        $uid = (int)($_POST['user_id'] ?? 0);
+        if ($uid > 0) {
+            $pdo->prepare("DELETE FROM cohort_students WHERE cohort_id=? AND user_id=?")->execute([$cohortId, $uid]);
+            $msg = "Student removed.";
+        }
+    }
+}
+
+// Load students in cohort
 $studentsStmt = $pdo->prepare("
-  SELECT u.id, u.name, u.email, cs.status, cs.enrolled_at
+  SELECT cs.user_id, cs.status, cs.enrolled_at,
+         u.email, u.name, u.role
   FROM cohort_students cs
-  JOIN users u ON u.id=cs.user_id
+  JOIN users u ON u.id = cs.user_id
   WHERE cs.cohort_id=?
-  ORDER BY cs.id DESC
+  ORDER BY cs.enrolled_at ASC, cs.user_id ASC
 ");
 $studentsStmt->execute([$cohortId]);
 $students = $studentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Deadlines
-$orderBy = $hasSortOrder ? "d.sort_order, d.id" : "d.deadline_utc, d.id";
-
-$deadlinesStmt = $pdo->prepare("
-  SELECT d.*, l.external_lesson_id, l.title AS lesson_title
-  FROM cohort_lesson_deadlines d
-  JOIN lessons l ON l.id=d.lesson_id
-  WHERE d.cohort_id=?
-  ORDER BY {$orderBy}
-");
-$deadlinesStmt->execute([$cohortId]);
-$deadlines = $deadlinesStmt->fetchAll(PDO::FETCH_ASSOC);
-
-cw_header('Cohort');
+cw_header('Theory Training');
 ?>
-<div class="card">
-  <div class="muted">
-    <?= h($cohort['program_key']) ?> — <?= h($cohort['course_title']) ?>
-    • Cohort: <strong><?= h($cohort['name']) ?></strong><br>
-    Start: <?= h($cohort['start_date']) ?>
-    • End: <?= h($cohort['end_date']) ?>
-    • TZ: <?= h((string)($cohort['timezone'] ?? 'UTC')) ?>
-  </div>
-
-  <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-    <a class="btn btn-sm" href="/instructor/cohorts.php">← Back</a>
-    <a class="btn btn-sm" href="/instructor/cohort_students.php?cohort_id=<?= (int)$cohortId ?>">Manage students</a>
-  </div>
-</div>
 
 <div class="card">
-  <h2>Students</h2>
-  <?php if (!$students): ?>
-    <p class="muted">No students enrolled yet.</p>
-  <?php else: ?>
-    <table>
-      <tr><th>Name</th><th>Email</th><th>Status</th><th>Enrolled</th></tr>
-      <?php foreach ($students as $s): ?>
-        <tr>
-          <td><?= h($s['name']) ?></td>
-          <td><?= h($s['email']) ?></td>
-          <td><?= h($s['status']) ?></td>
-          <td><?= h($s['enrolled_at']) ?></td>
-        </tr>
-      <?php endforeach; ?>
-    </table>
+  <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
+    <div>
+      <h2 style="margin:0 0 6px 0;"><?= h((string)$cohort['name']) ?></h2>
+      <div class="muted">
+        Program: <strong><?= h((string)($cohort['program_key'] ?? '—')) ?></strong>
+        • Primary course (legacy): <strong><?= h((string)($cohort['primary_course_title'] ?? '—')) ?></strong><br>
+        Start: <?= h((string)$cohort['start_date']) ?> • End: <?= h((string)$cohort['end_date']) ?> • TZ: <?= h((string)$cohort['timezone']) ?>
+      </div>
+    </div>
+
+    <div style="display:flex; gap:10px; align-items:center;">
+      <a class="btn btn-sm" href="/instructor/cohorts.php">← Back to cohorts</a>
+      <a class="btn btn-sm" href="/instructor/cohorts.php?edit_id=<?= (int)$cohortId ?>">Edit cohort</a>
+    </div>
+  </div>
+
+  <?php if ($msg): ?>
+    <div class="alert" style="margin-top:10px;"><?= h($msg) ?></div>
   <?php endif; ?>
 </div>
 
 <div class="card">
-  <h2>Deadlines</h2>
-  <?php if (!$deadlines): ?>
-    <p class="muted">No deadlines generated yet. Go back to cohorts and click “Generate deadlines”.</p>
+  <h2 style="margin:0 0 10px 0;">Selected Courses</h2>
+
+  <?php if (!$selectedCourses): ?>
+    <div class="muted">No course selection saved yet for this cohort.</div>
+  <?php else: ?>
+    <ul style="margin:0; padding-left:18px;">
+      <?php foreach ($selectedCourses as $c): ?>
+        <li>
+          <?= ((int)$c['is_enabled'] === 1) ? '✅' : '⬜️' ?>
+          <?= h((string)$c['title']) ?>
+        </li>
+      <?php endforeach; ?>
+    </ul>
+    <div class="muted" style="margin-top:10px;">
+      (Enabled courses are ✅. Disabled ones are unchecked in cohort setup.)
+    </div>
+  <?php endif; ?>
+</div>
+
+<div class="card">
+  <h2 style="margin:0 0 10px 0;">Students</h2>
+
+  <form method="post" class="form-inline" style="margin-bottom:12px;">
+    <input type="hidden" name="action" value="add_student">
+    <input class="input" name="email" placeholder="student@email.com" style="min-width:280px;">
+    <button class="btn" type="submit">Add student</button>
+    <div class="muted">User must already exist in the users table.</div>
+  </form>
+
+  <?php if (!$students): ?>
+    <div class="muted">No students enrolled yet.</div>
   <?php else: ?>
     <table>
       <tr>
-        <th><?= $hasSortOrder ? 'Order' : 'Deadline Order' ?></th>
-        <th>Lesson</th>
-        <th>Deadline (UTC)</th>
-        <th>Unlock after</th>
+        <th>Email</th>
+        <th>Name</th>
+        <th>Role</th>
+        <th>Status</th>
+        <th>Enrolled</th>
+        <th>Actions</th>
       </tr>
-      <?php foreach ($deadlines as $d): ?>
+      <?php foreach ($students as $s): ?>
         <tr>
-          <td>
-            <?= $hasSortOrder ? (int)$d['sort_order'] : h($d['deadline_utc']) ?>
+          <td><?= h((string)$s['email']) ?></td>
+          <td><?= h((string)$s['name']) ?></td>
+          <td><?= h((string)$s['role']) ?></td>
+          <td><?= h((string)$s['status']) ?></td>
+          <td><?= h((string)$s['enrolled_at']) ?></td>
+          <td style="white-space:nowrap;">
+            <form method="post" style="display:inline" onsubmit="return confirm('Remove this student from cohort?');">
+              <input type="hidden" name="action" value="remove_student">
+              <input type="hidden" name="user_id" value="<?= (int)$s['user_id'] ?>">
+              <button class="btn btn-sm" type="submit">Remove</button>
+            </form>
           </td>
-          <td><?= (int)$d['external_lesson_id'] ?> — <?= h($d['lesson_title']) ?></td>
-          <td><?= h($d['deadline_utc']) ?></td>
-          <td><?= !empty($d['unlock_after_lesson_id']) ? (int)$d['unlock_after_lesson_id'] : '—' ?></td>
         </tr>
       <?php endforeach; ?>
     </table>
