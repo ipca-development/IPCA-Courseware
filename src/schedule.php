@@ -2,283 +2,339 @@
 declare(strict_types=1);
 
 /**
- * Schedule / deadline generation for theory cohorts.
+ * IPCA Courseware - Cohort scheduling helper
  *
- * Stores deadlines in UTC at 00:00:00.
- * Uses narration scripts as primary source of truth for timing:
- *   slide_enrichment.narration_en per slide in lesson.
+ * Writes: cohort_lesson_deadlines (deadline_utc always stored as YYYY-MM-DD 00:00:00 in UTC)
+ * Displays: dates as "Mon, Jan 12, 2026"
  *
- * If narration missing, falls back to slide_content plain_text (EN).
+ * IMPORTANT:
+ * - This file is safe to include from instructor/cohort.php
  */
 
-function cw_setting(PDO $pdo, string $key, $defaultValue) {
+function cw_setting(PDO $pdo, string $key, string $default = ''): string {
+    $st = $pdo->prepare("SELECT value FROM app_settings WHERE `key`=? LIMIT 1");
+    $st->execute([$key]);
+    $v = $st->fetchColumn();
+    if ($v === false || $v === null) return $default;
+    return (string)$v;
+}
+
+function cw_fmt_date_pretty(string $ymd): string {
+    // $ymd can be 'YYYY-MM-DD' or 'YYYY-MM-DD HH:MM:SS'
+    $d = substr($ymd, 0, 10);
     try {
-        $st = $pdo->prepare("SELECT value FROM app_settings WHERE `key`=? LIMIT 1");
-        $st->execute([$key]);
-        $v = $st->fetchColumn();
-        if ($v === false || $v === null) return $defaultValue;
-        return $v;
+        $dt = new DateTimeImmutable($d . ' 00:00:00', new DateTimeZone('UTC'));
+        return $dt->format('D, M j, Y');
     } catch (Throwable $e) {
-        return $defaultValue;
+        return $ymd;
     }
 }
 
-function cw_setting_float(PDO $pdo, string $key, float $defaultValue): float {
-    $v = cw_setting($pdo, $key, (string)$defaultValue);
-    $f = (float)$v;
-    if ($f <= 0) return $defaultValue;
-    return $f;
+function cw_minutes_to_hours(float $minutes): string {
+    $hours = $minutes / 60.0;
+    return number_format($hours, 1);
 }
 
-function cw_setting_int(PDO $pdo, string $key, int $defaultValue): int {
-    $v = cw_setting($pdo, $key, (string)$defaultValue);
-    $i = (int)$v;
-    if ($i < 0) return $defaultValue;
-    return $i;
+function cw_clamp_int($v, int $min, int $max, int $default): int {
+    $n = (int)$v;
+    if ($n < $min || $n > $max) return $default;
+    return $n;
 }
 
 /**
- * Estimate minutes for a lesson.
- * - Convert characters -> words using 5 chars/word heuristic.
- * - Reading time = words / WPM * 60
- * - Study time = reading time * factor
- * - Plus fixed test minutes
+ * Estimate reading minutes based on text length (narration_en).
+ * WPM default 160. Factor default 2.5.
  */
-function cw_estimate_lesson_minutes(PDO $pdo, int $lessonId, float $factor, int $wpm, int $testMinutes): int {
-    $chars = 0;
-
-    // 1) narration_en chars (preferred)
+function cw_estimate_lesson_minutes(PDO $pdo, int $lessonId, int $wpm, float $factor, int $progressTestMinutes): int {
+    // Pull narration scripts for lesson slides
     $st = $pdo->prepare("
-      SELECT COALESCE(SUM(CHAR_LENGTH(e.narration_en)),0) AS c
+      SELECT e.narration_en
       FROM slides s
       JOIN slide_enrichment e ON e.slide_id = s.id
-      WHERE s.lesson_id=? AND s.is_deleted=0
-        AND e.narration_en IS NOT NULL AND e.narration_en <> ''
+      WHERE s.lesson_id=? AND s.is_deleted=0 AND e.narration_en IS NOT NULL AND e.narration_en <> ''
+      ORDER BY s.page_number ASC
     ");
     $st->execute([$lessonId]);
-    $chars = (int)($st->fetchColumn() ?: 0);
+    $rows = $st->fetchAll(PDO::FETCH_COLUMN);
 
-    // 2) fallback: slide_content EN plain_text (if narration missing)
-    if ($chars <= 0) {
-        $st = $pdo->prepare("
-          SELECT COALESCE(SUM(CHAR_LENGTH(sc.plain_text)),0) AS c
-          FROM slides s
-          JOIN slide_content sc ON sc.slide_id = s.id AND sc.lang='en'
-          WHERE s.lesson_id=? AND s.is_deleted=0
-            AND sc.plain_text IS NOT NULL AND sc.plain_text <> ''
-        ");
-        $st->execute([$lessonId]);
-        $chars = (int)($st->fetchColumn() ?: 0);
+    $txt = '';
+    foreach ($rows as $r) {
+        $t = trim((string)$r);
+        if ($t !== '') $txt .= $t . "\n";
     }
 
-    // If still unknown, assume minimum
-    if ($chars <= 0) $chars = 800; // ~160 words baseline
+    $chars = mb_strlen($txt);
+    // Rough conversion: avg 5 chars/word + 1 space => ~6 chars/word
+    $words = (int)ceil($chars / 6);
+    $readMin = ($wpm > 0) ? ($words / $wpm) : 0.0;
 
-    $words = max(20, (int)round($chars / 5)); // 5 chars/word heuristic
-    $readSeconds = (int)round(($words / max(60, $wpm)) * 60.0);
-    $studySeconds = (int)round($readSeconds * max(1.0, $factor));
-    $studyMinutes = (int)ceil($studySeconds / 60);
+    $studyMin = (int)ceil($readMin * $factor);
+    $total = $studyMin + max(0, $progressTestMinutes);
 
-    $total = $studyMinutes + max(0, $testMinutes);
-
-    // floor + ceiling guard
+    // Safety floor so tiny lessons still get time
     if ($total < 20) $total = 20;
-    if ($total > 360) $total = 360; // prevent insane outliers per lesson
 
     return $total;
 }
 
 /**
- * Get enabled courses for a cohort. If none present, fall back to program courses.
+ * Returns enabled course IDs for cohort.
+ * If cohort_courses has no rows for this cohort, default to ALL courses of the cohort program_id.
  */
-function cw_get_enabled_course_ids(PDO $pdo, int $cohortId, int $programId): array {
-    $st = $pdo->prepare("
-      SELECT course_id
-      FROM cohort_courses
-      WHERE cohort_id=? AND is_enabled=1
-      ORDER BY course_id
-    ");
+function cw_get_enabled_course_ids_for_cohort(PDO $pdo, int $cohortId, int $programId): array {
+    $st = $pdo->prepare("SELECT course_id, is_enabled FROM cohort_courses WHERE cohort_id=?");
     $st->execute([$cohortId]);
-    $ids = $st->fetchAll(PDO::FETCH_COLUMN);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
-    $out = [];
-    foreach ($ids as $x) $out[] = (int)$x;
-    $out = array_values(array_unique(array_filter($out)));
+    if ($rows) {
+        $ids = [];
+        foreach ($rows as $r) {
+            if ((int)$r['is_enabled'] === 1) $ids[] = (int)$r['course_id'];
+        }
+        return array_values(array_unique($ids));
+    }
 
-    if ($out) return $out;
-
-    // fallback: all courses in program
+    // default all courses in program
     $st = $pdo->prepare("SELECT id FROM courses WHERE program_id=? ORDER BY sort_order, id");
     $st->execute([$programId]);
-    $ids = $st->fetchAll(PDO::FETCH_COLUMN);
-    $out = [];
-    foreach ($ids as $x) $out[] = (int)$x;
-    return array_values(array_unique(array_filter($out)));
+    return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
 }
 
 /**
- * Build the ordered lesson list for selected courses.
- */
-function cw_get_lessons_for_courses(PDO $pdo, array $courseIds): array {
-    if (!$courseIds) return [];
-
-    $place = implode(',', array_fill(0, count($courseIds), '?'));
-    $st = $pdo->prepare("
-      SELECT l.id, l.course_id, l.external_lesson_id, l.title, l.sort_order,
-             c.sort_order AS course_sort, c.title AS course_title
-      FROM lessons l
-      JOIN courses c ON c.id = l.course_id
-      WHERE l.course_id IN ($place)
-      ORDER BY c.sort_order, c.id, l.sort_order, l.external_lesson_id, l.id
-    ");
-    $st->execute($courseIds);
-    return $st->fetchAll(PDO::FETCH_ASSOC);
-}
-
-/**
- * Generate and store deadlines.
+ * Build schedule and write cohort_lesson_deadlines.
  *
- * Returns summary array with warnings.
+ * Returns array:
+ * [
+ *   'summary' => [...],
+ *   'courses' => [
+ *      [
+ *        'course_id'=>.., 'course_title'=>.., 'course_order'=>1,
+ *        'course_deadline_pretty'=>..,
+ *        'lessons'=>[
+ *           ['lesson_id'=>..,'external_lesson_id'=>..,'title'=>..,'deadline_pretty'=>..,'deadline_utc'=>..,'sort_order'=>..]
+ *        ]
+ *      ]
+ *   ]
+ * ]
  */
 function cw_recalculate_cohort_deadlines(PDO $pdo, int $cohortId): array {
-    // Cohort row
-    $st = $pdo->prepare("SELECT id, program_id, start_date, end_date FROM cohorts WHERE id=? LIMIT 1");
-    $st->execute([$cohortId]);
-    $co = $st->fetch(PDO::FETCH_ASSOC);
-    if (!$co) throw new RuntimeException('Cohort not found');
+    // Cohort
+    $co = $pdo->prepare("SELECT id, name, start_date, end_date, timezone, program_id FROM cohorts WHERE id=? LIMIT 1");
+    $co->execute([$cohortId]);
+    $cohort = $co->fetch(PDO::FETCH_ASSOC);
+    if (!$cohort) {
+        throw new RuntimeException("Cohort not found");
+    }
 
-    $programId = (int)($co['program_id'] ?? 0);
-    if ($programId <= 0) throw new RuntimeException('Cohort has no program_id');
+    $programId = (int)($cohort['program_id'] ?? 0);
+    if ($programId <= 0) {
+        throw new RuntimeException("Cohort program_id is missing");
+    }
 
-    $startDate = (string)$co['start_date'];
-    $endDate   = (string)$co['end_date'];
-    if ($startDate === '' || $endDate === '') throw new RuntimeException('Cohort missing start/end date');
-
-    // Settings (not hard-coded)
-    $factor = cw_setting_float($pdo, 'schedule_study_factor', 2.5);
-    $wpm = cw_setting_int($pdo, 'schedule_wpm', 160);
-    $testMinutes = cw_setting_int($pdo, 'schedule_progress_test_minutes', 30);
-    $maxMinutesPerDay = cw_setting_int($pdo, 'schedule_max_minutes_per_day', 120);
-    $bufferDays = cw_setting_int($pdo, 'schedule_buffer_days', 3);
+    // Settings (adaptable, not hardcoded)
+    $maxMinDay = cw_clamp_int(cw_setting($pdo, 'study_max_minutes_per_day', '120'), 30, 600, 120);
+    $wpm       = cw_clamp_int(cw_setting($pdo, 'study_wpm', '160'), 60, 400, 160);
+    $factorStr = cw_setting($pdo, 'study_factor', '2.5');
+    $factor    = (float)$factorStr;
+    if ($factor < 1.0 || $factor > 6.0) $factor = 2.5;
+    $ptMin     = cw_clamp_int(cw_setting($pdo, 'progress_test_minutes', '30'), 0, 180, 30);
 
     // Enabled courses
-    $courseIds = cw_get_enabled_course_ids($pdo, $cohortId, $programId);
-    $lessons = cw_get_lessons_for_courses($pdo, $courseIds);
+    $enabledCourseIds = cw_get_enabled_course_ids_for_cohort($pdo, $cohortId, $programId);
+    if (!$enabledCourseIds) {
+        throw new RuntimeException("No courses enabled for cohort/program");
+    }
 
-    // Nothing to schedule
-    if (!$lessons) {
-        $pdo->prepare("DELETE FROM cohort_lesson_deadlines WHERE cohort_id=?")->execute([$cohortId]);
-        return [
-            'ok' => true,
-            'lessons' => 0,
-            'total_minutes' => 0,
-            'days_used' => 0,
-            'warnings' => ['No lessons found for selected courses.'],
+    // Pull courses + lessons in order
+    $in = implode(',', array_fill(0, count($enabledCourseIds), '?'));
+    $sql = "
+      SELECT
+        c.id AS course_id, c.title AS course_title, c.sort_order AS course_sort,
+        l.id AS lesson_id, l.external_lesson_id, l.title AS lesson_title, l.sort_order AS lesson_sort
+      FROM courses c
+      JOIN lessons l ON l.course_id = c.id
+      WHERE c.id IN ($in)
+      ORDER BY c.sort_order, c.id, l.sort_order, l.external_lesson_id
+    ";
+    $st = $pdo->prepare($sql);
+    $st->execute($enabledCourseIds);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+    // Group by course
+    $courses = [];
+    foreach ($rows as $r) {
+        $cid = (int)$r['course_id'];
+        if (!isset($courses[$cid])) {
+            $courses[$cid] = [
+                'course_id' => $cid,
+                'course_title' => (string)$r['course_title'],
+                'course_sort' => (int)$r['course_sort'],
+                'lessons' => []
+            ];
+        }
+        $courses[$cid]['lessons'][] = [
+            'lesson_id' => (int)$r['lesson_id'],
+            'external_lesson_id' => (int)$r['external_lesson_id'],
+            'title' => (string)$r['lesson_title'],
+            'lesson_sort' => (int)$r['lesson_sort'],
         ];
     }
 
-    // Build date buckets (UTC dates, deadline at 00:00 UTC)
-    $utc = new DateTimeZone('UTC');
-    $start = new DateTimeImmutable($startDate, $utc);
-    $end   = new DateTimeImmutable($endDate, $utc);
+    // Calendar days: we’ll schedule on all days between start and end inclusive
+    $startYmd = (string)$cohort['start_date'];
+    $endYmd   = (string)$cohort['end_date'];
 
-    if ($end < $start) throw new RuntimeException('End date is before start date');
+    $start = new DateTimeImmutable($startYmd . ' 00:00:00', new DateTimeZone('UTC'));
+    $end   = new DateTimeImmutable($endYmd   . ' 00:00:00', new DateTimeZone('UTC'));
+    if ($end < $start) throw new RuntimeException("End date is before start date");
 
-    $totalDays = (int)$end->diff($start)->days + 1;
-    $usableDays = max(1, $totalDays - max(0, $bufferDays));
-    $scheduleEnd = $start->modify('+' . ($usableDays - 1) . ' days');
-
-    // Build list of dates
-    $dates = [];
-    for ($i = 0; $i < $usableDays; $i++) {
-        $dates[] = $start->modify("+{$i} days");
+    $days = [];
+    $cursor = $start;
+    while ($cursor <= $end) {
+        $days[] = $cursor;
+        $cursor = $cursor->modify('+1 day');
     }
+    $usableDays = count($days);
 
-    // Estimate minutes per lesson
-    $lessonPlan = [];
+    // Build schedule: allocate lesson minutes into day buckets (<= maxMinDay/day).
+    // Deadline for a lesson = the date where it is fully allocated (00:00 UTC stored).
+    $scheduleLessons = []; // list with deadlines
     $totalMinutes = 0;
-    foreach ($lessons as $l) {
-        $lid = (int)$l['id'];
-        $mins = cw_estimate_lesson_minutes($pdo, $lid, $factor, $wpm, $testMinutes);
-        $lessonPlan[] = [
-            'lesson_id' => $lid,
-            'mins' => $mins,
-        ];
-        $totalMinutes += $mins;
-    }
 
-    $capacity = $usableDays * max(30, $maxMinutesPerDay);
-    $warnings = [];
+    $dayIdx = 0;
+    $usedToday = 0;
 
-    if ($totalMinutes > $capacity) {
-        $warnings[] = "Planned workload ({$totalMinutes} min) exceeds schedule capacity ({$capacity} min) using max {$maxMinutesPerDay} min/day. Deadlines will still be generated, but daily load may exceed the target.";
-    }
-
-    // Assign lessons to days sequentially
-    $assignments = []; // [lesson_id => deadlineDate]
-    $dayIndex = 0;
-    $dayUsed = 0;
-
-    foreach ($lessonPlan as $lp) {
-        if ($dayIndex >= count($dates)) {
-            // no more days -> assign to last day
-            $assignments[$lp['lesson_id']] = $dates[count($dates)-1];
-            continue;
-        }
-
-        // if adding exceeds per-day, move day (unless day empty)
-        if ($dayUsed > 0 && ($dayUsed + $lp['mins']) > $maxMinutesPerDay && $dayIndex < (count($dates)-1)) {
-            $dayIndex++;
-            $dayUsed = 0;
-        }
-
-        $assignments[$lp['lesson_id']] = $dates[$dayIndex];
-        $dayUsed += $lp['mins'];
-    }
-
-    // Store into DB: replace existing
+    // Clear old deadlines
     $pdo->prepare("DELETE FROM cohort_lesson_deadlines WHERE cohort_id=?")->execute([$cohortId]);
 
     $ins = $pdo->prepare("
-      INSERT INTO cohort_lesson_deadlines (cohort_id, lesson_id, deadline_utc, sort_order, unlock_after_lesson_id)
-      VALUES (?,?,?,?,?)
+      INSERT INTO cohort_lesson_deadlines
+        (cohort_id, lesson_id, sort_order, unlock_after_lesson_id, deadline_utc, created_at)
+      VALUES
+        (?,?,?,?,?,NOW())
     ");
 
-    $sort = 10;
-    $prevLessonId = null;
+    $globalLessonOrder = 0;
+    $lastLessonId = null;
 
-    foreach ($lessons as $l) {
-        $lid = (int)$l['id'];
-        $deadlineDate = $assignments[$lid] ?? $scheduleEnd;
-        // deadline at 00:00 UTC
-        $deadlineUtc = $deadlineDate->format('Y-m-d') . ' 00:00:00';
+    foreach ($courses as $cid => $c) {
+        foreach ($c['lessons'] as $lesson) {
+            $globalLessonOrder += 1;
 
-        $ins->execute([
-            $cohortId,
-            $lid,
-            $deadlineUtc,
-            $sort,
-            $prevLessonId ? (int)$prevLessonId : null
-        ]);
+            $lessonMin = cw_estimate_lesson_minutes($pdo, (int)$lesson['lesson_id'], $wpm, $factor, $ptMin);
+            $totalMinutes += $lessonMin;
 
-        $prevLessonId = $lid;
-        $sort += 10;
+            $remaining = $lessonMin;
+            while ($remaining > 0) {
+                if ($dayIdx >= $usableDays) {
+                    // Ran out of time in cohort window; we still must assign a deadline = last day
+                    $dayIdx = $usableDays - 1;
+                    $usedToday = $maxMinDay;
+                    $remaining = 0;
+                    break;
+                }
+
+                $free = $maxMinDay - $usedToday;
+                if ($free <= 0) {
+                    $dayIdx++;
+                    $usedToday = 0;
+                    continue;
+                }
+
+                $take = min($free, $remaining);
+                $usedToday += $take;
+                $remaining -= $take;
+
+                // if finished, deadline is current day
+                if ($remaining <= 0) {
+                    $deadlineDay = $days[$dayIdx]->format('Y-m-d');
+                    $deadlineUtc = $deadlineDay . ' 00:00:00';
+
+                    $unlockAfter = null;
+                    if ($lastLessonId !== null) $unlockAfter = (int)$lastLessonId;
+
+                    // Write DB row
+                    $ins->execute([$cohortId, (int)$lesson['lesson_id'], $globalLessonOrder * 10, $unlockAfter, $deadlineUtc]);
+
+                    $scheduleLessons[] = [
+                        'course_id' => (int)$cid,
+                        'course_title' => (string)$c['course_title'],
+                        'lesson_id' => (int)$lesson['lesson_id'],
+                        'external_lesson_id' => (int)$lesson['external_lesson_id'],
+                        'title' => (string)$lesson['title'],
+                        'deadline_utc' => $deadlineUtc,
+                        'deadline_pretty' => cw_fmt_date_pretty($deadlineUtc),
+                        'sort_order' => $globalLessonOrder * 10,
+                    ];
+
+                    $lastLessonId = (int)$lesson['lesson_id'];
+                }
+            }
+        }
     }
 
-    // Buffer warning visibility
-    if ($bufferDays > 0) {
-        $warnings[] = "Buffer reserved: {$bufferDays} day(s). Scheduling ends on " . $scheduleEnd->format('Y-m-d') . " (end date is " . $end->format('Y-m-d') . ").";
+    // Build course-level deadlines: deadline = last lesson deadline in that course
+    $courseGroups = [];
+    $courseOrder = 0;
+    foreach ($courses as $cid => $c) {
+        $courseOrder++;
+        $lessonsOut = [];
+        $courseLastDeadlineUtc = null;
+
+        $courseLessons = array_values(array_filter($scheduleLessons, function($x) use ($cid){
+            return (int)$x['course_id'] === (int)$cid;
+        }));
+
+        foreach ($courseLessons as $lx) {
+            $lessonsOut[] = [
+                'lesson_id' => (int)$lx['lesson_id'],
+                'external_lesson_id' => (int)$lx['external_lesson_id'],
+                'title' => (string)$lx['title'],
+                'deadline_utc' => (string)$lx['deadline_utc'],
+                'deadline_pretty' => (string)$lx['deadline_pretty'],
+                'sort_order' => (int)$lx['sort_order'],
+            ];
+            $courseLastDeadlineUtc = (string)$lx['deadline_utc']; // last one in order
+        }
+
+        $courseGroups[] = [
+            'course_id' => (int)$cid,
+            'course_title' => (string)$c['course_title'],
+            'course_order' => $courseOrder,
+            'course_deadline_utc' => $courseLastDeadlineUtc ?: ($end->format('Y-m-d') . ' 00:00:00'),
+            'course_deadline_pretty' => cw_fmt_date_pretty($courseLastDeadlineUtc ?: $end->format('Y-m-d').' 00:00:00'),
+            'lessons' => $lessonsOut,
+        ];
     }
+
+    // Summary formatting
+    $totalHours = cw_minutes_to_hours((float)$totalMinutes);
+    $recommendedDays = (int)ceil(((float)$totalMinutes) / (float)$maxMinDay);
+
+    // Suggested end date (based on schedule last lesson deadline)
+    $suggestedEndUtc = $scheduleLessons ? (string)end($scheduleLessons)['deadline_utc'] : ($end->format('Y-m-d').' 00:00:00');
+    $suggestedPretty = cw_fmt_date_pretty($suggestedEndUtc);
+
+    // Delta vs cohort end date
+    $suggested = new DateTimeImmutable(substr($suggestedEndUtc,0,10) . ' 00:00:00', new DateTimeZone('UTC'));
+    $deltaDays = (int)$end->diff($suggested)->format('%r%a'); // suggested - end (signed)
+    // We want “(X days later/earlier than)” -> compare to cohort end.
+    $deltaLabel = 'same as';
+    if ($deltaDays > 0) $deltaLabel = $deltaDays . ' days later than';
+    if ($deltaDays < 0) $deltaLabel = abs($deltaDays) . ' days earlier than';
+
+    $summary = [
+        'lessons_scheduled' => count($scheduleLessons),
+        'total_study_hours' => $totalHours,
+        'usable_days' => $usableDays,
+        'recommended_days' => $recommendedDays,
+        'assumptions' => "Assumptions: Max {$maxMinDay} min/day, Factor {$factor}, {$wpm} WPM, PT {$ptMin} minutes.",
+        'suggested_end_pretty' => $suggestedPretty,
+        'suggested_end_delta' => $deltaLabel . " cohort end date",
+    ];
 
     return [
-        'ok' => true,
-        'lessons' => count($lessons),
-        'total_minutes' => $totalMinutes,
-        'usable_days' => $usableDays,
-        'max_minutes_per_day' => $maxMinutesPerDay,
-        'study_factor' => $factor,
-        'wpm' => $wpm,
-        'progress_test_minutes' => $testMinutes,
-        'warnings' => $warnings,
+        'summary' => $summary,
+        'courses' => $courseGroups,
     ];
 }

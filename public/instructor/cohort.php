@@ -70,6 +70,16 @@ function pick_primary_course(PDO $pdo, int $programId, array $selectedCourseIds)
     return 1;
 }
 
+function fmt_pretty(string $ymdOrDt): string {
+    $d = substr($ymdOrDt, 0, 10);
+    try {
+        $dt = new DateTimeImmutable($d.' 00:00:00', new DateTimeZone('UTC'));
+        return $dt->format('D, M j, Y');
+    } catch (Throwable $e) {
+        return $ymdOrDt;
+    }
+}
+
 // Accept both ?cohort_id= and legacy ?id=
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 if ($cohortId <= 0) $cohortId = (int)($_GET['id'] ?? 0);
@@ -77,6 +87,7 @@ if ($cohortId <= 0) exit('Missing id');
 
 $msg = '';
 $scheduleSummary = null;
+$scheduleCourses = [];
 
 $programs = programs($pdo);
 
@@ -108,7 +119,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($programId <= 0 || $name === '' || $start === '' || $end === '') {
             $msg = 'Missing required fields.';
         } else {
-            // ensure legacy course_id stays valid
             $firstCourse = $pdo->prepare("SELECT id FROM courses WHERE program_id=? ORDER BY sort_order, id LIMIT 1");
             $firstCourse->execute([$programId]);
             $fallbackCourseId = (int)($firstCourse->fetchColumn() ?: 0);
@@ -137,11 +147,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msg = 'Missing program.';
         } else {
             save_course_selection($pdo, $cohortId, $programId, $courseIds);
-
-            // set primary course_id to first enabled (required by schema)
             $primary = pick_primary_course($pdo, $programId, $courseIds);
             $pdo->prepare("UPDATE cohorts SET course_id=? WHERE id=?")->execute([$primary, $cohortId]);
-
             redirect('/instructor/cohort.php?cohort_id='.$cohortId);
         }
     }
@@ -179,10 +186,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'recalc_deadlines') {
         try {
-            $scheduleSummary = cw_recalculate_cohort_deadlines($pdo, $cohortId);
-            $msg = "Deadlines recalculated successfully.";
+            $out = cw_recalculate_cohort_deadlines($pdo, $cohortId);
+            $scheduleSummary = $out['summary'] ?? null;
+            $scheduleCourses = $out['courses'] ?? [];
+            $msg = "Schedule recalculated.";
         } catch (Throwable $e) {
-            $msg = "Deadline recalculation failed: " . $e->getMessage();
+            $msg = "Schedule error: " . $e->getMessage();
         }
     }
 }
@@ -205,18 +214,40 @@ $studentsStmt = $pdo->prepare("
 $studentsStmt->execute([$cohortId]);
 $students = $studentsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// deadline preview
-$deadlines = $pdo->prepare("
-  SELECT d.deadline_utc, d.sort_order, d.unlock_after_lesson_id,
-         l.external_lesson_id, l.title
+// Also load schedule from DB for display (course grouping)
+$schedRowsStmt = $pdo->prepare("
+  SELECT d.sort_order, d.deadline_utc, d.lesson_id,
+         l.external_lesson_id, l.title AS lesson_title,
+         c.id AS course_id, c.title AS course_title, c.sort_order AS course_sort
   FROM cohort_lesson_deadlines d
-  JOIN lessons l ON l.id = d.lesson_id
+  JOIN lessons l ON l.id=d.lesson_id
+  JOIN courses c ON c.id=l.course_id
   WHERE d.cohort_id=?
-  ORDER BY d.sort_order, d.id
-  LIMIT 12
+  ORDER BY c.sort_order, c.id, d.sort_order, l.external_lesson_id
 ");
-$deadlines->execute([$cohortId]);
-$deadlineRows = $deadlines->fetchAll(PDO::FETCH_ASSOC);
+$schedRowsStmt->execute([$cohortId]);
+$schedRows = $schedRowsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+$courseBlocks = [];
+foreach ($schedRows as $r) {
+    $cid = (int)$r['course_id'];
+    if (!isset($courseBlocks[$cid])) {
+        $courseBlocks[$cid] = [
+            'course_id' => $cid,
+            'course_title' => (string)$r['course_title'],
+            'lessons' => [],
+            'course_deadline_utc' => (string)$r['deadline_utc'],
+        ];
+    }
+    $courseBlocks[$cid]['lessons'][] = [
+        'sort_order' => (int)$r['sort_order'],
+        'external_lesson_id' => (int)$r['external_lesson_id'],
+        'lesson_title' => (string)$r['lesson_title'],
+        'deadline_utc' => (string)$r['deadline_utc'],
+    ];
+    // keep updating; last row becomes course deadline
+    $courseBlocks[$cid]['course_deadline_utc'] = (string)$r['deadline_utc'];
+}
 
 cw_header('Theory Training');
 ?>
@@ -226,8 +257,8 @@ cw_header('Theory Training');
       <h2 style="margin:0 0 6px 0;"><?= h((string)$cohort['name']) ?></h2>
       <div class="muted">
         Program: <strong><?= h((string)($cohort['program_key'] ?? '—')) ?></strong>
-        • Start: <?= h((string)$cohort['start_date']) ?>
-        • End: <?= h((string)$cohort['end_date']) ?>
+        • Start: <?= h(fmt_pretty((string)$cohort['start_date'])) ?>
+        • End: <?= h(fmt_pretty((string)$cohort['end_date'])) ?>
         • TZ: <?= h((string)$cohort['timezone']) ?>
       </div>
     </div>
@@ -238,32 +269,6 @@ cw_header('Theory Training');
 
   <?php if ($msg): ?>
     <div class="alert" style="margin-top:10px;"><?= h($msg) ?></div>
-  <?php endif; ?>
-
-  <?php if (is_array($scheduleSummary) && !empty($scheduleSummary['ok'])): ?>
-    <div class="card" style="margin-top:12px;">
-      <h3 style="margin:0 0 8px 0;">Schedule summary</h3>
-      <div class="muted">
-        Lessons scheduled: <strong><?= (int)$scheduleSummary['lessons'] ?></strong><br>
-        Total study minutes (est.): <strong><?= (int)$scheduleSummary['total_minutes'] ?></strong><br>
-        Usable days: <strong><?= (int)$scheduleSummary['usable_days'] ?></strong><br>
-        Max minutes/day: <strong><?= (int)$scheduleSummary['max_minutes_per_day'] ?></strong><br>
-        Factor: <strong><?= h((string)$scheduleSummary['study_factor']) ?></strong>
-        • WPM: <strong><?= (int)$scheduleSummary['wpm'] ?></strong>
-        • Progress Test minutes: <strong><?= (int)$scheduleSummary['progress_test_minutes'] ?></strong>
-      </div>
-
-      <?php if (!empty($scheduleSummary['warnings']) && is_array($scheduleSummary['warnings'])): ?>
-        <div style="margin-top:10px;">
-          <h3 style="margin:0 0 6px 0;">Notes</h3>
-          <ul style="margin:0; padding-left:18px;">
-            <?php foreach ($scheduleSummary['warnings'] as $w): ?>
-              <li class="muted"><?= h((string)$w) ?></li>
-            <?php endforeach; ?>
-          </ul>
-        </div>
-      <?php endif; ?>
-    </div>
   <?php endif; ?>
 </div>
 
@@ -300,10 +305,6 @@ cw_header('Theory Training');
     <div></div>
     <button class="btn" type="submit">Save settings</button>
   </form>
-
-  <div class="muted" style="margin-top:10px;">
-    Changing program affects available courses. After saving program, re-open this cohort and adjust course selection below.
-  </div>
 </div>
 
 <div class="card">
@@ -323,7 +324,7 @@ cw_header('Theory Training');
         <?php foreach ($courses as $c): ?>
           <?php
             $cid = (int)$c['id'];
-            $checked = ((int)($enabledMap[$cid] ?? 1) === 1); // default ON
+            $checked = ((int)($enabledMap[$cid] ?? 1) === 1);
           ?>
           <label style="display:flex; gap:10px; align-items:center;">
             <input type="checkbox" name="course_ids[]" value="<?= $cid ?>" <?= $checked ? 'checked' : '' ?>>
@@ -335,49 +336,81 @@ cw_header('Theory Training');
       <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
         <button class="btn" type="submit">Save course selection</button>
       </div>
-
-      <div class="muted" style="margin-top:10px;">
-        (Legacy requirement) We automatically set <code>cohorts.course_id</code> to the first enabled course.
-      </div>
     <?php endif; ?>
   </form>
 </div>
 
 <div class="card">
   <h2 style="margin:0 0 10px 0;">Schedule</h2>
-  <p class="muted" style="margin-top:0;">
-    Recalculate lesson deadlines based on selected courses + narration length × factor + progress test minutes.
-    Deadlines are stored at <strong>00:00 UTC</strong>.
-  </p>
 
   <form method="post" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
     <input type="hidden" name="action" value="recalc_deadlines">
     <button class="btn" type="submit">Recalculate deadlines</button>
   </form>
 
-  <div style="margin-top:12px;">
-    <h3 style="margin:0 0 8px 0;">Preview (first 12)</h3>
-    <?php if (!$deadlineRows): ?>
-      <div class="muted">No deadlines generated yet. Click “Recalculate deadlines”.</div>
-    <?php else: ?>
+  <?php if ($scheduleSummary): ?>
+    <div style="margin-top:12px;">
+      <h3 style="margin:0 0 8px 0;">Schedule summary</h3>
+      <div class="muted">
+        <div>- Lessons scheduled: <?= (int)$scheduleSummary['lessons_scheduled'] ?></div>
+        <div>- Total study hours (est.): <?= h((string)$scheduleSummary['total_study_hours']) ?></div>
+        <div>- Usable days: <?= (int)$scheduleSummary['usable_days'] ?> (Recommended: <?= (int)$scheduleSummary['recommended_days'] ?> days)</div>
+        <div>- <?= h((string)$scheduleSummary['assumptions']) ?></div>
+        <div>- Note(s): Suggested End Date <?= h((string)$scheduleSummary['suggested_end_pretty']) ?> (<?= h((string)$scheduleSummary['suggested_end_delta']) ?>)</div>
+      </div>
+    </div>
+  <?php endif; ?>
+
+  <?php if (!$courseBlocks): ?>
+    <div class="muted" style="margin-top:12px;">No schedule yet. Click “Recalculate deadlines”.</div>
+  <?php else: ?>
+    <div style="margin-top:12px;">
       <table>
         <tr>
-          <th>Order</th>
-          <th>Lesson</th>
-          <th>Deadline (UTC)</th>
-          <th>Unlock after</th>
+          <th style="width:70px;">Order</th>
+          <th>Course</th>
+          <th style="width:220px;">Deadline</th>
         </tr>
-        <?php foreach ($deadlineRows as $d): ?>
+
+        <?php $i = 0; foreach ($courseBlocks as $cb): $i++; ?>
+          <?php
+            $courseDeadlinePretty = fmt_pretty((string)$cb['course_deadline_utc']);
+            $courseTitle = (string)$cb['course_title'];
+            $courseLessons = (array)$cb['lessons'];
+            $detailsId = 'course_' . (int)$cb['course_id'];
+          ?>
           <tr>
-            <td><?= (int)$d['sort_order'] ?></td>
-            <td><?= (int)$d['external_lesson_id'] ?> — <?= h((string)$d['title']) ?></td>
-            <td><?= h((string)$d['deadline_utc']) ?></td>
-            <td><?= $d['unlock_after_lesson_id'] ? (int)$d['unlock_after_lesson_id'] : '<span class="muted">—</span>' ?></td>
+            <td><?= $i ?></td>
+            <td>
+              <details id="<?= h($detailsId) ?>">
+                <summary style="cursor:pointer; font-weight:700;">
+                  <?= h($courseTitle) ?>
+                </summary>
+
+                <div style="margin-top:10px;">
+                  <table>
+                    <tr>
+                      <th style="width:70px;">Order</th>
+                      <th>Lesson</th>
+                      <th style="width:220px;">Deadline</th>
+                    </tr>
+                    <?php $j = 0; foreach ($courseLessons as $lx): $j++; ?>
+                      <tr>
+                        <td><?= $j ?></td>
+                        <td><?= (int)$lx['external_lesson_id'] ?> — <?= h((string)$lx['lesson_title']) ?></td>
+                        <td><?= h(fmt_pretty((string)$lx['deadline_utc'])) ?></td>
+                      </tr>
+                    <?php endforeach; ?>
+                  </table>
+                </div>
+              </details>
+            </td>
+            <td><?= h($courseDeadlinePretty) ?></td>
           </tr>
         <?php endforeach; ?>
       </table>
-    <?php endif; ?>
-  </div>
+    </div>
+  <?php endif; ?>
 </div>
 
 <div class="card">
