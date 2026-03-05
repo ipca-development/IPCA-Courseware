@@ -35,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
   <div class="login-card">
 
-      <div class="login-title">IPCA Courseware</div>
+      <div class="login-title">IPCA.aero</div>
 
       <?php if($error): ?>
         <div class="alert"><?= htmlspecialchars($error) ?></div>
