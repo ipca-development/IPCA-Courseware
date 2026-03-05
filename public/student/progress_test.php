@@ -78,16 +78,18 @@ cw_header('Progress Test');
     transform: translateZ(0);
   }
 
-  /* Instructor speaking ring: GREEN pulsing */
-  .avatar-badge.talking::after{
-    content:"";
-    position:absolute; inset:-10px;
-    border-radius:999px;
-    border: 4px solid rgba(22,163,74,0.65);
-    box-shadow: 0 0 22px rgba(22,163,74,0.35);
-    animation:pulseG 0.95s infinite;
-    pointer-events:none;
-  }
+  
+/* Instructor speaking ring: GREEN pulsing (robust selector) */
+#instructorBadge.talking::after{
+  content:"";
+  position:absolute; inset:-10px;
+  border-radius:999px;
+  border: 4px solid rgba(22,163,74,0.65);
+  box-shadow: 0 0 22px rgba(22,163,74,0.35);
+  animation:pulseG 0.95s infinite;
+  pointer-events:none;
+}	
+	
   @keyframes pulseG{
     0%{ transform:scale(0.98); opacity:0.25; }
     50%{ transform:scale(1.06); opacity:0.90; }
@@ -124,16 +126,16 @@ cw_header('Progress Test');
     line-height: 1.1;
   }
 
-  /* Student speaking ring: RED pulsing */
-  .cam.rec::after{
-    content:"";
-    position:absolute; inset:-10px;
-    border-radius:999px;
-    border: 4px solid rgba(220,38,38,0.70);
-    box-shadow: 0 0 22px rgba(220,38,38,0.35);
-    animation:pulseR 0.85s infinite;
-    pointer-events:none;
-  }
+/* Student speaking ring: RED pulsing (robust selector) */
+#camBox.rec::after{
+  content:"";
+  position:absolute; inset:-10px;
+  border-radius:999px;
+  border: 4px solid rgba(220,38,38,0.70);
+  box-shadow: 0 0 22px rgba(220,38,38,0.35);
+  animation:pulseR 0.85s infinite;
+  pointer-events:none;
+}
   @keyframes pulseR{
     0%{ transform:scale(0.98); opacity:0.25; }
     50%{ transform:scale(1.06); opacity:0.95; }
