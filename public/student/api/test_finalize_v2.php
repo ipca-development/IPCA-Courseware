@@ -11,7 +11,35 @@ function json_out(array $x): void {
 }
 
 function storage_base_dir(): string {
-    return dirname(__DIR__, 3) . '/storage/progress_tests_v2';
+    $base = '/tmp/progress_tests_v2';
+
+    if (!is_dir($base)) {
+        if (!@mkdir($base, 0777, true)) {
+            throw new RuntimeException('Cannot create base storage directory: ' . $base);
+        }
+    }
+
+    if (!is_dir($base) || !is_writable($base)) {
+        throw new RuntimeException('Base storage directory is not writable: ' . $base);
+    }
+
+    return $base;
+}
+
+function test_dir(int $testId): string {
+    $dir = storage_base_dir() . '/' . $testId;
+
+    if (!is_dir($dir)) {
+        if (!@mkdir($dir, 0777, true)) {
+            throw new RuntimeException('Cannot create test directory: ' . $dir);
+        }
+    }
+
+    if (!is_dir($dir) || !is_writable($dir)) {
+        throw new RuntimeException('Test directory is not writable: ' . $dir);
+    }
+
+    return $dir;
 }
 
 function tts_write_file(string $apiKey, string $model, string $voice, string $text, string $outfile): void {
@@ -258,7 +286,7 @@ try {
     $items = $itemsSt->fetchAll(PDO::FETCH_ASSOC);
     if (!$items) json_out(['ok' => false, 'error' => 'No items found']);
 
-    $baseDir = storage_base_dir() . '/' . $testId;
+    $baseDir = test_dir($testId);
 
     $updItem = $pdo->prepare("
       UPDATE progress_test_items_v2
