@@ -320,6 +320,7 @@ let INTRO_BLOB_URL = '';
 let QUESTION_BLOB_URLS = {};
 let CURRENT_QUESTION_BLOB_URL = '';
 let preloadDone = false;
+let preloadStarted = false;
 
 const btnStart = document.getElementById('btnStart');
 const btnPTT = document.getElementById('btnPTT');
@@ -392,30 +393,46 @@ async function fetchBlobUrl(url){
 }
 
 async function preloadAllAudio(){
-  setSys('Loading audio...');
+  preloadStarted = true;
   prepLabel.textContent = 'Audio buffering';
-  setPrep(0);
+  setSys('Loading audio...');
 
   const total = 1 + ITEM_IDS.length;
   let done = 0;
 
-  INTRO_BLOB_URL = await fetchBlobUrl(INTRO_URL);
+  try{
+    INTRO_BLOB_URL = await fetchBlobUrl(INTRO_URL);
+  }catch(e){
+    console.warn('Intro preload failed:', e);
+    INTRO_BLOB_URL = '';
+  }
   done++;
   setPrep(Math.round((done / total) * 100));
 
   for(let i=0;i<ITEM_IDS.length;i++){
     const itemId = ITEM_IDS[i];
     const src = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
-    QUESTION_BLOB_URLS[itemId] = await fetchBlobUrl(src);
+
+    try{
+      QUESTION_BLOB_URLS[itemId] = await fetchBlobUrl(src);
+    }catch(e){
+      console.warn('Question preload failed for item', itemId, e);
+      QUESTION_BLOB_URLS[itemId] = '';
+    }
+
     done++;
     setPrep(Math.round((done / total) * 100));
   }
 
   preloadDone = true;
   prepLabel.textContent = 'Preparation progress';
-  setPrep(100);
-  setSys(FIRST_NAME + ', your progress test is ready.');
-  btnStart.disabled = false;
+
+  if (INTRO_BLOB_URL) {
+    setSys(FIRST_NAME + ', your progress test is ready.');
+    btnStart.disabled = false;
+  } else {
+    setSys('Audio loading failed for the intro. Please refresh and try again.');
+  }
 }
 
 async function prepareTest(){
@@ -467,12 +484,8 @@ async function prepareTest(){
 
   renderDots(TOTAL_QUESTIONS);
 
-  try{
-    await preloadAllAudio();
-  }catch(e){
-    setPrep(100);
-    setSys('Loading audio failed: ' + (e && e.message ? e.message : 'Unknown error'));
-  }
+  setPrep(75);
+  preloadAllAudio();
 }
 
 async function playAudio(url){
@@ -490,6 +503,24 @@ async function playAudio(url){
   });
 }
 
+async function ensureQuestionBlob(itemId){
+  const existing = QUESTION_BLOB_URLS[itemId] || QUESTION_BLOB_URLS[String(itemId)] || '';
+  if (existing) return existing;
+
+  const src = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
+  if (!src) return '';
+
+  setSys('Loading audio...');
+  try{
+    const blobUrl = await fetchBlobUrl(src);
+    QUESTION_BLOB_URLS[itemId] = blobUrl;
+    return blobUrl;
+  }catch(e){
+    console.warn('ensureQuestionBlob failed', itemId, e);
+    return '';
+  }
+}
+
 function resultUrl(){
   return '/student/api/test_audio_v2.php?test_id=' + encodeURIComponent(TEST_ID) + '&kind=result';
 }
@@ -497,10 +528,15 @@ function resultUrl(){
 async function startFlow(){
   btnStart.disabled = true;
 
-  if(!preloadDone || !INTRO_BLOB_URL){
+  if(!INTRO_BLOB_URL){
     setSys('Loading audio...');
-    btnStart.disabled = false;
-    return;
+    try{
+      INTRO_BLOB_URL = await fetchBlobUrl(INTRO_URL);
+    }catch(e){
+      setSys('Intro audio failed to load.');
+      btnStart.disabled = false;
+      return;
+    }
   }
 
   setSys('Maya is speaking...');
@@ -522,11 +558,11 @@ async function askCurrent(){
     return;
   }
 
-  const qUrl = QUESTION_BLOB_URLS[itemId] || QUESTION_BLOB_URLS[String(itemId)] || '';
+  const qUrl = await ensureQuestionBlob(itemId);
   CURRENT_QUESTION_BLOB_URL = qUrl;
 
   if(!qUrl){
-    setSys('Loading audio...');
+    setSys('Question audio failed to load.');
     return;
   }
 
