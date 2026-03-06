@@ -6,14 +6,27 @@ cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
 
 function storage_base_dir(): string {
-    return dirname(__DIR__, 3) . '/storage/progress_tests_v2';
+    $dir = '/tmp/progress_tests_v2';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0777, true);
+    }
+    if (!is_dir($dir) || !is_writable($dir)) {
+        throw new RuntimeException('Temp storage directory is not writable: ' . $dir);
+    }
+    return $dir;
 }
 
 function make_test_dir(int $testId): string {
     $dir = storage_base_dir() . '/' . $testId;
-    if (!is_dir($dir)) mkdir($dir, 0775, true);
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0777, true);
+    }
     if (!is_dir($dir) || !is_writable($dir)) {
-        throw new RuntimeException('Storage directory is not writable: ' . $dir);
+        throw new RuntimeException('Test storage directory is not writable: ' . $dir);
+    }
+    $answersDir = $dir . '/answers';
+    if (!is_dir($answersDir)) {
+        @mkdir($answersDir, 0777, true);
     }
     return $dir;
 }
@@ -36,7 +49,6 @@ function tts_generate(string $text, string $file): void {
     ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
     $ch = curl_init('https://api.openai.com/v1/audio/speech');
-
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
@@ -129,9 +141,6 @@ try {
     $testId = (int)$pdo->lastInsertId();
     $testDir = make_test_dir($testId);
 
-    // -----------------------
-    // Load narration scripts
-    // -----------------------
     $nq = $pdo->prepare("
         SELECT e.narration_en
         FROM slides s
@@ -151,9 +160,6 @@ try {
         $truth = "(No narration scripts available.)";
     }
 
-    // -----------------------
-    // Load summary
-    // -----------------------
     $sq = $pdo->prepare("
         SELECT summary_plain
         FROM lesson_summaries
@@ -164,9 +170,6 @@ try {
     $summary = trim((string)$sq->fetchColumn());
     if ($summary === '') $summary = "(No student summary.)";
 
-    // -----------------------
-    // Generate questions
-    // -----------------------
     $schema = [
         "type" => "object",
         "properties" => [
@@ -251,9 +254,6 @@ Mix yesno, mcq and open questions."
         ];
     }
 
-    // -----------------------
-    // Save questions
-    // -----------------------
     $ins = $pdo->prepare("
         INSERT INTO progress_test_items_v2
         (test_id, idx, kind, prompt, options_json, correct_json)
@@ -282,9 +282,6 @@ Mix yesno, mcq and open questions."
         if ($idx > 10) break;
     }
 
-    // -----------------------
-    // Generate audio files
-    // -----------------------
     $name = trim((string)($u['name'] ?? 'student'));
     if ($name === '') $name = 'student';
     $parts = preg_split('/\s+/', $name);
@@ -325,9 +322,6 @@ Mix yesno, mcq and open questions."
         tts_generate($spoken, $file);
     }
 
-    // -----------------------
-    // Return real item IDs
-    // -----------------------
     $itemIds = [];
     $items2 = $pdo->prepare("
         SELECT id
@@ -340,7 +334,6 @@ Mix yesno, mcq and open questions."
         $itemIds[] = (int)$iid;
     }
 
-    // Optional: save manifest_json
     $manifest = [
         'test_id' => $testId,
         'total_questions' => count($itemIds),

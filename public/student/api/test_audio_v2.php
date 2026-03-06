@@ -4,11 +4,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 cw_require_login();
 
 function storage_base_dir(): string {
-    return dirname(__DIR__, 3) . '/storage/progress_tests_v2';
-}
-
-function safe_path(string $path): string {
-    return str_replace(['..','\\'], '', $path);
+    return '/tmp/progress_tests_v2';
 }
 
 $u = cw_current_user($pdo);
@@ -46,29 +42,22 @@ if ($role === 'student') {
 }
 
 $baseDir = storage_base_dir() . '/' . $testId;
-
 $audioFile = '';
 
 if ($kind === 'intro') {
     $audioFile = $baseDir . '/intro.mp3';
-}
-elseif ($kind === 'result') {
+} elseif ($kind === 'result') {
     $audioFile = $baseDir . '/result.mp3';
-}
-elseif ($kind === 'question') {
+} elseif ($kind === 'question') {
     if ($itemId <= 0) {
         http_response_code(400);
         exit('Missing item_id');
     }
-
     $audioFile = $baseDir . '/q_' . $itemId . '.mp3';
-}
-else {
+} else {
     http_response_code(400);
     exit('Invalid kind');
 }
-
-$audioFile = safe_path($audioFile);
 
 if (!is_file($audioFile)) {
     http_response_code(404);
