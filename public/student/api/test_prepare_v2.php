@@ -5,7 +5,12 @@ require_once __DIR__ . '/../../../src/openai.php';
 cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
 
-function storage_base_dir(): string {
+function json_ok(array $x): void {
+    echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
+}
+
+function temp_base_dir(): string {
     $dir = '/tmp/progress_tests_v2';
     if (!is_dir($dir)) {
         @mkdir($dir, 0777, true);
@@ -17,23 +22,17 @@ function storage_base_dir(): string {
 }
 
 function make_test_dir(int $testId): string {
-    $dir = storage_base_dir() . '/' . $testId;
+    $dir = temp_base_dir() . '/' . $testId;
     if (!is_dir($dir)) {
         @mkdir($dir, 0777, true);
     }
     if (!is_dir($dir) || !is_writable($dir)) {
-        throw new RuntimeException('Test storage directory is not writable: ' . $dir);
+        throw new RuntimeException('Test temp directory is not writable: ' . $dir);
     }
-
-    $answersDir = $dir . '/answers';
-    if (!is_dir($answersDir)) {
-        @mkdir($answersDir, 0777, true);
-    }
-
     return $dir;
 }
 
-function tts_generate(string $text, string $file): void {
+function tts_generate_local(string $text, string $file): void {
     $apiKey = getenv('OPENAI_API_KEY');
     if (!$apiKey) $apiKey = getenv('CW_OPENAI_API_KEY');
     if (!$apiKey) {
@@ -59,7 +58,7 @@ function tts_generate(string $text, string $file): void {
             'Content-Type: application/json'
         ],
         CURLOPT_POSTFIELDS => $payload,
-        CURLOPT_TIMEOUT => 120
+        CURLOPT_TIMEOUT => 180
     ]);
 
     $audio = curl_exec($ch);
@@ -72,13 +71,17 @@ function tts_generate(string $text, string $file): void {
     }
 
     if (@file_put_contents($file, $audio) === false) {
-        throw new RuntimeException('Failed to write audio file: ' . $file);
+        throw new RuntimeException('Failed to write temp audio file: ' . $file);
+    }
+
+    if (!is_file($file) || filesize($file) <= 0) {
+        throw new RuntimeException('Generated temp audio file is missing or empty: ' . $file);
     }
 }
 
-function json_ok(array $x): void {
-    echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    exit;
+function read_json(string $s): array {
+    $j = json_decode($s, true);
+    return is_array($j) ? $j : [];
 }
 
 function clamp_questions(array $questions, int $target = 10): array {
@@ -91,6 +94,74 @@ function clamp_questions(array $questions, int $target = 10): array {
     return $out;
 }
 
+function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $payload): array {
+    $url = 'http://127.0.0.1/student/api/progress_test_spaces_presign.php';
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => array_filter([
+            'Content-Type: application/json',
+            $cookieHeader !== '' ? ('Cookie: ' . $cookieHeader) : null
+        ]),
+        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        CURLOPT_TIMEOUT => 60
+    ]);
+
+    $out = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if ($out === false || $code < 200 || $code >= 300) {
+        throw new RuntimeException("Presign request failed (HTTP {$code}) {$err} " . substr((string)$out, 0, 300));
+    }
+
+    $j = read_json((string)$out);
+    if (empty($j['ok']) || empty($j['url']) || empty($j['public_url'])) {
+        throw new RuntimeException('Invalid presign response');
+    }
+
+    return $j;
+}
+
+function upload_file_to_presigned_put(string $putUrl, string $localFile, string $contentType): void {
+    if (!is_file($localFile)) {
+        throw new RuntimeException('Local file not found for upload: ' . $localFile);
+    }
+
+    $fh = fopen($localFile, 'rb');
+    if (!$fh) {
+        throw new RuntimeException('Cannot open local file for upload: ' . $localFile);
+    }
+
+    $size = filesize($localFile);
+    $ch = curl_init($putUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_CUSTOMREQUEST => 'PUT',
+        CURLOPT_UPLOAD => true,
+        CURLOPT_INFILE => $fh,
+        CURLOPT_INFILESIZE => $size,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: ' . $contentType,
+            'Content-Length: ' . $size
+        ],
+        CURLOPT_TIMEOUT => 300
+    ]);
+
+    $out = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+    fclose($fh);
+
+    if ($out === false || $code < 200 || $code >= 299) {
+        throw new RuntimeException("Spaces upload failed (HTTP {$code}) {$err} " . substr((string)$out, 0, 300));
+    }
+}
+
 try {
     $u = cw_current_user($pdo);
     $role = (string)($u['role'] ?? '');
@@ -100,8 +171,8 @@ try {
         json_ok(['ok' => false, 'error' => 'Forbidden']);
     }
 
-    $data = json_decode(file_get_contents('php://input'), true);
-    if (!is_array($data)) {
+    $data = read_json((string)file_get_contents('php://input'));
+    if (!$data) {
         json_ok(['ok' => false, 'error' => 'Invalid JSON']);
     }
 
@@ -137,7 +208,7 @@ try {
     $pdo->prepare("
         INSERT INTO progress_tests_v2
         (user_id, cohort_id, lesson_id, attempt, status, seed, started_at)
-        VALUES (?,?,?,?, 'in_progress', ?, NOW())
+        VALUES (?,?,?,?, 'preparing', ?, NOW())
     ")->execute([$userId, $cohortId, $lessonId, $attempt, $seed]);
 
     $testId = (int)$pdo->lastInsertId();
@@ -355,17 +426,7 @@ Rules:
         if ($idx > 10) break;
     }
 
-    // -----------------------
-    // Generate audio files
-    // -----------------------
-    $name = trim((string)($u['name'] ?? 'student'));
-    if ($name === '') $name = 'student';
-    $parts = preg_split('/\s+/', $name);
-    $firstName = trim((string)($parts[0] ?? 'student'));
-
-    $intro = "Hello {$firstName}. I will now conduct your progress test.";
-    tts_generate($intro, $testDir . "/intro.mp3");
-
+    // Get item rows
     $items = $pdo->prepare("
         SELECT id, idx, prompt, kind, options_json
         FROM progress_test_items_v2
@@ -373,8 +434,44 @@ Rules:
         ORDER BY idx
     ");
     $items->execute([$testId]);
+    $itemRows = $items->fetchAll(PDO::FETCH_ASSOC);
 
-    foreach ($items as $it) {
+    $name = trim((string)($u['name'] ?? 'student'));
+    if ($name === '') $name = 'student';
+    $nameParts = preg_split('/\s+/', $name);
+    $firstName = trim((string)($nameParts[0] ?? 'student'));
+
+    // Build cookie header for internal presign endpoint
+    $cookieHeader = '';
+    if (!empty($_SERVER['HTTP_COOKIE'])) {
+        $cookieHeader = (string)$_SERVER['HTTP_COOKIE'];
+    }
+
+    // -----------------------
+    // Intro audio -> local temp -> Spaces
+    // -----------------------
+    $introText = "Hello {$firstName}. I will now conduct your progress test.";
+    $introLocal = $testDir . '/intro.mp3';
+    tts_generate_local($introText, $introLocal);
+
+    $introPresign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
+        'test_id' => $testId,
+        'kind'    => 'intro',
+        'ext'     => 'mp3'
+    ]);
+    upload_file_to_presigned_put((string)$introPresign['url'], $introLocal, 'audio/mpeg');
+    $introUrl = (string)$introPresign['public_url'];
+
+    // -----------------------
+    // Question audio -> local temp -> Spaces
+    // -----------------------
+    $questionUrls = [];
+    $itemIds = [];
+
+    foreach ($itemRows as $it) {
+        $itemId = (int)$it['id'];
+        $itemIds[] = $itemId;
+
         $kind = (string)$it['kind'];
         $spoken = "Question {$it['idx']}. " . (string)$it['prompt'];
 
@@ -394,44 +491,52 @@ Rules:
             $spoken .= " What is your answer, {$firstName}?";
         }
 
-        $file = $testDir . "/q_" . $it['id'] . ".mp3";
-        tts_generate($spoken, $file);
-    }
+        $localFile = $testDir . '/q_' . $itemId . '.mp3';
+        tts_generate_local($spoken, $localFile);
 
-    // -----------------------
-    // Return real item IDs
-    // -----------------------
-    $itemIds = [];
-    $items2 = $pdo->prepare("
-        SELECT id
-        FROM progress_test_items_v2
-        WHERE test_id=?
-        ORDER BY idx
-    ");
-    $items2->execute([$testId]);
-    foreach ($items2->fetchAll(PDO::FETCH_COLUMN) as $iid) {
-        $itemIds[] = (int)$iid;
+        $presign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
+            'test_id' => $testId,
+            'kind'    => 'question',
+            'item_id' => $itemId,
+            'ext'     => 'mp3'
+        ]);
+        upload_file_to_presigned_put((string)$presign['url'], $localFile, 'audio/mpeg');
+
+        $questionUrls[$itemId] = (string)$presign['public_url'];
     }
 
     $manifest = [
-        'test_id' => $testId,
+        'test_id'         => $testId,
         'total_questions' => count($itemIds),
-        'item_ids' => $itemIds
+        'item_ids'        => $itemIds,
+        'intro_url'       => $introUrl,
+        'question_urls'   => $questionUrls
     ];
-    $pdo->prepare("UPDATE progress_tests_v2 SET manifest_json=?, updated_at=NOW() WHERE id=?")
-        ->execute([json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES), $testId]);
+
+    $pdo->prepare("
+        UPDATE progress_tests_v2
+        SET status='ready',
+            manifest_json=?,
+            updated_at=NOW()
+        WHERE id=?
+    ")->execute([
+        json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        $testId
+    ]);
 
     json_ok([
-        'ok' => true,
-        'test_id' => $testId,
+        'ok'              => true,
+        'test_id'         => $testId,
         'total_questions' => count($itemIds),
-        'item_ids' => $itemIds
+        'item_ids'        => $itemIds,
+        'intro_url'       => $introUrl,
+        'question_urls'   => $questionUrls
     ]);
 
 } catch (Throwable $e) {
     http_response_code(400);
     json_ok([
-        'ok' => false,
+        'ok'    => false,
         'error' => $e->getMessage()
     ]);
 }
