@@ -148,8 +148,7 @@ cw_header('Course');
         if ($role === 'student' && $locked) $canTest = false;
         if ($role === 'student' && !$summaryOk) $canTest = false;
 
-        $ptUrlV1 = '/student/progress_test.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$l['lesson_id'].'&from=menu';
-        $ptUrlV2 = '/student/progress_test_v2.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$l['lesson_id'];
+        $ptUrlFull = '/student/progress_test.php?cohort_id='.(int)$cohortId.'&lesson_id='.(int)$l['lesson_id'].'&from=menu';
       ?>
       <tr>
         <td>
@@ -194,11 +193,11 @@ cw_header('Course');
               <form method="get" action="/student/progress_test.php" style="display:inline; position:relative; z-index:50;">
                 <input type="hidden" name="cohort_id" value="<?= (int)$cohortId ?>">
                 <input type="hidden" name="lesson_id" value="<?= (int)$lessonRowId ?>">
-                <input type="hidden" name="from" value="menu">
-                <button class="btn btn-sm" type="submit" style="pointer-events:auto;">Start V1.0</button>
+                <button class="btn btn-sm" type="submit" style="pointer-events:auto;">Take Progress Test</button>
               </form>
 
-              <a class="btn btn-sm" target="_blank" href="<?= h($ptUrlV2) ?>" style="margin-left:6px;">Start V2</a>
+              <a class="btn btn-sm" target="_blank" href="<?= h($ptUrlFull) ?>" style="margin-left:6px;">Open</a>
+              <div class="smallmuted" style="user-select:text;"><?= h($ptUrlFull) ?></div>
 
             <?php elseif ($locked): ?>
               <span class="muted">Locked</span>

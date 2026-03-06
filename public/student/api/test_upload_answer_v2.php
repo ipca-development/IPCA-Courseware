@@ -5,97 +5,126 @@ cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
 
 function json_out(array $x): void {
-    echo json_encode($x, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+    echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
-}
-
-function ensure_dir(string $dir): void {
-    if (!is_dir($dir)) @mkdir($dir, 0775, true);
-    if (!is_dir($dir)) throw new RuntimeException("Cannot create directory: " . $dir);
 }
 
 function storage_base_dir(): string {
     return dirname(__DIR__, 3) . '/storage/progress_tests_v2';
 }
 
-try {
-    $u = cw_current_user($pdo);
-    $role = (string)($u['role'] ?? '');
-    if ($role !== 'student' && $role !== 'admin') {
-        http_response_code(403);
-        json_out(['ok'=>false,'error'=>'Forbidden']);
-    }
+$u = cw_current_user($pdo);
+$role = (string)($u['role'] ?? '');
 
-    $testId = (int)($_POST['test_id'] ?? 0);
-    $idx    = (int)($_POST['idx'] ?? 0);
-    $timeoutOnly = ((string)($_POST['timeout'] ?? '') === '1');
-
-    if ($testId <= 0 || $idx <= 0) {
-        json_out(['ok'=>false,'error'=>'Missing test_id or idx']);
-    }
-
-    $userId = (int)($u['id'] ?? 0);
-    if ($role === 'student') {
-        $own = $pdo->prepare("SELECT 1 FROM progress_tests_v2 WHERE id=? AND user_id=? LIMIT 1");
-        $own->execute([$testId, $userId]);
-        if (!$own->fetchColumn()) {
-            http_response_code(403);
-            json_out(['ok'=>false,'error'=>'Forbidden']);
-        }
-    }
-
-    $itemSt = $pdo->prepare("SELECT id FROM progress_test_items_v2 WHERE test_id=? AND idx=? LIMIT 1");
-    $itemSt->execute([$testId, $idx]);
-    $itemId = (int)($itemSt->fetchColumn() ?: 0);
-    if ($itemId <= 0) json_out(['ok'=>false,'error'=>'Item not found']);
-
-    $baseDir = storage_base_dir() . '/' . $testId;
-    $answersDir = $baseDir . '/answers';
-    ensure_dir(storage_base_dir());
-    ensure_dir($baseDir);
-    ensure_dir($answersDir);
-
-    if ($timeoutOnly) {
-        $up = $pdo->prepare("
-          UPDATE progress_test_items_v2
-          SET transcript_text=?, audio_path=?, updated_at=NOW()
-          WHERE id=?
-        ");
-        $up->execute(['[TIMEOUT]', null, $itemId]);
-
-        $pdo->prepare("UPDATE progress_tests_v2 SET status='in_progress', updated_at=NOW() WHERE id=?")->execute([$testId]);
-
-        json_out(['ok'=>true]);
-    }
-
-    if (empty($_FILES['audio']) || !is_uploaded_file($_FILES['audio']['tmp_name'])) {
-        json_out(['ok'=>false,'error'=>'Missing uploaded audio']);
-    }
-
-    $tmp = $_FILES['audio']['tmp_name'];
-    $destName = 'q' . str_pad((string)$idx, 2, '0', STR_PAD_LEFT) . '.webm';
-    $dest = $answersDir . '/' . $destName;
-
-    if (!@move_uploaded_file($tmp, $dest)) {
-        if (!@copy($tmp, $dest)) {
-            throw new RuntimeException('Failed to save uploaded audio');
-        }
-    }
-
-    $relPath = 'answers/' . $destName;
-
-    $up = $pdo->prepare("
-      UPDATE progress_test_items_v2
-      SET audio_path=?, updated_at=NOW()
-      WHERE id=?
-    ");
-    $up->execute([$relPath, $itemId]);
-
-    $pdo->prepare("UPDATE progress_tests_v2 SET status='in_progress', updated_at=NOW() WHERE id=?")->execute([$testId]);
-
-    json_out(['ok'=>true]);
-
-} catch (Throwable $e) {
-    http_response_code(400);
-    json_out(['ok'=>false,'error'=>$e->getMessage()]);
+if ($role !== 'student' && $role !== 'admin') {
+    http_response_code(403);
+    json_out(['ok' => false, 'error' => 'Forbidden']);
 }
+
+$testId = (int)($_POST['test_id'] ?? 0);
+$idx    = (int)($_POST['idx'] ?? 0);
+$timeout = (int)($_POST['timeout'] ?? 0);
+
+if ($testId <= 0 || $idx <= 0) {
+    json_out(['ok' => false, 'error' => 'Missing test_id or idx']);
+}
+
+$userId = (int)($u['id'] ?? 0);
+
+if ($role === 'student') {
+    $own = $pdo->prepare("
+        SELECT 1
+        FROM progress_tests_v2
+        WHERE id=? AND user_id=?
+        LIMIT 1
+    ");
+    $own->execute([$testId, $userId]);
+
+    if (!$own->fetchColumn()) {
+        http_response_code(403);
+        json_out(['ok' => false, 'error' => 'Forbidden']);
+    }
+}
+
+$itemSt = $pdo->prepare("
+    SELECT id, idx
+    FROM progress_test_items_v2
+    WHERE test_id=? AND idx=?
+    LIMIT 1
+");
+$itemSt->execute([$testId, $idx]);
+$item = $itemSt->fetch(PDO::FETCH_ASSOC);
+
+if (!$item) {
+    json_out(['ok' => false, 'error' => 'Question item not found']);
+}
+
+$itemId = (int)$item['id'];
+
+$baseDir = storage_base_dir() . '/' . $testId;
+$answersDir = $baseDir . '/answers';
+
+if (!is_dir($answersDir)) {
+    @mkdir($answersDir, 0775, true);
+}
+if (!is_dir($answersDir)) {
+    json_out(['ok' => false, 'error' => 'Cannot create answers directory']);
+}
+
+$relPath = 'answers/q' . str_pad((string)$idx, 2, '0', STR_PAD_LEFT) . '.webm';
+$fullPath = $baseDir . '/' . $relPath;
+
+if ($timeout === 1) {
+    $upd = $pdo->prepare("
+        UPDATE progress_test_items_v2
+        SET transcript_text='[TIMEOUT]',
+            audio_path=NULL,
+            updated_at=NOW()
+        WHERE id=?
+    ");
+    $upd->execute([$itemId]);
+
+    json_out([
+        'ok' => true,
+        'test_id' => $testId,
+        'idx' => $idx,
+        'timeout' => true
+    ]);
+}
+
+if (empty($_FILES['audio']) || !isset($_FILES['audio']['tmp_name'])) {
+    json_out(['ok' => false, 'error' => 'Missing audio upload']);
+}
+
+$tmp = $_FILES['audio']['tmp_name'];
+$err = (int)($_FILES['audio']['error'] ?? UPLOAD_ERR_OK);
+
+if ($err !== UPLOAD_ERR_OK) {
+    json_out(['ok' => false, 'error' => 'Upload failed with error code ' . $err]);
+}
+
+if (!is_uploaded_file($tmp)) {
+    json_out(['ok' => false, 'error' => 'Invalid uploaded file']);
+}
+
+if (!@move_uploaded_file($tmp, $fullPath)) {
+    if (!@copy($tmp, $fullPath)) {
+        json_out(['ok' => false, 'error' => 'Failed to store uploaded audio']);
+    }
+}
+
+$upd = $pdo->prepare("
+    UPDATE progress_test_items_v2
+    SET audio_path=?,
+        transcript_text=NULL,
+        updated_at=NOW()
+    WHERE id=?
+");
+$upd->execute([$relPath, $itemId]);
+
+json_out([
+    'ok' => true,
+    'test_id' => $testId,
+    'idx' => $idx,
+    'audio_path' => $relPath
+]);

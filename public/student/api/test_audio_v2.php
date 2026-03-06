@@ -3,24 +3,17 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 
 cw_require_login();
 
-function file_or_404(string $path, string $contentType): void {
-    if (!is_file($path)) {
-        http_response_code(404);
-        exit('File not found');
-    }
-    header('Content-Type: ' . $contentType);
-    header('Content-Length: ' . filesize($path));
-    header('Cache-Control: no-store');
-    readfile($path);
-    exit;
-}
-
 function storage_base_dir(): string {
     return dirname(__DIR__, 3) . '/storage/progress_tests_v2';
 }
 
+function safe_path(string $path): string {
+    return str_replace(['..','\\'], '', $path);
+}
+
 $u = cw_current_user($pdo);
 $role = (string)($u['role'] ?? '');
+
 if ($role !== 'student' && $role !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
@@ -28,18 +21,24 @@ if ($role !== 'student' && $role !== 'admin') {
 
 $testId = (int)($_GET['test_id'] ?? 0);
 $kind   = (string)($_GET['kind'] ?? '');
-$idx    = (int)($_GET['idx'] ?? 0);
+$itemId = (int)($_GET['item_id'] ?? 0);
 
-if ($testId <= 0 || $kind === '') {
+if ($testId <= 0) {
     http_response_code(400);
-    exit('Missing parameters');
+    exit('Missing test_id');
 }
 
 $userId = (int)($u['id'] ?? 0);
 
 if ($role === 'student') {
-    $own = $pdo->prepare("SELECT 1 FROM progress_tests_v2 WHERE id=? AND user_id=? LIMIT 1");
+    $own = $pdo->prepare("
+        SELECT 1
+        FROM progress_tests_v2
+        WHERE id=? AND user_id=?
+        LIMIT 1
+    ");
     $own->execute([$testId, $userId]);
+
     if (!$own->fetchColumn()) {
         http_response_code(403);
         exit('Forbidden');
@@ -48,22 +47,37 @@ if ($role === 'student') {
 
 $baseDir = storage_base_dir() . '/' . $testId;
 
+$audioFile = '';
+
 if ($kind === 'intro') {
-    file_or_404($baseDir . '/intro.mp3', 'audio/mpeg');
+    $audioFile = $baseDir . '/intro.mp3';
 }
-
-if ($kind === 'item') {
-    if ($idx <= 0) {
+elseif ($kind === 'result') {
+    $audioFile = $baseDir . '/result.mp3';
+}
+elseif ($kind === 'question') {
+    if ($itemId <= 0) {
         http_response_code(400);
-        exit('Missing idx');
+        exit('Missing item_id');
     }
-    $fname = 'q' . str_pad((string)$idx, 2, '0', STR_PAD_LEFT) . '.mp3';
-    file_or_404($baseDir . '/' . $fname, 'audio/mpeg');
+
+    $audioFile = $baseDir . '/q_' . $itemId . '.mp3';
+}
+else {
+    http_response_code(400);
+    exit('Invalid kind');
 }
 
-if ($kind === 'result') {
-    file_or_404($baseDir . '/result.mp3', 'audio/mpeg');
+$audioFile = safe_path($audioFile);
+
+if (!is_file($audioFile)) {
+    http_response_code(404);
+    exit('Audio not found');
 }
 
-http_response_code(400);
-exit('Invalid kind');
+header('Content-Type: audio/mpeg');
+header('Content-Length: ' . filesize($audioFile));
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+
+readfile($audioFile);
+exit;

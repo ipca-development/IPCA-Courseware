@@ -6,7 +6,7 @@ cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
 
 function json_out(array $x): void {
-    echo json_encode($x, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+    echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
@@ -16,11 +16,11 @@ function storage_base_dir(): string {
 
 function tts_write_file(string $apiKey, string $model, string $voice, string $text, string $outfile): void {
     $payload = json_encode([
-        'model' => $model,
-        'voice' => $voice,
+        'model'  => $model,
+        'voice'  => $voice,
         'format' => 'mp3',
-        'input' => $text,
-    ], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+        'input'  => $text,
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
     $ch = curl_init('https://api.openai.com/v1/audio/speech');
     curl_setopt_array($ch, [
@@ -59,8 +59,8 @@ function transcribe_file(string $apiKey, string $filepath): string {
 
     $cfile = curl_file_create($filepath, 'audio/webm', basename($filepath));
     $post = [
-        'file' => $cfile,
-        'model' => 'gpt-4o-mini-transcribe',
+        'file'     => $cfile,
+        'model'    => 'gpt-4o-mini-transcribe',
         'language' => 'en',
     ];
 
@@ -100,7 +100,7 @@ function grade_yesno(string $transcript, array $correct): array {
     $cv = (bool)($correct['value'] ?? false);
     $ok = ($sv !== null && $sv === $cv) ? 1 : 0;
 
-    return ['is_correct'=>$ok, 'score_points'=>$ok, 'max_points'=>1];
+    return ['is_correct' => $ok, 'score_points' => $ok, 'max_points' => 1, 'feedback' => ''];
 }
 
 function grade_mcq(string $transcript, array $correct, array $options): array {
@@ -108,18 +108,20 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
     $idx = -1;
 
     if (preg_match('/\b(a|b|c|d)\b/', $t, $m)) {
-        $map = ['a'=>0,'b'=>1,'c'=>2,'d'=>3];
+        $map = ['a' => 0, 'b' => 1, 'c' => 2, 'd' => 3];
         $idx = $map[$m[1]];
     } elseif (preg_match('/\b(1|2|3|4)\b/', $t, $m)) {
         $idx = ((int)$m[1]) - 1;
     } else {
-        $bestIdx = -1; $bestScore = 0;
-        foreach ($options as $i=>$opt) {
+        $bestIdx = -1;
+        $bestScore = 0;
+        foreach ($options as $i => $opt) {
             $o = normalize_text((string)$opt);
             if ($o === '') continue;
             $score = 0;
-            if (strpos($t, $o) !== false) $score = 100;
-            else {
+            if (strpos($t, $o) !== false) {
+                $score = 100;
+            } else {
                 $words = array_filter(explode(' ', $o));
                 foreach ($words as $w) {
                     if (strlen($w) >= 4 && strpos($t, $w) !== false) $score++;
@@ -136,12 +138,10 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
     $ci = (int)($correct['index'] ?? -1);
     $ok = ($idx === $ci) ? 1 : 0;
 
-    return ['is_correct'=>$ok, 'score_points'=>$ok, 'max_points'=>1];
+    return ['is_correct' => $ok, 'score_points' => $ok, 'max_points' => 1, 'feedback' => ''];
 }
 
 function grade_open_with_ai(array $item, string $transcript): array {
-    global $pdo;
-
     $correct = json_decode((string)($item['correct_json'] ?? '{}'), true) ?: [];
     $keyPoints = $correct['key_points'] ?? [];
     if (!is_array($keyPoints)) $keyPoints = [];
@@ -149,43 +149,46 @@ function grade_open_with_ai(array $item, string $transcript): array {
     if ($minPts < 1) $minPts = 1;
 
     $schema = [
-      "type" => "object",
-      "additionalProperties" => false,
-      "properties" => [
-        "score_points" => ["type"=>"integer"],
-        "max_points"   => ["type"=>"integer"],
-        "is_correct"   => ["type"=>"boolean"],
-        "feedback"     => ["type"=>"string"]
-      ],
-      "required" => ["score_points","max_points","is_correct","feedback"]
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => [
+            "score_points" => ["type" => "integer"],
+            "max_points"   => ["type" => "integer"],
+            "is_correct"   => ["type" => "boolean"],
+            "feedback"     => ["type" => "string"]
+        ],
+        "required" => ["score_points", "max_points", "is_correct", "feedback"]
     ];
 
     $payload = [
-      "model" => cw_openai_model(),
-      "input" => [
-        ["role"=>"system","content"=>[
-          ["type"=>"input_text","text"=>
+        "model" => cw_openai_model(),
+        "input" => [
+            ["role" => "system", "content" => [
+                ["type" => "input_text", "text" =>
 "You are grading one open-answer oral progress test response.
 Be strict and fair.
 Evaluate only against the supplied rubric key points.
 Do not invent facts."
-          ]
-        ]],
-        ["role"=>"user","content"=>[
-          ["type"=>"input_text","text"=>
-"QUESTION:\n" . (string)$item['prompt'] . "\n\nRUBRIC KEY POINTS:\n- " . implode("\n- ", $keyPoints) . "\n\nMIN POINTS TO PASS: {$minPts}\n\nSTUDENT TRANSCRIPT:\n" . $transcript
-          ]
-        ]]
-      ],
-      "text" => [
-        "format" => [
-          "type" => "json_schema",
-          "name" => "open_grade_v2",
-          "schema" => $schema,
-          "strict" => true
-        ]
-      ],
-      "temperature" => 0.1
+                ]
+            ]],
+            ["role" => "user", "content" => [
+                ["type" => "input_text", "text" =>
+"QUESTION:\n" . (string)$item['prompt'] .
+"\n\nRUBRIC KEY POINTS:\n- " . implode("\n- ", $keyPoints) .
+"\n\nMIN POINTS TO PASS: {$minPts}" .
+"\n\nSTUDENT TRANSCRIPT:\n" . $transcript
+                ]
+            ]]
+        ],
+        "text" => [
+            "format" => [
+                "type"   => "json_schema",
+                "name"   => "open_grade_v2",
+                "schema" => $schema,
+                "strict" => true
+            ]
+        ],
+        "temperature" => 0.1
     ];
 
     $resp = cw_openai_responses($payload);
@@ -201,9 +204,249 @@ Do not invent facts."
     if ($scorePoints >= $minPts) $isCorrect = 1;
 
     return [
-        'is_correct' => $isCorrect,
+        'is_correct'   => $isCorrect,
         'score_points' => $scorePoints,
-        'max_points' => $maxPoints,
-        'feedback' => trim((string)($j['feedback'] ?? ''))
+        'max_points'   => $maxPoints,
+        'feedback'     => trim((string)($j['feedback'] ?? ''))
     ];
+}
+
+try {
+    $u = cw_current_user($pdo);
+    $role = (string)($u['role'] ?? '');
+    if ($role !== 'student' && $role !== 'admin') {
+        http_response_code(403);
+        json_out(['ok' => false, 'error' => 'Forbidden']);
+    }
+
+    $raw = file_get_contents('php://input');
+    $data = json_decode($raw, true);
+    if (!is_array($data)) json_out(['ok' => false, 'error' => 'Invalid JSON']);
+
+    $testId = (int)($data['test_id'] ?? 0);
+    if ($testId <= 0) json_out(['ok' => false, 'error' => 'Missing test_id']);
+
+    $userId = (int)($u['id'] ?? 0);
+    if ($role === 'student') {
+        $own = $pdo->prepare("SELECT 1 FROM progress_tests_v2 WHERE id=? AND user_id=? LIMIT 1");
+        $own->execute([$testId, $userId]);
+        if (!$own->fetchColumn()) {
+            http_response_code(403);
+            json_out(['ok' => false, 'error' => 'Forbidden']);
+        }
+    }
+
+    $tst = $pdo->prepare("SELECT * FROM progress_tests_v2 WHERE id=? LIMIT 1");
+    $tst->execute([$testId]);
+    $test = $tst->fetch(PDO::FETCH_ASSOC);
+    if (!$test) json_out(['ok' => false, 'error' => 'Test not found']);
+
+    $cohortId = (int)($test['cohort_id'] ?? 0);
+    $lessonId = (int)($test['lesson_id'] ?? 0);
+
+    $apiKey = getenv('OPENAI_API_KEY');
+    if (!$apiKey) $apiKey = getenv('CW_OPENAI_API_KEY');
+    if (!$apiKey) throw new RuntimeException('Missing OPENAI_API_KEY');
+
+    $ttsModel = getenv('CW_OPENAI_TTS_MODEL') ?: 'gpt-4o-mini-tts';
+    $ttsVoice = getenv('CW_OPENAI_TTS_VOICE') ?: 'alloy';
+
+    $pdo->prepare("UPDATE progress_tests_v2 SET status='processing', updated_at=NOW() WHERE id=?")->execute([$testId]);
+
+    $itemsSt = $pdo->prepare("SELECT * FROM progress_test_items_v2 WHERE test_id=? ORDER BY idx ASC");
+    $itemsSt->execute([$testId]);
+    $items = $itemsSt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$items) json_out(['ok' => false, 'error' => 'No items found']);
+
+    $baseDir = storage_base_dir() . '/' . $testId;
+
+    $updItem = $pdo->prepare("
+      UPDATE progress_test_items_v2
+      SET transcript_text=?, is_correct=?, score_points=?, max_points=?, updated_at=NOW()
+      WHERE id=?
+    ");
+
+    $totalScore = 0;
+    $totalMax = 0;
+    $log = [];
+
+    foreach ($items as $item) {
+        $kind = (string)$item['kind'];
+        $options = json_decode((string)($item['options_json'] ?? '[]'), true) ?: [];
+        $correct = json_decode((string)($item['correct_json'] ?? '{}'), true) ?: [];
+        $audioRel = trim((string)($item['audio_path'] ?? ''));
+        $transcript = trim((string)($item['transcript_text'] ?? ''));
+
+        if ($transcript === '') {
+            if ($audioRel !== '') {
+                $fullPath = $baseDir . '/' . $audioRel;
+                $transcript = transcribe_file($apiKey, $fullPath);
+            }
+        }
+
+        if ($transcript === '') $transcript = '[NO AUDIO]';
+
+        if ($transcript === '[TIMEOUT]') {
+            $grade = [
+                'is_correct'   => 0,
+                'score_points' => 0,
+                'max_points'   => ($kind === 'open') ? max(1, (int)($correct['min_points_to_pass'] ?? 2)) : 1,
+                'feedback'     => 'No answer recorded.'
+            ];
+        } elseif ($kind === 'yesno') {
+            $grade = grade_yesno($transcript, $correct);
+        } elseif ($kind === 'mcq') {
+            $grade = grade_mcq($transcript, $correct, $options);
+        } else {
+            $grade = grade_open_with_ai($item, $transcript);
+        }
+
+        $updItem->execute([
+            $transcript,
+            (int)$grade['is_correct'],
+            (int)$grade['score_points'],
+            (int)$grade['max_points'],
+            (int)$item['id']
+        ]);
+
+        $totalScore += (int)$grade['score_points'];
+        $totalMax   += (int)$grade['max_points'];
+
+        $log[] = [
+            'idx'          => (int)$item['idx'],
+            'kind'         => $kind,
+            'prompt'       => (string)$item['prompt'],
+            'transcript'   => $transcript,
+            'is_correct'   => (int)$grade['is_correct'],
+            'score_points' => (int)$grade['score_points'],
+            'max_points'   => (int)$grade['max_points'],
+            'feedback'     => (string)($grade['feedback'] ?? ''),
+        ];
+    }
+
+    $scorePct = ($totalMax > 0) ? (int)round(($totalScore / $totalMax) * 100) : 0;
+
+    $nq = $pdo->prepare("
+      SELECT s.page_number, e.narration_en
+      FROM slides s
+      JOIN slide_enrichment e ON e.slide_id = s.id
+      WHERE s.lesson_id=? AND s.is_deleted=0
+        AND e.narration_en IS NOT NULL AND e.narration_en <> ''
+      ORDER BY s.page_number ASC
+    ");
+    $nq->execute([$lessonId]);
+    $nrows = $nq->fetchAll(PDO::FETCH_ASSOC);
+
+    $truthBlocks = [];
+    foreach ($nrows as $r) {
+        $pg = (int)($r['page_number'] ?? 0);
+        $tx = trim((string)($r['narration_en'] ?? ''));
+        if ($tx !== '') $truthBlocks[] = "Slide {$pg}: {$tx}";
+    }
+    $truthText = implode("\n\n", $truthBlocks);
+    if ($truthText === '') $truthText = "(No narration scripts available.)";
+
+    $sq = $pdo->prepare("
+      SELECT summary_plain
+      FROM lesson_summaries
+      WHERE user_id=? AND cohort_id=? AND lesson_id=?
+      LIMIT 1
+    ");
+    $sq->execute([$userId, $cohortId, $lessonId]);
+    $summaryPlain = trim((string)($sq->fetchColumn() ?: ''));
+    if ($summaryPlain === '') $summaryPlain = "(No student summary.)";
+
+    $schema = [
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => [
+            "written_debrief" => ["type" => "string"],
+            "spoken_debrief"  => ["type" => "string"],
+            "weak_areas"      => ["type" => "string"]
+        ],
+        "required" => ["written_debrief", "spoken_debrief", "weak_areas"]
+    ];
+
+    $payload = [
+        "model" => cw_openai_model(),
+        "input" => [
+            ["role" => "system", "content" => [
+                ["type" => "input_text", "text" =>
+"You are a strict but supportive flight instructor.
+
+SOURCE OF TRUTH:
+- Lesson narration scripts are the only truth source.
+- Student summary is not truth and may contain mistakes.
+
+TASK:
+1) Write a concise but useful written debrief.
+2) Write a spoken debrief suitable for TTS.
+3) Identify weak areas the student should review.
+
+Do not invent facts beyond the lesson narration."
+                ]
+            ]],
+            ["role" => "user", "content" => [
+                ["type" => "input_text", "text" =>
+"SCORE: {$scorePct}%\n\nLESSON NARRATION (TRUTH):\n{$truthText}\n\nSTUDENT SUMMARY:\n{$summaryPlain}\n\nTEST LOG JSON:\n" .
+json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                ]
+            ]]
+        ],
+        "text" => [
+            "format" => [
+                "type"   => "json_schema",
+                "name"   => "debrief_v2",
+                "schema" => $schema,
+                "strict" => true
+            ]
+        ],
+        "temperature" => 0.2
+    ];
+
+    $written = "Score {$scorePct}%.";
+    $spoken  = "Your score is {$scorePct} percent. Please review your results.";
+    $weak    = "Review the items you missed.";
+
+    try {
+        $resp = cw_openai_responses($payload);
+        $j = cw_openai_extract_json_text($resp);
+        $written = trim((string)($j['written_debrief'] ?? $written));
+        $spoken  = trim((string)($j['spoken_debrief'] ?? $spoken));
+        $weak    = trim((string)($j['weak_areas'] ?? $weak));
+    } catch (Throwable $e) {
+        // keep fallbacks
+    }
+
+    $resultAudio = $baseDir . '/result.mp3';
+    $name = trim((string)($u['name'] ?? 'student'));
+    if ($name === '') $name = 'student';
+    $resultSpeech = "Thank you {$name}. Your score is {$scorePct} percent. {$spoken}";
+    tts_write_file($apiKey, $ttsModel, $ttsVoice, $resultSpeech, $resultAudio);
+
+    $upTest = $pdo->prepare("
+      UPDATE progress_tests_v2
+      SET status='completed',
+          score_pct=?,
+          ai_summary=?,
+          weak_areas=?,
+          debrief_spoken=?,
+          completed_at=NOW(),
+          updated_at=NOW()
+      WHERE id=?
+    ");
+    $upTest->execute([$scorePct, $written, $weak, $spoken, $testId]);
+
+    json_out([
+        'ok'           => true,
+        'test_id'      => $testId,
+        'score_pct'    => $scorePct,
+        'ai_summary'   => $written,
+        'weak_areas'   => $weak,
+        'result_audio' => '/student/api/test_audio_v2.php?test_id=' . $testId . '&kind=result',
+    ]);
+
+} catch (Throwable $e) {
+    http_response_code(400);
+    json_out(['ok' => false, 'error' => $e->getMessage()]);
 }
