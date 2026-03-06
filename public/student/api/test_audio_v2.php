@@ -21,6 +21,7 @@ $itemId = (int)($_GET['item_id'] ?? 0);
 
 if ($testId <= 0) {
     http_response_code(400);
+    header('Content-Type: text/plain; charset=utf-8');
     exit('Missing test_id');
 }
 
@@ -37,6 +38,7 @@ if ($role === 'student') {
 
     if (!$own->fetchColumn()) {
         http_response_code(403);
+        header('Content-Type: text/plain; charset=utf-8');
         exit('Forbidden');
     }
 }
@@ -51,21 +53,37 @@ if ($kind === 'intro') {
 } elseif ($kind === 'question') {
     if ($itemId <= 0) {
         http_response_code(400);
+        header('Content-Type: text/plain; charset=utf-8');
         exit('Missing item_id');
     }
     $audioFile = $baseDir . '/q_' . $itemId . '.mp3';
 } else {
     http_response_code(400);
+    header('Content-Type: text/plain; charset=utf-8');
     exit('Invalid kind');
+}
+
+if (!is_dir($baseDir)) {
+    http_response_code(404);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('Base test directory not found: ' . $baseDir);
 }
 
 if (!is_file($audioFile)) {
     http_response_code(404);
-    exit('Audio not found');
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('Audio not found: ' . $audioFile);
+}
+
+$size = @filesize($audioFile);
+if ($size === false || $size <= 0) {
+    http_response_code(500);
+    header('Content-Type: text/plain; charset=utf-8');
+    exit('Audio file is empty or unreadable: ' . $audioFile);
 }
 
 header('Content-Type: audio/mpeg');
-header('Content-Length: ' . filesize($audioFile));
+header('Content-Length: ' . $size);
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
 readfile($audioFile);
