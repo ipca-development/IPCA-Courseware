@@ -405,7 +405,7 @@ try {
     if (!$apiKey) throw new RuntimeException('Missing OPENAI_API_KEY');
 
     $ttsModel = getenv('CW_OPENAI_TTS_MODEL') ?: 'gpt-4o-mini-tts';
-    $ttsVoice = getenv('CW_OPENAI_TTS_VOICE') ?: 'alloy';
+    $ttsVoice = getenv('CW_OPENAI_TTS_VOICE') ?: 'marin';
 
     $pdo->prepare("UPDATE progress_tests_v2 SET status='processing', updated_at=NOW() WHERE id=?")->execute([$testId]);
 

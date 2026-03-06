@@ -170,18 +170,6 @@ cw_header('Progress Test');
     color:#b91c1c;
   }
 
-  .btn-row{
-    display:flex;
-    gap:10px;
-    flex-wrap:wrap;
-    margin-top:14px;
-  }
-  .btn-half{
-    flex:1 1 220px;
-    width:auto;
-    margin-top:0;
-  }
-
   .timer-wrap{ margin-top:12px; }
   .timer-pill{
     height:14px;
@@ -276,11 +264,7 @@ cw_header('Progress Test');
     <div class="qstrip" id="qstrip" style="display:none;"></div>
 
     <button class="ptt" id="btnStart" type="button" disabled>Start Progress Test</button>
-
-    <div class="btn-row" id="answerBtns" style="display:none;">
-      <button class="ptt btn-half" id="btnPTT" type="button" disabled>🎙 Tap to Start Talking</button>
-      <button class="ptt btn-half" id="btnReplay" type="button" disabled>↺ Replay Question</button>
-    </div>
+    <button class="ptt" id="btnPTT" type="button" disabled style="display:none;">🎙 Tap to Start Talking</button>
 
     <div class="timer-wrap" id="answerWrap" style="display:none;">
       <div class="timer-pill"><div class="timer-fill" id="answerFill"></div></div>
@@ -312,19 +296,13 @@ let chunks = [];
 let answerLeft = 60;
 let answerInt = null;
 
+/* NEW: pre-generated Spaces/CDN audio */
 let INTRO_URL = '';
 let QUESTION_URLS = {};
 let RESULT_URL = '';
 
-let INTRO_BLOB_URL = '';
-let QUESTION_BLOB_URLS = {};
-let CURRENT_QUESTION_BLOB_URL = '';
-let preloadDone = false;
-
 const btnStart = document.getElementById('btnStart');
 const btnPTT = document.getElementById('btnPTT');
-const btnReplay = document.getElementById('btnReplay');
-const answerBtns = document.getElementById('answerBtns');
 const sysline = document.getElementById('sysline');
 const prepFill = document.getElementById('prepFill');
 const prepText = document.getElementById('prepText');
@@ -378,52 +356,12 @@ function markDone(i){
   if(el) el.classList.add('done');
 }
 
-async function fetchBlobUrl(url){
-  if(!url) return '';
-  const res = await fetch(url, {
-    method:'GET',
-    credentials:'omit',
-    cache:'force-cache'
-  });
-  if(!res.ok) throw new Error('Audio fetch failed: HTTP ' + res.status);
-  const blob = await res.blob();
-  if(!blob || blob.size <= 0) throw new Error('Audio blob empty');
-  return URL.createObjectURL(blob);
-}
-
-async function preloadAllAudio(){
-  setSys('Loading audio...');
-  prepLabel.textContent = 'Audio buffering';
-  setPrep(0);
-
-  const total = 1 + ITEM_IDS.length;
-  let done = 0;
-
-  INTRO_BLOB_URL = await fetchBlobUrl(INTRO_URL);
-  done++;
-  setPrep(Math.round((done / total) * 100));
-
-  for(let i=0;i<ITEM_IDS.length;i++){
-    const itemId = ITEM_IDS[i];
-    const src = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
-    QUESTION_BLOB_URLS[itemId] = await fetchBlobUrl(src);
-    done++;
-    setPrep(Math.round((done / total) * 100));
-  }
-
-  preloadDone = true;
-  prepLabel.textContent = 'Preparation progress';
-  setPrep(100);
-  setSys(FIRST_NAME + ', your progress test is ready.');
-  btnStart.disabled = false;
-}
-
 async function prepareTest(){
   await startCam();
 
   let p = 0;
   const tick = setInterval(()=>{
-    p = Math.min(70, p + 4);
+    p = Math.min(92, p + 4);
     setPrep(p);
   }, 250);
 
@@ -462,17 +400,14 @@ async function prepareTest(){
     for(let i=1;i<=TOTAL_QUESTIONS;i++) ITEM_IDS.push(i);
   }
 
+  /* NEW: store pre-generated audio URLs from backend */
   INTRO_URL = String(j.intro_url || '');
   QUESTION_URLS = (j.question_urls && typeof j.question_urls === 'object') ? j.question_urls : {};
 
   renderDots(TOTAL_QUESTIONS);
-
-  try{
-    await preloadAllAudio();
-  }catch(e){
-    setPrep(100);
-    setSys('Loading audio failed: ' + (e && e.message ? e.message : 'Unknown error'));
-  }
+  setPrep(100);
+  setSys(FIRST_NAME + ', your progress test is ready.');
+  btnStart.disabled = false;
 }
 
 async function playAudio(url){
@@ -490,24 +425,18 @@ async function playAudio(url){
   });
 }
 
+/* OLD introUrl/questionUrl helpers removed from active flow */
 function resultUrl(){
   return '/student/api/test_audio_v2.php?test_id=' + encodeURIComponent(TEST_ID) + '&kind=result';
 }
 
 async function startFlow(){
   btnStart.disabled = true;
-
-  if(!preloadDone || !INTRO_BLOB_URL){
-    setSys('Loading audio...');
-    btnStart.disabled = false;
-    return;
-  }
-
   setSys('Maya is speaking...');
-  const ok = await playAudio(INTRO_BLOB_URL);
+
+  const ok = await playAudio(INTRO_URL);
   if (!ok) {
     setSys('Intro audio failed.');
-    btnStart.disabled = false;
     return;
   }
 
@@ -522,13 +451,7 @@ async function askCurrent(){
     return;
   }
 
-  const qUrl = QUESTION_BLOB_URLS[itemId] || QUESTION_BLOB_URLS[String(itemId)] || '';
-  CURRENT_QUESTION_BLOB_URL = qUrl;
-
-  if(!qUrl){
-    setSys('Loading audio...');
-    return;
-  }
+  const qUrl = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
 
   setSys('Maya is speaking...');
   const ok = await playAudio(qUrl);
@@ -537,37 +460,10 @@ async function askCurrent(){
     return;
   }
 
-  answerBtns.style.display = 'flex';
   btnPTT.style.display = 'block';
   btnPTT.disabled = false;
-  btnReplay.disabled = false;
   answerWrap.style.display = 'block';
   setSys('Your turn.');
-  startAnswerTimer();
-}
-
-async function replayCurrentQuestion(){
-  if(isRecording) return;
-  if(!CURRENT_QUESTION_BLOB_URL){
-    setSys('Loading audio...');
-    return;
-  }
-
-  btnPTT.disabled = true;
-  btnReplay.disabled = true;
-  stopAnswerTimer();
-
-  setSys('Maya is speaking...');
-  const ok = await playAudio(CURRENT_QUESTION_BLOB_URL);
-
-  if(!ok){
-    setSys('Replay failed.');
-  } else {
-    setSys('Your turn.');
-  }
-
-  btnPTT.disabled = false;
-  btnReplay.disabled = false;
   startAnswerTimer();
 }
 
@@ -637,18 +533,14 @@ btnPTT.addEventListener('click', async ()=>{
   if (!TEST_ID) return;
   if (!isRecording) {
     stopAnswerTimer();
-    btnReplay.disabled = true;
     await startRecording();
   } else {
     await stopRecording();
   }
 });
 
-btnReplay.addEventListener('click', replayCurrentQuestion);
-
 async function uploadAnswerBlob(blob, timeoutOnly){
   btnPTT.disabled = true;
-  btnReplay.disabled = true;
   setSys('Saving your answer...');
 
   const fd = new FormData();
@@ -674,7 +566,6 @@ async function uploadAnswerBlob(blob, timeoutOnly){
   if (!j.ok) {
     setSys('Upload failed: ' + (j.error || 'Unknown error'));
     btnPTT.disabled = false;
-    btnReplay.disabled = false;
     startAnswerTimer();
     return;
   }
@@ -688,13 +579,11 @@ async function uploadAnswerBlob(blob, timeoutOnly){
   }
 
   btnPTT.disabled = true;
-  btnReplay.disabled = true;
   await askCurrent();
 }
 
 async function finalizeTest(){
   btnPTT.disabled = true;
-  btnReplay.disabled = true;
   prepLabel.textContent = 'Evaluation progress';
   setPrep(10);
   setSys('I am evaluating your answers... please standby.');
