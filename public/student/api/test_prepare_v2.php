@@ -24,10 +24,12 @@ function make_test_dir(int $testId): string {
     if (!is_dir($dir) || !is_writable($dir)) {
         throw new RuntimeException('Test storage directory is not writable: ' . $dir);
     }
+
     $answersDir = $dir . '/answers';
     if (!is_dir($answersDir)) {
         @mkdir($answersDir, 0777, true);
     }
+
     return $dir;
 }
 
@@ -141,6 +143,9 @@ try {
     $testId = (int)$pdo->lastInsertId();
     $testDir = make_test_dir($testId);
 
+    // -----------------------
+    // Load narration scripts
+    // -----------------------
     $nq = $pdo->prepare("
         SELECT e.narration_en
         FROM slides s
@@ -160,6 +165,9 @@ try {
         $truth = "(No narration scripts available.)";
     }
 
+    // -----------------------
+    // Load summary
+    // -----------------------
     $sq = $pdo->prepare("
         SELECT summary_plain
         FROM lesson_summaries
@@ -170,26 +178,51 @@ try {
     $summary = trim((string)$sq->fetchColumn());
     if ($summary === '') $summary = "(No student summary.)";
 
+    // -----------------------
+    // Generate questions
+    // -----------------------
     $schema = [
         "type" => "object",
+        "additionalProperties" => false,
         "properties" => [
             "questions" => [
                 "type" => "array",
                 "items" => [
                     "type" => "object",
+                    "additionalProperties" => false,
                     "properties" => [
-                        "kind"    => ["type" => "string"],
-                        "prompt"  => ["type" => "string"],
-                        "options" => ["type" => "array", "items" => ["type" => "string"]],
-                        "correct" => ["type" => "object"]
+                        "kind" => [
+                            "type" => "string",
+                            "enum" => ["yesno", "mcq", "open"]
+                        ],
+                        "prompt" => [
+                            "type" => "string"
+                        ],
+                        "options" => [
+                            "type" => "array",
+                            "items" => ["type" => "string"]
+                        ],
+                        "correct" => [
+                            "type" => "object",
+                            "additionalProperties" => false,
+                            "properties" => [
+                                "value" => ["type" => ["boolean", "null"]],
+                                "index" => ["type" => ["integer", "null"]],
+                                "type" => ["type" => ["string", "null"]],
+                                "key_points" => [
+                                    "type" => "array",
+                                    "items" => ["type" => "string"]
+                                ],
+                                "min_points_to_pass" => ["type" => ["integer", "null"]]
+                            ],
+                            "required" => ["value", "index", "type", "key_points", "min_points_to_pass"]
+                        ]
                     ],
-                    "required" => ["kind", "prompt", "options", "correct"],
-                    "additionalProperties" => false
+                    "required" => ["kind", "prompt", "options", "correct"]
                 ]
             ]
         ],
-        "required" => ["questions"],
-        "additionalProperties" => false
+        "required" => ["questions"]
     ];
 
     $payload = [
@@ -202,7 +235,12 @@ try {
 "Create exactly 10 oral flight training questions.
 Use ONLY the lesson narration text.
 Use summary only to detect misconceptions.
-Mix yesno, mcq and open questions."
+Mix yesno, mcq and open questions.
+
+Rules:
+- yesno: options should be [], correct.value true/false, correct.index null, correct.type null, correct.key_points [], correct.min_points_to_pass null
+- mcq: exactly 4 options, correct.index 0..3, correct.value null, correct.type null, correct.key_points [], correct.min_points_to_pass null
+- open: options [], correct.type rubric, correct.key_points 3-6 strings, correct.min_points_to_pass integer, correct.value null, correct.index null"
                     ]
                 ]
             ],
@@ -237,23 +275,44 @@ Mix yesno, mcq and open questions."
                 'kind' => 'yesno',
                 'prompt' => 'Based on the lesson, is the checklist used to reduce errors?',
                 'options' => [],
-                'correct' => ['value' => true]
+                'correct' => [
+                    'value' => true,
+                    'index' => null,
+                    'type' => null,
+                    'key_points' => [],
+                    'min_points_to_pass' => null
+                ]
             ],
             [
                 'kind' => 'mcq',
                 'prompt' => 'Based on the lesson, which part is primarily responsible for lift?',
                 'options' => ['Wings', 'Brakes', 'Seat', 'Spinner'],
-                'correct' => ['index' => 0]
+                'correct' => [
+                    'value' => null,
+                    'index' => 0,
+                    'type' => null,
+                    'key_points' => [],
+                    'min_points_to_pass' => null
+                ]
             ],
             [
                 'kind' => 'open',
                 'prompt' => 'Explain why pilots use checklists.',
                 'options' => [],
-                'correct' => ['type' => 'rubric', 'key_points' => ['reduce errors', 'standardize', 'safety'], 'min_points_to_pass' => 2]
+                'correct' => [
+                    'value' => null,
+                    'index' => null,
+                    'type' => 'rubric',
+                    'key_points' => ['reduce errors', 'standardize', 'safety'],
+                    'min_points_to_pass' => 2
+                ]
             ],
         ];
     }
 
+    // -----------------------
+    // Save questions
+    // -----------------------
     $ins = $pdo->prepare("
         INSERT INTO progress_test_items_v2
         (test_id, idx, kind, prompt, options_json, correct_json)
@@ -266,8 +325,22 @@ Mix yesno, mcq and open questions."
         $prompt = trim((string)($qq['prompt'] ?? ''));
         if ($prompt === '') $prompt = 'Question ' . $idx;
 
-        $options = json_encode($qq['options'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $correct = json_encode($qq['correct'] ?? [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $optionsArr = $qq['options'] ?? [];
+        if (!is_array($optionsArr)) $optionsArr = [];
+
+        $correctArr = $qq['correct'] ?? [];
+        if (!is_array($correctArr)) {
+            $correctArr = [
+                'value' => null,
+                'index' => null,
+                'type' => null,
+                'key_points' => [],
+                'min_points_to_pass' => null
+            ];
+        }
+
+        $options = json_encode($optionsArr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $correct = json_encode($correctArr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         $ins->execute([
             $testId,
@@ -282,6 +355,9 @@ Mix yesno, mcq and open questions."
         if ($idx > 10) break;
     }
 
+    // -----------------------
+    // Generate audio files
+    // -----------------------
     $name = trim((string)($u['name'] ?? 'student'));
     if ($name === '') $name = 'student';
     $parts = preg_split('/\s+/', $name);
@@ -322,6 +398,9 @@ Mix yesno, mcq and open questions."
         tts_generate($spoken, $file);
     }
 
+    // -----------------------
+    // Return real item IDs
+    // -----------------------
     $itemIds = [];
     $items2 = $pdo->prepare("
         SELECT id
