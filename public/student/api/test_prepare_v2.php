@@ -146,7 +146,8 @@ function upload_file_to_presigned_put(string $putUrl, string $localFile, string 
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
             'Content-Type: ' . $contentType,
-            'Content-Length: ' . $size
+            'Content-Length: ' . $size,
+            'x-amz-acl: public-read'
         ],
         CURLOPT_TIMEOUT => 300
     ]);
@@ -214,9 +215,6 @@ try {
     $testId = (int)$pdo->lastInsertId();
     $testDir = make_test_dir($testId);
 
-    // -----------------------
-    // Load narration scripts
-    // -----------------------
     $nq = $pdo->prepare("
         SELECT e.narration_en
         FROM slides s
@@ -236,9 +234,6 @@ try {
         $truth = "(No narration scripts available.)";
     }
 
-    // -----------------------
-    // Load summary
-    // -----------------------
     $sq = $pdo->prepare("
         SELECT summary_plain
         FROM lesson_summaries
@@ -249,9 +244,6 @@ try {
     $summary = trim((string)$sq->fetchColumn());
     if ($summary === '') $summary = "(No student summary.)";
 
-    // -----------------------
-    // Generate questions
-    // -----------------------
     $schema = [
         "type" => "object",
         "additionalProperties" => false,
@@ -381,9 +373,6 @@ Rules:
         ];
     }
 
-    // -----------------------
-    // Save questions
-    // -----------------------
     $ins = $pdo->prepare("
         INSERT INTO progress_test_items_v2
         (test_id, idx, kind, prompt, options_json, correct_json)
@@ -426,7 +415,6 @@ Rules:
         if ($idx > 10) break;
     }
 
-    // Get item rows
     $items = $pdo->prepare("
         SELECT id, idx, prompt, kind, options_json
         FROM progress_test_items_v2
@@ -441,15 +429,11 @@ Rules:
     $nameParts = preg_split('/\s+/', $name);
     $firstName = trim((string)($nameParts[0] ?? 'student'));
 
-    // Build cookie header for internal presign endpoint
     $cookieHeader = '';
     if (!empty($_SERVER['HTTP_COOKIE'])) {
         $cookieHeader = (string)$_SERVER['HTTP_COOKIE'];
     }
 
-    // -----------------------
-    // Intro audio -> local temp -> Spaces
-    // -----------------------
     $introText = "Hello {$firstName}. I will now conduct your progress test.";
     $introLocal = $testDir . '/intro.mp3';
     tts_generate_local($introText, $introLocal);
@@ -462,9 +446,6 @@ Rules:
     upload_file_to_presigned_put((string)$introPresign['url'], $introLocal, 'audio/mpeg');
     $introUrl = (string)$introPresign['public_url'];
 
-    // -----------------------
-    // Question audio -> local temp -> Spaces
-    // -----------------------
     $questionUrls = [];
     $itemIds = [];
 

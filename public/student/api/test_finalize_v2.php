@@ -343,7 +343,8 @@ function upload_file_to_presigned_put(string $putUrl, string $localFile, string 
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HTTPHEADER => [
             'Content-Type: ' . $contentType,
-            'Content-Length: ' . $size
+            'Content-Length: ' . $size,
+            'x-amz-acl: public-read'
         ],
         CURLOPT_TIMEOUT => 300
     ]);

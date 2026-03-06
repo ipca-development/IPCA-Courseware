@@ -118,7 +118,6 @@ try {
     $expiresSec = 900;
     $credential = $spacesKey . '/' . $datestamp . '/' . $spacesRegion . '/' . $service . '/aws4_request';
 
-    // Build object key
     $key = '';
     if ($kind === 'intro') {
         $ext = clean_ext($ext, 'mp3');
@@ -170,12 +169,12 @@ try {
         'X-Amz-Credential'    => $credential,
         'X-Amz-Date'          => $amzdate,
         'X-Amz-Expires'       => (string)$expiresSec,
-        'X-Amz-SignedHeaders' => 'host'
+        'X-Amz-SignedHeaders' => 'host;x-amz-acl'
     );
 
     $canonicalQuery   = rfc3986_query($query);
-    $canonicalHeaders = 'host:' . $host . "\n";
-    $signedHeaders    = 'host';
+    $canonicalHeaders = "host:" . $host . "\n" . "x-amz-acl:public-read\n";
+    $signedHeaders    = 'host;x-amz-acl';
     $payloadHash      = 'UNSIGNED-PAYLOAD';
 
     $canonicalRequest = implode("\n", array(
@@ -216,7 +215,10 @@ try {
         'url'        => $presignedUrl,
         'public_url' => $publicUrl,
         'origin_url' => $originUrl,
-        'expires'    => $expiresSec
+        'expires'    => $expiresSec,
+        'headers'    => array(
+            'x-amz-acl' => 'public-read'
+        )
     ));
 
 } catch (Throwable $e) {
