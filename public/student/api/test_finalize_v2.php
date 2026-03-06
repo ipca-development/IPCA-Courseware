@@ -5,7 +5,14 @@ require_once __DIR__ . '/../../../src/openai.php';
 cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
 
+while (ob_get_level()) { ob_end_clean(); }
+ob_start();
+
 function json_out(array $x): void {
+    while (ob_get_level() > 1) { ob_end_clean(); }
+    if (ob_get_level() === 1) {
+        ob_clean();
+    }
     echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
@@ -256,23 +263,24 @@ function spaces_public_url_for_path(string $path): string {
 
 function download_to_temp(string $url, string $outfile): bool {
     $ch = curl_init($url);
-    $fp = fopen($outfile, 'wb');
-    if (!$fp) return false;
 
     curl_setopt_array($ch, [
-        CURLOPT_FILE => $fp,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_TIMEOUT => 180,
-        CURLOPT_RETURNTRANSFER => false,
+        CURLOPT_RETURNTRANSFER => true,
     ]);
 
-    curl_exec($ch);
+    $data = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $err = curl_error($ch);
+    $err  = curl_error($ch);
     curl_close($ch);
-    fclose($fp);
 
-    if ($code < 200 || $code >= 300) {
+    if ($data === false || $code < 200 || $code >= 300) {
+        @unlink($outfile);
+        return false;
+    }
+
+    if (@file_put_contents($outfile, $data) === false) {
         @unlink($outfile);
         return false;
     }
