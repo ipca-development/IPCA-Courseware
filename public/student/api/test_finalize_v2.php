@@ -10,35 +10,37 @@ function json_out(array $x): void {
     exit;
 }
 
-function storage_base_dir(): string {
-    $base = '/tmp/progress_tests_v2';
+function env_required(string $k): string {
+    $v = getenv($k);
+    if ($v === false || $v === '') {
+        throw new RuntimeException('Missing env var: ' . $k);
+    }
+    return (string)$v;
+}
 
+function temp_base_dir(): string {
+    $base = '/tmp/progress_tests_v2_finalize';
     if (!is_dir($base)) {
         if (!@mkdir($base, 0777, true)) {
-            throw new RuntimeException('Cannot create base storage directory: ' . $base);
+            throw new RuntimeException('Cannot create temp base directory: ' . $base);
         }
     }
-
     if (!is_dir($base) || !is_writable($base)) {
-        throw new RuntimeException('Base storage directory is not writable: ' . $base);
+        throw new RuntimeException('Temp base directory is not writable: ' . $base);
     }
-
     return $base;
 }
 
 function test_dir(int $testId): string {
-    $dir = storage_base_dir() . '/' . $testId;
-
+    $dir = temp_base_dir() . '/' . $testId;
     if (!is_dir($dir)) {
         if (!@mkdir($dir, 0777, true)) {
-            throw new RuntimeException('Cannot create test directory: ' . $dir);
+            throw new RuntimeException('Cannot create test temp directory: ' . $dir);
         }
     }
-
     if (!is_dir($dir) || !is_writable($dir)) {
-        throw new RuntimeException('Test directory is not writable: ' . $dir);
+        throw new RuntimeException('Test temp directory is not writable: ' . $dir);
     }
-
     return $dir;
 }
 
@@ -73,6 +75,10 @@ function tts_write_file(string $apiKey, string $model, string $voice, string $te
 
     if (@file_put_contents($outfile, $audio) === false) {
         throw new RuntimeException("Failed to write audio file: {$outfile}");
+    }
+
+    if (!is_file($outfile) || filesize($outfile) <= 0) {
+        throw new RuntimeException("Generated TTS audio file missing or empty: {$outfile}");
     }
 }
 
@@ -239,6 +245,120 @@ Do not invent facts."
     ];
 }
 
+function is_full_url(string $s): bool {
+    return (bool)preg_match('~^https?://~i', $s);
+}
+
+function spaces_public_url_for_path(string $path): string {
+    $cdn = rtrim(env_required('SPACES_CDN'), '/');
+    return $cdn . '/' . ltrim($path, '/');
+}
+
+function download_to_temp(string $url, string $outfile): bool {
+    $ch = curl_init($url);
+    $fp = fopen($outfile, 'wb');
+    if (!$fp) return false;
+
+    curl_setopt_array($ch, [
+        CURLOPT_FILE => $fp,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_TIMEOUT => 180,
+        CURLOPT_RETURNTRANSFER => false,
+    ]);
+
+    curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+    fclose($fp);
+
+    if ($code < 200 || $code >= 300) {
+        @unlink($outfile);
+        return false;
+    }
+
+    if (!is_file($outfile) || filesize($outfile) <= 0) {
+        @unlink($outfile);
+        return false;
+    }
+
+    return true;
+}
+
+function read_json_body(): array {
+    $raw = file_get_contents('php://input');
+    $j = json_decode($raw, true);
+    return is_array($j) ? $j : [];
+}
+
+function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $payload): array {
+    $url = 'http://127.0.0.1/student/api/progress_test_spaces_presign.php';
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => array_filter([
+            'Content-Type: application/json',
+            $cookieHeader !== '' ? ('Cookie: ' . $cookieHeader) : null
+        ]),
+        CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        CURLOPT_TIMEOUT => 60
+    ]);
+
+    $out = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if ($out === false || $code < 200 || $code >= 300) {
+        throw new RuntimeException("Presign request failed (HTTP {$code}) {$err} " . substr((string)$out, 0, 300));
+    }
+
+    $j = json_decode((string)$out, true);
+    if (!is_array($j) || empty($j['ok']) || empty($j['url']) || empty($j['public_url'])) {
+        throw new RuntimeException('Invalid presign response');
+    }
+
+    return $j;
+}
+
+function upload_file_to_presigned_put(string $putUrl, string $localFile, string $contentType): void {
+    if (!is_file($localFile)) {
+        throw new RuntimeException('Local file not found for upload: ' . $localFile);
+    }
+
+    $fh = fopen($localFile, 'rb');
+    if (!$fh) {
+        throw new RuntimeException('Cannot open local file for upload: ' . $localFile);
+    }
+
+    $size = filesize($localFile);
+    $ch = curl_init($putUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_CUSTOMREQUEST => 'PUT',
+        CURLOPT_UPLOAD => true,
+        CURLOPT_INFILE => $fh,
+        CURLOPT_INFILESIZE => $size,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: ' . $contentType,
+            'Content-Length: ' . $size
+        ],
+        CURLOPT_TIMEOUT => 300
+    ]);
+
+    $out = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+    fclose($fh);
+
+    if ($out === false || $code < 200 || $code >= 299) {
+        throw new RuntimeException("Spaces upload failed (HTTP {$code}) {$err} " . substr((string)$out, 0, 300));
+    }
+}
+
 try {
     $u = cw_current_user($pdo);
     $role = (string)($u['role'] ?? '');
@@ -247,9 +367,8 @@ try {
         json_out(['ok' => false, 'error' => 'Forbidden']);
     }
 
-    $raw = file_get_contents('php://input');
-    $data = json_decode($raw, true);
-    if (!is_array($data)) json_out(['ok' => false, 'error' => 'Invalid JSON']);
+    $data = read_json_body();
+    if (!$data) json_out(['ok' => false, 'error' => 'Invalid JSON']);
 
     $testId = (int)($data['test_id'] ?? 0);
     if ($testId <= 0) json_out(['ok' => false, 'error' => 'Missing test_id']);
@@ -286,7 +405,7 @@ try {
     $items = $itemsSt->fetchAll(PDO::FETCH_ASSOC);
     if (!$items) json_out(['ok' => false, 'error' => 'No items found']);
 
-    $baseDir = test_dir($testId);
+    $tmpDir = test_dir($testId);
 
     $updItem = $pdo->prepare("
       UPDATE progress_test_items_v2
@@ -307,8 +426,12 @@ try {
 
         if ($transcript === '') {
             if ($audioRel !== '') {
-                $fullPath = $baseDir . '/' . $audioRel;
-                $transcript = transcribe_file($apiKey, $fullPath);
+                $sourceUrl = is_full_url($audioRel) ? $audioRel : spaces_public_url_for_path($audioRel);
+                $localAudio = $tmpDir . '/answer_' . (int)$item['idx'] . '.webm';
+
+                if (download_to_temp($sourceUrl, $localAudio)) {
+                    $transcript = transcribe_file($apiKey, $localAudio);
+                }
             }
         }
 
@@ -446,11 +569,24 @@ json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         // keep fallbacks
     }
 
-    $resultAudio = $baseDir . '/result.mp3';
+    $resultAudioLocal = $tmpDir . '/result.mp3';
     $name = trim((string)($u['name'] ?? 'student'));
     if ($name === '') $name = 'student';
     $resultSpeech = "Thank you {$name}. Your score is {$scorePct} percent. {$spoken}";
-    tts_write_file($apiKey, $ttsModel, $ttsVoice, $resultSpeech, $resultAudio);
+    tts_write_file($apiKey, $ttsModel, $ttsVoice, $resultSpeech, $resultAudioLocal);
+
+    $cookieHeader = '';
+    if (!empty($_SERVER['HTTP_COOKIE'])) {
+        $cookieHeader = (string)$_SERVER['HTTP_COOKIE'];
+    }
+
+    $resultPresign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
+        'test_id' => $testId,
+        'kind'    => 'result',
+        'ext'     => 'mp3'
+    ]);
+    upload_file_to_presigned_put((string)$resultPresign['url'], $resultAudioLocal, 'audio/mpeg');
+    $resultAudioUrl = (string)$resultPresign['public_url'];
 
     $upTest = $pdo->prepare("
       UPDATE progress_tests_v2
@@ -471,7 +607,7 @@ json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         'score_pct'    => $scorePct,
         'ai_summary'   => $written,
         'weak_areas'   => $weak,
-        'result_audio' => '/student/api/test_audio_v2.php?test_id=' . $testId . '&kind=result',
+        'result_audio' => $resultAudioUrl,
     ]);
 
 } catch (Throwable $e) {

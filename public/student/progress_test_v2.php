@@ -251,7 +251,7 @@ cw_header('Progress Test');
       </div>
     </div>
 
-    <div class="sysline" id="sysline"><?= h($firstName) ?>, we are loading your progress test…</div>
+    <div class="sysline" id="sysline"><?= h($firstName) ?>, we are loading your progress test...</div>
 
     <div class="timer-wrap" style="margin-top:12px;">
       <div class="timer-pill"><div class="timer-fill" id="prepFill"></div></div>
@@ -295,6 +295,11 @@ let recorder = null;
 let chunks = [];
 let answerLeft = 60;
 let answerInt = null;
+
+/* NEW: pre-generated Spaces/CDN audio */
+let INTRO_URL = '';
+let QUESTION_URLS = {};
+let RESULT_URL = '';
 
 const btnStart = document.getElementById('btnStart');
 const btnPTT = document.getElementById('btnPTT');
@@ -391,10 +396,13 @@ async function prepareTest(){
   if (Array.isArray(j.item_ids) && j.item_ids.length) {
     ITEM_IDS = j.item_ids.map(x => parseInt(x,10)).filter(Boolean);
   } else {
-    // fallback if backend does not return item ids
     ITEM_IDS = [];
     for(let i=1;i<=TOTAL_QUESTIONS;i++) ITEM_IDS.push(i);
   }
+
+  /* NEW: store pre-generated audio URLs from backend */
+  INTRO_URL = String(j.intro_url || '');
+  QUESTION_URLS = (j.question_urls && typeof j.question_urls === 'object') ? j.question_urls : {};
 
   renderDots(TOTAL_QUESTIONS);
   setPrep(100);
@@ -403,6 +411,8 @@ async function prepareTest(){
 }
 
 async function playAudio(url){
+  if (!url) return false;
+
   return new Promise((resolve)=>{
     setSpeaking(true);
     audioPlayer.pause();
@@ -415,23 +425,16 @@ async function playAudio(url){
   });
 }
 
-function introUrl(){
-  return '/student/api/test_audio_v2.php?test_id=' + encodeURIComponent(TEST_ID) + '&kind=intro';
-}
-
-function questionUrl(itemId){
-  return '/student/api/test_audio_v2.php?test_id=' + encodeURIComponent(TEST_ID) + '&kind=question&item_id=' + encodeURIComponent(itemId);
-}
-
+/* OLD introUrl/questionUrl helpers removed from active flow */
 function resultUrl(){
   return '/student/api/test_audio_v2.php?test_id=' + encodeURIComponent(TEST_ID) + '&kind=result';
 }
 
 async function startFlow(){
   btnStart.disabled = true;
-  setSys('Maya is speaking…');
+  setSys('Maya is speaking...');
 
-  const ok = await playAudio(introUrl());
+  const ok = await playAudio(INTRO_URL);
   if (!ok) {
     setSys('Intro audio failed.');
     return;
@@ -448,8 +451,10 @@ async function askCurrent(){
     return;
   }
 
-  setSys('Maya is speaking…');
-  const ok = await playAudio(questionUrl(itemId));
+  const qUrl = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
+
+  setSys('Maya is speaking...');
+  const ok = await playAudio(qUrl);
   if (!ok) {
     setSys('Question audio failed.');
     return;
@@ -513,7 +518,7 @@ async function startRecording(){
     isRecording = true;
     setRec(true);
     btnPTT.classList.add('rec');
-    btnPTT.textContent = '⏹ Recording… Tap to Stop';
+    btnPTT.textContent = '⏹ Recording... Tap to Stop';
   }catch(e){
     setSys('Microphone access failed.');
   }
@@ -536,7 +541,7 @@ btnPTT.addEventListener('click', async ()=>{
 
 async function uploadAnswerBlob(blob, timeoutOnly){
   btnPTT.disabled = true;
-  setSys('Saving your answer…');
+  setSys('Saving your answer...');
 
   const fd = new FormData();
   fd.append('test_id', String(TEST_ID));
@@ -581,7 +586,7 @@ async function finalizeTest(){
   btnPTT.disabled = true;
   prepLabel.textContent = 'Evaluation progress';
   setPrep(10);
-  setSys('I am evaluating your answers… please standby.');
+  setSys('I am evaluating your answers... please standby.');
 
   let p = 10;
   const tick = setInterval(()=>{
@@ -609,9 +614,10 @@ async function finalizeTest(){
   }
 
   setPrep(100);
-  setSys('Maya is speaking…');
+  setSys('Maya is speaking...');
 
-  const ok = await playAudio(j.result_audio || resultUrl());
+  RESULT_URL = String(j.result_audio || '');
+  const ok = await playAudio(RESULT_URL || resultUrl());
   if (!ok) {
     setSys('Result audio failed, but written results are available.');
   }
