@@ -23,25 +23,6 @@ function env_required(string $k): string {
     return (string)$v;
 }
 
-function ai_prompt_fetch(PDO $pdo, string $promptKey, string $fallback): string {
-    try {
-        $st = $pdo->prepare("
-            SELECT prompt_text
-            FROM ai_prompts
-            WHERE prompt_key = ?
-            LIMIT 1
-        ");
-        $st->execute([$promptKey]);
-        $txt = $st->fetchColumn();
-        if (is_string($txt) && trim($txt) !== '') {
-            return $txt;
-        }
-    } catch (Throwable $e) {
-        // fall back silently
-    }
-    return $fallback;
-}
-
 function temp_base_dir(): string {
     $base = '/tmp/progress_tests_v2_finalize';
     if (!is_dir($base)) {
@@ -292,30 +273,30 @@ function grade_yesno(string $transcript, array $correct): array {
     if (strpos($t, 'that is correct') !== false) $yesScore += 2;
 
     $sv = null;
-    if ($yesScore > 0 && $noScore === 0) {
-        $sv = true;
-    } elseif ($noScore > 0 && $yesScore === 0) {
-        $sv = false;
-    } elseif ($yesScore > $noScore) {
-        $sv = true;
-    } elseif ($noScore > $yesScore) {
-        $sv = false;
-    }
+if ($yesScore > 0 && $noScore === 0) {
+    $sv = true;
+} elseif ($noScore > 0 && $yesScore === 0) {
+    $sv = false;
+} elseif ($yesScore > $noScore) {
+    $sv = true;
+} elseif ($noScore > $yesScore) {
+    $sv = false;
+}
 
-    // Fallback for implicit spoken answers when student does not literally say yes/no
-    if ($sv === null) {
-        if (
-            preg_match('/\b(is not|are not|does not|do not|cannot|can not|never|no longer|without)\b/', $t)
-        ) {
-            $sv = false;
-        } elseif (
-            preg_match('/\b(attached|connected|located|mounted|present|included|used|provides|has brakes|have brakes|helps|assists|supports|contains|is air cooled|are air cooled)\b/', $t)
-        ) {
-            $sv = true;
-        }
+// Fallback for implicit spoken answers when student does not literally say yes/no
+if ($sv === null) {
+    if (
+        preg_match('/\b(is not|are not|does not|do not|cannot|can not|never|no longer|without)\b/', $t)
+    ) {
+        $sv = false;
+    } elseif (
+        preg_match('/\b(attached|connected|located|mounted|present|included|used|provides|has brakes|have brakes|helps|assists|supports|contains|is air cooled|are air cooled)\b/', $t)
+    ) {
+        $sv = true;
     }
+}
 
-    $cv = (bool)($correct['value'] ?? false);
+$cv = (bool)($correct['value'] ?? false);
 
     $aliases = build_alias_groups($correct, []);
     $aliasHits = 0;
@@ -489,8 +470,6 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
 }
 
 function grade_open_with_ai(array $item, string $transcript): array {
-    global $pdo;
-
     $correct = json_decode((string)($item['correct_json'] ?? '{}'), true) ?: [];
     $keyPoints = $correct['key_points'] ?? [];
     if (!is_array($keyPoints)) $keyPoints = [];
@@ -512,8 +491,12 @@ function grade_open_with_ai(array $item, string $transcript): array {
         "required" => ["score_points", "max_points", "is_correct", "feedback"]
     ];
 
-    $openGradeSystemFallback = <<<'TXT'
-Grade like a supportive but standards-based flight instructor during an oral progress check.
+    $payload = [
+        "model" => cw_openai_model(),
+        "input" => [
+            ["role" => "system", "content" => [
+                ["type" => "input_text", "text" =>
+"Grade like a supportive but standards-based flight instructor during an oral progress check.
 
 Rules:
 - Reward correct operational understanding even when phrasing is informal.
@@ -531,45 +514,17 @@ Rules:
 - If the student clearly states the main operational concept correctly, award meaningful partial credit even if supporting details are missing.
 - If the answer is concise but operationally correct, treat it as valid.
 - If the answer contains the correct main concept and no contradiction, do not score it like a failure just because it is incomplete.
-- Strong partial credit should be common for operationally correct but incomplete oral answers.
-TXT;
-
-    $openGradeUserFallback = <<<'TXT'
-QUESTION:
-{{QUESTION}}
-
-RUBRIC KEY POINTS:
-- {{KEY_POINTS_BULLETS}}
-
-ALIAS GROUPS / ACCEPTED CONCEPT PHRASES:
-{{ALIAS_GROUPS_JSON}}
-
-MIN POINTS TO PASS: {{MIN_POINTS_TO_PASS}}
-
-STUDENT TRANSCRIPT:
-{{TRANSCRIPT}}
-TXT;
-
-    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_open_grading_system', $openGradeSystemFallback);
-    $userPromptTemplate = ai_prompt_fetch($pdo, 'progress_test_open_grading_user', $openGradeUserFallback);
-
-    $keyPointsBullets = implode("\n- ", $keyPoints);
-    $userPrompt = strtr($userPromptTemplate, [
-        '{{QUESTION}}' => (string)$item['prompt'],
-        '{{KEY_POINTS_BULLETS}}' => $keyPointsBullets,
-        '{{ALIAS_GROUPS_JSON}}' => json_encode($aliasGroups, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        '{{MIN_POINTS_TO_PASS}}' => (string)$minPts,
-        '{{TRANSCRIPT}}' => $transcript
-    ]);
-
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            ["role" => "system", "content" => [
-                ["type" => "input_text", "text" => $systemPrompt]
+- Strong partial credit should be common for operationally correct but incomplete oral answers."
+                ]
             ]],
             ["role" => "user", "content" => [
-                ["type" => "input_text", "text" => $userPrompt]
+                ["type" => "input_text", "text" =>
+"QUESTION:\n" . (string)$item['prompt'] .
+"\n\nRUBRIC KEY POINTS:\n- " . implode("\n- ", $keyPoints) .
+"\n\nALIAS GROUPS / ACCEPTED CONCEPT PHRASES:\n" . json_encode($aliasGroups, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) .
+"\n\nMIN POINTS TO PASS: {$minPts}" .
+"\n\nSTUDENT TRANSCRIPT:\n" . $transcript
+                ]
             ]]
         ],
         "text" => [
@@ -907,8 +862,12 @@ try {
         ]
     ];
 
-    $debriefSystemFallback = <<<'TXT'
-You are a supportive but standards-based flight instructor.
+    $payload = [
+        "model" => cw_openai_model(),
+        "input" => [
+            ["role" => "system", "content" => [
+                ["type" => "input_text", "text" =>
+"You are a supportive but standards-based flight instructor.
 
 SOURCE OF TRUTH:
 - Lesson narration scripts are the only truth source.
@@ -928,40 +887,14 @@ IMPORTANT RULES:
 - Do NOT blend summary issues into the oral score.
 - Be fair and slightly cautious in wording.
 - Prefer phrases like 'review these areas' rather than overconfident claims like 'you misunderstood X', unless clearly wrong.
-- Reward correct operational understanding even when phrasing is informal.
-TXT;
-
-    $debriefUserFallback = <<<'TXT'
-SCORE: {{SCORE}}%
-
-LESSON NARRATION (TRUTH):
-{{TRUTH_TEXT}}
-
-STUDENT SUMMARY:
-{{SUMMARY_PLAIN}}
-
-TEST LOG JSON:
-{{TEST_LOG_JSON}}
-TXT;
-
-    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_debrief_system', $debriefSystemFallback);
-    $userPromptTemplate = ai_prompt_fetch($pdo, 'progress_test_debrief_user', $debriefUserFallback);
-
-    $userPrompt = strtr($userPromptTemplate, [
-        '{{SCORE}}' => (string)$scorePct,
-        '{{TRUTH_TEXT}}' => $truthText,
-        '{{SUMMARY_PLAIN}}' => $summaryPlain,
-        '{{TEST_LOG_JSON}}' => json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-    ]);
-
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            ["role" => "system", "content" => [
-                ["type" => "input_text", "text" => $systemPrompt]
+- Reward correct operational understanding even when phrasing is informal."
+                ]
             ]],
             ["role" => "user", "content" => [
-                ["type" => "input_text", "text" => $userPrompt]
+                ["type" => "input_text", "text" =>
+"SCORE: {$scorePct}%\n\nLESSON NARRATION (TRUTH):\n{$truthText}\n\nSTUDENT SUMMARY:\n{$summaryPlain}\n\nTEST LOG JSON:\n" .
+json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+                ]
             ]]
         ],
         "text" => [

@@ -227,29 +227,15 @@ function question_schema(): array {
     ];
 }
 
-function ai_prompt_fetch(PDO $pdo, string $promptKey, string $fallback): string {
-    try {
-        $st = $pdo->prepare("
-            SELECT prompt_text
-            FROM ai_prompts
-            WHERE prompt_key = ?
-            ORDER BY id DESC
-            LIMIT 1
-        ");
-        $st->execute([$promptKey]);
-        $txt = $st->fetchColumn();
-        if (is_string($txt) && trim($txt) !== '') {
-            return trim($txt);
-        }
-    } catch (Throwable $e) {
-        // keep fallback silently
-    }
-    return $fallback;
-}
-
-function generate_oral_questions(PDO $pdo, string $truth, string $summary): array {
-    $systemFallback = <<<'TXT'
-You are generating an oral aviation progress test.
+function generate_oral_questions(string $truth, string $summary): array {
+    $payload = [
+        "model" => cw_openai_model(),
+        "input" => [
+            [
+                "role" => "system",
+                "content" => [
+                    ["type" => "input_text", "text" =>
+"You are generating an oral aviation progress test.
 
 Create exactly 10 oral-friendly questions.
 Use ONLY the lesson narration text as truth.
@@ -302,18 +288,8 @@ FORMAT RULES:
 TARGET MIX:
 - around 4 yesno
 - around 2 mcq
-- around 4 open
-TXT;
-
-    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_generate_questions_system', $systemFallback);
-
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            [
-                "role" => "system",
-                "content" => [
-                    ["type" => "input_text", "text" => $systemPrompt]
+- around 4 open"
+                    ]
                 ]
             ],
             [
@@ -341,9 +317,15 @@ TXT;
     return normalize_generated_questions(clamp_questions($q, 10));
 }
 
-function validate_and_rewrite_questions(PDO $pdo, string $truth, array $questions): array {
-    $systemFallback = <<<'TXT'
-You are reviewing oral aviation test questions for quality.
+function validate_and_rewrite_questions(string $truth, array $questions): array {
+    $payload = [
+        "model" => cw_openai_model(),
+        "input" => [
+            [
+                "role" => "system",
+                "content" => [
+                    ["type" => "input_text", "text" =>
+"You are reviewing oral aviation test questions for quality.
 
 You will receive 10 candidate questions.
 Your job is to return a corrected final set of 10 questions.
@@ -368,18 +350,8 @@ IMPORTANT:
 - Prefer precise spoken questions.
 - For nuanced concepts, prefer open or mcq over weak yes/no.
 
-Return exactly 10 final cleaned questions.
-TXT;
-
-    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_validate_questions_system', $systemFallback);
-
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            [
-                "role" => "system",
-                "content" => [
-                    ["type" => "input_text", "text" => $systemPrompt]
+Return exactly 10 final cleaned questions."
+                    ]
                 ]
             ],
             [
@@ -562,11 +534,11 @@ try {
     if ($summary === '') $summary = "(No student summary.)";
 
     set_prepare_progress($pdo, $testId, 15, 'Generating oral questions...');
-    $q = generate_oral_questions($pdo, $truth, $summary);
+    $q = generate_oral_questions($truth, $summary);
 
     set_prepare_progress($pdo, $testId, 35, 'Checking question quality...');
     if (count($q) >= 6) {
-        $q2 = validate_and_rewrite_questions($pdo, $truth, $q);
+        $q2 = validate_and_rewrite_questions($truth, $q);
         if (count($q2) >= 6) {
             $q = $q2;
         }
