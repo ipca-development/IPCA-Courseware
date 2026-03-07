@@ -382,17 +382,6 @@ function markReady(i){
   }
 }
 
-function restoreAfterUploadFailure() {
-  btnReplay.disabled = false;
-  btnPTT.disabled = false;
-  btnNext.disabled = true;
-  btnNext.style.display = 'none';
-  if (CURRENT_PROMPT_TYPE === 'question') {
-    answerWrap.style.display = 'block';
-    startAnswerTimer();
-  }
-}
-
 async function startCam(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     camStatus.textContent = 'Camera not supported.';
@@ -699,8 +688,6 @@ async function delayedStopRecording(){
     }catch(e){
       isStopping = false;
       setSys('Stop recording failed.');
-      btnPTT.disabled = false;
-      btnPTT.textContent = '🎙 Tap to Start Talking';
     }
   }, 1000);
 }
@@ -803,62 +790,38 @@ async function uploadAnswerBlob(blob, timeoutOnly){
     fd.append('audio', blob, 'q' + String(CUR_POS).padStart(2,'0') + '.webm');
   }
 
-  const controller = new AbortController();
-  const timeoutMs = 45000;
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  const res = await fetch('/student/api/test_upload_answer_v2.php', {
+    method:'POST',
+    credentials:'same-origin',
+    body: fd
+  });
 
-  try {
-    const res = await fetch('/student/api/test_upload_answer_v2.php', {
-      method:'POST',
-      credentials:'same-origin',
-      body: fd,
-      signal: controller.signal
-    });
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch(e) { j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)}; }
 
-    clearTimeout(timeoutHandle);
-
-    const txt = await res.text();
-    let j = null;
-    try {
-      j = JSON.parse(txt);
-    } catch(e) {
-      j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)};
-    }
-
-    if (!j.ok) {
-      setSys('Upload failed: ' + (j.error || 'Unknown error'));
-      restoreAfterUploadFailure();
-      return;
-    }
-
-    markDone(CUR_POS);
-    CUR_POS++;
-
-    if (CUR_POS > TOTAL_QUESTIONS) {
-      await finalizeTest();
-      return;
-    }
-
-    READY_FOR_NEXT = false;
+  if (!j.ok) {
+    setSys('Upload failed: ' + (j.error || 'Unknown error'));
+    btnPTT.disabled = false;
     btnReplay.disabled = false;
-    answerWrap.style.display = 'none';
-    await prepareNextQuestionReady();
-    READY_FOR_NEXT = NEXT_QUESTION_READY;
-    btnNext.disabled = !READY_FOR_NEXT;
-
-  } catch (err) {
-    clearTimeout(timeoutHandle);
-
-    let msg = 'Upload failed.';
-    if (err && err.name === 'AbortError') {
-      msg = 'Upload timed out. Please try again.';
-    } else if (err && err.message) {
-      msg = 'Upload failed: ' + err.message;
-    }
-
-    setSys(msg);
-    restoreAfterUploadFailure();
+    startAnswerTimer();
+    return;
   }
+
+  markDone(CUR_POS);
+  CUR_POS++;
+
+  if (CUR_POS > TOTAL_QUESTIONS) {
+    await finalizeTest();
+    return;
+  }
+
+  READY_FOR_NEXT = false;
+  btnReplay.disabled = false;
+  answerWrap.style.display = 'none';
+  await prepareNextQuestionReady();
+  READY_FOR_NEXT = NEXT_QUESTION_READY;
+  btnNext.disabled = !READY_FOR_NEXT;
 }
 
 async function finalizeTest(){
