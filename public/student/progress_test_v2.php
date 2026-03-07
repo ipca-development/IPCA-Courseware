@@ -229,6 +229,11 @@ cw_header('Progress Test');
     border-color:rgba(22,163,74,0.55);
     color:#166534;
   }
+  .qdot.ready{
+    background:rgba(37,99,235,0.12);
+    border-color:rgba(37,99,235,0.45);
+    color:#1d4ed8;
+  }
 
   .result-box{
     margin-top:16px;
@@ -277,9 +282,14 @@ cw_header('Progress Test');
 
     <button class="ptt" id="btnStart" type="button" disabled>Start Progress Test</button>
 
+    <div class="btn-row" id="questionBtns" style="display:none;">
+      <button class="ptt btn-half" id="btnReady" type="button" disabled>Ready for First Question</button>
+      <button class="ptt btn-half" id="btnReplay" type="button" disabled>↺ Replay Question</button>
+    </div>
+
     <div class="btn-row" id="answerBtns" style="display:none;">
       <button class="ptt btn-half" id="btnPTT" type="button" disabled>🎙 Tap to Start Talking</button>
-      <button class="ptt btn-half" id="btnReplay" type="button" disabled>↺ Replay Question</button>
+      <button class="ptt btn-half" id="btnNext" type="button" disabled>Next Question</button>
     </div>
 
     <div class="timer-wrap" id="answerWrap" style="display:none;">
@@ -316,16 +326,21 @@ let INTRO_URL = '';
 let QUESTION_URLS = {};
 let RESULT_URL = '';
 
-let INTRO_BLOB_URL = '';
-let QUESTION_BLOB_URLS = {};
-let CURRENT_QUESTION_BLOB_URL = '';
-let preloadDone = false;
-let preloadStarted = false;
+let CURRENT_PROMPT_URL = '';
+let CURRENT_PROMPT_TYPE = ''; // intro|question
+let CURRENT_PROMPT_ITEM_ID = 0;
+let READY_FOR_NEXT = false;
+let FIRST_QUESTION_READY = false;
+let NEXT_QUESTION_READY = false;
 
 const btnStart = document.getElementById('btnStart');
-const btnPTT = document.getElementById('btnPTT');
+const btnReady = document.getElementById('btnReady');
 const btnReplay = document.getElementById('btnReplay');
+const btnPTT = document.getElementById('btnPTT');
+const btnNext = document.getElementById('btnNext');
+const questionBtns = document.getElementById('questionBtns');
 const answerBtns = document.getElementById('answerBtns');
+
 const sysline = document.getElementById('sysline');
 const prepFill = document.getElementById('prepFill');
 const prepText = document.getElementById('prepText');
@@ -346,6 +361,25 @@ function setSys(t){ sysline.textContent = t; }
 function setPrep(p){ prepFill.style.width = p + '%'; prepText.textContent = p + '%'; }
 function setSpeaking(on){ on ? instructorRing.classList.add('talking') : instructorRing.classList.remove('talking'); }
 function setRec(on){ on ? studentRing.classList.add('rec') : studentRing.classList.remove('rec'); }
+
+function setQuestionButtonLabel(){
+  btnReady.textContent = (CUR_POS <= 1) ? 'Ready for First Question' : 'Ready for Next Question';
+}
+
+function markDone(i){
+  const el = document.getElementById('qd_' + i);
+  if(el){
+    el.classList.remove('ready');
+    el.classList.add('done');
+  }
+}
+
+function markReady(i){
+  const el = document.getElementById('qd_' + i);
+  if(el && !el.classList.contains('done')){
+    el.classList.add('ready');
+  }
+}
 
 async function startCam(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
@@ -374,65 +408,96 @@ function renderDots(n){
   qstrip.style.display = 'flex';
 }
 
-function markDone(i){
-  const el = document.getElementById('qd_' + i);
-  if(el) el.classList.add('done');
-}
+async function waitUntilAudioReady(url, timeoutMs = 20000){
+  return new Promise((resolve) => {
+    if (!url) return resolve(false);
 
-async function fetchBlobUrl(url){
-  if(!url) return '';
-  const res = await fetch(url, {
-    method:'GET',
-    credentials:'omit',
-    cache:'force-cache'
+    const a = new Audio();
+    let settled = false;
+    const done = (ok) => {
+      if (settled) return;
+      settled = true;
+      a.src = '';
+      resolve(ok);
+    };
+
+    const timer = setTimeout(() => done(false), timeoutMs);
+
+    a.preload = 'auto';
+    a.oncanplaythrough = () => {
+      clearTimeout(timer);
+      done(true);
+    };
+    a.onerror = () => {
+      clearTimeout(timer);
+      done(false);
+    };
+
+    a.src = url;
+    try { a.load(); } catch(e) {}
   });
-  if(!res.ok) throw new Error('Audio fetch failed: HTTP ' + res.status);
-  const blob = await res.blob();
-  if(!blob || blob.size <= 0) throw new Error('Audio blob empty');
-  return URL.createObjectURL(blob);
 }
 
-async function preloadAllAudio(){
-  preloadStarted = true;
-  prepLabel.textContent = 'Audio buffering';
-  setSys('Loading audio...');
+async function playAudio(url){
+  if (!url) return false;
 
-  const total = 1 + ITEM_IDS.length;
-  let done = 0;
+  return new Promise((resolve)=>{
+    setSpeaking(true);
+    audioPlayer.pause();
+    audioPlayer.currentTime = 0;
+    audioPlayer.src = url;
+    audioPlayer.onended = ()=>{ setSpeaking(false); resolve(true); };
+    audioPlayer.onerror = ()=>{ setSpeaking(false); resolve(false); };
+    const p = audioPlayer.play();
+    if (p && p.catch) p.catch(()=>{ setSpeaking(false); resolve(false); });
+  });
+}
 
-  try{
-    INTRO_BLOB_URL = await fetchBlobUrl(INTRO_URL);
-  }catch(e){
-    console.warn('Intro preload failed:', e);
-    INTRO_BLOB_URL = '';
-  }
-  done++;
-  setPrep(Math.round((done / total) * 100));
-
-  for(let i=0;i<ITEM_IDS.length;i++){
-    const itemId = ITEM_IDS[i];
-    const src = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
-
-    try{
-      QUESTION_BLOB_URLS[itemId] = await fetchBlobUrl(src);
-    }catch(e){
-      console.warn('Question preload failed for item', itemId, e);
-      QUESTION_BLOB_URLS[itemId] = '';
-    }
-
-    done++;
-    setPrep(Math.round((done / total) * 100));
-  }
-
-  preloadDone = true;
-  prepLabel.textContent = 'Preparation progress';
-
-  if (INTRO_BLOB_URL) {
+async function prepareFirstQuestionReady(){
+  if (!ITEM_IDS.length) return false;
+  const itemId = ITEM_IDS[0];
+  const url = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
+  setSys('Buffering first question...');
+  const ok = await waitUntilAudioReady(url);
+  if (ok) {
+    FIRST_QUESTION_READY = true;
+    markReady(1);
+    setQuestionButtonLabel();
+    btnReady.disabled = false;
+    questionBtns.style.display = 'flex';
     setSys(FIRST_NAME + ', your progress test is ready.');
-    btnStart.disabled = false;
-  } else {
-    setSys('Audio loading failed for the intro. Please refresh and try again.');
+    return true;
   }
+  setSys('Loading audio failed for the first question. Please refresh the page.');
+  return false;
+}
+
+async function prepareNextQuestionReady(){
+  if (CUR_POS > TOTAL_QUESTIONS) return false;
+
+  const itemId = ITEM_IDS[CUR_POS - 1];
+  const url = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
+  if (!url) {
+    setSys('Next question audio not found.');
+    return false;
+  }
+
+  setSys('Preparing next question...');
+  NEXT_QUESTION_READY = false;
+  btnNext.disabled = true;
+
+  const ok = await waitUntilAudioReady(url);
+  if (ok) {
+    NEXT_QUESTION_READY = true;
+    markReady(CUR_POS);
+    btnNext.disabled = false;
+    btnNext.style.display = 'block';
+    setSys('Next question is ready.');
+    return true;
+  }
+
+  setSys('Next question audio failed to load.');
+  return false;
 }
 
 async function prepareTest(){
@@ -440,7 +505,7 @@ async function prepareTest(){
 
   let p = 0;
   const tick = setInterval(()=>{
-    p = Math.min(70, p + 4);
+    p = Math.min(85, p + 4);
     setPrep(p);
   }, 250);
 
@@ -484,127 +549,68 @@ async function prepareTest(){
 
   renderDots(TOTAL_QUESTIONS);
 
-  setPrep(75);
-  preloadAllAudio();
-}
+  setPrep(95);
+  setSys('Checking audio...');
+  const firstReady = await prepareFirstQuestionReady();
+  setPrep(100);
 
-async function playAudio(url){
-  if (!url) return false;
-
-  return new Promise((resolve)=>{
-    setSpeaking(true);
-    audioPlayer.pause();
-    audioPlayer.currentTime = 0;
-    audioPlayer.src = url;
-    audioPlayer.onended = ()=>{ setSpeaking(false); resolve(true); };
-    audioPlayer.onerror = ()=>{ setSpeaking(false); resolve(false); };
-    const p = audioPlayer.play();
-    if (p && p.catch) p.catch(()=>{ setSpeaking(false); resolve(false); });
-  });
-}
-
-async function ensureQuestionBlob(itemId){
-  const existing = QUESTION_BLOB_URLS[itemId] || QUESTION_BLOB_URLS[String(itemId)] || '';
-  if (existing) return existing;
-
-  const src = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
-  if (!src) return '';
-
-  setSys('Loading audio...');
-  try{
-    const blobUrl = await fetchBlobUrl(src);
-    QUESTION_BLOB_URLS[itemId] = blobUrl;
-    return blobUrl;
-  }catch(e){
-    console.warn('ensureQuestionBlob failed', itemId, e);
-    return '';
+  if (firstReady) {
+    btnStart.disabled = false;
   }
 }
 
-function resultUrl(){
-  return '/student/api/test_audio_v2.php?test_id=' + encodeURIComponent(TEST_ID) + '&kind=result';
-}
-
-async function startFlow(){
-  btnStart.disabled = true;
-
-  if(!INTRO_BLOB_URL){
-    setSys('Loading audio...');
-    try{
-      INTRO_BLOB_URL = await fetchBlobUrl(INTRO_URL);
-    }catch(e){
-      setSys('Intro audio failed to load.');
-      btnStart.disabled = false;
-      return;
-    }
-  }
+async function playIntroThenEnableFirstQuestion(){
+  CURRENT_PROMPT_URL = INTRO_URL;
+  CURRENT_PROMPT_TYPE = 'intro';
+  CURRENT_PROMPT_ITEM_ID = 0;
 
   setSys('Maya is speaking...');
-  const ok = await playAudio(INTRO_BLOB_URL);
+  const ok = await playAudio(INTRO_URL);
   if (!ok) {
     setSys('Intro audio failed.');
     btnStart.disabled = false;
-    return;
+    return false;
   }
 
-  CUR_POS = 1;
-  await askCurrent();
+  questionBtns.style.display = 'flex';
+  btnReplay.disabled = false;
+  setQuestionButtonLabel();
+  btnReady.disabled = !FIRST_QUESTION_READY;
+  setSys('Click when you are ready for the first question.');
+  return true;
 }
 
-async function askCurrent(){
+async function playCurrentQuestion(){
   const itemId = ITEM_IDS[CUR_POS - 1];
-  if (!itemId) {
-    await finalizeTest();
-    return;
+  const url = QUESTION_URLS[String(itemId)] || QUESTION_URLS[itemId] || '';
+  if (!itemId || !url) {
+    setSys('Question audio not found.');
+    return false;
   }
 
-  const qUrl = await ensureQuestionBlob(itemId);
-  CURRENT_QUESTION_BLOB_URL = qUrl;
-
-  if(!qUrl){
-    setSys('Question audio failed to load.');
-    return;
-  }
+  CURRENT_PROMPT_URL = url;
+  CURRENT_PROMPT_TYPE = 'question';
+  CURRENT_PROMPT_ITEM_ID = itemId;
 
   setSys('Maya is speaking...');
-  const ok = await playAudio(qUrl);
+  const ok = await playAudio(url);
   if (!ok) {
     setSys('Question audio failed.');
-    return;
+    return false;
   }
 
+  questionBtns.style.display = 'flex';
   answerBtns.style.display = 'flex';
-  btnPTT.style.display = 'block';
-  btnPTT.disabled = false;
-  btnReplay.disabled = false;
   answerWrap.style.display = 'block';
+
+  btnReplay.disabled = false;
+  btnPTT.disabled = false;
+  btnNext.disabled = true;
+  btnNext.style.display = 'none';
+
   setSys('Your turn.');
   startAnswerTimer();
-}
-
-async function replayCurrentQuestion(){
-  if(isRecording) return;
-  if(!CURRENT_QUESTION_BLOB_URL){
-    setSys('Loading audio...');
-    return;
-  }
-
-  btnPTT.disabled = true;
-  btnReplay.disabled = true;
-  stopAnswerTimer();
-
-  setSys('Maya is speaking...');
-  const ok = await playAudio(CURRENT_QUESTION_BLOB_URL);
-
-  if(!ok){
-    setSys('Replay failed.');
-  } else {
-    setSys('Your turn.');
-  }
-
-  btnPTT.disabled = false;
-  btnReplay.disabled = false;
-  startAnswerTimer();
+  return true;
 }
 
 function startAnswerTimer(){
@@ -669,22 +675,90 @@ async function stopRecording(){
   isRecording = false;
 }
 
+async function replayCurrentPrompt(){
+  if(isRecording) return;
+  if(!CURRENT_PROMPT_URL){
+    setSys('No question to replay.');
+    return;
+  }
+
+  stopAnswerTimer();
+
+  btnReplay.disabled = true;
+  btnReady.disabled = true;
+  btnPTT.disabled = true;
+  btnNext.disabled = true;
+
+  setSys('Maya is speaking...');
+  const ok = await playAudio(CURRENT_PROMPT_URL);
+
+  btnReplay.disabled = false;
+
+  if (!ok) {
+    setSys('Replay failed.');
+    return;
+  }
+
+  if (CURRENT_PROMPT_TYPE === 'question') {
+    btnPTT.disabled = false;
+    if (READY_FOR_NEXT) {
+      btnNext.disabled = false;
+    }
+    setSys('Your turn.');
+    startAnswerTimer();
+  } else {
+    btnReady.disabled = false;
+    setSys('Click when you are ready for the first question.');
+  }
+}
+
+btnStart.addEventListener('click', async ()=>{
+  btnStart.disabled = true;
+  questionBtns.style.display = 'none';
+  answerBtns.style.display = 'none';
+  answerWrap.style.display = 'none';
+  btnReplay.disabled = true;
+  btnReady.disabled = true;
+  await playIntroThenEnableFirstQuestion();
+});
+
+btnReady.addEventListener('click', async ()=>{
+  if (CUR_POS <= 0) CUR_POS = 1;
+
+  btnReady.disabled = true;
+  btnReplay.disabled = true;
+  answerBtns.style.display = 'none';
+  answerWrap.style.display = 'none';
+
+  await playCurrentQuestion();
+});
+
+btnReplay.addEventListener('click', replayCurrentPrompt);
+
 btnPTT.addEventListener('click', async ()=>{
   if (!TEST_ID) return;
   if (!isRecording) {
     stopAnswerTimer();
     btnReplay.disabled = true;
+    btnNext.disabled = true;
     await startRecording();
   } else {
     await stopRecording();
   }
 });
 
-btnReplay.addEventListener('click', replayCurrentQuestion);
+btnNext.addEventListener('click', async ()=>{
+  btnNext.disabled = true;
+  btnReplay.disabled = true;
+  READY_FOR_NEXT = false;
+  await playCurrentQuestion();
+});
 
 async function uploadAnswerBlob(blob, timeoutOnly){
   btnPTT.disabled = true;
   btnReplay.disabled = true;
+  btnNext.disabled = true;
+  btnNext.style.display = 'none';
   setSys('Saving your answer...');
 
   const fd = new FormData();
@@ -723,14 +797,19 @@ async function uploadAnswerBlob(blob, timeoutOnly){
     return;
   }
 
-  btnPTT.disabled = true;
-  btnReplay.disabled = true;
-  await askCurrent();
+  READY_FOR_NEXT = false;
+  btnReplay.disabled = false;
+  answerWrap.style.display = 'none';
+  await prepareNextQuestionReady();
+  READY_FOR_NEXT = NEXT_QUESTION_READY;
+  btnNext.disabled = !READY_FOR_NEXT;
 }
 
 async function finalizeTest(){
   btnPTT.disabled = true;
   btnReplay.disabled = true;
+  btnReady.disabled = true;
+  btnNext.disabled = true;
   prepLabel.textContent = 'Evaluation progress';
   setPrep(10);
   setSys('I am evaluating your answers... please standby.');
@@ -761,10 +840,14 @@ async function finalizeTest(){
   }
 
   setPrep(100);
-  setSys('Maya is speaking...');
-
   RESULT_URL = String(j.result_audio || '');
-  const ok = await playAudio(RESULT_URL || resultUrl());
+
+  CURRENT_PROMPT_URL = RESULT_URL;
+  CURRENT_PROMPT_TYPE = 'result';
+  CURRENT_PROMPT_ITEM_ID = 0;
+
+  setSys('Maya is speaking...');
+  const ok = await playAudio(RESULT_URL || '');
   if (!ok) {
     setSys('Result audio failed, but written results are available.');
   }
@@ -787,7 +870,6 @@ function escapeHtml(s){
 }
 
 prepareTest();
-btnStart.addEventListener('click', startFlow);
 </script>
 
 <?php cw_footer(); ?>
