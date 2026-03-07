@@ -4,6 +4,32 @@ require_once __DIR__ . '/../../src/layout.php';
 
 cw_require_login();
 
+$u = cw_current_user($pdo);
+$role = (string)($u['role'] ?? '');
+if ($role !== 'student' && $role !== 'admin') {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
+$cohortId = (int)($_GET['cohort_id'] ?? 0);
+$lessonId = (int)($_GET['lesson_id'] ?? 0);
+if ($cohortId <= 0 || $lessonId <= 0) exit('Missing cohort_id or lesson_id');
+
+if ($role === 'student') {
+    $check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
+    $check->execute([$cohortId, (int)$u['id']]);
+    if (!$check->fetchColumn()) {
+        http_response_code(403);
+        exit('Not enrolled in this cohort');
+    }
+}
+
+$userName = (string)($u['name'] ?? 'Student');
+$firstName = trim(explode(' ', trim($userName))[0] ?? 'Student');
+
+$INSTRUCTOR_NAME = 'Maya';
+$INSTRUCTOR_AVATAR = '/assets/avatars/maya.png';
+
 if (session_status() !== PHP_SESSION_ACTIVE) {
     @session_start();
 }
@@ -92,33 +118,6 @@ function pt_session_key(int $cohortId): string {
     return 'progress_test_access_ok_' . $cohortId;
 }
 
-$u = cw_current_user($pdo);
-$role = (string)($u['role'] ?? '');
-if ($role !== 'student' && $role !== 'admin') {
-    http_response_code(403);
-    exit('Forbidden');
-}
-
-$cohortId = (int)($_GET['cohort_id'] ?? 0);
-$lessonId = (int)($_GET['lesson_id'] ?? 0);
-if ($cohortId <= 0 || $lessonId <= 0) exit('Missing cohort_id or lesson_id');
-
-if ($role === 'student') {
-    $check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
-    $check->execute(array($cohortId, (int)$u['id']));
-    if (!$check->fetchColumn()) {
-        http_response_code(403);
-        exit('Not enrolled in this cohort');
-    }
-}
-
-$userName = (string)($u['name'] ?? 'Student');
-$firstName = trim(explode(' ', trim($userName))[0] ?? 'Student');
-
-$INSTRUCTOR_NAME = 'Maya';
-$INSTRUCTOR_AVATAR = '/assets/avatars/maya.png';
-
-/* ---------------- Access policy gate ---------------- */
 $userId = (int)($u['id'] ?? 0);
 $clientIp = pt_client_ip();
 $policy = pt_load_access_policy($pdo, $userId, $cohortId);
@@ -153,7 +152,6 @@ if ($policy) {
     if ($mode === 'any') {
         $allowed = true;
     } elseif ($mode === 'school_ip') {
-        // Allow on school IP, otherwise allow PIN fallback if configured and verified.
         $allowed = $ipAllowed || ($pinHash !== '' && $pinVerified);
     } elseif ($mode === 'pin') {
         $allowed = $pinVerified;
@@ -248,7 +246,6 @@ if ($policy) {
         exit;
     }
 }
-/* -------------------------------------------------- */
 
 cw_header('Progress Test');
 ?>
@@ -504,11 +501,11 @@ cw_header('Progress Test');
 
     <div class="btn-row" id="questionBtns" style="display:none;">
       <button class="ptt btn-half" id="btnReady" type="button" disabled>Ready for First Question</button>
-      <button class="ptt btn-half" id="btnReplay" type="button" disabled>↺ Replay Question</button>
+      <button class="ptt btn-half" id="btnReplay" type="button" disabled>â†º Replay Question</button>
     </div>
 
     <div class="btn-row" id="answerBtns" style="display:none;">
-      <button class="ptt btn-half" id="btnPTT" type="button" disabled>🎙 Tap to Start Talking</button>
+      <button class="ptt btn-half" id="btnPTT" type="button" disabled>ðŸŽ™ Tap to Start Talking</button>
       <button class="ptt btn-half" id="btnNext" type="button" disabled>Next Question</button>
     </div>
 
@@ -553,6 +550,8 @@ let CURRENT_PROMPT_ITEM_ID = 0;
 let READY_FOR_NEXT = false;
 let FIRST_QUESTION_READY = false;
 let NEXT_QUESTION_READY = false;
+let prepareStatusPoll = null;
+let prepareStatusStarted = false;
 
 const btnStart = document.getElementById('btnStart');
 const btnReady = document.getElementById('btnReady');
@@ -600,6 +599,54 @@ function markReady(i){
   if(el && !el.classList.contains('done')){
     el.classList.add('ready');
   }
+}
+
+function stopPrepareStatusPolling(){
+  if (prepareStatusPoll) {
+    clearInterval(prepareStatusPoll);
+    prepareStatusPoll = null;
+  }
+}
+
+async function pollPrepareStatusOnce(){
+  if (!TEST_ID) return;
+
+  try {
+    const res = await fetch('/student/api/test_prepare_status_v2.php?test_id=' + encodeURIComponent(TEST_ID), {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store'
+    });
+
+    const txt = await res.text();
+    let j = null;
+    try {
+      j = JSON.parse(txt);
+    } catch(e) {
+      return;
+    }
+
+    if (!j || !j.ok) return;
+
+    const pct = Math.max(0, Math.min(100, parseInt(j.progress_pct || 0, 10)));
+    const statusText = String(j.status_text || '');
+
+    if (pct > 0) setPrep(pct);
+    if (statusText) setSys(statusText);
+
+    if (String(j.status || '') === 'ready' || pct >= 100) {
+      stopPrepareStatusPolling();
+    }
+  } catch (e) {
+  }
+}
+
+function startPrepareStatusPolling(){
+  if (prepareStatusStarted) return;
+  prepareStatusStarted = true;
+
+  stopPrepareStatusPolling();
+  prepareStatusPoll = setInterval(pollPrepareStatusOnce, 1000);
 }
 
 function restoreAfterUploadFailure() {
@@ -735,11 +782,8 @@ async function prepareNextQuestionReady(){
 async function prepareTest(){
   await startCam();
 
-  let p = 0;
-  const tick = setInterval(()=>{
-    p = Math.min(85, p + 4);
-    setPrep(p);
-  }, 250);
+  setPrep(2);
+  setSys('Starting preparation...');
 
   const res = await fetch('/student/api/test_prepare_v2.php', {
     method:'POST',
@@ -748,13 +792,12 @@ async function prepareTest(){
     body: JSON.stringify({ cohort_id: COHORT_ID, lesson_id: LESSON_ID })
   });
 
-  clearInterval(tick);
-
   const txt = await res.text();
   let j = null;
   try { j = JSON.parse(txt); } catch(e) { j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)}; }
 
   if (!j.ok) {
+    stopPrepareStatusPolling();
     setPrep(100);
     setSys('Preparation failed: ' + (j.error || 'Unknown error'));
     return;
@@ -762,6 +805,11 @@ async function prepareTest(){
 
   TEST_ID = parseInt(j.test_id || 0, 10);
   TOTAL_QUESTIONS = parseInt(j.total_questions || 10, 10);
+
+  if (TEST_ID > 0) {
+    startPrepareStatusPolling();
+    await pollPrepareStatusOnce();
+  }
 
   if (!TEST_ID || !TOTAL_QUESTIONS) {
     setPrep(100);
@@ -781,12 +829,13 @@ async function prepareTest(){
 
   renderDots(TOTAL_QUESTIONS);
 
-  setPrep(95);
   setSys('Checking audio...');
   const firstReady = await prepareFirstQuestionReady();
+  await pollPrepareStatusOnce();
   setPrep(100);
 
   if (firstReady) {
+    stopPrepareStatusPolling();
     btnStart.disabled = false;
   }
 }
@@ -888,7 +937,7 @@ async function startRecording(){
       mediaStream = null;
       setRec(false);
       btnPTT.classList.remove('rec');
-      btnPTT.textContent = '🎙 Tap to Start Talking';
+      btnPTT.textContent = 'ðŸŽ™ Tap to Start Talking';
       isStopping = false;
       await uploadAnswerBlob(blob, false);
     };
@@ -897,7 +946,7 @@ async function startRecording(){
     isRecording = true;
     setRec(true);
     btnPTT.classList.add('rec');
-    btnPTT.textContent = '⏹ Tap to Stop (finishes in 1 sec)';
+    btnPTT.textContent = 'â¹ Tap to Stop (finishes in 1 sec)';
   }catch(e){
     setSys('Microphone access failed.');
   }
@@ -919,8 +968,6 @@ async function delayedStopRecording(){
     }catch(e){
       isStopping = false;
       setSys('Stop recording failed.');
-      btnPTT.disabled = false;
-      btnPTT.textContent = '🎙 Tap to Start Talking';
     }
   }, 1000);
 }
@@ -1006,13 +1053,12 @@ btnNext.addEventListener('click', async ()=>{
   await playCurrentQuestion();
 });
 
-
 async function uploadAnswerBlob(blob, timeoutOnly){
   btnPTT.disabled = true;
   btnReplay.disabled = true;
   btnNext.disabled = true;
   btnNext.style.display = 'none';
-  setSys('Saving your answer...');
+  setSys('STEP 1: Saving your answer...');
 
   const fd = new FormData();
   fd.append('test_id', String(TEST_ID));
@@ -1025,11 +1071,11 @@ async function uploadAnswerBlob(blob, timeoutOnly){
   }
 
   const controller = new AbortController();
-  const timeoutMs = 45000;
+  const timeoutMs = 15000;
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    setSys('Saving your answer... contacting server...');
+    setSys('STEP 2: Sending upload request...');
     const res = await fetch('/student/api/test_upload_answer_v2.php', {
       method:'POST',
       credentials:'same-origin',
@@ -1039,7 +1085,7 @@ async function uploadAnswerBlob(blob, timeoutOnly){
 
     clearTimeout(timeoutHandle);
 
-    setSys('Saving your answer... reading server response...');
+    setSys('STEP 3: Reading upload response...');
     const txt = await res.text();
 
     let j = null;
@@ -1050,12 +1096,12 @@ async function uploadAnswerBlob(blob, timeoutOnly){
     }
 
     if (!j.ok) {
-      setSys('Upload failed: ' + (j.error || 'Unknown error'));
+      setSys('STEP 4A: Upload failed: ' + (j.error || 'Unknown error'));
       restoreAfterUploadFailure();
       return;
     }
 
-    setSys('Answer saved. Preparing next question...');
+    setSys('STEP 4B: Upload OK. Preparing next question...');
     markDone(CUR_POS);
     CUR_POS++;
 
@@ -1068,33 +1114,26 @@ async function uploadAnswerBlob(blob, timeoutOnly){
     btnReplay.disabled = false;
     answerWrap.style.display = 'none';
 
-    const prepController = new AbortController();
-    const prepTimeout = setTimeout(() => prepController.abort(), 30000);
-
-    try {
-      await prepareNextQuestionReady();
-      clearTimeout(prepTimeout);
-    } catch (e) {
-      clearTimeout(prepTimeout);
-      throw e;
-    }
+    await prepareNextQuestionReady();
 
     READY_FOR_NEXT = NEXT_QUESTION_READY;
     btnNext.disabled = !READY_FOR_NEXT;
 
-    if (!READY_FOR_NEXT) {
-      setSys('Next question audio could not be prepared. Please retry.');
-      btnReplay.disabled = false;
+    if (READY_FOR_NEXT) {
+      setSys('STEP 5: Next question ready.');
+    } else {
+      setSys('STEP 5: Next question failed to prepare.');
+      restoreAfterUploadFailure();
     }
 
   } catch (err) {
     clearTimeout(timeoutHandle);
 
-    let msg = 'Upload failed.';
+    let msg = 'STEP X: Upload failed.';
     if (err && err.name === 'AbortError') {
-      msg = 'Upload timed out. Please try again.';
+      msg = 'STEP X: Upload timed out after 15 seconds.';
     } else if (err && err.message) {
-      msg = 'Upload failed: ' + err.message;
+      msg = 'STEP X: Upload failed: ' + err.message;
     }
 
     setSys(msg);
@@ -1150,29 +1189,29 @@ async function finalizeTest(){
   }
 
   const sections = [
-    ['Debrief', j.ai_summary || ''],
-    ['Weak Areas', j.weak_areas || ''],
-    ['Summary Quality', j.summary_quality || ''],
-    ['Summary Issues', j.summary_issues || ''],
-    ['Suggested Summary Corrections', j.summary_corrections || ''],
-    ['Confirmed Misunderstandings', j.confirmed_misunderstandings || '']
-  ];
+  ['Debrief', j.ai_summary || ''],
+  ['Weak Areas', j.weak_areas || ''],
+  ['Summary Quality', j.summary_quality || ''],
+  ['Summary Issues', j.summary_issues || ''],
+  ['Suggested Summary Corrections', j.summary_corrections || ''],
+  ['Confirmed Misunderstandings', j.confirmed_misunderstandings || '']
+];
 
-  let html = `<div><strong>Score:</strong> ${escapeHtml(String(j.score_pct || 0))}%</div>`;
+let html = `<div><strong>Score:</strong> ${escapeHtml(String(j.score_pct || 0))}%</div>`;
 
-  sections.forEach(([title, value]) => {
-    if (!String(value || '').trim()) return;
-    html += `
-      <div style="margin-top:10px;">
-        <strong>${escapeHtml(title)}</strong><br>
-        <div style="white-space:pre-wrap;">${escapeHtml(value)}</div>
-      </div>
-    `;
-  });
+sections.forEach(([title, value]) => {
+  if (!String(value || '').trim()) return;
+  html += `
+    <div style="margin-top:10px;">
+      <strong>${escapeHtml(title)}</strong><br>
+      <div style="white-space:pre-wrap;">${escapeHtml(value)}</div>
+    </div>
+  `;
+});
 
-  resultBox.style.display = 'block';
-  resultBox.innerHTML = html;
-  setSys('Completed.');
+resultBox.style.display = 'block';
+resultBox.innerHTML = html;
+setSys('Completed.');
 }
 
 function escapeHtml(s){
