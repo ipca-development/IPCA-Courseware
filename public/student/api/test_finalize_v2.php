@@ -155,7 +155,6 @@ function build_alias_groups(array $correct, array $fallbackKeyPoints = []): arra
         }
     }
 
-    // Fallback: each rubric key point becomes its own alias group
     foreach ($fallbackKeyPoints as $kp) {
         if (!is_string($kp)) continue;
         $kp = trim($kp);
@@ -267,7 +266,6 @@ function grade_yesno(string $transcript, array $correct): array {
         if (preg_match($rx, $t)) $noScore++;
     }
 
-    // strong real-world oral hints
     if (strpos($t, 'all airplanes have brakes on the main gear') !== false) $yesScore += 2;
     if (strpos($t, 'in most designs') !== false) $yesScore += 2;
     if (strpos($t, 'the airplane produces 180 horsepower') !== false) $yesScore += 2;
@@ -287,7 +285,6 @@ function grade_yesno(string $transcript, array $correct): array {
 
     $cv = (bool)($correct['value'] ?? false);
 
-    // partial concept aliases for explanation
     $aliases = build_alias_groups($correct, []);
     $aliasHits = 0;
     foreach ($aliases as $grp) {
@@ -303,15 +300,11 @@ function grade_yesno(string $transcript, array $correct): array {
     $score = 0;
 
     if ($sv !== null && $sv === $cv) {
-        // Full credit for correct yes/no direction.
         $score = 1;
         if ($aliases && $aliasHits === 0) {
             $feedback = 'Correct yes/no direction. Review the explanation detail for completeness.';
         }
     } else {
-        // Examiner override threshold:
-        // if explanation strongly supports the correct concept and does not contradict the correct direction,
-        // give benefit of the doubt.
         if ($aliases && $aliasHits > 0 && !transcript_is_contradictory_to_bool($transcript, $cv)) {
             $score = 1;
             $feedback = 'Accepted on concept evidence despite indirect yes/no phrasing.';
@@ -384,7 +377,6 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
     $t = normalize_text($transcript);
     $idx = -1;
 
-    // explicit spoken letters/numbers still supported
     if (preg_match('/\b(a|b|c|d)\b/', $t, $m)) {
         $map = ['a' => 0, 'b' => 1, 'c' => 2, 'd' => 3];
         $idx = $map[$m[1]];
@@ -410,7 +402,6 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
             }
         }
 
-        // concise correct answers accepted
         if ($bestIdx >= 0 && $bestScore >= 10 && ($bestScore - $secondBest) >= 2) {
             $idx = $bestIdx;
         }
@@ -421,7 +412,6 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
         $ci = (int)$correct['index'];
     }
 
-    // new oral-choice support using answer_text / alternatives / aliases
     $groups = [];
     if (!empty($correct['answer_text'])) {
         $groups[] = [(string)$correct['answer_text']];
@@ -453,7 +443,6 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
 
     $ok = ($idx === $ci && $ci >= 0) ? 1 : 0;
 
-    // examiner override threshold: concept clearly related and not contradictory
     if (!$ok && $groups) {
         $bestCorrectScore = best_alias_score($transcript, $groups);
         if ($bestCorrectScore >= 10) $ok = 1;
@@ -474,7 +463,6 @@ function grade_open_with_ai(array $item, string $transcript): array {
 
     $aliasGroups = build_alias_groups($correct, $keyPoints);
 
-    // minimum pass logic: enough correct concepts, not textbook completeness
     $minPts = (int)($correct['min_points_to_pass'] ?? 2);
     if ($minPts < 1) $minPts = 1;
 
@@ -505,7 +493,15 @@ Rules:
 - Do not punish over-answering unless the student clearly contradicts the correct concept.
 - For open answers, passing depends on enough correct core concepts, not a full textbook recital.
 - Be slightly generous on borderline oral responses when the correct concept is clearly present.
-- Penalize only actual conceptual errors or missing core elements."
+- Penalize only actual conceptual errors or missing core elements.
+- Distinguish clearly between:
+  1) conceptually correct but incomplete,
+  2) partially correct,
+  3) incorrect.
+- If the student clearly states the main operational concept correctly, award meaningful partial credit even if supporting details are missing.
+- If the answer is concise but operationally correct, treat it as valid.
+- If the answer contains the correct main concept and no contradiction, do not score it like a failure just because it is incomplete.
+- Strong partial credit should be common for operationally correct but incomplete oral answers."
                 ]
             ]],
             ["role" => "user", "content" => [
@@ -539,6 +535,22 @@ Rules:
 
     if ($scorePoints < 0) $scorePoints = 0;
     if ($scorePoints > $maxPoints) $scorePoints = $maxPoints;
+
+    $aliasHits = 0;
+    foreach ($aliasGroups as $grp) {
+        foreach ($grp as $phrase) {
+            if (text_matches_phrase($transcript, (string)$phrase)) {
+                $aliasHits++;
+                break;
+            }
+        }
+    }
+
+    if ($aliasHits >= 2) {
+        $scorePoints = max($scorePoints, min($maxPoints, $minPts));
+    } elseif ($aliasHits >= 1) {
+        $scorePoints = max($scorePoints, min($maxPoints, max(1, (int)ceil($maxPoints / 2))));
+    }
 
     $isCorrect = !empty($j['is_correct']) ? 1 : 0;
     if ($scorePoints >= $minPts) $isCorrect = 1;
