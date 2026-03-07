@@ -786,6 +786,7 @@ btnNext.addEventListener('click', async ()=>{
   await playCurrentQuestion();
 });
 
+
 async function uploadAnswerBlob(blob, timeoutOnly){
   btnPTT.disabled = true;
   btnReplay.disabled = true;
@@ -808,6 +809,7 @@ async function uploadAnswerBlob(blob, timeoutOnly){
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
+    setSys('Saving your answer... contacting server...');
     const res = await fetch('/student/api/test_upload_answer_v2.php', {
       method:'POST',
       credentials:'same-origin',
@@ -817,7 +819,9 @@ async function uploadAnswerBlob(blob, timeoutOnly){
 
     clearTimeout(timeoutHandle);
 
+    setSys('Saving your answer... reading server response...');
     const txt = await res.text();
+
     let j = null;
     try {
       j = JSON.parse(txt);
@@ -831,6 +835,7 @@ async function uploadAnswerBlob(blob, timeoutOnly){
       return;
     }
 
+    setSys('Answer saved. Preparing next question...');
     markDone(CUR_POS);
     CUR_POS++;
 
@@ -842,9 +847,25 @@ async function uploadAnswerBlob(blob, timeoutOnly){
     READY_FOR_NEXT = false;
     btnReplay.disabled = false;
     answerWrap.style.display = 'none';
-    await prepareNextQuestionReady();
+
+    const prepController = new AbortController();
+    const prepTimeout = setTimeout(() => prepController.abort(), 30000);
+
+    try {
+      await prepareNextQuestionReady();
+      clearTimeout(prepTimeout);
+    } catch (e) {
+      clearTimeout(prepTimeout);
+      throw e;
+    }
+
     READY_FOR_NEXT = NEXT_QUESTION_READY;
     btnNext.disabled = !READY_FOR_NEXT;
+
+    if (!READY_FOR_NEXT) {
+      setSys('Next question audio could not be prepared. Please retry.');
+      btnReplay.disabled = false;
+    }
 
   } catch (err) {
     clearTimeout(timeoutHandle);
@@ -859,7 +880,8 @@ async function uploadAnswerBlob(blob, timeoutOnly){
     setSys(msg);
     restoreAfterUploadFailure();
   }
-}
+}	
+	
 
 async function finalizeTest(){
   btnPTT.disabled = true;
