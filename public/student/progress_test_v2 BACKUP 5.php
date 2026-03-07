@@ -4,94 +4,6 @@ require_once __DIR__ . '/../../src/layout.php';
 
 cw_require_login();
 
-if (session_status() !== PHP_SESSION_ACTIVE) {
-    @session_start();
-}
-
-function pt_client_ip(): string {
-    $keys = array('HTTP_CF_CONNECTING_IP', 'HTTP_X_FORWARDED_FOR', 'REMOTE_ADDR');
-    foreach ($keys as $k) {
-        if (!empty($_SERVER[$k])) {
-            $v = trim((string)$_SERVER[$k]);
-            if ($k === 'HTTP_X_FORWARDED_FOR') {
-                $parts = explode(',', $v);
-                $v = trim((string)$parts[0]);
-            }
-            if ($v !== '') return $v;
-        }
-    }
-    return '';
-}
-
-function pt_ip_in_cidr(string $ip, string $cidr): bool {
-    if ($ip === '' || $cidr === '') return false;
-
-    if (strpos($cidr, '/') === false) {
-        return $ip === $cidr;
-    }
-
-    list($subnet, $mask) = explode('/', $cidr, 2);
-
-    $ipLong = ip2long($ip);
-    $subnetLong = ip2long($subnet);
-    $mask = (int)$mask;
-
-    if ($ipLong === false || $subnetLong === false || $mask < 0 || $mask > 32) {
-        return false;
-    }
-
-    $maskLong = $mask === 0 ? 0 : (-1 << (32 - $mask));
-    return (($ipLong & $maskLong) === ($subnetLong & $maskLong));
-}
-
-function pt_ip_matches_cidrs(string $ip, string $cidrs): bool {
-    $cidrs = trim($cidrs);
-    if ($ip === '' || $cidrs === '') return false;
-
-    $parts = preg_split('/[\s,;]+/', $cidrs);
-    if (!is_array($parts)) return false;
-
-    foreach ($parts as $rule) {
-        $rule = trim((string)$rule);
-        if ($rule !== '' && pt_ip_in_cidr($ip, $rule)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-function pt_load_access_policy(PDO $pdo, int $userId, int $cohortId): ?array {
-    $sql = "
-        SELECT *
-        FROM progress_test_access_policy
-        WHERE
-            (scope_type='user'   AND scope_id=:user_id)
-            OR
-            (scope_type='cohort' AND scope_id=:cohort_id)
-            OR
-            (scope_type='global' AND scope_id IS NULL)
-        ORDER BY
-            CASE scope_type
-                WHEN 'user' THEN 1
-                WHEN 'cohort' THEN 2
-                WHEN 'global' THEN 3
-                ELSE 9
-            END
-        LIMIT 1
-    ";
-    $st = $pdo->prepare($sql);
-    $st->execute(array(
-        ':user_id' => $userId,
-        ':cohort_id' => $cohortId
-    ));
-    $row = $st->fetch(PDO::FETCH_ASSOC);
-    return $row ?: null;
-}
-
-function pt_session_key(int $cohortId): string {
-    return 'progress_test_access_ok_' . $cohortId;
-}
-
 $u = cw_current_user($pdo);
 $role = (string)($u['role'] ?? '');
 if ($role !== 'student' && $role !== 'admin') {
@@ -105,7 +17,7 @@ if ($cohortId <= 0 || $lessonId <= 0) exit('Missing cohort_id or lesson_id');
 
 if ($role === 'student') {
     $check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
-    $check->execute(array($cohortId, (int)$u['id']));
+    $check->execute([$cohortId, (int)$u['id']]);
     if (!$check->fetchColumn()) {
         http_response_code(403);
         exit('Not enrolled in this cohort');
@@ -117,138 +29,6 @@ $firstName = trim(explode(' ', trim($userName))[0] ?? 'Student');
 
 $INSTRUCTOR_NAME = 'Maya';
 $INSTRUCTOR_AVATAR = '/assets/avatars/maya.png';
-
-/* ---------------- Access policy gate ---------------- */
-$userId = (int)($u['id'] ?? 0);
-$clientIp = pt_client_ip();
-$policy = pt_load_access_policy($pdo, $userId, $cohortId);
-$gateError = '';
-
-if ($policy) {
-    $mode = (string)($policy['mode'] ?? 'any');
-    $allowedCidrs = (string)($policy['allowed_cidrs'] ?? '');
-    $pinHash = (string)($policy['pin_hash'] ?? '');
-    $sessionKey = pt_session_key($cohortId);
-
-    $ipAllowed = false;
-    if ($allowedCidrs !== '') {
-        $ipAllowed = pt_ip_matches_cidrs($clientIp, $allowedCidrs);
-    }
-
-    $pinVerified = !empty($_SESSION[$sessionKey]);
-
-    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['progress_test_pin'])) {
-        $submittedPin = trim((string)$_POST['progress_test_pin']);
-        if ($pinHash !== '' && $submittedPin !== '' && password_verify($submittedPin, $pinHash)) {
-            $_SESSION[$sessionKey] = 1;
-            header('Location: ' . $_SERVER['REQUEST_URI']);
-            exit;
-        } else {
-            $gateError = 'Invalid access code.';
-        }
-    }
-
-    $allowed = true;
-
-    if ($mode === 'any') {
-        $allowed = true;
-    } elseif ($mode === 'school_ip') {
-        // Allow on school IP, otherwise allow PIN fallback if configured and verified.
-        $allowed = $ipAllowed || ($pinHash !== '' && $pinVerified);
-    } elseif ($mode === 'pin') {
-        $allowed = $pinVerified;
-    }
-
-    if (!$allowed) {
-        cw_header('Progress Test Access');
-        ?>
-        <style>
-          body{ background:#fff; }
-          .gate-wrap{ max-width:980px; margin:0 auto; }
-          .gate-card{
-            max-width:560px;
-            margin:38px auto;
-            padding:24px;
-            border:1px solid #e8e8e8;
-            border-radius:18px;
-            background:#fff;
-            box-shadow:0 10px 30px rgba(0,0,0,0.06);
-          }
-          .gate-title{
-            font-size:24px;
-            font-weight:900;
-            color:#1e3c72;
-            margin-bottom:8px;
-          }
-          .gate-text{
-            color:#334155;
-            line-height:1.5;
-          }
-          .gate-input{
-            width:100%;
-            margin-top:14px;
-            padding:14px 16px;
-            border:1px solid #d6d6d6;
-            border-radius:12px;
-            font-size:16px;
-            box-sizing:border-box;
-          }
-          .gate-btn{
-            width:100%;
-            margin-top:14px;
-            padding:16px 14px;
-            border-radius:16px;
-            border:2px solid rgba(30,60,114,0.25);
-            background:rgba(30,60,114,0.08);
-            color:#1e3c72;
-            font-weight:900;
-            font-size:18px;
-            cursor:pointer;
-          }
-          .gate-error{
-            margin-top:12px;
-            color:#b91c1c;
-            font-weight:800;
-          }
-        </style>
-
-        <div class="gate-wrap">
-          <div class="gate-card">
-            <div class="gate-title">Progress Test Access Required</div>
-
-            <?php if ($mode === 'school_ip'): ?>
-              <div class="gate-text">
-                This progress test normally requires the approved school network.<br>
-                Since you are not on the approved IP, enter the access code to continue.
-              </div>
-            <?php else: ?>
-              <div class="gate-text">
-                Enter the progress test access code to continue.
-              </div>
-            <?php endif; ?>
-
-            <?php if ($gateError !== ''): ?>
-              <div class="gate-error"><?= h($gateError) ?></div>
-            <?php endif; ?>
-
-            <form method="post" autocomplete="off">
-              <input
-                class="gate-input"
-                type="password"
-                name="progress_test_pin"
-                placeholder="Access code"
-                autofocus
-              >
-              <button class="gate-btn" type="submit">Continue</button>
-            </form>
-          </div>
-        </div>
-        <?php
-        cw_footer();
-        exit;
-    }
-}
-/* -------------------------------------------------- */
 
 cw_header('Progress Test');
 ?>
@@ -553,6 +333,8 @@ let CURRENT_PROMPT_ITEM_ID = 0;
 let READY_FOR_NEXT = false;
 let FIRST_QUESTION_READY = false;
 let NEXT_QUESTION_READY = false;
+let prepareStatusPoll = null;
+let prepareStatusStarted = false;
 
 const btnStart = document.getElementById('btnStart');
 const btnReady = document.getElementById('btnReady');
@@ -600,6 +382,54 @@ function markReady(i){
   if(el && !el.classList.contains('done')){
     el.classList.add('ready');
   }
+}
+
+function stopPrepareStatusPolling(){
+  if (prepareStatusPoll) {
+    clearInterval(prepareStatusPoll);
+    prepareStatusPoll = null;
+  }
+}
+
+async function pollPrepareStatusOnce(){
+  if (!TEST_ID) return;
+
+  try {
+    const res = await fetch('/student/api/test_prepare_status_v2.php?test_id=' + encodeURIComponent(TEST_ID), {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store'
+    });
+
+    const txt = await res.text();
+    let j = null;
+    try {
+      j = JSON.parse(txt);
+    } catch(e) {
+      return;
+    }
+
+    if (!j || !j.ok) return;
+
+    const pct = Math.max(0, Math.min(100, parseInt(j.progress_pct || 0, 10)));
+    const statusText = String(j.status_text || '');
+
+    if (pct > 0) setPrep(pct);
+    if (statusText) setSys(statusText);
+
+    if (String(j.status || '') === 'ready' || pct >= 100) {
+      stopPrepareStatusPolling();
+    }
+  } catch (e) {
+  }
+}
+
+function startPrepareStatusPolling(){
+  if (prepareStatusStarted) return;
+  prepareStatusStarted = true;
+
+  stopPrepareStatusPolling();
+  prepareStatusPoll = setInterval(pollPrepareStatusOnce, 1000);
 }
 
 function restoreAfterUploadFailure() {
@@ -735,11 +565,8 @@ async function prepareNextQuestionReady(){
 async function prepareTest(){
   await startCam();
 
-  let p = 0;
-  const tick = setInterval(()=>{
-    p = Math.min(85, p + 4);
-    setPrep(p);
-  }, 250);
+  setPrep(2);
+  setSys('Starting preparation...');
 
   const res = await fetch('/student/api/test_prepare_v2.php', {
     method:'POST',
@@ -748,13 +575,12 @@ async function prepareTest(){
     body: JSON.stringify({ cohort_id: COHORT_ID, lesson_id: LESSON_ID })
   });
 
-  clearInterval(tick);
-
   const txt = await res.text();
   let j = null;
   try { j = JSON.parse(txt); } catch(e) { j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)}; }
 
   if (!j.ok) {
+    stopPrepareStatusPolling();
     setPrep(100);
     setSys('Preparation failed: ' + (j.error || 'Unknown error'));
     return;
@@ -762,6 +588,11 @@ async function prepareTest(){
 
   TEST_ID = parseInt(j.test_id || 0, 10);
   TOTAL_QUESTIONS = parseInt(j.total_questions || 10, 10);
+
+  if (TEST_ID > 0) {
+    startPrepareStatusPolling();
+    await pollPrepareStatusOnce();
+  }
 
   if (!TEST_ID || !TOTAL_QUESTIONS) {
     setPrep(100);
@@ -781,12 +612,13 @@ async function prepareTest(){
 
   renderDots(TOTAL_QUESTIONS);
 
-  setPrep(95);
   setSys('Checking audio...');
   const firstReady = await prepareFirstQuestionReady();
+  await pollPrepareStatusOnce();
   setPrep(100);
 
   if (firstReady) {
+    stopPrepareStatusPolling();
     btnStart.disabled = false;
   }
 }
@@ -919,8 +751,6 @@ async function delayedStopRecording(){
     }catch(e){
       isStopping = false;
       setSys('Stop recording failed.');
-      btnPTT.disabled = false;
-      btnPTT.textContent = '🎙 Tap to Start Talking';
     }
   }, 1000);
 }
@@ -1006,13 +836,12 @@ btnNext.addEventListener('click', async ()=>{
   await playCurrentQuestion();
 });
 
-
 async function uploadAnswerBlob(blob, timeoutOnly){
   btnPTT.disabled = true;
   btnReplay.disabled = true;
   btnNext.disabled = true;
   btnNext.style.display = 'none';
-  setSys('Saving your answer...');
+  setSys('STEP 1: Saving your answer...');
 
   const fd = new FormData();
   fd.append('test_id', String(TEST_ID));
@@ -1025,11 +854,11 @@ async function uploadAnswerBlob(blob, timeoutOnly){
   }
 
   const controller = new AbortController();
-  const timeoutMs = 45000;
+  const timeoutMs = 15000;
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    setSys('Saving your answer... contacting server...');
+    setSys('STEP 2: Sending upload request...');
     const res = await fetch('/student/api/test_upload_answer_v2.php', {
       method:'POST',
       credentials:'same-origin',
@@ -1039,7 +868,7 @@ async function uploadAnswerBlob(blob, timeoutOnly){
 
     clearTimeout(timeoutHandle);
 
-    setSys('Saving your answer... reading server response...');
+    setSys('STEP 3: Reading upload response...');
     const txt = await res.text();
 
     let j = null;
@@ -1050,12 +879,12 @@ async function uploadAnswerBlob(blob, timeoutOnly){
     }
 
     if (!j.ok) {
-      setSys('Upload failed: ' + (j.error || 'Unknown error'));
+      setSys('STEP 4A: Upload failed: ' + (j.error || 'Unknown error'));
       restoreAfterUploadFailure();
       return;
     }
 
-    setSys('Answer saved. Preparing next question...');
+    setSys('STEP 4B: Upload OK. Preparing next question...');
     markDone(CUR_POS);
     CUR_POS++;
 
@@ -1068,33 +897,26 @@ async function uploadAnswerBlob(blob, timeoutOnly){
     btnReplay.disabled = false;
     answerWrap.style.display = 'none';
 
-    const prepController = new AbortController();
-    const prepTimeout = setTimeout(() => prepController.abort(), 30000);
-
-    try {
-      await prepareNextQuestionReady();
-      clearTimeout(prepTimeout);
-    } catch (e) {
-      clearTimeout(prepTimeout);
-      throw e;
-    }
+    await prepareNextQuestionReady();
 
     READY_FOR_NEXT = NEXT_QUESTION_READY;
     btnNext.disabled = !READY_FOR_NEXT;
 
-    if (!READY_FOR_NEXT) {
-      setSys('Next question audio could not be prepared. Please retry.');
-      btnReplay.disabled = false;
+    if (READY_FOR_NEXT) {
+      setSys('STEP 5: Next question ready.');
+    } else {
+      setSys('STEP 5: Next question failed to prepare.');
+      restoreAfterUploadFailure();
     }
 
   } catch (err) {
     clearTimeout(timeoutHandle);
 
-    let msg = 'Upload failed.';
+    let msg = 'STEP X: Upload failed.';
     if (err && err.name === 'AbortError') {
-      msg = 'Upload timed out. Please try again.';
+      msg = 'STEP X: Upload timed out after 15 seconds.';
     } else if (err && err.message) {
-      msg = 'Upload failed: ' + err.message;
+      msg = 'STEP X: Upload failed: ' + err.message;
     }
 
     setSys(msg);
@@ -1149,29 +971,12 @@ async function finalizeTest(){
     setSys('Result audio failed, but written results are available.');
   }
 
-  const sections = [
-    ['Debrief', j.ai_summary || ''],
-    ['Weak Areas', j.weak_areas || ''],
-    ['Summary Quality', j.summary_quality || ''],
-    ['Summary Issues', j.summary_issues || ''],
-    ['Suggested Summary Corrections', j.summary_corrections || ''],
-    ['Confirmed Misunderstandings', j.confirmed_misunderstandings || '']
-  ];
-
-  let html = `<div><strong>Score:</strong> ${escapeHtml(String(j.score_pct || 0))}%</div>`;
-
-  sections.forEach(([title, value]) => {
-    if (!String(value || '').trim()) return;
-    html += `
-      <div style="margin-top:10px;">
-        <strong>${escapeHtml(title)}</strong><br>
-        <div style="white-space:pre-wrap;">${escapeHtml(value)}</div>
-      </div>
-    `;
-  });
-
   resultBox.style.display = 'block';
-  resultBox.innerHTML = html;
+  resultBox.innerHTML = `
+    <div><strong>Score:</strong> ${escapeHtml(String(j.score_pct || 0))}%</div>
+    <div style="margin-top:10px;"><strong>Debrief</strong><br><div style="white-space:pre-wrap;">${escapeHtml(j.ai_summary || '')}</div></div>
+    <div style="margin-top:10px;"><strong>Weak Areas</strong><br><div style="white-space:pre-wrap;">${escapeHtml(j.weak_areas || '')}</div></div>
+  `;
   setSys('Completed.');
 }
 

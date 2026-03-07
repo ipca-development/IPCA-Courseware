@@ -10,7 +10,9 @@ ob_start();
 
 function json_out(array $x): void {
     while (ob_get_level() > 1) { ob_end_clean(); }
-    if (ob_get_level() === 1) ob_clean();
+    if (ob_get_level() === 1) {
+        ob_clean();
+    }
     echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
@@ -128,102 +130,6 @@ function transcribe_file(string $apiKey, string $filepath): string {
     return trim((string)($j['text'] ?? ''));
 }
 
-/**
- * Build keyword aliases for concept-based grading.
- * Accepts strings or maps like:
- * [
- *   "yaw",
- *   ["move nose left right", "directional control"],
- *   "stability"
- * ]
- */
-function build_alias_groups(array $correct, array $fallbackKeyPoints = []): array {
-    $groups = [];
-
-    $raw = $correct['aliases'] ?? [];
-    if (!is_array($raw)) $raw = [];
-
-    foreach ($raw as $entry) {
-        if (is_string($entry) && trim($entry) !== '') {
-            $groups[] = [trim($entry)];
-        } elseif (is_array($entry)) {
-            $grp = [];
-            foreach ($entry as $v) {
-                if (is_string($v) && trim($v) !== '') $grp[] = trim($v);
-            }
-            if ($grp) $groups[] = $grp;
-        }
-    }
-
-    // Fallback: each rubric key point becomes its own alias group
-    foreach ($fallbackKeyPoints as $kp) {
-        if (!is_string($kp)) continue;
-        $kp = trim($kp);
-        if ($kp !== '') $groups[] = [$kp];
-    }
-
-    return $groups;
-}
-
-function text_matches_phrase(string $transcript, string $phrase): bool {
-    $t = normalize_text($transcript);
-    $p = normalize_text($phrase);
-
-    if ($t === '' || $p === '') return false;
-    if (strpos($t, $p) !== false) return true;
-
-    $tWords = array_values(array_filter(explode(' ', $t)));
-    $pWords = array_values(array_filter(explode(' ', $p)));
-    if (!$tWords || !$pWords) return false;
-
-    $hits = 0;
-    $need = 0;
-    foreach ($pWords as $w) {
-        if (strlen($w) < 3) continue;
-        $need++;
-        foreach ($tWords as $tw) {
-            if ($tw === $w || (strlen($w) >= 4 && strlen($tw) >= 4 && (strpos($tw, $w) === 0 || strpos($w, $tw) === 0))) {
-                $hits++;
-                break;
-            }
-        }
-    }
-
-    if ($need === 0) return false;
-    return $hits >= max(1, $need - 1);
-}
-
-function transcript_is_contradictory_to_bool(string $transcript, bool $correctValue): bool {
-    $t = normalize_text($transcript);
-
-    $affirmativePatterns = [
-        '/\byes\b/', '/\btrue\b/', '/\byep\b/', '/\byeah\b/', '/\bcorrect\b/', '/\bindeed\b/',
-        '/\bit is\b/', '/\bit does\b/', '/\bthat is the case\b/', '/\bthat s the case\b/',
-        '/\bin most designs\b/', '/\bthere are\b/', '/\bthere is\b/'
-    ];
-
-    $negativePatterns = [
-        '/\bno\b/', '/\bfalse\b/', '/\bdoes not\b/', '/\bdo not\b/', '/\bis not\b/',
-        '/\baren t\b/', '/\bare not\b/', '/\bnever\b/', '/\bthat is not the case\b/',
-        '/\bthat s not the case\b/', '/\bnope\b/'
-    ];
-
-    $yesScore = 0;
-    $noScore = 0;
-
-    foreach ($affirmativePatterns as $rx) {
-        if (preg_match($rx, $t)) $yesScore++;
-    }
-    foreach ($negativePatterns as $rx) {
-        if (preg_match($rx, $t)) $noScore++;
-    }
-
-    if ($yesScore === 0 && $noScore === 0) return false;
-    $semantic = ($yesScore >= $noScore);
-
-    return $semantic !== $correctValue;
-}
-
 function grade_yesno(string $transcript, array $correct): array {
     $t = normalize_text($transcript);
 
@@ -246,6 +152,7 @@ function grade_yesno(string $transcript, array $correct): array {
     $negativePatterns = [
         '/\bno\b/',
         '/\bfalse\b/',
+        '/\bnot\b/',
         '/\bdoes not\b/',
         '/\bdo not\b/',
         '/\bis not\b/',
@@ -263,18 +170,21 @@ function grade_yesno(string $transcript, array $correct): array {
     foreach ($affirmativePatterns as $rx) {
         if (preg_match($rx, $t)) $yesScore++;
     }
+
     foreach ($negativePatterns as $rx) {
         if (preg_match($rx, $t)) $noScore++;
     }
 
-    // strong real-world oral hints
+    // Strong semantic hints
     if (strpos($t, 'all airplanes have brakes on the main gear') !== false) $yesScore += 2;
     if (strpos($t, 'in most designs') !== false) $yesScore += 2;
     if (strpos($t, 'the airplane produces 180 horsepower') !== false) $yesScore += 2;
+    if (strpos($t, 'never on the nose gear') !== false) $yesScore += 2;
     if (strpos($t, 'that s correct') !== false) $yesScore += 2;
     if (strpos($t, 'that is correct') !== false) $yesScore += 2;
 
     $sv = null;
+
     if ($yesScore > 0 && $noScore === 0) {
         $sv = true;
     } elseif ($noScore > 0 && $yesScore === 0) {
@@ -286,43 +196,13 @@ function grade_yesno(string $transcript, array $correct): array {
     }
 
     $cv = (bool)($correct['value'] ?? false);
-
-    // partial concept aliases for explanation
-    $aliases = build_alias_groups($correct, []);
-    $aliasHits = 0;
-    foreach ($aliases as $grp) {
-        foreach ($grp as $phrase) {
-            if (text_matches_phrase($transcript, $phrase)) {
-                $aliasHits++;
-                break;
-            }
-        }
-    }
-
-    $feedback = '';
-    $score = 0;
-
-    if ($sv !== null && $sv === $cv) {
-        // Full credit for correct yes/no direction.
-        $score = 1;
-        if ($aliases && $aliasHits === 0) {
-            $feedback = 'Correct yes/no direction. Review the explanation detail for completeness.';
-        }
-    } else {
-        // Examiner override threshold:
-        // if explanation strongly supports the correct concept and does not contradict the correct direction,
-        // give benefit of the doubt.
-        if ($aliases && $aliasHits > 0 && !transcript_is_contradictory_to_bool($transcript, $cv)) {
-            $score = 1;
-            $feedback = 'Accepted on concept evidence despite indirect yes/no phrasing.';
-        }
-    }
+    $ok = ($sv !== null && $sv === $cv) ? 1 : 0;
 
     return [
-        'is_correct'   => $score >= 1 ? 1 : 0,
-        'score_points' => $score,
+        'is_correct'   => $ok,
+        'score_points' => $ok,
         'max_points'   => 1,
-        'feedback'     => $feedback
+        'feedback'     => ''
     ];
 }
 
@@ -331,10 +211,12 @@ function mcq_text_score(string $transcript, string $option): int {
     $o = normalize_text($option);
 
     if ($t === '' || $o === '') return 0;
+
     if (strpos($t, $o) !== false) return 100;
 
     $tWords = array_values(array_filter(explode(' ', $t)));
     $oWords = array_values(array_filter(explode(' ', $o)));
+
     if (!$tWords || !$oWords) return 0;
 
     $score = 0;
@@ -349,6 +231,7 @@ function mcq_text_score(string $transcript, string $option): int {
                 $matched++;
                 break;
             }
+
             if (strlen($w) >= 4 && strlen($tw) >= 4) {
                 if (strpos($tw, $w) === 0 || strpos($w, $tw) === 0) {
                     $score += 6;
@@ -370,21 +253,10 @@ function mcq_text_score(string $transcript, string $option): int {
     return $score;
 }
 
-function best_alias_score(string $transcript, array $groups): int {
-    $best = 0;
-    foreach ($groups as $grp) {
-        foreach ($grp as $phrase) {
-            $best = max($best, mcq_text_score($transcript, (string)$phrase));
-        }
-    }
-    return $best;
-}
-
 function grade_mcq(string $transcript, array $correct, array $options): array {
     $t = normalize_text($transcript);
     $idx = -1;
 
-    // explicit spoken letters/numbers still supported
     if (preg_match('/\b(a|b|c|d)\b/', $t, $m)) {
         $map = ['a' => 0, 'b' => 1, 'c' => 2, 'd' => 3];
         $idx = $map[$m[1]];
@@ -410,39 +282,29 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
             }
         }
 
-        // concise correct answers accepted
-        if ($bestIdx >= 0 && $bestScore >= 10 && ($bestScore - $secondBest) >= 2) {
+        if ($bestIdx >= 0 && $bestScore >= 12 && ($bestScore - $secondBest) >= 3) {
             $idx = $bestIdx;
         }
     }
 
     $ci = -1;
+
     if (isset($correct['index']) && $correct['index'] !== null) {
         $ci = (int)$correct['index'];
     }
 
-    // new oral-choice support using answer_text / alternatives / aliases
-    $groups = [];
-    if (!empty($correct['answer_text'])) {
-        $groups[] = [(string)$correct['answer_text']];
-    }
+    if ($ci < 0 && !empty($correct['answer_text'])) {
+        $bestCorrectScore = mcq_text_score($transcript, (string)$correct['answer_text']);
 
-    $alts = $correct['alternatives'] ?? [];
-    if (is_array($alts)) {
-        $grp = [];
-        foreach ($alts as $alt) {
-            if (is_string($alt) && trim($alt) !== '') $grp[] = trim($alt);
+        $alts = $correct['alternatives'] ?? [];
+        if (is_array($alts)) {
+            foreach ($alts as $alt) {
+                $bestCorrectScore = max($bestCorrectScore, mcq_text_score($transcript, (string)$alt));
+            }
         }
-        if ($grp) $groups[] = $grp;
-    }
 
-    $aliasGroups = build_alias_groups($correct, []);
-    foreach ($aliasGroups as $g) $groups[] = $g;
+        $ok = ($bestCorrectScore >= 12) ? 1 : 0;
 
-    if ($ci < 0 && $groups) {
-        $bestCorrectScore = best_alias_score($transcript, $groups);
-
-        $ok = ($bestCorrectScore >= 10) ? 1 : 0;
         return [
             'is_correct'   => $ok,
             'score_points' => $ok,
@@ -452,12 +314,6 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
     }
 
     $ok = ($idx === $ci && $ci >= 0) ? 1 : 0;
-
-    // examiner override threshold: concept clearly related and not contradictory
-    if (!$ok && $groups) {
-        $bestCorrectScore = best_alias_score($transcript, $groups);
-        if ($bestCorrectScore >= 10) $ok = 1;
-    }
 
     return [
         'is_correct'   => $ok,
@@ -471,10 +327,6 @@ function grade_open_with_ai(array $item, string $transcript): array {
     $correct = json_decode((string)($item['correct_json'] ?? '{}'), true) ?: [];
     $keyPoints = $correct['key_points'] ?? [];
     if (!is_array($keyPoints)) $keyPoints = [];
-
-    $aliasGroups = build_alias_groups($correct, $keyPoints);
-
-    // minimum pass logic: enough correct concepts, not textbook completeness
     $minPts = (int)($correct['min_points_to_pass'] ?? 2);
     if ($minPts < 1) $minPts = 1;
 
@@ -495,24 +347,16 @@ function grade_open_with_ai(array $item, string $transcript): array {
         "input" => [
             ["role" => "system", "content" => [
                 ["type" => "input_text", "text" =>
-"Grade like a supportive but standards-based flight instructor during an oral progress check.
-
-Rules:
-- Reward correct operational understanding even when phrasing is informal.
-- Accept plain-English phrasing.
-- Do not require textbook wording.
-- Do not penalize grammar, accent, incomplete sentence structure, or short answers if the concept is correct.
-- Do not punish over-answering unless the student clearly contradicts the correct concept.
-- For open answers, passing depends on enough correct core concepts, not a full textbook recital.
-- Be slightly generous on borderline oral responses when the correct concept is clearly present.
-- Penalize only actual conceptual errors or missing core elements."
+"You are grading one open-answer oral progress test response.
+Be strict and fair.
+Evaluate only against the supplied rubric key points.
+Do not invent facts."
                 ]
             ]],
             ["role" => "user", "content" => [
                 ["type" => "input_text", "text" =>
 "QUESTION:\n" . (string)$item['prompt'] .
 "\n\nRUBRIC KEY POINTS:\n- " . implode("\n- ", $keyPoints) .
-"\n\nALIAS GROUPS / ACCEPTED CONCEPT PHRASES:\n" . json_encode($aliasGroups, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) .
 "\n\nMIN POINTS TO PASS: {$minPts}" .
 "\n\nSTUDENT TRANSCRIPT:\n" . $transcript
                 ]
@@ -521,7 +365,7 @@ Rules:
         "text" => [
             "format" => [
                 "type"   => "json_schema",
-                "name"   => "open_grade_v3",
+                "name"   => "open_grade_v2",
                 "schema" => $schema,
                 "strict" => true
             ]
@@ -532,11 +376,9 @@ Rules:
     $resp = cw_openai_responses($payload);
     $j = cw_openai_extract_json_text($resp);
 
-    $maxPoints = max(1, count($keyPoints));
     $scorePoints = (int)($j['score_points'] ?? 0);
-    $returnedMax = (int)($j['max_points'] ?? $maxPoints);
-    if ($returnedMax > 0) $maxPoints = max($maxPoints, $returnedMax);
-
+    $maxPoints   = (int)($j['max_points'] ?? max(1, count($keyPoints)));
+    if ($maxPoints <= 0) $maxPoints = max(1, count($keyPoints));
     if ($scorePoints < 0) $scorePoints = 0;
     if ($scorePoints > $maxPoints) $scorePoints = $maxPoints;
 
@@ -571,6 +413,7 @@ function download_to_temp(string $url, string $outfile): bool {
 
     $data = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err  = curl_error($ch);
     curl_close($ch);
 
     if ($data === false || $code < 200 || $code >= 300) {
@@ -820,21 +663,9 @@ try {
         "properties" => [
             "written_debrief" => ["type" => "string"],
             "spoken_debrief"  => ["type" => "string"],
-            "weak_areas"      => ["type" => "string"],
-            "summary_quality" => ["type" => "string"],
-            "summary_issues" => ["type" => "string"],
-            "summary_corrections" => ["type" => "string"],
-            "confirmed_misunderstandings" => ["type" => "string"]
+            "weak_areas"      => ["type" => "string"]
         ],
-        "required" => [
-            "written_debrief",
-            "spoken_debrief",
-            "weak_areas",
-            "summary_quality",
-            "summary_issues",
-            "summary_corrections",
-            "confirmed_misunderstandings"
-        ]
+        "required" => ["written_debrief", "spoken_debrief", "weak_areas"]
     ];
 
     $payload = [
@@ -842,27 +673,18 @@ try {
         "input" => [
             ["role" => "system", "content" => [
                 ["type" => "input_text", "text" =>
-"You are a supportive but standards-based flight instructor.
+"You are a strict but supportive flight instructor.
 
 SOURCE OF TRUTH:
 - Lesson narration scripts are the only truth source.
-- Student summary may contain mistakes.
+- Student summary is not truth and may contain mistakes.
 
-TASKS:
-1) Write a concise written debrief of the oral test.
+TASK:
+1) Write a concise but useful written debrief.
 2) Write a spoken debrief suitable for TTS.
-3) Identify review areas from the oral answers.
-4) Separately evaluate the quality of the student summary.
-5) List factual mistakes, misleading wording, or important omissions in the summary.
-6) Provide concise corrected summary wording.
-7) Identify concepts that appear weak both in the oral answers and in the summary, because those likely indicate a genuine misunderstanding.
+3) Identify weak areas the student should review.
 
-IMPORTANT RULES:
-- Do NOT change or reinterpret the numeric score.
-- Do NOT blend summary issues into the oral score.
-- Be fair and slightly cautious in wording.
-- Prefer phrases like 'review these areas' rather than overconfident claims like 'you misunderstood X', unless clearly wrong.
-- Reward correct operational understanding even when phrasing is informal."
+Do not invent facts beyond the lesson narration."
                 ]
             ]],
             ["role" => "user", "content" => [
@@ -875,7 +697,7 @@ json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         "text" => [
             "format" => [
                 "type"   => "json_schema",
-                "name"   => "debrief_v3",
+                "name"   => "debrief_v2",
                 "schema" => $schema,
                 "strict" => true
             ]
@@ -883,13 +705,9 @@ json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         "temperature" => 0.2
     ];
 
-    $written = "You completed the progress test. Review the areas below.";
-    $spoken  = "You completed the progress test. Please review the areas below.";
-    $weak    = "Review the items that were incomplete or uncertain.";
-    $summaryQuality = "Summary quality could not be fully assessed.";
-    $summaryIssues = "No specific summary issues were extracted.";
-    $summaryCorrections = "No specific summary corrections were generated.";
-    $confirmedMisunderstandings = "No repeated misunderstanding pattern was confirmed.";
+    $written = "Score {$scorePct}%.";
+    $spoken  = "Your score is {$scorePct} percent. Please review your results.";
+    $weak    = "Review the items you missed.";
 
     try {
         $resp = cw_openai_responses($payload);
@@ -897,10 +715,6 @@ json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         $written = trim((string)($j['written_debrief'] ?? $written));
         $spoken  = trim((string)($j['spoken_debrief'] ?? $spoken));
         $weak    = trim((string)($j['weak_areas'] ?? $weak));
-        $summaryQuality = trim((string)($j['summary_quality'] ?? $summaryQuality));
-        $summaryIssues = trim((string)($j['summary_issues'] ?? $summaryIssues));
-        $summaryCorrections = trim((string)($j['summary_corrections'] ?? $summaryCorrections));
-        $confirmedMisunderstandings = trim((string)($j['confirmed_misunderstandings'] ?? $confirmedMisunderstandings));
     } catch (Throwable $e) {
     }
 
@@ -937,16 +751,12 @@ json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
     $upTest->execute([$scorePct, $written, $weak, $spoken, $testId]);
 
     json_out([
-        'ok'                          => true,
-        'test_id'                     => $testId,
-        'score_pct'                   => $scorePct,
-        'ai_summary'                  => $written,
-        'weak_areas'                  => $weak,
-        'summary_quality'             => $summaryQuality,
-        'summary_issues'              => $summaryIssues,
-        'summary_corrections'         => $summaryCorrections,
-        'confirmed_misunderstandings' => $confirmedMisunderstandings,
-        'result_audio'                => $resultAudioUrl,
+        'ok'           => true,
+        'test_id'      => $testId,
+        'score_pct'    => $scorePct,
+        'ai_summary'   => $written,
+        'weak_areas'   => $weak,
+        'result_audio' => $resultAudioUrl,
     ]);
 
 } catch (Throwable $e) {
