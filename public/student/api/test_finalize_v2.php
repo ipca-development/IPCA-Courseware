@@ -144,42 +144,136 @@ function grade_yesno(string $transcript, array $correct): array {
     return ['is_correct' => $ok, 'score_points' => $ok, 'max_points' => 1, 'feedback' => ''];
 }
 
+function normalize_text(string $s): string {
+    $s = strtolower(trim($s));
+    $s = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $s);
+    $s = preg_replace('/\s+/', ' ', $s);
+    return trim($s);
+}
+
+function mcq_text_score(string $transcript, string $option): int {
+    $t = normalize_text($transcript);
+    $o = normalize_text($option);
+
+    if ($t === '' || $o === '') return 0;
+
+    // Exact option phrase appears in transcript
+    if (strpos($t, $o) !== false) return 100;
+
+    $tWords = array_values(array_filter(explode(' ', $t)));
+    $oWords = array_values(array_filter(explode(' ', $o)));
+
+    if (!$tWords || !$oWords) return 0;
+
+    $score = 0;
+    $matched = 0;
+
+    foreach ($oWords as $w) {
+        if (strlen($w) < 3) continue;
+
+        foreach ($tWords as $tw) {
+            if ($tw === $w) {
+                $score += 8;
+                $matched++;
+                break;
+            }
+
+            // allow singular/plural-ish loose match
+            if (strlen($w) >= 4 && strlen($tw) >= 4) {
+                if (strpos($tw, $w) === 0 || strpos($w, $tw) === 0) {
+                    $score += 6;
+                    $matched++;
+                    break;
+                }
+            }
+        }
+    }
+
+    // Bonus if most important words are present
+    $significant = 0;
+    foreach ($oWords as $w) {
+        if (strlen($w) >= 4) $significant++;
+    }
+    if ($significant > 0 && $matched >= max(1, $significant - 1)) {
+        $score += 20;
+    }
+
+    return $score;
+}
+
 function grade_mcq(string $transcript, array $correct, array $options): array {
     $t = normalize_text($transcript);
     $idx = -1;
 
+    // 1) Still support explicit spoken letters/numbers
     if (preg_match('/\b(a|b|c|d)\b/', $t, $m)) {
         $map = ['a' => 0, 'b' => 1, 'c' => 2, 'd' => 3];
+        $idx = $map[$m[1]];
+    } elseif (preg_match('/\b(option a|option b|option c|option d)\b/', $t, $m)) {
+        $map = ['option a' => 0, 'option b' => 1, 'option c' => 2, 'option d' => 3];
         $idx = $map[$m[1]];
     } elseif (preg_match('/\b(1|2|3|4)\b/', $t, $m)) {
         $idx = ((int)$m[1]) - 1;
     } else {
+        // 2) Natural speech matching against option text
         $bestIdx = -1;
-        $bestScore = 0;
+        $bestScore = -1;
+        $secondBest = -1;
+
         foreach ($options as $i => $opt) {
-            $o = normalize_text((string)$opt);
-            if ($o === '') continue;
-            $score = 0;
-            if (strpos($t, $o) !== false) {
-                $score = 100;
-            } else {
-                $words = array_filter(explode(' ', $o));
-                foreach ($words as $w) {
-                    if (strlen($w) >= 4 && strpos($t, $w) !== false) $score++;
-                }
-            }
+            $score = mcq_text_score($transcript, (string)$opt);
+
             if ($score > $bestScore) {
+                $secondBest = $bestScore;
                 $bestScore = $score;
                 $bestIdx = (int)$i;
+            } elseif ($score > $secondBest) {
+                $secondBest = $score;
             }
         }
-        if ($bestIdx >= 0) $idx = $bestIdx;
+
+        // Require a minimum confidence and a clear winner
+        if ($bestIdx >= 0 && $bestScore >= 12 && ($bestScore - $secondBest) >= 3) {
+            $idx = $bestIdx;
+        }
     }
 
-    $ci = (int)($correct['index'] ?? -1);
-    $ok = ($idx === $ci) ? 1 : 0;
+    $ci = -1;
 
-    return ['is_correct' => $ok, 'score_points' => $ok, 'max_points' => 1, 'feedback' => ''];
+    // Old style support
+    if (isset($correct['index']) && $correct['index'] !== null) {
+        $ci = (int)$correct['index'];
+    }
+
+    // New oral-choice support: answer_text / alternatives
+    if ($ci < 0 && !empty($correct['answer_text'])) {
+        $bestCorrectScore = mcq_text_score($transcript, (string)$correct['answer_text']);
+
+        $alts = $correct['alternatives'] ?? [];
+        if (is_array($alts)) {
+            foreach ($alts as $alt) {
+                $bestCorrectScore = max($bestCorrectScore, mcq_text_score($transcript, (string)$alt));
+            }
+        }
+
+        $ok = ($bestCorrectScore >= 12) ? 1 : 0;
+
+        return [
+            'is_correct'   => $ok,
+            'score_points' => $ok,
+            'max_points'   => 1,
+            'feedback'     => ''
+        ];
+    }
+
+    $ok = ($idx === $ci && $ci >= 0) ? 1 : 0;
+
+    return [
+        'is_correct'   => $ok,
+        'score_points' => $ok,
+        'max_points'   => 1,
+        'feedback'     => ''
+    ];
 }
 
 function grade_open_with_ai(array $item, string $transcript): array {
