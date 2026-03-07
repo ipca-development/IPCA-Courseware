@@ -273,17 +273,30 @@ function grade_yesno(string $transcript, array $correct): array {
     if (strpos($t, 'that is correct') !== false) $yesScore += 2;
 
     $sv = null;
-    if ($yesScore > 0 && $noScore === 0) {
-        $sv = true;
-    } elseif ($noScore > 0 && $yesScore === 0) {
-        $sv = false;
-    } elseif ($yesScore > $noScore) {
-        $sv = true;
-    } elseif ($noScore > $yesScore) {
-        $sv = false;
-    }
+if ($yesScore > 0 && $noScore === 0) {
+    $sv = true;
+} elseif ($noScore > 0 && $yesScore === 0) {
+    $sv = false;
+} elseif ($yesScore > $noScore) {
+    $sv = true;
+} elseif ($noScore > $yesScore) {
+    $sv = false;
+}
 
-    $cv = (bool)($correct['value'] ?? false);
+// Fallback for implicit spoken answers when student does not literally say yes/no
+if ($sv === null) {
+    if (
+        preg_match('/\b(is not|are not|does not|do not|cannot|can not|never|no longer|without)\b/', $t)
+    ) {
+        $sv = false;
+    } elseif (
+        preg_match('/\b(attached|connected|located|mounted|present|included|used|provides|has brakes|have brakes|helps|assists|supports|contains|is air cooled|are air cooled)\b/', $t)
+    ) {
+        $sv = true;
+    }
+}
+
+$cv = (bool)($correct['value'] ?? false);
 
     $aliases = build_alias_groups($correct, []);
     $aliasHits = 0;

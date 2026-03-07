@@ -501,7 +501,7 @@ cw_header('Progress Test');
 
     <div class="btn-row" id="questionBtns" style="display:none;">
       <button class="ptt btn-half" id="btnReady" type="button" disabled>Ready for First Question</button>
-      <button class="ptt btn-half" id="btnReplay" type="button" disabled>â†º Replay Question</button>
+      <button class="ptt btn-half" id="btnReplay" type="button" disabled>&#8634; Replay Question</button>
     </div>
 
     <div class="btn-row" id="answerBtns" style="display:none;">
@@ -937,7 +937,7 @@ async function startRecording(){
       mediaStream = null;
       setRec(false);
       btnPTT.classList.remove('rec');
-      btnPTT.textContent = 'ðŸŽ™ Tap to Start Talking';
+      btnPTT.textContent = 'Tap to Start Talking';
       isStopping = false;
       await uploadAnswerBlob(blob, false);
     };
@@ -946,7 +946,7 @@ async function startRecording(){
     isRecording = true;
     setRec(true);
     btnPTT.classList.add('rec');
-    btnPTT.textContent = 'â¹ Tap to Stop (finishes in 1 sec)';
+    btnPTT.textContent = 'Tap to Stop (finishes in 1 sec)';
   }catch(e){
     setSys('Microphone access failed.');
   }
