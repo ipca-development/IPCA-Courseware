@@ -145,12 +145,20 @@ function grade_yesno(string $transcript, array $correct): array {
     return ['is_correct' => $ok, 'score_points' => $ok, 'max_points' => 1, 'feedback' => ''];
 }
 
+function normalize_text(string $s): string {
+    $s = strtolower(trim($s));
+    $s = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $s);
+    $s = preg_replace('/\s+/', ' ', $s);
+    return trim($s);
+}
+
 function mcq_text_score(string $transcript, string $option): int {
     $t = normalize_text($transcript);
     $o = normalize_text($option);
 
     if ($t === '' || $o === '') return 0;
 
+    // Exact option phrase appears in transcript
     if (strpos($t, $o) !== false) return 100;
 
     $tWords = array_values(array_filter(explode(' ', $t)));
@@ -171,6 +179,7 @@ function mcq_text_score(string $transcript, string $option): int {
                 break;
             }
 
+            // allow singular/plural-ish loose match
             if (strlen($w) >= 4 && strlen($tw) >= 4) {
                 if (strpos($tw, $w) === 0 || strpos($w, $tw) === 0) {
                     $score += 6;
@@ -181,6 +190,7 @@ function mcq_text_score(string $transcript, string $option): int {
         }
     }
 
+    // Bonus if most important words are present
     $significant = 0;
     foreach ($oWords as $w) {
         if (strlen($w) >= 4) $significant++;
@@ -196,6 +206,7 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
     $t = normalize_text($transcript);
     $idx = -1;
 
+    // 1) Still support explicit spoken letters/numbers
     if (preg_match('/\b(a|b|c|d)\b/', $t, $m)) {
         $map = ['a' => 0, 'b' => 1, 'c' => 2, 'd' => 3];
         $idx = $map[$m[1]];
@@ -205,6 +216,7 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
     } elseif (preg_match('/\b(1|2|3|4)\b/', $t, $m)) {
         $idx = ((int)$m[1]) - 1;
     } else {
+        // 2) Natural speech matching against option text
         $bestIdx = -1;
         $bestScore = -1;
         $secondBest = -1;
@@ -221,6 +233,7 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
             }
         }
 
+        // Require a minimum confidence and a clear winner
         if ($bestIdx >= 0 && $bestScore >= 12 && ($bestScore - $secondBest) >= 3) {
             $idx = $bestIdx;
         }
@@ -228,10 +241,12 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
 
     $ci = -1;
 
+    // Old style support
     if (isset($correct['index']) && $correct['index'] !== null) {
         $ci = (int)$correct['index'];
     }
 
+    // New oral-choice support: answer_text / alternatives
     if ($ci < 0 && !empty($correct['answer_text'])) {
         $bestCorrectScore = mcq_text_score($transcript, (string)$correct['answer_text']);
 
@@ -655,6 +670,7 @@ json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         $spoken  = trim((string)($j['spoken_debrief'] ?? $spoken));
         $weak    = trim((string)($j['weak_areas'] ?? $weak));
     } catch (Throwable $e) {
+        // keep fallbacks
     }
 
     $resultAudioLocal = $tmpDir . '/result.mp3';
