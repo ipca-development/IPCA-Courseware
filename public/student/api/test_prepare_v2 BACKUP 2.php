@@ -94,280 +94,6 @@ function clamp_questions(array $questions, int $target = 10): array {
     return $out;
 }
 
-function normalize_generated_questions(array $questions): array {
-    $out = [];
-    foreach ($questions as $q) {
-        if (!is_array($q)) continue;
-
-        $kind = trim((string)($q['kind'] ?? 'yesno'));
-        if (!in_array($kind, ['yesno', 'either_or', 'open'], true)) {
-            $kind = 'open';
-        }
-
-        $prompt = trim((string)($q['prompt'] ?? ''));
-        if ($prompt === '') continue;
-
-        $options = $q['options'] ?? [];
-        if (!is_array($options)) $options = [];
-
-        $correct = $q['correct'] ?? [];
-        if (!is_array($correct)) $correct = [];
-
-        $correct = array_merge([
-            'value' => null,
-            'answer_text' => null,
-            'alternatives' => [],
-            'type' => null,
-            'key_points' => [],
-            'min_points_to_pass' => null
-        ], $correct);
-
-        if (!is_array($correct['alternatives'])) $correct['alternatives'] = [];
-        if (!is_array($correct['key_points'])) $correct['key_points'] = [];
-
-        if ($kind === 'yesno') {
-            $options = [];
-            $correct['answer_text'] = null;
-            $correct['alternatives'] = [];
-            $correct['type'] = null;
-            $correct['key_points'] = [];
-            $correct['min_points_to_pass'] = null;
-            $correct['value'] = (bool)$correct['value'];
-        } elseif ($kind === 'either_or') {
-            if (count($options) > 2) $options = array_slice($options, 0, 2);
-            $correct['value'] = null;
-            $correct['type'] = 'oral_choice';
-            $correct['key_points'] = [];
-            $correct['min_points_to_pass'] = null;
-        } else {
-            $options = [];
-            $correct['value'] = null;
-            $correct['answer_text'] = null;
-            $correct['alternatives'] = [];
-            $correct['type'] = 'rubric';
-            if (count($correct['key_points']) > 6) {
-                $correct['key_points'] = array_slice($correct['key_points'], 0, 6);
-            }
-            if ((int)$correct['min_points_to_pass'] < 1) {
-                $correct['min_points_to_pass'] = max(1, min(3, count($correct['key_points'])));
-            } else {
-                $correct['min_points_to_pass'] = (int)$correct['min_points_to_pass'];
-            }
-        }
-
-        $out[] = [
-            'kind' => $kind,
-            'prompt' => $prompt,
-            'options' => array_values($options),
-            'correct' => $correct
-        ];
-    }
-    return $out;
-}
-
-function question_schema(): array {
-    return [
-        "type" => "object",
-        "additionalProperties" => false,
-        "properties" => [
-            "questions" => [
-                "type" => "array",
-                "items" => [
-                    "type" => "object",
-                    "additionalProperties" => false,
-                    "properties" => [
-                        "kind" => [
-                            "type" => "string",
-                            "enum" => ["yesno", "either_or", "open"]
-                        ],
-                        "prompt" => [
-                            "type" => "string"
-                        ],
-                        "options" => [
-                            "type" => "array",
-                            "items" => ["type" => "string"]
-                        ],
-                        "correct" => [
-                            "type" => "object",
-                            "additionalProperties" => false,
-                            "properties" => [
-                                "value" => ["type" => ["boolean", "null"]],
-                                "answer_text" => ["type" => ["string", "null"]],
-                                "alternatives" => [
-                                    "type" => "array",
-                                    "items" => ["type" => "string"]
-                                ],
-                                "type" => ["type" => ["string", "null"]],
-                                "key_points" => [
-                                    "type" => "array",
-                                    "items" => ["type" => "string"]
-                                ],
-                                "min_points_to_pass" => ["type" => ["integer", "null"]]
-                            ],
-                            "required" => ["value", "answer_text", "alternatives", "type", "key_points", "min_points_to_pass"]
-                        ]
-                    ],
-                    "required" => ["kind", "prompt", "options", "correct"]
-                ]
-            ]
-        ],
-        "required" => ["questions"]
-    ];
-}
-
-function generate_oral_questions(string $truth, string $summary): array {
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            [
-                "role" => "system",
-                "content" => [
-                    ["type" => "input_text", "text" =>
-"You are generating an oral aviation progress test.
-
-Create exactly 10 oral-friendly questions.
-Use ONLY the lesson narration text as truth.
-Use summary only to detect misconceptions.
-
-CRITICAL RULES:
-- Do NOT create classic A/B/C/D letter-answer questions.
-- Do NOT create questions where the student would answer only with one letter.
-- Do NOT leak the answer inside the wording.
-- Do NOT create ambiguous yes/no questions.
-- Do NOT ask trick questions.
-- Keep them natural for spoken answers.
-
-Use only these kinds:
-1. yesno
-2. either_or
-3. open
-
-FORMAT RULES:
-- yesno:
-  answer should be yes/no and ideally a short explanation
-  options = []
-  correct.value = true/false
-  correct.answer_text = null
-  correct.alternatives = []
-  correct.type = null
-  correct.key_points = []
-  correct.min_points_to_pass = null
-
-- either_or:
-  exactly 2 spoken options
-  student should answer with the actual concept/term, not a letter
-  correct.value = null
-  correct.answer_text = preferred exact spoken answer
-  correct.alternatives = close valid spoken variants
-  correct.type = oral_choice
-  correct.key_points = []
-  correct.min_points_to_pass = null
-
-- open:
-  options = []
-  correct.value = null
-  correct.answer_text = null
-  correct.alternatives = []
-  correct.type = rubric
-  correct.key_points = 3 to 6 short rubric items
-  correct.min_points_to_pass = integer
-
-TARGET MIX:
-- around 4 yesno
-- around 2 either_or
-- around 4 open"
-                    ]
-                ]
-            ],
-            [
-                "role" => "user",
-                "content" => [
-                    ["type" => "input_text", "text" =>
-"LESSON NARRATION:\n" . $truth . "\n\nSUMMARY:\n" . $summary
-                    ]
-                ]
-            ]
-        ],
-        "text" => [
-            "format" => [
-                "type" => "json_schema",
-                "name" => "ipca_questions_first_pass",
-                "schema" => question_schema(),
-                "strict" => true
-            ]
-        ]
-    ];
-
-    $r = cw_openai_responses($payload);
-    $j = cw_openai_extract_json_text($r);
-    $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
-    return normalize_generated_questions(clamp_questions($q, 10));
-}
-
-function validate_and_rewrite_questions(string $truth, array $questions): array {
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            [
-                "role" => "system",
-                "content" => [
-                    ["type" => "input_text", "text" =>
-"You are reviewing oral aviation test questions for quality.
-
-You will receive 10 candidate questions.
-Your job is to return a corrected final set of 10 questions.
-
-REVIEW RULES:
-- Remove ambiguity.
-- Remove answer leakage.
-- Remove leading wording.
-- Remove questions that already contain the answer.
-- Remove awkward oral phrasing.
-- Remove questions where multiple interpretations could unfairly score the student wrong.
-- Keep the question answerable from the lesson narration only.
-- Keep each question concise and orally natural.
-- Preserve the same schema.
-- If a question is good, keep it.
-- If a question is weak, rewrite it.
-- Do not invent facts outside the narration.
-
-IMPORTANT:
-- Never include the answer in the prompt.
-- Never use A/B/C/D style.
-- Prefer precise spoken questions.
-- For nuanced concepts, prefer open or either_or over weak yes/no.
-
-Return exactly 10 final cleaned questions."
-                    ]
-                ]
-            ],
-            [
-                "role" => "user",
-                "content" => [
-                    ["type" => "input_text", "text" =>
-"LESSON NARRATION:\n" . $truth .
-"\n\nCANDIDATE QUESTIONS JSON:\n" .
-json_encode(['questions' => $questions], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-                    ]
-                ]
-            ]
-        ],
-        "text" => [
-            "format" => [
-                "type" => "json_schema",
-                "name" => "ipca_questions_second_pass",
-                "schema" => question_schema(),
-                "strict" => true
-            ]
-        ]
-    ];
-
-    $r = cw_openai_responses($payload);
-    $j = cw_openai_extract_json_text($r);
-    $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
-    return normalize_generated_questions(clamp_questions($q, 10));
-}
-
 function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $payload): array {
     $url = 'http://127.0.0.1/student/api/progress_test_spaces_presign.php';
 
@@ -518,39 +244,159 @@ try {
     $summary = trim((string)$sq->fetchColumn());
     if ($summary === '') $summary = "(No student summary.)";
 
-    $q = generate_oral_questions($truth, $summary);
+    $schema = [
+        "type" => "object",
+        "additionalProperties" => false,
+        "properties" => [
+            "questions" => [
+                "type" => "array",
+                "items" => [
+                    "type" => "object",
+                    "additionalProperties" => false,
+                    "properties" => [
+                        "kind" => [
+                            "type" => "string",
+                            "enum" => ["yesno", "mcq", "open"]
+                        ],
+                        "prompt" => ["type" => "string"],
+                        "options" => [
+                            "type" => "array",
+                            "items" => ["type" => "string"]
+                        ],
+                        "correct" => [
+                            "type" => "object",
+                            "additionalProperties" => false,
+                            "properties" => [
+                                "value" => ["type" => ["boolean", "null"]],
+                                "index" => ["type" => ["integer", "null"]],
+                                "type" => ["type" => ["string", "null"]],
+                                "key_points" => [
+                                    "type" => "array",
+                                    "items" => ["type" => "string"]
+                                ],
+                                "min_points_to_pass" => ["type" => ["integer", "null"]]
+                            ],
+                            "required" => ["value", "index", "type", "key_points", "min_points_to_pass"]
+                        ]
+                    ],
+                    "required" => ["kind", "prompt", "options", "correct"]
+                ]
+            ]
+        ],
+        "required" => ["questions"]
+    ];
 
-    if (count($q) >= 6) {
-        $q2 = validate_and_rewrite_questions($truth, $q);
-        if (count($q2) >= 6) {
-            $q = $q2;
-        }
-    }
+    $payload = [
+        "model" => cw_openai_model(),
+        "input" => [
+            [
+                "role" => "system",
+                "content" => [
+                    ["type" => "input_text", "text" =>
+"You are generating an ORAL progress test for aviation training.
+
+IMPORTANT:
+- This is a spoken test, not a written one.
+- Avoid questions that are best answered with only a single letter like A, B, C, or D.
+- Avoid prompts where the student would naturally only say one letter.
+- Prefer answers that are spoken naturally in short phrases or short explanations.
+- Strongly prefer:
+  1) yes/no questions answered with 'yes' or 'no' plus a short phrase,
+  2) open questions,
+  3) short spoken choice questions where the student says the actual concept, not the letter.
+
+Examples of good oral questions:
+- 'Is the role of the wings to produce lift? Answer yes or no, and briefly say why.'
+- 'During landing, which touches first: the main wheels or the nose wheel?'
+- 'Explain the role of the landing gear during takeoff and landing.'
+
+Examples of bad oral questions:
+- 'Which is correct: A, B, C, or D?'
+- 'Answer only with the letter.'
+
+Question mix target:
+- around 4 yes/no
+- around 2 spoken-choice mcq-style questions
+- around 4 open questions
+
+Rules:
+- Use ONLY the lesson narration text as source of truth.
+- Use summary only to detect misconceptions.
+- For yesno:
+  options should be []
+  correct.value true/false
+  correct.index null
+  correct.type null
+  correct.key_points []
+  correct.min_points_to_pass null
+- For mcq:
+  Use this only for spoken-choice questions.
+  The spoken answer should be the concept itself, not the letter.
+  You may still store 2-4 options.
+  correct.index should be 0..3
+  correct.value null
+  correct.type null
+  correct.key_points []
+  correct.min_points_to_pass null
+- For open:
+  options []
+  correct.type rubric
+  correct.key_points 3-6 strings
+  correct.min_points_to_pass integer
+  correct.value null
+  correct.index null
+
+Create exactly 10 questions."
+                    ]
+                ]
+            ],
+            [
+                "role" => "user",
+                "content" => [
+                    ["type" => "input_text", "text" =>
+"LESSON NARRATION:\n" . $truth . "\n\nSUMMARY:\n" . $summary
+                    ]
+                ]
+            ]
+        ],
+        "text" => [
+            "format" => [
+                "type" => "json_schema",
+                "name" => "ipca_questions",
+                "schema" => $schema,
+                "strict" => true
+            ]
+        ]
+    ];
+
+    $r = cw_openai_responses($payload);
+    $j = cw_openai_extract_json_text($r);
+
+    $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
+    $q = clamp_questions($q, 10);
 
     if (count($q) < 3) {
         $q = [
             [
                 'kind' => 'yesno',
-                'prompt' => 'Is the checklist used to reduce errors? Answer yes or no, and briefly explain.',
+                'prompt' => 'Is the checklist used to reduce errors? Answer yes or no, and briefly say why.',
                 'options' => [],
                 'correct' => [
                     'value' => true,
-                    'answer_text' => null,
-                    'alternatives' => [],
+                    'index' => null,
                     'type' => null,
                     'key_points' => [],
                     'min_points_to_pass' => null
                 ]
             ],
             [
-                'kind' => 'either_or',
-                'prompt' => 'Is the role of the wings to produce lift or to turn the airplane left and right?',
-                'options' => ['produce lift', 'turn the airplane left and right'],
+                'kind' => 'mcq',
+                'prompt' => 'Which is the main function of the wings: to produce lift or to provide braking?',
+                'options' => ['produce lift', 'provide braking'],
                 'correct' => [
                     'value' => null,
-                    'answer_text' => 'produce lift',
-                    'alternatives' => ['lift', 'to produce lift'],
-                    'type' => 'oral_choice',
+                    'index' => 0,
+                    'type' => null,
                     'key_points' => [],
                     'min_points_to_pass' => null
                 ]
@@ -561,8 +407,7 @@ try {
                 'options' => [],
                 'correct' => [
                     'value' => null,
-                    'answer_text' => null,
-                    'alternatives' => [],
+                    'index' => null,
                     'type' => 'rubric',
                     'key_points' => ['reduce errors', 'standardize', 'safety'],
                     'min_points_to_pass' => 2
@@ -590,8 +435,7 @@ try {
         if (!is_array($correctArr)) {
             $correctArr = [
                 'value' => null,
-                'answer_text' => null,
-                'alternatives' => [],
+                'index' => null,
                 'type' => null,
                 'key_points' => [],
                 'min_points_to_pass' => null
@@ -655,10 +499,20 @@ try {
         $kind = (string)$it['kind'];
         $spoken = "Question {$it['idx']}. " . trim((string)$it['prompt']);
 
+        $options = json_decode((string)($it['options_json'] ?? '[]'), true) ?: [];
+
         if ($kind === 'yesno') {
-            $spoken .= " Please answer yes or no, and briefly explain.";
-        } elseif ($kind === 'either_or') {
-            $spoken .= " Please answer with the correct phrase.";
+            // Keep it natural; prompt should already ask for a spoken yes/no response
+            $spoken = rtrim($spoken, " \t\n\r\0\x0B") . ".";
+        } elseif ($kind === 'mcq' && $options) {
+            // Spoken-choice style: read the concepts, not letters as the expected answer
+            $parts = [];
+            foreach ($options as $opt) {
+                $parts[] = trim((string)$opt);
+            }
+            if ($parts) {
+                $spoken .= " Your answer should say the correct concept, not the letter. Choices are: " . implode(", or ", $parts) . ".";
+            }
         } else {
             $spoken .= " Please answer in a short spoken explanation.";
         }
