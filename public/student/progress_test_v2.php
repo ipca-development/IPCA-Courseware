@@ -335,7 +335,7 @@ let FIRST_QUESTION_READY = false;
 let NEXT_QUESTION_READY = false;
 let prepareStatusPoll = null;
 let prepareStatusStarted = false;
-	
+
 const btnStart = document.getElementById('btnStart');
 const btnReady = document.getElementById('btnReady');
 const btnReplay = document.getElementById('btnReplay');
@@ -421,7 +421,6 @@ async function pollPrepareStatusOnce(){
       stopPrepareStatusPolling();
     }
   } catch (e) {
-    // silent on purpose; frontend fallback still works
   }
 }
 
@@ -431,8 +430,19 @@ function startPrepareStatusPolling(){
 
   stopPrepareStatusPolling();
   prepareStatusPoll = setInterval(pollPrepareStatusOnce, 1000);
-}	
-	
+}
+
+function restoreAfterUploadFailure() {
+  btnReplay.disabled = false;
+  btnPTT.disabled = false;
+  btnNext.disabled = true;
+  btnNext.style.display = 'none';
+  if (CURRENT_PROMPT_TYPE === 'question') {
+    answerWrap.style.display = 'block';
+    startAnswerTimer();
+  }
+}
+
 async function startCam(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     camStatus.textContent = 'Camera not supported.';
@@ -555,11 +565,8 @@ async function prepareNextQuestionReady(){
 async function prepareTest(){
   await startCam();
 
-  let p = 0;
-  const tick = setInterval(()=>{
-    p = Math.min(85, p + 4);
-    setPrep(p);
-  }, 250);
+  setPrep(2);
+  setSys('Starting preparation...');
 
   const res = await fetch('/student/api/test_prepare_v2.php', {
     method:'POST',
@@ -568,26 +575,25 @@ async function prepareTest(){
     body: JSON.stringify({ cohort_id: COHORT_ID, lesson_id: LESSON_ID })
   });
 
-  clearInterval(tick);
-
   const txt = await res.text();
   let j = null;
   try { j = JSON.parse(txt); } catch(e) { j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)}; }
 
   if (!j.ok) {
-  stopPrepareStatusPolling();
-  setPrep(100);
-  setSys('Preparation failed: ' + (j.error || 'Unknown error'));
-  return;
-}
+    stopPrepareStatusPolling();
+    setPrep(100);
+    setSys('Preparation failed: ' + (j.error || 'Unknown error'));
+    return;
+  }
 
   TEST_ID = parseInt(j.test_id || 0, 10);
   TOTAL_QUESTIONS = parseInt(j.total_questions || 10, 10);
 
   if (TEST_ID > 0) {
-  startPrepareStatusPolling();
-}	
-	
+    startPrepareStatusPolling();
+    await pollPrepareStatusOnce();
+  }
+
   if (!TEST_ID || !TOTAL_QUESTIONS) {
     setPrep(100);
     setSys('Preparation failed: invalid test data.');
@@ -604,18 +610,17 @@ async function prepareTest(){
   INTRO_URL = String(j.intro_url || '');
   QUESTION_URLS = (j.question_urls && typeof j.question_urls === 'object') ? j.question_urls : {};
 
- renderDots(TOTAL_QUESTIONS);
+  renderDots(TOTAL_QUESTIONS);
 
-await pollPrepareStatusOnce();
-setSys('Checking audio...');
-const firstReady = await prepareFirstQuestionReady();
-await pollPrepareStatusOnce();
-setPrep(100);
+  setSys('Checking audio...');
+  const firstReady = await prepareFirstQuestionReady();
+  await pollPrepareStatusOnce();
+  setPrep(100);
 
-if (firstReady) {
-  stopPrepareStatusPolling();
-  btnStart.disabled = false;
-}
+  if (firstReady) {
+    stopPrepareStatusPolling();
+    btnStart.disabled = false;
+  }
 }
 
 async function playIntroThenEnableFirstQuestion(){
@@ -831,17 +836,6 @@ btnNext.addEventListener('click', async ()=>{
   await playCurrentQuestion();
 });
 
-function restoreAfterUploadFailure() {
-  btnReplay.disabled = false;
-  btnPTT.disabled = false;
-  btnNext.disabled = true;
-  btnNext.style.display = 'none';
-  if (CURRENT_PROMPT_TYPE === 'question') {
-    answerWrap.style.display = 'block';
-    startAnswerTimer();
-  }
-}	
-	
 async function uploadAnswerBlob(blob, timeoutOnly){
   btnPTT.disabled = true;
   btnReplay.disabled = true;
@@ -860,7 +854,7 @@ async function uploadAnswerBlob(blob, timeoutOnly){
   }
 
   const controller = new AbortController();
-  const timeoutMs = 15000; // shorter on purpose for debugging
+  const timeoutMs = 15000;
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
   try {

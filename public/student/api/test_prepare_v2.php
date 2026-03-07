@@ -494,15 +494,15 @@ try {
     $seed = bin2hex(random_bytes(16));
 
     $pdo->prepare("
-    INSERT INTO progress_tests_v2
-    (user_id, cohort_id, lesson_id, attempt, status, seed, started_at)
-    VALUES (?,?,?,?, 'preparing', ?, NOW())
-")->execute([$userId, $cohortId, $lessonId, $attempt, $seed]);
+        INSERT INTO progress_tests_v2
+        (user_id, cohort_id, lesson_id, attempt, status, seed, started_at)
+        VALUES (?,?,?,?, 'preparing', ?, NOW())
+    ")->execute([$userId, $cohortId, $lessonId, $attempt, $seed]);
 
-$testId = (int)$pdo->lastInsertId();
-set_prepare_progress($pdo, $testId, 3, 'Initializing progress test...');
-$testDir = make_test_dir($testId);
-set_prepare_progress($pdo, $testId, 6, 'Loading lesson content...');
+    $testId = (int)$pdo->lastInsertId();
+    set_prepare_progress($pdo, $testId, 3, 'Initializing progress test...');
+    $testDir = make_test_dir($testId);
+    set_prepare_progress($pdo, $testId, 6, 'Loading lesson content...');
 
     $nq = $pdo->prepare("
         SELECT e.narration_en
@@ -533,11 +533,10 @@ set_prepare_progress($pdo, $testId, 6, 'Loading lesson content...');
     $summary = trim((string)$sq->fetchColumn());
     if ($summary === '') $summary = "(No student summary.)";
 
-	set_prepare_progress($pdo, $testId, 15, 'Generating oral questions...');
-	
+    set_prepare_progress($pdo, $testId, 15, 'Generating oral questions...');
     $q = generate_oral_questions($truth, $summary);
-	set_prepare_progress($pdo, $testId, 35, 'Checking question quality...');
 
+    set_prepare_progress($pdo, $testId, 35, 'Checking question quality...');
     if (count($q) >= 6) {
         $q2 = validate_and_rewrite_questions($truth, $q);
         if (count($q2) >= 6) {
@@ -545,8 +544,8 @@ set_prepare_progress($pdo, $testId, 6, 'Loading lesson content...');
         }
     }
 
-set_prepare_progress($pdo, $testId, 50, 'Saving questions...');	
-	
+    set_prepare_progress($pdo, $testId, 50, 'Saving questions...');
+
     if (count($q) < 3) {
         $q = [
             [
@@ -634,8 +633,8 @@ set_prepare_progress($pdo, $testId, 50, 'Saving questions...');
         if ($idx > 10) break;
     }
 
-	set_prepare_progress($pdo, $testId, 58, 'Preparing audio files...');
-	
+    set_prepare_progress($pdo, $testId, 58, 'Preparing audio files...');
+
     $items = $pdo->prepare("
         SELECT id, idx, prompt, kind, options_json
         FROM progress_test_items_v2
@@ -655,26 +654,26 @@ set_prepare_progress($pdo, $testId, 50, 'Saving questions...');
         $cookieHeader = (string)$_SERVER['HTTP_COOKIE'];
     }
 
+    $questionUrls = [];
+    $itemIds = [];
+    $totalAudio = 1 + count($itemRows);
+    $doneAudio = 0;
+
     $introText = "Hello {$firstName}. I will now conduct your progress test.";
     $introLocal = $testDir . '/intro.mp3';
     tts_generate_local($introText, $introLocal);
 
-$introPresign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
-    'test_id' => $testId,
-    'kind'    => 'intro',
-    'ext'     => 'mp3'
-]);
-upload_file_to_presigned_put((string)$introPresign['url'], $introLocal, 'audio/mpeg');
-$introUrl = (string)$introPresign['public_url'];
+    $introPresign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
+        'test_id' => $testId,
+        'kind'    => 'intro',
+        'ext'     => 'mp3'
+    ]);
+    upload_file_to_presigned_put((string)$introPresign['url'], $introLocal, 'audio/mpeg');
+    $introUrl = (string)$introPresign['public_url'];
 
-$doneAudio++;
-$pct = 58 + (int)floor(($doneAudio / $totalAudio) * 40);
-set_prepare_progress($pdo, $testId, $pct, 'Uploading audio ' . $doneAudio . ' of ' . $totalAudio . '...');
-
-    $questionUrls = [];
-$itemIds = [];
-$totalAudio = 1 + count($itemRows); // intro + all questions
-$doneAudio = 0;
+    $doneAudio++;
+    $pct = 58 + (int)floor(($doneAudio / $totalAudio) * 40);
+    set_prepare_progress($pdo, $testId, $pct, 'Uploading audio ' . $doneAudio . ' of ' . $totalAudio . '...');
 
     foreach ($itemRows as $it) {
         $itemId = (int)$it['id'];
@@ -695,18 +694,18 @@ $doneAudio = 0;
         tts_generate_local($spoken, $localFile);
 
         $presign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
-    'test_id' => $testId,
-    'kind'    => 'question',
-    'item_id' => $itemId,
-    'ext'     => 'mp3'
-]);
-upload_file_to_presigned_put((string)$presign['url'], $localFile, 'audio/mpeg');
+            'test_id' => $testId,
+            'kind'    => 'question',
+            'item_id' => $itemId,
+            'ext'     => 'mp3'
+        ]);
+        upload_file_to_presigned_put((string)$presign['url'], $localFile, 'audio/mpeg');
 
-$questionUrls[$itemId] = (string)$presign['public_url'];
+        $questionUrls[$itemId] = (string)$presign['public_url'];
 
-$doneAudio++;
-$pct = 58 + (int)floor(($doneAudio / $totalAudio) * 40);
-set_prepare_progress($pdo, $testId, $pct, 'Uploading audio ' . $doneAudio . ' of ' . $totalAudio . '...');
+        $doneAudio++;
+        $pct = 58 + (int)floor(($doneAudio / $totalAudio) * 40);
+        set_prepare_progress($pdo, $testId, $pct, 'Uploading audio ' . $doneAudio . ' of ' . $totalAudio . '...');
     }
 
     $manifest = [
@@ -718,17 +717,17 @@ set_prepare_progress($pdo, $testId, $pct, 'Uploading audio ' . $doneAudio . ' of
     ];
 
     $pdo->prepare("
-    UPDATE progress_tests_v2
-    SET status='ready',
-        manifest_json=?,
-        progress_pct=100,
-        status_text='Progress test ready.',
-        updated_at=NOW()
-    WHERE id=?
-")->execute([
-    json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-    $testId
-]);
+        UPDATE progress_tests_v2
+        SET status='ready',
+            manifest_json=?,
+            progress_pct=100,
+            status_text='Progress test ready.',
+            updated_at=NOW()
+        WHERE id=?
+    ")->execute([
+        json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        $testId
+    ]);
 
     json_ok([
         'ok'              => true,
