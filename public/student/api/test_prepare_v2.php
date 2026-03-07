@@ -100,7 +100,7 @@ function normalize_generated_questions(array $questions): array {
         if (!is_array($q)) continue;
 
         $kind = trim((string)($q['kind'] ?? 'yesno'));
-        if (!in_array($kind, ['yesno', 'either_or', 'open'], true)) {
+        if (!in_array($kind, ['yesno', 'mcq', 'open'], true)) {
             $kind = 'open';
         }
 
@@ -133,7 +133,7 @@ function normalize_generated_questions(array $questions): array {
             $correct['key_points'] = [];
             $correct['min_points_to_pass'] = null;
             $correct['value'] = (bool)$correct['value'];
-        } elseif ($kind === 'either_or') {
+        } elseif ($kind === 'mcq') {
             if (count($options) > 2) $options = array_slice($options, 0, 2);
             $correct['value'] = null;
             $correct['type'] = 'oral_choice';
@@ -178,7 +178,7 @@ function question_schema(): array {
                     "properties" => [
                         "kind" => [
                             "type" => "string",
-                            "enum" => ["yesno", "either_or", "open"]
+                            "enum" => ["yesno", "mcq", "open"]
                         ],
                         "prompt" => [
                             "type" => "string"
@@ -239,7 +239,7 @@ CRITICAL RULES:
 
 Use only these kinds:
 1. yesno
-2. either_or
+2. mcq
 3. open
 
 FORMAT RULES:
@@ -253,9 +253,10 @@ FORMAT RULES:
   correct.key_points = []
   correct.min_points_to_pass = null
 
-- either_or:
+- mcq:
   exactly 2 spoken options
   student should answer with the actual concept/term, not a letter
+  this is an oral-choice question, not an A/B/C/D question
   correct.value = null
   correct.answer_text = preferred exact spoken answer
   correct.alternatives = close valid spoken variants
@@ -274,7 +275,7 @@ FORMAT RULES:
 
 TARGET MIX:
 - around 4 yesno
-- around 2 either_or
+- around 2 mcq
 - around 4 open"
                     ]
                 ]
@@ -335,7 +336,7 @@ IMPORTANT:
 - Never include the answer in the prompt.
 - Never use A/B/C/D style.
 - Prefer precise spoken questions.
-- For nuanced concepts, prefer open or either_or over weak yes/no.
+- For nuanced concepts, prefer open or mcq over weak yes/no.
 
 Return exactly 10 final cleaned questions."
                     ]
@@ -543,7 +544,7 @@ try {
                 ]
             ],
             [
-                'kind' => 'either_or',
+                'kind' => 'mcq',
                 'prompt' => 'Is the role of the wings to produce lift or to turn the airplane left and right?',
                 'options' => ['produce lift', 'turn the airplane left and right'],
                 'correct' => [
@@ -657,7 +658,7 @@ try {
 
         if ($kind === 'yesno') {
             $spoken .= " Please answer yes or no, and briefly explain.";
-        } elseif ($kind === 'either_or') {
+        } elseif ($kind === 'mcq') {
             $spoken .= " Please answer with the correct phrase.";
         } else {
             $spoken .= " Please answer in a short spoken explanation.";
