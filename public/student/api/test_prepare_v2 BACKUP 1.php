@@ -258,7 +258,9 @@ try {
                             "type" => "string",
                             "enum" => ["yesno", "mcq", "open"]
                         ],
-                        "prompt" => ["type" => "string"],
+                        "prompt" => [
+                            "type" => "string"
+                        ],
                         "options" => [
                             "type" => "array",
                             "items" => ["type" => "string"]
@@ -293,60 +295,15 @@ try {
                 "role" => "system",
                 "content" => [
                     ["type" => "input_text", "text" =>
-"You are generating an ORAL progress test for aviation training.
-
-IMPORTANT:
-- This is a spoken test, not a written one.
-- Avoid questions that are best answered with only a single letter like A, B, C, or D.
-- Avoid prompts where the student would naturally only say one letter.
-- Prefer answers that are spoken naturally in short phrases or short explanations.
-- Strongly prefer:
-  1) yes/no questions answered with 'yes' or 'no' plus a short phrase,
-  2) open questions,
-  3) short spoken choice questions where the student says the actual concept, not the letter.
-
-Examples of good oral questions:
-- 'Is the role of the wings to produce lift? Answer yes or no, and briefly say why.'
-- 'During landing, which touches first: the main wheels or the nose wheel?'
-- 'Explain the role of the landing gear during takeoff and landing.'
-
-Examples of bad oral questions:
-- 'Which is correct: A, B, C, or D?'
-- 'Answer only with the letter.'
-
-Question mix target:
-- around 4 yes/no
-- around 2 spoken-choice mcq-style questions
-- around 4 open questions
+"Create exactly 10 oral flight training questions.
+Use ONLY the lesson narration text.
+Use summary only to detect misconceptions.
+Mix yesno, mcq and open questions.
 
 Rules:
-- Use ONLY the lesson narration text as source of truth.
-- Use summary only to detect misconceptions.
-- For yesno:
-  options should be []
-  correct.value true/false
-  correct.index null
-  correct.type null
-  correct.key_points []
-  correct.min_points_to_pass null
-- For mcq:
-  Use this only for spoken-choice questions.
-  The spoken answer should be the concept itself, not the letter.
-  You may still store 2-4 options.
-  correct.index should be 0..3
-  correct.value null
-  correct.type null
-  correct.key_points []
-  correct.min_points_to_pass null
-- For open:
-  options []
-  correct.type rubric
-  correct.key_points 3-6 strings
-  correct.min_points_to_pass integer
-  correct.value null
-  correct.index null
-
-Create exactly 10 questions."
+- yesno: options should be [], correct.value true/false, correct.index null, correct.type null, correct.key_points [], correct.min_points_to_pass null
+- mcq: exactly 4 options, correct.index 0..3, correct.value null, correct.type null, correct.key_points [], correct.min_points_to_pass null
+- open: options [], correct.type rubric, correct.key_points 3-6 strings, correct.min_points_to_pass integer, correct.value null, correct.index null"
                     ]
                 ]
             ],
@@ -379,7 +336,7 @@ Create exactly 10 questions."
         $q = [
             [
                 'kind' => 'yesno',
-                'prompt' => 'Is the checklist used to reduce errors? Answer yes or no, and briefly say why.',
+                'prompt' => 'Based on the lesson, is the checklist used to reduce errors?',
                 'options' => [],
                 'correct' => [
                     'value' => true,
@@ -391,8 +348,8 @@ Create exactly 10 questions."
             ],
             [
                 'kind' => 'mcq',
-                'prompt' => 'Which is the main function of the wings: to produce lift or to provide braking?',
-                'options' => ['produce lift', 'provide braking'],
+                'prompt' => 'Based on the lesson, which part is primarily responsible for lift?',
+                'options' => ['Wings', 'Brakes', 'Seat', 'Spinner'],
                 'correct' => [
                     'value' => null,
                     'index' => 0,
@@ -497,24 +454,22 @@ Create exactly 10 questions."
         $itemIds[] = $itemId;
 
         $kind = (string)$it['kind'];
-        $spoken = "Question {$it['idx']}. " . trim((string)$it['prompt']);
+        $spoken = "Question {$it['idx']}. " . (string)$it['prompt'];
 
         $options = json_decode((string)($it['options_json'] ?? '[]'), true) ?: [];
 
         if ($kind === 'yesno') {
-            // Keep it natural; prompt should already ask for a spoken yes/no response
-            $spoken = rtrim($spoken, " \t\n\r\0\x0B") . ".";
+            $spoken = rtrim($spoken, " \t\n\r\0\x0B?.") . ", yes or no?";
         } elseif ($kind === 'mcq' && $options) {
-            // Spoken-choice style: read the concepts, not letters as the expected answer
+            $letters = ['A', 'B', 'C', 'D'];
             $parts = [];
-            foreach ($options as $opt) {
-                $parts[] = trim((string)$opt);
+            foreach ($options as $i => $opt) {
+                if ($i > 3) break;
+                $parts[] = $letters[$i] . ". " . trim((string)$opt);
             }
-            if ($parts) {
-                $spoken .= " Your answer should say the correct concept, not the letter. Choices are: " . implode(", or ", $parts) . ".";
-            }
+            if ($parts) $spoken .= " " . implode(". ", $parts) . ".";
         } else {
-            $spoken .= " Please answer in a short spoken explanation.";
+            $spoken .= " What is your answer, {$firstName}?";
         }
 
         $localFile = $testDir . '/q_' . $itemId . '.mp3';

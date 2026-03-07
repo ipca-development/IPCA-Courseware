@@ -316,7 +316,6 @@ let TOTAL_QUESTIONS = 0;
 let ITEM_IDS = [];
 let CUR_POS = 0;
 let isRecording = false;
-let isStopping = false;
 let mediaStream = null;
 let recorder = null;
 let chunks = [];
@@ -328,7 +327,7 @@ let QUESTION_URLS = {};
 let RESULT_URL = '';
 
 let CURRENT_PROMPT_URL = '';
-let CURRENT_PROMPT_TYPE = '';
+let CURRENT_PROMPT_TYPE = ''; // intro|question
 let CURRENT_PROMPT_ITEM_ID = 0;
 let READY_FOR_NEXT = false;
 let FIRST_QUESTION_READY = false;
@@ -631,7 +630,7 @@ function startAnswerTimer(){
 
     if(answerLeft <= 0){
       stopAnswerTimer();
-      if(!isRecording && !isStopping){
+      if(!isRecording){
         uploadAnswerBlob(null, true);
       }
     }
@@ -658,7 +657,6 @@ async function startRecording(){
       setRec(false);
       btnPTT.classList.remove('rec');
       btnPTT.textContent = '🎙 Tap to Start Talking';
-      isStopping = false;
       await uploadAnswerBlob(blob, false);
     };
 
@@ -666,34 +664,19 @@ async function startRecording(){
     isRecording = true;
     setRec(true);
     btnPTT.classList.add('rec');
-    btnPTT.textContent = '⏹ Tap to Stop (finishes in 1 sec)';
+    btnPTT.textContent = '⏹ Recording... Tap to Stop';
   }catch(e){
     setSys('Microphone access failed.');
   }
 }
 
-async function delayedStopRecording(){
-  if (!recorder || recorder.state === 'inactive') return;
+async function stopRecording(){
+  if(recorder && recorder.state !== 'inactive') recorder.stop();
   isRecording = false;
-  isStopping = true;
-  btnPTT.disabled = true;
-  btnPTT.textContent = 'Finishing recording...';
-  setSys('Finishing recording...');
-
-  setTimeout(()=>{
-    try{
-      if(recorder && recorder.state !== 'inactive'){
-        recorder.stop();
-      }
-    }catch(e){
-      isStopping = false;
-      setSys('Stop recording failed.');
-    }
-  }, 1000);
 }
 
 async function replayCurrentPrompt(){
-  if(isRecording || isStopping) return;
+  if(isRecording) return;
   if(!CURRENT_PROMPT_URL){
     setSys('No question to replay.');
     return;
@@ -754,15 +737,13 @@ btnReplay.addEventListener('click', replayCurrentPrompt);
 
 btnPTT.addEventListener('click', async ()=>{
   if (!TEST_ID) return;
-  if (isStopping) return;
-
   if (!isRecording) {
     stopAnswerTimer();
     btnReplay.disabled = true;
     btnNext.disabled = true;
     await startRecording();
   } else {
-    await delayedStopRecording();
+    await stopRecording();
   }
 });
 
