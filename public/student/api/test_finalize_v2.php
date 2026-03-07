@@ -91,8 +91,9 @@ function tts_write_file(string $apiKey, string $model, string $voice, string $te
 
 function normalize_text(string $s): string {
     $s = strtolower(trim($s));
+    $s = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $s);
     $s = preg_replace('/\s+/', ' ', $s);
-    return $s;
+    return trim($s);
 }
 
 function transcribe_file(string $apiKey, string $filepath): string {
