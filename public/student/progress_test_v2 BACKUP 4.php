@@ -773,23 +773,12 @@ btnNext.addEventListener('click', async ()=>{
   await playCurrentQuestion();
 });
 
-function restoreAfterUploadFailure() {
-  btnReplay.disabled = false;
-  btnPTT.disabled = false;
-  btnNext.disabled = true;
-  btnNext.style.display = 'none';
-  if (CURRENT_PROMPT_TYPE === 'question') {
-    answerWrap.style.display = 'block';
-    startAnswerTimer();
-  }
-}	
-	
 async function uploadAnswerBlob(blob, timeoutOnly){
   btnPTT.disabled = true;
   btnReplay.disabled = true;
   btnNext.disabled = true;
   btnNext.style.display = 'none';
-  setSys('STEP 1: Saving your answer...');
+  setSys('Saving your answer...');
 
   const fd = new FormData();
   fd.append('test_id', String(TEST_ID));
@@ -801,75 +790,38 @@ async function uploadAnswerBlob(blob, timeoutOnly){
     fd.append('audio', blob, 'q' + String(CUR_POS).padStart(2,'0') + '.webm');
   }
 
-  const controller = new AbortController();
-  const timeoutMs = 15000; // shorter on purpose for debugging
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  const res = await fetch('/student/api/test_upload_answer_v2.php', {
+    method:'POST',
+    credentials:'same-origin',
+    body: fd
+  });
 
-  try {
-    setSys('STEP 2: Sending upload request...');
-    const res = await fetch('/student/api/test_upload_answer_v2.php', {
-      method:'POST',
-      credentials:'same-origin',
-      body: fd,
-      signal: controller.signal
-    });
+  const txt = await res.text();
+  let j = null;
+  try { j = JSON.parse(txt); } catch(e) { j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)}; }
 
-    clearTimeout(timeoutHandle);
-
-    setSys('STEP 3: Reading upload response...');
-    const txt = await res.text();
-
-    let j = null;
-    try {
-      j = JSON.parse(txt);
-    } catch(e) {
-      j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)};
-    }
-
-    if (!j.ok) {
-      setSys('STEP 4A: Upload failed: ' + (j.error || 'Unknown error'));
-      restoreAfterUploadFailure();
-      return;
-    }
-
-    setSys('STEP 4B: Upload OK. Preparing next question...');
-    markDone(CUR_POS);
-    CUR_POS++;
-
-    if (CUR_POS > TOTAL_QUESTIONS) {
-      await finalizeTest();
-      return;
-    }
-
-    READY_FOR_NEXT = false;
+  if (!j.ok) {
+    setSys('Upload failed: ' + (j.error || 'Unknown error'));
+    btnPTT.disabled = false;
     btnReplay.disabled = false;
-    answerWrap.style.display = 'none';
-
-    await prepareNextQuestionReady();
-
-    READY_FOR_NEXT = NEXT_QUESTION_READY;
-    btnNext.disabled = !READY_FOR_NEXT;
-
-    if (READY_FOR_NEXT) {
-      setSys('STEP 5: Next question ready.');
-    } else {
-      setSys('STEP 5: Next question failed to prepare.');
-      restoreAfterUploadFailure();
-    }
-
-  } catch (err) {
-    clearTimeout(timeoutHandle);
-
-    let msg = 'STEP X: Upload failed.';
-    if (err && err.name === 'AbortError') {
-      msg = 'STEP X: Upload timed out after 15 seconds.';
-    } else if (err && err.message) {
-      msg = 'STEP X: Upload failed: ' + err.message;
-    }
-
-    setSys(msg);
-    restoreAfterUploadFailure();
+    startAnswerTimer();
+    return;
   }
+
+  markDone(CUR_POS);
+  CUR_POS++;
+
+  if (CUR_POS > TOTAL_QUESTIONS) {
+    await finalizeTest();
+    return;
+  }
+
+  READY_FOR_NEXT = false;
+  btnReplay.disabled = false;
+  answerWrap.style.display = 'none';
+  await prepareNextQuestionReady();
+  READY_FOR_NEXT = NEXT_QUESTION_READY;
+  btnNext.disabled = !READY_FOR_NEXT;
 }
 
 async function finalizeTest(){
