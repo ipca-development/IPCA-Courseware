@@ -15,13 +15,7 @@ function read_json(string $s): array {
 }
 
 function build_background_run_url(int $testId): string {
-    $https = !empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off';
-    $scheme = $https ? 'https' : 'http';
-
-    $host = (string)($_SERVER['HTTP_HOST'] ?? '127.0.0.1');
-    if ($host === '') $host = '127.0.0.1';
-
-    return $scheme . '://' . $host . '/student/api/test_prepare_run_v2.php?test_id=' . urlencode((string)$testId);
+    return 'http://127.0.0.1/student/api/test_prepare_run_v2.php?test_id=' . urlencode((string)$testId);
 }
 
 function fire_and_forget_prepare_run(int $testId): void {
@@ -29,7 +23,7 @@ function fire_and_forget_prepare_run(int $testId): void {
 
     $ch = curl_init($url);
     curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => false,
+        CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HEADER => false,
         CURLOPT_NOBODY => false,
         CURLOPT_POST => false,
@@ -37,6 +31,7 @@ function fire_and_forget_prepare_run(int $testId): void {
         CURLOPT_CONNECTTIMEOUT_MS => 800,
         CURLOPT_FRESH_CONNECT => true,
         CURLOPT_FORBID_REUSE => true,
+        CURLOPT_FOLLOWLOCATION => true,
     ]);
 
     @curl_exec($ch);
