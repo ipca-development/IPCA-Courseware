@@ -484,6 +484,40 @@ try {
         json_ok(['ok' => false, 'error' => 'Forbidden']);
     }
 
+$userId = (int)($u['id'] ?? 0);
+
+$testId = (int)($_GET['test_id'] ?? 0);
+$cohortId = 0;
+$lessonId = 0;
+
+if ($testId > 0) {
+
+    // Background runner call from test_prepare_start_v2.php
+    $testSt = $pdo->prepare("
+        SELECT *
+        FROM progress_tests_v2
+        WHERE id=?
+        LIMIT 1
+    ");
+    $testSt->execute([$testId]);
+    $test = $testSt->fetch(PDO::FETCH_ASSOC);
+
+    if (!$test) {
+        json_ok(['ok' => false, 'error' => 'Test not found']);
+    }
+
+    $cohortId = (int)($test['cohort_id'] ?? 0);
+    $lessonId = (int)($test['lesson_id'] ?? 0);
+    $testUserId = (int)($test['user_id'] ?? 0);
+
+    if ($role === 'student' && $testUserId !== $userId) {
+        http_response_code(403);
+        json_ok(['ok' => false, 'error' => 'Forbidden']);
+    }
+
+} else {
+
+    // Direct API call fallback (old behaviour)
     $data = read_json((string)file_get_contents('php://input'));
     if (!$data) {
         json_ok(['ok' => false, 'error' => 'Invalid JSON']);
@@ -497,7 +531,7 @@ try {
         json_ok(['ok' => false, 'error' => 'Missing test_id, cohort_id or lesson_id']);
     }
 
-    $userId = (int)($u['id'] ?? 0);
+}
 
     if ($role === 'student') {
         $en = $pdo->prepare("
