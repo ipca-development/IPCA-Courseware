@@ -684,14 +684,26 @@ async function pollPrepareStatusOnce(){
     if (statusText) setSys(statusText);
 
 	  
-if (!PREPARE_IS_READY && (String(j.status || '') === 'ready' || pct >= 100)) {
+if (String(j.status || '') === 'ready' || pct >= 100) {
+
   const hydrated = await hydrateReadyManifest();
 
   if (hydrated) {
+
     stopPrepareStatusPolling();
+
     setPrep(100);
-    btnStart.disabled = false;
     setSys(FIRST_NAME + ', your progress test is ready.');
+
+    // ensure dots are visible
+    if (TOTAL_QUESTIONS > 0 && qstrip.children.length === 0) {
+        renderDots(TOTAL_QUESTIONS);
+    }
+
+    // unlock start button
+    btnStart.disabled = false;
+
+    PREPARE_IS_READY = true;
   }
 }	  
 	  
