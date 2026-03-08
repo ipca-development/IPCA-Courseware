@@ -505,7 +505,7 @@ cw_header('Progress Test');
     </div>
 
     <div class="btn-row" id="answerBtns" style="display:none;">
-      <button class="ptt btn-half" id="btnPTT" type="button" disabled>Tap to Start Talking</button>
+      <button class="ptt btn-half" id="btnPTT" type="button" disabled>ðŸŽ™ Tap to Start Talking</button>
       <button class="ptt btn-half" id="btnNext" type="button" disabled>Next Question</button>
     </div>
 
@@ -618,9 +618,7 @@ function applyPrepareManifest(j){
 
   let manifest = null;
 
-  if (j.manifest && typeof j.manifest === 'object') {
-    manifest = j.manifest;
-  } else if (j.manifest_json) {
+  if (j.manifest_json) {
     if (typeof j.manifest_json === 'string') {
       try { manifest = JSON.parse(j.manifest_json); } catch(e) {}
     } else if (typeof j.manifest_json === 'object') {
@@ -634,7 +632,7 @@ function applyPrepareManifest(j){
 
   if (Array.isArray(manifest.item_ids) && manifest.item_ids.length) {
     ITEM_IDS = manifest.item_ids.map(x => parseInt(x, 10)).filter(Boolean);
-    TOTAL_QUESTIONS = parseInt(manifest.total_questions || ITEM_IDS.length, 10) || ITEM_IDS.length;
+    TOTAL_QUESTIONS = ITEM_IDS.length;
   }
 
   if (manifest.question_urls && typeof manifest.question_urls === 'object') {
@@ -658,7 +656,7 @@ function stopPrepareStatusPolling(){
 }
 
 async function pollPrepareStatusOnce(){
-  if (!TEST_ID) return;
+  if (!TEST_ID) return null;
 
   try {
     const res = await fetch('/student/api/test_prepare_status_v2.php?test_id=' + encodeURIComponent(TEST_ID), {
@@ -672,10 +670,10 @@ async function pollPrepareStatusOnce(){
     try {
       j = JSON.parse(txt);
     } catch(e) {
-      return;
+      return null;
     }
 
-    if (!j || !j.ok) return;
+    if (!j || !j.ok) return null;
 
     const pct = Math.max(0, Math.min(100, parseInt(j.progress_pct || 0, 10)));
     const statusText = String(j.status_text || '');
@@ -683,21 +681,16 @@ async function pollPrepareStatusOnce(){
     if (pct > 0) setPrep(pct);
     if (statusText) setSys(statusText);
 
-    if (!PREPARE_IS_READY && (String(j.status || '') === 'ready' || pct >= 100)) {
-      const hydrated = await hydrateReadyManifest();
+    applyPrepareManifest(j);
 
-      if (hydrated) {
-        stopPrepareStatusPolling();
-        setSys('Checking audio...');
-        const firstReady = await prepareFirstQuestionReady();
-        setPrep(100);
-
-        if (firstReady) {
-          btnStart.disabled = false;
-        }
-      }
+    if (String(j.status || '') === 'ready' || pct >= 100) {
+      PREPARE_IS_READY = true;
+      stopPrepareStatusPolling();
     }
+
+    return j;
   } catch (e) {
+    return null;
   }
 }
 
@@ -709,49 +702,39 @@ function startPrepareStatusPolling(){
   prepareStatusPoll = setInterval(pollPrepareStatusOnce, 1000);
 }
 
-async function hydrateReadyManifest(){
-  if (!TEST_ID) return false;
+function startPrepareRun(){
+  if (prepareRunStarted || !TEST_ID) return;
+  prepareRunStarted = true;
 
-  try {
-    const res = await fetch('/student/api/test_prepare_status_v2.php?test_id=' + encodeURIComponent(TEST_ID), {
-      method: 'GET',
-      credentials: 'same-origin',
-      cache: 'no-store'
-    });
+  fetch('/student/api/test_prepare_run_v2.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    credentials:'same-origin',
+    body: JSON.stringify({ test_id: TEST_ID })
+  }).catch(() => {
+  });
+}
 
-    const txt = await res.text();
-    let j = null;
-    try {
-      j = JSON.parse(txt);
-    } catch(e) {
-      return false;
-    }
+async function waitForPreparationReady(timeoutMs = 240000){
+  const started = Date.now();
 
-    if (!j || !j.ok) return false;
-
-    applyPrepareManifest(j);
+  while ((Date.now() - started) < timeoutMs) {
+    await pollPrepareStatusOnce();
 
     if (
+      PREPARE_IS_READY &&
       TOTAL_QUESTIONS > 0 &&
       ITEM_IDS.length > 0 &&
-      typeof INTRO_URL === 'string' &&
-      INTRO_URL !== '' &&
-      QUESTION_URLS &&
-      typeof QUESTION_URLS === 'object' &&
-      Object.keys(QUESTION_URLS).length > 0
+      Object.keys(QUESTION_URLS || {}).length > 0
     ) {
-      PREPARE_IS_READY = true;
       return true;
     }
 
-    return false;
-
-  } catch(e) {
-    return false;
+    await sleep(1000);
   }
-}	
-	
 
+  return false;
+}
 
 function restoreAfterUploadFailure() {
   btnReplay.disabled = false;
@@ -887,7 +870,7 @@ async function prepareTest(){
   await startCam();
 
   setPrep(1);
-  setSys('Starting preparation...');
+  setSys('Creating progress test...');
 
   const res = await fetch('/student/api/test_prepare_start_v2.php', {
     method:'POST',
@@ -898,11 +881,7 @@ async function prepareTest(){
 
   const txt = await res.text();
   let j = null;
-  try {
-    j = JSON.parse(txt);
-  } catch(e) {
-    j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)};
-  }
+  try { j = JSON.parse(txt); } catch(e) { j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)}; }
 
   if (!j.ok) {
     stopPrepareStatusPolling();
@@ -912,17 +891,37 @@ async function prepareTest(){
   }
 
   TEST_ID = parseInt(j.test_id || 0, 10);
+
   if (!TEST_ID) {
     setPrep(100);
     setSys('Preparation failed: invalid test id.');
     return;
   }
 
-  if (j.progress_pct) setPrep(parseInt(j.progress_pct, 10) || 1);
-  if (j.status_text) setSys(String(j.status_text || ''));
-
   startPrepareStatusPolling();
   await pollPrepareStatusOnce();
+
+  setSys('Launching preparation...');
+  startPrepareRun();
+
+  const ready = await waitForPreparationReady(240000);
+  if (!ready) {
+    setPrep(100);
+    setSys('Preparation failed: timed out while generating questions or audio.');
+    return;
+  }
+
+  setSys('Checking audio...');
+  const firstReady = await prepareFirstQuestionReady();
+  await pollPrepareStatusOnce();
+  setPrep(100);
+
+  if (firstReady) {
+    stopPrepareStatusPolling();
+    btnStart.disabled = false;
+  } else {
+    setSys('Preparation finished, but the first question audio could not be buffered.');
+  }
 }
 
 async function playIntroThenEnableFirstQuestion(){
