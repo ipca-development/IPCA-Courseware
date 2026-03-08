@@ -21,17 +21,28 @@ function build_background_run_url(int $testId): string {
 function fire_and_forget_prepare_run(int $testId): void {
     $url = build_background_run_url($testId);
 
+    $cookieHeader = '';
+    if (!empty($_SERVER['HTTP_COOKIE'])) {
+        $cookieHeader = (string)$_SERVER['HTTP_COOKIE'];
+    }
+
+    $headers = [];
+    if ($cookieHeader !== '') {
+        $headers[] = 'Cookie: ' . $cookieHeader;
+    }
+
     $ch = curl_init($url);
     curl_setopt_array($ch, [
         CURLOPT_RETURNTRANSFER => true,
         CURLOPT_HEADER => false,
         CURLOPT_NOBODY => false,
         CURLOPT_POST => false,
-        CURLOPT_TIMEOUT_MS => 800,
-        CURLOPT_CONNECTTIMEOUT_MS => 800,
+        CURLOPT_TIMEOUT_MS => 1500,
+        CURLOPT_CONNECTTIMEOUT_MS => 1500,
         CURLOPT_FRESH_CONNECT => true,
         CURLOPT_FORBID_REUSE => true,
         CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_HTTPHEADER => $headers,
     ]);
 
     @curl_exec($ch);
