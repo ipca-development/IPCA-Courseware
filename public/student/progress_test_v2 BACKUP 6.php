@@ -518,10 +518,6 @@ cw_header('Progress Test');
     </div>
 
     <div class="result-box" id="resultBox" style="display:none;"></div>
-
-    <div class="btn-row" id="doneBtns" style="display:none;">
-      <button class="ptt btn-half" id="btnLessonMenu" type="button">Back to Lesson Menu</button>
-    </div>
   </div>
 </div>
 
@@ -556,18 +552,14 @@ let FIRST_QUESTION_READY = false;
 let NEXT_QUESTION_READY = false;
 let prepareStatusPoll = null;
 let prepareStatusStarted = false;
-let prepareRunStarted = false;
-let PREPARE_IS_READY = false;
 
 const btnStart = document.getElementById('btnStart');
 const btnReady = document.getElementById('btnReady');
 const btnReplay = document.getElementById('btnReplay');
 const btnPTT = document.getElementById('btnPTT');
 const btnNext = document.getElementById('btnNext');
-const btnLessonMenu = document.getElementById('btnLessonMenu');
 const questionBtns = document.getElementById('questionBtns');
 const answerBtns = document.getElementById('answerBtns');
-const doneBtns = document.getElementById('doneBtns');
 
 const sysline = document.getElementById('sysline');
 const prepFill = document.getElementById('prepFill');
@@ -609,45 +601,6 @@ function markReady(i){
   }
 }
 
-function sleep(ms){
-  return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function applyPrepareManifest(j){
-  if (!j || typeof j !== 'object') return;
-
-  let manifest = null;
-
-  if (j.manifest_json) {
-    if (typeof j.manifest_json === 'string') {
-      try { manifest = JSON.parse(j.manifest_json); } catch(e) {}
-    } else if (typeof j.manifest_json === 'object') {
-      manifest = j.manifest_json;
-    }
-  } else if (j.item_ids || j.question_urls || j.intro_url) {
-    manifest = j;
-  }
-
-  if (!manifest || typeof manifest !== 'object') return;
-
-  if (Array.isArray(manifest.item_ids) && manifest.item_ids.length) {
-    ITEM_IDS = manifest.item_ids.map(x => parseInt(x, 10)).filter(Boolean);
-    TOTAL_QUESTIONS = ITEM_IDS.length;
-  }
-
-  if (manifest.question_urls && typeof manifest.question_urls === 'object') {
-    QUESTION_URLS = manifest.question_urls;
-  }
-
-  if (typeof manifest.intro_url === 'string' && manifest.intro_url) {
-    INTRO_URL = manifest.intro_url;
-  }
-
-  if (TOTAL_QUESTIONS > 0 && qstrip.children.length === 0) {
-    renderDots(TOTAL_QUESTIONS);
-  }
-}
-
 function stopPrepareStatusPolling(){
   if (prepareStatusPoll) {
     clearInterval(prepareStatusPoll);
@@ -656,7 +609,7 @@ function stopPrepareStatusPolling(){
 }
 
 async function pollPrepareStatusOnce(){
-  if (!TEST_ID) return null;
+  if (!TEST_ID) return;
 
   try {
     const res = await fetch('/student/api/test_prepare_status_v2.php?test_id=' + encodeURIComponent(TEST_ID), {
@@ -670,10 +623,10 @@ async function pollPrepareStatusOnce(){
     try {
       j = JSON.parse(txt);
     } catch(e) {
-      return null;
+      return;
     }
 
-    if (!j || !j.ok) return null;
+    if (!j || !j.ok) return;
 
     const pct = Math.max(0, Math.min(100, parseInt(j.progress_pct || 0, 10)));
     const statusText = String(j.status_text || '');
@@ -681,16 +634,10 @@ async function pollPrepareStatusOnce(){
     if (pct > 0) setPrep(pct);
     if (statusText) setSys(statusText);
 
-    applyPrepareManifest(j);
-
     if (String(j.status || '') === 'ready' || pct >= 100) {
-      PREPARE_IS_READY = true;
       stopPrepareStatusPolling();
     }
-
-    return j;
   } catch (e) {
-    return null;
   }
 }
 
@@ -700,40 +647,6 @@ function startPrepareStatusPolling(){
 
   stopPrepareStatusPolling();
   prepareStatusPoll = setInterval(pollPrepareStatusOnce, 1000);
-}
-
-function startPrepareRun(){
-  if (prepareRunStarted || !TEST_ID) return;
-  prepareRunStarted = true;
-
-  fetch('/student/api/test_prepare_run_v2.php', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    credentials:'same-origin',
-    body: JSON.stringify({ test_id: TEST_ID })
-  }).catch(() => {
-  });
-}
-
-async function waitForPreparationReady(timeoutMs = 240000){
-  const started = Date.now();
-
-  while ((Date.now() - started) < timeoutMs) {
-    await pollPrepareStatusOnce();
-
-    if (
-      PREPARE_IS_READY &&
-      TOTAL_QUESTIONS > 0 &&
-      ITEM_IDS.length > 0 &&
-      Object.keys(QUESTION_URLS || {}).length > 0
-    ) {
-      return true;
-    }
-
-    await sleep(1000);
-  }
-
-  return false;
 }
 
 function restoreAfterUploadFailure() {
@@ -869,10 +782,10 @@ async function prepareNextQuestionReady(){
 async function prepareTest(){
   await startCam();
 
-  setPrep(1);
-  setSys('Creating progress test...');
+  setPrep(2);
+  setSys('Starting preparation...');
 
-  const res = await fetch('/student/api/test_prepare_start_v2.php', {
+  const res = await fetch('/student/api/test_prepare_v2.php', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
     credentials:'same-origin',
@@ -891,25 +804,30 @@ async function prepareTest(){
   }
 
   TEST_ID = parseInt(j.test_id || 0, 10);
+  TOTAL_QUESTIONS = parseInt(j.total_questions || 10, 10);
 
-  if (!TEST_ID) {
+  if (TEST_ID > 0) {
+    startPrepareStatusPolling();
+    await pollPrepareStatusOnce();
+  }
+
+  if (!TEST_ID || !TOTAL_QUESTIONS) {
     setPrep(100);
-    setSys('Preparation failed: invalid test id.');
+    setSys('Preparation failed: invalid test data.');
     return;
   }
 
-  startPrepareStatusPolling();
-  await pollPrepareStatusOnce();
-
-  setSys('Launching preparation...');
-  startPrepareRun();
-
-  const ready = await waitForPreparationReady(240000);
-  if (!ready) {
-    setPrep(100);
-    setSys('Preparation failed: timed out while generating questions or audio.');
-    return;
+  if (Array.isArray(j.item_ids) && j.item_ids.length) {
+    ITEM_IDS = j.item_ids.map(x => parseInt(x,10)).filter(Boolean);
+  } else {
+    ITEM_IDS = [];
+    for(let i=1;i<=TOTAL_QUESTIONS;i++) ITEM_IDS.push(i);
   }
+
+  INTRO_URL = String(j.intro_url || '');
+  QUESTION_URLS = (j.question_urls && typeof j.question_urls === 'object') ? j.question_urls : {};
+
+  renderDots(TOTAL_QUESTIONS);
 
   setSys('Checking audio...');
   const firstReady = await prepareFirstQuestionReady();
@@ -919,8 +837,6 @@ async function prepareTest(){
   if (firstReady) {
     stopPrepareStatusPolling();
     btnStart.disabled = false;
-  } else {
-    setSys('Preparation finished, but the first question audio could not be buffered.');
   }
 }
 
@@ -1137,10 +1053,6 @@ btnNext.addEventListener('click', async ()=>{
   await playCurrentQuestion();
 });
 
-btnLessonMenu.addEventListener('click', ()=>{
-  window.history.back();
-});
-
 async function uploadAnswerBlob(blob, timeoutOnly){
   btnPTT.disabled = true;
   btnReplay.disabled = true;
@@ -1277,30 +1189,29 @@ async function finalizeTest(){
   }
 
   const sections = [
-    ['Debrief', j.ai_summary || ''],
-    ['Weak Areas', j.weak_areas || ''],
-    ['Summary Quality', j.summary_quality || ''],
-    ['Summary Issues', j.summary_issues || ''],
-    ['Suggested Summary Corrections', j.summary_corrections || ''],
-    ['Confirmed Misunderstandings', j.confirmed_misunderstandings || '']
-  ];
+  ['Debrief', j.ai_summary || ''],
+  ['Weak Areas', j.weak_areas || ''],
+  ['Summary Quality', j.summary_quality || ''],
+  ['Summary Issues', j.summary_issues || ''],
+  ['Suggested Summary Corrections', j.summary_corrections || ''],
+  ['Confirmed Misunderstandings', j.confirmed_misunderstandings || '']
+];
 
-  let html = `<div><strong>Score:</strong> ${escapeHtml(String(j.score_pct || 0))}%</div>`;
+let html = `<div><strong>Score:</strong> ${escapeHtml(String(j.score_pct || 0))}%</div>`;
 
-  sections.forEach(([title, value]) => {
-    if (!String(value || '').trim()) return;
-    html += `
-      <div style="margin-top:10px;">
-        <strong>${escapeHtml(title)}</strong><br>
-        <div style="white-space:pre-wrap;">${escapeHtml(value)}</div>
-      </div>
-    `;
-  });
+sections.forEach(([title, value]) => {
+  if (!String(value || '').trim()) return;
+  html += `
+    <div style="margin-top:10px;">
+      <strong>${escapeHtml(title)}</strong><br>
+      <div style="white-space:pre-wrap;">${escapeHtml(value)}</div>
+    </div>
+  `;
+});
 
-  resultBox.style.display = 'block';
-  resultBox.innerHTML = html;
-  doneBtns.style.display = 'flex';
-  setSys('Completed.');
+resultBox.style.display = 'block';
+resultBox.innerHTML = html;
+setSys('Completed.');
 }
 
 function escapeHtml(s){
