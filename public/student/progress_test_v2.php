@@ -683,20 +683,18 @@ async function pollPrepareStatusOnce(){
     if (pct > 0) setPrep(pct);
     if (statusText) setSys(statusText);
 
-    if (!PREPARE_IS_READY && (String(j.status || '') === 'ready' || pct >= 100)) {
-      const hydrated = await hydrateReadyManifest();
+	  
+if (!PREPARE_IS_READY && (String(j.status || '') === 'ready' || pct >= 100)) {
+  const hydrated = await hydrateReadyManifest();
 
-      if (hydrated) {
-        stopPrepareStatusPolling();
-        setSys('Checking audio...');
-        const firstReady = await prepareFirstQuestionReady();
-        setPrep(100);
-
-        if (firstReady) {
-          btnStart.disabled = false;
-        }
-      }
-    }
+  if (hydrated) {
+    stopPrepareStatusPolling();
+    setPrep(100);
+    btnStart.disabled = false;
+    setSys(FIRST_NAME + ', your progress test is ready.');
+  }
+}	  
+	  
   } catch (e) {
   }
 }
@@ -938,12 +936,17 @@ async function playIntroThenEnableFirstQuestion(){
     return false;
   }
 
-  questionBtns.style.display = 'flex';
-  btnReplay.disabled = false;
-  setQuestionButtonLabel();
-  btnReady.disabled = !FIRST_QUESTION_READY;
-  setSys('Click when you are ready for the first question.');
-  return true;
+questionBtns.style.display = 'flex';
+btnReplay.disabled = false;
+setQuestionButtonLabel();
+
+if (!FIRST_QUESTION_READY) {
+  await prepareFirstQuestionReady();
+}
+
+btnReady.disabled = !FIRST_QUESTION_READY;
+setSys('Click when you are ready for the first question.');
+return true;
 }
 
 async function playCurrentQuestion(){
