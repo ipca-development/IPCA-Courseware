@@ -1,9 +1,6 @@
 <?php
-declare(strict_types=1);
-
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/openai.php';
-require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
 
 cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
@@ -739,112 +736,6 @@ function upload_file_to_presigned_put(string $putUrl, string $localFile, string 
     }
 }
 
-function classify_progress_test_result(array $testRow, int $scorePct, array $policy): array {
-    $passPct = (int)($policy['progress_test_pass_pct'] ?? 75);
-    $completedAt = trim((string)($testRow['completed_at'] ?? ''));
-    $effectiveDeadlineUtc = trim((string)($testRow['effective_deadline_utc'] ?? ''));
-    $attempt = (int)($testRow['attempt'] ?? 1);
-
-    $timingStatus = 'unknown';
-
-    if ($completedAt !== '' && $effectiveDeadlineUtc !== '') {
-        $timingStatus = (strtotime($completedAt) <= strtotime($effectiveDeadlineUtc))
-            ? 'on_time'
-            : 'after_final_deadline';
-    }
-
-    $passedByScore = ($scorePct >= $passPct);
-    $passGateMet = ($passedByScore && $timingStatus === 'on_time') ? 1 : 0;
-
-    $formalResultCode = '';
-    $formalResultLabel = '';
-    $countsAsUnsat = 0;
-
-    if ($passGateMet) {
-        if ($attempt <= 1) {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_1';
-            $formalResultLabel = 'Pass - On Time - Attempt 1';
-        } elseif ($attempt === 2) {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_2';
-            $formalResultLabel = 'Pass - On Time - Attempt 2';
-        } elseif ($attempt === 3) {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_3';
-            $formalResultLabel = 'Pass - On Time - Attempt 3';
-        } elseif ($attempt === 4) {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_4_EXTENSION';
-            $formalResultLabel = 'Pass - On Time Within Extension - Attempt 4';
-        } else {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_5_FINAL_EXTENSION';
-            $formalResultLabel = 'Pass - On Time Within Final Extension - Attempt ' . $attempt;
-        }
-        $countsAsUnsat = 0;
-    } else {
-        if (!$passedByScore) {
-            if ($timingStatus === 'on_time') {
-                $formalResultCode = 'UNSAT_SCORE_BELOW_PASS';
-                $formalResultLabel = 'Unsatisfactory - Score Below Pass Standard';
-            } else {
-                $formalResultCode = 'UNSAT_SCORE_BELOW_PASS_LATE';
-                $formalResultLabel = 'Unsatisfactory - Score Below Pass Standard - Late';
-            }
-        } else {
-            if ($timingStatus === 'after_final_deadline') {
-                $formalResultCode = 'UNSAT_PASSING_SCORE_BUT_LATE';
-                $formalResultLabel = 'Unsatisfactory - Passing Score But Outside Effective Deadline';
-            } else {
-                $formalResultCode = 'UNSAT_NOT_VALIDATED';
-                $formalResultLabel = 'Unsatisfactory - Result Not Validated';
-            }
-        }
-        $countsAsUnsat = 1;
-    }
-
-    return [
-        'timing_status' => $timingStatus,
-        'pass_gate_met' => $passGateMet,
-        'formal_result_code' => $formalResultCode,
-        'formal_result_label' => $formalResultLabel,
-        'counts_as_unsat' => $countsAsUnsat
-    ];
-}
-
-function count_recent_unsats(PDO $pdo, int $userId, int $cohortId, int $lessonId, int $windowDays): array {
-    $sameLesson = 0;
-    $coursewide = 0;
-
-    $sqlSameLesson = "
-        SELECT COUNT(*)
-        FROM progress_tests_v2
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id = ?
-          AND counts_as_unsat = 1
-          AND completed_at IS NOT NULL
-          AND completed_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)
-    ";
-    $st1 = $pdo->prepare($sqlSameLesson);
-    $st1->execute([$userId, $cohortId, $lessonId, $windowDays]);
-    $sameLesson = (int)$st1->fetchColumn();
-
-    $sqlCourse = "
-        SELECT COUNT(*)
-        FROM progress_tests_v2
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND counts_as_unsat = 1
-          AND completed_at IS NOT NULL
-          AND completed_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)
-    ";
-    $st2 = $pdo->prepare($sqlCourse);
-    $st2->execute([$userId, $cohortId, $windowDays]);
-    $coursewide = (int)$st2->fetchColumn();
-
-    return [
-        'same_lesson_unsat_count' => $sameLesson,
-        'coursewide_unsat_count' => $coursewide
-    ];
-}
-
 try {
     $u = cw_current_user($pdo);
     $role = (string)($u['role'] ?? '');
@@ -874,15 +765,8 @@ try {
     $test = $tst->fetch(PDO::FETCH_ASSOC);
     if (!$test) json_out(['ok' => false, 'error' => 'Test not found']);
 
-    $engine = new CoursewareProgressionV2($pdo);
-
-    $testOwnerUserId = (int)($test['user_id'] ?? 0);
     $cohortId = (int)($test['cohort_id'] ?? 0);
     $lessonId = (int)($test['lesson_id'] ?? 0);
-
-    $policy = $engine->getAllPolicies([
-        'cohort_id' => $cohortId
-    ]);
 
     $apiKey = getenv('OPENAI_API_KEY');
     if (!$apiKey) $apiKey = getenv('CW_OPENAI_API_KEY');
@@ -996,7 +880,7 @@ try {
       WHERE user_id=? AND cohort_id=? AND lesson_id=?
       LIMIT 1
     ");
-    $sq->execute([$testOwnerUserId, $cohortId, $lessonId]);
+    $sq->execute([$userId, $cohortId, $lessonId]);
     $summaryPlain = trim((string)($sq->fetchColumn() ?: ''));
     if ($summaryPlain === '') $summaryPlain = "(No student summary.)";
 
@@ -1131,45 +1015,6 @@ TXT;
     upload_file_to_presigned_put((string)$resultPresign['url'], $resultAudioLocal, 'audio/mpeg');
     $resultAudioUrl = (string)$resultPresign['public_url'];
 
-    $pdo->beginTransaction();
-
-    $nowUtc = gmdate('Y-m-d H:i:s');
-    $completedAtForClassification = $nowUtc;
-    $test['completed_at'] = $completedAtForClassification;
-
-    $classification = classify_progress_test_result($test, $scorePct, $policy);
-
-    $multipleUnsatWindowDays = (int)($policy['multiple_unsat_window_days'] ?? 30);
-    $multipleUnsatSameLessonThreshold = (int)($policy['multiple_unsat_same_lesson_threshold'] ?? 3);
-    $multipleUnsatCoursewideThreshold = (int)($policy['multiple_unsat_coursewide_threshold'] ?? 5);
-
-    $recentUnsats = [
-        'same_lesson_unsat_count' => 0,
-        'coursewide_unsat_count' => 0
-    ];
-
-    if ((int)$classification['counts_as_unsat'] === 1) {
-        $recentUnsats = count_recent_unsats(
-            $pdo,
-            $testOwnerUserId,
-            $cohortId,
-            $lessonId,
-            max(1, $multipleUnsatWindowDays)
-        );
-        $recentUnsats['same_lesson_unsat_count']++;
-        $recentUnsats['coursewide_unsat_count']++;
-    }
-
-    $remediationTriggered = 0;
-    if ((int)$classification['counts_as_unsat'] === 1) {
-        if (
-            $recentUnsats['same_lesson_unsat_count'] >= $multipleUnsatSameLessonThreshold ||
-            $recentUnsats['coursewide_unsat_count'] >= $multipleUnsatCoursewideThreshold
-        ) {
-            $remediationTriggered = 1;
-        }
-    }
-
     $upTest = $pdo->prepare("
       UPDATE progress_tests_v2
       SET status='completed',
@@ -1177,212 +1022,11 @@ TXT;
           ai_summary=?,
           weak_areas=?,
           debrief_spoken=?,
-          timing_status=?,
-          formal_result_code=?,
-          formal_result_label=?,
-          pass_gate_met=?,
-          counts_as_unsat=?,
-          remediation_triggered=?,
-          finalized_by_logic_version=?,
-          completed_at=?,
+          completed_at=NOW(),
           updated_at=NOW()
       WHERE id=?
     ");
-    $upTest->execute([
-        $scorePct,
-        $written,
-        $weak,
-        $spoken,
-        $classification['timing_status'],
-        $classification['formal_result_code'],
-        $classification['formal_result_label'],
-        (int)$classification['pass_gate_met'],
-        (int)$classification['counts_as_unsat'],
-        $remediationTriggered,
-        CoursewareProgressionV2::LOGIC_VERSION,
-        $completedAtForClassification,
-        $testId
-    ]);
-
-    $activitySel = $pdo->prepare("
-        SELECT id, attempt_count, best_score
-        FROM lesson_activity
-        WHERE user_id = ?
-          AND lesson_id = ?
-        LIMIT 1
-    ");
-    $activitySel->execute([$testOwnerUserId, $lessonId]);
-    $activityRow = $activitySel->fetch(PDO::FETCH_ASSOC);
-
-    $effectiveDeadlineUtc = trim((string)($test['effective_deadline_utc'] ?? ''));
-
-    if ($activityRow) {
-        $activityId = (int)$activityRow['id'];
-        $newAttemptCount = max((int)($activityRow['attempt_count'] ?? 0), (int)($test['attempt'] ?? 1));
-        $currentBest = (float)($activityRow['best_score'] ?? 0);
-        $newBest = max($currentBest, (float)$scorePct);
-
-        $summaryStatus = 'pending';
-        $sumSt = $pdo->prepare("
-            SELECT review_status
-            FROM lesson_summaries
-            WHERE user_id = ?
-              AND cohort_id = ?
-              AND lesson_id = ?
-            LIMIT 1
-        ");
-        $sumSt->execute([$testOwnerUserId, $cohortId, $lessonId]);
-        $sumReview = $sumSt->fetchColumn();
-        if (is_string($sumReview) && $sumReview !== '') {
-            if (in_array($sumReview, ['missing','pending','acceptable','needs_revision','rejected'], true)) {
-                $summaryStatus = $sumReview;
-            }
-        }
-
-        $testPassStatus = 'failed';
-        $completionStatus = 'in_progress';
-
-        if ((int)$classification['pass_gate_met'] === 1) {
-            $testPassStatus = 'passed';
-            if ($summaryStatus === 'acceptable') {
-                $completionStatus = 'completed';
-            } else {
-                $completionStatus = 'awaiting_summary_review';
-            }
-        } else {
-            if ($classification['timing_status'] === 'after_final_deadline') {
-                $testPassStatus = 'deadline_missed';
-                $completionStatus = 'blocked_deadline';
-            } else {
-                $testPassStatus = 'failed';
-                $completionStatus = $remediationTriggered ? 'remediation_required' : 'in_progress';
-            }
-        }
-
-        $updActivity = $pdo->prepare("
-            UPDATE lesson_activity
-            SET
-                attempt_count = ?,
-                best_score = ?,
-                test_pass_status = ?,
-                completion_status = ?,
-                summary_status = ?,
-                effective_deadline_utc = ?,
-                final_warning_issued = ?,
-                reason_required = ?,
-                reason_submitted = ?,
-                reason_decision = ?,
-                last_state_eval_at = ?,
-                completed_at = CASE WHEN ? = 'completed' AND completed_at IS NULL THEN ? ELSE completed_at END,
-                updated_at = NOW()
-            WHERE id = ?
-        ");
-        $updActivity->execute([
-            $newAttemptCount,
-            $newBest,
-            $testPassStatus,
-            $completionStatus,
-            $summaryStatus,
-            ($effectiveDeadlineUtc !== '' ? $effectiveDeadlineUtc : null),
-            0,
-            0,
-            0,
-            null,
-            $nowUtc,
-            $completionStatus,
-            $completedAtForClassification,
-            $activityId
-        ]);
-
-        if ($completionStatus === 'completed') {
-            $nextSt = $pdo->prepare("
-                SELECT lesson_id
-                FROM cohort_lesson_deadlines
-                WHERE cohort_id = ?
-                  AND unlock_after_lesson_id = ?
-                ORDER BY sort_order ASC, id ASC
-                LIMIT 1
-            ");
-            $nextSt->execute([$cohortId, $lessonId]);
-            $nextLessonId = (int)($nextSt->fetchColumn() ?: 0);
-
-            if ($nextLessonId > 0) {
-                $nextActivitySel = $pdo->prepare("
-                    SELECT id
-                    FROM lesson_activity
-                    WHERE user_id = ?
-                      AND lesson_id = ?
-                    LIMIT 1
-                ");
-                $nextActivitySel->execute([$testOwnerUserId, $nextLessonId]);
-                $nextActivityId = (int)($nextActivitySel->fetchColumn() ?: 0);
-
-                if ($nextActivityId > 0) {
-                    $pdo->prepare("
-                        UPDATE lesson_activity
-                        SET
-                            completion_status = CASE
-                                WHEN completion_status = 'locked' THEN 'available'
-                                ELSE completion_status
-                            END,
-                            next_lesson_unlocked_at = CASE
-                                WHEN next_lesson_unlocked_at IS NULL THEN ?
-                                ELSE next_lesson_unlocked_at
-                            END,
-                            updated_at = NOW()
-                        WHERE id = ?
-                    ")->execute([$nowUtc, $nextActivityId]);
-                }
-            }
-        }
-    }
-
-    $engine->logProgressionEvent([
-        'user_id' => $testOwnerUserId,
-        'cohort_id' => $cohortId,
-        'lesson_id' => $lessonId,
-        'progress_test_id' => $testId,
-        'event_type' => 'finalization',
-        'event_code' => 'progress_test_finalized',
-        'event_status' => 'info',
-        'actor_type' => 'system',
-        'actor_user_id' => null,
-        'event_time' => $completedAtForClassification,
-        'payload' => [
-            'score_pct' => $scorePct,
-            'timing_status' => $classification['timing_status'],
-            'formal_result_code' => $classification['formal_result_code'],
-            'formal_result_label' => $classification['formal_result_label'],
-            'pass_gate_met' => (int)$classification['pass_gate_met'],
-            'counts_as_unsat' => (int)$classification['counts_as_unsat'],
-            'remediation_triggered' => $remediationTriggered,
-            'same_lesson_unsat_count' => $recentUnsats['same_lesson_unsat_count'],
-            'coursewide_unsat_count' => $recentUnsats['coursewide_unsat_count']
-        ],
-        'legal_note' => 'Progress test finalized under active V2 progression policy.'
-    ]);
-
-    if ($remediationTriggered) {
-        $engine->logProgressionEvent([
-            'user_id' => $testOwnerUserId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => $testId,
-            'event_type' => 'remediation',
-            'event_code' => 'remediation_meeting_recommended',
-            'event_status' => 'warning',
-            'actor_type' => 'system',
-            'actor_user_id' => null,
-            'event_time' => $completedAtForClassification,
-            'payload' => [
-                'same_lesson_unsat_count' => $recentUnsats['same_lesson_unsat_count'],
-                'coursewide_unsat_count' => $recentUnsats['coursewide_unsat_count']
-            ],
-            'legal_note' => 'Automatic remediation recommendation triggered by repeated unsatisfactory progress test results.'
-        ]);
-    }
-
-    $pdo->commit();
+    $upTest->execute([$scorePct, $written, $weak, $spoken, $testId]);
 
     json_out([
         'ok'                          => true,
@@ -1395,18 +1039,9 @@ TXT;
         'summary_corrections'         => $summaryCorrections,
         'confirmed_misunderstandings' => $confirmedMisunderstandings,
         'result_audio'                => $resultAudioUrl,
-        'timing_status'               => $classification['timing_status'],
-        'formal_result_code'          => $classification['formal_result_code'],
-        'formal_result_label'         => $classification['formal_result_label'],
-        'pass_gate_met'               => (int)$classification['pass_gate_met'],
-        'counts_as_unsat'             => (int)$classification['counts_as_unsat'],
-        'remediation_triggered'       => $remediationTriggered
     ]);
 
 } catch (Throwable $e) {
-    if ($pdo->inTransaction()) {
-        $pdo->rollBack();
-    }
     http_response_code(400);
     json_out(['ok' => false, 'error' => $e->getMessage()]);
 }
