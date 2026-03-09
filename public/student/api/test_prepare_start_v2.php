@@ -1,5 +1,8 @@
 <?php
+declare(strict_types=1);
+
 require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
 
 cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
@@ -71,32 +74,113 @@ try {
     }
 
     $userId = (int)($u['id'] ?? 0);
+    if ($userId <= 0) {
+        http_response_code(403);
+        json_ok(['ok' => false, 'error' => 'Invalid user']);
+    }
+
+    $engine = new CoursewareProgressionV2($pdo);
 
     if ($role === 'student') {
         $en = $pdo->prepare("
             SELECT 1
             FROM cohort_students
-            WHERE cohort_id=? AND user_id=?
+            WHERE cohort_id = ?
+              AND user_id = ?
+              AND status = 'active'
             LIMIT 1
         ");
         $en->execute([$cohortId, $userId]);
 
         if (!$en->fetchColumn()) {
             http_response_code(403);
-            json_ok(['ok' => false, 'error' => 'Not enrolled']);
+            json_ok(['ok' => false, 'error' => 'Not actively enrolled']);
+        }
+    }
+
+    $policy = $engine->getAllPolicies([
+        'cohort_id' => $cohortId
+    ]);
+
+    $summaryRequiredBeforeTestStart = !empty($policy['summary_required_before_test_start']);
+    $initialAttemptLimit = (int)($policy['initial_attempt_limit'] ?? 3);
+    $extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
+    $maxTotalAttemptsWithoutAdminOverride = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
+
+    $calculatedMaxAttempts = $initialAttemptLimit + $extraAttemptsAfterThresholdFail;
+    if ($calculatedMaxAttempts <= 0) {
+        $calculatedMaxAttempts = 1;
+    }
+
+    if ($maxTotalAttemptsWithoutAdminOverride > 0) {
+        $maxAllowedAttempts = min($calculatedMaxAttempts, $maxTotalAttemptsWithoutAdminOverride);
+    } else {
+        $maxAllowedAttempts = $calculatedMaxAttempts;
+    }
+
+    if ($summaryRequiredBeforeTestStart) {
+        $sum = $pdo->prepare("
+            SELECT
+                id,
+                review_status,
+                review_score,
+                summary_plain
+            FROM lesson_summaries
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND lesson_id = ?
+            LIMIT 1
+        ");
+        $sum->execute([$userId, $cohortId, $lessonId]);
+        $summaryRow = $sum->fetch(PDO::FETCH_ASSOC);
+
+        if (!$summaryRow) {
+            json_ok([
+                'ok' => false,
+                'error' => 'A lesson summary is required before the progress test can start.'
+            ]);
+        }
+
+        $reviewStatus = (string)($summaryRow['review_status'] ?? 'pending');
+        if ($reviewStatus !== 'acceptable') {
+            json_ok([
+                'ok' => false,
+                'error' => 'Your lesson summary must be acceptable before the progress test can start.'
+            ]);
         }
     }
 
     $mx = $pdo->prepare("
         SELECT MAX(attempt)
         FROM progress_tests_v2
-        WHERE user_id=? AND cohort_id=? AND lesson_id=?
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id = ?
     ");
     $mx->execute([$userId, $cohortId, $lessonId]);
     $attempt = (int)$mx->fetchColumn() + 1;
-    if ($attempt <= 0) $attempt = 1;
+    if ($attempt <= 0) {
+        $attempt = 1;
+    }
+
+    if ($attempt > $maxAllowedAttempts) {
+        json_ok([
+            'ok' => false,
+            'error' => 'Maximum allowed attempts reached for this lesson.'
+        ]);
+    }
+
+    $deadlineMeta = $engine->getEffectiveDeadline($userId, $cohortId, $lessonId);
+    $effectiveDeadlineUtc = (string)($deadlineMeta['effective_deadline_utc'] ?? '');
+    $deadlineSource = (string)($deadlineMeta['deadline_source'] ?? 'cohort_default');
+
+    if ($effectiveDeadlineUtc === '') {
+        throw new RuntimeException('Unable to resolve effective deadline');
+    }
 
     $seed = bin2hex(random_bytes(16));
+
+    $pdo->beginTransaction();
 
     $ins = $pdo->prepare("
         INSERT INTO progress_tests_v2
@@ -108,13 +192,16 @@ try {
             status,
             seed,
             started_at,
+            effective_deadline_utc,
+            deadline_source,
+            timing_status,
             progress_pct,
             status_text,
             updated_at
         )
         VALUES
         (
-            ?, ?, ?, ?, 'preparing', ?, NOW(), ?, ?, NOW()
+            ?, ?, ?, ?, 'preparing', ?, NOW(), ?, ?, 'unknown', ?, ?, NOW()
         )
     ");
 
@@ -124,6 +211,8 @@ try {
         $lessonId,
         $attempt,
         $seed,
+        $effectiveDeadlineUtc,
+        $deadlineSource,
         1,
         'Initializing progress test...'
     ]);
@@ -132,6 +221,27 @@ try {
     if ($testId <= 0) {
         throw new RuntimeException('Failed to create progress test');
     }
+
+    $engine->logProgressionEvent([
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'progress_test_id' => $testId,
+        'event_type' => 'attempt',
+        'event_code' => 'progress_test_created',
+        'event_status' => 'info',
+        'actor_type' => $role === 'admin' ? 'admin' : 'student',
+        'actor_user_id' => $userId,
+        'payload' => [
+            'attempt' => $attempt,
+            'effective_deadline_utc' => $effectiveDeadlineUtc,
+            'deadline_source' => $deadlineSource,
+            'max_allowed_attempts' => $maxAllowedAttempts
+        ],
+        'legal_note' => 'Progress test attempt created under active V2 progression policy.'
+    ]);
+
+    $pdo->commit();
 
     fire_and_forget_prepare_run($testId);
 
@@ -144,6 +254,10 @@ try {
     ]);
 
 } catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+
     http_response_code(400);
     json_ok([
         'ok' => false,
