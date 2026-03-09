@@ -10,23 +10,17 @@ require_once __DIR__ . '/../src/courseware_progression_v2.php';
 echo '<pre>';
 
 try {
+
     $engine = new CoursewareProgressionV2($pdo);
 
     echo "===== POLICY TEST =====\n";
     var_dump($engine->getPolicy('progress_test_pass_pct'));
 
-    echo "\n===== SUMMARY REQUIRED TEST =====\n";
-    var_dump($engine->getPolicy('summary_required_before_test_start'));
-
     echo "\n===== ALL POLICIES =====\n";
-    print_r($engine->getAllPolicies([
-        'cohort_id' => 2
-    ]));
+    print_r($engine->getAllPolicies());
 
-    echo "\n===== DEADLINE TEST =====\n";
-    print_r($engine->getEffectiveDeadline(3, 2, 2));
+    echo "\n===== EVENT TEST =====\n";
 
-    echo "\n===== EVENT INSERT TEST =====\n";
     $eventId = $engine->logProgressionEvent([
         'user_id' => 3,
         'cohort_id' => 2,
@@ -35,18 +29,18 @@ try {
         'event_code' => 'engine_bootstrap_test',
         'event_status' => 'info',
         'actor_type' => 'system',
-        'payload' => [
-            'test' => true,
-            'logic_version' => CoursewareProgressionV2::LOGIC_VERSION
-        ],
-        'legal_note' => 'Bootstrap event test for progression engine.'
+        'payload' => ['test' => true],
+        'legal_note' => 'Bootstrap event test'
     ]);
-    var_dump($eventId);
+
+    echo "Event inserted with ID: ".$eventId."\n";
 
 } catch (Throwable $e) {
+
     echo "ERROR:\n";
-    echo $e->getMessage() . "\n\n";
+    echo $e->getMessage()."\n\n";
     echo $e->getTraceAsString();
+
 }
 
 echo '</pre>';
