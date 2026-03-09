@@ -118,8 +118,6 @@ try {
         $maxAllowedAttempts = $calculatedMaxAttempts;
     }
 
-    $summaryStatus = 'missing';
-
     if ($summaryRequiredBeforeTestStart) {
         $sum = $pdo->prepare("
             SELECT
@@ -143,27 +141,12 @@ try {
             ]);
         }
 
-        $summaryStatus = (string)($summaryRow['review_status'] ?? 'pending');
-
-        if ($summaryStatus !== 'acceptable') {
+        $reviewStatus = (string)($summaryRow['review_status'] ?? 'pending');
+        if ($reviewStatus !== 'acceptable') {
             json_ok([
                 'ok' => false,
                 'error' => 'Your lesson summary must be acceptable before the progress test can start.'
             ]);
-        }
-    } else {
-        $sum = $pdo->prepare("
-            SELECT review_status
-            FROM lesson_summaries
-            WHERE user_id = ?
-              AND cohort_id = ?
-              AND lesson_id = ?
-            LIMIT 1
-        ");
-        $sum->execute([$userId, $cohortId, $lessonId]);
-        $sumReview = $sum->fetchColumn();
-        if (is_string($sumReview) && $sumReview !== '') {
-            $summaryStatus = $sumReview;
         }
     }
 
@@ -195,157 +178,9 @@ try {
         throw new RuntimeException('Unable to resolve effective deadline');
     }
 
-    $nowUtc = gmdate('Y-m-d H:i:s');
-    $deadlinePassed = (strtotime($nowUtc) > strtotime($effectiveDeadlineUtc));
-
     $seed = bin2hex(random_bytes(16));
 
     $pdo->beginTransaction();
-
-    $activitySel = $pdo->prepare("
-        SELECT id, attempt_count, best_score, completed_at
-        FROM lesson_activity
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id = ?
-        LIMIT 1
-    ");
-    $activitySel->execute([$userId, $cohortId, $lessonId]);
-    $activityRow = $activitySel->fetch(PDO::FETCH_ASSOC);
-
-    if ($deadlinePassed) {
-        if ($activityRow) {
-            $updBlocked = $pdo->prepare("
-                UPDATE lesson_activity
-                SET
-                    summary_status = ?,
-                    test_pass_status = 'deadline_missed',
-                    completion_status = 'blocked_deadline',
-                    effective_deadline_utc = ?,
-                    last_state_eval_at = ?,
-                    updated_at = NOW()
-                WHERE id = ?
-            ");
-            $updBlocked->execute([
-                $summaryStatus,
-                $effectiveDeadlineUtc,
-                $nowUtc,
-                (int)$activityRow['id']
-            ]);
-        } else {
-            $insBlocked = $pdo->prepare("
-                INSERT INTO lesson_activity
-                (
-                    user_id,
-                    cohort_id,
-                    lesson_id,
-                    started_at,
-                    completed_at,
-                    total_seconds,
-                    attempt_count,
-                    best_score,
-                    summary_status,
-                    test_pass_status,
-                    completion_status,
-                    effective_deadline_utc,
-                    extension_count,
-                    final_warning_issued,
-                    reason_required,
-                    reason_submitted,
-                    reason_decision,
-                    next_lesson_unlocked_at,
-                    last_state_eval_at,
-                    status,
-                    created_at,
-                    updated_at
-                )
-                VALUES
-                (
-                    ?, ?, ?, NULL, NULL, 0, 0, NULL, ?, 'deadline_missed', 'blocked_deadline',
-                    ?, 0, 0, 0, 0, NULL, NULL, ?, 'in_progress', NOW(), NOW()
-                )
-            ");
-            $insBlocked->execute([
-                $userId,
-                $cohortId,
-                $lessonId,
-                $summaryStatus,
-                $effectiveDeadlineUtc,
-                $nowUtc
-            ]);
-        }
-
-        $pdo->commit();
-
-        json_ok([
-            'ok' => false,
-            'error' => 'The effective deadline for this lesson has passed. This progress test is currently blocked.'
-        ]);
-    }
-
-    if ($activityRow) {
-        $updActivity = $pdo->prepare("
-            UPDATE lesson_activity
-            SET
-                started_at = COALESCE(started_at, ?),
-                summary_status = ?,
-                test_pass_status = 'in_progress',
-                completion_status = 'in_progress',
-                effective_deadline_utc = ?,
-                last_state_eval_at = ?,
-                updated_at = NOW()
-            WHERE id = ?
-        ");
-        $updActivity->execute([
-            $nowUtc,
-            $summaryStatus,
-            $effectiveDeadlineUtc,
-            $nowUtc,
-            (int)$activityRow['id']
-        ]);
-    } else {
-        $insActivity = $pdo->prepare("
-            INSERT INTO lesson_activity
-            (
-                user_id,
-                cohort_id,
-                lesson_id,
-                started_at,
-                completed_at,
-                total_seconds,
-                attempt_count,
-                best_score,
-                summary_status,
-                test_pass_status,
-                completion_status,
-                effective_deadline_utc,
-                extension_count,
-                final_warning_issued,
-                reason_required,
-                reason_submitted,
-                reason_decision,
-                next_lesson_unlocked_at,
-                last_state_eval_at,
-                status,
-                created_at,
-                updated_at
-            )
-            VALUES
-            (
-                ?, ?, ?, ?, NULL, 0, 0, NULL, ?, 'in_progress', 'in_progress',
-                ?, 0, 0, 0, 0, NULL, NULL, ?, 'in_progress', NOW(), NOW()
-            )
-        ");
-        $insActivity->execute([
-            $userId,
-            $cohortId,
-            $lessonId,
-            $nowUtc,
-            $summaryStatus,
-            $effectiveDeadlineUtc,
-            $nowUtc
-        ]);
-    }
 
     $ins = $pdo->prepare("
         INSERT INTO progress_tests_v2
