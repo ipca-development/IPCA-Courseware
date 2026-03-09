@@ -1,43 +1,52 @@
 <?php
+declare(strict_types=1);
 
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', '1');
 
+require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/courseware_progression_v2.php';
-require_once __DIR__ . '/../config/database.php';
 
-echo "<pre>";
+echo '<pre>';
 
-$engine = new CoursewareProgressionEngine($pdo);
+try {
+    $engine = new CoursewareProgressionV2($pdo);
 
-echo "===== POLICY TEST =====\n";
+    echo "===== POLICY TEST =====\n";
+    var_dump($engine->getPolicy('progress_test_pass_pct'));
 
-$passPct = $engine->getPolicyValue('progress_test_pass_pct');
+    echo "\n===== SUMMARY REQUIRED TEST =====\n";
+    var_dump($engine->getPolicy('summary_required_before_test_start'));
 
-echo "Pass percentage policy:\n";
-var_dump($passPct);
+    echo "\n===== ALL POLICIES =====\n";
+    print_r($engine->getAllPolicies([
+        'cohort_id' => 2
+    ]));
 
-echo "\n===== ALL POLICIES =====\n";
-print_r($engine->getAllPolicies());
+    echo "\n===== DEADLINE TEST =====\n";
+    print_r($engine->getEffectiveDeadline(3, 2, 2));
 
-echo "\n===== DEADLINE TEST =====\n";
+    echo "\n===== EVENT INSERT TEST =====\n";
+    $eventId = $engine->logProgressionEvent([
+        'user_id' => 3,
+        'cohort_id' => 2,
+        'lesson_id' => 2,
+        'event_type' => 'system_test',
+        'event_code' => 'engine_bootstrap_test',
+        'event_status' => 'info',
+        'actor_type' => 'system',
+        'payload' => [
+            'test' => true,
+            'logic_version' => CoursewareProgressionV2::LOGIC_VERSION
+        ],
+        'legal_note' => 'Bootstrap event test for progression engine.'
+    ]);
+    var_dump($eventId);
 
-$deadline = $engine->getEffectiveDeadline(3,2,2);
+} catch (Throwable $e) {
+    echo "ERROR:\n";
+    echo $e->getMessage() . "\n\n";
+    echo $e->getTraceAsString();
+}
 
-print_r($deadline);
-
-echo "\n===== EVENT INSERT TEST =====\n";
-
-$eventId = $engine->logEvent([
-    'event_code' => 'engine_bootstrap_test',
-    'user_id' => 3,
-    'cohort_id' => 2,
-    'lesson_id' => 2,
-    'progress_test_id' => null,
-    'payload_json' => json_encode(['test'=>'engine']),
-    'legal_note' => 'Engine bootstrap test'
-]);
-
-echo "Event inserted with ID: ".$eventId."\n";
-
-echo "</pre>";
+echo '</pre>';
