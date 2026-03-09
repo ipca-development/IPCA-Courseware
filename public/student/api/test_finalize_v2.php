@@ -150,15 +150,6 @@ function transcribe_file(string $apiKey, string $filepath): string {
     return trim((string)($j['text'] ?? ''));
 }
 
-/**
- * Build keyword aliases for concept-based grading.
- * Accepts strings or maps like:
- * [
- *   "yaw",
- *   ["move nose left right", "directional control"],
- *   "stability"
- * ]
- */
 function build_alias_groups(array $correct, array $fallbackKeyPoints = []): array {
     $groups = [];
 
@@ -305,7 +296,6 @@ function grade_yesno(string $transcript, array $correct): array {
         $sv = false;
     }
 
-    // Fallback for implicit spoken answers when student does not literally say yes/no
     if ($sv === null) {
         if (
             preg_match('/\b(is not|are not|does not|do not|cannot|can not|never|no longer|without)\b/', $t)
@@ -1204,136 +1194,169 @@ TXT;
         $testId
     ]);
 
-    $activitySel = $pdo->prepare("
-        SELECT id, attempt_count, best_score
-        FROM lesson_activity
+    $summaryStatus = 'missing';
+    $sumSt = $pdo->prepare("
+        SELECT review_status
+        FROM lesson_summaries
         WHERE user_id = ?
+          AND cohort_id = ?
           AND lesson_id = ?
         LIMIT 1
     ");
-    $activitySel->execute([$testOwnerUserId, $lessonId]);
-    $activityRow = $activitySel->fetch(PDO::FETCH_ASSOC);
+    $sumSt->execute([$testOwnerUserId, $cohortId, $lessonId]);
+    $sumReview = $sumSt->fetchColumn();
+    if (is_string($sumReview) && $sumReview !== '') {
+        if (in_array($sumReview, ['missing','pending','acceptable','needs_revision','rejected'], true)) {
+            $summaryStatus = $sumReview;
+        }
+    }
+
+    $testPassStatus = 'failed';
+    $completionStatus = 'in_progress';
+
+    if ((int)$classification['pass_gate_met'] === 1) {
+        $testPassStatus = 'passed';
+        if ($summaryStatus === 'acceptable') {
+            $completionStatus = 'completed';
+        } else {
+            $completionStatus = 'awaiting_summary_review';
+        }
+    } else {
+        if ($classification['timing_status'] === 'after_final_deadline') {
+            $testPassStatus = 'deadline_missed';
+            $completionStatus = 'blocked_deadline';
+        } else {
+            $testPassStatus = 'failed';
+            $completionStatus = $remediationTriggered ? 'remediation_required' : 'in_progress';
+        }
+    }
 
     $effectiveDeadlineUtc = trim((string)($test['effective_deadline_utc'] ?? ''));
+    $attemptCount = (int)($test['attempt'] ?? 1);
+    $bestScore = (float)$scorePct;
 
-    if ($activityRow) {
-        $activityId = (int)$activityRow['id'];
-        $newAttemptCount = max((int)($activityRow['attempt_count'] ?? 0), (int)($test['attempt'] ?? 1));
-        $currentBest = (float)($activityRow['best_score'] ?? 0);
-        $newBest = max($currentBest, (float)$scorePct);
+    $insActivity = $pdo->prepare("
+        INSERT INTO lesson_activity
+        (
+            user_id,
+            lesson_id,
+            attempt_count,
+            best_score,
+            summary_status,
+            test_pass_status,
+            completion_status,
+            effective_deadline_utc,
+            extension_count,
+            final_warning_issued,
+            reason_required,
+            reason_submitted,
+            reason_decision,
+            next_lesson_unlocked_at,
+            last_state_eval_at,
+            completed_at,
+            created_at,
+            updated_at
+        )
+        VALUES
+        (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            attempt_count = GREATEST(COALESCE(attempt_count, 0), VALUES(attempt_count)),
+            best_score = GREATEST(COALESCE(best_score, 0), VALUES(best_score)),
+            summary_status = VALUES(summary_status),
+            test_pass_status = VALUES(test_pass_status),
+            completion_status = VALUES(completion_status),
+            effective_deadline_utc = VALUES(effective_deadline_utc),
+            final_warning_issued = VALUES(final_warning_issued),
+            reason_required = VALUES(reason_required),
+            reason_submitted = VALUES(reason_submitted),
+            reason_decision = VALUES(reason_decision),
+            last_state_eval_at = VALUES(last_state_eval_at),
+            completed_at = CASE
+                WHEN VALUES(completion_status) = 'completed' AND completed_at IS NULL THEN VALUES(completed_at)
+                ELSE completed_at
+            END,
+            updated_at = NOW()
+    ");
+    $insActivity->execute([
+        $testOwnerUserId,
+        $lessonId,
+        $attemptCount,
+        $bestScore,
+        $summaryStatus,
+        $testPassStatus,
+        $completionStatus,
+        ($effectiveDeadlineUtc !== '' ? $effectiveDeadlineUtc : null),
+        0,
+        0,
+        0,
+        0,
+        null,
+        null,
+        $nowUtc,
+        ($completionStatus === 'completed' ? $completedAtForClassification : null)
+    ]);
 
-        $summaryStatus = 'pending';
-        $sumSt = $pdo->prepare("
-            SELECT review_status
-            FROM lesson_summaries
-            WHERE user_id = ?
-              AND cohort_id = ?
-              AND lesson_id = ?
+    if ($completionStatus === 'completed') {
+        $nextSt = $pdo->prepare("
+            SELECT lesson_id
+            FROM cohort_lesson_deadlines
+            WHERE cohort_id = ?
+              AND unlock_after_lesson_id = ?
+            ORDER BY sort_order ASC, id ASC
             LIMIT 1
         ");
-        $sumSt->execute([$testOwnerUserId, $cohortId, $lessonId]);
-        $sumReview = $sumSt->fetchColumn();
-        if (is_string($sumReview) && $sumReview !== '') {
-            if (in_array($sumReview, ['missing','pending','acceptable','needs_revision','rejected'], true)) {
-                $summaryStatus = $sumReview;
-            }
-        }
+        $nextSt->execute([$cohortId, $lessonId]);
+        $nextLessonId = (int)($nextSt->fetchColumn() ?: 0);
 
-        $testPassStatus = 'failed';
-        $completionStatus = 'in_progress';
-
-        if ((int)$classification['pass_gate_met'] === 1) {
-            $testPassStatus = 'passed';
-            if ($summaryStatus === 'acceptable') {
-                $completionStatus = 'completed';
-            } else {
-                $completionStatus = 'awaiting_summary_review';
-            }
-        } else {
-            if ($classification['timing_status'] === 'after_final_deadline') {
-                $testPassStatus = 'deadline_missed';
-                $completionStatus = 'blocked_deadline';
-            } else {
-                $testPassStatus = 'failed';
-                $completionStatus = $remediationTriggered ? 'remediation_required' : 'in_progress';
-            }
-        }
-
-        $updActivity = $pdo->prepare("
-            UPDATE lesson_activity
-            SET
-                attempt_count = ?,
-                best_score = ?,
-                test_pass_status = ?,
-                completion_status = ?,
-                summary_status = ?,
-                effective_deadline_utc = ?,
-                final_warning_issued = ?,
-                reason_required = ?,
-                reason_submitted = ?,
-                reason_decision = ?,
-                last_state_eval_at = ?,
-                completed_at = CASE WHEN ? = 'completed' AND completed_at IS NULL THEN ? ELSE completed_at END,
-                updated_at = NOW()
-            WHERE id = ?
-        ");
-        $updActivity->execute([
-            $newAttemptCount,
-            $newBest,
-            $testPassStatus,
-            $completionStatus,
-            $summaryStatus,
-            ($effectiveDeadlineUtc !== '' ? $effectiveDeadlineUtc : null),
-            0,
-            0,
-            0,
-            null,
-            $nowUtc,
-            $completionStatus,
-            $completedAtForClassification,
-            $activityId
-        ]);
-
-        if ($completionStatus === 'completed') {
-            $nextSt = $pdo->prepare("
-                SELECT lesson_id
-                FROM cohort_lesson_deadlines
-                WHERE cohort_id = ?
-                  AND unlock_after_lesson_id = ?
-                ORDER BY sort_order ASC, id ASC
-                LIMIT 1
+        if ($nextLessonId > 0) {
+            $nextInsert = $pdo->prepare("
+                INSERT INTO lesson_activity
+                (
+                    user_id,
+                    lesson_id,
+                    attempt_count,
+                    best_score,
+                    summary_status,
+                    test_pass_status,
+                    completion_status,
+                    effective_deadline_utc,
+                    extension_count,
+                    final_warning_issued,
+                    reason_required,
+                    reason_submitted,
+                    reason_decision,
+                    next_lesson_unlocked_at,
+                    last_state_eval_at,
+                    completed_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (
+                    ?, ?, 0, 0, 'missing', 'not_started',
+                    'available', NULL, 0, 0, 0, 0, NULL, ?, ?, NULL, NOW(), NOW()
+                )
+                ON DUPLICATE KEY UPDATE
+                    completion_status = CASE
+                        WHEN completion_status = 'locked' THEN 'available'
+                        WHEN completion_status = 'available' THEN 'available'
+                        ELSE completion_status
+                    END,
+                    next_lesson_unlocked_at = CASE
+                        WHEN next_lesson_unlocked_at IS NULL THEN VALUES(next_lesson_unlocked_at)
+                        ELSE next_lesson_unlocked_at
+                    END,
+                    last_state_eval_at = VALUES(last_state_eval_at),
+                    updated_at = NOW()
             ");
-            $nextSt->execute([$cohortId, $lessonId]);
-            $nextLessonId = (int)($nextSt->fetchColumn() ?: 0);
-
-            if ($nextLessonId > 0) {
-                $nextActivitySel = $pdo->prepare("
-                    SELECT id
-                    FROM lesson_activity
-                    WHERE user_id = ?
-                      AND lesson_id = ?
-                    LIMIT 1
-                ");
-                $nextActivitySel->execute([$testOwnerUserId, $nextLessonId]);
-                $nextActivityId = (int)($nextActivitySel->fetchColumn() ?: 0);
-
-                if ($nextActivityId > 0) {
-                    $pdo->prepare("
-                        UPDATE lesson_activity
-                        SET
-                            completion_status = CASE
-                                WHEN completion_status = 'locked' THEN 'available'
-                                ELSE completion_status
-                            END,
-                            next_lesson_unlocked_at = CASE
-                                WHEN next_lesson_unlocked_at IS NULL THEN ?
-                                ELSE next_lesson_unlocked_at
-                            END,
-                            updated_at = NOW()
-                        WHERE id = ?
-                    ")->execute([$nowUtc, $nextActivityId]);
-                }
-            }
+            $nextInsert->execute([
+                $testOwnerUserId,
+                $nextLessonId,
+                $nowUtc,
+                $nowUtc
+            ]);
         }
     }
 
@@ -1400,7 +1423,10 @@ TXT;
         'formal_result_label'         => $classification['formal_result_label'],
         'pass_gate_met'               => (int)$classification['pass_gate_met'],
         'counts_as_unsat'             => (int)$classification['counts_as_unsat'],
-        'remediation_triggered'       => $remediationTriggered
+        'remediation_triggered'       => $remediationTriggered,
+        'activity_summary_status'     => $summaryStatus,
+        'activity_test_pass_status'   => $testPassStatus,
+        'activity_completion_status'  => $completionStatus
     ]);
 
 } catch (Throwable $e) {
