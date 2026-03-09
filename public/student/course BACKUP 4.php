@@ -164,53 +164,6 @@ function deadline_meta($deadlineUtc) {
     }
 }
 
-function deadline_progress_meta($cohortStartDate, $deadlineUtc) {
-    $meta = deadline_meta($deadlineUtc);
-    $meta['pct'] = 0;
-
-    if (trim($deadlineUtc) === '' || trim($cohortStartDate) === '') {
-        return $meta;
-    }
-
-    try {
-        $start = new DateTime(substr((string)$cohortStartDate, 0, 10) . ' 00:00:00', new DateTimeZone('UTC'));
-        $deadline = new DateTime(substr((string)$deadlineUtc, 0, 10) . ' 00:00:00', new DateTimeZone('UTC'));
-        $todayUtc = new DateTime('now', new DateTimeZone('UTC'));
-        $today = new DateTime($todayUtc->format('Y-m-d') . ' 00:00:00', new DateTimeZone('UTC'));
-
-        $startTs = $start->getTimestamp();
-        $deadlineTs = $deadline->getTimestamp();
-        $todayTs = $today->getTimestamp();
-
-        if ($deadlineTs <= $startTs) {
-            $meta['pct'] = ($todayTs <= $deadlineTs) ? 100 : 0;
-            return $meta;
-        }
-
-        if ($todayTs <= $startTs) {
-            $meta['pct'] = 100;
-            return $meta;
-        }
-
-        if ($todayTs >= $deadlineTs) {
-            $meta['pct'] = 0;
-            return $meta;
-        }
-
-        $total = $deadlineTs - $startTs;
-        $remaining = $deadlineTs - $todayTs;
-        $pct = (int)round(($remaining / $total) * 100);
-
-        if ($pct < 0) $pct = 0;
-        if ($pct > 100) $pct = 100;
-
-        $meta['pct'] = $pct;
-        return $meta;
-    } catch (Throwable $e) {
-        return $meta;
-    }
-}
-
 function score_class($score) {
     $score = (int)$score;
     if ($score >= 75) return 'score-pass';
@@ -304,7 +257,7 @@ foreach ($lessonRows as $l) {
     if ($role === 'student' && $attemptsLeft <= 0) $canTest = false;
 
     $ptUrlV2 = '/student/progress_test_v2.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
-    $deadline = deadline_progress_meta((string)$cohort['start_date'], (string)$l['deadline_utc']);
+    $deadline = deadline_meta((string)$l['deadline_utc']);
 
     if ($bestScore !== null) {
         $allBestScores[] = (int)$bestScore;
@@ -367,7 +320,7 @@ foreach ($courseBlocks as $k => $block) {
     $courseBlocks[$k]['passed_count'] = $countPassed;
     $courseBlocks[$k]['progress_pct'] = percent($countPassed, $countLessons);
     $courseBlocks[$k]['avg_score'] = $courseScores ? (int)round(array_sum($courseScores) / count($courseScores)) : null;
-    $courseBlocks[$k]['deadline'] = deadline_progress_meta((string)$cohort['start_date'], (string)$block['last_deadline_utc']);
+    $courseBlocks[$k]['deadline'] = deadline_meta((string)$block['last_deadline_utc']);
 }
 
 $programProgressPct = percent($totalCompletedLessons, $totalLessons);
@@ -518,30 +471,6 @@ cw_header('Course');
     background:#1e3c72;
   }
 
-  .deadline-progress-shell{
-    width:100%;
-    height:14px;
-    border-radius:999px;
-    overflow:hidden;
-    background:#e5e7eb;
-  }
-  .deadline-progress-fill{
-    height:14px;
-    border-radius:999px;
-  }
-  .deadline-progress-fill.deadline-green{
-    background:#16a34a;
-  }
-  .deadline-progress-fill.deadline-orange{
-    background:#f59e0b;
-  }
-  .deadline-progress-fill.deadline-red{
-    background:#dc2626;
-  }
-  .deadline-progress-fill.deadline-neutral{
-    background:#9ca3af;
-  }
-
   .course-card{
     border:1px solid #e5e7eb;
     border-radius:20px;
@@ -584,7 +513,6 @@ cw_header('Course');
     color:#1e3c72;
     font-weight:900;
     text-align:center;
-    transition:transform .2s ease;
   }
   details[open] .course-toggle{
     transform:rotate(90deg);
@@ -646,15 +574,39 @@ cw_header('Course');
     color:#1f2937;
     margin-bottom:6px;
   }
-  .deadline-label{
+  .deadline-pill{
+    width:100%;
+    min-width:190px;
+    border-radius:999px;
+    padding:6px 12px;
     font-size:12px;
-    font-weight:800;
-    margin-top:6px;
+    font-weight:700;
+    line-height:1.2;
+    display:inline-block;
+    text-align:center;
+    box-sizing:border-box;
+    border:1px solid transparent;
   }
-  .deadline-label.deadline-green{ color:#166534; }
-  .deadline-label.deadline-orange{ color:#c2410c; }
-  .deadline-label.deadline-red{ color:#b91c1c; }
-  .deadline-label.deadline-neutral{ color:#4b5563; }
+  .deadline-green{
+    background:#dcfce7;
+    border-color:#86efac;
+    color:#166534;
+  }
+  .deadline-orange{
+    background:#ffedd5;
+    border-color:#fdba74;
+    color:#c2410c;
+  }
+  .deadline-red{
+    background:#fee2e2;
+    border-color:#fca5a5;
+    color:#b91c1c;
+  }
+  .deadline-neutral{
+    background:#f3f4f6;
+    border-color:#d1d5db;
+    color:#4b5563;
+  }
 
   .icon-ok{
     color:#15803d;
@@ -825,10 +777,9 @@ cw_header('Course');
               <div class="metric-col">
                 <div class="metric-label">Final Course Deadline</div>
                 <div class="deadline-date"><?= h($course['deadline']['date']) ?></div>
-                <div class="deadline-progress-shell">
-                  <div class="deadline-progress-fill <?= h($course['deadline']['class']) ?>" style="width:<?= (int)$course['deadline']['pct'] ?>%;"></div>
+                <div class="deadline-pill <?= h($course['deadline']['class']) ?>">
+                  <?= h($course['deadline']['label']) ?>
                 </div>
-                <div class="deadline-label <?= h($course['deadline']['class']) ?>"><?= h($course['deadline']['label']) ?></div>
               </div>
             </div>
           </summary>
@@ -857,10 +808,7 @@ cw_header('Course');
                   <td>
                     <div class="deadline-wrap">
                       <div class="deadline-date"><?= h($lx['deadline']['date']) ?></div>
-                      <div class="deadline-progress-shell">
-                        <div class="deadline-progress-fill <?= h($lx['deadline']['class']) ?>" style="width:<?= (int)$lx['deadline']['pct'] ?>%;"></div>
-                      </div>
-                      <div class="deadline-label <?= h($lx['deadline']['class']) ?>">
+                      <div class="deadline-pill <?= h($lx['deadline']['class']) ?>">
                         <?= h($lx['deadline']['label']) ?>
                       </div>
                     </div>
