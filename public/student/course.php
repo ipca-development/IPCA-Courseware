@@ -183,23 +183,23 @@ function deadline_progress_meta($cohortStartDate, $deadlineUtc) {
         $todayTs = $today->getTimestamp();
 
         if ($deadlineTs <= $startTs) {
-            $meta['pct'] = ($todayTs <= $deadlineTs) ? 100 : 0;
+            $meta['pct'] = ($todayTs >= $deadlineTs) ? 100 : 0;
             return $meta;
         }
 
         if ($todayTs <= $startTs) {
-            $meta['pct'] = 100;
-            return $meta;
-        }
-
-        if ($todayTs >= $deadlineTs) {
             $meta['pct'] = 0;
             return $meta;
         }
 
+        if ($todayTs >= $deadlineTs) {
+            $meta['pct'] = 100;
+            return $meta;
+        }
+
         $total = $deadlineTs - $startTs;
-        $remaining = $deadlineTs - $todayTs;
-        $pct = (int)round(($remaining / $total) * 100);
+        $elapsed = $todayTs - $startTs;
+        $pct = (int)round(($elapsed / $total) * 100);
 
         if ($pct < 0) $pct = 0;
         if ($pct > 100) $pct = 100;
