@@ -1239,6 +1239,7 @@ TXT;
         INSERT INTO lesson_activity
         (
             user_id,
+            cohort_id,
             lesson_id,
             attempt_count,
             best_score,
@@ -1259,7 +1260,7 @@ TXT;
         )
         VALUES
         (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()
         )
         ON DUPLICATE KEY UPDATE
             attempt_count = GREATEST(COALESCE(attempt_count, 0), VALUES(attempt_count)),
@@ -1281,6 +1282,7 @@ TXT;
     ");
     $insActivity->execute([
         $testOwnerUserId,
+        $cohortId,
         $lessonId,
         $attemptCount,
         $bestScore,
@@ -1315,6 +1317,7 @@ TXT;
                 INSERT INTO lesson_activity
                 (
                     user_id,
+                    cohort_id,
                     lesson_id,
                     attempt_count,
                     best_score,
@@ -1335,7 +1338,7 @@ TXT;
                 )
                 VALUES
                 (
-                    ?, ?, 0, 0, 'missing', 'not_started',
+                    ?, ?, ?, 0, 0, 'missing', 'not_started',
                     'available', NULL, 0, 0, 0, 0, NULL, ?, ?, NULL, NOW(), NOW()
                 )
                 ON DUPLICATE KEY UPDATE
@@ -1353,6 +1356,7 @@ TXT;
             ");
             $nextInsert->execute([
                 $testOwnerUserId,
+                $cohortId,
                 $nextLessonId,
                 $nowUtc,
                 $nowUtc
