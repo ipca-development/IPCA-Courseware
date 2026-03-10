@@ -56,16 +56,26 @@ function lesson_passed(PDO $pdo, $userId, $lessonId) {
     return (bool)$pt->fetchColumn();
 }
 
-function get_summary_len(PDO $pdo, $userId, $cohortId, $lessonId) {
+function get_summary_state(PDO $pdo, $userId, $cohortId, $lessonId) {
     $st = $pdo->prepare("
-        SELECT summary_plain
+        SELECT summary_plain, review_status
         FROM lesson_summaries
         WHERE user_id=? AND cohort_id=? AND lesson_id=?
         LIMIT 1
     ");
     $st->execute([$userId, $cohortId, $lessonId]);
-    $plain = (string)($st->fetchColumn() ?: '');
-    return function_exists('mb_strlen') ? mb_strlen(trim($plain)) : strlen(trim($plain));
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+
+    $plain = (string)($row['summary_plain'] ?? '');
+    $reviewStatus = (string)($row['review_status'] ?? '');
+
+    $len = function_exists('mb_strlen') ? mb_strlen(trim($plain)) : strlen(trim($plain));
+
+    return [
+        'len' => $len,
+        'review_status' => $reviewStatus,
+        'ok' => ($reviewStatus === 'acceptable')
+    ];
 }
 
 function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
@@ -284,8 +294,12 @@ foreach ($lessonRows as $l) {
     $first->execute([$lessonId]);
     $firstSlideId = (int)$first->fetchColumn();
 
-    $sumLen = ($role === 'admin') ? 9999 : get_summary_len($pdo, $userId, $cohortId, $lessonId);
-    $summaryOk = ($sumLen >= 400);
+    $summaryState = ($role === 'admin')
+    ? ['len' => 9999, 'review_status' => 'acceptable', 'ok' => true]
+    : get_summary_state($pdo, $userId, $cohortId, $lessonId);
+
+$sumLen = (int)$summaryState['len'];
+$summaryOk = !empty($summaryState['ok']);
 
     $test = ($role === 'admin')
         ? ['max_attempt' => 0, 'last' => null, 'best_score' => null, 'passed' => false]
