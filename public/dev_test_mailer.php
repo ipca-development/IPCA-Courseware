@@ -7,8 +7,8 @@ header('Content-Type: application/json; charset=utf-8');
 $result = cw_send_mail([
     'to' => [
         [
-            'email' => 'YOUR_REAL_EMAIL@example.com',
-            'name'  => 'Test Recipient'
+            'email' => 'info@ipca.aero',
+            'name'  => 'Test Kay Vereeken IPCA Platform'
         ]
     ],
     'subject' => 'IPCA Courseware Mail Test',

@@ -1492,19 +1492,14 @@ TXT;
         ]);
     }
 
-$sendEmailAfterMultipleUnsat = !empty($policy['send_email_after_multiple_unsat']);
-$isThirdFailThresholdEmailNow =
-    $sendEmailAfterThirdFail &&
-    (int)$classification['counts_as_unsat'] === 1 &&
-    $attemptCount >= max(1, $thresholdAttemptForRemediationEmail);
+    $sendEmailAfterMultipleUnsat = !empty($policy['send_email_after_multiple_unsat']);
 
-if (
-    $studentRecipient !== null &&
-    $sendEmailAfterMultipleUnsat &&
-    $remediationTriggered === 1 &&
-    !$isThirdFailThresholdEmailNow &&
-    !$engine->progressionEmailExistsForProgressTest($testId, 'multiple_unsat_remedial_meeting')
-) {
+    if (
+        $studentRecipient !== null &&
+        $sendEmailAfterMultipleUnsat &&
+        $remediationTriggered === 1 &&
+        !$engine->progressionEmailExistsForProgressTest($testId, 'multiple_unsat_remedial_meeting')
+    ) {
         $subject = 'Remedial Review Meeting Recommended - ' . $lessonTitle;
         $html = ''
             . '<p>Dear ' . html_e($studentName) . ',</p>'
