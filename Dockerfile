@@ -15,6 +15,7 @@ RUN a2enmod rewrite
 
 COPY public/ /var/www/html/
 COPY src/ /var/www/src/
-RUN chown -R www-data:www-data /var/www/html /var/www/src
+COPY vendor/ /var/www/vendor/
+RUN chown -R www-data:www-data /var/www/html /var/www/src /var/www/vendor
 
 EXPOSE 80
