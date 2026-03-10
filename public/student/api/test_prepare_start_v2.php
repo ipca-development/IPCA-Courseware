@@ -189,19 +189,19 @@ try {
      * NEW:
      * Block further attempts until deadline reason submission is completed.
      */
-    $pendingDeadlineReason = $engine->getPendingRequiredAction(
-        $userId,
-        $cohortId,
-        $lessonId,
-        'deadline_reason_submission'
-    );
+$pendingInstructorApproval = $engine->getPendingRequiredAction(
+    $userId,
+    $cohortId,
+    $lessonId,
+    'instructor_approval'
+);
 
-    if ($pendingDeadlineReason) {
-        json_ok([
-            'ok' => false,
-            'error' => 'You must submit your required deadline reason before another progress test can start.'
-        ]);
-    }
+if ($pendingInstructorApproval) {
+    json_ok([
+        'ok' => false,
+        'error' => 'Further attempts are blocked pending instructor approval.'
+    ]);
+}
 
     $mx = $pdo->prepare("
         SELECT MAX(attempt)
