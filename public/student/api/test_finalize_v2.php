@@ -1730,12 +1730,12 @@ TXT;
         $attemptCount === max(1, $thresholdAttemptForRemediationEmail);
 
     if (
-        $studentRecipient !== null &&
-        $sendEmailAfterMultipleUnsat &&
-        $remediationTriggered === 1 &&
-        !$isThirdFailThresholdEmailNow &&
-        !$engine->progressionEmailExistsForProgressTest($testId, 'multiple_unsat_remedial_meeting')
-    ) {
+    $studentRecipient !== null &&
+    $sendEmailAfterMultipleUnsat &&
+    $remediationTriggered === 1 &&
+    !$isThirdFailThresholdEmailNow &&
+    !$engine->hasAnyProgressionEmailForLesson($testOwnerUserId, $cohortId, $lessonId, 'multiple_unsat_remedial_meeting')
+) {
         $subject = 'Remedial Review Meeting Recommended - ' . $lessonTitle;
         $html = ''
             . '<p>Dear ' . html_e($studentName) . ',</p>'
