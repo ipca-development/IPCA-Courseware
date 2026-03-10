@@ -96,7 +96,7 @@ function read_json(string $s): array {
     return is_array($j) ? $j : [];
 }
 
-function clamp_questions(array $questions, int $target = 10): array {
+function clamp_questions(array $questions, int $target = 3): array {
     $out = [];
     foreach ($questions as $q) {
         if (!is_array($q)) continue;
@@ -251,7 +251,7 @@ function generate_oral_questions(PDO $pdo, string $truth, string $summary): arra
     $systemFallback = <<<'TXT'
 You are generating an oral aviation progress test.
 
-Create exactly 10 oral-friendly questions.
+Create exactly 3 oral-friendly questions.
 Use ONLY the lesson narration text as truth.
 Use summary only to detect misconceptions.
 
@@ -300,9 +300,9 @@ FORMAT RULES:
   correct.min_points_to_pass = integer
 
 TARGET MIX:
-- around 4 yesno
-- around 2 mcq
-- around 4 open
+- around 1 yesno
+- around 1 mcq
+- around 1 open
 TXT;
 
     $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_generate_questions_system', $systemFallback);
@@ -338,14 +338,14 @@ TXT;
     $r = cw_openai_responses($payload);
     $j = cw_openai_extract_json_text($r);
     $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
-    return normalize_generated_questions(clamp_questions($q, 10));
+    return normalize_generated_questions(clamp_questions($q, 3));
 }
 
 function validate_and_rewrite_questions(PDO $pdo, string $truth, array $questions): array {
     $systemFallback = <<<'TXT'
 You are reviewing oral aviation test questions for quality.
 
-You will receive 10 candidate questions.
+You will receive 3 candidate questions.
 Your job is to return a corrected final set of 10 questions.
 
 REVIEW RULES:
@@ -368,7 +368,7 @@ IMPORTANT:
 - Prefer precise spoken questions.
 - For nuanced concepts, prefer open or mcq over weak yes/no.
 
-Return exactly 10 final cleaned questions.
+Return exactly 3 final cleaned questions.
 TXT;
 
     $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_validate_questions_system', $systemFallback);
@@ -658,7 +658,7 @@ try {
         ]);
 
         $idx++;
-        if ($idx > 10) break;
+        if ($idx > 3) break;
     }
 
     set_prepare_progress($pdo, $testId, 58, 'Preparing audio files...');

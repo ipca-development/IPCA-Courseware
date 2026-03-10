@@ -9,7 +9,6 @@ declare(strict_types=1);
  * - effective deadline resolution
  * - event logging
  * - email queue record creation
- * - queued email sending
  *
  * Requirements:
  * - PHP 8.2+
@@ -184,116 +183,6 @@ final class CoursewareProgressionV2
     }
 
     /**
-     * Resolve one user's email/name for mail delivery.
-     * Returns null if no usable email is found.
-     */
-    public function getUserRecipient(int $userId): ?array
-    {
-        $sql = "
-            SELECT id, email, name
-            FROM users
-            WHERE id = :id
-            LIMIT 1
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':id' => $userId,
-        ]);
-
-        $row = $stmt->fetch();
-        if (!$row) {
-            return null;
-        }
-
-        $email = trim((string)($row['email'] ?? ''));
-        if ($email === '') {
-            return null;
-        }
-
-        return [
-            'email' => $email,
-            'name' => trim((string)($row['name'] ?? '')),
-            'user_id' => (int)$row['id'],
-        ];
-    }
-
-    /**
-     * Resolve the chief instructor recipient from policy.
-     */
-    public function getChiefInstructorRecipient(array $scope = []): ?array
-    {
-        $chiefInstructorUserId = $this->getChiefInstructorUserId($scope);
-        if ($chiefInstructorUserId <= 0) {
-            return null;
-        }
-
-        return $this->getUserRecipient($chiefInstructorUserId);
-    }
-
-    public function getLessonTitle(int $lessonId): string
-    {
-        $sql = "
-            SELECT title
-            FROM lessons
-            WHERE id = :id
-            LIMIT 1
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':id' => $lessonId,
-        ]);
-
-        $title = $stmt->fetchColumn();
-        return is_string($title) && trim($title) !== ''
-            ? trim($title)
-            : ('Lesson ' . $lessonId);
-    }
-
-    public function getCohortTitle(int $cohortId): string
-    {
-        $sql = "
-            SELECT title
-            FROM cohorts
-            WHERE id = :id
-            LIMIT 1
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':id' => $cohortId,
-        ]);
-
-        $title = $stmt->fetchColumn();
-        return is_string($title) && trim($title) !== ''
-            ? trim($title)
-            : ('Cohort ' . $cohortId);
-    }
-
-    /**
-     * Check whether an email record already exists for this progress test + email type.
-     */
-    public function progressionEmailExistsForProgressTest(int $progressTestId, string $emailType): bool
-    {
-        $sql = "
-            SELECT 1
-            FROM training_progression_emails
-            WHERE progress_test_id = :progress_test_id
-              AND email_type = :email_type
-            LIMIT 1
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':progress_test_id' => $progressTestId,
-            ':email_type' => $emailType,
-        ]);
-
-        return (bool)$stmt->fetchColumn();
-    }
-
-    /**
      * Write one audit event into training_progression_events.
      */
     public function logProgressionEvent(array $event): int
@@ -365,6 +254,7 @@ final class CoursewareProgressionV2
 
     /**
      * Store one queued email record into training_progression_emails.
+     * Real sending will be implemented later.
      */
     public function queueProgressionEmail(array $email): int
     {
@@ -441,81 +331,6 @@ final class CoursewareProgressionV2
         ]);
 
         return (int)$this->pdo->lastInsertId();
-    }
-
-    /**
-     * Send one queued progression email by DB id and update sent_status.
-     * Returns the mail transport result.
-     */
-    public function sendProgressionEmailById(int $emailId): array
-    {
-        $sql = "
-            SELECT *
-            FROM training_progression_emails
-            WHERE id = :id
-            LIMIT 1
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':id' => $emailId,
-        ]);
-
-        $emailRow = $stmt->fetch();
-        if (!$emailRow) {
-            throw new RuntimeException("Queued email not found: {$emailId}");
-        }
-
-        require_once __DIR__ . '/mailer.php';
-
-        $to = $this->decodeMixedField((string)$emailRow['recipients_to']);
-        $cc = $this->decodeMixedField((string)($emailRow['recipients_cc'] ?? ''));
-
-        $result = cw_send_mail([
-            'to' => $to,
-            'cc' => $cc,
-            'subject' => (string)$emailRow['subject'],
-            'html' => (string)$emailRow['body_html'],
-            'text' => (string)($emailRow['body_text'] ?? ''),
-        ]);
-
-        $sentStatus = !empty($result['ok']) ? 'sent' : 'failed';
-
-        $upd = $this->pdo->prepare("
-            UPDATE training_progression_emails
-            SET sent_status = :sent_status,
-                sent_at = :sent_at
-            WHERE id = :id
-        ");
-        $upd->execute([
-            ':sent_status' => $sentStatus,
-            ':sent_at' => !empty($result['ok']) ? gmdate('Y-m-d H:i:s') : null,
-            ':id' => $emailId,
-        ]);
-
-        $this->logProgressionEvent([
-            'user_id' => (int)$emailRow['user_id'],
-            'cohort_id' => (int)$emailRow['cohort_id'],
-            'lesson_id' => (int)$emailRow['lesson_id'],
-            'progress_test_id' => isset($emailRow['progress_test_id']) ? (int)$emailRow['progress_test_id'] : null,
-            'event_type' => 'notification',
-            'event_code' => !empty($result['ok']) ? 'progression_email_sent' : 'progression_email_failed',
-            'event_status' => !empty($result['ok']) ? 'info' : 'warning',
-            'actor_type' => 'system',
-            'actor_user_id' => null,
-            'event_time' => gmdate('Y-m-d H:i:s'),
-            'payload' => [
-                'email_id' => (int)$emailRow['id'],
-                'email_type' => (string)$emailRow['email_type'],
-                'provider' => (string)($result['provider'] ?? 'smtp'),
-                'ok' => !empty($result['ok']) ? 1 : 0,
-                'message_id' => $result['message_id'] ?? null,
-                'error' => $result['error'] ?? null,
-            ],
-            'legal_note' => 'Progression email delivery attempt recorded by system.'
-        ]);
-
-        return $result;
     }
 
     private function getPolicyDefinition(string $policyKey): ?array
@@ -630,20 +445,5 @@ final class CoursewareProgressionV2
         }
 
         return (string)$value;
-    }
-
-    private function decodeMixedField(string $value): array|string
-    {
-        $value = trim($value);
-        if ($value === '') {
-            return [];
-        }
-
-        $decoded = json_decode($value, true);
-        if (is_array($decoded)) {
-            return $decoded;
-        }
-
-        return $value;
     }
 }

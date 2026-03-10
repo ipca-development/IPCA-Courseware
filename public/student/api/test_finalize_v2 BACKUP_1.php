@@ -26,10 +26,6 @@ function env_required(string $k): string {
     return (string)$v;
 }
 
-function html_e(string $s): string {
-    return htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-}
-
 function ai_prompt_fetch(PDO $pdo, string $promptKey, string $fallback): string {
     try {
         $st = $pdo->prepare("
@@ -1125,8 +1121,6 @@ TXT;
     upload_file_to_presigned_put((string)$resultPresign['url'], $resultAudioLocal, 'audio/mpeg');
     $resultAudioUrl = (string)$resultPresign['public_url'];
 
-    $queuedEmailIds = [];
-
     $pdo->beginTransaction();
 
     $nowUtc = gmdate('Y-m-d H:i:s');
@@ -1415,168 +1409,7 @@ TXT;
         ]);
     }
 
-    $studentRecipient = $engine->getUserRecipient($testOwnerUserId);
-    $chiefRecipient = $engine->getChiefInstructorRecipient([
-        'cohort_id' => $cohortId
-    ]);
-    $lessonTitle = $engine->getLessonTitle($lessonId);
-    $cohortTitle = $engine->getCohortTitle($cohortId);
-
-    $studentName = trim((string)($studentRecipient['name'] ?? $u['name'] ?? 'Student'));
-    if ($studentName === '') {
-        $studentName = 'Student';
-    }
-
-    $sendEmailAfterThirdFail = !empty($policy['send_email_after_third_fail']);
-    $thresholdAttemptForRemediationEmail = (int)($policy['threshold_attempt_for_remediation_email'] ?? 3);
-    $extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
-
-    if (
-        $studentRecipient !== null &&
-        $sendEmailAfterThirdFail &&
-        (int)$classification['counts_as_unsat'] === 1 &&
-        $attemptCount >= max(1, $thresholdAttemptForRemediationEmail) &&
-        !$engine->progressionEmailExistsForProgressTest($testId, 'third_fail_remediation')
-    ) {
-        $subject = 'Progress Test Review Required - ' . $lessonTitle;
-        $html = ''
-            . '<p>Dear ' . html_e($studentName) . ',</p>'
-            . '<p>I noticed that you have now reached attempt ' . html_e((string)$attemptCount) . ' for the progress test of <strong>' . html_e($lessonTitle) . '</strong> in <strong>' . html_e($cohortTitle) . '</strong>.</p>'
-            . '<p>Your latest score was <strong>' . html_e((string)$scorePct) . '%</strong>. Before continuing, please restudy the lesson carefully and focus specifically on the areas below.</p>'
-            . '<p><strong>Review areas:</strong><br>' . nl2br(html_e($weak)) . '</p>'
-            . '<p><strong>Debrief:</strong><br>' . nl2br(html_e($written)) . '</p>'
-            . '<p>After this review, you have been granted <strong>' . html_e((string)$extraAttemptsAfterThresholdFail) . ' additional attempt(s)</strong> under the current courseware progression policy.</p>'
-            . '<p>Please take the time to review the material properly before attempting the test again.</p>'
-            . '<p>Kind regards,<br>Chief Training Team<br>IPCA Courseware</p>';
-
-        $text = ''
-            . "Dear {$studentName},\n\n"
-            . "I noticed that you have now reached attempt {$attemptCount} for the progress test of {$lessonTitle} in {$cohortTitle}.\n\n"
-            . "Your latest score was {$scorePct}%.\n\n"
-            . "Review areas:\n{$weak}\n\n"
-            . "Debrief:\n{$written}\n\n"
-            . "After this review, you have been granted {$extraAttemptsAfterThresholdFail} additional attempt(s) under the current courseware progression policy.\n\n"
-            . "Kind regards,\nChief Training Team\nIPCA Courseware";
-
-        $queuedEmailIds[] = $engine->queueProgressionEmail([
-            'user_id' => $testOwnerUserId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => $testId,
-            'email_type' => 'third_fail_remediation',
-            'recipients_to' => [
-                [
-                    'email' => (string)$studentRecipient['email'],
-                    'name' => $studentName
-                ]
-            ],
-            'recipients_cc' => $chiefRecipient !== null
-                ? [[
-                    'email' => (string)$chiefRecipient['email'],
-                    'name' => trim((string)($chiefRecipient['name'] ?? ''))
-                ]]
-                : [],
-            'subject' => $subject,
-            'body_html' => $html,
-            'body_text' => $text,
-            'ai_inputs' => [
-                'trigger' => 'third_fail_remediation',
-                'attempt' => $attemptCount,
-                'score_pct' => $scorePct,
-                'lesson_title' => $lessonTitle,
-                'cohort_title' => $cohortTitle,
-                'weak_areas' => $weak,
-                'written_debrief' => $written
-            ],
-            'sent_status' => 'queued'
-        ]);
-    }
-
-    $sendEmailAfterMultipleUnsat = !empty($policy['send_email_after_multiple_unsat']);
-
-    if (
-        $studentRecipient !== null &&
-        $sendEmailAfterMultipleUnsat &&
-        $remediationTriggered === 1 &&
-        !$engine->progressionEmailExistsForProgressTest($testId, 'multiple_unsat_remedial_meeting')
-    ) {
-        $subject = 'Remedial Review Meeting Recommended - ' . $lessonTitle;
-        $html = ''
-            . '<p>Dear ' . html_e($studentName) . ',</p>'
-            . '<p>Based on repeated unsatisfactory progress test outcomes, the training system recommends a remedial review meeting before your next attempt for <strong>' . html_e($lessonTitle) . '</strong>.</p>'
-            . '<p><strong>Current score:</strong> ' . html_e((string)$scorePct) . '%</p>'
-            . '<p><strong>Review areas:</strong><br>' . nl2br(html_e($weak)) . '</p>'
-            . '<p><strong>Unsatisfactory counts in active review window:</strong><br>'
-            . 'Same lesson: ' . html_e((string)$recentUnsats['same_lesson_unsat_count']) . '<br>'
-            . 'Coursewide: ' . html_e((string)$recentUnsats['coursewide_unsat_count']) . '</p>'
-            . '<p>Please contact the training team so the next steps can be planned appropriately.</p>'
-            . '<p>Kind regards,<br>Chief Training Team<br>IPCA Courseware</p>';
-
-        $text = ''
-            . "Dear {$studentName},\n\n"
-            . "Based on repeated unsatisfactory progress test outcomes, the training system recommends a remedial review meeting before your next attempt for {$lessonTitle}.\n\n"
-            . "Current score: {$scorePct}%\n"
-            . "Same lesson unsatisfactory count: {$recentUnsats['same_lesson_unsat_count']}\n"
-            . "Coursewide unsatisfactory count: {$recentUnsats['coursewide_unsat_count']}\n\n"
-            . "Review areas:\n{$weak}\n\n"
-            . "Please contact the training team so the next steps can be planned appropriately.\n\n"
-            . "Kind regards,\nChief Training Team\nIPCA Courseware";
-
-        $queuedEmailIds[] = $engine->queueProgressionEmail([
-            'user_id' => $testOwnerUserId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => $testId,
-            'email_type' => 'multiple_unsat_remedial_meeting',
-            'recipients_to' => [
-                [
-                    'email' => (string)$studentRecipient['email'],
-                    'name' => $studentName
-                ]
-            ],
-            'recipients_cc' => $chiefRecipient !== null
-                ? [[
-                    'email' => (string)$chiefRecipient['email'],
-                    'name' => trim((string)($chiefRecipient['name'] ?? ''))
-                ]]
-                : [],
-            'subject' => $subject,
-            'body_html' => $html,
-            'body_text' => $text,
-            'ai_inputs' => [
-                'trigger' => 'multiple_unsat_remedial_meeting',
-                'score_pct' => $scorePct,
-                'lesson_title' => $lessonTitle,
-                'cohort_title' => $cohortTitle,
-                'same_lesson_unsat_count' => $recentUnsats['same_lesson_unsat_count'],
-                'coursewide_unsat_count' => $recentUnsats['coursewide_unsat_count'],
-                'weak_areas' => $weak
-            ],
-            'sent_status' => 'queued'
-        ]);
-    }
-
     $pdo->commit();
-
-    $emailSendResults = [];
-    foreach ($queuedEmailIds as $queuedEmailId) {
-        try {
-            $emailSendResults[] = [
-                'email_id' => $queuedEmailId,
-                'result' => $engine->sendProgressionEmailById((int)$queuedEmailId)
-            ];
-        } catch (Throwable $mailEx) {
-            $emailSendResults[] = [
-                'email_id' => $queuedEmailId,
-                'result' => [
-                    'ok' => false,
-                    'provider' => 'smtp',
-                    'message_id' => null,
-                    'error' => $mailEx->getMessage()
-                ]
-            ];
-        }
-    }
 
     json_out([
         'ok'                          => true,
@@ -1597,9 +1430,7 @@ TXT;
         'remediation_triggered'       => $remediationTriggered,
         'activity_summary_status'     => $summaryStatus,
         'activity_test_pass_status'   => $testPassStatus,
-        'activity_completion_status'  => $completionStatus,
-        'queued_email_ids'            => $queuedEmailIds,
-        'email_send_results'          => $emailSendResults
+        'activity_completion_status'  => $completionStatus
     ]);
 
 } catch (Throwable $e) {
