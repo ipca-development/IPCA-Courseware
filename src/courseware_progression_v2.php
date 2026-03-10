@@ -293,6 +293,30 @@ final class CoursewareProgressionV2
         return (bool)$stmt->fetchColumn();
     }
 
+	public function hasAnyProgressionEmailForLesson(int $userId, int $cohortId, int $lessonId, string $emailType): bool
+{
+    $sql = "
+        SELECT 1
+        FROM training_progression_emails
+        WHERE user_id = :user_id
+          AND cohort_id = :cohort_id
+          AND lesson_id = :lesson_id
+          AND email_type = :email_type
+        LIMIT 1
+    ";
+
+    $stmt = $this->pdo->prepare($sql);
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':cohort_id' => $cohortId,
+        ':lesson_id' => $lessonId,
+        ':email_type' => $emailType,
+    ]);
+
+    return (bool)$stmt->fetchColumn();
+}
+	
+	
     /**
      * Return most recent pending/open required action for user/cohort/lesson/type.
      */

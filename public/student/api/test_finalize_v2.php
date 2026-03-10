@@ -1444,13 +1444,13 @@ TXT;
     $sendEmailAfterThirdFail = !empty($policy['send_email_after_third_fail']);
     $thresholdAttemptForRemediationEmail = (int)($policy['threshold_attempt_for_remediation_email'] ?? 3);
 	
-	if (
-        $studentRecipient !== null &&
-        $sendEmailAfterThirdFail &&
-        (int)$classification['counts_as_unsat'] === 1 &&
-        $attemptCount >= max(1, $thresholdAttemptForRemediationEmail) &&
-        !$engine->progressionEmailExistsForProgressTest($testId, 'third_fail_remediation')
-    ) {
+if (
+    $studentRecipient !== null &&
+    $sendEmailAfterThirdFail &&
+    (int)$classification['counts_as_unsat'] === 1 &&
+    $attemptCount === max(1, $thresholdAttemptForRemediationEmail) &&
+    !$engine->hasAnyProgressionEmailForLesson($testOwnerUserId, $cohortId, $lessonId, 'third_fail_remediation')
+) {
         $existingPendingRemediation = $engine->getPendingRequiredAction(
             $testOwnerUserId,
             $cohortId,
@@ -1561,9 +1561,9 @@ TXT;
 
     $sendEmailAfterMultipleUnsat = !empty($policy['send_email_after_multiple_unsat']);
     $isThirdFailThresholdEmailNow =
-        $sendEmailAfterThirdFail &&
-        (int)$classification['counts_as_unsat'] === 1 &&
-        $attemptCount >= max(1, $thresholdAttemptForRemediationEmail);
+    $sendEmailAfterThirdFail &&
+    (int)$classification['counts_as_unsat'] === 1 &&
+    $attemptCount === max(1, $thresholdAttemptForRemediationEmail);
 
     if (
         $studentRecipient !== null &&
