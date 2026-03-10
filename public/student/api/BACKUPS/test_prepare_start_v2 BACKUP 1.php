@@ -167,42 +167,6 @@ try {
         }
     }
 
-    /**
-     * NEW:
-     * Block further attempts until remediation acknowledgement is completed.
-     */
-    $pendingRemediation = $engine->getPendingRequiredAction(
-        $userId,
-        $cohortId,
-        $lessonId,
-        'remediation_acknowledgement'
-    );
-
-    if ($pendingRemediation) {
-        json_ok([
-            'ok' => false,
-            'error' => 'You must review and acknowledge the remediation instructions before additional attempts become available.'
-        ]);
-    }
-
-    /**
-     * NEW:
-     * Block further attempts until deadline reason submission is completed.
-     */
-    $pendingDeadlineReason = $engine->getPendingRequiredAction(
-        $userId,
-        $cohortId,
-        $lessonId,
-        'deadline_reason_submission'
-    );
-
-    if ($pendingDeadlineReason) {
-        json_ok([
-            'ok' => false,
-            'error' => 'You must submit your required deadline reason before another progress test can start.'
-        ]);
-    }
-
     $mx = $pdo->prepare("
         SELECT MAX(attempt)
         FROM progress_tests_v2

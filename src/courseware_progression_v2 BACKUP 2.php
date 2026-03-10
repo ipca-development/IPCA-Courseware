@@ -251,25 +251,25 @@ final class CoursewareProgressionV2
             : ('Lesson ' . $lessonId);
     }
 
-    public function getCohortTitle(int $cohortId): string
-    {
-        $sql = "
-            SELECT name
-            FROM cohorts
-            WHERE id = :id
-            LIMIT 1
-        ";
+ public function getCohortTitle(int $cohortId): string
+{
+    $sql = "
+        SELECT name
+        FROM cohorts
+        WHERE id = :id
+        LIMIT 1
+    ";
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':id' => $cohortId,
-        ]);
+    $stmt = $this->pdo->prepare($sql);
+    $stmt->execute([
+        ':id' => $cohortId,
+    ]);
 
-        $title = $stmt->fetchColumn();
-        return is_string($title) && trim($title) !== ''
-            ? trim($title)
-            : ('Cohort ' . $cohortId);
-    }
+    $title = $stmt->fetchColumn();
+    return is_string($title) && trim($title) !== ''
+        ? trim($title)
+        : ('Cohort ' . $cohortId);
+}
 
     /**
      * Check whether an email record already exists for this progress test + email type.
@@ -291,238 +291,6 @@ final class CoursewareProgressionV2
         ]);
 
         return (bool)$stmt->fetchColumn();
-    }
-
-    /**
-     * Return most recent pending/open required action for user/cohort/lesson/type.
-     */
-    public function getPendingRequiredAction(int $userId, int $cohortId, int $lessonId, string $actionType): ?array
-    {
-        $sql = "
-            SELECT *
-            FROM student_required_actions
-            WHERE user_id = :user_id
-              AND cohort_id = :cohort_id
-              AND lesson_id = :lesson_id
-              AND action_type = :action_type
-              AND status IN ('pending','opened')
-            ORDER BY id DESC
-            LIMIT 1
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-            ':action_type' => $actionType,
-        ]);
-
-        $row = $stmt->fetch();
-        return $row ?: null;
-    }
-
-	/**
- * Fetch required action by token (used by remediation page).
- */
-public function getRequiredActionByToken(string $token): ?array
-{
-    $sql = "
-        SELECT *
-        FROM student_required_actions
-        WHERE token = :token
-        LIMIT 1
-    ";
-
-    $stmt = $this->pdo->prepare($sql);
-    $stmt->execute([
-        ':token' => $token,
-    ]);
-
-    $row = $stmt->fetch();
-    return $row ?: null;
-}
-
-/**
- * Mark required action as opened.
- */
-public function markRequiredActionOpened(int $actionId, ?string $ipAddress = null, ?string $userAgent = null): void
-{
-    $sql = "
-        UPDATE student_required_actions
-        SET
-            status = CASE
-                WHEN status = 'pending' THEN 'opened'
-                ELSE status
-            END,
-            opened_at = CASE
-                WHEN opened_at IS NULL THEN :opened_at
-                ELSE opened_at
-            END,
-            ip_address = COALESCE(:ip_address, ip_address),
-            user_agent = COALESCE(:user_agent, user_agent),
-            updated_at = :updated_at
-        WHERE id = :id
-    ";
-
-    $stmt = $this->pdo->prepare($sql);
-    $stmt->execute([
-        ':opened_at' => gmdate('Y-m-d H:i:s'),
-        ':ip_address' => $ipAddress,
-        ':user_agent' => $userAgent,
-        ':updated_at' => gmdate('Y-m-d H:i:s'),
-        ':id' => $actionId,
-    ]);
-}
-
-/**
- * Complete required action after student confirmation.
- */
-public function completeRequiredAction(int $actionId, string $responseText, ?string $ipAddress = null, ?string $userAgent = null): void
-{
-    $sql = "
-        UPDATE student_required_actions
-        SET
-            status = 'completed',
-            student_response_text = :student_response_text,
-            completed_at = :completed_at,
-            ip_address = COALESCE(:ip_address, ip_address),
-            user_agent = COALESCE(:user_agent, user_agent),
-            updated_at = :updated_at
-        WHERE id = :id
-          AND status IN ('pending','opened')
-    ";
-
-    $stmt = $this->pdo->prepare($sql);
-    $stmt->execute([
-        ':student_response_text' => $responseText,
-        ':completed_at' => gmdate('Y-m-d H:i:s'),
-        ':ip_address' => $ipAddress,
-        ':user_agent' => $userAgent,
-        ':updated_at' => gmdate('Y-m-d H:i:s'),
-        ':id' => $actionId,
-    ]);
-}
-
-/**
- * Check if a required action was completed.
- */
-public function hasCompletedRequiredAction(int $userId, int $cohortId, int $lessonId, string $actionType): bool
-{
-    $sql = "
-        SELECT 1
-        FROM student_required_actions
-        WHERE user_id = :user_id
-          AND cohort_id = :cohort_id
-          AND lesson_id = :lesson_id
-          AND action_type = :action_type
-          AND status IN ('completed','approved')
-        LIMIT 1
-    ";
-
-    $stmt = $this->pdo->prepare($sql);
-    $stmt->execute([
-        ':user_id' => $userId,
-        ':cohort_id' => $cohortId,
-        ':lesson_id' => $lessonId,
-        ':action_type' => $actionType,
-    ]);
-
-    return (bool)$stmt->fetchColumn();
-}
-	
-	
-    /**
-     * Create a new required action record.
-     */
-    public function createRequiredAction(array $data): int
-    {
-        $required = [
-            'user_id',
-            'cohort_id',
-            'lesson_id',
-            'action_type',
-            'token',
-            'title'
-        ];
-
-        foreach ($required as $field) {
-            if (!array_key_exists($field, $data)) {
-                throw new InvalidArgumentException("Missing required action field: {$field}");
-            }
-        }
-
-        $sql = "
-    INSERT INTO student_required_actions
-    (
-        user_id,
-        cohort_id,
-        lesson_id,
-        progress_test_id,
-        action_type,
-        token,
-        status,
-        title,
-        instructions_html,
-        instructions_text,
-        student_response_text,
-        email_id,
-        opened_at,
-        completed_at,
-        approved_at,
-        ip_address,
-        user_agent,
-        created_at,
-        updated_at
-    )
-    VALUES
-    (
-        :user_id,
-        :cohort_id,
-        :lesson_id,
-        :progress_test_id,
-        :action_type,
-        :token,
-        :status,
-        :title,
-        :instructions_html,
-        :instructions_text,
-        :student_response_text,
-        :email_id,
-        :opened_at,
-        :completed_at,
-        :approved_at,
-        :ip_address,
-        :user_agent,
-        :created_at,
-        :updated_at
-    )
-";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':user_id' => (int)$data['user_id'],
-            ':cohort_id' => (int)$data['cohort_id'],
-            ':lesson_id' => (int)$data['lesson_id'],
-            ':progress_test_id' => isset($data['progress_test_id']) ? (int)$data['progress_test_id'] : null,
-            ':action_type' => (string)$data['action_type'],
-            ':token' => (string)$data['token'],
-            ':status' => (string)($data['status'] ?? 'pending'),
-            ':title' => (string)$data['title'],
-            ':instructions_html' => isset($data['instructions_html']) ? (string)$data['instructions_html'] : null,
-            ':instructions_text' => isset($data['instructions_text']) ? (string)$data['instructions_text'] : null,
-            ':student_response_text' => isset($data['student_response_text']) ? (string)$data['student_response_text'] : null,
-            ':email_id' => isset($data['related_email_id']) ? (int)$data['related_email_id'] : null,
-            ':opened_at' => isset($data['opened_at']) ? (string)$data['opened_at'] : null,
-            ':completed_at' => isset($data['completed_at']) ? (string)$data['completed_at'] : null,
-            ':approved_at' => isset($data['approved_at']) ? (string)$data['approved_at'] : null,
-            ':ip_address' => isset($data['ip_address']) ? (string)$data['ip_address'] : null,
-            ':user_agent' => isset($data['user_agent']) ? (string)$data['user_agent'] : null,
-            ':created_at' => (string)($data['created_at'] ?? gmdate('Y-m-d H:i:s')),
-            ':updated_at' => (string)($data['updated_at'] ?? gmdate('Y-m-d H:i:s')),
-        ]);
-
-        return (int)$this->pdo->lastInsertId();
     }
 
     /**

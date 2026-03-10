@@ -30,20 +30,6 @@ function html_e(string $s): string {
     return htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
-function build_app_url(string $path): string {
-    $base = trim((string)(getenv('CW_APP_BASE_URL') ?: ''));
-    if ($base !== '') {
-        return rtrim($base, '/') . '/' . ltrim($path, '/');
-    }
-
-    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
-    if ($host !== '') {
-        return 'https://' . $host . '/' . ltrim($path, '/');
-    }
-
-    return '/' . ltrim($path, '/');
-}
-
 function ai_prompt_fetch(PDO $pdo, string $promptKey, string $fallback): string {
     try {
         $st = $pdo->prepare("
@@ -1443,49 +1429,36 @@ TXT;
 
     $sendEmailAfterThirdFail = !empty($policy['send_email_after_third_fail']);
     $thresholdAttemptForRemediationEmail = (int)($policy['threshold_attempt_for_remediation_email'] ?? 3);
-	
-	if (
+    $extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
+
+    if (
         $studentRecipient !== null &&
         $sendEmailAfterThirdFail &&
         (int)$classification['counts_as_unsat'] === 1 &&
         $attemptCount >= max(1, $thresholdAttemptForRemediationEmail) &&
         !$engine->progressionEmailExistsForProgressTest($testId, 'third_fail_remediation')
     ) {
-        $existingPendingRemediation = $engine->getPendingRequiredAction(
-            $testOwnerUserId,
-            $cohortId,
-            $lessonId,
-            'remediation_acknowledgement'
-        );
-
-        $remediationToken = $existingPendingRemediation
-            ? (string)$existingPendingRemediation['token']
-            : bin2hex(random_bytes(32));
-
-        $remediationUrl = build_app_url('/student/remediation_action.php?token=' . urlencode($remediationToken));
-
         $subject = 'Progress Test Review Required - ' . $lessonTitle;
         $html = ''
             . '<p>Dear ' . html_e($studentName) . ',</p>'
             . '<p>I noticed that you have now reached attempt ' . html_e((string)$attemptCount) . ' for the progress test of <strong>' . html_e($lessonTitle) . '</strong> in <strong>' . html_e($cohortTitle) . '</strong>.</p>'
-            . '<p>Your latest score was <strong>' . html_e((string)$scorePct) . '%</strong>.</p>'
+            . '<p>Your latest score was <strong>' . html_e((string)$scorePct) . '%</strong>. Before continuing, please restudy the lesson carefully and focus specifically on the areas below.</p>'
             . '<p><strong>Review areas:</strong><br>' . nl2br(html_e($weak)) . '</p>'
             . '<p><strong>Debrief:</strong><br>' . nl2br(html_e($written)) . '</p>'
-            . '<p>Before any additional attempts become available, you must review and acknowledge the remedial study items using the secure student portal link below.</p>'
-            . '<p><a href="' . html_e($remediationUrl) . '">Open Remediation Acknowledgement Page</a></p>'
+            . '<p>After this review, you have been granted <strong>' . html_e((string)$extraAttemptsAfterThresholdFail) . ' additional attempt(s)</strong> under the current courseware progression policy.</p>'
+            . '<p>Please take the time to review the material properly before attempting the test again.</p>'
             . '<p>Kind regards,<br>Chief Training Team<br>IPCA Courseware</p>';
 
         $text = ''
             . "Dear {$studentName},\n\n"
-            . "You have now reached attempt {$attemptCount} for the progress test of {$lessonTitle} in {$cohortTitle}.\n"
+            . "I noticed that you have now reached attempt {$attemptCount} for the progress test of {$lessonTitle} in {$cohortTitle}.\n\n"
             . "Your latest score was {$scorePct}%.\n\n"
             . "Review areas:\n{$weak}\n\n"
             . "Debrief:\n{$written}\n\n"
-            . "Before any additional attempts become available, you must review and acknowledge the remedial study items using this secure portal link:\n"
-            . $remediationUrl . "\n\n"
+            . "After this review, you have been granted {$extraAttemptsAfterThresholdFail} additional attempt(s) under the current courseware progression policy.\n\n"
             . "Kind regards,\nChief Training Team\nIPCA Courseware";
 
-        $emailId = $engine->queueProgressionEmail([
+        $queuedEmailIds[] = $engine->queueProgressionEmail([
             'user_id' => $testOwnerUserId,
             'cohort_id' => $cohortId,
             'lesson_id' => $lessonId,
@@ -1513,65 +1486,25 @@ TXT;
                 'lesson_title' => $lessonTitle,
                 'cohort_title' => $cohortTitle,
                 'weak_areas' => $weak,
-                'written_debrief' => $written,
-                'remediation_token' => $remediationToken
+                'written_debrief' => $written
             ],
             'sent_status' => 'queued'
         ]);
-
-        $queuedEmailIds[] = $emailId;
-
-        if (!$existingPendingRemediation) {
-            $actionId = $engine->createRequiredAction([
-                'user_id' => $testOwnerUserId,
-                'cohort_id' => $cohortId,
-                'lesson_id' => $lessonId,
-                'progress_test_id' => $testId,
-                'action_type' => 'remediation_acknowledgement',
-                'token' => $remediationToken,
-                'title' => 'Remedial Study Acknowledgement - ' . $lessonTitle,
-                'instructions_html' => ''
-                    . '<p>Please review the following remedial study items carefully before attempting the progress test again.</p>'
-                    . '<p><strong>Weak Areas:</strong><br>' . nl2br(html_e($weak)) . '</p>'
-                    . '<p><strong>Debrief:</strong><br>' . nl2br(html_e($written)) . '</p>'
-                    . '<p>When you have restudied the material, confirm below. Your acknowledgment will be logged with a timestamp for training records.</p>',
-                'instructions_text' => "Weak Areas:\n{$weak}\n\nDebrief:\n{$written}",
-                'related_email_id' => $emailId
-            ]);
-
-            $engine->logProgressionEvent([
-                'user_id' => $testOwnerUserId,
-                'cohort_id' => $cohortId,
-                'lesson_id' => $lessonId,
-                'progress_test_id' => $testId,
-                'event_type' => 'required_action',
-                'event_code' => 'remediation_action_created',
-                'event_status' => 'info',
-                'actor_type' => 'system',
-                'actor_user_id' => null,
-                'event_time' => $completedAtForClassification,
-                'payload' => [
-                    'required_action_id' => $actionId,
-                    'email_id' => $emailId
-                ],
-                'legal_note' => 'Remediation acknowledgement action created.'
-            ]);
-        }
     }
 
-    $sendEmailAfterMultipleUnsat = !empty($policy['send_email_after_multiple_unsat']);
-    $isThirdFailThresholdEmailNow =
-        $sendEmailAfterThirdFail &&
-        (int)$classification['counts_as_unsat'] === 1 &&
-        $attemptCount >= max(1, $thresholdAttemptForRemediationEmail);
+$sendEmailAfterMultipleUnsat = !empty($policy['send_email_after_multiple_unsat']);
+$isThirdFailThresholdEmailNow =
+    $sendEmailAfterThirdFail &&
+    (int)$classification['counts_as_unsat'] === 1 &&
+    $attemptCount >= max(1, $thresholdAttemptForRemediationEmail);
 
-    if (
-        $studentRecipient !== null &&
-        $sendEmailAfterMultipleUnsat &&
-        $remediationTriggered === 1 &&
-        !$isThirdFailThresholdEmailNow &&
-        !$engine->progressionEmailExistsForProgressTest($testId, 'multiple_unsat_remedial_meeting')
-    ) {
+if (
+    $studentRecipient !== null &&
+    $sendEmailAfterMultipleUnsat &&
+    $remediationTriggered === 1 &&
+    !$isThirdFailThresholdEmailNow &&
+    !$engine->progressionEmailExistsForProgressTest($testId, 'multiple_unsat_remedial_meeting')
+) {
         $subject = 'Remedial Review Meeting Recommended - ' . $lessonTitle;
         $html = ''
             . '<p>Dear ' . html_e($studentName) . ',</p>'
