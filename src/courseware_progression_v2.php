@@ -251,25 +251,25 @@ final class CoursewareProgressionV2
             : ('Lesson ' . $lessonId);
     }
 
-    public function getCohortTitle(int $cohortId): string
-    {
-        $sql = "
-            SELECT title
-            FROM cohorts
-            WHERE id = :id
-            LIMIT 1
-        ";
+ public function getCohortTitle(int $cohortId): string
+{
+    $sql = "
+        SELECT name
+        FROM cohorts
+        WHERE id = :id
+        LIMIT 1
+    ";
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':id' => $cohortId,
-        ]);
+    $stmt = $this->pdo->prepare($sql);
+    $stmt->execute([
+        ':id' => $cohortId,
+    ]);
 
-        $title = $stmt->fetchColumn();
-        return is_string($title) && trim($title) !== ''
-            ? trim($title)
-            : ('Cohort ' . $cohortId);
-    }
+    $title = $stmt->fetchColumn();
+    return is_string($title) && trim($title) !== ''
+        ? trim($title)
+        : ('Cohort ' . $cohortId);
+}
 
     /**
      * Check whether an email record already exists for this progress test + email type.
