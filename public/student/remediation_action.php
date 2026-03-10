@@ -48,9 +48,6 @@ if (!in_array($actionType, ['remediation_acknowledgement', 'deadline_reason_subm
     exit('Unsupported action type');
 }
 
-function h(string $s): string {
-    return htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-}
 
 function get_client_ip(): ?string {
     $keys = [
