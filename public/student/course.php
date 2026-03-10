@@ -305,11 +305,28 @@ $summaryOk = !empty($summaryState['ok']);
         ? ['max_attempt' => 0, 'last' => null, 'best_score' => null, 'passed' => false]
         : get_test_status_v2($pdo, $userId, $cohortId, $lessonId);
 
-    $last = $test['last'];
-    $attemptsUsed = (int)$test['max_attempt'];
-    $attemptsLeft = max(0, 3 - $attemptsUsed);
-    $testPassed = !empty($test['passed']);
-    $bestScore = $test['best_score'];
+	$last = $test['last'];
+$attemptsUsed = (int)$test['max_attempt'];
+
+$initialAttemptLimit = (int)($policy['initial_attempt_limit'] ?? 3);
+$extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
+$maxTotalAttemptsWithoutAdminOverride = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
+
+$calculatedMaxAttempts = $initialAttemptLimit + $extraAttemptsAfterThresholdFail;
+if ($calculatedMaxAttempts <= 0) {
+    $calculatedMaxAttempts = 1;
+}
+
+if ($maxTotalAttemptsWithoutAdminOverride > 0) {
+    $maxAllowedAttempts = min($calculatedMaxAttempts, $maxTotalAttemptsWithoutAdminOverride);
+} else {
+    $maxAllowedAttempts = $calculatedMaxAttempts;
+}
+
+$attemptsLeft = max(0, $maxAllowedAttempts - $attemptsUsed);
+
+$testPassed = !empty($test['passed']);
+$bestScore = $test['best_score'];
 
     $canTest = true;
     if ($role === 'student' && $locked) $canTest = false;
