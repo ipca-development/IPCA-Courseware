@@ -67,21 +67,6 @@ function lesson_passed(PDO $pdo, $userId, $cohortId, $lessonId) {
 }
 
 
-    if ($lessonActivityPassed) {
-        return true;
-    }
-
-    $pt = $pdo->prepare("
-        SELECT 1
-        FROM progress_tests_v2
-        WHERE user_id=? AND lesson_id=? AND status='completed' AND score_pct >= 75
-        LIMIT 1
-    ");
-    $pt->execute([$userId, $lessonId]);
-
-    return (bool)$pt->fetchColumn();
-}
-
 function get_summary_state(PDO $pdo, $userId, $cohortId, $lessonId) {
     $st = $pdo->prepare("
         SELECT summary_plain, review_status
