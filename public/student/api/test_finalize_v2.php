@@ -1567,6 +1567,7 @@ TXT;
         }
     }
 
+
     $instructorEscalationTriggered = false;
 
     if (
@@ -1587,7 +1588,7 @@ TXT;
             ? (string)$existingInstructorApproval['token']
             : bin2hex(random_bytes(32));
 
-        $approvalUrl = build_app_url('/admin/instructor_approval.php?token=' . urlencode($approvalToken));
+        $approvalUrl = build_app_url('/instructor/instructor_approval.php?token=' . urlencode($approvalToken));
 
         $studentSubject = 'Instructor Review Required - ' . $lessonTitle;
         $studentHtml = ''
@@ -1721,76 +1722,7 @@ TXT;
         }
 
         $instructorEscalationTriggered = true;
-    }
-
-    $sendEmailAfterMultipleUnsat = !empty($policy['send_email_after_multiple_unsat']);
-    $isThirdFailThresholdEmailNow =
-        $sendEmailAfterThirdFail &&
-        (int)$classification['counts_as_unsat'] === 1 &&
-        $attemptCount === max(1, $thresholdAttemptForRemediationEmail);
-
-    if (
-    $studentRecipient !== null &&
-    $sendEmailAfterMultipleUnsat &&
-    $remediationTriggered === 1 &&
-    !$isThirdFailThresholdEmailNow &&
-    !$engine->hasAnyProgressionEmailForLesson($testOwnerUserId, $cohortId, $lessonId, 'multiple_unsat_remedial_meeting')
-) {
-        $subject = 'Remedial Review Meeting Recommended - ' . $lessonTitle;
-        $html = ''
-            . '<p>Dear ' . html_e($studentName) . ',</p>'
-            . '<p>Based on repeated unsatisfactory progress test outcomes, the training system recommends a remedial review meeting before your next attempt for <strong>' . html_e($lessonTitle) . '</strong>.</p>'
-            . '<p><strong>Current score:</strong> ' . html_e((string)$scorePct) . '%</p>'
-            . '<p><strong>Review areas:</strong><br>' . nl2br(html_e($weak)) . '</p>'
-            . '<p><strong>Unsatisfactory counts in active review window:</strong><br>'
-            . 'Same lesson: ' . html_e((string)$recentUnsats['same_lesson_unsat_count']) . '<br>'
-            . 'Coursewide: ' . html_e((string)$recentUnsats['coursewide_unsat_count']) . '</p>'
-            . '<p>Please contact the training team so the next steps can be planned appropriately.</p>'
-            . '<p>Kind regards,<br>Chief Training Team<br>IPCA Courseware</p>';
-
-        $text = ''
-            . "Dear {$studentName},\n\n"
-            . "Based on repeated unsatisfactory progress test outcomes, the training system recommends a remedial review meeting before your next attempt for {$lessonTitle}.\n\n"
-            . "Current score: {$scorePct}%\n"
-            . "Same lesson unsatisfactory count: {$recentUnsats['same_lesson_unsat_count']}\n"
-            . "Coursewide unsatisfactory count: {$recentUnsats['coursewide_unsat_count']}\n\n"
-            . "Review areas:\n{$weak}\n\n"
-            . "Please contact the training team so the next steps can be planned appropriately.\n\n"
-            . "Kind regards,\nChief Training Team\nIPCA Courseware";
-
-        $queuedEmailIds[] = $engine->queueProgressionEmail([
-            'user_id' => $testOwnerUserId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => $testId,
-            'email_type' => 'multiple_unsat_remedial_meeting',
-            'recipients_to' => [
-                [
-                    'email' => (string)$studentRecipient['email'],
-                    'name' => $studentName
-                ]
-            ],
-            'recipients_cc' => $chiefRecipient !== null
-                ? [[
-                    'email' => (string)$chiefRecipient['email'],
-                    'name' => trim((string)($chiefRecipient['name'] ?? ''))
-                ]]
-                : [],
-            'subject' => $subject,
-            'body_html' => $html,
-            'body_text' => $text,
-            'ai_inputs' => [
-                'trigger' => 'multiple_unsat_remedial_meeting',
-                'score_pct' => $scorePct,
-                'lesson_title' => $lessonTitle,
-                'cohort_title' => $cohortTitle,
-                'same_lesson_unsat_count' => $recentUnsats['same_lesson_unsat_count'],
-                'coursewide_unsat_count' => $recentUnsats['coursewide_unsat_count'],
-                'weak_areas' => $weak
-            ],
-            'sent_status' => 'queued'
-        ]);
-    }
+    }	
 	
 	
     $pdo->commit();
