@@ -8,12 +8,8 @@ require_once __DIR__ . '/../../src/courseware_progression_v2.php';
 cw_require_login();
 
 $u = cw_current_user($pdo);
-$role = (string)($u['role'] ?? '');
-
-if ($role !== 'admin') {
-    http_response_code(403);
-    exit('Forbidden');
-}
+$userId = (int)($u['id'] ?? 0);
+$role   = (string)($u['role'] ?? '');
 
 $engine = new CoursewareProgressionV2($pdo);
 
@@ -34,34 +30,48 @@ if ((string)$action['action_type'] !== 'instructor_approval') {
     exit('Invalid action type');
 }
 
+$policy = $engine->getAllPolicies([
+    'cohort_id' => (int)$action['cohort_id']
+]);
+
+$chiefInstructorUserId = (int)($policy['chief_instructor_user_id'] ?? 0);
+
+if ($role !== 'admin' && $userId !== $chiefInstructorUserId) {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
 $ipAddress = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
 $userAgent = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
 
 $engine->markRequiredActionOpened((int)$action['id'], $ipAddress, $userAgent);
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+$done = ((string)$action['status'] === 'approved');
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$done) {
     $engine->approveRequiredAction((int)$action['id'], $ipAddress, $userAgent);
 
     $engine->logProgressionEvent([
-        'user_id' => (int)$action['user_id'],
-        'cohort_id' => (int)$action['cohort_id'],
-        'lesson_id' => (int)$action['lesson_id'],
+        'user_id'          => (int)$action['user_id'],
+        'cohort_id'        => (int)$action['cohort_id'],
+        'lesson_id'        => (int)$action['lesson_id'],
         'progress_test_id' => isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null,
-        'event_type' => 'required_action',
-        'event_code' => 'instructor_approval_completed',
-        'event_status' => 'info',
-        'actor_type' => 'admin',
-        'actor_user_id' => (int)($u['id'] ?? 0),
-        'event_time' => gmdate('Y-m-d H:i:s'),
-        'payload' => [
+        'event_type'       => 'required_action',
+        'event_code'       => 'instructor_approval_completed',
+        'event_status'     => 'info',
+        'actor_type'       => 'admin',
+        'actor_user_id'    => $userId,
+        'event_time'       => gmdate('Y-m-d H:i:s'),
+        'payload'          => [
             'required_action_id' => (int)$action['id']
         ],
-        'legal_note' => 'Instructor approved additional progression after maximum failed attempts.'
+        'legal_note'       => 'Instructor approved additional progression after maximum failed attempts.'
     ]);
 
     $done = true;
-} else {
-    $done = ((string)$action['status'] === 'approved');
+
+    // Refresh action so displayed status is current if needed later.
+    $action = $engine->getRequiredActionByToken($token);
 }
 
 cw_header('Instructor Approval');
