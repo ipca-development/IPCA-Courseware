@@ -36,7 +36,27 @@ $co = $pdo->prepare("
 $co->execute([$cohortId]);
 $cohort = $co->fetch(PDO::FETCH_ASSOC);
 if (!$cohort) exit('Cohort not found');
+$engine = new CoursewareProgressionV2($pdo);
+$policy = $engine->getAllPolicies(['cohort_id' => $cohortId]);
 
+$completedRemediationByLesson = [];
+
+if ($role === 'student') {
+    $remSt = $pdo->prepare("
+        SELECT lesson_id, MAX(id) AS latest_id
+        FROM student_required_actions
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND action_type = 'remediation_acknowledgement'
+          AND status IN ('completed','approved')
+        GROUP BY lesson_id
+    ");
+    $remSt->execute([$userId, $cohortId]);
+
+    foreach ($remSt->fetchAll(PDO::FETCH_ASSOC) as $rr) {
+        $completedRemediationByLesson[(int)$rr['lesson_id']] = (int)$rr['latest_id'];
+    }
+}
 
 function lesson_passed(PDO $pdo, $userId, $cohortId, $lessonId) {
     $st = $pdo->prepare("
@@ -89,6 +109,7 @@ function get_summary_state(PDO $pdo, $userId, $cohortId, $lessonId) {
     ];
 }
 
+
 function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
     $st = $pdo->prepare("
       SELECT attempt, status, score_pct, started_at, completed_at
@@ -108,22 +129,39 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
     $mx->execute([$userId, $cohortId, $lessonId]);
     $maxAttempt = (int)($mx->fetchColumn() ?: 0);
 
-    $pass = $pdo->prepare("
+    $best = $pdo->prepare("
       SELECT MAX(score_pct)
       FROM progress_tests_v2
-      WHERE user_id=? AND cohort_id=? AND lesson_id=? AND status='completed'
+      WHERE user_id=? 
+        AND cohort_id=? 
+        AND lesson_id=? 
+        AND status='completed'
+    ");
+    $best->execute([$userId, $cohortId, $lessonId]);
+    $bestScore = $best->fetchColumn();
+    $bestScore = ($bestScore === null) ? null : (int)$bestScore;
+
+    $pass = $pdo->prepare("
+      SELECT 1
+      FROM progress_tests_v2
+      WHERE user_id=? 
+        AND cohort_id=? 
+        AND lesson_id=? 
+        AND status='completed'
+        AND pass_gate_met=1
+      LIMIT 1
     ");
     $pass->execute([$userId, $cohortId, $lessonId]);
-    $bestScore = $pass->fetchColumn();
-    $bestScore = ($bestScore === null) ? null : (int)$bestScore;
+    $passed = (bool)$pass->fetchColumn();
 
     return [
         'max_attempt' => $maxAttempt,
         'last' => $row ?: null,
         'best_score' => $bestScore,
-        'passed' => ($bestScore !== null && $bestScore >= 75)
+        'passed' => $passed
     ];
 }
+
 
 function format_deadline_date($deadlineUtc) {
     if (trim($deadlineUtc) === '') return '—';
@@ -338,20 +376,15 @@ $summaryOk = !empty($summaryState['ok']);
     // Default: only the initial attempts are available.
     $maxAllowedAttempts = min($initialAttemptLimit, $maxTotalAttemptsWithoutAdminOverride);
 
-    // Extra attempts become available only after remediation acknowledgement is completed.
-    $completedRemediation = $engine->getLatestCompletedRequiredAction(
-        $userId,
-        $cohortId,
-        $lessonId,
-        'remediation_acknowledgement'
-    );
+// Extra attempts become available only after remediation acknowledgement is completed.
+$completedRemediation = !empty($completedRemediationByLesson[$lessonId]);
 
-    if ($completedRemediation !== null) {
-        $maxAllowedAttempts = min(
-            $initialAttemptLimit + $extraAttemptsAfterThresholdFail,
-            $maxTotalAttemptsWithoutAdminOverride
-        );
-    }
+if ($completedRemediation) {
+    $maxAllowedAttempts = min(
+        $initialAttemptLimit + $extraAttemptsAfterThresholdFail,
+        $maxTotalAttemptsWithoutAdminOverride
+    );
+}
 
     $attemptsLeft = max(0, $maxAllowedAttempts - $attemptsUsed);
 
