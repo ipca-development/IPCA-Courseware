@@ -103,20 +103,44 @@ try {
     ]);
 
     $summaryRequiredBeforeTestStart = !empty($policy['summary_required_before_test_start']);
-    $initialAttemptLimit = (int)($policy['initial_attempt_limit'] ?? 3);
-    $extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
-    $maxTotalAttemptsWithoutAdminOverride = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
+$initialAttemptLimit = (int)($policy['initial_attempt_limit'] ?? 3);
+$extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
+$maxTotalAttemptsWithoutAdminOverride = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
+$thresholdAttemptForRemediationEmail = (int)($policy['threshold_attempt_for_remediation_email'] ?? 3);
 
-    $calculatedMaxAttempts = $initialAttemptLimit + $extraAttemptsAfterThresholdFail;
-    if ($calculatedMaxAttempts <= 0) {
-        $calculatedMaxAttempts = 1;
-    }
+if ($initialAttemptLimit <= 0) {
+    $initialAttemptLimit = 3;
+}
+if ($extraAttemptsAfterThresholdFail < 0) {
+    $extraAttemptsAfterThresholdFail = 0;
+}
+if ($maxTotalAttemptsWithoutAdminOverride <= 0) {
+    $maxTotalAttemptsWithoutAdminOverride = 5;
+}
+if ($thresholdAttemptForRemediationEmail <= 0) {
+    $thresholdAttemptForRemediationEmail = 3;
+}
 
-    if ($maxTotalAttemptsWithoutAdminOverride > 0) {
-        $maxAllowedAttempts = min($calculatedMaxAttempts, $maxTotalAttemptsWithoutAdminOverride);
-    } else {
-        $maxAllowedAttempts = $calculatedMaxAttempts;
-    }
+/*
+ * IMPORTANT:
+ * Before remediation acknowledgement is completed, only the initial attempt block is available.
+ * After remediation acknowledgement is completed, the student may use the extra attempts.
+ */
+$maxAllowedAttempts = min($initialAttemptLimit, $maxTotalAttemptsWithoutAdminOverride);
+
+$completedRemediation = $engine->getLatestCompletedRequiredAction(
+    $userId,
+    $cohortId,
+    $lessonId,
+    'remediation_acknowledgement'
+);
+
+if ($completedRemediation !== null) {
+    $maxAllowedAttempts = min(
+        $initialAttemptLimit + $extraAttemptsAfterThresholdFail,
+        $maxTotalAttemptsWithoutAdminOverride
+    );
+}
 
     $summaryStatus = 'missing';
 

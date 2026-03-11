@@ -345,6 +345,37 @@ public function getPendingRequiredAction(int $userId, int $cohortId, int $lesson
     return $row ?: null;
 }
 
+	
+/**
+ * Return most recent completed/approved required action for user/cohort/lesson/type.
+ */
+public function getLatestCompletedRequiredAction(int $userId, int $cohortId, int $lessonId, string $actionType): ?array
+{
+    $sql = "
+        SELECT *
+        FROM student_required_actions
+        WHERE user_id = :user_id
+          AND cohort_id = :cohort_id
+          AND lesson_id = :lesson_id
+          AND action_type = :action_type
+          AND status IN ('completed','approved')
+        ORDER BY id DESC
+        LIMIT 1
+    ";
+
+    $stmt = $this->pdo->prepare($sql);
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':cohort_id' => $cohortId,
+        ':lesson_id' => $lessonId,
+        ':action_type' => $actionType,
+    ]);
+
+    $row = $stmt->fetch();
+    return $row ?: null;
+}	
+	
+	
 /**
  * Fetch required action by token.
  */
