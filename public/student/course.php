@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
+require_once __DIR__ . '/../../src/courseware_progression_v2.php';
 
 cw_require_login();
 
@@ -36,10 +37,35 @@ $co->execute([$cohortId]);
 $cohort = $co->fetch(PDO::FETCH_ASSOC);
 if (!$cohort) exit('Cohort not found');
 
-function lesson_passed(PDO $pdo, $userId, $lessonId) {
-    $st = $pdo->prepare("SELECT status FROM lesson_activity WHERE user_id=? AND lesson_id=? LIMIT 1");
-    $st->execute([$userId, $lessonId]);
-    $lessonActivityPassed = ((string)$st->fetchColumn() === 'passed');
+
+function lesson_passed(PDO $pdo, $userId, $cohortId, $lessonId) {
+    $st = $pdo->prepare("
+        SELECT completion_status, test_pass_status
+        FROM lesson_activity
+        WHERE user_id=? AND cohort_id=? AND lesson_id=?
+        LIMIT 1
+    ");
+    $st->execute([$userId, $cohortId, $lessonId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+
+    $completionStatus = (string)($row['completion_status'] ?? '');
+    $testPassStatus   = (string)($row['test_pass_status'] ?? '');
+
+    if ($completionStatus === 'completed' || $testPassStatus === 'passed') {
+        return true;
+    }
+
+    $pt = $pdo->prepare("
+        SELECT 1
+        FROM progress_tests_v2
+        WHERE user_id=? AND cohort_id=? AND lesson_id=? AND status='completed' AND pass_gate_met=1
+        LIMIT 1
+    ");
+    $pt->execute([$userId, $cohortId, $lessonId]);
+
+    return (bool)$pt->fetchColumn();
+}
+
 
     if ($lessonActivityPassed) {
         return true;
@@ -279,9 +305,9 @@ foreach ($lessonRows as $l) {
 
     if ($role === 'student') {
         if (!empty($l['unlock_after_lesson_id'])) {
-            $locked = !lesson_passed($pdo, $userId, (int)$l['unlock_after_lesson_id']);
+            $locked = !lesson_passed($pdo, $userId, $cohortId, (int)$l['unlock_after_lesson_id']);
         }
-        $passed = lesson_passed($pdo, $userId, $lessonId);
+        $passed = lesson_passed($pdo, $userId, $cohortId, $lessonId);
     }
 
     $first = $pdo->prepare("
@@ -305,28 +331,47 @@ $summaryOk = !empty($summaryState['ok']);
         ? ['max_attempt' => 0, 'last' => null, 'best_score' => null, 'passed' => false]
         : get_test_status_v2($pdo, $userId, $cohortId, $lessonId);
 
-	$last = $test['last'];
-$attemptsUsed = (int)$test['max_attempt'];
+    $last = $test['last'];
+    $attemptsUsed = (int)$test['max_attempt'];
 
-$initialAttemptLimit = (int)($policy['initial_attempt_limit'] ?? 3);
-$extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
-$maxTotalAttemptsWithoutAdminOverride = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
+    $initialAttemptLimit = (int)($policy['initial_attempt_limit'] ?? 3);
+    $extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
+    $maxTotalAttemptsWithoutAdminOverride = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
 
-$calculatedMaxAttempts = $initialAttemptLimit + $extraAttemptsAfterThresholdFail;
-if ($calculatedMaxAttempts <= 0) {
-    $calculatedMaxAttempts = 1;
-}
+    if ($initialAttemptLimit <= 0) {
+        $initialAttemptLimit = 3;
+    }
 
-if ($maxTotalAttemptsWithoutAdminOverride > 0) {
-    $maxAllowedAttempts = min($calculatedMaxAttempts, $maxTotalAttemptsWithoutAdminOverride);
-} else {
-    $maxAllowedAttempts = $calculatedMaxAttempts;
-}
+    if ($extraAttemptsAfterThresholdFail < 0) {
+        $extraAttemptsAfterThresholdFail = 0;
+    }
 
-$attemptsLeft = max(0, $maxAllowedAttempts - $attemptsUsed);
+    if ($maxTotalAttemptsWithoutAdminOverride <= 0) {
+        $maxTotalAttemptsWithoutAdminOverride = $initialAttemptLimit + $extraAttemptsAfterThresholdFail;
+    }
 
-$testPassed = !empty($test['passed']);
-$bestScore = $test['best_score'];
+    // Default: only the initial attempts are available.
+    $maxAllowedAttempts = min($initialAttemptLimit, $maxTotalAttemptsWithoutAdminOverride);
+
+    // Extra attempts become available only after remediation acknowledgement is completed.
+    $completedRemediation = $engine->getLatestCompletedRequiredAction(
+        $userId,
+        $cohortId,
+        $lessonId,
+        'remediation_acknowledgement'
+    );
+
+    if ($completedRemediation !== null) {
+        $maxAllowedAttempts = min(
+            $initialAttemptLimit + $extraAttemptsAfterThresholdFail,
+            $maxTotalAttemptsWithoutAdminOverride
+        );
+    }
+
+    $attemptsLeft = max(0, $maxAllowedAttempts - $attemptsUsed);
+
+    $testPassed = !empty($test['passed']);
+    $bestScore = $test['best_score'];
 
     $canTest = true;
     if ($role === 'student' && $locked) $canTest = false;
