@@ -418,10 +418,7 @@ $summaryOk = !empty($summaryState['ok']);
         ]
         : get_instructor_decision_state($pdo, $userId, $cohortId, $lessonId);
 
-    $maxAllowedAttempts = $maxTotalAttemptsWithoutAdminOverride + (int)$instructorDecision['granted_extra_attempts'];
-    if ($maxAllowedAttempts < $baseMaxAllowedAttempts) {
-        $maxAllowedAttempts = $baseMaxAllowedAttempts;
-    }
+  $maxAllowedAttempts = $baseMaxAllowedAttempts + (int)$instructorDecision['granted_extra_attempts'];
 
     $attemptsLeft = max(0, $maxAllowedAttempts - $attemptsUsed);
 

@@ -162,10 +162,7 @@ $oneOnOneRequired = (int)($activityGate['one_on_one_required'] ?? 0);
 $oneOnOneCompleted = (int)($activityGate['one_on_one_completed'] ?? 0);
 $trainingSuspended = (int)($activityGate['training_suspended'] ?? 0);
 
-$maxAllowedAttempts = $maxTotalAttemptsWithoutAdminOverride + $grantedExtraAttempts;
-if ($maxAllowedAttempts < $baseMaxAllowedAttempts) {
-    $maxAllowedAttempts = $baseMaxAllowedAttempts;
-}
+$maxAllowedAttempts = $baseMaxAllowedAttempts + $grantedExtraAttempts;
 
     $summaryStatus = 'missing';
 
