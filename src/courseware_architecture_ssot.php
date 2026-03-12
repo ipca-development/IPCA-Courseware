@@ -10,18 +10,27 @@ return [
         'media'     => 'DigitalOcean Spaces',
         'email'     => 'Postmark',
         'code'      => 'GitHub',
+        'scan_mode' => 'deployment_web_root',
     ],
 
+    /**
+     * IMPORTANT:
+     * This scanner currently scans the deployed web root:
+     * /var/www/html
+     *
+     * In GitHub this corresponds to the repository's /public folder.
+     */
     'required_directories' => [
-        'public',
-        'src',
-        'vendor',
+        'admin',
+        'assets',
+        'instructor',
+        'player',
+        'student',
     ],
 
     'ignored_directories' => [
         '.git',
         '.github',
-        'vendor',
         'node_modules',
     ],
 
@@ -36,77 +45,95 @@ return [
         '/~$/',
         '/copy of/i',
         '/\.DS_Store$/i',
+        '/backup/i',
     ],
 
     'max_repo_file_size_bytes' => 15 * 1024 * 1024,
+
+    /**
+     * Only require files that should exist inside the deployed web root.
+     */
+    'required_files' => [
+        'index.php',
+        'login.php',
+        'logout.php',
+        'admin/architecture_scanner.php',
+    ],
+
+    /**
+     * Exclude scanner files from secret scanning to avoid self-triggered regex false positives.
+     */
+    'secret_scan_excluded_files' => [
+        'admin/architecture_scanner.php',
+    ],
 
     'components' => [
         'slide_player' => [
             'label' => 'Slide player',
             'markers' => [
-                'public',
-                'src',
+                'player',
+                'player/api',
             ],
         ],
         'ai_narration' => [
             'label' => 'AI narration (OpenAI TTS)',
             'markers' => [
-                'src',
+                'player',
+                'student/api',
+                'admin',
             ],
         ],
         'progress_tests' => [
             'label' => 'AI-generated progress tests',
             'markers' => [
-                'src',
+                'student',
+                'student/api',
             ],
         ],
         'progression_engine_v2' => [
             'label' => 'Training progression engine (v2)',
             'markers' => [
-                'src',
+                'student/api',
+                'admin',
             ],
         ],
         'remediation_escalation' => [
             'label' => 'Remediation / instructor escalation logic',
             'markers' => [
-                'src',
+                'instructor',
+                'admin',
             ],
         ],
         'policy_engine' => [
             'label' => 'Policy engine',
             'markers' => [
-                'src',
+                'admin',
+                'student/api',
+                'instructor',
             ],
         ],
         'cohort_scheduling' => [
             'label' => 'Cohort scheduling engine',
             'markers' => [
-                'src',
+                'admin',
+                'instructor',
+                'student',
             ],
         ],
         'slide_designer_canonical' => [
             'label' => 'Slide designer / canonical data system',
             'markers' => [
-                'src',
+                'admin',
+                'assets',
             ],
         ],
     ],
 
-    'required_files' => [
-        'composer.json',
-        'composer.lock',
-        'Dockerfile',
-        '.htaccess',
-        'src/courseware_architecture_ssot.php',
-        'src/Services/ArchitectureScanner.php',
-        'public/admin/architecture_scanner.php',
-    ],
-
     'secret_patterns' => [
         'OpenAI API key' => '/sk-[A-Za-z0-9]{20,}/',
-        'Postmark token' => '/postmark[a-z0-9\-_]{10,}/i',
-        'AWS / Spaces key assignment' => '/(AWS|SPACES)_(ACCESS_KEY|SECRET_KEY)/i',
-        'Generic bearer token' => '/Bearer\s+[A-Za-z0-9\-\._~\+\/]+=*/i',
+        'Postmark token assignment' => '/postmark[a-z0-9\-_]{10,}/i',
+        'AWS or Spaces key assignment' => '/(AWS|SPACES)_(ACCESS_KEY|SECRET_KEY)/i',
+        'Hardcoded bearer token usage' => '/Bearer\s+[A-Za-z0-9\-\._~\+\/=]{20,}/i',
     ],
 
     'scannable_extensions' => [
