@@ -8,15 +8,6 @@ require_once __DIR__ . '/../../src/openai.php';
 
 cw_require_login();
 
-$u = cw_current_user($pdo);
-$userId = (int)($u['id'] ?? 0);
-$role   = (string)($u['role'] ?? '');
-
-if ($role !== 'admin') {
-    http_response_code(403);
-    exit('Forbidden');
-}
-
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 $lessonId = (int)($_GET['lesson_id'] ?? 0);
 $studentId = (int)($_GET['user_id'] ?? 0);
@@ -26,7 +17,22 @@ if ($cohortId <= 0 || $lessonId <= 0 || $studentId <= 0) {
     exit('Missing user_id, cohort_id or lesson_id');
 }
 
+$u = cw_current_user($pdo);
+$userId = (int)($u['id'] ?? 0);
+$role   = (string)($u['role'] ?? '');
+
 $engine = new CoursewareProgressionV2($pdo);
+
+$policy = $engine->getAllPolicies([
+    'cohort_id' => $cohortId
+]);
+
+$chiefInstructorUserId = (int)($policy['chief_instructor_user_id'] ?? 0);
+
+if ($role !== 'admin' && $userId !== $chiefInstructorUserId) {
+    http_response_code(403);
+    exit('Forbidden');
+}
 
 $sumSt = $pdo->prepare("
     SELECT *
