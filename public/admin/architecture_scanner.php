@@ -1,24 +1,11 @@
 <?php
 declare(strict_types=1);
 
-echo '<pre>';
-echo '__DIR__ = ' . __DIR__ . "\n";
-echo 'dirname(__DIR__) = ' . dirname(__DIR__) . "\n";
-echo 'dirname(dirname(__DIR__)) = ' . dirname(dirname(__DIR__)) . "\n";
-echo 'realpath(__DIR__) = ' . realpath(__DIR__) . "\n";
-echo 'realpath(__DIR__ . "/..") = ' . realpath(__DIR__ . '/..') . "\n";
-echo 'realpath(__DIR__ . "/../../") = ' . realpath(__DIR__ . '/../../') . "\n";
-echo '</pre>';
-exit;
-
 $config = require __DIR__ . '/../../src/courseware_architecture_ssot.php';
 require_once __DIR__ . '/../../src/Services/ArchitectureScanner.php';
 
-/**
- * Repo root:
- * public/admin/architecture_scanner.php -> ../../ = repo root
- */
-$repoRoot = realpath(__DIR__ . '/../../');
+$repoRoot = realpath(__DIR__ . '/..');
+
 $scanner  = new ArchitectureScanner($repoRoot, $config);
 $report   = $scanner->scan();
 
@@ -34,6 +21,8 @@ if ($report['status'] === 'WARNING') {
     $statusColor = '#dc2626';
 }
 ?>
+
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
