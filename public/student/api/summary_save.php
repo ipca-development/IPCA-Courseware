@@ -53,15 +53,40 @@ try {
         exit;
     }
 
+    $existingSt = $pdo->prepare("
+      SELECT review_status
+      FROM lesson_summaries
+      WHERE user_id=? AND cohort_id=? AND lesson_id=?
+      LIMIT 1
+    ");
+    $existingSt->execute([$userId, $cohortId, $lessonId]);
+    $existing = $existingSt->fetch(PDO::FETCH_ASSOC);
+
+    $existingReviewStatus = (string)($existing['review_status'] ?? '');
+    $newReviewStatus = $existingReviewStatus !== '' ? $existingReviewStatus : 'pending';
+
+    if ($existingReviewStatus === 'needs_revision') {
+        $newReviewStatus = 'pending';
+    }
+
     $stmt = $pdo->prepare("
-      INSERT INTO lesson_summaries (user_id, cohort_id, lesson_id, summary_html, summary_plain)
-      VALUES (?,?,?,?,?)
+      INSERT INTO lesson_summaries
+      (
+        user_id,
+        cohort_id,
+        lesson_id,
+        summary_html,
+        summary_plain,
+        review_status
+      )
+      VALUES (?,?,?,?,?,?)
       ON DUPLICATE KEY UPDATE
         summary_html=VALUES(summary_html),
         summary_plain=VALUES(summary_plain),
+        review_status=VALUES(review_status),
         updated_at=CURRENT_TIMESTAMP
     ");
-    $stmt->execute([$userId, $cohortId, $lessonId, $summaryHtml, $plain]);
+    $stmt->execute([$userId, $cohortId, $lessonId, $summaryHtml, $plain, $newReviewStatus]);
 
     echo json_encode(['ok'=>true]);
 } catch (Throwable $e) {
