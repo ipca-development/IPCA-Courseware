@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-$config = require __DIR__ . '/../../config/courseware_architecture_ssot.php';
+$config = require __DIR__ . '/../config/courseware_architecture_ssot.php';
 require_once __DIR__ . '/../../src/Services/ArchitectureScanner.php';
 
 /**
