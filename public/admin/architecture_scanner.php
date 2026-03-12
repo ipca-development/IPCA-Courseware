@@ -1,11 +1,12 @@
 <?php
 declare(strict_types=1);
 
-$config = require __DIR__ . '/../config/courseware_architecture_ssot.php';
+$config = require __DIR__ . '/../../src/courseware_architecture_ssot.php';
 require_once __DIR__ . '/../../src/Services/ArchitectureScanner.php';
 
 /**
- * Adjust repo root only if your public directory is not /public.
+ * Repo root:
+ * public/admin/architecture_scanner.php -> ../../ = repo root
  */
 $repoRoot = realpath(__DIR__ . '/../../');
 $scanner  = new ArchitectureScanner($repoRoot, $config);
