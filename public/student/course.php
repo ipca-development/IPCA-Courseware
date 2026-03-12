@@ -475,6 +475,7 @@ $summaryOk = !empty($summaryState['ok']);
         'passed' => $passed,
         'summary_ok' => $summaryOk,
         'summary_len' => $sumLen,
+        'summary_review_status' => (string)$summaryState['review_status'],
         'test' => $test,
         'test_passed' => $testPassed,
         'best_score' => $bestScore,
@@ -1041,7 +1042,7 @@ cw_header('Course');
 
                       <?php endif; ?>
 
-                       <?php if ($lx['can_test']): ?>
+                         <?php if ($lx['can_test']): ?>
                         <a class="btn btn-sm" href="<?= h($lx['progress_test_url']) ?>">Start</a>
                       <?php elseif (!empty($lx['instructor_decision']['training_suspended'])): ?>
                         <div class="smallmuted">Training suspended — contact Chief Instructor</div>
@@ -1049,6 +1050,10 @@ cw_header('Course');
                         <div class="smallmuted">Instructor session required before next attempt</div>
                       <?php elseif ($lx['locked']): ?>
                         <div class="smallmuted">Complete previous lesson first</div>
+                      <?php elseif (($lx['summary_review_status'] ?? '') === 'pending'): ?>
+                        <div class="smallmuted">Summary pending review</div>
+                      <?php elseif (($lx['summary_review_status'] ?? '') === 'needs_revision'): ?>
+                        <div class="smallmuted">Summary revision required</div>
                       <?php elseif (!$lx['summary_ok']): ?>
                         <div class="smallmuted">Complete summary first</div>
                       <?php elseif (!$lx['test_passed'] && $attemptsLeft <= 0): ?>
