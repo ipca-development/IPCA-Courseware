@@ -257,15 +257,19 @@ cw_header('Summary Review');
         </div>
     <?php endif; ?>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
+ <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:20px;">
         <div style="padding:16px;border:1px solid #ddd;border-radius:10px;background:#fff;">
             <h3>Current Summary</h3>
-            <div style="white-space:pre-wrap;"><?= nl2br(h3((string)($summary['summary_plain'] ?? ''))) ?></div>
+            <div style="border:1px solid #eee;border-radius:10px;padding:12px;min-height:180px;background:#fafafa;overflow:auto;">
+                <?= (string)($summary['summary_html'] ?? '') ?>
+            </div>
         </div>
 
         <div style="padding:16px;border:1px solid #ddd;border-radius:10px;background:#fff;">
             <h3>Last Reviewed Summary</h3>
-            <div style="white-space:pre-wrap;"><?= nl2br(h3((string)($summary['last_reviewed_summary_plain'] ?? ''))) ?></div>
+            <div style="border:1px solid #eee;border-radius:10px;padding:12px;min-height:180px;background:#fafafa;overflow:auto;">
+                <?= (string)($summary['last_reviewed_summary_html'] ?? '') ?>
+            </div>
         </div>
     </div>
 
