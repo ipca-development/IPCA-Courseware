@@ -126,7 +126,7 @@ if ($thresholdAttemptForRemediationEmail <= 0) {
  * Before remediation acknowledgement is completed, only the initial attempt block is available.
  * After remediation acknowledgement is completed, the student may use the extra attempts.
  */
-$maxAllowedAttempts = min($initialAttemptLimit, $maxTotalAttemptsWithoutAdminOverride);
+$baseMaxAllowedAttempts = min($initialAttemptLimit, $maxTotalAttemptsWithoutAdminOverride);
 
 $completedRemediation = $engine->getLatestCompletedRequiredAction(
     $userId,
@@ -136,10 +136,35 @@ $completedRemediation = $engine->getLatestCompletedRequiredAction(
 );
 
 if ($completedRemediation !== null) {
-    $maxAllowedAttempts = min(
+    $baseMaxAllowedAttempts = min(
         $initialAttemptLimit + $extraAttemptsAfterThresholdFail,
         $maxTotalAttemptsWithoutAdminOverride
     );
+}
+
+$activityGateSt = $pdo->prepare("
+    SELECT
+        granted_extra_attempts,
+        one_on_one_required,
+        one_on_one_completed,
+        training_suspended
+    FROM lesson_activity
+    WHERE user_id = ?
+      AND cohort_id = ?
+      AND lesson_id = ?
+    LIMIT 1
+");
+$activityGateSt->execute([$userId, $cohortId, $lessonId]);
+$activityGate = $activityGateSt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+$grantedExtraAttempts = max(0, (int)($activityGate['granted_extra_attempts'] ?? 0));
+$oneOnOneRequired = (int)($activityGate['one_on_one_required'] ?? 0);
+$oneOnOneCompleted = (int)($activityGate['one_on_one_completed'] ?? 0);
+$trainingSuspended = (int)($activityGate['training_suspended'] ?? 0);
+
+$maxAllowedAttempts = $maxTotalAttemptsWithoutAdminOverride + $grantedExtraAttempts;
+if ($maxAllowedAttempts < $baseMaxAllowedAttempts) {
+    $maxAllowedAttempts = $baseMaxAllowedAttempts;
 }
 
     $summaryStatus = 'missing';
@@ -227,6 +252,20 @@ if ($pendingInstructorApproval) {
     ]);
 }
 
+if ($trainingSuspended === 1) {
+    json_ok([
+        'ok' => false,
+        'error' => 'Further attempts are blocked because training progression has been suspended.'
+    ]);
+}
+
+if ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
+    json_ok([
+        'ok' => false,
+        'error' => 'Further attempts are blocked until the required instructor session is completed.'
+    ]);
+}	
+	
     $mx = $pdo->prepare("
         SELECT MAX(attempt)
         FROM progress_tests_v2

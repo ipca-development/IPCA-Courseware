@@ -163,6 +163,31 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
 }
 
 
+function get_instructor_decision_state(PDO $pdo, $userId, $cohortId, $lessonId) {
+    $st = $pdo->prepare("
+        SELECT
+            granted_extra_attempts,
+            one_on_one_required,
+            one_on_one_completed,
+            training_suspended
+        FROM lesson_activity
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id = ?
+        LIMIT 1
+    ");
+    $st->execute([$userId, $cohortId, $lessonId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+
+    return [
+        'granted_extra_attempts' => (int)($row['granted_extra_attempts'] ?? 0),
+        'one_on_one_required' => (int)($row['one_on_one_required'] ?? 0),
+        'one_on_one_completed' => (int)($row['one_on_one_completed'] ?? 0),
+        'training_suspended' => (int)($row['training_suspended'] ?? 0),
+    ];
+}
+
+
 function format_deadline_date($deadlineUtc) {
     if (trim($deadlineUtc) === '') return '—';
 
@@ -373,18 +398,30 @@ $summaryOk = !empty($summaryState['ok']);
         $maxTotalAttemptsWithoutAdminOverride = $initialAttemptLimit + $extraAttemptsAfterThresholdFail;
     }
 
-    // Default: only the initial attempts are available.
-    $maxAllowedAttempts = min($initialAttemptLimit, $maxTotalAttemptsWithoutAdminOverride);
+    $completedRemediation = !empty($completedRemediationByLesson[$lessonId]);
 
-// Extra attempts become available only after remediation acknowledgement is completed.
-$completedRemediation = !empty($completedRemediationByLesson[$lessonId]);
+    $baseMaxAllowedAttempts = min($initialAttemptLimit, $maxTotalAttemptsWithoutAdminOverride);
 
-if ($completedRemediation) {
-    $maxAllowedAttempts = min(
-        $initialAttemptLimit + $extraAttemptsAfterThresholdFail,
-        $maxTotalAttemptsWithoutAdminOverride
-    );
-}
+    if ($completedRemediation) {
+        $baseMaxAllowedAttempts = min(
+            $initialAttemptLimit + $extraAttemptsAfterThresholdFail,
+            $maxTotalAttemptsWithoutAdminOverride
+        );
+    }
+
+    $instructorDecision = ($role === 'admin')
+        ? [
+            'granted_extra_attempts' => 0,
+            'one_on_one_required' => 0,
+            'one_on_one_completed' => 0,
+            'training_suspended' => 0,
+        ]
+        : get_instructor_decision_state($pdo, $userId, $cohortId, $lessonId);
+
+    $maxAllowedAttempts = $maxTotalAttemptsWithoutAdminOverride + (int)$instructorDecision['granted_extra_attempts'];
+    if ($maxAllowedAttempts < $baseMaxAllowedAttempts) {
+        $maxAllowedAttempts = $baseMaxAllowedAttempts;
+    }
 
     $attemptsLeft = max(0, $maxAllowedAttempts - $attemptsUsed);
 
@@ -396,6 +433,14 @@ if ($completedRemediation) {
     if ($role === 'student' && !$summaryOk) $canTest = false;
     if ($role === 'student' && $testPassed) $canTest = false;
     if ($role === 'student' && $attemptsLeft <= 0) $canTest = false;
+    if ($role === 'student' && (int)$instructorDecision['training_suspended'] === 1) $canTest = false;
+    if (
+        $role === 'student' &&
+        (int)$instructorDecision['one_on_one_required'] === 1 &&
+        (int)$instructorDecision['one_on_one_completed'] !== 1
+    ) {
+        $canTest = false;
+    }
 
     $ptUrlV2 = '/student/progress_test_v2.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
     $deadline = deadline_progress_meta((string)$cohort['start_date'], (string)$l['deadline_utc']);
@@ -438,6 +483,7 @@ if ($completedRemediation) {
         'best_score' => $bestScore,
         'attempts_left' => $attemptsLeft,
         'can_test' => $canTest,
+        'instructor_decision' => $instructorDecision,
         'progress_test_url' => $ptUrlV2,
         'first_slide_id' => $firstSlideId
     ];
@@ -998,8 +1044,12 @@ cw_header('Course');
 
                       <?php endif; ?>
 
-                      <?php if ($lx['can_test']): ?>
+                       <?php if ($lx['can_test']): ?>
                         <a class="btn btn-sm" href="<?= h($lx['progress_test_url']) ?>">Start</a>
+                      <?php elseif (!empty($lx['instructor_decision']['training_suspended'])): ?>
+                        <div class="smallmuted">Training suspended — contact Chief Instructor</div>
+                      <?php elseif (!empty($lx['instructor_decision']['one_on_one_required']) && empty($lx['instructor_decision']['one_on_one_completed'])): ?>
+                        <div class="smallmuted">Instructor session required before next attempt</div>
                       <?php elseif ($lx['locked']): ?>
                         <div class="smallmuted">Complete previous lesson first</div>
                       <?php elseif (!$lx['summary_ok']): ?>

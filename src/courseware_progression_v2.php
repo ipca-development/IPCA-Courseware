@@ -397,6 +397,25 @@ public function getRequiredActionByToken(string $token): ?array
     return $row ?: null;
 }
 
+public function getRequiredActionById(int $actionId): ?array
+{
+    $sql = "
+        SELECT *
+        FROM student_required_actions
+        WHERE id = :id
+        LIMIT 1
+    ";
+
+    $stmt = $this->pdo->prepare($sql);
+    $stmt->execute([
+        ':id' => $actionId,
+    ]);
+
+    $row = $stmt->fetch();
+    return $row ?: null;
+}	
+	
+	
 /**
  * Mark required action as opened.
  */
@@ -452,6 +471,342 @@ public function approveRequiredAction(int $actionId, ?string $ipAddress = null, 
         ':updated_at' => gmdate('Y-m-d H:i:s'),
         ':id' => $actionId,
     ]);
+}	
+	
+public function recordInstructorDecision(
+    int $actionId,
+    array $decision,
+    int $actorUserId,
+    ?string $ipAddress = null,
+    ?string $userAgent = null
+): array {
+    $action = $this->getRequiredActionById($actionId);
+    if (!$action) {
+        throw new RuntimeException('Instructor approval action not found.');
+    }
+
+    if ((string)$action['action_type'] !== 'instructor_approval') {
+        throw new RuntimeException('Action is not instructor_approval.');
+    }
+
+    if (!in_array((string)$action['status'], ['pending', 'opened'], true)) {
+        throw new RuntimeException('This instructor action has already been decided.');
+    }
+
+    $decisionCode = trim((string)($decision['decision_code'] ?? ''));
+    $allowedDecisionCodes = [
+        'approve_additional_attempts',
+        'approve_with_summary_revision',
+        'approve_with_one_on_one',
+        'suspend_training',
+    ];
+
+    if (!in_array($decisionCode, $allowedDecisionCodes, true)) {
+        throw new RuntimeException('Invalid decision_code.');
+    }
+
+    $grantedExtraAttempts = max(0, min(5, (int)($decision['granted_extra_attempts'] ?? 0)));
+    $summaryRevisionRequired = !empty($decision['summary_revision_required']) ? 1 : 0;
+    $oneOnOneRequired = !empty($decision['one_on_one_required']) ? 1 : 0;
+    $trainingSuspended = !empty($decision['training_suspended']) ? 1 : 0;
+    $majorInterventionFlag = !empty($decision['major_intervention_flag']) ? 1 : 0;
+    $decisionNotes = trim((string)($decision['decision_notes'] ?? ''));
+
+    if ($decisionNotes === '') {
+        throw new RuntimeException('decision_notes is required.');
+    }
+
+    if ($decisionCode === 'approve_additional_attempts') {
+        $summaryRevisionRequired = 0;
+        $oneOnOneRequired = 0;
+        $trainingSuspended = 0;
+    } elseif ($decisionCode === 'approve_with_summary_revision') {
+        $summaryRevisionRequired = 1;
+        $oneOnOneRequired = 0;
+        $trainingSuspended = 0;
+    } elseif ($decisionCode === 'approve_with_one_on_one') {
+        $summaryRevisionRequired = 0;
+        $oneOnOneRequired = 1;
+        $trainingSuspended = 0;
+    } elseif ($decisionCode === 'suspend_training') {
+        $trainingSuspended = 1;
+        $summaryRevisionRequired = 0;
+        $oneOnOneRequired = 0;
+        $grantedExtraAttempts = 0;
+        $majorInterventionFlag = 1;
+    }
+
+    if (!$trainingSuspended && $grantedExtraAttempts < 0) {
+        throw new RuntimeException('Invalid granted_extra_attempts.');
+    }
+
+    $decisionPayload = [
+        'decision_code' => $decisionCode,
+        'granted_extra_attempts' => $grantedExtraAttempts,
+        'summary_revision_required' => $summaryRevisionRequired,
+        'one_on_one_required' => $oneOnOneRequired,
+        'training_suspended' => $trainingSuspended,
+        'major_intervention_flag' => $majorInterventionFlag,
+        'decision_notes' => $decisionNotes,
+    ];
+
+    $nowUtc = gmdate('Y-m-d H:i:s');
+
+    $this->pdo->beginTransaction();
+
+    try {
+        $updAction = $this->pdo->prepare("
+            UPDATE student_required_actions
+            SET
+                status = 'approved',
+                approved_at = :approved_at,
+                completed_at = COALESCE(completed_at, :completed_at),
+                ip_address = COALESCE(:ip_address, ip_address),
+                user_agent = COALESCE(:user_agent, user_agent),
+                decision_code = :decision_code,
+                decision_notes = :decision_notes,
+                decision_payload_json = :decision_payload_json,
+                decision_by_user_id = :decision_by_user_id,
+                decision_at = :decision_at,
+                granted_extra_attempts = :granted_extra_attempts,
+                summary_revision_required = :summary_revision_required,
+                one_on_one_required = :one_on_one_required,
+                training_suspended = :training_suspended,
+                major_intervention_flag = :major_intervention_flag,
+                updated_at = :updated_at
+            WHERE id = :id
+        ");
+        $updAction->execute([
+            ':approved_at' => $nowUtc,
+            ':completed_at' => $nowUtc,
+            ':ip_address' => $ipAddress,
+            ':user_agent' => $userAgent,
+            ':decision_code' => $decisionCode,
+            ':decision_notes' => $decisionNotes,
+            ':decision_payload_json' => json_encode($decisionPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+            ':decision_by_user_id' => $actorUserId,
+            ':decision_at' => $nowUtc,
+            ':granted_extra_attempts' => $grantedExtraAttempts,
+            ':summary_revision_required' => $summaryRevisionRequired,
+            ':one_on_one_required' => $oneOnOneRequired,
+            ':training_suspended' => $trainingSuspended,
+            ':major_intervention_flag' => $majorInterventionFlag,
+            ':updated_at' => $nowUtc,
+            ':id' => $actionId,
+        ]);
+
+        if ($summaryRevisionRequired === 1) {
+            $updSummary = $this->pdo->prepare("
+                UPDATE lesson_summaries
+                SET
+                    review_status = 'needs_revision',
+                    updated_at = NOW()
+                WHERE user_id = ?
+                  AND cohort_id = ?
+                  AND lesson_id = ?
+            ");
+            $updSummary->execute([
+                (int)$action['user_id'],
+                (int)$action['cohort_id'],
+                (int)$action['lesson_id']
+            ]);
+        }
+
+        $activitySel = $this->pdo->prepare("
+            SELECT id
+            FROM lesson_activity
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND lesson_id = ?
+            LIMIT 1
+        ");
+        $activitySel->execute([
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id']
+        ]);
+        $activityRow = $activitySel->fetch();
+
+        $mappedCompletionStatus = 'remediation_required';
+        if ($trainingSuspended === 1) {
+            $mappedCompletionStatus = 'blocked_final';
+        } elseif ($summaryRevisionRequired === 1) {
+            $mappedCompletionStatus = 'awaiting_summary_review';
+        } elseif ($oneOnOneRequired === 1) {
+            $mappedCompletionStatus = 'remediation_required';
+        } else {
+            $mappedCompletionStatus = 'in_progress';
+        }
+
+        if ($activityRow) {
+            $updActivity = $this->pdo->prepare("
+                UPDATE lesson_activity
+                SET
+                    completion_status = :completion_status,
+                    granted_extra_attempts = :granted_extra_attempts,
+                    one_on_one_required = :one_on_one_required,
+                    one_on_one_completed = CASE
+                        WHEN :one_on_one_required = 1 THEN 0
+                        ELSE one_on_one_completed
+                    END,
+                    training_suspended = :training_suspended,
+                    latest_instructor_action_id = :latest_instructor_action_id,
+                    last_state_eval_at = :last_state_eval_at,
+                    updated_at = NOW()
+                WHERE id = :id
+            ");
+            $updActivity->execute([
+                ':completion_status' => $mappedCompletionStatus,
+                ':granted_extra_attempts' => $grantedExtraAttempts,
+                ':one_on_one_required' => $oneOnOneRequired,
+                ':training_suspended' => $trainingSuspended,
+                ':latest_instructor_action_id' => $actionId,
+                ':last_state_eval_at' => $nowUtc,
+                ':id' => (int)$activityRow['id'],
+            ]);
+        }
+
+        $this->logProgressionEvent([
+            'user_id' => (int)$action['user_id'],
+            'cohort_id' => (int)$action['cohort_id'],
+            'lesson_id' => (int)$action['lesson_id'],
+            'progress_test_id' => isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null,
+            'event_type' => 'instructor_intervention',
+            'event_code' => 'instructor_decision',
+            'event_status' => 'warning',
+            'actor_type' => 'admin',
+            'actor_user_id' => $actorUserId,
+            'event_time' => $nowUtc,
+            'payload' => [
+                'required_action_id' => $actionId,
+                'decision_code' => $decisionCode,
+                'granted_extra_attempts' => $grantedExtraAttempts,
+                'summary_revision_required' => $summaryRevisionRequired,
+                'one_on_one_required' => $oneOnOneRequired,
+                'training_suspended' => $trainingSuspended,
+                'major_intervention_flag' => $majorInterventionFlag,
+            ],
+            'legal_note' => 'Instructor intervention decision recorded after escalation.'
+        ]);
+
+        $this->pdo->commit();
+
+        return [
+            'decision_code' => $decisionCode,
+            'granted_extra_attempts' => $grantedExtraAttempts,
+            'summary_revision_required' => $summaryRevisionRequired,
+            'one_on_one_required' => $oneOnOneRequired,
+            'training_suspended' => $trainingSuspended,
+            'major_intervention_flag' => $majorInterventionFlag,
+            'decision_notes' => $decisionNotes,
+            'mapped_completion_status' => $mappedCompletionStatus,
+        ];
+    } catch (Throwable $e) {
+        $this->pdo->rollBack();
+        throw $e;
+    }
+}
+	
+	
+	
+public function markInstructorSessionCompleted(
+    int $actionId,
+    int $actorUserId,
+    ?string $ipAddress = null,
+    ?string $userAgent = null
+): void {
+    $action = $this->getRequiredActionById($actionId);
+    if (!$action) {
+        throw new RuntimeException('Instructor approval action not found.');
+    }
+
+    if ((string)$action['action_type'] !== 'instructor_approval') {
+        throw new RuntimeException('Action is not instructor_approval.');
+    }
+
+    if ((int)($action['one_on_one_required'] ?? 0) !== 1) {
+        throw new RuntimeException('This action does not require an instructor session.');
+    }
+
+    if ((string)$action['status'] !== 'approved') {
+        throw new RuntimeException('Instructor decision must already be approved.');
+    }
+
+    $nowUtc = gmdate('Y-m-d H:i:s');
+
+    $this->pdo->beginTransaction();
+
+    try {
+        $activitySel = $this->pdo->prepare("
+            SELECT id
+            FROM lesson_activity
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND lesson_id = ?
+            LIMIT 1
+        ");
+        $activitySel->execute([
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id']
+        ]);
+        $activityRow = $activitySel->fetch();
+
+        if (!$activityRow) {
+            throw new RuntimeException('lesson_activity row not found.');
+        }
+
+        $updActivity = $this->pdo->prepare("
+            UPDATE lesson_activity
+            SET
+                one_on_one_completed = 1,
+                completion_status = 'in_progress',
+                last_state_eval_at = :last_state_eval_at,
+                updated_at = NOW()
+            WHERE id = :id
+        ");
+        $updActivity->execute([
+            ':last_state_eval_at' => $nowUtc,
+            ':id' => (int)$activityRow['id']
+        ]);
+
+        $updAction = $this->pdo->prepare("
+            UPDATE student_required_actions
+            SET
+                ip_address = COALESCE(:ip_address, ip_address),
+                user_agent = COALESCE(:user_agent, user_agent),
+                updated_at = :updated_at
+            WHERE id = :id
+        ");
+        $updAction->execute([
+            ':ip_address' => $ipAddress,
+            ':user_agent' => $userAgent,
+            ':updated_at' => $nowUtc,
+            ':id' => $actionId,
+        ]);
+
+        $this->logProgressionEvent([
+            'user_id' => (int)$action['user_id'],
+            'cohort_id' => (int)$action['cohort_id'],
+            'lesson_id' => (int)$action['lesson_id'],
+            'progress_test_id' => isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null,
+            'event_type' => 'instructor_intervention',
+            'event_code' => 'instructor_session_completed',
+            'event_status' => 'warning',
+            'actor_type' => 'admin',
+            'actor_user_id' => $actorUserId,
+            'event_time' => $nowUtc,
+            'payload' => [
+                'required_action_id' => $actionId
+            ],
+            'legal_note' => 'Required instructor one-on-one session marked completed.'
+        ]);
+
+        $this->pdo->commit();
+    } catch (Throwable $e) {
+        $this->pdo->rollBack();
+        throw $e;
+    }
 }	
 	
 	
