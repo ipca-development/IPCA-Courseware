@@ -34,7 +34,12 @@ if ($role === 'student') {
 }
 
 $stmt = $pdo->prepare("
-  SELECT summary_html, updated_at
+  SELECT
+    summary_html,
+    updated_at,
+    review_status,
+    review_feedback,
+    review_notes_by_instructor
   FROM lesson_summaries
   WHERE user_id=? AND cohort_id=? AND lesson_id=?
   LIMIT 1
@@ -45,5 +50,8 @@ $row = $stmt->fetch(PDO::FETCH_ASSOC);
 echo json_encode([
   'ok' => true,
   'summary_html' => $row ? (string)$row['summary_html'] : '',
-  'updated_at' => $row ? (string)$row['updated_at'] : null
+  'updated_at' => $row ? (string)$row['updated_at'] : null,
+  'review_status' => $row ? (string)$row['review_status'] : 'pending',
+  'review_feedback' => $row ? (string)($row['review_feedback'] ?? '') : '',
+  'review_notes_by_instructor' => $row ? (string)($row['review_notes_by_instructor'] ?? '') : ''
 ]);

@@ -330,6 +330,31 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       line-height: 1.35;
     }
     .muted{ opacity:.7; font-size:12px; }
+    .summary-alert{
+      position: sticky;
+      top: 62px;
+      z-index: 70;
+      max-width: 1200px;
+      margin: 10px auto 0 auto;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid #f59e0b;
+      background: #fff7ed;
+      color: #9a3412;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+      display: none;
+    }
+    .summary-alert strong{
+      display:block;
+      margin-bottom:4px;
+    }
+    .summary-alert.pending{
+      border-color:#93c5fd;
+      background:#eff6ff;
+      color:#1d4ed8;
+    }	  
+	  
+	  
   </style>
 </head>
 <body>
@@ -362,6 +387,11 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     </div>
   </div>
 
+  <div class="summary-alert" id="summaryAlert">
+    <strong id="summaryAlertTitle"></strong>
+    <div id="summaryAlertBody"></div>
+  </div>	
+	
   <div class="wrap">
     <div class="viewport" id="viewport">
       <div class="stage" id="stage">
@@ -667,6 +697,32 @@ const LESSON_ID = <?= (int)$lessonId ?>;
 const drawer = document.getElementById('drawer');
 const rte = document.getElementById('rte');
 const sumStatus = document.getElementById('sumStatus');
+const summaryAlert = document.getElementById('summaryAlert');
+const summaryAlertTitle = document.getElementById('summaryAlertTitle');
+const summaryAlertBody = document.getElementById('summaryAlertBody');
+	
+function renderSummaryAlert(j){
+  const status = String(j.review_status || '').trim();
+  const feedback = String(j.review_notes_by_instructor || j.review_feedback || '').trim();
+
+  summaryAlert.classList.remove('pending');
+  summaryAlert.style.display = 'none';
+  summaryAlertTitle.textContent = '';
+  summaryAlertBody.textContent = '';
+
+  if (status === 'needs_revision') {
+    summaryAlert.style.display = 'block';
+    summaryAlertTitle.textContent = 'Instructor requested summary revision';
+    summaryAlertBody.textContent = feedback !== ''
+      ? feedback
+      : 'Please revise your lesson summary based on the instructor feedback before continuing.';
+  } else if (status === 'pending') {
+    summaryAlert.style.display = 'block';
+    summaryAlert.classList.add('pending');
+    summaryAlertTitle.textContent = 'Summary pending instructor review';
+    summaryAlertBody.textContent = 'Your updated summary has been saved and is awaiting instructor review.';
+  }
+}	
 
 async function loadSummaryFromDb(){
   try{
@@ -675,6 +731,7 @@ async function loadSummaryFromDb(){
     if (j.ok) {
       rte.innerHTML = j.summary_html || '';
       sumStatus.textContent = 'Loaded';
+      renderSummaryAlert(j);
     }
   }catch(e){}
 }
@@ -697,6 +754,9 @@ function scheduleSave(){
       });
       const j = await res.json();
       sumStatus.textContent = j.ok ? 'Saved' : ('Save failed');
+      if (j.ok) {
+        loadSummaryFromDb();
+      }
     }catch(e){
       sumStatus.textContent = 'Save failed';
     }
@@ -729,12 +789,35 @@ function escapeHtml(s){
 }
 
 // Keyboard nav
+function isEditableTarget(el){
+  if (!el) return false;
+  const tag = (el.tagName || '').toUpperCase();
+
+  if (el.isContentEditable) return true;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (typeof el.closest === 'function' && el.closest('#rte')) return true;
+
+  return false;
+}
+
 document.addEventListener('keydown', (e)=>{
-  if (e.key === 'ArrowLeft') {
-    if (PREV_ID > 0) { armAutoplay(); location.href='/player/slide.php?slide_id=' + PREV_ID; }
+  // Do not hijack arrow keys while editing the summary
+  if (isEditableTarget(e.target)) {
+    return;
   }
+
+  if (e.key === 'ArrowLeft') {
+    if (PREV_ID > 0) {
+      armAutoplay();
+      location.href = '/player/slide.php?slide_id=' + PREV_ID;
+    }
+  }
+
   if (e.key === 'ArrowRight') {
-    if (NEXT_ID > 0) { armAutoplay(); location.href='/player/slide.php?slide_id=' + NEXT_ID; }
+    if (NEXT_ID > 0) {
+      armAutoplay();
+      location.href = '/player/slide.php?slide_id=' + NEXT_ID;
+    }
   }
 });
 </script>

@@ -200,7 +200,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lessonId
             ]);
 
-            $engine->logProgressionEvent([
+			$engine->logProgressionEvent([
                 'user_id' => $studentId,
                 'cohort_id' => $cohortId,
                 'lesson_id' => $lessonId,
@@ -216,7 +216,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'legal_note' => 'Instructor reviewed revised lesson summary.'
             ]);
 
+            $studentRecipient = $engine->getUserRecipient($studentId);
+
             $pdo->commit();
+
+            if ($decision === 'needs_revision' && $studentRecipient !== null) {
+                $studentName = trim((string)($studentRecipient['name'] ?? 'Student'));
+                if ($studentName === '') {
+                    $studentName = 'Student';
+                }
+
+                $subject = 'Summary Revision Required - ' . $lessonTitle;
+
+                $html = ''
+                    . '<p>Dear ' . h3($studentName) . ',</p>'
+                    . '<p>Your instructor has reviewed your revised summary for <strong>' . h3($lessonTitle) . '</strong> in <strong>' . h3($cohortTitle) . '</strong>.</p>'
+                    . '<p><strong>Decision:</strong> Summary needs further revision.</p>'
+                    . '<p><strong>Instructor feedback:</strong><br>' . nl2br(h3($reviewNotes)) . '</p>'
+                    . '<p>Please reopen the lesson, update your summary, and save your changes. Once updated, your summary will return to pending review automatically.</p>'
+                    . '<p>Kind regards,<br>Chief Training Team<br>IPCA Courseware</p>';
+
+                $text = ''
+                    . "Dear {$studentName},\n\n"
+                    . "Your instructor has reviewed your revised summary for {$lessonTitle} in {$cohortTitle}.\n\n"
+                    . "Decision: Summary needs further revision.\n\n"
+                    . "Instructor feedback:\n{$reviewNotes}\n\n"
+                    . "Please reopen the lesson, update your summary, and save your changes. Once updated, your summary will return to pending review automatically.\n\n"
+                    . "Kind regards,\nChief Training Team\nIPCA Courseware";
+
+                $emailId = $engine->queueProgressionEmail([
+                    'user_id' => $studentId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'email_type' => 'instructor_summary_revision_required',
+                    'recipients_to' => [[
+                        'email' => (string)$studentRecipient['email'],
+                        'name' => $studentName
+                    ]],
+                    'recipients_cc' => [],
+                    'subject' => $subject,
+                    'body_html' => $html,
+                    'body_text' => $text,
+                    'ai_inputs' => [
+                        'trigger' => 'instructor_summary_revision_required',
+                        'lesson_title' => $lessonTitle,
+                        'cohort_title' => $cohortTitle,
+                        'review_notes' => $reviewNotes
+                    ],
+                    'sent_status' => 'queued'
+                ]);
+
+                try {
+                    $emailSendResult = $engine->sendProgressionEmailById((int)$emailId);
+                } catch (Throwable $mailEx) {
+                    $emailSendResult = [
+                        'ok' => false,
+                        'error' => $mailEx->getMessage()
+                    ];
+                }
+            }
 
             $success = ($decision === 'acceptable')
                 ? 'Summary approved successfully.'
