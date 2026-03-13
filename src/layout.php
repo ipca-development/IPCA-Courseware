@@ -6,6 +6,8 @@ declare(strict_types=1);
  * Assumes bootstrap.php sets $pdo and session.
  */
 
+require_once __DIR__ . '/navigation.php';
+
 function cw_header(string $title = ''): void
 {
     global $pdo;
@@ -46,18 +48,17 @@ function cw_header(string $title = ''): void
 
     // Logout link
     $logoutHref = '/logout.php';
-    if ($area === 'student') $logoutHref = '/logout.php';
-    if ($area === 'instructor') $logoutHref = '/logout.php';
-    if ($area === 'admin') $logoutHref = '/logout.php';
 
     // Display role label (right)
     $roleLabel = 'User';
     if ($role === 'admin') $roleLabel = 'Admin';
-    elseif ($role === 'supervisor') $roleLabel = 'Instructor';
+    elseif ($role === 'supervisor' || $role === 'instructor' || $role === 'chief_instructor') $roleLabel = 'Instructor';
     elseif ($role === 'student') $roleLabel = 'Student';
 
     // Safe display name
     $displayName = $name !== '' ? $name : $roleLabel;
+
+    $navHtml = cw_render_navigation($role, $path);
 
     // Output HTML
     ?>
@@ -68,6 +69,116 @@ function cw_header(string $title = ''): void
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= h($centerTitle) ?></title>
   <link rel="stylesheet" href="/assets/app.css">
+	<style>
+    :root{
+      --cw-topbar-h: 58px;
+      --cw-sidebar-bg: #123b72;
+    }
+
+    html, body{
+      margin:0;
+      padding:0;
+    }
+
+    body{
+      background:#f3f4f6;
+    }
+
+    .topbar{
+      position: sticky;
+      top: 0;
+      z-index: 1000;
+      min-height: var(--cw-topbar-h);
+    }
+
+    .shell{
+      display:flex;
+      align-items:flex-start;
+      min-height: calc(100vh - var(--cw-topbar-h));
+    }
+
+    .sidebar{
+      position: sticky;
+      top: var(--cw-topbar-h);
+      align-self:flex-start;
+      height: calc(100vh - var(--cw-topbar-h));
+      overflow-y: auto;
+      background: var(--cw-sidebar-bg);
+      flex: 0 0 240px;
+    }
+
+    .main{
+      flex:1 1 auto;
+      min-width:0;
+    }
+
+    /* Make centralized nav look like a real sidebar, not a floating card */
+    .sidebar .cw-nav-shell{
+      margin:0;
+      padding:0;
+      border:none;
+      border-radius:0;
+      box-shadow:none;
+      background:transparent;
+    }
+
+    .sidebar .cw-nav-groups{
+      display:block;
+    }
+
+    .sidebar .cw-nav-group{
+      margin:0 0 14px 0;
+    }
+
+    .sidebar .cw-nav-group-title{
+      padding:10px 20px 6px 20px;
+      margin:0;
+      font-size:11px;
+      font-weight:800;
+      text-transform:uppercase;
+      letter-spacing:.04em;
+      color:rgba(255,255,255,0.55);
+    }
+
+    .sidebar .cw-nav-list{
+      display:flex;
+      flex-direction:column;
+      gap:2px;
+    }
+
+    .sidebar .cw-nav-link{
+      display:block;
+      padding:10px 20px;
+      border:none;
+      border-radius:0;
+      background:transparent;
+      color:rgba(255,255,255,0.90);
+      text-decoration:none;
+      font-size:15px;
+      font-weight:700;
+    }
+
+    .sidebar .cw-nav-link:hover{
+      background:rgba(255,255,255,0.08);
+      color:#ffffff;
+      border:none;
+    }
+
+    .sidebar .cw-nav-link.current{
+      background:rgba(255,255,255,0.14);
+      color:#ffffff;
+      border:none;
+    }
+
+    .sidebar .cw-nav-link.disabled{
+      background:transparent;
+      color:rgba(255,255,255,0.35);
+      border:none;
+      pointer-events:none;
+      cursor:default;
+    }
+  </style>
+	
 </head>
 <body>
   <div class="topbar">
@@ -90,35 +201,9 @@ function cw_header(string $title = ''): void
   </div>
 
   <div class="shell">
-<?php
-    // Sidebar visibility rules:
-    // - Admin sees admin sidebar
-    // - Instructor sees instructor sidebar
-    // - Student sees student sidebar
-    ?>
     <nav class="sidebar">
-      <?php if ($area === 'admin'): ?>
-        <a href="/admin/dashboard.php">Dashboard</a>
-        <a href="/admin/courses.php">Courses</a>
-        <a href="/admin/lessons.php">Lessons</a>
-        <a href="/admin/slides.php">Slides</a>
-        <a href="/admin/import_lab.php">Import Lab</a>
-        <a href="/admin/backgrounds.php">Backgrounds</a>
-        <a href="/admin/templates.php">Templates</a>
-        <hr style="opacity:.25;">
-        <a href="/instructor/dashboard.php">Instructor Portal</a>
-        <a href="/student/dashboard.php">Student Portal</a>
-
-      <?php elseif ($area === 'instructor'): ?>
-        <a href="/instructor/dashboard.php">Dashboard</a>
-        <a href="/instructor/cohorts.php">Theory Training</a>
-        <hr style="opacity:.25;">
-        <a href="/admin/dashboard.php">Admin</a>
-
-      <?php elseif ($area === 'student'): ?>
-        <a href="/student/dashboard.php">Dashboard</a>
-        <a href="/student/dashboard.php">Theory Training</a>
-
+      <?php if ($navHtml !== ''): ?>
+        <?= $navHtml ?>
       <?php else: ?>
         <a href="/admin/dashboard.php">Admin</a>
         <a href="/instructor/dashboard.php">Instructor</a>
