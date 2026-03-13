@@ -736,6 +736,16 @@ async function loadSummaryFromDb(){
   }catch(e){}
 }
 
+async function refreshSummaryStatusOnly(){
+  try{
+    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {credentials:'same-origin'});
+    const j = await res.json();
+    if (j.ok) {
+      renderSummaryAlert(j);
+    }
+  }catch(e){}
+}
+
 let saveTimer = null;
 function scheduleSave(){
   if (saveTimer) clearTimeout(saveTimer);
@@ -752,10 +762,10 @@ function scheduleSave(){
           summary_html: rte.innerHTML || ''
         })
       });
-      const j = await res.json();
+const j = await res.json();
       sumStatus.textContent = j.ok ? 'Saved' : ('Save failed');
       if (j.ok) {
-        loadSummaryFromDb();
+        refreshSummaryStatusOnly();
       }
     }catch(e){
       sumStatus.textContent = 'Save failed';
