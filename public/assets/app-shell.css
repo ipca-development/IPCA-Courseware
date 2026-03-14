@@ -222,7 +222,35 @@ body.app-shell-body{
 .cw-nav-groups{
   display:flex;
   flex-direction:column;
-  gap:18px;
+  gap:10px;
+}
+
+/* Section labels (top level groups) */
+.nav-section-label{
+  height:22px;
+  display:flex;
+  align-items:center;
+  padding:8px 18px 2px 18px;
+  font-size:11px;
+  line-height:1;
+  text-transform:uppercase;
+  letter-spacing:.14em;
+  color:rgba(193,205,225,0.42);
+  font-weight:670;
+}
+
+/* Sub-section labels (rare nested groups) */
+.nav-subsection-label{
+  height:18px;
+  display:flex;
+  align-items:center;
+  padding:6px 18px 0 18px;
+  font-size:10px;
+  line-height:1;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  color:rgba(193,205,225,0.36);
+  font-weight:650;
 }
 
 .nav-block{
@@ -280,8 +308,8 @@ body.app-shell-body{
 .nav-group-items{
   display:flex;
   flex-direction:column;
-  gap:4px;
-  padding-top:8px;
+  gap:3px;
+  padding-top:6px;
 }
 
 .nav-link{
