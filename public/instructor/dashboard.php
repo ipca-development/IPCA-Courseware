@@ -76,16 +76,23 @@ if (!can_view_instructor_dashboard($pdo, $engine, $userId, $role)) {
 */
 $summaryCards = [
     'pending_summary_reviews' => 0,
+    'pending_instructor_actions' => 0,
     'blocked_students' => 0,
-    'deadline_violations' => 0,
     'one_on_one_required' => 0,
-    'recent_interventions' => 0,
+    'major_intervention_cases' => 0,
 ];
 
 $summaryCards['pending_summary_reviews'] = (int)$pdo->query("
     SELECT COUNT(*)
     FROM lesson_summaries
     WHERE review_status = 'pending'
+")->fetchColumn();
+
+$summaryCards['pending_instructor_actions'] = (int)$pdo->query("
+    SELECT COUNT(*)
+    FROM student_required_actions
+    WHERE action_type = 'instructor_approval'
+      AND status IN ('pending', 'opened')
 ")->fetchColumn();
 
 $summaryCards['blocked_students'] = (int)$pdo->query("
@@ -99,12 +106,6 @@ $summaryCards['blocked_students'] = (int)$pdo->query("
     )
 ")->fetchColumn();
 
-$summaryCards['deadline_violations'] = (int)$pdo->query("
-    SELECT COUNT(*)
-    FROM progress_tests_v2
-    WHERE timing_status = 'after_final_deadline'
-")->fetchColumn();
-
 $summaryCards['one_on_one_required'] = (int)$pdo->query("
     SELECT COUNT(*)
     FROM lesson_activity
@@ -112,10 +113,11 @@ $summaryCards['one_on_one_required'] = (int)$pdo->query("
       AND one_on_one_completed = 0
 ")->fetchColumn();
 
-$summaryCards['recent_interventions'] = (int)$pdo->query("
+$summaryCards['major_intervention_cases'] = (int)$pdo->query("
     SELECT COUNT(*)
     FROM student_required_actions
     WHERE action_type = 'instructor_approval'
+      AND major_intervention_flag = 1
 ")->fetchColumn();
 
 /*
@@ -259,112 +261,311 @@ $oneOnOneRequiredSt = $pdo->prepare("
 $oneOnOneRequiredSt->execute();
 $oneOnOneRequired = $oneOnOneRequiredSt->fetchAll(PDO::FETCH_ASSOC);
 
+/*
+|--------------------------------------------------------------------------
+| Derived instructor work queues
+|--------------------------------------------------------------------------
+*/
+$pendingInterventionActions = array_values(array_filter($interventions, function ($row) {
+    return in_array((string)$row['status'], ['pending', 'opened'], true);
+}));
+
+$majorInterventionRows = array_values(array_filter($interventions, function ($row) {
+    return !empty($row['major_intervention_flag']);
+}));
+
+/*
+|--------------------------------------------------------------------------
+| Unified attention queue
+|--------------------------------------------------------------------------
+*/
+$attentionNow = [];
+
+/* summary review items */
+foreach (array_slice($pendingSummaryReviews, 0, 8) as $row) {
+    $attentionNow[] = [
+        'type' => 'review',
+        'label' => 'Review Needed',
+        'time' => (string)$row['updated_at'],
+        'student_name' => (string)$row['student_name'],
+        'cohort_name' => (string)$row['cohort_name'],
+        'lesson_title' => (string)$row['lesson_title'],
+        'action_href' => '/instructor/summary_review.php?user_id=' . (int)$row['user_id'] . '&cohort_id=' . (int)$row['cohort_id'] . '&lesson_id=' . (int)$row['lesson_id'],
+        'action_label' => 'Review',
+    ];
+}
+
+/* pending intervention items */
+foreach (array_slice($pendingInterventionActions, 0, 8) as $row) {
+    $attentionNow[] = [
+        'type' => 'decision',
+        'label' => 'Decision Required',
+        'time' => (string)($row['decision_at'] ?: $row['created_at']),
+        'student_name' => (string)$row['student_name'],
+        'cohort_name' => (string)$row['cohort_name'],
+        'lesson_title' => (string)$row['lesson_title'],
+        'action_href' => !empty($row['token']) ? '/instructor/instructor_approval.php?token=' . urlencode((string)$row['token']) : '',
+        'action_label' => !empty($row['token']) ? 'Open' : '',
+    ];
+}
+
+/* one-on-one items */
+foreach (array_slice($oneOnOneRequired, 0, 8) as $row) {
+    $attentionNow[] = [
+        'type' => 'session',
+        'label' => 'Session Required',
+        'time' => (string)$row['updated_at'],
+        'student_name' => (string)$row['student_name'],
+        'cohort_name' => (string)$row['cohort_name'],
+        'lesson_title' => (string)$row['lesson_title'],
+        'action_href' => '',
+        'action_label' => '',
+    ];
+}
+
+usort($attentionNow, function ($a, $b) {
+    return strcmp((string)$a['time'], (string)$b['time']);
+});
+$attentionNow = array_slice($attentionNow, 0, 10);
+
 cw_header('Dashboard');
 ?>
 <style>
-  .dash-stack{
-    display:flex;
-    flex-direction:column;
-    gap:22px;
-  }
+  .dash-stack{display:flex;flex-direction:column;gap:22px}
 
-  .hero-card{
-    padding:24px 26px;
-  }
+  .hero-card{padding:26px 28px}
   .hero-eyebrow{
     font-size:11px;
     text-transform:uppercase;
-    letter-spacing:.12em;
+    letter-spacing:.14em;
     color:#7b8ba3;
     font-weight:700;
     margin-bottom:10px;
   }
   .hero-title{
     margin:0;
-    font-size:28px;
-    line-height:1.05;
-    letter-spacing:-0.03em;
+    font-size:32px;
+    line-height:1.02;
+    letter-spacing:-0.04em;
     color:#152235;
+    font-weight:800;
   }
   .hero-sub{
-    margin-top:10px;
+    margin-top:12px;
     font-size:15px;
     color:#6f7f95;
-    max-width:760px;
+    max-width:860px;
+    line-height:1.55;
   }
 
-  .dash-grid{
+  .kpi-grid{
     display:grid;
     grid-template-columns:repeat(5,minmax(180px,1fr));
-    gap:16px;
+    gap:18px;
   }
-  .dash-card{
-    padding:20px 22px;
-  }
-  .dash-card .label{
+  .kpi-card{padding:22px 24px}
+  .kpi-label{
     font-size:11px;
     text-transform:uppercase;
     letter-spacing:.12em;
     color:#7b8ba3;
-    margin-bottom:14px;
     font-weight:700;
+    margin-bottom:14px;
   }
-  .dash-card .value{
-    font-size:40px;
+  .kpi-value{
+    font-size:38px;
     line-height:1;
-    font-weight:800;
     letter-spacing:-0.04em;
+    font-weight:800;
     color:#152235;
   }
-
-  .section-card{
-    padding:22px 24px;
+  .kpi-sub{
+    margin-top:10px;
+    font-size:14px;
+    color:#728198;
+    line-height:1.45;
   }
-  .section-head{
+
+  .signal-grid{
+    display:grid;
+    grid-template-columns:repeat(3,minmax(220px,1fr));
+    gap:18px;
+  }
+  .signal-card{
+    padding:20px 22px;
+    border-radius:20px;
+    background:#fff;
+    border:1px solid rgba(15,23,42,0.06);
+    box-shadow:0 10px 24px rgba(15,23,42,0.055);
+  }
+  .signal-head{
     display:flex;
+    align-items:flex-start;
     justify-content:space-between;
-    align-items:center;
     gap:12px;
+  }
+  .signal-title{
+    font-size:14px;
+    font-weight:700;
+    color:#152235;
+    line-height:1.2;
+  }
+  .signal-value{
+    font-size:34px;
+    line-height:1;
+    letter-spacing:-0.04em;
+    font-weight:800;
+    color:#152235;
+    margin-top:12px;
+  }
+  .signal-note{
+    margin-top:10px;
+    font-size:13px;
+    color:#728198;
+    line-height:1.45;
+  }
+  .signal-pill{
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.10em;
+    padding:6px 8px;
+    border-radius:999px;
+    white-space:nowrap;
+  }
+  .signal-pill.ok{color:#22543d;background:#dcfce7}
+  .signal-pill.warn{color:#92400e;background:#fef3c7}
+  .signal-pill.alert{color:#991b1b;background:#fee2e2}
+
+  .panel-grid{
+    display:grid;
+    grid-template-columns:1.2fr .8fr;
+    gap:18px;
+  }
+  .panel-grid.equal{
+    grid-template-columns:1fr 1fr;
+  }
+  .panel-card{padding:22px 24px}
+  .panel-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
     margin-bottom:14px;
   }
-  .section-head h2{
+  .panel-title{
     margin:0;
-    font-size:22px;
+    font-size:20px;
+    line-height:1.1;
     letter-spacing:-0.02em;
     color:#152235;
   }
-  .count-pill{
-    display:inline-block;
-    padding:7px 11px;
-    border-radius:999px;
-    background:#f2f7ff;
-    color:#2457b8;
-    font-size:12px;
-    font-weight:800;
-    border:1px solid #dbe7ff;
+  .panel-sub{
+    margin-top:6px;
+    font-size:14px;
+    color:#728198;
+    line-height:1.45;
   }
 
-  .table-wrap{
-    overflow:auto;
+  .queue-list{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
   }
-  table.dash-table{
-    width:100%;
-    border-collapse:collapse;
+  .queue-item{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    padding:14px 16px;
+    border-radius:16px;
+    background:#f8fafd;
+    border:1px solid rgba(15,23,42,0.05);
   }
-  table.dash-table th,
-  table.dash-table td{
-    text-align:left;
-    padding:12px 8px;
-    border-bottom:1px solid rgba(15,23,42,0.07);
-    vertical-align:top;
+  .queue-main{min-width:0}
+  .queue-title{
     font-size:14px;
-  }
-  table.dash-table th{
-    font-size:11px;
-    color:#7b8ba3;
-    text-transform:uppercase;
-    letter-spacing:.12em;
     font-weight:700;
+    color:#152235;
+    line-height:1.3;
+  }
+  .queue-meta{
+    margin-top:5px;
+    font-size:13px;
+    color:#728198;
+    line-height:1.45;
+  }
+  .queue-side{
+    text-align:right;
+    flex:0 0 auto;
+  }
+  .queue-status{
+    display:inline-block;
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.10em;
+    padding:6px 8px;
+    border-radius:999px;
+  }
+  .queue-status.review{background:#fef3c7;color:#92400e}
+  .queue-status.decision{background:#dbeafe;color:#1d4ed8}
+  .queue-status.session{background:#eff6ff;color:#1d4ed8}
+  .queue-status.major{background:#fee2e2;color:#991b1b}
+  .queue-status.overdue{background:#fee2e2;color:#b91c1c}
+  .queue-status.blocked{background:#fff7ed;color:#c2410c}
+
+  .queue-time{
+    margin-top:8px;
+    font-size:12px;
+    color:#8a97ab;
+    white-space:nowrap;
+  }
+
+  .mini-actions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+  }
+  .mini-action{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:40px;
+    padding:0 14px;
+    border-radius:12px;
+    text-decoration:none;
+    font-size:14px;
+    font-weight:700;
+    color:#152235;
+    background:#f4f7fb;
+    border:1px solid rgba(15,23,42,0.08);
+  }
+  .mini-action:hover{background:#edf2f8}
+
+  .action-link{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:38px;
+    padding:0 12px;
+    border-radius:10px;
+    background:#123b72;
+    color:#fff;
+    text-decoration:none;
+    font-size:12px;
+    font-weight:800;
+    white-space:nowrap;
+  }
+  .action-link:hover{opacity:.94}
+
+  .empty-premium{
+    padding:18px;
+    border-radius:16px;
+    border:1px dashed rgba(15,23,42,0.12);
+    background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
+    color:#728198;
+    font-size:14px;
   }
 
   .status-pill{
@@ -378,286 +579,292 @@ cw_header('Dashboard');
     color:#415067;
     white-space:nowrap;
   }
-  .status-warning{
-    background:#fff7ed;
-    border-color:#fed7aa;
-    color:#c2410c;
-  }
-  .status-danger{
-    background:#fef2f2;
-    border-color:#fecaca;
-    color:#b91c1c;
-  }
-  .status-info{
-    background:#eff6ff;
-    border-color:#bfdbfe;
-    color:#1d4ed8;
+  .status-warning{background:#fff7ed;border-color:#fed7aa;color:#c2410c}
+  .status-danger{background:#fef2f2;border-color:#fecaca;color:#b91c1c}
+  .status-info{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8}
+
+  @media (max-width:1300px){
+    .kpi-grid{grid-template-columns:repeat(3,minmax(180px,1fr))}
   }
 
-  .action-link{
-    display:inline-block;
-    padding:7px 11px;
-    border-radius:10px;
-    background:#123b72;
-    color:#fff;
-    text-decoration:none;
-    font-size:12px;
-    font-weight:800;
-  }
-  .action-link:hover{
-    opacity:.94;
+  @media (max-width:1200px){
+    .signal-grid{grid-template-columns:1fr}
+    .panel-grid,
+    .panel-grid.equal{grid-template-columns:1fr}
   }
 
-  .empty-premium{
-    padding:18px 18px;
-    border-radius:16px;
-    border:1px dashed rgba(15,23,42,0.12);
-    background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
-    color:#728198;
-    font-size:14px;
-  }
-
-  @media (max-width: 1200px){
-    .dash-grid{
-      grid-template-columns:repeat(2,minmax(180px,1fr));
-    }
+  @media (max-width:700px){
+    .kpi-grid{grid-template-columns:1fr}
   }
 </style>
 
 <div class="dash-stack">
+
   <div class="card hero-card">
     <div class="hero-eyebrow">Instructor Workspace</div>
     <h2 class="hero-title">Training Oversight Dashboard</h2>
     <div class="hero-sub">
-      Review pending summaries, monitor blocked progression states, track interventions, and keep theory training moving cleanly.
+      Review student friction points, process summary reviews, handle intervention decisions, and keep theory progression moving without jumping through separate pages.
     </div>
   </div>
 
-  <div class="dash-grid">
-    <div class="card dash-card">
-      <div class="label">Pending Summary Reviews</div>
-      <div class="value"><?= (int)$summaryCards['pending_summary_reviews'] ?></div>
+  <div class="kpi-grid">
+    <div class="card kpi-card">
+      <div class="kpi-label">Pending Summary Reviews</div>
+      <div class="kpi-value"><?= (int)$summaryCards['pending_summary_reviews'] ?></div>
+      <div class="kpi-sub">Summaries waiting for instructor review before students can continue.</div>
     </div>
-    <div class="card dash-card">
-      <div class="label">Blocked Students</div>
-      <div class="value"><?= (int)$summaryCards['blocked_students'] ?></div>
+
+    <div class="card kpi-card">
+      <div class="kpi-label">Pending Instructor Actions</div>
+      <div class="kpi-value"><?= (int)$summaryCards['pending_instructor_actions'] ?></div>
+      <div class="kpi-sub">Intervention approval items still waiting for a decision.</div>
     </div>
-    <div class="card dash-card">
-      <div class="label">Deadline Violations</div>
-      <div class="value"><?= (int)$summaryCards['deadline_violations'] ?></div>
+
+    <div class="card kpi-card">
+      <div class="kpi-label">Blocked Students</div>
+      <div class="kpi-value"><?= (int)$summaryCards['blocked_students'] ?></div>
+      <div class="kpi-sub">Students currently blocked by remediation, deadlines, or review states.</div>
     </div>
-    <div class="card dash-card">
-      <div class="label">One-on-One Required</div>
-      <div class="value"><?= (int)$summaryCards['one_on_one_required'] ?></div>
+
+    <div class="card kpi-card">
+      <div class="kpi-label">One-on-One Required</div>
+      <div class="kpi-value"><?= (int)$summaryCards['one_on_one_required'] ?></div>
+      <div class="kpi-sub">Students requiring instructor session before progression can resume.</div>
     </div>
-    <div class="card dash-card">
-      <div class="label">Interventions Logged</div>
-      <div class="value"><?= (int)$summaryCards['recent_interventions'] ?></div>
+
+    <div class="card kpi-card">
+      <div class="kpi-label">Major Intervention Cases</div>
+      <div class="kpi-value"><?= (int)$summaryCards['major_intervention_cases'] ?></div>
+      <div class="kpi-sub">Escalation-relevant intervention records that need awareness.</div>
     </div>
   </div>
 
-  <div class="card section-card">
-    <div class="section-head">
-      <h2>Pending Summary Reviews</h2>
-      <span class="count-pill"><?= count($pendingSummaryReviews) ?> shown</span>
-    </div>
-    <?php if (!$pendingSummaryReviews): ?>
-      <div class="empty-premium">No pending summary reviews.</div>
-    <?php else: ?>
-      <div class="table-wrap">
-        <table class="dash-table">
-          <thead>
-            <tr>
-              <th>Student</th>
-              <th>Cohort</th>
-              <th>Lesson</th>
-              <th>Updated</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-          <?php foreach ($pendingSummaryReviews as $row): ?>
-            <tr>
-              <td><?= h4((string)$row['student_name']) ?></td>
-              <td><?= h4((string)$row['cohort_name']) ?></td>
-              <td><?= h4((string)$row['lesson_title']) ?></td>
-              <td><?= h4(dash_fmt_datetime((string)$row['updated_at'])) ?></td>
-              <td>
-                <a class="action-link" href="/instructor/summary_review.php?user_id=<?= (int)$row['user_id'] ?>&cohort_id=<?= (int)$row['cohort_id'] ?>&lesson_id=<?= (int)$row['lesson_id'] ?>">
-                  Review Summary
-                </a>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-          </tbody>
-        </table>
+  <div class="signal-grid">
+    <div class="signal-card">
+      <div class="signal-head">
+        <div class="signal-title">Summary Review Queue</div>
+        <div class="signal-pill <?= $summaryCards['pending_summary_reviews'] > 0 ? 'warn' : 'ok' ?>">
+          <?= $summaryCards['pending_summary_reviews'] > 0 ? 'Action' : 'Clear' ?>
+        </div>
       </div>
-    <?php endif; ?>
+      <div class="signal-value"><?= (int)$summaryCards['pending_summary_reviews'] ?></div>
+      <div class="signal-note">Instructor review work currently waiting in the summary flow.</div>
+    </div>
+
+    <div class="signal-card">
+      <div class="signal-head">
+        <div class="signal-title">Decision Queue</div>
+        <div class="signal-pill <?= $summaryCards['pending_instructor_actions'] > 0 ? 'alert' : 'ok' ?>">
+          <?= $summaryCards['pending_instructor_actions'] > 0 ? 'Urgent' : 'Clear' ?>
+        </div>
+      </div>
+      <div class="signal-value"><?= (int)$summaryCards['pending_instructor_actions'] ?></div>
+      <div class="signal-note">Instructor approval actions still waiting for intervention handling.</div>
+    </div>
+
+    <div class="signal-card">
+      <div class="signal-head">
+        <div class="signal-title">Major Cases</div>
+        <div class="signal-pill <?= $summaryCards['major_intervention_cases'] > 0 ? 'warn' : 'ok' ?>">
+          <?= $summaryCards['major_intervention_cases'] > 0 ? 'Monitor' : 'Low' ?>
+        </div>
+      </div>
+      <div class="signal-value"><?= (int)$summaryCards['major_intervention_cases'] ?></div>
+      <div class="signal-note">Cases flagged as major and relevant for escalation or training concern tracking.</div>
+    </div>
   </div>
 
-  <div class="card section-card">
-    <div class="section-head">
-      <h2>Instructor Interventions</h2>
-      <span class="count-pill"><?= count($interventions) ?> shown</span>
-    </div>
-    <?php if (!$interventions): ?>
-      <div class="empty-premium">No instructor interventions found.</div>
-    <?php else: ?>
-      <div class="table-wrap">
-        <table class="dash-table">
-          <thead>
-            <tr>
-              <th>Student</th>
-              <th>Cohort</th>
-              <th>Lesson</th>
-              <th>Status</th>
-              <th>Decision</th>
-              <th>Major</th>
-              <th>Time</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody>
-          <?php foreach ($interventions as $row): ?>
-            <?php
-              $statusClass = 'status-info';
-              if ((string)$row['status'] === 'pending' || (string)$row['status'] === 'opened') $statusClass = 'status-warning';
-            ?>
-            <tr>
-              <td><?= h4((string)$row['student_name']) ?></td>
-              <td><?= h4((string)$row['cohort_name']) ?></td>
-              <td><?= h4((string)$row['lesson_title']) ?></td>
-              <td><span class="status-pill <?= h4($statusClass) ?>"><?= h4((string)$row['status']) ?></span></td>
-              <td><?= h4((string)($row['decision_code'] ?? '—')) ?></td>
-              <td><?= !empty($row['major_intervention_flag']) ? 'Yes' : 'No' ?></td>
-              <td><?= h4(dash_fmt_datetime((string)($row['decision_at'] ?: $row['created_at']))) ?></td>
-              <td>
-                <?php if (!empty($row['token'])): ?>
-                  <a class="action-link" href="/instructor/instructor_approval.php?token=<?= urlencode((string)$row['token']) ?>">
-                    Open
-                  </a>
-                <?php else: ?>
-                  <span class="human-date">—</span>
+  <div class="panel-grid">
+    <div class="card panel-card">
+      <div class="panel-head">
+        <div>
+          <h3 class="panel-title">Attention Now</h3>
+          <div class="panel-sub">The most immediate instructor workload items requiring action.</div>
+        </div>
+      </div>
+
+      <?php if (!$attentionNow): ?>
+        <div class="empty-premium">No immediate instructor attention items are currently waiting.</div>
+      <?php else: ?>
+        <div class="queue-list">
+          <?php foreach ($attentionNow as $row): ?>
+            <div class="queue-item">
+              <div class="queue-main">
+                <div class="queue-title"><?= h4((string)$row['student_name']) ?> · <?= h4((string)$row['lesson_title']) ?></div>
+                <div class="queue-meta"><?= h4((string)$row['cohort_name']) ?></div>
+              </div>
+              <div class="queue-side">
+                <div class="queue-status <?= h4((string)$row['type']) ?>"><?= h4((string)$row['label']) ?></div>
+                <?php if (!empty($row['action_href']) && !empty($row['action_label'])): ?>
+                  <div style="margin-top:8px;">
+                    <a class="action-link" href="<?= h4((string)$row['action_href']) ?>"><?= h4((string)$row['action_label']) ?></a>
+                  </div>
                 <?php endif; ?>
-              </td>
-            </tr>
+                <div class="queue-time"><?= h4(dash_fmt_datetime((string)$row['time'])) ?></div>
+              </div>
+            </div>
           <?php endforeach; ?>
-          </tbody>
-        </table>
+        </div>
+      <?php endif; ?>
+    </div>
+
+    <div class="card panel-card">
+      <div class="panel-head">
+        <div>
+          <h3 class="panel-title">Quick Access</h3>
+          <div class="panel-sub">Jump directly into the instructor area used most often.</div>
+        </div>
       </div>
-    <?php endif; ?>
+
+      <div class="mini-actions">
+        <a class="mini-action" href="/instructor/cohorts.php">Cohorts</a>
+      </div>
+
+      <div class="empty-premium" style="margin-top:14px;">
+        More direct queue pages can be added here later once dedicated instructor queue pages exist as first-class screens.
+      </div>
+    </div>
   </div>
 
-  <div class="card section-card">
-    <div class="section-head">
-      <h2>Blocked Students</h2>
-      <span class="count-pill"><?= count($blockedStudents) ?> shown</span>
+  <div class="panel-grid equal">
+    <div class="card panel-card">
+      <div class="panel-head">
+        <div>
+          <h3 class="panel-title">Major Intervention Cases</h3>
+          <div class="panel-sub">Cases flagged as major and worth elevated instructor awareness.</div>
+        </div>
+      </div>
+
+      <?php if (!$majorInterventionRows): ?>
+        <div class="empty-premium">No major intervention cases are currently flagged.</div>
+      <?php else: ?>
+        <div class="queue-list">
+          <?php foreach (array_slice($majorInterventionRows, 0, 8) as $row): ?>
+            <div class="queue-item">
+              <div class="queue-main">
+                <div class="queue-title"><?= h4((string)$row['student_name']) ?> · <?= h4((string)$row['lesson_title']) ?></div>
+                <div class="queue-meta">
+                  <?= h4((string)$row['cohort_name']) ?>
+                  <?php if (!empty($row['decision_code'])): ?>
+                    · <?= h4((string)$row['decision_code']) ?>
+                  <?php endif; ?>
+                </div>
+              </div>
+              <div class="queue-side">
+                <div class="queue-status major">Major Case</div>
+                <?php if (!empty($row['token'])): ?>
+                  <div style="margin-top:8px;">
+                    <a class="action-link" href="/instructor/instructor_approval.php?token=<?= urlencode((string)$row['token']) ?>">Open</a>
+                  </div>
+                <?php endif; ?>
+                <div class="queue-time"><?= h4(dash_fmt_datetime((string)($row['decision_at'] ?: $row['created_at']))) ?></div>
+              </div>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
     </div>
-    <?php if (!$blockedStudents): ?>
-      <div class="empty-premium">No blocked students found.</div>
-    <?php else: ?>
-      <div class="table-wrap">
-        <table class="dash-table">
-          <thead>
-            <tr>
-              <th>Student</th>
-              <th>Cohort</th>
-              <th>Lesson</th>
-              <th>Completion Status</th>
-              <th>Effective Deadline</th>
-            </tr>
-          </thead>
-          <tbody>
-          <?php foreach ($blockedStudents as $row): ?>
+
+    <div class="card panel-card">
+      <div class="panel-head">
+        <div>
+          <h3 class="panel-title">Deadline Violations</h3>
+          <div class="panel-sub">Progress tests recorded after final deadline status.</div>
+        </div>
+      </div>
+
+      <?php if (!$deadlineViolations): ?>
+        <div class="empty-premium">No deadline violations found.</div>
+      <?php else: ?>
+        <div class="queue-list">
+          <?php foreach (array_slice($deadlineViolations, 0, 8) as $row): ?>
+            <div class="queue-item">
+              <div class="queue-main">
+                <div class="queue-title"><?= h4((string)$row['student_name']) ?> · <?= h4((string)$row['lesson_title']) ?></div>
+                <div class="queue-meta"><?= h4((string)$row['cohort_name']) ?> · Attempt <?= (int)$row['attempt'] ?></div>
+              </div>
+              <div class="queue-side">
+                <div class="queue-status overdue">Deadline Breach</div>
+                <div class="queue-time"><?= h4(dash_fmt_datetime((string)$row['completed_at'])) ?></div>
+              </div>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+    </div>
+  </div>
+
+  <div class="panel-grid equal">
+    <div class="card panel-card">
+      <div class="panel-head">
+        <div>
+          <h3 class="panel-title">Blocked Students</h3>
+          <div class="panel-sub">Students blocked by current theory progression gates.</div>
+        </div>
+      </div>
+
+      <?php if (!$blockedStudents): ?>
+        <div class="empty-premium">No blocked students found.</div>
+      <?php else: ?>
+        <div class="queue-list">
+          <?php foreach (array_slice($blockedStudents, 0, 10) as $row): ?>
             <?php
-              $statusClass = 'status-warning';
-              if (in_array((string)$row['completion_status'], ['blocked_deadline', 'blocked_final'], true)) {
-                  $statusClass = 'status-danger';
+              $badgeLabel = 'Blocked';
+              if ((string)$row['completion_status'] === 'awaiting_summary_review') {
+                  $badgeLabel = 'Awaiting Review';
+              } elseif ((string)$row['completion_status'] === 'remediation_required') {
+                  $badgeLabel = 'Remediation';
+              } elseif ((string)$row['completion_status'] === 'blocked_deadline') {
+                  $badgeLabel = 'Deadline Block';
+              } elseif ((string)$row['completion_status'] === 'blocked_final') {
+                  $badgeLabel = 'Final Block';
               }
             ?>
-            <tr>
-              <td><?= h4((string)$row['student_name']) ?></td>
-              <td><?= h4((string)$row['cohort_name']) ?></td>
-              <td><?= h4((string)$row['lesson_title']) ?></td>
-              <td><span class="status-pill <?= h4($statusClass) ?>"><?= h4((string)$row['completion_status']) ?></span></td>
-              <td><?= h4(dash_fmt_date((string)($row['effective_deadline_utc'] ?? ''))) ?></td>
-            </tr>
+            <div class="queue-item">
+              <div class="queue-main">
+                <div class="queue-title"><?= h4((string)$row['student_name']) ?> · <?= h4((string)$row['lesson_title']) ?></div>
+                <div class="queue-meta"><?= h4((string)$row['cohort_name']) ?></div>
+              </div>
+              <div class="queue-side">
+                <div class="queue-status blocked"><?= h4($badgeLabel) ?></div>
+                <div class="queue-time"><?= h4(dash_fmt_date((string)($row['effective_deadline_utc'] ?? ''))) ?></div>
+              </div>
+            </div>
           <?php endforeach; ?>
-          </tbody>
-        </table>
+        </div>
+      <?php endif; ?>
+    </div>
+
+    <div class="card panel-card">
+      <div class="panel-head">
+        <div>
+          <h3 class="panel-title">One-on-One Required</h3>
+          <div class="panel-sub">Students requiring instructor session before progression continues.</div>
+        </div>
       </div>
-    <?php endif; ?>
+
+      <?php if (!$oneOnOneRequired): ?>
+        <div class="empty-premium">No one-on-one sessions currently required.</div>
+      <?php else: ?>
+        <div class="queue-list">
+          <?php foreach (array_slice($oneOnOneRequired, 0, 10) as $row): ?>
+            <div class="queue-item">
+              <div class="queue-main">
+                <div class="queue-title"><?= h4((string)$row['student_name']) ?> · <?= h4((string)$row['lesson_title']) ?></div>
+                <div class="queue-meta"><?= h4((string)$row['cohort_name']) ?></div>
+              </div>
+              <div class="queue-side">
+                <div class="queue-status session">Session Required</div>
+                <div class="queue-time"><?= h4(dash_fmt_datetime((string)$row['updated_at'])) ?></div>
+              </div>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+    </div>
   </div>
 
-  <div class="card section-card">
-    <div class="section-head">
-      <h2>Deadline Violations</h2>
-      <span class="count-pill"><?= count($deadlineViolations) ?> shown</span>
-    </div>
-    <?php if (!$deadlineViolations): ?>
-      <div class="empty-premium">No deadline violations found.</div>
-    <?php else: ?>
-      <div class="table-wrap">
-        <table class="dash-table">
-          <thead>
-            <tr>
-              <th>Student</th>
-              <th>Cohort</th>
-              <th>Lesson</th>
-              <th>Attempt</th>
-              <th>Status</th>
-              <th>Completed</th>
-            </tr>
-          </thead>
-          <tbody>
-          <?php foreach ($deadlineViolations as $row): ?>
-            <tr>
-              <td><?= h4((string)$row['student_name']) ?></td>
-              <td><?= h4((string)$row['cohort_name']) ?></td>
-              <td><?= h4((string)$row['lesson_title']) ?></td>
-              <td><?= (int)$row['attempt'] ?></td>
-              <td><span class="status-pill status-danger"><?= h4((string)$row['timing_status']) ?></span></td>
-              <td><?= h4(dash_fmt_datetime((string)$row['completed_at'])) ?></td>
-            </tr>
-          <?php endforeach; ?>
-          </tbody>
-        </table>
-      </div>
-    <?php endif; ?>
-  </div>
-
-  <div class="card section-card">
-    <div class="section-head">
-      <h2>One-on-One Required</h2>
-      <span class="count-pill"><?= count($oneOnOneRequired) ?> shown</span>
-    </div>
-    <?php if (!$oneOnOneRequired): ?>
-      <div class="empty-premium">No one-on-one sessions currently required.</div>
-    <?php else: ?>
-      <div class="table-wrap">
-        <table class="dash-table">
-          <thead>
-            <tr>
-              <th>Student</th>
-              <th>Cohort</th>
-              <th>Lesson</th>
-              <th>Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-          <?php foreach ($oneOnOneRequired as $row): ?>
-            <tr>
-              <td><?= h4((string)$row['student_name']) ?></td>
-              <td><?= h4((string)$row['cohort_name']) ?></td>
-              <td><?= h4((string)$row['lesson_title']) ?></td>
-              <td><?= h4(dash_fmt_datetime((string)$row['updated_at'])) ?></td>
-            </tr>
-          <?php endforeach; ?>
-          </tbody>
-        </table>
-      </div>
-    <?php endif; ?>
-  </div>
 </div>
 
 <?php cw_footer(); ?>
