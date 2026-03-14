@@ -16,13 +16,15 @@ return [
         'key' => 'my_training',
         'label' => 'My Training',
         'icon' => 'training',
-        'href' => '/student/dashboard.php',
+        'href' => null,
+        'coming_soon' => true,
     ],
     [
         'key' => 'theory_training',
         'label' => 'Theory Training',
         'icon' => 'theory',
-        'href' => '/student/dashboard.php',
+        'href' => null,
+        'coming_soon' => true,
     ],
     [
         'key' => 'flight_training',
