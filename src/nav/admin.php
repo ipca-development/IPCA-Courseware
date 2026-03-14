@@ -3,12 +3,15 @@ declare(strict_types=1);
 
 return [
     [
+        'type' => 'section',
+        'label' => 'Main',
+    ],
+    [
         'key' => 'dashboard',
         'label' => 'Dashboard',
         'icon' => 'dashboard',
         'href' => '/admin/dashboard.php',
     ],
-
     [
         'key' => 'schedule',
         'label' => 'Schedule',
@@ -18,18 +21,46 @@ return [
     ],
 
     [
+        'type' => 'section',
+        'label' => 'Training',
+    ],
+    [
         'key' => 'theory_training',
         'label' => 'Theory Training',
         'icon' => 'theory',
         'items' => [
-            ['label' => 'Courses', 'icon' => 'courses', 'href' => '/admin/courses.php'],
-            ['label' => 'Lessons', 'icon' => 'lessons', 'href' => '/admin/lessons.php'],
-            ['label' => 'Slides', 'icon' => 'slides', 'href' => '/admin/slides.php'],
-            ['label' => 'Bulk Import', 'icon' => 'import', 'href' => '/admin/import_lab.php'],
-            ['label' => 'Bulk Enrich', 'icon' => 'enrich', 'href' => '/admin/bulk_enrich.php'],
+            [
+                'key' => 'courses',
+                'label' => 'Courses',
+                'icon' => 'courses',
+                'href' => '/admin/courses.php',
+            ],
+            [
+                'key' => 'lessons',
+                'label' => 'Lessons',
+                'icon' => 'lessons',
+                'href' => '/admin/lessons.php',
+            ],
+            [
+                'key' => 'slides',
+                'label' => 'Slides',
+                'icon' => 'slides',
+                'href' => '/admin/slides.php',
+            ],
+            [
+                'key' => 'bulk_import',
+                'label' => 'Bulk Import',
+                'icon' => 'import',
+                'href' => '/admin/import_lab.php',
+            ],
+            [
+                'key' => 'bulk_enrich',
+                'label' => 'Bulk Enrich',
+                'icon' => 'enrich',
+                'href' => '/admin/bulk_enrich.php',
+            ],
         ],
     ],
-
     [
         'key' => 'flight_training',
         'label' => 'Flight Training',
@@ -39,13 +70,16 @@ return [
     ],
 
     [
+        'type' => 'section',
+        'label' => 'Operations',
+    ],
+    [
         'key' => 'operations',
         'label' => 'Operations',
         'icon' => 'operations',
         'href' => null,
         'coming_soon' => true,
     ],
-
     [
         'key' => 'projects',
         'label' => 'Projects',
@@ -53,17 +87,15 @@ return [
         'href' => null,
         'coming_soon' => true,
     ],
-
     [
-        'key' => 'compliance',
+        'key' => 'compliance_monitoring',
         'label' => 'Compliance Monitoring',
         'icon' => 'compliance',
         'href' => null,
         'coming_soon' => true,
     ],
-
     [
-        'key' => 'safety',
+        'key' => 'safety_management',
         'label' => 'Safety Management',
         'icon' => 'safety',
         'href' => null,
@@ -71,12 +103,27 @@ return [
     ],
 
     [
+        'type' => 'section',
+        'label' => 'System',
+    ],
+    [
         'key' => 'settings',
         'label' => 'Settings',
         'icon' => 'settings',
         'items' => [
-            ['label' => 'System Health', 'icon' => 'health', 'href' => null, 'coming_soon' => true],
-            ['label' => 'Architecture Scanner', 'icon' => 'scanner', 'href' => '/admin/architecture_scanner.php'],
+            [
+                'key' => 'system_health',
+                'label' => 'System Health',
+                'icon' => 'health',
+                'href' => null,
+                'coming_soon' => true,
+            ],
+            [
+                'key' => 'architecture_scanner',
+                'label' => 'Architecture Scanner',
+                'icon' => 'scanner',
+                'href' => '/admin/architecture_scanner.php',
+            ],
         ],
     ],
 ];

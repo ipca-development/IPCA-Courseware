@@ -30,11 +30,21 @@ function cw_nav_is_current(string $href, string $currentPath): bool
 function cw_nav_group_is_active(array $items, string $currentPath): bool
 {
     foreach ($items as $item) {
+        if (($item['type'] ?? '') === 'section') {
+            continue;
+        }
+
         $href = (string)($item['href'] ?? '');
         if ($href !== '' && cw_nav_is_current($href, $currentPath)) {
             return true;
         }
+
+        $children = (isset($item['items']) && is_array($item['items'])) ? $item['items'] : [];
+        if ($children && cw_nav_group_is_active($children, $currentPath)) {
+            return true;
+        }
     }
+
     return false;
 }
 
@@ -65,13 +75,6 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
         return '';
     }
 
-    $roleLabel = trim($roleLabel);
-    if ($roleLabel === '') {
-        $roleLabel = 'Workspace';
-    }
-
-    $roleLabelEsc = htmlspecialchars($roleLabel, ENT_QUOTES, 'UTF-8');
-
     $html = '';
     $html .= '<aside class="app-sidebar-shell">';
     $html .= '  <div class="app-sidebar-top">';
@@ -87,8 +90,19 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
     $html .= '  </div>';
 
     $html .= '  <div class="app-sidebar-nav">';
+    $html .= '    <div class="cw-nav-groups">';
 
     foreach ($entries as $entry) {
+        $type = (string)($entry['type'] ?? '');
+
+        if ($type === 'section') {
+            $label = (string)($entry['label'] ?? '');
+            $labelEsc = htmlspecialchars($label, ENT_QUOTES, 'UTF-8');
+
+            $html .= '<div class="nav-section-label">' . $labelEsc . '</div>';
+            continue;
+        }
+
         $label = (string)($entry['label'] ?? '');
         $labelEsc = htmlspecialchars($label, ENT_QUOTES, 'UTF-8');
         $href = (string)($entry['href'] ?? '');
@@ -96,7 +110,6 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
         $comingSoon = !empty($entry['coming_soon']);
         $items = (isset($entry['items']) && is_array($entry['items'])) ? $entry['items'] : [];
 
-        // Direct top-level item
         if (!$items) {
             $html .= '<div class="nav-block nav-block-direct">';
 
@@ -107,11 +120,13 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
                 $html .= '</span>';
             } else {
                 $class = 'nav-link';
+                $current = '';
                 if (cw_nav_is_current($href, $currentPath)) {
                     $class .= ' is-active';
+                    $current = ' aria-current="page"';
                 }
 
-                $html .= '<a class="' . $class . '" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '">';
+                $html .= '<a class="' . $class . '" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '"' . $current . '>';
                 $html .= '<span class="nav-link-accent"></span>';
                 $html .= '<span class="nav-link-icon-rail">' . cw_nav_icon_img($icon, $label) . '</span>';
                 $html .= '<span class="nav-link-label">' . $labelEsc . '</span>';
@@ -122,7 +137,6 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
             continue;
         }
 
-        // Grouped section
         $groupActive = cw_nav_group_is_active($items, $currentPath);
         $detailsClass = 'nav-group';
         if ($groupActive) {
@@ -140,6 +154,13 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
         $html .= '  <div class="nav-group-items">';
 
         foreach ($items as $item) {
+            if (($item['type'] ?? '') === 'section') {
+                $itemLabel = (string)($item['label'] ?? '');
+                $itemLabelEsc = htmlspecialchars($itemLabel, ENT_QUOTES, 'UTF-8');
+                $html .= '<div class="nav-subsection-label">' . $itemLabelEsc . '</div>';
+                continue;
+            }
+
             $itemLabel = (string)($item['label'] ?? '');
             $itemLabelEsc = htmlspecialchars($itemLabel, ENT_QUOTES, 'UTF-8');
             $itemHref = (string)($item['href'] ?? '');
@@ -155,11 +176,13 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
             }
 
             $class = 'nav-link nav-link-child';
+            $current = '';
             if (cw_nav_is_current($itemHref, $currentPath)) {
                 $class .= ' is-active';
+                $current = ' aria-current="page"';
             }
 
-            $html .= '<a class="' . $class . '" href="' . htmlspecialchars($itemHref, ENT_QUOTES, 'UTF-8') . '">';
+            $html .= '<a class="' . $class . '" href="' . htmlspecialchars($itemHref, ENT_QUOTES, 'UTF-8') . '"' . $current . '>';
             $html .= '<span class="nav-link-accent"></span>';
             $html .= '<span class="nav-link-icon-rail">' . cw_nav_icon_img($itemIcon, $itemLabel) . '</span>';
             $html .= '<span class="nav-link-label">' . $itemLabelEsc . '</span>';
@@ -170,6 +193,7 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
         $html .= '</details>';
     }
 
+    $html .= '    </div>';
     $html .= '  </div>';
     $html .= '</aside>';
 

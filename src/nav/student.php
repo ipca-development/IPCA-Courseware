@@ -3,26 +3,27 @@ declare(strict_types=1);
 
 return [
     [
+        'type' => 'section',
+        'label' => 'Main',
+    ],
+    [
         'key' => 'dashboard',
         'label' => 'Dashboard',
         'icon' => 'dashboard',
         'href' => '/student/dashboard.php',
     ],
-
     [
         'key' => 'my_training',
         'label' => 'My Training',
         'icon' => 'training',
         'href' => '/student/dashboard.php',
     ],
-
     [
         'key' => 'theory_training',
         'label' => 'Theory Training',
         'icon' => 'theory',
         'href' => '/student/dashboard.php',
     ],
-
     [
         'key' => 'flight_training',
         'label' => 'Flight Training',
@@ -30,7 +31,6 @@ return [
         'href' => null,
         'coming_soon' => true,
     ],
-
     [
         'key' => 'safety',
         'label' => 'Safety',
@@ -38,7 +38,6 @@ return [
         'href' => null,
         'coming_soon' => true,
     ],
-
     [
         'key' => 'schedule',
         'label' => 'Schedule',
@@ -46,7 +45,6 @@ return [
         'href' => null,
         'coming_soon' => true,
     ],
-
     [
         'key' => 'documents',
         'label' => 'Documents',
@@ -55,6 +53,10 @@ return [
         'coming_soon' => true,
     ],
 
+    [
+        'type' => 'section',
+        'label' => 'Account',
+    ],
     [
         'key' => 'account',
         'label' => 'Account',
