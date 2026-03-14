@@ -5,58 +5,58 @@ return [
     [
         'key' => 'dashboard',
         'label' => 'Dashboard',
-        'items' => [
-            ['label' => 'Instructor Dashboard', 'href' => '/instructor/dashboard.php'],
-        ],
+        'icon' => 'dashboard',
+        'href' => '/instructor/dashboard.php',
     ],
 
     [
         'key' => 'schedule',
         'label' => 'Schedule',
-        'items' => [
-            ['label' => 'Schedule', 'href' => null, 'coming_soon' => true],
-        ],
+        'icon' => 'schedule',
+        'href' => null,
+        'coming_soon' => true,
     ],
 
     [
         'key' => 'theory_training',
         'label' => 'Theory Training',
+        'icon' => 'theory',
         'items' => [
-            ['label' => 'Cohorts', 'href' => '/instructor/cohorts.php'],
-            ['label' => 'Summary Reviews', 'href' => null, 'coming_soon' => true],
-            ['label' => 'Instructor Decisions', 'href' => null, 'coming_soon' => true],
+            ['label' => 'Cohorts', 'icon' => 'cohorts', 'href' => '/instructor/cohorts.php'],
+            ['label' => 'Summary Reviews', 'icon' => 'summary', 'href' => null, 'coming_soon' => true],
+            ['label' => 'Instructor Decisions', 'icon' => 'decision', 'href' => null, 'coming_soon' => true],
         ],
     ],
 
     [
         'key' => 'flight_training',
         'label' => 'Flight Training',
-        'items' => [
-            ['label' => 'Flight Training', 'href' => null, 'coming_soon' => true],
-        ],
+        'icon' => 'flight',
+        'href' => null,
+        'coming_soon' => true,
     ],
 
     [
         'key' => 'operations',
         'label' => 'Operations',
-        'items' => [
-            ['label' => 'Operations', 'href' => null, 'coming_soon' => true],
-        ],
+        'icon' => 'operations',
+        'href' => null,
+        'coming_soon' => true,
     ],
 
     [
-        'key' => 'compliance_monitoring',
+        'key' => 'compliance',
         'label' => 'Compliance Monitoring',
-        'items' => [
-            ['label' => 'Compliance Monitoring', 'href' => null, 'coming_soon' => true],
-        ],
+        'icon' => 'compliance',
+        'href' => null,
+        'coming_soon' => true,
     ],
 
     [
-        'key' => 'safety_management',
+        'key' => 'safety',
         'label' => 'Safety Management',
-        'items' => [
-            ['label' => 'Safety Management', 'href' => null, 'coming_soon' => true],
-        ],
+        'icon' => 'safety',
+        'href' => null,
+        'coming_soon' => true,
     ],
 ];

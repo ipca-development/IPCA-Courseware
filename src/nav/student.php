@@ -5,56 +5,61 @@ return [
     [
         'key' => 'dashboard',
         'label' => 'Dashboard',
-        'items' => [
-            ['label' => 'Student Dashboard', 'href' => '/student/dashboard.php'],
-        ],
+        'icon' => 'dashboard',
+        'href' => '/student/dashboard.php',
     ],
 
     [
         'key' => 'my_training',
         'label' => 'My Training',
-        'items' => [
-            ['label' => 'My Training', 'href' => '/student/dashboard.php'],
-        ],
+        'icon' => 'training',
+        'href' => '/student/dashboard.php',
     ],
 
     [
         'key' => 'theory_training',
         'label' => 'Theory Training',
-        'items' => [
-            ['label' => 'Theory Training', 'href' => '/student/dashboard.php'],
-        ],
+        'icon' => 'theory',
+        'href' => '/student/dashboard.php',
     ],
 
     [
         'key' => 'flight_training',
         'label' => 'Flight Training',
-        'items' => [
-            ['label' => 'Flight Training', 'href' => null, 'coming_soon' => true],
-        ],
+        'icon' => 'flight',
+        'href' => null,
+        'coming_soon' => true,
+    ],
+
+    [
+        'key' => 'safety',
+        'label' => 'Safety',
+        'icon' => 'safety',
+        'href' => null,
+        'coming_soon' => true,
     ],
 
     [
         'key' => 'schedule',
         'label' => 'Schedule',
-        'items' => [
-            ['label' => 'Schedule', 'href' => null, 'coming_soon' => true],
-        ],
+        'icon' => 'schedule',
+        'href' => null,
+        'coming_soon' => true,
     ],
 
     [
         'key' => 'documents',
         'label' => 'Documents',
-        'items' => [
-            ['label' => 'Documents', 'href' => null, 'coming_soon' => true],
-        ],
+        'icon' => 'documents',
+        'href' => null,
+        'coming_soon' => true,
     ],
 
     [
         'key' => 'account',
         'label' => 'Account',
-        'items' => [
-            ['label' => 'Account', 'href' => null, 'coming_soon' => true],
-        ],
+        'icon' => 'account',
+        'href' => null,
+        'coming_soon' => true,
     ],
 ];

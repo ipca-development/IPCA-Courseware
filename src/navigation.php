@@ -19,50 +19,159 @@ function cw_nav_is_current(string $href, string $currentPath): bool
         return false;
     }
 
-    return rtrim($href, '/') === rtrim($currentPath, '/');
+    $hrefPath = parse_url($href, PHP_URL_PATH);
+    if (!is_string($hrefPath) || $hrefPath === '') {
+        $hrefPath = $href;
+    }
+
+    return rtrim($hrefPath, '/') === rtrim($currentPath, '/');
 }
 
-function cw_render_navigation(string $role, string $currentPath): string
+function cw_nav_group_is_active(array $items, string $currentPath): bool
 {
-    $groups = cw_nav_items_for_role($role);
-    if (!$groups) {
+    foreach ($items as $item) {
+        $href = (string)($item['href'] ?? '');
+        if ($href !== '' && cw_nav_is_current($href, $currentPath)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function cw_nav_icon_img(?string $icon, string $label): string
+{
+    $icon = trim((string)$icon);
+    if ($icon === '') {
         return '';
     }
 
+    $svgSrc = '/assets/icons/' . rawurlencode($icon) . '.svg';
+    $pngSrc = '/assets/icons/' . rawurlencode($icon) . '.png';
+
+    return ''
+        . '<img'
+        . ' class="nav-icon"'
+        . ' src="' . htmlspecialchars($svgSrc, ENT_QUOTES, 'UTF-8') . '"'
+        . ' data-png-fallback="' . htmlspecialchars($pngSrc, ENT_QUOTES, 'UTF-8') . '"'
+        . ' alt="' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '"'
+        . ' loading="lazy"'
+        . '>';
+}
+
+function cw_render_navigation(string $role, string $currentPath, string $roleLabel = ''): string
+{
+    $entries = cw_nav_items_for_role($role);
+    if (!$entries) {
+        return '';
+    }
+
+    $roleLabel = trim($roleLabel);
+    if ($roleLabel === '') {
+        $roleLabel = 'Workspace';
+    }
+
+    $roleLabelEsc = htmlspecialchars($roleLabel, ENT_QUOTES, 'UTF-8');
+
     $html = '';
+    $html .= '<aside class="app-sidebar-shell">';
+    $html .= '  <div class="app-sidebar-top">';
+    $html .= '    <div class="app-brand">';
+    $html .= '      <div class="app-brand-mark">';
+    $html .= '        <img src="/assets/logo/ipca_logo_white.png" alt="IPCA">';
+    $html .= '      </div>';
+    $html .= '      <div class="app-brand-copy">';
+    $html .= '        <div class="app-brand-title">IPCA Courseware</div>';
+    $html .= '        <div class="app-brand-subtitle">Aviation Training Platform</div>';
+    $html .= '      </div>';
+    $html .= '    </div>';
+    $html .= '  </div>';
 
-    $html .= '<div class="cw-nav-shell">';
-    $html .= '<div class="cw-nav-groups">';
+    $html .= '  <div class="app-sidebar-nav">';
 
-    foreach ($groups as $group) {
-        $html .= '<div class="cw-nav-group">';
-        $html .= '<div class="cw-nav-group-title">' . htmlspecialchars((string)$group['label'], ENT_QUOTES, 'UTF-8') . '</div>';
-        $html .= '<div class="cw-nav-list">';
+    foreach ($entries as $entry) {
+        $label = (string)($entry['label'] ?? '');
+        $labelEsc = htmlspecialchars($label, ENT_QUOTES, 'UTF-8');
+        $href = (string)($entry['href'] ?? '');
+        $icon = (string)($entry['icon'] ?? '');
+        $comingSoon = !empty($entry['coming_soon']);
+        $items = (isset($entry['items']) && is_array($entry['items'])) ? $entry['items'] : [];
 
-        foreach ((array)$group['items'] as $item) {
-            $label = htmlspecialchars((string)$item['label'], ENT_QUOTES, 'UTF-8');
-            $href = (string)($item['href'] ?? '');
-            $comingSoon = !empty($item['coming_soon']);
+        // Direct top-level item
+        if (!$items) {
+            $html .= '<div class="nav-block nav-block-direct">';
 
             if ($href === '' || $comingSoon) {
-                $html .= '<span class="cw-nav-link disabled">' . $label . '</span>';
+                $html .= '<span class="nav-link is-disabled">';
+                $html .= '<span class="nav-link-icon-rail">' . cw_nav_icon_img($icon, $label) . '</span>';
+                $html .= '<span class="nav-link-label">' . $labelEsc . '</span>';
+                $html .= '</span>';
+            } else {
+                $class = 'nav-link';
+                if (cw_nav_is_current($href, $currentPath)) {
+                    $class .= ' is-active';
+                }
+
+                $html .= '<a class="' . $class . '" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '">';
+                $html .= '<span class="nav-link-accent"></span>';
+                $html .= '<span class="nav-link-icon-rail">' . cw_nav_icon_img($icon, $label) . '</span>';
+                $html .= '<span class="nav-link-label">' . $labelEsc . '</span>';
+                $html .= '</a>';
+            }
+
+            $html .= '</div>';
+            continue;
+        }
+
+        // Grouped section
+        $groupActive = cw_nav_group_is_active($items, $currentPath);
+        $detailsClass = 'nav-group';
+        if ($groupActive) {
+            $detailsClass .= ' is-open';
+        }
+
+        $html .= '<details class="' . $detailsClass . '"' . ($groupActive ? ' open' : '') . '>';
+        $html .= '  <summary class="nav-group-summary">';
+        $html .= '    <span class="nav-group-summary-left">';
+        $html .= '      <span class="nav-link-icon-rail">' . cw_nav_icon_img($icon, $label) . '</span>';
+        $html .= '      <span class="nav-group-title">' . $labelEsc . '</span>';
+        $html .= '    </span>';
+        $html .= '    <span class="nav-group-caret">›</span>';
+        $html .= '  </summary>';
+        $html .= '  <div class="nav-group-items">';
+
+        foreach ($items as $item) {
+            $itemLabel = (string)($item['label'] ?? '');
+            $itemLabelEsc = htmlspecialchars($itemLabel, ENT_QUOTES, 'UTF-8');
+            $itemHref = (string)($item['href'] ?? '');
+            $itemIcon = (string)($item['icon'] ?? '');
+            $itemComingSoon = !empty($item['coming_soon']);
+
+            if ($itemHref === '' || $itemComingSoon) {
+                $html .= '<span class="nav-link nav-link-child is-disabled">';
+                $html .= '<span class="nav-link-icon-rail">' . cw_nav_icon_img($itemIcon, $itemLabel) . '</span>';
+                $html .= '<span class="nav-link-label">' . $itemLabelEsc . '</span>';
+                $html .= '</span>';
                 continue;
             }
 
-            $class = 'cw-nav-link';
-            if (cw_nav_is_current($href, $currentPath)) {
-                $class .= ' current';
+            $class = 'nav-link nav-link-child';
+            if (cw_nav_is_current($itemHref, $currentPath)) {
+                $class .= ' is-active';
             }
 
-            $html .= '<a class="' . $class . '" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '">' . $label . '</a>';
+            $html .= '<a class="' . $class . '" href="' . htmlspecialchars($itemHref, ENT_QUOTES, 'UTF-8') . '">';
+            $html .= '<span class="nav-link-accent"></span>';
+            $html .= '<span class="nav-link-icon-rail">' . cw_nav_icon_img($itemIcon, $itemLabel) . '</span>';
+            $html .= '<span class="nav-link-label">' . $itemLabelEsc . '</span>';
+            $html .= '</a>';
         }
 
-        $html .= '</div>';
-        $html .= '</div>';
+        $html .= '  </div>';
+        $html .= '</details>';
     }
 
-    $html .= '</div>';
-    $html .= '</div>';
+    $html .= '  </div>';
+    $html .= '</aside>';
 
     return $html;
 }
