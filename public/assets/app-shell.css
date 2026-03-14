@@ -48,6 +48,7 @@ body.app-shell-body{
 .app-shell{
   min-height:100vh;
   display:flex;
+  align-items:stretch;
   background:transparent;
 }
 
@@ -105,6 +106,10 @@ body.app-shell-body{
   width:24px;
   height:24px;
   object-fit:contain;
+}
+
+.app-brand-copy{
+  min-width:0;
 }
 
 .app-brand-title{
@@ -373,12 +378,14 @@ body.app-shell-body{
   min-width:0;
   display:flex;
   flex-direction:column;
+  justify-content:flex-start;
 }
 
 .app-topbar{
   position:sticky;
   top:0;
   z-index:90;
+  display:block;
   background:rgba(246,248,251,0.84);
   backdrop-filter: blur(16px);
   border-bottom:1px solid rgba(15,23,42,0.045);
@@ -390,6 +397,10 @@ body.app-shell-body{
   align-items:center;
   justify-content:space-between;
   padding:0 34px;
+}
+
+.app-topbar-title-block{
+  display:block;
 }
 
 .app-topbar-overline{
@@ -414,6 +425,7 @@ body.app-shell-body{
 .app-main{
   flex:1 1 auto;
   min-width:0;
+  display:block;
 }
 
 .app-content{
@@ -475,7 +487,6 @@ body.app-shell-body{
   color:var(--text-strong);
 }
 
-/* Generic premium progress styling for pages that already have bars */
 .progress-shell,
 .deadline-progress-shell,
 .mini-progress{
@@ -490,7 +501,6 @@ body.app-shell-body{
   border-radius:999px !important;
 }
 
-/* Human-readable datetime utility */
 .human-date{
   white-space:nowrap;
   color:var(--text-muted);
@@ -498,7 +508,6 @@ body.app-shell-body{
   font-weight:560;
 }
 
-/* Empty states */
 .empty-state{
   background:#fff;
   border:1px dashed rgba(15,23,42,0.10);
