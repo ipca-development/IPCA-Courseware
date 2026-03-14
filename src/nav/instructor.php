@@ -22,6 +22,7 @@ return [
         'key' => 'theory_training',
         'label' => 'Theory Training',
         'items' => [
+            ['label' => 'Cohorts', 'href' => '/instructor/cohorts.php'],
             ['label' => 'Summary Reviews', 'href' => null, 'coming_soon' => true],
             ['label' => 'Instructor Decisions', 'href' => null, 'coming_soon' => true],
         ],
@@ -39,7 +40,7 @@ return [
         'key' => 'operations',
         'label' => 'Operations',
         'items' => [
-            ['label' => 'Cohorts', 'href' => '/instructor/cohorts.php'],
+            ['label' => 'Operations', 'href' => null, 'coming_soon' => true],
         ],
     ],
 
