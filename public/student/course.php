@@ -97,6 +97,19 @@ function get_summary_state(PDO $pdo, $userId, $cohortId, $lessonId) {
     $st->execute([$userId, $cohortId, $lessonId]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
 
+    if (!$row || !is_array($row)) {
+        return [
+            'len' => 0,
+            'review_status' => '',
+            'review_score' => null,
+            'updated_at' => '',
+            'review_feedback' => '',
+            'review_notes_by_instructor' => '',
+            'has_summary' => false,
+            'ok' => false
+        ];
+    }
+
     $plain = (string)($row['summary_plain'] ?? '');
     $reviewStatus = (string)($row['review_status'] ?? '');
     $reviewScore = ($row['review_score'] === null) ? null : (int)$row['review_score'];
