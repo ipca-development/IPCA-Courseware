@@ -950,7 +950,8 @@ cw_header('Course');
 
   .section-card{padding:20px 22px}
   .section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
-  .module-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}
+  .module-header-card{padding:20px 22px}
+  .module-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
   .section-title{margin:0;font-size:22px;line-height:1.05;letter-spacing:-0.02em;color:#152235}
   .section-sub{margin-top:6px;font-size:14px;color:#56677f;line-height:1.45}
   .count-pill{display:inline-block;padding:7px 11px;border-radius:999px;background:#edf4ff;color:#1d4f91;font-size:12px;font-weight:800;border:1px solid #d3e3ff;white-space:nowrap}
@@ -981,7 +982,7 @@ cw_header('Course');
 
   .course-head{
     display:grid;
-    grid-template-columns:72px minmax(420px,2.35fr) minmax(128px,.72fr) minmax(118px,.66fr) minmax(118px,.66fr);
+    grid-template-columns:72px minmax(420px,2.35fr) minmax(122px,.70fr) minmax(112px,.64fr) minmax(112px,.64fr);
     gap:10px;
     align-items:center;
   }
@@ -1119,6 +1120,10 @@ cw_header('Course');
   .deadline-progress-fill.deadline-red{background:linear-gradient(90deg,#dc2626 0%, #ef4444 100%)}
   .deadline-progress-fill.deadline-neutral{background:linear-gradient(90deg,#64748b 0%, #94a3b8 100%)}
 
+  .avg-score-fill.ok{background:linear-gradient(90deg,#166534 0%, #22c55e 100%)}
+  .avg-score-fill.warn{background:linear-gradient(90deg,#d97706 0%, #dc2626 100%)}
+  .avg-score-fill.neutral{background:linear-gradient(90deg,#64748b 0%, #94a3b8 100%)}
+
   .course-body{
     padding:0;
     border-top:1px solid rgba(15,23,42,0.05);
@@ -1218,6 +1223,8 @@ cw_header('Course');
   .action-btn.disabled{opacity:.45;pointer-events:none}
 
   .cell-action{display:flex;align-items:center}
+  .score-cell{text-align:center !important}
+  .score-wrap{display:flex;align-items:center;justify-content:center}
   .status-text{font-size:11px;font-weight:700;color:#32465f;line-height:1.3}
 
   .resume-highlight td{background:#fafcff}
@@ -1235,7 +1242,7 @@ cw_header('Course');
     .top-grid{grid-template-columns:1fr}
     .support-grid{grid-template-columns:1fr}
     .course-head{
-      grid-template-columns:72px minmax(320px,2fr) minmax(120px,.8fr) minmax(110px,.68fr) minmax(110px,.68fr);
+      grid-template-columns:72px minmax(320px,2fr) minmax(118px,.76fr) minmax(106px,.62fr) minmax(106px,.62fr);
     }
   }
 
@@ -1412,7 +1419,7 @@ cw_header('Course');
     <?php endif; ?>
   </div>
 
-  <div>
+  <div class="card module-header-card">
     <div class="module-section-head">
       <div>
         <h2 class="section-title">Module Overview</h2>
@@ -1422,213 +1429,238 @@ cw_header('Course');
       </div>
       <div class="count-pill"><?= count($courseBlocks) ?> module<?= count($courseBlocks) === 1 ? '' : 's' ?></div>
     </div>
+  </div>
 
-    <?php if (!$courseBlocks): ?>
-      <div class="empty-premium">No lessons found for this cohort.</div>
-    <?php else: ?>
-      <div class="modules-stack">
-        <?php $courseIndex = 0; ?>
-        <?php foreach ($courseBlocks as $course): ?>
-          <?php
-            $courseIndex++;
-            $moduleMood = $course['motivation_meta'];
-            $moduleHasRecommended = ((int)$course['recommended_lesson_id'] === $recommendedLessonId && $recommendedLessonId > 0);
-          ?>
-          <div class="course-card">
-            <details <?= $moduleHasRecommended ? 'open' : '' ?>>
-              <summary>
-                <div class="course-head">
-                  <div class="course-index">
-                    <div class="course-badge"><?= (int)$courseIndex ?></div>
-                    <div class="course-toggle">›</div>
-                  </div>
+  <?php if (!$courseBlocks): ?>
+    <div class="empty-premium">No lessons found for this cohort.</div>
+  <?php else: ?>
+    <div class="modules-stack">
+      <?php $courseIndex = 0; ?>
+      <?php foreach ($courseBlocks as $course): ?>
+        <?php
+          $courseIndex++;
+          $moduleMood = $course['motivation_meta'];
+          $moduleHasRecommended = ((int)$course['recommended_lesson_id'] === $recommendedLessonId && $recommendedLessonId > 0);
 
-                  <div class="course-main">
-                    <div class="module-label">Module</div>
-                    <div class="course-title"><?= h($course['course_title']) ?></div>
-                    <div class="course-next">Next: <?= h($course['next_lesson_label']) ?></div>
-                    <div class="module-micro"><?= h($moduleMood['micro']) ?></div>
+          $avgScoreValue = $course['avg_score'];
+          $avgScorePct = ($avgScoreValue !== null) ? (int)$avgScoreValue : 0;
+          if ($avgScorePct < 0) $avgScorePct = 0;
+          if ($avgScorePct > 100) $avgScorePct = 100;
 
-                    <div class="module-signal-row">
-                      <span class="state-pill <?= h($moduleMood['class']) ?>"><?= h($moduleMood['label']) ?></span>
+          $avgScoreBarClass = 'neutral';
+          if ($avgScoreValue !== null) {
+              $avgScoreBarClass = ((int)$avgScoreValue >= 75) ? 'ok' : 'warn';
+          }
+        ?>
+        <div class="course-card">
+          <details <?= $moduleHasRecommended ? 'open' : '' ?>>
+            <summary>
+              <div class="course-head">
+                <div class="course-index">
+                  <div class="course-badge"><?= (int)$courseIndex ?></div>
+                  <div class="course-toggle">›</div>
+                </div>
 
-                      <?php if ((int)$course['revision_count'] > 0): ?>
-                        <span class="state-pill danger"><?= (int)$course['revision_count'] ?> revision<?= (int)$course['revision_count'] === 1 ? '' : 's' ?></span>
-                      <?php endif; ?>
-                      <?php if ((int)$course['overdue_count'] > 0): ?>
-                        <span class="state-pill warn"><?= (int)$course['overdue_count'] ?> priority</span>
-                      <?php endif; ?>
-                      <?php if ((int)$course['test_ready_count'] > 0): ?>
-                        <span class="state-pill info"><?= (int)$course['test_ready_count'] ?> test ready</span>
-                      <?php endif; ?>
-                      <?php if ((int)$course['blocked_count'] > 0): ?>
-                        <span class="state-pill danger"><?= (int)$course['blocked_count'] ?> blocked</span>
-                      <?php endif; ?>
-                    </div>
-                  </div>
+                <div class="course-main">
+                  <div class="module-label">Module</div>
+                  <div class="course-title"><?= h($course['course_title']) ?></div>
+                  <div class="course-next">Next: <?= h($course['next_lesson_label']) ?></div>
+                  <div class="module-micro"><?= h($moduleMood['micro']) ?></div>
 
-                  <div class="metric-col">
-                    <div class="metric-label">Final Module Deadline</div>
-                    <div class="metric-value"><?= h($course['deadline']['date']) ?></div>
-                    <div class="mini-progress">
-                      <span class="deadline-progress-fill <?= h($course['deadline']['class']) ?>" style="width:<?= (int)$course['deadline']['pct'] ?>%;"></span>
-                    </div>
-                    <div class="metric-sub"><?= h($course['deadline']['label']) ?></div>
-                  </div>
+                  <div class="module-signal-row">
+                    <span class="state-pill <?= h($moduleMood['class']) ?>"><?= h($moduleMood['label']) ?></span>
 
-                  <div class="metric-col">
-                    <div class="metric-label">Module Progress</div>
-                    <div class="metric-value"><?= (int)$course['progress_pct'] ?>%</div>
-                    <div class="mini-progress">
-                      <span style="width:<?= (int)$course['progress_pct'] ?>%;"></span>
-                    </div>
-                    <div class="metric-sub"><?= (int)$course['passed_count'] ?>/<?= (int)$course['lesson_count'] ?> completed</div>
-                  </div>
-
-                  <div class="metric-col">
-                    <div class="metric-label">Average Score</div>
-                    <div class="metric-value"><?= $course['avg_score'] !== null ? (int)$course['avg_score'] . '%' : '—' ?></div>
-                    <div class="mini-progress">
-                      <span style="width:<?= $course['avg_score'] !== null ? (int)$course['avg_score'] : 0 ?>%;"></span>
-                    </div>
-                    <div class="metric-sub"><?= (int)$course['summary_approved_count'] ?>/<?= (int)$course['lesson_count'] ?> summaries approved</div>
+                    <?php if ((int)$course['revision_count'] > 0): ?>
+                      <span class="state-pill danger"><?= (int)$course['revision_count'] ?> revision<?= (int)$course['revision_count'] === 1 ? '' : 's' ?></span>
+                    <?php endif; ?>
+                    <?php if ((int)$course['overdue_count'] > 0): ?>
+                      <span class="state-pill warn"><?= (int)$course['overdue_count'] ?> priority</span>
+                    <?php endif; ?>
+                    <?php if ((int)$course['test_ready_count'] > 0): ?>
+                      <span class="state-pill info"><?= (int)$course['test_ready_count'] ?> test ready</span>
+                    <?php endif; ?>
+                    <?php if ((int)$course['blocked_count'] > 0): ?>
+                      <span class="state-pill danger"><?= (int)$course['blocked_count'] ?> blocked</span>
+                    <?php endif; ?>
                   </div>
                 </div>
-              </summary>
 
-              <div class="course-body">
-                <div class="lesson-table-wrap">
-                  <table class="lesson-table">
-                    <colgroup>
-                      <col style="width:27%;">
-                      <col style="width:15%;">
-                      <col style="width:10%;">
-                      <col style="width:15%;">
-                      <col style="width:11%;">
-                      <col style="width:8%;">
-                      <col style="width:14%;">
-                    </colgroup>
-                    <thead>
-                      <tr>
-                        <th>Title</th>
-                        <th>Deadline</th>
-                        <th>Study</th>
-                        <th>Summary</th>
-                        <th>Progress Test</th>
-                        <th>Score</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($course['lessons'] as $lessonIndex => $lx): ?>
-                      <?php
-                        $last = $lx['test']['last'];
-                        $attemptsLeft = (int)$lx['attempts_left'];
-                        $scoreMeta = score_badge_meta($lx['test_passed'], $lx['best_score'], $last, $attemptsLeft);
-                        $rowClass = ((int)$lx['lesson_id'] === $recommendedLessonId) ? 'resume-highlight' : '';
+                <div class="metric-col">
+                  <div class="metric-label">Deadline</div>
+                  <div class="metric-value"><?= h($course['deadline']['date']) ?></div>
+                  <div class="mini-progress">
+                    <span class="deadline-progress-fill <?= h($course['deadline']['class']) ?>" style="width:<?= (int)$course['deadline']['pct'] ?>%;"></span>
+                  </div>
+                  <div class="metric-sub"><?= h($course['deadline']['label']) ?></div>
+                </div>
 
-                        $statusText = 'Study the lesson';
-                        if (!empty($lx['locked'])) {
-                            $statusText = 'Locked';
-                        } elseif (!empty($lx['instructor_decision']['training_suspended'])) {
-                            $statusText = 'Training paused';
-                        } elseif (!empty($lx['instructor_decision']['one_on_one_required']) && empty($lx['instructor_decision']['one_on_one_completed'])) {
-                            $statusText = 'Instructor session required';
-                        } elseif ((string)$lx['summary_review_status'] === 'pending') {
-                            $statusText = 'Waiting for instructor review';
-                        } elseif ((string)$lx['summary_review_status'] === 'needs_revision') {
-                            $statusText = 'Improve summary';
-                        } elseif (!empty($lx['can_test'])) {
-                            $statusText = 'Ready for progress test';
-                        } elseif (!$lx['test_passed'] && $last && isset($last['status']) && (string)$last['status'] === 'completed') {
-                            $statusText = 'Improve progress test';
-                        } elseif (!empty($lx['passed'])) {
-                            $statusText = 'Completed';
-                        }
+                <div class="metric-col">
+                  <div class="metric-label">Progress</div>
+                  <div class="metric-value"><?= (int)$course['progress_pct'] ?>%</div>
+                  <div class="mini-progress">
+                    <span style="width:<?= (int)$course['progress_pct'] ?>%;"></span>
+                  </div>
+                  <div class="metric-sub"><?= (int)$course['passed_count'] ?>/<?= (int)$course['lesson_count'] ?> completed</div>
+                </div>
 
-                        $studyHref = '';
-                        if ((int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
-                            $studyHref = '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'];
-                        }
-
-                        $testHref = '';
-                        $testLabel = '';
-                        if (!empty($lx['can_test'])) {
-                            $testHref = (string)$lx['progress_test_url'];
-                            $testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
-                        } else {
-                            $testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
-                        }
-                      ?>
-                      <tr class="<?= h($rowClass) ?>">
-                        <td>
-                          <div class="lesson-title-line">
-                            <span class="lesson-seq"><?= (int)($lessonIndex + 1) ?>.</span>
-                            <div class="lesson-title"><?= h($lx['lesson_title']) ?></div>
-                          </div>
-                        </td>
-
-                        <td>
-                          <div class="deadline-wrap">
-                            <div class="deadline-date"><?= h($lx['deadline']['date']) ?></div>
-                            <div class="deadline-progress-shell">
-                              <div class="deadline-progress-fill <?= h($lx['deadline']['class']) ?>" style="width:<?= (int)$lx['deadline']['pct'] ?>%;"></div>
-                            </div>
-                            <div class="deadline-label <?= h($lx['deadline']['class']) ?>">
-                              <?= h($lx['deadline']['label']) ?>
-                            </div>
-                          </div>
-                        </td>
-
-                        <td>
-                          <div class="cell-action">
-                            <?php if ($studyHref !== ''): ?>
-                              <a class="action-btn primary" href="<?= h($studyHref) ?>">Continue</a>
-                            <?php else: ?>
-                              <span class="action-btn disabled">Continue</span>
-                            <?php endif; ?>
-                          </div>
-                        </td>
-
-                        <td>
-                          <div class="summary-compact">
-                            <div class="summary-head"><?= h($lx['summary_meta']['sub']) ?></div>
-                            <div class="summary-bar-shell">
-                              <div class="summary-bar-fill <?= h($lx['summary_meta']['class']) ?>" style="width:<?= (int)$lx['summary_meta']['pct'] ?>%;"></div>
-                            </div>
-                            <div class="summary-label <?= h($lx['summary_meta']['class']) ?>"><?= h($lx['summary_meta']['label']) ?></div>
-                          </div>
-                        </td>
-
-                        <td>
-                          <div class="cell-action">
-                            <?php if ($testHref !== ''): ?>
-                              <a class="action-btn primary" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
-                            <?php else: ?>
-                              <span class="action-btn disabled"><?= h($testLabel) ?></span>
-                            <?php endif; ?>
-                          </div>
-                        </td>
-
-                        <td>
-                          <span class="state-pill <?= h($scoreMeta['class']) ?>"><?= h($scoreMeta['label']) ?></span>
-                        </td>
-
-                        <td>
-                          <div class="status-text"><?= h($statusText) ?></div>
-                        </td>
-                      </tr>
-                    <?php endforeach; ?>
-                    </tbody>
-                  </table>
+                <div class="metric-col">
+                  <div class="metric-label">Average Score</div>
+                  <div class="metric-value"><?= $avgScoreValue !== null ? (int)$avgScoreValue . '%' : '—' ?></div>
+                  <div class="mini-progress">
+                    <span class="avg-score-fill <?= h($avgScoreBarClass) ?>" style="width:<?= (int)$avgScorePct ?>%;"></span>
+                  </div>
                 </div>
               </div>
-            </details>
-          </div>
-        <?php endforeach; ?>
-      </div>
-    <?php endif; ?>
-  </div>
+            </summary>
+
+            <div class="course-body">
+              <div class="lesson-table-wrap">
+                <table class="lesson-table">
+                  <colgroup>
+                    <col style="width:27%;">
+                    <col style="width:15%;">
+                    <col style="width:10%;">
+                    <col style="width:15%;">
+                    <col style="width:11%;">
+                    <col style="width:8%;">
+                    <col style="width:14%;">
+                  </colgroup>
+                  <thead>
+                    <tr>
+                      <th>Title</th>
+                      <th>Deadline</th>
+                      <th>Study</th>
+                      <th>Summary</th>
+                      <th>Test</th>
+                      <th>Score</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                  <?php foreach ($course['lessons'] as $lessonIndex => $lx): ?>
+                    <?php
+                      $last = $lx['test']['last'];
+                      $attemptsLeft = (int)$lx['attempts_left'];
+                      $scoreMeta = score_badge_meta($lx['test_passed'], $lx['best_score'], $last, $attemptsLeft);
+                      $rowClass = ((int)$lx['lesson_id'] === $recommendedLessonId) ? 'resume-highlight' : '';
+
+                      $statusText = 'Study the lesson';
+                      $appendAttempts = false;
+
+                      if (!empty($lx['locked'])) {
+                          $statusText = 'Locked';
+                      } elseif (!empty($lx['instructor_decision']['training_suspended'])) {
+                          $statusText = 'Training paused';
+                      } elseif (!empty($lx['passed'])) {
+                          $statusText = 'Completed';
+                      } elseif (!empty($lx['instructor_decision']['one_on_one_required']) && empty($lx['instructor_decision']['one_on_one_completed'])) {
+                          $statusText = 'Instructor session required';
+                      } elseif ((string)$lx['summary_review_status'] === 'pending') {
+                          $statusText = 'Waiting for instructor review';
+                      } elseif ($attemptsLeft <= 0) {
+                          $statusText = 'No attempts left';
+                      } elseif ((string)$lx['summary_review_status'] === 'needs_revision') {
+                          $statusText = 'Improve summary';
+                          $appendAttempts = true;
+                      } elseif (!empty($lx['can_test'])) {
+                          $statusText = 'Ready for progress test';
+                          $appendAttempts = true;
+                      } elseif (!$lx['test_passed'] && $last && isset($last['status']) && (string)$last['status'] === 'completed') {
+                          $statusText = 'Improve progress test';
+                          $appendAttempts = true;
+                      } else {
+                          $statusText = 'Study the lesson';
+                          $appendAttempts = true;
+                      }
+
+                      if ($appendAttempts && $attemptsLeft > 0) {
+                          $statusText .= ' · ' . $attemptsLeft . ' attempt' . ($attemptsLeft === 1 ? '' : 's') . ' left';
+                      }
+
+                      $studyHref = '';
+                      if ((int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
+                          $studyHref = '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'];
+                      }
+
+                      $testHref = '';
+                      $testLabel = '';
+                      if (!empty($lx['can_test'])) {
+                          $testHref = (string)$lx['progress_test_url'];
+                          $testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
+                      } else {
+                          $testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
+                      }
+                    ?>
+                    <tr class="<?= h($rowClass) ?>">
+                      <td>
+                        <div class="lesson-title-line">
+                          <span class="lesson-seq"><?= (int)($lessonIndex + 1) ?>.</span>
+                          <div class="lesson-title"><?= h($lx['lesson_title']) ?></div>
+                        </div>
+                      </td>
+
+                      <td>
+                        <div class="deadline-wrap">
+                          <div class="deadline-date"><?= h($lx['deadline']['date']) ?></div>
+                          <div class="deadline-progress-shell">
+                            <div class="deadline-progress-fill <?= h($lx['deadline']['class']) ?>" style="width:<?= (int)$lx['deadline']['pct'] ?>%;"></div>
+                          </div>
+                          <div class="deadline-label <?= h($lx['deadline']['class']) ?>">
+                            <?= h($lx['deadline']['label']) ?>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td>
+                        <div class="cell-action">
+                          <?php if ($studyHref !== ''): ?>
+                            <a class="action-btn primary" href="<?= h($studyHref) ?>">Continue</a>
+                          <?php else: ?>
+                            <span class="action-btn disabled">Continue</span>
+                          <?php endif; ?>
+                        </div>
+                      </td>
+
+                      <td>
+                        <div class="summary-compact">
+                          <div class="summary-head"><?= h($lx['summary_meta']['sub']) ?></div>
+                          <div class="summary-bar-shell">
+                            <div class="summary-bar-fill <?= h($lx['summary_meta']['class']) ?>" style="width:<?= (int)$lx['summary_meta']['pct'] ?>%;"></div>
+                          </div>
+                          <div class="summary-label <?= h($lx['summary_meta']['class']) ?>"><?= h($lx['summary_meta']['label']) ?></div>
+                        </div>
+                      </td>
+
+                      <td>
+                        <div class="cell-action">
+                          <?php if ($testHref !== ''): ?>
+                            <a class="action-btn primary" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
+                          <?php else: ?>
+                            <span class="action-btn disabled"><?= h($testLabel) ?></span>
+                          <?php endif; ?>
+                        </div>
+                      </td>
+
+                      <td class="score-cell">
+                        <div class="score-wrap">
+                          <span class="state-pill <?= h($scoreMeta['class']) ?>"><?= h($scoreMeta['label']) ?></span>
+                        </div>
+                      </td>
+
+                      <td>
+                        <div class="status-text"><?= h($statusText) ?></div>
+                      </td>
+                    </tr>
+                  <?php endforeach; ?>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </details>
+        </div>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
 </div>
 
 <?php cw_footer(); ?>
