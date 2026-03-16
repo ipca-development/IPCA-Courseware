@@ -59,6 +59,20 @@ if ($role === 'student') {
     }
 }
 
+function cw_ui_date($value) {
+    $value = trim((string)$value);
+    if ($value === '') {
+        return '—';
+    }
+
+    try {
+        $dt = new DateTime($value, new DateTimeZone('UTC'));
+        return $dt->format('D, M j, Y');
+    } catch (Throwable $e) {
+        return $value;
+    }
+}
+
 function lesson_passed(PDO $pdo, $userId, $cohortId, $lessonId) {
     $st = $pdo->prepare("
         SELECT completion_status, test_pass_status
@@ -276,7 +290,7 @@ function deadline_meta($deadlineUtc) {
         return [
             'label' => $label,
             'class' => $class,
-            'date'  => $deadline->format('M j, Y')
+            'date'  => cw_ui_date($deadlineUtc)
         ];
     } catch (Throwable $e) {
         return [
@@ -842,7 +856,6 @@ if ($role === 'student' && $programId > 0) {
 }
 
 $summariesPageExists = file_exists(__DIR__ . '/lesson_summaries.php');
-$exportPdfExists = file_exists(__DIR__ . '/export_summaries_pdf.php');
 
 $allLessonsFlat = [];
 foreach ($courseBlocks as $cb) {
@@ -913,11 +926,12 @@ cw_header('Course');
 ?>
 <style>
   .course-page-stack{display:flex;flex-direction:column;gap:20px}
+  .hero-grid{display:grid;grid-template-columns:1.2fr .8fr;gap:16px}
   .hero-card{padding:24px 26px}
   .hero-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#5f6f88;font-weight:700;margin-bottom:10px}
   .hero-title{margin:0;font-size:32px;line-height:1.02;letter-spacing:-0.04em;color:#152235;font-weight:800}
   .hero-sub{margin-top:12px;font-size:15px;color:#56677f;max-width:920px;line-height:1.55}
-  .hero-meta{margin-top:14px;font-size:14px;color:#495a72;line-height:1.5}
+  .hero-meta{margin-top:14px;font-size:14px;color:#495a72;line-height:1.6}
   .hero-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
   .hero-btn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 14px;border-radius:12px;text-decoration:none;font-size:13px;font-weight:700;color:#152235;background:#f4f7fb;border:1px solid rgba(15,23,42,0.08)}
   .hero-btn.primary{background:#12355f;color:#fff;border-color:#12355f}
@@ -936,18 +950,6 @@ cw_header('Course');
   .momentum-line{margin-top:10px;font-size:13px;color:#1d4f91;font-weight:700}
   .today-line{margin-top:8px;font-size:13px;color:#166534;font-weight:700}
 
-  .support-grid{display:grid;grid-template-columns:1.25fr .75fr;gap:16px}
-  .priority-card,.ai-placeholder{padding:20px 22px;border:1px solid rgba(15,23,42,0.06);border-radius:18px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,0.055)}
-  .priority-label{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#5f718d;font-weight:700;margin-bottom:12px}
-  .priority-title{font-size:24px;font-weight:800;color:#152235;line-height:1.12;margin:0}
-  .priority-sub{margin-top:8px;font-size:14px;color:#56677f;line-height:1.5}
-  .priority-why{margin-top:12px;font-size:14px;color:#32465f;line-height:1.55}
-  .priority-actions{margin-top:14px;display:flex;gap:10px;flex-wrap:wrap}
-  .next-step-meta{margin-top:8px;font-size:13px;color:#56677f;line-height:1.5}
-  .next-step-reinforcement{margin-top:10px;font-size:13px;color:#1d4f91;font-weight:700}
-  .ai-title{margin:0;font-size:20px;font-weight:800;color:#152235;line-height:1.15}
-  .ai-text{margin-top:10px;font-size:14px;color:#56677f;line-height:1.6}
-
   .section-card{padding:20px 22px}
   .section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
   .module-header-card{padding:20px 22px}
@@ -961,6 +963,10 @@ cw_header('Course');
   .attention-main{min-width:0}
   .attention-title{font-size:14px;font-weight:700;color:#152235;line-height:1.3}
   .attention-meta{margin-top:5px;font-size:13px;color:#586b84;line-height:1.45}
+
+  .ai-placeholder{padding:20px 22px;border:1px solid rgba(15,23,42,0.06);border-radius:18px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,0.055)}
+  .ai-title{margin:0;font-size:20px;font-weight:800;color:#152235;line-height:1.15}
+  .ai-text{margin-top:10px;font-size:14px;color:#56677f;line-height:1.6}
 
   .modules-stack{display:flex;flex-direction:column;gap:12px}
 
@@ -982,9 +988,9 @@ cw_header('Course');
 
   .course-head{
     display:grid;
-    grid-template-columns:72px minmax(420px,2.35fr) minmax(122px,.70fr) minmax(112px,.64fr) minmax(112px,.64fr);
+    grid-template-columns:72px minmax(0,2.55fr) minmax(0,1.2fr) minmax(112px,.72fr) minmax(0,1fr);
     gap:10px;
-    align-items:center;
+    align-items:start;
   }
 
   .course-index{
@@ -1076,8 +1082,10 @@ cw_header('Course');
     min-width:0;
     display:flex;
     flex-direction:column;
-    justify-content:center;
+    align-items:flex-start;
+    justify-content:flex-start;
     overflow:visible;
+    padding-top:0;
   }
 
   .metric-value{
@@ -1087,6 +1095,9 @@ cw_header('Course');
     line-height:1.15;
     white-space:normal;
     word-break:break-word;
+    min-height:34px;
+    display:flex;
+    align-items:flex-start;
   }
 
   .metric-sub{
@@ -1097,6 +1108,12 @@ cw_header('Course');
     white-space:normal;
     overflow:visible;
     word-break:break-word;
+    min-height:28px;
+  }
+
+  .metric-col.metric-score .metric-sub{
+    min-height:28px;
+    margin-top:0;
   }
 
   .mini-progress{
@@ -1156,6 +1173,7 @@ cw_header('Course');
   .lesson-table tbody td:last-child{padding-right:15px}
   .lesson-table tbody tr:last-child td{border-bottom:0}
 
+  .th-center,.td-center{text-align:center !important}
   .lesson-title-line{display:flex;align-items:flex-start;gap:8px}
   .lesson-seq{flex:0 0 auto;min-width:15px;color:#3b4f68;font-weight:800;font-size:13px;line-height:1.25}
   .lesson-title{font-size:13px;font-weight:700;color:#152235;line-height:1.3;word-break:break-word}
@@ -1222,7 +1240,7 @@ cw_header('Course');
   .action-btn:hover{opacity:.95}
   .action-btn.disabled{opacity:.45;pointer-events:none}
 
-  .cell-action{display:flex;align-items:center}
+  .cell-action{display:flex;align-items:center;justify-content:center}
   .score-cell{text-align:center !important}
   .score-wrap{display:flex;align-items:center;justify-content:center}
   .status-text{font-size:11px;font-weight:700;color:#32465f;line-height:1.3}
@@ -1239,10 +1257,10 @@ cw_header('Course');
   }
 
   @media (max-width: 1320px){
+    .hero-grid{grid-template-columns:1fr}
     .top-grid{grid-template-columns:1fr}
-    .support-grid{grid-template-columns:1fr}
     .course-head{
-      grid-template-columns:72px minmax(320px,2fr) minmax(118px,.76fr) minmax(106px,.62fr) minmax(106px,.62fr);
+      grid-template-columns:72px minmax(0,2.2fr) minmax(0,1.15fr) minmax(104px,.68fr) minmax(0,.95fr);
     }
   }
 
@@ -1260,33 +1278,45 @@ cw_header('Course');
 
 <div class="course-page-stack">
 
-  <div class="card hero-card">
-    <div class="hero-eyebrow">Theory Course</div>
-    <h1 class="hero-title"><?= h($cohort['course_title']) ?></h1>
-    <div class="hero-sub">
-      Each step here moves you closer to becoming a safe and confident aviator.
+  <div class="hero-grid">
+    <div class="card hero-card">
+      <div class="hero-eyebrow">Theory Course</div>
+      <h1 class="hero-title"><?= h($cohort['course_title']) ?></h1>
+      <div class="hero-sub">
+        Each step here moves you closer to becoming a safe and confident aviator.
+      </div>
+      <div class="hero-meta">
+        Cohort: <strong><?= h($cohort['name']) ?></strong><br>
+        Study Window: <strong><?= h(cw_ui_date($cohort['start_date'])) ?></strong> to <strong><?= h(cw_ui_date($cohort['end_date'])) ?></strong>
+      </div>
+
+      <div class="hero-actions">
+        <a class="hero-btn" href="/student/dashboard.php">← Back to Dashboard</a>
+
+        <?php if ($summariesPageExists): ?>
+          <a class="hero-btn primary" href="/student/lesson_summaries.php?cohort_id=<?= (int)$cohortId ?>">My Lesson Summaries</a>
+        <?php else: ?>
+          <span class="hero-btn disabled">My Lesson Summaries</span>
+        <?php endif; ?>
+      </div>
     </div>
-    <div class="hero-meta">
-      Program: <strong><?= h($cohort['program_key']) ?></strong>
-      · Cohort: <strong><?= h($cohort['name']) ?></strong>
-      · Study Window: <strong><?= h($cohort['start_date']) ?></strong> to <strong><?= h($cohort['end_date']) ?></strong>
-      · You’ve completed <strong><?= (int)$totalCompletedLessons ?></strong> of <strong><?= (int)$totalLessons ?></strong> lessons so far.
-    </div>
 
-    <div class="hero-actions">
-      <a class="hero-btn" href="/student/dashboard.php">← Back to Dashboard</a>
-
-      <?php if ($summariesPageExists): ?>
-        <a class="hero-btn primary" href="/student/lesson_summaries.php?cohort_id=<?= (int)$cohortId ?>">Lesson Summaries</a>
-      <?php else: ?>
-        <span class="hero-btn disabled">Lesson Summaries</span>
-      <?php endif; ?>
-
-      <?php if ($exportPdfExists): ?>
-        <a class="hero-btn" href="/student/export_summaries_pdf.php?cohort_id=<?= (int)$cohortId ?>">Export Summaries PDF</a>
-      <?php else: ?>
-        <span class="hero-btn disabled">Export Summaries PDF</span>
-      <?php endif; ?>
+    <div class="ai-placeholder">
+      <h3 class="ai-title">AI Instructor Assistant (coming soon)</h3>
+      <div class="ai-text">
+        Soon you will be able to ask your AI Instructor questions about any lesson topic.
+      </div>
+      <div class="ai-text">
+        The AI will answer only using:
+      </div>
+      <div class="ai-text">
+        • course slide content<br>
+        • official FAA references<br>
+        • canonical training data
+      </div>
+      <div class="ai-text">
+        It will guide you directly to the exact slide where the concept is explained.
+      </div>
     </div>
   </div>
 
@@ -1340,47 +1370,6 @@ cw_header('Course');
       </div>
       <div class="progress-shell">
         <div class="progress-fill" style="width:<?= (int)$studentOnTimePct ?>%;"></div>
-      </div>
-    </div>
-  </div>
-
-  <div class="support-grid">
-    <div class="priority-card">
-      <div class="priority-label">Your Next Step Toward Becoming a Pilot</div>
-      <h2 class="priority-title"><?= $nextBestStep ? h($nextBestStep['lesson_label']) : 'No action available yet' ?></h2>
-      <div class="priority-sub">This is the single most important action to keep your training momentum.</div>
-
-      <?php if ($nextBestStep): ?>
-        <div class="next-step-meta">Module: <?= h($nextBestStep['module_title']) ?></div>
-        <div class="priority-why"><?= h($nextBestStep['why']) ?></div>
-        <div class="priority-actions">
-          <?php if ($nextBestStep['action_href'] !== ''): ?>
-            <a class="action-btn <?= h($nextBestStep['action_class']) ?>" href="<?= h($nextBestStep['action_href']) ?>"><?= h($nextBestStep['action_label']) ?></a>
-          <?php else: ?>
-            <span class="action-btn <?= h($nextBestStep['action_class']) ?> disabled"><?= h($nextBestStep['action_label']) ?></span>
-          <?php endif; ?>
-        </div>
-        <div class="next-step-reinforcement"><?= h($nextBestStep['why']) ?></div>
-      <?php else: ?>
-        <div class="empty-premium" style="margin-top:14px;">No next step could be determined yet.</div>
-      <?php endif; ?>
-    </div>
-
-    <div class="ai-placeholder">
-      <h3 class="ai-title">AI Instructor Assistant (coming soon)</h3>
-      <div class="ai-text">
-        Soon you will be able to ask your AI Instructor questions about any lesson topic.
-      </div>
-      <div class="ai-text">
-        The AI will answer only using:
-      </div>
-      <div class="ai-text">
-        • course slide content<br>
-        • official FAA references<br>
-        • canonical training data
-      </div>
-      <div class="ai-text">
-        It will guide you directly to the exact slide where the concept is explained.
       </div>
     </div>
   </div>
@@ -1503,12 +1492,13 @@ cw_header('Course');
                   <div class="metric-sub"><?= (int)$course['passed_count'] ?>/<?= (int)$course['lesson_count'] ?> completed</div>
                 </div>
 
-                <div class="metric-col">
+                <div class="metric-col metric-score">
                   <div class="metric-label">Average Score</div>
                   <div class="metric-value"><?= $avgScoreValue !== null ? (int)$avgScoreValue . '%' : '—' ?></div>
                   <div class="mini-progress">
                     <span class="avg-score-fill <?= h($avgScoreBarClass) ?>" style="width:<?= (int)$avgScorePct ?>%;"></span>
                   </div>
+                  <div class="metric-sub"></div>
                 </div>
               </div>
             </summary>
@@ -1529,10 +1519,10 @@ cw_header('Course');
                     <tr>
                       <th>Title</th>
                       <th>Deadline</th>
-                      <th>Study</th>
+                      <th class="th-center">Study</th>
                       <th>Summary</th>
-                      <th>Test</th>
-                      <th>Score</th>
+                      <th class="th-center">Test</th>
+                      <th class="th-center">Score</th>
                       <th>Status</th>
                     </tr>
                   </thead>
@@ -1611,7 +1601,7 @@ cw_header('Course');
                         </div>
                       </td>
 
-                      <td>
+                      <td class="td-center">
                         <div class="cell-action">
                           <?php if ($studyHref !== ''): ?>
                             <a class="action-btn primary" href="<?= h($studyHref) ?>">Continue</a>
@@ -1631,7 +1621,7 @@ cw_header('Course');
                         </div>
                       </td>
 
-                      <td>
+                      <td class="td-center">
                         <div class="cell-action">
                           <?php if ($testHref !== ''): ?>
                             <a class="action-btn primary" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
@@ -1641,7 +1631,7 @@ cw_header('Course');
                         </div>
                       </td>
 
-                      <td class="score-cell">
+                      <td class="score-cell td-center">
                         <div class="score-wrap">
                           <span class="state-pill <?= h($scoreMeta['class']) ?>"><?= h($scoreMeta['label']) ?></span>
                         </div>
