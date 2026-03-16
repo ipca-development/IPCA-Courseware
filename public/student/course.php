@@ -134,19 +134,19 @@ function summary_quality_meta(array $summaryState) {
     $score = $summaryState['review_score'];
 
     if ($len <= 0) {
-        return ['label' => 'Not Started', 'class' => 'neutral', 'sub' => 'No summary'];
+        return ['label' => 'Not started', 'class' => 'neutral', 'sub' => 'No summary', 'pct' => 0];
     }
 
     if ($status === 'pending') {
-        return ['label' => 'Pending review', 'class' => 'warn', 'sub' => 'Waiting for review', 'pct' => 58];
+        return ['label' => 'Pending review', 'class' => 'warn', 'sub' => 'Pending', 'pct' => 58];
     }
 
     if ($status === 'needs_revision') {
-        return ['label' => 'Needs revision', 'class' => 'danger', 'sub' => 'Improve summary', 'pct' => 32];
+        return ['label' => 'Needs revision', 'class' => 'danger', 'sub' => 'Revision', 'pct' => 32];
     }
 
     if ($status === 'rejected') {
-        return ['label' => 'Needs revision', 'class' => 'danger', 'sub' => 'Major improvement needed', 'pct' => 20];
+        return ['label' => 'Needs revision', 'class' => 'danger', 'sub' => 'Revision', 'pct' => 20];
     }
 
     if ($status === 'acceptable') {
@@ -363,29 +363,6 @@ function score_badge_meta($testPassed, $bestScore, $last, $attemptsLeft) {
         'label' => '—',
         'class' => 'neutral'
     ];
-}
-
-function student_workflow_label($status) {
-    switch ((string)$status) {
-        case 'awaiting_summary_review':
-            return 'Waiting for instructor review';
-        case 'awaiting_test':
-            return 'Ready for progress test';
-        case 'remediation_required':
-            return 'Improve progress test';
-        case 'blocked_deadline':
-            return 'Priority';
-        case 'blocked_reason_required':
-            return 'Reason required before extension';
-        case 'blocked_reason_rejected':
-            return 'Extension request not approved';
-        case 'blocked_final':
-            return 'Training paused';
-        case 'completed':
-            return 'Completed';
-        default:
-            return 'In progress';
-    }
 }
 
 function lesson_primary_action($lx) {
@@ -983,10 +960,24 @@ cw_header('Course');
   .attention-title{font-size:14px;font-weight:700;color:#152235;line-height:1.3}
   .attention-meta{margin-top:5px;font-size:13px;color:#586b84;line-height:1.45}
 
-  .course-card{border:1px solid rgba(15,23,42,0.06);border-radius:20px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,0.055);margin-bottom:16px;overflow:hidden}
+  .course-card{
+    border:1px solid rgba(15,23,42,0.045);
+    border-radius:16px;
+    background:transparent;
+    box-shadow:none;
+    margin-bottom:12px;
+    overflow:hidden;
+  }
   .course-card details{border:0}
-  .course-card summary{list-style:none;cursor:pointer;padding:18px 20px}
+  .course-card summary{
+    list-style:none;
+    cursor:pointer;
+    padding:16px 18px;
+    background:#ffffff;
+    border-radius:16px;
+  }
   .course-card summary::-webkit-details-marker{display:none}
+
   .course-head{display:grid;grid-template-columns:60px 26px minmax(220px,1.45fr) minmax(180px,1fr) minmax(140px,0.8fr) minmax(210px,1fr);gap:12px;align-items:center}
   .course-badge{width:48px;height:48px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:17px;color:#fff;background:linear-gradient(135deg,#0b2744,#123b72)}
   .course-toggle{font-size:20px;color:#12355f;font-weight:900;text-align:center;transition:transform .2s ease}
@@ -1000,28 +991,37 @@ cw_header('Course');
   .mini-progress > span{display:block;height:8px;border-radius:999px;background:linear-gradient(90deg,#113459 0%, #2458a6 100%)}
   .module-signal-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 
-  .course-body{padding:0 20px 18px 20px;border-top:1px solid rgba(15,23,42,0.06);background:#fbfcfe}
+  .course-body{
+    padding:0 18px 14px 18px;
+    border-top:1px solid rgba(15,23,42,0.05);
+    background:#ffffff;
+  }
+
   .lesson-table-wrap{overflow:visible;margin-top:12px}
   .lesson-table{width:100%;border-collapse:collapse;table-layout:fixed}
   .lesson-table th,.lesson-table td{padding:10px 8px;border-bottom:1px solid rgba(15,23,42,0.07);vertical-align:middle;text-align:left}
   .lesson-table th{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#60718b;font-weight:700}
+
+  .lesson-title-line{display:flex;align-items:flex-start;gap:8px}
+  .lesson-seq{flex:0 0 auto;min-width:16px;color:#3b4f68;font-weight:800}
   .lesson-title{font-size:14px;font-weight:700;color:#152235;line-height:1.3}
 
   .deadline-wrap{min-width:0}
-  .deadline-date{font-weight:700;color:#152235;margin-bottom:4px;font-size:13px}
+  .deadline-date{font-weight:700;color:#152235;margin-bottom:4px;font-size:13px;line-height:1.15}
   .deadline-progress-shell{width:100%;height:7px;border-radius:999px;overflow:hidden;background:#e7edf4}
   .deadline-progress-fill{height:7px;border-radius:999px}
   .deadline-progress-fill.deadline-green{background:linear-gradient(90deg,#0f766e 0%, #14b8a6 100%)}
   .deadline-progress-fill.deadline-orange{background:linear-gradient(90deg,#d97706 0%, #f59e0b 100%)}
   .deadline-progress-fill.deadline-red{background:linear-gradient(90deg,#dc2626 0%, #ef4444 100%)}
   .deadline-progress-fill.deadline-neutral{background:linear-gradient(90deg,#64748b 0%, #94a3b8 100%)}
-  .deadline-label{font-size:11px;font-weight:800;margin-top:4px}
+  .deadline-label{font-size:11px;font-weight:800;margin-top:4px;line-height:1.2}
   .deadline-label.deadline-green{color:#166534}
   .deadline-label.deadline-orange{color:#b45309}
   .deadline-label.deadline-red{color:#b91c1c}
   .deadline-label.deadline-neutral{color:#4b5563}
 
-  .summary-compact{display:flex;flex-direction:column;gap:4px}
+  .summary-compact{min-width:0}
+  .summary-head{font-weight:700;color:#152235;margin-bottom:4px;font-size:13px;line-height:1.15}
   .summary-bar-shell{width:100%;height:7px;border-radius:999px;overflow:hidden;background:#e7edf4}
   .summary-bar-fill{height:7px;border-radius:999px}
   .summary-bar-fill.ok{background:linear-gradient(90deg,#166534 0%, #22c55e 100%)}
@@ -1029,7 +1029,12 @@ cw_header('Course');
   .summary-bar-fill.danger{background:linear-gradient(90deg,#b91c1c 0%, #ef4444 100%)}
   .summary-bar-fill.info{background:linear-gradient(90deg,#1d4f91 0%, #3b82f6 100%)}
   .summary-bar-fill.neutral{background:linear-gradient(90deg,#64748b 0%, #94a3b8 100%)}
-  .summary-label{font-size:11px;font-weight:700;color:#41556f;line-height:1.25}
+  .summary-label{font-size:11px;font-weight:800;margin-top:4px;line-height:1.2}
+  .summary-label.ok{color:#166534}
+  .summary-label.warn{color:#b45309}
+  .summary-label.danger{color:#b91c1c}
+  .summary-label.info{color:#1d4f91}
+  .summary-label.neutral{color:#4b5563}
 
   .state-pill{display:inline-block;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;line-height:1.2;border:1px solid transparent;white-space:nowrap}
   .state-pill.ok{background:#dcfce7;border-color:#86efac;color:#166534}
@@ -1316,7 +1321,7 @@ cw_header('Course');
                     <th style="width:13%;">Status</th>
                   </tr>
 
-                  <?php foreach ($course['lessons'] as $lx): ?>
+                  <?php foreach ($course['lessons'] as $lessonIndex => $lx): ?>
                     <?php
                       $last = $lx['test']['last'];
                       $attemptsLeft = (int)$lx['attempts_left'];
@@ -1357,7 +1362,10 @@ cw_header('Course');
                     ?>
                     <tr class="<?= h($rowClass) ?>">
                       <td>
-                        <div class="lesson-title"><?= h($lx['lesson_title']) ?></div>
+                        <div class="lesson-title-line">
+                          <span class="lesson-seq"><?= (int)($lessonIndex + 1) ?>.</span>
+                          <div class="lesson-title"><?= h($lx['lesson_title']) ?></div>
+                        </div>
                       </td>
 
                       <td>
@@ -1382,10 +1390,11 @@ cw_header('Course');
 
                       <td>
                         <div class="summary-compact">
+                          <div class="summary-head"><?= h($lx['summary_meta']['sub']) ?></div>
                           <div class="summary-bar-shell">
                             <div class="summary-bar-fill <?= h($lx['summary_meta']['class']) ?>" style="width:<?= (int)$lx['summary_meta']['pct'] ?>%;"></div>
                           </div>
-                          <div class="summary-label"><?= h($lx['summary_meta']['label']) ?></div>
+                          <div class="summary-label <?= h($lx['summary_meta']['class']) ?>"><?= h($lx['summary_meta']['label']) ?></div>
                         </div>
                       </td>
 
