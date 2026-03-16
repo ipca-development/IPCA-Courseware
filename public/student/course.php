@@ -59,6 +59,11 @@ if ($role === 'student') {
     }
 }
 
+function cw_fetch_assoc_safe(PDOStatement $st) {
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return is_array($row) ? $row : array();
+}
+
 function lesson_passed(PDO $pdo, $userId, $cohortId, $lessonId) {
     $st = $pdo->prepare("
         SELECT completion_status, test_pass_status
@@ -67,7 +72,7 @@ function lesson_passed(PDO $pdo, $userId, $cohortId, $lessonId) {
         LIMIT 1
     ");
     $st->execute([$userId, $cohortId, $lessonId]);
-    $row = $st->fetch(PDO::FETCH_ASSOC);
+    $row = cw_fetch_assoc_safe($st);
 
     $completionStatus = (string)($row['completion_status'] ?? '');
     $testPassStatus   = (string)($row['test_pass_status'] ?? '');
@@ -95,10 +100,10 @@ function get_summary_state(PDO $pdo, $userId, $cohortId, $lessonId) {
         LIMIT 1
     ");
     $st->execute([$userId, $cohortId, $lessonId]);
-    $row = $st->fetch(PDO::FETCH_ASSOC);
+    $row = cw_fetch_assoc_safe($st);
 
-    if (!$row || !is_array($row)) {
-        return [
+    if (!$row) {
+        return array(
             'len' => 0,
             'review_status' => '',
             'review_score' => null,
@@ -107,7 +112,7 @@ function get_summary_state(PDO $pdo, $userId, $cohortId, $lessonId) {
             'review_notes_by_instructor' => '',
             'has_summary' => false,
             'ok' => false
-        ];
+        );
     }
 
     $plain = (string)($row['summary_plain'] ?? '');
@@ -116,7 +121,7 @@ function get_summary_state(PDO $pdo, $userId, $cohortId, $lessonId) {
 
     $len = function_exists('mb_strlen') ? mb_strlen(trim($plain)) : strlen(trim($plain));
 
-    return [
+    return array(
         'len' => $len,
         'review_status' => $reviewStatus,
         'review_score' => $reviewScore,
@@ -125,7 +130,7 @@ function get_summary_state(PDO $pdo, $userId, $cohortId, $lessonId) {
         'review_notes_by_instructor' => (string)($row['review_notes_by_instructor'] ?? ''),
         'has_summary' => ($len > 0),
         'ok' => ($reviewStatus === 'acceptable')
-    ];
+    );
 }
 
 function summary_quality_meta(array $summaryState) {
@@ -134,32 +139,28 @@ function summary_quality_meta(array $summaryState) {
     $score = $summaryState['review_score'];
 
     if ($len <= 0) {
-        return ['label' => 'Not started', 'class' => 'neutral', 'sub' => 'No summary', 'pct' => 0];
+        return array('label' => 'No summary', 'class' => 'neutral', 'sub' => 'No summary', 'pct' => 0);
     }
 
     if ($status === 'pending') {
-        return ['label' => 'Pending review', 'class' => 'warn', 'sub' => 'Pending', 'pct' => 58];
+        return array('label' => 'Pending', 'class' => 'warn', 'sub' => 'Pending', 'pct' => 58);
     }
 
-    if ($status === 'needs_revision') {
-        return ['label' => 'Needs revision', 'class' => 'danger', 'sub' => 'Revision', 'pct' => 32];
-    }
-
-    if ($status === 'rejected') {
-        return ['label' => 'Needs revision', 'class' => 'danger', 'sub' => 'Revision', 'pct' => 20];
+    if ($status === 'needs_revision' || $status === 'rejected') {
+        return array('label' => 'Revision', 'class' => 'danger', 'sub' => 'Revision', 'pct' => 32);
     }
 
     if ($status === 'acceptable') {
         if ($score !== null && (int)$score >= 90) {
-            return ['label' => 'Excellent understanding', 'class' => 'ok', 'sub' => 'Excellent', 'pct' => 96];
+            return array('label' => 'Excellent', 'class' => 'ok', 'sub' => 'Excellent', 'pct' => 96);
         }
         if ($score !== null && (int)$score >= 75) {
-            return ['label' => 'Strong understanding', 'class' => 'ok', 'sub' => 'Strong', 'pct' => 82];
+            return array('label' => 'Strong', 'class' => 'ok', 'sub' => 'Strong', 'pct' => 82);
         }
-        return ['label' => 'Approved summary', 'class' => 'ok', 'sub' => 'Approved', 'pct' => 72];
+        return array('label' => 'Approved', 'class' => 'ok', 'sub' => 'Approved', 'pct' => 72);
     }
 
-    return ['label' => 'Draft saved', 'class' => 'info', 'sub' => 'Draft', 'pct' => 44];
+    return array('label' => 'Draft', 'class' => 'info', 'sub' => 'Draft', 'pct' => 44);
 }
 
 function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
@@ -172,6 +173,7 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
     ");
     $st->execute([$userId, $cohortId, $lessonId]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($row)) $row = null;
 
     $mx = $pdo->prepare("
       SELECT MAX(attempt)
@@ -191,7 +193,7 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
     ");
     $best->execute([$userId, $cohortId, $lessonId]);
     $bestScore = $best->fetchColumn();
-    $bestScore = ($bestScore === null) ? null : (int)$bestScore;
+    $bestScore = ($bestScore === null || $bestScore === false) ? null : (int)$bestScore;
 
     $pass = $pdo->prepare("
       SELECT 1
@@ -206,12 +208,12 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
     $pass->execute([$userId, $cohortId, $lessonId]);
     $passed = (bool)$pass->fetchColumn();
 
-    return [
+    return array(
         'max_attempt' => $maxAttempt,
-        'last' => $row ?: null,
+        'last' => $row,
         'best_score' => $bestScore,
         'passed' => $passed
-    ];
+    );
 }
 
 function get_instructor_decision_state(PDO $pdo, $userId, $cohortId, $lessonId) {
@@ -228,23 +230,23 @@ function get_instructor_decision_state(PDO $pdo, $userId, $cohortId, $lessonId) 
         LIMIT 1
     ");
     $st->execute([$userId, $cohortId, $lessonId]);
-    $row = $st->fetch(PDO::FETCH_ASSOC);
+    $row = cw_fetch_assoc_safe($st);
 
-    return [
+    return array(
         'granted_extra_attempts' => (int)($row['granted_extra_attempts'] ?? 0),
         'one_on_one_required' => (int)($row['one_on_one_required'] ?? 0),
         'one_on_one_completed' => (int)($row['one_on_one_completed'] ?? 0),
         'training_suspended' => (int)($row['training_suspended'] ?? 0),
-    ];
+    );
 }
 
 function deadline_meta($deadlineUtc) {
-    if (trim($deadlineUtc) === '') {
-        return [
+    if (trim((string)$deadlineUtc) === '') {
+        return array(
             'label' => 'No deadline',
             'class' => 'deadline-neutral',
             'date'  => '—'
-        ];
+        );
     }
 
     try {
@@ -257,7 +259,7 @@ function deadline_meta($deadlineUtc) {
         $days = (int)floor($diffSeconds / 86400);
 
         if ($days < 0) {
-            $label = 'Needs attention today';
+            $label = 'Needs attention';
             $class = 'deadline-red';
         } elseif ($days === 0) {
             $label = 'Due today';
@@ -273,17 +275,17 @@ function deadline_meta($deadlineUtc) {
             $class = 'deadline-green';
         }
 
-        return [
+        return array(
             'label' => $label,
             'class' => $class,
             'date'  => $deadline->format('M j, Y')
-        ];
+        );
     } catch (Throwable $e) {
-        return [
+        return array(
             'label' => 'Unknown',
             'class' => 'deadline-neutral',
-            'date'  => $deadlineUtc
-        ];
+            'date'  => (string)$deadlineUtc
+        );
     }
 }
 
@@ -291,7 +293,7 @@ function deadline_progress_meta($cohortStartDate, $deadlineUtc) {
     $meta = deadline_meta($deadlineUtc);
     $meta['pct'] = 0;
 
-    if (trim($deadlineUtc) === '' || trim($cohortStartDate) === '') {
+    if (trim((string)$deadlineUtc) === '' || trim((string)$cohortStartDate) === '') {
         return $meta;
     }
 
@@ -339,30 +341,18 @@ function percent($num, $den) {
 
 function score_badge_meta($testPassed, $bestScore, $last, $attemptsLeft) {
     if ($testPassed && $bestScore !== null) {
-        return [
-            'label' => (int)$bestScore . '%',
-            'class' => 'ok'
-        ];
+        return array('label' => (int)$bestScore . '%', 'class' => 'ok');
     }
 
-    if ($last && $last['score_pct'] !== null && (string)$last['status'] === 'completed') {
-        return [
-            'label' => (int)$last['score_pct'] . '%',
-            'class' => 'danger'
-        ];
+    if ($last && isset($last['score_pct']) && $last['score_pct'] !== null && (string)$last['status'] === 'completed') {
+        return array('label' => (int)$last['score_pct'] . '%', 'class' => 'danger');
     }
 
     if ($last && (string)$last['status'] !== 'completed') {
-        return [
-            'label' => 'In progress',
-            'class' => 'info'
-        ];
+        return array('label' => 'In progress', 'class' => 'info');
     }
 
-    return [
-        'label' => '—',
-        'class' => 'neutral'
-    ];
+    return array('label' => '—', 'class' => 'neutral');
 }
 
 function lesson_primary_action($lx) {
@@ -370,112 +360,46 @@ function lesson_primary_action($lx) {
     $isPriority = (strpos(strtolower($deadlineLabel), 'attention') !== false || strtolower($deadlineLabel) === 'due today');
 
     if (!empty($lx['instructor_decision']['training_suspended'])) {
-        return [
-            'priority' => 90,
-            'label' => '',
-            'href' => '',
-            'class' => 'danger',
-            'note' => 'Training paused'
-        ];
+        return array('priority' => 90, 'label' => '', 'href' => '', 'class' => 'danger', 'note' => 'Training paused');
     }
 
     if ((string)$lx['summary_review_status'] === 'needs_revision' && (int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
-        return [
-            'priority' => 10,
-            'label' => 'Continue Lesson',
-            'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'],
-            'class' => 'primary',
-            'note' => 'Improve summary'
-        ];
+        return array('priority' => 10, 'label' => 'Continue', 'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'], 'class' => 'primary', 'note' => 'Improve summary');
     }
 
     if ($isPriority && empty($lx['passed']) && (int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
-        return [
-            'priority' => 20,
-            'label' => 'Continue Lesson',
-            'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'],
-            'class' => 'primary',
-            'note' => 'Study the lesson'
-        ];
+        return array('priority' => 20, 'label' => 'Continue', 'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'], 'class' => 'primary', 'note' => 'Study lesson');
     }
 
     if (!empty($lx['can_test'])) {
-        return [
-            'priority' => 30,
-            'label' => ($lx['test']['max_attempt'] > 0 ? 'Retake Test' : 'Take Test'),
-            'href' => (string)$lx['progress_test_url'],
-            'class' => 'primary',
-            'note' => 'Ready for progress test'
-        ];
+        return array('priority' => 30, 'label' => ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test'), 'href' => (string)$lx['progress_test_url'], 'class' => 'primary', 'note' => 'Ready for test');
     }
 
     if (!empty($lx['instructor_decision']['one_on_one_required']) && empty($lx['instructor_decision']['one_on_one_completed'])) {
-        return [
-            'priority' => 40,
-            'label' => '',
-            'href' => '',
-            'class' => 'warn',
-            'note' => 'Instructor session required'
-        ];
+        return array('priority' => 40, 'label' => '', 'href' => '', 'class' => 'warn', 'note' => 'Instructor review required');
     }
 
     if ((string)$lx['summary_review_status'] === 'pending') {
-        return [
-            'priority' => 50,
-            'label' => '',
-            'href' => '',
-            'class' => 'neutral',
-            'note' => 'Waiting for instructor review'
-        ];
+        return array('priority' => 50, 'label' => '', 'href' => '', 'class' => 'neutral', 'note' => 'Waiting for review');
     }
 
     if (empty($lx['summary_state']['has_summary']) && (int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
-        return [
-            'priority' => 60,
-            'label' => 'Continue Lesson',
-            'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'],
-            'class' => 'primary',
-            'note' => 'Study the lesson'
-        ];
+        return array('priority' => 60, 'label' => 'Continue', 'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'], 'class' => 'primary', 'note' => 'Study lesson');
     }
 
     if (!$lx['passed'] && (int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
-        return [
-            'priority' => 70,
-            'label' => 'Continue Lesson',
-            'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'],
-            'class' => 'primary',
-            'note' => 'Study the lesson'
-        ];
+        return array('priority' => 70, 'label' => 'Continue', 'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'], 'class' => 'primary', 'note' => 'Study lesson');
     }
 
     if (!empty($lx['passed']) && (int)$lx['first_slide_id'] > 0) {
-        return [
-            'priority' => 95,
-            'label' => 'Continue Lesson',
-            'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'],
-            'class' => 'neutral',
-            'note' => 'Completed'
-        ];
+        return array('priority' => 95, 'label' => 'Review', 'href' => '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'], 'class' => 'neutral', 'note' => 'Completed');
     }
 
     if (!empty($lx['locked'])) {
-        return [
-            'priority' => 96,
-            'label' => '',
-            'href' => '',
-            'class' => 'neutral',
-            'note' => 'Locked'
-        ];
+        return array('priority' => 96, 'label' => '', 'href' => '', 'class' => 'neutral', 'note' => 'Locked');
     }
 
-    return [
-        'priority' => 99,
-        'label' => '',
-        'href' => '',
-        'class' => 'neutral',
-        'note' => 'Unavailable'
-    ];
+    return array('priority' => 99, 'label' => '', 'href' => '', 'class' => 'neutral', 'note' => 'Unavailable');
 }
 
 function module_motivation_meta(array $course) {
@@ -488,27 +412,27 @@ function module_motivation_meta(array $course) {
     $lessons = (int)($course['lesson_count'] ?? 0);
 
     if ($lessons > 0 && $passed >= $lessons) {
-        return ['label' => 'Completed Strongly', 'class' => 'ok', 'micro' => 'You finished this module with strong completion.'];
+        return array('label' => 'Completed Strongly', 'class' => 'ok', 'micro' => 'Completed strongly');
     }
     if ($blocked > 0) {
-        return ['label' => 'Blocked', 'class' => 'danger', 'micro' => 'This module needs instructor resolution before moving forward.'];
+        return array('label' => 'Blocked', 'class' => 'danger', 'micro' => 'Instructor resolution needed');
     }
     if ($revision > 0) {
-        return ['label' => 'Priority', 'class' => 'danger', 'micro' => 'A summary revision inside this module is the current priority.'];
+        return array('label' => 'Priority', 'class' => 'danger', 'micro' => 'Priority item inside');
     }
     if ($overdue > 0) {
-        return ['label' => 'Priority', 'class' => 'warn', 'micro' => 'A time-sensitive item here should be addressed next.'];
+        return array('label' => 'Priority', 'class' => 'warn', 'micro' => 'Priority item inside');
     }
     if ($ready > 0) {
-        return ['label' => 'Ready for Test', 'class' => 'info', 'micro' => 'You have a lesson here that is ready for testing.'];
+        return array('label' => 'Ready for Test', 'class' => 'info', 'micro' => 'Ready for test');
     }
     if ($progress >= 85) {
-        return ['label' => 'Nearly Complete', 'class' => 'ok', 'micro' => 'You are close to completing this section.'];
+        return array('label' => 'Nearly Complete', 'class' => 'ok', 'micro' => 'Nearly complete');
     }
     if ($progress >= 35) {
-        return ['label' => 'Good Momentum', 'class' => 'ok', 'micro' => 'Strong progress in this module.'];
+        return array('label' => 'On Track', 'class' => 'ok', 'micro' => 'On track');
     }
-    return ['label' => 'On Track', 'class' => 'neutral', 'micro' => 'A manageable module to continue building steadily.'];
+    return array('label' => 'On Track', 'class' => 'neutral', 'micro' => 'On track');
 }
 
 $lessonRows = $pdo->prepare("
@@ -531,26 +455,25 @@ $lessonRows = $pdo->prepare("
 $lessonRows->execute([$cohortId]);
 $lessonRows = $lessonRows->fetchAll(PDO::FETCH_ASSOC);
 
-$courseBlocks = [];
+$courseBlocks = array();
 $totalLessons = 0;
 $totalCompletedLessons = 0;
-$allBestScores = [];
+$allBestScores = array();
 $onTimeEligible = 0;
 $onTimeCount = 0;
-$summariesStartedCount = 0;
 
 foreach ($lessonRows as $l) {
     $lessonId = (int)$l['lesson_id'];
     $courseId = (int)$l['course_id'];
 
     if (!isset($courseBlocks[$courseId])) {
-        $courseBlocks[$courseId] = [
+        $courseBlocks[$courseId] = array(
             'course_id' => $courseId,
             'course_title' => (string)$l['course_title'],
             'course_sort_order' => (int)$l['course_sort_order'],
-            'lessons' => [],
+            'lessons' => array(),
             'last_deadline_utc' => (string)$l['deadline_utc']
-        ];
+        );
     }
 
     $locked = false;
@@ -571,21 +494,18 @@ foreach ($lessonRows as $l) {
         LIMIT 1
     ");
     $first->execute([$lessonId]);
-    $firstSlideId = (int)$first->fetchColumn();
+    $firstSlideId = (int)($first->fetchColumn() ?: 0);
 
     $summaryState = ($role === 'admin')
-        ? ['len' => 9999, 'review_status' => 'acceptable', 'review_score' => 90, 'updated_at' => '', 'review_feedback' => '', 'review_notes_by_instructor' => '', 'has_summary' => true, 'ok' => true]
+        ? array('len' => 9999, 'review_status' => 'acceptable', 'review_score' => 90, 'updated_at' => '', 'review_feedback' => '', 'review_notes_by_instructor' => '', 'has_summary' => true, 'ok' => true)
         : get_summary_state($pdo, $userId, $cohortId, $lessonId);
 
     $summaryMeta = summary_quality_meta($summaryState);
     $sumLen = (int)$summaryState['len'];
     $summaryOk = !empty($summaryState['ok']);
-    if (!empty($summaryState['has_summary'])) {
-        $summariesStartedCount++;
-    }
 
     $test = ($role === 'admin')
-        ? ['max_attempt' => 0, 'last' => null, 'best_score' => null, 'passed' => false]
+        ? array('max_attempt' => 0, 'last' => null, 'best_score' => null, 'passed' => false)
         : get_test_status_v2($pdo, $userId, $cohortId, $lessonId);
 
     $last = $test['last'];
@@ -612,12 +532,12 @@ foreach ($lessonRows as $l) {
     }
 
     $instructorDecision = ($role === 'admin')
-        ? [
+        ? array(
             'granted_extra_attempts' => 0,
             'one_on_one_required' => 0,
             'one_on_one_completed' => 0,
             'training_suspended' => 0,
-        ]
+        )
         : get_instructor_decision_state($pdo, $userId, $cohortId, $lessonId);
 
     $maxAllowedAttempts = $baseMaxAllowedAttempts + (int)$instructorDecision['granted_extra_attempts'];
@@ -632,11 +552,7 @@ foreach ($lessonRows as $l) {
     if ($role === 'student' && $testPassed) $canTest = false;
     if ($role === 'student' && $attemptsLeft <= 0) $canTest = false;
     if ($role === 'student' && (int)$instructorDecision['training_suspended'] === 1) $canTest = false;
-    if (
-        $role === 'student' &&
-        (int)$instructorDecision['one_on_one_required'] === 1 &&
-        (int)$instructorDecision['one_on_one_completed'] !== 1
-    ) {
+    if ($role === 'student' && (int)$instructorDecision['one_on_one_required'] === 1 && (int)$instructorDecision['one_on_one_completed'] !== 1) {
         $canTest = false;
     }
 
@@ -652,7 +568,7 @@ foreach ($lessonRows as $l) {
     }
     $totalLessons++;
 
-    if ($testPassed && !empty($last['completed_at']) && trim((string)$l['deadline_utc']) !== '') {
+    if ($testPassed && $last && !empty($last['completed_at']) && trim((string)$l['deadline_utc']) !== '') {
         $onTimeEligible++;
         try {
             $completedDate = new DateTime(substr((string)$last['completed_at'], 0, 10) . ' 00:00:00', new DateTimeZone('UTC'));
@@ -666,7 +582,7 @@ foreach ($lessonRows as $l) {
         $onTimeEligible++;
     }
 
-    $row = [
+    $row = array(
         'lesson_id' => $lessonId,
         'external_lesson_id' => (int)$l['external_lesson_id'],
         'lesson_title' => (string)$l['lesson_title'],
@@ -688,7 +604,7 @@ foreach ($lessonRows as $l) {
         'instructor_decision' => $instructorDecision,
         'progress_test_url' => $ptUrlV2,
         'first_slide_id' => $firstSlideId
-    ];
+    );
 
     $row['primary_action'] = lesson_primary_action($row);
 
@@ -701,7 +617,7 @@ $courseBlocks = array_values($courseBlocks);
 foreach ($courseBlocks as $k => $block) {
     $countLessons = count($block['lessons']);
     $countPassed = 0;
-    $courseScores = [];
+    $courseScores = array();
     $summaryApproved = 0;
     $revisionCount = 0;
     $overdueCount = 0;
@@ -775,7 +691,7 @@ if ($role === 'student' && $programId > 0) {
         $rankSt->execute([$programId]);
         $rankRows = $rankSt->fetchAll(PDO::FETCH_ASSOC);
 
-        $scores = [];
+        $scores = array();
         $myAvg = null;
         foreach ($rankRows as $rr) {
             $avg = isset($rr['avg_score']) ? (float)$rr['avg_score'] : null;
@@ -823,7 +739,7 @@ if ($role === 'student' && $programId > 0) {
         $onTimeSt->execute([$programId]);
         $onTimeRows = $onTimeSt->fetchAll(PDO::FETCH_ASSOC);
 
-        $programOnTimePcts = [];
+        $programOnTimePcts = array();
         foreach ($onTimeRows as $otr) {
             $tc = (int)$otr['total_count'];
             $oc = (int)$otr['on_time_count'];
@@ -844,7 +760,7 @@ if ($role === 'student' && $programId > 0) {
 $summariesPageExists = file_exists(__DIR__ . '/lesson_summaries.php');
 $exportPdfExists = file_exists(__DIR__ . '/export_summaries_pdf.php');
 
-$allLessonsFlat = [];
+$allLessonsFlat = array();
 foreach ($courseBlocks as $cb) {
     foreach ($cb['lessons'] as $lx) {
         $lx['_module_title'] = $cb['course_title'];
@@ -853,13 +769,13 @@ foreach ($courseBlocks as $cb) {
 }
 
 $nextBestStep = null;
-$immediateAttention = [];
+$immediateAttention = array();
 
 foreach ($allLessonsFlat as $lx) {
     $pa = $lx['primary_action'];
 
     if ($nextBestStep === null || (int)$pa['priority'] < (int)$nextBestStep['priority']) {
-        $nextBestStep = [
+        $nextBestStep = array(
             'priority' => (int)$pa['priority'],
             'lesson_id' => (int)$lx['lesson_id'],
             'lesson_label' => (string)$lx['lesson_title'],
@@ -868,11 +784,11 @@ foreach ($allLessonsFlat as $lx) {
             'action_label' => (string)$pa['label'],
             'action_href' => (string)$pa['href'],
             'action_class' => (string)$pa['class']
-        ];
+        );
     }
 
     if ((int)$pa['priority'] <= 50) {
-        $immediateAttention[] = [
+        $immediateAttention[] = array(
             'lesson_id' => (int)$lx['lesson_id'],
             'lesson_label' => (string)$lx['lesson_title'],
             'module_title' => (string)$lx['_module_title'],
@@ -880,7 +796,7 @@ foreach ($allLessonsFlat as $lx) {
             'label' => (string)$pa['label'],
             'href' => (string)$pa['href'],
             'class' => (string)$pa['class']
-        ];
+        );
     }
 }
 
@@ -912,161 +828,327 @@ foreach ($allLessonsFlat as $lx) {
 cw_header('Course');
 ?>
 <style>
-  .course-page-stack{display:flex;flex-direction:column;gap:22px}
-  .hero-card{padding:26px 28px}
-  .hero-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#5f6f88;font-weight:700;margin-bottom:10px}
-  .hero-title{margin:0;font-size:32px;line-height:1.02;letter-spacing:-0.04em;color:#152235;font-weight:800}
-  .hero-sub{margin-top:12px;font-size:15px;color:#56677f;max-width:900px;line-height:1.55}
-  .hero-meta{margin-top:14px;font-size:14px;color:#495a72;line-height:1.5}
-  .hero-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
-  .hero-btn{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:0 15px;border-radius:12px;text-decoration:none;font-size:14px;font-weight:700;color:#152235;background:#f4f7fb;border:1px solid rgba(15,23,42,0.08)}
+  .course-page-stack{display:flex;flex-direction:column;gap:20px}
+  .hero-card{padding:24px 26px}
+  .hero-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#5b6a82;font-weight:700;margin-bottom:8px}
+  .hero-title{margin:0;font-size:30px;line-height:1.02;letter-spacing:-0.04em;color:#152235;font-weight:800}
+  .hero-sub{margin-top:10px;font-size:15px;color:#52647b;max-width:900px;line-height:1.5}
+  .hero-meta{margin-top:12px;font-size:14px;color:#495a72;line-height:1.45}
+  .hero-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+  .hero-btn{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 14px;border-radius:11px;text-decoration:none;font-size:14px;font-weight:700;color:#152235;background:#f4f7fb;border:1px solid rgba(15,23,42,0.08)}
   .hero-btn.primary{background:#12355f;color:#fff;border-color:#12355f}
   .hero-btn:hover{opacity:.95}
   .hero-btn.disabled{opacity:.45;pointer-events:none;cursor:default}
 
-  .top-grid{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:18px}
-  .overview-card{padding:22px 24px}
-  .overview-title{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#60718b;font-weight:700;margin-bottom:14px}
-  .overview-main{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:12px}
-  .overview-big{font-size:40px;line-height:1;font-weight:800;letter-spacing:-0.04em;color:#152235;white-space:nowrap}
-  .overview-sub{color:#5b6d85;font-size:14px;line-height:1.45;max-width:260px}
-  .progress-shell{width:100%;height:12px;border-radius:999px;overflow:hidden;background:#e7edf4}
-  .progress-fill{height:12px;border-radius:999px;background:linear-gradient(90deg,#113459 0%, #2458a6 100%)}
-  .smallmuted{font-size:12px;color:#5f7088;margin-top:8px;line-height:1.45}
-  .momentum-line{margin-top:10px;font-size:13px;color:#1d4f91;font-weight:700}
-  .today-line{margin-top:8px;font-size:13px;color:#166534;font-weight:700}
+  .top-grid{display:grid;grid-template-columns:repeat(3,minmax(220px,1fr));gap:16px}
+  .overview-card{padding:20px 22px}
+  .overview-title{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#5d6f89;font-weight:700;margin-bottom:12px}
+  .overview-main{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+  .overview-big{font-size:38px;line-height:1;font-weight:800;letter-spacing:-0.04em;color:#152235;white-space:nowrap}
+  .overview-sub{color:#586a82;font-size:14px;line-height:1.4;max-width:260px}
+  .progress-shell{width:100%;height:10px;border-radius:999px;overflow:hidden;background:#e7edf4}
+  .progress-fill{height:10px;border-radius:999px;background:linear-gradient(90deg,#103150 0%, #2458a6 100%)}
+  .smallmuted{font-size:12px;color:#5c6d85;margin-top:8px;line-height:1.4}
+  .momentum-line{margin-top:8px;font-size:13px;color:#1d4f91;font-weight:700}
+  .today-line{margin-top:7px;font-size:13px;color:#166534;font-weight:700}
 
-  .support-grid{display:grid;grid-template-columns:1.25fr .75fr;gap:18px}
-  .priority-card,.ai-placeholder{padding:22px 24px;border:1px solid rgba(15,23,42,0.06);border-radius:20px;background:#fff;box-shadow:0 10px 24px rgba(15,23,42,0.055)}
-  .priority-label{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#5f718d;font-weight:700;margin-bottom:12px}
-  .priority-title{font-size:24px;font-weight:800;color:#152235;line-height:1.12;margin:0}
-  .priority-sub{margin-top:8px;font-size:14px;color:#56677f;line-height:1.5}
-  .priority-why{margin-top:14px;font-size:15px;color:#32465f;line-height:1.55}
-  .priority-actions{margin-top:16px;display:flex;gap:10px;flex-wrap:wrap}
-  .next-step-meta{margin-top:10px;font-size:13px;color:#56677f;line-height:1.5}
-  .next-step-reinforcement{margin-top:10px;font-size:13px;color:#1d4f91;font-weight:700}
-  .ai-title{margin:0;font-size:20px;font-weight:800;color:#152235;line-height:1.15}
-  .ai-text{margin-top:10px;font-size:14px;color:#56677f;line-height:1.6}
+  .support-grid{display:grid;grid-template-columns:1.22fr .78fr;gap:16px}
+  .priority-card,.ai-placeholder{padding:20px 22px;border:1px solid rgba(15,23,42,0.06);border-radius:18px;background:#fff;box-shadow:0 8px 20px rgba(15,23,42,0.05)}
+  .priority-label{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#5d6f89;font-weight:700;margin-bottom:10px}
+  .priority-title{font-size:23px;font-weight:800;color:#152235;line-height:1.12;margin:0}
+  .priority-sub{margin-top:7px;font-size:14px;color:#52647b;line-height:1.45}
+  .priority-why{margin-top:12px;font-size:15px;color:#32465f;line-height:1.5}
+  .priority-actions{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+  .next-step-meta{margin-top:8px;font-size:13px;color:#52647b;line-height:1.45}
+  .next-step-reinforcement{margin-top:8px;font-size:13px;color:#1d4f91;font-weight:700}
+  .ai-title{margin:0;font-size:19px;font-weight:800;color:#152235;line-height:1.15}
+  .ai-text{margin-top:8px;font-size:14px;color:#52647b;line-height:1.55}
 
-  .section-card{padding:22px 24px}
-  .section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:14px}
-  .section-title{margin:0;font-size:22px;line-height:1.05;letter-spacing:-0.02em;color:#152235}
-  .section-sub{margin-top:6px;font-size:14px;color:#56677f;line-height:1.45}
+  .section-card{padding:20px 22px}
+  .section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}
+  .section-title{margin:0;font-size:21px;line-height:1.05;letter-spacing:-0.02em;color:#152235}
+  .section-sub{margin-top:5px;font-size:14px;color:#52647b;line-height:1.4}
   .count-pill{display:inline-block;padding:7px 11px;border-radius:999px;background:#edf4ff;color:#1d4f91;font-size:12px;font-weight:800;border:1px solid #d3e3ff;white-space:nowrap}
 
-  .attention-list{display:flex;flex-direction:column;gap:10px}
-  .attention-item{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:14px 16px;border-radius:16px;background:#f8fbfd;border:1px solid rgba(15,23,42,0.05)}
+  .attention-list{display:flex;flex-direction:column;gap:9px}
+  .attention-item{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:12px 14px;border-radius:14px;background:#f8fbfd;border:1px solid rgba(15,23,42,0.05)}
+  .attention-item.is-recommended{background:#f7fbff;box-shadow:inset 3px 0 0 #2563eb}
   .attention-main{min-width:0}
-  .attention-title{font-size:14px;font-weight:700;color:#152235;line-height:1.3}
-  .attention-meta{margin-top:5px;font-size:13px;color:#586b84;line-height:1.45}
+  .attention-title{font-size:14px;font-weight:700;color:#152235;line-height:1.25}
+  .attention-meta{margin-top:4px;font-size:13px;color:#586b84;line-height:1.4}
 
   .course-card{
-    border:1px solid rgba(15,23,42,0.045);
-    border-radius:16px;
+    border:1px solid rgba(15,23,42,0.05);
+    border-radius:14px;
     background:transparent;
     box-shadow:none;
-    margin-bottom:12px;
+    margin-bottom:10px;
     overflow:hidden;
   }
   .course-card details{border:0}
   .course-card summary{
     list-style:none;
     cursor:pointer;
-    padding:16px 18px;
+    padding:14px 14px;
     background:#ffffff;
-    border-radius:16px;
+    border-radius:14px;
   }
   .course-card summary::-webkit-details-marker{display:none}
+  .course-card.is-recommended summary{background:#f8fbff}
+  .course-card.is-recommended .course-head{box-shadow:inset 3px 0 0 #2563eb;border-radius:12px}
 
-  .course-head{display:grid;grid-template-columns:60px 26px minmax(220px,1.45fr) minmax(180px,1fr) minmax(140px,0.8fr) minmax(210px,1fr);gap:12px;align-items:center}
-  .course-badge{width:48px;height:48px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:17px;color:#fff;background:linear-gradient(135deg,#0b2744,#123b72)}
-  .course-toggle{font-size:20px;color:#12355f;font-weight:900;text-align:center;transition:transform .2s ease}
+  .course-head{
+    display:grid;
+    grid-template-columns:74px minmax(320px,2.2fr) minmax(160px,1fr) minmax(150px,1fr) minmax(175px,1fr);
+    gap:12px;
+    align-items:center;
+  }
+
+  .course-leading{
+    display:flex;
+    align-items:center;
+    gap:10px;
+  }
+  .course-badge{
+    width:42px;
+    height:42px;
+    border-radius:999px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-weight:900;
+    font-size:16px;
+    color:#fff;
+    background:linear-gradient(135deg,#081d33,#102e4f);
+    flex:0 0 auto;
+  }
+  .course-toggle{
+    font-size:18px;
+    color:#12355f;
+    font-weight:900;
+    line-height:1;
+    flex:0 0 auto;
+    transition:transform .2s ease;
+  }
   details[open] .course-toggle{transform:rotate(90deg)}
-  .course-title{font-size:19px;font-weight:800;color:#152235;line-height:1.15}
-  .metric-label{font-size:11px;color:#5f718d;margin-bottom:6px;font-weight:700;text-transform:uppercase;letter-spacing:.12em}
-  .metric-value{font-size:15px;font-weight:800;color:#152235}
-  .metric-sub{font-size:12px;color:#5b6d85;margin-top:6px;line-height:1.45}
-  .module-micro{margin-top:8px;font-size:12px;color:#38506d;font-weight:700;line-height:1.45}
-  .mini-progress{width:100%;height:8px;border-radius:999px;overflow:hidden;background:#e7edf4;margin-top:7px}
-  .mini-progress > span{display:block;height:8px;border-radius:999px;background:linear-gradient(90deg,#113459 0%, #2458a6 100%)}
-  .module-signal-row{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+
+  .module-main{min-width:0}
+  .metric-label{font-size:10px;color:#5d6f89;margin-bottom:4px;font-weight:700;text-transform:uppercase;letter-spacing:.13em}
+  .course-title{
+    font-size:18px;
+    font-weight:800;
+    color:#152235;
+    line-height:1.15;
+    margin:0;
+    display:-webkit-box;
+    -webkit-line-clamp:2;
+    -webkit-box-orient:vertical;
+    overflow:hidden;
+  }
+  .metric-sub{font-size:12px;color:#53657d;margin-top:4px;line-height:1.35}
+  .module-micro{
+    margin-top:4px;
+    font-size:12px;
+    color:#334963;
+    font-weight:700;
+    line-height:1.35;
+  }
+  .module-signal-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:8px}
+
+  .metric-col{min-width:0}
+  .metric-value{
+    font-size:15px;
+    font-weight:800;
+    color:#152235;
+    line-height:1.15;
+    white-space:nowrap;
+  }
+  .mini-progress{
+    width:100%;
+    height:6px;
+    border-radius:999px;
+    overflow:hidden;
+    background:#e7edf4;
+    margin-top:6px;
+  }
+  .mini-progress > span{
+    display:block;
+    height:6px;
+    border-radius:999px;
+    background:linear-gradient(90deg,#103150 0%, #2458a6 100%);
+  }
 
   .course-body{
-    padding:0 18px 14px 18px;
+    padding:0;
     border-top:1px solid rgba(15,23,42,0.05);
     background:#ffffff;
   }
 
-  .lesson-table-wrap{overflow:visible;margin-top:12px}
-  .lesson-table{width:100%;border-collapse:collapse;table-layout:fixed}
-  .lesson-table th,.lesson-table td{padding:10px 8px;border-bottom:1px solid rgba(15,23,42,0.07);vertical-align:middle;text-align:left}
-  .lesson-table th{font-size:11px;text-transform:uppercase;letter-spacing:.12em;color:#60718b;font-weight:700}
+  .lesson-table-wrap{overflow:visible}
+  .lesson-table{
+    width:100%;
+    border-collapse:collapse;
+    table-layout:fixed;
+  }
+  .lesson-table th,.lesson-table td{
+    padding:9px 8px;
+    border-bottom:1px solid rgba(15,23,42,0.06);
+    vertical-align:middle;
+    text-align:left;
+  }
+  .lesson-table th{
+    font-size:10px;
+    text-transform:uppercase;
+    letter-spacing:.12em;
+    color:#5f718d;
+    font-weight:700;
+    white-space:nowrap;
+  }
 
   .lesson-title-line{display:flex;align-items:flex-start;gap:8px}
-  .lesson-seq{flex:0 0 auto;min-width:16px;color:#3b4f68;font-weight:800}
-  .lesson-title{font-size:14px;font-weight:700;color:#152235;line-height:1.3}
+  .lesson-seq{
+    flex:0 0 auto;
+    min-width:14px;
+    color:#3b4f68;
+    font-weight:800;
+    line-height:1.3;
+  }
+  .lesson-title{
+    font-size:13px;
+    font-weight:700;
+    color:#152235;
+    line-height:1.3;
+  }
 
-  .deadline-wrap{min-width:0}
-  .deadline-date{font-weight:700;color:#152235;margin-bottom:4px;font-size:13px;line-height:1.15}
-  .deadline-progress-shell{width:100%;height:7px;border-radius:999px;overflow:hidden;background:#e7edf4}
-  .deadline-progress-fill{height:7px;border-radius:999px}
+  .deadline-wrap,.summary-compact{min-width:0}
+  .deadline-date,.summary-head{
+    font-weight:700;
+    color:#152235;
+    margin-bottom:4px;
+    font-size:12px;
+    line-height:1.15;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+
+  .deadline-progress-shell,.summary-bar-shell{
+    width:100%;
+    height:6px;
+    border-radius:999px;
+    overflow:hidden;
+    background:#e7edf4;
+  }
+
+  .deadline-progress-fill,.summary-bar-fill{height:6px;border-radius:999px}
   .deadline-progress-fill.deadline-green{background:linear-gradient(90deg,#0f766e 0%, #14b8a6 100%)}
   .deadline-progress-fill.deadline-orange{background:linear-gradient(90deg,#d97706 0%, #f59e0b 100%)}
   .deadline-progress-fill.deadline-red{background:linear-gradient(90deg,#dc2626 0%, #ef4444 100%)}
   .deadline-progress-fill.deadline-neutral{background:linear-gradient(90deg,#64748b 0%, #94a3b8 100%)}
-  .deadline-label{font-size:11px;font-weight:800;margin-top:4px;line-height:1.2}
-  .deadline-label.deadline-green{color:#166534}
-  .deadline-label.deadline-orange{color:#b45309}
-  .deadline-label.deadline-red{color:#b91c1c}
-  .deadline-label.deadline-neutral{color:#4b5563}
 
-  .summary-compact{min-width:0}
-  .summary-head{font-weight:700;color:#152235;margin-bottom:4px;font-size:13px;line-height:1.15}
-  .summary-bar-shell{width:100%;height:7px;border-radius:999px;overflow:hidden;background:#e7edf4}
-  .summary-bar-fill{height:7px;border-radius:999px}
   .summary-bar-fill.ok{background:linear-gradient(90deg,#166534 0%, #22c55e 100%)}
   .summary-bar-fill.warn{background:linear-gradient(90deg,#b45309 0%, #f59e0b 100%)}
   .summary-bar-fill.danger{background:linear-gradient(90deg,#b91c1c 0%, #ef4444 100%)}
   .summary-bar-fill.info{background:linear-gradient(90deg,#1d4f91 0%, #3b82f6 100%)}
   .summary-bar-fill.neutral{background:linear-gradient(90deg,#64748b 0%, #94a3b8 100%)}
-  .summary-label{font-size:11px;font-weight:800;margin-top:4px;line-height:1.2}
+
+  .deadline-label,.summary-label{
+    font-size:10px;
+    font-weight:800;
+    margin-top:4px;
+    line-height:1.15;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .deadline-label.deadline-green{color:#166534}
+  .deadline-label.deadline-orange{color:#b45309}
+  .deadline-label.deadline-red{color:#b91c1c}
+  .deadline-label.deadline-neutral{color:#4b5563}
+
   .summary-label.ok{color:#166534}
   .summary-label.warn{color:#b45309}
   .summary-label.danger{color:#b91c1c}
   .summary-label.info{color:#1d4f91}
   .summary-label.neutral{color:#4b5563}
 
-  .state-pill{display:inline-block;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:800;line-height:1.2;border:1px solid transparent;white-space:nowrap}
+  .state-pill{
+    display:inline-block;
+    border-radius:999px;
+    padding:4px 8px;
+    font-size:10px;
+    font-weight:800;
+    line-height:1.2;
+    border:1px solid transparent;
+    white-space:nowrap;
+  }
   .state-pill.ok{background:#dcfce7;border-color:#86efac;color:#166534}
   .state-pill.danger{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
   .state-pill.warn{background:#fef3c7;border-color:#fde68a;color:#92400e}
   .state-pill.info{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}
   .state-pill.neutral{background:#edf2f7;border-color:#d7dee9;color:#475569}
 
-  .action-btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 10px;border-radius:9px;text-decoration:none;font-size:11px;font-weight:800;white-space:nowrap;border:1px solid rgba(15,23,42,0.08);color:#152235;background:#f4f7fb}
+  .action-btn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:29px;
+    padding:0 8px;
+    border-radius:8px;
+    text-decoration:none;
+    font-size:10px;
+    font-weight:800;
+    white-space:nowrap;
+    border:1px solid rgba(15,23,42,0.08);
+    color:#152235;
+    background:#f4f7fb;
+  }
   .action-btn.primary{background:#12355f;color:#fff;border-color:#12355f}
   .action-btn.warn{background:#fff7ed;color:#92400e;border-color:#fed7aa}
   .action-btn.danger{background:#fef2f2;color:#991b1b;border-color:#fecaca}
   .action-btn:hover{opacity:.95}
   .action-btn.disabled{opacity:.45;pointer-events:none}
 
-  .status-text{font-size:12px;font-weight:700;color:#32465f;line-height:1.35}
+  .status-text{
+    font-size:11px;
+    font-weight:700;
+    color:#32465f;
+    line-height:1.25;
+  }
 
-  .resume-highlight td{background:#f7fbff}
-  .resume-highlight{box-shadow:inset 3px 0 0 #2563eb}
-  .module-resume-ring{box-shadow:0 0 0 2px rgba(37,99,235,0.18) inset}
+  .resume-highlight td{
+    background:#f8fbfe;
+    box-shadow:inset 2px 0 0 #2563eb;
+  }
 
-  .empty-premium{padding:18px;border-radius:16px;border:1px dashed rgba(15,23,42,0.12);background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);color:#5f7088;font-size:14px}
+  .empty-premium{
+    padding:18px;
+    border-radius:16px;
+    border:1px dashed rgba(15,23,42,0.12);
+    background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
+    color:#5f7088;
+    font-size:14px;
+  }
 
   @media (max-width: 1320px){
     .top-grid{grid-template-columns:1fr}
     .support-grid{grid-template-columns:1fr}
   }
+
   @media (max-width: 1180px){
-    .course-head{grid-template-columns:52px 28px 1fr}
-    .course-head .metric-col{grid-column:1 / -1}
-    .lesson-table{table-layout:auto}
-    .lesson-table-wrap{overflow:auto}
+    .course-head{
+      grid-template-columns:64px minmax(260px,1.8fr) minmax(130px,1fr) minmax(120px,1fr) minmax(150px,1fr);
+      gap:10px;
+    }
+  }
+
+  @media (max-width: 1024px){
+    .lesson-table{
+      table-layout:auto;
+    }
+    .lesson-table-wrap{
+      overflow:auto;
+    }
   }
 </style>
 
@@ -1214,7 +1296,7 @@ cw_header('Course');
       <div class="attention-list">
         <?php foreach ($immediateAttention as $item): ?>
           <?php $isRecommended = ((int)$item['lesson_id'] === $recommendedLessonId); ?>
-          <div class="attention-item <?= $isRecommended ? 'module-resume-ring' : '' ?>">
+          <div class="attention-item<?= $isRecommended ? ' is-recommended' : '' ?>">
             <div class="attention-main">
               <div class="attention-title"><?= h($item['lesson_label']) ?></div>
               <div class="attention-meta"><?= h($item['module_title']) ?> · <?= h($item['why']) ?></div>
@@ -1253,14 +1335,16 @@ cw_header('Course');
           $moduleMood = $course['motivation_meta'];
           $moduleHasRecommended = ((int)$course['recommended_lesson_id'] === $recommendedLessonId && $recommendedLessonId > 0);
         ?>
-        <div class="course-card <?= $moduleHasRecommended ? 'module-resume-ring' : '' ?>">
+        <div class="course-card<?= $moduleHasRecommended ? ' is-recommended' : '' ?>">
           <details <?= $moduleHasRecommended ? 'open' : '' ?>>
             <summary>
               <div class="course-head">
-                <div class="course-badge"><?= (int)$courseIndex ?></div>
-                <div class="course-toggle">›</div>
+                <div class="course-leading">
+                  <div class="course-badge"><?= (int)$courseIndex ?></div>
+                  <div class="course-toggle">›</div>
+                </div>
 
-                <div>
+                <div class="module-main">
                   <div class="metric-label">Module</div>
                   <div class="course-title"><?= h($course['course_title']) ?></div>
                   <div class="metric-sub">Next lesson: <?= h($course['next_lesson_label']) ?></div>
@@ -1276,7 +1360,7 @@ cw_header('Course');
                       <span class="state-pill warn"><?= (int)$course['overdue_count'] ?> priority</span>
                     <?php endif; ?>
                     <?php if ((int)$course['test_ready_count'] > 0): ?>
-                      <span class="state-pill info"><?= (int)$course['test_ready_count'] ?> test ready</span>
+                      <span class="state-pill info"><?= (int)$course['test_ready_count'] ?> ready</span>
                     <?php endif; ?>
                     <?php if ((int)$course['blocked_count'] > 0): ?>
                       <span class="state-pill danger"><?= (int)$course['blocked_count'] ?> blocked</span>
@@ -1294,16 +1378,23 @@ cw_header('Course');
                 <div class="metric-col">
                   <div class="metric-label">Average Score</div>
                   <div class="metric-value"><?= $course['avg_score'] !== null ? (int)$course['avg_score'] . '%' : '—' ?></div>
-                  <div class="metric-sub"><?= (int)$course['summary_approved_count'] ?>/<?= (int)$course['lesson_count'] ?> summaries approved</div>
+                  <div class="mini-progress"><span style="width:<?= $course['avg_score'] !== null ? (int)$course['avg_score'] : 0 ?>%;"></span></div>
+                  <div class="metric-sub"><?= (int)$course['summary_approved_count'] ?>/<?= (int)$course['lesson_count'] ?> approved</div>
                 </div>
 
                 <div class="metric-col">
                   <div class="metric-label">Final Module Deadline</div>
-                  <div class="deadline-date"><?= h($course['deadline']['date']) ?></div>
-                  <div class="deadline-progress-shell">
-                    <div class="deadline-progress-fill <?= h($course['deadline']['class']) ?>" style="width:<?= (int)$course['deadline']['pct'] ?>%;"></div>
+                  <div class="metric-value"><?= h($course['deadline']['date']) ?></div>
+                  <div class="mini-progress">
+                    <span style="width:<?= (int)$course['deadline']['pct'] ?>%; background:
+                      <?php
+                        if ($course['deadline']['class'] === 'deadline-green') echo 'linear-gradient(90deg,#0f766e 0%, #14b8a6 100%)';
+                        elseif ($course['deadline']['class'] === 'deadline-orange') echo 'linear-gradient(90deg,#d97706 0%, #f59e0b 100%)';
+                        elseif ($course['deadline']['class'] === 'deadline-red') echo 'linear-gradient(90deg,#dc2626 0%, #ef4444 100%)';
+                        else echo 'linear-gradient(90deg,#64748b 0%, #94a3b8 100%)';
+                      ?>;"></span>
                   </div>
-                  <div class="deadline-label <?= h($course['deadline']['class']) ?>"><?= h($course['deadline']['label']) ?></div>
+                  <div class="metric-sub"><?= h($course['deadline']['label']) ?></div>
                 </div>
               </div>
             </summary>
@@ -1312,13 +1403,13 @@ cw_header('Course');
               <div class="lesson-table-wrap">
                 <table class="lesson-table">
                   <tr>
-                    <th style="width:24%;">Lesson</th>
-                    <th style="width:16%;">Deadline</th>
-                    <th style="width:12%;">Study</th>
-                    <th style="width:14%;">Summary</th>
+                    <th style="width:24%;">Title</th>
+                    <th style="width:15%;">Deadline</th>
+                    <th style="width:11%;">Study</th>
+                    <th style="width:13%;">Summary</th>
                     <th style="width:12%;">Progress Test</th>
-                    <th style="width:9%;">Score</th>
-                    <th style="width:13%;">Status</th>
+                    <th style="width:8%;">Score</th>
+                    <th style="width:17%;">Status</th>
                   </tr>
 
                   <?php foreach ($course['lessons'] as $lessonIndex => $lx): ?>
@@ -1326,22 +1417,21 @@ cw_header('Course');
                       $last = $lx['test']['last'];
                       $attemptsLeft = (int)$lx['attempts_left'];
                       $scoreMeta = score_badge_meta($lx['test_passed'], $lx['best_score'], $last, $attemptsLeft);
-                      $rowAction = $lx['primary_action'];
                       $rowClass = ((int)$lx['lesson_id'] === $recommendedLessonId) ? 'resume-highlight' : '';
 
-                      $statusText = 'Study the lesson';
+                      $statusText = 'Study lesson';
                       if (!empty($lx['locked'])) {
                           $statusText = 'Locked';
                       } elseif (!empty($lx['instructor_decision']['training_suspended'])) {
                           $statusText = 'Training paused';
                       } elseif (!empty($lx['instructor_decision']['one_on_one_required']) && empty($lx['instructor_decision']['one_on_one_completed'])) {
-                          $statusText = 'Instructor session required';
+                          $statusText = 'Instructor review required';
                       } elseif ((string)$lx['summary_review_status'] === 'pending') {
-                          $statusText = 'Waiting for instructor review';
+                          $statusText = 'Waiting for review';
                       } elseif ((string)$lx['summary_review_status'] === 'needs_revision') {
                           $statusText = 'Improve summary';
                       } elseif (!empty($lx['can_test'])) {
-                          $statusText = 'Ready for progress test';
+                          $statusText = 'Ready for test';
                       } elseif (!$lx['test_passed'] && $last && isset($last['status']) && (string)$last['status'] === 'completed') {
                           $statusText = 'Improve progress test';
                       } elseif (!empty($lx['passed'])) {
@@ -1357,7 +1447,7 @@ cw_header('Course');
                       $testLabel = '';
                       if (!empty($lx['can_test'])) {
                           $testHref = (string)$lx['progress_test_url'];
-                          $testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake Test' : 'Take Test');
+                          $testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
                       }
                     ?>
                     <tr class="<?= h($rowClass) ?>">
@@ -1374,17 +1464,15 @@ cw_header('Course');
                           <div class="deadline-progress-shell">
                             <div class="deadline-progress-fill <?= h($lx['deadline']['class']) ?>" style="width:<?= (int)$lx['deadline']['pct'] ?>%;"></div>
                           </div>
-                          <div class="deadline-label <?= h($lx['deadline']['class']) ?>">
-                            <?= h($lx['deadline']['label']) ?>
-                          </div>
+                          <div class="deadline-label <?= h($lx['deadline']['class']) ?>"><?= h($lx['deadline']['label']) ?></div>
                         </div>
                       </td>
 
                       <td>
                         <?php if ($studyHref !== ''): ?>
-                          <a class="action-btn primary" href="<?= h($studyHref) ?>">Continue Lesson</a>
+                          <a class="action-btn primary" href="<?= h($studyHref) ?>">Continue</a>
                         <?php else: ?>
-                          <span class="action-btn disabled">Continue Lesson</span>
+                          <span class="action-btn disabled">Continue</span>
                         <?php endif; ?>
                       </td>
 
@@ -1402,7 +1490,7 @@ cw_header('Course');
                         <?php if ($testHref !== ''): ?>
                           <a class="action-btn primary" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
                         <?php else: ?>
-                          <span class="action-btn disabled"><?= ($lx['test']['max_attempt'] > 0 ? 'Retake Test' : 'Take Test') ?></span>
+                          <span class="action-btn disabled"><?= ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test') ?></span>
                         <?php endif; ?>
                       </td>
 
