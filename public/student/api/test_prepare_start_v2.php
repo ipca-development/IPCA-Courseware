@@ -18,7 +18,7 @@ function read_json(string $s): array {
 }
 
 function build_background_run_url(int $testId): string {
-    return 'http://127.0.0.1/student/api/test_prepare_run_v2.php?test_id=' . urlencode((string)$testId);
+    return 'https://ipca.training/student/api/test_prepare_run_v2.php?test_id=' . urlencode((string)$testId);
 }
 
 function fire_and_forget_prepare_run(int $testId): void {
@@ -40,8 +40,8 @@ function fire_and_forget_prepare_run(int $testId): void {
         CURLOPT_HEADER => false,
         CURLOPT_NOBODY => false,
         CURLOPT_POST => false,
-        CURLOPT_TIMEOUT_MS => 1500,
-        CURLOPT_CONNECTTIMEOUT_MS => 1500,
+        CURLOPT_TIMEOUT_MS => 3000,
+        CURLOPT_CONNECTTIMEOUT_MS => 5000,
         CURLOPT_FRESH_CONNECT => true,
         CURLOPT_FORBID_REUSE => true,
         CURLOPT_FOLLOWLOCATION => true,
@@ -504,7 +504,12 @@ if ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
 
     $pdo->commit();
 
-    fire_and_forget_prepare_run($testId);
+    // Release PHP session lock before internal background request
+	if (session_status() === PHP_SESSION_ACTIVE) {
+    session_write_close();
+	}
+
+	fire_and_forget_prepare_run($testId);
 
     json_ok([
         'ok' => true,
