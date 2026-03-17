@@ -103,12 +103,48 @@ try {
         }
     }
 
-    $spacesKey      = env_required('SPACES_KEY');
-    $spacesSecret   = env_required('SPACES_SECRET');
-    $spacesBucket   = env_required('SPACES_BUCKET');
-    $spacesRegion   = env_required('SPACES_REGION');
-    $spacesEndpoint = env_required('SPACES_ENDPOINT');
-    $spacesCdn      = env_required('SPACES_CDN');
+    // Backward + forward compatible env loader
+function env_fallback(array $keys): string {
+    foreach ($keys as $k) {
+        $v = getenv($k);
+        if ($v !== false && $v !== '') {
+            return trim((string)$v);
+        }
+    }
+    return '';
+}
+
+$spacesKey = env_fallback(['CW_SPACES_KEY', 'SPACES_KEY']);
+$spacesSecret = env_fallback(['CW_SPACES_SECRET', 'SPACES_SECRET']);
+$spacesBucket = env_fallback(['CW_SPACES_BUCKET', 'SPACES_BUCKET']);
+$spacesRegion = env_fallback(['CW_SPACES_REGION', 'SPACES_REGION']);
+$spacesEndpoint = env_fallback(['CW_SPACES_ENDPOINT', 'SPACES_ENDPOINT']);
+$spacesCdn = env_fallback(['CW_SPACES_CDN_BASE', 'SPACES_CDN']);
+
+// Explicit, clear error reporting (NO silent failures)
+$missing = [];
+
+if ($spacesKey === '')      $missing[] = 'CW_SPACES_KEY / SPACES_KEY';
+if ($spacesSecret === '')   $missing[] = 'CW_SPACES_SECRET / SPACES_SECRET';
+if ($spacesBucket === '')   $missing[] = 'CW_SPACES_BUCKET / SPACES_BUCKET';
+
+if (!empty($missing)) {
+    throw new RuntimeException(
+        'Missing environment variables: ' . implode(', ', $missing)
+    );
+}
+
+// Safe defaults
+if ($spacesRegion === '') {
+    $spacesRegion = 'nyc3';
+}
+
+if ($spacesEndpoint === '') {
+    $spacesEndpoint = 'nyc3.digitaloceanspaces.com';
+}
+
+// Normalize CDN (no trailing slash)
+$spacesCdn = rtrim($spacesCdn, '/');
 
     $service    = 's3';
     $host       = $spacesBucket . '.' . $spacesRegion . '.digitaloceanspaces.com';
