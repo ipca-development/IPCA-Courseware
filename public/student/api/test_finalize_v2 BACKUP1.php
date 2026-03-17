@@ -30,10 +30,6 @@ function html_e(string $s): string {
     return htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
-function html_with_breaks(string $s): string {
-    return nl2br(html_e($s));
-}
-
 function build_app_url(string $path): string {
     $base = trim((string)(getenv('CW_APP_BASE_URL') ?: ''));
     if ($base !== '') {
@@ -1255,7 +1251,7 @@ TXT;
         }
     }
 
-    $effectiveDeadlineUtc = trim((string)($test['effective_deadline_utc'] ?? ''));
+ $effectiveDeadlineUtc = trim((string)($test['effective_deadline_utc'] ?? ''));
     $attemptCount = (int)($test['attempt'] ?? 1);
 
     $maxAttemptsBeforeInstructorApproval = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
@@ -1451,14 +1447,17 @@ TXT;
         $studentName = 'Student';
     }
 
-    $sendEmailAfterThirdFail = !empty($policy['send_email_after_third_fail']);
+    
+	
+	    $sendEmailAfterThirdFail = !empty($policy['send_email_after_third_fail']);
     $thresholdAttemptForRemediationEmail = (int)($policy['threshold_attempt_for_remediation_email'] ?? 3);
 
     if (
         $studentRecipient !== null &&
         $sendEmailAfterThirdFail &&
         (int)$classification['counts_as_unsat'] === 1 &&
-        $attemptCount === max(1, $thresholdAttemptForRemediationEmail)
+        $attemptCount === max(1, $thresholdAttemptForRemediationEmail) &&
+        !$engine->hasAnyProgressionEmailForLesson($testOwnerUserId, $cohortId, $lessonId, 'third_fail_remediation')
     ) {
         $existingPendingRemediation = $engine->getPendingRequiredAction(
             $testOwnerUserId,
@@ -1473,35 +1472,48 @@ TXT;
 
         $remediationUrl = build_app_url('/student/remediation_action.php?token=' . urlencode($remediationToken));
 
-        $queueResult = $engine->renderAndQueueNotificationTemplate([
-            'notification_key' => 'third_fail_remediation',
+        $subject = 'Progress Test Review Required - ' . $lessonTitle;
+        $html = ''
+            . '<p>Dear ' . html_e($studentName) . ',</p>'
+            . '<p>I noticed that you have now reached attempt ' . html_e((string)$attemptCount) . ' for the progress test of <strong>' . html_e($lessonTitle) . '</strong> in <strong>' . html_e($cohortTitle) . '</strong>.</p>'
+            . '<p>Your latest score was <strong>' . html_e((string)$scorePct) . '%</strong>.</p>'
+            . '<p><strong>Review areas:</strong><br>' . nl2br(html_e($weak)) . '</p>'
+            . '<p><strong>Debrief:</strong><br>' . nl2br(html_e($written)) . '</p>'
+            . '<p>Before any additional attempts become available, you must review and acknowledge the remedial study items using the secure student portal link below.</p>'
+            . '<p><a href="' . html_e($remediationUrl) . '">Open Remediation Acknowledgement Page</a></p>'
+            . '<p>Kind regards,<br>Chief Training Team<br>IPCA Courseware</p>';
+
+        $text = ''
+            . "Dear {$studentName},\n\n"
+            . "You have now reached attempt {$attemptCount} for the progress test of {$lessonTitle} in {$cohortTitle}.\n"
+            . "Your latest score was {$scorePct}%.\n\n"
+            . "Review areas:\n{$weak}\n\n"
+            . "Debrief:\n{$written}\n\n"
+            . "Before any additional attempts become available, you must review and acknowledge the remedial study items using this secure portal link:\n"
+            . $remediationUrl . "\n\n"
+            . "Kind regards,\nChief Training Team\nIPCA Courseware";
+
+        $emailId = $engine->queueProgressionEmail([
             'user_id' => $testOwnerUserId,
             'cohort_id' => $cohortId,
             'lesson_id' => $lessonId,
             'progress_test_id' => $testId,
             'email_type' => 'third_fail_remediation',
-            'recipients_to' => [[
-                'email' => (string)$studentRecipient['email'],
-                'name' => $studentName
-            ]],
+            'recipients_to' => [
+                [
+                    'email' => (string)$studentRecipient['email'],
+                    'name' => $studentName
+                ]
+            ],
             'recipients_cc' => $chiefRecipient !== null
                 ? [[
                     'email' => (string)$chiefRecipient['email'],
                     'name' => trim((string)($chiefRecipient['name'] ?? ''))
                 ]]
                 : [],
-            'context' => [
-                'student_name' => $studentName,
-                'lesson_title' => $lessonTitle,
-                'cohort_title' => $cohortTitle,
-                'attempt_count' => (string)$attemptCount,
-                'score_pct' => (string)$scorePct,
-                'weak_areas_html' => html_with_breaks($weak),
-                'weak_areas_text' => $weak,
-                'written_debrief_html' => html_with_breaks($written),
-                'written_debrief_text' => $written,
-                'remediation_url' => $remediationUrl,
-            ],
+            'subject' => $subject,
+            'body_html' => $html,
+            'body_text' => $text,
             'ai_inputs' => [
                 'trigger' => 'third_fail_remediation',
                 'attempt' => $attemptCount,
@@ -1515,48 +1527,46 @@ TXT;
             'sent_status' => 'queued'
         ]);
 
-        if (!empty($queueResult['queued'])) {
-            $emailId = (int)$queueResult['email_id'];
-            $queuedEmailIds[] = $emailId;
+        $queuedEmailIds[] = $emailId;
 
-            if (!$existingPendingRemediation) {
-                $actionId = $engine->createRequiredAction([
-                    'user_id' => $testOwnerUserId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => $testId,
-                    'action_type' => 'remediation_acknowledgement',
-                    'token' => $remediationToken,
-                    'title' => 'Remedial Study Acknowledgement - ' . $lessonTitle,
-                    'instructions_html' => ''
-                        . '<p>Please review the following remedial study items carefully before attempting the progress test again.</p>'
-                        . '<p><strong>Weak Areas:</strong><br>' . html_with_breaks($weak) . '</p>'
-                        . '<p><strong>Debrief:</strong><br>' . html_with_breaks($written) . '</p>'
-                        . '<p>When you have restudied the material, confirm below. Your acknowledgment will be logged with a timestamp for training records.</p>',
-                    'instructions_text' => "Weak Areas:\n{$weak}\n\nDebrief:\n{$written}",
-                    'related_email_id' => $emailId
-                ]);
+        if (!$existingPendingRemediation) {
+            $actionId = $engine->createRequiredAction([
+                'user_id' => $testOwnerUserId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $testId,
+                'action_type' => 'remediation_acknowledgement',
+                'token' => $remediationToken,
+                'title' => 'Remedial Study Acknowledgement - ' . $lessonTitle,
+                'instructions_html' => ''
+                    . '<p>Please review the following remedial study items carefully before attempting the progress test again.</p>'
+                    . '<p><strong>Weak Areas:</strong><br>' . nl2br(html_e($weak)) . '</p>'
+                    . '<p><strong>Debrief:</strong><br>' . nl2br(html_e($written)) . '</p>'
+                    . '<p>When you have restudied the material, confirm below. Your acknowledgment will be logged with a timestamp for training records.</p>',
+                'instructions_text' => "Weak Areas:\n{$weak}\n\nDebrief:\n{$written}",
+                'related_email_id' => $emailId
+            ]);
 
-                $engine->logProgressionEvent([
-                    'user_id' => $testOwnerUserId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => $testId,
-                    'event_type' => 'required_action',
-                    'event_code' => 'remediation_action_created',
-                    'event_status' => 'info',
-                    'actor_type' => 'system',
-                    'actor_user_id' => null,
-                    'event_time' => $completedAtForClassification,
-                    'payload' => [
-                        'required_action_id' => $actionId,
-                        'email_id' => $emailId
-                    ],
-                    'legal_note' => 'Remediation acknowledgement action created.'
-                ]);
-            }
+            $engine->logProgressionEvent([
+                'user_id' => $testOwnerUserId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $testId,
+                'event_type' => 'required_action',
+                'event_code' => 'remediation_action_created',
+                'event_status' => 'info',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => $completedAtForClassification,
+                'payload' => [
+                    'required_action_id' => $actionId,
+                    'email_id' => $emailId
+                ],
+                'legal_note' => 'Remediation acknowledgement action created.'
+            ]);
         }
     }
+
 
     $instructorEscalationTriggered = false;
 
@@ -1564,7 +1574,8 @@ TXT;
         $studentRecipient !== null &&
         $chiefRecipient !== null &&
         (int)$classification['counts_as_unsat'] === 1 &&
-        $attemptCount >= $maxAttemptsBeforeInstructorApproval
+        $attemptCount >= $maxAttemptsBeforeInstructorApproval &&
+        !$engine->hasAnyProgressionEmailForLesson($testOwnerUserId, $cohortId, $lessonId, 'instructor_approval_required')
     ) {
         $existingInstructorApproval = $engine->getPendingRequiredAction(
             $testOwnerUserId,
@@ -1579,8 +1590,22 @@ TXT;
 
         $approvalUrl = build_app_url('/instructor/instructor_approval.php?token=' . urlencode($approvalToken));
 
-        $studentQueueResult = $engine->renderAndQueueNotificationTemplate([
-            'notification_key' => 'instructor_approval_required',
+        $studentSubject = 'Instructor Review Required - ' . $lessonTitle;
+        $studentHtml = ''
+            . '<p>Dear ' . html_e($studentName) . ',</p>'
+            . '<p>You have now reached the maximum number of permitted progress test attempts for <strong>' . html_e($lessonTitle) . '</strong> in <strong>' . html_e($cohortTitle) . '</strong>.</p>'
+            . '<p>Your training progression is now paused pending instructor review and approval.</p>'
+            . '<p>Please contact the Chief Instructor or training department before further attempts are made.</p>'
+            . '<p>Kind regards,<br>Chief Training Team<br>IPCA Courseware</p>';
+
+        $studentText = ''
+            . "Dear {$studentName},\n\n"
+            . "You have now reached the maximum number of permitted progress test attempts for {$lessonTitle} in {$cohortTitle}.\n\n"
+            . "Your training progression is now paused pending instructor review and approval.\n\n"
+            . "Please contact the Chief Instructor or training department before further attempts are made.\n\n"
+            . "Kind regards,\nChief Training Team\nIPCA Courseware";
+
+        $studentEmailId = $engine->queueProgressionEmail([
             'user_id' => $testOwnerUserId,
             'cohort_id' => $cohortId,
             'lesson_id' => $lessonId,
@@ -1591,11 +1616,9 @@ TXT;
                 'name' => $studentName
             ]],
             'recipients_cc' => [],
-            'context' => [
-                'student_name' => $studentName,
-                'lesson_title' => $lessonTitle,
-                'cohort_title' => $cohortTitle,
-            ],
+            'subject' => $studentSubject,
+            'body_html' => $studentHtml,
+            'body_text' => $studentText,
             'ai_inputs' => [
                 'trigger' => 'instructor_approval_required_student',
                 'attempt' => $attemptCount,
@@ -1606,20 +1629,32 @@ TXT;
             'sent_status' => 'queued'
         ]);
 
-        if (!empty($studentQueueResult['queued'])) {
-            $studentEmailId = (int)$studentQueueResult['email_id'];
-            $queuedEmailIds[] = $studentEmailId;
-        } else {
-            $studentEmailId = 0;
-        }
+        $queuedEmailIds[] = $studentEmailId;
 
         $chiefName = trim((string)($chiefRecipient['name'] ?? 'Chief Instructor'));
         if ($chiefName === '') {
             $chiefName = 'Chief Instructor';
         }
 
-        $chiefQueueResult = $engine->renderAndQueueNotificationTemplate([
-            'notification_key' => 'instructor_approval_required_chief',
+        $chiefSubject = 'Instructor Approval Required - ' . $lessonTitle;
+        $chiefHtml = ''
+            . '<p>Dear ' . html_e($chiefName) . ',</p>'
+            . '<p>Student <strong>' . html_e($studentName) . '</strong> has reached <strong>' . html_e((string)$attemptCount) . '</strong> failed progress test attempts for <strong>' . html_e($lessonTitle) . '</strong> in <strong>' . html_e($cohortTitle) . '</strong>.</p>'
+            . '<p><strong>Latest score:</strong> ' . html_e((string)$scorePct) . '%</p>'
+            . '<p><strong>Review areas:</strong><br>' . nl2br(html_e($weak)) . '</p>'
+            . '<p>Please use the secure approval link below to approve or review the next step.</p>'
+            . '<p><a href="' . html_e($approvalUrl) . '">Open Instructor Approval Page</a></p>'
+            . '<p>Kind regards,<br>IPCA Courseware</p>';
+
+        $chiefText = ''
+            . "Dear {$chiefName},\n\n"
+            . "Student {$studentName} has reached {$attemptCount} failed progress test attempts for {$lessonTitle} in {$cohortTitle}.\n\n"
+            . "Latest score: {$scorePct}%\n\n"
+            . "Review areas:\n{$weak}\n\n"
+            . "Use the secure approval link below:\n{$approvalUrl}\n\n"
+            . "Kind regards,\nIPCA Courseware";
+
+        $chiefEmailId = $engine->queueProgressionEmail([
             'user_id' => $testOwnerUserId,
             'cohort_id' => $cohortId,
             'lesson_id' => $lessonId,
@@ -1630,17 +1665,9 @@ TXT;
                 'name' => $chiefName
             ]],
             'recipients_cc' => [],
-            'context' => [
-                'chief_name' => $chiefName,
-                'student_name' => $studentName,
-                'lesson_title' => $lessonTitle,
-                'cohort_title' => $cohortTitle,
-                'attempt_count' => (string)$attemptCount,
-                'score_pct' => (string)$scorePct,
-                'weak_areas_html' => html_with_breaks($weak),
-                'weak_areas_text' => $weak,
-                'approval_url' => $approvalUrl,
-            ],
+            'subject' => $chiefSubject,
+            'body_html' => $chiefHtml,
+            'body_text' => $chiefText,
             'ai_inputs' => [
                 'trigger' => 'instructor_approval_required_chief',
                 'attempt' => $attemptCount,
@@ -1652,14 +1679,9 @@ TXT;
             'sent_status' => 'queued'
         ]);
 
-        if (!empty($chiefQueueResult['queued'])) {
-            $chiefEmailId = (int)$chiefQueueResult['email_id'];
-            $queuedEmailIds[] = $chiefEmailId;
-        } else {
-            $chiefEmailId = 0;
-        }
+        $queuedEmailIds[] = $chiefEmailId;
 
-        if (!$existingInstructorApproval && $chiefEmailId > 0) {
+        if (!$existingInstructorApproval) {
             $approvalActionId = $engine->createRequiredAction([
                 'user_id' => $testOwnerUserId,
                 'cohort_id' => $cohortId,
@@ -1673,7 +1695,7 @@ TXT;
                     . '<p><strong>Lesson:</strong> ' . html_e($lessonTitle) . '</p>'
                     . '<p><strong>Cohort:</strong> ' . html_e($cohortTitle) . '</p>'
                     . '<p><strong>Latest score:</strong> ' . html_e((string)$scorePct) . '%</p>'
-                    . '<p><strong>Weak Areas:</strong><br>' . html_with_breaks($weak) . '</p>'
+                    . '<p><strong>Weak Areas:</strong><br>' . nl2br(html_e($weak)) . '</p>'
                     . '<p>Approve only if you want to allow further training progression after review.</p>',
                 'instructions_text' => "Student: {$studentName}\nLesson: {$lessonTitle}\nCohort: {$cohortTitle}\nLatest score: {$scorePct}%\n\nWeak Areas:\n{$weak}",
                 'related_email_id' => $chiefEmailId
@@ -1693,17 +1715,16 @@ TXT;
                 'payload' => [
                     'required_action_id' => $approvalActionId,
                     'chief_email_id' => $chiefEmailId,
-                    'student_email_id' => $studentEmailId > 0 ? $studentEmailId : null
+                    'student_email_id' => $studentEmailId
                 ],
                 'legal_note' => 'Instructor approval action created after maximum failed attempts reached.'
             ]);
         }
 
-        if (!empty($studentQueueResult['queued']) || !empty($chiefQueueResult['queued'])) {
-            $instructorEscalationTriggered = true;
-        }
-    }
-
+        $instructorEscalationTriggered = true;
+    }	
+	
+	
     $pdo->commit();
 
     $emailSendResults = [];
@@ -1743,7 +1764,7 @@ TXT;
         'pass_gate_met'               => (int)$classification['pass_gate_met'],
         'counts_as_unsat'             => (int)$classification['counts_as_unsat'],
         'remediation_triggered'       => $remediationTriggered,
-        'instructor_escalation_triggered' => $instructorEscalationTriggered,
+		'instructor_escalation_triggered' => $instructorEscalationTriggered,
         'activity_summary_status'     => $summaryStatus,
         'activity_test_pass_status'   => $testPassStatus,
         'activity_completion_status'  => $completionStatus,
