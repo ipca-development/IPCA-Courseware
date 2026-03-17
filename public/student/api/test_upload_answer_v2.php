@@ -15,7 +15,7 @@ function read_json(string $s): array {
 }
 
 function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $payload): array {
-    $url = 'http://127.0.0.1/student/api/progress_test_spaces_presign.php';
+    $url = 'https://ipca.training/student/api/progress_test_spaces_presign.php';
 
     $ch = curl_init($url);
     curl_setopt_array($ch, [
