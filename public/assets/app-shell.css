@@ -616,7 +616,7 @@ body.app-shell-body{
     min-width:244px;
     max-width:244px;
   }
-	
+}
 /* =========================================================
    ADDITIVE UI PRIMITIVES
    Safe extension layer for new modules only.
@@ -843,4 +843,4 @@ body.app-shell-body{
   height:15px;
   flex:0 0 15px;
 }	
-}
+
