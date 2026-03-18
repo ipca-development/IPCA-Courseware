@@ -6,92 +6,88 @@ require_once dirname(__DIR__, 2) . '/src/auth.php';
 
 cw_require_admin();
 
-if (!isset($pdo) || !($pdo instanceof PDO)) {
-    http_response_code(500);
-    exit('Database connection not available.');
-}
+$currentUser = cw_current_user($pdo);
+$currentPath = (string)(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '/admin/users/index.php');
 
+/**
+ * ------------------------------------------------------------
+ * Filters
+ * ------------------------------------------------------------
+ */
+$q = trim((string)($_GET['q'] ?? ''));
+$roleFilter = strtolower(trim((string)($_GET['role'] ?? '')));
+$statusFilter = strtolower(trim((string)($_GET['status'] ?? '')));
+$completenessFilter = strtolower(trim((string)($_GET['completeness'] ?? '')));
+$validityFilter = strtolower(trim((string)($_GET['validity'] ?? '')));
+$securityFilter = strtolower(trim((string)($_GET['security'] ?? '')));
+
+/**
+ * ------------------------------------------------------------
+ * Small helpers
+ * ------------------------------------------------------------
+ */
 function h(?string $value): string
 {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
-function cw_users_idx_query_int(string $key, ?int $default = null): ?int
+function cw_users_build_qs(array $overrides = array()): string
 {
-    if (!isset($_GET[$key])) {
-        return $default;
+    $params = $_GET;
+    foreach ($overrides as $k => $v) {
+        if ($v === null || $v === '') {
+            unset($params[$k]);
+        } else {
+            $params[$k] = $v;
+        }
     }
-    $v = filter_var($_GET[$key], FILTER_VALIDATE_INT);
-    return ($v === false || $v === null) ? $default : (int)$v;
+
+    $query = http_build_query($params);
+    return $query !== '' ? ('?' . $query) : '';
 }
 
-function cw_users_idx_str(string $key, string $default = ''): string
-{
-    $v = isset($_GET[$key]) ? trim((string)$_GET[$key]) : $default;
-    return $v;
-}
-
-function cw_users_idx_scalar(PDO $pdo, string $sql, array $params = array(), int $default = 0): int
-{
-    try {
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $v = $stmt->fetchColumn();
-        return ($v !== false && $v !== null) ? (int)$v : $default;
-    } catch (Throwable $e) {
-        return $default;
-    }
-}
-
-function cw_users_idx_rows(PDO $pdo, string $sql, array $params = array()): array
-{
-    try {
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        return is_array($rows) ? $rows : array();
-    } catch (Throwable $e) {
-        return array();
-    }
-}
-
-function cw_users_idx_human_date(?string $date): string
+function cw_users_human_date(?string $date): string
 {
     if (!$date) {
         return '—';
     }
+
     $ts = strtotime($date);
     if (!$ts) {
         return '—';
     }
+
     return date('M j, Y', $ts);
 }
 
-function cw_users_idx_days_until(?string $date): ?int
+function cw_users_human_datetime(?string $dateTime): string
 {
-    if (!$date) {
-        return null;
+    if (!$dateTime) {
+        return '—';
     }
-    $today = strtotime(date('Y-m-d'));
-    $target = strtotime($date);
-    if (!$today || !$target) {
-        return null;
+
+    $ts = strtotime($dateTime);
+    if (!$ts) {
+        return '—';
     }
-    return (int)floor(($target - $today) / 86400);
+
+    return date('M j, Y · H:i', $ts);
 }
 
-function cw_users_idx_role_label(string $role): string
+function cw_users_role_label(string $role): string
 {
     $role = strtolower(trim($role));
     return match ($role) {
         'admin' => 'Admin',
         'supervisor' => 'Supervisor',
+        'instructor' => 'Instructor',
+        'chief_instructor' => 'Chief Instructor',
         'student' => 'Student',
         default => ucfirst($role),
     };
 }
 
-function cw_users_idx_status_label(string $status): string
+function cw_users_status_label(string $status): string
 {
     $status = strtolower(trim($status));
     return match ($status) {
@@ -103,126 +99,226 @@ function cw_users_idx_status_label(string $status): string
     };
 }
 
-function cw_users_idx_badge_class(string $type, string $value = ''): string
+function cw_users_status_class(string $status): string
 {
-    $value = strtolower(trim($value));
-
-    if ($type === 'status') {
-        return match ($value) {
-            'active' => 'ui-badge ui-badge--ok',
-            'pending_activation' => 'ui-badge ui-badge--warn',
-            'locked' => 'ui-badge ui-badge--danger',
-            'retired' => 'ui-badge ui-badge--neutral',
-            default => 'ui-badge ui-badge--neutral',
-        };
-    }
-
-    if ($type === 'completeness') {
-        return match ($value) {
-            'complete' => 'ui-badge ui-badge--ok',
-            'incomplete' => 'ui-badge ui-badge--warn',
-            default => 'ui-badge ui-badge--neutral',
-        };
-    }
-
-    if ($type === 'expiry') {
-        return match ($value) {
-            'expired' => 'ui-badge ui-badge--danger',
-            'soon' => 'ui-badge ui-badge--warn',
-            'healthy' => 'ui-badge ui-badge--neutral',
-            default => 'ui-badge ui-badge--neutral',
-        };
-    }
-
-    return 'ui-badge ui-badge--neutral';
-}
-
-function cw_users_idx_initials(string $name): string
-{
-    $name = trim($name);
-    if ($name === '') {
-        return 'U';
-    }
-    $parts = preg_split('/\s+/', $name) ?: array();
-    $first = mb_substr((string)($parts[0] ?? 'U'), 0, 1);
-    $second = mb_substr((string)($parts[1] ?? ''), 0, 1);
-    return strtoupper($first . $second);
-}
-
-function cw_users_idx_icon(string $name): string
-{
-    $stroke = 'currentColor';
-
-    return match ($name) {
-        'users' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
-        'plus' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>',
-        'search' => '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
-        'filter' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16"/><path d="M7 12h10"/><path d="M10 18h4"/></svg>',
-        'mail' => '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m4 7 8 6 8-6"/></svg>',
-        'key' => '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="8.5" cy="14.5" r="4.5"/><path d="M13 14.5h8"/><path d="M18 14.5v3"/><path d="M21 14.5v2"/></svg>',
-        'power' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2v10"/><path d="M6.2 6.2a8 8 0 1 0 11.6 0"/></svg>',
-        'rotate' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>',
-        'shield' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v6c0 5-3.5 8-7 9-3.5-1-7-4-7-9V6l7-3z"/></svg>',
-        'warning' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.6 19a1 1 0 0 0 .86 1.5h17.08A1 1 0 0 0 21.4 19L12 3z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
-        'calendar' => '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/></svg>',
-        'open' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 4h6v6"/><path d="M10 14 20 4"/><path d="M20 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h5"/></svg>',
-        'spark' => '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8L12 3z"/><path d="M19 16l.9 2.1L22 19l-2.1.9L19 22l-.9-2.1L16 19l2.1-.9L19 16z"/><path d="M5 15l.9 2.1L8 18l-2.1.9L5 21l-.9-2.1L2 18l2.1-.9L5 15z"/></svg>',
-        default => '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/></svg>',
+    $status = strtolower(trim($status));
+    return match ($status) {
+        'active' => 'ua-badge ua-badge--ok',
+        'pending_activation' => 'ua-badge ua-badge--warn',
+        'locked' => 'ua-badge ua-badge--danger',
+        'retired' => 'ua-badge ua-badge--muted',
+        default => 'ua-badge ua-badge--neutral',
     };
 }
 
-$currentUser = cw_current_user($pdo);
-$currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '/admin/users/index.php', PHP_URL_PATH) ?: '/admin/users/index.php';
+function cw_users_role_class(string $role): string
+{
+    $role = strtolower(trim($role));
+    return match ($role) {
+        'admin' => 'ua-badge ua-badge--accent',
+        'supervisor', 'instructor', 'chief_instructor' => 'ua-badge ua-badge--sky',
+        'student' => 'ua-badge ua-badge--neutral',
+        default => 'ua-badge ua-badge--neutral',
+    };
+}
 
-$q = cw_users_idx_str('q');
-$roleFilter = strtolower(cw_users_idx_str('role'));
-$statusFilter = strtolower(cw_users_idx_str('status'));
-$completenessFilter = strtolower(cw_users_idx_str('completeness'));
-$expiringFilter = strtolower(cw_users_idx_str('expiring'));
-$page = max(1, cw_users_idx_query_int('page', 1) ?? 1);
-$perPage = 18;
-$offset = ($page - 1) * $perPage;
+function cw_users_completeness_class(int $missingCount): string
+{
+    return $missingCount > 0
+        ? 'ua-badge ua-badge--warn'
+        : 'ua-badge ua-badge--ok';
+}
 
+function cw_users_validity_class(?string $validUntil): string
+{
+    if (!$validUntil) {
+        return 'ua-badge ua-badge--neutral';
+    }
+
+    $today = strtotime(date('Y-m-d'));
+    $target = strtotime($validUntil);
+    if (!$target) {
+        return 'ua-badge ua-badge--neutral';
+    }
+
+    $days = (int)floor(($target - $today) / 86400);
+
+    if ($days < 0) {
+        return 'ua-badge ua-badge--danger';
+    }
+    if ($days <= 30) {
+        return 'ua-badge ua-badge--warn';
+    }
+
+    return 'ua-badge ua-badge--ok';
+}
+
+function cw_users_validity_label(?string $validUntil): string
+{
+    if (!$validUntil) {
+        return 'No validity set';
+    }
+
+    $today = strtotime(date('Y-m-d'));
+    $target = strtotime($validUntil);
+    if (!$target) {
+        return 'No validity set';
+    }
+
+    $days = (int)floor(($target - $today) / 86400);
+
+    if ($days < 0) {
+        return 'Expired';
+    }
+    if ($days === 0) {
+        return 'Expires Today';
+    }
+    if ($days <= 30) {
+        return 'Expires in ' . $days . ' day' . ($days === 1 ? '' : 's');
+    }
+
+    return 'Valid';
+}
+
+function cw_users_security_badges(array $row): array
+{
+    $badges = array();
+
+    if ((int)($row['must_change_password'] ?? 0) === 1) {
+        $badges[] = array(
+            'class' => 'ua-badge ua-badge--warn',
+            'label' => 'Password Update Required',
+        );
+    }
+
+    if (strtolower((string)($row['status'] ?? '')) === 'locked') {
+        $badges[] = array(
+            'class' => 'ua-badge ua-badge--danger',
+            'label' => 'Locked',
+        );
+    }
+
+    if (strtolower((string)($row['status'] ?? '')) === 'pending_activation') {
+        $badges[] = array(
+            'class' => 'ua-badge ua-badge--warn',
+            'label' => 'Activation Pending',
+        );
+    }
+
+    return $badges;
+}
+
+function cw_users_svg(string $name): string
+{
+    switch ($name) {
+        case 'search':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15a7.5 7.5 0 0 1 0 15Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        case 'plus':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        case 'open':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M10 14L19 5M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        case 'mail':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h13A1.5 1.5 0 0 1 20 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5v-9Zm0 .5l8 5.5l8-5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        case 'shield':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-2.7 8.4-7 10c-4.3-1.6-7-5.6-7-10V6l7-3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        case 'archive':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M6 7l1 11h10l1-11M10 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 4h14v3H5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
+
+        case 'users':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 19v-1.2a3.8 3.8 0 0 0-3.8-3.8H8.8A3.8 3.8 0 0 0 5 17.8V19M15.5 8.5a2.5 2.5 0 1 1 0-5a2.5 2.5 0 0 1 0 5Zm-8 0a2.5 2.5 0 1 1 0-5a2.5 2.5 0 0 1 0 5Zm12 10.5v-1a3 3 0 0 0-2.2-2.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        case 'check':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        case 'warning':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l8 14H4L12 4Zm0 5.2v4.8m0 3h.01" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        case 'clock':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0a9 9 0 0 1 18 0Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        case 'filter':
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+        default:
+            return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
+    }
+}
+
+/**
+ * ------------------------------------------------------------
+ * Summary counts
+ * ------------------------------------------------------------
+ */
+function cw_users_scalar(PDO $pdo, string $sql, array $params = array()): int
+{
+    try {
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+        $value = $stmt->fetchColumn();
+        return ($value !== false && $value !== null) ? (int)$value : 0;
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+$stats = array(
+    'total' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users"),
+    'pending' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users WHERE status = 'pending_activation'"),
+    'incomplete' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM user_profile_requirements_status WHERE missing_count > 0"),
+    'expiring_soon' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users WHERE account_valid_until IS NOT NULL AND account_valid_until >= CURDATE() AND account_valid_until <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)"),
+    'retired' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users WHERE status = 'retired'"),
+    'must_change_password' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users WHERE must_change_password = 1"),
+);
+
+/**
+ * ------------------------------------------------------------
+ * Card list query
+ * ------------------------------------------------------------
+ */
 $where = array();
 $params = array();
 
 if ($q !== '') {
-    $where[] = "(u.name LIKE :q OR u.email LIKE :q OR u.username LIKE :q OR u.first_name LIKE :q OR u.last_name LIKE :q)";
+    $where[] = "(u.name LIKE :q OR u.email LIKE :q OR u.username LIKE :q)";
     $params[':q'] = '%' . $q . '%';
 }
 
-if (in_array($roleFilter, array('admin', 'supervisor', 'student'), true)) {
+if ($roleFilter !== '' && in_array($roleFilter, array('admin', 'student', 'supervisor', 'instructor', 'chief_instructor'), true)) {
     $where[] = "u.role = :role";
     $params[':role'] = $roleFilter;
 }
 
-if (in_array($statusFilter, array('active', 'pending_activation', 'locked', 'retired'), true)) {
+if ($statusFilter !== '' && in_array($statusFilter, array('active', 'pending_activation', 'locked', 'retired'), true)) {
     $where[] = "u.status = :status";
     $params[':status'] = $statusFilter;
 }
 
 if ($completenessFilter === 'complete') {
-    $where[] = "COALESCE(ups.is_profile_complete, 0) = 1";
+    $where[] = "COALESCE(req.missing_count, 0) = 0";
 } elseif ($completenessFilter === 'incomplete') {
-    $where[] = "COALESCE(ups.is_profile_complete, 0) = 0";
+    $where[] = "COALESCE(req.missing_count, 0) > 0";
 }
 
-if ($expiringFilter === 'soon') {
+if ($validityFilter === 'expiring_soon') {
     $where[] = "u.account_valid_until IS NOT NULL AND u.account_valid_until >= CURDATE() AND u.account_valid_until <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)";
-} elseif ($expiringFilter === 'expired') {
+} elseif ($validityFilter === 'expired') {
     $where[] = "u.account_valid_until IS NOT NULL AND u.account_valid_until < CURDATE()";
+} elseif ($validityFilter === 'unset') {
+    $where[] = "u.account_valid_until IS NULL";
 }
 
-$whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
+if ($securityFilter === 'password_update') {
+    $where[] = "u.must_change_password = 1";
+} elseif ($securityFilter === 'locked') {
+    $where[] = "u.status = 'locked'";
+}
 
-$countSql = "
-    SELECT COUNT(*)
-    FROM users u
-    LEFT JOIN user_profile_requirements_status ups ON ups.user_id = u.id
-    {$whereSql}
-";
-
-$listSql = "
+$sql = "
     SELECT
         u.id,
         u.uuid,
@@ -235,416 +331,649 @@ $listSql = "
         u.status,
         u.account_valid_until,
         u.photo_path,
+        u.must_change_password,
         u.last_login_at,
-        COALESCE(ups.missing_count, 0) AS missing_count,
-        COALESCE(ups.is_profile_complete, 0) AS is_profile_complete,
-        up.cellphone
+        COALESCE(req.missing_count, 0) AS missing_count,
+        req.is_profile_complete,
+        req.last_evaluated_at
     FROM users u
-    LEFT JOIN user_profile_requirements_status ups ON ups.user_id = u.id
-    LEFT JOIN user_profiles up ON up.user_id = u.id
-    {$whereSql}
+    LEFT JOIN user_profile_requirements_status req
+        ON req.user_id = u.id
+";
+
+if ($where) {
+    $sql .= " WHERE " . implode(" AND ", $where);
+}
+
+$sql .= "
     ORDER BY
         CASE u.status
             WHEN 'pending_activation' THEN 0
-            WHEN 'locked' THEN 1
-            WHEN 'active' THEN 2
+            WHEN 'active' THEN 1
+            WHEN 'locked' THEN 2
             WHEN 'retired' THEN 3
             ELSE 4
         END,
-        COALESCE(ups.is_profile_complete, 0) ASC,
-        u.name ASC
-    LIMIT {$perPage} OFFSET {$offset}
+        CASE
+            WHEN COALESCE(req.missing_count, 0) > 0 THEN 0
+            ELSE 1
+        END,
+        u.name ASC,
+        u.id ASC
 ";
 
-$totalUsers = cw_users_idx_scalar($pdo, "SELECT COUNT(*) FROM users");
-$pendingActivations = cw_users_idx_scalar($pdo, "SELECT COUNT(*) FROM users WHERE status = 'pending_activation'");
-$incompleteProfiles = cw_users_idx_scalar($pdo, "SELECT COUNT(*) FROM users u LEFT JOIN user_profile_requirements_status ups ON ups.user_id = u.id WHERE COALESCE(ups.is_profile_complete, 0) = 0");
-$expiringSoon = cw_users_idx_scalar($pdo, "SELECT COUNT(*) FROM users WHERE account_valid_until IS NOT NULL AND account_valid_until >= CURDATE() AND account_valid_until <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)");
-$retiredUsers = cw_users_idx_scalar($pdo, "SELECT COUNT(*) FROM users WHERE status = 'retired'");
-
-$totalFiltered = cw_users_idx_scalar($pdo, $countSql, $params);
-$users = cw_users_idx_rows($pdo, $listSql, $params);
-$totalPages = max(1, (int)ceil($totalFiltered / $perPage));
-
-$baseQuery = $_GET;
-unset($baseQuery['page']);
-
-if (function_exists('cw_header')) {
-    cw_header('User Accounts');
+$stmt = $pdo->prepare($sql);
+$stmt->execute($params);
+$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+if (!is_array($rows)) {
+    $rows = array();
 }
+
+cw_header('User Accounts');
 ?>
+
 <style>
 .user-accounts-page{
-    display:flex;
-    flex-direction:column;
-    gap:22px;
+    display:block;
 }
-.user-accounts-page .page-actions{
+
+.user-accounts-page .app-section-hero{
+    margin-bottom:20px;
+}
+
+.ua-hero-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:24px;
+}
+
+.ua-hero-copy{
+    min-width:0;
+}
+
+.ua-hero-title{
+    margin:0;
+    font-size:34px;
+    line-height:1.02;
+    letter-spacing:-0.04em;
+    font-weight:760;
+    color:#fff;
+}
+
+.ua-hero-text{
+    max-width:820px;
+    margin:14px 0 0 0;
+    color:rgba(255,255,255,0.82);
+    font-size:15px;
+    line-height:1.65;
+}
+
+.ua-hero-actions{
     display:flex;
     flex-wrap:wrap;
-    gap:12px;
-    margin-top:18px;
-}
-.user-accounts-page .page-action{
-    display:inline-flex;
-    align-items:center;
-    gap:10px;
-    min-height:42px;
-    padding:0 16px;
-    border-radius:12px;
-    text-decoration:none;
-    border:1px solid rgba(255,255,255,0.10);
-    background:rgba(255,255,255,0.08);
-    color:#ffffff;
-    font-size:14px;
-    font-weight:620;
-    transition:background .16s ease, transform .16s ease;
-}
-.user-accounts-page .page-action:hover{
-    background:rgba(255,255,255,0.14);
-    transform:translateY(-1px);
-}
-.user-accounts-page .page-action--ghost{
-    background:rgba(255,255,255,0.04);
-}
-.user-accounts-page .svg-icon{
-    width:18px;
-    height:18px;
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    color:currentColor;
-    flex:0 0 18px;
-}
-.user-accounts-page .svg-icon svg{
-    width:18px;
-    height:18px;
-    stroke:currentColor;
-    fill:none;
-    stroke-width:1.9;
-    stroke-linecap:round;
-    stroke-linejoin:round;
-}
-.users-kpi-grid{
-    display:grid;
-    grid-template-columns:repeat(5,minmax(0,1fr));
-    gap:18px;
-}
-.user-kpi-card{
-    padding:22px 22px 20px;
-}
-.user-kpi-label{
-    display:flex;
-    align-items:center;
-    gap:10px;
-    color:var(--text-muted);
-    font-size:13px;
-    font-weight:650;
-}
-.user-kpi-value{
-    margin-top:12px;
-    font-size:34px;
-    line-height:1;
-    font-weight:760;
-    letter-spacing:-0.03em;
-    color:var(--text-strong);
-}
-.user-kpi-note{
-    margin-top:8px;
-    color:var(--text-muted);
-    font-size:13px;
-    line-height:1.45;
-}
-.users-filter-card{
-    padding:18px;
-}
-.users-filter-form{
-    display:grid;
-    grid-template-columns:minmax(240px,2fr) repeat(4,minmax(140px,1fr)) auto;
-    gap:12px;
-    align-items:end;
-}
-.users-filter-field{
-    display:flex;
-    flex-direction:column;
-    gap:8px;
-}
-.users-filter-label{
-    font-size:12px;
-    font-weight:680;
-    letter-spacing:.04em;
-    text-transform:uppercase;
-    color:var(--text-muted);
-}
-.users-filter-input,
-.users-filter-select{
-    width:100%;
-    min-height:46px;
-    border-radius:14px;
-    border:1px solid rgba(15,23,42,0.08);
-    background:#ffffff;
-    color:var(--text-strong);
-    padding:0 14px;
-    font-size:14px;
-    font-weight:560;
-    outline:none;
-}
-.users-filter-input:focus,
-.users-filter-select:focus{
-    border-color:rgba(31,103,197,0.35);
-    box-shadow:0 0 0 4px rgba(110,174,252,0.12);
-}
-.users-filter-actions{
-    display:flex;
     gap:10px;
     justify-content:flex-end;
 }
-.users-btn{
-    min-height:46px;
-    border:none;
-    border-radius:14px;
-    padding:0 16px;
+
+.ua-action{
+    height:40px;
     display:inline-flex;
     align-items:center;
     gap:10px;
-    font-size:14px;
-    font-weight:650;
+    padding:0 16px;
+    border-radius:999px;
+    border:1px solid rgba(255,255,255,0.12);
+    background:rgba(255,255,255,0.08);
+    color:#fff;
     text-decoration:none;
-    cursor:pointer;
-    transition:transform .16s ease, box-shadow .16s ease, background .16s ease;
+    font-size:13px;
+    font-weight:650;
+    letter-spacing:.01em;
+    transition:background .16s ease, transform .16s ease, border-color .16s ease;
 }
-.users-btn:hover{
+
+.ua-action:hover{
+    background:rgba(255,255,255,0.13);
     transform:translateY(-1px);
 }
-.users-btn--primary{
-    color:#ffffff;
-    background:linear-gradient(180deg, #173459 0%, #102440 100%);
-    box-shadow:0 10px 24px rgba(13, 29, 52, 0.18);
+
+.ua-action svg{
+    width:16px;
+    height:16px;
+    flex:0 0 16px;
 }
-.users-btn--secondary{
-    color:var(--text-strong);
-    background:#ffffff;
-    border:1px solid rgba(15,23,42,0.08);
-}
-.users-list{
+
+.ua-hero-stats{
     display:grid;
-    grid-template-columns:repeat(2,minmax(0,1fr));
-    gap:18px;
+    grid-template-columns:repeat(6, minmax(0, 1fr));
+    gap:14px;
+    margin-top:22px;
 }
-.user-card{
-    padding:22px;
+
+.ua-stat-chip{
+    min-height:88px;
+    padding:16px 18px;
+    border-radius:18px;
+    background:rgba(255,255,255,0.08);
+    border:1px solid rgba(255,255,255,0.09);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.035);
+}
+
+.ua-stat-label{
+    color:rgba(255,255,255,0.68);
+    font-size:11px;
+    line-height:1.15;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    font-weight:680;
+}
+
+.ua-stat-value{
+    margin-top:10px;
+    color:#fff;
+    font-size:31px;
+    line-height:1;
+    font-weight:760;
+    letter-spacing:-0.04em;
+}
+
+.ua-toolbar-card{
+    padding:18px;
+}
+
+.ua-toolbar-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:16px;
+    margin-bottom:14px;
+}
+
+.ua-toolbar-title{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:17px;
+    font-weight:720;
+    color:var(--text-strong);
+    letter-spacing:-0.02em;
+}
+
+.ua-toolbar-title-icon{
+    width:18px;
+    height:18px;
+    color:var(--text-muted);
+}
+
+.ua-toolbar-meta{
+    color:var(--text-muted);
+    font-size:13px;
+    font-weight:560;
+}
+
+.ua-filters{
+    display:grid;
+    grid-template-columns:2fr repeat(5, minmax(0, 1fr));
+    gap:12px;
+}
+
+.ua-field{
     display:flex;
     flex-direction:column;
-    gap:18px;
+    gap:7px;
 }
-.user-card-top{
+
+.ua-field-label{
+    font-size:12px;
+    font-weight:670;
+    letter-spacing:.02em;
+    color:var(--text-muted);
+}
+
+.ua-input-wrap{
+    position:relative;
+}
+
+.ua-input-icon{
+    position:absolute;
+    left:12px;
+    top:50%;
+    transform:translateY(-50%);
+    width:16px;
+    height:16px;
+    color:#8a97ab;
+    pointer-events:none;
+}
+
+.ua-input,
+.ua-select{
+    width:100%;
+    height:44px;
+    border-radius:14px;
+    border:1px solid rgba(15,23,42,0.08);
+    background:#fff;
+    box-sizing:border-box;
+    color:var(--text-strong);
+    font-size:14px;
+    font-weight:560;
+    outline:none;
+    transition:border-color .16s ease, box-shadow .16s ease;
+}
+
+.ua-input{
+    padding:0 14px 0 40px;
+}
+
+.ua-select{
+    padding:0 14px;
+}
+
+.ua-input:focus,
+.ua-select:focus{
+    border-color:rgba(82, 133, 212, 0.45);
+    box-shadow:0 0 0 4px rgba(110,174,252,0.12);
+}
+
+.ua-filter-actions{
     display:flex;
+    align-items:flex-end;
+    gap:10px;
+}
+
+.ua-filter-btn{
+    height:44px;
+    padding:0 16px;
+    border:none;
+    border-radius:14px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    background:linear-gradient(180deg, #17345d 0%, #102440 100%);
+    color:#fff;
+    text-decoration:none;
+    font-size:14px;
+    font-weight:680;
+    cursor:pointer;
+    box-shadow:0 10px 22px rgba(16,36,64,0.14);
+}
+
+.ua-filter-btn:hover{
+    transform:translateY(-1px);
+}
+
+.ua-filter-btn--ghost{
+    background:#fff;
+    color:var(--text-strong);
+    border:1px solid rgba(15,23,42,0.08);
+    box-shadow:none;
+}
+
+.ua-filter-btn svg{
+    width:16px;
+    height:16px;
+    flex:0 0 16px;
+}
+
+.ua-list-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
     gap:16px;
+    margin:24px 0 14px 0;
+}
+
+.ua-list-title{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-size:18px;
+    font-weight:730;
+    letter-spacing:-0.02em;
+    color:var(--text-strong);
+}
+
+.ua-list-title-icon{
+    width:18px;
+    height:18px;
+    color:var(--text-muted);
+}
+
+.ua-list-count{
+    color:var(--text-muted);
+    font-size:13px;
+    font-weight:600;
+}
+
+.ua-card-list{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:16px;
+}
+
+.ua-user-card{
+    padding:22px;
+}
+
+.ua-user-card-inner{
+    display:grid;
+    grid-template-columns:minmax(0, 1.7fr) minmax(340px, 1fr);
+    gap:18px;
     align-items:flex-start;
 }
-.user-avatar{
-    width:64px;
-    height:64px;
-    border-radius:18px;
+
+.ua-user-main{
+    display:flex;
+    gap:16px;
+    min-width:0;
+}
+
+.ua-avatar{
+    width:72px;
+    height:72px;
+    border-radius:20px;
     overflow:hidden;
-    background:linear-gradient(180deg, #dfe8f4 0%, #cdd8e6 100%);
-    color:#173459;
+    flex:0 0 72px;
+    background:linear-gradient(180deg, #e8eef7 0%, #dfe7f2 100%);
+    border:1px solid rgba(15,23,42,0.07);
     display:flex;
     align-items:center;
     justify-content:center;
-    font-size:20px;
-    font-weight:760;
-    letter-spacing:-0.03em;
-    flex:0 0 64px;
-    box-shadow:inset 0 1px 0 rgba(255,255,255,0.5);
+    box-shadow:inset 0 1px 0 rgba(255,255,255,0.45);
 }
-.user-avatar img{
+
+.ua-avatar img{
     width:100%;
     height:100%;
     object-fit:cover;
     display:block;
 }
-.user-card-meta{
+
+.ua-avatar-fallback{
+    width:30px;
+    height:30px;
+    color:#7b8aa0;
+}
+
+.ua-main-copy{
     min-width:0;
-    flex:1 1 auto;
 }
-.user-name-row{
+
+.ua-name-row{
     display:flex;
-    align-items:flex-start;
-    justify-content:space-between;
-    gap:12px;
+    flex-wrap:wrap;
+    align-items:center;
+    gap:10px;
 }
-.user-name{
+
+.ua-name{
     margin:0;
-    font-size:20px;
+    font-size:24px;
     line-height:1.08;
-    font-weight:750;
     letter-spacing:-0.03em;
+    font-weight:760;
     color:var(--text-strong);
 }
-.user-identity{
-    margin-top:6px;
-    color:var(--text-muted);
-    font-size:13px;
-    line-height:1.45;
-    display:flex;
-    flex-wrap:wrap;
-    gap:6px 10px;
+
+.ua-meta-grid{
+    display:grid;
+    grid-template-columns:repeat(3, minmax(0, 1fr));
+    gap:10px 16px;
+    margin-top:14px;
 }
-.user-identity span{
-    white-space:nowrap;
+
+.ua-meta-block{
+    min-width:0;
 }
-.user-card-badges{
-    display:flex;
-    flex-wrap:wrap;
-    gap:8px;
-}
-.ui-badge{
-    min-height:30px;
-    display:inline-flex;
-    align-items:center;
-    gap:8px;
-    padding:0 12px;
-    border-radius:999px;
-    font-size:12px;
+
+.ua-meta-label{
+    font-size:11px;
+    line-height:1.15;
+    text-transform:uppercase;
+    letter-spacing:.12em;
+    color:#8a97ab;
     font-weight:700;
-    letter-spacing:.02em;
-    border:1px solid transparent;
 }
-.ui-badge .svg-icon{
-    width:14px;
-    height:14px;
-    flex:0 0 14px;
+
+.ua-meta-value{
+    margin-top:6px;
+    color:var(--text-strong);
+    font-size:14px;
+    font-weight:630;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
 }
-.ui-badge .svg-icon svg{
-    width:14px;
-    height:14px;
-    stroke-width:2;
+
+.ua-card-side{
+    display:flex;
+    flex-direction:column;
+    gap:12px;
 }
-.ui-badge--ok{
-    color:#196b43;
-    background:#ecfbf3;
-    border-color:#c8efd9;
-}
-.ui-badge--warn{
-    color:#8d5b00;
-    background:#fff8e8;
-    border-color:#f1deb0;
-}
-.ui-badge--danger{
-    color:#9c2f2f;
-    background:#fff0f0;
-    border-color:#f0c8c8;
-}
-.ui-badge--neutral{
-    color:#5d6c84;
-    background:#f3f6fa;
-    border-color:#dde5ef;
-}
-.user-card-actions{
+
+.ua-badge-grid{
     display:flex;
     flex-wrap:wrap;
     gap:10px;
+    justify-content:flex-end;
 }
-.user-card-action{
+
+.ua-badge{
+    min-height:34px;
+    padding:0 13px;
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:999px;
+    border:1px solid rgba(15,23,42,0.08);
+    background:#f8fafc;
+    color:#324155;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.02em;
+    white-space:nowrap;
+}
+
+.ua-badge--ok{
+    background:rgba(32, 135, 90, 0.10);
+    color:#1f7a54;
+    border-color:rgba(32, 135, 90, 0.18);
+}
+
+.ua-badge--warn{
+    background:rgba(196, 118, 11, 0.10);
+    color:#a66508;
+    border-color:rgba(196, 118, 11, 0.18);
+}
+
+.ua-badge--danger{
+    background:rgba(185, 54, 54, 0.10);
+    color:#ac2f2f;
+    border-color:rgba(185, 54, 54, 0.18);
+}
+
+.ua-badge--muted{
+    background:rgba(15, 23, 42, 0.06);
+    color:#637287;
+    border-color:rgba(15, 23, 42, 0.08);
+}
+
+.ua-badge--accent{
+    background:rgba(32, 84, 176, 0.10);
+    color:#2557b3;
+    border-color:rgba(32, 84, 176, 0.18);
+}
+
+.ua-badge--sky{
+    background:rgba(48, 124, 183, 0.10);
+    color:#246ea9;
+    border-color:rgba(48, 124, 183, 0.18);
+}
+
+.ua-badge--neutral{
+    background:rgba(86, 112, 153, 0.10);
+    color:#405a82;
+    border-color:rgba(86, 112, 153, 0.16);
+}
+
+.ua-card-actions{
+    display:flex;
+    justify-content:flex-end;
+    flex-wrap:wrap;
+    gap:10px;
+}
+
+.ua-card-action{
     min-height:40px;
+    padding:0 14px;
     display:inline-flex;
     align-items:center;
     gap:9px;
-    padding:0 14px;
     border-radius:12px;
     text-decoration:none;
+    color:var(--text-strong);
     font-size:13px;
     font-weight:680;
     border:1px solid rgba(15,23,42,0.08);
-    color:var(--text-strong);
-    background:#ffffff;
+    background:#fff;
+    transition:transform .16s ease, border-color .16s ease, background .16s ease;
 }
-.user-card-action:hover{
-    border-color:rgba(15,23,42,0.16);
-    box-shadow:0 8px 16px rgba(15,23,42,0.05);
+
+.ua-card-action:hover{
+    transform:translateY(-1px);
+    border-color:rgba(16,36,64,0.16);
+    background:#f9fbfe;
 }
-.user-card-action--primary{
-    background:linear-gradient(180deg, #173459 0%, #102440 100%);
-    color:#ffffff;
+
+.ua-card-action--primary{
+    background:linear-gradient(180deg, #17345d 0%, #102440 100%);
+    color:#fff;
     border-color:transparent;
+    box-shadow:0 10px 22px rgba(16,36,64,0.13);
 }
-.user-card-action--warn{
-    background:#fff8e8;
-    color:#8d5b00;
-    border-color:#f1deb0;
+
+.ua-card-action svg{
+    width:15px;
+    height:15px;
+    flex:0 0 15px;
 }
-.user-card-action--danger{
-    background:#fff0f0;
-    color:#9c2f2f;
-    border-color:#f0c8c8;
-}
-.user-card-footer{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:14px;
-    padding-top:12px;
+
+.ua-card-foot{
+    margin-top:16px;
+    padding-top:16px;
     border-top:1px solid rgba(15,23,42,0.06);
-}
-.user-card-footer-meta{
-    color:var(--text-muted);
-    font-size:13px;
-    line-height:1.45;
-}
-.user-card-footer-meta strong{
-    color:var(--text-strong);
-    font-weight:680;
-}
-.empty-state-card{
-    padding:34px 28px;
-}
-.users-pagination{
     display:flex;
     align-items:center;
     justify-content:space-between;
-    gap:14px;
-    padding:18px 20px;
+    gap:12px;
+    flex-wrap:wrap;
 }
-.users-pagination-meta{
+
+.ua-foot-note{
     color:var(--text-muted);
     font-size:13px;
     font-weight:560;
 }
-.users-pagination-actions{
+
+.ua-empty{
+    padding:34px 28px;
+}
+
+.ua-empty-inner{
     display:flex;
-    gap:10px;
+    align-items:flex-start;
+    gap:14px;
 }
-@media (max-width: 1380px){
-    .users-kpi-grid{
-        grid-template-columns:repeat(3,minmax(0,1fr));
+
+.ua-empty-icon{
+    width:22px;
+    height:22px;
+    color:#8a97ab;
+    flex:0 0 22px;
+}
+
+.ua-empty-title{
+    margin:0;
+    font-size:18px;
+    font-weight:740;
+    letter-spacing:-0.02em;
+    color:var(--text-strong);
+}
+
+.ua-empty-text{
+    margin:8px 0 0 0;
+    color:var(--text-muted);
+    font-size:14px;
+    line-height:1.65;
+    max-width:700px;
+}
+
+@media (max-width: 1300px){
+    .ua-hero-stats{
+        grid-template-columns:repeat(3, minmax(0, 1fr));
     }
-    .users-filter-form{
-        grid-template-columns:repeat(3,minmax(0,1fr));
+
+    .ua-filters{
+        grid-template-columns:repeat(3, minmax(0, 1fr));
     }
-    .users-list{
+
+    .ua-user-card-inner{
         grid-template-columns:1fr;
     }
-}
-@media (max-width: 980px){
-    .users-kpi-grid{
-        grid-template-columns:repeat(2,minmax(0,1fr));
-    }
-    .users-filter-form{
-        grid-template-columns:1fr 1fr;
+
+    .ua-badge-grid,
+    .ua-card-actions{
+        justify-content:flex-start;
     }
 }
-@media (max-width: 720px){
-    .users-kpi-grid,
-    .users-filter-form{
-        grid-template-columns:1fr;
-    }
-    .user-name-row{
-        flex-direction:column;
-    }
-    .users-pagination{
+
+@media (max-width: 900px){
+    .ua-hero-head{
         flex-direction:column;
         align-items:flex-start;
+    }
+
+    .ua-hero-actions{
+        justify-content:flex-start;
+    }
+
+    .ua-hero-stats{
+        grid-template-columns:repeat(2, minmax(0, 1fr));
+    }
+
+    .ua-filters{
+        grid-template-columns:1fr;
+    }
+
+    .ua-filter-actions{
+        align-items:stretch;
+    }
+
+    .ua-filter-btn,
+    .ua-filter-btn--ghost{
+        flex:1 1 auto;
+        justify-content:center;
+    }
+
+    .ua-meta-grid{
+        grid-template-columns:1fr;
+    }
+}
+
+@media (max-width: 640px){
+    .ua-hero-stats{
+        grid-template-columns:1fr;
+    }
+
+    .ua-name{
+        font-size:21px;
+    }
+
+    .ua-avatar{
+        width:62px;
+        height:62px;
+        flex-basis:62px;
     }
 }
 </style>
@@ -652,231 +981,285 @@ if (function_exists('cw_header')) {
 <div class="user-accounts-page">
     <section class="app-section-hero">
         <div class="hero-overline">Operations</div>
-        <h1 style="margin:0; font-size:34px; line-height:1.02; letter-spacing:-0.04em;">User Accounts</h1>
-        <p style="margin:14px 0 0 0; max-width:860px; color:rgba(255,255,255,0.82); font-size:15px; line-height:1.65;">
-            Manage enrollment, profile completeness, lifecycle status, and account readiness from one operational workspace.
-        </p>
-        <div class="hero-meta">
-            <span class="hero-chip"><?= cw_users_idx_icon('users') ?> <span>Total Users&nbsp;<?= (int)$totalUsers ?></span></span>
-            <span class="hero-chip"><?= cw_users_idx_icon('warning') ?> <span>Pending Activation&nbsp;<?= (int)$pendingActivations ?></span></span>
-            <span class="hero-chip"><?= cw_users_idx_icon('spark') ?> <span>Incomplete Profiles&nbsp;<?= (int)$incompleteProfiles ?></span></span>
+
+        <div class="ua-hero-head">
+            <div class="ua-hero-copy">
+                <h2 class="ua-hero-title">User Accounts</h2>
+                <p class="ua-hero-text">
+                    Manage enrollment readiness, account status, profile completeness, and operational account visibility from one premium control surface.
+                </p>
+            </div>
+
+            <div class="ua-hero-actions">
+                <a class="ua-action" href="/admin/users/create.php">
+                    <?php echo cw_users_svg('plus'); ?>
+                    <span>Add User</span>
+                </a>
+
+                <a class="ua-action" href="/admin/users/index.php?status=pending_activation">
+                    <?php echo cw_users_svg('mail'); ?>
+                    <span>Pending Activations</span>
+                </a>
+
+                <a class="ua-action" href="/admin/users/index.php?completeness=incomplete">
+                    <?php echo cw_users_svg('warning'); ?>
+                    <span>Incomplete Profiles</span>
+                </a>
+            </div>
         </div>
-        <div class="page-actions">
-            <a class="page-action" href="/admin/users/create.php"><?= cw_users_idx_icon('plus') ?><span>Add User</span></a>
-            <a class="page-action page-action--ghost" href="/admin/users/index.php?status=pending_activation"><?= cw_users_idx_icon('mail') ?><span>Pending Activations</span></a>
-            <a class="page-action page-action--ghost" href="/admin/users/index.php?completeness=incomplete"><?= cw_users_idx_icon('spark') ?><span>Incomplete Profiles</span></a>
-            <a class="page-action page-action--ghost" href="/admin/users/index.php?expiring=soon"><?= cw_users_idx_icon('calendar') ?><span>Expiring Soon</span></a>
-            <a class="page-action page-action--ghost" href="/admin/users/index.php?status=retired"><?= cw_users_idx_icon('power') ?><span>Retired Users</span></a>
+
+        <div class="ua-hero-stats">
+            <div class="ua-stat-chip">
+                <div class="ua-stat-label">Total Accounts</div>
+                <div class="ua-stat-value"><?php echo (int)$stats['total']; ?></div>
+            </div>
+
+            <div class="ua-stat-chip">
+                <div class="ua-stat-label">Pending Activation</div>
+                <div class="ua-stat-value"><?php echo (int)$stats['pending']; ?></div>
+            </div>
+
+            <div class="ua-stat-chip">
+                <div class="ua-stat-label">Incomplete Profiles</div>
+                <div class="ua-stat-value"><?php echo (int)$stats['incomplete']; ?></div>
+            </div>
+
+            <div class="ua-stat-chip">
+                <div class="ua-stat-label">Expiring Soon</div>
+                <div class="ua-stat-value"><?php echo (int)$stats['expiring_soon']; ?></div>
+            </div>
+
+            <div class="ua-stat-chip">
+                <div class="ua-stat-label">Retired</div>
+                <div class="ua-stat-value"><?php echo (int)$stats['retired']; ?></div>
+            </div>
+
+            <div class="ua-stat-chip">
+                <div class="ua-stat-label">Password Updates</div>
+                <div class="ua-stat-value"><?php echo (int)$stats['must_change_password']; ?></div>
+            </div>
         </div>
     </section>
 
-    <section class="users-kpi-grid">
-        <article class="card user-kpi-card">
-            <div class="user-kpi-label"><?= cw_users_idx_icon('users') ?><span>Total Accounts</span></div>
-            <div class="user-kpi-value"><?= (int)$totalUsers ?></div>
-            <div class="user-kpi-note">All user records currently active in the canonical account root.</div>
-        </article>
-        <article class="card user-kpi-card">
-            <div class="user-kpi-label"><?= cw_users_idx_icon('mail') ?><span>Pending Activation</span></div>
-            <div class="user-kpi-value"><?= (int)$pendingActivations ?></div>
-            <div class="user-kpi-note">Accounts created but not yet activated by their owner.</div>
-        </article>
-        <article class="card user-kpi-card">
-            <div class="user-kpi-label"><?= cw_users_idx_icon('spark') ?><span>Incomplete Profiles</span></div>
-            <div class="user-kpi-value"><?= (int)$incompleteProfiles ?></div>
-            <div class="user-kpi-note">Users still missing required personal or contact information.</div>
-        </article>
-        <article class="card user-kpi-card">
-            <div class="user-kpi-label"><?= cw_users_idx_icon('calendar') ?><span>Expiring in 30 Days</span></div>
-            <div class="user-kpi-value"><?= (int)$expiringSoon ?></div>
-            <div class="user-kpi-note">Accounts nearing the end of their current validity window.</div>
-        </article>
-        <article class="card user-kpi-card">
-            <div class="user-kpi-label"><?= cw_users_idx_icon('power') ?><span>Retired Accounts</span></div>
-            <div class="user-kpi-value"><?= (int)$retiredUsers ?></div>
-            <div class="user-kpi-note">Archived users retained for historical and compliance continuity.</div>
-        </article>
-    </section>
+    <section class="card ua-toolbar-card">
+        <div class="ua-toolbar-head">
+            <div class="ua-toolbar-title">
+                <span class="ua-toolbar-title-icon"><?php echo cw_users_svg('filter'); ?></span>
+                <span>Filter and search</span>
+            </div>
+            <div class="ua-toolbar-meta">Refine the roster by role, lifecycle status, completeness, validity, and readiness.</div>
+        </div>
 
-    <section class="card users-filter-card">
-        <form class="users-filter-form" method="get" action="/admin/users/index.php">
-            <div class="users-filter-field">
-                <label class="users-filter-label" for="users-filter-q">Search</label>
-                <input class="users-filter-input" id="users-filter-q" type="text" name="q" value="<?= h($q) ?>" placeholder="Name, email, or username">
+        <form method="get" action="/admin/users/index.php">
+            <div class="ua-filters">
+                <div class="ua-field">
+                    <label class="ua-field-label" for="ua-q">Search</label>
+                    <div class="ua-input-wrap">
+                        <span class="ua-input-icon"><?php echo cw_users_svg('search'); ?></span>
+                        <input
+                            id="ua-q"
+                            class="ua-input"
+                            type="text"
+                            name="q"
+                            value="<?php echo h($q); ?>"
+                            placeholder="Name, email, or username">
+                    </div>
+                </div>
+
+                <div class="ua-field">
+                    <label class="ua-field-label" for="ua-role">Role</label>
+                    <select class="ua-select" id="ua-role" name="role">
+                        <option value="">All roles</option>
+                        <option value="admin"<?php echo $roleFilter === 'admin' ? ' selected' : ''; ?>>Admin</option>
+                        <option value="supervisor"<?php echo $roleFilter === 'supervisor' ? ' selected' : ''; ?>>Supervisor</option>
+                        <option value="student"<?php echo $roleFilter === 'student' ? ' selected' : ''; ?>>Student</option>
+                    </select>
+                </div>
+
+                <div class="ua-field">
+                    <label class="ua-field-label" for="ua-status">Status</label>
+                    <select class="ua-select" id="ua-status" name="status">
+                        <option value="">All statuses</option>
+                        <option value="active"<?php echo $statusFilter === 'active' ? ' selected' : ''; ?>>Active</option>
+                        <option value="pending_activation"<?php echo $statusFilter === 'pending_activation' ? ' selected' : ''; ?>>Pending Activation</option>
+                        <option value="locked"<?php echo $statusFilter === 'locked' ? ' selected' : ''; ?>>Locked</option>
+                        <option value="retired"<?php echo $statusFilter === 'retired' ? ' selected' : ''; ?>>Retired</option>
+                    </select>
+                </div>
+
+                <div class="ua-field">
+                    <label class="ua-field-label" for="ua-completeness">Completeness</label>
+                    <select class="ua-select" id="ua-completeness" name="completeness">
+                        <option value="">All profiles</option>
+                        <option value="complete"<?php echo $completenessFilter === 'complete' ? ' selected' : ''; ?>>Complete</option>
+                        <option value="incomplete"<?php echo $completenessFilter === 'incomplete' ? ' selected' : ''; ?>>Incomplete</option>
+                    </select>
+                </div>
+
+                <div class="ua-field">
+                    <label class="ua-field-label" for="ua-validity">Validity</label>
+                    <select class="ua-select" id="ua-validity" name="validity">
+                        <option value="">Any validity</option>
+                        <option value="expiring_soon"<?php echo $validityFilter === 'expiring_soon' ? ' selected' : ''; ?>>Expiring Soon</option>
+                        <option value="expired"<?php echo $validityFilter === 'expired' ? ' selected' : ''; ?>>Expired</option>
+                        <option value="unset"<?php echo $validityFilter === 'unset' ? ' selected' : ''; ?>>Not Set</option>
+                    </select>
+                </div>
+
+                <div class="ua-field">
+                    <label class="ua-field-label" for="ua-security">Security</label>
+                    <select class="ua-select" id="ua-security" name="security">
+                        <option value="">Any security state</option>
+                        <option value="password_update"<?php echo $securityFilter === 'password_update' ? ' selected' : ''; ?>>Password Update Required</option>
+                        <option value="locked"<?php echo $securityFilter === 'locked' ? ' selected' : ''; ?>>Locked</option>
+                    </select>
+                </div>
             </div>
 
-            <div class="users-filter-field">
-                <label class="users-filter-label" for="users-filter-role">Role</label>
-                <select class="users-filter-select" id="users-filter-role" name="role">
-                    <option value="">All Roles</option>
-                    <option value="admin"<?= $roleFilter === 'admin' ? ' selected' : '' ?>>Admin</option>
-                    <option value="supervisor"<?= $roleFilter === 'supervisor' ? ' selected' : '' ?>>Supervisor</option>
-                    <option value="student"<?= $roleFilter === 'student' ? ' selected' : '' ?>>Student</option>
-                </select>
-            </div>
+            <div class="ua-filter-actions" style="margin-top:14px;">
+                <button class="ua-filter-btn" type="submit">
+                    <?php echo cw_users_svg('search'); ?>
+                    <span>Apply Filters</span>
+                </button>
 
-            <div class="users-filter-field">
-                <label class="users-filter-label" for="users-filter-status">Status</label>
-                <select class="users-filter-select" id="users-filter-status" name="status">
-                    <option value="">All Statuses</option>
-                    <option value="active"<?= $statusFilter === 'active' ? ' selected' : '' ?>>Active</option>
-                    <option value="pending_activation"<?= $statusFilter === 'pending_activation' ? ' selected' : '' ?>>Pending Activation</option>
-                    <option value="locked"<?= $statusFilter === 'locked' ? ' selected' : '' ?>>Locked</option>
-                    <option value="retired"<?= $statusFilter === 'retired' ? ' selected' : '' ?>>Retired</option>
-                </select>
-            </div>
-
-            <div class="users-filter-field">
-                <label class="users-filter-label" for="users-filter-completeness">Completeness</label>
-                <select class="users-filter-select" id="users-filter-completeness" name="completeness">
-                    <option value="">All Profiles</option>
-                    <option value="complete"<?= $completenessFilter === 'complete' ? ' selected' : '' ?>>Complete</option>
-                    <option value="incomplete"<?= $completenessFilter === 'incomplete' ? ' selected' : '' ?>>Incomplete</option>
-                </select>
-            </div>
-
-            <div class="users-filter-field">
-                <label class="users-filter-label" for="users-filter-expiring">Validity Window</label>
-                <select class="users-filter-select" id="users-filter-expiring" name="expiring">
-                    <option value="">Any Validity</option>
-                    <option value="soon"<?= $expiringFilter === 'soon' ? ' selected' : '' ?>>Expiring Soon</option>
-                    <option value="expired"<?= $expiringFilter === 'expired' ? ' selected' : '' ?>>Expired</option>
-                </select>
-            </div>
-
-            <div class="users-filter-actions">
-                <button class="users-btn users-btn--primary" type="submit"><?= cw_users_idx_icon('filter') ?><span>Apply</span></button>
-                <a class="users-btn users-btn--secondary" href="/admin/users/index.php"><?= cw_users_idx_icon('rotate') ?><span>Reset</span></a>
+                <a class="ua-filter-btn ua-filter-btn--ghost" href="/admin/users/index.php">
+                    <?php echo cw_users_svg('check'); ?>
+                    <span>Clear</span>
+                </a>
             </div>
         </form>
     </section>
 
-    <?php if ($users): ?>
-        <section class="users-list">
-            <?php foreach ($users as $user): ?>
-                <?php
-                $role = (string)($user['role'] ?? '');
-                $status = (string)($user['status'] ?? '');
-                $missingCount = (int)($user['missing_count'] ?? 0);
-                $isComplete = (int)($user['is_profile_complete'] ?? 0) === 1;
-                $validUntil = (string)($user['account_valid_until'] ?? '');
-                $daysUntil = cw_users_idx_days_until($validUntil);
-                $expiryLabel = 'No Validity Date';
-                $expiryState = 'healthy';
+    <div class="ua-list-head">
+        <div class="ua-list-title">
+            <span class="ua-list-title-icon"><?php echo cw_users_svg('users'); ?></span>
+            <span>User roster</span>
+        </div>
+        <div class="ua-list-count"><?php echo count($rows); ?> result<?php echo count($rows) === 1 ? '' : 's'; ?></div>
+    </div>
 
-                if ($validUntil !== '') {
-                    if ($daysUntil !== null && $daysUntil < 0) {
-                        $expiryLabel = 'Expired ' . abs($daysUntil) . ' Day' . (abs($daysUntil) === 1 ? '' : 's') . ' Ago';
-                        $expiryState = 'expired';
-                    } elseif ($daysUntil !== null && $daysUntil <= 30) {
-                        $expiryLabel = 'Expires in ' . $daysUntil . ' Day' . ($daysUntil === 1 ? '' : 's');
-                        $expiryState = 'soon';
-                    } else {
-                        $expiryLabel = 'Valid Until ' . cw_users_idx_human_date($validUntil);
-                        $expiryState = 'healthy';
-                    }
-                }
-
-                $displayName = trim((string)($user['name'] ?? ''));
-                if ($displayName === '') {
-                    $displayName = trim((string)($user['first_name'] ?? '') . ' ' . (string)($user['last_name'] ?? ''));
-                }
-                if ($displayName === '') {
-                    $displayName = (string)($user['email'] ?? 'User');
-                }
-
-                $openHref = '/admin/users/edit.php?id=' . (int)$user['id'];
-                $activationHref = $openHref . '#account';
-                $resetHref = $openHref . '#security';
-                $lifecycleHref = $openHref . '#account';
-                ?>
-                <article class="card user-card">
-                    <div class="user-card-top">
-                        <div class="user-avatar">
-                            <?php if (!empty($user['photo_path'])): ?>
-                                <img src="<?= h((string)$user['photo_path']) ?>" alt="<?= h($displayName) ?>">
-                            <?php else: ?>
-                                <?= h(cw_users_idx_initials($displayName)) ?>
-                            <?php endif; ?>
-                        </div>
-
-                        <div class="user-card-meta">
-                            <div class="user-name-row">
-                                <div>
-                                    <h2 class="user-name"><?= h($displayName) ?></h2>
-                                    <div class="user-identity">
-                                        <span><?= h((string)$user['email']) ?></span>
-                                        <?php if (!empty($user['username'])): ?><span>• @<?= h((string)$user['username']) ?></span><?php endif; ?>
-                                        <?php if (!empty($user['cellphone'])): ?><span>• <?= h((string)$user['cellphone']) ?></span><?php endif; ?>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="user-card-badges" style="margin-top:14px;">
-                                <span class="ui-badge ui-badge--neutral"><?= cw_users_idx_icon('users') ?><span><?= h(cw_users_idx_role_label($role)) ?></span></span>
-                                <span class="<?= h(cw_users_idx_badge_class('status', $status)) ?>"><?= cw_users_idx_icon($status === 'locked' ? 'shield' : ($status === 'pending_activation' ? 'mail' : ($status === 'retired' ? 'power' : 'spark'))) ?><span><?= h(cw_users_idx_status_label($status)) ?></span></span>
-                                <span class="<?= h(cw_users_idx_badge_class('completeness', $isComplete ? 'complete' : 'incomplete')) ?>"><?= cw_users_idx_icon($isComplete ? 'spark' : 'warning') ?><span><?= $isComplete ? 'Profile Complete' : ('Missing ' . $missingCount . ' Field' . ($missingCount === 1 ? '' : 's')) ?></span></span>
-                                <span class="<?= h(cw_users_idx_badge_class('expiry', $expiryState)) ?>"><?= cw_users_idx_icon('calendar') ?><span><?= h($expiryLabel) ?></span></span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="user-card-actions">
-                        <a class="user-card-action user-card-action--primary" href="<?= h($openHref) ?>"><?= cw_users_idx_icon('open') ?><span>Open</span></a>
-                        <a class="user-card-action" href="<?= h($activationHref) ?>"><?= cw_users_idx_icon('mail') ?><span>Send Activation</span></a>
-                        <a class="user-card-action" href="<?= h($resetHref) ?>"><?= cw_users_idx_icon('key') ?><span>Send Reset</span></a>
-                        <?php if ($status === 'retired'): ?>
-                            <a class="user-card-action user-card-action--warn" href="<?= h($lifecycleHref) ?>"><?= cw_users_idx_icon('rotate') ?><span>Reactivate</span></a>
-                        <?php else: ?>
-                            <a class="user-card-action user-card-action--danger" href="<?= h($lifecycleHref) ?>"><?= cw_users_idx_icon('power') ?><span>Retire</span></a>
-                        <?php endif; ?>
-                    </div>
-
-                    <div class="user-card-footer">
-                        <div class="user-card-footer-meta">
-                            <strong>Last Login:</strong>
-                            <?= h($user['last_login_at'] ? cw_users_idx_human_date((string)$user['last_login_at']) : 'No login recorded') ?>
-                        </div>
-                        <div class="user-card-footer-meta">
-                            <strong>Account ID:</strong>
-                            #<?= (int)$user['id'] ?>
-                        </div>
-                    </div>
-                </article>
-            <?php endforeach; ?>
-        </section>
-
-        <section class="card users-pagination">
-            <div class="users-pagination-meta">
-                Showing <?= (int)(($offset + 1)) ?>–<?= (int)min($offset + $perPage, $totalFiltered) ?> of <?= (int)$totalFiltered ?> matching accounts.
-            </div>
-            <div class="users-pagination-actions">
-                <?php if ($page > 1): ?>
-                    <?php $prevQuery = $baseQuery; $prevQuery['page'] = $page - 1; ?>
-                    <a class="users-btn users-btn--secondary" href="/admin/users/index.php?<?= h(http_build_query($prevQuery)) ?>"><?= cw_users_idx_icon('rotate') ?><span>Previous</span></a>
-                <?php endif; ?>
-                <?php if ($page < $totalPages): ?>
-                    <?php $nextQuery = $baseQuery; $nextQuery['page'] = $page + 1; ?>
-                    <a class="users-btn users-btn--primary" href="/admin/users/index.php?<?= h(http_build_query($nextQuery)) ?>"><?= cw_users_idx_icon('open') ?><span>Next</span></a>
-                <?php endif; ?>
+    <?php if (!$rows): ?>
+        <section class="card ua-empty">
+            <div class="ua-empty-inner">
+                <div class="ua-empty-icon"><?php echo cw_users_svg('warning'); ?></div>
+                <div>
+                    <h3 class="ua-empty-title">No user accounts matched the current filters</h3>
+                    <p class="ua-empty-text">
+                        Adjust the filters, clear the search, or add a new account to begin managing enrollment and readiness from this workspace.
+                    </p>
+                </div>
             </div>
         </section>
     <?php else: ?>
-        <section class="card empty-state empty-state-card">
-            <h3 style="margin:0 0 8px 0; font-size:20px; line-height:1.1; letter-spacing:-0.02em; color:var(--text-strong);">No user accounts match the current filters.</h3>
-            <p style="margin:0 0 18px 0; max-width:760px; color:var(--text-muted); font-size:14px; line-height:1.65;">
-                Adjust the role, status, completeness, or validity filters to widen the operational view, or create a new account to begin onboarding.
-            </p>
-            <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                <a class="users-btn users-btn--primary" href="/admin/users/create.php"><?= cw_users_idx_icon('plus') ?><span>Add User</span></a>
-                <a class="users-btn users-btn--secondary" href="/admin/users/index.php"><?= cw_users_idx_icon('rotate') ?><span>Reset Filters</span></a>
-            </div>
-        </section>
+        <div class="ua-card-list">
+            <?php foreach ($rows as $row): ?>
+                <?php
+                    $userId = (int)$row['id'];
+                    $displayName = trim((string)$row['name']) !== '' ? (string)$row['name'] : trim((string)$row['first_name'] . ' ' . (string)$row['last_name']);
+                    if ($displayName === '') {
+                        $displayName = 'User #' . $userId;
+                    }
+
+                    $photoPath = trim((string)($row['photo_path'] ?? ''));
+                    $missingCount = (int)($row['missing_count'] ?? 0);
+                    $securityBadges = cw_users_security_badges($row);
+                    $validityLabel = cw_users_validity_label((string)($row['account_valid_until'] ?? ''));
+                ?>
+                <section class="card ua-user-card">
+                    <div class="ua-user-card-inner">
+                        <div class="ua-user-main">
+                            <div class="ua-avatar">
+                                <?php if ($photoPath !== ''): ?>
+                                    <img src="<?php echo h($photoPath); ?>" alt="<?php echo h($displayName); ?>">
+                                <?php else: ?>
+                                    <span class="ua-avatar-fallback"><?php echo cw_users_svg('users'); ?></span>
+                                <?php endif; ?>
+                            </div>
+
+                            <div class="ua-main-copy">
+                                <div class="ua-name-row">
+                                    <h3 class="ua-name"><?php echo h($displayName); ?></h3>
+                                </div>
+
+                                <div class="ua-meta-grid">
+                                    <div class="ua-meta-block">
+                                        <div class="ua-meta-label">Email</div>
+                                        <div class="ua-meta-value"><?php echo h((string)$row['email']); ?></div>
+                                    </div>
+
+                                    <div class="ua-meta-block">
+                                        <div class="ua-meta-label">Username</div>
+                                        <div class="ua-meta-value"><?php echo h((string)($row['username'] !== null ? $row['username'] : '—')); ?></div>
+                                    </div>
+
+                                    <div class="ua-meta-block">
+                                        <div class="ua-meta-label">Last Login</div>
+                                        <div class="ua-meta-value"><?php echo h(cw_users_human_datetime((string)($row['last_login_at'] ?? ''))); ?></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="ua-card-side">
+                            <div class="ua-badge-grid">
+                                <span class="<?php echo cw_users_role_class((string)$row['role']); ?>">
+                                    <?php echo h(cw_users_role_label((string)$row['role'])); ?>
+                                </span>
+
+                                <span class="<?php echo cw_users_status_class((string)$row['status']); ?>">
+                                    <?php echo h(cw_users_status_label((string)$row['status'])); ?>
+                                </span>
+
+                                <span class="<?php echo cw_users_completeness_class($missingCount); ?>">
+                                    <?php echo $missingCount > 0 ? ('Missing ' . $missingCount) : 'Profile Complete'; ?>
+                                </span>
+
+                                <span class="<?php echo cw_users_validity_class((string)($row['account_valid_until'] ?? '')); ?>">
+                                    <?php echo h($validityLabel); ?>
+                                </span>
+
+                                <?php foreach ($securityBadges as $badge): ?>
+                                    <span class="<?php echo h((string)$badge['class']); ?>">
+                                        <?php echo h((string)$badge['label']); ?>
+                                    </span>
+                                <?php endforeach; ?>
+                            </div>
+
+                            <div class="ua-card-actions">
+                                <a class="ua-card-action ua-card-action--primary" href="/admin/users/edit.php?id=<?php echo $userId; ?>">
+                                    <?php echo cw_users_svg('open'); ?>
+                                    <span>Open Workspace</span>
+                                </a>
+
+                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>#account">
+                                    <?php echo cw_users_svg('mail'); ?>
+                                    <span>Activation</span>
+                                </a>
+
+                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>#security">
+                                    <?php echo cw_users_svg('shield'); ?>
+                                    <span>Security</span>
+                                </a>
+
+                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>#status">
+                                    <?php echo cw_users_svg('archive'); ?>
+                                    <span>Status</span>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="ua-card-foot">
+                        <div class="ua-foot-note">
+                            Account valid until: <strong><?php echo h(cw_users_human_date((string)($row['account_valid_until'] ?? ''))); ?></strong>
+                        </div>
+
+                        <div class="ua-foot-note">
+                            Completeness last evaluated: <strong><?php echo h(cw_users_human_datetime((string)($row['last_evaluated_at'] ?? ''))); ?></strong>
+                        </div>
+                    </div>
+                </section>
+            <?php endforeach; ?>
+        </div>
     <?php endif; ?>
 </div>
-
-<?php
-if (function_exists('cw_footer')) {
-    cw_footer();
-}
-?>
