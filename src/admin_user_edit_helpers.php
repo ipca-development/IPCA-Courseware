@@ -27,18 +27,18 @@ if (!function_exists('aue_human_datetime')) {
 
 if (!function_exists('aue_role_label')) {
     function aue_role_label(string $role): string
-{
-    $role = strtolower(trim($role));
+    {
+        $role = strtolower(trim($role));
 
-    return match ($role) {
-        'admin' => 'Admin',
-        'supervisor' => 'Instructor',
-        'instructor' => 'Instructor',
-        'chief_instructor' => 'Chief Instructor',
-        'student' => 'Student',
-        default => ucfirst($role),
-    };
-}
+        return match ($role) {
+            'admin' => 'Admin',
+            'supervisor' => 'Instructor',
+            'instructor' => 'Instructor',
+            'chief_instructor' => 'Chief Instructor',
+            'student' => 'Student',
+            default => ucfirst($role),
+        };
+    }
 }
 
 if (!function_exists('aue_status_label')) {
@@ -198,6 +198,21 @@ if (!function_exists('aue_normalize_decimal')) {
     }
 }
 
+if (!function_exists('aue_has_value')) {
+    function aue_has_value(mixed $value): bool
+    {
+        if ($value === null) {
+            return false;
+        }
+
+        if (is_string($value)) {
+            return trim($value) !== '';
+        }
+
+        return true;
+    }
+}
+
 if (!function_exists('aue_svg')) {
     function aue_svg(string $name): string
     {
@@ -302,6 +317,75 @@ if (!function_exists('aue_empty_emergency_contact')) {
             'created_at' => null,
             'updated_at' => null,
         );
+    }
+}
+
+if (!function_exists('aue_policy_raw')) {
+    function aue_policy_raw(PDO $pdo, string $policyKey, string $scopeType = 'global', ?int $scopeId = null): ?string
+    {
+        $sql = "
+            SELECT v.value_text
+            FROM system_policy_values v
+            WHERE v.policy_key = :policy_key
+              AND v.scope_type = :scope_type
+              AND (
+                    (:scope_id IS NULL AND v.scope_id IS NULL)
+                    OR v.scope_id = :scope_id
+                  )
+              AND v.is_active = 1
+              AND v.effective_from <= NOW()
+              AND (v.effective_to IS NULL OR v.effective_to >= NOW())
+            ORDER BY v.effective_from DESC, v.id DESC
+            LIMIT 1
+        ";
+
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array(
+            ':policy_key' => $policyKey,
+            ':scope_type' => $scopeType,
+            ':scope_id' => $scopeId,
+        ));
+
+        $value = $stmt->fetchColumn();
+        if ($value !== false && $value !== null) {
+            return (string)$value;
+        }
+
+        $fallbackStmt = $pdo->prepare("
+            SELECT default_value_text
+            FROM system_policy_definitions
+            WHERE policy_key = :policy_key
+            LIMIT 1
+        ");
+        $fallbackStmt->execute(array(':policy_key' => $policyKey));
+        $fallback = $fallbackStmt->fetchColumn();
+
+        return ($fallback !== false && $fallback !== null) ? (string)$fallback : null;
+    }
+}
+
+if (!function_exists('aue_policy_bool')) {
+    function aue_policy_bool(PDO $pdo, string $policyKey, bool $default = false, string $scopeType = 'global', ?int $scopeId = null): bool
+    {
+        $raw = aue_policy_raw($pdo, $policyKey, $scopeType, $scopeId);
+        if ($raw === null) {
+            return $default;
+        }
+
+        $normalized = strtolower(trim($raw));
+        return in_array($normalized, array('1', 'true', 'yes', 'on'), true);
+    }
+}
+
+if (!function_exists('aue_policy_int')) {
+    function aue_policy_int(PDO $pdo, string $policyKey, int $default = 0, string $scopeType = 'global', ?int $scopeId = null): int
+    {
+        $raw = aue_policy_raw($pdo, $policyKey, $scopeType, $scopeId);
+        if ($raw === null || trim($raw) === '' || !is_numeric($raw)) {
+            return $default;
+        }
+
+        return (int)$raw;
     }
 }
 
@@ -601,6 +685,8 @@ if (!function_exists('aue_update_account_tab')) {
             ':retired_by_user_id' => $status === 'retired' && $actorId > 0 ? $actorId : null,
             ':id' => $userId,
         ));
+
+        aue_recalculate_profile_requirements_status($pdo, $userId);
     }
 }
 
@@ -667,6 +753,8 @@ if (!function_exists('aue_update_profile_tab')) {
             ':eye_color' => trim((string)($_POST['eye_color'] ?? '')) ?: null,
             ':marital_status' => trim((string)($_POST['marital_status'] ?? '')) ?: null,
         ));
+
+        aue_recalculate_profile_requirements_status($pdo, $userId);
     }
 }
 
@@ -764,6 +852,8 @@ if (!function_exists('aue_update_emergency_tab')) {
             (string)($_POST['relationship_2'] ?? ''),
             (string)($_POST['phone_2'] ?? '')
         );
+
+        aue_recalculate_profile_requirements_status($pdo, $userId);
     }
 }
 
@@ -825,5 +915,227 @@ if (!function_exists('aue_update_billing_tab')) {
             ':billing_state_region' => trim((string)($_POST['billing_state_region'] ?? '')) ?: null,
             ':billing_country_code' => strtoupper(trim((string)($_POST['billing_country_code'] ?? ''))) ?: null,
         ));
+
+        aue_recalculate_profile_requirements_status($pdo, $userId);
+    }
+}
+
+if (!function_exists('aue_recalculate_profile_requirements_status')) {
+    function aue_recalculate_profile_requirements_status(PDO $pdo, int $userId): void
+    {
+        $workspace = aue_load_user_workspace($pdo, $userId);
+        if (!$workspace) {
+            return;
+        }
+
+        $user = is_array($workspace['user'] ?? null) ? $workspace['user'] : array();
+        $contacts = is_array($workspace['emergency_contacts'] ?? null) ? $workspace['emergency_contacts'] : array();
+
+        $missing = array();
+
+        if (!aue_has_value($user['first_name'] ?? null)) {
+            $missing[] = 'First Name';
+        }
+        if (!aue_has_value($user['last_name'] ?? null)) {
+            $missing[] = 'Last Name';
+        }
+        if (!aue_has_value($user['email'] ?? null)) {
+            $missing[] = 'Primary Email';
+        }
+        if (aue_policy_bool($pdo, 'user_require_username', true) && !aue_has_value($user['username'] ?? null)) {
+            $missing[] = 'Username';
+        }
+        if (!aue_has_value($user['role'] ?? null)) {
+            $missing[] = 'Role';
+        }
+        if (!aue_has_value($user['status'] ?? null)) {
+            $missing[] = 'Status';
+        }
+        if (aue_policy_bool($pdo, 'user_require_account_valid_until', false) && !aue_has_value($user['account_valid_until'] ?? null)) {
+            $missing[] = 'Account Valid Until';
+        }
+        if (aue_policy_bool($pdo, 'user_require_photo', false) && !aue_has_value($user['photo_path'] ?? null)) {
+            $missing[] = 'Photo';
+        }
+
+        if (aue_policy_bool($pdo, 'user_require_street_address', true) && !aue_has_value($user['street_address'] ?? null)) {
+            $missing[] = 'Street Address';
+        }
+        if (aue_policy_bool($pdo, 'user_require_street_number', true) && !aue_has_value($user['street_number'] ?? null)) {
+            $missing[] = 'Street Number';
+        }
+        if (aue_policy_bool($pdo, 'user_require_zip_code', true) && !aue_has_value($user['zip_code'] ?? null)) {
+            $missing[] = 'Zip Code';
+        }
+        if (aue_policy_bool($pdo, 'user_require_city', true) && !aue_has_value($user['city'] ?? null)) {
+            $missing[] = 'City';
+        }
+        if (aue_policy_bool($pdo, 'user_require_state_region', true) && !aue_has_value($user['state_region'] ?? null)) {
+            $missing[] = 'State / Region';
+        }
+        if (aue_policy_bool($pdo, 'user_require_country_code', true) && !aue_has_value($user['country_code'] ?? null)) {
+            $missing[] = 'Country';
+        }
+        if (aue_policy_bool($pdo, 'user_require_cellphone', true) && !aue_has_value($user['cellphone'] ?? null)) {
+            $missing[] = 'Cellphone';
+        }
+        if (aue_policy_bool($pdo, 'user_require_secondary_email', false) && !aue_has_value($user['secondary_email'] ?? null)) {
+            $missing[] = 'Secondary Email';
+        }
+        if (aue_policy_bool($pdo, 'user_require_date_of_birth', true) && !aue_has_value($user['date_of_birth'] ?? null)) {
+            $missing[] = 'Date of Birth';
+        }
+        if (aue_policy_bool($pdo, 'user_require_place_of_birth', true) && !aue_has_value($user['place_of_birth'] ?? null)) {
+            $missing[] = 'Place of Birth';
+        }
+        if (aue_policy_bool($pdo, 'user_require_nationality', true) && !aue_has_value($user['nationality'] ?? null)) {
+            $missing[] = 'Nationality';
+        }
+        if (aue_policy_bool($pdo, 'user_require_id_passport_number', true) && !aue_has_value($user['id_passport_number'] ?? null)) {
+            $missing[] = 'ID / Passport Number';
+        }
+        if (aue_policy_bool($pdo, 'user_require_gender', true) && !aue_has_value($user['gender'] ?? null)) {
+            $missing[] = 'Gender';
+        }
+        if (aue_policy_bool($pdo, 'user_require_weight', true) && !aue_has_value($user['weight'] ?? null)) {
+            $missing[] = 'Weight';
+        }
+        if (aue_policy_bool($pdo, 'user_require_height_cm', true) && !aue_has_value($user['height_cm'] ?? null)) {
+            $missing[] = 'Height';
+        }
+        if (aue_policy_bool($pdo, 'user_require_hair_color', true) && !aue_has_value($user['hair_color'] ?? null)) {
+            $missing[] = 'Hair Color';
+        }
+        if (aue_policy_bool($pdo, 'user_require_eye_color', true) && !aue_has_value($user['eye_color'] ?? null)) {
+            $missing[] = 'Eye Color';
+        }
+        if (aue_policy_bool($pdo, 'user_require_marital_status', true) && !aue_has_value($user['marital_status'] ?? null)) {
+            $missing[] = 'Marital Status';
+        }
+
+        $requiredContactCount = max(0, aue_policy_int($pdo, 'user_required_emergency_contact_count', 2));
+
+        for ($i = 1; $i <= $requiredContactCount; $i++) {
+            $contact = null;
+
+            foreach ($contacts as $row) {
+                if ((int)($row['sort_order'] ?? 0) === $i) {
+                    $contact = $row;
+                    break;
+                }
+            }
+
+            $contact = is_array($contact) ? $contact : array();
+
+            if (aue_policy_bool($pdo, 'user_require_emergency_contact_name', true) && !aue_has_value($contact['contact_name'] ?? null)) {
+                $missing[] = 'Emergency Contact ' . $i . ' Name';
+            }
+            if (aue_policy_bool($pdo, 'user_require_emergency_contact_relationship', true) && !aue_has_value($contact['relationship'] ?? null)) {
+                $missing[] = 'Emergency Contact ' . $i . ' Relationship';
+            }
+            if (aue_policy_bool($pdo, 'user_require_emergency_contact_phone', true) && !aue_has_value($contact['phone'] ?? null)) {
+                $missing[] = 'Emergency Contact ' . $i . ' Phone';
+            }
+        }
+
+        $useProfileAddress = (int)($user['use_profile_address'] ?? 1) === 1;
+
+        $billingTriggered =
+            aue_has_value($user['business_name'] ?? null) ||
+            aue_has_value($user['business_vat_tax_id'] ?? null) ||
+            !$useProfileAddress ||
+            aue_has_value($user['billing_street_address'] ?? null) ||
+            aue_has_value($user['billing_street_number'] ?? null) ||
+            aue_has_value($user['billing_zip_code'] ?? null) ||
+            aue_has_value($user['billing_city'] ?? null) ||
+            aue_has_value($user['billing_state_region'] ?? null) ||
+            aue_has_value($user['billing_country_code'] ?? null);
+
+        if ($billingTriggered && aue_policy_bool($pdo, 'user_billing_require_when_business_used', true)) {
+            if (aue_policy_bool($pdo, 'user_billing_require_business_name', true) && !aue_has_value($user['business_name'] ?? null)) {
+                $missing[] = 'Business Name';
+            }
+
+            if (aue_policy_bool($pdo, 'user_billing_require_business_vat_tax_id', true) && !aue_has_value($user['business_vat_tax_id'] ?? null)) {
+                $missing[] = 'Business VAT / Tax ID';
+            }
+
+            if (!$useProfileAddress && aue_policy_bool($pdo, 'user_billing_require_dedicated_address_if_not_using_profile', true)) {
+                if (!aue_has_value($user['billing_street_address'] ?? null)) {
+                    $missing[] = 'Billing Street Address';
+                }
+                if (!aue_has_value($user['billing_street_number'] ?? null)) {
+                    $missing[] = 'Billing Street Number';
+                }
+                if (!aue_has_value($user['billing_zip_code'] ?? null)) {
+                    $missing[] = 'Billing Zip Code';
+                }
+                if (!aue_has_value($user['billing_city'] ?? null)) {
+                    $missing[] = 'Billing City';
+                }
+                if (!aue_has_value($user['billing_state_region'] ?? null)) {
+                    $missing[] = 'Billing State / Region';
+                }
+                if (!aue_has_value($user['billing_country_code'] ?? null)) {
+                    $missing[] = 'Billing Country';
+                }
+            }
+        }
+
+        $missing = array_values(array_unique($missing));
+        $missingJson = json_encode($missing, JSON_UNESCAPED_UNICODE);
+        if (!is_string($missingJson)) {
+            $missingJson = '[]';
+        }
+
+        $missingCount = count($missing);
+        $isComplete = $missingCount === 0 ? 1 : 0;
+
+        $stmt = $pdo->prepare("
+            INSERT INTO user_profile_requirements_status (
+                user_id,
+                missing_fields_json,
+                missing_count,
+                is_profile_complete,
+                last_evaluated_at
+            ) VALUES (
+                :user_id,
+                :missing_fields_json,
+                :missing_count,
+                :is_profile_complete,
+                NOW()
+            )
+            ON DUPLICATE KEY UPDATE
+                missing_fields_json = VALUES(missing_fields_json),
+                missing_count = VALUES(missing_count),
+                is_profile_complete = VALUES(is_profile_complete),
+                last_evaluated_at = NOW()
+        ");
+
+        $stmt->execute(array(
+            ':user_id' => $userId,
+            ':missing_fields_json' => $missingJson,
+            ':missing_count' => $missingCount,
+            ':is_profile_complete' => $isComplete,
+        ));
+    }
+}
+
+if (!function_exists('aue_recalculate_all_profile_requirements_status')) {
+    function aue_recalculate_all_profile_requirements_status(PDO $pdo): void
+    {
+        $stmt = $pdo->query("SELECT id FROM users ORDER BY id ASC");
+        $ids = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN) : array();
+
+        if (!is_array($ids)) {
+            return;
+        }
+
+        foreach ($ids as $id) {
+            $userId = (int)$id;
+            if ($userId > 0) {
+                aue_recalculate_profile_requirements_status($pdo, $userId);
+            }
+        }
     }
 }
