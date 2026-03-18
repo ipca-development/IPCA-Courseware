@@ -81,6 +81,17 @@ return [
         'coming_soon' => true,
     ],
     [
+        'key' => 'user_accounts',
+        'label' => 'User Accounts',
+        'icon' => 'users',
+        'href' => '/admin/users/index.php',
+        'match_paths' => [
+            '/admin/users/index.php',
+            '/admin/users/create.php',
+            '/admin/users/edit.php',
+        ],
+    ],
+    [
         'key' => 'projects',
         'label' => 'Projects',
         'icon' => 'projects',
@@ -124,12 +135,10 @@ return [
                 'icon' => 'scanner',
                 'href' => '/admin/architecture_scanner.php',
             ],
-
-            /* ✅ NEW: Notifications */
             [
                 'key' => 'notifications',
                 'label' => 'Notifications',
-                'icon' => 'settings', // you can later replace with 'bell' if you add icon
+                'icon' => 'settings',
                 'href' => '/admin/notifications.php',
                 'match_paths' => [
                     '/admin/notifications.php',
