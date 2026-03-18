@@ -124,6 +124,19 @@ return [
                 'icon' => 'scanner',
                 'href' => '/admin/architecture_scanner.php',
             ],
+
+            /* ✅ NEW: Notifications */
+            [
+                'key' => 'notifications',
+                'label' => 'Notifications',
+                'icon' => 'settings', // you can later replace with 'bell' if you add icon
+                'href' => '/admin/notifications.php',
+                'match_paths' => [
+                    '/admin/notifications.php',
+                    '/admin/notification_edit.php',
+                    '/admin/notification_versions.php',
+                ],
+            ],
         ],
     ],
 ];

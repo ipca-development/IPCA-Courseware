@@ -27,6 +27,30 @@ function cw_nav_is_current(string $href, string $currentPath): bool
     return rtrim($hrefPath, '/') === rtrim($currentPath, '/');
 }
 
+function cw_nav_item_is_current(array $item, string $currentPath): bool
+{
+    $href = (string)($item['href'] ?? '');
+    if ($href !== '' && cw_nav_is_current($href, $currentPath)) {
+        return true;
+    }
+
+    $matchPaths = isset($item['match_paths']) && is_array($item['match_paths'])
+        ? $item['match_paths']
+        : [];
+
+    foreach ($matchPaths as $matchPath) {
+        if (!is_string($matchPath) || trim($matchPath) === '') {
+            continue;
+        }
+
+        if (rtrim($matchPath, '/') === rtrim($currentPath, '/')) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function cw_nav_group_is_active(array $items, string $currentPath): bool
 {
     foreach ($items as $item) {
@@ -34,8 +58,7 @@ function cw_nav_group_is_active(array $items, string $currentPath): bool
             continue;
         }
 
-        $href = (string)($item['href'] ?? '');
-        if ($href !== '' && cw_nav_is_current($href, $currentPath)) {
+        if (cw_nav_item_is_current($item, $currentPath)) {
             return true;
         }
 
@@ -121,7 +144,7 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
             } else {
                 $class = 'nav-link';
                 $current = '';
-                if (cw_nav_is_current($href, $currentPath)) {
+                if (cw_nav_item_is_current($entry, $currentPath)) {
                     $class .= ' is-active';
                     $current = ' aria-current="page"';
                 }
@@ -177,7 +200,7 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
 
             $class = 'nav-link nav-link-child';
             $current = '';
-            if (cw_nav_is_current($itemHref, $currentPath)) {
+            if (cw_nav_item_is_current($item, $currentPath)) {
                 $class .= ' is-active';
                 $current = ' aria-current="page"';
             }
