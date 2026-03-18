@@ -193,7 +193,7 @@ declare(strict_types=1);
                 <label for="role">Role</label>
                 <select class="app-select ue-select" id="role" name="role">
                     <option value="admin"<?php echo (string)($user['role'] ?? '') === 'admin' ? ' selected' : ''; ?>>Admin</option>
-                    <option value="supervisor"<?php echo (string)($user['role'] ?? '') === 'supervisor' ? ' selected' : ''; ?>>Supervisor</option>
+                    <option value="supervisor"<?php echo (string)($user['role'] ?? '') === 'supervisor' ? ' selected' : ''; ?>>Instructor</option>
                     <option value="student"<?php echo (string)($user['role'] ?? '') === 'student' ? ' selected' : ''; ?>>Student</option>
                 </select>
             </div>

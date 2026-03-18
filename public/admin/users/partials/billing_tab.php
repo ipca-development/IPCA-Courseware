@@ -1,5 +1,72 @@
 <?php
 declare(strict_types=1);
+
+$billingCountryOptions = array(
+    '' => 'Select country',
+    'US' => 'United States',
+    'CA' => 'Canada',
+    'MX' => 'Mexico',
+    'BE' => 'Belgium',
+    'NL' => 'Netherlands',
+    'DE' => 'Germany',
+    'FR' => 'France',
+    'ES' => 'Spain',
+    'IT' => 'Italy',
+    'PT' => 'Portugal',
+    'GB' => 'United Kingdom',
+    'IE' => 'Ireland',
+    'CH' => 'Switzerland',
+    'AT' => 'Austria',
+    'LU' => 'Luxembourg',
+    'SE' => 'Sweden',
+    'NO' => 'Norway',
+    'DK' => 'Denmark',
+    'FI' => 'Finland',
+    'PL' => 'Poland',
+    'CZ' => 'Czech Republic',
+    'HU' => 'Hungary',
+    'RO' => 'Romania',
+    'BG' => 'Bulgaria',
+    'HR' => 'Croatia',
+    'GR' => 'Greece',
+    'TR' => 'Turkey',
+    'UA' => 'Ukraine',
+    'IS' => 'Iceland',
+    'AU' => 'Australia',
+    'NZ' => 'New Zealand',
+    'ZA' => 'South Africa',
+    'AE' => 'United Arab Emirates',
+    'SA' => 'Saudi Arabia',
+    'QA' => 'Qatar',
+    'KW' => 'Kuwait',
+    'IL' => 'Israel',
+    'EG' => 'Egypt',
+    'MA' => 'Morocco',
+    'IN' => 'India',
+    'PK' => 'Pakistan',
+    'BD' => 'Bangladesh',
+    'LK' => 'Sri Lanka',
+    'NP' => 'Nepal',
+    'TH' => 'Thailand',
+    'VN' => 'Vietnam',
+    'MY' => 'Malaysia',
+    'SG' => 'Singapore',
+    'ID' => 'Indonesia',
+    'PH' => 'Philippines',
+    'CN' => 'China',
+    'HK' => 'Hong Kong',
+    'TW' => 'Taiwan',
+    'JP' => 'Japan',
+    'KR' => 'South Korea',
+    'BR' => 'Brazil',
+    'AR' => 'Argentina',
+    'CL' => 'Chile',
+    'CO' => 'Colombia',
+    'PE' => 'Peru',
+    'VE' => 'Venezuela',
+);
+
+$useProfileAddress = (int)($user['use_profile_address'] ?? 1) === 1;
 ?>
 
 <section class="card ue-card">
@@ -29,7 +96,8 @@ declare(strict_types=1);
         .ue-field--full{
             grid-column:1 / -1;
         }
-        .ue-input{
+        .ue-input,
+        .ue-select{
             width:100%;
             height:44px;
             border-radius:14px;
@@ -56,6 +124,32 @@ declare(strict_types=1);
             color:var(--text-muted);
             font-size:13px;
             line-height:1.6;
+        }
+        .ue-checkbox{
+            display:inline-flex;
+            align-items:center;
+            gap:10px;
+            font-size:14px;
+            font-weight:600;
+            color:var(--text-strong);
+        }
+        .ue-checkbox input{
+            width:16px;
+            height:16px;
+            margin:0;
+        }
+        .ue-billing-address-block{
+            padding:16px 18px 18px 18px;
+            border:1px solid rgba(15,23,42,0.06);
+            border-radius:16px;
+            background:#fbfcfe;
+        }
+        .ue-billing-address-title{
+            font-size:15px;
+            font-weight:730;
+            letter-spacing:-0.02em;
+            color:var(--text-strong);
+            margin:0 0 14px 0;
         }
         .ue-info-panel{
             margin-top:18px;
@@ -135,6 +229,92 @@ declare(strict_types=1);
                     Used for invoicing and compliance reporting. Stored separately from personal profile data.
                 </div>
             </div>
+
+            <div class="ue-field ue-field--full">
+                <label class="ue-checkbox">
+                    <input
+                        type="checkbox"
+                        id="use_profile_address"
+                        name="use_profile_address"
+                        value="1"<?php echo $useProfileAddress ? ' checked' : ''; ?>
+                    >
+                    <span>Use profile address as billing address</span>
+                </label>
+            </div>
+
+            <div class="ue-field ue-field--full" id="billing-address-wrap"<?php echo $useProfileAddress ? ' style="display:none;"' : ''; ?>>
+                <div class="ue-billing-address-block">
+                    <h4 class="ue-billing-address-title">Billing Address</h4>
+
+                    <div class="ue-form-grid">
+                        <div class="ue-field ue-field--full">
+                            <label for="billing_street_address">Billing Street Address</label>
+                            <input
+                                class="app-input ue-input"
+                                id="billing_street_address"
+                                type="text"
+                                name="billing_street_address"
+                                value="<?php echo h((string)($user['billing_street_address'] ?? '')); ?>"
+                            >
+                        </div>
+
+                        <div class="ue-field">
+                            <label for="billing_street_number">Billing Street Number</label>
+                            <input
+                                class="app-input ue-input"
+                                id="billing_street_number"
+                                type="text"
+                                name="billing_street_number"
+                                value="<?php echo h((string)($user['billing_street_number'] ?? '')); ?>"
+                            >
+                        </div>
+
+                        <div class="ue-field">
+                            <label for="billing_zip_code">Billing Zip Code</label>
+                            <input
+                                class="app-input ue-input"
+                                id="billing_zip_code"
+                                type="text"
+                                name="billing_zip_code"
+                                value="<?php echo h((string)($user['billing_zip_code'] ?? '')); ?>"
+                            >
+                        </div>
+
+                        <div class="ue-field">
+                            <label for="billing_city">Billing City</label>
+                            <input
+                                class="app-input ue-input"
+                                id="billing_city"
+                                type="text"
+                                name="billing_city"
+                                value="<?php echo h((string)($user['billing_city'] ?? '')); ?>"
+                            >
+                        </div>
+
+                        <div class="ue-field">
+                            <label for="billing_state_region">Billing State / Region</label>
+                            <input
+                                class="app-input ue-input"
+                                id="billing_state_region"
+                                type="text"
+                                name="billing_state_region"
+                                value="<?php echo h((string)($user['billing_state_region'] ?? '')); ?>"
+                            >
+                        </div>
+
+                        <div class="ue-field">
+                            <label for="billing_country_code">Billing Country</label>
+                            <select class="app-select ue-select" id="billing_country_code" name="billing_country_code">
+                                <?php foreach ($billingCountryOptions as $countryCode => $countryLabel): ?>
+                                    <option value="<?php echo h($countryCode); ?>"<?php echo strtoupper((string)($user['billing_country_code'] ?? '')) === $countryCode ? ' selected' : ''; ?>>
+                                        <?php echo h($countryLabel); ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="ue-actions-row">
@@ -163,10 +343,63 @@ declare(strict_types=1);
                     <?php echo empty($user['business_name']) ? 'Private individual' : 'Business account'; ?>
                 </div>
             </div>
+
+            <div>
+                <div class="ue-info-label">Billing Address Source</div>
+                <div class="ue-info-value">
+                    <?php echo $useProfileAddress ? 'Uses profile address' : 'Uses dedicated billing address'; ?>
+                </div>
+            </div>
+
+            <div>
+                <div class="ue-info-label">Billing City</div>
+                <div class="ue-info-value">
+                    <?php
+                    if ($useProfileAddress) {
+                        echo h((string)($user['city'] ?? '—'));
+                    } else {
+                        echo h((string)($user['billing_city'] ?? '—'));
+                    }
+                    ?>
+                </div>
+            </div>
+
+            <div>
+                <div class="ue-info-label">Billing Country</div>
+                <div class="ue-info-value">
+                    <?php
+                    $billingCountryCode = $useProfileAddress
+                        ? strtoupper((string)($user['country_code'] ?? ''))
+                        : strtoupper((string)($user['billing_country_code'] ?? ''));
+
+                    echo h($billingCountryOptions[$billingCountryCode] ?? ($billingCountryCode !== '' ? $billingCountryCode : '—'));
+                    ?>
+                </div>
+            </div>
         </div>
     </div>
 
     <div class="ue-callout">
         Aircraft rental and certain operational charges may be handled by a separate entity. This billing profile ensures correct invoicing context without mixing operational and contractual responsibilities.
     </div>
+
+    <script>
+    (function () {
+        var checkbox = document.getElementById('use_profile_address');
+        var wrap = document.getElementById('billing-address-wrap');
+
+        function syncBillingAddressVisibility() {
+            if (!checkbox || !wrap) {
+                return;
+            }
+
+            wrap.style.display = checkbox.checked ? 'none' : '';
+        }
+
+        if (checkbox) {
+            checkbox.addEventListener('change', syncBillingAddressVisibility);
+            syncBillingAddressVisibility();
+        }
+    })();
+    </script>
 </section>

@@ -27,18 +27,18 @@ if (!function_exists('aue_human_datetime')) {
 
 if (!function_exists('aue_role_label')) {
     function aue_role_label(string $role): string
-    {
-        $role = strtolower(trim($role));
+{
+    $role = strtolower(trim($role));
 
-        return match ($role) {
-            'admin' => 'Admin',
-            'supervisor' => 'Supervisor',
-            'student' => 'Student',
-            'instructor' => 'Instructor',
-            'chief_instructor' => 'Chief Instructor',
-            default => ucfirst($role),
-        };
-    }
+    return match ($role) {
+        'admin' => 'Admin',
+        'supervisor' => 'Instructor',
+        'instructor' => 'Instructor',
+        'chief_instructor' => 'Chief Instructor',
+        'student' => 'Student',
+        default => ucfirst($role),
+    };
+}
 }
 
 if (!function_exists('aue_status_label')) {
@@ -181,6 +181,23 @@ if (!function_exists('aue_normalize_date')) {
     }
 }
 
+if (!function_exists('aue_normalize_decimal')) {
+    function aue_normalize_decimal(?string $value): ?string
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return null;
+        }
+
+        $value = str_replace(',', '.', $value);
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        return number_format((float)$value, 2, '.', '');
+    }
+}
+
 if (!function_exists('aue_svg')) {
     function aue_svg(string $name): string
     {
@@ -272,6 +289,22 @@ if (!function_exists('aue_flash_redirect')) {
     }
 }
 
+if (!function_exists('aue_empty_emergency_contact')) {
+    function aue_empty_emergency_contact(int $sortOrder): array
+    {
+        return array(
+            'id' => null,
+            'user_id' => null,
+            'contact_name' => null,
+            'relationship' => null,
+            'phone' => null,
+            'sort_order' => $sortOrder,
+            'created_at' => null,
+            'updated_at' => null,
+        );
+    }
+}
+
 if (!function_exists('aue_load_user_workspace')) {
     function aue_load_user_workspace(PDO $pdo, int $userId): ?array
     {
@@ -312,10 +345,20 @@ if (!function_exists('aue_load_user_workspace')) {
                 p.id_passport_number,
                 p.gender,
                 p.weight,
+                p.height_cm,
+                p.hair_color,
+                p.eye_color,
                 p.marital_status,
 
                 b.business_name,
                 b.business_vat_tax_id,
+                b.use_profile_address,
+                b.billing_street_address,
+                b.billing_street_number,
+                b.billing_zip_code,
+                b.billing_city,
+                b.billing_state_region,
+                b.billing_country_code,
 
                 req.missing_fields_json,
                 COALESCE(req.missing_count, 0) AS missing_count,
@@ -340,17 +383,28 @@ if (!function_exists('aue_load_user_workspace')) {
             return null;
         }
 
-        $emergencyStmt = $pdo->prepare("
+        $contactsStmt = $pdo->prepare("
             SELECT *
             FROM user_emergency_contacts
             WHERE user_id = :user_id
-            ORDER BY id ASC
-            LIMIT 1
+            ORDER BY sort_order ASC, id ASC
         ");
-        $emergencyStmt->execute(array(':user_id' => $userId));
-        $emergency = $emergencyStmt->fetch(PDO::FETCH_ASSOC);
-        if (!is_array($emergency)) {
-            $emergency = array();
+        $contactsStmt->execute(array(':user_id' => $userId));
+        $contacts = $contactsStmt->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($contacts)) {
+            $contacts = array();
+        }
+
+        $primary = aue_empty_emergency_contact(1);
+        $secondary = aue_empty_emergency_contact(2);
+
+        foreach ($contacts as $contact) {
+            $sortOrder = (int)($contact['sort_order'] ?? 0);
+            if ($sortOrder === 1 && $primary['id'] === null) {
+                $primary = $contact;
+            } elseif ($sortOrder === 2 && $secondary['id'] === null) {
+                $secondary = $contact;
+            }
         }
 
         $missingFields = array();
@@ -376,7 +430,10 @@ if (!function_exists('aue_load_user_workspace')) {
 
         return array(
             'user' => $user,
-            'emergency' => $emergency,
+            'emergency' => $primary,
+            'emergency_primary' => $primary,
+            'emergency_secondary' => $secondary,
+            'emergency_contacts' => $contacts,
             'missing_fields' => $missingFields,
             'display_name' => $displayName,
         );
@@ -559,11 +616,13 @@ if (!function_exists('aue_update_profile_tab')) {
             INSERT INTO user_profiles (
                 user_id, street_address, street_number, zip_code, city, state_region, country_code,
                 cellphone, secondary_email, date_of_birth, place_of_birth, nationality,
-                id_passport_number, gender, weight, marital_status, created_at, updated_at
+                id_passport_number, gender, weight, height_cm, hair_color, eye_color, marital_status,
+                created_at, updated_at
             ) VALUES (
                 :user_id, :street_address, :street_number, :zip_code, :city, :state_region, :country_code,
                 :cellphone, :secondary_email, :date_of_birth, :place_of_birth, :nationality,
-                :id_passport_number, :gender, :weight, :marital_status, NOW(), NOW()
+                :id_passport_number, :gender, :weight, :height_cm, :hair_color, :eye_color, :marital_status,
+                NOW(), NOW()
             )
             ON DUPLICATE KEY UPDATE
                 street_address = VALUES(street_address),
@@ -580,6 +639,9 @@ if (!function_exists('aue_update_profile_tab')) {
                 id_passport_number = VALUES(id_passport_number),
                 gender = VALUES(gender),
                 weight = VALUES(weight),
+                height_cm = VALUES(height_cm),
+                hair_color = VALUES(hair_color),
+                eye_color = VALUES(eye_color),
                 marital_status = VALUES(marital_status),
                 updated_at = NOW()
         ");
@@ -600,7 +662,84 @@ if (!function_exists('aue_update_profile_tab')) {
             ':id_passport_number' => trim((string)($_POST['id_passport_number'] ?? '')) ?: null,
             ':gender' => trim((string)($_POST['gender'] ?? '')) ?: null,
             ':weight' => trim((string)($_POST['weight'] ?? '')) ?: null,
+            ':height_cm' => aue_normalize_decimal((string)($_POST['height_cm'] ?? '')),
+            ':hair_color' => trim((string)($_POST['hair_color'] ?? '')) ?: null,
+            ':eye_color' => trim((string)($_POST['eye_color'] ?? '')) ?: null,
             ':marital_status' => trim((string)($_POST['marital_status'] ?? '')) ?: null,
+        ));
+    }
+}
+
+if (!function_exists('aue_upsert_emergency_contact_row')) {
+    function aue_upsert_emergency_contact_row(PDO $pdo, int $userId, int $sortOrder, ?string $contactName, ?string $relationship, ?string $phone): void
+    {
+        $contactName = trim((string)$contactName);
+        $relationship = trim((string)$relationship);
+        $phone = trim((string)$phone);
+
+        $allEmpty = ($contactName === '' && $relationship === '' && $phone === '');
+
+        $existingStmt = $pdo->prepare("
+            SELECT id
+            FROM user_emergency_contacts
+            WHERE user_id = :user_id
+              AND sort_order = :sort_order
+            ORDER BY id ASC
+            LIMIT 1
+        ");
+        $existingStmt->execute(array(
+            ':user_id' => $userId,
+            ':sort_order' => $sortOrder,
+        ));
+        $existingId = (int)$existingStmt->fetchColumn();
+
+        if ($allEmpty) {
+            if ($existingId > 0) {
+                $deleteStmt = $pdo->prepare("
+                    DELETE FROM user_emergency_contacts
+                    WHERE id = :id
+                    LIMIT 1
+                ");
+                $deleteStmt->execute(array(':id' => $existingId));
+            }
+            return;
+        }
+
+        if ($existingId > 0) {
+            $updateStmt = $pdo->prepare("
+                UPDATE user_emergency_contacts
+                SET
+                    contact_name = :contact_name,
+                    relationship = :relationship,
+                    phone = :phone,
+                    sort_order = :sort_order,
+                    updated_at = NOW()
+                WHERE id = :id
+                LIMIT 1
+            ");
+            $updateStmt->execute(array(
+                ':contact_name' => $contactName !== '' ? $contactName : null,
+                ':relationship' => $relationship !== '' ? $relationship : null,
+                ':phone' => $phone !== '' ? $phone : null,
+                ':sort_order' => $sortOrder,
+                ':id' => $existingId,
+            ));
+            return;
+        }
+
+        $insertStmt = $pdo->prepare("
+            INSERT INTO user_emergency_contacts (
+                user_id, contact_name, relationship, phone, sort_order, created_at, updated_at
+            ) VALUES (
+                :user_id, :contact_name, :relationship, :phone, :sort_order, NOW(), NOW()
+            )
+        ");
+        $insertStmt->execute(array(
+            ':user_id' => $userId,
+            ':contact_name' => $contactName !== '' ? $contactName : null,
+            ':relationship' => $relationship !== '' ? $relationship : null,
+            ':phone' => $phone !== '' ? $phone : null,
+            ':sort_order' => $sortOrder,
         ));
     }
 }
@@ -608,62 +747,83 @@ if (!function_exists('aue_update_profile_tab')) {
 if (!function_exists('aue_update_emergency_tab')) {
     function aue_update_emergency_tab(PDO $pdo, int $userId): void
     {
-        $relationship = trim((string)($_POST['relationship'] ?? ''));
-        $phone = trim((string)($_POST['phone'] ?? ''));
+        aue_upsert_emergency_contact_row(
+            $pdo,
+            $userId,
+            1,
+            (string)($_POST['contact_name_1'] ?? ''),
+            (string)($_POST['relationship_1'] ?? ''),
+            (string)($_POST['phone_1'] ?? '')
+        );
 
-        $existingStmt = $pdo->prepare("
-            SELECT id
-            FROM user_emergency_contacts
-            WHERE user_id = :user_id
-            ORDER BY id ASC
-            LIMIT 1
-        ");
-        $existingStmt->execute(array(':user_id' => $userId));
-        $existingId = (int)$existingStmt->fetchColumn();
-
-        if ($existingId > 0) {
-            $stmt = $pdo->prepare("
-                UPDATE user_emergency_contacts
-                SET relationship = :relationship,
-                    phone = :phone,
-                    updated_at = NOW()
-                WHERE id = :id
-                LIMIT 1
-            ");
-            $stmt->execute(array(
-                ':relationship' => $relationship !== '' ? $relationship : null,
-                ':phone' => $phone !== '' ? $phone : null,
-                ':id' => $existingId,
-            ));
-        } else {
-            $stmt = $pdo->prepare("
-                INSERT INTO user_emergency_contacts (user_id, relationship, phone, created_at, updated_at)
-                VALUES (:user_id, :relationship, :phone, NOW(), NOW())
-            ");
-            $stmt->execute(array(
-                ':user_id' => $userId,
-                ':relationship' => $relationship !== '' ? $relationship : null,
-                ':phone' => $phone !== '' ? $phone : null,
-            ));
-        }
+        aue_upsert_emergency_contact_row(
+            $pdo,
+            $userId,
+            2,
+            (string)($_POST['contact_name_2'] ?? ''),
+            (string)($_POST['relationship_2'] ?? ''),
+            (string)($_POST['phone_2'] ?? '')
+        );
     }
 }
 
 if (!function_exists('aue_update_billing_tab')) {
     function aue_update_billing_tab(PDO $pdo, int $userId): void
     {
+        $useProfileAddress = isset($_POST['use_profile_address']) ? 1 : 0;
+
         $stmt = $pdo->prepare("
-            INSERT INTO user_billing_profiles (user_id, business_name, business_vat_tax_id, created_at, updated_at)
-            VALUES (:user_id, :business_name, :business_vat_tax_id, NOW(), NOW())
+            INSERT INTO user_billing_profiles (
+                user_id,
+                business_name,
+                business_vat_tax_id,
+                use_profile_address,
+                billing_street_address,
+                billing_street_number,
+                billing_zip_code,
+                billing_city,
+                billing_state_region,
+                billing_country_code,
+                created_at,
+                updated_at
+            ) VALUES (
+                :user_id,
+                :business_name,
+                :business_vat_tax_id,
+                :use_profile_address,
+                :billing_street_address,
+                :billing_street_number,
+                :billing_zip_code,
+                :billing_city,
+                :billing_state_region,
+                :billing_country_code,
+                NOW(),
+                NOW()
+            )
             ON DUPLICATE KEY UPDATE
                 business_name = VALUES(business_name),
                 business_vat_tax_id = VALUES(business_vat_tax_id),
+                use_profile_address = VALUES(use_profile_address),
+                billing_street_address = VALUES(billing_street_address),
+                billing_street_number = VALUES(billing_street_number),
+                billing_zip_code = VALUES(billing_zip_code),
+                billing_city = VALUES(billing_city),
+                billing_state_region = VALUES(billing_state_region),
+                billing_country_code = VALUES(billing_country_code),
                 updated_at = NOW()
         ");
+
         $stmt->execute(array(
             ':user_id' => $userId,
             ':business_name' => trim((string)($_POST['business_name'] ?? '')) ?: null,
             ':business_vat_tax_id' => trim((string)($_POST['business_vat_tax_id'] ?? '')) ?: null,
+            ':use_profile_address' => $useProfileAddress,
+            ':billing_street_address' => trim((string)($_POST['billing_street_address'] ?? '')) ?: null,
+            ':billing_street_number' => trim((string)($_POST['billing_street_number'] ?? '')) ?: null,
+            ':billing_zip_code' => trim((string)($_POST['billing_zip_code'] ?? '')) ?: null,
+            ':billing_city' => trim((string)($_POST['billing_city'] ?? '')) ?: null,
+            ':billing_state_region' => trim((string)($_POST['billing_state_region'] ?? '')) ?: null,
+            ':billing_country_code' => strtoupper(trim((string)($_POST['billing_country_code'] ?? ''))) ?: null,
         ));
     }
 }

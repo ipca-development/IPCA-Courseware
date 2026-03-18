@@ -51,10 +51,10 @@ function ua_role_label(string $role): string
 
     return match ($role) {
         'admin' => 'Admin',
-        'supervisor' => 'Supervisor',
-        'student' => 'Student',
+        'supervisor' => 'Instructor',
         'instructor' => 'Instructor',
         'chief_instructor' => 'Chief Instructor',
+        'student' => 'Student',
         default => ucfirst($role),
     };
 }
@@ -477,7 +477,7 @@ cw_header('User Accounts');
                     <select class="app-select ua-select" id="ua-role" name="role">
                         <option value="">All roles</option>
                         <option value="admin"<?php echo $roleFilter === 'admin' ? ' selected' : ''; ?>>Admin</option>
-                        <option value="supervisor"<?php echo $roleFilter === 'supervisor' ? ' selected' : ''; ?>>Supervisor</option>
+                        <option value="supervisor"<?php echo $roleFilter === 'supervisor' ? ' selected' : ''; ?>>Instructor</option>
                         <option value="student"<?php echo $roleFilter === 'student' ? ' selected' : ''; ?>>Student</option>
                     </select>
                 </div>
