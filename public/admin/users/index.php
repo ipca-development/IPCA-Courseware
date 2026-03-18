@@ -1,19 +1,15 @@
 <?php
 declare(strict_types=1);
 
-require_once dirname(__DIR__, 2) . '/src/bootstrap.php';
-require_once dirname(__DIR__, 2) . '/src/auth.php';
+require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/auth.php';
+require_once __DIR__ . '/../../../src/navigation.php';
 
 cw_require_admin();
 
 $currentUser = cw_current_user($pdo);
 $currentPath = (string)(parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '/admin/users/index.php');
 
-/**
- * ------------------------------------------------------------
- * Filters
- * ------------------------------------------------------------
- */
 $q = trim((string)($_GET['q'] ?? ''));
 $roleFilter = strtolower(trim((string)($_GET['role'] ?? '')));
 $statusFilter = strtolower(trim((string)($_GET['status'] ?? '')));
@@ -21,17 +17,12 @@ $completenessFilter = strtolower(trim((string)($_GET['completeness'] ?? '')));
 $validityFilter = strtolower(trim((string)($_GET['validity'] ?? '')));
 $securityFilter = strtolower(trim((string)($_GET['security'] ?? '')));
 
-/**
- * ------------------------------------------------------------
- * Small helpers
- * ------------------------------------------------------------
- */
 function h(?string $value): string
 {
     return htmlspecialchars((string)$value, ENT_QUOTES, 'UTF-8');
 }
 
-function cw_users_build_qs(array $overrides = array()): string
+function ua_qs(array $overrides = array()): string
 {
     $params = $_GET;
     foreach ($overrides as $k => $v) {
@@ -46,7 +37,7 @@ function cw_users_build_qs(array $overrides = array()): string
     return $query !== '' ? ('?' . $query) : '';
 }
 
-function cw_users_human_date(?string $date): string
+function ua_human_date(?string $date): string
 {
     if (!$date) {
         return '—';
@@ -60,7 +51,7 @@ function cw_users_human_date(?string $date): string
     return date('M j, Y', $ts);
 }
 
-function cw_users_human_datetime(?string $dateTime): string
+function ua_human_datetime(?string $dateTime): string
 {
     if (!$dateTime) {
         return '—';
@@ -74,20 +65,20 @@ function cw_users_human_datetime(?string $dateTime): string
     return date('M j, Y · H:i', $ts);
 }
 
-function cw_users_role_label(string $role): string
+function ua_role_label(string $role): string
 {
     $role = strtolower(trim($role));
     return match ($role) {
         'admin' => 'Admin',
         'supervisor' => 'Supervisor',
+        'student' => 'Student',
         'instructor' => 'Instructor',
         'chief_instructor' => 'Chief Instructor',
-        'student' => 'Student',
         default => ucfirst($role),
     };
 }
 
-function cw_users_status_label(string $status): string
+function ua_status_label(string $status): string
 {
     $status = strtolower(trim($status));
     return match ($status) {
@@ -99,7 +90,7 @@ function cw_users_status_label(string $status): string
     };
 }
 
-function cw_users_status_class(string $status): string
+function ua_status_class(string $status): string
 {
     $status = strtolower(trim($status));
     return match ($status) {
@@ -111,7 +102,7 @@ function cw_users_status_class(string $status): string
     };
 }
 
-function cw_users_role_class(string $role): string
+function ua_role_class(string $role): string
 {
     $role = strtolower(trim($role));
     return match ($role) {
@@ -122,14 +113,14 @@ function cw_users_role_class(string $role): string
     };
 }
 
-function cw_users_completeness_class(int $missingCount): string
+function ua_completeness_class(int $missingCount): string
 {
     return $missingCount > 0
         ? 'ua-badge ua-badge--warn'
         : 'ua-badge ua-badge--ok';
 }
 
-function cw_users_validity_class(?string $validUntil): string
+function ua_validity_class(?string $validUntil): string
 {
     if (!$validUntil) {
         return 'ua-badge ua-badge--neutral';
@@ -153,7 +144,7 @@ function cw_users_validity_class(?string $validUntil): string
     return 'ua-badge ua-badge--ok';
 }
 
-function cw_users_validity_label(?string $validUntil): string
+function ua_validity_label(?string $validUntil): string
 {
     if (!$validUntil) {
         return 'No validity set';
@@ -180,7 +171,7 @@ function cw_users_validity_label(?string $validUntil): string
     return 'Valid';
 }
 
-function cw_users_security_badges(array $row): array
+function ua_security_badges(array $row): array
 {
     $badges = array();
 
@@ -208,53 +199,37 @@ function cw_users_security_badges(array $row): array
     return $badges;
 }
 
-function cw_users_svg(string $name): string
+function ua_svg(string $name): string
 {
     switch ($name) {
         case 'search':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 21l-4.35-4.35M10.5 18a7.5 7.5 0 1 1 0-15a7.5 7.5 0 0 1 0 15Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         case 'plus':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         case 'open':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 5h5v5M10 14L19 5M19 13v5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         case 'mail':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7.5A1.5 1.5 0 0 1 5.5 6h13A1.5 1.5 0 0 1 20 7.5v9a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 16.5v-9Zm0 .5l8 5.5l8-5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         case 'shield':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-2.7 8.4-7 10c-4.3-1.6-7-5.6-7-10V6l7-3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         case 'archive':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M6 7l1 11h10l1-11M10 11h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M5 4h14v3H5z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>';
-
         case 'users':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 19v-1.2a3.8 3.8 0 0 0-3.8-3.8H8.8A3.8 3.8 0 0 0 5 17.8V19M15.5 8.5a2.5 2.5 0 1 1 0-5a2.5 2.5 0 0 1 0 5Zm-8 0a2.5 2.5 0 1 1 0-5a2.5 2.5 0 0 1 0 5Zm12 10.5v-1a3 3 0 0 0-2.2-2.9" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         case 'check':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.2 4.2L19 7.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         case 'warning':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l8 14H4L12 4Zm0 5.2v4.8m0 3h.01" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         case 'clock':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-18 0a9 9 0 0 1 18 0Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         case 'filter':
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M7 12h10M10 18h4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-
         default:
             return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
     }
 }
 
-/**
- * ------------------------------------------------------------
- * Summary counts
- * ------------------------------------------------------------
- */
-function cw_users_scalar(PDO $pdo, string $sql, array $params = array()): int
+function ua_scalar(PDO $pdo, string $sql, array $params = array()): int
 {
     try {
         $stmt = $pdo->prepare($sql);
@@ -267,19 +242,14 @@ function cw_users_scalar(PDO $pdo, string $sql, array $params = array()): int
 }
 
 $stats = array(
-    'total' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users"),
-    'pending' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users WHERE status = 'pending_activation'"),
-    'incomplete' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM user_profile_requirements_status WHERE missing_count > 0"),
-    'expiring_soon' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users WHERE account_valid_until IS NOT NULL AND account_valid_until >= CURDATE() AND account_valid_until <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)"),
-    'retired' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users WHERE status = 'retired'"),
-    'must_change_password' => cw_users_scalar($pdo, "SELECT COUNT(*) FROM users WHERE must_change_password = 1"),
+    'total' => ua_scalar($pdo, "SELECT COUNT(*) FROM users"),
+    'pending' => ua_scalar($pdo, "SELECT COUNT(*) FROM users WHERE status = 'pending_activation'"),
+    'incomplete' => ua_scalar($pdo, "SELECT COUNT(*) FROM user_profile_requirements_status WHERE missing_count > 0"),
+    'expiring_soon' => ua_scalar($pdo, "SELECT COUNT(*) FROM users WHERE account_valid_until IS NOT NULL AND account_valid_until >= CURDATE() AND account_valid_until <= DATE_ADD(CURDATE(), INTERVAL 30 DAY)"),
+    'retired' => ua_scalar($pdo, "SELECT COUNT(*) FROM users WHERE status = 'retired'"),
+    'must_change_password' => ua_scalar($pdo, "SELECT COUNT(*) FROM users WHERE must_change_password = 1"),
 );
 
-/**
- * ------------------------------------------------------------
- * Card list query
- * ------------------------------------------------------------
- */
 $where = array();
 $params = array();
 
@@ -371,27 +341,22 @@ if (!is_array($rows)) {
 
 cw_header('User Accounts');
 ?>
-
 <style>
 .user-accounts-page{
     display:block;
 }
-
 .user-accounts-page .app-section-hero{
     margin-bottom:20px;
 }
-
 .ua-hero-head{
     display:flex;
     align-items:flex-start;
     justify-content:space-between;
     gap:24px;
 }
-
 .ua-hero-copy{
     min-width:0;
 }
-
 .ua-hero-title{
     margin:0;
     font-size:34px;
@@ -400,7 +365,6 @@ cw_header('User Accounts');
     font-weight:760;
     color:#fff;
 }
-
 .ua-hero-text{
     max-width:820px;
     margin:14px 0 0 0;
@@ -408,14 +372,12 @@ cw_header('User Accounts');
     font-size:15px;
     line-height:1.65;
 }
-
 .ua-hero-actions{
     display:flex;
     flex-wrap:wrap;
     gap:10px;
     justify-content:flex-end;
 }
-
 .ua-action{
     height:40px;
     display:inline-flex;
@@ -432,25 +394,21 @@ cw_header('User Accounts');
     letter-spacing:.01em;
     transition:background .16s ease, transform .16s ease, border-color .16s ease;
 }
-
 .ua-action:hover{
     background:rgba(255,255,255,0.13);
     transform:translateY(-1px);
 }
-
 .ua-action svg{
     width:16px;
     height:16px;
     flex:0 0 16px;
 }
-
 .ua-hero-stats{
     display:grid;
     grid-template-columns:repeat(6, minmax(0, 1fr));
     gap:14px;
     margin-top:22px;
 }
-
 .ua-stat-chip{
     min-height:88px;
     padding:16px 18px;
@@ -459,7 +417,6 @@ cw_header('User Accounts');
     border:1px solid rgba(255,255,255,0.09);
     box-shadow:inset 0 1px 0 rgba(255,255,255,0.035);
 }
-
 .ua-stat-label{
     color:rgba(255,255,255,0.68);
     font-size:11px;
@@ -468,7 +425,6 @@ cw_header('User Accounts');
     text-transform:uppercase;
     font-weight:680;
 }
-
 .ua-stat-value{
     margin-top:10px;
     color:#fff;
@@ -477,11 +433,9 @@ cw_header('User Accounts');
     font-weight:760;
     letter-spacing:-0.04em;
 }
-
 .ua-toolbar-card{
     padding:18px;
 }
-
 .ua-toolbar-head{
     display:flex;
     align-items:center;
@@ -489,7 +443,6 @@ cw_header('User Accounts');
     gap:16px;
     margin-bottom:14px;
 }
-
 .ua-toolbar-title{
     display:flex;
     align-items:center;
@@ -499,42 +452,35 @@ cw_header('User Accounts');
     color:var(--text-strong);
     letter-spacing:-0.02em;
 }
-
 .ua-toolbar-title-icon{
     width:18px;
     height:18px;
     color:var(--text-muted);
 }
-
 .ua-toolbar-meta{
     color:var(--text-muted);
     font-size:13px;
     font-weight:560;
 }
-
 .ua-filters{
     display:grid;
     grid-template-columns:2fr repeat(5, minmax(0, 1fr));
     gap:12px;
 }
-
 .ua-field{
     display:flex;
     flex-direction:column;
     gap:7px;
 }
-
 .ua-field-label{
     font-size:12px;
     font-weight:670;
     letter-spacing:.02em;
     color:var(--text-muted);
 }
-
 .ua-input-wrap{
     position:relative;
 }
-
 .ua-input-icon{
     position:absolute;
     left:12px;
@@ -545,7 +491,6 @@ cw_header('User Accounts');
     color:#8a97ab;
     pointer-events:none;
 }
-
 .ua-input,
 .ua-select{
     width:100%;
@@ -560,27 +505,22 @@ cw_header('User Accounts');
     outline:none;
     transition:border-color .16s ease, box-shadow .16s ease;
 }
-
 .ua-input{
     padding:0 14px 0 40px;
 }
-
 .ua-select{
     padding:0 14px;
 }
-
 .ua-input:focus,
 .ua-select:focus{
     border-color:rgba(82, 133, 212, 0.45);
     box-shadow:0 0 0 4px rgba(110,174,252,0.12);
 }
-
 .ua-filter-actions{
     display:flex;
     align-items:flex-end;
     gap:10px;
 }
-
 .ua-filter-btn{
     height:44px;
     padding:0 16px;
@@ -598,24 +538,20 @@ cw_header('User Accounts');
     cursor:pointer;
     box-shadow:0 10px 22px rgba(16,36,64,0.14);
 }
-
 .ua-filter-btn:hover{
     transform:translateY(-1px);
 }
-
 .ua-filter-btn--ghost{
     background:#fff;
     color:var(--text-strong);
     border:1px solid rgba(15,23,42,0.08);
     box-shadow:none;
 }
-
 .ua-filter-btn svg{
     width:16px;
     height:16px;
     flex:0 0 16px;
 }
-
 .ua-list-head{
     display:flex;
     align-items:center;
@@ -623,7 +559,6 @@ cw_header('User Accounts');
     gap:16px;
     margin:24px 0 14px 0;
 }
-
 .ua-list-title{
     display:flex;
     align-items:center;
@@ -633,42 +568,35 @@ cw_header('User Accounts');
     letter-spacing:-0.02em;
     color:var(--text-strong);
 }
-
 .ua-list-title-icon{
     width:18px;
     height:18px;
     color:var(--text-muted);
 }
-
 .ua-list-count{
     color:var(--text-muted);
     font-size:13px;
     font-weight:600;
 }
-
 .ua-card-list{
     display:grid;
     grid-template-columns:1fr;
     gap:16px;
 }
-
 .ua-user-card{
     padding:22px;
 }
-
 .ua-user-card-inner{
     display:grid;
     grid-template-columns:minmax(0, 1.7fr) minmax(340px, 1fr);
     gap:18px;
     align-items:flex-start;
 }
-
 .ua-user-main{
     display:flex;
     gap:16px;
     min-width:0;
 }
-
 .ua-avatar{
     width:72px;
     height:72px;
@@ -682,31 +610,26 @@ cw_header('User Accounts');
     justify-content:center;
     box-shadow:inset 0 1px 0 rgba(255,255,255,0.45);
 }
-
 .ua-avatar img{
     width:100%;
     height:100%;
     object-fit:cover;
     display:block;
 }
-
 .ua-avatar-fallback{
     width:30px;
     height:30px;
     color:#7b8aa0;
 }
-
 .ua-main-copy{
     min-width:0;
 }
-
 .ua-name-row{
     display:flex;
     flex-wrap:wrap;
     align-items:center;
     gap:10px;
 }
-
 .ua-name{
     margin:0;
     font-size:24px;
@@ -715,18 +638,15 @@ cw_header('User Accounts');
     font-weight:760;
     color:var(--text-strong);
 }
-
 .ua-meta-grid{
     display:grid;
     grid-template-columns:repeat(3, minmax(0, 1fr));
     gap:10px 16px;
     margin-top:14px;
 }
-
 .ua-meta-block{
     min-width:0;
 }
-
 .ua-meta-label{
     font-size:11px;
     line-height:1.15;
@@ -735,7 +655,6 @@ cw_header('User Accounts');
     color:#8a97ab;
     font-weight:700;
 }
-
 .ua-meta-value{
     margin-top:6px;
     color:var(--text-strong);
@@ -745,20 +664,17 @@ cw_header('User Accounts');
     overflow:hidden;
     text-overflow:ellipsis;
 }
-
 .ua-card-side{
     display:flex;
     flex-direction:column;
     gap:12px;
 }
-
 .ua-badge-grid{
     display:flex;
     flex-wrap:wrap;
     gap:10px;
     justify-content:flex-end;
 }
-
 .ua-badge{
     min-height:34px;
     padding:0 13px;
@@ -774,56 +690,47 @@ cw_header('User Accounts');
     letter-spacing:.02em;
     white-space:nowrap;
 }
-
 .ua-badge--ok{
     background:rgba(32, 135, 90, 0.10);
     color:#1f7a54;
     border-color:rgba(32, 135, 90, 0.18);
 }
-
 .ua-badge--warn{
     background:rgba(196, 118, 11, 0.10);
     color:#a66508;
     border-color:rgba(196, 118, 11, 0.18);
 }
-
 .ua-badge--danger{
     background:rgba(185, 54, 54, 0.10);
     color:#ac2f2f;
     border-color:rgba(185, 54, 54, 0.18);
 }
-
 .ua-badge--muted{
     background:rgba(15, 23, 42, 0.06);
     color:#637287;
     border-color:rgba(15, 23, 42, 0.08);
 }
-
 .ua-badge--accent{
     background:rgba(32, 84, 176, 0.10);
     color:#2557b3;
     border-color:rgba(32, 84, 176, 0.18);
 }
-
 .ua-badge--sky{
     background:rgba(48, 124, 183, 0.10);
     color:#246ea9;
     border-color:rgba(48, 124, 183, 0.18);
 }
-
 .ua-badge--neutral{
     background:rgba(86, 112, 153, 0.10);
     color:#405a82;
     border-color:rgba(86, 112, 153, 0.16);
 }
-
 .ua-card-actions{
     display:flex;
     justify-content:flex-end;
     flex-wrap:wrap;
     gap:10px;
 }
-
 .ua-card-action{
     min-height:40px;
     padding:0 14px;
@@ -839,26 +746,22 @@ cw_header('User Accounts');
     background:#fff;
     transition:transform .16s ease, border-color .16s ease, background .16s ease;
 }
-
 .ua-card-action:hover{
     transform:translateY(-1px);
     border-color:rgba(16,36,64,0.16);
     background:#f9fbfe;
 }
-
 .ua-card-action--primary{
     background:linear-gradient(180deg, #17345d 0%, #102440 100%);
     color:#fff;
     border-color:transparent;
     box-shadow:0 10px 22px rgba(16,36,64,0.13);
 }
-
 .ua-card-action svg{
     width:15px;
     height:15px;
     flex:0 0 15px;
 }
-
 .ua-card-foot{
     margin-top:16px;
     padding-top:16px;
@@ -869,30 +772,25 @@ cw_header('User Accounts');
     gap:12px;
     flex-wrap:wrap;
 }
-
 .ua-foot-note{
     color:var(--text-muted);
     font-size:13px;
     font-weight:560;
 }
-
 .ua-empty{
     padding:34px 28px;
 }
-
 .ua-empty-inner{
     display:flex;
     align-items:flex-start;
     gap:14px;
 }
-
 .ua-empty-icon{
     width:22px;
     height:22px;
     color:#8a97ab;
     flex:0 0 22px;
 }
-
 .ua-empty-title{
     margin:0;
     font-size:18px;
@@ -900,7 +798,6 @@ cw_header('User Accounts');
     letter-spacing:-0.02em;
     color:var(--text-strong);
 }
-
 .ua-empty-text{
     margin:8px 0 0 0;
     color:var(--text-muted);
@@ -908,68 +805,54 @@ cw_header('User Accounts');
     line-height:1.65;
     max-width:700px;
 }
-
 @media (max-width: 1300px){
     .ua-hero-stats{
         grid-template-columns:repeat(3, minmax(0, 1fr));
     }
-
     .ua-filters{
         grid-template-columns:repeat(3, minmax(0, 1fr));
     }
-
     .ua-user-card-inner{
         grid-template-columns:1fr;
     }
-
     .ua-badge-grid,
     .ua-card-actions{
         justify-content:flex-start;
     }
 }
-
 @media (max-width: 900px){
     .ua-hero-head{
         flex-direction:column;
         align-items:flex-start;
     }
-
     .ua-hero-actions{
         justify-content:flex-start;
     }
-
     .ua-hero-stats{
         grid-template-columns:repeat(2, minmax(0, 1fr));
     }
-
     .ua-filters{
         grid-template-columns:1fr;
     }
-
     .ua-filter-actions{
         align-items:stretch;
     }
-
     .ua-filter-btn,
     .ua-filter-btn--ghost{
         flex:1 1 auto;
         justify-content:center;
     }
-
     .ua-meta-grid{
         grid-template-columns:1fr;
     }
 }
-
 @media (max-width: 640px){
     .ua-hero-stats{
         grid-template-columns:1fr;
     }
-
     .ua-name{
         font-size:21px;
     }
-
     .ua-avatar{
         width:62px;
         height:62px;
@@ -992,17 +875,17 @@ cw_header('User Accounts');
 
             <div class="ua-hero-actions">
                 <a class="ua-action" href="/admin/users/create.php">
-                    <?php echo cw_users_svg('plus'); ?>
+                    <?php echo ua_svg('plus'); ?>
                     <span>Add User</span>
                 </a>
 
                 <a class="ua-action" href="/admin/users/index.php?status=pending_activation">
-                    <?php echo cw_users_svg('mail'); ?>
+                    <?php echo ua_svg('mail'); ?>
                     <span>Pending Activations</span>
                 </a>
 
                 <a class="ua-action" href="/admin/users/index.php?completeness=incomplete">
-                    <?php echo cw_users_svg('warning'); ?>
+                    <?php echo ua_svg('warning'); ?>
                     <span>Incomplete Profiles</span>
                 </a>
             </div>
@@ -1044,7 +927,7 @@ cw_header('User Accounts');
     <section class="card ua-toolbar-card">
         <div class="ua-toolbar-head">
             <div class="ua-toolbar-title">
-                <span class="ua-toolbar-title-icon"><?php echo cw_users_svg('filter'); ?></span>
+                <span class="ua-toolbar-title-icon"><?php echo ua_svg('filter'); ?></span>
                 <span>Filter and search</span>
             </div>
             <div class="ua-toolbar-meta">Refine the roster by role, lifecycle status, completeness, validity, and readiness.</div>
@@ -1055,7 +938,7 @@ cw_header('User Accounts');
                 <div class="ua-field">
                     <label class="ua-field-label" for="ua-q">Search</label>
                     <div class="ua-input-wrap">
-                        <span class="ua-input-icon"><?php echo cw_users_svg('search'); ?></span>
+                        <span class="ua-input-icon"><?php echo ua_svg('search'); ?></span>
                         <input
                             id="ua-q"
                             class="ua-input"
@@ -1118,12 +1001,12 @@ cw_header('User Accounts');
 
             <div class="ua-filter-actions" style="margin-top:14px;">
                 <button class="ua-filter-btn" type="submit">
-                    <?php echo cw_users_svg('search'); ?>
+                    <?php echo ua_svg('search'); ?>
                     <span>Apply Filters</span>
                 </button>
 
                 <a class="ua-filter-btn ua-filter-btn--ghost" href="/admin/users/index.php">
-                    <?php echo cw_users_svg('check'); ?>
+                    <?php echo ua_svg('check'); ?>
                     <span>Clear</span>
                 </a>
             </div>
@@ -1132,7 +1015,7 @@ cw_header('User Accounts');
 
     <div class="ua-list-head">
         <div class="ua-list-title">
-            <span class="ua-list-title-icon"><?php echo cw_users_svg('users'); ?></span>
+            <span class="ua-list-title-icon"><?php echo ua_svg('users'); ?></span>
             <span>User roster</span>
         </div>
         <div class="ua-list-count"><?php echo count($rows); ?> result<?php echo count($rows) === 1 ? '' : 's'; ?></div>
@@ -1141,7 +1024,7 @@ cw_header('User Accounts');
     <?php if (!$rows): ?>
         <section class="card ua-empty">
             <div class="ua-empty-inner">
-                <div class="ua-empty-icon"><?php echo cw_users_svg('warning'); ?></div>
+                <div class="ua-empty-icon"><?php echo ua_svg('warning'); ?></div>
                 <div>
                     <h3 class="ua-empty-title">No user accounts matched the current filters</h3>
                     <p class="ua-empty-text">
@@ -1162,8 +1045,8 @@ cw_header('User Accounts');
 
                     $photoPath = trim((string)($row['photo_path'] ?? ''));
                     $missingCount = (int)($row['missing_count'] ?? 0);
-                    $securityBadges = cw_users_security_badges($row);
-                    $validityLabel = cw_users_validity_label((string)($row['account_valid_until'] ?? ''));
+                    $securityBadges = ua_security_badges($row);
+                    $validityLabel = ua_validity_label((string)($row['account_valid_until'] ?? ''));
                 ?>
                 <section class="card ua-user-card">
                     <div class="ua-user-card-inner">
@@ -1172,7 +1055,7 @@ cw_header('User Accounts');
                                 <?php if ($photoPath !== ''): ?>
                                     <img src="<?php echo h($photoPath); ?>" alt="<?php echo h($displayName); ?>">
                                 <?php else: ?>
-                                    <span class="ua-avatar-fallback"><?php echo cw_users_svg('users'); ?></span>
+                                    <span class="ua-avatar-fallback"><?php echo ua_svg('users'); ?></span>
                                 <?php endif; ?>
                             </div>
 
@@ -1194,7 +1077,7 @@ cw_header('User Accounts');
 
                                     <div class="ua-meta-block">
                                         <div class="ua-meta-label">Last Login</div>
-                                        <div class="ua-meta-value"><?php echo h(cw_users_human_datetime((string)($row['last_login_at'] ?? ''))); ?></div>
+                                        <div class="ua-meta-value"><?php echo h(ua_human_datetime((string)($row['last_login_at'] ?? ''))); ?></div>
                                     </div>
                                 </div>
                             </div>
@@ -1202,19 +1085,19 @@ cw_header('User Accounts');
 
                         <div class="ua-card-side">
                             <div class="ua-badge-grid">
-                                <span class="<?php echo cw_users_role_class((string)$row['role']); ?>">
-                                    <?php echo h(cw_users_role_label((string)$row['role'])); ?>
+                                <span class="<?php echo ua_role_class((string)$row['role']); ?>">
+                                    <?php echo h(ua_role_label((string)$row['role'])); ?>
                                 </span>
 
-                                <span class="<?php echo cw_users_status_class((string)$row['status']); ?>">
-                                    <?php echo h(cw_users_status_label((string)$row['status'])); ?>
+                                <span class="<?php echo ua_status_class((string)$row['status']); ?>">
+                                    <?php echo h(ua_status_label((string)$row['status'])); ?>
                                 </span>
 
-                                <span class="<?php echo cw_users_completeness_class($missingCount); ?>">
+                                <span class="<?php echo ua_completeness_class($missingCount); ?>">
                                     <?php echo $missingCount > 0 ? ('Missing ' . $missingCount) : 'Profile Complete'; ?>
                                 </span>
 
-                                <span class="<?php echo cw_users_validity_class((string)($row['account_valid_until'] ?? '')); ?>">
+                                <span class="<?php echo ua_validity_class((string)($row['account_valid_until'] ?? '')); ?>">
                                     <?php echo h($validityLabel); ?>
                                 </span>
 
@@ -1227,23 +1110,23 @@ cw_header('User Accounts');
 
                             <div class="ua-card-actions">
                                 <a class="ua-card-action ua-card-action--primary" href="/admin/users/edit.php?id=<?php echo $userId; ?>">
-                                    <?php echo cw_users_svg('open'); ?>
+                                    <?php echo ua_svg('open'); ?>
                                     <span>Open Workspace</span>
                                 </a>
 
-                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>#account">
-                                    <?php echo cw_users_svg('mail'); ?>
+                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>&tab=account">
+                                    <?php echo ua_svg('mail'); ?>
                                     <span>Activation</span>
                                 </a>
 
-                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>#security">
-                                    <?php echo cw_users_svg('shield'); ?>
+                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>&tab=security">
+                                    <?php echo ua_svg('shield'); ?>
                                     <span>Security</span>
                                 </a>
 
-                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>#status">
-                                    <?php echo cw_users_svg('archive'); ?>
-                                    <span>Status</span>
+                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>&tab=audit">
+                                    <?php echo ua_svg('archive'); ?>
+                                    <span>Audit</span>
                                 </a>
                             </div>
                         </div>
@@ -1251,11 +1134,11 @@ cw_header('User Accounts');
 
                     <div class="ua-card-foot">
                         <div class="ua-foot-note">
-                            Account valid until: <strong><?php echo h(cw_users_human_date((string)($row['account_valid_until'] ?? ''))); ?></strong>
+                            Account valid until: <strong><?php echo h(ua_human_date((string)($row['account_valid_until'] ?? ''))); ?></strong>
                         </div>
 
                         <div class="ua-foot-note">
-                            Completeness last evaluated: <strong><?php echo h(cw_users_human_datetime((string)($row['last_evaluated_at'] ?? ''))); ?></strong>
+                            Completeness last evaluated: <strong><?php echo h(ua_human_datetime((string)($row['last_evaluated_at'] ?? ''))); ?></strong>
                         </div>
                     </div>
                 </section>
@@ -1263,3 +1146,5 @@ cw_header('User Accounts');
         </div>
     <?php endif; ?>
 </div>
+
+<?php cw_footer(); ?>
