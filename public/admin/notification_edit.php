@@ -220,19 +220,21 @@ $previewSrcdoc = '<!doctype html><html><head><meta charset="utf-8"><meta name="v
 cw_header('Edit Notification Template');
 ?>
 <style>
-  body{ background:#f6f8fb; }
-
   .ne-page{
     max-width:1440px;
     margin:0 auto;
   }
 
   .ne-hero{
-    background:linear-gradient(135deg,#1e3c72,#2a5298);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.00) 100%),
+      linear-gradient(180deg, var(--sidebar-bg) 0%, var(--sidebar-bg-2) 100%);
     color:#fff;
     border-radius:22px;
     padding:24px 26px;
-    box-shadow:0 16px 40px rgba(30,60,114,0.18);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.04),
+      0 16px 40px rgba(13, 29, 52, 0.18);
     margin-bottom:20px;
   }
 
@@ -241,7 +243,7 @@ cw_header('Edit Notification Template');
     font-weight:900;
     text-transform:uppercase;
     letter-spacing:.12em;
-    opacity:.86;
+    color:rgba(255,255,255,0.82);
     margin-bottom:6px;
   }
 
@@ -250,12 +252,13 @@ cw_header('Edit Notification Template');
     line-height:1.1;
     font-weight:900;
     margin:0;
+    color:#fff;
   }
 
   .ne-sub{
     margin-top:10px;
     max-width:1000px;
-    color:rgba(255,255,255,0.92);
+    color:rgba(255,255,255,0.90);
     line-height:1.55;
     font-size:15px;
   }
@@ -288,29 +291,29 @@ cw_header('Edit Notification Template');
   }
 
   .ne-card{
-    background:#fff;
-    border:1px solid #e4e9f2;
+    background:var(--panel-bg);
+    border:1px solid var(--border-soft);
     border-radius:22px;
-    box-shadow:0 12px 34px rgba(15,23,42,0.06);
+    box-shadow:var(--card-shadow);
     overflow:hidden;
   }
 
   .ne-card-head{
     padding:18px 20px 14px;
-    border-bottom:1px solid #eef2f7;
+    border-bottom:1px solid var(--border-soft);
     background:#fbfcfe;
   }
 
   .ne-card-title{
     font-size:18px;
     font-weight:900;
-    color:#0f172a;
+    color:var(--text-strong);
     margin:0;
   }
 
   .ne-card-sub{
     margin-top:6px;
-    color:#64748b;
+    color:var(--text-muted);
     font-size:13px;
     line-height:1.45;
   }
@@ -359,11 +362,11 @@ cw_header('Edit Notification Template');
   .ne-label{
     font-size:13px;
     font-weight:900;
-    color:#1e3c72;
+    color:var(--text-strong);
   }
 
   .ne-help{
-    color:#64748b;
+    color:var(--text-muted);
     font-size:12px;
     line-height:1.45;
   }
@@ -372,19 +375,19 @@ cw_header('Edit Notification Template');
   .ne-textarea{
     width:100%;
     box-sizing:border-box;
-    border:1px solid #d7e0ec;
+    border:1px solid rgba(15,23,42,0.10);
     border-radius:14px;
     padding:12px 14px;
     font-size:14px;
-    color:#0f172a;
+    color:var(--text-strong);
     background:#fff;
     outline:none;
   }
 
   .ne-input:focus,
   .ne-textarea:focus{
-    border-color:#8eb1df;
-    box-shadow:0 0 0 4px rgba(59,130,246,0.08);
+    border-color:rgba(110,174,252,0.70);
+    box-shadow:0 0 0 4px rgba(110,174,252,0.12);
   }
 
   .ne-textarea{
@@ -426,9 +429,9 @@ cw_header('Edit Notification Template');
     min-height:44px;
     padding:0 16px;
     border-radius:14px;
-    border:1px solid #cad7e7;
+    border:1px solid rgba(15,23,42,0.10);
     background:#fff;
-    color:#1e3c72;
+    color:var(--text-strong);
     font-weight:900;
     font-size:14px;
     cursor:pointer;
@@ -438,14 +441,16 @@ cw_header('Edit Notification Template');
 
   .ne-btn:hover{
     background:#f8fbff;
-    border-color:#9fb6d8;
+    border-color:rgba(15,23,42,0.18);
   }
 
   .ne-btn.primary{
     color:#fff;
     border-color:transparent;
-    background:linear-gradient(135deg,#1e3c72,#2a5298);
-    box-shadow:0 8px 24px rgba(30,60,114,0.18);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.00) 100%),
+      linear-gradient(180deg, var(--sidebar-bg) 0%, var(--sidebar-bg-2) 100%);
+    box-shadow:0 8px 24px rgba(13, 29, 52, 0.18);
   }
 
   .ne-btn.primary:hover{
@@ -473,21 +478,21 @@ cw_header('Edit Notification Template');
   .ne-var-table th{
     text-align:left;
     font-size:12px;
-    color:#1e3c72;
+    color:var(--text-strong);
     text-transform:uppercase;
     letter-spacing:.05em;
     padding:11px 10px;
     background:#f8fafc;
-    border-bottom:1px solid #e7edf6;
+    border-bottom:1px solid var(--border-soft);
     white-space:nowrap;
   }
 
   .ne-var-table td{
     padding:12px 10px;
-    border-bottom:1px solid #eef2f7;
+    border-bottom:1px solid rgba(15,23,42,0.05);
     vertical-align:top;
     font-size:13px;
-    color:#1f2937;
+    color:var(--text-strong);
   }
 
   .ne-var-table tr:last-child td{
@@ -554,9 +559,9 @@ cw_header('Edit Notification Template');
     border-radius:999px;
     font-size:12px;
     font-weight:900;
-    border:1px solid #d7e0ec;
+    border:1px solid rgba(15,23,42,0.10);
     background:#fff;
-    color:#1e3c72;
+    color:var(--text-strong);
     cursor:pointer;
   }
 
@@ -567,7 +572,7 @@ cw_header('Edit Notification Template');
   }
 
   .ne-preview-shell{
-    border:1px solid #dbe3ef;
+    border:1px solid rgba(15,23,42,0.08);
     border-radius:18px;
     padding:14px;
     background:#f8fafc;
@@ -575,7 +580,7 @@ cw_header('Edit Notification Template');
 
   .ne-preview-subject{
     background:#fff;
-    border:1px solid #e5e7eb;
+    border:1px solid rgba(15,23,42,0.08);
     border-radius:14px;
     padding:12px 14px;
     margin-bottom:12px;
@@ -584,7 +589,7 @@ cw_header('Edit Notification Template');
   .ne-preview-subject-label{
     font-size:12px;
     font-weight:900;
-    color:#64748b;
+    color:var(--text-muted);
     text-transform:uppercase;
     letter-spacing:.06em;
     margin-bottom:6px;
@@ -593,12 +598,12 @@ cw_header('Edit Notification Template');
   .ne-preview-subject-value{
     font-size:15px;
     font-weight:900;
-    color:#0f172a;
+    color:var(--text-strong);
     word-break:break-word;
   }
 
   .ne-preview-frame-wrap{
-    border:1px solid #d9e2ee;
+    border:1px solid rgba(15,23,42,0.08);
     border-radius:18px;
     overflow:hidden;
     background:#fff;
@@ -625,7 +630,7 @@ cw_header('Edit Notification Template');
   .ne-preview-plain{
     margin-top:14px;
     background:#fff;
-    border:1px solid #e5e7eb;
+    border:1px solid rgba(15,23,42,0.08);
     border-radius:14px;
     padding:14px;
   }
@@ -649,7 +654,7 @@ cw_header('Edit Notification Template');
   .ne-validation-box{
     border-radius:14px;
     padding:12px 14px;
-    border:1px solid #e5e7eb;
+    border:1px solid rgba(15,23,42,0.08);
     background:#fff;
   }
 

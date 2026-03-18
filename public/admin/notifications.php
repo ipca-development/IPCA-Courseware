@@ -20,19 +20,21 @@ $rows = $service->listTemplates();
 cw_header('Notification Templates');
 ?>
 <style>
-  body { background:#f6f8fb; }
-
   .nt-page{
     max-width:1280px;
     margin:0 auto;
   }
 
   .nt-hero{
-    background:linear-gradient(135deg,#1e3c72,#2a5298);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.00) 100%),
+      linear-gradient(180deg, var(--sidebar-bg) 0%, var(--sidebar-bg-2) 100%);
     color:#fff;
     border-radius:22px;
     padding:24px 26px;
-    box-shadow:0 16px 40px rgba(30,60,114,0.18);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.04),
+      0 16px 40px rgba(13, 29, 52, 0.18);
     margin-bottom:20px;
   }
 
@@ -41,7 +43,7 @@ cw_header('Notification Templates');
     font-weight:900;
     letter-spacing:.12em;
     text-transform:uppercase;
-    opacity:.86;
+    color:rgba(255,255,255,0.82);
     margin-bottom:6px;
   }
 
@@ -50,12 +52,13 @@ cw_header('Notification Templates');
     line-height:1.1;
     font-weight:900;
     margin:0;
+    color:#fff;
   }
 
   .nt-hero-sub{
     margin-top:10px;
     max-width:920px;
-    color:rgba(255,255,255,0.92);
+    color:rgba(255,255,255,0.90);
     line-height:1.55;
     font-size:15px;
   }
@@ -70,7 +73,7 @@ cw_header('Notification Templates');
   }
 
   .nt-count{
-    color:#334155;
+    color:var(--text-strong);
     font-weight:800;
   }
 
@@ -86,18 +89,19 @@ cw_header('Notification Templates');
     gap:8px;
     padding:8px 12px;
     border-radius:999px;
-    background:#fff;
-    border:1px solid #dbe3f0;
-    color:#1e3c72;
+    background:var(--panel-bg);
+    border:1px solid var(--border-soft);
+    color:var(--text-strong);
     font-size:13px;
     font-weight:800;
+    box-shadow:var(--card-shadow);
   }
 
   .nt-card{
-    background:#fff;
-    border:1px solid #e4e9f2;
+    background:var(--panel-bg);
+    border:1px solid var(--border-soft);
     border-radius:22px;
-    box-shadow:0 12px 34px rgba(15,23,42,0.06);
+    box-shadow:var(--card-shadow);
     overflow:hidden;
   }
 
@@ -114,22 +118,22 @@ cw_header('Notification Templates');
 
   .nt-table thead th{
     background:#f8fafc;
-    color:#1e3c72;
+    color:var(--text-strong);
     font-size:12px;
     font-weight:900;
     letter-spacing:.06em;
     text-transform:uppercase;
     padding:14px 16px;
-    border-bottom:1px solid #e7edf6;
+    border-bottom:1px solid var(--border-soft);
     text-align:left;
     white-space:nowrap;
   }
 
   .nt-table tbody td{
     padding:16px;
-    border-bottom:1px solid #eef2f7;
+    border-bottom:1px solid rgba(15,23,42,0.05);
     vertical-align:top;
-    color:#1f2937;
+    color:var(--text-strong);
     font-size:14px;
   }
 
@@ -143,7 +147,7 @@ cw_header('Notification Templates');
 
   .nt-name{
     font-weight:900;
-    color:#0f172a;
+    color:var(--text-strong);
     font-size:15px;
     margin-bottom:4px;
   }
@@ -162,7 +166,7 @@ cw_header('Notification Templates');
 
   .nt-desc{
     margin-top:8px;
-    color:#475569;
+    color:var(--text-muted);
     line-height:1.45;
     max-width:420px;
   }
@@ -217,13 +221,13 @@ cw_header('Notification Templates');
   }
 
   .nt-meta{
-    color:#475569;
+    color:var(--text-strong);
     font-weight:700;
     line-height:1.5;
   }
 
   .nt-muted{
-    color:#64748b;
+    color:var(--text-muted);
     font-size:12px;
   }
 
@@ -241,9 +245,9 @@ cw_header('Notification Templates');
     min-height:40px;
     padding:0 14px;
     border-radius:12px;
-    border:1px solid #cdd8e8;
+    border:1px solid rgba(15,23,42,0.10);
     background:#fff;
-    color:#1e3c72;
+    color:var(--text-strong);
     text-decoration:none;
     font-weight:900;
     font-size:14px;
@@ -253,15 +257,17 @@ cw_header('Notification Templates');
 
   .nt-btn:hover{
     background:#f8fbff;
-    border-color:#9fb6d8;
+    border-color:rgba(15,23,42,0.18);
     text-decoration:none;
   }
 
   .nt-btn.primary{
-    background:linear-gradient(135deg,#1e3c72,#2a5298);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.018) 0%, rgba(255,255,255,0.00) 100%),
+      linear-gradient(180deg, var(--sidebar-bg) 0%, var(--sidebar-bg-2) 100%);
     color:#fff;
     border-color:transparent;
-    box-shadow:0 8px 24px rgba(30,60,114,0.18);
+    box-shadow:0 8px 24px rgba(13, 29, 52, 0.18);
   }
 
   .nt-btn.primary:hover{
@@ -272,13 +278,14 @@ cw_header('Notification Templates');
   .nt-empty{
     padding:34px 24px;
     text-align:center;
-    color:#475569;
+    color:var(--text-muted);
   }
 
   @media (max-width: 860px){
     .nt-hero-title{
       font-size:25px;
     }
+
     .nt-hero{
       padding:20px 18px;
     }
@@ -286,7 +293,7 @@ cw_header('Notification Templates');
 </style>
 
 <div class="nt-page">
-  <div class="nt-hero">
+  <div class="app-section-hero nt-hero">
     <div class="nt-hero-kicker">Admin / Notification Control</div>
     <h1 class="nt-hero-title">Notification Templates</h1>
     <div class="nt-hero-sub">
