@@ -34,20 +34,8 @@ declare(strict_types=1);
             width:100%;
             height:44px;
             border-radius:14px;
-            border:1px solid rgba(15,23,42,0.08);
-            background:#fff;
             box-sizing:border-box;
-            color:var(--text-strong);
-            font-size:14px;
-            font-weight:560;
-            outline:none;
-            transition:border-color .16s ease, box-shadow .16s ease;
             padding:0 14px;
-        }
-        .ue-input:focus,
-        .ue-select:focus{
-            border-color:rgba(82,133,212,0.45);
-            box-shadow:0 0 0 4px rgba(110,174,252,0.12);
         }
         .ue-actions-row{
             display:flex;
@@ -59,28 +47,6 @@ declare(strict_types=1);
             min-height:42px;
             padding:0 16px;
             border-radius:12px;
-            border:1px solid rgba(15,23,42,0.08);
-            display:inline-flex;
-            align-items:center;
-            gap:9px;
-            background:#fff;
-            color:var(--text-strong);
-            text-decoration:none;
-            font-size:13px;
-            font-weight:680;
-            cursor:pointer;
-            transition:transform .16s ease,border-color .16s ease,background .16s ease;
-        }
-        .ue-btn:hover{
-            transform:translateY(-1px);
-            border-color:rgba(16,36,64,0.16);
-            background:#f9fbfe;
-        }
-        .ue-btn--primary{
-            background:linear-gradient(180deg,#17345d 0%,#102440 100%);
-            color:#fff;
-            border-color:transparent;
-            box-shadow:0 10px 22px rgba(16,36,64,0.13);
         }
         .ue-btn svg{
             width:15px;
@@ -136,7 +102,7 @@ declare(strict_types=1);
             <div class="ue-field ue-field--full">
                 <label for="street_address">Street Address</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="street_address"
                     type="text"
                     name="street_address"
@@ -147,7 +113,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="street_number">Street Number</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="street_number"
                     type="text"
                     name="street_number"
@@ -158,7 +124,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="zip_code">Zip Code</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="zip_code"
                     type="text"
                     name="zip_code"
@@ -169,7 +135,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="city">City</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="city"
                     type="text"
                     name="city"
@@ -180,7 +146,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="state_region">State / Region</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="state_region"
                     type="text"
                     name="state_region"
@@ -191,7 +157,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="country_code">Country Code</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="country_code"
                     type="text"
                     name="country_code"
@@ -203,7 +169,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="cellphone">Cellphone</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="cellphone"
                     type="text"
                     name="cellphone"
@@ -214,7 +180,7 @@ declare(strict_types=1);
             <div class="ue-field ue-field--full">
                 <label for="secondary_email">Secondary Email</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="secondary_email"
                     type="email"
                     name="secondary_email"
@@ -228,7 +194,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="date_of_birth">Date of Birth</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="date_of_birth"
                     type="date"
                     name="date_of_birth"
@@ -239,7 +205,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="place_of_birth">Place of Birth</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="place_of_birth"
                     type="text"
                     name="place_of_birth"
@@ -250,7 +216,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="nationality">Nationality</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="nationality"
                     type="text"
                     name="nationality"
@@ -261,7 +227,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="id_passport_number">ID / Passport Number</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="id_passport_number"
                     type="text"
                     name="id_passport_number"
@@ -272,7 +238,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="gender">Gender</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="gender"
                     type="text"
                     name="gender"
@@ -283,7 +249,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="weight">Weight</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="weight"
                     type="text"
                     name="weight"
@@ -294,7 +260,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="marital_status">Marital Status</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="marital_status"
                     type="text"
                     name="marital_status"
@@ -304,7 +270,7 @@ declare(strict_types=1);
         </div>
 
         <div class="ue-actions-row">
-            <button class="ue-btn ue-btn--primary" type="submit">
+            <button class="app-btn app-btn-primary ue-btn ue-btn--primary" type="submit">
                 <?php echo aue_svg('save'); ?>
                 <span>Save Profile</span>
             </button>

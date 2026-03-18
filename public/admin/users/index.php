@@ -77,11 +77,11 @@ function ua_status_class(string $status): string
     $status = strtolower(trim($status));
 
     return match ($status) {
-        'active' => 'ua-badge ua-badge--ok',
-        'pending_activation' => 'ua-badge ua-badge--warn',
-        'locked' => 'ua-badge ua-badge--danger',
-        'retired' => 'ua-badge ua-badge--muted',
-        default => 'ua-badge ua-badge--neutral',
+        'active' => 'app-badge app-badge-success',
+        'pending_activation' => 'app-badge app-badge-warn',
+        'locked' => 'app-badge app-badge-danger',
+        'retired' => 'app-badge app-badge-muted',
+        default => 'app-badge app-badge-neutral',
     };
 }
 
@@ -90,40 +90,42 @@ function ua_role_class(string $role): string
     $role = strtolower(trim($role));
 
     return match ($role) {
-        'admin' => 'ua-badge ua-badge--accent',
-        'supervisor', 'instructor', 'chief_instructor' => 'ua-badge ua-badge--sky',
-        'student' => 'ua-badge ua-badge--neutral',
-        default => 'ua-badge ua-badge--neutral',
+        'admin' => 'app-badge app-badge-accent',
+        'supervisor', 'instructor', 'chief_instructor' => 'app-badge app-badge-sky',
+        'student' => 'app-badge app-badge-neutral',
+        default => 'app-badge app-badge-neutral',
     };
 }
 
 function ua_completeness_class(int $missingCount): string
 {
-    return $missingCount > 0 ? 'ua-badge ua-badge--warn' : 'ua-badge ua-badge--ok';
+    return $missingCount > 0
+        ? 'app-badge app-badge-warn'
+        : 'app-badge app-badge-success';
 }
 
 function ua_validity_class(?string $validUntil): string
 {
     if (!$validUntil) {
-        return 'ua-badge ua-badge--neutral';
+        return 'app-badge app-badge-neutral';
     }
 
     $today = strtotime(date('Y-m-d'));
     $target = strtotime($validUntil);
     if (!$target) {
-        return 'ua-badge ua-badge--neutral';
+        return 'app-badge app-badge-neutral';
     }
 
     $days = (int)floor(($target - $today) / 86400);
 
     if ($days < 0) {
-        return 'ua-badge ua-badge--danger';
+        return 'app-badge app-badge-danger';
     }
     if ($days <= 30) {
-        return 'ua-badge ua-badge--warn';
+        return 'app-badge app-badge-warn';
     }
 
-    return 'ua-badge ua-badge--ok';
+    return 'app-badge app-badge-success';
 }
 
 function ua_validity_label(?string $validUntil): string
@@ -159,21 +161,21 @@ function ua_security_badges(array $row): array
 
     if ((int)($row['must_change_password'] ?? 0) === 1) {
         $badges[] = array(
-            'class' => 'ua-badge ua-badge--warn',
+            'class' => 'app-badge app-badge-warn',
             'label' => 'Password Update Required',
         );
     }
 
     if (strtolower((string)($row['status'] ?? '')) === 'locked') {
         $badges[] = array(
-            'class' => 'ua-badge ua-badge--danger',
+            'class' => 'app-badge app-badge-danger',
             'label' => 'Locked',
         );
     }
 
     if (strtolower((string)($row['status'] ?? '')) === 'pending_activation') {
         $badges[] = array(
-            'class' => 'ua-badge ua-badge--warn',
+            'class' => 'app-badge app-badge-warn',
             'label' => 'Activation Pending',
         );
     }
@@ -349,15 +351,6 @@ cw_header('User Accounts');
 .ua-field-label{font-size:12px;font-weight:670;letter-spacing:.02em;color:var(--text-muted)}
 .ua-input-wrap{position:relative}
 .ua-input-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:#8a97ab;pointer-events:none}
-.ua-input,.ua-select{width:100%;height:44px;border-radius:14px;border:1px solid rgba(15,23,42,0.08);background:#fff;box-sizing:border-box;color:var(--text-strong);font-size:14px;font-weight:560;outline:none;transition:border-color .16s ease, box-shadow .16s ease}
-.ua-input{padding:0 14px 0 40px}
-.ua-select{padding:0 14px}
-.ua-input:focus,.ua-select:focus{border-color:rgba(82,133,212,0.45);box-shadow:0 0 0 4px rgba(110,174,252,0.12)}
-.ua-filter-actions{display:flex;align-items:flex-end;gap:10px}
-.ua-filter-btn{height:44px;padding:0 16px;border:none;border-radius:14px;display:inline-flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(180deg,#17345d 0%,#102440 100%);color:#fff;text-decoration:none;font-size:14px;font-weight:680;cursor:pointer;box-shadow:0 10px 22px rgba(16,36,64,0.14)}
-.ua-filter-btn:hover{transform:translateY(-1px)}
-.ua-filter-btn--ghost{background:#fff;color:var(--text-strong);border:1px solid rgba(15,23,42,0.08);box-shadow:none}
-.ua-filter-btn svg{width:16px;height:16px;flex:0 0 16px}
 .ua-list-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:24px 0 14px 0}
 .ua-list-title{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:730;letter-spacing:-0.02em;color:var(--text-strong)}
 .ua-list-title-icon{width:18px;height:18px;color:var(--text-muted)}
@@ -378,19 +371,7 @@ cw_header('User Accounts');
 .ua-meta-value{margin-top:6px;color:var(--text-strong);font-size:14px;font-weight:630;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ua-card-side{display:flex;flex-direction:column;gap:12px}
 .ua-badge-grid{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end}
-.ua-badge{min-height:34px;padding:0 13px;display:inline-flex;align-items:center;justify-content:center;border-radius:999px;border:1px solid rgba(15,23,42,0.08);background:#f8fafc;color:#324155;font-size:12px;font-weight:700;letter-spacing:.02em;white-space:nowrap}
-.ua-badge--ok{background:rgba(32,135,90,0.10);color:#1f7a54;border-color:rgba(32,135,90,0.18)}
-.ua-badge--warn{background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.18)}
-.ua-badge--danger{background:rgba(185,54,54,0.10);color:#ac2f2f;border-color:rgba(185,54,54,0.18)}
-.ua-badge--muted{background:rgba(15,23,42,0.06);color:#637287;border-color:rgba(15,23,42,0.08)}
-.ua-badge--accent{background:rgba(32,84,176,0.10);color:#2557b3;border-color:rgba(32,84,176,0.18)}
-.ua-badge--sky{background:rgba(48,124,183,0.10);color:#246ea9;border-color:rgba(48,124,183,0.18)}
-.ua-badge--neutral{background:rgba(86,112,153,0.10);color:#405a82;border-color:rgba(86,112,153,0.16)}
 .ua-card-actions{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:10px}
-.ua-card-action{min-height:40px;padding:0 14px;display:inline-flex;align-items:center;gap:9px;border-radius:12px;text-decoration:none;color:var(--text-strong);font-size:13px;font-weight:680;border:1px solid rgba(15,23,42,0.08);background:#fff;transition:transform .16s ease,border-color .16s ease,background .16s ease}
-.ua-card-action:hover{transform:translateY(-1px);border-color:rgba(16,36,64,0.16);background:#f9fbfe}
-.ua-card-action--primary{background:linear-gradient(180deg,#17345d 0%,#102440 100%);color:#fff;border-color:transparent;box-shadow:0 10px 22px rgba(16,36,64,0.13)}
-.ua-card-action svg{width:15px;height:15px;flex:0 0 15px}
 .ua-card-foot{margin-top:16px;padding-top:16px;border-top:1px solid rgba(15,23,42,0.06);display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
 .ua-foot-note{color:var(--text-muted);font-size:13px;font-weight:560}
 .ua-empty{padding:34px 28px}
@@ -483,7 +464,7 @@ cw_header('User Accounts');
                         <span class="ua-input-icon"><?php echo ua_svg('search'); ?></span>
                         <input
                             id="ua-q"
-                            class="ua-input"
+                            class="app-input ua-input"
                             type="text"
                             name="q"
                             value="<?php echo h($q); ?>"
@@ -493,7 +474,7 @@ cw_header('User Accounts');
 
                 <div class="ua-field">
                     <label class="ua-field-label" for="ua-role">Role</label>
-                    <select class="ua-select" id="ua-role" name="role">
+                    <select class="app-select ua-select" id="ua-role" name="role">
                         <option value="">All roles</option>
                         <option value="admin"<?php echo $roleFilter === 'admin' ? ' selected' : ''; ?>>Admin</option>
                         <option value="supervisor"<?php echo $roleFilter === 'supervisor' ? ' selected' : ''; ?>>Supervisor</option>
@@ -503,7 +484,7 @@ cw_header('User Accounts');
 
                 <div class="ua-field">
                     <label class="ua-field-label" for="ua-status">Status</label>
-                    <select class="ua-select" id="ua-status" name="status">
+                    <select class="app-select ua-select" id="ua-status" name="status">
                         <option value="">All statuses</option>
                         <option value="active"<?php echo $statusFilter === 'active' ? ' selected' : ''; ?>>Active</option>
                         <option value="pending_activation"<?php echo $statusFilter === 'pending_activation' ? ' selected' : ''; ?>>Pending Activation</option>
@@ -514,7 +495,7 @@ cw_header('User Accounts');
 
                 <div class="ua-field">
                     <label class="ua-field-label" for="ua-completeness">Completeness</label>
-                    <select class="ua-select" id="ua-completeness" name="completeness">
+                    <select class="app-select ua-select" id="ua-completeness" name="completeness">
                         <option value="">All profiles</option>
                         <option value="complete"<?php echo $completenessFilter === 'complete' ? ' selected' : ''; ?>>Complete</option>
                         <option value="incomplete"<?php echo $completenessFilter === 'incomplete' ? ' selected' : ''; ?>>Incomplete</option>
@@ -523,7 +504,7 @@ cw_header('User Accounts');
 
                 <div class="ua-field">
                     <label class="ua-field-label" for="ua-validity">Validity</label>
-                    <select class="ua-select" id="ua-validity" name="validity">
+                    <select class="app-select ua-select" id="ua-validity" name="validity">
                         <option value="">Any validity</option>
                         <option value="expiring_soon"<?php echo $validityFilter === 'expiring_soon' ? ' selected' : ''; ?>>Expiring Soon</option>
                         <option value="expired"<?php echo $validityFilter === 'expired' ? ' selected' : ''; ?>>Expired</option>
@@ -533,7 +514,7 @@ cw_header('User Accounts');
 
                 <div class="ua-field">
                     <label class="ua-field-label" for="ua-security">Security</label>
-                    <select class="ua-select" id="ua-security" name="security">
+                    <select class="app-select ua-select" id="ua-security" name="security">
                         <option value="">Any security state</option>
                         <option value="password_update"<?php echo $securityFilter === 'password_update' ? ' selected' : ''; ?>>Password Update Required</option>
                         <option value="locked"<?php echo $securityFilter === 'locked' ? ' selected' : ''; ?>>Locked</option>
@@ -542,12 +523,12 @@ cw_header('User Accounts');
             </div>
 
             <div class="ua-filter-actions" style="margin-top:14px;">
-                <button class="ua-filter-btn" type="submit">
+                <button class="app-btn app-btn-primary ua-filter-btn" type="submit">
                     <?php echo ua_svg('search'); ?>
                     <span>Apply Filters</span>
                 </button>
 
-                <a class="ua-filter-btn ua-filter-btn--ghost" href="/admin/users/index.php">
+                <a class="app-btn app-btn-secondary ua-filter-btn ua-filter-btn--ghost" href="/admin/users/index.php">
                     <?php echo ua_svg('check'); ?>
                     <span>Clear</span>
                 </a>
@@ -654,22 +635,22 @@ cw_header('User Accounts');
                             </div>
 
                             <div class="ua-card-actions">
-                                <a class="ua-card-action ua-card-action--primary" href="/admin/users/edit.php?id=<?php echo $userId; ?>">
+                                <a class="app-btn app-btn-primary ua-card-action ua-card-action--primary" href="/admin/users/edit.php?id=<?php echo $userId; ?>">
                                     <?php echo ua_svg('open'); ?>
                                     <span>Open Workspace</span>
                                 </a>
 
-                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>&tab=account">
+                                <a class="app-btn app-btn-secondary ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>&tab=account">
                                     <?php echo ua_svg('mail'); ?>
                                     <span>Activation</span>
                                 </a>
 
-                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>&tab=security">
+                                <a class="app-btn app-btn-secondary ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>&tab=security">
                                     <?php echo ua_svg('shield'); ?>
                                     <span>Security</span>
                                 </a>
 
-                                <a class="ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>&tab=audit">
+                                <a class="app-btn app-btn-secondary ua-card-action" href="/admin/users/edit.php?id=<?php echo $userId; ?>&tab=audit">
                                     <?php echo ua_svg('archive'); ?>
                                     <span>Audit</span>
                                 </a>

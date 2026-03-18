@@ -167,37 +167,6 @@ cw_header('User Workspace');
     gap:10px;
     margin-top:18px;
 }
-.ue-header-actions{
-    display:flex;
-    flex-wrap:wrap;
-    gap:10px;
-    justify-content:flex-end;
-}
-.ue-action{
-    height:40px;
-    display:inline-flex;
-    align-items:center;
-    gap:10px;
-    padding:0 16px;
-    border-radius:999px;
-    border:1px solid rgba(255,255,255,0.12);
-    background:rgba(255,255,255,0.08);
-    color:#fff;
-    text-decoration:none;
-    font-size:13px;
-    font-weight:650;
-    letter-spacing:.01em;
-    transition:background .16s ease, transform .16s ease, border-color .16s ease;
-}
-.ue-action:hover{
-    background:rgba(255,255,255,0.13);
-    transform:translateY(-1px);
-}
-.ue-action svg{
-    width:16px;
-    height:16px;
-    flex:0 0 16px;
-}
 .ue-badge{
     min-height:34px;
     padding:0 13px;
@@ -216,7 +185,7 @@ cw_header('User Workspace');
 .ue-badge--ok{
     background:rgba(32,135,90,0.12);
     border-color:rgba(32,135,90,0.18);
-    color:#d9fff0;
+    color:#1f7a54;
 }
 .ue-badge--warn{
     background:rgba(196,118,11,0.14);
@@ -276,31 +245,6 @@ cw_header('User Workspace');
 .ue-tab{
     min-height:42px;
     padding:0 14px;
-    border-radius:12px;
-    display:inline-flex;
-    align-items:center;
-    gap:9px;
-    text-decoration:none;
-    color:var(--text-muted);
-    font-size:13px;
-    font-weight:700;
-    letter-spacing:.01em;
-    border:1px solid transparent;
-}
-.ue-tab:hover{
-    background:#f6f9fd;
-    color:var(--text-strong);
-}
-.ue-tab.is-active{
-    background:linear-gradient(180deg,#17345d 0%,#102440 100%);
-    color:#fff;
-    border-color:transparent;
-    box-shadow:0 10px 22px rgba(16,36,64,0.13);
-}
-.ue-tab svg{
-    width:15px;
-    height:15px;
-    flex:0 0 15px;
 }
 .ue-grid{
     display:grid;
@@ -392,9 +336,6 @@ cw_header('User Workspace');
         flex-direction:column;
         align-items:flex-start;
     }
-    .ue-header-actions{
-        justify-content:flex-start;
-    }
 }
 @media (max-width:820px){
     .ue-title{
@@ -413,7 +354,7 @@ cw_header('User Workspace');
     <section class="app-section-hero">
         <a class="ue-back-link" href="/admin/users/index.php">
             <?php echo aue_svg('archive'); ?>
-            <span>Back to User Accounts</span>
+            <span>Back to Users</span>
         </a>
 
         <div class="hero-overline">Operations · User Accounts</div>
@@ -453,41 +394,23 @@ cw_header('User Workspace');
                     </div>
                 </div>
             </div>
-
-            <div class="ue-header-actions">
-                <a class="ue-action" href="<?php echo aue_edit_url($userId, 'account'); ?>">
-                    <?php echo aue_svg('mail'); ?>
-                    <span>Account</span>
-                </a>
-
-                <a class="ue-action" href="<?php echo aue_edit_url($userId, 'profile'); ?>">
-                    <?php echo aue_svg('profile'); ?>
-                    <span>Profile</span>
-                </a>
-
-                <a class="ue-action" href="<?php echo aue_edit_url($userId, 'emergency'); ?>">
-                    <?php echo aue_svg('warning'); ?>
-                    <span>Emergency</span>
-                </a>
-
-                <a class="ue-action" href="<?php echo aue_edit_url($userId, 'billing'); ?>">
-                    <?php echo aue_svg('billing'); ?>
-                    <span>Billing</span>
-                </a>
-            </div>
         </div>
     </section>
 
     <section class="card ue-tabs-card">
-        <nav class="ue-tabs" aria-label="User workspace sections">
-            <a class="ue-tab<?php echo $activeTab === 'account' ? ' is-active' : ''; ?>" href="<?php echo aue_edit_url($userId, 'account'); ?>"><?php echo aue_svg('users'); ?><span>Account</span></a>
-            <a class="ue-tab<?php echo $activeTab === 'profile' ? ' is-active' : ''; ?>" href="<?php echo aue_edit_url($userId, 'profile'); ?>"><?php echo aue_svg('profile'); ?><span>Profile</span></a>
-            <a class="ue-tab<?php echo $activeTab === 'emergency' ? ' is-active' : ''; ?>" href="<?php echo aue_edit_url($userId, 'emergency'); ?>"><?php echo aue_svg('warning'); ?><span>Emergency</span></a>
-            <a class="ue-tab<?php echo $activeTab === 'billing' ? ' is-active' : ''; ?>" href="<?php echo aue_edit_url($userId, 'billing'); ?>"><?php echo aue_svg('billing'); ?><span>Billing</span></a>
-            <a class="ue-tab" href="javascript:void(0)" style="opacity:.45;pointer-events:none;"><?php echo aue_svg('mail'); ?><span>Integrations</span></a>
-            <a class="ue-tab" href="javascript:void(0)" style="opacity:.45;pointer-events:none;"><?php echo aue_svg('lock'); ?><span>Credentials Vault</span></a>
-            <a class="ue-tab" href="javascript:void(0)" style="opacity:.45;pointer-events:none;"><?php echo aue_svg('shield'); ?><span>Security</span></a>
-            <a class="ue-tab" href="javascript:void(0)" style="opacity:.45;pointer-events:none;"><?php echo aue_svg('activity'); ?><span>Audit</span></a>
+        	<nav class="ue-tabs" aria-label="User workspace sections">
+            <a class="app-tab-pill ue-tab" href="/admin/users/index.php">
+    		<?php echo aue_svg('archive'); ?>
+    		<span>Back to Users</span>
+			</a>
+			<a class="app-tab-pill ue-tab<?php echo $activeTab === 'account' ? ' is-active' : ''; ?>" href="<?php echo aue_edit_url($userId, 'account'); ?>"><?php echo aue_svg('users'); ?><span>Account</span></a>
+            <a class="app-tab-pill ue-tab<?php echo $activeTab === 'profile' ? ' is-active' : ''; ?>" href="<?php echo aue_edit_url($userId, 'profile'); ?>"><?php echo aue_svg('profile'); ?><span>Profile</span></a>
+            <a class="app-tab-pill ue-tab<?php echo $activeTab === 'emergency' ? ' is-active' : ''; ?>" href="<?php echo aue_edit_url($userId, 'emergency'); ?>"><?php echo aue_svg('warning'); ?><span>Emergency</span></a>
+            <a class="app-tab-pill ue-tab<?php echo $activeTab === 'billing' ? ' is-active' : ''; ?>" href="<?php echo aue_edit_url($userId, 'billing'); ?>"><?php echo aue_svg('billing'); ?><span>Billing</span></a>
+            <a class="app-tab-pill ue-tab" href="javascript:void(0)" style="opacity:.45;pointer-events:none;"><?php echo aue_svg('mail'); ?><span>Integrations</span></a>
+            <a class="app-tab-pill ue-tab" href="javascript:void(0)" style="opacity:.45;pointer-events:none;"><?php echo aue_svg('lock'); ?><span>Credentials Vault</span></a>
+            <a class="app-tab-pill ue-tab" href="javascript:void(0)" style="opacity:.45;pointer-events:none;"><?php echo aue_svg('shield'); ?><span>Security</span></a>
+            <a class="app-tab-pill ue-tab" href="javascript:void(0)" style="opacity:.45;pointer-events:none;"><?php echo aue_svg('activity'); ?><span>Audit</span></a>
         </nav>
     </section>
 

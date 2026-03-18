@@ -34,20 +34,8 @@ declare(strict_types=1);
             width:100%;
             height:44px;
             border-radius:14px;
-            border:1px solid rgba(15,23,42,0.08);
-            background:#fff;
             box-sizing:border-box;
-            color:var(--text-strong);
-            font-size:14px;
-            font-weight:560;
-            outline:none;
-            transition:border-color .16s ease, box-shadow .16s ease;
             padding:0 14px;
-        }
-        .ue-input:focus,
-        .ue-select:focus{
-            border-color:rgba(82,133,212,0.45);
-            box-shadow:0 0 0 4px rgba(110,174,252,0.12);
         }
         .ue-checkbox{
             display:inline-flex;
@@ -72,28 +60,6 @@ declare(strict_types=1);
             min-height:42px;
             padding:0 16px;
             border-radius:12px;
-            border:1px solid rgba(15,23,42,0.08);
-            display:inline-flex;
-            align-items:center;
-            gap:9px;
-            background:#fff;
-            color:var(--text-strong);
-            text-decoration:none;
-            font-size:13px;
-            font-weight:680;
-            cursor:pointer;
-            transition:transform .16s ease,border-color .16s ease,background .16s ease;
-        }
-        .ue-btn:hover{
-            transform:translateY(-1px);
-            border-color:rgba(16,36,64,0.16);
-            background:#f9fbfe;
-        }
-        .ue-btn--primary{
-            background:linear-gradient(180deg,#17345d 0%,#102440 100%);
-            color:#fff;
-            border-color:transparent;
-            box-shadow:0 10px 22px rgba(16,36,64,0.13);
         }
         .ue-btn svg{
             width:15px;
@@ -179,7 +145,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="first_name">First Name</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="first_name"
                     type="text"
                     name="first_name"
@@ -191,7 +157,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="last_name">Last Name</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="last_name"
                     type="text"
                     name="last_name"
@@ -203,7 +169,7 @@ declare(strict_types=1);
             <div class="ue-field ue-field--full">
                 <label for="email">Primary Email</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="email"
                     type="email"
                     name="email"
@@ -215,7 +181,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="username">Username</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="username"
                     type="text"
                     name="username"
@@ -225,7 +191,7 @@ declare(strict_types=1);
 
             <div class="ue-field">
                 <label for="role">Role</label>
-                <select class="ue-select" id="role" name="role">
+                <select class="app-select ue-select" id="role" name="role">
                     <option value="admin"<?php echo (string)($user['role'] ?? '') === 'admin' ? ' selected' : ''; ?>>Admin</option>
                     <option value="supervisor"<?php echo (string)($user['role'] ?? '') === 'supervisor' ? ' selected' : ''; ?>>Supervisor</option>
                     <option value="student"<?php echo (string)($user['role'] ?? '') === 'student' ? ' selected' : ''; ?>>Student</option>
@@ -234,7 +200,7 @@ declare(strict_types=1);
 
             <div class="ue-field">
                 <label for="status">Status</label>
-                <select class="ue-select" id="status" name="status">
+                <select class="app-select ue-select" id="status" name="status">
                     <option value="pending_activation"<?php echo (string)($user['status'] ?? '') === 'pending_activation' ? ' selected' : ''; ?>>Pending Activation</option>
                     <option value="active"<?php echo (string)($user['status'] ?? '') === 'active' ? ' selected' : ''; ?>>Active</option>
                     <option value="locked"<?php echo (string)($user['status'] ?? '') === 'locked' ? ' selected' : ''; ?>>Locked</option>
@@ -245,7 +211,7 @@ declare(strict_types=1);
             <div class="ue-field">
                 <label for="account_valid_until">Account Valid Until</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="account_valid_until"
                     type="date"
                     name="account_valid_until"
@@ -266,7 +232,7 @@ declare(strict_types=1);
 
                     <div style="min-width:260px;flex:1 1 auto;">
                         <input
-                            class="ue-input"
+                            class="app-input ue-input"
                             style="padding-top:10px;height:auto;min-height:44px;"
                             id="photo"
                             type="file"
@@ -293,14 +259,14 @@ declare(strict_types=1);
         </div>
 
         <div class="ue-actions-row">
-            <button class="ue-btn ue-btn--primary" type="submit">
+            <button class="app-btn app-btn-primary ue-btn ue-btn--primary" type="submit">
                 <?php echo aue_svg('save'); ?>
                 <span>Save Account</span>
             </button>
 
-            <a class="ue-btn" href="/admin/users/index.php">
+            <a class="app-btn app-btn-secondary ue-btn" href="/admin/users/index.php">
                 <?php echo aue_svg('archive'); ?>
-                <span>Back to Roster</span>
+                <span>Back to Users</span>
             </a>
         </div>
     </form>

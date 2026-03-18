@@ -33,19 +33,8 @@ declare(strict_types=1);
             width:100%;
             height:44px;
             border-radius:14px;
-            border:1px solid rgba(15,23,42,0.08);
-            background:#fff;
             box-sizing:border-box;
-            color:var(--text-strong);
-            font-size:14px;
-            font-weight:560;
-            outline:none;
-            transition:border-color .16s ease, box-shadow .16s ease;
             padding:0 14px;
-        }
-        .ue-input:focus{
-            border-color:rgba(82,133,212,0.45);
-            box-shadow:0 0 0 4px rgba(110,174,252,0.12);
         }
         .ue-actions-row{
             display:flex;
@@ -57,28 +46,6 @@ declare(strict_types=1);
             min-height:42px;
             padding:0 16px;
             border-radius:12px;
-            border:1px solid rgba(15,23,42,0.08);
-            display:inline-flex;
-            align-items:center;
-            gap:9px;
-            background:#fff;
-            color:var(--text-strong);
-            text-decoration:none;
-            font-size:13px;
-            font-weight:680;
-            cursor:pointer;
-            transition:transform .16s ease,border-color .16s ease,background .16s ease;
-        }
-        .ue-btn:hover{
-            transform:translateY(-1px);
-            border-color:rgba(16,36,64,0.16);
-            background:#f9fbfe;
-        }
-        .ue-btn--primary{
-            background:linear-gradient(180deg,#17345d 0%,#102440 100%);
-            color:#fff;
-            border-color:transparent;
-            box-shadow:0 10px 22px rgba(16,36,64,0.13);
         }
         .ue-btn svg{
             width:15px;
@@ -145,7 +112,7 @@ declare(strict_types=1);
             <div class="ue-field ue-field--full">
                 <label for="business_name">Business Name</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="business_name"
                     type="text"
                     name="business_name"
@@ -157,7 +124,7 @@ declare(strict_types=1);
             <div class="ue-field ue-field--full">
                 <label for="business_vat_tax_id">Business VAT / Tax ID</label>
                 <input
-                    class="ue-input"
+                    class="app-input ue-input"
                     id="business_vat_tax_id"
                     type="text"
                     name="business_vat_tax_id"
@@ -171,7 +138,7 @@ declare(strict_types=1);
         </div>
 
         <div class="ue-actions-row">
-            <button class="ue-btn ue-btn--primary" type="submit">
+            <button class="app-btn app-btn-primary ue-btn ue-btn--primary" type="submit">
                 <?php echo aue_svg('save'); ?>
                 <span>Save Billing Profile</span>
             </button>

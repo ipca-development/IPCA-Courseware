@@ -62,11 +62,11 @@ if (!function_exists('aue_status_class')) {
         $status = strtolower(trim($status));
 
         return match ($status) {
-            'active' => 'ue-badge ue-badge--ok',
-            'pending_activation' => 'ue-badge ue-badge--warn',
-            'locked' => 'ue-badge ue-badge--danger',
-            'retired' => 'ue-badge ue-badge--muted',
-            default => 'ue-badge ue-badge--neutral',
+            'active' => 'app-badge app-badge-success',
+            'pending_activation' => 'app-badge app-badge-warn',
+            'locked' => 'app-badge app-badge-danger',
+            'retired' => 'app-badge app-badge-muted',
+            default => 'app-badge app-badge-neutral',
         };
     }
 }
@@ -77,10 +77,10 @@ if (!function_exists('aue_role_class')) {
         $role = strtolower(trim($role));
 
         return match ($role) {
-            'admin' => 'ue-badge ue-badge--accent',
-            'supervisor', 'instructor', 'chief_instructor' => 'ue-badge ue-badge--sky',
-            'student' => 'ue-badge ue-badge--neutral',
-            default => 'ue-badge ue-badge--neutral',
+            'admin' => 'app-badge app-badge-accent',
+            'supervisor', 'instructor', 'chief_instructor' => 'app-badge app-badge-sky',
+            'student' => 'app-badge app-badge-neutral',
+            default => 'app-badge app-badge-neutral',
         };
     }
 }
@@ -88,7 +88,9 @@ if (!function_exists('aue_role_class')) {
 if (!function_exists('aue_completeness_class')) {
     function aue_completeness_class(int $missingCount): string
     {
-        return $missingCount > 0 ? 'ue-badge ue-badge--warn' : 'ue-badge ue-badge--ok';
+        return $missingCount > 0
+            ? 'app-badge app-badge-warn'
+            : 'app-badge app-badge-success';
     }
 }
 
@@ -96,25 +98,25 @@ if (!function_exists('aue_validity_class')) {
     function aue_validity_class(?string $validUntil): string
     {
         if (!$validUntil) {
-            return 'ue-badge ue-badge--neutral';
+            return 'app-badge app-badge-neutral';
         }
 
         $today = strtotime(date('Y-m-d'));
         $target = strtotime($validUntil);
         if (!$target) {
-            return 'ue-badge ue-badge--neutral';
+            return 'app-badge app-badge-neutral';
         }
 
         $days = (int)floor(($target - $today) / 86400);
 
         if ($days < 0) {
-            return 'ue-badge ue-badge--danger';
+            return 'app-badge app-badge-danger';
         }
         if ($days <= 30) {
-            return 'ue-badge ue-badge--warn';
+            return 'app-badge app-badge-warn';
         }
 
-        return 'ue-badge ue-badge--ok';
+        return 'app-badge app-badge-success';
     }
 }
 
