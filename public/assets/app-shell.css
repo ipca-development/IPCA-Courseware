@@ -27,6 +27,12 @@
   --nav-radius: 10px;
   --icon-rail-w: 24px;
   --icon-size: 19px;
+  
+  --ipca-blue-1: #0d1d34;
+  --ipca-blue-2: #102440;
+
+  --ipca-blue-gradient: linear-gradient(135deg, #0d1d34 0%, #102440 100%);	
+	
 }
 
 html, body{
@@ -572,4 +578,27 @@ body.app-shell-body{
     min-width:244px;
     max-width:244px;
   }
+	
+/* =========================
+   HERO SYSTEM (UNIFIED)
+   ========================= */
+
+.hero-card,
+.nt-hero,
+.ne-hero,
+.nv-hero,
+.hero {
+  background: var(--ipca-blue-gradient);
+  color: #ffffff;
+  border: none !important;
+}
+
+/* Fix text colors */
+.hero-card *,
+.nt-hero *,
+.ne-hero *,
+.nv-hero *,
+.hero * {
+  color: inherit !important;
+}	
 }
