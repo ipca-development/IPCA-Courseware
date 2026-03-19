@@ -34,6 +34,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <title>IPCA Academy Login</title>
 <link rel="stylesheet" href="/assets/app-shell.css">
 <style>
+html,
+body,
+body.app-shell-body.login-page,
+body.app-shell-body.login-page *{
+  font-family:"Manrope", sans-serif;
+}
+
 :root{
   color-scheme: light;
 }
@@ -197,7 +204,6 @@ body.app-shell-body.login-page{
   box-shadow:0 14px 28px rgba(16,36,64,0.14);
   cursor:pointer;
   transition:transform .16s ease, filter .16s ease;
-  font-family:inherit;
 }
 
 .login-passkey-btn:hover{
@@ -280,7 +286,6 @@ body.app-shell-body.login-page{
   outline:none;
   transition:border-color .16s ease, box-shadow .16s ease, transform .16s ease;
   padding:0 15px;
-  font-family:inherit;
 }
 
 .login-input:focus{
@@ -327,7 +332,6 @@ body.app-shell-body.login-page{
   cursor:pointer;
   box-shadow:0 14px 28px rgba(13,29,52,0.14);
   transition:transform .16s ease, filter .16s ease;
-  font-family:inherit;
 }
 
 .login-btn:hover{
@@ -434,7 +438,7 @@ body.app-shell-body.login-page{
   <div class="login-frame">
     <section class="login-brand" aria-label="IPCA Academy brand">
       <div class="login-brand-mark">
-        <img src="/assets/logo/ipca_logo_white.png" alt="IPCA Academy">
+        <img src="/assets/logo/ipca_logo_dark.png" alt="IPCA Academy">
       </div>
 
       <h1 class="login-brand-title">IPCA Academy</h1>
