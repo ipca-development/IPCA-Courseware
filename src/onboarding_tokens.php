@@ -264,7 +264,6 @@ if (!function_exists('ot_user_display_name')) {
     }
 }
 
-
 if (!function_exists('ot_support_email')) {
     function ot_support_email(): string
     {
@@ -302,7 +301,7 @@ if (!function_exists('ot_send_set_password_notification')) {
 
         $service = new NotificationService($pdo);
         $service->sendSystemNotification(
-    		'set_password_onboarding',
+            'set_password_onboarding',
             $email,
             $displayName,
             array(
