@@ -2,180 +2,89 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/bootstrap.php';
-require_once __DIR__ . '/../src/notification_service.php';
 
 ini_set('display_errors', '1');
 ini_set('display_startup_errors', '1');
 error_reporting(E_ALL);
 
-function fp_h(string $value): string
+cw_require_login();
+
+$currentUser = cw_current_user($pdo);
+$userId = (int)($currentUser['id'] ?? 0);
+
+if ($userId <= 0) {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
+$mustChangePassword = (int)($currentUser['must_change_password'] ?? 0) === 1;
+
+if (!$mustChangePassword) {
+    header('Location: /?flash=password_changed_success');
+    exit;
+}
+
+function fpc_h(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
 }
 
-function fp_client_ip(): string
+function fpc_display_name(array $user): string
 {
-    $keys = array(
-        'HTTP_CF_CONNECTING_IP',
-        'HTTP_X_FORWARDED_FOR',
-        'REMOTE_ADDR',
-    );
-
-    foreach ($keys as $key) {
-        $value = trim((string)($_SERVER[$key] ?? ''));
-        if ($value === '') {
-            continue;
-        }
-
-        if ($key === 'HTTP_X_FORWARDED_FOR') {
-            $parts = explode(',', $value);
-            $value = trim((string)($parts[0] ?? ''));
-        }
-
-        if ($value !== '') {
-            return substr($value, 0, 255);
-        }
+    $displayName = trim((string)($user['name'] ?? ''));
+    if ($displayName === '') {
+        $displayName = trim((string)($user['first_name'] ?? '') . ' ' . (string)($user['last_name'] ?? ''));
     }
-
-    return '';
-}
-
-function fp_base_url(): string
-{
-    $scheme = 'https';
-    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
-
-    if ($host === '') {
-        $appUrl = trim((string)($_ENV['APP_URL'] ?? ''));
-        if ($appUrl !== '') {
-            return rtrim($appUrl, '/');
-        }
-        return '';
+    if ($displayName === '') {
+        $displayName = trim((string)($user['email'] ?? 'User'));
     }
-
-    if (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') {
-        $scheme = 'https';
-    } elseif ((string)($_SERVER['SERVER_PORT'] ?? '') === '80') {
-        $scheme = 'http';
-    }
-
-    return $scheme . '://' . $host;
-}
-
-function fp_support_email(): string
-{
-    $candidates = array(
-        trim((string)($_ENV['SUPPORT_EMAIL'] ?? '')),
-        trim((string)($_ENV['MAIL_FROM_ADDRESS'] ?? '')),
-    );
-
-    foreach ($candidates as $candidate) {
-        if ($candidate !== '') {
-            return $candidate;
-        }
-    }
-
-    return 'support@ipca.aero';
+    return $displayName !== '' ? $displayName : 'User';
 }
 
 $flashType = '';
 $flashMessage = '';
-$email = '';
+$password = '';
+$passwordConfirm = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = trim((string)($_POST['email'] ?? ''));
-
     try {
-        if ($email === '') {
-            throw new RuntimeException('Please enter your email address.');
+        $password = (string)($_POST['password'] ?? '');
+        $passwordConfirm = (string)($_POST['password_confirm'] ?? '');
+
+        if ($password === '') {
+            throw new RuntimeException('Please enter a new password.');
         }
 
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            throw new RuntimeException('Please enter a valid email address.');
+        if (strlen($password) < 8) {
+            throw new RuntimeException('Your new password must be at least 8 characters long.');
+        }
+
+        if ($password !== $passwordConfirm) {
+            throw new RuntimeException('The password confirmation does not match.');
+        }
+
+        $passwordHash = password_hash($password, PASSWORD_DEFAULT);
+        if (!is_string($passwordHash) || $passwordHash === '') {
+            throw new RuntimeException('Failed to generate password hash.');
         }
 
         $stmt = $pdo->prepare("
-            SELECT id, name, first_name, last_name, email, status
-            FROM users
-            WHERE email = :email
+            UPDATE users
+            SET
+                password_hash = :password_hash,
+                must_change_password = 0,
+                password_changed_at = UTC_TIMESTAMP(),
+                updated_at = NOW()
+            WHERE id = :id
             LIMIT 1
         ");
         $stmt->execute(array(
-            ':email' => $email,
+            ':password_hash' => $passwordHash,
+            ':id' => $userId,
         ));
-        $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if (is_array($user)) {
-            $userId = (int)($user['id'] ?? 0);
-            $displayName = trim((string)($user['name'] ?? ''));
-
-            if ($displayName === '') {
-                $displayName = trim((string)($user['first_name'] ?? '') . ' ' . (string)($user['last_name'] ?? ''));
-            }
-            if ($displayName === '') {
-                $displayName = 'User';
-            }
-
-            $rawToken = bin2hex(random_bytes(32));
-            $tokenHash = hash('sha256', $rawToken);
-
-            $expiresAtTs = time() + (60 * 60);
-            $expiresAtDb = gmdate('Y-m-d H:i:s', $expiresAtTs);
-            $expiryMinutes = '60';
-            $expiryDisplay = date('D, M j, Y g:i A', $expiresAtTs);
-
-            $ip = fp_client_ip();
-            $userAgent = substr(trim((string)($_SERVER['HTTP_USER_AGENT'] ?? '')), 0, 1000);
-
-            $insert = $pdo->prepare("
-                INSERT INTO password_reset_tokens (
-                    user_id,
-                    token_hash,
-                    expires_at,
-                    used_at,
-                    requested_ip,
-                    requested_user_agent,
-                    created_at
-                ) VALUES (
-                    :user_id,
-                    :token_hash,
-                    :expires_at,
-                    NULL,
-                    :requested_ip,
-                    :requested_user_agent,
-                    NOW()
-                )
-            ");
-            $insert->execute(array(
-                ':user_id' => $userId,
-                ':token_hash' => $tokenHash,
-                ':expires_at' => $expiresAtDb,
-                ':requested_ip' => $ip !== '' ? $ip : null,
-                ':requested_user_agent' => $userAgent !== '' ? $userAgent : null,
-            ));
-
-            $baseUrl = fp_base_url();
-            $resetLink = rtrim($baseUrl, '/') . '/reset_password.php?token=' . urlencode($rawToken);
-
-            $service = new NotificationService($pdo);
-            $service->sendSystemNotification(
-                'password_reset_request',
-                (string)$user['email'],
-                $displayName,
-                array(
-                    'user_name' => $displayName,
-                    'reset_link' => $resetLink,
-                    'expiry_minutes' => $expiryMinutes,
-                    'expiry_datetime' => $expiryDisplay,
-                    'support_email' => fp_support_email(),
-                ),
-                null
-            );
-        }
-
-        $flashType = 'success';
-        $flashMessage = 'If an account with that email exists, a password reset link has been sent.';
-        $email = '';
+        header('Location: /login.php?flash=password_changed_success');
+        exit;
     } catch (Throwable $e) {
         $flashType = 'error';
         $flashMessage = $e->getMessage();
@@ -187,7 +96,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Forgot Password · IPCA Academy</title>
+<title>Password Update Required · IPCA Academy</title>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/assets/app-shell.css">
 <style>
@@ -492,12 +401,6 @@ body.access-page::after{
     line-height:1.5;
 }
 
-.access-flash--success{
-    background:rgba(22,101,52,0.18);
-    border:1px solid rgba(187,247,208,0.26);
-    color:#d1fae5;
-}
-
 .access-flash--error{
     background:rgba(190,24,93,0.16);
     border:1px solid rgba(254,205,211,0.22);
@@ -583,12 +486,6 @@ body.access-page::after{
     background:#ffffff;
     color:#102440;
     box-shadow:0 12px 24px rgba(0,0,0,0.14);
-}
-
-.access-btn--secondary{
-    background:rgba(255,255,255,0.14);
-    color:#ffffff;
-    border:1px solid rgba(255,255,255,0.12);
 }
 
 .access-meta{
@@ -733,47 +630,55 @@ body.access-page::after{
         </section>
 
         <div class="access-card-wrap">
-            <section class="access-card" aria-label="Forgot password">
+            <section class="access-card" aria-label="Password update required">
                 <div class="access-card-head">
                     <div class="access-card-overline">Access Control</div>
-                    <h2 class="access-card-title">Forgot Password</h2>
+                    <h2 class="access-card-title">Password Update Required</h2>
                     <p class="access-card-subtitle">
-                        Enter your email address to request a secure password reset link.
+                        Hello <?php echo fpc_h(fpc_display_name($currentUser)); ?>. You must set a new password before continuing.
                     </p>
                 </div>
 
                 <div class="access-card-body">
                     <?php if ($flashMessage !== ''): ?>
-                        <div class="access-flash <?php echo $flashType === 'success' ? 'access-flash--success' : 'access-flash--error'; ?>">
-                            <?php echo fp_h($flashMessage); ?>
+                        <div class="access-flash access-flash--error">
+                            <?php echo fpc_h($flashMessage); ?>
                         </div>
                     <?php endif; ?>
 
-                    <form method="post" action="/forgot_password.php" novalidate>
+                    <form method="post" action="/force_password_change.php" novalidate>
                         <div class="access-field">
-                            <label class="access-label" for="email">Email</label>
+                            <label class="access-label" for="password">New Password</label>
                             <input
                                 class="access-input"
-                                id="email"
-                                type="email"
-                                name="email"
-                                value="<?php echo fp_h($email); ?>"
-                                placeholder="you@example.com"
+                                id="password"
+                                type="password"
+                                name="password"
+                                value="<?php echo fpc_h($password); ?>"
                                 required
-                                autocomplete="email">
-                            <div class="access-help">
-                                For security, this form shows the same success message whether or not the email exists.
-                            </div>
+                                autocomplete="new-password">
+                            <div class="access-help">Use at least 8 characters.</div>
+                        </div>
+
+                        <div class="access-field">
+                            <label class="access-label" for="password_confirm">Confirm New Password</label>
+                            <input
+                                class="access-input"
+                                id="password_confirm"
+                                type="password"
+                                name="password_confirm"
+                                value="<?php echo fpc_h($passwordConfirm); ?>"
+                                required
+                                autocomplete="new-password">
                         </div>
 
                         <div class="access-actions">
-                            <button class="access-btn access-btn--primary" type="submit">Send Reset Link</button>
-                            <a class="access-btn access-btn--secondary" href="/login.php">Back to Login</a>
+                            <button class="access-btn access-btn--primary" type="submit">Save New Password</button>
                         </div>
                     </form>
 
                     <div class="access-meta">
-                        Reset links expire automatically and can only be used once.
+                        You cannot continue into the platform until this password update is completed.
                     </div>
                 </div>
             </section>
