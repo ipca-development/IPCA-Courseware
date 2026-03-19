@@ -587,7 +587,7 @@ if (!function_exists('aue_update_account_tab')) {
         $validUntil = aue_normalize_date((string)($_POST['account_valid_until'] ?? ''));
         $mustChange = isset($_POST['must_change_password']) ? 1 : 0;
 
-        $allowedRoles = array('admin', 'student', 'supervisor');
+        $allowedRoles = array('admin', 'student', 'supervisor', 'instructor', 'chief_instructor');
         $allowedStatuses = array('pending_activation', 'active', 'locked', 'retired');
 
         if ($firstName === '' || $lastName === '' || $email === '') {

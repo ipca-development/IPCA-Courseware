@@ -382,34 +382,13 @@ cw_header('Create User');
     flex-wrap:wrap;
     margin-top:18px;
 }
-.auc-btn{
-    min-height:42px;
-    padding:0 16px;
-    border-radius:12px;
-    border:1px solid rgba(15,23,42,0.08);
-    display:inline-flex;
-    align-items:center;
-    gap:9px;
-    background:#fff;
-    color:var(--text-strong);
-    text-decoration:none;
-    font-size:13px;
-    font-weight:680;
-    cursor:pointer;
-    transition:transform .16s ease,border-color .16s ease,background .16s ease;
+.auc-actions-row{
+    display:flex;
+    gap:10px;
+    flex-wrap:wrap;
+    margin-top:18px;
 }
-.auc-btn:hover{
-    transform:translateY(-1px);
-    border-color:rgba(16,36,64,0.16);
-    background:#f9fbfe;
-}
-.auc-btn--primary{
-    background:linear-gradient(180deg,#17345d 0%,#102440 100%);
-    color:#fff;
-    border-color:transparent;
-    box-shadow:0 10px 22px rgba(16,36,64,0.13);
-}
-.auc-btn svg{
+.auc-actions-row .app-btn svg{
     width:15px;
     height:15px;
     flex:0 0 15px;
@@ -552,16 +531,16 @@ cw_header('Create User');
                     </div>
 
                     <div class="auc-actions-row">
-                        <button class="auc-btn auc-btn--primary" type="submit">
-                            <?php echo aue_svg('save'); ?>
-                            <span>Create User</span>
-                        </button>
+    <button class="app-btn app-btn-primary" type="submit">
+        <?php echo aue_svg('save'); ?>
+        <span>Create User</span>
+    </button>
 
-                        <a class="auc-btn" href="/admin/users/index.php">
-                            <?php echo aue_svg('archive'); ?>
-                            <span>Back to Users</span>
-                        </a>
-                    </div>
+    <a class="app-btn app-btn-secondary" href="/admin/users/index.php">
+        <?php echo aue_svg('archive'); ?>
+        <span>Back to Users</span>
+    </a>
+					</div>
                 </form>
             </section>
         </div>

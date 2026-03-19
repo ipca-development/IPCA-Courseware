@@ -302,7 +302,7 @@ if (!function_exists('ot_send_set_password_notification')) {
 
         $service = new NotificationService($pdo);
         $service->sendSystemNotification(
-            'user_onboarding_set_password',
+    		'set_password_onboarding',
             $email,
             $displayName,
             array(
