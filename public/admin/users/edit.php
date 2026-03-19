@@ -40,7 +40,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     try {
-        switch ($section) {
+
+		
+		
+		        switch ($section) {
             case 'account':
                 aue_update_account_tab($pdo, $userId, $actorId);
                 aue_flash_redirect($userId, 'account', 'success', 'Account details updated.');
@@ -61,9 +64,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 aue_flash_redirect($userId, 'billing', 'success', 'Billing details updated.');
                 break;
 
+            case 'activate_user':
+                aue_activate_pending_user($pdo, $userId, $actorId);
+                aue_flash_redirect($userId, 'account', 'success', 'User activated and onboarding email sent.');
+                break;
+
             default:
                 aue_flash_redirect($userId, $postedTab, 'error', 'Unknown form action.');
         }
+		
+		
+		
     } catch (Throwable $e) {
         aue_flash_redirect($userId, $postedTab, 'error', $e->getMessage());
     }

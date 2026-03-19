@@ -1,5 +1,7 @@
 <?php
 declare(strict_types=1);
+
+$isPendingActivation = strtolower(trim((string)($user['status'] ?? ''))) === 'pending_activation';
 ?>
 
 <section class="card ue-card">
@@ -60,6 +62,12 @@ declare(strict_types=1);
             min-height:42px;
             padding:0 16px;
             border-radius:12px;
+        }
+        .ue-btn--warn{
+            background:linear-gradient(180deg,#b87410 0%,#9a6208 100%);
+            color:#fff;
+            border-color:transparent;
+            box-shadow:0 10px 22px rgba(154,98,8,0.18);
         }
         .ue-btn svg{
             width:15px;
@@ -127,6 +135,26 @@ declare(strict_types=1);
             font-size:14px;
             font-weight:630;
             word-break:break-word;
+        }
+        .ue-activation-panel{
+            margin-top:18px;
+            padding:18px;
+            border:1px solid rgba(196,118,11,0.14);
+            border-radius:18px;
+            background:rgba(196,118,11,0.06);
+        }
+        .ue-activation-title{
+            margin:0;
+            font-size:16px;
+            font-weight:760;
+            letter-spacing:-0.02em;
+            color:#8f5a07;
+        }
+        .ue-activation-text{
+            margin:10px 0 0 0;
+            color:#8f5a07;
+            font-size:13px;
+            line-height:1.65;
         }
         @media (max-width:900px){
             .ue-form-grid,
@@ -270,6 +298,28 @@ declare(strict_types=1);
             </a>
         </div>
     </form>
+
+    <?php if ($isPendingActivation): ?>
+        <div class="ue-activation-panel">
+            <h4 class="ue-activation-title">Activation Pending</h4>
+            <p class="ue-activation-text">
+                This user is currently in pending activation state. Activating the account will switch the user to Active and send a secure onboarding email with a one-time password setup link.
+            </p>
+
+            <form method="post" style="margin-top:14px;">
+                <input type="hidden" name="form_section" value="activate_user">
+                <input type="hidden" name="tab" value="account">
+                <input type="hidden" name="user_id" value="<?php echo (int)$userId; ?>">
+
+                <div class="ue-actions-row" style="margin-top:0;">
+                    <button class="app-btn ue-btn ue-btn--warn" type="submit" onclick="return confirm('Activate this user and send onboarding email?');">
+                        <?php echo aue_svg('mail'); ?>
+                        <span>Activate User &amp; Send Onboarding</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    <?php endif; ?>
 
     <div class="ue-info-panel">
         <div class="ue-info-grid">

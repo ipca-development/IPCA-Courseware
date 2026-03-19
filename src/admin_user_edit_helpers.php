@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/onboarding_tokens.php';
+
 if (!function_exists('aue_human_date')) {
     function aue_human_date(?string $date): string
     {
@@ -1138,4 +1140,80 @@ if (!function_exists('aue_recalculate_all_profile_requirements_status')) {
             }
         }
     }
+	
+	
+	
+	if (!function_exists('aue_activate_pending_user')) {
+    function aue_activate_pending_user(PDO $pdo, int $userId, int $actorId): void
+    {
+        if ($userId <= 0) {
+            throw new RuntimeException('Invalid user id.');
+        }
+
+        $stmt = $pdo->prepare("
+            SELECT id, name, first_name, last_name, email, status, must_change_password
+            FROM users
+            WHERE id = :id
+            LIMIT 1
+        ");
+        $stmt->execute(array(
+            ':id' => $userId,
+        ));
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if (!is_array($user)) {
+            throw new RuntimeException('User not found.');
+        }
+
+        $status = strtolower(trim((string)($user['status'] ?? '')));
+        if ($status !== 'pending_activation') {
+            throw new RuntimeException('Only pending-activation users can be activated.');
+        }
+
+        $email = trim((string)($user['email'] ?? ''));
+        if ($email === '') {
+            throw new RuntimeException('Cannot activate a user without an email address.');
+        }
+
+        $pdo->beginTransaction();
+
+        try {
+            $update = $pdo->prepare("
+                UPDATE users
+                SET
+                    status = 'active',
+                    must_change_password = 1,
+                    updated_by_user_id = :updated_by_user_id,
+                    updated_at = NOW()
+                WHERE id = :id
+                LIMIT 1
+            ");
+            $update->execute(array(
+                ':updated_by_user_id' => $actorId > 0 ? $actorId : null,
+                ':id' => $userId,
+            ));
+
+            $tokenRow = ot_create_token(
+                $pdo,
+                $userId,
+                'set_password',
+                $actorId > 0 ? $actorId : null,
+                60
+            );
+
+            $user['status'] = 'active';
+            $user['must_change_password'] = 1;
+
+            ot_send_set_password_notification($pdo, $user, $tokenRow);
+
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+}
+	
 }
