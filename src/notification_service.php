@@ -211,6 +211,242 @@ final class NotificationService
     }
 
     /**
+     * Send a non-progression system/account notification using the SAVED live template.
+     * This is intended for auth/account flows such as password reset.
+     * It does not create a training_progression_emails row.
+     */
+    public function sendSystemNotification(
+        string $notificationKey,
+        string $toEmail,
+        ?string $toName = '',
+        array $context = [],
+        ?int $actorUserId = null,
+        array $headers = []
+    ): array {
+        $toEmail = trim($toEmail);
+        $toName = trim((string)$toName);
+
+        if ($toEmail === '') {
+            throw new InvalidArgumentException('Missing recipient email.');
+        }
+        if (!filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+            throw new InvalidArgumentException('Invalid recipient email.');
+        }
+
+        $template = $this->getTemplateByKey($notificationKey);
+        if (!$template) {
+            throw new RuntimeException('Notification template not found: ' . $notificationKey);
+        }
+
+        if ((int)($template['is_enabled'] ?? 0) !== 1) {
+            $this->engine->logProgressionEvent([
+                'user_id' => 0,
+                'cohort_id' => 0,
+                'lesson_id' => 0,
+                'progress_test_id' => null,
+                'event_type' => 'notification_system',
+                'event_code' => 'system_notification_suppressed',
+                'event_status' => 'info',
+                'actor_type' => 'system',
+                'actor_user_id' => $actorUserId,
+                'event_time' => gmdate('Y-m-d H:i:s'),
+                'payload' => [
+                    'notification_key' => $notificationKey,
+                    'notification_channel' => self::CHANNEL_EMAIL,
+                    'notification_template_id' => (int)$template['id'],
+                    'reason' => 'disabled',
+                    'target_email' => $toEmail,
+                    'target_name' => $toName,
+                ],
+                'legal_note' => 'System notification suppressed because template is disabled.'
+            ]);
+
+            return [
+                'ok' => true,
+                'suppressed' => true,
+                'reason' => 'disabled',
+                'notification_key' => $notificationKey,
+                'provider' => null,
+                'message_id' => null,
+                'error' => null,
+            ];
+        }
+
+        $version = $this->getLatestTemplateVersion((int)$template['id']);
+        if (!$version) {
+            throw new RuntimeException('No live template version found for notification: ' . $notificationKey);
+        }
+
+        $variables = $this->decodeAllowedVariables((string)($version['allowed_variables_json'] ?? ''));
+        $normalizedContext = $this->normalizeContextValues($context);
+
+        $validation = $this->validateTemplateVariables(
+            (string)$version['subject_template'],
+            (string)$version['html_template'],
+            (string)($version['text_template'] ?? ''),
+            $variables,
+            $normalizedContext
+        );
+
+        if (!empty($validation['missing_required_variables'])) {
+            throw new RuntimeException(
+                'Missing required notification variables: ' . implode(', ', $validation['missing_required_variables'])
+            );
+        }
+
+        if (!empty($validation['unknown_tokens'])) {
+            throw new RuntimeException(
+                'Unknown notification template tokens: ' . implode(', ', $validation['unknown_tokens'])
+            );
+        }
+
+        $rendered = $this->renderDraft(
+            (string)$version['subject_template'],
+            (string)$version['html_template'],
+            (string)($version['text_template'] ?? ''),
+            $variables,
+            $normalizedContext
+        );
+
+        $mailPayload = [
+            'to' => [[
+                'email' => $toEmail,
+                'name' => $toName
+            ]],
+            'subject' => $rendered['subject'],
+            'html' => $rendered['html'],
+            'text' => $rendered['text'],
+            'headers' => array_merge([
+                'X-IPCA-Notification-Key' => $notificationKey,
+                'X-IPCA-Notification-Type' => 'system',
+            ], $headers),
+        ];
+
+        $result = cw_send_mail($mailPayload);
+
+        $this->engine->logProgressionEvent([
+            'user_id' => 0,
+            'cohort_id' => 0,
+            'lesson_id' => 0,
+            'progress_test_id' => null,
+            'event_type' => 'notification_system',
+            'event_code' => !empty($result['ok']) ? 'system_notification_sent' : 'system_notification_failed',
+            'event_status' => !empty($result['ok']) ? 'success' : 'warning',
+            'actor_type' => 'system',
+            'actor_user_id' => $actorUserId,
+            'event_time' => gmdate('Y-m-d H:i:s'),
+            'payload' => [
+                'notification_key' => $notificationKey,
+                'notification_channel' => self::CHANNEL_EMAIL,
+                'notification_template_id' => (int)$template['id'],
+                'notification_template_version_id' => (int)$version['id'],
+                'target_email' => $toEmail,
+                'target_name' => $toName,
+                'provider' => (string)($result['provider'] ?? 'smtp'),
+                'ok' => !empty($result['ok']) ? 1 : 0,
+                'message_id' => $result['message_id'] ?? null,
+                'error' => $result['error'] ?? null,
+                'context_keys' => array_keys($normalizedContext),
+            ],
+            'legal_note' => 'System/account notification send executed outside progression email queue.'
+        ]);
+
+        return [
+            'ok' => !empty($result['ok']),
+            'suppressed' => false,
+            'notification_key' => $notificationKey,
+            'provider' => (string)($result['provider'] ?? 'smtp'),
+            'message_id' => $result['message_id'] ?? null,
+            'error' => $result['error'] ?? null,
+            'validation' => $validation,
+            'rendered_subject' => $rendered['subject'],
+        ];
+    }
+
+    /**
+     * Render a non-progression live system/account notification using the SAVED live template.
+     * Useful for password-reset QA without sending.
+     */
+    public function renderSystemNotificationPreview(
+        string $notificationKey,
+        array $context = [],
+        ?int $actorUserId = null
+    ): array {
+        $template = $this->getTemplateByKey($notificationKey);
+        if (!$template) {
+            throw new RuntimeException('Notification template not found: ' . $notificationKey);
+        }
+
+        $version = $this->getLatestTemplateVersion((int)$template['id']);
+        if (!$version) {
+            throw new RuntimeException('No live template version found for notification: ' . $notificationKey);
+        }
+
+        $variables = $this->decodeAllowedVariables((string)($version['allowed_variables_json'] ?? ''));
+        $normalizedContext = $this->normalizeContextValues($context);
+
+        $validation = $this->validateTemplateVariables(
+            (string)$version['subject_template'],
+            (string)$version['html_template'],
+            (string)($version['text_template'] ?? ''),
+            $variables,
+            $normalizedContext
+        );
+
+        if (!empty($validation['missing_required_variables'])) {
+            throw new RuntimeException(
+                'Missing required notification variables: ' . implode(', ', $validation['missing_required_variables'])
+            );
+        }
+
+        if (!empty($validation['unknown_tokens'])) {
+            throw new RuntimeException(
+                'Unknown notification template tokens: ' . implode(', ', $validation['unknown_tokens'])
+            );
+        }
+
+        $rendered = $this->renderDraft(
+            (string)$version['subject_template'],
+            (string)$version['html_template'],
+            (string)($version['text_template'] ?? ''),
+            $variables,
+            $normalizedContext
+        );
+
+        $this->engine->logProgressionEvent([
+            'user_id' => 0,
+            'cohort_id' => 0,
+            'lesson_id' => 0,
+            'progress_test_id' => null,
+            'event_type' => 'notification_system',
+            'event_code' => 'system_notification_preview_rendered',
+            'event_status' => 'info',
+            'actor_type' => 'system',
+            'actor_user_id' => $actorUserId,
+            'event_time' => gmdate('Y-m-d H:i:s'),
+            'payload' => [
+                'notification_key' => $notificationKey,
+                'notification_channel' => self::CHANNEL_EMAIL,
+                'notification_template_id' => (int)$template['id'],
+                'notification_template_version_id' => (int)$version['id'],
+                'context_keys' => array_keys($normalizedContext),
+            ],
+            'legal_note' => 'System/account notification preview rendered without sending.'
+        ]);
+
+        return [
+            'ok' => true,
+            'notification_key' => $notificationKey,
+            'template_id' => (int)$template['id'],
+            'template_version_id' => (int)$version['id'],
+            'validation' => $validation,
+            'rendered_subject' => $rendered['subject'],
+            'rendered_html' => $rendered['html'],
+            'rendered_text' => $rendered['text'],
+        ];
+    }
+
+    /**
      * Queue/send real progression notification using SAVED live template.
      * Suppression happens BEFORE queue creation.
      * Returns suppression result or queue/send result.
