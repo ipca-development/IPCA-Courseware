@@ -205,6 +205,329 @@ if (!function_exists('aue_has_value')) {
     }
 }
 
+if (!function_exists('aue_missing_field_metadata_map')) {
+    function aue_missing_field_metadata_map(): array
+    {
+        static $map = null;
+
+        if ($map !== null) {
+            return $map;
+        }
+
+        $map = array(
+            'first_name' => array(
+                'key' => 'first_name',
+                'label' => 'First Name',
+                'tab' => 'account',
+                'anchor' => 'first_name',
+            ),
+            'last_name' => array(
+                'key' => 'last_name',
+                'label' => 'Last Name',
+                'tab' => 'account',
+                'anchor' => 'last_name',
+            ),
+            'primary_email' => array(
+                'key' => 'primary_email',
+                'label' => 'Primary Email',
+                'tab' => 'account',
+                'anchor' => 'email',
+            ),
+            'role' => array(
+                'key' => 'role',
+                'label' => 'Role',
+                'tab' => 'account',
+                'anchor' => 'role',
+            ),
+            'status' => array(
+                'key' => 'status',
+                'label' => 'Status',
+                'tab' => 'account',
+                'anchor' => 'status',
+            ),
+            'account_valid_until' => array(
+                'key' => 'account_valid_until',
+                'label' => 'Account Valid Until',
+                'tab' => 'account',
+                'anchor' => 'account_valid_until',
+            ),
+            'photo' => array(
+                'key' => 'photo',
+                'label' => 'Photo',
+                'tab' => 'account',
+                'anchor' => 'photo',
+            ),
+
+            'street_address' => array(
+                'key' => 'street_address',
+                'label' => 'Street Address',
+                'tab' => 'profile',
+                'anchor' => 'street_address',
+            ),
+            'street_number' => array(
+                'key' => 'street_number',
+                'label' => 'Street Number',
+                'tab' => 'profile',
+                'anchor' => 'street_number',
+            ),
+            'zip_code' => array(
+                'key' => 'zip_code',
+                'label' => 'Zip Code',
+                'tab' => 'profile',
+                'anchor' => 'zip_code',
+            ),
+            'city' => array(
+                'key' => 'city',
+                'label' => 'City',
+                'tab' => 'profile',
+                'anchor' => 'city',
+            ),
+            'state_region' => array(
+                'key' => 'state_region',
+                'label' => 'State / Region',
+                'tab' => 'profile',
+                'anchor' => 'state_region',
+            ),
+            'country_code' => array(
+                'key' => 'country_code',
+                'label' => 'Country',
+                'tab' => 'profile',
+                'anchor' => 'country_code',
+            ),
+            'cellphone' => array(
+                'key' => 'cellphone',
+                'label' => 'Cellphone',
+                'tab' => 'profile',
+                'anchor' => 'cellphone',
+            ),
+            'secondary_email' => array(
+                'key' => 'secondary_email',
+                'label' => 'Secondary Email',
+                'tab' => 'profile',
+                'anchor' => 'secondary_email',
+            ),
+            'date_of_birth' => array(
+                'key' => 'date_of_birth',
+                'label' => 'Date of Birth',
+                'tab' => 'profile',
+                'anchor' => 'date_of_birth',
+            ),
+            'place_of_birth' => array(
+                'key' => 'place_of_birth',
+                'label' => 'Place of Birth',
+                'tab' => 'profile',
+                'anchor' => 'place_of_birth',
+            ),
+            'nationality' => array(
+                'key' => 'nationality',
+                'label' => 'Nationality',
+                'tab' => 'profile',
+                'anchor' => 'nationality',
+            ),
+            'id_passport_number' => array(
+                'key' => 'id_passport_number',
+                'label' => 'ID / Passport Number',
+                'tab' => 'profile',
+                'anchor' => 'id_passport_number',
+            ),
+            'gender' => array(
+                'key' => 'gender',
+                'label' => 'Gender',
+                'tab' => 'profile',
+                'anchor' => 'gender',
+            ),
+            'weight_kg' => array(
+                'key' => 'weight_kg',
+                'label' => 'Weight',
+                'tab' => 'profile',
+                'anchor' => 'weight_kg',
+            ),
+            'height_cm' => array(
+                'key' => 'height_cm',
+                'label' => 'Height',
+                'tab' => 'profile',
+                'anchor' => 'height_cm',
+            ),
+            'hair_color' => array(
+                'key' => 'hair_color',
+                'label' => 'Hair Color',
+                'tab' => 'profile',
+                'anchor' => 'hair_color',
+            ),
+            'eye_color' => array(
+                'key' => 'eye_color',
+                'label' => 'Eye Color',
+                'tab' => 'profile',
+                'anchor' => 'eye_color',
+            ),
+            'marital_status' => array(
+                'key' => 'marital_status',
+                'label' => 'Marital Status',
+                'tab' => 'profile',
+                'anchor' => 'marital_status',
+            ),
+
+            'emergency_contact_1_name' => array(
+                'key' => 'emergency_contact_1_name',
+                'label' => 'Emergency Contact 1 Name',
+                'tab' => 'emergency',
+                'anchor' => 'contact_name_1',
+            ),
+            'emergency_contact_1_relationship' => array(
+                'key' => 'emergency_contact_1_relationship',
+                'label' => 'Emergency Contact 1 Relationship',
+                'tab' => 'emergency',
+                'anchor' => 'relationship_1',
+            ),
+            'emergency_contact_1_phone' => array(
+                'key' => 'emergency_contact_1_phone',
+                'label' => 'Emergency Contact 1 Phone',
+                'tab' => 'emergency',
+                'anchor' => 'phone_1',
+            ),
+            'emergency_contact_2_name' => array(
+                'key' => 'emergency_contact_2_name',
+                'label' => 'Emergency Contact 2 Name',
+                'tab' => 'emergency',
+                'anchor' => 'contact_name_2',
+            ),
+            'emergency_contact_2_relationship' => array(
+                'key' => 'emergency_contact_2_relationship',
+                'label' => 'Emergency Contact 2 Relationship',
+                'tab' => 'emergency',
+                'anchor' => 'relationship_2',
+            ),
+            'emergency_contact_2_phone' => array(
+                'key' => 'emergency_contact_2_phone',
+                'label' => 'Emergency Contact 2 Phone',
+                'tab' => 'emergency',
+                'anchor' => 'phone_2',
+            ),
+
+            'business_name' => array(
+                'key' => 'business_name',
+                'label' => 'Business Name',
+                'tab' => 'billing',
+                'anchor' => 'business_name',
+            ),
+            'business_vat_tax_id' => array(
+                'key' => 'business_vat_tax_id',
+                'label' => 'Business VAT / Tax ID',
+                'tab' => 'billing',
+                'anchor' => 'business_vat_tax_id',
+            ),
+            'billing_street_address' => array(
+                'key' => 'billing_street_address',
+                'label' => 'Billing Street Address',
+                'tab' => 'billing',
+                'anchor' => 'billing_street_address',
+            ),
+            'billing_street_number' => array(
+                'key' => 'billing_street_number',
+                'label' => 'Billing Street Number',
+                'tab' => 'billing',
+                'anchor' => 'billing_street_number',
+            ),
+            'billing_zip_code' => array(
+                'key' => 'billing_zip_code',
+                'label' => 'Billing Zip Code',
+                'tab' => 'billing',
+                'anchor' => 'billing_zip_code',
+            ),
+            'billing_city' => array(
+                'key' => 'billing_city',
+                'label' => 'Billing City',
+                'tab' => 'billing',
+                'anchor' => 'billing_city',
+            ),
+            'billing_state_region' => array(
+                'key' => 'billing_state_region',
+                'label' => 'Billing State / Region',
+                'tab' => 'billing',
+                'anchor' => 'billing_state_region',
+            ),
+            'billing_country_code' => array(
+                'key' => 'billing_country_code',
+                'label' => 'Billing Country',
+                'tab' => 'billing',
+                'anchor' => 'billing_country_code',
+            ),
+        );
+
+        return $map;
+    }
+}
+
+if (!function_exists('aue_missing_field_metadata')) {
+    function aue_missing_field_metadata(string $key): ?array
+    {
+        $map = aue_missing_field_metadata_map();
+        return $map[$key] ?? null;
+    }
+}
+
+if (!function_exists('aue_missing_field_item')) {
+    function aue_missing_field_item(string $key): ?array
+    {
+        $meta = aue_missing_field_metadata($key);
+        if (!is_array($meta)) {
+            return null;
+        }
+
+        return array(
+            'key' => (string)$meta['key'],
+            'label' => (string)$meta['label'],
+            'tab' => (string)$meta['tab'],
+            'anchor' => (string)$meta['anchor'],
+        );
+    }
+}
+
+if (!function_exists('aue_push_missing_field')) {
+    function aue_push_missing_field(array &$missing, string $key): void
+    {
+        $item = aue_missing_field_item($key);
+        if ($item !== null) {
+            $missing[$key] = $item;
+        }
+    }
+}
+
+if (!function_exists('aue_missing_field_url')) {
+    function aue_missing_field_url(int $userId, mixed $missingField): string
+    {
+        $item = null;
+
+        if (is_array($missingField)) {
+            if (isset($missingField['key'])) {
+                $item = aue_missing_field_item((string)$missingField['key']);
+            } elseif (isset($missingField['tab'], $missingField['anchor'])) {
+                $item = array(
+                    'key' => (string)($missingField['key'] ?? ''),
+                    'label' => (string)($missingField['label'] ?? ''),
+                    'tab' => (string)$missingField['tab'],
+                    'anchor' => (string)$missingField['anchor'],
+                );
+            }
+        } elseif (is_string($missingField) && $missingField !== '') {
+            $item = aue_missing_field_item($missingField);
+        }
+
+        if (!is_array($item) || trim((string)($item['tab'] ?? '')) === '') {
+            return aue_edit_url($userId, 'account');
+        }
+
+        $url = aue_edit_url($userId, (string)$item['tab']);
+        $anchor = trim((string)($item['anchor'] ?? ''));
+
+        if ($anchor !== '') {
+            $url .= '#' . rawurlencode($anchor);
+        }
+
+        return $url;
+    }
+}
+
 if (!function_exists('aue_svg')) {
     function aue_svg(string $name): string
     {
@@ -312,7 +635,6 @@ if (!function_exists('aue_empty_emergency_contact')) {
     }
 }
 
-
 if (!function_exists('aue_policy_raw')) {
     function aue_policy_raw(PDO $pdo, string $policyKey, string $scopeType = 'global', ?int $scopeId = null): ?string
     {
@@ -362,7 +684,6 @@ if (!function_exists('aue_policy_raw')) {
         return null;
     }
 }
-
 
 if (!function_exists('aue_policy_bool')) {
     function aue_policy_bool(PDO $pdo, string $policyKey, bool $default = false, string $scopeType = 'global', ?int $scopeId = null): bool
@@ -497,8 +818,11 @@ if (!function_exists('aue_load_user_workspace')) {
             $decoded = json_decode($missingFieldsJson, true);
             if (is_array($decoded)) {
                 foreach ($decoded as $item) {
-                    if (is_scalar($item)) {
-                        $missingFields[] = (string)$item;
+                    if (is_array($item) && isset($item['key'])) {
+                        $normalized = aue_missing_field_item((string)$item['key']);
+                        if ($normalized !== null) {
+                            $missingFields[] = $normalized;
+                        }
                     }
                 }
             }
@@ -579,7 +903,6 @@ if (!function_exists('aue_update_account_tab')) {
         $firstName = trim((string)($_POST['first_name'] ?? ''));
         $lastName = trim((string)($_POST['last_name'] ?? ''));
         $email = trim((string)($_POST['email'] ?? ''));
-        $username = trim((string)($_POST['username'] ?? ''));
         $role = trim((string)($_POST['role'] ?? ''));
         $status = trim((string)($_POST['status'] ?? ''));
         $validUntil = aue_normalize_date((string)($_POST['account_valid_until'] ?? ''));
@@ -619,25 +942,6 @@ if (!function_exists('aue_update_account_tab')) {
             throw new RuntimeException('Another user already uses this email address.');
         }
 
-        if ($username !== '') {
-            $dupUserStmt = $pdo->prepare("
-                SELECT id
-                FROM users
-                WHERE username = :username
-                  AND id <> :id
-                LIMIT 1
-            ");
-            $dupUserStmt->execute(array(
-                ':username' => $username,
-                ':id' => $userId,
-            ));
-            if ($dupUserStmt->fetchColumn()) {
-                throw new RuntimeException('Another user already uses this username.');
-            }
-        } else {
-            $username = null;
-        }
-
         $photoPath = aue_handle_account_photo_upload($userId);
         $displayName = trim($firstName . ' ' . $lastName);
 
@@ -648,7 +952,7 @@ if (!function_exists('aue_update_account_tab')) {
                 last_name = :last_name,
                 name = :name,
                 email = :email,
-                username = :username,
+                username = NULL,
                 role = :role,
                 status = :status,
                 account_valid_until = :account_valid_until,
@@ -675,7 +979,6 @@ if (!function_exists('aue_update_account_tab')) {
             ':last_name' => $lastName,
             ':name' => $displayName,
             ':email' => $email,
-            ':username' => $username,
             ':role' => $role,
             ':status' => $status,
             ':account_valid_until' => $validUntil,
@@ -934,83 +1237,80 @@ if (!function_exists('aue_recalculate_profile_requirements_status')) {
         $missing = array();
 
         if (!aue_has_value($user['first_name'] ?? null)) {
-            $missing[] = 'First Name';
+            aue_push_missing_field($missing, 'first_name');
         }
         if (!aue_has_value($user['last_name'] ?? null)) {
-            $missing[] = 'Last Name';
+            aue_push_missing_field($missing, 'last_name');
         }
         if (!aue_has_value($user['email'] ?? null)) {
-            $missing[] = 'Primary Email';
-        }
-        if (aue_policy_bool($pdo, 'user_require_username', true) && !aue_has_value($user['username'] ?? null)) {
-            $missing[] = 'Username';
+            aue_push_missing_field($missing, 'primary_email');
         }
         if (!aue_has_value($user['role'] ?? null)) {
-            $missing[] = 'Role';
+            aue_push_missing_field($missing, 'role');
         }
         if (!aue_has_value($user['status'] ?? null)) {
-            $missing[] = 'Status';
+            aue_push_missing_field($missing, 'status');
         }
         if (aue_policy_bool($pdo, 'user_require_account_valid_until', false) && !aue_has_value($user['account_valid_until'] ?? null)) {
-            $missing[] = 'Account Valid Until';
+            aue_push_missing_field($missing, 'account_valid_until');
         }
         if (aue_policy_bool($pdo, 'user_require_photo', false) && !aue_has_value($user['photo_path'] ?? null)) {
-            $missing[] = 'Photo';
+            aue_push_missing_field($missing, 'photo');
         }
 
         if (aue_policy_bool($pdo, 'user_require_street_address', true) && !aue_has_value($user['street_address'] ?? null)) {
-            $missing[] = 'Street Address';
+            aue_push_missing_field($missing, 'street_address');
         }
         if (aue_policy_bool($pdo, 'user_require_street_number', true) && !aue_has_value($user['street_number'] ?? null)) {
-            $missing[] = 'Street Number';
+            aue_push_missing_field($missing, 'street_number');
         }
         if (aue_policy_bool($pdo, 'user_require_zip_code', true) && !aue_has_value($user['zip_code'] ?? null)) {
-            $missing[] = 'Zip Code';
+            aue_push_missing_field($missing, 'zip_code');
         }
         if (aue_policy_bool($pdo, 'user_require_city', true) && !aue_has_value($user['city'] ?? null)) {
-            $missing[] = 'City';
+            aue_push_missing_field($missing, 'city');
         }
         if (aue_policy_bool($pdo, 'user_require_state_region', true) && !aue_has_value($user['state_region'] ?? null)) {
-            $missing[] = 'State / Region';
+            aue_push_missing_field($missing, 'state_region');
         }
         if (aue_policy_bool($pdo, 'user_require_country_code', true) && !aue_has_value($user['country_code'] ?? null)) {
-            $missing[] = 'Country';
+            aue_push_missing_field($missing, 'country_code');
         }
         if (aue_policy_bool($pdo, 'user_require_cellphone', true) && !aue_has_value($user['cellphone'] ?? null)) {
-            $missing[] = 'Cellphone';
+            aue_push_missing_field($missing, 'cellphone');
         }
         if (aue_policy_bool($pdo, 'user_require_secondary_email', false) && !aue_has_value($user['secondary_email'] ?? null)) {
-            $missing[] = 'Secondary Email';
+            aue_push_missing_field($missing, 'secondary_email');
         }
         if (aue_policy_bool($pdo, 'user_require_date_of_birth', true) && !aue_has_value($user['date_of_birth'] ?? null)) {
-            $missing[] = 'Date of Birth';
+            aue_push_missing_field($missing, 'date_of_birth');
         }
         if (aue_policy_bool($pdo, 'user_require_place_of_birth', true) && !aue_has_value($user['place_of_birth'] ?? null)) {
-            $missing[] = 'Place of Birth';
+            aue_push_missing_field($missing, 'place_of_birth');
         }
         if (aue_policy_bool($pdo, 'user_require_nationality', true) && !aue_has_value($user['nationality'] ?? null)) {
-            $missing[] = 'Nationality';
+            aue_push_missing_field($missing, 'nationality');
         }
         if (aue_policy_bool($pdo, 'user_require_id_passport_number', true) && !aue_has_value($user['id_passport_number'] ?? null)) {
-            $missing[] = 'ID / Passport Number';
+            aue_push_missing_field($missing, 'id_passport_number');
         }
         if (aue_policy_bool($pdo, 'user_require_gender', true) && !aue_has_value($user['gender'] ?? null)) {
-            $missing[] = 'Gender';
+            aue_push_missing_field($missing, 'gender');
         }
         if (aue_policy_bool($pdo, 'user_require_weight', true) && !aue_has_value($user['weight'] ?? null)) {
-            $missing[] = 'Weight';
+            aue_push_missing_field($missing, 'weight_kg');
         }
         if (aue_policy_bool($pdo, 'user_require_height_cm', true) && !aue_has_value($user['height_cm'] ?? null)) {
-            $missing[] = 'Height';
+            aue_push_missing_field($missing, 'height_cm');
         }
         if (aue_policy_bool($pdo, 'user_require_hair_color', true) && !aue_has_value($user['hair_color'] ?? null)) {
-            $missing[] = 'Hair Color';
+            aue_push_missing_field($missing, 'hair_color');
         }
         if (aue_policy_bool($pdo, 'user_require_eye_color', true) && !aue_has_value($user['eye_color'] ?? null)) {
-            $missing[] = 'Eye Color';
+            aue_push_missing_field($missing, 'eye_color');
         }
         if (aue_policy_bool($pdo, 'user_require_marital_status', true) && !aue_has_value($user['marital_status'] ?? null)) {
-            $missing[] = 'Marital Status';
+            aue_push_missing_field($missing, 'marital_status');
         }
 
         $requiredContactCount = max(0, aue_policy_int($pdo, 'user_required_emergency_contact_count', 2));
@@ -1027,14 +1327,28 @@ if (!function_exists('aue_recalculate_profile_requirements_status')) {
 
             $contact = is_array($contact) ? $contact : array();
 
-            if (aue_policy_bool($pdo, 'user_require_emergency_contact_name', true) && !aue_has_value($contact['contact_name'] ?? null)) {
-                $missing[] = 'Emergency Contact ' . $i . ' Name';
+            if ($i === 1) {
+                if (aue_policy_bool($pdo, 'user_require_emergency_contact_name', true) && !aue_has_value($contact['contact_name'] ?? null)) {
+                    aue_push_missing_field($missing, 'emergency_contact_1_name');
+                }
+                if (aue_policy_bool($pdo, 'user_require_emergency_contact_relationship', true) && !aue_has_value($contact['relationship'] ?? null)) {
+                    aue_push_missing_field($missing, 'emergency_contact_1_relationship');
+                }
+                if (aue_policy_bool($pdo, 'user_require_emergency_contact_phone', true) && !aue_has_value($contact['phone'] ?? null)) {
+                    aue_push_missing_field($missing, 'emergency_contact_1_phone');
+                }
             }
-            if (aue_policy_bool($pdo, 'user_require_emergency_contact_relationship', true) && !aue_has_value($contact['relationship'] ?? null)) {
-                $missing[] = 'Emergency Contact ' . $i . ' Relationship';
-            }
-            if (aue_policy_bool($pdo, 'user_require_emergency_contact_phone', true) && !aue_has_value($contact['phone'] ?? null)) {
-                $missing[] = 'Emergency Contact ' . $i . ' Phone';
+
+            if ($i === 2) {
+                if (aue_policy_bool($pdo, 'user_require_emergency_contact_name', true) && !aue_has_value($contact['contact_name'] ?? null)) {
+                    aue_push_missing_field($missing, 'emergency_contact_2_name');
+                }
+                if (aue_policy_bool($pdo, 'user_require_emergency_contact_relationship', true) && !aue_has_value($contact['relationship'] ?? null)) {
+                    aue_push_missing_field($missing, 'emergency_contact_2_relationship');
+                }
+                if (aue_policy_bool($pdo, 'user_require_emergency_contact_phone', true) && !aue_has_value($contact['phone'] ?? null)) {
+                    aue_push_missing_field($missing, 'emergency_contact_2_phone');
+                }
             }
         }
 
@@ -1053,36 +1367,36 @@ if (!function_exists('aue_recalculate_profile_requirements_status')) {
 
         if ($billingTriggered && aue_policy_bool($pdo, 'user_billing_require_when_business_used', true)) {
             if (aue_policy_bool($pdo, 'user_billing_require_business_name', true) && !aue_has_value($user['business_name'] ?? null)) {
-                $missing[] = 'Business Name';
+                aue_push_missing_field($missing, 'business_name');
             }
 
             if (aue_policy_bool($pdo, 'user_billing_require_business_vat_tax_id', true) && !aue_has_value($user['business_vat_tax_id'] ?? null)) {
-                $missing[] = 'Business VAT / Tax ID';
+                aue_push_missing_field($missing, 'business_vat_tax_id');
             }
 
             if (!$useProfileAddress && aue_policy_bool($pdo, 'user_billing_require_dedicated_address_if_not_using_profile', true)) {
                 if (!aue_has_value($user['billing_street_address'] ?? null)) {
-                    $missing[] = 'Billing Street Address';
+                    aue_push_missing_field($missing, 'billing_street_address');
                 }
                 if (!aue_has_value($user['billing_street_number'] ?? null)) {
-                    $missing[] = 'Billing Street Number';
+                    aue_push_missing_field($missing, 'billing_street_number');
                 }
                 if (!aue_has_value($user['billing_zip_code'] ?? null)) {
-                    $missing[] = 'Billing Zip Code';
+                    aue_push_missing_field($missing, 'billing_zip_code');
                 }
                 if (!aue_has_value($user['billing_city'] ?? null)) {
-                    $missing[] = 'Billing City';
+                    aue_push_missing_field($missing, 'billing_city');
                 }
                 if (!aue_has_value($user['billing_state_region'] ?? null)) {
-                    $missing[] = 'Billing State / Region';
+                    aue_push_missing_field($missing, 'billing_state_region');
                 }
                 if (!aue_has_value($user['billing_country_code'] ?? null)) {
-                    $missing[] = 'Billing Country';
+                    aue_push_missing_field($missing, 'billing_country_code');
                 }
             }
         }
 
-        $missing = array_values(array_unique($missing));
+        $missing = array_values($missing);
         $missingJson = json_encode($missing, JSON_UNESCAPED_UNICODE);
         if (!is_string($missingJson)) {
             $missingJson = '[]';

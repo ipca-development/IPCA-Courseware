@@ -503,36 +503,39 @@ cw_header('User Workspace');
                     </div>
                 </div>
 
-                <?php if ($missingCount > 0): ?>
-                    <details class="ue-missing-details">
-                        <summary class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-summary">
-                            <?php echo 'Missing ' . $missingCount . ' field' . ($missingCount === 1 ? '' : 's'); ?>
-                        </summary>
+                
+				<?php if ($missingCount > 0): ?>
+    <details class="ue-missing-details">
+        <summary class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-summary">
+            <?php echo 'Missing ' . $missingCount . ' field' . ($missingCount === 1 ? '' : 's'); ?>
+        </summary>
 
-                        <div class="ue-missing-panel">
-                            <?php if ($missingFields): ?>
-                                <div class="ue-list">
-                                    <?php foreach ($missingFields as $field): ?>
-                                        <a class="ue-list-item ue-list-item-link" href="<?php echo h(aue_missing_field_url($userId, (string)$field)); ?>">
-                                            <div class="ue-list-title"><?php echo h((string)$field); ?></div>
-                                            <div class="ue-list-meta">Open the correct tab to complete this item.</div>
-                                        </a>
-                                    <?php endforeach; ?>
-                                </div>
-                            <?php else: ?>
-                                <div class="ue-note">
-                                    No missing data items.
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    </details>
-                <?php else: ?>
-                    <div class="ue-missing-details">
-                        <span class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-summary is-static">
-                            Profile Complete
-                        </span>
-                    </div>
-                <?php endif; ?>
+        <div class="ue-missing-panel">
+            <?php if ($missingFields): ?>
+                <div class="ue-list">
+                    <?php foreach ($missingFields as $missingItem): ?>
+                        <a class="ue-list-item ue-list-item-link" href="<?php echo h(aue_missing_field_url($userId, $missingItem)); ?>">
+                            <div class="ue-list-title"><?php echo h((string)($missingItem['label'] ?? 'Unknown field')); ?></div>
+                            <div class="ue-list-meta">Open the correct tab to complete this item.</div>
+                        </a>
+                    <?php endforeach; ?>
+                </div>
+            <?php else: ?>
+                <div class="ue-note">
+                    No missing data items.
+                </div>
+            <?php endif; ?>
+        </div>
+    </details>
+<?php else: ?>
+    <div class="ue-missing-details">
+        <span class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-summary is-static">
+            Profile Complete
+        </span>
+    </div>
+<?php endif; ?>
+				
+				
             </section>
         </aside>
     </div>
