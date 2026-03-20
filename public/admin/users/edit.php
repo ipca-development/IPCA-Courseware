@@ -40,10 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     try {
-
-		
-		
-		        switch ($section) {
+        switch ($section) {
             case 'account':
                 aue_update_account_tab($pdo, $userId, $actorId);
                 aue_flash_redirect($userId, 'account', 'success', 'Account details updated.');
@@ -72,9 +69,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             default:
                 aue_flash_redirect($userId, $postedTab, 'error', 'Unknown form action.');
         }
-		
-		
-		
     } catch (Throwable $e) {
         aue_flash_redirect($userId, $postedTab, 'error', $e->getMessage());
     }
@@ -167,13 +161,6 @@ cw_header('User Workspace');
     font-weight:760;
     color:#fff;
 }
-.ue-subtitle{
-    margin:12px 0 0 0;
-    color:rgba(255,255,255,0.82);
-    font-size:15px;
-    line-height:1.65;
-    max-width:860px;
-}
 .ue-meta{
     display:flex;
     flex-wrap:wrap;
@@ -225,12 +212,18 @@ cw_header('User Workspace');
 .ue-card-title{
     display:flex;
     align-items:center;
-    gap:10px;
+    justify-content:space-between;
+    gap:12px;
     margin:0 0 16px 0;
     font-size:18px;
     font-weight:740;
     letter-spacing:-0.02em;
     color:var(--text-strong);
+}
+.ue-card-title-main{
+    display:flex;
+    align-items:center;
+    gap:10px;
 }
 .ue-card-title svg{
     width:18px;
@@ -291,6 +284,34 @@ cw_header('User Workspace');
     font-size:13px;
     line-height:1.55;
 }
+.ue-collapse-toggle{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    gap:8px;
+    min-height:34px;
+    padding:0 12px;
+    border-radius:999px;
+    border:1px solid rgba(15,23,42,0.08);
+    background:#fff;
+    color:var(--text-strong);
+    font-size:12px;
+    font-weight:700;
+    cursor:pointer;
+    transition:background .16s ease,border-color .16s ease,transform .16s ease;
+}
+.ue-collapse-toggle:hover{
+    background:#f8fafc;
+    border-color:rgba(15,23,42,0.14);
+    transform:translateY(-1px);
+}
+.ue-collapse-toggle svg{
+    width:14px;
+    height:14px;
+}
+.ue-collapse-content[hidden]{
+    display:none !important;
+}
 @media (max-width:1200px){
     .ue-grid{
         grid-template-columns:1fr;
@@ -303,6 +324,10 @@ cw_header('User Workspace');
 @media (max-width:820px){
     .ue-title{
         font-size:28px;
+    }
+    .ue-card-title{
+        align-items:flex-start;
+        flex-direction:column;
     }
 }
 </style>
@@ -334,9 +359,6 @@ cw_header('User Workspace');
 
                 <div style="min-width:0;">
                     <h2 class="ue-title"><?php echo h($displayName); ?></h2>
-                    <p class="ue-subtitle">
-                        Premium admin workspace for account identity, profile quality, emergency readiness, billing context, and secure lifecycle control.
-                    </p>
 
                     <div class="ue-meta">
                         <span class="<?php echo aue_role_class((string)$user['role']); ?>">
@@ -418,7 +440,9 @@ cw_header('User Workspace');
 
         <aside class="ue-stack">
             <section class="card ue-card">
-                <h3 class="ue-card-title"><?php echo aue_svg('check'); ?><span>Readiness Summary</span></h3>
+                <h3 class="ue-card-title">
+                    <span class="ue-card-title-main"><?php echo aue_svg('check'); ?><span>Readiness Summary</span></span>
+                </h3>
 
                 <div class="ue-side-section">
                     <div class="<?php echo aue_completeness_class($missingCount); ?>">
@@ -429,33 +453,44 @@ cw_header('User Workspace');
                         <?php echo aue_svg('clock'); ?>
                         <span><?php echo h(aue_human_datetime((string)($user['last_evaluated_at'] ?? ''))); ?></span>
                     </div>
-
-                    <div class="ue-note">
-                        Profile completeness is evaluated from the canonical user root plus related profile tables.
-                    </div>
                 </div>
             </section>
 
             <section class="card ue-card">
-                <h3 class="ue-card-title"><?php echo aue_svg('warning'); ?><span>Missing Data</span></h3>
+                <h3 class="ue-card-title">
+                    <span class="ue-card-title-main"><?php echo aue_svg('warning'); ?><span>Missing Data</span></span>
+                    <button
+                        type="button"
+                        class="ue-collapse-toggle"
+                        data-target="ue-missing-data-content"
+                        aria-expanded="false"
+                        aria-controls="ue-missing-data-content">
+                        <?php echo aue_svg('archive'); ?>
+                        <span>Show / Hide</span>
+                    </button>
+                </h3>
 
-                <?php if ($missingFields): ?>
-                    <div class="ue-list">
-                        <?php foreach ($missingFields as $field): ?>
-                            <div class="ue-list-item">
-                                <div class="ue-list-title"><?php echo h((string)$field); ?></div>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php else: ?>
-                    <div class="ue-note">
-                        No missing-field list is currently cached for this user. Once completeness logic refreshes the status row, missing items will appear here.
-                    </div>
-                <?php endif; ?>
+                <div id="ue-missing-data-content" class="ue-collapse-content" hidden>
+                    <?php if ($missingFields): ?>
+                        <div class="ue-list">
+                            <?php foreach ($missingFields as $field): ?>
+                                <div class="ue-list-item">
+                                    <div class="ue-list-title"><?php echo h((string)$field); ?></div>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    <?php else: ?>
+                        <div class="ue-note">
+                            No missing data items.
+                        </div>
+                    <?php endif; ?>
+                </div>
             </section>
 
             <section class="card ue-card">
-                <h3 class="ue-card-title"><?php echo aue_svg('activity'); ?><span>Account Snapshot</span></h3>
+                <h3 class="ue-card-title">
+                    <span class="ue-card-title-main"><?php echo aue_svg('activity'); ?><span>Account Snapshot</span></span>
+                </h3>
 
                 <div class="ue-list">
                     <div class="ue-list-item">
@@ -465,7 +500,7 @@ cw_header('User Workspace');
 
                     <div class="ue-list-item">
                         <div class="ue-list-title">Username</div>
-                        <div class="ue-list-meta"><?php echo h((string)($user['username'] ?? '—')); ?></div>
+                        <div class="ue-list-meta"><?php echo h(trim((string)($user['email'] ?? '')) !== '' ? (string)$user['email'] : '—'); ?></div>
                     </div>
 
                     <div class="ue-list-item">
@@ -482,5 +517,33 @@ cw_header('User Workspace');
         </aside>
     </div>
 </div>
+
+<script>
+(function () {
+    var buttons = document.querySelectorAll('.ue-collapse-toggle');
+    for (var i = 0; i < buttons.length; i++) {
+        buttons[i].addEventListener('click', function () {
+            var targetId = this.getAttribute('data-target');
+            if (!targetId) {
+                return;
+            }
+
+            var target = document.getElementById(targetId);
+            if (!target) {
+                return;
+            }
+
+            var isHidden = target.hasAttribute('hidden');
+            if (isHidden) {
+                target.removeAttribute('hidden');
+                this.setAttribute('aria-expanded', 'true');
+            } else {
+                target.setAttribute('hidden', 'hidden');
+                this.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
+})();
+</script>
 
 <?php cw_footer(); ?>

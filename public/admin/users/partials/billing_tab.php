@@ -71,9 +71,6 @@ $useProfileAddress = (int)($user['use_profile_address'] ?? 1) === 1;
 
 <section class="card ue-card">
     <h3 class="ue-card-title"><?php echo aue_svg('billing'); ?><span>Billing / Business Profile</span></h3>
-    <p class="ue-card-subtitle">
-        Billing data is stored in <code>user_billing_profiles</code> to keep financial identity separate from personal and authentication data.
-    </p>
 
     <style>
         .ue-form-grid{
@@ -99,6 +96,7 @@ $useProfileAddress = (int)($user['use_profile_address'] ?? 1) === 1;
         .ue-input,
         .ue-select{
             width:100%;
+            max-width:100%;
             height:44px;
             border-radius:14px;
             box-sizing:border-box;
@@ -178,17 +176,6 @@ $useProfileAddress = (int)($user['use_profile_address'] ?? 1) === 1;
             font-weight:630;
             word-break:break-word;
         }
-        .ue-callout{
-            margin-top:18px;
-            padding:16px 18px;
-            border-radius:16px;
-            border:1px solid rgba(32,84,176,0.14);
-            background:rgba(32,84,176,0.06);
-            color:#214f9c;
-            font-size:13px;
-            line-height:1.65;
-            font-weight:560;
-        }
         @media (max-width:900px){
             .ue-form-grid,
             .ue-info-grid{
@@ -225,9 +212,6 @@ $useProfileAddress = (int)($user['use_profile_address'] ?? 1) === 1;
                     value="<?php echo h((string)($user['business_vat_tax_id'] ?? '')); ?>"
                     placeholder="VAT, EIN, or tax identifier"
                 >
-                <div class="ue-help">
-                    Used for invoicing and compliance reporting. Stored separately from personal profile data.
-                </div>
             </div>
 
             <div class="ue-field ue-field--full">
@@ -377,10 +361,6 @@ $useProfileAddress = (int)($user['use_profile_address'] ?? 1) === 1;
                 </div>
             </div>
         </div>
-    </div>
-
-    <div class="ue-callout">
-        Aircraft rental and certain operational charges may be handled by a separate entity. This billing profile ensures correct invoicing context without mixing operational and contractual responsibilities.
     </div>
 
     <script>

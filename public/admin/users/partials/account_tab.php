@@ -6,9 +6,6 @@ $isPendingActivation = strtolower(trim((string)($user['status'] ?? ''))) === 'pe
 
 <section class="card ue-card">
     <h3 class="ue-card-title"><?php echo aue_svg('users'); ?><span>Account Identity and Lifecycle</span></h3>
-    <p class="ue-card-subtitle">
-        Core account fields remain in the canonical <code>users</code> table for v1 compatibility with the existing auth/session flow.
-    </p>
 
     <style>
         .ue-form-grid{
@@ -35,6 +32,7 @@ $isPendingActivation = strtolower(trim((string)($user['status'] ?? ''))) === 'pe
         .ue-select{
             width:100%;
             height:44px;
+            max-width:100%;
             border-radius:14px;
             box-sizing:border-box;
             padding:0 14px;
@@ -195,7 +193,7 @@ $isPendingActivation = strtolower(trim((string)($user['status'] ?? ''))) === 'pe
             </div>
 
             <div class="ue-field ue-field--full">
-                <label for="email">Primary Email</label>
+                <label for="email">Primary E-mail / Username</label>
                 <input
                     class="app-input ue-input"
                     id="email"
@@ -213,7 +211,8 @@ $isPendingActivation = strtolower(trim((string)($user['status'] ?? ''))) === 'pe
                     id="username"
                     type="text"
                     name="username"
-                    value="<?php echo h((string)($user['username'] ?? '')); ?>"
+                    value="<?php echo h(trim((string)($user['email'] ?? '')) !== '' ? (string)$user['email'] : (string)($user['username'] ?? '')); ?>"
+                    readonly
                 >
             </div>
 

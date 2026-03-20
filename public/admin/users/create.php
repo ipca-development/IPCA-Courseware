@@ -122,66 +122,64 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdo->beginTransaction();
 
-		$uuid = bin2hex(random_bytes(16));
+        $uuid = bin2hex(random_bytes(16));
+        $uuid = sprintf(
+            '%s-%s-%s-%s-%s',
+            substr($uuid, 0, 8),
+            substr($uuid, 8, 4),
+            substr($uuid, 12, 4),
+            substr($uuid, 16, 4),
+            substr($uuid, 20, 12)
+        );
 
-// Format as UUID v4 (clean + standard)
-$uuid = sprintf('%s-%s-%s-%s-%s',
-    substr($uuid, 0, 8),
-    substr($uuid, 8, 4),
-    substr($uuid, 12, 4),
-    substr($uuid, 16, 4),
-    substr($uuid, 20, 12)
-);
-
-$insertUser = $pdo->prepare("
-    INSERT INTO users (
-        uuid,
-        name,
-        first_name,
-        last_name,
-        email,
-        username,
-        role,
-        status,
-        account_valid_until,
-        password_hash,
-        must_change_password,
-        created_by_user_id,
-        updated_by_user_id,
-        created_at,
-        updated_at
-    ) VALUES (
-        :uuid,
-        :name,
-        :first_name,
-        :last_name,
-        :email,
-        NULL,
-        :role,
-        :status,
-        :account_valid_until,
-        NULL,
-        :must_change_password,
-        :created_by_user_id,
-        :updated_by_user_id,
-        NOW(),
-        NOW()
-    )
-");
-
-$insertUser->execute([
-    ':uuid' => $uuid,
-    ':name' => $displayName,
-    ':first_name' => $firstName,
-    ':last_name' => $lastName,
-    ':email' => $email,
-    ':role' => $role,
-    ':status' => $status,
-    ':account_valid_until' => $accountValidUntil,
-    ':must_change_password' => $mustChangePassword,
-    ':created_by_user_id' => $actorUserId ?: null,
-    ':updated_by_user_id' => $actorUserId ?: null,
-]);
+        $insertUser = $pdo->prepare("
+            INSERT INTO users (
+                uuid,
+                name,
+                first_name,
+                last_name,
+                email,
+                username,
+                role,
+                status,
+                account_valid_until,
+                password_hash,
+                must_change_password,
+                created_by_user_id,
+                updated_by_user_id,
+                created_at,
+                updated_at
+            ) VALUES (
+                :uuid,
+                :name,
+                :first_name,
+                :last_name,
+                :email,
+                NULL,
+                :role,
+                :status,
+                :account_valid_until,
+                NULL,
+                :must_change_password,
+                :created_by_user_id,
+                :updated_by_user_id,
+                NOW(),
+                NOW()
+            )
+        ");
+        $insertUser->execute(array(
+            ':uuid' => $uuid,
+            ':name' => $displayName,
+            ':first_name' => $firstName,
+            ':last_name' => $lastName,
+            ':email' => $email,
+            ':role' => $role,
+            ':status' => $status,
+            ':account_valid_until' => $accountValidUntil,
+            ':must_change_password' => $mustChangePassword,
+            ':created_by_user_id' => $actorUserId > 0 ? $actorUserId : null,
+            ':updated_by_user_id' => $actorUserId > 0 ? $actorUserId : null,
+        ));
 
         $newUserId = (int)$pdo->lastInsertId();
         if ($newUserId <= 0) {
@@ -208,8 +206,8 @@ $insertUser->execute([
             ':user_id' => $newUserId,
             ':cellphone' => $cellphone !== '' ? $cellphone : null,
         ));
-		
-		aue_recalculate_profile_requirements_status($pdo, $newUserId);
+
+        aue_recalculate_profile_requirements_status($pdo, $newUserId);
 
         $tokenRow = ot_create_token($pdo, $newUserId, 'set_password', $actorUserId > 0 ? $actorUserId : null, 60);
 
@@ -282,13 +280,6 @@ cw_header('Create User');
     font-weight:760;
     color:#fff;
 }
-.auc-subtitle{
-    margin:12px 0 0 0;
-    color:rgba(255,255,255,0.82);
-    font-size:15px;
-    line-height:1.65;
-    max-width:860px;
-}
 .auc-meta{
     display:flex;
     flex-wrap:wrap;
@@ -333,12 +324,6 @@ cw_header('Create User');
     width:18px;
     height:18px;
     color:var(--text-muted);
-}
-.auc-card-subtitle{
-    margin:-6px 0 18px 0;
-    color:var(--text-muted);
-    font-size:14px;
-    line-height:1.6;
 }
 .auc-form-grid{
     display:grid;
@@ -399,21 +384,10 @@ cw_header('Create User');
     flex-wrap:wrap;
     margin-top:18px;
 }
-.auc-actions-row{
-    display:flex;
-    gap:10px;
-    flex-wrap:wrap;
-    margin-top:18px;
-}
 .auc-actions-row .app-btn svg{
     width:15px;
     height:15px;
     flex:0 0 15px;
-}
-.auc-note{
-    color:var(--text-muted);
-    font-size:13px;
-    line-height:1.6;
 }
 .auc-list{
     display:grid;
@@ -469,9 +443,6 @@ cw_header('Create User');
         <div class="auc-header">
             <div style="min-width:0;">
                 <h2 class="auc-title">Create User</h2>
-                <p class="auc-subtitle">
-                    Create a new internal account, generate a secure onboarding token, and send the user a password setup link without exposing any plain-text credentials.
-                </p>
 
                 <div class="auc-meta">
                     <span class="app-badge app-badge-accent">Email Login Identity</span>
@@ -486,9 +457,6 @@ cw_header('Create User');
         <div class="auc-stack">
             <section class="card auc-card">
                 <h3 class="auc-card-title"><?php echo aue_svg('users'); ?><span>Account Identity and Onboarding</span></h3>
-                <p class="auc-card-subtitle">
-                    The account root is created in the canonical <code>users</code> table. A secure onboarding email is sent immediately after creation.
-                </p>
 
                 <form method="post" action="/admin/users/create.php" novalidate>
                     <div class="auc-form-grid">
@@ -548,16 +516,16 @@ cw_header('Create User');
                     </div>
 
                     <div class="auc-actions-row">
-    <button class="app-btn app-btn-primary" type="submit">
-        <?php echo aue_svg('save'); ?>
-        <span>Create User</span>
-    </button>
+                        <button class="app-btn app-btn-primary" type="submit">
+                            <?php echo aue_svg('save'); ?>
+                            <span>Create User</span>
+                        </button>
 
-    <a class="app-btn app-btn-secondary" href="/admin/users/index.php">
-        <?php echo aue_svg('archive'); ?>
-        <span>Back to Users</span>
-    </a>
-					</div>
+                        <a class="app-btn app-btn-secondary" href="/admin/users/index.php">
+                            <?php echo aue_svg('archive'); ?>
+                            <span>Back to Users</span>
+                        </a>
+                    </div>
                 </form>
             </section>
         </div>
@@ -581,13 +549,6 @@ cw_header('Create User');
                         <div class="auc-list-title">Immediate Redirect</div>
                         <div class="auc-list-meta">After creation, the workflow returns directly to the canonical user workspace.</div>
                     </div>
-                </div>
-            </section>
-
-            <section class="card auc-card">
-                <h3 class="auc-card-title"><?php echo aue_svg('shield'); ?><span>Implementation Notes</span></h3>
-                <div class="auc-note">
-                    This page creates the canonical user root first, stores the mobile number in the profile layer, then generates the onboarding token and sends the secure set-password email.
                 </div>
             </section>
         </aside>

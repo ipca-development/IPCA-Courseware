@@ -238,7 +238,7 @@ $where = array();
 $params = array();
 
 if ($q !== '') {
-    $where[] = "(u.name LIKE :q OR u.email LIKE :q OR u.username LIKE :q)";
+    $where[] = "(u.name LIKE :q OR u.email LIKE :q OR COALESCE(u.username, u.email) LIKE :q)";
     $params[':q'] = '%' . $q . '%';
 }
 
@@ -468,7 +468,7 @@ cw_header('User Accounts');
                             type="text"
                             name="q"
                             value="<?php echo h($q); ?>"
-                            placeholder="Name, email, or username">
+                            placeholder="Name or email">
                     </div>
                 </div>
 
@@ -573,6 +573,7 @@ cw_header('User Accounts');
                     $missingCount = (int)($row['missing_count'] ?? 0);
                     $securityBadges = ua_security_badges($row);
                     $validityLabel = ua_validity_label((string)($row['account_valid_until'] ?? ''));
+                    $loginIdentity = trim((string)($row['email'] ?? '')) !== '' ? (string)$row['email'] : '—';
                 ?>
                 <section class="card ua-user-card">
                     <div class="ua-user-card-inner">
@@ -598,12 +599,12 @@ cw_header('User Accounts');
 
                                     <div class="ua-meta-block">
                                         <div class="ua-meta-label">Username</div>
-                                        <div class="ua-meta-value"><?php echo h((string)($row['username'] !== null ? $row['username'] : '—')); ?></div>
+                                        <div class="ua-meta-value"><?php echo h($loginIdentity); ?></div>
                                     </div>
 
                                     <div class="ua-meta-block">
                                         <div class="ua-meta-label">Last Login</div>
-                                        <div class="ua-meta-value"><?php echo h(ua_human_datetime((string)($row['last_login_at'] ?? ''))); ?></div>
+                                        <div class="ua-meta-value"><?php echo h(ua_human_datetime(isset($row['last_login_at']) ? (string)$row['last_login_at'] : null)); ?></div>
                                     </div>
                                 </div>
                             </div>
@@ -660,11 +661,11 @@ cw_header('User Accounts');
 
                     <div class="ua-card-foot">
                         <div class="ua-foot-note">
-                            Account valid until: <strong><?php echo h(ua_human_date((string)($row['account_valid_until'] ?? ''))); ?></strong>
+                            Account valid until: <strong><?php echo h(ua_human_date(isset($row['account_valid_until']) ? (string)$row['account_valid_until'] : null)); ?></strong>
                         </div>
 
                         <div class="ua-foot-note">
-                            Completeness last evaluated: <strong><?php echo h(ua_human_datetime((string)($row['last_evaluated_at'] ?? ''))); ?></strong>
+                            Completeness last evaluated: <strong><?php echo h(ua_human_datetime(isset($row['last_evaluated_at']) ? (string)$row['last_evaluated_at'] : null)); ?></strong>
                         </div>
                     </div>
                 </section>

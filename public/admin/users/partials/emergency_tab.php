@@ -26,9 +26,6 @@ $relationshipOptions = array(
 
 <section class="card ue-card">
     <h3 class="ue-card-title"><?php echo aue_svg('warning'); ?><span>Emergency Contacts</span></h3>
-    <p class="ue-card-subtitle">
-        Emergency contact data is stored separately in <code>user_emergency_contacts</code> and is part of the instructor-limited operational view.
-    </p>
 
     <style>
         .ue-form-grid{
@@ -54,6 +51,7 @@ $relationshipOptions = array(
         .ue-input,
         .ue-select{
             width:100%;
+            max-width:100%;
             height:44px;
             border-radius:14px;
             box-sizing:border-box;
@@ -74,11 +72,6 @@ $relationshipOptions = array(
             width:15px;
             height:15px;
             flex:0 0 15px;
-        }
-        .ue-note{
-            color:var(--text-muted);
-            font-size:13px;
-            line-height:1.6;
         }
         .ue-contact-block{
             padding:16px 18px 18px 18px;
@@ -137,17 +130,6 @@ $relationshipOptions = array(
             font-size:14px;
             font-weight:630;
             word-break:break-word;
-        }
-        .ue-callout{
-            margin-top:18px;
-            padding:16px 18px;
-            border-radius:16px;
-            border:1px solid rgba(196,118,11,0.14);
-            background:rgba(196,118,11,0.06);
-            color:#8b5b06;
-            font-size:13px;
-            line-height:1.65;
-            font-weight:560;
         }
         @media (max-width:900px){
             .ue-form-grid,
@@ -258,12 +240,6 @@ $relationshipOptions = array(
                     </div>
                 </div>
             </div>
-
-            <div class="ue-field ue-field--full">
-                <div class="ue-note">
-                    These phone numbers are among the very few personal fields exposed to instructors in operational scenarios.
-                </div>
-            </div>
         </div>
 
         <div class="ue-actions-row">
@@ -314,9 +290,5 @@ $relationshipOptions = array(
                 <div class="ue-info-value"><?php echo h((string)($emergencySecondary['phone'] ?? '—')); ?></div>
             </div>
         </div>
-    </div>
-
-    <div class="ue-callout">
-        Instructors should only see the operational minimum: photo, email, phone number, and emergency phone numbers. This section supports that restricted field-level visibility model.
     </div>
 </section>

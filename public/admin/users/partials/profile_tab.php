@@ -116,9 +116,6 @@ $heightCmValue = trim((string)($user['height_cm'] ?? ''));
 
 <section class="card ue-card">
     <h3 class="ue-card-title"><?php echo aue_svg('profile'); ?><span>Profile Details</span></h3>
-    <p class="ue-card-subtitle">
-        Contact and personal data are stored in <code>user_profiles</code> so the canonical account root remains lean and backward-compatible.
-    </p>
 
     <style>
         .ue-form-grid{
@@ -144,6 +141,7 @@ $heightCmValue = trim((string)($user['height_cm'] ?? ''));
         .ue-input,
         .ue-select{
             width:100%;
+            max-width:100%;
             height:44px;
             border-radius:14px;
             box-sizing:border-box;
@@ -307,9 +305,6 @@ $heightCmValue = trim((string)($user['height_cm'] ?? ''));
                     name="secondary_email"
                     value="<?php echo h((string)($user['secondary_email'] ?? '')); ?>"
                 >
-                <div class="ue-help">
-                    Secondary contact email is stored in the profile layer, not in the canonical account root.
-                </div>
             </div>
 
             <div class="ue-field">
@@ -401,7 +396,6 @@ $heightCmValue = trim((string)($user['height_cm'] ?? ''));
             </div>
 
             <div class="ue-field ue-field--full">
-                <label>Weight</label>
                 <div class="ue-inline-grid">
                     <div class="ue-field">
                         <label for="weight_kg">Weight (kg)</label>
@@ -427,13 +421,9 @@ $heightCmValue = trim((string)($user['height_cm'] ?? ''));
                         >
                     </div>
                 </div>
-                <div class="ue-help">
-                    Weight is stored canonically in kilograms. Pounds are shown automatically for quick operational reference.
-                </div>
             </div>
 
             <div class="ue-field ue-field--full">
-                <label>Height</label>
                 <div class="ue-inline-grid">
                     <div class="ue-field">
                         <label for="height_cm">Height (cm)</label>
@@ -458,9 +448,6 @@ $heightCmValue = trim((string)($user['height_cm'] ?? ''));
                             readonly
                         >
                     </div>
-                </div>
-                <div class="ue-help">
-                    Height is stored canonically in centimeters. Inches are shown automatically for quick reference.
                 </div>
             </div>
         </div>
