@@ -78,8 +78,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 |--------------------------------------------------------------------------
 | Always refresh requirement cache on page load
 |--------------------------------------------------------------------------
-| This ensures policy changes (such as user_require_username = 0)
-| are reflected immediately in the sidebar readiness snapshot.
+| This ensures policy changes are reflected immediately in the sidebar
+| snapshot and missing-fields list.
 |--------------------------------------------------------------------------
 */
 aue_recalculate_profile_requirements_status($pdo, $userId);
@@ -301,35 +301,39 @@ cw_header('User Workspace');
     font-size:13px;
     line-height:1.55;
 }
-.ue-collapse-content[hidden]{
-    display:none !important;
+.ue-missing-details{
+    margin-top:16px;
 }
-.ue-missing-pill-button{
+.ue-missing-summary{
+    list-style:none;
     display:inline-flex;
     align-items:center;
     justify-content:center;
     min-height:32px;
     padding:0 12px;
     border-radius:999px;
-    border:none;
-    cursor:pointer;
     font-size:12px;
     font-weight:700;
+    cursor:pointer;
+    user-select:none;
     transition:transform .16s ease, box-shadow .16s ease;
 }
-.ue-missing-pill-button:hover{
+.ue-missing-summary::-webkit-details-marker{
+    display:none;
+}
+.ue-missing-summary:hover{
     transform:translateY(-1px);
     box-shadow:0 6px 14px rgba(15,23,42,0.10);
 }
-.ue-missing-pill-static{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    min-height:32px;
-    padding:0 12px;
-    border-radius:999px;
-    font-size:12px;
-    font-weight:700;
+.ue-missing-summary.is-static{
+    cursor:default;
+}
+.ue-missing-summary.is-static:hover{
+    transform:none;
+    box-shadow:none;
+}
+.ue-missing-panel{
+    margin-top:16px;
 }
 .ue-list-item-link{
     display:block;
@@ -499,78 +503,39 @@ cw_header('User Workspace');
                     </div>
                 </div>
 
-<div style="margin-top:16px;">
-    <?php if ($missingCount > 0): ?>
-        <button
-            type="button"
-            class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-pill-button"
-            aria-expanded="false"
-            aria-controls="ue-missing-data-content"
-            onclick="return ueToggleMissingItems(this, 'ue-missing-data-content');">
-            <?php echo 'Missing ' . $missingCount . ' field' . ($missingCount === 1 ? '' : 's'); ?>
-        </button>
-    <?php else: ?>
-        <span class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-pill-static">
-            Profile Complete
-        </span>
-    <?php endif; ?>
-</div>
+                <?php if ($missingCount > 0): ?>
+                    <details class="ue-missing-details">
+                        <summary class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-summary">
+                            <?php echo 'Missing ' . $missingCount . ' field' . ($missingCount === 1 ? '' : 's'); ?>
+                        </summary>
 
-                <div id="ue-missing-data-content" class="ue-collapse-content" hidden style="margin-top:16px; display:none;">
-                    <?php if ($missingFields): ?>
-                        <div class="ue-list">
-                            <?php foreach ($missingFields as $field): ?>
-                                <a class="ue-list-item ue-list-item-link" href="<?php echo h(aue_missing_field_url($userId, (string)$field)); ?>">
-                                    <div class="ue-list-title"><?php echo h((string)$field); ?></div>
-                                    <div class="ue-list-meta">Open the correct tab to complete this item.</div>
-                                </a>
-                            <?php endforeach; ?>
+                        <div class="ue-missing-panel">
+                            <?php if ($missingFields): ?>
+                                <div class="ue-list">
+                                    <?php foreach ($missingFields as $field): ?>
+                                        <a class="ue-list-item ue-list-item-link" href="<?php echo h(aue_missing_field_url($userId, (string)$field)); ?>">
+                                            <div class="ue-list-title"><?php echo h((string)$field); ?></div>
+                                            <div class="ue-list-meta">Open the correct tab to complete this item.</div>
+                                        </a>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php else: ?>
+                                <div class="ue-note">
+                                    No missing data items.
+                                </div>
+                            <?php endif; ?>
                         </div>
-                    <?php else: ?>
-                        <div class="ue-note">
-                            No missing data items.
-                        </div>
-                    <?php endif; ?>
-                </div>
+                    </details>
+                <?php else: ?>
+                    <div class="ue-missing-details">
+                        <span class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-summary is-static">
+                            Profile Complete
+                        </span>
+                    </div>
+                <?php endif; ?>
             </section>
         </aside>
     </div>
 </div>
-
-<script>
-function ueToggleMissingItems(trigger, targetId) {
-    var target = document.getElementById(targetId);
-    var isOpen;
-
-    if (!target) {
-        return false;
-    }
-
-    isOpen = !target.hasAttribute('hidden') && target.style.display !== 'none';
-
-    if (isOpen) {
-        target.setAttribute('hidden', 'hidden');
-        target.style.display = 'none';
-        if (trigger) {
-            trigger.setAttribute('aria-expanded', 'false');
-        }
-    } else {
-        target.removeAttribute('hidden');
-        target.style.display = 'block';
-        if (trigger) {
-            trigger.setAttribute('aria-expanded', 'true');
-        }
-    }
-
-    return false;
-}
-
-(function () {
-    var panel = document.getElementById('ue-missing-data-content');
-    if (panel && panel.hasAttribute('hidden')) {
-        panel.style.display = 'none';
-    }
-})();
-</script>
 
 <?php cw_footer(); ?>
