@@ -484,7 +484,7 @@ $heightCmValue = trim((string)($user['height_cm'] ?? ''));
 
             <div>
                 <div class="ue-info-label">Date of Birth</div>
-                <div class="ue-info-value"><?php echo h(aue_human_date((string)($user['date_of_birth'] ?? ''))); ?></div>
+                <div class="ue-info-value"><?php echo h(cw_date_only((string)($user['date_of_birth'] ?? ''))); ?></div>
             </div>
 
             <div>

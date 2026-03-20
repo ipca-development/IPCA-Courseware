@@ -6,24 +6,14 @@ require_once __DIR__ . '/onboarding_tokens.php';
 if (!function_exists('aue_human_date')) {
     function aue_human_date(?string $date): string
     {
-        if (!$date) {
-            return '—';
-        }
-
-        $ts = strtotime($date);
-        return $ts ? date('M j, Y', $ts) : '—';
+        return cw_date_only($date);
     }
 }
 
 if (!function_exists('aue_human_datetime')) {
-    function aue_human_datetime(?string $dateTime): string
+    function aue_human_datetime(?string $dateTime, PDO $pdo, ?int $userId = null): string
     {
-        if (!$dateTime) {
-            return '—';
-        }
-
-        $ts = strtotime($dateTime);
-        return $ts ? date('M j, Y · H:i', $ts) : '—';
+        return cw_dt_admin($dateTime, $pdo, $userId);
     }
 }
 
@@ -306,6 +296,17 @@ if (!function_exists('aue_flash_redirect')) {
     }
 }
 
+if (!function_exists('aue_flash_redirect')) {
+    function aue_flash_redirect(int $userId, string $tab, string $type, string $message): void
+    {
+        header('Location: ' . aue_edit_url($userId, $tab, array(
+            'flash_type' => $type,
+            'flash_message' => $message,
+        )));
+        exit;
+    }
+}
+
 if (!function_exists('aue_empty_emergency_contact')) {
     function aue_empty_emergency_contact(int $sortOrder): array
     {
@@ -326,7 +327,16 @@ if (!function_exists('aue_policy_raw')) {
     function aue_policy_raw(PDO $pdo, string $policyKey, string $scopeType = 'global', ?int $scopeId = null): ?string
     {
         $sql = "
-            SELECT v.value_text
+            SELECT
+                COALESCE(
+                    NULLIF(v.value_text, ''),
+                    CASE
+                        WHEN v.value_number IS NOT NULL THEN CAST(v.value_number AS CHAR)
+                        WHEN v.value_integer IS NOT NULL THEN CAST(v.value_integer AS CHAR)
+                        WHEN v.value_bool IS NOT NULL THEN CAST(v.value_bool AS CHAR)
+                        ELSE NULL
+                    END
+                ) AS resolved_value
             FROM system_policy_values v
             WHERE v.policy_key = :policy_key
               AND v.scope_type = :scope_type
@@ -349,20 +359,33 @@ if (!function_exists('aue_policy_raw')) {
         ));
 
         $value = $stmt->fetchColumn();
-        if ($value !== false && $value !== null) {
+        if ($value !== false && $value !== null && trim((string)$value) !== '') {
             return (string)$value;
         }
 
         $fallbackStmt = $pdo->prepare("
-            SELECT default_value_text
+            SELECT
+                COALESCE(
+                    NULLIF(default_value_text, ''),
+                    CASE
+                        WHEN default_value_number IS NOT NULL THEN CAST(default_value_number AS CHAR)
+                        WHEN default_value_integer IS NOT NULL THEN CAST(default_value_integer AS CHAR)
+                        WHEN default_value_bool IS NOT NULL THEN CAST(default_value_bool AS CHAR)
+                        ELSE NULL
+                    END
+                ) AS resolved_default
             FROM system_policy_definitions
             WHERE policy_key = :policy_key
             LIMIT 1
         ");
-        $fallbackStmt->execute(array(':policy_key' => $policyKey));
+        $fallbackStmt->execute(array(
+            ':policy_key' => $policyKey,
+        ));
         $fallback = $fallbackStmt->fetchColumn();
 
-        return ($fallback !== false && $fallback !== null) ? (string)$fallback : null;
+        return ($fallback !== false && $fallback !== null && trim((string)$fallback) !== '')
+            ? (string)$fallback
+            : null;
     }
 }
 
@@ -1140,9 +1163,8 @@ if (!function_exists('aue_recalculate_all_profile_requirements_status')) {
             }
         }
     }
-	
-	
-	
+}
+
 if (!function_exists('aue_activate_pending_user')) {
     function aue_activate_pending_user(PDO $pdo, int $userId, int $actorId): void
     {
@@ -1216,6 +1238,4 @@ if (!function_exists('aue_activate_pending_user')) {
             throw $e;
         }
     }
-}
-	
 }

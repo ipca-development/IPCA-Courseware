@@ -25,26 +25,6 @@ $completenessFilter = strtolower(trim((string)($_GET['completeness'] ?? '')));
 $validityFilter = strtolower(trim((string)($_GET['validity'] ?? '')));
 $securityFilter = strtolower(trim((string)($_GET['security'] ?? '')));
 
-function ua_human_date(?string $date): string
-{
-    if (!$date) {
-        return '—';
-    }
-
-    $ts = strtotime($date);
-    return $ts ? date('M j, Y', $ts) : '—';
-}
-
-function ua_human_datetime(?string $dateTime): string
-{
-    if (!$dateTime) {
-        return '—';
-    }
-
-    $ts = strtotime($dateTime);
-    return $ts ? date('M j, Y · H:i', $ts) : '—';
-}
-
 function ua_role_label(string $role): string
 {
     $role = strtolower(trim($role));
@@ -610,7 +590,7 @@ cw_header('User Accounts');
 
                                     <div class="ua-meta-block">
                                         <div class="ua-meta-label">Last Login</div>
-                                        <div class="ua-meta-value"><?php echo h(ua_human_datetime(isset($row['last_login_at']) ? (string)$row['last_login_at'] : null)); ?></div>
+                                        <div class="ua-meta-value"><?php echo h(cw_dt(isset($row['last_login_at']) ? (string)$row['last_login_at'] : null, $pdo, $userId)); ?></div>
                                     </div>
                                 </div>
                             </div>
@@ -667,11 +647,11 @@ cw_header('User Accounts');
 
                     <div class="ua-card-foot">
                         <div class="ua-foot-note">
-                            Account valid until: <strong><?php echo h(ua_human_date(isset($row['account_valid_until']) ? (string)$row['account_valid_until'] : null)); ?></strong>
+                            Account valid until: <strong><?php echo h(cw_date_only(isset($row['account_valid_until']) ? (string)$row['account_valid_until'] : null)); ?></strong>
                         </div>
 
                         <div class="ua-foot-note">
-                            Completeness last evaluated: <strong><?php echo h(ua_human_datetime(isset($row['last_evaluated_at']) ? (string)$row['last_evaluated_at'] : null)); ?></strong>
+                            Completeness last evaluated: <strong><?php echo h(cw_dt_admin(isset($row['last_evaluated_at']) ? (string)$row['last_evaluated_at'] : null, $pdo, $userId)); ?></strong>
                         </div>
                     </div>
                 </section>

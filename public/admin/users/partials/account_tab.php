@@ -317,22 +317,22 @@ $isPendingActivation = strtolower(trim((string)($user['status'] ?? ''))) === 'pe
 
             <div>
                 <div class="ue-info-label">Last Login</div>
-                <div class="ue-info-value"><?php echo h(aue_human_datetime((string)($user['last_login_at'] ?? ''))); ?></div>
+                <div class="ue-info-value"><?php echo h(cw_dt_admin((string)($user['last_login_at'] ?? ''), $pdo, $userId)); ?></div>
             </div>
 
             <div>
                 <div class="ue-info-label">Password Changed</div>
-                <div class="ue-info-value"><?php echo h(aue_human_datetime((string)($user['password_changed_at'] ?? ''))); ?></div>
+                <div class="ue-info-value"><?php echo h(cw_dt_admin((string)($user['password_changed_at'] ?? ''), $pdo, $userId)); ?></div>
             </div>
 
             <div>
                 <div class="ue-info-label">Created</div>
-                <div class="ue-info-value"><?php echo h(aue_human_datetime((string)($user['created_at'] ?? ''))); ?></div>
+                <div class="ue-info-value"><?php echo h(cw_dt_admin((string)($user['created_at'] ?? ''), $pdo, $userId)); ?></div>
             </div>
 
             <div>
                 <div class="ue-info-label">Updated</div>
-                <div class="ue-info-value"><?php echo h(aue_human_datetime((string)($user['updated_at'] ?? ''))); ?></div>
+                <div class="ue-info-value"><?php echo h(cw_dt_admin((string)($user['updated_at'] ?? ''), $pdo, $userId)); ?></div>
             </div>
 
             <div>

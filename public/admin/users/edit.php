@@ -312,6 +312,43 @@ cw_header('User Workspace');
 .ue-collapse-content[hidden]{
     display:none !important;
 }
+.ue-missing-pill-button{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:32px;
+    padding:0 12px;
+    border-radius:999px;
+    border:none;
+    cursor:pointer;
+    font-size:12px;
+    font-weight:700;
+    transition:transform .16s ease, opacity .16s ease;
+}
+.ue-missing-pill-button:hover{
+    transform:translateY(-1px);
+}
+.ue-missing-pill-static{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:32px;
+    padding:0 12px;
+    border-radius:999px;
+    font-size:12px;
+    font-weight:700;
+}
+.ue-list-item-link{
+    display:block;
+    text-decoration:none;
+    transition:background .16s ease,border-color .16s ease,transform .16s ease;
+}
+.ue-list-item-link:hover{
+    background:#f8fafc;
+    border-color:rgba(15,23,42,0.12);
+    transform:translateY(-1px);
+    text-decoration:none;
+}	
 @media (max-width:1200px){
     .ue-grid{
         grid-template-columns:1fr;
@@ -438,45 +475,58 @@ cw_header('User Workspace');
             ?>
         </div>
 
-        <aside class="ue-stack">
+        
+		
+		        <aside class="ue-stack">
             <section class="card ue-card">
                 <h3 class="ue-card-title">
-                    <span class="ue-card-title-main"><?php echo aue_svg('check'); ?><span>Readiness Summary</span></span>
+                    <span class="ue-card-title-main"><?php echo aue_svg('activity'); ?><span>Account Snapshot</span></span>
                 </h3>
 
-                <div class="ue-side-section">
-                    <div class="<?php echo aue_completeness_class($missingCount); ?>">
-                        <?php echo $missingCount > 0 ? ('Missing ' . $missingCount . ' field' . ($missingCount === 1 ? '' : 's')) : 'Profile complete'; ?>
+                <div class="ue-list">
+                    <div class="ue-list-item">
+                        <div class="ue-list-title">Username</div>
+                        <div class="ue-list-meta"><?php echo h(trim((string)($user['email'] ?? '')) !== '' ? (string)$user['email'] : '—'); ?></div>
                     </div>
 
-                    <div class="ue-mini-chip">
-                        <?php echo aue_svg('clock'); ?>
-                        <span><?php echo h(aue_human_datetime((string)($user['last_evaluated_at'] ?? ''))); ?></span>
+                    <div class="ue-list-item">
+                        <div class="ue-list-title">Last Login</div>
+                        <div class="ue-list-meta"><?php echo h(cw_dt_admin((string)($user['last_login_at'] ?? ''), $pdo, $userId)); ?></div>
+                    </div>
+
+                    <div class="ue-list-item">
+                        <div class="ue-list-title">Password Changed</div>
+                        <div class="ue-list-meta"><?php echo h(cw_dt_admin((string)($user['password_changed_at'] ?? ''), $pdo, $userId)); ?></div>
                     </div>
                 </div>
-            </section>
 
-            <section class="card ue-card">
-                <h3 class="ue-card-title">
-                    <span class="ue-card-title-main"><?php echo aue_svg('warning'); ?><span>Missing Data</span></span>
-                    <button
-                        type="button"
-                        class="ue-collapse-toggle"
-                        data-target="ue-missing-data-content"
-                        aria-expanded="false"
-                        aria-controls="ue-missing-data-content">
-                        <?php echo aue_svg('archive'); ?>
-                        <span>Show / Hide</span>
-                    </button>
-                </h3>
+                <div style="margin-top:16px;">
+                    <?php if ($missingCount > 0): ?>
+                        <button
+                            type="button"
+                            class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-pill-button"
+                            data-target="ue-missing-data-content"
+                            aria-expanded="false"
+                            aria-controls="ue-missing-data-content">
+                            <?php echo 'Missing ' . $missingCount . ' field' . ($missingCount === 1 ? '' : 's'); ?>
+                        </button>
+                    <?php else: ?>
+                        <span class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-pill-static">
+                            Profile Complete
+                        </span>
+                    <?php endif; ?>
+                </div>
 
-                <div id="ue-missing-data-content" class="ue-collapse-content" hidden>
+                <div id="ue-missing-data-content" class="ue-collapse-content" hidden style="margin-top:16px;">
                     <?php if ($missingFields): ?>
                         <div class="ue-list">
                             <?php foreach ($missingFields as $field): ?>
-                                <div class="ue-list-item">
+                                <a
+                                    class="ue-list-item ue-list-item-link"
+                                    href="<?php echo h(aue_missing_field_url($userId, (string)$field)); ?>">
                                     <div class="ue-list-title"><?php echo h((string)$field); ?></div>
-                                </div>
+                                    <div class="ue-list-meta">Open the correct tab to complete this item.</div>
+                                </a>
                             <?php endforeach; ?>
                         </div>
                     <?php else: ?>
@@ -486,41 +536,15 @@ cw_header('User Workspace');
                     <?php endif; ?>
                 </div>
             </section>
-
-            <section class="card ue-card">
-                <h3 class="ue-card-title">
-                    <span class="ue-card-title-main"><?php echo aue_svg('activity'); ?><span>Account Snapshot</span></span>
-                </h3>
-
-                <div class="ue-list">
-                    <div class="ue-list-item">
-                        <div class="ue-list-title">Email</div>
-                        <div class="ue-list-meta"><?php echo h((string)$user['email']); ?></div>
-                    </div>
-
-                    <div class="ue-list-item">
-                        <div class="ue-list-title">Username</div>
-                        <div class="ue-list-meta"><?php echo h(trim((string)($user['email'] ?? '')) !== '' ? (string)$user['email'] : '—'); ?></div>
-                    </div>
-
-                    <div class="ue-list-item">
-                        <div class="ue-list-title">Last Login</div>
-                        <div class="ue-list-meta"><?php echo h(aue_human_datetime((string)($user['last_login_at'] ?? ''))); ?></div>
-                    </div>
-
-                    <div class="ue-list-item">
-                        <div class="ue-list-title">Password Changed</div>
-                        <div class="ue-list-meta"><?php echo h(aue_human_datetime((string)($user['password_changed_at'] ?? ''))); ?></div>
-                    </div>
-                </div>
-            </section>
         </aside>
+		
+		
     </div>
 </div>
 
 <script>
 (function () {
-    var buttons = document.querySelectorAll('.ue-collapse-toggle');
+    var buttons = document.querySelectorAll('.ue-collapse-toggle, .ue-missing-pill-button');
     for (var i = 0; i < buttons.length; i++) {
         buttons[i].addEventListener('click', function () {
             var targetId = this.getAttribute('data-target');

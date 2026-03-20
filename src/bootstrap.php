@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/db.php';
 require_once __DIR__ . '/auth.php';
+require_once __DIR__ . '/time.php';
 
 // CDN base
 $CDN_BASE = rtrim(getenv('CW_CDN_BASE') ?: '', '/');
