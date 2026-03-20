@@ -58,6 +58,16 @@ function cw_login(PDO $pdo, string $email, string $password): bool {
 
     if (!password_verify($password, (string)$u['password_hash'])) return false;
 
+    $update = $pdo->prepare("
+        UPDATE users
+        SET
+            last_login_at = NOW(),
+            updated_at = NOW()
+        WHERE id = ?
+        LIMIT 1
+    ");
+    $update->execute([(int)$u['id']]);
+
     session_regenerate_id(true);
     $_SESSION['user_id'] = (int)$u['id'];
 
