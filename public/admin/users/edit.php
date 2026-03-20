@@ -201,10 +201,12 @@ cw_header('User Workspace');
     grid-template-columns:1.2fr 0.8fr;
     gap:18px;
     margin-top:18px;
+    align-items:start;
 }
 .ue-stack{
     display:grid;
     gap:18px;
+    align-content:start;
 }
 .ue-card{
     padding:22px;
@@ -212,8 +214,7 @@ cw_header('User Workspace');
 .ue-card-title{
     display:flex;
     align-items:center;
-    justify-content:space-between;
-    gap:12px;
+    gap:10px;
     margin:0 0 16px 0;
     font-size:18px;
     font-weight:740;
@@ -224,6 +225,12 @@ cw_header('User Workspace');
     display:flex;
     align-items:center;
     gap:10px;
+}
+.ue-card-title-actions{
+    margin-left:auto;
+    display:flex;
+    align-items:center;
+    gap:8px;
 }
 .ue-card-title svg{
     width:18px;
@@ -284,31 +291,6 @@ cw_header('User Workspace');
     font-size:13px;
     line-height:1.55;
 }
-.ue-collapse-toggle{
-    display:inline-flex;
-    align-items:center;
-    justify-content:center;
-    gap:8px;
-    min-height:34px;
-    padding:0 12px;
-    border-radius:999px;
-    border:1px solid rgba(15,23,42,0.08);
-    background:#fff;
-    color:var(--text-strong);
-    font-size:12px;
-    font-weight:700;
-    cursor:pointer;
-    transition:background .16s ease,border-color .16s ease,transform .16s ease;
-}
-.ue-collapse-toggle:hover{
-    background:#f8fafc;
-    border-color:rgba(15,23,42,0.14);
-    transform:translateY(-1px);
-}
-.ue-collapse-toggle svg{
-    width:14px;
-    height:14px;
-}
 .ue-collapse-content[hidden]{
     display:none !important;
 }
@@ -323,10 +305,11 @@ cw_header('User Workspace');
     cursor:pointer;
     font-size:12px;
     font-weight:700;
-    transition:transform .16s ease, opacity .16s ease;
+    transition:transform .16s ease, box-shadow .16s ease;
 }
 .ue-missing-pill-button:hover{
     transform:translateY(-1px);
+    box-shadow:0 6px 14px rgba(15,23,42,0.10);
 }
 .ue-missing-pill-static{
     display:inline-flex;
@@ -348,7 +331,7 @@ cw_header('User Workspace');
     border-color:rgba(15,23,42,0.12);
     transform:translateY(-1px);
     text-decoration:none;
-}	
+}
 @media (max-width:1200px){
     .ue-grid{
         grid-template-columns:1fr;
@@ -363,8 +346,13 @@ cw_header('User Workspace');
         font-size:28px;
     }
     .ue-card-title{
+        flex-wrap:wrap;
         align-items:flex-start;
-        flex-direction:column;
+    }
+    .ue-card-title-actions{
+        margin-left:0;
+        width:100%;
+        justify-content:flex-start;
     }
 }
 </style>
@@ -475,12 +463,13 @@ cw_header('User Workspace');
             ?>
         </div>
 
-        
-		
-		        <aside class="ue-stack">
+        <aside class="ue-stack">
             <section class="card ue-card">
                 <h3 class="ue-card-title">
-                    <span class="ue-card-title-main"><?php echo aue_svg('activity'); ?><span>Account Snapshot</span></span>
+                    <span class="ue-card-title-main">
+                        <?php echo aue_svg('activity'); ?>
+                        <span>Account Snapshot</span>
+                    </span>
                 </h3>
 
                 <div class="ue-list">
@@ -505,6 +494,7 @@ cw_header('User Workspace');
                         <button
                             type="button"
                             class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-pill-button"
+                            data-toggle="collapse"
                             data-target="ue-missing-data-content"
                             aria-expanded="false"
                             aria-controls="ue-missing-data-content">
@@ -521,9 +511,7 @@ cw_header('User Workspace');
                     <?php if ($missingFields): ?>
                         <div class="ue-list">
                             <?php foreach ($missingFields as $field): ?>
-                                <a
-                                    class="ue-list-item ue-list-item-link"
-                                    href="<?php echo h(aue_missing_field_url($userId, (string)$field)); ?>">
+                                <a class="ue-list-item ue-list-item-link" href="<?php echo h(aue_missing_field_url($userId, (string)$field)); ?>">
                                     <div class="ue-list-title"><?php echo h((string)$field); ?></div>
                                     <div class="ue-list-meta">Open the correct tab to complete this item.</div>
                                 </a>
@@ -537,17 +525,18 @@ cw_header('User Workspace');
                 </div>
             </section>
         </aside>
-		
-		
     </div>
 </div>
 
 <script>
 (function () {
-    var buttons = document.querySelectorAll('.ue-collapse-toggle, .ue-missing-pill-button');
-    for (var i = 0; i < buttons.length; i++) {
-        buttons[i].addEventListener('click', function () {
-            var targetId = this.getAttribute('data-target');
+    function bindToggle(el) {
+        if (!el) {
+            return;
+        }
+
+        function togglePanel() {
+            var targetId = el.getAttribute('data-target');
             if (!targetId) {
                 return;
             }
@@ -558,14 +547,29 @@ cw_header('User Workspace');
             }
 
             var isHidden = target.hasAttribute('hidden');
+
             if (isHidden) {
                 target.removeAttribute('hidden');
-                this.setAttribute('aria-expanded', 'true');
+                el.setAttribute('aria-expanded', 'true');
             } else {
                 target.setAttribute('hidden', 'hidden');
-                this.setAttribute('aria-expanded', 'false');
+                el.setAttribute('aria-expanded', 'false');
+            }
+        }
+
+        el.addEventListener('click', togglePanel);
+
+        el.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                togglePanel();
             }
         });
+    }
+
+    var toggles = document.querySelectorAll('[data-toggle="collapse"]');
+    for (var i = 0; i < toggles.length; i++) {
+        bindToggle(toggles[i]);
     }
 })();
 </script>
