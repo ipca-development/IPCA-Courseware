@@ -1143,7 +1143,7 @@ if (!function_exists('aue_recalculate_all_profile_requirements_status')) {
 	
 	
 	
-	if (!function_exists('aue_activate_pending_user')) {
+if (!function_exists('aue_activate_pending_user')) {
     function aue_activate_pending_user(PDO $pdo, int $userId, int $actorId): void
     {
         if ($userId <= 0) {
@@ -1205,6 +1205,8 @@ if (!function_exists('aue_recalculate_all_profile_requirements_status')) {
             $user['must_change_password'] = 1;
 
             ot_send_set_password_notification($pdo, $user, $tokenRow);
+
+            aue_recalculate_profile_requirements_status($pdo, $userId);
 
             $pdo->commit();
         } catch (Throwable $e) {

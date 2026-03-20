@@ -213,45 +213,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $pdo->beginTransaction();
 
-            $insertUser = $pdo->prepare("
-                INSERT INTO users (
-                    name,
-                    first_name,
-                    last_name,
-                    email,
-                    username,
-                    role,
-                    status,
-                    account_valid_until,
-                    password_hash,
-                    must_change_password,
-                    created_by_user_id,
-                    updated_by_user_id,
-                    created_at,
-                    updated_at
-                ) VALUES (
-                    :name,
-                    :first_name,
-                    :last_name,
-                    :email,
-                    NULL,
-                    'student',
-                    'pending_activation',
-                    NULL,
-                    NULL,
-                    1,
-                    NULL,
-                    NULL,
-                    NOW(),
-                    NOW()
-                )
-            ");
-            $insertUser->execute(array(
-                ':name' => $displayName,
-                ':first_name' => $firstName,
-                ':last_name' => $lastName,
-                ':email' => $email,
-            ));
+            $displayName = trim($firstName . ' ' . $lastName);
+
+// Generate UUID for canonical users row
+$uuid = bin2hex(random_bytes(16));
+$uuid = sprintf(
+    '%s-%s-%s-%s-%s',
+    substr($uuid, 0, 8),
+    substr($uuid, 8, 4),
+    substr($uuid, 12, 4),
+    substr($uuid, 16, 4),
+    substr($uuid, 20, 12)
+);
+
+$pdo->beginTransaction();
+
+$insertUser = $pdo->prepare("
+    INSERT INTO users (
+        uuid,
+        name,
+        first_name,
+        last_name,
+        email,
+        username,
+        role,
+        status,
+        account_valid_until,
+        password_hash,
+        must_change_password,
+        created_by_user_id,
+        updated_by_user_id,
+        created_at,
+        updated_at
+    ) VALUES (
+        :uuid,
+        :name,
+        :first_name,
+        :last_name,
+        :email,
+        NULL,
+        'student',
+        'pending_activation',
+        NULL,
+        NULL,
+        1,
+        NULL,
+        NULL,
+        NOW(),
+        NOW()
+    )
+");
+$insertUser->execute(array(
+    ':uuid' => $uuid,
+    ':name' => $displayName,
+    ':first_name' => $firstName,
+    ':last_name' => $lastName,
+    ':email' => $email,
+));
 
             $newUserId = (int)$pdo->lastInsertId();
             if ($newUserId <= 0) {
@@ -279,6 +297,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':cellphone' => $cellphone,
             ));
 
+			aue_recalculate_profile_requirements_status($pdo, $newUserId);
+			
             try {
                 $securityStmt = $pdo->prepare("
                     INSERT INTO auth_security_events (

@@ -122,51 +122,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $pdo->beginTransaction();
 
-        $insertUser = $pdo->prepare("
-            INSERT INTO users (
-                name,
-                first_name,
-                last_name,
-                email,
-                username,
-                role,
-                status,
-                account_valid_until,
-                password_hash,
-                must_change_password,
-                created_by_user_id,
-                updated_by_user_id,
-                created_at,
-                updated_at
-            ) VALUES (
-                :name,
-                :first_name,
-                :last_name,
-                :email,
-                NULL,
-                :role,
-                :status,
-                :account_valid_until,
-                NULL,
-                :must_change_password,
-                :created_by_user_id,
-                :updated_by_user_id,
-                NOW(),
-                NOW()
-            )
-        ");
-        $insertUser->execute(array(
-            ':name' => $displayName,
-            ':first_name' => $firstName,
-            ':last_name' => $lastName,
-            ':email' => $email,
-            ':role' => $role,
-            ':status' => $status,
-            ':account_valid_until' => $accountValidUntil,
-            ':must_change_password' => $mustChangePassword,
-            ':created_by_user_id' => $actorUserId > 0 ? $actorUserId : null,
-            ':updated_by_user_id' => $actorUserId > 0 ? $actorUserId : null,
-        ));
+		$uuid = bin2hex(random_bytes(16));
+
+// Format as UUID v4 (clean + standard)
+$uuid = sprintf('%s-%s-%s-%s-%s',
+    substr($uuid, 0, 8),
+    substr($uuid, 8, 4),
+    substr($uuid, 12, 4),
+    substr($uuid, 16, 4),
+    substr($uuid, 20, 12)
+);
+
+$insertUser = $pdo->prepare("
+    INSERT INTO users (
+        uuid,
+        name,
+        first_name,
+        last_name,
+        email,
+        username,
+        role,
+        status,
+        account_valid_until,
+        password_hash,
+        must_change_password,
+        created_by_user_id,
+        updated_by_user_id,
+        created_at,
+        updated_at
+    ) VALUES (
+        :uuid,
+        :name,
+        :first_name,
+        :last_name,
+        :email,
+        NULL,
+        :role,
+        :status,
+        :account_valid_until,
+        NULL,
+        :must_change_password,
+        :created_by_user_id,
+        :updated_by_user_id,
+        NOW(),
+        NOW()
+    )
+");
+
+$insertUser->execute([
+    ':uuid' => $uuid,
+    ':name' => $displayName,
+    ':first_name' => $firstName,
+    ':last_name' => $lastName,
+    ':email' => $email,
+    ':role' => $role,
+    ':status' => $status,
+    ':account_valid_until' => $accountValidUntil,
+    ':must_change_password' => $mustChangePassword,
+    ':created_by_user_id' => $actorUserId ?: null,
+    ':updated_by_user_id' => $actorUserId ?: null,
+]);
 
         $newUserId = (int)$pdo->lastInsertId();
         if ($newUserId <= 0) {
@@ -193,6 +208,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':user_id' => $newUserId,
             ':cellphone' => $cellphone !== '' ? $cellphone : null,
         ));
+		
+		aue_recalculate_profile_requirements_status($pdo, $newUserId);
 
         $tokenRow = ot_create_token($pdo, $newUserId, 'set_password', $actorUserId > 0 ? $actorUserId : null, 60);
 
