@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/onboarding_tokens.php';
+require_once __DIR__ . '/../src/admin_user_edit_helpers.php';
 
 ini_set('display_errors', '1');
 ini_set('display_startup_errors', '1');
