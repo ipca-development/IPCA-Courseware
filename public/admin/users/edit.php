@@ -484,7 +484,7 @@ cw_header('User Workspace');
 
                 <div class="ue-list">
                     <div class="ue-list-item">
-                        <div class="ue-list-title">Username</div>
+                        <div class="ue-list-title">Login Email</div>
                         <div class="ue-list-meta"><?php echo h(trim((string)($user['email'] ?? '')) !== '' ? (string)$user['email'] : '—'); ?></div>
                     </div>
 
@@ -499,25 +499,24 @@ cw_header('User Workspace');
                     </div>
                 </div>
 
-                <div style="margin-top:16px;">
-                    <?php if ($missingCount > 0): ?>
-                        <button
-                            type="button"
-                            class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-pill-button"
-                            data-toggle="collapse"
-                            data-target="ue-missing-data-content"
-                            aria-expanded="false"
-                            aria-controls="ue-missing-data-content">
-                            <?php echo 'Missing ' . $missingCount . ' field' . ($missingCount === 1 ? '' : 's'); ?>
-                        </button>
-                    <?php else: ?>
-                        <span class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-pill-static">
-                            Profile Complete
-                        </span>
-                    <?php endif; ?>
-                </div>
+<div style="margin-top:16px;">
+    <?php if ($missingCount > 0): ?>
+        <button
+            type="button"
+            class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-pill-button"
+            aria-expanded="false"
+            aria-controls="ue-missing-data-content"
+            onclick="return ueToggleMissingItems(this, 'ue-missing-data-content');">
+            <?php echo 'Missing ' . $missingCount . ' field' . ($missingCount === 1 ? '' : 's'); ?>
+        </button>
+    <?php else: ?>
+        <span class="<?php echo aue_completeness_class($missingCount); ?> ue-missing-pill-static">
+            Profile Complete
+        </span>
+    <?php endif; ?>
+</div>
 
-                <div id="ue-missing-data-content" class="ue-collapse-content" hidden style="margin-top:16px;">
+                <div id="ue-missing-data-content" class="ue-collapse-content" hidden style="margin-top:16px; display:none;">
                     <?php if ($missingFields): ?>
                         <div class="ue-list">
                             <?php foreach ($missingFields as $field): ?>
@@ -539,42 +538,37 @@ cw_header('User Workspace');
 </div>
 
 <script>
-(function () {
-    var toggles = document.querySelectorAll('.ue-missing-pill-button, [data-toggle="collapse"]');
+function ueToggleMissingItems(trigger, targetId) {
+    var target = document.getElementById(targetId);
+    var isOpen;
 
-    function bindToggle(el) {
-        if (!el) {
-            return;
-        }
-
-        el.addEventListener('click', function (e) {
-            var targetId = el.getAttribute('data-target');
-            var target;
-
-            e.preventDefault();
-            e.stopPropagation();
-
-            if (!targetId) {
-                return;
-            }
-
-            target = document.getElementById(targetId);
-            if (!target) {
-                return;
-            }
-
-            if (target.hasAttribute('hidden')) {
-                target.removeAttribute('hidden');
-                el.setAttribute('aria-expanded', 'true');
-            } else {
-                target.setAttribute('hidden', 'hidden');
-                el.setAttribute('aria-expanded', 'false');
-            }
-        });
+    if (!target) {
+        return false;
     }
 
-    for (var i = 0; i < toggles.length; i++) {
-        bindToggle(toggles[i]);
+    isOpen = !target.hasAttribute('hidden') && target.style.display !== 'none';
+
+    if (isOpen) {
+        target.setAttribute('hidden', 'hidden');
+        target.style.display = 'none';
+        if (trigger) {
+            trigger.setAttribute('aria-expanded', 'false');
+        }
+    } else {
+        target.removeAttribute('hidden');
+        target.style.display = 'block';
+        if (trigger) {
+            trigger.setAttribute('aria-expanded', 'true');
+        }
+    }
+
+    return false;
+}
+
+(function () {
+    var panel = document.getElementById('ue-missing-data-content');
+    if (panel && panel.hasAttribute('hidden')) {
+        panel.style.display = 'none';
     }
 })();
 </script>
