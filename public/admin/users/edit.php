@@ -539,7 +539,7 @@ cw_header('User Workspace');
 </div>
 
 <script>
-document.addEventListener('DOMContentLoaded', function () {
+(function () {
     var toggles = document.querySelectorAll('.ue-missing-pill-button, [data-toggle="collapse"]');
 
     function bindToggle(el) {
@@ -548,21 +548,22 @@ document.addEventListener('DOMContentLoaded', function () {
         }
 
         el.addEventListener('click', function (e) {
-            e.preventDefault();
-
             var targetId = el.getAttribute('data-target');
+            var target;
+
+            e.preventDefault();
+            e.stopPropagation();
+
             if (!targetId) {
                 return;
             }
 
-            var target = document.getElementById(targetId);
+            target = document.getElementById(targetId);
             if (!target) {
                 return;
             }
 
-            var isHidden = target.hasAttribute('hidden');
-
-            if (isHidden) {
+            if (target.hasAttribute('hidden')) {
                 target.removeAttribute('hidden');
                 el.setAttribute('aria-expanded', 'true');
             } else {
@@ -575,7 +576,7 @@ document.addEventListener('DOMContentLoaded', function () {
     for (var i = 0; i < toggles.length; i++) {
         bindToggle(toggles[i]);
     }
-});
+})();
 </script>
 
 <?php cw_footer(); ?>
