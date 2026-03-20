@@ -516,9 +516,7 @@ cw_header('User Workspace');
                     <?php foreach ($missingFields as $missingItem): ?>
                         <a class="ue-list-item ue-list-item-link" href="<?php echo h(aue_missing_field_url($userId, $missingItem)); ?>">
                             <div class="ue-list-title"><?php echo h((string)($missingItem['label'] ?? 'Unknown field')); ?></div>
-                            <a class="ue-list-item ue-list-item-link" href="<?php echo h(aue_missing_field_url($userId, (string)$field)); ?>">
-    							<div class="ue-list-title"><?php echo h((string)$field); ?></div>
-							</a>
+                            
                         </a>
                     <?php endforeach; ?>
                 </div>
