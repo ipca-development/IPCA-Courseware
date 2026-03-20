@@ -350,11 +350,13 @@ cw_header('User Accounts');
 .ua-field{display:flex;flex-direction:column;gap:7px}
 .ua-field-label{font-size:12px;font-weight:670;letter-spacing:.02em;color:var(--text-muted)}
 .ua-input-wrap{position:relative}
-.ua-input-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:#8a97ab;pointer-events:none}
-.ua-list-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:24px 0 14px 0}
+.ua-input-icon{position:absolute;left:12px;top:50%;transform:translateY(-50%);width:16px;height:16px;color:#8a97ab;pointer-events:none;z-index:2}
+.ua-input-wrap .ua-input{padding-left:42px}
+.ua-list-head-card{padding:18px 20px;margin:24px 0 14px 0}
+.ua-list-head{display:flex;align-items:center;justify-content:space-between;gap:16px}
 .ua-list-title{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:730;letter-spacing:-0.02em;color:var(--text-strong)}
 .ua-list-title-icon{width:18px;height:18px;color:var(--text-muted)}
-.ua-list-count{color:var(--text-muted);font-size:13px;font-weight:600}
+.ua-list-count-pill{display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:0 14px;border-radius:999px;background:#f3f6fb;border:1px solid rgba(15,23,42,0.08);color:#71809a;font-size:13px;font-weight:700;white-space:nowrap}
 .ua-card-list{display:grid;grid-template-columns:1fr;gap:16px}
 .ua-user-card{padding:22px}
 .ua-user-card-inner{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(340px,1fr);gap:18px;align-items:flex-start}
@@ -380,7 +382,7 @@ cw_header('User Accounts');
 .ua-empty-title{margin:0;font-size:18px;font-weight:740;letter-spacing:-0.02em;color:var(--text-strong)}
 .ua-empty-text{margin:8px 0 0 0;color:var(--text-muted);font-size:14px;line-height:1.65;max-width:700px}
 @media (max-width:1300px){.ua-hero-stats{grid-template-columns:repeat(3,minmax(0,1fr))}.ua-filters{grid-template-columns:repeat(3,minmax(0,1fr))}.ua-user-card-inner{grid-template-columns:1fr}.ua-badge-grid,.ua-card-actions{justify-content:flex-start}}
-@media (max-width:900px){.ua-hero-head{flex-direction:column;align-items:flex-start}.ua-hero-actions{justify-content:flex-start}.ua-hero-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.ua-filters{grid-template-columns:1fr}.ua-filter-actions{align-items:stretch}.ua-filter-btn,.ua-filter-btn--ghost{flex:1 1 auto;justify-content:center}.ua-meta-grid{grid-template-columns:1fr}}
+@media (max-width:900px){.ua-hero-head{flex-direction:column;align-items:flex-start}.ua-hero-actions{justify-content:flex-start}.ua-hero-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.ua-filters{grid-template-columns:1fr}.ua-filter-actions{align-items:stretch}.ua-filter-btn,.ua-filter-btn--ghost{flex:1 1 auto;justify-content:center}.ua-meta-grid{grid-template-columns:1fr}.ua-list-head{align-items:flex-start;flex-direction:column}}
 @media (max-width:640px){.ua-hero-stats{grid-template-columns:1fr}.ua-name{font-size:21px}.ua-avatar{width:62px;height:62px;flex-basis:62px}}
 </style>
 
@@ -536,13 +538,17 @@ cw_header('User Accounts');
         </form>
     </section>
 
+<section class="card ua-list-head-card">
     <div class="ua-list-head">
         <div class="ua-list-title">
             <span class="ua-list-title-icon"><?php echo ua_svg('users'); ?></span>
             <span>User roster</span>
         </div>
-        <div class="ua-list-count"><?php echo count($rows); ?> result<?php echo count($rows) === 1 ? '' : 's'; ?></div>
+        <div class="ua-list-count-pill">
+            <?php echo count($rows); ?> result<?php echo count($rows) === 1 ? '' : 's'; ?>
+        </div>
     </div>
+</section>
 
     <?php if (!$rows): ?>
         <section class="card ua-empty">
