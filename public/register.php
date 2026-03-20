@@ -208,61 +208,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $existingUser = reg_find_user_by_email($pdo, $email);
 
-        if ($existingUser === null) {
-            $displayName = trim($firstName . ' ' . $lastName);
 
-            $pdo->beginTransaction();
+		if ($existingUser === null) {
+    $displayName = trim($firstName . ' ' . $lastName);
 
-            $displayName = trim($firstName . ' ' . $lastName);
+    // Generate UUID for canonical users row
+    $uuid = bin2hex(random_bytes(16));
+    $uuid = sprintf(
+        '%s-%s-%s-%s-%s',
+        substr($uuid, 0, 8),
+        substr($uuid, 8, 4),
+        substr($uuid, 12, 4),
+        substr($uuid, 16, 4),
+        substr($uuid, 20, 12)
+    );
 
-// Generate UUID for canonical users row
-$uuid = bin2hex(random_bytes(16));
-$uuid = sprintf(
-    '%s-%s-%s-%s-%s',
-    substr($uuid, 0, 8),
-    substr($uuid, 8, 4),
-    substr($uuid, 12, 4),
-    substr($uuid, 16, 4),
-    substr($uuid, 20, 12)
-);
+    $pdo->beginTransaction();
 
-$pdo->beginTransaction();
-
-$insertUser = $pdo->prepare("
-    INSERT INTO users (
-        uuid,
-        name,
-        first_name,
-        last_name,
-        email,
-        username,
-        role,
-        status,
-        account_valid_until,
-        password_hash,
-        must_change_password,
-        created_by_user_id,
-        updated_by_user_id,
-        created_at,
-        updated_at
-    ) VALUES (
-        :uuid,
-        :name,
-        :first_name,
-        :last_name,
-        :email,
-        NULL,
-        'student',
-        'pending_activation',
-        NULL,
-        NULL,
-        1,
-        NULL,
-        NULL,
-        NOW(),
-        NOW()
-    )
-");
+    $insertUser = $pdo->prepare("
+        INSERT INTO users (
+            uuid,
+            name,
+            first_name,
+            last_name,
+            email,
+            username,
+            role,
+            status,
+            account_valid_until,
+            password_hash,
+            must_change_password,
+            created_by_user_id,
+            updated_by_user_id,
+            created_at,
+            updated_at
+        ) VALUES (
+            :uuid,
+            :name,
+            :first_name,
+            :last_name,
+            :email,
+            NULL,
+            'student',
+            'pending_activation',
+            NULL,
+            NULL,
+            1,
+            NULL,
+            NULL,
+            NOW(),
+            NOW()
+        )
+    ");
+		
 $insertUser->execute(array(
     ':uuid' => $uuid,
     ':name' => $displayName,
