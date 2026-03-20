@@ -31,8 +31,8 @@ $isPendingActivation = strtolower(trim((string)($user['status'] ?? ''))) === 'pe
         .ue-input,
         .ue-select{
             width:100%;
-            height:44px;
             max-width:100%;
+            height:44px;
             border-radius:14px;
             box-sizing:border-box;
             padding:0 14px;
@@ -201,18 +201,6 @@ $isPendingActivation = strtolower(trim((string)($user['status'] ?? ''))) === 'pe
                     name="email"
                     value="<?php echo h((string)($user['email'] ?? '')); ?>"
                     required
-                >
-            </div>
-
-            <div class="ue-field">
-                <label for="username">Username</label>
-                <input
-                    class="app-input ue-input"
-                    id="username"
-                    type="text"
-                    name="username"
-                    value="<?php echo h(trim((string)($user['email'] ?? '')) !== '' ? (string)$user['email'] : (string)($user['username'] ?? '')); ?>"
-                    readonly
                 >
             </div>
 
