@@ -74,6 +74,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
+/*
+|--------------------------------------------------------------------------
+| Always refresh requirement cache on page load
+|--------------------------------------------------------------------------
+| This ensures policy changes (such as user_require_username = 0)
+| are reflected immediately in the sidebar readiness snapshot.
+|--------------------------------------------------------------------------
+*/
+aue_recalculate_profile_requirements_status($pdo, $userId);
+
 $workspace = aue_load_user_workspace($pdo, $userId);
 
 if (!$workspace) {
@@ -529,13 +539,17 @@ cw_header('User Workspace');
 </div>
 
 <script>
-(function () {
+document.addEventListener('DOMContentLoaded', function () {
+    var toggles = document.querySelectorAll('.ue-missing-pill-button, [data-toggle="collapse"]');
+
     function bindToggle(el) {
         if (!el) {
             return;
         }
 
-        function togglePanel() {
+        el.addEventListener('click', function (e) {
+            e.preventDefault();
+
             var targetId = el.getAttribute('data-target');
             if (!targetId) {
                 return;
@@ -555,23 +569,13 @@ cw_header('User Workspace');
                 target.setAttribute('hidden', 'hidden');
                 el.setAttribute('aria-expanded', 'false');
             }
-        }
-
-        el.addEventListener('click', togglePanel);
-
-        el.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                togglePanel();
-            }
         });
     }
 
-    var toggles = document.querySelectorAll('[data-toggle="collapse"]');
     for (var i = 0; i < toggles.length; i++) {
         bindToggle(toggles[i]);
     }
-})();
+});
 </script>
 
 <?php cw_footer(); ?>
