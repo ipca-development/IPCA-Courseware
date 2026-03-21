@@ -1127,7 +1127,6 @@ cw_header('My Profile');
                             <?php foreach ($missingFields as $item): ?>
                                 <a class="ip-list-item ip-list-item-link" href="<?php echo h(ups_missing_field_url((array)$item, '/instructor/profile.php')); ?>">
                                     <div class="ip-list-title"><?php echo h((string)($item['label'] ?? 'Missing Field')); ?></div>
-                                    <div class="ip-list-meta">Open the correct section and complete this item.</div>
                                 </a>
                             <?php endforeach; ?>
                         </div>
