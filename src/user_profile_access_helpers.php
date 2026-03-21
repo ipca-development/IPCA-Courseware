@@ -869,6 +869,20 @@ if (!function_exists('ups_load_self_service_workspace')) {
     }
 }
 
+if (!function_exists('ups_recalculate_profile_requirements_status')) {
+    function ups_recalculate_profile_requirements_status(PDO $pdo, int $userId): void
+    {
+        if ($userId <= 0) {
+            return;
+        }
+
+        // Bridge to existing requirement engine (SSOT)
+        if (function_exists('aue_recalculate_profile_requirements_status')) {
+            aue_recalculate_profile_requirements_status($pdo, $userId);
+        }
+    }
+}
+
 if (!function_exists('ups_load_instructor_student_workspace')) {
     function ups_load_instructor_student_workspace(PDO $pdo, int $studentId, int $instructorId): ?array
     {
