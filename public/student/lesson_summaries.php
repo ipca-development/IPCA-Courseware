@@ -117,7 +117,7 @@ function nb_action_button_meta(array $lesson): ?array
     }
 
     if (in_array($reviewStatus, ['needs_revision', 'rejected'], true)) {
-        return ['label' => 'Open Action', 'action' => 'edit', 'class' => 'warn'];
+        return ['label' => 'Open Summary', 'action' => 'edit', 'class' => 'warn'];
     }
 
     if ($canEdit) {
@@ -161,8 +161,7 @@ cw_header('My Lesson Summaries');
 .nb-banner.danger{background:#fef2f2;color:#991b1b;border-color:#fca5a5}
 
 .nb-doc{
-  background:
-    linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(250,251,253,1) 100%);
+  background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
   border:1px solid rgba(15,23,42,0.06);
   border-radius:24px;
   padding:34px 36px 38px 36px;
@@ -172,9 +171,24 @@ cw_header('My Lesson Summaries');
 .nb-scope-row{
   display:flex;
   justify-content:space-between;
-  align-items:center;
+  align-items:flex-end;
   gap:14px;
   margin-bottom:22px;
+}
+
+.nb-scope-field{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  min-width:310px;
+}
+
+.nb-scope-label{
+  font-size:10px;
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  color:#64748b;
+  font-weight:800;
 }
 
 .nb-scope-select{
@@ -201,8 +215,9 @@ cw_header('My Lesson Summaries');
 .nb-btn:hover{opacity:.97}
 .nb-btn:active{transform:translateY(1px)}
 .nb-btn.primary{background:#12355f;color:#fff;box-shadow:0 10px 22px rgba(18,53,95,0.18)}
-.nb-btn.warn{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa}
+.nb-btn.warn{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;box-shadow:0 4px 12px rgba(154,52,18,0.08)}
 .nb-btn.ghost{background:#fff;border:1px solid rgba(15,23,42,0.10);color:#152235}
+.nb-btn.ghost:hover{border-color:rgba(18,53,95,0.22);box-shadow:0 6px 14px rgba(15,23,42,0.05)}
 
 .nb-header{
   padding:2px 0 8px 0;
@@ -305,47 +320,86 @@ cw_header('My Lesson Summaries');
 }
 
 .nb-toc ol{
+  list-style:none;
   margin:0;
+  padding:0;
+}
+.nb-toc li{
+  list-style:none;
+  margin:0;
+  padding:0;
+}
+.nb-toc li::marker,
+.nb-toc ol li::marker{
+  content:'';
+  font-size:0;
+}
+
+.nb-toc-root{
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+.nb-toc-item-course{
+  padding:10px 0 0 0;
+}
+
+.nb-toc-course-row .nb-toc-link{
+  font-size:15px;
+  font-weight:800;
+  color:#102845;
+}
+
+.nb-toc-lesson-list{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  margin-top:9px;
   padding-left:20px;
 }
 
-.nb-toc > ol{
-  padding-left:22px;
-}
-
-.nb-toc li{
-  margin:8px 0;
-}
-
-.nb-toc a{
-  text-decoration:none;
+.nb-toc-item-lesson .nb-toc-link{
+  font-size:13px;
+  font-weight:700;
   color:#12355f;
-  font-weight:800;
-  line-height:1.45;
 }
 
-.nb-toc a:hover{
-  text-decoration:underline;
-}
-
-.nb-toc-meta{
-  margin-top:5px;
-  font-size:12px;
-  color:#64748b;
+.nb-toc-row{
   display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+  min-width:0;
+}
+
+.nb-toc-left{
+  min-width:0;
+  flex:1 1 auto;
+}
+
+.nb-toc-right{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
   gap:8px;
   flex-wrap:wrap;
-  align-items:center;
+  min-width:0;
 }
 
-.nb-body{
-  margin-top:6px;
+.nb-toc-link{
+  text-decoration:none;
+  line-height:1.45;
+  word-break:break-word;
+}
+.nb-toc-link:hover{
+  text-decoration:underline;
 }
 
 .nb-course{
   margin-top:34px;
 }
-
 .nb-course:first-child{
   margin-top:26px;
 }
@@ -365,6 +419,29 @@ cw_header('My Lesson Summaries');
   border-top:1px solid rgba(15,23,42,0.08);
 }
 
+.nb-lesson-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+  min-width:0;
+}
+
+.nb-lesson-head-left{
+  min-width:0;
+  flex:1 1 auto;
+}
+
+.nb-lesson-head-right{
+  flex:0 0 auto;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:8px;
+  flex-wrap:wrap;
+  min-width:0;
+}
+
 .nb-lesson-title{
   font-size:19px;
   line-height:1.25;
@@ -372,20 +449,21 @@ cw_header('My Lesson Summaries');
   color:#152235;
   margin:0;
   letter-spacing:-0.01em;
+  word-break:break-word;
 }
 
 .nb-pill{
   display:inline-flex;
   align-items:center;
   justify-content:center;
-  min-height:29px;
-  padding:0 11px;
+  min-height:22px;
+  padding:0 8px;
   border-radius:999px;
-  font-size:11px;
+  font-size:10px;
   font-weight:800;
-  margin-top:9px;
   letter-spacing:.02em;
   border:1px solid transparent;
+  white-space:nowrap;
 }
 .nb-pill.pending{background:#fef3c7;color:#92400e;border-color:#fde68a}
 .nb-pill.ok{background:#dcfce7;color:#166534;border-color:#86efac}
@@ -393,14 +471,18 @@ cw_header('My Lesson Summaries');
 .nb-pill.info{background:#dbeafe;color:#1d4ed8;border-color:#93c5fd}
 .nb-pill.danger{background:#fecaca;color:#991b1b;border-color:#f87171}
 
-.nb-lesson-meta{
-  margin-top:8px;
-  display:flex;
-  gap:12px;
-  flex-wrap:wrap;
-  font-size:12px;
-  color:#6b7b91;
-  line-height:1.4;
+.nb-meta-chip{
+  display:inline-flex;
+  align-items:center;
+  min-height:22px;
+  padding:0 8px;
+  border-radius:999px;
+  background:#f8fafc;
+  border:1px solid rgba(15,23,42,0.08);
+  color:#64748b;
+  font-size:10px;
+  font-weight:700;
+  white-space:nowrap;
 }
 
 .nb-content{
@@ -463,8 +545,14 @@ cw_header('My Lesson Summaries');
   flex-wrap:wrap;
 }
 
+.nb-panel-context{
+  margin-top:16px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
 .nb-panel-box{
-  margin-top:14px;
   border:1px solid rgba(15,23,42,0.08);
   border-radius:14px;
   padding:13px 14px;
@@ -514,16 +602,29 @@ cw_header('My Lesson Summaries');
   .nb-meta{grid-template-columns:1fr 1fr}
 }
 
-@media (max-width:720px){
+@media (max-width:760px){
   .nb-shell{max-width:none}
   .nb-doc{padding:22px 18px 26px 18px;border-radius:18px}
   .nb-scope-row{flex-direction:column;align-items:stretch}
+  .nb-scope-field{min-width:0;width:100%}
   .nb-scope-select{min-width:0;width:100%}
   .nb-meta{grid-template-columns:1fr}
   .nb-title{font-size:32px}
   .nb-course-title{font-size:24px}
   .nb-lesson-title{font-size:18px}
   .nb-content{font-size:15px;line-height:1.78}
+
+  .nb-toc-row,
+  .nb-lesson-head{
+    flex-direction:column;
+    align-items:flex-start;
+  }
+
+  .nb-toc-right,
+  .nb-lesson-head-right{
+    width:100%;
+    justify-content:flex-start;
+  }
 }
 
 @media print{
@@ -569,13 +670,16 @@ cw_header('My Lesson Summaries');
   <div class="nb-doc">
 
     <div class="nb-scope-row">
-      <select class="nb-scope-select" id="scopeSelect" data-current-scope="<?= (int)$selectedCohortId ?>">
-        <?php foreach ($scopes as $s): ?>
-          <option value="<?= (int)$s['cohort_id'] ?>" <?= ((int)$s['cohort_id'] === $selectedCohortId ? 'selected' : '') ?>>
-            <?= h((string)$s['label']) ?>
-          </option>
-        <?php endforeach; ?>
-      </select>
+      <div class="nb-scope-field">
+        <label class="nb-scope-label" for="scopeSelect">Training Scope</label>
+        <select class="nb-scope-select" id="scopeSelect" data-current-scope="<?= (int)$selectedCohortId ?>">
+          <?php foreach ($scopes as $s): ?>
+            <option value="<?= (int)$s['cohort_id'] ?>" <?= ((int)$s['cohort_id'] === $selectedCohortId ? 'selected' : '') ?>>
+              <?= h((string)$s['label']) ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+      </div>
 
       <button class="nb-btn primary" id="exportBtn">Export PDF</button>
     </div>
@@ -615,7 +719,7 @@ cw_header('My Lesson Summaries');
     </div>
 
     <div class="nb-export-note">
-      Export currently uses clean browser print-to-PDF rendering from read mode only. Current post-save metadata refresh is optimistic and client-derived in this pass.
+      Export currently uses clean browser print-to-PDF rendering from read mode only.
     </div>
 
     <div class="nb-toc">
@@ -626,35 +730,47 @@ cw_header('My Lesson Summaries');
         </div>
       </div>
 
-      <ol>
+      <ol class="nb-toc-root">
         <?php foreach ($data['courses'] as $course): ?>
-          <li>
-            <a href="#<?= h((string)$course['anchor_id']) ?>">
-              <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
-            </a>
-            <ol>
+          <li class="nb-toc-item nb-toc-item-course">
+            <div class="nb-toc-row nb-toc-course-row">
+              <div class="nb-toc-left">
+                <a class="nb-toc-link" href="#<?= h((string)$course['anchor_id']) ?>">
+                  <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
+                </a>
+              </div>
+              <div class="nb-toc-right"></div>
+            </div>
+
+            <ol class="nb-toc-lesson-list">
               <?php foreach ($course['lessons'] as $lesson): ?>
                 <?php
                   $hasSummary = nb_has_summary($lesson);
                   $attention = nb_attention_meta($lesson);
                 ?>
-                <li id="toc-lesson-<?= (int)$lesson['lesson_id'] ?>">
-                  <a href="#<?= h((string)$lesson['anchor_id']) ?>">
-                    <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
-                  </a>
-                  <div class="nb-toc-meta">
-                    <?php if ($attention['show']): ?>
-                      <span class="nb-pill <?= h($attention['class']) ?>" data-role="toc-status-pill"><?= h($attention['label']) ?></span>
-                    <?php endif; ?>
-                    <?php if ($hasSummary): ?>
-                      <span data-role="toc-word-meta"><?= (int)$lesson['word_count'] ?> words</span>
-                      <?php if ((int)$lesson['version_count'] > 0): ?>
-                        <span data-role="toc-version-meta"><?= (int)$lesson['version_count'] ?> versions</span>
+                <li class="nb-toc-item nb-toc-item-lesson" id="toc-lesson-<?= (int)$lesson['lesson_id'] ?>">
+                  <div class="nb-toc-row">
+                    <div class="nb-toc-left">
+                      <a class="nb-toc-link" href="#<?= h((string)$lesson['anchor_id']) ?>">
+                        <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
+                      </a>
+                    </div>
+
+                    <div class="nb-toc-right">
+                      <?php if ($attention['show']): ?>
+                        <span class="nb-pill <?= h($attention['class']) ?>" data-role="toc-status-pill"><?= h($attention['label']) ?></span>
                       <?php endif; ?>
-                      <?php if (trim((string)$lesson['updated_at']) !== ''): ?>
-                        <span data-role="toc-date-meta"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
+
+                      <?php if ($hasSummary): ?>
+                        <span class="nb-meta-chip" data-role="toc-word-meta"><?= (int)$lesson['word_count'] ?> words</span>
+                        <?php if ((int)$lesson['version_count'] > 0): ?>
+                          <span class="nb-meta-chip" data-role="toc-version-meta"><?= (int)$lesson['version_count'] ?> versions</span>
+                        <?php endif; ?>
+                        <?php if (trim((string)$lesson['updated_at']) !== ''): ?>
+                          <span class="nb-meta-chip" data-role="toc-date-meta"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
+                        <?php endif; ?>
                       <?php endif; ?>
-                    <?php endif; ?>
+                    </div>
                   </div>
                 </li>
               <?php endforeach; ?>
@@ -679,6 +795,8 @@ cw_header('My Lesson Summaries');
               $button = nb_action_button_meta($lesson);
               $reviewStatus = (string)$lesson['review_status'];
               $showActionPanelMeta = in_array($reviewStatus, ['needs_revision', 'rejected'], true);
+              $versionCount = (int)($lesson['version_count'] ?? 0);
+              $latestVersionAt = trim((string)($lesson['latest_version_at'] ?? ''));
             ?>
             <section
               class="nb-lesson"
@@ -687,27 +805,33 @@ cw_header('My Lesson Summaries');
               data-review-status="<?= h($reviewStatus) ?>"
               data-has-summary="<?= $hasSummary ? '1' : '0' ?>"
             >
-              <h3 class="nb-lesson-title">
-                <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
-              </h3>
+              <div class="nb-lesson-head">
+                <div class="nb-lesson-head-left">
+                  <h3 class="nb-lesson-title">
+                    <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
+                  </h3>
+                </div>
 
-              <?php if ($attention['show']): ?>
-                <span class="nb-pill <?= h($attention['class']) ?>" data-role="status-pill"><?= h($attention['label']) ?></span>
-              <?php endif; ?>
-
-              <?php if ($hasSummary): ?>
-                <div class="nb-lesson-meta" data-role="lesson-meta">
-                  <span data-role="word-meta"><?= (int)$lesson['word_count'] ?> words</span>
-                  <?php if ((int)$lesson['version_count'] > 0): ?>
-                    <span data-role="version-meta"><?= (int)$lesson['version_count'] ?> versions</span>
+                <div class="nb-lesson-head-right" data-role="lesson-meta">
+                  <?php if ($attention['show']): ?>
+                    <span class="nb-pill <?= h($attention['class']) ?>" data-role="status-pill"><?= h($attention['label']) ?></span>
                   <?php endif; ?>
-                  <?php if (trim((string)$lesson['updated_at']) !== ''): ?>
-                    <span data-role="date-meta"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
+
+                  <?php if ($hasSummary): ?>
+                    <span class="nb-meta-chip" data-role="word-meta"><?= (int)$lesson['word_count'] ?> words</span>
+                    <?php if ((int)$lesson['version_count'] > 0): ?>
+                      <span class="nb-meta-chip" data-role="version-meta"><?= (int)$lesson['version_count'] ?> versions</span>
+                    <?php endif; ?>
+                    <?php if (trim((string)$lesson['updated_at']) !== ''): ?>
+                      <span class="nb-meta-chip" data-role="date-meta"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
+                    <?php endif; ?>
                   <?php endif; ?>
                 </div>
+              </div>
+
+              <?php if ($hasSummary): ?>
                 <div class="nb-content" data-view><?= (string)$lesson['summary_html'] ?></div>
               <?php else: ?>
-                <div class="nb-lesson-meta" data-role="lesson-meta"></div>
                 <div class="nb-divider" data-view></div>
               <?php endif; ?>
 
@@ -731,21 +855,35 @@ cw_header('My Lesson Summaries');
                   <button class="nb-btn ghost" data-close-lesson="<?= $lessonId ?>">Close</button>
                 </div>
 
-                <?php if ($showActionPanelMeta): ?>
-                  <?php if (trim((string)$lesson['instructor_feedback']) !== ''): ?>
+                <div class="nb-panel-context">
+                  <?php if ($showActionPanelMeta && trim((string)$lesson['instructor_feedback']) !== ''): ?>
                     <div class="nb-panel-box">
                       <div class="nb-panel-label">Instructor Feedback</div>
                       <div class="nb-panel-body"><?= nl2br(h((string)$lesson['instructor_feedback'])) ?></div>
                     </div>
                   <?php endif; ?>
 
-                  <?php if (trim((string)$lesson['instructor_notes']) !== ''): ?>
+                  <?php if ($showActionPanelMeta && trim((string)$lesson['instructor_notes']) !== ''): ?>
                     <div class="nb-panel-box">
                       <div class="nb-panel-label">Instructor Notes</div>
                       <div class="nb-panel-body"><?= nl2br(h((string)$lesson['instructor_notes'])) ?></div>
                     </div>
                   <?php endif; ?>
-                <?php endif; ?>
+
+                  <?php if ($versionCount > 0 || $latestVersionAt !== ''): ?>
+                    <div class="nb-panel-box">
+                      <div class="nb-panel-label">Version Context</div>
+                      <div class="nb-panel-body">
+                        <?php if ($versionCount > 0): ?>
+                          <div><?= (int)$versionCount ?> saved version<?= $versionCount === 1 ? '' : 's' ?> preserved for your summary history.</div>
+                        <?php endif; ?>
+                        <?php if ($latestVersionAt !== ''): ?>
+                          <div>Latest saved version: <?= h(nb_ui_date($latestVersionAt)) ?></div>
+                        <?php endif; ?>
+                      </div>
+                    </div>
+                  <?php endif; ?>
+                </div>
               </div>
             </section>
           <?php endforeach; ?>
@@ -868,7 +1006,7 @@ function buildActionButton(reviewStatus, hasSummary) {
     return { label: 'Edit Summary', action: 'unlock', className: 'nb-btn warn' };
   }
   if (reviewStatus === 'needs_revision' || reviewStatus === 'rejected') {
-    return { label: 'Open Action', action: 'edit', className: 'nb-btn warn' };
+    return { label: 'Open Summary', action: 'edit', className: 'nb-btn warn' };
   }
   if (hasSummary) {
     return { label: 'Edit', action: 'edit', className: 'nb-btn ghost' };
@@ -895,16 +1033,27 @@ function renderActionButton(lessonId, reviewStatus, hasSummary) {
   actionBar.appendChild(btn);
 }
 
-function updateMetaSpans(container, map) {
+function ensureMetaChip(text, role) {
+  const span = document.createElement('span');
+  span.className = 'nb-meta-chip';
+  span.setAttribute('data-role', role);
+  span.textContent = text;
+  return span;
+}
+
+function clearMetaChipsKeepPill(container) {
   if (!container) return;
-  container.innerHTML = '';
-  Object.keys(map).forEach((key) => {
-    const val = map[key];
-    if (!val) return;
-    const span = document.createElement('span');
-    span.setAttribute('data-role', key);
-    span.textContent = val;
-    container.appendChild(span);
+  Array.from(container.children).forEach(function (child) {
+    if (child.getAttribute('data-role') === 'status-pill') return;
+    container.removeChild(child);
+  });
+}
+
+function clearTocMetaKeepPill(container) {
+  if (!container) return;
+  Array.from(container.children).forEach(function (child) {
+    if (child.getAttribute('data-role') === 'toc-status-pill') return;
+    container.removeChild(child);
   });
 }
 
@@ -927,6 +1076,7 @@ function updateLessonAndTocMetadata(lessonId, reviewStatus, html) {
 
   const attentionReason = '';
   const statusMeta = computeStatusDisplay(reviewStatus, attentionReason);
+
   setStatusPillOnNode(node, statusMeta.label, statusMeta.klass, '[data-role="status-pill"]');
   setStatusPillOnNode(toc, statusMeta.label, statusMeta.klass, '[data-role="toc-status-pill"]');
 
@@ -945,77 +1095,38 @@ function updateLessonAndTocMetadata(lessonId, reviewStatus, html) {
   const dateLabel = formatUtcDateLabel(now);
 
   const lessonMeta = node.querySelector('[data-role="lesson-meta"]');
-  updateMetaSpans(lessonMeta, {
-    'word-meta': hasSummary ? (wordCount + ' words') : ''
-  });
-
-  const tocMeta = toc ? toc.querySelector('.nb-toc-meta') : null;
-  if (tocMeta) {
-    let statusPill = tocMeta.querySelector('[data-role="toc-status-pill"]');
-    tocMeta.innerHTML = '';
-    if (!statusPill) {
-      statusPill = document.createElement('span');
-      statusPill.setAttribute('data-role', 'toc-status-pill');
-    }
-    statusPill.className = 'nb-pill ' + statusMeta.klass;
-    statusPill.textContent = statusMeta.label;
-    tocMeta.appendChild(statusPill);
-
+  if (lessonMeta) {
+    clearMetaChipsKeepPill(lessonMeta);
     if (hasSummary) {
-      const wc = document.createElement('span');
-      wc.setAttribute('data-role', 'toc-word-meta');
-      wc.textContent = wordCount + ' words';
-      tocMeta.appendChild(wc);
+      lessonMeta.appendChild(ensureMetaChip(wordCount + ' words', 'word-meta'));
+
+      const versionMeta = node.querySelector('[data-role="version-meta"]');
+      if (versionMeta) {
+        const current = parseInt((versionMeta.textContent || '0').replace(/\D+/g, ''), 10) || 0;
+        lessonMeta.appendChild(ensureMetaChip((current + 1) + ' versions', 'version-meta'));
+      } else {
+        lessonMeta.appendChild(ensureMetaChip('1 versions', 'version-meta'));
+      }
+
+      lessonMeta.appendChild(ensureMetaChip(dateLabel, 'date-meta'));
     }
   }
 
-  const versionMeta = node.querySelector('[data-role="version-meta"]');
-  if (versionMeta) {
-    const current = parseInt((versionMeta.textContent || '0').replace(/\D+/g, ''), 10) || 0;
-    versionMeta.textContent = (current + 1) + ' versions';
-  } else if (hasSummary) {
-    const lessonMetaBox = node.querySelector('[data-role="lesson-meta"]');
-    if (lessonMetaBox) {
-      const span = document.createElement('span');
-      span.setAttribute('data-role', 'version-meta');
-      span.textContent = '1 versions';
-      lessonMetaBox.appendChild(span);
-    }
-  }
+  const tocRight = toc ? toc.querySelector('.nb-toc-right') : null;
+  if (tocRight) {
+    clearTocMetaKeepPill(tocRight);
+    if (hasSummary) {
+      tocRight.appendChild(ensureMetaChip(wordCount + ' words', 'toc-word-meta'));
 
-  const dateMeta = node.querySelector('[data-role="date-meta"]');
-  if (dateMeta) {
-    dateMeta.textContent = dateLabel;
-  } else if (hasSummary) {
-    const lessonMetaBox = node.querySelector('[data-role="lesson-meta"]');
-    if (lessonMetaBox) {
-      const span = document.createElement('span');
-      span.setAttribute('data-role', 'date-meta');
-      span.textContent = dateLabel;
-      lessonMetaBox.appendChild(span);
-    }
-  }
+      const existingVersion = toc.querySelector('[data-role="toc-version-meta"]');
+      if (existingVersion) {
+        const current = parseInt((existingVersion.textContent || '0').replace(/\D+/g, ''), 10) || 0;
+        tocRight.appendChild(ensureMetaChip((current + 1) + ' versions', 'toc-version-meta'));
+      } else {
+        tocRight.appendChild(ensureMetaChip('1 versions', 'toc-version-meta'));
+      }
 
-  if (tocMeta && hasSummary) {
-    const existingVersion = tocMeta.querySelector('[data-role="toc-version-meta"]');
-    if (existingVersion) {
-      const current = parseInt((existingVersion.textContent || '0').replace(/\D+/g, ''), 10) || 0;
-      existingVersion.textContent = (current + 1) + ' versions';
-    } else {
-      const span = document.createElement('span');
-      span.setAttribute('data-role', 'toc-version-meta');
-      span.textContent = '1 versions';
-      tocMeta.appendChild(span);
-    }
-
-    const existingDate = tocMeta.querySelector('[data-role="toc-date-meta"]');
-    if (existingDate) {
-      existingDate.textContent = dateLabel;
-    } else {
-      const span = document.createElement('span');
-      span.setAttribute('data-role', 'toc-date-meta');
-      span.textContent = dateLabel;
-      tocMeta.appendChild(span);
+      tocRight.appendChild(ensureMetaChip(dateLabel, 'toc-date-meta'));
     }
   }
 
