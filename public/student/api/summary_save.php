@@ -25,6 +25,7 @@ try {
         throw new RuntimeException('Invalid JSON');
     }
 
+    $action = trim((string)($data['action'] ?? 'save'));
     $cohortId = (int)($data['cohort_id'] ?? 0);
     $lessonId = (int)($data['lesson_id'] ?? 0);
     $summaryHtml = (string)($data['summary_html'] ?? '');
@@ -48,17 +49,21 @@ try {
 
     $service = new LessonSummaryService($pdo);
 
-    $result = $service->saveSummary(
-        $userId,
-        $cohortId,
-        $lessonId,
-        $summaryHtml,
-        'student'
-    );
-
-    if (!empty($result['ok'])) {
-        echo json_encode($result);
-        exit;
+    if ($action === 'unlock') {
+        $result = $service->unlockSummary(
+            $userId,
+            $cohortId,
+            $lessonId,
+            'student'
+        );
+    } else {
+        $result = $service->saveSummary(
+            $userId,
+            $cohortId,
+            $lessonId,
+            $summaryHtml,
+            'student'
+        );
     }
 
     echo json_encode($result);

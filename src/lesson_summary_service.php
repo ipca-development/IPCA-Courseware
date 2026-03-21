@@ -7,10 +7,7 @@ declare(strict_types=1);
  * SSOT RULE:
  * - lesson_summaries is the ONLY live store
  * - this service controls ALL writes
- *
- * This service MUST be used by:
- * - existing summary_save.php
- * - notebook page (later)
+ * - notebook is a view layer only
  */
 final class LessonSummaryService
 {
@@ -23,14 +20,6 @@ final class LessonSummaryService
         $this->pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
     }
 
-    /**
-     * Save summary through the single centralized write path.
-     *
-     * Options:
-     * - require_unlock_for_accepted: bool
-     *      false = preserve current legacy save behavior
-     *      true  = accepted summaries require explicit unlock first
-     */
     public function saveSummary(
         int $userId,
         int $cohortId,
@@ -49,7 +38,6 @@ final class LessonSummaryService
 
         $existing = $this->getExisting($userId, $cohortId, $lessonId);
 
-        // Accepted summary protection is opt-in for now so we do not break existing flows.
         if (
             $requireUnlockForAccepted &&
             $existing &&
@@ -61,7 +49,6 @@ final class LessonSummaryService
             ];
         }
 
-        // Skip noise / identical writes
         if ($existing && $this->isSameContent(
             (string)($existing['summary_html'] ?? ''),
             (string)($existing['summary_plain'] ?? ''),
@@ -74,7 +61,6 @@ final class LessonSummaryService
         $this->pdo->beginTransaction();
 
         try {
-            // Snapshot before meaningful overwrite only
             if ($existing) {
                 $this->createVersionSnapshot(
                     $existing,
@@ -84,8 +70,6 @@ final class LessonSummaryService
                 );
             }
 
-            // Preserve existing transition behavior exactly:
-            // needs_revision + save => pending
             $newStatus = 'pending';
             if ($existing) {
                 $existingReviewStatus = (string)($existing['review_status'] ?? '');
@@ -134,10 +118,6 @@ final class LessonSummaryService
         }
     }
 
-    /**
-     * Unlock accepted summary for notebook editing.
-     * This is not yet wired into the old player flow.
-     */
     public function unlockSummary(
         int $userId,
         int $cohortId,
@@ -196,16 +176,6 @@ final class LessonSummaryService
         }
     }
 
-    /**
-     * Restore a previous version into the live canonical row.
-     *
-     * Restore rules:
-     * 1. snapshot current live row first
-     * 2. restore content fields only
-     * 3. set review_status = pending
-     * 4. do not revive old approval as active truth
-     * 5. do not revive old instructor feedback as active truth
-     */
     public function restoreVersion(
         int $versionId,
         int $userId,
@@ -224,7 +194,6 @@ final class LessonSummaryService
             return ['ok' => false, 'error' => 'Version not found'];
         }
 
-        // Strictly user-scoped
         if ((int)$version['user_id'] !== $userId) {
             return ['ok' => false, 'error' => 'Forbidden'];
         }
@@ -283,6 +252,258 @@ final class LessonSummaryService
                 $this->pdo->rollBack();
             }
             throw $e;
+        }
+    }
+
+    public function getNotebookViewData(int $userId, int $cohortId, string $studentName): array
+    {
+        $this->assertStudentEnrollment($userId, $cohortId);
+
+        $co = $this->pdo->prepare("
+            SELECT
+                co.id,
+                co.name,
+                co.start_date,
+                co.end_date,
+                c.title AS course_title
+            FROM cohorts co
+            JOIN courses c ON c.id = co.course_id
+            WHERE co.id = ?
+            LIMIT 1
+        ");
+        $co->execute([$cohortId]);
+        $cohort = $co->fetch();
+
+        if (!$cohort) {
+            throw new RuntimeException('Cohort not found');
+        }
+
+        $lessonRowsSt = $this->pdo->prepare("
+            SELECT
+                d.sort_order AS deadline_sort_order,
+                l.id AS lesson_id,
+                l.external_lesson_id,
+                l.title AS lesson_title,
+                c.id AS course_id,
+                c.title AS course_title,
+                c.sort_order AS course_sort_order
+            FROM cohort_lesson_deadlines d
+            JOIN lessons l ON l.id = d.lesson_id
+            JOIN courses c ON c.id = l.course_id
+            WHERE d.cohort_id = ?
+            ORDER BY c.sort_order, c.id, d.sort_order, d.id
+        ");
+        $lessonRowsSt->execute([$cohortId]);
+        $lessonRows = $lessonRowsSt->fetchAll();
+
+        $summarySt = $this->pdo->prepare("
+            SELECT
+                id,
+                lesson_id,
+                summary_html,
+                summary_plain,
+                review_status,
+                review_score,
+                review_feedback,
+                review_notes_by_instructor,
+                updated_at
+            FROM lesson_summaries
+            WHERE user_id = ?
+              AND cohort_id = ?
+        ");
+        $summarySt->execute([$userId, $cohortId]);
+        $summaryRows = $summarySt->fetchAll();
+
+        $versionMetaSt = $this->pdo->prepare("
+            SELECT
+                lesson_id,
+                COUNT(*) AS version_count,
+                MAX(created_at) AS latest_version_at
+            FROM lesson_summary_versions
+            WHERE user_id = ?
+              AND cohort_id = ?
+            GROUP BY lesson_id
+        ");
+        $versionMetaSt->execute([$userId, $cohortId]);
+        $versionMetaRows = $versionMetaSt->fetchAll();
+
+        $summaryMap = [];
+        foreach ($summaryRows as $row) {
+            $summaryMap[(int)$row['lesson_id']] = $row;
+        }
+
+        $versionMetaMap = [];
+        foreach ($versionMetaRows as $row) {
+            $versionMetaMap[(int)$row['lesson_id']] = $row;
+        }
+
+        $courses = [];
+        $lastSavedAt = null;
+
+        foreach ($lessonRows as $row) {
+            $lessonId = (int)$row['lesson_id'];
+            $courseId = (int)$row['course_id'];
+
+            if (!isset($courses[$courseId])) {
+                $courses[$courseId] = [
+                    'course_id' => $courseId,
+                    'course_title' => (string)$row['course_title'],
+                    'lessons' => [],
+                ];
+            }
+
+            $summary = $summaryMap[$lessonId] ?? null;
+            $versionMeta = $versionMetaMap[$lessonId] ?? null;
+
+            $summaryHtml = $summary ? (string)$summary['summary_html'] : '';
+            $summaryPlain = $summary ? (string)($summary['summary_plain'] ?? '') : '';
+            $reviewStatus = $summary ? (string)($summary['review_status'] ?? 'pending') : 'pending';
+            $reviewScore = ($summary && $summary['review_score'] !== null) ? (int)$summary['review_score'] : null;
+            $updatedAt = $summary ? (string)$summary['updated_at'] : '';
+
+            if ($updatedAt !== '') {
+                if ($lastSavedAt === null || strtotime($updatedAt) > strtotime((string)$lastSavedAt)) {
+                    $lastSavedAt = $updatedAt;
+                }
+            }
+
+            $wordCount = $this->wordCount($summaryPlain);
+            $reviewMeta = $this->reviewMeta($reviewStatus, $reviewScore, $wordCount);
+
+            $courses[$courseId]['lessons'][] = [
+                'lesson_id' => $lessonId,
+                'external_lesson_id' => (int)$row['external_lesson_id'],
+                'lesson_title' => (string)$row['lesson_title'],
+                'summary_id' => $summary ? (int)$summary['id'] : null,
+                'summary_html' => $summaryHtml,
+                'summary_plain' => $summaryPlain,
+                'review_status' => $reviewStatus,
+                'review_ui_label' => $this->reviewUiLabel($reviewStatus),
+                'review_ui_class' => $reviewMeta['class'],
+                'review_score' => $reviewScore,
+                'word_count' => $wordCount,
+                'updated_at' => $updatedAt,
+                'version_count' => $versionMeta ? (int)$versionMeta['version_count'] : 0,
+                'latest_version_at' => $versionMeta ? (string)$versionMeta['latest_version_at'] : '',
+                'instructor_feedback' => $summary ? (string)($summary['review_feedback'] ?? '') : '',
+                'instructor_notes' => $summary ? (string)($summary['review_notes_by_instructor'] ?? '') : '',
+                'read_only_by_default' => ($reviewStatus === 'acceptable'),
+                'status_meta' => $reviewMeta,
+            ];
+        }
+
+        return [
+            'cohort' => [
+                'id' => (int)$cohort['id'],
+                'name' => (string)$cohort['name'],
+                'course_title' => (string)$cohort['course_title'],
+                'start_date' => (string)$cohort['start_date'],
+                'end_date' => (string)$cohort['end_date'],
+            ],
+            'student_name' => $studentName,
+            'last_saved_at' => $lastSavedAt,
+            'courses' => array_values($courses),
+        ];
+    }
+
+    public function getVersionsForLesson(int $userId, int $cohortId, int $lessonId, int $limit = 12): array
+    {
+        $this->assertStudentEnrollment($userId, $cohortId);
+        $this->assertLessonInCohort($cohortId, $lessonId);
+
+        if ($limit <= 0) {
+            $limit = 12;
+        }
+        if ($limit > 25) {
+            $limit = 25;
+        }
+
+        $sql = "
+            SELECT
+                id,
+                version_no,
+                snapshot_reason,
+                source_review_status,
+                source_review_score,
+                source_updated_at,
+                summary_plain,
+                created_at
+            FROM lesson_summary_versions
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND lesson_id = ?
+            ORDER BY version_no DESC, id DESC
+            LIMIT " . (int)$limit;
+
+        $st = $this->pdo->prepare($sql);
+        $st->execute([$userId, $cohortId, $lessonId]);
+        $rows = $st->fetchAll();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $plain = trim((string)($row['summary_plain'] ?? ''));
+            $out[] = [
+                'id' => (int)$row['id'],
+                'version_no' => (int)$row['version_no'],
+                'snapshot_reason' => (string)$row['snapshot_reason'],
+                'snapshot_reason_label' => $this->snapshotReasonLabel((string)$row['snapshot_reason']),
+                'source_review_status' => (string)($row['source_review_status'] ?? ''),
+                'source_review_label' => $this->reviewUiLabel((string)($row['source_review_status'] ?? '')),
+                'source_review_score' => $row['source_review_score'] !== null ? (int)$row['source_review_score'] : null,
+                'source_updated_at' => (string)($row['source_updated_at'] ?? ''),
+                'created_at' => (string)$row['created_at'],
+                'preview' => $this->excerpt($plain, 220),
+            ];
+        }
+
+        return $out;
+    }
+
+    public function notebookSaveSummary(
+        int $userId,
+        int $cohortId,
+        int $lessonId,
+        string $summaryHtml
+    ): array {
+        return $this->saveSummary(
+            $userId,
+            $cohortId,
+            $lessonId,
+            $summaryHtml,
+            'student',
+            ['require_unlock_for_accepted' => true]
+        );
+    }
+
+    private function assertStudentEnrollment(int $userId, int $cohortId): void
+    {
+        $st = $this->pdo->prepare("
+            SELECT 1
+            FROM cohort_students
+            WHERE cohort_id = ?
+              AND user_id = ?
+            LIMIT 1
+        ");
+        $st->execute([$cohortId, $userId]);
+
+        if (!$st->fetchColumn()) {
+            throw new RuntimeException('Not enrolled in this cohort');
+        }
+    }
+
+    private function assertLessonInCohort(int $cohortId, int $lessonId): void
+    {
+        $st = $this->pdo->prepare("
+            SELECT 1
+            FROM cohort_lesson_deadlines
+            WHERE cohort_id = ?
+              AND lesson_id = ?
+            LIMIT 1
+        ");
+        $st->execute([$cohortId, $lessonId]);
+
+        if (!$st->fetchColumn()) {
+            throw new RuntimeException('Lesson is not part of this cohort');
         }
     }
 
@@ -405,5 +626,85 @@ final class LessonSummaryService
             $type,
             json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
         ]);
+    }
+
+    private function wordCount(string $plain): int
+    {
+        $plain = trim($plain);
+        if ($plain === '') {
+            return 0;
+        }
+
+        $parts = preg_split('/\s+/u', $plain);
+        return is_array($parts) ? count($parts) : 0;
+    }
+
+    private function reviewMeta(string $reviewStatus, ?int $reviewScore, int $wordCount): array
+    {
+        if ($wordCount <= 0) {
+            return ['label' => 'Not started', 'class' => 'neutral'];
+        }
+
+        if ($reviewStatus === 'acceptable') {
+            if ($reviewScore !== null && $reviewScore >= 90) {
+                return ['label' => 'Accepted · Excellent', 'class' => 'ok'];
+            }
+            if ($reviewScore !== null && $reviewScore >= 75) {
+                return ['label' => 'Accepted · Strong', 'class' => 'ok'];
+            }
+            return ['label' => 'Accepted', 'class' => 'ok'];
+        }
+
+        if ($reviewStatus === 'needs_revision' || $reviewStatus === 'rejected') {
+            return ['label' => 'Needs revision', 'class' => 'danger'];
+        }
+
+        if ($reviewStatus === 'pending') {
+            return ['label' => 'Pending review', 'class' => 'warn'];
+        }
+
+        return ['label' => 'Draft', 'class' => 'info'];
+    }
+
+    private function reviewUiLabel(string $reviewStatus): string
+    {
+        return match ($reviewStatus) {
+            'acceptable' => 'Accepted',
+            'needs_revision' => 'Needs revision',
+            'rejected' => 'Needs revision',
+            'pending' => 'Pending',
+            default => 'Draft',
+        };
+    }
+
+    private function snapshotReasonLabel(string $reason): string
+    {
+        return match ($reason) {
+            'autosave' => 'Autosave snapshot',
+            'manual_save' => 'Save snapshot',
+            'restore_point' => 'Restore point',
+            'pre_edit_accepted' => 'Pre-unlock snapshot',
+            'pre_restore' => 'Pre-restore snapshot',
+            'system_backup' => 'System backup',
+            default => 'Snapshot',
+        };
+    }
+
+    private function excerpt(string $plain, int $max): string
+    {
+        $plain = trim($plain);
+        if ($plain === '') {
+            return '';
+        }
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            if (mb_strlen($plain) <= $max) {
+                return $plain;
+            }
+            return rtrim(mb_substr($plain, 0, $max - 1)) . '…';
+        }
+        if (strlen($plain) <= $max) {
+            return $plain;
+        }
+        return rtrim(substr($plain, 0, $max - 1)) . '…';
     }
 }
