@@ -48,38 +48,56 @@ function cw_header(string $title = ''): void
   <link rel="stylesheet" href="/assets/app-shell.css">
 </head>
 <body class="app-shell-body">
-  <div class="app-shell">
-    <aside class="app-sidebar">
-      <?= $navHtml ?>
+  <div class="app-shell" id="appShell">
+    <div class="app-mobile-overlay" id="appMobileOverlay"></div>
 
-      <div class="app-sidebar-bottom">
-        <div class="sidebar-utility-card">
-          <div class="sidebar-utility-meta">
-            <div class="sidebar-utility-name"><?= h($displayName) ?></div>
-            <div class="sidebar-utility-role"><?= h($roleLabel) ?></div>
-          </div>
+<aside class="app-sidebar" id="appSidebar">
+  <?= $navHtml ?>
 
-          <div class="sidebar-utility-actions">
-            <?php if (function_exists('cw_is_logged_in') && cw_is_logged_in()): ?>
-              <a class="utility-action utility-action-logout" href="<?= h($logoutHref) ?>">
-                <span class="utility-action-icon"><?= cw_nav_icon_img('logout', 'Logout') ?></span>
-                <span class="utility-action-label">Logout</span>
-              </a>
-            <?php endif; ?>
-          </div>
+  <div class="app-sidebar-bottom">
+    <div class="sidebar-utility-card">
+      <div class="sidebar-utility-meta">
+        <div class="sidebar-utility-name"><?= h($displayName) ?></div>
+        <div class="sidebar-utility-role"><?= h($roleLabel) ?></div>
+      </div>
+
+      <div class="sidebar-utility-actions">
+        <?php if (function_exists('cw_is_logged_in') && cw_is_logged_in()): ?>
+          <a class="utility-action utility-action-logout" href="<?= h($logoutHref) ?>">
+            <span class="utility-action-icon"><?= cw_nav_icon_img('logout', 'Logout') ?></span>
+            <span class="utility-action-label">Logout</span>
+          </a>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<div class="app-main-shell">
+  <header class="app-topbar">
+    <div class="app-topbar-inner">
+      <div class="app-topbar-left">
+        <button
+          class="app-mobile-menu-toggle"
+          id="appMobileMenuToggle"
+          type="button"
+          aria-label="Open navigation menu"
+          aria-controls="appSidebar"
+          aria-expanded="false">
+          <span class="app-mobile-menu-toggle-lines" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </span>
+        </button>
+
+        <div class="app-topbar-title-block">
+          <div class="app-topbar-overline"><?= h($roleLabel) ?></div>
+          <h1 class="app-topbar-title"><?= h($pageTitle) ?></h1>
         </div>
       </div>
-    </aside>
-
-    <div class="app-main-shell">
-      <header class="app-topbar">
-        <div class="app-topbar-inner">
-          <div class="app-topbar-title-block">
-            <div class="app-topbar-overline"><?= h($roleLabel) ?></div>
-            <h1 class="app-topbar-title"><?= h($pageTitle) ?></h1>
-          </div>
-        </div>
-      </header>
+    </div>
+  </header>
 
       <main class="app-main">
         <div class="app-content">
@@ -94,7 +112,7 @@ function cw_footer(): void
     </div>
   </div>
 
-  <script>
+<script>
     document.addEventListener('DOMContentLoaded', function () {
       document.querySelectorAll('.nav-icon').forEach(function (img) {
         img.addEventListener('error', function () {
@@ -106,6 +124,87 @@ function cw_footer(): void
           img.style.visibility = 'hidden';
         });
       });
+
+      var shell = document.getElementById('appShell');
+      var sidebar = document.getElementById('appSidebar');
+      var overlay = document.getElementById('appMobileOverlay');
+      var toggle = document.getElementById('appMobileMenuToggle');
+      var mobileQuery = window.matchMedia('(max-width: 820px)');
+
+      function isMobile() {
+        return mobileQuery.matches;
+      }
+
+      function openMenu() {
+        if (!shell || !toggle || !isMobile()) {
+          return;
+        }
+        shell.classList.add('is-mobile-nav-open');
+        document.body.classList.add('is-mobile-nav-open');
+        toggle.setAttribute('aria-expanded', 'true');
+      }
+
+      function closeMenu() {
+        if (!shell || !toggle) {
+          return;
+        }
+        shell.classList.remove('is-mobile-nav-open');
+        document.body.classList.remove('is-mobile-nav-open');
+        toggle.setAttribute('aria-expanded', 'false');
+      }
+
+      function toggleMenu() {
+        if (!shell || !isMobile()) {
+          return;
+        }
+        if (shell.classList.contains('is-mobile-nav-open')) {
+          closeMenu();
+        } else {
+          openMenu();
+        }
+      }
+
+      if (toggle) {
+        toggle.addEventListener('click', function () {
+          toggleMenu();
+        });
+      }
+
+      if (overlay) {
+        overlay.addEventListener('click', function () {
+          closeMenu();
+        });
+      }
+
+      if (sidebar) {
+        sidebar.querySelectorAll('a[href]').forEach(function (link) {
+          link.addEventListener('click', function () {
+            if (isMobile()) {
+              closeMenu();
+            }
+          });
+        });
+      }
+
+      document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') {
+          closeMenu();
+        }
+      });
+
+      function handleViewportChange() {
+        if (!isMobile()) {
+          closeMenu();
+        }
+      }
+
+      if (typeof mobileQuery.addEventListener === 'function') {
+        mobileQuery.addEventListener('change', handleViewportChange);
+      } else if (typeof mobileQuery.addListener === 'function') {
+        mobileQuery.addListener(handleViewportChange);
+      }
+
+      handleViewportChange();
     });
   </script>
 </body>
