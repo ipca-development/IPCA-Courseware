@@ -15,20 +15,36 @@ if ($role !== 'student') {
 $userId = (int)$u['id'];
 $studentName = (string)($u['name'] ?? 'Student');
 
-$cohortId = (int)($_GET['cohort_id'] ?? 0);
-if ($cohortId <= 0) {
-    exit('Missing cohort_id');
+$service = new LessonSummaryService($pdo);
+$selectedCohortId = (int)($_GET['cohort_id'] ?? 0);
+$scopes = $service->getAvailableNotebookScopes($userId);
+
+if (!$scopes) {
+    exit('No available training scopes.');
 }
 
-$service = new LessonSummaryService($pdo);
-$data = $service->getNotebookViewData($userId, $cohortId, $studentName);
+if ($selectedCohortId <= 0) {
+    $selectedCohortId = (int)$scopes[0]['cohort_id'];
+}
+
+$validScope = null;
+foreach ($scopes as $s) {
+    if ((int)$s['cohort_id'] === $selectedCohortId) {
+        $validScope = $s;
+        break;
+    }
+}
+if (!$validScope) {
+    http_response_code(403);
+    exit('Invalid scope');
+}
+
+$data = $service->getNotebookViewData($userId, $selectedCohortId, $studentName);
 
 function nb_ui_date(?string $value): string
 {
     $value = trim((string)$value);
-    if ($value === '') {
-        return '—';
-    }
+    if ($value === '') return '—';
 
     try {
         $dt = new DateTime($value, new DateTimeZone('UTC'));
@@ -38,197 +54,607 @@ function nb_ui_date(?string $value): string
     }
 }
 
-$programTitle = trim((string)($data['cohort']['program_name'] ?? ''));
-if ($programTitle === '') {
-    $programTitle = trim((string)($data['cohort']['course_title'] ?? 'Training Notebook'));
+function nb_ui_datetime(?string $value): string
+{
+    $value = trim((string)$value);
+    if ($value === '') return '—';
+
+    try {
+        $dt = new DateTime($value, new DateTimeZone('UTC'));
+        return $dt->format('D, M j, Y H:i') . ' UTC';
+    } catch (Throwable $e) {
+        return $value;
+    }
 }
 
-$programNumber = trim((string)($data['program_number'] ?? '1'));
+function nb_has_summary(array $lesson): bool
+{
+    return trim(strip_tags((string)($lesson['summary_html'] ?? ''))) !== '';
+}
+
+function nb_attention_meta(array $lesson): array
+{
+    $reviewStatus = (string)($lesson['review_status'] ?? '');
+    $attentionReason = (string)($lesson['notebook_attention_reason'] ?? '');
+
+    if (in_array($reviewStatus, ['needs_revision', 'rejected'], true)) {
+        return ['show' => true, 'label' => 'Student Action Required', 'class' => 'warn'];
+    }
+
+    if ($attentionReason === 'training_suspended') {
+        return ['show' => true, 'label' => 'Training Paused', 'class' => 'danger'];
+    }
+
+    if ($attentionReason === 'one_on_one_required') {
+        return ['show' => true, 'label' => 'Instructor Session Required', 'class' => 'info'];
+    }
+
+    if ($reviewStatus === 'acceptable') {
+        return ['show' => true, 'label' => 'Accepted', 'class' => 'ok'];
+    }
+
+    if ($reviewStatus === 'pending') {
+        return ['show' => true, 'label' => 'Pending', 'class' => 'pending'];
+    }
+
+    return ['show' => true, 'label' => 'Pending', 'class' => 'pending'];
+}
+
+function nb_summary_edit_allowed(array $lesson): bool
+{
+    $reviewStatus = (string)($lesson['review_status'] ?? '');
+    return nb_has_summary($lesson) || in_array($reviewStatus, ['needs_revision', 'rejected'], true);
+}
+
+function nb_action_button_meta(array $lesson): ?array
+{
+    $reviewStatus = (string)($lesson['review_status'] ?? '');
+    $hasSummary = nb_has_summary($lesson);
+    $canEdit = nb_summary_edit_allowed($lesson);
+
+    if ($reviewStatus === 'acceptable' && $hasSummary) {
+        return ['label' => 'Edit Summary', 'action' => 'unlock', 'class' => 'warn'];
+    }
+
+    if (in_array($reviewStatus, ['needs_revision', 'rejected'], true)) {
+        return ['label' => 'Open Action', 'action' => 'edit', 'class' => 'warn'];
+    }
+
+    if ($canEdit) {
+        return ['label' => 'Edit', 'action' => 'edit', 'class' => 'ghost'];
+    }
+
+    return null;
+}
+
+$initialExportVersion = gmdate('Y.m.d.Hi');
+$programTitle = trim((string)($data['cohort']['program_name'] ?? ''));
+if ($programTitle === '') {
+    $programTitle = trim((string)$data['cohort']['course_title']);
+}
+
+$serverRenderUtc = gmdate('Y-m-d H:i:s');
 
 cw_header('My Lesson Summaries');
 ?>
 <style>
-.nb-shell{max-width:1120px;margin:0 auto}
-.nb-banner{display:none;position:sticky;top:14px;z-index:40;padding:12px 14px;border-radius:14px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;font-size:13px;font-weight:700;box-shadow:0 10px 24px rgba(15,23,42,0.08);margin-bottom:16px}
-.nb-banner.warn{border-color:#fcd34d;background:#fffbeb;color:#92400e}
-.nb-banner.danger{border-color:#fca5a5;background:#fef2f2;color:#991b1b}
-.nb-banner.ok{border-color:#86efac;background:#f0fdf4;color:#166534}
+.nb-shell{
+  max-width:1120px;
+  margin:0 auto;
+}
 
-.nb-doc{background:#fff;border:1px solid rgba(15,23,42,0.06);border-radius:22px;box-shadow:0 10px 24px rgba(15,23,42,0.055);padding:34px 36px 40px 36px}
-.nb-head{padding-bottom:24px;border-bottom:1px solid rgba(15,23,42,0.06)}
-.nb-overline{font-size:11px;line-height:1;text-transform:uppercase;letter-spacing:.14em;color:#63758f;font-weight:800;margin-bottom:12px}
-.nb-program-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
-.nb-title{margin:0;font-size:34px;line-height:1.02;color:#152235;letter-spacing:-0.04em;font-weight:800}
-.nb-sub{margin-top:12px;font-size:15px;color:#5c6e86;line-height:1.6;max-width:780px}
-.nb-meta{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:16px;margin-top:22px}
-.nb-meta-box{padding:16px 18px;border-radius:16px;background:#f7fafe;border:1px solid rgba(29,79,145,0.08)}
-.nb-meta-label{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:#6a7c95;font-weight:800;margin-bottom:8px}
-.nb-meta-value{font-size:16px;font-weight:800;color:#152235;line-height:1.35}
+.nb-banner{
+  display:none;
+  position:sticky;
+  top:16px;
+  z-index:60;
+  padding:13px 15px;
+  border-radius:14px;
+  margin-bottom:18px;
+  font-size:13px;
+  font-weight:800;
+  border:1px solid transparent;
+  box-shadow:0 10px 28px rgba(15,23,42,0.08);
+}
+.nb-banner.ok{background:#f0fdf4;color:#166534;border-color:#86efac}
+.nb-banner.warn{background:#fffbeb;color:#92400e;border-color:#fcd34d}
+.nb-banner.danger{background:#fef2f2;color:#991b1b;border-color:#fca5a5}
 
-.nb-selector{display:flex;align-items:center;gap:8px}
-.nb-selector-label{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#6a7c95;font-weight:800}
-.nb-selector-pill{display:inline-flex;align-items:center;min-height:38px;padding:0 12px;border-radius:999px;border:1px solid rgba(15,23,42,0.08);background:#f7fafe;color:#152235;font-size:13px;font-weight:800}
+.nb-doc{
+  background:
+    linear-gradient(180deg, rgba(255,255,255,1) 0%, rgba(250,251,253,1) 100%);
+  border:1px solid rgba(15,23,42,0.06);
+  border-radius:24px;
+  padding:34px 36px 38px 36px;
+  box-shadow:0 12px 34px rgba(15,23,42,0.055);
+}
 
-.nb-toc-wrap{padding:26px 0 24px 0;border-bottom:1px solid rgba(15,23,42,0.06)}
-.nb-toc-title{margin:0 0 14px 0;font-size:18px;font-weight:800;color:#152235}
-.nb-toc-list,.nb-toc-sublist{margin:0;padding-left:22px}
-.nb-toc-list{display:flex;flex-direction:column;gap:10px}
-.nb-toc-sublist{margin-top:8px;display:flex;flex-direction:column;gap:6px}
-.nb-toc-link{color:#12355f;text-decoration:none;font-weight:800}
-.nb-toc-link:hover{text-decoration:underline}
-.nb-toc-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
-.nb-toc-main{min-width:0}
-.nb-toc-meta{display:flex;flex-wrap:wrap;gap:6px 8px;justify-content:flex-end}
-.nb-mini-pill{display:inline-flex;align-items:center;padding:5px 9px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid transparent;white-space:nowrap}
-.nb-mini-pill.neutral{background:#eef2f7;border-color:#d7dee8;color:#475569}
-.nb-mini-pill.ok{background:#dcfce7;border-color:#86efac;color:#166534}
-.nb-mini-pill.warn{background:#fef3c7;border-color:#fde68a;color:#92400e}
-.nb-mini-pill.danger{background:#fee2e2;border-color:#fecaca;color:#991b1b}
-.nb-mini-pill.info{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}
+.nb-scope-row{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:14px;
+  margin-bottom:22px;
+}
 
-.nb-body{padding-top:28px}
-.nb-program-heading{margin-bottom:6px;font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:#687b94;font-weight:800}
-.nb-course-section + .nb-course-section{margin-top:36px}
-.nb-course-title{margin:0;font-size:28px;line-height:1.08;color:#152235;letter-spacing:-0.03em;font-weight:800}
-.nb-course-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#687b94;font-weight:800;margin-bottom:10px}
+.nb-scope-select{
+  padding:10px 12px;
+  min-width:310px;
+  border-radius:12px;
+  border:1px solid rgba(15,23,42,0.10);
+  background:#fff;
+  font-weight:700;
+  color:#152235;
+  box-shadow:0 2px 8px rgba(15,23,42,0.03);
+}
 
-.nb-lesson-section{margin-top:22px;padding-top:18px;border-top:1px solid rgba(15,23,42,0.06)}
-.nb-lesson-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
-.nb-lesson-title{margin:0;font-size:21px;line-height:1.15;color:#152235;letter-spacing:-0.02em;font-weight:800}
-.nb-lesson-meta{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:10px}
-.nb-pill{display:inline-flex;align-items:center;gap:6px;padding:7px 10px;border-radius:999px;font-size:12px;font-weight:800;border:1px solid transparent;white-space:nowrap}
-.nb-pill.neutral{background:#eef2f7;border-color:#d7dee8;color:#475569}
-.nb-pill.ok{background:#dcfce7;border-color:#86efac;color:#166534}
-.nb-pill.warn{background:#fef3c7;border-color:#fde68a;color:#92400e}
-.nb-pill.danger{background:#fee2e2;border-color:#fecaca;color:#991b1b}
-.nb-pill.info{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}
+.nb-btn{
+  padding:9px 14px;
+  border-radius:11px;
+  border:none;
+  cursor:pointer;
+  font-weight:800;
+  font-size:13px;
+  letter-spacing:0.01em;
+  transition:transform .06s ease, box-shadow .12s ease, opacity .12s ease;
+}
+.nb-btn:hover{opacity:.97}
+.nb-btn:active{transform:translateY(1px)}
+.nb-btn.primary{background:#12355f;color:#fff;box-shadow:0 10px 22px rgba(18,53,95,0.18)}
+.nb-btn.warn{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa}
+.nb-btn.ghost{background:#fff;border:1px solid rgba(15,23,42,0.10);color:#152235}
 
-.nb-action-row{display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap}
-.nb-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 12px;border-radius:12px;text-decoration:none;border:1px solid rgba(15,23,42,0.08);background:#f5f8fc;color:#152235;font-size:13px;font-weight:800;cursor:pointer}
-.nb-btn:hover{opacity:.96}
-.nb-btn.primary{background:#12355f;border-color:#12355f;color:#fff}
-.nb-btn.warn{background:#fff7ed;border-color:#fed7aa;color:#9a3412}
-.nb-btn.ghost{background:#fff}
-.nb-btn:disabled{opacity:.45;cursor:not-allowed}
+.nb-header{
+  padding:2px 0 8px 0;
+  border-bottom:1px solid rgba(15,23,42,0.06);
+}
 
-.nb-content-view{margin-top:14px;font-size:15px;line-height:1.7;color:#243447}
-.nb-content-view.is-empty{color:#8a98ad;font-style:italic}
+.nb-overline{
+  font-size:11px;
+  font-weight:800;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:#718198;
+  margin-bottom:10px;
+}
 
-.nb-editor-shell{display:none;margin-top:14px;border:1px solid rgba(15,23,42,0.08);border-radius:18px;background:#fff;overflow:hidden}
-.nb-editor-shell.is-open{display:block}
-.nb-toolbar{display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid rgba(15,23,42,0.06);background:#fbfdff}
-.nb-tool{min-width:34px;height:34px;border-radius:10px;border:1px solid rgba(15,23,42,0.08);background:#fff;color:#152235;font-size:14px;font-weight:800;cursor:pointer}
-.nb-tool:hover{background:#f7fafc}
-.nb-editor{min-height:190px;padding:16px 16px 18px 16px;font-size:15px;line-height:1.68;color:#152235;outline:none}
-.nb-editor:empty:before{content:attr(data-placeholder);color:#8a98ad}
-.nb-editor-status{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;border-top:1px solid rgba(15,23,42,0.06);background:#fbfdff}
-.nb-status-left,.nb-status-right{font-size:12px;color:#60718b;font-weight:700}
-.nb-editor-actions{display:flex;gap:8px;flex-wrap:wrap;padding:12px 14px;border-top:1px solid rgba(15,23,42,0.06);background:#fff}
+.nb-title{
+  margin:0;
+  font-size:38px;
+  line-height:1.02;
+  font-weight:800;
+  letter-spacing:-0.04em;
+  color:#152235;
+}
 
-.nb-note-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px}
-.nb-note-box{border:1px solid rgba(15,23,42,0.06);border-radius:16px;background:#fff;padding:14px 15px}
-.nb-note-label{font-size:10px;text-transform:uppercase;letter-spacing:.14em;color:#6a7c95;font-weight:800;margin-bottom:10px}
-.nb-note-body{font-size:14px;line-height:1.6;color:#3b4f68;min-height:54px}
-.nb-note-empty{color:#8a98ad;font-style:italic}
+.nb-sub{
+  margin-top:12px;
+  max-width:760px;
+  color:#5f7088;
+  font-size:15px;
+  line-height:1.6;
+}
 
-.nb-history{margin-top:14px;border:1px solid rgba(15,23,42,0.06);border-radius:16px;background:#fff}
-.nb-history summary{list-style:none;cursor:pointer;padding:12px 14px;font-size:13px;font-weight:800;color:#152235;display:flex;align-items:center;justify-content:space-between;gap:12px}
-.nb-history summary::-webkit-details-marker{display:none}
-.nb-history-body{padding:0 14px 14px 14px}
-.nb-history-list{display:flex;flex-direction:column;gap:10px}
-.nb-history-item{padding:12px;border:1px solid rgba(15,23,42,0.06);border-radius:14px;background:#fbfdff}
-.nb-history-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
-.nb-history-title{font-size:13px;font-weight:800;color:#152235}
-.nb-history-meta{margin-top:4px;font-size:12px;color:#64748b;line-height:1.45}
-.nb-history-preview{margin-top:8px;font-size:13px;color:#3b4f68;line-height:1.55}
-.nb-history-empty{font-size:13px;color:#64748b;padding:6px 0}
+.nb-meta{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:14px;
+  margin:22px 0 8px 0;
+}
 
-.nb-export-mode .nb-editor-shell,
-.nb-export-mode .nb-action-row,
-.nb-export-mode .nb-history{display:none !important}
+.nb-meta-box{
+  background:#f8fafc;
+  border:1px solid rgba(15,23,42,0.05);
+  border-radius:16px;
+  padding:13px 14px;
+}
 
-@media (max-width: 980px){
-  .nb-doc{padding:24px 20px 28px 20px}
+.nb-meta-label{
+  font-size:10px;
+  text-transform:uppercase;
+  color:#64748b;
+  font-weight:800;
+  letter-spacing:.12em;
+}
+
+.nb-meta-value{
+  font-size:14px;
+  font-weight:800;
+  margin-top:7px;
+  color:#152235;
+  line-height:1.35;
+}
+
+.nb-export-note{
+  margin-top:14px;
+  font-size:12px;
+  color:#74849a;
+  line-height:1.5;
+}
+
+.nb-print-only{display:none}
+
+.nb-toc{
+  margin:28px 0 0 0;
+  padding:24px 0 24px 0;
+  border-top:1px solid rgba(15,23,42,0.05);
+  border-bottom:1px solid rgba(15,23,42,0.07);
+}
+
+.nb-toc-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:12px;
+  margin-bottom:14px;
+}
+
+.nb-toc-title{
+  margin:0;
+  font-size:22px;
+  line-height:1.08;
+  font-weight:800;
+  letter-spacing:-0.02em;
+  color:#152235;
+}
+
+.nb-toc-sub{
+  font-size:13px;
+  color:#64748b;
+  line-height:1.45;
+}
+
+.nb-toc ol{
+  margin:0;
+  padding-left:20px;
+}
+
+.nb-toc > ol{
+  padding-left:22px;
+}
+
+.nb-toc li{
+  margin:8px 0;
+}
+
+.nb-toc a{
+  text-decoration:none;
+  color:#12355f;
+  font-weight:800;
+  line-height:1.45;
+}
+
+.nb-toc a:hover{
+  text-decoration:underline;
+}
+
+.nb-toc-meta{
+  margin-top:5px;
+  font-size:12px;
+  color:#64748b;
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  align-items:center;
+}
+
+.nb-body{
+  margin-top:6px;
+}
+
+.nb-course{
+  margin-top:34px;
+}
+
+.nb-course:first-child{
+  margin-top:26px;
+}
+
+.nb-course-title{
+  margin:0;
+  font-size:27px;
+  line-height:1.08;
+  font-weight:800;
+  letter-spacing:-0.03em;
+  color:#152235;
+}
+
+.nb-lesson{
+  margin-top:22px;
+  padding-top:18px;
+  border-top:1px solid rgba(15,23,42,0.08);
+}
+
+.nb-lesson-title{
+  font-size:19px;
+  line-height:1.25;
+  font-weight:800;
+  color:#152235;
+  margin:0;
+  letter-spacing:-0.01em;
+}
+
+.nb-pill{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-height:29px;
+  padding:0 11px;
+  border-radius:999px;
+  font-size:11px;
+  font-weight:800;
+  margin-top:9px;
+  letter-spacing:.02em;
+  border:1px solid transparent;
+}
+.nb-pill.pending{background:#fef3c7;color:#92400e;border-color:#fde68a}
+.nb-pill.ok{background:#dcfce7;color:#166534;border-color:#86efac}
+.nb-pill.warn{background:#fee2e2;color:#991b1b;border-color:#fca5a5}
+.nb-pill.info{background:#dbeafe;color:#1d4ed8;border-color:#93c5fd}
+.nb-pill.danger{background:#fecaca;color:#991b1b;border-color:#f87171}
+
+.nb-lesson-meta{
+  margin-top:8px;
+  display:flex;
+  gap:12px;
+  flex-wrap:wrap;
+  font-size:12px;
+  color:#6b7b91;
+  line-height:1.4;
+}
+
+.nb-content{
+  margin-top:14px;
+  color:#233246;
+  line-height:1.82;
+  font-size:15px;
+}
+
+.nb-content p{margin:0 0 12px 0}
+.nb-content ul,
+.nb-content ol{margin:0 0 12px 22px}
+.nb-content li{margin:0 0 6px 0}
+.nb-content b,
+.nb-content strong{color:#16263c}
+
+.nb-divider{
+  border-top:1px solid rgba(15,23,42,0.07);
+  margin-top:14px;
+}
+
+.nb-action-bar{
+  margin-top:14px;
+}
+
+.nb-action-panel{
+  display:none;
+  margin-top:14px;
+  border:1px solid rgba(15,23,42,0.10);
+  border-radius:18px;
+  padding:16px;
+  background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
+  box-shadow:0 10px 24px rgba(15,23,42,0.04);
+}
+.nb-action-panel.open{display:block}
+
+.nb-editor{
+  min-height:180px;
+  border:1px solid rgba(15,23,42,0.12);
+  border-radius:14px;
+  padding:14px;
+  margin-top:2px;
+  background:#fff;
+  font-size:15px;
+  line-height:1.75;
+  color:#1f2937;
+  box-shadow:inset 0 1px 2px rgba(15,23,42,0.02);
+}
+
+.nb-editor:focus{
+  outline:none;
+  border-color:#7aa3d8;
+  box-shadow:0 0 0 4px rgba(29,79,145,0.08);
+}
+
+.nb-panel-actions{
+  margin-top:12px;
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.nb-panel-box{
+  margin-top:14px;
+  border:1px solid rgba(15,23,42,0.08);
+  border-radius:14px;
+  padding:13px 14px;
+  background:#f9fbfd;
+}
+
+.nb-panel-label{
+  font-size:10px;
+  text-transform:uppercase;
+  color:#64748b;
+  font-weight:800;
+  letter-spacing:.12em;
+}
+
+.nb-panel-body{
+  margin-top:6px;
+  color:#243446;
+  line-height:1.65;
+  font-size:14px;
+}
+
+.nb-confirm{
+  margin-top:18px;
+  padding:14px;
+  border-radius:16px;
+  background:#f8fafc;
+  border:1px solid rgba(15,23,42,0.10);
+  display:none;
+}
+
+.nb-confirm-text{
+  color:#243446;
+  font-size:14px;
+  font-weight:700;
+  line-height:1.5;
+}
+
+.nb-confirm-actions{
+  margin-top:10px;
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+@media (max-width:980px){
+  .nb-doc{padding:26px 24px 30px 24px}
+  .nb-meta{grid-template-columns:1fr 1fr}
+}
+
+@media (max-width:720px){
+  .nb-shell{max-width:none}
+  .nb-doc{padding:22px 18px 26px 18px;border-radius:18px}
+  .nb-scope-row{flex-direction:column;align-items:stretch}
+  .nb-scope-select{min-width:0;width:100%}
   .nb-meta{grid-template-columns:1fr}
-  .nb-program-row{flex-direction:column}
-  .nb-toc-row{flex-direction:column}
-  .nb-toc-meta{justify-content:flex-start}
-  .nb-lesson-head{flex-direction:column}
-  .nb-note-grid{grid-template-columns:1fr}
+  .nb-title{font-size:32px}
+  .nb-course-title{font-size:24px}
+  .nb-lesson-title{font-size:18px}
+  .nb-content{font-size:15px;line-height:1.78}
+}
+
+@media print{
+  .nb-action-bar,
+  .nb-action-panel,
+  .nb-scope-row,
+  .nb-confirm,
+  .nb-export-note,
+  .nb-banner{
+    display:none !important;
+  }
+
+  .nb-print-only{
+    display:block !important;
+  }
+
+  .nb-doc{
+    box-shadow:none;
+    border:none;
+    padding:0;
+    background:#fff;
+  }
+
+  .nb-title{
+    font-size:30px;
+  }
+
+  .nb-course{
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
+
+  .nb-lesson{
+    break-inside:avoid;
+    page-break-inside:avoid;
+  }
 }
 </style>
 
 <div class="nb-shell">
-  <div class="nb-banner" id="notebookBanner"></div>
+  <div id="nbBanner" class="nb-banner"></div>
 
-  <div class="nb-doc" id="notebookDocument">
-    <header class="nb-head">
-      <div class="nb-overline">IPCA Academy · Training Notebook</div>
+  <div class="nb-doc">
 
-      <div class="nb-program-row">
+    <div class="nb-scope-row">
+      <select class="nb-scope-select" id="scopeSelect" data-current-scope="<?= (int)$selectedCohortId ?>">
+        <?php foreach ($scopes as $s): ?>
+          <option value="<?= (int)$s['cohort_id'] ?>" <?= ((int)$s['cohort_id'] === $selectedCohortId ? 'selected' : '') ?>>
+            <?= h((string)$s['label']) ?>
+          </option>
+        <?php endforeach; ?>
+      </select>
+
+      <button class="nb-btn primary" id="exportBtn">Export PDF</button>
+    </div>
+
+    <div class="nb-header">
+      <div class="nb-overline">Student Training Notebook</div>
+      <h1 class="nb-title"><?= h($programTitle) ?></h1>
+      <div class="nb-sub">
+        A structured summary document of your current lesson understanding, organized by course and lesson within your active training scope.
+      </div>
+    </div>
+
+    <div class="nb-meta">
+      <div class="nb-meta-box">
+        <div class="nb-meta-label">Student</div>
+        <div class="nb-meta-value" id="printStudentName"><?= h($studentName) ?></div>
+      </div>
+      <div class="nb-meta-box">
+        <div class="nb-meta-label">Program</div>
+        <div class="nb-meta-value" id="printProgramName"><?= h($programTitle) ?></div>
+      </div>
+      <div class="nb-meta-box">
+        <div class="nb-meta-label">Export Version</div>
+        <div class="nb-meta-value" id="exportVersion"><?= h($initialExportVersion) ?></div>
+      </div>
+      <div class="nb-meta-box">
+        <div class="nb-meta-label">Last Saved</div>
+        <div class="nb-meta-value"><?= h(nb_ui_date((string)$data['last_saved_at'])) ?></div>
+      </div>
+    </div>
+
+    <div class="nb-print-only" style="margin-top:6px;margin-bottom:20px;font-size:13px;line-height:1.7;color:#334155;">
+      <div><strong>Student:</strong> <span id="printStudentNameCopy"><?= h($studentName) ?></span></div>
+      <div><strong>Program:</strong> <span id="printProgramNameCopy"><?= h($programTitle) ?></span></div>
+      <div><strong>Export Version:</strong> <span id="printExportVersion"><?= h($initialExportVersion) ?></span></div>
+      <div><strong>Export Timestamp:</strong> <span id="printExportTimestamp"><?= h(nb_ui_datetime($serverRenderUtc)) ?></span></div>
+    </div>
+
+    <div class="nb-export-note">
+      Export currently uses clean browser print-to-PDF rendering from read mode only. Current post-save metadata refresh is optimistic and client-derived in this pass.
+    </div>
+
+    <div class="nb-toc">
+      <div class="nb-toc-head">
         <div>
-          <h2 class="nb-title"><?= h($programTitle) ?></h2>
-          <div class="nb-sub">
-            This notebook renders as one continuous training document. Edit one lesson section at a time while the live lesson summary remains the only canonical source of truth.
-          </div>
-        </div>
-
-        <div class="nb-selector">
-          <div class="nb-selector-label">Program</div>
-          <div class="nb-selector-pill"><?= h($programTitle) ?></div>
+          <h2 class="nb-toc-title">Table of Contents</h2>
+          <div class="nb-toc-sub">Jump directly to any course or lesson section in your notebook.</div>
         </div>
       </div>
 
-      <div class="nb-meta">
-        <div class="nb-meta-box">
-          <div class="nb-meta-label">Summary by</div>
-          <div class="nb-meta-value"><?= h($data['student_name']) ?></div>
-        </div>
-        <div class="nb-meta-box">
-          <div class="nb-meta-label">Cohort</div>
-          <div class="nb-meta-value"><?= h((string)$data['cohort']['name']) ?></div>
-        </div>
-        <div class="nb-meta-box">
-          <div class="nb-meta-label">Last saved</div>
-          <div class="nb-meta-value"><?= h(nb_ui_date($data['last_saved_at'] ?? '')) ?></div>
-        </div>
-      </div>
-    </header>
-
-    <nav class="nb-toc-wrap" aria-label="Notebook table of contents">
-      <h3 class="nb-toc-title">Table of Contents</h3>
-
-      <div class="nb-program-heading"><?= h($programNumber) ?> <?= h($programTitle) ?></div>
-
-      <ol class="nb-toc-list">
+      <ol>
         <?php foreach ($data['courses'] as $course): ?>
           <li>
-            <div class="nb-toc-row">
-              <div class="nb-toc-main">
-                <a class="nb-toc-link" href="#<?= h((string)$course['anchor_id']) ?>">
-                  <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
-                </a>
-              </div>
-            </div>
-
-            <ol class="nb-toc-sublist">
+            <a href="#<?= h((string)$course['anchor_id']) ?>">
+              <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
+            </a>
+            <ol>
               <?php foreach ($course['lessons'] as $lesson): ?>
-                <li>
-                  <div class="nb-toc-row">
-                    <div class="nb-toc-main">
-                      <a class="nb-toc-link" href="#<?= h((string)$lesson['anchor_id']) ?>">
-                        <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
-                      </a>
-                    </div>
-
-                    <div class="nb-toc-meta">
-                      <span class="nb-mini-pill <?= h((string)$lesson['review_ui_class']) ?>">
-                        <?= h((string)$lesson['review_ui_label']) ?>
-                      </span>
-                      <span class="nb-mini-pill neutral"><?= (int)$lesson['word_count'] ?> words</span>
-                      <span class="nb-mini-pill info"><?= (int)$lesson['version_count'] ?> versions</span>
-                      <span class="nb-mini-pill neutral"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
-                    </div>
+                <?php
+                  $hasSummary = nb_has_summary($lesson);
+                  $attention = nb_attention_meta($lesson);
+                ?>
+                <li id="toc-lesson-<?= (int)$lesson['lesson_id'] ?>">
+                  <a href="#<?= h((string)$lesson['anchor_id']) ?>">
+                    <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
+                  </a>
+                  <div class="nb-toc-meta">
+                    <?php if ($attention['show']): ?>
+                      <span class="nb-pill <?= h($attention['class']) ?>" data-role="toc-status-pill"><?= h($attention['label']) ?></span>
+                    <?php endif; ?>
+                    <?php if ($hasSummary): ?>
+                      <span data-role="toc-word-meta"><?= (int)$lesson['word_count'] ?> words</span>
+                      <?php if ((int)$lesson['version_count'] > 0): ?>
+                        <span data-role="toc-version-meta"><?= (int)$lesson['version_count'] ?> versions</span>
+                      <?php endif; ?>
+                      <?php if (trim((string)$lesson['updated_at']) !== ''): ?>
+                        <span data-role="toc-date-meta"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
+                      <?php endif; ?>
+                    <?php endif; ?>
                   </div>
                 </li>
               <?php endforeach; ?>
@@ -236,253 +662,408 @@ cw_header('My Lesson Summaries');
           </li>
         <?php endforeach; ?>
       </ol>
-    </nav>
+    </div>
 
-    <main class="nb-body">
+    <div class="nb-body">
       <?php foreach ($data['courses'] as $course): ?>
-        <section class="nb-course-section" id="<?= h((string)$course['anchor_id']) ?>">
-          <div class="nb-course-kicker">Program section <?= h((string)$course['course_number']) ?></div>
-          <h3 class="nb-course-title"><?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?></h3>
+        <section class="nb-course" id="<?= h((string)$course['anchor_id']) ?>">
+          <h2 class="nb-course-title">
+            <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
+          </h2>
 
           <?php foreach ($course['lessons'] as $lesson): ?>
             <?php
               $lessonId = (int)$lesson['lesson_id'];
-              $isReadOnly = !empty($lesson['read_only_by_default']);
-              $summaryHtml = (string)($lesson['summary_html'] ?? '');
-              $summaryEmpty = trim(strip_tags($summaryHtml)) === '';
+              $hasSummary = nb_has_summary($lesson);
+              $attention = nb_attention_meta($lesson);
+              $button = nb_action_button_meta($lesson);
+              $reviewStatus = (string)$lesson['review_status'];
+              $showActionPanelMeta = in_array($reviewStatus, ['needs_revision', 'rejected'], true);
             ?>
             <section
-              class="nb-lesson-section"
+              class="nb-lesson"
               id="<?= h((string)$lesson['anchor_id']) ?>"
               data-lesson-id="<?= $lessonId ?>"
-              data-review-status="<?= h((string)$lesson['review_status']) ?>"
-              data-read-only="<?= $isReadOnly ? '1' : '0' ?>"
-              data-has-unsaved="0"
+              data-review-status="<?= h($reviewStatus) ?>"
+              data-has-summary="<?= $hasSummary ? '1' : '0' ?>"
             >
-              <div class="nb-lesson-head">
-                <div>
-                  <h4 class="nb-lesson-title"><?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?></h4>
+              <h3 class="nb-lesson-title">
+                <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
+              </h3>
 
-                  <div class="nb-lesson-meta">
-                    <span class="nb-pill <?= h((string)$lesson['review_ui_class']) ?>" data-role="review-pill">
-                      <?= h((string)$lesson['review_ui_label']) ?>
-                    </span>
-                    <span class="nb-pill neutral" data-role="word-count"><?= (int)$lesson['word_count'] ?> words</span>
-                    <span class="nb-pill info" data-role="version-count"><?= (int)$lesson['version_count'] ?> versions</span>
-                    <span class="nb-pill neutral" data-role="updated-at"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
-                  </div>
-                </div>
+              <?php if ($attention['show']): ?>
+                <span class="nb-pill <?= h($attention['class']) ?>" data-role="status-pill"><?= h($attention['label']) ?></span>
+              <?php endif; ?>
 
-                <div class="nb-action-row">
-                  <?php if ($isReadOnly): ?>
-                    <button type="button" class="nb-btn warn" data-action="unlock">Edit Summary</button>
-                  <?php else: ?>
-                    <button type="button" class="nb-btn ghost" data-action="edit">Edit</button>
+              <?php if ($hasSummary): ?>
+                <div class="nb-lesson-meta" data-role="lesson-meta">
+                  <span data-role="word-meta"><?= (int)$lesson['word_count'] ?> words</span>
+                  <?php if ((int)$lesson['version_count'] > 0): ?>
+                    <span data-role="version-meta"><?= (int)$lesson['version_count'] ?> versions</span>
+                  <?php endif; ?>
+                  <?php if (trim((string)$lesson['updated_at']) !== ''): ?>
+                    <span data-role="date-meta"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
                   <?php endif; ?>
                 </div>
-              </div>
+                <div class="nb-content" data-view><?= (string)$lesson['summary_html'] ?></div>
+              <?php else: ?>
+                <div class="nb-lesson-meta" data-role="lesson-meta"></div>
+                <div class="nb-divider" data-view></div>
+              <?php endif; ?>
 
-              <div class="nb-content-view<?= $summaryEmpty ? ' is-empty' : '' ?>" data-role="content-view">
-                <?php if ($summaryEmpty): ?>
-                  <em>No summary yet.</em>
-                <?php else: ?>
-                  <?= $summaryHtml ?>
+              <div class="nb-action-bar" data-role="action-bar">
+                <?php if ($button !== null): ?>
+                  <button
+                    class="nb-btn <?= h($button['class']) ?>"
+                    data-action="<?= h($button['action']) ?>"
+                    data-lesson="<?= $lessonId ?>"
+                  >
+                    <?= h($button['label']) ?>
+                  </button>
                 <?php endif; ?>
               </div>
 
-              <div class="nb-editor-shell" data-role="editor-shell">
-                <div class="nb-toolbar">
-                  <button type="button" class="nb-tool" data-cmd="bold">B</button>
-                  <button type="button" class="nb-tool" data-cmd="italic"><em>I</em></button>
-                  <button type="button" class="nb-tool" data-cmd="underline"><u>U</u></button>
-                  <button type="button" class="nb-tool" data-cmd="insertUnorderedList">•</button>
+              <div class="nb-action-panel" id="panel-<?= $lessonId ?>">
+                <div class="nb-editor" contenteditable="true" id="editor-<?= $lessonId ?>"><?= (string)$lesson['summary_html'] ?></div>
+
+                <div class="nb-panel-actions">
+                  <button class="nb-btn primary" data-save-lesson="<?= $lessonId ?>">Save</button>
+                  <button class="nb-btn ghost" data-close-lesson="<?= $lessonId ?>">Close</button>
                 </div>
 
-                <div class="nb-editor" data-role="editor" contenteditable="true" spellcheck="true" data-placeholder="Write your lesson summary in your own words."><?= $summaryHtml ?></div>
+                <?php if ($showActionPanelMeta): ?>
+                  <?php if (trim((string)$lesson['instructor_feedback']) !== ''): ?>
+                    <div class="nb-panel-box">
+                      <div class="nb-panel-label">Instructor Feedback</div>
+                      <div class="nb-panel-body"><?= nl2br(h((string)$lesson['instructor_feedback'])) ?></div>
+                    </div>
+                  <?php endif; ?>
 
-                <div class="nb-editor-status">
-                  <div class="nb-status-left" data-role="editor-status-left">Editing this section only</div>
-                  <div class="nb-status-right" data-role="editor-status-right">Explicit save required</div>
-                </div>
-
-                <div class="nb-editor-actions">
-                  <button type="button" class="nb-btn primary" data-action="save">Save</button>
-                  <button type="button" class="nb-btn ghost" data-action="cancel">Close</button>
-                </div>
+                  <?php if (trim((string)$lesson['instructor_notes']) !== ''): ?>
+                    <div class="nb-panel-box">
+                      <div class="nb-panel-label">Instructor Notes</div>
+                      <div class="nb-panel-body"><?= nl2br(h((string)$lesson['instructor_notes'])) ?></div>
+                    </div>
+                  <?php endif; ?>
+                <?php endif; ?>
               </div>
-
-              <div class="nb-note-grid">
-                <div class="nb-note-box" data-role="feedback-box">
-                  <div class="nb-note-label">Instructor Feedback</div>
-                  <div class="nb-note-body" data-role="feedback-body">
-                    <?php if (trim((string)$lesson['instructor_feedback']) !== ''): ?>
-                      <?= nl2br(h((string)$lesson['instructor_feedback'])) ?>
-                    <?php else: ?>
-                      <span class="nb-note-empty">No instructor feedback visible for this lesson.</span>
-                    <?php endif; ?>
-                  </div>
-                </div>
-
-                <div class="nb-note-box" data-role="notes-box">
-                  <div class="nb-note-label">Instructor Notes</div>
-                  <div class="nb-note-body" data-role="notes-body">
-                    <?php if (trim((string)$lesson['instructor_notes']) !== ''): ?>
-                      <?= nl2br(h((string)$lesson['instructor_notes'])) ?>
-                    <?php else: ?>
-                      <span class="nb-note-empty">No instructor notes visible for this lesson.</span>
-                    <?php endif; ?>
-                  </div>
-                </div>
-              </div>
-
-              <details class="nb-history" data-role="history" data-loaded="0">
-                <summary>
-                  <span>Version history</span>
-                  <span data-role="history-count"><?= (int)$lesson['version_count'] ?> available</span>
-                </summary>
-                <div class="nb-history-body">
-                  <div class="nb-history-list" data-role="history-list">
-                    <div class="nb-history-empty">Open to load compact version history for this lesson.</div>
-                  </div>
-                </div>
-              </details>
             </section>
           <?php endforeach; ?>
         </section>
       <?php endforeach; ?>
-    </main>
+    </div>
+
+    <div id="confirmBar" class="nb-confirm">
+      <div id="confirmText" class="nb-confirm-text">You have unsaved changes.</div>
+      <div class="nb-confirm-actions">
+        <button class="nb-btn primary" id="confirmSaveBtn">Save</button>
+        <button class="nb-btn ghost" id="confirmDiscardBtn">Discard</button>
+        <button class="nb-btn ghost" id="confirmContinueBtn">Continue Editing</button>
+      </div>
+    </div>
+
   </div>
 </div>
+
 <script>
-const NB_COHORT_ID = <?= (int)$cohortId ?>;
-const NB_SAVE_URL = '/student/api/summary_save.php';
-const NB_GET_URL = '/student/api/lesson_summaries_get.php';
-const nbBanner = document.getElementById('notebookBanner');
-let nbActiveLessonId = null;
-let nbActiveOriginalHtml = '';
+const COHORT_ID = <?= (int)$selectedCohortId ?>;
+const SAVE_URL = '/student/api/summary_save.php';
+const exportBtn = document.getElementById('exportBtn');
+const exportVersionEl = document.getElementById('exportVersion');
+const printExportVersionEl = document.getElementById('printExportVersion');
+const printExportTimestampEl = document.getElementById('printExportTimestamp');
+const scopeSelect = document.getElementById('scopeSelect');
+const bannerEl = document.getElementById('nbBanner');
 
-function nbShowBanner(message, kind) {
-  nbBanner.textContent = message;
-  nbBanner.className = 'nb-banner' + (kind ? ' ' + kind : '');
-  nbBanner.style.display = 'block';
-  clearTimeout(nbShowBanner._t);
-  nbShowBanner._t = setTimeout(() => {
-    nbBanner.style.display = 'none';
-  }, 3200);
+let activeLessonId = null;
+let originalHtml = '';
+let pendingAction = null;
+let currentExportVersion = null;
+let currentExportTimestamp = null;
+
+const confirmBar = document.getElementById('confirmBar');
+const confirmText = document.getElementById('confirmText');
+const confirmSaveBtn = document.getElementById('confirmSaveBtn');
+const confirmDiscardBtn = document.getElementById('confirmDiscardBtn');
+const confirmContinueBtn = document.getElementById('confirmContinueBtn');
+
+function editorEl(lessonId) {
+  return document.getElementById('editor-' + lessonId);
 }
 
-function nbEscapeHtml(s) {
-  return (s || '').toString()
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
+function panelEl(lessonId) {
+  return document.getElementById('panel-' + lessonId);
 }
 
-function nbWordCountFromHtml(html) {
-  const div = document.createElement('div');
-  div.innerHTML = html || '';
-  const text = (div.textContent || div.innerText || '').trim();
-  if (!text) return 0;
-  return text.split(/\s+/).length;
+function lessonNode(lessonId) {
+  return document.querySelector('[data-lesson-id="' + lessonId + '"]');
 }
 
-function nbReviewMeta(status) {
-  if (status === 'acceptable') return {label:'Accepted', klass:'ok'};
-  if (status === 'needs_revision' || status === 'rejected') return {label:'Needs revision', klass:'danger'};
-  if (status === 'pending') return {label:'Pending', klass:'warn'};
-  return {label:'Draft', klass:'info'};
+function tocNode(lessonId) {
+  return document.getElementById('toc-lesson-' + lessonId);
 }
 
-function nbSection(lessonId) {
-  return document.querySelector('.nb-lesson-section[data-lesson-id="' + lessonId + '"]');
+function hasUnsavedChanges(lessonId) {
+  const ed = editorEl(lessonId);
+  if (!ed) return false;
+  return ed.innerHTML !== originalHtml;
 }
 
-function nbEditor(section) {
-  return section.querySelector('[data-role="editor"]');
+function showBanner(message, kind) {
+  bannerEl.textContent = message;
+  bannerEl.className = 'nb-banner ' + (kind || 'ok');
+  bannerEl.style.display = 'block';
+  clearTimeout(showBanner._t);
+  showBanner._t = setTimeout(() => {
+    bannerEl.style.display = 'none';
+  }, 3600);
 }
 
-function nbEditorShell(section) {
-  return section.querySelector('[data-role="editor-shell"]');
+function closeConfirmBar() {
+  confirmBar.style.display = 'none';
+  pendingAction = null;
 }
 
-function nbContentView(section) {
-  return section.querySelector('[data-role="content-view"]');
+function showConfirmBar(message, action) {
+  pendingAction = action;
+  confirmText.textContent = message;
+  confirmBar.style.display = 'block';
+  confirmBar.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-function nbIsMeaningfullyChanged(section) {
-  const editor = nbEditor(section);
-  return !!(editor && editor.innerHTML !== nbActiveOriginalHtml);
+function setStatusPillOnNode(node, label, klass, selector) {
+  if (!node) return;
+  const pill = node.querySelector(selector);
+  if (!pill) return;
+  pill.textContent = label;
+  pill.className = 'nb-pill ' + klass;
 }
 
-function nbSetUnsaved(section, flag) {
-  section.dataset.hasUnsaved = flag ? '1' : '0';
+function computeStatusDisplay(reviewStatus, attentionReason) {
+  if (reviewStatus === 'acceptable') {
+    return { label: 'Accepted', klass: 'ok' };
+  }
+  if (reviewStatus === 'needs_revision' || reviewStatus === 'rejected') {
+    return { label: 'Student Action Required', klass: 'warn' };
+  }
+  if (attentionReason === 'training_suspended') {
+    return { label: 'Training Paused', klass: 'danger' };
+  }
+  if (attentionReason === 'one_on_one_required') {
+    return { label: 'Instructor Session Required', klass: 'info' };
+  }
+  return { label: 'Pending', klass: 'pending' };
 }
 
-function nbUpdateMeta(section, html, reviewStatus) {
-  const wc = nbWordCountFromHtml(html);
-  const wcEl = section.querySelector('[data-role="word-count"]');
-  if (wcEl) wcEl.textContent = wc + ' words';
+function countWordsFromHtml(html) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html || '';
+  const txt = (tmp.textContent || tmp.innerText || '').trim();
+  if (!txt) return 0;
+  return txt.split(/\s+/).length;
+}
 
-  const updatedEl = section.querySelector('[data-role="updated-at"]');
-  if (updatedEl) {
-    const d = new Date();
-    const txt = d.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric', year:'numeric'});
-    updatedEl.textContent = txt;
+function buildActionButton(reviewStatus, hasSummary) {
+  if (reviewStatus === 'acceptable' && hasSummary) {
+    return { label: 'Edit Summary', action: 'unlock', className: 'nb-btn warn' };
+  }
+  if (reviewStatus === 'needs_revision' || reviewStatus === 'rejected') {
+    return { label: 'Open Action', action: 'edit', className: 'nb-btn warn' };
+  }
+  if (hasSummary) {
+    return { label: 'Edit', action: 'edit', className: 'nb-btn ghost' };
+  }
+  return null;
+}
+
+function renderActionButton(lessonId, reviewStatus, hasSummary) {
+  const node = lessonNode(lessonId);
+  if (!node) return;
+  const actionBar = node.querySelector('[data-role="action-bar"]');
+  if (!actionBar) return;
+
+  const meta = buildActionButton(reviewStatus, hasSummary);
+  actionBar.innerHTML = '';
+  if (!meta) return;
+
+  const btn = document.createElement('button');
+  btn.className = meta.className;
+  btn.setAttribute('data-action', meta.action);
+  btn.setAttribute('data-lesson', String(lessonId));
+  btn.textContent = meta.label;
+  btn.addEventListener('click', handleActionButtonClick);
+  actionBar.appendChild(btn);
+}
+
+function updateMetaSpans(container, map) {
+  if (!container) return;
+  container.innerHTML = '';
+  Object.keys(map).forEach((key) => {
+    const val = map[key];
+    if (!val) return;
+    const span = document.createElement('span');
+    span.setAttribute('data-role', key);
+    span.textContent = val;
+    container.appendChild(span);
+  });
+}
+
+function formatUtcDateLabel(now) {
+  const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const weekNames = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  return weekNames[now.getUTCDay()] + ', ' + monthNames[now.getUTCMonth()] + ' ' + now.getUTCDate() + ', ' + now.getUTCFullYear();
+}
+
+function updateLessonAndTocMetadata(lessonId, reviewStatus, html) {
+  const node = lessonNode(lessonId);
+  const toc = tocNode(lessonId);
+  if (!node) return;
+
+  const hasSummary = countWordsFromHtml(html) > 0;
+  const wordCount = countWordsFromHtml(html);
+
+  node.setAttribute('data-review-status', reviewStatus);
+  node.setAttribute('data-has-summary', hasSummary ? '1' : '0');
+
+  const attentionReason = '';
+  const statusMeta = computeStatusDisplay(reviewStatus, attentionReason);
+  setStatusPillOnNode(node, statusMeta.label, statusMeta.klass, '[data-role="status-pill"]');
+  setStatusPillOnNode(toc, statusMeta.label, statusMeta.klass, '[data-role="toc-status-pill"]');
+
+  const view = node.querySelector('[data-view]');
+  if (view) {
+    if (hasSummary) {
+      view.className = 'nb-content';
+      view.innerHTML = html;
+    } else {
+      view.className = 'nb-divider';
+      view.innerHTML = '';
+    }
   }
 
-  const pill = section.querySelector('[data-role="review-pill"]');
-  if (pill) {
-    const meta = nbReviewMeta(reviewStatus);
-    pill.className = 'nb-pill ' + meta.klass;
-    pill.textContent = meta.label;
+  const now = new Date();
+  const dateLabel = formatUtcDateLabel(now);
+
+  const lessonMeta = node.querySelector('[data-role="lesson-meta"]');
+  updateMetaSpans(lessonMeta, {
+    'word-meta': hasSummary ? (wordCount + ' words') : ''
+  });
+
+  const tocMeta = toc ? toc.querySelector('.nb-toc-meta') : null;
+  if (tocMeta) {
+    let statusPill = tocMeta.querySelector('[data-role="toc-status-pill"]');
+    tocMeta.innerHTML = '';
+    if (!statusPill) {
+      statusPill = document.createElement('span');
+      statusPill.setAttribute('data-role', 'toc-status-pill');
+    }
+    statusPill.className = 'nb-pill ' + statusMeta.klass;
+    statusPill.textContent = statusMeta.label;
+    tocMeta.appendChild(statusPill);
+
+    if (hasSummary) {
+      const wc = document.createElement('span');
+      wc.setAttribute('data-role', 'toc-word-meta');
+      wc.textContent = wordCount + ' words';
+      tocMeta.appendChild(wc);
+    }
+  }
+
+  const versionMeta = node.querySelector('[data-role="version-meta"]');
+  if (versionMeta) {
+    const current = parseInt((versionMeta.textContent || '0').replace(/\D+/g, ''), 10) || 0;
+    versionMeta.textContent = (current + 1) + ' versions';
+  } else if (hasSummary) {
+    const lessonMetaBox = node.querySelector('[data-role="lesson-meta"]');
+    if (lessonMetaBox) {
+      const span = document.createElement('span');
+      span.setAttribute('data-role', 'version-meta');
+      span.textContent = '1 versions';
+      lessonMetaBox.appendChild(span);
+    }
+  }
+
+  const dateMeta = node.querySelector('[data-role="date-meta"]');
+  if (dateMeta) {
+    dateMeta.textContent = dateLabel;
+  } else if (hasSummary) {
+    const lessonMetaBox = node.querySelector('[data-role="lesson-meta"]');
+    if (lessonMetaBox) {
+      const span = document.createElement('span');
+      span.setAttribute('data-role', 'date-meta');
+      span.textContent = dateLabel;
+      lessonMetaBox.appendChild(span);
+    }
+  }
+
+  if (tocMeta && hasSummary) {
+    const existingVersion = tocMeta.querySelector('[data-role="toc-version-meta"]');
+    if (existingVersion) {
+      const current = parseInt((existingVersion.textContent || '0').replace(/\D+/g, ''), 10) || 0;
+      existingVersion.textContent = (current + 1) + ' versions';
+    } else {
+      const span = document.createElement('span');
+      span.setAttribute('data-role', 'toc-version-meta');
+      span.textContent = '1 versions';
+      tocMeta.appendChild(span);
+    }
+
+    const existingDate = tocMeta.querySelector('[data-role="toc-date-meta"]');
+    if (existingDate) {
+      existingDate.textContent = dateLabel;
+    } else {
+      const span = document.createElement('span');
+      span.setAttribute('data-role', 'toc-date-meta');
+      span.textContent = dateLabel;
+      tocMeta.appendChild(span);
+    }
+  }
+
+  renderActionButton(lessonId, reviewStatus, hasSummary);
+}
+
+function openEditor(lessonId) {
+  if (activeLessonId !== null && activeLessonId !== lessonId) {
+    if (hasUnsavedChanges(activeLessonId)) {
+      showConfirmBar('You have unsaved changes in another section.', { type: 'switch-editor', lessonId: lessonId });
+      return;
+    }
+    closeEditor(activeLessonId, true);
+  }
+
+  const panel = panelEl(lessonId);
+  const ed = editorEl(lessonId);
+  if (!panel || !ed) return;
+
+  panel.classList.add('open');
+  activeLessonId = lessonId;
+  originalHtml = ed.innerHTML;
+  ed.focus();
+}
+
+function closeEditor(lessonId, silent) {
+  if (activeLessonId === lessonId && hasUnsavedChanges(lessonId) && !silent) {
+    showConfirmBar('You have unsaved changes in this section.', { type: 'close-editor', lessonId: lessonId });
+    return;
+  }
+
+  const panel = panelEl(lessonId);
+  if (panel) panel.classList.remove('open');
+
+  if (activeLessonId === lessonId) {
+    activeLessonId = null;
+    originalHtml = '';
+  }
+
+  if (!silent) {
+    closeConfirmBar();
   }
 }
 
-function nbOpenEditor(section) {
-  if (!section) return;
-
-  const shell = nbEditorShell(section);
-  const view = nbContentView(section);
-  const editor = nbEditor(section);
-  if (!shell || !view || !editor) return;
-
-  view.style.display = 'none';
-  shell.classList.add('is-open');
-  nbActiveLessonId = section.dataset.lessonId;
-  nbActiveOriginalHtml = editor.innerHTML;
-  nbSetUnsaved(section, false);
-  setTimeout(() => editor.focus(), 60);
-  section.scrollIntoView({behavior:'smooth', block:'start'});
-}
-
-function nbCloseEditor(section, restoreOriginal) {
-  if (!section) return;
-
-  const shell = nbEditorShell(section);
-  const view = nbContentView(section);
-  const editor = nbEditor(section);
-  if (!shell || !view || !editor) return;
-
-  if (restoreOriginal) {
-    editor.innerHTML = nbActiveOriginalHtml;
-  }
-
-  shell.classList.remove('is-open');
-  view.style.display = '';
-  nbSetUnsaved(section, false);
-
-  if (nbActiveLessonId === section.dataset.lessonId) {
-    nbActiveLessonId = null;
-    nbActiveOriginalHtml = '';
-  }
-}
-
-async function nbPost(payload) {
-  const res = await fetch(NB_SAVE_URL, {
+async function postSummary(payload) {
+  const res = await fetch(SAVE_URL, {
     method: 'POST',
-    headers: {'Content-Type':'application/json'},
+    headers: {'Content-Type': 'application/json'},
     credentials: 'same-origin',
     body: JSON.stringify(payload)
   });
@@ -491,293 +1072,216 @@ async function nbPost(payload) {
   try {
     json = await res.json();
   } catch (e) {
-    json = {ok:false, error:'Invalid server response'};
+    json = { ok: false, error: 'Invalid server response' };
   }
   return json;
 }
 
-async function nbEnsureSingleEditor(targetSection) {
-  if (!nbActiveLessonId) return true;
-  if (String(nbActiveLessonId) === String(targetSection.dataset.lessonId)) return true;
-
-  const activeSection = nbSection(nbActiveLessonId);
-  if (!activeSection) {
-    nbActiveLessonId = null;
-    nbActiveOriginalHtml = '';
-    return true;
-  }
-
-  if (!nbIsMeaningfullyChanged(activeSection)) {
-    nbCloseEditor(activeSection, true);
-    return true;
-  }
-
-  const choice = window.prompt('You have unsaved changes in another section. Type SAVE to save and switch, DISCARD to discard, or anything else to continue editing.', 'SAVE');
-  if (choice === null) return false;
-
-  const normalized = String(choice).trim().toUpperCase();
-  if (normalized === 'SAVE') {
-    const ok = await nbSaveSection(activeSection, true);
-    return !!ok;
-  }
-  if (normalized === 'DISCARD') {
-    nbCloseEditor(activeSection, true);
-    return true;
-  }
-
-  return false;
-}
-
-async function nbSaveSection(section, closeAfter) {
-  const lessonId = Number(section.dataset.lessonId || 0);
-  const editor = nbEditor(section);
-  const view = nbContentView(section);
-  if (!lessonId || !editor || !view) return false;
-
-  const result = await nbPost({
-    action: 'save',
-    cohort_id: NB_COHORT_ID,
-    lesson_id: lessonId,
-    summary_html: editor.innerHTML || ''
+async function unlockAcceptedSummary(lessonId) {
+  const result = await postSummary({
+    action: 'unlock',
+    cohort_id: COHORT_ID,
+    lesson_id: lessonId
   });
 
   if (!result.ok) {
-    nbShowBanner(result.error || 'Save failed.', 'danger');
+    showBanner(result.error || 'Unlock failed.', 'danger');
     return false;
   }
 
-  const html = editor.innerHTML || '';
-  view.innerHTML = html.trim() === '' ? '<em>No summary yet.</em>' : html;
-  view.classList.toggle('is-empty', html.trim() === '');
+  updateLessonAndTocMetadata(lessonId, 'pending', editorEl(lessonId) ? editorEl(lessonId).innerHTML : '');
+  showBanner('Accepted summary reopened. It is now pending review.', 'ok');
+  return true;
+}
 
-  let reviewStatus = section.dataset.reviewStatus || 'pending';
-  if (reviewStatus === 'needs_revision') {
-    reviewStatus = 'pending';
-    section.dataset.reviewStatus = 'pending';
+async function saveSummary(lessonId) {
+  const ed = editorEl(lessonId);
+  if (!ed) return false;
+
+  const result = await postSummary({
+    action: 'save',
+    cohort_id: COHORT_ID,
+    lesson_id: lessonId,
+    summary_html: ed.innerHTML || ''
+  });
+
+  if (!result.ok) {
+    showBanner(result.error || 'Save failed.', 'danger');
+    return false;
   }
 
-  nbUpdateMeta(section, html, reviewStatus);
-  nbSetUnsaved(section, false);
-  nbActiveOriginalHtml = html;
+  originalHtml = ed.innerHTML || '';
+  updateLessonAndTocMetadata(lessonId, 'pending', originalHtml);
+  closeEditor(lessonId, true);
+  showBanner(result.skipped ? 'No meaningful changes to save.' : 'Summary saved.', 'ok');
 
-  const historyCount = section.querySelector('[data-role="history-count"]');
-  const versionCountEl = section.querySelector('[data-role="version-count"]');
-  if (historyCount) {
-    const current = parseInt(historyCount.textContent, 10);
-    if (!isNaN(current)) historyCount.textContent = (current + 1) + ' available';
-  }
-  if (versionCountEl) {
-    const currentText = versionCountEl.textContent || '';
-    const m = currentText.match(/^(\d+)/);
-    if (m) versionCountEl.textContent = (parseInt(m[1], 10) + 1) + ' versions';
-  }
-
-  nbShowBanner(result.skipped ? 'No meaningful change.' : 'Summary saved.', 'ok');
-
-  if (closeAfter) {
-    nbCloseEditor(section, false);
+  if (pendingAction) {
+    const action = pendingAction;
+    closeConfirmBar();
+    await runPendingAction(action);
   }
 
   return true;
 }
 
-async function nbUnlockAccepted(section, button) {
-  const lessonId = Number(section.dataset.lessonId || 0);
-  if (!lessonId) return;
+async function runPendingAction(action) {
+  if (!action) return;
 
-  const result = await nbPost({
-    action: 'unlock',
-    cohort_id: NB_COHORT_ID,
-    lesson_id: lessonId
-  });
-
-  if (!result.ok) {
-    nbShowBanner(result.error || 'Unlock failed.', 'danger');
-    if (button) button.disabled = false;
+  if (action.type === 'switch-editor') {
+    openEditor(action.lessonId);
     return;
   }
 
-  section.dataset.reviewStatus = 'pending';
-  section.dataset.readOnly = '0';
-
-  const pill = section.querySelector('[data-role="review-pill"]');
-  if (pill) {
-    pill.className = 'nb-pill warn';
-    pill.textContent = 'Pending';
-  }
-
-  if (button) {
-    button.textContent = 'Edit';
-    button.className = 'nb-btn ghost';
-    button.disabled = false;
-    button.setAttribute('data-action', 'edit');
-  }
-
-  const versionCountEl = section.querySelector('[data-role="version-count"]');
-  const historyCount = section.querySelector('[data-role="history-count"]');
-  if (versionCountEl) {
-    const m = (versionCountEl.textContent || '').match(/^(\d+)/);
-    if (m) versionCountEl.textContent = (parseInt(m[1], 10) + 1) + ' versions';
-  }
-  if (historyCount) {
-    const m = (historyCount.textContent || '').match(/^(\d+)/);
-    if (m) historyCount.textContent = (parseInt(m[1], 10) + 1) + ' available';
-  }
-
-  nbShowBanner('Accepted summary reopened. It is now pending review.', 'ok');
-  nbOpenEditor(section);
-}
-
-async function nbLoadHistory(section) {
-  const details = section.querySelector('[data-role="history"]');
-  const list = section.querySelector('[data-role="history-list"]');
-  if (!details || !list || details.dataset.loaded === '1') return;
-
-  list.innerHTML = '<div class="nb-history-empty">Loading version history…</div>';
-
-  const lessonId = Number(section.dataset.lessonId || 0);
-
-  try {
-    const res = await fetch(
-      NB_GET_URL + '?cohort_id=' + encodeURIComponent(NB_COHORT_ID) + '&lesson_id=' + encodeURIComponent(lessonId) + '&view=versions',
-      {credentials:'same-origin'}
-    );
-    const json = await res.json();
-
-    if (!json.ok) {
-      list.innerHTML = '<div class="nb-history-empty">' + nbEscapeHtml(json.error || 'Could not load version history.') + '</div>';
-      return;
+  if (action.type === 'unlock-then-edit') {
+    const ok = await unlockAcceptedSummary(action.lessonId);
+    if (ok) {
+      openEditor(action.lessonId);
     }
+    return;
+  }
 
-    const versions = Array.isArray(json.versions) ? json.versions : [];
-    if (!versions.length) {
-      list.innerHTML = '<div class="nb-history-empty">No version snapshots available yet for this lesson.</div>';
-      details.dataset.loaded = '1';
-      return;
+  if (action.type === 'close-editor') {
+    const panel = panelEl(action.lessonId);
+    if (panel) panel.classList.remove('open');
+    if (activeLessonId === action.lessonId) {
+      activeLessonId = null;
+      originalHtml = '';
     }
+    return;
+  }
 
-    let html = '';
-    versions.forEach((v) => {
-      html += ''
-        + '<div class="nb-history-item">'
-        + '<div class="nb-history-top">'
-        + '<div>'
-        + '<div class="nb-history-title">Version ' + Number(v.version_no) + '</div>'
-        + '<div class="nb-history-meta">' + nbEscapeHtml(v.snapshot_reason_label || 'Snapshot') + ' · ' + nbEscapeHtml(v.created_at || '') + '</div>'
-        + '</div>'
-        + '</div>'
-        + '<div class="nb-history-preview">' + nbEscapeHtml(v.preview || '') + '</div>'
-        + '</div>';
-    });
-
-    list.innerHTML = html;
-    details.dataset.loaded = '1';
-  } catch (e) {
-    list.innerHTML = '<div class="nb-history-empty">Could not load version history.</div>';
+  if (action.type === 'switch-scope') {
+    window.location.href = '?cohort_id=' + encodeURIComponent(action.cohortId);
   }
 }
 
-document.querySelectorAll('.nb-lesson-section').forEach((section) => {
-  const editor = nbEditor(section);
-  const history = section.querySelector('[data-role="history"]');
+confirmSaveBtn.addEventListener('click', async function () {
+  if (activeLessonId !== null) {
+    await saveSummary(activeLessonId);
+  }
+});
 
-  if (editor) {
-    editor.addEventListener('input', () => {
-      nbSetUnsaved(section, nbIsMeaningfullyChanged(section));
-    });
-
-    editor.addEventListener('paste', (e) => {
-      e.preventDefault();
-      nbShowBanner('Paste attempt detected. Deterrence triggered for this notebook section.', 'warn');
-    });
-
-    editor.addEventListener('copy', (e) => {
-      e.preventDefault();
-      nbShowBanner('Copy attempt detected. Deterrence triggered for this notebook section.', 'warn');
-    });
-
-    editor.addEventListener('cut', (e) => {
-      e.preventDefault();
-      nbShowBanner('Cut attempt detected. Deterrence triggered for this notebook section.', 'warn');
-    });
-
-    editor.addEventListener('drop', (e) => {
-      e.preventDefault();
-      nbShowBanner('Drag/drop insertion attempt detected. Deterrence triggered for this notebook section.', 'warn');
-    });
-
-    editor.addEventListener('dragover', (e) => {
-      e.preventDefault();
-    });
-
-    editor.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      nbShowBanner('Context-menu attempt detected. Deterrence triggered for this notebook section.', 'warn');
-    });
+confirmDiscardBtn.addEventListener('click', async function () {
+  if (activeLessonId !== null) {
+    const ed = editorEl(activeLessonId);
+    if (ed) ed.innerHTML = originalHtml;
   }
 
-  section.querySelectorAll('[data-cmd]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (!editor) return;
-      const cmd = btn.getAttribute('data-cmd');
-      document.execCommand(cmd, false, null);
-      editor.focus();
-      nbSetUnsaved(section, nbIsMeaningfullyChanged(section));
-    });
-  });
+  const action = pendingAction;
+  const lessonId = activeLessonId;
 
-  section.querySelectorAll('[data-action]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const action = btn.getAttribute('data-action');
+  closeConfirmBar();
 
-      if (action === 'edit') {
-        const ok = await nbEnsureSingleEditor(section);
-        if (ok) nbOpenEditor(section);
-      }
-
-      if (action === 'unlock') {
-        const ok = await nbEnsureSingleEditor(section);
-        if (!ok) return;
-        btn.disabled = true;
-        await nbUnlockAccepted(section, btn);
-      }
-
-      if (action === 'save') {
-        await nbSaveSection(section, true);
-      }
-
-      if (action === 'cancel') {
-        if (!nbIsMeaningfullyChanged(section)) {
-          nbCloseEditor(section, true);
-          return;
-        }
-
-        const choice = window.prompt('Unsaved changes detected. Type SAVE to save, DISCARD to discard, or anything else to continue editing.', 'SAVE');
-        if (choice === null) return;
-
-        const normalized = String(choice).trim().toUpperCase();
-        if (normalized === 'SAVE') {
-          await nbSaveSection(section, true);
-          return;
-        }
-        if (normalized === 'DISCARD') {
-          nbCloseEditor(section, true);
-          return;
-        }
-      }
-    });
-  });
-
-  if (history) {
-    history.addEventListener('toggle', () => {
-      if (history.open) {
-        nbLoadHistory(section);
-      }
-    });
+  if (lessonId !== null) {
+    const panel = panelEl(lessonId);
+    if (panel) panel.classList.remove('open');
+    activeLessonId = null;
+    originalHtml = '';
   }
+
+  await runPendingAction(action);
+});
+
+confirmContinueBtn.addEventListener('click', function () {
+  if (scopeSelect && pendingAction && pendingAction.type === 'switch-scope') {
+    scopeSelect.value = scopeSelect.getAttribute('data-current-scope');
+  }
+  closeConfirmBar();
+});
+
+async function handleActionButtonClick() {
+  const lessonId = parseInt(this.getAttribute('data-lesson'), 10);
+  const action = this.getAttribute('data-action');
+
+  if (action === 'edit') {
+    openEditor(lessonId);
+    return;
+  }
+
+  if (action === 'unlock') {
+    if (activeLessonId !== null && activeLessonId !== lessonId && hasUnsavedChanges(activeLessonId)) {
+      showConfirmBar('You have unsaved changes in another section.', { type: 'unlock-then-edit', lessonId: lessonId });
+      return;
+    }
+
+    const ok = await unlockAcceptedSummary(lessonId);
+    if (ok) openEditor(lessonId);
+  }
+}
+
+document.querySelectorAll('[data-action]').forEach(function (btn) {
+  btn.addEventListener('click', handleActionButtonClick);
+});
+
+document.querySelectorAll('[data-save-lesson]').forEach(function (btn) {
+  btn.addEventListener('click', async function () {
+    const lessonId = parseInt(btn.getAttribute('data-save-lesson'), 10);
+    await saveSummary(lessonId);
+  });
+});
+
+document.querySelectorAll('[data-close-lesson]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    const lessonId = parseInt(btn.getAttribute('data-close-lesson'), 10);
+    closeEditor(lessonId, false);
+  });
+});
+
+scopeSelect.addEventListener('change', function () {
+  const targetCohortId = parseInt(this.value, 10);
+
+  if (activeLessonId !== null && hasUnsavedChanges(activeLessonId)) {
+    showConfirmBar('You have unsaved changes before switching notebook scope.', { type: 'switch-scope', cohortId: targetCohortId });
+    this.value = this.getAttribute('data-current-scope');
+    return;
+  }
+
+  window.location.href = '?cohort_id=' + encodeURIComponent(targetCohortId);
+});
+
+document.querySelectorAll('.nb-editor').forEach(function (ed) {
+  ed.addEventListener('paste', function () {
+    console.log('Deterrence triggered: paste attempt detected');
+  });
+  ed.addEventListener('cut', function () {
+    console.log('Deterrence triggered: cut attempt detected');
+  });
+  ed.addEventListener('contextmenu', function () {
+    console.log('Deterrence triggered: context menu attempt detected');
+  });
+});
+
+function generateExportVersionOnce() {
+  if (currentExportVersion !== null && currentExportTimestamp !== null) {
+    return { version: currentExportVersion, timestamp: currentExportTimestamp };
+  }
+
+  const now = new Date();
+  const y = now.getUTCFullYear();
+  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(now.getUTCDate()).padStart(2, '0');
+  const hh = String(now.getUTCHours()).padStart(2, '0');
+  const mm = String(now.getUTCMinutes()).padStart(2, '0');
+  const ss = String(now.getUTCSeconds()).padStart(2, '0');
+
+  currentExportVersion = y + '.' + m + '.' + d + '.' + hh + mm;
+  currentExportTimestamp =
+    ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][now.getUTCDay()] + ', ' +
+    ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][now.getUTCMonth()] + ' ' +
+    now.getUTCDate() + ', ' +
+    now.getUTCFullYear() + ' ' +
+    hh + ':' + mm + ':' + ss + ' UTC';
+
+  return { version: currentExportVersion, timestamp: currentExportTimestamp };
+}
+
+exportBtn.addEventListener('click', function () {
+  const exportMeta = generateExportVersionOnce();
+  exportVersionEl.textContent = exportMeta.version;
+  printExportVersionEl.textContent = exportMeta.version;
+  printExportTimestampEl.textContent = exportMeta.timestamp;
+  window.print();
 });
 </script>
 
 <?php cw_footer(); ?>
-
-			

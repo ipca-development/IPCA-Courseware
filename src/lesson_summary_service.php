@@ -2,12 +2,25 @@
 declare(strict_types=1);
 
 /**
- * Lesson Summary Domain Service
+ * Lesson Summary Service
+ *
+ * Responsibility scope:
+ * - canonical lesson summary content writes
+ * - accepted-summary unlock flow
+ * - version snapshotting
+ * - summary restore
+ * - notebook read shaping
+ *
+ * This is NOT the full courseware progression workflow service.
+ * It does not own:
+ * - attempt threshold escalation
+ * - instructor intervention creation
+ * - instructor decision workflow
+ * - progression email/event orchestration
  *
  * SSOT RULE:
- * - lesson_summaries is the ONLY live store
- * - this service controls ALL writes
- * - notebook is a VIEW layer only
+ * - lesson_summaries is the ONLY live canonical store
+ * - notebook remains a VIEW layer only
  */
 final class LessonSummaryService
 {
@@ -21,7 +34,11 @@ final class LessonSummaryService
     }
 
     /**
-     * CENTRAL SAVE (SSOT WRITE PATH)
+     * Central save path for lesson summaries.
+     *
+     * Core rule:
+     * - accepted summaries cannot be directly overwritten
+     * - unlock is required first
      */
     public function saveSummary(
         int $userId,
@@ -31,8 +48,6 @@ final class LessonSummaryService
         string $actor = 'student',
         array $options = []
     ): array {
-        $requireUnlockForAccepted = !empty($options['require_unlock_for_accepted']);
-
         $plain = trim((string)preg_replace('/\s+/u', ' ', strip_tags($summaryHtml)));
 
         if ($plain === '') {
@@ -41,9 +56,7 @@ final class LessonSummaryService
 
         $existing = $this->getExisting($userId, $cohortId, $lessonId);
 
-        // Accepted lock (only when explicitly required)
         if (
-            $requireUnlockForAccepted &&
             $existing &&
             (string)$existing['review_status'] === 'acceptable'
         ) {
@@ -53,7 +66,6 @@ final class LessonSummaryService
             ];
         }
 
-        // Skip identical content
         if ($existing && $this->isSameContent(
             (string)($existing['summary_html'] ?? ''),
             (string)($existing['summary_plain'] ?? ''),
@@ -66,21 +78,19 @@ final class LessonSummaryService
         $this->pdo->beginTransaction();
 
         try {
-            // Snapshot BEFORE overwrite
             if ($existing) {
                 $this->createVersionSnapshot(
                     $existing,
                     $userId,
-                    'manual_save',
-                    $actor
+                    'manual_save'
                 );
             }
 
-            // Preserve existing behavior EXACTLY
             $newStatus = 'pending';
+
             if ($existing) {
                 $existingStatus = (string)($existing['review_status'] ?? '');
-                $newStatus = $existingStatus !== '' ? $existingStatus : 'pending';
+                $newStatus = ($existingStatus !== '') ? $existingStatus : 'pending';
 
                 if ($existingStatus === 'needs_revision') {
                     $newStatus = 'pending';
@@ -126,13 +136,13 @@ final class LessonSummaryService
     }
 
     /**
-     * UNLOCK ACCEPTED SUMMARY
+     * Unlock accepted summary for editing.
      *
-     * Sequence:
-     * 1. snapshot current live row
+     * Required flow:
+     * 1. snapshot
      * 2. log security event
-     * 3. immediately set live review_status to pending
-     * 4. caller may then open edit mode
+     * 3. set review_status to pending
+     * 4. caller may then open editor
      */
     public function unlockSummary(
         int $userId,
@@ -156,8 +166,7 @@ final class LessonSummaryService
             $this->createVersionSnapshot(
                 $existing,
                 $userId,
-                'pre_edit_accepted',
-                $actor
+                'pre_edit_accepted'
             );
 
             $this->logSecurityEvent(
@@ -170,7 +179,8 @@ final class LessonSummaryService
 
             $stmt = $this->pdo->prepare("
                 UPDATE lesson_summaries
-                SET review_status = 'pending',
+                SET
+                    review_status = 'pending',
                     updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = ?
                   AND cohort_id = ?
@@ -190,14 +200,13 @@ final class LessonSummaryService
     }
 
     /**
-     * RESTORE VERSION
+     * Restore prior version into the live summary row.
      *
-     * Restore rules:
+     * Required restore rules:
      * 1. snapshot current live row first
-     * 2. restore content fields only
+     * 2. restore content only
      * 3. set review_status = pending
-     * 4. do not revive prior approval as active truth
-     * 5. do not revive old instructor feedback as active truth
+     * 4. clear old active instructor review fields
      */
     public function restoreVersion(
         int $versionId,
@@ -237,8 +246,7 @@ final class LessonSummaryService
             $this->createVersionSnapshot(
                 $existing,
                 $userId,
-                'pre_restore',
-                $actor
+                'pre_restore'
             );
 
             $stmt = $this->pdo->prepare("
@@ -279,10 +287,65 @@ final class LessonSummaryService
     }
 
     /**
-     * NOTEBOOK DATA (READ ONLY / DOCUMENT VIEW)
+     * Truthful notebook scope selector.
+     * Current live model is cohort-driven, so selector is cohort/program scoped.
+     */
+    public function getAvailableNotebookScopes(int $userId): array
+    {
+        $st = $this->pdo->prepare("
+            SELECT
+                co.id AS cohort_id,
+                co.name AS cohort_name,
+                co.start_date,
+                co.end_date,
+                c.id AS course_id,
+                c.title AS course_title,
+                p.id AS program_id,
+                p.name AS program_name,
+                p.sort_order AS program_sort_order
+            FROM cohort_students cs
+            JOIN cohorts co ON co.id = cs.cohort_id
+            JOIN courses c ON c.id = co.course_id
+            LEFT JOIN programs p ON p.id = co.program_id
+            WHERE cs.user_id = ?
+              AND cs.status IN ('active','paused','completed')
+            ORDER BY
+                COALESCE(p.sort_order, 999999) ASC,
+                p.id ASC,
+                co.start_date DESC,
+                co.id DESC
+        ");
+        $st->execute([$userId]);
+        $rows = $st->fetchAll();
+
+        $out = [];
+        foreach ($rows as $row) {
+            $programName = trim((string)($row['program_name'] ?? ''));
+            $courseTitle = trim((string)($row['course_title'] ?? ''));
+            $cohortName = trim((string)($row['cohort_name'] ?? ''));
+
+            $label = $programName !== ''
+                ? ($programName . ' — ' . $cohortName)
+                : ($courseTitle . ' — ' . $cohortName);
+
+            $out[] = [
+                'cohort_id' => (int)$row['cohort_id'],
+                'cohort_name' => $cohortName,
+                'course_id' => (int)$row['course_id'],
+                'course_title' => $courseTitle,
+                'program_id' => isset($row['program_id']) ? (int)$row['program_id'] : null,
+                'program_name' => $programName,
+                'label' => $label,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Notebook view data.
      *
-     * This shapes data for presentation only.
-     * It does not own business rules or state transitions.
+     * Read shaping only. Does not own workflow transitions.
      */
     public function getNotebookViewData(int $userId, int $cohortId, string $studentName): array
     {
@@ -311,7 +374,6 @@ final class LessonSummaryService
             throw new RuntimeException('Cohort not found');
         }
 
-        // Canonical lesson ordering comes from the training structure, not summary rows.
         $lessonRowsSt = $this->pdo->prepare("
             SELECT
                 d.id AS deadline_id,
@@ -372,6 +434,25 @@ final class LessonSummaryService
             $versionMetaMap[(int)$row['lesson_id']] = $row;
         }
 
+        $activitySt = $this->pdo->prepare("
+            SELECT
+                lesson_id,
+                completion_status,
+                one_on_one_required,
+                one_on_one_completed,
+                training_suspended
+            FROM lesson_activity
+            WHERE user_id = ?
+              AND cohort_id = ?
+        ");
+        $activitySt->execute([$userId, $cohortId]);
+        $activityRows = $activitySt->fetchAll();
+
+        $activityMap = [];
+        foreach ($activityRows as $row) {
+            $activityMap[(int)$row['lesson_id']] = $row;
+        }
+
         $courses = [];
         $lastSavedAt = null;
         $programNumber = '1';
@@ -398,6 +479,7 @@ final class LessonSummaryService
 
             $summary = $summaryMap[$lessonId] ?? null;
             $versionMeta = $versionMetaMap[$lessonId] ?? null;
+            $activity = $activityMap[$lessonId] ?? null;
 
             $summaryHtml = $summary ? (string)$summary['summary_html'] : '';
             $summaryPlain = $summary ? (string)($summary['summary_plain'] ?? '') : '';
@@ -412,6 +494,34 @@ final class LessonSummaryService
             }
 
             $wordCount = $this->wordCount($summaryPlain);
+
+            $notebookAttentionReason = '';
+            $studentActionRequired = false;
+            $studentActionReason = '';
+
+            if (in_array($reviewStatus, ['needs_revision', 'rejected'], true)) {
+                $studentActionRequired = true;
+                $studentActionReason = 'summary_review';
+                $notebookAttentionReason = 'summary_review';
+            }
+
+            if ($activity) {
+                $completionStatus = (string)($activity['completion_status'] ?? '');
+                $oneOnOneRequired = (int)($activity['one_on_one_required'] ?? 0);
+                $oneOnOneCompleted = (int)($activity['one_on_one_completed'] ?? 0);
+                $trainingSuspended = (int)($activity['training_suspended'] ?? 0);
+
+                if ($trainingSuspended === 1) {
+                    $notebookAttentionReason = 'training_suspended';
+                } elseif ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
+                    $notebookAttentionReason = 'one_on_one_required';
+                } elseif (
+                    $notebookAttentionReason === '' &&
+                    in_array($completionStatus, ['remediation_required', 'blocked_reason_required'], true)
+                ) {
+                    $notebookAttentionReason = 'workflow_action';
+                }
+            }
 
             $courses[$courseId]['lessons'][] = [
                 'lesson_id' => $lessonId,
@@ -432,7 +542,10 @@ final class LessonSummaryService
                 'updated_at' => $updatedAt,
                 'instructor_feedback' => $summary ? (string)($summary['review_feedback'] ?? '') : '',
                 'instructor_notes' => $summary ? (string)($summary['review_notes_by_instructor'] ?? '') : '',
-                'read_only_by_default' => ($reviewStatus === 'acceptable')
+                'read_only_by_default' => ($reviewStatus === 'acceptable'),
+                'student_action_required' => $studentActionRequired,
+                'student_action_reason' => $studentActionReason,
+                'notebook_attention_reason' => $notebookAttentionReason,
             ];
         }
 
@@ -450,23 +563,16 @@ final class LessonSummaryService
             'student_name' => $studentName,
             'last_saved_at' => $lastSavedAt,
             'program_number' => $programNumber,
-            'courses' => array_values($courses)
+            'courses' => array_values($courses),
         ];
     }
 
-    /**
-     * Compact version history for document disclosure UI.
-     */
     public function getVersionsForLesson(int $userId, int $cohortId, int $lessonId, int $limit = 12): array
     {
         $this->assertStudentEnrollment($userId, $cohortId);
 
-        if ($limit <= 0) {
-            $limit = 12;
-        }
-        if ($limit > 25) {
-            $limit = 25;
-        }
+        if ($limit <= 0) $limit = 12;
+        if ($limit > 25) $limit = 25;
 
         $sql = "
             SELECT
@@ -509,19 +615,6 @@ final class LessonSummaryService
         return $out;
     }
 
-    private function getVersionCount(int $userId, int $cohortId, int $lessonId): int
-    {
-        $st = $this->pdo->prepare("
-            SELECT COUNT(*)
-            FROM lesson_summary_versions
-            WHERE user_id = ?
-              AND cohort_id = ?
-              AND lesson_id = ?
-        ");
-        $st->execute([$userId, $cohortId, $lessonId]);
-        return (int)$st->fetchColumn();
-    }
-
     private function getExisting(int $userId, int $cohortId, int $lessonId): ?array
     {
         $st = $this->pdo->prepare("
@@ -550,7 +643,7 @@ final class LessonSummaryService
         return trim($oldHtml) === trim($newHtml);
     }
 
-    private function createVersionSnapshot(array $row, int $actorId, string $reason, string $actor): void
+    private function createVersionSnapshot(array $row, int $actorId, string $reason): void
     {
         if (trim((string)($row['summary_plain'] ?? '')) === '') {
             return;
@@ -642,9 +735,9 @@ final class LessonSummaryService
     {
         return match ($status) {
             'acceptable' => 'ok',
-            'needs_revision', 'rejected' => 'danger',
-            'pending' => 'warn',
-            default => 'info',
+            'needs_revision', 'rejected' => 'warn',
+            'pending' => 'pending',
+            default => 'pending',
         };
     }
 
@@ -664,30 +757,21 @@ final class LessonSummaryService
     private function excerpt(string $plain, int $max): string
     {
         $plain = trim($plain);
-        if ($plain === '') {
-            return '';
-        }
+        if ($plain === '') return '';
 
         if (function_exists('mb_strlen') && function_exists('mb_substr')) {
-            if (mb_strlen($plain) <= $max) {
-                return $plain;
-            }
+            if (mb_strlen($plain) <= $max) return $plain;
             return rtrim(mb_substr($plain, 0, $max - 1)) . '…';
         }
 
-        if (strlen($plain) <= $max) {
-            return $plain;
-        }
-
+        if (strlen($plain) <= $max) return $plain;
         return rtrim(substr($plain, 0, $max - 1)) . '…';
     }
 
     private function wordCount(string $plain): int
     {
         $plain = trim($plain);
-        if ($plain === '') {
-            return 0;
-        }
+        if ($plain === '') return 0;
 
         $parts = preg_split('/\s+/u', $plain);
         return is_array($parts) ? count($parts) : 0;
