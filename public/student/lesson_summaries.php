@@ -23,10 +23,12 @@ if ($cohortId <= 0) {
 $service = new LessonSummaryService($pdo);
 $data = $service->getNotebookViewData($userId, $cohortId, $studentName);
 
-function nb_hdate(?string $value): string
+function nb_ui_date(?string $value): string
 {
     $value = trim((string)$value);
-    if ($value === '') return '—';
+    if ($value === '') {
+        return '—';
+    }
 
     try {
         $dt = new DateTime($value, new DateTimeZone('UTC'));
@@ -36,29 +38,23 @@ function nb_hdate(?string $value): string
     }
 }
 
-function nb_program_title(array $data): string
-{
-    if (!empty($data['cohort']['program_name'])) {
-        return (string)$data['cohort']['program_name'];
-    }
-    if (!empty($data['cohort']['course_title'])) {
-        return (string)$data['cohort']['course_title'];
-    }
-    return 'Training Notebook';
+$programTitle = trim((string)($data['cohort']['program_name'] ?? ''));
+if ($programTitle === '') {
+    $programTitle = trim((string)($data['cohort']['course_title'] ?? 'Training Notebook'));
 }
 
-$programTitle = nb_program_title($data);
+$programNumber = trim((string)($data['program_number'] ?? '1'));
 
 cw_header('My Lesson Summaries');
 ?>
 <style>
 .nb-shell{max-width:1120px;margin:0 auto}
-.nb-doc{background:#fff;border:1px solid rgba(15,23,42,0.06);border-radius:22px;box-shadow:0 10px 24px rgba(15,23,42,0.055);padding:34px 36px 40px 36px}
 .nb-banner{display:none;position:sticky;top:14px;z-index:40;padding:12px 14px;border-radius:14px;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;font-size:13px;font-weight:700;box-shadow:0 10px 24px rgba(15,23,42,0.08);margin-bottom:16px}
 .nb-banner.warn{border-color:#fcd34d;background:#fffbeb;color:#92400e}
 .nb-banner.danger{border-color:#fca5a5;background:#fef2f2;color:#991b1b}
 .nb-banner.ok{border-color:#86efac;background:#f0fdf4;color:#166534}
 
+.nb-doc{background:#fff;border:1px solid rgba(15,23,42,0.06);border-radius:22px;box-shadow:0 10px 24px rgba(15,23,42,0.055);padding:34px 36px 40px 36px}
 .nb-head{padding-bottom:24px;border-bottom:1px solid rgba(15,23,42,0.06)}
 .nb-overline{font-size:11px;line-height:1;text-transform:uppercase;letter-spacing:.14em;color:#63758f;font-weight:800;margin-bottom:12px}
 .nb-program-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}
@@ -91,6 +87,7 @@ cw_header('My Lesson Summaries');
 .nb-mini-pill.info{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}
 
 .nb-body{padding-top:28px}
+.nb-program-heading{margin-bottom:6px;font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:#687b94;font-weight:800}
 .nb-course-section + .nb-course-section{margin-top:36px}
 .nb-course-title{margin:0;font-size:28px;line-height:1.08;color:#152235;letter-spacing:-0.03em;font-weight:800}
 .nb-course-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#687b94;font-weight:800;margin-bottom:10px}
@@ -193,7 +190,7 @@ cw_header('My Lesson Summaries');
         </div>
         <div class="nb-meta-box">
           <div class="nb-meta-label">Last saved</div>
-          <div class="nb-meta-value"><?= h(nb_hdate($data['last_saved_at'] ?? '')) ?></div>
+          <div class="nb-meta-value"><?= h(nb_ui_date($data['last_saved_at'] ?? '')) ?></div>
         </div>
       </div>
     </header>
@@ -201,26 +198,26 @@ cw_header('My Lesson Summaries');
     <nav class="nb-toc-wrap" aria-label="Notebook table of contents">
       <h3 class="nb-toc-title">Table of Contents</h3>
 
+      <div class="nb-program-heading"><?= h($programNumber) ?> <?= h($programTitle) ?></div>
+
       <ol class="nb-toc-list">
-        <?php foreach ($data['courses'] as $ci => $course): ?>
-          <?php $courseNum = '1.' . ($ci + 1); ?>
+        <?php foreach ($data['courses'] as $course): ?>
           <li>
             <div class="nb-toc-row">
               <div class="nb-toc-main">
-                <a class="nb-toc-link" href="#course-<?= (int)$course['course_id'] ?>">
-                  <?= h($courseNum) ?> <?= h((string)$course['course_title']) ?>
+                <a class="nb-toc-link" href="#<?= h((string)$course['anchor_id']) ?>">
+                  <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
                 </a>
               </div>
             </div>
 
             <ol class="nb-toc-sublist">
-              <?php foreach ($course['lessons'] as $li => $lesson): ?>
-                <?php $lessonNum = $courseNum . '.' . ($li + 1); ?>
+              <?php foreach ($course['lessons'] as $lesson): ?>
                 <li>
                   <div class="nb-toc-row">
                     <div class="nb-toc-main">
-                      <a class="nb-toc-link" href="#lesson-<?= (int)$lesson['lesson_id'] ?>">
-                        <?= h($lessonNum) ?> <?= h((string)$lesson['lesson_title']) ?>
+                      <a class="nb-toc-link" href="#<?= h((string)$lesson['anchor_id']) ?>">
+                        <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
                       </a>
                     </div>
 
@@ -230,7 +227,7 @@ cw_header('My Lesson Summaries');
                       </span>
                       <span class="nb-mini-pill neutral"><?= (int)$lesson['word_count'] ?> words</span>
                       <span class="nb-mini-pill info"><?= (int)$lesson['version_count'] ?> versions</span>
-                      <span class="nb-mini-pill neutral"><?= h(nb_hdate((string)$lesson['updated_at'])) ?></span>
+                      <span class="nb-mini-pill neutral"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
                     </div>
                   </div>
                 </li>
@@ -242,14 +239,13 @@ cw_header('My Lesson Summaries');
     </nav>
 
     <main class="nb-body">
-      <?php foreach ($data['courses'] as $ci => $course): ?>
-        <?php $courseNum = '1.' . ($ci + 1); ?>
-        <section class="nb-course-section" id="course-<?= (int)$course['course_id'] ?>">
-          <div class="nb-course-kicker">Program section <?= h($courseNum) ?></div>
-          <h3 class="nb-course-title"><?= h($courseNum) ?> <?= h((string)$course['course_title']) ?></h3>
-	          <?php foreach ($course['lessons'] as $li => $lesson): ?>
+      <?php foreach ($data['courses'] as $course): ?>
+        <section class="nb-course-section" id="<?= h((string)$course['anchor_id']) ?>">
+          <div class="nb-course-kicker">Program section <?= h((string)$course['course_number']) ?></div>
+          <h3 class="nb-course-title"><?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?></h3>
+
+          <?php foreach ($course['lessons'] as $lesson): ?>
             <?php
-              $lessonNum = $courseNum . '.' . ($li + 1);
               $lessonId = (int)$lesson['lesson_id'];
               $isReadOnly = !empty($lesson['read_only_by_default']);
               $summaryHtml = (string)($lesson['summary_html'] ?? '');
@@ -257,7 +253,7 @@ cw_header('My Lesson Summaries');
             ?>
             <section
               class="nb-lesson-section"
-              id="lesson-<?= $lessonId ?>"
+              id="<?= h((string)$lesson['anchor_id']) ?>"
               data-lesson-id="<?= $lessonId ?>"
               data-review-status="<?= h((string)$lesson['review_status']) ?>"
               data-read-only="<?= $isReadOnly ? '1' : '0' ?>"
@@ -265,7 +261,7 @@ cw_header('My Lesson Summaries');
             >
               <div class="nb-lesson-head">
                 <div>
-                  <h4 class="nb-lesson-title"><?= h($lessonNum) ?> <?= h((string)$lesson['lesson_title']) ?></h4>
+                  <h4 class="nb-lesson-title"><?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?></h4>
 
                   <div class="nb-lesson-meta">
                     <span class="nb-pill <?= h((string)$lesson['review_ui_class']) ?>" data-role="review-pill">
@@ -273,7 +269,7 @@ cw_header('My Lesson Summaries');
                     </span>
                     <span class="nb-pill neutral" data-role="word-count"><?= (int)$lesson['word_count'] ?> words</span>
                     <span class="nb-pill info" data-role="version-count"><?= (int)$lesson['version_count'] ?> versions</span>
-                    <span class="nb-pill neutral" data-role="updated-at"><?= h(nb_hdate((string)$lesson['updated_at'])) ?></span>
+                    <span class="nb-pill neutral" data-role="updated-at"><?= h(nb_ui_date((string)$lesson['updated_at'])) ?></span>
                   </div>
                 </div>
 
@@ -357,7 +353,6 @@ cw_header('My Lesson Summaries');
     </main>
   </div>
 </div>
-
 <script>
 const NB_COHORT_ID = <?= (int)$cohortId ?>;
 const NB_SAVE_URL = '/student/api/summary_save.php';
@@ -418,7 +413,7 @@ function nbContentView(section) {
 
 function nbIsMeaningfullyChanged(section) {
   const editor = nbEditor(section);
-  return editor && editor.innerHTML !== nbActiveOriginalHtml;
+  return !!(editor && editor.innerHTML !== nbActiveOriginalHtml);
 }
 
 function nbSetUnsaved(section, flag) {
@@ -783,5 +778,6 @@ document.querySelectorAll('.nb-lesson-section').forEach((section) => {
 });
 </script>
 
-<?php cw_footer(); ?>		
+<?php cw_footer(); ?>
+
 			
