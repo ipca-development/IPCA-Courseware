@@ -374,12 +374,16 @@ cw_header('My Lesson Summaries');
   flex-direction:column;
   gap:8px;
   margin-top:0;
-  margin-bottom:20px; /* 👈 NEW: spacing after last lesson */	
+  margin-bottom:20px;
 }
 
 .nb-toc-item-lesson{
-  margin-left:60px; /* 👈 real visual indent */
-}	
+  margin-left:0;
+}
+
+.nb-toc-item-lesson .nb-toc-row{
+  padding-left:60px; /* real visible indent on the rendered row */
+}
 	
 .nb-toc-item-lesson .nb-toc-link{
   font-size:13px;
