@@ -11,6 +11,10 @@ return [
         'label' => 'Dashboard',
         'icon' => 'dashboard',
         'href' => '/student/dashboard.php',
+        'match_paths' => [
+            '/student/dashboard.php',
+            '/student/index.php',
+        ],
     ],
     [
         'key' => 'my_training',
@@ -60,10 +64,12 @@ return [
         'label' => 'Account',
     ],
     [
-        'key' => 'account',
-        'label' => 'Account',
+        'key' => 'my_profile',
+        'label' => 'My Profile',
         'icon' => 'account',
-        'href' => null,
-        'coming_soon' => true,
+        'href' => '/student/profile.php',
+        'match_paths' => [
+            '/student/profile.php',
+        ],
     ],
 ];

@@ -11,6 +11,10 @@ return [
         'label' => 'Dashboard',
         'icon' => 'dashboard',
         'href' => '/instructor/dashboard.php',
+        'match_paths' => [
+            '/instructor/dashboard.php',
+            '/instructor/index.php',
+        ],
     ],
     [
         'key' => 'schedule',
@@ -25,6 +29,16 @@ return [
         'label' => 'Training',
     ],
     [
+        'key' => 'training_roster',
+        'label' => 'Training Roster',
+        'icon' => 'users',
+        'href' => '/instructor/students/index.php',
+        'match_paths' => [
+            '/instructor/students/index.php',
+            '/instructor/students/view.php',
+        ],
+    ],
+    [
         'key' => 'theory_training',
         'label' => 'Theory Training',
         'icon' => 'theory',
@@ -34,6 +48,9 @@ return [
                 'label' => 'Cohorts',
                 'icon' => 'cohorts',
                 'href' => '/instructor/cohorts.php',
+                'match_paths' => [
+                    '/instructor/cohorts.php',
+                ],
             ],
             [
                 'key' => 'summary_reviews',
@@ -83,5 +100,19 @@ return [
         'icon' => 'safety',
         'href' => null,
         'coming_soon' => true,
+    ],
+
+    [
+        'type' => 'section',
+        'label' => 'Account',
+    ],
+    [
+        'key' => 'my_profile',
+        'label' => 'My Profile',
+        'icon' => 'account',
+        'href' => '/instructor/profile.php',
+        'match_paths' => [
+            '/instructor/profile.php',
+        ],
     ],
 ];
