@@ -356,7 +356,7 @@ cw_header('My Lesson Summaries');
 }
 
 .nb-toc-item-course{
-  padding:10px 0 0 0;
+  padding:10px 0 18px 0;
 }
 
 .nb-toc-course-row .nb-toc-link{
@@ -369,7 +369,7 @@ cw_header('My Lesson Summaries');
   display:flex;
   flex-direction:column;
   gap:8px;
-  margin-top:22px;
+  margin-top:20px;
   padding-left:60px; /* much stronger indent than before */
 }
 
