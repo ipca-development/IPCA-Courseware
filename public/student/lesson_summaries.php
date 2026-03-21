@@ -360,7 +360,7 @@ cw_header('My Lesson Summaries');
 }
 
 .nb-toc-course-row{
-  margin-bottom:26px;
+  margin-bottom:20px;
 }
 
 .nb-toc-course-row .nb-toc-link{
