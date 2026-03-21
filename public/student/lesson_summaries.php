@@ -724,7 +724,15 @@ cw_header('My Lesson Summaries');
         </select>
       </div>
 
-      <button class="nb-btn primary" id="exportBtn">Export PDF</button>
+      <a
+  class="nb-btn primary"
+  id="exportBtn"
+  href="/student/export_lesson_summaries_pdf.php?cohort_id=<?= (int)$selectedCohortId ?>"
+  target="_blank"
+  rel="noopener"
+>
+  Export PDF
+</a>
     </div>
 
     <div class="nb-header">
@@ -960,18 +968,14 @@ cw_header('My Lesson Summaries');
 <script>
 const COHORT_ID = <?= (int)$selectedCohortId ?>;
 const SAVE_URL = '/student/api/summary_save.php';
-const exportBtn = document.getElementById('exportBtn');
-const exportVersionEl = document.getElementById('exportVersion');
-const printExportVersionEl = document.getElementById('printExportVersion');
-const printExportTimestampEl = document.getElementById('printExportTimestamp');
+const scopeSelect = document.getElementById('scopeSelect');
+const bannerEl = document.getElementById('nbBanner');
 const scopeSelect = document.getElementById('scopeSelect');
 const bannerEl = document.getElementById('nbBanner');
 
 let activeLessonId = null;
 let originalHtml = '';
 let pendingAction = null;
-let currentExportVersion = null;
-let currentExportTimestamp = null;
 
 const confirmBar = document.getElementById('confirmBar');
 const confirmText = document.getElementById('confirmText');
@@ -1427,37 +1431,7 @@ document.querySelectorAll('.nb-editor').forEach(function (ed) {
   });
 });
 
-function generateExportVersionOnce() {
-  if (currentExportVersion !== null && currentExportTimestamp !== null) {
-    return { version: currentExportVersion, timestamp: currentExportTimestamp };
-  }
 
-  const now = new Date();
-  const y = now.getUTCFullYear();
-  const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-  const d = String(now.getUTCDate()).padStart(2, '0');
-  const hh = String(now.getUTCHours()).padStart(2, '0');
-  const mm = String(now.getUTCMinutes()).padStart(2, '0');
-  const ss = String(now.getUTCSeconds()).padStart(2, '0');
-
-  currentExportVersion = y + '.' + m + '.' + d + '.' + hh + mm;
-  currentExportTimestamp =
-    ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][now.getUTCDay()] + ', ' +
-    ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][now.getUTCMonth()] + ' ' +
-    now.getUTCDate() + ', ' +
-    now.getUTCFullYear() + ' ' +
-    hh + ':' + mm + ':' + ss + ' UTC';
-
-  return { version: currentExportVersion, timestamp: currentExportTimestamp };
-}
-
-exportBtn.addEventListener('click', function () {
-  const exportMeta = generateExportVersionOnce();
-  exportVersionEl.textContent = exportMeta.version;
-  printExportVersionEl.textContent = exportMeta.version;
-  printExportTimestampEl.textContent = exportMeta.timestamp;
-  window.print();
-});
 </script>
 
 <?php cw_footer(); ?>
