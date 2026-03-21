@@ -369,7 +369,7 @@ cw_header('My Lesson Summaries');
   display:flex;
   flex-direction:column;
   gap:8px;
-  margin-top:9px;
+  margin-top:22px;
   padding-left:60px; /* much stronger indent than before */
 }
 
