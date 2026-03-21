@@ -374,9 +374,13 @@ cw_header('My Lesson Summaries');
   flex-direction:column;
   gap:8px;
   margin-top:0;
-  padding-left:60px; /* much stronger indent than before */
+  margin-bottom:20px; /* 👈 NEW: spacing after last lesson */	
 }
 
+.nb-toc-item-lesson{
+  margin-left:60px; /* 👈 real visual indent */
+}	
+	
 .nb-toc-item-lesson .nb-toc-link{
   font-size:13px;
   font-weight:700;
