@@ -1125,7 +1125,6 @@ cw_header('My Profile');
                             <?php foreach ($missingFields as $item): ?>
                                 <a class="sp-list-item sp-list-item-link" href="<?php echo h(ups_missing_field_url((array)$item, '/student/profile.php')); ?>">
                                     <div class="sp-list-title"><?php echo h((string)($item['label'] ?? 'Missing Field')); ?></div>
-                                    <div class="sp-list-meta">Open the correct section and complete this item.</div>
                                 </a>
                             <?php endforeach; ?>
                         </div>
