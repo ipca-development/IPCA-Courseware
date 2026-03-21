@@ -19,6 +19,26 @@ if (!in_array($currentRole, array('instructor', 'supervisor', 'chief_instructor'
 }
 
 $q = trim((string)($_GET['q'] ?? ''));
+$cohortId = (int)($_GET['cohort_id'] ?? 0);
+
+$cohortRows = array();
+$cohortStmt = $pdo->query("
+    SELECT
+        c.id,
+        c.name,
+        c.start_date
+    FROM cohorts c
+    ORDER BY
+        c.start_date DESC,
+        c.name ASC,
+        c.id ASC
+");
+if ($cohortStmt) {
+    $cohortRows = $cohortStmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!is_array($cohortRows)) {
+        $cohortRows = array();
+    }
+}
 
 $sql = "
     SELECT
@@ -30,15 +50,28 @@ $sql = "
         u.email,
         u.photo_path,
         u.status,
-        u.last_login_at,
         COALESCE(req.missing_count, 0) AS missing_count
     FROM users u
     LEFT JOIN user_profile_requirements_status req
         ON req.user_id = u.id
-    WHERE u.role = 'student'
 ";
 
 $params = array();
+
+if ($cohortId > 0) {
+    $sql .= "
+        INNER JOIN cohort_students cs_filter
+            ON cs_filter.user_id = u.id
+           AND cs_filter.cohort_id = :cohort_id
+           AND cs_filter.status = 'active'
+           AND cs_filter.exited_at IS NULL
+    ";
+    $params[':cohort_id'] = $cohortId;
+}
+
+$sql .= "
+    WHERE u.role = 'student'
+";
 
 if ($q !== '') {
     $sql .= "
@@ -53,6 +86,16 @@ if ($q !== '') {
 }
 
 $sql .= "
+    GROUP BY
+        u.id,
+        u.uuid,
+        u.name,
+        u.first_name,
+        u.last_name,
+        u.email,
+        u.photo_path,
+        u.status,
+        req.missing_count
     ORDER BY
         u.last_name ASC,
         u.first_name ASC,
@@ -66,6 +109,106 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 if (!is_array($rows)) {
     $rows = array();
+}
+
+$studentIds = array();
+foreach ($rows as $row) {
+    $studentId = (int)($row['id'] ?? 0);
+    if ($studentId > 0) {
+        $studentIds[] = $studentId;
+    }
+}
+$studentIds = array_values(array_unique($studentIds));
+
+$cohortsByUserId = array();
+
+if ($studentIds) {
+    $membershipSql = "
+        SELECT
+            cs.user_id,
+            cs.cohort_id,
+            c.name AS cohort_name
+        FROM cohort_students cs
+        INNER JOIN cohorts c
+            ON c.id = cs.cohort_id
+        WHERE cs.status = 'active'
+          AND cs.exited_at IS NULL
+          AND cs.user_id IN (" . implode(',', array_fill(0, count($studentIds), '?')) . ")
+    ";
+
+    $membershipParams = $studentIds;
+
+    if ($cohortId > 0) {
+        $membershipSql .= " AND cs.cohort_id = ? ";
+        $membershipParams[] = $cohortId;
+    }
+
+    $membershipSql .= "
+        ORDER BY
+            c.start_date DESC,
+            c.name ASC,
+            c.id ASC
+    ";
+
+    $membershipStmt = $pdo->prepare($membershipSql);
+    $membershipStmt->execute($membershipParams);
+    $membershipRows = $membershipStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!is_array($membershipRows)) {
+        $membershipRows = array();
+    }
+
+    foreach ($membershipRows as $membershipRow) {
+        $userId = (int)($membershipRow['user_id'] ?? 0);
+        if ($userId <= 0) {
+            continue;
+        }
+
+        if (!isset($cohortsByUserId[$userId]) || !is_array($cohortsByUserId[$userId])) {
+            $cohortsByUserId[$userId] = array();
+        }
+
+        $cohortName = trim((string)($membershipRow['cohort_name'] ?? ''));
+        if ($cohortName === '') {
+            continue;
+        }
+
+        $cohortsByUserId[$userId][] = $cohortName;
+    }
+
+    foreach ($cohortsByUserId as $userId => $cohortNames) {
+        $cohortsByUserId[$userId] = array_values(array_unique($cohortNames));
+    }
+}
+
+if (!function_exists('isp_status_label')) {
+    function isp_status_label(string $status): string
+    {
+        $status = strtolower(trim($status));
+
+        return match ($status) {
+            'active' => 'Active',
+            'pending_activation' => 'Pending Activation',
+            'locked' => 'Locked',
+            'retired' => 'Retired',
+            default => ucfirst(str_replace('_', ' ', $status)),
+        };
+    }
+}
+
+if (!function_exists('isp_status_class')) {
+    function isp_status_class(string $status): string
+    {
+        $status = strtolower(trim($status));
+
+        return match ($status) {
+            'active' => 'app-badge app-badge-success',
+            'pending_activation' => 'app-badge app-badge-warn',
+            'locked' => 'app-badge app-badge-danger',
+            'retired' => 'app-badge app-badge-muted',
+            default => 'app-badge app-badge-neutral',
+        };
+    }
 }
 
 cw_header('Students');
@@ -128,7 +271,7 @@ cw_header('Students');
 }
 .isp-search-row{
     display:grid;
-    grid-template-columns:minmax(0,1fr) auto auto;
+    grid-template-columns:minmax(0,1fr) minmax(220px,260px) auto auto;
     gap:12px;
     align-items:end;
 }
@@ -143,7 +286,8 @@ cw_header('Students');
     letter-spacing:.02em;
     color:var(--text-muted);
 }
-.isp-input{
+.isp-input,
+.isp-select{
     width:100%;
     height:44px;
     border-radius:14px;
@@ -191,6 +335,9 @@ cw_header('Students');
     width:28px;
     height:28px;
     color:#7b8aa0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
 }
 .isp-copy{
     min-width:0;
@@ -216,6 +363,25 @@ cw_header('Students');
     gap:10px;
     margin-top:12px;
 }
+.isp-cohorts{
+    display:flex;
+    flex-wrap:wrap;
+    gap:8px;
+    margin-top:12px;
+}
+.isp-cohort-badge{
+    display:inline-flex;
+    align-items:center;
+    min-height:30px;
+    padding:0 12px;
+    border-radius:999px;
+    background:rgba(37,99,235,0.08);
+    border:1px solid rgba(37,99,235,0.14);
+    color:#1d4ed8;
+    font-size:12px;
+    font-weight:700;
+    line-height:1.2;
+}
 .isp-actions{
     display:flex;
     align-items:center;
@@ -237,6 +403,12 @@ cw_header('Students');
     color:var(--text-muted);
     font-size:14px;
     line-height:1.65;
+}
+.isp-live-empty{
+    display:none;
+}
+.isp-live-empty.is-visible{
+    display:block;
 }
 @media (max-width:900px){
     .isp-hero-head{
@@ -274,10 +446,12 @@ cw_header('Students');
             <div class="isp-toolbar-title">
                 <span>Student Search</span>
             </div>
-            <div class="isp-toolbar-meta"><?php echo count($rows); ?> result<?php echo count($rows) === 1 ? '' : 's'; ?></div>
+            <div class="isp-toolbar-meta">
+                <span id="isp-result-count"><?php echo count($rows); ?></span> result<?php echo count($rows) === 1 ? '' : 's'; ?>
+            </div>
         </div>
 
-        <form method="get" action="/instructor/students/index.php">
+        <form method="get" action="/instructor/students/index.php" id="isp-search-form">
             <div class="isp-search-row">
                 <div class="isp-field">
                     <label for="q">Search</label>
@@ -287,7 +461,21 @@ cw_header('Students');
                         type="text"
                         name="q"
                         value="<?php echo h($q); ?>"
-                        placeholder="Name or email">
+                        placeholder="First name, last name, full name or email"
+                        autocomplete="off">
+                </div>
+
+                <div class="isp-field">
+                    <label for="cohort_id">Cohort</label>
+                    <select class="app-select isp-select" id="cohort_id" name="cohort_id">
+                        <option value="0">All cohorts</option>
+                        <?php foreach ($cohortRows as $cohortRow): ?>
+                            <?php $thisCohortId = (int)($cohortRow['id'] ?? 0); ?>
+                            <option value="<?php echo $thisCohortId; ?>"<?php echo $cohortId === $thisCohortId ? ' selected' : ''; ?>>
+                                <?php echo h((string)($cohortRow['name'] ?? ('Cohort #' . $thisCohortId))); ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
 
                 <button class="app-btn app-btn-primary" type="submit">Search</button>
@@ -300,11 +488,18 @@ cw_header('Students');
         <section class="card isp-empty">
             <h3 class="isp-empty-title">No students found</h3>
             <p class="isp-empty-text">
-                Adjust the search or add student accounts in the admin user system first.
+                Adjust the search or cohort filter, or add student accounts in the admin user system first.
             </p>
         </section>
     <?php else: ?>
-        <div class="isp-list">
+        <section class="card isp-empty isp-live-empty" id="isp-live-empty">
+            <h3 class="isp-empty-title">No students found</h3>
+            <p class="isp-empty-text">
+                No matching students were found for the current search.
+            </p>
+        </section>
+
+        <div class="isp-list" id="isp-student-list">
             <?php foreach ($rows as $row): ?>
                 <?php
                 $studentId = (int)($row['id'] ?? 0);
@@ -317,10 +512,24 @@ cw_header('Students');
                     $displayName = 'Student #' . $studentId;
                 }
 
+                $firstName = trim((string)($row['first_name'] ?? ''));
+                $lastName = trim((string)($row['last_name'] ?? ''));
+                $email = trim((string)($row['email'] ?? ''));
                 $photoPath = trim((string)($row['photo_path'] ?? ''));
                 $missingCount = (int)($row['missing_count'] ?? 0);
+                $cohortNames = isset($cohortsByUserId[$studentId]) && is_array($cohortsByUserId[$studentId])
+                    ? $cohortsByUserId[$studentId]
+                    : array();
+
+                $searchBlob = strtolower(trim(
+                    $displayName . ' ' .
+                    $firstName . ' ' .
+                    $lastName . ' ' .
+                    $email . ' ' .
+                    implode(' ', $cohortNames)
+                ));
                 ?>
-                <section class="card isp-card">
+                <section class="card isp-card" data-search="<?php echo h($searchBlob); ?>">
                     <div class="isp-card-inner">
                         <div class="isp-main">
                             <div class="isp-avatar">
@@ -333,17 +542,25 @@ cw_header('Students');
 
                             <div class="isp-copy">
                                 <h3 class="isp-name"><?php echo h($displayName); ?></h3>
-                                <div class="isp-email"><?php echo h((string)($row['email'] ?? '—')); ?></div>
+                                <div class="isp-email"><?php echo h($email !== '' ? $email : '—'); ?></div>
 
                                 <div class="isp-meta">
-                                    <span class="<?php echo strtolower((string)($row['status'] ?? '')) === 'active' ? 'app-badge app-badge-success' : 'app-badge app-badge-warn'; ?>">
-                                        <?php echo h((string)($row['status'] ?? 'Unknown')); ?>
+                                    <span class="<?php echo isp_status_class((string)($row['status'] ?? '')); ?>">
+                                        <?php echo h(isp_status_label((string)($row['status'] ?? ''))); ?>
                                     </span>
 
                                     <span class="<?php echo $missingCount > 0 ? 'app-badge app-badge-warn' : 'app-badge app-badge-success'; ?>">
                                         <?php echo $missingCount > 0 ? ('Missing ' . $missingCount) : 'Profile Complete'; ?>
                                     </span>
                                 </div>
+
+                                <?php if ($cohortNames): ?>
+                                    <div class="isp-cohorts">
+                                        <?php foreach ($cohortNames as $cohortName): ?>
+                                            <span class="isp-cohort-badge"><?php echo h((string)$cohortName); ?></span>
+                                        <?php endforeach; ?>
+                                    </div>
+                                <?php endif; ?>
                             </div>
                         </div>
 
@@ -358,5 +575,55 @@ cw_header('Students');
         </div>
     <?php endif; ?>
 </div>
+
+<script>
+(function () {
+    var input = document.getElementById('q');
+    var cards = document.querySelectorAll('#isp-student-list .isp-card');
+    var resultCount = document.getElementById('isp-result-count');
+    var emptyState = document.getElementById('isp-live-empty');
+
+    if (!input || !cards.length || !resultCount) {
+        return;
+    }
+
+    function normalize(value) {
+        return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    }
+
+    function applyFilter() {
+        var needle = normalize(input.value);
+        var visible = 0;
+        var i;
+        var card;
+        var haystack;
+
+        for (i = 0; i < cards.length; i++) {
+            card = cards[i];
+            haystack = normalize(card.getAttribute('data-search'));
+
+            if (needle === '' || haystack.indexOf(needle) !== -1) {
+                card.style.display = '';
+                visible++;
+            } else {
+                card.style.display = 'none';
+            }
+        }
+
+        resultCount.textContent = String(visible);
+
+        if (emptyState) {
+            if (visible === 0) {
+                emptyState.classList.add('is-visible');
+            } else {
+                emptyState.classList.remove('is-visible');
+            }
+        }
+    }
+
+    input.addEventListener('input', applyFilter);
+    applyFilter();
+})();
+</script>
 
 <?php cw_footer(); ?>
