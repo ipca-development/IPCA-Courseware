@@ -975,13 +975,13 @@ if (!function_exists('ups_load_instructor_student_workspace')) {
         }
 
         return array(
-            'student' => $student,
-            'display_name' => $displayName,
-            'visible_keys' => $visibleKeys,
-            'emergency_contacts' => $contacts['all'],
-            'emergency_primary' => $contacts['primary'],
-            'emergency_secondary' => $contacts['secondary'],
-        );
+    'user' => $student,
+    'display_name' => $displayName,
+    'visible_keys' => $visibleKeys,
+    'emergency_contacts' => $contacts['all'],
+    'emergency_primary' => $contacts['primary'],
+    'emergency_secondary' => $contacts['secondary'],
+);
     }
 }
 
