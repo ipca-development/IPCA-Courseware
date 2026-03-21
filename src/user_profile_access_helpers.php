@@ -916,9 +916,21 @@ if (!function_exists('ups_load_instructor_student_workspace')) {
                 u.email,
                 u.photo_path,
 
+                p.street_address,
+                p.street_number,
+                p.zip_code,
+                p.city,
+                p.state_region,
+                p.country_code,
                 p.cellphone,
                 p.date_of_birth,
-                p.nationality
+                p.place_of_birth,
+                p.nationality,
+                p.id_passport_number,
+                p.gender,
+                p.hair_color,
+                p.eye_color,
+                p.marital_status
             FROM users u
             LEFT JOIN user_profiles p
                 ON p.user_id = u.id
@@ -956,7 +968,8 @@ if (!function_exists('ups_load_instructor_student_workspace')) {
             'secondary' => ups_empty_emergency_contact(2),
         );
 
-        if (in_array('emergency_contact_1_name', $visibleKeys, true)
+        if (
+            in_array('emergency_contact_1_name', $visibleKeys, true)
             || in_array('emergency_contact_1_relationship', $visibleKeys, true)
             || in_array('emergency_contact_1_phone', $visibleKeys, true)
             || in_array('emergency_contact_2_name', $visibleKeys, true)
@@ -975,13 +988,13 @@ if (!function_exists('ups_load_instructor_student_workspace')) {
         }
 
         return array(
-    'user' => $student,
-    'display_name' => $displayName,
-    'visible_keys' => $visibleKeys,
-    'emergency_contacts' => $contacts['all'],
-    'emergency_primary' => $contacts['primary'],
-    'emergency_secondary' => $contacts['secondary'],
-);
+            'student' => $student,
+            'display_name' => $displayName,
+            'visible_keys' => $visibleKeys,
+            'emergency_contacts' => $contacts['all'],
+            'emergency_primary' => $contacts['primary'],
+            'emergency_secondary' => $contacts['secondary'],
+        );
     }
 }
 
