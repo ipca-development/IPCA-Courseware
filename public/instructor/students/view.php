@@ -1,5 +1,3 @@
-//Instructor Student View
-
 <?php
 declare(strict_types=1);
 
@@ -32,8 +30,9 @@ if ($studentId <= 0) {
 
 $workspace = ups_load_instructor_student_workspace($pdo, $studentId, $currentUserId);
 if (!$workspace) {
-    http_response_code(404);
-    exit('Student not found.');
+    echo '<pre style="color:red;">WORKSPACE FAILED</pre>';
+    var_dump($studentId, $currentUserId);
+    exit;
 }
 
 $user = is_array($workspace['user'] ?? null) ? $workspace['user'] : array();
