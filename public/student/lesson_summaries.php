@@ -218,6 +218,20 @@ cw_header('My Lesson Summaries');
 .nb-btn.warn{background:#fff7ed;color:#9a3412;border:1px solid #fed7aa;box-shadow:0 4px 12px rgba(154,52,18,0.08)}
 .nb-btn.ghost{background:#fff;border:1px solid rgba(15,23,42,0.10);color:#152235}
 .nb-btn.ghost:hover{border-color:rgba(18,53,95,0.22);box-shadow:0 6px 14px rgba(15,23,42,0.05)}
+.nb-btn.tool{
+  padding:6px 10px;
+  border:1px solid rgba(15,23,42,0.10);
+  background:#fff;
+  color:#152235;
+  min-width:38px;
+  border-radius:10px;
+  font-size:12px;
+  box-shadow:none;
+}
+.nb-btn.tool:hover{
+  border-color:rgba(18,53,95,0.22);
+  background:#f8fafc;
+}
 
 .nb-header{
   padding:2px 0 8px 0;
@@ -356,7 +370,7 @@ cw_header('My Lesson Summaries');
   flex-direction:column;
   gap:8px;
   margin-top:9px;
-  padding-left:20px;
+  padding-left:60px; /* much stronger indent than before */
 }
 
 .nb-toc-item-lesson .nb-toc-link{
@@ -519,23 +533,36 @@ cw_header('My Lesson Summaries');
 }
 .nb-action-panel.open{display:block}
 
+.nb-editor-toolbar{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+}
+
+.nb-editor-wrap{
+  background:#fff;
+  border-radius:14px;
+  padding:0;
+}
+
 .nb-editor{
   min-height:180px;
-  border:1px solid rgba(15,23,42,0.12);
+  border:none;
+  outline:none;
   border-radius:14px;
   padding:14px;
-  margin-top:2px;
+  margin-top:0;
   background:#fff;
   font-size:15px;
   line-height:1.75;
   color:#1f2937;
-  box-shadow:inset 0 1px 2px rgba(15,23,42,0.02);
+  box-shadow:none;
 }
 
 .nb-editor:focus{
   outline:none;
-  border-color:#7aa3d8;
-  box-shadow:0 0 0 4px rgba(29,79,145,0.08);
+  box-shadow:none;
 }
 
 .nb-panel-actions{
@@ -624,6 +651,10 @@ cw_header('My Lesson Summaries');
   .nb-lesson-head-right{
     width:100%;
     justify-content:flex-start;
+  }
+
+  .nb-toc-lesson-list{
+    padding-left:28px;
   }
 }
 
@@ -787,6 +818,7 @@ cw_header('My Lesson Summaries');
             <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
           </h2>
 
+          <?php foreach ($data['courses'] as $_unused) {} ?>
           <?php foreach ($course['lessons'] as $lesson): ?>
             <?php
               $lessonId = (int)$lesson['lesson_id'];
@@ -794,9 +826,10 @@ cw_header('My Lesson Summaries');
               $attention = nb_attention_meta($lesson);
               $button = nb_action_button_meta($lesson);
               $reviewStatus = (string)$lesson['review_status'];
-              $showActionPanelMeta = in_array($reviewStatus, ['needs_revision', 'rejected'], true);
               $versionCount = (int)($lesson['version_count'] ?? 0);
               $latestVersionAt = trim((string)($lesson['latest_version_at'] ?? ''));
+              $showFeedback = trim((string)$lesson['instructor_feedback']) !== '';
+              $showNotes = trim((string)$lesson['instructor_notes']) !== '';
             ?>
             <section
               class="nb-lesson"
@@ -848,7 +881,16 @@ cw_header('My Lesson Summaries');
               </div>
 
               <div class="nb-action-panel" id="panel-<?= $lessonId ?>">
-                <div class="nb-editor" contenteditable="true" id="editor-<?= $lessonId ?>"><?= (string)$lesson['summary_html'] ?></div>
+                <div class="nb-editor-toolbar">
+                  <button type="button" class="nb-btn tool" data-editor-cmd="bold" data-lesson="<?= $lessonId ?>"><strong>B</strong></button>
+                  <button type="button" class="nb-btn tool" data-editor-cmd="italic" data-lesson="<?= $lessonId ?>"><em>I</em></button>
+                  <button type="button" class="nb-btn tool" data-editor-cmd="underline" data-lesson="<?= $lessonId ?>"><u>U</u></button>
+                  <button type="button" class="nb-btn tool" data-editor-cmd="insertUnorderedList" data-lesson="<?= $lessonId ?>">•</button>
+                </div>
+
+                <div class="nb-editor-wrap">
+                  <div class="nb-editor" contenteditable="true" id="editor-<?= $lessonId ?>"><?= (string)$lesson['summary_html'] ?></div>
+                </div>
 
                 <div class="nb-panel-actions">
                   <button class="nb-btn primary" data-save-lesson="<?= $lessonId ?>">Save</button>
@@ -856,14 +898,14 @@ cw_header('My Lesson Summaries');
                 </div>
 
                 <div class="nb-panel-context">
-                  <?php if ($showActionPanelMeta && trim((string)$lesson['instructor_feedback']) !== ''): ?>
+                  <?php if ($showFeedback): ?>
                     <div class="nb-panel-box">
                       <div class="nb-panel-label">Instructor Feedback</div>
                       <div class="nb-panel-body"><?= nl2br(h((string)$lesson['instructor_feedback'])) ?></div>
                     </div>
                   <?php endif; ?>
 
-                  <?php if ($showActionPanelMeta && trim((string)$lesson['instructor_notes']) !== ''): ?>
+                  <?php if ($showNotes): ?>
                     <div class="nb-panel-box">
                       <div class="nb-panel-label">Instructor Notes</div>
                       <div class="nb-panel-body"><?= nl2br(h((string)$lesson['instructor_notes'])) ?></div>
@@ -1335,6 +1377,17 @@ document.querySelectorAll('[data-close-lesson]').forEach(function (btn) {
   btn.addEventListener('click', function () {
     const lessonId = parseInt(btn.getAttribute('data-close-lesson'), 10);
     closeEditor(lessonId, false);
+  });
+});
+
+document.querySelectorAll('[data-editor-cmd]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    const lessonId = parseInt(btn.getAttribute('data-lesson'), 10);
+    const cmd = btn.getAttribute('data-editor-cmd');
+    const ed = editorEl(lessonId);
+    if (!ed) return;
+    ed.focus();
+    document.execCommand(cmd, false, null);
   });
 });
 
