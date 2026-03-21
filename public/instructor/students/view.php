@@ -30,14 +30,38 @@ if ($studentId <= 0) {
 
 $workspace = ups_load_instructor_student_workspace($pdo, $studentId, $currentUserId);
 if (!$workspace) {
-    echo '<pre style="color:red;">WORKSPACE FAILED</pre>';
-    var_dump($studentId, $currentUserId);
-    exit;
+    http_response_code(404);
+    exit('Student not found.');
 }
 
-$user = is_array($workspace['user'] ?? null) ? $workspace['user'] : array();
+$user = is_array($workspace['student'] ?? null) ? $workspace['student'] : array();
 $displayName = (string)($workspace['display_name'] ?? ('Student #' . $studentId));
 $emergencyContacts = is_array($workspace['emergency_contacts'] ?? null) ? $workspace['emergency_contacts'] : array();
+
+$cohortNames = array();
+$cohortStmt = $pdo->prepare("
+    SELECT c.name
+    FROM cohort_students cs
+    INNER JOIN cohorts c
+        ON c.id = cs.cohort_id
+    WHERE cs.user_id = :user_id
+      AND cs.status = 'active'
+      AND cs.exited_at IS NULL
+    ORDER BY c.start_date DESC, c.name ASC, c.id ASC
+");
+$cohortStmt->execute(array(
+    ':user_id' => $studentId,
+));
+$cohortRows = $cohortStmt->fetchAll(PDO::FETCH_ASSOC);
+if (is_array($cohortRows)) {
+    foreach ($cohortRows as $cohortRow) {
+        $cohortName = trim((string)($cohortRow['name'] ?? ''));
+        if ($cohortName !== '') {
+            $cohortNames[] = $cohortName;
+        }
+    }
+}
+$cohortNames = array_values(array_unique($cohortNames));
 
 if (!function_exists('isv_svg')) {
     function isv_svg(string $name): string
@@ -57,6 +81,8 @@ if (!function_exists('isv_svg')) {
                 return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6.6 10.8a15.5 15.5 0 0 0 6.6 6.6l2.2-2.2a1 1 0 0 1 1-.25a11.2 11.2 0 0 0 3.5.56a1 1 0 0 1 1 1V20a1 1 0 0 1-1 1C10.3 21 3 13.7 3 4a1 1 0 0 1 1-1h3.5a1 1 0 0 1 1 1a11.2 11.2 0 0 0 .56 3.5a1 1 0 0 1-.25 1l-2.2 2.3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
             case 'id':
                 return '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M8 10h5M8 14h8M17 10h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            case 'cohort':
+                return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M7 4v6M17 4v6M6 20h12a2 2 0 0 0 2-2V8H4v10a2 2 0 0 0 2 2Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
             default:
                 return '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
         }
@@ -160,14 +186,74 @@ if (!function_exists('isv_can_show')) {
     }
 }
 
-$identityBlocks = array(
-    array('label' => 'First Name', 'key' => 'first_name'),
-    array('label' => 'Last Name', 'key' => 'last_name'),
-    array('label' => 'E-mail', 'key' => 'email', 'icon' => 'mail'),
-    array('label' => 'Cellphone', 'key' => 'cellphone', 'icon' => 'phone'),
-    array('label' => 'Date of Birth', 'key' => 'date_of_birth', 'type' => 'date'),
-    array('label' => 'Nationality', 'key' => 'nationality'),
-);
+if (!function_exists('isv_human_date')) {
+    function isv_human_date(?string $value): string
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return '—';
+        }
+
+        $ts = strtotime($value);
+        if (!$ts) {
+            return '—';
+        }
+
+        return date('D M j, Y', $ts);
+    }
+}
+
+if (!function_exists('isv_age_from_dob')) {
+    function isv_age_from_dob(?string $value): ?int
+    {
+        $value = trim((string)$value);
+        if ($value === '') {
+            return null;
+        }
+
+        try {
+            $dob = new DateTimeImmutable($value);
+            $today = new DateTimeImmutable('today');
+        } catch (Throwable $e) {
+            return null;
+        }
+
+        if ($dob > $today) {
+            return null;
+        }
+
+        return (int)$today->diff($dob)->y;
+    }
+}
+
+if (!function_exists('isv_mailto_link')) {
+    function isv_mailto_link(?string $email): string
+    {
+        $email = trim((string)$email);
+        if ($email === '') {
+            return '—';
+        }
+
+        return '<a class="isv-link" href="mailto:' . h($email) . '">' . h($email) . '</a>';
+    }
+}
+
+if (!function_exists('isv_tel_link')) {
+    function isv_tel_link(?string $phone): string
+    {
+        $phone = trim((string)$phone);
+        if ($phone === '') {
+            return '—';
+        }
+
+        $telHref = preg_replace('/[^0-9\+]/', '', $phone);
+        if (!is_string($telHref) || $telHref === '') {
+            return h($phone);
+        }
+
+        return '<a class="isv-link" href="tel:' . h($telHref) . '">' . h($phone) . '</a>';
+    }
+}
 
 $profileBlocks = array(
     array('label' => 'Place of Birth', 'key' => 'place_of_birth'),
@@ -202,6 +288,25 @@ if (isv_can_show($user, 'country_code')) {
 }
 $fullAddress = $addressParts ? implode(', ', $addressParts) : '—';
 
+$dobValue = isv_can_show($user, 'date_of_birth') ? (string)($user['date_of_birth'] ?? '') : '';
+$dobLabel = isv_human_date($dobValue);
+$ageValue = isv_age_from_dob($dobValue);
+
+$hasProfileExtra = false;
+foreach ($profileBlocks as $block) {
+    if (isv_can_show($user, (string)$block['key'])) {
+        $value = trim((string)($user[(string)$block['key']] ?? ''));
+        if ($value !== '') {
+            $hasProfileExtra = true;
+            break;
+        }
+    }
+}
+
+$hasEmail = isv_can_show($user, 'email') && trim((string)($user['email'] ?? '')) !== '';
+$hasCellphone = isv_can_show($user, 'cellphone') && trim((string)($user['cellphone'] ?? '')) !== '';
+$hasAddress = $fullAddress !== '—';
+
 cw_header('Student View');
 ?>
 
@@ -218,6 +323,8 @@ cw_header('Student View');
 .isv-avatar-fallback{width:34px;height:34px;color:#7b8aa0}
 .isv-title{margin:0;font-size:34px;line-height:1.02;letter-spacing:-0.04em;font-weight:760;color:#fff}
 .isv-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.isv-cohort-pill{display:inline-flex;align-items:center;gap:7px;padding:0 12px;height:32px;border-radius:999px;background:rgba(255,255,255,0.14);border:1px solid rgba(255,255,255,0.18);color:#fff;font-size:12px;font-weight:700}
+.isv-cohort-pill svg{width:14px;height:14px;flex:0 0 14px;color:rgba(255,255,255,0.9)}
 .isv-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px;align-items:start}
 .isv-stack{display:grid;gap:18px;align-content:start}
 .isv-card{padding:22px}
@@ -228,7 +335,14 @@ cw_header('Student View');
 .isv-list-title{font-size:14px;font-weight:700;color:var(--text-strong);display:flex;align-items:center;gap:8px}
 .isv-list-title svg{width:15px;height:15px;color:var(--text-muted)}
 .isv-list-meta{margin-top:6px;color:var(--text-muted);font-size:13px;line-height:1.55;word-break:break-word}
+.isv-list-submeta{margin-top:6px;color:var(--text-strong);font-size:13px;font-weight:700;line-height:1.45}
 .isv-note{color:var(--text-muted);font-size:13px;line-height:1.6}
+.isv-link{color:#1d4ed8;text-decoration:none;font-weight:600}
+.isv-link:hover{text-decoration:underline}
+.isv-emergency-name{font-size:14px;font-weight:700;color:var(--text-strong)}
+.isv-emergency-relationship{margin-top:6px;color:var(--text-muted);font-size:13px;line-height:1.5}
+.isv-emergency-phone{margin-top:8px;font-size:13px;line-height:1.5}
+.isv-emergency-phone strong{color:var(--text-strong);font-weight:700}
 @media (max-width:1200px){
     .isv-grid{grid-template-columns:1fr}
     .isv-header{flex-direction:column;align-items:flex-start}
@@ -240,9 +354,9 @@ cw_header('Student View');
 
 <div class="instructor-student-view-page">
     <section class="app-section-hero">
-        <a class="isv-back-link" href="/instructor/index.php">
+        <a class="isv-back-link" href="/instructor/students/index.php">
             <?php echo isv_svg('archive'); ?>
-            <span>Back to Instructor Area</span>
+            <span>Back to Students</span>
         </a>
 
         <div class="hero-overline">Instructor · Student Record</div>
@@ -262,9 +376,12 @@ cw_header('Student View');
 
                     <div class="isv-meta">
                         <span class="app-badge app-badge-neutral">Student</span>
-                        <?php if (isv_can_show($user, 'email')): ?>
-                            <span class="app-badge app-badge-neutral"><?php echo h(isv_value($user, 'email')); ?></span>
-                        <?php endif; ?>
+                        <?php foreach ($cohortNames as $cohortName): ?>
+                            <span class="isv-cohort-pill">
+                                <?php echo isv_svg('cohort'); ?>
+                                <span><?php echo h((string)$cohortName); ?></span>
+                            </span>
+                        <?php endforeach; ?>
                     </div>
                 </div>
             </div>
@@ -276,49 +393,81 @@ cw_header('Student View');
             <section class="card isv-card">
                 <h3 class="isv-card-title">
                     <?php echo isv_svg('profile'); ?>
-                    <span>Identity and Contact</span>
+                    <span>Identity</span>
                 </h3>
 
                 <div class="isv-list">
-                    <?php foreach ($identityBlocks as $block): ?>
-                        <?php if (!isv_can_show($user, (string)$block['key'])) continue; ?>
+                    <?php if (isv_can_show($user, 'first_name')): ?>
                         <div class="isv-list-item">
-                            <div class="isv-list-title">
-                                <?php if (!empty($block['icon'])): ?>
-                                    <?php echo isv_svg((string)$block['icon']); ?>
-                                <?php endif; ?>
-                                <span><?php echo h((string)$block['label']); ?></span>
-                            </div>
-                            <div class="isv-list-meta">
-                                <?php
-                                if (($block['type'] ?? '') === 'date') {
-                                    echo h(cw_date_only((string)($user[(string)$block['key']] ?? '')));
-                                } else {
-                                    echo h(isv_value($user, (string)$block['key']));
-                                }
-                                ?>
-                            </div>
+                            <div class="isv-list-title">First Name</div>
+                            <div class="isv-list-meta"><?php echo h(isv_value($user, 'first_name')); ?></div>
                         </div>
-                    <?php endforeach; ?>
+                    <?php endif; ?>
 
-                    <?php if ($fullAddress !== '—'): ?>
+                    <?php if (isv_can_show($user, 'last_name')): ?>
                         <div class="isv-list-item">
-                            <div class="isv-list-title">Address</div>
-                            <div class="isv-list-meta"><?php echo h($fullAddress); ?></div>
+                            <div class="isv-list-title">Last Name</div>
+                            <div class="isv-list-meta"><?php echo h(isv_value($user, 'last_name')); ?></div>
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if (isv_can_show($user, 'date_of_birth')): ?>
+                        <div class="isv-list-item">
+                            <div class="isv-list-title">Date of Birth</div>
+                            <div class="isv-list-meta"><?php echo h($dobLabel); ?></div>
+                            <div class="isv-list-submeta">Age: <?php echo h($ageValue !== null ? (string)$ageValue : '—'); ?></div>
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if (isv_can_show($user, 'nationality')): ?>
+                        <div class="isv-list-item">
+                            <div class="isv-list-title">Nationality</div>
+                            <div class="isv-list-meta"><?php echo h(isv_value($user, 'nationality')); ?></div>
                         </div>
                     <?php endif; ?>
                 </div>
             </section>
 
-            <?php
-            $hasProfileExtra = false;
-            foreach ($profileBlocks as $block) {
-                if (isv_can_show($user, (string)$block['key'])) {
-                    $hasProfileExtra = true;
-                    break;
-                }
-            }
-            ?>
+            <section class="card isv-card">
+                <h3 class="isv-card-title">
+                    <?php echo isv_svg('mail'); ?>
+                    <span>Contact Details</span>
+                </h3>
+
+                <?php if (!$hasEmail && !$hasCellphone && !$hasAddress): ?>
+                    <div class="isv-note">No contact details available.</div>
+                <?php else: ?>
+                    <div class="isv-list">
+                        <?php if (isv_can_show($user, 'email')): ?>
+                            <div class="isv-list-item">
+                                <div class="isv-list-title">
+                                    <?php echo isv_svg('mail'); ?>
+                                    <span>E-mail</span>
+                                </div>
+                                <div class="isv-list-meta"><?php echo isv_mailto_link((string)($user['email'] ?? '')); ?></div>
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if (isv_can_show($user, 'cellphone')): ?>
+                            <div class="isv-list-item">
+                                <div class="isv-list-title">
+                                    <?php echo isv_svg('phone'); ?>
+                                    <span>Cellphone</span>
+                                </div>
+                                <div class="isv-list-meta"><?php echo isv_tel_link((string)($user['cellphone'] ?? '')); ?></div>
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if ($fullAddress !== '—'): ?>
+                            <div class="isv-list-item">
+                                <div class="isv-list-title">Address</div>
+                                <div class="isv-list-meta"><?php echo h($fullAddress); ?></div>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                <?php endif; ?>
+            </section>
+
             <?php if ($hasProfileExtra): ?>
                 <section class="card isv-card">
                     <h3 class="isv-card-title">
@@ -328,7 +477,15 @@ cw_header('Student View');
 
                     <div class="isv-list">
                         <?php foreach ($profileBlocks as $block): ?>
-                            <?php if (!isv_can_show($user, (string)$block['key'])) continue; ?>
+                            <?php
+                            if (!isv_can_show($user, (string)$block['key'])) {
+                                continue;
+                            }
+                            $blockValue = trim((string)($user[(string)$block['key']] ?? ''));
+                            if ($blockValue === '') {
+                                continue;
+                            }
+                            ?>
                             <div class="isv-list-item">
                                 <div class="isv-list-title">
                                     <?php if (!empty($block['icon'])): ?>
@@ -336,7 +493,7 @@ cw_header('Student View');
                                     <?php endif; ?>
                                     <span><?php echo h((string)$block['label']); ?></span>
                                 </div>
-                                <div class="isv-list-meta"><?php echo h(isv_value($user, (string)$block['key'])); ?></div>
+                                <div class="isv-list-meta"><?php echo h($blockValue); ?></div>
                             </div>
                         <?php endforeach; ?>
                     </div>
@@ -365,10 +522,11 @@ cw_header('Student View');
                                     <?php echo isv_svg('warning'); ?>
                                     <span>Emergency Contact <?php echo $sortOrder > 0 ? (int)$sortOrder : ''; ?></span>
                                 </div>
+
                                 <div class="isv-list-meta">
-                                    <?php echo h($contactName !== '' ? $contactName : '—'); ?><br>
-                                    Relationship: <?php echo h($relationship !== '' ? $relationship : '—'); ?><br>
-                                    Phone: <?php echo h($phone !== '' ? $phone : '—'); ?>
+                                    <div class="isv-emergency-name"><?php echo h($contactName !== '' ? $contactName : '—'); ?></div>
+                                    <div class="isv-emergency-relationship">Relationship: <?php echo h($relationship !== '' ? $relationship : '—'); ?></div>
+                                    <div class="isv-emergency-phone"><strong>Phone:</strong> <?php echo isv_tel_link($phone); ?></div>
                                 </div>
                             </div>
                         <?php endforeach; ?>
@@ -376,17 +534,6 @@ cw_header('Student View');
                 <?php else: ?>
                     <div class="isv-note">No emergency contacts available.</div>
                 <?php endif; ?>
-            </section>
-
-            <section class="card isv-card">
-                <h3 class="isv-card-title">
-                    <?php echo isv_svg('users'); ?>
-                    <span>Visibility Note</span>
-                </h3>
-
-                <div class="isv-note">
-                    This page is read-only and only displays student information that is operationally visible to instructors under the active policy configuration.
-                </div>
             </section>
         </aside>
     </div>
