@@ -16,19 +16,29 @@ return [
             '/student/index.php',
         ],
     ],
+
     [
-        'key' => 'my_training',
-        'label' => 'My Training',
-        'icon' => 'training',
-        'href' => null,
-        'coming_soon' => true,
+        'type' => 'section',
+        'label' => 'Theory Training',
     ],
     [
-        'key' => 'theory_training',
-        'label' => 'Theory Training',
+        'key' => 'my_courses',
+        'label' => 'My Courses',
+        'icon' => 'training',
+        'href' => '/student/courses.php',
+        'match_paths' => [
+            '/student/courses.php',
+            '/student/course.php',
+        ],
+    ],
+    [
+        'key' => 'my_notebook',
+        'label' => 'My Notebook',
         'icon' => 'theory',
-        'href' => null,
-        'coming_soon' => true,
+        'href' => '/student/lesson_summaries.php',
+        'match_paths' => [
+            '/student/lesson_summaries.php',
+        ],
     ],
     [
         'key' => 'flight_training',
