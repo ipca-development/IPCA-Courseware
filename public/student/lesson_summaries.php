@@ -770,8 +770,8 @@ cw_header('My Notebook');
     </div>
 
     <div class="nb-export-note">
-      Export currently uses clean browser print-to-PDF rendering from read mode only.
-    </div>
+  Export opens a dedicated PDF document for the currently selected training scope.
+</div>
 
     <div class="nb-toc">
       <div class="nb-toc-head">
@@ -838,7 +838,6 @@ cw_header('My Notebook');
             <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
           </h2>
 
-          <?php foreach ($data['courses'] as $_unused) {} ?>
           <?php foreach ($course['lessons'] as $lesson): ?>
             <?php
               $lessonId = (int)$lesson['lesson_id'];
