@@ -22,8 +22,12 @@ $bannerUrl       = (string)($exportData['banner_url'] ?? '');
 
 function pdf_status_label(string $reviewStatus): string
 {
-    if ($reviewStatus === 'acceptable') return 'Accepted';
-    if ($reviewStatus === 'needs_revision' || $reviewStatus === 'rejected') return 'Student Action Required';
+    if ($reviewStatus === 'acceptable') {
+        return 'Accepted';
+    }
+    if ($reviewStatus === 'needs_revision' || $reviewStatus === 'rejected') {
+        return 'Student Action Required';
+    }
     return 'Pending';
 }
 ?>
@@ -50,6 +54,10 @@ body{
   line-height:1.7;
 }
 
+.meta strong{
+  color:#0f172a;
+}
+
 .toc{
   border-top:1px solid #ccc;
   border-bottom:1px solid #ccc;
@@ -72,6 +80,12 @@ body{
   font-size:9.5pt;
 }
 
+.toc a{
+  color:#1e293b;
+  text-decoration:none;
+  font-weight:inherit;
+}
+
 .divider{
   border-top:1px solid #ccc;
   margin:18px 0;
@@ -81,12 +95,20 @@ body{
   font-size:16pt;
   font-weight:bold;
   margin-top:18px;
+  color:#0f172a;
 }
 
 .lesson-title{
   font-size:12pt;
   font-weight:bold;
   margin-top:10px;
+  color:#0f172a;
+}
+
+.lesson-meta{
+  font-size:9pt;
+  color:#64748b;
+  margin-top:2px;
 }
 
 .summary{
@@ -103,35 +125,32 @@ body{
 </head>
 <body>
 
-<!-- ✅ Banner -->
 <div class="header">
   <?php if ($bannerUrl !== ''): ?>
-    <img src="<?= h($bannerUrl) ?>">
+    <img src="<?= h($bannerUrl) ?>" alt="IPCA Academy">
   <?php endif; ?>
 </div>
 
-<!-- ✅ Metadata -->
 <div class="meta">
   <strong>Student:</strong> <?= h($studentName) ?><br>
   <strong>Program:</strong> <?= h($programTitle) ?><br>
-  <strong>Scope:</strong> <?= h($scopeLabel) ?><br>
+  <strong>Scope / Cohort:</strong> <?= h($scopeLabel) ?><br>
   <strong>Export Version:</strong> <?= h($exportVersion) ?><br>
   <strong>Export Timestamp:</strong> <?= h($exportTimestamp) ?>
 </div>
 
-<!-- ✅ TOC -->
 <div class="toc">
   <div class="toc-title">Table of Contents</div>
 
   <?php foreach ($courses as $course): ?>
     <div class="toc-course">
-      <strong><?= h($course['course_number']) ?> <?= h($course['course_title']) ?></strong>
+      <strong><?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?></strong>
 
-      <?php foreach ($course['lessons'] as $lesson): ?>
-        <?php $anchor = 'lesson_' . (int)$lesson['lesson_id']; ?>
+      <?php foreach ((array)$course['lessons'] as $lesson): ?>
+        <?php $anchor = 'lesson_' . (int)($lesson['lesson_id'] ?? 0); ?>
         <div class="toc-lesson">
           <a href="#<?= h($anchor) ?>">
-            <?= h($lesson['lesson_number']) ?> <?= h($lesson['lesson_title']) ?>
+            <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
           </a>
         </div>
       <?php endforeach; ?>
@@ -141,36 +160,39 @@ body{
 
 <div class="divider"></div>
 
-<!-- ✅ CONTENT -->
 <?php foreach ($courses as $course): ?>
-
   <div class="course-title">
-    <?= h($course['course_number']) ?> <?= h($course['course_title']) ?>
+    <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
   </div>
 
-  <?php foreach ($course['lessons'] as $lesson): ?>
+  <?php foreach ((array)$course['lessons'] as $lesson): ?>
+    <?php $anchor = 'lesson_' . (int)($lesson['lesson_id'] ?? 0); ?>
 
-    <?php $anchor = 'lesson_' . (int)$lesson['lesson_id']; ?>
-
-    <!-- ✅ CORRECT MPDF ANCHOR (THIS FIXES YOUR ISSUE) -->
     <a name="<?= h($anchor) ?>"></a>
 
     <div class="lesson-title">
-      <?= h($lesson['lesson_number']) ?> <?= h($lesson['lesson_title']) ?>
+      <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
     </div>
 
-    <div>
-      <?= pdf_status_label($lesson['review_status']) ?>
+    <div class="lesson-meta">
+      <?= h(pdf_status_label((string)($lesson['review_status'] ?? 'pending'))) ?>
+      <?php if ((int)($lesson['word_count'] ?? 0) > 0): ?>
+        · <?= (int)$lesson['word_count'] ?> words
+      <?php endif; ?>
+      <?php if ((int)($lesson['version_count'] ?? 0) > 0): ?>
+        · <?= (int)$lesson['version_count'] ?> versions
+      <?php endif; ?>
+      <?php if (!empty($lesson['updated_at'])): ?>
+        · Last saved <?= h((string)$lesson['updated_at']) ?>
+      <?php endif; ?>
     </div>
 
     <?php if (!empty($lesson['summary_html'])): ?>
-      <div class="summary"><?= $lesson['summary_html'] ?></div>
+      <div class="summary"><?= (string)$lesson['summary_html'] ?></div>
     <?php else: ?>
       <div class="summary-empty">No summary available</div>
     <?php endif; ?>
-
   <?php endforeach; ?>
-
 <?php endforeach; ?>
 
 </body>
