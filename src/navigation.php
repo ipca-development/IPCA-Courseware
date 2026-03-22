@@ -120,7 +120,7 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
     $html .= '      </div>';
     $html .= '      <div class="app-brand-copy">';
     $html .= '        <div class="app-brand-title">IPCA Academy</div>';
-    $html .= '        <div class="app-brand-subtitle">Structured Learning. Global Standards./div>';
+    $html .= '        <div class="app-brand-subtitle">Aviation Training Platform</div>';
     $html .= '      </div>';
     $html .= '    </div>';
     $html .= '  </div>';
