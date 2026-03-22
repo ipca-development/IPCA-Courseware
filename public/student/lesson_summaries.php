@@ -135,7 +135,7 @@ if ($programTitle === '') {
 
 $serverRenderUtc = gmdate('Y-m-d H:i:s');
 
-cw_header('My Lesson Summaries');
+cw_header('My Notebook');
 ?>
 <style>
 .nb-shell{
@@ -736,11 +736,11 @@ cw_header('My Lesson Summaries');
     </div>
 
     <div class="nb-header">
-      <div class="nb-overline">Student Training Notebook</div>
-      <h1 class="nb-title"><?= h($programTitle) ?></h1>
-      <div class="nb-sub">
-        A structured summary document of your current lesson understanding, organized by course and lesson within your active training scope.
-      </div>
+		<div class="nb-overline">Student Training Notebook</div>
+<h1 class="nb-title">My Notebook</h1>
+<div class="nb-sub">
+  <?= h($programTitle) ?> · A structured summary document of your current lesson understanding, organized by course and lesson within your active training scope.
+</div>
     </div>
 
     <div class="nb-meta">
@@ -968,8 +968,6 @@ cw_header('My Lesson Summaries');
 <script>
 const COHORT_ID = <?= (int)$selectedCohortId ?>;
 const SAVE_URL = '/student/api/summary_save.php';
-const scopeSelect = document.getElementById('scopeSelect');
-const bannerEl = document.getElementById('nbBanner');
 const scopeSelect = document.getElementById('scopeSelect');
 const bannerEl = document.getElementById('nbBanner');
 

@@ -16,28 +16,39 @@ return [
             '/student/index.php',
         ],
     ],
-
     [
-        'type' => 'section',
-        'label' => 'Theory Training',
-    ],
-    [
-        'key' => 'my_courses',
-        'label' => 'My Courses',
+        'key' => 'my_training',
+        'label' => 'My Training',
         'icon' => 'training',
-        'href' => '/student/courses.php',
-        'match_paths' => [
-            '/student/courses.php',
-            '/student/course.php',
-        ],
+        'href' => null,
+        'coming_soon' => true,
     ],
     [
-        'key' => 'my_notebook',
-        'label' => 'My Notebook',
+        'key' => 'theory_training',
+        'label' => 'Theory Training',
         'icon' => 'theory',
-        'href' => '/student/lesson_summaries.php',
-        'match_paths' => [
-            '/student/lesson_summaries.php',
+        'href' => null,
+        'children' => [
+            [
+                'key' => 'my_courses',
+                'label' => 'My Courses',
+                'icon' => 'theory',
+                'href' => '/student/courses.php',
+                'match_paths' => [
+                    '/student/courses.php',
+                    '/student/course.php',
+                ],
+            ],
+            [
+                'key' => 'my_notebook',
+                'label' => 'My Notebook',
+                'icon' => 'documents',
+                'href' => '/student/lesson_summaries.php',
+                'match_paths' => [
+                    '/student/lesson_summaries.php',
+                    '/student/export_lesson_summaries_pdf.php',
+                ],
+            ],
         ],
     ],
     [

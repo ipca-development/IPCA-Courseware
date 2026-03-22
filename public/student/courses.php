@@ -13,7 +13,7 @@ if ($role !== 'student' && $role !== 'admin') {
     redirect(cw_home_path_for_role($role));
 }
 
-$userId = (int)($u['id'] ?? 0);
+$userId = (int)$u['id'];
 
 if ($role === 'admin' && isset($_GET['user_id'])) {
     $userId = (int)$_GET['user_id'];
@@ -41,11 +41,12 @@ $stmt = $pdo->prepare("
         co.start_date,
         co.end_date,
         c.title AS course_title,
-        p.program_key
+        p.program_key,
+        p.name AS program_name
     FROM cohort_students cs
     JOIN cohorts co ON co.id = cs.cohort_id
     JOIN courses c ON c.id = co.course_id
-    JOIN programs p ON p.id = c.program_id
+    LEFT JOIN programs p ON p.id = co.program_id
     WHERE cs.user_id = ?
     ORDER BY co.id DESC
 ");
@@ -133,46 +134,11 @@ cw_header('My Courses');
     border:1px solid #dbe7ff;
   }
 
-  .progress-meta{
-    display:flex;
-    align-items:center;
-    justify-content:space-between;
-    gap:12px;
-    flex-wrap:wrap;
-    margin-bottom:10px;
-  }
-
-  .progress-label{
-    font-size:15px;
-    color:#415067;
-    font-weight:600;
-  }
-
-  .progress-shell-student{
-    height:14px;
-    background:#e9eef5;
-    border-radius:999px;
-    overflow:hidden;
-  }
-
-  .progress-fill-student{
-    height:14px;
-    border-radius:999px;
-    background:linear-gradient(90deg,#123b72 0%, #2f6ac6 100%);
-  }
-
-  .item-meta{
-    margin-top:14px;
-    font-size:13px;
-    color:#728198;
-    line-height:1.5;
-  }
-
   .open-row{
     margin-top:18px;
     display:flex;
-    gap:10px;
     flex-wrap:wrap;
+    gap:10px;
   }
 
   .mini-action{
@@ -194,6 +160,16 @@ cw_header('My Courses');
     background:#edf2f8;
   }
 
+  .mini-action.primary{
+    background:#12355f;
+    color:#fff;
+    border-color:#12355f;
+  }
+
+  .mini-action.primary:hover{
+    background:#0f2f54;
+  }
+
   .empty-premium{
     padding:22px 24px;
     border-radius:18px;
@@ -209,93 +185,49 @@ cw_header('My Courses');
     <div class="hero-eyebrow">Theory Training</div>
     <h2 class="hero-title">My Courses</h2>
     <div class="hero-sub">
-      View the theory cohorts you are enrolled in and open the related course workspace directly.
+      View the training cohorts and course pages currently assigned to you. Open a course directly or jump to your notebook for that training scope.
     </div>
   </div>
 
   <?php if (!$cohorts): ?>
     <div class="card">
-      <div class="empty-premium">No theory cohorts assigned yet.</div>
+      <div class="empty-premium">No cohort assigned yet.</div>
     </div>
   <?php else: ?>
     <div class="cohort-stack">
       <?php foreach ($cohorts as $co): ?>
         <?php
           $cohortId = (int)$co['id'];
-
-          $total = $pdo->prepare("
-              SELECT COUNT(*)
-              FROM cohort_lesson_deadlines
-              WHERE cohort_id = ?
-          ");
-          $total->execute([$cohortId]);
-          $totalLessons = (int)$total->fetchColumn();
-
-          $passed = $pdo->prepare("
-              SELECT COUNT(*)
-              FROM lesson_activity
-              WHERE user_id = ?
-                AND status = 'passed'
-                AND lesson_id IN (
-                    SELECT lesson_id
-                    FROM cohort_lesson_deadlines
-                    WHERE cohort_id = ?
-                )
-          ");
-          $passed->execute([$userId, $cohortId]);
-          $passedLessons = (int)$passed->fetchColumn();
-
-          $pct = ($totalLessons > 0)
-              ? (int)round(($passedLessons / $totalLessons) * 100)
-              : 0;
-
-          $next = $pdo->prepare("
-              SELECT
-                  d.deadline_utc,
-                  l.title,
-                  l.external_lesson_id
-              FROM cohort_lesson_deadlines d
-              JOIN lessons l ON l.id = d.lesson_id
-              WHERE d.cohort_id = ?
-              ORDER BY d.deadline_utc ASC
-              LIMIT 1
-          ");
-          $next->execute([$cohortId]);
-          $nextRow = $next->fetch(PDO::FETCH_ASSOC);
+          $programLabel = trim((string)($co['program_name'] ?? ''));
+          if ($programLabel === '') {
+              $programLabel = trim((string)($co['program_key'] ?? ''));
+          }
+          if ($programLabel === '') {
+              $programLabel = 'Training Program';
+          }
         ?>
         <div class="card cohort-card">
           <div class="cohort-header">
             <div>
               <h3 class="cohort-title"><?= h((string)$co['course_title']) ?></h3>
               <div class="cohort-sub">
-                Program: <?= h((string)$co['program_key']) ?>
+                Program: <?= h($programLabel) ?>
                 · Cohort: <?= h((string)$co['name']) ?>
                 · Start: <?= h(courses_fmt_date((string)$co['start_date'])) ?>
                 · End: <?= h(courses_fmt_date((string)$co['end_date'])) ?>
               </div>
             </div>
 
-            <div class="cohort-chip"><?= $pct ?>% complete</div>
+            <div class="cohort-chip">Cohort #<?= $cohortId ?></div>
           </div>
-
-          <div class="progress-meta">
-            <div class="progress-label"><?= $passedLessons ?>/<?= $totalLessons ?> lessons completed</div>
-          </div>
-
-          <div class="progress-shell-student">
-            <div class="progress-fill-student" style="width:<?= $pct ?>%;"></div>
-          </div>
-
-          <?php if ($nextRow): ?>
-            <div class="item-meta">
-              Next lesson deadline: <?= h(courses_fmt_date((string)$nextRow['deadline_utc'])) ?>
-              · Lesson <?= (int)$nextRow['external_lesson_id'] ?>
-              · <?= h((string)$nextRow['title']) ?>
-            </div>
-          <?php endif; ?>
 
           <div class="open-row">
-            <a class="mini-action" href="/student/course.php?cohort_id=<?= $cohortId ?>">Open Course</a>
+            <a class="mini-action primary" href="/student/course.php?cohort_id=<?= $cohortId ?>">
+              Open Course
+            </a>
+            <a class="mini-action" href="/student/lesson_summaries.php?cohort_id=<?= $cohortId ?>">
+              Open Notebook
+            </a>
           </div>
         </div>
       <?php endforeach; ?>
