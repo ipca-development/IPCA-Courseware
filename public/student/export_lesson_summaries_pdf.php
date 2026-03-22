@@ -43,7 +43,6 @@ try {
         exit('Not enrolled in this cohort');
     }
 
-    // Generate export metadata ONCE for this export request
     $exportVersion = gmdate('Y.m.d.Hi');
     $exportTimestamp = gmdate('D, M j, Y H:i:s') . ' UTC';
 
@@ -74,6 +73,18 @@ try {
     $filename = 'lesson_summaries_' . $safeProgram . '_' . $safeScope . '_' . $exportVersion . '.pdf';
 
     if (class_exists('\Mpdf\Mpdf')) {
+        $tempDir = __DIR__ . '/../../storage/tmp/mpdf';
+
+        if (!is_dir($tempDir)) {
+            if (!mkdir($tempDir, 0775, true) && !is_dir($tempDir)) {
+                throw new RuntimeException('Could not create mPDF temp directory: ' . $tempDir);
+            }
+        }
+
+        if (!is_writable($tempDir)) {
+            throw new RuntimeException('mPDF temp directory is not writable: ' . $tempDir);
+        }
+
         $mpdf = new \Mpdf\Mpdf([
             'mode' => 'utf-8',
             'format' => 'A4',
@@ -83,6 +94,7 @@ try {
             'margin_bottom' => 18,
             'margin_header' => 8,
             'margin_footer' => 8,
+            'tempDir' => $tempDir,
         ]);
 
         $mpdf->SetTitle('Lesson Summaries');
