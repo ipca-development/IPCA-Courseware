@@ -55,6 +55,9 @@ try {
         $exportTimestamp
     );
 
+    // Filesystem path is more reliable than web path for mPDF image rendering
+    $exportData['logo_file_path'] = __DIR__ . '/../assets/logo/ipca_logo_white.png';
+
     $templatePath = __DIR__ . '/../../templates/pdf/export_lesson_summaries_pdf.php';
     if (!file_exists($templatePath)) {
         throw new RuntimeException('PDF export template not found');
@@ -91,9 +94,9 @@ try {
             'margin_left' => 16,
             'margin_right' => 16,
             'margin_top' => 18,
-            'margin_bottom' => 18,
+            'margin_bottom' => 24,
             'margin_header' => 8,
-            'margin_footer' => 8,
+            'margin_footer' => 12,
             'tempDir' => $tempDir,
         ]);
 
@@ -107,15 +110,26 @@ try {
         if ($footerCenter === '') {
             $footerCenter = trim((string)($exportData['program_title'] ?? ''));
         }
-        $footerRight = 'Page {PAGENO} of {nbpg}';
 
         $mpdf->SetHTMLFooter('
-            <div style="font-size:8.5pt; color:#64748b; border-top:1px solid #dbe4f0; padding-top:6px;">
+            <div style="
+                font-size:8.5pt;
+                color:#64748b;
+                border-top:1px solid #dbe4f0;
+                padding-top:5px;
+                line-height:1.2;
+            ">
                 <table width="100%" style="border-collapse:collapse;">
                     <tr>
-                        <td width="33%" align="left" style="font-weight:bold;">' . htmlspecialchars($footerLeft, ENT_QUOTES, 'UTF-8') . '</td>
-                        <td width="34%" align="center">' . htmlspecialchars($footerCenter, ENT_QUOTES, 'UTF-8') . '</td>
-                        <td width="33%" align="right">' . htmlspecialchars($footerRight, ENT_QUOTES, 'UTF-8') . '</td>
+                        <td width="33%" align="left" style="font-weight:bold;">
+                            ' . htmlspecialchars($footerLeft, ENT_QUOTES, 'UTF-8') . '
+                        </td>
+                        <td width="34%" align="center">
+                            ' . htmlspecialchars($footerCenter, ENT_QUOTES, 'UTF-8') . '
+                        </td>
+                        <td width="33%" align="right">
+                            Page {PAGENO} of {nbpg}
+                        </td>
                     </tr>
                 </table>
             </div>

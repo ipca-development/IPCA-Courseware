@@ -20,6 +20,7 @@ $exportTimestamp = (string)($exportData['export_timestamp'] ?? '');
 $courseCount     = (int)($exportData['course_count'] ?? 0);
 $lessonCount     = (int)($exportData['lesson_count'] ?? 0);
 $courses         = (array)($exportData['courses'] ?? []);
+$logoFilePath    = (string)($exportData['logo_file_path'] ?? '');
 
 function pdf_status_label(string $reviewStatus): string
 {
@@ -81,7 +82,7 @@ function pdf_ui_date(string $value): string
     .brand-header{
       background: linear-gradient(135deg, #12355f 0%, #1d4f91 100%);
       color:#ffffff;
-      border-radius:14px;
+      border-radius:10px;
       padding:16px 18px;
       margin-bottom:18px;
     }
@@ -99,7 +100,7 @@ function pdf_ui_date(string $value): string
     .brand-logo-wrap{
       width:56px;
       height:56px;
-      border-radius:12px;
+      border-radius:10px;
       background:rgba(255,255,255,0.12);
       text-align:center;
       vertical-align:middle;
@@ -141,7 +142,7 @@ function pdf_ui_date(string $value): string
     .meta-box{
       border:1px solid #dde6f2;
       background:#f8fbff;
-      border-radius:12px;
+      border-radius:11px;
       padding:11px 12px;
       vertical-align:top;
       width:25%;
@@ -324,7 +325,9 @@ function pdf_ui_date(string $value): string
       <tr>
         <td class="brand-logo-cell">
           <div class="brand-logo-wrap">
-            <img class="brand-logo" src="<?= h('/assets/logo/ipca_logo_white.png') ?>" alt="IPCA Academy">
+            <?php if ($logoFilePath !== '' && file_exists($logoFilePath)): ?>
+              <img class="brand-logo" src="<?= h($logoFilePath) ?>" alt="IPCA Academy">
+            <?php endif; ?>
           </div>
         </td>
         <td class="brand-copy">
@@ -385,10 +388,8 @@ function pdf_ui_date(string $value): string
 
         <div class="toc-lesson-list">
           <?php foreach ((array)$course['lessons'] as $lesson): ?>
+            <?php $lessonAnchor = 'lesson-' . (int)($lesson['lesson_id'] ?? 0); ?>
             <div class="toc-lesson">
-              <?php
-                $lessonAnchor = 'lesson-' . (int)($lesson['lesson_id'] ?? 0);
-              ?>
               <a class="toc-link" href="#<?= h($lessonAnchor) ?>">
                 <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
               </a>
@@ -450,7 +451,7 @@ function pdf_ui_date(string $value): string
   <?php endforeach; ?>
 
   <div class="footer-note">
-    This PDF is generated from IPCA.training – Version 1.0
+    This PDF is generated from IPCA.training V1.0
   </div>
 
 </body>
