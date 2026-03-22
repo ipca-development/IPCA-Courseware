@@ -20,36 +20,26 @@ $exportTimestamp = (string)($exportData['export_timestamp'] ?? '');
 $courseCount     = (int)($exportData['course_count'] ?? 0);
 $lessonCount     = (int)($exportData['lesson_count'] ?? 0);
 $courses         = (array)($exportData['courses'] ?? []);
-$logoFileUrl     = (string)($exportData['logo_file_url'] ?? '');
+$bannerUrl       = (string)($exportData['banner_url'] ?? '');
 
 function pdf_status_label(string $reviewStatus): string
 {
-    if ($reviewStatus === 'acceptable') {
-        return 'Accepted';
-    }
-    if ($reviewStatus === 'needs_revision' || $reviewStatus === 'rejected') {
-        return 'Student Action Required';
-    }
+    if ($reviewStatus === 'acceptable') return 'Accepted';
+    if ($reviewStatus === 'needs_revision' || $reviewStatus === 'rejected') return 'Student Action Required';
     return 'Pending';
 }
 
 function pdf_status_class(string $reviewStatus): string
 {
-    if ($reviewStatus === 'acceptable') {
-        return 'status-ok';
-    }
-    if ($reviewStatus === 'needs_revision' || $reviewStatus === 'rejected') {
-        return 'status-warn';
-    }
+    if ($reviewStatus === 'acceptable') return 'status-ok';
+    if ($reviewStatus === 'needs_revision' || $reviewStatus === 'rejected') return 'status-warn';
     return 'status-pending';
 }
 
 function pdf_ui_date(string $value): string
 {
     $value = trim($value);
-    if ($value === '') {
-        return '—';
-    }
+    if ($value === '') return '—';
 
     try {
         $dt = new DateTime($value, new DateTimeZone('UTC'));
@@ -62,413 +52,166 @@ function pdf_ui_date(string $value): string
 <!doctype html>
 <html>
 <head>
-  <meta charset="utf-8">
-  <title>Lesson Summaries PDF Export</title>
-  <style>
-    body{
-      font-family: sans-serif;
-      color:#1e293b;
-      font-size:10.5pt;
-      line-height:1.55;
-      margin:0;
-      padding:0;
-      background:#ffffff;
-    }
+<meta charset="utf-8">
 
-    .brand-header{
-      background:#184883;
-      color:#ffffff;
-      border-radius:7px;
-      padding:14px 16px;
-      margin-bottom:16px;
-    }
+<style>
+body{
+  font-family: sans-serif;
+  color:#1e293b;
+  font-size:10.5pt;
+  line-height:1.55;
+}
 
-    .brand-table{
-      width:100%;
-      border-collapse:collapse;
-    }
+.header img{
+  width:100%;
+  border-radius:6px;
+  margin-bottom:18px;
+}
 
-    .brand-logo-cell{
-      width:64px;
-      vertical-align:middle;
-    }
+.meta{
+  margin-bottom:18px;
+  line-height:1.7;
+}
 
-    .brand-logo-wrap{
-      width:48px;
-      height:48px;
-      border-radius:6px;
-      background:rgba(255,255,255,0.10);
-      text-align:center;
-      vertical-align:middle;
-    }
+.meta strong{
+  color:#0f172a;
+}
 
-    .brand-logo{
-      width:34px;
-      height:34px;
-      display:block;
-      margin:7px auto;
-      object-fit:contain;
-    }
+.toc{
+  margin-top:8px;
+  padding:14px 0;
+  border-top:1px solid #dbe4f0;
+  border-bottom:1px solid #dbe4f0;
+}
 
-    .brand-copy{
-      vertical-align:middle;
-    }
+.toc-title{
+  font-size:15pt;
+  font-weight:bold;
+  margin-bottom:12px;
+}
 
-    .brand-title{
-      font-size:18pt;
-      font-weight:bold;
-      line-height:1.05;
-      margin:0 0 3px 0;
-      color:#ffffff;
-    }
+.toc-course{
+  margin-bottom:14px;
+}
 
-    .brand-subtitle{
-      font-size:10pt;
-      color:rgba(255,255,255,0.92);
-      margin:0;
-    }
+.toc-course-title{
+  font-weight:bold;
+  font-size:10.5pt;
+}
 
-    .meta-grid{
-      width:100%;
-      border-collapse:separate;
-      border-spacing:8px;
-      margin:0 0 14px 0;
-    }
+.toc-lesson{
+  margin-left:18px;
+  font-size:9.5pt;
+}
 
-    .meta-cell{
-      width:25%;
-      vertical-align:top;
-    }
+.divider{
+  border-top:1px solid #cbd5e1;
+  margin:18px 0;
+}
 
-    .meta-card{
-      border:1px solid #dde6f2;
-      background:#f8fbff;
-      border-radius:8px;
-      padding:10px 11px;
-      min-height:56px;
-    }
+.course-title{
+  font-size:17pt;
+  font-weight:bold;
+  margin-top:18px;
+}
 
-    .meta-label{
-      font-size:8pt;
-      text-transform:uppercase;
-      letter-spacing:.12em;
-      color:#64748b;
-      font-weight:bold;
-      margin-bottom:5px;
-    }
+.lesson-title{
+  font-size:12.5pt;
+  font-weight:bold;
+  margin-top:10px;
+}
 
-    .meta-value{
-      font-size:10pt;
-      color:#0f172a;
-      font-weight:bold;
-      line-height:1.35;
-    }
+.lesson-meta{
+  font-size:9pt;
+  color:#64748b;
+}
 
-    .toc{
-      margin-top:8px;
-      padding:14px 0 8px 0;
-      border-top:1px solid #dbe4f0;
-      border-bottom:1px solid #dbe4f0;
-    }
+.status-ok{color:#166534;}
+.status-warn{color:#991b1b;}
+.status-pending{color:#92400e;}
 
-    .toc-title{
-      font-size:15pt;
-      font-weight:bold;
-      color:#0f172a;
-      margin:0 0 12px 0;
-    }
+.summary{
+  margin-top:6px;
+  margin-bottom:12px;
+}
 
-    .toc-course{
-      margin:0 0 14px 0;
-    }
+.summary-empty{
+  color:#64748b;
+  font-style:italic;
+}
+</style>
 
-    .toc-course-title{
-      font-size:10.5pt;
-      font-weight:bold;
-      color:#102845;
-      margin:0 0 7px 0;
-      line-height:1.35;
-    }
-
-    .toc-lesson-list{
-      margin:0 0 0 20px;
-      padding:0;
-    }
-
-    .toc-lesson{
-      margin:0 0 5px 0;
-      color:#334155;
-      font-size:9.4pt;
-      line-height:1.4;
-    }
-
-    .toc-link{
-      color:inherit;
-      text-decoration:none;
-    }
-
-    .toc-meta{
-      font-size:8.3pt;
-      color:#64748b;
-    }
-
-    .divider{
-      border-top:1px solid #cbd5e1;
-      margin:18px 0;
-    }
-
-    .course-section{
-      margin-top:22px;
-      page-break-inside:avoid;
-    }
-
-    .course-title{
-      font-size:17pt;
-      font-weight:bold;
-      color:#0f172a;
-      margin:0 0 12px 0;
-      line-height:1.12;
-    }
-
-    .lesson-section{
-      margin:0 0 18px 0;
-      padding-top:12px;
-      border-top:1px solid #e2e8f0;
-      page-break-inside:avoid;
-    }
-
-    .lesson-head{
-      margin:0 0 8px 0;
-    }
-
-    .lesson-title{
-      font-size:12.5pt;
-      font-weight:bold;
-      color:#0f172a;
-      margin:0 0 5px 0;
-      line-height:1.25;
-    }
-
-    .lesson-meta{
-      font-size:8.8pt;
-      color:#64748b;
-      margin:0;
-    }
-
-    .status-pill{
-      display:inline-block;
-      padding:2px 7px;
-      border-radius:999px;
-      font-size:8pt;
-      font-weight:bold;
-      border:1px solid transparent;
-    }
-
-    .status-ok{
-      background:#dcfce7;
-      color:#166534;
-      border-color:#86efac;
-    }
-
-    .status-warn{
-      background:#fee2e2;
-      color:#991b1b;
-      border-color:#fca5a5;
-    }
-
-    .status-pending{
-      background:#fef3c7;
-      color:#92400e;
-      border-color:#fde68a;
-    }
-
-    .summary-body{
-      margin-top:8px;
-      color:#1e293b;
-      font-size:10.5pt;
-      line-height:1.65;
-    }
-
-    .summary-body p{
-      margin:0 0 10px 0;
-    }
-
-    .summary-body ul,
-    .summary-body ol{
-      margin:0 0 10px 20px;
-      padding:0;
-    }
-
-    .summary-body li{
-      margin:0 0 4px 0;
-    }
-
-    .summary-empty{
-      font-style:italic;
-      color:#64748b;
-      margin-top:8px;
-    }
-
-    .footer-note{
-      margin-top:18px;
-      padding-top:10px;
-      border-top:1px solid #e2e8f0;
-      font-size:8.5pt;
-      color:#64748b;
-    }
-  </style>
 </head>
 <body>
 
-  <div class="brand-header">
-    <table class="brand-table">
-      <tr>
-        <td class="brand-logo-cell">
-          <div class="brand-logo-wrap">
-            <?php if ($logoFileUrl !== ''): ?>
-              <img class="brand-logo" src="<?= h($logoFileUrl) ?>" alt="IPCA Academy">
-            <?php endif; ?>
-          </div>
-        </td>
-        <td class="brand-copy">
-          <div class="brand-title">IPCA Academy</div>
-          <div class="brand-subtitle">Student Training Summary Export</div>
-        </td>
-      </tr>
-    </table>
-  </div>
+<!-- ✅ Banner -->
+<div class="header">
+  <?php if ($bannerUrl !== ''): ?>
+    <img src="<?= h($bannerUrl) ?>">
+  <?php endif; ?>
+</div>
 
-  <table class="meta-grid">
-    <tr>
-      <td class="meta-cell">
-        <div class="meta-card">
-          <div class="meta-label">Student</div>
-          <div class="meta-value"><?= h($studentName) ?></div>
-        </div>
-      </td>
-      <td class="meta-cell">
-        <div class="meta-card">
-          <div class="meta-label">Program</div>
-          <div class="meta-value"><?= h($programTitle) ?></div>
-        </div>
-      </td>
-      <td class="meta-cell">
-        <div class="meta-card">
-          <div class="meta-label">Scope / Cohort</div>
-          <div class="meta-value"><?= h($scopeLabel) ?></div>
-        </div>
-      </td>
-      <td class="meta-cell">
-        <div class="meta-card">
-          <div class="meta-label">Export Version</div>
-          <div class="meta-value"><?= h($exportVersion) ?></div>
-        </div>
-      </td>
-    </tr>
-    <tr>
-      <td class="meta-cell">
-        <div class="meta-card">
-          <div class="meta-label">Export Timestamp</div>
-          <div class="meta-value"><?= h($exportTimestamp) ?></div>
-        </div>
-      </td>
-      <td class="meta-cell">
-        <div class="meta-card">
-          <div class="meta-label">Courses</div>
-          <div class="meta-value"><?= (int)$courseCount ?></div>
-        </div>
-      </td>
-      <td class="meta-cell">
-        <div class="meta-card">
-          <div class="meta-label">Lessons</div>
-          <div class="meta-value"><?= (int)$lessonCount ?></div>
-        </div>
-      </td>
-      <td class="meta-cell">
-        <div class="meta-card">
-          <div class="meta-label">Document Type</div>
-          <div class="meta-value">Lesson Summary Export</div>
-        </div>
-      </td>
-    </tr>
-  </table>
+<!-- ✅ Clean metadata -->
+<div class="meta">
+  <strong>Student:</strong> <?= h($studentName) ?><br>
+  <strong>Program:</strong> <?= h($programTitle) ?><br>
+  <strong>Scope / Cohort:</strong> <?= h($scopeLabel) ?><br>
+  <strong>Export Version:</strong> <?= h($exportVersion) ?><br>
+  <strong>Export Timestamp:</strong> <?= h($exportTimestamp) ?><br>
+  <strong>Courses:</strong> <?= $courseCount ?><br>
+  <strong>Lessons:</strong> <?= $lessonCount ?>
+</div>
 
-  <div class="toc">
-    <div class="toc-title">Table of Contents</div>
-
-    <?php foreach ($courses as $course): ?>
-      <div class="toc-course">
-        <div class="toc-course-title">
-          <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
-        </div>
-
-        <div class="toc-lesson-list">
-          <?php foreach ((array)$course['lessons'] as $lesson): ?>
-            <?php $lessonAnchor = 'lesson-' . (int)($lesson['lesson_id'] ?? 0); ?>
-            <div class="toc-lesson">
-              <a class="toc-link" href="#<?= h($lessonAnchor) ?>">
-                <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
-              </a>
-              <span class="toc-meta">
-                — <?= h(pdf_status_label((string)$lesson['review_status'])) ?>
-                <?php if ((int)$lesson['word_count'] > 0): ?>
-                  · <?= (int)$lesson['word_count'] ?> words
-                <?php endif; ?>
-              </span>
-            </div>
-          <?php endforeach; ?>
-        </div>
-      </div>
-    <?php endforeach; ?>
-  </div>
-
-  <div class="divider"></div>
+<!-- ✅ TOC -->
+<div class="toc">
+  <div class="toc-title">Table of Contents</div>
 
   <?php foreach ($courses as $course): ?>
-    <div class="course-section">
-      <div class="course-title">
-        <?= h((string)$course['course_number']) ?> <?= h((string)$course['course_title']) ?>
+    <div class="toc-course">
+      <div class="toc-course-title">
+        <?= h($course['course_number']) ?> <?= h($course['course_title']) ?>
       </div>
 
-      <?php foreach ((array)$course['lessons'] as $lesson): ?>
-        <?php $lessonAnchor = 'lesson-' . (int)($lesson['lesson_id'] ?? 0); ?>
-        <a name="<?= h($lessonAnchor) ?>"></a>
-        <div class="lesson-section">
-          <div class="lesson-head">
-            <div class="lesson-title">
-              <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
-            </div>
-            <div class="lesson-meta">
-              <span class="status-pill <?= h(pdf_status_class((string)$lesson['review_status'])) ?>">
-                <?= h(pdf_status_label((string)$lesson['review_status'])) ?>
-              </span>
-              <?php if ((int)$lesson['word_count'] > 0): ?>
-                &nbsp; · &nbsp; <?= (int)$lesson['word_count'] ?> words
-              <?php endif; ?>
-              <?php if ((int)$lesson['version_count'] > 0): ?>
-                &nbsp; · &nbsp; <?= (int)$lesson['version_count'] ?> versions
-              <?php endif; ?>
-              <?php if (trim((string)$lesson['updated_at']) !== ''): ?>
-                &nbsp; · &nbsp; Last saved <?= h(pdf_ui_date((string)$lesson['updated_at'])) ?>
-              <?php endif; ?>
-            </div>
-          </div>
-
-          <?php if (trim((string)$lesson['summary_html']) !== ''): ?>
-            <div class="summary-body">
-              <?= (string)$lesson['summary_html'] ?>
-            </div>
-          <?php else: ?>
-            <div class="summary-empty">No summary content available for this lesson.</div>
-          <?php endif; ?>
+      <?php foreach ($course['lessons'] as $lesson): ?>
+        <div class="toc-lesson">
+          <?= h($lesson['lesson_number']) ?> <?= h($lesson['lesson_title']) ?>
         </div>
       <?php endforeach; ?>
     </div>
   <?php endforeach; ?>
+</div>
 
-  <div class="footer-note">
-    This document contains your lesson summaries for the selected training scope.
+<div class="divider"></div>
+
+<!-- ✅ CONTENT -->
+<?php foreach ($courses as $course): ?>
+
+  <div class="course-title">
+    <?= h($course['course_number']) ?> <?= h($course['course_title']) ?>
   </div>
+
+  <?php foreach ($course['lessons'] as $lesson): ?>
+
+    <div class="lesson-title">
+      <?= h($lesson['lesson_number']) ?> <?= h($lesson['lesson_title']) ?>
+    </div>
+
+    <div class="lesson-meta">
+      <?= pdf_status_label($lesson['review_status']) ?>
+      <?php if ($lesson['word_count'] > 0): ?>
+        · <?= (int)$lesson['word_count'] ?> words
+      <?php endif; ?>
+    </div>
+
+    <?php if (!empty($lesson['summary_html'])): ?>
+      <div class="summary"><?= $lesson['summary_html'] ?></div>
+    <?php else: ?>
+      <div class="summary-empty">No summary available</div>
+    <?php endif; ?>
+
+  <?php endforeach; ?>
+
+<?php endforeach; ?>
 
 </body>
 </html>

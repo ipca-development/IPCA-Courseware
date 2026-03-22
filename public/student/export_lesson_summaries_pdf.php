@@ -13,23 +13,20 @@ cw_require_login();
 
 try {
     $u = cw_current_user($pdo);
-    $role = (string)($u['role'] ?? '');
-    if ($role !== 'student') {
+    if (($u['role'] ?? '') !== 'student') {
         http_response_code(403);
         exit('Forbidden');
     }
 
-    $userId = (int)($u['id'] ?? 0);
-    $studentName = trim((string)($u['name'] ?? 'Student'));
-    if ($studentName === '') {
-        $studentName = 'Student';
-    }
+    $userId = (int)$u['id'];
+    $studentName = trim((string)$u['name'] ?: 'Student');
 
     $cohortId = (int)($_GET['cohort_id'] ?? 0);
     if ($cohortId <= 0) {
         throw new RuntimeException('Missing cohort_id');
     }
 
+    // Enrollment check
     $chk = $pdo->prepare("
         SELECT 1
         FROM cohort_students
@@ -43,6 +40,7 @@ try {
         exit('Not enrolled in this cohort');
     }
 
+    // Export metadata
     $exportVersion = gmdate('Y.m.d.Hi');
     $exportTimestamp = gmdate('D, M j, Y H:i:s') . ' UTC';
 
@@ -56,29 +54,17 @@ try {
     );
 
     /*
-     * More reliable logo resolution for mPDF:
-     * - use realpath()
-     * - pass file:// URL
-     * Adjust the candidate list if your real logo filename differs.
+     * ✅ NEW: Use JPG banner instead of logo rendering
      */
-    $logoCandidates = [
-        __DIR__ . '/../assets/logo/ipca_logo_white.png',
-        __DIR__ . '/../assets/logo/ipca_logo.png',
-        __DIR__ . '/../assets/ipca_logo_white.png',
-        __DIR__ . '/../assets/ipca_logo.png',
-    ];
+    $bannerPath = realpath(__DIR__ . '/../assets/pdf/ipca_header.jpg');
 
-    $logoRealPath = '';
-    foreach ($logoCandidates as $candidate) {
-        $real = realpath($candidate);
-        if ($real !== false && is_file($real)) {
-            $logoRealPath = $real;
-            break;
-        }
+    if (!$bannerPath || !is_file($bannerPath)) {
+        throw new RuntimeException('PDF banner not found at /public/assets/pdf/ipca_header.jpg');
     }
 
-    $exportData['logo_file_url'] = ($logoRealPath !== '') ? ('file://' . $logoRealPath) : '';
+    $exportData['banner_url'] = 'file://' . $bannerPath;
 
+    // Template
     $templatePath = __DIR__ . '/../../templates/pdf/export_lesson_summaries_pdf.php';
     if (!file_exists($templatePath)) {
         throw new RuntimeException('PDF export template not found');
@@ -92,69 +78,55 @@ try {
         throw new RuntimeException('PDF export template rendered empty output');
     }
 
+    // Filename
     $safeProgram = preg_replace('/[^A-Za-z0-9_\-]+/', '_', (string)($exportData['program_title'] ?? 'Program'));
     $safeScope = preg_replace('/[^A-Za-z0-9_\-]+/', '_', (string)($exportData['scope_label'] ?? ('Cohort_' . $cohortId)));
     $filename = 'lesson_summaries_' . $safeProgram . '_' . $safeScope . '_' . $exportVersion . '.pdf';
 
-    if (class_exists('\Mpdf\Mpdf')) {
-        $tempDir = __DIR__ . '/../../storage/tmp/mpdf';
-
-        if (!is_dir($tempDir)) {
-            if (!mkdir($tempDir, 0775, true) && !is_dir($tempDir)) {
-                throw new RuntimeException('Could not create mPDF temp directory: ' . $tempDir);
-            }
-        }
-
-        if (!is_writable($tempDir)) {
-            throw new RuntimeException('mPDF temp directory is not writable: ' . $tempDir);
-        }
-
-        $mpdf = new \Mpdf\Mpdf([
-            'mode' => 'utf-8',
-            'format' => 'A4',
-            'margin_left' => 14,
-            'margin_right' => 14,
-            'margin_top' => 16,
-            'margin_bottom' => 18,
-            'margin_header' => 6,
-            'margin_footer' => 8,
-            'tempDir' => $tempDir,
-            'default_font' => 'sans',
-            'setAutoBottomMargin' => 'stretch',
-        ]);
-
-        $mpdf->SetTitle('Lesson Summaries');
-        $mpdf->SetAuthor('IPCA Academy');
-        $mpdf->SetCreator('IPCA Courseware');
-        $mpdf->SetDisplayMode('fullpage');
-
-        $footerCenter = trim((string)($exportData['scope_label'] ?? ''));
-        if ($footerCenter === '') {
-            $footerCenter = trim((string)($exportData['program_title'] ?? ''));
-        }
-
-        /*
-         * Plain-text footer is more reliable in mPDF than styled HTML footer.
-         * Format: left|center|right
-         */
-        $mpdf->SetFooter('IPCA Academy|' . $footerCenter . '|Page {PAGENO} of {nbpg}');
-
-        $mpdf->WriteHTML($html);
-        $mpdf->Output($filename, \Mpdf\Output\Destination::INLINE);
-        exit;
+    if (!class_exists('\Mpdf\Mpdf')) {
+        throw new RuntimeException('mPDF not installed');
     }
 
-    http_response_code(503);
-    header('Content-Type: text/plain; charset=utf-8');
-    echo "PDF renderer not available.\n\n";
-    echo "The export pipeline is in place, but mPDF is not currently available to this runtime.\n";
-    echo "Expected autoload path: ../../vendor/autoload.php\n";
-    echo "Expected package: mpdf/mpdf\n";
+    // Temp dir
+    $tempDir = __DIR__ . '/../../storage/tmp/mpdf';
+    if (!is_dir($tempDir)) {
+        mkdir($tempDir, 0775, true);
+    }
+    if (!is_writable($tempDir)) {
+        throw new RuntimeException('mPDF temp directory not writable');
+    }
+
+    $mpdf = new \Mpdf\Mpdf([
+        'mode' => 'utf-8',
+        'format' => 'A4',
+        'margin_left' => 14,
+        'margin_right' => 14,
+        'margin_top' => 16,
+        'margin_bottom' => 18,
+        'tempDir' => $tempDir,
+        'default_font' => 'sans',
+    ]);
+
+    $mpdf->SetTitle('Lesson Summaries');
+    $mpdf->SetAuthor('IPCA Academy');
+    $mpdf->SetCreator('IPCA Courseware');
+
+    /*
+     * ✅ FIXED FOOTER (always works)
+     */
+    $footerCenter = trim((string)($exportData['scope_label'] ?? ''));
+    if ($footerCenter === '') {
+        $footerCenter = trim((string)($exportData['program_title'] ?? ''));
+    }
+
+    $mpdf->SetFooter('IPCA Academy|' . $footerCenter . '|Page {PAGENO} of {nbpg}');
+
+    $mpdf->WriteHTML($html);
+    $mpdf->Output($filename, \Mpdf\Output\Destination::INLINE);
     exit;
 
 } catch (Throwable $e) {
     http_response_code(400);
-    header('Content-Type: text/plain; charset=utf-8');
     echo 'PDF export failed: ' . $e->getMessage();
     exit;
 }
