@@ -17,8 +17,6 @@ $programTitle    = (string)($exportData['program_title'] ?? 'Training Program');
 $scopeLabel      = (string)($exportData['scope_label'] ?? '');
 $exportVersion   = (string)($exportData['export_version'] ?? '');
 $exportTimestamp = (string)($exportData['export_timestamp'] ?? '');
-$courseCount     = (int)($exportData['course_count'] ?? 0);
-$lessonCount     = (int)($exportData['lesson_count'] ?? 0);
 $courses         = (array)($exportData['courses'] ?? []);
 $bannerUrl       = (string)($exportData['banner_url'] ?? '');
 
@@ -27,26 +25,6 @@ function pdf_status_label(string $reviewStatus): string
     if ($reviewStatus === 'acceptable') return 'Accepted';
     if ($reviewStatus === 'needs_revision' || $reviewStatus === 'rejected') return 'Student Action Required';
     return 'Pending';
-}
-
-function pdf_status_class(string $reviewStatus): string
-{
-    if ($reviewStatus === 'acceptable') return 'status-ok';
-    if ($reviewStatus === 'needs_revision' || $reviewStatus === 'rejected') return 'status-warn';
-    return 'status-pending';
-}
-
-function pdf_ui_date(string $value): string
-{
-    $value = trim($value);
-    if ($value === '') return '—';
-
-    try {
-        $dt = new DateTime($value, new DateTimeZone('UTC'));
-        return $dt->format('D, M j, Y');
-    } catch (Throwable $e) {
-        return $value;
-    }
 }
 ?>
 <!doctype html>
@@ -57,9 +35,8 @@ function pdf_ui_date(string $value): string
 <style>
 body{
   font-family: sans-serif;
-  color:#1e293b;
   font-size:10.5pt;
-  line-height:1.55;
+  color:#1e293b;
 }
 
 .header img{
@@ -73,67 +50,44 @@ body{
   line-height:1.7;
 }
 
-.meta strong{
-  color:#0f172a;
-}
-
 .toc{
-  margin-top:8px;
-  padding:14px 0;
-  border-top:1px solid #dbe4f0;
-  border-bottom:1px solid #dbe4f0;
+  border-top:1px solid #ccc;
+  border-bottom:1px solid #ccc;
+  padding:12px 0;
+  margin-bottom:20px;
 }
 
 .toc-title{
-  font-size:15pt;
+  font-size:14pt;
   font-weight:bold;
-  margin-bottom:12px;
+  margin-bottom:10px;
 }
 
 .toc-course{
-  margin-bottom:14px;
-}
-
-.toc-course-title{
-  font-weight:bold;
-  font-size:10.5pt;
+  margin-bottom:12px;
 }
 
 .toc-lesson{
-  margin-left:18px;
+  margin-left:15px;
   font-size:9.5pt;
 }
 
-.toc-link{
-  text-decoration:none;
-  color:#1e293b;
-}
-
 .divider{
-  border-top:1px solid #cbd5e1;
+  border-top:1px solid #ccc;
   margin:18px 0;
 }
 
 .course-title{
-  font-size:17pt;
+  font-size:16pt;
   font-weight:bold;
   margin-top:18px;
 }
 
 .lesson-title{
-  font-size:12.5pt;
+  font-size:12pt;
   font-weight:bold;
   margin-top:10px;
 }
-
-.lesson-meta{
-  font-size:9pt;
-  color:#64748b;
-}
-
-.status-ok{color:#166534;}
-.status-warn{color:#991b1b;}
-.status-pending{color:#92400e;}
 
 .summary{
   margin-top:6px;
@@ -156,15 +110,13 @@ body{
   <?php endif; ?>
 </div>
 
-<!-- ✅ Clean metadata -->
+<!-- ✅ Metadata -->
 <div class="meta">
   <strong>Student:</strong> <?= h($studentName) ?><br>
   <strong>Program:</strong> <?= h($programTitle) ?><br>
-  <strong>Scope / Cohort:</strong> <?= h($scopeLabel) ?><br>
+  <strong>Scope:</strong> <?= h($scopeLabel) ?><br>
   <strong>Export Version:</strong> <?= h($exportVersion) ?><br>
-  <strong>Export Timestamp:</strong> <?= h($exportTimestamp) ?><br>
-  <strong>Courses:</strong> <?= $courseCount ?><br>
-  <strong>Lessons:</strong> <?= $lessonCount ?>
+  <strong>Export Timestamp:</strong> <?= h($exportTimestamp) ?>
 </div>
 
 <!-- ✅ TOC -->
@@ -173,14 +125,12 @@ body{
 
   <?php foreach ($courses as $course): ?>
     <div class="toc-course">
-      <div class="toc-course-title">
-        <?= h($course['course_number']) ?> <?= h($course['course_title']) ?>
-      </div>
+      <strong><?= h($course['course_number']) ?> <?= h($course['course_title']) ?></strong>
 
       <?php foreach ($course['lessons'] as $lesson): ?>
-        <?php $lessonAnchor = 'lesson-' . (int)$lesson['lesson_id']; ?>
+        <?php $anchor = 'lesson_' . (int)$lesson['lesson_id']; ?>
         <div class="toc-lesson">
-          <a class="toc-link" href="#<?= h($lessonAnchor) ?>">
+          <a href="#<?= h($anchor) ?>">
             <?= h($lesson['lesson_number']) ?> <?= h($lesson['lesson_title']) ?>
           </a>
         </div>
@@ -200,20 +150,17 @@ body{
 
   <?php foreach ($course['lessons'] as $lesson): ?>
 
-    <?php $lessonAnchor = 'lesson-' . (int)$lesson['lesson_id']; ?>
+    <?php $anchor = 'lesson_' . (int)$lesson['lesson_id']; ?>
 
-    <!-- ✅ FIXED ANCHOR FOR mPDF -->
-    <div id="<?= h($lessonAnchor) ?>" style="height:0; margin:0; padding:0;"></div>
+    <!-- ✅ CORRECT MPDF ANCHOR (THIS FIXES YOUR ISSUE) -->
+    <a name="<?= h($anchor) ?>"></a>
 
     <div class="lesson-title">
       <?= h($lesson['lesson_number']) ?> <?= h($lesson['lesson_title']) ?>
     </div>
 
-    <div class="lesson-meta">
+    <div>
       <?= pdf_status_label($lesson['review_status']) ?>
-      <?php if ($lesson['word_count'] > 0): ?>
-        · <?= (int)$lesson['word_count'] ?> words
-      <?php endif; ?>
     </div>
 
     <?php if (!empty($lesson['summary_html'])): ?>
