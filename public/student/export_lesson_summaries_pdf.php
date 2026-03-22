@@ -103,14 +103,17 @@ try {
         $mpdf->SetDisplayMode('fullpage');
 
         $footerLeft = 'IPCA Academy';
-        $footerCenter = (string)($exportData['scope_label'] ?? '');
-        $footerRight = 'Page {PAGENO}';
+        $footerCenter = trim((string)($exportData['scope_label'] ?? ''));
+        if ($footerCenter === '') {
+            $footerCenter = trim((string)($exportData['program_title'] ?? ''));
+        }
+        $footerRight = 'Page {PAGENO} of {nbpg}';
 
         $mpdf->SetHTMLFooter('
-            <div style="font-size:9pt; color:#64748b; border-top:1px solid #e2e8f0; padding-top:6px;">
+            <div style="font-size:8.5pt; color:#64748b; border-top:1px solid #dbe4f0; padding-top:6px;">
                 <table width="100%" style="border-collapse:collapse;">
                     <tr>
-                        <td width="33%" align="left">' . htmlspecialchars($footerLeft, ENT_QUOTES, 'UTF-8') . '</td>
+                        <td width="33%" align="left" style="font-weight:bold;">' . htmlspecialchars($footerLeft, ENT_QUOTES, 'UTF-8') . '</td>
                         <td width="34%" align="center">' . htmlspecialchars($footerCenter, ENT_QUOTES, 'UTF-8') . '</td>
                         <td width="33%" align="right">' . htmlspecialchars($footerRight, ENT_QUOTES, 'UTF-8') . '</td>
                     </tr>

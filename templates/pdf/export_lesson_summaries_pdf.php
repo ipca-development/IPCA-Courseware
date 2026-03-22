@@ -65,66 +65,90 @@ function pdf_ui_date(string $value): string
   <title>Lesson Summaries PDF Export</title>
   <style>
     @page {
-      margin: 20mm 16mm 18mm 16mm;
+      margin: 18mm 14mm 18mm 14mm;
     }
 
     body{
       font-family: sans-serif;
       color:#1e293b;
-      font-size:11pt;
+      font-size:10.5pt;
       line-height:1.55;
       margin:0;
       padding:0;
       background:#ffffff;
     }
 
-    .doc-header{
-      border-bottom:1px solid #cbd5e1;
-      padding-bottom:14px;
+    .brand-header{
+      background: linear-gradient(135deg, #12355f 0%, #1d4f91 100%);
+      color:#ffffff;
+      border-radius:14px;
+      padding:16px 18px;
       margin-bottom:18px;
     }
 
-    .doc-overline{
-      font-size:9pt;
-      text-transform:uppercase;
-      letter-spacing:.14em;
-      color:#64748b;
-      font-weight:bold;
-      margin-bottom:8px;
+    .brand-table{
+      width:100%;
+      border-collapse:collapse;
     }
 
-    .doc-title{
-      font-size:24pt;
-      font-weight:bold;
-      color:#0f172a;
-      margin:0 0 8px 0;
-      line-height:1.08;
+    .brand-logo-cell{
+      width:72px;
+      vertical-align:middle;
     }
 
-    .doc-subtitle{
-      font-size:11pt;
-      color:#475569;
+    .brand-logo-wrap{
+      width:56px;
+      height:56px;
+      border-radius:12px;
+      background:rgba(255,255,255,0.12);
+      text-align:center;
+      vertical-align:middle;
+    }
+
+    .brand-logo{
+      width:38px;
+      height:38px;
+      display:block;
+      margin:9px auto;
+      object-fit:contain;
+    }
+
+    .brand-copy{
+      vertical-align:middle;
+    }
+
+    .brand-title{
+      font-size:19pt;
+      font-weight:bold;
+      line-height:1.05;
+      margin:0 0 4px 0;
+      color:#ffffff;
+    }
+
+    .brand-subtitle{
+      font-size:10pt;
+      color:rgba(255,255,255,0.90);
       margin:0;
     }
 
     .meta-grid{
       width:100%;
       border-collapse:separate;
-      border-spacing:8px;
-      margin:16px 0 8px 0;
+      border-spacing:10px;
+      margin:0 0 16px 0;
     }
 
     .meta-box{
-      border:1px solid #e2e8f0;
-      background:#f8fafc;
-      border-radius:10px;
-      padding:10px 12px;
+      border:1px solid #dde6f2;
+      background:#f8fbff;
+      border-radius:12px;
+      padding:11px 12px;
       vertical-align:top;
       width:25%;
     }
 
     .meta-label{
-      font-size:8.5pt;
+      font-size:8pt;
       text-transform:uppercase;
       letter-spacing:.12em;
       color:#64748b;
@@ -133,20 +157,21 @@ function pdf_ui_date(string $value): string
     }
 
     .meta-value{
-      font-size:10.5pt;
+      font-size:10pt;
       color:#0f172a;
       font-weight:bold;
       line-height:1.35;
     }
 
     .toc{
-      margin-top:18px;
-      padding-top:10px;
-      border-top:1px solid #e2e8f0;
+      margin-top:8px;
+      padding:14px 0 6px 0;
+      border-top:1px solid #dbe4f0;
+      border-bottom:1px solid #dbe4f0;
     }
 
     .toc-title{
-      font-size:16pt;
+      font-size:15pt;
       font-weight:bold;
       color:#0f172a;
       margin:0 0 12px 0;
@@ -157,24 +182,32 @@ function pdf_ui_date(string $value): string
     }
 
     .toc-course-title{
-      font-size:11pt;
+      font-size:10.5pt;
       font-weight:bold;
-      color:#0f172a;
-      margin:0 0 8px 0;
+      color:#102845;
+      margin:0 0 7px 0;
+      line-height:1.35;
     }
 
     .toc-lesson-list{
-      margin:0 0 0 24px;
+      margin:0 0 0 20px;
       padding:0;
     }
 
     .toc-lesson{
-      margin:0 0 6px 0;
+      margin:0 0 5px 0;
       color:#334155;
+      font-size:9.4pt;
+      line-height:1.4;
+    }
+
+    .toc-link{
+      color:inherit;
+      text-decoration:none;
     }
 
     .toc-meta{
-      font-size:9pt;
+      font-size:8.3pt;
       color:#64748b;
     }
 
@@ -189,15 +222,15 @@ function pdf_ui_date(string $value): string
     }
 
     .course-title{
-      font-size:18pt;
+      font-size:17pt;
       font-weight:bold;
       color:#0f172a;
-      margin:0 0 14px 0;
+      margin:0 0 12px 0;
       line-height:1.12;
     }
 
     .lesson-section{
-      margin:0 0 20px 0;
+      margin:0 0 18px 0;
       padding-top:12px;
       border-top:1px solid #e2e8f0;
       page-break-inside:avoid;
@@ -208,7 +241,7 @@ function pdf_ui_date(string $value): string
     }
 
     .lesson-title{
-      font-size:13pt;
+      font-size:12.5pt;
       font-weight:bold;
       color:#0f172a;
       margin:0 0 5px 0;
@@ -216,7 +249,7 @@ function pdf_ui_date(string $value): string
     }
 
     .lesson-meta{
-      font-size:9pt;
+      font-size:8.8pt;
       color:#64748b;
       margin:0;
     }
@@ -225,7 +258,7 @@ function pdf_ui_date(string $value): string
       display:inline-block;
       padding:2px 8px;
       border-radius:999px;
-      font-size:8.5pt;
+      font-size:8pt;
       font-weight:bold;
       border:1px solid transparent;
     }
@@ -251,7 +284,7 @@ function pdf_ui_date(string $value): string
     .summary-body{
       margin-top:8px;
       color:#1e293b;
-      font-size:11pt;
+      font-size:10.5pt;
       line-height:1.65;
     }
 
@@ -261,7 +294,7 @@ function pdf_ui_date(string $value): string
 
     .summary-body ul,
     .summary-body ol{
-      margin:0 0 10px 22px;
+      margin:0 0 10px 20px;
       padding:0;
     }
 
@@ -279,19 +312,27 @@ function pdf_ui_date(string $value): string
       margin-top:18px;
       padding-top:10px;
       border-top:1px solid #e2e8f0;
-      font-size:9pt;
+      font-size:8.5pt;
       color:#64748b;
     }
   </style>
 </head>
 <body>
 
-  <div class="doc-header">
-    <div class="doc-overline">Student Training Notebook Export</div>
-    <div class="doc-title"><?= h($programTitle) ?></div>
-    <p class="doc-subtitle">
-      Structured lesson summaries exported from the canonical lesson summary record for the selected training scope.
-    </p>
+  <div class="brand-header">
+    <table class="brand-table">
+      <tr>
+        <td class="brand-logo-cell">
+          <div class="brand-logo-wrap">
+            <img class="brand-logo" src="<?= h('/assets/logo/ipca_logo_white.png') ?>" alt="IPCA Academy">
+          </div>
+        </td>
+        <td class="brand-copy">
+          <div class="brand-title">IPCA Academy</div>
+          <div class="brand-subtitle">Student Training Summary Export</div>
+        </td>
+      </tr>
+    </table>
   </div>
 
   <table class="meta-grid">
@@ -345,7 +386,12 @@ function pdf_ui_date(string $value): string
         <div class="toc-lesson-list">
           <?php foreach ((array)$course['lessons'] as $lesson): ?>
             <div class="toc-lesson">
-              <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
+              <?php
+                $lessonAnchor = 'lesson-' . (int)($lesson['lesson_id'] ?? 0);
+              ?>
+              <a class="toc-link" href="#<?= h($lessonAnchor) ?>">
+                <?= h((string)$lesson['lesson_number']) ?> <?= h((string)$lesson['lesson_title']) ?>
+              </a>
               <span class="toc-meta">
                 — <?= h(pdf_status_label((string)$lesson['review_status'])) ?>
                 <?php if ((int)$lesson['word_count'] > 0): ?>
@@ -368,6 +414,8 @@ function pdf_ui_date(string $value): string
       </div>
 
       <?php foreach ((array)$course['lessons'] as $lesson): ?>
+        <?php $lessonAnchor = 'lesson-' . (int)($lesson['lesson_id'] ?? 0); ?>
+        <a name="<?= h($lessonAnchor) ?>"></a>
         <div class="lesson-section">
           <div class="lesson-head">
             <div class="lesson-title">
@@ -402,7 +450,7 @@ function pdf_ui_date(string $value): string
   <?php endforeach; ?>
 
   <div class="footer-note">
-    This PDF is generated directly from canonical lesson summary data for the selected training scope. No second persistence layer is created.
+    This PDF is generated from IPCA.training – Version 1.0
   </div>
 
 </body>
