@@ -567,6 +567,85 @@ final class LessonSummaryService
         ];
     }
 
+	
+	public function getNotebookExportData(
+    int $userId,
+    int $cohortId,
+    string $studentName,
+    string $exportVersion,
+    string $exportTimestamp
+): array {
+    $view = $this->getNotebookViewData($userId, $cohortId, $studentName);
+
+    $cohort = isset($view['cohort']) && is_array($view['cohort']) ? $view['cohort'] : [];
+
+    $programTitle = trim((string)($cohort['program_name'] ?? ''));
+    if ($programTitle === '') {
+        $programTitle = trim((string)($cohort['course_title'] ?? 'Training Program'));
+    }
+
+    $scopeLabel = trim((string)($cohort['scope_label'] ?? ''));
+    if ($scopeLabel === '') {
+        $scopeLabel = trim((string)($cohort['cohort_name'] ?? ''));
+    }
+    if ($scopeLabel === '') {
+        $scopeLabel = 'Cohort ' . $cohortId;
+    }
+
+    $courses = [];
+    $courseCount = 0;
+    $lessonCount = 0;
+
+    foreach ((array)($view['courses'] ?? []) as $course) {
+        $courseLessons = [];
+
+        foreach ((array)($course['lessons'] ?? []) as $lesson) {
+            $summaryHtml = (string)($lesson['summary_html'] ?? '');
+            $summaryPlain = trim((string)($lesson['summary_plain'] ?? ''));
+
+            if ($summaryPlain === '') {
+                $summaryPlain = trim((string)preg_replace('/\s+/', ' ', strip_tags($summaryHtml)));
+            }
+
+            $courseLessons[] = [
+                'lesson_id' => (int)($lesson['lesson_id'] ?? 0),
+                'anchor_id' => (string)($lesson['anchor_id'] ?? ('lesson-' . (int)($lesson['lesson_id'] ?? 0))),
+                'lesson_number' => (string)($lesson['lesson_number'] ?? ''),
+                'lesson_title' => (string)($lesson['lesson_title'] ?? ''),
+                'review_status' => (string)($lesson['review_status'] ?? 'pending'),
+                'word_count' => (int)($lesson['word_count'] ?? 0),
+                'version_count' => (int)($lesson['version_count'] ?? 0),
+                'updated_at' => (string)($lesson['updated_at'] ?? ''),
+                'summary_html' => $summaryHtml,
+                'summary_plain' => $summaryPlain,
+            ];
+
+            $lessonCount++;
+        }
+
+        $courses[] = [
+            'course_id' => (int)($course['course_id'] ?? 0),
+            'anchor_id' => (string)($course['anchor_id'] ?? ('course-' . (int)($course['course_id'] ?? 0))),
+            'course_number' => (string)($course['course_number'] ?? ''),
+            'course_title' => (string)($course['course_title'] ?? ''),
+            'lessons' => $courseLessons,
+        ];
+
+        $courseCount++;
+    }
+
+    return [
+        'student_name' => $studentName,
+        'program_title' => $programTitle,
+        'scope_label' => $scopeLabel,
+        'export_version' => $exportVersion,
+        'export_timestamp' => $exportTimestamp,
+        'course_count' => $courseCount,
+        'lesson_count' => $lessonCount,
+        'courses' => $courses,
+    ];
+}
+	
     public function getVersionsForLesson(int $userId, int $cohortId, int $lessonId, int $limit = 12): array
     {
         $this->assertStudentEnrollment($userId, $cohortId);
