@@ -51,6 +51,19 @@ function cw_nav_item_is_current(array $item, string $currentPath): bool
     return false;
 }
 
+function cw_nav_child_items(array $item): array
+{
+    if (isset($item['items']) && is_array($item['items'])) {
+        return $item['items'];
+    }
+
+    if (isset($item['children']) && is_array($item['children'])) {
+        return $item['children'];
+    }
+
+    return [];
+}
+
 function cw_nav_group_is_active(array $items, string $currentPath): bool
 {
     foreach ($items as $item) {
@@ -62,7 +75,7 @@ function cw_nav_group_is_active(array $items, string $currentPath): bool
             return true;
         }
 
-        $children = (isset($item['items']) && is_array($item['items'])) ? $item['items'] : [];
+        $children = cw_nav_child_items($item);
         if ($children && cw_nav_group_is_active($children, $currentPath)) {
             return true;
         }
@@ -106,8 +119,8 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
     $html .= '        <img src="/assets/logo/ipca_logo_white.png" alt="IPCA">';
     $html .= '      </div>';
     $html .= '      <div class="app-brand-copy">';
-    $html .= '        <div class="app-brand-title">IPCA Courseware</div>';
-    $html .= '        <div class="app-brand-subtitle">Aviation Training Platform</div>';
+    $html .= '        <div class="app-brand-title">IPCA Academy</div>';
+    $html .= '        <div class="app-brand-subtitle">Structured Learning. Global Standards./div>';
     $html .= '      </div>';
     $html .= '    </div>';
     $html .= '  </div>';
@@ -131,7 +144,7 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
         $href = (string)($entry['href'] ?? '');
         $icon = (string)($entry['icon'] ?? '');
         $comingSoon = !empty($entry['coming_soon']);
-        $items = (isset($entry['items']) && is_array($entry['items'])) ? $entry['items'] : [];
+        $items = cw_nav_child_items($entry);
 
         if (!$items) {
             $html .= '<div class="nav-block nav-block-direct">';
