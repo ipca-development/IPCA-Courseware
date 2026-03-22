@@ -20,7 +20,7 @@ $exportTimestamp = (string)($exportData['export_timestamp'] ?? '');
 $courseCount     = (int)($exportData['course_count'] ?? 0);
 $lessonCount     = (int)($exportData['lesson_count'] ?? 0);
 $courses         = (array)($exportData['courses'] ?? []);
-$logoFilePath    = (string)($exportData['logo_file_path'] ?? '');
+$logoFileUrl     = (string)($exportData['logo_file_url'] ?? '');
 
 function pdf_status_label(string $reviewStatus): string
 {
@@ -65,10 +65,6 @@ function pdf_ui_date(string $value): string
   <meta charset="utf-8">
   <title>Lesson Summaries PDF Export</title>
   <style>
-    @page {
-      margin: 18mm 14mm 18mm 14mm;
-    }
-
     body{
       font-family: sans-serif;
       color:#1e293b;
@@ -80,11 +76,11 @@ function pdf_ui_date(string $value): string
     }
 
     .brand-header{
-      background: linear-gradient(135deg, #12355f 0%, #1d4f91 100%);
+      background:#184883;
       color:#ffffff;
-      border-radius:10px;
-      padding:16px 18px;
-      margin-bottom:18px;
+      border-radius:7px;
+      padding:14px 16px;
+      margin-bottom:16px;
     }
 
     .brand-table{
@@ -93,24 +89,24 @@ function pdf_ui_date(string $value): string
     }
 
     .brand-logo-cell{
-      width:72px;
+      width:64px;
       vertical-align:middle;
     }
 
     .brand-logo-wrap{
-      width:56px;
-      height:56px;
-      border-radius:10px;
-      background:rgba(255,255,255,0.12);
+      width:48px;
+      height:48px;
+      border-radius:6px;
+      background:rgba(255,255,255,0.10);
       text-align:center;
       vertical-align:middle;
     }
 
     .brand-logo{
-      width:38px;
-      height:38px;
+      width:34px;
+      height:34px;
       display:block;
-      margin:9px auto;
+      margin:7px auto;
       object-fit:contain;
     }
 
@@ -119,33 +115,37 @@ function pdf_ui_date(string $value): string
     }
 
     .brand-title{
-      font-size:19pt;
+      font-size:18pt;
       font-weight:bold;
       line-height:1.05;
-      margin:0 0 4px 0;
+      margin:0 0 3px 0;
       color:#ffffff;
     }
 
     .brand-subtitle{
       font-size:10pt;
-      color:rgba(255,255,255,0.90);
+      color:rgba(255,255,255,0.92);
       margin:0;
     }
 
     .meta-grid{
       width:100%;
       border-collapse:separate;
-      border-spacing:10px;
-      margin:0 0 16px 0;
+      border-spacing:8px;
+      margin:0 0 14px 0;
     }
 
-    .meta-box{
+    .meta-cell{
+      width:25%;
+      vertical-align:top;
+    }
+
+    .meta-card{
       border:1px solid #dde6f2;
       background:#f8fbff;
-      border-radius:11px;
-      padding:11px 12px;
-      vertical-align:top;
-      width:25%;
+      border-radius:8px;
+      padding:10px 11px;
+      min-height:56px;
     }
 
     .meta-label{
@@ -166,7 +166,7 @@ function pdf_ui_date(string $value): string
 
     .toc{
       margin-top:8px;
-      padding:14px 0 6px 0;
+      padding:14px 0 8px 0;
       border-top:1px solid #dbe4f0;
       border-bottom:1px solid #dbe4f0;
     }
@@ -257,7 +257,7 @@ function pdf_ui_date(string $value): string
 
     .status-pill{
       display:inline-block;
-      padding:2px 8px;
+      padding:2px 7px;
       border-radius:999px;
       font-size:8pt;
       font-weight:bold;
@@ -325,8 +325,8 @@ function pdf_ui_date(string $value): string
       <tr>
         <td class="brand-logo-cell">
           <div class="brand-logo-wrap">
-            <?php if ($logoFilePath !== '' && file_exists($logoFilePath)): ?>
-              <img class="brand-logo" src="<?= h($logoFilePath) ?>" alt="IPCA Academy">
+            <?php if ($logoFileUrl !== ''): ?>
+              <img class="brand-logo" src="<?= h($logoFileUrl) ?>" alt="IPCA Academy">
             <?php endif; ?>
           </div>
         </td>
@@ -340,39 +340,55 @@ function pdf_ui_date(string $value): string
 
   <table class="meta-grid">
     <tr>
-      <td class="meta-box">
-        <div class="meta-label">Student</div>
-        <div class="meta-value"><?= h($studentName) ?></div>
+      <td class="meta-cell">
+        <div class="meta-card">
+          <div class="meta-label">Student</div>
+          <div class="meta-value"><?= h($studentName) ?></div>
+        </div>
       </td>
-      <td class="meta-box">
-        <div class="meta-label">Program</div>
-        <div class="meta-value"><?= h($programTitle) ?></div>
+      <td class="meta-cell">
+        <div class="meta-card">
+          <div class="meta-label">Program</div>
+          <div class="meta-value"><?= h($programTitle) ?></div>
+        </div>
       </td>
-      <td class="meta-box">
-        <div class="meta-label">Scope / Cohort</div>
-        <div class="meta-value"><?= h($scopeLabel) ?></div>
+      <td class="meta-cell">
+        <div class="meta-card">
+          <div class="meta-label">Scope / Cohort</div>
+          <div class="meta-value"><?= h($scopeLabel) ?></div>
+        </div>
       </td>
-      <td class="meta-box">
-        <div class="meta-label">Export Version</div>
-        <div class="meta-value"><?= h($exportVersion) ?></div>
+      <td class="meta-cell">
+        <div class="meta-card">
+          <div class="meta-label">Export Version</div>
+          <div class="meta-value"><?= h($exportVersion) ?></div>
+        </div>
       </td>
     </tr>
     <tr>
-      <td class="meta-box">
-        <div class="meta-label">Export Timestamp</div>
-        <div class="meta-value"><?= h($exportTimestamp) ?></div>
+      <td class="meta-cell">
+        <div class="meta-card">
+          <div class="meta-label">Export Timestamp</div>
+          <div class="meta-value"><?= h($exportTimestamp) ?></div>
+        </div>
       </td>
-      <td class="meta-box">
-        <div class="meta-label">Courses</div>
-        <div class="meta-value"><?= (int)$courseCount ?></div>
+      <td class="meta-cell">
+        <div class="meta-card">
+          <div class="meta-label">Courses</div>
+          <div class="meta-value"><?= (int)$courseCount ?></div>
+        </div>
       </td>
-      <td class="meta-box">
-        <div class="meta-label">Lessons</div>
-        <div class="meta-value"><?= (int)$lessonCount ?></div>
+      <td class="meta-cell">
+        <div class="meta-card">
+          <div class="meta-label">Lessons</div>
+          <div class="meta-value"><?= (int)$lessonCount ?></div>
+        </div>
       </td>
-      <td class="meta-box">
-        <div class="meta-label">Document Type</div>
-        <div class="meta-value">Lesson Summary Export</div>
+      <td class="meta-cell">
+        <div class="meta-card">
+          <div class="meta-label">Document Type</div>
+          <div class="meta-value">Lesson Summary Export</div>
+        </div>
       </td>
     </tr>
   </table>
@@ -451,7 +467,7 @@ function pdf_ui_date(string $value): string
   <?php endforeach; ?>
 
   <div class="footer-note">
-    This PDF is generated from IPCA.training V1.0
+    This document contains your lesson summaries for the selected training scope.
   </div>
 
 </body>

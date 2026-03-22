@@ -55,8 +55,29 @@ try {
         $exportTimestamp
     );
 
-    // Filesystem path is more reliable than web path for mPDF image rendering
-    $exportData['logo_file_path'] = __DIR__ . '/../assets/logo/ipca_logo_white.png';
+    /*
+     * More reliable logo resolution for mPDF:
+     * - use realpath()
+     * - pass file:// URL
+     * Adjust the candidate list if your real logo filename differs.
+     */
+    $logoCandidates = [
+        __DIR__ . '/../assets/logo/ipca_logo_white.png',
+        __DIR__ . '/../assets/logo/ipca_logo.png',
+        __DIR__ . '/../assets/ipca_logo_white.png',
+        __DIR__ . '/../assets/ipca_logo.png',
+    ];
+
+    $logoRealPath = '';
+    foreach ($logoCandidates as $candidate) {
+        $real = realpath($candidate);
+        if ($real !== false && is_file($real)) {
+            $logoRealPath = $real;
+            break;
+        }
+    }
+
+    $exportData['logo_file_url'] = ($logoRealPath !== '') ? ('file://' . $logoRealPath) : '';
 
     $templatePath = __DIR__ . '/../../templates/pdf/export_lesson_summaries_pdf.php';
     if (!file_exists($templatePath)) {
@@ -91,13 +112,15 @@ try {
         $mpdf = new \Mpdf\Mpdf([
             'mode' => 'utf-8',
             'format' => 'A4',
-            'margin_left' => 16,
-            'margin_right' => 16,
-            'margin_top' => 18,
-            'margin_bottom' => 24,
-            'margin_header' => 8,
-            'margin_footer' => 12,
+            'margin_left' => 14,
+            'margin_right' => 14,
+            'margin_top' => 16,
+            'margin_bottom' => 18,
+            'margin_header' => 6,
+            'margin_footer' => 8,
             'tempDir' => $tempDir,
+            'default_font' => 'sans',
+            'setAutoBottomMargin' => 'stretch',
         ]);
 
         $mpdf->SetTitle('Lesson Summaries');
@@ -105,35 +128,16 @@ try {
         $mpdf->SetCreator('IPCA Courseware');
         $mpdf->SetDisplayMode('fullpage');
 
-        $footerLeft = 'IPCA Academy';
         $footerCenter = trim((string)($exportData['scope_label'] ?? ''));
         if ($footerCenter === '') {
             $footerCenter = trim((string)($exportData['program_title'] ?? ''));
         }
 
-        $mpdf->SetHTMLFooter('
-            <div style="
-                font-size:8.5pt;
-                color:#64748b;
-                border-top:1px solid #dbe4f0;
-                padding-top:5px;
-                line-height:1.2;
-            ">
-                <table width="100%" style="border-collapse:collapse;">
-                    <tr>
-                        <td width="33%" align="left" style="font-weight:bold;">
-                            ' . htmlspecialchars($footerLeft, ENT_QUOTES, 'UTF-8') . '
-                        </td>
-                        <td width="34%" align="center">
-                            ' . htmlspecialchars($footerCenter, ENT_QUOTES, 'UTF-8') . '
-                        </td>
-                        <td width="33%" align="right">
-                            Page {PAGENO} of {nbpg}
-                        </td>
-                    </tr>
-                </table>
-            </div>
-        ');
+        /*
+         * Plain-text footer is more reliable in mPDF than styled HTML footer.
+         * Format: left|center|right
+         */
+        $mpdf->SetFooter('IPCA Academy|' . $footerCenter . '|Page {PAGENO} of {nbpg}');
 
         $mpdf->WriteHTML($html);
         $mpdf->Output($filename, \Mpdf\Output\Destination::INLINE);
