@@ -104,6 +104,11 @@ body{
   font-size:9.5pt;
 }
 
+.toc-link{
+  text-decoration:none;
+  color:#1e293b;
+}
+
 .divider{
   border-top:1px solid #cbd5e1;
   margin:18px 0;
@@ -173,8 +178,11 @@ body{
       </div>
 
       <?php foreach ($course['lessons'] as $lesson): ?>
+        <?php $lessonAnchor = 'lesson-' . (int)$lesson['lesson_id']; ?>
         <div class="toc-lesson">
-          <?= h($lesson['lesson_number']) ?> <?= h($lesson['lesson_title']) ?>
+          <a class="toc-link" href="#<?= h($lessonAnchor) ?>">
+            <?= h($lesson['lesson_number']) ?> <?= h($lesson['lesson_title']) ?>
+          </a>
         </div>
       <?php endforeach; ?>
     </div>
@@ -191,6 +199,11 @@ body{
   </div>
 
   <?php foreach ($course['lessons'] as $lesson): ?>
+
+    <?php $lessonAnchor = 'lesson-' . (int)$lesson['lesson_id']; ?>
+
+    <!-- ✅ FIXED ANCHOR FOR mPDF -->
+    <div id="<?= h($lessonAnchor) ?>" style="height:0; margin:0; padding:0;"></div>
 
     <div class="lesson-title">
       <?= h($lesson['lesson_number']) ?> <?= h($lesson['lesson_title']) ?>
