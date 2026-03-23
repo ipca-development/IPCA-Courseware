@@ -448,10 +448,8 @@ final class NotificationService
 
     /**
      * Queue/send real progression notification using SAVED live template.
-     * This is a passive execution path only.
-     * Caller must already decide notification_key, recipients, and context.
-     * Duplicate suppression happens BEFORE queue creation.
-     * email_type = notification_key ALWAYS.
+     * Suppression happens BEFORE queue creation.
+     * Returns suppression result or queue/send result.
      */
     public function queueRealNotification(array $payload): array
     {
@@ -471,102 +469,53 @@ final class NotificationService
         }
 
         $notificationKey = trim((string)$payload['notification_key']);
-        if ($notificationKey === '') {
-            throw new InvalidArgumentException('Missing required field: notification_key');
-        }
-
         $template = $this->getTemplateByKey($notificationKey);
         if (!$template) {
             throw new RuntimeException('Notification template not found: ' . $notificationKey);
-        }
-
-        if ((int)($template['is_enabled'] ?? 0) !== 1) {
-            $this->engine->logProgressionEvent([
-                'user_id' => (int)$payload['user_id'],
-                'cohort_id' => (int)$payload['cohort_id'],
-                'lesson_id' => (int)$payload['lesson_id'],
-                'progress_test_id' => isset($payload['progress_test_id']) && $payload['progress_test_id'] !== null
-                    ? (int)$payload['progress_test_id']
-                    : null,
-                'event_type' => 'notification',
-                'event_code' => 'progression_email_failed_configuration',
-                'event_status' => 'warning',
-                'actor_type' => trim((string)($payload['actor_type'] ?? 'system')) !== ''
-                    ? (string)$payload['actor_type']
-                    : 'system',
-                'actor_user_id' => isset($payload['actor_user_id']) ? (int)$payload['actor_user_id'] : null,
-                'event_time' => gmdate('Y-m-d H:i:s'),
-                'payload' => [
-                    'notification_key' => $notificationKey,
-                    'notification_channel' => self::CHANNEL_EMAIL,
-                    'notification_template_id' => (int)$template['id'],
-                    'reason' => 'disabled',
-                ],
-                'legal_note' => 'Progression notification request failed because the live template is disabled.'
-            ]);
-
-            throw new RuntimeException('Notification template disabled: ' . $notificationKey);
         }
 
         $deliveryMode = (string)($template['delivery_mode'] ?? 'immediate');
         $userId = (int)$payload['user_id'];
         $cohortId = (int)$payload['cohort_id'];
         $lessonId = (int)$payload['lesson_id'];
-        $progressTestId = isset($payload['progress_test_id']) && $payload['progress_test_id'] !== null
-            ? (int)$payload['progress_test_id']
-            : null;
+        $progressTestId = isset($payload['progress_test_id']) ? (int)$payload['progress_test_id'] : null;
         $actorType = trim((string)($payload['actor_type'] ?? 'system'));
         if ($actorType === '') {
             $actorType = 'system';
         }
         $actorUserId = isset($payload['actor_user_id']) ? (int)$payload['actor_user_id'] : null;
 
-        $duplicateStrategy = trim((string)($template['duplicate_strategy'] ?? ''));
-        if ($duplicateStrategy !== '') {
-            $existingEmailId = $this->findExistingProgressionEmailByDuplicateStrategy(
-                $notificationKey,
-                $duplicateStrategy,
-                $userId,
-                $cohortId,
-                $lessonId,
-                $progressTestId
-            );
-
-            if ($existingEmailId !== null) {
-                $this->engine->logProgressionEvent([
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => $progressTestId,
-                    'event_type' => 'notification',
-                    'event_code' => 'progression_email_suppressed',
-                    'event_status' => 'info',
-                    'actor_type' => $actorType,
-                    'actor_user_id' => $actorUserId,
-                    'event_time' => gmdate('Y-m-d H:i:s'),
-                    'payload' => [
-                        'notification_key' => $notificationKey,
-                        'notification_channel' => self::CHANNEL_EMAIL,
-                        'notification_template_id' => (int)$template['id'],
-                        'reason' => 'duplicate_suppressed',
-                        'duplicate_strategy' => $duplicateStrategy,
-                        'existing_email_id' => $existingEmailId,
-                        'recipients_to' => $payload['recipients_to'],
-                        'recipients_cc' => $payload['recipients_cc'] ?? [],
-                    ],
-                    'legal_note' => 'Notification suppressed before queue creation by configured duplicate strategy.'
-                ]);
-
-                return [
-                    'ok' => true,
-                    'suppressed' => true,
-                    'reason' => 'duplicate_suppressed',
+        if ((int)($template['is_enabled'] ?? 0) !== 1) {
+            $this->engine->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $progressTestId,
+                'event_type' => 'notification',
+                'event_code' => 'progression_email_suppressed',
+                'event_status' => 'info',
+                'actor_type' => $actorType,
+                'actor_user_id' => $actorUserId,
+                'event_time' => gmdate('Y-m-d H:i:s'),
+                'payload' => [
                     'notification_key' => $notificationKey,
-                    'duplicate_strategy' => $duplicateStrategy,
-                    'email_id' => $existingEmailId,
-                    'send_result' => null,
-                ];
-            }
+                    'notification_channel' => self::CHANNEL_EMAIL,
+                    'notification_template_id' => (int)$template['id'],
+                    'reason' => 'disabled',
+                    'recipients_to' => $payload['recipients_to'],
+                    'recipients_cc' => $payload['recipients_cc'] ?? [],
+                ],
+                'legal_note' => 'Notification suppressed before queue creation because template is disabled.'
+            ]);
+
+            return [
+                'ok' => true,
+                'suppressed' => true,
+                'reason' => 'disabled',
+                'notification_key' => $notificationKey,
+                'email_id' => null,
+                'send_result' => null,
+            ];
         }
 
         $version = $this->getLatestTemplateVersion((int)$template['id']);
@@ -605,26 +554,27 @@ final class NotificationService
             $context
         );
 
-        $emailId = $this->logProgressionNotificationFromTemplate(
-            $notificationKey,
-            $userId,
-            $cohortId,
-            $lessonId,
-            $progressTestId,
-            $payload['recipients_to'],
-            $payload['recipients_cc'] ?? [],
-            $rendered['subject'],
-            $rendered['html'],
-            $rendered['text'],
-            $context,
-            isset($payload['ai_inputs']) ? $payload['ai_inputs'] : null,
-            (int)$template['id'],
-            (int)$version['id']
-        );
+        $emailId = $this->queueProgressionEmailExtended([
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => $progressTestId,
+            'email_type' => $notificationKey,
+            'recipients_to' => $payload['recipients_to'],
+            'recipients_cc' => $payload['recipients_cc'] ?? [],
+            'subject' => $rendered['subject'],
+            'body_html' => $rendered['html'],
+            'body_text' => $rendered['text'],
+            'ai_inputs' => $payload['ai_inputs'] ?? null,
+            'sent_status' => 'queued',
+            'notification_template_id' => (int)$template['id'],
+            'notification_template_version_id' => (int)$version['id'],
+            'render_context_json' => $context,
+        ]);
 
         $sendResult = null;
         if ($deliveryMode === 'immediate') {
-            $sendResult = $this->sendLoggedProgressionEmailById($emailId);
+            $sendResult = $this->engine->sendProgressionEmailById($emailId);
         }
 
         return [
@@ -635,380 +585,6 @@ final class NotificationService
             'delivery_mode' => $deliveryMode,
             'send_result' => $sendResult,
         ];
-    }
-
-    /**
-     * Public progression log helper.
-     * email_type = notification_key ALWAYS.
-     */
-    public function logProgressionNotificationFromTemplate(
-        string $notificationKey,
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        ?int $progressTestId,
-        mixed $recipientsTo,
-        mixed $recipientsCc,
-        string $subject,
-        string $bodyHtml,
-        ?string $bodyText,
-        array $renderContext,
-        mixed $aiInputs = null,
-        ?int $notificationTemplateId = null,
-        ?int $notificationTemplateVersionId = null
-    ): int {
-        return $this->queueProgressionEmailExtended([
-            'user_id' => $userId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => $progressTestId,
-            'email_type' => $notificationKey,
-            'recipients_to' => $recipientsTo,
-            'recipients_cc' => $recipientsCc,
-            'subject' => $subject,
-            'body_html' => $bodyHtml,
-            'body_text' => $bodyText,
-            'ai_inputs' => $aiInputs,
-            'sent_status' => 'queued',
-            'notification_template_id' => $notificationTemplateId,
-            'notification_template_version_id' => $notificationTemplateVersionId,
-            'render_context_json' => $renderContext,
-        ]);
-    }
-
-    /**
-     * Public logged progression email sender.
-     * Sends exactly the already-logged row.
-     */
-    public function sendLoggedProgressionEmailById(int $emailId): array
-    {
-        $stmt = $this->pdo->prepare("
-            SELECT *
-            FROM training_progression_emails
-            WHERE id = :id
-            LIMIT 1
-        ");
-        $stmt->execute([
-            ':id' => $emailId,
-        ]);
-        $email = $stmt->fetch();
-
-        if (!$email) {
-            throw new RuntimeException('Progression email not found: ' . $emailId);
-        }
-
-        $recipientsTo = $this->decodeRecipientField((string)$email['recipients_to']);
-        $recipientsCc = $this->decodeRecipientField((string)($email['recipients_cc'] ?? ''));
-
-        $mailPayload = [
-            'to' => $recipientsTo,
-            'subject' => (string)$email['subject'],
-            'html' => (string)$email['body_html'],
-            'text' => (string)($email['body_text'] ?? ''),
-            'headers' => [
-                'X-IPCA-Notification-Key' => (string)$email['email_type'],
-                'X-IPCA-Notification-Type' => 'progression',
-            ],
-        ];
-
-        if (!empty($recipientsCc)) {
-            $mailPayload['cc'] = $recipientsCc;
-        }
-
-        $result = cw_send_mail($mailPayload);
-
-        $sentStatus = !empty($result['ok']) ? 'sent' : 'failed';
-        $sentAt = !empty($result['ok']) ? gmdate('Y-m-d H:i:s') : null;
-
-        if (!empty($result['ok'])) {
-            $stmt = $this->pdo->prepare("
-                UPDATE training_progression_emails
-                SET
-                    sent_status = :sent_status,
-                    sent_at = :sent_at
-                WHERE id = :id
-                LIMIT 1
-            ");
-            $stmt->execute([
-                ':sent_status' => $sentStatus,
-                ':sent_at' => $sentAt,
-                ':id' => $emailId,
-            ]);
-        } else {
-            $stmt = $this->pdo->prepare("
-                UPDATE training_progression_emails
-                SET
-                    sent_status = :sent_status
-                WHERE id = :id
-                LIMIT 1
-            ");
-            $stmt->execute([
-                ':sent_status' => $sentStatus,
-                ':id' => $emailId,
-            ]);
-        }
-
-        $this->engine->logProgressionEvent([
-            'user_id' => (int)$email['user_id'],
-            'cohort_id' => (int)$email['cohort_id'],
-            'lesson_id' => (int)$email['lesson_id'],
-            'progress_test_id' => isset($email['progress_test_id']) && $email['progress_test_id'] !== null ? (int)$email['progress_test_id'] : null,
-            'event_type' => 'notification',
-            'event_code' => !empty($result['ok']) ? 'progression_email_sent' : 'progression_email_failed',
-            'event_status' => !empty($result['ok']) ? 'success' : 'warning',
-            'actor_type' => 'system',
-            'actor_user_id' => null,
-            'event_time' => gmdate('Y-m-d H:i:s'),
-            'payload' => [
-                'notification_key' => (string)$email['email_type'],
-                'notification_channel' => self::CHANNEL_EMAIL,
-                'email_id' => $emailId,
-                'notification_template_id' => isset($email['notification_template_id']) && $email['notification_template_id'] !== null ? (int)$email['notification_template_id'] : null,
-                'notification_template_version_id' => isset($email['notification_template_version_id']) && $email['notification_template_version_id'] !== null ? (int)$email['notification_template_version_id'] : null,
-                'provider' => (string)($result['provider'] ?? 'smtp'),
-                'ok' => !empty($result['ok']) ? 1 : 0,
-                'message_id' => $result['message_id'] ?? null,
-                'error' => $result['error'] ?? null,
-            ],
-            'legal_note' => 'Progression notification delivery executed from logged email row.'
-        ]);
-
-        return [
-            'ok' => !empty($result['ok']),
-            'provider' => (string)($result['provider'] ?? 'smtp'),
-            'message_id' => $result['message_id'] ?? null,
-            'error' => $result['error'] ?? null,
-            'email_id' => $emailId,
-            'notification_key' => (string)$email['email_type'],
-        ];
-    }
-
-    /**
-     * Pure helper only. No decision-making.
-     */
-    public function buildBaseProgressionContext(array $data): array
-    {
-        $context = [
-            'student_name' => trim((string)($data['student_name'] ?? '')),
-            'chief_name' => trim((string)($data['chief_name'] ?? '')),
-            'lesson_title' => trim((string)($data['lesson_title'] ?? '')),
-            'cohort_title' => trim((string)($data['cohort_title'] ?? ($data['cohort_name'] ?? ''))),
-            'course_title' => trim((string)($data['course_title'] ?? '')),
-            'attempt_count' => isset($data['attempt_count']) ? (string)$data['attempt_count'] : '',
-            'score_pct' => isset($data['score_pct']) ? (string)$data['score_pct'] : '',
-            'previous_deadline_text' => trim((string)($data['previous_deadline_text'] ?? '')),
-            'new_deadline_text' => trim((string)($data['new_deadline_text'] ?? '')),
-            'same_lesson_unsat_count' => isset($data['same_lesson_unsat_count']) ? (string)$data['same_lesson_unsat_count'] : '',
-            'coursewide_unsat_count' => isset($data['coursewide_unsat_count']) ? (string)$data['coursewide_unsat_count'] : '',
-            'decision_code' => trim((string)($data['decision_code'] ?? '')),
-            'remediation_url' => trim((string)($data['remediation_url'] ?? '')),
-            'approval_url' => trim((string)($data['approval_url'] ?? '')),
-            'reason_submission_url' => trim((string)($data['reason_submission_url'] ?? '')),
-            'weak_areas_html' => trim((string)($data['weak_areas_html'] ?? '')),
-            'weak_areas_text' => trim((string)($data['weak_areas_text'] ?? '')),
-            'written_debrief_html' => trim((string)($data['written_debrief_html'] ?? '')),
-            'written_debrief_text' => trim((string)($data['written_debrief_text'] ?? '')),
-            'decision_notes_html' => trim((string)($data['decision_notes_html'] ?? '')),
-            'decision_notes_text' => trim((string)($data['decision_notes_text'] ?? '')),
-            'review_notes_html' => trim((string)($data['review_notes_html'] ?? '')),
-            'review_notes_text' => trim((string)($data['review_notes_text'] ?? '')),
-        ];
-
-        if (isset($data['extra']) && is_array($data['extra'])) {
-            foreach ($data['extra'] as $k => $v) {
-                $key = trim((string)$k);
-                if ($key === '') {
-                    continue;
-                }
-
-                if (is_scalar($v) || $v === null) {
-                    $context[$key] = $v === null ? '' : (string)$v;
-                } else {
-                    $context[$key] = json_encode($v, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                }
-            }
-        }
-
-        return $context;
-    }
-
-    /**
-     * Passive wrapper only.
-     * Caller already knows notification_key, recipients, and context.
-     */
-    public function queueStandardizedProgressionNotification(
-        string $notificationKey,
-        array $context,
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        ?int $progressTestId,
-        mixed $recipientsTo,
-        mixed $recipientsCc = [],
-        ?string $actorType = 'system',
-        ?int $actorUserId = null,
-        mixed $aiInputs = null
-    ): array {
-        return $this->queueRealNotification([
-            'notification_key' => $notificationKey,
-            'user_id' => $userId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => $progressTestId,
-            'recipients_to' => $recipientsTo,
-            'recipients_cc' => $recipientsCc,
-            'context' => $context,
-            'actor_type' => $actorType ?: 'system',
-            'actor_user_id' => $actorUserId,
-            'ai_inputs' => $aiInputs,
-        ]);
-    }
-
-    /**
-     * Passive wrapper only.
-     */
-    public function queueStudentProgressionNotification(
-        string $notificationKey,
-        array $context,
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        ?int $progressTestId,
-        string $studentEmail,
-        ?string $studentName = '',
-        mixed $recipientsCc = [],
-        ?string $actorType = 'system',
-        ?int $actorUserId = null,
-        mixed $aiInputs = null
-    ): array {
-        $recipientsTo = [[
-            'email' => trim($studentEmail),
-            'name' => trim((string)$studentName),
-        ]];
-
-        return $this->queueStandardizedProgressionNotification(
-            $notificationKey,
-            $context,
-            $userId,
-            $cohortId,
-            $lessonId,
-            $progressTestId,
-            $recipientsTo,
-            $recipientsCc,
-            $actorType,
-            $actorUserId,
-            $aiInputs
-        );
-    }
-
-    /**
-     * Passive wrapper only.
-     */
-    public function queueChiefProgressionNotification(
-        string $notificationKey,
-        array $context,
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        ?int $progressTestId,
-        string $chiefEmail,
-        ?string $chiefName = '',
-        mixed $recipientsCc = [],
-        ?string $actorType = 'system',
-        ?int $actorUserId = null,
-        mixed $aiInputs = null
-    ): array {
-        $recipientsTo = [[
-            'email' => trim($chiefEmail),
-            'name' => trim((string)$chiefName),
-        ]];
-
-        return $this->queueStandardizedProgressionNotification(
-            $notificationKey,
-            $context,
-            $userId,
-            $cohortId,
-            $lessonId,
-            $progressTestId,
-            $recipientsTo,
-            $recipientsCc,
-            $actorType,
-            $actorUserId,
-            $aiInputs
-        );
-    }
-
-    /**
-     * Operational dedupe only:
-     * once_per_lesson
-     * once_per_progress_test
-     */
-    public function findExistingProgressionEmailByDuplicateStrategy(
-        string $notificationKey,
-        string $duplicateStrategy,
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        ?int $progressTestId = null
-    ): ?int {
-        $notificationKey = trim($notificationKey);
-        $duplicateStrategy = trim($duplicateStrategy);
-
-        if ($notificationKey === '' || $duplicateStrategy === '') {
-            return null;
-        }
-
-        if ($duplicateStrategy === 'once_per_lesson') {
-            $stmt = $this->pdo->prepare("
-                SELECT id
-                FROM training_progression_emails
-                WHERE user_id = :user_id
-                  AND cohort_id = :cohort_id
-                  AND lesson_id = :lesson_id
-                  AND email_type = :email_type
-                ORDER BY id DESC
-                LIMIT 1
-            ");
-            $stmt->execute([
-                ':user_id' => $userId,
-                ':cohort_id' => $cohortId,
-                ':lesson_id' => $lessonId,
-                ':email_type' => $notificationKey,
-            ]);
-            $id = $stmt->fetchColumn();
-
-            return $id !== false ? (int)$id : null;
-        }
-
-        if ($duplicateStrategy === 'once_per_progress_test') {
-            if ($progressTestId === null || $progressTestId <= 0) {
-                return null;
-            }
-
-            $stmt = $this->pdo->prepare("
-                SELECT id
-                FROM training_progression_emails
-                WHERE user_id = :user_id
-                  AND cohort_id = :cohort_id
-                  AND lesson_id = :lesson_id
-                  AND progress_test_id = :progress_test_id
-                  AND email_type = :email_type
-                ORDER BY id DESC
-                LIMIT 1
-            ");
-            $stmt->execute([
-                ':user_id' => $userId,
-                ':cohort_id' => $cohortId,
-                ':lesson_id' => $lessonId,
-                ':progress_test_id' => $progressTestId,
-                ':email_type' => $notificationKey,
-            ]);
-            $id = $stmt->fetchColumn();
-
-            return $id !== false ? (int)$id : null;
-        }
-
-        return null;
     }
 
     public function getTemplateByKey(string $notificationKey): ?array
@@ -1225,6 +801,7 @@ final class NotificationService
             'text_template' => (string)$version['text_template'],
         ], $actorUserId, $note);
     }
+
     public function buildDummyContext(string $notificationKey, array $variables = []): array
     {
         $base = [
@@ -1232,7 +809,6 @@ final class NotificationService
             'chief_name' => 'Capt. Reynolds',
             'lesson_title' => 'Aerodynamics Basics',
             'cohort_title' => 'PPL Spring 2026',
-            'course_title' => 'Private Pilot',
             'attempt_count' => '3',
             'score_pct' => '58',
             'previous_deadline_text' => '2026-03-20 00:00 UTC',
@@ -1288,7 +864,7 @@ final class NotificationService
                 continue;
             }
 
-            if (array_key_exists('sample_value', $meta) && trim((string)$meta['sample_value']) !== '') {
+            if (array_key_exists('sample_value', $meta)) {
                 $out[$name] = (string)$meta['sample_value'];
                 continue;
             }
@@ -1645,7 +1221,7 @@ final class NotificationService
             ':user_id' => (int)$email['user_id'],
             ':cohort_id' => (int)$email['cohort_id'],
             ':lesson_id' => (int)$email['lesson_id'],
-            ':progress_test_id' => isset($email['progress_test_id']) && $email['progress_test_id'] !== null ? (int)$email['progress_test_id'] : null,
+            ':progress_test_id' => isset($email['progress_test_id']) ? (int)$email['progress_test_id'] : null,
             ':email_type' => (string)$email['email_type'],
             ':recipients_to' => $this->encodeMixedField($email['recipients_to']),
             ':recipients_cc' => array_key_exists('recipients_cc', $email)
@@ -1676,40 +1252,5 @@ final class NotificationService
             return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
         }
         return (string)$value;
-    }
-
-    private function decodeRecipientField(string $value): array
-    {
-        $value = trim($value);
-        if ($value === '') {
-            return [];
-        }
-
-        $decoded = json_decode($value, true);
-        if (is_array($decoded)) {
-            $out = [];
-            foreach ($decoded as $row) {
-                if (!is_array($row)) {
-                    continue;
-                }
-
-                $email = trim((string)($row['email'] ?? ''));
-                if ($email === '') {
-                    continue;
-                }
-
-                $out[] = [
-                    'email' => $email,
-                    'name' => trim((string)($row['name'] ?? '')),
-                ];
-            }
-
-            return $out;
-        }
-
-        return [[
-            'email' => $value,
-            'name' => '',
-        ]];
     }
 }

@@ -9,7 +9,6 @@ cw_require_login();
 
 $u = cw_current_user($pdo);
 $userId = (int)($u['id'] ?? 0);
-$role   = (string)($u['role'] ?? '');
 
 $engine = new CoursewareProgressionV2($pdo);
 
@@ -19,36 +18,8 @@ if ($token === '') {
     exit('Missing token');
 }
 
-$action = $engine->getRequiredActionByToken($token);
-if (!$action) {
-    http_response_code(404);
-    exit('Approval action not found');
-}
-
-if ((string)$action['action_type'] !== 'instructor_approval') {
-    http_response_code(400);
-    exit('Invalid action type');
-}
-
-$policy = $engine->getAllPolicies([
-    'cohort_id' => (int)$action['cohort_id']
-]);
-
-$chiefInstructorUserId = (int)($policy['chief_instructor_user_id'] ?? 0);
-
-if ($role !== 'admin' && $userId !== $chiefInstructorUserId) {
-    http_response_code(403);
-    exit('Forbidden');
-}
-
-$ipAddress = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
-$userAgent = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
-
-$engine->markRequiredActionOpened((int)$action['id'], $ipAddress, $userAgent);
-
 $error = '';
 $success = '';
-$emailSendResult = null;
 
 function h2(?string $v): string
 {
@@ -60,139 +31,99 @@ function yesno(int $v): string
     return $v ? 'Yes' : 'No';
 }
 
+function load_instructor_approval_page_state(
+    CoursewareProgressionV2 $engine,
+    string $token
+): array {
+    $state = $engine->getInstructorApprovalPageStateByToken($token);
+
+    if (!$state || empty($state['action'])) {
+        http_response_code(404);
+        exit('Approval action not found');
+    }
+
+    if (isset($state['access']) && is_array($state['access']) && array_key_exists('is_allowed', $state['access'])) {
+        if (empty($state['access']['is_allowed'])) {
+            http_response_code(403);
+            exit('Forbidden');
+        }
+    }
+
+    $action = (array)$state['action'];
+    if ((string)($action['action_type'] ?? '') !== 'instructor_approval') {
+        http_response_code(400);
+        exit('Invalid action type');
+    }
+
+    return $state;
+}
+
+$state = load_instructor_approval_page_state($engine, $token);
+$action = (array)$state['action'];
+$activity = (array)($state['activity'] ?? []);
+
+$ipAddress = trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+$userAgent = trim((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+
+try {
+    $engine->markInstructorApprovalPageOpened(
+    (int)$action['id'],
+    $ipAddress,
+    $userAgent
+);
+} catch (Throwable $e) {
+    error_log('markInstructorApprovalPageOpened failed: ' . $e->getMessage());
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         if (isset($_POST['mark_instructor_session_completed'])) {
-            $engine->markInstructorSessionCompleted(
+            $result = $engine->markInstructorApprovalOneOnOneCompleted(
                 (int)$action['id'],
                 $userId,
                 $ipAddress,
                 $userAgent
             );
-            $success = 'Instructor session completion recorded.';
         } else {
-            $decisionCode = trim((string)($_POST['decision_code'] ?? ''));
-            $grantedExtraAttempts = max(0, min(5, (int)($_POST['granted_extra_attempts'] ?? 0)));
-            $summaryRevisionRequired = isset($_POST['summary_revision_required']) ? 1 : 0;
-            $oneOnOneRequired = isset($_POST['one_on_one_required']) ? 1 : 0;
-            $trainingSuspended = isset($_POST['training_suspended']) ? 1 : 0;
-            $majorInterventionFlag = isset($_POST['major_intervention_flag']) ? 1 : 0;
-            $decisionNotes = trim((string)($_POST['decision_notes'] ?? ''));
+            $payload = [
+                'decision_code' => trim((string)($_POST['decision_code'] ?? '')),
+                'granted_extra_attempts' => (int)($_POST['granted_extra_attempts'] ?? 0),
+                'summary_revision_required' => isset($_POST['summary_revision_required']) ? 1 : 0,
+                'one_on_one_required' => isset($_POST['one_on_one_required']) ? 1 : 0,
+                'training_suspended' => isset($_POST['training_suspended']) ? 1 : 0,
+                'major_intervention_flag' => isset($_POST['major_intervention_flag']) ? 1 : 0,
+                'decision_notes' => trim((string)($_POST['decision_notes'] ?? '')),
+            ];
 
-            $decisionResult = $engine->recordInstructorDecision(
+            $result = $engine->processInstructorApprovalDecision(
                 (int)$action['id'],
-                [
-                    'decision_code' => $decisionCode,
-                    'granted_extra_attempts' => $grantedExtraAttempts,
-                    'summary_revision_required' => $summaryRevisionRequired,
-                    'one_on_one_required' => $oneOnOneRequired,
-                    'training_suspended' => $trainingSuspended,
-                    'major_intervention_flag' => $majorInterventionFlag,
-                    'decision_notes' => $decisionNotes,
-                ],
+                $payload,
                 $userId,
                 $ipAddress,
                 $userAgent
             );
-
-            $studentRecipient = $engine->getUserRecipient((int)$action['user_id']);
-            if ($studentRecipient !== null) {
-                $lessonTitle = $engine->getLessonTitle((int)$action['lesson_id']);
-                $cohortTitle = $engine->getCohortTitle((int)$action['cohort_id']);
-                $studentName = trim((string)($studentRecipient['name'] ?? 'Student'));
-                if ($studentName === '') {
-                    $studentName = 'Student';
-                }
-
-                $subject = 'Instructor Intervention Decision - ' . $lessonTitle;
-
-                $html = ''
-                    . '<p>Dear ' . h2($studentName) . ',</p>'
-                    . '<p>Your instructor has recorded a decision for <strong>' . h2($lessonTitle) . '</strong> in <strong>' . h2($cohortTitle) . '</strong>.</p>'
-                    . '<p><strong>Decision:</strong> ' . h2((string)$decisionResult['decision_code']) . '</p>'
-                    . '<p><strong>Extra attempts granted:</strong> ' . h2((string)$decisionResult['granted_extra_attempts']) . '</p>'
-                    . '<p><strong>Summary revision required:</strong> ' . h2(yesno((int)$decisionResult['summary_revision_required'])) . '</p>'
-                    . '<p><strong>Instructor session required:</strong> ' . h2(yesno((int)$decisionResult['one_on_one_required'])) . '</p>'
-                    . '<p><strong>Training suspended:</strong> ' . h2(yesno((int)$decisionResult['training_suspended'])) . '</p>'
-                    . '<p><strong>Instructor notes:</strong><br>' . nl2br(h2((string)$decisionResult['decision_notes'])) . '</p>'
-                    . '<p>Please review your course page for the next step.</p>'
-                    . '<p>Kind regards,<br>Chief Training Team<br>IPCA Courseware</p>';
-
-                $text = ''
-                    . "Dear {$studentName},\n\n"
-                    . "Your instructor has recorded a decision for {$lessonTitle} in {$cohortTitle}.\n\n"
-                    . "Decision: {$decisionResult['decision_code']}\n"
-                    . "Extra attempts granted: {$decisionResult['granted_extra_attempts']}\n"
-                    . "Summary revision required: " . yesno((int)$decisionResult['summary_revision_required']) . "\n"
-                    . "Instructor session required: " . yesno((int)$decisionResult['one_on_one_required']) . "\n"
-                    . "Training suspended: " . yesno((int)$decisionResult['training_suspended']) . "\n\n"
-                    . "Instructor notes:\n{$decisionResult['decision_notes']}\n\n"
-                    . "Please review your course page for the next step.\n\n"
-                    . "Kind regards,\nChief Training Team\nIPCA Courseware";
-
-                $emailId = $engine->queueProgressionEmail([
-                    'user_id' => (int)$action['user_id'],
-                    'cohort_id' => (int)$action['cohort_id'],
-                    'lesson_id' => (int)$action['lesson_id'],
-                    'progress_test_id' => isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null,
-                    'email_type' => 'instructor_intervention_decision',
-                    'recipients_to' => [[
-                        'email' => (string)$studentRecipient['email'],
-                        'name' => $studentName
-                    ]],
-                    'recipients_cc' => [],
-                    'subject' => $subject,
-                    'body_html' => $html,
-                    'body_text' => $text,
-                    'ai_inputs' => [
-                        'decision_code' => $decisionResult['decision_code'],
-                        'granted_extra_attempts' => $decisionResult['granted_extra_attempts'],
-                        'summary_revision_required' => $decisionResult['summary_revision_required'],
-                        'one_on_one_required' => $decisionResult['one_on_one_required'],
-                        'training_suspended' => $decisionResult['training_suspended'],
-                        'major_intervention_flag' => $decisionResult['major_intervention_flag'],
-                    ],
-                    'sent_status' => 'queued'
-                ]);
-
-                try {
-                    $emailSendResult = $engine->sendProgressionEmailById((int)$emailId);
-                } catch (Throwable $mailEx) {
-                    $emailSendResult = [
-                        'ok' => false,
-                        'error' => $mailEx->getMessage()
-                    ];
-                }
-            }
-
-            $success = 'Instructor decision recorded successfully.';
         }
 
-        $action = $engine->getRequiredActionByToken($token);
+        $success = trim((string)($result['message'] ?? ''));
+        if ($success === '') {
+            $success = 'Action recorded successfully.';
+        }
+
+        if (!empty($result['state']) && is_array($result['state'])) {
+            $state = $result['state'];
+        } else {
+            $state = load_instructor_approval_page_state($engine, $token);
+        }
+
+        $action = (array)($state['action'] ?? []);
+        $activity = (array)($state['activity'] ?? []);
     } catch (Throwable $e) {
         $error = $e->getMessage();
-        $action = $engine->getRequiredActionByToken($token);
+        $state = load_instructor_approval_page_state($engine, $token);
+        $action = (array)($state['action'] ?? []);
+        $activity = (array)($state['activity'] ?? []);
     }
 }
-
-$activitySt = $pdo->prepare("
-    SELECT
-        completion_status,
-        granted_extra_attempts,
-        one_on_one_required,
-        one_on_one_completed
-    FROM lesson_activity
-    WHERE user_id = ?
-      AND cohort_id = ?
-      AND lesson_id = ?
-    LIMIT 1
-");
-$activitySt->execute([
-    (int)$action['user_id'],
-    (int)$action['cohort_id'],
-    (int)$action['lesson_id']
-]);
-$activity = $activitySt->fetch(PDO::FETCH_ASSOC) ?: [];
 
 cw_header('Instructor Approval');
 ?>
@@ -200,7 +131,7 @@ cw_header('Instructor Approval');
 <div class="card" style="max-width:980px;margin:24px auto;">
     <h1>Instructor Decision Page</h1>
 
-    <p><strong>Title:</strong> <?= h2((string)$action['title']) ?></p>
+    <p><strong>Title:</strong> <?= h2((string)($action['title'] ?? '')) ?></p>
 
     <div style="margin-top:16px;padding:16px;border:1px solid #ddd;border-radius:10px;background:#fafafa;">
         <?= (string)($action['instructions_html'] ?? '') ?>
@@ -220,7 +151,7 @@ cw_header('Instructor Approval');
 
     <div style="margin-top:20px;padding:16px;border:1px solid #ddd;border-radius:10px;background:#fff;">
         <h3 style="margin-top:0;">Current state</h3>
-        <p><strong>Action status:</strong> <?= h2((string)$action['status']) ?></p>
+        <p><strong>Action status:</strong> <?= h2((string)($action['status'] ?? '')) ?></p>
         <p><strong>Decision code:</strong> <?= h2((string)($action['decision_code'] ?? '')) ?: '—' ?></p>
         <p><strong>Granted extra attempts:</strong> <?= h2((string)($action['granted_extra_attempts'] ?? 0)) ?></p>
         <p><strong>Summary revision required:</strong> <?= h2(yesno((int)($action['summary_revision_required'] ?? 0))) ?></p>
@@ -231,7 +162,7 @@ cw_header('Instructor Approval');
         <p><strong>Instructor notes:</strong><br><?= nl2br(h2((string)($action['decision_notes'] ?? ''))) ?></p>
     </div>
 
-    <?php if ((string)$action['status'] !== 'approved'): ?>
+    <?php if ((string)($action['status'] ?? '') !== 'approved'): ?>
         <form method="post" style="margin-top:20px;">
             <div style="display:grid;grid-template-columns:repeat(2,minmax(220px,1fr));gap:16px;">
                 <div>
@@ -246,12 +177,11 @@ cw_header('Instructor Approval');
                 </div>
 
                 <div>
-                    <label><strong>Extra Attempts Granted (0–5)</strong></label><br>
+                    <label><strong>Extra Attempts Granted</strong></label><br>
                     <input
                         type="number"
                         name="granted_extra_attempts"
                         min="0"
-                        max="5"
                         step="1"
                         value="0"
                         style="margin-top:6px;padding:10px;width:100%;box-sizing:border-box;"
@@ -283,7 +213,7 @@ cw_header('Instructor Approval');
     <?php endif; ?>
 
     <?php if (
-        (string)$action['status'] === 'approved' &&
+        (string)($action['status'] ?? '') === 'approved' &&
         (int)($action['one_on_one_required'] ?? 0) === 1 &&
         (int)($activity['one_on_one_completed'] ?? 0) !== 1 &&
         (int)($action['training_suspended'] ?? 0) !== 1
@@ -293,16 +223,7 @@ cw_header('Instructor Approval');
             <button type="submit" class="btn">Mark Instructor Session Completed</button>
         </form>
     <?php endif; ?>
-
-    <?php if ($emailSendResult !== null): ?>
-        <div style="margin-top:20px;padding:14px;border-radius:10px;background:#f8fafc;border:1px solid #cbd5e1;color:#0f172a;">
-            Student notification email:
-            <strong><?= !empty($emailSendResult['ok']) ? 'sent' : 'failed' ?></strong>
-            <?php if (!empty($emailSendResult['error'])): ?>
-                <br><?= h2((string)$emailSendResult['error']) ?>
-            <?php endif; ?>
-        </div>
-    <?php endif; ?>
 </div>
 
 <?php cw_footer(); ?>
+	
