@@ -646,13 +646,31 @@ async function prefetchNeighborAudio(){
 }
 setTimeout(prefetchNeighborAudio, 600);
 
-document.getElementById('btnPrev').onclick = ()=>{
+
+document.getElementById('btnPrev').onclick = async ()=>{
   if (PREV_ID <= 0) return;
+
+  if (drawer.style.display === 'flex') {
+    saveSummaryDrawerState(true);
+    await flushSummarySaveNow();
+  } else {
+    saveSummaryDrawerState(false);
+  }
+
   armAutoplay();
   location.href = '/player/slide.php?slide_id=' + PREV_ID;
-};
-document.getElementById('btnNext').onclick = ()=>{
+};	
+	
+document.getElementById('btnNext').onclick = async ()=>{
   if (NEXT_ID <= 0) return;
+
+  if (drawer.style.display === 'flex') {
+    saveSummaryDrawerState(true);
+    await flushSummarySaveNow();
+  } else {
+    saveSummaryDrawerState(false);
+  }
+
   armAutoplay();
   location.href = '/player/slide.php?slide_id=' + NEXT_ID;
 };
@@ -915,14 +933,74 @@ document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
   });
 });
 
+	
+function summaryDrawerStateKey(){
+  return 'ipca_summary_drawer_state|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
+}
+
+function saveSummaryDrawerState(isOpen){
+  try {
+    sessionStorage.setItem(summaryDrawerStateKey(), isOpen ? 'open' : 'closed');
+  } catch(e){}
+}
+
+function loadSummaryDrawerState(){
+  try {
+    return sessionStorage.getItem(summaryDrawerStateKey()) === 'open';
+  } catch(e){
+    return false;
+  }
+}
+
+async function flushSummarySaveNow(){
+  if (saveTimer) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+
+  try{
+    const res = await fetch('/student/api/summary_save.php', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'same-origin',
+      body: JSON.stringify({
+        action: 'save',
+        cohort_id: COHORT_ID,
+        lesson_id: LESSON_ID,
+        summary_html: rte.innerHTML || ''
+      })
+    });
+
+    const j = await res.json();
+    sumStatus.textContent = (j && j.ok)
+      ? (j.skipped ? 'Draft unchanged' : 'Draft saved')
+      : 'Save failed';
+  } catch(e){
+    sumStatus.textContent = 'Save failed';
+  }
+}	
+	
 document.getElementById('btnSummary').onclick = ()=>{
-  drawer.style.display = (drawer.style.display==='flex') ? 'none' : 'flex';
-  if (drawer.style.display==='flex') setTimeout(()=>rte.focus(), 80);
+  const willOpen = drawer.style.display !== 'flex';
+  drawer.style.display = willOpen ? 'flex' : 'none';
+  saveSummaryDrawerState(willOpen);
+  if (willOpen) setTimeout(()=>rte.focus(), 80);
 };
-document.getElementById('btnCloseDrawer').onclick = ()=> drawer.style.display='none';
+
+document.getElementById('btnCloseDrawer').onclick = ()=>{
+  drawer.style.display = 'none';
+  saveSummaryDrawerState(false);
+};
+	
+	
 btnCheckSummary.onclick = ()=> checkSummaryNow();
 
-loadSummaryFromDb();
+loadSummaryFromDb().then(()=>{
+  if (loadSummaryDrawerState()) {
+    drawer.style.display = 'flex';
+    setTimeout(()=>rte.focus(), 80);
+  }
+});
 
 function escapeHtml(s){
   return (s||'').toString()
@@ -946,19 +1024,40 @@ document.addEventListener('keydown', (e)=>{
     return;
   }
 
-  if (e.key === 'ArrowLeft') {
-    if (PREV_ID > 0) {
+
+if (e.key === 'ArrowLeft') {
+  if (PREV_ID > 0) {
+    (async function(){
+      if (drawer.style.display === 'flex') {
+        saveSummaryDrawerState(true);
+        await flushSummarySaveNow();
+      } else {
+        saveSummaryDrawerState(false);
+      }
       armAutoplay();
       location.href = '/player/slide.php?slide_id=' + PREV_ID;
-    }
+    })();
   }
+}
 
-  if (e.key === 'ArrowRight') {
-    if (NEXT_ID > 0) {
+if (e.key === 'ArrowRight') {
+  if (NEXT_ID > 0) {
+    (async function(){
+      if (drawer.style.display === 'flex') {
+        saveSummaryDrawerState(true);
+        await flushSummarySaveNow();
+      } else {
+        saveSummaryDrawerState(false);
+      }
       armAutoplay();
       location.href = '/player/slide.php?slide_id=' + NEXT_ID;
-    }
+    })();
   }
+}	
+	
+	
+	
+	
 });
 </script>
 </body>
