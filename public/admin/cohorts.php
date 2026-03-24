@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') ==
                 $insCC->execute([$cohortId, (int)$cid]);
             }
 
-            redirect('/instructor/cohort.php?cohort_id='.$cohortId);
+            redirect('/admin/cohort.php?cohort_id='.$cohortId);
         }
     }
 }
@@ -139,7 +139,7 @@ cw_header('Theory Training');
         <td><?= h((string)$r['end_date']) ?></td>
         <td><?= h((string)$r['timezone']) ?></td>
         <td style="white-space:nowrap;">
-          <a class="btn btn-sm" href="/instructor/cohort.php?cohort_id=<?= (int)$r['id'] ?>">Open</a>
+          <a class="btn btn-sm" href="/admin/cohort.php?cohort_id=<?= (int)$r['id'] ?>">Open</a>
         </td>
       </tr>
     <?php endforeach; ?>

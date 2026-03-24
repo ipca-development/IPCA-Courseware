@@ -28,7 +28,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare("INSERT IGNORE INTO cohort_students (cohort_id,user_id,status) VALUES (?,?, 'active')");
             $stmt->execute([$cohortId,$userId]);
         }
-        redirect('/instructor/cohort_students.php?cohort_id=' . $cohortId);
+        redirect('/admin/cohort_students.php?cohort_id=' . $cohortId);
     }
 
     if ($action === 'remove') {
@@ -37,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt = $pdo->prepare("DELETE FROM cohort_students WHERE cohort_id=? AND user_id=?");
             $stmt->execute([$cohortId,$userId]);
         }
-        redirect('/instructor/cohort_students.php?cohort_id=' . $cohortId);
+        redirect('/admin/cohort_students.php?cohort_id=' . $cohortId);
     }
 }
 
@@ -58,7 +58,7 @@ cw_header('Manage Cohort Students');
 <div class="card">
   <div class="row" style="justify-content:space-between;">
     <div class="muted">Cohort: <strong><?= h($cohort['name']) ?></strong></div>
-    <a class="btn btn-sm" href="/instructor/cohort.php?id=<?= (int)$cohortId ?>">← Back</a>
+    <a class="btn btn-sm" href="/admin/cohort.php?id=<?= (int)$cohortId ?>">← Back</a>
   </div>
 </div>
 

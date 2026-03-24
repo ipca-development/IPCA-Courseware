@@ -132,7 +132,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ");
                 $up->execute([$programId, $name, $start, $end, $tz, $fallbackCourseId, $cohortId]);
 
-                redirect('/instructor/cohort.php?cohort_id='.$cohortId);
+                redirect('/admin/cohort.php?cohort_id='.$cohortId);
             }
         }
     }
@@ -149,7 +149,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             save_course_selection($pdo, $cohortId, $programId, $courseIds);
             $primary = pick_primary_course($pdo, $programId, $courseIds);
             $pdo->prepare("UPDATE cohorts SET course_id=? WHERE id=?")->execute([$primary, $cohortId]);
-            redirect('/instructor/cohort.php?cohort_id='.$cohortId);
+            redirect('/admin/cohort.php?cohort_id='.$cohortId);
         }
     }
 
@@ -263,7 +263,7 @@ cw_header('Theory Training');
       </div>
     </div>
     <div style="display:flex; gap:10px; align-items:center;">
-      <a class="btn btn-sm" href="/instructor/cohorts.php">← Back to cohorts</a>
+      <a class="btn btn-sm" href="/admin/cohorts.php">← Back to cohorts</a>
     </div>
   </div>
 
