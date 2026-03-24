@@ -1,6 +1,6 @@
 <?php
 require_once __DIR__ . '/../../../src/bootstrap.php';
-//require_once __DIR__ . '/../../../src/openai.php';
+require_once __DIR__ . '/../../../src/openai.php';
 
 echo "START<br>";
 flush();
