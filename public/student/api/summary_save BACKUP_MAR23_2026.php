@@ -9,7 +9,6 @@ header('Content-Type: application/json; charset=utf-8');
 try {
     $u = cw_current_user($pdo);
     $role = (string)($u['role'] ?? '');
-
     if ($role !== 'student' && $role !== 'admin') {
         http_response_code(403);
         echo json_encode(['ok' => false, 'error' => 'Forbidden']);
@@ -37,16 +36,10 @@ try {
 
     $userId = (int)$u['id'];
 
+    // Student must be enrolled in cohort
     if ($role === 'student') {
-        $chk = $pdo->prepare("
-            SELECT 1
-            FROM cohort_students
-            WHERE cohort_id = ?
-              AND user_id = ?
-            LIMIT 1
-        ");
+        $chk = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
         $chk->execute([$cohortId, $userId]);
-
         if (!$chk->fetchColumn()) {
             http_response_code(403);
             echo json_encode(['ok' => false, 'error' => 'Not enrolled in this cohort']);
@@ -58,13 +51,6 @@ try {
 
     if ($action === 'unlock') {
         $result = $service->unlockSummary(
-            $userId,
-            $cohortId,
-            $lessonId,
-            'student'
-        );
-    } elseif ($action === 'check') {
-        $result = $service->checkSummary(
             $userId,
             $cohortId,
             $lessonId,
@@ -82,9 +68,7 @@ try {
 
     echo json_encode($result);
 } catch (Throwable $e) {
+    error_log('summary_save.php failed: ' . $e->getMessage());
     http_response_code(400);
-    echo json_encode([
-        'ok' => false,
-        'error' => $e->getMessage()
-    ]);
+    echo json_encode(['ok' => false, 'error' => $e->getMessage()]);
 }
