@@ -702,26 +702,21 @@ const summaryAlertTitle = document.getElementById('summaryAlertTitle');
 const summaryAlertBody = document.getElementById('summaryAlertBody');
 	
 function renderSummaryAlert(j){
-  const status = String(j.review_status || '').trim();
-  const feedback = String(j.review_notes_by_instructor || j.review_feedback || '').trim();
+const status = String(j.review_status || ‘’).trim();
+const feedback = String(j.review_notes_by_instructor || j.review_feedback || ‘’).trim();
 
-  summaryAlert.classList.remove('pending');
-  summaryAlert.style.display = 'none';
-  summaryAlertTitle.textContent = '';
-  summaryAlertBody.textContent = '';
+summaryAlert.classList.remove(‘pending’);
+summaryAlert.style.display = ‘none’;
+summaryAlertTitle.textContent = ‘’;
+summaryAlertBody.textContent = ‘’;
 
-  if (status === 'needs_revision') {
-    summaryAlert.style.display = 'block';
-    summaryAlertTitle.textContent = 'Instructor requested summary revision';
-    summaryAlertBody.textContent = feedback !== ''
-      ? feedback
-      : 'Please revise your lesson summary based on the instructor feedback before continuing.';
-  } else if (status === 'pending') {
-    summaryAlert.style.display = 'block';
-    summaryAlert.classList.add('pending');
-    summaryAlertTitle.textContent = 'Summary pending instructor review';
-    summaryAlertBody.textContent = 'Your updated summary has been saved and is awaiting instructor review.';
-  }
+if (status === ‘needs_revision’) {
+summaryAlert.style.display = ‘block’;
+summaryAlertTitle.textContent = ‘Instructor requested summary revision’;
+summaryAlertBody.textContent = feedback !== ‘’
+? feedback
+: ‘Please revise your lesson summary based on the instructor feedback before continuing.’;
+}
 }	
 
 async function loadSummaryFromDb(){
