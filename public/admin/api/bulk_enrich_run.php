@@ -1,8 +1,15 @@
 <?php
 require_once __DIR__ . '/../../../src/bootstrap.php';
-require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/openai.php';
 cw_require_admin();
+
+session_write_close();
+
+header('Content-Type: text/html; charset=utf-8');
+header('Cache-Control: no-cache, no-store, must-revalidate');
+header('Pragma: no-cache');
+header('Expires: 0');
+header('X-Accel-Buffering: no');
 
 // streaming output
 @set_time_limit(1800);
@@ -12,8 +19,12 @@ cw_require_admin();
 @ini_set('zlib.output_compression', '0');
 
 function progress(string $msg): void {
-    echo "<div style='font-family:system-ui;font-size:14px;padding:4px 0;'>" . htmlspecialchars($msg, ENT_QUOTES, 'UTF-8') . "</div>";
-    @ob_flush(); @flush();
+    echo "<div style='font-family:system-ui;font-size:14px;padding:4px 0;'>" . htmlspecialchars($msg, ENT_QUOTES, 'UTF-8') . "</div>\n";
+    echo str_repeat(' ', 4096) . "\n";
+    if (function_exists('ob_flush')) {
+        @ob_flush();
+    }
+    @flush();
 }
 
 // --- helpers
@@ -26,7 +37,7 @@ function sc_upsert(PDO $pdo, int $slideId, string $lang, array $contentJson, str
     $stmt->execute([
         $slideId,
         $lang,
-        json_encode($contentJson, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES),
+        json_encode($contentJson, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         $plainText
     ]);
 }
@@ -53,7 +64,10 @@ function replace_refs(PDO $pdo, int $slideId, array $phak, array $acs): void {
     foreach ($phak as $r) {
         $code = trim((string)($r['chapter'] ?? '')) . (trim((string)($r['section'] ?? '')) !== '' ? (' ' . trim((string)$r['section'])) : '');
         $code = trim($code);
-        if ($code === '') $code = 'PHAK';
+        if ($code === '') {
+            $code = 'PHAK';
+        }
+
         $ins->execute([
             $slideId,
             'PHAK',
@@ -66,7 +80,10 @@ function replace_refs(PDO $pdo, int $slideId, array $phak, array $acs): void {
 
     foreach ($acs as $r) {
         $code = trim((string)($r['code'] ?? ''));
-        if ($code === '') continue;
+        if ($code === '') {
+            continue;
+        }
+
         $ins->execute([
             $slideId,
             'ACS',
@@ -80,40 +97,56 @@ function replace_refs(PDO $pdo, int $slideId, array $phak, array $acs): void {
 
 function read_manifest_match(int $extLessonId, int $pageNum, string $programKey): string {
     $manifestPath = __DIR__ . '/../../assets/kings_videos_manifest.json';
-    if (!file_exists($manifestPath)) return '';
+    if (!file_exists($manifestPath)) {
+        return '';
+    }
 
     $raw = file_get_contents($manifestPath);
     $arr = json_decode($raw, true);
-    if (!is_array($arr)) return '';
+    if (!is_array($arr)) {
+        return '';
+    }
 
     foreach ($arr as $item) {
         $lid = (int)($item['lessonId'] ?? 0);
         $pg  = (int)($item['page'] ?? 0);
+
         if ($lid === $extLessonId && $pg === $pageNum) {
             $urls = $item['videoUrls'] ?? [];
-            if (!is_array($urls) || count($urls) === 0) return '';
+            if (!is_array($urls) || count($urls) === 0) {
+                return '';
+            }
+
             $u = (string)$urls[0];
             $base = basename(parse_url($u, PHP_URL_PATH) ?: $u);
 
             $videosBase = getenv('CW_VIDEOS_BASE') ?: ('ks_videos/' . $programKey);
             $pagePrefix = 'page_' . str_pad((string)$pageNum, 3, '0', STR_PAD_LEFT) . '__';
 
-            return rtrim($videosBase,'/') . '/lesson_' . $extLessonId . '/' . $pagePrefix . $base;
+            return rtrim($videosBase, '/') . '/lesson_' . $extLessonId . '/' . $pagePrefix . $base;
         }
     }
+
     return '';
 }
 
 function ensure_hotspot(PDO $pdo, int $slideId, string $src): void {
-    if ($src === '') return;
+    if ($src === '') {
+        return;
+    }
 
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM slide_hotspots WHERE slide_id=? AND is_deleted=0");
     $stmt->execute([$slideId]);
     $cnt = (int)$stmt->fetchColumn();
-    if ($cnt > 0) return;
+    if ($cnt > 0) {
+        return;
+    }
 
     // default box inside content region
-    $x = 900; $y = 280; $w = 520; $h = 320;
+    $x = 900;
+    $y = 280;
+    $w = 520;
+    $h = 320;
 
     $ins = $pdo->prepare("
       INSERT INTO slide_hotspots (slide_id, kind, label, src, x, y, w, h, is_deleted)
@@ -127,34 +160,49 @@ function ensure_hotspot(PDO $pdo, int $slideId, string $src): void {
  */
 function ai_translate_es(string $text): string {
     $text = trim($text);
-    if ($text === '') return '';
+    if ($text === '') {
+        return '';
+    }
 
     $schemaT = [
-        "type"=>"object",
-        "additionalProperties"=>false,
-        "properties"=>["spanish_text"=>["type"=>"string"]],
-        "required"=>["spanish_text"]
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'spanish_text' => ['type' => 'string']
+        ],
+        'required' => ['spanish_text']
     ];
 
     $payloadT = [
-        "model" => cw_openai_model(),
-        "input" => [
-            ["role"=>"system","content"=>[["type"=>"input_text","text"=>"Translate to Spanish. Preserve line breaks. Keep aviation terms clear and natural."]]],
-            ["role"=>"user","content"=>[["type"=>"input_text","text"=>$text]]]
-        ],
-        "text" => [
-            "format" => [
-                "type"=>"json_schema",
-                "name"=>"translate_es_v1",
-                "schema"=>$schemaT,
-                "strict"=>true
+        'model' => cw_openai_model(),
+        'input' => [
+            [
+                'role' => 'system',
+                'content' => [
+                    ['type' => 'input_text', 'text' => 'Translate to Spanish. Preserve line breaks. Keep aviation terms clear and natural.']
+                ]
+            ],
+            [
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'input_text', 'text' => $text]
+                ]
             ]
         ],
-        "temperature"=>0.2
+        'text' => [
+            'format' => [
+                'type' => 'json_schema',
+                'name' => 'translate_es_v1',
+                'schema' => $schemaT,
+                'strict' => true
+            ]
+        ],
+        'temperature' => 0.2
     ];
 
     $respT = cw_openai_responses($payloadT);
     $jsonT = cw_openai_extract_json_text($respT);
+
     return trim((string)($jsonT['spanish_text'] ?? ''));
 }
 
@@ -173,10 +221,22 @@ $skipExisting = isset($_POST['skip_existing']);
 $limit = (int)($_POST['limit'] ?? 0);
 
 echo "<!doctype html><html><head><meta charset='utf-8'><title>Bulk Canonical Builder</title></head><body style='padding:16px'>";
+echo str_repeat(' ', 4096);
+@flush();
+
 progress("Bulk run started…");
 
-if ($courseId <= 0) { progress("ERROR: course_id required."); echo "</body></html>"; exit; }
-if ($scope === 'lesson' && $lessonId <= 0) { progress("ERROR: lesson_id required for scope=lesson."); echo "</body></html>"; exit; }
+if ($courseId <= 0) {
+    progress("ERROR: course_id required.");
+    echo "</body></html>";
+    exit;
+}
+
+if ($scope === 'lesson' && $lessonId <= 0) {
+    progress("ERROR: lesson_id required for scope=lesson.");
+    echo "</body></html>";
+    exit;
+}
 
 // --- Fetch slides
 $sql = "
@@ -234,6 +294,8 @@ foreach ($slides as $row) {
         if ($src !== '') {
             ensure_hotspot($pdo, $slideId, $src);
             progress("  + hotspot video: {$src}");
+        } else {
+            progress("  - no video manifest match for lesson {$extLessonId} page {$pageNum}");
         }
     }
 
@@ -246,42 +308,42 @@ foreach ($slides as $row) {
 
     if ($doEN || $doNarr || $doRefs) {
         $schema = [
-            "type" => "object",
-            "additionalProperties" => false,
-            "properties" => [
-                "english_text" => ["type" => "string"],
-                "narration_script_en" => ["type" => "string"],
-                "phak" => [
-                    "type" => "array",
-                    "items" => [
-                        "type" => "object",
-                        "additionalProperties" => false,
-                        "properties" => [
-                            "chapter" => ["type"=>"string"],
-                            "section" => ["type"=>"string"],
-                            "title" => ["type"=>"string"],
-                            "confidence" => ["type"=>"number"],
-                            "notes" => ["type"=>"string"]
+            'type' => 'object',
+            'additionalProperties' => false,
+            'properties' => [
+                'english_text' => ['type' => 'string'],
+                'narration_script_en' => ['type' => 'string'],
+                'phak' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'properties' => [
+                            'chapter' => ['type' => 'string'],
+                            'section' => ['type' => 'string'],
+                            'title' => ['type' => 'string'],
+                            'confidence' => ['type' => 'number'],
+                            'notes' => ['type' => 'string']
                         ],
-                        "required" => ["chapter","section","title","confidence","notes"]
+                        'required' => ['chapter', 'section', 'title', 'confidence', 'notes']
                     ]
                 ],
-                "acs" => [
-                    "type" => "array",
-                    "items" => [
-                        "type" => "object",
-                        "additionalProperties" => false,
-                        "properties" => [
-                            "code" => ["type"=>"string"],
-                            "task" => ["type"=>"string"],
-                            "confidence" => ["type"=>"number"],
-                            "notes" => ["type"=>"string"]
+                'acs' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'properties' => [
+                            'code' => ['type' => 'string'],
+                            'task' => ['type' => 'string'],
+                            'confidence' => ['type' => 'number'],
+                            'notes' => ['type' => 'string']
                         ],
-                        "required" => ["code","task","confidence","notes"]
+                        'required' => ['code', 'task', 'confidence', 'notes']
                     ]
                 ]
             ],
-            "required" => ["english_text","narration_script_en","phak","acs"]
+            'required' => ['english_text', 'narration_script_en', 'phak', 'acs']
         ];
 
         $instructions = <<<TXT
@@ -299,23 +361,31 @@ Return JSON that matches the schema.
 TXT;
 
         $payload = [
-            "model" => cw_openai_model(),
-            "input" => [
-                ["role"=>"system","content"=>[["type"=>"input_text","text"=>$instructions]]],
-                ["role"=>"user","content"=>[
-                    ["type"=>"input_text","text"=>"Extract canonical content + narration + PHAK + ACS."],
-                    ["type"=>"input_image","image_url"=>$imgUrl]
-                ]]
-            ],
-            "text" => [
-                "format" => [
-                    "type"=>"json_schema",
-                    "name"=>"bulk_canonical_v1",
-                    "schema"=>$schema,
-                    "strict"=>true
+            'model' => cw_openai_model(),
+            'input' => [
+                [
+                    'role' => 'system',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => $instructions]
+                    ]
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => 'Extract canonical content + narration + PHAK + ACS.'],
+                        ['type' => 'input_image', 'image_url' => $imgUrl]
+                    ]
                 ]
             ],
-            "temperature" => 0.2
+            'text' => [
+                'format' => [
+                    'type' => 'json_schema',
+                    'name' => 'bulk_canonical_v1',
+                    'schema' => $schema,
+                    'strict' => true
+                ]
+            ],
+            'temperature' => 0.2
         ];
 
         try {
@@ -324,16 +394,15 @@ TXT;
 
             $englishText = trim((string)($json['english_text'] ?? ''));
             $narrationEn = trim((string)($json['narration_script_en'] ?? ''));
-            $phak        = is_array($json['phak'] ?? null) ? $json['phak'] : [];
-            $acs         = is_array($json['acs'] ?? null) ? $json['acs'] : [];
-
+            $phak = is_array($json['phak'] ?? null) ? $json['phak'] : [];
+            $acs = is_array($json['acs'] ?? null) ? $json['acs'] : [];
         } catch (Throwable $e) {
             progress("  ERROR AI extract: " . $e->getMessage());
             continue;
         }
 
         if ($doEN) {
-            sc_upsert($pdo, $slideId, 'en', ['blocks'=>[['type'=>'raw','text'=>$englishText]]], $englishText);
+            sc_upsert($pdo, $slideId, 'en', ['blocks' => [['type' => 'raw', 'text' => $englishText]]], $englishText);
             progress("  + saved EN text");
         }
 
@@ -346,6 +415,7 @@ TXT;
                     $narrationEs = '';
                 }
             }
+
             set_narration($pdo, $slideId, $narrationEn, $narrationEs);
             progress("  + saved narration (EN" . ($narrationEs !== '' ? "+ES" : "") . ")");
         }
@@ -367,7 +437,7 @@ TXT;
         if ($englishText !== '') {
             try {
                 $spanishText = ai_translate_es($englishText);
-                sc_upsert($pdo, $slideId, 'es', ['blocks'=>[['type'=>'raw','text'=>$spanishText]]], $spanishText);
+                sc_upsert($pdo, $slideId, 'es', ['blocks' => [['type' => 'raw', 'text' => $spanishText]]], $spanishText);
                 progress("  + saved ES translation");
             } catch (Throwable $e) {
                 progress("  ERROR AI translate: " . $e->getMessage());
