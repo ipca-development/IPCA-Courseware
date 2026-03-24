@@ -30,11 +30,6 @@ $lessonId = (int)$slide['lesson_id'];
 $courseId = (int)$slide['course_id'];
 $pageNum  = (int)$slide['page_number'];
 
-//
-// SECURITY: students may only access slides that belong to a cohort they are enrolled in,
-// and that cohort contains this lesson in its schedule.
-// (Admin bypasses.)
-//
 $cohortId = 0;
 if ($role === 'student') {
     $uid = (int)$u['id'];
@@ -56,7 +51,6 @@ if ($role === 'student') {
         exit('Forbidden');
     }
 } else {
-    // Admin: try to find any cohort for this course (for back link convenience)
     $c = $pdo->prepare("SELECT id FROM cohorts WHERE course_id=? ORDER BY id DESC LIMIT 1");
     $c->execute([$courseId]);
     $cohortId = (int)($c->fetchColumn() ?: 0);
@@ -66,15 +60,13 @@ $backUrl = $cohortId > 0 ? ('/student/course.php?cohort_id='.(int)$cohortId) : '
 
 $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
 
-$HEADER = "/assets/overlay/header.png"; // 1600x125
-$FOOTER = "/assets/overlay/footer.png"; // 1600x90
+$HEADER = "/assets/overlay/header.png";
+$FOOTER = "/assets/overlay/footer.png";
 
-// Hotspots
 $hs = $pdo->prepare("SELECT id, label, src, x,y,w,h FROM slide_hotspots WHERE slide_id=? AND is_deleted=0 ORDER BY id ASC");
 $hs->execute([$slideId]);
 $hotspots = $hs->fetchAll(PDO::FETCH_ASSOC);
 
-// Content EN/ES (for ES popup)
 $en = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='en' LIMIT 1");
 $en->execute([$slideId]);
 $enText = (string)($en->fetchColumn() ?: '');
@@ -83,7 +75,6 @@ $es = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND l
 $es->execute([$slideId]);
 $esText = (string)($es->fetchColumn() ?: '');
 
-// References
 $refsStmt = $pdo->prepare("
   SELECT ref_type, ref_code, ref_title, confidence, notes
   FROM slide_references
@@ -93,7 +84,6 @@ $refsStmt = $pdo->prepare("
 $refsStmt->execute([$slideId]);
 $refs = $refsStmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Prev/Next within lesson
 $prevStmt = $pdo->prepare("
   SELECT id FROM slides
   WHERE lesson_id=? AND is_deleted=0 AND page_number < ?
@@ -164,19 +154,22 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     .wrap{ padding:14px; }
     .viewport{
       width:100%;
-      max-width: 1200px;
-      margin: 0 auto;
-      aspect-ratio: 16/9;
+      max-width:1200px;
+      margin:0 auto;
+      aspect-ratio:16/9;
       overflow:hidden;
-      border-radius: 14px;
+      border-radius:14px;
       border:1px solid #e6e6e6;
       background:#ffffff;
       position:relative;
     }
     .stage{
-      width:1600px; height:900px;
-      transform-origin: top left;
-      position:absolute; left:0; top:0;
+      width:1600px;
+      height:900px;
+      transform-origin:top left;
+      position:absolute;
+      left:0;
+      top:0;
       background:#ffffff;
     }
 
@@ -184,27 +177,33 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       position:absolute;
       width:1315px;
       height:900px;
-      left: calc((1600px - 1315px)/2);
-      top: 0;
-      object-fit: contain;
+      left:calc((1600px - 1315px)/2);
+      top:0;
+      object-fit:contain;
       background:#ffffff;
-      user-drag: none;
-      -webkit-user-drag: none;
-      user-select: none;
-      -webkit-user-select: none;
+      user-drag:none;
+      -webkit-user-drag:none;
+      user-select:none;
+      -webkit-user-select:none;
       pointer-events:none;
     }
     .header-img{
-      position:absolute; left:0; top:0;
-      width:1600px; height:125px;
+      position:absolute;
+      left:0;
+      top:0;
+      width:1600px;
+      height:125px;
       object-fit:cover;
       pointer-events:none;
       user-select:none;
       -webkit-user-drag:none;
     }
     .footer-img{
-      position:absolute; left:0; bottom:0;
-      width:1600px; height:90px;
+      position:absolute;
+      left:0;
+      bottom:0;
+      width:1600px;
+      height:90px;
       object-fit:cover;
       pointer-events:none;
       user-select:none;
@@ -214,70 +213,74 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     .shield{
       position:absolute;
       inset:0;
-      background: transparent;
-      z-index: 5;
+      background:transparent;
+      z-index:5;
     }
 
     .hotspot{
       position:absolute;
       border:2px solid rgba(0,255,255,0.85);
       border-radius:10px;
-      background: rgba(0,255,255,0.08);
+      background:rgba(0,255,255,0.08);
       cursor:pointer;
-      z-index: 10;
+      z-index:10;
     }
     .hotspot .tag{
-      position:absolute; left:8px; top:8px;
-      font-size:14px; padding:4px 8px;
+      position:absolute;
+      left:8px;
+      top:8px;
+      font-size:14px;
+      padding:4px 8px;
       border-radius:10px;
-      background: rgba(0,0,0,0.55);
+      background:rgba(0,0,0,0.55);
       color:#fff;
     }
 
     .fab{
-      position: fixed;
-      right: 14px;
-      bottom: 14px;
-      width: 54px;
-      height: 54px;
-      border-radius: 999px;
+      position:fixed;
+      right:14px;
+      bottom:14px;
+      width:54px;
+      height:54px;
+      border-radius:999px;
       display:flex;
       align-items:center;
       justify-content:center;
-      background: rgba(30,60,114,0.92);
+      background:rgba(30,60,114,0.92);
       color:#fff;
       font-weight:900;
-      border: none;
+      border:none;
       cursor:pointer;
-      box-shadow: 0 12px 26px rgba(0,0,0,0.18);
-      z-index: 120;
+      box-shadow:0 12px 26px rgba(0,0,0,0.18);
+      z-index:120;
     }
 
     .modal{
-      position:fixed; inset:0;
+      position:fixed;
+      inset:0;
       display:none;
       align-items:center;
       justify-content:center;
-      background: rgba(0,0,0,0.55);
-      z-index: 130;
+      background:rgba(0,0,0,0.55);
+      z-index:130;
     }
     .modal .box{
       width:min(980px, 94vw);
-      max-height: min(86vh, 900px);
+      max-height:min(86vh, 900px);
       overflow:auto;
       background:#fff;
       border:1px solid rgba(0,0,0,0.10);
       border-radius:16px;
       padding:14px;
-      box-shadow: 0 16px 50px rgba(0,0,0,0.25);
+      box-shadow:0 16px 50px rgba(0,0,0,0.25);
     }
-    .modal h3{ margin: 0 0 10px 0; }
+    .modal h3{ margin:0 0 10px 0; }
     .modal pre{
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-family: Manrope, Arial, sans-serif;
-      font-size: 14px;
-      line-height: 1.35;
+      white-space:pre-wrap;
+      word-break:break-word;
+      font-family:Manrope, Arial, sans-serif;
+      font-size:14px;
+      line-height:1.35;
       margin:0;
     }
 
@@ -291,18 +294,18 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     .vbox video{ width:100%; height:auto; display:block; }
 
     .drawer{
-      position: fixed;
-      right: 14px;
-      bottom: 80px;
-      width: min(560px, 94vw);
-      height: min(520px, 70vh);
+      position:fixed;
+      right:14px;
+      bottom:80px;
+      width:min(560px, 94vw);
+      height:min(520px, 70vh);
       background:#fff;
       border:1px solid #eee;
       border-radius:16px;
-      box-shadow: 0 16px 50px rgba(0,0,0,0.18);
+      box-shadow:0 16px 50px rgba(0,0,0,0.18);
       display:none;
       flex-direction:column;
-      z-index: 125;
+      z-index:125;
       overflow:hidden;
     }
     .drawer .head{
@@ -314,7 +317,9 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       gap:10px;
     }
     .drawer .tools{
-      display:flex; gap:6px; flex-wrap:wrap;
+      display:flex;
+      gap:6px;
+      flex-wrap:wrap;
       padding:8px 12px;
       border-bottom:1px solid #eee;
     }
@@ -325,25 +330,27 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       width:100%;
       height:100%;
       overflow:auto;
-      font-family: Manrope, Arial, sans-serif;
-      font-size: 14px;
-      line-height: 1.35;
+      font-family:Manrope, Arial, sans-serif;
+      font-size:14px;
+      line-height:1.35;
       background:#fff;
     }
+
     .muted{ opacity:.7; font-size:12px; }
+
     .summary-alert{
-      position: sticky;
-      top: 62px;
-      z-index: 70;
-      max-width: 1200px;
-      margin: 10px auto 0 auto;
-      padding: 12px 14px;
-      border-radius: 12px;
-      border: 1px solid #f59e0b;
-      background: #fff7ed;
-      color: #9a3412;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
-      display: none;
+      position:sticky;
+      top:62px;
+      z-index:70;
+      max-width:1200px;
+      margin:10px auto 0 auto;
+      padding:12px 14px;
+      border-radius:12px;
+      border:1px solid #f59e0b;
+      background:#fff7ed;
+      color:#9a3412;
+      box-shadow:0 8px 24px rgba(0,0,0,0.06);
+      display:none;
     }
     .summary-alert strong{
       display:block;
@@ -353,6 +360,11 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       border-color:#93c5fd;
       background:#eff6ff;
       color:#1d4ed8;
+    }
+    .summary-alert.ok{
+      border-color:#86efac;
+      background:#f0fdf4;
+      color:#166534;
     }
   </style>
 </head>
@@ -401,9 +413,9 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
 
         <?php foreach ($hotspots as $h): ?>
           <div class="hotspot"
-              data-src="<?= htmlspecialchars($h['src']) ?>"
-              data-label="<?= htmlspecialchars($h['label']) ?>"
-              style="left:<?= (int)$h['x'] ?>px; top:<?= (int)$h['y'] ?>px; width:<?= (int)$h['w'] ?>px; height:<?= (int)$h['h'] ?>px;">
+               data-src="<?= htmlspecialchars($h['src']) ?>"
+               data-label="<?= htmlspecialchars($h['label']) ?>"
+               style="left:<?= (int)$h['x'] ?>px; top:<?= (int)$h['y'] ?>px; width:<?= (int)$h['w'] ?>px; height:<?= (int)$h['h'] ?>px;">
             <div class="tag"><?= htmlspecialchars($h['label']) ?></div>
           </div>
         <?php endforeach; ?>
@@ -418,9 +430,11 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
   <div class="drawer" id="drawer">
     <div class="head">
       <strong>My Study Summary (Lesson)</strong>
-      <span class="muted" id="sumStatus">Saved</span>
-      <button class="btnx" id="btnUnlockSummary" style="padding:6px 10px; display:none;">Unlock for editing</button>
-      <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
+      <span class="muted" id="sumStatus">Draft</span>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btnx" id="btnCheckSummary" style="padding:6px 10px;">Check my Summary</button>
+        <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
+      </div>
     </div>
     <div class="tools">
       <button class="btnx" type="button" data-cmd="bold" style="padding:6px 10px;">B</button>
@@ -475,22 +489,20 @@ function fitStage(){
 window.addEventListener('resize', ()=>setTimeout(fitStage, 60));
 setTimeout(fitStage, 30);
 
-// Prevent context menu (basic deterrent)
 document.getElementById('shield').addEventListener('contextmenu', (e)=>e.preventDefault());
 document.addEventListener('contextmenu', (e)=>{
   if (e.target.closest && e.target.closest('#viewport')) e.preventDefault();
 });
 
-// Clock
 function tickClock(){
   const d = new Date();
   const hh = String(d.getHours()).padStart(2,'0');
   const mm = String(d.getMinutes()).padStart(2,'0');
   document.getElementById('clock').textContent = hh + ':' + mm;
 }
-tickClock(); setInterval(tickClock, 10000);
+tickClock();
+setInterval(tickClock, 10000);
 
-// Language dropdown
 const PREF_KEY = 'ipca_lang_pref';
 let lang = localStorage.getItem(PREF_KEY) || 'en';
 const langSel = document.getElementById('langSel');
@@ -500,7 +512,7 @@ const btnTxtES  = document.getElementById('btnTxtES');
 const ES_TEXT = <?= json_encode($esText) ?>;
 
 function applyLangUI(){
-  btnTxtES.style.display = (lang==='es') ? 'inline-block' : 'none';
+  btnTxtES.style.display = (lang === 'es') ? 'inline-block' : 'none';
 }
 function setLang(newLang){
   lang = newLang;
@@ -508,7 +520,6 @@ function setLang(newLang){
   applyLangUI();
 }
 
-// Autoplay arm
 const AUTO_KEY = 'ipca_autoplay_next';
 function armAutoplay(){ localStorage.setItem(AUTO_KEY, '1'); }
 function consumeAutoplay(){
@@ -521,18 +532,15 @@ function consumeAutoplay(){
 
 langSel.addEventListener('change', ()=>{
   setLang(langSel.value);
-
   ttsAudio.pause();
   ttsAudio.currentTime = 0;
   ttsAudio.removeAttribute('src');
   ttsAudio.dataset.src = '';
   setPlayLabel('idle');
-
   prefetchNeighborAudio();
 });
 applyLangUI();
 
-// ---- AI Voice (OpenAI TTS MP3 via API) ----
 const ttsAudio = document.getElementById('ttsAudio');
 const btnPlay  = document.getElementById('btnAudioPlay');
 const btnMute  = document.getElementById('btnAudioMute');
@@ -551,7 +559,7 @@ function applyMuteUI(){
   btnMute.textContent = muted ? 'Unmute' : 'Mute';
 }
 
-function ttsUrl(prefetch=false, slideId=SLIDE_ID, useLang=lang){
+function ttsUrl(prefetch, slideId, useLang){
   const p = prefetch ? '&prefetch=1' : '';
   return `/player/api/tts.php?slide_id=${slideId}&lang=${encodeURIComponent(useLang)}${p}`;
 }
@@ -598,7 +606,6 @@ ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
 applyMuteUI();
 consumeAutoplay();
 
-// ---- Prefetch next/prev slide audio (warm cache) ----
 async function prefetchOne(slideId){
   if (!slideId || slideId <= 0) return;
   try {
@@ -611,7 +618,6 @@ async function prefetchNeighborAudio(){
 }
 setTimeout(prefetchNeighborAudio, 600);
 
-// ---- Prev/Next clicks: arm autoplay + navigate ----
 document.getElementById('btnPrev').onclick = ()=>{
   if (PREV_ID <= 0) return;
   armAutoplay();
@@ -623,7 +629,6 @@ document.getElementById('btnNext').onclick = ()=>{
   location.href = '/player/slide.php?slide_id=' + NEXT_ID;
 };
 
-// ---- Video modal ----
 const CDN_BASE = <?= json_encode(rtrim($CDN_BASE,'/')) ?>;
 const modalVid = document.getElementById('modalVid');
 const vid = document.getElementById('vid');
@@ -645,15 +650,14 @@ modalVid.addEventListener('click', (e)=>{
   }
 });
 
-// ---- Study refs modal ----
 const REFS = <?= json_encode($refs) ?>;
 const modalRefs = document.getElementById('modalRefs');
 const refsBody = document.getElementById('refsBody');
 document.getElementById('btnRefs').onclick = ()=>{
   const groups = {};
-  (REFS||[]).forEach(r=>{
+  (REFS || []).forEach(r=>{
     const t = r.ref_type || 'OTHER';
-    if (!groups[t]) groups[t]=[];
+    if (!groups[t]) groups[t] = [];
     groups[t].push(r);
   });
 
@@ -661,102 +665,117 @@ document.getElementById('btnRefs').onclick = ()=>{
   Object.keys(groups).sort().forEach(t=>{
     html += `<div style="margin-bottom:10px;"><strong>${t}</strong><ul style="margin:6px 0 0 18px;">`;
     groups[t].forEach(r=>{
-      const code = (r.ref_code||'').toString();
-      const title = (r.ref_title||'').toString();
-      html += `<li><span style="font-weight:700;">${escapeHtml(code)}</span> ${title ? '— '+escapeHtml(title) : ''}</li>`;
+      const code = (r.ref_code || '').toString();
+      const title = (r.ref_title || '').toString();
+      html += `<li><span style="font-weight:700;">${escapeHtml(code)}</span> ${title ? '— ' + escapeHtml(title) : ''}</li>`;
     });
     html += `</ul></div>`;
   });
-  if (!html) html = `<div class="muted">No references saved yet for this slide.</div>`;
+
+  if (!html) {
+    html = `<div class="muted">No references saved yet for this slide.</div>`;
+  }
 
   refsBody.innerHTML = html;
-  modalRefs.style.display='flex';
+  modalRefs.style.display = 'flex';
 };
-document.getElementById('btnCloseRefs').onclick = ()=> modalRefs.style.display='none';
-modalRefs.addEventListener('click', (e)=>{ if(e.target===modalRefs) modalRefs.style.display='none'; });
+document.getElementById('btnCloseRefs').onclick = ()=> modalRefs.style.display = 'none';
+modalRefs.addEventListener('click', (e)=>{ if (e.target === modalRefs) modalRefs.style.display = 'none'; });
 
-// ---- Spanish text modal ----
 const modalES = document.getElementById('modalES');
 document.getElementById('esBody').textContent = ES_TEXT || '(No Spanish text yet)';
 btnTxtES.onclick = ()=>{
   document.getElementById('esBody').textContent = ES_TEXT || '(No Spanish text yet)';
-  modalES.style.display='flex';
+  modalES.style.display = 'flex';
 };
-document.getElementById('btnCloseES').onclick = ()=> modalES.style.display='none';
-modalES.addEventListener('click', (e)=>{ if(e.target===modalES) modalES.style.display='none'; });
+document.getElementById('btnCloseES').onclick = ()=> modalES.style.display = 'none';
+modalES.addEventListener('click', (e)=>{ if (e.target === modalES) modalES.style.display = 'none'; });
 
-// ---- Summary (lesson-level rich text, autosave to DB) ----
 const COHORT_ID = <?= (int)$cohortId ?>;
 const LESSON_ID = <?= (int)$lessonId ?>;
 
 const drawer = document.getElementById('drawer');
 const rte = document.getElementById('rte');
 const sumStatus = document.getElementById('sumStatus');
+const btnCheckSummary = document.getElementById('btnCheckSummary');
 const summaryAlert = document.getElementById('summaryAlert');
 const summaryAlertTitle = document.getElementById('summaryAlertTitle');
 const summaryAlertBody = document.getElementById('summaryAlertBody');
-const btnUnlockSummary = document.getElementById('btnUnlockSummary');
 
 let saveTimer = null;
 let summaryLocked = false;
-let summaryUnlockedForSession = false;
-
-function renderSummaryAlert(j){
-  const status = String(j.review_status || '').trim();
-  const feedback = String(j.review_notes_by_instructor || j.review_feedback || '').trim();
-
-  summaryAlert.classList.remove('pending');
-  summaryAlert.style.display = 'none';
-  summaryAlertTitle.textContent = '';
-  summaryAlertBody.textContent = '';
-
-  if (status === 'needs_revision') {
-    summaryAlert.style.display = 'block';
-    summaryAlertTitle.textContent = 'Instructor requested summary revision';
-    summaryAlertBody.textContent = feedback !== ''
-      ? feedback
-      : 'Please revise your lesson summary based on the instructor feedback before continuing.';
-  }
-}
 
 function setSummaryLockedUI(isLocked){
   summaryLocked = !!isLocked;
 
-  rte.contentEditable = isLocked ? 'false' : 'true';
+  rte.setAttribute('contenteditable', isLocked ? 'false' : 'true');
   rte.style.opacity = isLocked ? '0.75' : '1';
   rte.style.background = isLocked ? '#f8fafc' : '#fff';
   rte.style.cursor = isLocked ? 'default' : 'text';
 
-  if (btnUnlockSummary) {
-    btnUnlockSummary.style.display = isLocked ? 'inline-block' : 'none';
-  }
-
   document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
     btn.disabled = isLocked;
   });
+
+  if (btnCheckSummary) {
+    btnCheckSummary.style.display = isLocked ? 'none' : 'inline-block';
+  }
 
   if (isLocked) {
     sumStatus.textContent = 'Accepted - locked';
   }
 }
 
+function renderSummaryAlert(j){
+  const status = String(j.review_status || '').trim();
+  const feedback = String(j.review_notes_by_instructor || j.review_feedback || '').trim();
+
+  summaryAlert.classList.remove('pending', 'ok');
+  summaryAlert.style.display = 'none';
+  summaryAlertTitle.textContent = '';
+  summaryAlertBody.textContent = '';
+
+  if (status === 'acceptable') {
+    summaryAlert.style.display = 'block';
+    summaryAlert.classList.add('ok');
+    summaryAlertTitle.textContent = 'Accepted';
+    summaryAlertBody.textContent = 'Accepted: Edit via Notebook if needed.';
+    setSummaryLockedUI(true);
+    return;
+  }
+
+  if (status === 'needs_revision' || status === 'rejected') {
+    summaryAlert.style.display = 'block';
+    summaryAlertTitle.textContent = 'Not Accepted';
+    summaryAlertBody.textContent = feedback !== ''
+      ? feedback
+      : 'Not accepted: Keep working on it and check again.';
+    setSummaryLockedUI(false);
+    return;
+  }
+
+  if (status === 'pending') {
+    summaryAlert.style.display = 'block';
+    summaryAlert.classList.add('pending');
+    summaryAlertTitle.textContent = 'Draft Not Yet Checked';
+    summaryAlertBody.textContent = 'Your summary is saved as a draft. Click "Check my Summary" when you are ready.';
+    setSummaryLockedUI(false);
+    return;
+  }
+
+  setSummaryLockedUI(false);
+}
+
 async function loadSummaryFromDb(){
   try{
-    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {
-      credentials:'same-origin'
-    });
+    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {credentials:'same-origin'});
     const j = await res.json();
-
     if (j.ok) {
       rte.innerHTML = j.summary_html || '';
+      sumStatus.textContent = 'Draft loaded';
       renderSummaryAlert(j);
-      setSummaryLockedUI(String(j.review_status || '').trim() === 'acceptable');
-
-      if (String(j.review_status || '').trim() !== 'acceptable') {
-        sumStatus.textContent = 'Loaded';
-      }
     }
-  }catch(e){}
+  } catch(e){}
 }
 
 async function refreshSummaryStatusOnly(){
@@ -768,56 +787,8 @@ async function refreshSummaryStatusOnly(){
 
     if (j.ok) {
       renderSummaryAlert(j);
-      setSummaryLockedUI(String(j.review_status || '').trim() === 'acceptable');
     }
-  }catch(e){}
-}
-
-async function unlockSummaryForEditing(){
-  try{
-    sumStatus.textContent = 'Unlocking...';
-
-    const res = await fetch('/student/api/summary_save.php', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      credentials:'same-origin',
-      body: JSON.stringify({
-        action: 'unlock',
-        cohort_id: COHORT_ID,
-        lesson_id: LESSON_ID
-      })
-    });
-
-    const raw = await res.text();
-    let j = null;
-
-    try {
-      j = JSON.parse(raw);
-    } catch (parseErr) {
-      console.error('summary_unlock invalid JSON response:', raw);
-      sumStatus.textContent = 'Unlock failed: invalid JSON response';
-      return;
-    }
-
-    if (!j.ok) {
-      sumStatus.textContent = 'Unlock failed: ' + (j.error || 'unknown error');
-      return;
-    }
-
-    summaryUnlockedForSession = true;
-    setSummaryLockedUI(false);
-    sumStatus.textContent = 'Unlocked';
-
-    if (saveTimer) {
-      clearTimeout(saveTimer);
-    }
-
-    scheduleSave();
-    setTimeout(()=>rte.focus(), 80);
-  } catch(e){
-    console.error('summary_unlock request failed:', e);
-    sumStatus.textContent = 'Unlock failed: ' + (e && e.message ? e.message : 'request error');
-  }
+  } catch(e){}
 }
 
 function scheduleSave(){
@@ -826,7 +797,7 @@ function scheduleSave(){
   }
 
   if (saveTimer) clearTimeout(saveTimer);
-  sumStatus.textContent = 'Saving...';
+  sumStatus.textContent = 'Saving draft...';
 
   saveTimer = setTimeout(async ()=>{
     try {
@@ -835,6 +806,7 @@ function scheduleSave(){
         headers: {'Content-Type': 'application/json'},
         credentials: 'same-origin',
         body: JSON.stringify({
+          action: 'save',
           cohort_id: COHORT_ID,
           lesson_id: LESSON_ID,
           summary_html: rte.innerHTML || ''
@@ -848,25 +820,15 @@ function scheduleSave(){
         j = JSON.parse(raw);
       } catch (parseErr) {
         console.error('summary_save invalid JSON response:', raw);
-
-        if (raw && raw.indexOf('"ok":true') !== -1) {
-          sumStatus.textContent = 'Saved';
-          refreshSummaryStatusOnly();
-          return;
-        }
-
         sumStatus.textContent = 'Save failed: invalid JSON response';
         return;
       }
 
       sumStatus.textContent = j.ok
-        ? 'Saved'
+        ? (j.skipped ? 'Draft unchanged' : 'Draft saved')
         : ('Save failed: ' + (j.error || 'unknown error'));
 
       if (j.ok) {
-        if (!summaryUnlockedForSession && String(j.review_status || '').trim() === 'acceptable') {
-          setSummaryLockedUI(true);
-        }
         refreshSummaryStatusOnly();
       }
     } catch (e) {
@@ -874,6 +836,48 @@ function scheduleSave(){
       sumStatus.textContent = 'Save failed: ' + (e && e.message ? e.message : 'request error');
     }
   }, 800);
+}
+
+async function checkSummaryNow(){
+  try{
+    sumStatus.textContent = 'Checking summary...';
+
+    const res = await fetch('/student/api/summary_save.php', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'same-origin',
+      body: JSON.stringify({
+        action: 'check',
+        cohort_id: COHORT_ID,
+        lesson_id: LESSON_ID
+      })
+    });
+
+    const raw = await res.text();
+    let j = null;
+
+    try {
+      j = JSON.parse(raw);
+    } catch (parseErr) {
+      console.error('summary_check invalid JSON response:', raw);
+      sumStatus.textContent = 'Check failed: invalid JSON response';
+      return;
+    }
+
+    if (!j.ok) {
+      sumStatus.textContent = 'Check failed: ' + (j.error || 'unknown error');
+      return;
+    }
+
+    sumStatus.textContent = (String(j.review_status || '') === 'acceptable')
+      ? 'Accepted'
+      : 'Not accepted';
+
+    renderSummaryAlert(j);
+  } catch(e){
+    console.error('summary_check request failed:', e);
+    sumStatus.textContent = 'Check failed: ' + (e && e.message ? e.message : 'request error');
+  }
 }
 
 rte.addEventListener('input', scheduleSave);
@@ -890,7 +894,6 @@ document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
 
 document.getElementById('btnSummary').onclick = ()=>{
   const isOpening = drawer.style.display !== 'flex';
-
   if (isOpening) {
     drawer.style.display = 'flex';
     if (!summaryLocked) {
@@ -898,31 +901,27 @@ document.getElementById('btnSummary').onclick = ()=>{
     }
   } else {
     drawer.style.display = 'none';
-    summaryUnlockedForSession = false;
-    refreshSummaryStatusOnly();
   }
 };
 
 document.getElementById('btnCloseDrawer').onclick = ()=> {
   drawer.style.display = 'none';
-  summaryUnlockedForSession = false;
-  refreshSummaryStatusOnly();
 };
 
-if (btnUnlockSummary) {
-  btnUnlockSummary.onclick = unlockSummaryForEditing;
-}
+btnCheckSummary.onclick = ()=> {
+  checkSummaryNow();
+};
 
 loadSummaryFromDb();
 
-// utils
 function escapeHtml(s){
-  return (s||'').toString()
-    .replaceAll('&','&amp;').replaceAll('<','&lt;')
-    .replaceAll('>','&gt;').replaceAll('"','&quot;');
+  return (s || '').toString()
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;');
 }
 
-// Keyboard nav
 function isEditableTarget(el){
   if (!el) return false;
   const tag = (el.tagName || '').toUpperCase();
