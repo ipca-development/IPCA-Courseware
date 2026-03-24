@@ -42,121 +42,216 @@ final class LessonSummaryService
      * - accepted summaries cannot be directly overwritten
      * - unlock is required first
      */
-    public function saveSummary(
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        string $summaryHtml,
-        string $actor = 'student',
-        array $options = []
-    ): array {
-        $plain = trim((string)preg_replace('/\s+/u', ' ', strip_tags($summaryHtml)));
+ public function saveSummary(
+    int $userId,
+    int $cohortId,
+    int $lessonId,
+    string $summaryHtml,
+    string $actor = 'student',
+    array $options = []
+): array {
+    $plain = trim((string)preg_replace('/\s+/u', ' ', strip_tags($summaryHtml)));
 
-        if ($plain === '') {
-            return ['ok' => false, 'error' => 'Empty summary'];
-        }
+    if ($plain === '') {
+        return ['ok' => false, 'error' => 'Empty summary'];
+    }
 
-        $existing = $this->getExisting($userId, $cohortId, $lessonId);
+    $existing = $this->getExisting($userId, $cohortId, $lessonId);
 
-        if (
-            $existing &&
-            (string)$existing['review_status'] === 'acceptable'
-        ) {
-            return [
-                'ok' => false,
-                'error' => 'Summary is accepted and must be unlocked before editing'
-            ];
-        }
+    if (
+        $existing &&
+        (string)$existing['review_status'] === 'acceptable'
+    ) {
+        return [
+            'ok' => false,
+            'error' => 'Summary is accepted and must be unlocked before editing'
+        ];
+    }
 
-        if ($existing && $this->isSameContent(
+    if (
+        $existing &&
+        $this->isSameContent(
             (string)($existing['summary_html'] ?? ''),
             (string)($existing['summary_plain'] ?? ''),
             $summaryHtml,
             $plain
-        )) {
-            return ['ok' => true, 'skipped' => true];
+        )
+    ) {
+        return [
+            'ok' => true,
+            'skipped' => true,
+            'review_status' => (string)($existing['review_status'] ?? 'pending')
+        ];
+    }
+
+    $this->pdo->beginTransaction();
+
+    try {
+        if ($existing) {
+            $this->createVersionSnapshot(
+                $existing,
+                $userId,
+                'manual_save'
+            );
         }
 
-        $evaluation = $this->evaluateSummaryQuality(
+        $reviewStatus = 'pending';
+        $reviewScore = null;
+        $reviewFeedback = null;
+        $gapTopics = null;
+        $reviewedAt = null;
+
+        if ($existing) {
+            $existingStatus = (string)($existing['review_status'] ?? 'pending');
+
+            if ($existingStatus === 'needs_revision' || $existingStatus === 'rejected') {
+                $reviewStatus = 'needs_revision';
+            } elseif ($existingStatus === 'acceptable') {
+                $reviewStatus = 'acceptable';
+            } else {
+                $reviewStatus = 'pending';
+            }
+
+            $reviewScore = $existing['review_score'] !== null ? (int)$existing['review_score'] : null;
+            $reviewFeedback = $existing['review_feedback'] ?? null;
+            $gapTopics = $existing['gap_topics'] ?? null;
+            $reviewedAt = $existing['reviewed_at'] ?? null;
+        }
+
+        $stmt = $this->pdo->prepare("
+            INSERT INTO lesson_summaries
+            (
+                user_id,
+                cohort_id,
+                lesson_id,
+                summary_html,
+                summary_plain,
+                review_status,
+                review_score,
+                review_feedback,
+                gap_topics,
+                reviewed_at,
+                reviewed_by_user_id,
+                reviewed_by_logic_version
+            )
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+            ON DUPLICATE KEY UPDATE
+                summary_html = VALUES(summary_html),
+                summary_plain = VALUES(summary_plain),
+                review_status = VALUES(review_status),
+                review_score = VALUES(review_score),
+                review_feedback = VALUES(review_feedback),
+                gap_topics = VALUES(gap_topics),
+                reviewed_at = VALUES(reviewed_at),
+                reviewed_by_user_id = VALUES(reviewed_by_user_id),
+                reviewed_by_logic_version = VALUES(reviewed_by_logic_version),
+                updated_at = CURRENT_TIMESTAMP
+        ");
+
+        $stmt->execute([
             $userId,
             $cohortId,
             $lessonId,
             $summaryHtml,
-            $plain
-        );
+            $plain,
+            $reviewStatus,
+            $reviewScore,
+            $reviewFeedback,
+            $gapTopics,
+            $reviewedAt,
+            null,
+            'v2.0'
+        ]);
 
-        $this->pdo->beginTransaction();
+        $this->pdo->commit();
 
-        try {
-            if ($existing) {
-                $this->createVersionSnapshot(
-                    $existing,
-                    $userId,
-                    'manual_save'
-                );
-            }
-
-            $stmt = $this->pdo->prepare("
-                INSERT INTO lesson_summaries
-                (
-                    user_id,
-                    cohort_id,
-                    lesson_id,
-                    summary_html,
-                    summary_plain,
-                    review_status,
-                    review_score,
-                    review_feedback,
-                    gap_topics,
-                    reviewed_at,
-                    reviewed_by_user_id,
-                    reviewed_by_logic_version
-                )
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
-                ON DUPLICATE KEY UPDATE
-                    summary_html = VALUES(summary_html),
-                    summary_plain = VALUES(summary_plain),
-                    review_status = VALUES(review_status),
-                    review_score = VALUES(review_score),
-                    review_feedback = VALUES(review_feedback),
-                    gap_topics = VALUES(gap_topics),
-                    reviewed_at = VALUES(reviewed_at),
-                    reviewed_by_user_id = VALUES(reviewed_by_user_id),
-                    reviewed_by_logic_version = VALUES(reviewed_by_logic_version),
-                    updated_at = CURRENT_TIMESTAMP
-            ");
-
-            $stmt->execute([
-                $userId,
-                $cohortId,
-                $lessonId,
-                $summaryHtml,
-                $plain,
-                (string)$evaluation['review_status'],
-                isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
-                (string)$evaluation['review_feedback'],
-                (string)$evaluation['gap_topics'],
-                gmdate('Y-m-d H:i:s'),
-                null,
-                'v2.0'
-            ]);
-
-            $this->pdo->commit();
-
-            return [
-                'ok' => true,
-                'review_status' => (string)$evaluation['review_status'],
-                'review_score' => isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
-                'review_feedback' => (string)$evaluation['review_feedback'],
-                'gap_topics' => (string)$evaluation['gap_topics'],
-            ];
-        } catch (Throwable $e) {
-            if ($this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            throw $e;
+        return [
+            'ok' => true,
+            'review_status' => $reviewStatus,
+            'saved_as_draft' => true
+        ];
+    } catch (Throwable $e) {
+        if ($this->pdo->inTransaction()) {
+            $this->pdo->rollBack();
         }
+        throw $e;
     }
+}
+	
+public function checkSummary(
+    int $userId,
+    int $cohortId,
+    int $lessonId,
+    string $actor = 'student'
+): array {
+    $existing = $this->getExisting($userId, $cohortId, $lessonId);
+
+    if (!$existing) {
+        return ['ok' => false, 'error' => 'Summary not found'];
+    }
+
+    $summaryHtml = (string)($existing['summary_html'] ?? '');
+    $summaryPlain = trim((string)($existing['summary_plain'] ?? ''));
+
+    if ($summaryPlain === '') {
+        return ['ok' => false, 'error' => 'Summary is empty'];
+    }
+
+    $evaluation = $this->evaluateSummaryQuality(
+        $userId,
+        $cohortId,
+        $lessonId,
+        $summaryHtml,
+        $summaryPlain
+    );
+
+    $this->pdo->beginTransaction();
+
+    try {
+        $stmt = $this->pdo->prepare("
+            UPDATE lesson_summaries
+            SET
+                review_status = ?,
+                review_score = ?,
+                review_feedback = ?,
+                gap_topics = ?,
+                reviewed_at = ?,
+                reviewed_by_user_id = NULL,
+                reviewed_by_logic_version = 'v2.0',
+                updated_at = CURRENT_TIMESTAMP
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND lesson_id = ?
+        ");
+
+        $stmt->execute([
+            (string)$evaluation['review_status'],
+            isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
+            (string)$evaluation['review_feedback'],
+            (string)$evaluation['gap_topics'],
+            gmdate('Y-m-d H:i:s'),
+            $userId,
+            $cohortId,
+            $lessonId
+        ]);
+
+        $this->pdo->commit();
+
+        return [
+            'ok' => true,
+            'review_status' => (string)$evaluation['review_status'],
+            'review_score' => isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
+            'review_feedback' => (string)$evaluation['review_feedback'],
+            'gap_topics' => (string)$evaluation['gap_topics'],
+        ];
+    } catch (Throwable $e) {
+        if ($this->pdo->inTransaction()) {
+            $this->pdo->rollBack();
+        }
+        throw $e;
+    }
+}	
+	
 
     /**
      * Unlock accepted summary for editing.
