@@ -44,8 +44,20 @@ function cw_header(string $title = ''): void
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title><?= h($pageTitle) ?></title>
-  <link rel="stylesheet" href="/assets/app.css">
-  <link rel="stylesheet" href="/assets/app-shell.css">
+
+<meta name="theme-color" content="#1e3c72">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/favicon-180x180.png">
+<link rel="manifest" href="/site.webmanifest">
+
+<link rel="stylesheet" href="/assets/app.css">
+<link rel="stylesheet" href="/assets/app-shell.css">
 </head>
 <body class="app-shell-body">
   <div class="app-shell" id="appShell">
