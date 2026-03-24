@@ -807,7 +807,12 @@ async function unlockSummaryForEditing(){
     summaryUnlockedForSession = true;
     setSummaryLockedUI(false);
     sumStatus.textContent = 'Unlocked';
-    await refreshSummaryStatusOnly();
+
+    if (saveTimer) {
+      clearTimeout(saveTimer);
+    }
+
+    scheduleSave();
     setTimeout(()=>rte.focus(), 80);
   } catch(e){
     console.error('summary_unlock request failed:', e);
