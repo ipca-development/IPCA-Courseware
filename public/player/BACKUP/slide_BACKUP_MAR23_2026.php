@@ -30,6 +30,11 @@ $lessonId = (int)$slide['lesson_id'];
 $courseId = (int)$slide['course_id'];
 $pageNum  = (int)$slide['page_number'];
 
+//
+// SECURITY: students may only access slides that belong to a cohort they are enrolled in,
+// and that cohort contains this lesson in its schedule.
+// (Admin bypasses.)
+//
 $cohortId = 0;
 if ($role === 'student') {
     $uid = (int)$u['id'];
@@ -51,6 +56,7 @@ if ($role === 'student') {
         exit('Forbidden');
     }
 } else {
+    // Admin: try to find any cohort for this course (for back link convenience)
     $c = $pdo->prepare("SELECT id FROM cohorts WHERE course_id=? ORDER BY id DESC LIMIT 1");
     $c->execute([$courseId]);
     $cohortId = (int)($c->fetchColumn() ?: 0);
@@ -60,13 +66,15 @@ $backUrl = $cohortId > 0 ? ('/student/course.php?cohort_id='.(int)$cohortId) : '
 
 $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
 
-$HEADER = "/assets/overlay/header.png";
-$FOOTER = "/assets/overlay/footer.png";
+$HEADER = "/assets/overlay/header.png"; // 1600x125
+$FOOTER = "/assets/overlay/footer.png"; // 1600x90
 
+// Hotspots
 $hs = $pdo->prepare("SELECT id, label, src, x,y,w,h FROM slide_hotspots WHERE slide_id=? AND is_deleted=0 ORDER BY id ASC");
 $hs->execute([$slideId]);
 $hotspots = $hs->fetchAll(PDO::FETCH_ASSOC);
 
+// Content EN/ES (for ES popup)
 $en = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='en' LIMIT 1");
 $en->execute([$slideId]);
 $enText = (string)($en->fetchColumn() ?: '');
@@ -75,6 +83,7 @@ $es = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND l
 $es->execute([$slideId]);
 $esText = (string)($es->fetchColumn() ?: '');
 
+// References
 $refsStmt = $pdo->prepare("
   SELECT ref_type, ref_code, ref_title, confidence, notes
   FROM slide_references
@@ -84,6 +93,7 @@ $refsStmt = $pdo->prepare("
 $refsStmt->execute([$slideId]);
 $refs = $refsStmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Prev/Next within lesson
 $prevStmt = $pdo->prepare("
   SELECT id FROM slides
   WHERE lesson_id=? AND is_deleted=0 AND page_number < ?
@@ -154,22 +164,19 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     .wrap{ padding:14px; }
     .viewport{
       width:100%;
-      max-width:1200px;
-      margin:0 auto;
-      aspect-ratio:16/9;
+      max-width: 1200px;
+      margin: 0 auto;
+      aspect-ratio: 16/9;
       overflow:hidden;
-      border-radius:14px;
+      border-radius: 14px;
       border:1px solid #e6e6e6;
       background:#ffffff;
       position:relative;
     }
     .stage{
-      width:1600px;
-      height:900px;
-      transform-origin:top left;
-      position:absolute;
-      left:0;
-      top:0;
+      width:1600px; height:900px;
+      transform-origin: top left;
+      position:absolute; left:0; top:0;
       background:#ffffff;
     }
 
@@ -177,33 +184,27 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       position:absolute;
       width:1315px;
       height:900px;
-      left:calc((1600px - 1315px)/2);
-      top:0;
-      object-fit:contain;
+      left: calc((1600px - 1315px)/2);
+      top: 0;
+      object-fit: contain;
       background:#ffffff;
-      user-drag:none;
-      -webkit-user-drag:none;
-      user-select:none;
-      -webkit-user-select:none;
+      user-drag: none;
+      -webkit-user-drag: none;
+      user-select: none;
+      -webkit-user-select: none;
       pointer-events:none;
     }
     .header-img{
-      position:absolute;
-      left:0;
-      top:0;
-      width:1600px;
-      height:125px;
+      position:absolute; left:0; top:0;
+      width:1600px; height:125px;
       object-fit:cover;
       pointer-events:none;
       user-select:none;
       -webkit-user-drag:none;
     }
     .footer-img{
-      position:absolute;
-      left:0;
-      bottom:0;
-      width:1600px;
-      height:90px;
+      position:absolute; left:0; bottom:0;
+      width:1600px; height:90px;
       object-fit:cover;
       pointer-events:none;
       user-select:none;
@@ -213,74 +214,70 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     .shield{
       position:absolute;
       inset:0;
-      background:transparent;
-      z-index:5;
+      background: transparent;
+      z-index: 5;
     }
 
     .hotspot{
       position:absolute;
       border:2px solid rgba(0,255,255,0.85);
       border-radius:10px;
-      background:rgba(0,255,255,0.08);
+      background: rgba(0,255,255,0.08);
       cursor:pointer;
-      z-index:10;
+      z-index: 10;
     }
     .hotspot .tag{
-      position:absolute;
-      left:8px;
-      top:8px;
-      font-size:14px;
-      padding:4px 8px;
+      position:absolute; left:8px; top:8px;
+      font-size:14px; padding:4px 8px;
       border-radius:10px;
-      background:rgba(0,0,0,0.55);
+      background: rgba(0,0,0,0.55);
       color:#fff;
     }
 
     .fab{
-      position:fixed;
-      right:14px;
-      bottom:14px;
-      width:54px;
-      height:54px;
-      border-radius:999px;
+      position: fixed;
+      right: 14px;
+      bottom: 14px;
+      width: 54px;
+      height: 54px;
+      border-radius: 999px;
       display:flex;
       align-items:center;
       justify-content:center;
-      background:rgba(30,60,114,0.92);
+      background: rgba(30,60,114,0.92);
       color:#fff;
       font-weight:900;
-      border:none;
+      border: none;
       cursor:pointer;
-      box-shadow:0 12px 26px rgba(0,0,0,0.18);
-      z-index:120;
+      box-shadow: 0 12px 26px rgba(0,0,0,0.18);
+      z-index: 120;
     }
 
     .modal{
-      position:fixed;
-      inset:0;
+      position:fixed; inset:0;
       display:none;
       align-items:center;
       justify-content:center;
-      background:rgba(0,0,0,0.55);
-      z-index:130;
+      background: rgba(0,0,0,0.55);
+      z-index: 130;
     }
     .modal .box{
       width:min(980px, 94vw);
-      max-height:min(86vh, 900px);
+      max-height: min(86vh, 900px);
       overflow:auto;
       background:#fff;
       border:1px solid rgba(0,0,0,0.10);
       border-radius:16px;
       padding:14px;
-      box-shadow:0 16px 50px rgba(0,0,0,0.25);
+      box-shadow: 0 16px 50px rgba(0,0,0,0.25);
     }
-    .modal h3{ margin:0 0 10px 0; }
+    .modal h3{ margin: 0 0 10px 0; }
     .modal pre{
-      white-space:pre-wrap;
-      word-break:break-word;
-      font-family:Manrope, Arial, sans-serif;
-      font-size:14px;
-      line-height:1.35;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: Manrope, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.35;
       margin:0;
     }
 
@@ -294,18 +291,18 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     .vbox video{ width:100%; height:auto; display:block; }
 
     .drawer{
-      position:fixed;
-      right:14px;
-      bottom:80px;
-      width:min(560px, 94vw);
-      height:min(520px, 70vh);
+      position: fixed;
+      right: 14px;
+      bottom: 80px;
+      width: min(560px, 94vw);
+      height: min(520px, 70vh);
       background:#fff;
       border:1px solid #eee;
       border-radius:16px;
-      box-shadow:0 16px 50px rgba(0,0,0,0.18);
+      box-shadow: 0 16px 50px rgba(0,0,0,0.18);
       display:none;
       flex-direction:column;
-      z-index:125;
+      z-index: 125;
       overflow:hidden;
     }
     .drawer .head{
@@ -317,9 +314,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       gap:10px;
     }
     .drawer .tools{
-      display:flex;
-      gap:6px;
-      flex-wrap:wrap;
+      display:flex; gap:6px; flex-wrap:wrap;
       padding:8px 12px;
       border-bottom:1px solid #eee;
     }
@@ -330,28 +325,24 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       width:100%;
       height:100%;
       overflow:auto;
-      font-family:Manrope, Arial, sans-serif;
-      font-size:14px;
-      line-height:1.35;
-      background:#fff;
+      font-family: Manrope, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.35;
     }
     .muted{ opacity:.7; font-size:12px; }
-
     .summary-alert{
-      position:sticky;
-      top:62px;
-      z-index:70;
-      width:100%;
-      max-width:1200px;
-      box-sizing:border-box;
-      margin:10px auto 0 auto;
-      padding:12px 44px 12px 14px;
-      border-radius:12px;
-      border:1px solid #f59e0b;
-      background:#fff7ed;
-      color:#9a3412;
-      box-shadow:0 8px 24px rgba(0,0,0,0.06);
-      display:none;
+      position: sticky;
+      top: 62px;
+      z-index: 70;
+      max-width: 1200px;
+      margin: 10px auto 0 auto;
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid #f59e0b;
+      background: #fff7ed;
+      color: #9a3412;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.06);
+      display: none;
     }
     .summary-alert strong{
       display:block;
@@ -361,30 +352,9 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       border-color:#93c5fd;
       background:#eff6ff;
       color:#1d4ed8;
-    }
-    .summary-alert.ok{
-      border-color:#86efac;
-      background:#f0fdf4;
-      color:#166534;
-    }
-    .summary-alert-close{
-      position:absolute;
-      top:8px;
-      right:8px;
-      width:28px;
-      height:28px;
-      border:none;
-      border-radius:999px;
-      background:transparent;
-      color:inherit;
-      font-size:18px;
-      font-weight:800;
-      line-height:1;
-      cursor:pointer;
-    }
-    .summary-alert-close:hover{
-      background:rgba(0,0,0,0.06);
-    }
+    }	  
+	  
+	  
   </style>
 </head>
 <body>
@@ -418,11 +388,10 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
   </div>
 
   <div class="summary-alert" id="summaryAlert">
-    <button type="button" class="summary-alert-close" id="summaryAlertClose" aria-label="Close">×</button>
     <strong id="summaryAlertTitle"></strong>
     <div id="summaryAlertBody"></div>
-  </div>
-
+  </div>	
+	
   <div class="wrap">
     <div class="viewport" id="viewport">
       <div class="stage" id="stage">
@@ -443,6 +412,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     </div>
   </div>
 
+  <!-- Audio element for OpenAI TTS -->
   <audio id="ttsAudio" preload="none"></audio>
 
   <button class="fab" id="btnSummary" title="My Study Summary">📝</button>
@@ -450,16 +420,12 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
   <div class="drawer" id="drawer">
     <div class="head">
       <strong>My Study Summary (Lesson)</strong>
-      <span class="muted" id="sumStatus">Draft</span>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <button class="btnx" id="btnCheckSummary" style="padding:6px 10px;">Check my Summary</button>
-        <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
-      </div>
+      <span class="muted" id="sumStatus">Saved</span>
+      <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
     </div>
     <div class="tools">
       <button class="btnx" type="button" data-cmd="bold" style="padding:6px 10px;">B</button>
       <button class="btnx" type="button" data-cmd="italic" style="padding:6px 10px;">I</button>
-      <button class="btnx" type="button" data-cmd="underline" style="padding:6px 10px;">U</button>
       <button class="btnx" type="button" data-cmd="insertUnorderedList" style="padding:6px 10px;">•</button>
     </div>
     <div id="rte" class="rte" contenteditable="true"></div>
@@ -510,11 +476,13 @@ function fitStage(){
 window.addEventListener('resize', ()=>setTimeout(fitStage, 60));
 setTimeout(fitStage, 30);
 
+// Prevent context menu (basic deterrent)
 document.getElementById('shield').addEventListener('contextmenu', (e)=>e.preventDefault());
 document.addEventListener('contextmenu', (e)=>{
   if (e.target.closest && e.target.closest('#viewport')) e.preventDefault();
 });
 
+// Clock
 function tickClock(){
   const d = new Date();
   const hh = String(d.getHours()).padStart(2,'0');
@@ -523,6 +491,7 @@ function tickClock(){
 }
 tickClock(); setInterval(tickClock, 10000);
 
+// Language dropdown
 const PREF_KEY = 'ipca_lang_pref';
 let lang = localStorage.getItem(PREF_KEY) || 'en';
 const langSel = document.getElementById('langSel');
@@ -540,6 +509,7 @@ function setLang(newLang){
   applyLangUI();
 }
 
+// Autoplay arm
 const AUTO_KEY = 'ipca_autoplay_next';
 function armAutoplay(){ localStorage.setItem(AUTO_KEY, '1'); }
 function consumeAutoplay(){
@@ -553,16 +523,19 @@ function consumeAutoplay(){
 langSel.addEventListener('change', ()=>{
   setLang(langSel.value);
 
+  // stop audio when switching language
   ttsAudio.pause();
   ttsAudio.currentTime = 0;
   ttsAudio.removeAttribute('src');
   ttsAudio.dataset.src = '';
   setPlayLabel('idle');
 
+  // Prefetch neighbors in the new language
   prefetchNeighborAudio();
 });
 applyLangUI();
 
+// ---- AI Voice (OpenAI TTS MP3 via API) ----
 const ttsAudio = document.getElementById('ttsAudio');
 const btnPlay  = document.getElementById('btnAudioPlay');
 const btnMute  = document.getElementById('btnAudioMute');
@@ -606,6 +579,7 @@ async function playTTS(){
   }
 }
 
+// Button handlers
 document.getElementById('btnAudioPlay').onclick = ()=> playTTS();
 document.getElementById('btnAudioPause').onclick = ()=> ttsAudio.pause();
 document.getElementById('btnAudioRew').onclick = ()=>{
@@ -620,6 +594,7 @@ btnMute.onclick = ()=>{
   applyMuteUI();
 };
 
+// audio events
 ttsAudio.addEventListener('waiting', ()=> setPlayLabel('generating'));
 ttsAudio.addEventListener('canplay', ()=> setPlayLabel('idle'));
 ttsAudio.addEventListener('playing', ()=> setPlayLabel('idle'));
@@ -628,6 +603,7 @@ ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
 applyMuteUI();
 consumeAutoplay();
 
+// ---- Prefetch next/prev slide audio (warm cache) ----
 async function prefetchOne(slideId){
   if (!slideId || slideId <= 0) return;
   try {
@@ -640,17 +616,19 @@ async function prefetchNeighborAudio(){
 }
 setTimeout(prefetchNeighborAudio, 600);
 
-document.getElementById('btnPrev').onclick = ()=>{
+// ---- Prev/Next clicks: arm autoplay + navigate ----
+document.getElementById('btnPrev').onclick = (e)=>{
   if (PREV_ID <= 0) return;
   armAutoplay();
   location.href = '/player/slide.php?slide_id=' + PREV_ID;
 };
-document.getElementById('btnNext').onclick = ()=>{
+document.getElementById('btnNext').onclick = (e)=>{
   if (NEXT_ID <= 0) return;
   armAutoplay();
   location.href = '/player/slide.php?slide_id=' + NEXT_ID;
 };
 
+// ---- Video modal ----
 const CDN_BASE = <?= json_encode(rtrim($CDN_BASE,'/')) ?>;
 const modalVid = document.getElementById('modalVid');
 const vid = document.getElementById('vid');
@@ -672,6 +650,7 @@ modalVid.addEventListener('click', (e)=>{
   }
 });
 
+// ---- Study refs modal ----
 const REFS = <?= json_encode($refs) ?>;
 const modalRefs = document.getElementById('modalRefs');
 const refsBody = document.getElementById('refsBody');
@@ -701,6 +680,7 @@ document.getElementById('btnRefs').onclick = ()=>{
 document.getElementById('btnCloseRefs').onclick = ()=> modalRefs.style.display='none';
 modalRefs.addEventListener('click', (e)=>{ if(e.target===modalRefs) modalRefs.style.display='none'; });
 
+// ---- Spanish text modal ----
 const modalES = document.getElementById('modalES');
 document.getElementById('esBody').textContent = ES_TEXT || '(No Spanish text yet)';
 btnTxtES.onclick = ()=>{
@@ -710,76 +690,39 @@ btnTxtES.onclick = ()=>{
 document.getElementById('btnCloseES').onclick = ()=> modalES.style.display='none';
 modalES.addEventListener('click', (e)=>{ if(e.target===modalES) modalES.style.display='none'; });
 
+// ---- Summary (lesson-level rich text, autosave to DB) ----
 const COHORT_ID = <?= (int)$cohortId ?>;
 const LESSON_ID = <?= (int)$lessonId ?>;
 
 const drawer = document.getElementById('drawer');
 const rte = document.getElementById('rte');
 const sumStatus = document.getElementById('sumStatus');
-const btnCheckSummary = document.getElementById('btnCheckSummary');
 const summaryAlert = document.getElementById('summaryAlert');
-const summaryAlertClose = document.getElementById('summaryAlertClose');
 const summaryAlertTitle = document.getElementById('summaryAlertTitle');
 const summaryAlertBody = document.getElementById('summaryAlertBody');
-
-let saveTimer = null;
-let summaryAlertDismissed = false;
-
-summaryAlertClose.addEventListener('click', ()=>{
-  summaryAlertDismissed = true;
-  summaryAlert.style.display = 'none';
-});
-
-function renderSummaryAlert(j, options){
-  options = options || {};
-
+	
+function renderSummaryAlert(j){
   const status = String(j.review_status || '').trim();
   const feedback = String(j.review_notes_by_instructor || j.review_feedback || '').trim();
-  const suppressPending = !!options.suppressPending;
 
-  const newBannerKey = status + '|' + feedback;
-  if (renderSummaryAlert._lastKey !== newBannerKey) {
-    summaryAlertDismissed = false;
-    renderSummaryAlert._lastKey = newBannerKey;
-  }
-
-  summaryAlert.classList.remove('pending', 'ok');
+  summaryAlert.classList.remove('pending');
   summaryAlert.style.display = 'none';
   summaryAlertTitle.textContent = '';
   summaryAlertBody.textContent = '';
 
-  if (summaryAlertDismissed) {
-    return;
-  }
-
-  if (status === 'acceptable') {
+  if (status === 'needs_revision') {
     summaryAlert.style.display = 'block';
-    summaryAlert.classList.add('ok');
-    summaryAlertTitle.textContent = 'Accepted';
-    summaryAlertBody.textContent = 'Accepted: Edit via Notebook if needed.';
-    return;
-  }
-
-  if (status === 'needs_revision' || status === 'rejected') {
-    summaryAlert.style.display = 'block';
-    summaryAlertTitle.textContent = 'Not Accepted';
+    summaryAlertTitle.textContent = 'Instructor requested summary revision';
     summaryAlertBody.textContent = feedback !== ''
       ? feedback
-      : 'Not accepted: Keep working on it and check again.';
-    return;
-  }
-
-  if (status === 'pending') {
-    if (suppressPending) {
-      return;
-    }
-
+      : 'Please revise your lesson summary based on the instructor feedback before continuing.';
+  } else if (status === 'pending') {
     summaryAlert.style.display = 'block';
     summaryAlert.classList.add('pending');
-    summaryAlertTitle.textContent = 'Draft Not Yet Checked';
-    summaryAlertBody.textContent = 'Your summary is saved as a draft. Click "Check my Summary" when you are ready.';
+    summaryAlertTitle.textContent = 'Summary pending instructor review';
+    summaryAlertBody.textContent = 'Your updated summary has been saved and is awaiting instructor review.';
   }
-}
+}	
 
 async function loadSummaryFromDb(){
   try{
@@ -787,8 +730,8 @@ async function loadSummaryFromDb(){
     const j = await res.json();
     if (j.ok) {
       rte.innerHTML = j.summary_html || '';
-      sumStatus.textContent = 'Draft loaded';
-      renderSummaryAlert(j, { suppressPending: true });
+      sumStatus.textContent = 'Loaded';
+      renderSummaryAlert(j);
     }
   }catch(e){}
 }
@@ -803,9 +746,10 @@ async function refreshSummaryStatusOnly(){
   }catch(e){}
 }
 
+let saveTimer = null;
 function scheduleSave(){
   if (saveTimer) clearTimeout(saveTimer);
-  sumStatus.textContent = 'Saving draft...';
+  sumStatus.textContent = 'Saving…';
   saveTimer = setTimeout(async ()=>{
     try{
       const res = await fetch('/student/api/summary_save.php', {
@@ -813,14 +757,13 @@ function scheduleSave(){
         headers:{'Content-Type':'application/json'},
         credentials:'same-origin',
         body: JSON.stringify({
-          action: 'save',
           cohort_id: COHORT_ID,
           lesson_id: LESSON_ID,
           summary_html: rte.innerHTML || ''
         })
       });
-      const j = await res.json();
-      sumStatus.textContent = j.ok ? (j.skipped ? 'Draft unchanged' : 'Draft saved') : 'Save failed';
+const j = await res.json();
+      sumStatus.textContent = j.ok ? 'Saved' : ('Save failed');
       if (j.ok) {
         refreshSummaryStatusOnly();
       }
@@ -829,39 +772,6 @@ function scheduleSave(){
     }
   }, 800);
 }
-
-async function checkSummaryNow(){
-  try{
-    sumStatus.textContent = 'Checking summary...';
-
-    const res = await fetch('/student/api/summary_save.php', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      credentials:'same-origin',
-      body: JSON.stringify({
-        action: 'check',
-        cohort_id: COHORT_ID,
-        lesson_id: LESSON_ID
-      })
-    });
-
-    const j = await res.json();
-
-    if (!j.ok) {
-      sumStatus.textContent = 'Check failed';
-      return;
-    }
-
-    sumStatus.textContent = (String(j.review_status || '') === 'acceptable')
-      ? 'Accepted'
-      : 'Not accepted';
-
-    renderSummaryAlert(j);
-  } catch(e){
-    sumStatus.textContent = 'Check failed';
-  }
-}
-
 rte.addEventListener('input', scheduleSave);
 
 document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
@@ -878,16 +788,17 @@ document.getElementById('btnSummary').onclick = ()=>{
   if (drawer.style.display==='flex') setTimeout(()=>rte.focus(), 80);
 };
 document.getElementById('btnCloseDrawer').onclick = ()=> drawer.style.display='none';
-btnCheckSummary.onclick = ()=> checkSummaryNow();
 
 loadSummaryFromDb();
 
+// utils
 function escapeHtml(s){
   return (s||'').toString()
     .replaceAll('&','&amp;').replaceAll('<','&lt;')
     .replaceAll('>','&gt;').replaceAll('"','&quot;');
 }
 
+// Keyboard nav
 function isEditableTarget(el){
   if (!el) return false;
   const tag = (el.tagName || '').toUpperCase();
@@ -900,6 +811,7 @@ function isEditableTarget(el){
 }
 
 document.addEventListener('keydown', (e)=>{
+  // Do not hijack arrow keys while editing the summary
   if (isEditableTarget(e.target)) {
     return;
   }
