@@ -323,18 +323,24 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       padding:8px 12px;
       border-bottom:1px solid #eee;
     }
-    .rte{
-      border:none;
-      outline:none;
-      padding:12px;
-      width:100%;
-      height:100%;
-      overflow:auto;
-      font-family:Manrope, Arial, sans-serif;
-      font-size:14px;
-      line-height:1.35;
-      background:#fff;
-    }
+.rte{
+  border:none;
+  outline:none;
+  padding:12px;
+  width:100%;
+  max-width:100%;
+  height:100%;
+  box-sizing:border-box;
+  overflow-y:auto;
+  overflow-x:hidden;
+  font-family:Manrope, Arial, sans-serif;
+  font-size:14px;
+  line-height:1.35;
+  background:#fff;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  word-break:break-word;
+}
     .muted{ opacity:.7; font-size:12px; }
 
     .summary-alert{
