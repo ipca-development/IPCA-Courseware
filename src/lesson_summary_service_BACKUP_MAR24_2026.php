@@ -1062,18 +1062,17 @@ public function checkSummary(
         return $row ?: null;
     }
 
-private function isSameContent(string $oldHtml, string $oldPlain, string $newHtml, string $newPlain): bool
-{
-    $oldPlain = trim((string)preg_replace('/\s+/u', ' ', $oldPlain));
-    $newPlain = trim((string)preg_replace('/\s+/u', ' ', $newPlain));
+    private function isSameContent(string $oldHtml, string $oldPlain, string $newHtml, string $newPlain): bool
+    {
+        $oldPlain = trim($oldPlain);
+        $newPlain = trim($newPlain);
 
-    $oldHtml = trim((string)$oldHtml);
-    $newHtml = trim((string)$newHtml);
+        if ($oldPlain !== '' && $oldPlain === $newPlain) {
+            return true;
+        }
 
-    // Content is only the same if BOTH the visible text and the HTML markup match.
-    // This allows formatting-only changes (bold, italic, underline, lists) to be saved.
-    return ($oldPlain === $newPlain) && ($oldHtml === $newHtml);
-}
+        return trim($oldHtml) === trim($newHtml);
+    }
 
     private function createVersionSnapshot(array $row, int $actorId, string $reason): void
     {
