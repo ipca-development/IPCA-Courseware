@@ -150,13 +150,14 @@ final class LessonSummaryService
                 'review_feedback' => (string)$evaluation['review_feedback'],
                 'gap_topics' => (string)$evaluation['gap_topics'],
             ];
-        } catch (Throwable $e) {
-            if ($this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            throw $e;
-        }
-    }
+} catch (Throwable $e) {
+    return [
+        'review_status' => 'needs_revision',
+        'review_score' => 0,
+        'review_feedback' => 'Automatic summary review is temporarily unavailable. Please improve and resave your summary shortly.',
+        'gap_topics' => 'Automatic validation unavailable at save time.',
+    ];
+}
 
     /**
      * Unlock accepted summary for editing.
@@ -752,13 +753,13 @@ final class LessonSummaryService
         $sourceText = $this->buildLessonReferenceText($lessonId);
 
         if ($sourceText === '') {
-            return [
-                'review_status' => 'pending',
-                'review_score' => null,
-                'review_feedback' => 'Automatic summary review could not load lesson reference content. Please save again later or ask an instructor to review.',
-                'gap_topics' => '',
-            ];
-        }
+    return [
+        'review_status' => 'needs_revision',
+        'review_score' => 0,
+        'review_feedback' => 'Automatic summary review could not verify your summary against the lesson content. Please expand and improve your summary.',
+        'gap_topics' => 'Lesson reference content unavailable for automatic validation.',
+    ];
+}
 
         $schema = [
             'type' => 'object',
