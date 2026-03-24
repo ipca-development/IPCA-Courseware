@@ -725,34 +725,8 @@ const summaryAlertBody = document.getElementById('summaryAlertBody');
 let saveTimer = null;
 let summaryAlertDismissed = false;
 
-function summaryBannerStorageKey(status, feedback){
-  return 'ipca_summary_banner_seen'
-    + '|cohort:' + String(COHORT_ID)
-    + '|lesson:' + String(LESSON_ID)
-    + '|status:' + String(status || '')
-    + '|feedback:' + String(feedback || '');
-}
-
-function markSummaryBannerSeen(status, feedback){
-  try {
-    sessionStorage.setItem(summaryBannerStorageKey(status, feedback), '1');
-  } catch(e){}
-}
-
-function hasSeenSummaryBanner(status, feedback){
-  try {
-    return sessionStorage.getItem(summaryBannerStorageKey(status, feedback)) === '1';
-  } catch(e){
-    return false;
-  }
-}
-
 summaryAlertClose.addEventListener('click', ()=>{
-  const status = String(summaryAlert.dataset.status || '').trim();
-  const feedback = String(summaryAlert.dataset.feedback || '').trim();
-
   summaryAlertDismissed = true;
-  markSummaryBannerSeen(status, feedback);
   summaryAlert.style.display = 'none';
 });
 
@@ -762,7 +736,6 @@ function renderSummaryAlert(j, options){
   const status = String(j.review_status || '').trim();
   const feedback = String(j.review_notes_by_instructor || j.review_feedback || '').trim();
   const suppressPending = !!options.suppressPending;
-  const forceShow = !!options.forceShow;
 
   const newBannerKey = status + '|' + feedback;
   if (renderSummaryAlert._lastKey !== newBannerKey) {
@@ -774,14 +747,8 @@ function renderSummaryAlert(j, options){
   summaryAlert.style.display = 'none';
   summaryAlertTitle.textContent = '';
   summaryAlertBody.textContent = '';
-  summaryAlert.dataset.status = status;
-  summaryAlert.dataset.feedback = feedback;
 
   if (summaryAlertDismissed) {
-    return;
-  }
-
-  if (!forceShow && hasSeenSummaryBanner(status, feedback)) {
     return;
   }
 
@@ -790,7 +757,6 @@ function renderSummaryAlert(j, options){
     summaryAlert.classList.add('ok');
     summaryAlertTitle.textContent = 'Accepted';
     summaryAlertBody.textContent = 'Accepted: Edit via Notebook if needed.';
-    markSummaryBannerSeen(status, feedback);
     return;
   }
 
@@ -800,7 +766,6 @@ function renderSummaryAlert(j, options){
     summaryAlertBody.textContent = feedback !== ''
       ? feedback
       : 'Not accepted: Keep working on it and check again.';
-    markSummaryBannerSeen(status, feedback);
     return;
   }
 
@@ -813,7 +778,6 @@ function renderSummaryAlert(j, options){
     summaryAlert.classList.add('pending');
     summaryAlertTitle.textContent = 'Draft Not Yet Checked';
     summaryAlertBody.textContent = 'Your summary is saved as a draft. Click "Check my Summary" when you are ready.';
-    markSummaryBannerSeen(status, feedback);
   }
 }
 
