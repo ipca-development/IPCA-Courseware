@@ -101,6 +101,7 @@ $nextStmt = $pdo->prepare("
 ");
 $nextStmt->execute([$lessonId, $pageNum]);
 $nextId = (int)($nextStmt->fetchColumn() ?: 0);
+$isAdminViewer = ($role === 'admin');
 
 ?>
 <!doctype html>
@@ -219,14 +220,36 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
 
 .hotspot{
   position:absolute;
-  border:none;
-  border-radius:0;
-  background:transparent;
   cursor:pointer;
   z-index:10;
 }
 
-.hotspot .tag{
+/* Admin sees editable/visible hotspot areas */
+.viewer-admin .hotspot{
+  border:2px solid rgba(0,255,255,0.85);
+  border-radius:10px;
+  background:rgba(0,255,255,0.08);
+}
+
+.viewer-admin .hotspot .tag{
+  position:absolute;
+  left:8px;
+  top:8px;
+  font-size:14px;
+  padding:4px 8px;
+  border-radius:10px;
+  background:rgba(0,0,0,0.55);
+  color:#fff;
+}
+
+/* Students get invisible but still clickable hotspots */
+.viewer-student .hotspot{
+  border:none;
+  border-radius:0;
+  background:transparent;
+}
+
+.viewer-student .hotspot .tag{
   display:none;
 }
 
@@ -387,7 +410,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     }
   </style>
 </head>
-<body>
+<body class="<?= $isAdminViewer ? 'viewer-admin' : 'viewer-student' ?>">
 
   <div class="topbar2">
     <button class="btnx" onclick="location.href='<?= htmlspecialchars($backUrl) ?>'">Lesson Menu</button>
