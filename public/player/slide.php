@@ -328,6 +328,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       font-family: Manrope, Arial, sans-serif;
       font-size: 14px;
       line-height: 1.35;
+      background:#fff;
     }
     .muted{ opacity:.7; font-size:12px; }
     .summary-alert{
@@ -352,9 +353,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       border-color:#93c5fd;
       background:#eff6ff;
       color:#1d4ed8;
-    }	  
-	  
-	  
+    }
   </style>
 </head>
 <body>
@@ -390,8 +389,8 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
   <div class="summary-alert" id="summaryAlert">
     <strong id="summaryAlertTitle"></strong>
     <div id="summaryAlertBody"></div>
-  </div>	
-	
+  </div>
+
   <div class="wrap">
     <div class="viewport" id="viewport">
       <div class="stage" id="stage">
@@ -412,7 +411,6 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     </div>
   </div>
 
-  <!-- Audio element for OpenAI TTS -->
   <audio id="ttsAudio" preload="none"></audio>
 
   <button class="fab" id="btnSummary" title="My Study Summary">📝</button>
@@ -421,6 +419,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     <div class="head">
       <strong>My Study Summary (Lesson)</strong>
       <span class="muted" id="sumStatus">Saved</span>
+      <button class="btnx" id="btnUnlockSummary" style="padding:6px 10px; display:none;">Unlock for editing</button>
       <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
     </div>
     <div class="tools">
@@ -523,14 +522,12 @@ function consumeAutoplay(){
 langSel.addEventListener('change', ()=>{
   setLang(langSel.value);
 
-  // stop audio when switching language
   ttsAudio.pause();
   ttsAudio.currentTime = 0;
   ttsAudio.removeAttribute('src');
   ttsAudio.dataset.src = '';
   setPlayLabel('idle');
 
-  // Prefetch neighbors in the new language
   prefetchNeighborAudio();
 });
 applyLangUI();
@@ -579,7 +576,6 @@ async function playTTS(){
   }
 }
 
-// Button handlers
 document.getElementById('btnAudioPlay').onclick = ()=> playTTS();
 document.getElementById('btnAudioPause').onclick = ()=> ttsAudio.pause();
 document.getElementById('btnAudioRew').onclick = ()=>{
@@ -594,7 +590,6 @@ btnMute.onclick = ()=>{
   applyMuteUI();
 };
 
-// audio events
 ttsAudio.addEventListener('waiting', ()=> setPlayLabel('generating'));
 ttsAudio.addEventListener('canplay', ()=> setPlayLabel('idle'));
 ttsAudio.addEventListener('playing', ()=> setPlayLabel('idle'));
@@ -617,12 +612,12 @@ async function prefetchNeighborAudio(){
 setTimeout(prefetchNeighborAudio, 600);
 
 // ---- Prev/Next clicks: arm autoplay + navigate ----
-document.getElementById('btnPrev').onclick = (e)=>{
+document.getElementById('btnPrev').onclick = ()=>{
   if (PREV_ID <= 0) return;
   armAutoplay();
   location.href = '/player/slide.php?slide_id=' + PREV_ID;
 };
-document.getElementById('btnNext').onclick = (e)=>{
+document.getElementById('btnNext').onclick = ()=>{
   if (NEXT_ID <= 0) return;
   armAutoplay();
   location.href = '/player/slide.php?slide_id=' + NEXT_ID;
@@ -700,7 +695,11 @@ const sumStatus = document.getElementById('sumStatus');
 const summaryAlert = document.getElementById('summaryAlert');
 const summaryAlertTitle = document.getElementById('summaryAlertTitle');
 const summaryAlertBody = document.getElementById('summaryAlertBody');
-	
+const btnUnlockSummary = document.getElementById('btnUnlockSummary');
+
+let saveTimer = null;
+let summaryLocked = false;
+
 function renderSummaryAlert(j){
   const status = String(j.review_status || '').trim();
   const feedback = String(j.review_notes_by_instructor || j.review_feedback || '').trim();
@@ -716,35 +715,109 @@ function renderSummaryAlert(j){
     summaryAlertBody.textContent = feedback !== ''
       ? feedback
       : 'Please revise your lesson summary based on the instructor feedback before continuing.';
-  } 
-}	
+  }
+}
+
+function setSummaryLockedUI(isLocked){
+  summaryLocked = !!isLocked;
+
+  rte.contentEditable = isLocked ? 'false' : 'true';
+  rte.style.opacity = isLocked ? '0.75' : '1';
+  rte.style.background = isLocked ? '#f8fafc' : '#fff';
+  rte.style.cursor = isLocked ? 'default' : 'text';
+
+  if (btnUnlockSummary) {
+    btnUnlockSummary.style.display = isLocked ? 'inline-block' : 'none';
+  }
+
+  document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
+    btn.disabled = isLocked;
+  });
+
+  if (isLocked) {
+    sumStatus.textContent = 'Accepted - locked';
+  }
+}
 
 async function loadSummaryFromDb(){
   try{
-    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {credentials:'same-origin'});
+    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {
+      credentials:'same-origin'
+    });
     const j = await res.json();
+
     if (j.ok) {
       rte.innerHTML = j.summary_html || '';
-      sumStatus.textContent = 'Loaded';
       renderSummaryAlert(j);
+      setSummaryLockedUI(String(j.review_status || '').trim() === 'acceptable');
+
+      if (String(j.review_status || '').trim() !== 'acceptable') {
+        sumStatus.textContent = 'Loaded';
+      }
     }
   }catch(e){}
 }
 
 async function refreshSummaryStatusOnly(){
   try{
-    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {credentials:'same-origin'});
+    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {
+      credentials:'same-origin'
+    });
     const j = await res.json();
+
     if (j.ok) {
       renderSummaryAlert(j);
+      setSummaryLockedUI(String(j.review_status || '').trim() === 'acceptable');
     }
   }catch(e){}
 }
 
-let saveTimer = null;
-	
-	
+async function unlockSummaryForEditing(){
+  try{
+    sumStatus.textContent = 'Unlocking...';
+
+    const res = await fetch('/student/api/summary_save.php', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'same-origin',
+      body: JSON.stringify({
+        action: 'unlock',
+        cohort_id: COHORT_ID,
+        lesson_id: LESSON_ID
+      })
+    });
+
+    const raw = await res.text();
+    let j = null;
+
+    try {
+      j = JSON.parse(raw);
+    } catch (parseErr) {
+      console.error('summary_unlock invalid JSON response:', raw);
+      sumStatus.textContent = 'Unlock failed: invalid JSON response';
+      return;
+    }
+
+    if (!j.ok) {
+      sumStatus.textContent = 'Unlock failed: ' + (j.error || 'unknown error');
+      return;
+    }
+
+    setSummaryLockedUI(false);
+    sumStatus.textContent = 'Unlocked';
+    await refreshSummaryStatusOnly();
+    setTimeout(()=>rte.focus(), 80);
+  } catch(e){
+    console.error('summary_unlock request failed:', e);
+    sumStatus.textContent = 'Unlock failed: ' + (e && e.message ? e.message : 'request error');
+  }
+}
+
 function scheduleSave(){
+  if (summaryLocked) {
+    return;
+  }
+
   if (saveTimer) clearTimeout(saveTimer);
   sumStatus.textContent = 'Saving...';
 
@@ -784,6 +857,9 @@ function scheduleSave(){
         : ('Save failed: ' + (j.error || 'unknown error'));
 
       if (j.ok) {
+        if (String(j.review_status || '').trim() === 'acceptable') {
+          setSummaryLockedUI(true);
+        }
         refreshSummaryStatusOnly();
       }
     } catch (e) {
@@ -797,6 +873,7 @@ rte.addEventListener('input', scheduleSave);
 
 document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
   btn.addEventListener('click', ()=>{
+    if (summaryLocked) return;
     const cmd = btn.getAttribute('data-cmd');
     document.execCommand(cmd, false, null);
     rte.focus();
@@ -806,12 +883,18 @@ document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
 
 document.getElementById('btnSummary').onclick = ()=>{
   drawer.style.display = (drawer.style.display === 'flex') ? 'none' : 'flex';
-  if (drawer.style.display === 'flex') setTimeout(()=>rte.focus(), 80);
+  if (drawer.style.display === 'flex' && !summaryLocked) {
+    setTimeout(()=>rte.focus(), 80);
+  }
 };
 
 document.getElementById('btnCloseDrawer').onclick = ()=> {
   drawer.style.display = 'none';
 };
+
+if (btnUnlockSummary) {
+  btnUnlockSummary.onclick = unlockSummaryForEditing;
+}
 
 loadSummaryFromDb();
 
@@ -835,7 +918,6 @@ function isEditableTarget(el){
 }
 
 document.addEventListener('keydown', (e)=>{
-  // Do not hijack arrow keys while editing the summary
   if (isEditableTarget(e.target)) {
     return;
   }
