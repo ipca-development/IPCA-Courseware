@@ -338,20 +338,22 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
 
   .muted{ opacity:.7; font-size:12px; }
 
-    .summary-alert{
-      position:sticky;
-      top:62px;
-      z-index:70;
-      max-width:1200px;
-      margin:10px auto 0 auto;
-      padding:12px 44px 12px 14px;
-      border-radius:12px;
-      border:1px solid #f59e0b;
-      background:#fff7ed;
-      color:#9a3412;
-      box-shadow:0 8px 24px rgba(0,0,0,0.06);
-      display:none;
-    }
+	 .summary-alert{
+	  position:sticky;
+	  top:62px;
+	  z-index:70;
+	  width:100%;
+	  max-width:1200px;
+	  box-sizing:border-box;
+	  margin:10px auto 0 auto;
+	  padding:12px 44px 12px 14px;
+	  border-radius:12px;
+	  border:1px solid #f59e0b;
+	  background:#fff7ed;
+	  color:#9a3412;
+	  box-shadow:0 8px 24px rgba(0,0,0,0.06);
+	  display:none;
+	}
     .summary-alert strong{
       display:block;
       margin-bottom:4px;
@@ -456,11 +458,12 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
         <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
       </div>
     </div>
-    <div class="tools">
-      <button class="btnx" type="button" data-cmd="bold" style="padding:6px 10px;">B</button>
-      <button class="btnx" type="button" data-cmd="italic" style="padding:6px 10px;">I</button>
-      <button class="btnx" type="button" data-cmd="insertUnorderedList" style="padding:6px 10px;">•</button>
-    </div>
+	<div class="tools">
+	  <button class="btnx" type="button" data-cmd="bold" style="padding:6px 10px;">B</button>
+	  <button class="btnx" type="button" data-cmd="italic" style="padding:6px 10px;">I</button>
+	  <button class="btnx" type="button" data-cmd="underline" style="padding:6px 10px;">U</button>
+	  <button class="btnx" type="button" data-cmd="insertUnorderedList" style="padding:6px 10px;">•</button>
+	</div>
     <div id="rte" class="rte" contenteditable="true"></div>
   </div>
 
@@ -542,6 +545,7 @@ function setLang(newLang){
 
 const AUTO_KEY = 'ipca_autoplay_next';
 function armAutoplay(){ localStorage.setItem(AUTO_KEY, '1'); }
+
 function consumeAutoplay(){
   const v = localStorage.getItem(AUTO_KEY);
   if (v === '1') {
@@ -572,48 +576,11 @@ const ttsAudio = document.getElementById('ttsAudio');
 const btnPlay  = document.getElementById('btnAudioPlay');
 const btnMute  = document.getElementById('btnAudioMute');
 
-let audioPrimed = false;
-let pendingAutoplay = false;
-	
-async function primeAudioOnce(){
-  if (audioPrimed) return;
-
-  try {
-    ttsAudio.muted = true;
-
-    const p = ttsAudio.play();
-    if (p !== undefined) {
-      p.then(()=>{
-        ttsAudio.pause();
-        ttsAudio.currentTime = 0;
-
-        ttsAudio.muted = (localStorage.getItem(MUTE_KEY) === '1');
-        audioPrimed = true;
-
-        if (pendingAutoplay) {
-          pendingAutoplay = false;
-          playTTS();
-        }
-      }).catch(()=>{
-        ttsAudio.muted = (localStorage.getItem(MUTE_KEY) === '1');
-      });
-    }
-  } catch(e){}
-}	
-
-function handleFirstGesturePrime(){
-  primeAudioOnce();
-
-  document.removeEventListener('click', handleFirstGesturePrime, true);
-  document.removeEventListener('touchstart', handleFirstGesturePrime, true);
-  document.removeEventListener('keydown', handleFirstGesturePrime, true);
-}
-
-document.addEventListener('click', handleFirstGesturePrime, true);
-document.addEventListener('touchstart', handleFirstGesturePrime, true);
-document.addEventListener('keydown', handleFirstGesturePrime, true);	
-	
 const MUTE_KEY = 'ipca_tts_muted';
+const AUDIO_PRIMED_KEY = 'ipca_tts_primed';
+
+let audioPrimed = sessionStorage.getItem(AUDIO_PRIMED_KEY) === '1';
+let pendingAutoplay = false;
 
 function setPlayLabel(state){
   if (state === 'generating') btnPlay.textContent = 'Generating Audio…';
@@ -672,6 +639,7 @@ ttsAudio.addEventListener('waiting', ()=> setPlayLabel('generating'));
 ttsAudio.addEventListener('canplay', ()=> setPlayLabel('idle'));
 ttsAudio.addEventListener('playing', ()=>{
   audioPrimed = true;
+  sessionStorage.setItem(AUDIO_PRIMED_KEY, '1');
   pendingAutoplay = false;
   setPlayLabel('idle');
 });
@@ -807,9 +775,12 @@ function setSummaryLockedUI(isLocked){
   }
 }
 
-function renderSummaryAlert(j){
+function renderSummaryAlert(j, options){
+  options = options || {};
+
   const status = String(j.review_status || '').trim();
   const feedback = String(j.review_notes_by_instructor || j.review_feedback || '').trim();
+  const suppressPending = !!options.suppressPending;
 
   const newBannerKey = status + '|' + feedback;
   if (renderSummaryAlert._lastKey !== newBannerKey) {
@@ -847,24 +818,30 @@ function renderSummaryAlert(j){
   }
 
   if (status === 'pending') {
+    setSummaryLockedUI(false);
+
+    if (suppressPending) {
+      return;
+    }
+
     summaryAlert.style.display = 'block';
     summaryAlert.classList.add('pending');
     summaryAlertTitle.textContent = 'Draft Not Yet Checked';
     summaryAlertBody.textContent = 'Your summary is saved as a draft. Click "Check my Summary" when you are ready.';
-    setSummaryLockedUI(false);
     return;
   }
 
   setSummaryLockedUI(false);
 }
 
-async function loadSummaryFromDb(){
+async function refreshSummaryStatusOnly(){
   try{
-    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {credentials:'same-origin'});
+    const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {
+      credentials:'same-origin'
+    });
     const j = await res.json();
+
     if (j.ok) {
-      rte.innerHTML = j.summary_html || '';
-      sumStatus.textContent = 'Draft loaded';
       renderSummaryAlert(j);
     }
   } catch(e){}
