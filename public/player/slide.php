@@ -758,13 +758,13 @@ function scheduleSave(){
         })
       });
 const j = await res.json();
-      sumStatus.textContent = j.ok ? 'Saved' : ('Save failed');
-      if (j.ok) {
-        refreshSummaryStatusOnly();
-      }
+sumStatus.textContent = j.ok ? 'Saved' : ('Save failed: ' + (j.error || 'unknown error'));
+if (j.ok) {
+  refreshSummaryStatusOnly();
+}
     }catch(e){
-      sumStatus.textContent = 'Save failed';
-    }
+  sumStatus.textContent = 'Save failed: ' + (e && e.message ? e.message : 'request error');
+}
   }, 800);
 }
 rte.addEventListener('input', scheduleSave);
