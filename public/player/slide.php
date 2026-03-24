@@ -892,7 +892,7 @@ async function checkSummaryNow(){
       ? 'Accepted'
       : 'Not accepted';
 
-    renderSummaryAlert(j);
+    renderSummaryAlert(j, { forceShow: true });
   } catch(e){
     sumStatus.textContent = 'Check failed';
   }
