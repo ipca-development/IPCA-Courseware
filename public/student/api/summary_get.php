@@ -51,7 +51,7 @@ echo json_encode([
   'ok' => true,
   'summary_html' => $row ? (string)$row['summary_html'] : '',
   'updated_at' => $row ? (string)$row['updated_at'] : null,
-  'review_status' => $row ? (string)$row['review_status'] : 'pending',
+  'review_status' => $row ? (string)$row['review_status'] : 'missing',
   'review_feedback' => $row ? (string)($row['review_feedback'] ?? '') : '',
   'review_notes_by_instructor' => $row ? (string)($row['review_notes_by_instructor'] ?? '') : ''
 ]);
