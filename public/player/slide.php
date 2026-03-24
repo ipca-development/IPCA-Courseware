@@ -336,7 +336,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       background:#fff;
     }
 
-    .muted{ opacity:.7; font-size:12px; }
+  .muted{ opacity:.7; font-size:12px; }
 
     .summary-alert{
       position:sticky;
@@ -344,7 +344,7 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       z-index:70;
       max-width:1200px;
       margin:10px auto 0 auto;
-      padding:12px 14px;
+      padding:12px 44px 12px 14px;
       border-radius:12px;
       border:1px solid #f59e0b;
       background:#fff7ed;
@@ -366,6 +366,25 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       background:#f0fdf4;
       color:#166534;
     }
+    .summary-alert-close{
+      position:absolute;
+      top:8px;
+      right:8px;
+      width:28px;
+      height:28px;
+      border:none;
+      border-radius:999px;
+      background:transparent;
+      color:inherit;
+      font-size:18px;
+      font-weight:800;
+      line-height:1;
+      cursor:pointer;
+    }
+    .summary-alert-close:hover{
+      background:rgba(0,0,0,0.06);
+    }
+	  
   </style>
 </head>
 <body>
@@ -398,10 +417,11 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
     </div>
   </div>
 
-  <div class="summary-alert" id="summaryAlert">
-    <strong id="summaryAlertTitle"></strong>
-    <div id="summaryAlertBody"></div>
-  </div>
+ <div class="summary-alert" id="summaryAlert">
+  <button type="button" class="summary-alert-close" id="summaryAlertClose" aria-label="Close">×</button>
+  <strong id="summaryAlertTitle"></strong>
+  <div id="summaryAlertBody"></div>
+</div>
 
   <div class="wrap">
     <div class="viewport" id="viewport">
@@ -526,7 +546,14 @@ function consumeAutoplay(){
   const v = localStorage.getItem(AUTO_KEY);
   if (v === '1') {
     localStorage.removeItem(AUTO_KEY);
-    setTimeout(()=>playTTS(), 350);
+
+    setTimeout(()=>{
+      if (audioPrimed) {
+        playTTS();
+      } else {
+        pendingAutoplay = true;
+      }
+    }, 350);
   }
 }
 
@@ -545,6 +572,47 @@ const ttsAudio = document.getElementById('ttsAudio');
 const btnPlay  = document.getElementById('btnAudioPlay');
 const btnMute  = document.getElementById('btnAudioMute');
 
+let audioPrimed = false;
+let pendingAutoplay = false;
+	
+async function primeAudioOnce(){
+  if (audioPrimed) return;
+
+  try {
+    ttsAudio.muted = true;
+
+    const p = ttsAudio.play();
+    if (p !== undefined) {
+      p.then(()=>{
+        ttsAudio.pause();
+        ttsAudio.currentTime = 0;
+
+        ttsAudio.muted = (localStorage.getItem(MUTE_KEY) === '1');
+        audioPrimed = true;
+
+        if (pendingAutoplay) {
+          pendingAutoplay = false;
+          playTTS();
+        }
+      }).catch(()=>{
+        ttsAudio.muted = (localStorage.getItem(MUTE_KEY) === '1');
+      });
+    }
+  } catch(e){}
+}	
+
+function handleFirstGesturePrime(){
+  primeAudioOnce();
+
+  document.removeEventListener('click', handleFirstGesturePrime, true);
+  document.removeEventListener('touchstart', handleFirstGesturePrime, true);
+  document.removeEventListener('keydown', handleFirstGesturePrime, true);
+}
+
+document.addEventListener('click', handleFirstGesturePrime, true);
+document.addEventListener('touchstart', handleFirstGesturePrime, true);
+document.addEventListener('keydown', handleFirstGesturePrime, true);	
+	
 const MUTE_KEY = 'ipca_tts_muted';
 
 function setPlayLabel(state){
@@ -584,7 +652,9 @@ async function playTTS(){
   }
 }
 
-document.getElementById('btnAudioPlay').onclick = ()=> playTTS();
+document.getElementById('btnAudioPlay').onclick = ()=>{
+  playTTS();
+};
 document.getElementById('btnAudioPause').onclick = ()=> ttsAudio.pause();
 document.getElementById('btnAudioRew').onclick = ()=>{
   ttsAudio.currentTime = 0;
@@ -600,7 +670,11 @@ btnMute.onclick = ()=>{
 
 ttsAudio.addEventListener('waiting', ()=> setPlayLabel('generating'));
 ttsAudio.addEventListener('canplay', ()=> setPlayLabel('idle'));
-ttsAudio.addEventListener('playing', ()=> setPlayLabel('idle'));
+ttsAudio.addEventListener('playing', ()=>{
+  audioPrimed = true;
+  pendingAutoplay = false;
+  setPlayLabel('idle');
+});
 ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
 
 applyMuteUI();
@@ -699,12 +773,19 @@ const rte = document.getElementById('rte');
 const sumStatus = document.getElementById('sumStatus');
 const btnCheckSummary = document.getElementById('btnCheckSummary');
 const summaryAlert = document.getElementById('summaryAlert');
+const summaryAlertClose = document.getElementById('summaryAlertClose');
 const summaryAlertTitle = document.getElementById('summaryAlertTitle');
 const summaryAlertBody = document.getElementById('summaryAlertBody');
 
 let saveTimer = null;
 let summaryLocked = false;
+let summaryAlertDismissed = false;
 
+summaryAlertClose.addEventListener('click', ()=>{
+  summaryAlertDismissed = true;
+  summaryAlert.style.display = 'none';
+});	
+	
 function setSummaryLockedUI(isLocked){
   summaryLocked = !!isLocked;
 
@@ -730,10 +811,21 @@ function renderSummaryAlert(j){
   const status = String(j.review_status || '').trim();
   const feedback = String(j.review_notes_by_instructor || j.review_feedback || '').trim();
 
+  const newBannerKey = status + '|' + feedback;
+  if (renderSummaryAlert._lastKey !== newBannerKey) {
+    summaryAlertDismissed = false;
+    renderSummaryAlert._lastKey = newBannerKey;
+  }
+
   summaryAlert.classList.remove('pending', 'ok');
   summaryAlert.style.display = 'none';
   summaryAlertTitle.textContent = '';
   summaryAlertBody.textContent = '';
+
+  if (summaryAlertDismissed) {
+    setSummaryLockedUI(status === 'acceptable');
+    return;
+  }
 
   if (status === 'acceptable') {
     summaryAlert.style.display = 'block';
