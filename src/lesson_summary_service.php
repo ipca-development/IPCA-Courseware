@@ -873,62 +873,65 @@ final class LessonSummaryService
     }
 
     private function buildLessonReferenceText(int $lessonId): string
-    {
-        $parts = [];
+{
+    $parts = [];
 
-        $lessonTitle = $this->getLessonTitle($lessonId);
-        if ($lessonTitle !== '') {
-            $parts[] = 'Lesson Title: ' . $lessonTitle;
-        }
-
-        $stmt = $this->pdo->prepare("
-            SELECT
-                s.page_number,
-                se.summary,
-                se.narration_en,
-                sc.plain_text
-            FROM slides s
-            LEFT JOIN slide_enrichment se ON se.slide_id = s.id
-            LEFT JOIN slide_content sc
-              ON sc.slide_id = s.id
-             AND sc.lang = 'en'
-            WHERE s.lesson_id = ?
-              AND s.is_deleted = 0
-            ORDER BY s.page_number ASC
-        ");
-        $stmt->execute([$lessonId]);
-        $rows = $stmt->fetchAll();
-
-        foreach ($rows as $row) {
-            $pageNumber = (int)($row['page_number'] ?? 0);
-            $pageChunks = [];
-
-            $summary = trim((string)($row['summary'] ?? ''));
-            if ($summary !== '') {
-                $pageChunks[] = $summary;
-            }
-
-            $narration = trim((string)($row['narration_en'] ?? ''));
-            if ($narration !== '') {
-                $pageChunks[] = $narration;
-            }
-
-            $plainText = trim((string)($row['plain_text'] ?? ''));
-            if ($plainText !== '') {
-                $pageChunks[] = $plainText;
-            }
-
-            $pageText = trim(implode("\n", $pageChunks));
-            if ($pageText === '') {
-                continue;
-            }
-
-            $parts[] = 'Slide ' . $pageNumber . ":\n" . $pageText;
-        }
-
-        return trim(implode("\n\n", $parts));
+    $lessonTitle = $this->getLessonTitle($lessonId);
+    if ($lessonTitle !== '') {
+        $parts[] = 'Lesson Title: ' . $lessonTitle;
     }
 
+    $stmt = $this->pdo->prepare("
+        SELECT
+            s.page_number,
+            sao.summary AS ai_summary,
+            se.narration_en,
+            sc.plain_text
+        FROM slides s
+        LEFT JOIN slide_ai_outputs sao
+          ON sao.slide_id = s.id
+         AND sao.status = 'approved'
+        LEFT JOIN slide_enrichment se
+          ON se.slide_id = s.id
+        LEFT JOIN slide_content sc
+          ON sc.slide_id = s.id
+         AND sc.lang = 'en'
+        WHERE s.lesson_id = ?
+          AND s.is_deleted = 0
+        ORDER BY s.page_number ASC
+    ");
+    $stmt->execute([$lessonId]);
+    $rows = $stmt->fetchAll();
+
+    foreach ($rows as $row) {
+        $pageNumber = (int)($row['page_number'] ?? 0);
+        $pageChunks = [];
+
+        $aiSummary = trim((string)($row['ai_summary'] ?? ''));
+        if ($aiSummary !== '') {
+            $pageChunks[] = $aiSummary;
+        }
+
+        $narration = trim((string)($row['narration_en'] ?? ''));
+        if ($narration !== '') {
+            $pageChunks[] = $narration;
+        }
+
+        $plainText = trim((string)($row['plain_text'] ?? ''));
+        if ($plainText !== '') {
+            $pageChunks[] = $plainText;
+        }
+
+        $pageText = trim(implode("\n", $pageChunks));
+        if ($pageText === '') {
+            continue;
+        }
+
+        $parts[] = 'Slide ' . $pageNumber . ":\n" . $pageText;
+    }
+
+    return trim(implode("\n\n", $parts));
+}
     private function getLessonTitle(int $lessonId): string
     {
         $stmt = $this->pdo->prepare("
