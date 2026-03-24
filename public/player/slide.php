@@ -739,6 +739,157 @@ const LESSON_ID = <?= (int)$lessonId ?>;
 
 const drawer = document.getElementById('drawer');
 const rte = document.getElementById('rte');
+	
+	
+function summaryUiStateKey(){
+  return 'ipca_summary_ui_state|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
+}
+
+function getTextOffsetWithin(root, targetNode, targetOffset){
+  let total = 0;
+
+  function walk(node){
+    if (node === targetNode) {
+      total += targetOffset;
+      throw new Error('__FOUND__');
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      total += node.nodeValue ? node.nodeValue.length : 0;
+      return;
+    }
+
+    let child = node.firstChild;
+    while (child) {
+      walk(child);
+      child = child.nextSibling;
+    }
+  }
+
+  try {
+    walk(root);
+  } catch (e) {
+    if (e && e.message === '__FOUND__') {
+      return total;
+    }
+    throw e;
+  }
+
+  return total;
+}
+
+function findTextPosition(root, charIndex){
+  let remaining = Math.max(0, charIndex);
+  let result = { node: root, offset: 0 };
+
+  function walk(node){
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = node.nodeValue ? node.nodeValue.length : 0;
+      if (remaining <= len) {
+        result = { node: node, offset: remaining };
+        throw new Error('__FOUND__');
+      }
+      remaining -= len;
+      return;
+    }
+
+    let child = node.firstChild;
+    while (child) {
+      walk(child);
+      child = child.nextSibling;
+    }
+  }
+
+  try {
+    walk(root);
+  } catch (e) {
+    if (e && e.message === '__FOUND__') {
+      return result;
+    }
+    throw e;
+  }
+
+  return result;
+}
+
+function saveSummaryUiState(){
+  try {
+    const state = {
+      drawerOpen: drawer.style.display === 'flex',
+      pageScrollY: window.scrollY || window.pageYOffset || 0,
+      rteScrollTop: rte ? rte.scrollTop : 0,
+      selectionStart: null,
+      selectionEnd: null
+    };
+
+    if (state.drawerOpen) {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+
+        if (rte.contains(range.startContainer) && rte.contains(range.endContainer)) {
+          state.selectionStart = getTextOffsetWithin(rte, range.startContainer, range.startOffset);
+          state.selectionEnd = getTextOffsetWithin(rte, range.endContainer, range.endOffset);
+        }
+      }
+    }
+
+    sessionStorage.setItem(summaryUiStateKey(), JSON.stringify(state));
+  } catch (e) {}
+}
+
+function loadSummaryUiState(){
+  try {
+    const raw = sessionStorage.getItem(summaryUiStateKey());
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+}
+
+function restoreSummaryUiState(){
+  const state = loadSummaryUiState();
+  if (!state) return;
+
+  if (state.drawerOpen) {
+    drawer.style.display = 'flex';
+  }
+
+  setTimeout(function(){
+    try {
+      window.scrollTo(0, Number(state.pageScrollY || 0));
+    } catch (e) {}
+  }, 0);
+
+  if (!state.drawerOpen) return;
+
+  setTimeout(function(){
+    try {
+      rte.scrollTop = Number(state.rteScrollTop || 0);
+    } catch (e) {}
+  }, 0);
+
+  if (state.selectionStart === null || state.selectionEnd === null) return;
+
+  setTimeout(function(){
+    try {
+      const startPos = findTextPosition(rte, Number(state.selectionStart || 0));
+      const endPos = findTextPosition(rte, Number(state.selectionEnd || 0));
+
+      const range = document.createRange();
+      range.setStart(startPos.node, startPos.offset);
+      range.setEnd(endPos.node, endPos.offset);
+
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (e) {}
+  }, 20);
+}	
+	
+	
+	
 const sumStatus = document.getElementById('sumStatus');
 const btnCheckSummary = document.getElementById('btnCheckSummary');
 const summaryAlert = document.getElementById('summaryAlert');
@@ -984,27 +1135,32 @@ document.getElementById('btnSummary').onclick = ()=>{
   const willOpen = drawer.style.display !== 'flex';
   drawer.style.display = willOpen ? 'flex' : 'none';
   saveSummaryDrawerState(willOpen);
+  saveSummaryUiState();
   if (willOpen) setTimeout(()=>rte.focus(), 80);
 };
 
 document.getElementById('btnCloseDrawer').onclick = ()=>{
   drawer.style.display = 'none';
   saveSummaryDrawerState(false);
+  saveSummaryUiState();
 };
 	
 	
 btnCheckSummary.onclick = ()=> checkSummaryNow();
 
-if (loadSummaryDrawerState()) {
+const initialSummaryUiState = loadSummaryUiState();
+
+if (initialSummaryUiState && initialSummaryUiState.drawerOpen) {
   drawer.style.display = 'flex';
-  setTimeout(()=>rte.focus(), 80);
 }
 
-loadSummaryFromDb();
+loadSummaryFromDb().then(()=>{
+  restoreSummaryUiState();
+});
 
 window.addEventListener('beforeunload', ()=>{
-  saveSummaryDrawerState(drawer.style.display === 'flex');
-});	
+  saveSummaryUiState();
+});
 	
 	
 function escapeHtml(s){
