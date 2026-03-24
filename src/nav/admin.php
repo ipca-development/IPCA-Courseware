@@ -30,6 +30,16 @@ return [
         'icon' => 'theory',
         'items' => [
             [
+                'key' => 'cohorts',
+                'label' => 'Cohorts',
+                'icon' => 'cohorts',
+                'href' => '/admin/cohorts.php',
+                'match_paths' => [
+                    '/admin/cohorts.php',
+                    '/admin/cohort.php',
+                ],
+            ],
+            [
                 'key' => 'courses',
                 'label' => 'Courses',
                 'icon' => 'courses',

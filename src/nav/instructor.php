@@ -29,8 +29,8 @@ return [
         'label' => 'Training',
     ],
     [
-        'key' => 'training_roster',
-        'label' => 'Training Roster',
+        'key' => 'user_accounts',
+        'label' => 'User Accounts',
         'icon' => 'users',
         'href' => '/instructor/students/index.php',
         'match_paths' => [
@@ -43,15 +43,6 @@ return [
         'label' => 'Theory Training',
         'icon' => 'theory',
         'items' => [
-            [
-                'key' => 'cohorts',
-                'label' => 'Cohorts',
-                'icon' => 'cohorts',
-                'href' => '/instructor/cohorts.php',
-                'match_paths' => [
-                    '/instructor/cohorts.php',
-                ],
-            ],
             [
                 'key' => 'summary_reviews',
                 'label' => 'Summary Reviews',
