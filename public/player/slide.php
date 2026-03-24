@@ -869,6 +869,9 @@ function scheduleSave(){
   sumStatus.textContent = 'Saving draft...';
 
   saveTimer = setTimeout(async ()=>{
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000);
+
     try {
       const res = await fetch('/student/api/summary_save.php', {
         method: 'POST',
@@ -879,12 +882,17 @@ function scheduleSave(){
           cohort_id: COHORT_ID,
           lesson_id: LESSON_ID,
           summary_html: rte.innerHTML || ''
-        })
+        }),
+        signal: controller.signal
       });
 
-      const raw = await res.text();
-      let j = null;
+      clearTimeout(timeoutId);
 
+      const raw = await res.text();
+      console.log('summary_save status:', res.status);
+      console.log('summary_save raw response:', raw);
+
+      let j = null;
       try {
         j = JSON.parse(raw);
       } catch (parseErr) {
@@ -901,8 +909,14 @@ function scheduleSave(){
         refreshSummaryStatusOnly();
       }
     } catch (e) {
+      clearTimeout(timeoutId);
       console.error('summary_save request failed:', e);
-      sumStatus.textContent = 'Save failed: ' + (e && e.message ? e.message : 'request error');
+
+      if (e && e.name === 'AbortError') {
+        sumStatus.textContent = 'Save failed: request timeout';
+      } else {
+        sumStatus.textContent = 'Save failed: ' + (e && e.message ? e.message : 'request error');
+      }
     }
   }, 800);
 }
