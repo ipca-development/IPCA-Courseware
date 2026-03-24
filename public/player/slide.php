@@ -217,24 +217,18 @@ $nextId = (int)($nextStmt->fetchColumn() ?: 0);
       z-index:5;
     }
 
-    .hotspot{
-      position:absolute;
-      border:2px solid rgba(0,255,255,0.85);
-      border-radius:10px;
-      background:rgba(0,255,255,0.08);
-      cursor:pointer;
-      z-index:10;
-    }
-    .hotspot .tag{
-      position:absolute;
-      left:8px;
-      top:8px;
-      font-size:14px;
-      padding:4px 8px;
-      border-radius:10px;
-      background:rgba(0,0,0,0.55);
-      color:#fff;
-    }
+.hotspot{
+  position:absolute;
+  border:none;
+  border-radius:0;
+  background:transparent;
+  cursor:pointer;
+  z-index:10;
+}
+
+.hotspot .tag{
+  display:none;
+}
 
     .fab{
       position:fixed;
