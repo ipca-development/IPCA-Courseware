@@ -995,13 +995,18 @@ document.getElementById('btnCloseDrawer').onclick = ()=>{
 	
 btnCheckSummary.onclick = ()=> checkSummaryNow();
 
-loadSummaryFromDb().then(()=>{
-  if (loadSummaryDrawerState()) {
-    drawer.style.display = 'flex';
-    setTimeout(()=>rte.focus(), 80);
-  }
-});
+if (loadSummaryDrawerState()) {
+  drawer.style.display = 'flex';
+  setTimeout(()=>rte.focus(), 80);
+}
 
+loadSummaryFromDb();
+
+window.addEventListener('beforeunload', ()=>{
+  saveSummaryDrawerState(drawer.style.display === 'flex');
+});	
+	
+	
 function escapeHtml(s){
   return (s||'').toString()
     .replaceAll('&','&amp;').replaceAll('<','&lt;')
