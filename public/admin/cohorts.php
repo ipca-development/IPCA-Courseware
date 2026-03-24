@@ -6,7 +6,7 @@ cw_require_login();
 
 $u = cw_current_user($pdo);
 $role = (string)($u['role'] ?? '');
-if ($role !== 'supervisor' && $role !== 'admin') {
+if ($role !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
 }

@@ -2,8 +2,11 @@
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 
-$u = cw_current_user();
-if (($u['role'] ?? '') !== 'admin' && ($u['role'] ?? '') !== 'supervisor') {
+cw_require_login();
+
+$u = cw_current_user($pdo);
+$role = (string)($u['role'] ?? '');
+if ($role !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
 }
