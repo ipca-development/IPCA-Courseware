@@ -150,14 +150,13 @@ final class LessonSummaryService
                 'review_feedback' => (string)$evaluation['review_feedback'],
                 'gap_topics' => (string)$evaluation['gap_topics'],
             ];
-} catch (Throwable $e) {
-    return [
-        'review_status' => 'needs_revision',
-        'review_score' => 0,
-        'review_feedback' => 'Automatic summary review is temporarily unavailable. Please improve and resave your summary shortly.',
-        'gap_topics' => 'Automatic validation unavailable at save time.',
-    ];
-}
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
 
     /**
      * Unlock accepted summary for editing.
@@ -753,13 +752,13 @@ final class LessonSummaryService
         $sourceText = $this->buildLessonReferenceText($lessonId);
 
         if ($sourceText === '') {
-    return [
-        'review_status' => 'needs_revision',
-        'review_score' => 0,
-        'review_feedback' => 'Automatic summary review could not verify your summary against the lesson content. Please expand and improve your summary.',
-        'gap_topics' => 'Lesson reference content unavailable for automatic validation.',
-    ];
-}
+            return [
+                'review_status' => 'needs_revision',
+                'review_score' => 0,
+                'review_feedback' => 'Automatic summary review could not verify your summary against the lesson content. Please expand and improve your summary.',
+                'gap_topics' => 'Lesson reference content unavailable for automatic validation.',
+            ];
+        }
 
         $schema = [
             'type' => 'object',
@@ -865,10 +864,10 @@ final class LessonSummaryService
             ];
         } catch (Throwable $e) {
             return [
-                'review_status' => 'pending',
-                'review_score' => null,
-                'review_feedback' => 'Automatic summary review is temporarily unavailable. Your summary was saved, but it is not yet approved.',
-                'gap_topics' => '',
+                'review_status' => 'needs_revision',
+                'review_score' => 0,
+                'review_feedback' => 'Automatic summary review is temporarily unavailable. Please improve and resave your summary shortly.',
+                'gap_topics' => 'Automatic validation unavailable at save time.',
             ];
         }
     }
