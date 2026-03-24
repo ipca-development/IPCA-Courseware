@@ -746,14 +746,14 @@ let saveTimer = null;
 	
 function scheduleSave(){
   if (saveTimer) clearTimeout(saveTimer);
-  sumStatus.textContent = 'Saving…';
+  sumStatus.textContent = 'Saving...';
 
   saveTimer = setTimeout(async ()=>{
-    try{
+    try {
       const res = await fetch('/student/api/summary_save.php', {
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        credentials:'same-origin',
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        credentials: 'same-origin',
         body: JSON.stringify({
           cohort_id: COHORT_ID,
           lesson_id: LESSON_ID,
@@ -762,22 +762,31 @@ function scheduleSave(){
       });
 
       const raw = await res.text();
-
       let j = null;
+
       try {
         j = JSON.parse(raw);
       } catch (parseErr) {
         console.error('summary_save invalid JSON response:', raw);
+
+        if (raw && raw.indexOf('"ok":true') !== -1) {
+          sumStatus.textContent = 'Saved';
+          refreshSummaryStatusOnly();
+          return;
+        }
+
         sumStatus.textContent = 'Save failed: invalid JSON response';
         return;
       }
 
-      sumStatus.textContent = j.ok ? 'Saved' : ('Save failed: ' + (j.error || 'unknown error'));
+      sumStatus.textContent = j.ok
+        ? 'Saved'
+        : ('Save failed: ' + (j.error || 'unknown error'));
 
       if (j.ok) {
         refreshSummaryStatusOnly();
       }
-    } catch(e){
+    } catch (e) {
       console.error('summary_save request failed:', e);
       sumStatus.textContent = 'Save failed: ' + (e && e.message ? e.message : 'request error');
     }
@@ -796,11 +805,13 @@ document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
 });
 
 document.getElementById('btnSummary').onclick = ()=>{
-  drawer.style.display = (drawer.style.display==='flex') ? 'none' : 'flex';
-  if (drawer.style.display==='flex') setTimeout(()=>rte.focus(), 80);
+  drawer.style.display = (drawer.style.display === 'flex') ? 'none' : 'flex';
+  if (drawer.style.display === 'flex') setTimeout(()=>rte.focus(), 80);
 };
 
-document.getElementById('btnCloseDrawer').onclick = ()=> drawer.style.display='none';
+document.getElementById('btnCloseDrawer').onclick = ()=> {
+  drawer.style.display = 'none';
+};
 
 loadSummaryFromDb();
 
