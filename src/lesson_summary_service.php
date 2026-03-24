@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/openai.php';
+
 /**
  * Lesson Summary Service
  *
@@ -75,6 +77,14 @@ final class LessonSummaryService
             return ['ok' => true, 'skipped' => true];
         }
 
+        $evaluation = $this->evaluateSummaryQuality(
+            $userId,
+            $cohortId,
+            $lessonId,
+            $summaryHtml,
+            $plain
+        );
+
         $this->pdo->beginTransaction();
 
         try {
@@ -86,17 +96,6 @@ final class LessonSummaryService
                 );
             }
 
-            $newStatus = 'pending';
-
-            if ($existing) {
-                $existingStatus = (string)($existing['review_status'] ?? '');
-                $newStatus = ($existingStatus !== '') ? $existingStatus : 'pending';
-
-                if ($existingStatus === 'needs_revision') {
-                    $newStatus = 'pending';
-                }
-            }
-
             $stmt = $this->pdo->prepare("
                 INSERT INTO lesson_summaries
                 (
@@ -105,13 +104,25 @@ final class LessonSummaryService
                     lesson_id,
                     summary_html,
                     summary_plain,
-                    review_status
+                    review_status,
+                    review_score,
+                    review_feedback,
+                    gap_topics,
+                    reviewed_at,
+                    reviewed_by_user_id,
+                    reviewed_by_logic_version
                 )
-                VALUES (?,?,?,?,?,?)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 ON DUPLICATE KEY UPDATE
                     summary_html = VALUES(summary_html),
                     summary_plain = VALUES(summary_plain),
                     review_status = VALUES(review_status),
+                    review_score = VALUES(review_score),
+                    review_feedback = VALUES(review_feedback),
+                    gap_topics = VALUES(gap_topics),
+                    reviewed_at = VALUES(reviewed_at),
+                    reviewed_by_user_id = VALUES(reviewed_by_user_id),
+                    reviewed_by_logic_version = VALUES(reviewed_by_logic_version),
                     updated_at = CURRENT_TIMESTAMP
             ");
 
@@ -121,12 +132,24 @@ final class LessonSummaryService
                 $lessonId,
                 $summaryHtml,
                 $plain,
-                $newStatus
+                (string)$evaluation['review_status'],
+                isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
+                (string)$evaluation['review_feedback'],
+                (string)$evaluation['gap_topics'],
+                gmdate('Y-m-d H:i:s'),
+                null,
+                'v2.0'
             ]);
 
             $this->pdo->commit();
 
-            return ['ok' => true];
+            return [
+                'ok' => true,
+                'review_status' => (string)$evaluation['review_status'],
+                'review_score' => isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
+                'review_feedback' => (string)$evaluation['review_feedback'],
+                'gap_topics' => (string)$evaluation['gap_topics'],
+            ];
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
@@ -567,91 +590,94 @@ final class LessonSummaryService
         ];
     }
 
-	
-	public function getNotebookExportData(
-    int $userId,
-    int $cohortId,
-    string $studentName,
-    string $exportVersion,
-    string $exportTimestamp
-): array {
-    $view = $this->getNotebookViewData($userId, $cohortId, $studentName);
+    public function getNotebookExportData(
+        int $userId,
+        int $cohortId,
+        string $studentName,
+        string $exportVersion,
+        string $exportTimestamp
+    ): array {
+        $view = $this->getNotebookViewData($userId, $cohortId, $studentName);
 
-    $cohort = isset($view['cohort']) && is_array($view['cohort']) ? $view['cohort'] : [];
+        $cohort = isset($view['cohort']) && is_array($view['cohort']) ? $view['cohort'] : [];
 
-    $programTitle = trim((string)($cohort['program_name'] ?? ''));
-    if ($programTitle === '') {
-        $programTitle = trim((string)($cohort['course_title'] ?? 'Training Program'));
-    }
-
-    $scopeLabel = trim((string)($cohort['scope_label'] ?? ''));
-    if ($scopeLabel === '') {
-        $scopeLabel = trim((string)($cohort['cohort_name'] ?? ''));
-    }
-    if ($scopeLabel === '') {
-        $scopeLabel = 'Cohort ' . $cohortId;
-    }
-
-    $courses = [];
-    $courseCount = 0;
-    $lessonCount = 0;
-
-    foreach ((array)($view['courses'] ?? []) as $course) {
-        $courseLessons = [];
-
-        foreach ((array)($course['lessons'] ?? []) as $lesson) {
-            $summaryHtml = (string)($lesson['summary_html'] ?? '');
-            $summaryPlain = trim((string)($lesson['summary_plain'] ?? ''));
-
-            if ($summaryPlain === '') {
-                $summaryPlain = trim((string)preg_replace('/\s+/', ' ', strip_tags($summaryHtml)));
-            }
-
-            $courseLessons[] = [
-                'lesson_id' => (int)($lesson['lesson_id'] ?? 0),
-                'anchor_id' => (string)($lesson['anchor_id'] ?? ('lesson-' . (int)($lesson['lesson_id'] ?? 0))),
-                'lesson_number' => (string)($lesson['lesson_number'] ?? ''),
-                'lesson_title' => (string)($lesson['lesson_title'] ?? ''),
-                'review_status' => (string)($lesson['review_status'] ?? 'pending'),
-                'word_count' => (int)($lesson['word_count'] ?? 0),
-                'version_count' => (int)($lesson['version_count'] ?? 0),
-                'updated_at' => (string)($lesson['updated_at'] ?? ''),
-                'summary_html' => $summaryHtml,
-                'summary_plain' => $summaryPlain,
-            ];
-
-            $lessonCount++;
+        $programTitle = trim((string)($cohort['program_name'] ?? ''));
+        if ($programTitle === '') {
+            $programTitle = trim((string)($cohort['course_title'] ?? 'Training Program'));
         }
 
-        $courses[] = [
-            'course_id' => (int)($course['course_id'] ?? 0),
-            'anchor_id' => (string)($course['anchor_id'] ?? ('course-' . (int)($course['course_id'] ?? 0))),
-            'course_number' => (string)($course['course_number'] ?? ''),
-            'course_title' => (string)($course['course_title'] ?? ''),
-            'lessons' => $courseLessons,
-        ];
+        $scopeLabel = trim((string)($cohort['scope_label'] ?? ''));
+        if ($scopeLabel === '') {
+            $scopeLabel = trim((string)($cohort['cohort_name'] ?? ''));
+        }
+        if ($scopeLabel === '') {
+            $scopeLabel = 'Cohort ' . $cohortId;
+        }
 
-        $courseCount++;
+        $courses = [];
+        $courseCount = 0;
+        $lessonCount = 0;
+
+        foreach ((array)($view['courses'] ?? []) as $course) {
+            $courseLessons = [];
+
+            foreach ((array)($course['lessons'] ?? []) as $lesson) {
+                $summaryHtml = (string)($lesson['summary_html'] ?? '');
+                $summaryPlain = trim((string)($lesson['summary_plain'] ?? ''));
+
+                if ($summaryPlain === '') {
+                    $summaryPlain = trim((string)preg_replace('/\s+/', ' ', strip_tags($summaryHtml)));
+                }
+
+                $courseLessons[] = [
+                    'lesson_id' => (int)($lesson['lesson_id'] ?? 0),
+                    'anchor_id' => (string)($lesson['anchor_id'] ?? ('lesson-' . (int)($lesson['lesson_id'] ?? 0))),
+                    'lesson_number' => (string)($lesson['lesson_number'] ?? ''),
+                    'lesson_title' => (string)($lesson['lesson_title'] ?? ''),
+                    'review_status' => (string)($lesson['review_status'] ?? 'pending'),
+                    'word_count' => (int)($lesson['word_count'] ?? 0),
+                    'version_count' => (int)($lesson['version_count'] ?? 0),
+                    'updated_at' => (string)($lesson['updated_at'] ?? ''),
+                    'summary_html' => $summaryHtml,
+                    'summary_plain' => $summaryPlain,
+                ];
+
+                $lessonCount++;
+            }
+
+            $courses[] = [
+                'course_id' => (int)($course['course_id'] ?? 0),
+                'anchor_id' => (string)($course['anchor_id'] ?? ('course-' . (int)($course['course_id'] ?? 0))),
+                'course_number' => (string)($course['course_number'] ?? ''),
+                'course_title' => (string)($course['course_title'] ?? ''),
+                'lessons' => $courseLessons,
+            ];
+
+            $courseCount++;
+        }
+
+        return [
+            'student_name' => $studentName,
+            'program_title' => $programTitle,
+            'scope_label' => $scopeLabel,
+            'export_version' => $exportVersion,
+            'export_timestamp' => $exportTimestamp,
+            'course_count' => $courseCount,
+            'lesson_count' => $lessonCount,
+            'courses' => $courses,
+        ];
     }
 
-    return [
-        'student_name' => $studentName,
-        'program_title' => $programTitle,
-        'scope_label' => $scopeLabel,
-        'export_version' => $exportVersion,
-        'export_timestamp' => $exportTimestamp,
-        'course_count' => $courseCount,
-        'lesson_count' => $lessonCount,
-        'courses' => $courses,
-    ];
-}
-	
     public function getVersionsForLesson(int $userId, int $cohortId, int $lessonId, int $limit = 12): array
     {
         $this->assertStudentEnrollment($userId, $cohortId);
 
-        if ($limit <= 0) $limit = 12;
-        if ($limit > 25) $limit = 25;
+        if ($limit <= 0) {
+            $limit = 12;
+        }
+        if ($limit > 25) {
+            $limit = 25;
+        }
 
         $sql = "
             SELECT
@@ -692,6 +718,251 @@ final class LessonSummaryService
         }
 
         return $out;
+    }
+
+    private function evaluateSummaryQuality(
+        int $userId,
+        int $cohortId,
+        int $lessonId,
+        string $summaryHtml,
+        string $summaryPlain
+    ): array {
+        $summaryPlain = trim($summaryPlain);
+
+        if ($summaryPlain === '') {
+            return [
+                'review_status' => 'needs_revision',
+                'review_score' => 0,
+                'review_feedback' => 'Summary is empty.',
+                'gap_topics' => 'No usable summary content provided.',
+            ];
+        }
+
+        $minimumWordCount = 35;
+        if ($this->wordCount($summaryPlain) < $minimumWordCount) {
+            return [
+                'review_status' => 'needs_revision',
+                'review_score' => 20,
+                'review_feedback' => 'Your summary is too short. Add the main aircraft concepts, components, and operational details from the lesson in your own words.',
+                'gap_topics' => 'Summary too short; likely missing key lesson concepts.',
+            ];
+        }
+
+        $lessonTitle = $this->getLessonTitle($lessonId);
+        $sourceText = $this->buildLessonReferenceText($lessonId);
+
+        if ($sourceText === '') {
+            return [
+                'review_status' => 'pending',
+                'review_score' => null,
+                'review_feedback' => 'Automatic summary review could not load lesson reference content. Please save again later or ask an instructor to review.',
+                'gap_topics' => '',
+            ];
+        }
+
+        $schema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'properties' => [
+                'review_status' => [
+                    'type' => 'string',
+                    'enum' => ['acceptable', 'needs_revision']
+                ],
+                'review_score' => [
+                    'type' => 'integer',
+                    'minimum' => 0,
+                    'maximum' => 100
+                ],
+                'review_feedback' => [
+                    'type' => 'string'
+                ],
+                'gap_topics' => [
+                    'type' => 'string'
+                ]
+            ],
+            'required' => [
+                'review_status',
+                'review_score',
+                'review_feedback',
+                'gap_topics'
+            ]
+        ];
+
+        $systemPrompt = "You are an aviation training summary evaluator. Your task is to judge whether the student's lesson summary demonstrates adequate understanding of the lesson content. Approve only if the summary is factually aligned with the lesson, covers the important points, and is written as a genuine concise study summary. If important lesson concepts are missing, vague, or inaccurate, mark it needs_revision. Do not require perfect wording. Be practical and training-oriented.";
+
+        $userPrompt = "LESSON TITLE:\n"
+            . $lessonTitle
+            . "\n\nLESSON REFERENCE CONTENT:\n"
+            . $this->truncateForAi($sourceText, 12000)
+            . "\n\nSTUDENT SUMMARY:\n"
+            . $this->truncateForAi($summaryPlain, 5000)
+            . "\n\nEvaluate the student summary.\n"
+            . "- acceptable only if it captures the important lesson points with adequate understanding\n"
+            . "- needs_revision if it is too vague, incomplete, generic, or misses key concepts\n"
+            . "- review_feedback should be short, direct, and student-facing\n"
+            . "- gap_topics should list the missing or weak topics in plain text";
+
+        try {
+            $resp = cw_openai_responses([
+                'model' => cw_openai_model(),
+                'input' => [
+                    [
+                        'role' => 'system',
+                        'content' => [
+                            ['type' => 'input_text', 'text' => $systemPrompt]
+                        ]
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            ['type' => 'input_text', 'text' => $userPrompt]
+                        ]
+                    ]
+                ],
+                'text' => [
+                    'format' => [
+                        'type' => 'json_schema',
+                        'name' => 'lesson_summary_quality_review',
+                        'schema' => $schema,
+                        'strict' => true
+                    ]
+                ],
+                'temperature' => 0.1
+            ]);
+
+            $json = cw_openai_extract_json_text($resp);
+
+            $reviewStatus = trim((string)($json['review_status'] ?? 'needs_revision'));
+            if (!in_array($reviewStatus, ['acceptable', 'needs_revision'], true)) {
+                $reviewStatus = 'needs_revision';
+            }
+
+            $reviewScore = isset($json['review_score']) ? (int)$json['review_score'] : null;
+            if ($reviewScore !== null) {
+                if ($reviewScore < 0) {
+                    $reviewScore = 0;
+                }
+                if ($reviewScore > 100) {
+                    $reviewScore = 100;
+                }
+            }
+
+            $reviewFeedback = trim((string)($json['review_feedback'] ?? ''));
+            $gapTopics = trim((string)($json['gap_topics'] ?? ''));
+
+            if ($reviewFeedback === '') {
+                $reviewFeedback = $reviewStatus === 'acceptable'
+                    ? 'Summary quality is acceptable.'
+                    : 'Please revise your summary to better cover the key lesson topics.';
+            }
+
+            return [
+                'review_status' => $reviewStatus,
+                'review_score' => $reviewScore,
+                'review_feedback' => $reviewFeedback,
+                'gap_topics' => $gapTopics,
+            ];
+        } catch (Throwable $e) {
+            return [
+                'review_status' => 'pending',
+                'review_score' => null,
+                'review_feedback' => 'Automatic summary review is temporarily unavailable. Your summary was saved, but it is not yet approved.',
+                'gap_topics' => '',
+            ];
+        }
+    }
+
+    private function buildLessonReferenceText(int $lessonId): string
+    {
+        $parts = [];
+
+        $lessonTitle = $this->getLessonTitle($lessonId);
+        if ($lessonTitle !== '') {
+            $parts[] = 'Lesson Title: ' . $lessonTitle;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT
+                s.page_number,
+                se.summary,
+                se.narration_en,
+                sc.plain_text
+            FROM slides s
+            LEFT JOIN slide_enrichment se ON se.slide_id = s.id
+            LEFT JOIN slide_content sc
+              ON sc.slide_id = s.id
+             AND sc.lang = 'en'
+            WHERE s.lesson_id = ?
+              AND s.is_deleted = 0
+            ORDER BY s.page_number ASC
+        ");
+        $stmt->execute([$lessonId]);
+        $rows = $stmt->fetchAll();
+
+        foreach ($rows as $row) {
+            $pageNumber = (int)($row['page_number'] ?? 0);
+            $pageChunks = [];
+
+            $summary = trim((string)($row['summary'] ?? ''));
+            if ($summary !== '') {
+                $pageChunks[] = $summary;
+            }
+
+            $narration = trim((string)($row['narration_en'] ?? ''));
+            if ($narration !== '') {
+                $pageChunks[] = $narration;
+            }
+
+            $plainText = trim((string)($row['plain_text'] ?? ''));
+            if ($plainText !== '') {
+                $pageChunks[] = $plainText;
+            }
+
+            $pageText = trim(implode("\n", $pageChunks));
+            if ($pageText === '') {
+                continue;
+            }
+
+            $parts[] = 'Slide ' . $pageNumber . ":\n" . $pageText;
+        }
+
+        return trim(implode("\n\n", $parts));
+    }
+
+    private function getLessonTitle(int $lessonId): string
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT title
+            FROM lessons
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $stmt->execute([$lessonId]);
+
+        $title = $stmt->fetchColumn();
+
+        return is_string($title) ? trim($title) : '';
+    }
+
+    private function truncateForAi(string $text, int $maxChars): string
+    {
+        $text = trim($text);
+        if ($text === '') {
+            return '';
+        }
+
+        if (function_exists('mb_strlen') && function_exists('mb_substr')) {
+            if (mb_strlen($text) <= $maxChars) {
+                return $text;
+            }
+            return rtrim(mb_substr($text, 0, $maxChars - 1)) . '…';
+        }
+
+        if (strlen($text) <= $maxChars) {
+            return $text;
+        }
+
+        return rtrim(substr($text, 0, $maxChars - 1)) . '…';
     }
 
     private function getExisting(int $userId, int $cohortId, int $lessonId): ?array
@@ -836,21 +1107,29 @@ final class LessonSummaryService
     private function excerpt(string $plain, int $max): string
     {
         $plain = trim($plain);
-        if ($plain === '') return '';
+        if ($plain === '') {
+            return '';
+        }
 
         if (function_exists('mb_strlen') && function_exists('mb_substr')) {
-            if (mb_strlen($plain) <= $max) return $plain;
+            if (mb_strlen($plain) <= $max) {
+                return $plain;
+            }
             return rtrim(mb_substr($plain, 0, $max - 1)) . '…';
         }
 
-        if (strlen($plain) <= $max) return $plain;
+        if (strlen($plain) <= $max) {
+            return $plain;
+        }
         return rtrim(substr($plain, 0, $max - 1)) . '…';
     }
 
     private function wordCount(string $plain): int
     {
         $plain = trim($plain);
-        if ($plain === '') return 0;
+        if ($plain === '') {
+            return 0;
+        }
 
         $parts = preg_split('/\s+/u', $plain);
         return is_array($parts) ? count($parts) : 0;

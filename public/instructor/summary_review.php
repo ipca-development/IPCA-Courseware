@@ -206,13 +206,13 @@ cw_header('Summary Review');
         </div>
 
         <div style="margin-top:16px;display:flex;gap:12px;flex-wrap:wrap;">
-            <button
-                type="submit"
-                name="summary_decision"
-                value="approve"
-                class="btn"
-                <?= ($isReadOnly || !$canSubmit) ? 'disabled' : '' ?>
-            >Approve Summary</button>
+           <button
+    type="submit"
+    name="summary_decision"
+    value="approve"
+    class="btn"
+    <?= ($isReadOnly || !$canSubmit) ? 'disabled' : '' ?>
+>Approve Summary</button>
 
             <button
                 type="submit"
