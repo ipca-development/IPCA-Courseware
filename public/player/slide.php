@@ -699,6 +699,7 @@ const btnUnlockSummary = document.getElementById('btnUnlockSummary');
 
 let saveTimer = null;
 let summaryLocked = false;
+let summaryUnlockedForSession = false;
 
 function renderSummaryAlert(j){
   const status = String(j.review_status || '').trim();
@@ -803,6 +804,7 @@ async function unlockSummaryForEditing(){
       return;
     }
 
+    summaryUnlockedForSession = true;
     setSummaryLockedUI(false);
     sumStatus.textContent = 'Unlocked';
     await refreshSummaryStatusOnly();
@@ -857,7 +859,7 @@ function scheduleSave(){
         : ('Save failed: ' + (j.error || 'unknown error'));
 
       if (j.ok) {
-        if (String(j.review_status || '').trim() === 'acceptable') {
+        if (!summaryUnlockedForSession && String(j.review_status || '').trim() === 'acceptable') {
           setSummaryLockedUI(true);
         }
         refreshSummaryStatusOnly();
@@ -882,14 +884,24 @@ document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
 });
 
 document.getElementById('btnSummary').onclick = ()=>{
-  drawer.style.display = (drawer.style.display === 'flex') ? 'none' : 'flex';
-  if (drawer.style.display === 'flex' && !summaryLocked) {
-    setTimeout(()=>rte.focus(), 80);
+  const isOpening = drawer.style.display !== 'flex';
+
+  if (isOpening) {
+    drawer.style.display = 'flex';
+    if (!summaryLocked) {
+      setTimeout(()=>rte.focus(), 80);
+    }
+  } else {
+    drawer.style.display = 'none';
+    summaryUnlockedForSession = false;
+    refreshSummaryStatusOnly();
   }
 };
 
 document.getElementById('btnCloseDrawer').onclick = ()=> {
   drawer.style.display = 'none';
+  summaryUnlockedForSession = false;
+  refreshSummaryStatusOnly();
 };
 
 if (btnUnlockSummary) {
