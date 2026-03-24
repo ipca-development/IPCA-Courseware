@@ -716,12 +716,7 @@ function renderSummaryAlert(j){
     summaryAlertBody.textContent = feedback !== ''
       ? feedback
       : 'Please revise your lesson summary based on the instructor feedback before continuing.';
-  } else if (status === 'pending') {
-    summaryAlert.style.display = 'block';
-    summaryAlert.classList.add('pending');
-    summaryAlertTitle.textContent = 'Summary pending instructor review';
-    summaryAlertBody.textContent = 'Your updated summary has been saved and is awaiting instructor review.';
-  }
+  } 
 }	
 
 async function loadSummaryFromDb(){
