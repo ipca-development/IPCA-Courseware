@@ -95,28 +95,11 @@ final class LessonSummaryService
             );
         }
 
-        $reviewStatus = 'pending';
+$reviewStatus = 'pending';
         $reviewScore = null;
         $reviewFeedback = null;
         $gapTopics = null;
         $reviewedAt = null;
-
-        if ($existing) {
-            $existingStatus = (string)($existing['review_status'] ?? 'pending');
-
-            if ($existingStatus === 'needs_revision' || $existingStatus === 'rejected') {
-                $reviewStatus = 'needs_revision';
-            } elseif ($existingStatus === 'acceptable') {
-                $reviewStatus = 'acceptable';
-            } else {
-                $reviewStatus = 'pending';
-            }
-
-            $reviewScore = $existing['review_score'] !== null ? (int)$existing['review_score'] : null;
-            $reviewFeedback = $existing['review_feedback'] ?? null;
-            $gapTopics = $existing['gap_topics'] ?? null;
-            $reviewedAt = $existing['reviewed_at'] ?? null;
-        }
 
         $stmt = $this->pdo->prepare("
             INSERT INTO lesson_summaries
