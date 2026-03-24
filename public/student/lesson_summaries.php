@@ -77,6 +77,10 @@ function nb_attention_meta(array $lesson): array
     $reviewStatus = (string)($lesson['review_status'] ?? '');
     $attentionReason = (string)($lesson['notebook_attention_reason'] ?? '');
 
+    if ($reviewStatus === 'acceptable') {
+        return ['show' => true, 'label' => 'Accepted', 'class' => 'ok'];
+    }
+
     if (in_array($reviewStatus, ['needs_revision', 'rejected'], true)) {
         return ['show' => true, 'label' => 'Student Action Required', 'class' => 'warn'];
     }
@@ -89,42 +93,35 @@ function nb_attention_meta(array $lesson): array
         return ['show' => true, 'label' => 'Instructor Session Required', 'class' => 'info'];
     }
 
-    if ($reviewStatus === 'acceptable') {
-        return ['show' => true, 'label' => 'Accepted', 'class' => 'ok'];
-    }
-
     if ($reviewStatus === 'pending') {
-        return ['show' => true, 'label' => 'Pending', 'class' => 'pending'];
+        return ['show' => true, 'label' => 'Draft Not Yet Checked', 'class' => 'pending'];
     }
 
-    return ['show' => true, 'label' => 'Pending', 'class' => 'pending'];
-}
-
-function nb_summary_edit_allowed(array $lesson): bool
-{
-    $reviewStatus = (string)($lesson['review_status'] ?? '');
-    return nb_has_summary($lesson) || in_array($reviewStatus, ['needs_revision', 'rejected'], true);
+    return ['show' => true, 'label' => 'Draft Not Yet Checked', 'class' => 'pending'];
 }
 
 function nb_action_button_meta(array $lesson): ?array
 {
     $reviewStatus = (string)($lesson['review_status'] ?? '');
     $hasSummary = nb_has_summary($lesson);
-    $canEdit = nb_summary_edit_allowed($lesson);
 
     if ($reviewStatus === 'acceptable' && $hasSummary) {
-        return ['label' => 'Edit Summary', 'action' => 'unlock', 'class' => 'warn'];
+        return ['label' => 'Edit Summary', 'action' => 'unlock_edit', 'class' => 'warn'];
     }
 
     if (in_array($reviewStatus, ['needs_revision', 'rejected'], true)) {
-        return ['label' => 'Open Summary', 'action' => 'edit', 'class' => 'warn'];
+        return ['label' => 'Continue Editing', 'action' => 'edit', 'class' => 'warn'];
     }
 
-    if ($canEdit) {
-        return ['label' => 'Edit', 'action' => 'edit', 'class' => 'ghost'];
+    if ($reviewStatus === 'pending' && $hasSummary) {
+        return ['label' => 'Check my Summary', 'action' => 'check', 'class' => 'primary'];
     }
 
-    return null;
+    if (!$hasSummary) {
+        return ['label' => 'Write Summary', 'action' => 'edit', 'class' => 'ghost'];
+    }
+
+    return ['label' => 'Open Summary', 'action' => 'edit', 'class' => 'ghost'];
 }
 
 $initialExportVersion = gmdate('Y.m.d.Hi');
@@ -382,9 +379,9 @@ cw_header('My Notebook');
 }
 
 .nb-toc-item-lesson .nb-toc-row{
-  padding-left:60px; /* real visible indent on the rendered row */
+  padding-left:60px;
 }
-	
+
 .nb-toc-item-lesson .nb-toc-link{
   font-size:13px;
   font-weight:700;
@@ -577,6 +574,12 @@ cw_header('My Notebook');
   box-shadow:none;
 }
 
+.nb-editor.locked{
+  opacity:.75;
+  background:#f8fafc;
+  cursor:default;
+}
+
 .nb-panel-actions{
   margin-top:12px;
   display:flex;
@@ -725,22 +728,22 @@ cw_header('My Notebook');
       </div>
 
       <a
-  class="nb-btn primary"
-  id="exportBtn"
-  href="/student/export_lesson_summaries_pdf.php?cohort_id=<?= (int)$selectedCohortId ?>"
-  target="_blank"
-  rel="noopener"
->
-  Export PDF
-</a>
+        class="nb-btn primary"
+        id="exportBtn"
+        href="/student/export_lesson_summaries_pdf.php?cohort_id=<?= (int)$selectedCohortId ?>"
+        target="_blank"
+        rel="noopener"
+      >
+        Export PDF
+      </a>
     </div>
 
     <div class="nb-header">
-		<div class="nb-overline">Student Training Notebook</div>
-<h1 class="nb-title">My Notebook</h1>
-<div class="nb-sub">
-  <?= h($programTitle) ?> · A structured summary document of your current lesson understanding, organized by course and lesson within your active training scope.
-</div>
+      <div class="nb-overline">Student Training Notebook</div>
+      <h1 class="nb-title">My Notebook</h1>
+      <div class="nb-sub">
+        <?= h($programTitle) ?> · A structured summary document of your current lesson understanding, organized by course and lesson within your active training scope.
+      </div>
     </div>
 
     <div class="nb-meta">
@@ -770,8 +773,8 @@ cw_header('My Notebook');
     </div>
 
     <div class="nb-export-note">
-  Export opens a dedicated PDF document for the currently selected training scope.
-</div>
+      Export opens a dedicated PDF document for the currently selected training scope.
+    </div>
 
     <div class="nb-toc">
       <div class="nb-toc-head">
@@ -849,6 +852,7 @@ cw_header('My Notebook');
               $latestVersionAt = trim((string)($lesson['latest_version_at'] ?? ''));
               $showFeedback = trim((string)$lesson['instructor_feedback']) !== '';
               $showNotes = trim((string)$lesson['instructor_notes']) !== '';
+              $isLocked = ($reviewStatus === 'acceptable');
             ?>
             <section
               class="nb-lesson"
@@ -856,6 +860,7 @@ cw_header('My Notebook');
               data-lesson-id="<?= $lessonId ?>"
               data-review-status="<?= h($reviewStatus) ?>"
               data-has-summary="<?= $hasSummary ? '1' : '0' ?>"
+              data-summary-locked="<?= $isLocked ? '1' : '0' ?>"
             >
               <div class="nb-lesson-head">
                 <div class="nb-lesson-head-left">
@@ -908,19 +913,25 @@ cw_header('My Notebook');
                 </div>
 
                 <div class="nb-editor-wrap">
-                  <div class="nb-editor" contenteditable="true" id="editor-<?= $lessonId ?>"><?= (string)$lesson['summary_html'] ?></div>
+                  <div class="nb-editor<?= $isLocked ? ' locked' : '' ?>" contenteditable="<?= $isLocked ? 'false' : 'true' ?>" id="editor-<?= $lessonId ?>"><?= (string)$lesson['summary_html'] ?></div>
                 </div>
 
                 <div class="nb-panel-actions">
-                  <button class="nb-btn primary" data-save-lesson="<?= $lessonId ?>">Save</button>
+                  <button class="nb-btn ghost" data-save-lesson="<?= $lessonId ?>">Save Draft</button>
+                  <button class="nb-btn primary" data-check-lesson="<?= $lessonId ?>"<?= $isLocked ? ' style="display:none;"' : '' ?>>Check my Summary</button>
                   <button class="nb-btn ghost" data-close-lesson="<?= $lessonId ?>">Close</button>
                 </div>
 
                 <div class="nb-panel-context">
                   <?php if ($showFeedback): ?>
                     <div class="nb-panel-box">
-                      <div class="nb-panel-label">Instructor Feedback</div>
-                      <div class="nb-panel-body"><?= nl2br(h((string)$lesson['instructor_feedback'])) ?></div>
+                      <div class="nb-panel-label">Review Feedback</div>
+                      <div class="nb-panel-body" data-role="review-feedback-box"><?= nl2br(h((string)$lesson['instructor_feedback'])) ?></div>
+                    </div>
+                  <?php else: ?>
+                    <div class="nb-panel-box" data-role="review-feedback-container" style="display:none;">
+                      <div class="nb-panel-label">Review Feedback</div>
+                      <div class="nb-panel-body" data-role="review-feedback-box"></div>
                     </div>
                   <?php endif; ?>
 
@@ -955,7 +966,7 @@ cw_header('My Notebook');
     <div id="confirmBar" class="nb-confirm">
       <div id="confirmText" class="nb-confirm-text">You have unsaved changes.</div>
       <div class="nb-confirm-actions">
-        <button class="nb-btn primary" id="confirmSaveBtn">Save</button>
+        <button class="nb-btn primary" id="confirmSaveBtn">Save Draft</button>
         <button class="nb-btn ghost" id="confirmDiscardBtn">Discard</button>
         <button class="nb-btn ghost" id="confirmContinueBtn">Continue Editing</button>
       </div>
@@ -994,6 +1005,31 @@ function lessonNode(lessonId) {
 
 function tocNode(lessonId) {
   return document.getElementById('toc-lesson-' + lessonId);
+}
+
+function lessonIsLocked(lessonId) {
+  const node = lessonNode(lessonId);
+  if (!node) return false;
+  return node.getAttribute('data-summary-locked') === '1';
+}
+
+function setLessonLockedState(lessonId, locked) {
+  const node = lessonNode(lessonId);
+  const ed = editorEl(lessonId);
+  const checkBtn = document.querySelector('[data-check-lesson="' + lessonId + '"]');
+
+  if (node) {
+    node.setAttribute('data-summary-locked', locked ? '1' : '0');
+  }
+
+  if (ed) {
+    ed.setAttribute('contenteditable', locked ? 'false' : 'true');
+    ed.classList.toggle('locked', !!locked);
+  }
+
+  if (checkBtn) {
+    checkBtn.style.display = locked ? 'none' : 'inline-block';
+  }
 }
 
 function hasUnsavedChanges(lessonId) {
@@ -1045,7 +1081,7 @@ function computeStatusDisplay(reviewStatus, attentionReason) {
   if (attentionReason === 'one_on_one_required') {
     return { label: 'Instructor Session Required', klass: 'info' };
   }
-  return { label: 'Pending', klass: 'pending' };
+  return { label: 'Draft Not Yet Checked', klass: 'pending' };
 }
 
 function countWordsFromHtml(html) {
@@ -1058,15 +1094,18 @@ function countWordsFromHtml(html) {
 
 function buildActionButton(reviewStatus, hasSummary) {
   if (reviewStatus === 'acceptable' && hasSummary) {
-    return { label: 'Edit Summary', action: 'unlock', className: 'nb-btn warn' };
+    return { label: 'Edit Summary', action: 'unlock_edit', className: 'nb-btn warn' };
   }
   if (reviewStatus === 'needs_revision' || reviewStatus === 'rejected') {
-    return { label: 'Open Summary', action: 'edit', className: 'nb-btn warn' };
+    return { label: 'Continue Editing', action: 'edit', className: 'nb-btn warn' };
   }
-  if (hasSummary) {
-    return { label: 'Edit', action: 'edit', className: 'nb-btn ghost' };
+  if (reviewStatus === 'pending' && hasSummary) {
+    return { label: 'Check my Summary', action: 'check', className: 'nb-btn primary' };
   }
-  return null;
+  if (!hasSummary) {
+    return { label: 'Write Summary', action: 'edit', className: 'nb-btn ghost' };
+  }
+  return { label: 'Open Summary', action: 'edit', className: 'nb-btn ghost' };
 }
 
 function renderActionButton(lessonId, reviewStatus, hasSummary) {
@@ -1118,18 +1157,38 @@ function formatUtcDateLabel(now) {
   return weekNames[now.getUTCDay()] + ', ' + monthNames[now.getUTCMonth()] + ' ' + now.getUTCDate() + ', ' + now.getUTCFullYear();
 }
 
-function updateLessonAndTocMetadata(lessonId, reviewStatus, html) {
+function setPanelFeedback(lessonId, feedback) {
+  const panel = panelEl(lessonId);
+  if (!panel) return;
+
+  const container = panel.querySelector('[data-role="review-feedback-container"]');
+  const box = panel.querySelector('[data-role="review-feedback-box"]');
+
+  if (!container || !box) return;
+
+  const value = String(feedback || '').trim();
+  if (value === '') {
+    box.innerHTML = '';
+    container.style.display = 'none';
+    return;
+  }
+
+  box.innerHTML = escapeHtml(value).replace(/\n/g, '<br>');
+  container.style.display = 'block';
+}
+
+function updateLessonAndTocMetadata(lessonId, reviewStatus, html, reviewFeedback) {
   const node = lessonNode(lessonId);
   const toc = tocNode(lessonId);
   if (!node) return;
 
   const hasSummary = countWordsFromHtml(html) > 0;
   const wordCount = countWordsFromHtml(html);
+  const attentionReason = '';
 
   node.setAttribute('data-review-status', reviewStatus);
   node.setAttribute('data-has-summary', hasSummary ? '1' : '0');
 
-  const attentionReason = '';
   const statusMeta = computeStatusDisplay(reviewStatus, attentionReason);
 
   setStatusPillOnNode(node, statusMeta.label, statusMeta.klass, '[data-role="status-pill"]');
@@ -1151,40 +1210,42 @@ function updateLessonAndTocMetadata(lessonId, reviewStatus, html) {
 
   const lessonMeta = node.querySelector('[data-role="lesson-meta"]');
   if (lessonMeta) {
+    const existingVersionChip = lessonMeta.querySelector('[data-role="version-meta"]');
+    const existingVersionCount = existingVersionChip
+      ? (parseInt((existingVersionChip.textContent || '0').replace(/\D+/g, ''), 10) || 0)
+      : 0;
+
     clearMetaChipsKeepPill(lessonMeta);
+
     if (hasSummary) {
       lessonMeta.appendChild(ensureMetaChip(wordCount + ' words', 'word-meta'));
-
-      const versionMeta = node.querySelector('[data-role="version-meta"]');
-      if (versionMeta) {
-        const current = parseInt((versionMeta.textContent || '0').replace(/\D+/g, ''), 10) || 0;
-        lessonMeta.appendChild(ensureMetaChip((current + 1) + ' versions', 'version-meta'));
-      } else {
-        lessonMeta.appendChild(ensureMetaChip('1 versions', 'version-meta'));
+      if (existingVersionCount > 0) {
+        lessonMeta.appendChild(ensureMetaChip(existingVersionCount + ' versions', 'version-meta'));
       }
-
       lessonMeta.appendChild(ensureMetaChip(dateLabel, 'date-meta'));
     }
   }
 
   const tocRight = toc ? toc.querySelector('.nb-toc-right') : null;
   if (tocRight) {
+    const existingVersionChip = tocRight.querySelector('[data-role="toc-version-meta"]');
+    const existingVersionCount = existingVersionChip
+      ? (parseInt((existingVersionChip.textContent || '0').replace(/\D+/g, ''), 10) || 0)
+      : 0;
+
     clearTocMetaKeepPill(tocRight);
+
     if (hasSummary) {
       tocRight.appendChild(ensureMetaChip(wordCount + ' words', 'toc-word-meta'));
-
-      const existingVersion = toc.querySelector('[data-role="toc-version-meta"]');
-      if (existingVersion) {
-        const current = parseInt((existingVersion.textContent || '0').replace(/\D+/g, ''), 10) || 0;
-        tocRight.appendChild(ensureMetaChip((current + 1) + ' versions', 'toc-version-meta'));
-      } else {
-        tocRight.appendChild(ensureMetaChip('1 versions', 'toc-version-meta'));
+      if (existingVersionCount > 0) {
+        tocRight.appendChild(ensureMetaChip(existingVersionCount + ' versions', 'toc-version-meta'));
       }
-
       tocRight.appendChild(ensureMetaChip(dateLabel, 'toc-date-meta'));
     }
   }
 
+  setLessonLockedState(lessonId, reviewStatus === 'acceptable');
+  setPanelFeedback(lessonId, reviewFeedback || '');
   renderActionButton(lessonId, reviewStatus, hasSummary);
 }
 
@@ -1204,7 +1265,9 @@ function openEditor(lessonId) {
   panel.classList.add('open');
   activeLessonId = lessonId;
   originalHtml = ed.innerHTML;
-  ed.focus();
+  if (!lessonIsLocked(lessonId)) {
+    ed.focus();
+  }
 }
 
 function closeEditor(lessonId, silent) {
@@ -1234,13 +1297,13 @@ async function postSummary(payload) {
     body: JSON.stringify(payload)
   });
 
-  let json = null;
+  const raw = await res.text();
   try {
-    json = await res.json();
+    return JSON.parse(raw);
   } catch (e) {
-    json = { ok: false, error: 'Invalid server response' };
+    console.error('Invalid summary API response:', raw);
+    return { ok: false, error: 'Invalid server response' };
   }
-  return json;
 }
 
 async function unlockAcceptedSummary(lessonId) {
@@ -1251,18 +1314,29 @@ async function unlockAcceptedSummary(lessonId) {
   });
 
   if (!result.ok) {
-    showBanner(result.error || 'Unlock failed.', 'danger');
+    showBanner(result.error || 'Unable to reopen accepted summary.', 'danger');
     return false;
   }
 
-  updateLessonAndTocMetadata(lessonId, 'pending', editorEl(lessonId) ? editorEl(lessonId).innerHTML : '');
-  showBanner('Accepted summary reopened. It is now pending review.', 'ok');
+  setLessonLockedState(lessonId, false);
+  updateLessonAndTocMetadata(
+    lessonId,
+    'pending',
+    editorEl(lessonId) ? editorEl(lessonId).innerHTML : '',
+    ''
+  );
+  showBanner('Summary reopened. Continue editing, then click "Check my Summary" when ready.', 'ok');
   return true;
 }
 
 async function saveSummary(lessonId) {
   const ed = editorEl(lessonId);
   if (!ed) return false;
+
+  if (lessonIsLocked(lessonId)) {
+    showBanner('Accepted summaries must be reopened before editing.', 'warn');
+    return false;
+  }
 
   const result = await postSummary({
     action: 'save',
@@ -1277,14 +1351,62 @@ async function saveSummary(lessonId) {
   }
 
   originalHtml = ed.innerHTML || '';
-  updateLessonAndTocMetadata(lessonId, 'pending', originalHtml);
-  closeEditor(lessonId, true);
-  showBanner(result.skipped ? 'No meaningful changes to save.' : 'Summary saved.', 'ok');
+  updateLessonAndTocMetadata(
+    lessonId,
+    String(result.review_status || 'pending'),
+    originalHtml,
+    ''
+  );
+
+  showBanner(result.skipped ? 'Draft unchanged.' : 'Draft saved.', 'ok');
 
   if (pendingAction) {
     const action = pendingAction;
     closeConfirmBar();
     await runPendingAction(action);
+  }
+
+  return true;
+}
+
+async function checkSummary(lessonId) {
+  const ed = editorEl(lessonId);
+  if (!ed) return false;
+
+  if (!lessonIsLocked(lessonId) && hasUnsavedChanges(lessonId)) {
+    const saved = await saveSummary(lessonId);
+    if (!saved) {
+      return false;
+    }
+  }
+
+  const result = await postSummary({
+    action: 'check',
+    cohort_id: COHORT_ID,
+    lesson_id: lessonId
+  });
+
+  if (!result.ok) {
+    showBanner(result.error || 'Summary check failed.', 'danger');
+    return false;
+  }
+
+  const currentHtml = ed.innerHTML || '';
+  updateLessonAndTocMetadata(
+    lessonId,
+    String(result.review_status || 'pending'),
+    currentHtml,
+    String(result.review_feedback || '')
+  );
+
+  originalHtml = currentHtml;
+
+  if (String(result.review_status || '') === 'acceptable') {
+    closeEditor(lessonId, true);
+    showBanner('Accepted: Edit via Notebook if needed.', 'ok');
+  } else {
+    openEditor(lessonId);
+    showBanner('Not accepted: Keep working on it and check again.', 'warn');
   }
 
   return true;
@@ -1303,6 +1425,11 @@ async function runPendingAction(action) {
     if (ok) {
       openEditor(action.lessonId);
     }
+    return;
+  }
+
+  if (action.type === 'check-after-save') {
+    await checkSummary(action.lessonId);
     return;
   }
 
@@ -1364,7 +1491,7 @@ async function handleActionButtonClick() {
     return;
   }
 
-  if (action === 'unlock') {
+  if (action === 'unlock_edit') {
     if (activeLessonId !== null && activeLessonId !== lessonId && hasUnsavedChanges(activeLessonId)) {
       showConfirmBar('You have unsaved changes in another section.', { type: 'unlock-then-edit', lessonId: lessonId });
       return;
@@ -1372,6 +1499,16 @@ async function handleActionButtonClick() {
 
     const ok = await unlockAcceptedSummary(lessonId);
     if (ok) openEditor(lessonId);
+    return;
+  }
+
+  if (action === 'check') {
+    if (activeLessonId !== null && activeLessonId !== lessonId && hasUnsavedChanges(activeLessonId)) {
+      showConfirmBar('You have unsaved changes in another section.', { type: 'switch-editor', lessonId: lessonId });
+      return;
+    }
+
+    await checkSummary(lessonId);
   }
 }
 
@@ -1386,6 +1523,13 @@ document.querySelectorAll('[data-save-lesson]').forEach(function (btn) {
   });
 });
 
+document.querySelectorAll('[data-check-lesson]').forEach(function (btn) {
+  btn.addEventListener('click', async function () {
+    const lessonId = parseInt(btn.getAttribute('data-check-lesson'), 10);
+    await checkSummary(lessonId);
+  });
+});
+
 document.querySelectorAll('[data-close-lesson]').forEach(function (btn) {
   btn.addEventListener('click', function () {
     const lessonId = parseInt(btn.getAttribute('data-close-lesson'), 10);
@@ -1396,11 +1540,30 @@ document.querySelectorAll('[data-close-lesson]').forEach(function (btn) {
 document.querySelectorAll('[data-editor-cmd]').forEach(function (btn) {
   btn.addEventListener('click', function () {
     const lessonId = parseInt(btn.getAttribute('data-lesson'), 10);
+    if (lessonIsLocked(lessonId)) return;
+
     const cmd = btn.getAttribute('data-editor-cmd');
     const ed = editorEl(lessonId);
     if (!ed) return;
     ed.focus();
     document.execCommand(cmd, false, null);
+  });
+});
+
+document.querySelectorAll('.nb-editor').forEach(function (ed) {
+  ed.addEventListener('input', function () {
+    const lessonId = parseInt(ed.id.replace('editor-', ''), 10);
+    if (lessonIsLocked(lessonId)) return;
+  });
+
+  ed.addEventListener('paste', function () {
+    console.log('Deterrence triggered: paste attempt detected');
+  });
+  ed.addEventListener('cut', function () {
+    console.log('Deterrence triggered: cut attempt detected');
+  });
+  ed.addEventListener('contextmenu', function () {
+    console.log('Deterrence triggered: context menu attempt detected');
   });
 });
 
@@ -1416,19 +1579,13 @@ scopeSelect.addEventListener('change', function () {
   window.location.href = '?cohort_id=' + encodeURIComponent(targetCohortId);
 });
 
-document.querySelectorAll('.nb-editor').forEach(function (ed) {
-  ed.addEventListener('paste', function () {
-    console.log('Deterrence triggered: paste attempt detected');
-  });
-  ed.addEventListener('cut', function () {
-    console.log('Deterrence triggered: cut attempt detected');
-  });
-  ed.addEventListener('contextmenu', function () {
-    console.log('Deterrence triggered: context menu attempt detected');
-  });
-});
-
-
+function escapeHtml(s) {
+  return String(s || '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
 </script>
 
 <?php cw_footer(); ?>
