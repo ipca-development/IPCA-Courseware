@@ -152,7 +152,7 @@ error_log('LessonSummaryService::saveSummary success user_id=' . $userId
     . ' plain_len=' . strlen($plain));
 		
 		
-        $stmt->execute([
+$stmt->execute([
     $userId,
     $cohortId,
     $lessonId,
