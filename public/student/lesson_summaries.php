@@ -2155,6 +2155,63 @@ modalEditor.addEventListener('contextmenu', function () {
   console.log('Deterrence triggered: context menu attempt detected');
 });
 
+modalEditor.addEventListener('keydown', function(e) {
+  if (activeLessonId === null) return;
+  if (lessonIsLocked(activeLessonId)) return;
+
+  const isMod = e.metaKey || e.ctrlKey;
+  const key = String(e.key || '').toLowerCase();
+
+  if (isMod && key === 'b') {
+    e.preventDefault();
+    document.execCommand('bold', false, null);
+    syncHiddenEditorFromModal(activeLessonId);
+    updateModalToolbarState();
+    updateModalWordCount();
+    modalSaveStatus.textContent = 'Unsaved changes';
+    return;
+  }
+
+  if (isMod && key === 'i') {
+    e.preventDefault();
+    document.execCommand('italic', false, null);
+    syncHiddenEditorFromModal(activeLessonId);
+    updateModalToolbarState();
+    updateModalWordCount();
+    modalSaveStatus.textContent = 'Unsaved changes';
+    return;
+  }
+
+  if (isMod && key === 'u') {
+    e.preventDefault();
+    document.execCommand('underline', false, null);
+    syncHiddenEditorFromModal(activeLessonId);
+    updateModalToolbarState();
+    updateModalWordCount();
+    modalSaveStatus.textContent = 'Unsaved changes';
+    return;
+  }
+
+  if (e.key === 'Tab') {
+    e.preventDefault();
+
+    try {
+      if (e.shiftKey) {
+        document.execCommand('outdent', false, null);
+      } else {
+        document.execCommand('indent', false, null);
+      }
+    } catch(err) {}
+
+    syncHiddenEditorFromModal(activeLessonId);
+    updateModalToolbarState();
+    updateModalWordCount();
+    modalSaveStatus.textContent = 'Unsaved changes';
+    return;
+  }
+});	
+	
+	
 function escapeHtml(s) {
   return String(s || '')
     .replaceAll('&', '&amp;')
