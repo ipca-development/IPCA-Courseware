@@ -945,6 +945,12 @@ body.nb-modal-open{
     break-inside:avoid;
     page-break-inside:avoid;
   }
+  .nb-btn.tool[data-modal-cmd="indent"],
+.nb-btn.tool[data-modal-cmd="outdent"]{
+  min-width:auto;
+  padding:7px 12px;
+}	
+	
 }
 </style>
 
@@ -1206,18 +1212,20 @@ body.nb-modal-open{
     <div class="nb-editor-body">
       <div class="nb-editor-main">
         <div class="nb-editor-toolbar">
-          <button type="button" class="nb-btn tool" data-modal-cmd="bold"><strong>B</strong></button>
-          <button type="button" class="nb-btn tool" data-modal-cmd="italic"><em>I</em></button>
-          <button type="button" class="nb-btn tool" data-modal-cmd="underline"><u>U</u></button>
-          <button type="button" class="nb-btn tool" data-modal-cmd="insertUnorderedList">•</button>
+		  <button type="button" class="nb-btn tool" data-modal-cmd="bold"><strong>B</strong></button>
+		  <button type="button" class="nb-btn tool" data-modal-cmd="italic"><em>I</em></button>
+		  <button type="button" class="nb-btn tool" data-modal-cmd="underline"><u>U</u></button>
+		  <button type="button" class="nb-btn tool" data-modal-cmd="insertUnorderedList">•</button>
+		  <button type="button" class="nb-btn tool" data-modal-cmd="indent">Indent</button>
+		  <button type="button" class="nb-btn tool" data-modal-cmd="outdent">Outdent</button>
 
-          <button type="button" class="nb-btn tool size-btn" data-size="sm">Small</button>
-          <button type="button" class="nb-btn tool size-btn active" data-size="md">Medium</button>
-          <button type="button" class="nb-btn tool size-btn" data-size="lg">Large</button>
+		  <button type="button" class="nb-btn tool size-btn" data-size="sm">Small</button>
+		  <button type="button" class="nb-btn tool size-btn active" data-size="md">Medium</button>
+		  <button type="button" class="nb-btn tool size-btn" data-size="lg">Large</button>
 
-          <button type="button" class="nb-btn tool" id="modalHighlightBtn">Highlight</button>
-          <button type="button" class="nb-btn tool" id="modalClearFormatBtn">Clear</button>
-        </div>
+		  <button type="button" class="nb-btn tool" id="modalHighlightBtn">Highlight</button>
+		  <button type="button" class="nb-btn tool" id="modalClearFormatBtn">Clear</button>
+		</div>
 
         <div class="nb-editor-canvas">
           <div class="nb-editor-paper">
@@ -1592,17 +1600,23 @@ function applyModalSize(size) {
   updateSizeButtons();
 }
 
-function updateModalToolbarState() {
-  modalCmdButtons.forEach(function(btn){
+modalCmdButtons.forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    if (activeLessonId === null || lessonIsLocked(activeLessonId)) return;
+
     const cmd = btn.getAttribute('data-modal-cmd');
-    let active = false;
+    modalEditor.focus();
+
     try {
-      active = document.queryCommandState(cmd);
-    } catch(e){}
-    btn.classList.toggle('active', !!active);
+      document.execCommand(cmd, false, null);
+    } catch(e) {}
+
+    syncHiddenEditorFromModal(activeLessonId);
+    updateModalToolbarState();
+    updateModalWordCount();
+    modalSaveStatus.textContent = 'Unsaved changes';
   });
-  modalHighlightBtn.classList.toggle('highlight-on', modalHighlightOn);
-}
+});
 
 function updateModalChromeForLesson(lessonId) {
   const node = lessonNode(lessonId);
@@ -2207,9 +2221,8 @@ modalEditor.addEventListener('keydown', function(e) {
     updateModalToolbarState();
     updateModalWordCount();
     modalSaveStatus.textContent = 'Unsaved changes';
-    return;
   }
-});	
+});
 	
 	
 function escapeHtml(s) {
