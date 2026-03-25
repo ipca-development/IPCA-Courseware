@@ -1097,29 +1097,38 @@ function countWordsFromHtml(html) {
   return txt.split(/\s+/).length;
 }
 
-function buildActionButton(reviewStatus, hasSummary) {
-  if (reviewStatus === 'acceptable' && hasSummary) {
-    return { label: 'Edit Summary', action: 'unlock_edit', className: 'nb-btn warn' };
+function buildActionButton(reviewStatus, hasSummary, isLocked) {
+  if (reviewStatus === 'acceptable' && hasSummary && isLocked) {
+    return { label: 'Unlock for Editing', action: 'unlock_edit', className: 'nb-btn warn' };
   }
+
+  if (reviewStatus === 'acceptable' && hasSummary && !isLocked) {
+    return { label: 'Continue Editing', action: 'edit', className: 'nb-btn ghost' };
+  }
+
   if (reviewStatus === 'needs_revision' || reviewStatus === 'rejected') {
     return { label: 'Continue Editing', action: 'edit', className: 'nb-btn warn' };
   }
+
   if (reviewStatus === 'pending' && hasSummary) {
     return { label: 'Check my Summary', action: 'check', className: 'nb-btn primary' };
   }
+
   if (!hasSummary) {
     return { label: 'Write Summary', action: 'edit', className: 'nb-btn ghost' };
   }
+
   return { label: 'Open Summary', action: 'edit', className: 'nb-btn ghost' };
 }
 
-function renderActionButton(lessonId, reviewStatus, hasSummary) {
+function renderActionButton(lessonId, reviewStatus, hasSummary, isLocked) {
   const node = lessonNode(lessonId);
   if (!node) return;
+
   const actionBar = node.querySelector('[data-role="action-bar"]');
   if (!actionBar) return;
 
-  const meta = buildActionButton(reviewStatus, hasSummary);
+  const meta = buildActionButton(reviewStatus, hasSummary, isLocked);
   actionBar.innerHTML = '';
   if (!meta) return;
 
@@ -1339,8 +1348,8 @@ async function unlockAcceptedSummary(lessonId) {
     return false;
   }
 
-  setLessonLockedState(lessonId, false);
-  renderActionButton(lessonId, String(result.review_status || 'acceptable'), true);
+	setLessonLockedState(lessonId, false);
+	renderActionButton(lessonId, String(result.review_status || 'acceptable'), true, false);
   showBanner('Summary unlocked. If you make changes, you will have to check your summary again.', 'ok');
   return true;
 }
