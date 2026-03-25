@@ -1600,6 +1600,28 @@ function applyModalSize(size) {
   updateSizeButtons();
 }
 
+function updateModalToolbarState() {
+  modalCmdButtons.forEach(function(btn) {
+    const cmd = btn.getAttribute('data-modal-cmd');
+    let active = false;
+
+    try {
+      if (cmd === 'indent' || cmd === 'outdent') {
+        active = false;
+      } else {
+        active = document.queryCommandState(cmd);
+      }
+    } catch (e) {
+      active = false;
+    }
+
+    btn.classList.toggle('active', !!active);
+  });
+
+  modalHighlightBtn.classList.toggle('highlight-on', modalHighlightOn);
+}	
+	
+	
 modalCmdButtons.forEach(function(btn) {
   btn.addEventListener('click', function() {
     if (activeLessonId === null || lessonIsLocked(activeLessonId)) return;
@@ -2093,18 +2115,6 @@ document.addEventListener('keydown', function(e){
   }
 });
 
-modalCmdButtons.forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    if (activeLessonId === null || lessonIsLocked(activeLessonId)) return;
-
-    const cmd = btn.getAttribute('data-modal-cmd');
-    modalEditor.focus();
-    document.execCommand(cmd, false, null);
-    syncHiddenEditorFromModal(activeLessonId);
-    updateModalToolbarState();
-    updateModalWordCount();
-  });
-});
 
 modalSizeButtons.forEach(function(btn){
   btn.addEventListener('click', function(){
