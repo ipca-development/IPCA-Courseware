@@ -6,13 +6,35 @@ cw_require_login();
 
 header('Content-Type: application/json; charset=utf-8');
 
+function summary_debug_log($label, $data = null)
+{
+    $line = '[' . gmdate('Y-m-d H:i:s') . ' UTC] ' . $label;
+
+    if ($data !== null) {
+        if (is_string($data)) {
+            $line .= ' ' . $data;
+        } else {
+            $json = json_encode($data, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $line .= ' ' . ($json !== false ? $json : '[json_encode_failed]');
+        }
+    }
+
+    $line .= "\n";
+    @file_put_contents('/var/www/ipca/storage_summary_debug.log', $line, FILE_APPEND);
+}
+
 try {
     $u = cw_current_user($pdo);
     $role = (string)($u['role'] ?? '');
 
     if ($role !== 'student' && $role !== 'admin') {
         http_response_code(403);
-        echo json_encode(['ok' => false, 'error' => 'Forbidden']);
+        $result = ['ok' => false, 'error' => 'Forbidden'];
+        summary_debug_log('forbidden_role', [
+            'role' => $role,
+            'user_id' => (int)($u['id'] ?? 0)
+        ]);
+        echo json_encode($result);
         exit;
     }
 
@@ -25,10 +47,8 @@ try {
     if (!is_array($data)) {
         throw new RuntimeException('Invalid JSON');
     }
-	
-	error_log('summary_save.php payload: ' . json_encode($data));
-	
-	
+
+    summary_debug_log('payload', $data);
 
     $action = trim((string)($data['action'] ?? 'save'));
     $cohortId = (int)($data['cohort_id'] ?? 0);
@@ -39,7 +59,7 @@ try {
         throw new RuntimeException('Missing cohort_id or lesson_id');
     }
 
-    $userId = (int)$u['id'];
+    $userId = (int)($u['id'] ?? 0);
 
     if ($role === 'student') {
         $chk = $pdo->prepare("
@@ -53,7 +73,14 @@ try {
 
         if (!$chk->fetchColumn()) {
             http_response_code(403);
-            echo json_encode(['ok' => false, 'error' => 'Not enrolled in this cohort']);
+            $result = ['ok' => false, 'error' => 'Not enrolled in this cohort'];
+            summary_debug_log('not_enrolled', [
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'action' => $action
+            ]);
+            echo json_encode($result);
             exit;
         }
     }
@@ -84,15 +111,18 @@ try {
         );
     }
 
-	error_log('summary_save.php result: ' . json_encode($result));
-	
+    summary_debug_log('result', $result);
     echo json_encode($result);
 } catch (Throwable $e) {
     http_response_code(400);
-    
-	error_log('summary_save.php error: ' . $e->getMessage());
-	
-	echo json_encode([
+
+    summary_debug_log('error', [
+        'message' => $e->getMessage(),
+        'trace_file' => $e->getFile(),
+        'trace_line' => $e->getLine()
+    ]);
+
+    echo json_encode([
         'ok' => false,
         'error' => $e->getMessage()
     ]);
