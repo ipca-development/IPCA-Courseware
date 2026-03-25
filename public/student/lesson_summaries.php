@@ -853,6 +853,10 @@ cw_header('My Notebook');
   display:none !important;
 }
 	
+.nb-editor .size-sm { font-size:14px; }
+.nb-editor .size-md { font-size:15px; }
+.nb-editor .size-lg { font-size:17px; }	
+	
 body.nb-modal-open{
   overflow:hidden;
 }	
@@ -1556,8 +1560,34 @@ function updateSizeButtons() {
 
 function applyModalSize(size) {
   modalCurrentSize = size;
-  modalEditor.classList.remove('size-sm', 'size-md', 'size-lg');
-  modalEditor.classList.add('size-' + size);
+
+  const selection = window.getSelection();
+  const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed;
+
+  // If user selected text → apply ONLY to selection
+  if (hasSelection) {
+    const range = selection.getRangeAt(0);
+
+    const span = document.createElement('span');
+    span.className = 'size-' + size;
+
+    try {
+      range.surroundContents(span);
+    } catch (e) {
+      // fallback for complex selections
+      const frag = range.extractContents();
+      span.appendChild(frag);
+      range.insertNode(span);
+    }
+
+    // move cursor after styled content
+    selection.removeAllRanges();
+  } else {
+    // No selection → change default typing size
+    modalEditor.classList.remove('size-sm', 'size-md', 'size-lg');
+    modalEditor.classList.add('size-' + size);
+  }
+
   syncHiddenEditorFromModal(activeLessonId);
   updateSizeButtons();
 }
