@@ -82,113 +82,91 @@ if ($existing && $isSame && !$wasLocked) {
     return [
         'ok' => true,
         'skipped' => true,
-        'review_status' => (string)($existing['review_status'] ?? 'pending')
+        'review_status' => (string)($existing['review_status'] ?? 'pending'),
+        'student_soft_locked' => (int)($existing['student_soft_locked'] ?? 0)
     ];
 }
 
-error_log('LessonSummaryService::saveSummary success user_id=' . $userId
-    . ' cohort_id=' . $cohortId
-    . ' lesson_id=' . $lessonId);		
-		
-		
-	return [
-    'ok' => true,
-    'skipped' => true,
-    'review_status' => (string)($existing['review_status'] ?? 'pending'),
-    'student_soft_locked' => (int)($existing['student_soft_locked'] ?? 0)
-	];	
-		
-		
+$this->pdo->beginTransaction();
+
+try {
+    if ($existing) {
+        $this->createVersionSnapshot(
+            $existing,
+            $userId,
+            'manual_save'
+        );
     }
 
-    $this->pdo->beginTransaction();
+    $reviewStatus = 'pending';
+    $reviewScore = null;
+    $reviewFeedback = null;
+    $gapTopics = null;
+    $reviewedAt = null;
+    $studentSoftLocked = 0;
 
-    try {
-        if ($existing) {
-            $this->createVersionSnapshot(
-                $existing,
-                $userId,
-                'manual_save'
-            );
-        }
+    $stmt = $this->pdo->prepare("
+        INSERT INTO lesson_summaries
+        (
+            user_id,
+            cohort_id,
+            lesson_id,
+            summary_html,
+            summary_plain,
+            review_status,
+            student_soft_locked,
+            review_score,
+            review_feedback,
+            gap_topics,
+            reviewed_at,
+            reviewed_by_user_id,
+            reviewed_by_logic_version
+        )
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ON DUPLICATE KEY UPDATE
+            summary_html = VALUES(summary_html),
+            summary_plain = VALUES(summary_plain),
+            review_status = VALUES(review_status),
+            review_score = VALUES(review_score),
+            review_feedback = VALUES(review_feedback),
+            gap_topics = VALUES(gap_topics),
+            reviewed_at = VALUES(reviewed_at),
+            reviewed_by_user_id = VALUES(reviewed_by_user_id),
+            reviewed_by_logic_version = VALUES(reviewed_by_logic_version),
+            updated_at = CURRENT_TIMESTAMP,
+            student_soft_locked = VALUES(student_soft_locked)
+    ");
 
-		$reviewStatus = 'pending';
-		$reviewScore = null;
-		$reviewFeedback = null;
-		$gapTopics = null;
-		$reviewedAt = null;
-		$studentSoftLocked = 0;
+    $stmt->execute([
+        $userId,
+        $cohortId,
+        $lessonId,
+        $summaryHtml,
+        $plain,
+        $reviewStatus,
+        $studentSoftLocked,
+        $reviewScore,
+        $reviewFeedback,
+        $gapTopics,
+        $reviewedAt,
+        null,
+        'v2.0'
+    ]);
 
-        $stmt = $this->pdo->prepare("
-            INSERT INTO lesson_summaries
-            (
-                user_id,
-                cohort_id,
-                lesson_id,
-                summary_html,
-                summary_plain,
-                review_status,
-				student_soft_locked,
-                review_score,
-                review_feedback,
-                gap_topics,
-                reviewed_at,
-                reviewed_by_user_id,
-                reviewed_by_logic_version
-            )
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-            ON DUPLICATE KEY UPDATE
-                summary_html = VALUES(summary_html),
-                summary_plain = VALUES(summary_plain),
-                review_status = VALUES(review_status),
-                review_score = VALUES(review_score),
-                review_feedback = VALUES(review_feedback),
-                gap_topics = VALUES(gap_topics),
-                reviewed_at = VALUES(reviewed_at),
-                reviewed_by_user_id = VALUES(reviewed_by_user_id),
-                reviewed_by_logic_version = VALUES(reviewed_by_logic_version),
-                updated_at = CURRENT_TIMESTAMP,
-				student_soft_locked = VALUES(student_soft_locked)
-        ");
+    $this->pdo->commit();
 
-		error_log('LessonSummaryService::saveSummary execute user_id=' . $userId
-    . ' cohort_id=' . $cohortId
-    . ' lesson_id=' . $lessonId
-    . ' review_status=' . $reviewStatus
-    . ' student_soft_locked=' . $studentSoftLocked
-    . ' plain_len=' . strlen($plain));
-		
-		
-$stmt->execute([
-    $userId,
-    $cohortId,
-    $lessonId,
-    $summaryHtml,
-    $plain,
-    $reviewStatus,
-    $reviewScore,
-    $reviewFeedback,
-    $gapTopics,
-    $reviewedAt,
-    null,
-    'v2.0',
-    $studentSoftLocked
-]);
+    return [
+        'ok' => true,
+        'review_status' => $reviewStatus,
+        'student_soft_locked' => $studentSoftLocked,
+        'saved_as_draft' => true
+    ];
 
-        $this->pdo->commit();
-
-        return [
-			'ok' => true,
-			'review_status' => $reviewStatus,
-			'student_soft_locked' => $studentSoftLocked,
-			'saved_as_draft' => true
-			];
-    } catch (Throwable $e) {
-        if ($this->pdo->inTransaction()) {
-            $this->pdo->rollBack();
-        }
-        throw $e;
+} catch (Throwable $e) {
+    if ($this->pdo->inTransaction()) {
+        $this->pdo->rollBack();
     }
+    throw $e;
 }
 	
 public function checkSummary(
