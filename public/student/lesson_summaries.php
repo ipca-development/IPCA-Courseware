@@ -690,16 +690,20 @@ cw_header('My Notebook');
 .nb-editor-body{
   flex:1 1 auto;
   min-height:0;
+  height:0;
   display:grid;
   grid-template-columns:minmax(0,1fr) 300px;
   gap:0;
+  overflow:hidden;
 }
 
 .nb-editor-main{
   min-width:0;
+  min-height:0;
   display:flex;
   flex-direction:column;
   border-right:1px solid rgba(15,23,42,0.07);
+  overflow:hidden;
 }
 
 .nb-editor-toolbar{
@@ -779,14 +783,18 @@ cw_header('My Notebook');
 
 .nb-editor-side{
   min-width:0;
+  min-height:0;
   background:#fbfcfe;
   display:flex;
   flex-direction:column;
+  overflow:hidden;
 }
 
 .nb-editor-side-scroll{
   padding:16px;
-  overflow:auto;
+  min-height:0;
+  overflow-y:auto;
+  overflow-x:hidden;
 }
 
 .nb-side-card{
@@ -844,6 +852,10 @@ cw_header('My Notebook');
 .nb-hidden{
   display:none !important;
 }
+	
+body.nb-modal-open{
+  overflow:hidden;
+}	
 
 @media (max-width:980px){
   .nb-doc{padding:26px 24px 30px 24px}
@@ -1700,6 +1712,7 @@ function openEditor(lessonId) {
   updateModalToolbarState();
   editorModal.classList.add('open');
   editorModal.setAttribute('aria-hidden', 'false');
+  document.body.classList.add('nb-modal-open');	
 
   if (!lessonIsLocked(lessonId)) {
     setTimeout(function(){ modalEditor.focus(); }, 60);
@@ -1714,6 +1727,7 @@ function closeEditor(lessonId, silent) {
 
   editorModal.classList.remove('open');
   editorModal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('nb-modal-open');	
 
   if (activeLessonId === lessonId) {
     syncHiddenEditorFromModal(lessonId);
@@ -1928,12 +1942,13 @@ confirmDiscardBtn.addEventListener('click', async function () {
 
   closeConfirmBar();
 
-  if (lessonId !== null) {
-    editorModal.classList.remove('open');
-    editorModal.setAttribute('aria-hidden', 'true');
-    activeLessonId = null;
-    originalHtml = '';
-  }
+if (lessonId !== null) {
+  editorModal.classList.remove('open');
+  editorModal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('nb-modal-open');
+  activeLessonId = null;
+  originalHtml = '';
+}
 
   await runPendingAction(action);
 });
