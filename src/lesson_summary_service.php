@@ -116,13 +116,13 @@ if (
                 summary_html,
                 summary_plain,
                 review_status,
+				student_soft_locked,
                 review_score,
                 review_feedback,
                 gap_topics,
                 reviewed_at,
                 reviewed_by_user_id,
-                reviewed_by_logic_version,
-				student_soft_locked
+                reviewed_by_logic_version
             )
             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
             ON DUPLICATE KEY UPDATE
@@ -662,8 +662,8 @@ public function checkSummary(
                 'updated_at' => $updatedAt,
                 'instructor_feedback' => $summary ? (string)($summary['review_feedback'] ?? '') : '',
                 'instructor_notes' => $summary ? (string)($summary['review_notes_by_instructor'] ?? '') : '',
-                'read_only_by_default' => ($reviewStatus === 'acceptable'),
-                'student_action_required' => $studentActionRequired,
+                'student_soft_locked' => $summary ? (int)($summary['student_soft_locked'] ?? 0) : 0,
+				'read_only_by_default' => ($summary ? (int)($summary['student_soft_locked'] ?? 0) : 0) === 1,
                 'student_action_reason' => $studentActionReason,
                 'notebook_attention_reason' => $notebookAttentionReason,
             ];
