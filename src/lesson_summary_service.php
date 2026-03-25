@@ -69,15 +69,22 @@ if (
     ];
 }
 
-    if (
-        $existing &&
-        $this->isSameContent(
-            (string)($existing['summary_html'] ?? ''),
-            (string)($existing['summary_plain'] ?? ''),
-            $summaryHtml,
-            $plain
-        )
-    ) {
+$isSame = $existing && $this->isSameContent(
+    (string)($existing['summary_html'] ?? ''),
+    (string)($existing['summary_plain'] ?? ''),
+    $summaryHtml,
+    $plain
+);
+
+$wasLocked = $existing && ((int)($existing['student_soft_locked'] ?? 0) === 1);
+
+if ($existing && $isSame && !$wasLocked) {
+    return [
+        'ok' => true,
+        'skipped' => true,
+        'review_status' => (string)($existing['review_status'] ?? 'pending')
+    ];
+}
 
 error_log('LessonSummaryService::saveSummary success user_id=' . $userId
     . ' cohort_id=' . $cohortId
