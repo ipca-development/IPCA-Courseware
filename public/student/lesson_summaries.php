@@ -104,9 +104,14 @@ function nb_action_button_meta(array $lesson): ?array
 {
     $reviewStatus = (string)($lesson['review_status'] ?? '');
     $hasSummary = nb_has_summary($lesson);
+    $isLocked = ((int)($lesson['student_soft_locked'] ?? 0) === 1);
 
-    if ($reviewStatus === 'acceptable' && $hasSummary) {
-        return ['label' => 'Edit Summary', 'action' => 'unlock_edit', 'class' => 'warn'];
+    if ($reviewStatus === 'acceptable' && $hasSummary && $isLocked) {
+        return ['label' => 'Unlock for Editing', 'action' => 'unlock_edit', 'class' => 'warn'];
+    }
+
+    if ($reviewStatus === 'acceptable' && $hasSummary && !$isLocked) {
+        return ['label' => 'Continue Editing', 'action' => 'edit', 'class' => 'ghost'];
     }
 
     if (in_array($reviewStatus, ['needs_revision', 'rejected'], true)) {
@@ -852,7 +857,7 @@ cw_header('My Notebook');
               $latestVersionAt = trim((string)($lesson['latest_version_at'] ?? ''));
               $showFeedback = trim((string)$lesson['instructor_feedback']) !== '';
               $showNotes = trim((string)$lesson['instructor_notes']) !== '';
-              $isLocked = ($reviewStatus === 'acceptable');
+              $isLocked = ((int)($lesson['student_soft_locked'] ?? 0) === 1);
             ?>
             <section
               class="nb-lesson"
@@ -1177,7 +1182,7 @@ function setPanelFeedback(lessonId, feedback) {
   container.style.display = 'block';
 }
 
-function updateLessonAndTocMetadata(lessonId, reviewStatus, html, reviewFeedback) {
+function updateLessonAndTocMetadata(lessonId, reviewStatus, html, reviewFeedback, studentSoftLocked) {
   const node = lessonNode(lessonId);
   const toc = tocNode(lessonId);
   if (!node) return;
@@ -1244,9 +1249,15 @@ function updateLessonAndTocMetadata(lessonId, reviewStatus, html, reviewFeedback
     }
   }
 
-  setLessonLockedState(lessonId, reviewStatus === 'acceptable');
-  setPanelFeedback(lessonId, reviewFeedback || '');
-  renderActionButton(lessonId, reviewStatus, hasSummary);
+ const locked = Number(studentSoftLocked || 0) === 1;
+
+if (node) {
+  node.setAttribute('data-summary-locked', locked ? '1' : '0');
+}
+
+setLessonLockedState(lessonId, locked);
+setPanelFeedback(lessonId, reviewFeedback || '');
+renderActionButton(lessonId, reviewStatus, hasSummary);
 }
 
 function openEditor(lessonId) {
@@ -1307,6 +1318,16 @@ async function postSummary(payload) {
 }
 
 async function unlockAcceptedSummary(lessonId) {
+  const ok = window.confirm(
+    'You are about to unlock your summary for editing.\n'
+    + 'If you make changes, you will have to check your summary again.\n'
+    + 'Are you sure?'
+  );
+
+  if (!ok) {
+    return false;
+  }
+
   const result = await postSummary({
     action: 'unlock',
     cohort_id: COHORT_ID,
@@ -1314,18 +1335,13 @@ async function unlockAcceptedSummary(lessonId) {
   });
 
   if (!result.ok) {
-    showBanner(result.error || 'Unable to reopen accepted summary.', 'danger');
+    showBanner(result.error || 'Unable to unlock summary.', 'danger');
     return false;
   }
 
   setLessonLockedState(lessonId, false);
-  updateLessonAndTocMetadata(
-    lessonId,
-    'pending',
-    editorEl(lessonId) ? editorEl(lessonId).innerHTML : '',
-    ''
-  );
-  showBanner('Summary reopened. Continue editing, then click "Check my Summary" when ready.', 'ok');
+  renderActionButton(lessonId, String(result.review_status || 'acceptable'), true);
+  showBanner('Summary unlocked. If you make changes, you will have to check your summary again.', 'ok');
   return true;
 }
 
