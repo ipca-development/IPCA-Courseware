@@ -1367,12 +1367,15 @@ async function saveSummary(lessonId) {
   }
 
   originalHtml = ed.innerHTML || '';
-  updateLessonAndTocMetadata(
-    lessonId,
-    String(result.review_status || 'pending'),
-    originalHtml,
-    ''
-  );
+updateLessonAndTocMetadata(
+  lessonId,
+  String(result.review_status || 'pending'),
+  originalHtml,
+  '',
+  Number(result.student_soft_locked || 0)
+);
+	
+	
 
   showBanner(result.skipped ? 'Draft unchanged.' : 'Draft saved.', 'ok');
 
@@ -1408,12 +1411,13 @@ async function checkSummary(lessonId) {
   }
 
   const currentHtml = ed.innerHTML || '';
-  updateLessonAndTocMetadata(
-    lessonId,
-    String(result.review_status || 'pending'),
-    currentHtml,
-    String(result.review_feedback || '')
-  );
+updateLessonAndTocMetadata(
+  lessonId,
+  String(result.review_status || 'pending'),
+  currentHtml,
+  String(result.review_feedback || ''),
+  Number(result.student_soft_locked || 0)
+);
 
   originalHtml = currentHtml;
 
