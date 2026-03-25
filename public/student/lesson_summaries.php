@@ -1942,13 +1942,17 @@ async function checkSummary(lessonId) {
   originalHtml = currentHtml;
   modalSaveStatus.textContent = String(result.review_status || '') === 'acceptable' ? 'Accepted' : 'Needs revision';
 
-  if (String(result.review_status || '') === 'acceptable') {
-    closeEditor(lessonId, true);
-    showBanner('Accepted: Edit via Notebook if needed.', 'ok');
-  } else {
-    openEditor(lessonId);
-    showBanner('Not accepted: Keep working on it and check again.', 'warn');
-  }
+if (String(result.review_status || '') === 'acceptable') {
+  updateModalChromeForLesson(lessonId);
+  setLessonLockedState(lessonId, true);
+  modalSaveStatus.textContent = 'Accepted';
+  showBanner('Summary accepted. Review the feedback on the right.', 'ok');
+} else {
+  updateModalChromeForLesson(lessonId);
+  setLessonLockedState(lessonId, false);
+  modalSaveStatus.textContent = 'Needs revision';
+  showBanner('Not accepted: Review the feedback and continue editing.', 'warn');
+}
 
   return true;
 }
