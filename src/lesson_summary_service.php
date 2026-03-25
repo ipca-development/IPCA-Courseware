@@ -168,7 +168,8 @@ try {
     }
     throw $e;
 }
-	
+}
+
 public function checkSummary(
     int $userId,
     int $cohortId,
