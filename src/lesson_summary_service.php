@@ -79,6 +79,11 @@ if (
         )
     ) {
 
+error_log('LessonSummaryService::saveSummary success user_id=' . $userId
+    . ' cohort_id=' . $cohortId
+    . ' lesson_id=' . $lessonId);		
+		
+		
 	return [
     'ok' => true,
     'skipped' => true,
@@ -139,6 +144,14 @@ if (
 				student_soft_locked = VALUES(student_soft_locked)
         ");
 
+		error_log('LessonSummaryService::saveSummary execute user_id=' . $userId
+    . ' cohort_id=' . $cohortId
+    . ' lesson_id=' . $lessonId
+    . ' review_status=' . $reviewStatus
+    . ' student_soft_locked=' . $studentSoftLocked
+    . ' plain_len=' . strlen($plain));
+		
+		
         $stmt->execute([
     $userId,
     $cohortId,

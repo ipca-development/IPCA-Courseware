@@ -25,6 +25,10 @@ try {
     if (!is_array($data)) {
         throw new RuntimeException('Invalid JSON');
     }
+	
+	error_log('summary_save.php payload: ' . json_encode($data));
+	
+	
 
     $action = trim((string)($data['action'] ?? 'save'));
     $cohortId = (int)($data['cohort_id'] ?? 0);
@@ -80,10 +84,15 @@ try {
         );
     }
 
+	error_log('summary_save.php result: ' . json_encode($result));
+	
     echo json_encode($result);
 } catch (Throwable $e) {
     http_response_code(400);
-    echo json_encode([
+    
+	error_log('summary_save.php error: ' . $e->getMessage());
+	
+	echo json_encode([
         'ok' => false,
         'error' => $e->getMessage()
     ]);
