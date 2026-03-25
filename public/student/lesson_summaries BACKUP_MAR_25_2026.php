@@ -149,7 +149,7 @@ cw_header('My Notebook');
   display:none;
   position:sticky;
   top:16px;
-  z-index:120;
+  z-index:60;
   padding:13px 15px;
   border-radius:14px;
   margin-bottom:18px;
@@ -212,7 +212,7 @@ cw_header('My Notebook');
   font-weight:800;
   font-size:13px;
   letter-spacing:0.01em;
-  transition:transform .06s ease, box-shadow .12s ease, opacity .12s ease, background .12s ease;
+  transition:transform .06s ease, box-shadow .12s ease, opacity .12s ease;
 }
 .nb-btn:hover{opacity:.97}
 .nb-btn:active{transform:translateY(1px)}
@@ -221,11 +221,11 @@ cw_header('My Notebook');
 .nb-btn.ghost{background:#fff;border:1px solid rgba(15,23,42,0.10);color:#152235}
 .nb-btn.ghost:hover{border-color:rgba(18,53,95,0.22);box-shadow:0 6px 14px rgba(15,23,42,0.05)}
 .nb-btn.tool{
-  padding:7px 11px;
+  padding:6px 10px;
   border:1px solid rgba(15,23,42,0.10);
   background:#fff;
   color:#152235;
-  min-width:40px;
+  min-width:38px;
   border-radius:10px;
   font-size:12px;
   box-shadow:none;
@@ -233,20 +233,6 @@ cw_header('My Notebook');
 .nb-btn.tool:hover{
   border-color:rgba(18,53,95,0.22);
   background:#f8fafc;
-}
-.nb-btn.tool.active{
-  background:#eaf2ff;
-  border-color:#93c5fd;
-  color:#12355f;
-}
-.nb-btn.tool.size-btn{
-  min-width:auto;
-  padding:7px 12px;
-}
-.nb-btn.tool.highlight-on{
-  background:#fff8c5;
-  border-color:#facc15;
-  color:#713f12;
 }
 
 .nb-header{
@@ -533,18 +519,13 @@ cw_header('My Notebook');
   line-height:1.82;
   font-size:15px;
 }
+
 .nb-content p{margin:0 0 12px 0}
 .nb-content ul,
 .nb-content ol{margin:0 0 12px 22px}
 .nb-content li{margin:0 0 6px 0}
 .nb-content b,
 .nb-content strong{color:#16263c}
-.nb-content mark{
-  background:#fff59d;
-  color:inherit;
-  padding:0 .1em;
-  border-radius:3px;
-}
 
 .nb-divider{
   border-top:1px solid rgba(15,23,42,0.07);
@@ -553,6 +534,91 @@ cw_header('My Notebook');
 
 .nb-action-bar{
   margin-top:14px;
+}
+
+.nb-action-panel{
+  display:none;
+  margin-top:14px;
+  border:1px solid rgba(15,23,42,0.10);
+  border-radius:18px;
+  padding:16px;
+  background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
+  box-shadow:0 10px 24px rgba(15,23,42,0.04);
+}
+.nb-action-panel.open{display:block}
+
+.nb-editor-toolbar{
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+  margin-bottom:10px;
+}
+
+.nb-editor-wrap{
+  background:#fff;
+  border-radius:14px;
+  padding:0;
+}
+
+.nb-editor{
+  min-height:180px;
+  border:none;
+  outline:none;
+  border-radius:14px;
+  padding:14px;
+  margin-top:0;
+  background:#fff;
+  font-size:15px;
+  line-height:1.75;
+  color:#1f2937;
+  box-shadow:none;
+}
+
+.nb-editor:focus{
+  outline:none;
+  box-shadow:none;
+}
+
+.nb-editor.locked{
+  opacity:.75;
+  background:#f8fafc;
+  cursor:default;
+}
+
+.nb-panel-actions{
+  margin-top:12px;
+  display:flex;
+  gap:8px;
+  flex-wrap:wrap;
+}
+
+.nb-panel-context{
+  margin-top:16px;
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.nb-panel-box{
+  border:1px solid rgba(15,23,42,0.08);
+  border-radius:14px;
+  padding:13px 14px;
+  background:#f9fbfd;
+}
+
+.nb-panel-label{
+  font-size:10px;
+  text-transform:uppercase;
+  color:#64748b;
+  font-weight:800;
+  letter-spacing:.12em;
+}
+
+.nb-panel-body{
+  margin-top:6px;
+  color:#243446;
+  line-height:1.65;
+  font-size:14px;
 }
 
 .nb-confirm{
@@ -578,278 +644,9 @@ cw_header('My Notebook');
   flex-wrap:wrap;
 }
 
-/* Modal editor */
-.nb-editor-modal{
-  position:fixed;
-  inset:0;
-  display:none;
-  align-items:center;
-  justify-content:center;
-  background:rgba(15,23,42,0.52);
-  z-index:200;
-  padding:20px;
-}
-
-.nb-editor-modal.open{
-  display:flex;
-}
-
-.nb-editor-dialog{
-  width:min(1160px, 96vw);
-  height:min(88vh, 930px);
-  background:#ffffff;
-  border-radius:24px;
-  border:1px solid rgba(15,23,42,0.08);
-  box-shadow:0 24px 80px rgba(15,23,42,0.28);
-  display:flex;
-  flex-direction:column;
-  overflow:hidden;
-}
-
-.nb-editor-top{
-  padding:18px 20px 14px 20px;
-  border-bottom:1px solid rgba(15,23,42,0.07);
-  background:linear-gradient(180deg,#ffffff 0%,#f8fbff 100%);
-}
-
-.nb-editor-topline{
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:16px;
-}
-
-.nb-editor-title-wrap{
-  min-width:0;
-  flex:1 1 auto;
-}
-
-.nb-editor-kicker{
-  font-size:10px;
-  text-transform:uppercase;
-  letter-spacing:.13em;
-  font-weight:800;
-  color:#6b7b92;
-  margin-bottom:7px;
-}
-
-.nb-editor-title{
-  margin:0;
-  font-size:24px;
-  line-height:1.15;
-  font-weight:800;
-  letter-spacing:-0.03em;
-  color:#13263f;
-  word-break:break-word;
-}
-
-.nb-editor-subtitle{
-  margin-top:7px;
-  font-size:13px;
-  line-height:1.5;
-  color:#607086;
-}
-
-.nb-editor-top-actions{
-  display:flex;
-  gap:8px;
-  align-items:center;
-  flex-wrap:wrap;
-  justify-content:flex-end;
-}
-
-.nb-editor-statusbar{
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  flex-wrap:wrap;
-  margin-top:14px;
-}
-
-.nb-editor-status-left{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  flex-wrap:wrap;
-}
-
-.nb-editor-status-right{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  flex-wrap:wrap;
-}
-
-.nb-editor-status-text{
-  font-size:12px;
-  font-weight:700;
-  color:#66768d;
-}
-
-.nb-editor-body{
-  flex:1 1 auto;
-  min-height:0;
-  display:grid;
-  grid-template-columns:minmax(0,1fr) 300px;
-  gap:0;
-}
-
-.nb-editor-main{
-  min-width:0;
-  display:flex;
-  flex-direction:column;
-  border-right:1px solid rgba(15,23,42,0.07);
-}
-
-.nb-editor-toolbar{
-  padding:12px 16px;
-  border-bottom:1px solid rgba(15,23,42,0.06);
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-  background:#fcfdff;
-}
-
-.nb-editor-canvas{
-  flex:1 1 auto;
-  min-height:0;
-  background:#f3f6fb;
-  padding:18px;
-  overflow:auto;
-}
-
-.nb-editor-paper{
-  min-height:100%;
-  background:#ffffff;
-  border:1px solid rgba(15,23,42,0.08);
-  border-radius:18px;
-  box-shadow:0 12px 30px rgba(15,23,42,0.08);
-  padding:24px 26px;
-}
-
-.nb-editor{
-  min-height:420px;
-  border:none;
-  outline:none;
-  background:#fff;
-  font-size:15px;
-  line-height:1.8;
-  color:#1f2937;
-  white-space:normal;
-  word-break:break-word;
-}
-.nb-editor p{margin:0 0 12px 0}
-.nb-editor ul,
-.nb-editor ol{margin:0 0 12px 22px}
-.nb-editor li{margin:0 0 6px 0}
-.nb-editor mark{
-  background:#fff59d;
-  color:inherit;
-  padding:0 .1em;
-  border-radius:3px;
-}
-.nb-editor.size-sm{font-size:14px}
-.nb-editor.size-md{font-size:15px}
-.nb-editor.size-lg{font-size:17px}
-
-.nb-editor.locked{
-  opacity:.74;
-  cursor:default;
-}
-
-.nb-editor-locked-overlay{
-  display:none;
-  position:sticky;
-  top:0;
-  z-index:2;
-  margin-bottom:12px;
-  padding:12px 14px;
-  border-radius:14px;
-  background:rgba(248,250,252,0.92);
-  border:1px solid rgba(148,163,184,0.35);
-  color:#475569;
-  font-size:13px;
-  font-weight:700;
-  backdrop-filter:blur(6px);
-}
-.nb-editor-locked-overlay.show{
-  display:block;
-}
-
-.nb-editor-side{
-  min-width:0;
-  background:#fbfcfe;
-  display:flex;
-  flex-direction:column;
-}
-
-.nb-editor-side-scroll{
-  padding:16px;
-  overflow:auto;
-}
-
-.nb-side-card{
-  border:1px solid rgba(15,23,42,0.08);
-  background:#fff;
-  border-radius:16px;
-  padding:14px;
-  margin-bottom:12px;
-}
-
-.nb-side-label{
-  font-size:10px;
-  text-transform:uppercase;
-  color:#64748b;
-  font-weight:800;
-  letter-spacing:.12em;
-}
-
-.nb-side-body{
-  margin-top:7px;
-  color:#243446;
-  font-size:14px;
-  line-height:1.6;
-}
-
-.nb-side-empty{
-  color:#7b8798;
-}
-
-.nb-editor-footer{
-  padding:14px 18px;
-  border-top:1px solid rgba(15,23,42,0.07);
-  background:#ffffff;
-  display:flex;
-  align-items:center;
-  justify-content:space-between;
-  gap:12px;
-  flex-wrap:wrap;
-}
-
-.nb-editor-footer-left{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  flex-wrap:wrap;
-}
-
-.nb-editor-footer-right{
-  display:flex;
-  align-items:center;
-  gap:8px;
-  flex-wrap:wrap;
-}
-
-.nb-hidden{
-  display:none !important;
-}
-
 @media (max-width:980px){
   .nb-doc{padding:26px 24px 30px 24px}
   .nb-meta{grid-template-columns:1fr 1fr}
-  .nb-editor-body{grid-template-columns:1fr}
-  .nb-editor-main{border-right:none;border-bottom:1px solid rgba(15,23,42,0.07)}
 }
 
 @media (max-width:760px){
@@ -879,29 +676,15 @@ cw_header('My Notebook');
   .nb-toc-lesson-list{
     padding-left:28px;
   }
-
-  .nb-editor-modal{
-    padding:10px;
-  }
-
-  .nb-editor-dialog{
-    width:100%;
-    height:94vh;
-    border-radius:18px;
-  }
-
-  .nb-editor-paper{
-    padding:18px 16px;
-  }
 }
 
 @media print{
   .nb-action-bar,
+  .nb-action-panel,
   .nb-scope-row,
   .nb-confirm,
   .nb-export-note,
-  .nb-banner,
-  .nb-editor-modal{
+  .nb-banner{
     display:none !important;
   }
 
@@ -1083,7 +866,6 @@ cw_header('My Notebook');
               data-review-status="<?= h($reviewStatus) ?>"
               data-has-summary="<?= $hasSummary ? '1' : '0' ?>"
               data-summary-locked="<?= $isLocked ? '1' : '0' ?>"
-              data-lesson-title="<?= h((string)$lesson['lesson_number'] . ' ' . (string)$lesson['lesson_title']) ?>"
             >
               <div class="nb-lesson-head">
                 <div class="nb-lesson-head-left">
@@ -1127,16 +909,56 @@ cw_header('My Notebook');
                 <?php endif; ?>
               </div>
 
-              <div class="nb-hidden">
-                <div id="editor-<?= $lessonId ?>" class="nb-editor<?= $isLocked ? ' locked' : '' ?> size-md" contenteditable="<?= $isLocked ? 'false' : 'true' ?>"><?= (string)$lesson['summary_html'] ?></div>
-                <div id="feedback-<?= $lessonId ?>"><?= h((string)$lesson['instructor_feedback']) ?></div>
-                <div id="notes-<?= $lessonId ?>"><?= h((string)$lesson['instructor_notes']) ?></div>
-                <div id="versionctx-<?= $lessonId ?>">
-                  <?php if ($versionCount > 0): ?>
-                    <div><?= (int)$versionCount ?> saved version<?= $versionCount === 1 ? '' : 's' ?> preserved for your summary history.</div>
+              <div class="nb-action-panel" id="panel-<?= $lessonId ?>">
+                <div class="nb-editor-toolbar">
+                  <button type="button" class="nb-btn tool" data-editor-cmd="bold" data-lesson="<?= $lessonId ?>"><strong>B</strong></button>
+                  <button type="button" class="nb-btn tool" data-editor-cmd="italic" data-lesson="<?= $lessonId ?>"><em>I</em></button>
+                  <button type="button" class="nb-btn tool" data-editor-cmd="underline" data-lesson="<?= $lessonId ?>"><u>U</u></button>
+                  <button type="button" class="nb-btn tool" data-editor-cmd="insertUnorderedList" data-lesson="<?= $lessonId ?>">•</button>
+                </div>
+
+                <div class="nb-editor-wrap">
+                  <div class="nb-editor<?= $isLocked ? ' locked' : '' ?>" contenteditable="<?= $isLocked ? 'false' : 'true' ?>" id="editor-<?= $lessonId ?>"><?= (string)$lesson['summary_html'] ?></div>
+                </div>
+
+                <div class="nb-panel-actions">
+                  <button class="nb-btn ghost" data-save-lesson="<?= $lessonId ?>">Save Draft</button>
+                  <button class="nb-btn primary" data-check-lesson="<?= $lessonId ?>"<?= $isLocked ? ' style="display:none;"' : '' ?>>Check my Summary</button>
+                  <button class="nb-btn ghost" data-close-lesson="<?= $lessonId ?>">Close</button>
+                </div>
+
+                <div class="nb-panel-context">
+                  <?php if ($showFeedback): ?>
+                    <div class="nb-panel-box">
+                      <div class="nb-panel-label">Review Feedback</div>
+                      <div class="nb-panel-body" data-role="review-feedback-box"><?= nl2br(h((string)$lesson['instructor_feedback'])) ?></div>
+                    </div>
+                  <?php else: ?>
+                    <div class="nb-panel-box" data-role="review-feedback-container" style="display:none;">
+                      <div class="nb-panel-label">Review Feedback</div>
+                      <div class="nb-panel-body" data-role="review-feedback-box"></div>
+                    </div>
                   <?php endif; ?>
-                  <?php if ($latestVersionAt !== ''): ?>
-                    <div>Latest saved version: <?= h(nb_ui_date($latestVersionAt)) ?></div>
+
+                  <?php if ($showNotes): ?>
+                    <div class="nb-panel-box">
+                      <div class="nb-panel-label">Instructor Notes</div>
+                      <div class="nb-panel-body"><?= nl2br(h((string)$lesson['instructor_notes'])) ?></div>
+                    </div>
+                  <?php endif; ?>
+
+                  <?php if ($versionCount > 0 || $latestVersionAt !== ''): ?>
+                    <div class="nb-panel-box">
+                      <div class="nb-panel-label">Version Context</div>
+                      <div class="nb-panel-body">
+                        <?php if ($versionCount > 0): ?>
+                          <div><?= (int)$versionCount ?> saved version<?= $versionCount === 1 ? '' : 's' ?> preserved for your summary history.</div>
+                        <?php endif; ?>
+                        <?php if ($latestVersionAt !== ''): ?>
+                          <div>Latest saved version: <?= h(nb_ui_date($latestVersionAt)) ?></div>
+                        <?php endif; ?>
+                      </div>
+                    </div>
                   <?php endif; ?>
                 </div>
               </div>
@@ -1158,105 +980,6 @@ cw_header('My Notebook');
   </div>
 </div>
 
-<div id="editorModal" class="nb-editor-modal" aria-hidden="true">
-  <div class="nb-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="modalLessonTitle">
-    <div class="nb-editor-top">
-      <div class="nb-editor-topline">
-        <div class="nb-editor-title-wrap">
-          <div class="nb-editor-kicker">Lesson Summary Editor</div>
-          <h2 class="nb-editor-title" id="modalLessonTitle">Summary Editor</h2>
-          <div class="nb-editor-subtitle" id="modalLessonSubtitle">Write, refine, and check your lesson summary.</div>
-        </div>
-
-        <div class="nb-editor-top-actions">
-          <span id="modalStatusPill" class="nb-pill pending">Draft Not Yet Checked</span>
-          <button type="button" class="nb-btn ghost" id="modalCloseTopBtn">Close</button>
-        </div>
-      </div>
-
-      <div class="nb-editor-statusbar">
-        <div class="nb-editor-status-left">
-          <span class="nb-editor-status-text" id="modalSaveStatus">Ready</span>
-          <span class="nb-meta-chip" id="modalWordCount">0 words</span>
-          <span class="nb-meta-chip" id="modalLockState">Unlocked</span>
-        </div>
-
-        <div class="nb-editor-status-right">
-          <span class="nb-editor-status-text" id="modalHintText">Use clear structure and your own wording.</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="nb-editor-body">
-      <div class="nb-editor-main">
-        <div class="nb-editor-toolbar">
-          <button type="button" class="nb-btn tool" data-modal-cmd="bold"><strong>B</strong></button>
-          <button type="button" class="nb-btn tool" data-modal-cmd="italic"><em>I</em></button>
-          <button type="button" class="nb-btn tool" data-modal-cmd="underline"><u>U</u></button>
-          <button type="button" class="nb-btn tool" data-modal-cmd="insertUnorderedList">•</button>
-
-          <button type="button" class="nb-btn tool size-btn" data-size="sm">Small</button>
-          <button type="button" class="nb-btn tool size-btn active" data-size="md">Medium</button>
-          <button type="button" class="nb-btn tool size-btn" data-size="lg">Large</button>
-
-          <button type="button" class="nb-btn tool" id="modalHighlightBtn">Highlight</button>
-          <button type="button" class="nb-btn tool" id="modalClearFormatBtn">Clear</button>
-        </div>
-
-        <div class="nb-editor-canvas">
-          <div class="nb-editor-paper">
-            <div id="modalLockedOverlay" class="nb-editor-locked-overlay">
-              This summary is soft locked. Unlock it to make changes. If you edit it, you will need to check it again.
-            </div>
-            <div id="modalEditor" class="nb-editor size-md" contenteditable="true"></div>
-          </div>
-        </div>
-      </div>
-
-      <aside class="nb-editor-side">
-        <div class="nb-editor-side-scroll">
-          <div class="nb-side-card">
-            <div class="nb-side-label">Review Feedback</div>
-            <div class="nb-side-body" id="modalFeedbackBox"><span class="nb-side-empty">No review feedback yet.</span></div>
-          </div>
-
-          <div class="nb-side-card">
-            <div class="nb-side-label">Instructor Notes</div>
-            <div class="nb-side-body" id="modalNotesBox"><span class="nb-side-empty">No instructor notes.</span></div>
-          </div>
-
-          <div class="nb-side-card">
-            <div class="nb-side-label">Version Context</div>
-            <div class="nb-side-body" id="modalVersionContext"><span class="nb-side-empty">No version context available.</span></div>
-          </div>
-
-          <div class="nb-side-card">
-            <div class="nb-side-label">Quick Tips</div>
-            <div class="nb-side-body">
-              <div>Use your own words.</div>
-              <div>Keep key aircraft concepts accurate.</div>
-              <div>Use headings and bullets where useful.</div>
-              <div>Yellow highlight will also appear in PDF if your export renderer keeps HTML styling.</div>
-            </div>
-          </div>
-        </div>
-      </aside>
-    </div>
-
-    <div class="nb-editor-footer">
-      <div class="nb-editor-footer-left">
-        <button type="button" class="nb-btn ghost" id="modalSaveBtn">Save Draft</button>
-        <button type="button" class="nb-btn primary" id="modalCheckBtn">Check my Summary</button>
-      </div>
-
-      <div class="nb-editor-footer-right">
-        <button type="button" class="nb-btn warn" id="modalUnlockBtn">Unlock for Editing</button>
-        <button type="button" class="nb-btn ghost" id="modalCloseBtn">Close</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <script>
 const COHORT_ID = <?= (int)$selectedCohortId ?>;
 const SAVE_URL = '/student/api/summary_save.php';
@@ -1273,32 +996,6 @@ const confirmSaveBtn = document.getElementById('confirmSaveBtn');
 const confirmDiscardBtn = document.getElementById('confirmDiscardBtn');
 const confirmContinueBtn = document.getElementById('confirmContinueBtn');
 
-const editorModal = document.getElementById('editorModal');
-const modalEditor = document.getElementById('modalEditor');
-const modalLessonTitle = document.getElementById('modalLessonTitle');
-const modalLessonSubtitle = document.getElementById('modalLessonSubtitle');
-const modalSaveStatus = document.getElementById('modalSaveStatus');
-const modalWordCount = document.getElementById('modalWordCount');
-const modalLockState = document.getElementById('modalLockState');
-const modalHintText = document.getElementById('modalHintText');
-const modalStatusPill = document.getElementById('modalStatusPill');
-const modalFeedbackBox = document.getElementById('modalFeedbackBox');
-const modalNotesBox = document.getElementById('modalNotesBox');
-const modalVersionContext = document.getElementById('modalVersionContext');
-const modalLockedOverlay = document.getElementById('modalLockedOverlay');
-const modalUnlockBtn = document.getElementById('modalUnlockBtn');
-const modalCheckBtn = document.getElementById('modalCheckBtn');
-const modalSaveBtn = document.getElementById('modalSaveBtn');
-const modalCloseBtn = document.getElementById('modalCloseBtn');
-const modalCloseTopBtn = document.getElementById('modalCloseTopBtn');
-const modalHighlightBtn = document.getElementById('modalHighlightBtn');
-const modalClearFormatBtn = document.getElementById('modalClearFormatBtn');
-const modalSizeButtons = Array.from(document.querySelectorAll('[data-size]'));
-const modalCmdButtons = Array.from(document.querySelectorAll('[data-modal-cmd]'));
-
-let modalCurrentSize = 'md';
-let modalHighlightOn = false;
-	
 function editorEl(lessonId) {
   return document.getElementById('editor-' + lessonId);
 }
@@ -1323,27 +1020,27 @@ function lessonIsLocked(lessonId) {
 
 function setLessonLockedState(lessonId, locked) {
   const node = lessonNode(lessonId);
+  const ed = editorEl(lessonId);
+  const checkBtn = document.querySelector('[data-check-lesson="' + lessonId + '"]');
 
   if (node) {
     node.setAttribute('data-summary-locked', locked ? '1' : '0');
   }
 
-  if (activeLessonId === lessonId) {
-    modalEditor.setAttribute('contenteditable', locked ? 'false' : 'true');
-    modalEditor.classList.toggle('locked', !!locked);
-    modalLockedOverlay.classList.toggle('show', !!locked);
-    modalUnlockBtn.classList.toggle('nb-hidden', !locked);
-    modalCheckBtn.classList.toggle('nb-hidden', !!locked);
-    modalLockState.textContent = locked ? 'Locked' : 'Unlocked';
-    modalHintText.textContent = locked
-      ? 'Unlock to edit. Re-check will be required after changes.'
-      : 'Use clear structure and your own wording.';
+  if (ed) {
+    ed.setAttribute('contenteditable', locked ? 'false' : 'true');
+    ed.classList.toggle('locked', !!locked);
+  }
+
+  if (checkBtn) {
+    checkBtn.style.display = locked ? 'none' : 'inline-block';
   }
 }
 
 function hasUnsavedChanges(lessonId) {
-  if (activeLessonId !== lessonId) return false;
-  return modalEditor.innerHTML !== originalHtml;
+  const ed = editorEl(lessonId);
+  if (!ed) return false;
+  return ed.innerHTML !== originalHtml;
 }
 
 function showBanner(message, kind) {
@@ -1374,11 +1071,6 @@ function setStatusPillOnNode(node, label, klass, selector) {
   if (!pill) return;
   pill.textContent = label;
   pill.className = 'nb-pill ' + klass;
-}
-
-function setModalStatusPill(label, klass) {
-  modalStatusPill.textContent = label;
-  modalStatusPill.className = 'nb-pill ' + klass;
 }
 
 function computeStatusDisplay(reviewStatus, attentionReason) {
@@ -1428,7 +1120,7 @@ function buildActionButton(reviewStatus, hasSummary, isLocked) {
 
   return { label: 'Open Summary', action: 'edit', className: 'nb-btn ghost' };
 }
-	
+
 function renderActionButton(lessonId, reviewStatus, hasSummary, isLocked) {
   const node = lessonNode(lessonId);
   if (!node) return;
@@ -1480,107 +1172,23 @@ function formatUtcDateLabel(now) {
 }
 
 function setPanelFeedback(lessonId, feedback) {
+  const panel = panelEl(lessonId);
+  if (!panel) return;
+
+  const container = panel.querySelector('[data-role="review-feedback-container"]');
+  const box = panel.querySelector('[data-role="review-feedback-box"]');
+
+  if (!container || !box) return;
+
   const value = String(feedback || '').trim();
   if (value === '') {
-    modalFeedbackBox.innerHTML = '<span class="nb-side-empty">No review feedback yet.</span>';
+    box.innerHTML = '';
+    container.style.display = 'none';
     return;
   }
-  modalFeedbackBox.innerHTML = escapeHtml(value).replace(/\n/g, '<br>');
-}
 
-function setPanelNotes(lessonId) {
-  const src = document.getElementById('notes-' + lessonId);
-  const value = src ? String(src.textContent || '').trim() : '';
-  if (value === '') {
-    modalNotesBox.innerHTML = '<span class="nb-side-empty">No instructor notes.</span>';
-    return;
-  }
-  modalNotesBox.innerHTML = escapeHtml(value).replace(/\n/g, '<br>');
-}
-
-function setPanelVersionContext(lessonId) {
-  const src = document.getElementById('versionctx-' + lessonId);
-  const value = src ? String(src.innerHTML || '').trim() : '';
-  if (value === '') {
-    modalVersionContext.innerHTML = '<span class="nb-side-empty">No version context available.</span>';
-    return;
-  }
-  modalVersionContext.innerHTML = value;
-}
-
-function syncHiddenEditorFromModal(lessonId) {
-  const hidden = editorEl(lessonId);
-  if (hidden) {
-    hidden.innerHTML = modalEditor.innerHTML;
-    hidden.className = modalEditor.className;
-    hidden.setAttribute('contenteditable', lessonIsLocked(lessonId) ? 'false' : 'true');
-  }
-}
-
-function syncModalFromHidden(lessonId) {
-  const hidden = editorEl(lessonId);
-  if (!hidden) return;
-
-  modalEditor.innerHTML = hidden.innerHTML;
-  modalCurrentSize = 'md';
-  if (hidden.classList.contains('size-sm')) modalCurrentSize = 'sm';
-  if (hidden.classList.contains('size-lg')) modalCurrentSize = 'lg';
-
-  modalEditor.className = 'nb-editor size-' + modalCurrentSize;
-  modalEditor.classList.toggle('locked', lessonIsLocked(lessonId));
-  updateSizeButtons();
-  updateModalWordCount();
-}
-
-function updateModalWordCount() {
-  modalWordCount.textContent = countWordsFromHtml(modalEditor.innerHTML) + ' words';
-}
-
-function updateSizeButtons() {
-  modalSizeButtons.forEach(function(btn){
-    btn.classList.toggle('active', btn.getAttribute('data-size') === modalCurrentSize);
-  });
-}
-
-function applyModalSize(size) {
-  modalCurrentSize = size;
-  modalEditor.classList.remove('size-sm', 'size-md', 'size-lg');
-  modalEditor.classList.add('size-' + size);
-  syncHiddenEditorFromModal(activeLessonId);
-  updateSizeButtons();
-}
-
-function updateModalToolbarState() {
-  modalCmdButtons.forEach(function(btn){
-    const cmd = btn.getAttribute('data-modal-cmd');
-    let active = false;
-    try {
-      active = document.queryCommandState(cmd);
-    } catch(e){}
-    btn.classList.toggle('active', !!active);
-  });
-  modalHighlightBtn.classList.toggle('highlight-on', modalHighlightOn);
-}
-
-function updateModalChromeForLesson(lessonId) {
-  const node = lessonNode(lessonId);
-  if (!node) return;
-
-  const lessonTitle = String(node.getAttribute('data-lesson-title') || 'Summary Editor');
-  const reviewStatus = String(node.getAttribute('data-review-status') || 'pending');
-  const statusMeta = computeStatusDisplay(reviewStatus, '');
-
-  modalLessonTitle.textContent = lessonTitle;
-  modalLessonSubtitle.textContent = 'Write, refine, and check your lesson summary.';
-  modalSaveStatus.textContent = 'Ready';
-  setModalStatusPill(statusMeta.label, statusMeta.klass);
-  modalLockState.textContent = lessonIsLocked(lessonId) ? 'Locked' : 'Unlocked';
-  modalHintText.textContent = lessonIsLocked(lessonId)
-    ? 'Unlock to edit. Re-check will be required after changes.'
-    : 'Use clear structure and your own wording.';
-  modalLockedOverlay.classList.toggle('show', lessonIsLocked(lessonId));
-  modalUnlockBtn.classList.toggle('nb-hidden', !lessonIsLocked(lessonId));
-  modalCheckBtn.classList.toggle('nb-hidden', lessonIsLocked(lessonId));
+  box.innerHTML = escapeHtml(value).replace(/\n/g, '<br>');
+  container.style.display = 'block';
 }
 
 function updateLessonAndTocMetadata(lessonId, reviewStatus, html, reviewFeedback, studentSoftLocked) {
@@ -1609,16 +1217,6 @@ function updateLessonAndTocMetadata(lessonId, reviewStatus, html, reviewFeedback
       view.className = 'nb-divider';
       view.innerHTML = '';
     }
-  }
-
-  const hidden = editorEl(lessonId);
-  if (hidden) {
-    hidden.innerHTML = html;
-  }
-
-  const feedbackHolder = document.getElementById('feedback-' + lessonId);
-  if (feedbackHolder) {
-    feedbackHolder.textContent = reviewFeedback || '';
   }
 
   const now = new Date();
@@ -1660,22 +1258,15 @@ function updateLessonAndTocMetadata(lessonId, reviewStatus, html, reviewFeedback
     }
   }
 
-  const locked = Number(studentSoftLocked || 0) === 1;
+ const locked = Number(studentSoftLocked || 0) === 1;
 
-  if (node) {
-    node.setAttribute('data-summary-locked', locked ? '1' : '0');
-  }
+if (node) {
+  node.setAttribute('data-summary-locked', locked ? '1' : '0');
+}
 
-  setLessonLockedState(lessonId, locked);
-  renderActionButton(lessonId, reviewStatus, hasSummary, locked);
-
-  if (activeLessonId === lessonId) {
-    setPanelFeedback(lessonId, reviewFeedback || '');
-    setPanelNotes(lessonId);
-    setPanelVersionContext(lessonId);
-    syncModalFromHidden(lessonId);
-    updateModalChromeForLesson(lessonId);
-  }
+setLessonLockedState(lessonId, locked);
+setPanelFeedback(lessonId, reviewFeedback || '');
+renderActionButton(lessonId, reviewStatus, hasSummary, locked);
 }
 
 function openEditor(lessonId) {
@@ -1687,22 +1278,15 @@ function openEditor(lessonId) {
     closeEditor(activeLessonId, true);
   }
 
-  const hidden = editorEl(lessonId);
-  if (!hidden) return;
+  const panel = panelEl(lessonId);
+  const ed = editorEl(lessonId);
+  if (!panel || !ed) return;
 
+  panel.classList.add('open');
   activeLessonId = lessonId;
-  syncModalFromHidden(lessonId);
-  originalHtml = modalEditor.innerHTML;
-  setPanelFeedback(lessonId, (document.getElementById('feedback-' + lessonId) || {}).textContent || '');
-  setPanelNotes(lessonId);
-  setPanelVersionContext(lessonId);
-  updateModalChromeForLesson(lessonId);
-  updateModalToolbarState();
-  editorModal.classList.add('open');
-  editorModal.setAttribute('aria-hidden', 'false');
-
+  originalHtml = ed.innerHTML;
   if (!lessonIsLocked(lessonId)) {
-    setTimeout(function(){ modalEditor.focus(); }, 60);
+    ed.focus();
   }
 }
 
@@ -1712,14 +1296,12 @@ function closeEditor(lessonId, silent) {
     return;
   }
 
-  editorModal.classList.remove('open');
-  editorModal.setAttribute('aria-hidden', 'true');
+  const panel = panelEl(lessonId);
+  if (panel) panel.classList.remove('open');
 
   if (activeLessonId === lessonId) {
-    syncHiddenEditorFromModal(lessonId);
     activeLessonId = null;
     originalHtml = '';
-    modalSaveStatus.textContent = 'Ready';
   }
 
   if (!silent) {
@@ -1730,8 +1312,8 @@ function closeEditor(lessonId, silent) {
 async function postSummary(payload) {
   const res = await fetch(SAVE_URL, {
     method: 'POST',
-    headers:{'Content-Type':'application/json'},
-    credentials:'same-origin',
+    headers: {'Content-Type': 'application/json'},
+    credentials: 'same-origin',
     body: JSON.stringify(payload)
   });
 
@@ -1766,55 +1348,44 @@ async function unlockAcceptedSummary(lessonId) {
     return false;
   }
 
-  setLessonLockedState(lessonId, false);
-  updateLessonAndTocMetadata(
-    lessonId,
-    String(result.review_status || 'acceptable'),
-    activeLessonId === lessonId ? modalEditor.innerHTML : (editorEl(lessonId) ? editorEl(lessonId).innerHTML : ''),
-    '',
-    Number(result.student_soft_locked || 0)
-  );
-
-  originalHtml = activeLessonId === lessonId ? modalEditor.innerHTML : originalHtml;
-  modalSaveStatus.textContent = 'Unlocked';
+	setLessonLockedState(lessonId, false);
+	renderActionButton(lessonId, String(result.review_status || 'acceptable'), true, false);
   showBanner('Summary unlocked. If you make changes, you will have to check your summary again.', 'ok');
   return true;
 }
 
 async function saveSummary(lessonId) {
-  if (activeLessonId !== lessonId) return false;
+  const ed = editorEl(lessonId);
+  if (!ed) return false;
 
   if (lessonIsLocked(lessonId)) {
     showBanner('Accepted summaries must be reopened before editing.', 'warn');
     return false;
   }
 
-  modalSaveStatus.textContent = 'Saving draft...';
-  syncHiddenEditorFromModal(lessonId);
-
   const result = await postSummary({
     action: 'save',
     cohort_id: COHORT_ID,
     lesson_id: lessonId,
-    summary_html: modalEditor.innerHTML || ''
+    summary_html: ed.innerHTML || ''
   });
 
   if (!result.ok) {
-    modalSaveStatus.textContent = 'Save failed';
     showBanner(result.error || 'Save failed.', 'danger');
     return false;
   }
 
-  originalHtml = modalEditor.innerHTML || '';
-  updateLessonAndTocMetadata(
-    lessonId,
-    String(result.review_status || 'pending'),
-    originalHtml,
-    '',
-    Number(result.student_soft_locked || 0)
-  );
+  originalHtml = ed.innerHTML || '';
+updateLessonAndTocMetadata(
+  lessonId,
+  String(result.review_status || 'pending'),
+  originalHtml,
+  '',
+  Number(result.student_soft_locked || 0)
+);
+	
+	
 
-  modalSaveStatus.textContent = result.skipped ? 'Draft unchanged' : 'Draft saved';
   showBanner(result.skipped ? 'Draft unchanged.' : 'Draft saved.', 'ok');
 
   if (pendingAction) {
@@ -1827,7 +1398,8 @@ async function saveSummary(lessonId) {
 }
 
 async function checkSummary(lessonId) {
-  if (activeLessonId !== lessonId) return false;
+  const ed = editorEl(lessonId);
+  if (!ed) return false;
 
   if (!lessonIsLocked(lessonId) && hasUnsavedChanges(lessonId)) {
     const saved = await saveSummary(lessonId);
@@ -1836,8 +1408,6 @@ async function checkSummary(lessonId) {
     }
   }
 
-  modalSaveStatus.textContent = 'Checking summary...';
-
   const result = await postSummary({
     action: 'check',
     cohort_id: COHORT_ID,
@@ -1845,22 +1415,20 @@ async function checkSummary(lessonId) {
   });
 
   if (!result.ok) {
-    modalSaveStatus.textContent = 'Check failed';
     showBanner(result.error || 'Summary check failed.', 'danger');
     return false;
   }
 
-  const currentHtml = modalEditor.innerHTML || '';
-  updateLessonAndTocMetadata(
-    lessonId,
-    String(result.review_status || 'pending'),
-    currentHtml,
-    String(result.review_feedback || ''),
-    Number(result.student_soft_locked || 0)
-  );
+  const currentHtml = ed.innerHTML || '';
+updateLessonAndTocMetadata(
+  lessonId,
+  String(result.review_status || 'pending'),
+  currentHtml,
+  String(result.review_feedback || ''),
+  Number(result.student_soft_locked || 0)
+);
 
   originalHtml = currentHtml;
-  modalSaveStatus.textContent = String(result.review_status || '') === 'acceptable' ? 'Accepted' : 'Needs revision';
 
   if (String(result.review_status || '') === 'acceptable') {
     closeEditor(lessonId, true);
@@ -1895,10 +1463,9 @@ async function runPendingAction(action) {
   }
 
   if (action.type === 'close-editor') {
-    editorModal.classList.remove('open');
-    editorModal.setAttribute('aria-hidden', 'true');
+    const panel = panelEl(action.lessonId);
+    if (panel) panel.classList.remove('open');
     if (activeLessonId === action.lessonId) {
-      syncHiddenEditorFromModal(action.lessonId);
       activeLessonId = null;
       originalHtml = '';
     }
@@ -1918,9 +1485,8 @@ confirmSaveBtn.addEventListener('click', async function () {
 
 confirmDiscardBtn.addEventListener('click', async function () {
   if (activeLessonId !== null) {
-    modalEditor.innerHTML = originalHtml;
-    syncHiddenEditorFromModal(activeLessonId);
-    updateModalWordCount();
+    const ed = editorEl(activeLessonId);
+    if (ed) ed.innerHTML = originalHtml;
   }
 
   const action = pendingAction;
@@ -1929,8 +1495,8 @@ confirmDiscardBtn.addEventListener('click', async function () {
   closeConfirmBar();
 
   if (lessonId !== null) {
-    editorModal.classList.remove('open');
-    editorModal.setAttribute('aria-hidden', 'true');
+    const panel = panelEl(lessonId);
+    if (panel) panel.classList.remove('open');
     activeLessonId = null;
     originalHtml = '';
   }
@@ -1971,13 +1537,63 @@ async function handleActionButtonClick() {
       return;
     }
 
-    openEditor(lessonId);
     await checkSummary(lessonId);
   }
 }
 
 document.querySelectorAll('[data-action]').forEach(function (btn) {
   btn.addEventListener('click', handleActionButtonClick);
+});
+
+document.querySelectorAll('[data-save-lesson]').forEach(function (btn) {
+  btn.addEventListener('click', async function () {
+    const lessonId = parseInt(btn.getAttribute('data-save-lesson'), 10);
+    await saveSummary(lessonId);
+  });
+});
+
+document.querySelectorAll('[data-check-lesson]').forEach(function (btn) {
+  btn.addEventListener('click', async function () {
+    const lessonId = parseInt(btn.getAttribute('data-check-lesson'), 10);
+    await checkSummary(lessonId);
+  });
+});
+
+document.querySelectorAll('[data-close-lesson]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    const lessonId = parseInt(btn.getAttribute('data-close-lesson'), 10);
+    closeEditor(lessonId, false);
+  });
+});
+
+document.querySelectorAll('[data-editor-cmd]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    const lessonId = parseInt(btn.getAttribute('data-lesson'), 10);
+    if (lessonIsLocked(lessonId)) return;
+
+    const cmd = btn.getAttribute('data-editor-cmd');
+    const ed = editorEl(lessonId);
+    if (!ed) return;
+    ed.focus();
+    document.execCommand(cmd, false, null);
+  });
+});
+
+document.querySelectorAll('.nb-editor').forEach(function (ed) {
+  ed.addEventListener('input', function () {
+    const lessonId = parseInt(ed.id.replace('editor-', ''), 10);
+    if (lessonIsLocked(lessonId)) return;
+  });
+
+  ed.addEventListener('paste', function () {
+    console.log('Deterrence triggered: paste attempt detected');
+  });
+  ed.addEventListener('cut', function () {
+    console.log('Deterrence triggered: cut attempt detected');
+  });
+  ed.addEventListener('contextmenu', function () {
+    console.log('Deterrence triggered: context menu attempt detected');
+  });
 });
 
 scopeSelect.addEventListener('change', function () {
@@ -1992,124 +1608,6 @@ scopeSelect.addEventListener('change', function () {
   window.location.href = '?cohort_id=' + encodeURIComponent(targetCohortId);
 });
 
-modalSaveBtn.addEventListener('click', async function () {
-  if (activeLessonId !== null) {
-    await saveSummary(activeLessonId);
-  }
-});
-
-modalCheckBtn.addEventListener('click', async function () {
-  if (activeLessonId !== null) {
-    await checkSummary(activeLessonId);
-  }
-});
-
-modalUnlockBtn.addEventListener('click', async function () {
-  if (activeLessonId !== null) {
-    await unlockAcceptedSummary(activeLessonId);
-  }
-});
-
-modalCloseBtn.addEventListener('click', function () {
-  if (activeLessonId !== null) {
-    closeEditor(activeLessonId, false);
-  }
-});
-
-modalCloseTopBtn.addEventListener('click', function () {
-  if (activeLessonId !== null) {
-    closeEditor(activeLessonId, false);
-  }
-});
-
-editorModal.addEventListener('click', function(e){
-  if (e.target === editorModal && activeLessonId !== null) {
-    closeEditor(activeLessonId, false);
-  }
-});
-
-document.addEventListener('keydown', function(e){
-  if (e.key === 'Escape' && editorModal.classList.contains('open') && activeLessonId !== null) {
-    closeEditor(activeLessonId, false);
-  }
-});
-
-modalCmdButtons.forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    if (activeLessonId === null || lessonIsLocked(activeLessonId)) return;
-
-    const cmd = btn.getAttribute('data-modal-cmd');
-    modalEditor.focus();
-    document.execCommand(cmd, false, null);
-    syncHiddenEditorFromModal(activeLessonId);
-    updateModalToolbarState();
-    updateModalWordCount();
-  });
-});
-
-modalSizeButtons.forEach(function(btn){
-  btn.addEventListener('click', function(){
-    if (activeLessonId === null) return;
-    applyModalSize(btn.getAttribute('data-size'));
-    modalEditor.focus();
-  });
-});
-
-modalHighlightBtn.addEventListener('click', function(){
-  if (activeLessonId === null || lessonIsLocked(activeLessonId)) return;
-
-  modalEditor.focus();
-
-  try {
-    if (modalHighlightOn) {
-      document.execCommand('hiliteColor', false, 'transparent');
-      modalHighlightOn = false;
-    } else {
-      document.execCommand('hiliteColor', false, '#fff59d');
-      modalHighlightOn = true;
-    }
-  } catch(e) {}
-
-  syncHiddenEditorFromModal(activeLessonId);
-  updateModalToolbarState();
-});
-
-modalClearFormatBtn.addEventListener('click', function(){
-  if (activeLessonId === null || lessonIsLocked(activeLessonId)) return;
-
-  modalEditor.focus();
-  try {
-    document.execCommand('removeFormat', false, null);
-  } catch(e) {}
-
-  syncHiddenEditorFromModal(activeLessonId);
-  updateModalToolbarState();
-  updateModalWordCount();
-});
-
-modalEditor.addEventListener('input', function () {
-  if (activeLessonId === null) return;
-  if (lessonIsLocked(activeLessonId)) return;
-
-  syncHiddenEditorFromModal(activeLessonId);
-  updateModalWordCount();
-  updateModalToolbarState();
-  modalSaveStatus.textContent = 'Unsaved changes';
-});
-
-modalEditor.addEventListener('keyup', updateModalToolbarState);
-modalEditor.addEventListener('mouseup', updateModalToolbarState);
-
-modalEditor.addEventListener('paste', function () {
-  console.log('Deterrence triggered: paste attempt detected');
-});
-modalEditor.addEventListener('cut', function () {
-  console.log('Deterrence triggered: cut attempt detected');
-});
-modalEditor.addEventListener('contextmenu', function () {
-  console.log('Deterrence triggered: context menu attempt detected');
-});
-
 function escapeHtml(s) {
   return String(s || '')
     .replaceAll('&', '&amp;')
@@ -2119,4 +1617,4 @@ function escapeHtml(s) {
 }
 </script>
 
-<?php cw_footer(); ?>	
+<?php cw_footer(); ?>
