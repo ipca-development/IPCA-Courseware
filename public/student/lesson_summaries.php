@@ -1266,7 +1266,7 @@ if (node) {
 
 setLessonLockedState(lessonId, locked);
 setPanelFeedback(lessonId, reviewFeedback || '');
-renderActionButton(lessonId, reviewStatus, hasSummary);
+renderActionButton(lessonId, reviewStatus, hasSummary, locked);
 }
 
 function openEditor(lessonId) {
