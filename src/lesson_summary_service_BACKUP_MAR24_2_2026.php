@@ -58,16 +58,15 @@ final class LessonSummaryService
 
     $existing = $this->getExisting($userId, $cohortId, $lessonId);
 
-if (
-    $existing &&
-    (string)$existing['review_status'] === 'acceptable' &&
-    (int)($existing['student_soft_locked'] ?? 0) === 1
-) {
-    return [
-        'ok' => false,
-        'error' => 'Summary is locked and must be unlocked before editing'
-    ];
-}
+    if (
+        $existing &&
+        (string)$existing['review_status'] === 'acceptable'
+    ) {
+        return [
+            'ok' => false,
+            'error' => 'Summary is accepted and must be unlocked before editing'
+        ];
+    }
 
     if (
         $existing &&
@@ -78,15 +77,11 @@ if (
             $plain
         )
     ) {
-
-	return [
-    'ok' => true,
-    'skipped' => true,
-    'review_status' => (string)($existing['review_status'] ?? 'pending'),
-    'student_soft_locked' => (int)($existing['student_soft_locked'] ?? 0)
-	];	
-		
-		
+        return [
+            'ok' => true,
+            'skipped' => true,
+            'review_status' => (string)($existing['review_status'] ?? 'pending')
+        ];
     }
 
     $this->pdo->beginTransaction();
@@ -100,12 +95,11 @@ if (
             );
         }
 
-		$reviewStatus = 'pending';
-		$reviewScore = null;
-		$reviewFeedback = null;
-		$gapTopics = null;
-		$reviewedAt = null;
-		$studentSoftLocked = 0;
+$reviewStatus = 'pending';
+        $reviewScore = null;
+        $reviewFeedback = null;
+        $gapTopics = null;
+        $reviewedAt = null;
 
         $stmt = $this->pdo->prepare("
             INSERT INTO lesson_summaries
@@ -121,10 +115,9 @@ if (
                 gap_topics,
                 reviewed_at,
                 reviewed_by_user_id,
-                reviewed_by_logic_version,
-				student_soft_locked
+                reviewed_by_logic_version
             )
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
             ON DUPLICATE KEY UPDATE
                 summary_html = VALUES(summary_html),
                 summary_plain = VALUES(summary_plain),
@@ -135,34 +128,31 @@ if (
                 reviewed_at = VALUES(reviewed_at),
                 reviewed_by_user_id = VALUES(reviewed_by_user_id),
                 reviewed_by_logic_version = VALUES(reviewed_by_logic_version),
-                updated_at = CURRENT_TIMESTAMP,
-				student_soft_locked = VALUES(student_soft_locked)
+                updated_at = CURRENT_TIMESTAMP
         ");
 
         $stmt->execute([
-    $userId,
-    $cohortId,
-    $lessonId,
-    $summaryHtml,
-    $plain,
-    $reviewStatus,
-    $reviewScore,
-    $reviewFeedback,
-    $gapTopics,
-    $reviewedAt,
-    null,
-    'v2.0',
-    $studentSoftLocked
-]);
+            $userId,
+            $cohortId,
+            $lessonId,
+            $summaryHtml,
+            $plain,
+            $reviewStatus,
+            $reviewScore,
+            $reviewFeedback,
+            $gapTopics,
+            $reviewedAt,
+            null,
+            'v2.0'
+        ]);
 
         $this->pdo->commit();
 
         return [
-			'ok' => true,
-			'review_status' => $reviewStatus,
-			'student_soft_locked' => $studentSoftLocked,
-			'saved_as_draft' => true
-			];
+            'ok' => true,
+            'review_status' => $reviewStatus,
+            'saved_as_draft' => true
+        ];
     } catch (Throwable $e) {
         if ($this->pdo->inTransaction()) {
             $this->pdo->rollBack();
@@ -205,11 +195,10 @@ public function checkSummary(
             UPDATE lesson_summaries
             SET
                 review_status = ?,
-				student_soft_locked = ?,
-				review_score = ?,
-				review_feedback = ?,
-				gap_topics = ?,
-				reviewed_at = ?,
+                review_score = ?,
+                review_feedback = ?,
+                gap_topics = ?,
+                reviewed_at = ?,
                 reviewed_by_user_id = NULL,
                 reviewed_by_logic_version = 'v2.0',
                 updated_at = CURRENT_TIMESTAMP
@@ -219,27 +208,25 @@ public function checkSummary(
         ");
 
         $stmt->execute([
-			(string)$evaluation['review_status'],
-			((string)$evaluation['review_status'] === 'acceptable') ? 1 : 0,
-			isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
-			(string)$evaluation['review_feedback'],
-			(string)$evaluation['gap_topics'],
-			gmdate('Y-m-d H:i:s'),
-			$userId,
-			$cohortId,
-			$lessonId
-					]);
+            (string)$evaluation['review_status'],
+            isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
+            (string)$evaluation['review_feedback'],
+            (string)$evaluation['gap_topics'],
+            gmdate('Y-m-d H:i:s'),
+            $userId,
+            $cohortId,
+            $lessonId
+        ]);
 
         $this->pdo->commit();
 
         return [
-			'ok' => true,
-			'review_status' => (string)$evaluation['review_status'],
-			'student_soft_locked' => ((string)$evaluation['review_status'] === 'acceptable') ? 1 : 0,
-			'review_score' => isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
-			'review_feedback' => (string)$evaluation['review_feedback'],
-			'gap_topics' => (string)$evaluation['gap_topics'],
-		];
+            'ok' => true,
+            'review_status' => (string)$evaluation['review_status'],
+            'review_score' => isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
+            'review_feedback' => (string)$evaluation['review_feedback'],
+            'gap_topics' => (string)$evaluation['gap_topics'],
+        ];
     } catch (Throwable $e) {
         if ($this->pdo->inTransaction()) {
             $this->pdo->rollBack();
@@ -291,24 +278,20 @@ public function checkSummary(
                 ['actor' => $actor]
             );
 
-		$stmt = $this->pdo->prepare("
-			UPDATE lesson_summaries
-			SET
-				student_soft_locked = 0,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE user_id = ?
-			  AND cohort_id = ?
-			  AND lesson_id = ?
-		");
-		$stmt->execute([$userId, $cohortId, $lessonId]);
+            $stmt = $this->pdo->prepare("
+                UPDATE lesson_summaries
+                SET
+                    review_status = 'pending',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                  AND cohort_id = ?
+                  AND lesson_id = ?
+            ");
+            $stmt->execute([$userId, $cohortId, $lessonId]);
 
             $this->pdo->commit();
 
-			return [
-				'ok' => true,
-				'review_status' => (string)$existing['review_status'],
-				'student_soft_locked' => 0
-			];
+            return ['ok' => true];
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
@@ -373,7 +356,6 @@ public function checkSummary(
                     summary_html = ?,
                     summary_plain = ?,
                     review_status = 'pending',
-					student_soft_locked = 0,
                     review_score = NULL,
                     review_feedback = NULL,
                     review_notes_by_instructor = NULL,
@@ -522,7 +504,6 @@ public function checkSummary(
                 review_score,
                 review_feedback,
                 review_notes_by_instructor,
-				student_soft_locked,
                 updated_at
             FROM lesson_summaries
             WHERE user_id = ?
