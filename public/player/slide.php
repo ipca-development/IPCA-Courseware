@@ -380,7 +380,11 @@ $isAdminViewer = ($role === 'admin');
 
 .rte.size-sm { font-size:13px; }
 .rte.size-md { font-size:14px; }
-.rte.size-lg { font-size:16px; } 
+.rte.size-lg { font-size:16px; }
+
+.rte .size-sm { font-size:13px; }
+.rte .size-md { font-size:14px; }
+.rte .size-lg { font-size:16px; }
 	  
     .muted{ opacity:.7; font-size:12px; }
 
@@ -1193,7 +1197,7 @@ btn.addEventListener('click', ()=>{
 
 	
 // TEXT SIZE
-document.querySelectorAll('[data-size]').forEach(btn=>{
+document.querySelectorAll('[data-size]').forEach(function(btn){
   btn.addEventListener('mousedown', function(e){
     e.preventDefault();
   });
@@ -1204,8 +1208,11 @@ document.querySelectorAll('[data-size]').forEach(btn=>{
       return;
     }
 
-    const size = btn.dataset.size;
+    rte.focus();
+
+    const size = btn.getAttribute('data-size');
     const sel = window.getSelection();
+
     const hasSelection =
       sel &&
       sel.rangeCount > 0 &&
@@ -1215,20 +1222,23 @@ document.querySelectorAll('[data-size]').forEach(btn=>{
 
     if (hasSelection) {
       const range = sel.getRangeAt(0);
-      const span = document.createElement('span');
-      span.className = 'size-' + size;
+      const selectedHtml = range.cloneContents();
 
-      try {
-        range.surroundContents(span);
-      } catch (e) {
-        const frag = range.extractContents();
-        span.appendChild(frag);
-        range.insertNode(span);
-      }
+      const wrapper = document.createElement('span');
+      wrapper.className = 'size-' + size;
+      wrapper.appendChild(selectedHtml);
+
+      range.deleteContents();
+      range.insertNode(wrapper);
 
       sel.removeAllRanges();
+
+      const newRange = document.createRange();
+      newRange.selectNodeContents(wrapper);
+      newRange.collapse(false);
+      sel.addRange(newRange);
     } else {
-      rte.classList.remove('size-sm','size-md','size-lg');
+      rte.classList.remove('size-sm', 'size-md', 'size-lg');
       rte.classList.add('size-' + size);
     }
 
