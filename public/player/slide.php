@@ -1194,7 +1194,11 @@ btn.addEventListener('click', ()=>{
 	
 // TEXT SIZE
 document.querySelectorAll('[data-size]').forEach(btn=>{
-  btn.onclick = ()=>{
+  btn.addEventListener('mousedown', function(e){
+    e.preventDefault();
+  });
+
+  btn.addEventListener('click', function(){
     if (isLocked) {
       showBanner('Summary is locked. Unlock to edit.', 'warn');
       return;
@@ -1202,9 +1206,12 @@ document.querySelectorAll('[data-size]').forEach(btn=>{
 
     const size = btn.dataset.size;
     const sel = window.getSelection();
-    const hasSelection = sel && sel.rangeCount > 0 && !sel.isCollapsed;
-
-    rte.focus();
+    const hasSelection =
+      sel &&
+      sel.rangeCount > 0 &&
+      !sel.isCollapsed &&
+      rte.contains(sel.anchorNode) &&
+      rte.contains(sel.focusNode);
 
     if (hasSelection) {
       const range = sel.getRangeAt(0);
@@ -1226,7 +1233,7 @@ document.querySelectorAll('[data-size]').forEach(btn=>{
     }
 
     scheduleSave();
-  };
+  });
 });
 
 // HIGHLIGHT
