@@ -1272,14 +1272,12 @@ document.querySelectorAll('[data-size]').forEach(function(btn){
       sel.removeAllRanges();
       const newRange = document.createRange();
       newRange.selectNodeContents(wrapper);
-      newRange.collapse(false);
       sel.addRange(newRange);
     } else {
       rte.classList.remove('size-sm', 'size-md', 'size-lg');
       rte.classList.add('size-' + size);
     }
 
-    saveSelection();
     scheduleSave();
   });
 });
