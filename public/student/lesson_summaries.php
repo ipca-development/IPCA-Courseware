@@ -111,15 +111,19 @@ function nb_action_button_meta(array $lesson): ?array
     }
 
     if ($reviewStatus === 'acceptable' && $hasSummary && !$isLocked) {
-        return ['label' => 'Continue Editing', 'action' => 'edit', 'class' => 'ghost'];
+        return ['label' => 'Edit Draft', 'action' => 'edit', 'class' => 'ghost'];
+    }
+
+    if ($reviewStatus === 'pending' && $hasSummary && !$isLocked) {
+        return ['label' => 'Edit Draft', 'action' => 'edit', 'class' => 'ghost'];
     }
 
     if (in_array($reviewStatus, ['needs_revision', 'rejected'], true)) {
         return ['label' => 'Continue Editing', 'action' => 'edit', 'class' => 'warn'];
     }
 
-    if ($reviewStatus === 'pending' && $hasSummary) {
-        return ['label' => 'Check my Summary', 'action' => 'check', 'class' => 'primary'];
+    if ($reviewStatus === 'pending' && $hasSummary && $isLocked) {
+        return ['label' => 'Unlock for Editing', 'action' => 'unlock_edit', 'class' => 'warn'];
     }
 
     if (!$hasSummary) {
@@ -243,6 +247,13 @@ cw_header('My Notebook');
   min-width:auto;
   padding:7px 12px;
 }
+	
+.nb-btn.tool[data-modal-cmd="indent"],
+.nb-btn.tool[data-modal-cmd="outdent"]{
+  min-width:auto;
+  padding:7px 12px;
+}	
+	
 .nb-btn.tool.highlight-on{
   background:#fff8c5;
   border-color:#facc15;
@@ -944,13 +955,7 @@ body.nb-modal-open{
   .nb-lesson{
     break-inside:avoid;
     page-break-inside:avoid;
-  }
-  .nb-btn.tool[data-modal-cmd="indent"],
-.nb-btn.tool[data-modal-cmd="outdent"]{
-  min-width:auto;
-  padding:7px 12px;
-}	
-	
+  }	
 }
 </style>
 
@@ -1327,10 +1332,6 @@ function editorEl(lessonId) {
   return document.getElementById('editor-' + lessonId);
 }
 
-function panelEl(lessonId) {
-  return document.getElementById('panel-' + lessonId);
-}
-
 function lessonNode(lessonId) {
   return document.querySelector('[data-lesson-id="' + lessonId + '"]');
 }
@@ -1430,22 +1431,33 @@ function countWordsFromHtml(html) {
 }
 
 function buildActionButton(reviewStatus, hasSummary, isLocked) {
+
+  // 1. Accepted + Locked → Unlock
   if (reviewStatus === 'acceptable' && hasSummary && isLocked) {
     return { label: 'Unlock for Editing', action: 'unlock_edit', className: 'nb-btn warn' };
   }
 
+  // 2. Accepted + Unlocked → Edit Draft (NOT Continue Editing)
   if (reviewStatus === 'acceptable' && hasSummary && !isLocked) {
-    return { label: 'Continue Editing', action: 'edit', className: 'nb-btn ghost' };
+    return { label: 'Edit Draft', action: 'edit', className: 'nb-btn ghost' };
   }
 
+  // 3. Pending but UNLOCKED → THIS IS THE IMPORTANT FIX
+  if (reviewStatus === 'pending' && hasSummary && !isLocked) {
+    return { label: 'Edit Draft', action: 'edit', className: 'nb-btn ghost' };
+  }
+
+  // 4. Needs revision
   if (reviewStatus === 'needs_revision' || reviewStatus === 'rejected') {
     return { label: 'Continue Editing', action: 'edit', className: 'nb-btn warn' };
   }
 
-  if (reviewStatus === 'pending' && hasSummary) {
-    return { label: 'Check my Summary', action: 'check', className: 'nb-btn primary' };
+  // 5. Pending + has summary + LOCKED (edge case)
+  if (reviewStatus === 'pending' && hasSummary && isLocked) {
+    return { label: 'Unlock for Editing', action: 'unlock_edit', className: 'nb-btn warn' };
   }
 
+  // 6. No summary yet
   if (!hasSummary) {
     return { label: 'Write Summary', action: 'edit', className: 'nb-btn ghost' };
   }
@@ -1939,6 +1951,20 @@ async function checkSummary(lessonId) {
     Number(result.student_soft_locked || 0)
   );
 
+  if (activeLessonId === lessonId) {
+  setPanelFeedback(lessonId, result.review_feedback || '');
+  setPanelNotes(lessonId);
+  setPanelVersionContext(lessonId);
+
+  const statusMeta = computeStatusDisplay(result.review_status, '');
+  setModalStatusPill(statusMeta.label, statusMeta.klass);
+
+  modalSaveStatus.textContent =
+    result.review_status === 'acceptable'
+      ? 'Summary accepted'
+      : 'Needs revision';
+}	
+	
   originalHtml = currentHtml;
   modalSaveStatus.textContent = String(result.review_status || '') === 'acceptable' ? 'Accepted' : 'Needs revision';
 
@@ -1978,16 +2004,18 @@ async function runPendingAction(action) {
     return;
   }
 
-  if (action.type === 'close-editor') {
-    editorModal.classList.remove('open');
-    editorModal.setAttribute('aria-hidden', 'true');
-    if (activeLessonId === action.lessonId) {
-      syncHiddenEditorFromModal(action.lessonId);
-      activeLessonId = null;
-      originalHtml = '';
-    }
-    return;
+if (action.type === 'close-editor') {
+  editorModal.classList.remove('open');
+  editorModal.setAttribute('aria-hidden', 'true');
+  document.body.classList.remove('nb-modal-open');
+
+  if (activeLessonId === action.lessonId) {
+    syncHiddenEditorFromModal(action.lessonId);
+    activeLessonId = null;
+    originalHtml = '';
   }
+  return;
+}
 
   if (action.type === 'switch-scope') {
     window.location.href = '?cohort_id=' + encodeURIComponent(action.cohortId);
