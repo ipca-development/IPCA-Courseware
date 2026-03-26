@@ -28,6 +28,11 @@ final class LessonSummaryService
 {
     private PDO $pdo;
 
+    private const MANUAL_SAVE_KEEP_COUNT = 20;
+    private const MANUAL_SAVE_MIN_SECONDS = 600;
+    private const MANUAL_SAVE_MIN_WORD_DELTA = 8;
+    private const MANUAL_SAVE_MIN_CHAR_DELTA = 40;
+
     public function __construct(PDO $pdo)
     {
         $this->pdo = $pdo;
@@ -42,211 +47,217 @@ final class LessonSummaryService
      * - accepted summaries cannot be directly overwritten
      * - unlock is required first
      */
- public function saveSummary(
-    int $userId,
-    int $cohortId,
-    int $lessonId,
-    string $summaryHtml,
-    string $actor = 'student',
-    array $options = []
-): array {
-    $plain = trim((string)preg_replace('/\s+/u', ' ', strip_tags($summaryHtml)));
+    public function saveSummary(
+        int $userId,
+        int $cohortId,
+        int $lessonId,
+        string $summaryHtml,
+        string $actor = 'student',
+        array $options = []
+    ): array {
+        $plain = trim((string)preg_replace('/\s+/u', ' ', strip_tags($summaryHtml)));
 
-    if ($plain === '') {
-        return ['ok' => false, 'error' => 'Empty summary'];
-    }
-
-    $existing = $this->getExisting($userId, $cohortId, $lessonId);
-
-if (
-    $existing &&
-    (string)$existing['review_status'] === 'acceptable' &&
-    (int)($existing['student_soft_locked'] ?? 0) === 1
-) {
-    return [
-        'ok' => false,
-        'error' => 'Summary is locked and must be unlocked before editing'
-    ];
-}
-
-$isSame = $existing && $this->isSameContent(
-    (string)($existing['summary_html'] ?? ''),
-    (string)($existing['summary_plain'] ?? ''),
-    $summaryHtml,
-    $plain
-);
-
-$wasLocked = $existing && ((int)($existing['student_soft_locked'] ?? 0) === 1);
-
-if ($existing && $isSame && !$wasLocked) {
-    return [
-        'ok' => true,
-        'skipped' => true,
-        'review_status' => (string)($existing['review_status'] ?? 'pending'),
-        'student_soft_locked' => (int)($existing['student_soft_locked'] ?? 0)
-    ];
-}
-
-$this->pdo->beginTransaction();
-
-try {
-    if ($existing) {
-        $this->createVersionSnapshot(
-            $existing,
-            $userId,
-            'manual_save'
-        );
-    }
-
-    $reviewStatus = 'pending';
-    $reviewScore = null;
-    $reviewFeedback = null;
-    $gapTopics = null;
-    $reviewedAt = null;
-    $studentSoftLocked = 0;
-
-    $stmt = $this->pdo->prepare("
-        INSERT INTO lesson_summaries
-        (
-            user_id,
-            cohort_id,
-            lesson_id,
-            summary_html,
-            summary_plain,
-            review_status,
-            student_soft_locked,
-            review_score,
-            review_feedback,
-            gap_topics,
-            reviewed_at,
-            reviewed_by_user_id,
-            reviewed_by_logic_version
-        )
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ON DUPLICATE KEY UPDATE
-            summary_html = VALUES(summary_html),
-            summary_plain = VALUES(summary_plain),
-            review_status = VALUES(review_status),
-            review_score = VALUES(review_score),
-            review_feedback = VALUES(review_feedback),
-            gap_topics = VALUES(gap_topics),
-            reviewed_at = VALUES(reviewed_at),
-            reviewed_by_user_id = VALUES(reviewed_by_user_id),
-            reviewed_by_logic_version = VALUES(reviewed_by_logic_version),
-            updated_at = CURRENT_TIMESTAMP,
-            student_soft_locked = VALUES(student_soft_locked)
-    ");
-
-    $stmt->execute([
-        $userId,
-        $cohortId,
-        $lessonId,
-        $summaryHtml,
-        $plain,
-        $reviewStatus,
-        $studentSoftLocked,
-        $reviewScore,
-        $reviewFeedback,
-        $gapTopics,
-        $reviewedAt,
-        null,
-        'v2.0'
-    ]);
-
-    $this->pdo->commit();
-
-    return [
-        'ok' => true,
-        'review_status' => $reviewStatus,
-        'student_soft_locked' => $studentSoftLocked,
-        'saved_as_draft' => true
-    ];
-
-} catch (Throwable $e) {
-    if ($this->pdo->inTransaction()) {
-        $this->pdo->rollBack();
-    }
-    throw $e;
-}
-}
-
-public function checkSummary(
-    int $userId,
-    int $cohortId,
-    int $lessonId,
-    string $actor = 'student'
-): array {
-    $existing = $this->getExisting($userId, $cohortId, $lessonId);
-
-    if (!$existing) {
-        return ['ok' => false, 'error' => 'Summary not found'];
-    }
-
-    $summaryHtml = (string)($existing['summary_html'] ?? '');
-    $summaryPlain = trim((string)($existing['summary_plain'] ?? ''));
-
-    if ($summaryPlain === '') {
-        return ['ok' => false, 'error' => 'Summary is empty'];
-    }
-
-    $evaluation = $this->evaluateSummaryQuality(
-        $userId,
-        $cohortId,
-        $lessonId,
-        $summaryHtml,
-        $summaryPlain
-    );
-
-    $this->pdo->beginTransaction();
-
-    try {
-        $stmt = $this->pdo->prepare("
-            UPDATE lesson_summaries
-            SET
-                review_status = ?,
-				student_soft_locked = ?,
-				review_score = ?,
-				review_feedback = ?,
-				gap_topics = ?,
-				reviewed_at = ?,
-                reviewed_by_user_id = NULL,
-                reviewed_by_logic_version = 'v2.0',
-                updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = ?
-              AND cohort_id = ?
-              AND lesson_id = ?
-        ");
-
-        $stmt->execute([
-			(string)$evaluation['review_status'],
-			((string)$evaluation['review_status'] === 'acceptable') ? 1 : 0,
-			isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
-			(string)$evaluation['review_feedback'],
-			(string)$evaluation['gap_topics'],
-			gmdate('Y-m-d H:i:s'),
-			$userId,
-			$cohortId,
-			$lessonId
-					]);
-
-        $this->pdo->commit();
-
-        return [
-			'ok' => true,
-			'review_status' => (string)$evaluation['review_status'],
-			'student_soft_locked' => ((string)$evaluation['review_status'] === 'acceptable') ? 1 : 0,
-			'review_score' => isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
-			'review_feedback' => (string)$evaluation['review_feedback'],
-			'gap_topics' => (string)$evaluation['gap_topics'],
-		];
-    } catch (Throwable $e) {
-        if ($this->pdo->inTransaction()) {
-            $this->pdo->rollBack();
+        if ($plain === '') {
+            return ['ok' => false, 'error' => 'Empty summary'];
         }
-        throw $e;
+
+        $existing = $this->getExisting($userId, $cohortId, $lessonId);
+
+        if (
+            $existing &&
+            (string)$existing['review_status'] === 'acceptable' &&
+            (int)($existing['student_soft_locked'] ?? 0) === 1
+        ) {
+            return [
+                'ok' => false,
+                'error' => 'Summary is locked and must be unlocked before editing'
+            ];
+        }
+
+        $isSame = $existing && $this->isSameContent(
+            (string)($existing['summary_html'] ?? ''),
+            (string)($existing['summary_plain'] ?? ''),
+            $summaryHtml,
+            $plain
+        );
+
+        $wasLocked = $existing && ((int)($existing['student_soft_locked'] ?? 0) === 1);
+
+        if ($existing && $isSame && !$wasLocked) {
+            return [
+                'ok' => true,
+                'skipped' => true,
+                'review_status' => (string)($existing['review_status'] ?? 'pending'),
+                'student_soft_locked' => (int)($existing['student_soft_locked'] ?? 0)
+            ];
+        }
+
+        $this->pdo->beginTransaction();
+
+        try {
+            if ($existing && $this->shouldCreateManualSaveSnapshot($existing, $summaryHtml, $plain)) {
+                $this->createVersionSnapshot(
+                    $existing,
+                    $userId,
+                    'manual_save'
+                );
+
+                $this->pruneManualSaveSnapshots(
+                    $userId,
+                    $cohortId,
+                    $lessonId,
+                    self::MANUAL_SAVE_KEEP_COUNT
+                );
+            }
+
+            $reviewStatus = 'pending';
+            $reviewScore = null;
+            $reviewFeedback = null;
+            $gapTopics = null;
+            $reviewedAt = null;
+            $studentSoftLocked = 0;
+
+            $stmt = $this->pdo->prepare("
+                INSERT INTO lesson_summaries
+                (
+                    user_id,
+                    cohort_id,
+                    lesson_id,
+                    summary_html,
+                    summary_plain,
+                    review_status,
+                    student_soft_locked,
+                    review_score,
+                    review_feedback,
+                    gap_topics,
+                    reviewed_at,
+                    reviewed_by_user_id,
+                    reviewed_by_logic_version
+                )
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                ON DUPLICATE KEY UPDATE
+                    summary_html = VALUES(summary_html),
+                    summary_plain = VALUES(summary_plain),
+                    review_status = VALUES(review_status),
+                    review_score = VALUES(review_score),
+                    review_feedback = VALUES(review_feedback),
+                    gap_topics = VALUES(gap_topics),
+                    reviewed_at = VALUES(reviewed_at),
+                    reviewed_by_user_id = VALUES(reviewed_by_user_id),
+                    reviewed_by_logic_version = VALUES(reviewed_by_logic_version),
+                    updated_at = CURRENT_TIMESTAMP,
+                    student_soft_locked = VALUES(student_soft_locked)
+            ");
+
+            $stmt->execute([
+                $userId,
+                $cohortId,
+                $lessonId,
+                $summaryHtml,
+                $plain,
+                $reviewStatus,
+                $studentSoftLocked,
+                $reviewScore,
+                $reviewFeedback,
+                $gapTopics,
+                $reviewedAt,
+                null,
+                'v2.0'
+            ]);
+
+            $this->pdo->commit();
+
+            return [
+                'ok' => true,
+                'review_status' => $reviewStatus,
+                'student_soft_locked' => $studentSoftLocked,
+                'saved_as_draft' => true
+            ];
+
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
     }
-}	
-	
+
+    public function checkSummary(
+        int $userId,
+        int $cohortId,
+        int $lessonId,
+        string $actor = 'student'
+    ): array {
+        $existing = $this->getExisting($userId, $cohortId, $lessonId);
+
+        if (!$existing) {
+            return ['ok' => false, 'error' => 'Summary not found'];
+        }
+
+        $summaryHtml = (string)($existing['summary_html'] ?? '');
+        $summaryPlain = trim((string)($existing['summary_plain'] ?? ''));
+
+        if ($summaryPlain === '') {
+            return ['ok' => false, 'error' => 'Summary is empty'];
+        }
+
+        $evaluation = $this->evaluateSummaryQuality(
+            $userId,
+            $cohortId,
+            $lessonId,
+            $summaryHtml,
+            $summaryPlain
+        );
+
+        $this->pdo->beginTransaction();
+
+        try {
+            $stmt = $this->pdo->prepare("
+                UPDATE lesson_summaries
+                SET
+                    review_status = ?,
+                    student_soft_locked = ?,
+                    review_score = ?,
+                    review_feedback = ?,
+                    gap_topics = ?,
+                    reviewed_at = ?,
+                    reviewed_by_user_id = NULL,
+                    reviewed_by_logic_version = 'v2.0',
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                  AND cohort_id = ?
+                  AND lesson_id = ?
+            ");
+
+            $stmt->execute([
+                (string)$evaluation['review_status'],
+                ((string)$evaluation['review_status'] === 'acceptable') ? 1 : 0,
+                isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
+                (string)$evaluation['review_feedback'],
+                (string)$evaluation['gap_topics'],
+                gmdate('Y-m-d H:i:s'),
+                $userId,
+                $cohortId,
+                $lessonId
+            ]);
+
+            $this->pdo->commit();
+
+            return [
+                'ok' => true,
+                'review_status' => (string)$evaluation['review_status'],
+                'student_soft_locked' => ((string)$evaluation['review_status'] === 'acceptable') ? 1 : 0,
+                'review_score' => isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
+                'review_feedback' => (string)$evaluation['review_feedback'],
+                'gap_topics' => (string)$evaluation['gap_topics'],
+            ];
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
 
     /**
      * Unlock accepted summary for editing.
@@ -290,24 +301,24 @@ public function checkSummary(
                 ['actor' => $actor]
             );
 
-		$stmt = $this->pdo->prepare("
-			UPDATE lesson_summaries
-			SET
-				student_soft_locked = 0,
-				updated_at = CURRENT_TIMESTAMP
-			WHERE user_id = ?
-			  AND cohort_id = ?
-			  AND lesson_id = ?
-		");
-		$stmt->execute([$userId, $cohortId, $lessonId]);
+            $stmt = $this->pdo->prepare("
+                UPDATE lesson_summaries
+                SET
+                    student_soft_locked = 0,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ?
+                  AND cohort_id = ?
+                  AND lesson_id = ?
+            ");
+            $stmt->execute([$userId, $cohortId, $lessonId]);
 
             $this->pdo->commit();
 
-			return [
-				'ok' => true,
-				'review_status' => (string)$existing['review_status'],
-				'student_soft_locked' => 0
-			];
+            return [
+                'ok' => true,
+                'review_status' => (string)$existing['review_status'],
+                'student_soft_locked' => 0
+            ];
         } catch (Throwable $e) {
             if ($this->pdo->inTransaction()) {
                 $this->pdo->rollBack();
@@ -372,7 +383,7 @@ public function checkSummary(
                     summary_html = ?,
                     summary_plain = ?,
                     review_status = 'pending',
-					student_soft_locked = 0,
+                    student_soft_locked = 0,
                     review_score = NULL,
                     review_feedback = NULL,
                     review_notes_by_instructor = NULL,
@@ -521,7 +532,7 @@ public function checkSummary(
                 review_score,
                 review_feedback,
                 review_notes_by_instructor,
-				student_soft_locked,
+                student_soft_locked,
                 updated_at
             FROM lesson_summaries
             WHERE user_id = ?
@@ -662,7 +673,7 @@ public function checkSummary(
                 'instructor_feedback' => $summary ? (string)($summary['review_feedback'] ?? '') : '',
                 'instructor_notes' => $summary ? (string)($summary['review_notes_by_instructor'] ?? '') : '',
                 'student_soft_locked' => $summary ? (int)($summary['student_soft_locked'] ?? 0) : 0,
-				'read_only_by_default' => ($summary ? (int)($summary['student_soft_locked'] ?? 0) : 0) === 1,
+                'read_only_by_default' => ($summary ? (int)($summary['student_soft_locked'] ?? 0) : 0) === 1,
                 'student_action_reason' => $studentActionReason,
                 'notebook_attention_reason' => $notebookAttentionReason,
             ];
@@ -685,8 +696,8 @@ public function checkSummary(
             'courses' => array_values($courses),
         ];
     }
-
-    public function getNotebookExportData(
+	
+	    public function getNotebookExportData(
         int $userId,
         int $cohortId,
         string $studentName,
@@ -969,65 +980,66 @@ public function checkSummary(
     }
 
     private function buildLessonReferenceText(int $lessonId): string
-{
-    $parts = [];
+    {
+        $parts = [];
 
-    $lessonTitle = $this->getLessonTitle($lessonId);
-    if ($lessonTitle !== '') {
-        $parts[] = 'Lesson Title: ' . $lessonTitle;
+        $lessonTitle = $this->getLessonTitle($lessonId);
+        if ($lessonTitle !== '') {
+            $parts[] = 'Lesson Title: ' . $lessonTitle;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT
+                s.page_number,
+                sao.summary AS ai_summary,
+                se.narration_en,
+                sc.plain_text
+            FROM slides s
+            LEFT JOIN slide_ai_outputs sao
+              ON sao.slide_id = s.id
+             AND sao.status = 'approved'
+            LEFT JOIN slide_enrichment se
+              ON se.slide_id = s.id
+            LEFT JOIN slide_content sc
+              ON sc.slide_id = s.id
+             AND sc.lang = 'en'
+            WHERE s.lesson_id = ?
+              AND s.is_deleted = 0
+            ORDER BY s.page_number ASC
+        ");
+        $stmt->execute([$lessonId]);
+        $rows = $stmt->fetchAll();
+
+        foreach ($rows as $row) {
+            $pageNumber = (int)($row['page_number'] ?? 0);
+            $pageChunks = [];
+
+            $aiSummary = trim((string)($row['ai_summary'] ?? ''));
+            if ($aiSummary !== '') {
+                $pageChunks[] = $aiSummary;
+            }
+
+            $narration = trim((string)($row['narration_en'] ?? ''));
+            if ($narration !== '') {
+                $pageChunks[] = $narration;
+            }
+
+            $plainText = trim((string)($row['plain_text'] ?? ''));
+            if ($plainText !== '') {
+                $pageChunks[] = $plainText;
+            }
+
+            $pageText = trim(implode("\n", $pageChunks));
+            if ($pageText === '') {
+                continue;
+            }
+
+            $parts[] = 'Slide ' . $pageNumber . ":\n" . $pageText;
+        }
+
+        return trim(implode("\n\n", $parts));
     }
 
-    $stmt = $this->pdo->prepare("
-        SELECT
-            s.page_number,
-            sao.summary AS ai_summary,
-            se.narration_en,
-            sc.plain_text
-        FROM slides s
-        LEFT JOIN slide_ai_outputs sao
-          ON sao.slide_id = s.id
-         AND sao.status = 'approved'
-        LEFT JOIN slide_enrichment se
-          ON se.slide_id = s.id
-        LEFT JOIN slide_content sc
-          ON sc.slide_id = s.id
-         AND sc.lang = 'en'
-        WHERE s.lesson_id = ?
-          AND s.is_deleted = 0
-        ORDER BY s.page_number ASC
-    ");
-    $stmt->execute([$lessonId]);
-    $rows = $stmt->fetchAll();
-
-    foreach ($rows as $row) {
-        $pageNumber = (int)($row['page_number'] ?? 0);
-        $pageChunks = [];
-
-        $aiSummary = trim((string)($row['ai_summary'] ?? ''));
-        if ($aiSummary !== '') {
-            $pageChunks[] = $aiSummary;
-        }
-
-        $narration = trim((string)($row['narration_en'] ?? ''));
-        if ($narration !== '') {
-            $pageChunks[] = $narration;
-        }
-
-        $plainText = trim((string)($row['plain_text'] ?? ''));
-        if ($plainText !== '') {
-            $pageChunks[] = $plainText;
-        }
-
-        $pageText = trim(implode("\n", $pageChunks));
-        if ($pageText === '') {
-            continue;
-        }
-
-        $parts[] = 'Slide ' . $pageNumber . ":\n" . $pageText;
-    }
-
-    return trim(implode("\n\n", $parts));
-}
     private function getLessonTitle(int $lessonId): string
     {
         $stmt = $this->pdo->prepare("
@@ -1080,18 +1092,87 @@ public function checkSummary(
         return $row ?: null;
     }
 
-private function isSameContent(string $oldHtml, string $oldPlain, string $newHtml, string $newPlain): bool
-{
-    $oldPlain = trim((string)preg_replace('/\s+/u', ' ', $oldPlain));
-    $newPlain = trim((string)preg_replace('/\s+/u', ' ', $newPlain));
+    private function isSameContent(string $oldHtml, string $oldPlain, string $newHtml, string $newPlain): bool
+    {
+        $oldPlain = trim((string)preg_replace('/\s+/u', ' ', $oldPlain));
+        $newPlain = trim((string)preg_replace('/\s+/u', ' ', $newPlain));
 
-    $oldHtml = trim((string)$oldHtml);
-    $newHtml = trim((string)$newHtml);
+        $oldHtml = trim((string)$oldHtml);
+        $newHtml = trim((string)$newHtml);
 
-    // Content is only the same if BOTH the visible text and the HTML markup match.
-    // This allows formatting-only changes (bold, italic, underline, lists) to be saved.
-    return ($oldPlain === $newPlain) && ($oldHtml === $newHtml);
-}
+        return ($oldPlain === $newPlain) && ($oldHtml === $newHtml);
+    }
+
+    private function shouldCreateManualSaveSnapshot(array $existing, string $newHtml, string $newPlain): bool
+    {
+        $oldHtml = (string)($existing['summary_html'] ?? '');
+        $oldPlain = (string)($existing['summary_plain'] ?? '');
+        $updatedAt = trim((string)($existing['updated_at'] ?? ''));
+
+        if ($oldPlain === '') {
+            return false;
+        }
+
+        if ($this->isSameContent($oldHtml, $oldPlain, $newHtml, $newPlain)) {
+            return false;
+        }
+
+        $oldWords = $this->wordCount($oldPlain);
+        $newWords = $this->wordCount($newPlain);
+        $wordDelta = abs($newWords - $oldWords);
+
+        $oldChars = strlen(trim($oldPlain));
+        $newChars = strlen(trim($newPlain));
+        $charDelta = abs($newChars - $oldChars);
+
+        $enoughContentChange = ($wordDelta >= self::MANUAL_SAVE_MIN_WORD_DELTA)
+            || ($charDelta >= self::MANUAL_SAVE_MIN_CHAR_DELTA)
+            || $this->hasStructuralHtmlChange($oldHtml, $newHtml);
+
+        if (!$enoughContentChange) {
+            return false;
+        }
+
+        if ($updatedAt === '') {
+            return true;
+        }
+
+        $lastTs = strtotime($updatedAt);
+        if ($lastTs === false) {
+            return true;
+        }
+
+        return (time() - $lastTs) >= self::MANUAL_SAVE_MIN_SECONDS;
+    }
+
+    private function hasStructuralHtmlChange(string $oldHtml, string $newHtml): bool
+    {
+        $normalize = static function (string $html): string {
+            $html = strtolower($html);
+            $html = preg_replace('/\s+/u', ' ', $html);
+            $html = preg_replace('/\sstyle="[^"]*"/u', '', $html);
+            return trim((string)$html);
+        };
+
+        $oldNormalized = $normalize($oldHtml);
+        $newNormalized = $normalize($newHtml);
+
+        if ($oldNormalized === $newNormalized) {
+            return false;
+        }
+
+        $tagsToCheck = ['<ul', '<ol', '<li', '<h1', '<h2', '<h3', '<blockquote', '<mark'];
+
+        foreach ($tagsToCheck as $tag) {
+            $oldHas = strpos($oldNormalized, $tag) !== false;
+            $newHas = strpos($newNormalized, $tag) !== false;
+            if ($oldHas !== $newHas) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     private function createVersionSnapshot(array $row, int $actorId, string $reason): void
     {
@@ -1146,6 +1227,47 @@ private function isSameContent(string $oldHtml, string $oldPlain, string $newHtm
             (string)($row['updated_at'] ?? ''),
             $actorId
         ]);
+    }
+
+    private function pruneManualSaveSnapshots(int $userId, int $cohortId, int $lessonId, int $keepCount): void
+    {
+        if ($keepCount < 1) {
+            $keepCount = 1;
+        }
+
+        $st = $this->pdo->prepare("
+            SELECT id
+            FROM lesson_summary_versions
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND lesson_id = ?
+              AND snapshot_reason = 'manual_save'
+            ORDER BY version_no DESC, id DESC
+        ");
+        $st->execute([$userId, $cohortId, $lessonId]);
+        $rows = $st->fetchAll();
+
+        if (!$rows || count($rows) <= $keepCount) {
+            return;
+        }
+
+        $deleteIds = [];
+        foreach ($rows as $index => $row) {
+            if ($index >= $keepCount) {
+                $deleteIds[] = (int)$row['id'];
+            }
+        }
+
+        if (!$deleteIds) {
+            return;
+        }
+
+        $placeholders = implode(',', array_fill(0, count($deleteIds), '?'));
+        $del = $this->pdo->prepare("
+            DELETE FROM lesson_summary_versions
+            WHERE id IN ($placeholders)
+        ");
+        $del->execute($deleteIds);
     }
 
     private function logSecurityEvent(int $userId, int $cohortId, int $lessonId, string $type, array $payload = []): void
