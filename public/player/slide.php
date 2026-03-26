@@ -352,16 +352,29 @@ $isAdminViewer = ($role === 'admin');
   overflow-x:hidden;
   font-family:Manrope, Arial, sans-serif;
   font-size:14px;
-  line-height:1.35;
+  line-height:1.6;
   background:#fff;
-  white-space:pre-wrap;
+  white-space:normal;
   overflow-wrap:anywhere;
   word-break:break-word;
 }
-	  
-	.rte.size-sm { font-size:13px; }
-	.rte.size-md { font-size:14px; }
-	.rte.size-lg { font-size:16px; }  
+
+.rte p{ margin:0 0 12px 0; }
+.rte ul,
+.rte ol{ margin:0 0 12px 22px; }
+.rte li{ margin:0 0 6px 0; }
+.rte strong,
+.rte b{ color:#16263c; }
+.rte mark{
+  background:#fff59d;
+  color:inherit;
+  padding:0 .1em;
+  border-radius:3px;
+}
+
+.rte.size-sm { font-size:13px; }
+.rte.size-md { font-size:14px; }
+.rte.size-lg { font-size:16px; } 
 	  
     .muted{ opacity:.7; font-size:12px; }
 
