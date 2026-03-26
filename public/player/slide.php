@@ -1068,7 +1068,7 @@ if (j.ok) {
   isLocked = Number(j.student_soft_locked || 0) === 1;
 
   updateDrawerLockState();
-  renderSummaryAlert(j, { forceShow: true });
+  renderSummaryAlert(j);
 }
   }catch(e){}
 }
