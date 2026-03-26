@@ -141,7 +141,13 @@ $isAdminViewer = ($role === 'admin');
     .btnx:hover{ background: rgba(30,60,114,0.14); }
     .btnx:disabled{ opacity:.4; cursor:not-allowed; }
     .btnx.on{ background: rgba(30,60,114,0.20); border-color: rgba(30,60,114,0.45); }
-
+ 	.btnx.locked-disabled{
+  		opacity:.45;
+  		cursor:not-allowed;
+  		pointer-events:auto;
+	}
+	  
+	  
     .meta{
       margin-left:auto;
       display:flex;
@@ -1071,6 +1077,17 @@ function updateDrawerLockState() {
   btnUnlockSummary.style.display = isLocked ? 'inline-block' : 'none';
   btnCheckSummary.style.display = isLocked ? 'none' : 'inline-block';
 
+  document.querySelectorAll('.drawer .tools .btnx').forEach(function(btn){
+    const isUnlockButton = btn.id === 'btnUnlockSummary';
+    const isCloseButton = btn.id === 'btnCloseDrawer';
+
+    if (isLocked && !isUnlockButton && !isCloseButton) {
+      btn.classList.add('locked-disabled');
+    } else {
+      btn.classList.remove('locked-disabled');
+    }
+  });
+
   if (isLocked) {
     sumStatus.textContent = 'Locked (Accepted)';
   } else if (currentReviewStatus === 'needs_revision' || currentReviewStatus === 'rejected') {
@@ -1163,9 +1180,9 @@ rte.addEventListener('input', ()=>{
 document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
 btn.addEventListener('click', ()=>{
   if (isLocked) {
-    showBanner('Summary is locked. Unlock to edit.', 'warn');
-    return;
-  }
+  showBanner('Summary is locked. Unlock to edit.', 'warn');
+  return;
+}
 
   const cmd = btn.getAttribute('data-cmd');
   document.execCommand(cmd, false, null);
@@ -1183,8 +1200,30 @@ document.querySelectorAll('[data-size]').forEach(btn=>{
       return;
     }
 
-    rte.classList.remove('size-sm','size-md','size-lg');
-    rte.classList.add('size-' + btn.dataset.size);
+    const size = btn.dataset.size;
+    const sel = window.getSelection();
+    const hasSelection = sel && sel.rangeCount > 0 && !sel.isCollapsed;
+
+    rte.focus();
+
+    if (hasSelection) {
+      const range = sel.getRangeAt(0);
+      const span = document.createElement('span');
+      span.className = 'size-' + size;
+
+      try {
+        range.surroundContents(span);
+      } catch (e) {
+        const frag = range.extractContents();
+        span.appendChild(frag);
+        range.insertNode(span);
+      }
+
+      sel.removeAllRanges();
+    } else {
+      rte.classList.remove('size-sm','size-md','size-lg');
+      rte.classList.add('size-' + size);
+    }
 
     scheduleSave();
   };
@@ -1331,6 +1370,51 @@ function isEditableTarget(el){
   return false;
 }
 
+	
+	
+rte.addEventListener('keydown', function(e){
+  if (isLocked) return;
+
+  const isMod = e.metaKey || e.ctrlKey;
+  const key = String(e.key || '').toLowerCase();
+
+  if (isMod && key === 'b') {
+    e.preventDefault();
+    document.execCommand('bold', false, null);
+    scheduleSave();
+    return;
+  }
+
+  if (isMod && key === 'i') {
+    e.preventDefault();
+    document.execCommand('italic', false, null);
+    scheduleSave();
+    return;
+  }
+
+  if (isMod && key === 'u') {
+    e.preventDefault();
+    document.execCommand('underline', false, null);
+    scheduleSave();
+    return;
+  }
+
+  if (e.key === 'Tab') {
+    e.preventDefault();
+
+    try {
+      if (e.shiftKey) {
+        document.execCommand('outdent', false, null);
+      } else {
+        document.execCommand('indent', false, null);
+      }
+    } catch(err) {}
+
+    scheduleSave();
+  }
+});	
+	
+	
 document.addEventListener('keydown', (e)=>{
   if (isEditableTarget(e.target)) {
     return;
