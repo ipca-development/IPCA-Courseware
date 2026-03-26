@@ -1659,19 +1659,25 @@ function updateModalChromeForLesson(lessonId) {
 
   const lessonTitle = String(node.getAttribute('data-lesson-title') || 'Summary Editor');
   const reviewStatus = String(node.getAttribute('data-review-status') || 'pending');
+  const locked = lessonIsLocked(lessonId);
   const statusMeta = computeStatusDisplay(reviewStatus, '');
 
   modalLessonTitle.textContent = lessonTitle;
   modalLessonSubtitle.textContent = 'Write, refine, and check your lesson summary.';
-  modalSaveStatus.textContent = 'Ready';
   setModalStatusPill(statusMeta.label, statusMeta.klass);
-  modalLockState.textContent = lessonIsLocked(lessonId) ? 'Locked' : 'Unlocked';
-  modalHintText.textContent = lessonIsLocked(lessonId)
+
+  modalLockState.textContent = locked ? 'Locked' : 'Unlocked';
+  modalHintText.textContent = locked
     ? 'Unlock to edit. Re-check will be required after changes.'
     : 'Use clear structure and your own wording.';
-  modalLockedOverlay.classList.toggle('show', lessonIsLocked(lessonId));
-  modalUnlockBtn.classList.toggle('nb-hidden', !lessonIsLocked(lessonId));
-  modalCheckBtn.classList.toggle('nb-hidden', lessonIsLocked(lessonId));
+
+  modalEditor.setAttribute('contenteditable', locked ? 'false' : 'true');
+  modalEditor.classList.toggle('locked', locked);
+  modalLockedOverlay.classList.toggle('show', locked);
+
+  modalUnlockBtn.classList.toggle('nb-hidden', !locked);
+  modalSaveBtn.classList.toggle('nb-hidden', locked);
+  modalCheckBtn.classList.toggle('nb-hidden', locked);
 }
 
 function updateLessonAndTocMetadata(lessonId, reviewStatus, html, reviewFeedback, studentSoftLocked) {
@@ -1971,7 +1977,13 @@ async function checkSummary(lessonId) {
 	
   originalHtml = currentHtml;
 
-  if (String(result.review_status || '') === 'acceptable') {
+if (String(result.review_status || '') === 'acceptable') {
+  const node = lessonNode(lessonId);
+  if (node) {
+    node.setAttribute('data-review-status', 'acceptable');
+    node.setAttribute('data-summary-locked', '1');
+  }
+
   updateLessonAndTocMetadata(
     lessonId,
     'acceptable',
@@ -1980,18 +1992,15 @@ async function checkSummary(lessonId) {
     1
   );
 
-  syncModalFromHidden(lessonId);
   setLessonLockedState(lessonId, true);
+  syncModalFromHidden(lessonId);
   updateModalChromeForLesson(lessonId);
+
   setPanelFeedback(lessonId, String(result.review_feedback || ''));
   setPanelNotes(lessonId);
   setPanelVersionContext(lessonId);
 
   originalHtml = modalEditor.innerHTML;
-
-  modalSaveBtn.classList.add('nb-hidden');
-  modalCheckBtn.classList.add('nb-hidden');
-  modalUnlockBtn.classList.remove('nb-hidden');
   modalSaveStatus.textContent = 'Summary accepted';
 
   showBanner('Summary accepted. Review the feedback on the right.', 'ok');
