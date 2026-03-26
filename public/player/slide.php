@@ -1116,7 +1116,45 @@ async function refreshSummaryStatusOnly(){
   }catch(e){}
 }
 
+	
+let savedSelection = null;
+
+function saveSelection() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+
+  const range = sel.getRangeAt(0);
+
+  if (!rte.contains(range.startContainer)) return;
+
+  savedSelection = {
+    startContainer: range.startContainer,
+    startOffset: range.startOffset,
+    endContainer: range.endContainer,
+    endOffset: range.endOffset
+  };
+}
+
+function restoreSelection() {
+  if (!savedSelection) return;
+
+  try {
+    const range = document.createRange();
+    range.setStart(savedSelection.startContainer, savedSelection.startOffset);
+    range.setEnd(savedSelection.endContainer, savedSelection.endOffset);
+
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (e) {
+    // silently fail if DOM changed
+  }
+}	
+	
 function scheduleSave(){
+	
+  saveSelection();   
+	
   if (saveTimer) clearTimeout(saveTimer);
   sumStatus.textContent = 'Saving draft...';
   saveTimer = setTimeout(async ()=>{
@@ -1135,7 +1173,8 @@ function scheduleSave(){
       const j = await res.json();
       sumStatus.textContent = j.ok ? (j.skipped ? 'Draft unchanged' : 'Draft saved') : 'Save failed';
       if (j.ok) {
-        refreshSummaryStatusOnly();
+          restoreSelection();
+		  refreshSummaryStatusOnly();
       }
     }catch(e){
       sumStatus.textContent = 'Save failed';
@@ -1240,10 +1279,10 @@ document.querySelectorAll('[data-size]').forEach(function(btn){
       rte.classList.add('size-' + size);
     }
 
+    saveSelection();
     scheduleSave();
   });
 });
-
 // HIGHLIGHT
 document.getElementById('btnHighlight').onclick = ()=>{
   if (isLocked) {
