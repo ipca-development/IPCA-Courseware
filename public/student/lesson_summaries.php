@@ -1357,8 +1357,11 @@ function setLessonLockedState(lessonId, locked) {
     modalEditor.setAttribute('contenteditable', locked ? 'false' : 'true');
     modalEditor.classList.toggle('locked', !!locked);
     modalLockedOverlay.classList.toggle('show', !!locked);
+
     modalUnlockBtn.classList.toggle('nb-hidden', !locked);
     modalCheckBtn.classList.toggle('nb-hidden', !!locked);
+    modalSaveBtn.classList.toggle('nb-hidden', !!locked);
+
     modalLockState.textContent = locked ? 'Locked' : 'Unlocked';
     modalHintText.textContent = locked
       ? 'Unlock to edit. Re-check will be required after changes.'
@@ -1966,19 +1969,58 @@ async function checkSummary(lessonId) {
 }	
 	
   originalHtml = currentHtml;
-  modalSaveStatus.textContent = String(result.review_status || '') === 'acceptable' ? 'Accepted' : 'Needs revision';
 
-if (String(result.review_status || '') === 'acceptable') {
-  updateModalChromeForLesson(lessonId);
-  setLessonLockedState(lessonId, true);
-  modalSaveStatus.textContent = 'Accepted';
-  showBanner('Summary accepted. Review the feedback on the right.', 'ok');
-} else {
-  updateModalChromeForLesson(lessonId);
-  setLessonLockedState(lessonId, false);
-  modalSaveStatus.textContent = 'Needs revision';
-  showBanner('Not accepted: Review the feedback and continue editing.', 'warn');
-}
+  if (String(result.review_status || '') === 'acceptable') {
+    updateLessonAndTocMetadata(
+      lessonId,
+      'acceptable',
+      currentHtml,
+      String(result.review_feedback || ''),
+      1
+    );
+
+    // Force modal into locked accepted state
+    syncModalFromHidden(lessonId);
+    setLessonLockedState(lessonId, true);
+    updateModalChromeForLesson(lessonId);
+    setPanelFeedback(lessonId, String(result.review_feedback || ''));
+    setPanelNotes(lessonId);
+    setPanelVersionContext(lessonId);
+
+    // Critical: reset dirty tracking after server-accepted state
+    originalHtml = modalEditor.innerHTML;
+
+    modalSaveBtn.classList.add('nb-hidden');
+    modalCheckBtn.classList.add('nb-hidden');
+    modalUnlockBtn.classList.remove('nb-hidden');
+    modalSaveStatus.textContent = 'Summary accepted';
+
+    showBanner('Summary accepted. Review the feedback on the right.', 'ok');
+  } else {
+    updateLessonAndTocMetadata(
+      lessonId,
+      String(result.review_status || 'needs_revision'),
+      currentHtml,
+      String(result.review_feedback || ''),
+      0
+    );
+
+    syncModalFromHidden(lessonId);
+    setLessonLockedState(lessonId, false);
+    updateModalChromeForLesson(lessonId);
+    setPanelFeedback(lessonId, String(result.review_feedback || ''));
+    setPanelNotes(lessonId);
+    setPanelVersionContext(lessonId);
+
+    originalHtml = modalEditor.innerHTML;
+
+    modalSaveBtn.classList.remove('nb-hidden');
+    modalCheckBtn.classList.remove('nb-hidden');
+    modalUnlockBtn.classList.add('nb-hidden');
+    modalSaveStatus.textContent = 'Needs revision';
+
+    showBanner('Not accepted: Review the feedback and continue editing.', 'warn');
+  }
 
   return true;
 }
