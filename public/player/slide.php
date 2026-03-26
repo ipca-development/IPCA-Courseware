@@ -1196,7 +1196,6 @@ btn.addEventListener('click', ()=>{
 });
 
 	
-// TEXT SIZE
 document.querySelectorAll('[data-size]').forEach(function(btn){
   btn.addEventListener('mousedown', function(e){
     e.preventDefault();
@@ -1207,8 +1206,6 @@ document.querySelectorAll('[data-size]').forEach(function(btn){
       showBanner('Summary is locked. Unlock to edit.', 'warn');
       return;
     }
-
-    rte.focus();
 
     const size = btn.getAttribute('data-size');
     const sel = window.getSelection();
@@ -1222,17 +1219,18 @@ document.querySelectorAll('[data-size]').forEach(function(btn){
 
     if (hasSelection) {
       const range = sel.getRangeAt(0);
-      const selectedHtml = range.cloneContents();
-
       const wrapper = document.createElement('span');
       wrapper.className = 'size-' + size;
-      wrapper.appendChild(selectedHtml);
 
-      range.deleteContents();
-      range.insertNode(wrapper);
+      try {
+        range.surroundContents(wrapper);
+      } catch (e) {
+        const fragment = range.extractContents();
+        wrapper.appendChild(fragment);
+        range.insertNode(wrapper);
+      }
 
       sel.removeAllRanges();
-
       const newRange = document.createRange();
       newRange.selectNodeContents(wrapper);
       newRange.collapse(false);
