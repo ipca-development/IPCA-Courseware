@@ -358,6 +358,11 @@ $isAdminViewer = ($role === 'admin');
   overflow-wrap:anywhere;
   word-break:break-word;
 }
+	  
+	.rte.size-sm { font-size:13px; }
+	.rte.size-md { font-size:14px; }
+	.rte.size-lg { font-size:16px; }  
+	  
     .muted{ opacity:.7; font-size:12px; }
 
     .summary-alert{
@@ -475,16 +480,23 @@ $isAdminViewer = ($role === 'admin');
       <strong>My Study Summary (Lesson)</strong>
       <span class="muted" id="sumStatus">Draft</span>
       <div style="display:flex; gap:8px; align-items:center;">
-        <button class="btnx" id="btnCheckSummary" style="padding:6px 10px;">Check my Summary</button>
+        <button class="btnx" id="btnCheckSummary">Check my Summary</button>
+		<button class="btnx" id="btnUnlockSummary" style="display:none;">Unlock</button>
         <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
       </div>
     </div>
-    <div class="tools">
-      <button class="btnx" type="button" data-cmd="bold" style="padding:6px 10px;">B</button>
-      <button class="btnx" type="button" data-cmd="italic" style="padding:6px 10px;">I</button>
-      <button class="btnx" type="button" data-cmd="underline" style="padding:6px 10px;">U</button>
-      <button class="btnx" type="button" data-cmd="insertUnorderedList" style="padding:6px 10px;">•</button>
-    </div>
+<div class="tools">
+  <button class="btnx" type="button" data-cmd="bold">B</button>
+  <button class="btnx" type="button" data-cmd="italic">I</button>
+  <button class="btnx" type="button" data-cmd="underline">U</button>
+  <button class="btnx" type="button" data-cmd="insertUnorderedList">•</button>
+
+  <!-- NEW -->
+  <button class="btnx" type="button" data-size="sm">S</button>
+  <button class="btnx" type="button" data-size="md">M</button>
+  <button class="btnx" type="button" data-size="lg">L</button>
+  <button class="btnx" type="button" id="btnHighlight">Highlight</button>
+</div>
     <div id="rte" class="rte" contenteditable="true"></div>
   </div>
 
@@ -516,6 +528,9 @@ $isAdminViewer = ($role === 'admin');
   </div>
 
 <script>
+let isLocked = false;
+let currentReviewStatus = 'pending';	
+	
 const SLIDE_ID = <?= (int)$slideId ?>;
 const PREV_ID = <?= (int)$prevId ?>;
 const NEXT_ID = <?= (int)$nextId ?>;
@@ -909,10 +924,19 @@ function restoreSummaryUiState(){
 	
 const sumStatus = document.getElementById('sumStatus');
 const btnCheckSummary = document.getElementById('btnCheckSummary');
+const btnUnlockSummary = document.getElementById('btnUnlockSummary');
 const summaryAlert = document.getElementById('summaryAlert');
 const summaryAlertClose = document.getElementById('summaryAlertClose');
 const summaryAlertTitle = document.getElementById('summaryAlertTitle');
 const summaryAlertBody = document.getElementById('summaryAlertBody');
+
+function showBanner(message, kind){
+  sumStatus.textContent = message;
+
+  setTimeout(function(){
+    updateDrawerLockState();
+  }, 2000);
+}
 
 let saveTimer = null;
 let summaryAlertDismissed = false;
@@ -1013,21 +1037,48 @@ async function loadSummaryFromDb(){
   try{
     const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {credentials:'same-origin'});
     const j = await res.json();
-    if (j.ok) {
-      rte.innerHTML = j.summary_html || '';
-      sumStatus.textContent = 'Draft loaded';
-      renderSummaryAlert(j, { suppressPending: true });
-    }
+
+if (j.ok) {
+  rte.innerHTML = j.summary_html || '';
+
+  currentReviewStatus = j.review_status || 'pending';
+  isLocked = Number(j.student_soft_locked || 0) === 1;
+
+  updateDrawerLockState();
+  renderSummaryAlert(j, { forceShow: true });
+}
   }catch(e){}
 }
+	
+function updateDrawerLockState() {
+  rte.contentEditable = isLocked ? 'false' : 'true';
+  rte.style.opacity = isLocked ? '0.7' : '1';
+  rte.style.cursor = isLocked ? 'not-allowed' : 'text';
+
+  btnUnlockSummary.style.display = isLocked ? 'inline-block' : 'none';
+  btnCheckSummary.style.display = isLocked ? 'none' : 'inline-block';
+
+  if (isLocked) {
+    sumStatus.textContent = 'Locked (Accepted)';
+  } else if (currentReviewStatus === 'needs_revision' || currentReviewStatus === 'rejected') {
+    sumStatus.textContent = 'Needs revision';
+  } else if (currentReviewStatus === 'acceptable') {
+    sumStatus.textContent = 'Accepted';
+  } else {
+    sumStatus.textContent = 'Draft';
+  }
+}	
 
 async function refreshSummaryStatusOnly(){
   try{
     const res = await fetch(`/student/api/summary_get.php?cohort_id=${COHORT_ID}&lesson_id=${LESSON_ID}`, {credentials:'same-origin'});
     const j = await res.json();
     if (j.ok) {
-      renderSummaryAlert(j);
-    }
+	  currentReviewStatus = j.review_status || 'pending';
+	  isLocked = Number(j.student_soft_locked || 0) === 1;
+	  updateDrawerLockState();
+	  renderSummaryAlert(j);
+	}
   }catch(e){}
 }
 
@@ -1076,31 +1127,66 @@ async function checkSummaryNow(){
     const j = await res.json();
 
     if (!j.ok) {
-      sumStatus.textContent = 'Check failed';
-      return;
-    }
+  sumStatus.textContent = 'Check failed';
+  return;
+}
 
-    sumStatus.textContent = (String(j.review_status || '') === 'acceptable')
-      ? 'Accepted'
-      : 'Not accepted';
+		currentReviewStatus = j.review_status || 'pending';
+		isLocked = Number(j.student_soft_locked || 0) === 1;
 
-    renderSummaryAlert(j, { forceShow: true });
+		updateDrawerLockState();
+		renderSummaryAlert(j, { forceShow: true });
+
   } catch(e){
     sumStatus.textContent = 'Check failed';
   }
 }
 
-rte.addEventListener('input', scheduleSave);
-
-document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
-  btn.addEventListener('click', ()=>{
-    const cmd = btn.getAttribute('data-cmd');
-    document.execCommand(cmd, false, null);
-    rte.focus();
-    scheduleSave();
-  });
+rte.addEventListener('input', ()=>{
+  if (isLocked) return;
+  scheduleSave();
 });
 
+document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
+btn.addEventListener('click', ()=>{
+  if (isLocked) {
+    showBanner('Summary is locked. Unlock to edit.', 'warn');
+    return;
+  }
+
+  const cmd = btn.getAttribute('data-cmd');
+  document.execCommand(cmd, false, null);
+  rte.focus();
+  scheduleSave();
+});
+});
+
+	
+// TEXT SIZE
+document.querySelectorAll('[data-size]').forEach(btn=>{
+  btn.onclick = ()=>{
+    if (isLocked) {
+      showBanner('Summary is locked. Unlock to edit.', 'warn');
+      return;
+    }
+
+    rte.classList.remove('size-sm','size-md','size-lg');
+    rte.classList.add('size-' + btn.dataset.size);
+
+    scheduleSave();
+  };
+});
+
+// HIGHLIGHT
+document.getElementById('btnHighlight').onclick = ()=>{
+  if (isLocked) {
+    showBanner('Summary is locked. Unlock to edit.', 'warn');
+    return;
+  }
+
+  document.execCommand('hiliteColor', false, '#fff59d');
+  scheduleSave();
+};	
 	
 function summaryDrawerStateKey(){
   return 'ipca_summary_drawer_state|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
@@ -1121,6 +1207,10 @@ function loadSummaryDrawerState(){
 }
 
 async function flushSummarySaveNow(){
+  if (isLocked) {
+    return;
+  }
+
   if (saveTimer) {
     clearTimeout(saveTimer);
     saveTimer = null;
@@ -1153,7 +1243,7 @@ document.getElementById('btnSummary').onclick = ()=>{
   drawer.style.display = willOpen ? 'flex' : 'none';
   saveSummaryDrawerState(willOpen);
   saveSummaryUiState();
-  if (willOpen) setTimeout(()=>rte.focus(), 80);
+  if (willOpen && !isLocked) setTimeout(()=>rte.focus(), 80);
 };
 
 document.getElementById('btnCloseDrawer').onclick = ()=>{
@@ -1165,6 +1255,37 @@ document.getElementById('btnCloseDrawer').onclick = ()=>{
 	
 btnCheckSummary.onclick = ()=> checkSummaryNow();
 
+btnUnlockSummary.onclick = async ()=>{
+  const ok = confirm('Unlock summary for editing? You will need to check again.');
+  if (!ok) return;
+
+  const res = await fetch('/student/api/summary_save.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    credentials:'same-origin',
+    body: JSON.stringify({
+      action:'unlock',
+      cohort_id: COHORT_ID,
+      lesson_id: LESSON_ID
+    })
+  });
+
+  const j = await res.json();
+
+if (j.ok) {
+  isLocked = false;
+  currentReviewStatus = j.review_status || 'pending';
+  updateDrawerLockState();
+  renderSummaryAlert({
+    review_status: currentReviewStatus,
+    review_feedback: '',
+    review_notes_by_instructor: ''
+  }, { suppressPending: true });
+  sumStatus.textContent = 'Unlocked';
+}
+};	
+	
+	
 const initialSummaryUiState = loadSummaryUiState();
 
 if (initialSummaryUiState && initialSummaryUiState.drawerOpen) {
