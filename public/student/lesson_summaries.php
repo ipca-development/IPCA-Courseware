@@ -1587,32 +1587,30 @@ function applyModalSize(size) {
   const selection = window.getSelection();
   const hasSelection = selection && selection.rangeCount > 0 && !selection.isCollapsed;
 
-  // If user selected text → apply ONLY to selection
   if (hasSelection) {
     const range = selection.getRangeAt(0);
-
     const span = document.createElement('span');
     span.className = 'size-' + size;
 
     try {
       range.surroundContents(span);
     } catch (e) {
-      // fallback for complex selections
       const frag = range.extractContents();
       span.appendChild(frag);
       range.insertNode(span);
     }
 
-    // move cursor after styled content
     selection.removeAllRanges();
   } else {
-    // No selection → change default typing size
     modalEditor.classList.remove('size-sm', 'size-md', 'size-lg');
     modalEditor.classList.add('size-' + size);
   }
 
   syncHiddenEditorFromModal(activeLessonId);
   updateSizeButtons();
+  updateModalToolbarState();
+  updateModalWordCount();
+  modalSaveStatus.textContent = 'Unsaved changes';
 }
 
 function updateModalToolbarState() {
@@ -1801,14 +1799,16 @@ function openEditor(lessonId) {
 }
 
 function closeEditor(lessonId, silent) {
-  if (activeLessonId === lessonId && hasUnsavedChanges(lessonId) && !silent) {
+  const locked = lessonIsLocked(lessonId);
+
+  if (activeLessonId === lessonId && hasUnsavedChanges(lessonId) && !silent && !locked) {
     showConfirmBar('You have unsaved changes in this section.', { type: 'close-editor', lessonId: lessonId });
     return;
   }
 
   editorModal.classList.remove('open');
   editorModal.setAttribute('aria-hidden', 'true');
-  document.body.classList.remove('nb-modal-open');	
+  document.body.classList.remove('nb-modal-open');
 
   if (activeLessonId === lessonId) {
     syncHiddenEditorFromModal(lessonId);
@@ -1971,32 +1971,30 @@ async function checkSummary(lessonId) {
   originalHtml = currentHtml;
 
   if (String(result.review_status || '') === 'acceptable') {
-    updateLessonAndTocMetadata(
-      lessonId,
-      'acceptable',
-      currentHtml,
-      String(result.review_feedback || ''),
-      1
-    );
+  updateLessonAndTocMetadata(
+    lessonId,
+    'acceptable',
+    currentHtml,
+    String(result.review_feedback || ''),
+    1
+  );
 
-    // Force modal into locked accepted state
-    syncModalFromHidden(lessonId);
-    setLessonLockedState(lessonId, true);
-    updateModalChromeForLesson(lessonId);
-    setPanelFeedback(lessonId, String(result.review_feedback || ''));
-    setPanelNotes(lessonId);
-    setPanelVersionContext(lessonId);
+  syncModalFromHidden(lessonId);
+  setLessonLockedState(lessonId, true);
+  updateModalChromeForLesson(lessonId);
+  setPanelFeedback(lessonId, String(result.review_feedback || ''));
+  setPanelNotes(lessonId);
+  setPanelVersionContext(lessonId);
 
-    // Critical: reset dirty tracking after server-accepted state
-    originalHtml = modalEditor.innerHTML;
+  originalHtml = modalEditor.innerHTML;
 
-    modalSaveBtn.classList.add('nb-hidden');
-    modalCheckBtn.classList.add('nb-hidden');
-    modalUnlockBtn.classList.remove('nb-hidden');
-    modalSaveStatus.textContent = 'Summary accepted';
+  modalSaveBtn.classList.add('nb-hidden');
+  modalCheckBtn.classList.add('nb-hidden');
+  modalUnlockBtn.classList.remove('nb-hidden');
+  modalSaveStatus.textContent = 'Summary accepted';
 
-    showBanner('Summary accepted. Review the feedback on the right.', 'ok');
-  } else {
+  showBanner('Summary accepted. Review the feedback on the right.', 'ok');
+} else {
     updateLessonAndTocMetadata(
       lessonId,
       String(result.review_status || 'needs_revision'),
