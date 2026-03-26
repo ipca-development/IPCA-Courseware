@@ -1861,20 +1861,21 @@ async function unlockAcceptedSummary(lessonId) {
     return false;
   }
 
-  setLessonLockedState(lessonId, false);
   updateLessonAndTocMetadata(
     lessonId,
     String(result.review_status || 'acceptable'),
     activeLessonId === lessonId ? modalEditor.innerHTML : (editorEl(lessonId) ? editorEl(lessonId).innerHTML : ''),
     '',
-    Number(result.student_soft_locked || 0)
+    0
   );
 
-  originalHtml = activeLessonId === lessonId ? modalEditor.innerHTML : originalHtml;
+  setLessonLockedState(lessonId, false);
+  originalHtml = modalEditor.innerHTML;
   modalSaveStatus.textContent = 'Unlocked';
+
   showBanner('Summary unlocked. If you make changes, you will have to check your summary again.', 'ok');
   return true;
-}
+}	
 
 async function saveSummary(lessonId) {
   if (activeLessonId !== lessonId) return false;
