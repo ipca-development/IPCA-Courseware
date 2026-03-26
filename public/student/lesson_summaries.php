@@ -768,6 +768,18 @@ cw_header('My Notebook');
 .nb-editor.size-md{font-size:15px}
 .nb-editor.size-lg{font-size:17px}
 
+.nb-locked-shake{
+  animation: nbShake 0.25s ease;
+}
+
+@keyframes nbShake{
+  0% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  50% { transform: translateX(4px); }
+  75% { transform: translateX(-3px); }
+  100% { transform: translateX(0); }
+}		
+	
 .nb-editor.locked{
   opacity:.74;
   cursor:default;
@@ -1354,18 +1366,48 @@ function setLessonLockedState(lessonId, locked) {
   }
 
   if (activeLessonId === lessonId) {
+
+    // Core editor lock
     modalEditor.setAttribute('contenteditable', locked ? 'false' : 'true');
     modalEditor.classList.toggle('locked', !!locked);
     modalLockedOverlay.classList.toggle('show', !!locked);
 
+    // Buttons
     modalUnlockBtn.classList.toggle('nb-hidden', !locked);
     modalCheckBtn.classList.toggle('nb-hidden', !!locked);
     modalSaveBtn.classList.toggle('nb-hidden', !!locked);
 
+    // Status text
     modalLockState.textContent = locked ? 'Locked' : 'Unlocked';
     modalHintText.textContent = locked
       ? 'Unlock to edit. Re-check will be required after changes.'
       : 'Use clear structure and your own wording.';
+
+    // 🔒 Disable ALL editor tools visually + functionally
+    const allTools = [
+      ...modalCmdButtons,
+      ...modalSizeButtons,
+      modalHighlightBtn,
+      modalClearFormatBtn
+    ];
+
+    allTools.forEach(function(btn) {
+      if (!btn) return;
+
+      btn.disabled = !!locked;
+      btn.style.opacity = locked ? '0.45' : '';
+      btn.style.cursor = locked ? 'not-allowed' : '';
+
+      // 🚨 High-end feedback on click while locked
+      if (locked) {
+        btn.onclick = function(e) {
+          e.preventDefault();
+          showLockedFeedback();
+        };
+      } else {
+        btn.onclick = null; // restore normal behavior
+      }
+    });
   }
 }
 
@@ -1582,6 +1624,10 @@ function updateSizeButtons() {
 }
 
 function applyModalSize(size) {
+
+  // 🚨 BLOCK when locked
+  if (activeLessonId === null || lessonIsLocked(activeLessonId)) return;
+
   modalCurrentSize = size;
 
   const selection = window.getSelection();
@@ -1589,6 +1635,7 @@ function applyModalSize(size) {
 
   if (hasSelection) {
     const range = selection.getRangeAt(0);
+
     const span = document.createElement('span');
     span.className = 'size-' + size;
 
@@ -2200,7 +2247,8 @@ document.addEventListener('keydown', function(e){
 
 modalSizeButtons.forEach(function(btn){
   btn.addEventListener('click', function(){
-    if (activeLessonId === null) return;
+    if (activeLessonId === null || lessonIsLocked(activeLessonId)) return;
+
     applyModalSize(btn.getAttribute('data-size'));
     modalEditor.focus();
   });
@@ -2315,7 +2363,16 @@ modalEditor.addEventListener('keydown', function(e) {
     modalSaveStatus.textContent = 'Unsaved changes';
   }
 });
-	
+
+
+function showLockedFeedback() {
+  modalEditor.classList.add('nb-locked-shake');
+  setTimeout(() => modalEditor.classList.remove('nb-locked-shake'), 300);
+
+  modalHintText.textContent = 'This summary is locked. Click "Unlock for Editing" to make changes.';
+
+  showBanner('Summary is locked. Unlock to edit.', 'warn');
+}	
 	
 function escapeHtml(s) {
   return String(s || '')
