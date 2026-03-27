@@ -346,6 +346,30 @@ $isAdminViewer = ($role === 'admin');
       padding:8px 12px;
       border-bottom:1px solid #eee;
     }
+	.drawer.expanded{
+	  right:50%;
+	  transform:translateX(50%);
+	  width:min(1200px, 96vw);
+	  height:min(72vh, 820px);
+	  bottom:18px;
+	}
+
+	.drawer.expanded .rte{
+	  font-size:15px;
+	  line-height:1.7;
+	}
+
+@media (max-width: 900px){
+  .drawer.expanded{
+    width:min(98vw, 98vw);
+    height:min(78vh, 860px);
+    right:50%;
+    transform:translateX(50%);
+    bottom:10px;
+  }
+}  
+	  
+	  
 .rte{
   border:none;
   outline:none;
@@ -502,11 +526,12 @@ $isAdminViewer = ($role === 'admin');
     <div class="head">
       <strong>My Study Summary (Lesson)</strong>
       <span class="muted" id="sumStatus">Draft</span>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <button class="btnx" id="btnCheckSummary">Check my Summary</button>
-		<button class="btnx" id="btnUnlockSummary" style="display:none;">Unlock</button>
-        <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
-      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+		  <button class="btnx" id="btnCheckSummary">Check my Summary</button>
+		  <button class="btnx" id="btnUnlockSummary" style="display:none;">Unlock</button>
+		  <button class="btnx" id="btnToggleSummarySize">Expand</button>
+		  <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
+	  </div>
     </div>
 <div class="tools">
   <button class="btnx" type="button" data-cmd="bold">B</button>
@@ -948,6 +973,7 @@ function restoreSummaryUiState(){
 const sumStatus = document.getElementById('sumStatus');
 const btnCheckSummary = document.getElementById('btnCheckSummary');
 const btnUnlockSummary = document.getElementById('btnUnlockSummary');
+const btnToggleSummarySize = document.getElementById('btnToggleSummarySize');
 const summaryAlert = document.getElementById('summaryAlert');
 const summaryAlertClose = document.getElementById('summaryAlertClose');
 const summaryAlertTitle = document.getElementById('summaryAlertTitle');
@@ -1296,6 +1322,32 @@ function summaryDrawerStateKey(){
   return 'ipca_summary_drawer_state|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
 }
 
+function summaryDrawerSizeStateKey(){
+  return 'ipca_summary_drawer_size|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
+}
+
+function saveSummaryDrawerExpandedState(isExpanded){
+  try {
+    sessionStorage.setItem(summaryDrawerSizeStateKey(), isExpanded ? 'expanded' : 'compact');
+  } catch(e){}
+}
+
+function loadSummaryDrawerExpandedState(){
+  try {
+    return sessionStorage.getItem(summaryDrawerSizeStateKey()) === 'expanded';
+  } catch(e){
+    return false;
+  }
+}
+
+function applySummaryDrawerExpandedState(){
+  const expanded = loadSummaryDrawerExpandedState();
+  drawer.classList.toggle('expanded', expanded);
+  if (btnToggleSummarySize) {
+    btnToggleSummarySize.textContent = expanded ? 'Compact' : 'Expand';
+  }
+}
+	
 function saveSummaryDrawerState(isOpen){
   try {
     sessionStorage.setItem(summaryDrawerStateKey(), isOpen ? 'open' : 'closed');
@@ -1345,9 +1397,19 @@ async function flushSummarySaveNow(){
 document.getElementById('btnSummary').onclick = ()=>{
   const willOpen = drawer.style.display !== 'flex';
   drawer.style.display = willOpen ? 'flex' : 'none';
+
+  if (willOpen) {
+    applySummaryDrawerExpandedState();
+  }
+
   saveSummaryDrawerState(willOpen);
   saveSummaryUiState();
-  if (willOpen && !isLocked) setTimeout(()=>rte.focus(), 80);
+
+  if (willOpen && !isLocked) {
+    setTimeout(function(){
+      rte.focus();
+    }, 80);
+  }
 };
 
 document.getElementById('btnCloseDrawer').onclick = ()=>{
@@ -1359,6 +1421,21 @@ document.getElementById('btnCloseDrawer').onclick = ()=>{
 	
 btnCheckSummary.onclick = ()=> checkSummaryNow();
 
+btnToggleSummarySize.onclick = ()=>{
+  const willExpand = !drawer.classList.contains('expanded');
+  drawer.classList.toggle('expanded', willExpand);
+  saveSummaryDrawerExpandedState(willExpand);
+  btnToggleSummarySize.textContent = willExpand ? 'Compact' : 'Expand';
+
+  saveSummaryUiState();
+
+  if (drawer.style.display === 'flex' && !isLocked) {
+    setTimeout(function(){
+      rte.focus();
+    }, 80);
+  }
+};	
+	
 btnUnlockSummary.onclick = async ()=>{
   const ok = confirm('Unlock summary for editing? You will need to check again.');
   if (!ok) return;
@@ -1396,8 +1473,11 @@ if (initialSummaryUiState && initialSummaryUiState.drawerOpen) {
   drawer.style.display = 'flex';
 }
 
+applySummaryDrawerExpandedState();
+
 loadSummaryFromDb().then(()=>{
   restoreSummaryUiState();
+  applySummaryDrawerExpandedState();
 });
 
 window.addEventListener('beforeunload', ()=>{
