@@ -1,86 +1,73 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../../../src/bootstrap.php';
-require_once __DIR__ . '/../../../src/automation_catalog.php';
+require_once __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/automation_catalog.php';
+
+cw_require_admin();
 
 header('Content-Type: application/json; charset=utf-8');
 
-cw_require_login();
-
-$u = cw_current_user($pdo);
-$role = (string)($u['role'] ?? '');
-if ($role !== 'admin') {
-    http_response_code(403);
-    echo json_encode(array('ok' => false, 'error' => 'Forbidden'));
+function af_json_error(string $message, int $status = 400): void
+{
+    http_response_code($status);
+    echo json_encode(array(
+        'ok' => false,
+        'error' => $message,
+    ));
     exit;
 }
 
-function af_json_input(): array
+function af_json_ok(array $payload = array()): void
+{
+    echo json_encode(array_merge(array('ok' => true), $payload));
+    exit;
+}
+
+function af_request_json(): array
 {
     $raw = file_get_contents('php://input');
-    if (!is_string($raw) || trim($raw) === '') {
+    if ($raw === false || trim($raw) === '') {
         return array();
     }
 
-    $data = json_decode($raw, true);
-    return is_array($data) ? $data : array();
-}
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        af_json_error('Invalid JSON payload');
+    }
 
-function af_response(array $data): void
-{
-    echo json_encode($data);
-    exit;
+    return $decoded;
 }
 
 function af_normalize_conditions(array $conditions): array
 {
-    $validFields = automation_condition_field_options();
-    $validOps = automation_condition_operator_options();
-    $numericFields = automation_numeric_fields();
-
     $out = array();
-    $sort = 0;
 
-    foreach ($conditions as $row) {
+    foreach ($conditions as $idx => $row) {
         if (!is_array($row)) {
             continue;
         }
 
         $fieldKey = trim((string)($row['field_key'] ?? ''));
         $operator = trim((string)($row['operator'] ?? ''));
-        $valueRaw = isset($row['value']) ? $row['value'] : '';
-
-        if ($fieldKey === '' || !isset($validFields[$fieldKey])) {
-            continue;
-        }
-        if ($operator === '' || !isset($validOps[$operator])) {
-            continue;
-        }
-
-        $valueText = null;
+        $valueText = isset($row['value_text']) ? trim((string)$row['value_text']) : '';
         $valueNumber = null;
 
-        if (in_array($fieldKey, $numericFields, true)) {
-            if ($valueRaw === '' || $valueRaw === null) {
-                continue;
-            }
-            $valueNumber = (float)$valueRaw;
-        } else {
-            $valueText = trim((string)$valueRaw);
-            if ($valueText === '') {
-                continue;
-            }
+        if (array_key_exists('value_number', $row) && $row['value_number'] !== '' && $row['value_number'] !== null) {
+            $valueNumber = (float)$row['value_number'];
+        }
+
+        if ($fieldKey === '' || $operator === '') {
+            continue;
         }
 
         $out[] = array(
             'field_key' => $fieldKey,
             'operator' => $operator,
-            'value_text' => $valueText,
+            'value_text' => $valueText !== '' ? $valueText : null,
             'value_number' => $valueNumber,
-            'sort_order' => $sort
+            'sort_order' => count($out) + 1,
         );
-        $sort++;
     }
 
     return $out;
@@ -88,261 +75,241 @@ function af_normalize_conditions(array $conditions): array
 
 function af_normalize_actions(array $actions): array
 {
-    $validActions = automation_action_options();
     $out = array();
-    $sort = 0;
 
-    foreach ($actions as $row) {
+    foreach ($actions as $idx => $row) {
         if (!is_array($row)) {
             continue;
         }
 
         $actionKey = trim((string)($row['action_key'] ?? ''));
-        if ($actionKey === '' || !isset($validActions[$actionKey])) {
+        $config = isset($row['config_json']) && is_array($row['config_json']) ? $row['config_json'] : array();
+
+        if ($actionKey === '') {
             continue;
-        }
-
-        $config = array();
-
-        if ($actionKey === 'send_notification') {
-            $notificationKey = trim((string)($row['notification_key'] ?? ''));
-            if ($notificationKey === '') {
-                continue;
-            }
-            $config['notification_key'] = $notificationKey;
-        }
-
-        if ($actionKey === 'grant_extra_attempts') {
-            $extraAttempts = (int)($row['extra_attempts'] ?? 0);
-            $config['extra_attempts'] = max(0, $extraAttempts);
-        }
-
-        if ($actionKey === 'apply_deadline_extension') {
-            $hours = (int)($row['extension_hours'] ?? 0);
-            $config['extension_hours'] = max(0, $hours);
-        }
-
-        if ($actionKey === 'create_required_action') {
-            $requiredActionType = trim((string)($row['required_action_type'] ?? ''));
-            if ($requiredActionType !== '') {
-                $config['required_action_type'] = $requiredActionType;
-            }
         }
 
         $out[] = array(
             'action_key' => $actionKey,
             'config_json' => json_encode($config),
-            'sort_order' => $sort
+            'sort_order' => count($out) + 1,
         );
-        $sort++;
     }
 
     return $out;
 }
 
-$input = af_json_input();
-$action = trim((string)($input['action'] ?? ''));
+try {
+    $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 
-if ($action === 'save_flow') {
-    $flowId = (int)($input['flow_id'] ?? 0);
-    $name = trim((string)($input['name'] ?? ''));
-    $description = trim((string)($input['description'] ?? ''));
-    $eventKey = trim((string)($input['event_key'] ?? ''));
-    $isActive = !empty($input['is_active']) ? 1 : 0;
-    $priority = (int)($input['priority'] ?? 100);
+    if ($method === 'GET') {
+        $mode = trim((string)($_GET['mode'] ?? 'list'));
 
-    $validEvents = automation_event_options();
-    if ($name === '') {
-        af_response(array('ok' => false, 'error' => 'Flow name is required.'));
+        if ($mode === 'catalog') {
+            af_json_ok(array(
+                'categories' => automation_category_rows($pdo, true),
+                'event_groups' => automation_event_grouped_options($pdo, true),
+                'condition_fields' => automation_condition_field_options(),
+                'operators' => automation_operator_options(),
+                'actions' => automation_action_options(),
+            ));
+        }
+
+        if ($mode === 'detail') {
+            $flowId = (int)($_GET['id'] ?? 0);
+            if ($flowId <= 0) {
+                af_json_error('Missing flow id');
+            }
+
+            $detail = automation_flow_detail($pdo, $flowId);
+            if (!$detail) {
+                af_json_error('Flow not found', 404);
+            }
+
+            af_json_ok(array('flow' => $detail));
+        }
+
+        af_json_ok(array(
+            'flows' => automation_flow_rows($pdo),
+        ));
     }
-    if ($eventKey === '' || !isset($validEvents[$eventKey])) {
-        af_response(array('ok' => false, 'error' => 'Valid event is required.'));
-    }
 
-    $conditions = af_normalize_conditions((array)($input['conditions'] ?? array()));
-    $actions = af_normalize_actions((array)($input['actions'] ?? array()));
+    $payload = af_request_json();
+    $action = trim((string)($payload['action'] ?? ''));
 
-    try {
+    if ($method === 'POST' && $action === 'save_flow') {
+        $flowId = (int)($payload['id'] ?? 0);
+        $name = trim((string)($payload['name'] ?? ''));
+        $description = trim((string)($payload['description'] ?? ''));
+        $eventKey = trim((string)($payload['event_key'] ?? ''));
+        $isActive = !empty($payload['is_active']) ? 1 : 0;
+        $priority = (int)($payload['priority'] ?? 100);
+        $conditions = af_normalize_conditions(isset($payload['conditions']) && is_array($payload['conditions']) ? $payload['conditions'] : array());
+        $actions = af_normalize_actions(isset($payload['actions']) && is_array($payload['actions']) ? $payload['actions'] : array());
+
+        if ($name === '') {
+            af_json_error('Flow name is required');
+        }
+        if ($eventKey === '') {
+            af_json_error('Event key is required');
+        }
+
+        $validEvents = automation_event_label_map($pdo, false);
+        if (!isset($validEvents[$eventKey])) {
+            af_json_error('Unknown event key');
+        }
+
         $pdo->beginTransaction();
 
         if ($flowId > 0) {
             $stmt = $pdo->prepare("
                 UPDATE automation_flows
-                SET name = ?, description = ?, event_key = ?, is_active = ?, priority = ?
+                SET
+                    name = ?,
+                    description = ?,
+                    event_key = ?,
+                    is_active = ?,
+                    priority = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE id = ?
             ");
-            $stmt->execute(array($name, $description, $eventKey, $isActive, $priority, $flowId));
+            $stmt->execute(array(
+                $name,
+                $description !== '' ? $description : null,
+                $eventKey,
+                $isActive,
+                $priority,
+                $flowId,
+            ));
 
-            $pdo->prepare("DELETE FROM automation_flow_conditions WHERE flow_id = ?")->execute(array($flowId));
-            $pdo->prepare("DELETE FROM automation_flow_actions WHERE flow_id = ?")->execute(array($flowId));
+            $deleteCond = $pdo->prepare("DELETE FROM automation_flow_conditions WHERE flow_id = ?");
+            $deleteCond->execute(array($flowId));
+
+            $deleteAct = $pdo->prepare("DELETE FROM automation_flow_actions WHERE flow_id = ?");
+            $deleteAct->execute(array($flowId));
         } else {
             $stmt = $pdo->prepare("
                 INSERT INTO automation_flows
-                (name, description, event_key, is_active, priority)
-                VALUES (?, ?, ?, ?, ?)
+                (
+                    name,
+                    description,
+                    event_key,
+                    is_active,
+                    priority,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             ");
-            $stmt->execute(array($name, $description, $eventKey, $isActive, $priority));
+            $stmt->execute(array(
+                $name,
+                $description !== '' ? $description : null,
+                $eventKey,
+                $isActive,
+                $priority,
+            ));
+
             $flowId = (int)$pdo->lastInsertId();
         }
 
         if (!empty($conditions)) {
-            $stmt = $pdo->prepare("
+            $stmtCond = $pdo->prepare("
                 INSERT INTO automation_flow_conditions
-                (flow_id, field_key, operator, value_text, value_number, sort_order)
+                (
+                    flow_id,
+                    field_key,
+                    operator,
+                    value_text,
+                    value_number,
+                    sort_order
+                )
                 VALUES (?, ?, ?, ?, ?, ?)
             ");
+
             foreach ($conditions as $row) {
-                $stmt->execute(array(
+                $stmtCond->execute(array(
                     $flowId,
                     $row['field_key'],
                     $row['operator'],
                     $row['value_text'],
                     $row['value_number'],
-                    $row['sort_order']
+                    $row['sort_order'],
                 ));
             }
         }
 
         if (!empty($actions)) {
-            $stmt = $pdo->prepare("
+            $stmtAct = $pdo->prepare("
                 INSERT INTO automation_flow_actions
-                (flow_id, action_key, config_json, sort_order)
+                (
+                    flow_id,
+                    action_key,
+                    config_json,
+                    sort_order
+                )
                 VALUES (?, ?, ?, ?)
             ");
+
             foreach ($actions as $row) {
-                $stmt->execute(array(
+                $stmtAct->execute(array(
                     $flowId,
                     $row['action_key'],
                     $row['config_json'],
-                    $row['sort_order']
+                    $row['sort_order'],
                 ));
             }
         }
 
         $pdo->commit();
-        af_response(array('ok' => true, 'flow_id' => $flowId));
-    } catch (Throwable $e) {
-        if ($pdo->inTransaction()) {
-            $pdo->rollBack();
+
+        $detail = automation_flow_detail($pdo, $flowId);
+        af_json_ok(array(
+            'message' => 'Flow saved',
+            'flow' => $detail,
+        ));
+    }
+
+    if ($method === 'POST' && $action === 'delete_flow') {
+        $flowId = (int)($payload['id'] ?? 0);
+        if ($flowId <= 0) {
+            af_json_error('Missing flow id');
         }
-        af_response(array('ok' => false, 'error' => $e->getMessage()));
-    }
-}
 
-if ($action === 'delete_flow') {
-    $flowId = (int)($input['flow_id'] ?? 0);
-    if ($flowId <= 0) {
-        af_response(array('ok' => false, 'error' => 'Missing flow_id.'));
-    }
-
-    try {
         $stmt = $pdo->prepare("DELETE FROM automation_flows WHERE id = ?");
         $stmt->execute(array($flowId));
-        af_response(array('ok' => true));
-    } catch (Throwable $e) {
-        af_response(array('ok' => false, 'error' => $e->getMessage()));
-    }
-}
 
-if ($action === 'toggle_flow') {
-    $flowId = (int)($input['flow_id'] ?? 0);
-    $isActive = !empty($input['is_active']) ? 1 : 0;
-
-    if ($flowId <= 0) {
-        af_response(array('ok' => false, 'error' => 'Missing flow_id.'));
+        af_json_ok(array(
+            'message' => 'Flow deleted',
+        ));
     }
 
-    try {
-        $stmt = $pdo->prepare("UPDATE automation_flows SET is_active = ? WHERE id = ?");
+    if ($method === 'POST' && $action === 'toggle_flow') {
+        $flowId = (int)($payload['id'] ?? 0);
+        $isActive = !empty($payload['is_active']) ? 1 : 0;
+
+        if ($flowId <= 0) {
+            af_json_error('Missing flow id');
+        }
+
+        $stmt = $pdo->prepare("
+            UPDATE automation_flows
+            SET
+                is_active = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ");
         $stmt->execute(array($isActive, $flowId));
-        af_response(array('ok' => true));
-    } catch (Throwable $e) {
-        af_response(array('ok' => false, 'error' => $e->getMessage()));
+
+        af_json_ok(array(
+            'message' => 'Flow updated',
+        ));
     }
+
+    af_json_error('Unsupported request', 405);
+
+} catch (Throwable $e) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    af_json_error($e->getMessage(), 500);
 }
-
-if ($action === 'test_flow') {
-    $flowId = (int)($input['flow_id'] ?? 0);
-    $context = (array)($input['context'] ?? array());
-
-    if ($flowId <= 0) {
-        af_response(array('ok' => false, 'error' => 'Missing flow_id.'));
-    }
-
-    $fStmt = $pdo->prepare("SELECT * FROM automation_flows WHERE id = ? LIMIT 1");
-    $fStmt->execute(array($flowId));
-    $flow = $fStmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$flow) {
-        af_response(array('ok' => false, 'error' => 'Flow not found.'));
-    }
-
-    $cStmt = $pdo->prepare("
-        SELECT * FROM automation_flow_conditions
-        WHERE flow_id = ?
-        ORDER BY sort_order ASC, id ASC
-    ");
-    $cStmt->execute(array($flowId));
-    $conditions = $cStmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $aStmt = $pdo->prepare("
-        SELECT * FROM automation_flow_actions
-        WHERE flow_id = ?
-        ORDER BY sort_order ASC, id ASC
-    ");
-    $aStmt->execute(array($flowId));
-    $actions = $aStmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $matched = true;
-    $checks = array();
-
-    foreach ($conditions as $cond) {
-        $fieldKey = (string)$cond['field_key'];
-        $operator = (string)$cond['operator'];
-        $expected = $cond['value_text'] !== null ? $cond['value_text'] : $cond['value_number'];
-        $actual = array_key_exists($fieldKey, $context) ? $context[$fieldKey] : null;
-        $pass = false;
-
-        switch ($operator) {
-            case '=':
-                $pass = ($actual == $expected);
-                break;
-            case '!=':
-                $pass = ($actual != $expected);
-                break;
-            case '>=':
-                $pass = ($actual >= $expected);
-                break;
-            case '<=':
-                $pass = ($actual <= $expected);
-                break;
-            case '>':
-                $pass = ($actual > $expected);
-                break;
-            case '<':
-                $pass = ($actual < $expected);
-                break;
-        }
-
-        $checks[] = array(
-            'field_key' => $fieldKey,
-            'operator' => $operator,
-            'expected' => $expected,
-            'actual' => $actual,
-            'passed' => $pass
-        );
-
-        if (!$pass) {
-            $matched = false;
-        }
-    }
-
-    af_response(array(
-        'ok' => true,
-        'matched' => $matched,
-        'checks' => $checks,
-        'actions' => $actions
-    ));
-}
-
-af_response(array('ok' => false, 'error' => 'Invalid action.'));
