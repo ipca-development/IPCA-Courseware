@@ -170,7 +170,7 @@ cw_header('Automation Flows');
 
 <script>
 (function () {
-  const apiUrl = <?= json_encode(rtrim(dirname($_SERVER['SCRIPT_NAME']), '/\\') . '/automation_flows_api.php') ?>;
+  const apiUrl = 'automation_flows_api.php';
   const flowListEl = document.getElementById('afFlowList');
   const formEl = document.getElementById('afForm');
   const editorTitleEl = document.getElementById('afEditorTitle');
@@ -341,13 +341,9 @@ cw_header('Automation Flows');
   }
 
   async function loadDetail(flowId) {
-    const url = new URL(apiUrl, window.location.origin);
-    url.search = new URLSearchParams({
-      mode: 'detail',
-      id: String(flowId)
-    }).toString();
+    const detailUrl = apiUrl + '?mode=detail&id=' + encodeURIComponent(String(flowId));
 
-    const res = await fetch(url.toString(), {
+    const res = await fetch(detailUrl, {
       method: 'GET',
       headers: { 'Accept': 'application/json' }
     });
