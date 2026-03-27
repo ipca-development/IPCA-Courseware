@@ -14,39 +14,315 @@ $operators = automation_operator_options();
 $actionOptions = automation_action_options();
 $flowGroups = automation_flow_rows_grouped($pdo);
 
+$notificationTemplates = array();
+try {
+    $stmt = $pdo->query("
+        SELECT
+            id,
+            notification_key,
+            name,
+            is_enabled
+        FROM notification_templates
+        WHERE channel = 'email'
+        ORDER BY is_enabled DESC, name ASC, id ASC
+    ");
+    $notificationTemplates = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
+} catch (Throwable $e) {
+    $notificationTemplates = array();
+}
+
 cw_header('Automation Flows');
 ?>
 <style>
-.af-wrap{display:grid;grid-template-columns:380px minmax(0,1fr);gap:24px}
-.af-panel{background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.05)}
-.af-panel-head{padding:18px 20px;border-bottom:1px solid rgba(15,23,42,.06)}
-.af-panel-body{padding:18px 20px}
-.af-list{display:flex;flex-direction:column;gap:14px}
-.af-group{display:flex;flex-direction:column;gap:10px}
-.af-group-label{font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.12em;padding:2px 2px 0 2px}
-.af-item{border:1px solid rgba(15,23,42,.08);border-radius:14px;padding:14px;cursor:pointer}
-.af-item.active{border-color:#1d4f91;box-shadow:0 0 0 3px rgba(29,79,145,.08)}
-.af-item-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
-.af-item-name{font-weight:800;color:#102845}
-.af-item-meta{margin-top:6px;font-size:13px;color:#64748b}
-.af-pill{display:inline-flex;align-items:center;border-radius:999px;padding:3px 9px;font-size:12px;font-weight:700}
-.af-pill.on{background:#dcfce7;color:#166534}
-.af-pill.off{background:#fee2e2;color:#991b1b}
-.af-pill.cat{background:#eff6ff;color:#1d4f91}
-.af-form-grid{display:grid;grid-template-columns:1fr 140px 120px;gap:12px}
-.af-field{display:flex;flex-direction:column;gap:6px}
-.af-field label{font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.08em}
-.af-field input,.af-field select,.af-field textarea{width:100%;box-sizing:border-box}
-.af-subtitle{font-size:12px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.1em;margin:0 0 10px}
-.af-repeater{display:flex;flex-direction:column;gap:10px}
-.af-row{display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:10px;align-items:end}
-.af-row.actions{grid-template-columns:1fr 2fr auto}
-.af-empty{padding:14px;border:1px dashed rgba(15,23,42,.12);border-radius:12px;color:#64748b;background:#fafcff}
-.af-btn-row{display:flex;gap:10px;flex-wrap:wrap}
-.af-btn-secondary{background:#fff;color:#102845;border:1px solid rgba(15,23,42,.12)}
-.af-danger{background:#fff;color:#991b1b;border:1px solid #fecaca}
+:root{
+  --af-border: rgba(15,23,42,.08);
+  --af-border-soft: rgba(15,23,42,.06);
+  --af-shadow: 0 10px 24px rgba(15,23,42,.05);
+  --af-blue: #1d4f91;
+  --af-blue-soft: #eff6ff;
+  --af-text: #102845;
+  --af-muted: #64748b;
+  --af-danger: #991b1b;
+  --af-success: #166534;
+  --af-control-h: 44px;
+  --af-radius: 18px;
+  --af-radius-sm: 14px;
+}
+
+.af-wrap{
+  display:grid;
+  grid-template-columns:380px minmax(0,1fr);
+  gap:24px;
+  align-items:start;
+}
+
+.af-panel{
+  background:#fff;
+  border:1px solid var(--af-border);
+  border-radius:var(--af-radius);
+  box-shadow:var(--af-shadow);
+}
+
+.af-panel-head{
+  padding:18px 20px;
+  border-bottom:1px solid var(--af-border-soft);
+}
+
+.af-panel-body{
+  padding:18px 20px;
+}
+
+.af-list-shell{
+  max-height:72vh;
+  overflow-y:auto;
+  padding-right:4px;
+}
+
+.af-list-shell::-webkit-scrollbar{
+  width:8px;
+}
+
+.af-list-shell::-webkit-scrollbar-thumb{
+  background:rgba(15,23,42,.12);
+  border-radius:999px;
+}
+
+.af-list{
+  display:flex;
+  flex-direction:column;
+  gap:14px;
+}
+
+.af-group{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.af-group-label{
+  font-size:11px;
+  font-weight:800;
+  color:var(--af-muted);
+  text-transform:uppercase;
+  letter-spacing:.12em;
+  padding:2px 2px 0 2px;
+}
+
+.af-item{
+  border:1px solid var(--af-border);
+  border-radius:var(--af-radius-sm);
+  padding:14px;
+  cursor:pointer;
+  transition:border-color .16s ease, box-shadow .16s ease, transform .08s ease;
+}
+
+.af-item:hover{
+  border-color:rgba(29,79,145,.18);
+  box-shadow:0 8px 20px rgba(15,23,42,.06);
+}
+
+.af-item.active{
+  border-color:var(--af-blue);
+  box-shadow:0 0 0 3px rgba(29,79,145,.08);
+}
+
+.af-item-top{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  align-items:flex-start;
+}
+
+.af-item-name{
+  font-weight:800;
+  color:var(--af-text);
+}
+
+.af-item-meta{
+  margin-top:6px;
+  font-size:13px;
+  color:var(--af-muted);
+}
+
+.af-pill{
+  display:inline-flex;
+  align-items:center;
+  border-radius:999px;
+  padding:3px 9px;
+  font-size:12px;
+  font-weight:700;
+}
+
+.af-pill.on{
+  background:#dcfce7;
+  color:var(--af-success);
+}
+
+.af-pill.off{
+  background:#fee2e2;
+  color:var(--af-danger);
+}
+
+.af-form-grid{
+  display:grid;
+  grid-template-columns:1fr 140px 120px;
+  gap:12px;
+}
+
+.af-field{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+}
+
+.af-field label{
+  font-size:12px;
+  font-weight:700;
+  color:var(--af-muted);
+  text-transform:uppercase;
+  letter-spacing:.08em;
+}
+
+.af-field input,
+.af-field select,
+.af-field textarea{
+  width:100%;
+  box-sizing:border-box;
+  border:1px solid rgba(15,23,42,.12);
+  border-radius:12px;
+  background:#fff;
+  color:#102845;
+  font:inherit;
+}
+
+.af-field input,
+.af-field select{
+  min-height:var(--af-control-h);
+  padding:0 12px;
+}
+
+.af-field textarea{
+  padding:10px 12px;
+  min-height:92px;
+  resize:vertical;
+}
+
+.af-field input:focus,
+.af-field select:focus,
+.af-field textarea:focus{
+  outline:none;
+  border-color:rgba(29,79,145,.35);
+  box-shadow:0 0 0 3px rgba(29,79,145,.10);
+}
+
+.af-subtitle{
+  font-size:12px;
+  font-weight:800;
+  color:var(--af-muted);
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  margin:0 0 10px;
+}
+
+.af-repeater{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.af-row{
+  display:grid;
+  grid-template-columns:1fr 1fr 1fr auto;
+  gap:10px;
+  align-items:end;
+  border:1px solid rgba(15,23,42,.06);
+  border-radius:14px;
+  padding:12px;
+  background:#fbfdff;
+}
+
+.af-row.actions{
+  grid-template-columns:1fr 1fr auto;
+}
+
+.af-empty{
+  padding:14px;
+  border:1px dashed rgba(15,23,42,.12);
+  border-radius:12px;
+  color:var(--af-muted);
+  background:#fafcff;
+}
+
+.af-btn-row{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+}
+
+.af-btn-secondary{
+  background:#fff;
+  color:#102845;
+  border:1px solid rgba(15,23,42,.12);
+}
+
+.af-danger{
+  background:#fff;
+  color:var(--af-danger);
+  border:1px solid #fecaca;
+}
+
+.af-help{
+  font-size:12px;
+  color:var(--af-muted);
+  line-height:1.45;
+}
+
+.af-action-extra{
+  display:flex;
+  flex-direction:column;
+  gap:10px;
+}
+
+.af-action-advanced{
+  margin-top:4px;
+}
+
+.af-action-advanced summary{
+  cursor:pointer;
+  color:var(--af-blue);
+  font-size:12px;
+  font-weight:700;
+}
+
+.af-action-advanced[open] summary{
+  margin-bottom:8px;
+}
+
+.af-inline-note{
+  margin-top:6px;
+  font-size:12px;
+  color:var(--af-muted);
+}
+
 @media (max-width: 1180px){
-  .af-wrap{grid-template-columns:1fr}
+  .af-wrap{
+    grid-template-columns:1fr;
+  }
+
+  .af-list-shell{
+    max-height:46vh;
+  }
+}
+
+@media (max-width: 760px){
+  .af-form-grid{
+    grid-template-columns:1fr;
+  }
+
+  .af-row,
+  .af-row.actions{
+    grid-template-columns:1fr;
+  }
 }
 </style>
 
@@ -61,39 +337,41 @@ cw_header('Automation Flows');
         <button class="btn" id="afNewBtn" type="button">New Flow</button>
       </div>
 
-      <div class="af-list" id="afFlowList">
-        <?php if (empty($flowGroups)): ?>
-          <div class="af-empty">No automation flows created yet.</div>
-        <?php else: ?>
-          <?php foreach ($flowGroups as $group): ?>
-            <div class="af-group">
-              <div class="af-group-label"><?= h((string)$group['category_label']) ?></div>
+      <div class="af-list-shell">
+        <div class="af-list" id="afFlowList">
+          <?php if (empty($flowGroups)): ?>
+            <div class="af-empty">No automation flows created yet.</div>
+          <?php else: ?>
+            <?php foreach ($flowGroups as $group): ?>
+              <div class="af-group">
+                <div class="af-group-label"><?= h((string)$group['category_label']) ?></div>
 
-              <?php foreach ((array)$group['items'] as $flow): ?>
-                <div class="af-item" data-flow-id="<?= (int)$flow['id'] ?>">
-                  <div class="af-item-top">
-                    <div>
-                      <div class="af-item-name"><?= h((string)$flow['name']) ?></div>
-                      <div class="af-item-meta">
-                        <strong><?= h((string)$flow['event_label']) ?></strong>
+                <?php foreach ((array)$group['items'] as $flow): ?>
+                  <div class="af-item" data-flow-id="<?= (int)$flow['id'] ?>">
+                    <div class="af-item-top">
+                      <div>
+                        <div class="af-item-name"><?= h((string)$flow['name']) ?></div>
+                        <div class="af-item-meta">
+                          <strong><?= h((string)$flow['event_label']) ?></strong>
+                        </div>
+                      </div>
+                      <div>
+                        <?php if (!empty($flow['is_active'])): ?>
+                          <span class="af-pill on">Active</span>
+                        <?php else: ?>
+                          <span class="af-pill off">Inactive</span>
+                        <?php endif; ?>
                       </div>
                     </div>
-                    <div>
-                      <?php if (!empty($flow['is_active'])): ?>
-                        <span class="af-pill on">Active</span>
-                      <?php else: ?>
-                        <span class="af-pill off">Inactive</span>
-                      <?php endif; ?>
+                    <div class="af-item-meta" style="margin-top:10px;">
+                      Priority <?= (int)$flow['priority'] ?>
                     </div>
                   </div>
-                  <div class="af-item-meta" style="margin-top:10px;">
-                    Priority <?= (int)$flow['priority'] ?>
-                  </div>
-                </div>
-              <?php endforeach; ?>
-            </div>
-          <?php endforeach; ?>
-        <?php endif; ?>
+                <?php endforeach; ?>
+              </div>
+            <?php endforeach; ?>
+          <?php endif; ?>
+        </div>
       </div>
     </div>
   </section>
@@ -162,6 +440,7 @@ cw_header('Automation Flows');
           <div class="af-btn-row" style="margin-top:10px;">
             <button class="btn af-btn-secondary" type="button" id="afAddActionBtn">Add Action</button>
           </div>
+          <div class="af-inline-note">Email actions now use a template dropdown instead of raw JSON.</div>
         </div>
 
         <div class="af-btn-row" style="margin-top:24px;">
@@ -200,6 +479,7 @@ cw_header('Automation Flows');
   const conditionFieldOptions = <?= json_encode($conditionFields) ?>;
   const operatorOptions = <?= json_encode($operators) ?>;
   const actionOptions = <?= json_encode($actionOptions) ?>;
+  const emailTemplates = <?= json_encode($notificationTemplates) ?>;
 
   function esc(str) {
     return String(str === null || str === undefined ? '' : str)
@@ -214,6 +494,17 @@ cw_header('Automation Flows');
     let html = '';
     Object.keys(map).forEach(function (key) {
       html += '<option value="' + esc(key) + '"' + (String(selected) === String(key) ? ' selected' : '') + '>' + esc(map[key]) + '</option>';
+    });
+    return html;
+  }
+
+  function emailTemplateOptionsHtml(selectedId) {
+    let html = '<option value="">Select email template</option>';
+    emailTemplates.forEach(function (tpl) {
+      const id = String(tpl.id || '');
+      const name = String(tpl.name || tpl.notification_key || ('Template #' + id));
+      const suffix = tpl.notification_key ? ' (' + tpl.notification_key + ')' : '';
+      html += '<option value="' + esc(id) + '"' + (String(selectedId) === id ? ' selected' : '') + '>' + esc(name + suffix) + '</option>';
     });
     return html;
   }
@@ -246,14 +537,26 @@ cw_header('Automation Flows');
       '</div>';
   }
 
+  function parseActionConfig(row) {
+    let config = {};
+    if (row && row.config_json && typeof row.config_json === 'object') {
+      config = row.config_json;
+    } else if (row && typeof row.config_json === 'string' && row.config_json.trim() !== '') {
+      try {
+        config = JSON.parse(row.config_json);
+      } catch (e) {
+        config = {};
+      }
+    }
+    return config;
+  }
+
   function actionRowHtml(row) {
     row = row || {};
-    let configText = '';
-    if (row.config_json && typeof row.config_json === 'string') {
-      configText = row.config_json;
-    } else if (row.config_json && typeof row.config_json === 'object') {
-      configText = JSON.stringify(row.config_json);
-    }
+    const config = parseActionConfig(row);
+    const actionKey = row.action_key || '';
+    const selectedTemplateId = config.notification_template_id || config.template_id || '';
+    const advancedJson = Object.keys(config).length ? JSON.stringify(config, null, 2) : '';
 
     return '' +
       '<div class="af-row actions" data-kind="action">' +
@@ -261,12 +564,23 @@ cw_header('Automation Flows');
           '<label>Action</label>' +
           '<select class="af-action-key">' +
             '<option value="">Select action</option>' +
-            optionHtml(actionOptions, row.action_key || '') +
+            optionHtml(actionOptions, actionKey) +
           '</select>' +
         '</div>' +
-        '<div class="af-field">' +
-          '<label>Config JSON</label>' +
-          '<textarea class="af-action-config" rows="2">' + esc(configText) + '</textarea>' +
+        '<div class="af-action-extra">' +
+          '<div class="af-field af-email-template-field" style="' + (actionKey === 'send_email' ? '' : 'display:none;') + '">' +
+            '<label>Email Template</label>' +
+            '<select class="af-email-template-id">' +
+              emailTemplateOptionsHtml(selectedTemplateId) +
+            '</select>' +
+            '<div class="af-help">Choose the notification template used for this email action.</div>' +
+          '</div>' +
+          '<details class="af-action-advanced"' + (actionKey !== 'send_email' && advancedJson !== '' ? ' open' : '') + '>' +
+            '<summary>Advanced Config JSON</summary>' +
+            '<div class="af-field">' +
+              '<textarea class="af-action-config" rows="4">' + esc(advancedJson) + '</textarea>' +
+            '</div>' +
+          '</details>' +
         '</div>' +
         '<div class="af-field">' +
           '<button class="btn af-danger af-remove-row" type="button">Remove</button>' +
@@ -314,8 +628,12 @@ cw_header('Automation Flows');
   function collectActions() {
     const rows = [];
     actionsEl.querySelectorAll('[data-kind="action"]').forEach(function (row) {
-      let configObj = {};
+      const actionKey = row.querySelector('.af-action-key').value;
       const raw = row.querySelector('.af-action-config').value.trim();
+      const templateIdEl = row.querySelector('.af-email-template-id');
+      const templateId = templateIdEl ? templateIdEl.value : '';
+      let configObj = {};
+
       if (raw !== '') {
         try {
           configObj = JSON.parse(raw);
@@ -324,8 +642,21 @@ cw_header('Automation Flows');
         }
       }
 
+      if (actionKey === 'send_email') {
+        const selectedTemplate = emailTemplates.find(function (tpl) {
+          return String(tpl.id) === String(templateId);
+        }) || null;
+
+        if (templateId !== '') {
+          configObj.notification_template_id = parseInt(templateId, 10);
+        }
+        if (selectedTemplate && selectedTemplate.notification_key) {
+          configObj.notification_key = String(selectedTemplate.notification_key);
+        }
+      }
+
       rows.push({
-        action_key: row.querySelector('.af-action-key').value,
+        action_key: actionKey,
         config_json: configObj
       });
     });
@@ -411,12 +742,28 @@ cw_header('Automation Flows');
   });
 
   document.addEventListener('click', function (e) {
-    if (!e.target.classList.contains('af-remove-row')) return;
-    const row = e.target.closest('.af-row');
-    if (row) {
-      row.remove();
+    if (e.target.classList.contains('af-remove-row')) {
+      const row = e.target.closest('.af-row');
+      if (row) {
+        row.remove();
+      }
+      return;
     }
-  });
+
+    if (e.target.classList.contains('af-action-key')) {
+      const row = e.target.closest('[data-kind="action"]');
+      if (!row) return;
+
+      const emailField = row.querySelector('.af-email-template-field');
+      if (!emailField) return;
+
+      if (e.target.value === 'send_email') {
+        emailField.style.display = '';
+      } else {
+        emailField.style.display = 'none';
+      }
+    }
+  }, true);
 
   formEl.addEventListener('submit', async function (e) {
     e.preventDefault();
