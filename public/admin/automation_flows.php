@@ -170,7 +170,7 @@ cw_header('Automation Flows');
 
 <script>
 (function () {
-  const apiUrl = 'automation_flows_api.php';
+  const apiUrl = 'api/automation_flows_api.php';
   const flowListEl = document.getElementById('afFlowList');
   const formEl = document.getElementById('afForm');
   const editorTitleEl = document.getElementById('afEditorTitle');
