@@ -153,7 +153,9 @@ cw_header('Automation Flows');
                   'actions' => isset($actionsByFlow[$flowId]) ? $actionsByFlow[$flowId] : array()
               );
             ?>
-            <div class="af-flow-item" data-flow='<?= h(json_encode($payload)) ?>'>
+            <div
+              class="af-flow-item"
+              data-flow="<?= h(json_encode($payload, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT)) ?>">
               <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start;">
                 <div class="af-flow-name"><?= h((string)$flow['name']) ?></div>
                 <span class="af-pill <?= ((int)$flow['is_active'] === 1 ? 'ok' : 'off') ?>">
@@ -255,10 +257,10 @@ cw_header('Automation Flows');
 </div>
 
 <script>
-const TEMPLATE_OPTIONS = <?= json_encode($templateOptions) ?>;
-const FIELD_OPTIONS = <?= json_encode($fieldOptions) ?>;
-const OPERATOR_OPTIONS = <?= json_encode($operatorOptions) ?>;
-const ACTION_OPTIONS = <?= json_encode($actionOptions) ?>;
+const TEMPLATE_OPTIONS = <?= json_encode($templateOptions, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+const FIELD_OPTIONS = <?= json_encode($fieldOptions, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+const OPERATOR_OPTIONS = <?= json_encode($operatorOptions, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+const ACTION_OPTIONS = <?= json_encode($actionOptions, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 
 const flowIdEl = document.getElementById('flowId');
 const flowNameEl = document.getElementById('flowName');
@@ -277,7 +279,141 @@ function apiPost(payload) {
     headers: {'Content-Type': 'application/json'},
     credentials: 'same-origin',
     body: JSON.stringify(payload)
-  }).then(r => r.json());
+  }).then(async function(r){
+    const text = await r.text();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      return {ok:false,error:'Invalid JSON response: ' + text.slice(0, 400)};
+    }
+  });
+}
+
+function normalizeKey(str) {
+  return String(str || '')
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, 'and')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .replace(/_+/g, '_');
+}
+
+function buildLabelIndex(map) {
+  const idx = {};
+  Object.keys(map || {}).forEach(function(key){
+    idx[normalizeKey(key)] = key;
+    idx[normalizeKey(map[key])] = key;
+  });
+  return idx;
+}
+
+const FIELD_INDEX = buildLabelIndex(FIELD_OPTIONS);
+const OPERATOR_INDEX = buildLabelIndex(OPERATOR_OPTIONS);
+const ACTION_INDEX = buildLabelIndex(ACTION_OPTIONS);
+const TEMPLATE_INDEX = buildLabelIndex(TEMPLATE_OPTIONS);
+
+const FIELD_ALIASES = {
+  attempt: 'attempt_count',
+  attempts: 'attempt_count',
+  attempt_number: 'attempt_count',
+  total_attempts: 'attempt_count',
+  score: 'score_pct',
+  score_percent: 'score_pct',
+  percentage_score: 'score_pct',
+  result: 'result_code',
+  formal_result: 'result_code',
+  deadline: 'deadline_status',
+  timing: 'deadline_status',
+  timing_status: 'deadline_status',
+  summary_review_status: 'summary_status',
+  review_status: 'summary_status',
+  role: 'user_role'
+};
+
+const OPERATOR_ALIASES = {
+  equals: 'equals',
+  equal: 'equals',
+  is: 'equals',
+  eq: 'equals',
+  not_equals: 'not_equals',
+  not_equal: 'not_equals',
+  neq: 'not_equals',
+  greater_than: 'greater_than',
+  gt: 'greater_than',
+  greater_or_equal: 'greater_or_equal',
+  greater_than_or_equal: 'greater_or_equal',
+  greater_or_equal_to: 'greater_or_equal',
+  gte: 'greater_or_equal',
+  less_than: 'less_than',
+  lt: 'less_than',
+  less_or_equal: 'less_or_equal',
+  less_than_or_equal: 'less_or_equal',
+  less_or_equal_to: 'less_or_equal',
+  lte: 'less_or_equal',
+  contains: 'contains',
+  in: 'contains'
+};
+
+const ACTION_ALIASES = {
+  send_email: 'send_notification',
+  send_notification: 'send_notification',
+  email: 'send_notification',
+  notify: 'send_notification',
+  notification: 'send_notification',
+
+  grant_extra_attempts: 'grant_extra_attempts',
+  extra_attempts: 'grant_extra_attempts',
+  add_attempts: 'grant_extra_attempts',
+
+  apply_deadline_extension: 'apply_deadline_extension',
+  grant_deadline_extension: 'apply_deadline_extension',
+  deadline_extension: 'apply_deadline_extension',
+  extend_deadline: 'apply_deadline_extension',
+
+  create_required_action: 'create_required_action',
+  required_action: 'create_required_action',
+  create_action: 'create_required_action'
+};
+
+function resolveSelectValue(rawValue, map, index, aliasMap) {
+  const raw = String(rawValue || '').trim();
+  if (raw === '') return '';
+
+  if (Object.prototype.hasOwnProperty.call(map, raw)) {
+    return raw;
+  }
+
+  const normalized = normalizeKey(raw);
+
+  if (aliasMap && Object.prototype.hasOwnProperty.call(aliasMap, normalized)) {
+    const aliasResolved = aliasMap[normalized];
+    if (Object.prototype.hasOwnProperty.call(map, aliasResolved)) {
+      return aliasResolved;
+    }
+  }
+
+  if (Object.prototype.hasOwnProperty.call(index, normalized)) {
+    return index[normalized];
+  }
+
+  return raw;
+}
+
+function resolveFieldValue(rawValue) {
+  return resolveSelectValue(rawValue, FIELD_OPTIONS, FIELD_INDEX, FIELD_ALIASES);
+}
+
+function resolveOperatorValue(rawValue) {
+  return resolveSelectValue(rawValue, OPERATOR_OPTIONS, OPERATOR_INDEX, OPERATOR_ALIASES);
+}
+
+function resolveActionValue(rawValue) {
+  return resolveSelectValue(rawValue, ACTION_OPTIONS, ACTION_INDEX, ACTION_ALIASES);
+}
+
+function resolveTemplateValue(rawValue) {
+  return resolveSelectValue(rawValue, TEMPLATE_OPTIONS, TEMPLATE_INDEX, null);
 }
 
 function optionHtml(map, selectedValue) {
@@ -289,8 +425,46 @@ function optionHtml(map, selectedValue) {
   return html;
 }
 
+function parseConfigJson(configJson) {
+  if (!configJson) return {};
+  if (typeof configJson === 'object') return configJson;
+  try {
+    const parsed = JSON.parse(configJson);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function inferActionValue(actionKey, config) {
+  if (!config || typeof config !== 'object') return '';
+
+  if (actionKey === 'grant_extra_attempts') {
+    return config.extra_attempts ?? config.granted_extra_attempts ?? '';
+  }
+
+  if (actionKey === 'apply_deadline_extension') {
+    return config.extension_hours ?? config.hours ?? '';
+  }
+
+  if (actionKey === 'create_required_action') {
+    return config.required_action_type ?? config.action_type ?? '';
+  }
+
+  return config.value ?? '';
+}
+
+function inferNotificationKey(config) {
+  if (!config || typeof config !== 'object') return '';
+  return config.notification_key ?? config.template_key ?? config.email_type ?? '';
+}
+
 function conditionRowHtml(data) {
   data = data || {};
+
+  const selectedFieldKey = resolveFieldValue(data.field_key || '');
+  const selectedOperator = resolveOperatorValue(data.operator || '');
+
   const value = data.value_text !== null && data.value_text !== undefined && data.value_text !== ''
     ? data.value_text
     : (data.value_number !== null && data.value_number !== undefined ? data.value_number : '');
@@ -301,13 +475,13 @@ function conditionRowHtml(data) {
         '<div class="af-field">' +
           '<label class="af-label">Field</label>' +
           '<select class="af-select cond-field">' +
-            '<option value="">Select field</option>' + optionHtml(FIELD_OPTIONS, data.field_key || '') +
+            '<option value="">Select field</option>' + optionHtml(FIELD_OPTIONS, selectedFieldKey) +
           '</select>' +
         '</div>' +
         '<div class="af-field">' +
           '<label class="af-label">Operator</label>' +
           '<select class="af-select cond-operator">' +
-            '<option value="">Select operator</option>' + optionHtml(OPERATOR_OPTIONS, data.operator || '') +
+            '<option value="">Select operator</option>' + optionHtml(OPERATOR_OPTIONS, selectedOperator) +
           '</select>' +
         '</div>' +
         '<div class="af-field">' +
@@ -324,10 +498,10 @@ function conditionRowHtml(data) {
 
 function actionRowHtml(data) {
   data = data || {};
-  let config = {};
-  if (data.config_json) {
-    try { config = JSON.parse(data.config_json); } catch (e) {}
-  }
+  const config = parseConfigJson(data.config_json);
+  const selectedActionKey = resolveActionValue(data.action_key || '');
+  const selectedNotificationKey = resolveTemplateValue(inferNotificationKey(config));
+  const actionValue = inferActionValue(selectedActionKey, config);
 
   return '' +
     '<div class="af-row action-row">' +
@@ -335,18 +509,18 @@ function actionRowHtml(data) {
         '<div class="af-field">' +
           '<label class="af-label">Action</label>' +
           '<select class="af-select action-key">' +
-            '<option value="">Select action</option>' + optionHtml(ACTION_OPTIONS, data.action_key || '') +
+            '<option value="">Select action</option>' + optionHtml(ACTION_OPTIONS, selectedActionKey) +
           '</select>' +
         '</div>' +
         '<div class="af-field action-notification-wrap">' +
           '<label class="af-label">Notification Template</label>' +
           '<select class="af-select action-notification-key">' +
-            '<option value="">Select template</option>' + optionHtml(TEMPLATE_OPTIONS, config.notification_key || '') +
+            '<option value="">Select template</option>' + optionHtml(TEMPLATE_OPTIONS, selectedNotificationKey) +
           '</select>' +
         '</div>' +
         '<div class="af-field action-value-wrap">' +
           '<label class="af-label">Value</label>' +
-          '<input class="af-input action-value" type="text" value="' + escapeHtml(String(config.extra_attempts || config.extension_hours || config.required_action_type || '')) + '">' +
+          '<input class="af-input action-value" type="text" value="' + escapeHtml(String(actionValue)) + '">' +
         '</div>' +
         '<div class="af-field">' +
           '<label class="af-label">&nbsp;</label>' +
@@ -357,10 +531,15 @@ function actionRowHtml(data) {
 }
 
 function refreshActionRowUi(row) {
-  const key = row.querySelector('.action-key').value;
+  const key = resolveActionValue(row.querySelector('.action-key').value);
+  const actionSelect = row.querySelector('.action-key');
   const notificationWrap = row.querySelector('.action-notification-wrap');
   const valueWrap = row.querySelector('.action-value-wrap');
   const valueInput = row.querySelector('.action-value');
+
+  if (actionSelect.value !== key && key !== '') {
+    actionSelect.value = key;
+  }
 
   notificationWrap.style.display = 'none';
   valueWrap.style.display = 'none';
@@ -444,10 +623,14 @@ function loadFlow(flow, itemEl) {
 function collectConditions() {
   const rows = [];
   document.querySelectorAll('.condition-row').forEach(function(row){
+    const fieldKey = resolveFieldValue(row.querySelector('.cond-field').value);
+    const operator = resolveOperatorValue(row.querySelector('.cond-operator').value);
+    const value = row.querySelector('.cond-value').value;
+
     rows.push({
-      field_key: row.querySelector('.cond-field').value,
-      operator: row.querySelector('.cond-operator').value,
-      value: row.querySelector('.cond-value').value
+      field_key: fieldKey,
+      operator: operator,
+      value: value
     });
   });
   return rows;
@@ -456,11 +639,11 @@ function collectConditions() {
 function collectActions() {
   const rows = [];
   document.querySelectorAll('.action-row').forEach(function(row){
-    const actionKey = row.querySelector('.action-key').value;
+    const actionKey = resolveActionValue(row.querySelector('.action-key').value);
     const data = { action_key: actionKey };
 
     if (actionKey === 'send_notification') {
-      data.notification_key = row.querySelector('.action-notification-key').value;
+      data.notification_key = resolveTemplateValue(row.querySelector('.action-notification-key').value);
     }
     if (actionKey === 'grant_extra_attempts') {
       data.extra_attempts = row.querySelector('.action-value').value;
@@ -479,16 +662,25 @@ function collectActions() {
 
 document.querySelectorAll('.af-flow-item').forEach(function(item){
   item.addEventListener('click', function(){
-    const payload = JSON.parse(item.getAttribute('data-flow'));
+    const raw = item.getAttribute('data-flow') || '{}';
+    let payload = {};
+    try {
+      payload = JSON.parse(raw);
+    } catch (e) {
+      alert('Failed to load flow JSON.');
+      return;
+    }
     loadFlow(payload, item);
   });
 });
 
 document.getElementById('newFlowBtn').onclick = clearEditor;
+
 document.getElementById('addConditionBtn').onclick = function(){
   conditionsWrap.insertAdjacentHTML('beforeend', conditionRowHtml());
   bindDynamicRows();
 };
+
 document.getElementById('addActionBtn').onclick = function(){
   actionsWrap.insertAdjacentHTML('beforeend', actionRowHtml());
   bindDynamicRows();
