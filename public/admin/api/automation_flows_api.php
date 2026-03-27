@@ -1,8 +1,8 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../../src/bootstrap.php';
-require_once __DIR__ . '/../../src/automation_catalog.php';
+require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/automation_catalog.php';
 
 cw_require_admin();
 
@@ -39,23 +39,39 @@ function af_request_json(): array
     return $decoded;
 }
 
+function af_string_or_null($value): ?string
+{
+    if ($value === null) {
+        return null;
+    }
+    $value = trim((string)$value);
+    return $value === '' ? null : $value;
+}
+
+function af_decimal_or_null($value): ?float
+{
+    if ($value === null || $value === '') {
+        return null;
+    }
+    if (!is_numeric($value)) {
+        return null;
+    }
+    return (float)$value;
+}
+
 function af_normalize_conditions(array $conditions): array
 {
     $out = array();
 
-    foreach ($conditions as $idx => $row) {
+    foreach ($conditions as $row) {
         if (!is_array($row)) {
             continue;
         }
 
         $fieldKey = trim((string)($row['field_key'] ?? ''));
         $operator = trim((string)($row['operator'] ?? ''));
-        $valueText = isset($row['value_text']) ? trim((string)$row['value_text']) : '';
-        $valueNumber = null;
-
-        if (array_key_exists('value_number', $row) && $row['value_number'] !== '' && $row['value_number'] !== null) {
-            $valueNumber = (float)$row['value_number'];
-        }
+        $valueText = af_string_or_null($row['value_text'] ?? null);
+        $valueNumber = af_decimal_or_null($row['value_number'] ?? null);
 
         if ($fieldKey === '' || $operator === '') {
             continue;
@@ -64,7 +80,7 @@ function af_normalize_conditions(array $conditions): array
         $out[] = array(
             'field_key' => $fieldKey,
             'operator' => $operator,
-            'value_text' => $valueText !== '' ? $valueText : null,
+            'value_text' => $valueText,
             'value_number' => $valueNumber,
             'sort_order' => count($out) + 1,
         );
@@ -77,7 +93,7 @@ function af_normalize_actions(array $actions): array
 {
     $out = array();
 
-    foreach ($actions as $idx => $row) {
+    foreach ($actions as $row) {
         if (!is_array($row)) {
             continue;
         }
@@ -97,6 +113,49 @@ function af_normalize_actions(array $actions): array
     }
 
     return $out;
+}
+
+function af_flow_detail(PDO $pdo, int $flowId): ?array
+{
+    $flow = automation_flow_detail($pdo, $flowId);
+    if (!$flow) {
+        return null;
+    }
+
+    $flow['id'] = (int)($flow['id'] ?? 0);
+    $flow['name'] = (string)($flow['name'] ?? '');
+    $flow['description'] = (string)($flow['description'] ?? '');
+    $flow['event_key'] = (string)($flow['event_key'] ?? '');
+    $flow['is_active'] = (int)!empty($flow['is_active']);
+    $flow['priority'] = (int)($flow['priority'] ?? 100);
+
+    $safeConditions = array();
+    foreach ((array)($flow['conditions'] ?? array()) as $row) {
+        $safeConditions[] = array(
+            'id' => (int)($row['id'] ?? 0),
+            'flow_id' => (int)($row['flow_id'] ?? 0),
+            'field_key' => (string)($row['field_key'] ?? ''),
+            'operator' => (string)($row['operator'] ?? ''),
+            'value_text' => (string)($row['value_text'] ?? ''),
+            'value_number' => ($row['value_number'] === null || $row['value_number'] === '') ? null : (float)$row['value_number'],
+            'sort_order' => (int)($row['sort_order'] ?? 0),
+        );
+    }
+    $flow['conditions'] = $safeConditions;
+
+    $safeActions = array();
+    foreach ((array)($flow['actions'] ?? array()) as $row) {
+        $safeActions[] = array(
+            'id' => (int)($row['id'] ?? 0),
+            'flow_id' => (int)($row['flow_id'] ?? 0),
+            'action_key' => (string)($row['action_key'] ?? ''),
+            'config_json' => (string)($row['config_json'] ?? ''),
+            'sort_order' => (int)($row['sort_order'] ?? 0),
+        );
+    }
+    $flow['actions'] = $safeActions;
+
+    return $flow;
 }
 
 try {
@@ -121,7 +180,7 @@ try {
                 af_json_error('Missing flow id');
             }
 
-            $detail = automation_flow_detail($pdo, $flowId);
+            $detail = af_flow_detail($pdo, $flowId);
             if (!$detail) {
                 af_json_error('Flow not found', 404);
             }
@@ -262,7 +321,7 @@ try {
 
         $pdo->commit();
 
-        $detail = automation_flow_detail($pdo, $flowId);
+        $detail = af_flow_detail($pdo, $flowId);
         af_json_ok(array(
             'message' => 'Flow saved',
             'flow' => $detail,
