@@ -1,8 +1,11 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../../src/bootstrap.php';
-require_once __DIR__ . '/../../src/automation_catalog.php';
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/automation_catalog.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
