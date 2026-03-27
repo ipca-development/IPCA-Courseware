@@ -388,6 +388,7 @@ if (!function_exists('automation_event_category_map')) {
             $map[(string)$row['event_key']] = array(
                 'category_key' => (string)$row['category_key'],
                 'category_label' => (string)$row['category_label'],
+                'category_sort_order' => (int)($row['category_sort_order'] ?? 999),
             );
         }
 
@@ -412,19 +413,87 @@ if (!function_exists('automation_flow_rows')) {
                 created_at,
                 updated_at
             FROM automation_flows
-            ORDER BY is_active DESC, priority ASC, name ASC, id ASC
         ");
 
         $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
+
         foreach ($rows as &$row) {
             $eventKey = (string)$row['event_key'];
+            $cat = isset($eventCategoryMap[$eventKey]) ? $eventCategoryMap[$eventKey] : array(
+                'category_key' => '',
+                'category_label' => 'Uncategorized',
+                'category_sort_order' => 999,
+            );
+
             $row['event_label'] = isset($eventLabelMap[$eventKey]) ? $eventLabelMap[$eventKey] : $eventKey;
-            $row['category_key'] = isset($eventCategoryMap[$eventKey]['category_key']) ? $eventCategoryMap[$eventKey]['category_key'] : '';
-            $row['category_label'] = isset($eventCategoryMap[$eventKey]['category_label']) ? $eventCategoryMap[$eventKey]['category_label'] : 'Uncategorized';
+            $row['category_key'] = (string)$cat['category_key'];
+            $row['category_label'] = (string)$cat['category_label'];
+            $row['category_sort_order'] = (int)$cat['category_sort_order'];
         }
         unset($row);
 
+        usort($rows, function ($a, $b) {
+            $cmp = ((int)$a['category_sort_order'] <=> (int)$b['category_sort_order']);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            $cmp = strcmp((string)$a['category_label'], (string)$b['category_label']);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            $cmp = strcmp((string)$a['event_label'], (string)$b['event_label']);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            $cmp = ((int)$b['is_active'] <=> (int)$a['is_active']);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            $cmp = ((int)$a['priority'] <=> (int)$b['priority']);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            $cmp = strcmp((string)$a['name'], (string)$b['name']);
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            return ((int)$a['id'] <=> (int)$b['id']);
+        });
+
         return $rows;
+    }
+}
+
+if (!function_exists('automation_flow_rows_grouped')) {
+    function automation_flow_rows_grouped(PDO $pdo): array
+    {
+        $rows = automation_flow_rows($pdo);
+        $grouped = array();
+
+        foreach ($rows as $row) {
+            $categoryKey = (string)($row['category_key'] ?? '');
+            if ($categoryKey === '') {
+                $categoryKey = 'uncategorized';
+            }
+
+            if (!isset($grouped[$categoryKey])) {
+                $grouped[$categoryKey] = array(
+                    'category_key' => $categoryKey,
+                    'category_label' => (string)($row['category_label'] ?? 'Uncategorized'),
+                    'items' => array(),
+                );
+            }
+
+            $grouped[$categoryKey]['items'][] = $row;
+        }
+
+        return array_values($grouped);
     }
 }
 

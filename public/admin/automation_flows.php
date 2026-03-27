@@ -12,16 +12,18 @@ $eventGroups = automation_event_grouped_options($pdo, true);
 $conditionFields = automation_condition_field_options();
 $operators = automation_operator_options();
 $actionOptions = automation_action_options();
-$flows = automation_flow_rows($pdo);
+$flowGroups = automation_flow_rows_grouped($pdo);
 
 cw_header('Automation Flows');
 ?>
 <style>
-.af-wrap{display:grid;grid-template-columns:360px minmax(0,1fr);gap:24px}
+.af-wrap{display:grid;grid-template-columns:380px minmax(0,1fr);gap:24px}
 .af-panel{background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:18px;box-shadow:0 10px 24px rgba(15,23,42,.05)}
 .af-panel-head{padding:18px 20px;border-bottom:1px solid rgba(15,23,42,.06)}
 .af-panel-body{padding:18px 20px}
-.af-list{display:flex;flex-direction:column;gap:12px}
+.af-list{display:flex;flex-direction:column;gap:14px}
+.af-group{display:flex;flex-direction:column;gap:10px}
+.af-group-label{font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.12em;padding:2px 2px 0 2px}
 .af-item{border:1px solid rgba(15,23,42,.08);border-radius:14px;padding:14px;cursor:pointer}
 .af-item.active{border-color:#1d4f91;box-shadow:0 0 0 3px rgba(29,79,145,.08)}
 .af-item-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
@@ -52,7 +54,7 @@ cw_header('Automation Flows');
   <section class="af-panel">
     <div class="af-panel-head">
       <h2 style="margin:0;">Flows</h2>
-      <div class="muted" style="margin-top:6px;">Grouped by event category in the selector, with execution still driven by event_key.</div>
+      <div class="muted" style="margin-top:6px;">Sorted by event category, then event, then priority and name.</div>
     </div>
     <div class="af-panel-body">
       <div class="af-btn-row" style="margin-bottom:14px;">
@@ -60,31 +62,35 @@ cw_header('Automation Flows');
       </div>
 
       <div class="af-list" id="afFlowList">
-        <?php if (empty($flows)): ?>
+        <?php if (empty($flowGroups)): ?>
           <div class="af-empty">No automation flows created yet.</div>
         <?php else: ?>
-          <?php foreach ($flows as $flow): ?>
-            <div class="af-item" data-flow-id="<?= (int)$flow['id'] ?>">
-              <div class="af-item-top">
-                <div>
-                  <div class="af-item-name"><?= h((string)$flow['name']) ?></div>
-                  <div class="af-item-meta">
-                    <span class="af-pill cat"><?= h((string)$flow['category_label']) ?></span>
-                    &nbsp;
-                    <strong><?= h((string)$flow['event_label']) ?></strong>
+          <?php foreach ($flowGroups as $group): ?>
+            <div class="af-group">
+              <div class="af-group-label"><?= h((string)$group['category_label']) ?></div>
+
+              <?php foreach ((array)$group['items'] as $flow): ?>
+                <div class="af-item" data-flow-id="<?= (int)$flow['id'] ?>">
+                  <div class="af-item-top">
+                    <div>
+                      <div class="af-item-name"><?= h((string)$flow['name']) ?></div>
+                      <div class="af-item-meta">
+                        <strong><?= h((string)$flow['event_label']) ?></strong>
+                      </div>
+                    </div>
+                    <div>
+                      <?php if (!empty($flow['is_active'])): ?>
+                        <span class="af-pill on">Active</span>
+                      <?php else: ?>
+                        <span class="af-pill off">Inactive</span>
+                      <?php endif; ?>
+                    </div>
+                  </div>
+                  <div class="af-item-meta" style="margin-top:10px;">
+                    Priority <?= (int)$flow['priority'] ?>
                   </div>
                 </div>
-                <div>
-                  <?php if (!empty($flow['is_active'])): ?>
-                    <span class="af-pill on">Active</span>
-                  <?php else: ?>
-                    <span class="af-pill off">Inactive</span>
-                  <?php endif; ?>
-                </div>
-              </div>
-              <div class="af-item-meta" style="margin-top:10px;">
-                Priority <?= (int)$flow['priority'] ?>
-              </div>
+              <?php endforeach; ?>
             </div>
           <?php endforeach; ?>
         <?php endif; ?>
