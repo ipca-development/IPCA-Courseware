@@ -197,8 +197,12 @@ cw_header('Automation Flows');
 
 .af-field input,
 .af-field select{
+  height:var(--af-control-h);
   min-height:var(--af-control-h);
   padding:0 12px;
+  line-height:1.2;
+  -webkit-appearance:none;
+  appearance:none;
 }
 
 .af-field textarea{
@@ -242,7 +246,12 @@ cw_header('Automation Flows');
 }
 
 .af-row.actions{
-  grid-template-columns:1fr 1fr auto;
+  grid-template-columns:minmax(220px,1fr) minmax(260px,1fr) auto;
+  align-items:start;
+}
+
+.af-row.actions .af-field{
+  align-self:start;
 }
 
 .af-empty{
@@ -280,11 +289,17 @@ cw_header('Automation Flows');
 .af-action-extra{
   display:flex;
   flex-direction:column;
-  gap:10px;
+  gap:8px;
+}
+
+.af-action-primary{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
 }
 
 .af-action-advanced{
-  margin-top:4px;
+  margin-top:2px;
 }
 
 .af-action-advanced summary{
@@ -302,6 +317,10 @@ cw_header('Automation Flows');
   margin-top:6px;
   font-size:12px;
   color:var(--af-muted);
+}
+
+.af-hidden{
+  display:none !important;
 }
 
 @media (max-width: 1180px){
@@ -440,7 +459,7 @@ cw_header('Automation Flows');
           <div class="af-btn-row" style="margin-top:10px;">
             <button class="btn af-btn-secondary" type="button" id="afAddActionBtn">Add Action</button>
           </div>
-          <div class="af-inline-note">Email actions now use a template dropdown instead of raw JSON.</div>
+          <div class="af-inline-note">Action-specific fields will adapt automatically. Advanced Config JSON remains available for optional fine tuning.</div>
         </div>
 
         <div class="af-btn-row" style="margin-top:24px;">
@@ -509,6 +528,20 @@ cw_header('Automation Flows');
     return html;
   }
 
+  function requiredActionTypeOptionsHtml(selectedValue) {
+    const options = {
+      remediation_acknowledgement: 'Remediation Acknowledgement',
+      deadline_reason_submission: 'Deadline Reason Submission',
+      instructor_approval: 'Instructor Approval'
+    };
+
+    let html = '<option value="">Select required action</option>';
+    Object.keys(options).forEach(function (key) {
+      html += '<option value="' + esc(key) + '"' + (String(selectedValue) === String(key) ? ' selected' : '') + '>' + esc(options[key]) + '</option>';
+    });
+    return html;
+  }
+
   function conditionRowHtml(row) {
     row = row || {};
     return '' +
@@ -551,11 +584,77 @@ cw_header('Automation Flows');
     return config;
   }
 
+  function dynamicActionFieldHtml(actionKey, config) {
+    const selectedTemplateId = config.notification_template_id || config.template_id || '';
+    const requiredActionType = config.required_action_type || '';
+    const logEventCode = config.event_code || '';
+    const notifyAdminRole = config.notify_role || 'admin';
+
+    if (actionKey === 'send_email') {
+      return '' +
+        '<div class="af-action-primary" data-dynamic-kind="send_email">' +
+          '<div class="af-field">' +
+            '<label>Email Template</label>' +
+            '<select class="af-email-template-id">' +
+              emailTemplateOptionsHtml(selectedTemplateId) +
+            '</select>' +
+            '<div class="af-help">Choose the notification template used for this email action.</div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    if (actionKey === 'create_required_action') {
+      return '' +
+        '<div class="af-action-primary" data-dynamic-kind="create_required_action">' +
+          '<div class="af-field">' +
+            '<label>Required Action</label>' +
+            '<select class="af-required-action-type">' +
+              requiredActionTypeOptionsHtml(requiredActionType) +
+            '</select>' +
+            '<div class="af-help">Choose which required action should be created for the student.</div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    if (actionKey === 'log_event') {
+      return '' +
+        '<div class="af-action-primary" data-dynamic-kind="log_event">' +
+          '<div class="af-field">' +
+            '<label>Event Code</label>' +
+            '<input class="af-log-event-code" type="text" value="' + esc(logEventCode) + '">' +
+            '<div class="af-help">Short event code to log when this action runs.</div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    if (actionKey === 'notify_admin') {
+      return '' +
+        '<div class="af-action-primary" data-dynamic-kind="notify_admin">' +
+          '<div class="af-field">' +
+            '<label>Notify Role</label>' +
+            '<select class="af-notify-role">' +
+              '<option value="admin"' + (notifyAdminRole === 'admin' ? ' selected' : '') + '>Admin</option>' +
+              '<option value="supervisor"' + (notifyAdminRole === 'supervisor' ? ' selected' : '') + '>Supervisor</option>' +
+            '</select>' +
+            '<div class="af-help">Choose which role receives the notification.</div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    return '' +
+      '<div class="af-action-primary" data-dynamic-kind="none">' +
+        '<div class="af-field">' +
+          '<label>Action Details</label>' +
+          '<input type="text" value="" disabled>' +
+          '<div class="af-help">No guided field for this action. Use Advanced Config JSON if needed.</div>' +
+        '</div>' +
+      '</div>';
+  }
+
   function actionRowHtml(row) {
     row = row || {};
     const config = parseActionConfig(row);
     const actionKey = row.action_key || '';
-    const selectedTemplateId = config.notification_template_id || config.template_id || '';
     const advancedJson = Object.keys(config).length ? JSON.stringify(config, null, 2) : '';
 
     return '' +
@@ -568,14 +667,8 @@ cw_header('Automation Flows');
           '</select>' +
         '</div>' +
         '<div class="af-action-extra">' +
-          '<div class="af-field af-email-template-field" style="' + (actionKey === 'send_email' ? '' : 'display:none;') + '">' +
-            '<label>Email Template</label>' +
-            '<select class="af-email-template-id">' +
-              emailTemplateOptionsHtml(selectedTemplateId) +
-            '</select>' +
-            '<div class="af-help">Choose the notification template used for this email action.</div>' +
-          '</div>' +
-          '<details class="af-action-advanced"' + (actionKey !== 'send_email' && advancedJson !== '' ? ' open' : '') + '>' +
+          dynamicActionFieldHtml(actionKey, config) +
+          '<details class="af-action-advanced"' + (advancedJson !== '' ? ' open' : '') + '>' +
             '<summary>Advanced Config JSON</summary>' +
             '<div class="af-field">' +
               '<textarea class="af-action-config" rows="4">' + esc(advancedJson) + '</textarea>' +
@@ -583,9 +676,40 @@ cw_header('Automation Flows');
           '</details>' +
         '</div>' +
         '<div class="af-field">' +
+          '<label>&nbsp;</label>' +
           '<button class="btn af-danger af-remove-row" type="button">Remove</button>' +
         '</div>' +
       '</div>';
+  }
+
+  function rerenderActionDynamicField(row) {
+    if (!row) return;
+
+    const actionKeyEl = row.querySelector('.af-action-key');
+    const dynamicHost = row.querySelector('.af-action-extra');
+    const advanced = row.querySelector('.af-action-advanced');
+    const configTextarea = row.querySelector('.af-action-config');
+
+    if (!actionKeyEl || !dynamicHost || !advanced || !configTextarea) {
+      return;
+    }
+
+    let config = {};
+    const raw = configTextarea.value.trim();
+    if (raw !== '') {
+      try {
+        config = JSON.parse(raw);
+      } catch (e) {
+        config = {};
+      }
+    }
+
+    const oldPrimary = dynamicHost.querySelector('.af-action-primary');
+    if (oldPrimary) {
+      oldPrimary.remove();
+    }
+
+    advanced.insertAdjacentHTML('beforebegin', dynamicActionFieldHtml(actionKeyEl.value, config));
   }
 
   function resetForm() {
@@ -630,8 +754,6 @@ cw_header('Automation Flows');
     actionsEl.querySelectorAll('[data-kind="action"]').forEach(function (row) {
       const actionKey = row.querySelector('.af-action-key').value;
       const raw = row.querySelector('.af-action-config').value.trim();
-      const templateIdEl = row.querySelector('.af-email-template-id');
-      const templateId = templateIdEl ? templateIdEl.value : '';
       let configObj = {};
 
       if (raw !== '') {
@@ -643,16 +765,75 @@ cw_header('Automation Flows');
       }
 
       if (actionKey === 'send_email') {
+        const templateIdEl = row.querySelector('.af-email-template-id');
+        const templateId = templateIdEl ? templateIdEl.value : '';
         const selectedTemplate = emailTemplates.find(function (tpl) {
           return String(tpl.id) === String(templateId);
         }) || null;
 
+        delete configObj.required_action_type;
+        delete configObj.event_code;
+        delete configObj.notify_role;
+
         if (templateId !== '') {
           configObj.notification_template_id = parseInt(templateId, 10);
+        } else {
+          delete configObj.notification_template_id;
         }
+
         if (selectedTemplate && selectedTemplate.notification_key) {
           configObj.notification_key = String(selectedTemplate.notification_key);
+        } else {
+          delete configObj.notification_key;
         }
+      } else if (actionKey === 'create_required_action') {
+        const requiredActionTypeEl = row.querySelector('.af-required-action-type');
+        const requiredActionType = requiredActionTypeEl ? requiredActionTypeEl.value : '';
+
+        delete configObj.notification_template_id;
+        delete configObj.notification_key;
+        delete configObj.event_code;
+        delete configObj.notify_role;
+
+        if (requiredActionType !== '') {
+          configObj.required_action_type = requiredActionType;
+        } else {
+          delete configObj.required_action_type;
+        }
+      } else if (actionKey === 'log_event') {
+        const logEventCodeEl = row.querySelector('.af-log-event-code');
+        const eventCode = logEventCodeEl ? logEventCodeEl.value.trim() : '';
+
+        delete configObj.notification_template_id;
+        delete configObj.notification_key;
+        delete configObj.required_action_type;
+        delete configObj.notify_role;
+
+        if (eventCode !== '') {
+          configObj.event_code = eventCode;
+        } else {
+          delete configObj.event_code;
+        }
+      } else if (actionKey === 'notify_admin') {
+        const notifyRoleEl = row.querySelector('.af-notify-role');
+        const notifyRole = notifyRoleEl ? notifyRoleEl.value : '';
+
+        delete configObj.notification_template_id;
+        delete configObj.notification_key;
+        delete configObj.required_action_type;
+        delete configObj.event_code;
+
+        if (notifyRole !== '') {
+          configObj.notify_role = notifyRole;
+        } else {
+          delete configObj.notify_role;
+        }
+      } else {
+        delete configObj.notification_template_id;
+        delete configObj.notification_key;
+        delete configObj.required_action_type;
+        delete configObj.event_code;
+        delete configObj.notify_role;
       }
 
       rows.push({
@@ -749,21 +930,14 @@ cw_header('Automation Flows');
       }
       return;
     }
+  });
 
+  document.addEventListener('change', function (e) {
     if (e.target.classList.contains('af-action-key')) {
       const row = e.target.closest('[data-kind="action"]');
-      if (!row) return;
-
-      const emailField = row.querySelector('.af-email-template-field');
-      if (!emailField) return;
-
-      if (e.target.value === 'send_email') {
-        emailField.style.display = '';
-      } else {
-        emailField.style.display = 'none';
-      }
+      rerenderActionDynamicField(row);
     }
-  }, true);
+  });
 
   formEl.addEventListener('submit', async function (e) {
     e.preventDefault();
