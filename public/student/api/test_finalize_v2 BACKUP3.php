@@ -1143,37 +1143,588 @@ TXT;
     upload_file_to_presigned_put((string)$resultPresign['url'], $resultAudioLocal, 'audio/mpeg');
     $resultAudioUrl = (string)$resultPresign['public_url'];
 
-    $finalizeResult = $engine->finalizeAssessedProgressTest($testId, [
-    'score_pct' => $scorePct,
-    'ai_summary' => $written,
-    'weak_areas' => $weak,
-    'debrief_spoken' => $spoken,
-    'summary_quality' => $summaryQuality,
-    'summary_issues' => $summaryIssues,
-    'summary_corrections' => $summaryCorrections,
-    'confirmed_misunderstandings' => $confirmedMisunderstandings,
-    'completed_at' => gmdate('Y-m-d H:i:s'),
-]);
+    $queuedEmailIds = [];
+
+    $pdo->beginTransaction();
+
+    $nowUtc = gmdate('Y-m-d H:i:s');
+    $completedAtForClassification = $nowUtc;
+    $test['completed_at'] = $completedAtForClassification;
+
+    $classification = classify_progress_test_result($test, $scorePct, $policy);
+
+    $multipleUnsatWindowDays = (int)($policy['multiple_unsat_window_days'] ?? 30);
+    $multipleUnsatSameLessonThreshold = (int)($policy['multiple_unsat_same_lesson_threshold'] ?? 3);
+    $multipleUnsatCoursewideThreshold = (int)($policy['multiple_unsat_coursewide_threshold'] ?? 5);
+
+    $recentUnsats = [
+        'same_lesson_unsat_count' => 0,
+        'coursewide_unsat_count' => 0
+    ];
+
+    if ((int)$classification['counts_as_unsat'] === 1) {
+        $recentUnsats = count_recent_unsats(
+            $pdo,
+            $testOwnerUserId,
+            $cohortId,
+            $lessonId,
+            max(1, $multipleUnsatWindowDays)
+        );
+        $recentUnsats['same_lesson_unsat_count']++;
+        $recentUnsats['coursewide_unsat_count']++;
+    }
+
+    $remediationTriggered = 0;
+    if ((int)$classification['counts_as_unsat'] === 1) {
+        if (
+            $recentUnsats['same_lesson_unsat_count'] >= $multipleUnsatSameLessonThreshold ||
+            $recentUnsats['coursewide_unsat_count'] >= $multipleUnsatCoursewideThreshold
+        ) {
+            $remediationTriggered = 1;
+        }
+    }
+
+    $upTest = $pdo->prepare("
+      UPDATE progress_tests_v2
+      SET status='completed',
+          score_pct=?,
+          ai_summary=?,
+          weak_areas=?,
+          debrief_spoken=?,
+          timing_status=?,
+          formal_result_code=?,
+          formal_result_label=?,
+          pass_gate_met=?,
+          counts_as_unsat=?,
+          remediation_triggered=?,
+          finalized_by_logic_version=?,
+          completed_at=?,
+          updated_at=NOW()
+      WHERE id=?
+    ");
+    $upTest->execute([
+        $scorePct,
+        $written,
+        $weak,
+        $spoken,
+        $classification['timing_status'],
+        $classification['formal_result_code'],
+        $classification['formal_result_label'],
+        (int)$classification['pass_gate_met'],
+        (int)$classification['counts_as_unsat'],
+        $remediationTriggered,
+        CoursewareProgressionV2::LOGIC_VERSION,
+        $completedAtForClassification,
+        $testId
+    ]);
+
+    $summaryStatus = 'missing';
+    $sumSt = $pdo->prepare("
+        SELECT review_status
+        FROM lesson_summaries
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id = ?
+        LIMIT 1
+    ");
+    $sumSt->execute([$testOwnerUserId, $cohortId, $lessonId]);
+    $sumReview = $sumSt->fetchColumn();
+    if (is_string($sumReview) && $sumReview !== '') {
+        if (in_array($sumReview, ['missing','pending','acceptable','needs_revision','rejected'], true)) {
+            $summaryStatus = $sumReview;
+        }
+    }
+
+    $testPassStatus = 'failed';
+    $completionStatus = 'in_progress';
+
+    if ((int)$classification['pass_gate_met'] === 1) {
+        $testPassStatus = 'passed';
+        if ($summaryStatus === 'acceptable') {
+            $completionStatus = 'completed';
+        } else {
+            $completionStatus = 'awaiting_summary_review';
+        }
+    } else {
+        if ($classification['timing_status'] === 'after_final_deadline') {
+            $testPassStatus = 'deadline_missed';
+            $completionStatus = 'blocked_deadline';
+        } else {
+            $testPassStatus = 'failed';
+            $completionStatus = $remediationTriggered ? 'remediation_required' : 'in_progress';
+        }
+    }
+
+    $effectiveDeadlineUtc = trim((string)($test['effective_deadline_utc'] ?? ''));
+    $attemptCount = (int)($test['attempt'] ?? 1);
+
+    $maxAttemptsBeforeInstructorApproval = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
+    if ($maxAttemptsBeforeInstructorApproval <= 0) {
+        $maxAttemptsBeforeInstructorApproval = 5;
+    }
+
+    $bestScore = (float)$scorePct;
+
+    $insActivity = $pdo->prepare("
+        INSERT INTO lesson_activity
+        (
+            user_id,
+            cohort_id,
+            lesson_id,
+            attempt_count,
+            best_score,
+            summary_status,
+            test_pass_status,
+            completion_status,
+            effective_deadline_utc,
+            extension_count,
+            final_warning_issued,
+            reason_required,
+            reason_submitted,
+            reason_decision,
+            next_lesson_unlocked_at,
+            last_state_eval_at,
+            completed_at,
+            created_at,
+            updated_at
+        )
+        VALUES
+        (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW()
+        )
+        ON DUPLICATE KEY UPDATE
+            attempt_count = GREATEST(COALESCE(attempt_count, 0), VALUES(attempt_count)),
+            best_score = GREATEST(COALESCE(best_score, 0), VALUES(best_score)),
+            summary_status = VALUES(summary_status),
+            test_pass_status = VALUES(test_pass_status),
+            completion_status = VALUES(completion_status),
+            effective_deadline_utc = VALUES(effective_deadline_utc),
+            final_warning_issued = VALUES(final_warning_issued),
+            reason_required = VALUES(reason_required),
+            reason_submitted = VALUES(reason_submitted),
+            reason_decision = VALUES(reason_decision),
+            last_state_eval_at = VALUES(last_state_eval_at),
+            completed_at = CASE
+                WHEN VALUES(completion_status) = 'completed' AND completed_at IS NULL THEN VALUES(completed_at)
+                ELSE completed_at
+            END,
+            updated_at = NOW()
+    ");
+    $insActivity->execute([
+        $testOwnerUserId,
+        $cohortId,
+        $lessonId,
+        $attemptCount,
+        $bestScore,
+        $summaryStatus,
+        $testPassStatus,
+        $completionStatus,
+        ($effectiveDeadlineUtc !== '' ? $effectiveDeadlineUtc : null),
+        0,
+        0,
+        0,
+        0,
+        null,
+        null,
+        $nowUtc,
+        ($completionStatus === 'completed' ? $completedAtForClassification : null)
+    ]);
+
+    if ($completionStatus === 'completed') {
+        $nextSt = $pdo->prepare("
+            SELECT lesson_id
+            FROM cohort_lesson_deadlines
+            WHERE cohort_id = ?
+              AND unlock_after_lesson_id = ?
+            ORDER BY sort_order ASC, id ASC
+            LIMIT 1
+        ");
+        $nextSt->execute([$cohortId, $lessonId]);
+        $nextLessonId = (int)($nextSt->fetchColumn() ?: 0);
+
+        if ($nextLessonId > 0) {
+            $nextInsert = $pdo->prepare("
+                INSERT INTO lesson_activity
+                (
+                    user_id,
+                    cohort_id,
+                    lesson_id,
+                    attempt_count,
+                    best_score,
+                    summary_status,
+                    test_pass_status,
+                    completion_status,
+                    effective_deadline_utc,
+                    extension_count,
+                    final_warning_issued,
+                    reason_required,
+                    reason_submitted,
+                    reason_decision,
+                    next_lesson_unlocked_at,
+                    last_state_eval_at,
+                    completed_at,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (
+                    ?, ?, ?, 0, 0, 'missing', 'not_started',
+                    'available', NULL, 0, 0, 0, 0, NULL, ?, ?, NULL, NOW(), NOW()
+                )
+                ON DUPLICATE KEY UPDATE
+                    completion_status = CASE
+                        WHEN completion_status = 'locked' THEN 'available'
+                        WHEN completion_status = 'available' THEN 'available'
+                        ELSE completion_status
+                    END,
+                    next_lesson_unlocked_at = CASE
+                        WHEN next_lesson_unlocked_at IS NULL THEN VALUES(next_lesson_unlocked_at)
+                        ELSE next_lesson_unlocked_at
+                    END,
+                    last_state_eval_at = VALUES(last_state_eval_at),
+                    updated_at = NOW()
+            ");
+            $nextInsert->execute([
+                $testOwnerUserId,
+                $cohortId,
+                $nextLessonId,
+                $nowUtc,
+                $nowUtc
+            ]);
+        }
+    }
+
+    $engine->logProgressionEvent([
+        'user_id' => $testOwnerUserId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'progress_test_id' => $testId,
+        'event_type' => 'finalization',
+        'event_code' => 'progress_test_finalized',
+        'event_status' => 'info',
+        'actor_type' => 'system',
+        'actor_user_id' => null,
+        'event_time' => $completedAtForClassification,
+        'payload' => [
+            'score_pct' => $scorePct,
+            'timing_status' => $classification['timing_status'],
+            'formal_result_code' => $classification['formal_result_code'],
+            'formal_result_label' => $classification['formal_result_label'],
+            'pass_gate_met' => (int)$classification['pass_gate_met'],
+            'counts_as_unsat' => (int)$classification['counts_as_unsat'],
+            'remediation_triggered' => $remediationTriggered,
+            'same_lesson_unsat_count' => $recentUnsats['same_lesson_unsat_count'],
+            'coursewide_unsat_count' => $recentUnsats['coursewide_unsat_count']
+        ],
+        'legal_note' => 'Progress test finalized under active V2 progression policy.'
+    ]);
+
+    if ($remediationTriggered) {
+        $engine->logProgressionEvent([
+            'user_id' => $testOwnerUserId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => $testId,
+            'event_type' => 'remediation',
+            'event_code' => 'remediation_meeting_recommended',
+            'event_status' => 'warning',
+            'actor_type' => 'system',
+            'actor_user_id' => null,
+            'event_time' => $completedAtForClassification,
+            'payload' => [
+                'same_lesson_unsat_count' => $recentUnsats['same_lesson_unsat_count'],
+                'coursewide_unsat_count' => $recentUnsats['coursewide_unsat_count']
+            ],
+            'legal_note' => 'Automatic remediation recommendation triggered by repeated unsatisfactory progress test results.'
+        ]);
+    }
+
+    $studentRecipient = $engine->getUserRecipient($testOwnerUserId);
+    $chiefRecipient = $engine->getChiefInstructorRecipient([
+        'cohort_id' => $cohortId
+    ]);
+    $lessonTitle = $engine->getLessonTitle($lessonId);
+    $cohortTitle = $engine->getCohortTitle($cohortId);
+
+    $studentName = trim((string)($studentRecipient['name'] ?? $u['name'] ?? 'Student'));
+    if ($studentName === '') {
+        $studentName = 'Student';
+    }
+
+    $sendEmailAfterThirdFail = !empty($policy['send_email_after_third_fail']);
+    $thresholdAttemptForRemediationEmail = (int)($policy['threshold_attempt_for_remediation_email'] ?? 3);
+
+    if (
+        $studentRecipient !== null &&
+        $sendEmailAfterThirdFail &&
+        (int)$classification['counts_as_unsat'] === 1 &&
+        $attemptCount === max(1, $thresholdAttemptForRemediationEmail)
+    ) {
+        $existingPendingRemediation = $engine->getPendingRequiredAction(
+            $testOwnerUserId,
+            $cohortId,
+            $lessonId,
+            'remediation_acknowledgement'
+        );
+
+        $remediationToken = $existingPendingRemediation
+            ? (string)$existingPendingRemediation['token']
+            : bin2hex(random_bytes(32));
+
+        $remediationUrl = build_app_url('/student/remediation_action.php?token=' . urlencode($remediationToken));
+
+        $queueResult = $engine->renderAndQueueNotificationTemplate([
+            'notification_key' => 'third_fail_remediation',
+            'user_id' => $testOwnerUserId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => $testId,
+            'email_type' => 'third_fail_remediation',
+            'recipients_to' => [[
+                'email' => (string)$studentRecipient['email'],
+                'name' => $studentName
+            ]],
+            'recipients_cc' => $chiefRecipient !== null
+                ? [[
+                    'email' => (string)$chiefRecipient['email'],
+                    'name' => trim((string)($chiefRecipient['name'] ?? ''))
+                ]]
+                : [],
+            'context' => [
+                'student_name' => $studentName,
+                'lesson_title' => $lessonTitle,
+                'cohort_title' => $cohortTitle,
+                'attempt_count' => (string)$attemptCount,
+                'score_pct' => (string)$scorePct,
+                'weak_areas_html' => html_with_breaks($weak),
+                'weak_areas_text' => $weak,
+                'written_debrief_html' => html_with_breaks($written),
+                'written_debrief_text' => $written,
+                'remediation_url' => $remediationUrl,
+            ],
+            'ai_inputs' => [
+                'trigger' => 'third_fail_remediation',
+                'attempt' => $attemptCount,
+                'score_pct' => $scorePct,
+                'lesson_title' => $lessonTitle,
+                'cohort_title' => $cohortTitle,
+                'weak_areas' => $weak,
+                'written_debrief' => $written,
+                'remediation_token' => $remediationToken
+            ],
+            'sent_status' => 'queued'
+        ]);
+
+        if (!empty($queueResult['queued'])) {
+            $emailId = (int)$queueResult['email_id'];
+            $queuedEmailIds[] = $emailId;
+
+            if (!$existingPendingRemediation) {
+                $actionId = $engine->createRequiredAction([
+                    'user_id' => $testOwnerUserId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $testId,
+                    'action_type' => 'remediation_acknowledgement',
+                    'token' => $remediationToken,
+                    'title' => 'Remedial Study Acknowledgement - ' . $lessonTitle,
+                    'instructions_html' => ''
+                        . '<p>Please review the following remedial study items carefully before attempting the progress test again.</p>'
+                        . '<p><strong>Weak Areas:</strong><br>' . html_with_breaks($weak) . '</p>'
+                        . '<p><strong>Debrief:</strong><br>' . html_with_breaks($written) . '</p>'
+                        . '<p>When you have restudied the material, confirm below. Your acknowledgment will be logged with a timestamp for training records.</p>',
+                    'instructions_text' => "Weak Areas:\n{$weak}\n\nDebrief:\n{$written}",
+                    'related_email_id' => $emailId
+                ]);
+
+                $engine->logProgressionEvent([
+                    'user_id' => $testOwnerUserId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $testId,
+                    'event_type' => 'required_action',
+                    'event_code' => 'remediation_action_created',
+                    'event_status' => 'info',
+                    'actor_type' => 'system',
+                    'actor_user_id' => null,
+                    'event_time' => $completedAtForClassification,
+                    'payload' => [
+                        'required_action_id' => $actionId,
+                        'email_id' => $emailId
+                    ],
+                    'legal_note' => 'Remediation acknowledgement action created.'
+                ]);
+            }
+        }
+    }
+
+    $instructorEscalationTriggered = false;
+
+    if (
+        $studentRecipient !== null &&
+        $chiefRecipient !== null &&
+        (int)$classification['counts_as_unsat'] === 1 &&
+        $attemptCount >= $maxAttemptsBeforeInstructorApproval
+    ) {
+        $existingInstructorApproval = $engine->getPendingRequiredAction(
+            $testOwnerUserId,
+            $cohortId,
+            $lessonId,
+            'instructor_approval'
+        );
+
+        $approvalToken = $existingInstructorApproval
+            ? (string)$existingInstructorApproval['token']
+            : bin2hex(random_bytes(32));
+
+        $approvalUrl = build_app_url('/instructor/instructor_approval.php?token=' . urlencode($approvalToken));
+
+        $studentQueueResult = $engine->renderAndQueueNotificationTemplate([
+            'notification_key' => 'instructor_approval_required',
+            'user_id' => $testOwnerUserId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => $testId,
+            'email_type' => 'instructor_approval_required',
+            'recipients_to' => [[
+                'email' => (string)$studentRecipient['email'],
+                'name' => $studentName
+            ]],
+            'recipients_cc' => [],
+            'context' => [
+                'student_name' => $studentName,
+                'lesson_title' => $lessonTitle,
+                'cohort_title' => $cohortTitle,
+            ],
+            'ai_inputs' => [
+                'trigger' => 'instructor_approval_required_student',
+                'attempt' => $attemptCount,
+                'score_pct' => $scorePct,
+                'lesson_title' => $lessonTitle,
+                'cohort_title' => $cohortTitle
+            ],
+            'sent_status' => 'queued'
+        ]);
+
+        if (!empty($studentQueueResult['queued'])) {
+            $studentEmailId = (int)$studentQueueResult['email_id'];
+            $queuedEmailIds[] = $studentEmailId;
+        } else {
+            $studentEmailId = 0;
+        }
+
+        $chiefName = trim((string)($chiefRecipient['name'] ?? 'Chief Instructor'));
+        if ($chiefName === '') {
+            $chiefName = 'Chief Instructor';
+        }
+
+        $chiefQueueResult = $engine->renderAndQueueNotificationTemplate([
+            'notification_key' => 'instructor_approval_required_chief',
+            'user_id' => $testOwnerUserId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => $testId,
+            'email_type' => 'instructor_approval_required_chief',
+            'recipients_to' => [[
+                'email' => (string)$chiefRecipient['email'],
+                'name' => $chiefName
+            ]],
+            'recipients_cc' => [],
+            'context' => [
+                'chief_name' => $chiefName,
+                'student_name' => $studentName,
+                'lesson_title' => $lessonTitle,
+                'cohort_title' => $cohortTitle,
+                'attempt_count' => (string)$attemptCount,
+                'score_pct' => (string)$scorePct,
+                'weak_areas_html' => html_with_breaks($weak),
+                'weak_areas_text' => $weak,
+                'approval_url' => $approvalUrl,
+            ],
+            'ai_inputs' => [
+                'trigger' => 'instructor_approval_required_chief',
+                'attempt' => $attemptCount,
+                'score_pct' => $scorePct,
+                'lesson_title' => $lessonTitle,
+                'cohort_title' => $cohortTitle,
+                'approval_token' => $approvalToken
+            ],
+            'sent_status' => 'queued'
+        ]);
+
+        if (!empty($chiefQueueResult['queued'])) {
+            $chiefEmailId = (int)$chiefQueueResult['email_id'];
+            $queuedEmailIds[] = $chiefEmailId;
+        } else {
+            $chiefEmailId = 0;
+        }
+
+        if (!$existingInstructorApproval && $chiefEmailId > 0) {
+            $approvalActionId = $engine->createRequiredAction([
+                'user_id' => $testOwnerUserId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $testId,
+                'action_type' => 'instructor_approval',
+                'token' => $approvalToken,
+                'title' => 'Instructor Approval Required - ' . $lessonTitle,
+                'instructions_html' => ''
+                    . '<p>Student <strong>' . html_e($studentName) . '</strong> has reached the maximum permitted attempts for this lesson.</p>'
+                    . '<p><strong>Lesson:</strong> ' . html_e($lessonTitle) . '</p>'
+                    . '<p><strong>Cohort:</strong> ' . html_e($cohortTitle) . '</p>'
+                    . '<p><strong>Latest score:</strong> ' . html_e((string)$scorePct) . '%</p>'
+                    . '<p><strong>Weak Areas:</strong><br>' . html_with_breaks($weak) . '</p>'
+                    . '<p>Approve only if you want to allow further training progression after review.</p>',
+                'instructions_text' => "Student: {$studentName}\nLesson: {$lessonTitle}\nCohort: {$cohortTitle}\nLatest score: {$scorePct}%\n\nWeak Areas:\n{$weak}",
+                'related_email_id' => $chiefEmailId
+            ]);
+
+            $engine->logProgressionEvent([
+                'user_id' => $testOwnerUserId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $testId,
+                'event_type' => 'required_action',
+                'event_code' => 'instructor_approval_action_created',
+                'event_status' => 'warning',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => $completedAtForClassification,
+                'payload' => [
+                    'required_action_id' => $approvalActionId,
+                    'chief_email_id' => $chiefEmailId,
+                    'student_email_id' => $studentEmailId > 0 ? $studentEmailId : null
+                ],
+                'legal_note' => 'Instructor approval action created after maximum failed attempts reached.'
+            ]);
+        }
+
+        if (!empty($studentQueueResult['queued']) || !empty($chiefQueueResult['queued'])) {
+            $instructorEscalationTriggered = true;
+        }
+    }
+
+    $pdo->commit();
 
     $emailSendResults = [];
-foreach ((array)($finalizeResult['dispatch_plan']['queued_email_ids'] ?? []) as $queuedEmailId) {
-    try {
-        $emailSendResults[] = [
-            'email_id' => (int)$queuedEmailId,
-            'result' => $engine->sendProgressionEmailById((int)$queuedEmailId)
-        ];
-    } catch (Throwable $mailEx) {
-        $emailSendResults[] = [
-            'email_id' => (int)$queuedEmailId,
-            'result' => [
-                'ok' => false,
-                'provider' => 'smtp',
-                'message_id' => null,
-                'error' => $mailEx->getMessage()
-            ]
-        ];
+    foreach ($queuedEmailIds as $queuedEmailId) {
+        try {
+            $emailSendResults[] = [
+                'email_id' => $queuedEmailId,
+                'result' => $engine->sendProgressionEmailById((int)$queuedEmailId)
+            ];
+        } catch (Throwable $mailEx) {
+            $emailSendResults[] = [
+                'email_id' => $queuedEmailId,
+                'result' => [
+                    'ok' => false,
+                    'provider' => 'smtp',
+                    'message_id' => null,
+                    'error' => $mailEx->getMessage()
+                ]
+            ];
+        }
     }
-}
 
     json_out([
         'ok'                          => true,
