@@ -1,142 +1,302 @@
 <?php
-ini_set('display_errors', '1');
-ini_set('display_startup_errors', '1');
-error_reporting(E_ALL);
-
 declare(strict_types=1);
 
-require_once __DIR__ . '/../src/bootstrap.php';
+require_once __DIR__ . '/../../src/bootstrap.php';
 
 cw_require_login();
 
-$u = cw_current_user($pdo);
+header('Content-Type: application/json; charset=utf-8');
 
-// 🔒 Restrict to YOU ONLY
-if ((int)$u['id'] !== 1) {
-    die('Forbidden');
+function jake_json_out(array $x): void
+{
+    echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    exit;
 }
 
-// --- Load SSOT ---
-$ssotStmt = $pdo->prepare("
-    SELECT version, content
-    FROM ssot_versions
-    ORDER BY created_at DESC
-    LIMIT 1
-");
-$ssotStmt->execute();
-$ssot = $ssotStmt->fetch(PDO::FETCH_ASSOC);
+function jake_h(string $v): string
+{
+    return htmlspecialchars($v, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+}
 
-$ssotVersion = $ssot['version'] ?? 'unknown';
-$ssotContent = $ssot['content'] ?? '';
+function jake_normalize_path(string $path): string
+{
+    $path = trim($path);
+    $path = str_replace('\\', '/', $path);
+    $path = preg_replace('~/+~', '/', $path);
+    $path = ltrim($path, '/');
+    return $path;
+}
 
-?>
-<!DOCTYPE html>
-<html>
-<head>
-    <title>IPCA Jake Console</title>
-    <style>
-        body {
-            font-family: Arial;
-            background: #0f172a;
-            color: #e2e8f0;
-            margin: 0;
+function jake_is_allowed_path(string $path): bool
+{
+    $allowedPrefixes = [
+        'src/',
+        'public/',
+        'admin/',
+        'assets/',
+    ];
+
+    foreach ($allowedPrefixes as $prefix) {
+        if (strpos($path, $prefix) === 0) {
+            return true;
         }
-        .container {
-            display: flex;
-            height: 100vh;
+    }
+
+    return false;
+}
+
+function jake_get_project_root(): string
+{
+    return dirname(__DIR__, 2);
+}
+
+function jake_load_latest_ssot(PDO $pdo): array
+{
+    $stmt = $pdo->prepare("
+        SELECT id, version, title, content, created_at
+        FROM ssot_versions
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+    ");
+    $stmt->execute();
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ?: [];
+}
+
+try {
+    $u = cw_current_user($pdo);
+
+    // TODO: replace 1 with your own user ID if needed
+    if ((int)($u['id'] ?? 0) !== 1) {
+        http_response_code(403);
+        jake_json_out([
+            'ok' => false,
+            'error' => 'Forbidden'
+        ]);
+    }
+
+    $raw = file_get_contents('php://input');
+    $data = json_decode((string)$raw, true);
+    if (!is_array($data)) {
+        jake_json_out([
+            'ok' => false,
+            'error' => 'Invalid JSON'
+        ]);
+    }
+
+    $action = (string)($data['action'] ?? '');
+
+    if ($action === 'list_tables') {
+        $rows = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_NUM);
+        $tables = [];
+        foreach ($rows as $r) {
+            if (isset($r[0])) {
+                $tables[] = (string)$r[0];
+            }
         }
-        .left {
-            width: 60%;
-            padding: 20px;
-            border-right: 1px solid #1e293b;
+
+        jake_json_out([
+            'ok' => true,
+            'action' => 'list_tables',
+            'count' => count($tables),
+            'tables' => $tables
+        ]);
+    }
+
+    if ($action === 'describe_table') {
+        $table = trim((string)($data['table'] ?? ''));
+        if ($table === '' || !preg_match('/^[a-zA-Z0-9_]+$/', $table)) {
+            jake_json_out([
+                'ok' => false,
+                'error' => 'Invalid table name'
+            ]);
         }
-        .right {
-            width: 40%;
-            padding: 20px;
+
+        $stmt = $pdo->query("DESCRIBE `" . $table . "`");
+        $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        jake_json_out([
+            'ok' => true,
+            'action' => 'describe_table',
+            'table' => $table,
+            'columns' => $columns
+        ]);
+    }
+
+    if ($action === 'list_files') {
+        $root = jake_get_project_root();
+
+        $targets = [
+            $root . '/src',
+            $root . '/public',
+            $root . '/admin',
+        ];
+
+        $result = [];
+
+        foreach ($targets as $base) {
+            if (!is_dir($base)) {
+                continue;
+            }
+
+            $it = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($base, FilesystemIterator::SKIP_DOTS)
+            );
+
+            foreach ($it as $file) {
+                if (!$file->isFile()) {
+                    continue;
+                }
+
+                $full = str_replace('\\', '/', $file->getPathname());
+                $rel = ltrim(str_replace(str_replace('\\', '/', $root), '', $full), '/');
+
+                if (preg_match('/\.(php|sql|js|css|json|md)$/i', $rel)) {
+                    $result[] = $rel;
+                }
+            }
         }
-        textarea {
-            width: 100%;
-            height: 120px;
-            background: #020617;
-            color: #e2e8f0;
-            border: 1px solid #334155;
-            padding: 10px;
+
+        sort($result);
+
+        jake_json_out([
+            'ok' => true,
+            'action' => 'list_files',
+            'count' => count($result),
+            'files' => $result
+        ]);
+    }
+
+    if ($action === 'read_file') {
+        $path = jake_normalize_path((string)($data['path'] ?? ''));
+
+        if ($path === '' || !jake_is_allowed_path($path)) {
+            jake_json_out([
+                'ok' => false,
+                'error' => 'Path not allowed'
+            ]);
         }
-        button {
-            background: #1e40af;
-            color: white;
-            padding: 10px 15px;
-            border: none;
-            cursor: pointer;
-            margin-top: 10px;
+
+        $full = jake_get_project_root() . '/' . $path;
+        $real = realpath($full);
+        $root = realpath(jake_get_project_root());
+
+        if ($real === false || $root === false || strpos($real, $root) !== 0 || !is_file($real)) {
+            jake_json_out([
+                'ok' => false,
+                'error' => 'File not found'
+            ]);
         }
-        pre {
-            background: #020617;
-            padding: 10px;
-            overflow: auto;
-            border: 1px solid #334155;
+
+        $content = file_get_contents($real);
+        if ($content === false) {
+            jake_json_out([
+                'ok' => false,
+                'error' => 'Could not read file'
+            ]);
         }
-        .box {
-            margin-bottom: 20px;
+
+        jake_json_out([
+            'ok' => true,
+            'action' => 'read_file',
+            'path' => $path,
+            'bytes' => strlen($content),
+            'content' => $content
+        ]);
+    }
+
+    if ($action === 'ask_jake') {
+        $prompt = trim((string)($data['prompt'] ?? ''));
+        if ($prompt === '') {
+            jake_json_out([
+                'ok' => false,
+                'error' => 'Prompt is required'
+            ]);
         }
-        h2 {
-            margin-top: 0;
+
+        $ssot = jake_load_latest_ssot($pdo);
+        $ssotVersion = (string)($ssot['version'] ?? 'unknown');
+        $ssotContent = (string)($ssot['content'] ?? '');
+
+        $lower = strtolower($prompt);
+        $files = [];
+        $checks = [];
+        $notes = [];
+        $nextStep = 'Inspect relevant file and verify DB truth before coding.';
+
+        if (strpos($lower, 'progress test') !== false || strpos($lower, 'test_finalize') !== false) {
+            $files[] = 'public/student/api/test_finalize_v2.php';
+            $files[] = 'src/courseware_progression_v2.php';
+            $checks[] = 'Confirm controller only owns assessment pipeline';
+            $checks[] = 'Confirm engine owns progression consequences';
+            $checks[] = 'Confirm no duplicate writes to lesson_activity or student_required_actions';
+            $notes[] = 'This area has already shown drift risk in this chat.';
+            $nextStep = 'Read both files and compare ownership block-by-block.';
         }
-    </style>
-</head>
-<body>
 
-<div class="container">
+        if (strpos($lower, 'summary') !== false) {
+            $files[] = 'public/instructor/summary_review.php';
+            $files[] = 'src/courseware_progression_v2.php';
+            $checks[] = 'Confirm decision values align with engine expectations';
+        }
 
-    <!-- LEFT: JAKE -->
-    <div class="left">
+        if (strpos($lower, 'instructor approval') !== false) {
+            $files[] = 'public/instructor/instructor_approval.php';
+            $files[] = 'src/courseware_progression_v2.php';
+            $checks[] = 'Confirm page is thin and role-protected';
+        }
 
-        <h2>IPCA's AI Agent (Jake) � The Architect</h2>
+        if (empty($files)) {
+            $notes[] = 'No direct file match inferred yet.';
+            $checks[] = 'Clarify file scope or inspect manually';
+        }
 
-        <form method="post">
-            <textarea name="prompt" placeholder="Ask Jake..."><?php echo htmlspecialchars($_POST['prompt'] ?? ''); ?></textarea>
-            <button type="submit">Ask Jake</button>
-        </form>
+        $ssotHints = [];
+        if ($ssotContent !== '') {
+            if (stripos($ssotContent, 'single source of truth') !== false) {
+                $ssotHints[] = 'SSOT emphasizes central ownership and anti-drift behavior.';
+            }
+            if (stripos($ssotContent, 'lesson_activity') !== false) {
+                $ssotHints[] = 'lesson_activity is projection, not canonical workflow authority.';
+            }
+            if (stripos($ssotContent, 'student_required_actions') !== false) {
+                $ssotHints[] = 'student_required_actions is workflow/intervention authority.';
+            }
+            if (stripos($ssotContent, 'training_progression_emails') !== false) {
+                $ssotHints[] = 'emails are outputs, never state.';
+            }
+        }
 
-        <?php if (!empty($_POST['prompt'])): ?>
+        $files = array_values(array_unique($files));
+        $checks = array_values(array_unique($checks));
+        $notes = array_values(array_unique($notes));
+        $ssotHints = array_values(array_unique($ssotHints));
 
-            <div class="box">
-                <h3>📥 Your Request</h3>
-                <pre><?php echo htmlspecialchars($_POST['prompt']); ?></pre>
-            </div>
+        jake_json_out([
+            'ok' => true,
+            'action' => 'ask_jake',
+            'jake' => [
+                'ssot_version_used' => $ssotVersion,
+                'root_cause_hypothesis' => 'Likely ownership drift or duplicated progression logic unless proven otherwise.',
+                'affected_files' => $files,
+                'ssot_hints' => $ssotHints,
+                'verification_checks' => $checks,
+                'notes' => $notes,
+                'next_step' => $nextStep
+            ]
+        ]);
+    }
 
-            <div class="box">
-                <h3>🧠 Jake Analysis</h3>
-                <pre>
-<?php
-// VERY SIMPLE V1 — we just echo SSOT + request
-echo "SSOT Version: " . $ssotVersion . "\n\n";
+    jake_json_out([
+        'ok' => false,
+        'error' => 'Unknown action'
+    ]);
 
-echo "Jake reasoning:\n";
-echo "- Check SSOT\n";
-echo "- Identify affected files\n";
-echo "- Avoid controller logic\n";
-echo "- Move logic to engine\n\n";
-
-echo "Next step: implement or inspect requested change.";
-?>
-                </pre>
-            </div>
-
-        <?php endif; ?>
-
-    </div>
-
-    <!-- RIGHT: SSOT -->
-    <div class="right">
-
-        <h2>📘 SSOT (v<?php echo htmlspecialchars($ssotVersion); ?>)</h2>
-
-        <pre style="height:80vh;"><?php echo htmlspecialchars($ssotContent); ?></pre>
-
-    </div>
-
-</div>
-
-</body>
-</html>
+} catch (Throwable $e) {
+    http_response_code(400);
+    jake_json_out([
+        'ok' => false,
+        'error' => $e->getMessage()
+    ]);
+}
