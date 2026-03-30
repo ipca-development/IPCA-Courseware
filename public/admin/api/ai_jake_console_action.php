@@ -1,15 +1,15 @@
 <?php
+declare(strict_types=1);
 
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
-
-declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
-function json_out(array $x): void {
+function json_out(array $x): void
+{
     echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
@@ -43,11 +43,13 @@ try {
     switch ($action) {
 
         // =========================================
-        // 1. SAVE REQUEST (SSOT logging)
+        // 1. SAVE REQUEST
         // =========================================
         case 'save_request':
 
             $prompt = trim((string)($data['prompt'] ?? ''));
+            $title  = trim((string)($data['title'] ?? 'Untitled request'));
+            $type   = trim((string)($data['type'] ?? 'investigation'));
 
             if ($prompt === '') {
                 json_out(['ok' => false, 'error' => 'Empty prompt']);
@@ -55,11 +57,24 @@ try {
 
             $stmt = $pdo->prepare("
                 INSERT INTO ai_jake_requests
-                (user_id, prompt, created_at)
-                VALUES (?, ?, NOW())
+                (
+                    user_id,
+                    request_title,
+                    request_type,
+                    prompt,
+                    status,
+                    created_at,
+                    updated_at
+                )
+                VALUES
+                (
+                    ?, ?, ?, ?, 'new', NOW(), NOW()
+                )
             ");
             $stmt->execute([
                 (int)$u['id'],
+                $title,
+                $type,
                 $prompt
             ]);
 
@@ -81,18 +96,28 @@ try {
                 json_out(['ok' => false, 'error' => 'Missing path']);
             }
 
-            // prevent directory traversal
             if (str_contains($path, '..')) {
                 json_out(['ok' => false, 'error' => 'Invalid path']);
             }
 
-            $fullPath = realpath(__DIR__ . '/../../../' . $path);
+            $basePath = realpath(__DIR__ . '/../../../');
+            if ($basePath === false) {
+                json_out(['ok' => false, 'error' => 'Base path not found']);
+            }
 
+            $fullPath = realpath($basePath . '/' . ltrim($path, '/'));
             if (!$fullPath || !is_file($fullPath)) {
                 json_out(['ok' => false, 'error' => 'File not found']);
             }
 
+            if (strpos($fullPath, $basePath) !== 0) {
+                json_out(['ok' => false, 'error' => 'Invalid path scope']);
+            }
+
             $content = file_get_contents($fullPath);
+            if ($content === false) {
+                json_out(['ok' => false, 'error' => 'Failed to read file']);
+            }
 
             json_out([
                 'ok' => true,
@@ -103,7 +128,7 @@ try {
         break;
 
         // =========================================
-        // 3. LIST TABLES (READ-ONLY)
+        // 3. LIST TABLES
         // =========================================
         case 'list_tables':
 
@@ -128,7 +153,7 @@ try {
             }
 
             $stmt = $pdo->query("DESCRIBE `$table`");
-            $columns = $stmt->fetchAll();
+            $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             json_out([
                 'ok' => true,
@@ -149,13 +174,16 @@ try {
                 json_out(['ok' => false, 'error' => 'Empty query']);
             }
 
-            // HARD SAFETY: only allow SELECT
-            if (!preg_match('/^\s*SELECT/i', $query)) {
-                json_out(['ok' => false, 'error' => 'Only SELECT allowed']);
+            if (!preg_match('/^\s*(SELECT|SHOW|DESCRIBE|EXPLAIN)\b/i', $query)) {
+                json_out(['ok' => false, 'error' => 'Only SELECT, SHOW, DESCRIBE, EXPLAIN allowed']);
+            }
+
+            if (preg_match('/\b(INSERT|UPDATE|DELETE|DROP|ALTER|TRUNCATE|CREATE|REPLACE|GRANT|REVOKE)\b/i', $query)) {
+                json_out(['ok' => false, 'error' => 'Write operations are not allowed']);
             }
 
             $stmt = $pdo->query($query);
-            $rows = $stmt->fetchAll();
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
             json_out([
                 'ok' => true,
@@ -172,10 +200,9 @@ try {
 
             $prompt = trim((string)($data['prompt'] ?? ''));
 
-            // V1: simple echo (next step = GPT integration + Steven loop)
             json_out([
                 'ok' => true,
-                'response' => "Jake received: " . $prompt,
+                'response' => 'Jake received: ' . $prompt,
                 'notes' => 'V1 stub — GPT + Steven integration next'
             ]);
 
