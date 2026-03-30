@@ -480,30 +480,38 @@ if ($hasRequestsTable) {
         responsePanel.innerHTML = html;
     }
 
-    async function callAPI(payload) {
-        setResponse('Loading...');
+	async function callAPI(payload) {
+    setResponse('Loading...');
 
+    try {
+        const res = await fetch(API, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+
+        const text = await res.text();
+
+        let data;
         try {
-            const res = await fetch(API, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
-
-            const data = await res.json();
-
-            if (!data.ok) {
-                setResponse('ERROR:\n' + data.error);
-                return null;
-            }
-
-            return data;
-
+            data = JSON.parse(text);
         } catch (e) {
-            setResponse('FETCH ERROR:\n' + e.message);
+            setResponse('INVALID JSON RESPONSE:\n\n' + text);
             return null;
         }
+
+        if (!data.ok) {
+            setResponse('ERROR:\n' + data.error);
+            return null;
+        }
+
+        return data;
+
+    } catch (e) {
+        setResponse('FETCH ERROR:\n' + e.message);
+        return null;
     }
+}
 
     function getRequestId() {
         return document.getElementById('request_id').value.trim();
