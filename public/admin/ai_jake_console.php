@@ -1,7 +1,15 @@
 <?php
-echo 'STEP 1 OK';
-
 require_once __DIR__ . '/../../src/bootstrap.php';
 
-echo 'STEP 2 OK';
+echo 'BOOTSTRAP OK<br>';
+
+cw_require_login();
+
+echo 'LOGIN OK<br>';
+
+$u = cw_current_user($pdo);
+
+echo '<pre>';
+print_r($u);
+echo '</pre>';
 exit;
