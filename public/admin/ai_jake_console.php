@@ -23,20 +23,15 @@ if (!function_exists('h')) {
 
 function table_exists(PDO $pdo, string $tableName): bool
 {
-
-$stmt = $pdo->prepare("
-    INSERT INTO ai_jake_requests
-    (user_id, request_title, request_type, prompt, status, created_at)
-    VALUES (?, ?, ?, ?, 'new', NOW())
-");
-
-$stmt->execute([
-    (int)$u['id'],
-    (string)($data['title'] ?? ''),
-    (string)($data['type'] ?? ''),
-    $prompt
-]);	
-	
+    $stmt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+          AND table_name = ?
+    ");
+    $stmt->execute([$tableName]);
+    return (int)$stmt->fetchColumn() > 0;
+}
 
 $hasSsotTable = table_exists($pdo, 'ai_ssot_snapshots');
 $hasRequestsTable = table_exists($pdo, 'ai_jake_requests');
@@ -63,6 +58,7 @@ if ($hasRequestsTable) {
     ");
     $recentRequests = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
+?>
 ?>
 <!DOCTYPE html>
 <html lang="en">
