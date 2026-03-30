@@ -483,24 +483,30 @@ if ($hasRequestsTable) {
     // =========================
     // SAVE REQUEST
     // =========================
-    document.getElementById('btn_save_request').addEventListener('click', async function () {
+document.getElementById('btn_save_request').addEventListener('click', async function () {
 
-        const prompt =
-            'TITLE: ' + document.getElementById('request_title').value + '\n\n' +
-            'TYPE: ' + document.getElementById('request_type').value + '\n\n' +
-            document.getElementById('request_body').value;
+    const title = document.getElementById('request_title').value.trim();
+    const type = document.getElementById('request_type').value;
+    const body = document.getElementById('request_body').value.trim();
 
-        const data = await callAPI({
-            action: 'save_request',
-            prompt: prompt
-        });
+    const prompt =
+        'TITLE: ' + title + '\n\n' +
+        'TYPE: ' + type + '\n\n' +
+        body;
 
-        if (!data) return;
-
-        setResponse(
-            'Saved.\n\nRequest ID: ' + data.request_id
-        );
+    const data = await callAPI({
+        action: 'save_request',
+        title: title,
+        type: type,
+        prompt: prompt
     });
+
+    if (!data) return;
+
+    setResponse(
+        'Saved.\n\nRequest ID: ' + data.request_id
+    );
+});
 
     // =========================
     // JAKE THINK (stub)
