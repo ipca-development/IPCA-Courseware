@@ -261,6 +261,16 @@ if ($hasRequestsTable) {
             font-size:18px;
             font-weight:800;
         }
+		.table-link {
+		cursor: pointer;
+		padding: 6px 10px;
+		border-radius: 8px;
+		margin-bottom: 4px;
+		}
+
+		.table-link:hover {
+			background: #e9eef8;
+		}
         @media (max-width: 1100px){
             .content{grid-template-columns:1fr}
         }
@@ -579,16 +589,36 @@ if ($hasRequestsTable) {
 	// =========================
 	document.getElementById('btn_list_tables').addEventListener('click', async function () {
 
-		const data = await callAPI({
-			action: 'list_tables'
-		});
+    const data = await callAPI({
+        action: 'list_tables'
+    });
 
-		if (!data) return;
+    if (!data) return;
 
-		setResponse(
-			'TABLES:\n\n' + data.tables.join('\n')
-		);
-	});
+    // Render clickable HTML instead of plain text
+    let html = 'TABLES:<br><br>';
+
+    data.tables.forEach(function (t) {
+        html += '<div class="table-link" data-table="' + t + '">' + t + '</div>';
+    });
+
+    responsePanel.innerHTML = html;
+
+    // Attach click handlers AFTER rendering
+    document.querySelectorAll('.table-link').forEach(function (el) {
+        el.addEventListener('click', function () {
+
+            const table = this.getAttribute('data-table');
+
+            // Fill input
+            document.getElementById('table_name').value = table;
+
+            // Optional: auto describe
+            document.getElementById('btn_describe_table').click();
+        });
+    });
+
+});
 
 	// =========================
 	// DESCRIBE TABLE
