@@ -7,7 +7,7 @@ error_reporting(E_ALL);
 
 echo "STEP 1<br>";
 
-require_once __DIR__ . '/../../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/bootstrap.php';
 
 echo "STEP 2<br>";
 

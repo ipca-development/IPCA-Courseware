@@ -5,7 +5,7 @@ error_reporting(E_ALL);
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/bootstrap.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
