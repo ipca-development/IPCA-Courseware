@@ -448,7 +448,7 @@ if ($hasRequestsTable) {
 <script>
 (function () {
 
-    const API = '/admin/api/ai_jake_console_action.php';
+    const API = window.location.origin + '/admin/api/ai_jake_console_action.php';
     const responsePanel = document.getElementById('response_panel');
 
     function setResponse(text) {
