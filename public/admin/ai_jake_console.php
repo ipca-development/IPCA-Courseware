@@ -424,13 +424,19 @@ if ($hasRequestsTable) {
                     <h2>DB Tools</h2>
                     <div class="form-grid">
                         <div>
+							<label for="table_name"><strong>Describe Table</strong></label>
+							<input id="table_name" type="text" placeholder="Example: ai_jake_requests">
+						</div>
+						
+						<div>
                             <label for="db_query"><strong>Safe Read-Only SQL</strong></label>
                             <textarea id="db_query" style="min-height:140px" placeholder="SELECT * FROM ai_ssot_snapshots ORDER BY id DESC LIMIT 5"></textarea>
                         </div>
                         <div class="actions">
-                            <button class="btn btn-secondary" type="button" id="btn_run_sql">Run Read Query</button>
 							<button class="btn btn-secondary" type="button" id="btn_list_tables">List Tables</button>
-                        </div>
+							<button class="btn btn-secondary" type="button" id="btn_describe_table">Describe Table</button>
+							<button class="btn btn-secondary" type="button" id="btn_run_sql">Run Read Query</button>
+						</div>
                     </div>
                     <div class="panel-note">
                         Read-only diagnostics only. No write queries.
@@ -583,6 +589,32 @@ document.getElementById('btn_save_request').addEventListener('click', async func
 			'TABLES:\n\n' + data.tables.join('\n')
 		);
 	});
+	
+	// =========================
+	// DESCRIBE TABLE
+	// =========================
+	document.getElementById('btn_describe_table').addEventListener('click', async function () {
+
+		const table = document.getElementById('table_name').value.trim();
+
+		if (!table) {
+			setResponse('Please enter a table name first.');
+			return;
+		}
+
+		const data = await callAPI({
+			action: 'describe_table',
+			table: table
+		});
+
+		if (!data) return;
+
+		setResponse(
+			'TABLE: ' + data.table + '\n\n' +
+			JSON.stringify(data.columns, null, 2)
+		);
+	});
+	
 	
 })();
 </script>
