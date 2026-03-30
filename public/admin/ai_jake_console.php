@@ -429,6 +429,7 @@ if ($hasRequestsTable) {
                         </div>
                         <div class="actions">
                             <button class="btn btn-secondary" type="button" id="btn_run_sql">Run Read Query</button>
+							<button class="btn btn-secondary" type="button" id="btn_list_tables">List Tables</button>
                         </div>
                     </div>
                     <div class="panel-note">
@@ -566,6 +567,23 @@ document.getElementById('btn_save_request').addEventListener('click', async func
         );
     });
 
+	
+	// =========================
+	// LIST TABLES
+	// =========================
+	document.getElementById('btn_list_tables').addEventListener('click', async function () {
+
+		const data = await callAPI({
+			action: 'list_tables'
+		});
+
+		if (!data) return;
+
+		setResponse(
+			'TABLES:\n\n' + data.tables.join('\n')
+		);
+	});
+	
 })();
 </script>
 </body>
