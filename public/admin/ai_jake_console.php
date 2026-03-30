@@ -576,14 +576,16 @@ if ($hasRequestsTable) {
 
         if (!data) return;
 
-		if (data.request_id) {
-			document.getElementById('request_id').value = data.request_id;
-		}
-		if (data.artifact_id) {
-			document.getElementById('artifact_id').value = data.artifact_id;
-		}
+        if (data.request_id) {
+            document.getElementById('request_id').value = data.request_id;
+        }
+        if (data.artifact_id) {
+            document.getElementById('artifact_id').value = data.artifact_id;
+        }
 
-		setResponse(JSON.stringify(data, null, 2));
+        setResponse(
+            data.response
+        );
     });
 
     // =========================
