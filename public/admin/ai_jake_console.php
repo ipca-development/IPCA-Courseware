@@ -445,64 +445,119 @@ if ($hasRequestsTable) {
 
 <script>
 (function () {
+
+    const API = '/admin/api/ai_jake_console_action.php';
     const responsePanel = document.getElementById('response_panel');
 
     function setResponse(text) {
         responsePanel.textContent = text;
     }
 
-    document.getElementById('btn_save_request').addEventListener('click', function () {
-        const title = document.getElementById('request_title').value.trim();
-        const type = document.getElementById('request_type').value;
-        const body = document.getElementById('request_body').value.trim();
+    async function callAPI(payload) {
+        setResponse('Loading...');
+
+        try {
+            const res = await fetch(API, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await res.json();
+
+            if (!data.ok) {
+                setResponse('ERROR:\n' + data.error);
+                return null;
+            }
+
+            return data;
+
+        } catch (e) {
+            setResponse('FETCH ERROR:\n' + e.message);
+            return null;
+        }
+    }
+
+    // =========================
+    // SAVE REQUEST
+    // =========================
+    document.getElementById('btn_save_request').addEventListener('click', async function () {
+
+        const prompt =
+            'TITLE: ' + document.getElementById('request_title').value + '\n\n' +
+            'TYPE: ' + document.getElementById('request_type').value + '\n\n' +
+            document.getElementById('request_body').value;
+
+        const data = await callAPI({
+            action: 'save_request',
+            prompt: prompt
+        });
+
+        if (!data) return;
 
         setResponse(
-            "V1 UI shell action captured.\n\n" +
-            "Next endpoint will save:\n" +
-            "- request_title: " + title + "\n" +
-            "- request_type: " + type + "\n" +
-            "- request_body length: " + body.length + "\n\n" +
-            "No backend action wired yet."
+            'Saved.\n\nRequest ID: ' + data.request_id
         );
     });
 
-    document.getElementById('btn_stub_chat').addEventListener('click', function () {
+    // =========================
+    // JAKE THINK (stub)
+    // =========================
+    document.getElementById('btn_stub_chat').addEventListener('click', async function () {
+
+        const prompt = document.getElementById('request_body').value;
+
+        const data = await callAPI({
+            action: 'jake_think',
+            prompt: prompt
+        });
+
+        if (!data) return;
+
         setResponse(
-            "Jake analysis stub.\n\n" +
-            "Planned next:\n" +
-            "1. Save request row\n" +
-            "2. Load latest SSOT snapshot\n" +
-            "3. Build context bundle\n" +
-            "4. Return Jake structured response"
+            'JAKE RESPONSE:\n\n' + data.response
         );
     });
 
-    document.getElementById('btn_read_file').addEventListener('click', function () {
-        const path = document.getElementById('file_path').value.trim();
+    // =========================
+    // READ FILE
+    // =========================
+    document.getElementById('btn_read_file').addEventListener('click', async function () {
+
+        const path = document.getElementById('file_path').value;
+
+        const data = await callAPI({
+            action: 'read_file',
+            path: path
+        });
+
+        if (!data) return;
+
         setResponse(
-            "File read stub.\n\nRequested path:\n" + path + "\n\n" +
-            "Next backend endpoint will read file contents safely."
+            'FILE: ' + data.path + '\n\n' + data.content
         );
     });
 
-    document.getElementById('btn_list_unused_stub').addEventListener('click', function () {
+    // =========================
+    // RUN SQL
+    // =========================
+    document.getElementById('btn_run_sql').addEventListener('click', async function () {
+
+        const query = document.getElementById('db_query').value;
+
+        const data = await callAPI({
+            action: 'run_sql_read',
+            query: query
+        });
+
+        if (!data) return;
+
         setResponse(
-            "Unused scan stub.\n\n" +
-            "Planned future behavior:\n" +
-            "- inspect project paths\n" +
-            "- compare references\n" +
-            "- flag likely unused files/tables\n" +
-            "- never auto-delete"
+            'ROWS: ' + data.count + '\n\n' +
+            JSON.stringify(data.rows, null, 2)
         );
     });
 
-    document.getElementById('btn_run_sql').addEventListener('click', function () {
-        const sql = document.getElementById('db_query').value.trim();
-        setResponse(
-            "Read-only SQL stub.\n\nSubmitted query:\n" + sql + "\n\n" +
-            "Next backend endpoint will validate SELECT/SHOW/DESCRIBE only."
-        );
-    });
 })();
 </script>
 </body>
