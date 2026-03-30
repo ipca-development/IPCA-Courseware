@@ -14,9 +14,11 @@ if ($role !== 'admin') {
     exit;
 }
 
-function h(?string $value): string
-{
-    return htmlspecialchars((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+if (!function_exists('h')) {
+    function h(?string $value): string
+    {
+        return htmlspecialchars((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    }
 }
 
 function table_exists(PDO $pdo, string $tableName): bool
