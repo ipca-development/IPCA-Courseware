@@ -490,30 +490,30 @@ if ($hasRequestsTable) {
     // =========================
     // SAVE REQUEST
     // =========================
-document.getElementById('btn_save_request').addEventListener('click', async function () {
+    document.getElementById('btn_save_request').addEventListener('click', async function () {
 
-    const title = document.getElementById('request_title').value.trim();
-    const type = document.getElementById('request_type').value;
-    const body = document.getElementById('request_body').value.trim();
+        const title = document.getElementById('request_title').value.trim();
+        const type = document.getElementById('request_type').value;
+        const body = document.getElementById('request_body').value.trim();
 
-    const prompt =
-        'TITLE: ' + title + '\n\n' +
-        'TYPE: ' + type + '\n\n' +
-        body;
+        const prompt =
+            'TITLE: ' + title + '\n\n' +
+            'TYPE: ' + type + '\n\n' +
+            body;
 
-    const data = await callAPI({
-        action: 'save_request',
-        title: title,
-        type: type,
-        prompt: prompt
+        const data = await callAPI({
+            action: 'save_request',
+            title: title,
+            type: type,
+            prompt: prompt
+        });
+
+        if (!data) return;
+
+        setResponse(
+            'Saved.\n\nRequest ID: ' + data.request_id
+        );
     });
-
-    if (!data) return;
-
-    setResponse(
-        'Saved.\n\nRequest ID: ' + data.request_id
-    );
-});
 
     // =========================
     // JAKE THINK (stub)
@@ -589,10 +589,45 @@ document.getElementById('btn_save_request').addEventListener('click', async func
 			'TABLES:\n\n' + data.tables.join('\n')
 		);
 	});
+
+	// =========================
+	// DESCRIBE TABLE
+	// =========================
+	document.getElementById('btn_describe_table').addEventListener('click', async function () {
+
+		const table = document.getElementById('table_name').value.trim();
+
+		if (!table) {
+			setResponse('ERROR:\nEnter table name first.');
+			return;
+		}
+
+		const data = await callAPI({
+			action: 'describe_table',
+			table: table
+		});
+
+		if (!data) return;
+
+		setResponse(
+			'TABLE: ' + data.table + '\n\n' +
+			JSON.stringify(data.columns, null, 2)
+		);
+	});
 	
 	// =========================
-
-	
+	// UNUSED SCAN STUB
+	// =========================
+	document.getElementById('btn_list_unused_stub').addEventListener('click', function () {
+		setResponse(
+			'Unused scan stub.\n\n' +
+			'Planned future behavior:\n' +
+			'- inspect project paths\n' +
+			'- compare references\n' +
+			'- flag likely unused files/tables\n' +
+			'- never auto-delete'
+		);
+	});
 	
 })();
 </script>
