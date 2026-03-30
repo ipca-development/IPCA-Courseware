@@ -1,9 +1,8 @@
 <?php
+declare(strict_types=1);
 
 ini_set('display_errors', '1');
 error_reporting(E_ALL);
-
-declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 
@@ -17,8 +16,3 @@ echo json_encode([
     'raw' => $raw
 ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 exit;
-
-function json_out(array $x): void {
-    echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-    exit;
-}
