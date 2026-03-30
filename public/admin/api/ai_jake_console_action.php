@@ -1,7 +1,11 @@
 <?php
+
+ini_set('display_errors', '1');
+error_reporting(E_ALL);
+
 declare(strict_types=1);
 
-require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../../src/bootstrap.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -50,7 +54,7 @@ try {
             }
 
             $stmt = $pdo->prepare("
-                INSERT INTO ai_requests
+                INSERT INTO ai_jake_requests
                 (user_id, prompt, created_at)
                 VALUES (?, ?, NOW())
             ");
