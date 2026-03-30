@@ -261,16 +261,6 @@ if ($hasRequestsTable) {
             font-size:18px;
             font-weight:800;
         }
-		.table-link {
-		cursor: pointer;
-		padding: 6px 10px;
-		border-radius: 8px;
-		margin-bottom: 4px;
-		}
-
-		.table-link:hover {
-			background: #e9eef8;
-		}
         @media (max-width: 1100px){
             .content{grid-template-columns:1fr}
         }
@@ -311,6 +301,17 @@ if ($hasRequestsTable) {
                             </div>
                         </div>
 
+                        <div class="form-row-2">
+                            <div>
+                                <label for="request_id"><strong>Request ID</strong></label>
+                                <input id="request_id" type="text" placeholder="Optional: existing request ID">
+                            </div>
+                            <div>
+                                <label for="artifact_id"><strong>Artifact ID</strong></label>
+                                <input id="artifact_id" type="text" placeholder="Optional: artifact ID">
+                            </div>
+                        </div>
+
                         <div>
                             <label for="request_body"><strong>Request</strong></label>
                             <textarea id="request_body" placeholder="Describe the issue, target files, constraints, and what Jake should inspect first."></textarea>
@@ -320,6 +321,9 @@ if ($hasRequestsTable) {
                     <div class="actions">
                         <button class="btn btn-primary" type="button" id="btn_save_request">Save Request</button>
                         <button class="btn btn-secondary" type="button" id="btn_stub_chat">Run Jake Analysis</button>
+                        <button class="btn btn-secondary" type="button" id="btn_list_artifacts">List Request Artifacts</button>
+                        <button class="btn btn-secondary" type="button" id="btn_read_artifact">Read Artifact</button>
+                        <button class="btn btn-secondary" type="button" id="btn_view_latest_artifact">View Latest Artifact</button>
                     </div>
 
                     <div class="panel-note">
@@ -472,6 +476,10 @@ if ($hasRequestsTable) {
         responsePanel.textContent = text;
     }
 
+    function setResponseHtml(html) {
+        responsePanel.innerHTML = html;
+    }
+
     async function callAPI(payload) {
         setResponse('Loading...');
 
@@ -497,6 +505,14 @@ if ($hasRequestsTable) {
         }
     }
 
+    function getRequestId() {
+        return document.getElementById('request_id').value.trim();
+    }
+
+    function getArtifactId() {
+        return document.getElementById('artifact_id').value.trim();
+    }
+
     // =========================
     // SAVE REQUEST
     // =========================
@@ -520,27 +536,47 @@ if ($hasRequestsTable) {
 
         if (!data) return;
 
+        document.getElementById('request_id').value = data.request_id;
+
         setResponse(
             'Saved.\n\nRequest ID: ' + data.request_id
         );
     });
 
     // =========================
-    // JAKE THINK (stub)
+    // JAKE THINK
     // =========================
     document.getElementById('btn_stub_chat').addEventListener('click', async function () {
 
+        const requestId = getRequestId();
+        const title = document.getElementById('request_title').value.trim();
+        const type = document.getElementById('request_type').value;
         const prompt = document.getElementById('request_body').value;
 
-        const data = await callAPI({
+        const payload = {
             action: 'jake_think',
+            title: title,
+            type: type,
             prompt: prompt
-        });
+        };
+
+        if (requestId !== '') {
+            payload.request_id = parseInt(requestId, 10);
+        }
+
+        const data = await callAPI(payload);
 
         if (!data) return;
 
+        if (data.request_id) {
+            document.getElementById('request_id').value = data.request_id;
+        }
+        if (data.artifact_id) {
+            document.getElementById('artifact_id').value = data.artifact_id;
+        }
+
         setResponse(
-            'JAKE RESPONSE:\n\n' + data.response
+            data.response
         );
     });
 
@@ -583,42 +619,39 @@ if ($hasRequestsTable) {
         );
     });
 
-	
 	// =========================
 	// LIST TABLES
 	// =========================
 	document.getElementById('btn_list_tables').addEventListener('click', async function () {
 
-    const data = await callAPI({
-        action: 'list_tables'
-    });
+		const data = await callAPI({
+			action: 'list_tables'
+		});
 
-    if (!data) return;
+		if (!data) return;
 
-    // Render clickable HTML instead of plain text
-    let html = 'TABLES:<br><br>';
+        let html = 'TABLES:<br><br>';
 
-    data.tables.forEach(function (t) {
-        html += '<div class="table-link" data-table="' + t + '">' + t + '</div>';
-    });
-
-    responsePanel.innerHTML = html;
-
-    // Attach click handlers AFTER rendering
-    document.querySelectorAll('.table-link').forEach(function (el) {
-        el.addEventListener('click', function () {
-
-            const table = this.getAttribute('data-table');
-
-            // Fill input
-            document.getElementById('table_name').value = table;
-
-            // Optional: auto describe
-            document.getElementById('btn_describe_table').click();
+        data.tables.forEach(function (t) {
+            html += '<div class="table-link" data-table="' + t + '" style="cursor:pointer;padding:6px 10px;border-radius:8px;margin-bottom:4px;">' + t + '</div>';
         });
-    });
 
-});
+        setResponseHtml(html);
+
+        document.querySelectorAll('.table-link').forEach(function (el) {
+            el.addEventListener('mouseenter', function () {
+                this.style.background = '#e9eef8';
+            });
+            el.addEventListener('mouseleave', function () {
+                this.style.background = 'transparent';
+            });
+            el.addEventListener('click', function () {
+                const table = this.getAttribute('data-table');
+                document.getElementById('table_name').value = table;
+                document.getElementById('btn_describe_table').click();
+            });
+        });
+	});
 
 	// =========================
 	// DESCRIBE TABLE
@@ -658,7 +691,133 @@ if ($hasRequestsTable) {
 			'- never auto-delete'
 		);
 	});
-	
+
+    // =========================
+    // LIST REQUEST ARTIFACTS
+    // =========================
+    document.getElementById('btn_list_artifacts').addEventListener('click', async function () {
+
+        const requestId = getRequestId();
+
+        if (!requestId) {
+            setResponse('ERROR:\nEnter Request ID first.');
+            return;
+        }
+
+        const data = await callAPI({
+            action: 'list_request_artifacts',
+            request_id: parseInt(requestId, 10)
+        });
+
+        if (!data) return;
+
+        if (!data.artifacts || !data.artifacts.length) {
+            setResponse('No artifacts found for Request ID ' + requestId);
+            return;
+        }
+
+        let out = 'ARTIFACTS FOR REQUEST ' + requestId + ':\n\n';
+
+        data.artifacts.forEach(function (a) {
+            out += 'Artifact ID: ' + a.id + '\n';
+            out += 'Run ID: ' + a.run_id + '\n';
+            out += 'Title: ' + a.title + '\n';
+            out += 'Type: ' + a.artifact_type + '\n';
+            out += 'Target Path: ' + (a.target_path || '') + '\n';
+            out += 'Output Mode: ' + (a.output_mode || '') + '\n';
+            out += 'Created: ' + (a.created_at || '') + '\n';
+            out += '\n';
+        });
+
+        document.getElementById('artifact_id').value = data.artifacts[0].id;
+
+        setResponse(out);
+    });
+
+    // =========================
+    // READ ARTIFACT
+    // =========================
+    document.getElementById('btn_read_artifact').addEventListener('click', async function () {
+
+        const artifactId = getArtifactId();
+
+        if (!artifactId) {
+            setResponse('ERROR:\nEnter Artifact ID first.');
+            return;
+        }
+
+        const data = await callAPI({
+            action: 'read_artifact',
+            artifact_id: parseInt(artifactId, 10)
+        });
+
+        if (!data) return;
+
+        const a = data.artifact;
+
+        setResponse(
+            'ARTIFACT ID: ' + a.id + '\n' +
+            'REQUEST ID: ' + a.request_id + '\n' +
+            'RUN ID: ' + a.run_id + '\n' +
+            'TITLE: ' + a.title + '\n' +
+            'TARGET PATH: ' + (a.target_path || '') + '\n' +
+            'OUTPUT MODE: ' + (a.output_mode || '') + '\n' +
+            'CREATED BY: ' + (a.created_by_agent || '') + '\n' +
+            'APPROVED BY: ' + (a.approved_by_agent || '') + '\n' +
+            '\n' +
+            a.content
+        );
+    });
+
+    // =========================
+    // VIEW LATEST ARTIFACT
+    // =========================
+    document.getElementById('btn_view_latest_artifact').addEventListener('click', async function () {
+
+        const requestId = getRequestId();
+
+        if (!requestId) {
+            setResponse('ERROR:\nEnter Request ID first.');
+            return;
+        }
+
+        const listData = await callAPI({
+            action: 'list_request_artifacts',
+            request_id: parseInt(requestId, 10)
+        });
+
+        if (!listData) return;
+
+        if (!listData.artifacts || !listData.artifacts.length) {
+            setResponse('No artifacts found for Request ID ' + requestId);
+            return;
+        }
+
+        const latest = listData.artifacts[0];
+        document.getElementById('artifact_id').value = latest.id;
+
+        const readData = await callAPI({
+            action: 'read_artifact',
+            artifact_id: parseInt(latest.id, 10)
+        });
+
+        if (!readData) return;
+
+        const a = readData.artifact;
+
+        setResponse(
+            'LATEST ARTIFACT\n\n' +
+            'ARTIFACT ID: ' + a.id + '\n' +
+            'REQUEST ID: ' + a.request_id + '\n' +
+            'RUN ID: ' + a.run_id + '\n' +
+            'TITLE: ' + a.title + '\n' +
+            'TARGET PATH: ' + (a.target_path || '') + '\n' +
+            'OUTPUT MODE: ' + (a.output_mode || '') + '\n' +
+            '\n' +
+            a.content
+        );
+    });
+
 })();
 </script>
 </body>
