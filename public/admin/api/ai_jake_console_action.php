@@ -925,6 +925,44 @@ function is_continuation_trigger(string $messageText): bool
 }
 
 
+function is_revision_trigger(string $messageText): bool
+{
+    $text = strtolower(trim($messageText));
+
+    if ($text === '') {
+        return false;
+    }
+
+    $normalized = str_replace(array("’", "`", "‘"), "'", $text);
+    $normalized = preg_replace('/[^a-z0-9\'\s]/', ' ', $normalized);
+    $normalized = preg_replace('/\s+/', ' ', $normalized);
+    $normalized = trim((string)$normalized);
+
+    if ($normalized === '') {
+        return false;
+    }
+
+    $patterns = array(
+        '/\brefine\s+(this|it)\b/',
+        '/\bimprove\s+(this|it)\b/',
+        '/\brevise\s+(this|it)\b/',
+        '/\btry\s+again\b/',
+        '/\bpush\s+(it|this)\s+to\s+approved\b/',
+        '/\bgenerate\s+a\s+revised\s+version\b/',
+        '/\bmake\s+this\s+safer\b/',
+        '/\bfix\s+this\b/',
+        '/\brework\s+(this|it)\b/'
+    );
+
+    foreach ($patterns as $pattern) {
+        if (preg_match($pattern, $normalized)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function list_conversations(PDO $pdo, int $limit = 50): array
 {
     $stmt = $pdo->prepare("
@@ -1398,7 +1436,8 @@ try {
             $reply = '';
             $linkedRunId = null;
 
-            if (
+
+			if (
     $activeRequestSummary !== '' &&
     (
         is_continuation_trigger($messageText)
@@ -1413,8 +1452,10 @@ try {
             (string)$activeMode === 'analysis'
         )
     )
-) {
-                $engineeringPrompt = $activeRequestSummary;
+)
+			
+			{
+                $engineeringPrompt = $activeRequestSummary . "\n\nUser follow-up:\n" . $messageText;
 
                 if ($activeTargetFiles !== '') {
                     $engineeringPrompt .= "\n\nRelevant files:\n" . $activeTargetFiles;
