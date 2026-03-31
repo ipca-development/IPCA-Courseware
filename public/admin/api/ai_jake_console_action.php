@@ -242,6 +242,29 @@ function build_steven_brief(array $requestRow, ?array $ssot, array $contextFiles
     return implode("\n", $brief);
 }
 
+
+function parse_lenient_json_text(string $text): array
+{
+    $text = trim($text);
+
+    if ($text === '') {
+        throw new RuntimeException('Empty model text');
+    }
+
+    // Remove ```json ... ``` or ``` ... ```
+    if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/si', $text, $m)) {
+        $text = trim((string)$m[1]);
+    }
+
+    $json = json_decode($text, true);
+    if (!is_array($json)) {
+        throw new RuntimeException('Model returned non-JSON text: ' . substr($text, 0, 200));
+    }
+
+    return $json;
+}
+
+
 function build_steven_artifact_content(array $requestRow, array $contextFiles): array
 {
     $targetPath = '';
@@ -315,7 +338,30 @@ SYS;
             ]
         ]);
 
-        $json = cw_openai_extract_json_text($resp);
+        $text = '';
+		$out = $resp['output'] ?? [];
+
+		if (is_array($out)) {
+			foreach ($out as $item) {
+				if (!is_array($item)) {
+					continue;
+				}
+
+				$content = $item['content'] ?? [];
+				if (!is_array($content)) {
+					continue;
+				}
+
+				foreach ($content as $c) {
+					if (is_array($c) && ($c['type'] ?? '') === 'output_text') {
+						$text .= (string)($c['text'] ?? '');
+					}
+				}
+			}
+		}
+
+		$text = trim($text);
+		$json = parse_lenient_json_text($text);
 
         $outputMode = trim((string)($json['output_mode'] ?? 'full_drop_in'));
         $returnedTargetPath = trim((string)($json['target_path'] ?? ''));
