@@ -251,19 +251,72 @@ function parse_lenient_json_text(string $text): array
         throw new RuntimeException('Empty model text');
     }
 
-    // Remove ```json ... ``` or ``` ... ```
+    // 1) Whole response is a fenced block
     if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/si', $text, $m)) {
-        $text = trim((string)$m[1]);
+        $candidate = trim((string)$m[1]);
+        $json = json_decode($candidate, true);
+        if (is_array($json)) {
+            return $json;
+        }
     }
 
-    $json = json_decode($text, true);
-    if (!is_array($json)) {
-        throw new RuntimeException('Model returned non-JSON text: ' . substr($text, 0, 200));
+    // 2) JSON fenced block appears anywhere inside prose
+    if (preg_match('/```(?:json)?\s*([\s\S]*?)\s*```/i', $text, $m)) {
+        $candidate = trim((string)$m[1]);
+        $json = json_decode($candidate, true);
+        if (is_array($json)) {
+            return $json;
+        }
     }
 
-    return $json;
+    // 3) Raw JSON object appears somewhere in mixed text
+    $start = strpos($text, '{');
+    if ($start !== false) {
+        $len = strlen($text);
+        $depth = 0;
+        $inString = false;
+        $escape = false;
+
+        for ($i = $start; $i < $len; $i++) {
+            $ch = $text[$i];
+
+            if ($inString) {
+                if ($escape) {
+                    $escape = false;
+                } elseif ($ch === '\\') {
+                    $escape = true;
+                } elseif ($ch === '"') {
+                    $inString = false;
+                }
+                continue;
+            }
+
+            if ($ch === '"') {
+                $inString = true;
+                continue;
+            }
+
+            if ($ch === '{') {
+                $depth++;
+                continue;
+            }
+
+            if ($ch === '}') {
+                $depth--;
+                if ($depth === 0) {
+                    $candidate = substr($text, $start, $i - $start + 1);
+                    $json = json_decode($candidate, true);
+                    if (is_array($json)) {
+                        return $json;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+
+    throw new RuntimeException('Model returned non-JSON text: ' . substr($text, 0, 200));
 }
-
 
 function build_steven_artifact_content(array $requestRow, array $contextFiles): array
 {
@@ -289,6 +342,9 @@ Rules:
 - Prefer full drop-in replacements when a single target file is clearly identified.
 - If full replacement is too risky, provide an exact surgical patch.
 - Return JSON only.
+- Do not include introductions, explanations, markdown fences, or prose before or after the JSON.
+- Your first character must be { and your last character must be }.
+
 
 Required JSON schema:
 {
