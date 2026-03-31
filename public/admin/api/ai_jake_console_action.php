@@ -1399,15 +1399,20 @@ try {
             $linkedRunId = null;
 
             if (
+    $activeRequestSummary !== '' &&
     (
-        is_continuation_trigger($messageText) ||
+        is_continuation_trigger($messageText)
+        ||
         (
-            $activeRequestSummary !== '' &&
-            in_array(strtolower(trim($messageText)), array('yes', 'yes.', 'ok', 'okay', 'sure'), true) &&
+            (string)$activeMode === 'analysis' &&
+            mb_strlen(trim($messageText)) < 40
+        )
+        ||
+        (
+            $activeNextStep !== '' &&
             (string)$activeMode === 'analysis'
         )
-    ) &&
-    $activeRequestSummary !== ''
+    )
 ) {
                 $engineeringPrompt = $activeRequestSummary;
 
