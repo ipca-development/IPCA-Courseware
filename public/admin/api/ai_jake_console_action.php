@@ -339,13 +339,42 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
     ];
 }
 
-function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFiles, string $artifactContent): array
+function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFiles, array $artifactSeed): array
 {
-        if (strpos(ltrim($artifactContent), 'AI ERROR:') === 0) {
+    $artifactContent = (string)($artifactSeed['content'] ?? '');
+    $targetPath = (string)($artifactSeed['target_path'] ?? '');
+    $outputMode = (string)($artifactSeed['output_mode'] ?? '');
+    $requestPrompt = trim((string)($requestRow['prompt'] ?? ''));
+
+    if (strpos(ltrim($artifactContent), 'AI ERROR:') === 0) {
         return [
             'verdict' => 'analysis_only',
             'reason' => 'Steven did not complete the code generation successfully because the AI call failed before a real artifact could be produced. In other words: this is not approved code — it is a generation failure, so we should retry with less context or after the rate limit clears.',
             'revision' => 'Retry generation with reduced context size or after the OpenAI rate limit window resets.'
+        ];
+    }
+
+    // Hard deterministic guard: do not allow class rewrites when user did not ask for one
+    $containsClassRewrite =
+        strpos($artifactContent, 'class CoursewareProgressionV2') !== false
+        || strpos($artifactContent, 'final class CoursewareProgressionV2') !== false;
+
+    $userExplicitlyAskedFullDropIn =
+        stripos($requestPrompt, 'full drop-in') !== false
+        || stripos($requestPrompt, 'full drop in') !== false
+        || stripos($requestPrompt, 'full replacement') !== false
+        || stripos($requestPrompt, 'rewrite the file') !== false
+        || stripos($requestPrompt, 'replace the file') !== false;
+
+    if (
+        $targetPath === 'src/courseware_progression_v2.php'
+        && $containsClassRewrite
+        && !$userExplicitlyAskedFullDropIn
+    ) {
+        return [
+            'verdict' => 'needs_revision',
+            'reason' => 'Steven rewrote the CoursewareProgressionV2 class instead of proposing a clearly scoped addition or surgical patch. For this request, that is too broad and too risky. In other words: even if the methods used are visible, the delivery format is still wrong — this should be added as a precise patch, not as a class rewrite.',
+            'revision' => 'Return a surgical_patch only. Do not redefine the class. Provide the exact insertion point for the new diagnostics method inside src/courseware_progression_v2.php.'
         ];
     }
 	
@@ -1235,11 +1264,11 @@ function run_jake_engineering_cycle(
             ]);
 
             $review = jake_review_artifact(
-                $requestRow,
-                $ssot,
-                $contextFiles,
-                (string)$artifactSeed['content']
-            );
+				$requestRow,
+				$ssot,
+				$contextFiles,
+				$artifactSeed
+			);
 
             $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
             $reviewSummary = (string)($review['reason'] ?? '');
@@ -1865,11 +1894,11 @@ try {
                     ]);
 
                     $review = jake_review_artifact(
-                        $requestRow,
-                        $ssot,
-                        $contextFiles,
-                        (string)$artifactSeed['content']
-                    );
+					$requestRow,
+					$ssot,
+					$contextFiles,
+					$artifactSeed
+					);
 
                     $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
                     $reviewSummary = (string)($review['reason'] ?? '');
