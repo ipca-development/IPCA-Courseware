@@ -125,7 +125,7 @@ function read_files_for_context(array $paths, int $limit = 5): array
 {
     $out = [];
     $count = 0;
-    $maxCharsPerFile = 12000;
+    $maxCharsPerFile = 6000;
 
     $paths = array_values(array_unique($paths));
 
@@ -170,6 +170,9 @@ function load_database_schema(PDO $pdo): array
 {
     $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
 
+    // 🔥 LIMIT TABLE COUNT
+    $tables = array_slice($tables, 0, 15);
+
     $schema = [];
 
     foreach ($tables as $table) {
@@ -177,7 +180,8 @@ function load_database_schema(PDO $pdo): array
         $stmt = $pdo->query("DESCRIBE `$table`");
         $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $schema[$table] = $columns;
+        // 🔥 LIMIT COLUMNS PER TABLE
+        $schema[$table] = array_slice($columns, 0, 10);
     }
 
     return $schema;
@@ -211,7 +215,7 @@ function load_project_file_index(string $root): array
         }
     }
 
-    return array_slice($files, 0, 100);
+    return array_slice($files, 0, 50);
 }
 
 
