@@ -6,13 +6,6 @@ require_once __DIR__ . '/../../src/layout.php';
 
 cw_require_admin();
 
-if (!function_exists('h')) {
-    function h(?string $value): string
-    {
-        return htmlspecialchars((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-    }
-}
-
 $recentArtifacts = array();
 try {
     $stmt = $pdo->query("
@@ -26,7 +19,7 @@ try {
             created_at
         FROM ai_jake_artifacts
         ORDER BY id DESC
-        LIMIT 20
+        LIMIT 50
     ");
     $recentArtifacts = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
 } catch (Throwable $e) {
@@ -40,6 +33,7 @@ cw_header('Jake Console');
     display:flex;
     flex-direction:column;
     gap:22px;
+    padding-bottom:120px;
   }
 
   .hero-card{padding:26px 28px}
@@ -58,13 +52,6 @@ cw_header('Jake Console');
     letter-spacing:-0.04em;
     color:#152235;
     font-weight:800;
-  }
-  .hero-sub{
-    margin-top:12px;
-    font-size:15px;
-    color:#6f7f95;
-    max-width:980px;
-    line-height:1.55;
   }
 
   .console-grid{
@@ -97,13 +84,6 @@ cw_header('Jake Console');
     font-weight:800;
   }
 
-  .console-sub{
-    margin-top:8px;
-    font-size:14px;
-    line-height:1.5;
-    color:#728198;
-  }
-
   .status-pill{
     display:inline-flex;
     align-items:center;
@@ -125,16 +105,19 @@ cw_header('Jake Console');
     flex-direction:column;
     min-height:72vh;
     background:#f8fafd;
+    position:relative;
   }
 
   .chat-scroll{
     flex:1 1 auto;
-    padding:20px 18px 12px;
+    padding:20px 18px 18px;
     overflow:auto;
     display:flex;
     flex-direction:column;
     gap:12px;
     min-height:420px;
+    max-height:72vh;
+    scroll-behavior:smooth;
   }
 
   .chat-empty{
@@ -168,7 +151,7 @@ cw_header('Jake Console');
   }
 
   .bubble.user{
-    background:linear-gradient(135deg,#233b8f,#3d66e0);
+    background:linear-gradient(135deg,#1e3c72,#2a5298);
     color:#fff;
     border-bottom-right-radius:8px;
   }
@@ -186,17 +169,69 @@ cw_header('Jake Console');
     white-space:normal;
   }
 
-  .chat-input-wrap{
-    position:sticky;
-    bottom:0;
-    background:#fff;
-    border-top:1px solid rgba(15,23,42,0.08);
-    padding:14px 16px 16px;
+  .typing-wrap{
+    display:flex;
+    justify-content:flex-start;
+  }
+
+  .typing-bubble{
+    background:#eef2f7;
+    color:#152235;
+    border:1px solid rgba(15,23,42,0.05);
+    border-radius:20px;
+    border-bottom-left-radius:8px;
+    padding:12px 16px;
+    box-shadow:0 8px 18px rgba(15,23,42,0.05);
+  }
+
+  .typing-dots{
+    display:inline-flex;
+    align-items:center;
+    gap:6px;
+    min-width:38px;
+  }
+
+  .typing-dots span{
+    width:7px;
+    height:7px;
+    border-radius:999px;
+    background:#7c8aa3;
+    display:inline-block;
+    animation:typingBlink 1.2s infinite ease-in-out;
+  }
+  .typing-dots span:nth-child(2){animation-delay:.15s}
+  .typing-dots span:nth-child(3){animation-delay:.3s}
+
+  @keyframes typingBlink{
+    0%, 80%, 100%{opacity:.35; transform:translateY(0)}
+    40%{opacity:1; transform:translateY(-2px)}
+  }
+
+  .chat-composer-float{
+    position:fixed;
+    left:calc(280px + 24px);
+    right:24px;
+    bottom:18px;
+    z-index:50;
+    pointer-events:none;
+  }
+
+  .chat-composer{
+    max-width:980px;
+    margin:0 auto;
+    pointer-events:auto;
+    background:rgba(255,255,255,0.62);
+    backdrop-filter:blur(16px) saturate(160%);
+    -webkit-backdrop-filter:blur(16px) saturate(160%);
+    border:1px solid rgba(255,255,255,0.35);
+    box-shadow:0 20px 50px rgba(15,23,42,0.12);
+    border-radius:24px;
+    padding:12px;
   }
 
   .chat-input-grid{
     display:grid;
-    grid-template-columns:180px minmax(0, 1fr) 120px;
+    grid-template-columns:180px minmax(0, 1fr) 56px;
     gap:12px;
     align-items:end;
   }
@@ -231,11 +266,13 @@ cw_header('Jake Console');
   }
 
   .ui-textarea{
+    height:48px;
     min-height:48px;
-    max-height:180px;
-    padding:12px 14px;
-    resize:vertical;
-    line-height:1.45;
+    max-height:48px;
+    padding:13px 14px 11px;
+    resize:none;
+    line-height:1.35;
+    overflow:auto;
   }
 
   .ui-button{
@@ -244,15 +281,18 @@ cw_header('Jake Console');
     cursor:pointer;
     font-weight:700;
     color:#fff;
-    background:linear-gradient(135deg,#233b8f,#3d66e0);
-    box-shadow:0 10px 20px rgba(35,59,143,0.18);
+    background:linear-gradient(135deg,#1e3c72,#2a5298);
+    box-shadow:0 10px 20px rgba(30,60,114,0.24);
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:16px;
   }
 
-  .ui-button.secondary{
-    color:#152235;
-    background:#eef2f7;
-    box-shadow:none;
-    border:1px solid rgba(15,23,42,0.08);
+  .ui-button svg{
+    width:20px;
+    height:20px;
+    display:block;
   }
 
   .right-stack{
@@ -270,7 +310,7 @@ cw_header('Jake Console');
     display:flex;
     flex-direction:column;
     gap:10px;
-    max-height:220px;
+    max-height:240px;
     overflow:auto;
   }
 
@@ -305,7 +345,7 @@ cw_header('Jake Console');
     display:flex;
     flex-direction:column;
     gap:10px;
-    max-height:260px;
+    max-height:420px;
     overflow:auto;
   }
 
@@ -334,20 +374,6 @@ cw_header('Jake Console');
     font-size:12px;
     color:#728198;
     line-height:1.45;
-  }
-
-  .artifact-viewer{
-    background:#0f172a;
-    color:#d9e3f0;
-    border-radius:16px;
-    padding:16px 18px;
-    min-height:240px;
-    max-height:46vh;
-    overflow:auto;
-    white-space:pre-wrap;
-    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-    font-size:13px;
-    line-height:1.55;
   }
 
   .mini-actions{
@@ -386,18 +412,118 @@ cw_header('Jake Console');
     font-size:14px;
   }
 
+  .artifact-modal{
+    position:fixed;
+    inset:0;
+    z-index:120;
+    display:none;
+    align-items:center;
+    justify-content:center;
+    padding:24px;
+    background:rgba(15,23,42,0.46);
+    backdrop-filter:blur(6px);
+    -webkit-backdrop-filter:blur(6px);
+  }
+
+  .artifact-modal.is-open{
+    display:flex;
+  }
+
+  .artifact-modal-panel{
+    width:min(1180px, 96vw);
+    height:min(86vh, 920px);
+    background:#fff;
+    border-radius:22px;
+    box-shadow:0 28px 70px rgba(15,23,42,0.25);
+    overflow:hidden;
+    display:flex;
+    flex-direction:column;
+  }
+
+  .artifact-modal-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:16px;
+    padding:20px 22px 16px;
+    border-bottom:1px solid rgba(15,23,42,0.08);
+  }
+
+  .artifact-modal-title{
+    margin:0;
+    font-size:20px;
+    line-height:1.1;
+    letter-spacing:-0.02em;
+    color:#152235;
+    font-weight:800;
+  }
+
+  .artifact-modal-sub{
+    margin-top:8px;
+    font-size:13px;
+    line-height:1.45;
+    color:#728198;
+    white-space:pre-wrap;
+  }
+
+  .artifact-modal-close{
+    width:40px;
+    height:40px;
+    border:none;
+    border-radius:12px;
+    background:#eef2f7;
+    color:#152235;
+    font-size:20px;
+    line-height:1;
+    cursor:pointer;
+    flex:0 0 auto;
+  }
+
+  .artifact-modal-body{
+    flex:1 1 auto;
+    overflow:auto;
+    background:#0f172a;
+    color:#d9e3f0;
+    padding:18px 20px;
+    white-space:pre-wrap;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:13px;
+    line-height:1.55;
+  }
+
   @media (max-width: 1200px){
     .console-grid{
       grid-template-columns:1fr;
     }
-    .artifact-viewer{
-      max-height:34vh;
+
+    .chat-composer-float{
+      left:24px;
     }
   }
 
   @media (max-width: 820px){
+    .jake-shell{
+      padding-bottom:122px;
+    }
+
     .chat-shell{
-      min-height:calc(100vh - 230px);
+      min-height:calc(100vh - 290px);
+    }
+
+    .chat-scroll{
+      min-height:300px;
+      max-height:none;
+      padding-bottom:18px;
+    }
+
+    .bubble{
+      max-width:92%;
+    }
+
+    .chat-composer-float{
+      left:12px;
+      right:12px;
+      bottom:12px;
     }
 
     .chat-input-grid{
@@ -411,17 +537,20 @@ cw_header('Jake Console');
       height:48px;
     }
 
-    .chat-input-wrap{
-      padding-bottom:calc(14px + env(safe-area-inset-bottom));
+    .ui-textarea{
+      height:48px;
+      min-height:48px;
+      max-height:48px;
     }
 
-    .chat-scroll{
-      min-height:300px;
-      padding-bottom:14px;
+    .artifact-modal{
+      padding:10px;
     }
 
-    .bubble{
-      max-width:92%;
+    .artifact-modal-panel{
+      width:100%;
+      height:92vh;
+      border-radius:18px;
     }
   }
 </style>
@@ -431,9 +560,6 @@ cw_header('Jake Console');
   <div class="card hero-card">
     <div class="hero-eyebrow">Admin Workspace</div>
     <h2 class="hero-title">Jake Console</h2>
-    <div class="hero-sub">
-      Natural-language architect console for IPCA. You chat with Jake, Jake orchestrates the reasoning, and artifacts stay available in a dedicated engineering panel for inspection and copy/paste into your editor.
-    </div>
   </div>
 
   <div class="console-grid">
@@ -442,42 +568,13 @@ cw_header('Jake Console');
       <div class="console-head">
         <div>
           <h3 class="console-title">Chat with Jake</h3>
-          <div class="console-sub">
-            Ask in normal language. Jake replies conversationally and keeps the engineering layer out of the chat stream unless you want to inspect it.
-          </div>
         </div>
         <div class="status-pill">Live Conversation</div>
       </div>
 
       <div class="chat-shell">
         <div class="chat-scroll" id="messages">
-          <div class="chat-empty">Start a conversation with Jake. Your message appears on the right, Jake replies on the left, and technical artifacts remain selectable in the panel next to the chat.</div>
-        </div>
-
-        <div class="chat-input-wrap">
-          <div class="chat-input-grid">
-            <div>
-              <label class="field-label" for="request_type">Request Type</label>
-              <select id="request_type" class="ui-select">
-                <option value="">Auto Detect</option>
-                <option value="bugfix">Bugfix</option>
-                <option value="feature">Feature</option>
-                <option value="review">Review</option>
-                <option value="investigation">Investigation</option>
-                <option value="cleanup">Cleanup</option>
-              </select>
-            </div>
-
-            <div>
-              <label class="field-label" for="msg_input">Message</label>
-              <textarea id="msg_input" class="ui-textarea" rows="2" placeholder="Ask Jake in normal language..."></textarea>
-            </div>
-
-            <div>
-              <label class="field-label">&nbsp;</label>
-              <button id="send_btn" class="ui-button" type="button">Send</button>
-            </div>
-          </div>
+          <div class="chat-empty">Start a conversation with Jake.</div>
         </div>
       </div>
     </div>
@@ -487,10 +584,7 @@ cw_header('Jake Console');
       <div class="card console-card">
         <div class="console-head">
           <div>
-            <h3 class="console-title">Conversations</h3>
-            <div class="console-sub">
-              Recent Jake threads. Select one to reload the conversation history.
-            </div>
+            <h3 class="console-title">My conversations</h3>
           </div>
           <div class="status-pill">History</div>
         </div>
@@ -505,9 +599,6 @@ cw_header('Jake Console');
         <div class="console-head">
           <div>
             <h3 class="console-title">Artifacts</h3>
-            <div class="console-sub">
-              Recent engineering outputs are selectable here, separate from the normal chat stream.
-            </div>
           </div>
           <div class="status-pill">Selectable</div>
         </div>
@@ -517,10 +608,7 @@ cw_header('Jake Console');
               <div class="empty-premium">No artifacts found yet.</div>
             <?php else: ?>
               <?php foreach ($recentArtifacts as $artifact): ?>
-                <div
-                  class="artifact-item"
-                  data-artifact-id="<?= (int)$artifact['id'] ?>"
-                >
+                <div class="artifact-item" data-artifact-id="<?= (int)$artifact['id'] ?>">
                   <div class="artifact-title"><?= h((string)$artifact['title']) ?></div>
                   <div class="artifact-meta">
                     Artifact #<?= (int)$artifact['id'] ?>
@@ -538,10 +626,6 @@ cw_header('Jake Console');
           <div class="mini-actions">
             <button type="button" class="mini-action" id="refresh_conversations_btn">Refresh Conversations</button>
           </div>
-
-          <div style="height:14px"></div>
-
-          <div class="artifact-viewer" id="artifact_viewer">Select an artifact to view its contents here.</div>
         </div>
       </div>
 
@@ -549,6 +633,51 @@ cw_header('Jake Console');
 
   </div>
 
+  <div class="chat-composer-float">
+    <div class="chat-composer">
+      <div class="chat-input-grid">
+        <div>
+          <label class="field-label" for="request_type">Request Type</label>
+          <select id="request_type" class="ui-select">
+            <option value="">Auto Detect</option>
+            <option value="bugfix">Bugfix</option>
+            <option value="feature">Feature</option>
+            <option value="review">Review</option>
+            <option value="investigation">Investigation</option>
+            <option value="cleanup">Cleanup</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="field-label" for="msg_input">Message</label>
+          <textarea id="msg_input" class="ui-textarea" rows="1" placeholder="Ask Jake..."></textarea>
+        </div>
+
+        <div>
+          <label class="field-label">&nbsp;</label>
+          <button id="send_btn" class="ui-button" type="button" aria-label="Send">
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M4 12L20 4L13 20L11 13L4 12Z" fill="currentColor"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="artifact-modal" id="artifact_modal" aria-hidden="true">
+  <div class="artifact-modal-panel">
+    <div class="artifact-modal-head">
+      <div>
+        <h3 class="artifact-modal-title" id="artifact_modal_title">Artifact</h3>
+        <div class="artifact-modal-sub" id="artifact_modal_meta"></div>
+      </div>
+      <button type="button" class="artifact-modal-close" id="artifact_modal_close" aria-label="Close">×</button>
+    </div>
+    <div class="artifact-modal-body" id="artifact_modal_body">Select an artifact to inspect its content.</div>
+  </div>
 </div>
 
 <script>
@@ -556,6 +685,7 @@ cw_header('Jake Console');
     const API = window.location.origin + '/admin/api/ai_jake_console_action.php';
 
     let currentConversation = null;
+    let typingNode = null;
 
     async function callAPI(payload) {
         const res = await fetch(API, {
@@ -589,32 +719,79 @@ cw_header('Jake Console');
             .replaceAll("'", '&#039;');
     }
 
+    function chatBox() {
+        return document.getElementById('messages');
+    }
+
+    function scrollChatToBottom() {
+        const box = chatBox();
+        requestAnimationFrame(function () {
+            box.scrollTop = box.scrollHeight;
+        });
+    }
+
     function renderMessages(messages) {
-        const box = document.getElementById('messages');
+        const box = chatBox();
         box.innerHTML = '';
 
         if (!messages || !messages.length) {
-            box.innerHTML = '<div class="chat-empty">No messages in this conversation yet.</div>';
+            box.innerHTML = '<div class="chat-empty">Start a conversation with Jake.</div>';
             return;
         }
 
         messages.forEach(function (m) {
-            const role = m.role === 'user' ? 'user' : 'jake';
-            const row = document.createElement('div');
-            row.className = 'bubble-row ' + role;
-
-            const bubble = document.createElement('div');
-            bubble.className = 'bubble ' + role;
-
-            const safeText = escapeHtml(m.message_text || '');
-            const meta = m.created_at ? '<div class="bubble-meta">' + escapeHtml(m.created_at) + '</div>' : '';
-
-            bubble.innerHTML = safeText + meta;
-            row.appendChild(bubble);
-            box.appendChild(row);
+            appendBubble(m.role === 'user' ? 'user' : 'jake', m.message_text || '', m.created_at || '', false);
         });
 
-        box.scrollTop = box.scrollHeight;
+        scrollChatToBottom();
+    }
+
+    function appendBubble(role, text, createdAt, shouldScroll = true) {
+        const box = chatBox();
+
+        const row = document.createElement('div');
+        row.className = 'bubble-row ' + role;
+
+        const bubble = document.createElement('div');
+        bubble.className = 'bubble ' + role;
+
+        const safeText = escapeHtml(text || '');
+        const meta = createdAt ? '<div class="bubble-meta">' + escapeHtml(createdAt) + '</div>' : '';
+
+        bubble.innerHTML = safeText + meta;
+        row.appendChild(bubble);
+        box.appendChild(row);
+
+        if (shouldScroll) {
+            scrollChatToBottom();
+        }
+
+        return row;
+    }
+
+    function showTyping() {
+        hideTyping();
+
+        const box = chatBox();
+        const wrap = document.createElement('div');
+        wrap.className = 'typing-wrap';
+        wrap.id = 'typing_indicator';
+
+        wrap.innerHTML =
+            '<div class="typing-bubble">' +
+                '<div class="typing-dots"><span></span><span></span><span></span></div>' +
+            '</div>';
+
+        box.appendChild(wrap);
+        typingNode = wrap;
+        scrollChatToBottom();
+    }
+
+    function hideTyping() {
+        if (typingNode && typingNode.parentNode) {
+            typingNode.parentNode.removeChild(typingNode);
+        }
+        typingNode = null;
     }
 
     function setConversationList(conversations) {
@@ -669,6 +846,11 @@ cw_header('Jake Console');
 
         if (!messageText) return;
 
+        const tempTime = new Date().toLocaleString();
+        appendBubble('user', messageText, tempTime, true);
+        input.value = '';
+        showTyping();
+
         const payload = {
             action: 'send_message',
             message_text: messageText
@@ -682,38 +864,39 @@ cw_header('Jake Console');
             payload.request_type = requestType;
         }
 
-        input.value = '';
+        try {
+            const data = await callAPI(payload);
 
-        const data = await callAPI(payload);
+            if (!currentConversation) {
+                currentConversation = data.conversation_id;
+            }
 
-        if (!currentConversation) {
-            currentConversation = data.conversation_id;
+            hideTyping();
+            await loadConversation(currentConversation);
+            await loadConversations();
+        } catch (err) {
+            hideTyping();
+            appendBubble('jake', 'Error: ' + (err.message || 'Failed to send message'), new Date().toLocaleString(), true);
         }
-
-        await loadConversation(currentConversation);
-        await loadConversations();
     }
 
-    async function readArtifact(artifactId) {
+    async function openArtifactModal(artifactId) {
         const data = await callAPI({
             action: 'read_artifact',
             artifact_id: artifactId
         });
 
         const a = data.artifact || {};
-        const viewer = document.getElementById('artifact_viewer');
 
-        viewer.textContent =
-            'ARTIFACT ID: ' + (a.id || '') + '\n' +
-            'REQUEST ID: ' + (a.request_id || '') + '\n' +
-            'RUN ID: ' + (a.run_id || '') + '\n' +
-            'TITLE: ' + (a.title || '') + '\n' +
-            'TARGET PATH: ' + (a.target_path || '') + '\n' +
-            'OUTPUT MODE: ' + (a.output_mode || '') + '\n' +
-            'CREATED BY: ' + (a.created_by_agent || '') + '\n' +
-            'APPROVED BY: ' + (a.approved_by_agent || '') + '\n' +
-            '\n' +
-            (a.content || '');
+        document.getElementById('artifact_modal_title').textContent = a.title || 'Artifact';
+        document.getElementById('artifact_modal_meta').textContent =
+            'Artifact ID: ' + (a.id || '') +
+            ' · Request ID: ' + (a.request_id || '') +
+            ' · Run ID: ' + (a.run_id || '') +
+            ' · Output Mode: ' + (a.output_mode || '') +
+            (a.target_path ? ' · Target Path: ' + a.target_path : '');
+
+        document.getElementById('artifact_modal_body').textContent = a.content || '';
 
         document.querySelectorAll('.artifact-item').forEach(function (el) {
             el.classList.remove('active');
@@ -723,20 +906,26 @@ cw_header('Jake Console');
         if (active) {
             active.classList.add('active');
         }
+
+        const modal = document.getElementById('artifact_modal');
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeArtifactModal() {
+        const modal = document.getElementById('artifact_modal');
+        modal.classList.remove('is-open');
+        modal.setAttribute('aria-hidden', 'true');
     }
 
     document.getElementById('send_btn').addEventListener('click', function () {
-        sendMessage().catch(function (err) {
-            alert(err.message || 'Failed to send message');
-        });
+        sendMessage();
     });
 
     document.getElementById('msg_input').addEventListener('keydown', function (e) {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
-            sendMessage().catch(function (err) {
-                alert(err.message || 'Failed to send message');
-            });
+            sendMessage();
         }
     });
 
@@ -751,10 +940,24 @@ cw_header('Jake Console');
             const artifactId = this.getAttribute('data-artifact-id');
             if (!artifactId) return;
 
-            readArtifact(parseInt(artifactId, 10)).catch(function (err) {
+            openArtifactModal(parseInt(artifactId, 10)).catch(function (err) {
                 alert(err.message || 'Failed to read artifact');
             });
         });
+    });
+
+    document.getElementById('artifact_modal_close').addEventListener('click', closeArtifactModal);
+
+    document.getElementById('artifact_modal').addEventListener('click', function (e) {
+        if (e.target === this) {
+            closeArtifactModal();
+        }
+    });
+
+    document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+            closeArtifactModal();
+        }
     });
 
     loadConversations().catch(function () {});
