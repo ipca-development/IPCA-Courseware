@@ -1455,7 +1455,26 @@ try {
 )
 			
 			{
-                $engineeringPrompt = $activeRequestSummary . "\n\nUser follow-up:\n" . $messageText;
+                $engineeringPrompt = $activeRequestSummary;
+
+				// 🔥 If refining, include previous artifact
+				if ($activeArtifactId !== null) {
+					$stmt = $pdo->prepare("
+						SELECT content
+						FROM ai_jake_artifacts
+						WHERE id = ?
+						LIMIT 1
+					");
+					$stmt->execute([$activeArtifactId]);
+					$artifactRow = $stmt->fetch(PDO::FETCH_ASSOC);
+
+					if ($artifactRow && !empty($artifactRow['content'])) {
+						$engineeringPrompt .= "\n\nPREVIOUS ARTIFACT:\n" . $artifactRow['content'];
+					}
+				}
+
+				// 🔥 Always include user follow-up
+				$engineeringPrompt .= "\n\nUSER FOLLOW-UP:\n" . $messageText;
 
                 if ($activeTargetFiles !== '') {
                     $engineeringPrompt .= "\n\nRelevant files:\n" . $activeTargetFiles;
