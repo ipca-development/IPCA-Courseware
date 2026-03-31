@@ -1180,7 +1180,9 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 	'- When the answer is present in supplied context, use that context directly instead of giving generic guidance.',
 	'- Do not say you cannot access a file, schema, or project structure when it has been provided in the prompt.',
 	'- If asked to list items from provided context, list the actual items from that context.',
-	'- If context is incomplete or truncated, say that clearly and answer only from the visible portion.',	
+	'- If context is incomplete or truncated, say that clearly and answer only from the visible portion.',
+	'- Never propose SQL INSERT statements for artifacts.'
+	'- Artifacts must ONLY be created via the engineering cycle (Steven).'	
     '',
     'Interaction style:',
 	'- Think like a partner, not a gatekeeper',
@@ -1603,16 +1605,28 @@ try {
     $reply = '';
     $linkedRunId = null;
 
-    // 🔥 ENGINEERING TRIGGER (FINAL STABLE VERSION)
-    $shouldRunEngineering = (
-    $activeRequestSummary !== '' &&
+$lower = strtolower($messageText);
+
+$explicitImplementation =
+    strpos($lower, 'create') !== false ||
+    strpos($lower, 'build') !== false ||
+    strpos($lower, 'generate') !== false ||
+    strpos($lower, 'make') !== false ||
+    strpos($lower, 'add') !== false ||
+    strpos($lower, 'implement') !== false;
+
+$shouldRunEngineering = (
+    $explicitImplementation ||
     (
-        is_continuation_trigger($messageText)
-        || is_revision_trigger($messageText)
-        || $activeArtifactId !== null
-        || (
-            (string)$activeMode === 'analysis' &&
-            mb_strlen($messageText) < 40
+        $activeRequestSummary !== '' &&
+        (
+            is_continuation_trigger($messageText)
+            || is_revision_trigger($messageText)
+            || $activeArtifactId !== null
+            || (
+                (string)$activeMode === 'analysis' &&
+                mb_strlen($messageText) < 40
+            )
         )
     )
 );
