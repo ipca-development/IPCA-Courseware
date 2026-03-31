@@ -243,7 +243,7 @@ function build_steven_brief(array $requestRow, ?array $ssot, array $contextFiles
 }
 
 
-function parse_lenient_json_text(string $text): array
+function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = null): array
 {
     $text = trim($text);
 
@@ -251,72 +251,78 @@ function parse_lenient_json_text(string $text): array
         throw new RuntimeException('Empty model text');
     }
 
-    // 1) Whole response is a fenced block
-    if (preg_match('/^```(?:json)?\s*(.*?)\s*```$/si', $text, $m)) {
-        $candidate = trim((string)$m[1]);
-        $json = json_decode($candidate, true);
-        if (is_array($json)) {
-            return $json;
-        }
+    $outputMode = 'analysis_only';
+    $targetPath = $fallbackTargetPath;
+    $title = 'Steven Output';
+    $notes = '';
+
+    $lines = preg_split("/\r\n|\n|\r/", $text);
+    if (!is_array($lines)) {
+        throw new RuntimeException('Unable to parse model text');
     }
 
-    // 2) JSON fenced block appears anywhere inside prose
-    if (preg_match('/```(?:json)?\s*([\s\S]*?)\s*```/i', $text, $m)) {
-        $candidate = trim((string)$m[1]);
-        $json = json_decode($candidate, true);
-        if (is_array($json)) {
-            return $json;
+    $bodyStartIndex = 0;
+
+    for ($i = 0; $i < count($lines); $i++) {
+        $line = trim((string)$lines[$i]);
+
+        if ($line === '') {
+            $bodyStartIndex = $i + 1;
+            break;
         }
+
+        if (stripos($line, 'OUTPUT_MODE:') === 0) {
+            $value = trim(substr($line, strlen('OUTPUT_MODE:')));
+            if ($value !== '') {
+                $outputMode = $value;
+            }
+            continue;
+        }
+
+        if (stripos($line, 'TARGET_PATH:') === 0) {
+            $value = trim(substr($line, strlen('TARGET_PATH:')));
+            if ($value !== '') {
+                $targetPath = $value;
+            }
+            continue;
+        }
+
+        if (stripos($line, 'TITLE:') === 0) {
+            $value = trim(substr($line, strlen('TITLE:')));
+            if ($value !== '') {
+                $title = $value;
+            }
+            continue;
+        }
+
+        if (stripos($line, 'NOTES:') === 0) {
+            $value = trim(substr($line, strlen('NOTES:')));
+            if ($value !== '') {
+                $notes = $value;
+            }
+            continue;
+        }
+
+        $bodyStartIndex = $i;
+        break;
     }
 
-    // 3) Raw JSON object appears somewhere in mixed text
-    $start = strpos($text, '{');
-    if ($start !== false) {
-        $len = strlen($text);
-        $depth = 0;
-        $inString = false;
-        $escape = false;
+    $body = implode("\n", array_slice($lines, $bodyStartIndex));
+    $body = trim($body);
 
-        for ($i = $start; $i < $len; $i++) {
-            $ch = $text[$i];
-
-            if ($inString) {
-                if ($escape) {
-                    $escape = false;
-                } elseif ($ch === '\\') {
-                    $escape = true;
-                } elseif ($ch === '"') {
-                    $inString = false;
-                }
-                continue;
-            }
-
-            if ($ch === '"') {
-                $inString = true;
-                continue;
-            }
-
-            if ($ch === '{') {
-                $depth++;
-                continue;
-            }
-
-            if ($ch === '}') {
-                $depth--;
-                if ($depth === 0) {
-                    $candidate = substr($text, $start, $i - $start + 1);
-                    $json = json_decode($candidate, true);
-                    if (is_array($json)) {
-                        return $json;
-                    }
-                    break;
-                }
-            }
-        }
+    if ($body === '') {
+        throw new RuntimeException('Steven returned empty content');
     }
 
-    throw new RuntimeException('Model returned non-JSON text: ' . substr($text, 0, 200));
+    return [
+        'output_mode' => $outputMode,
+        'target_path' => $targetPath,
+        'title' => $title,
+        'notes' => $notes,
+        'content' => $body,
+    ];
 }
+
 
 function build_steven_artifact_content(array $requestRow, array $contextFiles): array
 {
@@ -331,41 +337,49 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
 
-    $system = <<<SYS
-You are Steven, a senior PHP/MySQL engineer.
+    $systemPrompt = implode("\n", [
+        'You are Steven, a hidden senior PHP/MySQL implementation agent inside the IPCA engineering console.',
+        'You write implementation-ready engineering output.',
+        'You do not make architecture decisions independently.',
+        'You must preserve existing behavior unless explicitly changed.',
+        'You must not invent nonexistent schema, APIs, helper functions, or engine methods unless the user explicitly requests new structure.',
+        'When a safe full replacement is possible, provide a full drop-in.',
+        'When a full replacement is unsafe, provide a surgical patch.',
+        'When neither is safe, provide analysis_only.',
+        'Return plain text in exactly this format:',
+        'OUTPUT_MODE: full_drop_in|surgical_patch|analysis_only',
+        'TARGET_PATH: <path or blank>',
+        'TITLE: <short title>',
+        'NOTES: <short note>',
+        '',
+        '<blank line>',
+        '<actual output starts here>',
+        '',
+        'Do not return JSON.',
+        'Do not wrap the response in markdown fences.',
+        'Do not put introductions before OUTPUT_MODE.',
+        'After the blank line, provide normal human-readable code or patch content.',
+    ]);
 
-Rules:
-- Do not invent database schema unless explicitly required.
-- Do not break existing functionality.
-- Follow existing project patterns.
-- Preserve existing features unless explicitly asked to change them.
-- Prefer full drop-in replacements when a single target file is clearly identified.
-- If full replacement is too risky, provide an exact surgical patch.
-- Return JSON only.
-- Do not include introductions, explanations, markdown fences, or prose before or after the JSON.
-- Your first character must be { and your last character must be }.
-
-
-Required JSON schema:
-{
-  "output_mode": "full_drop_in|surgical_patch|analysis_only",
-  "target_path": "string",
-  "title": "string",
-  "content": "string",
-  "notes": "string"
-}
-SYS;
-
-    $user = "REQUEST TITLE:\n" . $title . "\n\n";
-    $user .= "REQUEST:\n" . $prompt . "\n\n";
+    $userPrompt = "REQUEST TITLE:\n" . $title . "\n\n";
+    $userPrompt .= "REQUEST:\n" . $prompt . "\n\n";
 
     if (!empty($contextFiles)) {
-        $user .= "CONTEXT FILES:\n";
+        $userPrompt .= "CONTEXT FILES:\n";
         foreach ($contextFiles as $f) {
-            if (empty($f['error'])) {
-                $user .= "FILE: " . $f['path'] . "\n";
-                $user .= $f['content_excerpt'] . "\n\n";
+            if (!empty($f['error'])) {
+                continue;
             }
+
+            $fileContent = '';
+            if (isset($f['content']) && is_string($f['content'])) {
+                $fileContent = $f['content'];
+            } elseif (isset($f['content_excerpt']) && is_string($f['content_excerpt'])) {
+                $fileContent = $f['content_excerpt'];
+            }
+
+            $userPrompt .= "FILE: " . (string)$f['path'] . "\n";
+            $userPrompt .= $fileContent . "\n\n";
         }
     }
 
@@ -378,7 +392,7 @@ SYS;
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $system
+                            'text' => $systemPrompt
                         ]
                     ]
                 ],
@@ -387,7 +401,7 @@ SYS;
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => $user
+                            'text' => $userPrompt
                         ]
                     ]
                 ]
@@ -395,47 +409,51 @@ SYS;
         ]);
 
         $text = '';
-		$out = $resp['output'] ?? [];
 
-		if (is_array($out)) {
-			foreach ($out as $item) {
-				if (!is_array($item)) {
-					continue;
-				}
-
-				$content = $item['content'] ?? [];
-				if (!is_array($content)) {
-					continue;
-				}
-
-				foreach ($content as $c) {
-					if (is_array($c) && ($c['type'] ?? '') === 'output_text') {
-						$text .= (string)($c['text'] ?? '');
-					}
-				}
-			}
-		}
-
-		$text = trim($text);
-		$json = parse_lenient_json_text($text);
-
-        $outputMode = trim((string)($json['output_mode'] ?? 'full_drop_in'));
-        $returnedTargetPath = trim((string)($json['target_path'] ?? ''));
-        $returnedTitle = trim((string)($json['title'] ?? ''));
-        $returnedContent = trim((string)($json['content'] ?? ''));
-        $returnedNotes = trim((string)($json['notes'] ?? ''));
-
-        if ($returnedContent === '') {
-            throw new RuntimeException('Steven returned empty content');
+        if (!empty($resp['output_text']) && is_string($resp['output_text'])) {
+            $text = trim($resp['output_text']);
         }
 
+        if ($text === '') {
+            $out = $resp['output'] ?? [];
+
+            if (is_array($out)) {
+                foreach ($out as $item) {
+                    if (!is_array($item)) {
+                        continue;
+                    }
+
+                    $content = $item['content'] ?? [];
+                    if (!is_array($content)) {
+                        continue;
+                    }
+
+                    foreach ($content as $c) {
+                        if (!is_array($c)) {
+                            continue;
+                        }
+
+                        if (($c['type'] ?? '') === 'output_text' && !empty($c['text']) && is_string($c['text'])) {
+                            $text .= (string)$c['text'];
+                        } elseif (($c['type'] ?? '') === 'text' && !empty($c['text']) && is_string($c['text'])) {
+                            $text .= (string)$c['text'];
+                        }
+                    }
+                }
+            }
+
+            $text = trim($text);
+        }
+
+        $parsed = parse_plain_text_artifact($text, $targetPath !== '' ? $targetPath : null);
+
         return [
-            'title' => $returnedTitle !== '' ? $returnedTitle : ($targetPath !== '' ? ('Steven Output - ' . $targetPath) : 'Steven Output'),
-            'target_path' => $returnedTargetPath !== '' ? $returnedTargetPath : ($targetPath !== '' ? $targetPath : null),
+            'title' => trim((string)$parsed['title']) !== '' ? (string)$parsed['title'] : ($targetPath !== '' ? ('Steven Output - ' . $targetPath) : 'Steven Output'),
+            'target_path' => !empty($parsed['target_path']) ? (string)$parsed['target_path'] : ($targetPath !== '' ? $targetPath : null),
             'artifact_type' => 'code',
-            'output_mode' => $outputMode !== '' ? $outputMode : 'full_drop_in',
-            'content' => $returnedContent,
-            'notes' => $returnedNotes !== '' ? $returnedNotes : 'Generated by Steven (AI)',
+            'output_mode' => !empty($parsed['output_mode']) ? (string)$parsed['output_mode'] : 'analysis_only',
+            'content' => (string)$parsed['content'],
+            'notes' => trim((string)$parsed['notes']) !== '' ? (string)$parsed['notes'] : 'Generated by Steven (AI)',
         ];
 
     } catch (Throwable $e) {
