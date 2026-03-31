@@ -1454,35 +1454,63 @@ try {
     )
 )
 			
-			{
-                $engineeringPrompt = $activeRequestSummary;
+			            {
+                $engineeringPromptParts = array();
 
-				// 🔥 If refining, include previous artifact
-				if ($activeArtifactId !== null) {
-					$stmt = $pdo->prepare("
-						SELECT content
-						FROM ai_jake_artifacts
-						WHERE id = ?
-						LIMIT 1
-					");
-					$stmt->execute([$activeArtifactId]);
-					$artifactRow = $stmt->fetch(PDO::FETCH_ASSOC);
+                // Base task summary
+                $engineeringPromptParts[] = trim((string)$activeRequestSummary);
 
-					if ($artifactRow && !empty($artifactRow['content'])) {
-						$engineeringPrompt .= "\n\nPREVIOUS ARTIFACT:\n" . $artifactRow['content'];
-					}
-				}
-
-				// 🔥 Always include user follow-up
-				$engineeringPrompt .= "\n\nUSER FOLLOW-UP:\n" . $messageText;
-
+                // Relevant files from conversation state
                 if ($activeTargetFiles !== '') {
-                    $engineeringPrompt .= "\n\nRelevant files:\n" . $activeTargetFiles;
+                    $engineeringPromptParts[] = "Relevant files:\n" . trim((string)$activeTargetFiles);
                 }
 
+                // Previously stored next-step guidance
                 if ($activeNextStep !== '') {
-                    $engineeringPrompt .= "\n\nRequested next step:\n" . $activeNextStep;
+                    $engineeringPromptParts[] = "Requested next step:\n" . trim((string)$activeNextStep);
                 }
+
+                // Previous artifact context for refinement / continuation
+                if ($activeArtifactId !== null) {
+                    $stmt = $pdo->prepare("
+                        SELECT
+                            id,
+                            title,
+                            target_path,
+                            output_mode,
+                            review_status,
+                            review_summary,
+                            content
+                        FROM ai_jake_artifacts
+                        WHERE id = ?
+                        LIMIT 1
+                    ");
+                    $stmt->execute([$activeArtifactId]);
+                    $artifactRow = $stmt->fetch(PDO::FETCH_ASSOC);
+
+                    if (is_array($artifactRow) && $artifactRow) {
+                        $artifactContext = array();
+                        $artifactContext[] = 'PREVIOUS ARTIFACT ID: ' . (string)($artifactRow['id'] ?? '');
+                        $artifactContext[] = 'PREVIOUS ARTIFACT TITLE: ' . (string)($artifactRow['title'] ?? '');
+                        $artifactContext[] = 'PREVIOUS ARTIFACT TARGET PATH: ' . (string)($artifactRow['target_path'] ?? '');
+                        $artifactContext[] = 'PREVIOUS ARTIFACT OUTPUT MODE: ' . (string)($artifactRow['output_mode'] ?? '');
+                        $artifactContext[] = 'PREVIOUS ARTIFACT REVIEW STATUS: ' . (string)($artifactRow['review_status'] ?? '');
+                        $artifactContext[] = 'PREVIOUS ARTIFACT REVIEW SUMMARY: ' . (string)($artifactRow['review_summary'] ?? '');
+                        $artifactContext[] = '';
+                        $artifactContext[] = 'PREVIOUS ARTIFACT CONTENT:';
+                        $artifactContext[] = (string)($artifactRow['content'] ?? '');
+
+                        $engineeringPromptParts[] = implode("\n", $artifactContext);
+                    }
+                }
+
+                // Always include the latest user instruction verbatim
+                $engineeringPromptParts[] = "USER FOLLOW-UP:\n" . trim((string)$messageText);
+
+                // Final composed engineering prompt
+                $engineeringPrompt = trim(implode("\n\n", array_filter($engineeringPromptParts, function ($part) {
+                    return trim((string)$part) !== '';
+                })));
 
                 $result = run_jake_engineering_cycle(
                     $pdo,
