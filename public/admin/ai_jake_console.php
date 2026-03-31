@@ -691,9 +691,7 @@ cw_header('Jake Console');
             <?php else: ?>
               <?php foreach ($recentArtifacts as $artifact): ?>
                 <div class="artifact-item" data-artifact-id="<?= (int)$artifact['id'] ?>">
-                  <?php
-
-?>
+                  
 
 <div class="artifact-title">
     <?= h((string)$artifact['title']) ?>
@@ -821,15 +819,23 @@ cw_header('Jake Console');
 
     function renderArtifactContent(a) {
         const codeEl = document.getElementById('artifact_modal_code');
+        if (!codeEl) {
+            return;
+        }
+
         const language = detectArtifactLanguage(a);
 
         codeEl.className = 'language-' + language;
         codeEl.textContent = a.content || '';
 
-        if (window.Prism && typeof window.Prism.highlightElement === 'function') {
-            window.Prism.highlightElement(codeEl);
+        try {
+            if (window.Prism && typeof window.Prism.highlightElement === 'function') {
+                window.Prism.highlightElement(codeEl);
+            }
+        } catch (e) {
+            console.warn('Prism highlight failed', e);
         }
-    }	
+    } 	
 	
 function renderArtifactItem(a) {
     const createdAt = a.created_at || '';
@@ -1067,11 +1073,6 @@ async function loadRecentArtifacts() {
         wrapper.innerHTML = renderArtifactItem(a);
 
         const el = wrapper.firstElementChild;
-
-        el.addEventListener('click', function () {
-            openArtifactModal(a.id);
-        });
-
         list.appendChild(el);
     });
 }
@@ -1152,7 +1153,11 @@ async function loadRecentArtifacts() {
             ' · Output Mode: ' + (a.output_mode || '') +
             (a.target_path ? ' · Target Path: ' + a.target_path : '');
 
-             renderArtifactContent(a);
+        const modal = document.getElementById('artifact_modal');
+        modal.classList.add('is-open');
+        modal.setAttribute('aria-hidden', 'false');
+
+        renderArtifactContent(a);
 
         document.querySelectorAll('.artifact-item').forEach(function (el) {
             el.classList.remove('active');
@@ -1162,10 +1167,6 @@ async function loadRecentArtifacts() {
         if (active) {
             active.classList.add('active');
         }
-
-        const modal = document.getElementById('artifact_modal');
-        modal.classList.add('is-open');
-        modal.setAttribute('aria-hidden', 'false');
     }
 
     function closeArtifactModal() {
@@ -1197,14 +1198,15 @@ async function loadRecentArtifacts() {
         });
     });
 
-    document.querySelectorAll('.artifact-item').forEach(function (el) {
-        el.addEventListener('click', function () {
-            const artifactId = this.getAttribute('data-artifact-id');
-            if (!artifactId) return;
+    document.getElementById('artifact_list').addEventListener('click', function (e) {
+        const card = e.target.closest('.artifact-item');
+        if (!card) return;
 
-            openArtifactModal(parseInt(artifactId, 10)).catch(function (err) {
-                alert(err.message || 'Failed to read artifact');
-            });
+        const artifactId = parseInt(card.getAttribute('data-artifact-id') || '', 10);
+        if (!artifactId) return;
+
+        openArtifactModal(artifactId).catch(function (err) {
+            alert(err.message || 'Failed to read artifact');
         });
     });
 
