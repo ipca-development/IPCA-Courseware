@@ -193,16 +193,25 @@ function load_project_file_index(string $root): array
     );
 
     foreach ($iterator as $file) {
-        if ($file->isFile()) {
-            $path = str_replace($root . '/', '', $file->getPathname());
+        if (!$file->isFile()) continue;
 
-            if (preg_match('/\.(php|js|css|sql)$/i', $path)) {
-                $files[] = $path;
-            }
+        $path = str_replace($root . '/', '', $file->getPathname());
+
+        // 🚫 EXCLUDE vendor + irrelevant folders
+        if (
+            strpos($path, 'vendor/') === 0 ||
+            strpos($path, '.git/') === 0 ||
+            strpos($path, 'node_modules/') === 0
+        ) {
+            continue;
+        }
+
+        if (preg_match('/\.(php|js|css|sql)$/i', $path)) {
+            $files[] = $path;
         }
     }
 
-    return array_slice($files, 0, 200);
+    return array_slice($files, 0, 100);
 }
 
 
@@ -670,7 +679,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
     }
 
 	$userPrompt .= "DATABASE SCHEMA:\n";
-	$userPrompt .= json_encode($dbSchema);
+	$userPrompt .= json_encode(array_keys($dbSchema));
 	$userPrompt .= "\n\n";
 
 	$userPrompt .= "PROJECT FILE INDEX:\n";
@@ -1293,6 +1302,14 @@ function run_jake_engineering_cycle(
 
     $ssot = load_latest_ssot_snapshot($pdo);
     $candidatePaths = extract_file_candidates_from_text((string)$requestRow['prompt']);
+
+		// ✅ Always include core engine files (minimal, controlled)
+			$coreFiles = [
+					'src/courseware_progression_v2.php',
+    				'src/notification_service.php'
+		];
+
+$candidatePaths = array_values(array_unique(array_merge($coreFiles, $candidatePaths)));
     $contextFiles = read_files_for_context($candidatePaths, 3);
 
     $runId = create_jake_run(
