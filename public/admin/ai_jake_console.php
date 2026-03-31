@@ -198,7 +198,22 @@ cw_header('Jake Console');
   .msg-spacer{
     height:10px;
   }
+  .inline-artifact-link{
+  display:inline-block;
+  margin-left:4px;
+  padding:2px 8px;
+  border-radius:999px;
+  background:#dbe7ff;
+  color:#1f4db8;
+  font-weight:700;
+  text-decoration:none;
+  border:1px solid rgba(31,77,184,0.15);
+}
 
+.inline-artifact-link:hover{
+  background:#cfe0ff;
+}
+	
   .typing-wrap{
     display:flex;
     justify-content:flex-start;
@@ -399,6 +414,21 @@ cw_header('Jake Console');
     line-height:1.35;
   }
 
+  .artifact-badge-new{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  margin-left:8px;
+  padding:2px 8px;
+  font-size:10px;
+  font-weight:800;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+  border-radius:999px;
+  background:linear-gradient(135deg,#22c55e,#16a34a);
+  color:#fff;
+}	
+	
   .artifact-meta{
     margin-top:6px;
     font-size:12px;
@@ -639,7 +669,22 @@ cw_header('Jake Console');
             <?php else: ?>
               <?php foreach ($recentArtifacts as $artifact): ?>
                 <div class="artifact-item" data-artifact-id="<?= (int)$artifact['id'] ?>">
-                  <div class="artifact-title"><?= h((string)$artifact['title']) ?></div>
+                  <?php
+$isNew = false;
+if (!empty($artifact['created_at'])) {
+    $createdTs = strtotime($artifact['created_at']);
+    if ($createdTs !== false && (time() - $createdTs) <= 60) {
+        $isNew = true;
+    }
+}
+?>
+
+<div class="artifact-title">
+    <?= h((string)$artifact['title']) ?>
+    <?php if ($isNew): ?>
+        <span class="artifact-badge-new">New</span>
+    <?php endif; ?>
+</div>
                   <div class="artifact-meta">
                     Artifact #<?= (int)$artifact['id'] ?>
                     <?php if (!empty($artifact['target_path'])): ?>
@@ -738,6 +783,36 @@ cw_header('Jake Console');
             .replaceAll("'", '&#039;');
     }
 
+	
+	function renderArtifactItem(a) {
+    const createdAt = a.created_at || '';
+    let isNew = false;
+
+    if (createdAt) {
+        const createdTs = new Date(createdAt).getTime();
+        const now = Date.now();
+        if (!isNaN(createdTs) && (now - createdTs) <= 60000) {
+            isNew = true;
+        }
+    }
+
+    return `
+        <div class="artifact-item" data-artifact-id="${a.id}">
+            <div class="artifact-title">
+                ${escapeHtml(a.title || 'Artifact')}
+                ${isNew ? '<span class="artifact-badge-new">New</span>' : ''}
+            </div>
+            <div class="artifact-meta">
+                Artifact #${a.id}
+                ${a.target_path ? ' · ' + escapeHtml(a.target_path) : ''}
+                <br>
+                ${escapeHtml(a.output_mode || '')} · ${escapeHtml(createdAt)}
+            </div>
+        </div>
+    `;
+}
+	
+	
     function chatBox() {
         return document.getElementById('messages');
     }
@@ -771,16 +846,24 @@ function formatJakeMessage(text) {
         if (/^#{1,6}\s+/.test(line)) return true;
         if (/^\*\*(.+?)\*\*$/.test(line)) return true;
 
-        // Title-like plain text: mostly capitalized words, short, no sentence punctuation
         const words = line.split(/\s+/).filter(Boolean);
         if (words.length >= 2 && words.length <= 6) {
-            const titleish = words.filter(w => /^[A-Z][A-Za-z0-9'`-]*$/.test(w)).length;
+            const titleish = words.filter(function (w) {
+                return /^[A-Z][A-Za-z0-9'`-]*$/.test(w);
+            }).length;
             if (titleish >= Math.max(2, words.length - 1)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    function injectArtifactLinks(line) {
+        return line.replace(
+            /Artifact ID:\s*([0-9]+)/g,
+            'Artifact ID: <a href="#" class="inline-artifact-link" data-artifact-id="$1">#$1</a>'
+        );
     }
 
     for (let i = 0; i < lines.length; i++) {
@@ -796,7 +879,7 @@ function formatJakeMessage(text) {
         const boldMatch = line.match(/^\*\*(.+?)\*\*$/);
         if (boldMatch) {
             closeListIfOpen();
-            html += '<div class="msg-section-title">' + boldMatch[1] + '</div>';
+            html += '<div class="msg-section-title">' + injectArtifactLinks(boldMatch[1]) + '</div>';
             html += '<div class="msg-section-gap"></div>';
             continue;
         }
@@ -804,14 +887,14 @@ function formatJakeMessage(text) {
         const mdHeadingMatch = line.match(/^#{1,6}\s+(.+)$/);
         if (mdHeadingMatch) {
             closeListIfOpen();
-            html += '<div class="msg-section-title">' + mdHeadingMatch[1] + '</div>';
+            html += '<div class="msg-section-title">' + injectArtifactLinks(mdHeadingMatch[1]) + '</div>';
             html += '<div class="msg-section-gap"></div>';
             continue;
         }
 
         if (looksLikeTitle(line)) {
             closeListIfOpen();
-            html += '<div class="msg-section-title">' + line + '</div>';
+            html += '<div class="msg-section-title">' + injectArtifactLinks(line) + '</div>';
             html += '<div class="msg-section-gap"></div>';
             continue;
         }
@@ -821,12 +904,12 @@ function formatJakeMessage(text) {
                 html += '<ul class="msg-list">';
                 inList = true;
             }
-            html += '<li>' + line.substring(2) + '</li>';
+            html += '<li>' + injectArtifactLinks(line.substring(2)) + '</li>';
             continue;
         }
 
         closeListIfOpen();
-        html += '<div class="msg-paragraph">' + line + '</div>';
+        html += '<div class="msg-paragraph">' + injectArtifactLinks(line) + '</div>';
     }
 
     closeListIfOpen();
@@ -1020,7 +1103,38 @@ function formatJakeMessage(text) {
 
             hideTyping();
             await loadConversation(currentConversation);
-            await loadConversations();
+await loadConversations();
+
+// 🔥 NEW: refresh artifact list
+try {
+    const res = await fetch(API, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'list_request_artifacts', request_id: data.request_id })
+    });
+
+    const json = await res.json();
+
+    if (json.ok && json.artifacts) {
+        const list = document.getElementById('artifact_list');
+        list.innerHTML = '';
+
+        json.artifacts.forEach(function (a) {
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = renderArtifactItem(a);
+
+            const el = wrapper.firstElementChild;
+
+            el.addEventListener('click', function () {
+                openArtifactModal(a.id);
+            });
+
+            list.appendChild(el);
+        });
+    }
+} catch (e) {
+    console.warn('Artifact refresh failed', e);
+}
             await loadRecentArtifacts();
         } catch (err) {
             hideTyping();
@@ -1108,6 +1222,21 @@ function formatJakeMessage(text) {
         }
     });
 
+	document.addEventListener('click', function (e) {
+    const link = e.target.closest('.inline-artifact-link');
+    if (!link) return;
+
+    e.preventDefault();
+
+    const artifactId = parseInt(link.getAttribute('data-artifact-id') || '', 10);
+    if (!artifactId) return;
+
+    openArtifactModal(artifactId).catch(function (err) {
+        alert(err.message || 'Failed to open artifact');
+    });
+});
+	
+	
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') {
             closeArtifactModal();
