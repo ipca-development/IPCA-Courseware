@@ -1533,24 +1533,44 @@ try {
                     $result['artifact_id']
                 );
 
-            } else {
+                        } else {
                 $reply = jake_chat_reply($pdo, [
                     'message_text' => $messageText
                 ], $requestType !== '' ? $requestType : null);
 
-                $targetFiles = extract_active_target_files_from_message($messageText);
-                $targetFilesText = $targetFiles ? implode("\n", $targetFiles) : '';
+                // 🔥 Detect if we are already in an active engineering flow
+                if (
+                    (string)$activeMode === 'implementation' ||
+                    $activeArtifactId !== null ||
+                    $activeRunId !== null
+                ) {
+                    // 🔥 Preserve existing engineering state (DO NOT overwrite task)
+                    update_conversation_state(
+                        $pdo,
+                        $conversationId,
+                        $activeMode !== '' ? $activeMode : 'implementation',
+                        $activeRequestSummary !== '' ? $activeRequestSummary : build_active_request_summary($messageText, $requestType !== '' ? $requestType : null),
+                        $activeTargetFiles !== '' ? $activeTargetFiles : null,
+                        $activeNextStep !== '' ? $activeNextStep : 'Implementation draft created and reviewed. Awaiting user inspection.',
+                        $activeRunId,
+                        $activeArtifactId
+                    );
+                } else {
+                    // 🔥 Normal behavior (new discussion → safe to overwrite state)
+                    $targetFiles = extract_active_target_files_from_message($messageText);
+                    $targetFilesText = $targetFiles ? implode("\n", $targetFiles) : '';
 
-                update_conversation_state(
-                    $pdo,
-                    $conversationId,
-                    'analysis',
-                    build_active_request_summary($messageText, $requestType !== '' ? $requestType : null),
-                    $targetFilesText !== '' ? $targetFilesText : null,
-                    'If user approves, move into implementation mode.',
-                    $activeRunId,
-                    $activeArtifactId
-                );
+                    update_conversation_state(
+                        $pdo,
+                        $conversationId,
+                        'analysis',
+                        build_active_request_summary($messageText, $requestType !== '' ? $requestType : null),
+                        $targetFilesText !== '' ? $targetFilesText : null,
+                        'If user approves, move into implementation mode.',
+                        $activeRunId,
+                        $activeArtifactId
+                    );
+                }
             }
 
             $jakeMessageId = add_conversation_message(
@@ -1569,8 +1589,6 @@ try {
                 'jake_message_id' => $jakeMessageId,
                 'reply' => $reply
             ]);
-
-        case 'save_request':
 
             $prompt = trim((string)($data['prompt'] ?? ''));
             $title = trim((string)($data['title'] ?? ''));
