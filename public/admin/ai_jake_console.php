@@ -552,7 +552,33 @@ cw_header('Jake Console');
       height:92vh;
       border-radius:18px;
     }
+	.msg-section-title{
+  font-weight:800;
+  color:inherit;
+  margin:2px 0 8px;
+	}
+
+	.msg-list{
+	  margin:4px 0 10px 20px;
+	  padding-left:18px;
+	}
+
+	.msg-list li{
+	  margin:4px 0;
+	  line-height:1.45;
+	}
+
+	.msg-paragraph{
+	  line-height:1.5;
+	  margin:0 0 8px;
+	}
+
+	.msg-spacer{
+	  height:6px;
+	}  
+	  
   }
+	
 </style>
 
 <div class="jake-shell">
@@ -730,6 +756,60 @@ cw_header('Jake Console');
         });
     }
 
+	function formatJakeMessage(text) {
+    const safe = escapeHtml(text || '');
+    const lines = safe.split(/\r?\n/);
+
+    let html = '';
+    let inList = false;
+
+    for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+
+        if (line === '') {
+            if (inList) {
+                html += '</ul>';
+                inList = false;
+            }
+            html += '<div class="msg-spacer"></div>';
+            continue;
+        }
+
+        const boldMatch = line.match(/^\*\*(.+?)\*\*$/);
+        if (boldMatch) {
+            if (inList) {
+                html += '</ul>';
+                inList = false;
+            }
+            html += '<div class="msg-section-title">' + boldMatch[1] + '</div>';
+            continue;
+        }
+
+        if (line.startsWith('- ')) {
+            if (!inList) {
+                html += '<ul class="msg-list">';
+                inList = true;
+            }
+            html += '<li>' + line.substring(2) + '</li>';
+            continue;
+        }
+
+        if (inList) {
+            html += '</ul>';
+            inList = false;
+        }
+
+        html += '<div class="msg-paragraph">' + line + '</div>';
+    }
+
+    if (inList) {
+        html += '</ul>';
+    }
+
+    return html;
+}
+	
+	
     function renderMessages(messages) {
         const box = chatBox();
         box.innerHTML = '';
@@ -755,10 +835,11 @@ cw_header('Jake Console');
         const bubble = document.createElement('div');
         bubble.className = 'bubble ' + role;
 
-        const safeText = escapeHtml(text || '');
-        const meta = createdAt ? '<div class="bubble-meta">' + escapeHtml(createdAt) + '</div>' : '';
+        const formattedText = formatJakeMessage(text || '');
+		const meta = createdAt ? '<div class="bubble-meta">' + escapeHtml(createdAt) + '</div>' : '';
 
-        bubble.innerHTML = safeText + meta;
+		bubble.innerHTML = formattedText + meta;
+		
         row.appendChild(bubble);
         box.appendChild(row);
 
