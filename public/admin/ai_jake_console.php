@@ -784,17 +784,27 @@ if (!empty($artifact['created_at'])) {
     }
 
 	
-	function renderArtifactItem(a) {
+function renderArtifactItem(a) {
     const createdAt = a.created_at || '';
-    let isNew = false;
 
-    if (createdAt) {
-        const createdTs = new Date(createdAt).getTime();
-        const now = Date.now();
-        if (!isNaN(createdTs) && (now - createdTs) <= 60000) {
-            isNew = true;
-        }
-    }
+    const lastSeenId = parseInt(localStorage.getItem('last_seen_artifact_id') || '0', 10);
+    const isNew = a.id > lastSeenId;
+
+    return `
+        <div class="artifact-item" data-artifact-id="${a.id}">
+            <div class="artifact-title">
+                ${escapeHtml(a.title || 'Artifact')}
+                ${isNew ? '<span class="artifact-badge-new">New</span>' : ''}
+            </div>
+            <div class="artifact-meta">
+                Artifact #${a.id}
+                ${a.target_path ? ' · ' + escapeHtml(a.target_path) : ''}
+                <br>
+                ${escapeHtml(a.output_mode || '')} · ${escapeHtml(createdAt)}
+            </div>
+        </div>
+    `;
+}
 
     return `
         <div class="artifact-item" data-artifact-id="${a.id}">
@@ -1150,6 +1160,8 @@ try {
 
         const a = data.artifact || {};
 
+		localStorage.setItem('last_seen_artifact_id', String(artifactId));
+		
         document.getElementById('artifact_modal_title').textContent = a.title || 'Artifact';
         document.getElementById('artifact_modal_meta').textContent =
             'Artifact ID: ' + (a.id || '') +
