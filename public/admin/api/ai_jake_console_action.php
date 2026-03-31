@@ -335,65 +335,153 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
 function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFiles, string $artifactContent): array
 {
     $system = implode("\n", [
-        'You are Jake, IPCA system architect.',
-        'You review Steven outputs strictly.',
+        'You are Jake, the IPCA architect and SSOT guardian.',
         '',
-        'Rules:',
-        '- Do NOT allow invented methods',
-        '- Do NOT allow architecture drift',
-        '- Must respect SSOT',
-        '- Must preserve behavior unless explicitly changed',
-        '- Must match real file context',
+        'Your job is to review Steven outputs strictly, but explain your verdict in clear human language.',
         '',
-        'Return:',
+        'Core review rules:',
+        '- Stay grounded in the actual user request.',
+        '- Stay grounded in the loaded files.',
+        '- Stay grounded in the SSOT snapshot when provided.',
+        '- Do not give generic code-review advice unless it is directly relevant to the actual artifact.',
+        '- Do not fall back to generic security, logging, validation, or architecture checklists unless the artifact truly has that specific problem.',
+        '- Focus on whether Steven actually solved the requested task correctly and safely.',
+        '',
+        'Critical rejection rules:',
+        '- Reject invented methods, invented schema, invented APIs, or invented architecture.',
+        '- Reject changes that alter behavior without explicit permission.',
+        '- Reject output that is not actually grounded in the loaded file context.',
+        '- Reject output that claims a safe full drop-in when that is not justified.',
+        '- If the correct answer is "not safely possible yet", prefer analysis_only.',
+        '',
+        'Communication rules:',
+        '- Be clear, calm, and conversational.',
+        '- Explain the issue in normal human language.',
+        '- After the technical explanation, add a short plain-English clarification starting with: "In other words:"',
+        '- Keep the explanation helpful, not robotic.',
+        '',
+        'Return format exactly:',
         'VERDICT: approved|needs_revision|analysis_only',
-        'REASON: short explanation',
-        'REVISION: if needed, clear instruction'
+        'REASON: <clear explanation with some context, plus "In other words: ...">',
+        'REVISION: <exact revision instruction if needed, otherwise "None">',
     ]);
 
-    $user = "REQUEST:\n" . ($requestRow['prompt'] ?? '') . "\n\n";
-    $user .= "ARTIFACT:\n" . $artifactContent;
+    $user = "USER REQUEST:\n" . trim((string)($requestRow['prompt'] ?? '')) . "\n\n";
+
+    if ($ssot) {
+        $user .= "SSOT SNAPSHOT:\n";
+        $user .= "Version: " . (string)($ssot['ssot_version'] ?? '') . "\n";
+        $user .= "Title: " . (string)($ssot['title'] ?? '') . "\n";
+        $user .= "Summary: " . (string)($ssot['summary_text'] ?? '') . "\n\n";
+    }
+
+    if ($contextFiles) {
+        $user .= "LOADED FILES:\n";
+        foreach ($contextFiles as $f) {
+            if (!empty($f['error'])) {
+                $user .= "- " . (string)$f['path'] . " [read failed: " . (string)$f['error'] . "]\n";
+                continue;
+            }
+
+            $user .= "- " . (string)$f['path'] . "\n";
+        }
+        $user .= "\n";
+    }
+
+    $user .= "STEVEN ARTIFACT TO REVIEW:\n";
+    $user .= $artifactContent;
 
     $resp = cw_openai_responses([
         'model' => cw_openai_model(),
         'input' => [
             [
                 'role' => 'system',
-                'content' => [['type'=>'input_text','text'=>$system]]
+                'content' => [
+                    ['type' => 'input_text', 'text' => $system]
+                ]
             ],
             [
                 'role' => 'user',
-                'content' => [['type'=>'input_text','text'=>$user]]
+                'content' => [
+                    ['type' => 'input_text', 'text' => $user]
+                ]
             ]
         ]
     ]);
 
     $text = '';
 
-    if (!empty($resp['output_text'])) {
+    if (!empty($resp['output_text']) && is_string($resp['output_text'])) {
         $text = trim($resp['output_text']);
     }
 
     if ($text === '') {
         $out = $resp['output'] ?? [];
-        foreach ($out as $item) {
-            foreach (($item['content'] ?? []) as $c) {
-                if (($c['type'] ?? '') === 'output_text') {
-                    $text .= $c['text'] ?? '';
+        if (is_array($out)) {
+            foreach ($out as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                $content = $item['content'] ?? [];
+                if (!is_array($content)) {
+                    continue;
+                }
+
+                foreach ($content as $c) {
+                    if (!is_array($c)) {
+                        continue;
+                    }
+
+                    if (($c['type'] ?? '') === 'output_text' && !empty($c['text']) && is_string($c['text'])) {
+                        $text .= (string)$c['text'];
+                    } elseif (($c['type'] ?? '') === 'text' && !empty($c['text']) && is_string($c['text'])) {
+                        $text .= (string)$c['text'];
+                    }
                 }
             }
         }
+
         $text = trim($text);
+    }
+
+    if ($text === '') {
+        throw new RuntimeException('Jake review returned empty content');
     }
 
     $verdict = 'analysis_only';
     $reason = $text;
-    $revision = '';
+    $revision = 'None';
 
-    if (stripos($text, 'approved') !== false) {
-        $verdict = 'approved';
-    } elseif (stripos($text, 'needs_revision') !== false) {
-        $verdict = 'needs_revision';
+    $lines = preg_split("/\r\n|\n|\r/", $text);
+    if (is_array($lines)) {
+        foreach ($lines as $line) {
+            $trimmed = trim((string)$line);
+
+            if (stripos($trimmed, 'VERDICT:') === 0) {
+                $candidate = trim(substr($trimmed, strlen('VERDICT:')));
+                if ($candidate !== '') {
+                    $verdict = $candidate;
+                }
+                continue;
+            }
+
+            if (stripos($trimmed, 'REASON:') === 0) {
+                $candidate = trim(substr($trimmed, strlen('REASON:')));
+                if ($candidate !== '') {
+                    $reason = $candidate;
+                }
+                continue;
+            }
+
+            if (stripos($trimmed, 'REVISION:') === 0) {
+                $candidate = trim(substr($trimmed, strlen('REVISION:')));
+                if ($candidate !== '') {
+                    $revision = $candidate;
+                }
+                continue;
+            }
+        }
     }
 
     return [
@@ -1104,30 +1192,60 @@ function run_jake_engineering_cycle(
         throw $inner;
     }
 
-    $reply = array();
-    $reply[] = 'I moved this conversation into implementation mode.';
-    $reply[] = '';
-    $reply[] = 'I prepared and reviewed an engineering artifact.';
-    $reply[] = '';
-    $reply[] = 'Request ID: ' . $requestId;
-    $reply[] = 'Run ID: ' . $runId;
-    $reply[] = 'Artifact ID: ' . $finalArtifactId;
-    $reply[] = 'Review Status: ' . $finalReviewStatus;
-    $reply[] = 'Output Mode: ' . (string)($finalArtifact['output_mode'] ?? $outputMode);
-    $reply[] = 'Target Path: ' . (($finalArtifact !== null && $finalArtifact['target_path'] !== null) ? $finalArtifact['target_path'] : '[not determined]');
-    $reply[] = '';
-    $reply[] = 'Jake Review Summary:';
-    $reply[] = $finalReviewSummary !== '' ? $finalReviewSummary : 'No review summary returned.';
+$replyLines = [];
 
-    return array(
-        'request_id' => $requestId,
-        'run_id' => $runId,
-        'artifact_id' => $finalArtifactId,
-        'review_status' => $finalReviewStatus,
-        'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
-        'target_path' => $finalArtifact !== null ? $finalArtifact['target_path'] : null,
-        'reply' => implode("\n", $reply)
-    );
+// Title
+$replyLines[] = '**Summary**';
+$replyLines[] = 'I took your request, generated a solution, and reviewed it against the system.';
+$replyLines[] = '';
+
+// Result block
+$replyLines[] = '**Result**';
+$replyLines[] = '- Request ID: ' . $requestId;
+$replyLines[] = '- Run ID: ' . $runId;
+$replyLines[] = '- Artifact ID: ' . $finalArtifactId;
+$replyLines[] = '- Output Mode: ' . (string)($finalArtifact['output_mode'] ?? $outputMode);
+$replyLines[] = '- Review Status: ' . $finalReviewStatus;
+$replyLines[] = '- Target Path: ' . (($finalArtifact !== null && $finalArtifact['target_path'] !== null) ? $finalArtifact['target_path'] : '[not determined]');
+$replyLines[] = '';
+
+// Explanation
+$replyLines[] = '**What this means**';
+$replyLines[] = $finalReviewSummary !== '' ? $finalReviewSummary : 'No detailed review feedback was generated.';
+$replyLines[] = '';
+
+// Human explanation
+$replyLines[] = '**In other words**';
+
+if ($finalReviewStatus === 'approved') {
+    $replyLines[] = 'This is solid and safe. You can use the artifact directly.';
+} elseif ($finalReviewStatus === 'needs_revision') {
+    $replyLines[] = 'The direction is good, but there are issues that make it unsafe to use as-is.';
+} else {
+    $replyLines[] = 'This cannot be safely implemented yet without adjusting the approach.';
+}
+
+$replyLines[] = '';
+
+// Guidance
+$replyLines[] = '**My suggestion**';
+$replyLines[] = 'Open the artifact on the right and review the proposed code or patch.';
+
+if ($finalReviewStatus !== 'approved') {
+    $replyLines[] = 'If you want, I can refine this further and push it to an approved version.';
+}
+
+return array(
+    'request_id' => $requestId,
+    'run_id' => $runId,
+    'artifact_id' => $finalArtifactId,
+    'review_status' => $finalReviewStatus,
+    'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
+    'target_path' => $finalArtifact !== null ? $finalArtifact['target_path'] : null,
+    'reply' => implode("\n", $replyLines)
+);
+	
+	
 }
 
 
