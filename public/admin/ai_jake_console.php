@@ -2,7 +2,12 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
+
+echo 'LAYOUT LOAD TEST<br>';
 require_once __DIR__ . '/../../src/layout.php';
+echo 'LAYOUT OK<br>';
+exit;
+
 
 cw_require_admin();
 
