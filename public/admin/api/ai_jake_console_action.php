@@ -1181,7 +1181,7 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 	'- Do not say you cannot access a file, schema, or project structure when it has been provided in the prompt.',
 	'- If asked to list items from provided context, list the actual items from that context.',
 	'- If context is incomplete or truncated, say that clearly and answer only from the visible portion.',
-	'- Never propose SQL INSERT statements for artifacts.'
+	'- Never propose SQL INSERT statements for artifacts.',
 	'- Artifacts must ONLY be created via the engineering cycle (Steven).',	
     '',
     'Interaction style:',
