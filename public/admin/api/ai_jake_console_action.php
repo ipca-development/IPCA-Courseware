@@ -1183,16 +1183,19 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
     }
 
     if ($contextFiles) {
-        $userPrompt .= "LOADED FILES:\n";
-        foreach ($contextFiles as $f) {
-            if (!empty($f['error'])) {
-                $userPrompt .= "- " . $f['path'] . " [read failed: " . $f['error'] . "]\n";
-            } else {
-                $userPrompt .= "- " . $f['path'] . "\n";
-            }
+    $userPrompt .= "LOADED FILE CONTENTS:\n";
+
+    foreach ($contextFiles as $f) {
+        if (!empty($f['error'])) {
+            $userPrompt .= "FILE: " . $f['path'] . "\n";
+            $userPrompt .= "[READ FAILED: " . $f['error'] . "]\n\n";
+            continue;
         }
-        $userPrompt .= "\n";
+
+        $userPrompt .= "FILE: " . $f['path'] . "\n";
+        $userPrompt .= (string)$f['content'] . "\n\n";
     }
+	}
 
 	$userPrompt .= "DATABASE SCHEMA:\n";
 	$userPrompt .= json_encode($dbSchema);
