@@ -261,7 +261,7 @@ cw_header('Jake Console');
 
   .chat-input-grid{
     display:grid;
-    grid-template-columns:180px minmax(0, 1fr) 56px;
+    grid-template-columns:minmax(0, 1fr) 56px;
     gap:12px;
     align-items:end;
   }
@@ -667,18 +667,6 @@ cw_header('Jake Console');
     <div class="chat-composer">
       <div class="chat-input-grid">
         <div>
-          <label class="field-label" for="request_type">Request Type</label>
-          <select id="request_type" class="ui-select">
-            <option value="">Auto Detect</option>
-            <option value="bugfix">Bugfix</option>
-            <option value="feature">Feature</option>
-            <option value="review">Review</option>
-            <option value="investigation">Investigation</option>
-            <option value="cleanup">Cleanup</option>
-          </select>
-        </div>
-
-        <div>
           <label class="field-label" for="msg_input">Message</label>
           <textarea id="msg_input" class="ui-textarea" rows="1" placeholder="Ask Jake..."></textarea>
         </div>
@@ -955,9 +943,8 @@ function formatJakeMessage(text) {
         await loadConversations();
     }
 
-    async function sendMessage() {
+        async function sendMessage() {
         const input = document.getElementById('msg_input');
-        const requestType = document.getElementById('request_type').value;
         const messageText = input.value.trim();
 
         if (!messageText) return;
@@ -974,10 +961,6 @@ function formatJakeMessage(text) {
 
         if (currentConversation) {
             payload.conversation_id = currentConversation;
-        }
-
-        if (requestType !== '') {
-            payload.request_type = requestType;
         }
 
         try {
