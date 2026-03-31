@@ -1872,6 +1872,32 @@ try {
                 'count' => count($artifacts)
             ]);
 
+			        case 'list_recent_artifacts':
+
+            $stmt = $pdo->query("
+                SELECT
+                    id,
+                    request_id,
+                    run_id,
+                    title,
+                    target_path,
+                    output_mode,
+                    review_status,
+                    created_at,
+                    updated_at
+                FROM ai_jake_artifacts
+                ORDER BY id DESC
+                LIMIT 50
+            ");
+
+            $artifacts = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+
+            json_out([
+                'ok' => true,
+                'artifacts' => $artifacts,
+                'count' => count($artifacts)
+            ]);
+
         case 'read_artifact':
 
             $artifactId = (int)($data['artifact_id'] ?? 0);

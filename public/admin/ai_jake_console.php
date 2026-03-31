@@ -653,8 +653,9 @@ cw_header('Jake Console');
             <?php endif; ?>
           </div>
 
-          <div class="mini-actions">
+		  <div class="mini-actions">
             <button type="button" class="mini-action" id="refresh_conversations_btn">Refresh Conversations</button>
+            <button type="button" class="mini-action" id="refresh_artifacts_btn">Refresh Artifacts</button>
           </div>
         </div>
       </div>
@@ -923,6 +924,53 @@ function formatJakeMessage(text) {
         });
     }
 
+	    function renderArtifactList(artifacts) {
+        const list = document.getElementById('artifact_list');
+        list.innerHTML = '';
+
+        if (!artifacts || !artifacts.length) {
+            list.innerHTML = '<div class="empty-premium">No artifacts found yet.</div>';
+            return;
+        }
+
+        artifacts.forEach(function (artifact) {
+            const div = document.createElement('div');
+            div.className = 'artifact-item';
+            div.setAttribute('data-artifact-id', String(artifact.id));
+
+            div.innerHTML =
+                '<div class="artifact-title">' + escapeHtml(artifact.title || 'Untitled artifact') + '</div>' +
+                '<div class="artifact-meta">' +
+                    'Artifact #' + escapeHtml(artifact.id || '') +
+                    (artifact.target_path ? ' · ' + escapeHtml(artifact.target_path) : '') +
+                    '<br>' +
+                    escapeHtml(artifact.output_mode || '') +
+                    (artifact.review_status ? ' · ' + escapeHtml(artifact.review_status) : '') +
+                    ' · ' + escapeHtml(artifact.created_at || '') +
+                '</div>';
+
+            div.addEventListener('click', function () {
+                const artifactId = this.getAttribute('data-artifact-id');
+                if (!artifactId) return;
+
+                openArtifactModal(parseInt(artifactId, 10)).catch(function (err) {
+                    alert(err.message || 'Failed to read artifact');
+                });
+            });
+
+            list.appendChild(div);
+        });
+    }
+
+    async function loadRecentArtifacts() {
+        const data = await callAPI({
+            action: 'list_recent_artifacts'
+        });
+
+        renderArtifactList(data.artifacts || []);
+    }
+	
+	
     async function loadConversations() {
         const data = await callAPI({
             action: 'list_conversations'
@@ -973,6 +1021,7 @@ function formatJakeMessage(text) {
             hideTyping();
             await loadConversation(currentConversation);
             await loadConversations();
+            await loadRecentArtifacts();
         } catch (err) {
             hideTyping();
             appendBubble('jake', 'Error: ' + (err.message || 'Failed to send message'), new Date().toLocaleString(), true);
@@ -1028,9 +1077,15 @@ function formatJakeMessage(text) {
         }
     });
 
-    document.getElementById('refresh_conversations_btn').addEventListener('click', function () {
+	    document.getElementById('refresh_conversations_btn').addEventListener('click', function () {
         loadConversations().catch(function (err) {
             alert(err.message || 'Failed to refresh conversations');
+        });
+    });
+
+    document.getElementById('refresh_artifacts_btn').addEventListener('click', function () {
+        loadRecentArtifacts().catch(function (err) {
+            alert(err.message || 'Failed to refresh artifacts');
         });
     });
 
@@ -1060,6 +1115,11 @@ function formatJakeMessage(text) {
     });
 
     loadConversations().catch(function () {});
+    loadRecentArtifacts().catch(function () {});
+
+    setInterval(function () {
+        loadRecentArtifacts().catch(function () {});
+    }, 5000);
 })();
 </script>
 
