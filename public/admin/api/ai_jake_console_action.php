@@ -332,6 +332,78 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
     ];
 }
 
+function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFiles, string $artifactContent): array
+{
+    $system = implode("\n", [
+        'You are Jake, IPCA system architect.',
+        'You review Steven outputs strictly.',
+        '',
+        'Rules:',
+        '- Do NOT allow invented methods',
+        '- Do NOT allow architecture drift',
+        '- Must respect SSOT',
+        '- Must preserve behavior unless explicitly changed',
+        '- Must match real file context',
+        '',
+        'Return:',
+        'VERDICT: approved|needs_revision|analysis_only',
+        'REASON: short explanation',
+        'REVISION: if needed, clear instruction'
+    ]);
+
+    $user = "REQUEST:\n" . ($requestRow['prompt'] ?? '') . "\n\n";
+    $user .= "ARTIFACT:\n" . $artifactContent;
+
+    $resp = cw_openai_responses([
+        'model' => cw_openai_model(),
+        'input' => [
+            [
+                'role' => 'system',
+                'content' => [['type'=>'input_text','text'=>$system]]
+            ],
+            [
+                'role' => 'user',
+                'content' => [['type'=>'input_text','text'=>$user]]
+            ]
+        ]
+    ]);
+
+    $text = '';
+
+    if (!empty($resp['output_text'])) {
+        $text = trim($resp['output_text']);
+    }
+
+    if ($text === '') {
+        $out = $resp['output'] ?? [];
+        foreach ($out as $item) {
+            foreach (($item['content'] ?? []) as $c) {
+                if (($c['type'] ?? '') === 'output_text') {
+                    $text .= $c['text'] ?? '';
+                }
+            }
+        }
+        $text = trim($text);
+    }
+
+    $verdict = 'analysis_only';
+    $reason = $text;
+    $revision = '';
+
+    if (stripos($text, 'approved') !== false) {
+        $verdict = 'approved';
+    } elseif (stripos($text, 'needs_revision') !== false) {
+        $verdict = 'needs_revision';
+    }
+
+    return [
+        'verdict' => $verdict,
+        'reason' => $reason,
+        'revision' => $revision
+    ];
+}
+
+
 function build_steven_artifact_content(array $requestRow, array $contextFiles): array
 {
     $targetPath = '';
@@ -1129,30 +1201,77 @@ try {
             $riskNotes = 'Steven output generated via OpenAI. Manual review still required before any code is used.';
             $outputMode = 'full_drop_in';
 
-            try {
-                $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles);
-                $outputMode = (string)($artifactSeed['output_mode'] ?? 'full_drop_in');
+                        try {
+                $maxRounds = 2;
+                $currentRound = 1;
+                $finalArtifactId = null;
+                $finalArtifact = null;
+                $finalReviewStatus = 'analysis_only';
+                $finalReviewSummary = '';
+
+                while ($currentRound <= $maxRounds) {
+
+                    $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles);
+                    $outputMode = (string)($artifactSeed['output_mode'] ?? 'full_drop_in');
+
+                    $artifactId = create_artifact($pdo, [
+                        'run_id' => $runId,
+                        'request_id' => $requestId,
+                        'artifact_type' => $artifactSeed['artifact_type'],
+                        'target_path' => $artifactSeed['target_path'],
+                        'title' => $artifactSeed['title'],
+                        'content' => $artifactSeed['content'],
+                        'output_mode' => $artifactSeed['output_mode'],
+                        'notes' => $artifactSeed['notes'],
+                        'created_by_agent' => 'steven',
+                        'approved_by_agent' => 'jake',
+                    ]);
+
+                    $review = jake_review_artifact(
+                        $requestRow,
+                        $ssot,
+                        $contextFiles,
+                        (string)$artifactSeed['content']
+                    );
+
+                    $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
+                    $reviewSummary = (string)($review['reason'] ?? '');
+                    $isFinal = ($reviewStatus === 'approved' || $reviewStatus === 'analysis_only') ? 1 : 0;
+
+                    $stmt = $pdo->prepare("
+                        UPDATE ai_jake_artifacts
+                        SET review_status = ?, review_summary = ?, revision_round = ?, is_final = ?
+                        WHERE id = ?
+                    ");
+                    $stmt->execute([
+                        $reviewStatus,
+                        $reviewSummary,
+                        $currentRound,
+                        $isFinal,
+                        $artifactId
+                    ]);
+
+                    $finalArtifactId = $artifactId;
+                    $finalArtifact = $artifactSeed;
+                    $finalReviewStatus = $reviewStatus;
+                    $finalReviewSummary = $reviewSummary;
+
+                    if ($isFinal) {
+                        break;
+                    }
+
+                    $requestRow['prompt'] .= "\n\nREVISION REQUIRED:\n" . $reviewSummary;
+                    $currentRound++;
+                }
 
                 update_jake_run($pdo, $runId, [
                     'status' => 'completed',
                     'jake_summary' => $jakeSummary,
                     'steven_brief' => $stevenBrief,
-                    'risk_notes' => $riskNotes,
-                    'output_mode' => $outputMode,
+                    'risk_notes' => $riskNotes . ' Final review status: ' . $finalReviewStatus,
+                    'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
                 ]);
 
-                $artifactId = create_artifact($pdo, [
-                    'run_id' => $runId,
-                    'request_id' => $requestId,
-                    'artifact_type' => $artifactSeed['artifact_type'],
-                    'target_path' => $artifactSeed['target_path'],
-                    'title' => $artifactSeed['title'],
-                    'content' => $artifactSeed['content'],
-                    'output_mode' => $artifactSeed['output_mode'],
-                    'notes' => $artifactSeed['notes'],
-                    'created_by_agent' => 'steven',
-                    'approved_by_agent' => 'jake',
-                ]);
             } catch (Throwable $inner) {
                 update_jake_run($pdo, $runId, [
                     'status' => 'failed',
@@ -1170,19 +1289,23 @@ try {
             $summaryLines[] = '';
             $summaryLines[] = 'Request ID: ' . $requestId;
             $summaryLines[] = 'Run ID: ' . $runId;
-            $summaryLines[] = 'Artifact ID: ' . $artifactId;
-            $summaryLines[] = 'Output Mode: ' . $outputMode;
-            $summaryLines[] = 'Target Path: ' . ($artifactSeed['target_path'] !== null ? $artifactSeed['target_path'] : '[not determined]');
+            $summaryLines[] = 'Artifact ID: ' . $finalArtifactId;
+            $summaryLines[] = 'Output Mode: ' . (string)($finalArtifact['output_mode'] ?? $outputMode);
+            $summaryLines[] = 'Review Status: ' . $finalReviewStatus;
+            $summaryLines[] = 'Target Path: ' . (($finalArtifact !== null && $finalArtifact['target_path'] !== null) ? $finalArtifact['target_path'] : '[not determined]');
             $summaryLines[] = '';
             $summaryLines[] = $jakeSummary;
+            $summaryLines[] = '';
+            $summaryLines[] = 'Jake Review Summary:';
+            $summaryLines[] = $finalReviewSummary !== '' ? $finalReviewSummary : 'No review summary returned.';
 
             json_out([
                 'ok' => true,
                 'request_id' => $requestId,
                 'run_id' => $runId,
-                'artifact_id' => $artifactId,
-                'output_mode' => $outputMode,
-                'target_path' => $artifactSeed['target_path'],
+                'artifact_id' => $finalArtifactId,
+                'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
+                'target_path' => $finalArtifact !== null ? $finalArtifact['target_path'] : null,
                 'response' => implode("\n", $summaryLines),
                 'jake_summary' => $jakeSummary,
                 'steven_brief' => $stevenBrief,
