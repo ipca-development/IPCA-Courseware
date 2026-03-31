@@ -805,22 +805,6 @@ function renderArtifactItem(a) {
         </div>
     `;
 }
-
-    return `
-        <div class="artifact-item" data-artifact-id="${a.id}">
-            <div class="artifact-title">
-                ${escapeHtml(a.title || 'Artifact')}
-                ${isNew ? '<span class="artifact-badge-new">New</span>' : ''}
-            </div>
-            <div class="artifact-meta">
-                Artifact #${a.id}
-                ${a.target_path ? ' · ' + escapeHtml(a.target_path) : ''}
-                <br>
-                ${escapeHtml(a.output_mode || '')} · ${escapeHtml(createdAt)}
-            </div>
-        </div>
-    `;
-}
 	
 	
     function chatBox() {
