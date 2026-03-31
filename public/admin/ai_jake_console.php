@@ -670,20 +670,12 @@ cw_header('Jake Console');
               <?php foreach ($recentArtifacts as $artifact): ?>
                 <div class="artifact-item" data-artifact-id="<?= (int)$artifact['id'] ?>">
                   <?php
-$isNew = false;
-if (!empty($artifact['created_at'])) {
-    $createdTs = strtotime($artifact['created_at']);
-    if ($createdTs !== false && (time() - $createdTs) <= 60) {
-        $isNew = true;
-    }
-}
+
 ?>
 
 <div class="artifact-title">
     <?= h((string)$artifact['title']) ?>
-    <?php if ($isNew): ?>
-        <span class="artifact-badge-new">New</span>
-    <?php endif; ?>
+
 </div>
                   <div class="artifact-meta">
                     Artifact #<?= (int)$artifact['id'] ?>
@@ -1001,51 +993,33 @@ function formatJakeMessage(text) {
         });
     }
 
-	    function renderArtifactList(artifacts) {
-        const list = document.getElementById('artifact_list');
-        list.innerHTML = '';
+	
+async function loadRecentArtifacts() {
+    const data = await callAPI({
+        action: 'list_recent_artifacts'
+    });
 
-        if (!artifacts || !artifacts.length) {
-            list.innerHTML = '<div class="empty-premium">No artifacts found yet.</div>';
-            return;
-        }
+    const list = document.getElementById('artifact_list');
+    list.innerHTML = '';
 
-        artifacts.forEach(function (artifact) {
-            const div = document.createElement('div');
-            div.className = 'artifact-item';
-            div.setAttribute('data-artifact-id', String(artifact.id));
-
-            div.innerHTML =
-                '<div class="artifact-title">' + escapeHtml(artifact.title || 'Untitled artifact') + '</div>' +
-                '<div class="artifact-meta">' +
-                    'Artifact #' + escapeHtml(artifact.id || '') +
-                    (artifact.target_path ? ' · ' + escapeHtml(artifact.target_path) : '') +
-                    '<br>' +
-                    escapeHtml(artifact.output_mode || '') +
-                    (artifact.review_status ? ' · ' + escapeHtml(artifact.review_status) : '') +
-                    ' · ' + escapeHtml(artifact.created_at || '') +
-                '</div>';
-
-            div.addEventListener('click', function () {
-                const artifactId = this.getAttribute('data-artifact-id');
-                if (!artifactId) return;
-
-                openArtifactModal(parseInt(artifactId, 10)).catch(function (err) {
-                    alert(err.message || 'Failed to read artifact');
-                });
-            });
-
-            list.appendChild(div);
-        });
+    if (!data.artifacts || !data.artifacts.length) {
+        list.innerHTML = '<div class="empty-premium">No artifacts found yet.</div>';
+        return;
     }
 
-    async function loadRecentArtifacts() {
-        const data = await callAPI({
-            action: 'list_recent_artifacts'
+    data.artifacts.forEach(function (a) {
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = renderArtifactItem(a);
+
+        const el = wrapper.firstElementChild;
+
+        el.addEventListener('click', function () {
+            openArtifactModal(a.id);
         });
 
-        renderArtifactList(data.artifacts || []);
-    }
+        list.appendChild(el);
+    });
+}
 	
 	
     async function loadConversations() {
@@ -1097,39 +1071,8 @@ function formatJakeMessage(text) {
 
             hideTyping();
             await loadConversation(currentConversation);
-await loadConversations();
-
-// 🔥 NEW: refresh artifact list
-try {
-    const res = await fetch(API, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'list_request_artifacts', request_id: data.request_id })
-    });
-
-    const json = await res.json();
-
-    if (json.ok && json.artifacts) {
-        const list = document.getElementById('artifact_list');
-        list.innerHTML = '';
-
-        json.artifacts.forEach(function (a) {
-            const wrapper = document.createElement('div');
-            wrapper.innerHTML = renderArtifactItem(a);
-
-            const el = wrapper.firstElementChild;
-
-            el.addEventListener('click', function () {
-                openArtifactModal(a.id);
-            });
-
-            list.appendChild(el);
-        });
-    }
-} catch (e) {
-    console.warn('Artifact refresh failed', e);
-}
-            await loadRecentArtifacts();
+			await loadConversations();
+			await loadRecentArtifacts();
         } catch (err) {
             hideTyping();
             appendBubble('jake', 'Error: ' + (err.message || 'Failed to send message'), new Date().toLocaleString(), true);
