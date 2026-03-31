@@ -137,7 +137,7 @@ function read_files_for_context(array $paths, int $limit = 3): array
                 'path' => $file['path'],
                 'basename' => $file['basename'],
                 'size_bytes' => $file['size_bytes'],
-                'content_excerpt' => mb_substr((string)$file['content'], 0, 8000),
+                'content' => (string)$file['content'],
             ];
             $count++;
         } catch (Throwable $e) {
@@ -189,7 +189,7 @@ function build_jake_summary(array $requestRow, ?array $ssot, array $contextFiles
         $lines[] = '';
     }
 
-    $lines[] = 'Next internal action: Jake prepared a Steven implementation brief and artifact candidate.';
+    $lines[] = 'Next internal action: Jake prepared a Steven implementation brief and requested a coded artifact.';
     return implode("\n", $lines);
 }
 
@@ -207,17 +207,18 @@ function build_steven_brief(array $requestRow, ?array $ssot, array $contextFiles
     $brief[] = '';
     $brief[] = 'Rules:';
     $brief[] = '- Follow existing project patterns.';
-    $brief[] = '- Do not invent schema or functions unless explicitly required.';
-    $brief[] = '- Prefer full drop-in replacements or exact surgical patches.';
-    $brief[] = '- Keep Jake as final authority.';
+    $brief[] = '- Do not invent schema, tables, or functions unless explicitly required by the request.';
     $brief[] = '- Preserve existing features unless explicitly changed.';
+    $brief[] = '- Prefer full drop-in replacements when modifying a known file.';
+    $brief[] = '- If full replacement is too risky, provide an exact surgical patch with exact insertion points.';
+    $brief[] = '- Be concrete and copy-paste ready.';
     $brief[] = '';
     $brief[] = 'User Request:';
     $brief[] = $prompt !== '' ? $prompt : '(empty)';
     $brief[] = '';
 
     if ($ssot) {
-        $brief[] = 'Latest SSOT:';
+        $brief[] = 'Latest SSOT Snapshot:';
         $brief[] = 'Version: ' . (string)($ssot['ssot_version'] ?? '');
         $brief[] = 'Title: ' . (string)($ssot['title'] ?? '');
         $brief[] = 'Summary: ' . (string)($ssot['summary_text'] ?? '');
@@ -234,14 +235,22 @@ function build_steven_brief(array $requestRow, ?array $ssot, array $contextFiles
         $brief[] = '';
     }
 
-    $brief[] = 'Expected Output:';
-    $brief[] = '- artifact_type: code';
-    $brief[] = '- output_mode: full_drop_in';
-    $brief[] = '- include exact target path when known';
+    $brief[] = 'Required Output Format:';
+    $brief[] = 'OUTPUT_MODE: full_drop_in|surgical_patch|analysis_only';
+    $brief[] = 'TARGET_PATH: <path or blank>';
+    $brief[] = 'TITLE: <short title>';
+    $brief[] = 'NOTES: <short note>';
+    $brief[] = '';
+    $brief[] = '<blank line>';
+    $brief[] = '<actual output starts here>';
+    $brief[] = '';
+    $brief[] = 'Do not return JSON.';
+    $brief[] = 'Do not wrap the response in markdown fences.';
+    $brief[] = 'Do not put introductions before OUTPUT_MODE.';
+    $brief[] = 'After the blank line, provide normal human-readable code or patch content.';
 
     return implode("\n", $brief);
 }
-
 
 function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = null): array
 {
@@ -323,7 +332,6 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
     ];
 }
 
-
 function build_steven_artifact_content(array $requestRow, array $contextFiles): array
 {
     $targetPath = '';
@@ -374,8 +382,6 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
             $fileContent = '';
             if (isset($f['content']) && is_string($f['content'])) {
                 $fileContent = $f['content'];
-            } elseif (isset($f['content_excerpt']) && is_string($f['content_excerpt'])) {
-                $fileContent = $f['content_excerpt'];
             }
 
             $userPrompt .= "FILE: " . (string)$f['path'] . "\n";
@@ -555,6 +561,206 @@ function create_artifact(PDO $pdo, array $artifact): int
     return (int)$pdo->lastInsertId();
 }
 
+function create_conversation(PDO $pdo, int $userId, string $subject): int
+{
+    $stmt = $pdo->prepare("
+        INSERT INTO ai_jake_conversations
+        (subject, status, created_by_user_id, created_at, updated_at)
+        VALUES (?, 'active', ?, NOW(), NOW())
+    ");
+    $stmt->execute([$subject, $userId]);
+    return (int)$pdo->lastInsertId();
+}
+
+function add_conversation_message(PDO $pdo, int $conversationId, string $role, string $messageText, ?string $requestType = null, ?int $linkedRunId = null): int
+{
+    $stmt = $pdo->prepare("
+        INSERT INTO ai_jake_messages
+        (conversation_id, role, message_text, request_type, linked_run_id, created_at)
+        VALUES (?, ?, ?, ?, ?, NOW())
+    ");
+    $stmt->execute([
+        $conversationId,
+        $role,
+        $messageText,
+        $requestType,
+        $linkedRunId
+    ]);
+
+    $stmt2 = $pdo->prepare("
+        UPDATE ai_jake_conversations
+        SET updated_at = NOW()
+        WHERE id = ?
+    ");
+    $stmt2->execute([$conversationId]);
+
+    return (int)$pdo->lastInsertId();
+}
+
+function load_conversation(PDO $pdo, int $conversationId): ?array
+{
+    $stmt = $pdo->prepare("
+        SELECT *
+        FROM ai_jake_conversations
+        WHERE id = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$conversationId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+function list_conversations(PDO $pdo, int $limit = 50): array
+{
+    $stmt = $pdo->prepare("
+        SELECT *
+        FROM ai_jake_conversations
+        ORDER BY updated_at DESC, id DESC
+        LIMIT ?
+    ");
+    $stmt->bindValue(1, $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function load_conversation_messages(PDO $pdo, int $conversationId): array
+{
+    $stmt = $pdo->prepare("
+        SELECT *
+        FROM ai_jake_messages
+        WHERE conversation_id = ?
+        ORDER BY id ASC
+    ");
+    $stmt->execute([$conversationId]);
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+}
+
+function auto_subject_from_message(string $message): string
+{
+    $message = trim(preg_replace('/\s+/', ' ', $message));
+    if ($message === '') {
+        return 'Untitled conversation';
+    }
+
+    if (mb_strlen($message) <= 80) {
+        return $message;
+    }
+
+    return trim(mb_substr($message, 0, 77)) . '...';
+}
+
+function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = null): string
+{
+    $message = trim((string)($userMessage['message_text'] ?? ''));
+    $ssot = load_latest_ssot_snapshot($pdo);
+
+    $fileCandidates = extract_file_candidates_from_text($message);
+    $contextFiles = read_files_for_context($fileCandidates, 3);
+
+    $systemPrompt = implode("\n", [
+        'You are Jake, the IPCA architect and SSOT guardian.',
+        'You speak naturally and clearly, like a senior engineering partner.',
+        'You are not the final authority; the user is.',
+        'You should be architecturally strict, practical, and concise.',
+        'When useful, mention what files you inspected.',
+        'Do not dump code unless the user explicitly asks for it in chat.',
+        'Do not invent system state.',
+        'Stay grounded in the provided SSOT snapshot and loaded files.',
+    ]);
+
+    $userPrompt = "USER MESSAGE:\n" . $message . "\n\n";
+
+    if ($requestType !== null && trim($requestType) !== '') {
+        $userPrompt .= "REQUEST TYPE:\n" . trim($requestType) . "\n\n";
+    }
+
+    if ($ssot) {
+        $userPrompt .= "LATEST SSOT SNAPSHOT:\n";
+        $userPrompt .= "Version: " . (string)($ssot['ssot_version'] ?? '') . "\n";
+        $userPrompt .= "Title: " . (string)($ssot['title'] ?? '') . "\n";
+        $userPrompt .= "Summary: " . (string)($ssot['summary_text'] ?? '') . "\n\n";
+    }
+
+    if ($contextFiles) {
+        $userPrompt .= "LOADED FILES:\n";
+        foreach ($contextFiles as $f) {
+            if (!empty($f['error'])) {
+                $userPrompt .= "- " . $f['path'] . " [read failed: " . $f['error'] . "]\n";
+            } else {
+                $userPrompt .= "- " . $f['path'] . "\n";
+            }
+        }
+        $userPrompt .= "\n";
+    }
+
+    $resp = cw_openai_responses([
+        'model' => cw_openai_model(),
+        'input' => [
+            [
+                'role' => 'system',
+                'content' => [
+                    [
+                        'type' => 'input_text',
+                        'text' => $systemPrompt
+                    ]
+                ]
+            ],
+            [
+                'role' => 'user',
+                'content' => [
+                    [
+                        'type' => 'input_text',
+                        'text' => $userPrompt
+                    ]
+                ]
+            ]
+        ]
+    ]);
+
+    $text = '';
+
+    if (!empty($resp['output_text']) && is_string($resp['output_text'])) {
+        $text = trim($resp['output_text']);
+    }
+
+    if ($text === '') {
+        $out = $resp['output'] ?? [];
+
+        if (is_array($out)) {
+            foreach ($out as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                $content = $item['content'] ?? [];
+                if (!is_array($content)) {
+                    continue;
+                }
+
+                foreach ($content as $c) {
+                    if (!is_array($c)) {
+                        continue;
+                    }
+
+                    if (($c['type'] ?? '') === 'output_text' && !empty($c['text']) && is_string($c['text'])) {
+                        $text .= (string)$c['text'];
+                    } elseif (($c['type'] ?? '') === 'text' && !empty($c['text']) && is_string($c['text'])) {
+                        $text .= (string)$c['text'];
+                    }
+                }
+            }
+        }
+
+        $text = trim($text);
+    }
+
+    if ($text === '') {
+        throw new RuntimeException('Jake returned empty content');
+    }
+
+    return $text;
+}
+
 try {
     $u = cw_current_user($pdo);
 
@@ -564,7 +770,7 @@ try {
     }
 
     $raw = file_get_contents('php://input');
-    $data = json_decode($raw, true);
+    $data = json_decode((string)$raw, true);
 
     if (!is_array($data)) {
         json_out(['ok' => false, 'error' => 'Invalid JSON']);
@@ -573,6 +779,100 @@ try {
     $action = (string)($data['action'] ?? '');
 
     switch ($action) {
+
+        case 'create_conversation':
+
+            $subject = trim((string)($data['subject'] ?? ''));
+            if ($subject === '') {
+                $subject = 'Untitled conversation';
+            }
+
+            $conversationId = create_conversation($pdo, (int)$u['id'], $subject);
+
+            json_out([
+                'ok' => true,
+                'conversation_id' => $conversationId
+            ]);
+
+        case 'list_conversations':
+
+            $items = list_conversations($pdo, 50);
+
+            json_out([
+                'ok' => true,
+                'conversations' => $items,
+                'count' => count($items)
+            ]);
+
+        case 'get_conversation_messages':
+
+            $conversationId = (int)($data['conversation_id'] ?? 0);
+            if ($conversationId <= 0) {
+                json_out(['ok' => false, 'error' => 'Missing conversation_id']);
+            }
+
+            $conversation = load_conversation($pdo, $conversationId);
+            if (!$conversation) {
+                json_out(['ok' => false, 'error' => 'Conversation not found']);
+            }
+
+            $messages = load_conversation_messages($pdo, $conversationId);
+
+            json_out([
+                'ok' => true,
+                'conversation' => $conversation,
+                'messages' => $messages
+            ]);
+
+        case 'send_message':
+
+            $conversationId = (int)($data['conversation_id'] ?? 0);
+            $messageText = trim((string)($data['message_text'] ?? ''));
+            $requestType = trim((string)($data['request_type'] ?? ''));
+
+            if ($messageText === '') {
+                json_out(['ok' => false, 'error' => 'Empty message_text']);
+            }
+
+            if ($conversationId <= 0) {
+                $subject = auto_subject_from_message($messageText);
+                $conversationId = create_conversation($pdo, (int)$u['id'], $subject);
+            }
+
+            $conversation = load_conversation($pdo, $conversationId);
+            if (!$conversation) {
+                json_out(['ok' => false, 'error' => 'Conversation not found']);
+            }
+
+            $userMessageId = add_conversation_message(
+                $pdo,
+                $conversationId,
+                'user',
+                $messageText,
+                $requestType !== '' ? $requestType : null,
+                null
+            );
+
+            $jakeReply = jake_chat_reply($pdo, [
+                'message_text' => $messageText
+            ], $requestType !== '' ? $requestType : null);
+
+            $jakeMessageId = add_conversation_message(
+                $pdo,
+                $conversationId,
+                'jake',
+                $jakeReply,
+                $requestType !== '' ? $requestType : null,
+                null
+            );
+
+            json_out([
+                'ok' => true,
+                'conversation_id' => $conversationId,
+                'user_message_id' => $userMessageId,
+                'jake_message_id' => $jakeMessageId,
+                'reply' => $jakeReply
+            ]);
 
         case 'save_request':
 
@@ -807,31 +1107,44 @@ try {
 
             $jakeSummary = build_jake_summary($requestRow, $ssot, $contextFiles);
             $stevenBrief = build_steven_brief($requestRow, $ssot, $contextFiles);
-            $riskNotes = 'V1 caution: Steven output is placeholder-grade until real model generation is wired.';
+            $riskNotes = 'Steven output generated via OpenAI. Manual review still required before any code is used.';
             $outputMode = 'full_drop_in';
 
-            update_jake_run($pdo, $runId, [
-                'status' => 'completed',
-                'jake_summary' => $jakeSummary,
-                'steven_brief' => $stevenBrief,
-                'risk_notes' => $riskNotes,
-                'output_mode' => $outputMode,
-            ]);
+            try {
+                $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles);
+                $outputMode = (string)($artifactSeed['output_mode'] ?? 'full_drop_in');
 
-            $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles);
+                update_jake_run($pdo, $runId, [
+                    'status' => 'completed',
+                    'jake_summary' => $jakeSummary,
+                    'steven_brief' => $stevenBrief,
+                    'risk_notes' => $riskNotes,
+                    'output_mode' => $outputMode,
+                ]);
 
-            $artifactId = create_artifact($pdo, [
-                'run_id' => $runId,
-                'request_id' => $requestId,
-                'artifact_type' => $artifactSeed['artifact_type'],
-                'target_path' => $artifactSeed['target_path'],
-                'title' => $artifactSeed['title'],
-                'content' => $artifactSeed['content'],
-                'output_mode' => $artifactSeed['output_mode'],
-                'notes' => $artifactSeed['notes'],
-                'created_by_agent' => 'steven',
-                'approved_by_agent' => 'jake',
-            ]);
+                $artifactId = create_artifact($pdo, [
+                    'run_id' => $runId,
+                    'request_id' => $requestId,
+                    'artifact_type' => $artifactSeed['artifact_type'],
+                    'target_path' => $artifactSeed['target_path'],
+                    'title' => $artifactSeed['title'],
+                    'content' => $artifactSeed['content'],
+                    'output_mode' => $artifactSeed['output_mode'],
+                    'notes' => $artifactSeed['notes'],
+                    'created_by_agent' => 'steven',
+                    'approved_by_agent' => 'jake',
+                ]);
+            } catch (Throwable $inner) {
+                update_jake_run($pdo, $runId, [
+                    'status' => 'failed',
+                    'jake_summary' => $jakeSummary,
+                    'steven_brief' => $stevenBrief,
+                    'risk_notes' => 'Steven generation failed: ' . $inner->getMessage(),
+                    'output_mode' => $outputMode,
+                ]);
+
+                throw $inner;
+            }
 
             $summaryLines = [];
             $summaryLines[] = 'JAKE COMPLETE';

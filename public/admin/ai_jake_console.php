@@ -2,488 +2,560 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/layout.php';
 
-cw_require_login();
+cw_require_admin();
 
-$user = cw_current_user($pdo);
-$role = (string)($user['role'] ?? '');
-
-if ($role !== 'admin') {
-    http_response_code(403);
-    echo 'Forbidden';
-    exit;
-}
-
-if (!function_exists('h')) {
-    function h(?string $value): string
-    {
-        return htmlspecialchars((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
-    }
-}
-
-function table_exists(PDO $pdo, string $tableName): bool
+function h(?string $value): string
 {
-    $stmt = $pdo->prepare("
-        SELECT COUNT(*)
-        FROM information_schema.tables
-        WHERE table_schema = DATABASE()
-          AND table_name = ?
-    ");
-    $stmt->execute([$tableName]);
-    return (int)$stmt->fetchColumn() > 0;
+    return htmlspecialchars((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
-$hasSsotTable = table_exists($pdo, 'ai_ssot_snapshots');
-$hasRequestsTable = table_exists($pdo, 'ai_jake_requests');
-
-$latestSsot = null;
-$recentRequests = [];
-
-if ($hasSsotTable) {
+$recentArtifacts = array();
+try {
     $stmt = $pdo->query("
-        SELECT *
-        FROM ai_ssot_snapshots
+        SELECT
+            id,
+            request_id,
+            run_id,
+            title,
+            target_path,
+            output_mode,
+            created_at
+        FROM ai_jake_artifacts
         ORDER BY id DESC
-        LIMIT 1
+        LIMIT 20
     ");
-    $latestSsot = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    $recentArtifacts = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+} catch (Throwable $e) {
+    $recentArtifacts = array();
 }
 
-if ($hasRequestsTable) {
-    $stmt = $pdo->query("
-        SELECT id, request_title, request_type, status, created_at, updated_at
-        FROM ai_jake_requests
-        ORDER BY id DESC
-        LIMIT 10
-    ");
-    $recentRequests = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-}
+cw_header('Jake Console');
 ?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="utf-8">
-    <title>Jake Console</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        :root{
-            --bg:#eef1f5;
-            --card:#ffffff;
-            --line:#d7dde7;
-            --text:#182033;
-            --muted:#5c667a;
-            --blue1:#233b8f;
-            --blue2:#3d66e0;
-            --green:#256b4f;
-            --shadow:0 10px 30px rgba(16,24,40,.08);
-            --radius:18px;
-        }
-        *{box-sizing:border-box}
-        body{
-            margin:0;
-            font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
-            background:var(--bg);
-            color:var(--text);
-        }
-        .page{
-            padding:24px;
-        }
-        .shell{
-            background:#f3f5f8;
-            border:1px solid #cfd6df;
-            border-radius:22px;
-            overflow:hidden;
-            box-shadow:var(--shadow);
-        }
-        .hero{
-            padding:28px 30px;
-            background:linear-gradient(135deg,var(--blue1),var(--blue2));
-            color:#fff;
-        }
-        .hero h1{
-            margin:0 0 10px 0;
-            font-size:48px;
-            line-height:1.05;
-            font-weight:800;
-            letter-spacing:-.02em;
-        }
-        .hero p{
-            margin:0;
-            font-size:18px;
-            opacity:.95;
-        }
-        .content{
-            padding:26px;
-            display:grid;
-            grid-template-columns:1.35fr .95fr;
-            gap:22px;
-        }
-        .stack{
-            display:grid;
-            gap:22px;
-        }
-        .card{
-            background:var(--card);
-            border:1px solid var(--line);
-            border-radius:var(--radius);
-            padding:24px 26px;
-            box-shadow:var(--shadow);
-        }
-        .card h2{
-            margin:0 0 18px 0;
-            font-size:28px;
-            line-height:1.1;
-            letter-spacing:-.02em;
-        }
-        .muted{
-            color:var(--muted);
-        }
-        .ok{
-            color:var(--green);
-            font-weight:700;
-        }
-        .meta{
-            display:grid;
-            gap:12px;
-        }
-        .meta-row{
-            display:grid;
-            grid-template-columns:160px 1fr;
-            gap:14px;
-            align-items:start;
-        }
-        .meta-label{
-            color:var(--muted);
-            font-weight:600;
-        }
-        textarea,input,select{
-            width:100%;
-            border:1px solid #c9d2df;
-            border-radius:12px;
-            padding:12px 14px;
-            font:inherit;
-            color:var(--text);
-            background:#fff;
-        }
-        textarea{
-            min-height:180px;
-            resize:vertical;
-        }
-        .form-grid{
-            display:grid;
-            gap:14px;
-        }
-        .form-row-2{
-            display:grid;
-            grid-template-columns:1fr 1fr;
-            gap:14px;
-        }
-        .actions{
-            display:flex;
-            gap:12px;
-            flex-wrap:wrap;
-            margin-top:8px;
-        }
-        .btn{
-            appearance:none;
-            border:0;
-            border-radius:12px;
-            padding:12px 16px;
-            font:inherit;
-            font-weight:700;
-            cursor:pointer;
-        }
-        .btn-primary{
-            background:linear-gradient(135deg,var(--blue1),var(--blue2));
-            color:#fff;
-        }
-        .btn-secondary{
-            background:#e9eef8;
-            color:#213051;
-        }
-        .panel-note{
-            margin-top:12px;
-            font-size:14px;
-            color:var(--muted);
-        }
-        .list{
-            display:grid;
-            gap:12px;
-        }
-        .list-item{
-            border:1px solid var(--line);
-            border-radius:14px;
-            padding:14px 16px;
-            background:#fafbfd;
-        }
-        .list-title{
-            font-weight:700;
-            margin:0 0 6px 0;
-        }
-        .pill{
-            display:inline-block;
-            padding:5px 10px;
-            border-radius:999px;
-            font-size:12px;
-            font-weight:700;
-            background:#edf2ff;
-            color:#2949a8;
-            margin-right:8px;
-        }
-        .codebox{
-            background:#0f172a;
-            color:#d9e3f0;
-            border-radius:14px;
-            padding:14px 16px;
-            font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-            font-size:13px;
-            line-height:1.5;
-            overflow:auto;
-            white-space:pre-wrap;
-        }
-        .grid-3{
-            display:grid;
-            grid-template-columns:1fr 1fr 1fr;
-            gap:12px;
-        }
-        .mini{
-            border:1px solid var(--line);
-            border-radius:14px;
-            padding:14px;
-            background:#fafbfd;
-        }
-        .mini-label{
-            color:var(--muted);
-            font-size:13px;
-            margin-bottom:6px;
-        }
-        .mini-value{
-            font-size:18px;
-            font-weight:800;
-        }
-        @media (max-width: 1100px){
-            .content{grid-template-columns:1fr}
-        }
-        @media (max-width: 720px){
-            .form-row-2,.grid-3,.meta-row{grid-template-columns:1fr}
-            .hero h1{font-size:36px}
-        }
-    </style>
-</head>
-<body>
-<div class="page">
-    <div class="shell">
-        <div class="hero">
-            <h1>Jake Console</h1>
-            <p>Internal AI architect console</p>
-        </div>
+<style>
+  .jake-shell{
+    display:flex;
+    flex-direction:column;
+    gap:22px;
+  }
 
-        <div class="content">
-            <div class="stack">
-                <section class="card">
-                    <h2>Ask Jake</h2>
+  .hero-card{padding:26px 28px}
+  .hero-eyebrow{
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:.14em;
+    color:#7a8aa2;
+    font-weight:700;
+    margin-bottom:10px;
+  }
+  .hero-title{
+    margin:0;
+    font-size:32px;
+    line-height:1.02;
+    letter-spacing:-0.04em;
+    color:#152235;
+    font-weight:800;
+  }
+  .hero-sub{
+    margin-top:12px;
+    font-size:15px;
+    color:#6f7f95;
+    max-width:980px;
+    line-height:1.55;
+  }
 
-                    <div class="form-grid">
-                        <div class="form-row-2">
-                            <div>
-                                <label for="request_title"><strong>Request Title</strong></label>
-                                <input id="request_title" type="text" placeholder="Example: Thin test_finalize_v2 controller">
-                            </div>
-                            <div>
-                                <label for="request_type"><strong>Request Type</strong></label>
-                                <select id="request_type">
-                                    <option value="bugfix">Bugfix</option>
-                                    <option value="feature">Feature</option>
-                                    <option value="review">Review</option>
-                                    <option value="investigation">Investigation</option>
-                                    <option value="cleanup">Cleanup</option>
-                                </select>
-                            </div>
-                        </div>
+  .console-grid{
+    display:grid;
+    grid-template-columns:minmax(0, 1.45fr) minmax(380px, .95fr);
+    gap:18px;
+    align-items:start;
+  }
 
-                        <div class="form-row-2">
-                            <div>
-                                <label for="request_id"><strong>Request ID</strong></label>
-                                <input id="request_id" type="text" placeholder="Optional: existing request ID">
-                            </div>
-                            <div>
-                                <label for="artifact_id"><strong>Artifact ID</strong></label>
-                                <input id="artifact_id" type="text" placeholder="Optional: artifact ID">
-                            </div>
-                        </div>
+  .console-card{
+    padding:0;
+    overflow:hidden;
+  }
 
-                        <div>
-                            <label for="request_body"><strong>Request</strong></label>
-                            <textarea id="request_body" placeholder="Describe the issue, target files, constraints, and what Jake should inspect first."></textarea>
-                        </div>
-                    </div>
+  .console-head{
+    display:flex;
+    align-items:flex-start;
+    justify-content:space-between;
+    gap:14px;
+    padding:20px 22px 16px;
+    border-bottom:1px solid rgba(15,23,42,0.06);
+  }
 
-                    <div class="actions">
-                        <button class="btn btn-primary" type="button" id="btn_save_request">Save Request</button>
-                        <button class="btn btn-secondary" type="button" id="btn_stub_chat">Run Jake Analysis</button>
-                        <button class="btn btn-secondary" type="button" id="btn_list_artifacts">List Request Artifacts</button>
-                        <button class="btn btn-secondary" type="button" id="btn_read_artifact">Read Artifact</button>
-                        <button class="btn btn-secondary" type="button" id="btn_view_latest_artifact">View Latest Artifact</button>
-                    </div>
+  .console-title{
+    margin:0;
+    font-size:22px;
+    line-height:1.05;
+    letter-spacing:-0.03em;
+    color:#152235;
+    font-weight:800;
+  }
 
-                    <div class="panel-note">
-                        V1 is read-only and orchestration-first. You keep full manual control of editor changes, SQL writes, and deployment.
-                    </div>
-                </section>
+  .console-sub{
+    margin-top:8px;
+    font-size:14px;
+    line-height:1.5;
+    color:#728198;
+  }
 
-                <section class="card">
-                    <h2>Access Check</h2>
-                    <p class="ok">OK — authenticated as admin.</p>
+  .status-pill{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:34px;
+    padding:0 12px;
+    border-radius:999px;
+    font-size:11px;
+    font-weight:700;
+    text-transform:uppercase;
+    letter-spacing:.1em;
+    white-space:nowrap;
+    background:#edf2ff;
+    color:#2949a8;
+  }
 
-                    <div class="meta">
-                        <div class="meta-row">
-                            <div class="meta-label">User ID</div>
-                            <div><?= h((string)($user['id'] ?? '')) ?></div>
-                        </div>
-                        <div class="meta-row">
-                            <div class="meta-label">Name</div>
-                            <div><?= h((string)($user['name'] ?? '')) ?></div>
-                        </div>
-                        <div class="meta-row">
-                            <div class="meta-label">Role</div>
-                            <div><?= h($role) ?></div>
-                        </div>
-                    </div>
-                </section>
+  .chat-shell{
+    display:flex;
+    flex-direction:column;
+    min-height:72vh;
+    background:#f8fafd;
+  }
 
-                <section class="card">
-                    <h2>Recent Jake Requests</h2>
+  .chat-scroll{
+    flex:1 1 auto;
+    padding:20px 18px 12px;
+    overflow:auto;
+    display:flex;
+    flex-direction:column;
+    gap:12px;
+    min-height:420px;
+  }
 
-                    <?php if (!$hasRequestsTable): ?>
-                        <p class="muted">Table <code>ai_jake_requests</code> not found yet.</p>
-                    <?php elseif (!$recentRequests): ?>
-                        <p class="muted">No Jake requests found yet.</p>
-                    <?php else: ?>
-                        <div class="list">
-                            <?php foreach ($recentRequests as $row): ?>
-                                <div class="list-item">
-                                    <div class="list-title">#<?= (int)$row['id'] ?> — <?= h((string)$row['request_title']) ?></div>
-                                    <div>
-                                        <span class="pill"><?= h((string)$row['request_type']) ?></span>
-                                        <span class="pill"><?= h((string)$row['status']) ?></span>
-                                    </div>
-                                    <div class="panel-note">
-                                        Created: <?= h((string)$row['created_at']) ?><br>
-                                        Updated: <?= h((string)$row['updated_at']) ?>
-                                    </div>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
-                    <?php endif; ?>
-                </section>
-            </div>
+  .chat-empty{
+    padding:18px;
+    border-radius:16px;
+    border:1px dashed rgba(15,23,42,0.12);
+    background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
+    color:#728198;
+    font-size:14px;
+  }
 
-            <div class="stack">
-                <section class="card">
-                    <h2>SSOT Snapshot</h2>
+  .bubble-row{
+    display:flex;
+  }
+  .bubble-row.user{
+    justify-content:flex-end;
+  }
+  .bubble-row.jake{
+    justify-content:flex-start;
+  }
 
-                    <?php if (!$hasSsotTable): ?>
-                        <p class="muted">Table <code>ai_ssot_snapshots</code> not found yet.</p>
-                    <?php elseif (!$latestSsot): ?>
-                        <p class="muted">No SSOT snapshot found yet.</p>
-                    <?php else: ?>
-                        <div class="grid-3">
-                            <div class="mini">
-                                <div class="mini-label">Version</div>
-                                <div class="mini-value"><?= h((string)($latestSsot['ssot_version'] ?? '')) ?></div>
-                            </div>
-                            <div class="mini">
-                                <div class="mini-label">Status</div>
-                                <div class="mini-value"><?= h((string)($latestSsot['status'] ?? '')) ?></div>
-                            </div>
-                            <div class="mini">
-                                <div class="mini-label">Created</div>
-                                <div class="mini-value" style="font-size:15px"><?= h((string)($latestSsot['created_at'] ?? '')) ?></div>
-                            </div>
-                        </div>
+  .bubble{
+    max-width:min(82%, 760px);
+    padding:14px 16px;
+    border-radius:20px;
+    white-space:pre-wrap;
+    line-height:1.48;
+    font-size:14px;
+    box-shadow:0 8px 18px rgba(15,23,42,0.05);
+    border:1px solid rgba(15,23,42,0.05);
+  }
 
-                        <div style="height:14px"></div>
+  .bubble.user{
+    background:linear-gradient(135deg,#233b8f,#3d66e0);
+    color:#fff;
+    border-bottom-right-radius:8px;
+  }
 
-                        <div class="meta">
-                            <div class="meta-row">
-                                <div class="meta-label">Title</div>
-                                <div><?= h((string)($latestSsot['title'] ?? '')) ?></div>
-                            </div>
-                            <div class="meta-row">
-                                <div class="meta-label">Summary</div>
-                                <div><?= nl2br(h((string)($latestSsot['summary_text'] ?? ''))) ?></div>
-                            </div>
-                        </div>
-                    <?php endif; ?>
-                </section>
+  .bubble.jake{
+    background:#eef2f7;
+    color:#152235;
+    border-bottom-left-radius:8px;
+  }
 
-                <section class="card">
-                    <h2>File Tools</h2>
-                    <div class="form-grid">
-                        <div>
-                            <label for="file_path"><strong>Project File Path</strong></label>
-                            <input id="file_path" type="text" placeholder="src/courseware_progression_v2.php">
-                        </div>
-                        <div class="actions">
-                            <button class="btn btn-secondary" type="button" id="btn_read_file">Read File</button>
-                            <button class="btn btn-secondary" type="button" id="btn_list_unused_stub">Unused Scan</button>
-                        </div>
-                    </div>
-                    <div class="panel-note">
-                        Intended for read-only inspection and fast copy/paste workflow.
-                    </div>
-                </section>
+  .bubble-meta{
+    margin-top:8px;
+    font-size:11px;
+    opacity:.72;
+    white-space:normal;
+  }
 
-                <section class="card">
-                    <h2>DB Tools</h2>
-                    <div class="form-grid">
-                        <div>
-							<label for="table_name"><strong>Describe Table</strong></label>
-							<input id="table_name" type="text" placeholder="Example: ai_jake_requests">
-						</div>
-						
-						<div>
-                            <label for="db_query"><strong>Safe Read-Only SQL</strong></label>
-                            <textarea id="db_query" style="min-height:140px" placeholder="SELECT * FROM ai_ssot_snapshots ORDER BY id DESC LIMIT 5"></textarea>
-                        </div>
-                        <div class="actions">
-							<button class="btn btn-secondary" type="button" id="btn_list_tables">List Tables</button>
-							<button class="btn btn-secondary" type="button" id="btn_describe_table">Describe Table</button>
-							<button class="btn btn-secondary" type="button" id="btn_run_sql">Run Read Query</button>
-						</div>
-                    </div>
-                    <div class="panel-note">
-                        Read-only diagnostics only. No write queries.
-                    </div>
-                </section>
+  .chat-input-wrap{
+    position:sticky;
+    bottom:0;
+    background:#fff;
+    border-top:1px solid rgba(15,23,42,0.08);
+    padding:14px 16px 16px;
+  }
 
-                <section class="card">
-                    <h2>Response Panel</h2>
-                    <div id="response_panel" class="codebox">Jake Console V1 shell ready.</div>
-                </section>
-            </div>
-        </div>
+  .chat-input-grid{
+    display:grid;
+    grid-template-columns:180px minmax(0, 1fr) 120px;
+    gap:12px;
+    align-items:end;
+  }
+
+  .field-label{
+    display:block;
+    margin-bottom:7px;
+    font-size:12px;
+    font-weight:700;
+    letter-spacing:.08em;
+    text-transform:uppercase;
+    color:#7b8ba3;
+  }
+
+  .ui-input,
+  .ui-select,
+  .ui-textarea,
+  .ui-button{
+    width:100%;
+    font:inherit;
+    border-radius:14px;
+    border:1px solid rgba(15,23,42,0.10);
+    background:#fff;
+    color:#152235;
+    box-sizing:border-box;
+  }
+
+  .ui-input,
+  .ui-select{
+    height:48px;
+    padding:0 14px;
+  }
+
+  .ui-textarea{
+    min-height:48px;
+    max-height:180px;
+    padding:12px 14px;
+    resize:vertical;
+    line-height:1.45;
+  }
+
+  .ui-button{
+    height:48px;
+    border:none;
+    cursor:pointer;
+    font-weight:700;
+    color:#fff;
+    background:linear-gradient(135deg,#233b8f,#3d66e0);
+    box-shadow:0 10px 20px rgba(35,59,143,0.18);
+  }
+
+  .ui-button.secondary{
+    color:#152235;
+    background:#eef2f7;
+    box-shadow:none;
+    border:1px solid rgba(15,23,42,0.08);
+  }
+
+  .right-stack{
+    display:flex;
+    flex-direction:column;
+    gap:18px;
+    min-width:0;
+  }
+
+  .panel-body{
+    padding:18px 20px 20px;
+  }
+
+  .conversation-list{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    max-height:220px;
+    overflow:auto;
+  }
+
+  .conversation-item{
+    padding:12px 14px;
+    border-radius:16px;
+    background:#f8fafd;
+    border:1px solid rgba(15,23,42,0.05);
+    cursor:pointer;
+  }
+
+  .conversation-item:hover,
+  .conversation-item.active{
+    background:#edf2f8;
+  }
+
+  .conversation-subject{
+    font-size:14px;
+    font-weight:700;
+    color:#152235;
+    line-height:1.3;
+  }
+
+  .conversation-meta{
+    margin-top:6px;
+    font-size:12px;
+    color:#728198;
+    line-height:1.45;
+  }
+
+  .artifact-list{
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+    max-height:260px;
+    overflow:auto;
+  }
+
+  .artifact-item{
+    padding:12px 14px;
+    border-radius:16px;
+    background:#f8fafd;
+    border:1px solid rgba(15,23,42,0.05);
+    cursor:pointer;
+  }
+
+  .artifact-item:hover,
+  .artifact-item.active{
+    background:#edf2f8;
+  }
+
+  .artifact-title{
+    font-size:14px;
+    font-weight:700;
+    color:#152235;
+    line-height:1.35;
+  }
+
+  .artifact-meta{
+    margin-top:6px;
+    font-size:12px;
+    color:#728198;
+    line-height:1.45;
+  }
+
+  .artifact-viewer{
+    background:#0f172a;
+    color:#d9e3f0;
+    border-radius:16px;
+    padding:16px 18px;
+    min-height:240px;
+    max-height:46vh;
+    overflow:auto;
+    white-space:pre-wrap;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:13px;
+    line-height:1.55;
+  }
+
+  .mini-actions{
+    display:flex;
+    flex-wrap:wrap;
+    gap:10px;
+    margin-top:14px;
+  }
+
+  .mini-action{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    min-height:40px;
+    padding:0 14px;
+    border-radius:12px;
+    text-decoration:none;
+    font-size:14px;
+    font-weight:700;
+    color:#152235;
+    background:#f4f7fb;
+    border:1px solid rgba(15,23,42,0.08);
+    cursor:pointer;
+  }
+
+  .mini-action:hover{
+    background:#edf2f8;
+  }
+
+  .empty-premium{
+    padding:18px;
+    border-radius:16px;
+    border:1px dashed rgba(15,23,42,0.12);
+    background:linear-gradient(180deg,#ffffff 0%,#fbfcfe 100%);
+    color:#728198;
+    font-size:14px;
+  }
+
+  @media (max-width: 1200px){
+    .console-grid{
+      grid-template-columns:1fr;
+    }
+    .artifact-viewer{
+      max-height:34vh;
+    }
+  }
+
+  @media (max-width: 820px){
+    .chat-shell{
+      min-height:calc(100vh - 230px);
+    }
+
+    .chat-input-grid{
+      grid-template-columns:1fr;
+      align-items:stretch;
+    }
+
+    .ui-input,
+    .ui-select,
+    .ui-button{
+      height:48px;
+    }
+
+    .chat-input-wrap{
+      padding-bottom:calc(14px + env(safe-area-inset-bottom));
+    }
+
+    .chat-scroll{
+      min-height:300px;
+      padding-bottom:14px;
+    }
+
+    .bubble{
+      max-width:92%;
+    }
+  }
+</style>
+
+<div class="jake-shell">
+
+  <div class="card hero-card">
+    <div class="hero-eyebrow">Admin Workspace</div>
+    <h2 class="hero-title">Jake Console</h2>
+    <div class="hero-sub">
+      Natural-language architect console for IPCA. You chat with Jake, Jake orchestrates the reasoning, and artifacts stay available in a dedicated engineering panel for inspection and copy/paste into your editor.
     </div>
+  </div>
+
+  <div class="console-grid">
+
+    <div class="card console-card">
+      <div class="console-head">
+        <div>
+          <h3 class="console-title">Chat with Jake</h3>
+          <div class="console-sub">
+            Ask in normal language. Jake replies conversationally and keeps the engineering layer out of the chat stream unless you want to inspect it.
+          </div>
+        </div>
+        <div class="status-pill">Live Conversation</div>
+      </div>
+
+      <div class="chat-shell">
+        <div class="chat-scroll" id="messages">
+          <div class="chat-empty">Start a conversation with Jake. Your message appears on the right, Jake replies on the left, and technical artifacts remain selectable in the panel next to the chat.</div>
+        </div>
+
+        <div class="chat-input-wrap">
+          <div class="chat-input-grid">
+            <div>
+              <label class="field-label" for="request_type">Request Type</label>
+              <select id="request_type" class="ui-select">
+                <option value="">Auto Detect</option>
+                <option value="bugfix">Bugfix</option>
+                <option value="feature">Feature</option>
+                <option value="review">Review</option>
+                <option value="investigation">Investigation</option>
+                <option value="cleanup">Cleanup</option>
+              </select>
+            </div>
+
+            <div>
+              <label class="field-label" for="msg_input">Message</label>
+              <textarea id="msg_input" class="ui-textarea" rows="2" placeholder="Ask Jake in normal language..."></textarea>
+            </div>
+
+            <div>
+              <label class="field-label">&nbsp;</label>
+              <button id="send_btn" class="ui-button" type="button">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="right-stack">
+
+      <div class="card console-card">
+        <div class="console-head">
+          <div>
+            <h3 class="console-title">Conversations</h3>
+            <div class="console-sub">
+              Recent Jake threads. Select one to reload the conversation history.
+            </div>
+          </div>
+          <div class="status-pill">History</div>
+        </div>
+        <div class="panel-body">
+          <div class="conversation-list" id="conv_list">
+            <div class="empty-premium">No conversations loaded yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card console-card">
+        <div class="console-head">
+          <div>
+            <h3 class="console-title">Artifacts</h3>
+            <div class="console-sub">
+              Recent engineering outputs are selectable here, separate from the normal chat stream.
+            </div>
+          </div>
+          <div class="status-pill">Selectable</div>
+        </div>
+        <div class="panel-body">
+          <div class="artifact-list" id="artifact_list">
+            <?php if (!$recentArtifacts): ?>
+              <div class="empty-premium">No artifacts found yet.</div>
+            <?php else: ?>
+              <?php foreach ($recentArtifacts as $artifact): ?>
+                <div
+                  class="artifact-item"
+                  data-artifact-id="<?= (int)$artifact['id'] ?>"
+                >
+                  <div class="artifact-title"><?= h((string)$artifact['title']) ?></div>
+                  <div class="artifact-meta">
+                    Artifact #<?= (int)$artifact['id'] ?>
+                    <?php if (!empty($artifact['target_path'])): ?>
+                      · <?= h((string)$artifact['target_path']) ?>
+                    <?php endif; ?>
+                    <br>
+                    <?= h((string)$artifact['output_mode']) ?> · <?= h((string)$artifact['created_at']) ?>
+                  </div>
+                </div>
+              <?php endforeach; ?>
+            <?php endif; ?>
+          </div>
+
+          <div class="mini-actions">
+            <button type="button" class="mini-action" id="refresh_conversations_btn">Refresh Conversations</button>
+          </div>
+
+          <div style="height:14px"></div>
+
+          <div class="artifact-viewer" id="artifact_viewer">Select an artifact to view its contents here.</div>
+        </div>
+      </div>
+
+    </div>
+
+  </div>
+
 </div>
 
 <script>
 (function () {
-
     const API = window.location.origin + '/admin/api/ai_jake_console_action.php';
-    const responsePanel = document.getElementById('response_panel');
 
-    function setResponse(text) {
-        responsePanel.textContent = text;
-    }
+    let currentConversation = null;
 
-    function setResponseHtml(html) {
-        responsePanel.innerHTML = html;
-    }
-
-	async function callAPI(payload) {
-    setResponse('Loading...');
-
-    try {
+    async function callAPI(payload) {
         const res = await fetch(API, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -496,337 +568,195 @@ if ($hasRequestsTable) {
         try {
             data = JSON.parse(text);
         } catch (e) {
-            setResponse('INVALID JSON RESPONSE:\n\n' + text);
-            return null;
+            throw new Error('Invalid JSON response: ' + text);
         }
 
         if (!data.ok) {
-            setResponse('ERROR:\n' + data.error);
-            return null;
+            throw new Error(data.error || 'Unknown API error');
         }
 
         return data;
-
-    } catch (e) {
-        setResponse('FETCH ERROR:\n' + e.message);
-        return null;
-    }
-}
-
-    function getRequestId() {
-        return document.getElementById('request_id').value.trim();
     }
 
-    function getArtifactId() {
-        return document.getElementById('artifact_id').value.trim();
+    function escapeHtml(str) {
+        return String(str)
+            .replaceAll('&', '&amp;')
+            .replaceAll('<', '&lt;')
+            .replaceAll('>', '&gt;')
+            .replaceAll('"', '&quot;')
+            .replaceAll("'", '&#039;');
     }
 
-    // =========================
-    // SAVE REQUEST
-    // =========================
-    document.getElementById('btn_save_request').addEventListener('click', async function () {
+    function renderMessages(messages) {
+        const box = document.getElementById('messages');
+        box.innerHTML = '';
 
-        const title = document.getElementById('request_title').value.trim();
-        const type = document.getElementById('request_type').value;
-        const body = document.getElementById('request_body').value.trim();
+        if (!messages || !messages.length) {
+            box.innerHTML = '<div class="chat-empty">No messages in this conversation yet.</div>';
+            return;
+        }
 
-        const prompt =
-            'TITLE: ' + title + '\n\n' +
-            'TYPE: ' + type + '\n\n' +
-            body;
+        messages.forEach(function (m) {
+            const role = m.role === 'user' ? 'user' : 'jake';
+            const row = document.createElement('div');
+            row.className = 'bubble-row ' + role;
 
-        const data = await callAPI({
-            action: 'save_request',
-            title: title,
-            type: type,
-            prompt: prompt
+            const bubble = document.createElement('div');
+            bubble.className = 'bubble ' + role;
+
+            const safeText = escapeHtml(m.message_text || '');
+            const meta = m.created_at ? '<div class="bubble-meta">' + escapeHtml(m.created_at) + '</div>' : '';
+
+            bubble.innerHTML = safeText + meta;
+            row.appendChild(bubble);
+            box.appendChild(row);
         });
 
-        if (!data) return;
+        box.scrollTop = box.scrollHeight;
+    }
 
-        document.getElementById('request_id').value = data.request_id;
+    function setConversationList(conversations) {
+        const list = document.getElementById('conv_list');
+        list.innerHTML = '';
 
-        setResponse(
-            'Saved.\n\nRequest ID: ' + data.request_id
-        );
-    });
+        if (!conversations || !conversations.length) {
+            list.innerHTML = '<div class="empty-premium">No conversations found yet.</div>';
+            return;
+        }
 
-    // =========================
-    // JAKE THINK
-    // =========================
-    document.getElementById('btn_stub_chat').addEventListener('click', async function () {
+        conversations.forEach(function (c) {
+            const div = document.createElement('div');
+            div.className = 'conversation-item' + ((currentConversation && Number(currentConversation) === Number(c.id)) ? ' active' : '');
 
-        const requestId = getRequestId();
-        const title = document.getElementById('request_title').value.trim();
-        const type = document.getElementById('request_type').value;
-        const prompt = document.getElementById('request_body').value;
+            div.innerHTML =
+                '<div class="conversation-subject">' + escapeHtml(c.subject || 'Untitled conversation') + '</div>' +
+                '<div class="conversation-meta">' + escapeHtml(c.updated_at || '') + '</div>';
+
+            div.addEventListener('click', function () {
+                loadConversation(c.id);
+            });
+
+            list.appendChild(div);
+        });
+    }
+
+    async function loadConversations() {
+        const data = await callAPI({
+            action: 'list_conversations'
+        });
+
+        setConversationList(data.conversations || []);
+    }
+
+    async function loadConversation(id) {
+        currentConversation = id;
+
+        const data = await callAPI({
+            action: 'get_conversation_messages',
+            conversation_id: id
+        });
+
+        renderMessages(data.messages || []);
+        await loadConversations();
+    }
+
+    async function sendMessage() {
+        const input = document.getElementById('msg_input');
+        const requestType = document.getElementById('request_type').value;
+        const messageText = input.value.trim();
+
+        if (!messageText) return;
 
         const payload = {
-            action: 'jake_think',
-            title: title,
-            type: type,
-            prompt: prompt
+            action: 'send_message',
+            message_text: messageText
         };
 
-        if (requestId !== '') {
-            payload.request_id = parseInt(requestId, 10);
+        if (currentConversation) {
+            payload.conversation_id = currentConversation;
         }
+
+        if (requestType !== '') {
+            payload.request_type = requestType;
+        }
+
+        input.value = '';
 
         const data = await callAPI(payload);
 
-        if (!data) return;
-
-        if (data.request_id) {
-            document.getElementById('request_id').value = data.request_id;
-        }
-        if (data.artifact_id) {
-            document.getElementById('artifact_id').value = data.artifact_id;
+        if (!currentConversation) {
+            currentConversation = data.conversation_id;
         }
 
-        setResponse(
-            data.response
-        );
-    });
+        await loadConversation(currentConversation);
+        await loadConversations();
+    }
 
-    // =========================
-    // READ FILE
-    // =========================
-    document.getElementById('btn_read_file').addEventListener('click', async function () {
-
-        const path = document.getElementById('file_path').value;
-
-        const data = await callAPI({
-            action: 'read_file',
-            path: path
-        });
-
-        if (!data) return;
-
-        setResponse(
-            'FILE: ' + data.path + '\n\n' + data.content
-        );
-    });
-
-    // =========================
-    // RUN SQL
-    // =========================
-    document.getElementById('btn_run_sql').addEventListener('click', async function () {
-
-        const query = document.getElementById('db_query').value;
-
-        const data = await callAPI({
-            action: 'run_sql_read',
-            query: query
-        });
-
-        if (!data) return;
-
-        setResponse(
-            'ROWS: ' + data.count + '\n\n' +
-            JSON.stringify(data.rows, null, 2)
-        );
-    });
-
-	// =========================
-	// LIST TABLES
-	// =========================
-	document.getElementById('btn_list_tables').addEventListener('click', async function () {
-
-		const data = await callAPI({
-			action: 'list_tables'
-		});
-
-		if (!data) return;
-
-        let html = 'TABLES:<br><br>';
-
-        data.tables.forEach(function (t) {
-            html += '<div class="table-link" data-table="' + t + '" style="cursor:pointer;padding:6px 10px;border-radius:8px;margin-bottom:4px;">' + t + '</div>';
-        });
-
-        setResponseHtml(html);
-
-        document.querySelectorAll('.table-link').forEach(function (el) {
-            el.addEventListener('mouseenter', function () {
-                this.style.background = '#e9eef8';
-            });
-            el.addEventListener('mouseleave', function () {
-                this.style.background = 'transparent';
-            });
-            el.addEventListener('click', function () {
-                const table = this.getAttribute('data-table');
-                document.getElementById('table_name').value = table;
-                document.getElementById('btn_describe_table').click();
-            });
-        });
-	});
-
-	// =========================
-	// DESCRIBE TABLE
-	// =========================
-	document.getElementById('btn_describe_table').addEventListener('click', async function () {
-
-		const table = document.getElementById('table_name').value.trim();
-
-		if (!table) {
-			setResponse('ERROR:\nEnter table name first.');
-			return;
-		}
-
-		const data = await callAPI({
-			action: 'describe_table',
-			table: table
-		});
-
-		if (!data) return;
-
-		setResponse(
-			'TABLE: ' + data.table + '\n\n' +
-			JSON.stringify(data.columns, null, 2)
-		);
-	});
-	
-	// =========================
-	// UNUSED SCAN STUB
-	// =========================
-	document.getElementById('btn_list_unused_stub').addEventListener('click', function () {
-		setResponse(
-			'Unused scan stub.\n\n' +
-			'Planned future behavior:\n' +
-			'- inspect project paths\n' +
-			'- compare references\n' +
-			'- flag likely unused files/tables\n' +
-			'- never auto-delete'
-		);
-	});
-
-    // =========================
-    // LIST REQUEST ARTIFACTS
-    // =========================
-    document.getElementById('btn_list_artifacts').addEventListener('click', async function () {
-
-        const requestId = getRequestId();
-
-        if (!requestId) {
-            setResponse('ERROR:\nEnter Request ID first.');
-            return;
-        }
-
-        const data = await callAPI({
-            action: 'list_request_artifacts',
-            request_id: parseInt(requestId, 10)
-        });
-
-        if (!data) return;
-
-        if (!data.artifacts || !data.artifacts.length) {
-            setResponse('No artifacts found for Request ID ' + requestId);
-            return;
-        }
-
-        let out = 'ARTIFACTS FOR REQUEST ' + requestId + ':\n\n';
-
-        data.artifacts.forEach(function (a) {
-            out += 'Artifact ID: ' + a.id + '\n';
-            out += 'Run ID: ' + a.run_id + '\n';
-            out += 'Title: ' + a.title + '\n';
-            out += 'Type: ' + a.artifact_type + '\n';
-            out += 'Target Path: ' + (a.target_path || '') + '\n';
-            out += 'Output Mode: ' + (a.output_mode || '') + '\n';
-            out += 'Created: ' + (a.created_at || '') + '\n';
-            out += '\n';
-        });
-
-        document.getElementById('artifact_id').value = data.artifacts[0].id;
-
-        setResponse(out);
-    });
-
-    // =========================
-    // READ ARTIFACT
-    // =========================
-    document.getElementById('btn_read_artifact').addEventListener('click', async function () {
-
-        const artifactId = getArtifactId();
-
-        if (!artifactId) {
-            setResponse('ERROR:\nEnter Artifact ID first.');
-            return;
-        }
-
+    async function readArtifact(artifactId) {
         const data = await callAPI({
             action: 'read_artifact',
-            artifact_id: parseInt(artifactId, 10)
+            artifact_id: artifactId
         });
 
-        if (!data) return;
+        const a = data.artifact || {};
+        const viewer = document.getElementById('artifact_viewer');
 
-        const a = data.artifact;
-
-        setResponse(
-            'ARTIFACT ID: ' + a.id + '\n' +
-            'REQUEST ID: ' + a.request_id + '\n' +
-            'RUN ID: ' + a.run_id + '\n' +
-            'TITLE: ' + a.title + '\n' +
+        viewer.textContent =
+            'ARTIFACT ID: ' + (a.id || '') + '\n' +
+            'REQUEST ID: ' + (a.request_id || '') + '\n' +
+            'RUN ID: ' + (a.run_id || '') + '\n' +
+            'TITLE: ' + (a.title || '') + '\n' +
             'TARGET PATH: ' + (a.target_path || '') + '\n' +
             'OUTPUT MODE: ' + (a.output_mode || '') + '\n' +
             'CREATED BY: ' + (a.created_by_agent || '') + '\n' +
             'APPROVED BY: ' + (a.approved_by_agent || '') + '\n' +
             '\n' +
-            a.content
-        );
-    });
+            (a.content || '');
 
-    // =========================
-    // VIEW LATEST ARTIFACT
-    // =========================
-    document.getElementById('btn_view_latest_artifact').addEventListener('click', async function () {
-
-        const requestId = getRequestId();
-
-        if (!requestId) {
-            setResponse('ERROR:\nEnter Request ID first.');
-            return;
-        }
-
-        const listData = await callAPI({
-            action: 'list_request_artifacts',
-            request_id: parseInt(requestId, 10)
+        document.querySelectorAll('.artifact-item').forEach(function (el) {
+            el.classList.remove('active');
         });
 
-        if (!listData) return;
-
-        if (!listData.artifacts || !listData.artifacts.length) {
-            setResponse('No artifacts found for Request ID ' + requestId);
-            return;
+        const active = document.querySelector('.artifact-item[data-artifact-id="' + artifactId + '"]');
+        if (active) {
+            active.classList.add('active');
         }
+    }
 
-        const latest = listData.artifacts[0];
-        document.getElementById('artifact_id').value = latest.id;
-
-        const readData = await callAPI({
-            action: 'read_artifact',
-            artifact_id: parseInt(latest.id, 10)
+    document.getElementById('send_btn').addEventListener('click', function () {
+        sendMessage().catch(function (err) {
+            alert(err.message || 'Failed to send message');
         });
-
-        if (!readData) return;
-
-        const a = readData.artifact;
-
-        setResponse(
-            'LATEST ARTIFACT\n\n' +
-            'ARTIFACT ID: ' + a.id + '\n' +
-            'REQUEST ID: ' + a.request_id + '\n' +
-            'RUN ID: ' + a.run_id + '\n' +
-            'TITLE: ' + a.title + '\n' +
-            'TARGET PATH: ' + (a.target_path || '') + '\n' +
-            'OUTPUT MODE: ' + (a.output_mode || '') + '\n' +
-            '\n' +
-            a.content
-        );
     });
 
+    document.getElementById('msg_input').addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage().catch(function (err) {
+                alert(err.message || 'Failed to send message');
+            });
+        }
+    });
+
+    document.getElementById('refresh_conversations_btn').addEventListener('click', function () {
+        loadConversations().catch(function (err) {
+            alert(err.message || 'Failed to refresh conversations');
+        });
+    });
+
+    document.querySelectorAll('.artifact-item').forEach(function (el) {
+        el.addEventListener('click', function () {
+            const artifactId = this.getAttribute('data-artifact-id');
+            if (!artifactId) return;
+
+            readArtifact(parseInt(artifactId, 10)).catch(function (err) {
+                alert(err.message || 'Failed to read artifact');
+            });
+        });
+    });
+
+    loadConversations().catch(function () {});
 })();
 </script>
-</body>
-</html>
+
+<?php cw_footer(); ?>
