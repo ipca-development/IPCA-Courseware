@@ -682,6 +682,128 @@ function load_conversation(PDO $pdo, int $conversationId): ?array
     return $row ?: null;
 }
 
+
+//HELPERS FOR COOPERATION BETWEEN JAKE AND STEVEN
+
+function update_conversation_state(
+    PDO $pdo,
+    int $conversationId,
+    ?string $activeMode,
+    ?string $activeRequestSummary,
+    ?string $activeTargetFiles,
+    ?string $activeNextStep,
+    ?int $activeRunId,
+    ?int $activeArtifactId
+): void {
+    $stmt = $pdo->prepare("
+        UPDATE ai_jake_conversations
+        SET
+            active_mode = ?,
+            active_request_summary = ?,
+            active_target_files = ?,
+            active_next_step = ?,
+            active_run_id = ?,
+            active_artifact_id = ?,
+            updated_at = NOW()
+        WHERE id = ?
+    ");
+    $stmt->execute([
+        $activeMode,
+        $activeRequestSummary,
+        $activeTargetFiles,
+        $activeNextStep,
+        $activeRunId,
+        $activeArtifactId,
+        $conversationId
+    ]);
+}
+
+function extract_active_target_files_from_message(string $messageText): array
+{
+    return extract_file_candidates_from_text($messageText);
+}
+
+function build_active_request_summary(string $messageText, ?string $requestType = null): string
+{
+    $messageText = trim(preg_replace('/\s+/', ' ', $messageText));
+    $summary = $messageText;
+
+    if ($summary === '') {
+        $summary = 'Untitled engineering request';
+    }
+
+    if (mb_strlen($summary) > 240) {
+        $summary = trim(mb_substr($summary, 0, 237)) . '...';
+    }
+
+    if ($requestType !== null && trim($requestType) !== '') {
+        return '[' . trim($requestType) . '] ' . $summary;
+    }
+
+    return $summary;
+}
+
+function is_continuation_trigger(string $messageText): bool
+{
+    $text = strtolower(trim($messageText));
+
+    if ($text === '') {
+        return false;
+    }
+
+    $exact = array(
+        'yes',
+        'yes.',
+        'go ahead',
+        'do it',
+        'implement it',
+        'code it',
+        'try it',
+        'let\'s do it',
+        'lets do it',
+        'let\'s code it',
+        'lets code it',
+        'let\'s try it',
+        'lets try it',
+        'proceed',
+        'continue',
+        'ok do it',
+        'okay do it',
+        'yes let\'s do it',
+        'yes lets do it',
+        'yes, let\'s do it',
+        'yes, lets do it',
+        'yes let\'s try to code it',
+        'yes lets try to code it',
+        'yes, let\'s try to code it',
+        'yes, lets try to code it'
+    );
+
+    if (in_array($text, $exact, true)) {
+        return true;
+    }
+
+    $contains = array(
+        'let\'s try to code it',
+        'lets try to code it',
+        'go ahead and code it',
+        'please implement it',
+        'let\'s implement it',
+        'lets implement it',
+        'go ahead with the implementation',
+        'continue with implementation'
+    );
+
+    foreach ($contains as $needle) {
+        if (strpos($text, $needle) !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
 function list_conversations(PDO $pdo, int $limit = 50): array
 {
     $stmt = $pdo->prepare("
@@ -852,6 +974,163 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
     return $text;
 }
 
+
+function run_jake_engineering_cycle(
+    PDO $pdo,
+    int $userId,
+    string $messageText,
+    ?string $requestType = null
+): array {
+    $title = auto_subject_from_message($messageText);
+    $type = ($requestType !== null && trim($requestType) !== '') ? trim($requestType) : 'investigation';
+    $prompt = trim($messageText);
+
+    $stmt = $pdo->prepare("
+        INSERT INTO ai_jake_requests
+        (user_id, request_title, request_type, prompt, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'new', NOW(), NOW())
+    ");
+    $stmt->execute([
+        $userId,
+        $title,
+        $type,
+        $prompt
+    ]);
+
+    $requestId = (int)$pdo->lastInsertId();
+    $requestRow = load_request_row($pdo, $requestId);
+
+    if (!$requestRow) {
+        throw new RuntimeException('Unable to reload created request');
+    }
+
+    $ssot = load_latest_ssot_snapshot($pdo);
+    $candidatePaths = extract_file_candidates_from_text((string)$requestRow['prompt']);
+    $contextFiles = read_files_for_context($candidatePaths, 3);
+
+    $runId = create_jake_run(
+        $pdo,
+        $requestId,
+        $userId,
+        'jake_think',
+        'running'
+    );
+
+    $jakeSummary = build_jake_summary($requestRow, $ssot, $contextFiles);
+    $stevenBrief = build_steven_brief($requestRow, $ssot, $contextFiles);
+    $riskNotes = 'Steven output generated via OpenAI. Manual review still required before any code is used.';
+    $outputMode = 'full_drop_in';
+
+    try {
+        $maxRounds = 2;
+        $currentRound = 1;
+        $finalArtifactId = null;
+        $finalArtifact = null;
+        $finalReviewStatus = 'analysis_only';
+        $finalReviewSummary = '';
+
+        while ($currentRound <= $maxRounds) {
+
+            $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles);
+            $outputMode = (string)($artifactSeed['output_mode'] ?? 'full_drop_in');
+
+            $artifactId = create_artifact($pdo, [
+                'run_id' => $runId,
+                'request_id' => $requestId,
+                'artifact_type' => $artifactSeed['artifact_type'],
+                'target_path' => $artifactSeed['target_path'],
+                'title' => $artifactSeed['title'],
+                'content' => $artifactSeed['content'],
+                'output_mode' => $artifactSeed['output_mode'],
+                'notes' => $artifactSeed['notes'],
+                'created_by_agent' => 'steven',
+                'approved_by_agent' => 'jake',
+            ]);
+
+            $review = jake_review_artifact(
+                $requestRow,
+                $ssot,
+                $contextFiles,
+                (string)$artifactSeed['content']
+            );
+
+            $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
+            $reviewSummary = (string)($review['reason'] ?? '');
+            $isFinal = ($reviewStatus === 'approved' || $reviewStatus === 'analysis_only') ? 1 : 0;
+
+            $stmt2 = $pdo->prepare("
+                UPDATE ai_jake_artifacts
+                SET review_status = ?, review_summary = ?, revision_round = ?, is_final = ?
+                WHERE id = ?
+            ");
+            $stmt2->execute([
+                $reviewStatus,
+                $reviewSummary,
+                $currentRound,
+                $isFinal,
+                $artifactId
+            ]);
+
+            $finalArtifactId = $artifactId;
+            $finalArtifact = $artifactSeed;
+            $finalReviewStatus = $reviewStatus;
+            $finalReviewSummary = $reviewSummary;
+
+            if ($isFinal) {
+                break;
+            }
+
+            $requestRow['prompt'] .= "\n\nREVISION REQUIRED:\n" . $reviewSummary;
+            $currentRound++;
+        }
+
+        update_jake_run($pdo, $runId, [
+            'status' => 'completed',
+            'jake_summary' => $jakeSummary,
+            'steven_brief' => $stevenBrief,
+            'risk_notes' => $riskNotes . ' Final review status: ' . $finalReviewStatus,
+            'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
+        ]);
+
+    } catch (Throwable $inner) {
+        update_jake_run($pdo, $runId, [
+            'status' => 'failed',
+            'jake_summary' => $jakeSummary,
+            'steven_brief' => $stevenBrief,
+            'risk_notes' => 'Steven generation failed: ' . $inner->getMessage(),
+            'output_mode' => $outputMode,
+        ]);
+
+        throw $inner;
+    }
+
+    $reply = array();
+    $reply[] = 'I moved this conversation into implementation mode.';
+    $reply[] = '';
+    $reply[] = 'I prepared and reviewed an engineering artifact.';
+    $reply[] = '';
+    $reply[] = 'Request ID: ' . $requestId;
+    $reply[] = 'Run ID: ' . $runId;
+    $reply[] = 'Artifact ID: ' . $finalArtifactId;
+    $reply[] = 'Review Status: ' . $finalReviewStatus;
+    $reply[] = 'Output Mode: ' . (string)($finalArtifact['output_mode'] ?? $outputMode);
+    $reply[] = 'Target Path: ' . (($finalArtifact !== null && $finalArtifact['target_path'] !== null) ? $finalArtifact['target_path'] : '[not determined]');
+    $reply[] = '';
+    $reply[] = 'Jake Review Summary:';
+    $reply[] = $finalReviewSummary !== '' ? $finalReviewSummary : 'No review summary returned.';
+
+    return array(
+        'request_id' => $requestId,
+        'run_id' => $runId,
+        'artifact_id' => $finalArtifactId,
+        'review_status' => $finalReviewStatus,
+        'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
+        'target_path' => $finalArtifact !== null ? $finalArtifact['target_path'] : null,
+        'reply' => implode("\n", $reply)
+    );
+}
+
+
 try {
     $u = cw_current_user($pdo);
 
@@ -915,7 +1194,7 @@ try {
                 'messages' => $messages
             ]);
 
-        case 'send_message':
+                case 'send_message':
 
             $conversationId = (int)($data['conversation_id'] ?? 0);
             $messageText = trim((string)($data['message_text'] ?? ''));
@@ -944,17 +1223,78 @@ try {
                 null
             );
 
-            $jakeReply = jake_chat_reply($pdo, [
-                'message_text' => $messageText
-            ], $requestType !== '' ? $requestType : null);
+            $activeMode = (string)($conversation['active_mode'] ?? '');
+            $activeRequestSummary = (string)($conversation['active_request_summary'] ?? '');
+            $activeTargetFiles = (string)($conversation['active_target_files'] ?? '');
+            $activeNextStep = (string)($conversation['active_next_step'] ?? '');
+            $activeRunId = isset($conversation['active_run_id']) ? (int)$conversation['active_run_id'] : null;
+            $activeArtifactId = isset($conversation['active_artifact_id']) ? (int)$conversation['active_artifact_id'] : null;
+
+            $reply = '';
+            $linkedRunId = null;
+
+            if (
+                is_continuation_trigger($messageText) &&
+                $activeRequestSummary !== ''
+            ) {
+                $engineeringPrompt = $activeRequestSummary;
+
+                if ($activeTargetFiles !== '') {
+                    $engineeringPrompt .= "\n\nRelevant files:\n" . $activeTargetFiles;
+                }
+
+                if ($activeNextStep !== '') {
+                    $engineeringPrompt .= "\n\nRequested next step:\n" . $activeNextStep;
+                }
+
+                $result = run_jake_engineering_cycle(
+                    $pdo,
+                    (int)$u['id'],
+                    $engineeringPrompt,
+                    $requestType !== '' ? $requestType : 'investigation'
+                );
+
+                $reply = (string)$result['reply'];
+                $linkedRunId = (int)$result['run_id'];
+
+                update_conversation_state(
+                    $pdo,
+                    $conversationId,
+                    'implementation',
+                    $activeRequestSummary,
+                    $activeTargetFiles,
+                    'Implementation draft created and reviewed. Awaiting user inspection.',
+                    $result['run_id'],
+                    $result['artifact_id']
+                );
+
+            } else {
+                $reply = jake_chat_reply($pdo, [
+                    'message_text' => $messageText
+                ], $requestType !== '' ? $requestType : null);
+
+                $targetFiles = extract_active_target_files_from_message($messageText);
+                $targetFilesText = $targetFiles ? implode("\n", $targetFiles) : '';
+
+                update_conversation_state(
+                    $pdo,
+                    $conversationId,
+                    'analysis',
+                    build_active_request_summary($messageText, $requestType !== '' ? $requestType : null),
+                    $targetFilesText !== '' ? $targetFilesText : null,
+                    'If user approves, move into implementation mode.',
+                    $activeRunId,
+                    $activeArtifactId
+                );
+            }
 
             $jakeMessageId = add_conversation_message(
                 $pdo,
                 $conversationId,
                 'jake',
-                $jakeReply,
+                $reply,
                 $requestType !== '' ? $requestType : null,
-                null
+                $linkedRunId
             );
 
             json_out([
@@ -962,7 +1302,7 @@ try {
                 'conversation_id' => $conversationId,
                 'user_message_id' => $userMessageId,
                 'jake_message_id' => $jakeMessageId,
-                'reply' => $jakeReply
+                'reply' => $reply
             ]);
 
         case 'save_request':
