@@ -26,8 +26,17 @@ try {
     $recentArtifacts = array();
 }
 
-cw_header('Jake Console');
-?>
+<?php cw_header('Jake Console'); ?>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-clike.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-markup.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-css.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-sql.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-php.min.js"></script>
+
 <style>
   .jake-shell{
     display:flex;
@@ -543,9 +552,19 @@ cw_header('Jake Console');
     flex:1 1 auto;
     overflow:auto;
     background:#0f172a;
-    color:#d9e3f0;
+    padding:0;
+  }
+
+  .artifact-code-pre{
+    margin:0;
+    min-height:100%;
     padding:18px 20px;
-    white-space:pre-wrap;
+    background:#0f172a !important;
+    overflow:auto;
+    white-space:pre;
+  }
+
+  .artifact-code-pre code{
     font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     font-size:13px;
     line-height:1.55;
@@ -732,7 +751,9 @@ cw_header('Jake Console');
       </div>
       <button type="button" class="artifact-modal-close" id="artifact_modal_close" aria-label="Close">×</button>
     </div>
-    <div class="artifact-modal-body" id="artifact_modal_body">Select an artifact to inspect its content.</div>
+    <div class="artifact-modal-body" id="artifact_modal_body">
+  <pre class="artifact-code-pre"><code id="artifact_modal_code" class="language-php">Select an artifact to inspect its content.</code></pre>
+</div>
   </div>
 </div>
 
@@ -775,6 +796,37 @@ cw_header('Jake Console');
             .replaceAll("'", '&#039;');
     }
 
+    function detectArtifactLanguage(a) {
+        const path = String(a.target_path || '').toLowerCase();
+        const mode = String(a.output_mode || '').toLowerCase();
+        const title = String(a.title || '').toLowerCase();
+
+        if (path.endsWith('.php')) return 'php';
+        if (path.endsWith('.js')) return 'javascript';
+        if (path.endsWith('.css')) return 'css';
+        if (path.endsWith('.sql')) return 'sql';
+        if (path.endsWith('.json')) return 'json';
+        if (path.endsWith('.html')) return 'markup';
+        if (path.endsWith('.xml')) return 'markup';
+        if (path.endsWith('.md')) return 'markup';
+
+        if (mode === 'sql') return 'sql';
+        if (mode === 'code' && title.indexOf('sql') !== -1) return 'sql';
+
+        return 'php';
+    }
+
+    function renderArtifactContent(a) {
+        const codeEl = document.getElementById('artifact_modal_code');
+        const language = detectArtifactLanguage(a);
+
+        codeEl.className = 'language-' + language;
+        codeEl.textContent = a.content || '';
+
+        if (window.Prism && typeof window.Prism.highlightElement === 'function') {
+            window.Prism.highlightElement(codeEl);
+        }
+    }	
 	
 function renderArtifactItem(a) {
     const createdAt = a.created_at || '';
@@ -1097,7 +1149,7 @@ async function loadRecentArtifacts() {
             ' · Output Mode: ' + (a.output_mode || '') +
             (a.target_path ? ' · Target Path: ' + a.target_path : '');
 
-        document.getElementById('artifact_modal_body').textContent = a.content || '';
+             renderArtifactContent(a);
 
         document.querySelectorAll('.artifact-item').forEach(function (el) {
             el.classList.remove('active');
