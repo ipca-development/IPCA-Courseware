@@ -756,7 +756,7 @@ cw_header('Jake Console');
         });
     }
 
-	function formatJakeMessage(text) {
+function formatJakeMessage(text) {
     const safe = escapeHtml(text || '');
     const lines = safe.split(/\r?\n/);
 
@@ -764,7 +764,8 @@ cw_header('Jake Console');
     let inList = false;
 
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
+        const rawLine = lines[i];
+        const line = rawLine.trim();
 
         if (line === '') {
             if (inList) {
@@ -775,6 +776,7 @@ cw_header('Jake Console');
             continue;
         }
 
+        // **Title**
         const boldMatch = line.match(/^\*\*(.+?)\*\*$/);
         if (boldMatch) {
             if (inList) {
@@ -785,6 +787,18 @@ cw_header('Jake Console');
             continue;
         }
 
+        // ### Title / ## Title / # Title
+        const mdHeadingMatch = line.match(/^#{1,6}\s+(.+)$/);
+        if (mdHeadingMatch) {
+            if (inList) {
+                html += '</ul>';
+                inList = false;
+            }
+            html += '<div class="msg-section-title">' + mdHeadingMatch[1] + '</div>';
+            continue;
+        }
+
+        // - item
         if (line.startsWith('- ')) {
             if (!inList) {
                 html += '<ul class="msg-list">';
