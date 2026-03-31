@@ -854,51 +854,61 @@ function is_continuation_trigger(string $messageText): bool
         return false;
     }
 
+    // Normalize apostrophes, punctuation, spacing
+    $normalized = str_replace(array("’", "`", "‘"), "'", $text);
+    $normalized = preg_replace('/[^a-z0-9\'\s]/', ' ', $normalized);
+    $normalized = preg_replace('/\s+/', ' ', $normalized);
+    $normalized = trim((string)$normalized);
+
+    if ($normalized === '') {
+        return false;
+    }
+
     $exact = array(
         'yes',
-        'yes.',
+        'yes please',
         'go ahead',
         'do it',
         'implement it',
+        'implement this',
         'code it',
+        'code this',
         'try it',
-        'let\'s do it',
-        'lets do it',
-        'let\'s code it',
-        'lets code it',
-        'let\'s try it',
-        'lets try it',
+        'try this',
         'proceed',
         'continue',
-        'ok do it',
+        'go for it',
+        'sounds good',
+        'looks good',
         'okay do it',
-        'yes let\'s do it',
-        'yes lets do it',
-        'yes, let\'s do it',
-        'yes, lets do it',
-        'yes let\'s try to code it',
-        'yes lets try to code it',
-        'yes, let\'s try to code it',
-        'yes, lets try to code it'
+        'ok do it'
     );
 
-    if (in_array($text, $exact, true)) {
+    if (in_array($normalized, $exact, true)) {
         return true;
     }
 
-    $contains = array(
-        'let\'s try to code it',
-        'lets try to code it',
-        'go ahead and code it',
-        'please implement it',
-        'let\'s implement it',
-        'lets implement it',
-        'go ahead with the implementation',
-        'continue with implementation'
+    $patterns = array(
+        '/\blet\s*\'?\s*s?\s+implement\s+(it|this)\b/',
+        '/\blet\s*\'?\s*s?\s+code\s+(it|this)\b/',
+        '/\blet\s*\'?\s*s?\s+try\s+(it|this)\b/',
+        '/\blet\s*\'?\s*s?\s+build\s+(it|this)\b/',
+        '/\bplease\s+implement\s+(it|this)\b/',
+        '/\bplease\s+code\s+(it|this)\b/',
+        '/\bgo\s+ahead\b/',
+        '/\bgo\s+for\s+it\b/',
+        '/\byes\b.*\bimplement\b/',
+        '/\byes\b.*\bcode\b/',
+        '/\byes\b.*\bdo\s+it\b/',
+        '/\bimplement\s+(it|this)\b/',
+        '/\bcode\s+(it|this)\b/',
+        '/\bbuild\s+(it|this)\b/',
+        '/\bcontinue\s+with\s+(the\s+)?implementation\b/',
+        '/\bproceed\s+with\s+(the\s+)?implementation\b/'
     );
 
-    foreach ($contains as $needle) {
-        if (strpos($text, $needle) !== false) {
+    foreach ($patterns as $pattern) {
+        if (preg_match($pattern, $normalized)) {
             return true;
         }
     }
@@ -1367,9 +1377,16 @@ try {
             $linkedRunId = null;
 
             if (
-                is_continuation_trigger($messageText) &&
-                $activeRequestSummary !== ''
-            ) {
+    (
+        is_continuation_trigger($messageText) ||
+        (
+            $activeRequestSummary !== '' &&
+            in_array(strtolower(trim($messageText)), array('yes', 'yes.', 'ok', 'okay', 'sure'), true) &&
+            (string)$activeMode === 'analysis'
+        )
+    ) &&
+    $activeRequestSummary !== ''
+) {
                 $engineeringPrompt = $activeRequestSummary;
 
                 if ($activeTargetFiles !== '') {
