@@ -125,6 +125,7 @@ function read_files_for_context(array $paths, int $limit = 3): array
 {
     $out = [];
     $count = 0;
+    $maxCharsPerFile = 7000;
 
     foreach ($paths as $path) {
         if ($count >= $limit) {
@@ -133,11 +134,17 @@ function read_files_for_context(array $paths, int $limit = 3): array
 
         try {
             $file = safe_project_file_read((string)$path);
+
+            $content = (string)$file['content'];
+            if (mb_strlen($content) > $maxCharsPerFile) {
+                $content = mb_substr($content, 0, $maxCharsPerFile) . "\n\n/* [truncated for AI context] */";
+            }
+
             $out[] = [
                 'path' => $file['path'],
                 'basename' => $file['basename'],
                 'size_bytes' => $file['size_bytes'],
-                'content' => (string)$file['content'],
+                'content' => $content,
             ];
             $count++;
         } catch (Throwable $e) {
@@ -334,7 +341,15 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
 
 function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFiles, string $artifactContent): array
 {
-    $system = implode("\n", [
+        if (strpos(ltrim($artifactContent), 'AI ERROR:') === 0) {
+        return [
+            'verdict' => 'analysis_only',
+            'reason' => 'Steven did not complete the code generation successfully because the AI call failed before a real artifact could be produced. In other words: this is not approved code — it is a generation failure, so we should retry with less context or after the rate limit clears.',
+            'revision' => 'Retry generation with reduced context size or after the OpenAI rate limit window resets.'
+        ];
+    }
+	
+	$system = implode("\n", [
         'You are Jake, the IPCA architect and SSOT guardian.',
         '',
         'Your job is to review Steven outputs strictly, but explain your verdict in clear human language.',
@@ -1094,7 +1109,7 @@ function run_jake_engineering_cycle(
 
     $ssot = load_latest_ssot_snapshot($pdo);
     $candidatePaths = extract_file_candidates_from_text((string)$requestRow['prompt']);
-    $contextFiles = read_files_for_context($candidatePaths, 3);
+    $contextFiles = read_files_for_context($candidatePaths, 2);
 
     $runId = create_jake_run(
         $pdo,
