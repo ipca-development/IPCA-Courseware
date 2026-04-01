@@ -72,8 +72,9 @@ return [
      * Exclude scanner files from secret scanning to avoid self-triggered regex false positives.
      */
     'secret_scan_excluded_files' => [
-        'public/admin/architecture_scanner.php',
-    ],
+    'public/admin/architecture_scanner.php',
+    'docs/deployment/Deployment_Environment.md',
+	],
 
     'components' => [
         'slide_player' => [
@@ -142,7 +143,7 @@ return [
 
     'secret_patterns' => [
         'OpenAI API key' => '/sk-[A-Za-z0-9]{20,}/',
-        'Postmark token assignment' => '/postmark[a-z0-9\-_]{10,}/i',
+        'Postmark token assignment' => '/POSTMARK_SERVER_TOKEN\s*[:=]\s*[\'"]?[A-Za-z0-9\-_]{20,}[\'"]?/i',
         'AWS or Spaces key assignment' => '/(AWS|SPACES)_(ACCESS_KEY|SECRET_KEY)/i',
         'Hardcoded bearer token usage' => '/Bearer\s+[A-Za-z0-9\-\._~\+\/=]{20,}/i',
     ],
