@@ -6,7 +6,7 @@ function cw_openai_key(): string {
     if ($k === '') throw new RuntimeException("CW_OPENAI_API_KEY is missing");
     return $k;
 }
-
+//OPEN AI
 function cw_openai_model(): string {
     return getenv('CW_OPENAI_MODEL') ?: 'gpt-5.4';
 }
