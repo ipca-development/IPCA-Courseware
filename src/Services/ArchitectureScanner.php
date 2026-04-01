@@ -220,83 +220,103 @@ final class ArchitectureScanner
     }
 
     private function scanSecrets(array &$issues): void
-    {
-        $patterns = $this->config['secret_patterns'] ?? [];
-        $extensions = $this->config['scannable_extensions'] ?? [];
+{
+    $patterns = $this->config['secret_patterns'] ?? [];
+    $extensions = $this->config['scannable_extensions'] ?? [];
+    $excluded = $this->normalizePaths($this->config['secret_scan_excluded_files'] ?? []);
 
-        foreach (array_keys($this->allFiles) as $filePath) {
-            if (!$this->hasAllowedExtension($filePath, $extensions)) {
+    foreach (array_keys($this->allFiles) as $filePath) {
+
+        // 🔹 Skip excluded files
+        if (in_array($filePath, $excluded, true)) {
+            continue;
+        }
+
+        // 🔹 Skip vendor completely (too noisy + not relevant)
+        if (strpos($filePath, 'vendor/') === 0) {
+            continue;
+        }
+
+        if (!$this->hasAllowedExtension($filePath, $extensions)) {
+            continue;
+        }
+
+        $content = $this->safeRead($this->repoRoot . '/' . $filePath);
+        if ($content === null || $content === '') {
+            continue;
+        }
+
+        foreach ($patterns as $label => $pattern) {
+            if (@preg_match($pattern, '') === false) {
                 continue;
             }
 
-            $content = $this->safeRead($this->repoRoot . '/' . $filePath);
-            if ($content === null || $content === '') {
-                continue;
-            }
-
-            foreach ($patterns as $label => $pattern) {
-                if (@preg_match($pattern, '') === false) {
-                    continue;
-                }
-
-                if (preg_match($pattern, $content)) {
-                    $issues['critical'][] = sprintf(
-                        'Possible secret detected (%s) in file: %s',
-                        $label,
-                        $filePath
-                    );
-                }
+            if (preg_match($pattern, $content)) {
+                $issues['critical'][] = sprintf(
+                    'Possible secret detected (%s) in file: %s',
+                    $label,
+                    $filePath
+                );
             }
         }
     }
+}
 
-    private function scanBrokenIncludes(array &$issues): void
-    {
-        $includeRegex = '/\b(?:require|require_once|include|include_once)\s*\(?\s*[\'"]([^\'"]+)[\'"]\s*\)?\s*;/i';
+private function scanBrokenIncludes(array &$issues): void
+{
+    $includeRegex = '/\b(?:require|require_once|include|include_once)\s*\(?\s*[\'"]([^\'"]+)[\'"]\s*\)?\s*;/i';
 
-        foreach (array_keys($this->allFiles) as $filePath) {
-            if (!preg_match('/\.php$/i', $filePath)) {
+    foreach (array_keys($this->allFiles) as $filePath) {
+
+        // 🔹 Skip vendor noise
+        if (strpos($filePath, 'vendor/') === 0) {
+            continue;
+        }
+
+        if (!preg_match('/\.php$/i', $filePath)) {
+            continue;
+        }
+
+        $absolutePath = $this->repoRoot . '/' . $filePath;
+        $content = $this->safeRead($absolutePath);
+
+        if ($content === null || $content === '') {
+            continue;
+        }
+
+        if (!preg_match_all($includeRegex, $content, $matches, PREG_SET_ORDER)) {
+            continue;
+        }
+
+        $baseDir = dirname($absolutePath);
+
+        foreach ($matches as $match) {
+            $includeTarget = trim($match[1]);
+
+            if ($includeTarget === '') {
                 continue;
             }
 
-            $absolutePath = $this->repoRoot . '/' . $filePath;
-            $content = $this->safeRead($absolutePath);
-            if ($content === null || $content === '') {
+            if (
+                str_contains($includeTarget, '$') ||
+                str_contains($includeTarget, '__DIR__') ||
+                str_contains($includeTarget, 'dirname(')
+            ) {
                 continue;
             }
 
-            if (!preg_match_all($includeRegex, $content, $matches, PREG_SET_ORDER)) {
-                continue;
-            }
+            $resolvedPath = realpath($baseDir . '/' . $includeTarget);
 
-            $baseDir = dirname($absolutePath);
-
-            foreach ($matches as $match) {
-                $includeTarget = trim($match[1]);
-
-                if ($includeTarget === '') {
-                    continue;
-                }
-
-                if (
-                    str_contains($includeTarget, '$') ||
-                    str_contains($includeTarget, '__DIR__') ||
-                    str_contains($includeTarget, 'dirname(')
-                ) {
-                    continue;
-                }
-
-                $resolvedPath = realpath($baseDir . '/' . $includeTarget);
-                if ($resolvedPath === false) {
-                    $issues['warning'][] = sprintf(
-                        'Possibly broken static include/require in %s -> %s',
-                        $filePath,
-                        $includeTarget
-                    );
-                }
+            if ($resolvedPath === false) {
+                $issues['warning'][] = sprintf(
+                    'Possibly broken include in %s -> %s',
+                    $filePath,
+                    $includeTarget
+                );
             }
         }
     }
+}
 
     private function relativePath(string $absolutePath): string
     {
