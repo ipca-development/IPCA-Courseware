@@ -28,6 +28,11 @@ function load_relevant_file_intelligence(PDO $pdo, string $text, int $limit = 10
         return [];
     }
 
+		$exactFile = null;
+	if (preg_match('/([a-zA-Z0-9_\-\/]+\.php)/', $text, $m)) {
+		$exactFile = strtolower(trim((string)$m[1]));
+	}
+	
     $sql = "
         SELECT file_path, module, purpose, tables_json, helpers_json, functions_json, includes_json
         FROM ai_architecture_file_index
@@ -57,7 +62,25 @@ function load_relevant_file_intelligence(PDO $pdo, string $text, int $limit = 10
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 
-    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+
+if ($exactFile !== null) {
+    usort($rows, function ($a, $b) use ($exactFile) {
+        $aPath = strtolower((string)($a['file_path'] ?? ''));
+        $bPath = strtolower((string)($b['file_path'] ?? ''));
+
+        $aScore = (strpos($aPath, $exactFile) !== false) ? 0 : 1;
+        $bScore = (strpos($bPath, $exactFile) !== false) ? 0 : 1;
+
+        if ($aScore !== $bScore) {
+            return $aScore <=> $bScore;
+        }
+
+        return strcmp($aPath, $bPath);
+    });
+}
+
+return $rows;
 }
 
 function build_targeted_context(PDO $pdo, string $text): array
@@ -102,7 +125,7 @@ function build_targeted_context(PDO $pdo, string $text): array
     }
 
     return [
-        'summary' => implode("\n", $summaryLines),
-        'files' => array_slice(array_unique($filePaths), 0, 5)
-    ];
+    'summary' => implode("\n", $summaryLines),
+    'files' => array_slice(array_unique($filePaths), 0, 3)
+];
 }

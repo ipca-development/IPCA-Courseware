@@ -128,6 +128,11 @@ function read_files_for_context(array $paths, int $limit = 5): array
     $count = 0;
     $maxCharsPerFile = 6000;
 
+	// 🔥 If explicitly targeted file, allow full read
+	if ($limit <= 3) {
+    $maxCharsPerFile = 20000;
+	}
+
     $paths = array_values(array_unique($paths));
 
     foreach ($paths as $path) {
