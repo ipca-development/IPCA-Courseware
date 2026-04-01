@@ -126,12 +126,6 @@ function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFi
 {
     $out = [];
     $count = 0;
-   
-
-	// 🔥 If explicitly targeted file, allow full read
-	if ($limit <= 3) {
-    $maxCharsPerFile = 20000;
-	}
 
     $paths = array_values(array_unique($paths));
 
@@ -143,20 +137,40 @@ function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFi
 
         try {
             $file = safe_project_file_read((string)$path);
-
             $content = (string)$file['content'];
 
-            if (mb_strlen($content) > $maxCharsPerFile) {
-                $content = mb_substr($content, 0, $maxCharsPerFile)
-                    . "\n\n/* [truncated for AI context] */";
-            }
+            $len = mb_strlen($content);
 
-            $out[] = [
-                'path' => $file['path'],
-                'basename' => $file['basename'],
-                'size_bytes' => $file['size_bytes'],
-                'content' => $content,
-            ];
+            // 🔥 If file is small → normal behavior
+            if ($len <= $maxCharsPerFile) {
+
+                $out[] = [
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => $content,
+                ];
+
+            } else {
+
+                // 🔥 Split into chunks
+                $chunkSize = $maxCharsPerFile;
+                $totalChunks = (int)ceil($len / $chunkSize);
+
+                for ($i = 0; $i < $totalChunks; $i++) {
+
+                    $chunk = mb_substr($content, $i * $chunkSize, $chunkSize);
+
+                    $out[] = [
+                        'path' => $file['path'],
+                        'basename' => $file['basename'],
+                        'size_bytes' => $file['size_bytes'],
+                        'content' =>
+                            "/* FILE CHUNK " . ($i + 1) . " / " . $totalChunks . " */\n\n" .
+                            $chunk
+                    ];
+                }
+            }
 
             $count++;
 
