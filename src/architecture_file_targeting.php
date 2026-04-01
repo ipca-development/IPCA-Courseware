@@ -128,7 +128,7 @@ $uniqueFiles = array_values(array_unique($filePaths));
 
 return [
     'summary' => implode("\n", $summaryLines),
-    'files' => array_slice($uniqueFiles, 0, 3),
+    'files' => array_slice($uniqueFiles, 0, 1),
     'primary_file' => !empty($uniqueFiles) ? $uniqueFiles[0] : null,
 ];
 }

@@ -154,8 +154,8 @@ function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFi
             } else {
 
                 // 🔥 Split into chunks
-                $chunkSize = $maxCharsPerFile;
-                $totalChunks = (int)ceil($len / $chunkSize);
+                $chunkSize = 4000;
+                $totalChunks = min((int)ceil($len / $chunkSize), 2);
 
                 for ($i = 0; $i < $totalChunks; $i++) {
 
@@ -235,7 +235,7 @@ function load_project_file_index(string $root): array
         }
     }
 
-    return array_slice($files, 0, 50);
+    return array_slice($files, 0, 20);
 }
 
 
@@ -1298,7 +1298,7 @@ $targetedFilesContent = read_files_for_context($targetFiles, 3, $targetedMaxChar
 	}
 
 	$userPrompt .= "DATABASE SCHEMA:\n";
-	$userPrompt .= json_encode($dbSchema);
+	$userPrompt .= json_encode(array_slice($dbSchema, 0, 8));
 	$userPrompt .= "\n\n";
 
 	$userPrompt .= "PROJECT FILE INDEX:\n";
