@@ -2191,6 +2191,9 @@ $shouldRunEngineering = (
     }
 
 } catch (Throwable $e) {
+    error_log('ai_jake_console_action.php ERROR: ' . $e->getMessage());
+    error_log($e->getTraceAsString());
+
     http_response_code(400);
     json_out([
         'ok' => false,
