@@ -523,18 +523,17 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         $user .= "Summary: " . (string)($ssot['summary_text'] ?? '') . "\n\n";
     }
 
-    if ($contextFiles) {
-        $user .= "LOADED FILES:\n";
-        foreach ($contextFiles as $f) {
-            if (!empty($f['error'])) {
-                $user .= "- " . (string)$f['path'] . " [read failed: " . (string)$f['error'] . "]\n";
-                continue;
-            }
+    // 🔥 Add context to review phase
+if (!empty($contextFiles)) {
+    $user .= "TARGETED FILE CONTENTS:\n";
 
-            $user .= "- " . (string)$f['path'] . "\n";
-        }
-        $user .= "\n";
+    foreach ($contextFiles as $f) {
+        if (!empty($f['error'])) continue;
+
+        $user .= "FILE: " . $f['path'] . "\n";
+        $user .= (string)$f['content'] . "\n\n";
     }
+}
 
     $user .= "STEVEN ARTIFACT TO REVIEW:\n";
     $user .= $artifactContent;
@@ -640,35 +639,43 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
 }
 
 
+
+
 function build_steven_artifact_content(array $requestRow, array $contextFiles): array
 {
-    
+    $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
+    $prompt = trim((string)($requestRow['prompt'] ?? ''));
 
-	
-	$targetPath = '';
-    foreach ($contextFiles as $f) {
-        if (empty($f['error']) && !empty($f['path'])) {
-            $targetPath = (string)$f['path'];
-            break;
+    // 🔥 FIRST: resolve targeting (this MUST come before using primary file)
+    $targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
+    $targetedSummary = $targetData['summary'];
+    $targetFiles = $targetData['files'];
+    $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
+
+    // 🔥 THEN: determine target path safely
+    $targetPath = $primaryTargetFile;
+
+    if ($targetPath === '') {
+        foreach ($contextFiles as $f) {
+            if (empty($f['error']) && !empty($f['path'])) {
+                $targetPath = (string)$f['path'];
+                break;
+            }
         }
     }
 
-    $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
-    $prompt = trim((string)($requestRow['prompt'] ?? ''));
-	$targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
-$targetedSummary = $targetData['summary'];
-$targetFiles = $targetData['files'];
-$primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
+    // 🔥 Load targeted file content (full if possible)
+    $targetedMaxChars = 20000;
 
-$targetedMaxChars = 20000;
-if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
-    $targetedMaxChars = 60000;
-}
+    if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
+        $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
+    } else {
+        $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
+    }
 
-$targetedFilesContent = read_files_for_context($targetFiles, 3, $targetedMaxChars);
-	
-	$dbSchema = load_database_schema($GLOBALS['pdo']);
-	$projectIndex = load_project_file_index(project_root_path());
+    // 🔥 DB + project context
+    $dbSchema = load_database_schema($GLOBALS['pdo']);
+    $projectIndex = load_project_file_index(project_root_path());
 
     $systemPrompt = implode("\n", [
 		'You are Steven, a hidden senior PHP/MySQL implementation agent inside the IPCA engineering console.',
@@ -1197,17 +1204,18 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 {
     $message = trim((string)($userMessage['message_text'] ?? ''));
 	$targetData = build_targeted_context($pdo, $message);
-$targetedSummary = $targetData['summary'];
-$targetFiles = $targetData['files'];
-$primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
+	$targetedSummary = $targetData['summary'];
+	$targetFiles = $targetData['files'];
+	$primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
 $targetedMaxChars = 20000;
+
 if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
-    $targetedMaxChars = 60000;
+    $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
+} else {
+    $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
 }
 
-$targetedFilesContent = read_files_for_context($targetFiles, 3, $targetedMaxChars);
-	$targetedFilesContent = read_files_for_context($targetFiles, 3);
     $ssot = load_latest_ssot_snapshot($pdo);
 	$dbSchema = load_database_schema($pdo);
     $fileCandidates = extract_file_candidates_from_text($message);
@@ -1298,7 +1306,7 @@ $targetedFilesContent = read_files_for_context($targetFiles, 3, $targetedMaxChar
 	}
 
 	$userPrompt .= "DATABASE SCHEMA:\n";
-	$userPrompt .= json_encode(array_slice($dbSchema, 0, 8));
+	$userPrompt .= json_encode(array_slice(array_keys($dbSchema), 0, 8));
 	$userPrompt .= "\n\n";
 
 	$userPrompt .= "PROJECT FILE INDEX:\n";
@@ -1309,8 +1317,8 @@ $targetedFilesContent = read_files_for_context($targetFiles, 3, $targetedMaxChar
     $userPrompt .= "TARGETED FILE CONTEXT:\n";
     $userPrompt .= $targetedSummary . "\n\n";
 	}
-	
-	if ($targetedFilesContent) {
+
+if (!empty($targetedFilesContent)) {
     $userPrompt .= "TARGETED FILE CONTENTS:\n";
 
     foreach ($targetedFilesContent as $f) {
@@ -1390,6 +1398,36 @@ $targetedFilesContent = read_files_for_context($targetFiles, 3, $targetedMaxChar
 }
 
 
+
+function build_engineering_context_files(PDO $pdo, string $prompt): array
+{
+    $targetData = build_targeted_context($pdo, $prompt);
+
+    $primary = $targetData['primary_file'] ?? null;
+    $files   = $targetData['files'] ?? [];
+
+    $paths = [];
+
+    if ($primary) {
+        $paths[] = $primary;
+    }
+
+    foreach ($files as $f) {
+        if ($f !== $primary) {
+            $paths[] = $f;
+        }
+    }
+
+    // Always include core engine files
+    $paths[] = 'src/courseware_progression_v2.php';
+    $paths[] = 'src/notification_service.php';
+
+    $paths = array_values(array_unique($paths));
+
+    return read_files_for_context($paths, 3, 20000);
+}
+
+
 function run_jake_engineering_cycle(
     PDO $pdo,
     int $userId,
@@ -1419,17 +1457,8 @@ function run_jake_engineering_cycle(
         throw new RuntimeException('Unable to reload created request');
     }
 
-    $ssot = load_latest_ssot_snapshot($pdo);
-    $candidatePaths = extract_file_candidates_from_text((string)$requestRow['prompt']);
-
-		// ✅ Always include core engine files (minimal, controlled)
-			$coreFiles = [
-					'src/courseware_progression_v2.php',
-    				'src/notification_service.php'
-		];
-
-$candidatePaths = array_values(array_unique(array_merge($coreFiles, $candidatePaths)));
-    $contextFiles = read_files_for_context($candidatePaths, 3);
+$ssot = load_latest_ssot_snapshot($pdo);
+$contextFiles = build_engineering_context_files($pdo, (string)$requestRow['prompt']);
 
     $runId = create_jake_run(
         $pdo,
@@ -1694,7 +1723,10 @@ $explicitImplementation =
     strpos($lower, 'generate') !== false ||
     strpos($lower, 'make') !== false ||
     strpos($lower, 'add') !== false ||
-    strpos($lower, 'implement') !== false;
+    strpos($lower, 'implement') !== false ||
+    strpos($lower, 'fix') !== false ||
+    strpos($lower, 'patch') !== false ||
+    strpos($lower, 'repair') !== false;
 
 $shouldRunEngineering = (
     $explicitImplementation ||
@@ -1924,8 +1956,7 @@ $shouldRunEngineering = (
             }
 
             $ssot = load_latest_ssot_snapshot($pdo);
-            $candidates = extract_file_candidates_from_text((string)($requestRow['prompt'] ?? ''));
-            $contextFiles = read_files_for_context($candidates, 3);
+            $contextFiles = build_engineering_context_files($pdo, (string)($requestRow['prompt'] ?? ''));
 
             json_out([
                 'ok' => true,
@@ -2059,8 +2090,7 @@ $shouldRunEngineering = (
             }
 
             $ssot = load_latest_ssot_snapshot($pdo);
-            $candidatePaths = extract_file_candidates_from_text((string)($requestRow['prompt'] ?? ''));
-            $contextFiles = read_files_for_context($candidatePaths, 3);
+			$contextFiles = build_engineering_context_files($pdo, (string)($requestRow['prompt'] ?? ''));
 
             $runId = create_jake_run(
                 $pdo,

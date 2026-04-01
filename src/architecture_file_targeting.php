@@ -126,9 +126,26 @@ function build_targeted_context(PDO $pdo, string $text): array
 
 $uniqueFiles = array_values(array_unique($filePaths));
 
+$primaryFile = null;
+
+if (!empty($rows) && isset($rows[0]['file_path'])) {
+    $primaryFile = (string)$rows[0]['file_path'];
+}
+
+// 🔥 Guarantee primary file is FIRST and NOT duplicated
+if ($primaryFile !== null) {
+
+    // Remove it if already in list
+    $uniqueFiles = array_values(array_filter($uniqueFiles, function ($f) use ($primaryFile) {
+        return $f !== $primaryFile;
+    }));
+
+    // Insert at the front
+    array_unshift($uniqueFiles, $primaryFile);
+}
+
 return [
     'summary' => implode("\n", $summaryLines),
     'files' => array_slice($uniqueFiles, 0, 1),
-    'primary_file' => !empty($uniqueFiles) ? $uniqueFiles[0] : null,
+    'primary_file' => $primaryFile,
 ];
-}
