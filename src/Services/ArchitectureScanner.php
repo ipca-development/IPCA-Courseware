@@ -413,19 +413,34 @@ private function extractFileIntelligence(): array
         $helpers = [];
 
         // ? TABLE DETECTION (cleaned)
-        if (preg_match_all('/\b(FROM|JOIN|UPDATE|INTO)\s+`?([a-zA-Z0-9_]+)`?/i', $content, $m)) {
-            foreach ($m[2] as $t) {
-                $t = strtolower(trim($t));
+		if (preg_match_all('/\b(FROM|JOIN|UPDATE|INTO)\s+`?([a-zA-Z0-9_]+)`?/i', $content, $m)) {
+			foreach ($m[2] as $t) {
 
-                if (strlen($t) < 3) continue;
-                if (in_array($t, $invalidTableWords, true)) continue;
+        $t = strtolower(trim($t));
 
-                // Ignore things that look like function names
-                if (strpos($t, 'test_') === 0 && strpos($t, '_v2') !== false) continue;
+        // ? Basic filters
+        if (strlen($t) < 4) continue;
+        if (in_array($t, $invalidTableWords, true)) continue;
 
-                $tables[] = $t;
-            }
+        // ? Must look like a DB table (underscore is strong signal)
+        if (strpos($t, '_') === false) continue;
+
+        // ? Reject common column-style words
+        if (preg_match('/^(id|name|email|password|token|address|phone|cellphone)$/', $t)) {
+            continue;
         }
+
+        // ? Reject obvious English words
+        if (preg_match('/^(your|their|data|value|text)$/', $t)) {
+            continue;
+        }
+
+        // ? Reject function-like patterns
+        if (strpos($t, 'test_') === 0 && strpos($t, '_v2') !== false) continue;
+
+        $tables[] = $t;
+    }
+}
 
         // ? INCLUDE / REQUIRE
         if (preg_match_all('/\b(require|include)(_once)?\s*\(?\s*[\'"]([^\'"]+)[\'"]\s*\)?/i', $content, $m)) {
