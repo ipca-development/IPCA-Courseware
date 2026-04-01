@@ -1,9 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
-  <!-- Main user -->
-  <circle cx="9" cy="8" r="2.5" stroke="#EAF2FF" stroke-width="1.6"/>
-  <path d="M4.5 18C4.5 15.8 6.4 14 9 14C11.6 14 13.5 15.8 13.5 18" stroke="#EAF2FF" stroke-width="1.6" stroke-linecap="round"/>
-
-  <!-- Secondary user -->
-  <circle cx="16.5" cy="9" r="2" stroke="#EAF2FF" stroke-width="1.6"/>
-  <path d="M14.5 18C14.5 16.6 15.6 15.4 17.3 15" stroke="#EAF2FF" stroke-width="1.6" stroke-linecap="round"/>
-</svg>
