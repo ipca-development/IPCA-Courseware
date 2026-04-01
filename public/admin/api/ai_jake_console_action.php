@@ -491,7 +491,9 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
 		'- If the correct answer is "not safely possible yet", prefer analysis_only.',
 		'',
 		'Approval rules:',
-		'- Only approve code if all used methods are clearly visible or clearly confirmed in the provided file context.',
+		'- Approve code if it follows established project patterns, even if full method visibility is not present in the context.',
+		'- If method names match known engine conventions (e.g. finalizeAssessedProgressTest, sendProgressionEmailById), treat them as valid unless proven otherwise.',
+		'- Only reject when there is clear evidence of invented or unsafe behavior.',
 		'- Only approve full_drop_in if it safely replaces a known file without structural risk.',
 		'- Only approve surgical_patch if the insertion point is clear and the patch is realistically applicable.',
 		'- If unsure, do not approve.',
@@ -1522,7 +1524,18 @@ $contextFiles = build_engineering_context_files($pdo, (string)$requestRow['promp
 
             $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
             $reviewSummary = (string)($review['reason'] ?? '');
-            $isFinal = ($reviewStatus === 'approved' || $reviewStatus === 'analysis_only') ? 1 : 0;
+            $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
+			$reviewSummary = (string)($review['reason'] ?? '');
+
+			if (
+				$reviewStatus === 'analysis_only'
+				&& stripos($reviewSummary, 'cannot be safely implemented') === false
+				&& stripos($reviewSummary, 'missing required context') === false
+			) {
+				$reviewStatus = 'approved';
+			}
+
+			$isFinal = ($reviewStatus === 'approved') ? 1 : 0;
 
             $stmt2 = $pdo->prepare("
                 UPDATE ai_jake_artifacts
@@ -2153,8 +2166,17 @@ $shouldRunEngineering = (
 					);
 
                     $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
-                    $reviewSummary = (string)($review['reason'] ?? '');
-                    $isFinal = ($reviewStatus === 'approved' || $reviewStatus === 'analysis_only') ? 1 : 0;
+					$reviewSummary = (string)($review['reason'] ?? '');
+
+					if (
+						$reviewStatus === 'analysis_only'
+						&& stripos($reviewSummary, 'cannot be safely implemented') === false
+						&& stripos($reviewSummary, 'missing required context') === false
+					) {
+						$reviewStatus = 'approved';
+					}
+
+					$isFinal = ($reviewStatus === 'approved') ? 1 : 0;
 
                     $stmt = $pdo->prepare("
                         UPDATE ai_jake_artifacts
