@@ -29,6 +29,8 @@ final class ArchitectureScanner
 
         $this->indexRepository();
 
+		$fileIntelligence = $this->extractFileIntelligence();
+		
         $issues = [
             'critical' => [],
             'warning'  => [],
@@ -75,6 +77,7 @@ final class ArchitectureScanner
             'environment' => $this->config['environment'] ?? [],
             'components' => $componentResults,
             'issues' => $issues,
+			'file_intelligence' => $fileIntelligence,
         ];
     }
 
@@ -352,4 +355,95 @@ final class ArchitectureScanner
         $content = @file_get_contents($absolutePath);
         return is_string($content) ? $content : null;
     }
+	
+	private function extractFileIntelligence(): array
+{
+    $results = [];
+
+    foreach ($this->allFiles as $filePath => $meta) {
+
+        // Only analyze PHP files for now (safe + efficient)
+        if (!preg_match('/\.php$/i', $filePath)) {
+            continue;
+        }
+
+        $absolute = $this->repoRoot . '/' . $filePath;
+        $content = $this->safeRead($absolute);
+
+        if ($content === null || $content === '') {
+            continue;
+        }
+
+        $tables = [];
+        $includes = [];
+        $functions = [];
+        $helpers = [];
+
+        // 🔹 TABLE DETECTION (FROM, JOIN, UPDATE, INSERT INTO)
+        if (preg_match_all('/\b(FROM|JOIN|UPDATE|INTO)\s+`?([a-zA-Z0-9_]+)`?/i', $content, $m)) {
+            foreach ($m[2] as $t) {
+                $tables[] = $t;
+            }
+        }
+
+        // 🔹 INCLUDE / REQUIRE
+        if (preg_match_all('/\b(require|include)(_once)?\s*\(?\s*[\'"]([^\'"]+)[\'"]\s*\)?/i', $content, $m)) {
+            foreach ($m[3] as $inc) {
+                $includes[] = $inc;
+            }
+        }
+
+        // 🔹 FUNCTION DEFINITIONS
+        if (preg_match_all('/function\s+([a-zA-Z0-9_]+)\s*\(/i', $content, $m)) {
+            foreach ($m[1] as $fn) {
+                $functions[] = $fn;
+            }
+        }
+
+        // 🔹 HELPER USAGE (cw_*)
+        if (preg_match_all('/\b(cw_[a-zA-Z0-9_]+)\s*\(/', $content, $m)) {
+            foreach ($m[1] as $h) {
+                $helpers[] = $h;
+            }
+        }
+
+        // 🔹 MODULE CLASSIFICATION (safe heuristic)
+        $module = 'general';
+
+		if (strpos($filePath, 'student/') !== false) {
+			$module = 'student';
+		} elseif (strpos($filePath, 'admin/') !== false) {
+			$module = 'admin';
+		} elseif (strpos($filePath, 'instructor/') !== false) {
+			$module = 'instructor';
+		} elseif (strpos($filePath, 'api/') !== false) {
+			$module = 'api';
+		} elseif (strpos($filePath, 'src/') !== false) {
+			$module = 'core';
+}
+
+        // 🔹 PURPOSE (very light heuristic — safe Phase 1)
+        $purpose = 'General file';
+
+        if (stripos($filePath, 'test_finalize') !== false) {
+            $purpose = 'Handles progress test finalization';
+        } elseif (stripos($filePath, 'summary') !== false) {
+            $purpose = 'Handles summary logic';
+        } elseif (stripos($filePath, 'course') !== false) {
+            $purpose = 'Handles course progression / UI';
+        }
+
+        $results[$filePath] = [
+            'tables' => array_values(array_unique($tables)),
+            'includes' => array_values(array_unique($includes)),
+            'functions' => array_values(array_unique($functions)),
+            'helpers' => array_values(array_unique($helpers)),
+            'module' => $module,
+            'purpose' => $purpose,
+        ];
+    }
+
+    return $results;
+}
+	
 }

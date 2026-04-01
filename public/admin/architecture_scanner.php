@@ -4,7 +4,7 @@ declare(strict_types=1);
 $config = require __DIR__ . '/../../src/courseware_architecture_ssot.php';
 require_once __DIR__ . '/../../src/Services/ArchitectureScanner.php';
 
-$repoRoot = realpath(__DIR__ . '/..');
+$repoRoot = realpath(__DIR__ . '/../..');
 
 $scanner  = new ArchitectureScanner($repoRoot, $config);
 $report   = $scanner->scan();
