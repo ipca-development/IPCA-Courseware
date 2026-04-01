@@ -122,11 +122,11 @@ function extract_file_candidates_from_text(string $text): array
     return array_values(array_unique($matches));
 }
 
-function read_files_for_context(array $paths, int $limit = 5): array
+function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFile = 6000): array
 {
     $out = [];
     $count = 0;
-    $maxCharsPerFile = 6000;
+   
 
 	// 🔥 If explicitly targeted file, allow full read
 	if ($limit <= 3) {
@@ -637,10 +637,16 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
 	$targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
-	$targetedSummary = $targetData['summary'];
-	$targetFiles = $targetData['files'];
+$targetedSummary = $targetData['summary'];
+$targetFiles = $targetData['files'];
+$primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
-	$targetedFilesContent = read_files_for_context($targetFiles, 3);
+$targetedMaxChars = 20000;
+if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
+    $targetedMaxChars = 60000;
+}
+
+$targetedFilesContent = read_files_for_context($targetFiles, 3, $targetedMaxChars);
 	
 	$dbSchema = load_database_schema($GLOBALS['pdo']);
 	$projectIndex = load_project_file_index(project_root_path());
@@ -1171,8 +1177,16 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 {
     $message = trim((string)($userMessage['message_text'] ?? ''));
 	$targetData = build_targeted_context($pdo, $message);
-	$targetedSummary = $targetData['summary'];
-	$targetFiles = $targetData['files'];
+$targetedSummary = $targetData['summary'];
+$targetFiles = $targetData['files'];
+$primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
+
+$targetedMaxChars = 20000;
+if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
+    $targetedMaxChars = 60000;
+}
+
+$targetedFilesContent = read_files_for_context($targetFiles, 3, $targetedMaxChars);
 	$targetedFilesContent = read_files_for_context($targetFiles, 3);
     $ssot = load_latest_ssot_snapshot($pdo);
 	$dbSchema = load_database_schema($pdo);

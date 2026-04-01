@@ -7,14 +7,14 @@ function load_relevant_file_intelligence(PDO $pdo, string $text, int $limit = 10
 
     $keywords = [];
 
-    // ? Extract file-like tokens
+    // 🔹 Extract file-like tokens
     if (preg_match_all('/[a-zA-Z0-9_\-\/]+\.php/', $text, $m)) {
         foreach ($m[0] as $f) {
             $keywords[] = $f;
         }
     }
 
-    // ? Extract keywords
+    // 🔹 Extract keywords
     $words = preg_split('/[^a-z0-9_]+/', $text);
     foreach ($words as $w) {
         if (strlen($w) >= 4) {
@@ -124,8 +124,11 @@ function build_targeted_context(PDO $pdo, string $text): array
         $summaryLines[] = '';
     }
 
-    return [
+$uniqueFiles = array_values(array_unique($filePaths));
+
+return [
     'summary' => implode("\n", $summaryLines),
-    'files' => array_slice(array_unique($filePaths), 0, 3)
+    'files' => array_slice($uniqueFiles, 0, 3),
+    'primary_file' => !empty($uniqueFiles) ? $uniqueFiles[0] : null,
 ];
 }
