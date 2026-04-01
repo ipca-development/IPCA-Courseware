@@ -19,11 +19,6 @@ try {
     // fail silently to avoid breaking UI
 }
 
-function h(string $value): string
-{
-    return htmlspecialchars($value, ENT_QUOTES, 'UTF-8');
-}
-
 $statusColor = '#16a34a';
 if ($report['status'] === 'WARNING') {
     $statusColor = '#d97706';
