@@ -6,6 +6,7 @@ error_reporting(E_ALL);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/openai.php';
+require_once __DIR__ . '/../../../src/architecture_file_targeting.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -630,6 +631,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
 
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
+	$targetedContext = build_targeted_context($GLOBALS['pdo'], $prompt);
 	
 	$dbSchema = load_database_schema($GLOBALS['pdo']);
 	$projectIndex = load_project_file_index(project_root_path());
@@ -709,6 +711,11 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
 	$userPrompt .= "PROJECT FILE INDEX:\n";
 	$userPrompt .= implode("\n", $projectIndex);
 	$userPrompt .= "\n\n";
+	
+	if ($targetedContext !== '') {
+    $userPrompt .= "TARGETED FILE CONTEXT:\n";
+    $userPrompt .= $targetedContext . "\n\n";
+	}
 	
     try {
         $resp = cw_openai_responses([
@@ -1143,6 +1150,7 @@ function auto_subject_from_message(string $message): string
 function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = null): string
 {
     $message = trim((string)($userMessage['message_text'] ?? ''));
+	$targetedContext = build_targeted_context($pdo, $message);
     $ssot = load_latest_ssot_snapshot($pdo);
 	$dbSchema = load_database_schema($pdo);
     $fileCandidates = extract_file_candidates_from_text($message);
@@ -1239,6 +1247,11 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 	$userPrompt .= "PROJECT FILE INDEX:\n";
 	$userPrompt .= implode("\n", $projectIndex);
 	$userPrompt .= "\n\n";
+	
+	if ($targetedContext !== '') {
+    $userPrompt .= "TARGETED FILE CONTEXT:\n";
+    $userPrompt .= $targetedContext . "\n\n";
+	}
 	
     $resp = cw_openai_responses([
         'model' => cw_openai_model(),
