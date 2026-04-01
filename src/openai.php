@@ -7,6 +7,7 @@ function cw_openai_key(): string {
     return $k;
 }
 
+//OpenAI Model
 function cw_openai_model(): string {
     return getenv('CW_OPENAI_MODEL') ?: 'gpt-5.4';
 }
