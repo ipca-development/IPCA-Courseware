@@ -10,22 +10,28 @@ return [
         'media'     => 'DigitalOcean Spaces',
         'email'     => 'Postmark',
         'code'      => 'GitHub',
-        'scan_mode' => 'deployment_web_root',
+        'scan_mode' => 'full_project_root',
     ],
 
     /**
      * IMPORTANT:
-     * This scanner currently scans the deployed web root:
-     * /var/www/html
+     * This scanner now scans the full deployed project root:
+     * /var/www/ipca
      *
-     * In GitHub this corresponds to the repository's /public folder.
+     * Public-facing application files live under /public.
+     * Core system files live under /src, /templates, /storage, /vendor, etc.
      */
     'required_directories' => [
-        'admin',
-        'assets',
-        'instructor',
-        'player',
-        'student',
+        'public',
+        'public/admin',
+        'public/assets',
+        'public/instructor',
+        'public/player',
+        'public/student',
+        'src',
+        'templates',
+        'storage',
+        'vendor',
     ],
 
     'ignored_directories' => [
@@ -51,80 +57,85 @@ return [
     'max_repo_file_size_bytes' => 15 * 1024 * 1024,
 
     /**
-     * Only require files that should exist inside the deployed web root.
+     * Required files relative to full project root.
      */
     'required_files' => [
-        'index.php',
-        'login.php',
-        'logout.php',
-        'admin/architecture_scanner.php',
+        'public/index.php',
+        'public/login.php',
+        'public/logout.php',
+        'public/admin/architecture_scanner.php',
+        'src/bootstrap.php',
+        'src/openai.php',
     ],
 
     /**
      * Exclude scanner files from secret scanning to avoid self-triggered regex false positives.
      */
     'secret_scan_excluded_files' => [
-        'admin/architecture_scanner.php',
+        'public/admin/architecture_scanner.php',
     ],
 
     'components' => [
         'slide_player' => [
             'label' => 'Slide player',
             'markers' => [
-                'player',
-                'player/api',
+                'public/player',
+                'public/player/api',
             ],
         ],
         'ai_narration' => [
             'label' => 'AI narration (OpenAI TTS)',
             'markers' => [
-                'player',
-                'student/api',
-                'admin',
+                'public/player',
+                'public/student/api',
+                'public/admin',
+                'src/openai.php',
             ],
         ],
         'progress_tests' => [
             'label' => 'AI-generated progress tests',
             'markers' => [
-                'student',
-                'student/api',
+                'public/student',
+                'public/student/api',
             ],
         ],
         'progression_engine_v2' => [
             'label' => 'Training progression engine (v2)',
             'markers' => [
-                'student/api',
-                'admin',
+                'src/courseware_progression_v2.php',
+                'public/student/api',
+                'public/admin',
             ],
         ],
         'remediation_escalation' => [
             'label' => 'Remediation / instructor escalation logic',
             'markers' => [
-                'instructor',
-                'admin',
+                'public/instructor',
+                'public/admin',
             ],
         ],
         'policy_engine' => [
             'label' => 'Policy engine',
             'markers' => [
-                'admin',
-                'student/api',
-                'instructor',
+                'src/courseware_progression_v2.php',
+                'public/admin',
+                'public/student/api',
+                'public/instructor',
             ],
         ],
         'cohort_scheduling' => [
             'label' => 'Cohort scheduling engine',
             'markers' => [
-                'admin',
-                'instructor',
-                'student',
+                'public/admin',
+                'public/instructor',
+                'public/student',
             ],
         ],
         'slide_designer_canonical' => [
             'label' => 'Slide designer / canonical data system',
             'markers' => [
-                'admin',
-                'assets',
+                'public/admin',
+                'public/assets',
             ],
         ],
     ],
