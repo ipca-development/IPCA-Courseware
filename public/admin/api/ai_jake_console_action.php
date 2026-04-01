@@ -644,34 +644,43 @@ if (!empty($contextFiles)) {
 function build_steven_artifact_content(array $requestRow, array $contextFiles): array
 {
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
-    $prompt = trim((string)($requestRow['prompt'] ?? ''));
+$prompt = trim((string)($requestRow['prompt'] ?? ''));
 
-    // 🔥 FIRST: resolve targeting (this MUST come before using primary file)
-    $targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
-    $targetedSummary = $targetData['summary'];
-    $targetFiles = $targetData['files'];
-    $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
+// 1) Explicit path from prompt wins first
+$explicitPaths = extract_file_candidates_from_text($prompt);
+$explicitTargetPath = '';
+if (!empty($explicitPaths)) {
+    $explicitTargetPath = (string)$explicitPaths[0];
+}
 
-    // 🔥 THEN: determine target path safely
-    $targetPath = $primaryTargetFile;
+// 2) Architecture targeting fallback
+$targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
+$targetedSummary = $targetData['summary'];
+$targetFiles = $targetData['files'];
+$primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
-    if ($targetPath === '') {
-        foreach ($contextFiles as $f) {
-            if (empty($f['error']) && !empty($f['path'])) {
-                $targetPath = (string)$f['path'];
-                break;
-            }
+// 3) Final target path priority
+$targetPath = $explicitTargetPath !== '' ? $explicitTargetPath : $primaryTargetFile;
+
+if ($targetPath === '') {
+    foreach ($contextFiles as $f) {
+        if (empty($f['error']) && !empty($f['path'])) {
+            $targetPath = (string)$f['path'];
+            break;
         }
     }
+}
 
-    // 🔥 Load targeted file content (full if possible)
-    $targetedMaxChars = 20000;
+// 4) Load targeted file contents
+$targetedMaxChars = 20000;
 
-    if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
-        $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
-    } else {
-        $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
-    }
+if ($targetPath !== '') {
+    $targetedFilesContent = read_files_for_context([$targetPath], 1, 100000);
+} elseif ($primaryTargetFile !== '' && count($targetFiles) === 1) {
+    $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
+} else {
+    $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
+}
 
     // 🔥 DB + project context
     $dbSchema = load_database_schema($GLOBALS['pdo']);
@@ -1401,30 +1410,35 @@ if (!empty($targetedFilesContent)) {
 
 function build_engineering_context_files(PDO $pdo, string $prompt): array
 {
+    $paths = [];
+
+    // 1) Exact file paths explicitly mentioned by the user/request always win first
+    $explicitPaths = extract_file_candidates_from_text($prompt);
+    foreach ($explicitPaths as $p) {
+        $paths[] = $p;
+    }
+
+    // 2) Then use architecture targeting as fallback/support
     $targetData = build_targeted_context($pdo, $prompt);
 
     $primary = $targetData['primary_file'] ?? null;
     $files   = $targetData['files'] ?? [];
-
-    $paths = [];
 
     if ($primary) {
         $paths[] = $primary;
     }
 
     foreach ($files as $f) {
-        if ($f !== $primary) {
-            $paths[] = $f;
-        }
+        $paths[] = $f;
     }
 
-    // Always include core engine files
+    // 3) Always include core engine files
     $paths[] = 'src/courseware_progression_v2.php';
     $paths[] = 'src/notification_service.php';
 
-    $paths = array_values(array_unique($paths));
+    $paths = array_values(array_unique(array_filter($paths)));
 
-    return read_files_for_context($paths, 3, 20000);
+    return read_files_for_context($paths, 4, 20000);
 }
 
 
