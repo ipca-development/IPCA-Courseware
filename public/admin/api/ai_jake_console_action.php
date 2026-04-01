@@ -405,6 +405,11 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
     }
 
     $body = implode("\n", array_slice($lines, $bodyStartIndex));
+	
+	if ($outputMode === 'full_drop_in') {
+    $body = preg_replace('/^[\-\+]\s?/m', '', $body);
+}
+	
     $body = trim($body);
 
     if ($body === '') {
@@ -699,6 +704,7 @@ $targetedFilesContent = read_files_for_context($targetFiles, 3, $targetedMaxChar
 		'- When a full replacement is unsafe, provide a surgical patch.',
 		'- When neither is safe, provide analysis_only.',
 		'- Return plain text in exactly this format:',
+		'- When OUTPUT_MODE is full_drop_in, DO NOT include any diff markers like "-", "+", or "@@". Return clean copy-paste ready code only.',
 		'OUTPUT_MODE: full_drop_in|surgical_patch|analysis_only',
 		'TARGET_PATH: <path or blank>',
 		'TITLE: <short title>',
