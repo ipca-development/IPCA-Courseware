@@ -642,7 +642,7 @@ cw_header('Jake Console');
 
   <div class="card hero-card">
     <div class="hero-eyebrow">Admin Workspace</div>
-    <h2 class="hero-title">Jake Console</h2>
+    <h2 class="hero-title">Jake Console V1.0</h2>
   </div>
 
   <div class="console-grid">
