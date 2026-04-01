@@ -8,7 +8,7 @@ function cw_openai_key(): string {
 }
 
 function cw_openai_model(): string {
-    return getenv('CW_OPENAI_MODEL') ?: 'gpt-4o';
+    return getenv('CW_OPENAI_MODEL') ?: 'gpt-5.4';
 }
 
 function cw_openai_responses(array $payload): array {
