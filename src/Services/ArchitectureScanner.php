@@ -201,6 +201,8 @@ final class ArchitectureScanner
         }
     }
 
+//SCAN LARGE FILES	
+	
 private function scanLargeFiles(array &$issues): void
 {
     $maxBytes = (int)($this->config['max_repo_file_size_bytes'] ?? 0);
