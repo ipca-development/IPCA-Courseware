@@ -201,23 +201,30 @@ final class ArchitectureScanner
         }
     }
 
-    private function scanLargeFiles(array &$issues): void
-    {
-        $maxBytes = (int)($this->config['max_repo_file_size_bytes'] ?? 0);
-        if ($maxBytes <= 0) {
-            return;
+private function scanLargeFiles(array &$issues): void
+{
+    $maxBytes = (int)($this->config['max_repo_file_size_bytes'] ?? 0);
+
+    if ($maxBytes <= 0) {
+        return;
+    }
+
+    foreach ($this->allFiles as $filePath => $meta) {
+
+        // 🔹 Ignore vendor files (expected large)
+        if (strpos($filePath, 'vendor/') === 0) {
+            continue;
         }
 
-        foreach ($this->allFiles as $filePath => $meta) {
-            if (($meta['size'] ?? 0) > $maxBytes) {
-                $issues['warning'][] = sprintf(
-                    'Large file in repo: %s (%s MB)',
-                    $filePath,
-                    number_format(($meta['size'] / 1024 / 1024), 2)
-                );
-            }
+        if (($meta['size'] ?? 0) > $maxBytes) {
+            $issues['warning'][] = sprintf(
+                'Large file in repo: %s (%s MB)',
+                $filePath,
+                number_format(($meta['size'] / 1024 / 1024), 2)
+            );
         }
     }
+}
 
     private function scanSecrets(array &$issues): void
 {
