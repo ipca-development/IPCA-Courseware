@@ -631,7 +631,11 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
 
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
-	$targetedContext = build_targeted_context($GLOBALS['pdo'], $prompt);
+	$targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
+	$targetedSummary = $targetData['summary'];
+	$targetFiles = $targetData['files'];
+
+	$targetedFilesContent = read_files_for_context($targetFiles, 3);
 	
 	$dbSchema = load_database_schema($GLOBALS['pdo']);
 	$projectIndex = load_project_file_index(project_root_path());
@@ -712,10 +716,21 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
 	$userPrompt .= implode("\n", $projectIndex);
 	$userPrompt .= "\n\n";
 	
-	if ($targetedContext !== '') {
+	if ($targetedSummary !== '') {
     $userPrompt .= "TARGETED FILE CONTEXT:\n";
-    $userPrompt .= $targetedContext . "\n\n";
-	}
+    $userPrompt .= $targetedSummary . "\n\n";
+	}	
+	
+	if ($targetedFilesContent) {
+    $userPrompt .= "TARGETED FILE CONTENTS:\n";
+
+    foreach ($targetedFilesContent as $f) {
+        if (!empty($f['error'])) continue;
+
+        $userPrompt .= "FILE: " . $f['path'] . "\n";
+        $userPrompt .= $f['content'] . "\n\n";
+    }
+}
 	
     try {
         $resp = cw_openai_responses([
@@ -1150,7 +1165,10 @@ function auto_subject_from_message(string $message): string
 function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = null): string
 {
     $message = trim((string)($userMessage['message_text'] ?? ''));
-	$targetedContext = build_targeted_context($pdo, $message);
+	$targetData = build_targeted_context($pdo, $message);
+	$targetedSummary = $targetData['summary'];
+	$targetFiles = $targetData['files'];
+	$targetedFilesContent = read_files_for_context($targetFiles, 3);
     $ssot = load_latest_ssot_snapshot($pdo);
 	$dbSchema = load_database_schema($pdo);
     $fileCandidates = extract_file_candidates_from_text($message);
@@ -1248,10 +1266,21 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 	$userPrompt .= implode("\n", $projectIndex);
 	$userPrompt .= "\n\n";
 	
-	if ($targetedContext !== '') {
+	if ($targetedSummary !== '') {
     $userPrompt .= "TARGETED FILE CONTEXT:\n";
-    $userPrompt .= $targetedContext . "\n\n";
+    $userPrompt .= $targetedSummary . "\n\n";
 	}
+	
+	if ($targetedFilesContent) {
+    $userPrompt .= "TARGETED FILE CONTENTS:\n";
+
+    foreach ($targetedFilesContent as $f) {
+        if (!empty($f['error'])) continue;
+
+        $userPrompt .= "FILE: " . $f['path'] . "\n";
+        $userPrompt .= $f['content'] . "\n\n";
+    }
+}
 	
     $resp = cw_openai_responses([
         'model' => cw_openai_model(),

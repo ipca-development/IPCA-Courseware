@@ -60,52 +60,49 @@ function load_relevant_file_intelligence(PDO $pdo, string $text, int $limit = 10
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 }
 
-function build_targeted_context(PDO $pdo, string $text): string
+function build_targeted_context(PDO $pdo, string $text): array
 {
     $rows = load_relevant_file_intelligence($pdo, $text);
 
     if (!$rows) {
-        return '';
+        return ['summary' => '', 'files' => []];
     }
 
-    $lines = [];
-    $lines[] = 'RELEVANT FILE CONTEXT';
-    $lines[] = '';
+    $summaryLines = [];
+    $summaryLines[] = 'RELEVANT FILE CONTEXT';
+    $summaryLines[] = '';
+
+    $filePaths = [];
 
     foreach ($rows as $r) {
 
-    $lines[] = $r['file_path'];
+        $filePaths[] = $r['file_path'];
 
-    if (!empty($r['module'])) {
-        $lines[] = '- module: ' . $r['module'];
+        $summaryLines[] = $r['file_path'];
+
+        if (!empty($r['module'])) {
+            $summaryLines[] = '- module: ' . $r['module'];
+        }
+
+        if (!empty($r['purpose'])) {
+            $summaryLines[] = '- purpose: ' . $r['purpose'];
+        }
+
+        $tables = json_decode($r['tables_json'] ?? '[]', true);
+        if (!empty($tables)) {
+            $summaryLines[] = '- tables: [' . implode(', ', $tables) . ']';
+        }
+
+        $helpers = json_decode($r['helpers_json'] ?? '[]', true);
+        if (!empty($helpers)) {
+            $summaryLines[] = '- helpers: [' . implode(', ', $helpers) . ']';
+        }
+
+        $summaryLines[] = '';
     }
 
-    if (!empty($r['purpose'])) {
-        $lines[] = '- purpose: ' . $r['purpose'];
-    }
-
-    $tables = json_decode($r['tables_json'] ?? '[]', true);
-    if (!empty($tables)) {
-        $lines[] = '- tables: [' . implode(', ', $tables) . ']';
-    }
-
-    $helpers = json_decode($r['helpers_json'] ?? '[]', true);
-    if (!empty($helpers)) {
-        $lines[] = '- helpers: [' . implode(', ', $helpers) . ']';
-    }
-
-    $functions = json_decode($r['functions_json'] ?? '[]', true);
-    if (!empty($functions)) {
-        $lines[] = '- functions: [' . implode(', ', $functions) . ']';
-    }
-
-    $includes = json_decode($r['includes_json'] ?? '[]', true);
-    if (!empty($includes)) {
-        $lines[] = '- includes: [' . implode(', ', $includes) . ']';
-    }
-
-    $lines[] = '';
-}
-
-    return implode("\n", $lines);
+    return [
+        'summary' => implode("\n", $summaryLines),
+        'files' => array_slice(array_unique($filePaths), 0, 5)
+    ];
 }
