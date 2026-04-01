@@ -385,13 +385,17 @@ private function scanBrokenIncludes(array &$issues): void
         return is_string($content) ? $content : null;
     }
 	
-	private function extractFileIntelligence(): array
+private function extractFileIntelligence(): array
 {
     $results = [];
 
+    // Words we NEVER want as "tables"
+    $invalidTableWords = [
+        'the','a','an','and','or','if','else','from','join','select','where','insert','update','into'
+    ];
+
     foreach ($this->allFiles as $filePath => $meta) {
 
-        // Only analyze PHP files for now (safe + efficient)
         if (!preg_match('/\.php$/i', $filePath)) {
             continue;
         }
@@ -408,58 +412,92 @@ private function scanBrokenIncludes(array &$issues): void
         $functions = [];
         $helpers = [];
 
-        // 🔹 TABLE DETECTION (FROM, JOIN, UPDATE, INSERT INTO)
+        // ? TABLE DETECTION (cleaned)
         if (preg_match_all('/\b(FROM|JOIN|UPDATE|INTO)\s+`?([a-zA-Z0-9_]+)`?/i', $content, $m)) {
             foreach ($m[2] as $t) {
+                $t = strtolower(trim($t));
+
+                if (strlen($t) < 3) continue;
+                if (in_array($t, $invalidTableWords, true)) continue;
+
+                // Ignore things that look like function names
+                if (strpos($t, 'test_') === 0 && strpos($t, '_v2') !== false) continue;
+
                 $tables[] = $t;
             }
         }
 
-        // 🔹 INCLUDE / REQUIRE
+        // ? INCLUDE / REQUIRE
         if (preg_match_all('/\b(require|include)(_once)?\s*\(?\s*[\'"]([^\'"]+)[\'"]\s*\)?/i', $content, $m)) {
             foreach ($m[3] as $inc) {
                 $includes[] = $inc;
             }
         }
 
-        // 🔹 FUNCTION DEFINITIONS
+        // ? FUNCTION DEFINITIONS
         if (preg_match_all('/function\s+([a-zA-Z0-9_]+)\s*\(/i', $content, $m)) {
             foreach ($m[1] as $fn) {
                 $functions[] = $fn;
             }
         }
 
-        // 🔹 HELPER USAGE (cw_*)
+        // ? HELPER USAGE
         if (preg_match_all('/\b(cw_[a-zA-Z0-9_]+)\s*\(/', $content, $m)) {
             foreach ($m[1] as $h) {
                 $helpers[] = $h;
             }
         }
 
-        // 🔹 MODULE CLASSIFICATION (safe heuristic)
+        // ? MODULE CLASSIFICATION (FIXED ORDER � IMPORTANT)
         $module = 'general';
 
-		if (strpos($filePath, 'student/') !== false) {
-			$module = 'student';
-		} elseif (strpos($filePath, 'admin/') !== false) {
-			$module = 'admin';
-		} elseif (strpos($filePath, 'instructor/') !== false) {
-			$module = 'instructor';
-		} elseif (strpos($filePath, 'api/') !== false) {
-			$module = 'api';
-		} elseif (strpos($filePath, 'src/') !== false) {
-			$module = 'core';
-}
+        if (strpos($filePath, 'public/admin/api/') === 0) {
+            $module = 'api';
+        } elseif (strpos($filePath, 'public/student/api/') === 0) {
+            $module = 'api';
+        } elseif (strpos($filePath, 'public/player/api/') === 0) {
+            $module = 'api';
+        } elseif (strpos($filePath, 'public/player/') === 0) {
+            $module = 'player';
+        } elseif (strpos($filePath, 'public/student/') === 0) {
+            $module = 'student';
+        } elseif (strpos($filePath, 'public/instructor/') === 0) {
+            $module = 'instructor';
+        } elseif (strpos($filePath, 'public/admin/') === 0) {
+            $module = 'admin';
+        } elseif (strpos($filePath, 'src/') === 0) {
+            $module = 'core';
+        }
 
-        // 🔹 PURPOSE (very light heuristic — safe Phase 1)
-        $purpose = 'General file';
+        // ? PURPOSE DETECTION (SMARTER)
+        $purpose = 'General system file';
 
-        if (stripos($filePath, 'test_finalize') !== false) {
-            $purpose = 'Handles progress test finalization';
-        } elseif (stripos($filePath, 'summary') !== false) {
-            $purpose = 'Handles summary logic';
-        } elseif (stripos($filePath, 'course') !== false) {
-            $purpose = 'Handles course progression / UI';
+        $name = strtolower($filePath);
+
+        if (strpos($name, 'test_finalize') !== false) {
+            $purpose = 'Finalizes progress test and updates progression state';
+        } elseif (strpos($name, 'test_prepare') !== false) {
+            $purpose = 'Prepares progress test data and structure';
+        } elseif (strpos($name, 'test_start') !== false) {
+            $purpose = 'Handles progress test session start';
+        } elseif (strpos($name, 'test_answer') !== false) {
+            $purpose = 'Processes student test answers';
+        } elseif (strpos($name, 'dashboard') !== false) {
+            $purpose = 'Displays dashboard overview for user role';
+        } elseif (strpos($name, 'summary_review') !== false) {
+            $purpose = 'Handles instructor summary review decisions';
+        } elseif (strpos($name, 'approval') !== false) {
+            $purpose = 'Handles instructor approval workflow';
+        } elseif (strpos($name, 'track.php') !== false) {
+            $purpose = 'Tracks slide or lesson interaction';
+        } elseif (strpos($name, 'tts.php') !== false) {
+            $purpose = 'Handles AI text-to-speech generation';
+        } elseif (strpos($name, 'ai_jake_console') !== false) {
+            $purpose = 'AI orchestration console for Jake and Steven';
+        } elseif (strpos($name, 'openai.php') !== false) {
+            $purpose = 'OpenAI API integration layer';
+        } elseif (strpos($name, 'bootstrap.php') !== false) {
+            $purpose = 'Core system bootstrap and initialization';
         }
 
         $results[$filePath] = [
