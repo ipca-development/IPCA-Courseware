@@ -124,28 +124,26 @@ function build_targeted_context(PDO $pdo, string $text): array
         $summaryLines[] = '';
     }
 
-$uniqueFiles = array_values(array_unique($filePaths));
+    $uniqueFiles = array_values(array_unique($filePaths));
 
-$primaryFile = null;
+    $primaryFile = null;
 
-if (!empty($rows) && isset($rows[0]['file_path'])) {
-    $primaryFile = (string)$rows[0]['file_path'];
+    if (!empty($rows) && isset($rows[0]['file_path'])) {
+        $primaryFile = (string)$rows[0]['file_path'];
+    }
+
+    // Ensure primary file is first (no duplicates)
+    if ($primaryFile !== null) {
+        $uniqueFiles = array_values(array_filter($uniqueFiles, function ($f) use ($primaryFile) {
+            return $f !== $primaryFile;
+        }));
+
+        array_unshift($uniqueFiles, $primaryFile);
+    }
+
+    return [
+        'summary' => implode("\n", $summaryLines),
+        'files' => array_slice($uniqueFiles, 0, 1),
+        'primary_file' => $primaryFile,
+    ];
 }
-
-// 🔥 Guarantee primary file is FIRST and NOT duplicated
-if ($primaryFile !== null) {
-
-    // Remove it if already in list
-    $uniqueFiles = array_values(array_filter($uniqueFiles, function ($f) use ($primaryFile) {
-        return $f !== $primaryFile;
-    }));
-
-    // Insert at the front
-    array_unshift($uniqueFiles, $primaryFile);
-}
-
-return [
-    'summary' => implode("\n", $summaryLines),
-    'files' => array_slice($uniqueFiles, 0, 1),
-    'primary_file' => $primaryFile,
-];
