@@ -2,12 +2,22 @@
 declare(strict_types=1);
 
 $config = require __DIR__ . '/../../src/courseware_architecture_ssot.php';
+require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/Services/ArchitectureScanner.php';
+require_once __DIR__ . '/../../src/architecture_snapshot.php';
+
+cw_require_admin();
 
 $repoRoot = realpath(__DIR__ . '/../..');
 
 $scanner  = new ArchitectureScanner($repoRoot, $config);
 $report   = $scanner->scan();
+
+try {
+    save_architecture_snapshot($pdo, $report);
+} catch (Throwable $e) {
+    // fail silently to avoid breaking UI
+}
 
 function h(string $value): string
 {
