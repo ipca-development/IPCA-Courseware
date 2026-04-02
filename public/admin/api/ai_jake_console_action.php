@@ -1053,7 +1053,7 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
 function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFiles, array $artifactSeed, array $scopeContract = array()): array
 {
     $artifactContent = (string)($artifactSeed['content'] ?? '');
-    $targetPath = (string)($artifactSeed['target_path'] ?? '');
+    $targetPath = trim((string)($artifactSeed['target_path'] ?? ''));
     $outputMode = trim((string)($artifactSeed['output_mode'] ?? 'analysis_only'));
     if ($outputMode === '') {
         $outputMode = 'analysis_only';
@@ -1124,7 +1124,49 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
             ];
         }
     }
-	
+
+    // STRICT SQL PATCH QUALITY GUARD (notification_service specific)
+    if (
+        $targetPath === 'src/notification_service.php' &&
+        $outputMode !== 'analysis_only'
+    ) {
+        $content = trim($artifactContent);
+
+        $hasUpdateKeyword = stripos($content, 'UPDATE training_progression_emails') !== false;
+        $hasBeforeBlock =
+            strpos($content, '@@') !== false
+            || stripos($content, 'Replace this block') !== false
+            || stripos($content, 'Replace the failure-status UPDATE') !== false;
+
+        $hasPlaceholderLanguage =
+            stripos($content, 'find the failure path') !== false
+            || stripos($content, 'locate the failure') !== false
+            || stripos($content, 'if that same failure update') !== false
+            || (
+                stripos($content, '/*') !== false
+                && stripos($content, 'keep any existing') !== false
+            );
+
+        if (!$hasUpdateKeyword || !$hasBeforeBlock || $hasPlaceholderLanguage) {
+            return [
+                'verdict' => 'needs_revision',
+                'reason' => 'Steven did not provide a concrete, directly applicable SQL patch for sendProgressionEmailById(). The artifact must include the exact existing UPDATE block and a precise replacement. In other words: this is still guidance, not a real patch.',
+                'revision' => 'Return a surgical_patch that shows the exact existing UPDATE statement and replaces it with a fully concrete revised SQL block. No instructions, no placeholders.'
+            ];
+        }
+
+        if (
+            stripos($content, 'sent_at') !== false &&
+            stripos($content, 'sent_at = sent_at') !== false
+        ) {
+            return [
+                'verdict' => 'needs_revision',
+                'reason' => 'Steven used a no-op sent_at assignment instead of removing the overwrite. This is not the cleanest or safest fix. In other words: the patch gestures at preserving sent_at, but it does not implement the clean minimal correction we want.',
+                'revision' => 'Return a surgical_patch that removes sent_at from the failure UPDATE entirely instead of assigning sent_at = sent_at.'
+            ];
+        }
+    }
+
     $system = implode("\n", [
         'You are Jake, the IPCA architect and SSOT guardian.',
         '',
@@ -1137,7 +1179,7 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         '- Do not give generic code-review advice unless it is directly relevant to the actual artifact.',
         '- Do not fall back to generic security, logging, validation, or architecture checklists unless the artifact truly has that specific problem.',
         '- Focus on whether Steven actually solved the requested task correctly and safely.',
-		'- If a SCOPE CONTRACT is provided, review Steven against that contract strictly.',
+        '- If a SCOPE CONTRACT is provided, review Steven against that contract strictly.',
         '',
         'Critical rejection rules:',
         '- Reject invented methods, invented schema, invented APIs, or invented architecture.',
@@ -1152,8 +1194,9 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         '- Reject any output that mixes placeholders, example usage blocks, or speculative scaffolding into what is presented as production-ready code.',
         '- If there is uncertainty, prefer needs_revision over analysis_only when the target file still contains an obvious local bug that can be repaired without inventing new architecture.',
         '- Use analysis_only only when the requested fix truly cannot be grounded from the target file, loaded files, and established project conventions.',
-		'- Reject output that modifies files outside ALLOWED_EDIT_PATHS when a SCOPE CONTRACT is present.',
+        '- Reject output that modifies files outside ALLOWED_EDIT_PATHS when a SCOPE CONTRACT is present.',
         '- Reject output that rewrites a class when NO_CLASS_REWRITE is yes.',
+        '- For notification_service SQL fixes, reject any artifact that gives generic instructions, placeholder comments, or indirect guidance instead of a directly applicable before/after patch.',
         '',
         'Approval rules:',
         '- Approve code if it follows established project patterns, even if full method visibility is not present in the context.',
@@ -1183,10 +1226,10 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
 
     $user = "USER REQUEST:\n" . trim((string)($requestRow['prompt'] ?? '')) . "\n\n";
 
-	    if (!empty($scopeContract)) {
+    if (!empty($scopeContract)) {
         $user .= render_scope_contract_text($scopeContract) . "\n\n";
     }
-	
+
     if ($ssot) {
         $user .= "SSOT SNAPSHOT:\n";
         $user .= "Version: " . (string)($ssot['ssot_version'] ?? '') . "\n";
