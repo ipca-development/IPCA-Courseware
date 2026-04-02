@@ -1615,6 +1615,28 @@ function message_explicitly_names_different_target(PDO $pdo, string $messageText
     return false;
 }
 
+function extract_explicit_full_target_path(PDO $pdo, string $messageText): string
+{
+    $resolvedPaths = resolve_explicit_file_candidates($pdo, $messageText);
+    if (empty($resolvedPaths)) {
+        return '';
+    }
+
+    foreach ($resolvedPaths as $path) {
+        $path = trim((string)$path);
+        if ($path === '') {
+            continue;
+        }
+
+        if (path_looks_like_full_relative_path($path)) {
+            return $path;
+        }
+    }
+
+    return (string)$resolvedPaths[0];
+}
+
+
 function inject_forced_target_into_prompt(string $prompt, string $targetPath): string
 {
     $prompt = trim($prompt);
@@ -2493,19 +2515,27 @@ try {
             if ($shouldRunEngineering) {
                 $engineeringPromptParts = array();
 
-                $isRevision = is_revision_trigger($messageText);
+                                $isRevision = is_revision_trigger($messageText);
                 $useFreshPromptIsolation = message_has_explicit_target_or_direct_fix_intent($pdo, $messageText);
 
-                $shouldInheritPreviousTarget =
+                $explicitCurrentTargetPath = extract_explicit_full_target_path($pdo, $messageText);
+
+                $forcedTargetPath = '';
+                if ($explicitCurrentTargetPath !== '') {
+                    $forcedTargetPath = $explicitCurrentTargetPath;
+                } elseif (
                     $isRevision &&
                     $inheritedTargetPath !== '' &&
-                    !message_explicitly_names_different_target($pdo, $messageText, $inheritedTargetPath);
+                    !message_explicitly_names_different_target($pdo, $messageText, $inheritedTargetPath)
+                ) {
+                    $forcedTargetPath = $inheritedTargetPath;
+                }
 
                 if ($useFreshPromptIsolation) {
                     $basePrompt = $messageText;
 
-                    if ($shouldInheritPreviousTarget) {
-                        $basePrompt = inject_forced_target_into_prompt($basePrompt, $inheritedTargetPath);
+                                        if ($forcedTargetPath !== '') {
+                        $basePrompt = inject_forced_target_into_prompt($basePrompt, $forcedTargetPath);
                     }
 
                     $engineeringPromptParts[] = $basePrompt;
@@ -2524,8 +2554,8 @@ try {
 
                     $followUpPrompt = "USER FOLLOW-UP:\n" . $messageText;
 
-                    if ($shouldInheritPreviousTarget) {
-                        $followUpPrompt = inject_forced_target_into_prompt($followUpPrompt, $inheritedTargetPath);
+                                        if ($forcedTargetPath !== '') {
+                        $followUpPrompt = inject_forced_target_into_prompt($followUpPrompt, $forcedTargetPath);
                     }
 
                     $engineeringPromptParts[] = $followUpPrompt;
