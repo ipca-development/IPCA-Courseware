@@ -2170,7 +2170,7 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 
     $ssot = load_latest_ssot_snapshot($pdo);
     $fileCandidates = resolve_explicit_file_candidates($pdo, $message);
-    $contextFiles = read_files_for_context($fileCandidates, 3);
+	$contextFiles = read_files_for_targeted_context($fileCandidates, array(), 3, 24000, true);
     $dbSchema = load_targeted_schema($pdo, $message);
     $projectIndex = load_targeted_project_index(
         project_root_path(),
