@@ -193,6 +193,26 @@ function resolve_explicit_file_candidates(PDO $pdo, string $prompt): array
     return array_values(array_unique($resolved));
 }
 
+function pick_primary_target_path(PDO $pdo, string $prompt, array $contextFiles = array()): ?string
+{
+    $explicitPaths = resolve_explicit_file_candidates($pdo, $prompt);
+    if (!empty($explicitPaths)) {
+        return (string)$explicitPaths[0];
+    }
+
+    $targetData = build_targeted_context($pdo, $prompt);
+    if (!empty($targetData['primary_file']) && is_string($targetData['primary_file'])) {
+        return (string)$targetData['primary_file'];
+    }
+
+    foreach ($contextFiles as $f) {
+        if (empty($f['error']) && !empty($f['path'])) {
+            return (string)$f['path'];
+        }
+    }
+
+    return null;
+}
 
 function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFile = 6000): array
 {
@@ -864,20 +884,15 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
 
-        $explicitPaths = resolve_explicit_file_candidates($GLOBALS['pdo'], $prompt);
-    $explicitTargetPath = '';
-    if (!empty($explicitPaths)) {
-        $explicitTargetPath = (string)$explicitPaths[0];
-    }
-
     $targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
-	
-	
     $targetedSummary = $targetData['summary'];
-    $targetFiles = $targetData['files'];
+    $targetFiles = isset($targetData['files']) && is_array($targetData['files']) ? $targetData['files'] : array();
     $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
-    $targetPath = $explicitTargetPath !== '' ? $explicitTargetPath : $primaryTargetFile;
+    $targetPath = pick_primary_target_path($GLOBALS['pdo'], $prompt, $contextFiles);
+    if ($targetPath === null) {
+        $targetPath = '';
+    }
 
     if ($targetPath === '') {
         foreach ($contextFiles as $f) {
@@ -890,10 +905,10 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
 
     $targetedMaxChars = 20000;
 
-    if ($targetPath !== '') {
-        $targetedFilesContent = read_files_for_context([$targetPath], 1, 100000);
-    } elseif ($primaryTargetFile !== '' && count($targetFiles) === 1) {
-        $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
+        if ($targetPath !== '') {
+        $targetedFilesContent = read_files_for_context(array($targetPath), 1, 100000);
+    } elseif ($primaryTargetFile !== '' && count($targetFiles) >= 1) {
+        $targetedFilesContent = read_files_for_context(array($primaryTargetFile), 1, 100000);
     } else {
         $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
     }
@@ -923,6 +938,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
         '- Do NOT say you cannot access files, schema, or project structure when they are present in the prompt.',
         '- When asked to list methods, tables, files, or structures, extract them explicitly from the provided context.',
         '- If the required information is NOT present in the provided context, return analysis_only and clearly state what is missing.',
+	    '- If PRIMARY TARGET FILE CONTENTS are provided, treat them as the authoritative implementation source for the requested fix.',
         '',
         'Context priority rules:',
         '- When a question explicitly references DATABASE SCHEMA, ONLY use DATABASE SCHEMA to answer.',
@@ -937,6 +953,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
         '- If unsure whether a method exists, do NOT assume; instead return analysis_only.',
         '- Prefer using clearly visible existing methods from the loaded file.',
         '- If functionality is missing, explicitly state which method, file, schema element, or dependency is missing instead of guessing.',
+		'- When the requested fix names a specific target file and that file content is provided, prefer patching that file directly instead of refusing due to broader uncertainty.',
         '',
         'Output rules:',
         '- When a safe full replacement is possible, provide a full drop-in.',
@@ -990,13 +1007,18 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
         $userPrompt .= "\n\n";
     }
 
+        if ($targetPath !== '') {
+        $userPrompt .= "PRIMARY TARGET FILE:\n";
+        $userPrompt .= $targetPath . "\n\n";
+    }
+
     if ($targetedSummary !== '') {
         $userPrompt .= "TARGETED FILE CONTEXT:\n";
         $userPrompt .= $targetedSummary . "\n\n";
     }
 
     if ($targetedFilesContent) {
-        $userPrompt .= "TARGETED FILE CONTENTS:\n";
+        $userPrompt .= "PRIMARY TARGET FILE CONTENTS (AUTHORITATIVE):\n";
 
         foreach ($targetedFilesContent as $f) {
             if (!empty($f['error'])) {
@@ -1707,35 +1729,32 @@ function build_engineering_context_files(PDO $pdo, string $prompt): array
 {
     $paths = [];
 
-    $explicitPaths = resolve_explicit_file_candidates($pdo, $prompt);
-    foreach ($explicitPaths as $p) {
-        $paths[] = $p;
+    $primaryTargetPath = pick_primary_target_path($pdo, $prompt);
+
+    if ($primaryTargetPath !== null && $primaryTargetPath !== '') {
+        $paths[] = $primaryTargetPath;
     }
 
     $targetData = build_targeted_context($pdo, $prompt);
-
-    $primary = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : null;
     $files = isset($targetData['files']) && is_array($targetData['files']) ? $targetData['files'] : [];
 
-    if ($primary) {
-        $paths[] = $primary;
-    }
-
     foreach ($files as $f) {
-        $paths[] = $f;
+        if (is_string($f) && $f !== '') {
+            $paths[] = $f;
+        }
     }
 
-    if (should_include_core_engine_file('src/courseware_progression_v2.php', $prompt, $files, $primary)) {
+    if (should_include_core_engine_file('src/courseware_progression_v2.php', $prompt, $files, $primaryTargetPath)) {
         $paths[] = 'src/courseware_progression_v2.php';
     }
 
-    if (should_include_core_engine_file('src/notification_service.php', $prompt, $files, $primary)) {
+    if (should_include_core_engine_file('src/notification_service.php', $prompt, $files, $primaryTargetPath)) {
         $paths[] = 'src/notification_service.php';
     }
 
     $paths = array_values(array_unique(array_filter($paths)));
 
-    return read_files_for_context($paths, 4, 20000);
+    return read_files_for_context($paths, 3, 24000);
 }
 
 function run_jake_engineering_cycle(
