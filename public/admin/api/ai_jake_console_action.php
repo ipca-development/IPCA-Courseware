@@ -369,19 +369,21 @@ function read_files_for_targeted_context(array $paths, array $methodNames, int $
                 'content' => $targetedExcerpt,
             );
         } else {
-            if ($len <= $fallbackMaxCharsPerFile) {
+            $chunkSize = $fallbackMaxCharsPerFile;
+            $maxChunksPerFile = 6;
+            $totalChunks = (int)ceil($len / $chunkSize);
+            if ($totalChunks > $maxChunksPerFile) {
+                $totalChunks = $maxChunksPerFile;
+            }
+
+            for ($i = 0; $i < $totalChunks; $i++) {
+                $chunk = mb_substr($content, $i * $chunkSize, $chunkSize);
+
                 $out[] = array(
                     'path' => $file['path'],
                     'basename' => $file['basename'],
                     'size_bytes' => $file['size_bytes'],
-                    'content' => $content,
-                );
-            } else {
-                $out[] = array(
-                    'path' => $file['path'],
-                    'basename' => $file['basename'],
-                    'size_bytes' => $file['size_bytes'],
-                    'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $fallbackMaxCharsPerFile),
+                    'content' => "/* FILE CHUNK " . ($i + 1) . " / " . $totalChunks . " */\n\n" . $chunk,
                 );
             }
         }
