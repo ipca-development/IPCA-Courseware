@@ -195,7 +195,15 @@ function resolve_explicit_file_candidates(PDO $pdo, string $prompt): array
 
 function pick_primary_target_path(PDO $pdo, string $prompt, array $contextFiles = array()): ?string
 {
-    $explicitPaths = resolve_explicit_file_candidates($pdo, $prompt);
+    
+	if (preg_match('/FORCED_TARGET_PATH:\s*([^\r\n]+)/i', $prompt, $m)) {
+    $forcedPath = trim((string)$m[1]);
+        if ($forcedPath !== '') {
+            return $forcedPath;
+        }
+    }
+	
+	$explicitPaths = resolve_explicit_file_candidates($pdo, $prompt);
     if (!empty($explicitPaths)) {
         return (string)$explicitPaths[0];
     }
@@ -1563,6 +1571,63 @@ function load_conversation(PDO $pdo, int $conversationId): ?array
     return $row ?: null;
 }
 
+function load_artifact_row(PDO $pdo, int $artifactId): ?array
+{
+    if ($artifactId <= 0) {
+        return null;
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT *
+        FROM ai_jake_artifacts
+        WHERE id = ?
+        LIMIT 1
+    ");
+    $stmt->execute([$artifactId]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+    return $row ?: null;
+}
+
+function message_explicitly_names_different_target(PDO $pdo, string $messageText, ?string $currentTargetPath): bool
+{
+    $currentTargetPath = trim((string)$currentTargetPath);
+    if ($currentTargetPath === '') {
+        return false;
+    }
+
+    $explicitPaths = resolve_explicit_file_candidates($pdo, $messageText);
+    if (empty($explicitPaths)) {
+        return false;
+    }
+
+    foreach ($explicitPaths as $path) {
+        $path = trim((string)$path);
+        if ($path === '') {
+            continue;
+        }
+
+        if ($path !== $currentTargetPath) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function inject_forced_target_into_prompt(string $prompt, string $targetPath): string
+{
+    $prompt = trim($prompt);
+    $targetPath = trim($targetPath);
+
+    if ($targetPath === '') {
+        return $prompt;
+    }
+
+    return "FORCED_TARGET_PATH:\n" . $targetPath . "\n\n" . $prompt;
+}
+
+
 function update_conversation_state(
     PDO $pdo,
     int $conversationId,
@@ -2385,6 +2450,17 @@ try {
             $linkedRunId = null;
             $result = null;
 
+			            $activeArtifact = null;
+            $inheritedTargetPath = '';
+
+            if ($activeArtifactId !== null && $activeArtifactId > 0) {
+                $activeArtifact = load_artifact_row($pdo, $activeArtifactId);
+
+                if ($activeArtifact && !empty($activeArtifact['target_path'])) {
+                    $inheritedTargetPath = trim((string)$activeArtifact['target_path']);
+                }
+            }
+			
             $lower = strtolower($messageText);
 
             $explicitImplementation =
@@ -2415,12 +2491,24 @@ try {
             );
 
             if ($shouldRunEngineering) {
-                               $engineeringPromptParts = array();
+                $engineeringPromptParts = array();
 
+                $isRevision = is_revision_trigger($messageText);
                 $useFreshPromptIsolation = message_has_explicit_target_or_direct_fix_intent($pdo, $messageText);
 
+                $shouldInheritPreviousTarget =
+                    $isRevision &&
+                    $inheritedTargetPath !== '' &&
+                    !message_explicitly_names_different_target($pdo, $messageText, $inheritedTargetPath);
+
                 if ($useFreshPromptIsolation) {
-                    $engineeringPromptParts[] = $messageText;
+                    $basePrompt = $messageText;
+
+                    if ($shouldInheritPreviousTarget) {
+                        $basePrompt = inject_forced_target_into_prompt($basePrompt, $inheritedTargetPath);
+                    }
+
+                    $engineeringPromptParts[] = $basePrompt;
                 } else {
                     if ($activeRequestSummary !== '') {
                         $engineeringPromptParts[] = $activeRequestSummary;
@@ -2434,10 +2522,16 @@ try {
                         $engineeringPromptParts[] = "Requested next step:\n" . $activeNextStep;
                     }
 
-                    $engineeringPromptParts[] = "USER FOLLOW-UP:\n" . $messageText;
+                    $followUpPrompt = "USER FOLLOW-UP:\n" . $messageText;
+
+                    if ($shouldInheritPreviousTarget) {
+                        $followUpPrompt = inject_forced_target_into_prompt($followUpPrompt, $inheritedTargetPath);
+                    }
+
+                    $engineeringPromptParts[] = $followUpPrompt;
                 }
 
-                if ($activeArtifactId !== null && is_revision_trigger($messageText)) {
+                if ($activeArtifactId !== null && $isRevision) {
                     $stmt = $pdo->prepare("
                         SELECT content, review_summary
                         FROM ai_jake_artifacts
@@ -2453,7 +2547,7 @@ try {
                     }
                 }
 
-                $engineeringPrompt = implode("\n\n", $engineeringPromptParts);
+                $engineeringPrompt = implode("\n\n", $engineeringPromptParts); 
 
                 $result = run_jake_engineering_cycle(
                     $pdo,
