@@ -605,18 +605,30 @@ function read_files_for_targeted_context(
             $len = strlen($content);
 
             if ($forceMethodInventory) {
-                $inventory = build_method_inventory_text($content);
-                if ($inventory !== null) {
-                    $out[] = array(
-                        'path' => $file['path'],
-                        'basename' => $file['basename'],
-                        'size_bytes' => $file['size_bytes'],
-                        'content' => $inventory,
-                    );
-                    $count++;
-                    continue;
-                }
-            }
+				$inventory = build_method_inventory_text($content);
+				if ($inventory !== null) {
+					$out[] = array(
+						'path' => $file['path'],
+						'basename' => $file['basename'],
+						'size_bytes' => $file['size_bytes'],
+						'content' => $inventory,
+					);
+					$count++;
+					continue;
+				}
+			}
+
+// DEFAULT: ALWAYS INCLUDE FULL FILE FOR ENGINEERING
+if ($len <= 80000) {
+    $out[] = array(
+        'path' => $file['path'],
+        'basename' => $file['basename'],
+        'size_bytes' => $file['size_bytes'],
+        'content' => $content,
+    );
+    $count++;
+    continue;
+}
 
             if ($preferFullFileWhenSmall && $len <= 80000) {
                 $out[] = array(
