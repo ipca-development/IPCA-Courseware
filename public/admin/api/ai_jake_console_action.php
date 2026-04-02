@@ -214,6 +214,129 @@ function pick_primary_target_path(PDO $pdo, string $prompt, array $contextFiles 
     return null;
 }
 
+function extract_method_like_tokens_from_text(string $text, int $limit = 8): array
+{
+    $tokens = array();
+
+    if (preg_match_all('/\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $text, $m)) {
+        foreach ($m[1] as $name) {
+            $name = trim((string)$name);
+            if ($name === '' || strlen($name) < 6) {
+                continue;
+            }
+
+            $tokens[] = $name;
+        }
+    }
+
+    $tokens = array_values(array_unique($tokens));
+
+    if (count($tokens) > $limit) {
+        $tokens = array_slice($tokens, 0, $limit);
+    }
+
+    return $tokens;
+}
+
+function extract_targeted_excerpt_from_file_content(string $content, array $methodNames, int $radius = 5000): ?string
+{
+    if ($content === '' || empty($methodNames)) {
+        return null;
+    }
+
+    foreach ($methodNames as $methodName) {
+        $methodName = trim((string)$methodName);
+        if ($methodName === '') {
+            continue;
+        }
+
+        $patterns = array(
+            '/function\s+' . preg_quote($methodName, '/') . '\s*\(/i',
+            '/public\s+function\s+' . preg_quote($methodName, '/') . '\s*\(/i',
+            '/protected\s+function\s+' . preg_quote($methodName, '/') . '\s*\(/i',
+            '/private\s+function\s+' . preg_quote($methodName, '/') . '\s*\(/i'
+        );
+
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $content, $match, PREG_OFFSET_CAPTURE)) {
+                $offset = (int)$match[0][1];
+
+                $start = max(0, $offset - 1200);
+                $length = $radius;
+
+                $excerpt = substr($content, $start, $length);
+                if (!is_string($excerpt) || $excerpt === '') {
+                    continue;
+                }
+
+                return
+                    "/* TARGETED METHOD EXCERPT: " . $methodName . " */\n\n" .
+                    $excerpt;
+            }
+        }
+    }
+
+    return null;
+}
+
+function read_files_for_targeted_context(array $paths, array $methodNames, int $limit = 3, int $fallbackMaxCharsPerFile = 12000): array
+{
+    $out = array();
+    $count = 0;
+
+    $paths = array_values(array_unique($paths));
+
+    foreach ($paths as $path) {
+        if ($count >= $limit) {
+            break;
+        }
+
+        try {
+            $file = safe_project_file_read((string)$path);
+            $content = (string)$file['content'];
+
+            $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
+
+            if ($targetedExcerpt !== null) {
+                $out[] = array(
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => $targetedExcerpt,
+                );
+            } else {
+                $len = mb_strlen($content);
+
+                if ($len <= $fallbackMaxCharsPerFile) {
+                    $out[] = array(
+                        'path' => $file['path'],
+                        'basename' => $file['basename'],
+                        'size_bytes' => $file['size_bytes'],
+                        'content' => $content,
+                    );
+                } else {
+                    $out[] = array(
+                        'path' => $file['path'],
+                        'basename' => $file['basename'],
+                        'size_bytes' => $file['size_bytes'],
+                        'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $fallbackMaxCharsPerFile),
+                    );
+                }
+            }
+
+            $count++;
+        } catch (Throwable $e) {
+            $out[] = array(
+                'path' => (string)$path,
+                'error' => $e->getMessage(),
+            );
+        }
+    }
+
+    return $out;
+}
+
+
 function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFile = 6000): array
 {
     $out = [];
@@ -905,12 +1028,14 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
 
     $targetedMaxChars = 20000;
 
-        if ($targetPath !== '') {
-        $targetedFilesContent = read_files_for_context(array($targetPath), 1, 100000);
+            $methodNames = extract_method_like_tokens_from_text($prompt);
+
+    if ($targetPath !== '') {
+        $targetedFilesContent = read_files_for_targeted_context(array($targetPath), $methodNames, 1, 24000);
     } elseif ($primaryTargetFile !== '' && count($targetFiles) >= 1) {
-        $targetedFilesContent = read_files_for_context(array($primaryTargetFile), 1, 100000);
+        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000);
     } else {
-        $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
+        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars);
     }
 
       // 🔥 Targeted DB + project context
@@ -1500,10 +1625,12 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 
     $targetedMaxChars = 20000;
 
+        $methodNames = extract_method_like_tokens_from_text($message);
+
     if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
-        $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
+        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000);
     } else {
-        $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
+        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars);
     }
 
     $ssot = load_latest_ssot_snapshot($pdo);
@@ -1790,7 +1917,8 @@ function build_engineering_context_files(PDO $pdo, string $prompt): array
 
     $paths = array_values(array_unique(array_filter($paths)));
 
-    return read_files_for_context($paths, 3, 24000);
+     $methodNames = extract_method_like_tokens_from_text($prompt);
+    return read_files_for_targeted_context($paths, $methodNames, 3, 24000);
 }
 
 function run_jake_engineering_cycle(
