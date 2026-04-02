@@ -564,10 +564,27 @@ function should_force_method_inventory_mode(string $prompt): bool
         'list all public methods',
         'public methods',
         'visible public methods',
+        'private methods',
+        'protected methods',
         'method inventory',
         'which methods are visible',
         'complete method list',
-        'list methods'
+        'list methods',
+        'declared methods',
+        'declared method',
+        'method declarations',
+        'last visible declared method',
+        'last declared method',
+        'last 10 declared method',
+        'last 12 declared method',
+        'does that authoritative block literally contain',
+        'does the authoritative block contain',
+        'contains the string',
+        'full method inventory',
+        'method names visible',
+        'which method comes after',
+        'what is the next declared method',
+        'is this method visible'
     );
 
     foreach ($signals as $signal) {
