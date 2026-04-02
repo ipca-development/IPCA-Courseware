@@ -1308,6 +1308,42 @@ function build_active_request_summary(string $messageText, ?string $requestType 
     return $summary;
 }
 
+function message_has_explicit_target_or_direct_fix_intent(PDO $pdo, string $messageText): bool
+{
+    $messageText = trim($messageText);
+    if ($messageText === '') {
+        return false;
+    }
+
+    $resolvedPaths = resolve_explicit_file_candidates($pdo, $messageText);
+    if (!empty($resolvedPaths)) {
+        return true;
+    }
+
+    $lower = strtolower($messageText);
+
+    $signals = array(
+        'fix',
+        'patch',
+        'repair',
+        'update',
+        'change',
+        'modify',
+        'implement',
+        'create',
+        'build'
+    );
+
+    foreach ($signals as $signal) {
+        if (strpos($lower, $signal) !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
 function is_continuation_trigger(string $messageText): bool
 {
     $text = strtolower(trim($messageText));
@@ -2060,18 +2096,29 @@ try {
             );
 
             if ($shouldRunEngineering) {
-                $engineeringPromptParts = [];
-                $engineeringPromptParts[] = $activeRequestSummary;
+                               $engineeringPromptParts = array();
 
-                if ($activeTargetFiles !== '') {
-                    $engineeringPromptParts[] = "Relevant files:\n" . $activeTargetFiles;
+                $useFreshPromptIsolation = message_has_explicit_target_or_direct_fix_intent($pdo, $messageText);
+
+                if ($useFreshPromptIsolation) {
+                    $engineeringPromptParts[] = $messageText;
+                } else {
+                    if ($activeRequestSummary !== '') {
+                        $engineeringPromptParts[] = $activeRequestSummary;
+                    }
+
+                    if ($activeTargetFiles !== '') {
+                        $engineeringPromptParts[] = "Relevant files:\n" . $activeTargetFiles;
+                    }
+
+                    if ($activeNextStep !== '') {
+                        $engineeringPromptParts[] = "Requested next step:\n" . $activeNextStep;
+                    }
+
+                    $engineeringPromptParts[] = "USER FOLLOW-UP:\n" . $messageText;
                 }
 
-                if ($activeNextStep !== '') {
-                    $engineeringPromptParts[] = "Requested next step:\n" . $activeNextStep;
-                }
-
-                if ($activeArtifactId !== null) {
+                if ($activeArtifactId !== null && is_revision_trigger($messageText)) {
                     $stmt = $pdo->prepare("
                         SELECT content, review_summary
                         FROM ai_jake_artifacts
@@ -2086,8 +2133,6 @@ try {
                         $engineeringPromptParts[] = "PREVIOUS REVIEW:\n" . $artifactRow['review_summary'];
                     }
                 }
-
-                $engineeringPromptParts[] = "USER FOLLOW-UP:\n" . $messageText;
 
                 $engineeringPrompt = implode("\n\n", $engineeringPromptParts);
 
