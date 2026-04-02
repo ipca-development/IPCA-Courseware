@@ -1,7 +1,7 @@
 <?php
 declare(strict_types=1);
 
-ini_set('display_errors', '1');
+ini_set('display_errors', '0');
 error_reporting(E_ALL);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
@@ -1054,6 +1054,10 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
 {
     $artifactContent = (string)($artifactSeed['content'] ?? '');
     $targetPath = (string)($artifactSeed['target_path'] ?? '');
+    $outputMode = trim((string)($artifactSeed['output_mode'] ?? 'analysis_only'));
+    if ($outputMode === '') {
+        $outputMode = 'analysis_only';
+    }
     $requestPrompt = trim((string)($requestRow['prompt'] ?? ''));
 
     if (strpos(ltrim($artifactContent), 'AI ERROR:') === 0) {
@@ -1087,7 +1091,23 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         ];
     }
 
-	    if (
+    if (!empty($scopeContract)) {
+        $allowedEditPaths = (!empty($scopeContract['allowed_edit_paths']) && is_array($scopeContract['allowed_edit_paths']))
+            ? $scopeContract['allowed_edit_paths']
+            : array();
+
+        if ($outputMode !== 'analysis_only' && !empty($allowedEditPaths)) {
+            if ($targetPath === '' || !in_array($targetPath, $allowedEditPaths, true)) {
+                return [
+                    'verdict' => 'needs_revision',
+                    'reason' => 'Steven produced an artifact outside the allowed edit scope. The scope contract limited edits to specific file paths, but this artifact targets a different path. In other words: even if the code itself looks plausible, it is aimed at the wrong file and cannot be approved.',
+                    'revision' => 'Return a new artifact that targets only a file listed in ALLOWED_EDIT_PATHS.'
+                ];
+            }
+        }
+    }
+
+    if (
         !empty($scopeContract) &&
         $outputMode !== 'analysis_only' &&
         scope_contract_requires_method_scoped_patch($scopeContract)
@@ -1614,7 +1634,7 @@ function create_artifact(PDO $pdo, array $artifact): int
         $artifact['target_path'] ?? null,
         (string)$artifact['title'],
         (string)$artifact['content'],
-        (string)($artifact['output_mode'] ?? 'full_drop_in'),
+        trim((string)($artifact['output_mode'] ?? '')) !== '' ? (string)$artifact['output_mode'] : 'analysis_only',
         $artifact['notes'] ?? null,
         (string)($artifact['created_by_agent'] ?? 'steven'),
         (string)($artifact['approved_by_agent'] ?? 'jake'),
@@ -2297,6 +2317,20 @@ function build_engineering_context_files(PDO $pdo, string $prompt): array
     return read_files_for_targeted_context($paths, $methodNames, 3, 24000);
 }
 
+function resolve_effective_output_mode(?array $artifact, string $fallback = 'analysis_only'): string
+{
+    if (is_array($artifact)) {
+        $candidate = trim((string)($artifact['output_mode'] ?? ''));
+        if ($candidate !== '') {
+            return $candidate;
+        }
+    }
+
+    $fallback = trim($fallback);
+    return $fallback !== '' ? $fallback : 'analysis_only';
+}
+
+
 function run_jake_engineering_cycle(
     PDO $pdo,
     int $userId,
@@ -2327,21 +2361,21 @@ function run_jake_engineering_cycle(
     }
 
     $ssot = load_latest_ssot_snapshot($pdo);
-    $contextFiles = build_engineering_context_files($pdo, (string)$requestRow['prompt']);
-	$scopeContract = build_scope_contract($pdo, $requestRow, $contextFiles);
-	
-    $runId = create_jake_run(
-        $pdo,
-        $requestId,
-        $userId,
-        'jake_think',
-        'running'
-    );
+$contextFiles = build_engineering_context_files($pdo, (string)$requestRow['prompt']);
+$scopeContract = build_scope_contract($pdo, $requestRow, $contextFiles);
 
-    $jakeSummary = build_jake_summary($requestRow, $ssot, $contextFiles);
-    $stevenBrief = build_steven_brief($requestRow, $ssot, $contextFiles, $scopeContract);
-    $riskNotes = 'Steven output generated via OpenAI. Manual review still required before any code is used.';
-    $outputMode = 'full_drop_in';
+$runId = create_jake_run(
+    $pdo,
+    $requestId,
+    $userId,
+    'jake_think',
+    'running'
+);
+
+$jakeSummary = build_jake_summary($requestRow, $ssot, $contextFiles);
+$stevenBrief = build_steven_brief($requestRow, $ssot, $contextFiles, $scopeContract);
+$riskNotes = 'Steven output generated via OpenAI. Manual review still required before any code is used.';
+$outputMode = 'analysis_only';
 
     try {
         $maxRounds = 2;
@@ -2379,6 +2413,14 @@ function run_jake_engineering_cycle(
             $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
             $reviewSummary = (string)($review['reason'] ?? '');
 
+					if (
+			resolve_effective_output_mode($artifactSeed, $outputMode) === 'analysis_only'
+			&& $reviewStatus === 'approved'
+		) {
+			$reviewStatus = 'analysis_only';
+				}
+			
+			
             $isFinal = ($reviewStatus === 'approved') ? 1 : 0;
 
             $stmt2 = $pdo->prepare("
@@ -2404,8 +2446,10 @@ function run_jake_engineering_cycle(
             }
 
             $requestRow['prompt'] .= "\n\nREVISION REQUIRED:\n" . $reviewSummary;
-            $scopeContract = build_scope_contract($pdo, $requestRow, $contextFiles);
-            $currentRound++;
+            $contextFiles = build_engineering_context_files($pdo, (string)$requestRow['prompt']);
+			$scopeContract = build_scope_contract($pdo, $requestRow, $contextFiles);
+			$stevenBrief = build_steven_brief($requestRow, $ssot, $contextFiles, $scopeContract);
+			$currentRound++;
         }
 
         update_jake_run($pdo, $runId, [
@@ -2413,7 +2457,7 @@ function run_jake_engineering_cycle(
             'jake_summary' => $jakeSummary,
             'steven_brief' => $stevenBrief,
             'risk_notes' => $riskNotes . ' Final review status: ' . $finalReviewStatus,
-            'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
+            'output_mode' => resolve_effective_output_mode($finalArtifact, $outputMode),
         ]);
     } catch (Throwable $inner) {
         update_jake_run($pdo, $runId, [
@@ -2437,7 +2481,7 @@ function run_jake_engineering_cycle(
     $replyLines[] = '- Request ID: ' . $requestId;
     $replyLines[] = '- Run ID: ' . $runId;
     $replyLines[] = '- Artifact ID: ' . $finalArtifactId;
-    $replyLines[] = '- Output Mode: ' . (string)($finalArtifact['output_mode'] ?? $outputMode);
+    $replyLines[] = '- Output Mode: ' . resolve_effective_output_mode($finalArtifact, $outputMode);
     $replyLines[] = '- Review Status: ' . $finalReviewStatus;
     $replyLines[] = '- Target Path: ' . (($finalArtifact !== null && $finalArtifact['target_path'] !== null) ? $finalArtifact['target_path'] : '[not determined]');
     $replyLines[] = '';
@@ -2470,7 +2514,7 @@ function run_jake_engineering_cycle(
         'run_id' => $runId,
         'artifact_id' => $finalArtifactId,
         'review_status' => $finalReviewStatus,
-        'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
+        'output_mode' => resolve_effective_output_mode($finalArtifact, $outputMode),
         'target_path' => $finalArtifact !== null ? $finalArtifact['target_path'] : null,
         'reply' => implode("\n", $replyLines)
     );
@@ -2690,16 +2734,22 @@ try {
                 $reply = (string)$result['reply'];
                 $linkedRunId = (int)$result['run_id'];
 
-                update_conversation_state(
-                    $pdo,
-                    $conversationId,
-                    'implementation',
-                    $activeRequestSummary,
-                    $activeTargetFiles,
-                    'Refinement in progress',
-                    $result['run_id'],
-                    $result['artifact_id']
-                );
+                $newActiveTargetFiles = $activeTargetFiles;
+
+				if (!empty($result['target_path'])) {
+					$newActiveTargetFiles = (string)$result['target_path'];
+				}
+
+				update_conversation_state(
+					$pdo,
+					$conversationId,
+					'implementation',
+					$activeRequestSummary,
+					$newActiveTargetFiles,
+					'Refinement in progress',
+					$result['run_id'],
+					$result['artifact_id']
+				);
             } else {
                 $reply = jake_chat_reply($pdo, [
                     'message_text' => $messageText
