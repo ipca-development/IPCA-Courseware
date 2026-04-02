@@ -520,18 +520,29 @@ function should_force_method_inventory_mode(string $prompt): bool
         'which methods are visible',
         'complete method list',
         'list methods',
-        'declared methods',
         'declared method',
+        'declared methods',
         'method declarations',
-        'last visible declared method',
-        'last declared method',
-        'last 10 declared method',
-        'last 12 declared method',
-        'does that authoritative block literally contain',
-        'does the authoritative block contain',
-        'contains the string',
         'full method inventory',
         'method names visible',
+        'last visible declared method',
+        'last declared method',
+        'last 5 public methods',
+        'last 10 declared method',
+        'last 12 declared method',
+        'last 5 public methods in source order',
+        'count_visible_public_methods',
+        'last_5_public_methods_in_source_order',
+        'read only the authoritative primary target file',
+        'primary target file contents (authoritative)',
+        'use only primary target file contents',
+        'ignore targeted file context',
+        'ignore supporting files',
+        'match declared method names only',
+        'check whether these exact declared public methods are visible',
+        'contains the string',
+        'does the authoritative block contain',
+        'does that authoritative block literally contain',
         'which method comes after',
         'what is the next declared method',
         'is this method visible'
@@ -1683,32 +1694,7 @@ if (
 
 function should_skip_targeted_summary_context(string $prompt): bool
 {
-    $promptLower = strtolower($prompt);
-
-    $signals = array(
-        'list all public methods',
-        'public methods',
-        'visible public methods',
-        'private methods',
-        'protected methods',
-        'method inventory',
-        'which methods are visible',
-        'complete method list',
-        'list methods',
-        'declared method',
-        'declared methods',
-        'last visible declared method',
-        'next declared method',
-        'authoritative block'
-    );
-
-    foreach ($signals as $signal) {
-        if (strpos($promptLower, $signal) !== false) {
-            return true;
-        }
-    }
-
-    return false;
+    return should_force_method_inventory_mode($prompt);
 }
 
 
