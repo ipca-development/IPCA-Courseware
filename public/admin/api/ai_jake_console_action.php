@@ -246,7 +246,7 @@ function extract_method_like_tokens_from_text(string $text, int $limit = 8): arr
     return $tokens;
 }
 
-function extract_targeted_excerpt_from_file_content(string $content, array $methodNames, int $radius = 5000): ?string
+function extract_targeted_excerpt_from_file_content(string $content, array $methodNames, int $radius = 7000): ?string
 {
     if ($content === '' || empty($methodNames)) {
         return null;
@@ -259,17 +259,16 @@ function extract_targeted_excerpt_from_file_content(string $content, array $meth
         }
 
         $patterns = array(
-            '/function\s+' . preg_quote($methodName, '/') . '\s*\(/i',
             '/public\s+function\s+' . preg_quote($methodName, '/') . '\s*\(/i',
             '/protected\s+function\s+' . preg_quote($methodName, '/') . '\s*\(/i',
-            '/private\s+function\s+' . preg_quote($methodName, '/') . '\s*\(/i'
+            '/private\s+function\s+' . preg_quote($methodName, '/') . '\s*\(/i',
+            '/function\s+' . preg_quote($methodName, '/') . '\s*\(/i'
         );
 
         foreach ($patterns as $pattern) {
             if (preg_match($pattern, $content, $match, PREG_OFFSET_CAPTURE)) {
                 $offset = (int)$match[0][1];
-
-                $start = max(0, $offset - 1200);
+                $start = max(0, $offset - 1400);
                 $length = $radius;
 
                 $excerpt = substr($content, $start, $length);
@@ -277,14 +276,54 @@ function extract_targeted_excerpt_from_file_content(string $content, array $meth
                     continue;
                 }
 
-                return
-                    "/* TARGETED METHOD EXCERPT: " . $methodName . " */\n\n" .
-                    $excerpt;
+                return "/* TARGETED METHOD EXCERPT: " . $methodName . " */\n\n" . $excerpt;
             }
         }
     }
 
+    foreach ($methodNames as $methodName) {
+        $methodName = trim((string)$methodName);
+        if ($methodName === '') {
+            continue;
+        }
+
+        $offset = stripos($content, $methodName);
+        if ($offset !== false) {
+            $start = max(0, (int)$offset - 1800);
+            $length = $radius;
+
+            $excerpt = substr($content, $start, $length);
+            if (!is_string($excerpt) || $excerpt === '') {
+                continue;
+            }
+
+            return "/* TARGETED SYMBOL EXCERPT: " . $methodName . " */\n\n" . $excerpt;
+        }
+    }
+
     return null;
+}
+
+
+function extract_large_file_tail_excerpt(string $content, array $methodNames, int $tailChars = 28000): ?string
+{
+    if ($content === '') {
+        return null;
+    }
+
+    $len = mb_strlen($content);
+    if ($len <= $tailChars) {
+        return null;
+    }
+
+    $tail = mb_substr($content, $len - $tailChars, $tailChars);
+    if (!is_string($tail) || $tail === '') {
+        return null;
+    }
+
+    $label = !empty($methodNames) ? implode(', ', $methodNames) : 'unknown_symbol';
+
+    return "/* LARGE FILE TAIL FALLBACK FOR: " . $label . " */\n\n" . $tail;
 }
 
 function read_files_for_targeted_context(array $paths, array $methodNames, int $limit = 3, int $fallbackMaxCharsPerFile = 12000): array
@@ -304,6 +343,10 @@ function read_files_for_targeted_context(array $paths, array $methodNames, int $
             $content = (string)$file['content'];
 
             $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
+
+            if ($targetedExcerpt === null && !empty($methodNames)) {
+                $targetedExcerpt = extract_large_file_tail_excerpt($content, $methodNames, 28000);
+            }
 
             if ($targetedExcerpt !== null) {
                 $out[] = array(
@@ -817,6 +860,46 @@ function render_scope_contract_text(array $contract): string
     return implode("\n", $lines);
 }
 
+function artifact_mentions_expected_symbols(string $artifactContent, array $expectedSymbols): bool
+{
+    $artifactContent = trim($artifactContent);
+    if ($artifactContent === '' || empty($expectedSymbols)) {
+        return false;
+    }
+
+    foreach ($expectedSymbols as $symbol) {
+        $symbol = trim((string)$symbol);
+        if ($symbol === '') {
+            continue;
+        }
+
+        if (stripos($artifactContent, $symbol) !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function scope_contract_requires_method_scoped_patch(array $scopeContract): bool
+{
+    $taskType = trim((string)($scopeContract['task_type'] ?? ''));
+    $expectedLocalChangeOnly = trim((string)($scopeContract['expected_local_change_only'] ?? ''));
+    $expectedSymbols = (!empty($scopeContract['expected_symbols']) && is_array($scopeContract['expected_symbols']))
+        ? $scopeContract['expected_symbols']
+        : array();
+
+    if ($expectedLocalChangeOnly !== 'yes') {
+        return false;
+    }
+
+    if (empty($expectedSymbols)) {
+        return false;
+    }
+
+    return in_array($taskType, array('bugfix', 'alias_normalization', 'implementation'), true);
+}
+
 
 function build_steven_brief(array $requestRow, ?array $ssot, array $contextFiles, array $scopeContract = array()): string
 {
@@ -1004,6 +1087,24 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         ];
     }
 
+	    if (
+        !empty($scopeContract) &&
+        $outputMode !== 'analysis_only' &&
+        scope_contract_requires_method_scoped_patch($scopeContract)
+    ) {
+        $expectedSymbols = (!empty($scopeContract['expected_symbols']) && is_array($scopeContract['expected_symbols']))
+            ? $scopeContract['expected_symbols']
+            : array();
+
+        if (!artifact_mentions_expected_symbols($artifactContent, $expectedSymbols)) {
+            return [
+                'verdict' => 'needs_revision',
+                'reason' => 'Steven did not patch the expected local method/symbol area required by the scope contract. The requested change was method-scoped, but the artifact does not visibly reference the expected symbol(s), so this is likely the wrong in-file patch location. In other words: the patch may be in the right file, but not in the right method.',
+                'revision' => 'Return a surgical_patch that explicitly patches the expected local method/symbol area only, and reference that method or symbol directly in the patch.'
+            ];
+        }
+    }
+	
     $system = implode("\n", [
         'You are Jake, the IPCA architect and SSOT guardian.',
         '',
