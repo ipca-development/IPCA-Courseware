@@ -326,7 +326,13 @@ function extract_large_file_tail_excerpt(string $content, array $methodNames, in
     return "/* LARGE FILE TAIL FALLBACK FOR: " . $label . " */\n\n" . $tail;
 }
 
-function read_files_for_targeted_context(array $paths, array $methodNames, int $limit = 3, int $fallbackMaxCharsPerFile = 12000): array
+function read_files_for_targeted_context(
+    array $paths,
+    array $methodNames,
+    int $limit = 3,
+    int $fallbackMaxCharsPerFile = 12000,
+    bool $preferFullFileWhenSmall = false
+): array
 {
     $out = array();
     $count = 0;
@@ -341,9 +347,9 @@ function read_files_for_targeted_context(array $paths, array $methodNames, int $
         try {
             $file = safe_project_file_read((string)$path);
             $content = (string)$file['content'];
-            $len = mb_strlen($content);
+            $len = strlen($content);
 
-            if ($len <= 80000) {
+            if ($preferFullFileWhenSmall && $len <= 80000) {
                 $out[] = array(
                     'path' => $file['path'],
                     'basename' => $file['basename'],
@@ -368,23 +374,19 @@ function read_files_for_targeted_context(array $paths, array $methodNames, int $
                     'content' => $targetedExcerpt,
                 );
             } else {
-                $chunkSize = $fallbackMaxCharsPerFile;
-                $realTotalChunks = (int)ceil($len / $chunkSize);
-                $maxChunksPerFile = 10;
-                $totalChunks = $realTotalChunks > $maxChunksPerFile ? $maxChunksPerFile : $realTotalChunks;
-                $truncated = $realTotalChunks > $maxChunksPerFile;
-
-                for ($i = 0; $i < $totalChunks; $i++) {
-                    $chunk = mb_substr($content, $i * $chunkSize, $chunkSize);
-
+                if ($len <= $fallbackMaxCharsPerFile) {
                     $out[] = array(
                         'path' => $file['path'],
                         'basename' => $file['basename'],
                         'size_bytes' => $file['size_bytes'],
-                        'content' =>
-                            "/* FILE CHUNK " . ($i + 1) . " / " . $totalChunks . " */\n" .
-                            (($truncated && $i === $totalChunks - 1) ? "/* FILE TRUNCATED BEFORE EOF */\n\n" : "\n") .
-                            $chunk,
+                        'content' => $content,
+                    );
+                } else {
+                    $out[] = array(
+                        'path' => $file['path'],
+                        'basename' => $file['basename'],
+                        'size_bytes' => $file['size_bytes'],
+                        'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $fallbackMaxCharsPerFile),
                     );
                 }
             }
@@ -2161,9 +2163,9 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
         $methodNames = extract_method_like_tokens_from_text($message);
 
     if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
-        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000);
+        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000, true);
     } else {
-        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars);
+        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars, false);
     }
 
     $ssot = load_latest_ssot_snapshot($pdo);
@@ -2693,7 +2695,7 @@ function expand_engineering_context_files(
         $methodNames = array_values(array_unique(array_merge($methodNames, $dependencyHints['symbols'])));
     }
 
-    $extraContextFiles = read_files_for_targeted_context($newPaths, $methodNames, $maxExtraFiles, 24000);
+    $extraContextFiles = read_files_for_targeted_context($newPaths, $methodNames, $maxExtraFiles, 24000, true);
 
     return merge_context_files($existingContextFiles, $extraContextFiles, 8);
 }
