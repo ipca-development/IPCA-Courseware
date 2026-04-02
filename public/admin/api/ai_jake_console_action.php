@@ -557,6 +557,7 @@ function read_files_for_targeted_context(
 {
     $out = array();
     $count = 0;
+    $forceFullFileForInventory = ($prompt !== null && should_force_method_inventory_mode($prompt));
 
     $paths = array_values(array_unique($paths));
 
@@ -569,6 +570,28 @@ function read_files_for_targeted_context(
             $file = safe_project_file_read((string)$path);
             $content = (string)$file['content'];
             $len = strlen($content);
+
+            if ($forceFullFileForInventory) {
+                $out[] = array(
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => $content,
+                );
+                $count++;
+                continue;
+            }
+
+            if ($preferFullFileWhenSmall && $len <= 80000) {
+                $out[] = array(
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => $content,
+                );
+                $count++;
+                continue;
+            }
 
             if ($len <= 80000) {
                 $out[] = array(
@@ -1850,7 +1873,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         $userPrompt .= render_scope_contract_text($scopeContract) . "\n\n";
     }
 
-    if (!empty($contextFiles)) {
+        if (!empty($contextFiles) && !should_force_method_inventory_mode($prompt)) {
         $userPrompt .= "CONTEXT FILES:\n";
         foreach ($contextFiles as $f) {
             if (!empty($f['error'])) {
@@ -2479,7 +2502,9 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 
     $ssot = load_latest_ssot_snapshot($pdo);
     $fileCandidates = resolve_explicit_file_candidates($pdo, $message);
-    $contextFiles = read_files_for_targeted_context($fileCandidates, array(), 3, 24000, true, $message);
+        $contextFiles = should_force_method_inventory_mode($message)
+        ? array()
+        : read_files_for_targeted_context($fileCandidates, array(), 3, 24000, true, $message);
     $dbSchema = load_targeted_schema($pdo, $message);
     $projectIndex = load_targeted_project_index(
         project_root_path(),
