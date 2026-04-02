@@ -573,6 +573,73 @@ cw_header('Jake Console');
     font-size:13px;
     line-height:1.55;
   }
+	
+  .artifact-modal-head-left{
+    min-width:0;
+    flex:1 1 auto;
+  }
+
+  .artifact-modal-actions{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex:0 0 auto;
+  }
+
+  .artifact-modal-copy{
+    height:40px;
+    min-width:72px;
+    padding:0 14px;
+    border:none;
+    border-radius:12px;
+    background:#dbe7ff;
+    color:#1f4db8;
+    font-size:13px;
+    font-weight:800;
+    cursor:pointer;
+    white-space:nowrap;
+  }
+
+  .artifact-modal-copy:hover{
+    background:#cfe0ff;
+  }
+
+  .artifact-modal-copy.is-copied{
+    background:#dcfce7;
+    color:#166534;
+  }
+
+  .artifact-modal-body{
+    flex:1 1 auto;
+    overflow:auto;
+    background:#0f172a;
+    padding:0;
+    min-height:0;
+    max-height:100%;
+  }
+
+  .artifact-code-pre{
+    margin:0;
+    min-height:100%;
+    padding:18px 20px;
+    background:#0f172a !important;
+    overflow:auto;
+    white-space:pre-wrap;
+    word-break:break-word;
+    overflow-wrap:anywhere;
+    box-sizing:border-box;
+  }
+
+  .artifact-code-pre code{
+    display:block;
+    font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    font-size:13px;
+    line-height:1.55;
+    white-space:inherit;
+    word-break:inherit;
+    overflow-wrap:inherit;
+  }	
+	
 
   @media (max-width: 1200px){
     .console-grid{
@@ -747,12 +814,16 @@ cw_header('Jake Console');
 <div class="artifact-modal" id="artifact_modal" aria-hidden="true">
   <div class="artifact-modal-panel">
     <div class="artifact-modal-head">
-      <div>
-        <h3 class="artifact-modal-title" id="artifact_modal_title">Artifact</h3>
-        <div class="artifact-modal-sub" id="artifact_modal_meta"></div>
-      </div>
-      <button type="button" class="artifact-modal-close" id="artifact_modal_close" aria-label="Close">×</button>
-    </div>
+  <div class="artifact-modal-head-left">
+    <h3 class="artifact-modal-title" id="artifact_modal_title">Artifact</h3>
+    <div class="artifact-modal-sub" id="artifact_modal_meta"></div>
+  </div>
+
+  <div class="artifact-modal-actions">
+    <button type="button" class="artifact-modal-copy" id="artifact_modal_copy">Copy</button>
+    <button type="button" class="artifact-modal-close" id="artifact_modal_close" aria-label="Close">×</button>
+  </div>
+</div>
     <div class="artifact-modal-body" id="artifact_modal_body">
   <pre class="artifact-code-pre"><code id="artifact_modal_code" class="language-php">Select an artifact to inspect its content.</code></pre>
 </div>
@@ -818,16 +889,73 @@ cw_header('Jake Console');
         return 'php';
     }
 
-    function renderArtifactContent(a) {
+	
+	    function normalizeArtifactContent(a) {
+        let content = String((a && a.content) || '');
+        const outputMode = String((a && a.output_mode) || '').toLowerCase();
+
+        if (outputMode === 'full_drop_in') {
+            content = content.replace(/^[\t ]*[-+][ \t]?/gm, '');
+        }
+
+        return content;
+    }
+
+    async function copyArtifactContent() {
         const codeEl = document.getElementById('artifact_modal_code');
+        const copyBtn = document.getElementById('artifact_modal_copy');
+        if (!codeEl || !copyBtn) {
+            return;
+        }
+
+        const text = codeEl.textContent || '';
+
+        try {
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                await navigator.clipboard.writeText(text);
+            } else {
+                const temp = document.createElement('textarea');
+                temp.value = text;
+                temp.setAttribute('readonly', 'readonly');
+                temp.style.position = 'fixed';
+                temp.style.opacity = '0';
+                document.body.appendChild(temp);
+                temp.select();
+                document.execCommand('copy');
+                document.body.removeChild(temp);
+            }
+
+            const oldLabel = copyBtn.textContent;
+            copyBtn.textContent = 'Copied';
+            copyBtn.classList.add('is-copied');
+
+            window.setTimeout(function () {
+                copyBtn.textContent = oldLabel;
+                copyBtn.classList.remove('is-copied');
+            }, 1200);
+        } catch (err) {
+            alert('Failed to copy artifact');
+        }
+    }
+	
+	
+	
+        function renderArtifactContent(a) {
+        const codeEl = document.getElementById('artifact_modal_code');
+        const bodyEl = document.getElementById('artifact_modal_body');
         if (!codeEl) {
             return;
         }
 
         const language = detectArtifactLanguage(a);
+        const normalizedContent = normalizeArtifactContent(a);
 
         codeEl.className = 'language-' + language;
-        codeEl.textContent = a.content || '';
+        codeEl.textContent = normalizedContent;
+
+        if (bodyEl) {
+            bodyEl.scrollTop = 0;
+        }
 
         try {
             if (window.Prism && typeof window.Prism.highlightElement === 'function') {
@@ -836,7 +964,7 @@ cw_header('Jake Console');
         } catch (e) {
             console.warn('Prism highlight failed', e);
         }
-    } 	
+    }	
 	
 function renderArtifactItem(a) {
     const createdAt = a.created_at || '';
@@ -1213,6 +1341,10 @@ async function loadRecentArtifacts() {
 
     document.getElementById('artifact_modal_close').addEventListener('click', closeArtifactModal);
 
+	document.getElementById('artifact_modal_copy').addEventListener('click', function () {
+        copyArtifactContent();
+    });
+	
     document.getElementById('artifact_modal').addEventListener('click', function (e) {
         if (e.target === this) {
             closeArtifactModal();
