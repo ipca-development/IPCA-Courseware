@@ -326,7 +326,7 @@ function extract_large_file_tail_excerpt(string $content, array $methodNames, in
     return "/* LARGE FILE TAIL FALLBACK FOR: " . $label . " */\n\n" . $tail;
 }
 
-function read_files_for_targeted_context(array $paths, array $methodNames, int $limit = 3, int $fallbackMaxCharsPerFile = 12000, bool $forceFullChunks = false): array
+function read_files_for_targeted_context(array $paths, array $methodNames, int $limit = 3, int $fallbackMaxCharsPerFile = 12000): array
 {
     $out = array();
     $count = 0;
@@ -338,31 +338,26 @@ function read_files_for_targeted_context(array $paths, array $methodNames, int $
             break;
         }
 
-            try {
-        $file = safe_project_file_read((string)$path);
-        $content = (string)$file['content'];
-        $len = mb_strlen($content);
-        $fullFileThreshold = 50000;
+        try {
+            $file = safe_project_file_read((string)$path);
+            $content = (string)$file['content'];
+            $len = mb_strlen($content);
 
-        if ($len <= $fullFileThreshold) {
-            $out[] = array(
-                'path' => $file['path'],
-                'basename' => $file['basename'],
-                'size_bytes' => $file['size_bytes'],
-                'content' => $content,
-            );
-            $count++;
-            continue;
-        }
+            if ($len <= 80000) {
+                $out[] = array(
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => $content,
+                );
+                $count++;
+                continue;
+            }
 
-                    $targetedExcerpt = null;
+            $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
 
-            if (!$forceFullChunks) {
-                $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
-
-                if ($targetedExcerpt === null && !empty($methodNames)) {
-                    $targetedExcerpt = extract_large_file_tail_excerpt($content, $methodNames, 28000);
-                }
+            if ($targetedExcerpt === null && !empty($methodNames)) {
+                $targetedExcerpt = extract_large_file_tail_excerpt($content, $methodNames, 28000);
             }
 
             if ($targetedExcerpt !== null) {
@@ -374,11 +369,10 @@ function read_files_for_targeted_context(array $paths, array $methodNames, int $
                 );
             } else {
                 $chunkSize = $fallbackMaxCharsPerFile;
-                $maxChunksPerFile = 6;
-                $totalChunks = (int)ceil($len / $chunkSize);
-                if ($totalChunks > $maxChunksPerFile) {
-                    $totalChunks = $maxChunksPerFile;
-                }
+                $realTotalChunks = (int)ceil($len / $chunkSize);
+                $maxChunksPerFile = 10;
+                $totalChunks = $realTotalChunks > $maxChunksPerFile ? $maxChunksPerFile : $realTotalChunks;
+                $truncated = $realTotalChunks > $maxChunksPerFile;
 
                 for ($i = 0; $i < $totalChunks; $i++) {
                     $chunk = mb_substr($content, $i * $chunkSize, $chunkSize);
@@ -387,15 +381,15 @@ function read_files_for_targeted_context(array $paths, array $methodNames, int $
                         'path' => $file['path'],
                         'basename' => $file['basename'],
                         'size_bytes' => $file['size_bytes'],
-                        'content' => "/* FILE CHUNK " . ($i + 1) . " / " . $totalChunks . " */\n\n" . $chunk,
+                        'content' =>
+                            "/* FILE CHUNK " . ($i + 1) . " / " . $totalChunks . " */\n" .
+                            (($truncated && $i === $totalChunks - 1) ? "/* FILE TRUNCATED BEFORE EOF */\n\n" : "\n") .
+                            $chunk,
                     );
                 }
             }
 
-        $count++;
-		
-		
-		
+            $count++;
         } catch (Throwable $e) {
             $out[] = array(
                 'path' => (string)$path,
