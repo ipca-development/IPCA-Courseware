@@ -1703,10 +1703,15 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
 
-    $targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
-    $targetedSummary = $targetData['summary'];
-    $targetFiles = isset($targetData['files']) && is_array($targetData['files']) ? $targetData['files'] : array();
-    $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
+    $targetData = array(
+    'summary' => '',
+    'files' => array(),
+    'primary_file' => ''
+);
+
+$targetedSummary = '';
+$targetFiles = array();
+$primaryTargetFile = '';
 
     $targetPath = pick_primary_target_path($GLOBALS['pdo'], $prompt, $contextFiles);
     if ($targetPath === null) {
