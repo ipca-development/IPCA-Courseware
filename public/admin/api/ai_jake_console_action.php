@@ -336,7 +336,7 @@ function extract_method_inventory_from_file_content(string $content): array
         return $methods;
     }
 
-    if (preg_match_all('/\b(public|protected|private)\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)\s*(?::\s*([A-Za-z0-9_\\\\?]+))?/s', $content, $m, PREG_SET_ORDER)) {
+    if (preg_match_all('/\b(public)\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)\s*(?::\s*([A-Za-z0-9_\\\\?]+))?/s', $content, $m, PREG_SET_ORDER)) {
         foreach ($m as $row) {
             $visibility = isset($row[1]) ? trim((string)$row[1]) : '';
             $name = isset($row[2]) ? trim((string)$row[2]) : '';
@@ -636,84 +636,6 @@ function read_files_for_targeted_context(
                     'basename' => $file['basename'],
                     'size_bytes' => $file['size_bytes'],
                     'content' => $exactBlocks,
-                );
-                $count++;
-                continue;
-            }
-
-            $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
-
-            if ($targetedExcerpt === null && !empty($methodNames)) {
-                $targetedExcerpt = extract_large_file_tail_excerpt($content, $methodNames, 28000);
-            }
-
-            if ($targetedExcerpt !== null) {
-                $out[] = array(
-                    'path' => $file['path'],
-                    'basename' => $file['basename'],
-                    'size_bytes' => $file['size_bytes'],
-                    'content' => $targetedExcerpt,
-                );
-            } else {
-                if ($len <= $fallbackMaxCharsPerFile) {
-                    $out[] = array(
-                        'path' => $file['path'],
-                        'basename' => $file['basename'],
-                        'size_bytes' => $file['size_bytes'],
-                        'content' => $content,
-                    );
-                } else {
-                    $out[] = array(
-                        'path' => $file['path'],
-                        'basename' => $file['basename'],
-                        'size_bytes' => $file['size_bytes'],
-                        'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $fallbackMaxCharsPerFile),
-                    );
-                }
-            }
-
-            $count++;
-        } catch (Throwable $e) {
-            $out[] = array(
-                'path' => (string)$path,
-                'error' => $e->getMessage(),
-            );
-        }
-    }
-
-    return $out;
-}
-
-
-function read_files_for_targeted_context(
-    array $paths,
-    array $methodNames,
-    int $limit = 3,
-    int $fallbackMaxCharsPerFile = 12000,
-    bool $preferFullFileWhenSmall = false
-): array
-{
-    $out = array();
-    $count = 0;
-
-    $paths = array_values(array_unique($paths));
-
-    foreach ($paths as $path) {
-        if ($count >= $limit) {
-            break;
-        }
-
-        try {
-            $file = safe_project_file_read((string)$path);
-            $content = (string)$file['content'];
-            $len = strlen($content);
-
-            if ($preferFullFileWhenSmall && $len <= 80000) {
-                $out[] = array(
-                    'path' => $file['path'],
-                    'basename' => $file['basename'],
-                    'size_bytes' => $file['size_bytes'],
-                    'content' => $content,
                 );
                 $count++;
                 continue;
