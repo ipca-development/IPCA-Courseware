@@ -1,316 +1,378 @@
 <?php
 declare(strict_types=1);
 
-function load_latest_architecture_snapshot_id(PDO $pdo): ?int
+require_once __DIR__ . '/bootstrap.php';
+
+function runAutomationFlows(PDO $pdo, string $eventKey, array $context = array()): array
 {
-    $stmt = $pdo->query("
-        SELECT id
-        FROM ai_architecture_snapshots
-        ORDER BY id DESC
-        LIMIT 1
-    ");
+    $flows = loadFlowsForEvent($pdo, $eventKey);
+    $results = array();
 
-    $value = $stmt->fetchColumn();
-
-    if ($value === false || $value === null) {
-        return null;
-    }
-
-    return (int)$value;
-}
-
-function extract_targeting_keywords(string $text): array
-{
-    $text = strtolower($text);
-    $keywords = [];
-
-    if (preg_match_all('/[a-zA-Z0-9_\-\/]+\.php/', $text, $m)) {
-        foreach ($m[0] as $fileToken) {
-            $fileToken = trim((string)$fileToken);
-            if ($fileToken !== '') {
-                $keywords[] = $fileToken;
-            }
-        }
-    }
-
-    $words = preg_split('/[^a-z0-9_]+/', $text);
-    if (is_array($words)) {
-        foreach ($words as $word) {
-            $word = trim((string)$word);
-            if (strlen($word) >= 4) {
-                $keywords[] = $word;
-            }
-        }
-    }
-
-    return array_values(array_unique($keywords));
-}
-
-function extract_exact_target_file(string $text): ?string
-{
-    if (preg_match('/([a-zA-Z0-9_\-\/]+\.php)/i', $text, $m)) {
-        $file = strtolower(trim((string)$m[1]));
-        if ($file !== '') {
-            return $file;
-        }
-    }
-
-    return null;
-}
-
-function compute_file_intelligence_score(array $row, array $keywords, ?string $exactFile): int
-{
-    $score = 0;
-
-    $filePath = strtolower((string)($row['file_path'] ?? ''));
-    $purpose = strtolower((string)($row['purpose'] ?? ''));
-    $module = strtolower((string)($row['module'] ?? ''));
-    $tablesJson = strtolower((string)($row['tables_json'] ?? ''));
-    $helpersJson = strtolower((string)($row['helpers_json'] ?? ''));
-    $functionsJson = strtolower((string)($row['functions_json'] ?? ''));
-    $includesJson = strtolower((string)($row['includes_json'] ?? ''));
-
-    if ($exactFile !== null && $exactFile !== '') {
-        if ($filePath === $exactFile) {
-            $score += 1000;
-        } elseif (strpos($filePath, $exactFile) !== false) {
-            $score += 700;
-        } elseif (basename($filePath) === basename($exactFile)) {
-            $score += 500;
-        }
-    }
-
-    foreach ($keywords as $keyword) {
-        $keyword = strtolower(trim((string)$keyword));
-        if ($keyword === '') {
+    foreach ($flows as $flow) {
+        $flowId = (int)($flow['id'] ?? 0);
+        if ($flowId <= 0) {
             continue;
         }
 
-        if ($filePath === $keyword) {
-            $score += 300;
-        } elseif (strpos($filePath, $keyword) !== false) {
-            $score += 120;
+        $conditions = isset($flow['conditions']) && is_array($flow['conditions']) ? $flow['conditions'] : array();
+        $actions = isset($flow['actions']) && is_array($flow['actions']) ? $flow['actions'] : array();
+
+        if (!conditionsMatch($conditions, $context)) {
+            $results[] = array(
+                'flow_id' => $flowId,
+                'event_key' => $eventKey,
+                'status' => 'skipped_conditions',
+            );
+            continue;
         }
 
-        if (strpos($functionsJson, '"' . $keyword . '"') !== false) {
-            $score += 90;
-        } elseif (strpos($functionsJson, $keyword) !== false) {
-            $score += 60;
+        if (alreadyExecuted($pdo, $flowId, $eventKey, $context)) {
+            $results[] = array(
+                'flow_id' => $flowId,
+                'event_key' => $eventKey,
+                'status' => 'skipped_already_executed',
+            );
+            continue;
         }
 
-        if (strpos($helpersJson, '"' . $keyword . '"') !== false) {
-            $score += 70;
-        } elseif (strpos($helpersJson, $keyword) !== false) {
-            $score += 45;
-        }
-
-        if (strpos($tablesJson, '"' . $keyword . '"') !== false) {
-            $score += 55;
-        } elseif (strpos($tablesJson, $keyword) !== false) {
-            $score += 35;
-        }
-
-        if (strpos($includesJson, '"' . $keyword . '"') !== false) {
-            $score += 45;
-        } elseif (strpos($includesJson, $keyword) !== false) {
-            $score += 25;
-        }
-
-        if (strpos($purpose, $keyword) !== false) {
-            $score += 25;
-        }
-
-        if (strpos($module, $keyword) !== false) {
-            $score += 15;
-        }
+        $executionResult = executeFlow($pdo, $flow, $eventKey, $context, $actions);
+        $results[] = $executionResult;
     }
 
-    if ($module === 'core') {
-        $score += 5;
-    }
-
-    return $score;
+    return $results;
 }
 
-function load_relevant_file_intelligence(PDO $pdo, string $text, int $limit = 10): array
+function loadFlowsForEvent(PDO $pdo, string $eventKey): array
 {
-    $keywords = extract_targeting_keywords($text);
+    $stmt = $pdo->prepare("
+        SELECT
+            f.id,
+            f.name,
+            f.description,
+            f.event_key,
+            f.is_active,
+            f.priority
+        FROM automation_flows f
+        WHERE f.is_active = 1
+          AND f.event_key = ?
+        ORDER BY f.priority ASC, f.id ASC
+    ");
+    $stmt->execute(array($eventKey));
+    $flows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    if (empty($keywords)) {
-        return [];
+    if (!$flows) {
+        return array();
     }
 
-    $latestSnapshotId = load_latest_architecture_snapshot_id($pdo);
-    if ($latestSnapshotId === null) {
-        return [];
+    $flowIds = array();
+    foreach ($flows as $flow) {
+        $flowId = (int)($flow['id'] ?? 0);
+        if ($flowId > 0) {
+            $flowIds[] = $flowId;
+        }
     }
 
-    $exactFile = extract_exact_target_file($text);
+    if (empty($flowIds)) {
+        return array();
+    }
 
-    $sql = "
+    $placeholders = implode(',', array_fill(0, count($flowIds), '?'));
+
+    $condStmt = $pdo->prepare("
         SELECT
             id,
-            snapshot_id,
-            file_path,
-            module,
-            purpose,
-            tables_json,
-            helpers_json,
-            functions_json,
-            includes_json
-        FROM ai_architecture_file_index
-        WHERE snapshot_id = ?
-          AND (
-    ";
+            flow_id,
+            field_key,
+            operator,
+            value_text,
+            value_number,
+            sort_order
+        FROM automation_flow_conditions
+        WHERE flow_id IN ($placeholders)
+        ORDER BY flow_id ASC, sort_order ASC, id ASC
+    ");
+    $condStmt->execute($flowIds);
+    $conditionRows = $condStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    $conditions = [];
-    $params = [$latestSnapshotId];
+    $actionStmt = $pdo->prepare("
+        SELECT
+            id,
+            flow_id,
+            action_key,
+            config_json,
+            sort_order
+        FROM automation_flow_actions
+        WHERE flow_id IN ($placeholders)
+        ORDER BY flow_id ASC, sort_order ASC, id ASC
+    ");
+    $actionStmt->execute($flowIds);
+    $actionRows = $actionStmt->fetchAll(PDO::FETCH_ASSOC);
 
-    foreach ($keywords as $keyword) {
-        $conditions[] = "file_path LIKE ?";
-        $params[] = '%' . $keyword . '%';
-
-        $conditions[] = "purpose LIKE ?";
-        $params[] = '%' . $keyword . '%';
-
-        $conditions[] = "tables_json LIKE ?";
-        $params[] = '%' . $keyword . '%';
-
-        $conditions[] = "helpers_json LIKE ?";
-        $params[] = '%' . $keyword . '%';
-
-        $conditions[] = "functions_json LIKE ?";
-        $params[] = '%' . $keyword . '%';
-
-        $conditions[] = "includes_json LIKE ?";
-        $params[] = '%' . $keyword . '%';
-    }
-
-    $sql .= implode(' OR ', $conditions);
-    $sql .= "
-          )
-        ORDER BY file_path ASC
-        LIMIT " . (int)max($limit * 3, 12);
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    if (!$rows) {
-        return [];
-    }
-
-    foreach ($rows as &$row) {
-        $row['_score'] = compute_file_intelligence_score($row, $keywords, $exactFile);
-    }
-    unset($row);
-
-    usort($rows, function ($a, $b) {
-        $aScore = (int)($a['_score'] ?? 0);
-        $bScore = (int)($b['_score'] ?? 0);
-
-        if ($aScore !== $bScore) {
-            return $bScore <=> $aScore;
+    $conditionsByFlow = array();
+    foreach ($conditionRows as $row) {
+        $fid = (int)($row['flow_id'] ?? 0);
+        if (!isset($conditionsByFlow[$fid])) {
+            $conditionsByFlow[$fid] = array();
         }
-
-        $aPath = strtolower((string)($a['file_path'] ?? ''));
-        $bPath = strtolower((string)($b['file_path'] ?? ''));
-
-        return strcmp($aPath, $bPath);
-    });
-
-    $deduped = [];
-    $seen = [];
-
-    foreach ($rows as $row) {
-        $path = (string)($row['file_path'] ?? '');
-        if ($path === '' || isset($seen[$path])) {
-            continue;
-        }
-
-        $seen[$path] = true;
-        $deduped[] = $row;
-
-        if (count($deduped) >= $limit) {
-            break;
-        }
+        $conditionsByFlow[$fid][] = $row;
     }
 
-    return $deduped;
+    $actionsByFlow = array();
+    foreach ($actionRows as $row) {
+        $fid = (int)($row['flow_id'] ?? 0);
+        if (!isset($actionsByFlow[$fid])) {
+            $actionsByFlow[$fid] = array();
+        }
+        $actionsByFlow[$fid][] = $row;
+    }
+
+    foreach ($flows as &$flow) {
+        $fid = (int)($flow['id'] ?? 0);
+        $flow['conditions'] = $conditionsByFlow[$fid] ?? array();
+        $flow['actions'] = $actionsByFlow[$fid] ?? array();
+    }
+    unset($flow);
+
+    return $flows;
 }
 
-function build_targeted_context(PDO $pdo, string $text): array
+function conditionsMatch(array $conditions, array $context): bool
 {
-    $rows = load_relevant_file_intelligence($pdo, $text, 5);
+    foreach ($conditions as $condition) {
+        $fieldKey = trim((string)($condition['field_key'] ?? ''));
+        $operator = trim((string)($condition['operator'] ?? ''));
+        $expectedText = $condition['value_text'] ?? null;
+        $expectedNumber = $condition['value_number'] ?? null;
+        $actual = $context[$fieldKey] ?? null;
 
-    if (!$rows) {
-        return [
-            'summary' => '',
-            'files' => [],
-            'primary_file' => null,
-        ];
+        switch ($operator) {
+            case 'equals':
+                if ((string)$actual !== (string)$expectedText) {
+                    return false;
+                }
+                break;
+
+            case 'not_equals':
+                if ((string)$actual === (string)$expectedText) {
+                    return false;
+                }
+                break;
+
+            case 'contains':
+                if (strpos((string)$actual, (string)$expectedText) === false) {
+                    return false;
+                }
+                break;
+
+            case 'not_contains':
+                if (strpos((string)$actual, (string)$expectedText) !== false) {
+                    return false;
+                }
+                break;
+
+            case 'gt':
+                if (!is_numeric($actual) || (float)$actual <= (float)$expectedNumber) {
+                    return false;
+                }
+                break;
+
+            case 'gte':
+                if (!is_numeric($actual) || (float)$actual < (float)$expectedNumber) {
+                    return false;
+                }
+                break;
+
+            case 'lt':
+                if (!is_numeric($actual) || (float)$actual >= (float)$expectedNumber) {
+                    return false;
+                }
+                break;
+
+            case 'lte':
+                if (!is_numeric($actual) || (float)$actual > (float)$expectedNumber) {
+                    return false;
+                }
+                break;
+
+            case 'is_empty':
+                if ($actual !== null && $actual !== '') {
+                    return false;
+                }
+                break;
+
+            case 'is_not_empty':
+                if ($actual === null || $actual === '') {
+                    return false;
+                }
+                break;
+
+            default:
+                return false;
+        }
     }
 
-    $summaryLines = [];
-    $summaryLines[] = 'RELEVANT FILE CONTEXT';
-    $summaryLines[] = '';
+    return true;
+}
 
-    $filePaths = [];
+function alreadyExecuted(PDO $pdo, int $flowId, string $eventKey, array $context = array()): bool
+{
+    $userId = isset($context['user_id']) ? (int)$context['user_id'] : 0;
+    $lessonId = isset($context['lesson_id']) ? (int)$context['lesson_id'] : 0;
 
-    foreach ($rows as $row) {
-        $path = (string)($row['file_path'] ?? '');
-        if ($path === '') {
-            continue;
-        }
+    $stmt = $pdo->prepare("
+        SELECT id
+        FROM automation_flow_executions
+        WHERE flow_id = ?
+          AND user_id <=> ?
+          AND lesson_id <=> ?
+          AND event_type = ?
+        LIMIT 1
+    ");
+    $stmt->execute(array(
+        $flowId,
+        $userId > 0 ? $userId : null,
+        $lessonId > 0 ? $lessonId : null,
+        $eventKey,
+    ));
 
-        $filePaths[] = $path;
+    return (bool)$stmt->fetchColumn();
+}
 
-        $summaryLines[] = $path;
+function markExecuted(PDO $pdo, int $flowId, string $eventKey, array $context = array()): int
+{
+    $userId = isset($context['user_id']) ? (int)$context['user_id'] : 0;
+    $lessonId = isset($context['lesson_id']) ? (int)$context['lesson_id'] : 0;
 
-        if (!empty($row['module'])) {
-            $summaryLines[] = '- module: ' . (string)$row['module'];
-        }
+    $stmt = $pdo->prepare("
+        INSERT INTO automation_flow_executions
+        (
+            flow_id,
+            user_id,
+            lesson_id,
+            event_type,
+            executed_at
+        )
+        VALUES (?, ?, ?, ?, NOW())
+    ");
+    $stmt->execute(array(
+        $flowId,
+        $userId > 0 ? $userId : null,
+        $lessonId > 0 ? $lessonId : null,
+        $eventKey,
+    ));
 
-        if (!empty($row['purpose'])) {
-            $summaryLines[] = '- purpose: ' . (string)$row['purpose'];
-        }
+    return (int)$pdo->lastInsertId();
+}
 
-        $tables = json_decode((string)($row['tables_json'] ?? '[]'), true);
-        if (is_array($tables) && !empty($tables)) {
-            $summaryLines[] = '- tables: [' . implode(', ', $tables) . ']';
-        }
+function executeFlow(PDO $pdo, array $flow, string $eventKey, array $context = array(), ?array $actions = null): array
+{
+    $flowId = (int)($flow['id'] ?? 0);
+    $actions = is_array($actions) ? $actions : (isset($flow['actions']) && is_array($flow['actions']) ? $flow['actions'] : array());
 
-        $helpers = json_decode((string)($row['helpers_json'] ?? '[]'), true);
-        if (is_array($helpers) && !empty($helpers)) {
-            $summaryLines[] = '- helpers: [' . implode(', ', $helpers) . ']';
-        }
-
-        $functions = json_decode((string)($row['functions_json'] ?? '[]'), true);
-        if (is_array($functions) && !empty($functions)) {
-            $summaryLines[] = '- functions: [' . implode(', ', array_slice($functions, 0, 8)) . ']';
-        }
-
-        $includes = json_decode((string)($row['includes_json'] ?? '[]'), true);
-        if (is_array($includes) && !empty($includes)) {
-            $summaryLines[] = '- includes: [' . implode(', ', array_slice($includes, 0, 5)) . ']';
-        }
-
-        $summaryLines[] = '';
+    $contextJson = json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if ($contextJson === false) {
+        $contextJson = '{}';
     }
 
-    $uniqueFiles = array_values(array_unique($filePaths));
-    $primaryFile = !empty($uniqueFiles) ? (string)$uniqueFiles[0] : null;
+    $flowRunId = null;
+    $actionResults = array();
+    $hasImplementedAction = false;
 
-    if ($primaryFile !== null) {
-        $uniqueFiles = array_values(array_filter($uniqueFiles, function ($file) use ($primaryFile) {
-            return $file !== $primaryFile;
-        }));
-        array_unshift($uniqueFiles, $primaryFile);
+    try {
+        $pdo->beginTransaction();
+
+        $stmtRun = $pdo->prepare("
+            INSERT INTO automation_flow_runs
+            (
+                flow_id,
+                event_key,
+                context_json,
+                result,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, NOW())
+        ");
+        $stmtRun->execute(array(
+            $flowId,
+            $eventKey,
+            $contextJson,
+            'started',
+        ));
+
+        $flowRunId = (int)$pdo->lastInsertId();
+
+        $stmtActionRun = $pdo->prepare("
+            INSERT INTO automation_action_runs
+            (
+                flow_run_id,
+                action_key,
+                result,
+                details,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, NOW())
+        ");
+
+        foreach ($actions as $action) {
+            $actionKey = trim((string)($action['action_key'] ?? ''));
+            if ($actionKey === '') {
+                continue;
+            }
+
+            $details = 'Action wiring not implemented';
+            $result = 'not_implemented';
+
+            $stmtActionRun->execute(array(
+                $flowRunId,
+                $actionKey,
+                $result,
+                $details,
+            ));
+
+            $actionResults[] = array(
+                'action_key' => $actionKey,
+                'result' => $result,
+                'details' => $details,
+            );
+        }
+
+        $finalResult = $hasImplementedAction ? 'completed' : 'not_executed';
+
+        $stmtUpdateRun = $pdo->prepare("
+            UPDATE automation_flow_runs
+            SET result = ?
+            WHERE id = ?
+        ");
+        $stmtUpdateRun->execute(array(
+            $finalResult,
+            $flowRunId,
+        ));
+
+        if ($hasImplementedAction) {
+            markExecuted($pdo, $flowId, $eventKey, $context);
+        }
+
+        $pdo->commit();
+
+        return array(
+            'flow_id' => $flowId,
+            'event_key' => $eventKey,
+            'status' => $hasImplementedAction ? 'executed' : 'not_executed',
+            'flow_run_id' => $flowRunId,
+            'actions' => $actionResults,
+        );
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+
+        return array(
+            'flow_id' => $flowId,
+            'event_key' => $eventKey,
+            'status' => 'error',
+            'flow_run_id' => $flowRunId,
+            'error' => $e->getMessage(),
+            'actions' => $actionResults,
+        );
     }
-
-    return [
-        'summary' => implode("\n", $summaryLines),
-        'files' => array_slice($uniqueFiles, 0, 3),
-        'primary_file' => $primaryFile,
-    ];
 }
