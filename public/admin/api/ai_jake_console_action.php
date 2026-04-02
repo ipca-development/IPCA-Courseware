@@ -622,30 +622,18 @@ function read_files_for_targeted_context(
             $len = strlen($content);
 
             if ($forceMethodInventory) {
-				$inventory = build_method_inventory_text($content);
-				if ($inventory !== null) {
-					$out[] = array(
-						'path' => $file['path'],
-						'basename' => $file['basename'],
-						'size_bytes' => $file['size_bytes'],
-						'content' => $inventory,
-					);
-					$count++;
-					continue;
-				}
-			}
-
-// DEFAULT: ALWAYS INCLUDE FULL FILE FOR ENGINEERING
-if ($len <= 80000) {
-    $out[] = array(
-        'path' => $file['path'],
-        'basename' => $file['basename'],
-        'size_bytes' => $file['size_bytes'],
-        'content' => $content,
-    );
-    $count++;
-    continue;
-}
+                $inventory = build_method_inventory_text($content);
+                if ($inventory !== null) {
+                    $out[] = array(
+                        'path' => $file['path'],
+                        'basename' => $file['basename'],
+                        'size_bytes' => $file['size_bytes'],
+                        'content' => $inventory,
+                    );
+                    $count++;
+                    continue;
+                }
+            }
 
             if ($preferFullFileWhenSmall && $len <= 80000) {
                 $out[] = array(
@@ -1785,7 +1773,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
     $targetFiles = isset($targetData['files']) && is_array($targetData['files']) ? $targetData['files'] : array();
     $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
-        $targetPath = pick_primary_target_path($GLOBALS['pdo'], $prompt, $contextFiles);
+    $targetPath = pick_primary_target_path($GLOBALS['pdo'], $prompt, $contextFiles);
     if ($targetPath === null) {
         $targetPath = '';
     }
@@ -1812,9 +1800,43 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         }
     }
 
-    $targetedMaxChars = 20000;
+    $authoritativePrimaryTargetFile = null;
 
-            $methodNames = extract_method_like_tokens_from_text($prompt);
+    if ($targetPath !== '') {
+        try {
+            $rawPrimaryFile = safe_project_file_read($targetPath);
+            $authoritativePrimaryTargetFile = array(
+                'path' => $rawPrimaryFile['path'],
+                'basename' => $rawPrimaryFile['basename'],
+                'size_bytes' => $rawPrimaryFile['size_bytes'],
+                'content' => (string)$rawPrimaryFile['content'],
+            );
+        } catch (Throwable $e) {
+            $authoritativePrimaryTargetFile = array(
+                'path' => $targetPath,
+                'error' => $e->getMessage(),
+            );
+        }
+    } elseif ($primaryTargetFile !== '') {
+        try {
+            $rawPrimaryFile = safe_project_file_read($primaryTargetFile);
+            $authoritativePrimaryTargetFile = array(
+                'path' => $rawPrimaryFile['path'],
+                'basename' => $rawPrimaryFile['basename'],
+                'size_bytes' => $rawPrimaryFile['size_bytes'],
+                'content' => (string)$rawPrimaryFile['content'],
+            );
+            $targetPath = (string)$rawPrimaryFile['path'];
+        } catch (Throwable $e) {
+            $authoritativePrimaryTargetFile = array(
+                'path' => $primaryTargetFile,
+                'error' => $e->getMessage(),
+            );
+        }
+    }
+
+    $targetedMaxChars = 20000;
+    $methodNames = extract_method_like_tokens_from_text($prompt);
 
     if ($targetPath !== '') {
         $targetedFilesContent = read_files_for_targeted_context(array($targetPath), $methodNames, 1, 24000, true, $prompt);
@@ -1824,18 +1846,17 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars, false, $prompt);
     }
 
-      // Targeted DB + project context
     $dbSchema = load_targeted_schema($GLOBALS['pdo'], $prompt);
     $projectIndex = load_targeted_project_index(
         project_root_path(),
         array_values(array_unique(array_filter(array_merge(
-            $targetPath !== '' ? [$targetPath] : [],
+            $targetPath !== '' ? array($targetPath) : array(),
             $targetFiles
         )))),
         $prompt
     );
 
-    $systemPrompt = implode("\n", [
+    $systemPrompt = implode("\n", array(
         'You are Steven, a hidden senior PHP/MySQL implementation agent inside the IPCA engineering console.',
         'You write implementation-ready engineering output.',
         'You do not make architecture decisions independently.',
@@ -1849,7 +1870,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         '- Do NOT say you cannot access files, schema, or project structure when they are present in the prompt.',
         '- When asked to list methods, tables, files, or structures, extract them explicitly from the provided context.',
         '- If the required information is NOT present in the provided context, return analysis_only and clearly state what is missing.',
-	    '- If PRIMARY TARGET FILE CONTENTS are provided, treat them as the authoritative implementation source for the requested fix.',
+        '- If PRIMARY TARGET FILE CONTENTS are provided, treat them as the authoritative implementation source for the requested fix.',
         '',
         'Context priority rules:',
         '- When a question explicitly references DATABASE SCHEMA, ONLY use DATABASE SCHEMA to answer.',
@@ -1860,21 +1881,21 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         '- Each answer must be grounded in the correct requested source.',
         '',
         'Implementation safety rules:',
-		'- Before using any method or function, verify it exists in the provided file context.',
-		'- If unsure whether a method exists, do NOT assume; instead return analysis_only.',
-		'- Prefer using clearly visible existing methods from the loaded file.',
-		'- If functionality is missing, explicitly state which method, file, schema element, or dependency is missing instead of guessing.',
-		'- When the requested fix names a specific target file and that file content is provided, prefer patching that file directly instead of refusing due to broader uncertainty.',
-		'- If a SCOPE CONTRACT is provided, obey it strictly.',
-		'- Only modify files listed in ALLOWED_EDIT_PATHS.',
-		'- If PRIMARY_TARGET_PATH is provided, treat it as the main file to patch.',
-		'- If NO_CLASS_REWRITE is yes, do not output a full class definition or class rewrite.',
-		'- If EXPECTED_LOCAL_CHANGE_ONLY is yes, prefer the smallest viable local patch.',
-		'- For surgical_patch output, prefer exact before/after replacement blocks whenever the requested change is method-scoped or SQL-block-scoped.',
-		'- Do not give vague instructions like "find this block", "locate the failure path", or "change the UPDATE".',
-		'- Do not use placeholder comments inside a patch.',
-		'- If you cannot quote the existing block from visible context, return analysis_only instead of inventing it.',
-		'- A surgical_patch should be directly copy-paste applicable by the user.',
+        '- Before using any method or function, verify it exists in the provided file context.',
+        '- If unsure whether a method exists, do NOT assume; instead return analysis_only.',
+        '- Prefer using clearly visible existing methods from the loaded file.',
+        '- If functionality is missing, explicitly state which method, file, schema element, or dependency is missing instead of guessing.',
+        '- When the requested fix names a specific target file and that file content is provided, prefer patching that file directly instead of refusing due to broader uncertainty.',
+        '- If a SCOPE CONTRACT is provided, obey it strictly.',
+        '- Only modify files listed in ALLOWED_EDIT_PATHS.',
+        '- If PRIMARY_TARGET_PATH is provided, treat it as the main file to patch.',
+        '- If NO_CLASS_REWRITE is yes, do not output a full class definition or class rewrite.',
+        '- If EXPECTED_LOCAL_CHANGE_ONLY is yes, prefer the smallest viable local patch.',
+        '- For surgical_patch output, prefer exact before/after replacement blocks whenever the requested change is method-scoped or SQL-block-scoped.',
+        '- Do not give vague instructions like "find this block", "locate the failure path", or "change the UPDATE".',
+        '- Do not use placeholder comments inside a patch.',
+        '- If you cannot quote the existing block from visible context, return analysis_only instead of inventing it.',
+        '- A surgical_patch should be directly copy-paste applicable by the user.',
         '',
         'Output rules:',
         '- When a safe full replacement is possible, provide a full drop-in.',
@@ -1894,15 +1915,15 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         'Do not wrap the response in markdown fences.',
         'Do not put introductions before OUTPUT_MODE.',
         'After the blank line, provide normal human-readable code or patch content.',
-    ]);
+    ));
 
     $userPrompt = "REQUEST TITLE:\n" . $title . "\n\n";
     $userPrompt .= "REQUEST:\n" . $prompt . "\n\n";
 
-	    if (!empty($scopeContract)) {
+    if (!empty($scopeContract)) {
         $userPrompt .= render_scope_contract_text($scopeContract) . "\n\n";
     }
-	
+
     if (!empty($contextFiles)) {
         $userPrompt .= "CONTEXT FILES:\n";
         foreach ($contextFiles as $f) {
@@ -1932,24 +1953,41 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         $userPrompt .= "\n\n";
     }
 
-            $userPrompt .= "PRIMARY TARGET FILE:\n";
+    $userPrompt .= "PRIMARY TARGET FILE:\n";
     $userPrompt .= ($targetPath !== '' ? $targetPath : '[blank]') . "\n\n";
-	
-	$userPrompt .= "PRIMARY_TARGET_FILE_SEEN_BY_SYSTEM:\n";
-    $userPrompt .= ($targetPath !== '' ? $targetPath : '[blank]') . "\n\n";
-	
 
-        if ($targetedSummary !== '' && !should_skip_targeted_summary_context($prompt)) {
+    $userPrompt .= "PRIMARY_TARGET_FILE_SEEN_BY_SYSTEM:\n";
+    $userPrompt .= ($targetPath !== '' ? $targetPath : '[blank]') . "\n\n";
+
+    if ($targetedSummary !== '' && !should_skip_targeted_summary_context($prompt)) {
         $userPrompt .= "TARGETED FILE CONTEXT:\n";
         $userPrompt .= $targetedSummary . "\n\n";
     }
 
-    if ($targetedFilesContent) {
+    if ($authoritativePrimaryTargetFile !== null) {
         $userPrompt .= "PRIMARY TARGET FILE CONTENTS (AUTHORITATIVE):\n";
+
+        if (!empty($authoritativePrimaryTargetFile['error'])) {
+            $userPrompt .= "FILE: " . $authoritativePrimaryTargetFile['path'] . "\n";
+            $userPrompt .= "[READ FAILED: " . $authoritativePrimaryTargetFile['error'] . "]\n\n";
+        } else {
+            $userPrompt .= "FILE: " . $authoritativePrimaryTargetFile['path'] . "\n";
+            $userPrompt .= (string)$authoritativePrimaryTargetFile['content'] . "\n\n";
+        }
+    }
+
+    if (!empty($targetedFilesContent)) {
+        $userPrompt .= "SUPPORTING TARGETED FILE CONTENTS:\n";
 
         foreach ($targetedFilesContent as $f) {
             if (!empty($f['error'])) {
                 continue;
+            }
+
+            if ($authoritativePrimaryTargetFile !== null && !empty($authoritativePrimaryTargetFile['path'])) {
+                if ((string)$f['path'] === (string)$authoritativePrimaryTargetFile['path']) {
+                    continue;
+                }
             }
 
             $userPrompt .= "FILE: " . $f['path'] . "\n";
@@ -1958,29 +1996,29 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
     }
 
     try {
-        $resp = cw_openai_responses([
+        $resp = cw_openai_responses(array(
             'model' => cw_openai_model(),
-            'input' => [
-                [
+            'input' => array(
+                array(
                     'role' => 'system',
-                    'content' => [
-                        [
+                    'content' => array(
+                        array(
                             'type' => 'input_text',
                             'text' => $systemPrompt
-                        ]
-                    ]
-                ],
-                [
+                        )
+                    )
+                ),
+                array(
                     'role' => 'user',
-                    'content' => [
-                        [
+                    'content' => array(
+                        array(
                             'type' => 'input_text',
                             'text' => $userPrompt
-                        ]
-                    ]
-                ]
-            ]
-        ]);
+                        )
+                    )
+                )
+            )
+        ));
 
         $text = '';
 
@@ -1989,7 +2027,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         }
 
         if ($text === '') {
-            $out = $resp['output'] ?? [];
+            $out = $resp['output'] ?? array();
 
             if (is_array($out)) {
                 foreach ($out as $item) {
@@ -1997,7 +2035,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
                         continue;
                     }
 
-                    $content = $item['content'] ?? [];
+                    $content = $item['content'] ?? array();
                     if (!is_array($content)) {
                         continue;
                     }
@@ -2021,23 +2059,23 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
 
         $parsed = parse_plain_text_artifact($text, $targetPath !== '' ? $targetPath : null);
 
-        return [
+        return array(
             'title' => trim((string)$parsed['title']) !== '' ? (string)$parsed['title'] : ($targetPath !== '' ? ('Steven Output - ' . $targetPath) : 'Steven Output'),
             'target_path' => !empty($parsed['target_path']) ? (string)$parsed['target_path'] : ($targetPath !== '' ? $targetPath : null),
             'artifact_type' => 'code',
             'output_mode' => !empty($parsed['output_mode']) ? (string)$parsed['output_mode'] : 'analysis_only',
             'content' => (string)$parsed['content'],
             'notes' => trim((string)$parsed['notes']) !== '' ? (string)$parsed['notes'] : 'Generated by Steven (AI)',
-        ];
+        );
     } catch (Throwable $e) {
-        return [
+        return array(
             'title' => $targetPath !== '' ? ('Steven Output - ' . $targetPath) : 'Steven Output',
             'target_path' => $targetPath !== '' ? $targetPath : null,
             'artifact_type' => 'code',
             'output_mode' => 'analysis_only',
             'content' => "AI ERROR:\n" . $e->getMessage(),
             'notes' => 'Steven generation failed',
-        ];
+        );
     }
 }
 
