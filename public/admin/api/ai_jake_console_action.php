@@ -1727,6 +1727,37 @@ if (
     ];
 }
 
+function should_skip_targeted_summary_context(string $prompt): bool
+{
+    $promptLower = strtolower($prompt);
+
+    $signals = array(
+        'list all public methods',
+        'public methods',
+        'visible public methods',
+        'private methods',
+        'protected methods',
+        'method inventory',
+        'which methods are visible',
+        'complete method list',
+        'list methods',
+        'declared method',
+        'declared methods',
+        'last visible declared method',
+        'next declared method',
+        'authoritative block'
+    );
+
+    foreach ($signals as $signal) {
+        if (strpos($promptLower, $signal) !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+
 function build_steven_artifact_content(array $requestRow, array $contextFiles, array $scopeContract = array()): array
 {
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
@@ -1876,7 +1907,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         $userPrompt .= $targetPath . "\n\n";
     }
 
-    if ($targetedSummary !== '') {
+        if ($targetedSummary !== '' && !should_skip_targeted_summary_context($prompt)) {
         $userPrompt .= "TARGETED FILE CONTEXT:\n";
         $userPrompt .= $targetedSummary . "\n\n";
     }
@@ -2560,7 +2591,7 @@ $systemPrompt = implode("\n", [
         $userPrompt .= "\n\n";
     }
 
-    if ($targetedSummary !== '') {
+    if ($targetedSummary !== '' && !should_skip_targeted_summary_context($message)) {
         $userPrompt .= "TARGETED FILE CONTEXT:\n";
         $userPrompt .= $targetedSummary . "\n\n";
     }
