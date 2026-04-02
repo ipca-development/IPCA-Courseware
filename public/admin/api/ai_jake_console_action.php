@@ -326,7 +326,7 @@ function extract_large_file_tail_excerpt(string $content, array $methodNames, in
     return "/* LARGE FILE TAIL FALLBACK FOR: " . $label . " */\n\n" . $tail;
 }
 
-function read_files_for_targeted_context(array $paths, array $methodNames, int $limit = 3, int $fallbackMaxCharsPerFile = 12000): array
+function read_files_for_targeted_context(array $paths, array $methodNames, int $limit = 3, int $fallbackMaxCharsPerFile = 12000, bool $forceFullChunks = false): array
 {
     $out = array();
     $count = 0;
@@ -355,38 +355,42 @@ function read_files_for_targeted_context(array $paths, array $methodNames, int $
             continue;
         }
 
-        $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
+                    $targetedExcerpt = null;
 
-        if ($targetedExcerpt === null && !empty($methodNames)) {
-            $targetedExcerpt = extract_large_file_tail_excerpt($content, $methodNames, 28000);
-        }
+            if (!$forceFullChunks) {
+                $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
 
-        if ($targetedExcerpt !== null) {
-            $out[] = array(
-                'path' => $file['path'],
-                'basename' => $file['basename'],
-                'size_bytes' => $file['size_bytes'],
-                'content' => $targetedExcerpt,
-            );
-        } else {
-            $chunkSize = $fallbackMaxCharsPerFile;
-            $maxChunksPerFile = 6;
-            $totalChunks = (int)ceil($len / $chunkSize);
-            if ($totalChunks > $maxChunksPerFile) {
-                $totalChunks = $maxChunksPerFile;
+                if ($targetedExcerpt === null && !empty($methodNames)) {
+                    $targetedExcerpt = extract_large_file_tail_excerpt($content, $methodNames, 28000);
+                }
             }
 
-            for ($i = 0; $i < $totalChunks; $i++) {
-                $chunk = mb_substr($content, $i * $chunkSize, $chunkSize);
-
+            if ($targetedExcerpt !== null) {
                 $out[] = array(
                     'path' => $file['path'],
                     'basename' => $file['basename'],
                     'size_bytes' => $file['size_bytes'],
-                    'content' => "/* FILE CHUNK " . ($i + 1) . " / " . $totalChunks . " */\n\n" . $chunk,
+                    'content' => $targetedExcerpt,
                 );
+            } else {
+                $chunkSize = $fallbackMaxCharsPerFile;
+                $maxChunksPerFile = 6;
+                $totalChunks = (int)ceil($len / $chunkSize);
+                if ($totalChunks > $maxChunksPerFile) {
+                    $totalChunks = $maxChunksPerFile;
+                }
+
+                for ($i = 0; $i < $totalChunks; $i++) {
+                    $chunk = mb_substr($content, $i * $chunkSize, $chunkSize);
+
+                    $out[] = array(
+                        'path' => $file['path'],
+                        'basename' => $file['basename'],
+                        'size_bytes' => $file['size_bytes'],
+                        'content' => "/* FILE CHUNK " . ($i + 1) . " / " . $totalChunks . " */\n\n" . $chunk,
+                    );
+                }
             }
-        }
 
         $count++;
 		
@@ -1473,14 +1477,14 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
             $methodNames = extract_method_like_tokens_from_text($prompt);
 
     if ($targetPath !== '') {
-        $targetedFilesContent = read_files_for_targeted_context(array($targetPath), $methodNames, 1, 24000);
+        $targetedFilesContent = read_files_for_targeted_context(array($targetPath), $methodNames, 1, 24000, true);
     } elseif ($primaryTargetFile !== '' && count($targetFiles) >= 1) {
-        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000);
+        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000, true);
     } else {
-        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars);
+        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars, false);
     }
 
-      // ðŸ”¥ Targeted DB + project context
+      // Targeted DB + project context
     $dbSchema = load_targeted_schema($GLOBALS['pdo'], $prompt);
     $projectIndex = load_targeted_project_index(
         project_root_path(),
@@ -2458,7 +2462,7 @@ function build_engineering_context_files(PDO $pdo, string $prompt): array
     $paths = array_values(array_unique(array_filter($paths)));
 
      $methodNames = extract_method_like_tokens_from_text($prompt);
-    return read_files_for_targeted_context($paths, $methodNames, 3, 24000);
+     return read_files_for_targeted_context($paths, $methodNames, 3, 24000, true);
 }
 
 function resolve_effective_output_mode(?array $artifact, string $fallback = 'analysis_only'): string
