@@ -130,7 +130,6 @@ function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFi
     $paths = array_values(array_unique($paths));
 
     foreach ($paths as $path) {
-
         if ($count >= $limit) {
             break;
         }
@@ -141,24 +140,18 @@ function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFi
 
             $len = mb_strlen($content);
 
-            // 🔥 If file is small → normal behavior
             if ($len <= $maxCharsPerFile) {
-
                 $out[] = [
                     'path' => $file['path'],
                     'basename' => $file['basename'],
                     'size_bytes' => $file['size_bytes'],
                     'content' => $content,
                 ];
-
             } else {
-
-                // 🔥 Split into chunks
                 $chunkSize = 4000;
                 $totalChunks = min((int)ceil($len / $chunkSize), 2);
 
                 for ($i = 0; $i < $totalChunks; $i++) {
-
                     $chunk = mb_substr($content, $i * $chunkSize, $chunkSize);
 
                     $out[] = [
@@ -173,7 +166,6 @@ function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFi
             }
 
             $count++;
-
         } catch (Throwable $e) {
             $out[] = [
                 'path' => (string)$path,
@@ -185,28 +177,21 @@ function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFi
     return $out;
 }
 
-
 function load_database_schema(PDO $pdo): array
 {
     $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
-
-    // 🔥 LIMIT TABLE COUNT
     $tables = array_slice($tables, 0, 15);
 
     $schema = [];
 
     foreach ($tables as $table) {
-
         $stmt = $pdo->query("DESCRIBE `$table`");
         $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        // 🔥 LIMIT COLUMNS PER TABLE
         $schema[$table] = array_slice($columns, 0, 10);
     }
 
     return $schema;
 }
-
 
 function load_project_file_index(string $root): array
 {
@@ -217,11 +202,12 @@ function load_project_file_index(string $root): array
     );
 
     foreach ($iterator as $file) {
-        if (!$file->isFile()) continue;
+        if (!$file->isFile()) {
+            continue;
+        }
 
         $path = str_replace($root . '/', '', $file->getPathname());
 
-        // 🚫 EXCLUDE vendor + irrelevant folders
         if (
             strpos($path, 'vendor/') === 0 ||
             strpos($path, '.git/') === 0 ||
@@ -239,12 +225,173 @@ function load_project_file_index(string $root): array
 }
 
 
+//NEW HELPERS AI
+
+function extract_relevant_tables_from_prompt(PDO $pdo, string $prompt, int $limit = 8): array
+{
+    $promptLower = strtolower($prompt);
+    $tables = [];
+
+    try {
+        $allTables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
+    } catch (Throwable $e) {
+        return [];
+    }
+
+    if (!is_array($allTables) || empty($allTables)) {
+        return [];
+    }
+
+    foreach ($allTables as $table) {
+        $table = (string)$table;
+        if ($table === '') {
+            continue;
+        }
+
+        $tableLower = strtolower($table);
+
+        if (strpos($promptLower, $tableLower) !== false) {
+            $tables[] = $table;
+            continue;
+        }
+
+        $parts = preg_split('/_+/', $tableLower);
+        if (!is_array($parts)) {
+            continue;
+        }
+
+        $matchedParts = 0;
+        foreach ($parts as $part) {
+            $part = trim((string)$part);
+            if ($part === '' || strlen($part) < 4) {
+                continue;
+            }
+
+            if (strpos($promptLower, $part) !== false) {
+                $matchedParts++;
+            }
+        }
+
+        if ($matchedParts >= 1) {
+            $tables[] = $table;
+        }
+
+        if (count($tables) >= $limit) {
+            break;
+        }
+    }
+
+    return array_values(array_unique($tables));
+}
+
+function load_targeted_schema(PDO $pdo, string $prompt, int $maxTables = 6, int $maxColumns = 12): array
+{
+    $tables = extract_relevant_tables_from_prompt($pdo, $prompt, $maxTables);
+
+    if (empty($tables)) {
+        return [];
+    }
+
+    $schema = [];
+
+    foreach ($tables as $table) {
+        try {
+            $stmt = $pdo->query("DESCRIBE `$table`");
+            $columns = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            $schema[$table] = array_slice($columns ?: [], 0, $maxColumns);
+        } catch (Throwable $e) {
+            $schema[$table] = [
+                [
+                    'Field' => '[describe_failed]',
+                    'Type' => $e->getMessage(),
+                    'Null' => '',
+                    'Key' => '',
+                    'Default' => '',
+                    'Extra' => ''
+                ]
+            ];
+        }
+    }
+
+    return $schema;
+}
+
+function load_targeted_project_index(string $root, array $targetFiles, string $prompt, int $limit = 12): array
+{
+    $allFiles = load_project_file_index($root);
+    if (empty($allFiles)) {
+        return [];
+    }
+
+    $promptLower = strtolower($prompt);
+    $scored = [];
+
+    foreach ($allFiles as $path) {
+        $path = (string)$path;
+        $pathLower = strtolower($path);
+        $score = 0;
+
+        if (in_array($path, $targetFiles, true)) {
+            $score += 1000;
+        }
+
+        $base = strtolower(basename($path));
+        if ($base !== '' && strpos($promptLower, $base) !== false) {
+            $score += 500;
+        }
+
+        $parts = preg_split('/[\/_.-]+/', $pathLower);
+        if (is_array($parts)) {
+            foreach ($parts as $part) {
+                $part = trim((string)$part);
+                if ($part === '' || strlen($part) < 4) {
+                    continue;
+                }
+
+                if (strpos($promptLower, $part) !== false) {
+                    $score += 25;
+                }
+            }
+        }
+
+        if ($score > 0) {
+            $scored[] = [
+                'path' => $path,
+                'score' => $score
+            ];
+        }
+    }
+
+    usort($scored, function ($a, $b) {
+        $aScore = (int)$a['score'];
+        $bScore = (int)$b['score'];
+
+        if ($aScore !== $bScore) {
+            return $bScore <=> $aScore;
+        }
+
+        return strcmp((string)$a['path'], (string)$b['path']);
+    });
+
+    $out = [];
+    foreach ($scored as $row) {
+        $out[] = (string)$row['path'];
+        if (count($out) >= $limit) {
+            break;
+        }
+    }
+
+    return array_values(array_unique($out));
+}
+
+
+
 function build_jake_summary(array $requestRow, ?array $ssot, array $contextFiles): string
 {
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $type = trim((string)($requestRow['request_type'] ?? 'investigation'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
-	
+
     $ssotVersion = $ssot ? trim((string)($ssot['ssot_version'] ?? 'unknown')) : 'none';
     $ssotTitle = $ssot ? trim((string)($ssot['title'] ?? '')) : '';
 
@@ -405,11 +552,11 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
     }
 
     $body = implode("\n", array_slice($lines, $bodyStartIndex));
-	
-	if ($outputMode === 'full_drop_in') {
-    $body = preg_replace('/^[\-\+]\s?/m', '', $body);
-}
-	
+
+    if ($outputMode === 'full_drop_in') {
+        $body = preg_replace('/^[\-\+]\s?/m', '', $body);
+    }
+
     $body = trim($body);
 
     if ($body === '') {
@@ -429,7 +576,6 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
 {
     $artifactContent = (string)($artifactSeed['content'] ?? '');
     $targetPath = (string)($artifactSeed['target_path'] ?? '');
-    $outputMode = (string)($artifactSeed['output_mode'] ?? '');
     $requestPrompt = trim((string)($requestRow['prompt'] ?? ''));
 
     if (strpos(ltrim($artifactContent), 'AI ERROR:') === 0) {
@@ -440,7 +586,6 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         ];
     }
 
-    // Hard deterministic guard: do not allow class rewrites when user did not ask for one
     $containsClassRewrite =
         strpos($artifactContent, 'class CoursewareProgressionV2') !== false
         || strpos($artifactContent, 'final class CoursewareProgressionV2') !== false;
@@ -463,57 +608,58 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
             'revision' => 'Return a surgical_patch only. Do not redefine the class. Provide the exact insertion point for the new diagnostics method inside src/courseware_progression_v2.php.'
         ];
     }
-	
-	$system = implode("\n", [
+
+    $system = implode("\n", [
         'You are Jake, the IPCA architect and SSOT guardian.',
-		'',
-		'Your job is to review Steven outputs strictly, but explain your verdict in clear human language.',
-		'',
-		'Core review rules:',
-		'- Stay grounded in the actual user request.',
-		'- Stay grounded in the loaded files.',
-		'- Stay grounded in the SSOT snapshot when provided.',
-		'- Do not give generic code-review advice unless it is directly relevant to the actual artifact.',
-		'- Do not fall back to generic security, logging, validation, or architecture checklists unless the artifact truly has that specific problem.',
-		'- Focus on whether Steven actually solved the requested task correctly and safely.',
-		'',
-		'Critical rejection rules:',
-		'- Reject invented methods, invented schema, invented APIs, or invented architecture.',
-		'- Reject changes that alter behavior without explicit permission.',
-		'- Reject output that is not actually grounded in the loaded file context.',
-		'- Reject output that claims a safe full drop-in when that is not justified.',
-		'- Reject any output that redefines an existing class unless that was explicitly requested.',
-		'- Reject any output that includes a full class definition for a file that already exists, unless a true full-file replacement was explicitly requested and is clearly safe.',
-		'- Reject any output that assumes methods exist unless those methods are visible or clearly confirmed in the provided file context.',
-		'- Reject any output that introduces new methods while relying on unverified existing methods.',
-		'- Reject any output that mixes placeholders, example usage blocks, or speculative scaffolding into what is presented as production-ready code.',
-		'- If there is uncertainty about method existence, class structure, or safe insertion point, prefer analysis_only.',
-		'- If the correct answer is "not safely possible yet", prefer analysis_only.',
-		'',
-		'Approval rules:',
-		'- Approve code if it follows established project patterns, even if full method visibility is not present in the context.',
-		'- If method names match known engine conventions (e.g. finalizeAssessedProgressTest, sendProgressionEmailById), treat them as valid unless proven otherwise.',
-		'- Only reject when there is clear evidence of invented or unsafe behavior.',
-		'- Only approve full_drop_in if it safely replaces a known file without structural risk.',
-		'- Only approve surgical_patch if the insertion point is clear and the patch is realistically applicable.',
-		'- If unsure, do not approve.',
-		'',
-		'Formatting rules:',
-		'- Do not use markdown headings like #, ##, or ###.',
-		'- Do not number sections like "### 1."',
-		'- Use plain section titles only when needed, for example: "Summary", "What this means", "My suggestion".',
-		'- Use simple bullet lists when structure helps.',
-		'',
-		'Communication rules:',
-		'- Be clear, calm, and conversational.',
-		'- Explain the issue in normal human language.',
-		'- After the technical explanation, add a short plain-English clarification starting with: "In other words:"',
-		'- Keep the explanation helpful, not robotic.',
-		'',
-		'Return format exactly:',
-		'VERDICT: approved|needs_revision|analysis_only',
-		'REASON: <clear explanation with some context, plus "In other words: ...">',
-		'REVISION: <exact revision instruction if needed, otherwise "None">',
+        '',
+        'Your job is to review Steven outputs strictly, but explain your verdict in clear human language.',
+        '',
+        'Core review rules:',
+        '- Stay grounded in the actual user request.',
+        '- Stay grounded in the loaded files.',
+        '- Stay grounded in the SSOT snapshot when provided.',
+        '- Do not give generic code-review advice unless it is directly relevant to the actual artifact.',
+        '- Do not fall back to generic security, logging, validation, or architecture checklists unless the artifact truly has that specific problem.',
+        '- Focus on whether Steven actually solved the requested task correctly and safely.',
+        '',
+        'Critical rejection rules:',
+        '- Reject invented methods, invented schema, invented APIs, or invented architecture.',
+        '- Reject changes that alter behavior without explicit permission.',
+        '- Reject output that is not actually grounded in the loaded file context.',
+        '- Reject output that claims a safe full drop-in when that is not justified.',
+        '- Reject any output that redefines an existing class unless that was explicitly requested.',
+        '- Reject any output that includes a full class definition for a file that already exists, unless a true full-file replacement was explicitly requested and is clearly safe.',
+        '- Reject methods ONLY if they clearly do not match established project conventions or naming patterns.',
+        '- If a method follows known engine naming patterns (e.g. finalizeAssessedProgressTest, sendProgressionEmailById), assume it exists unless there is evidence it does not.',
+        '- Reject any output that introduces new methods while relying on unverified existing methods.',
+        '- Reject any output that mixes placeholders, example usage blocks, or speculative scaffolding into what is presented as production-ready code.',
+        '- If there is uncertainty, prefer needs_revision over analysis_only when the target file still contains an obvious local bug that can be repaired without inventing new architecture.',
+        '- Use analysis_only only when the requested fix truly cannot be grounded from the target file, loaded files, and established project conventions.',
+        '',
+        'Approval rules:',
+        '- Approve code if it follows established project patterns, even if full method visibility is not present in the context.',
+        '- If method names match known engine conventions (e.g. finalizeAssessedProgressTest, sendProgressionEmailById), treat them as valid unless proven otherwise.',
+        '- Only reject when there is clear evidence of invented or unsafe behavior.',
+        '- Only approve full_drop_in if it safely replaces a known file without structural risk.',
+        '- Only approve surgical_patch if the insertion point is clear and the patch is realistically applicable.',
+        '- If unsure, do not approve.',
+        '',
+        'Formatting rules:',
+        '- Do not use markdown headings like #, ##, or ###.',
+        '- Do not number sections like "### 1."',
+        '- Use plain section titles only when needed, for example: "Summary", "What this means", "My suggestion".',
+        '- Use simple bullet lists when structure helps.',
+        '',
+        'Communication rules:',
+        '- Be clear, calm, and conversational.',
+        '- Explain the issue in normal human language.',
+        '- After the technical explanation, add a short plain-English clarification starting with: "In other words:"',
+        '- Keep the explanation helpful, not robotic.',
+        '',
+        'Return format exactly:',
+        'VERDICT: approved|needs_revision|analysis_only',
+        'REASON: <clear explanation with some context, plus "In other words: ...">',
+        'REVISION: <exact revision instruction if needed, otherwise "None">',
     ]);
 
     $user = "USER REQUEST:\n" . trim((string)($requestRow['prompt'] ?? '')) . "\n\n";
@@ -525,17 +671,18 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         $user .= "Summary: " . (string)($ssot['summary_text'] ?? '') . "\n\n";
     }
 
-    // 🔥 Add context to review phase
-if (!empty($contextFiles)) {
-    $user .= "TARGETED FILE CONTENTS:\n";
+    if (!empty($contextFiles)) {
+        $user .= "TARGETED FILE CONTENTS:\n";
 
-    foreach ($contextFiles as $f) {
-        if (!empty($f['error'])) continue;
+        foreach ($contextFiles as $f) {
+            if (!empty($f['error'])) {
+                continue;
+            }
 
-        $user .= "FILE: " . $f['path'] . "\n";
-        $user .= (string)$f['content'] . "\n\n";
+            $user .= "FILE: " . $f['path'] . "\n";
+            $user .= (string)$f['content'] . "\n\n";
+        }
     }
-}
 
     $user .= "STEVEN ARTIFACT TO REVIEW:\n";
     $user .= $artifactContent;
@@ -640,101 +787,101 @@ if (!empty($contextFiles)) {
     ];
 }
 
-
-
-
 function build_steven_artifact_content(array $requestRow, array $contextFiles): array
 {
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
-$prompt = trim((string)($requestRow['prompt'] ?? ''));
+    $prompt = trim((string)($requestRow['prompt'] ?? ''));
 
-// 1) Explicit path from prompt wins first
-$explicitPaths = extract_file_candidates_from_text($prompt);
-$explicitTargetPath = '';
-if (!empty($explicitPaths)) {
-    $explicitTargetPath = (string)$explicitPaths[0];
-}
+    $explicitPaths = extract_file_candidates_from_text($prompt);
+    $explicitTargetPath = '';
+    if (!empty($explicitPaths)) {
+        $explicitTargetPath = (string)$explicitPaths[0];
+    }
 
-// 2) Architecture targeting fallback
-$targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
-$targetedSummary = $targetData['summary'];
-$targetFiles = $targetData['files'];
-$primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
+    $targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
+    $targetedSummary = $targetData['summary'];
+    $targetFiles = $targetData['files'];
+    $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
-// 3) Final target path priority
-$targetPath = $explicitTargetPath !== '' ? $explicitTargetPath : $primaryTargetFile;
+    $targetPath = $explicitTargetPath !== '' ? $explicitTargetPath : $primaryTargetFile;
 
-if ($targetPath === '') {
-    foreach ($contextFiles as $f) {
-        if (empty($f['error']) && !empty($f['path'])) {
-            $targetPath = (string)$f['path'];
-            break;
+    if ($targetPath === '') {
+        foreach ($contextFiles as $f) {
+            if (empty($f['error']) && !empty($f['path'])) {
+                $targetPath = (string)$f['path'];
+                break;
+            }
         }
     }
-}
 
-// 4) Load targeted file contents
-$targetedMaxChars = 20000;
+    $targetedMaxChars = 20000;
 
-if ($targetPath !== '') {
-    $targetedFilesContent = read_files_for_context([$targetPath], 1, 100000);
-} elseif ($primaryTargetFile !== '' && count($targetFiles) === 1) {
-    $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
-} else {
-    $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
-}
+    if ($targetPath !== '') {
+        $targetedFilesContent = read_files_for_context([$targetPath], 1, 100000);
+    } elseif ($primaryTargetFile !== '' && count($targetFiles) === 1) {
+        $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
+    } else {
+        $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
+    }
 
-    // 🔥 DB + project context
-    $dbSchema = load_database_schema($GLOBALS['pdo']);
-    $projectIndex = load_project_file_index(project_root_path());
+      // 🔥 Targeted DB + project context
+    $dbSchema = load_targeted_schema($GLOBALS['pdo'], $prompt);
+    $projectIndex = load_targeted_project_index(
+        project_root_path(),
+        array_values(array_unique(array_filter(array_merge(
+            $targetPath !== '' ? [$targetPath] : [],
+            $targetFiles
+        )))),
+        $prompt
+    );
 
     $systemPrompt = implode("\n", [
-		'You are Steven, a hidden senior PHP/MySQL implementation agent inside the IPCA engineering console.',
-		'You write implementation-ready engineering output.',
-		'You do not make architecture decisions independently.',
-		'You must preserve existing behavior unless explicitly changed.',
-		'You must not invent nonexistent schema, APIs, helper functions, or engine methods unless the user explicitly requests new structure.',
-		'',
-		'Context usage rules:',
-		'- If CONTEXT FILES are provided, treat them as directly readable code, not as hints.',
-		'- If DATABASE SCHEMA is provided, treat it as authoritative and extract real table and column names from it.',
-		'- If PROJECT FILE INDEX is provided, treat it as the available live project structure for this run.',
-		'- Do NOT say you cannot access files, schema, or project structure when they are present in the prompt.',
-		'- When asked to list methods, tables, files, or structures, extract them explicitly from the provided context.',
-		'- If the required information is NOT present in the provided context, return analysis_only and clearly state what is missing.',
-		'',
-		'Context priority rules:',
-		'- When a question explicitly references DATABASE SCHEMA, ONLY use DATABASE SCHEMA to answer.',
-		'- When a question explicitly references CONTEXT FILES, ONLY use the provided file contents to answer.',
-		'- When a question explicitly references PROJECT FILE INDEX, ONLY use the file index list to answer.',
-		'- Do NOT mix sources unless the request explicitly requires combining them.',
-		'- Do NOT reuse a previous answer from another context source when the current request targets a different source.',
-		'- Each answer must be grounded in the correct requested source.',
-		'',
-		'Implementation safety rules:',
-		'- Before using any method or function, verify it exists in the provided file context.',
-		'- If unsure whether a method exists, do NOT assume; instead return analysis_only.',
-		'- Prefer using clearly visible existing methods from the loaded file.',
-		'- If functionality is missing, explicitly state which method, file, schema element, or dependency is missing instead of guessing.',
-		'',
-		'Output rules:',
-		'- When a safe full replacement is possible, provide a full drop-in.',
-		'- When a full replacement is unsafe, provide a surgical patch.',
-		'- When neither is safe, provide analysis_only.',
-		'- Return plain text in exactly this format:',
-		'- When OUTPUT_MODE is full_drop_in, DO NOT include any diff markers like "-", "+", or "@@". Return clean copy-paste ready code only.',
-		'OUTPUT_MODE: full_drop_in|surgical_patch|analysis_only',
-		'TARGET_PATH: <path or blank>',
-		'TITLE: <short title>',
-		'NOTES: <short note>',
-		'',
-		'<blank line>',
-		'<actual output starts here>',
-		'',
-		'Do not return JSON.',
-		'Do not wrap the response in markdown fences.',
-		'Do not put introductions before OUTPUT_MODE.',
-		'After the blank line, provide normal human-readable code or patch content.',
+        'You are Steven, a hidden senior PHP/MySQL implementation agent inside the IPCA engineering console.',
+        'You write implementation-ready engineering output.',
+        'You do not make architecture decisions independently.',
+        'You must preserve existing behavior unless explicitly changed.',
+        'You must not invent nonexistent schema, APIs, helper functions, or engine methods unless the user explicitly requests new structure.',
+        '',
+        'Context usage rules:',
+        '- If CONTEXT FILES are provided, treat them as directly readable code, not as hints.',
+        '- If DATABASE SCHEMA is provided, treat it as authoritative and extract real table and column names from it.',
+        '- If PROJECT FILE INDEX is provided, treat it as the available live project structure for this run.',
+        '- Do NOT say you cannot access files, schema, or project structure when they are present in the prompt.',
+        '- When asked to list methods, tables, files, or structures, extract them explicitly from the provided context.',
+        '- If the required information is NOT present in the provided context, return analysis_only and clearly state what is missing.',
+        '',
+        'Context priority rules:',
+        '- When a question explicitly references DATABASE SCHEMA, ONLY use DATABASE SCHEMA to answer.',
+        '- When a question explicitly references CONTEXT FILES, ONLY use the provided file contents to answer.',
+        '- When a question explicitly references PROJECT FILE INDEX, ONLY use the file index list to answer.',
+        '- Do NOT mix sources unless the request explicitly requires combining them.',
+        '- Do NOT reuse a previous answer from another context source when the current request targets a different source.',
+        '- Each answer must be grounded in the correct requested source.',
+        '',
+        'Implementation safety rules:',
+        '- Before using any method or function, verify it exists in the provided file context.',
+        '- If unsure whether a method exists, do NOT assume; instead return analysis_only.',
+        '- Prefer using clearly visible existing methods from the loaded file.',
+        '- If functionality is missing, explicitly state which method, file, schema element, or dependency is missing instead of guessing.',
+        '',
+        'Output rules:',
+        '- When a safe full replacement is possible, provide a full drop-in.',
+        '- When a full replacement is unsafe, provide a surgical patch.',
+        '- When neither is safe, provide analysis_only.',
+        '- Return plain text in exactly this format:',
+        '- When OUTPUT_MODE is full_drop_in, DO NOT include any diff markers like "-", "+", or "@@". Return clean copy-paste ready code only.',
+        'OUTPUT_MODE: full_drop_in|surgical_patch|analysis_only',
+        'TARGET_PATH: <path or blank>',
+        'TITLE: <short title>',
+        'NOTES: <short note>',
+        '',
+        '<blank line>',
+        '<actual output starts here>',
+        '',
+        'Do not return JSON.',
+        'Do not wrap the response in markdown fences.',
+        'Do not put introductions before OUTPUT_MODE.',
+        'After the blank line, provide normal human-readable code or patch content.',
     ]);
 
     $userPrompt = "REQUEST TITLE:\n" . $title . "\n\n";
@@ -757,30 +904,36 @@ if ($targetPath !== '') {
         }
     }
 
-	$userPrompt .= "DATABASE SCHEMA:\n";
-	$userPrompt .= json_encode(array_keys($dbSchema));
-	$userPrompt .= "\n\n";
-
-	$userPrompt .= "PROJECT FILE INDEX:\n";
-	$userPrompt .= implode("\n", $projectIndex);
-	$userPrompt .= "\n\n";
-	
-	if ($targetedSummary !== '') {
-    $userPrompt .= "TARGETED FILE CONTEXT:\n";
-    $userPrompt .= $targetedSummary . "\n\n";
-	}	
-	
-	if ($targetedFilesContent) {
-    $userPrompt .= "TARGETED FILE CONTENTS:\n";
-
-    foreach ($targetedFilesContent as $f) {
-        if (!empty($f['error'])) continue;
-
-        $userPrompt .= "FILE: " . $f['path'] . "\n";
-        $userPrompt .= $f['content'] . "\n\n";
+    if (!empty($dbSchema)) {
+        $userPrompt .= "TARGETED DATABASE SCHEMA:\n";
+        $userPrompt .= json_encode($dbSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $userPrompt .= "\n\n";
     }
-}
-	
+
+    if (!empty($projectIndex)) {
+        $userPrompt .= "TARGETED PROJECT FILE INDEX:\n";
+        $userPrompt .= implode("\n", $projectIndex);
+        $userPrompt .= "\n\n";
+    }
+
+    if ($targetedSummary !== '') {
+        $userPrompt .= "TARGETED FILE CONTEXT:\n";
+        $userPrompt .= $targetedSummary . "\n\n";
+    }
+
+    if ($targetedFilesContent) {
+        $userPrompt .= "TARGETED FILE CONTENTS:\n";
+
+        foreach ($targetedFilesContent as $f) {
+            if (!empty($f['error'])) {
+                continue;
+            }
+
+            $userPrompt .= "FILE: " . $f['path'] . "\n";
+            $userPrompt .= $f['content'] . "\n\n";
+        }
+    }
+
     try {
         $resp = cw_openai_responses([
             'model' => cw_openai_model(),
@@ -853,7 +1006,6 @@ if ($targetPath !== '') {
             'content' => (string)$parsed['content'],
             'notes' => trim((string)$parsed['notes']) !== '' ? (string)$parsed['notes'] : 'Generated by Steven (AI)',
         ];
-
     } catch (Throwable $e) {
         return [
             'title' => $targetPath !== '' ? ('Steven Output - ' . $targetPath) : 'Steven Output',
@@ -1002,9 +1154,6 @@ function load_conversation(PDO $pdo, int $conversationId): ?array
     return $row ?: null;
 }
 
-
-//HELPERS FOR COOPERATION BETWEEN JAKE AND STEVEN
-
 function update_conversation_state(
     PDO $pdo,
     int $conversationId,
@@ -1045,7 +1194,7 @@ function extract_active_target_files_from_message(string $messageText): array
 
 function build_active_request_summary(string $messageText, ?string $requestType = null): string
 {
-    $messageText = trim(preg_replace('/\s+/', ' ', $messageText));
+    $messageText = trim((string)preg_replace('/\s+/', ' ', $messageText));
     $summary = $messageText;
 
     if ($summary === '') {
@@ -1071,7 +1220,6 @@ function is_continuation_trigger(string $messageText): bool
         return false;
     }
 
-    // Normalize apostrophes, punctuation, spacing
     $normalized = str_replace(array("’", "`", "‘"), "'", $text);
     $normalized = preg_replace('/[^a-z0-9\'\s]/', ' ', $normalized);
     $normalized = preg_replace('/\s+/', ' ', $normalized);
@@ -1132,7 +1280,6 @@ function is_continuation_trigger(string $messageText): bool
 
     return false;
 }
-
 
 function is_revision_trigger(string $messageText): bool
 {
@@ -1199,7 +1346,7 @@ function load_conversation_messages(PDO $pdo, int $conversationId): array
 
 function auto_subject_from_message(string $message): string
 {
-    $message = trim(preg_replace('/\s+/', ' ', $message));
+    $message = trim((string)preg_replace('/\s+/', ' ', $message));
     if ($message === '') {
         return 'Untitled conversation';
     }
@@ -1214,79 +1361,83 @@ function auto_subject_from_message(string $message): string
 function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = null): string
 {
     $message = trim((string)($userMessage['message_text'] ?? ''));
-	$targetData = build_targeted_context($pdo, $message);
-	$targetedSummary = $targetData['summary'];
-	$targetFiles = $targetData['files'];
-	$primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
+    $targetData = build_targeted_context($pdo, $message);
+    $targetedSummary = $targetData['summary'];
+    $targetFiles = $targetData['files'];
+    $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
-$targetedMaxChars = 20000;
+    $targetedMaxChars = 20000;
 
-if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
-    $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
-} else {
-    $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
-}
+    if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
+        $targetedFilesContent = read_files_for_context([$primaryTargetFile], 1, 100000);
+    } else {
+        $targetedFilesContent = read_files_for_context($targetFiles, 2, $targetedMaxChars);
+    }
 
     $ssot = load_latest_ssot_snapshot($pdo);
-	$dbSchema = load_database_schema($pdo);
     $fileCandidates = extract_file_candidates_from_text($message);
-	$contextFiles = read_files_for_context($fileCandidates, 3);
-	$projectIndex = load_project_file_index(project_root_path());
-	
+    $contextFiles = read_files_for_context($fileCandidates, 3);
+    $dbSchema = load_targeted_schema($pdo, $message);
+    $projectIndex = load_targeted_project_index(
+        project_root_path(),
+        array_values(array_unique(array_filter(array_merge($fileCandidates, $targetFiles)))),
+        $message
+    );
+
     $systemPrompt = implode("\n", [
-    'You are Jake, the IPCA system architect and SSOT guardian.',
-    '',
-    'You think like a senior software architect, but you speak like a clear, calm, helpful human.',
-    '',
-    'Tone rules:',
-    '- Natural, conversational, like a senior engineer explaining things to a colleague',
-    '- No robotic or overly strict phrasing',
-    '- No unnecessary warnings unless something is actually risky',
-    '- Be concise but not abrupt',
-    '- It should feel like a real conversation, not a system message',
-    '',
-    'Behavior rules:',
-    '- Internally be strict about architecture, SSOT, and correctness',
-    '- Externally explain things simply and clearly',
-    '- You can guide, suggest, and explain — not just block',
-    '- If something is not possible, explain *why* and suggest the next best step',
-    '- Avoid saying things like "we must stay focused" or similar rigid phrasing',
-    '',
-    'Engineering rules:',
-    '- Do not invent system behavior',
-    '- Stay grounded in SSOT and loaded files',
-    '- Highlight risks when relevant, but do not overdo it',
-	'',
-	'Context usage rules:',
-	'- If LOADED FILES are present, treat them as directly readable context.',
-	'- If DATABASE SCHEMA is present, treat it as directly available source data.',
-	'- If PROJECT FILE INDEX is present, treat it as directly available source data.',
-	'- When the answer is present in supplied context, use that context directly instead of giving generic guidance.',
-	'- Do not say you cannot access a file, schema, or project structure when it has been provided in the prompt.',
-	'- If asked to list items from provided context, list the actual items from that context.',
-	'- If context is incomplete or truncated, say that clearly and answer only from the visible portion.',
-	'- Never propose SQL INSERT statements for artifacts.',
-	'- Artifacts must ONLY be created via the engineering cycle (Steven).',	
-    '',
-    'Interaction style:',
-	'- Think like a partner, not a gatekeeper',
-	'- You are assisting the user, not policing them',
-	'- Always structure your reply using section titles when explaining steps, reasoning, or recommendations',
-	'- Use bullet points only inside sections when it improves clarity',
-	'- Never write section titles as plain text',
-	'- Every section title MUST use the format: **Title**',
-	'- After every section title, insert exactly one empty line before continuing text',
-	'- Keep each section short and focused',
-	'- Avoid long continuous paragraphs',
-	'- Prefer breaking complex ideas into 2–4 short lines',
-	'',
-	'Default reply structure:',
-	'- Use sections in this order when applicable:',
-	'  **Summary**',
-	'  **What this means**',
-	'  **In other words**',
-	'  **My suggestion**',	
-]);
+        'You are Jake, the IPCA system architect and SSOT guardian.',
+        '',
+        'You think like a senior software architect, but you speak like a clear, calm, helpful human.',
+        '',
+        'Tone rules:',
+        '- Natural, conversational, like a senior engineer explaining things to a colleague',
+        '- No robotic or overly strict phrasing',
+        '- No unnecessary warnings unless something is actually risky',
+        '- Be concise but not abrupt',
+        '- It should feel like a real conversation, not a system message',
+        '',
+        'Behavior rules:',
+        '- Internally be strict about architecture, SSOT, and correctness',
+        '- Externally explain things simply and clearly',
+        '- You can guide, suggest, and explain — not just block',
+        '- If something is not possible, explain *why* and suggest the next best step',
+        '- Avoid saying things like "we must stay focused" or similar rigid phrasing',
+        '',
+        'Engineering rules:',
+        '- Do not invent system behavior',
+        '- Stay grounded in SSOT and loaded files',
+        '- Highlight risks when relevant, but do not overdo it',
+        '',
+        'Context usage rules:',
+        '- If LOADED FILES are present, treat them as directly readable context.',
+        '- If DATABASE SCHEMA is present, treat it as directly available source data.',
+        '- If PROJECT FILE INDEX is present, treat it as directly available source data.',
+        '- When the answer is present in supplied context, use that context directly instead of giving generic guidance.',
+        '- Do not say you cannot access a file, schema, or project structure when it has been provided in the prompt.',
+        '- If asked to list items from provided context, list the actual items from that context.',
+        '- If context is incomplete or truncated, say that clearly and answer only from the visible portion.',
+        '- Never propose SQL INSERT statements for artifacts.',
+        '- Artifacts must ONLY be created via the engineering cycle (Steven).',
+        '',
+        'Interaction style:',
+        '- Think like a partner, not a gatekeeper',
+        '- You are assisting the user, not policing them',
+        '- Always structure your reply using section titles when explaining steps, reasoning, or recommendations',
+        '- Use bullet points only inside sections when it improves clarity',
+        '- Never write section titles as plain text',
+        '- Every section title MUST use the format: **Title**',
+        '- After every section title, insert exactly one empty line before continuing text',
+        '- Keep each section short and focused',
+        '- Avoid long continuous paragraphs',
+        '- Prefer breaking complex ideas into 2–4 short lines',
+        '',
+        'Default reply structure:',
+        '- Use sections in this order when applicable:',
+        '  **Summary**',
+        '  **What this means**',
+        '  **In other words**',
+        '  **My suggestion**',
+    ]);
 
     $userPrompt = "USER MESSAGE:\n" . $message . "\n\n";
 
@@ -1302,44 +1453,50 @@ if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
     }
 
     if ($contextFiles) {
-    $userPrompt .= "LOADED FILE CONTENTS:\n";
+        $userPrompt .= "LOADED FILE CONTENTS:\n";
 
-    foreach ($contextFiles as $f) {
-        if (!empty($f['error'])) {
+        foreach ($contextFiles as $f) {
+            if (!empty($f['error'])) {
+                $userPrompt .= "FILE: " . $f['path'] . "\n";
+                $userPrompt .= "[READ FAILED: " . $f['error'] . "]\n\n";
+                continue;
+            }
+
             $userPrompt .= "FILE: " . $f['path'] . "\n";
-            $userPrompt .= "[READ FAILED: " . $f['error'] . "]\n\n";
-            continue;
+            $userPrompt .= (string)$f['content'] . "\n\n";
         }
-
-        $userPrompt .= "FILE: " . $f['path'] . "\n";
-        $userPrompt .= (string)$f['content'] . "\n\n";
     }
-	}
 
-	$userPrompt .= "DATABASE SCHEMA:\n";
-	$userPrompt .= json_encode(array_slice(array_keys($dbSchema), 0, 8));
-	$userPrompt .= "\n\n";
-
-	$userPrompt .= "PROJECT FILE INDEX:\n";
-	$userPrompt .= implode("\n", $projectIndex);
-	$userPrompt .= "\n\n";
-	
-	if ($targetedSummary !== '') {
-    $userPrompt .= "TARGETED FILE CONTEXT:\n";
-    $userPrompt .= $targetedSummary . "\n\n";
-	}
-
-if (!empty($targetedFilesContent)) {
-    $userPrompt .= "TARGETED FILE CONTENTS:\n";
-
-    foreach ($targetedFilesContent as $f) {
-        if (!empty($f['error'])) continue;
-
-        $userPrompt .= "FILE: " . $f['path'] . "\n";
-        $userPrompt .= $f['content'] . "\n\n";
+    if (!empty($dbSchema)) {
+        $userPrompt .= "TARGETED DATABASE SCHEMA:\n";
+        $userPrompt .= json_encode($dbSchema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $userPrompt .= "\n\n";
     }
-}
-	
+
+    if (!empty($projectIndex)) {
+        $userPrompt .= "TARGETED PROJECT FILE INDEX:\n";
+        $userPrompt .= implode("\n", $projectIndex);
+        $userPrompt .= "\n\n";
+    }
+
+    if ($targetedSummary !== '') {
+        $userPrompt .= "TARGETED FILE CONTEXT:\n";
+        $userPrompt .= $targetedSummary . "\n\n";
+    }
+
+    if (!empty($targetedFilesContent)) {
+        $userPrompt .= "TARGETED FILE CONTENTS:\n";
+
+        foreach ($targetedFilesContent as $f) {
+            if (!empty($f['error'])) {
+                continue;
+            }
+
+            $userPrompt .= "FILE: " . $f['path'] . "\n";
+            $userPrompt .= $f['content'] . "\n\n";
+        }
+    }
+
     $resp = cw_openai_responses([
         'model' => cw_openai_model(),
         'input' => [
@@ -1408,23 +1565,83 @@ if (!empty($targetedFilesContent)) {
     return $text;
 }
 
+function should_include_core_engine_file(string $path, string $prompt, array $targetFiles, ?string $primaryFile): bool
+{
+    $path = trim($path);
+    if ($path === '') {
+        return false;
+    }
 
+    if ($primaryFile !== null && $primaryFile === $path) {
+        return true;
+    }
+
+    if (in_array($path, $targetFiles, true)) {
+        return true;
+    }
+
+    $explicitPaths = extract_file_candidates_from_text($prompt);
+    if (in_array($path, $explicitPaths, true)) {
+        return true;
+    }
+
+    $promptLower = strtolower($prompt);
+
+    if ($path === 'src/courseware_progression_v2.php') {
+        $signals = [
+            'progression',
+            'progress test',
+            'progress_test',
+            'lesson activity',
+            'lesson_activity',
+            'student_required_actions',
+            'deadline',
+            'remediation',
+            'summary review',
+            'instructor approval'
+        ];
+
+        foreach ($signals as $signal) {
+            if (strpos($promptLower, $signal) !== false) {
+                return true;
+            }
+        }
+    }
+
+    if ($path === 'src/notification_service.php') {
+        $signals = [
+            'notification',
+            'email',
+            'template',
+            'training_progression_emails',
+            'send',
+            'queue',
+            'postmark'
+        ];
+
+        foreach ($signals as $signal) {
+            if (strpos($promptLower, $signal) !== false) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
 
 function build_engineering_context_files(PDO $pdo, string $prompt): array
 {
     $paths = [];
 
-    // 1) Exact file paths explicitly mentioned by the user/request always win first
     $explicitPaths = extract_file_candidates_from_text($prompt);
     foreach ($explicitPaths as $p) {
         $paths[] = $p;
     }
 
-    // 2) Then use architecture targeting as fallback/support
     $targetData = build_targeted_context($pdo, $prompt);
 
-    $primary = $targetData['primary_file'] ?? null;
-    $files   = $targetData['files'] ?? [];
+    $primary = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : null;
+    $files = isset($targetData['files']) && is_array($targetData['files']) ? $targetData['files'] : [];
 
     if ($primary) {
         $paths[] = $primary;
@@ -1434,15 +1651,18 @@ function build_engineering_context_files(PDO $pdo, string $prompt): array
         $paths[] = $f;
     }
 
-    // 3) Always include core engine files
-    $paths[] = 'src/courseware_progression_v2.php';
-    $paths[] = 'src/notification_service.php';
+    if (should_include_core_engine_file('src/courseware_progression_v2.php', $prompt, $files, $primary)) {
+        $paths[] = 'src/courseware_progression_v2.php';
+    }
+
+    if (should_include_core_engine_file('src/notification_service.php', $prompt, $files, $primary)) {
+        $paths[] = 'src/notification_service.php';
+    }
 
     $paths = array_values(array_unique(array_filter($paths)));
 
     return read_files_for_context($paths, 4, 20000);
 }
-
 
 function run_jake_engineering_cycle(
     PDO $pdo,
@@ -1473,8 +1693,8 @@ function run_jake_engineering_cycle(
         throw new RuntimeException('Unable to reload created request');
     }
 
-$ssot = load_latest_ssot_snapshot($pdo);
-$contextFiles = build_engineering_context_files($pdo, (string)$requestRow['prompt']);
+    $ssot = load_latest_ssot_snapshot($pdo);
+    $contextFiles = build_engineering_context_files($pdo, (string)$requestRow['prompt']);
 
     $runId = create_jake_run(
         $pdo,
@@ -1498,7 +1718,6 @@ $contextFiles = build_engineering_context_files($pdo, (string)$requestRow['promp
         $finalReviewSummary = '';
 
         while ($currentRound <= $maxRounds) {
-
             $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles);
             $outputMode = (string)($artifactSeed['output_mode'] ?? 'full_drop_in');
 
@@ -1516,26 +1735,16 @@ $contextFiles = build_engineering_context_files($pdo, (string)$requestRow['promp
             ]);
 
             $review = jake_review_artifact(
-				$requestRow,
-				$ssot,
-				$contextFiles,
-				$artifactSeed
-			);
+                $requestRow,
+                $ssot,
+                $contextFiles,
+                $artifactSeed
+            );
 
             $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
             $reviewSummary = (string)($review['reason'] ?? '');
-            $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
-			$reviewSummary = (string)($review['reason'] ?? '');
 
-			if (
-				$reviewStatus === 'analysis_only'
-				&& stripos($reviewSummary, 'cannot be safely implemented') === false
-				&& stripos($reviewSummary, 'missing required context') === false
-			) {
-				$reviewStatus = 'approved';
-			}
-
-			$isFinal = ($reviewStatus === 'approved') ? 1 : 0;
+            $isFinal = ($reviewStatus === 'approved') ? 1 : 0;
 
             $stmt2 = $pdo->prepare("
                 UPDATE ai_jake_artifacts
@@ -1570,7 +1779,6 @@ $contextFiles = build_engineering_context_files($pdo, (string)$requestRow['promp
             'risk_notes' => $riskNotes . ' Final review status: ' . $finalReviewStatus,
             'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
         ]);
-
     } catch (Throwable $inner) {
         update_jake_run($pdo, $runId, [
             'status' => 'failed',
@@ -1583,62 +1791,54 @@ $contextFiles = build_engineering_context_files($pdo, (string)$requestRow['promp
         throw $inner;
     }
 
-$replyLines = [];
+    $replyLines = [];
 
-// Title
-$replyLines[] = '**Summary**';
-$replyLines[] = 'I took your request, generated a solution, and reviewed it against the system.';
-$replyLines[] = '';
+    $replyLines[] = '**Summary**';
+    $replyLines[] = 'I took your request, generated a solution, and reviewed it against the system.';
+    $replyLines[] = '';
 
-// Result block
-$replyLines[] = '**Result**';
-$replyLines[] = '- Request ID: ' . $requestId;
-$replyLines[] = '- Run ID: ' . $runId;
-$replyLines[] = '- Artifact ID: ' . $finalArtifactId;
-$replyLines[] = '- Output Mode: ' . (string)($finalArtifact['output_mode'] ?? $outputMode);
-$replyLines[] = '- Review Status: ' . $finalReviewStatus;
-$replyLines[] = '- Target Path: ' . (($finalArtifact !== null && $finalArtifact['target_path'] !== null) ? $finalArtifact['target_path'] : '[not determined]');
-$replyLines[] = '';
+    $replyLines[] = '**Result**';
+    $replyLines[] = '- Request ID: ' . $requestId;
+    $replyLines[] = '- Run ID: ' . $runId;
+    $replyLines[] = '- Artifact ID: ' . $finalArtifactId;
+    $replyLines[] = '- Output Mode: ' . (string)($finalArtifact['output_mode'] ?? $outputMode);
+    $replyLines[] = '- Review Status: ' . $finalReviewStatus;
+    $replyLines[] = '- Target Path: ' . (($finalArtifact !== null && $finalArtifact['target_path'] !== null) ? $finalArtifact['target_path'] : '[not determined]');
+    $replyLines[] = '';
 
-// Explanation
-$replyLines[] = '**What this means**';
-$replyLines[] = $finalReviewSummary !== '' ? $finalReviewSummary : 'No detailed review feedback was generated.';
-$replyLines[] = '';
+    $replyLines[] = '**What this means**';
+    $replyLines[] = $finalReviewSummary !== '' ? $finalReviewSummary : 'No detailed review feedback was generated.';
+    $replyLines[] = '';
 
-// Human explanation
-$replyLines[] = '**In other words**';
+    $replyLines[] = '**In other words**';
 
-if ($finalReviewStatus === 'approved') {
-    $replyLines[] = 'This is solid and safe. You can use the artifact directly.';
-} elseif ($finalReviewStatus === 'needs_revision') {
-    $replyLines[] = 'The direction is good, but there are issues that make it unsafe to use as-is.';
-} else {
-    $replyLines[] = 'This cannot be safely implemented yet without adjusting the approach.';
+    if ($finalReviewStatus === 'approved') {
+        $replyLines[] = 'This is solid and safe. You can use the artifact directly.';
+    } elseif ($finalReviewStatus === 'needs_revision') {
+        $replyLines[] = 'The direction is good, but there are issues that make it unsafe to use as-is.';
+    } else {
+        $replyLines[] = 'This cannot be safely implemented yet without adjusting the approach.';
+    }
+
+    $replyLines[] = '';
+
+    $replyLines[] = '**My suggestion**';
+    $replyLines[] = 'Open the artifact on the right and review the proposed code or patch.';
+
+    if ($finalReviewStatus !== 'approved') {
+        $replyLines[] = 'If you want, I can refine this further and push it to an approved version.';
+    }
+
+    return array(
+        'request_id' => $requestId,
+        'run_id' => $runId,
+        'artifact_id' => $finalArtifactId,
+        'review_status' => $finalReviewStatus,
+        'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
+        'target_path' => $finalArtifact !== null ? $finalArtifact['target_path'] : null,
+        'reply' => implode("\n", $replyLines)
+    );
 }
-
-$replyLines[] = '';
-
-// Guidance
-$replyLines[] = '**My suggestion**';
-$replyLines[] = 'Open the artifact on the right and review the proposed code or patch.';
-
-if ($finalReviewStatus !== 'approved') {
-    $replyLines[] = 'If you want, I can refine this further and push it to an approved version.';
-}
-
-return array(
-    'request_id' => $requestId,
-    'run_id' => $runId,
-    'artifact_id' => $finalArtifactId,
-    'review_status' => $finalReviewStatus,
-    'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
-    'target_path' => $finalArtifact !== null ? $finalArtifact['target_path'] : null,
-    'reply' => implode("\n", $replyLines)
-);
-	
-	
-}
-
 
 try {
     $u = cw_current_user($pdo);
@@ -1658,9 +1858,7 @@ try {
     $action = (string)($data['action'] ?? '');
 
     switch ($action) {
-
         case 'create_conversation':
-
             $subject = trim((string)($data['subject'] ?? ''));
             if ($subject === '') {
                 $subject = 'Untitled conversation';
@@ -1674,7 +1872,6 @@ try {
             ]);
 
         case 'list_conversations':
-
             $items = list_conversations($pdo, 50);
 
             json_out([
@@ -1684,7 +1881,6 @@ try {
             ]);
 
         case 'get_conversation_messages':
-
             $conversationId = (int)($data['conversation_id'] ?? 0);
             if ($conversationId <= 0) {
                 json_out(['ok' => false, 'error' => 'Missing conversation_id']);
@@ -1703,212 +1899,198 @@ try {
                 'messages' => $messages
             ]);
 
-               case 'send_message':
+        case 'send_message':
+            $conversationId = (int)($data['conversation_id'] ?? 0);
+            $messageText = trim((string)($data['message_text'] ?? ''));
+            $requestType = trim((string)($data['request_type'] ?? ''));
 
-    $conversationId = (int)($data['conversation_id'] ?? 0);
-    $messageText = trim((string)($data['message_text'] ?? ''));
-    $requestType = trim((string)($data['request_type'] ?? ''));
+            if ($messageText === '') {
+                json_out(['ok' => false, 'error' => 'Empty message_text']);
+            }
 
-    if ($messageText === '') {
-        json_out(['ok' => false, 'error' => 'Empty message_text']);
-    }
+            if ($conversationId <= 0) {
+                $subject = auto_subject_from_message($messageText);
+                $conversationId = create_conversation($pdo, (int)$u['id'], $subject);
+            }
 
-    if ($conversationId <= 0) {
-        $subject = auto_subject_from_message($messageText);
-        $conversationId = create_conversation($pdo, (int)$u['id'], $subject);
-    }
+            $conversation = load_conversation($pdo, $conversationId);
+            if (!$conversation) {
+                json_out(['ok' => false, 'error' => 'Conversation not found']);
+            }
 
-    $conversation = load_conversation($pdo, $conversationId);
-    if (!$conversation) {
-        json_out(['ok' => false, 'error' => 'Conversation not found']);
-    }
+            $userMessageId = add_conversation_message(
+                $pdo,
+                $conversationId,
+                'user',
+                $messageText,
+                $requestType !== '' ? $requestType : null,
+                null
+            );
 
-    $userMessageId = add_conversation_message(
-        $pdo,
-        $conversationId,
-        'user',
-        $messageText,
-        $requestType !== '' ? $requestType : null,
-        null
-    );
+            $activeMode = (string)($conversation['active_mode'] ?? '');
+            $activeRequestSummary = (string)($conversation['active_request_summary'] ?? '');
+            $activeTargetFiles = (string)($conversation['active_target_files'] ?? '');
+            $activeNextStep = (string)($conversation['active_next_step'] ?? '');
+            $activeArtifactId = isset($conversation['active_artifact_id']) ? (int)$conversation['active_artifact_id'] : null;
 
-    $activeMode = (string)($conversation['active_mode'] ?? '');
-    $activeRequestSummary = (string)($conversation['active_request_summary'] ?? '');
-    $activeTargetFiles = (string)($conversation['active_target_files'] ?? '');
-    $activeNextStep = (string)($conversation['active_next_step'] ?? '');
-    $activeRunId = isset($conversation['active_run_id']) ? (int)$conversation['active_run_id'] : null;
-    $activeArtifactId = isset($conversation['active_artifact_id']) ? (int)$conversation['active_artifact_id'] : null;
+            $reply = '';
+            $linkedRunId = null;
+            $result = null;
 
-    $reply = '';
-    $linkedRunId = null;
+            $lower = strtolower($messageText);
 
-$lower = strtolower($messageText);
+            $explicitImplementation =
+                strpos($lower, 'create') !== false ||
+                strpos($lower, 'build') !== false ||
+                strpos($lower, 'generate') !== false ||
+                strpos($lower, 'make') !== false ||
+                strpos($lower, 'add') !== false ||
+                strpos($lower, 'implement') !== false ||
+                strpos($lower, 'fix') !== false ||
+                strpos($lower, 'patch') !== false ||
+                strpos($lower, 'repair') !== false;
 
-$explicitImplementation =
-    strpos($lower, 'create') !== false ||
-    strpos($lower, 'build') !== false ||
-    strpos($lower, 'generate') !== false ||
-    strpos($lower, 'make') !== false ||
-    strpos($lower, 'add') !== false ||
-    strpos($lower, 'implement') !== false ||
-    strpos($lower, 'fix') !== false ||
-    strpos($lower, 'patch') !== false ||
-    strpos($lower, 'repair') !== false;
+            $shouldRunEngineering = (
+                $explicitImplementation ||
+                (
+                    $activeRequestSummary !== '' &&
+                    (
+                        is_continuation_trigger($messageText)
+                        || is_revision_trigger($messageText)
+                        || $activeArtifactId !== null
+                        || (
+                            (string)$activeMode === 'analysis' &&
+                            mb_strlen($messageText) < 40
+                        )
+                    )
+                )
+            );
 
-$shouldRunEngineering = (
-    $explicitImplementation ||
-    (
-        $activeRequestSummary !== '' &&
-        (
-            is_continuation_trigger($messageText)
-            || is_revision_trigger($messageText)
-            || $activeArtifactId !== null
-            || (
-                (string)$activeMode === 'analysis' &&
-                mb_strlen($messageText) < 40
-            )
-        )
-    )
-);
+            if ($shouldRunEngineering) {
+                $engineeringPromptParts = [];
+                $engineeringPromptParts[] = $activeRequestSummary;
 
-    if ($shouldRunEngineering) {
+                if ($activeTargetFiles !== '') {
+                    $engineeringPromptParts[] = "Relevant files:\n" . $activeTargetFiles;
+                }
 
-        $engineeringPromptParts = [];
+                if ($activeNextStep !== '') {
+                    $engineeringPromptParts[] = "Requested next step:\n" . $activeNextStep;
+                }
 
-        $engineeringPromptParts[] = $activeRequestSummary;
+                if ($activeArtifactId !== null) {
+                    $stmt = $pdo->prepare("
+                        SELECT content, review_summary
+                        FROM ai_jake_artifacts
+                        WHERE id = ?
+                        LIMIT 1
+                    ");
+                    $stmt->execute([$activeArtifactId]);
+                    $artifactRow = $stmt->fetch(PDO::FETCH_ASSOC);
 
-        if ($activeTargetFiles !== '') {
-            $engineeringPromptParts[] = "Relevant files:\n" . $activeTargetFiles;
-        }
+                    if ($artifactRow) {
+                        $engineeringPromptParts[] = "PREVIOUS ARTIFACT:\n" . $artifactRow['content'];
+                        $engineeringPromptParts[] = "PREVIOUS REVIEW:\n" . $artifactRow['review_summary'];
+                    }
+                }
 
-        if ($activeNextStep !== '') {
-            $engineeringPromptParts[] = "Requested next step:\n" . $activeNextStep;
-        }
+                $engineeringPromptParts[] = "USER FOLLOW-UP:\n" . $messageText;
 
-        // 🔥 Include previous artifact ALWAYS if exists
-        if ($activeArtifactId !== null) {
+                $engineeringPrompt = implode("\n\n", $engineeringPromptParts);
+
+                $result = run_jake_engineering_cycle(
+                    $pdo,
+                    (int)$u['id'],
+                    $engineeringPrompt,
+                    $requestType !== '' ? $requestType : 'investigation'
+                );
+
+                $reply = (string)$result['reply'];
+                $linkedRunId = (int)$result['run_id'];
+
+                update_conversation_state(
+                    $pdo,
+                    $conversationId,
+                    'implementation',
+                    $activeRequestSummary,
+                    $activeTargetFiles,
+                    'Refinement in progress',
+                    $result['run_id'],
+                    $result['artifact_id']
+                );
+            } else {
+                $reply = jake_chat_reply($pdo, [
+                    'message_text' => $messageText
+                ], $requestType !== '' ? $requestType : null);
+
+                $targetFiles = extract_active_target_files_from_message($messageText);
+                $targetFilesText = $targetFiles ? implode("\n", $targetFiles) : '';
+
+                update_conversation_state(
+                    $pdo,
+                    $conversationId,
+                    'analysis',
+                    build_active_request_summary($messageText, $requestType !== '' ? $requestType : null),
+                    $targetFilesText !== '' ? $targetFilesText : null,
+                    'Awaiting approval',
+                    null,
+                    null
+                );
+            }
+
+            $jakeMessageId = add_conversation_message(
+                $pdo,
+                $conversationId,
+                'jake',
+                $reply,
+                $requestType !== '' ? $requestType : null,
+                $linkedRunId
+            );
+
+            json_out([
+                'ok' => true,
+                'conversation_id' => $conversationId,
+                'user_message_id' => $userMessageId,
+                'jake_message_id' => $jakeMessageId,
+                'reply' => $reply,
+                'artifact_id' => isset($result['artifact_id']) ? (int)$result['artifact_id'] : null
+            ]);
+
+        case 'save_request':
+            $prompt = trim((string)($data['prompt'] ?? ''));
+            $title = trim((string)($data['title'] ?? ''));
+            $type = trim((string)($data['type'] ?? ''));
+
+            if ($prompt === '') {
+                json_out(['ok' => false, 'error' => 'Empty prompt']);
+            }
+
+            if ($title === '') {
+                $title = 'Untitled request';
+            }
+
+            if ($type === '') {
+                $type = 'investigation';
+            }
 
             $stmt = $pdo->prepare("
-                SELECT content, review_summary
-                FROM ai_jake_artifacts
-                WHERE id = ?
-                LIMIT 1
+                INSERT INTO ai_jake_requests
+                (user_id, request_title, request_type, prompt, status, created_at, updated_at)
+                VALUES (?, ?, ?, ?, 'new', NOW(), NOW())
             ");
-            $stmt->execute([$activeArtifactId]);
-            $artifactRow = $stmt->fetch(PDO::FETCH_ASSOC);
+            $stmt->execute([
+                (int)$u['id'],
+                $title,
+                $type,
+                $prompt
+            ]);
 
-            if ($artifactRow) {
-                $engineeringPromptParts[] = "PREVIOUS ARTIFACT:\n" . $artifactRow['content'];
-                $engineeringPromptParts[] = "PREVIOUS REVIEW:\n" . $artifactRow['review_summary'];
-            }
-        }
+            json_out([
+                'ok' => true,
+                'request_id' => (int)$pdo->lastInsertId()
+            ]);
 
-        $engineeringPromptParts[] = "USER FOLLOW-UP:\n" . $messageText;
-
-        $engineeringPrompt = implode("\n\n", $engineeringPromptParts);
-
-        $result = run_jake_engineering_cycle(
-            $pdo,
-            (int)$u['id'],
-            $engineeringPrompt,
-            $requestType !== '' ? $requestType : 'investigation'
-        );
-
-        $reply = (string)$result['reply'];
-        $linkedRunId = (int)$result['run_id'];
-
-        update_conversation_state(
-            $pdo,
-            $conversationId,
-            'implementation',
-            $activeRequestSummary,
-            $activeTargetFiles,
-            'Refinement in progress',
-            $result['run_id'],
-            $result['artifact_id']
-        );
-
-    } else {
-
-        // NORMAL CHAT MODE
-        $reply = jake_chat_reply($pdo, [
-            'message_text' => $messageText
-        ], $requestType !== '' ? $requestType : null);
-
-        $targetFiles = extract_active_target_files_from_message($messageText);
-        $targetFilesText = $targetFiles ? implode("\n", $targetFiles) : '';
-
-        update_conversation_state(
-            $pdo,
-            $conversationId,
-            'analysis',
-            build_active_request_summary($messageText, $requestType !== '' ? $requestType : null),
-            $targetFilesText !== '' ? $targetFilesText : null,
-            'Awaiting approval',
-            null,
-            null
-        );
-    }
-
-    $jakeMessageId = add_conversation_message(
-        $pdo,
-        $conversationId,
-        'jake',
-        $reply,
-        $requestType !== '' ? $requestType : null,
-        $linkedRunId
-    );
-
-    json_out([
-        'ok' => true,
-        'conversation_id' => $conversationId,
-        'user_message_id' => $userMessageId,
-        'jake_message_id' => $jakeMessageId,
-        'reply' => $reply,
-        'artifact_id' => isset($result['artifact_id']) ? (int)$result['artifact_id'] : null
-    ]);
-
-	break;			
-    	
-	case 'save_request':
-
-    $prompt = trim((string)($data['prompt'] ?? ''));
-    $title = trim((string)($data['title'] ?? ''));
-    $type = trim((string)($data['type'] ?? ''));
-
-    if ($prompt === '') {
-        json_out(['ok' => false, 'error' => 'Empty prompt']);
-    }
-
-    if ($title === '') {
-        $title = 'Untitled request';
-    }
-
-    if ($type === '') {
-        $type = 'investigation';
-    }
-
-    $stmt = $pdo->prepare("
-        INSERT INTO ai_jake_requests
-        (user_id, request_title, request_type, prompt, status, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 'new', NOW(), NOW())
-    ");
-    $stmt->execute([
-        (int)$u['id'],
-        $title,
-        $type,
-        $prompt
-    ]);
-
-    json_out([
-        'ok' => true,
-        'request_id' => (int)$pdo->lastInsertId()
-    ]);
-	
-		break;	
-			
         case 'read_file':
-
             $path = trim((string)($data['path'] ?? ''));
 
             if ($path === '') {
@@ -1924,7 +2106,6 @@ $shouldRunEngineering = (
             ]);
 
         case 'list_tables':
-
             $tables = $pdo->query("SHOW TABLES")->fetchAll(PDO::FETCH_COLUMN);
 
             json_out([
@@ -1933,7 +2114,6 @@ $shouldRunEngineering = (
             ]);
 
         case 'describe_table':
-
             $table = preg_replace('/[^a-zA-Z0-9_]/', '', (string)($data['table'] ?? ''));
 
             if ($table === '') {
@@ -1950,7 +2130,6 @@ $shouldRunEngineering = (
             ]);
 
         case 'run_sql_read':
-
             $query = trim((string)($data['query'] ?? ''));
 
             if ($query === '') {
@@ -1971,7 +2150,6 @@ $shouldRunEngineering = (
             ]);
 
         case 'get_request_context':
-
             $requestId = (int)($data['request_id'] ?? 0);
             if ($requestId <= 0) {
                 json_out(['ok' => false, 'error' => 'Missing request_id']);
@@ -1993,7 +2171,6 @@ $shouldRunEngineering = (
             ]);
 
         case 'list_request_artifacts':
-
             $requestId = (int)($data['request_id'] ?? 0);
             if ($requestId <= 0) {
                 json_out(['ok' => false, 'error' => 'Missing request_id']);
@@ -2025,8 +2202,7 @@ $shouldRunEngineering = (
                 'count' => count($artifacts)
             ]);
 
-			        case 'list_recent_artifacts':
-
+        case 'list_recent_artifacts':
             $stmt = $pdo->query("
                 SELECT
                     id,
@@ -2052,7 +2228,6 @@ $shouldRunEngineering = (
             ]);
 
         case 'read_artifact':
-
             $artifactId = (int)($data['artifact_id'] ?? 0);
             if ($artifactId <= 0) {
                 json_out(['ok' => false, 'error' => 'Missing artifact_id']);
@@ -2077,185 +2252,53 @@ $shouldRunEngineering = (
             ]);
 
         case 'jake_think':
-
             $requestId = (int)($data['request_id'] ?? 0);
             $prompt = trim((string)($data['prompt'] ?? ''));
             $title = trim((string)($data['title'] ?? ''));
             $type = trim((string)($data['type'] ?? ''));
 
-            if ($requestId <= 0) {
+            if ($requestId > 0) {
+                $requestRow = load_request_row($pdo, $requestId);
+                if (!$requestRow) {
+                    json_out(['ok' => false, 'error' => 'Request not found']);
+                }
+
+                $result = run_jake_engineering_cycle(
+                    $pdo,
+                    (int)$u['id'],
+                    (string)$requestRow['prompt'],
+                    (string)($requestRow['request_type'] ?? 'investigation')
+                );
+            } else {
                 if ($prompt === '') {
                     json_out(['ok' => false, 'error' => 'Missing request_id or prompt']);
                 }
 
-                if ($title === '') {
-                    $title = 'Untitled request';
+                if ($title !== '') {
+                    $prompt = $title . "\n\n" . $prompt;
                 }
 
-                if ($type === '') {
-                    $type = 'investigation';
-                }
-
-                $stmt = $pdo->prepare("
-                    INSERT INTO ai_jake_requests
-                    (user_id, request_title, request_type, prompt, status, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, 'new', NOW(), NOW())
-                ");
-                $stmt->execute([
+                $result = run_jake_engineering_cycle(
+                    $pdo,
                     (int)$u['id'],
-                    $title,
-                    $type,
-                    $prompt
-                ]);
-
-                $requestId = (int)$pdo->lastInsertId();
+                    $prompt,
+                    $type !== '' ? $type : 'investigation'
+                );
             }
-
-            $requestRow = load_request_row($pdo, $requestId);
-            if (!$requestRow) {
-                json_out(['ok' => false, 'error' => 'Request not found']);
-            }
-
-            $ssot = load_latest_ssot_snapshot($pdo);
-			$contextFiles = build_engineering_context_files($pdo, (string)($requestRow['prompt'] ?? ''));
-
-            $runId = create_jake_run(
-                $pdo,
-                $requestId,
-                (int)$u['id'],
-                'jake_think',
-                'running'
-            );
-
-            $jakeSummary = build_jake_summary($requestRow, $ssot, $contextFiles);
-            $stevenBrief = build_steven_brief($requestRow, $ssot, $contextFiles);
-            $riskNotes = 'Steven output generated via OpenAI. Manual review still required before any code is used.';
-            $outputMode = 'full_drop_in';
-
-                        try {
-                $maxRounds = 2;
-                $currentRound = 1;
-                $finalArtifactId = null;
-                $finalArtifact = null;
-                $finalReviewStatus = 'analysis_only';
-                $finalReviewSummary = '';
-
-                while ($currentRound <= $maxRounds) {
-
-                    $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles);
-                    $outputMode = (string)($artifactSeed['output_mode'] ?? 'full_drop_in');
-
-                    $artifactId = create_artifact($pdo, [
-                        'run_id' => $runId,
-                        'request_id' => $requestId,
-                        'artifact_type' => $artifactSeed['artifact_type'],
-                        'target_path' => $artifactSeed['target_path'],
-                        'title' => $artifactSeed['title'],
-                        'content' => $artifactSeed['content'],
-                        'output_mode' => $artifactSeed['output_mode'],
-                        'notes' => $artifactSeed['notes'],
-                        'created_by_agent' => 'steven',
-                        'approved_by_agent' => 'jake',
-                    ]);
-
-                    $review = jake_review_artifact(
-					$requestRow,
-					$ssot,
-					$contextFiles,
-					$artifactSeed
-					);
-
-                    $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
-					$reviewSummary = (string)($review['reason'] ?? '');
-
-					if (
-						$reviewStatus === 'analysis_only'
-						&& stripos($reviewSummary, 'cannot be safely implemented') === false
-						&& stripos($reviewSummary, 'missing required context') === false
-					) {
-						$reviewStatus = 'approved';
-					}
-
-					$isFinal = ($reviewStatus === 'approved') ? 1 : 0;
-
-                    $stmt = $pdo->prepare("
-                        UPDATE ai_jake_artifacts
-                        SET review_status = ?, review_summary = ?, revision_round = ?, is_final = ?
-                        WHERE id = ?
-                    ");
-                    $stmt->execute([
-                        $reviewStatus,
-                        $reviewSummary,
-                        $currentRound,
-                        $isFinal,
-                        $artifactId
-                    ]);
-
-                    $finalArtifactId = $artifactId;
-                    $finalArtifact = $artifactSeed;
-                    $finalReviewStatus = $reviewStatus;
-                    $finalReviewSummary = $reviewSummary;
-
-                    if ($isFinal) {
-                        break;
-                    }
-
-                    $requestRow['prompt'] .= "\n\nREVISION REQUIRED:\n" . $reviewSummary;
-                    $currentRound++;
-                }
-
-                update_jake_run($pdo, $runId, [
-                    'status' => 'completed',
-                    'jake_summary' => $jakeSummary,
-                    'steven_brief' => $stevenBrief,
-                    'risk_notes' => $riskNotes . ' Final review status: ' . $finalReviewStatus,
-                    'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
-                ]);
-
-            } catch (Throwable $inner) {
-                update_jake_run($pdo, $runId, [
-                    'status' => 'failed',
-                    'jake_summary' => $jakeSummary,
-                    'steven_brief' => $stevenBrief,
-                    'risk_notes' => 'Steven generation failed: ' . $inner->getMessage(),
-                    'output_mode' => $outputMode,
-                ]);
-
-                throw $inner;
-            }
-
-            $summaryLines = [];
-            $summaryLines[] = 'JAKE COMPLETE';
-            $summaryLines[] = '';
-            $summaryLines[] = 'Request ID: ' . $requestId;
-            $summaryLines[] = 'Run ID: ' . $runId;
-            $summaryLines[] = 'Artifact ID: ' . $finalArtifactId;
-            $summaryLines[] = 'Output Mode: ' . (string)($finalArtifact['output_mode'] ?? $outputMode);
-            $summaryLines[] = 'Review Status: ' . $finalReviewStatus;
-            $summaryLines[] = 'Target Path: ' . (($finalArtifact !== null && $finalArtifact['target_path'] !== null) ? $finalArtifact['target_path'] : '[not determined]');
-            $summaryLines[] = '';
-            $summaryLines[] = $jakeSummary;
-            $summaryLines[] = '';
-            $summaryLines[] = 'Jake Review Summary:';
-            $summaryLines[] = $finalReviewSummary !== '' ? $finalReviewSummary : 'No review summary returned.';
 
             json_out([
                 'ok' => true,
-                'request_id' => $requestId,
-                'run_id' => $runId,
-                'artifact_id' => $finalArtifactId,
-                'output_mode' => (string)($finalArtifact['output_mode'] ?? $outputMode),
-                'target_path' => $finalArtifact !== null ? $finalArtifact['target_path'] : null,
-                'response' => implode("\n", $summaryLines),
-                'jake_summary' => $jakeSummary,
-                'steven_brief' => $stevenBrief,
-                'risk_notes' => $riskNotes,
+                'request_id' => (int)$result['request_id'],
+                'run_id' => (int)$result['run_id'],
+                'artifact_id' => (int)$result['artifact_id'],
+                'output_mode' => (string)$result['output_mode'],
+                'target_path' => $result['target_path'],
+                'response' => (string)$result['reply']
             ]);
 
         default:
             json_out(['ok' => false, 'error' => 'Unknown action']);
     }
-
 } catch (Throwable $e) {
     error_log('ai_jake_console_action.php ERROR: ' . $e->getMessage());
     error_log($e->getTraceAsString());
