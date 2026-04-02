@@ -122,6 +122,78 @@ function extract_file_candidates_from_text(string $text): array
     return array_values(array_unique($matches));
 }
 
+function path_looks_like_full_relative_path(string $path): bool
+{
+    $path = trim(str_replace('\\', '/', $path), '/');
+    if ($path === '') {
+        return false;
+    }
+
+    return strpos($path, '/') !== false;
+}
+
+function resolve_candidate_path_from_target_data(string $candidatePath, array $targetData): ?string
+{
+    $candidatePath = trim(str_replace('\\', '/', $candidatePath), '/');
+    if ($candidatePath === '') {
+        return null;
+    }
+
+    if (path_looks_like_full_relative_path($candidatePath)) {
+        return $candidatePath;
+    }
+
+    $possibleFiles = [];
+
+    if (!empty($targetData['primary_file']) && is_string($targetData['primary_file'])) {
+        $possibleFiles[] = (string)$targetData['primary_file'];
+    }
+
+    if (!empty($targetData['files']) && is_array($targetData['files'])) {
+        foreach ($targetData['files'] as $f) {
+            if (is_string($f) && $f !== '') {
+                $possibleFiles[] = $f;
+            }
+        }
+    }
+
+    $possibleFiles = array_values(array_unique($possibleFiles));
+
+    foreach ($possibleFiles as $fullPath) {
+        $fullPathNorm = trim(str_replace('\\', '/', $fullPath), '/');
+        if ($fullPathNorm === '') {
+            continue;
+        }
+
+        if (strcasecmp(basename($fullPathNorm), basename($candidatePath)) === 0) {
+            return $fullPathNorm;
+        }
+    }
+
+    return $candidatePath;
+}
+
+function resolve_explicit_file_candidates(PDO $pdo, string $prompt): array
+{
+    $explicitPaths = extract_file_candidates_from_text($prompt);
+    if (empty($explicitPaths)) {
+        return [];
+    }
+
+    $targetData = build_targeted_context($pdo, $prompt);
+    $resolved = [];
+
+    foreach ($explicitPaths as $path) {
+        $resolvedPath = resolve_candidate_path_from_target_data((string)$path, $targetData);
+        if ($resolvedPath !== null && $resolvedPath !== '') {
+            $resolved[] = $resolvedPath;
+        }
+    }
+
+    return array_values(array_unique($resolved));
+}
+
+
 function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFile = 6000): array
 {
     $out = [];
@@ -792,13 +864,15 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
 
-    $explicitPaths = extract_file_candidates_from_text($prompt);
+        $explicitPaths = resolve_explicit_file_candidates($GLOBALS['pdo'], $prompt);
     $explicitTargetPath = '';
     if (!empty($explicitPaths)) {
         $explicitTargetPath = (string)$explicitPaths[0];
     }
 
     $targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
+	
+	
     $targetedSummary = $targetData['summary'];
     $targetFiles = $targetData['files'];
     $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
@@ -1187,9 +1261,9 @@ function update_conversation_state(
     ]);
 }
 
-function extract_active_target_files_from_message(string $messageText): array
+function extract_active_target_files_from_message(PDO $pdo, string $messageText): array
 {
-    return extract_file_candidates_from_text($messageText);
+    return resolve_explicit_file_candidates($pdo, $messageText);
 }
 
 function build_active_request_summary(string $messageText, ?string $requestType = null): string
@@ -1375,7 +1449,7 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
     }
 
     $ssot = load_latest_ssot_snapshot($pdo);
-    $fileCandidates = extract_file_candidates_from_text($message);
+    $fileCandidates = resolve_explicit_file_candidates($pdo, $message);
     $contextFiles = read_files_for_context($fileCandidates, 3);
     $dbSchema = load_targeted_schema($pdo, $message);
     $projectIndex = load_targeted_project_index(
@@ -1633,7 +1707,7 @@ function build_engineering_context_files(PDO $pdo, string $prompt): array
 {
     $paths = [];
 
-    $explicitPaths = extract_file_candidates_from_text($prompt);
+    $explicitPaths = resolve_explicit_file_candidates($pdo, $prompt);
     foreach ($explicitPaths as $p) {
         $paths[] = $p;
     }
@@ -2023,7 +2097,7 @@ try {
                     'message_text' => $messageText
                 ], $requestType !== '' ? $requestType : null);
 
-                $targetFiles = extract_active_target_files_from_message($messageText);
+                $targetFiles = extract_active_target_files_from_message($pdo, $messageText);
                 $targetFilesText = $targetFiles ? implode("\n", $targetFiles) : '';
 
                 update_conversation_state(
