@@ -1785,9 +1785,22 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
     $targetFiles = isset($targetData['files']) && is_array($targetData['files']) ? $targetData['files'] : array();
     $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
-    $targetPath = pick_primary_target_path($GLOBALS['pdo'], $prompt, $contextFiles);
+        $targetPath = pick_primary_target_path($GLOBALS['pdo'], $prompt, $contextFiles);
     if ($targetPath === null) {
         $targetPath = '';
+    }
+
+    if ($targetPath === '' && $primaryTargetFile !== '') {
+        $targetPath = $primaryTargetFile;
+    }
+
+    if ($targetPath === '' && !empty($targetData['files']) && is_array($targetData['files'])) {
+        foreach ($targetData['files'] as $candidatePath) {
+            if (is_string($candidatePath) && trim($candidatePath) !== '') {
+                $targetPath = trim((string)$candidatePath);
+                break;
+            }
+        }
     }
 
     if ($targetPath === '') {
@@ -1919,10 +1932,12 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         $userPrompt .= "\n\n";
     }
 
-        if ($targetPath !== '') {
-        $userPrompt .= "PRIMARY TARGET FILE:\n";
-        $userPrompt .= $targetPath . "\n\n";
-    }
+            $userPrompt .= "PRIMARY TARGET FILE:\n";
+    $userPrompt .= ($targetPath !== '' ? $targetPath : '[blank]') . "\n\n";
+	
+	$userPrompt .= "PRIMARY_TARGET_FILE_SEEN_BY_SYSTEM:\n";
+    $userPrompt .= ($targetPath !== '' ? $targetPath : '[blank]') . "\n\n";
+	
 
         if ($targetedSummary !== '' && !should_skip_targeted_summary_context($prompt)) {
         $userPrompt .= "TARGETED FILE CONTEXT:\n";
