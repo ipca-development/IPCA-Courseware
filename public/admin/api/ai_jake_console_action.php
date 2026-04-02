@@ -305,6 +305,8 @@ function extract_targeted_excerpt_from_file_content(string $content, array $meth
 }
 
 
+//LARGE FILE UPGRADE
+
 function extract_large_file_tail_excerpt(string $content, array $methodNames, int $tailChars = 28000): ?string
 {
     if ($content === '') {
@@ -325,6 +327,363 @@ function extract_large_file_tail_excerpt(string $content, array $methodNames, in
 
     return "/* LARGE FILE TAIL FALLBACK FOR: " . $label . " */\n\n" . $tail;
 }
+
+function extract_method_inventory_from_file_content(string $content): array
+{
+    $methods = array();
+
+    if ($content === '') {
+        return $methods;
+    }
+
+    if (preg_match_all('/\b(public|protected|private)\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)\s*(?::\s*([A-Za-z0-9_\\\\?]+))?/s', $content, $m, PREG_SET_ORDER)) {
+        foreach ($m as $row) {
+            $visibility = isset($row[1]) ? trim((string)$row[1]) : '';
+            $name = isset($row[2]) ? trim((string)$row[2]) : '';
+            $params = isset($row[3]) ? trim((string)$row[3]) : '';
+            $returnType = isset($row[4]) ? trim((string)$row[4]) : '';
+
+            if ($name === '') {
+                continue;
+            }
+
+            $signature = $visibility . ' function ' . $name . '(' . $params . ')';
+            if ($returnType !== '') {
+                $signature .= ': ' . $returnType;
+            }
+
+            $methods[] = array(
+                'visibility' => $visibility,
+                'name' => $name,
+                'signature' => $signature,
+            );
+        }
+    }
+
+    return $methods;
+}
+
+function build_method_inventory_text(string $content): ?string
+{
+    $methods = extract_method_inventory_from_file_content($content);
+    if (empty($methods)) {
+        return null;
+    }
+
+    $lines = array();
+    $lines[] = '/* METHOD INVENTORY */';
+    $lines[] = '';
+
+    foreach ($methods as $method) {
+        $lines[] = $method['signature'];
+    }
+
+    return implode("\n", $lines);
+}
+
+function find_matching_brace_position(string $content, int $openBracePos): ?int
+{
+    $len = strlen($content);
+    if ($openBracePos < 0 || $openBracePos >= $len) {
+        return null;
+    }
+
+    $depth = 0;
+    $inSingle = false;
+    $inDouble = false;
+    $inLineComment = false;
+    $inBlockComment = false;
+    $escaped = false;
+
+    for ($i = $openBracePos; $i < $len; $i++) {
+        $ch = $content[$i];
+        $next = ($i + 1 < $len) ? $content[$i + 1] : '';
+
+        if ($inLineComment) {
+            if ($ch === "\n") {
+                $inLineComment = false;
+            }
+            continue;
+        }
+
+        if ($inBlockComment) {
+            if ($ch === '*' && $next === '/') {
+                $inBlockComment = false;
+                $i++;
+            }
+            continue;
+        }
+
+        if ($inSingle) {
+            if ($ch === '\\' && !$escaped) {
+                $escaped = true;
+                continue;
+            }
+            if ($ch === "'" && !$escaped) {
+                $inSingle = false;
+            }
+            $escaped = false;
+            continue;
+        }
+
+        if ($inDouble) {
+            if ($ch === '\\' && !$escaped) {
+                $escaped = true;
+                continue;
+            }
+            if ($ch === '"' && !$escaped) {
+                $inDouble = false;
+            }
+            $escaped = false;
+            continue;
+        }
+
+        if ($ch === '/' && $next === '/') {
+            $inLineComment = true;
+            $i++;
+            continue;
+        }
+
+        if ($ch === '/' && $next === '*') {
+            $inBlockComment = true;
+            $i++;
+            continue;
+        }
+
+        if ($ch === "'") {
+            $inSingle = true;
+            continue;
+        }
+
+        if ($ch === '"') {
+            $inDouble = true;
+            continue;
+        }
+
+        if ($ch === '{') {
+            $depth++;
+            continue;
+        }
+
+        if ($ch === '}') {
+            $depth--;
+            if ($depth === 0) {
+                return $i;
+            }
+        }
+    }
+
+    return null;
+}
+
+function extract_exact_method_block_from_file_content(string $content, string $methodName): ?string
+{
+    $methodName = trim($methodName);
+    if ($content === '' || $methodName === '') {
+        return null;
+    }
+
+    $pattern = '/\b(public|protected|private)?\s*function\s+' . preg_quote($methodName, '/') . '\s*\(/i';
+    if (!preg_match($pattern, $content, $match, PREG_OFFSET_CAPTURE)) {
+        return null;
+    }
+
+    $methodOffset = (int)$match[0][1];
+    $openBracePos = strpos($content, '{', $methodOffset);
+    if ($openBracePos === false) {
+        return null;
+    }
+
+    $closeBracePos = find_matching_brace_position($content, (int)$openBracePos);
+    if ($closeBracePos === null) {
+        return null;
+    }
+
+    $start = $methodOffset;
+    $docPos = strrpos(substr($content, 0, $methodOffset), '/**');
+    if ($docPos !== false) {
+        $between = substr($content, $docPos, $methodOffset - $docPos);
+        if (strpos($between, '*/') !== false) {
+            $start = (int)$docPos;
+        }
+    }
+
+    $block = substr($content, $start, $closeBracePos - $start + 1);
+    if (!is_string($block) || trim($block) === '') {
+        return null;
+    }
+
+    return $block;
+}
+
+function extract_exact_method_blocks_from_file_content(string $content, array $methodNames, int $maxBlocks = 4): ?string
+{
+    if ($content === '' || empty($methodNames)) {
+        return null;
+    }
+
+    $blocks = array();
+    $seen = array();
+
+    foreach ($methodNames as $methodName) {
+        $methodName = trim((string)$methodName);
+        if ($methodName === '') {
+            continue;
+        }
+
+        $block = extract_exact_method_block_from_file_content($content, $methodName);
+        if ($block === null) {
+            continue;
+        }
+
+        $hash = md5($block);
+        if (isset($seen[$hash])) {
+            continue;
+        }
+
+        $seen[$hash] = true;
+        $blocks[] = "/* EXACT METHOD BLOCK: " . $methodName . " */\n\n" . $block;
+
+        if (count($blocks) >= $maxBlocks) {
+            break;
+        }
+    }
+
+    if (empty($blocks)) {
+        return null;
+    }
+
+    return implode("\n\n", $blocks);
+}
+
+function should_force_method_inventory_mode(string $prompt): bool
+{
+    $promptLower = strtolower($prompt);
+
+    $signals = array(
+        'list all public methods',
+        'public methods',
+        'visible public methods',
+        'method inventory',
+        'which methods are visible',
+        'complete method list',
+        'list methods'
+    );
+
+    foreach ($signals as $signal) {
+        if (strpos($promptLower, $signal) !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function read_files_for_targeted_context(
+    array $paths,
+    array $methodNames,
+    int $limit = 3,
+    int $fallbackMaxCharsPerFile = 12000,
+    bool $preferFullFileWhenSmall = false,
+    ?string $prompt = null
+): array
+{
+    $out = array();
+    $count = 0;
+    $forceMethodInventory = ($prompt !== null && should_force_method_inventory_mode($prompt));
+
+    $paths = array_values(array_unique($paths));
+
+    foreach ($paths as $path) {
+        if ($count >= $limit) {
+            break;
+        }
+
+        try {
+            $file = safe_project_file_read((string)$path);
+            $content = (string)$file['content'];
+            $len = strlen($content);
+
+            if ($forceMethodInventory) {
+                $inventory = build_method_inventory_text($content);
+                if ($inventory !== null) {
+                    $out[] = array(
+                        'path' => $file['path'],
+                        'basename' => $file['basename'],
+                        'size_bytes' => $file['size_bytes'],
+                        'content' => $inventory,
+                    );
+                    $count++;
+                    continue;
+                }
+            }
+
+            if ($preferFullFileWhenSmall && $len <= 80000) {
+                $out[] = array(
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => $content,
+                );
+                $count++;
+                continue;
+            }
+
+            $exactBlocks = extract_exact_method_blocks_from_file_content($content, $methodNames, 4);
+            if ($exactBlocks !== null) {
+                $out[] = array(
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => $exactBlocks,
+                );
+                $count++;
+                continue;
+            }
+
+            $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
+
+            if ($targetedExcerpt === null && !empty($methodNames)) {
+                $targetedExcerpt = extract_large_file_tail_excerpt($content, $methodNames, 28000);
+            }
+
+            if ($targetedExcerpt !== null) {
+                $out[] = array(
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => $targetedExcerpt,
+                );
+            } else {
+                if ($len <= $fallbackMaxCharsPerFile) {
+                    $out[] = array(
+                        'path' => $file['path'],
+                        'basename' => $file['basename'],
+                        'size_bytes' => $file['size_bytes'],
+                        'content' => $content,
+                    );
+                } else {
+                    $out[] = array(
+                        'path' => $file['path'],
+                        'basename' => $file['basename'],
+                        'size_bytes' => $file['size_bytes'],
+                        'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $fallbackMaxCharsPerFile),
+                    );
+                }
+            }
+
+            $count++;
+        } catch (Throwable $e) {
+            $out[] = array(
+                'path' => (string)$path,
+                'error' => $e->getMessage(),
+            );
+        }
+    }
+
+    return $out;
+}
+
 
 function read_files_for_targeted_context(
     array $paths,
@@ -419,10 +778,9 @@ function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFi
         try {
             $file = safe_project_file_read((string)$path);
             $content = (string)$file['content'];
+            $len = strlen($content);
 
-            $len = mb_strlen($content);
-
-            if ($len <= $maxCharsPerFile) {
+            if ($len <= 80000) {
                 $out[] = [
                     'path' => $file['path'],
                     'basename' => $file['basename'],
@@ -430,21 +788,12 @@ function read_files_for_context(array $paths, int $limit = 5, int $maxCharsPerFi
                     'content' => $content,
                 ];
             } else {
-                $chunkSize = 4000;
-                $totalChunks = min((int)ceil($len / $chunkSize), 2);
-
-                for ($i = 0; $i < $totalChunks; $i++) {
-                    $chunk = mb_substr($content, $i * $chunkSize, $chunkSize);
-
-                    $out[] = [
-                        'path' => $file['path'],
-                        'basename' => $file['basename'],
-                        'size_bytes' => $file['size_bytes'],
-                        'content' =>
-                            "/* FILE CHUNK " . ($i + 1) . " / " . $totalChunks . " */\n\n" .
-                            $chunk
-                    ];
-                }
+                $out[] = [
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $maxCharsPerFile),
+                ];
             }
 
             $count++;
@@ -1473,11 +1822,11 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
             $methodNames = extract_method_like_tokens_from_text($prompt);
 
     if ($targetPath !== '') {
-        $targetedFilesContent = read_files_for_targeted_context(array($targetPath), $methodNames, 1, 24000, true);
+        $targetedFilesContent = read_files_for_targeted_context(array($targetPath), $methodNames, 1, 24000, true, $prompt);
     } elseif ($primaryTargetFile !== '' && count($targetFiles) >= 1) {
-        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000, true);
+        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000, true, $prompt);
     } else {
-        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars, false);
+        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars, false, $prompt);
     }
 
       // Targeted DB + project context
@@ -2159,18 +2508,17 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
     $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
     $targetedMaxChars = 20000;
-
-        $methodNames = extract_method_like_tokens_from_text($message);
+    $methodNames = extract_method_like_tokens_from_text($message);
 
     if ($primaryTargetFile !== '' && count($targetFiles) === 1) {
-        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000, true);
+        $targetedFilesContent = read_files_for_targeted_context(array($primaryTargetFile), $methodNames, 1, 24000, true, $message);
     } else {
-        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars, false);
+        $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars, false, $message);
     }
 
     $ssot = load_latest_ssot_snapshot($pdo);
     $fileCandidates = resolve_explicit_file_candidates($pdo, $message);
-	$contextFiles = read_files_for_targeted_context($fileCandidates, array(), 3, 24000, true);
+    $contextFiles = read_files_for_targeted_context($fileCandidates, array(), 3, 24000, true, $message);
     $dbSchema = load_targeted_schema($pdo, $message);
     $projectIndex = load_targeted_project_index(
         project_root_path(),
@@ -2457,8 +2805,8 @@ function build_engineering_context_files(PDO $pdo, string $prompt): array
 
     $paths = array_values(array_unique(array_filter($paths)));
 
-     $methodNames = extract_method_like_tokens_from_text($prompt);
-     return read_files_for_targeted_context($paths, $methodNames, 3, 24000, true);
+    $methodNames = extract_method_like_tokens_from_text($prompt);
+    return read_files_for_targeted_context($paths, $methodNames, 3, 24000, true, $prompt);
 }
 
 function resolve_effective_output_mode(?array $artifact, string $fallback = 'analysis_only'): string
@@ -2695,7 +3043,7 @@ function expand_engineering_context_files(
         $methodNames = array_values(array_unique(array_merge($methodNames, $dependencyHints['symbols'])));
     }
 
-    $extraContextFiles = read_files_for_targeted_context($newPaths, $methodNames, $maxExtraFiles, 24000, true);
+    $extraContextFiles = read_files_for_targeted_context($newPaths, $methodNames, $maxExtraFiles, 24000, true, $prompt);
 
     return merge_context_files($existingContextFiles, $extraContextFiles, 8);
 }
