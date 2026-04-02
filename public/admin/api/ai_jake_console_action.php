@@ -813,10 +813,21 @@ function build_scope_contract(PDO $pdo, array $requestRow, array $contextFiles):
 
     $expectedLocalChangeOnly = ($preferredOutputMode === 'surgical_patch') ? 'yes' : 'no';
 
-    $allowedEditPaths = array();
+	$allowedEditPaths = array();
+
     if ($primaryTargetPath !== null && $primaryTargetPath !== '') {
         $allowedEditPaths[] = $primaryTargetPath;
     }
+
+    $explicitPaths = resolve_explicit_file_candidates($pdo, $prompt);
+    foreach ($explicitPaths as $path) {
+        $path = trim((string)$path);
+        if ($path !== '') {
+            $allowedEditPaths[] = $path;
+        }
+    }
+
+    $allowedEditPaths = array_values(array_unique($allowedEditPaths));
 
     return array(
         'primary_target_path' => $primaryTargetPath,
@@ -1071,10 +1082,6 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
 
     $body = implode("\n", array_slice($lines, $bodyStartIndex));
 
-    if ($outputMode === 'full_drop_in') {
-        $body = preg_replace('/^[\-\+]\s?/m', '', $body);
-    }
-
     $body = trim($body);
 
     if ($body === '') {
@@ -1103,7 +1110,7 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
     if (strpos(ltrim($artifactContent), 'AI ERROR:') === 0) {
         return [
             'verdict' => 'analysis_only',
-            'reason' => 'Steven did not complete the code generation successfully because the AI call failed before a real artifact could be produced. In other words: this is not approved code â€” it is a generation failure, so we should retry with less context or after the rate limit clears.',
+            'reason' => 'Steven did not complete the code generation successfully because the AI call failed before a real artifact could be produced. In other words: this is not approved code, it is a generation failure, so we should retry with less context or after the rate limit clears.',
             'revision' => 'Retry generation with reduced context size or after the OpenAI rate limit window resets.'
         ];
     }
@@ -1126,7 +1133,7 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
     ) {
         return [
             'verdict' => 'needs_revision',
-            'reason' => 'Steven rewrote the CoursewareProgressionV2 class instead of proposing a clearly scoped addition or surgical patch. For this request, that is too broad and too risky. In other words: even if the methods used are visible, the delivery format is still wrong â€” this should be added as a precise patch, not as a class rewrite.',
+            'reason' => 'Steven rewrote the CoursewareProgressionV2 class instead of proposing a clearly scoped addition or surgical patch. For this request, that is too broad and too risky. In other words: even if the methods used are visible, the delivery format is still wrong, this should be added as a precise patch, not as a class rewrite.',
             'revision' => 'Return a surgical_patch only. Do not redefine the class. Provide the exact insertion point for the new diagnostics method inside src/courseware_progression_v2.php.'
         ];
     }
@@ -1989,7 +1996,7 @@ function is_continuation_trigger(string $messageText): bool
         return false;
     }
 
-    $normalized = str_replace(array("â€™", "`", "â€˜"), "'", $text);
+    $normalized = str_replace(array("’", "‘", "â€™", "â€˜", "`"), "'", $text);
     $normalized = preg_replace('/[^a-z0-9\'\s]/', ' ', $normalized);
     $normalized = preg_replace('/\s+/', ' ', $normalized);
     $normalized = trim((string)$normalized);
@@ -2058,7 +2065,7 @@ function is_revision_trigger(string $messageText): bool
         return false;
     }
 
-    $normalized = str_replace(array("â€™", "`", "â€˜"), "'", $text);
+    $normalized = str_replace(array("’", "‘", "â€™", "â€˜", "`"), "'", $text);
     $normalized = preg_replace('/[^a-z0-9\'\s]/', ' ', $normalized);
     $normalized = preg_replace('/\s+/', ' ', $normalized);
     $normalized = trim((string)$normalized);
@@ -2452,6 +2459,232 @@ function resolve_effective_output_mode(?array $artifact, string $fallback = 'ana
 }
 
 
+function artifact_or_analysis_requests_more_context(array $artifactSeed): bool
+{
+    $outputMode = trim((string)($artifactSeed['output_mode'] ?? 'analysis_only'));
+    $content = trim((string)($artifactSeed['content'] ?? ''));
+
+    if ($content === '') {
+        return false;
+    }
+
+    if ($outputMode !== 'analysis_only') {
+        return false;
+    }
+
+    $signals = array(
+        'missing required file',
+        'missing file',
+        'missing method',
+        'missing dependency',
+        'not visible in the loaded context',
+        'not present in the provided context',
+        'actual file contents',
+        'please provide the file contents',
+        'the provided context is not sufficient',
+        'the authoritative target file content provided is truncated',
+        'the expected method body is not actually visible',
+        'cannot safely produce',
+        'cannot safely patch',
+        'cannot safely output',
+        'full current contents of',
+        'what is missing',
+        'required to produce',
+        'required to proceed safely',
+    );
+
+    $lower = strtolower($content);
+
+    foreach ($signals as $signal) {
+        if (strpos($lower, $signal) !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function extract_missing_dependencies_from_analysis(string $text): array
+{
+    $text = trim($text);
+
+    $out = array(
+        'files' => array(),
+        'symbols' => array(),
+        'tables' => array(),
+    );
+
+    if ($text === '') {
+        return $out;
+    }
+
+    if (preg_match_all('#([A-Za-z0-9_\-\/]+\.(php|js|css|sql|json|md|txt))#i', $text, $m)) {
+        foreach ($m[1] as $path) {
+            $path = trim((string)$path);
+            if ($path !== '') {
+                $out['files'][] = ltrim(str_replace('\\', '/', $path), '/');
+            }
+        }
+    }
+
+    if (preg_match_all('/\b([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $text, $m)) {
+        foreach ($m[1] as $symbol) {
+            $symbol = trim((string)$symbol);
+            if ($symbol !== '' && strlen($symbol) >= 6) {
+                $out['symbols'][] = $symbol;
+            }
+        }
+    }
+
+    if (preg_match_all('/\b([a-z][a-z0-9_]{3,})\b/', strtolower($text), $m)) {
+        foreach ($m[1] as $token) {
+            if (strpos($token, '_') !== false) {
+                $out['tables'][] = $token;
+            }
+        }
+    }
+
+    $out['files'] = array_values(array_unique($out['files']));
+    $out['symbols'] = array_values(array_unique($out['symbols']));
+    $out['tables'] = array_values(array_unique($out['tables']));
+
+    return $out;
+}
+
+function resolve_dependency_candidates(PDO $pdo, array $dependencyHints, string $prompt = ''): array
+{
+    $paths = array();
+
+    if (!empty($dependencyHints['files']) && is_array($dependencyHints['files'])) {
+        foreach ($dependencyHints['files'] as $path) {
+            $path = trim((string)$path);
+            if ($path !== '') {
+                $paths[] = $path;
+            }
+        }
+    }
+
+    $symbols = (!empty($dependencyHints['symbols']) && is_array($dependencyHints['symbols']))
+        ? $dependencyHints['symbols']
+        : array();
+
+    $root = project_root_path();
+    $allFiles = load_project_file_index($root);
+
+    if (!empty($symbols)) {
+        foreach ($allFiles as $path) {
+            try {
+                $file = safe_project_file_read((string)$path);
+                $content = (string)$file['content'];
+
+                foreach ($symbols as $symbol) {
+                    $symbol = trim((string)$symbol);
+                    if ($symbol === '') {
+                        continue;
+                    }
+
+                    if (
+                        preg_match('/public\s+function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
+                        preg_match('/protected\s+function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
+                        preg_match('/private\s+function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
+                        preg_match('/function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
+                        preg_match('/class\s+' . preg_quote($symbol, '/') . '\b/i', $content)
+                    ) {
+                        $paths[] = (string)$path;
+                        break;
+                    }
+                }
+            } catch (Throwable $e) {
+                continue;
+            }
+        }
+    }
+
+    if ($prompt !== '') {
+        $targetData = build_targeted_context($pdo, $prompt);
+        if (!empty($targetData['files']) && is_array($targetData['files'])) {
+            foreach ($targetData['files'] as $path) {
+                $path = trim((string)$path);
+                if ($path !== '') {
+                    $paths[] = $path;
+                }
+            }
+        }
+    }
+
+    $paths = array_values(array_unique(array_filter($paths)));
+
+    return $paths;
+}
+
+function merge_context_files(array $existingContextFiles, array $extraContextFiles, int $maxFiles = 8): array
+{
+    $merged = array();
+    $seen = array();
+
+    foreach (array_merge($existingContextFiles, $extraContextFiles) as $f) {
+        $path = !empty($f['path']) ? (string)$f['path'] : '';
+        $key = $path !== '' ? $path : md5(json_encode($f));
+
+        if (isset($seen[$key])) {
+            continue;
+        }
+
+        $seen[$key] = true;
+        $merged[] = $f;
+
+        if (count($merged) >= $maxFiles) {
+            break;
+        }
+    }
+
+    return $merged;
+}
+
+function expand_engineering_context_files(
+    PDO $pdo,
+    string $prompt,
+    array $existingContextFiles,
+    array $artifactSeed,
+    int $maxExtraFiles = 3
+): array {
+    $analysisText = trim((string)($artifactSeed['content'] ?? ''));
+    if ($analysisText === '') {
+        return $existingContextFiles;
+    }
+
+    $dependencyHints = extract_missing_dependencies_from_analysis($analysisText);
+    $candidatePaths = resolve_dependency_candidates($pdo, $dependencyHints, $prompt);
+
+    $alreadyLoaded = array();
+    foreach ($existingContextFiles as $f) {
+        if (!empty($f['path'])) {
+            $alreadyLoaded[] = (string)$f['path'];
+        }
+    }
+
+    $newPaths = array();
+    foreach ($candidatePaths as $path) {
+        if (!in_array($path, $alreadyLoaded, true)) {
+            $newPaths[] = $path;
+        }
+    }
+
+    if (empty($newPaths)) {
+        return $existingContextFiles;
+    }
+
+    $methodNames = extract_method_like_tokens_from_text($prompt, 10);
+    if (!empty($dependencyHints['symbols'])) {
+        $methodNames = array_values(array_unique(array_merge($methodNames, $dependencyHints['symbols'])));
+    }
+
+    $extraContextFiles = read_files_for_targeted_context($newPaths, $methodNames, $maxExtraFiles, 24000);
+
+    return merge_context_files($existingContextFiles, $extraContextFiles, 8);
+}
+
+
 function run_jake_engineering_cycle(
     PDO $pdo,
     int $userId,
@@ -2506,9 +2739,32 @@ $outputMode = 'analysis_only';
         $finalReviewStatus = 'analysis_only';
         $finalReviewSummary = '';
 
-        while ($currentRound <= $maxRounds) {
+                while ($currentRound <= $maxRounds) {
             $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles, $scopeContract);
             $outputMode = (string)($artifactSeed['output_mode'] ?? 'full_drop_in');
+
+            if (
+                artifact_or_analysis_requests_more_context($artifactSeed)
+                && $currentRound < $maxRounds
+            ) {
+                $expandedContextFiles = expand_engineering_context_files(
+                    $pdo,
+                    (string)$requestRow['prompt'],
+                    $contextFiles,
+                    $artifactSeed,
+                    3
+                );
+
+                $contextActuallyExpanded = count($expandedContextFiles) > count($contextFiles);
+
+                if ($contextActuallyExpanded) {
+                    $contextFiles = $expandedContextFiles;
+                    $scopeContract = build_scope_contract($pdo, $requestRow, $contextFiles);
+                    $stevenBrief = build_steven_brief($requestRow, $ssot, $contextFiles, $scopeContract);
+                    $currentRound++;
+                    continue;
+                }
+            }
 
             $artifactId = create_artifact($pdo, [
                 'run_id' => $runId,
