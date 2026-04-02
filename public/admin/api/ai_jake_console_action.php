@@ -881,6 +881,46 @@ function artifact_mentions_expected_symbols(string $artifactContent, array $expe
     return false;
 }
 
+function context_files_contain_expected_symbol_bodies(array $contextFiles, array $expectedSymbols): bool
+{
+    if (empty($expectedSymbols)) {
+        return true;
+    }
+
+    foreach ($expectedSymbols as $symbol) {
+        $symbol = trim((string)$symbol);
+        if ($symbol === '') {
+            continue;
+        }
+
+        $found = false;
+
+        foreach ($contextFiles as $f) {
+            if (!empty($f['error']) || empty($f['content'])) {
+                continue;
+            }
+
+            $content = (string)$f['content'];
+
+            if (
+                preg_match('/public\s+function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
+                preg_match('/protected\s+function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
+                preg_match('/private\s+function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
+                preg_match('/function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content)
+            ) {
+                $found = true;
+                break;
+            }
+        }
+
+        if (!$found) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 function scope_contract_requires_method_scoped_patch(array $scopeContract): bool
 {
     $taskType = trim((string)($scopeContract['task_type'] ?? ''));
@@ -1107,7 +1147,7 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         }
     }
 
-    if (
+        if (
         !empty($scopeContract) &&
         $outputMode !== 'analysis_only' &&
         scope_contract_requires_method_scoped_patch($scopeContract)
@@ -1115,6 +1155,14 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         $expectedSymbols = (!empty($scopeContract['expected_symbols']) && is_array($scopeContract['expected_symbols']))
             ? $scopeContract['expected_symbols']
             : array();
+
+        if (!context_files_contain_expected_symbol_bodies($contextFiles, $expectedSymbols)) {
+            return [
+                'verdict' => 'needs_revision',
+                'reason' => 'Steven produced a concrete patch for a method-scoped request, but the expected method body is not actually visible in the loaded file context. In other words: this may look precise, but it is still an invented patch against an unseen implementation.',
+                'revision' => 'Return analysis_only unless the loaded context includes the actual body of the expected method/symbol.'
+            ];
+        }
 
         if (!artifact_mentions_expected_symbols($artifactContent, $expectedSymbols)) {
             return [
@@ -1179,6 +1227,7 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         '- Do not give generic code-review advice unless it is directly relevant to the actual artifact.',
         '- Do not fall back to generic security, logging, validation, or architecture checklists unless the artifact truly has that specific problem.',
         '- Focus on whether Steven actually solved the requested task correctly and safely.',
+        '- Review only against the current USER REQUEST, current SCOPE CONTRACT, and currently loaded file contents. Do not import semantic assumptions from prior runs, prior revisions, or earlier artifacts unless they are explicitly included in the current prompt.',
         '- If a SCOPE CONTRACT is provided, review Steven against that contract strictly.',
         '',
         'Critical rejection rules:',
