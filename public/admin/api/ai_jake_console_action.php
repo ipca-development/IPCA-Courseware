@@ -643,7 +643,174 @@ function build_jake_summary(array $requestRow, ?array $ssot, array $contextFiles
     return implode("\n", $lines);
 }
 
-function build_steven_brief(array $requestRow, ?array $ssot, array $contextFiles): string
+function detect_preferred_output_mode(string $prompt, ?string $primaryTargetPath = null): string
+{
+    $promptLower = strtolower($prompt);
+
+    if (
+        strpos($promptLower, 'surgical patch') !== false ||
+        strpos($promptLower, 'surgical_patch') !== false ||
+        strpos($promptLower, 'small patch') !== false ||
+        strpos($promptLower, 'minimal patch') !== false
+    ) {
+        return 'surgical_patch';
+    }
+
+    if (
+        strpos($promptLower, 'full drop-in') !== false ||
+        strpos($promptLower, 'full drop in') !== false ||
+        strpos($promptLower, 'full replacement') !== false ||
+        strpos($promptLower, 'rewrite the file') !== false ||
+        strpos($promptLower, 'replace the file') !== false
+    ) {
+        return 'full_drop_in';
+    }
+
+    if ($primaryTargetPath !== null && $primaryTargetPath !== '') {
+        return 'surgical_patch';
+    }
+
+    return 'analysis_only';
+}
+
+function detect_task_type(string $prompt): string
+{
+    $promptLower = strtolower($prompt);
+
+    if (
+        strpos($promptLower, 'normalize') !== false ||
+        strpos($promptLower, 'alias') !== false
+    ) {
+        return 'alias_normalization';
+    }
+
+    if (
+        strpos($promptLower, 'fix') !== false ||
+        strpos($promptLower, 'patch') !== false ||
+        strpos($promptLower, 'repair') !== false
+    ) {
+        return 'bugfix';
+    }
+
+    if (
+        strpos($promptLower, 'create') !== false ||
+        strpos($promptLower, 'build') !== false ||
+        strpos($promptLower, 'implement') !== false ||
+        strpos($promptLower, 'add') !== false
+    ) {
+        return 'implementation';
+    }
+
+    if (
+        strpos($promptLower, 'explain') !== false ||
+        strpos($promptLower, 'trace') !== false ||
+        strpos($promptLower, 'identify') !== false ||
+        strpos($promptLower, 'safest place') !== false
+    ) {
+        return 'analysis_trace';
+    }
+
+    return 'investigation';
+}
+
+function build_scope_contract(PDO $pdo, array $requestRow, array $contextFiles): array
+{
+    $prompt = trim((string)($requestRow['prompt'] ?? ''));
+
+    $targetData = build_targeted_context($pdo, $prompt);
+    $primaryTargetPath = pick_primary_target_path($pdo, $prompt, $contextFiles);
+    $supportingPaths = array();
+
+    if (!empty($targetData['files']) && is_array($targetData['files'])) {
+        foreach ($targetData['files'] as $path) {
+            $path = trim((string)$path);
+            if ($path !== '' && $path !== $primaryTargetPath) {
+                $supportingPaths[] = $path;
+            }
+        }
+    }
+
+    foreach ($contextFiles as $f) {
+        if (!empty($f['error']) || empty($f['path'])) {
+            continue;
+        }
+
+        $path = trim((string)$f['path']);
+        if ($path !== '' && $path !== $primaryTargetPath) {
+            $supportingPaths[] = $path;
+        }
+    }
+
+    $supportingPaths = array_values(array_unique($supportingPaths));
+    if (count($supportingPaths) > 3) {
+        $supportingPaths = array_slice($supportingPaths, 0, 3);
+    }
+
+    $methodNames = extract_method_like_tokens_from_text($prompt, 6);
+
+    $preferredOutputMode = detect_preferred_output_mode($prompt, $primaryTargetPath);
+    $taskType = detect_task_type($prompt);
+
+    $noClassRewrite = 'yes';
+    if (
+        strpos(strtolower($prompt), 'rewrite the file') !== false ||
+        strpos(strtolower($prompt), 'full replacement') !== false ||
+        strpos(strtolower($prompt), 'full drop-in') !== false
+    ) {
+        $noClassRewrite = 'no';
+    }
+
+    $expectedLocalChangeOnly = ($preferredOutputMode === 'surgical_patch') ? 'yes' : 'no';
+
+    $allowedEditPaths = array();
+    if ($primaryTargetPath !== null && $primaryTargetPath !== '') {
+        $allowedEditPaths[] = $primaryTargetPath;
+    }
+
+    return array(
+        'primary_target_path' => $primaryTargetPath,
+        'supporting_paths' => $supportingPaths,
+        'allowed_edit_paths' => $allowedEditPaths,
+        'preferred_output_mode' => $preferredOutputMode,
+        'no_class_rewrite' => $noClassRewrite,
+        'expected_local_change_only' => $expectedLocalChangeOnly,
+        'task_type' => $taskType,
+        'expected_symbols' => $methodNames,
+    );
+}
+
+function render_scope_contract_text(array $contract): string
+{
+    $lines = array();
+    $lines[] = 'SCOPE CONTRACT';
+
+    $lines[] = 'PRIMARY_TARGET_PATH: ' . (string)($contract['primary_target_path'] ?? '');
+
+    $supportingPaths = (!empty($contract['supporting_paths']) && is_array($contract['supporting_paths']))
+        ? $contract['supporting_paths']
+        : array();
+    $lines[] = 'SUPPORTING_PATHS: ' . (!empty($supportingPaths) ? implode(', ', $supportingPaths) : '');
+
+    $allowedEditPaths = (!empty($contract['allowed_edit_paths']) && is_array($contract['allowed_edit_paths']))
+        ? $contract['allowed_edit_paths']
+        : array();
+    $lines[] = 'ALLOWED_EDIT_PATHS: ' . (!empty($allowedEditPaths) ? implode(', ', $allowedEditPaths) : '');
+
+    $lines[] = 'PREFERRED_OUTPUT_MODE: ' . (string)($contract['preferred_output_mode'] ?? '');
+    $lines[] = 'NO_CLASS_REWRITE: ' . (string)($contract['no_class_rewrite'] ?? 'yes');
+    $lines[] = 'EXPECTED_LOCAL_CHANGE_ONLY: ' . (string)($contract['expected_local_change_only'] ?? 'yes');
+    $lines[] = 'TASK_TYPE: ' . (string)($contract['task_type'] ?? 'investigation');
+
+    $expectedSymbols = (!empty($contract['expected_symbols']) && is_array($contract['expected_symbols']))
+        ? $contract['expected_symbols']
+        : array();
+    $lines[] = 'EXPECTED_SYMBOLS: ' . (!empty($expectedSymbols) ? implode(', ', $expectedSymbols) : '');
+
+    return implode("\n", $lines);
+}
+
+
+function build_steven_brief(array $requestRow, ?array $ssot, array $contextFiles, array $scopeContract = array()): string
 {
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $type = trim((string)($requestRow['request_type'] ?? 'investigation'));
@@ -675,6 +842,11 @@ function build_steven_brief(array $requestRow, ?array $ssot, array $contextFiles
         $brief[] = '';
     }
 
+	if (!empty($scopeContract)) {
+        $brief[] = render_scope_contract_text($scopeContract);
+        $brief[] = '';
+    }
+	
     if ($contextFiles) {
         $brief[] = 'Loaded Context Files:';
         foreach ($contextFiles as $f) {
@@ -787,7 +959,7 @@ function parse_plain_text_artifact(string $text, ?string $fallbackTargetPath = n
     ];
 }
 
-function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFiles, array $artifactSeed): array
+function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFiles, array $artifactSeed, array $scopeContract = array()): array
 {
     $artifactContent = (string)($artifactSeed['content'] ?? '');
     $targetPath = (string)($artifactSeed['target_path'] ?? '');
@@ -836,6 +1008,7 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         '- Do not give generic code-review advice unless it is directly relevant to the actual artifact.',
         '- Do not fall back to generic security, logging, validation, or architecture checklists unless the artifact truly has that specific problem.',
         '- Focus on whether Steven actually solved the requested task correctly and safely.',
+		'- If a SCOPE CONTRACT is provided, review Steven against that contract strictly.',
         '',
         'Critical rejection rules:',
         '- Reject invented methods, invented schema, invented APIs, or invented architecture.',
@@ -850,6 +1023,8 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         '- Reject any output that mixes placeholders, example usage blocks, or speculative scaffolding into what is presented as production-ready code.',
         '- If there is uncertainty, prefer needs_revision over analysis_only when the target file still contains an obvious local bug that can be repaired without inventing new architecture.',
         '- Use analysis_only only when the requested fix truly cannot be grounded from the target file, loaded files, and established project conventions.',
+		'- Reject output that modifies files outside ALLOWED_EDIT_PATHS when a SCOPE CONTRACT is present.',
+        '- Reject output that rewrites a class when NO_CLASS_REWRITE is yes.',
         '',
         'Approval rules:',
         '- Approve code if it follows established project patterns, even if full method visibility is not present in the context.',
@@ -879,6 +1054,10 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
 
     $user = "USER REQUEST:\n" . trim((string)($requestRow['prompt'] ?? '')) . "\n\n";
 
+	    if (!empty($scopeContract)) {
+        $user .= render_scope_contract_text($scopeContract) . "\n\n";
+    }
+	
     if ($ssot) {
         $user .= "SSOT SNAPSHOT:\n";
         $user .= "Version: " . (string)($ssot['ssot_version'] ?? '') . "\n";
@@ -1002,7 +1181,7 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
     ];
 }
 
-function build_steven_artifact_content(array $requestRow, array $contextFiles): array
+function build_steven_artifact_content(array $requestRow, array $contextFiles, array $scopeContract = array()): array
 {
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
@@ -1079,6 +1258,11 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
         '- Prefer using clearly visible existing methods from the loaded file.',
         '- If functionality is missing, explicitly state which method, file, schema element, or dependency is missing instead of guessing.',
 		'- When the requested fix names a specific target file and that file content is provided, prefer patching that file directly instead of refusing due to broader uncertainty.',
+	    '- If a SCOPE CONTRACT is provided, obey it strictly.',
+        '- Only modify files listed in ALLOWED_EDIT_PATHS.',
+        '- If PRIMARY_TARGET_PATH is provided, treat it as the main file to patch.',
+        '- If NO_CLASS_REWRITE is yes, do not output a full class definition or class rewrite.',
+        '- If EXPECTED_LOCAL_CHANGE_ONLY is yes, prefer the smallest viable local patch.',
         '',
         'Output rules:',
         '- When a safe full replacement is possible, provide a full drop-in.',
@@ -1103,6 +1287,10 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles): 
     $userPrompt = "REQUEST TITLE:\n" . $title . "\n\n";
     $userPrompt .= "REQUEST:\n" . $prompt . "\n\n";
 
+	    if (!empty($scopeContract)) {
+        $userPrompt .= render_scope_contract_text($scopeContract) . "\n\n";
+    }
+	
     if (!empty($contextFiles)) {
         $userPrompt .= "CONTEXT FILES:\n";
         foreach ($contextFiles as $f) {
@@ -1952,7 +2140,8 @@ function run_jake_engineering_cycle(
 
     $ssot = load_latest_ssot_snapshot($pdo);
     $contextFiles = build_engineering_context_files($pdo, (string)$requestRow['prompt']);
-
+	$scopeContract = build_scope_contract($pdo, $requestRow, $contextFiles);
+	
     $runId = create_jake_run(
         $pdo,
         $requestId,
@@ -1962,7 +2151,7 @@ function run_jake_engineering_cycle(
     );
 
     $jakeSummary = build_jake_summary($requestRow, $ssot, $contextFiles);
-    $stevenBrief = build_steven_brief($requestRow, $ssot, $contextFiles);
+    $stevenBrief = build_steven_brief($requestRow, $ssot, $contextFiles, $scopeContract);
     $riskNotes = 'Steven output generated via OpenAI. Manual review still required before any code is used.';
     $outputMode = 'full_drop_in';
 
@@ -1975,7 +2164,7 @@ function run_jake_engineering_cycle(
         $finalReviewSummary = '';
 
         while ($currentRound <= $maxRounds) {
-            $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles);
+            $artifactSeed = build_steven_artifact_content($requestRow, $contextFiles, $scopeContract);
             $outputMode = (string)($artifactSeed['output_mode'] ?? 'full_drop_in');
 
             $artifactId = create_artifact($pdo, [
@@ -1991,11 +2180,12 @@ function run_jake_engineering_cycle(
                 'approved_by_agent' => 'jake',
             ]);
 
-            $review = jake_review_artifact(
+             $review = jake_review_artifact(
                 $requestRow,
                 $ssot,
                 $contextFiles,
-                $artifactSeed
+                $artifactSeed,
+                $scopeContract
             );
 
             $reviewStatus = (string)($review['verdict'] ?? 'analysis_only');
@@ -2026,6 +2216,7 @@ function run_jake_engineering_cycle(
             }
 
             $requestRow['prompt'] .= "\n\nREVISION REQUIRED:\n" . $reviewSummary;
+            $scopeContract = build_scope_contract($pdo, $requestRow, $contextFiles);
             $currentRound++;
         }
 
