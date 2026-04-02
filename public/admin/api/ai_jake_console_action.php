@@ -328,58 +328,8 @@ function extract_large_file_tail_excerpt(string $content, array $methodNames, in
     return "/* LARGE FILE TAIL FALLBACK FOR: " . $label . " */\n\n" . $tail;
 }
 
-function extract_method_inventory_from_file_content(string $content): array
-{
-    $methods = array();
 
-    if ($content === '') {
-        return $methods;
-    }
 
-    if (preg_match_all('/\b(public)\s+function\s+([A-Za-z_][A-Za-z0-9_]*)\s*\((.*?)\)\s*(?::\s*([A-Za-z0-9_\\\\?]+))?/s', $content, $m, PREG_SET_ORDER)) {
-        foreach ($m as $row) {
-            $visibility = isset($row[1]) ? trim((string)$row[1]) : '';
-            $name = isset($row[2]) ? trim((string)$row[2]) : '';
-            $params = isset($row[3]) ? trim((string)$row[3]) : '';
-            $returnType = isset($row[4]) ? trim((string)$row[4]) : '';
-
-            if ($name === '') {
-                continue;
-            }
-
-            $signature = $visibility . ' function ' . $name . '(' . $params . ')';
-            if ($returnType !== '') {
-                $signature .= ': ' . $returnType;
-            }
-
-            $methods[] = array(
-                'visibility' => $visibility,
-                'name' => $name,
-                'signature' => $signature,
-            );
-        }
-    }
-
-    return $methods;
-}
-
-function build_method_inventory_text(string $content): ?string
-{
-    $methods = extract_method_inventory_from_file_content($content);
-    if (empty($methods)) {
-        return null;
-    }
-
-    $lines = array();
-    $lines[] = '/* METHOD INVENTORY */';
-    $lines[] = '';
-
-    foreach ($methods as $method) {
-        $lines[] = $method['signature'];
-    }
-
-    return implode("\n", $lines);
-}
 
 function find_matching_brace_position(string $content, int $openBracePos): ?int
 {
@@ -607,7 +557,6 @@ function read_files_for_targeted_context(
 {
     $out = array();
     $count = 0;
-    $forceMethodInventory = ($prompt !== null && should_force_method_inventory_mode($prompt));
 
     $paths = array_values(array_unique($paths));
 
@@ -621,21 +570,7 @@ function read_files_for_targeted_context(
             $content = (string)$file['content'];
             $len = strlen($content);
 
-            if ($forceMethodInventory) {
-                $inventory = build_method_inventory_text($content);
-                if ($inventory !== null) {
-                    $out[] = array(
-                        'path' => $file['path'],
-                        'basename' => $file['basename'],
-                        'size_bytes' => $file['size_bytes'],
-                        'content' => $inventory,
-                    );
-                    $count++;
-                    continue;
-                }
-            }
-
-            if ($preferFullFileWhenSmall && $len <= 80000) {
+            if ($len <= 80000) {
                 $out[] = array(
                     'path' => $file['path'],
                     'basename' => $file['basename'],
@@ -672,21 +607,12 @@ function read_files_for_targeted_context(
                     'content' => $targetedExcerpt,
                 );
             } else {
-                if ($len <= $fallbackMaxCharsPerFile) {
-                    $out[] = array(
-                        'path' => $file['path'],
-                        'basename' => $file['basename'],
-                        'size_bytes' => $file['size_bytes'],
-                        'content' => $content,
-                    );
-                } else {
-                    $out[] = array(
-                        'path' => $file['path'],
-                        'basename' => $file['basename'],
-                        'size_bytes' => $file['size_bytes'],
-                        'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $fallbackMaxCharsPerFile),
-                    );
-                }
+                $out[] = array(
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $fallbackMaxCharsPerFile),
+                );
             }
 
             $count++;
