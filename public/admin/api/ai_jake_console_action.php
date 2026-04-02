@@ -338,44 +338,58 @@ function read_files_for_targeted_context(array $paths, array $methodNames, int $
             break;
         }
 
-        try {
-            $file = safe_project_file_read((string)$path);
-            $content = (string)$file['content'];
+            try {
+        $file = safe_project_file_read((string)$path);
+        $content = (string)$file['content'];
+        $len = mb_strlen($content);
+        $fullFileThreshold = 50000;
 
-            $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
+        if ($len <= $fullFileThreshold) {
+            $out[] = array(
+                'path' => $file['path'],
+                'basename' => $file['basename'],
+                'size_bytes' => $file['size_bytes'],
+                'content' => $content,
+            );
+            $count++;
+            continue;
+        }
 
-            if ($targetedExcerpt === null && !empty($methodNames)) {
-                $targetedExcerpt = extract_large_file_tail_excerpt($content, $methodNames, 28000);
-            }
+        $targetedExcerpt = extract_targeted_excerpt_from_file_content($content, $methodNames);
 
-            if ($targetedExcerpt !== null) {
+        if ($targetedExcerpt === null && !empty($methodNames)) {
+            $targetedExcerpt = extract_large_file_tail_excerpt($content, $methodNames, 28000);
+        }
+
+        if ($targetedExcerpt !== null) {
+            $out[] = array(
+                'path' => $file['path'],
+                'basename' => $file['basename'],
+                'size_bytes' => $file['size_bytes'],
+                'content' => $targetedExcerpt,
+            );
+        } else {
+            if ($len <= $fallbackMaxCharsPerFile) {
                 $out[] = array(
                     'path' => $file['path'],
                     'basename' => $file['basename'],
                     'size_bytes' => $file['size_bytes'],
-                    'content' => $targetedExcerpt,
+                    'content' => $content,
                 );
             } else {
-                $len = mb_strlen($content);
-
-                if ($len <= $fallbackMaxCharsPerFile) {
-                    $out[] = array(
-                        'path' => $file['path'],
-                        'basename' => $file['basename'],
-                        'size_bytes' => $file['size_bytes'],
-                        'content' => $content,
-                    );
-                } else {
-                    $out[] = array(
-                        'path' => $file['path'],
-                        'basename' => $file['basename'],
-                        'size_bytes' => $file['size_bytes'],
-                        'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $fallbackMaxCharsPerFile),
-                    );
-                }
+                $out[] = array(
+                    'path' => $file['path'],
+                    'basename' => $file['basename'],
+                    'size_bytes' => $file['size_bytes'],
+                    'content' => "/* FILE CHUNK 1 / 1 */\n\n" . mb_substr($content, 0, $fallbackMaxCharsPerFile),
+                );
             }
+        }
 
-            $count++;
+        $count++;
+		
+		
+		
         } catch (Throwable $e) {
             $out[] = array(
                 'path' => (string)$path,
