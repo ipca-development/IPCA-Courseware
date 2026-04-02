@@ -1103,7 +1103,7 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
     if (strpos(ltrim($artifactContent), 'AI ERROR:') === 0) {
         return [
             'verdict' => 'analysis_only',
-            'reason' => 'Steven did not complete the code generation successfully because the AI call failed before a real artifact could be produced. In other words: this is not approved code â€” it is a generation failure, so we should retry with less context or after the rate limit clears.',
+            'reason' => 'Steven did not complete the code generation successfully because the AI call failed before a real artifact could be produced. In other words: this is not approved code — it is a generation failure, so we should retry with less context or after the rate limit clears.',
             'revision' => 'Retry generation with reduced context size or after the OpenAI rate limit window resets.'
         ];
     }
@@ -1126,7 +1126,7 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
     ) {
         return [
             'verdict' => 'needs_revision',
-            'reason' => 'Steven rewrote the CoursewareProgressionV2 class instead of proposing a clearly scoped addition or surgical patch. For this request, that is too broad and too risky. In other words: even if the methods used are visible, the delivery format is still wrong â€” this should be added as a precise patch, not as a class rewrite.',
+            'reason' => 'Steven rewrote the CoursewareProgressionV2 class instead of proposing a clearly scoped addition or surgical patch. For this request, that is too broad and too risky. In other words: even if the methods used are visible, the delivery format is still wrong — this should be added as a precise patch, not as a class rewrite.',
             'revision' => 'Return a surgical_patch only. Do not redefine the class. Provide the exact insertion point for the new diagnostics method inside src/courseware_progression_v2.php.'
         ];
     }
@@ -1147,25 +1147,6 @@ function jake_review_artifact(array $requestRow, ?array $ssot, array $contextFil
         }
     }
 
-	
-// STRICT PATCH QUALITY GATE (notification_service + similar)
-if (
-    strpos($targetPath, 'notification_service.php') !== false &&
-    $outputMode === 'surgical_patch'
-) {
-    $hasReplaceKeyword = stripos($artifactContent, 'Replace this block') !== false;
-    $hasWithKeyword = stripos($artifactContent, 'With this block') !== false;
-
-    if (!$hasReplaceKeyword || !$hasWithKeyword) {
-        return [
-            'verdict' => 'needs_revision',
-            'reason' => 'Steven did not provide a concrete before/after patch. The request requires an exact replace block, not generic instructions. In other words: this cannot be applied directly and is therefore unsafe.',
-            'revision' => 'Return a surgical_patch that includes both the exact existing block and the exact replacement block.'
-        ];
-    }
-}	
-	
-	
         if (
         !empty($scopeContract) &&
         $outputMode !== 'analysis_only' &&
@@ -1457,7 +1438,7 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         $targetedFilesContent = read_files_for_targeted_context($targetFiles, $methodNames, 2, $targetedMaxChars);
     }
 
-      // ðŸ”¥ Targeted DB + project context
+      // 🔥 Targeted DB + project context
     $dbSchema = load_targeted_schema($GLOBALS['pdo'], $prompt);
     $projectIndex = load_targeted_project_index(
         project_root_path(),
@@ -1493,21 +1474,16 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
         '- Each answer must be grounded in the correct requested source.',
         '',
         'Implementation safety rules:',
-		'- Before using any method or function, verify it exists in the provided file context.',
-		'- If unsure whether a method exists, do NOT assume; instead return analysis_only.',
-		'- Prefer using clearly visible existing methods from the loaded file.',
-		'- If functionality is missing, explicitly state which method, file, schema element, or dependency is missing instead of guessing.',
+        '- Before using any method or function, verify it exists in the provided file context.',
+        '- If unsure whether a method exists, do NOT assume; instead return analysis_only.',
+        '- Prefer using clearly visible existing methods from the loaded file.',
+        '- If functionality is missing, explicitly state which method, file, schema element, or dependency is missing instead of guessing.',
 		'- When the requested fix names a specific target file and that file content is provided, prefer patching that file directly instead of refusing due to broader uncertainty.',
-		'- If a SCOPE CONTRACT is provided, obey it strictly.',
-		'- Only modify files listed in ALLOWED_EDIT_PATHS.',
-		'- If PRIMARY_TARGET_PATH is provided, treat it as the main file to patch.',
-		'- If NO_CLASS_REWRITE is yes, do not output a full class definition or class rewrite.',
-		'- If EXPECTED_LOCAL_CHANGE_ONLY is yes, prefer the smallest viable local patch.',
-		'- For surgical_patch output, prefer exact before/after replacement blocks whenever the requested change is method-scoped or SQL-block-scoped.',
-		'- Do not give vague instructions like "find this block", "locate the failure path", or "change the UPDATE".',
-		'- Do not use placeholder comments inside a patch.',
-		'- If you cannot quote the existing block from visible context, return analysis_only instead of inventing it.',
-		'- A surgical_patch should be directly copy-paste applicable by the user.',
+	    '- If a SCOPE CONTRACT is provided, obey it strictly.',
+        '- Only modify files listed in ALLOWED_EDIT_PATHS.',
+        '- If PRIMARY_TARGET_PATH is provided, treat it as the main file to patch.',
+        '- If NO_CLASS_REWRITE is yes, do not output a full class definition or class rewrite.',
+        '- If EXPECTED_LOCAL_CHANGE_ONLY is yes, prefer the smallest viable local patch.',
         '',
         'Output rules:',
         '- When a safe full replacement is possible, provide a full drop-in.',
@@ -1989,7 +1965,7 @@ function is_continuation_trigger(string $messageText): bool
         return false;
     }
 
-    $normalized = str_replace(array("â€™", "`", "â€˜"), "'", $text);
+    $normalized = str_replace(array("’", "`", "‘"), "'", $text);
     $normalized = preg_replace('/[^a-z0-9\'\s]/', ' ', $normalized);
     $normalized = preg_replace('/\s+/', ' ', $normalized);
     $normalized = trim((string)$normalized);
@@ -2058,7 +2034,7 @@ function is_revision_trigger(string $messageText): bool
         return false;
     }
 
-    $normalized = str_replace(array("â€™", "`", "â€˜"), "'", $text);
+    $normalized = str_replace(array("’", "`", "‘"), "'", $text);
     $normalized = preg_replace('/[^a-z0-9\'\s]/', ' ', $normalized);
     $normalized = preg_replace('/\s+/', ' ', $normalized);
     $normalized = trim((string)$normalized);
@@ -2155,65 +2131,60 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
         $message
     );
 
-$systemPrompt = implode("\n", [
-    'You are Jake, the IPCA architect and SSOT guardian.',
-    '',
-    'You are NOT a generic assistant.',
-    'You are an execution-focused orchestrator working with Steven (implementation agent).',
-    '',
-    'CORE BEHAVIOR',
-    '- You guide implementation, not just explain.',
-    '- You prepare clean, actionable steps for Steven.',
-    '- You do NOT re-analyze systems that are already defined.',
-    '- You respect the existing architecture and SSOT strictly.',
-    '',
-    'SYSTEM REALITY',
-    '- Files may be truncated.',
-    '- Methods may be partially visible.',
-    '- Context may be incomplete.',
-    '- You must work within this constraint WITHOUT guessing.',
-    '',
-    'CRITICAL RULES',
-    '- DO NOT invent methods, schema, or architecture.',
-    '- DO NOT suggest rewrites of core systems unless explicitly asked.',
-    '- DO NOT duplicate business logic from the progression engine.',
-    '',
-    'EXECUTION MINDSET',
-    '- Always move the system forward.',
-    '- Prefer safe progress over theoretical perfection.',
-    '- If a safe step can be taken → take it.',
-    '- If blocked → clearly state what is missing.',
-    '',
-    'COOPERATION MODEL',
-    '- You define WHAT should be built.',
-    '- Steven defines HOW it is implemented.',
-    '- You validate that Steven stayed within scope.',
-    '',
-    'WHEN USER IS BUILDING SYSTEMS',
-    '- Break work into ordered steps.',
-    '- Keep steps small and deterministic.',
-    '- Avoid mixing multiple concerns in one step.',
-    '',
-    'CONTEXT USAGE RULES',
-    '- If LOADED FILES are present → treat as source of truth.',
-    '- If DATABASE SCHEMA is present → treat as authoritative.',
-    '- If context is incomplete → explicitly say so.',
-    '',
-    'INTERACTION STYLE',
-    '- Clear, calm, senior engineer tone',
-    '- No robotic phrasing',
-    '- No over-warning',
-    '- Short structured responses',
-    '',
-    'STRUCTURE OUTPUT LIKE THIS:',
-    '**Summary**',
-    '',
-    '**What this means**',
-    '',
-    '**In other words**',
-    '',
-    '**My suggestion**',
-]);
+    $systemPrompt = implode("\n", [
+        'You are Jake, the IPCA system architect and SSOT guardian.',
+        '',
+        'You think like a senior software architect, but you speak like a clear, calm, helpful human.',
+        '',
+        'Tone rules:',
+        '- Natural, conversational, like a senior engineer explaining things to a colleague',
+        '- No robotic or overly strict phrasing',
+        '- No unnecessary warnings unless something is actually risky',
+        '- Be concise but not abrupt',
+        '- It should feel like a real conversation, not a system message',
+        '',
+        'Behavior rules:',
+        '- Internally be strict about architecture, SSOT, and correctness',
+        '- Externally explain things simply and clearly',
+        '- You can guide, suggest, and explain — not just block',
+        '- If something is not possible, explain *why* and suggest the next best step',
+        '- Avoid saying things like "we must stay focused" or similar rigid phrasing',
+        '',
+        'Engineering rules:',
+        '- Do not invent system behavior',
+        '- Stay grounded in SSOT and loaded files',
+        '- Highlight risks when relevant, but do not overdo it',
+        '',
+        'Context usage rules:',
+        '- If LOADED FILES are present, treat them as directly readable context.',
+        '- If DATABASE SCHEMA is present, treat it as directly available source data.',
+        '- If PROJECT FILE INDEX is present, treat it as directly available source data.',
+        '- When the answer is present in supplied context, use that context directly instead of giving generic guidance.',
+        '- Do not say you cannot access a file, schema, or project structure when it has been provided in the prompt.',
+        '- If asked to list items from provided context, list the actual items from that context.',
+        '- If context is incomplete or truncated, say that clearly and answer only from the visible portion.',
+        '- Never propose SQL INSERT statements for artifacts.',
+        '- Artifacts must ONLY be created via the engineering cycle (Steven).',
+        '',
+        'Interaction style:',
+        '- Think like a partner, not a gatekeeper',
+        '- You are assisting the user, not policing them',
+        '- Always structure your reply using section titles when explaining steps, reasoning, or recommendations',
+        '- Use bullet points only inside sections when it improves clarity',
+        '- Never write section titles as plain text',
+        '- Every section title MUST use the format: **Title**',
+        '- After every section title, insert exactly one empty line before continuing text',
+        '- Keep each section short and focused',
+        '- Avoid long continuous paragraphs',
+        '- Prefer breaking complex ideas into 2–4 short lines',
+        '',
+        'Default reply structure:',
+        '- Use sections in this order when applicable:',
+        '  **Summary**',
+        '  **What this means**',
+        '  **In other words**',
+        '  **My suggestion**',
+    ]);
 
     $userPrompt = "USER MESSAGE:\n" . $message . "\n\n";
 
