@@ -40,6 +40,45 @@ try {
     $notificationTemplates = array();
 }
 
+$activeAdmins = array();
+try {
+    $stmt = $pdo->query("
+        SELECT
+            id,
+            email,
+            name,
+            first_name,
+            last_name
+        FROM users
+        WHERE role = 'admin'
+          AND status = 'active'
+        ORDER BY COALESCE(name, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), id ASC
+    ");
+    $activeAdmins = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
+} catch (Throwable $e) {
+    $activeAdmins = array();
+}
+
+$activeInstructors = array();
+try {
+    $stmt = $pdo->query("
+        SELECT
+            id,
+            email,
+            name,
+            first_name,
+            last_name,
+            role
+        FROM users
+        WHERE role IN ('instructor', 'supervisor')
+          AND status = 'active'
+        ORDER BY COALESCE(name, ''), COALESCE(first_name, ''), COALESCE(last_name, ''), id ASC
+    ");
+    $activeInstructors = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
+} catch (Throwable $e) {
+    $activeInstructors = array();
+}
+
 cw_header('Automation Flows');
 ?>
 <style>
@@ -550,6 +589,8 @@ cw_header('Automation Flows');
   const operatorOptions = <?= json_encode($operators) ?>;
   const actionOptions = <?= json_encode($actionOptions) ?>;
   const emailTemplates = <?= json_encode($notificationTemplates) ?>;
+  const activeAdmins = <?= json_encode($activeAdmins) ?>;
+  const activeInstructors = <?= json_encode($activeInstructors) ?>;
   const eventGroups = <?= json_encode($eventGroups) ?>;
 
   let toastTimer = null;
@@ -655,13 +696,22 @@ cw_header('Automation Flows');
     return html;
   }
 
-  function emailTemplateOptionsHtml(selectedId) {
-    let html = '<option value="">Select email template</option>';
-    emailTemplates.forEach(function (tpl) {
-      const id = String(tpl.id || '');
-      const name = String(tpl.name || tpl.notification_key || ('Template #' + id));
-      const suffix = tpl.notification_key ? ' (' + tpl.notification_key + ')' : '';
-      html += '<option value="' + esc(id) + '"' + (String(selectedId) === id ? ' selected' : '') + '>' + esc(name + suffix) + '</option>';
+  function userOptionsHtml(users, selectedId) {
+    let html = '<option value="">Select user</option>';
+    (users || []).forEach(function (user) {
+      const id = String(user.id || '');
+      let label = String(user.name || '').trim();
+
+      if (label === '') {
+        label = (String(user.first_name || '') + ' ' + String(user.last_name || '')).trim();
+      }
+      if (label === '') {
+        label = String(user.email || ('User #' + id));
+      } else if (user.email) {
+        label += ' (' + String(user.email) + ')';
+      }
+
+      html += '<option value="' + esc(id) + '"' + (String(selectedId) === id ? ' selected' : '') + '>' + esc(label) + '</option>';
     });
     return html;
   }
@@ -722,11 +772,12 @@ cw_header('Automation Flows');
     return config;
   }
 
-  function dynamicActionFieldHtml(actionKey, config) {
+   function dynamicActionFieldHtml(actionKey, config) {
     const selectedTemplateId = config.notification_template_id || config.template_id || '';
     const requiredActionType = config.required_action_type || '';
     const logEventCode = config.event_code || '';
-    const notifyAdminRole = config.notify_role || 'admin';
+    const selectedAdminUserId = config.recipient_user_id || '';
+    const selectedInstructorUserId = config.recipient_user_id || '';
 
     if (actionKey === 'send_email') {
       return '' +
@@ -737,6 +788,81 @@ cw_header('Automation Flows');
               emailTemplateOptionsHtml(selectedTemplateId) +
             '</select>' +
             '<div class="af-help">Choose the notification template used for this email action.</div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    if (actionKey === 'notify_all_admins') {
+      return '' +
+        '<div class="af-action-primary" data-dynamic-kind="notify_all_admins">' +
+          '<div class="af-field">' +
+            '<label>Email Template</label>' +
+            '<select class="af-notify-all-admins-template-id">' +
+              emailTemplateOptionsHtml(selectedTemplateId) +
+            '</select>' +
+            '<div class="af-help">Send this template to all active admin users.</div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    if (actionKey === 'notify_all_instructors') {
+      return '' +
+        '<div class="af-action-primary" data-dynamic-kind="notify_all_instructors">' +
+          '<div class="af-field">' +
+            '<label>Email Template</label>' +
+            '<select class="af-notify-all-instructors-template-id">' +
+              emailTemplateOptionsHtml(selectedTemplateId) +
+            '</select>' +
+            '<div class="af-help">Send this template to all active instructor users.</div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    if (actionKey === 'notify_all_students') {
+      return '' +
+        '<div class="af-action-primary" data-dynamic-kind="notify_all_students">' +
+          '<div class="af-field">' +
+            '<label>Email Template</label>' +
+            '<select class="af-notify-all-students-template-id">' +
+              emailTemplateOptionsHtml(selectedTemplateId) +
+            '</select>' +
+            '<div class="af-help">Send this template to all active student users.</div>' +
+          '</div>' +
+        '</div>';
+    }
+
+    if (actionKey === 'notify_specific_admin') {
+      return '' +
+        '<div class="af-action-primary" data-dynamic-kind="notify_specific_admin">' +
+          '<div class="af-field">' +
+            '<label>Admin User</label>' +
+            '<select class="af-recipient-admin-user-id">' +
+              userOptionsHtml(activeAdmins, selectedAdminUserId) +
+            '</select>' +
+          '</div>' +
+          '<div class="af-field">' +
+            '<label>Email Template</label>' +
+            '<select class="af-notify-specific-admin-template-id">' +
+              emailTemplateOptionsHtml(selectedTemplateId) +
+            '</select>' +
+          '</div>' +
+        '</div>';
+    }
+
+    if (actionKey === 'notify_specific_instructor') {
+      return '' +
+        '<div class="af-action-primary" data-dynamic-kind="notify_specific_instructor">' +
+          '<div class="af-field">' +
+            '<label>Instructor User</label>' +
+            '<select class="af-recipient-instructor-user-id">' +
+              userOptionsHtml(activeInstructors, selectedInstructorUserId) +
+            '</select>' +
+          '</div>' +
+          '<div class="af-field">' +
+            '<label>Email Template</label>' +
+            '<select class="af-notify-specific-instructor-template-id">' +
+              emailTemplateOptionsHtml(selectedTemplateId) +
+            '</select>' +
           '</div>' +
         '</div>';
     }
@@ -761,20 +887,6 @@ cw_header('Automation Flows');
             '<label>Event Code</label>' +
             '<input class="af-log-event-code" type="text" value="' + esc(logEventCode) + '">' +
             '<div class="af-help">Short event code to log when this action runs.</div>' +
-          '</div>' +
-        '</div>';
-    }
-
-    if (actionKey === 'notify_admin') {
-      return '' +
-        '<div class="af-action-primary" data-dynamic-kind="notify_admin">' +
-          '<div class="af-field">' +
-            '<label>Notify Role</label>' +
-            '<select class="af-notify-role">' +
-              '<option value="admin"' + (notifyAdminRole === 'admin' ? ' selected' : '') + '>Admin</option>' +
-              '<option value="supervisor"' + (notifyAdminRole === 'supervisor' ? ' selected' : '') + '>Supervisor</option>' +
-            '</select>' +
-            '<div class="af-help">Choose which role receives the notification.</div>' +
           '</div>' +
         '</div>';
     }
@@ -952,19 +1064,129 @@ cw_header('Automation Flows');
         } else {
           delete configObj.event_code;
         }
-      } else if (actionKey === 'notify_admin') {
-        const notifyRoleEl = row.querySelector('.af-notify-role');
-        const notifyRole = notifyRoleEl ? notifyRoleEl.value : '';
+      } else if (actionKey === 'notify_all_admins') {
+        const templateIdEl = row.querySelector('.af-notify-all-admins-template-id');
+        const templateId = templateIdEl ? templateIdEl.value : '';
+        const selectedTemplate = emailTemplates.find(function (tpl) {
+          return String(tpl.id) === String(templateId);
+        }) || null;
 
-        delete configObj.notification_template_id;
-        delete configObj.notification_key;
+        delete configObj.recipient_user_id;
         delete configObj.required_action_type;
         delete configObj.event_code;
 
-        if (notifyRole !== '') {
-          configObj.notify_role = notifyRole;
+        if (templateId !== '') {
+          configObj.notification_template_id = parseInt(templateId, 10);
         } else {
-          delete configObj.notify_role;
+          delete configObj.notification_template_id;
+        }
+
+        if (selectedTemplate && selectedTemplate.notification_key) {
+          configObj.notification_key = String(selectedTemplate.notification_key);
+        } else {
+          delete configObj.notification_key;
+        }
+      } else if (actionKey === 'notify_all_instructors') {
+        const templateIdEl = row.querySelector('.af-notify-all-instructors-template-id');
+        const templateId = templateIdEl ? templateIdEl.value : '';
+        const selectedTemplate = emailTemplates.find(function (tpl) {
+          return String(tpl.id) === String(templateId);
+        }) || null;
+
+        delete configObj.recipient_user_id;
+        delete configObj.required_action_type;
+        delete configObj.event_code;
+
+        if (templateId !== '') {
+          configObj.notification_template_id = parseInt(templateId, 10);
+        } else {
+          delete configObj.notification_template_id;
+        }
+
+        if (selectedTemplate && selectedTemplate.notification_key) {
+          configObj.notification_key = String(selectedTemplate.notification_key);
+        } else {
+          delete configObj.notification_key;
+        }
+      } else if (actionKey === 'notify_all_students') {
+        const templateIdEl = row.querySelector('.af-notify-all-students-template-id');
+        const templateId = templateIdEl ? templateIdEl.value : '';
+        const selectedTemplate = emailTemplates.find(function (tpl) {
+          return String(tpl.id) === String(templateId);
+        }) || null;
+
+        delete configObj.recipient_user_id;
+        delete configObj.required_action_type;
+        delete configObj.event_code;
+
+        if (templateId !== '') {
+          configObj.notification_template_id = parseInt(templateId, 10);
+        } else {
+          delete configObj.notification_template_id;
+        }
+
+        if (selectedTemplate && selectedTemplate.notification_key) {
+          configObj.notification_key = String(selectedTemplate.notification_key);
+        } else {
+          delete configObj.notification_key;
+        }
+      } else if (actionKey === 'notify_specific_admin') {
+        const userIdEl = row.querySelector('.af-recipient-admin-user-id');
+        const templateIdEl = row.querySelector('.af-notify-specific-admin-template-id');
+        const userId = userIdEl ? userIdEl.value : '';
+        const templateId = templateIdEl ? templateIdEl.value : '';
+        const selectedTemplate = emailTemplates.find(function (tpl) {
+          return String(tpl.id) === String(templateId);
+        }) || null;
+
+        delete configObj.required_action_type;
+        delete configObj.event_code;
+
+        if (userId !== '') {
+          configObj.recipient_user_id = parseInt(userId, 10);
+        } else {
+          delete configObj.recipient_user_id;
+        }
+
+        if (templateId !== '') {
+          configObj.notification_template_id = parseInt(templateId, 10);
+        } else {
+          delete configObj.notification_template_id;
+        }
+
+        if (selectedTemplate && selectedTemplate.notification_key) {
+          configObj.notification_key = String(selectedTemplate.notification_key);
+        } else {
+          delete configObj.notification_key;
+        }
+      } else if (actionKey === 'notify_specific_instructor') {
+        const userIdEl = row.querySelector('.af-recipient-instructor-user-id');
+        const templateIdEl = row.querySelector('.af-notify-specific-instructor-template-id');
+        const userId = userIdEl ? userIdEl.value : '';
+        const templateId = templateIdEl ? templateIdEl.value : '';
+        const selectedTemplate = emailTemplates.find(function (tpl) {
+          return String(tpl.id) === String(templateId);
+        }) || null;
+
+        delete configObj.required_action_type;
+        delete configObj.event_code;
+
+        if (userId !== '') {
+          configObj.recipient_user_id = parseInt(userId, 10);
+        } else {
+          delete configObj.recipient_user_id;
+        }
+
+        if (templateId !== '') {
+          configObj.notification_template_id = parseInt(templateId, 10);
+        } else {
+          delete configObj.notification_template_id;
+        }
+
+        if (selectedTemplate && selectedTemplate.notification_key) {
+          configObj.notification_key = String(selectedTemplate.notification_key);
+        } else {
+          delete configObj.notification_key;
         }
       } else {
         delete configObj.notification_template_id;

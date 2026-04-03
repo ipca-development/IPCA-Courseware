@@ -265,16 +265,6 @@ $insertUser->execute(array(
 
             $pdo->commit();
 
-             $userRow = array(
-                'id' => $newUserId,
-                'name' => $displayName,
-                'first_name' => $firstName,
-                'last_name' => $lastName,
-                'email' => $email,
-                'role' => 'student',
-                'status' => 'pending_activation',
-            );
-
             try {
                 $automationRuntime = new AutomationRuntime();
                 $automationRuntime->dispatchEvent(
