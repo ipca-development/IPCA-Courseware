@@ -360,8 +360,22 @@ public function dispatchEvent(PDO $pdo, string $eventKey, array $context = array
     private function runSendEmail(PDO $pdo, int $flowRunId, string $actionKey, array $config, array $eventContext): array
     {
         $notificationKey = trim((string)($config['notification_key'] ?? ''));
-        $toEmail = automation_runtime_resolve_config_value($config, 'to_email', $eventContext);
-        $toName = automation_runtime_resolve_config_value($config, 'to_name', $eventContext);
+        $toEmail = trim((string)($config['to_email'] ?? ''));
+        $toName = trim((string)($config['to_name'] ?? ''));
+
+        if (
+            preg_match('/^\{\{\s*([a-zA-Z0-9_]+)\s*\}\}$/', $toEmail, $matches)
+            && array_key_exists($matches[1], $eventContext)
+        ) {
+            $toEmail = trim((string)$eventContext[$matches[1]]);
+        }
+
+        if (
+            preg_match('/^\{\{\s*([a-zA-Z0-9_]+)\s*\}\}$/', $toName, $matches)
+            && array_key_exists($matches[1], $eventContext)
+        ) {
+            $toName = trim((string)$eventContext[$matches[1]]);
+        }
 
         if ($notificationKey === '') {
             throw new RuntimeException('send_email requires notification_key');
