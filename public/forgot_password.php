@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/notification_service.php';
+require_once __DIR__ . '/../src/automation_runtime.php';
 
 ini_set('display_errors', '1');
 ini_set('display_startup_errors', '1');
@@ -157,19 +158,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $baseUrl = fp_base_url();
             $resetLink = rtrim($baseUrl, '/') . '/reset_password.php?token=' . urlencode($rawToken);
 
-            $service = new NotificationService($pdo);
-            $service->sendSystemNotification(
+			$automationRuntime = new AutomationRuntime();
+            $automationRuntime->dispatchEvent(
+                $pdo,
                 'password_reset_request',
-                (string)$user['email'],
-                $displayName,
                 array(
                     'user_name' => $displayName,
                     'reset_link' => $resetLink,
                     'expiry_minutes' => $expiryMinutes,
                     'expiry_datetime' => $expiryDisplay,
                     'support_email' => fp_support_email(),
-                ),
-                null
+                    'to_email' => (string)$user['email'],
+                    'to_name' => $displayName,
+                )
             );
         }
 
