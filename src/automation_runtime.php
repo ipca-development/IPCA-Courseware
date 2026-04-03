@@ -234,18 +234,21 @@ final class AutomationRuntime
 
         $placeholders = implode(',', array_fill(0, count($flowIds), '?'));
 
-        $stmt = $pdo->prepare("
-            SELECT
-                id,
-                flow_id,
-                field_key,
-                operator,
-                value_text,
-                value_number,
-                sort_order
-            FROM automation_flow_conditions
-            WHERE flow_id IN ($placeholders)
-            ORDER BY flow_id ASC, sort_order ASC, id ASC
+               $stmt = $pdo->prepare("
+            SELECT DISTINCT
+                a.id,
+                a.flow_id,
+                a.action_key,
+                a.config_json,
+                a.sort_order
+            FROM automation_flow_actions a
+            INNER JOIN automation_flows f
+                ON f.id = a.flow_id
+            LEFT JOIN automation_flow_conditions c
+                ON c.flow_id = f.id
+            WHERE f.event_key = ?
+              AND f.is_active = 1
+            ORDER BY a.flow_id ASC, a.sort_order ASC, a.id ASC
         ");
         $stmt->execute($flowIds);
 
