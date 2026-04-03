@@ -40,6 +40,7 @@ try {
     $notificationTemplates = array();
 }
 
+
 $activeAdmins = array();
 try {
     $stmt = $pdo->query("
@@ -716,6 +717,18 @@ cw_header('Automation Flows');
     return html;
   }
 
+function emailTemplateOptionsHtml(selectedId) {
+  let html = '<option value="">Select email template</option>';
+  emailTemplates.forEach(function (tpl) {
+    const id = String(tpl.id || '');
+    const name = String(tpl.name || tpl.notification_key || ('Template #' + id));
+    const suffix = tpl.notification_key ? ' (' + tpl.notification_key + ')' : '';
+    html += '<option value="' + esc(id) + '"' + (String(selectedId) === id ? ' selected' : '') + '>' + esc(name + suffix) + '</option>';
+  });
+  return html;
+}	
+	
+	
   function requiredActionTypeOptionsHtml(selectedValue) {
     const options = {
       remediation_acknowledgement: 'Remediation Acknowledgement',
@@ -772,134 +785,134 @@ cw_header('Automation Flows');
     return config;
   }
 
-   function dynamicActionFieldHtml(actionKey, config) {
-    const selectedTemplateId = config.notification_template_id || config.template_id || '';
-    const requiredActionType = config.required_action_type || '';
-    const logEventCode = config.event_code || '';
-    const selectedAdminUserId = config.recipient_user_id || '';
-    const selectedInstructorUserId = config.recipient_user_id || '';
+ function dynamicActionFieldHtml(actionKey, config) {
+  const selectedTemplateId = config.notification_template_id || config.template_id || '';
+  const requiredActionType = config.required_action_type || '';
+  const logEventCode = config.event_code || '';
+  const selectedAdminUserId = config.recipient_user_id || '';
+  const selectedInstructorUserId = config.recipient_user_id || '';
 
-    if (actionKey === 'send_email') {
-      return '' +
-        '<div class="af-action-primary" data-dynamic-kind="send_email">' +
-          '<div class="af-field">' +
-            '<label>Email Template</label>' +
-            '<select class="af-email-template-id">' +
-              emailTemplateOptionsHtml(selectedTemplateId) +
-            '</select>' +
-            '<div class="af-help">Choose the notification template used for this email action.</div>' +
-          '</div>' +
-        '</div>';
-    }
-
-    if (actionKey === 'notify_all_admins') {
-      return '' +
-        '<div class="af-action-primary" data-dynamic-kind="notify_all_admins">' +
-          '<div class="af-field">' +
-            '<label>Email Template</label>' +
-            '<select class="af-notify-all-admins-template-id">' +
-              emailTemplateOptionsHtml(selectedTemplateId) +
-            '</select>' +
-            '<div class="af-help">Send this template to all active admin users.</div>' +
-          '</div>' +
-        '</div>';
-    }
-
-    if (actionKey === 'notify_all_instructors') {
-      return '' +
-        '<div class="af-action-primary" data-dynamic-kind="notify_all_instructors">' +
-          '<div class="af-field">' +
-            '<label>Email Template</label>' +
-            '<select class="af-notify-all-instructors-template-id">' +
-              emailTemplateOptionsHtml(selectedTemplateId) +
-            '</select>' +
-            '<div class="af-help">Send this template to all active instructor users.</div>' +
-          '</div>' +
-        '</div>';
-    }
-
-    if (actionKey === 'notify_all_students') {
-      return '' +
-        '<div class="af-action-primary" data-dynamic-kind="notify_all_students">' +
-          '<div class="af-field">' +
-            '<label>Email Template</label>' +
-            '<select class="af-notify-all-students-template-id">' +
-              emailTemplateOptionsHtml(selectedTemplateId) +
-            '</select>' +
-            '<div class="af-help">Send this template to all active student users.</div>' +
-          '</div>' +
-        '</div>';
-    }
-
-    if (actionKey === 'notify_specific_admin') {
-      return '' +
-        '<div class="af-action-primary" data-dynamic-kind="notify_specific_admin">' +
-          '<div class="af-field">' +
-            '<label>Admin User</label>' +
-            '<select class="af-recipient-admin-user-id">' +
-              userOptionsHtml(activeAdmins, selectedAdminUserId) +
-            '</select>' +
-          '</div>' +
-          '<div class="af-field">' +
-            '<label>Email Template</label>' +
-            '<select class="af-notify-specific-admin-template-id">' +
-              emailTemplateOptionsHtml(selectedTemplateId) +
-            '</select>' +
-          '</div>' +
-        '</div>';
-    }
-
-    if (actionKey === 'notify_specific_instructor') {
-      return '' +
-        '<div class="af-action-primary" data-dynamic-kind="notify_specific_instructor">' +
-          '<div class="af-field">' +
-            '<label>Instructor User</label>' +
-            '<select class="af-recipient-instructor-user-id">' +
-              userOptionsHtml(activeInstructors, selectedInstructorUserId) +
-            '</select>' +
-          '</div>' +
-          '<div class="af-field">' +
-            '<label>Email Template</label>' +
-            '<select class="af-notify-specific-instructor-template-id">' +
-              emailTemplateOptionsHtml(selectedTemplateId) +
-            '</select>' +
-          '</div>' +
-        '</div>';
-    }
-
-    if (actionKey === 'create_required_action') {
-      return '' +
-        '<div class="af-action-primary" data-dynamic-kind="create_required_action">' +
-          '<div class="af-field">' +
-            '<label>Required Action</label>' +
-            '<select class="af-required-action-type">' +
-              requiredActionTypeOptionsHtml(requiredActionType) +
-            '</select>' +
-            '<div class="af-help">Choose which required action should be created for the student.</div>' +
-          '</div>' +
-        '</div>';
-    }
-
-    if (actionKey === 'log_event') {
-      return '' +
-        '<div class="af-action-primary" data-dynamic-kind="log_event">' +
-          '<div class="af-field">' +
-            '<label>Event Code</label>' +
-            '<input class="af-log-event-code" type="text" value="' + esc(logEventCode) + '">' +
-            '<div class="af-help">Short event code to log when this action runs.</div>' +
-          '</div>' +
-        '</div>';
-    }
-
+  if (actionKey === 'send_email') {
     return '' +
-      '<div class="af-action-primary" data-dynamic-kind="none">' +
+      '<div class="af-action-primary" data-dynamic-kind="send_email">' +
         '<div class="af-field">' +
-          '<label>Action Details</label>' +
-          '<input type="text" value="" disabled>' +
-          '<div class="af-help">No guided field for this action. Use Advanced Config JSON if needed.</div>' +
+          '<label>Email Template</label>' +
+          '<select class="af-email-template-id">' +
+            emailTemplateOptionsHtml(selectedTemplateId) +
+          '</select>' +
+          '<div class="af-help">Choose the notification template used for this email action.</div>' +
         '</div>' +
       '</div>';
   }
+
+  if (actionKey === 'notify_all_admins') {
+    return '' +
+      '<div class="af-action-primary" data-dynamic-kind="notify_all_admins">' +
+        '<div class="af-field">' +
+          '<label>Email Template</label>' +
+          '<select class="af-notify-all-admins-template-id">' +
+            emailTemplateOptionsHtml(selectedTemplateId) +
+          '</select>' +
+          '<div class="af-help">Send this template to all active admin users.</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (actionKey === 'notify_all_instructors') {
+    return '' +
+      '<div class="af-action-primary" data-dynamic-kind="notify_all_instructors">' +
+        '<div class="af-field">' +
+          '<label>Email Template</label>' +
+          '<select class="af-notify-all-instructors-template-id">' +
+            emailTemplateOptionsHtml(selectedTemplateId) +
+          '</select>' +
+          '<div class="af-help">Send this template to all active instructor users.</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (actionKey === 'notify_all_students') {
+    return '' +
+      '<div class="af-action-primary" data-dynamic-kind="notify_all_students">' +
+        '<div class="af-field">' +
+          '<label>Email Template</label>' +
+          '<select class="af-notify-all-students-template-id">' +
+            emailTemplateOptionsHtml(selectedTemplateId) +
+          '</select>' +
+          '<div class="af-help">Send this template to all active student users.</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (actionKey === 'notify_specific_admin') {
+    return '' +
+      '<div class="af-action-primary" data-dynamic-kind="notify_specific_admin">' +
+        '<div class="af-field">' +
+          '<label>Admin User</label>' +
+          '<select class="af-recipient-admin-user-id">' +
+            userOptionsHtml(activeAdmins, selectedAdminUserId) +
+          '</select>' +
+        '</div>' +
+        '<div class="af-field">' +
+          '<label>Email Template</label>' +
+          '<select class="af-notify-specific-admin-template-id">' +
+            emailTemplateOptionsHtml(selectedTemplateId) +
+          '</select>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (actionKey === 'notify_specific_instructor') {
+    return '' +
+      '<div class="af-action-primary" data-dynamic-kind="notify_specific_instructor">' +
+        '<div class="af-field">' +
+          '<label>Instructor User</label>' +
+          '<select class="af-recipient-instructor-user-id">' +
+            userOptionsHtml(activeInstructors, selectedInstructorUserId) +
+          '</select>' +
+        '</div>' +
+        '<div class="af-field">' +
+          '<label>Email Template</label>' +
+          '<select class="af-notify-specific-instructor-template-id">' +
+            emailTemplateOptionsHtml(selectedTemplateId) +
+          '</select>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (actionKey === 'create_required_action') {
+    return '' +
+      '<div class="af-action-primary" data-dynamic-kind="create_required_action">' +
+        '<div class="af-field">' +
+          '<label>Required Action</label>' +
+          '<select class="af-required-action-type">' +
+            requiredActionTypeOptionsHtml(requiredActionType) +
+          '</select>' +
+          '<div class="af-help">Choose which required action should be created for the student.</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  if (actionKey === 'log_event') {
+    return '' +
+      '<div class="af-action-primary" data-dynamic-kind="log_event">' +
+        '<div class="af-field">' +
+          '<label>Event Code</label>' +
+          '<input class="af-log-event-code" type="text" value="' + esc(logEventCode) + '">' +
+          '<div class="af-help">Short event code to log when this action runs.</div>' +
+        '</div>' +
+      '</div>';
+  }
+
+  return '' +
+    '<div class="af-action-primary" data-dynamic-kind="none">' +
+      '<div class="af-field">' +
+        '<label>Action Details</label>' +
+        '<input type="text" value="" disabled>' +
+        '<div class="af-help">No guided field for this action. Use Advanced Config JSON if needed.</div>' +
+      '</div>' +
+    '</div>';
+}
 
   function actionRowHtml(row) {
     row = row || {};
@@ -1143,10 +1156,10 @@ cw_header('Automation Flows');
         delete configObj.event_code;
 
         if (userId !== '') {
-          configObj.recipient_user_id = parseInt(userId, 10);
-        } else {
-          delete configObj.recipient_user_id;
-        }
+		  configObj.recipient_user_id = parseInt(userId, 10);
+		} else {
+		  delete configObj.recipient_user_id;
+		}
 
         if (templateId !== '') {
           configObj.notification_template_id = parseInt(templateId, 10);
@@ -1172,10 +1185,10 @@ cw_header('Automation Flows');
         delete configObj.event_code;
 
         if (userId !== '') {
-          configObj.recipient_user_id = parseInt(userId, 10);
-        } else {
-          delete configObj.recipient_user_id;
-        }
+		  configObj.recipient_user_id = parseInt(userId, 10);
+		} else {
+		  delete configObj.recipient_user_id;
+		}
 
         if (templateId !== '') {
           configObj.notification_template_id = parseInt(templateId, 10);
