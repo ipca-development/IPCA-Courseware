@@ -621,38 +621,6 @@ function try_build_local_inventory_response(PDO $pdo, string $prompt, array $con
     }
 
     $targetPath = pick_primary_target_path($pdo, $prompt, $contextFiles);
-    if ($targetPath === null || trim($targetPath) === '') {
-        return null;
-    }
-
-    try {
-        $file = safe_project_file_read($targetPath);
-    } catch (Throwable $e) {
-        return array(
-            'target_path' => $targetPath,
-            'content' => 'PRIMARY_TARGET_FILE_SEEN: ' . $targetPath . "\n" . 'READ_ERROR: ' . $e->getMessage()
-        );
-    }
-
-    $response = build_local_inventory_response($prompt, (string)$file['path'], (string)$file['content']);
-    if ($response === null) {
-        return null;
-    }
-
-    return array(
-        'target_path' => (string)$file['path'],
-        'content' => $response
-    );
-}
-
-With this block:
-function try_build_local_inventory_response(PDO $pdo, string $prompt, array $contextFiles = array()): ?array
-{
-    if (!should_force_method_inventory_mode($prompt)) {
-        return null;
-    }
-
-    $targetPath = pick_primary_target_path($pdo, $prompt, $contextFiles);
 
     if ($targetPath === null || trim($targetPath) === '') {
         $explicitPaths = extract_file_candidates_from_text($prompt);
