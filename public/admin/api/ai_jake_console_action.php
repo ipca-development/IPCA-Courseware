@@ -471,23 +471,53 @@ function extract_declared_methods_from_php_content(string $content, array $allow
 function parse_inventory_method_names_from_prompt(string $prompt): array
 {
     $names = array();
+    $capture = false;
 
-    if (preg_match('/check whether these exact declared public methods are visible\s*:\s*(.*?)(?:return exactly:|rules:|$)/is', $prompt, $m)) {
-        $block = trim((string)$m[1]);
-        if ($block !== '') {
-            $lines = preg_split("/\r\n|\n|\r/", $block);
-            if (is_array($lines)) {
-                foreach ($lines as $line) {
-                    $line = trim((string)$line);
-                    if ($line === '') {
-                        continue;
-                    }
+    $lines = preg_split("/\r\n|\n|\r/", $prompt);
+    if (!is_array($lines)) {
+        return $names;
+    }
 
-                    if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $line)) {
-                        $names[] = $line;
+    foreach ($lines as $line) {
+        $line = trim((string)$line);
+
+        if ($line === '') {
+            if ($capture) {
+                continue;
+            }
+            continue;
+        }
+
+        if (!$capture) {
+            if (stripos($line, 'check whether these exact declared public methods are visible') !== false) {
+                $capture = true;
+
+                $pos = strpos($line, ':');
+                if ($pos !== false) {
+                    $afterColon = trim(substr($line, $pos + 1));
+                    if ($afterColon !== '' && preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $afterColon)) {
+                        $names[] = $afterColon;
                     }
                 }
+
+                continue;
             }
+
+            continue;
+        }
+
+        if (
+            stripos($line, 'return exactly:') === 0 ||
+            stripos($line, 'rules:') === 0 ||
+            stripos($line, 'use only ') === 0 ||
+            stripos($line, 'match declared method names only') === 0 ||
+            stripos($line, 'no explanation') === 0
+        ) {
+            break;
+        }
+
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $line)) {
+            $names[] = $line;
         }
     }
 
