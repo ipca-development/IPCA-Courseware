@@ -330,6 +330,272 @@ function extract_large_file_tail_excerpt(string $content, array $methodNames, in
 
 
 
+function extract_declared_methods_from_php_content(string $content, array $allowedVisibilities = array('public')): array
+{
+    $methods = array();
+
+    if ($content === '') {
+        return $methods;
+    }
+
+    $tokens = token_get_all($content);
+    if (!is_array($tokens) || empty($tokens)) {
+        return $methods;
+    }
+
+    $allowedMap = array();
+    foreach ($allowedVisibilities as $visibility) {
+        $visibility = strtolower(trim((string)$visibility));
+        if ($visibility !== '') {
+            $allowedMap[$visibility] = true;
+        }
+    }
+
+    $classDepth = 0;
+    $pendingClassOpen = false;
+    $currentVisibility = null;
+    $count = count($tokens);
+
+    for ($i = 0; $i < $count; $i++) {
+        $token = $tokens[$i];
+        $tokenId = is_array($token) ? $token[0] : null;
+        $tokenText = is_array($token) ? $token[1] : $token;
+
+        if ($tokenId === T_CLASS || $tokenId === T_INTERFACE || $tokenId === T_TRAIT) {
+            $pendingClassOpen = true;
+            $currentVisibility = null;
+            continue;
+        }
+
+        if ($tokenText === '{') {
+            if ($pendingClassOpen) {
+                $classDepth++;
+                $pendingClassOpen = false;
+                $currentVisibility = null;
+            }
+            continue;
+        }
+
+        if ($tokenText === '}') {
+            if ($classDepth > 0) {
+                $classDepth--;
+            }
+            $currentVisibility = null;
+            continue;
+        }
+
+        if ($classDepth <= 0) {
+            continue;
+        }
+
+        if ($tokenText === ';') {
+            $currentVisibility = null;
+            continue;
+        }
+
+        if ($tokenId === T_PUBLIC) {
+            $currentVisibility = 'public';
+            continue;
+        }
+
+        if ($tokenId === T_PROTECTED) {
+            $currentVisibility = 'protected';
+            continue;
+        }
+
+        if ($tokenId === T_PRIVATE) {
+            $currentVisibility = 'private';
+            continue;
+        }
+
+        if ($tokenId === T_FUNCTION) {
+            if ($currentVisibility === null) {
+                continue;
+            }
+
+            if (!isset($allowedMap[$currentVisibility])) {
+                $currentVisibility = null;
+                continue;
+            }
+
+            $signature = $currentVisibility . ' function';
+            for ($j = $i + 1; $j < $count; $j++) {
+                $t = $tokens[$j];
+                $tText = is_array($t) ? $t[1] : $t;
+
+                if ($tText === '{' || $tText === ';') {
+                    break;
+                }
+
+                $signature .= $tText;
+            }
+
+            $signature = preg_replace('/\s+/', ' ', trim($signature));
+            $signature = preg_replace('/\s*\(\s*/', '(', $signature);
+            $signature = preg_replace('/\s*\)\s*/', ')', $signature);
+            $signature = preg_replace('/\s*,\s*/', ', ', $signature);
+            $signature = preg_replace('/\s*:\s*/', ': ', $signature);
+
+            $name = '';
+            if (preg_match('/\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $signature, $m)) {
+                $name = (string)$m[1];
+            }
+
+            if ($name !== '') {
+                $methods[] = array(
+                    'visibility' => $currentVisibility,
+                    'name' => $name,
+                    'signature' => $signature,
+                );
+            }
+
+            $currentVisibility = null;
+        }
+    }
+
+    return $methods;
+}
+
+function parse_inventory_method_names_from_prompt(string $prompt): array
+{
+    $names = array();
+
+    if (preg_match('/check whether these exact declared public methods are visible\s*:\s*(.*?)(?:return exactly:|rules:|$)/is', $prompt, $m)) {
+        $block = trim((string)$m[1]);
+        if ($block !== '') {
+            $lines = preg_split("/\r\n|\n|\r/", $block);
+            if (is_array($lines)) {
+                foreach ($lines as $line) {
+                    $line = trim((string)$line);
+                    if ($line === '') {
+                        continue;
+                    }
+
+                    if (preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $line)) {
+                        $names[] = $line;
+                    }
+                }
+            }
+        }
+    }
+
+    return array_values(array_unique($names));
+}
+
+function extract_requested_last_method_count(string $prompt, int $default = 5): int
+{
+    if (preg_match('/last_(\d+)_public_methods_in_source_order/i', $prompt, $m)) {
+        return max(1, (int)$m[1]);
+    }
+
+    if (preg_match('/last\s+(\d+)\s+public\s+methods/i', $prompt, $m)) {
+        return max(1, (int)$m[1]);
+    }
+
+    if (preg_match('/last\s+(\d+)\s+declared\s+method/i', $prompt, $m)) {
+        return max(1, (int)$m[1]);
+    }
+
+    return $default;
+}
+
+function build_local_inventory_response(string $prompt, string $targetPath, string $content): ?string
+{
+    $publicMethods = extract_declared_methods_from_php_content($content, array('public'));
+
+    if (stripos($prompt, 'check whether these exact declared public methods are visible') !== false) {
+        $requestedNames = parse_inventory_method_names_from_prompt($prompt);
+        $visibleMap = array();
+
+        foreach ($publicMethods as $method) {
+            $visibleMap[$method['name']] = true;
+        }
+
+        $lines = array();
+        $lines[] = 'PRIMARY_TARGET_FILE_SEEN: ' . $targetPath;
+
+        foreach ($requestedNames as $name) {
+            $lines[] = $name . ': ' . (isset($visibleMap[$name]) ? 'YES' : 'NO');
+        }
+
+        return implode("\n", $lines);
+    }
+
+    if (
+        stripos($prompt, 'COUNT_VISIBLE_PUBLIC_METHODS') !== false ||
+        stripos($prompt, 'LAST_5_PUBLIC_METHODS_IN_SOURCE_ORDER') !== false ||
+        stripos($prompt, 'last 5 public methods') !== false ||
+        stripos($prompt, 'last_5_public_methods_in_source_order') !== false ||
+        preg_match('/last\s+\d+\s+public\s+methods/i', $prompt) ||
+        preg_match('/last_\d+_public_methods_in_source_order/i', $prompt)
+    ) {
+        $count = count($publicMethods);
+        $lastCount = extract_requested_last_method_count($prompt, 5);
+        $tail = array_slice($publicMethods, -$lastCount);
+
+        $lines = array();
+        $lines[] = 'PRIMARY_TARGET_FILE_SEEN: ' . $targetPath;
+        $lines[] = 'COUNT_VISIBLE_PUBLIC_METHODS: ' . $count;
+        $lines[] = 'LAST_' . $lastCount . '_PUBLIC_METHODS_IN_SOURCE_ORDER:';
+
+        foreach ($tail as $method) {
+            $lines[] = $method['signature'];
+        }
+
+        return implode("\n", $lines);
+    }
+
+    if (
+        stripos($prompt, 'list all public methods') !== false ||
+        stripos($prompt, 'complete method list') !== false ||
+        stripos($prompt, 'full method inventory') !== false
+    ) {
+        $lines = array();
+        $lines[] = 'PRIMARY_TARGET_FILE_SEEN: ' . $targetPath;
+        $lines[] = 'COUNT_VISIBLE_PUBLIC_METHODS: ' . count($publicMethods);
+        $lines[] = 'ALL_VISIBLE_PUBLIC_METHODS_IN_SOURCE_ORDER:';
+
+        foreach ($publicMethods as $method) {
+            $lines[] = $method['signature'];
+        }
+
+        return implode("\n", $lines);
+    }
+
+    return null;
+}
+
+function try_build_local_inventory_response(PDO $pdo, string $prompt, array $contextFiles = array()): ?array
+{
+    if (!should_force_method_inventory_mode($prompt)) {
+        return null;
+    }
+
+    $targetPath = pick_primary_target_path($pdo, $prompt, $contextFiles);
+    if ($targetPath === null || trim($targetPath) === '') {
+        return null;
+    }
+
+    try {
+        $file = safe_project_file_read($targetPath);
+    } catch (Throwable $e) {
+        return array(
+            'target_path' => $targetPath,
+            'content' => 'PRIMARY_TARGET_FILE_SEEN: ' . $targetPath . "\n" . 'READ_ERROR: ' . $e->getMessage()
+        );
+    }
+
+    $response = build_local_inventory_response($prompt, (string)$file['path'], (string)$file['content']);
+    if ($response === null) {
+        return null;
+    }
+
+    return array(
+        'target_path' => (string)$file['path'],
+        'content' => $response
+    );
+}
+
 
 function find_matching_brace_position(string $content, int $openBracePos): ?int
 {
@@ -1703,10 +1969,22 @@ function build_steven_artifact_content(array $requestRow, array $contextFiles, a
     $title = trim((string)($requestRow['request_title'] ?? 'Untitled request'));
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
 
-$targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
-$targetedSummary = isset($targetData['summary']) ? (string)$targetData['summary'] : '';
-$targetFiles = isset($targetData['files']) && is_array($targetData['files']) ? $targetData['files'] : array();
-$primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
+    $localInventory = try_build_local_inventory_response($GLOBALS['pdo'], $prompt, $contextFiles);
+    if ($localInventory !== null) {
+        return array(
+            'title' => 'Steven Output - ' . (string)$localInventory['target_path'],
+            'target_path' => (string)$localInventory['target_path'],
+            'artifact_type' => 'code',
+            'output_mode' => 'analysis_only',
+            'content' => (string)$localInventory['content'],
+            'notes' => 'Deterministic local inventory response',
+        );
+    }
+
+    $targetData = build_targeted_context($GLOBALS['pdo'], $prompt);
+    $targetedSummary = isset($targetData['summary']) ? (string)$targetData['summary'] : '';
+    $targetFiles = isset($targetData['files']) && is_array($targetData['files']) ? $targetData['files'] : array();
+    $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['primary_file'] : '';
 
     $targetPath = pick_primary_target_path($GLOBALS['pdo'], $prompt, $contextFiles);
     if ($targetPath === null) {
@@ -1859,7 +2137,7 @@ $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['p
         $userPrompt .= render_scope_contract_text($scopeContract) . "\n\n";
     }
 
-        if (!empty($contextFiles) && !should_force_method_inventory_mode($prompt)) {
+    if (!empty($contextFiles) && !should_force_method_inventory_mode($prompt)) {
         $userPrompt .= "CONTEXT FILES:\n";
         foreach ($contextFiles as $f) {
             if (!empty($f['error'])) {
@@ -2013,6 +2291,7 @@ $primaryTargetFile = isset($targetData['primary_file']) ? (string)$targetData['p
         );
     }
 }
+
 
 function create_jake_run(PDO $pdo, int $requestId, int $userId, string $runType, string $status): int
 {
@@ -2472,6 +2751,12 @@ function auto_subject_from_message(string $message): string
 function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = null): string
 {
     $message = trim((string)($userMessage['message_text'] ?? ''));
+
+    $localInventory = try_build_local_inventory_response($pdo, $message, array());
+    if ($localInventory !== null) {
+        return (string)$localInventory['content'];
+    }
+
     $targetData = build_targeted_context($pdo, $message);
     $targetedSummary = $targetData['summary'];
     $targetFiles = $targetData['files'];
@@ -2488,7 +2773,7 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
 
     $ssot = load_latest_ssot_snapshot($pdo);
     $fileCandidates = resolve_explicit_file_candidates($pdo, $message);
-        $contextFiles = should_force_method_inventory_mode($message)
+    $contextFiles = should_force_method_inventory_mode($message)
         ? array()
         : read_files_for_targeted_context($fileCandidates, array(), 3, 24000, true, $message);
     $dbSchema = load_targeted_schema($pdo, $message);
@@ -2498,65 +2783,65 @@ function jake_chat_reply(PDO $pdo, array $userMessage, ?string $requestType = nu
         $message
     );
 
-$systemPrompt = implode("\n", [
-    'You are Jake, the IPCA architect and SSOT guardian.',
-    '',
-    'You are NOT a generic assistant.',
-    'You are an execution-focused orchestrator working with Steven (implementation agent).',
-    '',
-    'CORE BEHAVIOR',
-    '- You guide implementation, not just explain.',
-    '- You prepare clean, actionable steps for Steven.',
-    '- You do NOT re-analyze systems that are already defined.',
-    '- You respect the existing architecture and SSOT strictly.',
-    '',
-    'SYSTEM REALITY',
-    '- Files may be truncated.',
-    '- Methods may be partially visible.',
-    '- Context may be incomplete.',
-    '- You must work within this constraint WITHOUT guessing.',
-    '',
-    'CRITICAL RULES',
-    '- DO NOT invent methods, schema, or architecture.',
-    '- DO NOT suggest rewrites of core systems unless explicitly asked.',
-    '- DO NOT duplicate business logic from the progression engine.',
-    '',
-    'EXECUTION MINDSET',
-    '- Always move the system forward.',
-    '- Prefer safe progress over theoretical perfection.',
-    '- If a safe step can be taken → take it.',
-    '- If blocked → clearly state what is missing.',
-    '',
-    'COOPERATION MODEL',
-    '- You define WHAT should be built.',
-    '- Steven defines HOW it is implemented.',
-    '- You validate that Steven stayed within scope.',
-    '',
-    'WHEN USER IS BUILDING SYSTEMS',
-    '- Break work into ordered steps.',
-    '- Keep steps small and deterministic.',
-    '- Avoid mixing multiple concerns in one step.',
-    '',
-    'CONTEXT USAGE RULES',
-    '- If LOADED FILES are present → treat as source of truth.',
-    '- If DATABASE SCHEMA is present → treat as authoritative.',
-    '- If context is incomplete → explicitly say so.',
-    '',
-    'INTERACTION STYLE',
-    '- Clear, calm, senior engineer tone',
-    '- No robotic phrasing',
-    '- No over-warning',
-    '- Short structured responses',
-    '',
-    'STRUCTURE OUTPUT LIKE THIS:',
-    '**Summary**',
-    '',
-    '**What this means**',
-    '',
-    '**In other words**',
-    '',
-    '**My suggestion**',
-]);
+    $systemPrompt = implode("\n", [
+        'You are Jake, the IPCA architect and SSOT guardian.',
+        '',
+        'You are NOT a generic assistant.',
+        'You are an execution-focused orchestrator working with Steven (implementation agent).',
+        '',
+        'CORE BEHAVIOR',
+        '- You guide implementation, not just explain.',
+        '- You prepare clean, actionable steps for Steven.',
+        '- You do NOT re-analyze systems that are already defined.',
+        '- You respect the existing architecture and SSOT strictly.',
+        '',
+        'SYSTEM REALITY',
+        '- Files may be truncated.',
+        '- Methods may be partially visible.',
+        '- Context may be incomplete.',
+        '- You must work within this constraint WITHOUT guessing.',
+        '',
+        'CRITICAL RULES',
+        '- DO NOT invent methods, schema, or architecture.',
+        '- DO NOT suggest rewrites of core systems unless explicitly asked.',
+        '- DO NOT duplicate business logic from the progression engine.',
+        '',
+        'EXECUTION MINDSET',
+        '- Always move the system forward.',
+        '- Prefer safe progress over theoretical perfection.',
+        '- If a safe step can be taken → take it.',
+        '- If blocked → clearly state what is missing.',
+        '',
+        'COOPERATION MODEL',
+        '- You define WHAT should be built.',
+        '- Steven defines HOW it is implemented.',
+        '- You validate that Steven stayed within scope.',
+        '',
+        'WHEN USER IS BUILDING SYSTEMS',
+        '- Break work into ordered steps.',
+        '- Keep steps small and deterministic.',
+        '- Avoid mixing multiple concerns in one step.',
+        '',
+        'CONTEXT USAGE RULES',
+        '- If LOADED FILES are present → treat as source of truth.',
+        '- If DATABASE SCHEMA is present → treat as authoritative.',
+        '- If context is incomplete → explicitly say so.',
+        '',
+        'INTERACTION STYLE',
+        '- Clear, calm, senior engineer tone',
+        '- No robotic phrasing',
+        '- No over-warning',
+        '- Short structured responses',
+        '',
+        'STRUCTURE OUTPUT LIKE THIS:',
+        '**Summary**',
+        '',
+        '**What this means**',
+        '',
+        '**In other words**',
+        '',
+        '**My suggestion**',
+    ]);
 
     $userPrompt = "USER MESSAGE:\n" . $message . "\n\n";
 
