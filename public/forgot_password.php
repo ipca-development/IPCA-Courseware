@@ -158,20 +158,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $baseUrl = fp_base_url();
             $resetLink = rtrim($baseUrl, '/') . '/reset_password.php?token=' . urlencode($rawToken);
 
+			
+//AUTOMATION TRIGGER 			
+			
 			$automationRuntime = new AutomationRuntime();
-            $automationRuntime->dispatchEvent(
-                $pdo,
-                'password_reset_request',
-                array(
-                    'user_name' => $displayName,
-                    'reset_link' => $resetLink,
-                    'expiry_minutes' => $expiryMinutes,
-                    'expiry_datetime' => $expiryDisplay,
-                    'support_email' => fp_support_email(),
-                    'to_email' => (string)$user['email'],
-                    'to_name' => $displayName,
-                )
-            );
+			$automationRuntime->dispatchEvent(
+    		$pdo,
+    		'password_reset_requested',
+    			array(
+					'user_name' => $displayName,
+					'reset_link' => $resetLink,
+					'expiry_minutes' => $expiryMinutes,
+					'expiry_datetime' => $expiryDisplay,
+					'support_email' => fp_support_email(),
+					'to_email' => (string)$user['email'],
+					'to_name' => $displayName,
+    			)
+			);
         }
 
         $flashType = 'success';
