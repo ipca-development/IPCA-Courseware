@@ -253,6 +253,30 @@ function extract_method_like_tokens_from_text(string $text, int $limit = 8): arr
     return $tokens;
 }
 
+function strip_revision_scaffolding_from_prompt(string $prompt): string
+{
+    $markers = array(
+        'PREVIOUS ARTIFACT:',
+        'PREVIOUS REVIEW:',
+        'REVISION REQUIRED:'
+    );
+
+    $cutPos = null;
+
+    foreach ($markers as $marker) {
+        $pos = strpos($prompt, $marker);
+        if ($pos !== false && ($cutPos === null || $pos < $cutPos)) {
+            $cutPos = $pos;
+        }
+    }
+
+    if ($cutPos === null) {
+        return $prompt;
+    }
+
+    return rtrim(substr($prompt, 0, $cutPos));
+}
+
 function extract_targeted_excerpt_from_file_content(string $content, array $methodNames, int $radius = 7000): ?string
 {
     if ($content === '' || empty($methodNames)) {
@@ -1573,6 +1597,7 @@ function detect_task_type(string $prompt): string
 function build_scope_contract(PDO $pdo, array $requestRow, array $contextFiles): array
 {
     $prompt = trim((string)($requestRow['prompt'] ?? ''));
+    $symbolPrompt = strip_revision_scaffolding_from_prompt($prompt);
 
     $targetData = build_targeted_context($pdo, $prompt);
     $primaryTargetPath = pick_primary_target_path($pdo, $prompt, $contextFiles);
@@ -1603,7 +1628,7 @@ function build_scope_contract(PDO $pdo, array $requestRow, array $contextFiles):
         $supportingPaths = array_slice($supportingPaths, 0, 3);
     }
 
-    $methodNames = extract_method_like_tokens_from_text($prompt, 6);
+    $methodNames = extract_method_like_tokens_from_text($symbolPrompt, 6);
 
     $preferredOutputMode = detect_preferred_output_mode($prompt, $primaryTargetPath);
     $taskType = detect_task_type($prompt);
