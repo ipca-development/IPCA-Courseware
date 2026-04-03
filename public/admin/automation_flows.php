@@ -323,6 +323,44 @@ cw_header('Automation Flows');
   display:none !important;
 }
 
+.af-toast{
+  position:fixed;
+  top:22px;
+  right:22px;
+  z-index:9999;
+  min-width:260px;
+  max-width:420px;
+  padding:12px 16px;
+  border-radius:14px;
+  color:#fff;
+  font-size:14px;
+  font-weight:800;
+  line-height:1.45;
+  box-shadow:0 14px 34px rgba(15,23,42,.18);
+  opacity:0;
+  transform:translateY(-10px);
+  pointer-events:none;
+  transition:opacity .18s ease, transform .18s ease;
+}
+
+.af-toast.is-visible{
+  opacity:1;
+  transform:translateY(0);
+}
+
+.af-toast.is-success{
+  background:#166534;
+}
+
+.af-toast.is-error{
+  background:#991b1b;
+}
+
+.af-form-saving{
+  opacity:.72;
+  pointer-events:none;
+}
+
 @media (max-width: 1180px){
   .af-wrap{
     grid-template-columns:1fr;
@@ -478,6 +516,7 @@ cw_header('Automation Flows');
   const flowListEl = document.getElementById('afFlowList');
   const formEl = document.getElementById('afForm');
   const editorTitleEl = document.getElementById('afEditorTitle');
+  const toastEl = document.getElementById('afToast');
 
   const idEl = document.getElementById('afId');
   const nameEl = document.getElementById('afName');
@@ -499,6 +538,9 @@ cw_header('Automation Flows');
   const operatorOptions = <?= json_encode($operators) ?>;
   const actionOptions = <?= json_encode($actionOptions) ?>;
   const emailTemplates = <?= json_encode($notificationTemplates) ?>;
+  const eventGroups = <?= json_encode($eventGroups) ?>;
+
+  let toastTimer = null;
 
   function esc(str) {
     return String(str === null || str === undefined ? '' : str)
@@ -507,6 +549,90 @@ cw_header('Automation Flows');
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  function showToast(message, type) {
+    if (!toastEl) return;
+
+    toastEl.textContent = message || '';
+    toastEl.className = 'af-toast ' + (type === 'error' ? 'is-error' : 'is-success') + ' is-visible';
+
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+    }
+
+    toastTimer = setTimeout(function () {
+      toastEl.className = 'af-toast';
+    }, 2400);
+  }
+
+  function setSaving(isSaving) {
+    if (isSaving) {
+      formEl.classList.add('af-form-saving');
+    } else {
+      formEl.classList.remove('af-form-saving');
+    }
+  }
+
+  function eventLabelForKey(eventKey) {
+    let found = eventKey || '';
+    (eventGroups || []).forEach(function (group) {
+      (group.items || []).forEach(function (item) {
+        if (String(item.event_key) === String(eventKey)) {
+          found = item.label || item.event_key || eventKey;
+        }
+      });
+    });
+    return found;
+  }
+
+  function renderFlowListItem(flow) {
+    const isActive = !!parseInt(flow.is_active || 0, 10);
+    const eventLabel = eventLabelForKey(flow.event_key || '');
+    return '' +
+      '<div class="af-item active" data-flow-id="' + esc(flow.id) + '">' +
+        '<div class="af-item-top">' +
+          '<div>' +
+            '<div class="af-item-name">' + esc(flow.name || '') + '</div>' +
+            '<div class="af-item-meta"><strong>' + esc(eventLabel) + '</strong></div>' +
+          '</div>' +
+          '<div>' +
+            (isActive
+              ? '<span class="af-pill on">Active</span>'
+              : '<span class="af-pill off">Inactive</span>') +
+          '</div>' +
+        '</div>' +
+        '<div class="af-item-meta" style="margin-top:10px;">Priority ' + esc(flow.priority || 100) + '</div>' +
+      '</div>';
+  }
+
+  function upsertFlowListItem(flow) {
+    if (!flow || !flow.id) return;
+
+    const existing = flowListEl.querySelector('.af-item[data-flow-id="' + String(flow.id) + '"]');
+    const html = renderFlowListItem(flow);
+
+    document.querySelectorAll('.af-item').forEach(function (el) {
+      el.classList.remove('active');
+    });
+
+    if (existing) {
+      existing.outerHTML = html;
+    } else {
+      const firstGroupItems = flowListEl.querySelector('.af-group');
+      if (firstGroupItems) {
+        firstGroupItems.insertAdjacentHTML('beforeend', html);
+      } else {
+        flowListEl.innerHTML = '<div class="af-group"><div class="af-group-label">Flows</div>' + html + '</div>';
+      }
+    }
+  }
+
+  function removeFlowListItem(flowId) {
+    const existing = flowListEl.querySelector('.af-item[data-flow-id="' + String(flowId) + '"]');
+    if (existing) {
+      existing.remove();
+    }
   }
 
   function optionHtml(map, selected) {
@@ -847,7 +973,10 @@ cw_header('Automation Flows');
   async function apiRequest(payload, method = 'POST') {
     const res = await fetch(apiUrl, {
       method: method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
       body: method === 'POST' ? JSON.stringify(payload) : undefined
     });
 
@@ -902,7 +1031,7 @@ cw_header('Automation Flows');
     if (!id) return;
 
     loadDetail(id).catch(function (err) {
-      alert(err.message);
+      showToast(err.message, 'error');
     });
   });
 
@@ -941,6 +1070,7 @@ cw_header('Automation Flows');
 
   formEl.addEventListener('submit', async function (e) {
     e.preventDefault();
+    setSaving(true);
 
     try {
       const payload = {
@@ -955,17 +1085,25 @@ cw_header('Automation Flows');
         actions: collectActions()
       };
 
-      await apiRequest(payload, 'POST');
-      window.location.reload();
+      const data = await apiRequest(payload, 'POST');
+
+      if (data.flow && data.flow.id) {
+        upsertFlowListItem(data.flow);
+        await loadDetail(data.flow.id);
+      }
+
+      showToast('Flow updated successfully.', 'success');
     } catch (err) {
-      alert(err.message);
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
     }
   });
 
   deleteBtn.addEventListener('click', async function () {
     const flowId = parseInt(idEl.value || '0', 10);
     if (flowId <= 0) {
-      alert('No saved flow selected.');
+      showToast('No saved flow selected.', 'error');
       return;
     }
 
@@ -973,17 +1111,26 @@ cw_header('Automation Flows');
       return;
     }
 
+    setSaving(true);
+
     try {
       await apiRequest({
         action: 'delete_flow',
         id: flowId
       }, 'POST');
-      window.location.reload();
+
+      removeFlowListItem(flowId);
+      resetForm();
+      showToast('Flow deleted successfully.', 'success');
     } catch (err) {
-      alert(err.message);
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
     }
   });
 })();
 </script>
+
+<div id="afToast" class="af-toast" aria-live="polite" aria-atomic="true"></div>
 
 <?php cw_footer(); ?>
