@@ -616,7 +616,7 @@ function build_local_inventory_response(string $prompt, string $targetPath, stri
 
 function try_build_local_inventory_response(PDO $pdo, string $prompt, array $contextFiles = array()): ?array
 {
-    if (!should_force_method_inventory_mode($prompt)) {
+    if (!should_run_deterministic_local_inspection($prompt)) {
         return null;
     }
 
@@ -647,7 +647,12 @@ function try_build_local_inventory_response(PDO $pdo, string $prompt, array $con
     } catch (Throwable $e) {
         return array(
             'target_path' => (string)$targetPath,
-            'content' => 'PRIMARY_TARGET_FILE_SEEN: ' . (string)$targetPath . "\n" . 'READ_ERROR: ' . $e->getMessage()
+            'content' => implode("\n", array(
+                'PRIMARY_TARGET_FILE_SEEN: ' . (string)$targetPath,
+                'DOES_FILE_EXIST: NO',
+                'READ_ERROR: ' . $e->getMessage(),
+                'CONTENTS:'
+            ))
         );
     }
 
@@ -659,15 +664,15 @@ function try_build_local_inventory_response(PDO $pdo, string $prompt, array $con
         );
     }
 
-    $lines = array();
-    $lines[] = 'PRIMARY_TARGET_FILE_SEEN: ' . (string)$file['path'];
-    $lines[] = 'DOES_FILE_EXIST: YES';
-    $lines[] = 'CONTENTS:';
-    $lines[] = (string)$file['content'];
-
     return array(
         'target_path' => (string)$file['path'],
-        'content' => implode("\n", $lines)
+        'content' => implode("\n", array(
+            'PRIMARY_TARGET_FILE_SEEN: ' . (string)$file['path'],
+            'DOES_FILE_EXIST: YES',
+            'READ_ERROR:',
+            'CONTENTS:',
+            (string)$file['content']
+        ))
     );
 }
 
@@ -847,40 +852,75 @@ function extract_exact_method_blocks_from_file_content(string $content, array $m
     return implode("\n\n", $blocks);
 }
 
+
+function is_explicit_patch_or_fix_request(string $prompt): bool
+{
+    $promptLower = strtolower($prompt);
+
+    $signals = array(
+        'fix',
+        'patch',
+        'repair',
+        'modify',
+        'update',
+        'replace this block',
+        'with this block',
+        'surgical patch',
+        'surgical_patch',
+        'full drop-in',
+        'full drop in',
+        'full replacement',
+        'rewrite the file',
+        'target file',
+        'allowed_edit_paths',
+        'scope contract',
+        'return a surgical_patch',
+        'produce a surgical_patch',
+        'exact replace block',
+        'exact replacement block'
+    );
+
+    foreach ($signals as $signal) {
+        if (strpos($promptLower, $signal) !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+function should_run_deterministic_local_inspection(string $prompt): bool
+{
+    if (is_explicit_patch_or_fix_request($prompt)) {
+        return false;
+    }
+
+    return should_force_method_inventory_mode($prompt);
+}
+
+
+
+
 function should_force_method_inventory_mode(string $prompt): bool
 {
     $promptLower = strtolower($prompt);
 
     $signals = array(
         'list all public methods',
-        'public methods',
         'visible public methods',
-        'private methods',
-        'protected methods',
-        'method inventory',
-        'which methods are visible',
         'complete method list',
-        'list methods',
-        'declared method',
-        'declared methods',
-        'method declarations',
         'full method inventory',
-        'method names visible',
-        'last visible declared method',
-        'last declared method',
-        'last 5 public methods',
-        'last 10 declared method',
-        'last 12 declared method',
-        'last 5 public methods in source order',
         'count_visible_public_methods',
         'last_5_public_methods_in_source_order',
-        'read only the authoritative primary target file',
-        'primary target file contents (authoritative)',
-        'use only primary target file contents',
-        'ignore targeted file context',
-        'ignore supporting files',
-        'match declared method names only',
         'check whether these exact declared public methods are visible',
+        'last declared method',
+        'last 5 public methods',
+        'last 10 public methods',
+        'last 12 public methods',
+        'first_10_declared_functions_or_methods_in_source_order',
+        'does_file_exist',
+        'contents:',
+        'read_error:',
         'contains the string',
         'does the authoritative block contain',
         'does that authoritative block literally contain',
