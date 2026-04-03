@@ -32,44 +32,37 @@ function normalize_rel_path(string $path): string
 
 function project_root_path(): string
 {
-    $root = realpath(dirname(__FILE__) . '/../../../');
-    if ($root === false || !is_dir($root)) {
-        throw new RuntimeException('Unable to resolve project root from ' . dirname(__FILE__) . '/../../../');
-    }
-    return rtrim(str_replace('\\', '/', $root), '/');
+    $root = realpath(__DIR__ . '/../../../');
+    return $root !== false ? $root : (__DIR__ . '/../../../');
 }
 
 function safe_project_file_read(string $relativePath): array
 {
     $relativePath = normalize_rel_path($relativePath);
 
-    $root = project_root_path();
-    $candidate = $root . '/' . $relativePath;
-    $fullPath = realpath($candidate);
+    $root = rtrim(project_root_path(), '/');
+    $fullPath = realpath($root . '/' . $relativePath);
 
     if ($fullPath === false || !is_file($fullPath)) {
-        throw new RuntimeException('File not found: ' . $candidate);
+        throw new RuntimeException('File not found');
     }
 
-    $fullPath = str_replace('\\', '/', $fullPath);
-    $rootNorm = rtrim(str_replace('\\', '/', $root), '/');
-
-    if (strpos($fullPath, $rootNorm . '/') !== 0 && $fullPath !== $rootNorm) {
+    if (strpos($fullPath, $root) !== 0) {
         throw new RuntimeException('Invalid path');
     }
 
     $content = file_get_contents($fullPath);
     if ($content === false) {
-        throw new RuntimeException('Unable to read file: ' . $fullPath);
+        throw new RuntimeException('Unable to read file');
     }
 
-    return array(
+    return [
         'path' => $relativePath,
         'full_path' => $fullPath,
         'content' => $content,
         'basename' => basename($relativePath),
         'size_bytes' => filesize($fullPath) ?: 0,
-    );
+    ];
 }
 
 function table_exists(PDO $pdo, string $tableName): bool
