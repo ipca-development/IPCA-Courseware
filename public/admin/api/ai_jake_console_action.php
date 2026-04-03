@@ -548,9 +548,170 @@ function extract_requested_last_method_count(string $prompt, int $default = 5): 
     return $default;
 }
 
+function extract_requested_first_declared_function_or_method_count(string $prompt, int $default = 10): int
+{
+    if (preg_match('/first_(\d+)_declared_functions_or_methods_in_source_order/i', $prompt, $m)) {
+        return max(1, (int)$m[1]);
+    }
+
+    if (preg_match('/first\s+(\d+)\s+declared\s+functions?\s+or\s+methods?/i', $prompt, $m)) {
+        return max(1, (int)$m[1]);
+    }
+
+    return $default;
+}
+
+function extract_declared_functions_or_methods_from_php_content(string $content): array
+{
+    $declared = array();
+
+    if ($content === '') {
+        return $declared;
+    }
+
+    $tokens = token_get_all($content);
+    if (!is_array($tokens) || empty($tokens)) {
+        return $declared;
+    }
+
+    $braceDepth = 0;
+    $pendingClassOpen = false;
+    $classDepthStack = array();
+    $currentVisibility = null;
+    $count = count($tokens);
+
+    for ($i = 0; $i < $count; $i++) {
+        $token = $tokens[$i];
+        $tokenId = is_array($token) ? $token[0] : null;
+        $tokenText = is_array($token) ? $token[1] : $token;
+
+        if ($tokenId === T_CLASS || $tokenId === T_INTERFACE || $tokenId === T_TRAIT) {
+            $pendingClassOpen = true;
+            $currentVisibility = null;
+            continue;
+        }
+
+        if ($tokenText === '{') {
+            $braceDepth++;
+
+            if ($pendingClassOpen) {
+                $classDepthStack[] = $braceDepth;
+                $pendingClassOpen = false;
+                $currentVisibility = null;
+            }
+
+            continue;
+        }
+
+        if ($tokenText === '}') {
+            if (!empty($classDepthStack)) {
+                $topIndex = count($classDepthStack) - 1;
+                if ($classDepthStack[$topIndex] === $braceDepth) {
+                    array_pop($classDepthStack);
+                    $currentVisibility = null;
+                }
+            }
+
+            if ($braceDepth > 0) {
+                $braceDepth--;
+            }
+
+            continue;
+        }
+
+        if ($tokenText === ';') {
+            $currentVisibility = null;
+            continue;
+        }
+
+        if (!empty($classDepthStack)) {
+            if ($tokenId === T_PUBLIC) {
+                $currentVisibility = 'public';
+                continue;
+            }
+
+            if ($tokenId === T_PROTECTED) {
+                $currentVisibility = 'protected';
+                continue;
+            }
+
+            if ($tokenId === T_PRIVATE) {
+                $currentVisibility = 'private';
+                continue;
+            }
+        }
+
+        if ($tokenId === T_FUNCTION) {
+            $signatureParts = array();
+
+            if (!empty($classDepthStack) && $currentVisibility !== null) {
+                $signatureParts[] = $currentVisibility;
+            }
+
+            $signatureParts[] = 'function';
+
+            for ($j = $i + 1; $j < $count; $j++) {
+                $t = $tokens[$j];
+                $tText = is_array($t) ? $t[1] : $t;
+
+                if ($tText === '{' || $tText === ';') {
+                    break;
+                }
+
+                $signatureParts[] = $tText;
+            }
+
+            $signature = implode('', $signatureParts);
+            $signature = preg_replace('/\s+/', ' ', trim($signature));
+            $signature = preg_replace('/\s*\(\s*/', '(', $signature);
+            $signature = preg_replace('/\s*\)\s*/', ')', $signature);
+            $signature = preg_replace('/\s*,\s*/', ', ', $signature);
+            $signature = preg_replace('/\s*:\s*/', ': ', $signature);
+
+            $name = '';
+            if (preg_match('/\bfunction\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/', $signature, $m)) {
+                $name = (string)$m[1];
+            }
+
+            if ($name !== '') {
+                $declared[] = array(
+                    'visibility' => !empty($classDepthStack) ? $currentVisibility : null,
+                    'name' => $name,
+                    'signature' => $signature,
+                );
+            }
+
+            $currentVisibility = null;
+        }
+    }
+
+    return $declared;
+}
+
 function build_local_inventory_response(string $prompt, string $targetPath, string $content): ?string
 {
     $publicMethods = extract_declared_methods_from_php_content($content, array('public'));
+
+    if (
+        preg_match('/first_(\d+)_declared_functions_or_methods_in_source_order/i', $prompt) ||
+        stripos($prompt, 'FIRST_10_DECLARED_FUNCTIONS_OR_METHODS_IN_SOURCE_ORDER') !== false
+    ) {
+        $declared = extract_declared_functions_or_methods_from_php_content($content);
+        $firstCount = extract_requested_first_declared_function_or_method_count($prompt, 10);
+        $head = array_slice($declared, 0, $firstCount);
+
+        $lines = array();
+        $lines[] = 'PRIMARY_TARGET_FILE_SEEN: ' . $targetPath;
+        $lines[] = 'DOES_FILE_EXIST: YES';
+        $lines[] = 'READ_ERROR:';
+        $lines[] = 'FIRST_' . $firstCount . '_DECLARED_FUNCTIONS_OR_METHODS_IN_SOURCE_ORDER:';
+
+        foreach ($head as $declaredItem) {
+            $lines[] = $declaredItem['signature'];
+        }
+
+        return implode("\n", $lines);
+    }
 
     if (stripos($prompt, 'check whether these exact declared public methods are visible') !== false) {
         $requestedNames = parse_inventory_method_names_from_prompt($prompt);
