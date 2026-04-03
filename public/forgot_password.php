@@ -2,7 +2,6 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/bootstrap.php';
-require_once __DIR__ . '/../src/notification_service.php';
 require_once __DIR__ . '/../src/automation_runtime.php';
 
 ini_set('display_errors', '1');

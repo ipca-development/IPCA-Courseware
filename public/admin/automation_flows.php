@@ -11,7 +11,16 @@ $u = cw_current_user($pdo);
 $eventGroups = automation_event_grouped_options($pdo, true);
 $conditionFields = automation_condition_field_options();
 $operators = automation_operator_options();
-$actionOptions = automation_action_options();
+$stmt = $pdo->query("
+    SELECT action_key, label
+    FROM automation_action_definitions
+    WHERE is_active = 1
+    ORDER BY sort_order ASC, label ASC
+");
+$actionOptions = [];
+foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $actionOptions[$row['action_key']] = $row['label'];
+}
 $flowGroups = automation_flow_rows_grouped($pdo);
 
 $notificationTemplates = array();

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/onboarding_tokens.php';
 require_once __DIR__ . '/../src/admin_user_edit_helpers.php';
+require_once __DIR__ . '/../src/automation_runtime.php';
 
 ini_set('display_errors', '1');
 ini_set('display_startup_errors', '1');
@@ -100,81 +101,7 @@ function reg_log_duplicate_attempt(PDO $pdo, string $email, string $firstName, s
     }
 }
 
-function reg_send_acknowledgement_email(PDO $pdo, string $email, string $displayName): void
-{
-    try {
-        if (!class_exists('NotificationService')) {
-            require_once __DIR__ . '/../src/notification_service.php';
-        }
 
-        $service = new NotificationService($pdo);
-        $service->sendSystemNotification(
-            'public_registration_received_user',
-            $email,
-            $displayName,
-            array(
-                'user_name' => $displayName,
-                'support_email' => ot_support_email(),
-            ),
-            null
-        );
-    } catch (Throwable $e) {
-    }
-}
-
-function reg_send_admin_alert(PDO $pdo, array $userRow, string $cellphone): void
-{
-    try {
-        if (!class_exists('NotificationService')) {
-            require_once __DIR__ . '/../src/notification_service.php';
-        }
-
-        $service = new NotificationService($pdo);
-
-        $adminStmt = $pdo->query("
-            SELECT email, name, first_name, last_name
-            FROM users
-            WHERE role = 'admin'
-              AND status = 'active'
-              AND email IS NOT NULL
-              AND email <> ''
-            ORDER BY id ASC
-            LIMIT 1
-        ");
-        $admin = $adminStmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!is_array($admin)) {
-            return;
-        }
-
-        $adminEmail = trim((string)($admin['email'] ?? ''));
-        if ($adminEmail === '') {
-            return;
-        }
-
-        $displayName = trim((string)($admin['name'] ?? ''));
-        if ($displayName === '') {
-            $displayName = trim((string)($admin['first_name'] ?? '') . ' ' . (string)($admin['last_name'] ?? ''));
-        }
-        if ($displayName === '') {
-            $displayName = 'Admin';
-        }
-
-        $service->sendSystemNotification(
-            'public_registration_received_admin',
-            $adminEmail,
-            $displayName,
-            array(
-                'user_name' => trim((string)($userRow['name'] ?? '')),
-                'login_email' => trim((string)($userRow['email'] ?? '')),
-                'mobile_phone' => $cellphone,
-                'support_email' => ot_support_email(),
-            ),
-            null
-        );
-    } catch (Throwable $e) {
-    }
-}
 
 $flashType = '';
 $flashMessage = '';
@@ -338,7 +265,7 @@ $insertUser->execute(array(
 
             $pdo->commit();
 
-            $userRow = array(
+             $userRow = array(
                 'id' => $newUserId,
                 'name' => $displayName,
                 'first_name' => $firstName,
@@ -348,8 +275,26 @@ $insertUser->execute(array(
                 'status' => 'pending_activation',
             );
 
-            reg_send_acknowledgement_email($pdo, $email, $displayName);
-            reg_send_admin_alert($pdo, $userRow, $cellphone);
+            try {
+                $automationRuntime = new AutomationRuntime();
+                $automationRuntime->dispatchEvent(
+                    $pdo,
+                    'public_registration_submitted',
+                    array(
+                        'user_id' => $newUserId,
+                        'user_name' => $displayName,
+                        'first_name' => $firstName,
+                        'last_name' => $lastName,
+                        'login_email' => $email,
+                        'email' => $email,
+                        'mobile_phone' => $cellphone,
+                        'support_email' => ot_support_email(),
+                        'to_email' => $email,
+                        'to_name' => $displayName
+                    )
+                );
+            } catch (Throwable $e) {
+            }
         } else {
             reg_log_duplicate_attempt($pdo, $email, $firstName, $lastName, $cellphone);
         }
