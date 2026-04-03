@@ -6,7 +6,8 @@ require_once __DIR__ . '/notification_service.php';
 
 final class AutomationRuntime
 {
-    public function dispatchEvent(PDO $pdo, string $eventKey, array $context = array()): array
+    
+	public function dispatchEvent(PDO $pdo, string $eventKey, array $context = array()): array
     {
         $eventKey = trim($eventKey);
         if ($eventKey === '') {
@@ -37,7 +38,7 @@ final class AutomationRuntime
             WHERE e.event_key = ?
               AND e.is_active = 1
               AND f.is_active = 1
-            ORDER BY a.sort_order ASC, a.id ASC
+            ORDER BY a.flow_id ASC, a.sort_order ASC, a.id ASC
         ");
         $stmt->execute(array($eventKey));
         $actions = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -45,6 +46,7 @@ final class AutomationRuntime
         $results = array();
         $matchedActions = count($actions);
         $executedActions = 0;
+        $flowRunIdsByFlowId = array();
 
         foreach ($actions as $action) {
             $actionId = (int)($action['id'] ?? 0);
@@ -52,7 +54,21 @@ final class AutomationRuntime
             $actionKey = trim((string)($action['action_key'] ?? ''));
             $config = $this->decodeConfig((string)($action['config_json'] ?? ''));
 
-            $flowRunId = $flowId > 0 ? $flowId : $actionId;
+            if ($flowId > 0) {
+                if (!isset($flowRunIdsByFlowId[$flowId])) {
+                    $insertFlowRun = $pdo->prepare("
+                        INSERT INTO automation_flow_runs
+                        (flow_id)
+                        VALUES (?)
+                    ");
+                    $insertFlowRun->execute(array($flowId));
+                    $flowRunIdsByFlowId[$flowId] = (int)$pdo->lastInsertId();
+                }
+
+                $flowRunId = (int)$flowRunIdsByFlowId[$flowId];
+            } else {
+                $flowRunId = $actionId;
+            }
 
             try {
                 if ($actionKey === 'send_email') {
@@ -125,6 +141,7 @@ final class AutomationRuntime
             'results' => $results,
         );
     }
+	
 
     private function runSendEmail(PDO $pdo, int $flowRunId, string $actionKey, array $config, array $eventContext): array
     {
