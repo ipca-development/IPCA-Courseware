@@ -268,21 +268,22 @@ $insertUser->execute(array(
             try {
                 $automationRuntime = new AutomationRuntime();
                 $automationRuntime->dispatchEvent(
-                    $pdo,
-                    'public_registration_submitted',
-                    array(
-                        'user_id' => $newUserId,
-                        'user_name' => $displayName,
-                        'first_name' => $firstName,
-                        'last_name' => $lastName,
-                        'login_email' => $email,
-                        'email' => $email,
-                        'mobile_phone' => $cellphone,
-                        'support_email' => ot_support_email(),
-                        'to_email' => $email,
-                        'to_name' => $displayName
-                    )
-                );
+				$pdo,
+				'public_registration_submitted',
+				array(
+					'user_id' => $newUserId,
+					'user_name' => $displayName,
+					'first_name' => $firstName,
+					'last_name' => $lastName,
+					'login_email' => $email,
+					'user_email' => $email,
+					'email' => $email,
+					'mobile_phone' => $cellphone,
+					'support_email' => ot_support_email(),
+					'to_email' => $email,
+					'to_name' => $displayName
+				)
+			);
             } catch (Throwable $e) {
             }
         } else {
