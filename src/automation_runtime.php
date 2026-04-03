@@ -53,12 +53,19 @@ public function dispatchEvent(PDO $pdo, string $eventKey, array $context = array
 
         if ($flowId > 0) {
             if (!isset($flowRunIdsByFlowId[$flowId])) {
-                $insertFlowRun = $pdo->prepare("
-                    INSERT INTO automation_flow_runs
-                    (flow_id)
-                    VALUES (?)
-                ");
-                $insertFlowRun->execute(array($flowId));
+                
+				
+				$insertFlowRun = $pdo->prepare("
+					INSERT INTO automation_flow_runs
+					(flow_id, event_key)
+					VALUES (?, ?)
+				");
+				$insertFlowRun->execute(array(
+					$flowId,
+					$eventKey,
+				));
+				
+				
                 $flowRunIdsByFlowId[$flowId] = (int)$pdo->lastInsertId();
             }
 
