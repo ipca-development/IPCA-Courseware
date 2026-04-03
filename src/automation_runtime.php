@@ -21,7 +21,7 @@ final class AutomationRuntime
         }
 
         $stmt = $pdo->prepare("
-            SELECT
+            SELECT DISTINCT
                 a.id,
                 a.flow_id,
                 a.action_key,
@@ -30,7 +30,7 @@ final class AutomationRuntime
             FROM automation_flow_actions a
             INNER JOIN automation_flows f
                 ON f.id = a.flow_id
-            INNER JOIN automation_flow_conditions c
+            LEFT JOIN automation_flow_conditions c
                 ON c.flow_id = f.id
             INNER JOIN automation_event_definitions e
                 ON e.id = f.event_definition_id
