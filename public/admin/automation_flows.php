@@ -510,6 +510,9 @@ cw_header('Automation Flows');
   </section>
 </div>
 
+
+<div id="afToast" class="af-toast" aria-live="polite" aria-atomic="true"></div>
+
 <script>
 (function () {
   const apiUrl = 'api/automation_flows_api.php';
@@ -1131,6 +1134,6 @@ cw_header('Automation Flows');
 })();
 </script>
 
-<div id="afToast" class="af-toast" aria-live="polite" aria-atomic="true"></div>
+
 
 <?php cw_footer(); ?>
