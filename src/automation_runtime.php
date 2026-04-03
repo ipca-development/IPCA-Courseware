@@ -360,7 +360,8 @@ public function dispatchEvent(PDO $pdo, string $eventKey, array $context = array
     private function runSendEmail(PDO $pdo, int $flowRunId, string $actionKey, array $config, array $eventContext): array
     {
         $notificationKey = trim((string)($config['notification_key'] ?? ''));
-        $toEmail = trim((string)($config['to_email'] ?? ''));
+        $toEmail = automation_runtime_resolve_config_value($config, 'to_email', $eventContext);
+        $toName = automation_runtime_resolve_config_value($config, 'to_name', $eventContext);
 
         if ($notificationKey === '') {
             throw new RuntimeException('send_email requires notification_key');
@@ -369,8 +370,6 @@ public function dispatchEvent(PDO $pdo, string $eventKey, array $context = array
         if ($toEmail === '') {
             throw new RuntimeException('send_email requires to_email');
         }
-
-        $toName = isset($config['to_name']) ? (string)$config['to_name'] : '';
         $notificationContext = array();
 
         if (isset($config['context']) && is_array($config['context'])) {
