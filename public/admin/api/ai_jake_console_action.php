@@ -351,8 +351,9 @@ function extract_declared_methods_from_php_content(string $content, array $allow
         }
     }
 
-    $classDepth = 0;
+    $braceDepth = 0;
     $pendingClassOpen = false;
+    $classDepthStack = array();
     $currentVisibility = null;
     $count = count($tokens);
 
@@ -368,23 +369,34 @@ function extract_declared_methods_from_php_content(string $content, array $allow
         }
 
         if ($tokenText === '{') {
+            $braceDepth++;
+
             if ($pendingClassOpen) {
-                $classDepth++;
+                $classDepthStack[] = $braceDepth;
                 $pendingClassOpen = false;
                 $currentVisibility = null;
             }
+
             continue;
         }
 
         if ($tokenText === '}') {
-            if ($classDepth > 0) {
-                $classDepth--;
+            if (!empty($classDepthStack)) {
+                $topIndex = count($classDepthStack) - 1;
+                if ($classDepthStack[$topIndex] === $braceDepth) {
+                    array_pop($classDepthStack);
+                    $currentVisibility = null;
+                }
             }
-            $currentVisibility = null;
+
+            if ($braceDepth > 0) {
+                $braceDepth--;
+            }
+
             continue;
         }
 
-        if ($classDepth <= 0) {
+        if (empty($classDepthStack)) {
             continue;
         }
 
