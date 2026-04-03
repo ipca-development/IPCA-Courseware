@@ -1720,6 +1720,7 @@ function context_files_contain_expected_symbol_bodies(array $contextFiles, array
             $content = (string)$f['content'];
 
             if (
+                preg_match('/\/\*\s*EXACT\s+METHOD\s+BLOCK:\s*' . preg_quote($symbol, '/') . '\s*\*\//i', $content) ||
                 preg_match('/public\s+function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
                 preg_match('/protected\s+function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
                 preg_match('/private\s+function\s+' . preg_quote($symbol, '/') . '\s*\(/i', $content) ||
@@ -1737,6 +1738,7 @@ function context_files_contain_expected_symbol_bodies(array $contextFiles, array
 
     return true;
 }
+
 
 function scope_contract_requires_method_scoped_patch(array $scopeContract): bool
 {
@@ -1988,7 +1990,33 @@ if (
             ? $scopeContract['expected_symbols']
             : array();
 
-        if (!context_files_contain_expected_symbol_bodies($contextFiles, $expectedSymbols)) {
+$primaryTargetPath = trim((string)($scopeContract['primary_target_path'] ?? ''));
+        $hasVisibleExpectedSymbolBodies =
+            context_files_contain_expected_symbol_bodies($contextFiles, $expectedSymbols);
+
+        if (
+            !$hasVisibleExpectedSymbolBodies &&
+            $primaryTargetPath !== '' &&
+            $targetPath !== '' &&
+            $targetPath === $primaryTargetPath
+        ) {
+            try {
+                $primaryTargetFile = safe_project_file_read($primaryTargetPath);
+                $hasVisibleExpectedSymbolBodies = context_files_contain_expected_symbol_bodies(
+                    array(
+                        array(
+                            'path' => (string)$primaryTargetFile['path'],
+                            'content' => (string)$primaryTargetFile['content'],
+                        )
+                    ),
+                    $expectedSymbols
+                );
+            } catch (Throwable $e) {
+                $hasVisibleExpectedSymbolBodies = false;
+            }
+        }
+
+        if (!$hasVisibleExpectedSymbolBodies) {
             return [
                 'verdict' => 'needs_revision',
                 'reason' => 'Steven produced a concrete patch for a method-scoped request, but the expected method body is not actually visible in the loaded file context. In other words: this may look precise, but it is still an invented patch against an unseen implementation.',
