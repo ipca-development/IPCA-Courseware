@@ -6,209 +6,139 @@ require_once __DIR__ . '/notification_service.php';
 
 final class AutomationRuntime
 {
-    public function dispatchEvent(PDO $pdo, string $eventKey, array $context = array()): array
-    {
-        $eventKey = trim($eventKey);
 
-        if ($eventKey === '') {
-            return array(
-                'ok' => false,
-                'event_key' => '',
-                'matched_flows' => 0,
-                'executed_flows' => 0,
-                'executed_actions' => 0,
-                'results' => array(),
-                'error' => 'Missing event key',
-            );
-        }
-
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-
-        $flowStmt = $pdo->prepare("
-            SELECT
-                f.id,
-                f.name,
-                f.event_definition_id,
-                f.is_active,
-                f.priority
-            FROM automation_flows f
-            INNER JOIN automation_event_definitions e
-                ON e.id = f.event_definition_id
-            WHERE e.event_key = ?
-              AND e.is_active = 1
-              AND f.is_active = 1
-            ORDER BY f.priority ASC, f.id ASC
-        ");
-        $flowStmt->execute(array($eventKey));
-        $flows = $flowStmt->fetchAll(PDO::FETCH_ASSOC);
-
-        if (!$flows) {
-            return array(
-                'ok' => true,
-                'event_key' => $eventKey,
-                'matched_flows' => 0,
-                'executed_flows' => 0,
-                'executed_actions' => 0,
-                'results' => array(),
-            );
-        }
-
-        $flowIds = array();
-        foreach ($flows as $flow) {
-            $flowId = (int)($flow['id'] ?? 0);
-            if ($flowId > 0) {
-                $flowIds[] = $flowId;
-            }
-        }
-
-        $conditionsByFlowId = $this->loadConditionsByFlowId($pdo, $flowIds);
-        $actionsByFlowId = $this->loadActionsByFlowId($pdo, $flowIds);
-
-        $results = array();
-        $matchedFlows = 0;
-        $executedFlows = 0;
-        $executedActions = 0;
-
-        foreach ($flows as $flow) {
-            $flowId = (int)($flow['id'] ?? 0);
-            $flowName = trim((string)($flow['name'] ?? ''));
-
-            if ($flowId <= 0) {
-                $results[] = array(
-                    'flow_id' => 0,
-                    'flow_name' => $flowName,
-                    'matched' => false,
-                    'executed' => false,
-                    'reason' => 'Invalid flow_id',
-                    'flow_run_id' => null,
-                    'actions' => array(),
-                );
-                continue;
-            }
-
-            $conditions = isset($conditionsByFlowId[$flowId]) ? $conditionsByFlowId[$flowId] : array();
-            $conditionResult = $this->evaluateFlowConditions($conditions, $context);
-
-            if (!$conditionResult['matched']) {
-                $results[] = array(
-                    'flow_id' => $flowId,
-                    'flow_name' => $flowName,
-                    'matched' => false,
-                    'executed' => false,
-                    'reason' => $conditionResult['reason'],
-                    'flow_run_id' => null,
-                    'actions' => array(),
-                );
-                continue;
-            }
-
-            $matchedFlows++;
-
-            $actions = isset($actionsByFlowId[$flowId]) ? $actionsByFlowId[$flowId] : array();
-
-            if (empty($actions)) {
-                $results[] = array(
-                    'flow_id' => $flowId,
-                    'flow_name' => $flowName,
-                    'matched' => true,
-                    'executed' => false,
-                    'reason' => 'No actions configured',
-                    'flow_run_id' => null,
-                    'actions' => array(),
-                );
-                continue;
-            }
-
-            $flowRunId = $this->insertFlowRun($pdo, $flowId, $eventKey, $context);
-            $executedFlows++;
-
-            $flowActionResults = array();
-
-            foreach ($actions as $action) {
-                $actionId = (int)($action['id'] ?? 0);
-                $actionKey = trim((string)($action['action_key'] ?? ''));
-                $config = $this->decodeConfig((string)($action['config_json'] ?? ''));
-
-                try {
-                    if ($actionKey === 'send_email') {
-                        $actionResult = $this->runSendEmail($pdo, $flowRunId, $actionKey, $config, $context);
-                        $executedActions++;
-                        $flowActionResults[] = array(
-                            'action_id' => $actionId,
-                            'action_key' => $actionKey,
-                            'ok' => true,
-                            'result' => $actionResult,
-                        );
-                        continue;
-                    }
-
-                    if ($actionKey === 'log_event') {
-                        $actionResult = $this->runLogEvent($pdo, $flowRunId, $actionKey, $config, $context);
-                        $executedActions++;
-                        $flowActionResults[] = array(
-                            'action_id' => $actionId,
-                            'action_key' => $actionKey,
-                            'ok' => true,
-                            'result' => $actionResult,
-                        );
-                        continue;
-                    }
-
-                    $details = $this->encodeDetails(array(
-                        'message' => 'Unsupported action',
-                        'flow_id' => $flowId,
-                        'action_id' => $actionId,
-                        'action_key' => $actionKey,
-                    ));
-
-                    $this->insertActionRun($pdo, $flowRunId, $actionKey !== '' ? $actionKey : 'unknown', 'skipped', $details);
-
-                    $flowActionResults[] = array(
-                        'action_id' => $actionId,
-                        'action_key' => $actionKey,
-                        'ok' => false,
-                        'error' => 'Unsupported action',
-                    );
-                } catch (Throwable $e) {
-                    $details = $this->encodeDetails(array(
-                        'message' => $e->getMessage(),
-                        'flow_id' => $flowId,
-                        'action_id' => $actionId,
-                        'action_key' => $actionKey,
-                    ));
-
-                    $this->insertActionRun($pdo, $flowRunId, $actionKey !== '' ? $actionKey : 'unknown', 'error', $details);
-
-                    $flowActionResults[] = array(
-                        'action_id' => $actionId,
-                        'action_key' => $actionKey,
-                        'ok' => false,
-                        'error' => $e->getMessage(),
-                    );
-                }
-            }
-
-            $results[] = array(
-                'flow_id' => $flowId,
-                'flow_name' => $flowName,
-                'matched' => true,
-                'executed' => true,
-                'reason' => $conditionResult['reason'],
-                'flow_run_id' => $flowRunId,
-                'actions' => $flowActionResults,
-            );
-        }
-
+public function dispatchEvent(PDO $pdo, string $eventKey, array $context = array()): array
+{
+    $eventKey = trim($eventKey);
+    if ($eventKey === '') {
         return array(
-            'ok' => true,
+            'ok' => false,
             'event_key' => $eventKey,
-            'matched_flows' => $matchedFlows,
-            'executed_flows' => $executedFlows,
-            'executed_actions' => $executedActions,
-            'results' => $results,
+            'matched_actions' => 0,
+            'executed_actions' => 0,
+            'results' => array(),
+            'error' => 'Missing event key',
         );
     }
+
+    $stmt = $pdo->prepare("
+        SELECT DISTINCT
+            a.id,
+            a.flow_id,
+            a.action_key,
+            a.config_json,
+            a.sort_order
+        FROM automation_flow_actions a
+        INNER JOIN automation_flows f
+            ON f.id = a.flow_id
+        LEFT JOIN automation_flow_conditions c
+            ON c.flow_id = f.id
+        WHERE f.event_key = ?
+          AND f.is_active = 1
+        ORDER BY a.flow_id ASC, a.sort_order ASC, a.id ASC
+    ");
+    $stmt->execute(array($eventKey));
+    $actions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $results = array();
+    $matchedActions = count($actions);
+    $executedActions = 0;
+    $flowRunIdsByFlowId = array();
+
+    foreach ($actions as $action) {
+        $actionId = (int)($action['id'] ?? 0);
+        $flowId = (int)($action['flow_id'] ?? 0);
+        $actionKey = trim((string)($action['action_key'] ?? ''));
+        $config = $this->decodeConfig((string)($action['config_json'] ?? ''));
+
+        if ($flowId > 0) {
+            if (!isset($flowRunIdsByFlowId[$flowId])) {
+                $insertFlowRun = $pdo->prepare("
+                    INSERT INTO automation_flow_runs
+                    (flow_id)
+                    VALUES (?)
+                ");
+                $insertFlowRun->execute(array($flowId));
+                $flowRunIdsByFlowId[$flowId] = (int)$pdo->lastInsertId();
+            }
+
+            $flowRunId = (int)$flowRunIdsByFlowId[$flowId];
+        } else {
+            $flowRunId = $actionId;
+        }
+
+        try {
+            if ($actionKey === 'send_email') {
+                $result = $this->runSendEmail($pdo, $flowRunId, $actionKey, $config, $context);
+                $executedActions++;
+                $results[] = array(
+                    'action_id' => $actionId,
+                    'flow_id' => $flowId,
+                    'action_key' => $actionKey,
+                    'ok' => true,
+                    'result' => $result,
+                );
+                continue;
+            }
+
+            if ($actionKey === 'log_event') {
+                $result = $this->runLogEvent($pdo, $flowRunId, $actionKey, $config, $context);
+                $executedActions++;
+                $results[] = array(
+                    'action_id' => $actionId,
+                    'flow_id' => $flowId,
+                    'action_key' => $actionKey,
+                    'ok' => true,
+                    'result' => $result,
+                );
+                continue;
+            }
+
+            $details = $this->encodeDetails(array(
+                'message' => 'Unsupported action',
+                'action_id' => $actionId,
+                'flow_id' => $flowId,
+                'action_key' => $actionKey,
+            ));
+
+            $this->insertActionRun($pdo, $flowRunId, $actionKey, 'skipped', $details);
+
+            $results[] = array(
+                'action_id' => $actionId,
+                'flow_id' => $flowId,
+                'action_key' => $actionKey,
+                'ok' => false,
+                'error' => 'Unsupported action',
+            );
+        } catch (Throwable $e) {
+            $details = $this->encodeDetails(array(
+                'message' => $e->getMessage(),
+                'action_id' => $actionId,
+                'flow_id' => $flowId,
+                'action_key' => $actionKey,
+            ));
+
+            $this->insertActionRun($pdo, $flowRunId, $actionKey, 'error', $details);
+
+            $results[] = array(
+                'action_id' => $actionId,
+                'flow_id' => $flowId,
+                'action_key' => $actionKey,
+                'ok' => false,
+                'error' => $e->getMessage(),
+            );
+        }
+    }
+
+    return array(
+        'ok' => true,
+        'event_key' => $eventKey,
+        'matched_actions' => $matchedActions,
+        'executed_actions' => $executedActions,
+        'results' => $results,
+    );
+}	
+	
 
     private function insertFlowRun(PDO $pdo, int $flowId, string $eventKey, array $context): int
     {
@@ -234,21 +164,18 @@ final class AutomationRuntime
 
         $placeholders = implode(',', array_fill(0, count($flowIds), '?'));
 
-               $stmt = $pdo->prepare("
-            SELECT DISTINCT
-                a.id,
-                a.flow_id,
-                a.action_key,
-                a.config_json,
-                a.sort_order
-            FROM automation_flow_actions a
-            INNER JOIN automation_flows f
-                ON f.id = a.flow_id
-            LEFT JOIN automation_flow_conditions c
-                ON c.flow_id = f.id
-            WHERE f.event_key = ?
-              AND f.is_active = 1
-            ORDER BY a.flow_id ASC, a.sort_order ASC, a.id ASC
+        $stmt = $pdo->prepare("
+            SELECT
+                id,
+                flow_id,
+                field_key,
+                operator,
+                value_text,
+                value_number,
+                sort_order
+            FROM automation_flow_conditions
+            WHERE flow_id IN ($placeholders)
+            ORDER BY flow_id ASC, sort_order ASC, id ASC
         ");
         $stmt->execute($flowIds);
 
