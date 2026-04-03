@@ -645,6 +645,64 @@ function try_build_local_inventory_response(PDO $pdo, string $prompt, array $con
     );
 }
 
+With this block:
+function try_build_local_inventory_response(PDO $pdo, string $prompt, array $contextFiles = array()): ?array
+{
+    if (!should_force_method_inventory_mode($prompt)) {
+        return null;
+    }
+
+    $targetPath = pick_primary_target_path($pdo, $prompt, $contextFiles);
+
+    if ($targetPath === null || trim($targetPath) === '') {
+        $explicitPaths = extract_file_candidates_from_text($prompt);
+        if (!empty($explicitPaths)) {
+            $targetPath = trim((string)$explicitPaths[0]);
+        }
+    }
+
+    if ($targetPath === null || trim($targetPath) === '') {
+        return null;
+    }
+
+    try {
+        $resolvedTargetPath = resolve_candidate_path_from_target_data($targetPath, array(
+            'primary_file' => $targetPath,
+            'files' => array($targetPath),
+        ));
+
+        if ($resolvedTargetPath === null || trim($resolvedTargetPath) === '') {
+            $resolvedTargetPath = $targetPath;
+        }
+
+        $file = safe_project_file_read($resolvedTargetPath);
+    } catch (Throwable $e) {
+        return array(
+            'target_path' => (string)$targetPath,
+            'content' => 'PRIMARY_TARGET_FILE_SEEN: ' . (string)$targetPath . "\n" . 'READ_ERROR: ' . $e->getMessage()
+        );
+    }
+
+    $response = build_local_inventory_response($prompt, (string)$file['path'], (string)$file['content']);
+    if ($response !== null) {
+        return array(
+            'target_path' => (string)$file['path'],
+            'content' => $response
+        );
+    }
+
+    $lines = array();
+    $lines[] = 'PRIMARY_TARGET_FILE_SEEN: ' . (string)$file['path'];
+    $lines[] = 'DOES_FILE_EXIST: YES';
+    $lines[] = 'CONTENTS:';
+    $lines[] = (string)$file['content'];
+
+    return array(
+        'target_path' => (string)$file['path'],
+        'content' => implode("\n", $lines)
+    );
+}
+
 
 function find_matching_brace_position(string $content, int $openBracePos): ?int
 {
