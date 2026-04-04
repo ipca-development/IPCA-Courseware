@@ -1155,8 +1155,19 @@ TXT;
     'completed_at' => gmdate('Y-m-d H:i:s'),
 ]);
 
-    $emailSendResults = [];
-foreach ((array)($finalizeResult['dispatch_plan']['queued_email_ids'] ?? []) as $queuedEmailId) {
+$classification = (array)($finalizeResult['classification'] ?? []);
+$activityState = (array)($finalizeResult['activity_state'] ?? []);
+$queuedEmailIds = (array)($finalizeResult['queued_email_ids'] ?? []);
+
+$remediationTriggered = !empty($finalizeResult['remediation_triggered']);
+$instructorEscalationTriggered = !empty($finalizeResult['instructor_escalation_triggered']);
+
+$summaryStatus = (string)($activityState['summary_status'] ?? '');
+$testPassStatus = (string)($activityState['test_pass_status'] ?? '');
+$completionStatus = (string)($activityState['completion_status'] ?? '');
+
+$emailSendResults = [];
+foreach ($queuedEmailIds as $queuedEmailId) {
     try {
         $emailSendResults[] = [
             'email_id' => (int)$queuedEmailId,
@@ -1175,30 +1186,30 @@ foreach ((array)($finalizeResult['dispatch_plan']['queued_email_ids'] ?? []) as 
     }
 }
 
-    json_out([
-        'ok'                          => true,
-        'test_id'                     => $testId,
-        'score_pct'                   => $scorePct,
-        'ai_summary'                  => $written,
-        'weak_areas'                  => $weak,
-        'summary_quality'             => $summaryQuality,
-        'summary_issues'              => $summaryIssues,
-        'summary_corrections'         => $summaryCorrections,
-        'confirmed_misunderstandings' => $confirmedMisunderstandings,
-        'result_audio'                => $resultAudioUrl,
-        'timing_status'               => $classification['timing_status'],
-        'formal_result_code'          => $classification['formal_result_code'],
-        'formal_result_label'         => $classification['formal_result_label'],
-        'pass_gate_met'               => (int)$classification['pass_gate_met'],
-        'counts_as_unsat'             => (int)$classification['counts_as_unsat'],
-        'remediation_triggered'       => $remediationTriggered,
-        'instructor_escalation_triggered' => $instructorEscalationTriggered,
-        'activity_summary_status'     => $summaryStatus,
-        'activity_test_pass_status'   => $testPassStatus,
-        'activity_completion_status'  => $completionStatus,
-        'queued_email_ids'            => $queuedEmailIds,
-        'email_send_results'          => $emailSendResults
-    ]);
+json_out([
+    'ok' => true,
+    'test_id' => $testId,
+    'score_pct' => $scorePct,
+    'ai_summary' => $written,
+    'weak_areas' => $weak,
+    'summary_quality' => $summaryQuality,
+    'summary_issues' => $summaryIssues,
+    'summary_corrections' => $summaryCorrections,
+    'confirmed_misunderstandings' => $confirmedMisunderstandings,
+    'result_audio' => $resultAudioUrl,
+    'timing_status' => (string)($classification['timing_status'] ?? ''),
+    'formal_result_code' => (string)($classification['formal_result_code'] ?? ''),
+    'formal_result_label' => (string)($classification['formal_result_label'] ?? ''),
+    'pass_gate_met' => (int)($classification['pass_gate_met'] ?? 0),
+    'counts_as_unsat' => (int)($classification['counts_as_unsat'] ?? 0),
+    'remediation_triggered' => $remediationTriggered ? 1 : 0,
+    'instructor_escalation_triggered' => $instructorEscalationTriggered ? 1 : 0,
+    'activity_summary_status' => $summaryStatus,
+    'activity_test_pass_status' => $testPassStatus,
+    'activity_completion_status' => $completionStatus,
+    'queued_email_ids' => $queuedEmailIds,
+    'email_send_results' => $emailSendResults
+]);
 
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) {
