@@ -233,9 +233,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
-        }
-        tcc_redirect($activeTab, 'error', $e->getMessage());
-    }
+        } else {
+    throw new RuntimeException('Unknown action.');
+		}
+	}
 }
 
 $policyCategories = tcc_policy_categories();
@@ -503,12 +504,13 @@ cw_header('Theory Control Center');
 
             <?php if ((string)$row['value_type'] === 'bool'): ?>
                 <select class="tcc-input" name="value_text">
-                    <option value="1" <?php echo (string)$row['current_value_text'] === '1' ? 'selected' : ''; ?>>
-                        Enabled (1)
-                    </option>
-                    <option value="0" <?php echo (string)$row['current_value_text'] === '0' ? 'selected' : ''; ?>>
-                        Disabled (0)
-                    </option>
+                    <?php $boolCurrent = strtolower(trim((string)$row['current_value_text'])); ?>
+					<option value="1" <?php echo in_array($boolCurrent, array('1', 'true', 'yes', 'on'), true) ? 'selected' : ''; ?>>
+						Enabled (1)
+					</option>
+					<option value="0" <?php echo in_array($boolCurrent, array('0', 'false', 'no', 'off', ''), true) ? 'selected' : ''; ?>>
+						Disabled (0)
+					</option>
                 </select>
             <?php elseif ((string)$row['value_type'] === 'json'): ?>
                 <textarea
