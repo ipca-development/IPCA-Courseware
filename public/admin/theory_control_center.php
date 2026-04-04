@@ -432,7 +432,7 @@ cw_header('Theory Control Center');
             <a class="tcc-tab <?php echo $activeTab === 'policies' ? 'active' : ''; ?>" href="/admin/theory_control_center.php?tab=policies">A. Theory Policies</a>
             <a class="tcc-tab <?php echo $activeTab === 'logic_map' ? 'active' : ''; ?>" href="/admin/theory_control_center.php?tab=logic_map">B. Read-only Logic Map</a>
             <a class="tcc-tab <?php echo $activeTab === 'automation' ? 'active' : ''; ?>" href="/admin/theory_control_center.php?tab=automation">C. Theory Automations</a>
-            <a class="tcc-tab <?php echo $activeTab === 'notifications' ? 'active' : ''; ?>" href="/admin/theory_control_center.php?tab=notifications">D. Theory Notifications</a>
+            <a class="tcc-tab " href="/admin/theory_control_center.php?tab=notifications">D. Theory Notifications</a>
         </div>
     </section>
 
@@ -573,14 +573,10 @@ cw_header('Theory Control Center');
     <?php endif; ?>
 
     <?php if ($activeTab === 'notifications'): ?>
-        <section class="card tcc-panel-card">
-            <h2 class="tcc-panel-title">Theory Notifications</h2>
-            <div class="tcc-panel-sub">
-                This tab is ready for direct integrated rendering.
-                Next step is to drop in the theory notifications panel partial here, without iframe usage.
-            </div>
-        </section>
-    <?php endif; ?>
+    <section class="card tcc-panel-card">
+        <?php require __DIR__ . '/partials/theory_notifications_panel.php'; ?>
+    </section>
+<?php endif; ?>
 
 </div>
 
