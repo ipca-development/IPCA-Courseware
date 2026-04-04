@@ -918,7 +918,41 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         if (is_file(__DIR__ . '/automation_runtime.php')) {
             require_once __DIR__ . '/automation_runtime.php';
             $automation = new AutomationRuntime();
+
+            $this->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $progressTestId,
+                'event_type' => 'automation',
+                'event_code' => 'automation_dispatch_before',
+                'event_status' => 'info',
+                'actor_type' => 'system',
+                'event_time' => gmdate('Y-m-d H:i:s'),
+                'payload' => [
+                    'event_key' => $eventKey,
+                    'attempt_count' => (int)($testRow['attempt'] ?? 0),
+                    'score_pct' => $scorePct,
+                ],
+            ]);
+
             $automationResult = $automation->dispatchEvent($this->pdo, $eventKey, $automationEventContext);
+
+            $this->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $progressTestId,
+                'event_type' => 'automation',
+                'event_code' => 'automation_dispatch_after',
+                'event_status' => 'info',
+                'actor_type' => 'system',
+                'event_time' => gmdate('Y-m-d H:i:s'),
+                'payload' => [
+                    'event_key' => $eventKey,
+                    'automation_result' => $automationResult,
+                ],
+            ]);
         }
 
         return [
@@ -933,10 +967,12 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         ];
 
     } catch (Throwable $e) {
-        $this->pdo->rollBack();
+        if ($this->pdo->inTransaction()) {
+            $this->pdo->rollBack();
+        }
         throw $e;
     }
-}	
+}
 	
 	
 	
