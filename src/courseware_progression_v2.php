@@ -674,7 +674,6 @@ final class CoursewareProgressionV2
 	
 public function finalizeAssessedProgressTest(int $progressTestId, array $assessment): array
 {
-    // 🚫 Guard: no nested transactions
     if ($this->pdo->inTransaction()) {
         throw new RuntimeException('finalizeAssessedProgressTest must own its transaction.');
     }
@@ -688,24 +687,15 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
     $cohortId = (int)$testRow['cohort_id'];
     $lessonId = (int)$testRow['lesson_id'];
 
-    // ------------------------------------------------------------
-    // 1. NORMALIZE INPUT (NO DECISIONS HERE)
-    // ------------------------------------------------------------
-
-    $scorePct     = (int)($assessment['score_pct'] ?? 0);
-    $completedAt  = (string)($assessment['completed_at'] ?? gmdate('Y-m-d H:i:s'));
-
-    $aiSummary    = (string)($assessment['ai_summary'] ?? '');
-    $weakAreas    = (string)($assessment['weak_areas'] ?? '');
-    $spoken       = (string)($assessment['debrief_spoken'] ?? '');
-    $summaryQual  = (string)($assessment['summary_quality'] ?? '');
-    $summaryIssues= (string)($assessment['summary_issues'] ?? '');
-    $summaryCorr  = (string)($assessment['summary_corrections'] ?? '');
-    $misunder     = (string)($assessment['confirmed_misunderstandings'] ?? '');
-
-    // ------------------------------------------------------------
-    // 2. LOAD POLICY + STATE
-    // ------------------------------------------------------------
+    $scorePct      = (int)($assessment['score_pct'] ?? 0);
+    $completedAt   = (string)($assessment['completed_at'] ?? gmdate('Y-m-d H:i:s'));
+    $aiSummary     = (string)($assessment['ai_summary'] ?? '');
+    $weakAreas     = (string)($assessment['weak_areas'] ?? '');
+    $spoken        = (string)($assessment['debrief_spoken'] ?? '');
+    $summaryQual   = (string)($assessment['summary_quality'] ?? '');
+    $summaryIssues = (string)($assessment['summary_issues'] ?? '');
+    $summaryCorr   = (string)($assessment['summary_corrections'] ?? '');
+    $misunder      = (string)($assessment['confirmed_misunderstandings'] ?? '');
 
     $policy       = $this->resolveEffectivePolicySet($cohortId);
     $behaviorMode = $this->resolveBehaviorMode($policy);
@@ -713,8 +703,8 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
     $testForClassification = $testRow;
     $testForClassification['completed_at'] = $completedAt;
 
-    $summaryState  = $this->resolveSummaryState($userId, $cohortId, $lessonId, $policy);
-    $attemptState  = $this->resolveAttemptPolicyState(
+    $summaryState = $this->resolveSummaryState($userId, $cohortId, $lessonId, $policy);
+    $attemptState = $this->resolveAttemptPolicyState(
         $userId,
         $cohortId,
         $lessonId,
@@ -733,10 +723,6 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
 
     $context = $this->getProgressionContextForUserLesson($userId, $cohortId, $lessonId);
 
-    // ------------------------------------------------------------
-    // 3. DECISION (CANONICAL)
-    // ------------------------------------------------------------
-
     $decision = $this->evaluateProgressionDecision([
         'phase'          => 'finalize',
         'user_id'        => $userId,
@@ -749,18 +735,11 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         'classification' => $classification,
     ]);
 
-    // ------------------------------------------------------------
-    // 4. TRANSACTION
-    // ------------------------------------------------------------
+    $automationEventContext = [];
 
     $this->pdo->beginTransaction();
 
     try {
-
-        // --------------------------------------------------------
-        // 4A. UPDATE progress_tests_v2 (KEEP EXISTING FIELDS)
-        // --------------------------------------------------------
-
         $stmt = $this->pdo->prepare("
             UPDATE progress_tests_v2
             SET
@@ -793,41 +772,33 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             ':summary_issues' => $summaryIssues,
             ':summary_corrections' => $summaryCorr,
             ':confirmed_misunderstandings' => $misunder,
-            ':timing_status' => $classification['timing_status'],
-            ':formal_result_code' => $classification['formal_result_code'],
-            ':formal_result_label' => $classification['formal_result_label'],
-            ':pass_gate_met' => (int)$classification['pass_gate_met'],
-            ':counts_as_unsat' => (int)$classification['counts_as_unsat'],
+            ':timing_status' => (string)($classification['timing_status'] ?? 'unknown'),
+            ':formal_result_code' => (string)($classification['formal_result_code'] ?? ''),
+            ':formal_result_label' => (string)($classification['formal_result_label'] ?? ''),
+            ':pass_gate_met' => (int)($classification['pass_gate_met'] ?? 0),
+            ':counts_as_unsat' => (int)($classification['counts_as_unsat'] ?? 0),
             ':logic_version' => self::LOGIC_VERSION,
             ':completed_at' => $completedAt,
             ':id' => $progressTestId
         ]);
-
-        // --------------------------------------------------------
-        // 4B. REQUIRED ACTIONS (CANONICAL)
-        // --------------------------------------------------------
 
         $requiredActions = $this->ensureRequiredActionsForDecision(
             $progressTestId,
             $decision
         );
 
-        // --------------------------------------------------------
-        // 4C. ACTIVITY PROJECTION
-        // --------------------------------------------------------
-
         $projection = $this->computeLessonActivityProjection([
-            'phase'          => 'finalize',
-            'user_id'        => $userId,
-            'cohort_id'      => $cohortId,
-            'lesson_id'      => $lessonId,
-            'summary_state'  => $summaryState,
-            'attempt_state'  => $attemptState,
-            'deadline_state' => $deadlineState,
-            'classification' => $classification,
-            'activity_state' => $context['activity_state'],
+            'phase'            => 'finalize',
+            'user_id'          => $userId,
+            'cohort_id'        => $cohortId,
+            'lesson_id'        => $lessonId,
+            'summary_state'    => $summaryState,
+            'attempt_state'    => $attemptState,
+            'deadline_state'   => $deadlineState,
+            'classification'   => $classification,
+            'activity_state'   => $context['activity_state'],
             'required_actions' => $requiredActions,
-            'completed_at'  => $completedAt,
+            'completed_at'     => $completedAt,
         ], $decision);
 
         $projectionResult = $this->persistLessonActivityProjection(
@@ -837,17 +808,22 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             $projection
         );
 
-        // --------------------------------------------------------
-        // 4D. NOTIFICATION DECISION (QUEUE ONLY)
-        // --------------------------------------------------------
-
         $notificationDecision = $this->buildNotificationDecision(
             $context,
             $decision,
             [
-                'behavior_mode'   => $behaviorMode,
-                'required_actions'=> $requiredActions,
-                'phase'           => 'finalize',
+                'behavior_mode'    => $behaviorMode,
+                'required_actions' => $requiredActions,
+                'phase'            => 'finalize',
+                'classification'   => $classification,
+                'score_pct'        => $scorePct,
+                'attempt'          => (int)($testRow['attempt'] ?? 0),
+                'weak_areas'       => $weakAreas,
+                'ai_summary'       => $aiSummary,
+                'summary_quality'  => $summaryQual,
+                'summary_issues'   => $summaryIssues,
+                'summary_corrections' => $summaryCorr,
+                'confirmed_misunderstandings' => $misunder,
             ]
         );
 
@@ -861,7 +837,7 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
                 'lesson_id'        => $lessonId,
                 'progress_test_id' => $progressTestId,
                 'email_type'       => $n['email_type'],
-                'recipients_to'    => [ $n['recipient'] ],
+                'recipients_to'    => [$n['recipient']],
                 'context'          => $n['context'],
                 'sent_status'      => 'queued'
             ]);
@@ -871,9 +847,47 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             }
         }
 
-        // --------------------------------------------------------
-        // 4E. EVENT LOG (CANONICAL)
-        // --------------------------------------------------------
+        $studentName = (string)(($context['student_recipient']['name'] ?? '') ?: 'Student');
+        $lessonTitle = (string)($context['lesson_title'] ?? '');
+        $cohortTitle = (string)($context['cohort_title'] ?? '');
+
+        $remediationUrl = '';
+        $approvalUrl = '';
+
+        foreach ((array)($requiredActions['actions'] ?? []) as $actionItem) {
+            $actionType = (string)($actionItem['action']['action_type'] ?? '');
+            if ($actionType === 'remediation_acknowledgement') {
+                $remediationUrl = (string)($actionItem['action_url'] ?? '');
+            } elseif ($actionType === 'instructor_approval') {
+                $approvalUrl = (string)($actionItem['action_url'] ?? '');
+            }
+        }
+
+        $automationEventContext = [
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => $progressTestId,
+            'student_name' => $studentName,
+            'lesson_title' => $lessonTitle,
+            'cohort_title' => $cohortTitle,
+            'attempt_count' => (string)((int)($testRow['attempt'] ?? 0)),
+            'score_pct' => (string)$scorePct,
+            'formal_result_code' => (string)($classification['formal_result_code'] ?? ''),
+            'formal_result_label' => (string)($classification['formal_result_label'] ?? ''),
+            'timing_status' => (string)($classification['timing_status'] ?? ''),
+            'pass_gate_met' => (int)($classification['pass_gate_met'] ?? 0),
+            'counts_as_unsat' => (int)($classification['counts_as_unsat'] ?? 0),
+            'decision_code' => (string)($classification['formal_result_code'] ?? ''),
+            'weak_areas_text' => $weakAreas,
+            'written_debrief_text' => $aiSummary,
+            'summary_quality' => $summaryQual,
+            'summary_issues' => $summaryIssues,
+            'summary_corrections' => $summaryCorr,
+            'confirmed_misunderstandings' => $misunder,
+            'remediation_url' => $remediationUrl,
+            'approval_url' => $approvalUrl,
+        ];
 
         $this->logProgressionEvent([
             'user_id' => $userId,
@@ -895,6 +909,18 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
 
         $this->pdo->commit();
 
+        $automationResult = null;
+
+        $eventKey = !empty($classification['pass_gate_met'])
+            ? 'progress_test_passed'
+            : 'progress_test_failed';
+
+        if (is_file(__DIR__ . '/automation_runtime.php')) {
+            require_once __DIR__ . '/automation_runtime.php';
+            $automation = new AutomationRuntime();
+            $automationResult = $automation->dispatchEvent($this->pdo, $eventKey, $automationEventContext);
+        }
+
         return [
             'ok' => true,
             'classification' => $classification,
@@ -903,6 +929,7 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             'queued_email_ids' => $queuedEmailIds,
             'remediation_triggered' => !empty($decision['remediation_required']),
             'instructor_escalation_triggered' => !empty($decision['instructor_required']),
+            'automation_result' => $automationResult,
         ];
 
     } catch (Throwable $e) {
@@ -1974,67 +2001,88 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         return (int)$this->pdo->lastInsertId();
     }
 
-    public function buildNotificationDecision(array $progressionContext, array $decision, array $context = []): array
-    {
-        $behaviorMode = (array)($context['behavior_mode'] ?? []);
-        $strategy = $this->resolveNotificationKeyStrategy($behaviorMode, $decision);
+public function buildNotificationDecision(array $progressionContext, array $decision, array $context = []): array
+{
+    $behaviorMode = (array)($context['behavior_mode'] ?? []);
+    $strategy = $this->resolveNotificationKeyStrategy($behaviorMode, $decision);
 
-        $notifications = [];
-        $priority = (string)($decision['priority_state'] ?? 'normal');
-        $map = (array)($strategy['active_map'] ?? []);
-        $requiredActions = (array)($context['required_actions'] ?? []);
+    $notifications = [];
+    $priority = (string)($decision['priority_state'] ?? 'normal');
+    $map = (array)($strategy['active_map'] ?? []);
+    $requiredActions = (array)($context['required_actions'] ?? []);
 
-        $remediationUrl = null;
-        $approvalUrl = null;
+    $remediationUrl = '';
+    $approvalUrl = '';
 
-        foreach ((array)($requiredActions['actions'] ?? []) as $actionItem) {
-            $actionType = (string)($actionItem['action']['action_type'] ?? '');
-            if ($actionType === 'remediation_acknowledgement') {
-                $remediationUrl = (string)($actionItem['action_url'] ?? '');
-            } elseif ($actionType === 'instructor_approval') {
-                $approvalUrl = (string)($actionItem['action_url'] ?? '');
-            }
+    foreach ((array)($requiredActions['actions'] ?? []) as $actionItem) {
+        $actionType = (string)($actionItem['action']['action_type'] ?? '');
+        if ($actionType === 'remediation_acknowledgement') {
+            $remediationUrl = (string)($actionItem['action_url'] ?? '');
+        } elseif ($actionType === 'instructor_approval') {
+            $approvalUrl = (string)($actionItem['action_url'] ?? '');
         }
-
-        if (isset($map[$priority])) {
-            foreach ((array)$map[$priority] as $item) {
-                $audience = (string)$item['audience'];
-                $recipient = null;
-
-                if ($audience === 'student') {
-                    $recipient = $progressionContext['student_recipient'] ?? null;
-                } elseif ($audience === 'chief_instructor') {
-                    $recipient = $progressionContext['chief_instructor_recipient'] ?? null;
-                }
-
-                if (!$recipient) {
-                    continue;
-                }
-
-                $notifications[] = [
-                    'audience' => $audience,
-                    'notification_key' => (string)$item['notification_key'],
-                    'email_type' => (string)$item['notification_key'],
-                    'recipient' => $recipient,
-                    'context' => [
-                        'lesson_title' => (string)($progressionContext['lesson_title'] ?? ''),
-                        'cohort_title' => (string)($progressionContext['cohort_title'] ?? ''),
-                        'student_name' => (string)($progressionContext['student_recipient']['name'] ?? 'Student'),
-                        'remediation_url' => $remediationUrl,
-                        'approval_url' => $approvalUrl,
-                    ],
-                ];
-            }
-        }
-
-        return [
-            'should_notify' => !empty($notifications),
-            'notifications' => $notifications,
-            'active_key_map_name' => $strategy['active_key_map_name'],
-            'fallback_map_used' => $strategy['fallback_map_used'],
-            'notes' => $strategy['notes'],
-        ];
     }
+
+    $studentName = (string)(($progressionContext['student_recipient']['name'] ?? '') ?: 'Student');
+    $lessonTitle = (string)($progressionContext['lesson_title'] ?? '');
+    $cohortTitle = (string)($progressionContext['cohort_title'] ?? '');
+
+    $attempt = (int)($context['attempt'] ?? 0);
+    $scorePct = (int)($context['score_pct'] ?? 0);
+    $weakAreasText = (string)($context['weak_areas'] ?? '');
+    $writtenDebriefText = (string)($context['ai_summary'] ?? '');
+    $formalResultCode = (string)(($context['classification']['formal_result_code'] ?? '') ?: '');
+
+    if (isset($map[$priority])) {
+        foreach ((array)$map[$priority] as $item) {
+            $audience = (string)$item['audience'];
+            $recipient = null;
+
+            if ($audience === 'student') {
+                $recipient = $progressionContext['student_recipient'] ?? null;
+            } elseif ($audience === 'chief_instructor') {
+                $recipient = $progressionContext['chief_instructor_recipient'] ?? null;
+            }
+
+            if (!$recipient) {
+                continue;
+            }
+
+            $notificationContext = [
+                'student_name' => $studentName,
+                'lesson_title' => $lessonTitle,
+                'cohort_title' => $cohortTitle,
+                'attempt_count' => (string)$attempt,
+                'score_pct' => (string)$scorePct,
+                'weak_areas_text' => $weakAreasText,
+                'written_debrief_text' => $writtenDebriefText,
+                'decision_code' => $formalResultCode,
+                'remediation_url' => $remediationUrl,
+                'approval_url' => $approvalUrl,
+                'summary_quality' => (string)($context['summary_quality'] ?? ''),
+                'summary_issues' => (string)($context['summary_issues'] ?? ''),
+                'summary_corrections' => (string)($context['summary_corrections'] ?? ''),
+                'confirmed_misunderstandings' => (string)($context['confirmed_misunderstandings'] ?? ''),
+            ];
+
+            $notifications[] = [
+                'audience' => $audience,
+                'notification_key' => (string)$item['notification_key'],
+                'email_type' => (string)$item['notification_key'],
+                'recipient' => $recipient,
+                'context' => $notificationContext,
+            ];
+        }
+    }
+
+    return [
+        'should_notify' => !empty($notifications),
+        'notifications' => $notifications,
+        'active_key_map_name' => $strategy['active_key_map_name'],
+        'fallback_map_used' => $strategy['fallback_map_used'],
+        'notes' => $strategy['notes'],
+    ];
+}
 
     public function resolveNotificationKeyStrategy(array $behaviorMode, array $decision): array
     {
