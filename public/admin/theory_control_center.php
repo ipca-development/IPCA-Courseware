@@ -64,7 +64,12 @@ function tcc_bool_label(mixed $value): string
 
 function tcc_redirect(string $tab, string $type, string $message): void
 {
-    header('Location: /admin/theory_control_center.php?tab=' . rawurlencode($tab) . '&flash_type=' . rawurlencode($type) . '&flash_message=' . rawurlencode($message));
+    header(
+        'Location: /admin/theory_control_center.php?tab='
+        . rawurlencode($tab)
+        . '&flash_type=' . rawurlencode($type)
+        . '&flash_message=' . rawurlencode($message)
+    );
     exit;
 }
 
@@ -120,10 +125,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($valueText === '') {
                     throw new RuntimeException('This policy requires JSON.');
                 }
-                $decoded = json_decode($valueText, true);
-                if (!is_array($decoded) && !is_object($decoded)) {
-                    throw new RuntimeException('Invalid JSON value.');
-                }
+                json_decode($valueText, true, 512, JSON_THROW_ON_ERROR);
             }
 
             $oldStmt = $pdo->prepare("
@@ -233,10 +235,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
-        } else {
-    throw new RuntimeException('Unknown action.');
-		}
-	}
+        }
+        tcc_redirect($activeTab, 'error', $e->getMessage());
+    }
 }
 
 $policyCategories = tcc_policy_categories();
@@ -382,7 +383,7 @@ cw_header('Theory Control Center');
 .tcc-policy-desc{font-size:13px;line-height:1.55;color:#56677f;margin-top:5px}
 .tcc-muted{font-size:12px;color:#64748b;line-height:1.5}
 .tcc-form-inline{display:flex;flex-direction:column;gap:8px}
-.tcc-input,.tcc-textarea{
+.tcc-input,.tcc-textarea,.tcc-select{
     width:100%;box-sizing:border-box;border:1px solid rgba(15,23,42,.12);
     border-radius:12px;padding:10px 12px;background:#fff;color:#102845;font:inherit;
 }
@@ -402,11 +403,9 @@ cw_header('Theory Control Center');
 .tcc-logic-item:last-child{border-bottom:0}
 .tcc-logic-label{font-size:13px;font-weight:700;color:#334155}
 .tcc-logic-value{font-size:13px;font-weight:800;color:#102845;text-align:right}
-.tcc-embed-card{padding:0;overflow:hidden}
-.tcc-embed-head{padding:18px 20px;border-bottom:1px solid rgba(15,23,42,.06)}
-.tcc-embed-title{margin:0;font-size:18px;font-weight:800;color:#102845}
-.tcc-embed-sub{margin-top:6px;font-size:13px;color:#64748b}
-.tcc-frame{width:100%;height:calc(100vh - 260px);min-height:900px;border:0;background:#fff}
+.tcc-panel-card{padding:20px 22px}
+.tcc-panel-title{margin:0 0 8px 0;font-size:20px;font-weight:800;color:#102845}
+.tcc-panel-sub{font-size:13px;line-height:1.6;color:#64748b}
 @media (max-width: 1100px){
     .tcc-logic-grid{grid-template-columns:1fr}
 }
@@ -425,8 +424,7 @@ cw_header('Theory Control Center');
         <h1 class="tcc-title">Theory Control Center</h1>
         <div class="tcc-sub">
             Central control page for theory policies, read-only logic visibility, theory automations, and theory notifications.
-            This page is designed to give you one place to inspect and adjust the theory system without digging through code.
-        </div>
+            This page is designed to give you one place to inspect and adjust the theory system.</div>
     </section>
 
     <section class="card" style="padding:14px 16px;">
@@ -439,15 +437,15 @@ cw_header('Theory Control Center');
     </section>
 
     <?php if ($activeTab === 'policies'): ?>
-    <section class="card" style="padding:14px 16px;">
-        <div class="tcc-muted">
-            You are currently editing <strong>global theory policies</strong>.
-            Course-level and cohort-level overrides are not yet exposed in this control center.
-        </div>
-    </section>
+        <section class="card" style="padding:14px 16px;">
+            <div class="tcc-muted">
+                You are currently editing <strong>global theory policies</strong>.
+                Course-level and cohort-level overrides are not yet exposed in this control center.
+            </div>
+        </section>
 
-    <div class="tcc-grid">
-        <?php foreach ($groupedPolicies as $category => $rows): ?>
+        <div class="tcc-grid">
+            <?php foreach ($groupedPolicies as $category => $rows): ?>
                 <section class="card tcc-policy-group">
                     <h2 class="tcc-group-title"><?php echo tcc_h($policyCategories[$category] ?? ucfirst($category)); ?></h2>
 
@@ -496,52 +494,47 @@ cw_header('Theory Control Center');
                                         </div>
                                     </td>
                                     <td>
-    <?php if (!empty($row['is_admin_editable'])): ?>
-        <form method="post" class="tcc-form-inline">
-            <input type="hidden" name="action" value="save_global_policy">
-            <input type="hidden" name="policy_key" value="<?php echo tcc_h((string)$row['policy_key']); ?>">
-            <input type="hidden" name="tab" value="policies">
+                                        <?php if (!empty($row['is_admin_editable'])): ?>
+                                            <form method="post" class="tcc-form-inline">
+                                                <input type="hidden" name="action" value="save_global_policy">
+                                                <input type="hidden" name="policy_key" value="<?php echo tcc_h((string)$row['policy_key']); ?>">
+                                                <input type="hidden" name="tab" value="policies">
 
-            <?php if ((string)$row['value_type'] === 'bool'): ?>
-                <select class="tcc-input" name="value_text">
-                    <?php $boolCurrent = strtolower(trim((string)$row['current_value_text'])); ?>
-					<option value="1" <?php echo in_array($boolCurrent, array('1', 'true', 'yes', 'on'), true) ? 'selected' : ''; ?>>
-						Enabled (1)
-					</option>
-					<option value="0" <?php echo in_array($boolCurrent, array('0', 'false', 'no', 'off', ''), true) ? 'selected' : ''; ?>>
-						Disabled (0)
-					</option>
-                </select>
-            <?php elseif ((string)$row['value_type'] === 'json'): ?>
-                <textarea
-                    class="tcc-textarea"
-                    name="value_text"
-                    placeholder="Enter valid JSON"
-                ><?php echo tcc_h((string)$row['current_value_text']); ?></textarea>
-            <?php else: ?>
-                <input
-                    class="tcc-input"
-                    type="text"
-                    name="value_text"
-                    value="<?php echo tcc_h((string)$row['current_value_text']); ?>"
-                    placeholder="New value"
-                >
-            <?php endif; ?>
+                                                <?php if ((string)$row['value_type'] === 'bool'): ?>
+                                                    <select class="tcc-select" name="value_text">
+                                                        <option value="1" <?php echo (string)$row['current_value_text'] === '1' ? 'selected' : ''; ?>>Enabled (1)</option>
+                                                        <option value="0" <?php echo (string)$row['current_value_text'] === '0' ? 'selected' : ''; ?>>Disabled (0)</option>
+                                                    </select>
+                                                <?php elseif ((string)$row['value_type'] === 'json'): ?>
+                                                    <textarea
+                                                        class="tcc-textarea"
+                                                        name="value_text"
+                                                        placeholder="Enter valid JSON"
+                                                    ><?php echo tcc_h((string)$row['current_value_text']); ?></textarea>
+                                                <?php else: ?>
+                                                    <input
+                                                        class="tcc-input"
+                                                        type="text"
+                                                        name="value_text"
+                                                        value="<?php echo tcc_h((string)$row['current_value_text']); ?>"
+                                                        placeholder="New value"
+                                                    >
+                                                <?php endif; ?>
 
-            <textarea
-                class="tcc-textarea"
-                name="change_reason_text"
-                placeholder="Optional reason for audit trail"
-            ></textarea>
+                                                <textarea
+                                                    class="tcc-textarea"
+                                                    name="change_reason_text"
+                                                    placeholder="Optional reason for audit trail"
+                                                ></textarea>
 
-            <div>
-                <button class="tcc-btn" type="submit">Save Global Policy</button>
-            </div>
-        </form>
-    <?php else: ?>
-        <div class="tcc-muted">Read-only</div>
-    <?php endif; ?>
-</td>
+                                                <div>
+                                                    <button class="tcc-btn" type="submit">Save Global Policy</button>
+                                                </div>
+                                            </form>
+                                        <?php else: ?>
+                                            <div class="tcc-muted">Read-only</div>
+                                        <?php endif; ?>
+                                    </td>
                                 </tr>
                             <?php endforeach; ?>
                         </tbody>
@@ -570,36 +563,22 @@ cw_header('Theory Control Center');
     <?php endif; ?>
 
     <?php if ($activeTab === 'automation'): ?>
-        <section class="card tcc-embed-card">
-            <div class="tcc-embed-head">
-                <h2 class="tcc-embed-title">Theory Automation Flows</h2>
-                <div class="tcc-embed-sub">
-                    Existing automation page loaded inside the Theory Control Center.
-                    Next step is to wire `scope=theory_training` filtering inside the automation page itself.
-                </div>
+        <section class="card tcc-panel-card">
+            <h2 class="tcc-panel-title">Theory Automations</h2>
+            <div class="tcc-panel-sub">
+                This tab is ready for direct integrated rendering.
+                Next step is to drop in the theory automation panel partial here, without iframe usage.
             </div>
-            <iframe
-                class="tcc-frame"
-                src="/admin/automation_flows.php?scope=theory_training"
-                title="Theory Automation Flows"
-            ></iframe>
         </section>
     <?php endif; ?>
 
     <?php if ($activeTab === 'notifications'): ?>
-        <section class="card tcc-embed-card">
-            <div class="tcc-embed-head">
-                <h2 class="tcc-embed-title">Theory Notifications</h2>
-                <div class="tcc-embed-sub">
-                    Existing notifications page loaded inside the Theory Control Center.
-                    Next step is to wire `scope=theory_training` filtering inside the notifications page itself.
-                </div>
+        <section class="card tcc-panel-card">
+            <h2 class="tcc-panel-title">Theory Notifications</h2>
+            <div class="tcc-panel-sub">
+                This tab is ready for direct integrated rendering.
+                Next step is to drop in the theory notifications panel partial here, without iframe usage.
             </div>
-            <iframe
-                class="tcc-frame"
-                src="/admin/notifications.php?scope=theory_training"
-                title="Theory Notifications"
-            ></iframe>
         </section>
     <?php endif; ?>
 
