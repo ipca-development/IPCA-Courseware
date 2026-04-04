@@ -331,7 +331,7 @@ try {
 
     if ($method === 'POST' && $action === 'test_trigger') {
         $eventKey = trim((string)($payload['event_key'] ?? ''));
-        $context = $payload['context'] ?? array();
+        $context = isset($payload['context']) ? $payload['context'] : array();
 
         if ($eventKey === '') {
             af_json_error('Missing event_key');
