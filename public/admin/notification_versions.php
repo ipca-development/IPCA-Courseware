@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/notification_service.php';
+require_once __DIR__ . '/../../src/theory_control_center_catalog.php';
 
 cw_require_login();
 
@@ -90,6 +91,7 @@ function nv_render_srcdoc(string $html): string
         . '</head><body>' . $html . '</body></html>';
 }
 
+$scope = trim((string)($_GET['scope'] ?? $_POST['scope'] ?? ''));
 $id = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
 if ($id <= 0) {
     http_response_code(400);
@@ -101,6 +103,14 @@ $template = nv_find_template($pdo, $id);
 if (!$template) {
     http_response_code(404);
     exit('Notification template not found');
+}
+
+if (
+    $scope === 'theory_training' &&
+    !theory_control_is_notification_key((string)($template['notification_key'] ?? ''))
+) {
+    http_response_code(403);
+    exit('Forbidden');
 }
 
 $actorUserId = (int)($u['id'] ?? 0);
@@ -191,10 +201,11 @@ $previewSrcdoc = nv_render_srcdoc($previewHtml);
 cw_header('Notification Version History');
 ?>
 <style>
-  .nv-page{
-    max-width:1440px;
-    margin:0 auto;
-  }
+ .nv-page{
+  max-width:none;
+  width:100%;
+  margin:0;
+}
 
   .nv-hero{
     background:
@@ -274,12 +285,12 @@ cw_header('Notification Version History');
     color:#be123c;
   }
 
-  .nv-grid{
-    display:grid;
-    grid-template-columns:420px minmax(0, 1fr);
-    gap:20px;
-    align-items:start;
-  }
+.nv-grid{
+  display:grid;
+  grid-template-columns:360px minmax(0, 1fr);
+  gap:20px;
+  align-items:start;
+}
 
   .nv-card{
     background:var(--panel-bg);
@@ -677,8 +688,8 @@ cw_header('Notification Version History');
       </div>
       <div class="nv-card-body">
         <div class="nv-actions" style="margin-top:0; margin-bottom:16px;">
-          <a class="nv-btn" href="/admin/notification_edit.php?id=<?= (int)$id ?>">Back to Edit</a>
-          <a class="nv-btn" href="/admin/notifications.php">Back to List</a>
+          <a class="nv-btn" href="/admin/notification_edit.php?id=<?= (int)$id ?>&scope=<?= urlencode($scope) ?>">Back to Edit</a>
+		  <a class="nv-btn" href="/admin/notifications.php<?= $scope !== '' ? '?scope=' . urlencode($scope) : '' ?>">Back to List</a>
         </div>
 
         <div class="nv-version-list">
@@ -700,7 +711,7 @@ cw_header('Notification Version History');
               ?>
               <a
                 class="nv-version-item<?= $isActive ? ' active' : '' ?>"
-                href="/admin/notification_versions.php?id=<?= (int)$id ?>&version_id=<?= $versionId ?>"
+                href="/admin/notification_versions.php?id=<?= (int)$id ?>&version_id=<?= $versionId ?>&scope=<?= urlencode($scope) ?>"
               >
                 <div class="nv-version-top">
                   <div class="nv-version-no">v<?= $versionNo ?></div>
@@ -778,7 +789,8 @@ cw_header('Notification Version History');
 
             <form method="post" style="margin-top:18px;">
               <input type="hidden" name="id" value="<?= (int)$id ?>">
-              <input type="hidden" name="version_id" value="<?= (int)$selectedVersionId ?>">
+				<input type="hidden" name="version_id" value="<?= (int)$selectedVersionId ?>">
+				<input type="hidden" name="scope" value="<?= nv_h($scope) ?>">
 
               <div class="nv-field">
                 <div class="nv-label">Restore Change Note</div>

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/notification_service.php';
+require_once __DIR__ . '/../../src/theory_control_center_catalog.php';
 
 cw_require_login();
 
@@ -14,16 +15,46 @@ if ($role !== 'admin') {
     exit('Forbidden');
 }
 
+$scope = trim((string)($_GET['scope'] ?? ''));
+
+$scope = trim((string)($_GET['scope'] ?? ''));
+
 $service = new NotificationService($pdo);
 $rows = $service->listTemplates();
+
+if ($scope === 'theory_training') {
+    $rows = theory_control_filter_rows_by_notification_keys($rows);
+}
+
+if ($scope === 'theory_training') {
+    $theoryKeys = array(
+        'third_fail_remediation',
+        'instructor_approval_required',
+        'instructor_approval_required_chief',
+        'summary_needs_revision',
+        'summary_approved',
+        'deadline_missed_reason_required',
+        'deadline_extension_granted',
+        'deadline_final_warning',
+        'deadline_instructor_intervention_required',
+        'progress_test_passed',
+        'progress_test_failed',
+    );
+
+    $rows = array_values(array_filter($rows, function ($row) use ($theoryKeys) {
+        $key = trim((string)($row['notification_key'] ?? ''));
+        return in_array($key, $theoryKeys, true);
+    }));
+}
 
 cw_header('Notification Templates');
 ?>
 <style>
-  .nt-page{
-    max-width:1280px;
-    margin:0 auto;
-  }
+.nt-page{
+  max-width:none;
+  width:100%;
+  margin:0;
+}
 
   .nt-hero{
     background:
@@ -109,12 +140,12 @@ cw_header('Notification Templates');
     overflow:auto;
   }
 
-  .nt-table{
-    width:100%;
-    border-collapse:separate;
-    border-spacing:0;
-    min-width:1060px;
-  }
+ .nt-table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+  table-layout:fixed;
+}
 
   .nt-table thead th{
     background:#f8fafc;
@@ -164,12 +195,13 @@ cw_header('Notification Templates');
     padding:4px 9px;
   }
 
-  .nt-desc{
-    margin-top:8px;
-    color:var(--text-muted);
-    line-height:1.45;
-    max-width:420px;
-  }
+ .nt-desc{
+  margin-top:8px;
+  color:var(--text-muted);
+  line-height:1.45;
+  max-width:none;
+  word-break:break-word;
+}
 
   .nt-pill{
     display:inline-flex;
@@ -231,11 +263,12 @@ cw_header('Notification Templates');
     font-size:12px;
   }
 
-  .nt-actions{
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-  }
+.nt-actions{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  align-items:stretch;
+}
 
   .nt-btn{
     display:inline-flex;
@@ -319,14 +352,14 @@ cw_header('Notification Templates');
       <table class="nt-table">
         <thead>
           <tr>
-            <th style="min-width:350px;">Notification</th>
-            <th>Status</th>
-            <th>Delivery</th>
-            <th>Duplicate Strategy</th>
-            <th>Live Version</th>
-            <th>Updated</th>
-            <th style="min-width:190px;">Actions</th>
-          </tr>
+			  <th style="width:34%;">Notification</th>
+			  <th style="width:10%;">Status</th>
+			  <th style="width:11%;">Delivery</th>
+			  <th style="width:13%;">Duplicate Strategy</th>
+			  <th style="width:10%;">Live Version</th>
+			  <th style="width:12%;">Updated</th>
+			  <th style="width:10%;">Actions</th>
+		  </tr>
         </thead>
         <tbody>
         <?php if (!$rows): ?>
@@ -400,8 +433,8 @@ cw_header('Notification Templates');
 
               <td>
                 <div class="nt-actions">
-                  <a class="nt-btn primary" href="/admin/notification_edit.php?id=<?= $templateId ?>">Edit</a>
-                  <a class="nt-btn" href="/admin/notification_versions.php?id=<?= $templateId ?>">Versions</a>
+                  	<a class="nt-btn primary" href="/admin/notification_edit.php?id=<?= $templateId ?>&scope=<?= urlencode($scope) ?>">Edit</a>
+					<a class="nt-btn" href="/admin/notification_versions.php?id=<?= $templateId ?>&scope=<?= urlencode($scope) ?>">Versions</a>
                 </div>
               </td>
             </tr>

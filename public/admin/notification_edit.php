@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/notification_service.php';
+require_once __DIR__ . '/../../src/theory_control_center_catalog.php';
 
 cw_require_login();
 
@@ -74,6 +75,7 @@ function ne_find_template(PDO $pdo, int $id): ?array
     return $row ?: null;
 }
 
+$scope = trim((string)($_GET['scope'] ?? $_POST['scope'] ?? ''));
 $id = (int)($_GET['id'] ?? $_POST['id'] ?? 0);
 if ($id <= 0) {
     http_response_code(400);
@@ -85,6 +87,14 @@ $template = ne_find_template($pdo, $id);
 if (!$template) {
     http_response_code(404);
     exit('Notification template not found');
+}
+
+if (
+    $scope === 'theory_training' &&
+    !theory_control_is_notification_key((string)($template['notification_key'] ?? ''))
+) {
+    http_response_code(403);
+    exit('Forbidden');
 }
 
 $latestVersion = $service->getLatestTemplateVersion((int)$template['id']);
@@ -221,9 +231,10 @@ cw_header('Edit Notification Template');
 ?>
 <style>
   .ne-page{
-    max-width:1440px;
-    margin:0 auto;
-  }
+  max-width:none;
+  width:100%;
+  margin:0;
+}
 
   .ne-hero{
     background:
@@ -283,12 +294,12 @@ cw_header('Edit Notification Template');
     font-weight:900;
   }
 
-  .ne-grid{
-    display:grid;
-    grid-template-columns:minmax(0, 1.06fr) minmax(420px, .94fr);
-    gap:20px;
-    align-items:start;
-  }
+.ne-grid{
+  display:grid;
+  grid-template-columns:minmax(0, 1fr) minmax(360px, .9fr);
+  gap:20px;
+  align-items:start;
+}
 
   .ne-card{
     background:var(--panel-bg);
@@ -762,6 +773,7 @@ cw_header('Edit Notification Template');
       <div class="ne-card-body">
         <form method="post">
           <input type="hidden" name="id" value="<?= (int)$id ?>">
+			<input type="hidden" name="scope" value="<?= ne_h($scope) ?>">
 
           <div class="ne-form-grid">
             <div class="ne-field">
@@ -812,8 +824,8 @@ cw_header('Edit Notification Template');
           <div class="ne-actions">
             <button class="ne-btn primary" type="submit" name="action" value="save_template">Save Live Version</button>
             <button class="ne-btn warn" type="submit" name="action" value="preview_template">Refresh Preview</button>
-            <a class="ne-btn" href="/admin/notification_versions.php?id=<?= (int)$id ?>">View Version History</a>
-            <a class="ne-btn" href="/admin/notifications.php">Back to List</a>
+            <a class="ne-btn" href="/admin/notification_versions.php?id=<?= (int)$id ?>&scope=<?= urlencode($scope) ?>">View Version History</a>
+			<a class="ne-btn" href="/admin/notifications.php<?= $scope !== '' ? '?scope=' . urlencode($scope) : '' ?>">Back to List</a>
           </div>
 
           <div class="ne-card" style="margin-top:18px;">
