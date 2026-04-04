@@ -104,9 +104,73 @@ function cw_nav_icon_img(?string $icon, string $label): string
         . '>';
 }
 
+function cw_nav_item_is_visible(array $item): bool
+{
+    if (!array_key_exists('visible', $item)) {
+        return true;
+    }
+
+    $visible = $item['visible'];
+
+    if (is_bool($visible)) {
+        return $visible;
+    }
+
+    if (is_callable($visible)) {
+        try {
+            return (bool)$visible();
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function cw_nav_filter_items(array $items): array
+{
+    $filtered = [];
+
+    foreach ($items as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        if (($item['type'] ?? '') === 'section') {
+            $filtered[] = $item;
+            continue;
+        }
+
+        if (!cw_nav_item_is_visible($item)) {
+            continue;
+        }
+
+        $children = cw_nav_child_items($item);
+        if ($children) {
+            $children = cw_nav_filter_items($children);
+
+            if (isset($item['items']) && is_array($item['items'])) {
+                $item['items'] = $children;
+            } elseif (isset($item['children']) && is_array($item['children'])) {
+                $item['children'] = $children;
+            }
+
+            if (count($children) === 0) {
+                continue;
+            }
+        }
+
+        $filtered[] = $item;
+    }
+
+    return $filtered;
+}
+
 function cw_render_navigation(string $role, string $currentPath, string $roleLabel = ''): string
 {
     $entries = cw_nav_items_for_role($role);
+    $entries = cw_nav_filter_items($entries);
+
     if (!$entries) {
         return '';
     }

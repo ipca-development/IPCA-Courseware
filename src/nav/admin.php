@@ -133,27 +133,49 @@ return [
         'icon' => 'settings',
         'items' => [
             [
+                'key' => 'theory_control_center',
+                'label' => 'Theory Control',
+                'icon' => 'settings',
+                'href' => '/admin/theory_control_center.php',
+                'match_paths' => [
+                    '/admin/theory_control_center.php',
+                ],
+            ],
+            [
+                'key' => 'ai_dev_agents',
+                'label' => 'AI Dev Agents',
+                'icon' => 'settings',
+                'href' => '/admin/ai_jake_console.php',
+                'match_paths' => [
+                    '/admin/ai_jake_console.php',
+                ],
+                'visible' => static function (): bool {
+                    if (!function_exists('cw_current_user')) {
+                        return false;
+                    }
+
+                    global $pdo;
+
+                    if (!isset($pdo) || !($pdo instanceof PDO)) {
+                        return false;
+                    }
+
+                    try {
+                        $u = cw_current_user($pdo);
+                    } catch (Throwable $e) {
+                        return false;
+                    }
+
+                    return (int)($u['id'] ?? 0) === 1 && (string)($u['role'] ?? '') === 'admin';
+                },
+            ],
+            [
                 'key' => 'system_health',
                 'label' => 'System Health',
                 'icon' => 'health',
-                'href' => null,
-                'coming_soon' => true,
-            ],
-            [
-                'key' => 'architecture_scanner',
-                'label' => 'Architecture Scanner',
-                'icon' => 'scanner',
                 'href' => '/admin/architecture_scanner.php',
-            ],
-            [
-                'key' => 'notifications',
-                'label' => 'Notifications',
-                'icon' => 'settings',
-                'href' => '/admin/notifications.php',
                 'match_paths' => [
-                    '/admin/notifications.php',
-                    '/admin/notification_edit.php',
-                    '/admin/notification_versions.php',
+                    '/admin/architecture_scanner.php',
                 ],
             ],
         ],
