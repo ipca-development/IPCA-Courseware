@@ -13,6 +13,7 @@ final class AutomationRuntime
             return array(
                 'ok' => false,
                 'event_key' => $eventKey,
+                'matched_flows' => 0,
                 'matched_actions' => 0,
                 'executed_actions' => 0,
                 'results' => array(),
@@ -20,187 +21,486 @@ final class AutomationRuntime
             );
         }
 
-        $stmt = $pdo->prepare("
-            SELECT DISTINCT
-                a.id,
-                a.flow_id,
-                a.action_key,
-                a.config_json,
-                a.sort_order
-            FROM automation_flow_actions a
-            INNER JOIN automation_flows f
-                ON f.id = a.flow_id
-            LEFT JOIN automation_flow_conditions c
-                ON c.flow_id = f.id
-            WHERE f.event_key = ?
-              AND f.is_active = 1
-            ORDER BY a.flow_id ASC, a.sort_order ASC, a.id ASC
-        ");
-        $stmt->execute(array($eventKey));
-        $actions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $flows = $this->loadFlowsForEvent($pdo, $eventKey);
 
         $results = array();
-        $matchedActions = count($actions);
+        $matchedFlows = 0;
+        $matchedActions = 0;
         $executedActions = 0;
-        $flowRunIdsByFlowId = array();
 
-        foreach ($actions as $action) {
-            $actionId = (int)($action['id'] ?? 0);
-            $flowId = (int)($action['flow_id'] ?? 0);
-            $actionKey = trim((string)($action['action_key'] ?? ''));
-            $config = $this->decodeConfig((string)($action['config_json'] ?? ''));
+        foreach ($flows as $flow) {
+            $flowId = (int)($flow['id'] ?? 0);
+            $flowName = trim((string)($flow['name'] ?? ''));
+            $conditions = $this->loadFlowConditions($pdo, $flowId);
 
-            if ($flowId > 0) {
-                if (!isset($flowRunIdsByFlowId[$flowId])) {
-                    $insertFlowRun = $pdo->prepare("
-                        INSERT INTO automation_flow_runs
-                        (flow_id, event_key)
-                        VALUES (?, ?)
-                    ");
-                    $insertFlowRun->execute(array($flowId, $eventKey));
-                    $flowRunIdsByFlowId[$flowId] = (int)$pdo->lastInsertId();
-                }
+            $conditionCheck = $this->evaluateFlowConditions($conditions, $context);
 
-                $flowRunId = (int)$flowRunIdsByFlowId[$flowId];
-            } else {
-                $flowRunId = $actionId;
+            if (!$conditionCheck['matched']) {
+                $results[] = array(
+                    'flow_id' => $flowId,
+                    'flow_name' => $flowName,
+                    'ok' => true,
+                    'skipped' => true,
+                    'reason' => 'conditions_not_matched',
+                    'condition_results' => $conditionCheck['condition_results'],
+                );
+                continue;
             }
 
-            try {
-                if ($actionKey === 'send_email') {
-                    $result = $this->runSendEmail($pdo, $flowRunId, $actionKey, $config, $context);
-                    $executedActions++;
-                    $results[] = array(
-                        'action_id' => $actionId,
-                        'flow_id' => $flowId,
-                        'action_key' => $actionKey,
-                        'ok' => true,
-                        'result' => $result,
-                    );
-                    continue;
-                }
+            $actions = $this->loadFlowActions($pdo, $flowId);
+            $matchedFlows++;
+            $matchedActions += count($actions);
 
-                if ($actionKey === 'log_event') {
-                    $result = $this->runLogEvent($pdo, $flowRunId, $actionKey, $config, $context);
-                    $executedActions++;
-                    $results[] = array(
-                        'action_id' => $actionId,
-                        'flow_id' => $flowId,
-                        'action_key' => $actionKey,
-                        'ok' => true,
-                        'result' => $result,
-                    );
-                    continue;
-                }
+            if ($flowId > 0) {
+                $insertFlowRun = $pdo->prepare("
+                    INSERT INTO automation_flow_runs
+                    (flow_id, event_key)
+                    VALUES (?, ?)
+                ");
+                $insertFlowRun->execute(array($flowId, $eventKey));
+                $flowRunId = (int)$pdo->lastInsertId();
+            } else {
+                $flowRunId = 0;
+            }
 
-                if ($actionKey === 'notify_all_admins') {
-                    $result = $this->runNotifyAllByRoles($pdo, $flowRunId, $actionKey, $config, $context, array('admin'));
-                    $executedActions++;
-                    $results[] = array(
-                        'action_id' => $actionId,
-                        'flow_id' => $flowId,
-                        'action_key' => $actionKey,
-                        'ok' => true,
-                        'result' => $result,
-                    );
-                    continue;
-                }
-
-                if ($actionKey === 'notify_all_instructors') {
-                    $result = $this->runNotifyAllByRoles($pdo, $flowRunId, $actionKey, $config, $context, array('instructor', 'supervisor'));
-                    $executedActions++;
-                    $results[] = array(
-                        'action_id' => $actionId,
-                        'flow_id' => $flowId,
-                        'action_key' => $actionKey,
-                        'ok' => true,
-                        'result' => $result,
-                    );
-                    continue;
-                }
-
-                if ($actionKey === 'notify_all_students') {
-                    $result = $this->runNotifyAllByRoles($pdo, $flowRunId, $actionKey, $config, $context, array('student'));
-                    $executedActions++;
-                    $results[] = array(
-                        'action_id' => $actionId,
-                        'flow_id' => $flowId,
-                        'action_key' => $actionKey,
-                        'ok' => true,
-                        'result' => $result,
-                    );
-                    continue;
-                }
-
-                if ($actionKey === 'notify_specific_admin') {
-                    $result = $this->runNotifySpecificUser($pdo, $flowRunId, $actionKey, $config, $context, array('admin'));
-                    $executedActions++;
-                    $results[] = array(
-                        'action_id' => $actionId,
-                        'flow_id' => $flowId,
-                        'action_key' => $actionKey,
-                        'ok' => true,
-                        'result' => $result,
-                    );
-                    continue;
-                }
-
-                if ($actionKey === 'notify_specific_instructor') {
-                    $result = $this->runNotifySpecificUser($pdo, $flowRunId, $actionKey, $config, $context, array('instructor', 'supervisor'));
-                    $executedActions++;
-                    $results[] = array(
-                        'action_id' => $actionId,
-                        'flow_id' => $flowId,
-                        'action_key' => $actionKey,
-                        'ok' => true,
-                        'result' => $result,
-                    );
-                    continue;
-                }
-
-                $details = $this->encodeDetails(array(
-                    'message' => 'Unsupported action',
-                    'action_id' => $actionId,
-                    'flow_id' => $flowId,
-                    'action_key' => $actionKey,
-                ));
-
-                $this->insertActionRun($pdo, $flowRunId, $actionKey, 'skipped', $details);
-
+            if (empty($actions)) {
                 $results[] = array(
-                    'action_id' => $actionId,
                     'flow_id' => $flowId,
-                    'action_key' => $actionKey,
-                    'ok' => false,
-                    'error' => 'Unsupported action',
+                    'flow_name' => $flowName,
+                    'ok' => true,
+                    'skipped' => true,
+                    'reason' => 'no_actions',
+                    'condition_results' => $conditionCheck['condition_results'],
                 );
-            } catch (Throwable $e) {
-                $details = $this->encodeDetails(array(
-                    'message' => $e->getMessage(),
-                    'action_id' => $actionId,
-                    'flow_id' => $flowId,
-                    'action_key' => $actionKey,
-                ));
+                continue;
+            }
 
-                $this->insertActionRun($pdo, $flowRunId, $actionKey, 'error', $details);
+            foreach ($actions as $action) {
+                $actionId = (int)($action['id'] ?? 0);
+                $actionKey = trim((string)($action['action_key'] ?? ''));
+                $config = $this->decodeConfig((string)($action['config_json'] ?? ''));
 
-                $results[] = array(
-                    'action_id' => $actionId,
-                    'flow_id' => $flowId,
-                    'action_key' => $actionKey,
-                    'ok' => false,
-                    'error' => $e->getMessage(),
-                );
+                try {
+                    if ($actionKey === 'send_email') {
+                        $result = $this->runSendEmail($pdo, $flowRunId, $actionKey, $config, $context);
+                        $executedActions++;
+                        $results[] = array(
+                            'flow_id' => $flowId,
+                            'flow_name' => $flowName,
+                            'action_id' => $actionId,
+                            'action_key' => $actionKey,
+                            'ok' => true,
+                            'result' => $result,
+                            'condition_results' => $conditionCheck['condition_results'],
+                        );
+                        continue;
+                    }
+
+                    if ($actionKey === 'log_event') {
+                        $result = $this->runLogEvent($pdo, $flowRunId, $actionKey, $config, $context);
+                        $executedActions++;
+                        $results[] = array(
+                            'flow_id' => $flowId,
+                            'flow_name' => $flowName,
+                            'action_id' => $actionId,
+                            'action_key' => $actionKey,
+                            'ok' => true,
+                            'result' => $result,
+                            'condition_results' => $conditionCheck['condition_results'],
+                        );
+                        continue;
+                    }
+
+                    if ($actionKey === 'notify_all_admins') {
+                        $result = $this->runNotifyAllByRoles($pdo, $flowRunId, $actionKey, $config, $context, array('admin'));
+                        $executedActions++;
+                        $results[] = array(
+                            'flow_id' => $flowId,
+                            'flow_name' => $flowName,
+                            'action_id' => $actionId,
+                            'action_key' => $actionKey,
+                            'ok' => true,
+                            'result' => $result,
+                            'condition_results' => $conditionCheck['condition_results'],
+                        );
+                        continue;
+                    }
+
+                    if ($actionKey === 'notify_all_instructors') {
+                        $result = $this->runNotifyAllByRoles($pdo, $flowRunId, $actionKey, $config, $context, array('instructor', 'supervisor'));
+                        $executedActions++;
+                        $results[] = array(
+                            'flow_id' => $flowId,
+                            'flow_name' => $flowName,
+                            'action_id' => $actionId,
+                            'action_key' => $actionKey,
+                            'ok' => true,
+                            'result' => $result,
+                            'condition_results' => $conditionCheck['condition_results'],
+                        );
+                        continue;
+                    }
+
+                    if ($actionKey === 'notify_all_students') {
+                        $result = $this->runNotifyAllByRoles($pdo, $flowRunId, $actionKey, $config, $context, array('student'));
+                        $executedActions++;
+                        $results[] = array(
+                            'flow_id' => $flowId,
+                            'flow_name' => $flowName,
+                            'action_id' => $actionId,
+                            'action_key' => $actionKey,
+                            'ok' => true,
+                            'result' => $result,
+                            'condition_results' => $conditionCheck['condition_results'],
+                        );
+                        continue;
+                    }
+
+                    if ($actionKey === 'notify_specific_admin') {
+                        $result = $this->runNotifySpecificUser($pdo, $flowRunId, $actionKey, $config, $context, array('admin'));
+                        $executedActions++;
+                        $results[] = array(
+                            'flow_id' => $flowId,
+                            'flow_name' => $flowName,
+                            'action_id' => $actionId,
+                            'action_key' => $actionKey,
+                            'ok' => true,
+                            'result' => $result,
+                            'condition_results' => $conditionCheck['condition_results'],
+                        );
+                        continue;
+                    }
+
+                    if ($actionKey === 'notify_specific_instructor') {
+                        $result = $this->runNotifySpecificUser($pdo, $flowRunId, $actionKey, $config, $context, array('instructor', 'supervisor'));
+                        $executedActions++;
+                        $results[] = array(
+                            'flow_id' => $flowId,
+                            'flow_name' => $flowName,
+                            'action_id' => $actionId,
+                            'action_key' => $actionKey,
+                            'ok' => true,
+                            'result' => $result,
+                            'condition_results' => $conditionCheck['condition_results'],
+                        );
+                        continue;
+                    }
+
+                    $details = $this->encodeDetails(array(
+                        'message' => 'Unsupported action',
+                        'action_id' => $actionId,
+                        'flow_id' => $flowId,
+                        'action_key' => $actionKey,
+                    ));
+
+                    $this->insertActionRun($pdo, $flowRunId, $actionKey, 'skipped', $details);
+
+                    $results[] = array(
+                        'flow_id' => $flowId,
+                        'flow_name' => $flowName,
+                        'action_id' => $actionId,
+                        'action_key' => $actionKey,
+                        'ok' => false,
+                        'error' => 'Unsupported action',
+                        'condition_results' => $conditionCheck['condition_results'],
+                    );
+                } catch (Throwable $e) {
+                    $details = $this->encodeDetails(array(
+                        'message' => $e->getMessage(),
+                        'action_id' => $actionId,
+                        'flow_id' => $flowId,
+                        'action_key' => $actionKey,
+                    ));
+
+                    $this->insertActionRun($pdo, $flowRunId, $actionKey, 'error', $details);
+
+                    $results[] = array(
+                        'flow_id' => $flowId,
+                        'flow_name' => $flowName,
+                        'action_id' => $actionId,
+                        'action_key' => $actionKey,
+                        'ok' => false,
+                        'error' => $e->getMessage(),
+                        'condition_results' => $conditionCheck['condition_results'],
+                    );
+                }
             }
         }
 
         return array(
             'ok' => true,
             'event_key' => $eventKey,
+            'matched_flows' => $matchedFlows,
             'matched_actions' => $matchedActions,
             'executed_actions' => $executedActions,
             'results' => $results,
         );
+    }
+
+    private function loadFlowsForEvent(PDO $pdo, string $eventKey): array
+    {
+        $stmt = $pdo->prepare("
+            SELECT
+                id,
+                name,
+                description,
+                event_key,
+                is_active,
+                priority
+            FROM automation_flows
+            WHERE event_key = ?
+              AND is_active = 1
+            ORDER BY priority ASC, id ASC
+        ");
+        $stmt->execute(array($eventKey));
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    private function loadFlowConditions(PDO $pdo, int $flowId): array
+    {
+        $stmt = $pdo->prepare("
+            SELECT
+                id,
+                flow_id,
+                field_key,
+                operator,
+                value_text,
+                value_number,
+                sort_order
+            FROM automation_flow_conditions
+            WHERE flow_id = ?
+            ORDER BY sort_order ASC, id ASC
+        ");
+        $stmt->execute(array($flowId));
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    private function loadFlowActions(PDO $pdo, int $flowId): array
+    {
+        $stmt = $pdo->prepare("
+            SELECT
+                id,
+                flow_id,
+                action_key,
+                config_json,
+                sort_order
+            FROM automation_flow_actions
+            WHERE flow_id = ?
+            ORDER BY sort_order ASC, id ASC
+        ");
+        $stmt->execute(array($flowId));
+
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    private function evaluateFlowConditions(array $conditions, array $context): array
+    {
+        if (empty($conditions)) {
+            return array(
+                'matched' => true,
+                'condition_results' => array(),
+            );
+        }
+
+        $conditionResults = array();
+
+        foreach ($conditions as $condition) {
+            $fieldKey = trim((string)($condition['field_key'] ?? ''));
+            $operator = trim((string)($condition['operator'] ?? ''));
+            $expectedText = $condition['value_text'] ?? null;
+            $expectedNumber = $condition['value_number'] ?? null;
+            $actualValue = array_key_exists($fieldKey, $context) ? $context[$fieldKey] : null;
+
+            $matched = $this->evaluateSingleCondition(
+                $actualValue,
+                $operator,
+                $expectedText,
+                $expectedNumber
+            );
+
+            $conditionResults[] = array(
+                'condition_id' => (int)($condition['id'] ?? 0),
+                'field_key' => $fieldKey,
+                'operator' => $operator,
+                'expected_text' => $expectedText,
+                'expected_number' => $expectedNumber,
+                'actual_value' => $actualValue,
+                'matched' => $matched,
+            );
+
+            if (!$matched) {
+                return array(
+                    'matched' => false,
+                    'condition_results' => $conditionResults,
+                );
+            }
+        }
+
+        return array(
+            'matched' => true,
+            'condition_results' => $conditionResults,
+        );
+    }
+
+    private function evaluateSingleCondition(mixed $actualValue, string $operator, mixed $expectedText, mixed $expectedNumber): bool
+    {
+        switch ($operator) {
+            case '=':
+                return $this->normalizeScalar($actualValue) === $this->normalizeExpected($expectedText, $expectedNumber);
+
+            case '!=':
+                return $this->normalizeScalar($actualValue) !== $this->normalizeExpected($expectedText, $expectedNumber);
+
+            case '>':
+                return $this->compareNumeric($actualValue, $expectedText, $expectedNumber, '>');
+
+            case '>=':
+                return $this->compareNumeric($actualValue, $expectedText, $expectedNumber, '>=');
+
+            case '<':
+                return $this->compareNumeric($actualValue, $expectedText, $expectedNumber, '<');
+
+            case '<=':
+                return $this->compareNumeric($actualValue, $expectedText, $expectedNumber, '<=');
+
+            case 'contains':
+                return strpos($this->normalizeString($actualValue), $this->normalizeString($this->normalizeExpected($expectedText, $expectedNumber))) !== false;
+
+            case 'not_contains':
+                return strpos($this->normalizeString($actualValue), $this->normalizeString($this->normalizeExpected($expectedText, $expectedNumber))) === false;
+
+            case 'in':
+                return $this->valueInList($actualValue, $expectedText, $expectedNumber, true);
+
+            case 'not_in':
+                return $this->valueInList($actualValue, $expectedText, $expectedNumber, false);
+
+            case 'is_empty':
+                return $this->isEmptyValue($actualValue);
+
+            case 'is_not_empty':
+                return !$this->isEmptyValue($actualValue);
+        }
+
+        return false;
+    }
+
+    private function normalizeExpected(mixed $expectedText, mixed $expectedNumber): string
+    {
+        if ($expectedNumber !== null && $expectedNumber !== '') {
+            return $this->normalizeScalar($expectedNumber);
+        }
+
+        return $this->normalizeScalar($expectedText);
+    }
+
+    private function normalizeScalar(mixed $value): string
+    {
+        if ($value === null) {
+            return '';
+        }
+
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+
+        if (is_array($value)) {
+            return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '';
+        }
+
+        return trim((string)$value);
+    }
+
+    private function normalizeString(mixed $value): string
+    {
+        return strtolower($this->normalizeScalar($value));
+    }
+
+    private function compareNumeric(mixed $actualValue, mixed $expectedText, mixed $expectedNumber, string $operator): bool
+    {
+        $actual = $this->toFloatOrNull($actualValue);
+        $expected = $this->toFloatOrNull($expectedNumber !== null && $expectedNumber !== '' ? $expectedNumber : $expectedText);
+
+        if ($actual === null || $expected === null) {
+            return false;
+        }
+
+        switch ($operator) {
+            case '>':
+                return $actual > $expected;
+            case '>=':
+                return $actual >= $expected;
+            case '<':
+                return $actual < $expected;
+            case '<=':
+                return $actual <= $expected;
+        }
+
+        return false;
+    }
+
+    private function toFloatOrNull(mixed $value): ?float
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_string($value)) {
+            $value = trim($value);
+            if ($value === '') {
+                return null;
+            }
+            $value = str_replace(',', '.', $value);
+        }
+
+        if (!is_numeric($value)) {
+            return null;
+        }
+
+        return (float)$value;
+    }
+
+    private function valueInList(mixed $actualValue, mixed $expectedText, mixed $expectedNumber, bool $shouldBeInList): bool
+    {
+        $actual = $this->normalizeScalar($actualValue);
+        $rawList = $expectedText;
+
+        if (($rawList === null || $rawList === '') && $expectedNumber !== null && $expectedNumber !== '') {
+            $rawList = (string)$expectedNumber;
+        }
+
+        $list = array();
+        foreach (explode(',', (string)$rawList) as $part) {
+            $normalized = trim($part);
+            if ($normalized !== '') {
+                $list[] = $normalized;
+            }
+        }
+
+        $inList = in_array($actual, $list, true);
+        return $shouldBeInList ? $inList : !$inList;
+    }
+
+    private function isEmptyValue(mixed $value): bool
+    {
+        if ($value === null) {
+            return true;
+        }
+
+        if (is_string($value)) {
+            return trim($value) === '';
+        }
+
+        if (is_array($value)) {
+            return count($value) === 0;
+        }
+
+        return false;
     }
 
     private function runSendEmail(PDO $pdo, int $flowRunId, string $actionKey, array $config, array $eventContext): array

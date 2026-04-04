@@ -409,7 +409,38 @@ cw_header('Automation Flows');
   opacity:.72;
   pointer-events:none;
 }
+	
+.af-test-panel{
+  margin-top:24px;
+  padding-top:22px;
+  border-top:1px solid var(--af-border-soft);
+}
+.af-test-grid{
+  display:grid;
+  grid-template-columns:260px minmax(0,1fr);
+  gap:14px;
+  align-items:start;
+}
+.af-test-actions{
+  display:flex;
+  gap:10px;
+  flex-wrap:wrap;
+  margin-top:12px;
+}
+.af-result{
+  margin-top:14px;
+  padding:14px;
+  border-radius:14px;
+  border:1px solid rgba(15,23,42,.10);
+  background:#0f172a;
+  color:#e5eefc;
+  font:12px/1.55 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  white-space:pre-wrap;
+  word-break:break-word;
+  min-height:120px;
+}
 
+	
 @media (max-width: 1180px){
   .af-wrap{
     grid-template-columns:1fr;
@@ -427,6 +458,10 @@ cw_header('Automation Flows');
 
   .af-row,
   .af-row.actions{
+    grid-template-columns:1fr;
+  }
+
+  .af-test-grid{
     grid-template-columns:1fr;
   }
 }
@@ -549,12 +584,54 @@ cw_header('Automation Flows');
           <div class="af-inline-note">Action-specific fields will adapt automatically. Advanced Config JSON remains available for optional fine tuning.</div>
         </div>
 
-        <div class="af-btn-row" style="margin-top:24px;">
+		<div class="af-btn-row" style="margin-top:24px;">
           <button class="btn" type="submit">Save Flow</button>
           <button class="btn af-btn-secondary" type="button" id="afResetBtn">Reset</button>
           <button class="btn af-danger" type="button" id="afDeleteBtn">Delete</button>
         </div>
       </form>
+
+      <div class="af-test-panel">
+        <div class="af-subtitle">Test Trigger</div>
+        <div class="af-help" style="margin-bottom:12px;">
+          Runs the automation runtime directly for a selected event using the JSON context below.
+          This Phase 1 tester performs real execution.
+        </div>
+
+        <div class="af-test-grid">
+          <div class="af-field">
+            <label for="afTestEventKey">Trigger Event</label>
+            <select id="afTestEventKey">
+              <option value="">Select event</option>
+              <?php foreach ($eventGroups as $group): ?>
+                <optgroup label="<?= h((string)$group['category_label']) ?>">
+                  <?php foreach ((array)$group['items'] as $item): ?>
+                    <option value="<?= h((string)$item['event_key']) ?>">
+                      <?= h((string)$item['label']) ?>
+                    </option>
+                  <?php endforeach; ?>
+                </optgroup>
+              <?php endforeach; ?>
+            </select>
+          </div>
+
+          <div class="af-field">
+            <label for="afTestContext">Context JSON</label>
+            <textarea id="afTestContext" rows="12" placeholder='{
+  "user_id": 123,
+  "to_email": "test@example.com",
+  "to_name": "Test User"
+}'></textarea>
+          </div>
+        </div>
+
+        <div class="af-test-actions">
+          <button class="btn af-btn-secondary" type="button" id="afFillSampleBtn">Fill Sample JSON</button>
+          <button class="btn" type="button" id="afRunTestBtn">Run Test Trigger</button>
+        </div>
+
+        <div id="afTestResult" class="af-result">{}</div>
+      </div>
     </div>
   </section>
 </div>
@@ -585,6 +662,11 @@ cw_header('Automation Flows');
   const deleteBtn = document.getElementById('afDeleteBtn');
   const addConditionBtn = document.getElementById('afAddConditionBtn');
   const addActionBtn = document.getElementById('afAddActionBtn');
+  const testEventKeyEl = document.getElementById('afTestEventKey');
+  const testContextEl = document.getElementById('afTestContext');
+  const runTestBtn = document.getElementById('afRunTestBtn');
+  const fillSampleBtn = document.getElementById('afFillSampleBtn');
+  const testResultEl = document.getElementById('afTestResult');		
 
   const conditionFieldOptions = <?= json_encode($conditionFields) ?>;
   const operatorOptions = <?= json_encode($operators) ?>;
@@ -605,6 +687,92 @@ cw_header('Automation Flows');
       .replace(/'/g, '&#039;');
   }
 
+	function prettyJson(value) {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (e) {
+      return String(value);
+    }
+  }
+
+  function sampleContextForEvent(eventKey) {
+    switch (String(eventKey || '')) {
+      case 'password_reset_requested':
+        return {
+          user_name: 'Test User',
+          reset_link: 'https://ipca.training/reset_password.php?token=TESTTOKEN',
+          expiry_minutes: '60',
+          expiry_datetime: 'Sat, Apr 4, 2026 3:00 PM',
+          support_email: 'support@ipca.aero',
+          to_email: 'test@example.com',
+          to_name: 'Test User'
+        };
+
+      case 'public_registration_submitted':
+        return {
+          user_id: 999,
+          user_name: 'Test Applicant',
+          first_name: 'Test',
+          last_name: 'Applicant',
+          login_email: 'test@example.com',
+          user_email: 'test@example.com',
+          email: 'test@example.com',
+          mobile_phone: '+1 555 000 1111',
+          support_email: 'support@ipca.aero',
+          to_email: 'test@example.com',
+          to_name: 'Test Applicant'
+        };
+
+      case 'user_onboarding_created':
+        return {
+          user_id: 999,
+          user_name: 'Test User',
+          first_name: 'Test',
+          last_name: 'User',
+          user_email: 'test@example.com',
+          email: 'test@example.com',
+          login_email: 'test@example.com',
+          to_email: 'test@example.com',
+          to_name: 'Test User',
+          set_password_link: 'https://ipca.training/set_password.php?token=TESTTOKEN',
+          reset_link: 'https://ipca.training/set_password.php?token=TESTTOKEN',
+          expiry_minutes: '60',
+          expiry_datetime: 'Sat, Apr 4, 2026 3:00 PM',
+          support_email: 'support@ipca.aero',
+          actor_user_id: 1
+        };
+
+      case 'progress_test_failed':
+        return {
+          user_id: 999,
+          lesson_id: 123,
+          attempt: 3,
+          counts_as_unsat: 1,
+          score_pct: 64,
+          timing_status: 'before_deadline',
+          to_email: 'test@example.com',
+          to_name: 'Theory Student'
+        };
+
+      case 'summary_reviewed':
+        return {
+          user_id: 999,
+          lesson_id: 123,
+          review_status: 'needs_revision',
+          review_score: 62,
+          to_email: 'test@example.com',
+          to_name: 'Theory Student'
+        };
+
+      default:
+        return {
+          user_id: 999,
+          to_email: 'test@example.com',
+          to_name: 'Test User'
+        };
+    }
+  }	
+	
   function showToast(message, type) {
     if (!toastEl) return;
 
@@ -620,11 +788,17 @@ cw_header('Automation Flows');
     }, 2400);
   }
 
-  function setSaving(isSaving) {
+    function setSaving(isSaving) {
+    const editorPanelBody = formEl ? formEl.closest('.af-panel-body') : null;
+
+    if (!editorPanelBody) {
+      return;
+    }
+
     if (isSaving) {
-      formEl.classList.add('af-form-saving');
+      editorPanelBody.classList.add('af-form-saving');
     } else {
-      formEl.classList.remove('af-form-saving');
+      editorPanelBody.classList.remove('af-form-saving');
     }
   }
 
@@ -1308,10 +1482,60 @@ function emailTemplateOptionsHtml(selectedId) {
     }
   });
 
-  document.addEventListener('change', function (e) {
+    document.addEventListener('change', function (e) {
     if (e.target.classList.contains('af-action-key')) {
       const row = e.target.closest('[data-kind="action"]');
       rerenderActionDynamicField(row);
+    }
+  });
+
+  fillSampleBtn.addEventListener('click', function () {
+    const eventKey = testEventKeyEl.value || eventKeyEl.value || '';
+    if (eventKey !== '') {
+      testEventKeyEl.value = eventKey;
+    }
+    testContextEl.value = prettyJson(sampleContextForEvent(testEventKeyEl.value));
+  });
+
+  runTestBtn.addEventListener('click', async function () {
+    const eventKey = (testEventKeyEl.value || '').trim();
+    if (eventKey === '') {
+      showToast('Select a trigger event first.', 'error');
+      return;
+    }
+
+    let context = {};
+    const raw = testContextEl.value.trim();
+
+    if (raw !== '') {
+      try {
+        context = JSON.parse(raw);
+      } catch (e) {
+        showToast('Invalid test context JSON.', 'error');
+        return;
+      }
+    }
+
+    setSaving(true);
+    testResultEl.textContent = 'Running...';
+
+    try {
+      const data = await apiRequest({
+        action: 'test_trigger',
+        event_key: eventKey,
+        context: context
+      }, 'POST');
+
+      testResultEl.textContent = prettyJson(data);
+      showToast('Test trigger executed.', 'success');
+    } catch (err) {
+      testResultEl.textContent = prettyJson({
+        ok: false,
+        error: err.message
+      });
+      showToast(err.message, 'error');
+    } finally {
+      setSaving(false);
     }
   });
 
