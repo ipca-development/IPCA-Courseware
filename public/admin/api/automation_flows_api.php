@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/automation_catalog.php';
+require_once __DIR__ . '/../../../src/automation_runtime.php';
 
 cw_require_admin();
 
@@ -328,6 +329,36 @@ try {
         ));
     }
 
+    if ($method === 'POST' && $action === 'test_trigger') {
+        $eventKey = trim((string)($payload['event_key'] ?? ''));
+        $context = $payload['context'] ?? array();
+
+        if ($eventKey === '') {
+            af_json_error('Missing event_key');
+        }
+
+        if (!is_array($context)) {
+            af_json_error('Context must be a JSON object');
+        }
+
+        $validEvents = automation_event_label_map($pdo, false);
+        if (!isset($validEvents[$eventKey])) {
+            af_json_error('Unknown event key');
+        }
+
+        $runtime = new AutomationRuntime();
+        $result = $runtime->dispatchEvent($pdo, $eventKey, $context);
+
+        af_json_ok(array(
+            'message' => 'Test trigger executed',
+            'test' => array(
+                'event_key' => $eventKey,
+                'context' => $context,
+            ),
+            'runtime_result' => $result,
+        ));
+    }	
+	
     if ($method === 'POST' && $action === 'delete_flow') {
         $flowId = (int)($payload['id'] ?? 0);
         if ($flowId <= 0) {
