@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/onboarding_tokens.php';
+require_once __DIR__ . '/automation_runtime.php';
 
 if (!function_exists('aue_human_date')) {
     function aue_human_date(?string $date): string
@@ -1504,7 +1505,7 @@ if (!function_exists('aue_activate_pending_user')) {
                 ':id' => $userId,
             ));
 
-            $tokenRow = ot_create_token(
+                        $tokenRow = ot_create_token(
                 $pdo,
                 $userId,
                 'set_password',
@@ -1515,7 +1516,64 @@ if (!function_exists('aue_activate_pending_user')) {
             $user['status'] = 'active';
             $user['must_change_password'] = 1;
 
-            ot_send_set_password_notification($pdo, $user, $tokenRow);
+            $displayName = trim((string)($user['name'] ?? ''));
+            if ($displayName === '') {
+                $displayName = trim((string)($user['first_name'] ?? '') . ' ' . (string)($user['last_name'] ?? ''));
+            }
+            if ($displayName === '') {
+                $displayName = 'User';
+            }
+
+            $baseUrl = '';
+            $appUrl = trim((string)($_ENV['APP_URL'] ?? ''));
+            if ($appUrl !== '') {
+                $baseUrl = rtrim($appUrl, '/');
+            } elseif (!empty($_SERVER['HTTP_HOST'])) {
+                $scheme = 'https';
+                if (!empty($_SERVER['HTTPS']) && strtolower((string)$_SERVER['HTTPS']) !== 'off') {
+                    $scheme = 'https';
+                } elseif ((string)($_SERVER['SERVER_PORT'] ?? '') === '80') {
+                    $scheme = 'http';
+                }
+                $baseUrl = $scheme . '://' . trim((string)$_SERVER['HTTP_HOST']);
+            }
+
+            $rawToken = trim((string)($tokenRow['raw_token'] ?? ''));
+            $setPasswordLink = $baseUrl !== '' && $rawToken !== ''
+                ? ($baseUrl . '/set_password.php?token=' . urlencode($rawToken))
+                : '';
+
+            $expiryMinutes = '60';
+            $expiryDisplay = '';
+            if (!empty($tokenRow['expires_at'])) {
+                $ts = strtotime((string)$tokenRow['expires_at']);
+                if ($ts) {
+                    $expiryDisplay = date('D, M j, Y g:i A', $ts);
+                }
+            }
+
+            $automationRuntime = new AutomationRuntime();
+            $automationRuntime->dispatchEvent(
+                $pdo,
+                'user_onboarding_created',
+                array(
+                    'user_id' => $userId,
+                    'user_name' => $displayName,
+                    'first_name' => (string)($user['first_name'] ?? ''),
+                    'last_name' => (string)($user['last_name'] ?? ''),
+                    'user_email' => $email,
+                    'email' => $email,
+                    'login_email' => $email,
+                    'to_email' => $email,
+                    'to_name' => $displayName,
+                    'set_password_link' => $setPasswordLink,
+                    'reset_link' => $setPasswordLink,
+                    'expiry_minutes' => $expiryMinutes,
+                    'expiry_datetime' => $expiryDisplay,
+                    'support_email' => ot_support_email(),
+                    'actor_user_id' => $actorId > 0 ? $actorId : null
+                )
+            );
 
             aue_recalculate_profile_requirements_status($pdo, $userId);
 
