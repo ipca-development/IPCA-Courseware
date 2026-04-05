@@ -1965,6 +1965,96 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
     }
 
 
+public function createRequiredAction(array $data): int
+{
+    $required = [
+        'user_id',
+        'cohort_id',
+        'lesson_id',
+        'action_type',
+        'token',
+        'title',
+    ];
+
+    foreach ($required as $field) {
+        if (!array_key_exists($field, $data)) {
+            throw new InvalidArgumentException("Missing required action field: {$field}");
+        }
+    }
+
+    $sql = "
+        INSERT INTO student_required_actions
+        (
+            user_id,
+            cohort_id,
+            lesson_id,
+            progress_test_id,
+            action_type,
+            token,
+            status,
+            title,
+            instructions_html,
+            instructions_text,
+            student_response_text,
+            email_id,
+            opened_at,
+            completed_at,
+            approved_at,
+            ip_address,
+            user_agent,
+            created_at,
+            updated_at
+        )
+        VALUES
+        (
+            :user_id,
+            :cohort_id,
+            :lesson_id,
+            :progress_test_id,
+            :action_type,
+            :token,
+            :status,
+            :title,
+            :instructions_html,
+            :instructions_text,
+            :student_response_text,
+            :email_id,
+            :opened_at,
+            :completed_at,
+            :approved_at,
+            :ip_address,
+            :user_agent,
+            :created_at,
+            :updated_at
+        )
+    ";
+
+    $stmt = $this->pdo->prepare($sql);
+    $stmt->execute([
+        ':user_id' => (int)$data['user_id'],
+        ':cohort_id' => (int)$data['cohort_id'],
+        ':lesson_id' => (int)$data['lesson_id'],
+        ':progress_test_id' => isset($data['progress_test_id']) ? (int)$data['progress_test_id'] : null,
+        ':action_type' => (string)$data['action_type'],
+        ':token' => (string)$data['token'],
+        ':status' => (string)($data['status'] ?? 'pending'),
+        ':title' => (string)$data['title'],
+        ':instructions_html' => isset($data['instructions_html']) ? (string)$data['instructions_html'] : null,
+        ':instructions_text' => isset($data['instructions_text']) ? (string)$data['instructions_text'] : null,
+        ':student_response_text' => isset($data['student_response_text']) ? (string)$data['student_response_text'] : null,
+        ':email_id' => isset($data['related_email_id']) ? (int)$data['related_email_id'] : null,
+        ':opened_at' => isset($data['opened_at']) ? (string)$data['opened_at'] : null,
+        ':completed_at' => isset($data['completed_at']) ? (string)$data['completed_at'] : null,
+        ':approved_at' => isset($data['approved_at']) ? (string)$data['approved_at'] : null,
+        ':ip_address' => isset($data['ip_address']) ? (string)$data['ip_address'] : null,
+        ':user_agent' => isset($data['user_agent']) ? (string)$data['user_agent'] : null,
+        ':created_at' => (string)($data['created_at'] ?? gmdate('Y-m-d H:i:s')),
+        ':updated_at' => (string)($data['updated_at'] ?? gmdate('Y-m-d H:i:s')),
+    ]);
+
+    return (int)$this->pdo->lastInsertId();
+}	
+	
 public function ensureRequiredActionsForDecision(int $progressTestId, array $decision): array
 {
     $test = $this->getProgressTestRowById($progressTestId);
