@@ -561,6 +561,30 @@ final class AutomationRuntime
             $headers
         );
 
+		
+		 require_once __DIR__ . '/courseware_progression_v2.php';
+        $progression = new CoursewareProgressionV2($pdo);
+
+        $progression->recordAutomationEmailAudit([
+            'user_id' => (int)($notificationContext['user_id'] ?? 0),
+            'cohort_id' => (int)($notificationContext['cohort_id'] ?? 0),
+            'lesson_id' => (int)($notificationContext['lesson_id'] ?? 0),
+            'progress_test_id' => isset($notificationContext['progress_test_id']) ? (int)$notificationContext['progress_test_id'] : null,
+            'email_type' => (string)$notificationKey,
+            'recipients_to' => [[
+                'email' => $toEmail,
+                'name' => $toName,
+            ]],
+            'subject' => (string)($sendResult['rendered_subject'] ?? $notificationKey),
+            'body_html' => (string)($sendResult['rendered_html'] ?? ''),
+            'body_text' => (string)($sendResult['rendered_text'] ?? ''),
+            'sent_status' => !empty($sendResult['ok']) ? 'sent' : 'failed',
+            'sent_at' => !empty($sendResult['ok']) ? gmdate('Y-m-d H:i:s') : null,
+            'notification_template_id' => isset($sendResult['template_id']) ? (int)$sendResult['template_id'] : null,
+            'notification_template_version_id' => isset($sendResult['template_version_id']) ? (int)$sendResult['template_version_id'] : null,
+            'render_context' => $notificationContext,
+        ]);
+		
         $details = $this->encodeDetails(array(
             'notification_key' => $notificationKey,
             'to_email' => $toEmail,
