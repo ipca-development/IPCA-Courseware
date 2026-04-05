@@ -863,32 +863,92 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             }
         }
 
+        //UPDATED LOGIC PATH V3
+		        $currentAttemptNumber = (int)($attemptState['current_attempt_number'] ?? (int)($testRow['attempt'] ?? 0));
+        $initialAttemptLimit = (int)($attemptState['initial_attempt_limit'] ?? 0);
+        $maxTotalAttemptsWithoutAdminOverride = (int)($attemptState['max_total_attempts_without_admin_override'] ?? 0);
+
+        $multipleUnsatSameLessonThreshold = (int)$this->resolveProgressionPolicyValue(
+            $policy,
+            'multiple_unsat_same_lesson_threshold',
+            [],
+            3
+        );
+
+        $multipleUnsatCoursewideThreshold = (int)$this->resolveProgressionPolicyValue(
+            $policy,
+            'multiple_unsat_coursewide_threshold',
+            [],
+            5
+        );
+
+        $multipleUnsatWindowDays = (int)$this->resolveProgressionPolicyValue(
+            $policy,
+            'multiple_unsat_window_days',
+            [],
+            30
+        );
+
+        $sameLessonUnsatCount = 0;
+        $coursewideUnsatCount = 0;
+
+        if (!empty($classification['counts_as_unsat'])) {
+            $sameLessonUnsatCount = $this->countUnsatResultsForLesson($userId, $cohortId, $lessonId);
+            $coursewideUnsatCount = $this->countUnsatResultsCoursewide($userId, $multipleUnsatWindowDays);
+        }
+
         $automationEventContext = [
             'user_id' => $userId,
             'cohort_id' => $cohortId,
             'lesson_id' => $lessonId,
             'progress_test_id' => $progressTestId,
+
             'student_name' => $studentName,
             'lesson_title' => $lessonTitle,
             'cohort_title' => $cohortTitle,
-            'attempt_count' => (string)((int)($testRow['attempt'] ?? 0)),
+
+            'attempt_count' => (string)$currentAttemptNumber,
+            'initial_attempt_limit' => (int)$initialAttemptLimit,
+            'max_total_attempts_without_admin_override' => (int)$maxTotalAttemptsWithoutAdminOverride,
+            'initial_attempt_limit_reached' => $initialAttemptLimit > 0 && $currentAttemptNumber >= $initialAttemptLimit ? 1 : 0,
+            'max_attempts_reached' => $maxTotalAttemptsWithoutAdminOverride > 0 && $currentAttemptNumber >= $maxTotalAttemptsWithoutAdminOverride ? 1 : 0,
+
             'score_pct' => (string)$scorePct,
             'formal_result_code' => (string)($classification['formal_result_code'] ?? ''),
             'formal_result_label' => (string)($classification['formal_result_label'] ?? ''),
             'timing_status' => (string)($classification['timing_status'] ?? ''),
             'pass_gate_met' => (int)($classification['pass_gate_met'] ?? 0),
             'counts_as_unsat' => (int)($classification['counts_as_unsat'] ?? 0),
+
             'decision_code' => (string)($classification['formal_result_code'] ?? ''),
+            'remediation_required' => !empty($decision['remediation_required']) ? 1 : 0,
+            'instructor_required' => !empty($decision['instructor_required']) ? 1 : 0,
+            'deadline_blocked' => !empty($decision['deadline_blocked']) ? 1 : 0,
+            'training_suspended' => !empty($decision['training_suspended']) ? 1 : 0,
+            'summary_blocked' => !empty($decision['summary_blocked']) ? 1 : 0,
+
+            'same_lesson_unsat_count' => (int)$sameLessonUnsatCount,
+            'coursewide_unsat_count' => (int)$coursewideUnsatCount,
+            'multiple_unsat_same_lesson_threshold' => (int)$multipleUnsatSameLessonThreshold,
+            'multiple_unsat_coursewide_threshold' => (int)$multipleUnsatCoursewideThreshold,
+            'multiple_unsat_window_days' => (int)$multipleUnsatWindowDays,
+            'multiple_unsat_triggered' => (
+                ($multipleUnsatSameLessonThreshold > 0 && $sameLessonUnsatCount >= $multipleUnsatSameLessonThreshold) ||
+                ($multipleUnsatCoursewideThreshold > 0 && $coursewideUnsatCount >= $multipleUnsatCoursewideThreshold)
+            ) ? 1 : 0,
+
             'weak_areas_text' => $weakAreas,
             'written_debrief_text' => $aiSummary,
             'summary_quality' => $summaryQual,
             'summary_issues' => $summaryIssues,
             'summary_corrections' => $summaryCorr,
             'confirmed_misunderstandings' => $misunder,
+
             'remediation_url' => $remediationUrl,
             'approval_url' => $approvalUrl,
         ];
-
+		
+		
         $this->logProgressionEvent([
             'user_id' => $userId,
             'cohort_id' => $cohortId,
@@ -2363,6 +2423,50 @@ public function buildNotificationDecision(array $progressionContext, array $deci
         ];
     }
 
+	    private function countUnsatResultsForLesson(int $userId, int $cohortId, int $lessonId): int
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM progress_tests_v2
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+              AND counts_as_unsat = 1
+              AND status = 'completed'
+        ");
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+        ]);
+
+        return (int)$stmt->fetchColumn();
+    }
+
+    private function countUnsatResultsCoursewide(int $userId, int $windowDays): int
+    {
+        if ($windowDays <= 0) {
+            $windowDays = 30;
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT COUNT(*)
+            FROM progress_tests_v2
+            WHERE user_id = :user_id
+              AND counts_as_unsat = 1
+              AND status = 'completed'
+              AND completed_at IS NOT NULL
+              AND completed_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL :window_days DAY)
+        ");
+        $stmt->bindValue(':user_id', $userId, PDO::PARAM_INT);
+        $stmt->bindValue(':window_days', $windowDays, PDO::PARAM_INT);
+        $stmt->execute();
+
+        return (int)$stmt->fetchColumn();
+    }
+	
+	
+	
     public function logProgressionEvent(array $event): int
     {
         $requiredFields = [
