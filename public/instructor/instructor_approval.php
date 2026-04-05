@@ -112,8 +112,14 @@ function short_text(?string $text, int $maxLen = 220): string
 
 function load_instructor_approval_page_state(
     CoursewareProgressionV2 $engine,
-    string $token
+    string $token,
+    string $role
 ): array {
+    if (!in_array($role, ['admin', 'instructor', 'chief_instructor'], true)) {
+        http_response_code(403);
+        exit('Forbidden');
+    }
+
     $state = $engine->getInstructorApprovalPageStateByToken($token);
 
     if (!$state || empty($state['action'])) {
@@ -126,13 +132,6 @@ function load_instructor_approval_page_state(
     if ((string)($action['action_type'] ?? '') !== 'instructor_approval') {
         http_response_code(400);
         exit('Invalid action type');
-    }
-
-    if (isset($state['access']) && is_array($state['access']) && array_key_exists('is_allowed', $state['access'])) {
-        if (empty($state['access']['is_allowed'])) {
-            http_response_code(403);
-            exit('Forbidden');
-        }
     }
 
     return $state;
@@ -171,7 +170,7 @@ function load_attempt_history(PDO $pdo, int $userId, int $cohortId, int $lessonI
     return is_array($rows) ? $rows : [];
 }
 
-$state = load_instructor_approval_page_state($engine, $token);
+$state = load_instructor_approval_page_state($engine, $token, $role);
 $action = (array)$state['action'];
 $activity = (array)($state['activity'] ?? []);
 $progressionContext = (array)($state['progression_context'] ?? []);
@@ -247,7 +246,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!empty($result['state']) && is_array($result['state'])) {
             $state = $result['state'];
         } else {
-            $state = load_instructor_approval_page_state($engine, $token);
+            $state = load_instructor_approval_page_state($engine, $token, $role);
         }
 
         $action = (array)($state['action'] ?? []);
@@ -272,7 +271,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $progressTestId = isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : 0;
     } catch (Throwable $e) {
         $error = $e->getMessage();
-        $state = load_instructor_approval_page_state($engine, $token);
+        $state = load_instructor_approval_page_state($engine, $token, $role);
         $action = (array)($state['action'] ?? []);
         $activity = (array)($state['activity'] ?? []);
         $progressionContext = (array)($state['progression_context'] ?? []);
