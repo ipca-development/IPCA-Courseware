@@ -1047,11 +1047,19 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             ) {
                 $remediationRequired = true;
             }
-        } else {
+                } else {
             if (!empty($classification['counts_as_unsat'])) {
-                if (($attempt['current_attempt_number'] ?? 1) >= ($attempt['instructor_escalation_attempt'] ?? PHP_INT_MAX)) {
+                $currentAttemptNumber = (int)($attempt['current_attempt_number'] ?? 1);
+                $instructorEscalationAttempt = (int)($attempt['instructor_escalation_attempt'] ?? PHP_INT_MAX);
+                $remediationTriggerAttempt = (int)($attempt['remediation_trigger_attempt'] ?? PHP_INT_MAX);
+                $remediationCompleted = !empty($attempt['remediation_completed']);
+
+                if ($currentAttemptNumber >= $instructorEscalationAttempt) {
                     $instructorRequired = true;
-                } elseif (($attempt['current_attempt_number'] ?? 1) >= ($attempt['remediation_trigger_attempt'] ?? PHP_INT_MAX)) {
+                } elseif (
+                    $currentAttemptNumber === $remediationTriggerAttempt
+                    && !$remediationCompleted
+                ) {
                     $remediationRequired = true;
                 }
             }
