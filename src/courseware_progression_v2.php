@@ -1964,6 +1964,7 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         ];
     }
 
+
 public function ensureRequiredActionsForDecision(int $progressTestId, array $decision): array
 {
     $test = $this->getProgressTestRowById($progressTestId);
@@ -2043,7 +2044,6 @@ public function ensureRequiredActionsForDecision(int $progressTestId, array $dec
         $action = $this->createOrReuseRequiredActionSafe($actionData);
 
         $actionToken = (string)(($action['action']['token'] ?? '') ?: $token);
-
         $actionUrl = $actionType === 'instructor_approval'
             ? $this->buildInternalAppUrl('/instructor/instructor_approval.php?token=' . urlencode($actionToken))
             : $this->buildInternalAppUrl('/student/remediation_action.php?token=' . urlencode($actionToken));
@@ -2057,7 +2057,9 @@ public function ensureRequiredActionsForDecision(int $progressTestId, array $dec
     }
 
     return $result;
-}
+}	
+	
+	
 
 public function buildNotificationDecision(array $progressionContext, array $decision, array $context = []): array
 {
