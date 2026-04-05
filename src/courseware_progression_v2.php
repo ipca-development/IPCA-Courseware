@@ -945,8 +945,9 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             ) ? 1 : 0,
 
             'weak_areas_text' => $weakAreas,
-			'weak_areas_html' => nl2br($weakAreas),
-            'written_debrief_text' => $aiSummary,
+			'weak_areas_html' => nl2br($this->escapeHtml($weakAreas)),
+			'written_debrief_text' => $aiSummary,
+			'written_debrief_html' => nl2br($this->escapeHtml($aiSummary)),
             'summary_quality' => $summaryQual,
             'summary_issues' => $summaryIssues,
             'summary_corrections' => $summaryCorr,
