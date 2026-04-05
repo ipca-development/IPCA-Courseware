@@ -848,8 +848,12 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         }
 
         $studentName = (string)(($context['student_recipient']['name'] ?? '') ?: 'Student');
+        $studentEmail = (string)($context['student_recipient']['email'] ?? '');
         $lessonTitle = (string)($context['lesson_title'] ?? '');
         $cohortTitle = (string)($context['cohort_title'] ?? '');
+
+        $chiefInstructorName = (string)(($context['chief_instructor_recipient']['name'] ?? '') ?: 'Chief Instructor');
+        $chiefInstructorEmail = (string)($context['chief_instructor_recipient']['email'] ?? '');
 
         $remediationUrl = '';
         $approvalUrl = '';
@@ -904,6 +908,9 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             'progress_test_id' => $progressTestId,
 
             'student_name' => $studentName,
+            'student_email' => $studentEmail,
+            'chief_instructor_name' => $chiefInstructorName,
+            'chief_instructor_email' => $chiefInstructorEmail,
             'lesson_title' => $lessonTitle,
             'cohort_title' => $cohortTitle,
 
@@ -938,6 +945,7 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             ) ? 1 : 0,
 
             'weak_areas_text' => $weakAreas,
+			'weak_areas_html' => nl2br($weakAreas),
             'written_debrief_text' => $aiSummary,
             'summary_quality' => $summaryQual,
             'summary_issues' => $summaryIssues,
