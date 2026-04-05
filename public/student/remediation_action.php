@@ -48,12 +48,12 @@ if (!in_array($actionType, ['remediation_acknowledgement', 'deadline_reason_subm
     exit('Unsupported action type');
 }
 
-
-function get_client_ip(): ?string {
+function get_client_ip(): ?string
+{
     $keys = [
         'HTTP_CF_CONNECTING_IP',
         'HTTP_X_FORWARDED_FOR',
-        'REMOTE_ADDR'
+        'REMOTE_ADDR',
     ];
 
     foreach ($keys as $key) {
@@ -77,10 +77,12 @@ function get_client_ip(): ?string {
     return null;
 }
 
-function get_user_agent_string(): ?string {
+function get_user_agent_string(): ?string
+{
     if (empty($_SERVER['HTTP_USER_AGENT'])) {
         return null;
     }
+
     return substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 65535);
 }
 
@@ -106,9 +108,9 @@ if (in_array($status, ['pending', 'opened'], true)) {
         'payload' => [
             'required_action_id' => $actionId,
             'action_type' => $actionType,
-            'token' => $token
+            'token' => $token,
         ],
-        'legal_note' => 'Required action page opened by authenticated user.'
+        'legal_note' => 'Required action page opened by authenticated user.',
     ]);
 }
 
@@ -120,19 +122,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'This action has already been completed or is no longer active.';
     } else {
         $responseText = trim((string)($_POST['student_response_text'] ?? ''));
+        $automationEventKey = '';
+        $automationEventContext = [];
+        $successMessage = 'Your acknowledgment has been recorded successfully.';
 
         if ($actionType === 'remediation_acknowledgement') {
             if ($responseText === '') {
-                $responseText = 'I confirm that I have reviewed and restudied the remedial study items.';
+                $responseText = 'I confirm that I have reviewed and restudied the remedial study items and I am ready to continue.';
             }
+            $successMessage = 'Your remedial study acknowledgment has been recorded successfully.';
         } elseif ($actionType === 'deadline_reason_submission') {
             if ($responseText === '') {
                 $error = 'Please provide your reason before submitting.';
             }
+            $successMessage = 'Your reason has been submitted successfully.';
         } elseif ($actionType === 'instructor_approval') {
             if ($responseText === '') {
                 $responseText = 'Approved by instructor/chief instructor through secure action page.';
             }
+            $successMessage = 'Your approval has been recorded successfully.';
         }
 
         if ($error === '') {
@@ -168,6 +176,83 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $updActivity->execute([$actionUserId, $cohortId, $lessonId]);
                 }
 
+                if ($actionType === 'remediation_acknowledgement') {
+                    $policy = $engine->resolveEffectivePolicySet($cohortId);
+                    $behaviorMode = $engine->resolveBehaviorMode($policy);
+                    $attemptState = $engine->resolveAttemptPolicyState(
+                        $actionUserId,
+                        $cohortId,
+                        $lessonId,
+                        $policy,
+                        null,
+                        $behaviorMode
+                    );
+
+                    $engine->persistLessonActivityProjection(
+                        $actionUserId,
+                        $cohortId,
+                        $lessonId,
+                        [
+                            'engine_projection' => true,
+                            'user_id' => $actionUserId,
+                            'cohort_id' => $cohortId,
+                            'lesson_id' => $lessonId,
+                            'phase' => 'required_action_completed',
+                            'fields' => [
+                                'completion_status' => 'in_progress',
+                                'last_state_eval_at' => gmdate('Y-m-d H:i:s'),
+                            ],
+                        ]
+                    );
+
+                    $progressionContext = $engine->getProgressionContextForUserLesson($actionUserId, $cohortId, $lessonId);
+                    $studentRecipient = (array)($progressionContext['student_recipient'] ?? []);
+                    $chiefInstructorRecipient = (array)($progressionContext['chief_instructor_recipient'] ?? []);
+
+                    $studentName = (string)(($studentRecipient['name'] ?? '') ?: 'Student');
+                    $studentEmail = (string)($studentRecipient['email'] ?? '');
+                    $chiefInstructorName = (string)(($chiefInstructorRecipient['name'] ?? '') ?: 'Chief Instructor');
+                    $chiefInstructorEmail = (string)($chiefInstructorRecipient['email'] ?? '');
+                    $lessonTitle = (string)($progressionContext['lesson_title'] ?? '');
+                    $cohortTitle = (string)($progressionContext['cohort_title'] ?? '');
+
+                    $initialAttemptLimit = (int)($attemptState['initial_attempt_limit'] ?? 0);
+                    $autoExtraAttemptsAfterRemediation = (int)($attemptState['auto_extra_attempts_after_remediation'] ?? 0);
+                    $effectiveAllowedAttempts = (int)($attemptState['effective_allowed_attempts'] ?? 0);
+                    $remainingAttempts = (int)($attemptState['remaining_attempts'] ?? 0);
+                    $nextAttemptNumber = (int)($attemptState['next_attempt_number'] ?? 1);
+
+                    $latestProgressTest = $engine->getProgressionContextForUserLesson($actionUserId, $cohortId, $lessonId);
+                    $latestProgressTestRow = (array)($latestProgressTest['latest_progress_test'] ?? []);
+                    $resolvedProgressTestId = $progressTestId !== null && $progressTestId > 0
+                        ? $progressTestId
+                        : (isset($latestProgressTestRow['id']) ? (int)$latestProgressTestRow['id'] : null);
+
+                    $automationEventKey = 'remediation_acknowledgement_completed';
+                    $automationEventContext = [
+                        'user_id' => $actionUserId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'progress_test_id' => $resolvedProgressTestId,
+                        'required_action_id' => $actionId,
+                        'action_type' => $actionType,
+                        'student_name' => $studentName,
+                        'student_email' => $studentEmail,
+                        'chief_instructor_name' => $chiefInstructorName,
+                        'chief_instructor_email' => $chiefInstructorEmail,
+                        'lesson_title' => $lessonTitle,
+                        'cohort_title' => $cohortTitle,
+                        'response_text' => $responseText,
+                        'remediation_completed' => 1,
+                        'action_completed' => 1,
+                        'initial_attempt_limit' => $initialAttemptLimit,
+                        'extra_attempts_granted' => $autoExtraAttemptsAfterRemediation,
+                        'effective_allowed_attempts' => $effectiveAllowedAttempts,
+                        'remaining_attempts' => $remainingAttempts,
+                        'next_attempt_number' => $nextAttemptNumber,
+                    ];
+                }
+
                 $engine->logProgressionEvent([
                     'user_id' => $actionUserId,
                     'cohort_id' => $cohortId,
@@ -182,16 +267,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'payload' => [
                         'required_action_id' => $actionId,
                         'action_type' => $actionType,
-                        'response_text' => $responseText
+                        'response_text' => $responseText,
                     ],
-                    'legal_note' => 'Required action completed and timestamped by authenticated user.'
+                    'legal_note' => 'Required action completed and timestamped by authenticated user.',
                 ]);
 
                 $pdo->commit();
 
+                if ($automationEventKey !== '' && !empty($automationEventContext) && is_file(__DIR__ . '/../../src/automation_runtime.php')) {
+                    require_once __DIR__ . '/../../src/automation_runtime.php';
+
+                    $engine->logProgressionEvent([
+                        'user_id' => $actionUserId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'progress_test_id' => $progressTestId,
+                        'event_type' => 'automation',
+                        'event_code' => 'automation_dispatch_before',
+                        'event_status' => 'info',
+                        'actor_type' => 'system',
+                        'actor_user_id' => null,
+                        'event_time' => gmdate('Y-m-d H:i:s'),
+                        'payload' => [
+                            'event_key' => $automationEventKey,
+                            'required_action_id' => $actionId,
+                            'action_type' => $actionType,
+                        ],
+                    ]);
+
+                    $automation = new AutomationRuntime();
+                    $automationResult = $automation->dispatchEvent($pdo, $automationEventKey, $automationEventContext);
+
+                    $engine->logProgressionEvent([
+                        'user_id' => $actionUserId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'progress_test_id' => $progressTestId,
+                        'event_type' => 'automation',
+                        'event_code' => 'automation_dispatch_after',
+                        'event_status' => 'info',
+                        'actor_type' => 'system',
+                        'actor_user_id' => null,
+                        'event_time' => gmdate('Y-m-d H:i:s'),
+                        'payload' => [
+                            'event_key' => $automationEventKey,
+                            'automation_result' => $automationResult,
+                        ],
+                    ]);
+                }
+
                 $action = $engine->getRequiredActionByToken($token) ?: $action;
                 $status = (string)($action['status'] ?? 'completed');
-                $success = 'Your acknowledgment has been recorded successfully.';
+                $success = $successMessage;
             } catch (Throwable $e) {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
