@@ -2602,6 +2602,96 @@ public function buildNotificationDecision(array $progressionContext, array $deci
         return (int)$this->pdo->lastInsertId();
     }
 
+	
+	    public function recordAutomationEmailAudit(array $email): int
+    {
+        $requiredFields = [
+            'user_id',
+            'cohort_id',
+            'lesson_id',
+            'email_type',
+            'recipients_to',
+            'subject',
+            'body_html',
+        ];
+
+        foreach ($requiredFields as $field) {
+            if (!array_key_exists($field, $email)) {
+                throw new InvalidArgumentException("Missing required email audit field: {$field}");
+            }
+        }
+
+        $sql = "
+            INSERT INTO training_progression_emails (
+                user_id,
+                cohort_id,
+                lesson_id,
+                progress_test_id,
+                email_type,
+                recipients_to,
+                recipients_cc,
+                subject,
+                body_html,
+                body_text,
+                ai_inputs_json,
+                sent_status,
+                sent_at,
+                created_at,
+                notification_template_id,
+                notification_template_version_id,
+                render_context_json
+            ) VALUES (
+                :user_id,
+                :cohort_id,
+                :lesson_id,
+                :progress_test_id,
+                :email_type,
+                :recipients_to,
+                :recipients_cc,
+                :subject,
+                :body_html,
+                :body_text,
+                :ai_inputs_json,
+                :sent_status,
+                :sent_at,
+                :created_at,
+                :notification_template_id,
+                :notification_template_version_id,
+                :render_context_json
+            )
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            ':user_id' => (int)$email['user_id'],
+            ':cohort_id' => (int)$email['cohort_id'],
+            ':lesson_id' => (int)$email['lesson_id'],
+            ':progress_test_id' => isset($email['progress_test_id']) ? (int)$email['progress_test_id'] : null,
+            ':email_type' => (string)$email['email_type'],
+            ':recipients_to' => $this->encodeMixedField($email['recipients_to']),
+            ':recipients_cc' => array_key_exists('recipients_cc', $email)
+                ? $this->encodeMixedField($email['recipients_cc'])
+                : null,
+            ':subject' => (string)$email['subject'],
+            ':body_html' => (string)$email['body_html'],
+            ':body_text' => isset($email['body_text']) ? (string)$email['body_text'] : null,
+            ':ai_inputs_json' => isset($email['ai_inputs'])
+                ? json_encode($email['ai_inputs'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+                : null,
+            ':sent_status' => (string)($email['sent_status'] ?? 'sent'),
+            ':sent_at' => isset($email['sent_at']) ? (string)$email['sent_at'] : null,
+            ':created_at' => (string)($email['created_at'] ?? gmdate('Y-m-d H:i:s')),
+            ':notification_template_id' => isset($email['notification_template_id']) ? (int)$email['notification_template_id'] : null,
+            ':notification_template_version_id' => isset($email['notification_template_version_id']) ? (int)$email['notification_template_version_id'] : null,
+            ':render_context_json' => isset($email['render_context'])
+                ? json_encode($email['render_context'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)
+                : null,
+        ]);
+
+        return (int)$this->pdo->lastInsertId();
+    }
+	
+	
     public function sendProgressionEmailById(int $emailId): array
     {
         $sql = "

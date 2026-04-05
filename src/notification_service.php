@@ -351,7 +351,7 @@ final class NotificationService
             'legal_note' => 'System/account notification send executed outside progression email queue.'
         ]);
 
-        return [
+          return [
             'ok' => !empty($result['ok']),
             'suppressed' => false,
             'notification_key' => $notificationKey,
@@ -360,6 +360,10 @@ final class NotificationService
             'error' => $result['error'] ?? null,
             'validation' => $validation,
             'rendered_subject' => $rendered['subject'],
+            'rendered_html' => $rendered['html'],
+            'rendered_text' => $rendered['text'],
+            'template_id' => (int)$template['id'],
+            'template_version_id' => (int)$version['id'],
         ];
     }
 
