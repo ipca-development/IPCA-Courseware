@@ -1927,161 +1927,100 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         ];
     }
 
-    public function ensureRequiredActionsForDecision(int $progressTestId, array $decision): array
-    {
-        $test = $this->getProgressTestRowById($progressTestId);
-        if (!$test) {
-            throw new RuntimeException('Progress test not found.');
-        }
+public function ensureRequiredActionsForDecision(int $progressTestId, array $decision): array
+{
+    $test = $this->getProgressTestRowById($progressTestId);
+    if (!$test) {
+        throw new RuntimeException('Progress test not found.');
+    }
 
-        $result = [
-            'should_create_any' => false,
-            'actions' => [],
-            'latest_instructor_action_id' => null,
-        ];
-
-        $requiredActionDecision = (array)($decision['required_action_decision'] ?? []);
-        if (empty($requiredActionDecision['should_create_any'])) {
-            return $result;
-        }
-
-        $result['should_create_any'] = true;
-
-        foreach ((array)($requiredActionDecision['action_types'] ?? []) as $actionType) {
-    $token = bin2hex(random_bytes(32));
-    $title = $actionType === 'instructor_approval'
-        ? 'Instructor Approval Required - ' . $this->getLessonTitle((int)$test['lesson_id'])
-        : 'Remedial Study Acknowledgement - ' . $this->getLessonTitle((int)$test['lesson_id']);
-
-    $actionData = [
-        'user_id' => (int)$test['user_id'],
-        'cohort_id' => (int)$test['cohort_id'],
-        'lesson_id' => (int)$test['lesson_id'],
-        'progress_test_id' => $progressTestId,
-        'action_type' => (string)$actionType,
-        'token' => $token,
-        'title' => $title,
+    $result = [
+        'should_create_any' => false,
+        'actions' => [],
+        'latest_instructor_action_id' => null,
     ];
 
-    if ($actionType === 'remediation_acknowledgement') {
+    $requiredActionDecision = (array)($decision['required_action_decision'] ?? []);
+    if (empty($requiredActionDecision['should_create_any'])) {
+        return $result;
+    }
+
+    $result['should_create_any'] = true;
+
+    foreach ((array)($requiredActionDecision['action_types'] ?? []) as $actionType) {
+        $token = bin2hex(random_bytes(32));
         $lessonTitle = $this->getLessonTitle((int)$test['lesson_id']);
-        $weakAreasText = trim((string)($test['weak_areas'] ?? ''));
-        $debriefText = trim((string)($test['ai_summary'] ?? ''));
 
-        $instructionsText = "Please review the following before confirming your remedial study:\n\n";
+        $title = $actionType === 'instructor_approval'
+            ? 'Instructor Approval Required - ' . $lessonTitle
+            : 'Remedial Study Acknowledgement - ' . $lessonTitle;
 
-        if ($weakAreasText !== '') {
-            $instructionsText .= "Weak areas to review:\n" . $weakAreasText . "\n\n";
-        }
+        $actionData = [
+            'user_id' => (int)$test['user_id'],
+            'cohort_id' => (int)$test['cohort_id'],
+            'lesson_id' => (int)$test['lesson_id'],
+            'progress_test_id' => $progressTestId,
+            'action_type' => (string)$actionType,
+            'token' => $token,
+            'title' => $title,
+        ];
 
-        if ($debriefText !== '') {
-            $instructionsText .= "Debrief summary:\n" . $debriefText . "\n\n";
-        }
+        if ($actionType === 'remediation_acknowledgement') {
+            $weakAreasText = trim((string)($test['weak_areas'] ?? ''));
+            $debriefText = trim((string)($test['ai_summary'] ?? ''));
 
-        $instructionsText .= "After reviewing the material for lesson \"" . $lessonTitle . "\", confirm below that you completed the required remedial study.";
+            $instructionsText = "Please review the following before confirming your remedial study:\n\n";
 
-        $instructionsHtml = '<div>'
-            . '<p>Please review the following before confirming your remedial study:</p>';
-
-        if ($weakAreasText !== '') {
-            $instructionsHtml .= '<h3 style="margin:14px 0 6px 0;">Weak areas to review</h3>'
-                . '<div>' . nl2br($this->escapeHtml($weakAreasText)) . '</div>';
-        }
-
-        if ($debriefText !== '') {
-            $instructionsHtml .= '<h3 style="margin:14px 0 6px 0;">Debrief summary</h3>'
-                . '<div>' . nl2br($this->escapeHtml($debriefText)) . '</div>';
-        }
-
-        $instructionsHtml .= '<p style="margin-top:14px;">After reviewing the material for lesson <strong>'
-            . $this->escapeHtml($lessonTitle)
-            . '</strong>, confirm below that you completed the required remedial study.</p>'
-            . '</div>';
-
-        $actionData['instructions_text'] = $instructionsText;
-        $actionData['instructions_html'] = $instructionsHtml;
-    }
-
-    $action = $this->createOrReuseRequiredActionSafe($actionData);
-
-        foreach ($required as $field) {
-            if (!array_key_exists($field, $data)) {
-                throw new InvalidArgumentException("Missing required action field: {$field}");
+            if ($weakAreasText !== '') {
+                $instructionsText .= "Weak areas to review:\n" . $weakAreasText . "\n\n";
             }
+
+            if ($debriefText !== '') {
+                $instructionsText .= "Debrief summary:\n" . $debriefText . "\n\n";
+            }
+
+            $instructionsText .= 'After reviewing the material for lesson "' . $lessonTitle . '", confirm below that you completed the required remedial study.';
+
+            $instructionsHtml = '<div>';
+            $instructionsHtml .= '<p>Please review the following before confirming your remedial study:</p>';
+
+            if ($weakAreasText !== '') {
+                $instructionsHtml .= '<h3 style="margin:14px 0 6px 0;">Weak areas to review</h3>';
+                $instructionsHtml .= '<div>' . nl2br($this->escapeHtml($weakAreasText)) . '</div>';
+            }
+
+            if ($debriefText !== '') {
+                $instructionsHtml .= '<h3 style="margin:14px 0 6px 0;">Debrief summary</h3>';
+                $instructionsHtml .= '<div>' . nl2br($this->escapeHtml($debriefText)) . '</div>';
+            }
+
+            $instructionsHtml .= '<p style="margin-top:14px;">After reviewing the material for lesson <strong>'
+                . $this->escapeHtml($lessonTitle)
+                . '</strong>, confirm below that you completed the required remedial study.</p>';
+            $instructionsHtml .= '</div>';
+
+            $actionData['instructions_text'] = $instructionsText;
+            $actionData['instructions_html'] = $instructionsHtml;
         }
 
-        $sql = "
-            INSERT INTO student_required_actions
-            (
-                user_id,
-                cohort_id,
-                lesson_id,
-                progress_test_id,
-                action_type,
-                token,
-                status,
-                title,
-                instructions_html,
-                instructions_text,
-                student_response_text,
-                email_id,
-                opened_at,
-                completed_at,
-                approved_at,
-                ip_address,
-                user_agent,
-                created_at,
-                updated_at
-            )
-            VALUES
-            (
-                :user_id,
-                :cohort_id,
-                :lesson_id,
-                :progress_test_id,
-                :action_type,
-                :token,
-                :status,
-                :title,
-                :instructions_html,
-                :instructions_text,
-                :student_response_text,
-                :email_id,
-                :opened_at,
-                :completed_at,
-                :approved_at,
-                :ip_address,
-                :user_agent,
-                :created_at,
-                :updated_at
-            )
-        ";
+        $action = $this->createOrReuseRequiredActionSafe($actionData);
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':user_id' => (int)$data['user_id'],
-            ':cohort_id' => (int)$data['cohort_id'],
-            ':lesson_id' => (int)$data['lesson_id'],
-            ':progress_test_id' => isset($data['progress_test_id']) ? (int)$data['progress_test_id'] : null,
-            ':action_type' => (string)$data['action_type'],
-            ':token' => (string)$data['token'],
-            ':status' => (string)($data['status'] ?? 'pending'),
-            ':title' => (string)$data['title'],
-            ':instructions_html' => isset($data['instructions_html']) ? (string)$data['instructions_html'] : null,
-            ':instructions_text' => isset($data['instructions_text']) ? (string)$data['instructions_text'] : null,
-            ':student_response_text' => isset($data['student_response_text']) ? (string)$data['student_response_text'] : null,
-            ':email_id' => isset($data['related_email_id']) ? (int)$data['related_email_id'] : null,
-            ':opened_at' => isset($data['opened_at']) ? (string)$data['opened_at'] : null,
-            ':completed_at' => isset($data['completed_at']) ? (string)$data['completed_at'] : null,
-            ':approved_at' => isset($data['approved_at']) ? (string)$data['approved_at'] : null,
-            ':ip_address' => isset($data['ip_address']) ? (string)$data['ip_address'] : null,
-            ':user_agent' => isset($data['user_agent']) ? (string)$data['user_agent'] : null,
-            ':created_at' => (string)($data['created_at'] ?? gmdate('Y-m-d H:i:s')),
-            ':updated_at' => (string)($data['updated_at'] ?? gmdate('Y-m-d H:i:s')),
-        ]);
+        $actionToken = (string)(($action['action']['token'] ?? '') ?: $token);
 
-        return (int)$this->pdo->lastInsertId();
+        $actionUrl = $actionType === 'instructor_approval'
+            ? $this->buildInternalAppUrl('/instructor/instructor_approval.php?token=' . urlencode($actionToken))
+            : $this->buildInternalAppUrl('/student/remediation_action.php?token=' . urlencode($actionToken));
+
+        $action['action_url'] = $actionUrl;
+        $result['actions'][] = $action;
+
+        if ($actionType === 'instructor_approval') {
+            $result['latest_instructor_action_id'] = (int)$action['action_id'];
+        }
     }
+
+    return $result;
+}
 
 public function buildNotificationDecision(array $progressionContext, array $decision, array $context = []): array
 {
