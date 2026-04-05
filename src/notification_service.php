@@ -1360,6 +1360,7 @@ final class NotificationService
         $variableMap = $this->buildVariableMap($allowedVariables);
 
         $subject = $this->renderTemplateString($subjectTemplate, $variableMap, $context, false);
+		$subject = html_entity_decode($subject, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $html = $this->renderTemplateString($htmlTemplate, $variableMap, $context, true);
         $text = trim($textTemplate) !== ''
             ? $this->renderTemplateString($textTemplate, $variableMap, $context, false)

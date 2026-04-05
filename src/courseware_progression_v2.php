@@ -1948,47 +1948,61 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         $result['should_create_any'] = true;
 
         foreach ((array)($requiredActionDecision['action_types'] ?? []) as $actionType) {
-            $token = bin2hex(random_bytes(32));
-            $title = $actionType === 'instructor_approval'
-                ? 'Instructor Approval Required - ' . $this->getLessonTitle((int)$test['lesson_id'])
-                : 'Remedial Study Acknowledgement - ' . $this->getLessonTitle((int)$test['lesson_id']);
+    $token = bin2hex(random_bytes(32));
+    $title = $actionType === 'instructor_approval'
+        ? 'Instructor Approval Required - ' . $this->getLessonTitle((int)$test['lesson_id'])
+        : 'Remedial Study Acknowledgement - ' . $this->getLessonTitle((int)$test['lesson_id']);
 
-            $action = $this->createOrReuseRequiredActionSafe([
-                'user_id' => (int)$test['user_id'],
-                'cohort_id' => (int)$test['cohort_id'],
-                'lesson_id' => (int)$test['lesson_id'],
-                'progress_test_id' => $progressTestId,
-                'action_type' => (string)$actionType,
-                'token' => $token,
-                'title' => $title,
-            ]);
+    $actionData = [
+        'user_id' => (int)$test['user_id'],
+        'cohort_id' => (int)$test['cohort_id'],
+        'lesson_id' => (int)$test['lesson_id'],
+        'progress_test_id' => $progressTestId,
+        'action_type' => (string)$actionType,
+        'token' => $token,
+        'title' => $title,
+    ];
 
-            $actionToken = (string)(($action['action']['token'] ?? '') ?: $token);
-            $actionUrl = $actionType === 'instructor_approval'
-                ? $this->buildInternalAppUrl('/instructor/instructor_approval.php?token=' . urlencode($actionToken))
-                : $this->buildInternalAppUrl('/student/remediation_action.php?token=' . urlencode($actionToken));
+    if ($actionType === 'remediation_acknowledgement') {
+        $lessonTitle = $this->getLessonTitle((int)$test['lesson_id']);
+        $weakAreasText = trim((string)($test['weak_areas'] ?? ''));
+        $debriefText = trim((string)($test['ai_summary'] ?? ''));
 
-            $action['action_url'] = $actionUrl;
-            $result['actions'][] = $action;
+        $instructionsText = "Please review the following before confirming your remedial study:\n\n";
 
-            if ($actionType === 'instructor_approval') {
-                $result['latest_instructor_action_id'] = (int)$action['action_id'];
-            }
+        if ($weakAreasText !== '') {
+            $instructionsText .= "Weak areas to review:\n" . $weakAreasText . "\n\n";
         }
 
-        return $result;
+        if ($debriefText !== '') {
+            $instructionsText .= "Debrief summary:\n" . $debriefText . "\n\n";
+        }
+
+        $instructionsText .= "After reviewing the material for lesson \"" . $lessonTitle . "\", confirm below that you completed the required remedial study.";
+
+        $instructionsHtml = '<div>'
+            . '<p>Please review the following before confirming your remedial study:</p>';
+
+        if ($weakAreasText !== '') {
+            $instructionsHtml .= '<h3 style="margin:14px 0 6px 0;">Weak areas to review</h3>'
+                . '<div>' . nl2br($this->escapeHtml($weakAreasText)) . '</div>';
+        }
+
+        if ($debriefText !== '') {
+            $instructionsHtml .= '<h3 style="margin:14px 0 6px 0;">Debrief summary</h3>'
+                . '<div>' . nl2br($this->escapeHtml($debriefText)) . '</div>';
+        }
+
+        $instructionsHtml .= '<p style="margin-top:14px;">After reviewing the material for lesson <strong>'
+            . $this->escapeHtml($lessonTitle)
+            . '</strong>, confirm below that you completed the required remedial study.</p>'
+            . '</div>';
+
+        $actionData['instructions_text'] = $instructionsText;
+        $actionData['instructions_html'] = $instructionsHtml;
     }
 
-    public function createRequiredAction(array $data): int
-    {
-        $required = [
-            'user_id',
-            'cohort_id',
-            'lesson_id',
-            'action_type',
-            'token',
-            'title',
-        ];
+    $action = $this->createOrReuseRequiredActionSafe($actionData);
 
         foreach ($required as $field) {
             if (!array_key_exists($field, $data)) {
