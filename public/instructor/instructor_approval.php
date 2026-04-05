@@ -8,24 +8,11 @@ require_once __DIR__ . '/../../src/courseware_progression_v2.php';
 
 cw_require_login();
 
-//$u = cw_current_user($pdo);
-//$userId = (int)($u['id'] ?? 0);
-//$role = trim((string)($u['role'] ?? ''));
-
 $u = cw_current_user($pdo);
 $userId = (int)($u['id'] ?? 0);
 $role = trim((string)($u['role'] ?? ''));
 
-echo '<pre>';
-echo 'USER ID: ' . $userId . "\n";
-echo 'ROLE RAW: ';
-var_dump($u['role'] ?? null);
-echo 'ROLE TRIMMED: ';
-var_dump($role);
-echo '</pre>';
-exit;
-
-$allowedRoles = ['admin', 'chief_instructor', 'instructor'];
+$allowedRoles = ['admin', 'chief_instructor', 'instructor', 'supervisor'];
 if (!in_array($role, $allowedRoles, true)) {
     http_response_code(403);
     exit('Forbidden');
@@ -129,10 +116,10 @@ function load_instructor_approval_page_state(
     string $token,
     string $role
 ): array {
-    if (!in_array($role, ['admin', 'instructor', 'chief_instructor'], true)) {
-        http_response_code(403);
-        exit('Forbidden');
-    }
+    if (!in_array($role, ['admin', 'instructor', 'chief_instructor', 'supervisor'], true)) {
+    http_response_code(403);
+    exit('Forbidden');
+}
 
     $state = $engine->getInstructorApprovalPageStateByToken($token);
 
