@@ -1,4 +1,19 @@
 <?php
+
+
+$u = cw_current_user($pdo);
+$userId = (int)($u['id'] ?? 0);
+$role = trim((string)($u['role'] ?? ''));
+
+echo '<pre>';
+echo 'USER ID: ' . $userId . "\n";
+echo 'ROLE RAW: ';
+var_dump($u['role'] ?? null);
+echo 'ROLE TRIMMED: ';
+var_dump($role);
+echo '</pre>';
+exit;
+
 declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
