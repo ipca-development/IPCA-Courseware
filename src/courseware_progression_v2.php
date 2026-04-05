@@ -808,44 +808,7 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             $projection
         );
 
-        $notificationDecision = $this->buildNotificationDecision(
-            $context,
-            $decision,
-            [
-                'behavior_mode'    => $behaviorMode,
-                'required_actions' => $requiredActions,
-                'phase'            => 'finalize',
-                'classification'   => $classification,
-                'score_pct'        => $scorePct,
-                'attempt'          => (int)($testRow['attempt'] ?? 0),
-                'weak_areas'       => $weakAreas,
-                'ai_summary'       => $aiSummary,
-                'summary_quality'  => $summaryQual,
-                'summary_issues'   => $summaryIssues,
-                'summary_corrections' => $summaryCorr,
-                'confirmed_misunderstandings' => $misunder,
-            ]
-        );
-
-        $queuedEmailIds = [];
-
-        foreach ((array)$notificationDecision['notifications'] as $n) {
-            $queue = $this->renderAndQueueNotificationTemplate([
-                'notification_key' => $n['notification_key'],
-                'user_id'          => $userId,
-                'cohort_id'        => $cohortId,
-                'lesson_id'        => $lessonId,
-                'progress_test_id' => $progressTestId,
-                'email_type'       => $n['email_type'],
-                'recipients_to'    => [$n['recipient']],
-                'context'          => $n['context'],
-                'sent_status'      => 'queued'
-            ]);
-
-            if (!empty($queue['queued'])) {
-                $queuedEmailIds[] = (int)$queue['email_id'];
-            }
-        }
+		$queuedEmailIds = [];
 
         $studentName = (string)(($context['student_recipient']['name'] ?? '') ?: 'Student');
         $studentEmail = (string)($context['student_recipient']['email'] ?? '');
