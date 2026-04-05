@@ -1,5 +1,16 @@
 <?php
 
+declare(strict_types=1);
+
+require_once __DIR__ . '/../../src/bootstrap.php';
+require_once __DIR__ . '/../../src/layout.php';
+require_once __DIR__ . '/../../src/courseware_progression_v2.php';
+
+cw_require_login();
+
+//$u = cw_current_user($pdo);
+//$userId = (int)($u['id'] ?? 0);
+//$role = trim((string)($u['role'] ?? ''));
 
 $u = cw_current_user($pdo);
 $userId = (int)($u['id'] ?? 0);
@@ -13,18 +24,6 @@ echo 'ROLE TRIMMED: ';
 var_dump($role);
 echo '</pre>';
 exit;
-
-declare(strict_types=1);
-
-require_once __DIR__ . '/../../src/bootstrap.php';
-require_once __DIR__ . '/../../src/layout.php';
-require_once __DIR__ . '/../../src/courseware_progression_v2.php';
-
-cw_require_login();
-
-$u = cw_current_user($pdo);
-$userId = (int)($u['id'] ?? 0);
-$role = trim((string)($u['role'] ?? ''));
 
 $allowedRoles = ['admin', 'chief_instructor', 'instructor'];
 if (!in_array($role, $allowedRoles, true)) {
