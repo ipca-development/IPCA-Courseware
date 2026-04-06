@@ -19,7 +19,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         }
 
-        header('Location: /');
+     
+		$role = (string)($user['role'] ?? '');
+
+		if ($role === 'admin') {
+			header('Location: /admin/dashboard.php');
+			exit;
+		}
+
+		if (
+			$role === 'instructor' ||
+			$role === 'supervisor' ||
+			$role === 'chief_instructor'
+		) {
+			header('Location: /instructor/dashboard.php');
+			exit;
+		}
+
+		if ($role === 'student') {
+			header('Location: /student/dashboard.php');
+			exit;
+}
+
+// fallback (safety)
+header('Location: /');
+exit;
+		
+		
         exit;
     }
 
