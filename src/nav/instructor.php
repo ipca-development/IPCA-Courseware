@@ -44,27 +44,23 @@ return [
         'icon' => 'theory',
         'items' => [
             [
+                'key' => 'cohort_progress',
+                'label' => 'Cohort Progress',
+                'icon' => 'reviews',
+                'href' => '/instructor/cohort_progress_overview.php',
+                'match_paths' => [
+                    '/instructor/cohort_progress_overview.php',
+                    '/instructor/instructor_approval.php',
+                ],
+            ],
+            [
                 'key' => 'summary_reviews',
                 'label' => 'Summary Reviews',
                 'icon' => 'reviews',
                 'href' => null,
                 'coming_soon' => true,
             ],
-            [
-                'key' => 'instructor_decisions',
-                'label' => 'Instructor Decisions',
-                'icon' => 'decisions',
-                'href' => null,
-                'coming_soon' => true,
-            ],
         ],
-    ],
-    [
-        'key' => 'flight_training',
-        'label' => 'Flight Training',
-        'icon' => 'flight',
-        'href' => null,
-        'coming_soon' => true,
     ],
 
     [
