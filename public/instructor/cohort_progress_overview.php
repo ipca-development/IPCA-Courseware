@@ -353,18 +353,21 @@ $cohortSql = "
     SELECT
         c.id,
         c.name,
-        COALESCE(cr.title, CONCAT('Course #', c.course_id)) AS course_title,
-        COUNT(DISTINCT e.user_id) AS student_count
+        COALESCE(cr.title, CONCAT('Course #', cc.course_id)) AS course_title,
+        COUNT(DISTINCT CASE
+            WHEN u.role = 'student' AND u.status = 'active' THEN cs.user_id
+            ELSE NULL
+        END) AS student_count
     FROM cohorts c
+    LEFT JOIN cohort_courses cc
+        ON cc.cohort_id = c.id
     LEFT JOIN courses cr
-        ON cr.id = c.course_id
-    LEFT JOIN enrollments e
-        ON e.cohort_id = c.id
+        ON cr.id = cc.course_id
+    LEFT JOIN cohort_students cs
+        ON cs.cohort_id = c.id
     LEFT JOIN users u
-        ON u.id = e.user_id
-       AND u.role = 'student'
-       AND u.status = 'active'
-    GROUP BY c.id, c.name, cr.title, c.course_id
+        ON u.id = cs.user_id
+    GROUP BY c.id, c.name, cr.title, cc.course_id
     ORDER BY c.name ASC, c.id ASC
 ";
 
@@ -387,146 +390,148 @@ $studentRows = array();
 
 if ($cohortId > 0) {
     $studentSql = "
-        SELECT
-            u.id AS user_id,
-            u.name AS student_name,
-            u.first_name,
-            u.last_name,
-            u.email,
-            u.photo_path,
+    SELECT
+        u.id AS user_id,
+        u.name AS student_name,
+        u.first_name,
+        u.last_name,
+        u.email,
+        u.photo_path,
 
-            c.id AS cohort_id,
-            c.name AS cohort_name,
-            COALESCE(cr.title, CONCAT('Course #', c.course_id)) AS course_title,
+        c.id AS cohort_id,
+        c.name AS cohort_name,
+        COALESCE(cr.title, CONCAT('Course #', cc.course_id)) AS course_title,
 
-            MAX(pt.completed_at) AS latest_attempt_at,
-            MIN(CASE WHEN pt.score_pct IS NOT NULL THEN pt.score_pct END) AS first_attempt_score,
-            MAX(CASE WHEN pt.score_pct IS NOT NULL THEN pt.score_pct END) AS best_score_calc,
-            AVG(CASE WHEN pt.score_pct IS NOT NULL THEN pt.score_pct END) AS avg_score,
-            MAX(CASE WHEN pt.id = (
-                SELECT pt2.id
-                FROM progress_tests_v2 pt2
-                WHERE pt2.user_id = u.id
-                  AND pt2.cohort_id = c.id
-                ORDER BY COALESCE(pt2.completed_at, pt2.created_at) DESC, pt2.id DESC
-                LIMIT 1
-            ) THEN pt.score_pct END) AS latest_score,
+        MAX(pt.completed_at) AS latest_attempt_at,
+        MIN(CASE WHEN pt.score_pct IS NOT NULL THEN pt.score_pct END) AS first_attempt_score,
+        MAX(CASE WHEN pt.score_pct IS NOT NULL THEN pt.score_pct END) AS best_score_calc,
+        AVG(CASE WHEN pt.score_pct IS NOT NULL THEN pt.score_pct END) AS avg_score,
+        MAX(CASE WHEN pt.id = (
+            SELECT pt2.id
+            FROM progress_tests_v2 pt2
+            WHERE pt2.user_id = u.id
+              AND pt2.cohort_id = c.id
+            ORDER BY COALESCE(pt2.completed_at, pt2.created_at) DESC, pt2.id DESC
+            LIMIT 1
+        ) THEN pt.score_pct END) AS latest_score,
 
-            COUNT(DISTINCT pt.id) AS attempt_count_calc,
-            SUM(CASE WHEN pt.pass_gate_met = 1 THEN 1 ELSE 0 END) AS pass_count_calc,
-            SUM(CASE WHEN pt.timing_status = 'late' OR pt.timing_status = 'after_final_deadline' THEN 1 ELSE 0 END) AS late_attempt_count,
+        COUNT(DISTINCT pt.id) AS attempt_count_calc,
+        SUM(CASE WHEN pt.pass_gate_met = 1 THEN 1 ELSE 0 END) AS pass_count_calc,
+        SUM(CASE WHEN pt.timing_status = 'late' OR pt.timing_status = 'after_final_deadline' THEN 1 ELSE 0 END) AS late_attempt_count,
 
-            SUM(CASE WHEN ls.review_status = 'acceptable' THEN 1 ELSE 0 END) AS summary_acceptable_count,
-            SUM(CASE WHEN ls.review_status = 'needs_revision' THEN 1 ELSE 0 END) AS summary_needs_revision_count,
+        SUM(CASE WHEN ls.review_status = 'acceptable' THEN 1 ELSE 0 END) AS summary_acceptable_count,
+        SUM(CASE WHEN ls.review_status = 'needs_revision' THEN 1 ELSE 0 END) AS summary_needs_revision_count,
 
-            SUM(CASE WHEN la.completion_status = 'deadline_blocked' OR la.test_pass_status = 'deadline_missed' THEN 1 ELSE 0 END) AS deadline_missed_count,
-            SUM(CASE WHEN la.training_suspended = 1 THEN 1 ELSE 0 END) AS training_suspended_count,
-            SUM(CASE WHEN la.one_on_one_required = 1 THEN 1 ELSE 0 END) AS one_on_one_required_count,
-            SUM(CASE WHEN la.one_on_one_completed = 1 THEN 1 ELSE 0 END) AS one_on_one_completed_count,
+        SUM(CASE WHEN la.completion_status = 'deadline_blocked' OR la.test_pass_status = 'deadline_missed' THEN 1 ELSE 0 END) AS deadline_missed_count,
+        SUM(CASE WHEN la.training_suspended = 1 THEN 1 ELSE 0 END) AS training_suspended_count,
+        SUM(CASE WHEN la.one_on_one_required = 1 THEN 1 ELSE 0 END) AS one_on_one_required_count,
+        SUM(CASE WHEN la.one_on_one_completed = 1 THEN 1 ELSE 0 END) AS one_on_one_completed_count,
 
-            COUNT(DISTINCT CASE WHEN sra.status IN ('pending','opened') THEN sra.id END) AS pending_actions_count,
-            COUNT(DISTINCT CASE WHEN sra.action_type = 'instructor_approval' AND sra.status IN ('pending','opened') THEN sra.id END) AS pending_instructor_actions_count,
-            COUNT(DISTINCT CASE WHEN sra.action_type = 'remediation_acknowledgement' AND sra.status IN ('pending','opened') THEN sra.id END) AS pending_remediation_actions_count,
-            COUNT(DISTINCT CASE WHEN sra.action_type = 'deadline_reason_submission' AND sra.status IN ('pending','opened') THEN sra.id END) AS pending_reason_actions_count,
+        COUNT(DISTINCT CASE WHEN sra.status IN ('pending','opened') THEN sra.id END) AS pending_actions_count,
+        COUNT(DISTINCT CASE WHEN sra.action_type = 'instructor_approval' AND sra.status IN ('pending','opened') THEN sra.id END) AS pending_instructor_actions_count,
+        COUNT(DISTINCT CASE WHEN sra.action_type = 'remediation_acknowledgement' AND sra.status IN ('pending','opened') THEN sra.id END) AS pending_remediation_actions_count,
+        COUNT(DISTINCT CASE WHEN sra.action_type = 'deadline_reason_submission' AND sra.status IN ('pending','opened') THEN sra.id END) AS pending_reason_actions_count,
 
-            MAX(COALESCE(la.last_state_eval_at, pt.completed_at, ls.updated_at, sra.updated_at, u.updated_at)) AS latest_activity_at,
+        MAX(COALESCE(la.last_state_eval_at, pt.completed_at, ls.updated_at, sra.updated_at, u.updated_at)) AS latest_activity_at,
 
-            (
-                SELECT sra2.id
-                FROM student_required_actions sra2
-                WHERE sra2.user_id = u.id
-                  AND sra2.cohort_id = c.id
-                  AND sra2.action_type = 'instructor_approval'
-                  AND sra2.status IN ('pending','opened','approved')
-                ORDER BY sra2.id DESC
-                LIMIT 1
-            ) AS latest_instructor_action_id,
+        (
+            SELECT sra2.id
+            FROM student_required_actions sra2
+            WHERE sra2.user_id = u.id
+              AND sra2.cohort_id = c.id
+              AND sra2.action_type = 'instructor_approval'
+              AND sra2.status IN ('pending','opened','approved')
+            ORDER BY sra2.id DESC
+            LIMIT 1
+        ) AS latest_instructor_action_id,
 
-            (
-                SELECT sra3.token
-                FROM student_required_actions sra3
-                WHERE sra3.user_id = u.id
-                  AND sra3.cohort_id = c.id
-                  AND sra3.action_type = 'instructor_approval'
-                  AND sra3.status IN ('pending','opened','approved')
-                ORDER BY sra3.id DESC
-                LIMIT 1
-            ) AS latest_instructor_action_token,
+        (
+            SELECT sra3.token
+            FROM student_required_actions sra3
+            WHERE sra3.user_id = u.id
+              AND sra3.cohort_id = c.id
+              AND sra3.action_type = 'instructor_approval'
+              AND sra3.status IN ('pending','opened','approved')
+            ORDER BY sra3.id DESC
+            LIMIT 1
+        ) AS latest_instructor_action_token,
 
-            (
-                SELECT l.title
-                FROM student_required_actions sra4
-                INNER JOIN lessons l
-                    ON l.id = sra4.lesson_id
-                WHERE sra4.user_id = u.id
-                  AND sra4.cohort_id = c.id
-                  AND sra4.status IN ('pending','opened')
-                ORDER BY sra4.id DESC
-                LIMIT 1
-            ) AS attention_lesson_title,
+        (
+            SELECT l.title
+            FROM student_required_actions sra4
+            INNER JOIN lessons l
+                ON l.id = sra4.lesson_id
+            WHERE sra4.user_id = u.id
+              AND sra4.cohort_id = c.id
+              AND sra4.status IN ('pending','opened')
+            ORDER BY sra4.id DESC
+            LIMIT 1
+        ) AS attention_lesson_title,
 
-            (
-                SELECT ls2.review_status
-                FROM lesson_summaries ls2
-                WHERE ls2.user_id = u.id
-                  AND ls2.cohort_id = c.id
-                ORDER BY ls2.updated_at DESC, ls2.id DESC
-                LIMIT 1
-            ) AS latest_summary_status,
+        (
+            SELECT ls2.review_status
+            FROM lesson_summaries ls2
+            WHERE ls2.user_id = u.id
+              AND ls2.cohort_id = c.id
+            ORDER BY ls2.updated_at DESC, ls2.id DESC
+            LIMIT 1
+        ) AS latest_summary_status,
 
-            (
-                SELECT pt3.formal_result_label
-                FROM progress_tests_v2 pt3
-                WHERE pt3.user_id = u.id
-                  AND pt3.cohort_id = c.id
-                ORDER BY COALESCE(pt3.completed_at, pt3.created_at) DESC, pt3.id DESC
-                LIMIT 1
-            ) AS latest_result_label,
+        (
+            SELECT pt3.formal_result_label
+            FROM progress_tests_v2 pt3
+            WHERE pt3.user_id = u.id
+              AND pt3.cohort_id = c.id
+            ORDER BY COALESCE(pt3.completed_at, pt3.created_at) DESC, pt3.id DESC
+            LIMIT 1
+        ) AS latest_result_label,
 
-            (
-                SELECT pt4.formal_result_code
-                FROM progress_tests_v2 pt4
-                WHERE pt4.user_id = u.id
-                  AND pt4.cohort_id = c.id
-                ORDER BY COALESCE(pt4.completed_at, pt4.created_at) DESC, pt4.id DESC
-                LIMIT 1
-            ) AS latest_result_code
+        (
+            SELECT pt4.formal_result_code
+            FROM progress_tests_v2 pt4
+            WHERE pt4.user_id = u.id
+              AND pt4.cohort_id = c.id
+            ORDER BY COALESCE(pt4.completed_at, pt4.created_at) DESC, pt4.id DESC
+            LIMIT 1
+        ) AS latest_result_code
 
-        FROM enrollments e
-        INNER JOIN users u
-            ON u.id = e.user_id
-           AND u.role = 'student'
-           AND u.status = 'active'
-        INNER JOIN cohorts c
-            ON c.id = e.cohort_id
-        LEFT JOIN courses cr
-            ON cr.id = c.course_id
-        LEFT JOIN progress_tests_v2 pt
-            ON pt.user_id = u.id
-           AND pt.cohort_id = c.id
-        LEFT JOIN lesson_summaries ls
-            ON ls.user_id = u.id
-           AND ls.cohort_id = c.id
-        LEFT JOIN lesson_activity la
-            ON la.user_id = u.id
-           AND la.cohort_id = c.id
-        LEFT JOIN student_required_actions sra
-            ON sra.user_id = u.id
-           AND sra.cohort_id = c.id
-        WHERE e.cohort_id = :cohort_id
-        GROUP BY
-            u.id,
-            u.name,
-            u.first_name,
-            u.last_name,
-            u.email,
-            u.photo_path,
-            c.id,
-            c.name,
-            cr.title,
-            c.course_id
-        ORDER BY u.name ASC, u.id ASC
-    ";
+    FROM cohort_students cs
+    INNER JOIN users u
+        ON u.id = cs.user_id
+       AND u.role = 'student'
+       AND u.status = 'active'
+    INNER JOIN cohorts c
+        ON c.id = cs.cohort_id
+    LEFT JOIN cohort_courses cc
+        ON cc.cohort_id = c.id
+    LEFT JOIN courses cr
+        ON cr.id = cc.course_id
+    LEFT JOIN progress_tests_v2 pt
+        ON pt.user_id = u.id
+       AND pt.cohort_id = c.id
+    LEFT JOIN lesson_summaries ls
+        ON ls.user_id = u.id
+       AND ls.cohort_id = c.id
+    LEFT JOIN lesson_activity la
+        ON la.user_id = u.id
+       AND la.cohort_id = c.id
+    LEFT JOIN student_required_actions sra
+        ON sra.user_id = u.id
+       AND sra.cohort_id = c.id
+    WHERE cs.cohort_id = :cohort_id
+    GROUP BY
+        u.id,
+        u.name,
+        u.first_name,
+        u.last_name,
+        u.email,
+        u.photo_path,
+        c.id,
+        c.name,
+        cr.title,
+        cc.course_id
+    ORDER BY u.name ASC, u.id ASC
+";
 
     $studentStmt = $pdo->prepare($studentSql);
     $studentStmt->execute(array(
