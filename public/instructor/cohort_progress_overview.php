@@ -1324,25 +1324,6 @@ cw_header('Cohort Progress Overview');
                                 </div>
 
                                 <div class="cpo-kv">
-									<div class="cpo-kv-label">Latest Result</div>
-									<div class="cpo-kv-value" style="min-width:250px;">
-										<?php if ($latestScoreDisplay !== null): ?>
-											<div class="cpo-inline-bar compact">
-												<div class="cpo-progress-value"><?php echo cpo_h((string)$latestScoreDisplay); ?>%</div>
-												<div class="cpo-progress-track">
-													<div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($latestScoreDisplay)); ?>" style="width:<?php echo (int)$latestScoreDisplay; ?>%;"></div>
-												</div>
-												<span class="cpo-inline-status <?php echo cpo_h(cpo_result_pill_class($latestResultCode)); ?>">
-													<?php echo cpo_h(cpo_result_pill_label($latestResultLabel, $latestResultCode)); ?>
-												</span>
-											</div>
-										<?php else: ?>
-											—
-										<?php endif; ?>
-									</div>
-								</div>
-
-                                <div class="cpo-kv">
                                     <div class="cpo-kv-label">Latest Score</div>
                                     <div class="cpo-kv-value" style="min-width:210px;">
                                         <?php if ($latestScoreDisplay !== null): ?>
