@@ -74,7 +74,7 @@ function ia_format_datetime_utc(?string $dt): string
         return $dt;
     }
 
-    return gmdate('D M j, Y', $ts) . ' · ' . gmdate('H:i', $ts) . ' UTC';
+    return gmdate('D M j, Y', $ts) . ' - ' . gmdate('H:i', $ts) . ' UTC';
 }
 
 function ia_percent_clamped(?float $value): ?int
@@ -161,6 +161,22 @@ function ia_decision_ui_options(): array
             'help' => 'Progression paused pending stronger intervention.',
         ),
     );
+}
+
+function ia_human_completion_status(string $status): array
+{
+    return match ($status) {
+        'instructor_required' => array('label' => 'Instructor Required', 'class' => 'warning'),
+        'remediation_required' => array('label' => 'Remediation Required', 'class' => 'warning'),
+        'training_suspended' => array('label' => 'Training Suspended', 'class' => 'danger'),
+        'deadline_blocked' => array('label' => 'Deadline Blocked', 'class' => 'danger'),
+        'summary_required' => array('label' => 'Summary Required', 'class' => 'warning'),
+        'awaiting_summary_review' => array('label' => 'Awaiting Summary Review', 'class' => 'info'),
+        'awaiting_test_completion' => array('label' => 'Awaiting Test Completion', 'class' => 'info'),
+        'completed' => array('label' => 'Completed', 'class' => 'ok'),
+        'in_progress' => array('label' => 'In Progress', 'class' => 'info'),
+        default => array('label' => $status !== '' ? ucwords(str_replace('_', ' ', $status)) : '—', 'class' => 'info'),
+    };
 }
 
 function ia_load_state(CoursewareProgressionV2 $engine, string $token): array
@@ -296,8 +312,8 @@ function ia_collect_attempt_items(PDO $pdo, array $attemptIds): array
 
 function ia_collect_official_references(PDO $pdo, int $lessonId): array
 {
-    try {
-        $stmt = $pdo->prepare("
+    $sqlVariants = array(
+        "
             SELECT
                 sr.ref_type,
                 sr.ref_code,
@@ -307,21 +323,53 @@ function ia_collect_official_references(PDO $pdo, int $lessonId): array
                 sr.confidence,
                 s.id AS slide_id,
                 s.title AS slide_title
-            FROM slides s
-            INNER JOIN slide_references sr
-                ON sr.slide_id = s.id
+            FROM slide_references sr
+            INNER JOIN slides s
+                ON s.id = sr.slide_id
             WHERE s.lesson_id = ?
             ORDER BY
                 FIELD(sr.ref_type, 'ACS', 'PHAK', 'FAR_AIM', 'EASA'),
                 sr.confidence DESC,
                 s.id ASC,
                 sr.id ASC
-        ");
-        $stmt->execute(array($lessonId));
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
-    } catch (Throwable $e) {
-        return array();
+        ",
+        "
+            SELECT
+                sr.ref_type,
+                sr.ref_code,
+                sr.ref_title,
+                sr.notes,
+                sr.ref_detail,
+                sr.confidence,
+                s.id AS slide_id,
+                s.title AS slide_title
+            FROM slide_references sr
+            INNER JOIN slides s
+                ON s.id = sr.slide_id
+            INNER JOIN slide_enrichment se
+                ON se.slide_id = s.id
+            WHERE se.lesson_id = ?
+            ORDER BY
+                FIELD(sr.ref_type, 'ACS', 'PHAK', 'FAR_AIM', 'EASA'),
+                sr.confidence DESC,
+                s.id ASC,
+                sr.id ASC
+        "
+    );
+
+    foreach ($sqlVariants as $sql) {
+        try {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array($lessonId));
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+            if ($rows) {
+                return $rows;
+            }
+        } catch (Throwable $e) {
+        }
     }
+
+    return array();
 }
 
 function ia_build_audio_url(string $audioPath): string
@@ -341,19 +389,30 @@ function ia_build_audio_url(string $audioPath): string
 
 function ia_build_difficulty_lines(array $attempts, array $attemptItems): array
 {
-    $weakAreaLines = array();
+    $weakKeywordCounts = array();
     $failedPromptCounts = array();
 
     foreach ($attempts as $attempt) {
         $testId = (int)($attempt['id'] ?? 0);
-
         $weakAreas = trim((string)($attempt['weak_areas'] ?? ''));
+
         if ($weakAreas !== '') {
             foreach (preg_split('/\r\n|\r|\n/', $weakAreas) as $line) {
                 $line = trim($line);
-                if ($line !== '') {
-                    $weakAreaLines[] = $line;
+                if ($line === '') {
+                    continue;
                 }
+
+                $line = preg_replace('/^[\-\*\•\d\.\)\s]+/u', '', $line);
+                $line = trim((string)$line);
+                if ($line === '') {
+                    continue;
+                }
+
+                if (!isset($weakKeywordCounts[$line])) {
+                    $weakKeywordCounts[$line] = 0;
+                }
+                $weakKeywordCounts[$line]++;
             }
         }
 
@@ -378,20 +437,24 @@ function ia_build_difficulty_lines(array $attempts, array $attemptItems): array
         }
     }
 
+    arsort($weakKeywordCounts);
+    arsort($failedPromptCounts);
+
     $out = array();
-    foreach (array_values(array_unique($weakAreaLines)) as $line) {
-        $out[] = $line;
-        if (count($out) >= 4) {
+
+    foreach ($weakKeywordCounts as $line => $count) {
+        $out[] = $count > 1
+            ? 'Repeated core gap: ' . $line . ' (' . $count . ' times)'
+            : 'Core gap: ' . $line;
+        if (count($out) >= 3) {
             break;
         }
     }
 
-    if (count($out) < 6 && $failedPromptCounts) {
-        arsort($failedPromptCounts);
+    if (count($out) < 5) {
         foreach ($failedPromptCounts as $prompt => $count) {
-            $out[] = 'Repeated weakness area from oral questioning: ' . $prompt
-                . ($count > 1 ? ' (' . $count . ' times)' : '');
-            if (count($out) >= 6) {
+            $out[] = 'Weak oral performance area: ' . $prompt . ($count > 1 ? ' (' . $count . ' times)' : '');
+            if (count($out) >= 5) {
                 break;
             }
         }
@@ -476,7 +539,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'required_action_id' => (int)$action['id'],
                     'review_notes_length' => strlen($reviewNotes),
                 ),
-                'legal_note' => 'Instructor summary notes saved from instructor approval page.',
+                'legal_note' => 'Instructor summary notes saved from instructor intervention page.',
             ));
 
             $flashSuccess = 'Instructor summary notes saved successfully.';
@@ -535,7 +598,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $studentUserId = (int)($action['user_id'] ?? 0);
 $cohortId = (int)($action['cohort_id'] ?? 0);
 $lessonId = (int)($action['lesson_id'] ?? 0);
-$progressTestId = isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : 0;
 
 $studentStmt = $pdo->prepare("
     SELECT id, name, first_name, last_name, email, photo_path, role
@@ -628,8 +690,9 @@ foreach ($attemptHistory as $attemptRow) {
 }
 
 $decisionOptions = ia_decision_ui_options();
+$completionStatusUi = ia_human_completion_status((string)($activity['completion_status'] ?? ''));
 
-cw_header('Instructor Approval');
+cw_header('Instructor Intervention');
 ?>
 
 <style>
@@ -640,7 +703,6 @@ cw_header('Instructor Approval');
 .ia-hero{padding:22px 24px}
 .ia-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#64748b;font-weight:800;margin-bottom:8px}
 .ia-title{margin:0;font-size:32px;line-height:1.05;letter-spacing:-.04em;color:#102845}
-.ia-sub{margin-top:10px;font-size:14px;line-height:1.6;color:#56677f;max-width:980px}
 .ia-chip-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 .ia-chip{
     display:inline-flex;align-items:center;justify-content:center;min-height:30px;
@@ -674,11 +736,10 @@ cw_header('Instructor Approval');
 .ia-kv{padding:14px 14px;border-radius:16px;border:1px solid rgba(15,23,42,.07);background:#fff}
 .ia-kv-label{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#64748b;font-weight:800}
 .ia-kv-value{margin-top:8px;font-size:20px;font-weight:820;color:#102845;letter-spacing:-.03em}
-.ia-kv-sub{margin-top:6px;font-size:12px;color:#64748b;line-height:1.5}
 .ia-progress-row{display:flex;flex-direction:column;gap:7px}
-.ia-inline-bar{display:flex;align-items:center;gap:10px}
-.ia-inline-bar .ia-progress-value{min-width:44px;text-align:right;font-size:12px;font-weight:800;color:#64748b}
-.ia-track{flex:1 1 auto;height:12px;border-radius:999px;overflow:hidden;background:#e7edf5}
+.ia-inline-bar{display:flex;align-items:center;gap:12px}
+.ia-inline-bar .ia-progress-value{min-width:52px;text-align:right;font-size:14px;font-weight:900;color:#102845}
+.ia-track{flex:1 1 auto;height:14px;border-radius:999px;overflow:hidden;background:#e7edf5}
 .ia-fill{height:100%;border-radius:999px}
 .ia-fill.good{background:linear-gradient(90deg,#166534 0%,#22c55e 100%)}
 .ia-fill.amber{background:linear-gradient(90deg,#c2410c 0%,#f59e0b 100%)}
@@ -719,6 +780,7 @@ cw_header('Instructor Approval');
     width:100%;box-sizing:border-box;border:1px solid rgba(15,23,42,.12);
     border-radius:12px;padding:10px 12px;background:#fff;color:#102845;font:inherit;
 }
+.ia-select,.ia-input{height:46px}
 .ia-textarea{min-height:110px;resize:vertical}
 .ia-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
 .ia-btn{
@@ -729,11 +791,11 @@ cw_header('Instructor Approval');
 .ia-btn.secondary{background:#fff;color:#12355f}
 .ia-attempt-table-wrap{overflow:auto}
 .ia-attempt-table{width:100%;border-collapse:collapse}
-.ia-attempt-table th,.ia-attempt-table td{padding:12px 10px;border-bottom:1px solid rgba(15,23,42,.06);vertical-align:top}
+.ia-attempt-table th,.ia-attempt-table td{padding:12px 10px;border-bottom:1px solid rgba(15,23,42,.06);vertical-align:middle}
 .ia-attempt-table th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#64748b;font-weight:800}
 .ia-table-actions{display:flex;gap:8px;flex-wrap:wrap}
 .ia-link-btn{
-    display:inline-flex;align-items:center;justify-content:center;min-height:32px;padding:0 10px;border-radius:10px;
+    display:inline-flex;align-items:center;justify-content:center;min-height:34px;padding:0 12px;border-radius:10px;
     border:1px solid rgba(15,23,42,.10);background:#fff;color:#102845;font-size:12px;font-weight:800;text-decoration:none;cursor:pointer;
 }
 .ia-summary-preview{max-height:220px;overflow:auto;padding:14px;border-radius:16px;border:1px solid rgba(15,23,42,.07);background:#fff}
@@ -755,7 +817,10 @@ cw_header('Instructor Approval');
 .ia-qa-q{font-size:13px;font-weight:820;color:#102845;line-height:1.45}
 .ia-qa-a{margin-top:10px;font-size:13px;line-height:1.6;color:#334155;white-space:pre-wrap}
 .ia-audio-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:10px}
-.ia-override-meta{margin-top:10px;padding:10px 12px;border-radius:12px;background:#f8fafc;border:1px solid rgba(15,23,42,.06);font-size:12px;line-height:1.5;color:#334155}
+.ia-override-box{margin-top:12px;padding:12px;border-radius:14px;background:#f8fafc;border:1px solid rgba(15,23,42,.06)}
+.ia-override-title{font-size:12px;font-weight:820;color:#102845;margin-bottom:8px}
+.ia-override-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.ia-override-meta{margin-top:10px;padding:10px 12px;border-radius:12px;background:#fff;border:1px solid rgba(15,23,42,.06);font-size:12px;line-height:1.5;color:#334155}
 @media (max-width: 1220px){
     .ia-grid{grid-template-columns:1fr}
 }
@@ -765,6 +830,7 @@ cw_header('Instructor Approval');
 @media (max-width: 760px){
     .ia-kv-grid{grid-template-columns:1fr}
     .ia-form-grid{grid-template-columns:1fr}
+    .ia-override-grid{grid-template-columns:1fr}
 }
 </style>
 
@@ -780,10 +846,7 @@ cw_header('Instructor Approval');
 
     <section class="card ia-hero">
         <div class="ia-eyebrow">Instructor Platform · Theory Intervention</div>
-        <h1 class="ia-title">Instructor Approval</h1>
-        <div class="ia-sub">
-            Canonical instructor intervention page for this theory action. Decisions recorded here are persisted through the engine, while notifications remain downstream outputs of configured automation and templates.
-        </div>
+        <h1 class="ia-title">Instructor Intervention</h1>
 
         <div class="ia-chip-row">
             <span class="ia-chip info"><?php echo ia_h((string)($state['cohort_title'] ?? '')); ?></span>
@@ -835,7 +898,6 @@ cw_header('Instructor Approval');
                         <div class="ia-kv">
                             <div class="ia-kv-label">Attempt Count</div>
                             <div class="ia-kv-value"><?php echo $attemptCount; ?></div>
-                            <div class="ia-kv-sub">Completed attempts for this lesson in this cohort.</div>
                         </div>
 
                         <div class="ia-kv">
@@ -854,7 +916,6 @@ cw_header('Instructor Approval');
                                     —
                                 <?php endif; ?>
                             </div>
-                            <div class="ia-kv-sub">Best recorded progress test result for this lesson.</div>
                         </div>
 
                         <div class="ia-kv">
@@ -867,16 +928,12 @@ cw_header('Instructor Approval');
                                             <div class="ia-track">
                                                 <div class="ia-fill <?php echo ia_h(ia_bar_class($latestScore)); ?>" style="width:<?php echo (int)ia_percent_clamped($latestScore); ?>%;"></div>
                                             </div>
-                                            <span class="ia-small-status <?php echo ia_h(ia_result_class($latestResultCode)); ?>">
-                                                <?php echo ia_h(ia_result_label($latestResultCode, $latestResultLabel)); ?>
-                                            </span>
                                         </div>
                                     </div>
                                 <?php else: ?>
                                     —
                                 <?php endif; ?>
                             </div>
-                            <div class="ia-kv-sub">Latest finalized progress test result.</div>
                         </div>
 
                         <div class="ia-kv">
@@ -889,9 +946,6 @@ cw_header('Instructor Approval');
                                             <div class="ia-track">
                                                 <div class="ia-fill <?php echo ia_h(ia_bar_class($summaryScore)); ?>" style="width:<?php echo (int)ia_percent_clamped($summaryScore); ?>%;"></div>
                                             </div>
-                                            <span class="ia-small-status <?php echo ia_h(ia_summary_status_class($summaryStatus)); ?>">
-                                                <?php echo ia_h(ia_summary_status_label($summaryStatus)); ?>
-                                            </span>
                                         </div>
                                     </div>
                                 <?php elseif ($summaryStatus !== ''): ?>
@@ -902,19 +956,22 @@ cw_header('Instructor Approval');
                                     —
                                 <?php endif; ?>
                             </div>
-                            <div class="ia-kv-sub">Current summary review state from lesson_summaries.</div>
                         </div>
 
                         <div class="ia-kv">
                             <div class="ia-kv-label">Completion Status</div>
-                            <div class="ia-kv-value"><?php echo ia_h((string)($activity['completion_status'] ?? '—')); ?></div>
-                            <div class="ia-kv-sub">Projection only from lesson_activity.</div>
+                            <div class="ia-kv-value">
+                                <span class="ia-small-status <?php echo ia_h((string)$completionStatusUi['class']); ?>">
+                                    <?php echo ia_h((string)$completionStatusUi['label']); ?>
+                                </span>
+                            </div>
                         </div>
 
                         <div class="ia-kv">
                             <div class="ia-kv-label">Latest Activity</div>
-                            <div class="ia-kv-value"><?php echo ia_h(ia_format_datetime_utc((string)($latestProgressTest['completed_at'] ?? $latestProgressTest['updated_at'] ?? ''))); ?></div>
-                            <div class="ia-kv-sub">Most recent finalized progress test timestamp.</div>
+                            <div class="ia-kv-value">
+                                <span class="ia-small-status info"><?php echo ia_h(ia_format_datetime_utc((string)($latestProgressTest['completed_at'] ?? $latestProgressTest['updated_at'] ?? ''))); ?></span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -926,7 +983,7 @@ cw_header('Instructor Approval');
                     <div class="ia-note-list">
                         <div class="ia-note-row">
                             <span class="ia-note-dot"></span>
-                            <span>No consolidated difficulty lines were found yet from weak areas or failed question history.</span>
+                            <span>No consolidated core difficulty lines were found yet.</span>
                         </div>
                     </div>
                 <?php else: ?>
@@ -948,7 +1005,7 @@ cw_header('Instructor Approval');
                     <div class="ia-note-list">
                         <div class="ia-note-row">
                             <span class="ia-note-dot"></span>
-                            <span>No official lesson reference rows were found for this lesson.</span>
+                            <span>No official reference rows were found for this lesson.</span>
                         </div>
                     </div>
                 <?php else: ?>
@@ -996,17 +1053,16 @@ cw_header('Instructor Approval');
                     <table class="ia-attempt-table">
                         <thead>
                             <tr>
-                                <th style="width:10%;">Attempt</th>
-                                <th style="width:14%;">Score</th>
-                                <th style="width:18%;">Result</th>
-                                <th style="width:34%;">Main Reason</th>
-                                <th style="width:24%;">Actions</th>
+                                <th style="width:14%;">Attempt</th>
+                                <th style="width:34%;">Score</th>
+                                <th style="width:26%;">Result</th>
+                                <th style="width:26%;">Button</th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php if (!$attemptHistory): ?>
                                 <tr>
-                                    <td colspan="5" style="color:#64748b;">No attempts found yet for this lesson.</td>
+                                    <td colspan="4" style="color:#64748b;">No attempts found yet for this lesson.</td>
                                 </tr>
                             <?php else: ?>
                                 <?php foreach ($attemptHistory as $attempt): ?>
@@ -1015,12 +1071,11 @@ cw_header('Instructor Approval');
                                     $attemptScore = isset($attempt['score_pct']) && $attempt['score_pct'] !== null
                                         ? (float)$attempt['score_pct']
                                         : null;
-                                    $attemptWeakAreas = trim((string)($attempt['weak_areas'] ?? ''));
                                     $attemptResultCode = trim((string)($attempt['formal_result_code'] ?? ''));
                                     $attemptResultLabel = trim((string)($attempt['formal_result_label'] ?? ''));
                                     ?>
                                     <tr>
-                                        <td><?php echo (int)($attempt['attempt'] ?? 0); ?></td>
+                                        <td style="font-size:14px;font-weight:900;color:#102845;"><?php echo (int)($attempt['attempt'] ?? 0); ?></td>
                                         <td>
                                             <?php if ($attemptScore !== null): ?>
                                                 <div class="ia-inline-bar">
@@ -1034,27 +1089,15 @@ cw_header('Instructor Approval');
                                             <?php endif; ?>
                                         </td>
                                         <td>
-                                            <?php if ($attemptResultCode !== '' || $attemptResultLabel !== ''): ?>
-                                                <span class="ia-small-status <?php echo ia_h(ia_result_class($attemptResultCode)); ?>">
-                                                    <?php echo ia_h(ia_result_label($attemptResultCode, $attemptResultLabel)); ?>
-                                                </span>
-                                            <?php else: ?>
-                                                —
-                                            <?php endif; ?>
-                                        </td>
-                                        <td>
-                                            <?php echo ia_h($attemptWeakAreas !== '' ? $attemptWeakAreas : 'See test details'); ?>
+                                            <span class="ia-small-status <?php echo ia_h(ia_result_class($attemptResultCode)); ?>">
+                                                <?php echo ia_h(ia_result_label($attemptResultCode, $attemptResultLabel)); ?>
+                                            </span>
                                         </td>
                                         <td>
                                             <div class="ia-table-actions">
                                                 <button type="button" class="ia-link-btn" data-open-modal="attempt-modal-<?php echo $attemptId; ?>">
                                                     Test Details
                                                 </button>
-                                                <?php if (!empty($lessonSummary)): ?>
-                                                    <button type="button" class="ia-link-btn" data-open-modal="summary-modal">
-                                                        Summary
-                                                    </button>
-                                                <?php endif; ?>
                                             </div>
                                         </td>
                                     </tr>
@@ -1283,7 +1326,7 @@ cw_header('Instructor Approval');
 
                             <div class="ia-chip-row" style="margin-top:10px;">
                                 <span class="ia-chip <?php echo $effectiveIsCorrect === 1 ? 'ok' : 'danger'; ?>">
-                                    AI Score: <?php echo $effectiveScorePoints !== null ? (int)$effectiveScorePoints : '—'; ?> / <?php echo isset($item['max_points']) && $item['max_points'] !== null ? (int)$item['max_points'] : '—'; ?>
+                                    Score: <?php echo $effectiveScorePoints !== null ? (int)$effectiveScorePoints : '—'; ?> / <?php echo isset($item['max_points']) && $item['max_points'] !== null ? (int)$item['max_points'] : '—'; ?>
                                 </span>
                                 <span class="ia-chip info">
                                     Correctness:
@@ -1296,6 +1339,32 @@ cw_header('Instructor Approval');
                                 <?php if (isset($item['override_id']) && $item['override_id'] !== null): ?>
                                     <span class="ia-chip warning">Instructor Override Logged</span>
                                 <?php endif; ?>
+                            </div>
+
+                            <div class="ia-override-box">
+                                <div class="ia-override-title">Manual Score Override</div>
+                                <div style="font-size:12px;line-height:1.5;color:#64748b;">
+                                    Override execution wiring belongs to the canonical follow-up path. This Phase 1 page surfaces the exact item-level context and latest override audit, while the full override apply/recompute flow is added separately to avoid unsafe state drift.
+                                </div>
+
+                                <div class="ia-override-grid" style="margin-top:10px;">
+                                    <div class="ia-field">
+                                        <label class="ia-label">Override Correctness</label>
+                                        <select class="ia-select" disabled>
+                                            <option><?php echo $effectiveIsCorrect === 1 ? 'Correct' : ($effectiveIsCorrect === 0 ? 'Incorrect' : '—'); ?></option>
+                                        </select>
+                                    </div>
+
+                                    <div class="ia-field">
+                                        <label class="ia-label">Override Score Points</label>
+                                        <input class="ia-input" type="text" disabled value="<?php echo ia_h($effectiveScorePoints !== null ? (string)$effectiveScorePoints : ''); ?>">
+                                    </div>
+                                </div>
+
+                                <div class="ia-field" style="margin-top:10px;">
+                                    <label class="ia-label">Override Reason</label>
+                                    <textarea class="ia-textarea" disabled placeholder="Override apply wiring is added in the next step."></textarea>
+                                </div>
                             </div>
 
                             <?php if (isset($item['override_id']) && $item['override_id'] !== null): ?>
