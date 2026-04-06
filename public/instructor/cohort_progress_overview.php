@@ -63,6 +63,33 @@ function cpo_format_dt(?string $dt): string
     return gmdate('M j, Y · H:i', $ts) . ' UTC';
 }
 
+function cpo_cohort_status(array $cohort): array
+{
+    $startDate = trim((string)($cohort['start_date'] ?? ''));
+    $endDate = trim((string)($cohort['end_date'] ?? ''));
+    $today = gmdate('Y-m-d');
+
+    if ($startDate !== '' && $startDate > $today) {
+        return array(
+            'label' => 'Future',
+            'class' => 'info',
+        );
+    }
+
+    if ($endDate !== '' && $endDate < $today) {
+        return array(
+            'label' => 'Retired',
+            'class' => 'warning',
+        );
+    }
+
+    return array(
+        'label' => 'Ongoing',
+        'class' => 'ok',
+    );
+}
+
+
 function cpo_parse_json_assoc(?string $json): array
 {
     $json = trim((string)$json);
@@ -344,6 +371,7 @@ function cpo_status_pills(array $row): array
 }
 
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
+$showRetiredCohorts = !empty($_GET['show_retired']) ? 1 : 0;
 
 /**
  * Cohorts visible to instructor/supervisor/admin.
@@ -353,26 +381,39 @@ $cohortSql = "
     SELECT
         c.id,
         c.name,
-        COALESCE(cr.title, CONCAT('Course #', cc.course_id)) AS course_title,
-        COUNT(DISTINCT CASE
-            WHEN u.role = 'student' AND u.status = 'active' THEN cs.user_id
-            ELSE NULL
-        END) AS student_count
+        c.course_id,
+        c.start_date,
+        c.end_date,
+        (
+            SELECT COUNT(DISTINCT cs2.user_id)
+            FROM cohort_students cs2
+            INNER JOIN users u2
+                ON u2.id = cs2.user_id
+               AND u2.role = 'student'
+               AND u2.status = 'active'
+            WHERE cs2.cohort_id = c.id
+        ) AS student_count
     FROM cohorts c
-    LEFT JOIN cohort_courses cc
-        ON cc.cohort_id = c.id
-    LEFT JOIN courses cr
-        ON cr.id = cc.course_id
-    LEFT JOIN cohort_students cs
-        ON cs.cohort_id = c.id
-    LEFT JOIN users u
-        ON u.id = cs.user_id
-    GROUP BY c.id, c.name, cr.title, cc.course_id
-    ORDER BY c.name ASC, c.id ASC
+    WHERE (
+        :show_retired = 1
+        OR c.end_date >= CURDATE()
+    )
+    ORDER BY
+        CASE
+            WHEN CURDATE() BETWEEN c.start_date AND c.end_date THEN 0
+            WHEN c.start_date > CURDATE() THEN 1
+            ELSE 2
+        END,
+        c.start_date ASC,
+        c.name ASC,
+        c.id ASC
 ";
 
-$cohortStmt = $pdo->query($cohortSql);
-$cohorts = $cohortStmt ? $cohortStmt->fetchAll(PDO::FETCH_ASSOC) : array();
+$cohortStmt = $pdo->prepare($cohortSql);
+$cohortStmt->execute(array(
+    ':show_retired' => $showRetiredCohorts,
+));
+$cohorts = $cohortStmt->fetchAll(PDO::FETCH_ASSOC);
 
 if ($cohortId <= 0 && !empty($cohorts)) {
     $cohortId = (int)($cohorts[0]['id'] ?? 0);
@@ -638,6 +679,11 @@ usort($cards, function (array $a, array $b): int {
 
 $topCards = array_slice($cards, 0, 5);
 
+$selectedCohortStatus = $selectedCohort ? cpo_cohort_status($selectedCohort) : array(
+    'label' => '—',
+    'class' => 'info',
+);
+
 cw_header('Cohort Progress Overview');
 ?>
 
@@ -759,6 +805,18 @@ cw_header('Cohort Progress Overview');
 .cpo-state-pill.danger{background:#fee2e2;color:#991b1b;border-color:#fca5a5}
 .cpo-state-pill.info{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
 .cpo-empty{padding:28px 24px;text-align:center;font-size:14px;color:#64748b}
+	
+cpo-hero-meta{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.cpo-hero-chip{
+    display:inline-flex;align-items:center;justify-content:center;
+    min-height:32px;padding:0 12px;border-radius:999px;
+    font-size:12px;font-weight:800;white-space:nowrap;
+    border:1px solid rgba(15,23,42,.08);background:#f8fafc;color:#334155;
+}
+.cpo-hero-chip.ok{background:#ecfdf5;color:#166534;border-color:#bbf7d0}
+.cpo-hero-chip.info{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+.cpo-hero-chip.warning{background:#fff7ed;color:#c2410c;border-color:#fdba74}	
+	
 @media (max-width: 1320px){
     .cpo-metric-grid{grid-template-columns:repeat(3,minmax(0,1fr))}
     .cpo-top-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
@@ -779,39 +837,80 @@ cw_header('Cohort Progress Overview');
 <div class="cpo-page">
 
     <section class="card cpo-hero">
-        <div class="cpo-eyebrow">Instructor Platform · Theory Progress</div>
-        <h1 class="cpo-title">Cohort Progress Overview</h1>
-        <div class="cpo-sub">
-            Ranked operational overview of theory progression across the selected cohort. Students are compared using factual progression status, assessment performance, deadline compliance, and a fact-derived motivation score. Urgent cases are clearly flagged so instructors do not need to search for issues.
+    <div class="cpo-eyebrow">Instructor Platform · Theory Progress</div>
+    <h1 class="cpo-title">Cohort Progress Overview</h1>
+    <div class="cpo-sub">
+        Ranked operational overview of theory progression across the selected cohort. Students are compared using factual progression status, assessment performance, deadline compliance, and a fact-derived motivation score. Urgent cases are clearly flagged so instructors do not need to search for issues.
+    </div>
+
+    <?php if ($selectedCohort): ?>
+        <div class="cpo-hero-meta">
+            <span class="cpo-hero-chip <?php echo cpo_h((string)$selectedCohortStatus['class']); ?>">
+                <?php echo cpo_h((string)($selectedCohort['name'] ?? 'Cohort')); ?> · <?php echo cpo_h((string)$selectedCohortStatus['label']); ?>
+            </span>
+
+            <?php if (trim((string)($selectedCohort['course_title'] ?? '')) !== ''): ?>
+                <span class="cpo-hero-chip">
+                    <?php echo cpo_h((string)$selectedCohort['course_title']); ?>
+                </span>
+            <?php endif; ?>
+
+            <span class="cpo-hero-chip">
+                Start: <?php echo cpo_h((string)($selectedCohort['start_date'] ?? '—')); ?>
+            </span>
+
+            <span class="cpo-hero-chip">
+                End: <?php echo cpo_h((string)($selectedCohort['end_date'] ?? '—')); ?>
+            </span>
+
+            <span class="cpo-hero-chip">
+                <?php echo (int)($selectedCohort['student_count'] ?? 0); ?> student(s)
+            </span>
         </div>
-    </section>
+  	  <?php endif; ?>
+	</section>
 
     <section class="card" style="padding:18px 20px;">
         <form method="get" class="cpo-toolbar">
-            <div class="cpo-field">
-                <label class="cpo-label">Select Cohort</label>
-                <select class="cpo-select" name="cohort_id">
-                    <?php foreach ($cohorts as $cohortRow): ?>
-                        <option value="<?php echo (int)($cohortRow['id'] ?? 0); ?>" <?php echo (int)($cohortRow['id'] ?? 0) === $cohortId ? 'selected' : ''; ?>>
-                            <?php
-                            echo cpo_h(
-                                (string)($cohortRow['name'] ?? ('Cohort #' . (int)($cohortRow['id'] ?? 0)))
-                                . ' · '
-                                . (string)($cohortRow['course_title'] ?? '')
-                                . ' · '
-                                . (int)($cohortRow['student_count'] ?? 0)
-                                . ' student(s)'
-                            );
-                            ?>
-                        </option>
-                    <?php endforeach; ?>
-                </select>
-            </div>
+    <div class="cpo-field">
+        <label class="cpo-label">Select Cohort</label>
+        <select class="cpo-select" name="cohort_id">
+            <?php foreach ($cohorts as $cohortRow): ?>
+                <?php
+                $rowId = (int)($cohortRow['id'] ?? 0);
+                $rowName = (string)($cohortRow['name'] ?? ('Cohort #' . $rowId));
+                $rowStart = (string)($cohortRow['start_date'] ?? '');
+                $rowEnd = (string)($cohortRow['end_date'] ?? '');
+                $rowStudents = (int)($cohortRow['student_count'] ?? 0);
 
-            <div>
-                <button class="cpo-btn" type="submit">Load Cohort</button>
-            </div>
-        </form>
+                $statusLabel = 'Ongoing';
+                $today = date('Y-m-d');
+
+                if ($rowStart !== '' && $rowStart > $today) {
+                    $statusLabel = 'Future';
+                } elseif ($rowEnd !== '' && $rowEnd < $today) {
+                    $statusLabel = 'Retired';
+                }
+                ?>
+                <option value="<?php echo $rowId; ?>" <?php echo $rowId === $cohortId ? 'selected' : ''; ?>>
+                    <?php echo cpo_h($rowName . ' · ' . $statusLabel . ' · ' . $rowStudents . ' student(s)'); ?>
+                </option>
+            <?php endforeach; ?>
+        </select>
+    </div>
+
+    <div class="cpo-field" style="justify-content:end;">
+        <label class="cpo-label" style="visibility:hidden;">Options</label>
+        <label class="cpo-mini-note" style="display:flex;align-items:center;gap:8px;min-height:42px;">
+            <input type="checkbox" name="show_retired" value="1" <?php echo $showRetiredCohorts ? 'checked' : ''; ?>>
+            Show retired cohorts
+        </label>
+    </div>
+
+    <div>
+        <button class="cpo-btn" type="submit">Load Cohort</button>
+    </div>
+</form>
     </section>
 
     <?php if (!$selectedCohort): ?>
