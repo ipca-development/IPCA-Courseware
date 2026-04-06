@@ -11,43 +11,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $pass = trim((string)($_POST['password'] ?? ''));
 
     if (cw_login($pdo, $email, $pass)) {
-        $currentUser = cw_current_user($pdo);
-        $mustChangePassword = (int)($currentUser['must_change_password'] ?? 0) === 1;
+    $currentUser = cw_current_user($pdo);
+    $mustChangePassword = (int)($currentUser['must_change_password'] ?? 0) === 1;
 
-        if ($mustChangePassword && file_exists(__DIR__ . '/force_password_change.php')) {
-            header('Location: /force_password_change.php');
-            exit;
-        }
-
-     
-		$role = (string)($user['role'] ?? '');
-
-		if ($role === 'admin') {
-			header('Location: /admin/dashboard.php');
-			exit;
-		}
-
-		if (
-			$role === 'instructor' ||
-			$role === 'supervisor' ||
-			$role === 'chief_instructor'
-		) {
-			header('Location: /instructor/dashboard.php');
-			exit;
-		}
-
-		if ($role === 'student') {
-			header('Location: /student/dashboard.php');
-			exit;
-}
-
-// fallback (safety)
-header('Location: /');
-exit;
-		
-		
+    if ($mustChangePassword && file_exists(__DIR__ . '/force_password_change.php')) {
+        header('Location: /force_password_change.php');
         exit;
     }
+
+    $role = (string)($currentUser['role'] ?? '');
+
+    if ($role === 'admin') {
+        header('Location: /admin/dashboard.php');
+        exit;
+    }
+
+    if (
+        $role === 'instructor' ||
+        $role === 'supervisor' ||
+        $role === 'chief_instructor'
+    ) {
+        header('Location: /instructor/dashboard.php');
+        exit;
+    }
+
+    if ($role === 'student') {
+        header('Location: /student/dashboard.php');
+        exit;
+    }
+
+    header('Location: /');
+    exit;
+}
 
     $error = 'Invalid email or password.';
 }
