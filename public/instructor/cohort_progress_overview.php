@@ -526,10 +526,41 @@ if ($cohortId > 0) {
             ) AS completed_lessons_count,
 
             (
+                SELECT cld_current.lesson_id
+                FROM cohort_lesson_deadlines cld_current
+                LEFT JOIN lesson_activity la_current
+                    ON la_current.user_id = u.id
+                   AND la_current.cohort_id = c.id
+                   AND la_current.lesson_id = cld_current.lesson_id
+                WHERE cld_current.cohort_id = c.id
+                  AND (
+                    la_current.id IS NULL
+                    OR COALESCE(la_current.completion_status, '') <> 'completed'
+                  )
+                ORDER BY cld_current.sort_order ASC, cld_current.id ASC
+                LIMIT 1
+            ) AS current_lesson_id,
+
+            (
                 SELECT COUNT(*)
                 FROM progress_tests_v2 pt_count
                 WHERE pt_count.user_id = u.id
                   AND pt_count.cohort_id = c.id
+                  AND pt_count.lesson_id = (
+                      SELECT cld_current2.lesson_id
+                      FROM cohort_lesson_deadlines cld_current2
+                      LEFT JOIN lesson_activity la_current2
+                          ON la_current2.user_id = u.id
+                         AND la_current2.cohort_id = c.id
+                         AND la_current2.lesson_id = cld_current2.lesson_id
+                      WHERE cld_current2.cohort_id = c.id
+                        AND (
+                            la_current2.id IS NULL
+                            OR COALESCE(la_current2.completion_status, '') <> 'completed'
+                        )
+                      ORDER BY cld_current2.sort_order ASC, cld_current2.id ASC
+                      LIMIT 1
+                  )
                   AND pt_count.status = 'completed'
             ) AS attempt_count_calc,
 
@@ -810,7 +841,7 @@ if ($cohortId > 0) {
             ON cr.id = c.course_id
         WHERE cs.cohort_id = :cohort_id
         ORDER BY u.name ASC, u.id ASC
-    ";
+";
 
     $studentStmt = $pdo->prepare($studentSql);
     $studentStmt->execute(array(
