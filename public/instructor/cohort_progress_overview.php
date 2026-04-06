@@ -996,6 +996,20 @@ cw_header('Cohort Progress Overview');
 .cpo-progress-head{display:flex;justify-content:space-between;gap:10px;align-items:center}
 .cpo-progress-label{font-size:13px;font-weight:800;color:#102845}
 .cpo-progress-value{font-size:12px;font-weight:800;color:#64748b}
+.cpo-inline-bar{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:210px}
+.cpo-inline-bar .cpo-progress-value{min-width:44px;text-align:right;flex:0 0 auto}
+.cpo-inline-bar .cpo-progress-track{flex:1 1 auto;min-width:120px}
+.cpo-inline-bar.compact{min-width:250px}
+.cpo-inline-bar.compact .cpo-progress-track{min-width:110px}
+.cpo-inline-status{
+    display:inline-flex;align-items:center;justify-content:center;
+    min-height:22px;padding:0 8px;border-radius:999px;font-size:10px;font-weight:800;
+    border:1px solid rgba(15,23,42,.08);white-space:nowrap;
+}
+.cpo-inline-status.ok{background:#ecfdf5;color:#166534;border-color:#bbf7d0}
+.cpo-inline-status.warning{background:#fff7ed;color:#c2410c;border-color:#fdba74}
+.cpo-inline-status.danger{background:#fee2e2;color:#991b1b;border-color:#fca5a5}
+.cpo-inline-status.info{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
 .cpo-progress-track{width:100%;height:12px;border-radius:999px;overflow:hidden;background:#e7edf5;position:relative}
 .cpo-progress-fill{height:100%;border-radius:999px}
 .cpo-progress-fill.good{background:linear-gradient(90deg,#166534 0%,#22c55e 100%)}
@@ -1004,8 +1018,8 @@ cw_header('Cohort Progress Overview');
 .cpo-progress-fill.neutral{background:linear-gradient(90deg,#64748b 0%,#cbd5e1 100%)}
 .cpo-mini-note{font-size:12px;line-height:1.55;color:#64748b}
 .cpo-mini-list{display:grid;gap:8px;margin-top:10px}
-.cpo-mini-list-item{display:flex;gap:10px;align-items:flex-start;font-size:12px;line-height:1.45;color:#0f172a}
-.cpo-mini-dot{width:8px;height:8px;border-radius:999px;background:#0f172a;flex:0 0 8px;margin-top:5px}
+.cpo-mini-list-item{display:flex;gap:8px;align-items:flex-start;font-size:11px;line-height:1.35;color:#0f172a}
+.cpo-mini-dot{width:4px;height:4px;border-radius:999px;background:#0f172a;flex:0 0 4px;margin-top:5px}
 .cpo-state-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
 .cpo-state-pill{display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:0 10px;border-radius:999px;font-size:11px;font-weight:800;border:1px solid rgba(15,23,42,.08)}
 .cpo-state-pill.ok{background:#ecfdf5;color:#166534;border-color:#bbf7d0}
@@ -1271,15 +1285,13 @@ cw_header('Cohort Progress Overview');
                                     <div class="cpo-kv-label">Average Score</div>
                                     <div class="cpo-kv-value" style="min-width:210px;">
                                         <?php if ($avgScoreDisplay !== null): ?>
-                                            <div class="cpo-progress-row" style="min-width:200px;">
-                                                <div class="cpo-progress-head">
-                                                    <div class="cpo-progress-value"><?php echo cpo_h((string)$avgScoreDisplay); ?>%</div>
-                                                </div>
-                                                <div class="cpo-progress-track">
-                                                    <div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($avgScoreDisplay)); ?>" style="width:<?php echo (int)$avgScoreDisplay; ?>%;"></div>
-                                                </div>
-                                            </div>
-                                        <?php else: ?>
+											<div class="cpo-inline-bar">
+												<div class="cpo-progress-value"><?php echo cpo_h((string)$avgScoreDisplay); ?>%</div>
+												<div class="cpo-progress-track">
+													<div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($avgScoreDisplay)); ?>" style="width:<?php echo (int)$avgScoreDisplay; ?>%;"></div>
+												</div>
+											</div>
+										<?php else: ?>
                                             —
                                         <?php endif; ?>
                                     </div>
@@ -1289,15 +1301,13 @@ cw_header('Cohort Progress Overview');
                                     <div class="cpo-kv-label">Best Score</div>
                                     <div class="cpo-kv-value" style="min-width:210px;">
                                         <?php if ($bestScoreDisplay !== null): ?>
-                                            <div class="cpo-progress-row" style="min-width:200px;">
-                                                <div class="cpo-progress-head">
-                                                    <div class="cpo-progress-value"><?php echo cpo_h((string)$bestScoreDisplay); ?>%</div>
-                                                </div>
-                                                <div class="cpo-progress-track">
-                                                    <div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($bestScoreDisplay)); ?>" style="width:<?php echo (int)$bestScoreDisplay; ?>%;"></div>
-                                                </div>
-                                            </div>
-                                        <?php else: ?>
+											<div class="cpo-inline-bar">
+												<div class="cpo-progress-value"><?php echo cpo_h((string)$bestScoreDisplay); ?>%</div>
+												<div class="cpo-progress-track">
+													<div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($bestScoreDisplay)); ?>" style="width:<?php echo (int)$bestScoreDisplay; ?>%;"></div>
+												</div>
+											</div>
+										<?php else: ?>
                                             —
                                         <?php endif; ?>
                                     </div>
@@ -1314,63 +1324,64 @@ cw_header('Cohort Progress Overview');
                                 </div>
 
                                 <div class="cpo-kv">
-                                    <div class="cpo-kv-label">Latest Result</div>
-                                    <div class="cpo-kv-value">
-                                        <?php if ($latestResultCode !== '' || $latestResultLabel !== ''): ?>
-                                            <span class="cpo-state-pill <?php echo cpo_h(cpo_result_pill_class($latestResultCode)); ?>">
-                                                <?php echo cpo_h(cpo_result_pill_label($latestResultLabel, $latestResultCode)); ?>
-                                            </span>
-                                        <?php else: ?>
-                                            —
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
+									<div class="cpo-kv-label">Latest Result</div>
+									<div class="cpo-kv-value" style="min-width:250px;">
+										<?php if ($latestScoreDisplay !== null): ?>
+											<div class="cpo-inline-bar compact">
+												<div class="cpo-progress-value"><?php echo cpo_h((string)$latestScoreDisplay); ?>%</div>
+												<div class="cpo-progress-track">
+													<div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($latestScoreDisplay)); ?>" style="width:<?php echo (int)$latestScoreDisplay; ?>%;"></div>
+												</div>
+												<span class="cpo-inline-status <?php echo cpo_h(cpo_result_pill_class($latestResultCode)); ?>">
+													<?php echo cpo_h(cpo_result_pill_label($latestResultLabel, $latestResultCode)); ?>
+												</span>
+											</div>
+										<?php else: ?>
+											—
+										<?php endif; ?>
+									</div>
+								</div>
 
                                 <div class="cpo-kv">
                                     <div class="cpo-kv-label">Latest Score</div>
                                     <div class="cpo-kv-value" style="min-width:210px;">
                                         <?php if ($latestScoreDisplay !== null): ?>
-                                            <div class="cpo-progress-row" style="min-width:200px;">
-                                                <div class="cpo-progress-head">
-                                                    <div class="cpo-progress-value"><?php echo cpo_h((string)$latestScoreDisplay); ?>%</div>
-                                                </div>
-                                                <div class="cpo-progress-track">
-                                                    <div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($latestScoreDisplay)); ?>" style="width:<?php echo (int)$latestScoreDisplay; ?>%;"></div>
-                                                </div>
-                                            </div>
-                                        <?php else: ?>
+											<div class="cpo-inline-bar">
+												<div class="cpo-progress-value"><?php echo cpo_h((string)$latestScoreDisplay); ?>%</div>
+												<div class="cpo-progress-track">
+													<div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($latestScoreDisplay)); ?>" style="width:<?php echo (int)$latestScoreDisplay; ?>%;"></div>
+												</div>
+											</div>
+										<?php else: ?>
                                             —
                                         <?php endif; ?>
                                     </div>
                                 </div>
 
                                 <div class="cpo-kv">
-                                    <div class="cpo-kv-label">Latest Summary</div>
-                                    <div class="cpo-kv-value" style="min-width:250px;">
-                                        <div style="display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;">
-                                            <?php if ($latestSummaryScore !== null): ?>
-                                                <div class="cpo-progress-row" style="min-width:160px;">
-                                                    <div class="cpo-progress-head">
-                                                        <div class="cpo-progress-value"><?php echo cpo_h((string)round($latestSummaryScore, 1)); ?>%</div>
-                                                    </div>
-                                                    <div class="cpo-progress-track">
-                                                        <div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($latestSummaryScore)); ?>" style="width:<?php echo (int)round($latestSummaryScore); ?>%;"></div>
-                                                    </div>
-                                                </div>
-                                            <?php else: ?>
-                                                <span>—</span>
-                                            <?php endif; ?>
-
-                                            <?php if ($latestSummaryStatus !== ''): ?>
-                                                <span class="cpo-state-pill <?php echo cpo_h(cpo_summary_pill_class($latestSummaryStatus)); ?>">
-                                                    <?php echo cpo_h(cpo_summary_pill_label($latestSummaryStatus)); ?>
-                                                </span>
-                                            <?php else: ?>
-                                                <span>—</span>
-                                            <?php endif; ?>
-                                        </div>
-                                    </div>
-                                </div>
+										<div class="cpo-kv-label">Latest Summary</div>
+										<div class="cpo-kv-value" style="min-width:250px;">
+											<?php if ($latestSummaryScore !== null): ?>
+												<div class="cpo-inline-bar compact">
+													<div class="cpo-progress-value"><?php echo cpo_h((string)round($latestSummaryScore, 1)); ?>%</div>
+													<div class="cpo-progress-track">
+														<div class="cpo-progress-fill <?php echo cpo_h(cpo_bar_class($latestSummaryScore)); ?>" style="width:<?php echo (int)round($latestSummaryScore); ?>%;"></div>
+													</div>
+													<span class="cpo-inline-status <?php echo cpo_h(cpo_summary_pill_class($latestSummaryStatus)); ?>">
+														<?php echo cpo_h(cpo_summary_pill_label($latestSummaryStatus)); ?>
+													</span>
+												</div>
+											<?php else: ?>
+												<?php if ($latestSummaryStatus !== ''): ?>
+													<span class="cpo-inline-status <?php echo cpo_h(cpo_summary_pill_class($latestSummaryStatus)); ?>">
+														<?php echo cpo_h(cpo_summary_pill_label($latestSummaryStatus)); ?>
+													</span>
+												<?php else: ?>
+													—
+												<?php endif; ?>
+											<?php endif; ?>
+										</div>
+									</div>
 
                                 <div class="cpo-kv">
                                     <div class="cpo-kv-label">Latest Activity</div>
