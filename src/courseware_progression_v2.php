@@ -1666,53 +1666,57 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
         ]);
 
         if ($summaryRevisionRequired === 1) {
-            $summaryStmt = $this->pdo->prepare("
-                UPDATE lesson_summaries
-                SET
-                    review_status = 'needs_revision',
-                    updated_at = NOW()
-                WHERE user_id = :user_id
-                  AND cohort_id = :cohort_id
-                  AND lesson_id = :lesson_id
-            ");
-            $summaryStmt->execute([
+                        $summaryStmt->execute([
                 ':user_id' => (int)$action['user_id'],
                 ':cohort_id' => (int)$action['cohort_id'],
                 ':lesson_id' => (int)$action['lesson_id'],
             ]);
         }
 
-		
-			$currentActivity = $this->getLessonActivityProjectionRow(
-				(int)$action['user_id'],
-				(int)$action['cohort_id'],
-				(int)$action['lesson_id']
-			) ?? [];
-		
+        $currentActivity = $this->getLessonActivityProjectionRow(
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id']
+        ) ?? [];
+
+        $currentGrantedExtraAttempts = max(0, (int)($currentActivity['granted_extra_attempts'] ?? 0));
+        $newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts;
+
+        if (
+            $decisionCode === 'approve_additional_attempts' ||
+            $decisionCode === 'approve_with_summary_revision'
+        ) {
+            $newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts + $grantedExtraAttempts;
+        }
+
+        if ($decisionCode === 'suspend_training') {
+            $newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts;
+        }
+
         $projection = [
-    'engine_projection' => true,
-    'user_id' => (int)$action['user_id'],
-    'cohort_id' => (int)$action['cohort_id'],
-    'lesson_id' => (int)$action['lesson_id'],
-    'phase' => 'instructor_approval_decision',
-    'fields' => [
-        'granted_extra_attempts' => $grantedExtraAttempts,
-        'one_on_one_required' => $oneOnOneRequired,
-        'training_suspended' => $trainingSuspended,
-        'latest_instructor_action_id' => $requiredActionId,
-        'last_state_eval_at' => $nowUtc,
-        'summary_status' => $summaryRevisionRequired === 1
-            ? 'needs_revision'
-            : (string)($currentActivity['summary_status'] ?? 'acceptable'),
-        'completion_status' => $trainingSuspended
-            ? 'training_suspended'
-            : ($oneOnOneRequired
-                ? 'instructor_required'
-                : ($summaryRevisionRequired
-                    ? 'awaiting_summary_review'
-                    : 'in_progress')),
-    ],
-];
+            'engine_projection' => true,
+            'user_id' => (int)$action['user_id'],
+            'cohort_id' => (int)$action['cohort_id'],
+            'lesson_id' => (int)$action['lesson_id'],
+            'phase' => 'instructor_approval_decision',
+            'fields' => [
+                'granted_extra_attempts' => $newTotalGrantedExtraAttempts,
+                'one_on_one_required' => $oneOnOneRequired,
+                'training_suspended' => $trainingSuspended,
+                'latest_instructor_action_id' => $requiredActionId,
+                'last_state_eval_at' => $nowUtc,
+                'summary_status' => $summaryRevisionRequired === 1
+                    ? 'needs_revision'
+                    : (string)($currentActivity['summary_status'] ?? 'acceptable'),
+                'completion_status' => $trainingSuspended
+                    ? 'training_suspended'
+                    : ($oneOnOneRequired
+                        ? 'instructor_required'
+                        : ($summaryRevisionRequired
+                            ? 'awaiting_summary_review'
+                            : 'in_progress')),
+            ],
+        ];
 
         if ($oneOnOneRequired === 1) {
             $projection['fields']['one_on_one_completed'] = 0;
