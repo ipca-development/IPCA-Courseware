@@ -1683,11 +1683,12 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
         $newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts;
 
         if (
-            $decisionCode === 'approve_additional_attempts' ||
-            $decisionCode === 'approve_with_summary_revision'
-        ) {
-            $newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts + $grantedExtraAttempts;
-        }
+			$decisionCode === 'approve_additional_attempts' ||
+			$decisionCode === 'approve_with_summary_revision' ||
+			$decisionCode === 'approve_with_one_on_one'
+		) {
+			$newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts + $grantedExtraAttempts;
+		}
 
         if ($decisionCode === 'suspend_training') {
             $newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts;
