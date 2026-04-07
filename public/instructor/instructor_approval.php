@@ -187,7 +187,6 @@ function ia_collect_instructor_interventions(PDO $pdo, int $userId, int $cohortI
             sra.granted_extra_attempts,
             sra.summary_revision_required,
             sra.one_on_one_required,
-            sra.one_on_one_completed,
             sra.training_suspended,
             sra.major_intervention_flag,
             sra.decision_notes,
@@ -1589,7 +1588,7 @@ cw_header('Instructor Intervention');
 
                     <div class="ia-detail-box">
                         <div class="ia-detail-label">One-on-One Completed</div>
-                        <div class="ia-detail-value"><?php echo !empty($intervention['one_on_one_completed']) ? 'Yes' : 'No'; ?></div>
+                        <div class="ia-detail-value">—</div>
                     </div>
 
                     <div class="ia-detail-box">
