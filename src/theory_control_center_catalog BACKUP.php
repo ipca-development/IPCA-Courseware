@@ -57,9 +57,6 @@ function theory_control_event_keys(): array
         'required_action_completed',
         'instructor_decision_recorded',
         'one_on_one_completed',
-        'deadline_approaching_48h',
-        'deadline_today',
-        'deadline_passed',
     );
 }
 
