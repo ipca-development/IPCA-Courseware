@@ -605,26 +605,6 @@ foreach ($lessonRows as $l) {
     $last = $test['last'];
     $attemptsUsed = (int)$test['max_attempt'];
 
-    $initialAttemptLimit = (int)($policy['initial_attempt_limit'] ?? 3);
-    $extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
-    $maxTotalAttemptsWithoutAdminOverride = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
-
-    if ($initialAttemptLimit <= 0) $initialAttemptLimit = 3;
-    if ($extraAttemptsAfterThresholdFail < 0) $extraAttemptsAfterThresholdFail = 0;
-    if ($maxTotalAttemptsWithoutAdminOverride <= 0) {
-        $maxTotalAttemptsWithoutAdminOverride = $initialAttemptLimit + $extraAttemptsAfterThresholdFail;
-    }
-
-    $completedRemediation = !empty($completedRemediationByLesson[$lessonId]);
-    $baseMaxAllowedAttempts = min($initialAttemptLimit, $maxTotalAttemptsWithoutAdminOverride);
-
-    if ($completedRemediation) {
-        $baseMaxAllowedAttempts = min(
-            $initialAttemptLimit + $extraAttemptsAfterThresholdFail,
-            $maxTotalAttemptsWithoutAdminOverride
-        );
-    }
-
     $instructorDecision = ($role === 'admin')
     ? [
         'granted_extra_attempts' => 0,
@@ -639,8 +619,21 @@ foreach ($lessonRows as $l) {
         'training_suspended' => (int)($activity['training_suspended'] ?? 0),
     ];
 
-	$maxAllowedAttempts = $baseMaxAllowedAttempts + (int)$instructorDecision['granted_extra_attempts'];
-    $attemptsLeft = max(0, $maxAllowedAttempts - $attemptsUsed);
+$attemptState = ($role === 'admin')
+    ? [
+        'effective_allowed_attempts' => $attemptsUsed,
+        'remaining_attempts' => 0,
+    ]
+    : $progression->resolveAttemptPolicyState(
+        $userId,
+        $cohortId,
+        $lessonId,
+        $policy,
+        $attemptsUsed
+    );
+
+$maxAllowedAttempts = (int)($attemptState['effective_allowed_attempts'] ?? $attemptsUsed);
+$attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
 
     $testPassed = !empty($test['passed']);
     $bestScore = $test['best_score'];
