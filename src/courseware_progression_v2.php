@@ -1682,6 +1682,13 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
             ]);
         }
 
+		
+			$currentActivity = $this->getLessonActivityProjectionRow(
+				(int)$action['user_id'],
+				(int)$action['cohort_id'],
+				(int)$action['lesson_id']
+			) ?? [];
+		
         $projection = [
             'engine_projection' => true,
             'user_id' => (int)$action['user_id'],
