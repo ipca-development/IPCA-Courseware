@@ -612,7 +612,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $oneOnOneTimeFrom = trim((string)($_POST['one_on_one_time_from'] ?? ''));
             $oneOnOneTimeUntil = trim((string)($_POST['one_on_one_time_until'] ?? ''));
             $oneOnOneInstructorUserId = (int)($_POST['one_on_one_instructor_user_id'] ?? 0);
-
+			$oneOnOneStartUtc = trim((string)($_POST['one_on_one_start_utc'] ?? ''));
+            $oneOnOneEndUtc = trim((string)($_POST['one_on_one_end_utc'] ?? ''));
+            $oneOnOneTimezone = trim((string)($_POST['one_on_one_timezone'] ?? ''));	
+			
             $validDecisions = array_keys(ia_decision_ui_options());
             if (!in_array($uiDecision, $validDecisions, true)) {
                 throw new RuntimeException('Please select a valid instructor decision.');
@@ -632,7 +635,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $grantedExtraAttempts = 0;
             }
 
-            if ($uiDecision === 'approve_with_one_on_one') {
+                        if ($uiDecision === 'approve_with_one_on_one') {
                 if ($oneOnOneDate === '') {
                     throw new RuntimeException('Please select the one-on-one date.');
                 }
@@ -658,6 +661,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($oneOnOneTimeUntil <= $oneOnOneTimeFrom) {
                     throw new RuntimeException('One-on-one end time must be later than the start time.');
                 }
+
+                if ($oneOnOneStartUtc === '' || $oneOnOneEndUtc === '') {
+                    throw new RuntimeException('One-on-one UTC scheduling values are missing.');
+                }
+                if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $oneOnOneStartUtc)) {
+                    throw new RuntimeException('Invalid one-on-one UTC start format.');
+                }
+                if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $oneOnOneEndUtc)) {
+                    throw new RuntimeException('Invalid one-on-one UTC end format.');
+                }
+                if ($oneOnOneEndUtc <= $oneOnOneStartUtc) {
+                    throw new RuntimeException('One-on-one UTC end time must be later than start time.');
+                }
             }
 
             if ($uiDecision === 'suspend_training' && $decisionNotes === '') {
@@ -680,6 +696,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'one_on_one_time_from' => $oneOnOneTimeFrom,
                 'one_on_one_time_until' => $oneOnOneTimeUntil,
                 'one_on_one_instructor_user_id' => $oneOnOneInstructorUserId,
+                'one_on_one_start_utc' => $oneOnOneStartUtc,
+                'one_on_one_end_utc' => $oneOnOneEndUtc,
+                'one_on_one_timezone' => $oneOnOneTimezone,
             );
 
             $result = $engine->processInstructorApprovalDecision(
