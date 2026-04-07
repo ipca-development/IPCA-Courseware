@@ -1210,13 +1210,13 @@ cw_header('Instructor Intervention');
                 </div>
 
                 <?php if ((string)($action['status'] ?? '') !== 'approved'): ?>
-                    <form method="post">
+                    <form method="post" id="ia-decision-form">
                         <input type="hidden" name="page_action" value="record_decision">
 
                         <div class="ia-form-grid">
                             <div class="ia-field">
                                 <label class="ia-label">Decision</label>
-                                <select name="decision_code" class="ia-select" required>
+                                <select name="decision_code" class="ia-select" id="ia-decision-code" required>
                                     <option value="">Select a decision</option>
                                     <?php foreach ($decisionOptions as $key => $meta): ?>
                                         <option value="<?php echo ia_h($key); ?>"><?php echo ia_h((string)$meta['label']); ?></option>
@@ -1224,27 +1224,104 @@ cw_header('Instructor Intervention');
                                 </select>
                             </div>
 
+                            <div class="ia-field" id="ia-extra-attempts-field" style="display:none;">
+								<label class="ia-label">Extra Progress Test Attempts</label>
+								<select class="ia-select" name="granted_extra_attempts" id="ia-granted-extra-attempts">
+									<option value="">Select attempts</option>
+									<option value="1">1 extra attempt</option>
+									<option value="2">2 extra attempts</option>
+									<option value="3">3 extra attempts</option>
+									<option value="4">4 extra attempts</option>
+									<option value="5">5 extra attempts</option>
+								</select>
+							</div>
+                        </div>
+						
+						
+						<div class="ia-form-grid">
                             <div class="ia-field">
-                                <label class="ia-label">Extra Attempts</label>
-                                <input
-                                    class="ia-input"
-                                    type="number"
-                                    name="granted_extra_attempts"
-                                    min="0"
-                                    step="1"
-                                    value="0"
-                                >
+                                <label class="ia-label">Decision</label>
+                                <select name="decision_code" class="ia-select" id="ia-decision-code" required>
+                                    <option value="">Select a decision</option>
+                                    <?php foreach ($decisionOptions as $key => $meta): ?>
+                                        <option value="<?php echo ia_h($key); ?>"><?php echo ia_h((string)$meta['label']); ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+
+                            <div class="ia-field" id="ia-extra-attempts-field" style="display:none;">
+                                <label class="ia-label">Extra Progress Test Attempts</label>
+                                <select class="ia-select" name="granted_extra_attempts" id="ia-granted-extra-attempts">
+                                    <option value="">Select attempts</option>
+                                    <option value="1">1 extra attempt</option>
+                                    <option value="2">2 extra attempts</option>
+                                    <option value="3">3 extra attempts</option>
+                                    <option value="4">4 extra attempts</option>
+                                    <option value="5">5 extra attempts</option>
+                                </select>
                             </div>
                         </div>
+
+                        <div id="ia-one-on-one-fields" style="display:none;margin-top:14px;">
+                            <div class="ia-form-grid">
+                                <div class="ia-field">
+                                    <label class="ia-label">One-on-One Date</label>
+                                    <input class="ia-input" type="date" name="one_on_one_date" id="ia-one-on-one-date">
+                                </div>
+
+                                <div class="ia-field">
+                                    <label class="ia-label">Instructor</label>
+                                    <select class="ia-select" name="one_on_one_instructor_user_id" id="ia-one-on-one-instructor">
+                                        <option value="">Select instructor</option>
+                                        <?php
+                                        $instructorListStmt = $pdo->prepare("
+                                            SELECT id, name, first_name, last_name
+                                            FROM users
+                                            WHERE role IN ('instructor','supervisor','chief_instructor','admin')
+                                            ORDER BY
+                                                COALESCE(NULLIF(name, ''), CONCAT(TRIM(COALESCE(first_name,'')), ' ', TRIM(COALESCE(last_name,'')))) ASC,
+                                                id ASC
+                                        ");
+                                        $instructorListStmt->execute();
+                                        $instructorList = $instructorListStmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+                                        foreach ($instructorList as $inst):
+                                            $instName = trim((string)($inst['name'] ?? ''));
+                                            if ($instName === '') {
+                                                $instName = trim((string)($inst['first_name'] ?? '') . ' ' . (string)($inst['last_name'] ?? ''));
+                                            }
+                                            if ($instName === '') {
+                                                $instName = 'User #' . (int)$inst['id'];
+                                            }
+                                        ?>
+                                            <option value="<?php echo (int)$inst['id']; ?>"><?php echo ia_h($instName); ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <div class="ia-form-grid" style="margin-top:14px;">
+                                <div class="ia-field">
+                                    <label class="ia-label">Time From</label>
+                                    <input class="ia-input" type="time" name="one_on_one_time_from" id="ia-one-on-one-time-from">
+                                </div>
+
+                                <div class="ia-field">
+                                    <label class="ia-label">Time Until</label>
+                                    <input class="ia-input" type="time" name="one_on_one_time_until" id="ia-one-on-one-time-until">
+                                </div>
+                            </div>
+                        </div>
+						
 
                         <div class="ia-field" style="margin-top:14px;">
                             <label class="ia-label">Decision Notes</label>
                             <textarea
-                                class="ia-textarea"
-                                name="decision_notes"
-                                placeholder="Explain why this instructional decision is appropriate and what the student must do next."
-                                required
-                            ></textarea>
+								class="ia-textarea"
+								name="decision_notes"
+								id="ia-decision-notes"
+								placeholder="Explain why this instructional decision is appropriate and what the student must do next."
+								required
+							></textarea>
                         </div>
 
                         <div class="ia-actions">
@@ -1698,6 +1775,126 @@ cw_header('Instructor Intervention');
             }
         });
     });
+
+
+
+    var decisionForm = document.getElementById('ia-decision-form');
+    var decisionCode = document.getElementById('ia-decision-code');
+    var extraAttemptsField = document.getElementById('ia-extra-attempts-field');
+    var extraAttemptsInput = document.getElementById('ia-granted-extra-attempts');
+    var oneOnOneFields = document.getElementById('ia-one-on-one-fields');
+    var decisionNotes = document.getElementById('ia-decision-notes');
+    var oneOnOneDate = document.getElementById('ia-one-on-one-date');
+    var oneOnOneInstructor = document.getElementById('ia-one-on-one-instructor');
+    var oneOnOneTimeFrom = document.getElementById('ia-one-on-one-time-from');
+    var oneOnOneTimeUntil = document.getElementById('ia-one-on-one-time-until');
+
+    function setRequired(el, isRequired) {
+        if (!el) return;
+        if (isRequired) {
+            el.setAttribute('required', 'required');
+        } else {
+            el.removeAttribute('required');
+        }
+    }
+
+    function syncDecisionUi() {
+        if (!decisionCode) return;
+
+        var code = decisionCode.value || '';
+        var needsAttempts =
+            code === 'approve_additional_attempts' ||
+            code === 'approve_with_summary_revision' ||
+            code === 'approve_with_one_on_one';
+
+        var needsOneOnOne =
+            code === 'approve_with_one_on_one';
+
+        var needsReasonOnly =
+            code === 'suspend_training';
+
+        if (extraAttemptsField) {
+            extraAttemptsField.style.display = needsAttempts ? '' : 'none';
+        }
+        if (oneOnOneFields) {
+            oneOnOneFields.style.display = needsOneOnOne ? '' : 'none';
+        }
+
+        setRequired(extraAttemptsInput, needsAttempts);
+        setRequired(oneOnOneDate, needsOneOnOne);
+        setRequired(oneOnOneInstructor, needsOneOnOne);
+        setRequired(oneOnOneTimeFrom, needsOneOnOne);
+        setRequired(oneOnOneTimeUntil, needsOneOnOne);
+        setRequired(decisionNotes, needsReasonOnly || needsAttempts);
+
+        if (!needsAttempts && extraAttemptsInput) {
+            extraAttemptsInput.value = '';
+        }
+
+        if (!needsOneOnOne) {
+            if (oneOnOneDate) oneOnOneDate.value = '';
+            if (oneOnOneInstructor) oneOnOneInstructor.value = '';
+            if (oneOnOneTimeFrom) oneOnOneTimeFrom.value = '';
+            if (oneOnOneTimeUntil) oneOnOneTimeUntil.value = '';
+        }
+    }
+
+    if (decisionCode) {
+        decisionCode.addEventListener('change', syncDecisionUi);
+        syncDecisionUi();
+    }
+
+    if (decisionForm) {
+        decisionForm.addEventListener('submit', function (e) {
+            if (!decisionCode) return;
+
+            var code = decisionCode.value || '';
+
+            if (
+                (code === 'approve_additional_attempts' ||
+                 code === 'approve_with_summary_revision' ||
+                 code === 'approve_with_one_on_one') &&
+                (!extraAttemptsInput || !extraAttemptsInput.value || parseInt(extraAttemptsInput.value, 10) < 1)
+            ) {
+                e.preventDefault();
+                alert('Please select between 1 and 5 extra progress test attempts.');
+                return;
+            }
+
+            if (code === 'approve_with_one_on_one') {
+                if (!oneOnOneDate || !oneOnOneDate.value) {
+                    e.preventDefault();
+                    alert('Please select the one-on-one date.');
+                    return;
+                }
+                if (!oneOnOneTimeFrom || !oneOnOneTimeFrom.value) {
+                    e.preventDefault();
+                    alert('Please select the one-on-one start time.');
+                    return;
+                }
+                if (!oneOnOneTimeUntil || !oneOnOneTimeUntil.value) {
+                    e.preventDefault();
+                    alert('Please select the one-on-one end time.');
+                    return;
+                }
+                if (!oneOnOneInstructor || !oneOnOneInstructor.value) {
+                    e.preventDefault();
+                    alert('Please select the instructor for the one-on-one.');
+                    return;
+                }
+            }
+
+            if (code === 'suspend_training') {
+                if (!decisionNotes || !decisionNotes.value.trim()) {
+                    e.preventDefault();
+                    alert('Please provide the reason for suspending training.');
+                    return;
+                }
+            }
+        });
+    }
+
+
 })();
 </script>
 
