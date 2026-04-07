@@ -3,6 +3,8 @@ require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/courseware_progression_v2.php';
 
+$progression = new CoursewareProgressionV2($pdo);
+
 cw_require_login();
 
 $u = cw_current_user($pdo);
