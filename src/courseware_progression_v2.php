@@ -2500,10 +2500,21 @@ public function buildNotificationDecision(array $progressionContext, array $deci
                 ':lesson_id' => $resolved['lesson_id'],
             ]);
 
-            $latestTest = $this->getLatestProgressTestRowForLesson($resolved['user_id'], $resolved['cohort_id'], $resolved['lesson_id']);
-            $completionStatus = ($mappedReviewStatus === 'acceptable' && $latestTest && !empty($latestTest['pass_gate_met']))
-                ? 'completed'
-                : ($mappedReviewStatus === 'acceptable' ? 'awaiting_test_completion' : 'awaiting_summary_review');
+			$latestTest = $this->getLatestProgressTestRowForLesson(
+				$resolved['user_id'],
+				$resolved['cohort_id'],
+				$resolved['lesson_id']
+			);
+
+			$completionStatus = 'awaiting_summary_review';
+
+			if ($mappedReviewStatus === 'acceptable') {
+				if ($latestTest && !empty($latestTest['pass_gate_met'])) {
+					$completionStatus = 'completed';
+				} else {
+					$completionStatus = 'in_progress';
+				}
+			}
 
             $projection = [
                 'engine_projection' => true,
