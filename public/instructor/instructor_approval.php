@@ -539,6 +539,15 @@ $activity = (array)($state['activity'] ?? array());
 $progressionContext = (array)($state['progression_context'] ?? array());
 $latestProgressTest = (array)($state['latest_progress_test'] ?? array());
 
+$actionDecisionPayload = array();
+$actionDecisionPayloadRaw = trim((string)($action['decision_payload_json'] ?? ''));
+if ($actionDecisionPayloadRaw !== '') {
+    $decoded = json_decode($actionDecisionPayloadRaw, true);
+    if (is_array($decoded)) {
+        $actionDecisionPayload = $decoded;
+    }
+}
+
 try {
     $engine->markInstructorApprovalPageOpened(
         (int)$action['id'],
@@ -659,7 +668,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Please provide instructor decision notes.');
             }
 
-            $payload = array(
+                        $payload = array(
                 'decision_code' => $uiDecision,
                 'granted_extra_attempts' => $grantedExtraAttempts,
                 'summary_revision_required' => 0,
@@ -667,6 +676,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'training_suspended' => 0,
                 'major_intervention_flag' => 0,
                 'decision_notes' => $decisionNotes,
+                'one_on_one_date' => $oneOnOneDate,
+                'one_on_one_time_from' => $oneOnOneTimeFrom,
+                'one_on_one_time_until' => $oneOnOneTimeUntil,
+                'one_on_one_instructor_user_id' => $oneOnOneInstructorUserId,
             );
 
             $result = $engine->processInstructorApprovalDecision(
@@ -693,18 +706,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException('Unknown action.');
         }
 
-        $state = ia_load_state($engine, $token);
+                $state = ia_load_state($engine, $token);
         $action = (array)$state['action'];
         $activity = (array)($state['activity'] ?? array());
         $progressionContext = (array)($state['progression_context'] ?? array());
         $latestProgressTest = (array)($state['latest_progress_test'] ?? array());
+
+        $actionDecisionPayload = array();
+        $actionDecisionPayloadRaw = trim((string)($action['decision_payload_json'] ?? ''));
+        if ($actionDecisionPayloadRaw !== '') {
+            $decoded = json_decode($actionDecisionPayloadRaw, true);
+            if (is_array($decoded)) {
+                $actionDecisionPayload = $decoded;
+            }
+        }
     } catch (Throwable $e) {
         $flashError = $e->getMessage();
-        $state = ia_load_state($engine, $token);
+                $state = ia_load_state($engine, $token);
         $action = (array)$state['action'];
         $activity = (array)($state['activity'] ?? array());
         $progressionContext = (array)($state['progression_context'] ?? array());
         $latestProgressTest = (array)($state['latest_progress_test'] ?? array());
+
+        $actionDecisionPayload = array();
+        $actionDecisionPayloadRaw = trim((string)($action['decision_payload_json'] ?? ''));
+        if ($actionDecisionPayloadRaw !== '') {
+            $decoded = json_decode($actionDecisionPayloadRaw, true);
+            if (is_array($decoded)) {
+                $actionDecisionPayload = $decoded;
+            }
+        }
     }
 }
 
@@ -753,6 +784,31 @@ if ($chiefName === '') {
 if ($chiefName === '') {
     $chiefName = 'Chief Instructor';
 }
+
+
+$scheduledOneOnOneInstructorName = '';
+$scheduledOneOnOneInstructorId = (int)($actionDecisionPayload['one_on_one_instructor_user_id'] ?? 0);
+
+if ($scheduledOneOnOneInstructorId > 0) {
+    try {
+        $scheduledInstructorStmt = $pdo->prepare("
+            SELECT id, name, first_name, last_name
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $scheduledInstructorStmt->execute(array($scheduledOneOnOneInstructorId));
+        $scheduledInstructor = $scheduledInstructorStmt->fetch(PDO::FETCH_ASSOC) ?: array();
+
+        $scheduledOneOnOneInstructorName = trim((string)($scheduledInstructor['name'] ?? ''));
+        if ($scheduledOneOnOneInstructorName === '') {
+            $scheduledOneOnOneInstructorName = trim((string)($scheduledInstructor['first_name'] ?? '') . ' ' . (string)($scheduledInstructor['last_name'] ?? ''));
+        }
+    } catch (Throwable $e) {
+        $scheduledOneOnOneInstructorName = '';
+    }
+}
+
 
 $lessonSummary = array();
 try {
@@ -1384,6 +1440,38 @@ cw_header('Instructor Intervention');
                     <div class="ia-section-title">One-on-One Completion</div>
                     <div style="font-size:13px;line-height:1.6;color:#64748b;">
                         Use this only once the required instructor one-on-one session has actually been completed.
+                    </div>
+
+                    <div style="margin-top:14px;padding:14px;border-radius:16px;border:1px solid rgba(15,23,42,.06);background:#fff;">
+                        <div class="ia-kv-grid">
+                            <div class="ia-kv">
+                                <div class="ia-kv-label">Scheduled Date</div>
+                                <div class="ia-kv-value" style="font-size:15px;">
+                                    <?php echo ia_h((string)($actionDecisionPayload['one_on_one_date'] ?? '—')); ?>
+                                </div>
+                            </div>
+
+                            <div class="ia-kv">
+                                <div class="ia-kv-label">Scheduled Instructor</div>
+                                <div class="ia-kv-value" style="font-size:15px;">
+                                    <?php echo ia_h($scheduledOneOnOneInstructorName !== '' ? $scheduledOneOnOneInstructorName : '—'); ?>
+                                </div>
+                            </div>
+
+                            <div class="ia-kv">
+                                <div class="ia-kv-label">Time From</div>
+                                <div class="ia-kv-value" style="font-size:15px;">
+                                    <?php echo ia_h((string)($actionDecisionPayload['one_on_one_time_from'] ?? '—')); ?>
+                                </div>
+                            </div>
+
+                            <div class="ia-kv">
+                                <div class="ia-kv-label">Time Until</div>
+                                <div class="ia-kv-value" style="font-size:15px;">
+                                    <?php echo ia_h((string)($actionDecisionPayload['one_on_one_time_until'] ?? '—')); ?>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <form method="post" style="margin-top:14px;">
