@@ -1236,31 +1236,6 @@ cw_header('Instructor Intervention');
 								</select>
 							</div>
                         </div>
-						
-						
-						<div class="ia-form-grid">
-                            <div class="ia-field">
-                                <label class="ia-label">Decision</label>
-                                <select name="decision_code" class="ia-select" id="ia-decision-code" required>
-                                    <option value="">Select a decision</option>
-                                    <?php foreach ($decisionOptions as $key => $meta): ?>
-                                        <option value="<?php echo ia_h($key); ?>"><?php echo ia_h((string)$meta['label']); ?></option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-
-                            <div class="ia-field" id="ia-extra-attempts-field" style="display:none;">
-                                <label class="ia-label">Extra Progress Test Attempts</label>
-                                <select class="ia-select" name="granted_extra_attempts" id="ia-granted-extra-attempts">
-                                    <option value="">Select attempts</option>
-                                    <option value="1">1 extra attempt</option>
-                                    <option value="2">2 extra attempts</option>
-                                    <option value="3">3 extra attempts</option>
-                                    <option value="4">4 extra attempts</option>
-                                    <option value="5">5 extra attempts</option>
-                                </select>
-                            </div>
-                        </div>
 
                         <div id="ia-one-on-one-fields" style="display:none;margin-top:14px;">
                             <div class="ia-form-grid">
