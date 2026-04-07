@@ -626,15 +626,20 @@ foreach ($lessonRows as $l) {
     }
 
     $instructorDecision = ($role === 'admin')
-        ? [
-            'granted_extra_attempts' => 0,
-            'one_on_one_required' => 0,
-            'one_on_one_completed' => 0,
-            'training_suspended' => 0,
-        ]
-        : get_instructor_decision_state($pdo, $userId, $cohortId, $lessonId);
+    ? [
+        'granted_extra_attempts' => 0,
+        'one_on_one_required' => 0,
+        'one_on_one_completed' => 0,
+        'training_suspended' => 0,
+    ]
+    : [
+        'granted_extra_attempts' => (int)($activity['granted_extra_attempts'] ?? 0),
+        'one_on_one_required' => (int)($activity['one_on_one_required'] ?? 0),
+        'one_on_one_completed' => (int)($activity['one_on_one_completed'] ?? 0),
+        'training_suspended' => (int)($activity['training_suspended'] ?? 0),
+    ];
 
-    $maxAllowedAttempts = $baseMaxAllowedAttempts + (int)$instructorDecision['granted_extra_attempts'];
+	$maxAllowedAttempts = $baseMaxAllowedAttempts + (int)$instructorDecision['granted_extra_attempts'];
     $attemptsLeft = max(0, $maxAllowedAttempts - $attemptsUsed);
 
     $testPassed = !empty($test['passed']);
