@@ -1407,6 +1407,11 @@ cw_header('Instructor Intervention');
                             </div>
                         </div>
 						
+						
+						<input type="hidden" name="one_on_one_start_utc" id="ia-one-on-one-start-utc" value="">
+						<input type="hidden" name="one_on_one_end_utc" id="ia-one-on-one-end-utc" value="">
+						<input type="hidden" name="one_on_one_timezone" id="ia-one-on-one-timezone" value="">						
+						
 
                         <div class="ia-field" style="margin-top:14px;">
                             <label class="ia-label">Decision Notes</label>
@@ -1422,6 +1427,10 @@ cw_header('Instructor Intervention');
                         <div class="ia-actions">
                             <button type="submit" class="ia-btn">Record Instructor Decision</button>
                         </div>
+						
+
+						
+						
                     </form>
                 <?php else: ?>
                     <div style="font-size:13px;line-height:1.6;color:#64748b;">
@@ -1925,6 +1934,23 @@ cw_header('Instructor Intervention');
         }
     }
 
+	
+	function buildUtcFromLocal(dateValue, timeValue) {
+        if (!dateValue || !timeValue) return '';
+
+        var local = new Date(dateValue + 'T' + timeValue + ':00');
+        if (isNaN(local.getTime())) return '';
+
+        var yyyy = local.getUTCFullYear();
+        var mm = String(local.getUTCMonth() + 1).padStart(2, '0');
+        var dd = String(local.getUTCDate()).padStart(2, '0');
+        var hh = String(local.getUTCHours()).padStart(2, '0');
+        var mi = String(local.getUTCMinutes()).padStart(2, '0');
+        var ss = String(local.getUTCSeconds()).padStart(2, '0');
+
+        return yyyy + '-' + mm + '-' + dd + ' ' + hh + ':' + mi + ':' + ss;
+    }
+	
     function syncDecisionUi() {
         if (!decisionCode) return;
 
@@ -2008,6 +2034,31 @@ cw_header('Instructor Intervention');
                     e.preventDefault();
                     alert('Please select the instructor for the one-on-one.');
                     return;
+                }
+
+                var startUtcField = document.getElementById('ia-one-on-one-start-utc');
+                var endUtcField = document.getElementById('ia-one-on-one-end-utc');
+                var timezoneField = document.getElementById('ia-one-on-one-timezone');
+
+                var startUtc = buildUtcFromLocal(oneOnOneDate.value, oneOnOneTimeFrom.value);
+                var endUtc = buildUtcFromLocal(oneOnOneDate.value, oneOnOneTimeUntil.value);
+
+                if (!startUtc || !endUtc) {
+                    e.preventDefault();
+                    alert('Unable to convert the one-on-one time to UTC.');
+                    return;
+                }
+
+                if (endUtc <= startUtc) {
+                    e.preventDefault();
+                    alert('One-on-one end time must be later than the start time.');
+                    return;
+                }
+
+                if (startUtcField) startUtcField.value = startUtc;
+                if (endUtcField) endUtcField.value = endUtc;
+                if (timezoneField && window.Intl && Intl.DateTimeFormat) {
+                    timezoneField.value = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
                 }
             }
 
