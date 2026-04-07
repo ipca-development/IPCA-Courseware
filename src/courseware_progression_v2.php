@@ -1048,21 +1048,25 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
                 $remediationRequired = true;
             }
                 } else {
-            if (!empty($classification['counts_as_unsat'])) {
-                $currentAttemptNumber = (int)($attempt['current_attempt_number'] ?? 1);
-                $instructorEscalationAttempt = (int)($attempt['instructor_escalation_attempt'] ?? PHP_INT_MAX);
-                $remediationTriggerAttempt = (int)($attempt['remediation_trigger_attempt'] ?? PHP_INT_MAX);
-                $remediationCompleted = !empty($attempt['remediation_completed']);
+            		if (!empty($classification['counts_as_unsat'])) {
+						$currentAttemptNumber = (int)($attempt['current_attempt_number'] ?? 1);
+						$effectiveAllowedAttempts = (int)($attempt['effective_allowed_attempts'] ?? 0);
+						$remediationTriggerAttempt = (int)($attempt['remediation_trigger_attempt'] ?? PHP_INT_MAX);
+						$remediationCompleted = !empty($attempt['remediation_completed']);
 
-                if ($currentAttemptNumber >= $instructorEscalationAttempt) {
-                    $instructorRequired = true;
-                } elseif (
-                    $currentAttemptNumber === $remediationTriggerAttempt
-                    && !$remediationCompleted
-                ) {
-                    $remediationRequired = true;
-                }
-            }
+						if ($effectiveAllowedAttempts <= 0) {
+							$effectiveAllowedAttempts = (int)($attempt['instructor_escalation_attempt'] ?? PHP_INT_MAX);
+						}
+
+						if ($currentAttemptNumber >= $effectiveAllowedAttempts) {
+							$instructorRequired = true;
+						} elseif (
+							$currentAttemptNumber === $remediationTriggerAttempt
+							&& !$remediationCompleted
+						) {
+							$remediationRequired = true;
+						}
+					}
         }
 
         if ($oneOnOneRequired) {
