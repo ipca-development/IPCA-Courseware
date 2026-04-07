@@ -141,6 +141,7 @@ function ia_result_class(string $code): string
     return strtoupper($code) === 'PASS' ? 'ok' : 'danger';
 }
 
+
 function ia_decision_ui_options(): array
 {
     return array(
@@ -162,6 +163,55 @@ function ia_decision_ui_options(): array
         ),
     );
 }
+
+
+function ia_decision_code_label(string $code): string
+{
+    return match ($code) {
+        'approve_additional_attempts' => 'Extra Attempts',
+        'approve_with_summary_revision' => 'Summary Revision',
+        'approve_with_one_on_one' => 'One-on-One',
+        'suspend_training' => 'Training Suspended',
+        default => $code !== '' ? ucwords(str_replace('_', ' ', $code)) : '—',
+    };
+}
+
+function ia_collect_instructor_interventions(PDO $pdo, int $userId, int $cohortId, int $lessonId): array
+{
+    $stmt = $pdo->prepare("
+        SELECT
+            sra.id,
+            sra.progress_test_id,
+            sra.status,
+            sra.decision_code,
+            sra.granted_extra_attempts,
+            sra.summary_revision_required,
+            sra.one_on_one_required,
+            sra.one_on_one_completed,
+            sra.training_suspended,
+            sra.major_intervention_flag,
+            sra.decision_notes,
+            sra.decision_by_user_id,
+            sra.decision_at,
+            u.name AS decision_by_name,
+            u.first_name AS decision_by_first_name,
+            u.last_name AS decision_by_last_name
+        FROM student_required_actions sra
+        LEFT JOIN users u
+            ON u.id = sra.decision_by_user_id
+        WHERE sra.user_id = ?
+          AND sra.cohort_id = ?
+          AND sra.lesson_id = ?
+          AND sra.action_type = 'instructor_approval'
+          AND sra.status = 'approved'
+          AND sra.decision_at IS NOT NULL
+        ORDER BY sra.decision_at DESC, sra.id DESC
+    ");
+    $stmt->execute(array($userId, $cohortId, $lessonId));
+    return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+}
+
+
 
 function ia_human_completion_status(string $status): array
 {
@@ -666,6 +716,7 @@ $attemptItems = ia_collect_attempt_items($pdo, $attemptIds);
 $officialReferences = ia_collect_official_references($pdo, $lessonId);
 $groupedReferences = ia_group_references($officialReferences);
 $difficultyLines = ia_build_difficulty_lines($attemptHistory, $attemptItems);
+$interventionHistory = ia_collect_instructor_interventions($pdo, $studentUserId, $cohortId, $lessonId);
 
 $summaryScore = isset($lessonSummary['review_score']) && $lessonSummary['review_score'] !== null
     ? (float)$lessonSummary['review_score']
@@ -821,6 +872,11 @@ cw_header('Instructor Intervention');
 .ia-override-title{font-size:12px;font-weight:820;color:#102845;margin-bottom:8px}
 .ia-override-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .ia-override-meta{margin-top:10px;padding:10px 12px;border-radius:12px;background:#fff;border:1px solid rgba(15,23,42,.06);font-size:12px;line-height:1.5;color:#334155}
+.ia-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.ia-detail-box{padding:12px 14px;border-radius:14px;border:1px solid rgba(15,23,42,.06);background:#fff}
+.ia-detail-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:800}
+.ia-detail-value{margin-top:6px;font-size:13px;line-height:1.55;color:#102845;font-weight:700}	
+	
 @media (max-width: 1220px){
     .ia-grid{grid-template-columns:1fr}
 }
@@ -831,6 +887,7 @@ cw_header('Instructor Intervention');
     .ia-kv-grid{grid-template-columns:1fr}
     .ia-form-grid{grid-template-columns:1fr}
     .ia-override-grid{grid-template-columns:1fr}
+    .ia-detail-grid{grid-template-columns:1fr}
 }
 </style>
 
@@ -1120,7 +1177,7 @@ cw_header('Instructor Intervention');
                         Action Status: <?php echo ia_h((string)($action['status'] ?? '—')); ?>
                     </span>
                     <?php if (!empty($action['decision_code'])): ?>
-                        <span class="ia-chip info">Decision: <?php echo ia_h((string)$action['decision_code']); ?></span>
+                        <span class="ia-chip info">Decision: <?php echo ia_h(ia_decision_code_label((string)$action['decision_code'])); ?></span>
                     <?php endif; ?>
                     <?php if (!empty($activity['one_on_one_required']) && empty($activity['one_on_one_completed'])): ?>
                         <span class="ia-chip warning">One-on-One Pending</span>
@@ -1255,6 +1312,46 @@ cw_header('Instructor Intervention');
                 <?php endif; ?>
             </section>
 
+			
+			            <section class="card ia-actions-card">
+                <div class="ia-section-title">Instructor Interventions</div>
+
+                <?php if (!$interventionHistory): ?>
+                    <div style="font-size:13px;line-height:1.6;color:#64748b;">No approved instructor interventions found for this lesson yet.</div>
+                <?php else: ?>
+                    <div class="ia-attempt-table-wrap">
+                        <table class="ia-attempt-table">
+                            <thead>
+                                <tr>
+                                    <th style="width:34%;">Date</th>
+                                    <th style="width:32%;">Decision</th>
+                                    <th style="width:14%;">Attempts</th>
+                                    <th style="width:20%;">Button</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($interventionHistory as $intervention): ?>
+                                    <?php $interventionId = (int)($intervention['id'] ?? 0); ?>
+                                    <tr>
+                                        <td><?php echo ia_h(ia_format_datetime_utc((string)($intervention['decision_at'] ?? ''))); ?></td>
+                                        <td><?php echo ia_h(ia_decision_code_label((string)($intervention['decision_code'] ?? ''))); ?></td>
+                                        <td style="font-weight:800;color:#102845;"><?php echo (int)($intervention['granted_extra_attempts'] ?? 0); ?></td>
+                                        <td>
+                                            <div class="ia-table-actions">
+                                                <button type="button" class="ia-link-btn" data-open-modal="intervention-modal-<?php echo $interventionId; ?>">
+                                                    Details
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
+            </section>
+			
+			
         </div>
 
     </div>
@@ -1442,6 +1539,91 @@ cw_header('Instructor Intervention');
         </div>
     </div>
 </div>
+
+
+<?php foreach ($interventionHistory as $intervention): ?>
+    <?php
+    $interventionId = (int)($intervention['id'] ?? 0);
+    $decisionByName = trim((string)($intervention['decision_by_name'] ?? ''));
+    if ($decisionByName === '') {
+        $decisionByName = trim((string)($intervention['decision_by_first_name'] ?? '') . ' ' . (string)($intervention['decision_by_last_name'] ?? ''));
+    }
+    if ($decisionByName === '') {
+        $decisionByName = '—';
+    }
+    ?>
+    <div class="ia-modal" id="intervention-modal-<?php echo $interventionId; ?>">
+        <div class="ia-modal-card">
+            <div class="ia-modal-head">
+                <div>
+                    <h2 class="ia-modal-title">Instructor Intervention Details</h2>
+                    <div class="ia-modal-sub">
+                        <?php echo ia_h(ia_decision_code_label((string)($intervention['decision_code'] ?? ''))); ?>
+                        · <?php echo ia_h(ia_format_datetime_utc((string)($intervention['decision_at'] ?? ''))); ?>
+                    </div>
+                </div>
+                <button type="button" class="ia-close" data-close-modal="intervention-modal-<?php echo $interventionId; ?>">×</button>
+            </div>
+
+            <div class="ia-modal-body">
+                <div class="ia-detail-grid">
+                    <div class="ia-detail-box">
+                        <div class="ia-detail-label">Decision</div>
+                        <div class="ia-detail-value"><?php echo ia_h(ia_decision_code_label((string)($intervention['decision_code'] ?? ''))); ?></div>
+                    </div>
+
+                    <div class="ia-detail-box">
+                        <div class="ia-detail-label">Attempts Granted</div>
+                        <div class="ia-detail-value"><?php echo (int)($intervention['granted_extra_attempts'] ?? 0); ?></div>
+                    </div>
+
+                    <div class="ia-detail-box">
+                        <div class="ia-detail-label">Summary Revision Required</div>
+                        <div class="ia-detail-value"><?php echo !empty($intervention['summary_revision_required']) ? 'Yes' : 'No'; ?></div>
+                    </div>
+
+                    <div class="ia-detail-box">
+                        <div class="ia-detail-label">One-on-One Required</div>
+                        <div class="ia-detail-value"><?php echo !empty($intervention['one_on_one_required']) ? 'Yes' : 'No'; ?></div>
+                    </div>
+
+                    <div class="ia-detail-box">
+                        <div class="ia-detail-label">One-on-One Completed</div>
+                        <div class="ia-detail-value"><?php echo !empty($intervention['one_on_one_completed']) ? 'Yes' : 'No'; ?></div>
+                    </div>
+
+                    <div class="ia-detail-box">
+                        <div class="ia-detail-label">Training Suspended</div>
+                        <div class="ia-detail-value"><?php echo !empty($intervention['training_suspended']) ? 'Yes' : 'No'; ?></div>
+                    </div>
+
+                    <div class="ia-detail-box">
+                        <div class="ia-detail-label">Major Intervention Flag</div>
+                        <div class="ia-detail-value"><?php echo !empty($intervention['major_intervention_flag']) ? 'Yes' : 'No'; ?></div>
+                    </div>
+
+                    <div class="ia-detail-box">
+                        <div class="ia-detail-label">Recorded By</div>
+                        <div class="ia-detail-value"><?php echo ia_h($decisionByName); ?></div>
+                    </div>
+                </div>
+
+                <div style="margin-top:16px;">
+                    <div class="ia-label" style="margin-bottom:8px;">Instructor Notes</div>
+                    <div class="ia-summary-preview" style="max-height:none;">
+                        <?php
+                        $notes = trim((string)($intervention['decision_notes'] ?? ''));
+                        echo $notes !== ''
+                            ? nl2br(ia_h($notes))
+                            : 'No decision notes recorded.';
+                        ?>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+<?php endforeach; ?>
+
 
 <script>
 (function () {
