@@ -1563,6 +1563,13 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
     $decisionCode = trim((string)($payload['decision_code'] ?? ''));
     $decisionNotes = trim((string)($payload['decision_notes'] ?? ''));
 	$oneOnOneDate = trim((string)($payload['one_on_one_date'] ?? ''));
+    $oneOnOneTimeFrom = trim((string)($payload['one_on_one_time_from'] ?? ''));
+    $oneOnOneTimeUntil = trim((string)($payload['one_on_one_time_until'] ?? ''));
+    $oneOnOneInstructorUserId = (int)($payload['one_on_one_instructor_user_id'] ?? 0);
+	$oneOnOneStartUtc = trim((string)($payload['one_on_one_start_utc'] ?? ''));
+    $oneOnOneEndUtc = trim((string)($payload['one_on_one_end_utc'] ?? ''));
+    $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
+	$oneOnOneDate = trim((string)($payload['one_on_one_date'] ?? ''));
 	$oneOnOneTimeFrom = trim((string)($payload['one_on_one_time_from'] ?? ''));
 	$oneOnOneTimeUntil = trim((string)($payload['one_on_one_time_until'] ?? ''));
 	$oneOnOneInstructorUserId = (int)($payload['one_on_one_instructor_user_id'] ?? 0);
@@ -1626,10 +1633,15 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
             'training_suspended' => $trainingSuspended,
             'major_intervention_flag' => $majorInterventionFlag,
             'decision_notes' => $decisionNotes,
+
             'one_on_one_date' => $oneOnOneDate,
             'one_on_one_time_from' => $oneOnOneTimeFrom,
             'one_on_one_time_until' => $oneOnOneTimeUntil,
             'one_on_one_instructor_user_id' => $oneOnOneInstructorUserId,
+
+            'one_on_one_start_utc' => $oneOnOneStartUtc,
+            'one_on_one_end_utc' => $oneOnOneEndUtc,
+            'one_on_one_timezone' => $oneOnOneTimezone,
         ];
 
         $stmt = $this->pdo->prepare("
