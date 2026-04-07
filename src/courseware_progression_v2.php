@@ -1562,6 +1562,10 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
 
     $decisionCode = trim((string)($payload['decision_code'] ?? ''));
     $decisionNotes = trim((string)($payload['decision_notes'] ?? ''));
+	$oneOnOneDate = trim((string)($payload['one_on_one_date'] ?? ''));
+	$oneOnOneTimeFrom = trim((string)($payload['one_on_one_time_from'] ?? ''));
+	$oneOnOneTimeUntil = trim((string)($payload['one_on_one_time_until'] ?? ''));
+	$oneOnOneInstructorUserId = (int)($payload['one_on_one_instructor_user_id'] ?? 0);
 
     if ($decisionCode === '') {
         throw new RuntimeException('decision_code is required.');
@@ -1614,7 +1618,7 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
     $this->pdo->beginTransaction();
 
     try {
-        $decisionPayload = [
+                $decisionPayload = [
             'decision_code' => $decisionCode,
             'granted_extra_attempts' => $grantedExtraAttempts,
             'summary_revision_required' => $summaryRevisionRequired,
@@ -1622,6 +1626,10 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
             'training_suspended' => $trainingSuspended,
             'major_intervention_flag' => $majorInterventionFlag,
             'decision_notes' => $decisionNotes,
+            'one_on_one_date' => $oneOnOneDate,
+            'one_on_one_time_from' => $oneOnOneTimeFrom,
+            'one_on_one_time_until' => $oneOnOneTimeUntil,
+            'one_on_one_instructor_user_id' => $oneOnOneInstructorUserId,
         ];
 
         $stmt = $this->pdo->prepare("
@@ -1833,6 +1841,10 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
             'training_suspended' => $trainingSuspended,
             'major_intervention_flag' => $majorInterventionFlag,
             'decision_notes' => $decisionNotes,
+            'one_on_one_date' => $oneOnOneDate,
+            'one_on_one_time_from' => $oneOnOneTimeFrom,
+            'one_on_one_time_until' => $oneOnOneTimeUntil,
+            'one_on_one_instructor_user_id' => $oneOnOneInstructorUserId,
         ],
         'projection_result' => $projectionResult,
         'automation_result' => $automationResult,
