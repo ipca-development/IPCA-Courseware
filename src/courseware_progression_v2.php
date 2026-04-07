@@ -1666,12 +1666,23 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
         ]);
 
         if ($summaryRevisionRequired === 1) {
-                        $summaryStmt->execute([
-                ':user_id' => (int)$action['user_id'],
-                ':cohort_id' => (int)$action['cohort_id'],
-                ':lesson_id' => (int)$action['lesson_id'],
-            ]);
-        }
+				$summaryStmt = $this->pdo->prepare("
+					UPDATE lesson_summaries
+						SET
+							review_status = 'needs_revision',
+							student_soft_locked = 0,
+							updated_at = CURRENT_TIMESTAMP
+        				WHERE user_id = :user_id
+          					AND cohort_id = :cohort_id
+          					AND lesson_id = :lesson_id
+    ");
+
+    $summaryStmt->execute([
+        ':user_id' => (int)$action['user_id'],
+        ':cohort_id' => (int)$action['cohort_id'],
+        ':lesson_id' => (int)$action['lesson_id'],
+    ]);
+}
 
         $currentActivity = $this->getLessonActivityProjectionRow(
             (int)$action['user_id'],
