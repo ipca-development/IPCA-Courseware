@@ -592,10 +592,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ));
 
             $flashSuccess = 'Instructor summary notes saved successfully.';
-        } elseif ($postAction === 'record_decision') {
+        
+			        } elseif ($postAction === 'record_decision') {
             $uiDecision = trim((string)($_POST['decision_code'] ?? ''));
             $decisionNotes = trim((string)($_POST['decision_notes'] ?? ''));
-            $grantedExtraAttempts = max(0, (int)($_POST['granted_extra_attempts'] ?? 0));
+            $rawGrantedExtraAttempts = trim((string)($_POST['granted_extra_attempts'] ?? ''));
+            $grantedExtraAttempts = ($rawGrantedExtraAttempts === '') ? 0 : (int)$rawGrantedExtraAttempts;
+
+            $oneOnOneDate = trim((string)($_POST['one_on_one_date'] ?? ''));
+            $oneOnOneTimeFrom = trim((string)($_POST['one_on_one_time_from'] ?? ''));
+            $oneOnOneTimeUntil = trim((string)($_POST['one_on_one_time_until'] ?? ''));
+            $oneOnOneInstructorUserId = (int)($_POST['one_on_one_instructor_user_id'] ?? 0);
+
+            $validDecisions = array_keys(ia_decision_ui_options());
+            if (!in_array($uiDecision, $validDecisions, true)) {
+                throw new RuntimeException('Please select a valid instructor decision.');
+            }
+
+            $requiresAttempts = in_array($uiDecision, array(
+                'approve_additional_attempts',
+                'approve_with_summary_revision',
+                'approve_with_one_on_one',
+            ), true);
+
+            if ($requiresAttempts) {
+                if ($grantedExtraAttempts < 1 || $grantedExtraAttempts > 5) {
+                    throw new RuntimeException('Please select between 1 and 5 extra progress test attempts.');
+                }
+            } else {
+                $grantedExtraAttempts = 0;
+            }
+
+            if ($uiDecision === 'approve_with_one_on_one') {
+                if ($oneOnOneDate === '') {
+                    throw new RuntimeException('Please select the one-on-one date.');
+                }
+                if ($oneOnOneTimeFrom === '') {
+                    throw new RuntimeException('Please select the one-on-one start time.');
+                }
+                if ($oneOnOneTimeUntil === '') {
+                    throw new RuntimeException('Please select the one-on-one end time.');
+                }
+                if ($oneOnOneInstructorUserId <= 0) {
+                    throw new RuntimeException('Please select the instructor for the one-on-one.');
+                }
+
+                if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $oneOnOneDate)) {
+                    throw new RuntimeException('Invalid one-on-one date format.');
+                }
+                if (!preg_match('/^\d{2}:\d{2}$/', $oneOnOneTimeFrom)) {
+                    throw new RuntimeException('Invalid one-on-one start time format.');
+                }
+                if (!preg_match('/^\d{2}:\d{2}$/', $oneOnOneTimeUntil)) {
+                    throw new RuntimeException('Invalid one-on-one end time format.');
+                }
+                if ($oneOnOneTimeUntil <= $oneOnOneTimeFrom) {
+                    throw new RuntimeException('One-on-one end time must be later than the start time.');
+                }
+            }
+
+            if ($uiDecision === 'suspend_training' && $decisionNotes === '') {
+                throw new RuntimeException('Please provide the reason for suspending training.');
+            }
+
+            if ($decisionNotes === '') {
+                throw new RuntimeException('Please provide instructor decision notes.');
+            }
 
             $payload = array(
                 'decision_code' => $uiDecision,
@@ -616,6 +678,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
 
             $flashSuccess = trim((string)($result['message'] ?? 'Instructor decision recorded successfully.'));
+			
+			
         } elseif ($postAction === 'mark_one_on_one_completed') {
             $result = $engine->markInstructorApprovalOneOnOneCompleted(
                 (int)$action['id'],
