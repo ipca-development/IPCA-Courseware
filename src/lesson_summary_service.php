@@ -230,18 +230,46 @@ final class LessonSummaryService
             ");
 
             $stmt->execute([
-                (string)$evaluation['review_status'],
-                ((string)$evaluation['review_status'] === 'acceptable') ? 1 : 0,
-                isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
-                (string)$evaluation['review_feedback'],
-                (string)$evaluation['gap_topics'],
-                gmdate('Y-m-d H:i:s'),
-                $userId,
-                $cohortId,
-                $lessonId
-            ]);
+					(string)$evaluation['review_status'],
+					((string)$evaluation['review_status'] === 'acceptable') ? 1 : 0,
+					isset($evaluation['review_score']) ? (int)$evaluation['review_score'] : null,
+					(string)$evaluation['review_feedback'],
+					(string)$evaluation['gap_topics'],
+					gmdate('Y-m-d H:i:s'),
+					$userId,
+					$cohortId,
+					$lessonId
+				]);
 
-            $this->pdo->commit();
+				$activityStmt = $this->pdo->prepare("
+					UPDATE lesson_activity
+					SET
+						summary_status = ?,
+						completion_status = ?,
+						last_state_eval_at = ?,
+						updated_at = CURRENT_TIMESTAMP
+					WHERE user_id = ?
+					  AND cohort_id = ?
+					  AND lesson_id = ?
+				");
+
+				$summaryStatus = (string)$evaluation['review_status'];
+				$completionStatus = ($summaryStatus === 'acceptable')
+					? 'in_progress'
+					: 'awaiting_summary_review';
+
+				$nowUtc = gmdate('Y-m-d H:i:s');
+
+				$activityStmt->execute([
+					$summaryStatus,
+					$completionStatus,
+					$nowUtc,
+					$userId,
+					$cohortId,
+					$lessonId
+				]);
+
+				$this->pdo->commit();
 
             return [
                 'ok' => true,
