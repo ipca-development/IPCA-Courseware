@@ -1690,22 +1690,29 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
 			) ?? [];
 		
         $projection = [
-            'engine_projection' => true,
-            'user_id' => (int)$action['user_id'],
-            'cohort_id' => (int)$action['cohort_id'],
-            'lesson_id' => (int)$action['lesson_id'],
-            'phase' => 'instructor_approval_decision',
-            'fields' => [
-                'granted_extra_attempts' => $grantedExtraAttempts,
-                'one_on_one_required' => $oneOnOneRequired,
-                'training_suspended' => $trainingSuspended,
-                'latest_instructor_action_id' => $requiredActionId,
-                'last_state_eval_at' => $nowUtc,
-                'completion_status' => $trainingSuspended
-                    ? 'training_suspended'
-                    : ($oneOnOneRequired ? 'instructor_required' : ($summaryRevisionRequired ? 'awaiting_summary_review' : 'in_progress')),
-            ],
-        ];
+    'engine_projection' => true,
+    'user_id' => (int)$action['user_id'],
+    'cohort_id' => (int)$action['cohort_id'],
+    'lesson_id' => (int)$action['lesson_id'],
+    'phase' => 'instructor_approval_decision',
+    'fields' => [
+        'granted_extra_attempts' => $grantedExtraAttempts,
+        'one_on_one_required' => $oneOnOneRequired,
+        'training_suspended' => $trainingSuspended,
+        'latest_instructor_action_id' => $requiredActionId,
+        'last_state_eval_at' => $nowUtc,
+        'summary_status' => $summaryRevisionRequired === 1
+            ? 'needs_revision'
+            : (string)($currentActivity['summary_status'] ?? 'acceptable'),
+        'completion_status' => $trainingSuspended
+            ? 'training_suspended'
+            : ($oneOnOneRequired
+                ? 'instructor_required'
+                : ($summaryRevisionRequired
+                    ? 'awaiting_summary_review'
+                    : 'in_progress')),
+    ],
+];
 
         if ($oneOnOneRequired === 1) {
             $projection['fields']['one_on_one_completed'] = 0;
