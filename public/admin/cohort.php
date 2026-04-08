@@ -13,7 +13,7 @@ if (($u['role'] ?? '') !== 'admin') {
     exit('Forbidden');
 }
 
-function h($v){ return htmlspecialchars((string)$v, ENT_QUOTES | ENT_HTML5, 'UTF-8'); }
+// use existing h() from layout.php
 
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 if ($cohortId <= 0) exit('Missing cohort_id');
