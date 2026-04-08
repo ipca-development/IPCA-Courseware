@@ -1,4 +1,6 @@
 <?php
+declare(strict_types=1);
+
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/schedule.php';
@@ -6,453 +8,236 @@ require_once __DIR__ . '/../../src/schedule.php';
 cw_require_login();
 
 $u = cw_current_user($pdo);
-$role = (string)($u['role'] ?? '');
-if ($role !== 'admin') {
+if (($u['role'] ?? '') !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
 }
 
-function tz_options(): array {
-    return [
-        'UTC' => 'UTC',
-        'America/Los_Angeles' => 'California (America/Los_Angeles)',
-        'Europe/Brussels' => 'Belgium (Europe/Brussels)',
-    ];
-}
+function h($v){ return htmlspecialchars((string)$v, ENT_QUOTES | ENT_HTML5, 'UTF-8'); }
 
-function programs(PDO $pdo): array {
-    return $pdo->query("SELECT id, program_key, sort_order FROM programs ORDER BY sort_order, id")
-        ->fetchAll(PDO::FETCH_ASSOC);
-}
-
-function courses_for_program(PDO $pdo, int $programId): array {
-    $st = $pdo->prepare("SELECT id, title, sort_order FROM courses WHERE program_id=? ORDER BY sort_order, id");
-    $st->execute([$programId]);
-    return $st->fetchAll(PDO::FETCH_ASSOC);
-}
-
-function cohort_courses_enabled(PDO $pdo, int $cohortId): array {
-    $st = $pdo->prepare("SELECT course_id, is_enabled FROM cohort_courses WHERE cohort_id=?");
-    $st->execute([$cohortId]);
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-    $out = [];
-    foreach ($rows as $r) $out[(int)$r['course_id']] = (int)$r['is_enabled'];
-    return $out;
-}
-
-function save_course_selection(PDO $pdo, int $cohortId, int $programId, array $selectedCourseIds): void {
-    $all = courses_for_program($pdo, $programId);
-    $selected = [];
-    foreach ($selectedCourseIds as $cid) $selected[(int)$cid] = true;
-
-    $ins = $pdo->prepare("
-      INSERT INTO cohort_courses (cohort_id, course_id, is_enabled)
-      VALUES (?,?,?)
-      ON DUPLICATE KEY UPDATE is_enabled=VALUES(is_enabled)
-    ");
-    foreach ($all as $c) {
-        $cid = (int)$c['id'];
-        $enabled = isset($selected[$cid]) ? 1 : 0;
-        $ins->execute([$cohortId, $cid, $enabled]);
-    }
-}
-
-function pick_primary_course(PDO $pdo, int $programId, array $selectedCourseIds): int {
-    $selected = [];
-    foreach ($selectedCourseIds as $cid) $selected[(int)$cid] = true;
-
-    $all = courses_for_program($pdo, $programId);
-    foreach ($all as $c) {
-        $cid = (int)$c['id'];
-        if (isset($selected[$cid])) return $cid;
-    }
-    if ($all) return (int)$all[0]['id'];
-    return 1;
-}
-
-function fmt_pretty(string $ymdOrDt): string {
-    $d = substr($ymdOrDt, 0, 10);
-    try {
-        $dt = new DateTimeImmutable($d.' 00:00:00', new DateTimeZone('UTC'));
-        return $dt->format('D, M j, Y');
-    } catch (Throwable $e) {
-        return $ymdOrDt;
-    }
-}
-
-// Accept both ?cohort_id= and legacy ?id=
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
-if ($cohortId <= 0) $cohortId = (int)($_GET['id'] ?? 0);
-if ($cohortId <= 0) exit('Missing id');
+if ($cohortId <= 0) exit('Missing cohort_id');
+
+$stmt = $pdo->prepare("SELECT co.*, p.program_key FROM cohorts co LEFT JOIN programs p ON p.id=co.program_id WHERE co.id=?");
+$stmt->execute([$cohortId]);
+$cohort = $stmt->fetch(PDO::FETCH_ASSOC);
+if (!$cohort) exit('Not found');
 
 $msg = '';
-$scheduleSummary = null;
-$scheduleCourses = [];
+$preview = null;
 
-$programs = programs($pdo);
+/**
+ * LIGHTWEIGHT VERSIONING TABLE (SAFE)
+ * If not exists, create once manually:
+ * 
+ * CREATE TABLE cohort_schedule_versions (
+ *   id BIGINT AUTO_INCREMENT PRIMARY KEY,
+ *   cohort_id INT NOT NULL,
+ *   version_no INT NOT NULL,
+ *   is_published TINYINT(1) DEFAULT 0,
+ *   policy_snapshot_json LONGTEXT,
+ *   created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+ * );
+ */
 
-$stmt = $pdo->prepare("
-  SELECT co.*, p.program_key
-  FROM cohorts co
-  LEFT JOIN programs p ON p.id=co.program_id
-  WHERE co.id=? LIMIT 1
-");
-$stmt->execute([$cohortId]);
-$cohort = $stmt->fetch(PDO::FETCH_ASSOC);
-if (!$cohort) exit('Cohort not found');
+function get_next_version(PDO $pdo, int $cohortId): int {
+    $st = $pdo->prepare("SELECT MAX(version_no) FROM cohort_schedule_versions WHERE cohort_id=?");
+    $st->execute([$cohortId]);
+    return ((int)$st->fetchColumn()) + 1;
+}
 
-$programId = (int)($cohort['program_id'] ?? 0);
-$enabledMap = cohort_courses_enabled($pdo, $cohortId);
-$courses = ($programId > 0) ? courses_for_program($pdo, $programId) : [];
-
-// --- Actions ---
+/**
+ * ACTIONS
+ */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = (string)($_POST['action'] ?? '');
+    $action = $_POST['action'] ?? '';
 
-    if ($action === 'save_cohort') {
-        $programId = (int)($_POST['program_id'] ?? 0);
-        $name = trim((string)($_POST['name'] ?? ''));
-        $start = trim((string)($_POST['start_date'] ?? ''));
-        $end   = trim((string)($_POST['end_date'] ?? ''));
-        $tz    = trim((string)($_POST['timezone'] ?? 'UTC'));
+    if ($action === 'preview_schedule') {
 
-        if ($programId <= 0 || $name === '' || $start === '' || $end === '') {
-            $msg = 'Missing required fields.';
-        } else {
-            $firstCourse = $pdo->prepare("SELECT id FROM courses WHERE program_id=? ORDER BY sort_order, id LIMIT 1");
-            $firstCourse->execute([$programId]);
-            $fallbackCourseId = (int)($firstCourse->fetchColumn() ?: 0);
-            if ($fallbackCourseId <= 0) {
-                $msg = 'No courses exist for this program yet.';
-            } else {
-                $up = $pdo->prepare("
-                  UPDATE cohorts
-                  SET program_id=?, name=?, start_date=?, end_date=?, timezone=?, course_id=?
-                  WHERE id=?
-                ");
-                $up->execute([$programId, $name, $start, $end, $tz, $fallbackCourseId, $cohortId]);
+        $preview = cw_recalculate_cohort_deadlines($pdo, $cohortId);
+        $msg = "Preview generated (NOT published).";
 
-                redirect('/admin/cohort.php?cohort_id='.$cohortId);
-            }
-        }
-    }
+    } elseif ($action === 'publish_schedule') {
 
-    if ($action === 'save_courses') {
-        $programId = (int)($_POST['program_id'] ?? 0);
-        $courseIds = $_POST['course_ids'] ?? [];
-        if (!is_array($courseIds)) $courseIds = [];
-        $courseIds = array_values(array_map('intval', $courseIds));
+        $pdo->beginTransaction();
 
-        if ($programId <= 0) {
-            $msg = 'Missing program.';
-        } else {
-            save_course_selection($pdo, $cohortId, $programId, $courseIds);
-            $primary = pick_primary_course($pdo, $programId, $courseIds);
-            $pdo->prepare("UPDATE cohorts SET course_id=? WHERE id=?")->execute([$primary, $cohortId]);
-            redirect('/admin/cohort.php?cohort_id='.$cohortId);
-        }
-    }
-
-    if ($action === 'add_student') {
-        $email = strtolower(trim((string)($_POST['email'] ?? '')));
-        if ($email === '') {
-            $msg = 'Enter an email address.';
-        } else {
-            $st = $pdo->prepare("SELECT id,email,name,role FROM users WHERE email=? LIMIT 1");
-            $st->execute([$email]);
-            $userRow = $st->fetch(PDO::FETCH_ASSOC);
-            if (!$userRow) {
-                $msg = "No user found for: {$email}";
-            } else {
-                $uid = (int)$userRow['id'];
-                $ins = $pdo->prepare("
-                  INSERT INTO cohort_students (cohort_id, user_id, status, enrolled_at, created_at)
-                  VALUES (?, ?, 'active', NOW(), NOW())
-                  ON DUPLICATE KEY UPDATE status='active'
-                ");
-                $ins->execute([$cohortId, $uid]);
-                $msg = "Student added: ".$userRow['email'];
-            }
-        }
-    }
-
-    if ($action === 'remove_student') {
-        $uid = (int)($_POST['user_id'] ?? 0);
-        if ($uid > 0) {
-            $pdo->prepare("DELETE FROM cohort_students WHERE cohort_id=? AND user_id=?")->execute([$cohortId, $uid]);
-            $msg = "Student removed.";
-        }
-    }
-
-    if ($action === 'recalc_deadlines') {
         try {
             $out = cw_recalculate_cohort_deadlines($pdo, $cohortId);
-            $scheduleSummary = $out['summary'] ?? null;
-            $scheduleCourses = $out['courses'] ?? [];
-            $msg = "Schedule recalculated.";
+
+            $version = get_next_version($pdo, $cohortId);
+
+            $policySnapshot = json_encode([
+                'weekend_skip' => $_POST['weekend_skip'] ?? 'none',
+                'cutoff_time' => $_POST['cutoff_time'] ?? '23:59:59'
+            ]);
+
+            $pdo->prepare("
+                INSERT INTO cohort_schedule_versions
+                (cohort_id, version_no, is_published, policy_snapshot_json)
+                VALUES (?,?,1,?)
+            ")->execute([$cohortId, $version, $policySnapshot]);
+
+            $pdo->commit();
+
+            $msg = "Schedule published (Version {$version}).";
+
         } catch (Throwable $e) {
-            $msg = "Schedule error: " . $e->getMessage();
+            $pdo->rollBack();
+            $msg = "Error: " . $e->getMessage();
         }
     }
 }
 
-// reload after edits
-$stmt->execute([$cohortId]);
-$cohort = $stmt->fetch(PDO::FETCH_ASSOC);
-$programId = (int)($cohort['program_id'] ?? 0);
-$enabledMap = cohort_courses_enabled($pdo, $cohortId);
-$courses = ($programId > 0) ? courses_for_program($pdo, $programId) : [];
-
-$studentsStmt = $pdo->prepare("
-  SELECT cs.user_id, cs.status, cs.enrolled_at,
-         u.email, u.name, u.role
-  FROM cohort_students cs
-  JOIN users u ON u.id = cs.user_id
-  WHERE cs.cohort_id=?
-  ORDER BY cs.enrolled_at ASC, cs.user_id ASC
+/**
+ * LOAD STUDENTS + PROGRESS SNAPSHOT
+ */
+$students = $pdo->prepare("
+    SELECT u.id, u.name, u.email
+    FROM cohort_students cs
+    JOIN users u ON u.id = cs.user_id
+    WHERE cs.cohort_id=?
 ");
-$studentsStmt->execute([$cohortId]);
-$students = $studentsStmt->fetchAll(PDO::FETCH_ASSOC);
+$students->execute([$cohortId]);
+$students = $students->fetchAll(PDO::FETCH_ASSOC);
 
-// Also load schedule from DB for display (course grouping)
-$schedRowsStmt = $pdo->prepare("
-  SELECT d.sort_order, d.deadline_utc, d.lesson_id,
-         l.external_lesson_id, l.title AS lesson_title,
-         c.id AS course_id, c.title AS course_title, c.sort_order AS course_sort
-  FROM cohort_lesson_deadlines d
-  JOIN lessons l ON l.id=d.lesson_id
-  JOIN courses c ON c.id=l.course_id
-  WHERE d.cohort_id=?
-  ORDER BY c.sort_order, c.id, d.sort_order, l.external_lesson_id
-");
-$schedRowsStmt->execute([$cohortId]);
-$schedRows = $schedRowsStmt->fetchAll(PDO::FETCH_ASSOC);
-
-$courseBlocks = [];
-foreach ($schedRows as $r) {
-    $cid = (int)$r['course_id'];
-    if (!isset($courseBlocks[$cid])) {
-        $courseBlocks[$cid] = [
-            'course_id' => $cid,
-            'course_title' => (string)$r['course_title'],
-            'lessons' => [],
-            'course_deadline_utc' => (string)$r['deadline_utc'],
-        ];
-    }
-    $courseBlocks[$cid]['lessons'][] = [
-        'sort_order' => (int)$r['sort_order'],
-        'external_lesson_id' => (int)$r['external_lesson_id'],
-        'lesson_title' => (string)$r['lesson_title'],
-        'deadline_utc' => (string)$r['deadline_utc'],
-    ];
-    // keep updating; last row becomes course deadline
-    $courseBlocks[$cid]['course_deadline_utc'] = (string)$r['deadline_utc'];
+/**
+ * SIMPLE PROGRESS %
+ */
+function student_progress(PDO $pdo, int $userId, int $cohortId): int {
+    $st = $pdo->prepare("
+        SELECT 
+            SUM(CASE WHEN completion_status='completed' THEN 1 ELSE 0 END) as done,
+            COUNT(*) as total
+        FROM lesson_activity
+        WHERE user_id=? AND cohort_id=?
+    ");
+    $st->execute([$userId, $cohortId]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$r || (int)$r['total'] === 0) return 0;
+    return (int)round(((int)$r['done'] / (int)$r['total']) * 100);
 }
 
-cw_header('Theory Training');
+cw_header("Cohort");
 ?>
-<div class="card">
-  <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:center;">
-    <div>
-      <h2 style="margin:0 0 6px 0;"><?= h((string)$cohort['name']) ?></h2>
-      <div class="muted">
-        Program: <strong><?= h((string)($cohort['program_key'] ?? '—')) ?></strong>
-        • Start: <?= h(fmt_pretty((string)$cohort['start_date'])) ?>
-        • End: <?= h(fmt_pretty((string)$cohort['end_date'])) ?>
-        • TZ: <?= h((string)$cohort['timezone']) ?>
-      </div>
-    </div>
-    <div style="display:flex; gap:10px; align-items:center;">
-      <a class="btn btn-sm" href="/admin/cohorts.php">← Back to cohorts</a>
-    </div>
-  </div>
 
-  <?php if ($msg): ?>
-    <div class="alert" style="margin-top:10px;"><?= h($msg) ?></div>
-  <?php endif; ?>
-</div>
+<style>
+.cohort-page{display:flex;flex-direction:column;gap:18px}
+.cohort-hero{padding:22px}
+.cohort-title{font-size:28px;font-weight:800;color:#102845;margin:0}
+.cohort-sub{color:#64748b;margin-top:6px}
+.card-pad{padding:20px}
 
-<div class="card">
-  <h2 style="margin:0 0 10px 0;">Cohort settings</h2>
-  <form method="post" class="form-grid">
-    <input type="hidden" name="action" value="save_cohort">
+.student-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(260px,1fr));
+    gap:14px;
+}
+.student-card{
+    display:flex;
+    gap:12px;
+    padding:14px;
+    border-radius:14px;
+    border:1px solid rgba(15,23,42,.08);
+    background:#fff;
+}
+.avatar{
+    width:42px;height:42px;border-radius:50%;
+    background:#12355f;color:#fff;
+    display:flex;align-items:center;justify-content:center;
+    font-weight:800;
+}
+.progress-bar{
+    height:6px;
+    border-radius:6px;
+    background:rgba(15,23,42,.08);
+    overflow:hidden;
+}
+.progress-fill{
+    height:100%;
+    background:linear-gradient(90deg,#1e3c72,#2a5298);
+}
+</style>
 
-    <label>Program</label>
-    <select name="program_id" required>
-      <?php foreach ($programs as $p): ?>
-        <option value="<?= (int)$p['id'] ?>" <?= ((int)$p['id'] === (int)$cohort['program_id']) ? 'selected' : '' ?>>
-          <?= h((string)$p['program_key']) ?>
-        </option>
-      <?php endforeach; ?>
-    </select>
+<div class="cohort-page">
 
-    <label>Cohort name</label>
-    <input name="name" required value="<?= h((string)$cohort['name']) ?>">
+    <section class="card cohort-hero">
+        <h1 class="cohort-title"><?= h($cohort['name']) ?></h1>
+        <div class="cohort-sub">
+            <?= h($cohort['program_key']) ?> • 
+            <?= h($cohort['start_date']) ?> → <?= h($cohort['end_date']) ?>
+        </div>
+    </section>
 
-    <label>Start date</label>
-    <input name="start_date" type="date" required value="<?= h((string)$cohort['start_date']) ?>">
-
-    <label>End date</label>
-    <input name="end_date" type="date" required value="<?= h((string)$cohort['end_date']) ?>">
-
-    <label>Timezone</label>
-    <select name="timezone" required>
-      <?php foreach (tz_options() as $k=>$lbl): ?>
-        <option value="<?= h($k) ?>" <?= ((string)$cohort['timezone'] === $k) ? 'selected' : '' ?>><?= h($lbl) ?></option>
-      <?php endforeach; ?>
-    </select>
-
-    <div></div>
-    <button class="btn" type="submit">Save settings</button>
-  </form>
-</div>
-
-<div class="card">
-  <h2 style="margin:0 0 10px 0;">Courses included</h2>
-  <p class="muted" style="margin-top:0;">
-    Default: all program courses enabled. Uncheck to exclude.
-  </p>
-
-  <form method="post">
-    <input type="hidden" name="action" value="save_courses">
-    <input type="hidden" name="program_id" value="<?= (int)$programId ?>">
-
-    <?php if (!$programId || !$courses): ?>
-      <div class="muted">No program/courses available. Set a program above first.</div>
-    <?php else: ?>
-      <div style="display:flex; flex-direction:column; gap:6px;">
-        <?php foreach ($courses as $c): ?>
-          <?php
-            $cid = (int)$c['id'];
-            $checked = ((int)($enabledMap[$cid] ?? 1) === 1);
-          ?>
-          <label style="display:flex; gap:10px; align-items:center;">
-            <input type="checkbox" name="course_ids[]" value="<?= $cid ?>" <?= $checked ? 'checked' : '' ?>>
-            <span><?= h((string)$c['title']) ?></span>
-          </label>
-        <?php endforeach; ?>
-      </div>
-
-      <div style="margin-top:10px; display:flex; gap:10px; flex-wrap:wrap;">
-        <button class="btn" type="submit">Save course selection</button>
-      </div>
+    <?php if ($msg): ?>
+        <div class="card card-pad"><?= h($msg) ?></div>
     <?php endif; ?>
-  </form>
-</div>
 
-<div class="card">
-  <h2 style="margin:0 0 10px 0;">Schedule</h2>
+    <!-- SCHEDULING -->
+    <section class="card card-pad">
+        <h2>Schedule</h2>
 
-  <form method="post" style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
-    <input type="hidden" name="action" value="recalc_deadlines">
-    <button class="btn" type="submit">Recalculate deadlines</button>
-  </form>
+        <form method="post" style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+            <input type="hidden" name="action" value="preview_schedule">
 
-  <?php if ($scheduleSummary): ?>
-    <div style="margin-top:12px;">
-      <h3 style="margin:0 0 8px 0;">Schedule summary</h3>
-      <div class="muted">
-        <div>- Lessons scheduled: <?= (int)$scheduleSummary['lessons_scheduled'] ?></div>
-        <div>- Total study hours (est.): <?= h((string)$scheduleSummary['total_study_hours']) ?></div>
-        <div>- Usable days: <?= (int)$scheduleSummary['usable_days'] ?> (Recommended: <?= (int)$scheduleSummary['recommended_days'] ?> days)</div>
-        <div>- <?= h((string)$scheduleSummary['assumptions']) ?></div>
-        <div>- Note(s): Suggested End Date <?= h((string)$scheduleSummary['suggested_end_pretty']) ?> (<?= h((string)$scheduleSummary['suggested_end_delta']) ?>)</div>
-      </div>
-    </div>
-  <?php endif; ?>
+            <label>Weekend handling</label>
+            <select name="weekend_skip">
+                <option value="none">No skip</option>
+                <option value="sat_sun">Skip Sat+Sun</option>
+                <option value="sun">Skip Sun only</option>
+            </select>
 
-  <?php if (!$courseBlocks): ?>
-    <div class="muted" style="margin-top:12px;">No schedule yet. Click “Recalculate deadlines”.</div>
-  <?php else: ?>
-    <div style="margin-top:12px;">
-      <table>
-        <tr>
-          <th style="width:70px;">Order</th>
-          <th>Course</th>
-          <th style="width:220px;">Deadline</th>
-        </tr>
+            <label>Cutoff time</label>
+            <input type="time" name="cutoff_time" value="23:59">
 
-        <?php $i = 0; foreach ($courseBlocks as $cb): $i++; ?>
-          <?php
-            $courseDeadlinePretty = fmt_pretty((string)$cb['course_deadline_utc']);
-            $courseTitle = (string)$cb['course_title'];
-            $courseLessons = (array)$cb['lessons'];
-            $detailsId = 'course_' . (int)$cb['course_id'];
-          ?>
-          <tr>
-            <td><?= $i ?></td>
-            <td>
-              <details id="<?= h($detailsId) ?>">
-                <summary style="cursor:pointer; font-weight:700;">
-                  <?= h($courseTitle) ?>
-                </summary>
+            <button class="btn">Preview</button>
+        </form>
 
-                <div style="margin-top:10px;">
-                  <table>
-                    <tr>
-                      <th style="width:70px;">Order</th>
-                      <th>Lesson</th>
-                      <th style="width:220px;">Deadline</th>
-                    </tr>
-                    <?php $j = 0; foreach ($courseLessons as $lx): $j++; ?>
-                      <tr>
-                        <td><?= $j ?></td>
-                        <td><?= (int)$lx['external_lesson_id'] ?> — <?= h((string)$lx['lesson_title']) ?></td>
-                        <td><?= h(fmt_pretty((string)$lx['deadline_utc'])) ?></td>
-                      </tr>
-                    <?php endforeach; ?>
-                  </table>
+        <form method="post">
+            <input type="hidden" name="action" value="publish_schedule">
+            <button class="btn">Publish Schedule</button>
+        </form>
+
+        <?php if ($preview): ?>
+            <div style="margin-top:14px;">
+                <strong>Preview Summary</strong><br>
+                Lessons: <?= (int)$preview['summary']['lessons_scheduled'] ?><br>
+                Hours: <?= h($preview['summary']['total_study_hours']) ?>
+            </div>
+        <?php endif; ?>
+    </section>
+
+    <!-- STUDENTS -->
+    <section class="card card-pad">
+        <h2>Students</h2>
+
+        <div class="student-grid">
+
+            <?php foreach ($students as $s): 
+                $progress = student_progress($pdo, (int)$s['id'], $cohortId);
+                $initial = strtoupper(substr($s['name'],0,1));
+            ?>
+
+                <div class="student-card">
+                    <div class="avatar"><?= h($initial) ?></div>
+
+                    <div style="flex:1;">
+                        <div style="font-weight:800"><?= h($s['name']) ?></div>
+                        <div class="muted"><?= h($s['email']) ?></div>
+
+                        <div style="margin-top:8px;">
+                            <div class="progress-bar">
+                                <div class="progress-fill" style="width:<?= $progress ?>%"></div>
+                            </div>
+                            <div class="muted"><?= $progress ?>%</div>
+                        </div>
+                    </div>
                 </div>
-              </details>
-            </td>
-            <td><?= h($courseDeadlinePretty) ?></td>
-          </tr>
-        <?php endforeach; ?>
-      </table>
-    </div>
-  <?php endif; ?>
-</div>
 
-<div class="card">
-  <h2 style="margin:0 0 10px 0;">Students</h2>
+            <?php endforeach; ?>
 
-  <form method="post" class="form-inline" style="margin-bottom:12px;">
-    <input type="hidden" name="action" value="add_student">
-    <input class="input" name="email" placeholder="student@email.com" style="min-width:280px;">
-    <button class="btn" type="submit">Add student</button>
-    <div class="muted">User must already exist in the users table.</div>
-  </form>
+        </div>
+    </section>
 
-  <?php if (!$students): ?>
-    <div class="muted">No students enrolled yet.</div>
-  <?php else: ?>
-    <table>
-      <tr>
-        <th>Email</th>
-        <th>Name</th>
-        <th>Role</th>
-        <th>Status</th>
-        <th>Enrolled</th>
-        <th>Actions</th>
-      </tr>
-      <?php foreach ($students as $s): ?>
-        <tr>
-          <td><?= h((string)$s['email']) ?></td>
-          <td><?= h((string)$s['name']) ?></td>
-          <td><?= h((string)$s['role']) ?></td>
-          <td><?= h((string)$s['status']) ?></td>
-          <td><?= h((string)$s['enrolled_at']) ?></td>
-          <td style="white-space:nowrap;">
-            <form method="post" style="display:inline" onsubmit="return confirm('Remove this student from cohort?');">
-              <input type="hidden" name="action" value="remove_student">
-              <input type="hidden" name="user_id" value="<?= (int)$s['user_id'] ?>">
-              <button class="btn btn-sm" type="submit">Remove</button>
-            </form>
-          </td>
-        </tr>
-      <?php endforeach; ?>
-    </table>
-  <?php endif; ?>
 </div>
 
 <?php cw_footer(); ?>
