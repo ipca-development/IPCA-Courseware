@@ -68,6 +68,46 @@ function cs_initials(string $name, string $email = ''): string
     return 'NA';
 }
 
+function cs_avatar_url(string $photoPath): string
+{
+    $photoPath = trim($photoPath);
+    if ($photoPath === '') {
+        return '';
+    }
+
+    if (preg_match('#^https?://#i', $photoPath)) {
+        return $photoPath;
+    }
+
+    if ($photoPath[0] !== '/') {
+        $photoPath = '/' . $photoPath;
+    }
+
+    return $photoPath;
+}
+
+function cs_avatar_html(string $name, string $email, string $photoPath, int $size = 42): string
+{
+    $label = trim($name) !== '' ? $name : $email;
+    $initials = cs_initials($name, $email);
+    $url = cs_avatar_url($photoPath);
+
+    $style = 'width:' . $size . 'px;height:' . $size . 'px;';
+
+    if ($url !== '') {
+        return ''
+            . '<span class="cs-avatar" style="' . cs_h($style) . '" title="' . cs_h($label) . '">'
+            . '<img src="' . cs_h($url) . '" alt="' . cs_h($label) . '" loading="lazy">'
+            . '</span>';
+    }
+
+    return ''
+        . '<span class="cs-avatar cs-avatar--fallback" style="' . cs_h($style) . '" title="' . cs_h($label) . '">'
+        . cs_h($initials)
+        . '</span>';
+}
+
+
 function cs_percent(int $numerator, int $denominator): int
 {
     if ($denominator <= 0) {
@@ -152,10 +192,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $userSearchSql = "
     SELECT
         u.id,
-        u.name,
-        u.email,
-        u.role,
-        CASE WHEN cs.user_id IS NULL THEN 0 ELSE 1 END AS already_in_cohort
+		u.name,
+		u.email,
+		u.role,
+		u.photo_path,
+    CASE WHEN cs.user_id IS NULL THEN 0 ELSE 1 END AS already_in_cohort
     FROM users u
     LEFT JOIN cohort_students cs
         ON cs.user_id = u.id
@@ -183,11 +224,12 @@ $userSearchRows = $userSearchStmt->fetchAll(PDO::FETCH_ASSOC);
 $studentsStmt = $pdo->prepare("
     SELECT
         cs.user_id,
-        cs.status,
-        cs.enrolled_at,
-        u.email,
-        u.name,
-        u.role
+		cs.status,
+		cs.enrolled_at,
+		u.email,
+		u.name,
+		u.role,
+		u.photo_path
     FROM cohort_students cs
     JOIN users u ON u.id = cs.user_id
     WHERE cs.cohort_id = ?
@@ -296,7 +338,13 @@ cw_header('Theory Training');
 .cs-avatar{
     width:42px;height:42px;border-radius:999px;display:flex;align-items:center;justify-content:center;
     font-size:13px;font-weight:800;color:#fff;background:linear-gradient(135deg,#12355f,#2767aa);
-    box-shadow:0 2px 8px rgba(15,23,42,.12);flex:0 0 auto;
+    box-shadow:0 2px 8px rgba(15,23,42,.12);flex:0 0 auto;overflow:hidden;
+}
+.cs-avatar img{
+    width:100%;height:100%;object-fit:cover;display:block;
+}
+.cs-avatar--fallback{
+    text-transform:uppercase;
 }
 .cs-person-copy{min-width:0}
 .cs-person-name{font-size:14px;font-weight:800;color:#102845;line-height:1.2}
@@ -410,9 +458,14 @@ cw_header('Theory Training');
                         <?php $alreadyInCohort = (int)($row['already_in_cohort'] ?? 0) === 1; ?>
                         <div class="cs-person-card">
                             <div class="cs-person-main">
-                                <div class="cs-avatar">
-                                    <?php echo cs_h(cs_initials((string)($row['name'] ?? ''), (string)($row['email'] ?? ''))); ?>
-                                </div>
+                                <?php
+									echo cs_avatar_html(
+										(string)($row['name'] ?? ''),
+										(string)($row['email'] ?? ''),
+										(string)($row['photo_path'] ?? ''),
+										42
+									);
+									?>
                                 <div class="cs-person-copy">
                                     <div class="cs-person-name"><?php echo cs_h((string)($row['name'] ?? '')); ?></div>
                                     <div class="cs-person-meta">
@@ -478,9 +531,14 @@ cw_header('Theory Training');
                         <div class="cs-student-card">
                             <div class="cs-student-head">
                                 <div class="cs-student-main">
-                                    <div class="cs-avatar">
-                                        <?php echo cs_h(cs_initials((string)($s['name'] ?? ''), (string)($s['email'] ?? ''))); ?>
-                                    </div>
+                                    <?php
+										echo cs_avatar_html(
+											(string)($s['name'] ?? ''),
+											(string)($s['email'] ?? ''),
+											(string)($s['photo_path'] ?? ''),
+											42
+										);
+?>
                                     <div>
                                         <div class="cs-person-name"><?php echo cs_h((string)($s['name'] ?? '')); ?></div>
                                         <div class="cs-person-meta">
