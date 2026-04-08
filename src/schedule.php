@@ -767,6 +767,53 @@ function cw_build_deadline_utc_from_local_day_and_cutoff(string $ymd, string $cu
     }
 }
 
+function cw_format_deadline_delta_label(string $oldUtc, string $newUtc): string
+{
+    $oldUtc = trim($oldUtc);
+    $newUtc = trim($newUtc);
+
+    if ($oldUtc === '' && $newUtc === '') {
+        return '—';
+    }
+
+    if ($oldUtc === '' && $newUtc !== '') {
+        return 'New';
+    }
+
+    if ($oldUtc !== '' && $newUtc === '') {
+        return 'Removed';
+    }
+
+    $oldTs = strtotime($oldUtc);
+    $newTs = strtotime($newUtc);
+
+    if ($oldTs === false || $newTs === false) {
+        return 'Changed';
+    }
+
+    $deltaSeconds = $newTs - $oldTs;
+    if ($deltaSeconds === 0) {
+        return 'No change';
+    }
+
+    $abs = abs((int)$deltaSeconds);
+    $days = (int)floor($abs / 86400);
+    $hours = (int)floor(($abs % 86400) / 3600);
+    $sign = $deltaSeconds > 0 ? '+' : '-';
+
+    if ($days > 0) {
+        return $sign . $days . 'd ' . $hours . 'h';
+    }
+
+    if ($hours > 0) {
+        return $sign . $hours . 'h';
+    }
+
+    $minutes = (int)floor(($abs % 3600) / 60);
+    return $sign . $minutes . 'm';
+}
+
+
 function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $overrideSettings = array()): array
 {
     $cohort = cw_get_cohort_row($pdo, $cohortId);
@@ -884,25 +931,12 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
 
             $oldDeadlineUtc = isset($existingMap[$lessonId]['deadline_utc']) ? (string)$existingMap[$lessonId]['deadline_utc'] : '';
             $oldLabel = $oldDeadlineUtc !== '' ? cw_fmt_local_deadline_label($oldDeadlineUtc, $timezone, 'D, M j, Y H:i') : '—';
+            $newLabel = cw_fmt_local_deadline_label($deadlineUtc, $timezone, 'D, M j, Y H:i');
+            $deltaLabel = cw_format_deadline_delta_label($oldDeadlineUtc, $deadlineUtc);
 
-            $deltaSeconds = null;
-            $deltaLabel = 'New';
-            if ($oldDeadlineUtc !== '') {
-                $deltaSeconds = strtotime($deadlineUtc) - strtotime($oldDeadlineUtc);
-                if ($deltaSeconds === 0) {
-                    $deltaLabel = 'No change';
-                } else {
-                    $abs = abs((int)$deltaSeconds);
-                    $days = (int)floor($abs / 86400);
-                    $hours = (int)floor(($abs % 86400) / 3600);
-                    $sign = $deltaSeconds > 0 ? '+' : '-';
-                    if ($days > 0) {
-                        $deltaLabel = $sign . $days . 'd ' . $hours . 'h';
-                    } else {
-                        $deltaLabel = $sign . $hours . 'h';
-                    }
-                }
-            }
+            $localDeadline = new DateTimeImmutable($deadlineUtc, new DateTimeZone('UTC'));
+            $localDeadline = $localDeadline->setTimezone(new DateTimeZone($timezone));
+            $isWeekendLocal = in_array((int)$localDeadline->format('N'), array(6, 7), true);
 
             $unlockAfter = $lastLessonId !== null ? (int)$lastLessonId : null;
 
@@ -915,18 +949,18 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
                 'sort_order' => $globalLessonOrder * 10,
                 'unlock_after_lesson_id' => $unlockAfter,
                 'estimated_minutes' => $lessonMinutes,
+
                 'old_deadline_utc' => $oldDeadlineUtc,
-                'old_deadline_local_label' => $oldLabel,
+                'existing_deadline_pretty' => $oldLabel,
+
                 'new_deadline_utc' => $deadlineUtc,
-                'new_deadline_local_label' => $deadlineLocalLabel,
-                'delta_seconds' => $deltaSeconds,
-                'delta_label' => $deltaLabel,
-                'weekday_local' => cw_fmt_local_deadline_label($deadlineUtc, $timezone, 'D'),
-                'is_weekend_local' => in_array(
-                    (int)(new DateTimeImmutable($deadlineUtc, new DateTimeZone('UTC')))->setTimezone(new DateTimeZone($timezone))->format('N'),
-                    array(6, 7),
-                    true
-                ),
+                'deadline_pretty' => $newLabel,
+
+                'deadline_delta_label' => $deltaLabel,
+
+                'weekday_local' => $localDeadline->format('D'),
+                'is_weekend' => $isWeekendLocal,
+                'cutoff_label' => $settings['cutoff_local_time'] . ' ' . $timezone,
             );
 
             $previewLessons[] = $lessonRow;
@@ -935,12 +969,39 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
             $lastLessonId = $lessonId;
         }
 
+		        $existingCourseDeadlineUtc = '';
+        foreach ($courseLessons as $courseLessonRow) {
+            $candidate = trim((string)($courseLessonRow['old_deadline_utc'] ?? ''));
+            if ($candidate !== '') {
+                if ($existingCourseDeadlineUtc === '' || strtotime($candidate) > strtotime($existingCourseDeadlineUtc)) {
+                    $existingCourseDeadlineUtc = $candidate;
+                }
+            }
+        }
+
+        $existingCourseDeadlinePretty = $existingCourseDeadlineUtc !== ''
+            ? cw_fmt_local_deadline_label($existingCourseDeadlineUtc, $timezone, 'D, M j, Y H:i')
+            : '—';
+
+        $courseDeadlinePretty = $courseLastDeadlineUtc !== ''
+            ? cw_fmt_local_deadline_label($courseLastDeadlineUtc, $timezone, 'D, M j, Y H:i')
+            : '—';
+
+        $courseDeadlineDeltaLabel = cw_format_deadline_delta_label($existingCourseDeadlineUtc, $courseLastDeadlineUtc);
+		
+		
         $previewCourses[] = array(
             'course_id' => (int)$cid,
             'course_title' => (string)$course['course_title'],
             'course_order' => count($previewCourses) + 1,
+
+            'existing_course_deadline_utc' => $existingCourseDeadlineUtc,
+            'existing_course_deadline_pretty' => $existingCourseDeadlinePretty,
+
             'course_deadline_utc' => $courseLastDeadlineUtc,
-            'course_deadline_local_label' => $courseLastDeadlineUtc !== '' ? cw_fmt_local_deadline_label($courseLastDeadlineUtc, $timezone, 'D, M j, Y H:i') : '—',
+            'course_deadline_pretty' => $courseDeadlinePretty,
+
+            'course_deadline_delta_label' => $courseDeadlineDeltaLabel,
             'lessons' => $courseLessons,
         );
     }
@@ -951,6 +1012,23 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
 
     $firstDeadlineUtc = $previewLessons ? (string)$previewLessons[0]['new_deadline_utc'] : '';
     $lastDeadlineUtc = $previewLessons ? (string)$previewLessons[count($previewLessons) - 1]['new_deadline_utc'] : '';
+
+    $usableDays = 0;
+    try {
+        $usableCursor = $startUtc;
+        $usableEnd = new DateTimeImmutable($cohortEndDate . ' 23:59:59', new DateTimeZone('UTC'));
+        $guard = 0;
+
+        while ($usableCursor <= $usableEnd && $guard < 3700) {
+            if (cw_is_allowed_weekday($usableCursor, (array)$settings['allowed_weekdays'], $timezone)) {
+                $usableDays++;
+            }
+            $usableCursor = $usableCursor->modify('+1 day');
+            $guard++;
+        }
+    } catch (Throwable $e) {
+        $usableDays = 0;
+    }
 
     $fitsWithinCohort = true;
     $daysOverrun = 0;
@@ -970,23 +1048,35 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
         $warningMessages[] = 'No lessons are currently selected in scope.';
     }
 
-    $summary = array(
+        $summary = array(
         'selected_lessons' => $selectedLessonCount,
         'lessons_scheduled' => $selectedLessonCount,
+        'usable_days' => $usableDays,
+        'recommended_days' => $recommendedDays,
+
         'total_study_minutes' => $totalMinutes,
         'total_study_hours' => $totalHours,
-        'recommended_days' => $recommendedDays,
+
         'first_deadline_utc' => $firstDeadlineUtc,
-        'first_deadline_local_label' => $firstDeadlineUtc !== '' ? cw_fmt_local_deadline_label($firstDeadlineUtc, $timezone, 'D, M j, Y H:i') : '—',
+        'first_deadline_pretty' => $firstDeadlineUtc !== '' ? cw_fmt_local_deadline_label($firstDeadlineUtc, $timezone, 'D, M j, Y H:i') : '—',
+
         'suggested_end_utc' => $lastDeadlineUtc,
-        'suggested_end_local_label' => $lastDeadlineUtc !== '' ? cw_fmt_local_deadline_label($lastDeadlineUtc, $timezone, 'D, M j, Y H:i') : '—',
+        'suggested_end_pretty' => $lastDeadlineUtc !== '' ? cw_fmt_local_deadline_label($lastDeadlineUtc, $timezone, 'D, M j, Y H:i') : '—',
+
         'fits_within_cohort' => $fitsWithinCohort,
         'days_overrun' => $daysOverrun,
+        'suggested_end_delta' => $fitsWithinCohort
+            ? 'Within cohort end date'
+            : ($daysOverrun > 0 ? ($daysOverrun . ' day(s) beyond cohort end date') : 'Beyond cohort end date'),
+
         'schedule_start_date' => $settings['schedule_start_date'],
         'cutoff_local_time' => $settings['cutoff_local_time'],
         'timezone' => $timezone,
         'allowed_weekdays' => array_values((array)$settings['allowed_weekdays']),
         'assumptions' => 'Assumptions: Max ' . $maxMinDay . ' min/day, Factor ' . rtrim(rtrim(number_format($factor, 2, '.', ''), '0'), '.') . ', ' . $wpm . ' WPM, PT ' . $ptMin . ' minutes.',
+        'advisory_text' => !$fitsWithinCohort
+            ? 'The selected lesson scope does not comfortably fit inside the current cohort window with these scheduling settings. This is advisory only. No lessons were removed.'
+            : 'The current schedule settings appear sufficient to fit the selected scope inside the cohort window.',
     );
 
     return array(
@@ -1182,23 +1272,40 @@ function cw_publish_cohort_schedule(PDO $pdo, int $cohortId, array $overrideSett
     }
 }
 
-/* =========================================================
- * Legacy compatibility shim
- * ========================================================= */
 
-/**
- * Legacy entry point retained for existing callers.
- *
- * Current behavior:
- * - generates a preview
- * - immediately publishes it
- *
- * This keeps old pages alive until admin/cohort.php is moved to explicit
- * Preview Schedule / Publish Schedule actions.
- */
-function cw_recalculate_cohort_deadlines(PDO $pdo, int $cohortId): array
+function cw_recalculate_cohort_deadlines(PDO $pdo, int $cohortId, array $options = array()): array
 {
-    $published = cw_publish_cohort_schedule($pdo, $cohortId);
+    $previewOnly = !empty($options['preview_only']);
+    $overrideSettings = array();
+
+    foreach (array(
+        'schedule_start_date',
+        'daily_cap_min',
+        'allowed_weekdays',
+        'cutoff_local_time',
+        'reading_wpm',
+        'study_multiplier',
+        'progress_test_minutes',
+        'buffer_min_days',
+        'buffer_pct'
+    ) as $key) {
+        if (array_key_exists($key, $options)) {
+            $overrideSettings[$key] = $options[$key];
+        }
+    }
+
+    if ($previewOnly) {
+        $preview = cw_generate_cohort_schedule_preview($pdo, $cohortId, $overrideSettings);
+
+        return array(
+            'summary' => $preview['summary'],
+            'courses' => $preview['courses'],
+            'lessons' => $preview['lessons'],
+            'warnings' => $preview['warnings'],
+        );
+    }
+
+    $published = cw_publish_cohort_schedule($pdo, $cohortId, $overrideSettings);
 
     return array(
         'summary' => $published['summary'],
