@@ -631,8 +631,8 @@ foreach ($courseLessonTree as $courseTreeRow) {
 
 $publishedLessonCount = count($schedRows);
 $publishedCoverageLessonCount = min($publishedLessonCount, $totalSelectedLessonCount);
-$schedulePct = cohort_percent($publishedCoverageLessonCount, $totalSelectedLessonCount);
 $scopePct = cohort_percent($totalSelectedLessonCount, $totalProgramLessonCount);
+$schedulePct = $scopePct;
 $publishedScopeMismatch = ($publishedLessonCount !== $totalSelectedLessonCount);
 
 $durationDays = cohort_days_between((string)$cohort['start_date'], (string)$cohort['end_date']);
@@ -720,11 +720,20 @@ cw_header('Theory Training');
     border:1px solid rgba(15,23,42,.06);border-radius:16px;background:#f8fafc;padding:14px;
 }
 .cohort-scope-head{
-    display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:nowrap;
+    display:flex;
+    justify-content:space-between;
+    gap:12px;
+    align-items:flex-start;
+    flex-wrap:nowrap;
+}
+.cohort-scope-head > div:first-child{
+    flex:1 1 auto;
+    min-width:0;
 }
 .cohort-scope-head > div:last-child{
     margin-left:auto;
     flex:0 0 auto;
+    align-self:flex-start;
 }
 .cohort-chip-disabled{
     background:#e5e7eb;
@@ -829,20 +838,20 @@ cw_header('Theory Training');
             </div>
         </div>
 
-        <div class="cohort-progress-wrap">
+ <div class="cohort-progress-wrap">
             <div>
-                <div class="cohort-progress-label">Published Program Coverage</div>
+                <div class="cohort-progress-label">Program Content Selected</div>
                 <div class="cohort-progress-bar">
-                    <div class="cohort-progress-fill" style="width: <?php echo (int)$schedulePct; ?>%;"></div>
+                    <div class="cohort-progress-fill" style="width: <?php echo (int)$scopePct; ?>%;"></div>
                 </div>
                 <div class="cohort-progress-sub">
-                    <?php echo (int)$publishedCoverageLessonCount; ?> of <?php echo (int)$totalSelectedLessonCount; ?> selected lessons are represented in the currently published baseline schedule.
+                    <?php echo (int)$totalSelectedLessonCount; ?> selected lessons out of <?php echo (int)$totalProgramLessonCount; ?> total program lessons.
                     <?php if ($publishedScopeMismatch): ?>
-                        <br><span style="color:#a16207;font-weight:700;">Published schedule and selected scope do not match yet. Preview and publish again after scope changes.</span>
+                        <br><span style="color:#a16207;font-weight:700;">Published schedule still does not fully match the current selected scope. Preview and publish again after scope changes.</span>
                     <?php endif; ?>
                 </div>
             </div>
-            <div class="cohort-chip"><?php echo (int)$schedulePct; ?>%</div>
+            <div class="cohort-chip"><?php echo (int)$scopePct; ?>%</div>
         </div>
     </section>
 	
@@ -1069,8 +1078,8 @@ cw_header('Theory Training');
                         These settings help estimate whether the planned scope fits inside the cohort window. They are advisory here and do not override the admin’s selected scope.
                     </p>
                 </div>
-                                <div class="cohort-muted" style="max-width:280px;text-align:right;">
-                    These rules are currently shown for visibility. Editable cohort-specific scheduling controls belong here next.
+                <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                    <a class="cohort-btn cohort-btn-secondary" href="/admin/theory_control_center.php?tab=policies">View Policies</a>
                 </div>
             </div>
 
@@ -1143,7 +1152,6 @@ cw_header('Theory Training');
                     <input type="hidden" name="action" value="publish_schedule">
                     <button class="cohort-btn" type="submit">Publish schedule</button>
                 </form>
-                <a class="cohort-btn cohort-btn-secondary" href="#schedule-settings">Scheduling settings</a>
             </div>
         </div>
 
@@ -1196,7 +1204,7 @@ cw_header('Theory Training');
                     </thead>
                     <tbody>
                         <?php $courseCounter = 0; ?>
-                        <?php foreach ($scheduleCourses as $courseRow): ?>
+                                                <?php foreach ($scheduleCourses as $courseRow): ?>
                             <?php
                             $courseCounter++;
                             $previewDetailsId = 'preview_course_' . $courseCounter;
@@ -1206,8 +1214,17 @@ cw_header('Theory Training');
                                 <td>
                                     <details class="cohort-course-details" id="<?php echo cohort_h($previewDetailsId); ?>">
                                         <summary><?php echo cohort_h((string)$courseRow['course_title']); ?></summary>
-
-                                        <table class="cohort-table" style="margin-top:8px;">
+                                    </details>
+                                </td>
+                                <td><?php echo cohort_h((string)($courseRow['existing_course_deadline_pretty'] ?? '—')); ?></td>
+                                <td><?php echo cohort_h((string)($courseRow['course_deadline_pretty'] ?? '—')); ?></td>
+                                <td><?php echo cohort_h((string)($courseRow['course_deadline_delta_label'] ?? '—')); ?></td>
+                            </tr>
+                            <tr>
+                                <td></td>
+                                <td colspan="4" style="padding-top:0;">
+                                    <div style="padding:10px 0 0 0;">
+                                        <table class="cohort-table" style="width:100%;margin-top:0;">
                                             <thead>
                                                 <tr>
                                                     <th style="width:70px;">Order</th>
@@ -1242,11 +1259,8 @@ cw_header('Theory Training');
                                                 <?php endforeach; ?>
                                             </tbody>
                                         </table>
-                                    </details>
+                                    </div>
                                 </td>
-                                <td><?php echo cohort_h((string)($courseRow['existing_course_deadline_pretty'] ?? '—')); ?></td>
-                                <td><?php echo cohort_h((string)($courseRow['course_deadline_pretty'] ?? '—')); ?></td>
-                                <td><?php echo cohort_h((string)($courseRow['course_deadline_delta_label'] ?? '—')); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
@@ -1268,7 +1282,7 @@ cw_header('Theory Training');
                         </tr>
                     </thead>
                     <tbody>
-                        <?php $i = 0; foreach ($courseBlocks as $cb): $i++; ?>
+                                                <?php $i = 0; foreach ($courseBlocks as $cb): $i++; ?>
                             <?php
                             $courseDeadlinePretty = cohort_fmt_pretty((string)$cb['course_deadline_utc']);
                             $courseTitle = (string)$cb['course_title'];
@@ -1280,8 +1294,15 @@ cw_header('Theory Training');
                                 <td>
                                     <details class="cohort-course-details" id="<?php echo cohort_h($detailsId); ?>">
                                         <summary><?php echo cohort_h($courseTitle); ?></summary>
-
-                                        <table class="cohort-table" style="margin-top:8px;">
+                                    </details>
+                                </td>
+                                <td><?php echo cohort_h($courseDeadlinePretty); ?></td>
+                            </tr>
+                            <tr>
+                                <td></td>
+                                <td colspan="2" style="padding-top:0;">
+                                    <div style="padding:10px 0 0 0;">
+                                        <table class="cohort-table" style="width:100%;margin-top:0;">
                                             <thead>
                                                 <tr>
                                                     <th style="width:70px;">Order</th>
@@ -1302,9 +1323,8 @@ cw_header('Theory Training');
                                                 <?php endforeach; ?>
                                             </tbody>
                                         </table>
-                                    </details>
+                                    </div>
                                 </td>
-                                <td><?php echo cohort_h($courseDeadlinePretty); ?></td>
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
