@@ -57,6 +57,27 @@ function cohort_courses_for_program(PDO $pdo, int $programId): array
     return $st->fetchAll(PDO::FETCH_ASSOC);
 }
 
+function cohort_lessons_for_program(PDO $pdo, int $programId): array
+{
+    $st = $pdo->prepare("
+        SELECT
+            c.id AS course_id,
+            c.title AS course_title,
+            c.sort_order AS course_sort,
+            l.id AS lesson_id,
+            l.title AS lesson_title,
+            l.external_lesson_id,
+            l.sort_order AS lesson_sort
+        FROM courses c
+        JOIN lessons l
+            ON l.course_id = c.id
+        WHERE c.program_id = ?
+        ORDER BY c.sort_order, c.id, l.sort_order, l.external_lesson_id, l.id
+    ");
+    $st->execute(array($programId));
+    return $st->fetchAll(PDO::FETCH_ASSOC);
+}
+
 function cohort_courses_enabled(PDO $pdo, int $cohortId): array
 {
     $st = $pdo->prepare("
@@ -65,11 +86,27 @@ function cohort_courses_enabled(PDO $pdo, int $cohortId): array
         WHERE cohort_id = ?
     ");
     $st->execute(array($cohortId));
-    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
     $out = array();
-    foreach ($rows as $r) {
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
         $out[(int)$r['course_id']] = (int)$r['is_enabled'];
+    }
+
+    return $out;
+}
+
+function cohort_selected_lessons(PDO $pdo, int $cohortId): array
+{
+    $st = $pdo->prepare("
+        SELECT lesson_id, is_selected
+        FROM cohort_lesson_scope
+        WHERE cohort_id = ?
+    ");
+    $st->execute(array($cohortId));
+
+    $out = array();
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $out[(int)$r['lesson_id']] = (int)$r['is_selected'];
     }
 
     return $out;
@@ -93,6 +130,41 @@ function cohort_save_course_selection(PDO $pdo, int $cohortId, int $programId, a
         $cid = (int)$c['id'];
         $enabled = isset($selected[$cid]) ? 1 : 0;
         $ins->execute(array($cohortId, $cid, $enabled));
+    }
+}
+
+function cohort_save_lesson_scope(PDO $pdo, int $cohortId, int $programId, array $selectedCourseIds, array $selectedLessonIds): void
+{
+    $selectedCourses = array();
+    foreach ($selectedCourseIds as $cid) {
+        $selectedCourses[(int)$cid] = true;
+    }
+
+    $selectedLessons = array();
+    foreach ($selectedLessonIds as $lid) {
+        $selectedLessons[(int)$lid] = true;
+    }
+
+    $rows = cohort_lessons_for_program($pdo, $programId);
+
+    $ins = $pdo->prepare("
+        INSERT INTO cohort_lesson_scope (cohort_id, lesson_id, is_selected)
+        VALUES (?, ?, ?)
+        ON DUPLICATE KEY UPDATE
+            is_selected = VALUES(is_selected),
+            updated_at = CURRENT_TIMESTAMP
+    ");
+
+    foreach ($rows as $row) {
+        $courseId = (int)$row['course_id'];
+        $lessonId = (int)$row['lesson_id'];
+
+        $isSelected = 0;
+        if (isset($selectedCourses[$courseId]) && isset($selectedLessons[$lessonId])) {
+            $isSelected = 1;
+        }
+
+        $ins->execute(array($cohortId, $lessonId, $isSelected));
     }
 }
 
@@ -206,8 +278,6 @@ function cohort_avatar_html(string $name, string $email, string $photoPath, int 
         . '</span>';
 }
 
-
-
 function cohort_days_between(?string $startDate, ?string $endDate): int
 {
     $start = trim((string)$startDate);
@@ -242,6 +312,69 @@ function cohort_setting(PDO $pdo, string $key, string $default = ''): string
     return $cache[$key];
 }
 
+function cohort_percent(int $numerator, int $denominator): int
+{
+    if ($denominator <= 0) {
+        return 0;
+    }
+
+    $pct = (int)floor(($numerator / $denominator) * 100);
+    if ($pct < 0) {
+        $pct = 0;
+    }
+    if ($pct > 100) {
+        $pct = 100;
+    }
+    return $pct;
+}
+
+function cohort_build_course_lesson_tree(PDO $pdo, int $programId, array $enabledMap, array $selectedLessonMap): array
+{
+    $rows = cohort_lessons_for_program($pdo, $programId);
+    $tree = array();
+
+    foreach ($rows as $row) {
+        $courseId = (int)$row['course_id'];
+
+        if (!isset($tree[$courseId])) {
+            $tree[$courseId] = array(
+                'course_id' => $courseId,
+                'course_title' => (string)$row['course_title'],
+                'course_sort' => (int)$row['course_sort'],
+                'is_enabled' => ((int)($enabledMap[$courseId] ?? 1) === 1),
+                'lessons' => array(),
+                'total_lessons' => 0,
+                'selected_lessons' => 0,
+            );
+        }
+
+        $lessonId = (int)$row['lesson_id'];
+        $courseEnabled = ((int)($enabledMap[$courseId] ?? 1) === 1);
+
+        $isSelected = false;
+        if (array_key_exists($lessonId, $selectedLessonMap)) {
+            $isSelected = ((int)$selectedLessonMap[$lessonId] === 1);
+        } else {
+            $isSelected = $courseEnabled;
+        }
+
+        $tree[$courseId]['lessons'][] = array(
+            'lesson_id' => $lessonId,
+            'lesson_title' => (string)$row['lesson_title'],
+            'external_lesson_id' => (int)$row['external_lesson_id'],
+            'lesson_sort' => (int)$row['lesson_sort'],
+            'is_selected' => $isSelected,
+        );
+
+        $tree[$courseId]['total_lessons']++;
+        if ($isSelected) {
+            $tree[$courseId]['selected_lessons']++;
+        }
+    }
+
+    return $tree;
+}
+
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 if ($cohortId <= 0) {
     $cohortId = (int)($_GET['id'] ?? 0);
@@ -253,6 +386,7 @@ if ($cohortId <= 0) {
 $msg = '';
 $scheduleSummary = null;
 $scheduleCourses = array();
+$schedulePreview = null;
 
 $programs = cohort_programs($pdo);
 
@@ -271,7 +405,11 @@ if (!$cohort) {
 
 $programId = (int)($cohort['program_id'] ?? 0);
 $enabledMap = cohort_courses_enabled($pdo, $cohortId);
+$selectedLessonMap = cohort_selected_lessons($pdo, $cohortId);
 $courses = ($programId > 0) ? cohort_courses_for_program($pdo, $programId) : array();
+$courseLessonTree = ($programId > 0)
+    ? cohort_build_course_lesson_tree($pdo, $programId, $enabledMap, $selectedLessonMap)
+    : array();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
@@ -312,20 +450,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($action === 'save_courses') {
+    if ($action === 'save_scope') {
         $programId = (int)($_POST['program_id'] ?? 0);
+
         $courseIds = $_POST['course_ids'] ?? array();
         if (!is_array($courseIds)) {
             $courseIds = array();
         }
-        $courseIds = array_values(array_map('intval', $courseIds));
+        $courseIds = array_values(array_unique(array_map('intval', $courseIds)));
+
+        $lessonIds = $_POST['lesson_ids'] ?? array();
+        if (!is_array($lessonIds)) {
+            $lessonIds = array();
+        }
+        $lessonIds = array_values(array_unique(array_map('intval', $lessonIds)));
 
         if ($programId <= 0) {
             $msg = 'Missing program.';
         } else {
             cohort_save_course_selection($pdo, $cohortId, $programId, $courseIds);
-            $primary = cohort_pick_primary_course($pdo, $programId, $courseIds);
+            cohort_save_lesson_scope($pdo, $cohortId, $programId, $courseIds, $lessonIds);
 
+            $primary = cohort_pick_primary_course($pdo, $programId, $courseIds);
             if ($primary > 0) {
                 $pdo->prepare("UPDATE cohorts SET course_id = ? WHERE id = ?")->execute(array($primary, $cohortId));
             }
@@ -335,14 +481,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($action === 'recalc_deadlines') {
+    if ($action === 'preview_schedule') {
         try {
-            $out = cw_recalculate_cohort_deadlines($pdo, $cohortId);
+            $schedulePreview = cw_recalculate_cohort_deadlines($pdo, $cohortId, array('preview_only' => true));
+            $scheduleSummary = $schedulePreview['summary'] ?? null;
+            $scheduleCourses = $schedulePreview['courses'] ?? array();
+            $msg = 'Schedule preview generated. No live deadlines were changed.';
+        } catch (Throwable $e) {
+            $msg = 'Schedule preview error: ' . $e->getMessage();
+        }
+    }
+
+    if ($action === 'publish_schedule') {
+        try {
+            $out = cw_recalculate_cohort_deadlines($pdo, $cohortId, array('preview_only' => false));
             $scheduleSummary = $out['summary'] ?? null;
             $scheduleCourses = $out['courses'] ?? array();
-            $msg = 'Schedule recalculated.';
+            $msg = 'Schedule published.';
         } catch (Throwable $e) {
-            $msg = 'Schedule error: ' . $e->getMessage();
+            $msg = 'Schedule publish error: ' . $e->getMessage();
         }
     }
 }
@@ -351,17 +508,21 @@ $stmt->execute(array($cohortId));
 $cohort = $stmt->fetch(PDO::FETCH_ASSOC);
 $programId = (int)($cohort['program_id'] ?? 0);
 $enabledMap = cohort_courses_enabled($pdo, $cohortId);
+$selectedLessonMap = cohort_selected_lessons($pdo, $cohortId);
 $courses = ($programId > 0) ? cohort_courses_for_program($pdo, $programId) : array();
+$courseLessonTree = ($programId > 0)
+    ? cohort_build_course_lesson_tree($pdo, $programId, $enabledMap, $selectedLessonMap)
+    : array();
 
 $studentsStmt = $pdo->prepare("
     SELECT
-		cs.user_id,
-		cs.status,
-		cs.enrolled_at,
-		u.email,
-		u.name,
-		u.role,
-		u.photo_path
+        cs.user_id,
+        cs.status,
+        cs.enrolled_at,
+        u.email,
+        u.name,
+        u.role,
+        u.photo_path
     FROM cohort_students cs
     JOIN users u ON u.id = cs.user_id
     WHERE cs.cohort_id = ?
@@ -432,20 +593,20 @@ foreach ($schedRows as $r) {
 }
 
 $enabledCourseCount = 0;
-$totalEnabledLessonCount = 0;
-foreach ($courses as $c) {
-    $cid = (int)$c['id'];
-    $enabled = ((int)($enabledMap[$cid] ?? 1) === 1);
-    if ($enabled) {
+$totalSelectedLessonCount = 0;
+$totalProgramLessonCount = 0;
+
+foreach ($courseLessonTree as $courseTreeRow) {
+    $totalProgramLessonCount += (int)$courseTreeRow['total_lessons'];
+    if (!empty($courseTreeRow['is_enabled'])) {
         $enabledCourseCount++;
-        $totalEnabledLessonCount += (int)($c['lesson_count'] ?? 0);
     }
+    $totalSelectedLessonCount += (int)$courseTreeRow['selected_lessons'];
 }
 
-$scheduledLessonCount = count($schedRows);
-$schedulePct = ($totalEnabledLessonCount > 0)
-    ? min(100, max(0, (int)floor(($scheduledLessonCount / $totalEnabledLessonCount) * 100)))
-    : 0;
+$publishedLessonCount = count($schedRows);
+$schedulePct = cohort_percent($publishedLessonCount, $totalSelectedLessonCount);
+$scopePct = cohort_percent($totalSelectedLessonCount, $totalProgramLessonCount);
 
 $durationDays = cohort_days_between((string)$cohort['start_date'], (string)$cohort['end_date']);
 
@@ -459,6 +620,8 @@ $settingsSnapshot = array(
     'overhead_base_min' => cohort_setting($pdo, 'sched_overhead_base_min', '5'),
     'overhead_per_slide_min' => cohort_setting($pdo, 'sched_overhead_per_slide_min', '0.7'),
     'overhead_cap_min' => cohort_setting($pdo, 'sched_overhead_cap_min', '15'),
+    'skip_weekdays_csv' => cohort_setting($pdo, 'sched_skip_weekdays_csv', ''),
+    'cutoff_time_local' => cohort_setting($pdo, 'sched_cutoff_time_local', '23:59'),
 );
 
 cw_header('Theory Training');
@@ -508,12 +671,8 @@ cw_header('Theory Training');
     border:2px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,.12);margin-left:-8px;
     overflow:hidden;flex:0 0 auto;
 }
-.cohort-avatar img{
-    width:100%;height:100%;object-fit:cover;display:block;
-}
-.cohort-avatar--fallback{
-    text-transform:uppercase;
-}
+.cohort-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.cohort-avatar--fallback{text-transform:uppercase}
 .cohort-avatar:first-child{margin-left:0}
 .cohort-avatar-more{background:linear-gradient(135deg,#64748b,#475569)}
 .cohort-student-list{display:grid;gap:10px}
@@ -529,13 +688,20 @@ cw_header('Theory Training');
     display:inline-flex;align-items:center;padding:6px 9px;border-radius:999px;
     background:rgba(18,53,95,.08);color:#12355f;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
 }
-.cohort-course-grid{display:grid;gap:10px}
-.cohort-course-row{
-    border:1px solid rgba(15,23,42,.06);border-radius:14px;padding:12px 12px;background:#f8fafc;
-    display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;
+.cohort-course-grid{display:grid;gap:12px}
+.cohort-scope-card{
+    border:1px solid rgba(15,23,42,.06);border-radius:16px;background:#f8fafc;padding:14px;
 }
-.cohort-course-title{font-size:14px;font-weight:800;color:#102845}
-.cohort-course-meta{font-size:12px;color:#64748b;margin-top:4px}
+.cohort-scope-head{
+    display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;
+}
+.cohort-scope-title{font-size:15px;font-weight:800;color:#102845}
+.cohort-scope-meta{font-size:12px;color:#64748b;margin-top:4px}
+.cohort-scope-lessons{display:grid;gap:8px;margin-top:12px}
+.cohort-scope-lesson{
+    display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;background:#fff;border:1px solid rgba(15,23,42,.05);
+}
+.cohort-scope-lesson-copy{font-size:13px;color:#334155}
 .cohort-schedule-head{
     display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:flex-start;
 }
@@ -553,9 +719,7 @@ cw_header('Theory Training');
 .cohort-table th{text-align:left;font-size:11px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:#64748b}
 .cohort-course-details summary{cursor:pointer;font-weight:800;color:#102845}
 .cohort-course-details[open] summary{margin-bottom:10px}
-.cohort-modal-btn{
-    border:0;background:none;color:#12355f;font-size:12px;font-weight:800;cursor:pointer;padding:0;
-}
+.cohort-modal-btn{border:0;background:none;color:#12355f;font-size:12px;font-weight:800;cursor:pointer;padding:0}
 .cohort-policy-list{display:grid;gap:8px}
 .cohort-policy-item{
     display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid rgba(15,23,42,.06);
@@ -572,7 +736,6 @@ cw_header('Theory Training');
 }
 @media (max-width: 700px){
     .cohort-form-grid,.cohort-kpis,.cohort-schedule-summary{grid-template-columns:1fr}
-    .cohort-course-row{grid-template-columns:1fr}
     .cohort-progress-wrap{grid-template-columns:1fr}
 }
 </style>
@@ -587,8 +750,8 @@ cw_header('Theory Training');
         <div class="cohort-eyebrow">Admin · Theory Training</div>
         <h1 class="cohort-title"><?php echo cohort_h((string)$cohort['name']); ?></h1>
         <div class="cohort-sub">
-            Cohort control page for program assignment, course inclusion, lesson schedule visibility, and roster access.
-            This page preserves the existing program → course → lesson cohort logic while presenting a cleaner operational overview.
+            Cohort control page for program assignment, course inclusion, lesson scope, schedule preview, and publication.
+            Advisory scheduling rules remain informative only. Final cohort scope and publishing remain an admin decision.
         </div>
 
         <div class="cohort-top-actions" style="margin-top:16px;">
@@ -614,9 +777,11 @@ cw_header('Theory Training');
             </div>
 
             <div class="cohort-kpi">
-                <div class="cohort-kpi-label">Enabled Courses</div>
-                <div class="cohort-kpi-value"><?php echo (int)$enabledCourseCount; ?></div>
-                <div class="cohort-kpi-sub"><?php echo (int)$totalEnabledLessonCount; ?> enabled lessons in scope.</div>
+                <div class="cohort-kpi-label">Lessons in Scope</div>
+                <div class="cohort-kpi-value"><?php echo (int)$totalSelectedLessonCount; ?></div>
+                <div class="cohort-kpi-sub">
+                    <?php echo (int)$enabledCourseCount; ?> enabled courses · <?php echo (int)$scopePct; ?>% of program content selected.
+                </div>
             </div>
 
             <div class="cohort-kpi">
@@ -631,23 +796,23 @@ cw_header('Theory Training');
 
         <div class="cohort-progress-wrap">
             <div>
-                <div class="cohort-progress-label">Schedule Coverage</div>
+                <div class="cohort-progress-label">Published Schedule Coverage</div>
                 <div class="cohort-progress-bar">
                     <div class="cohort-progress-fill" style="width: <?php echo (int)$schedulePct; ?>%;"></div>
                 </div>
                 <div class="cohort-progress-sub">
-                    <?php echo (int)$scheduledLessonCount; ?> of <?php echo (int)$totalEnabledLessonCount; ?> enabled lessons currently have baseline cohort deadlines.
+                    <?php echo (int)$publishedLessonCount; ?> of <?php echo (int)$totalSelectedLessonCount; ?> selected lessons currently have published baseline deadlines.
                 </div>
             </div>
             <div class="cohort-chip"><?php echo (int)$schedulePct; ?>%</div>
         </div>
     </section>
-
-    <div class="cohort-grid-main">
+	
+	    <div class="cohort-grid-main">
         <section class="card cohort-card-pad">
             <h2 class="cohort-section-title">Cohort settings</h2>
             <p class="cohort-section-sub">
-                Update the administrative cohort binding and date range. Course selection remains managed separately below.
+                Update the administrative cohort binding and date range. Scope and schedule are managed separately below.
             </p>
 
             <form method="post">
@@ -698,12 +863,12 @@ cw_header('Theory Training');
                     </div>
 
                     <div class="cohort-field">
-                        <label>Current baseline window</label>
+                        <label>Published baseline window</label>
                         <input
                             class="cohort-input"
                             type="text"
                             readonly
-                            value="<?php echo cohort_h(($firstDeadlineUtc !== '' ? cohort_fmt_pretty($firstDeadlineUtc) : '—') . ' → ' . ($lastDeadlineUtc !== '' ? cohort_fmt_pretty($lastDeadlineUtc) : '—')); ?>"
+                            value="<?php echo cohort_h(($firstDeadlineUtc !== '' ? cohort_fmt_pretty((string)$firstDeadlineUtc) : '—') . ' → ' . ($lastDeadlineUtc !== '' ? cohort_fmt_pretty((string)$lastDeadlineUtc) : '—')); ?>"
                         >
                     </div>
                 </div>
@@ -723,16 +888,16 @@ cw_header('Theory Training');
             <div class="cohort-avatar-row">
                 <?php if ($studentPreview): ?>
                     <?php foreach ($studentPreview as $s): ?>
-						<?php
-						echo cohort_avatar_html(
-							(string)($s['name'] ?? ''),
-							(string)($s['email'] ?? ''),
-							(string)($s['photo_path'] ?? ''),
-							38,
-							false
-						);
-						?>
-					<?php endforeach; ?>
+                        <?php
+                        echo cohort_avatar_html(
+                            (string)($s['name'] ?? ''),
+                            (string)($s['email'] ?? ''),
+                            (string)($s['photo_path'] ?? ''),
+                            38,
+                            false
+                        );
+                        ?>
+                    <?php endforeach; ?>
                     <?php if ($studentCount > count($studentPreview)): ?>
                         <div class="cohort-avatar cohort-avatar-more">+<?php echo (int)($studentCount - count($studentPreview)); ?></div>
                     <?php endif; ?>
@@ -749,14 +914,14 @@ cw_header('Theory Training');
                         <div class="cohort-student-item">
                             <div class="cohort-student-main">
                                 <?php
-									echo cohort_avatar_html(
-										(string)($s['name'] ?? ''),
-										(string)($s['email'] ?? ''),
-										(string)($s['photo_path'] ?? ''),
-										38,
-										true
-									);
-									?>
+                                echo cohort_avatar_html(
+                                    (string)($s['name'] ?? ''),
+                                    (string)($s['email'] ?? ''),
+                                    (string)($s['photo_path'] ?? ''),
+                                    38,
+                                    true
+                                );
+                                ?>
                                 <div class="cohort-student-copy">
                                     <div class="cohort-student-name"><?php echo cohort_h((string)($s['name'] ?? '')); ?></div>
                                     <div class="cohort-student-meta">
@@ -779,42 +944,78 @@ cw_header('Theory Training');
 
     <div class="cohort-grid-two">
         <section class="card cohort-card-pad" id="courses">
-            <h2 class="cohort-section-title">Courses included</h2>
+            <h2 class="cohort-section-title">Courses and lesson scope</h2>
             <p class="cohort-section-sub">
-                This remains the authoritative cohort course-selection layer. Enabled courses define the lessons that are eligible for cohort scheduling.
+                Admin-selected scope is authoritative. Advisory scheduling rules must never silently remove courses or lessons from storage.
             </p>
 
             <form method="post">
-                <input type="hidden" name="action" value="save_courses">
+                <input type="hidden" name="action" value="save_scope">
                 <input type="hidden" name="program_id" value="<?php echo (int)$programId; ?>">
 
-                <?php if (!$programId || !$courses): ?>
-                    <div class="cohort-muted">No program or courses available. Set a valid program above first.</div>
+                <?php if (!$programId || !$courseLessonTree): ?>
+                    <div class="cohort-muted">No program or lessons available. Set a valid program above first.</div>
                 <?php else: ?>
                     <div class="cohort-course-grid">
-                        <?php foreach ($courses as $c): ?>
+                        <?php foreach ($courseLessonTree as $courseRow): ?>
                             <?php
-                            $cid = (int)$c['id'];
-                            $checked = ((int)($enabledMap[$cid] ?? 1) === 1);
+                            $cid = (int)$courseRow['course_id'];
+                            $courseChecked = !empty($courseRow['is_enabled']);
+                            $totalLessons = (int)$courseRow['total_lessons'];
+                            $selectedLessons = (int)$courseRow['selected_lessons'];
+                            $scopeDetailsId = 'scope_course_' . $cid;
                             ?>
-                            <label class="cohort-course-row">
-                                <div>
-                                    <input type="checkbox" name="course_ids[]" value="<?php echo $cid; ?>" <?php echo $checked ? 'checked' : ''; ?>>
-                                </div>
-                                <div>
-                                    <div class="cohort-course-title"><?php echo cohort_h((string)$c['title']); ?></div>
-                                    <div class="cohort-course-meta">
-                                        <?php echo (int)($c['lesson_count'] ?? 0); ?> lesson<?php echo ((int)($c['lesson_count'] ?? 0) === 1) ? '' : 's'; ?>
-                                        · Course ID <?php echo $cid; ?>
+                            <div class="cohort-scope-card">
+                                <div class="cohort-scope-head">
+                                    <div>
+                                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+                                            <input
+                                                type="checkbox"
+                                                name="course_ids[]"
+                                                value="<?php echo $cid; ?>"
+                                                <?php echo $courseChecked ? 'checked' : ''; ?>
+                                            >
+                                            <span>
+                                                <span class="cohort-scope-title"><?php echo cohort_h((string)$courseRow['course_title']); ?></span>
+                                                <span class="cohort-scope-meta">
+                                                    <?php echo $selectedLessons; ?> selected of <?php echo $totalLessons; ?> total lessons
+                                                    · Course ID <?php echo $cid; ?>
+                                                </span>
+                                            </span>
+                                        </label>
                                     </div>
+                                    <div class="cohort-chip"><?php echo $courseChecked ? 'Enabled' : 'Disabled'; ?></div>
                                 </div>
-                                <div class="cohort-chip"><?php echo $checked ? 'Enabled' : 'Disabled'; ?></div>
-                            </label>
+
+                                <details id="<?php echo cohort_h($scopeDetailsId); ?>" style="margin-top:12px;">
+                                    <summary class="cohort-modal-btn">Select lessons</summary>
+                                    <div class="cohort-scope-lessons">
+                                        <?php foreach ($courseRow['lessons'] as $lessonRow): ?>
+                                            <?php
+                                            $lessonId = (int)$lessonRow['lesson_id'];
+                                            $lessonChecked = !empty($lessonRow['is_selected']);
+                                            ?>
+                                            <label class="cohort-scope-lesson">
+                                                <input
+                                                    type="checkbox"
+                                                    name="lesson_ids[]"
+                                                    value="<?php echo $lessonId; ?>"
+                                                    <?php echo $lessonChecked ? 'checked' : ''; ?>
+                                                >
+                                                <span class="cohort-scope-lesson-copy">
+                                                    <?php echo (int)$lessonRow['external_lesson_id']; ?>
+                                                    — <?php echo cohort_h((string)$lessonRow['lesson_title']); ?>
+                                                </span>
+                                            </label>
+                                        <?php endforeach; ?>
+                                    </div>
+                                </details>
+                            </div>
                         <?php endforeach; ?>
                     </div>
 
                     <div style="margin-top:14px;">
-                        <button class="cohort-btn" type="submit">Save course selection</button>
+                        <button class="cohort-btn" type="submit">Save scope selection</button>
                     </div>
                 <?php endif; ?>
             </form>
@@ -825,7 +1026,7 @@ cw_header('Theory Training');
                 <div>
                     <h2 class="cohort-section-title">Scheduling policy snapshot</h2>
                     <p class="cohort-section-sub" style="margin-bottom:0;">
-                        Current scheduler defaults from <strong>app_settings</strong>. These are shown for operator visibility only.
+                        Informative scheduler defaults only. These help the admin judge schedule realism, but do not override scope selection.
                     </p>
                 </div>
                 <button class="cohort-modal-btn" type="button" onclick="document.getElementById('cohortPolicyDialog').showModal();">
@@ -850,10 +1051,18 @@ cw_header('Theory Training');
                     <div class="cohort-policy-label">Progress test time</div>
                     <div class="cohort-policy-value"><?php echo cohort_h($settingsSnapshot['progress_test_min']); ?> min</div>
                 </div>
+                <div class="cohort-policy-item">
+                    <div class="cohort-policy-label">Skipped weekdays</div>
+                    <div class="cohort-policy-value"><?php echo cohort_h($settingsSnapshot['skip_weekdays_csv'] !== '' ? $settingsSnapshot['skip_weekdays_csv'] : 'None'); ?></div>
+                </div>
+                <div class="cohort-policy-item">
+                    <div class="cohort-policy-label">Cutoff time</div>
+                    <div class="cohort-policy-value"><?php echo cohort_h($settingsSnapshot['cutoff_time_local']); ?> local</div>
+                </div>
             </div>
 
             <div class="cohort-muted" style="margin-top:12px;">
-                Current UI preserves the existing live recalculation flow. Policy versioning, weekend patterns, cutoff times, and publishable schedule versions belong in the next backend-safe scheduling phase.
+                These rules are advisory on this page. If the projected end date is too tight, the admin may still publish or may first adapt cohort scheduling settings.
             </div>
         </section>
     </div>
@@ -861,16 +1070,20 @@ cw_header('Theory Training');
     <section class="card cohort-card-pad" id="schedule">
         <div class="cohort-schedule-head">
             <div>
-                <h2 class="cohort-section-title">Schedule</h2>
+                <h2 class="cohort-section-title">Schedule preview and publish</h2>
                 <p class="cohort-section-sub">
-                    Recalculate baseline cohort deadlines using the current enabled course set and scheduler defaults.
-                    Student-specific exceptions remain outside this page.
+                    Preview compares existing published deadlines against newly projected deadlines for the current selected scope.
+                    Publish makes the new baseline real.
                 </p>
             </div>
             <div style="display:flex;gap:10px;flex-wrap:wrap;">
                 <form method="post" style="margin:0;">
-                    <input type="hidden" name="action" value="recalc_deadlines">
-                    <button class="cohort-btn" type="submit">Recalculate deadlines</button>
+                    <input type="hidden" name="action" value="preview_schedule">
+                    <button class="cohort-btn cohort-btn-secondary" type="submit">Preview schedule</button>
+                </form>
+                <form method="post" style="margin:0;">
+                    <input type="hidden" name="action" value="publish_schedule">
+                    <button class="cohort-btn" type="submit">Publish schedule</button>
                 </form>
                 <button class="cohort-btn cohort-btn-secondary" type="button" onclick="document.getElementById('cohortPolicyDialog').showModal();">
                     Scheduling rules
@@ -905,11 +1118,67 @@ cw_header('Theory Training');
             <div class="cohort-muted" style="margin-top:12px;">
                 <?php echo cohort_h((string)$scheduleSummary['assumptions']); ?>
             </div>
+
+            <?php if (!empty($scheduleSummary['advisory_text'])): ?>
+                <div class="cohort-alert" style="margin-top:12px;">
+                    <?php echo cohort_h((string)$scheduleSummary['advisory_text']); ?>
+                </div>
+            <?php endif; ?>
         <?php endif; ?>
 
-        <?php if (!$courseBlocks): ?>
+        <?php if ($scheduleCourses): ?>
+            <div class="cohort-table-wrap">
+                <table class="cohort-table">
+                    <thead>
+                        <tr>
+                            <th style="width:70px;">Order</th>
+                            <th>Course / lesson</th>
+                            <th style="width:220px;">Current deadline</th>
+                            <th style="width:220px;">Projected deadline</th>
+                            <th style="width:120px;">Delta</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php $courseCounter = 0; ?>
+                        <?php foreach ($scheduleCourses as $courseRow): ?>
+                            <?php $courseCounter++; ?>
+                            <tr>
+                                <td><?php echo $courseCounter; ?></td>
+                                <td>
+                                    <strong><?php echo cohort_h((string)$courseRow['course_title']); ?></strong>
+                                </td>
+                                <td><?php echo cohort_h((string)($courseRow['existing_course_deadline_pretty'] ?? '—')); ?></td>
+                                <td><?php echo cohort_h((string)($courseRow['course_deadline_pretty'] ?? '—')); ?></td>
+                                <td><?php echo cohort_h((string)($courseRow['course_deadline_delta_label'] ?? '—')); ?></td>
+                            </tr>
+
+                            <?php foreach ((array)$courseRow['lessons'] as $lessonRow): ?>
+                                <?php
+                                $isWeekend = !empty($lessonRow['is_weekend']);
+                                $rowBg = $isWeekend ? ' style="background:rgba(245,158,11,.08);"' : '';
+                                ?>
+                                <tr<?php echo $rowBg; ?>>
+                                    <td></td>
+                                    <td>
+                                        <?php echo (int)$lessonRow['external_lesson_id']; ?>
+                                        — <?php echo cohort_h((string)$lessonRow['title']); ?>
+                                        <div class="cohort-muted">
+                                            <?php echo $isWeekend ? 'Weekend date' : 'Weekday date'; ?>
+                                            · Cutoff <?php echo cohort_h((string)($lessonRow['cutoff_label'] ?? ($settingsSnapshot['cutoff_time_local'] . ' local'))); ?>
+                                        </div>
+                                    </td>
+                                    <td><?php echo cohort_h((string)($lessonRow['existing_deadline_pretty'] ?? '—')); ?></td>
+                                    <td><?php echo cohort_h((string)($lessonRow['deadline_pretty'] ?? '—')); ?></td>
+                                    <td><?php echo cohort_h((string)($lessonRow['deadline_delta_label'] ?? '—')); ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        <?php elseif (!$courseBlocks): ?>
             <div class="cohort-muted" style="margin-top:12px;">
-                No schedule exists yet. Click <strong>Recalculate deadlines</strong> to generate cohort baseline lesson deadlines.
+                No published schedule exists yet. Use <strong>Preview schedule</strong> to inspect the proposed schedule, then <strong>Publish schedule</strong> to store it.
             </div>
         <?php else: ?>
             <div class="cohort-table-wrap">
@@ -918,7 +1187,7 @@ cw_header('Theory Training');
                         <tr>
                             <th style="width:70px;">Order</th>
                             <th>Course</th>
-                            <th style="width:220px;">Course deadline</th>
+                            <th style="width:220px;">Published deadline</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -940,7 +1209,7 @@ cw_header('Theory Training');
                                                 <tr>
                                                     <th style="width:70px;">Order</th>
                                                     <th>Lesson</th>
-                                                    <th style="width:220px;">Deadline</th>
+                                                    <th style="width:220px;">Published deadline</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -974,7 +1243,7 @@ cw_header('Theory Training');
             <div>
                 <h2 class="cohort-section-title" style="margin-bottom:6px;">Current scheduling rules</h2>
                 <p class="cohort-section-sub" style="margin-bottom:0;">
-                    These are the current live scheduler defaults driving the existing cohort deadline calculation.
+                    These are the live scheduler defaults and advisory controls currently used for preview and publish.
                 </p>
             </div>
             <button class="cohort-btn cohort-btn-secondary" type="button" onclick="document.getElementById('cohortPolicyDialog').close();">Close</button>
@@ -1006,6 +1275,14 @@ cw_header('Theory Training');
                 <div class="cohort-policy-value"><?php echo cohort_h($settingsSnapshot['buffer_pct']); ?></div>
             </div>
             <div class="cohort-policy-item">
+                <div class="cohort-policy-label">Skipped weekdays</div>
+                <div class="cohort-policy-value"><?php echo cohort_h($settingsSnapshot['skip_weekdays_csv'] !== '' ? $settingsSnapshot['skip_weekdays_csv'] : 'None'); ?></div>
+            </div>
+            <div class="cohort-policy-item">
+                <div class="cohort-policy-label">Cutoff time</div>
+                <div class="cohort-policy-value"><?php echo cohort_h($settingsSnapshot['cutoff_time_local']); ?> local</div>
+            </div>
+            <div class="cohort-policy-item">
                 <div class="cohort-policy-label">Overhead base</div>
                 <div class="cohort-policy-value"><?php echo cohort_h($settingsSnapshot['overhead_base_min']); ?> min</div>
             </div>
@@ -1020,7 +1297,7 @@ cw_header('Theory Training');
         </div>
 
         <div class="cohort-muted" style="margin-top:14px;">
-            This dialog reflects the current live scheduler state only. Advanced policy versioning, cutoff-time control, weekday calendars, and publishable schedule versions require the dedicated scheduling backend phase rather than direct page-only mutation.
+            Advisory rules help the operator judge whether the timeframe is realistic. They must not silently change the stored admin scope.
         </div>
     </div>
 </dialog>
