@@ -4,7 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/schedule.php';
-
+ 
 cw_require_login();
 
 $u = cw_current_user($pdo);
