@@ -106,6 +106,45 @@ function cohort_initials(string $name, string $email = ''): string
     return 'NA';
 }
 
+
+function cohort_avatar_url(string $photoPath): string
+{
+    $photoPath = trim($photoPath);
+    if ($photoPath === '') {
+        return '';
+    }
+
+    if (preg_match('#^https?://#i', $photoPath)) {
+        return $photoPath;
+    }
+
+    if ($photoPath[0] !== '/') {
+        $photoPath = '/' . $photoPath;
+    }
+
+    return $photoPath;
+}
+
+function cohort_avatar_html(string $name, string $email, string $photoPath, int $size = 34): string
+{
+    $label = trim($name) !== '' ? $name : $email;
+    $initials = cohort_initials($name, $email);
+    $url = cohort_avatar_url($photoPath);
+    $style = 'width:' . $size . 'px;height:' . $size . 'px;';
+
+    if ($url !== '') {
+        return ''
+            . '<span class="cohort-avatar" style="' . c_h($style) . '" title="' . c_h($label) . '">'
+            . '<img src="' . c_h($url) . '" alt="' . c_h($label) . '" loading="lazy">'
+            . '</span>';
+    }
+
+    return ''
+        . '<span class="cohort-avatar cohort-avatar--fallback" style="' . c_h($style) . '" title="' . c_h($label) . '">'
+        . c_h($initials)
+        . '</span>';
+}
+
 $msg = '';
 
 $programs = $pdo->query("
@@ -226,16 +265,18 @@ if ($cohortIds) {
     $in = implode(',', array_fill(0, count($cohortIds), '?'));
     $sql = "
         SELECT
-            x.cohort_id,
-            x.user_id,
-            x.email,
-            x.name
+			x.cohort_id,
+			x.user_id,
+			x.email,
+			x.name,
+			x.photo_path
         FROM (
             SELECT
                 cs.cohort_id,
                 u.id AS user_id,
-                u.email,
-                u.name,
+				u.email,
+				u.name,
+				u.photo_path,
                 ROW_NUMBER() OVER (
                     PARTITION BY cs.cohort_id
                     ORDER BY
@@ -267,7 +308,7 @@ if ($cohortIds) {
     } catch (Throwable $e) {
         // Fallback for environments without window functions
         $fallbackSql = "
-            SELECT cs.cohort_id, u.id AS user_id, u.email, u.name
+            SELECT cs.cohort_id, u.id AS user_id, u.email, u.name, u.photo_path
             FROM cohort_students cs
             JOIN users u ON u.id = cs.user_id
             WHERE cs.cohort_id IN ($in)
@@ -348,6 +389,13 @@ cw_header('Theory Training');
     width:34px;height:34px;border-radius:999px;display:flex;align-items:center;justify-content:center;
     font-size:11px;font-weight:800;color:#fff;background:linear-gradient(135deg,#12355f,#2767aa);
     border:2px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,.12);margin-left:-8px;
+    overflow:hidden;flex:0 0 auto;
+}
+.cohort-avatar img{
+    width:100%;height:100%;object-fit:cover;display:block;
+}
+.cohort-avatar--fallback{
+    text-transform:uppercase;
 }
 .cohort-avatar:first-child{margin-left:0}
 .cohort-avatar-more{
@@ -521,10 +569,15 @@ cw_header('Theory Training');
                                     <div class="cohort-avatars">
                                         <?php if ($avatarRows): ?>
                                             <?php foreach ($avatarRows as $ar): ?>
-                                                <div class="cohort-avatar" title="<?php echo c_h((string)($ar['name'] ?: $ar['email'])); ?>">
-                                                    <?php echo c_h(cohort_initials((string)($ar['name'] ?? ''), (string)($ar['email'] ?? ''))); ?>
-                                                </div>
-                                            <?php endforeach; ?>
+													<?php
+													echo cohort_avatar_html(
+														(string)($ar['name'] ?? ''),
+														(string)($ar['email'] ?? ''),
+														(string)($ar['photo_path'] ?? ''),
+														34
+													);
+													?>
+												<?php endforeach; ?>
                                             <?php if ($extraStudents > 0): ?>
                                                 <div class="cohort-avatar cohort-avatar-more" title="<?php echo c_h((string)$extraStudents . ' more student(s)'); ?>">
                                                     +<?php echo (int)$extraStudents; ?>
