@@ -164,6 +164,50 @@ function cohort_initials(string $name, string $email = ''): string
     return 'NA';
 }
 
+function cohort_avatar_url(string $photoPath): string
+{
+    $photoPath = trim($photoPath);
+    if ($photoPath === '') {
+        return '';
+    }
+
+    if (preg_match('#^https?://#i', $photoPath)) {
+        return $photoPath;
+    }
+
+    if ($photoPath[0] !== '/') {
+        $photoPath = '/' . $photoPath;
+    }
+
+    return $photoPath;
+}
+
+function cohort_avatar_html(string $name, string $email, string $photoPath, int $size = 38, bool $withMarginReset = false): string
+{
+    $label = trim($name) !== '' ? $name : $email;
+    $initials = cohort_initials($name, $email);
+    $url = cohort_avatar_url($photoPath);
+
+    $style = 'width:' . $size . 'px;height:' . $size . 'px;';
+    if ($withMarginReset) {
+        $style .= 'margin-left:0;';
+    }
+
+    if ($url !== '') {
+        return ''
+            . '<span class="cohort-avatar" style="' . cohort_h($style) . '" title="' . cohort_h($label) . '">'
+            . '<img src="' . cohort_h($url) . '" alt="' . cohort_h($label) . '" loading="lazy">'
+            . '</span>';
+    }
+
+    return ''
+        . '<span class="cohort-avatar cohort-avatar--fallback" style="' . cohort_h($style) . '" title="' . cohort_h($label) . '">'
+        . cohort_h($initials)
+        . '</span>';
+}
+
+
+
 function cohort_days_between(?string $startDate, ?string $endDate): int
 {
     $start = trim((string)$startDate);
@@ -311,12 +355,13 @@ $courses = ($programId > 0) ? cohort_courses_for_program($pdo, $programId) : arr
 
 $studentsStmt = $pdo->prepare("
     SELECT
-        cs.user_id,
-        cs.status,
-        cs.enrolled_at,
-        u.email,
-        u.name,
-        u.role
+		cs.user_id,
+		cs.status,
+		cs.enrolled_at,
+		u.email,
+		u.name,
+		u.role,
+		u.photo_path
     FROM cohort_students cs
     JOIN users u ON u.id = cs.user_id
     WHERE cs.cohort_id = ?
@@ -461,6 +506,13 @@ cw_header('Theory Training');
     width:38px;height:38px;border-radius:999px;display:flex;align-items:center;justify-content:center;
     font-size:12px;font-weight:800;color:#fff;background:linear-gradient(135deg,#12355f,#2767aa);
     border:2px solid #fff;box-shadow:0 2px 8px rgba(15,23,42,.12);margin-left:-8px;
+    overflow:hidden;flex:0 0 auto;
+}
+.cohort-avatar img{
+    width:100%;height:100%;object-fit:cover;display:block;
+}
+.cohort-avatar--fallback{
+    text-transform:uppercase;
 }
 .cohort-avatar:first-child{margin-left:0}
 .cohort-avatar-more{background:linear-gradient(135deg,#64748b,#475569)}
@@ -671,13 +723,16 @@ cw_header('Theory Training');
             <div class="cohort-avatar-row">
                 <?php if ($studentPreview): ?>
                     <?php foreach ($studentPreview as $s): ?>
-                        <div
-                            class="cohort-avatar"
-                            title="<?php echo cohort_h((string)(($s['name'] ?? '') !== '' ? $s['name'] : $s['email'])); ?>"
-                        >
-                            <?php echo cohort_h(cohort_initials((string)($s['name'] ?? ''), (string)($s['email'] ?? ''))); ?>
-                        </div>
-                    <?php endforeach; ?>
+						<?php
+						echo cohort_avatar_html(
+							(string)($s['name'] ?? ''),
+							(string)($s['email'] ?? ''),
+							(string)($s['photo_path'] ?? ''),
+							38,
+							false
+						);
+						?>
+					<?php endforeach; ?>
                     <?php if ($studentCount > count($studentPreview)): ?>
                         <div class="cohort-avatar cohort-avatar-more">+<?php echo (int)($studentCount - count($studentPreview)); ?></div>
                     <?php endif; ?>
@@ -693,9 +748,15 @@ cw_header('Theory Training');
                     <?php foreach ($studentPreview as $s): ?>
                         <div class="cohort-student-item">
                             <div class="cohort-student-main">
-                                <div class="cohort-avatar" style="margin-left:0;">
-                                    <?php echo cohort_h(cohort_initials((string)($s['name'] ?? ''), (string)($s['email'] ?? ''))); ?>
-                                </div>
+                                <?php
+									echo cohort_avatar_html(
+										(string)($s['name'] ?? ''),
+										(string)($s['email'] ?? ''),
+										(string)($s['photo_path'] ?? ''),
+										38,
+										true
+									);
+									?>
                                 <div class="cohort-student-copy">
                                     <div class="cohort-student-name"><?php echo cohort_h((string)($s['name'] ?? '')); ?></div>
                                     <div class="cohort-student-meta">
