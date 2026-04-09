@@ -1457,7 +1457,7 @@ cw_header('Theory Training');
             
 		
 <div class="cohort-table-wrap">
-    <table class="cohort-table">
+    <table class="cohort-table" style="width:100%;">
         <thead>
             <tr>
                 <th style="width:70px;">Order</th>
@@ -1468,69 +1468,71 @@ cw_header('Theory Training');
             </tr>
         </thead>
         <tbody>
-
             <?php $courseCounter = 0; ?>
             <?php foreach ($scheduleCourses as $courseRow): ?>
                 <?php
                 $courseCounter++;
                 $previewDetailsId = 'preview_course_' . $courseCounter;
                 ?>
+                <tr>
+                    <td><?php echo $courseCounter; ?></td>
+                    <td>
+                        <strong><?php echo cohort_h((string)$courseRow['course_title']); ?></strong>
+                    </td>
+                    <td><?php echo cohort_h((string)($courseRow['existing_course_deadline_pretty'] ?? '—')); ?></td>
+                    <td><?php echo cohort_h((string)($courseRow['course_deadline_pretty'] ?? '—')); ?></td>
+                    <td><?php echo cohort_h((string)($courseRow['course_deadline_delta_label'] ?? '—')); ?></td>
+                </tr>
 
                 <tr>
-    <td><?php echo $courseCounter; ?></td>
-    <td>
-        <details class="cohort-course-details" id="<?php echo cohort_h($previewDetailsId); ?>">
-            <summary><?php echo cohort_h((string)$courseRow['course_title']); ?></summary>
+                    <td colspan="5" style="padding:0 10px 14px 10px;border-bottom:1px solid rgba(15,23,42,.06);">
+                        <details class="cohort-course-details" id="<?php echo cohort_h($previewDetailsId); ?>">
+                            <summary style="margin:10px 0 0 0;">Show lesson deadlines</summary>
 
-            <div style="margin-top:10px;">
-                <table class="cohort-table" style="width:100%;">
-                    <thead>
-                        <tr>
-                            <th style="width:70px;">Order</th>
-                            <th>Lesson</th>
-                            <th style="width:220px;">Current deadline</th>
-                            <th style="width:220px;">Projected deadline</th>
-                            <th style="width:120px;">Delta</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php $lessonCounter = 0; ?>
-                        <?php foreach ((array)$courseRow['lessons'] as $lessonRow): ?>
-                            <?php
-                            $lessonCounter++;
-                            $isWeekend = !empty($lessonRow['is_weekend']);
-                            $rowBg = $isWeekend ? ' style="background:rgba(245,158,11,.08);"' : '';
-                            ?>
-                            <tr<?php echo $rowBg; ?>>
-                                <td><?php echo $lessonCounter; ?></td>
-                                <td>
-                                    <?php echo (int)$lessonRow['external_lesson_id']; ?>
-                                    — <?php echo cohort_h((string)$lessonRow['title']); ?>
-                                    <div class="cohort-muted">
-                                        <?php echo $isWeekend ? 'Weekend date' : 'Weekday date'; ?>
-                                        · Cutoff <?php echo cohort_h((string)($lessonRow['cutoff_label'] ?? ($settingsSnapshot['cutoff_time_local'] . ' local'))); ?>
-                                    </div>
-                                </td>
-                                <td><?php echo cohort_h((string)($lessonRow['existing_deadline_pretty'] ?? '—')); ?></td>
-                                <td><?php echo cohort_h((string)($lessonRow['deadline_pretty'] ?? '—')); ?></td>
-                                <td><?php echo cohort_h((string)($lessonRow['deadline_delta_label'] ?? '—')); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
-        </details>
-    </td>
-    <td><?php echo cohort_h((string)($courseRow['existing_course_deadline_pretty'] ?? '—')); ?></td>
-    <td><?php echo cohort_h((string)($courseRow['course_deadline_pretty'] ?? '—')); ?></td>
-    <td><?php echo cohort_h((string)($courseRow['course_deadline_delta_label'] ?? '—')); ?></td>
-</tr>
-
+                            <div style="margin-top:10px;width:100%;overflow-x:auto;">
+                                <table class="cohort-table" style="width:100%;table-layout:auto;">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:70px;">Order</th>
+                                            <th>Lesson</th>
+                                            <th style="width:220px;">Current deadline</th>
+                                            <th style="width:220px;">Projected deadline</th>
+                                            <th style="width:120px;">Delta</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php $lessonCounter = 0; ?>
+                                        <?php foreach ((array)$courseRow['lessons'] as $lessonRow): ?>
+                                            <?php
+                                            $lessonCounter++;
+                                            $isWeekend = !empty($lessonRow['is_weekend']);
+                                            $rowBg = $isWeekend ? ' style="background:rgba(245,158,11,.08);"' : '';
+                                            ?>
+                                            <tr<?php echo $rowBg; ?>>
+                                                <td><?php echo $lessonCounter; ?></td>
+                                                <td>
+                                                    <?php echo (int)$lessonRow['external_lesson_id']; ?>
+                                                    — <?php echo cohort_h((string)$lessonRow['title']); ?>
+                                                    <div class="cohort-muted">
+                                                        <?php echo $isWeekend ? 'Weekend date' : 'Weekday date'; ?>
+                                                        · Cutoff <?php echo cohort_h((string)($lessonRow['cutoff_label'] ?? ($settingsSnapshot['cutoff_time_local'] . ' local'))); ?>
+                                                    </div>
+                                                </td>
+                                                <td><?php echo cohort_h((string)($lessonRow['existing_deadline_pretty'] ?? '—')); ?></td>
+                                                <td><?php echo cohort_h((string)($lessonRow['deadline_pretty'] ?? '—')); ?></td>
+                                                <td><?php echo cohort_h((string)($lessonRow['deadline_delta_label'] ?? '—')); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    </td>
+                </tr>
             <?php endforeach; ?>
-
         </tbody>
     </table>
-</div>		
+</div>	
 		
 		
         <?php elseif (!$courseBlocks): ?>
