@@ -269,6 +269,32 @@ function cw_find_next_allowed_day(DateTimeImmutable $startUtc, array $allowedWee
     return $startUtc;
 }
 
+
+function cw_build_usable_schedule_days(string $startDateYmd, string $endDateYmd, array $allowedWeekdays, string $timezone): array
+{
+    $days = array();
+
+    $startUtc = new DateTimeImmutable($startDateYmd . ' 00:00:00', new DateTimeZone('UTC'));
+    $endUtc = new DateTimeImmutable($endDateYmd . ' 00:00:00', new DateTimeZone('UTC'));
+
+    if ($endUtc < $startUtc) {
+        return $days;
+    }
+
+    $cursor = $startUtc;
+    $guard = 0;
+
+    while ($cursor <= $endUtc && $guard < 3700) {
+        if (cw_is_allowed_weekday($cursor, $allowedWeekdays, $timezone)) {
+            $days[] = $cursor;
+        }
+        $cursor = $cursor->modify('+1 day');
+        $guard++;
+    }
+
+    return $days;
+}
+
 /* =========================================================
  * Reading / lesson estimate helpers
  * ========================================================= */
@@ -864,18 +890,13 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
     $courses = cw_group_scoped_lessons_by_course($scopedRows);
     $existingMap = cw_get_existing_deadlines_map($pdo, $cohortId);
 
-    $cohortStartDate = trim((string)$cohort['start_date']);
+     $cohortStartDate = trim((string)$cohort['start_date']);
     $cohortEndDate = trim((string)$cohort['end_date']);
 
     $scheduleStartDate = trim((string)$settings['schedule_start_date']);
     if ($scheduleStartDate === '') {
         $scheduleStartDate = $cohortStartDate;
     }
-
-    $startUtc = new DateTimeImmutable($scheduleStartDate . ' 00:00:00', new DateTimeZone('UTC'));
-    $startUtc = cw_find_next_allowed_day($startUtc, (array)$settings['allowed_weekdays'], $timezone);
-
-    $endUtc = new DateTimeImmutable($cohortEndDate . ' 00:00:00', new DateTimeZone('UTC'));
 
     $maxMinDay = (int)$settings['daily_cap_min'];
     $wpm = (int)$settings['reading_wpm'];
@@ -885,8 +906,6 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
     $previewLessons = array();
     $previewCourses = array();
 
-    $dayCursor = $startUtc;
-    $usedToday = 0;
     $globalLessonOrder = 0;
     $lastLessonId = null;
     $totalMinutes = 0;
@@ -894,40 +913,81 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
     $warningCodes = array();
     $warningMessages = array();
 
+    $usableDays = cw_build_usable_schedule_days(
+        $scheduleStartDate,
+        $cohortEndDate,
+        (array)$settings['allowed_weekdays'],
+        $timezone
+    );
+
+    if (!$usableDays) {
+        throw new RuntimeException('No usable scheduling days are available inside the selected cohort window.');
+    }
+
+    $flattenedLessons = array();
+    foreach ($courses as $cid => $course) {
+        foreach ((array)$course['lessons'] as $lesson) {
+            $lessonId = (int)$lesson['lesson_id'];
+            $lessonMinutes = cw_estimate_lesson_minutes($pdo, $lessonId, $wpm, $factor, $ptMin);
+            $totalMinutes += $lessonMinutes;
+
+            $flattenedLessons[] = array(
+                'course_id' => (int)$cid,
+                'course_title' => (string)$course['course_title'],
+                'lesson_id' => $lessonId,
+                'external_lesson_id' => (int)$lesson['external_lesson_id'],
+                'title' => (string)$lesson['title'],
+                'estimated_minutes' => $lessonMinutes,
+            );
+        }
+    }
+
+    $selectedLessonCount = count($flattenedLessons);
+    $usableDayCount = count($usableDays);
+
+    $requiredMinutesPerUsableDay = $usableDayCount > 0
+        ? (float)$totalMinutes / (float)$usableDayCount
+        : 0.0;
+
+    if ($requiredMinutesPerUsableDay > (float)$maxMinDay) {
+        $warningCodes[] = 'compressed_schedule';
+        $warningMessages[] = 'To fit the selected scope inside the selected period, the schedule requires about '
+            . (int)ceil($requiredMinutesPerUsableDay)
+            . ' minutes per usable day, which is above the preferred daily cap of '
+            . $maxMinDay
+            . ' minutes.';
+    }
+
+    $lessonIndex = 0;
     foreach ($courses as $cid => $course) {
         $courseLessons = array();
         $courseLastDeadlineUtc = '';
 
         foreach ((array)$course['lessons'] as $lesson) {
-            $globalLessonOrder++;
-
-            $lessonId = (int)$lesson['lesson_id'];
-            $lessonMinutes = cw_estimate_lesson_minutes($pdo, $lessonId, $wpm, $factor, $ptMin);
-            $totalMinutes += $lessonMinutes;
-            $remaining = $lessonMinutes;
-
-            while ($remaining > 0) {
-                if (!cw_is_allowed_weekday($dayCursor, (array)$settings['allowed_weekdays'], $timezone)) {
-                    $dayCursor = cw_find_next_allowed_day($dayCursor->modify('+1 day'), (array)$settings['allowed_weekdays'], $timezone);
-                    $usedToday = 0;
-                    continue;
-                }
-
-                $free = $maxMinDay - $usedToday;
-                if ($free <= 0) {
-                    $dayCursor = cw_find_next_allowed_day($dayCursor->modify('+1 day'), (array)$settings['allowed_weekdays'], $timezone);
-                    $usedToday = 0;
-                    continue;
-                }
-
-                $take = min($free, $remaining);
-                $usedToday += $take;
-                $remaining -= $take;
+            if (!isset($flattenedLessons[$lessonIndex])) {
+                continue;
             }
 
-            $deadlineDayYmd = $dayCursor->format('Y-m-d');
-            $deadlineUtc = cw_build_deadline_utc_from_local_day_and_cutoff($deadlineDayYmd, (string)$settings['cutoff_local_time'], $timezone);
-            $deadlineLocalLabel = cw_fmt_local_deadline_label($deadlineUtc, $timezone, 'D, M j, Y H:i');
+            $globalLessonOrder++;
+
+            $flatLesson = $flattenedLessons[$lessonIndex];
+            $lessonId = (int)$flatLesson['lesson_id'];
+
+            $dayIndex = (int)floor(($lessonIndex * $usableDayCount) / max(1, $selectedLessonCount));
+            if ($dayIndex < 0) {
+                $dayIndex = 0;
+            }
+            if ($dayIndex >= $usableDayCount) {
+                $dayIndex = $usableDayCount - 1;
+            }
+
+            $assignedDayUtc = $usableDays[$dayIndex];
+            $deadlineDayYmd = $assignedDayUtc->format('Y-m-d');
+            $deadlineUtc = cw_build_deadline_utc_from_local_day_and_cutoff(
+                $deadlineDayYmd,
+                (string)$settings['cutoff_local_time'],
+                $timezone
+            );
 
             $oldDeadlineUtc = isset($existingMap[$lessonId]['deadline_utc']) ? (string)$existingMap[$lessonId]['deadline_utc'] : '';
             $oldLabel = $oldDeadlineUtc !== '' ? cw_fmt_local_deadline_label($oldDeadlineUtc, $timezone, 'D, M j, Y H:i') : '—';
@@ -944,11 +1004,11 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
                 'course_id' => (int)$cid,
                 'course_title' => (string)$course['course_title'],
                 'lesson_id' => $lessonId,
-                'external_lesson_id' => (int)$lesson['external_lesson_id'],
-                'title' => (string)$lesson['title'],
+                'external_lesson_id' => (int)$flatLesson['external_lesson_id'],
+                'title' => (string)$flatLesson['title'],
                 'sort_order' => $globalLessonOrder * 10,
                 'unlock_after_lesson_id' => $unlockAfter,
-                'estimated_minutes' => $lessonMinutes,
+                'estimated_minutes' => (int)$flatLesson['estimated_minutes'],
 
                 'old_deadline_utc' => $oldDeadlineUtc,
                 'existing_deadline_pretty' => $oldLabel,
@@ -967,6 +1027,7 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
             $courseLessons[] = $lessonRow;
             $courseLastDeadlineUtc = $deadlineUtc;
             $lastLessonId = $lessonId;
+            $lessonIndex++;
         }
 
 		        $existingCourseDeadlineUtc = '';
@@ -1013,35 +1074,9 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
     $firstDeadlineUtc = $previewLessons ? (string)$previewLessons[0]['new_deadline_utc'] : '';
     $lastDeadlineUtc = $previewLessons ? (string)$previewLessons[count($previewLessons) - 1]['new_deadline_utc'] : '';
 
-    $usableDays = 0;
-    try {
-        $usableCursor = $startUtc;
-        $usableEnd = new DateTimeImmutable($cohortEndDate . ' 23:59:59', new DateTimeZone('UTC'));
-        $guard = 0;
-
-        while ($usableCursor <= $usableEnd && $guard < 3700) {
-            if (cw_is_allowed_weekday($usableCursor, (array)$settings['allowed_weekdays'], $timezone)) {
-                $usableDays++;
-            }
-            $usableCursor = $usableCursor->modify('+1 day');
-            $guard++;
-        }
-    } catch (Throwable $e) {
-        $usableDays = 0;
-    }
-
+    $usableDays = $usableDayCount;
     $fitsWithinCohort = true;
     $daysOverrun = 0;
-
-    if ($lastDeadlineUtc !== '') {
-        $lastDt = new DateTimeImmutable($lastDeadlineUtc, new DateTimeZone('UTC'));
-        if ($lastDt > $endUtc->setTime(23, 59, 59)) {
-            $fitsWithinCohort = false;
-            $daysOverrun = (int)$endUtc->diff($lastDt)->format('%a');
-            $warningCodes[] = 'schedule_overrun';
-            $warningMessages[] = 'Schedule extends beyond cohort end date. This is advisory only; no scoped lessons were omitted.';
-        }
-    }
 
     if ($selectedLessonCount <= 0) {
         $warningCodes[] = 'empty_scope';
@@ -1074,9 +1109,13 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
         'timezone' => $timezone,
         'allowed_weekdays' => array_values((array)$settings['allowed_weekdays']),
         'assumptions' => 'Assumptions: Max ' . $maxMinDay . ' min/day, Factor ' . rtrim(rtrim(number_format($factor, 2, '.', ''), '0'), '.') . ', ' . $wpm . ' WPM, PT ' . $ptMin . ' minutes.',
-        'advisory_text' => !$fitsWithinCohort
-            ? 'The selected lesson scope does not comfortably fit inside the current cohort window with these scheduling settings. This is advisory only. No lessons were removed.'
-            : 'The current schedule settings appear sufficient to fit the selected scope inside the cohort window.',
+                'advisory_text' => ($requiredMinutesPerUsableDay > (float)$maxMinDay)
+            ? 'All selected lessons were fitted inside the selected cohort window, but the plan is compressed. It requires about '
+                . (int)ceil($requiredMinutesPerUsableDay)
+                . ' minutes per usable day versus the preferred '
+                . $maxMinDay
+                . ' minutes per day.'
+            : 'All selected lessons fit inside the selected cohort window with the current scheduling settings.',
     );
 
     return array(
