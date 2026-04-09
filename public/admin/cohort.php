@@ -566,7 +566,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 	
 	
-    if ($action === 'preview_schedule') {
+        if ($action === 'preview_schedule') {
         try {
             $schedulePreview = cw_generate_cohort_schedule_preview($pdo, $cohortId);
             $scheduleSummary = $schedulePreview['summary'] ?? array();
@@ -577,7 +577,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
-    if ($action === 'publish_schedule') {
+        if ($action === 'publish_schedule') {
         try {
             $out = cw_publish_cohort_schedule($pdo, $cohortId, array(), (int)($u['id'] ?? 0));
             $scheduleSummary = $out['summary'] ?? array();
@@ -1426,9 +1426,9 @@ cw_header('Theory Training');
                                         <summary><?php echo cohort_h((string)$courseRow['course_title']); ?></summary>
                                     </details>
                                 </td>
-                                <td><?php echo cohort_h((string)($courseRow['existing_course_deadline_pretty'] ?? '—')); ?></td>
-                                <td><?php echo cohort_h((string)($courseRow['course_deadline_pretty'] ?? '—')); ?></td>
-                                <td><?php echo cohort_h((string)($courseRow['course_deadline_delta_label'] ?? '—')); ?></td>
+                                <td><?php echo cohort_h((string)($courseRow['existing_course_deadline_local_label'] ?? '—')); ?></td>
+								<td><?php echo cohort_h((string)($courseRow['course_deadline_local_label'] ?? '—')); ?></td>
+								<td><?php echo cohort_h((string)($courseRow['course_deadline_delta_label'] ?? '—')); ?></td>
                             </tr>
                             <tr>
                                 <td></td>
@@ -1462,9 +1462,9 @@ cw_header('Theory Training');
                                                                 · Cutoff <?php echo cohort_h((string)($lessonRow['cutoff_label'] ?? ($settingsSnapshot['cutoff_time_local'] . ' local'))); ?>
                                                             </div>
                                                         </td>
-                                                        <td><?php echo cohort_h((string)($lessonRow['existing_deadline_pretty'] ?? '—')); ?></td>
-                                                        <td><?php echo cohort_h((string)($lessonRow['deadline_pretty'] ?? '—')); ?></td>
-                                                        <td><?php echo cohort_h((string)($lessonRow['deadline_delta_label'] ?? '—')); ?></td>
+                                                        <td><?php echo cohort_h((string)($lessonRow['old_deadline_local_label'] ?? '—')); ?></td>
+														<td><?php echo cohort_h((string)($lessonRow['new_deadline_local_label'] ?? '—')); ?></td>
+														<td><?php echo cohort_h((string)($lessonRow['delta_label'] ?? '—')); ?></td>
                                                     </tr>
                                                 <?php endforeach; ?>
                                             </tbody>
