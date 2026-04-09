@@ -399,6 +399,39 @@ function cohort_build_course_lesson_tree(PDO $pdo, int $programId, array $enable
     return $tree;
 }
 
+
+function cohort_weekday_labels(): array
+{
+    return array(
+        1 => 'Mon',
+        2 => 'Tue',
+        3 => 'Wed',
+        4 => 'Thu',
+        5 => 'Fri',
+        6 => 'Sat',
+        7 => 'Sun',
+    );
+}
+
+function cohort_schedule_setting_value(array $settings, string $key, string $default = ''): string
+{
+    return isset($settings[$key]) ? (string)$settings[$key] : $default;
+}
+
+function cohort_schedule_setting_int(array $settings, string $key, int $default = 0): int
+{
+    return isset($settings[$key]) ? (int)$settings[$key] : $default;
+}
+
+function cohort_schedule_setting_float(array $settings, string $key, float $default = 0.0): string
+{
+    if (!isset($settings[$key])) {
+        return (string)$default;
+    }
+    $value = (float)$settings[$key];
+    return rtrim(rtrim(number_format($value, 2, '.', ''), '0'), '.');
+}
+
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 if ($cohortId <= 0) {
     $cohortId = (int)($_GET['id'] ?? 0);
@@ -506,10 +539,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+	    if ($action === 'save_schedule_settings') {
+        try {
+            $allowedWeekdays = $_POST['allowed_weekdays'] ?? array();
+            if (!is_array($allowedWeekdays)) {
+                $allowedWeekdays = array();
+            }
+
+            $savedSettings = cw_save_cohort_schedule_settings($pdo, $cohortId, array(
+                'schedule_start_date' => trim((string)($_POST['schedule_start_date'] ?? '')),
+                'daily_cap_min' => (int)($_POST['daily_cap_min'] ?? 120),
+                'allowed_weekdays' => array_values(array_map('intval', $allowedWeekdays)),
+                'cutoff_local_time' => trim((string)($_POST['cutoff_local_time'] ?? '23:59')),
+                'reading_wpm' => (int)($_POST['reading_wpm'] ?? 140),
+                'study_multiplier' => (float)($_POST['study_multiplier'] ?? 2.5),
+                'progress_test_minutes' => (int)($_POST['progress_test_minutes'] ?? 30),
+                'buffer_min_days' => (int)($_POST['buffer_min_days'] ?? 3),
+                'buffer_pct' => (float)($_POST['buffer_pct'] ?? 0.15),
+            ), (int)($u['id'] ?? 0));
+
+            header('Location: /admin/cohort.php?cohort_id=' . $cohortId . '#schedule-settings');
+            exit;
+        } catch (Throwable $e) {
+            $msg = 'Schedule settings error: ' . $e->getMessage();
+        }
+    }
+	
+	
     if ($action === 'preview_schedule') {
         try {
-            $schedulePreview = cw_recalculate_cohort_deadlines($pdo, $cohortId, array('preview_only' => true));
-            $scheduleSummary = $schedulePreview['summary'] ?? null;
+            $schedulePreview = cw_generate_cohort_schedule_preview($pdo, $cohortId);
+            $scheduleSummary = $schedulePreview['summary'] ?? array();
             $scheduleCourses = $schedulePreview['courses'] ?? array();
             $msg = 'Schedule preview generated. No live deadlines were changed.';
         } catch (Throwable $e) {
@@ -519,8 +579,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'publish_schedule') {
         try {
-            $out = cw_recalculate_cohort_deadlines($pdo, $cohortId, array('preview_only' => false));
-            $scheduleSummary = $out['summary'] ?? null;
+            $out = cw_publish_cohort_schedule($pdo, $cohortId, array(), (int)($u['id'] ?? 0));
+            $scheduleSummary = $out['summary'] ?? array();
             $scheduleCourses = $out['courses'] ?? array();
             $msg = 'Schedule published.';
         } catch (Throwable $e) {
@@ -637,19 +697,33 @@ $publishedScopeMismatch = ($publishedLessonCount !== $totalSelectedLessonCount);
 
 $durationDays = cohort_days_between((string)$cohort['start_date'], (string)$cohort['end_date']);
 
+$scheduleSettings = cw_get_cohort_schedule_settings($pdo, $cohortId);
+
 $settingsSnapshot = array(
-    'daily_cap_min' => cohort_setting($pdo, 'sched_daily_cap_min', '120'),
-    'wpm' => cohort_setting($pdo, 'sched_wpm', '140'),
-    'multiplier' => cohort_setting($pdo, 'sched_multiplier', '2.5'),
-    'progress_test_min' => cohort_setting($pdo, 'sched_progress_test_min', '30'),
-    'buffer_min_days' => cohort_setting($pdo, 'sched_buffer_min_days', '3'),
-    'buffer_pct' => cohort_setting($pdo, 'sched_buffer_pct', '0.15'),
-    'overhead_base_min' => cohort_setting($pdo, 'sched_overhead_base_min', '5'),
-    'overhead_per_slide_min' => cohort_setting($pdo, 'sched_overhead_per_slide_min', '0.7'),
-    'overhead_cap_min' => cohort_setting($pdo, 'sched_overhead_cap_min', '15'),
-    'skip_weekdays_csv' => cohort_setting($pdo, 'sched_skip_weekdays_csv', ''),
-    'cutoff_time_local' => cohort_setting($pdo, 'sched_cutoff_time_local', '23:59'),
+    'schedule_start_date' => (string)($scheduleSettings['schedule_start_date'] ?? ''),
+    'daily_cap_min' => (string)($scheduleSettings['daily_cap_min'] ?? '120'),
+    'wpm' => (string)($scheduleSettings['reading_wpm'] ?? '140'),
+    'multiplier' => (string)($scheduleSettings['study_multiplier'] ?? '2.5'),
+    'progress_test_min' => (string)($scheduleSettings['progress_test_minutes'] ?? '30'),
+    'buffer_min_days' => (string)($scheduleSettings['buffer_min_days'] ?? '3'),
+    'buffer_pct' => (string)($scheduleSettings['buffer_pct'] ?? '0.15'),
+    'cutoff_time_local' => (string)($scheduleSettings['cutoff_local_time'] ?? '23:59'),
+    'allowed_weekdays' => (array)($scheduleSettings['allowed_weekdays'] ?? array(1,2,3,4,5,6,7)),
 );
+
+$scheduleVersionRows = array();
+if (cw_table_exists($pdo, 'cohort_schedule_versions')) {
+    $versionSql = "
+        SELECT *
+        FROM cohort_schedule_versions
+        WHERE cohort_id = ?
+        ORDER BY id DESC
+        LIMIT 12
+    ";
+    $versionStmt = $pdo->prepare($versionSql);
+    $versionStmt->execute(array($cohortId));
+    $scheduleVersionRows = $versionStmt->fetchAll(PDO::FETCH_ASSOC);
+}
 
 cw_header('Theory Training');
 ?>
