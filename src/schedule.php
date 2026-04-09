@@ -282,26 +282,34 @@ function cw_build_usable_schedule_days(
         return $days;
     }
 
+    $tzName = trim($timezone) !== '' ? $timezone : 'UTC';
+
     try {
-        $startUtc = new DateTimeImmutable($startDateYmd . ' 00:00:00', new DateTimeZone('UTC'));
-        $endUtc   = new DateTimeImmutable($endDateYmd . ' 23:59:59', new DateTimeZone('UTC'));
+        $localTz = new DateTimeZone($tzName);
+
+        // Build the calendar range in the COHORT LOCAL TIMEZONE, not in UTC.
+        $startLocal = new DateTimeImmutable($startDateYmd . ' 00:00:00', $localTz);
+        $endLocal   = new DateTimeImmutable($endDateYmd   . ' 00:00:00', $localTz);
     } catch (Throwable $e) {
         return $days;
     }
 
-    if ($endUtc < $startUtc) {
+    if ($endLocal < $startLocal) {
         return $days;
     }
 
-    $cursor = $startUtc;
+    $cursorLocal = $startLocal;
     $guard = 0;
 
-    while ($cursor <= $endUtc && $guard < 3700) {
-        if (cw_is_allowed_weekday($cursor, $allowedWeekdays, $timezone)) {
-            $days[] = $cursor;
+    while ($cursorLocal <= $endLocal && $guard < 3700) {
+        $dow = (int)$cursorLocal->format('N'); // 1=Mon ... 7=Sun
+
+        if (in_array($dow, $allowedWeekdays, true)) {
+            // Store the day as UTC, but keep the LOCAL calendar day identity.
+            $days[] = $cursorLocal->setTimezone(new DateTimeZone('UTC'));
         }
 
-        $cursor = $cursor->modify('+1 day');
+        $cursorLocal = $cursorLocal->modify('+1 day');
         $guard++;
     }
 
