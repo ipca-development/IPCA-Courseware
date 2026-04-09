@@ -938,26 +938,21 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
     $warningCodes[] = 'no_usable_days';
     $warningMessages[] = 'No usable days available based on current weekday selection.';
 
-    return array(
-        'cohort' => $cohort,
-        'settings' => $settings,
-        'summary' => array(
-            'lessons_scheduled' => 0,
-            'total_study_hours' => '0',
-            'usable_days' => 0,
-            'recommended_days' => 0,
-            'suggested_end_pretty' => '—',
-            'suggested_end_delta' => 'No usable days',
-            'assumptions' => '',
-            'advisory_text' => 'No usable days selected.',
-        ),
-        'warnings' => array(
-            'codes' => $warningCodes,
-            'messages' => $warningMessages,
-        ),
-        'courses' => array(),
-        'lessons' => array(),
-    );
+return array(
+    'DEBUG_preview_lessons_raw' => $previewLessons,
+    'DEBUG_existing_map' => $existingMap,
+    'DEBUG_first_lesson' => isset($previewLessons[0]) ? $previewLessons[0] : null,
+
+    'cohort' => $cohort,
+    'settings' => $settings,
+    'summary' => $summary,
+    'warnings' => array(
+        'codes' => $warningCodes,
+        'messages' => $warningMessages,
+    ),
+    'courses' => $previewCourses,
+    'lessons' => $previewLessons,
+);
 }
     }
 

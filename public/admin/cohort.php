@@ -1407,6 +1407,13 @@ cw_header('Theory Training');
             </div>
         </div>
 
+	
+		<?php if (!empty($schedulePreview['DEBUG_first_lesson'])): ?>
+    <pre style="background:#000;color:#0f0;padding:10px;font-size:11px;overflow:auto;">
+<?php print_r($schedulePreview['DEBUG_first_lesson']); ?>
+    </pre>
+<?php endif; ?>
+		
         <?php if ($scheduleSummary): ?>
             <div class="cohort-schedule-summary">
                 <div class="cohort-summary-box">
