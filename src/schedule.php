@@ -270,18 +270,24 @@ function cw_find_next_allowed_day(DateTimeImmutable $startUtc, array $allowedWee
 }
 
 
-function cw_build_usable_schedule_days(string $startDateYmd, string $endDateYmd, array $allowedWeekdays, string $timezone): array
-{
+function cw_build_usable_schedule_days(
+    string $startDateYmd,
+    string $endDateYmd,
+    array $allowedWeekdays,
+    string $timezone
+): array {
     $days = array();
 
-    $localTz = new DateTimeZone($timezone);
+    if (trim($startDateYmd) === '' || trim($endDateYmd) === '') {
+        return $days;
+    }
 
-		$startLocal = new DateTimeImmutable($scheduleStartDate . ' 00:00:00', $localTz);
-		$startUtc = $startLocal->setTimezone(new DateTimeZone('UTC'));
-		$startUtc = cw_find_next_allowed_day($startUtc, (array)$settings['allowed_weekdays'], $timezone);
-
-		$endLocal = new DateTimeImmutable($cohortEndDate . ' 23:59:59', $localTz);
-		$endUtc = $endLocal->setTimezone(new DateTimeZone('UTC'));
+    try {
+        $startUtc = new DateTimeImmutable($startDateYmd . ' 00:00:00', new DateTimeZone('UTC'));
+        $endUtc   = new DateTimeImmutable($endDateYmd . ' 23:59:59', new DateTimeZone('UTC'));
+    } catch (Throwable $e) {
+        return $days;
+    }
 
     if ($endUtc < $startUtc) {
         return $days;
@@ -294,6 +300,7 @@ function cw_build_usable_schedule_days(string $startDateYmd, string $endDateYmd,
         if (cw_is_allowed_weekday($cursor, $allowedWeekdays, $timezone)) {
             $days[] = $cursor;
         }
+
         $cursor = $cursor->modify('+1 day');
         $guard++;
     }
@@ -920,14 +927,38 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
     $warningMessages = array();
 
     $usableDays = cw_build_usable_schedule_days(
-        $scheduleStartDate,
-        $cohortEndDate,
-        (array)$settings['allowed_weekdays'],
-        $timezone
-    );
+    $scheduleStartDate,
+    $cohortEndDate,
+    (array)$settings['allowed_weekdays'],
+    $timezone
+);
 
     if (!$usableDays) {
-        throw new RuntimeException('No usable scheduling days are available inside the selected cohort window.');
+        if (!$usableDays) {
+    $warningCodes[] = 'no_usable_days';
+    $warningMessages[] = 'No usable days available based on current weekday selection.';
+
+    return array(
+        'cohort' => $cohort,
+        'settings' => $settings,
+        'summary' => array(
+            'lessons_scheduled' => 0,
+            'total_study_hours' => '0',
+            'usable_days' => 0,
+            'recommended_days' => 0,
+            'suggested_end_pretty' => '—',
+            'suggested_end_delta' => 'No usable days',
+            'assumptions' => '',
+            'advisory_text' => 'No usable days selected.',
+        ),
+        'warnings' => array(
+            'codes' => $warningCodes,
+            'messages' => $warningMessages,
+        ),
+        'courses' => array(),
+        'lessons' => array(),
+    );
+}
     }
 
     $flattenedLessons = array();
@@ -1007,27 +1038,28 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
             $unlockAfter = $lastLessonId !== null ? (int)$lastLessonId : null;
 
             $lessonRow = array(
-                'course_id' => (int)$cid,
-                'course_title' => (string)$course['course_title'],
-                'lesson_id' => $lessonId,
-                'external_lesson_id' => (int)$flatLesson['external_lesson_id'],
-                'title' => (string)$flatLesson['title'],
-                'sort_order' => $globalLessonOrder * 10,
-                'unlock_after_lesson_id' => $unlockAfter,
-                'estimated_minutes' => (int)$flatLesson['estimated_minutes'],
+    'course_id' => (int)$cid,
+    'course_title' => (string)$course['course_title'],
+    'lesson_id' => $lessonId,
+    'external_lesson_id' => (int)$flatLesson['external_lesson_id'],
+    'title' => (string)$flatLesson['title'],
+    'sort_order' => $globalLessonOrder * 10,
+    'unlock_after_lesson_id' => $unlockAfter,
+    'estimated_minutes' => (int)$flatLesson['estimated_minutes'],
 
-                'old_deadline_utc' => $oldDeadlineUtc,
-                'existing_deadline_pretty' => $oldLabel,
+    // 🔥 STANDARDIZED KEYS (MATCH UI)
+    'existing_deadline_pretty' => $oldLabel,
+    'deadline_pretty' => $newLabel,
+    'deadline_delta_label' => $deltaLabel,
 
-                'new_deadline_utc' => $deadlineUtc,
-                'deadline_pretty' => $newLabel,
+    // keep raw values too (optional but useful)
+    'old_deadline_utc' => $oldDeadlineUtc,
+    'new_deadline_utc' => $deadlineUtc,
 
-                'deadline_delta_label' => $deltaLabel,
-
-                'weekday_local' => $localDeadline->format('D'),
-                'is_weekend' => $isWeekendLocal,
-                'cutoff_label' => $settings['cutoff_local_time'] . ' ' . $timezone,
-            );
+    'weekday_local' => $localDeadline->format('D'),
+    'is_weekend' => $isWeekendLocal,
+    'cutoff_label' => $settings['cutoff_local_time'] . ' ' . $timezone,
+);
 
             $previewLessons[] = $lessonRow;
             $courseLessons[] = $lessonRow;
@@ -1063,10 +1095,10 @@ function cw_generate_cohort_schedule_preview(PDO $pdo, int $cohortId, array $ove
             'course_order' => count($previewCourses) + 1,
 
             'existing_course_deadline_utc' => $existingCourseDeadlineUtc,
-            'existing_course_deadline_pretty' => $existingCourseDeadlinePretty,
+			'existing_course_deadline_pretty' => $existingCourseDeadlinePretty,
 
-            'course_deadline_utc' => $courseLastDeadlineUtc,
-            'course_deadline_pretty' => $courseDeadlinePretty,
+			'course_deadline_utc' => $courseLastDeadlineUtc,
+			'course_deadline_pretty' => $courseDeadlinePretty,
 
             'course_deadline_delta_label' => $courseDeadlineDeltaLabel,
             'lessons' => $courseLessons,
