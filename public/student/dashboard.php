@@ -117,19 +117,19 @@ function student_action_label(string $status): string
 {
     switch ($status) {
         case 'awaiting_summary_review':
-            return 'Awaiting Instructor Review';
-        case 'awaiting_test':
-            return 'Ready for Progress Test';
+            return 'Awaiting Summary Review';
+        case 'awaiting_test_completion':
+            return 'Awaiting Test Completion';
+        case 'summary_required':
+            return 'Summary Required';
         case 'remediation_required':
             return 'Remediation Required';
-        case 'blocked_deadline':
-            return 'Deadline Missed';
-        case 'blocked_reason_required':
-            return 'Reason Required';
-        case 'blocked_reason_rejected':
-            return 'Reason Rejected';
-        case 'blocked_final':
-            return 'Training Blocked';
+        case 'instructor_required':
+            return 'Instructor Action Required';
+        case 'deadline_blocked':
+            return 'Deadline Blocked';
+        case 'training_suspended':
+            return 'Training Suspended';
         case 'completed':
             return 'Completed';
         default:
@@ -139,13 +139,13 @@ function student_action_label(string $status): string
 
 function student_action_badge_class(string $status): string
 {
-    if (in_array($status, ['blocked_deadline', 'blocked_final', 'blocked_reason_rejected'], true)) {
+    if ($status === 'training_suspended' || $status === 'deadline_blocked') {
         return 'danger';
     }
-    if (in_array($status, ['remediation_required', 'blocked_reason_required'], true)) {
+    if ($status === 'remediation_required' || $status === 'instructor_required' || $status === 'summary_required') {
         return 'warn';
     }
-    if (in_array($status, ['awaiting_summary_review', 'awaiting_test'], true)) {
+    if ($status === 'awaiting_summary_review' || $status === 'awaiting_test_completion') {
         return 'info';
     }
     if ($status === 'completed') {
@@ -187,7 +187,7 @@ function student_display_first_name(array $user): string
         return $first;
     }
 
-    $name = trim((string)($user['name'] ?? $user['full_name'] ?? ''));
+    $name = trim((string)($user['name'] ?? ''));
     if ($name !== '') {
         $parts = preg_split('/\s+/', $name);
         if (!empty($parts[0])) {
@@ -213,7 +213,7 @@ function student_display_name(array $user): string
         return $full;
     }
 
-    $name = trim((string)($user['name'] ?? $user['full_name'] ?? ''));
+    $name = trim((string)($user['name'] ?? ''));
     if ($name !== '') {
         return $name;
     }
@@ -416,7 +416,6 @@ $cohorts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 */
 $totalLessonsAll = 0;
 $passedLessonsAll = 0;
-
 $urgentLessonCount = 0;
 $summaryWarningCount = 0;
 $actionCount = 0;
@@ -429,23 +428,9 @@ $primaryCohortId = null;
 
 /*
 |--------------------------------------------------------------------------
-| Latest instructor communication + dashboard flags
+| Canonical current-state dashboard flags from lesson_activity
 |--------------------------------------------------------------------------
 */
-$instructorFlagsSt = $pdo->prepare("
-    SELECT
-        sra.training_suspended,
-        sra.summary_revision_required,
-        sra.one_on_one_required,
-        sra.granted_extra_attempts
-    FROM student_required_actions sra
-    WHERE sra.user_id = ?
-      AND sra.action_type = 'instructor_approval'
-      AND sra.status = 'approved'
-");
-$instructorFlagsSt->execute([$userId]);
-$instructorFlagRows = $instructorFlagsSt->fetchAll(PDO::FETCH_ASSOC);
-
 $dashboardFlags = [
     'training_suspended' => false,
     'summary_revision_required' => false,
@@ -453,19 +438,30 @@ $dashboardFlags = [
     'extra_attempts_granted' => 0,
 ];
 
-foreach ($instructorFlagRows as $msg) {
-    if (!empty($msg['training_suspended'])) {
-        $dashboardFlags['training_suspended'] = true;
-    }
-    if (!empty($msg['summary_revision_required'])) {
-        $dashboardFlags['summary_revision_required'] = true;
-    }
-    if (!empty($msg['one_on_one_required'])) {
-        $dashboardFlags['one_on_one_required'] = true;
-    }
-    $dashboardFlags['extra_attempts_granted'] += (int)($msg['granted_extra_attempts'] ?? 0);
+$dashboardFlagsSt = $pdo->prepare("
+    SELECT
+        COALESCE(SUM(la.granted_extra_attempts), 0) AS total_extra_attempts,
+        MAX(CASE WHEN la.training_suspended = 1 THEN 1 ELSE 0 END) AS has_training_suspended,
+        MAX(CASE WHEN la.one_on_one_required = 1 AND la.one_on_one_completed = 0 THEN 1 ELSE 0 END) AS has_one_on_one_required,
+        MAX(CASE WHEN la.summary_status = 'needs_revision' THEN 1 ELSE 0 END) AS has_summary_revision
+    FROM lesson_activity la
+    WHERE la.user_id = ?
+");
+$dashboardFlagsSt->execute([$userId]);
+$dashboardFlagsRow = $dashboardFlagsSt->fetch(PDO::FETCH_ASSOC);
+
+if ($dashboardFlagsRow) {
+    $dashboardFlags['training_suspended'] = !empty($dashboardFlagsRow['has_training_suspended']);
+    $dashboardFlags['summary_revision_required'] = !empty($dashboardFlagsRow['has_summary_revision']);
+    $dashboardFlags['one_on_one_required'] = !empty($dashboardFlagsRow['has_one_on_one_required']);
+    $dashboardFlags['extra_attempts_granted'] = (int)($dashboardFlagsRow['total_extra_attempts'] ?? 0);
 }
 
+/*
+|--------------------------------------------------------------------------
+| Latest instructor communication feed from student_required_actions
+|--------------------------------------------------------------------------
+*/
 $instructorMessagesSt = $pdo->prepare("
     SELECT
         sra.user_id,
@@ -504,16 +500,16 @@ foreach ($cohorts as $idx => $co) {
         $primaryCohortId = $cohortId;
     }
 
-    $total = $pdo->prepare("
+    $totalSt = $pdo->prepare("
         SELECT COUNT(*)
         FROM cohort_lesson_deadlines
         WHERE cohort_id = ?
     ");
-    $total->execute([$cohortId]);
-    $totalLessons = (int)$total->fetchColumn();
+    $totalSt->execute([$cohortId]);
+    $totalLessons = (int)$totalSt->fetchColumn();
     $totalLessonsAll += $totalLessons;
 
-    $passed = $pdo->prepare("
+    $passedSt = $pdo->prepare("
         SELECT COUNT(DISTINCT la.lesson_id)
         FROM lesson_activity la
         WHERE la.user_id = ?
@@ -524,13 +520,12 @@ foreach ($cohorts as $idx => $co) {
               WHERE cld.cohort_id = ?
           )
           AND (
-              la.status = 'passed'
-              OR la.completion_status = 'completed'
+              la.completion_status = 'completed'
               OR la.test_pass_status = 'passed'
           )
     ");
-    $passed->execute([$userId, $cohortId, $cohortId]);
-    $passedLessons = (int)$passed->fetchColumn();
+    $passedSt->execute([$userId, $cohortId, $cohortId]);
+    $passedLessons = (int)$passedSt->fetchColumn();
     $passedLessonsAll += $passedLessons;
 
     $urgentCountSt = $pdo->prepare("
@@ -581,8 +576,8 @@ foreach ($cohorts as $idx => $co) {
         $cohortId,
         $cohortId
     ]);
-    $rows = $urgentSt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($rows as $r) {
+    $urgentRows = $urgentSt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($urgentRows as $r) {
         $r['days_left'] = student_days_left((string)$r['deadline_utc']);
         $urgentLessons[] = $r;
     }
@@ -626,8 +621,8 @@ foreach ($cohorts as $idx => $co) {
         $userId,
         $cohortId
     ]);
-    $sumRows = $summaryWarnSt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($sumRows as $r) {
+    $summaryRows = $summaryWarnSt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($summaryRows as $r) {
         $summaryWarnings[] = $r;
     }
 
@@ -638,12 +633,12 @@ foreach ($cohorts as $idx => $co) {
           AND la.cohort_id = ?
           AND la.completion_status IN (
             'awaiting_summary_review',
-            'awaiting_test',
+            'awaiting_test_completion',
+            'summary_required',
             'remediation_required',
-            'blocked_deadline',
-            'blocked_reason_required',
-            'blocked_reason_rejected',
-            'blocked_final'
+            'instructor_required',
+            'deadline_blocked',
+            'training_suspended'
           )
     ");
     $actionCountSt->execute([$userId, $cohortId]);
@@ -667,12 +662,12 @@ foreach ($cohorts as $idx => $co) {
           AND la.cohort_id = ?
           AND la.completion_status IN (
             'awaiting_summary_review',
-            'awaiting_test',
+            'awaiting_test_completion',
+            'summary_required',
             'remediation_required',
-            'blocked_deadline',
-            'blocked_reason_required',
-            'blocked_reason_rejected',
-            'blocked_final'
+            'instructor_required',
+            'deadline_blocked',
+            'training_suspended'
           )
         ORDER BY la.updated_at DESC
     ");
@@ -682,8 +677,8 @@ foreach ($cohorts as $idx => $co) {
         $userId,
         $cohortId
     ]);
-    $actRows = $actionSt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($actRows as $r) {
+    $actionRows = $actionSt->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($actionRows as $r) {
         $actionItems[] = $r;
     }
 }
@@ -725,7 +720,6 @@ if ($summaryNeedsRevisionCount > 0) {
     $dashboardFlags['summary_revision_required'] = true;
 }
 
-$firstName = student_display_first_name($displayUser);
 $displayName = student_display_name($displayUser);
 $avatarUrl = student_avatar_url($displayUser);
 $avatarInitials = student_initials($displayUser);
@@ -1185,7 +1179,7 @@ cw_header('Dashboard');
       <div class="priority-banner info">
         <div class="priority-title">Additional attempts granted</div>
         <div class="priority-text">
-          Your instructor granted a total of <?= (int)$dashboardFlags['extra_attempts_granted'] ?> additional progress test attempt(s) across approved intervention decisions.
+          Your instructor granted a total of <?= (int)$dashboardFlags['extra_attempts_granted'] ?> additional progress test attempt(s) across your current lesson activity states.
         </div>
       </div>
     <?php endif; ?>
@@ -1448,11 +1442,15 @@ cw_header('Dashboard');
         <?php
           $cohortId = (int)$co['id'];
 
-          $total = $pdo->prepare("SELECT COUNT(*) FROM cohort_lesson_deadlines WHERE cohort_id = ?");
-          $total->execute([$cohortId]);
-          $totalLessons = (int)$total->fetchColumn();
+          $totalSt = $pdo->prepare("
+            SELECT COUNT(*)
+            FROM cohort_lesson_deadlines
+            WHERE cohort_id = ?
+          ");
+          $totalSt->execute([$cohortId]);
+          $totalLessons = (int)$totalSt->fetchColumn();
 
-          $passed = $pdo->prepare("
+          $passedSt = $pdo->prepare("
             SELECT COUNT(DISTINCT la.lesson_id)
             FROM lesson_activity la
             WHERE la.user_id = ?
@@ -1463,19 +1461,18 @@ cw_header('Dashboard');
                   WHERE cohort_id = ?
               )
               AND (
-                  la.status = 'passed'
-                  OR la.completion_status = 'completed'
+                  la.completion_status = 'completed'
                   OR la.test_pass_status = 'passed'
               )
           ");
-          $passed->execute([$userId, $cohortId, $cohortId]);
-          $passedLessons = (int)$passed->fetchColumn();
+          $passedSt->execute([$userId, $cohortId, $cohortId]);
+          $passedLessons = (int)$passedSt->fetchColumn();
 
           $pct = ($totalLessons > 0)
             ? (int)round(($passedLessons / $totalLessons) * 100)
             : 0;
 
-          $next = $pdo->prepare("
+          $nextSt = $pdo->prepare("
             SELECT d.deadline_utc, l.title, l.external_lesson_id
             FROM cohort_lesson_deadlines d
             JOIN lessons l ON l.id = d.lesson_id
@@ -1491,8 +1488,8 @@ cw_header('Dashboard');
             ORDER BY d.deadline_utc ASC
             LIMIT 1
           ");
-          $next->execute([$userId, $cohortId, $cohortId]);
-          $nextRow = $next->fetch(PDO::FETCH_ASSOC);
+          $nextSt->execute([$userId, $cohortId, $cohortId]);
+          $nextRow = $nextSt->fetch(PDO::FETCH_ASSOC);
 
           $programTitle = student_program_title((string)$co['program_key']);
         ?>
