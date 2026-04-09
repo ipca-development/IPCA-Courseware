@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
+require_once __DIR__ . '/../../src/openai.php';
 
 cw_require_login();
 
@@ -19,6 +20,18 @@ $userId = (int)$u['id'];
 // If admin, optionally simulate a student view via ?user_id=
 if ($role === 'admin' && isset($_GET['user_id'])) {
     $userId = (int)$_GET['user_id'];
+}
+
+$displayUserSt = $pdo->prepare("SELECT * FROM users WHERE id = ? LIMIT 1");
+$displayUserSt->execute([$userId]);
+$displayUser = $displayUserSt->fetch(PDO::FETCH_ASSOC);
+if (!$displayUser) {
+    $displayUser = is_array($u) ? $u : [];
+}
+
+function dash_h(?string $value): string
+{
+    return htmlspecialchars((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
 }
 
 function dash_fmt_date_student(?string $value): string
@@ -167,10 +180,225 @@ function student_snippet(?string $value, int $max = 180): string
     return rtrim(mb_substr($value, 0, $max - 1)) . '…';
 }
 
+function student_display_first_name(array $user): string
+{
+    $first = trim((string)($user['first_name'] ?? ''));
+    if ($first !== '') {
+        return $first;
+    }
+
+    $name = trim((string)($user['name'] ?? $user['full_name'] ?? ''));
+    if ($name !== '') {
+        $parts = preg_split('/\s+/', $name);
+        if (!empty($parts[0])) {
+            return (string)$parts[0];
+        }
+    }
+
+    $email = trim((string)($user['email'] ?? ''));
+    if ($email !== '') {
+        $pos = strpos($email, '@');
+        return $pos !== false ? substr($email, 0, $pos) : $email;
+    }
+
+    return 'Student';
+}
+
+function student_display_name(array $user): string
+{
+    $first = trim((string)($user['first_name'] ?? ''));
+    $last = trim((string)($user['last_name'] ?? ''));
+    $full = trim($first . ' ' . $last);
+    if ($full !== '') {
+        return $full;
+    }
+
+    $name = trim((string)($user['name'] ?? $user['full_name'] ?? ''));
+    if ($name !== '') {
+        return $name;
+    }
+
+    return student_display_first_name($user);
+}
+
+function student_avatar_url(array $user): string
+{
+    $value = trim((string)($user['photo_path'] ?? ''));
+    if ($value === '') {
+        return '';
+    }
+
+    if (preg_match('~^https?://~i', $value)) {
+        return $value;
+    }
+
+    if (strpos($value, '/') === 0) {
+        return $value;
+    }
+
+    return '/' . ltrim($value, '/');
+}
+
+function student_initials(array $user): string
+{
+    $first = trim((string)($user['first_name'] ?? ''));
+    $last = trim((string)($user['last_name'] ?? ''));
+
+    $initials = '';
+    if ($first !== '') {
+        $initials .= mb_strtoupper(mb_substr($first, 0, 1));
+    }
+    if ($last !== '') {
+        $initials .= mb_strtoupper(mb_substr($last, 0, 1));
+    }
+
+    if ($initials !== '') {
+        return $initials;
+    }
+
+    $name = student_display_name($user);
+    $parts = preg_split('/\s+/', trim($name));
+    $initials = '';
+    foreach ($parts as $p) {
+        if ($p !== '') {
+            $initials .= mb_strtoupper(mb_substr($p, 0, 1));
+        }
+        if (mb_strlen($initials) >= 2) {
+            break;
+        }
+    }
+
+    return $initials !== '' ? $initials : 'S';
+}
+
+function student_dashboard_ai_cache_key(int $userId): string
+{
+    return sys_get_temp_dir() . '/ipca_dashboard_welcome_' . $userId . '.txt';
+}
+
+function student_dashboard_ai_fallback_message(string $firstName): string
+{
+    return "Welcome {$firstName} to your dashboard page. Keep building steady pilot habits today. One disciplined training session at a time is how strong aviators are made.";
+}
+
+function student_openai_extract_output_text(array $resp): string
+{
+    $out = $resp['output'] ?? [];
+    if (!is_array($out)) {
+        return '';
+    }
+
+    $text = '';
+    foreach ($out as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+
+        $content = $item['content'] ?? [];
+        if (!is_array($content)) {
+            continue;
+        }
+
+        foreach ($content as $c) {
+            if (is_array($c) && ($c['type'] ?? '') === 'output_text') {
+                $text .= (string)($c['text'] ?? '');
+            }
+        }
+    }
+
+    return trim($text);
+}
+
+function student_dashboard_generate_ai_welcome(
+    array $user,
+    int $theoryProgressPct,
+    int $urgentLessonCount,
+    int $summaryWarningCount,
+    int $actionCount
+): string {
+    $userId = (int)($user['id'] ?? 0);
+    $firstName = student_display_first_name($user);
+    $studentName = student_display_name($user);
+    $cacheFile = student_dashboard_ai_cache_key($userId);
+
+    if ($userId > 0 && is_file($cacheFile)) {
+        $age = time() - (int)@filemtime($cacheFile);
+        if ($age >= 0 && $age < 14400) {
+            $cached = trim((string)@file_get_contents($cacheFile));
+            if ($cached !== '') {
+                return $cached;
+            }
+        }
+    }
+
+    $input = <<<PROMPT
+Write a short personalized motivational welcome message for a student pilot dashboard.
+
+Rules:
+- Address the student by first name: {$firstName}
+- Mention this is their dashboard
+- Tone must be professional, motivating, aviation-themed, and natural
+- Length must be 2 to 5 sentences
+- Include encouragement
+- Include one practical study or training tip
+- Include one fun aviation fact or aviation-style motivational element
+- Keep it concise
+- Do not use markdown
+- Do not use bullet points
+- Do not use quotation marks
+- Do not sound cheesy
+- Return plain text only
+
+Student full name: {$studentName}
+Theory progress: {$theoryProgressPct}%
+Urgent lesson deadlines: {$urgentLessonCount}
+Summary warnings: {$summaryWarningCount}
+Action items: {$actionCount}
+PROMPT;
+
+    try {
+        $resp = cw_openai_responses([
+            'model' => cw_openai_model(),
+            'input' => $input,
+            'max_output_tokens' => 180
+        ]);
+
+        $message = student_openai_extract_output_text($resp);
+        $message = trim((string)preg_replace('/\s+/', ' ', $message));
+
+        if ($message === '') {
+            $message = student_dashboard_ai_fallback_message($firstName);
+        }
+
+        if ($userId > 0) {
+            @file_put_contents($cacheFile, $message);
+        }
+
+        return $message;
+    } catch (Throwable $e) {
+        return student_dashboard_ai_fallback_message($firstName);
+    }
+}
+
+function student_program_title(string $programKey): string
+{
+    $programKey = trim($programKey);
+    if ($programKey === '') {
+        return 'Program';
+    }
+
+    $programKey = str_replace(['-', '_'], ' ', $programKey);
+    return ucwords($programKey);
+}
+
 $stmt = $pdo->prepare("
-  SELECT co.id, co.name, co.start_date, co.end_date,
-         c.title AS course_title,
-         p.program_key
+  SELECT
+      co.id,
+      co.name,
+      co.start_date,
+      co.end_date,
+      c.title AS course_title,
+      p.program_key
   FROM cohort_students cs
   JOIN cohorts co ON co.id = cs.cohort_id
   JOIN courses c ON c.id = co.course_id
@@ -188,6 +416,11 @@ $cohorts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 */
 $totalLessonsAll = 0;
 $passedLessonsAll = 0;
+
+$urgentLessonCount = 0;
+$summaryWarningCount = 0;
+$actionCount = 0;
+
 $urgentLessons = [];
 $summaryWarnings = [];
 $actionItems = [];
@@ -196,9 +429,43 @@ $primaryCohortId = null;
 
 /*
 |--------------------------------------------------------------------------
-| Latest instructor communication
+| Latest instructor communication + dashboard flags
 |--------------------------------------------------------------------------
 */
+$instructorFlagsSt = $pdo->prepare("
+    SELECT
+        sra.training_suspended,
+        sra.summary_revision_required,
+        sra.one_on_one_required,
+        sra.granted_extra_attempts
+    FROM student_required_actions sra
+    WHERE sra.user_id = ?
+      AND sra.action_type = 'instructor_approval'
+      AND sra.status = 'approved'
+");
+$instructorFlagsSt->execute([$userId]);
+$instructorFlagRows = $instructorFlagsSt->fetchAll(PDO::FETCH_ASSOC);
+
+$dashboardFlags = [
+    'training_suspended' => false,
+    'summary_revision_required' => false,
+    'one_on_one_required' => false,
+    'extra_attempts_granted' => 0,
+];
+
+foreach ($instructorFlagRows as $msg) {
+    if (!empty($msg['training_suspended'])) {
+        $dashboardFlags['training_suspended'] = true;
+    }
+    if (!empty($msg['summary_revision_required'])) {
+        $dashboardFlags['summary_revision_required'] = true;
+    }
+    if (!empty($msg['one_on_one_required'])) {
+        $dashboardFlags['one_on_one_required'] = true;
+    }
+    $dashboardFlags['extra_attempts_granted'] += (int)($msg['granted_extra_attempts'] ?? 0);
+}
+
 $instructorMessagesSt = $pdo->prepare("
     SELECT
         sra.user_id,
@@ -226,30 +493,9 @@ $instructorMessagesSt = $pdo->prepare("
         OR sra.created_at IS NOT NULL
       )
     ORDER BY COALESCE(sra.decision_at, sra.created_at) DESC
-    LIMIT 10
 ");
 $instructorMessagesSt->execute([$userId]);
 $instructorMessages = $instructorMessagesSt->fetchAll(PDO::FETCH_ASSOC);
-
-$dashboardFlags = [
-    'training_suspended' => false,
-    'summary_revision_required' => false,
-    'one_on_one_required' => false,
-    'extra_attempts_granted' => 0,
-];
-
-foreach ($instructorMessages as $msg) {
-    if (!empty($msg['training_suspended'])) {
-        $dashboardFlags['training_suspended'] = true;
-    }
-    if (!empty($msg['summary_revision_required'])) {
-        $dashboardFlags['summary_revision_required'] = true;
-    }
-    if (!empty($msg['one_on_one_required'])) {
-        $dashboardFlags['one_on_one_required'] = true;
-    }
-    $dashboardFlags['extra_attempts_granted'] += (int)($msg['granted_extra_attempts'] ?? 0);
-}
 
 foreach ($cohorts as $idx => $co) {
     $cohortId = (int)$co['id'];
@@ -267,26 +513,41 @@ foreach ($cohorts as $idx => $co) {
     $totalLessons = (int)$total->fetchColumn();
     $totalLessonsAll += $totalLessons;
 
-    /*
-    |--------------------------------------------------------------------------
-    | Keep same baseline logic as current live version:
-    | progress based on lesson_activity.status = 'passed'
-    |--------------------------------------------------------------------------
-    */
     $passed = $pdo->prepare("
-        SELECT COUNT(*)
-        FROM lesson_activity
-        WHERE user_id = ?
-          AND status = 'passed'
-          AND lesson_id IN (
-              SELECT lesson_id
-              FROM cohort_lesson_deadlines
-              WHERE cohort_id = ?
+        SELECT COUNT(DISTINCT la.lesson_id)
+        FROM lesson_activity la
+        WHERE la.user_id = ?
+          AND la.cohort_id = ?
+          AND la.lesson_id IN (
+              SELECT cld.lesson_id
+              FROM cohort_lesson_deadlines cld
+              WHERE cld.cohort_id = ?
+          )
+          AND (
+              la.status = 'passed'
+              OR la.completion_status = 'completed'
+              OR la.test_pass_status = 'passed'
           )
     ");
-    $passed->execute([$userId, $cohortId]);
+    $passed->execute([$userId, $cohortId, $cohortId]);
     $passedLessons = (int)$passed->fetchColumn();
     $passedLessonsAll += $passedLessons;
+
+    $urgentCountSt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM cohort_lesson_deadlines d
+        LEFT JOIN lesson_activity la
+          ON la.user_id = ?
+         AND la.cohort_id = ?
+         AND la.lesson_id = d.lesson_id
+        WHERE d.cohort_id = ?
+          AND (
+            la.completion_status IS NULL
+            OR la.completion_status <> 'completed'
+          )
+    ");
+    $urgentCountSt->execute([$userId, $cohortId, $cohortId]);
+    $urgentLessonCount += (int)$urgentCountSt->fetchColumn();
 
     $urgentSt = $pdo->prepare("
         SELECT
@@ -312,7 +573,6 @@ foreach ($cohorts as $idx => $co) {
             OR la.completion_status <> 'completed'
           )
         ORDER BY d.deadline_utc ASC
-        LIMIT 12
     ");
     $urgentSt->execute([
         (string)$co['name'],
@@ -326,6 +586,16 @@ foreach ($cohorts as $idx => $co) {
         $r['days_left'] = student_days_left((string)$r['deadline_utc']);
         $urgentLessons[] = $r;
     }
+
+    $summaryCountSt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM lesson_summaries ls
+        WHERE ls.user_id = ?
+          AND ls.cohort_id = ?
+          AND ls.review_status IN ('needs_revision', 'pending')
+    ");
+    $summaryCountSt->execute([$userId, $cohortId]);
+    $summaryWarningCount += (int)$summaryCountSt->fetchColumn();
 
     $summaryWarnSt = $pdo->prepare("
         SELECT
@@ -349,7 +619,6 @@ foreach ($cohorts as $idx => $co) {
                 ELSE 2
             END,
             ls.updated_at DESC
-        LIMIT 10
     ");
     $summaryWarnSt->execute([
         (string)$co['name'],
@@ -361,6 +630,24 @@ foreach ($cohorts as $idx => $co) {
     foreach ($sumRows as $r) {
         $summaryWarnings[] = $r;
     }
+
+    $actionCountSt = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM lesson_activity la
+        WHERE la.user_id = ?
+          AND la.cohort_id = ?
+          AND la.completion_status IN (
+            'awaiting_summary_review',
+            'awaiting_test',
+            'remediation_required',
+            'blocked_deadline',
+            'blocked_reason_required',
+            'blocked_reason_rejected',
+            'blocked_final'
+          )
+    ");
+    $actionCountSt->execute([$userId, $cohortId]);
+    $actionCount += (int)$actionCountSt->fetchColumn();
 
     $actionSt = $pdo->prepare("
         SELECT
@@ -388,7 +675,6 @@ foreach ($cohorts as $idx => $co) {
             'blocked_final'
           )
         ORDER BY la.updated_at DESC
-        LIMIT 10
     ");
     $actionSt->execute([
         (string)$co['name'],
@@ -411,7 +697,19 @@ usort($urgentLessons, function ($a, $b) {
     $bDate = strtotime((string)($b['deadline_utc'] ?? ''));
     return $aDate <=> $bDate;
 });
-$urgentLessons = array_slice($urgentLessons, 0, 5);
+
+usort($summaryWarnings, function ($a, $b) {
+    $aPriority = ((string)($a['review_status'] ?? '') === 'needs_revision') ? 0 : 1;
+    $bPriority = ((string)($b['review_status'] ?? '') === 'needs_revision') ? 0 : 1;
+    if ($aPriority !== $bPriority) {
+        return $aPriority <=> $bPriority;
+    }
+    return strtotime((string)($b['updated_at'] ?? '')) <=> strtotime((string)($a['updated_at'] ?? ''));
+});
+
+usort($actionItems, function ($a, $b) {
+    return strtotime((string)($b['updated_at'] ?? '')) <=> strtotime((string)($a['updated_at'] ?? ''));
+});
 
 $summaryNeedsRevisionCount = 0;
 $summaryPendingCount = 0;
@@ -423,7 +721,21 @@ foreach ($summaryWarnings as $sw) {
     }
 }
 
-$actionCount = count($actionItems);
+if ($summaryNeedsRevisionCount > 0) {
+    $dashboardFlags['summary_revision_required'] = true;
+}
+
+$firstName = student_display_first_name($displayUser);
+$displayName = student_display_name($displayUser);
+$avatarUrl = student_avatar_url($displayUser);
+$avatarInitials = student_initials($displayUser);
+$welcomeMessage = student_dashboard_generate_ai_welcome(
+    $displayUser,
+    $theoryProgressPct,
+    $urgentLessonCount,
+    $summaryWarningCount,
+    $actionCount
+);
 
 cw_header('Dashboard');
 ?>
@@ -437,6 +749,33 @@ cw_header('Dashboard');
 
   .hero-card{
     padding:24px 26px;
+  }
+  .hero-wrap{
+    display:flex;
+    align-items:flex-start;
+    gap:18px;
+  }
+  .hero-avatar{
+    width:74px;
+    height:74px;
+    border-radius:50%;
+    overflow:hidden;
+    flex:0 0 74px;
+    background:linear-gradient(180deg,#123b72 0%, #2f6ac6 100%);
+    color:#fff;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size:24px;
+    font-weight:800;
+    letter-spacing:-0.03em;
+    box-shadow:0 8px 24px rgba(18,59,114,.18);
+  }
+  .hero-avatar img{
+    width:100%;
+    height:100%;
+    object-fit:cover;
+    display:block;
   }
   .hero-eyebrow{
     font-size:11px;
@@ -457,8 +796,8 @@ cw_header('Dashboard');
     margin-top:10px;
     font-size:15px;
     color:#6f7f95;
-    max-width:780px;
-    line-height:1.55;
+    max-width:860px;
+    line-height:1.65;
   }
 
   .kpi-grid{
@@ -546,6 +885,16 @@ cw_header('Dashboard');
     height:14px;
     border-radius:999px;
     background:linear-gradient(90deg,#123b72 0%, #2f6ac6 100%);
+    min-width:0;
+  }
+
+  .scroll-panel{
+    max-height:300px;
+    overflow-y:auto;
+    padding-right:4px;
+  }
+  .scroll-panel.three-visible{
+    max-height:286px;
   }
 
   .urgent-list,
@@ -767,6 +1116,10 @@ cw_header('Dashboard');
   }
 
   @media (max-width:700px){
+    .hero-wrap{
+      flex-direction:column;
+      align-items:flex-start;
+    }
     .kpi-grid{
       grid-template-columns:1fr;
     }
@@ -778,10 +1131,20 @@ cw_header('Dashboard');
 
 <div class="dash-stack">
   <div class="card hero-card">
-    <div class="hero-eyebrow">Student Workspace</div>
-    <h2 class="hero-title">Training Overview</h2>
-    <div class="hero-sub">
-      Track your theory progress, urgent deadlines, and the latest instructor guidance that may affect what you must do next before training can continue.
+    <div class="hero-wrap">
+      <div class="hero-avatar">
+        <?php if ($avatarUrl !== ''): ?>
+          <img src="<?= dash_h($avatarUrl) ?>" alt="<?= dash_h($displayName) ?>">
+        <?php else: ?>
+          <?= dash_h($avatarInitials) ?>
+        <?php endif; ?>
+      </div>
+
+      <div style="min-width:0;">
+        <div class="hero-eyebrow">Student Workspace</div>
+        <h2 class="hero-title">Training Overview</h2>
+        <div class="hero-sub"><?= dash_h($welcomeMessage) ?></div>
+      </div>
     </div>
   </div>
 
@@ -822,7 +1185,7 @@ cw_header('Dashboard');
       <div class="priority-banner info">
         <div class="priority-title">Additional attempts granted</div>
         <div class="priority-text">
-          Your instructor granted a total of <?= (int)$dashboardFlags['extra_attempts_granted'] ?> additional progress test attempt(s) across your current intervention items.
+          Your instructor granted a total of <?= (int)$dashboardFlags['extra_attempts_granted'] ?> additional progress test attempt(s) across approved intervention decisions.
         </div>
       </div>
     <?php endif; ?>
@@ -836,14 +1199,14 @@ cw_header('Dashboard');
 
       <div class="card kpi-card">
         <div class="kpi-label">Urgent Lessons</div>
-        <div class="kpi-value"><?= count($urgentLessons) ?></div>
-        <div class="kpi-sub">Most urgent upcoming lesson deadlines currently visible in your theory path.</div>
+        <div class="kpi-value"><?= $urgentLessonCount ?></div>
+        <div class="kpi-sub">Incomplete lessons with active deadlines currently visible in your theory path.</div>
       </div>
 
       <div class="card kpi-card">
         <div class="kpi-label">Summary Warnings</div>
-        <div class="kpi-value"><?= $summaryNeedsRevisionCount + $summaryPendingCount ?></div>
-        <div class="kpi-sub">Summary items needing revision or currently waiting for instructor review.</div>
+        <div class="kpi-value"><?= $summaryWarningCount ?></div>
+        <div class="kpi-sub">Summary items needing revision or waiting for instructor review.</div>
       </div>
 
       <div class="card kpi-card">
@@ -868,7 +1231,7 @@ cw_header('Dashboard');
         </div>
 
         <div class="progress-shell-student">
-          <div class="progress-fill-student" style="width:<?= $theoryProgressPct ?>%;"></div>
+          <div class="progress-fill-student" style="width:<?= max(0, min(100, $theoryProgressPct)) ?>%;"></div>
         </div>
 
         <div style="margin-top:18px;" class="empty-premium">
@@ -888,7 +1251,7 @@ cw_header('Dashboard');
           <?php if ($primaryCohortId !== null): ?>
             <a class="mini-action" href="/student/course.php?cohort_id=<?= (int)$primaryCohortId ?>">Open Course</a>
           <?php endif; ?>
-          <a class="mini-action" href="/student/dashboard.php">Refresh Overview</a>
+          <a class="mini-action" href="/student/dashboard.php<?= ($role === 'admin' && $userId > 0) ? '?user_id=' . (int)$userId : '' ?>">Refresh Overview</a>
         </div>
       </div>
     </div>
@@ -905,43 +1268,45 @@ cw_header('Dashboard');
         <?php if (!$instructorMessages): ?>
           <div class="empty-premium">No instructor decision messages are currently active.</div>
         <?php else: ?>
-          <div class="message-list">
-            <?php foreach (array_slice($instructorMessages, 0, 6) as $row): ?>
-              <?php
-                $decisionLabel = student_decision_label((string)($row['decision_code'] ?? ''));
-                $decisionBadgeClass = 'info';
-                if (!empty($row['training_suspended'])) {
-                    $decisionBadgeClass = 'danger';
-                } elseif (!empty($row['summary_revision_required'])) {
-                    $decisionBadgeClass = 'warn';
-                } elseif (!empty($row['one_on_one_required'])) {
-                    $decisionBadgeClass = 'info';
-                }
-                $notesSnippet = student_snippet((string)($row['decision_notes'] ?? ''), 180);
-              ?>
-              <div class="message-item">
-                <div class="item-main">
-                  <div class="item-title">
-                    Lesson <?= (int)$row['external_lesson_id'] ?> · <?= h((string)$row['lesson_title']) ?>
+          <div class="scroll-panel three-visible">
+            <div class="message-list">
+              <?php foreach ($instructorMessages as $row): ?>
+                <?php
+                  $decisionLabel = student_decision_label((string)($row['decision_code'] ?? ''));
+                  $decisionBadgeClass = 'info';
+                  if (!empty($row['training_suspended'])) {
+                      $decisionBadgeClass = 'danger';
+                  } elseif (!empty($row['summary_revision_required'])) {
+                      $decisionBadgeClass = 'warn';
+                  } elseif (!empty($row['one_on_one_required'])) {
+                      $decisionBadgeClass = 'info';
+                  }
+                  $notesSnippet = student_snippet((string)($row['decision_notes'] ?? ''), 180);
+                ?>
+                <div class="message-item">
+                  <div class="item-main">
+                    <div class="item-title">
+                      Lesson <?= (int)$row['external_lesson_id'] ?> · <?= dash_h((string)$row['lesson_title']) ?>
+                    </div>
+                    <div class="item-meta">
+                      <?= dash_h((string)$row['cohort_name']) ?> · <?= dash_h(dash_fmt_datetime_student((string)$row['decision_at'])) ?>
+                    </div>
+
+                    <?php if ($notesSnippet !== ''): ?>
+                      <div class="message-note"><?= dash_h($notesSnippet) ?></div>
+                    <?php endif; ?>
+
+                    <?php if ((int)($row['granted_extra_attempts'] ?? 0) > 0): ?>
+                      <div class="message-note">Additional attempts granted: <?= (int)$row['granted_extra_attempts'] ?></div>
+                    <?php endif; ?>
                   </div>
-                  <div class="item-meta">
-                    <?= h((string)$row['cohort_name']) ?> · <?= h(dash_fmt_datetime_student((string)$row['decision_at'])) ?>
+
+                  <div class="item-side">
+                    <div class="badge <?= dash_h($decisionBadgeClass) ?>"><?= dash_h($decisionLabel) ?></div>
                   </div>
-
-                  <?php if ($notesSnippet !== ''): ?>
-                    <div class="message-note"><?= h($notesSnippet) ?></div>
-                  <?php endif; ?>
-
-                  <?php if ((int)($row['granted_extra_attempts'] ?? 0) > 0): ?>
-                    <div class="message-note">Additional attempts granted: <?= (int)$row['granted_extra_attempts'] ?></div>
-                  <?php endif; ?>
                 </div>
-
-                <div class="item-side">
-                  <div class="badge <?= h($decisionBadgeClass) ?>"><?= h($decisionLabel) ?></div>
-                </div>
-              </div>
-            <?php endforeach; ?>
+              <?php endforeach; ?>
+            </div>
           </div>
         <?php endif; ?>
       </div>
@@ -957,36 +1322,38 @@ cw_header('Dashboard');
         <?php if (!$summaryWarnings): ?>
           <div class="empty-premium">No summary review warnings are currently active.</div>
         <?php else: ?>
-          <div class="warn-list">
-            <?php foreach (array_slice($summaryWarnings, 0, 5) as $row): ?>
-              <?php
-                $feedbackSnippet = '';
-                if ((string)$row['review_status'] === 'needs_revision') {
-                    $feedbackSnippet = student_snippet((string)($row['review_notes_by_instructor'] ?: $row['review_feedback']), 160);
-                }
-              ?>
-              <div class="warn-item">
-                <div class="item-main">
-                  <div class="item-title">
-                    Lesson <?= (int)$row['external_lesson_id'] ?> · <?= h((string)$row['lesson_title']) ?>
-                  </div>
-                  <div class="item-meta">
-                    <?= h((string)$row['cohort_name']) ?> · Updated <?= h(dash_fmt_datetime_student((string)$row['updated_at'])) ?>
-                  </div>
+          <div class="scroll-panel three-visible">
+            <div class="warn-list">
+              <?php foreach ($summaryWarnings as $row): ?>
+                <?php
+                  $feedbackSnippet = '';
+                  if ((string)$row['review_status'] === 'needs_revision') {
+                      $feedbackSnippet = student_snippet((string)($row['review_notes_by_instructor'] ?: $row['review_feedback']), 160);
+                  }
+                ?>
+                <div class="warn-item">
+                  <div class="item-main">
+                    <div class="item-title">
+                      Lesson <?= (int)$row['external_lesson_id'] ?> · <?= dash_h((string)$row['lesson_title']) ?>
+                    </div>
+                    <div class="item-meta">
+                      <?= dash_h((string)$row['cohort_name']) ?> · Updated <?= dash_h(dash_fmt_datetime_student((string)$row['updated_at'])) ?>
+                    </div>
 
-                  <?php if ($feedbackSnippet !== ''): ?>
-                    <div class="message-note"><?= h($feedbackSnippet) ?></div>
-                  <?php endif; ?>
+                    <?php if ($feedbackSnippet !== ''): ?>
+                      <div class="message-note"><?= dash_h($feedbackSnippet) ?></div>
+                    <?php endif; ?>
+                  </div>
+                  <div class="item-side">
+                    <?php if ((string)$row['review_status'] === 'needs_revision'): ?>
+                      <div class="badge danger">Needs revision</div>
+                    <?php else: ?>
+                      <div class="badge warn">Pending review</div>
+                    <?php endif; ?>
+                  </div>
                 </div>
-                <div class="item-side">
-                  <?php if ((string)$row['review_status'] === 'needs_revision'): ?>
-                    <div class="badge danger">Needs revision</div>
-                  <?php else: ?>
-                    <div class="badge warn">Pending review</div>
-                  <?php endif; ?>
-                </div>
-              </div>
-            <?php endforeach; ?>
+              <?php endforeach; ?>
+            </div>
           </div>
         <?php endif; ?>
       </div>
@@ -996,38 +1363,40 @@ cw_header('Dashboard');
       <div class="card panel-card">
         <div class="panel-head">
           <div>
-            <h3 class="panel-title">5 Most Urgent Lesson Deadlines</h3>
-            <div class="panel-sub">The nearest lesson deadlines that deserve your attention first.</div>
+            <h3 class="panel-title">Urgent Lesson Deadlines</h3>
+            <div class="panel-sub">All current incomplete lesson deadlines, ordered from most urgent to least urgent.</div>
           </div>
         </div>
 
         <?php if (!$urgentLessons): ?>
           <div class="empty-premium">No urgent lesson deadlines found.</div>
         <?php else: ?>
-          <div class="urgent-list">
-            <?php foreach ($urgentLessons as $row): ?>
-              <?php
-                $badgeClass = student_deadline_badge_class($row['days_left']);
-                $progressClass = student_deadline_progress_class($row['days_left']);
-                $progressPct = student_deadline_progress_pct($row['days_left']);
-              ?>
-              <div class="urgent-item">
-                <div class="item-main">
-                  <div class="item-title">
-                    Lesson <?= (int)$row['external_lesson_id'] ?> · <?= h((string)$row['title']) ?>
+          <div class="scroll-panel three-visible">
+            <div class="urgent-list">
+              <?php foreach ($urgentLessons as $row): ?>
+                <?php
+                  $badgeClass = student_deadline_badge_class($row['days_left']);
+                  $progressClass = student_deadline_progress_class($row['days_left']);
+                  $progressPct = student_deadline_progress_pct($row['days_left']);
+                ?>
+                <div class="urgent-item">
+                  <div class="item-main">
+                    <div class="item-title">
+                      Lesson <?= (int)$row['external_lesson_id'] ?> · <?= dash_h((string)$row['title']) ?>
+                    </div>
+                    <div class="item-meta">
+                      <?= dash_h((string)$row['cohort_name']) ?> · Due <?= dash_h(dash_fmt_date_student((string)$row['deadline_utc'])) ?>
+                    </div>
+                    <div class="deadline-progress-shell">
+                      <div class="deadline-progress-fill <?= dash_h($progressClass) ?>" style="width:<?= $progressPct ?>%;"></div>
+                    </div>
                   </div>
-                  <div class="item-meta">
-                    <?= h((string)$row['cohort_name']) ?> · Due <?= h(dash_fmt_date_student((string)$row['deadline_utc'])) ?>
-                  </div>
-                  <div class="deadline-progress-shell">
-                    <div class="deadline-progress-fill <?= h($progressClass) ?>" style="width:<?= $progressPct ?>%;"></div>
+                  <div class="item-side">
+                    <div class="badge <?= dash_h($badgeClass) ?>"><?= dash_h(student_deadline_label($row['days_left'])) ?></div>
                   </div>
                 </div>
-                <div class="item-side">
-                  <div class="badge <?= h($badgeClass) ?>"><?= h(student_deadline_label($row['days_left'])) ?></div>
-                </div>
-              </div>
-            <?php endforeach; ?>
+              <?php endforeach; ?>
+            </div>
           </div>
         <?php endif; ?>
       </div>
@@ -1043,30 +1412,32 @@ cw_header('Dashboard');
         <?php if (!$actionItems): ?>
           <div class="empty-premium">No active action items found right now.</div>
         <?php else: ?>
-          <div class="action-list">
-            <?php foreach (array_slice($actionItems, 0, 8) as $row): ?>
-              <?php
-                $status = (string)$row['completion_status'];
-                $badgeClass = student_action_badge_class($status);
-                $statusLabel = student_action_label($status);
-              ?>
-              <div class="action-item">
-                <div class="item-main">
-                  <div class="item-title">
-                    Lesson <?= (int)$row['external_lesson_id'] ?> · <?= h((string)$row['lesson_title']) ?>
+          <div class="scroll-panel three-visible">
+            <div class="action-list">
+              <?php foreach ($actionItems as $row): ?>
+                <?php
+                  $status = (string)$row['completion_status'];
+                  $badgeClass = student_action_badge_class($status);
+                  $statusLabel = student_action_label($status);
+                ?>
+                <div class="action-item">
+                  <div class="item-main">
+                    <div class="item-title">
+                      Lesson <?= (int)$row['external_lesson_id'] ?> · <?= dash_h((string)$row['lesson_title']) ?>
+                    </div>
+                    <div class="item-meta">
+                      <?= dash_h((string)$row['cohort_name']) ?>
+                      <?php if (!empty($row['effective_deadline_utc'])): ?>
+                        · Deadline <?= dash_h(dash_fmt_date_student((string)$row['effective_deadline_utc'])) ?>
+                      <?php endif; ?>
+                    </div>
                   </div>
-                  <div class="item-meta">
-                    <?= h((string)$row['cohort_name']) ?>
-                    <?php if (!empty($row['effective_deadline_utc'])): ?>
-                      · Deadline <?= h(dash_fmt_date_student((string)$row['effective_deadline_utc'])) ?>
-                    <?php endif; ?>
+                  <div class="item-side">
+                    <div class="badge <?= dash_h($badgeClass) ?>"><?= dash_h($statusLabel) ?></div>
                   </div>
                 </div>
-                <div class="item-side">
-                  <div class="badge <?= h($badgeClass) ?>"><?= h($statusLabel) ?></div>
-                </div>
-              </div>
-            <?php endforeach; ?>
+              <?php endforeach; ?>
+            </div>
           </div>
         <?php endif; ?>
       </div>
@@ -1077,21 +1448,27 @@ cw_header('Dashboard');
         <?php
           $cohortId = (int)$co['id'];
 
-          $total = $pdo->prepare("SELECT COUNT(*) FROM cohort_lesson_deadlines WHERE cohort_id=?");
+          $total = $pdo->prepare("SELECT COUNT(*) FROM cohort_lesson_deadlines WHERE cohort_id = ?");
           $total->execute([$cohortId]);
           $totalLessons = (int)$total->fetchColumn();
 
           $passed = $pdo->prepare("
-            SELECT COUNT(*)
-            FROM lesson_activity
-            WHERE user_id=? AND status='passed'
-            AND lesson_id IN (
-                SELECT lesson_id
-                FROM cohort_lesson_deadlines
-                WHERE cohort_id=?
-            )
+            SELECT COUNT(DISTINCT la.lesson_id)
+            FROM lesson_activity la
+            WHERE la.user_id = ?
+              AND la.cohort_id = ?
+              AND la.lesson_id IN (
+                  SELECT lesson_id
+                  FROM cohort_lesson_deadlines
+                  WHERE cohort_id = ?
+              )
+              AND (
+                  la.status = 'passed'
+                  OR la.completion_status = 'completed'
+                  OR la.test_pass_status = 'passed'
+              )
           ");
-          $passed->execute([$userId, $cohortId]);
+          $passed->execute([$userId, $cohortId, $cohortId]);
           $passedLessons = (int)$passed->fetchColumn();
 
           $pct = ($totalLessons > 0)
@@ -1102,22 +1479,32 @@ cw_header('Dashboard');
             SELECT d.deadline_utc, l.title, l.external_lesson_id
             FROM cohort_lesson_deadlines d
             JOIN lessons l ON l.id = d.lesson_id
-            WHERE d.cohort_id=?
+            LEFT JOIN lesson_activity la
+              ON la.user_id = ?
+             AND la.cohort_id = ?
+             AND la.lesson_id = d.lesson_id
+            WHERE d.cohort_id = ?
+              AND (
+                la.completion_status IS NULL
+                OR la.completion_status <> 'completed'
+              )
             ORDER BY d.deadline_utc ASC
             LIMIT 1
           ");
-          $next->execute([$cohortId]);
+          $next->execute([$userId, $cohortId, $cohortId]);
           $nextRow = $next->fetch(PDO::FETCH_ASSOC);
+
+          $programTitle = student_program_title((string)$co['program_key']);
         ?>
           <div class="card cohort-card">
             <div class="cohort-header">
               <div>
-                <h3 class="cohort-title"><?= h((string)$co['course_title']) ?></h3>
+                <h3 class="cohort-title"><?= dash_h($programTitle) ?></h3>
                 <div class="cohort-sub">
-                  Program: <?= h((string)$co['program_key']) ?>
-                  · Cohort: <?= h((string)$co['name']) ?>
-                  · Start: <?= h(dash_fmt_date_student((string)$co['start_date'])) ?>
-                  · End: <?= h(dash_fmt_date_student((string)$co['end_date'])) ?>
+                  Course: <?= dash_h((string)$co['course_title']) ?>
+                  · Cohort: <?= dash_h((string)$co['name']) ?>
+                  · Start: <?= dash_h(dash_fmt_date_student((string)$co['start_date'])) ?>
+                  · End: <?= dash_h(dash_fmt_date_student((string)$co['end_date'])) ?>
                 </div>
               </div>
 
@@ -1129,15 +1516,15 @@ cw_header('Dashboard');
                 <div class="progress-label"><?= $passedLessons ?>/<?= $totalLessons ?> lessons completed</div>
               </div>
               <div class="progress-shell-student">
-                <div class="progress-fill-student" style="width:<?= $pct ?>%;"></div>
+                <div class="progress-fill-student" style="width:<?= max(0, min(100, $pct)) ?>%;"></div>
               </div>
             </div>
 
             <?php if ($nextRow): ?>
               <div class="item-meta" style="margin-top:14px;">
-                Next lesson deadline: <?= h(dash_fmt_date_student((string)$nextRow['deadline_utc'])) ?>
+                Next lesson deadline: <?= dash_h(dash_fmt_date_student((string)$nextRow['deadline_utc'])) ?>
                 · Lesson <?= (int)$nextRow['external_lesson_id'] ?>
-                · <?= h((string)$nextRow['title']) ?>
+                · <?= dash_h((string)$nextRow['title']) ?>
               </div>
             <?php endif; ?>
 
