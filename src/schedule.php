@@ -274,8 +274,14 @@ function cw_build_usable_schedule_days(string $startDateYmd, string $endDateYmd,
 {
     $days = array();
 
-    $startUtc = new DateTimeImmutable($startDateYmd . ' 00:00:00', new DateTimeZone('UTC'));
-    $endUtc = new DateTimeImmutable($endDateYmd . ' 00:00:00', new DateTimeZone('UTC'));
+    $localTz = new DateTimeZone($timezone);
+
+		$startLocal = new DateTimeImmutable($scheduleStartDate . ' 00:00:00', $localTz);
+		$startUtc = $startLocal->setTimezone(new DateTimeZone('UTC'));
+		$startUtc = cw_find_next_allowed_day($startUtc, (array)$settings['allowed_weekdays'], $timezone);
+
+		$endLocal = new DateTimeImmutable($cohortEndDate . ' 23:59:59', $localTz);
+		$endUtc = $endLocal->setTimezone(new DateTimeZone('UTC'));
 
     if ($endUtc < $startUtc) {
         return $days;
