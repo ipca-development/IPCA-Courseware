@@ -1540,64 +1540,72 @@ cw_header('Theory Training');
                 No published schedule exists yet. Use <strong>Preview schedule</strong> to inspect the proposed schedule, then <strong>Publish schedule</strong> to store it.
             </div>
         <?php else: ?>
-            <div class="cohort-table-wrap">
-                <table class="cohort-table">
-                    <thead>
-                        <tr>
-                            <th style="width:70px;">Order</th>
-                            <th>Course</th>
-                            <th style="width:220px;">Published deadline</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                                                <?php $i = 0; foreach ($courseBlocks as $cb): $i++; ?>
-                            <?php
-                            $courseDeadlinePretty = cohort_fmt_pretty((string)$cb['course_deadline_utc']);
-                            $courseTitle = (string)$cb['course_title'];
-                            $courseLessons = (array)$cb['lessons'];
-                            $detailsId = 'course_' . (int)$cb['course_id'];
-                            ?>
-                            <tr>
-                                <td><?php echo $i; ?></td>
-                                <td>
-                                    <details class="cohort-course-details" id="<?php echo cohort_h($detailsId); ?>">
-                                        <summary><?php echo cohort_h($courseTitle); ?></summary>
-                                    </details>
-                                </td>
-                                <td><?php echo cohort_h($courseDeadlinePretty); ?></td>
-                            </tr>
-                            <tr>
-                                <td></td>
-                                <td colspan="2" style="padding-top:0;">
-                                    <div style="padding:10px 0 0 0;">
-                                        <table class="cohort-table" style="width:100%;margin-top:0;">
-                                            <thead>
-                                                <tr>
-                                                    <th style="width:70px;">Order</th>
-                                                    <th>Lesson</th>
-                                                    <th style="width:220px;">Published deadline</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <?php $j = 0; foreach ($courseLessons as $lx): $j++; ?>
-                                                    <tr>
-                                                        <td><?php echo $j; ?></td>
-                                                        <td>
-                                                            <?php echo (int)$lx['external_lesson_id']; ?>
-                                                            — <?php echo cohort_h((string)$lx['lesson_title']); ?>
-                                                        </td>
-                                                        <td><?php echo cohort_h(cohort_fmt_pretty((string)$lx['deadline_utc'])); ?></td>
-                                                    </tr>
-                                                <?php endforeach; ?>
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            </div>
+            
+		
+		<div class="cohort-table-wrap">
+    <table class="cohort-table" style="width:100%;">
+        <thead>
+            <tr>
+                <th style="width:70px;">Order</th>
+                <th>Course</th>
+                <th style="width:220px;">Published deadline</th>
+            </tr>
+        </thead>
+        <tbody>
+            <?php $i = 0; foreach ($courseBlocks as $cb): $i++; ?>
+                <?php
+                $courseDeadlinePretty = cohort_fmt_pretty((string)$cb['course_deadline_utc']);
+                $courseTitle = (string)$cb['course_title'];
+                $courseLessons = (array)$cb['lessons'];
+                $detailsId = 'course_' . (int)$cb['course_id'];
+                ?>
+                <tr>
+                    <td><?php echo $i; ?></td>
+                    <td>
+                        <strong><?php echo cohort_h($courseTitle); ?></strong>
+                    </td>
+                    <td><?php echo cohort_h($courseDeadlinePretty); ?></td>
+                </tr>
+                <tr>
+                    <td colspan="3" style="padding:0 10px 14px 10px;border-bottom:1px solid rgba(15,23,42,.06);">
+                        <details class="cohort-course-details" id="<?php echo cohort_h($detailsId); ?>">
+                            <summary style="margin:10px 0 0 0;">Show lesson deadlines</summary>
+
+                            <div style="margin-top:10px;width:100%;overflow-x:auto;">
+                                <table class="cohort-table" style="width:100%;table-layout:auto;">
+                                    <thead>
+                                        <tr>
+                                            <th style="width:70px;">Order</th>
+                                            <th>Lesson</th>
+                                            <th style="width:220px;">Published deadline</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php $j = 0; foreach ($courseLessons as $lx): $j++; ?>
+                                            <tr>
+                                                <td><?php echo $j; ?></td>
+                                                <td>
+                                                    <?php echo (int)$lx['external_lesson_id']; ?>
+                                                    — <?php echo cohort_h((string)$lx['lesson_title']); ?>
+                                                </td>
+                                                <td><?php echo cohort_h(cohort_fmt_pretty((string)$lx['deadline_utc'])); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    </td>
+                </tr>
+            <?php endforeach; ?>
+        </tbody>
+    </table>
+</div>
+		
+		
+		
+		
+		
         <?php endif; ?>
     </section>
 </div>
