@@ -213,7 +213,7 @@ $maxAllowedAttempts = $baseMaxAllowedAttempts + $grantedExtraAttempts;
         }
     }
 
-    /**
+/**
      * NEW:
      * Block further attempts until remediation acknowledgement is completed.
      */
@@ -235,12 +235,30 @@ $maxAllowedAttempts = $baseMaxAllowedAttempts + $grantedExtraAttempts;
      * NEW:
      * Block further attempts until deadline reason submission is completed.
      */
-$pendingInstructorApproval = $engine->getPendingRequiredAction(
-    $userId,
-    $cohortId,
-    $lessonId,
-    'instructor_approval'
-);
+    $pendingDeadlineReason = $engine->getPendingRequiredAction(
+        $userId,
+        $cohortId,
+        $lessonId,
+        'deadline_reason_submission'
+    );
+
+    if ($pendingDeadlineReason) {
+        json_ok([
+            'ok' => false,
+            'error' => 'You must first submit the required deadline reason before the progress test can start.'
+        ]);
+    }
+
+    /**
+     * NEW:
+     * Block further attempts until instructor approval is completed.
+     */
+    $pendingInstructorApproval = $engine->getPendingRequiredAction(
+        $userId,
+        $cohortId,
+        $lessonId,
+        'instructor_approval'
+    );
 
 if ($pendingInstructorApproval) {
     json_ok([
