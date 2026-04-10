@@ -283,7 +283,7 @@ if ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
         ]);
     }
 
-    $deadlineMeta = $engine->getEffectiveDeadline($userId, $cohortId, $lessonId);
+        $deadlineMeta = $engine->getEffectiveDeadline($userId, $cohortId, $lessonId);
     $effectiveDeadlineUtc = (string)($deadlineMeta['effective_deadline_utc'] ?? '');
     $deadlineSource = (string)($deadlineMeta['deadline_source'] ?? 'cohort_default');
 
@@ -293,6 +293,41 @@ if ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
 
     $nowUtc = gmdate('Y-m-d H:i:s');
     $deadlinePassed = (strtotime($nowUtc) > strtotime($effectiveDeadlineUtc));
+
+    if ($deadlinePassed && !$engine->isLessonCompletedForDeadlinePurposes($userId, $cohortId, $lessonId)) {
+        $deadlineHandleResult = $engine->handleMissedDeadlineForLesson(
+            $userId,
+            $cohortId,
+            $lessonId,
+            null
+        );
+
+        $requiredActionUrl = (string)($deadlineHandleResult['required_action_url'] ?? '');
+        $actionTaken = (string)($deadlineHandleResult['action_taken'] ?? '');
+
+        $message = 'The effective deadline for this lesson has passed. This progress test is currently blocked.';
+
+        if ($actionTaken === 'deadline_reason_required_extension_1') {
+            $message = 'The lesson deadline was missed. A 48-hour extension has been applied and your reason submission is now required.';
+        } elseif ($actionTaken === 'deadline_reason_required_extension_2_final') {
+            $message = 'The lesson deadline was missed again. A final 48-hour extension has been applied and your reason submission is now required.';
+        } elseif ($actionTaken === 'deadline_missed_instructor_required') {
+            $message = 'The lesson deadline path is exhausted. Instructor intervention is now required before progression can continue.';
+        } elseif ($actionTaken === 'existing_reason_action_reused') {
+            $message = 'A deadline reason submission is already pending for this lesson.';
+        } elseif ($actionTaken === 'existing_instructor_action_reused') {
+            $message = 'Instructor intervention is already pending for this lesson.';
+        }
+
+        json_ok([
+            'ok' => false,
+            'error' => $message,
+            'deadline_blocked' => true,
+            'deadline_action_taken' => $actionTaken,
+            'required_action_url' => $requiredActionUrl,
+            'deadline_handle_result' => $deadlineHandleResult,
+        ]);
+    }
 
     $seed = bin2hex(random_bytes(16));
 
@@ -308,76 +343,6 @@ if ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
     ");
     $activitySel->execute([$userId, $cohortId, $lessonId]);
     $activityRow = $activitySel->fetch(PDO::FETCH_ASSOC);
-
-    if ($deadlinePassed) {
-        if ($activityRow) {
-            $updBlocked = $pdo->prepare("
-                UPDATE lesson_activity
-                SET
-                    summary_status = ?,
-                    test_pass_status = 'deadline_missed',
-                    completion_status = 'blocked_deadline',
-                    effective_deadline_utc = ?,
-                    last_state_eval_at = ?,
-                    updated_at = NOW()
-                WHERE id = ?
-            ");
-            $updBlocked->execute([
-                $summaryStatus,
-                $effectiveDeadlineUtc,
-                $nowUtc,
-                (int)$activityRow['id']
-            ]);
-        } else {
-            $insBlocked = $pdo->prepare("
-                INSERT INTO lesson_activity
-                (
-                    user_id,
-                    cohort_id,
-                    lesson_id,
-                    started_at,
-                    completed_at,
-                    total_seconds,
-                    attempt_count,
-                    best_score,
-                    summary_status,
-                    test_pass_status,
-                    completion_status,
-                    effective_deadline_utc,
-                    extension_count,
-                    final_warning_issued,
-                    reason_required,
-                    reason_submitted,
-                    reason_decision,
-                    next_lesson_unlocked_at,
-                    last_state_eval_at,
-                    status,
-                    created_at,
-                    updated_at
-                )
-                VALUES
-                (
-                    ?, ?, ?, NULL, NULL, 0, 0, NULL, ?, 'deadline_missed', 'blocked_deadline',
-                    ?, 0, 0, 0, 0, NULL, NULL, ?, 'in_progress', NOW(), NOW()
-                )
-            ");
-            $insBlocked->execute([
-                $userId,
-                $cohortId,
-                $lessonId,
-                $summaryStatus,
-                $effectiveDeadlineUtc,
-                $nowUtc
-            ]);
-        }
-
-        $pdo->commit();
-
-        json_ok([
-            'ok' => false,
-            'error' => 'The effective deadline for this lesson has passed. This progress test is currently blocked.'
-        ]);
-    }
 
     if ($activityRow) {
         $updActivity = $pdo->prepare("
@@ -415,11 +380,6 @@ if ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
                 test_pass_status,
                 completion_status,
                 effective_deadline_utc,
-                extension_count,
-                final_warning_issued,
-                reason_required,
-                reason_submitted,
-                reason_decision,
                 next_lesson_unlocked_at,
                 last_state_eval_at,
                 status,
@@ -429,7 +389,7 @@ if ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
             VALUES
             (
                 ?, ?, ?, ?, NULL, 0, 0, NULL, ?, 'in_progress', 'in_progress',
-                ?, 0, 0, 0, 0, NULL, NULL, ?, 'in_progress', NOW(), NOW()
+                ?, NULL, ?, 'in_progress', NOW(), NOW()
             )
         ");
         $insActivity->execute([
