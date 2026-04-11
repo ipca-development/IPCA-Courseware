@@ -11,44 +11,32 @@ header('Content-Type: application/json; charset=utf-8');
 while (ob_get_level()) { ob_end_clean(); }
 ob_start();
 
-function json_out(array $x): void {
+function json_out(array $payload): void
+{
     while (ob_get_level() > 1) { ob_end_clean(); }
-    if (ob_get_level() === 1) ob_clean();
-    echo json_encode($x, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (ob_get_level() === 1) { ob_clean(); }
+    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
 }
 
-function env_required(string $k): string {
-    $v = getenv($k);
-    if ($v === false || $v === '') {
-        throw new RuntimeException('Missing env var: ' . $k);
+function env_required(string $key): string
+{
+    $value = getenv($key);
+    if ($value === false || $value === '') {
+        throw new RuntimeException('Missing env var: ' . $key);
     }
-    return (string)$v;
+    return (string)$value;
 }
 
-function html_e(string $s): string {
-    return htmlspecialchars($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+function read_json_body(): array
+{
+    $raw = file_get_contents('php://input');
+    $decoded = json_decode($raw, true);
+    return is_array($decoded) ? $decoded : [];
 }
 
-function html_with_breaks(string $s): string {
-    return nl2br(html_e($s));
-}
-
-function build_app_url(string $path): string {
-    $base = trim((string)(getenv('CW_APP_BASE_URL') ?: ''));
-    if ($base !== '') {
-        return rtrim($base, '/') . '/' . ltrim($path, '/');
-    }
-
-    $host = trim((string)($_SERVER['HTTP_HOST'] ?? ''));
-    if ($host !== '') {
-        return 'https://' . $host . '/' . ltrim($path, '/');
-    }
-
-    return '/' . ltrim($path, '/');
-}
-
-function ai_prompt_fetch(PDO $pdo, string $promptKey, string $fallback): string {
+function ai_prompt_fetch(PDO $pdo, string $promptKey, string $fallback): string
+{
     try {
         $st = $pdo->prepare("
             SELECT prompt_text
@@ -62,38 +50,73 @@ function ai_prompt_fetch(PDO $pdo, string $promptKey, string $fallback): string 
             return $txt;
         }
     } catch (Throwable $e) {
-        // fall back silently
     }
+
     return $fallback;
 }
 
-function temp_base_dir(): string {
-    $base = '/tmp/progress_tests_v2_finalize';
-    if (!is_dir($base)) {
-        if (!@mkdir($base, 0777, true)) {
-            throw new RuntimeException('Cannot create temp base directory: ' . $base);
-        }
-    }
-    if (!is_dir($base) || !is_writable($base)) {
-        throw new RuntimeException('Temp base directory is not writable: ' . $base);
-    }
-    return $base;
+function ai_json_schema_call(string $systemPrompt, string $userPrompt, array $schema, string $name, float $temperature = 0.1): array
+{
+    $payload = [
+        'model' => cw_openai_model(),
+        'input' => [
+            [
+                'role' => 'system',
+                'content' => [
+                    ['type' => 'input_text', 'text' => $systemPrompt]
+                ]
+            ],
+            [
+                'role' => 'user',
+                'content' => [
+                    ['type' => 'input_text', 'text' => $userPrompt]
+                ]
+            ]
+        ],
+        'text' => [
+            'format' => [
+                'type'   => 'json_schema',
+                'name'   => $name,
+                'schema' => $schema,
+                'strict' => true
+            ]
+        ],
+        'temperature' => $temperature
+    ];
+
+    $resp = cw_openai_responses($payload);
+    $json = cw_openai_extract_json_text($resp);
+
+    return is_array($json) ? $json : [];
 }
 
-function test_dir(int $testId): string {
-    $dir = temp_base_dir() . '/' . $testId;
+function ensure_dir(string $dir): string
+{
     if (!is_dir($dir)) {
         if (!@mkdir($dir, 0777, true)) {
-            throw new RuntimeException('Cannot create test temp directory: ' . $dir);
+            throw new RuntimeException('Cannot create directory: ' . $dir);
         }
     }
+
     if (!is_dir($dir) || !is_writable($dir)) {
-        throw new RuntimeException('Test temp directory is not writable: ' . $dir);
+        throw new RuntimeException('Directory is not writable: ' . $dir);
     }
+
     return $dir;
 }
 
-function tts_write_file(string $apiKey, string $model, string $voice, string $text, string $outfile): void {
+function temp_base_dir(): string
+{
+    return ensure_dir('/tmp/progress_tests_v2_finalize');
+}
+
+function test_dir(int $testId): string
+{
+    return ensure_dir(temp_base_dir() . '/' . $testId);
+}
+
+function tts_write_file(string $apiKey, string $model, string $voice, string $text, string $outfile): void
+{
     $payload = json_encode([
         'model'  => $model,
         'voice'  => $voice,
@@ -123,27 +146,30 @@ function tts_write_file(string $apiKey, string $model, string $voice, string $te
     }
 
     if (@file_put_contents($outfile, $audio) === false) {
-        throw new RuntimeException("Failed to write audio file: {$outfile}");
+        throw new RuntimeException('Failed to write audio file: ' . $outfile);
     }
 
     if (!is_file($outfile) || filesize($outfile) <= 0) {
-        throw new RuntimeException("Generated TTS audio file missing or empty: {$outfile}");
+        throw new RuntimeException('Generated TTS audio file missing or empty: ' . $outfile);
     }
 }
 
-function normalize_text(string $s): string {
-    $s = strtolower(trim($s));
-    $s = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $s);
-    $s = preg_replace('/\s+/', ' ', $s);
-    return trim($s);
+function normalize_text(string $text): string
+{
+    $text = strtolower(trim($text));
+    $text = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $text);
+    $text = preg_replace('/\s+/', ' ', $text);
+    return trim((string)$text);
 }
 
-function transcribe_file(string $apiKey, string $filepath): string {
-    if (!is_file($filepath)) return '';
+function transcribe_file(string $apiKey, string $filepath): string
+{
+    if (!is_file($filepath)) {
+        return '';
+    }
 
-    $cfile = curl_file_create($filepath, 'audio/webm', basename($filepath));
     $post = [
-        'file'     => $cfile,
+        'file'     => curl_file_create($filepath, 'audio/webm', basename($filepath)),
         'model'    => 'gpt-4o-mini-transcribe',
         'language' => 'en',
     ];
@@ -159,75 +185,99 @@ function transcribe_file(string $apiKey, string $filepath): string {
         CURLOPT_TIMEOUT => 180,
     ]);
 
-    $out = curl_exec($ch);
+    $out  = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $err = curl_error($ch);
+    $err  = curl_error($ch);
     curl_close($ch);
 
     if ($out === false || $code < 200 || $code >= 300) {
         throw new RuntimeException("Transcription failed (HTTP {$code}) {$err}");
     }
 
-    $j = json_decode($out, true);
-    return trim((string)($j['text'] ?? ''));
+    $json = json_decode((string)$out, true);
+    return trim((string)($json['text'] ?? ''));
 }
 
-function build_alias_groups(array $correct, array $fallbackKeyPoints = []): array {
+function build_alias_groups(array $correct, array $fallbackKeyPoints = []): array
+{
     $groups = [];
-
     $raw = $correct['aliases'] ?? [];
-    if (!is_array($raw)) $raw = [];
+    if (!is_array($raw)) {
+        $raw = [];
+    }
 
     foreach ($raw as $entry) {
         if (is_string($entry) && trim($entry) !== '') {
             $groups[] = [trim($entry)];
-        } elseif (is_array($entry)) {
+            continue;
+        }
+
+        if (is_array($entry)) {
             $grp = [];
             foreach ($entry as $v) {
-                if (is_string($v) && trim($v) !== '') $grp[] = trim($v);
+                if (is_string($v) && trim($v) !== '') {
+                    $grp[] = trim($v);
+                }
             }
-            if ($grp) $groups[] = $grp;
+            if ($grp) {
+                $groups[] = $grp;
+            }
         }
     }
 
     foreach ($fallbackKeyPoints as $kp) {
-        if (!is_string($kp)) continue;
-        $kp = trim($kp);
-        if ($kp !== '') $groups[] = [$kp];
+        if (is_string($kp) && trim($kp) !== '') {
+            $groups[] = [trim($kp)];
+        }
     }
 
     return $groups;
 }
 
-function text_matches_phrase(string $transcript, string $phrase): bool {
+function text_matches_phrase(string $transcript, string $phrase): bool
+{
     $t = normalize_text($transcript);
     $p = normalize_text($phrase);
 
-    if ($t === '' || $p === '') return false;
-    if (strpos($t, $p) !== false) return true;
+    if ($t === '' || $p === '') {
+        return false;
+    }
+
+    if (strpos($t, $p) !== false) {
+        return true;
+    }
 
     $tWords = array_values(array_filter(explode(' ', $t)));
     $pWords = array_values(array_filter(explode(' ', $p)));
-    if (!$tWords || !$pWords) return false;
+    if (!$tWords || !$pWords) {
+        return false;
+    }
 
     $hits = 0;
     $need = 0;
+
     foreach ($pWords as $w) {
-        if (strlen($w) < 3) continue;
+        if (strlen($w) < 3) {
+            continue;
+        }
+
         $need++;
         foreach ($tWords as $tw) {
-            if ($tw === $w || (strlen($w) >= 4 && strlen($tw) >= 4 && (strpos($tw, $w) === 0 || strpos($w, $tw) === 0))) {
+            if (
+                $tw === $w ||
+                (strlen($w) >= 4 && strlen($tw) >= 4 && (strpos($tw, $w) === 0 || strpos($w, $tw) === 0))
+            ) {
                 $hits++;
                 break;
             }
         }
     }
 
-    if ($need === 0) return false;
-    return $hits >= max(1, $need - 1);
+    return $need > 0 && $hits >= max(1, $need - 1);
 }
 
-function transcript_is_contradictory_to_bool(string $transcript, bool $correctValue): bool {
+function transcript_is_contradictory_to_bool(string $transcript, bool $correctValue): bool
+{
     $t = normalize_text($transcript);
 
     $affirmativePatterns = [
@@ -246,94 +296,74 @@ function transcript_is_contradictory_to_bool(string $transcript, bool $correctVa
     $noScore = 0;
 
     foreach ($affirmativePatterns as $rx) {
-        if (preg_match($rx, $t)) $yesScore++;
+        if (preg_match($rx, $t)) { $yesScore++; }
     }
     foreach ($negativePatterns as $rx) {
-        if (preg_match($rx, $t)) $noScore++;
+        if (preg_match($rx, $t)) { $noScore++; }
     }
 
-    if ($yesScore === 0 && $noScore === 0) return false;
-    $semantic = ($yesScore >= $noScore);
+    if ($yesScore === 0 && $noScore === 0) {
+        return false;
+    }
 
-    return $semantic !== $correctValue;
+    return (($yesScore >= $noScore) !== $correctValue);
 }
 
-function grade_yesno(string $transcript, array $correct): array {
+function grade_yesno(string $transcript, array $correct): array
+{
     $t = normalize_text($transcript);
 
     $affirmativePatterns = [
-        '/\byes\b/',
-        '/\btrue\b/',
-        '/\byep\b/',
-        '/\byeah\b/',
-        '/\bcorrect\b/',
-        '/\bindeed\b/',
-        '/\bit is\b/',
-        '/\bit does\b/',
-        '/\bthat is the case\b/',
-        '/\bthat s the case\b/',
-        '/\bin most designs\b/',
-        '/\bthere are\b/',
-        '/\bthere is\b/',
+        '/\byes\b/', '/\btrue\b/', '/\byep\b/', '/\byeah\b/', '/\bcorrect\b/', '/\bindeed\b/',
+        '/\bit is\b/', '/\bit does\b/', '/\bthat is the case\b/', '/\bthat s the case\b/',
+        '/\bin most designs\b/', '/\bthere are\b/', '/\bthere is\b/',
     ];
 
     $negativePatterns = [
-        '/\bno\b/',
-        '/\bfalse\b/',
-        '/\bdoes not\b/',
-        '/\bdo not\b/',
-        '/\bis not\b/',
-        '/\baren t\b/',
-        '/\bare not\b/',
-        '/\bnever\b/',
-        '/\bthat is not the case\b/',
-        '/\bthat s not the case\b/',
-        '/\bnope\b/',
+        '/\bno\b/', '/\bfalse\b/', '/\bdoes not\b/', '/\bdo not\b/', '/\bis not\b/',
+        '/\baren t\b/', '/\bare not\b/', '/\bnever\b/', '/\bthat is not the case\b/',
+        '/\bthat s not the case\b/', '/\bnope\b/',
     ];
 
     $yesScore = 0;
-    $noScore = 0;
+    $noScore  = 0;
 
     foreach ($affirmativePatterns as $rx) {
-        if (preg_match($rx, $t)) $yesScore++;
+        if (preg_match($rx, $t)) { $yesScore++; }
     }
     foreach ($negativePatterns as $rx) {
-        if (preg_match($rx, $t)) $noScore++;
+        if (preg_match($rx, $t)) { $noScore++; }
     }
 
-    if (strpos($t, 'all airplanes have brakes on the main gear') !== false) $yesScore += 2;
-    if (strpos($t, 'in most designs') !== false) $yesScore += 2;
-    if (strpos($t, 'the airplane produces 180 horsepower') !== false) $yesScore += 2;
-    if (strpos($t, 'that s correct') !== false) $yesScore += 2;
-    if (strpos($t, 'that is correct') !== false) $yesScore += 2;
+    if (strpos($t, 'all airplanes have brakes on the main gear') !== false) { $yesScore += 2; }
+    if (strpos($t, 'in most designs') !== false) { $yesScore += 2; }
+    if (strpos($t, 'the airplane produces 180 horsepower') !== false) { $yesScore += 2; }
+    if (strpos($t, 'that s correct') !== false) { $yesScore += 2; }
+    if (strpos($t, 'that is correct') !== false) { $yesScore += 2; }
 
-    $sv = null;
+    $studentValue = null;
     if ($yesScore > 0 && $noScore === 0) {
-        $sv = true;
+        $studentValue = true;
     } elseif ($noScore > 0 && $yesScore === 0) {
-        $sv = false;
+        $studentValue = false;
     } elseif ($yesScore > $noScore) {
-        $sv = true;
+        $studentValue = true;
     } elseif ($noScore > $yesScore) {
-        $sv = false;
+        $studentValue = false;
     }
 
-    if ($sv === null) {
-        if (
-            preg_match('/\b(is not|are not|does not|do not|cannot|can not|never|no longer|without)\b/', $t)
-        ) {
-            $sv = false;
-        } elseif (
-            preg_match('/\b(attached|connected|located|mounted|present|included|used|provides|has brakes|have brakes|helps|assists|supports|contains|is air cooled|are air cooled)\b/', $t)
-        ) {
-            $sv = true;
+    if ($studentValue === null) {
+        if (preg_match('/\b(is not|are not|does not|do not|cannot|can not|never|no longer|without)\b/', $t)) {
+            $studentValue = false;
+        } elseif (preg_match('/\b(attached|connected|located|mounted|present|included|used|provides|has brakes|have brakes|helps|assists|supports|contains|is air cooled|are air cooled)\b/', $t)) {
+            $studentValue = true;
         }
     }
 
-    $cv = (bool)($correct['value'] ?? false);
-
-    $aliases = build_alias_groups($correct, []);
+    $correctValue = (bool)($correct['value'] ?? false);
+    $aliases = build_alias_groups($correct);
     $aliasHits = 0;
+
     foreach ($aliases as $grp) {
         foreach ($grp as $phrase) {
             if (text_matches_phrase($transcript, $phrase)) {
@@ -343,19 +373,17 @@ function grade_yesno(string $transcript, array $correct): array {
         }
     }
 
-    $feedback = '';
     $score = 0;
+    $feedback = '';
 
-    if ($sv !== null && $sv === $cv) {
+    if ($studentValue !== null && $studentValue === $correctValue) {
         $score = 1;
         if ($aliases && $aliasHits === 0) {
             $feedback = 'Correct yes/no direction. Review the explanation detail for completeness.';
         }
-    } else {
-        if ($aliases && $aliasHits > 0 && !transcript_is_contradictory_to_bool($transcript, $cv)) {
-            $score = 1;
-            $feedback = 'Accepted on concept evidence despite indirect yes/no phrasing.';
-        }
+    } elseif ($aliases && $aliasHits > 0 && !transcript_is_contradictory_to_bool($transcript, $correctValue)) {
+        $score = 1;
+        $feedback = 'Accepted on concept evidence despite indirect yes/no phrasing.';
     }
 
     return [
@@ -366,22 +394,32 @@ function grade_yesno(string $transcript, array $correct): array {
     ];
 }
 
-function mcq_text_score(string $transcript, string $option): int {
+function mcq_text_score(string $transcript, string $option): int
+{
     $t = normalize_text($transcript);
     $o = normalize_text($option);
 
-    if ($t === '' || $o === '') return 0;
-    if (strpos($t, $o) !== false) return 100;
+    if ($t === '' || $o === '') {
+        return 0;
+    }
+
+    if (strpos($t, $o) !== false) {
+        return 100;
+    }
 
     $tWords = array_values(array_filter(explode(' ', $t)));
     $oWords = array_values(array_filter(explode(' ', $o)));
-    if (!$tWords || !$oWords) return 0;
+    if (!$tWords || !$oWords) {
+        return 0;
+    }
 
     $score = 0;
     $matched = 0;
 
     foreach ($oWords as $w) {
-        if (strlen($w) < 3) continue;
+        if (strlen($w) < 3) {
+            continue;
+        }
 
         foreach ($tWords as $tw) {
             if ($tw === $w) {
@@ -389,20 +427,22 @@ function mcq_text_score(string $transcript, string $option): int {
                 $matched++;
                 break;
             }
-            if (strlen($w) >= 4 && strlen($tw) >= 4) {
-                if (strpos($tw, $w) === 0 || strpos($w, $tw) === 0) {
-                    $score += 6;
-                    $matched++;
-                    break;
-                }
+
+            if (strlen($w) >= 4 && strlen($tw) >= 4 && (strpos($tw, $w) === 0 || strpos($w, $tw) === 0)) {
+                $score += 6;
+                $matched++;
+                break;
             }
         }
     }
 
     $significant = 0;
     foreach ($oWords as $w) {
-        if (strlen($w) >= 4) $significant++;
+        if (strlen($w) >= 4) {
+            $significant++;
+        }
     }
+
     if ($significant > 0 && $matched >= max(1, $significant - 1)) {
         $score += 20;
     }
@@ -410,7 +450,8 @@ function mcq_text_score(string $transcript, string $option): int {
     return $score;
 }
 
-function best_alias_score(string $transcript, array $groups): int {
+function best_alias_score(string $transcript, array $groups): int
+{
     $best = 0;
     foreach ($groups as $grp) {
         foreach ($grp as $phrase) {
@@ -420,7 +461,8 @@ function best_alias_score(string $transcript, array $groups): int {
     return $best;
 }
 
-function grade_mcq(string $transcript, array $correct, array $options): array {
+function grade_mcq(string $transcript, array $correct, array $options): array
+{
     $t = normalize_text($transcript);
     $idx = -1;
 
@@ -454,32 +496,32 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
         }
     }
 
-    $ci = -1;
-    if (isset($correct['index']) && $correct['index'] !== null) {
-        $ci = (int)$correct['index'];
-    }
+    $correctIndex = isset($correct['index']) && $correct['index'] !== null ? (int)$correct['index'] : -1;
 
     $groups = [];
     if (!empty($correct['answer_text'])) {
         $groups[] = [(string)$correct['answer_text']];
     }
 
-    $alts = $correct['alternatives'] ?? [];
-    if (is_array($alts)) {
+    $alternatives = $correct['alternatives'] ?? [];
+    if (is_array($alternatives)) {
         $grp = [];
-        foreach ($alts as $alt) {
-            if (is_string($alt) && trim($alt) !== '') $grp[] = trim($alt);
+        foreach ($alternatives as $alt) {
+            if (is_string($alt) && trim($alt) !== '') {
+                $grp[] = trim($alt);
+            }
         }
-        if ($grp) $groups[] = $grp;
+        if ($grp) {
+            $groups[] = $grp;
+        }
     }
 
-    $aliasGroups = build_alias_groups($correct, []);
-    foreach ($aliasGroups as $g) $groups[] = $g;
+    foreach (build_alias_groups($correct) as $grp) {
+        $groups[] = $grp;
+    }
 
-    if ($ci < 0 && $groups) {
-        $bestCorrectScore = best_alias_score($transcript, $groups);
-
-        $ok = ($bestCorrectScore >= 10) ? 1 : 0;
+    if ($correctIndex < 0 && $groups) {
+        $ok = best_alias_score($transcript, $groups) >= 10 ? 1 : 0;
         return [
             'is_correct'   => $ok,
             'score_points' => $ok,
@@ -488,11 +530,9 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
         ];
     }
 
-    $ok = ($idx === $ci && $ci >= 0) ? 1 : 0;
-
-    if (!$ok && $groups) {
-        $bestCorrectScore = best_alias_score($transcript, $groups);
-        if ($bestCorrectScore >= 10) $ok = 1;
+    $ok = ($idx === $correctIndex && $correctIndex >= 0) ? 1 : 0;
+    if (!$ok && $groups && best_alias_score($transcript, $groups) >= 10) {
+        $ok = 1;
     }
 
     return [
@@ -503,31 +543,36 @@ function grade_mcq(string $transcript, array $correct, array $options): array {
     ];
 }
 
-function grade_open_with_ai(array $item, string $transcript): array {
+function grade_open_with_ai(array $item, string $transcript): array
+{
     global $pdo;
 
     $correct = json_decode((string)($item['correct_json'] ?? '{}'), true) ?: [];
     $keyPoints = $correct['key_points'] ?? [];
-    if (!is_array($keyPoints)) $keyPoints = [];
+    if (!is_array($keyPoints)) {
+        $keyPoints = [];
+    }
 
     $aliasGroups = build_alias_groups($correct, $keyPoints);
 
     $minPts = (int)($correct['min_points_to_pass'] ?? 2);
-    if ($minPts < 1) $minPts = 1;
+    if ($minPts < 1) {
+        $minPts = 1;
+    }
 
     $schema = [
-        "type" => "object",
-        "additionalProperties" => false,
-        "properties" => [
-            "score_points" => ["type" => "integer"],
-            "max_points"   => ["type" => "integer"],
-            "is_correct"   => ["type" => "boolean"],
-            "feedback"     => ["type" => "string"]
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'score_points' => ['type' => 'integer'],
+            'max_points'   => ['type' => 'integer'],
+            'is_correct'   => ['type' => 'boolean'],
+            'feedback'     => ['type' => 'string']
         ],
-        "required" => ["score_points", "max_points", "is_correct", "feedback"]
+        'required' => ['score_points', 'max_points', 'is_correct', 'feedback']
     ];
 
-    $openGradeSystemFallback = <<<'TXT'
+    $systemFallback = <<<'TXT'
 Grade like a supportive but standards-based flight instructor during an oral progress check.
 
 Rules:
@@ -549,7 +594,7 @@ Rules:
 - Strong partial credit should be common for operationally correct but incomplete oral answers.
 TXT;
 
-    $openGradeUserFallback = <<<'TXT'
+    $userFallback = <<<'TXT'
 QUESTION:
 {{QUESTION}}
 
@@ -565,49 +610,27 @@ STUDENT TRANSCRIPT:
 {{TRANSCRIPT}}
 TXT;
 
-    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_open_grading_system', $openGradeSystemFallback);
-    $userPromptTemplate = ai_prompt_fetch($pdo, 'progress_test_open_grading_user', $openGradeUserFallback);
+    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_open_grading_system', $systemFallback);
+    $userTemplate = ai_prompt_fetch($pdo, 'progress_test_open_grading_user', $userFallback);
 
-    $keyPointsBullets = implode("\n- ", $keyPoints);
-    $userPrompt = strtr($userPromptTemplate, [
-        '{{QUESTION}}' => (string)$item['prompt'],
-        '{{KEY_POINTS_BULLETS}}' => $keyPointsBullets,
-        '{{ALIAS_GROUPS_JSON}}' => json_encode($aliasGroups, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-        '{{MIN_POINTS_TO_PASS}}' => (string)$minPts,
-        '{{TRANSCRIPT}}' => $transcript
+    $userPrompt = strtr($userTemplate, [
+        '{{QUESTION}}'             => (string)$item['prompt'],
+        '{{KEY_POINTS_BULLETS}}'   => implode("\n- ", $keyPoints),
+        '{{ALIAS_GROUPS_JSON}}'    => json_encode($aliasGroups, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        '{{MIN_POINTS_TO_PASS}}'   => (string)$minPts,
+        '{{TRANSCRIPT}}'           => $transcript,
     ]);
 
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            ["role" => "system", "content" => [
-                ["type" => "input_text", "text" => $systemPrompt]
-            ]],
-            ["role" => "user", "content" => [
-                ["type" => "input_text", "text" => $userPrompt]
-            ]]
-        ],
-        "text" => [
-            "format" => [
-                "type"   => "json_schema",
-                "name"   => "open_grade_v3",
-                "schema" => $schema,
-                "strict" => true
-            ]
-        ],
-        "temperature" => 0.1
-    ];
-
-    $resp = cw_openai_responses($payload);
-    $j = cw_openai_extract_json_text($resp);
+    $j = ai_json_schema_call($systemPrompt, $userPrompt, $schema, 'open_grade_v3', 0.1);
 
     $maxPoints = max(1, count($keyPoints));
     $scorePoints = (int)($j['score_points'] ?? 0);
     $returnedMax = (int)($j['max_points'] ?? $maxPoints);
-    if ($returnedMax > 0) $maxPoints = max($maxPoints, $returnedMax);
+    if ($returnedMax > 0) {
+        $maxPoints = max($maxPoints, $returnedMax);
+    }
 
-    if ($scorePoints < 0) $scorePoints = 0;
-    if ($scorePoints > $maxPoints) $scorePoints = $maxPoints;
+    $scorePoints = max(0, min($scorePoints, $maxPoints));
 
     $aliasHits = 0;
     foreach ($aliasGroups as $grp) {
@@ -626,7 +649,9 @@ TXT;
     }
 
     $isCorrect = !empty($j['is_correct']) ? 1 : 0;
-    if ($scorePoints >= $minPts) $isCorrect = 1;
+    if ($scorePoints >= $minPts) {
+        $isCorrect = 1;
+    }
 
     return [
         'is_correct'   => $isCorrect,
@@ -636,18 +661,19 @@ TXT;
     ];
 }
 
-function is_full_url(string $s): bool {
-    return (bool)preg_match('~^https?://~i', $s);
+function is_full_url(string $value): bool
+{
+    return (bool)preg_match('~^https?://~i', $value);
 }
 
-function spaces_public_url_for_path(string $path): string {
-    $cdn = rtrim(env_required('SPACES_CDN'), '/');
-    return $cdn . '/' . ltrim($path, '/');
+function spaces_public_url_for_path(string $path): string
+{
+    return rtrim(env_required('SPACES_CDN'), '/') . '/' . ltrim($path, '/');
 }
 
-function download_to_temp(string $url, string $outfile): bool {
+function download_to_temp(string $url, string $outfile): bool
+{
     $ch = curl_init($url);
-
     curl_setopt_array($ch, [
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_TIMEOUT => 180,
@@ -676,16 +702,9 @@ function download_to_temp(string $url, string $outfile): bool {
     return true;
 }
 
-function read_json_body(): array {
-    $raw = file_get_contents('php://input');
-    $j = json_decode($raw, true);
-    return is_array($j) ? $j : [];
-}
-
-function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $payload): array {
-    $url = 'https://ipca.training/student/api/progress_test_spaces_presign.php';
-
-    $ch = curl_init($url);
+function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $payload): array
+{
+    $ch = curl_init('https://ipca.training/student/api/progress_test_spaces_presign.php');
     curl_setopt_array($ch, [
         CURLOPT_POST => true,
         CURLOPT_RETURNTRANSFER => true,
@@ -697,24 +716,25 @@ function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $p
         CURLOPT_TIMEOUT => 60
     ]);
 
-    $out = curl_exec($ch);
+    $out  = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $err = curl_error($ch);
+    $err  = curl_error($ch);
     curl_close($ch);
 
     if ($out === false || $code < 200 || $code >= 300) {
         throw new RuntimeException("Presign request failed (HTTP {$code}) {$err} " . substr((string)$out, 0, 300));
     }
 
-    $j = json_decode((string)$out, true);
-    if (!is_array($j) || empty($j['ok']) || empty($j['url']) || empty($j['public_url'])) {
+    $json = json_decode((string)$out, true);
+    if (!is_array($json) || empty($json['ok']) || empty($json['url']) || empty($json['public_url'])) {
         throw new RuntimeException('Invalid presign response');
     }
 
-    return $j;
+    return $json;
 }
 
-function upload_file_to_presigned_put(string $putUrl, string $localFile, string $contentType): void {
+function upload_file_to_presigned_put(string $putUrl, string $localFile, string $contentType): void
+{
     if (!is_file($localFile)) {
         throw new RuntimeException('Local file not found for upload: ' . $localFile);
     }
@@ -740,9 +760,9 @@ function upload_file_to_presigned_put(string $putUrl, string $localFile, string 
         CURLOPT_TIMEOUT => 300
     ]);
 
-    $out = curl_exec($ch);
+    $out  = curl_exec($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    $err = curl_error($ch);
+    $err  = curl_error($ch);
     curl_close($ch);
     fclose($fh);
 
@@ -751,20 +771,50 @@ function upload_file_to_presigned_put(string $putUrl, string $localFile, string 
     }
 }
 
+function grade_item(array $item, string $transcript): array
+{
+    $kind    = (string)$item['kind'];
+    $options = json_decode((string)($item['options_json'] ?? '[]'), true) ?: [];
+    $correct = json_decode((string)($item['correct_json'] ?? '{}'), true) ?: [];
+
+    if ($transcript === '[TIMEOUT]') {
+        return [
+            'is_correct'   => 0,
+            'score_points' => 0,
+            'max_points'   => ($kind === 'open') ? max(1, (int)($correct['min_points_to_pass'] ?? 2)) : 1,
+            'feedback'     => 'No answer recorded.'
+        ];
+    }
+
+    if ($kind === 'yesno') {
+        return grade_yesno($transcript, $correct);
+    }
+
+    if ($kind === 'mcq') {
+        return grade_mcq($transcript, $correct, $options);
+    }
+
+    return grade_open_with_ai($item, $transcript);
+}
 
 try {
     $u = cw_current_user($pdo);
     $role = (string)($u['role'] ?? '');
+
     if ($role !== 'student' && $role !== 'admin') {
         http_response_code(403);
         json_out(['ok' => false, 'error' => 'Forbidden']);
     }
 
     $data = read_json_body();
-    if (!$data) json_out(['ok' => false, 'error' => 'Invalid JSON']);
+    if (!$data) {
+        json_out(['ok' => false, 'error' => 'Invalid JSON']);
+    }
 
     $testId = (int)($data['test_id'] ?? 0);
-    if ($testId <= 0) json_out(['ok' => false, 'error' => 'Missing test_id']);
+    if ($testId <= 0) {
+        json_out(['ok' => false, 'error' => 'Missing test_id']);
+    }
 
     $userId = (int)($u['id'] ?? 0);
     if ($role === 'student') {
@@ -779,7 +829,9 @@ try {
     $tst = $pdo->prepare("SELECT * FROM progress_tests_v2 WHERE id=? LIMIT 1");
     $tst->execute([$testId]);
     $test = $tst->fetch(PDO::FETCH_ASSOC);
-    if (!$test) json_out(['ok' => false, 'error' => 'Test not found']);
+    if (!$test) {
+        json_out(['ok' => false, 'error' => 'Test not found']);
+    }
 
     $engine = new CoursewareProgressionV2($pdo);
 
@@ -787,9 +839,10 @@ try {
     $cohortId = (int)($test['cohort_id'] ?? 0);
     $lessonId = (int)($test['lesson_id'] ?? 0);
 
-    $apiKey = getenv('OPENAI_API_KEY');
-    if (!$apiKey) $apiKey = getenv('CW_OPENAI_API_KEY');
-    if (!$apiKey) throw new RuntimeException('Missing OPENAI_API_KEY');
+    $apiKey = getenv('OPENAI_API_KEY') ?: getenv('CW_OPENAI_API_KEY');
+    if (!$apiKey) {
+        throw new RuntimeException('Missing OPENAI_API_KEY');
+    }
 
     $ttsModel = getenv('CW_OPENAI_TTS_MODEL') ?: 'gpt-4o-mini-tts';
     $ttsVoice = getenv('CW_OPENAI_TTS_VOICE') ?: 'marin';
@@ -799,14 +852,16 @@ try {
     $itemsSt = $pdo->prepare("SELECT * FROM progress_test_items_v2 WHERE test_id=? ORDER BY idx ASC");
     $itemsSt->execute([$testId]);
     $items = $itemsSt->fetchAll(PDO::FETCH_ASSOC);
-    if (!$items) json_out(['ok' => false, 'error' => 'No items found']);
+    if (!$items) {
+        json_out(['ok' => false, 'error' => 'No items found']);
+    }
 
     $tmpDir = test_dir($testId);
 
     $updItem = $pdo->prepare("
-      UPDATE progress_test_items_v2
-      SET transcript_text=?, is_correct=?, score_points=?, max_points=?, updated_at=NOW()
-      WHERE id=?
+        UPDATE progress_test_items_v2
+        SET transcript_text=?, is_correct=?, score_points=?, max_points=?, updated_at=NOW()
+        WHERE id=?
     ");
 
     $totalScore = 0;
@@ -814,39 +869,23 @@ try {
     $log = [];
 
     foreach ($items as $item) {
-        $kind = (string)$item['kind'];
-        $options = json_decode((string)($item['options_json'] ?? '[]'), true) ?: [];
-        $correct = json_decode((string)($item['correct_json'] ?? '{}'), true) ?: [];
         $audioRel = trim((string)($item['audio_path'] ?? ''));
         $transcript = trim((string)($item['transcript_text'] ?? ''));
 
-        if ($transcript === '') {
-            if ($audioRel !== '') {
-                $sourceUrl = is_full_url($audioRel) ? $audioRel : spaces_public_url_for_path($audioRel);
-                $localAudio = $tmpDir . '/answer_' . (int)$item['idx'] . '.webm';
+        if ($transcript === '' && $audioRel !== '') {
+            $sourceUrl = is_full_url($audioRel) ? $audioRel : spaces_public_url_for_path($audioRel);
+            $localAudio = $tmpDir . '/answer_' . (int)$item['idx'] . '.webm';
 
-                if (download_to_temp($sourceUrl, $localAudio)) {
-                    $transcript = transcribe_file($apiKey, $localAudio);
-                }
+            if (download_to_temp($sourceUrl, $localAudio)) {
+                $transcript = transcribe_file($apiKey, $localAudio);
             }
         }
 
-        if ($transcript === '') $transcript = '[NO AUDIO]';
-
-        if ($transcript === '[TIMEOUT]') {
-            $grade = [
-                'is_correct'   => 0,
-                'score_points' => 0,
-                'max_points'   => ($kind === 'open') ? max(1, (int)($correct['min_points_to_pass'] ?? 2)) : 1,
-                'feedback'     => 'No answer recorded.'
-            ];
-        } elseif ($kind === 'yesno') {
-            $grade = grade_yesno($transcript, $correct);
-        } elseif ($kind === 'mcq') {
-            $grade = grade_mcq($transcript, $correct, $options);
-        } else {
-            $grade = grade_open_with_ai($item, $transcript);
+        if ($transcript === '') {
+            $transcript = '[NO AUDIO]';
         }
+
+        $grade = grade_item($item, $transcript);
 
         $updItem->execute([
             $transcript,
@@ -861,7 +900,7 @@ try {
 
         $log[] = [
             'idx'          => (int)$item['idx'],
-            'kind'         => $kind,
+            'kind'         => (string)$item['kind'],
             'prompt'       => (string)$item['prompt'],
             'transcript'   => $transcript,
             'is_correct'   => (int)$grade['is_correct'],
@@ -871,15 +910,15 @@ try {
         ];
     }
 
-    $scorePct = ($totalMax > 0) ? (int)round(($totalScore / $totalMax) * 100) : 0;
+    $scorePct = $totalMax > 0 ? (int)round(($totalScore / $totalMax) * 100) : 0;
 
     $nq = $pdo->prepare("
-      SELECT s.page_number, e.narration_en
-      FROM slides s
-      JOIN slide_enrichment e ON e.slide_id = s.id
-      WHERE s.lesson_id=? AND s.is_deleted=0
-        AND e.narration_en IS NOT NULL AND e.narration_en <> ''
-      ORDER BY s.page_number ASC
+        SELECT s.page_number, e.narration_en
+        FROM slides s
+        JOIN slide_enrichment e ON e.slide_id = s.id
+        WHERE s.lesson_id=? AND s.is_deleted=0
+          AND e.narration_en IS NOT NULL AND e.narration_en <> ''
+        ORDER BY s.page_number ASC
     ");
     $nq->execute([$lessonId]);
     $nrows = $nq->fetchAll(PDO::FETCH_ASSOC);
@@ -888,41 +927,44 @@ try {
     foreach ($nrows as $r) {
         $pg = (int)($r['page_number'] ?? 0);
         $tx = trim((string)($r['narration_en'] ?? ''));
-        if ($tx !== '') $truthBlocks[] = "Slide {$pg}: {$tx}";
+        if ($tx !== '') {
+            $truthBlocks[] = "Slide {$pg}: {$tx}";
+        }
     }
-    $truthText = implode("\n\n", $truthBlocks);
-    if ($truthText === '') $truthText = "(No narration scripts available.)";
+    $truthText = $truthBlocks ? implode("\n\n", $truthBlocks) : '(No narration scripts available.)';
 
     $sq = $pdo->prepare("
-      SELECT summary_plain
-      FROM lesson_summaries
-      WHERE user_id=? AND cohort_id=? AND lesson_id=?
-      LIMIT 1
+        SELECT summary_plain
+        FROM lesson_summaries
+        WHERE user_id=? AND cohort_id=? AND lesson_id=?
+        LIMIT 1
     ");
     $sq->execute([$testOwnerUserId, $cohortId, $lessonId]);
     $summaryPlain = trim((string)($sq->fetchColumn() ?: ''));
-    if ($summaryPlain === '') $summaryPlain = "(No student summary.)";
+    if ($summaryPlain === '') {
+        $summaryPlain = '(No student summary.)';
+    }
 
-    $schema = [
-        "type" => "object",
-        "additionalProperties" => false,
-        "properties" => [
-            "written_debrief" => ["type" => "string"],
-            "spoken_debrief"  => ["type" => "string"],
-            "weak_areas"      => ["type" => "string"],
-            "summary_quality" => ["type" => "string"],
-            "summary_issues" => ["type" => "string"],
-            "summary_corrections" => ["type" => "string"],
-            "confirmed_misunderstandings" => ["type" => "string"]
+    $debriefSchema = [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'written_debrief'            => ['type' => 'string'],
+            'spoken_debrief'             => ['type' => 'string'],
+            'weak_areas'                 => ['type' => 'string'],
+            'summary_quality'            => ['type' => 'string'],
+            'summary_issues'             => ['type' => 'string'],
+            'summary_corrections'        => ['type' => 'string'],
+            'confirmed_misunderstandings'=> ['type' => 'string']
         ],
-        "required" => [
-            "written_debrief",
-            "spoken_debrief",
-            "weak_areas",
-            "summary_quality",
-            "summary_issues",
-            "summary_corrections",
-            "confirmed_misunderstandings"
+        'required' => [
+            'written_debrief',
+            'spoken_debrief',
+            'weak_areas',
+            'summary_quality',
+            'summary_issues',
+            'summary_corrections',
+            'confirmed_misunderstandings'
         ]
     ];
 
@@ -963,51 +1005,29 @@ TEST LOG JSON:
 {{TEST_LOG_JSON}}
 TXT;
 
-    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_debrief_system', $debriefSystemFallback);
-    $userPromptTemplate = ai_prompt_fetch($pdo, 'progress_test_debrief_user', $debriefUserFallback);
+    $debriefSystemPrompt = ai_prompt_fetch($pdo, 'progress_test_debrief_system', $debriefSystemFallback);
+    $debriefUserTemplate = ai_prompt_fetch($pdo, 'progress_test_debrief_user', $debriefUserFallback);
 
-    $userPrompt = strtr($userPromptTemplate, [
-        '{{SCORE}}' => (string)$scorePct,
-        '{{TRUTH_TEXT}}' => $truthText,
-        '{{SUMMARY_PLAIN}}' => $summaryPlain,
-        '{{TEST_LOG_JSON}}' => json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+    $debriefUserPrompt = strtr($debriefUserTemplate, [
+        '{{SCORE}}'          => (string)$scorePct,
+        '{{TRUTH_TEXT}}'     => $truthText,
+        '{{SUMMARY_PLAIN}}'  => $summaryPlain,
+        '{{TEST_LOG_JSON}}'  => json_encode($log, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
     ]);
 
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            ["role" => "system", "content" => [
-                ["type" => "input_text", "text" => $systemPrompt]
-            ]],
-            ["role" => "user", "content" => [
-                ["type" => "input_text", "text" => $userPrompt]
-            ]]
-        ],
-        "text" => [
-            "format" => [
-                "type"   => "json_schema",
-                "name"   => "debrief_v3",
-                "schema" => $schema,
-                "strict" => true
-            ]
-        ],
-        "temperature" => 0.2
-    ];
-
-    $written = "You completed the progress test. Review the areas below.";
-    $spoken  = "You completed the progress test. Please review the areas below.";
-    $weak    = "Review the items that were incomplete or uncertain.";
-    $summaryQuality = "Summary quality could not be fully assessed.";
-    $summaryIssues = "No specific summary issues were extracted.";
-    $summaryCorrections = "No specific summary corrections were generated.";
-    $confirmedMisunderstandings = "No repeated misunderstanding pattern was confirmed.";
+    $written = 'You completed the progress test. Review the areas below.';
+    $spoken  = 'You completed the progress test. Please review the areas below.';
+    $weak    = 'Review the items that were incomplete or uncertain.';
+    $summaryQuality = 'Summary quality could not be fully assessed.';
+    $summaryIssues = 'No specific summary issues were extracted.';
+    $summaryCorrections = 'No specific summary corrections were generated.';
+    $confirmedMisunderstandings = 'No repeated misunderstanding pattern was confirmed.';
 
     try {
-        $resp = cw_openai_responses($payload);
-        $j = cw_openai_extract_json_text($resp);
+        $j = ai_json_schema_call($debriefSystemPrompt, $debriefUserPrompt, $debriefSchema, 'debrief_v3', 0.2);
         $written = trim((string)($j['written_debrief'] ?? $written));
-        $spoken  = trim((string)($j['spoken_debrief'] ?? $spoken));
-        $weak    = trim((string)($j['weak_areas'] ?? $weak));
+        $spoken = trim((string)($j['spoken_debrief'] ?? $spoken));
+        $weak = trim((string)($j['weak_areas'] ?? $weak));
         $summaryQuality = trim((string)($j['summary_quality'] ?? $summaryQuality));
         $summaryIssues = trim((string)($j['summary_issues'] ?? $summaryIssues));
         $summaryCorrections = trim((string)($j['summary_corrections'] ?? $summaryCorrections));
@@ -1017,14 +1037,14 @@ TXT;
 
     $resultAudioLocal = $tmpDir . '/result.mp3';
     $name = trim((string)($u['name'] ?? 'student'));
-    if ($name === '') $name = 'student';
+    if ($name === '') {
+        $name = 'student';
+    }
+
     $resultSpeech = "Thank you {$name}. Your score is {$scorePct} percent. {$spoken}";
     tts_write_file($apiKey, $ttsModel, $ttsVoice, $resultSpeech, $resultAudioLocal);
 
-    $cookieHeader = '';
-    if (!empty($_SERVER['HTTP_COOKIE'])) {
-        $cookieHeader = (string)$_SERVER['HTTP_COOKIE'];
-    }
+    $cookieHeader = !empty($_SERVER['HTTP_COOKIE']) ? (string)$_SERVER['HTTP_COOKIE'] : '';
 
     $resultPresign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
         'test_id' => $testId,
@@ -1035,56 +1055,52 @@ TXT;
     $resultAudioUrl = (string)$resultPresign['public_url'];
 
     $finalizeResult = $engine->finalizeAssessedProgressTest($testId, [
-    'score_pct' => $scorePct,
-    'ai_summary' => $written,
-    'weak_areas' => $weak,
-    'debrief_spoken' => $spoken,
-    'summary_quality' => $summaryQuality,
-    'summary_issues' => $summaryIssues,
-    'summary_corrections' => $summaryCorrections,
-    'confirmed_misunderstandings' => $confirmedMisunderstandings,
-    'completed_at' => gmdate('Y-m-d H:i:s'),
-]);
+        'score_pct' => $scorePct,
+        'ai_summary' => $written,
+        'weak_areas' => $weak,
+        'debrief_spoken' => $spoken,
+        'summary_quality' => $summaryQuality,
+        'summary_issues' => $summaryIssues,
+        'summary_corrections' => $summaryCorrections,
+        'confirmed_misunderstandings' => $confirmedMisunderstandings,
+        'completed_at' => gmdate('Y-m-d H:i:s'),
+    ]);
 
-$classification = (array)($finalizeResult['classification'] ?? []);
-$activityState = (array)($finalizeResult['activity_state'] ?? []);
-$queuedEmailIds = (array)($finalizeResult['queued_email_ids'] ?? []);
+    $classification = (array)($finalizeResult['classification'] ?? []);
+    $activityState = (array)($finalizeResult['activity_state'] ?? []);
 
-$remediationTriggered = !empty($finalizeResult['remediation_triggered']);
-$instructorEscalationTriggered = !empty($finalizeResult['instructor_escalation_triggered']);
-
-$summaryStatus = (string)($activityState['summary_status'] ?? '');
-$testPassStatus = (string)($activityState['test_pass_status'] ?? '');
-$completionStatus = (string)($activityState['completion_status'] ?? '');
-
-json_out([
-    'ok' => true,
-    'test_id' => $testId,
-    'score_pct' => $scorePct,
-    'ai_summary' => $written,
-    'weak_areas' => $weak,
-    'summary_quality' => $summaryQuality,
-    'summary_issues' => $summaryIssues,
-    'summary_corrections' => $summaryCorrections,
-    'confirmed_misunderstandings' => $confirmedMisunderstandings,
-    'result_audio' => $resultAudioUrl,
-    'timing_status' => (string)($classification['timing_status'] ?? ''),
-    'formal_result_code' => (string)($classification['formal_result_code'] ?? ''),
-    'formal_result_label' => (string)($classification['formal_result_label'] ?? ''),
-    'pass_gate_met' => (int)($classification['pass_gate_met'] ?? 0),
-    'counts_as_unsat' => (int)($classification['counts_as_unsat'] ?? 0),
-    'remediation_triggered' => $remediationTriggered ? 1 : 0,
-    'instructor_escalation_triggered' => $instructorEscalationTriggered ? 1 : 0,
-    'activity_summary_status' => $summaryStatus,
-    'activity_test_pass_status' => $testPassStatus,
-    'activity_completion_status' => $completionStatus,
-    'automation_result' => $finalizeResult['automation_result'] ?? null
-]);
+    json_out([
+        'ok' => true,
+        'test_id' => $testId,
+        'score_pct' => $scorePct,
+        'ai_summary' => $written,
+        'weak_areas' => $weak,
+        'summary_quality' => $summaryQuality,
+        'summary_issues' => $summaryIssues,
+        'summary_corrections' => $summaryCorrections,
+        'confirmed_misunderstandings' => $confirmedMisunderstandings,
+        'result_audio' => $resultAudioUrl,
+        'timing_status' => (string)($classification['timing_status'] ?? ''),
+        'formal_result_code' => (string)($classification['formal_result_code'] ?? ''),
+        'formal_result_label' => (string)($classification['formal_result_label'] ?? ''),
+        'pass_gate_met' => (int)($classification['pass_gate_met'] ?? 0),
+        'counts_as_unsat' => (int)($classification['counts_as_unsat'] ?? 0),
+        'remediation_triggered' => !empty($finalizeResult['remediation_triggered']) ? 1 : 0,
+        'instructor_escalation_triggered' => !empty($finalizeResult['instructor_escalation_triggered']) ? 1 : 0,
+        'activity_summary_status' => (string)($activityState['summary_status'] ?? ''),
+        'activity_test_pass_status' => (string)($activityState['test_pass_status'] ?? ''),
+        'activity_completion_status' => (string)($activityState['completion_status'] ?? ''),
+        'automation_result' => $finalizeResult['automation_result'] ?? null
+    ]);
 
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
     }
+
     http_response_code(400);
-    json_out(['ok' => false, 'error' => $e->getMessage()]);
+    json_out([
+        'ok' => false,
+        'error' => $e->getMessage()
+    ]);
 }
