@@ -1889,7 +1889,8 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
 	
 	
 	
-public function evaluateProgressionDecision(array $context): array
+    
+	public function evaluateProgressionDecision(array $context): array
 {
     $activity = (array)($context['activity_state'] ?? []);
     $deadline = (array)($context['deadline_state'] ?? []);
@@ -2015,7 +2016,8 @@ public function evaluateProgressionDecision(array $context): array
         'summary_blocked' => $summaryBlocked,
     ];
 }
-
+	
+	
     public function computeLessonActivityProjection(array $context, array $decision): array
     {
         $userId = (int)$context['user_id'];
