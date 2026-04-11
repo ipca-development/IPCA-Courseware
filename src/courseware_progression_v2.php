@@ -504,543 +504,568 @@ final class CoursewareProgressionV2
     }
 
     public function handleMissedDeadlineForLesson(
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        ?int $progressTestId = null
-    ): array {
-        if ($this->pdo->inTransaction()) {
-            throw new RuntimeException('handleMissedDeadlineForLesson must own its transaction.');
-        }
+    int $userId,
+    int $cohortId,
+    int $lessonId,
+    ?int $progressTestId = null
+): array {
+    if ($this->pdo->inTransaction()) {
+        throw new RuntimeException('handleMissedDeadlineForLesson must own its transaction.');
+    }
 
-        $policy = $this->resolveEffectivePolicySet($cohortId);
-        $progressionContext = $this->getProgressionContextForUserLesson($userId, $cohortId, $lessonId);
-        $deadlineMeta = $this->getEffectiveDeadline($userId, $cohortId, $lessonId);
-        $deadlineState = $this->resolveDeadlineState($userId, $cohortId, $lessonId);
+    $policy = $this->resolveEffectivePolicySet($cohortId);
+    $progressionContext = $this->getProgressionContextForUserLesson($userId, $cohortId, $lessonId);
+    $deadlineMeta = $this->getEffectiveDeadline($userId, $cohortId, $lessonId);
+    $deadlineState = $this->resolveDeadlineState($userId, $cohortId, $lessonId);
 
-        $effectiveDeadlineUtc = (string)$deadlineMeta['effective_deadline_utc'];
-        $baseDeadlineUtc = (string)$deadlineMeta['base_deadline_utc'];
-        $deadlineSource = (string)$deadlineMeta['deadline_source'];
+    $effectiveDeadlineUtc = (string)$deadlineMeta['effective_deadline_utc'];
+    $baseDeadlineUtc = (string)$deadlineMeta['base_deadline_utc'];
+    $deadlineSource = (string)$deadlineMeta['deadline_source'];
+    $effectiveDeadlineDisplay = $this->formatUtcForDisplay($effectiveDeadlineUtc);
+    $baseDeadlineDisplay = $this->formatUtcForDisplay($baseDeadlineUtc);
 
-        if (empty($deadlineState['deadline_passed'])) {
-            return [
-                'ok' => true,
-                'handled' => false,
-                'reason' => 'deadline_not_passed',
-                'deadline_state' => $deadlineState,
-            ];
-        }
-
-        if ($this->isLessonCompletedForDeadlinePurposes($userId, $cohortId, $lessonId)) {
-            return [
-                'ok' => true,
-                'handled' => false,
-                'reason' => 'lesson_already_completed',
-                'deadline_state' => $deadlineState,
-            ];
-        }
-
-        $pendingReasonAction = $this->getPendingRequiredAction(
-            $userId,
-            $cohortId,
-            $lessonId,
-            'deadline_reason_submission'
-        );
-
-        if ($pendingReasonAction) {
-            return [
-                'ok' => true,
-                'handled' => true,
-                'action_taken' => 'existing_reason_action_reused',
-                'required_action' => $pendingReasonAction,
-                'required_action_url' => $this->buildInternalAppUrl(
-                    '/student/remediation_action.php?token=' . urlencode((string)$pendingReasonAction['token'])
-                ),
-                'deadline_state' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
-            ];
-        }
-
-        $pendingInstructorAction = $this->getPendingRequiredAction(
-            $userId,
-            $cohortId,
-            $lessonId,
-            'instructor_approval'
-        );
-
-        if ($pendingInstructorAction) {
-            return [
-                'ok' => true,
-                'handled' => true,
-                'action_taken' => 'existing_instructor_action_reused',
-                'required_action' => $pendingInstructorAction,
-                'required_action_url' => $this->buildInternalAppUrl(
-                    '/instructor/instructor_approval.php?token=' . urlencode((string)$pendingInstructorAction['token'])
-                ),
-                'deadline_state' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
-            ];
-        }
-
-        $allowFirstAutomaticExtension = !empty($this->resolveProgressionPolicyValue(
-            $policy,
-            'allow_first_deadline_extension_automatic',
-            [],
-            true
-        ));
-
-        $extension1Hours = (int)$this->resolveProgressionPolicyValue(
-            $policy,
-            'deadline_extension_1_hours',
-            [],
-            48
-        );
-
-        $extension2Hours = (int)$this->resolveProgressionPolicyValue(
-            $policy,
-            'deadline_extension_2_hours',
-            [],
-            48
-        );
-
-        $requireReasonAfterExtension1Missed = !empty($this->resolveProgressionPolicyValue(
-            $policy,
-            'require_reason_after_extension_1_missed',
-            [],
-            true
-        ));
-
-        $maxProgramDeadlineExtensionsBeforeInstructorEscalation = (int)$this->resolveProgressionPolicyValue(
-            $policy,
-            'max_program_deadline_extensions_before_instructor_escalation',
-            [],
-            0
-        );
-
-        $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview = (int)$this->resolveProgressionPolicyValue(
-            $policy,
-            'max_program_deadline_extensions_before_training_suspension_review',
-            [],
-            0
-        );
-
-        if ($extension1Hours <= 0) {
-            $extension1Hours = 48;
-        }
-        if ($extension2Hours <= 0) {
-            $extension2Hours = 48;
-        }
-
-        $lessonExtensionCountBefore = $this->countDeadlineExtensionsForLesson($userId, $cohortId, $lessonId);
-        $programExtensionCountBefore = $this->countDeadlineExtensionsForProgram($userId, $cohortId);
-
-        $forceInstructorEscalationByProgramLimit =
-            $maxProgramDeadlineExtensionsBeforeInstructorEscalation > 0
-            && $programExtensionCountBefore >= $maxProgramDeadlineExtensionsBeforeInstructorEscalation;
-
-        $trainingSuspensionReviewRecommended =
-            $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview > 0
-            && $programExtensionCountBefore >= $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview;
-
-        $studentRecipient = (array)($progressionContext['student_recipient'] ?? []);
-        $chiefRecipient = (array)($progressionContext['chief_instructor_recipient'] ?? []);
-
-        $studentName = trim((string)($studentRecipient['name'] ?? ''));
-        if ($studentName === '') {
-            $studentName = 'Student';
-        }
-
-        $lessonTitle = (string)($progressionContext['lesson_title'] ?? ('Lesson ' . $lessonId));
-        $cohortTitle = (string)($progressionContext['cohort_title'] ?? ('Cohort ' . $cohortId));
-
-        $nowUtc = gmdate('Y-m-d H:i:s');
-        $result = [];
-        $automationEventKey = '';
-        $automationContext = [];
-        $projectionResult = [];
-        $createdAction = null;
-        $createdActionUrl = '';
-        $newEffectiveDeadlineUtc = $effectiveDeadlineUtc;
-        $newDeadlineSource = $deadlineSource;
-
-        $this->pdo->beginTransaction();
-
-        try {
-            if (
-                !$forceInstructorEscalationByProgramLimit
-                && $lessonExtensionCountBefore === 0
-                && $allowFirstAutomaticExtension
-            ) {
-                $newEffectiveDeadlineUtc = gmdate(
-                    'Y-m-d H:i:s',
-                    strtotime($effectiveDeadlineUtc . ' +' . $extension1Hours . ' hours')
-                );
-
-                $this->replaceActiveDeadlineOverride([
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'override_type' => 'extension_1',
-                    'base_deadline_utc' => $baseDeadlineUtc,
-                    'new_deadline_utc' => $newEffectiveDeadlineUtc,
-                    'granted_reason_code' => 'automatic_deadline_miss_extension_1',
-                    'granted_reason_text' => 'Automatic extension 1 granted because the current effective deadline was missed.',
-                    'approval_source' => 'automatic_deadline_miss',
-                    'granted_by_user_id' => null,
-                ]);
-
-                $createdAction = $this->createOrReuseRequiredActionSafe(
-                    $this->buildDeadlineReasonRequiredActionData([
-                        'user_id' => $userId,
-                        'cohort_id' => $cohortId,
-                        'lesson_id' => $lessonId,
-                        'progress_test_id' => $progressTestId,
-                        'lesson_title' => $lessonTitle,
-                        'cohort_title' => $cohortTitle,
-                        'student_name' => $studentName,
-                        'old_effective_deadline_utc' => $effectiveDeadlineUtc,
-                        'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                        'warning_level' => 'standard',
-                    ])
-                );
-
-                $createdActionUrl = $this->buildInternalAppUrl(
-                    '/student/remediation_action.php?token=' . urlencode((string)($createdAction['action']['token'] ?? ''))
-                );
-
-                $projectionResult = $this->persistLessonActivityProjection(
-                    $userId,
-                    $cohortId,
-                    $lessonId,
-                    [
-                        'engine_projection' => true,
-                        'user_id' => $userId,
-                        'cohort_id' => $cohortId,
-                        'lesson_id' => $lessonId,
-                        'phase' => 'deadline_extension_1_granted',
-                        'fields' => [
-                            'effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                            'test_pass_status' => 'deadline_missed',
-                            'completion_status' => 'deadline_blocked',
-                            'last_state_eval_at' => $nowUtc,
-                        ],
-                    ]
-                );
-
-                $this->logProgressionEvent([
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => $progressTestId,
-                    'event_type' => 'deadline',
-                    'event_code' => 'deadline_extension_1_granted',
-                    'event_status' => 'warning',
-                    'actor_type' => 'system',
-                    'actor_user_id' => null,
-                    'event_time' => $nowUtc,
-                    'payload' => [
-                        'old_effective_deadline_utc' => $effectiveDeadlineUtc,
-                        'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                        'deadline_source_before' => $deadlineSource,
-                        'deadline_source_after' => 'student_extension_1',
-                        'lesson_extension_count_before' => $lessonExtensionCountBefore,
-                        'lesson_extension_count_after' => ($lessonExtensionCountBefore + 1),
-                        'program_extension_count_before' => $programExtensionCountBefore,
-                        'program_extension_count_after' => ($programExtensionCountBefore + 1),
-                        'required_action_id' => (int)($createdAction['action_id'] ?? 0),
-                    ],
-                    'legal_note' => 'Automatic deadline extension 1 granted and reason submission required.',
-                ]);
-
-                $automationEventKey = 'deadline_reason_required_extension_1';
-                $newDeadlineSource = 'student_extension_1';
-            } elseif (
-                !$forceInstructorEscalationByProgramLimit
-                && $lessonExtensionCountBefore === 1
-                && $requireReasonAfterExtension1Missed
-            ) {
-                $newEffectiveDeadlineUtc = gmdate(
-                    'Y-m-d H:i:s',
-                    strtotime($effectiveDeadlineUtc . ' +' . $extension2Hours . ' hours')
-                );
-
-                $this->replaceActiveDeadlineOverride([
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'override_type' => 'extension_2_final',
-                    'base_deadline_utc' => $baseDeadlineUtc,
-                    'new_deadline_utc' => $newEffectiveDeadlineUtc,
-                    'granted_reason_code' => 'automatic_deadline_miss_extension_2_final',
-                    'granted_reason_text' => 'Final automatic extension granted because extension 1 was also missed.',
-                    'approval_source' => 'automatic_deadline_miss',
-                    'granted_by_user_id' => null,
-                ]);
-
-                $createdAction = $this->createOrReuseRequiredActionSafe(
-                    $this->buildDeadlineReasonRequiredActionData([
-                        'user_id' => $userId,
-                        'cohort_id' => $cohortId,
-                        'lesson_id' => $lessonId,
-                        'progress_test_id' => $progressTestId,
-                        'lesson_title' => $lessonTitle,
-                        'cohort_title' => $cohortTitle,
-                        'student_name' => $studentName,
-                        'old_effective_deadline_utc' => $effectiveDeadlineUtc,
-                        'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                        'warning_level' => 'final_warning',
-                    ])
-                );
-
-                $createdActionUrl = $this->buildInternalAppUrl(
-                    '/student/remediation_action.php?token=' . urlencode((string)($createdAction['action']['token'] ?? ''))
-                );
-
-                $projectionResult = $this->persistLessonActivityProjection(
-                    $userId,
-                    $cohortId,
-                    $lessonId,
-                    [
-                        'engine_projection' => true,
-                        'user_id' => $userId,
-                        'cohort_id' => $cohortId,
-                        'lesson_id' => $lessonId,
-                        'phase' => 'deadline_extension_2_final_granted',
-                        'fields' => [
-                            'effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                            'test_pass_status' => 'deadline_missed',
-                            'completion_status' => 'deadline_blocked',
-                            'last_state_eval_at' => $nowUtc,
-                        ],
-                    ]
-                );
-
-                $this->logProgressionEvent([
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => $progressTestId,
-                    'event_type' => 'deadline',
-                    'event_code' => 'deadline_extension_2_final_granted',
-                    'event_status' => 'warning',
-                    'actor_type' => 'system',
-                    'actor_user_id' => null,
-                    'event_time' => $nowUtc,
-                    'payload' => [
-                        'old_effective_deadline_utc' => $effectiveDeadlineUtc,
-                        'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                        'deadline_source_before' => $deadlineSource,
-                        'deadline_source_after' => 'student_extension_2_final',
-                        'lesson_extension_count_before' => $lessonExtensionCountBefore,
-                        'lesson_extension_count_after' => ($lessonExtensionCountBefore + 1),
-                        'program_extension_count_before' => $programExtensionCountBefore,
-                        'program_extension_count_after' => ($programExtensionCountBefore + 1),
-                        'required_action_id' => (int)($createdAction['action_id'] ?? 0),
-                        'final_warning' => 1,
-                    ],
-                    'legal_note' => 'Final automatic deadline extension granted and stricter reason submission required.',
-                ]);
-
-                $automationEventKey = 'deadline_reason_required_extension_2_final';
-                $newDeadlineSource = 'student_extension_2_final';
-            } else {
-                $token = bin2hex(random_bytes(32));
-
-                $createdAction = $this->createOrReuseRequiredActionSafe([
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => $progressTestId,
-                    'action_type' => 'instructor_approval',
-                    'token' => $token,
-                    'title' => 'Instructor Approval Required - Missed Deadline - ' . $lessonTitle,
-                    'instructions_text' => "The student missed the final allowed deadline for this lesson. Instructor review is now required before further progression.",
-                    'instructions_html' => '<p>The student missed the final allowed deadline for this lesson. Instructor review is now required before further progression.</p>',
-                ]);
-
-                $createdActionUrl = $this->buildInternalAppUrl(
-                    '/instructor/instructor_approval.php?token=' . urlencode((string)($createdAction['action']['token'] ?? ''))
-                );
-
-                $projectionFields = [
-                    'test_pass_status' => 'deadline_missed',
-                    'completion_status' => 'instructor_required',
-                    'latest_instructor_action_id' => (int)($createdAction['action_id'] ?? 0),
-                    'last_state_eval_at' => $nowUtc,
-                ];
-
-                if ($trainingSuspensionReviewRecommended) {
-                    $projectionFields['training_suspended'] = 0;
-                }
-
-                $projectionResult = $this->persistLessonActivityProjection(
-                    $userId,
-                    $cohortId,
-                    $lessonId,
-                    [
-                        'engine_projection' => true,
-                        'user_id' => $userId,
-                        'cohort_id' => $cohortId,
-                        'lesson_id' => $lessonId,
-                        'phase' => 'deadline_instructor_escalation_required',
-                        'fields' => $projectionFields,
-                    ]
-                );
-
-                $this->logProgressionEvent([
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => $progressTestId,
-                    'event_type' => 'deadline',
-                    'event_code' => 'deadline_instructor_escalation_required',
-                    'event_status' => 'warning',
-                    'actor_type' => 'system',
-                    'actor_user_id' => null,
-                    'event_time' => $nowUtc,
-                    'payload' => [
-                        'effective_deadline_utc' => $effectiveDeadlineUtc,
-                        'deadline_source' => $deadlineSource,
-                        'lesson_extension_count_before' => $lessonExtensionCountBefore,
-                        'program_extension_count_before' => $programExtensionCountBefore,
-                        'force_instructor_escalation_by_program_limit' => $forceInstructorEscalationByProgramLimit ? 1 : 0,
-                        'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
-                        'required_action_id' => (int)($createdAction['action_id'] ?? 0),
-                    ],
-                    'legal_note' => 'Instructor intervention required because automatic deadline extension path is exhausted or program deadline extension limit is reached.',
-                ]);
-
-                $automationEventKey = 'deadline_missed_instructor_required';
-            }
-
-            $this->pdo->commit();
-        } catch (Throwable $e) {
-            $this->pdo->rollBack();
-            throw $e;
-        }
-
-        $automationContext = [
-            'user_id' => $userId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => $progressTestId,
-
-            'student_name' => $studentName,
-            'student_email' => trim((string)($studentRecipient['email'] ?? '')),
-            'chief_instructor_name' => trim((string)($chiefRecipient['name'] ?? '')),
-            'chief_instructor_email' => trim((string)($chiefRecipient['email'] ?? '')),
-
-            'lesson_title' => $lessonTitle,
-            'cohort_title' => $cohortTitle,
-
-            'base_deadline_utc' => $baseDeadlineUtc,
-            'old_effective_deadline_utc' => $effectiveDeadlineUtc,
-            'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
-            'effective_deadline_utc' => $newEffectiveDeadlineUtc,
-            'deadline_source_before' => $deadlineSource,
-            'deadline_source_after' => $newDeadlineSource,
-
-            'lesson_extension_count_before' => $lessonExtensionCountBefore,
-            'lesson_extension_count_after' => $createdAction && $automationEventKey !== 'deadline_missed_instructor_required'
-                ? ($lessonExtensionCountBefore + 1)
-                : $lessonExtensionCountBefore,
-
-            'program_extension_count_before' => $programExtensionCountBefore,
-            'program_extension_count_after' => $createdAction && $automationEventKey !== 'deadline_missed_instructor_required'
-                ? ($programExtensionCountBefore + 1)
-                : $programExtensionCountBefore,
-
-            'max_program_deadline_extensions_before_instructor_escalation' => $maxProgramDeadlineExtensionsBeforeInstructorEscalation,
-            'max_program_deadline_extensions_before_training_suspension_review' => $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview,
-            'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
-
-            'required_action_id' => (int)($createdAction['action_id'] ?? 0),
-            'reason_submission_url' => $createdActionUrl,
-            'approval_url' => $automationEventKey === 'deadline_missed_instructor_required' ? $createdActionUrl : '',
+    if (empty($deadlineState['deadline_passed'])) {
+        return [
+            'ok' => true,
+            'handled' => false,
+            'reason' => 'deadline_not_passed',
+            'deadline_state' => $deadlineState,
         ];
+    }
 
-        $automationResult = null;
-        if ($automationEventKey !== '') {
-            $automationResult = $this->dispatchAutomationEventIfAvailable(
-                $automationEventKey,
-                $automationContext,
+    if ($this->isLessonCompletedForDeadlinePurposes($userId, $cohortId, $lessonId)) {
+        return [
+            'ok' => true,
+            'handled' => false,
+            'reason' => 'lesson_already_completed',
+            'deadline_state' => $deadlineState,
+        ];
+    }
+
+    $pendingReasonAction = $this->getPendingRequiredAction(
+        $userId,
+        $cohortId,
+        $lessonId,
+        'deadline_reason_submission'
+    );
+
+    if ($pendingReasonAction) {
+        return [
+            'ok' => true,
+            'handled' => true,
+            'action_taken' => 'existing_reason_action_reused',
+            'required_action' => $pendingReasonAction,
+            'required_action_url' => $this->buildInternalAppUrl(
+                '/student/remediation_action.php?token=' . urlencode((string)$pendingReasonAction['token'])
+            ),
+            'deadline_state' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
+        ];
+    }
+
+    $pendingInstructorAction = $this->getPendingRequiredAction(
+        $userId,
+        $cohortId,
+        $lessonId,
+        'instructor_approval'
+    );
+
+    if ($pendingInstructorAction) {
+        return [
+            'ok' => true,
+            'handled' => true,
+            'action_taken' => 'existing_instructor_action_reused',
+            'required_action' => $pendingInstructorAction,
+            'required_action_url' => $this->buildInternalAppUrl(
+                '/instructor/instructor_approval.php?token=' . urlencode((string)$pendingInstructorAction['token'])
+            ),
+            'deadline_state' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
+        ];
+    }
+
+    $allowFirstAutomaticExtension = !empty($this->resolveProgressionPolicyValue(
+        $policy,
+        'allow_first_deadline_extension_automatic',
+        [],
+        true
+    ));
+
+    $extension1Hours = (int)$this->resolveProgressionPolicyValue(
+        $policy,
+        'deadline_extension_1_hours',
+        [],
+        48
+    );
+
+    $extension2Hours = (int)$this->resolveProgressionPolicyValue(
+        $policy,
+        'deadline_extension_2_hours',
+        [],
+        48
+    );
+
+    $requireReasonAfterExtension1Missed = !empty($this->resolveProgressionPolicyValue(
+        $policy,
+        'require_reason_after_extension_1_missed',
+        [],
+        true
+    ));
+
+    $maxProgramDeadlineExtensionsBeforeInstructorEscalation = (int)$this->resolveProgressionPolicyValue(
+        $policy,
+        'max_program_deadline_extensions_before_instructor_escalation',
+        [],
+        0
+    );
+
+    $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview = (int)$this->resolveProgressionPolicyValue(
+        $policy,
+        'max_program_deadline_extensions_before_training_suspension_review',
+        [],
+        0
+    );
+
+    if ($extension1Hours <= 0) {
+        $extension1Hours = 48;
+    }
+    if ($extension2Hours <= 0) {
+        $extension2Hours = 48;
+    }
+
+    $lessonExtensionCountBefore = $this->countDeadlineExtensionsForLesson($userId, $cohortId, $lessonId);
+    $programExtensionCountBefore = $this->countDeadlineExtensionsForProgram($userId, $cohortId);
+
+    $forceInstructorEscalationByProgramLimit =
+        $maxProgramDeadlineExtensionsBeforeInstructorEscalation > 0
+        && $programExtensionCountBefore >= $maxProgramDeadlineExtensionsBeforeInstructorEscalation;
+
+    $trainingSuspensionReviewRecommended =
+        $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview > 0
+        && $programExtensionCountBefore >= $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview;
+
+    $studentRecipient = (array)($progressionContext['student_recipient'] ?? []);
+    $chiefRecipient = (array)($progressionContext['chief_instructor_recipient'] ?? []);
+
+    $studentName = trim((string)($studentRecipient['name'] ?? ''));
+    if ($studentName === '') {
+        $studentName = 'Student';
+    }
+
+    $lessonTitle = (string)($progressionContext['lesson_title'] ?? ('Lesson ' . $lessonId));
+    $cohortTitle = (string)($progressionContext['cohort_title'] ?? ('Cohort ' . $cohortId));
+
+    $nowUtc = gmdate('Y-m-d H:i:s');
+    $result = [];
+    $automationEventKey = '';
+    $automationContext = [];
+    $projectionResult = [];
+    $createdAction = null;
+    $createdActionUrl = '';
+    $newEffectiveDeadlineUtc = $effectiveDeadlineUtc;
+    $newEffectiveDeadlineDisplay = $effectiveDeadlineDisplay;
+    $newDeadlineSource = $deadlineSource;
+
+    $this->pdo->beginTransaction();
+
+    try {
+        if (
+            !$forceInstructorEscalationByProgramLimit
+            && $lessonExtensionCountBefore === 0
+            && $allowFirstAutomaticExtension
+        ) {
+            $newEffectiveDeadlineUtc = gmdate(
+                'Y-m-d H:i:s',
+                strtotime($effectiveDeadlineUtc . ' +' . $extension1Hours . ' hours')
+            );
+            $newEffectiveDeadlineDisplay = $this->formatUtcForDisplay($newEffectiveDeadlineUtc);
+
+            $this->replaceActiveDeadlineOverride([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'override_type' => 'extension_1',
+                'base_deadline_utc' => $baseDeadlineUtc,
+                'new_deadline_utc' => $newEffectiveDeadlineUtc,
+                'granted_reason_code' => 'automatic_deadline_miss_extension_1',
+                'granted_reason_text' => 'Automatic extension 1 granted because the current effective deadline was missed.',
+                'approval_source' => 'automatic_deadline_miss',
+                'granted_by_user_id' => null,
+            ]);
+
+            $createdAction = $this->createOrReuseRequiredActionSafe(
+                $this->buildDeadlineReasonRequiredActionData([
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $progressTestId,
+                    'lesson_title' => $lessonTitle,
+                    'cohort_title' => $cohortTitle,
+                    'student_name' => $studentName,
+                    'old_effective_deadline_utc' => $effectiveDeadlineUtc,
+                    'old_effective_deadline_display' => $effectiveDeadlineDisplay,
+                    'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                    'new_effective_deadline_display' => $newEffectiveDeadlineDisplay,
+                    'warning_level' => 'standard',
+                ])
+            );
+
+            $createdActionUrl = $this->buildInternalAppUrl(
+                '/student/remediation_action.php?token=' . urlencode((string)($createdAction['action']['token'] ?? ''))
+            );
+
+            $projectionResult = $this->persistLessonActivityProjection(
                 $userId,
                 $cohortId,
                 $lessonId,
-                $progressTestId
+                [
+                    'engine_projection' => true,
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'phase' => 'deadline_extension_1_granted',
+                    'fields' => [
+                        'effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                        'test_pass_status' => 'deadline_missed',
+                        'completion_status' => 'deadline_blocked',
+                        'last_state_eval_at' => $nowUtc,
+                    ],
+                ]
             );
+
+            $this->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $progressTestId,
+                'event_type' => 'deadline',
+                'event_code' => 'deadline_extension_1_granted',
+                'event_status' => 'warning',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => $nowUtc,
+                'payload' => [
+                    'old_effective_deadline_utc' => $effectiveDeadlineUtc,
+                    'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                    'deadline_source_before' => $deadlineSource,
+                    'deadline_source_after' => 'student_extension_1',
+                    'lesson_extension_count_before' => $lessonExtensionCountBefore,
+                    'lesson_extension_count_after' => ($lessonExtensionCountBefore + 1),
+                    'program_extension_count_before' => $programExtensionCountBefore,
+                    'program_extension_count_after' => ($programExtensionCountBefore + 1),
+                    'required_action_id' => (int)($createdAction['action_id'] ?? 0),
+                ],
+                'legal_note' => 'Automatic deadline extension 1 granted and reason submission required.',
+            ]);
+
+            $automationEventKey = 'deadline_reason_required_extension_1';
+            $newDeadlineSource = 'student_extension_1';
+        } elseif (
+            !$forceInstructorEscalationByProgramLimit
+            && $lessonExtensionCountBefore === 1
+            && $requireReasonAfterExtension1Missed
+        ) {
+            $newEffectiveDeadlineUtc = gmdate(
+                'Y-m-d H:i:s',
+                strtotime($effectiveDeadlineUtc . ' +' . $extension2Hours . ' hours')
+            );
+            $newEffectiveDeadlineDisplay = $this->formatUtcForDisplay($newEffectiveDeadlineUtc);
+
+            $this->replaceActiveDeadlineOverride([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'override_type' => 'extension_2_final',
+                'base_deadline_utc' => $baseDeadlineUtc,
+                'new_deadline_utc' => $newEffectiveDeadlineUtc,
+                'granted_reason_code' => 'automatic_deadline_miss_extension_2_final',
+                'granted_reason_text' => 'Final automatic extension granted because extension 1 was also missed.',
+                'approval_source' => 'automatic_deadline_miss',
+                'granted_by_user_id' => null,
+            ]);
+
+            $createdAction = $this->createOrReuseRequiredActionSafe(
+                $this->buildDeadlineReasonRequiredActionData([
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $progressTestId,
+                    'lesson_title' => $lessonTitle,
+                    'cohort_title' => $cohortTitle,
+                    'student_name' => $studentName,
+                    'old_effective_deadline_utc' => $effectiveDeadlineUtc,
+                    'old_effective_deadline_display' => $effectiveDeadlineDisplay,
+                    'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                    'new_effective_deadline_display' => $newEffectiveDeadlineDisplay,
+                    'warning_level' => 'final_warning',
+                ])
+            );
+
+            $createdActionUrl = $this->buildInternalAppUrl(
+                '/student/remediation_action.php?token=' . urlencode((string)($createdAction['action']['token'] ?? ''))
+            );
+
+            $projectionResult = $this->persistLessonActivityProjection(
+                $userId,
+                $cohortId,
+                $lessonId,
+                [
+                    'engine_projection' => true,
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'phase' => 'deadline_extension_2_final_granted',
+                    'fields' => [
+                        'effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                        'test_pass_status' => 'deadline_missed',
+                        'completion_status' => 'deadline_blocked',
+                        'last_state_eval_at' => $nowUtc,
+                    ],
+                ]
+            );
+
+            $this->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $progressTestId,
+                'event_type' => 'deadline',
+                'event_code' => 'deadline_extension_2_final_granted',
+                'event_status' => 'warning',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => $nowUtc,
+                'payload' => [
+                    'old_effective_deadline_utc' => $effectiveDeadlineUtc,
+                    'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                    'deadline_source_before' => $deadlineSource,
+                    'deadline_source_after' => 'student_extension_2_final',
+                    'lesson_extension_count_before' => $lessonExtensionCountBefore,
+                    'lesson_extension_count_after' => ($lessonExtensionCountBefore + 1),
+                    'program_extension_count_before' => $programExtensionCountBefore,
+                    'program_extension_count_after' => ($programExtensionCountBefore + 1),
+                    'required_action_id' => (int)($createdAction['action_id'] ?? 0),
+                    'final_warning' => 1,
+                ],
+                'legal_note' => 'Final automatic deadline extension granted and stricter reason submission required.',
+            ]);
+
+            $automationEventKey = 'deadline_reason_required_extension_2_final';
+            $newDeadlineSource = 'student_extension_2_final';
+        } else {
+            $token = bin2hex(random_bytes(32));
+
+            $createdAction = $this->createOrReuseRequiredActionSafe([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $progressTestId,
+                'action_type' => 'instructor_approval',
+                'token' => $token,
+                'title' => 'Instructor Approval Required - Missed Deadline - ' . $lessonTitle,
+                'instructions_text' => "The student missed the final allowed deadline for this lesson. Instructor review is now required before further progression.",
+                'instructions_html' => '<p>The student missed the final allowed deadline for this lesson. Instructor review is now required before further progression.</p>',
+            ]);
+
+            $createdActionUrl = $this->buildInternalAppUrl(
+                '/instructor/instructor_approval.php?token=' . urlencode((string)($createdAction['action']['token'] ?? ''))
+            );
+
+            $projectionFields = [
+                'test_pass_status' => 'deadline_missed',
+                'completion_status' => 'instructor_required',
+                'latest_instructor_action_id' => (int)($createdAction['action_id'] ?? 0),
+                'last_state_eval_at' => $nowUtc,
+            ];
+
+            if ($trainingSuspensionReviewRecommended) {
+                $projectionFields['training_suspended'] = 0;
+            }
+
+            $projectionResult = $this->persistLessonActivityProjection(
+                $userId,
+                $cohortId,
+                $lessonId,
+                [
+                    'engine_projection' => true,
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'phase' => 'deadline_instructor_escalation_required',
+                    'fields' => $projectionFields,
+                ]
+            );
+
+            $this->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $progressTestId,
+                'event_type' => 'deadline',
+                'event_code' => 'deadline_instructor_escalation_required',
+                'event_status' => 'warning',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => $nowUtc,
+                'payload' => [
+                    'effective_deadline_utc' => $effectiveDeadlineUtc,
+                    'deadline_source' => $deadlineSource,
+                    'lesson_extension_count_before' => $lessonExtensionCountBefore,
+                    'program_extension_count_before' => $programExtensionCountBefore,
+                    'force_instructor_escalation_by_program_limit' => $forceInstructorEscalationByProgramLimit ? 1 : 0,
+                    'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
+                    'required_action_id' => (int)($createdAction['action_id'] ?? 0),
+                ],
+                'legal_note' => 'Instructor intervention required because automatic deadline extension path is exhausted or program deadline extension limit is reached.',
+            ]);
+
+            $automationEventKey = 'deadline_missed_instructor_required';
         }
 
-        $result = [
-            'ok' => true,
-            'handled' => true,
-            'action_taken' => $automationEventKey,
-            'required_action' => $createdAction['action'] ?? null,
-            'required_action_url' => $createdActionUrl,
-            'projection_result' => $projectionResult,
-            'automation_event_key' => $automationEventKey,
-            'automation_result' => $automationResult,
-            'deadline_state_before' => $deadlineState,
-            'deadline_state_after' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
-            'lesson_extension_count_before' => $lessonExtensionCountBefore,
-            'program_extension_count_before' => $programExtensionCountBefore,
-            'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
-        ];
-
-        return $result;
+        $this->pdo->commit();
+    } catch (Throwable $e) {
+        $this->pdo->rollBack();
+        throw $e;
     }
+
+    $automationContext = [
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'progress_test_id' => $progressTestId,
+
+        'student_name' => $studentName,
+        'student_email' => trim((string)($studentRecipient['email'] ?? '')),
+        'chief_instructor_name' => trim((string)($chiefRecipient['name'] ?? '')),
+        'chief_instructor_email' => trim((string)($chiefRecipient['email'] ?? '')),
+
+        'lesson_title' => $lessonTitle,
+        'cohort_title' => $cohortTitle,
+
+        'base_deadline_utc' => $baseDeadlineUtc,
+        'base_deadline_display' => $baseDeadlineDisplay,
+        'old_effective_deadline_utc' => $effectiveDeadlineUtc,
+        'old_effective_deadline_display' => $effectiveDeadlineDisplay,
+        'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
+        'new_effective_deadline_display' => $newEffectiveDeadlineDisplay,
+        'effective_deadline_utc' => $newEffectiveDeadlineUtc,
+        'effective_deadline_display' => $newEffectiveDeadlineDisplay,
+        'deadline_source_before' => $deadlineSource,
+        'deadline_source_after' => $newDeadlineSource,
+
+        'lesson_extension_count_before' => $lessonExtensionCountBefore,
+        'lesson_extension_count_after' => $createdAction && $automationEventKey !== 'deadline_missed_instructor_required'
+            ? ($lessonExtensionCountBefore + 1)
+            : $lessonExtensionCountBefore,
+
+        'program_extension_count_before' => $programExtensionCountBefore,
+        'program_extension_count_after' => $createdAction && $automationEventKey !== 'deadline_missed_instructor_required'
+            ? ($programExtensionCountBefore + 1)
+            : $programExtensionCountBefore,
+
+        'max_program_deadline_extensions_before_instructor_escalation' => $maxProgramDeadlineExtensionsBeforeInstructorEscalation,
+        'max_program_deadline_extensions_before_training_suspension_review' => $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview,
+        'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
+
+        'required_action_id' => (int)($createdAction['action_id'] ?? 0),
+        'reason_submission_url' => $createdActionUrl,
+        'approval_url' => $automationEventKey === 'deadline_missed_instructor_required' ? $createdActionUrl : '',
+    ];
+
+    $automationResult = null;
+    if ($automationEventKey !== '') {
+        $automationResult = $this->dispatchAutomationEventIfAvailable(
+            $automationEventKey,
+            $automationContext,
+            $userId,
+            $cohortId,
+            $lessonId,
+            $progressTestId
+        );
+    }
+
+    $result = [
+        'ok' => true,
+        'handled' => true,
+        'action_taken' => $automationEventKey,
+        'required_action' => $createdAction['action'] ?? null,
+        'required_action_url' => $createdActionUrl,
+        'projection_result' => $projectionResult,
+        'automation_event_key' => $automationEventKey,
+        'automation_result' => $automationResult,
+        'deadline_state_before' => $deadlineState,
+        'deadline_state_after' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
+        'lesson_extension_count_before' => $lessonExtensionCountBefore,
+        'program_extension_count_before' => $programExtensionCountBefore,
+        'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
+    ];
+
+    return $result;
+}
 
     private function buildDeadlineReasonRequiredActionData(array $data): array
-    {
-        $userId = (int)$data['user_id'];
-        $cohortId = (int)$data['cohort_id'];
-        $lessonId = (int)$data['lesson_id'];
-        $progressTestId = isset($data['progress_test_id']) ? (int)$data['progress_test_id'] : null;
-        $lessonTitle = trim((string)($data['lesson_title'] ?? ('Lesson ' . $lessonId)));
-        $cohortTitle = trim((string)($data['cohort_title'] ?? ('Cohort ' . $cohortId)));
-        $studentName = trim((string)($data['student_name'] ?? 'Student'));
-        $oldEffectiveDeadlineUtc = trim((string)($data['old_effective_deadline_utc'] ?? ''));
-        $newEffectiveDeadlineUtc = trim((string)($data['new_effective_deadline_utc'] ?? ''));
-        $warningLevel = trim((string)($data['warning_level'] ?? 'standard'));
+{
+    $userId = (int)$data['user_id'];
+    $cohortId = (int)$data['cohort_id'];
+    $lessonId = (int)$data['lesson_id'];
+    $progressTestId = isset($data['progress_test_id']) ? (int)$data['progress_test_id'] : null;
+    $lessonTitle = trim((string)($data['lesson_title'] ?? ('Lesson ' . $lessonId)));
+    $cohortTitle = trim((string)($data['cohort_title'] ?? ('Cohort ' . $cohortId)));
+    $studentName = trim((string)($data['student_name'] ?? 'Student'));
 
-        $token = bin2hex(random_bytes(32));
+    $oldEffectiveDeadlineUtc = trim((string)($data['old_effective_deadline_utc'] ?? ''));
+    $oldEffectiveDeadlineDisplay = trim((string)($data['old_effective_deadline_display'] ?? ''));
+    $newEffectiveDeadlineUtc = trim((string)($data['new_effective_deadline_utc'] ?? ''));
+    $newEffectiveDeadlineDisplay = trim((string)($data['new_effective_deadline_display'] ?? ''));
 
-        $title = 'Action Required - Deadline Reason Submission - ' . $lessonTitle;
-
-        $warningHtml = '';
-        $warningText = '';
-
-        if ($warningLevel === 'final_warning') {
-            $warningHtml = '<p><strong>Important:</strong> this is your final automatic deadline extension for this lesson. If this deadline is missed again, instructor intervention will be required.</p>';
-            $warningText = "Important: this is your final automatic deadline extension for this lesson. If this deadline is missed again, instructor intervention will be required.\n\n";
-        }
-
-        $instructionsHtml =
-            '<p>Dear ' . $this->escapeHtml($studentName) . ',</p>'
-            . '<p>The deadline for <strong>' . $this->escapeHtml($lessonTitle) . '</strong> in <strong>' . $this->escapeHtml($cohortTitle) . '</strong> has been missed.</p>'
-            . '<p><strong>Previous effective deadline:</strong> ' . $this->escapeHtml($oldEffectiveDeadlineUtc) . '</p>'
-            . '<p><strong>New effective deadline:</strong> ' . $this->escapeHtml($newEffectiveDeadlineUtc) . '</p>'
-            . $warningHtml
-            . '<p>Please explain clearly why the deadline was missed, what the root cause was, and what you will do differently to prevent this from happening again.</p>';
-
-        $instructionsText =
-            'Dear ' . $studentName . ",\n\n"
-            . 'The deadline for "' . $lessonTitle . '" in "' . $cohortTitle . "\" has been missed.\n\n"
-            . 'Previous effective deadline: ' . $oldEffectiveDeadlineUtc . "\n"
-            . 'New effective deadline: ' . $newEffectiveDeadlineUtc . "\n\n"
-            . $warningText
-            . 'Please explain clearly why the deadline was missed, what the root cause was, and what you will do differently to prevent this from happening again.';
-
-        return [
-            'user_id' => $userId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => $progressTestId,
-            'action_type' => 'deadline_reason_submission',
-            'token' => $token,
-            'title' => $title,
-            'instructions_html' => $instructionsHtml,
-            'instructions_text' => $instructionsText,
-        ];
+    if ($oldEffectiveDeadlineDisplay === '') {
+        $oldEffectiveDeadlineDisplay = $this->formatUtcForDisplay($oldEffectiveDeadlineUtc);
     }
+    if ($newEffectiveDeadlineDisplay === '') {
+        $newEffectiveDeadlineDisplay = $this->formatUtcForDisplay($newEffectiveDeadlineUtc);
+    }
+
+    $warningLevel = trim((string)($data['warning_level'] ?? 'standard'));
+
+    $token = bin2hex(random_bytes(32));
+
+    $title = 'Action Required - Deadline Reason Submission - ' . $lessonTitle;
+
+    $warningHtml = '';
+    $warningText = '';
+
+    if ($warningLevel === 'final_warning') {
+        $warningHtml = '<p><strong>Important:</strong> this is your final automatic deadline extension for this lesson. If this deadline is missed again, instructor intervention will be required.</p>';
+        $warningText = "Important: this is your final automatic deadline extension for this lesson. If this deadline is missed again, instructor intervention will be required.\n\n";
+    }
+
+    $instructionsHtml =
+        $instructionsHtml =
+		'<p>Dear ' . $this->escapeHtml($studentName) . ',</p>'
+		. '<p>The deadline for <strong>' . $this->escapeHtml($lessonTitle) . '</strong> in <strong>' . $this->escapeHtml($cohortTitle) . '</strong> has been missed.</p>'
+		. '<p><strong>Previous effective deadline:</strong> ' . $this->escapeHtml($oldEffectiveDeadlineDisplay) . '</p>'
+		. '<p><strong>New effective deadline:</strong> ' . $this->escapeHtml($newEffectiveDeadlineDisplay) . '</p>'
+        . $warningHtml
+        . '<p>Please explain clearly why the deadline was missed, what the root cause was, and what you will do differently to prevent this from happening again.</p>';
+
+    $instructionsText =
+        'Dear ' . $studentName . ",\n\n"
+        . 'The deadline for "' . $lessonTitle . '" in "' . $cohortTitle . "\" has been missed.\n\n"
+        . 'Previous effective deadline: ' . $oldEffectiveDeadlineDisplay . "\n"
+		. 'New effective deadline: ' . $newEffectiveDeadlineDisplay . "\n\n"
+        . $warningText
+        . 'Please explain clearly why the deadline was missed, what the root cause was, and what you will do differently to prevent this from happening again.';
+
+    return [
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'progress_test_id' => $progressTestId,
+        'action_type' => 'deadline_reason_submission',
+        'token' => $token,
+        'title' => $title,
+        'instructions_html' => $instructionsHtml,
+        'instructions_text' => $instructionsText,
+    ];
+}
 
     private function replaceActiveDeadlineOverride(array $data): int
     {
@@ -4410,6 +4435,23 @@ public function buildNotificationDecision(array $progressionContext, array $deci
             . 'No student progression state, required actions, deadlines, or real notifications were changed.';
     }
 
+	
+	private function formatUtcForDisplay(?string $value): string
+{
+    $value = trim((string)$value);
+    if ($value === '') {
+        return '';
+    }
+
+    try {
+        $dt = new DateTime($value, new DateTimeZone('UTC'));
+        return $dt->format('D M j, Y, H:i') . ' UTC';
+    } catch (Throwable $e) {
+        return $value . ' UTC';
+    }
+}
+	
+	
     private function escapeHtml(string $value): string
     {
         return htmlspecialchars($value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
