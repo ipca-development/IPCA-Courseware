@@ -2085,8 +2085,8 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
     // STEP 1 — STRUCTURE VALIDATION (unchanged)
     // --------------------------------------------------
     if (empty($projection['engine_projection']) || !is_array($projection['fields'] ?? null)) {
-        throw new InvalidArgumentException('persistLessonActivityProjection only accepts canonical output from computeLessonActivityProjection().');
-    }
+    throw new InvalidArgumentException('persistLessonActivityProjection only accepts canonical output from computeLessonActivityProjection().');
+}
 
     // --------------------------------------------------
     // STEP 2 — CONSISTENCY GUARD (NEW — CORRECT POSITION)
