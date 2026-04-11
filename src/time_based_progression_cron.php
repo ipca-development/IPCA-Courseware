@@ -227,124 +227,202 @@ final class TimeBasedProgressionCron
             }
 
             foreach ($resolvedTriggers as $triggerEventKey) {
-                $result['dispatch_attempts']++;
+    $result['dispatch_attempts']++;
 
-                $effectiveDeadlineUtc = trim((string)($deadlineState['effective_deadline_utc'] ?? ''));
-                if ($effectiveDeadlineUtc === '') {
-                    $result['dispatch_state_mismatch_skipped']++;
-                    $result['trigger_results'][] = $this->logStateMismatch(
-                        $userId,
-                        $cohortId,
-                        $lessonId,
-                        $triggerEventKey,
-                        $candidateRow,
-                        $deadlineState
-                    );
-                    continue;
-                }
+    $effectiveDeadlineUtc = trim((string)($deadlineState['effective_deadline_utc'] ?? ''));
+    if ($effectiveDeadlineUtc === '') {
+        $result['dispatch_state_mismatch_skipped']++;
+        $result['trigger_results'][] = $this->logStateMismatch(
+            $userId,
+            $cohortId,
+            $lessonId,
+            $triggerEventKey,
+            $candidateRow,
+            $deadlineState
+        );
+        continue;
+    }
 
-                $dedupeKey = $this->buildDedupeKey(
-                    $triggerEventKey,
-                    $userId,
-                    $cohortId,
-                    $lessonId,
-                    $effectiveDeadlineUtc
-                );
+    $dedupeKey = $this->buildDedupeKey(
+        $triggerEventKey,
+        $userId,
+        $cohortId,
+        $lessonId,
+        $effectiveDeadlineUtc
+    );
 
-                if ($this->hasDispatchAlreadyOccurred($userId, $cohortId, $lessonId, $triggerEventKey, $dedupeKey)) {
-                    $result['dispatch_duplicates_skipped']++;
-                    $result['trigger_results'][] = $this->logSkippedDuplicate(
-                        $userId,
-                        $cohortId,
-                        $lessonId,
-                        $triggerEventKey,
-                        $dedupeKey,
-                        $effectiveDeadlineUtc
-                    );
-                    continue;
-                }
+    if ($this->hasDispatchAlreadyOccurred($userId, $cohortId, $lessonId, $triggerEventKey, $dedupeKey)) {
+        $result['dispatch_duplicates_skipped']++;
+        $result['trigger_results'][] = $this->logSkippedDuplicate(
+            $userId,
+            $cohortId,
+            $lessonId,
+            $triggerEventKey,
+            $dedupeKey,
+            $effectiveDeadlineUtc
+        );
+        continue;
+    }
 
-                $automationContext = $this->buildAutomationContext(
-                    $triggerEventKey,
-                    $dedupeKey,
-                    $progressionContext,
-                    $deadlineState,
-                    $attemptState
-                );
+    if ($triggerEventKey === 'deadline_passed') {
+        $this->engine->logProgressionEvent(array(
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => null,
+            'event_type' => 'deadline',
+            'event_code' => 'cron_deadline_passed_engine_before',
+            'event_status' => 'info',
+            'actor_type' => 'system',
+            'actor_user_id' => null,
+            'event_time' => gmdate('Y-m-d H:i:s'),
+            'payload' => array(
+                'event_key' => $triggerEventKey,
+                'dedupe_key' => $dedupeKey,
+                'effective_deadline_utc' => $effectiveDeadlineUtc,
+            ),
+            'legal_note' => 'Time-based progression cron is delegating canonical missed-deadline handling to CoursewareProgressionV2.',
+        ));
 
-                $this->engine->logProgressionEvent(array(
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null,
-                    'event_type' => 'automation',
-                    'event_code' => self::EVENT_CODE_DISPATCH_BEFORE,
-                    'event_status' => 'info',
-                    'actor_type' => 'system',
-                    'actor_user_id' => null,
-                    'event_time' => gmdate('Y-m-d H:i:s'),
-                    'payload' => array(
-                        'event_key' => $triggerEventKey,
-                        'dedupe_key' => $dedupeKey,
-                        'candidate' => array(
-                            'user_id' => $userId,
-                            'cohort_id' => $cohortId,
-                            'lesson_id' => $lessonId,
-                        ),
-                        'effective_deadline_utc' => $effectiveDeadlineUtc,
-                    ),
-                    'legal_note' => 'Time-based progression cron dispatch starting.',
-                ));
+        $engineResult = $this->engine->handleMissedDeadlineForLesson(
+            $userId,
+            $cohortId,
+            $lessonId,
+            null
+        );
 
-                $automationResult = $this->automation->dispatchEvent($this->pdo, $triggerEventKey, $automationContext);
+        $this->engine->logProgressionEvent(array(
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => null,
+            'event_type' => 'deadline',
+            'event_code' => 'cron_deadline_passed_engine_after',
+            'event_status' => 'info',
+            'actor_type' => 'system',
+            'actor_user_id' => null,
+            'event_time' => gmdate('Y-m-d H:i:s'),
+            'payload' => array(
+                'event_key' => $triggerEventKey,
+                'dedupe_key' => $dedupeKey,
+                'effective_deadline_utc' => $effectiveDeadlineUtc,
+                'engine_result' => $engineResult,
+            ),
+            'legal_note' => 'Time-based progression cron completed canonical missed-deadline handling through CoursewareProgressionV2.',
+        ));
 
-                $this->engine->logProgressionEvent(array(
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null,
-                    'event_type' => 'automation',
-                    'event_code' => self::EVENT_CODE_DISPATCH_AFTER,
-                    'event_status' => 'info',
-                    'actor_type' => 'system',
-                    'actor_user_id' => null,
-                    'event_time' => gmdate('Y-m-d H:i:s'),
-                    'payload' => array(
-                        'event_key' => $triggerEventKey,
-                        'dedupe_key' => $dedupeKey,
-                        'automation_result' => $automationResult,
-                    ),
-                    'legal_note' => 'Time-based progression cron dispatch completed.',
-                ));
+        $this->engine->logProgressionEvent(array(
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => null,
+            'event_type' => 'automation',
+            'event_code' => $this->getDedupeEventCodeForTrigger($triggerEventKey),
+            'event_status' => 'info',
+            'actor_type' => 'system',
+            'actor_user_id' => null,
+            'event_time' => gmdate('Y-m-d H:i:s'),
+            'payload' => array(
+                'event_key' => $triggerEventKey,
+                'dedupe_key' => $dedupeKey,
+                'effective_deadline_utc' => $effectiveDeadlineUtc,
+                'engine_handled' => 1,
+            ),
+            'legal_note' => 'Time-based progression cron recorded missed-deadline handling for dedupe after canonical engine processing.',
+        ));
 
-                $this->engine->logProgressionEvent(array(
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null,
-                    'event_type' => 'automation',
-                    'event_code' => $this->getDedupeEventCodeForTrigger($triggerEventKey),
-                    'event_status' => 'info',
-                    'actor_type' => 'system',
-                    'actor_user_id' => null,
-                    'event_time' => gmdate('Y-m-d H:i:s'),
-                    'payload' => array(
-                        'event_key' => $triggerEventKey,
-                        'dedupe_key' => $dedupeKey,
-                        'effective_deadline_utc' => $effectiveDeadlineUtc,
-                        'automation_result' => $automationResult,
-                    ),
-                    'legal_note' => 'Time-based progression cron dispatch recorded for dedupe.',
-                ));
+        $result['dispatch_successes']++;
+        $result['trigger_results'][] = array(
+            'event_key' => $triggerEventKey,
+            'dedupe_key' => $dedupeKey,
+            'status' => 'engine_handled',
+            'engine_result' => $engineResult,
+        );
 
-                $result['dispatch_successes']++;
-                $result['trigger_results'][] = array(
-                    'event_key' => $triggerEventKey,
-                    'dedupe_key' => $dedupeKey,
-                    'status' => 'dispatched',
-                    'automation_result' => $automationResult,
-                );
-            }
+        continue;
+    }
+
+    $automationContext = $this->buildAutomationContext(
+        $triggerEventKey,
+        $dedupeKey,
+        $progressionContext,
+        $deadlineState,
+        $attemptState
+    );
+
+    $this->engine->logProgressionEvent(array(
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'progress_test_id' => isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null,
+        'event_type' => 'automation',
+        'event_code' => self::EVENT_CODE_DISPATCH_BEFORE,
+        'event_status' => 'info',
+        'actor_type' => 'system',
+        'actor_user_id' => null,
+        'event_time' => gmdate('Y-m-d H:i:s'),
+        'payload' => array(
+            'event_key' => $triggerEventKey,
+            'dedupe_key' => $dedupeKey,
+            'candidate' => array(
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+            ),
+            'effective_deadline_utc' => $effectiveDeadlineUtc,
+        ),
+        'legal_note' => 'Time-based progression cron dispatch starting.',
+    ));
+
+    $automationResult = $this->automation->dispatchEvent($this->pdo, $triggerEventKey, $automationContext);
+
+    $this->engine->logProgressionEvent(array(
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'progress_test_id' => isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null,
+        'event_type' => 'automation',
+        'event_code' => self::EVENT_CODE_DISPATCH_AFTER,
+        'event_status' => 'info',
+        'actor_type' => 'system',
+        'actor_user_id' => null,
+        'event_time' => gmdate('Y-m-d H:i:s'),
+        'payload' => array(
+            'event_key' => $triggerEventKey,
+            'dedupe_key' => $dedupeKey,
+            'automation_result' => $automationResult,
+        ),
+        'legal_note' => 'Time-based progression cron dispatch completed.',
+    ));
+
+    $this->engine->logProgressionEvent(array(
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'progress_test_id' => isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null,
+        'event_type' => 'automation',
+        'event_code' => $this->getDedupeEventCodeForTrigger($triggerEventKey),
+        'event_status' => 'info',
+        'actor_type' => 'system',
+        'actor_user_id' => null,
+        'event_time' => gmdate('Y-m-d H:i:s'),
+        'payload' => array(
+            'event_key' => $triggerEventKey,
+            'dedupe_key' => $dedupeKey,
+            'effective_deadline_utc' => $effectiveDeadlineUtc,
+            'automation_result' => $automationResult,
+        ),
+        'legal_note' => 'Time-based progression cron dispatch recorded for dedupe.',
+    ));
+
+    $result['dispatch_successes']++;
+    $result['trigger_results'][] = array(
+        'event_key' => $triggerEventKey,
+        'dedupe_key' => $dedupeKey,
+        'status' => 'dispatched',
+        'automation_result' => $automationResult,
+    );
+}
         } catch (Throwable $e) {
             $result['errors'][] = array(
                 'user_id' => $userId,
