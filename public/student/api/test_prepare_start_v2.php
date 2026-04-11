@@ -79,7 +79,7 @@ try {
         json_ok(['ok' => false, 'error' => 'Invalid user']);
     }
 
-    $engine = new CoursewareProgressionV2($pdo);
+$engine = new CoursewareProgressionV2($pdo);
 
     if ($role === 'student') {
         $en = $pdo->prepare("
@@ -98,254 +98,75 @@ try {
         }
     }
 
-    $policy = $engine->getAllPolicies([
-        'cohort_id' => $cohortId
-    ]);
+    // IMPORTANT:
+    // Do not gate test start from lesson_activity projection fields.
+    // Always use CoursewareProgressionV2::prepareStartDecision() as the canonical source.
 
-    $summaryRequiredBeforeTestStart = !empty($policy['summary_required_before_test_start']);
-$initialAttemptLimit = (int)($policy['initial_attempt_limit'] ?? 3);
-$extraAttemptsAfterThresholdFail = (int)($policy['extra_attempts_after_threshold_fail'] ?? 2);
-$maxTotalAttemptsWithoutAdminOverride = (int)($policy['max_total_attempts_without_admin_override'] ?? 5);
-$thresholdAttemptForRemediationEmail = (int)($policy['threshold_attempt_for_remediation_email'] ?? 3);
+    $startDecision = $engine->prepareStartDecision($userId, $cohortId, $lessonId);
 
-if ($initialAttemptLimit <= 0) {
-    $initialAttemptLimit = 3;
-}
-if ($extraAttemptsAfterThresholdFail < 0) {
-    $extraAttemptsAfterThresholdFail = 0;
-}
-if ($maxTotalAttemptsWithoutAdminOverride <= 0) {
-    $maxTotalAttemptsWithoutAdminOverride = 5;
-}
-if ($thresholdAttemptForRemediationEmail <= 0) {
-    $thresholdAttemptForRemediationEmail = 3;
-}
+    if (!empty($startDecision['deadline_state']['deadline_passed'])) {
+    $deadlineHandleResult = $engine->handleMissedDeadlineForLesson($userId, $cohortId, $lessonId, null);
 
-/*
- * IMPORTANT:
- * Before remediation acknowledgement is completed, only the initial attempt block is available.
- * After remediation acknowledgement is completed, the student may use the extra attempts.
- */
-$baseMaxAllowedAttempts = min($initialAttemptLimit, $maxTotalAttemptsWithoutAdminOverride);
+    $requiredActionUrl = (string)($deadlineHandleResult['required_action_url'] ?? '');
+    $actionTaken = (string)($deadlineHandleResult['action_taken'] ?? '');
 
-$completedRemediation = $engine->getLatestCompletedRequiredAction(
-    $userId,
-    $cohortId,
-    $lessonId,
-    'remediation_acknowledgement'
-);
+    $message = 'The effective deadline for this lesson has passed. This progress test is currently blocked.';
 
-if ($completedRemediation !== null) {
-    $baseMaxAllowedAttempts = min(
-        $initialAttemptLimit + $extraAttemptsAfterThresholdFail,
-        $maxTotalAttemptsWithoutAdminOverride
-    );
-}
-
-$activityGateSt = $pdo->prepare("
-    SELECT
-        granted_extra_attempts,
-        one_on_one_required,
-        one_on_one_completed,
-        training_suspended
-    FROM lesson_activity
-    WHERE user_id = ?
-      AND cohort_id = ?
-      AND lesson_id = ?
-    LIMIT 1
-");
-$activityGateSt->execute([$userId, $cohortId, $lessonId]);
-$activityGate = $activityGateSt->fetch(PDO::FETCH_ASSOC) ?: [];
-
-$grantedExtraAttempts = max(0, (int)($activityGate['granted_extra_attempts'] ?? 0));
-$oneOnOneRequired = (int)($activityGate['one_on_one_required'] ?? 0);
-$oneOnOneCompleted = (int)($activityGate['one_on_one_completed'] ?? 0);
-$trainingSuspended = (int)($activityGate['training_suspended'] ?? 0);
-
-$maxAllowedAttempts = $baseMaxAllowedAttempts + $grantedExtraAttempts;
-
-    $summaryStatus = 'missing';
-
-    if ($summaryRequiredBeforeTestStart) {
-        $sum = $pdo->prepare("
-            SELECT
-                id,
-                review_status,
-                review_score,
-                summary_plain
-            FROM lesson_summaries
-            WHERE user_id = ?
-              AND cohort_id = ?
-              AND lesson_id = ?
-            LIMIT 1
-        ");
-        $sum->execute([$userId, $cohortId, $lessonId]);
-        $summaryRow = $sum->fetch(PDO::FETCH_ASSOC);
-
-        if (!$summaryRow) {
-            json_ok([
-                'ok' => false,
-                'error' => 'A lesson summary is required before the progress test can start.'
-            ]);
-        }
-
-        $summaryStatus = (string)($summaryRow['review_status'] ?? 'pending');
-
-        if ($summaryStatus !== 'acceptable') {
-            json_ok([
-                'ok' => false,
-                'error' => 'Your lesson summary must be acceptable before the progress test can start.'
-            ]);
-        }
-    } else {
-        $sum = $pdo->prepare("
-            SELECT review_status
-            FROM lesson_summaries
-            WHERE user_id = ?
-              AND cohort_id = ?
-              AND lesson_id = ?
-            LIMIT 1
-        ");
-        $sum->execute([$userId, $cohortId, $lessonId]);
-        $sumReview = $sum->fetchColumn();
-        if (is_string($sumReview) && $sumReview !== '') {
-            $summaryStatus = $sumReview;
-        }
+    if ($actionTaken === 'deadline_reason_required_extension_1') {
+        $message = 'The lesson deadline was missed. A deadline extension has been applied and your reason submission is now required.';
+    } elseif ($actionTaken === 'deadline_reason_required_extension_2_final') {
+        $message = 'The lesson deadline was missed again. A final deadline extension has been applied and your reason submission is now required.';
+    } elseif ($actionTaken === 'deadline_missed_instructor_required') {
+        $message = 'The lesson deadline path is exhausted. Instructor intervention is now required before progression can continue.';
+    } elseif ($actionTaken === 'existing_reason_action_reused') {
+        $message = 'A deadline reason submission is already pending for this lesson.';
+    } elseif ($actionTaken === 'existing_instructor_action_reused') {
+        $message = 'Instructor intervention is already pending for this lesson.';
     }
 
-/**
-     * NEW:
-     * Block further attempts until remediation acknowledgement is completed.
-     */
-    $pendingRemediation = $engine->getPendingRequiredAction(
-        $userId,
-        $cohortId,
-        $lessonId,
-        'remediation_acknowledgement'
-    );
+    http_response_code(409);
+    json_ok([
+        'ok' => false,
+        'blocked' => true,
+        'error' => $message,
+        'deadline_blocked' => true,
+        'deadline_action_taken' => $actionTaken,
+        'required_action_url' => $requiredActionUrl,
+        'deadline_handle_result' => $deadlineHandleResult,
+    ]);
+}
 
-    if ($pendingRemediation) {
+    if (empty($startDecision['allowed'])) {
+        http_response_code(409);
         json_ok([
             'ok' => false,
-            'error' => 'You must review and acknowledge the remediation instructions before additional attempts become available.'
+            'blocked' => true,
+            'error' => 'Progress test start blocked by progression rules.',
+            'decision' => $startDecision['decision'],
+            'deadline_state' => $startDecision['deadline_state'],
+            'summary_state' => $startDecision['summary_state'],
+            'attempt_state' => $startDecision['attempt_state'],
+            'required_actions' => $startDecision['required_actions'],
         ]);
     }
 
-    /**
-     * NEW:
-     * Block further attempts until deadline reason submission is completed.
-     */
-    $pendingDeadlineReason = $engine->getPendingRequiredAction(
-        $userId,
-        $cohortId,
-        $lessonId,
-        'deadline_reason_submission'
-    );
+    $summaryStatus = (string)($startDecision['summary_state']['summary_status'] ?? 'missing');
 
-    if ($pendingDeadlineReason) {
-        json_ok([
-            'ok' => false,
-            'error' => 'You must first submit the required deadline reason before the progress test can start.'
-        ]);
-    }
-
-    /**
-     * NEW:
-     * Block further attempts until instructor approval is completed.
-     */
-    $pendingInstructorApproval = $engine->getPendingRequiredAction(
-        $userId,
-        $cohortId,
-        $lessonId,
-        'instructor_approval'
-    );
-
-if ($pendingInstructorApproval) {
-    json_ok([
-        'ok' => false,
-        'error' => 'Further attempts are blocked pending instructor approval.'
-    ]);
-}
-
-if ($trainingSuspended === 1) {
-    json_ok([
-        'ok' => false,
-        'error' => 'Further attempts are blocked because training progression has been suspended.'
-    ]);
-}
-
-if ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
-    json_ok([
-        'ok' => false,
-        'error' => 'Further attempts are blocked until the required instructor session is completed.'
-    ]);
-}	
-	
-    $mx = $pdo->prepare("
-        SELECT MAX(attempt)
-        FROM progress_tests_v2
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id = ?
-    ");
-    $mx->execute([$userId, $cohortId, $lessonId]);
-    $attempt = (int)$mx->fetchColumn() + 1;
+    $attempt = (int)($startDecision['attempt_state']['next_attempt_number'] ?? 1);
     if ($attempt <= 0) {
         $attempt = 1;
     }
 
-    if ($attempt > $maxAllowedAttempts) {
-        json_ok([
-            'ok' => false,
-            'error' => 'Maximum allowed attempts reached for this lesson.'
-        ]);
-    }
+    $maxAllowedAttempts = (int)($startDecision['attempt_state']['effective_allowed_attempts'] ?? 0);
 
-        $deadlineMeta = $engine->getEffectiveDeadline($userId, $cohortId, $lessonId);
-    $effectiveDeadlineUtc = (string)($deadlineMeta['effective_deadline_utc'] ?? '');
-    $deadlineSource = (string)($deadlineMeta['deadline_source'] ?? 'cohort_default');
+    $effectiveDeadlineUtc = (string)($startDecision['deadline_state']['effective_deadline_utc'] ?? '');
+    $deadlineSource = (string)($startDecision['deadline_state']['deadline_source'] ?? 'cohort_default');
 
     if ($effectiveDeadlineUtc === '') {
         throw new RuntimeException('Unable to resolve effective deadline');
     }
 
     $nowUtc = gmdate('Y-m-d H:i:s');
-    $deadlinePassed = (strtotime($nowUtc) > strtotime($effectiveDeadlineUtc));
-
-    if ($deadlinePassed && !$engine->isLessonCompletedForDeadlinePurposes($userId, $cohortId, $lessonId)) {
-        $deadlineHandleResult = $engine->handleMissedDeadlineForLesson(
-            $userId,
-            $cohortId,
-            $lessonId,
-            null
-        );
-
-        $requiredActionUrl = (string)($deadlineHandleResult['required_action_url'] ?? '');
-        $actionTaken = (string)($deadlineHandleResult['action_taken'] ?? '');
-
-        $message = 'The effective deadline for this lesson has passed. This progress test is currently blocked.';
-
-        if ($actionTaken === 'deadline_reason_required_extension_1') {
-            $message = 'The lesson deadline was missed. A 48-hour extension has been applied and your reason submission is now required.';
-        } elseif ($actionTaken === 'deadline_reason_required_extension_2_final') {
-            $message = 'The lesson deadline was missed again. A final 48-hour extension has been applied and your reason submission is now required.';
-        } elseif ($actionTaken === 'deadline_missed_instructor_required') {
-            $message = 'The lesson deadline path is exhausted. Instructor intervention is now required before progression can continue.';
-        } elseif ($actionTaken === 'existing_reason_action_reused') {
-            $message = 'A deadline reason submission is already pending for this lesson.';
-        } elseif ($actionTaken === 'existing_instructor_action_reused') {
-            $message = 'Instructor intervention is already pending for this lesson.';
-        }
-
-        json_ok([
-            'ok' => false,
-            'error' => $message,
-            'deadline_blocked' => true,
-            'deadline_action_taken' => $actionTaken,
-            'required_action_url' => $requiredActionUrl,
-            'deadline_handle_result' => $deadlineHandleResult,
-        ]);
-    }
 
     $seed = bin2hex(random_bytes(16));
 
@@ -364,61 +185,54 @@ if ($oneOnOneRequired === 1 && $oneOnOneCompleted !== 1) {
 
     if ($activityRow) {
         $updActivity = $pdo->prepare("
-            UPDATE lesson_activity
-            SET
-                started_at = COALESCE(started_at, ?),
-                summary_status = ?,
-                test_pass_status = 'in_progress',
-                completion_status = 'in_progress',
-                effective_deadline_utc = ?,
-                last_state_eval_at = ?,
-                updated_at = NOW()
-            WHERE id = ?
-        ");
+    UPDATE lesson_activity
+    SET
+        started_at = COALESCE(started_at, ?),
+        summary_status = ?,
+        effective_deadline_utc = ?,
+        last_state_eval_at = ?,
+        updated_at = NOW()
+    WHERE id = ?
+");
         $updActivity->execute([
-            $nowUtc,
-            $summaryStatus,
-            $effectiveDeadlineUtc,
-            $nowUtc,
-            (int)$activityRow['id']
-        ]);
+    $nowUtc,
+    $summaryStatus,
+    $effectiveDeadlineUtc,
+    $nowUtc,
+    (int)$activityRow['id']
+]);
     } else {
-        $insActivity = $pdo->prepare("
-            INSERT INTO lesson_activity
-            (
-                user_id,
-                cohort_id,
-                lesson_id,
-                started_at,
-                completed_at,
-                total_seconds,
-                attempt_count,
-                best_score,
-                summary_status,
-                test_pass_status,
-                completion_status,
-                effective_deadline_utc,
-                next_lesson_unlocked_at,
-                last_state_eval_at,
-                status,
-                created_at,
-                updated_at
-            )
-            VALUES
-            (
-                ?, ?, ?, ?, NULL, 0, 0, NULL, ?, 'in_progress', 'in_progress',
-                ?, NULL, ?, 'in_progress', NOW(), NOW()
-            )
-        ");
-        $insActivity->execute([
-            $userId,
-            $cohortId,
-            $lessonId,
-            $nowUtc,
-            $summaryStatus,
-            $effectiveDeadlineUtc,
-            $nowUtc
-        ]);
+      $insActivity = $pdo->prepare("
+    INSERT INTO lesson_activity
+    (
+        user_id,
+        cohort_id,
+        lesson_id,
+        started_at,
+        completed_at,
+        total_seconds,
+        attempt_count,
+        best_score,
+        summary_status,
+        effective_deadline_utc,
+        last_state_eval_at,
+        created_at,
+        updated_at
+    )
+    VALUES
+    (
+        ?, ?, ?, ?, NULL, 0, 0, NULL, ?, ?, ?, NOW(), NOW()
+    )
+");
+$insActivity->execute([
+    $userId,
+    $cohortId,
+    $lessonId,
+    $nowUtc,
+    $summaryStatus,
+    $effectiveDeadlineUtc,
+    $nowUtc
+]);
     }
 
     $ins = $pdo->prepare("
