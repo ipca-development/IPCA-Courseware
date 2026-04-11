@@ -2,29 +2,138 @@
 declare(strict_types=1);
 
 /**
- * Courseware Progression Engine V2
+ * ============================================================
+ * COURSEWARE PROGRESSION ENGINE V2 (SSOT CORE)
+ * ============================================================
  *
- * Foundation layer:
- * - policy loading
- * - effective deadline resolution
- * - required action logic
- * - event logging
- * - notification template rendering
- * - real progression email queue record creation
- * - queued email sending
- * - preview / test-send support for admin notification control panel
+ * THIS FILE IS THE SINGLE SOURCE OF TRUTH (SSOT) FOR:
+ * - Student progression state
+ * - Attempt logic
+ * - Deadline logic
+ * - Required action lifecycle
+ * - Lesson activity projection
+ * - Canonical progression events
  *
- * Requirements:
+ * REQUIREMENTS
  * - PHP 8.2+
  * - MySQL 8+
- * - PDO
+ * - PDO (SAFE VERSION)
+ *
+ * ------------------------------------------------------------
+ * CORE RESPONSIBILITY
+ * ------------------------------------------------------------
+ *
+ * This engine is the ONLY component allowed to:
+ *
+ * 1. Evaluate progression decisions
+ *    - remediation_required
+ *    - instructor_required
+ *    - deadline_blocked
+ *    - training_suspended
+ *    - summary_blocked
+ *
+ * 2. Mutate canonical system state
+ *    - progress_tests_v2 (finalization)
+ *    - student_required_actions (creation/update)
+ *    - lesson_activity (projection only)
+ *
+ * 3. Emit canonical events
+ *    - training_progression_events
+ *
+ * 4. Trigger automation (NON-CANONICAL SIDE EFFECTS)
+ *    - ONLY via dispatchAutomationEventIfAvailable()
+ *
+ * ------------------------------------------------------------
+ * WHAT THIS ENGINE MUST NEVER DO
+ * ------------------------------------------------------------
+ *
+ * - Must NOT:
+ * - Send emails directly
+ * - Contain UI logic
+ * - Depend on controllers
+ * - Allow AutomationRuntime to define state
+ * - Create duplicate or parallel decision logic
+ *
+ * ------------------------------------------------------------
+ * ARCHITECTURE CONTRACT (STRICT)
+ * ------------------------------------------------------------
+ *
+ * Policies → define thresholds ONLY
+ *
+ * Engine (THIS FILE) → decides ALL state
+ *
+ * AutomationRuntime → executes side effects ONLY
+ *   (email, logging, notifications)
+ *
+ * Notifications → outputs only (never inputs)
+ *
+ * UI → displays projection only (no logic)
+ *
+ * ------------------------------------------------------------
+ * DATA OWNERSHIP
+ * ------------------------------------------------------------
+ *
+ * Authoritative tables:
+ *
+ * - progress_tests_v2 → attempt + result truth
+ * - student_required_actions → workflow / intervention truth
+ * - training_progression_events → audit trail
+ *
+ * Projection table:
+ *
+ * - lesson_activity → derived state ONLY (never authoritative)
+ *
+ * ------------------------------------------------------------
+ * AUTOMATION CONTRACT
+ * ------------------------------------------------------------
+ *
+ * - Engine triggers automation AFTER commit
+ * - Automation MUST NOT modify canonical progression state
+ * - Automation MUST NOT create required actions
+ * - Automation MUST NOT influence decisions
+ *
+ * ------------------------------------------------------------
+ * DESIGN PRINCIPLES
+ * ------------------------------------------------------------
+ *
+ * - Deterministic (same input → same output)
+ * - Idempotent (safe to re-run)
+ * - Auditable (every decision logged)
+ * - Reversible (state reconstructable from events)
+ *
+ * ------------------------------------------------------------
+ * FUTURE DEVELOPMENT RULES (CRITICAL)
+ * ------------------------------------------------------------
+ *
+ * ANY new feature MUST:
+ *
+ * ✔ Be implemented inside this engine if it affects:
+ *   - progression
+ *   - attempts
+ *   - deadlines
+ *   - required actions
+ *
+ * ✔ Use existing decision + projection pipelines
+ *
+ * ✔ Log events via logProgressionEvent()
+ *
+ * ✔ Trigger automation ONLY via:
+ *   dispatchAutomationEventIfAvailable()
+ *
+ * - NEVER:
+ * - Add progression logic in controllers
+ * - Add progression logic in AutomationRuntime
+ * - Write directly to lesson_activity outside projection
+ *
+ * ------------------------------------------------------------
+ * VERSION
+ * ------------------------------------------------------------
+ *
+ * LOGIC_VERSION = v2.0
+ *
+ * ============================================================
  */
 
-// TODO: DEADLINE CONSEQUENCES LOGIC (morning implementation)
-// - block test when deadline passed
-// - create reason_required action
-// - apply extension (max 2)
-// - trigger automation event
 
 
 final class CoursewareProgressionV2
@@ -1210,13 +1319,47 @@ final class CoursewareProgressionV2
             'attempt_state' => $attemptState,
             'deadline_state' => $deadlineState,
             'classification' => [],
+			'required_actions' => $requiredActions 
         ]);
 
-        $requiredActions = [
-            'should_create_any' => false,
-            'actions' => [],
-            'latest_instructor_action_id' => null,
+        $blockingActions = [];
+
+// Check ALL blocking required actions
+$actionTypesToBlock = [
+    'remediation_acknowledgement',
+    'instructor_approval',
+    'deadline_reason_submission'
+];
+
+foreach ($actionTypesToBlock as $actionType) {
+    $pending = $this->getPendingRequiredAction(
+        $userId,
+        $cohortId,
+        $lessonId,
+        $actionType
+    );
+
+    if ($pending) {
+        $blockingActions[] = [
+            'action_type' => $actionType,
+            'action' => $pending,
+            'action_url' => $this->buildInternalAppUrl(
+                $actionType === 'instructor_approval'
+                    ? '/instructor/instructor_approval.php?token=' . urlencode((string)$pending['token'])
+                    : '/student/remediation_action.php?token=' . urlencode((string)$pending['token'])
+            ),
         ];
+    }
+}
+
+$hasBlockingActions = !empty($blockingActions);
+
+$requiredActions = [
+    'should_create_any' => false,
+    'actions' => $blockingActions,
+    'latest_instructor_action_id' => null,
+    'blocking' => $hasBlockingActions,
+];
 
         $notificationDecision = $this->buildNotificationDecision($progressionContext, $decision, [
             'behavior_mode' => $behaviorMode,
@@ -1255,29 +1398,88 @@ public function createProgressTestAttempt(
     int $cohortId,
     int $lessonId,
     string $actorType = 'student',
-    ?int $actorUserId = null
+    ?int $actorUserId = null,
+    ?string $idempotencyKey = null
 ): array {
 
     $startDecision = $this->prepareStartDecision($userId, $cohortId, $lessonId);
 
-    if (!empty($startDecision['deadline_state']['deadline_passed'])) {
+    $decision = (array)($startDecision['decision'] ?? []);
+    $priority = (string)($decision['priority_state'] ?? 'normal');
+
+    if (!empty($decision['training_suspended'])) {
         return [
             'blocked' => true,
-            'reason' => 'deadline',
-            'deadline_state' => $startDecision['deadline_state']
+            'reason' => 'training_suspended',
+            'decision' => $decision
         ];
     }
 
-    if (empty($startDecision['allowed'])) {
+    if (!empty($decision['deadline_blocked'])) {
+        return [
+            'blocked' => true,
+            'reason' => 'deadline',
+            'deadline_state' => $startDecision['deadline_state'],
+            'decision' => $decision
+        ];
+    }
+
+    if (!empty($decision['instructor_required'])) {
+        return [
+            'blocked' => true,
+            'reason' => 'instructor_required',
+            'decision' => $decision
+        ];
+    }
+
+    if ($idempotencyKey === null) {
+        $idempotencyKey = hash('sha256', implode('|', [
+            $userId,
+            $cohortId,
+            $lessonId,
+            'start_attempt',
+            gmdate('Y-m-d-H')
+        ]));
+    }
+
+    $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
+    if ($existing) {
+        return [
+            'blocked' => false,
+            'test_id' => (int)$existing['id'],
+            'attempt' => (int)$existing['attempt'],
+            'idempotent_reuse' => true
+        ];
+    }
+
+    if (!empty($decision['remediation_required'])) {
+        return [
+            'blocked' => true,
+            'reason' => 'remediation_required',
+            'decision' => $decision
+        ];
+    }
+
+    if (!empty($decision['summary_blocked'])) {
+        return [
+            'blocked' => true,
+            'reason' => 'summary_required',
+            'decision' => $decision
+        ];
+    }
+
+    if (empty($decision['allowed'])) {
         return [
             'blocked' => true,
             'reason' => 'progression_rules',
-            'decision' => $startDecision['decision']
+            'decision' => $decision
         ];
     }
 
     $attempt = (int)($startDecision['attempt_state']['next_attempt_number'] ?? 1);
-    if ($attempt <= 0) $attempt = 1;
+    if ($attempt <= 0) {
+        $attempt = 1;
+    }
 
     $effectiveDeadlineUtc = (string)$startDecision['deadline_state']['effective_deadline_utc'];
     $deadlineSource = (string)$startDecision['deadline_state']['deadline_source'];
@@ -1288,9 +1490,7 @@ public function createProgressTestAttempt(
     $this->pdo->beginTransaction();
 
     try {
-
-        // Create progress test
-        $stmt = $this->pdo->prepare("
+                $stmt = $this->pdo->prepare("
             INSERT INTO progress_tests_v2
             (
                 user_id,
@@ -1302,12 +1502,13 @@ public function createProgressTestAttempt(
                 started_at,
                 effective_deadline_utc,
                 deadline_source,
+                idempotency_key,
                 timing_status,
                 progress_pct,
                 status_text,
                 updated_at
             )
-            VALUES (?, ?, ?, ?, 'preparing', ?, ?, ?, ?, 'unknown', 1, 'Initializing...', NOW())
+            VALUES (?, ?, ?, ?, 'preparing', ?, ?, ?, ?, ?, 'unknown', 1, 'Initializing...', NOW())
         ");
 
         $stmt->execute([
@@ -1318,12 +1519,12 @@ public function createProgressTestAttempt(
             $seed,
             $nowUtc,
             $effectiveDeadlineUtc,
-            $deadlineSource
+            $deadlineSource,
+            $idempotencyKey,
         ]);
 
         $testId = (int)$this->pdo->lastInsertId();
 
-        // Projection (canonical)
         $this->persistLessonActivityProjection($userId, $cohortId, $lessonId, [
             'engine_projection' => true,
             'user_id' => $userId,
@@ -1339,7 +1540,6 @@ public function createProgressTestAttempt(
             ]
         ]);
 
-        // Event
         $this->logProgressionEvent([
             'user_id' => $userId,
             'cohort_id' => $cohortId,
@@ -1355,14 +1555,28 @@ public function createProgressTestAttempt(
 
         $this->pdo->commit();
 
-        return [
+                return [
             'blocked' => false,
             'test_id' => $testId,
-            'attempt' => $attempt
+            'attempt' => $attempt,
+            'idempotent_reuse' => false,
         ];
 
-    } catch (Throwable $e) {
-        $this->pdo->rollBack();
+        } catch (Throwable $e) {
+        if ($this->pdo->inTransaction()) {
+            $this->pdo->rollBack();
+        }
+
+        $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
+        if ($existing) {
+            return [
+                'blocked' => false,
+                'test_id' => (int)$existing['id'],
+                'attempt' => (int)$existing['attempt'],
+                'idempotent_reuse' => true
+            ];
+        }
+
         throw $e;
     }
 }	
@@ -1636,51 +1850,22 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
 
         $this->pdo->commit();
 
-        $automationResult = null;
-
         $eventKey = !empty($classification['pass_gate_met'])
             ? 'progress_test_passed'
             : 'progress_test_failed';
 
-        if (is_file(__DIR__ . '/automation_runtime.php')) {
-            require_once __DIR__ . '/automation_runtime.php';
-            $automation = new AutomationRuntime();
+        $automationResult = null;
 
-            $this->logProgressionEvent([
-                'user_id' => $userId,
-                'cohort_id' => $cohortId,
-                'lesson_id' => $lessonId,
-                'progress_test_id' => $progressTestId,
-                'event_type' => 'automation',
-                'event_code' => 'automation_dispatch_before',
-                'event_status' => 'info',
-                'actor_type' => 'system',
-                'event_time' => gmdate('Y-m-d H:i:s'),
-                'payload' => [
-                    'event_key' => $eventKey,
-                    'attempt_count' => (int)($testRow['attempt'] ?? 0),
-                    'score_pct' => $scorePct,
-                ],
-            ]);
-
-            $automationResult = $automation->dispatchEvent($this->pdo, $eventKey, $automationEventContext);
-
-            $this->logProgressionEvent([
-                'user_id' => $userId,
-                'cohort_id' => $cohortId,
-                'lesson_id' => $lessonId,
-                'progress_test_id' => $progressTestId,
-                'event_type' => 'automation',
-                'event_code' => 'automation_dispatch_after',
-                'event_status' => 'info',
-                'actor_type' => 'system',
-                'event_time' => gmdate('Y-m-d H:i:s'),
-                'payload' => [
-                    'event_key' => $eventKey,
-                    'automation_result' => $automationResult,
-                ],
-            ]);
-        }
+		if (!empty($eventKey)) {
+    	$automationResult = $this->dispatchAutomationEventIfAvailable(
+        $eventKey,
+        $automationEventContext,
+        $userId,
+        $cohortId,
+        $lessonId,
+        $progressTestId
+    );
+}
 
         return [
             'ok' => true,
@@ -1712,6 +1897,8 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         $classification = (array)($context['classification'] ?? []);
         $summaryState = (array)($context['summary_state'] ?? []);
         $phase = (string)($context['phase'] ?? 'prepare_start');
+		$requiredActions = (array)($context['required_actions'] ?? []);
+		$hasBlockingActions = !empty($requiredActions['blocking']);
 
 		$trainingSuspended = !empty($activity['training_suspended']);
 		$oneOnOneRequired = !empty($activity['one_on_one_required']) && empty($activity['one_on_one_completed']);
@@ -1781,7 +1968,10 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         } elseif ($deadlineBlocked) {
             $priority = 'deadline_blocked';
             $allowed = false;
-        } elseif ($instructorRequired) {
+        } elseif ($hasBlockingActions) {
+    		$priority = 'required_action_pending';
+			$allowed = false;
+		} elseif ($instructorRequired) {
             $priority = 'instructor_required';
             $allowed = false;
             if ($phase === 'finalize') {
@@ -1878,87 +2068,68 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         ];
     }
 
-    public function persistLessonActivityProjection(int $userId, int $cohortId, int $lessonId, array $projection): array
-    {
-        if (empty($projection['engine_projection']) || !is_array($projection['fields'] ?? null)) {
-            throw new InvalidArgumentException('persistLessonActivityProjection only accepts canonical output from computeLessonActivityProjection().');
-        }
+public function persistLessonActivityProjection(int $userId, int $cohortId, int $lessonId, array $projection): array
+{
+    // --------------------------------------------------
+    // STEP 1 — STRUCTURE VALIDATION (unchanged)
+    // --------------------------------------------------
+    if (empty($projection['engine_projection']) || !is_array($projection['fields'] ?? null)) {
+        throw new InvalidArgumentException('persistLessonActivityProjection only accepts canonical output from computeLessonActivityProjection().');
+    }
 
-        if ((int)$projection['user_id'] !== $userId || (int)$projection['cohort_id'] !== $cohortId || (int)$projection['lesson_id'] !== $lessonId) {
-            throw new InvalidArgumentException('Projection identity mismatch.');
-        }
+    // --------------------------------------------------
+    // STEP 2 — CONSISTENCY GUARD (NEW — CORRECT POSITION)
+    // --------------------------------------------------
+    $this->assertLessonActivityConsistency($projection['fields']);
 
-        $allowedFields = [
-            'started_at',
-            'completed_at',
-            'attempt_count',
-            'best_score',
-            'summary_status',
-            'test_pass_status',
-            'completion_status',
-            'effective_deadline_utc',
-            'last_state_eval_at',
-            'next_lesson_unlocked_at',
-            'latest_instructor_action_id',
-            'granted_extra_attempts',
-            'one_on_one_required',
-            'one_on_one_completed',
-            'training_suspended',
+    // --------------------------------------------------
+    // STEP 3 — IDENTITY VALIDATION (unchanged)
+    // --------------------------------------------------
+    if (
+        (int)$projection['user_id'] !== $userId ||
+        (int)$projection['cohort_id'] !== $cohortId ||
+        (int)$projection['lesson_id'] !== $lessonId
+    ) {
+        throw new InvalidArgumentException('Projection identity mismatch.');
+    }
+
+    $allowedFields = [
+        'started_at',
+        'completed_at',
+        'attempt_count',
+        'best_score',
+        'summary_status',
+        'test_pass_status',
+        'completion_status',
+        'effective_deadline_utc',
+        'last_state_eval_at',
+        'next_lesson_unlocked_at',
+        'latest_instructor_action_id',
+        'granted_extra_attempts',
+        'one_on_one_required',
+        'one_on_one_completed',
+        'training_suspended',
+    ];
+
+    $fields = [];
+    foreach ($allowedFields as $key) {
+        if (array_key_exists($key, $projection['fields'])) {
+            $fields[$key] = $projection['fields'][$key];
+        }
+    }
+
+    if (!$fields) {
+        return [
+            'ok' => true,
+            'changed_fields' => [],
+            'action' => 'noop',
         ];
+    }
 
-        $fields = [];
-        foreach ($allowedFields as $key) {
-            if (array_key_exists($key, $projection['fields'])) {
-                $fields[$key] = $projection['fields'][$key];
-            }
-        }
+    $existing = $this->getLessonActivityProjectionRow($userId, $cohortId, $lessonId);
 
-        if (!$fields) {
-            return [
-                'ok' => true,
-                'changed_fields' => [],
-                'action' => 'noop',
-            ];
-        }
-
-        $existing = $this->getLessonActivityProjectionRow($userId, $cohortId, $lessonId);
-
-        if ($existing) {
-            $set = [];
-            $params = [
-                ':user_id' => $userId,
-                ':cohort_id' => $cohortId,
-                ':lesson_id' => $lessonId,
-            ];
-
-            foreach ($fields as $key => $value) {
-                $set[] = "{$key} = :{$key}";
-                $params[":{$key}"] = $value;
-            }
-
-            $set[] = "updated_at = NOW()";
-
-            $sql = "
-                UPDATE lesson_activity
-                SET " . implode(", ", $set) . "
-                WHERE user_id = :user_id
-                  AND cohort_id = :cohort_id
-                  AND lesson_id = :lesson_id
-                LIMIT 1
-            ";
-
-            $stmt = $this->pdo->prepare($sql);
-            $stmt->execute($params);
-
-            return [
-                'ok' => true,
-                'changed_fields' => array_keys($fields),
-                'action' => 'update',
-            ];
-        }
-
-        $columns = ['user_id', 'cohort_id', 'lesson_id'];
-        $placeholders = [':user_id', ':cohort_id', ':lesson_id'];
+    if ($existing) {
+        $set = [];
         $params = [
             ':user_id' => $userId,
             ':cohort_id' => $cohortId,
@@ -1966,19 +2137,19 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         ];
 
         foreach ($fields as $key => $value) {
-            $columns[] = $key;
-            $placeholders[] = ':' . $key;
-            $params[':' . $key] = $value;
+            $set[] = "{$key} = :{$key}";
+            $params[":{$key}"] = $value;
         }
 
-        $columns[] = 'created_at';
-        $columns[] = 'updated_at';
-        $placeholders[] = 'NOW()';
-        $placeholders[] = 'NOW()';
+        $set[] = "updated_at = NOW()";
 
         $sql = "
-            INSERT INTO lesson_activity (" . implode(', ', $columns) . ")
-            VALUES (" . implode(', ', $placeholders) . ")
+            UPDATE lesson_activity
+            SET " . implode(", ", $set) . "
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+            LIMIT 1
         ";
 
         $stmt = $this->pdo->prepare($sql);
@@ -1987,9 +2158,43 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         return [
             'ok' => true,
             'changed_fields' => array_keys($fields),
-            'action' => 'insert',
+            'action' => 'update',
         ];
     }
+
+    $columns = ['user_id', 'cohort_id', 'lesson_id'];
+    $placeholders = [':user_id', ':cohort_id', ':lesson_id'];
+    $params = [
+        ':user_id' => $userId,
+        ':cohort_id' => $cohortId,
+        ':lesson_id' => $lessonId,
+    ];
+
+    foreach ($fields as $key => $value) {
+        $columns[] = $key;
+        $placeholders[] = ':' . $key;
+        $params[':' . $key] = $value;
+    }
+
+    $columns[] = 'created_at';
+    $columns[] = 'updated_at';
+    $placeholders[] = 'NOW()';
+    $placeholders[] = 'NOW()';
+
+    $sql = "
+        INSERT INTO lesson_activity (" . implode(', ', $columns) . ")
+        VALUES (" . implode(', ', $placeholders) . ")
+    ";
+
+    $stmt = $this->pdo->prepare($sql);
+    $stmt->execute($params);
+
+    return [
+        'ok' => true,
+        'changed_fields' => array_keys($fields),
+        'action' => 'insert',
+    ];
+}
 
     public function progressionEmailExistsForProgressTest(int $progressTestId, string $emailType): bool
     {
@@ -2511,53 +2716,14 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
 
     $automationResult = null;
 
-    if (is_file(__DIR__ . '/automation_runtime.php')) {
-        require_once __DIR__ . '/automation_runtime.php';
-        $automation = new AutomationRuntime();
-
-        $this->logProgressionEvent([
-            'user_id' => (int)$action['user_id'],
-            'cohort_id' => (int)$action['cohort_id'],
-            'lesson_id' => (int)$action['lesson_id'],
-            'progress_test_id' => isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null,
-            'event_type' => 'automation',
-            'event_code' => 'automation_dispatch_before',
-            'event_status' => 'info',
-            'actor_type' => 'system',
-            'actor_user_id' => null,
-            'event_time' => gmdate('Y-m-d H:i:s'),
-            'payload' => [
-                'event_key' => 'instructor_decision_recorded',
-                'decision_code' => $decisionCode,
-                'required_action_id' => $requiredActionId,
-            ],
-        ]);
-
-        $automationResult = $automation->dispatchEvent(
-            $this->pdo,
-            'instructor_decision_recorded',
-            $automationContext
-        );
-
-        $this->logProgressionEvent([
-            'user_id' => (int)$action['user_id'],
-            'cohort_id' => (int)$action['cohort_id'],
-            'lesson_id' => (int)$action['lesson_id'],
-            'progress_test_id' => isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null,
-            'event_type' => 'automation',
-            'event_code' => 'automation_dispatch_after',
-            'event_status' => 'info',
-            'actor_type' => 'system',
-            'actor_user_id' => null,
-            'event_time' => gmdate('Y-m-d H:i:s'),
-            'payload' => [
-                'event_key' => 'instructor_decision_recorded',
-                'decision_code' => $decisionCode,
-                'required_action_id' => $requiredActionId,
-                'automation_result' => $automationResult,
-            ],
-        ]);
-    }
+	$automationResult = $this->dispatchAutomationEventIfAvailable(
+    'instructor_decision_recorded',
+    $automationContext,
+    (int)$action['user_id'],
+    (int)$action['cohort_id'],
+    (int)$action['lesson_id'],
+    isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null
+);
 
     return [
         'message' => 'Instructor decision saved successfully.',
@@ -2709,48 +2875,14 @@ public function markInstructorApprovalOneOnOneCompleted(int $requiredActionId, i
 
         $automationResult = null;
 
-        if (is_file(__DIR__ . '/automation_runtime.php')) {
-            require_once __DIR__ . '/automation_runtime.php';
-            $automation = new AutomationRuntime();
-
-            $this->logProgressionEvent([
-                'user_id' => (int)$action['user_id'],
-                'cohort_id' => (int)$action['cohort_id'],
-                'lesson_id' => (int)$action['lesson_id'],
-                'progress_test_id' => isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null,
-                'event_type' => 'automation',
-                'event_code' => 'automation_dispatch_before',
-                'event_status' => 'info',
-                'actor_type' => 'system',
-                'actor_user_id' => null,
-                'event_time' => gmdate('Y-m-d H:i:s'),
-                'payload' => [
-                    'event_key' => $automationEventKey,
-                    'required_action_id' => $requiredActionId,
-                ],
-                'legal_note' => 'Automation dispatch starting after canonical one-on-one completion commit.',
-            ]);
-
-            $automationResult = $automation->dispatchEvent($this->pdo, $automationEventKey, $automationContext);
-
-            $this->logProgressionEvent([
-                'user_id' => (int)$action['user_id'],
-                'cohort_id' => (int)$action['cohort_id'],
-                'lesson_id' => (int)$action['lesson_id'],
-                'progress_test_id' => isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null,
-                'event_type' => 'automation',
-                'event_code' => 'automation_dispatch_after',
-                'event_status' => 'info',
-                'actor_type' => 'system',
-                'actor_user_id' => null,
-                'event_time' => gmdate('Y-m-d H:i:s'),
-                'payload' => [
-                    'event_key' => $automationEventKey,
-                    'automation_result' => $automationResult,
-                ],
-                'legal_note' => 'Automation dispatch completed after canonical one-on-one completion commit.',
-            ]);
-        }
+        $automationResult = $this->dispatchAutomationEventIfAvailable(
+    $automationEventKey,
+    $automationContext,
+    (int)$action['user_id'],
+    (int)$action['cohort_id'],
+    (int)$action['lesson_id'],
+    isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null
+);
 
         return [
             'message' => 'Required one-on-one session marked completed.',
@@ -2820,23 +2952,11 @@ public function markInstructorApprovalOneOnOneCompleted(int $requiredActionId, i
     }
 
     public function createOrReuseRequiredActionSafe(array $data): array
-    {
-        $existing = $this->getPendingRequiredAction(
-            (int)$data['user_id'],
-            (int)$data['cohort_id'],
-            (int)$data['lesson_id'],
-            (string)$data['action_type']
-        );
-
-        if ($existing) {
-            return [
-                'action_id' => (int)$existing['id'],
-                'action' => $existing,
-                'created_new' => false,
-            ];
-        }
-
+{
+    try {
+        // Try insert FIRST (optimistic write)
         $actionId = $this->createRequiredAction($data);
+
         $action = $this->getRequiredActionById($actionId);
 
         return [
@@ -2844,7 +2964,31 @@ public function markInstructorApprovalOneOnOneCompleted(int $requiredActionId, i
             'action' => $action ?: [],
             'created_new' => true,
         ];
+
+    } catch (PDOException $e) {
+
+        // Duplicate key = another process already created it
+        if ((int)$e->getCode() === 23000) {
+
+            $existing = $this->getPendingRequiredAction(
+                (int)$data['user_id'],
+                (int)$data['cohort_id'],
+                (int)$data['lesson_id'],
+                (string)$data['action_type']
+            );
+
+            if ($existing) {
+                return [
+                    'action_id' => (int)$existing['id'],
+                    'action' => $existing,
+                    'created_new' => false,
+                ];
+            }
+        }
+
+        throw $e;
     }
+}
 
 
 public function createRequiredAction(array $data): int
@@ -3377,61 +3521,86 @@ public function buildNotificationDecision(array $progressionContext, array $deci
     }
 
 
-    private function dispatchAutomationEventIfAvailable(
-        string $eventKey,
-        array $automationContext,
-        ?int $userId = null,
-        ?int $cohortId = null,
-        ?int $lessonId = null,
-        ?int $progressTestId = null
-    ): ?array {
-        if ($eventKey === '' || !is_file(__DIR__ . '/automation_runtime.php')) {
-            return null;
-        }
+private function dispatchAutomationEventIfAvailable(
+    string $eventKey,
+    array $automationContext,
+    ?int $userId = null,
+    ?int $cohortId = null,
+    ?int $lessonId = null,
+    ?int $progressTestId = null
+): ?array {
+    if ($eventKey === '') {
+        return null;
+    }
 
-        require_once __DIR__ . '/automation_runtime.php';
-
-        $eventTime = gmdate('Y-m-d H:i:s');
-
+    if (!is_file(__DIR__ . '/automation_runtime.php')) {
         $this->logProgressionEvent([
             'user_id' => (int)($userId ?? ($automationContext['user_id'] ?? 0)),
             'cohort_id' => (int)($cohortId ?? ($automationContext['cohort_id'] ?? 0)),
             'lesson_id' => (int)($lessonId ?? ($automationContext['lesson_id'] ?? 0)),
             'progress_test_id' => $progressTestId ?? (isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null),
             'event_type' => 'automation',
-            'event_code' => 'automation_dispatch_before',
-            'event_status' => 'info',
-            'actor_type' => 'system',
-            'actor_user_id' => null,
-            'event_time' => $eventTime,
-            'payload' => [
-                'event_key' => $eventKey,
-                'source' => 'courseware_progression_v2',
-            ],
-        ]);
-
-        $automation = new AutomationRuntime();
-        $result = $automation->dispatchEvent($this->pdo, $eventKey, $automationContext);
-
-        $this->logProgressionEvent([
-            'user_id' => (int)($userId ?? ($automationContext['user_id'] ?? 0)),
-            'cohort_id' => (int)($cohortId ?? ($automationContext['cohort_id'] ?? 0)),
-            'lesson_id' => (int)($lessonId ?? ($automationContext['lesson_id'] ?? 0)),
-            'progress_test_id' => $progressTestId ?? (isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null),
-            'event_type' => 'automation',
-            'event_code' => 'automation_dispatch_after',
-            'event_status' => 'info',
+            'event_code' => 'automation_runtime_missing',
+            'event_status' => 'warning',
             'actor_type' => 'system',
             'actor_user_id' => null,
             'event_time' => gmdate('Y-m-d H:i:s'),
             'payload' => [
                 'event_key' => $eventKey,
-                'automation_result' => $result,
+                'source' => 'courseware_progression_v2',
             ],
+            'legal_note' => 'Automation event skipped because automation_runtime.php is missing.',
         ]);
-
-        return $result;
+        return null;
     }
+
+    if (!class_exists('AutomationRuntime')) {
+        require_once __DIR__ . '/automation_runtime.php';
+    }
+
+    $eventTime = gmdate('Y-m-d H:i:s');
+
+    $this->logProgressionEvent([
+        'user_id' => (int)($userId ?? ($automationContext['user_id'] ?? 0)),
+        'cohort_id' => (int)($cohortId ?? ($automationContext['cohort_id'] ?? 0)),
+        'lesson_id' => (int)($lessonId ?? ($automationContext['lesson_id'] ?? 0)),
+        'progress_test_id' => $progressTestId ?? (isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null),
+        'event_type' => 'automation',
+        'event_code' => 'automation_dispatch_before',
+        'event_status' => 'info',
+        'actor_type' => 'system',
+        'actor_user_id' => null,
+        'event_time' => $eventTime,
+        'payload' => [
+            'event_key' => $eventKey,
+            'source' => 'courseware_progression_v2',
+        ],
+    ]);
+
+    $safePdo = new SafeAutomationPDO($this->pdo);
+
+    $automation = new AutomationRuntime();
+    $result = $automation->dispatchEvent($safePdo, $eventKey, $automationContext);
+
+    $this->logProgressionEvent([
+        'user_id' => (int)($userId ?? ($automationContext['user_id'] ?? 0)),
+        'cohort_id' => (int)($cohortId ?? ($automationContext['cohort_id'] ?? 0)),
+        'lesson_id' => (int)($lessonId ?? ($automationContext['lesson_id'] ?? 0)),
+        'progress_test_id' => $progressTestId ?? (isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null),
+        'event_type' => 'automation',
+        'event_code' => 'automation_dispatch_after',
+        'event_status' => 'info',
+        'actor_type' => 'system',
+        'actor_user_id' => null,
+        'event_time' => gmdate('Y-m-d H:i:s'),
+        'payload' => [
+            'event_key' => $eventKey,
+            'automation_result' => $result,
+        ],
+    ]);
+
+    return $result;
+}
 	
 	
 	
@@ -4549,6 +4718,39 @@ public function buildNotificationDecision(array $progressionContext, array $deci
         return $row ?: null;
     }
 
+	
+	private function getProgressTestByIdempotencyKey(string $key): ?array
+{
+    $stmt = $this->pdo->prepare("
+        SELECT *
+        FROM progress_tests_v2
+        WHERE idempotency_key = :key
+        LIMIT 1
+    ");
+    $stmt->execute([
+        ':key' => $key,
+    ]);
+
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+	
+	
+	
+	private function getProgressTestByIdempotencyKey(string $key): ?array
+{
+    $stmt = $this->pdo->prepare("
+        SELECT *
+        FROM progress_tests_v2
+        WHERE idempotency_key = :key
+        LIMIT 1
+    ");
+    $stmt->execute([':key' => $key]);
+
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
+	
     private function getLatestProgressTestRowForLesson(int $userId, int $cohortId, int $lessonId): ?array
     {
         $stmt = $this->pdo->prepare("
@@ -4872,5 +5074,68 @@ private function buildInstructorDecisionAutomationContext(array $action, array $
         'approval_url' => $approvalUrl,
     ];
 }	
+
+	
+/**
+ * ============================================================
+ * SAFE AUTOMATION PDO WRAPPER
+ * ============================================================
+ *
+ * Prevents AutomationRuntime from modifying canonical tables.
+ */
+final class SafeAutomationPDO
+{
+    private PDO $inner;
+
+    private array $blockedTables = [
+    'progress_tests_v2',
+    'student_required_actions',
+    'lesson_activity',
+    'training_progression_events',
+    'student_lesson_deadline_overrides',
+    'lesson_summaries',
+];
+
+    public function __construct(PDO $pdo)
+    {
+        $this->inner = $pdo;
+    }
+
+    public function prepare($query, $options = []): PDOStatement|false
+    {
+        $this->assertQueryAllowed($query);
+        return $this->inner->prepare($query, $options);
+    }
+
+    public function query(string $query, ?int $fetchMode = null, ...$fetchModeArgs): PDOStatement|false
+    {
+        $this->assertQueryAllowed($query);
+        return $this->inner->query($query, $fetchMode, ...$fetchModeArgs);
+    }
+
+    public function exec($statement): int|false
+    {
+        $this->assertQueryAllowed($statement);
+        return $this->inner->exec($statement);
+    }
+
+    private function assertQueryAllowed(string $sql): void
+    {
+        $normalized = preg_replace('/\s+/', ' ', strtolower($sql));
+
+        foreach ($this->blockedTables as $table) {
+            if (
+    str_contains($normalized, $table)
+    && preg_match('/\b(insert|update|delete|replace)\b/', $normalized)
+) {
+                throw new RuntimeException(
+                    "AutomationRuntime is not allowed to mutate table: {$table}"
+                );
+            }
+        }
+    }
+}	
+	
+	
 	
 }

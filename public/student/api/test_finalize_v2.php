@@ -751,111 +751,6 @@ function upload_file_to_presigned_put(string $putUrl, string $localFile, string 
     }
 }
 
-function classify_progress_test_result(array $testRow, int $scorePct, array $policy): array {
-    $passPct = (int)($policy['progress_test_pass_pct'] ?? 75);
-    $completedAt = trim((string)($testRow['completed_at'] ?? ''));
-    $effectiveDeadlineUtc = trim((string)($testRow['effective_deadline_utc'] ?? ''));
-    $attempt = (int)($testRow['attempt'] ?? 1);
-
-    $timingStatus = 'unknown';
-
-    if ($completedAt !== '' && $effectiveDeadlineUtc !== '') {
-        $timingStatus = (strtotime($completedAt) <= strtotime($effectiveDeadlineUtc))
-            ? 'on_time'
-            : 'after_final_deadline';
-    }
-
-    $passedByScore = ($scorePct >= $passPct);
-    $passGateMet = ($passedByScore && $timingStatus === 'on_time') ? 1 : 0;
-
-    $formalResultCode = '';
-    $formalResultLabel = '';
-    $countsAsUnsat = 0;
-
-    if ($passGateMet) {
-        if ($attempt <= 1) {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_1';
-            $formalResultLabel = 'Pass - On Time - Attempt 1';
-        } elseif ($attempt === 2) {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_2';
-            $formalResultLabel = 'Pass - On Time - Attempt 2';
-        } elseif ($attempt === 3) {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_3';
-            $formalResultLabel = 'Pass - On Time - Attempt 3';
-        } elseif ($attempt === 4) {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_4_EXTENSION';
-            $formalResultLabel = 'Pass - On Time Within Extension - Attempt 4';
-        } else {
-            $formalResultCode = 'PASS_ON_TIME_ATTEMPT_5_FINAL_EXTENSION';
-            $formalResultLabel = 'Pass - On Time Within Final Extension - Attempt ' . $attempt;
-        }
-        $countsAsUnsat = 0;
-    } else {
-        if (!$passedByScore) {
-            if ($timingStatus === 'on_time') {
-                $formalResultCode = 'UNSAT_SCORE_BELOW_PASS';
-                $formalResultLabel = 'Unsatisfactory - Score Below Pass Standard';
-            } else {
-                $formalResultCode = 'UNSAT_SCORE_BELOW_PASS_LATE';
-                $formalResultLabel = 'Unsatisfactory - Score Below Pass Standard - Late';
-            }
-        } else {
-            if ($timingStatus === 'after_final_deadline') {
-                $formalResultCode = 'UNSAT_PASSING_SCORE_BUT_LATE';
-                $formalResultLabel = 'Unsatisfactory - Passing Score But Outside Effective Deadline';
-            } else {
-                $formalResultCode = 'UNSAT_NOT_VALIDATED';
-                $formalResultLabel = 'Unsatisfactory - Result Not Validated';
-            }
-        }
-        $countsAsUnsat = 1;
-    }
-
-    return [
-        'timing_status' => $timingStatus,
-        'pass_gate_met' => $passGateMet,
-        'formal_result_code' => $formalResultCode,
-        'formal_result_label' => $formalResultLabel,
-        'counts_as_unsat' => $countsAsUnsat
-    ];
-}
-
-function count_recent_unsats(PDO $pdo, int $userId, int $cohortId, int $lessonId, int $windowDays): array {
-    $sameLesson = 0;
-    $coursewide = 0;
-
-    $sqlSameLesson = "
-        SELECT COUNT(*)
-        FROM progress_tests_v2
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id = ?
-          AND counts_as_unsat = 1
-          AND completed_at IS NOT NULL
-          AND completed_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)
-    ";
-    $st1 = $pdo->prepare($sqlSameLesson);
-    $st1->execute([$userId, $cohortId, $lessonId, $windowDays]);
-    $sameLesson = (int)$st1->fetchColumn();
-
-    $sqlCourse = "
-        SELECT COUNT(*)
-        FROM progress_tests_v2
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND counts_as_unsat = 1
-          AND completed_at IS NOT NULL
-          AND completed_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL ? DAY)
-    ";
-    $st2 = $pdo->prepare($sqlCourse);
-    $st2->execute([$userId, $cohortId, $windowDays]);
-    $coursewide = (int)$st2->fetchColumn();
-
-    return [
-        'same_lesson_unsat_count' => $sameLesson,
-        'coursewide_unsat_count' => $coursewide
-    ];
-}
 
 try {
     $u = cw_current_user($pdo);
@@ -891,10 +786,6 @@ try {
     $testOwnerUserId = (int)($test['user_id'] ?? 0);
     $cohortId = (int)($test['cohort_id'] ?? 0);
     $lessonId = (int)($test['lesson_id'] ?? 0);
-
-    $policy = $engine->getAllPolicies([
-        'cohort_id' => $cohortId
-    ]);
 
     $apiKey = getenv('OPENAI_API_KEY');
     if (!$apiKey) $apiKey = getenv('CW_OPENAI_API_KEY');

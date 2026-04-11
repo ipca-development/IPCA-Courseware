@@ -98,92 +98,41 @@ $engine = new CoursewareProgressionV2($pdo);
         }
     }
 
-    // IMPORTANT:
-    // Do not gate test start from lesson_activity projection fields.
-    // Always use CoursewareProgressionV2::prepareStartDecision() as the canonical source.
 
-    $startDecision = $engine->prepareStartDecision($userId, $cohortId, $lessonId);
-
-    if (!empty($startDecision['deadline_state']['deadline_passed'])) {
-    $deadlineHandleResult = $engine->handleMissedDeadlineForLesson($userId, $cohortId, $lessonId, null);
-
-    $requiredActionUrl = (string)($deadlineHandleResult['required_action_url'] ?? '');
-    $actionTaken = (string)($deadlineHandleResult['action_taken'] ?? '');
-
-    $message = 'The effective deadline for this lesson has passed. This progress test is currently blocked.';
-
-    if ($actionTaken === 'deadline_reason_required_extension_1') {
-        $message = 'The lesson deadline was missed. A deadline extension has been applied and your reason submission is now required.';
-    } elseif ($actionTaken === 'deadline_reason_required_extension_2_final') {
-        $message = 'The lesson deadline was missed again. A final deadline extension has been applied and your reason submission is now required.';
-    } elseif ($actionTaken === 'deadline_missed_instructor_required') {
-        $message = 'The lesson deadline path is exhausted. Instructor intervention is now required before progression can continue.';
-    } elseif ($actionTaken === 'existing_reason_action_reused') {
-        $message = 'A deadline reason submission is already pending for this lesson.';
-    } elseif ($actionTaken === 'existing_instructor_action_reused') {
-        $message = 'Instructor intervention is already pending for this lesson.';
-    }
-
-    http_response_code(409);
-    json_ok([
-        'ok' => false,
-        'blocked' => true,
-        'error' => $message,
-        'deadline_blocked' => true,
-        'deadline_action_taken' => $actionTaken,
-        'required_action_url' => $requiredActionUrl,
-        'deadline_handle_result' => $deadlineHandleResult,
-    ]);
-}
-
-    if (empty($startDecision['allowed'])) {
-        http_response_code(409);
-        json_ok([
-            'ok' => false,
-            'blocked' => true,
-            'error' => 'Progress test start blocked by progression rules.',
-            'decision' => $startDecision['decision'],
-            'deadline_state' => $startDecision['deadline_state'],
-            'summary_state' => $startDecision['summary_state'],
-            'attempt_state' => $startDecision['attempt_state'],
-            'required_actions' => $startDecision['required_actions'],
-        ]);
-    }
-
-    $summaryStatus = (string)($startDecision['summary_state']['summary_status'] ?? 'missing');
-
-    $attempt = (int)($startDecision['attempt_state']['next_attempt_number'] ?? 1);
-    if ($attempt <= 0) {
-        $attempt = 1;
-    }
-
-    $maxAllowedAttempts = (int)($startDecision['attempt_state']['effective_allowed_attempts'] ?? 0);
-
-    $effectiveDeadlineUtc = (string)($startDecision['deadline_state']['effective_deadline_utc'] ?? '');
-    $deadlineSource = (string)($startDecision['deadline_state']['deadline_source'] ?? 'cohort_default');
-
-    if ($effectiveDeadlineUtc === '') {
-        throw new RuntimeException('Unable to resolve effective deadline');
-    }
-
-    $nowUtc = gmdate('Y-m-d H:i:s');
-
-    $seed = bin2hex(random_bytes(16));
 
 $create = $engine->createProgressTestAttempt(
     $userId,
     $cohortId,
     $lessonId,
-    $role === 'admin' ? 'admin' : 'student'
+    $role === 'admin' ? 'admin' : 'student',
+    $role === 'admin' ? $userId : null
 );
 
 if (!empty($create['blocked'])) {
     http_response_code(409);
+
+    $reason = (string)($create['reason'] ?? 'blocked');
+    $message = 'Progress test start blocked.';
+
+    if ($reason === 'deadline') {
+        $message = 'The effective deadline for this lesson has passed.';
+    } elseif ($reason === 'training_suspended') {
+        $message = 'Training is currently suspended for this lesson.';
+    } elseif ($reason === 'instructor_required') {
+        $message = 'Instructor approval is required before another attempt can begin.';
+    } elseif ($reason === 'remediation_required') {
+        $message = 'Remediation is required before another attempt can begin.';
+    } elseif ($reason === 'summary_required') {
+        $message = 'An acceptable lesson summary is required before this progress test can begin.';
+    }
+
     json_ok([
         'ok' => false,
         'blocked' => true,
-        'reason' => $create['reason'] ?? 'blocked',
-        'decision' => $create['decision'] ?? null
+        'reason' => $reason,
+        'error' => $message,
+        'decision' => $create['decision'] ?? [],
+		'deadline_state' => $create['deadline_state'] ?? [],
     ]);
 }
 
