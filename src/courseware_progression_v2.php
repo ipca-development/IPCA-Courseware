@@ -1889,123 +1889,132 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
 	
 	
 	
-    public function evaluateProgressionDecision(array $context): array
-    {
-        $activity = (array)($context['activity_state'] ?? []);
-        $deadline = (array)($context['deadline_state'] ?? []);
-        $attempt = (array)($context['attempt_state'] ?? []);
-        $classification = (array)($context['classification'] ?? []);
-        $summaryState = (array)($context['summary_state'] ?? []);
-        $phase = (string)($context['phase'] ?? 'prepare_start');
-		$requiredActions = (array)($context['required_actions'] ?? []);
-		$hasBlockingActions = !empty($requiredActions['blocking']);
+public function evaluateProgressionDecision(array $context): array
+{
+    $activity = (array)($context['activity_state'] ?? []);
+    $deadline = (array)($context['deadline_state'] ?? []);
+    $attempt = (array)($context['attempt_state'] ?? []);
+    $classification = (array)($context['classification'] ?? []);
+    $summaryState = (array)($context['summary_state'] ?? []);
+    $phase = (string)($context['phase'] ?? 'prepare_start');
+    $requiredActions = (array)($context['required_actions'] ?? []);
+    $hasBlockingActions = !empty($requiredActions['blocking']);
 
-		$trainingSuspended = !empty($activity['training_suspended']);
-		$oneOnOneRequired = !empty($activity['one_on_one_required']) && empty($activity['one_on_one_completed']);
-		$deadlineBlocked = !empty($deadline['deadline_passed']);
-		
-        $summaryRequiredBeforeStart = !empty($summaryState['summary_required_before_test_start']);
-        $summaryStatus = (string)($summaryState['summary_status'] ?? 'missing');
-        $summaryReadyForStart = (!$summaryRequiredBeforeStart) || ($summaryStatus === 'acceptable');
+    $trainingSuspended = !empty($activity['training_suspended']);
+    $oneOnOneRequired = !empty($activity['one_on_one_required']) && empty($activity['one_on_one_completed']);
+    $deadlineBlocked = !empty($deadline['deadline_passed']);
 
-        $instructorRequired = false;
-        $remediationRequired = false;
-        $summaryBlocked = false;
+    $summaryRequiredBeforeStart = !empty($summaryState['summary_required_before_test_start']);
+    $summaryStatus = (string)($summaryState['summary_status'] ?? 'missing');
+    $summaryReadyForStart = (!$summaryRequiredBeforeStart) || ($summaryStatus === 'acceptable');
 
-        if ($phase === 'prepare_start') {
-            if (!$summaryReadyForStart) {
-                $summaryBlocked = true;
-            } elseif (($attempt['next_attempt_number'] ?? 1) > ($attempt['effective_allowed_attempts'] ?? 0)) {
-                if (($attempt['next_attempt_number'] ?? 1) >= ($attempt['instructor_escalation_attempt'] ?? PHP_INT_MAX)) {
-                    $instructorRequired = true;
-                } elseif (!(bool)($attempt['remediation_completed'] ?? false)) {
-                    $remediationRequired = true;
-                } else {
-                    $instructorRequired = true;
-                }
-            } elseif (
-                ($attempt['next_attempt_number'] ?? 1) > ($attempt['initial_attempt_limit'] ?? PHP_INT_MAX)
-                && !(bool)($attempt['remediation_completed'] ?? false)
+    $instructorRequired = false;
+    $remediationRequired = false;
+    $summaryBlocked = false;
+
+    if ($phase === 'prepare_start') {
+        if (!$summaryReadyForStart) {
+            $summaryBlocked = true;
+        } elseif (($attempt['next_attempt_number'] ?? 1) > ($attempt['effective_allowed_attempts'] ?? 0)) {
+            if (($attempt['next_attempt_number'] ?? 1) >= ($attempt['instructor_escalation_attempt'] ?? PHP_INT_MAX)) {
+                $instructorRequired = true;
+            } elseif (!(bool)($attempt['remediation_completed'] ?? false)) {
+                $remediationRequired = true;
+            } else {
+                $instructorRequired = true;
+            }
+        } elseif (
+            ($attempt['next_attempt_number'] ?? 1) > ($attempt['initial_attempt_limit'] ?? PHP_INT_MAX)
+            && !(bool)($attempt['remediation_completed'] ?? false)
+        ) {
+            $remediationRequired = true;
+        }
+    } else {
+        if (!empty($classification['counts_as_unsat'])) {
+            $currentAttemptNumber = (int)($attempt['current_attempt_number'] ?? 1);
+            $remediationTriggerAttempt = (int)($attempt['remediation_trigger_attempt'] ?? PHP_INT_MAX);
+            $instructorEscalationAttempt = (int)($attempt['instructor_escalation_attempt'] ?? PHP_INT_MAX);
+            $maxTotalAttemptsWithoutAdminOverride = (int)($attempt['max_total_attempts_without_admin_override'] ?? PHP_INT_MAX);
+            $remediationCompleted = !empty($attempt['remediation_completed']);
+
+            if ($remediationTriggerAttempt <= 0) {
+                $remediationTriggerAttempt = PHP_INT_MAX;
+            }
+
+            if ($instructorEscalationAttempt <= 0) {
+                $instructorEscalationAttempt = $maxTotalAttemptsWithoutAdminOverride;
+            }
+
+            if ($instructorEscalationAttempt <= 0) {
+                $instructorEscalationAttempt = PHP_INT_MAX;
+            }
+
+            if (
+                !$remediationCompleted
+                && $currentAttemptNumber === $remediationTriggerAttempt
             ) {
                 $remediationRequired = true;
+            } elseif ($currentAttemptNumber >= $instructorEscalationAttempt) {
+                $instructorRequired = true;
             }
-                } else {
-            		if (!empty($classification['counts_as_unsat'])) {
-						$currentAttemptNumber = (int)($attempt['current_attempt_number'] ?? 1);
-						$effectiveAllowedAttempts = (int)($attempt['effective_allowed_attempts'] ?? 0);
-						$remediationTriggerAttempt = (int)($attempt['remediation_trigger_attempt'] ?? PHP_INT_MAX);
-						$remediationCompleted = !empty($attempt['remediation_completed']);
-
-						if ($effectiveAllowedAttempts <= 0) {
-							$effectiveAllowedAttempts = (int)($attempt['instructor_escalation_attempt'] ?? PHP_INT_MAX);
-						}
-
-						if ($currentAttemptNumber >= $effectiveAllowedAttempts) {
-							$instructorRequired = true;
-						} elseif (
-							$currentAttemptNumber === $remediationTriggerAttempt
-							&& !$remediationCompleted
-						) {
-							$remediationRequired = true;
-						}
-					}
         }
-
-        if ($oneOnOneRequired) {
-            $instructorRequired = true;
-        }
-
-        $priority = 'normal';
-        $allowed = true;
-        $requiredActionDecision = [
-            'should_create_any' => false,
-            'action_types' => [],
-        ];
-
-        if ($trainingSuspended) {
-            $priority = 'training_suspended';
-            $allowed = false;
-        } elseif ($deadlineBlocked) {
-            $priority = 'deadline_blocked';
-            $allowed = false;
-        } elseif ($hasBlockingActions) {
-    		$priority = 'required_action_pending';
-			$allowed = false;
-		} elseif ($instructorRequired) {
-            $priority = 'instructor_required';
-            $allowed = false;
-            if ($phase === 'finalize') {
-                $requiredActionDecision = [
-                    'should_create_any' => true,
-                    'action_types' => ['instructor_approval'],
-                ];
-            }
-        } elseif ($remediationRequired) {
-            $priority = 'remediation_required';
-            $allowed = false;
-            if ($phase === 'finalize') {
-                $requiredActionDecision = [
-                    'should_create_any' => true,
-                    'action_types' => ['remediation_acknowledgement'],
-                ];
-            }
-        } elseif ($summaryBlocked) {
-            $priority = 'summary_required';
-            $allowed = false;
-        }
-
-        return [
-            'phase' => $phase,
-            'priority_state' => $priority,
-            'allowed' => $allowed,
-            'required_action_decision' => $requiredActionDecision,
-            'training_suspended' => $trainingSuspended,
-            'deadline_blocked' => $deadlineBlocked,
-            'instructor_required' => $instructorRequired,
-            'remediation_required' => $remediationRequired,
-            'summary_blocked' => $summaryBlocked,
-        ];
     }
+
+    if ($oneOnOneRequired) {
+        $instructorRequired = true;
+    }
+
+    $priority = 'normal';
+    $allowed = true;
+    $requiredActionDecision = [
+        'should_create_any' => false,
+        'action_types' => [],
+    ];
+
+    if ($trainingSuspended) {
+        $priority = 'training_suspended';
+        $allowed = false;
+    } elseif ($deadlineBlocked) {
+        $priority = 'deadline_blocked';
+        $allowed = false;
+    } elseif ($hasBlockingActions) {
+        $priority = 'required_action_pending';
+        $allowed = false;
+    } elseif ($instructorRequired) {
+        $priority = 'instructor_required';
+        $allowed = false;
+        if ($phase === 'finalize') {
+            $requiredActionDecision = [
+                'should_create_any' => true,
+                'action_types' => ['instructor_approval'],
+            ];
+        }
+    } elseif ($remediationRequired) {
+        $priority = 'remediation_required';
+        $allowed = false;
+        if ($phase === 'finalize') {
+            $requiredActionDecision = [
+                'should_create_any' => true,
+                'action_types' => ['remediation_acknowledgement'],
+            ];
+        }
+    } elseif ($summaryBlocked) {
+        $priority = 'summary_required';
+        $allowed = false;
+    }
+
+    return [
+        'phase' => $phase,
+        'priority_state' => $priority,
+        'allowed' => $allowed,
+        'required_action_decision' => $requiredActionDecision,
+        'training_suspended' => $trainingSuspended,
+        'deadline_blocked' => $deadlineBlocked,
+        'instructor_required' => $instructorRequired,
+        'remediation_required' => $remediationRequired,
+        'summary_blocked' => $summaryBlocked,
+    ];
+}
 
     public function computeLessonActivityProjection(array $context, array $decision): array
     {
