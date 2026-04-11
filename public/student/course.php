@@ -61,6 +61,12 @@ if ($role === 'student') {
     }
 }
 
+$pendingRequiredActionsByLesson = [];
+
+if ($role === 'student') {
+    $pendingRequiredActionsByLesson = get_pending_required_action_map($pdo, $userId, $cohortId);
+}
+
 function cw_ui_date($value) {
     $value = trim((string)$value);
     if ($value === '') {
@@ -254,6 +260,50 @@ function get_instructor_decision_state(PDO $pdo, $userId, $cohortId, $lessonId) 
     ];
 }
 
+
+function get_pending_required_action_map(PDO $pdo, int $userId, int $cohortId): array {
+    $st = $pdo->prepare("
+        SELECT lesson_id, action_type, id, token, title
+        FROM student_required_actions
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND status IN ('pending','opened')
+        ORDER BY id DESC
+    ");
+    $st->execute([$userId, $cohortId]);
+
+    $map = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $lessonId = (int)$row['lesson_id'];
+        $actionType = (string)$row['action_type'];
+
+        if (!isset($map[$lessonId])) {
+            $map[$lessonId] = [];
+        }
+
+        if (!isset($map[$lessonId][$actionType])) {
+            $map[$lessonId][$actionType] = $row;
+        }
+    }
+
+    return $map;
+}
+
+function get_lesson_activity_state(PDO $pdo, int $userId, int $cohortId, int $lessonId): array {
+    $st = $pdo->prepare("
+        SELECT *
+        FROM lesson_activity
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id = ?
+        LIMIT 1
+    ");
+    $st->execute([$userId, $cohortId, $lessonId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+
+    return is_array($row) ? $row : [];
+}
+
 function deadline_meta($deadlineUtc) {
     if (trim($deadlineUtc) === '') {
         return [
@@ -273,9 +323,9 @@ function deadline_meta($deadlineUtc) {
         $days = (int)floor($diffSeconds / 86400);
 
         if ($days < 0) {
-            $label = 'Needs attention today';
-            $class = 'deadline-red';
-        } elseif ($days === 0) {
+			$label = 'Deadline passed';
+			$class = 'deadline-red';
+		} elseif ($days === 0) {
             $label = 'Due today';
             $class = 'deadline-red';
         } elseif ($days === 1) {
@@ -507,7 +557,7 @@ function module_motivation_meta(array $course) {
         return ['label' => 'Completed Strongly', 'class' => 'ok', 'micro' => 'You finished this module with strong completion.'];
     }
     if ($blocked > 0) {
-        return ['label' => 'Blocked', 'class' => 'danger', 'micro' => 'This module needs instructor resolution before moving forward.'];
+        return ['label' => 'Blocked', 'class' => 'danger', 'micro' => 'This module has blocked lesson steps that need action before moving forward.'];
     }
     if ($revision > 0) {
         return ['label' => 'Priority', 'class' => 'danger', 'micro' => 'A summary revision inside this module is the current priority.'];
@@ -559,6 +609,32 @@ foreach ($lessonRows as $l) {
     $lessonId = (int)$l['lesson_id'];
     $courseId = (int)$l['course_id'];
 
+	
+	$activityState = ($role === 'admin')
+    ? []
+    : get_lesson_activity_state($pdo, $userId, $cohortId, $lessonId);
+
+$effectiveDeadlineState = ($role === 'admin')
+    ? [
+        'effective_deadline_utc' => (string)$l['deadline_utc'],
+        'deadline_source' => 'cohort_default',
+        'base_deadline_utc' => (string)$l['deadline_utc'],
+        'override_id' => null,
+        'deadline_passed' => false,
+    ]
+    : $progression->resolveDeadlineState($userId, $cohortId, $lessonId);
+
+$effectiveDeadlineUtc = (string)($effectiveDeadlineState['effective_deadline_utc'] ?? (string)$l['deadline_utc']);
+$baseDeadlineUtc = (string)$l['deadline_utc'];
+
+$pendingActions = ($role === 'admin')
+    ? []
+    : ($pendingRequiredActionsByLesson[$lessonId] ?? []);
+
+$pendingDeadlineReason = !empty($pendingActions['deadline_reason_submission']);
+$pendingRemediation = !empty($pendingActions['remediation_acknowledgement']);
+$pendingInstructorApproval = !empty($pendingActions['instructor_approval']);
+	
     if (!isset($courseBlocks[$courseId])) {
         $courseBlocks[$courseId] = [
             'course_id' => $courseId,
@@ -615,10 +691,10 @@ foreach ($lessonRows as $l) {
         'training_suspended' => 0,
     ]
     : [
-        'granted_extra_attempts' => (int)($activity['granted_extra_attempts'] ?? 0),
-        'one_on_one_required' => (int)($activity['one_on_one_required'] ?? 0),
-        'one_on_one_completed' => (int)($activity['one_on_one_completed'] ?? 0),
-        'training_suspended' => (int)($activity['training_suspended'] ?? 0),
+        'granted_extra_attempts' => (int)($activityState['granted_extra_attempts'] ?? 0),
+        'one_on_one_required' => (int)($activityState['one_on_one_required'] ?? 0),
+        'one_on_one_completed' => (int)($activityState['one_on_one_completed'] ?? 0),
+        'training_suspended' => (int)($activityState['training_suspended'] ?? 0),
     ];
 
 $attemptState = ($role === 'admin')
@@ -640,22 +716,26 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
     $testPassed = !empty($test['passed']);
     $bestScore = $test['best_score'];
 
-    $canTest = true;
-    if ($role === 'student' && $locked) $canTest = false;
-    if ($role === 'student' && !$summaryOk) $canTest = false;
-    if ($role === 'student' && $testPassed) $canTest = false;
-    if ($role === 'student' && $attemptsLeft <= 0) $canTest = false;
-    if ($role === 'student' && (int)$instructorDecision['training_suspended'] === 1) $canTest = false;
-    if (
-        $role === 'student' &&
-        (int)$instructorDecision['one_on_one_required'] === 1 &&
-        (int)$instructorDecision['one_on_one_completed'] !== 1
-    ) {
-        $canTest = false;
-    }
+  	$canTest = true;
+	if ($role === 'student' && $locked) $canTest = false;
+	if ($role === 'student' && !$summaryOk) $canTest = false;
+	if ($role === 'student' && $testPassed) $canTest = false;
+	if ($role === 'student' && $attemptsLeft <= 0) $canTest = false;
+	if ($role === 'student' && (int)$instructorDecision['training_suspended'] === 1) $canTest = false;
+	if ($role === 'student' && $pendingDeadlineReason) $canTest = false;
+	if ($role === 'student' && $pendingRemediation) $canTest = false;
+	if ($role === 'student' && $pendingInstructorApproval) $canTest = false;
+	if ($role === 'student' && !empty($effectiveDeadlineState['deadline_passed'])) $canTest = false;
+	if (
+		$role === 'student' &&
+		(int)$instructorDecision['one_on_one_required'] === 1 &&
+		(int)$instructorDecision['one_on_one_completed'] !== 1
+	) {
+		$canTest = false;
+	}
 
     $ptUrlV2 = '/student/progress_test_v2.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
-    $deadline = deadline_progress_meta((string)$cohort['start_date'], (string)$l['deadline_utc']);
+    $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc);
 
     if ($bestScore !== null) {
         $allBestScores[] = (int)$bestScore;
@@ -685,7 +765,18 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'external_lesson_id' => (int)$l['external_lesson_id'],
         'lesson_title' => (string)$l['lesson_title'],
         'course_title' => (string)$l['course_title'],
-        'deadline_utc' => (string)$l['deadline_utc'],
+        'deadline_utc' => $effectiveDeadlineUtc,
+		'base_deadline_utc' => $baseDeadlineUtc,
+		'deadline_source' => (string)($effectiveDeadlineState['deadline_source'] ?? 'cohort_default'),
+		'deadline_passed' => !empty($effectiveDeadlineState['deadline_passed']),
+		'pending_deadline_reason' => $pendingDeadlineReason,
+		'pending_remediation' => $pendingRemediation,
+		'pending_instructor_approval' => $pendingInstructorApproval,
+		'action_required_url' => $pendingDeadlineReason
+			? ('/student/remediation_action.php?token=' . urlencode((string)$pendingActions['deadline_reason_submission']['token']))
+			: ($pendingRemediation
+        		? ('/student/remediation_action.php?token=' . urlencode((string)$pendingActions['remediation_acknowledgement']['token']))
+        		: ''),
         'deadline' => $deadline,
         'locked' => $locked,
         'passed' => $passed,
@@ -709,6 +800,8 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
     $courseBlocks[$courseId]['lessons'][] = $row;
     $courseBlocks[$courseId]['last_deadline_utc'] = (string)$l['deadline_utc'];
 }
+
+
 
 $courseBlocks = array_values($courseBlocks);
 
@@ -737,9 +830,15 @@ foreach ($courseBlocks as $k => $block) {
         if (!empty($lx['can_test'])) {
             $testReadyCount++;
         }
-        if (!empty($lx['instructor_decision']['training_suspended']) || !empty($lx['locked'])) {
-            $blockedCount++;
-        }
+        if (
+			!empty($lx['instructor_decision']['training_suspended']) ||
+			!empty($lx['locked']) ||
+			!empty($lx['pending_deadline_reason']) ||
+			!empty($lx['pending_remediation']) ||
+			!empty($lx['pending_instructor_approval'])
+		) {
+			$blockedCount++;
+		}
 
         if ($nextLessonTitle === null && empty($lx['passed']) && empty($lx['locked'])) {
             $nextLessonTitle = (string)$lx['lesson_title'];
@@ -1535,33 +1634,39 @@ cw_header('Course');
                       $rowClass = ((int)$lx['lesson_id'] === $recommendedLessonId) ? 'resume-highlight' : '';
 
                       $statusText = 'Study the lesson';
-                      $appendAttempts = false;
+						$appendAttempts = false;
 
-                      if (!empty($lx['locked'])) {
-                          $statusText = 'Locked';
-                      } elseif (!empty($lx['instructor_decision']['training_suspended'])) {
-                          $statusText = 'Training paused';
-                      } elseif (!empty($lx['passed'])) {
-                          $statusText = 'Completed';
-                      } elseif (!empty($lx['instructor_decision']['one_on_one_required']) && empty($lx['instructor_decision']['one_on_one_completed'])) {
-                          $statusText = 'Instructor session required';
-                      } elseif ((string)$lx['summary_review_status'] === 'pending') {
-                          $statusText = 'Waiting for instructor review';
-                      } elseif ($attemptsLeft <= 0) {
-                          $statusText = 'No attempts left';
-                      } elseif ((string)$lx['summary_review_status'] === 'needs_revision') {
-                          $statusText = 'Improve summary';
-                          $appendAttempts = true;
-                      } elseif (!empty($lx['can_test'])) {
-                          $statusText = 'Ready for progress test';
-                          $appendAttempts = true;
-                      } elseif (!$lx['test_passed'] && $last && isset($last['status']) && (string)$last['status'] === 'completed') {
-                          $statusText = 'Improve progress test';
-                          $appendAttempts = true;
-                      } else {
-                          $statusText = 'Study the lesson';
-                          $appendAttempts = true;
-                      }
+						if (!empty($lx['locked'])) {
+							$statusText = 'Locked';
+						} elseif (!empty($lx['instructor_decision']['training_suspended'])) {
+							$statusText = 'Training paused';
+						} elseif (!empty($lx['passed'])) {
+							$statusText = 'Completed';
+						} elseif (!empty($lx['pending_deadline_reason'])) {
+							$statusText = 'Action required: submit deadline reason';
+						} elseif (!empty($lx['pending_instructor_approval'])) {
+							$statusText = 'Awaiting instructor approval';
+						} elseif (!empty($lx['pending_remediation'])) {
+							$statusText = 'Complete remedial study acknowledgement';
+						} elseif (!empty($lx['instructor_decision']['one_on_one_required']) && empty($lx['instructor_decision']['one_on_one_completed'])) {
+							$statusText = 'Instructor session required';
+						} elseif ((string)$lx['summary_review_status'] === 'pending') {
+							$statusText = 'Waiting for instructor review';
+						} elseif ($attemptsLeft <= 0) {
+							$statusText = 'No attempts left';
+						} elseif ((string)$lx['summary_review_status'] === 'needs_revision') {
+							$statusText = 'Improve summary';
+							$appendAttempts = true;
+						} elseif (!empty($lx['can_test'])) {
+							$statusText = 'Ready for progress test';
+							$appendAttempts = true;
+						} elseif (!$lx['test_passed'] && $last && isset($last['status']) && (string)$last['status'] === 'completed') {
+							$statusText = 'Improve progress test';
+							$appendAttempts = true;
+						} else {
+							$statusText = 'Study the lesson';
+							$appendAttempts = true;
+						}
 
                       if ($appendAttempts && $attemptsLeft > 0) {
                           $statusText .= ' · ' . $attemptsLeft . ' attempt' . ($attemptsLeft === 1 ? '' : 's') . ' left';
@@ -1573,13 +1678,20 @@ cw_header('Course');
                       }
 
                       $testHref = '';
-                      $testLabel = '';
-                      if (!empty($lx['can_test'])) {
-                          $testHref = (string)$lx['progress_test_url'];
-                          $testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
-                      } else {
-                          $testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
-                      }
+						$testLabel = '';
+						$testBtnClass = 'primary';
+
+						if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])) {
+							$testHref = (string)$lx['action_required_url'];
+							$testLabel = 'Submit Reason';
+							$testBtnClass = 'warn';
+						} elseif (!empty($lx['can_test'])) {
+							$testHref = (string)$lx['progress_test_url'];
+							$testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
+							$testBtnClass = 'primary';
+						} else {
+							$testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
+						}
                     ?>
                     <tr class="<?= h($rowClass) ?>">
                       <td>
@@ -1624,7 +1736,7 @@ cw_header('Course');
                       <td class="td-center">
                         <div class="cell-action">
                           <?php if ($testHref !== ''): ?>
-                            <a class="action-btn primary" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
+                            <a class="action-btn <?= h($testBtnClass) ?>" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
                           <?php else: ?>
                             <span class="action-btn disabled"><?= h($testLabel) ?></span>
                           <?php endif; ?>
