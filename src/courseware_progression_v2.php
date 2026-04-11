@@ -1037,8 +1037,8 @@ final class CoursewareProgressionV2
         $warningText = "Important: this is your final automatic deadline extension for this lesson. If this deadline is missed again, instructor intervention will be required.\n\n";
     }
 
-    $instructionsHtml =
-        $instructionsHtml =
+    
+     $instructionsHtml =
 		'<p>Dear ' . $this->escapeHtml($studentName) . ',</p>'
 		. '<p>The deadline for <strong>' . $this->escapeHtml($lessonTitle) . '</strong> in <strong>' . $this->escapeHtml($cohortTitle) . '</strong> has been missed.</p>'
 		. '<p><strong>Previous effective deadline:</strong> ' . $this->escapeHtml($oldEffectiveDeadlineDisplay) . '</p>'
@@ -1249,131 +1249,123 @@ final class CoursewareProgressionV2
         ];
     }
 
-    public function finalizeProgressionDecision(int $progressTestId, array $finalizeData = []): array
-    {
-        if ($this->pdo->inTransaction()) {
-            throw new RuntimeException('finalizeProgressionDecision requires transaction ownership and cannot run inside an outer transaction.');
-        }
+ 
+public function createProgressTestAttempt(
+    int $userId,
+    int $cohortId,
+    int $lessonId,
+    string $actorType = 'student',
+    ?int $actorUserId = null
+): array {
 
-        $testRow = $this->getProgressTestRowById($progressTestId);
-        if (!$testRow) {
-            throw new RuntimeException('Progress test not found.');
-        }
+    $startDecision = $this->prepareStartDecision($userId, $cohortId, $lessonId);
 
-        $userId = (int)$testRow['user_id'];
-        $cohortId = (int)$testRow['cohort_id'];
-        $lessonId = (int)$testRow['lesson_id'];
+    if (!empty($startDecision['deadline_state']['deadline_passed'])) {
+        return [
+            'blocked' => true,
+            'reason' => 'deadline',
+            'deadline_state' => $startDecision['deadline_state']
+        ];
+    }
 
-        $policy = $this->resolveEffectivePolicySet($cohortId);
-        $behaviorMode = $this->resolveBehaviorMode($policy);
+    if (empty($startDecision['allowed'])) {
+        return [
+            'blocked' => true,
+            'reason' => 'progression_rules',
+            'decision' => $startDecision['decision']
+        ];
+    }
 
-        $scorePct = (int)($finalizeData['score_pct'] ?? (int)($testRow['score_pct'] ?? 0));
-        $completedAt = (string)($finalizeData['completed_at'] ?? gmdate('Y-m-d H:i:s'));
+    $attempt = (int)($startDecision['attempt_state']['next_attempt_number'] ?? 1);
+    if ($attempt <= 0) $attempt = 1;
 
-        $testForClassification = $testRow;
-        $testForClassification['completed_at'] = $completedAt;
+    $effectiveDeadlineUtc = (string)$startDecision['deadline_state']['effective_deadline_utc'];
+    $deadlineSource = (string)$startDecision['deadline_state']['deadline_source'];
 
-        $summaryState = $this->resolveSummaryState($userId, $cohortId, $lessonId, $policy);
-        $attemptState = $this->resolveAttemptPolicyState(
+    $nowUtc = gmdate('Y-m-d H:i:s');
+    $seed = bin2hex(random_bytes(16));
+
+    $this->pdo->beginTransaction();
+
+    try {
+
+        // Create progress test
+        $stmt = $this->pdo->prepare("
+            INSERT INTO progress_tests_v2
+            (
+                user_id,
+                cohort_id,
+                lesson_id,
+                attempt,
+                status,
+                seed,
+                started_at,
+                effective_deadline_utc,
+                deadline_source,
+                timing_status,
+                progress_pct,
+                status_text,
+                updated_at
+            )
+            VALUES (?, ?, ?, ?, 'preparing', ?, ?, ?, ?, 'unknown', 1, 'Initializing...', NOW())
+        ");
+
+        $stmt->execute([
             $userId,
             $cohortId,
             $lessonId,
-            $policy,
-            (int)($testRow['attempt'] ?? 1),
-            $behaviorMode
-        );
-        $deadlineState = $this->resolveDeadlineState($userId, $cohortId, $lessonId);
-        $classification = $this->classifyProgressTestResult($testForClassification, $scorePct, $policy, $behaviorMode);
-        $progressionContext = $this->getProgressionContextForUserLesson($userId, $cohortId, $lessonId);
+            $attempt,
+            $seed,
+            $nowUtc,
+            $effectiveDeadlineUtc,
+            $deadlineSource
+        ]);
 
-        $decision = $this->evaluateProgressionDecision([
-            'phase' => 'finalize',
+        $testId = (int)$this->pdo->lastInsertId();
+
+        // Projection (canonical)
+        $this->persistLessonActivityProjection($userId, $cohortId, $lessonId, [
+            'engine_projection' => true,
             'user_id' => $userId,
             'cohort_id' => $cohortId,
             'lesson_id' => $lessonId,
-            'activity_state' => $progressionContext['activity_state'],
-            'summary_state' => $summaryState,
-            'attempt_state' => $attemptState,
-            'deadline_state' => $deadlineState,
-            'classification' => $classification,
+            'phase' => 'start',
+            'fields' => [
+                'started_at' => $nowUtc,
+                'effective_deadline_utc' => $effectiveDeadlineUtc,
+                'completion_status' => 'in_progress',
+                'test_pass_status' => 'in_progress',
+                'last_state_eval_at' => $nowUtc
+            ]
         ]);
 
-        $this->pdo->beginTransaction();
+        // Event
+        $this->logProgressionEvent([
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => $testId,
+            'event_type' => 'attempt',
+            'event_code' => 'progress_test_created',
+            'event_status' => 'info',
+            'actor_type' => $actorType,
+            'actor_user_id' => $actorUserId,
+            'event_time' => $nowUtc
+        ]);
 
-        try {
-            $requiredActions = $this->ensureRequiredActionsForDecision($progressTestId, $decision);
+        $this->pdo->commit();
 
-            $notificationDecision = $this->buildNotificationDecision($progressionContext, $decision, [
-                'behavior_mode' => $behaviorMode,
-                'required_actions' => $requiredActions,
-                'phase' => 'finalize',
-            ]);
+        return [
+            'blocked' => false,
+            'test_id' => $testId,
+            'attempt' => $attempt
+        ];
 
-            $projection = $this->computeLessonActivityProjection([
-                'phase' => 'finalize',
-                'user_id' => $userId,
-                'cohort_id' => $cohortId,
-                'lesson_id' => $lessonId,
-                'summary_state' => $summaryState,
-                'attempt_state' => $attemptState,
-                'deadline_state' => $deadlineState,
-                'classification' => $classification,
-                'activity_state' => $progressionContext['activity_state'],
-                'required_actions' => $requiredActions,
-                'completed_at' => $completedAt,
-            ], $decision);
-
-            $persistResult = $this->persistProgressionConsequences(
-                $progressTestId,
-                $classification,
-                $decision,
-                $requiredActions,
-                $projection,
-                ['completed_at' => $completedAt]
-            );
-
-            $this->logProgressionEvent([
-                'user_id' => $userId,
-                'cohort_id' => $cohortId,
-                'lesson_id' => $lessonId,
-                'progress_test_id' => $progressTestId,
-                'event_type' => 'finalization',
-                'event_code' => 'progression_decision_finalized',
-                'event_status' => 'info',
-                'actor_type' => 'system',
-                'actor_user_id' => null,
-                'event_time' => $completedAt,
-                'payload' => [
-                    'classification' => $classification,
-                    'decision' => $decision,
-                    'required_actions_count' => count((array)($requiredActions['actions'] ?? [])),
-                    'notification_count' => count((array)($notificationDecision['notifications'] ?? [])),
-                ],
-                'legal_note' => 'Central progression finalization decision persisted by CoursewareProgressionV2.',
-            ]);
-
-            $this->pdo->commit();
-
-            return [
-                'ok' => true,
-                'progress_test_id' => $progressTestId,
-                'classification' => $classification,
-                'decision' => $decision,
-                'summary_state' => $summaryState,
-                'attempt_state' => $attemptState,
-                'deadline_state' => $deadlineState,
-                'required_actions' => $requiredActions,
-                'notification_decision' => $notificationDecision,
-                'lesson_activity_projection' => $projection,
-                'persist_result' => $persistResult,
-            ];
-        } catch (Throwable $e) {
-            $this->pdo->rollBack();
-            throw $e;
-        }
+    } catch (Throwable $e) {
+        $this->pdo->rollBack();
+        throw $e;
     }
-
-	
+}	
 	
 public function finalizeAssessedProgressTest(int $progressTestId, array $assessment): array
 {
@@ -1721,10 +1713,10 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         $summaryState = (array)($context['summary_state'] ?? []);
         $phase = (string)($context['phase'] ?? 'prepare_start');
 
-        $trainingSuspended = !empty($activity['training_suspended']);
-        $oneOnOneRequired = !empty($activity['one_on_one_required']) && empty($activity['one_on_one_completed']);
-        $deadlineBlocked = !empty($deadline['deadline_passed']);
-
+		$trainingSuspended = !empty($activity['training_suspended']);
+		$oneOnOneRequired = !empty($activity['one_on_one_required']) && empty($activity['one_on_one_completed']);
+		$deadlineBlocked = !empty($deadline['deadline_passed']);
+		
         $summaryRequiredBeforeStart = !empty($summaryState['summary_required_before_test_start']);
         $summaryStatus = (string)($summaryState['summary_status'] ?? 'missing');
         $summaryReadyForStart = (!$summaryRequiredBeforeStart) || ($summaryStatus === 'acceptable');
@@ -2263,19 +2255,15 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
         throw new RuntimeException('Instructor approval action is no longer pending.');
     }
 
-    $decisionCode = trim((string)($payload['decision_code'] ?? ''));
-    $decisionNotes = trim((string)($payload['decision_notes'] ?? ''));
-	$oneOnOneDate = trim((string)($payload['one_on_one_date'] ?? ''));
-    $oneOnOneTimeFrom = trim((string)($payload['one_on_one_time_from'] ?? ''));
-    $oneOnOneTimeUntil = trim((string)($payload['one_on_one_time_until'] ?? ''));
-    $oneOnOneInstructorUserId = (int)($payload['one_on_one_instructor_user_id'] ?? 0);
-	$oneOnOneStartUtc = trim((string)($payload['one_on_one_start_utc'] ?? ''));
-    $oneOnOneEndUtc = trim((string)($payload['one_on_one_end_utc'] ?? ''));
-    $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
-	$oneOnOneDate = trim((string)($payload['one_on_one_date'] ?? ''));
-	$oneOnOneTimeFrom = trim((string)($payload['one_on_one_time_from'] ?? ''));
-	$oneOnOneTimeUntil = trim((string)($payload['one_on_one_time_until'] ?? ''));
-	$oneOnOneInstructorUserId = (int)($payload['one_on_one_instructor_user_id'] ?? 0);
+$decisionCode = trim((string)($payload['decision_code'] ?? ''));
+$decisionNotes = trim((string)($payload['decision_notes'] ?? ''));
+$oneOnOneDate = trim((string)($payload['one_on_one_date'] ?? ''));
+$oneOnOneTimeFrom = trim((string)($payload['one_on_one_time_from'] ?? ''));
+$oneOnOneTimeUntil = trim((string)($payload['one_on_one_time_until'] ?? ''));
+$oneOnOneInstructorUserId = (int)($payload['one_on_one_instructor_user_id'] ?? 0);
+$oneOnOneStartUtc = trim((string)($payload['one_on_one_start_utc'] ?? ''));
+$oneOnOneEndUtc = trim((string)($payload['one_on_one_end_utc'] ?? ''));
+$oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
 
     if ($decisionCode === '') {
         throw new RuntimeException('decision_code is required.');
@@ -2321,6 +2309,32 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
         $majorInterventionFlag = 1;
     }
 
+	
+	if ($decisionCode === 'approve_with_one_on_one') {
+    if (
+        $oneOnOneStartUtc === '' ||
+        $oneOnOneEndUtc === '' ||
+        $oneOnOneTimezone === '' ||
+        $oneOnOneInstructorUserId <= 0
+    ) {
+        throw new RuntimeException('One-on-one scheduling details are required.');
+    }
+
+    $startTs = strtotime($oneOnOneStartUtc);
+    $endTs = strtotime($oneOnOneEndUtc);
+
+    if ($startTs === false || $endTs === false) {
+        throw new RuntimeException('Invalid one-on-one UTC datetime values.');
+    }
+
+    if ($endTs <= $startTs) {
+        throw new RuntimeException('One-on-one end time must be after start time.');
+    }
+}
+	
+	
+	
+	
     $nowUtc = gmdate('Y-m-d H:i:s');
     $automationContext = [];
     $projectionResult = [];

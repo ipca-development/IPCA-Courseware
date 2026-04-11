@@ -170,132 +170,26 @@ $engine = new CoursewareProgressionV2($pdo);
 
     $seed = bin2hex(random_bytes(16));
 
-    $pdo->beginTransaction();
-
-    $activitySel = $pdo->prepare("
-        SELECT id, attempt_count, best_score, completed_at
-        FROM lesson_activity
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id = ?
-        LIMIT 1
-    ");
-    $activitySel->execute([$userId, $cohortId, $lessonId]);
-    $activityRow = $activitySel->fetch(PDO::FETCH_ASSOC);
-
-    if ($activityRow) {
-        $updActivity = $pdo->prepare("
-    UPDATE lesson_activity
-    SET
-        started_at = COALESCE(started_at, ?),
-        summary_status = ?,
-        effective_deadline_utc = ?,
-        last_state_eval_at = ?,
-        updated_at = NOW()
-    WHERE id = ?
-");
-        $updActivity->execute([
-    $nowUtc,
-    $summaryStatus,
-    $effectiveDeadlineUtc,
-    $nowUtc,
-    (int)$activityRow['id']
-]);
-    } else {
-      $insActivity = $pdo->prepare("
-    INSERT INTO lesson_activity
-    (
-        user_id,
-        cohort_id,
-        lesson_id,
-        started_at,
-        completed_at,
-        total_seconds,
-        attempt_count,
-        best_score,
-        summary_status,
-        effective_deadline_utc,
-        last_state_eval_at,
-        created_at,
-        updated_at
-    )
-    VALUES
-    (
-        ?, ?, ?, ?, NULL, 0, 0, NULL, ?, ?, ?, NOW(), NOW()
-    )
-");
-$insActivity->execute([
+$create = $engine->createProgressTestAttempt(
     $userId,
     $cohortId,
     $lessonId,
-    $nowUtc,
-    $summaryStatus,
-    $effectiveDeadlineUtc,
-    $nowUtc
-]);
-    }
+    $role === 'admin' ? 'admin' : 'student'
+);
 
-    $ins = $pdo->prepare("
-        INSERT INTO progress_tests_v2
-        (
-            user_id,
-            cohort_id,
-            lesson_id,
-            attempt,
-            status,
-            seed,
-            started_at,
-            effective_deadline_utc,
-            deadline_source,
-            timing_status,
-            progress_pct,
-            status_text,
-            updated_at
-        )
-        VALUES
-        (
-            ?, ?, ?, ?, 'preparing', ?, NOW(), ?, ?, 'unknown', ?, ?, NOW()
-        )
-    ");
-
-    $ins->execute([
-        $userId,
-        $cohortId,
-        $lessonId,
-        $attempt,
-        $seed,
-        $effectiveDeadlineUtc,
-        $deadlineSource,
-        1,
-        'Initializing progress test...'
+if (!empty($create['blocked'])) {
+    http_response_code(409);
+    json_ok([
+        'ok' => false,
+        'blocked' => true,
+        'reason' => $create['reason'] ?? 'blocked',
+        'decision' => $create['decision'] ?? null
     ]);
+}
 
-    $testId = (int)$pdo->lastInsertId();
-    if ($testId <= 0) {
-        throw new RuntimeException('Failed to create progress test');
-    }
-
-    $engine->logProgressionEvent([
-        'user_id' => $userId,
-        'cohort_id' => $cohortId,
-        'lesson_id' => $lessonId,
-        'progress_test_id' => $testId,
-        'event_type' => 'attempt',
-        'event_code' => 'progress_test_created',
-        'event_status' => 'info',
-        'actor_type' => $role === 'admin' ? 'admin' : 'student',
-        'actor_user_id' => $userId,
-        'payload' => [
-            'attempt' => $attempt,
-            'effective_deadline_utc' => $effectiveDeadlineUtc,
-            'deadline_source' => $deadlineSource,
-            'max_allowed_attempts' => $maxAllowedAttempts
-        ],
-        'legal_note' => 'Progress test attempt created under active V2 progression policy.'
-    ]);
-
-    $pdo->commit();
-
+$testId = (int)$create['test_id'];
+$attempt = (int)$create['attempt'];
+	
     // Release PHP session lock before internal background request
 	if (session_status() === PHP_SESSION_ACTIVE) {
     session_write_close();

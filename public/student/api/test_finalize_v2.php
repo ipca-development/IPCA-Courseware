@@ -1166,26 +1166,6 @@ $summaryStatus = (string)($activityState['summary_status'] ?? '');
 $testPassStatus = (string)($activityState['test_pass_status'] ?? '');
 $completionStatus = (string)($activityState['completion_status'] ?? '');
 
-$emailSendResults = [];
-foreach ($queuedEmailIds as $queuedEmailId) {
-    try {
-        $emailSendResults[] = [
-            'email_id' => (int)$queuedEmailId,
-            'result' => $engine->sendProgressionEmailById((int)$queuedEmailId)
-        ];
-    } catch (Throwable $mailEx) {
-        $emailSendResults[] = [
-            'email_id' => (int)$queuedEmailId,
-            'result' => [
-                'ok' => false,
-                'provider' => 'smtp',
-                'message_id' => null,
-                'error' => $mailEx->getMessage()
-            ]
-        ];
-    }
-}
-
 json_out([
     'ok' => true,
     'test_id' => $testId,
@@ -1207,8 +1187,7 @@ json_out([
     'activity_summary_status' => $summaryStatus,
     'activity_test_pass_status' => $testPassStatus,
     'activity_completion_status' => $completionStatus,
-    'queued_email_ids' => $queuedEmailIds,
-    'email_send_results' => $emailSendResults
+    'automation_result' => $finalizeResult['automation_result'] ?? null
 ]);
 
 } catch (Throwable $e) {
