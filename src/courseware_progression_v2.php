@@ -4745,23 +4745,7 @@ private function dispatchAutomationEventIfAvailable(
     $row = $stmt->fetch();
     return $row ?: null;
 }
-	
-	
-	
-	private function getProgressTestByIdempotencyKey(string $key): ?array
-{
-    $stmt = $this->pdo->prepare("
-        SELECT *
-        FROM progress_tests_v2
-        WHERE idempotency_key = :key
-        LIMIT 1
-    ");
-    $stmt->execute([':key' => $key]);
-
-    $row = $stmt->fetch();
-    return $row ?: null;
-}
-	
+		
     private function getLatestProgressTestRowForLesson(int $userId, int $cohortId, int $lessonId): ?array
     {
         $stmt = $this->pdo->prepare("
