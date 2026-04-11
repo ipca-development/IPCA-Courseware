@@ -1432,15 +1432,18 @@ public function createProgressTestAttempt(
         ];
     }
 
-    if ($idempotencyKey === null) {
-        $idempotencyKey = hash('sha256', implode('|', [
-            $userId,
-            $cohortId,
-            $lessonId,
-            'start_attempt',
-            gmdate('Y-m-d-H')
-        ]));
+    if ($idempotencyKey !== null && $idempotencyKey !== '') {
+    $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
+
+    if ($existing) {
+        return [
+            'blocked' => false,
+            'test_id' => (int)$existing['id'],
+            'attempt' => (int)$existing['attempt'],
+            'idempotent_reuse' => true
+        ];
     }
+}
 
     $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
     if ($existing) {
