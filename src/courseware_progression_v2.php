@@ -713,23 +713,23 @@ final class CoursewareProgressionV2
             );
 
             $projectionResult = $this->persistLessonActivityProjection(
-                $userId,
-                $cohortId,
-                $lessonId,
-                [
-                    'engine_projection' => true,
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'phase' => 'deadline_extension_1_granted',
-                    'fields' => [
-                        'effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                        'test_pass_status' => 'deadline_missed',
-                        'completion_status' => 'deadline_blocked',
-                        'last_state_eval_at' => $nowUtc,
-                    ],
-                ]
-            );
+    $userId,
+    $cohortId,
+    $lessonId,
+    [
+        'engine_projection' => true,
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'phase' => 'deadline_extension_1_granted',
+        'fields' => [
+            'effective_deadline_utc' => $newEffectiveDeadlineUtc,
+            'test_pass_status' => 'in_progress',
+            'completion_status' => 'in_progress',
+            'last_state_eval_at' => $nowUtc,
+        ],
+    ]
+);
 
             $this->logProgressionEvent([
                 'user_id' => $userId,
@@ -804,23 +804,23 @@ final class CoursewareProgressionV2
             );
 
             $projectionResult = $this->persistLessonActivityProjection(
-                $userId,
-                $cohortId,
-                $lessonId,
-                [
-                    'engine_projection' => true,
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'phase' => 'deadline_extension_2_final_granted',
-                    'fields' => [
-                        'effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                        'test_pass_status' => 'deadline_missed',
-                        'completion_status' => 'deadline_blocked',
-                        'last_state_eval_at' => $nowUtc,
-                    ],
-                ]
-            );
+    $userId,
+    $cohortId,
+    $lessonId,
+    [
+        'engine_projection' => true,
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'phase' => 'deadline_extension_2_final_granted',
+        'fields' => [
+            'effective_deadline_utc' => $newEffectiveDeadlineUtc,
+            'test_pass_status' => 'in_progress',
+            'completion_status' => 'in_progress',
+            'last_state_eval_at' => $nowUtc,
+        ],
+    ]
+);
 
             $this->logProgressionEvent([
                 'user_id' => $userId,
