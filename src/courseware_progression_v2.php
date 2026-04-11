@@ -3575,10 +3575,8 @@ private function dispatchAutomationEventIfAvailable(
         ],
     ]);
 
-    $safePdo = new SafeAutomationPDO($this->pdo);
-
     $automation = new AutomationRuntime();
-    $result = $automation->dispatchEvent($safePdo, $eventKey, $automationContext);
+	$result = $automation->dispatchEvent($this->pdo, $eventKey, $automationContext);
 
     $this->logProgressionEvent([
         'user_id' => (int)($userId ?? ($automationContext['user_id'] ?? 0)),
