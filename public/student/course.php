@@ -315,26 +315,32 @@ function deadline_meta($deadlineUtc) {
 
     try {
         $deadline = new DateTime($deadlineUtc, new DateTimeZone('UTC'));
-        $todayUtc = new DateTime('now', new DateTimeZone('UTC'));
-        $todayDate = new DateTime($todayUtc->format('Y-m-d') . ' 00:00:00', new DateTimeZone('UTC'));
-        $deadlineDate = new DateTime($deadline->format('Y-m-d') . ' 00:00:00', new DateTimeZone('UTC'));
+        $now = new DateTime('now', new DateTimeZone('UTC'));
 
-        $diffSeconds = $deadlineDate->getTimestamp() - $todayDate->getTimestamp();
-        $days = (int)floor($diffSeconds / 86400);
+        $deadlineTs = $deadline->getTimestamp();
+        $nowTs = $now->getTimestamp();
+        $diff = $deadlineTs - $nowTs;
 
-        if ($days < 0) {
-			$label = 'Deadline passed';
-			$class = 'deadline-red';
-		} elseif ($days === 0) {
-            $label = 'Due today';
+        if ($diff < 0) {
+            $label = 'Deadline passed';
             $class = 'deadline-red';
-        } elseif ($days === 1) {
+        } elseif ($diff <= 3600) {
+            $mins = max(1, (int)floor($diff / 60));
+            $label = $mins . ' min left';
+            $class = 'deadline-red';
+        } elseif ($diff <= 86400) {
+            $hours = max(1, (int)floor($diff / 3600));
+            $label = $hours . ' hour' . ($hours === 1 ? '' : 's') . ' left';
+            $class = 'deadline-red';
+        } elseif ($diff <= (2 * 86400)) {
             $label = '1 day left';
             $class = 'deadline-orange';
-        } elseif ($days <= 3) {
+        } elseif ($diff <= (4 * 86400)) {
+            $days = (int)floor($diff / 86400);
             $label = $days . ' days left';
             $class = 'deadline-orange';
         } else {
+            $days = (int)floor($diff / 86400);
             $label = $days . ' days left';
             $class = 'deadline-green';
         }
@@ -342,7 +348,7 @@ function deadline_meta($deadlineUtc) {
         return [
             'label' => $label,
             'class' => $class,
-            'date'  => cw_ui_date($deadlineUtc)
+            'date'  => $deadline->format('D, M j, Y, H:i') . ' UTC'
         ];
     } catch (Throwable $e) {
         return [
@@ -432,8 +438,8 @@ function score_badge_meta($testPassed, $bestScore, $last, $attemptsLeft) {
 }
 
 function lesson_primary_action($lx) {
-    $deadlineLabel = (string)($lx['deadline']['label'] ?? '');
-    $isPriority = (strpos(strtolower($deadlineLabel), 'attention') !== false || strtolower($deadlineLabel) === 'due today');
+    $deadlineLabel = strtolower((string)($lx['deadline']['label'] ?? ''));
+	$isPriority = (!empty($lx['deadline_passed']) && empty($lx['passed']));
 
     if (!empty($lx['instructor_decision']['training_suspended'])) {
         return [
@@ -445,6 +451,36 @@ function lesson_primary_action($lx) {
         ];
     }
 
+		if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])) {
+		return [
+			'priority' => 5,
+			'label' => 'Submit Reason',
+			'href' => (string)$lx['action_required_url'],
+			'class' => 'warn',
+			'note' => 'Deadline reason required'
+		];
+	}
+
+	if (!empty($lx['pending_remediation']) && !empty($lx['action_required_url'])) {
+		return [
+			'priority' => 6,
+			'label' => 'Complete Action',
+			'href' => (string)$lx['action_required_url'],
+			'class' => 'warn',
+			'note' => 'Remedial study acknowledgement required'
+		];
+	}
+
+	if (!empty($lx['pending_instructor_approval'])) {
+		return [
+			'priority' => 7,
+			'label' => '',
+			'href' => '',
+			'class' => 'warn',
+			'note' => 'Awaiting instructor approval'
+		];
+}	
+	
     if ((string)$lx['summary_review_status'] === 'needs_revision' && (int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
         return [
             'priority' => 10,
@@ -609,8 +645,7 @@ foreach ($lessonRows as $l) {
     $lessonId = (int)$l['lesson_id'];
     $courseId = (int)$l['course_id'];
 
-	
-	$activityState = ($role === 'admin')
+$activityState = ($role === 'admin')
     ? []
     : get_lesson_activity_state($pdo, $userId, $cohortId, $lessonId);
 
@@ -625,7 +660,8 @@ $effectiveDeadlineState = ($role === 'admin')
     : $progression->resolveDeadlineState($userId, $cohortId, $lessonId);
 
 $effectiveDeadlineUtc = (string)($effectiveDeadlineState['effective_deadline_utc'] ?? (string)$l['deadline_utc']);
-$baseDeadlineUtc = (string)$l['deadline_utc'];
+$baseDeadlineUtc = (string)($effectiveDeadlineState['base_deadline_utc'] ?? (string)$l['deadline_utc']);
+$deadlineSource = (string)($effectiveDeadlineState['deadline_source'] ?? 'cohort_default');
 
 $pendingActions = ($role === 'admin')
     ? []
@@ -798,7 +834,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
     $row['primary_action'] = lesson_primary_action($row);
 
     $courseBlocks[$courseId]['lessons'][] = $row;
-    $courseBlocks[$courseId]['last_deadline_utc'] = (string)$l['deadline_utc'];
+    $courseBlocks[$courseId]['last_deadline_utc'] = $effectiveDeadlineUtc;
 }
 
 
@@ -823,27 +859,45 @@ foreach ($courseBlocks as $k => $block) {
         if ((string)$lx['summary_review_status'] === 'acceptable') $summaryApproved++;
         if ((string)$lx['summary_review_status'] === 'needs_revision') $revisionCount++;
 
-        $deadlineLabel = strtolower((string)$lx['deadline']['label']);
-        if ((strpos($deadlineLabel, 'attention') !== false || $deadlineLabel === 'due today') && empty($lx['passed'])) {
-            $overdueCount++;
-        }
-        if (!empty($lx['can_test'])) {
-            $testReadyCount++;
-        }
         if (
+			!empty($lx['deadline_passed']) &&
+			empty($lx['passed']) &&
+			empty($lx['pending_deadline_reason']) &&
+			empty($lx['pending_instructor_approval'])
+		) {
+			$overdueCount++;
+		}
+
+		if (!empty($lx['can_test'])) {
+			$testReadyCount++;
+		}
+
+		if (
 			!empty($lx['instructor_decision']['training_suspended']) ||
 			!empty($lx['locked']) ||
 			!empty($lx['pending_deadline_reason']) ||
 			!empty($lx['pending_remediation']) ||
-			!empty($lx['pending_instructor_approval'])
+			!empty($lx['pending_instructor_approval']) ||
+			(
+				!empty($lx['instructor_decision']['one_on_one_required']) &&
+				empty($lx['instructor_decision']['one_on_one_completed'])
+			)
 		) {
 			$blockedCount++;
 		}
 
-        if ($nextLessonTitle === null && empty($lx['passed']) && empty($lx['locked'])) {
-            $nextLessonTitle = (string)$lx['lesson_title'];
-            $recommendedLessonId = (int)$lx['lesson_id'];
-        }
+        if (
+    $nextLessonTitle === null &&
+    empty($lx['passed']) &&
+    empty($lx['locked']) &&
+    empty($lx['pending_deadline_reason']) &&
+    empty($lx['pending_remediation']) &&
+    empty($lx['pending_instructor_approval']) &&
+    empty($lx['instructor_decision']['training_suspended'])
+) {
+    $nextLessonTitle = (string)$lx['lesson_title'];
+    $recommendedLessonId = (int)$lx['lesson_id'];
+}
     }
 
     $courseBlocks[$k]['lesson_count'] = $countLessons;
@@ -1644,6 +1698,8 @@ cw_header('Course');
 							$statusText = 'Completed';
 						} elseif (!empty($lx['pending_deadline_reason'])) {
 							$statusText = 'Action required: submit deadline reason';
+						} elseif (!empty($lx['deadline_passed'])) {
+							$statusText = 'Deadline passed';
 						} elseif (!empty($lx['pending_instructor_approval'])) {
 							$statusText = 'Awaiting instructor approval';
 						} elseif (!empty($lx['pending_remediation'])) {
