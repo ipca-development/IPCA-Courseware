@@ -86,6 +86,22 @@ function get_user_agent_string(): ?string
     return substr((string)$_SERVER['HTTP_USER_AGENT'], 0, 65535);
 }
 
+function format_action_datetime_utc(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+
+    try {
+        $dt = new DateTime($value, new DateTimeZone('UTC'));
+        return $dt->format('D M j, g:i A') . ' UTC';
+    } catch (Throwable $e) {
+        return $value . ' UTC';
+    }
+}
+
+
 $clientIp = get_client_ip();
 $userAgent = get_user_agent_string();
 
@@ -150,18 +166,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $engine->completeRequiredAction($actionId, $responseText, $clientIp, $userAgent);
 
                 if ($actionType === 'deadline_reason_submission') {
-                    $updActivity = $pdo->prepare("
-                        UPDATE lesson_activity
-                        SET
-                            reason_submitted = 1,
-                            reason_decision = 'pending_review',
-                            updated_at = NOW()
-                        WHERE user_id = ?
-                          AND cohort_id = ?
-                          AND lesson_id = ?
-                    ");
-                    $updActivity->execute([$actionUserId, $cohortId, $lessonId]);
-                }
+					$updActivity = $pdo->prepare("
+						UPDATE lesson_activity
+						SET
+							reason_submitted = 1,
+							reason_decision = 'pending',
+							updated_at = NOW()
+						WHERE user_id = ?
+						  AND cohort_id = ?
+						  AND lesson_id = ?
+					");
+					$updActivity->execute([$actionUserId, $cohortId, $lessonId]);
+					}
 
                 if ($actionType === 'instructor_approval') {
                     $updActivity = $pdo->prepare("
@@ -333,8 +349,8 @@ $title = (string)($action['title'] ?? 'Required Action');
 $instructionsHtml = (string)($action['instructions_html'] ?? '');
 $instructionsText = (string)($action['instructions_text'] ?? '');
 $studentResponseText = trim((string)($action['student_response_text'] ?? ''));
-$openedAt = (string)($action['opened_at'] ?? '');
-$completedAt = (string)($action['completed_at'] ?? '');
+$openedAt = format_action_datetime_utc((string)($action['opened_at'] ?? ''));
+$completedAt = format_action_datetime_utc((string)($action['completed_at'] ?? ''));
 
 cw_header($title);
 ?>
@@ -459,11 +475,11 @@ cw_header($title);
     <div class="ra-meta">
       Action type: <strong><?= h($actionType) ?></strong>
       <?php if ($openedAt !== ''): ?>
-        • Opened: <strong><?= h($openedAt) ?> UTC</strong>
-      <?php endif; ?>
-      <?php if ($completedAt !== ''): ?>
-        • Completed: <strong><?= h($completedAt) ?> UTC</strong>
-      <?php endif; ?>
+  			• Opened: <strong><?= h($openedAt) ?></strong>
+		<?php endif; ?>
+		<?php if ($completedAt !== ''): ?>
+		  • Completed: <strong><?= h($completedAt) ?></strong>
+		<?php endif; ?>
     </div>
 
     <div class="ra-status <?= h($status) ?>">
