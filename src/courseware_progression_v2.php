@@ -2079,28 +2079,15 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
         ];
     }
 
+
+
 public function persistLessonActivityProjection(int $userId, int $cohortId, int $lessonId, array $projection): array
 {
-    // --------------------------------------------------
-    // STEP 1 — STRUCTURE VALIDATION (unchanged)
-    // --------------------------------------------------
     if (empty($projection['engine_projection']) || !is_array($projection['fields'] ?? null)) {
-    throw new InvalidArgumentException('persistLessonActivityProjection only accepts canonical output from computeLessonActivityProjection().');
-}
+        throw new InvalidArgumentException('persistLessonActivityProjection only accepts canonical output from computeLessonActivityProjection().');
+    }
 
-    // --------------------------------------------------
-    // STEP 2 — CONSISTENCY GUARD (NEW — CORRECT POSITION)
-    // --------------------------------------------------
-    $this->assertLessonActivityConsistency($projection['fields']);
-
-    // --------------------------------------------------
-    // STEP 3 — IDENTITY VALIDATION (unchanged)
-    // --------------------------------------------------
-    if (
-        (int)$projection['user_id'] !== $userId ||
-        (int)$projection['cohort_id'] !== $cohortId ||
-        (int)$projection['lesson_id'] !== $lessonId
-    ) {
+    if ((int)$projection['user_id'] !== $userId || (int)$projection['cohort_id'] !== $cohortId || (int)$projection['lesson_id'] !== $lessonId) {
         throw new InvalidArgumentException('Projection identity mismatch.');
     }
 
