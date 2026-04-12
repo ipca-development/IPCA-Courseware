@@ -2423,31 +2423,37 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
             'one_on_one_timezone' => $oneOnOneTimezone,
         ];
 
-        $stmt = $this->pdo->prepare("
-            UPDATE student_required_actions
-            SET
-                status = 'approved',
-                approved_at = :approved_at,
-                completed_at = COALESCE(completed_at, :completed_at),
-                ip_address = COALESCE(:ip_address, ip_address),
-                user_agent = COALESCE(:user_agent, user_agent),
-                decision_code = :decision_code,
-                decision_notes = :decision_notes,
-                decision_payload_json = :decision_payload_json,
-                decision_by_user_id = :decision_by_user_id,
-                decision_at = :decision_at,
-                granted_extra_attempts = :granted_extra_attempts,
-                summary_revision_required = :summary_revision_required,
-                one_on_one_required = :one_on_one_required,
-                training_suspended = :training_suspended,
-                major_intervention_flag = :major_intervention_flag,
-                updated_at = :updated_at
-            WHERE id = :id
-        ");
+        $completedAtForApproval = null;
+
+		if ($decisionCode !== 'approve_with_one_on_one') {
+			$completedAtForApproval = $nowUtc;
+		}
+
+		$stmt = $this->pdo->prepare("
+			UPDATE student_required_actions
+			SET
+				status = 'approved',
+				approved_at = :approved_at,
+				completed_at = :completed_at,
+				ip_address = COALESCE(:ip_address, ip_address),
+				user_agent = COALESCE(:user_agent, user_agent),
+				decision_code = :decision_code,
+				decision_notes = :decision_notes,
+				decision_payload_json = :decision_payload_json,
+				decision_by_user_id = :decision_by_user_id,
+				decision_at = :decision_at,
+				granted_extra_attempts = :granted_extra_attempts,
+				summary_revision_required = :summary_revision_required,
+				one_on_one_required = :one_on_one_required,
+				training_suspended = :training_suspended,
+				major_intervention_flag = :major_intervention_flag,
+				updated_at = :updated_at
+			WHERE id = :id
+		");
 
         $stmt->execute([
             ':approved_at' => $nowUtc,
-            ':completed_at' => $nowUtc,
+            ':completed_at' => $completedAtForApproval,
             ':ip_address' => $ipAddress,
             ':user_agent' => $userAgent,
             ':decision_code' => $decisionCode,
@@ -2657,36 +2663,56 @@ public function markInstructorApprovalOneOnOneCompleted(int $requiredActionId, i
     $this->pdo->beginTransaction();
 
     try {
-        $stmt = $this->pdo->prepare("
-            UPDATE student_required_actions
-            SET
-                completed_at = COALESCE(completed_at, :completed_at),
-                ip_address = COALESCE(:ip_address, ip_address),
-                user_agent = COALESCE(:user_agent, user_agent),
-                updated_at = :updated_at
-            WHERE id = :id
-        ");
-        $stmt->execute([
-            ':completed_at' => $nowUtc,
-            ':ip_address' => $ipAddress,
-            ':user_agent' => $userAgent,
-            ':updated_at' => $nowUtc,
-            ':id' => $requiredActionId,
-        ]);
+        $existingDecisionPayload = [];
+$existingDecisionPayloadRaw = trim((string)($action['decision_payload_json'] ?? ''));
 
-        $projection = [
-            'engine_projection' => true,
-            'user_id' => (int)$action['user_id'],
-            'cohort_id' => (int)$action['cohort_id'],
-            'lesson_id' => (int)$action['lesson_id'],
-            'phase' => 'instructor_one_on_one_completed',
-            'fields' => [
-                'one_on_one_completed' => 1,
-                'completion_status' => 'in_progress',
-                'latest_instructor_action_id' => $requiredActionId,
-                'last_state_eval_at' => $nowUtc,
-            ],
-        ];
+if ($existingDecisionPayloadRaw !== '') {
+    $decoded = json_decode($existingDecisionPayloadRaw, true);
+    if (is_array($decoded)) {
+        $existingDecisionPayload = $decoded;
+    }
+	}
+
+	$existingDecisionPayload['one_on_one_completed'] = 1;
+	$existingDecisionPayload['one_on_one_completed_at_utc'] = $nowUtc;
+	$existingDecisionPayload['one_on_one_completed_by_user_id'] = $actorUserId;
+
+	$stmt = $this->pdo->prepare("
+		UPDATE student_required_actions
+		SET
+			completed_at = :completed_at,
+			decision_payload_json = :decision_payload_json,
+			ip_address = COALESCE(:ip_address, ip_address),
+			user_agent = COALESCE(:user_agent, user_agent),
+			updated_at = :updated_at
+		WHERE id = :id
+	");
+	$stmt->execute([
+		':completed_at' => $nowUtc,
+		':decision_payload_json' => json_encode(
+			$existingDecisionPayload,
+			JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR
+		),
+		':ip_address' => $ipAddress,
+		':user_agent' => $userAgent,
+		':updated_at' => $nowUtc,
+		':id' => $requiredActionId,
+]);
+
+			$projection = [
+		'engine_projection' => true,
+		'user_id' => (int)$action['user_id'],
+		'cohort_id' => (int)$action['cohort_id'],
+		'lesson_id' => (int)$action['lesson_id'],
+		'phase' => 'instructor_one_on_one_completed',
+		'fields' => [
+			'one_on_one_required' => 1,
+			'one_on_one_completed' => 1,
+			'completion_status' => 'in_progress',
+			'latest_instructor_action_id' => $requiredActionId,
+			'last_state_eval_at' => $nowUtc,
+		],
+];
 
         $projectionResult = $this->persistLessonActivityProjection(
             (int)$action['user_id'],
