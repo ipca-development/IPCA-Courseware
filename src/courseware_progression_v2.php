@@ -1437,8 +1437,8 @@ return [
 ‘attempt’ => (int)$existing[‘attempt’],
 ‘idempotent_reuse’ => true
 ];
-}
-}	
+
+	
 	
 public function finalizeAssessedProgressTest(int $progressTestId, array $assessment): array
 {
