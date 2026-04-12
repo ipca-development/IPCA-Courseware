@@ -1,140 +1,6 @@
 <?php
 declare(strict_types=1);
 
-/**
- * ============================================================
- * COURSEWARE PROGRESSION ENGINE V2 (SSOT CORE)
- * ============================================================
- *
- * THIS FILE IS THE SINGLE SOURCE OF TRUTH (SSOT) FOR:
- * - Student progression state
- * - Attempt logic
- * - Deadline logic
- * - Required action lifecycle
- * - Lesson activity projection
- * - Canonical progression events
- *
- * REQUIREMENTS
- * - PHP 8.2+
- * - MySQL 8+
- * - PDO (SAFE VERSION)
- *
- * ------------------------------------------------------------
- * CORE RESPONSIBILITY
- * ------------------------------------------------------------
- *
- * This engine is the ONLY component allowed to:
- *
- * 1. Evaluate progression decisions
- *    - remediation_required
- *    - instructor_required
- *    - deadline_blocked
- *    - training_suspended
- *    - summary_blocked
- *
- * 2. Mutate canonical system state
- *    - progress_tests_v2 (finalization)
- *    - student_required_actions (creation/update)
- *    - lesson_activity (projection only)
- *
- * 3. Emit canonical events
- *    - training_progression_events
- *
- * 4. Trigger automation (NON-CANONICAL SIDE EFFECTS)
- *    - ONLY via dispatchAutomationEventIfAvailable()
- *
- * ------------------------------------------------------------
- * WHAT THIS ENGINE MUST NEVER DO
- * ------------------------------------------------------------
- *
- * - Must NOT:
- * - Send emails directly
- * - Contain UI logic
- * - Depend on controllers
- * - Allow AutomationRuntime to define state
- * - Create duplicate or parallel decision logic
- *
- * ------------------------------------------------------------
- * ARCHITECTURE CONTRACT (STRICT)
- * ------------------------------------------------------------
- *
- * Policies → define thresholds ONLY
- *
- * Engine (THIS FILE) → decides ALL state
- *
- * AutomationRuntime → executes side effects ONLY
- *   (email, logging, notifications)
- *
- * Notifications → outputs only (never inputs)
- *
- * UI → displays projection only (no logic)
- *
- * ------------------------------------------------------------
- * DATA OWNERSHIP
- * ------------------------------------------------------------
- *
- * Authoritative tables:
- *
- * - progress_tests_v2 → attempt + result truth
- * - student_required_actions → workflow / intervention truth
- * - training_progression_events → audit trail
- *
- * Projection table:
- *
- * - lesson_activity → derived state ONLY (never authoritative)
- *
- * ------------------------------------------------------------
- * AUTOMATION CONTRACT
- * ------------------------------------------------------------
- *
- * - Engine triggers automation AFTER commit
- * - Automation MUST NOT modify canonical progression state
- * - Automation MUST NOT create required actions
- * - Automation MUST NOT influence decisions
- *
- * ------------------------------------------------------------
- * DESIGN PRINCIPLES
- * ------------------------------------------------------------
- *
- * - Deterministic (same input → same output)
- * - Idempotent (safe to re-run)
- * - Auditable (every decision logged)
- * - Reversible (state reconstructable from events)
- *
- * ------------------------------------------------------------
- * FUTURE DEVELOPMENT RULES (CRITICAL)
- * ------------------------------------------------------------
- *
- * ANY new feature MUST:
- *
- * ✔ Be implemented inside this engine if it affects:
- *   - progression
- *   - attempts
- *   - deadlines
- *   - required actions
- *
- * ✔ Use existing decision + projection pipelines
- *
- * ✔ Log events via logProgressionEvent()
- *
- * ✔ Trigger automation ONLY via:
- *   dispatchAutomationEventIfAvailable()
- *
- * - NEVER:
- * - Add progression logic in controllers
- * - Add progression logic in AutomationRuntime
- * - Write directly to lesson_activity outside projection
- *
- * ------------------------------------------------------------
- * VERSION
- * ------------------------------------------------------------
- *
- * LOGIC_VERSION = v2.0
- *
- * ============================================================
- */
-
-
 
 final class CoursewareProgressionV2
 {
@@ -1298,99 +1164,100 @@ final class CoursewareProgressionV2
         ];
     }
 
-    public function prepareStartDecision(int $userId, int $cohortId, int $lessonId, array $scope = []): array
-    {
-        $courseId = isset($scope['course_id']) ? (int)$scope['course_id'] : null;
 
-        $policy = $this->resolveEffectivePolicySet($cohortId, $courseId);
-        $behaviorMode = $this->resolveBehaviorMode($policy);
-        $summaryState = $this->resolveSummaryState($userId, $cohortId, $lessonId, $policy);
-        $attemptState = $this->resolveAttemptPolicyState($userId, $cohortId, $lessonId, $policy, null, $behaviorMode);
-        $deadlineState = $this->resolveDeadlineState($userId, $cohortId, $lessonId);
-        $progressionContext = $this->getProgressionContextForUserLesson($userId, $cohortId, $lessonId);
+	
+public function prepareStartDecision(int $userId, int $cohortId, int $lessonId, array $scope = []): array
+{
+    $courseId = isset($scope['course_id']) ? (int)$scope['course_id'] : null;
 
-        $decision = $this->evaluateProgressionDecision([
-            'phase' => 'prepare_start',
-            'user_id' => $userId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'activity_state' => $progressionContext['activity_state'],
-            'summary_state' => $summaryState,
-            'attempt_state' => $attemptState,
-            'deadline_state' => $deadlineState,
-            'classification' => [],
-			'required_actions' => $requiredActions 
-        ]);
+    $policy = $this->resolveEffectivePolicySet($cohortId, $courseId);
+    $behaviorMode = $this->resolveBehaviorMode($policy);
+    $summaryState = $this->resolveSummaryState($userId, $cohortId, $lessonId, $policy);
+    $attemptState = $this->resolveAttemptPolicyState($userId, $cohortId, $lessonId, $policy, null, $behaviorMode);
+    $deadlineState = $this->resolveDeadlineState($userId, $cohortId, $lessonId);
+    $progressionContext = $this->getProgressionContextForUserLesson($userId, $cohortId, $lessonId);
 
-        $blockingActions = [];
+    $blockingActions = [];
 
-// Check ALL blocking required actions
-$actionTypesToBlock = [
-    'remediation_acknowledgement',
-    'instructor_approval',
-    'deadline_reason_submission'
-];
+    $actionTypesToBlock = [
+        'remediation_acknowledgement',
+        'instructor_approval',
+        'deadline_reason_submission'
+    ];
 
-foreach ($actionTypesToBlock as $actionType) {
-    $pending = $this->getPendingRequiredAction(
-        $userId,
-        $cohortId,
-        $lessonId,
-        $actionType
-    );
+    foreach ($actionTypesToBlock as $actionType) {
+        $pending = $this->getPendingRequiredAction(
+            $userId,
+            $cohortId,
+            $lessonId,
+            $actionType
+        );
 
-    if ($pending) {
-        $blockingActions[] = [
-            'action_type' => $actionType,
-            'action' => $pending,
-            'action_url' => $this->buildInternalAppUrl(
-                $actionType === 'instructor_approval'
-                    ? '/instructor/instructor_approval.php?token=' . urlencode((string)$pending['token'])
-                    : '/student/remediation_action.php?token=' . urlencode((string)$pending['token'])
-            ),
-        ];
+        if ($pending) {
+            $blockingActions[] = [
+                'action_type' => $actionType,
+                'action' => $pending,
+                'action_url' => $this->buildInternalAppUrl(
+                    $actionType === 'instructor_approval'
+                        ? '/instructor/instructor_approval.php?token=' . urlencode((string)$pending['token'])
+                        : '/student/remediation_action.php?token=' . urlencode((string)$pending['token'])
+                ),
+            ];
+        }
     }
-}
 
-$hasBlockingActions = !empty($blockingActions);
+    $hasBlockingActions = !empty($blockingActions);
 
-$requiredActions = [
-    'should_create_any' => false,
-    'actions' => $blockingActions,
-    'latest_instructor_action_id' => null,
-    'blocking' => $hasBlockingActions,
-];
+    $requiredActions = [
+        'should_create_any' => false,
+        'actions' => $blockingActions,
+        'latest_instructor_action_id' => null,
+        'blocking' => $hasBlockingActions,
+    ];
 
-        $notificationDecision = $this->buildNotificationDecision($progressionContext, $decision, [
-            'behavior_mode' => $behaviorMode,
-            'required_actions' => $requiredActions,
-            'phase' => 'prepare_start',
-        ]);
+    $decision = $this->evaluateProgressionDecision([
+        'phase' => 'prepare_start',
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'activity_state' => $progressionContext['activity_state'],
+        'summary_state' => $summaryState,
+        'attempt_state' => $attemptState,
+        'deadline_state' => $deadlineState,
+        'classification' => [],
+        'required_actions' => $requiredActions
+    ]);
 
-        $lessonActivityProjection = $this->computeLessonActivityProjection([
-            'phase' => 'prepare_start',
-            'user_id' => $userId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'summary_state' => $summaryState,
-            'attempt_state' => $attemptState,
-            'deadline_state' => $deadlineState,
-            'classification' => [],
-            'activity_state' => $progressionContext['activity_state'],
-            'required_actions' => $requiredActions,
-        ], $decision);
+    $notificationDecision = $this->buildNotificationDecision($progressionContext, $decision, [
+        'behavior_mode' => $behaviorMode,
+        'required_actions' => $requiredActions,
+        'phase' => 'prepare_start',
+    ]);
 
-        return [
-            'allowed' => !empty($decision['allowed']),
-            'decision' => $decision,
-            'summary_state' => $summaryState,
-            'attempt_state' => $attemptState,
-            'deadline_state' => $deadlineState,
-            'required_actions' => $requiredActions,
-            'notification_decision' => $notificationDecision,
-            'lesson_activity_projection' => $lessonActivityProjection,
-        ];
-    }
+    $lessonActivityProjection = $this->computeLessonActivityProjection([
+        'phase' => 'prepare_start',
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'summary_state' => $summaryState,
+        'attempt_state' => $attemptState,
+        'deadline_state' => $deadlineState,
+        'classification' => [],
+        'activity_state' => $progressionContext['activity_state'],
+        'required_actions' => $requiredActions,
+    ], $decision);
+
+    return [
+        'allowed' => !empty($decision['allowed']),
+        'decision' => $decision,
+        'summary_state' => $summaryState,
+        'attempt_state' => $attemptState,
+        'deadline_state' => $deadlineState,
+        'required_actions' => $requiredActions,
+        'notification_decision' => $notificationDecision,
+        'lesson_activity_projection' => $lessonActivityProjection,
+    ];
+}	
 
  
 public function createProgressTestAttempt(
