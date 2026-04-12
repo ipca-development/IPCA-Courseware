@@ -2470,6 +2470,61 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
             ':id' => $requiredActionId,
         ]);
 
+		
+		        $reopenedEffectiveDeadlineUtc = null;
+
+        if (
+            $decisionCode !== 'suspend_training'
+            && (
+                $decisionCode === 'approve_additional_attempts'
+                || $decisionCode === 'approve_with_summary_revision'
+                || $decisionCode === 'approve_with_one_on_one'
+            )
+        ) {
+            $deadlineMeta = $this->getEffectiveDeadline(
+                (int)$action['user_id'],
+                (int)$action['cohort_id'],
+                (int)$action['lesson_id']
+            );
+
+            $currentEffectiveDeadlineUtc = (string)$deadlineMeta['effective_deadline_utc'];
+            $baseDeadlineUtc = (string)$deadlineMeta['base_deadline_utc'];
+
+            if (strtotime($nowUtc) > strtotime($currentEffectiveDeadlineUtc)) {
+                $policy = $this->resolveEffectivePolicySet((int)$action['cohort_id']);
+
+                $hours = (int)$this->resolveProgressionPolicyValue(
+                    $policy,
+                    'instructor_approved_deadline_reopen_hours',
+                    [],
+                    48
+                );
+
+                if ($hours <= 0) {
+                    $hours = 48;
+                }
+
+                $reopenedEffectiveDeadlineUtc = gmdate(
+                    'Y-m-d H:i:s',
+                    strtotime($nowUtc . ' +' . $hours . ' hours')
+                );
+
+                $this->replaceActiveDeadlineOverride([
+                    'user_id' => (int)$action['user_id'],
+                    'cohort_id' => (int)$action['cohort_id'],
+                    'lesson_id' => (int)$action['lesson_id'],
+                    'override_type' => 'manual_override',
+                    'base_deadline_utc' => $baseDeadlineUtc,
+                    'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+                    'granted_reason_code' => 'instructor_reopen_after_deadline',
+                    'granted_reason_text' => 'Instructor approval reopened lesson progression after deadline had already passed.',
+                    'approval_source' => 'instructor_approval',
+                    'granted_by_user_id' => $actorUserId,
+                ]);
+            }
+        }
+		
+		
 		if ($summaryRevisionRequired === 1) {
             $summaryStmt = $this->pdo->prepare("
                 UPDATE lesson_summaries
@@ -2517,7 +2572,7 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
             'lesson_id' => (int)$action['lesson_id'],
             'phase' => 'instructor_approval_decision',
             'fields' => [
-                'granted_extra_attempts' => $newTotalGrantedExtraAttempts,
+            'granted_extra_attempts' => $newTotalGrantedExtraAttempts,
                 'one_on_one_required' => $oneOnOneRequired,
                 'training_suspended' => $trainingSuspended,
                 'latest_instructor_action_id' => $requiredActionId,
@@ -2532,6 +2587,9 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
                         : ($summaryRevisionRequired
                             ? 'awaiting_summary_review'
                             : 'in_progress')),
+                'effective_deadline_utc' => $reopenedEffectiveDeadlineUtc !== null
+                    ? $reopenedEffectiveDeadlineUtc
+                    : (string)($currentActivity['effective_deadline_utc'] ?? ''),
             ],
         ];
 
