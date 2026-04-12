@@ -1299,25 +1299,19 @@ public function createProgressTestAttempt(
         ];
     }
 
-    if ($idempotencyKey === null) {
-        $idempotencyKey = hash('sha256', implode('|', [
-            $userId,
-            $cohortId,
-            $lessonId,
-            'start_attempt',
-            gmdate('Y-m-d-H')
-        ]));
-    }
 
-    $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
-    if ($existing) {
-        return [
-            'blocked' => false,
-            'test_id' => (int)$existing['id'],
-            'attempt' => (int)$existing['attempt'],
-            'idempotent_reuse' => true
-        ];
-    }
+
+    if ($idempotencyKey !== null && $idempotencyKey !== ‘’) {
+$existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
+if ($existing) {
+return [
+‘blocked’ => false,
+‘test_id’ => (int)$existing[‘id’],
+‘attempt’ => (int)$existing[‘attempt’],
+‘idempotent_reuse’ => true
+];
+}
+}
 
     if (!empty($decision['remediation_required'])) {
         return [
@@ -1434,18 +1428,16 @@ public function createProgressTestAttempt(
             $this->pdo->rollBack();
         }
 
-        $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
-        if ($existing) {
-            return [
-                'blocked' => false,
-                'test_id' => (int)$existing['id'],
-                'attempt' => (int)$existing['attempt'],
-                'idempotent_reuse' => true
-            ];
-        }
-
-        throw $e;
-    }
+ if ($idempotencyKey !== null && $idempotencyKey !== ‘’) {
+$existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
+if ($existing) {
+return [
+‘blocked’ => false,
+‘test_id’ => (int)$existing[‘id’],
+‘attempt’ => (int)$existing[‘attempt’],
+‘idempotent_reuse’ => true
+];
+}
 }	
 	
 public function finalizeAssessedProgressTest(int $progressTestId, array $assessment): array
