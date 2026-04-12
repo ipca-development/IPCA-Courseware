@@ -1,9 +1,9 @@
 <?php
 declare(strict_types=1);
 
-abstract class CoursewareProgressionV2Repository
+trait CoursewareProgressionV2Core
 {
-    protected PDO $pdo;
+
 
     private function getPolicyDefinition(string $policyKey): ?array
     {
