@@ -141,7 +141,6 @@ function ia_result_class(string $code): string
     return strtoupper($code) === 'PASS' ? 'ok' : 'danger';
 }
 
-
 function ia_decision_ui_options(): array
 {
     return array(
@@ -163,7 +162,6 @@ function ia_decision_ui_options(): array
         ),
     );
 }
-
 
 function ia_decision_code_label(string $code): string
 {
@@ -209,8 +207,6 @@ function ia_collect_instructor_interventions(PDO $pdo, int $userId, int $cohortI
     $stmt->execute(array($userId, $cohortId, $lessonId));
     return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
 }
-
-
 
 function ia_human_completion_status(string $status): array
 {
@@ -601,21 +597,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ));
 
             $flashSuccess = 'Instructor summary notes saved successfully.';
-        
-			        } elseif ($postAction === 'record_decision') {
+        } elseif ($postAction === 'record_decision') {
             $uiDecision = trim((string)($_POST['decision_code'] ?? ''));
             $decisionNotes = trim((string)($_POST['decision_notes'] ?? ''));
             $rawGrantedExtraAttempts = trim((string)($_POST['granted_extra_attempts'] ?? ''));
             $grantedExtraAttempts = ($rawGrantedExtraAttempts === '') ? 0 : (int)$rawGrantedExtraAttempts;
 
+            $rawDeadlineExtensionDays = trim((string)($_POST['deadline_extension_days'] ?? ''));
+            $deadlineExtensionDays = ($rawDeadlineExtensionDays === '') ? 0 : (int)$rawDeadlineExtensionDays;
+
             $oneOnOneDate = trim((string)($_POST['one_on_one_date'] ?? ''));
             $oneOnOneTimeFrom = trim((string)($_POST['one_on_one_time_from'] ?? ''));
             $oneOnOneTimeUntil = trim((string)($_POST['one_on_one_time_until'] ?? ''));
             $oneOnOneInstructorUserId = (int)($_POST['one_on_one_instructor_user_id'] ?? 0);
-			$oneOnOneStartUtc = trim((string)($_POST['one_on_one_start_utc'] ?? ''));
+            $oneOnOneStartUtc = trim((string)($_POST['one_on_one_start_utc'] ?? ''));
             $oneOnOneEndUtc = trim((string)($_POST['one_on_one_end_utc'] ?? ''));
-            $oneOnOneTimezone = trim((string)($_POST['one_on_one_timezone'] ?? ''));	
-			
+            $oneOnOneTimezone = trim((string)($_POST['one_on_one_timezone'] ?? ''));
+
             $validDecisions = array_keys(ia_decision_ui_options());
             if (!in_array($uiDecision, $validDecisions, true)) {
                 throw new RuntimeException('Please select a valid instructor decision.');
@@ -635,7 +633,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $grantedExtraAttempts = 0;
             }
 
-                        if ($uiDecision === 'approve_with_one_on_one') {
+            if ($deadlineExtensionDays < 0 || $deadlineExtensionDays > 10) {
+                throw new RuntimeException('Please select between 0 and 10 deadline extension days.');
+            }
+
+            if (!$requiresAttempts) {
+                $deadlineExtensionDays = 0;
+            }
+
+            if ($uiDecision === 'approve_with_one_on_one') {
                 if ($oneOnOneDate === '') {
                     throw new RuntimeException('Please select the one-on-one date.');
                 }
@@ -684,9 +690,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new RuntimeException('Please provide instructor decision notes.');
             }
 
-                        $payload = array(
+            $payload = array(
                 'decision_code' => $uiDecision,
                 'granted_extra_attempts' => $grantedExtraAttempts,
+                'deadline_extension_days' => $deadlineExtensionDays,
                 'summary_revision_required' => 0,
                 'one_on_one_required' => 0,
                 'training_suspended' => 0,
@@ -710,8 +717,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
 
             $flashSuccess = trim((string)($result['message'] ?? 'Instructor decision recorded successfully.'));
-			
-			
         } elseif ($postAction === 'mark_one_on_one_completed') {
             $result = $engine->markInstructorApprovalOneOnOneCompleted(
                 (int)$action['id'],
@@ -725,7 +730,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new RuntimeException('Unknown action.');
         }
 
-                $state = ia_load_state($engine, $token);
+        $state = ia_load_state($engine, $token);
         $action = (array)$state['action'];
         $activity = (array)($state['activity'] ?? array());
         $progressionContext = (array)($state['progression_context'] ?? array());
@@ -741,7 +746,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (Throwable $e) {
         $flashError = $e->getMessage();
-                $state = ia_load_state($engine, $token);
+
+        $state = ia_load_state($engine, $token);
         $action = (array)$state['action'];
         $activity = (array)($state['activity'] ?? array());
         $progressionContext = (array)($state['progression_context'] ?? array());
@@ -761,6 +767,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $studentUserId = (int)($action['user_id'] ?? 0);
 $cohortId = (int)($action['cohort_id'] ?? 0);
 $lessonId = (int)($action['lesson_id'] ?? 0);
+
+$deadlinePassedForUi = false;
+try {
+    $deadlineStateForUi = $engine->resolveDeadlineState($studentUserId, $cohortId, $lessonId);
+    $deadlinePassedForUi = !empty($deadlineStateForUi['deadline_passed']);
+} catch (Throwable $e) {
+    $deadlinePassedForUi = false;
+}
 
 $studentStmt = $pdo->prepare("
     SELECT id, name, first_name, last_name, email, photo_path, role
@@ -804,7 +818,6 @@ if ($chiefName === '') {
     $chiefName = 'Chief Instructor';
 }
 
-
 $scheduledOneOnOneInstructorName = '';
 $scheduledOneOnOneInstructorId = (int)($actionDecisionPayload['one_on_one_instructor_user_id'] ?? 0);
 
@@ -827,7 +840,6 @@ if ($scheduledOneOnOneInstructorId > 0) {
         $scheduledOneOnOneInstructorName = '';
     }
 }
-
 
 $lessonSummary = array();
 try {
@@ -902,7 +914,6 @@ cw_header('Instructor Intervention');
 .ia-chip.warning{background:#fff7ed;color:#c2410c;border-color:#fdba74}
 .ia-chip.danger{background:#fee2e2;color:#991b1b;border-color:#fca5a5}
 .ia-chip.info{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
-
 .ia-grid{display:grid;grid-template-columns:1.2fr .95fr;gap:18px}
 .ia-card{padding:20px 22px}
 .ia-student-top{display:grid;grid-template-columns:1.3fr 1fr;gap:18px;align-items:start}
@@ -962,7 +973,7 @@ cw_header('Instructor Intervention');
 .ia-help-list{display:grid;gap:8px;margin:12px 0 16px 0}
 .ia-help-item{display:flex;gap:9px;align-items:flex-start;font-size:12px;line-height:1.45;color:#334155}
 .ia-help-dot{width:5px;height:5px;border-radius:999px;background:#12355f;flex:0 0 5px;margin-top:6px}
-.ia-form-grid{display:grid;grid-template-columns:1fr 220px;gap:14px}
+.ia-form-grid{display:grid;grid-template-columns:1fr 220px 220px;gap:14px}
 .ia-field{display:flex;flex-direction:column;gap:7px}
 .ia-label{font-size:13px;font-weight:800;color:#102845}
 .ia-input,.ia-select,.ia-textarea{
@@ -1013,8 +1024,7 @@ cw_header('Instructor Intervention');
 .ia-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
 .ia-detail-box{padding:12px 14px;border-radius:14px;border:1px solid rgba(15,23,42,.06);background:#fff}
 .ia-detail-label{font-size:11px;text-transform:uppercase;letter-spacing:.08em;color:#64748b;font-weight:800}
-.ia-detail-value{margin-top:6px;font-size:13px;line-height:1.55;color:#102845;font-weight:700}	
-	
+.ia-detail-value{margin-top:6px;font-size:13px;line-height:1.55;color:#102845;font-weight:700}
 @media (max-width: 1220px){
     .ia-grid{grid-template-columns:1fr}
 }
@@ -1364,16 +1374,33 @@ cw_header('Instructor Intervention');
                             </div>
 
                             <div class="ia-field" id="ia-extra-attempts-field" style="display:none;">
-								<label class="ia-label">Extra Progress Test Attempts</label>
-								<select class="ia-select" name="granted_extra_attempts" id="ia-granted-extra-attempts">
-									<option value="">Select attempts</option>
-									<option value="1">1 extra attempt</option>
-									<option value="2">2 extra attempts</option>
-									<option value="3">3 extra attempts</option>
-									<option value="4">4 extra attempts</option>
-									<option value="5">5 extra attempts</option>
-								</select>
-							</div>
+                                <label class="ia-label">Extra Progress Test Attempts</label>
+                                <select class="ia-select" name="granted_extra_attempts" id="ia-granted-extra-attempts">
+                                    <option value="">Select attempts</option>
+                                    <option value="1">1 extra attempt</option>
+                                    <option value="2">2 extra attempts</option>
+                                    <option value="3">3 extra attempts</option>
+                                    <option value="4">4 extra attempts</option>
+                                    <option value="5">5 extra attempts</option>
+                                </select>
+                            </div>
+
+                            <div class="ia-field" id="ia-deadline-extension-field" style="display:none;">
+                                <label class="ia-label">Deadline Extension</label>
+                                <select class="ia-select" name="deadline_extension_days" id="ia-deadline-extension-days">
+                                    <option value="0">No deadline extension</option>
+                                    <option value="1">1 day</option>
+                                    <option value="2">2 days</option>
+                                    <option value="3">3 days</option>
+                                    <option value="4">4 days</option>
+                                    <option value="5">5 days</option>
+                                    <option value="6">6 days</option>
+                                    <option value="7">7 days</option>
+                                    <option value="8">8 days</option>
+                                    <option value="9">9 days</option>
+                                    <option value="10">10 days</option>
+                                </select>
+                            </div>
                         </div>
 
                         <div id="ia-one-on-one-fields" style="display:none;margin-top:14px;">
@@ -1411,6 +1438,8 @@ cw_header('Instructor Intervention');
                                         <?php endforeach; ?>
                                     </select>
                                 </div>
+
+                                <div class="ia-field" style="display:none;"></div>
                             </div>
 
                             <div class="ia-form-grid" style="margin-top:14px;">
@@ -1423,33 +1452,29 @@ cw_header('Instructor Intervention');
                                     <label class="ia-label">Time Until</label>
                                     <input class="ia-input" type="time" name="one_on_one_time_until" id="ia-one-on-one-time-until">
                                 </div>
+
+                                <div class="ia-field" style="display:none;"></div>
                             </div>
                         </div>
-						
-						
-						<input type="hidden" name="one_on_one_start_utc" id="ia-one-on-one-start-utc" value="">
-						<input type="hidden" name="one_on_one_end_utc" id="ia-one-on-one-end-utc" value="">
-						<input type="hidden" name="one_on_one_timezone" id="ia-one-on-one-timezone" value="">						
-						
+
+                        <input type="hidden" name="one_on_one_start_utc" id="ia-one-on-one-start-utc" value="">
+                        <input type="hidden" name="one_on_one_end_utc" id="ia-one-on-one-end-utc" value="">
+                        <input type="hidden" name="one_on_one_timezone" id="ia-one-on-one-timezone" value="">
 
                         <div class="ia-field" style="margin-top:14px;">
                             <label class="ia-label">Decision Notes</label>
                             <textarea
-								class="ia-textarea"
-								name="decision_notes"
-								id="ia-decision-notes"
-								placeholder="Explain why this instructional decision is appropriate and what the student must do next."
-								required
-							></textarea>
+                                class="ia-textarea"
+                                name="decision_notes"
+                                id="ia-decision-notes"
+                                placeholder="Explain why this instructional decision is appropriate and what the student must do next."
+                                required
+                            ></textarea>
                         </div>
 
                         <div class="ia-actions">
                             <button type="submit" class="ia-btn">Record Instructor Decision</button>
                         </div>
-						
-
-						
-						
                     </form>
                 <?php else: ?>
                     <div style="font-size:13px;line-height:1.6;color:#64748b;">
@@ -1543,8 +1568,7 @@ cw_header('Instructor Intervention');
                 <?php endif; ?>
             </section>
 
-			
-			            <section class="card ia-actions-card">
+            <section class="card ia-actions-card">
                 <div class="ia-section-title">Instructor Interventions</div>
 
                 <?php if (!$interventionHistory): ?>
@@ -1581,13 +1605,11 @@ cw_header('Instructor Intervention');
                     </div>
                 <?php endif; ?>
             </section>
-			
-			
+
         </div>
 
     </div>
 </div>
-
 <?php foreach ($attemptHistory as $attempt): ?>
     <?php
     $attemptId = (int)($attempt['id'] ?? 0);
@@ -1771,7 +1793,6 @@ cw_header('Instructor Intervention');
     </div>
 </div>
 
-
 <?php foreach ($interventionHistory as $intervention): ?>
     <?php
     $interventionId = (int)($intervention['id'] ?? 0);
@@ -1855,6 +1876,9 @@ cw_header('Instructor Intervention');
     </div>
 <?php endforeach; ?>
 
+<script>
+window.iaDeadlinePassed = <?php echo $deadlinePassedForUi ? 'true' : 'false'; ?>;
+</script>
 
 <script>
 (function () {
@@ -1925,18 +1949,20 @@ cw_header('Instructor Intervention');
                 navigator.clipboard.writeText(text).then(function () {
                     var old = btn.textContent;
                     btn.textContent = 'Copied';
-                    setTimeout(function () { btn.textContent = old; }, 1200);
+                    setTimeout(function () {
+                        btn.textContent = old;
+                    }, 1200);
                 });
             }
         });
     });
 
-
-
     var decisionForm = document.getElementById('ia-decision-form');
     var decisionCode = document.getElementById('ia-decision-code');
     var extraAttemptsField = document.getElementById('ia-extra-attempts-field');
     var extraAttemptsInput = document.getElementById('ia-granted-extra-attempts');
+    var deadlineExtensionField = document.getElementById('ia-deadline-extension-field');
+    var deadlineExtensionInput = document.getElementById('ia-deadline-extension-days');
     var oneOnOneFields = document.getElementById('ia-one-on-one-fields');
     var decisionNotes = document.getElementById('ia-decision-notes');
     var oneOnOneDate = document.getElementById('ia-one-on-one-date');
@@ -1945,7 +1971,9 @@ cw_header('Instructor Intervention');
     var oneOnOneTimeUntil = document.getElementById('ia-one-on-one-time-until');
 
     function setRequired(el, isRequired) {
-        if (!el) return;
+        if (!el) {
+            return;
+        }
         if (isRequired) {
             el.setAttribute('required', 'required');
         } else {
@@ -1953,12 +1981,15 @@ cw_header('Instructor Intervention');
         }
     }
 
-	
-	function buildUtcFromLocal(dateValue, timeValue) {
-        if (!dateValue || !timeValue) return '';
+    function buildUtcFromLocal(dateValue, timeValue) {
+        if (!dateValue || !timeValue) {
+            return '';
+        }
 
         var local = new Date(dateValue + 'T' + timeValue + ':00');
-        if (isNaN(local.getTime())) return '';
+        if (isNaN(local.getTime())) {
+            return '';
+        }
 
         var yyyy = local.getUTCFullYear();
         var mm = String(local.getUTCMonth() + 1).padStart(2, '0');
@@ -1969,11 +2000,14 @@ cw_header('Instructor Intervention');
 
         return yyyy + '-' + mm + '-' + dd + ' ' + hh + ':' + mi + ':' + ss;
     }
-	
+
     function syncDecisionUi() {
-        if (!decisionCode) return;
+        if (!decisionCode) {
+            return;
+        }
 
         var code = decisionCode.value || '';
+
         var needsAttempts =
             code === 'approve_additional_attempts' ||
             code === 'approve_with_summary_revision' ||
@@ -1985,14 +2019,23 @@ cw_header('Instructor Intervention');
         var needsReasonOnly =
             code === 'suspend_training';
 
+        var needsDeadlineExtension =
+            needsAttempts && !!window.iaDeadlinePassed;
+
         if (extraAttemptsField) {
             extraAttemptsField.style.display = needsAttempts ? '' : 'none';
         }
+
+        if (deadlineExtensionField) {
+            deadlineExtensionField.style.display = needsAttempts ? '' : 'none';
+        }
+
         if (oneOnOneFields) {
             oneOnOneFields.style.display = needsOneOnOne ? '' : 'none';
         }
 
         setRequired(extraAttemptsInput, needsAttempts);
+        setRequired(deadlineExtensionInput, needsDeadlineExtension);
         setRequired(oneOnOneDate, needsOneOnOne);
         setRequired(oneOnOneInstructor, needsOneOnOne);
         setRequired(oneOnOneTimeFrom, needsOneOnOne);
@@ -2001,6 +2044,10 @@ cw_header('Instructor Intervention');
 
         if (!needsAttempts && extraAttemptsInput) {
             extraAttemptsInput.value = '';
+        }
+
+        if (!needsAttempts && deadlineExtensionInput) {
+            deadlineExtensionInput.value = '0';
         }
 
         if (!needsOneOnOne) {
@@ -2018,19 +2065,36 @@ cw_header('Instructor Intervention');
 
     if (decisionForm) {
         decisionForm.addEventListener('submit', function (e) {
-            if (!decisionCode) return;
+            if (!decisionCode) {
+                return;
+            }
 
             var code = decisionCode.value || '';
 
+            var isApprovalDecision =
+                code === 'approve_additional_attempts' ||
+                code === 'approve_with_summary_revision' ||
+                code === 'approve_with_one_on_one';
+
             if (
-                (code === 'approve_additional_attempts' ||
-                 code === 'approve_with_summary_revision' ||
-                 code === 'approve_with_one_on_one') &&
+                isApprovalDecision &&
                 (!extraAttemptsInput || !extraAttemptsInput.value || parseInt(extraAttemptsInput.value, 10) < 1)
             ) {
                 e.preventDefault();
                 alert('Please select between 1 and 5 extra progress test attempts.');
                 return;
+            }
+
+            if (isApprovalDecision && window.iaDeadlinePassed) {
+                var extensionDays = deadlineExtensionInput
+                    ? parseInt(deadlineExtensionInput.value || '0', 10)
+                    : 0;
+
+                if (!extensionDays || extensionDays < 1 || extensionDays > 10) {
+                    e.preventDefault();
+                    alert('This lesson is already past due. Please select a deadline extension of 1 to 10 days.');
+                    return;
+                }
             }
 
             if (code === 'approve_with_one_on_one') {
@@ -2039,16 +2103,19 @@ cw_header('Instructor Intervention');
                     alert('Please select the one-on-one date.');
                     return;
                 }
+
                 if (!oneOnOneTimeFrom || !oneOnOneTimeFrom.value) {
                     e.preventDefault();
                     alert('Please select the one-on-one start time.');
                     return;
                 }
+
                 if (!oneOnOneTimeUntil || !oneOnOneTimeUntil.value) {
                     e.preventDefault();
                     alert('Please select the one-on-one end time.');
                     return;
                 }
+
                 if (!oneOnOneInstructor || !oneOnOneInstructor.value) {
                     e.preventDefault();
                     alert('Please select the instructor for the one-on-one.');
@@ -2074,8 +2141,12 @@ cw_header('Instructor Intervention');
                     return;
                 }
 
-                if (startUtcField) startUtcField.value = startUtc;
-                if (endUtcField) endUtcField.value = endUtc;
+                if (startUtcField) {
+                    startUtcField.value = startUtc;
+                }
+                if (endUtcField) {
+                    endUtcField.value = endUtc;
+                }
                 if (timezoneField && window.Intl && Intl.DateTimeFormat) {
                     timezoneField.value = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
                 }
@@ -2090,8 +2161,6 @@ cw_header('Instructor Intervention');
             }
         });
     }
-
-
 })();
 </script>
 

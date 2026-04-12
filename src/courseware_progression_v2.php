@@ -815,92 +815,26 @@ final class CoursewareProgressionV2
                 'instructor_approval'
             );
 
-            if ($pendingInstructorAction) {
-                $reopenedEffectiveDeadlineUtc = gmdate(
-                    'Y-m-d H:i:s',
-                    strtotime($effectiveDeadlineUtc . ' +48 hours')
-                );
+           if ($pendingInstructorAction) {
+    $this->pdo->commit();
 
-                $this->replaceActiveDeadlineOverride([
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'override_type' => 'manual_override',
-                    'base_deadline_utc' => $baseDeadlineUtc,
-                    'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
-                    'granted_reason_code' => 'auto_reopen_due_to_instructor_action',
-                    'granted_reason_text' => 'Deadline reopened because instructor intervention is active.',
-                    'approval_source' => 'system',
-                    'granted_by_user_id' => null,
-                ]);
-
-                $deadlineReopened = 1;
-                $newEffectiveDeadlineUtc = $reopenedEffectiveDeadlineUtc;
-                $newEffectiveDeadlineDisplay = $this->formatUtcForDisplay($newEffectiveDeadlineUtc);
-                $newDeadlineSource = 'manual_override';
-                $createdActionUrl = $this->buildInternalAppUrl(
-                    '/instructor/instructor_approval.php?token=' . urlencode((string)$pendingInstructorAction['token'])
-                );
-
-                $projectionResult = $this->persistLessonActivityProjection(
-                    $userId,
-                    $cohortId,
-                    $lessonId,
-                    [
-                        'engine_projection' => true,
-                        'user_id' => $userId,
-                        'cohort_id' => $cohortId,
-                        'lesson_id' => $lessonId,
-                        'phase' => 'deadline_reopened_due_to_instructor_action',
-                        'fields' => [
-                            'effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                            'test_pass_status' => 'in_progress',
-                            'completion_status' => 'instructor_required',
-                            'latest_instructor_action_id' => (int)$pendingInstructorAction['id'],
-                            'last_state_eval_at' => $nowUtc,
-                        ],
-                    ]
-                );
-
-                $this->logProgressionEvent([
-                    'user_id' => $userId,
-                    'cohort_id' => $cohortId,
-                    'lesson_id' => $lessonId,
-                    'progress_test_id' => $progressTestId,
-                    'event_type' => 'deadline',
-                    'event_code' => 'deadline_reopened_due_to_instructor_action',
-                    'event_status' => 'warning',
-                    'actor_type' => 'system',
-                    'actor_user_id' => null,
-                    'event_time' => $nowUtc,
-                    'payload' => [
-                        'old_effective_deadline_utc' => $effectiveDeadlineUtc,
-                        'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
-                        'deadline_source_before' => $deadlineSource,
-                        'deadline_source_after' => $newDeadlineSource,
-                        'required_action_id' => (int)$pendingInstructorAction['id'],
-                    ],
-                    'legal_note' => 'Deadline reopened because an instructor approval action was already active.',
-                ]);
-
-                $this->pdo->commit();
-
-                return [
-                    'ok' => true,
-                    'handled' => true,
-                    'action_taken' => 'existing_instructor_action_reused_with_deadline_reopen',
-                    'required_action' => $pendingInstructorAction,
-                    'required_action_url' => $createdActionUrl,
-                    'projection_result' => $projectionResult,
-                    'deadline_reopened' => 1,
-                    'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
-                    'deadline_state_before' => $deadlineState,
-                    'deadline_state_after' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
-                    'lesson_extension_count_before' => $lessonExtensionCountBefore,
-                    'program_extension_count_before' => $programExtensionCountBefore,
-                    'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
-                ];
-            }
+    return [
+        'ok' => true,
+        'handled' => true,
+        'action_taken' => 'existing_instructor_action_reused',
+        'required_action' => $pendingInstructorAction,
+        'required_action_url' => $this->buildInternalAppUrl(
+            '/instructor/instructor_approval.php?token=' . urlencode((string)$pendingInstructorAction['token'])
+        ),
+        'deadline_state_before' => $deadlineState,
+        'deadline_state_after' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
+        'lesson_extension_count_before' => $lessonExtensionCountBefore,
+        'program_extension_count_before' => $programExtensionCountBefore,
+        'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
+        'deadline_reopened' => 0,
+        'reopened_effective_deadline_utc' => null,
+    ];
+}
 
             $token = bin2hex(random_bytes(32));
 
@@ -2396,15 +2330,18 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
         throw new RuntimeException('Instructor approval action is no longer pending.');
     }
 
-$decisionCode = trim((string)($payload['decision_code'] ?? ''));
-$decisionNotes = trim((string)($payload['decision_notes'] ?? ''));
-$oneOnOneDate = trim((string)($payload['one_on_one_date'] ?? ''));
-$oneOnOneTimeFrom = trim((string)($payload['one_on_one_time_from'] ?? ''));
-$oneOnOneTimeUntil = trim((string)($payload['one_on_one_time_until'] ?? ''));
-$oneOnOneInstructorUserId = (int)($payload['one_on_one_instructor_user_id'] ?? 0);
-$oneOnOneStartUtc = trim((string)($payload['one_on_one_start_utc'] ?? ''));
-$oneOnOneEndUtc = trim((string)($payload['one_on_one_end_utc'] ?? ''));
-$oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
+    $decisionCode = trim((string)($payload['decision_code'] ?? ''));
+    $decisionNotes = trim((string)($payload['decision_notes'] ?? ''));
+    $grantedExtraAttempts = max(0, min(5, (int)($payload['granted_extra_attempts'] ?? 0)));
+    $deadlineExtensionDays = max(0, min(10, (int)($payload['deadline_extension_days'] ?? 0)));
+
+    $oneOnOneDate = trim((string)($payload['one_on_one_date'] ?? ''));
+    $oneOnOneTimeFrom = trim((string)($payload['one_on_one_time_from'] ?? ''));
+    $oneOnOneTimeUntil = trim((string)($payload['one_on_one_time_until'] ?? ''));
+    $oneOnOneInstructorUserId = (int)($payload['one_on_one_instructor_user_id'] ?? 0);
+    $oneOnOneStartUtc = trim((string)($payload['one_on_one_start_utc'] ?? ''));
+    $oneOnOneEndUtc = trim((string)($payload['one_on_one_end_utc'] ?? ''));
+    $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
 
     if ($decisionCode === '') {
         throw new RuntimeException('decision_code is required.');
@@ -2424,11 +2361,10 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
         throw new RuntimeException('Invalid decision_code.');
     }
 
-    $grantedExtraAttempts = max(0, min(5, (int)($payload['granted_extra_attempts'] ?? 0)));
-    $summaryRevisionRequired = !empty($payload['summary_revision_required']) ? 1 : 0;
-    $oneOnOneRequired = !empty($payload['one_on_one_required']) ? 1 : 0;
-    $trainingSuspended = !empty($payload['training_suspended']) ? 1 : 0;
-    $majorInterventionFlag = !empty($payload['major_intervention_flag']) ? 1 : 0;
+    $summaryRevisionRequired = 0;
+    $oneOnOneRequired = 0;
+    $trainingSuspended = 0;
+    $majorInterventionFlag = 0;
 
     if ($decisionCode === 'approve_additional_attempts') {
         $summaryRevisionRequired = 0;
@@ -2447,35 +2383,58 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
         $oneOnOneRequired = 0;
         $trainingSuspended = 1;
         $grantedExtraAttempts = 0;
+        $deadlineExtensionDays = 0;
         $majorInterventionFlag = 1;
     }
 
-	
-	if ($decisionCode === 'approve_with_one_on_one') {
+    $approvalDecisionCodes = [
+        'approve_additional_attempts',
+        'approve_with_summary_revision',
+        'approve_with_one_on_one',
+    ];
+
+    if (in_array($decisionCode, $approvalDecisionCodes, true) && $grantedExtraAttempts < 1) {
+        throw new RuntimeException('At least 1 extra attempt must be granted for this approval decision.');
+    }
+
+    if ($decisionCode === 'approve_with_one_on_one') {
+        if (
+            $oneOnOneStartUtc === '' ||
+            $oneOnOneEndUtc === '' ||
+            $oneOnOneTimezone === '' ||
+            $oneOnOneInstructorUserId <= 0
+        ) {
+            throw new RuntimeException('One-on-one scheduling details are required.');
+        }
+
+        $startTs = strtotime($oneOnOneStartUtc);
+        $endTs = strtotime($oneOnOneEndUtc);
+
+        if ($startTs === false || $endTs === false) {
+            throw new RuntimeException('Invalid one-on-one UTC datetime values.');
+        }
+
+        if ($endTs <= $startTs) {
+            throw new RuntimeException('One-on-one end time must be after start time.');
+        }
+    }
+
+    $deadlineStateBeforeDecision = $this->resolveDeadlineState(
+        (int)$action['user_id'],
+        (int)$action['cohort_id'],
+        (int)$action['lesson_id']
+    );
+
+    $deadlinePassedBeforeDecision = !empty($deadlineStateBeforeDecision['deadline_passed']);
+
     if (
-        $oneOnOneStartUtc === '' ||
-        $oneOnOneEndUtc === '' ||
-        $oneOnOneTimezone === '' ||
-        $oneOnOneInstructorUserId <= 0
+        in_array($decisionCode, $approvalDecisionCodes, true)
+        && $deadlinePassedBeforeDecision
+        && $deadlineExtensionDays <= 0
     ) {
-        throw new RuntimeException('One-on-one scheduling details are required.');
+        throw new RuntimeException('This lesson is already past due. Please grant a deadline extension of 1 to 10 days.');
     }
 
-    $startTs = strtotime($oneOnOneStartUtc);
-    $endTs = strtotime($oneOnOneEndUtc);
-
-    if ($startTs === false || $endTs === false) {
-        throw new RuntimeException('Invalid one-on-one UTC datetime values.');
-    }
-
-    if ($endTs <= $startTs) {
-        throw new RuntimeException('One-on-one end time must be after start time.');
-    }
-}
-	
-	
-	
-	
     $nowUtc = gmdate('Y-m-d H:i:s');
     $automationContext = [];
     $projectionResult = [];
@@ -2484,52 +2443,78 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
     $this->pdo->beginTransaction();
 
     try {
-                $decisionPayload = [
+        if (
+            in_array($decisionCode, $approvalDecisionCodes, true)
+            && $deadlineExtensionDays > 0
+        ) {
+            $baseDeadlineUtc = (string)($deadlineStateBeforeDecision['base_deadline_utc'] ?? '');
+            $currentEffectiveDeadlineUtc = (string)($deadlineStateBeforeDecision['effective_deadline_utc'] ?? '');
+
+            $reopenedEffectiveDeadlineUtc = gmdate(
+                'Y-m-d H:i:s',
+                strtotime($nowUtc . ' +' . $deadlineExtensionDays . ' days')
+            );
+
+            $this->replaceActiveDeadlineOverride([
+                'user_id' => (int)$action['user_id'],
+                'cohort_id' => (int)$action['cohort_id'],
+                'lesson_id' => (int)$action['lesson_id'],
+                'override_type' => 'manual_override',
+                'base_deadline_utc' => $baseDeadlineUtc !== '' ? $baseDeadlineUtc : $currentEffectiveDeadlineUtc,
+                'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+                'granted_reason_code' => 'instructor_deadline_extension',
+                'granted_reason_text' => 'Instructor granted a manual deadline extension during instructor approval.',
+                'approval_source' => 'instructor_approval',
+                'granted_by_user_id' => $actorUserId,
+            ]);
+        }
+
+        $decisionPayload = [
             'decision_code' => $decisionCode,
             'granted_extra_attempts' => $grantedExtraAttempts,
+            'deadline_extension_days' => $deadlineExtensionDays,
             'summary_revision_required' => $summaryRevisionRequired,
             'one_on_one_required' => $oneOnOneRequired,
             'training_suspended' => $trainingSuspended,
             'major_intervention_flag' => $majorInterventionFlag,
             'decision_notes' => $decisionNotes,
-
             'one_on_one_date' => $oneOnOneDate,
             'one_on_one_time_from' => $oneOnOneTimeFrom,
             'one_on_one_time_until' => $oneOnOneTimeUntil,
             'one_on_one_instructor_user_id' => $oneOnOneInstructorUserId,
-
             'one_on_one_start_utc' => $oneOnOneStartUtc,
             'one_on_one_end_utc' => $oneOnOneEndUtc,
             'one_on_one_timezone' => $oneOnOneTimezone,
+            'deadline_reopened' => $reopenedEffectiveDeadlineUtc !== null ? 1 : 0,
+            'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
         ];
 
         $completedAtForApproval = null;
+        if ($decisionCode !== 'approve_with_one_on_one') {
+            $completedAtForApproval = $nowUtc;
+        }
 
-		if ($decisionCode !== 'approve_with_one_on_one') {
-			$completedAtForApproval = $nowUtc;
-		}
-
-		$stmt = $this->pdo->prepare("
-			UPDATE student_required_actions
-			SET
-				status = 'approved',
-				approved_at = :approved_at,
-				completed_at = :completed_at,
-				ip_address = COALESCE(:ip_address, ip_address),
-				user_agent = COALESCE(:user_agent, user_agent),
-				decision_code = :decision_code,
-				decision_notes = :decision_notes,
-				decision_payload_json = :decision_payload_json,
-				decision_by_user_id = :decision_by_user_id,
-				decision_at = :decision_at,
-				granted_extra_attempts = :granted_extra_attempts,
-				summary_revision_required = :summary_revision_required,
-				one_on_one_required = :one_on_one_required,
-				training_suspended = :training_suspended,
-				major_intervention_flag = :major_intervention_flag,
-				updated_at = :updated_at
-			WHERE id = :id
-		");
+        $stmt = $this->pdo->prepare("
+            UPDATE student_required_actions
+            SET
+                status = 'approved',
+                approved_at = :approved_at,
+                completed_at = :completed_at,
+                ip_address = COALESCE(:ip_address, ip_address),
+                user_agent = COALESCE(:user_agent, user_agent),
+                decision_code = :decision_code,
+                decision_notes = :decision_notes,
+                decision_payload_json = :decision_payload_json,
+                decision_by_user_id = :decision_by_user_id,
+                decision_at = :decision_at,
+                granted_extra_attempts = :granted_extra_attempts,
+                summary_revision_required = :summary_revision_required,
+                one_on_one_required = :one_on_one_required,
+                training_suspended = :training_suspended,
+                major_intervention_flag = :major_intervention_flag,
+                updated_at = :updated_at
+            WHERE id = :id
+        ");
 
         $stmt->execute([
             ':approved_at' => $nowUtc,
@@ -2550,96 +2535,7 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
             ':id' => $requiredActionId,
         ]);
 
-		
-			        $deadlineStateBeforeDecision = $this->resolveDeadlineState(
-            (int)$action['user_id'],
-            (int)$action['cohort_id'],
-            (int)$action['lesson_id']
-        );
-
-        $shouldReopenDeadline =
-            in_array($decisionCode, array(
-                'approve_additional_attempts',
-                'approve_with_summary_revision',
-                'approve_with_one_on_one',
-            ), true)
-            && !empty($deadlineStateBeforeDecision['deadline_passed']);
-
-        if ($shouldReopenDeadline) {
-            $currentEffectiveDeadlineUtc = (string)($deadlineStateBeforeDecision['effective_deadline_utc'] ?? '');
-            $baseDeadlineUtc = (string)($deadlineStateBeforeDecision['base_deadline_utc'] ?? $currentEffectiveDeadlineUtc);
-
-            $reopenedEffectiveDeadlineUtc = gmdate('Y-m-d H:i:s', strtotime($nowUtc . ' +48 hours'));
-
-            $this->replaceActiveDeadlineOverride(array(
-                'user_id' => (int)$action['user_id'],
-                'cohort_id' => (int)$action['cohort_id'],
-                'lesson_id' => (int)$action['lesson_id'],
-                'override_type' => 'manual_override',
-                'base_deadline_utc' => $baseDeadlineUtc !== '' ? $baseDeadlineUtc : $currentEffectiveDeadlineUtc,
-                'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
-                'granted_reason_code' => 'instructor_reopened_after_expired_deadline',
-                'granted_reason_text' => 'Instructor approval reopened the expired lesson deadline so granted extra attempts can actually be used.',
-                'approval_source' => 'instructor_approval_decision',
-                'granted_by_user_id' => $actorUserId,
-            ));
-        }
-		
-		        $reopenedEffectiveDeadlineUtc = null;
-
-        if (
-            $decisionCode !== 'suspend_training'
-            && (
-                $decisionCode === 'approve_additional_attempts'
-                || $decisionCode === 'approve_with_summary_revision'
-                || $decisionCode === 'approve_with_one_on_one'
-            )
-        ) {
-            $deadlineMeta = $this->getEffectiveDeadline(
-                (int)$action['user_id'],
-                (int)$action['cohort_id'],
-                (int)$action['lesson_id']
-            );
-
-            $currentEffectiveDeadlineUtc = (string)$deadlineMeta['effective_deadline_utc'];
-            $baseDeadlineUtc = (string)$deadlineMeta['base_deadline_utc'];
-
-            if (strtotime($nowUtc) > strtotime($currentEffectiveDeadlineUtc)) {
-                $policy = $this->resolveEffectivePolicySet((int)$action['cohort_id']);
-
-                $hours = (int)$this->resolveProgressionPolicyValue(
-                    $policy,
-                    'instructor_approved_deadline_reopen_hours',
-                    [],
-                    48
-                );
-
-                if ($hours <= 0) {
-                    $hours = 48;
-                }
-
-                $reopenedEffectiveDeadlineUtc = gmdate(
-                    'Y-m-d H:i:s',
-                    strtotime($nowUtc . ' +' . $hours . ' hours')
-                );
-
-                $this->replaceActiveDeadlineOverride([
-                    'user_id' => (int)$action['user_id'],
-                    'cohort_id' => (int)$action['cohort_id'],
-                    'lesson_id' => (int)$action['lesson_id'],
-                    'override_type' => 'manual_override',
-                    'base_deadline_utc' => $baseDeadlineUtc,
-                    'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
-                    'granted_reason_code' => 'instructor_reopen_after_deadline',
-                    'granted_reason_text' => 'Instructor approval reopened lesson progression after deadline had already passed.',
-                    'approval_source' => 'instructor_approval',
-                    'granted_by_user_id' => $actorUserId,
-                ]);
-            }
-        }
-		
-		
-		if ($summaryRevisionRequired === 1) {
+        if ($summaryRevisionRequired === 1) {
             $summaryStmt = $this->pdo->prepare("
                 UPDATE lesson_summaries
                 SET
@@ -2656,7 +2552,7 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
                 ':cohort_id' => (int)$action['cohort_id'],
                 ':lesson_id' => (int)$action['lesson_id'],
             ]);
-        }	
+        }
 
         $currentActivity = $this->getLessonActivityProjectionRow(
             (int)$action['user_id'],
@@ -2667,19 +2563,15 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
         $currentGrantedExtraAttempts = max(0, (int)($currentActivity['granted_extra_attempts'] ?? 0));
         $newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts;
 
-        if (
-			$decisionCode === 'approve_additional_attempts' ||
-			$decisionCode === 'approve_with_summary_revision' ||
-			$decisionCode === 'approve_with_one_on_one'
-		) {
-			$newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts + $grantedExtraAttempts;
-		}
+        if (in_array($decisionCode, $approvalDecisionCodes, true)) {
+            $newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts + $grantedExtraAttempts;
+        }
 
         if ($decisionCode === 'suspend_training') {
             $newTotalGrantedExtraAttempts = $currentGrantedExtraAttempts;
         }
 
-                $projectionFields = [
+        $projectionFields = [
             'granted_extra_attempts' => $newTotalGrantedExtraAttempts,
             'one_on_one_required' => $oneOnOneRequired,
             'training_suspended' => $trainingSuspended,
@@ -2754,16 +2646,14 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
         throw $e;
     }
 
-    $automationResult = null;
-
-	$automationResult = $this->dispatchAutomationEventIfAvailable(
-    'instructor_decision_recorded',
-    $automationContext,
-    (int)$action['user_id'],
-    (int)$action['cohort_id'],
-    (int)$action['lesson_id'],
-    isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null
-);
+    $automationResult = $this->dispatchAutomationEventIfAvailable(
+        'instructor_decision_recorded',
+        $automationContext,
+        (int)$action['user_id'],
+        (int)$action['cohort_id'],
+        (int)$action['lesson_id'],
+        isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null
+    );
 
     return [
         'message' => 'Instructor decision saved successfully.',
@@ -2771,6 +2661,7 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
         'decision_payload' => [
             'decision_code' => $decisionCode,
             'granted_extra_attempts' => $grantedExtraAttempts,
+            'deadline_extension_days' => $deadlineExtensionDays,
             'summary_revision_required' => $summaryRevisionRequired,
             'one_on_one_required' => $oneOnOneRequired,
             'training_suspended' => $trainingSuspended,
@@ -2780,6 +2671,11 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
             'one_on_one_time_from' => $oneOnOneTimeFrom,
             'one_on_one_time_until' => $oneOnOneTimeUntil,
             'one_on_one_instructor_user_id' => $oneOnOneInstructorUserId,
+            'deadline_reopened' => $reopenedEffectiveDeadlineUtc !== null ? 1 : 0,
+            'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+			'one_on_one_start_utc' => $oneOnOneStartUtc,
+			'one_on_one_end_utc' => $oneOnOneEndUtc,
+			'one_on_one_timezone' => $oneOnOneTimezone,
         ],
         'projection_result' => $projectionResult,
         'automation_result' => $automationResult,
@@ -5095,11 +4991,14 @@ private function buildInstructorDecisionAutomationContext(array $action, array $
         'decision_notes_html' => $decisionNotesHtml,
 
         'granted_extra_attempts' => $grantedExtraAttempts,
-        'summary_revision_required' => $summaryRevisionRequired,
-        'one_on_one_required' => $oneOnOneRequired,
-        'one_on_one_completed' => !empty($projectionFields['one_on_one_completed']) ? 1 : (!empty($activityState['one_on_one_completed']) ? 1 : 0),
-        'training_suspended' => $trainingSuspended,
-        'major_intervention_flag' => $majorInterventionFlag,
+		'deadline_extension_days' => (int)($decisionPayload['deadline_extension_days'] ?? 0),
+		'deadline_reopened' => !empty($decisionPayload['deadline_reopened']) ? 1 : 0,
+		'reopened_effective_deadline_utc' => (string)($decisionPayload['reopened_effective_deadline_utc'] ?? ''),
+		'summary_revision_required' => $summaryRevisionRequired,
+		'one_on_one_required' => $oneOnOneRequired,
+		'one_on_one_completed' => !empty($projectionFields['one_on_one_completed']) ? 1 : (!empty($activityState['one_on_one_completed']) ? 1 : 0),
+		'training_suspended' => $trainingSuspended,
+		'major_intervention_flag' => $majorInterventionFlag,
 
         'summary_status' => $summaryStatus,
         'summary_score' => $summaryScore,
