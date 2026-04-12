@@ -2464,7 +2464,7 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
                 'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
                 'granted_reason_code' => 'instructor_deadline_extension',
                 'granted_reason_text' => 'Instructor granted a manual deadline extension during instructor approval.',
-                'approval_source' => 'instructor_approval',
+                'approval_source' => 'admin_manual',
                 'granted_by_user_id' => $actorUserId,
             ]);
         }
