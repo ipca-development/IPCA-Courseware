@@ -537,25 +537,47 @@ final class CoursewareProgressionV2
         ];
     }
 
-    $pendingInstructorAction = $this->getPendingRequiredAction(
-        $userId,
-        $cohortId,
-        $lessonId,
-        'instructor_approval'
+$pendingInstructorAction = $this->getPendingRequiredAction(
+    $userId,
+    $cohortId,
+    $lessonId,
+    'instructor_approval'
+);
+
+if ($pendingInstructorAction) {
+
+    // 🔥 CRITICAL FIX: reopen deadline when instructor is in control
+    $reopenedEffectiveDeadlineUtc = gmdate(
+        'Y-m-d H:i:s',
+        strtotime($effectiveDeadlineUtc . ' +48 hours')
     );
 
-    if ($pendingInstructorAction) {
-        return [
-            'ok' => true,
-            'handled' => true,
-            'action_taken' => 'existing_instructor_action_reused',
-            'required_action' => $pendingInstructorAction,
-            'required_action_url' => $this->buildInternalAppUrl(
-                '/instructor/instructor_approval.php?token=' . urlencode((string)$pendingInstructorAction['token'])
-            ),
-            'deadline_state' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
-        ];
-    }
+    $this->replaceActiveDeadlineOverride([
+        'user_id' => $userId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'override_type' => 'manual_override',
+        'base_deadline_utc' => $baseDeadlineUtc,
+        'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+        'granted_reason_code' => 'auto_reopen_due_to_instructor_action',
+        'granted_reason_text' => 'Deadline reopened because instructor intervention is active.',
+        'approval_source' => 'system',
+        'granted_by_user_id' => null,
+    ]);
+
+    return [
+        'ok' => true,
+        'handled' => true,
+        'action_taken' => 'existing_instructor_action_reused_with_deadline_reopen',
+        'required_action' => $pendingInstructorAction,
+        'required_action_url' => $this->buildInternalAppUrl(
+            '/instructor/instructor_approval.php?token=' . urlencode((string)$pendingInstructorAction['token'])
+        ),
+        'deadline_reopened' => 1,
+        'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+        'deadline_state' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
+    ];
+}
 
     $allowFirstAutomaticExtension = !empty($this->resolveProgressionPolicyValue(
         $policy,
