@@ -1268,7 +1268,6 @@ public function createProgressTestAttempt(
     ?int $actorUserId = null,
     ?string $idempotencyKey = null
 ): array {
-
     $startDecision = $this->prepareStartDecision($userId, $cohortId, $lessonId);
 
     $decision = (array)($startDecision['decision'] ?? []);
@@ -1299,19 +1298,17 @@ public function createProgressTestAttempt(
         ];
     }
 
-
-
-    if ($idempotencyKey !== null && $idempotencyKey !== ‘’) {
-$existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
-if ($existing) {
-return [
-‘blocked’ => false,
-‘test_id’ => (int)$existing[‘id’],
-‘attempt’ => (int)$existing[‘attempt’],
-‘idempotent_reuse’ => true
-];
-}
-}
+    if ($idempotencyKey !== null && $idempotencyKey !== '') {
+        $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
+        if ($existing) {
+            return [
+                'blocked' => false,
+                'test_id' => (int)$existing['id'],
+                'attempt' => (int)$existing['attempt'],
+                'idempotent_reuse' => true
+            ];
+        }
+    }
 
     if (!empty($decision['remediation_required'])) {
         return [
@@ -1351,7 +1348,7 @@ return [
     $this->pdo->beginTransaction();
 
     try {
-                $stmt = $this->pdo->prepare("
+        $stmt = $this->pdo->prepare("
             INSERT INTO progress_tests_v2
             (
                 user_id,
@@ -1416,29 +1413,32 @@ return [
 
         $this->pdo->commit();
 
-                return [
+        return [
             'blocked' => false,
             'test_id' => $testId,
             'attempt' => $attempt,
             'idempotent_reuse' => false,
         ];
-
-        } catch (Throwable $e) {
+    } catch (Throwable $e) {
         if ($this->pdo->inTransaction()) {
             $this->pdo->rollBack();
         }
 
- if ($idempotencyKey !== null && $idempotencyKey !== ‘’) {
-$existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
-if ($existing) {
-return [
-‘blocked’ => false,
-‘test_id’ => (int)$existing[‘id’],
-‘attempt’ => (int)$existing[‘attempt’],
-‘idempotent_reuse’ => true
-];
+        if ($idempotencyKey !== null && $idempotencyKey !== '') {
+            $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
+            if ($existing) {
+                return [
+                    'blocked' => false,
+                    'test_id' => (int)$existing['id'],
+                    'attempt' => (int)$existing['attempt'],
+                    'idempotent_reuse' => true
+                ];
+            }
+        }
 
-	
+        throw $e;
+    }
+}	
 	
 public function finalizeAssessedProgressTest(int $progressTestId, array $assessment): array
 {
