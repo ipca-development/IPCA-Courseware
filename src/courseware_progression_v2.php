@@ -2619,6 +2619,8 @@ $oneOnOneTimezone = trim((string)($payload['one_on_one_timezone'] ?? ''));
                 'required_action_id' => $requiredActionId,
                 'decision_payload' => $decisionPayload,
                 'projection_result' => $projectionResult,
+                'deadline_reopened' => $reopenedEffectiveDeadlineUtc !== null ? 1 : 0,
+                'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
             ],
             'legal_note' => 'Instructor approval decision recorded through CoursewareProgressionV2.',
         ]);
