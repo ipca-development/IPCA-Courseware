@@ -537,48 +537,6 @@ final class CoursewareProgressionV2
         ];
     }
 
-$pendingInstructorAction = $this->getPendingRequiredAction(
-    $userId,
-    $cohortId,
-    $lessonId,
-    'instructor_approval'
-);
-
-if ($pendingInstructorAction) {
-
-    // 🔥 CRITICAL FIX: reopen deadline when instructor is in control
-    $reopenedEffectiveDeadlineUtc = gmdate(
-        'Y-m-d H:i:s',
-        strtotime($effectiveDeadlineUtc . ' +48 hours')
-    );
-
-    $this->replaceActiveDeadlineOverride([
-        'user_id' => $userId,
-        'cohort_id' => $cohortId,
-        'lesson_id' => $lessonId,
-        'override_type' => 'manual_override',
-        'base_deadline_utc' => $baseDeadlineUtc,
-        'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
-        'granted_reason_code' => 'auto_reopen_due_to_instructor_action',
-        'granted_reason_text' => 'Deadline reopened because instructor intervention is active.',
-        'approval_source' => 'system',
-        'granted_by_user_id' => null,
-    ]);
-
-    return [
-        'ok' => true,
-        'handled' => true,
-        'action_taken' => 'existing_instructor_action_reused_with_deadline_reopen',
-        'required_action' => $pendingInstructorAction,
-        'required_action_url' => $this->buildInternalAppUrl(
-            '/instructor/instructor_approval.php?token=' . urlencode((string)$pendingInstructorAction['token'])
-        ),
-        'deadline_reopened' => 1,
-        'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
-        'deadline_state' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
-    ];
-}
-
     $allowFirstAutomaticExtension = !empty($this->resolveProgressionPolicyValue(
         $policy,
         'allow_first_deadline_extension_automatic',
@@ -660,6 +618,8 @@ if ($pendingInstructorAction) {
     $newEffectiveDeadlineUtc = $effectiveDeadlineUtc;
     $newEffectiveDeadlineDisplay = $effectiveDeadlineDisplay;
     $newDeadlineSource = $deadlineSource;
+    $deadlineReopened = 0;
+    $reopenedEffectiveDeadlineUtc = null;
 
     $this->pdo->beginTransaction();
 
@@ -710,23 +670,23 @@ if ($pendingInstructorAction) {
             );
 
             $projectionResult = $this->persistLessonActivityProjection(
-    $userId,
-    $cohortId,
-    $lessonId,
-    [
-        'engine_projection' => true,
-        'user_id' => $userId,
-        'cohort_id' => $cohortId,
-        'lesson_id' => $lessonId,
-        'phase' => 'deadline_extension_1_granted',
-        'fields' => [
-            'effective_deadline_utc' => $newEffectiveDeadlineUtc,
-            'test_pass_status' => 'in_progress',
-            'completion_status' => 'in_progress',
-            'last_state_eval_at' => $nowUtc,
-        ],
-    ]
-);
+                $userId,
+                $cohortId,
+                $lessonId,
+                [
+                    'engine_projection' => true,
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'phase' => 'deadline_extension_1_granted',
+                    'fields' => [
+                        'effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                        'test_pass_status' => 'in_progress',
+                        'completion_status' => 'in_progress',
+                        'last_state_eval_at' => $nowUtc,
+                    ],
+                ]
+            );
 
             $this->logProgressionEvent([
                 'user_id' => $userId,
@@ -801,23 +761,23 @@ if ($pendingInstructorAction) {
             );
 
             $projectionResult = $this->persistLessonActivityProjection(
-    $userId,
-    $cohortId,
-    $lessonId,
-    [
-        'engine_projection' => true,
-        'user_id' => $userId,
-        'cohort_id' => $cohortId,
-        'lesson_id' => $lessonId,
-        'phase' => 'deadline_extension_2_final_granted',
-        'fields' => [
-            'effective_deadline_utc' => $newEffectiveDeadlineUtc,
-            'test_pass_status' => 'in_progress',
-            'completion_status' => 'in_progress',
-            'last_state_eval_at' => $nowUtc,
-        ],
-    ]
-);
+                $userId,
+                $cohortId,
+                $lessonId,
+                [
+                    'engine_projection' => true,
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'phase' => 'deadline_extension_2_final_granted',
+                    'fields' => [
+                        'effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                        'test_pass_status' => 'in_progress',
+                        'completion_status' => 'in_progress',
+                        'last_state_eval_at' => $nowUtc,
+                    ],
+                ]
+            );
 
             $this->logProgressionEvent([
                 'user_id' => $userId,
@@ -848,6 +808,100 @@ if ($pendingInstructorAction) {
             $automationEventKey = 'deadline_reason_required_extension_2_final';
             $newDeadlineSource = 'student_extension_2_final';
         } else {
+            $pendingInstructorAction = $this->getPendingRequiredAction(
+                $userId,
+                $cohortId,
+                $lessonId,
+                'instructor_approval'
+            );
+
+            if ($pendingInstructorAction) {
+                $reopenedEffectiveDeadlineUtc = gmdate(
+                    'Y-m-d H:i:s',
+                    strtotime($effectiveDeadlineUtc . ' +48 hours')
+                );
+
+                $this->replaceActiveDeadlineOverride([
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'override_type' => 'manual_override',
+                    'base_deadline_utc' => $baseDeadlineUtc,
+                    'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+                    'granted_reason_code' => 'auto_reopen_due_to_instructor_action',
+                    'granted_reason_text' => 'Deadline reopened because instructor intervention is active.',
+                    'approval_source' => 'system',
+                    'granted_by_user_id' => null,
+                ]);
+
+                $deadlineReopened = 1;
+                $newEffectiveDeadlineUtc = $reopenedEffectiveDeadlineUtc;
+                $newEffectiveDeadlineDisplay = $this->formatUtcForDisplay($newEffectiveDeadlineUtc);
+                $newDeadlineSource = 'manual_override';
+                $createdActionUrl = $this->buildInternalAppUrl(
+                    '/instructor/instructor_approval.php?token=' . urlencode((string)$pendingInstructorAction['token'])
+                );
+
+                $projectionResult = $this->persistLessonActivityProjection(
+                    $userId,
+                    $cohortId,
+                    $lessonId,
+                    [
+                        'engine_projection' => true,
+                        'user_id' => $userId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'phase' => 'deadline_reopened_due_to_instructor_action',
+                        'fields' => [
+                            'effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                            'test_pass_status' => 'in_progress',
+                            'completion_status' => 'instructor_required',
+                            'latest_instructor_action_id' => (int)$pendingInstructorAction['id'],
+                            'last_state_eval_at' => $nowUtc,
+                        ],
+                    ]
+                );
+
+                $this->logProgressionEvent([
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $progressTestId,
+                    'event_type' => 'deadline',
+                    'event_code' => 'deadline_reopened_due_to_instructor_action',
+                    'event_status' => 'warning',
+                    'actor_type' => 'system',
+                    'actor_user_id' => null,
+                    'event_time' => $nowUtc,
+                    'payload' => [
+                        'old_effective_deadline_utc' => $effectiveDeadlineUtc,
+                        'new_effective_deadline_utc' => $newEffectiveDeadlineUtc,
+                        'deadline_source_before' => $deadlineSource,
+                        'deadline_source_after' => $newDeadlineSource,
+                        'required_action_id' => (int)$pendingInstructorAction['id'],
+                    ],
+                    'legal_note' => 'Deadline reopened because an instructor approval action was already active.',
+                ]);
+
+                $this->pdo->commit();
+
+                return [
+                    'ok' => true,
+                    'handled' => true,
+                    'action_taken' => 'existing_instructor_action_reused_with_deadline_reopen',
+                    'required_action' => $pendingInstructorAction,
+                    'required_action_url' => $createdActionUrl,
+                    'projection_result' => $projectionResult,
+                    'deadline_reopened' => 1,
+                    'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+                    'deadline_state_before' => $deadlineState,
+                    'deadline_state_after' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
+                    'lesson_extension_count_before' => $lessonExtensionCountBefore,
+                    'program_extension_count_before' => $programExtensionCountBefore,
+                    'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
+                ];
+            }
+
             $token = bin2hex(random_bytes(32));
 
             $createdAction = $this->createOrReuseRequiredActionSafe([
@@ -947,6 +1001,8 @@ if ($pendingInstructorAction) {
         'effective_deadline_display' => $newEffectiveDeadlineDisplay,
         'deadline_source_before' => $deadlineSource,
         'deadline_source_after' => $newDeadlineSource,
+        'deadline_reopened' => $deadlineReopened,
+        'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
 
         'lesson_extension_count_before' => $lessonExtensionCountBefore,
         'lesson_extension_count_after' => $createdAction && $automationEventKey !== 'deadline_missed_instructor_required'
@@ -993,11 +1049,12 @@ if ($pendingInstructorAction) {
         'lesson_extension_count_before' => $lessonExtensionCountBefore,
         'program_extension_count_before' => $programExtensionCountBefore,
         'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
+        'deadline_reopened' => $deadlineReopened,
+        'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
     ];
 
     return $result;
 }
-
     private function buildDeadlineReasonRequiredActionData(array $data): array
 {
     $userId = (int)$data['user_id'];
