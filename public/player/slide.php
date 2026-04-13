@@ -661,10 +661,18 @@ function setLang(newLang){
 const COHORT_ID = <?= (int)$cohortId ?>;
 const LESSON_ID = <?= (int)$lessonId ?>;
 
-const AUTO_KEY = 'ipca_autoplay_next';
-const LESSON_AUTOPLAY_KEY = 'ipca_lesson_autoplay|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
-const LESSON_AUTOPLAY_PROMPTED_KEY = 'ipca_lesson_autoplay_prompted|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
 
+// ==============================
+// AUTOPLAY (CLEAN VERSION)
+// ==============================
+
+const AUTO_KEY = 'ipca_autoplay_next';
+
+// ✅ COHORT-LEVEL (NOT lesson!)
+const LESSON_AUTOPLAY_KEY = 'ipca_lesson_autoplay|cohort:' + String(COHORT_ID);
+const LESSON_AUTOPLAY_PROMPTED_KEY = 'ipca_lesson_autoplay_prompted|cohort:' + String(COHORT_ID);
+
+// ---------- STATE ----------
 function hasLessonAutoplayConsent(){
   try {
     return sessionStorage.getItem(LESSON_AUTOPLAY_KEY) === '1';
@@ -697,6 +705,48 @@ function markLessonAutoplayPrompted(){
   } catch(e){}
 }
 
+// ---------- MODAL ----------
+const modalAutoplay = document.getElementById('modalAutoplay');
+const btnAutoplayEnable = document.getElementById('btnAutoplayEnable');
+const btnAutoplaySkip = document.getElementById('btnAutoplaySkip');
+
+function showAutoplayModal(){
+  if (!modalAutoplay) return;
+  markLessonAutoplayPrompted();
+  modalAutoplay.style.display = 'flex';
+}
+
+function hideAutoplayModal(){
+  if (!modalAutoplay) return;
+  modalAutoplay.style.display = 'none';
+}
+
+// ---------- EVENTS ----------
+if (btnAutoplayEnable) {
+  btnAutoplayEnable.addEventListener('click', async ()=>{
+    setLessonAutoplayConsent(true);
+    hideAutoplayModal();
+    await playTTS();
+  });
+}
+
+if (btnAutoplaySkip) {
+  btnAutoplaySkip.addEventListener('click', ()=>{
+    hideAutoplayModal();
+    localStorage.removeItem(AUTO_KEY);
+  });
+}
+
+if (modalAutoplay) {
+  modalAutoplay.addEventListener('click', (e)=>{
+    if (e.target === modalAutoplay) {
+      hideAutoplayModal();
+      localStorage.removeItem(AUTO_KEY);
+    }
+  });
+}
+
+// ---------- NAVIGATION ----------
 function armAutoplay(){
   if (hasLessonAutoplayConsent()) {
     localStorage.setItem(AUTO_KEY, '1');
@@ -718,6 +768,17 @@ function consumeAutoplay(){
     if (!ok) showAutoplayModal();
   }, 350);
 }
+
+// ---------- INIT ----------
+consumeAutoplay();
+
+// ✅ SHOW MODAL ONLY ONCE PER COHORT SESSION
+if (!hasLessonAutoplayConsent() && !hasLessonAutoplayPrompted()) {
+  setTimeout(()=>{
+    showAutoplayModal();
+  }, 250);
+}
+
 
 langSel.addEventListener('change', ()=>{
   setLang(langSel.value);
