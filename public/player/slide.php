@@ -697,30 +697,6 @@ function markLessonAutoplayPrompted(){
   } catch(e){}
 }
 
-function setLessonAutoplayConsent(enabled){
-  try {
-    if (enabled) {
-      sessionStorage.setItem(LESSON_AUTOPLAY_KEY, '1');
-    } else {
-      sessionStorage.removeItem(LESSON_AUTOPLAY_KEY);
-    }
-  } catch(e){}
-}
-
-function hasLessonAutoplayPrompted(){
-  try {
-    return sessionStorage.getItem(LESSON_AUTOPLAY_PROMPTED_KEY) === '1';
-  } catch(e){
-    return false;
-  }
-}
-
-function markLessonAutoplayPrompted(){
-  try {
-    sessionStorage.setItem(LESSON_AUTOPLAY_PROMPTED_KEY, '1');
-  } catch(e){}
-}
-
 function armAutoplay(){
   if (hasLessonAutoplayConsent()) {
     localStorage.setItem(AUTO_KEY, '1');
@@ -828,6 +804,45 @@ ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
 applyMuteUI();
 consumeAutoplay();
 
+const modalAutoplay = document.getElementById('modalAutoplay');
+const btnAutoplayEnable = document.getElementById('btnAutoplayEnable');
+const btnAutoplaySkip = document.getElementById('btnAutoplaySkip');
+
+function showAutoplayModal(){
+  if (!modalAutoplay) return;
+  markLessonAutoplayPrompted();
+  modalAutoplay.style.display = 'flex';
+}
+
+function hideAutoplayModal(){
+  if (!modalAutoplay) return;
+  modalAutoplay.style.display = 'none';
+}
+
+if (btnAutoplayEnable) {
+  btnAutoplayEnable.addEventListener('click', async ()=>{
+    setLessonAutoplayConsent(true);
+    hideAutoplayModal();
+    await playTTS();
+  });
+}
+
+if (btnAutoplaySkip) {
+  btnAutoplaySkip.addEventListener('click', ()=>{
+    hideAutoplayModal();
+    localStorage.removeItem(AUTO_KEY);
+  });
+}
+
+if (modalAutoplay) {
+  modalAutoplay.addEventListener('click', (e)=>{
+    if (e.target === modalAutoplay) {
+      hideAutoplayModal();
+      localStorage.removeItem(AUTO_KEY);
+    }
+  });
+}	
+	
 if (!hasLessonAutoplayConsent() && !hasLessonAutoplayPrompted()) {
   setTimeout(function(){
     showAutoplayModal();
