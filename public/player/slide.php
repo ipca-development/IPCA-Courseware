@@ -675,7 +675,7 @@ const LESSON_AUTOPLAY_PROMPTED_KEY = 'ipca_lesson_autoplay_prompted|cohort:' + S
 // ---------- STATE ----------
 function hasLessonAutoplayConsent(){
   try {
-    return sessionStorage.getItem(LESSON_AUTOPLAY_KEY) === '1';
+    return localStorage.getItem(LESSON_AUTOPLAY_KEY) === '1';
   } catch(e){
     return false;
   }
@@ -684,16 +684,16 @@ function hasLessonAutoplayConsent(){
 function setLessonAutoplayConsent(enabled){
   try {
     if (enabled) {
-      sessionStorage.setItem(LESSON_AUTOPLAY_KEY, '1');
+      localStorage.setItem(LESSON_AUTOPLAY_KEY, '1');
     } else {
-      sessionStorage.removeItem(LESSON_AUTOPLAY_KEY);
+      localStorage.removeItem(LESSON_AUTOPLAY_KEY);
     }
   } catch(e){}
 }
 
 function hasLessonAutoplayPrompted(){
   try {
-    return sessionStorage.getItem(LESSON_AUTOPLAY_PROMPTED_KEY) === '1';
+    return localStorage.getItem(LESSON_AUTOPLAY_PROMPTED_KEY) === '1';
   } catch(e){
     return false;
   }
@@ -701,7 +701,7 @@ function hasLessonAutoplayPrompted(){
 
 function markLessonAutoplayPrompted(){
   try {
-    sessionStorage.setItem(LESSON_AUTOPLAY_PROMPTED_KEY, '1');
+    localStorage.setItem(LESSON_AUTOPLAY_PROMPTED_KEY, '1');
   } catch(e){}
 }
 
