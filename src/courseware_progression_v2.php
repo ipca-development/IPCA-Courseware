@@ -2857,31 +2857,72 @@ if ($existingDecisionPayloadRaw !== '') {
 
 	
 	
-    public function completeRequiredAction(int $actionId, string $responseText, ?string $ipAddress = null, ?string $userAgent = null): void
-    {
-        $sql = "
-            UPDATE student_required_actions
-            SET
-                status = 'completed',
-                student_response_text = :student_response_text,
-                completed_at = :completed_at,
-                ip_address = COALESCE(:ip_address, ip_address),
-                user_agent = COALESCE(:user_agent, user_agent),
-                updated_at = :updated_at
-            WHERE id = :id
-              AND status IN ('pending','opened')
-        ";
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute([
-            ':student_response_text' => $responseText,
-            ':completed_at' => gmdate('Y-m-d H:i:s'),
-            ':ip_address' => $ipAddress,
-            ':user_agent' => $userAgent,
-            ':updated_at' => gmdate('Y-m-d H:i:s'),
-            ':id' => $actionId,
-        ]);
+public function completeRequiredAction(int $actionId, string $responseText, ?string $ipAddress = null, ?string $userAgent = null): void
+{
+    $action = $this->getRequiredActionById($actionId);
+    if (!$action) {
+        throw new RuntimeException('Required action not found.');
     }
+
+    $status = (string)($action['status'] ?? '');
+    if (!in_array($status, ['pending', 'opened'], true)) {
+        throw new RuntimeException('Required action is no longer pending.');
+    }
+
+    $actionType = trim((string)($action['action_type'] ?? ''));
+    $responseText = trim($responseText);
+
+    if ($actionType === 'deadline_reason_submission') {
+        if ($responseText === '') {
+            throw new RuntimeException('Deadline reason is required before completion.');
+        }
+
+        if (mb_strlen($responseText) < 15) {
+            throw new RuntimeException('Please provide a more complete reason before submitting.');
+        }
+    }
+
+    if ($actionType === 'remediation_acknowledgement') {
+        if ($responseText === '') {
+            $responseText = 'I confirm that I have reviewed and restudied the remedial study items and I am ready to continue.';
+        }
+    }
+
+    if ($actionType === 'instructor_approval') {
+        if ($responseText === '') {
+            $responseText = 'Approved by instructor/chief instructor through secure action page.';
+        }
+    }
+
+    $nowUtc = gmdate('Y-m-d H:i:s');
+
+    $sql = "
+        UPDATE student_required_actions
+        SET
+            status = 'completed',
+            student_response_text = :student_response_text,
+            completed_at = :completed_at,
+            ip_address = COALESCE(:ip_address, ip_address),
+            user_agent = COALESCE(:user_agent, user_agent),
+            updated_at = :updated_at
+        WHERE id = :id
+          AND status IN ('pending','opened')
+    ";
+
+    $stmt = $this->pdo->prepare($sql);
+    $stmt->execute([
+        ':student_response_text' => $responseText,
+        ':completed_at' => $nowUtc,
+        ':ip_address' => $ipAddress,
+        ':user_agent' => $userAgent,
+        ':updated_at' => $nowUtc,
+        ':id' => $actionId,
+    ]);
+
+    if ($stmt->rowCount() < 1) {
+        throw new RuntimeException('Required action could not be completed.');
+    }
+}
 
     public function hasCompletedRequiredAction(int $userId, int $cohortId, int $lessonId, string $actionType): bool
     {
