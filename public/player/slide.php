@@ -650,46 +650,16 @@ const ES_TEXT = <?= json_encode($esText) ?>;
 function applyLangUI(){
   btnTxtES.style.display = (lang==='es') ? 'inline-block' : 'none';
 }
+
+	
 function setLang(newLang){
   lang = newLang;
   localStorage.setItem(PREF_KEY, lang);
   applyLangUI();
-	
-	const modalAutoplay = document.getElementById('modalAutoplay');
-const btnAutoplayEnable = document.getElementById('btnAutoplayEnable');
-const btnAutoplaySkip = document.getElementById('btnAutoplaySkip');
-
-function showAutoplayModal(){
-  if (!modalAutoplay) return;
-  markLessonAutoplayPrompted();
-  modalAutoplay.style.display = 'flex';
 }
 
-function hideAutoplayModal(){
-  if (!modalAutoplay) return;
-  modalAutoplay.style.display = 'none';
-}
-
-btnAutoplayEnable.addEventListener('click', async ()=>{
-  setLessonAutoplayConsent(true);
-  hideAutoplayModal();
-  await playTTS();
-});
-
-btnAutoplaySkip.addEventListener('click', ()=>{
-  hideAutoplayModal();
-  localStorage.removeItem(AUTO_KEY);
-});
-
-modalAutoplay.addEventListener('click', (e)=>{
-  if (e.target === modalAutoplay) {
-    hideAutoplayModal();
-    localStorage.removeItem(AUTO_KEY);
-  }
-});
-	
-	
-}
+const COHORT_ID = <?= (int)$cohortId ?>;
+const LESSON_ID = <?= (int)$lessonId ?>;
 
 const AUTO_KEY = 'ipca_autoplay_next';
 const LESSON_AUTOPLAY_KEY = 'ipca_lesson_autoplay|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
@@ -701,6 +671,30 @@ function hasLessonAutoplayConsent(){
   } catch(e){
     return false;
   }
+}
+
+function setLessonAutoplayConsent(enabled){
+  try {
+    if (enabled) {
+      sessionStorage.setItem(LESSON_AUTOPLAY_KEY, '1');
+    } else {
+      sessionStorage.removeItem(LESSON_AUTOPLAY_KEY);
+    }
+  } catch(e){}
+}
+
+function hasLessonAutoplayPrompted(){
+  try {
+    return sessionStorage.getItem(LESSON_AUTOPLAY_PROMPTED_KEY) === '1';
+  } catch(e){
+    return false;
+  }
+}
+
+function markLessonAutoplayPrompted(){
+  try {
+    sessionStorage.setItem(LESSON_AUTOPLAY_PROMPTED_KEY, '1');
+  } catch(e){}
 }
 
 function setLessonAutoplayConsent(enabled){
@@ -807,13 +801,6 @@ async function playTTS(){
   }
 }
 
-  try {
-    await ttsAudio.play();
-    setPlayLabel('idle');
-  } catch(e) {
-    setPlayLabel('idle');
-  }
-}
 
 document.getElementById('btnAudioPlay').onclick = async ()=>{
   setLessonAutoplayConsent(true);
@@ -946,9 +933,6 @@ btnTxtES.onclick = ()=>{
 };
 document.getElementById('btnCloseES').onclick = ()=> modalES.style.display='none';
 modalES.addEventListener('click', (e)=>{ if(e.target===modalES) modalES.style.display='none'; });
-
-const COHORT_ID = <?= (int)$cohortId ?>;
-const LESSON_ID = <?= (int)$lessonId ?>;
 
 const drawer = document.getElementById('drawer');
 const rte = document.getElementById('rte');
