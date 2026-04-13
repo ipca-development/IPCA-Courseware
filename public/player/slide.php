@@ -865,50 +865,6 @@ ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
 applyMuteUI();
 consumeAutoplay();
 
-const modalAutoplay = document.getElementById('modalAutoplay');
-const btnAutoplayEnable = document.getElementById('btnAutoplayEnable');
-const btnAutoplaySkip = document.getElementById('btnAutoplaySkip');
-
-function showAutoplayModal(){
-  if (!modalAutoplay) return;
-  markLessonAutoplayPrompted();
-  modalAutoplay.style.display = 'flex';
-}
-
-function hideAutoplayModal(){
-  if (!modalAutoplay) return;
-  modalAutoplay.style.display = 'none';
-}
-
-if (btnAutoplayEnable) {
-  btnAutoplayEnable.addEventListener('click', async ()=>{
-    setLessonAutoplayConsent(true);
-    hideAutoplayModal();
-    await playTTS();
-  });
-}
-
-if (btnAutoplaySkip) {
-  btnAutoplaySkip.addEventListener('click', ()=>{
-    hideAutoplayModal();
-    localStorage.removeItem(AUTO_KEY);
-  });
-}
-
-if (modalAutoplay) {
-  modalAutoplay.addEventListener('click', (e)=>{
-    if (e.target === modalAutoplay) {
-      hideAutoplayModal();
-      localStorage.removeItem(AUTO_KEY);
-    }
-  });
-}	
-	
-if (!hasLessonAutoplayConsent() && !hasLessonAutoplayPrompted()) {
-  setTimeout(function(){
-    showAutoplayModal();
-  }, 250);
-}
 
 async function prefetchOne(slideId){
   if (!slideId || slideId <= 0) return;
