@@ -460,22 +460,6 @@ $isAdminViewer = ($role === 'admin');
     .summary-alert-close:hover{
       background:rgba(0,0,0,0.06);
     }
-	.autoplay-modal-copy{
-  max-width:720px;
-  font-size:14px;
-  line-height:1.65;
-  color:#334155;
-}
-.autoplay-modal-actions{
-  display:flex;
-  gap:10px;
-  justify-content:flex-end;
-  flex-wrap:wrap;
-  margin-top:16px;
-}  
-	  
-	  
-	  
   </style>
 </head>
 <body class="<?= $isAdminViewer ? 'viewer-admin' : 'viewer-student' ?>">
@@ -591,20 +575,6 @@ $isAdminViewer = ($role === 'admin');
     </div>
   </div>
 
-    <div class="modal" id="modalAutoplay">
-    <div class="box">
-      <h3>Audio Recommended</h3>
-      <div class="autoplay-modal-copy">
-        This lesson is intended to be studied with audio.<br><br>
-        Click <strong>Enable Auto-Play</strong> to begin the lesson with narration.
-      </div>
-      <div class="autoplay-modal-actions">
-        <button class="btnx" id="btnAutoplaySkip">Not now</button>
-        <button class="btnx" id="btnAutoplayEnable">Enable Auto-Play</button>
-      </div>
-    </div>
-  </div>	
-	
 <script>
 let isLocked = false;
 let currentReviewStatus = 'pending';	
@@ -654,99 +624,16 @@ function setLang(newLang){
   lang = newLang;
   localStorage.setItem(PREF_KEY, lang);
   applyLangUI();
-	
-	const modalAutoplay = document.getElementById('modalAutoplay');
-const btnAutoplayEnable = document.getElementById('btnAutoplayEnable');
-const btnAutoplaySkip = document.getElementById('btnAutoplaySkip');
-
-function showAutoplayModal(){
-  if (!modalAutoplay) return;
-  markLessonAutoplayPrompted();
-  modalAutoplay.style.display = 'flex';
-}
-
-function hideAutoplayModal(){
-  if (!modalAutoplay) return;
-  modalAutoplay.style.display = 'none';
-}
-
-btnAutoplayEnable.addEventListener('click', async ()=>{
-  setLessonAutoplayConsent(true);
-  hideAutoplayModal();
-  await playTTS();
-});
-
-btnAutoplaySkip.addEventListener('click', ()=>{
-  hideAutoplayModal();
-  localStorage.removeItem(AUTO_KEY);
-});
-
-modalAutoplay.addEventListener('click', (e)=>{
-  if (e.target === modalAutoplay) {
-    hideAutoplayModal();
-    localStorage.removeItem(AUTO_KEY);
-  }
-});
-	
-	
 }
 
 const AUTO_KEY = 'ipca_autoplay_next';
-const LESSON_AUTOPLAY_KEY = 'ipca_lesson_autoplay|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
-const LESSON_AUTOPLAY_PROMPTED_KEY = 'ipca_lesson_autoplay_prompted|cohort:' + String(COHORT_ID) + '|lesson:' + String(LESSON_ID);
-
-function hasLessonAutoplayConsent(){
-  try {
-    return sessionStorage.getItem(LESSON_AUTOPLAY_KEY) === '1';
-  } catch(e){
-    return false;
-  }
-}
-
-function setLessonAutoplayConsent(enabled){
-  try {
-    if (enabled) {
-      sessionStorage.setItem(LESSON_AUTOPLAY_KEY, '1');
-    } else {
-      sessionStorage.removeItem(LESSON_AUTOPLAY_KEY);
-    }
-  } catch(e){}
-}
-
-function hasLessonAutoplayPrompted(){
-  try {
-    return sessionStorage.getItem(LESSON_AUTOPLAY_PROMPTED_KEY) === '1';
-  } catch(e){
-    return false;
-  }
-}
-
-function markLessonAutoplayPrompted(){
-  try {
-    sessionStorage.setItem(LESSON_AUTOPLAY_PROMPTED_KEY, '1');
-  } catch(e){}
-}
-
-function armAutoplay(){
-  if (hasLessonAutoplayConsent()) {
-    localStorage.setItem(AUTO_KEY, '1');
-  } else {
-    localStorage.removeItem(AUTO_KEY);
-  }
-}
-
+function armAutoplay(){ localStorage.setItem(AUTO_KEY, '1'); }
 function consumeAutoplay(){
   const v = localStorage.getItem(AUTO_KEY);
-  if (v !== '1') return;
-
-  localStorage.removeItem(AUTO_KEY);
-
-  if (!hasLessonAutoplayConsent()) return;
-
-  setTimeout(async ()=>{
-    const ok = await playTTS();
-    if (!ok) showAutoplayModal();
-  }, 350);
+  if (v === '1') {
+    localStorage.removeItem(AUTO_KEY);
+    setTimeout(()=>playTTS(), 350);
+  }
 }
 
 langSel.addEventListener('change', ()=>{
@@ -800,30 +687,16 @@ async function playTTS(){
   try {
     await ttsAudio.play();
     setPlayLabel('idle');
-    return true;
-  } catch(e) {
-    setPlayLabel('idle');
-    return false;
-  }
-}
-
-  try {
-    await ttsAudio.play();
-    setPlayLabel('idle');
   } catch(e) {
     setPlayLabel('idle');
   }
 }
 
-document.getElementById('btnAudioPlay').onclick = async ()=>{
-  setLessonAutoplayConsent(true);
-  await playTTS();
-};
+document.getElementById('btnAudioPlay').onclick = ()=> playTTS();
 document.getElementById('btnAudioPause').onclick = ()=> ttsAudio.pause();
-document.getElementById('btnAudioRew').onclick = async ()=>{
-  setLessonAutoplayConsent(true);
+document.getElementById('btnAudioRew').onclick = ()=>{
   ttsAudio.currentTime = 0;
-  await playTTS();
+  playTTS();
 };
 
 btnMute.onclick = ()=>{
@@ -840,12 +713,6 @@ ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
 
 applyMuteUI();
 consumeAutoplay();
-
-if (!hasLessonAutoplayConsent() && !hasLessonAutoplayPrompted()) {
-  setTimeout(function(){
-    showAutoplayModal();
-  }, 250);
-}
 
 async function prefetchOne(slideId){
   if (!slideId || slideId <= 0) return;
