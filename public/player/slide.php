@@ -824,6 +824,12 @@ ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
 applyMuteUI();
 consumeAutoplay();
 
+// ✅ FORCE pulse if user has NOT enabled autoplay yet
+if (!hasLessonAutoplayConsent()) {
+  btnPlay.classList.add('audio-pulse');
+  btnPlay.textContent = 'Tap to start audio';
+}
+
 
 async function prefetchOne(slideId){
   if (!slideId || slideId <= 0) return;
