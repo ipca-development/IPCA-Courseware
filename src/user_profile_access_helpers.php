@@ -876,10 +876,181 @@ if (!function_exists('ups_recalculate_profile_requirements_status')) {
             return;
         }
 
-        // Bridge to existing requirement engine (SSOT)
-        if (function_exists('aue_recalculate_profile_requirements_status')) {
-            aue_recalculate_profile_requirements_status($pdo, $userId);
+        $workspace = ups_load_self_service_workspace($pdo, $userId);
+        if (!$workspace || !is_array($workspace)) {
+            return;
         }
+
+        $user = is_array($workspace['user'] ?? null) ? $workspace['user'] : array();
+        $contacts = is_array($workspace['emergency_contacts'] ?? null) ? $workspace['emergency_contacts'] : array();
+
+        $missingKeys = array();
+
+        if (!ups_has_value($user['first_name'] ?? null)) {
+            $missingKeys[] = 'first_name';
+        }
+
+        if (!ups_has_value($user['last_name'] ?? null)) {
+            $missingKeys[] = 'last_name';
+        }
+
+        if (!ups_has_value($user['email'] ?? null)) {
+            $missingKeys[] = 'email';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_photo', false) && !ups_has_value($user['photo_path'] ?? null)) {
+            $missingKeys[] = 'photo_path';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_street_address', true) && !ups_has_value($user['street_address'] ?? null)) {
+            $missingKeys[] = 'street_address';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_street_number', true) && !ups_has_value($user['street_number'] ?? null)) {
+            $missingKeys[] = 'street_number';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_zip_code', true) && !ups_has_value($user['zip_code'] ?? null)) {
+            $missingKeys[] = 'zip_code';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_city', true) && !ups_has_value($user['city'] ?? null)) {
+            $missingKeys[] = 'city';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_state_region', true) && !ups_has_value($user['state_region'] ?? null)) {
+            $missingKeys[] = 'state_region';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_country_code', true) && !ups_has_value($user['country_code'] ?? null)) {
+            $missingKeys[] = 'country_code';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_cellphone', true) && !ups_has_value($user['cellphone'] ?? null)) {
+            $missingKeys[] = 'cellphone';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_secondary_email', false) && !ups_has_value($user['secondary_email'] ?? null)) {
+            $missingKeys[] = 'secondary_email';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_date_of_birth', true) && !ups_has_value($user['date_of_birth'] ?? null)) {
+            $missingKeys[] = 'date_of_birth';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_place_of_birth', true) && !ups_has_value($user['place_of_birth'] ?? null)) {
+            $missingKeys[] = 'place_of_birth';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_nationality', true) && !ups_has_value($user['nationality'] ?? null)) {
+            $missingKeys[] = 'nationality';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_id_passport_number', true) && !ups_has_value($user['id_passport_number'] ?? null)) {
+            $missingKeys[] = 'id_passport_number';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_gender', true) && !ups_has_value($user['gender'] ?? null)) {
+            $missingKeys[] = 'gender';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_weight', true) && !ups_has_value($user['weight_kg'] ?? null)) {
+            $missingKeys[] = 'weight_kg';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_height_cm', true) && !ups_has_value($user['height_cm'] ?? null)) {
+            $missingKeys[] = 'height_cm';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_hair_color', true) && !ups_has_value($user['hair_color'] ?? null)) {
+            $missingKeys[] = 'hair_color';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_eye_color', true) && !ups_has_value($user['eye_color'] ?? null)) {
+            $missingKeys[] = 'eye_color';
+        }
+
+        if (ups_policy_bool($pdo, 'user_require_marital_status', true) && !ups_has_value($user['marital_status'] ?? null)) {
+            $missingKeys[] = 'marital_status';
+        }
+
+        $requiredContactCount = max(0, ups_policy_int($pdo, 'user_required_emergency_contact_count', 2));
+
+        for ($i = 1; $i <= $requiredContactCount; $i++) {
+            $contact = array();
+
+            foreach ($contacts as $row) {
+                if ((int)($row['sort_order'] ?? 0) === $i) {
+                    $contact = is_array($row) ? $row : array();
+                    break;
+                }
+            }
+
+            if ($i === 1) {
+                if (ups_policy_bool($pdo, 'user_require_emergency_contact_name', true) && !ups_has_value($contact['contact_name'] ?? null)) {
+                    $missingKeys[] = 'emergency_contact_1_name';
+                }
+
+                if (ups_policy_bool($pdo, 'user_require_emergency_contact_relationship', true) && !ups_has_value($contact['relationship'] ?? null)) {
+                    $missingKeys[] = 'emergency_contact_1_relationship';
+                }
+
+                if (ups_policy_bool($pdo, 'user_require_emergency_contact_phone', true) && !ups_has_value($contact['phone'] ?? null)) {
+                    $missingKeys[] = 'emergency_contact_1_phone';
+                }
+            }
+
+            if ($i === 2) {
+                if (ups_policy_bool($pdo, 'user_require_emergency_contact_name', true) && !ups_has_value($contact['contact_name'] ?? null)) {
+                    $missingKeys[] = 'emergency_contact_2_name';
+                }
+
+                if (ups_policy_bool($pdo, 'user_require_emergency_contact_relationship', true) && !ups_has_value($contact['relationship'] ?? null)) {
+                    $missingKeys[] = 'emergency_contact_2_relationship';
+                }
+
+                if (ups_policy_bool($pdo, 'user_require_emergency_contact_phone', true) && !ups_has_value($contact['phone'] ?? null)) {
+                    $missingKeys[] = 'emergency_contact_2_phone';
+                }
+            }
+        }
+
+        $missingKeys = array_values(array_unique($missingKeys));
+        $missingCount = count($missingKeys);
+        $isComplete = $missingCount === 0 ? 1 : 0;
+        $missingJson = ups_profile_missing_items_json($missingKeys);
+
+        $stmt = $pdo->prepare("
+            INSERT INTO user_profile_requirements_status (
+                user_id,
+                missing_fields_json,
+                missing_count,
+                is_profile_complete,
+                last_evaluated_at,
+                created_at,
+                updated_at
+            ) VALUES (
+                :user_id,
+                :missing_fields_json,
+                :missing_count,
+                :is_profile_complete,
+                NOW(),
+                NOW(),
+                NOW()
+            )
+            ON DUPLICATE KEY UPDATE
+                missing_fields_json = VALUES(missing_fields_json),
+                missing_count = VALUES(missing_count),
+                is_profile_complete = VALUES(is_profile_complete),
+                last_evaluated_at = NOW(),
+                updated_at = NOW()
+        ");
+        $stmt->execute(array(
+            ':user_id' => $userId,
+            ':missing_fields_json' => $missingJson,
+            ':missing_count' => $missingCount,
+            ':is_profile_complete' => $isComplete,
+        ));
     }
 }
 
