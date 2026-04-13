@@ -39,11 +39,6 @@ $co->execute([$cohortId]);
 $cohort = $co->fetch(PDO::FETCH_ASSOC);
 if (!$cohort) exit('Cohort not found');
 
-$cohortTimezone = trim((string)($cohort['timezone'] ?? 'UTC'));
-if ($cohortTimezone === '') {
-    $cohortTimezone = 'UTC';
-}
-
 $engine = new CoursewareProgressionV2($pdo);
 $policy = $engine->getAllPolicies(['cohort_id' => $cohortId]);
 
@@ -309,7 +304,7 @@ function get_lesson_activity_state(PDO $pdo, int $userId, int $cohortId, int $le
     return is_array($row) ? $row : [];
 }
 
-function deadline_meta($deadlineUtc, $displayTimezone = 'UTC') {
+function deadline_meta($deadlineUtc) {
     if (trim($deadlineUtc) === '') {
         return [
             'label' => 'No deadline',
@@ -319,19 +314,11 @@ function deadline_meta($deadlineUtc, $displayTimezone = 'UTC') {
     }
 
     try {
-        $utcTz = new DateTimeZone('UTC');
+        $deadline = new DateTime($deadlineUtc, new DateTimeZone('UTC'));
+        $now = new DateTime('now', new DateTimeZone('UTC'));
 
-        try {
-            $uiTz = new DateTimeZone(trim((string)$displayTimezone) !== '' ? (string)$displayTimezone : 'UTC');
-        } catch (Throwable $e) {
-            $uiTz = $utcTz;
-        }
-
-        $deadlineUtcDt = new DateTime($deadlineUtc, $utcTz);
-        $nowUtc = new DateTime('now', $utcTz);
-
-        $deadlineTs = $deadlineUtcDt->getTimestamp();
-        $nowTs = $nowUtc->getTimestamp();
+        $deadlineTs = $deadline->getTimestamp();
+        $nowTs = $now->getTimestamp();
         $diff = $deadlineTs - $nowTs;
 
         if ($diff < 0) {
@@ -358,13 +345,10 @@ function deadline_meta($deadlineUtc, $displayTimezone = 'UTC') {
             $class = 'deadline-green';
         }
 
-        $deadlineDisplay = clone $deadlineUtcDt;
-        $deadlineDisplay->setTimezone($uiTz);
-
         return [
             'label' => $label,
             'class' => $class,
-            'date'  => $deadlineDisplay->format('D, M j, Y, H:i T')
+            'date'  => $deadline->format('D, M j, Y, H:i') . ' UTC'
         ];
     } catch (Throwable $e) {
         return [
@@ -375,8 +359,8 @@ function deadline_meta($deadlineUtc, $displayTimezone = 'UTC') {
     }
 }
 
-function deadline_progress_meta($cohortStartDate, $deadlineUtc, $displayTimezone = 'UTC') {
-    $meta = deadline_meta($deadlineUtc, $displayTimezone);
+function deadline_progress_meta($cohortStartDate, $deadlineUtc) {
+    $meta = deadline_meta($deadlineUtc);
     $meta['pct'] = 0;
 
     if (trim($deadlineUtc) === '' || trim($cohortStartDate) === '') {
@@ -787,7 +771,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
 	}
 
     $ptUrlV2 = '/student/progress_test_v2.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
-    $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc, $cohortTimezone);
+    $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc);
 
     if ($bestScore !== null) {
         $allBestScores[] = (int)$bestScore;
@@ -920,7 +904,7 @@ foreach ($courseBlocks as $k => $block) {
     $courseBlocks[$k]['passed_count'] = $countPassed;
     $courseBlocks[$k]['progress_pct'] = percent($countPassed, $countLessons);
     $courseBlocks[$k]['avg_score'] = $courseScores ? (int)round(array_sum($courseScores) / count($courseScores)) : null;
-    $courseBlocks[$k]['deadline'] = deadline_progress_meta((string)$cohort['start_date'], (string)$block['last_deadline_utc'], $cohortTimezone);
+    $courseBlocks[$k]['deadline'] = deadline_progress_meta((string)$cohort['start_date'], (string)$block['last_deadline_utc']);
     $courseBlocks[$k]['summary_approved_count'] = $summaryApproved;
     $courseBlocks[$k]['revision_count'] = $revisionCount;
     $courseBlocks[$k]['overdue_count'] = $overdueCount;
