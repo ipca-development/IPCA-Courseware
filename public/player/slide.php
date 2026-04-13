@@ -460,19 +460,27 @@ $isAdminViewer = ($role === 'admin');
     .summary-alert-close:hover{
       background:rgba(0,0,0,0.06);
     }
-	.autoplay-modal-copy{
-  max-width:720px;
-  font-size:14px;
-  line-height:1.65;
-  color:#334155;
+
+	.btnx.audio-pulse{
+  animation:audioPulse 1.2s ease-in-out infinite;
+  box-shadow:0 0 0 0 rgba(30,60,114,0.45);
 }
-.autoplay-modal-actions{
-  display:flex;
-  gap:10px;
-  justify-content:flex-end;
-  flex-wrap:wrap;
-  margin-top:16px;
+
+@keyframes audioPulse{
+  0%{
+    transform:scale(1);
+    box-shadow:0 0 0 0 rgba(30,60,114,0.45);
+  }
+  50%{
+    transform:scale(1.04);
+    box-shadow:0 0 0 10px rgba(30,60,114,0);
+  }
+  100%{
+    transform:scale(1);
+    box-shadow:0 0 0 0 rgba(30,60,114,0);
+  }
 }  
+	  
 	  
 	  
 	  
@@ -590,20 +598,7 @@ $isAdminViewer = ($role === 'admin');
       <video id="vid" controls playsinline></video>
     </div>
   </div>
-
-    <div class="modal" id="modalAutoplay">
-    <div class="box">
-      <h3>Audio Recommended</h3>
-      <div class="autoplay-modal-copy">
-        This lesson is intended to be studied with audio.<br><br>
-        Click <strong>Enable Auto-Play</strong> to begin the lesson with narration.
-      </div>
-      <div class="autoplay-modal-actions">
-        <button class="btnx" id="btnAutoplaySkip">Not now</button>
-        <button class="btnx" id="btnAutoplayEnable">Enable Auto-Play</button>
-      </div>
-    </div>
-  </div>	
+	
 	
 <script>
 let isLocked = false;
@@ -705,46 +700,7 @@ function markLessonAutoplayPrompted(){
   } catch(e){}
 }
 
-// ---------- MODAL ----------
-const modalAutoplay = document.getElementById('modalAutoplay');
-const btnAutoplayEnable = document.getElementById('btnAutoplayEnable');
-const btnAutoplaySkip = document.getElementById('btnAutoplaySkip');
 
-function showAutoplayModal(){
-  if (!modalAutoplay) return;
-  markLessonAutoplayPrompted();
-  modalAutoplay.style.display = 'flex';
-}
-
-function hideAutoplayModal(){
-  if (!modalAutoplay) return;
-  modalAutoplay.style.display = 'none';
-}
-
-// ---------- EVENTS ----------
-if (btnAutoplayEnable) {
-  btnAutoplayEnable.addEventListener('click', async ()=>{
-    setLessonAutoplayConsent(true);
-    hideAutoplayModal();
-    await playTTS();
-  });
-}
-
-if (btnAutoplaySkip) {
-  btnAutoplaySkip.addEventListener('click', ()=>{
-    hideAutoplayModal();
-    localStorage.removeItem(AUTO_KEY);
-  });
-}
-
-if (modalAutoplay) {
-  modalAutoplay.addEventListener('click', (e)=>{
-    if (e.target === modalAutoplay) {
-      hideAutoplayModal();
-      localStorage.removeItem(AUTO_KEY);
-    }
-  });
-}
 
 // ---------- NAVIGATION ----------
 function armAutoplay(){
@@ -764,16 +720,14 @@ function consumeAutoplay(){
   if (!hasLessonAutoplayConsent()) return;
 
   setTimeout(async ()=>{
-    await playTTS();
+    const ok = await playTTS();
+    if (!ok) {
+      btnPlay.classList.add('audio-pulse');
+      btnPlay.textContent = 'Tap to continue audio';
+    }
   }, 350);
 }
 
-// ✅ SHOW MODAL ONLY ONCE PER COHORT SESSION
-if (!hasLessonAutoplayConsent() && !hasLessonAutoplayPrompted()) {
-  setTimeout(()=>{
-    showAutoplayModal();
-  }, 250);
-}
 
 
 langSel.addEventListener('change', ()=>{
@@ -796,8 +750,13 @@ const btnMute  = document.getElementById('btnAudioMute');
 const MUTE_KEY = 'ipca_tts_muted';
 
 function setPlayLabel(state){
-  if (state === 'generating') btnPlay.textContent = 'Generating Audio…';
-  else btnPlay.textContent = '▶︎ Audio';
+  if (state === 'generating') {
+    btnPlay.classList.remove('audio-pulse');
+    btnPlay.textContent = 'Generating Audio…';
+  } else {
+    btnPlay.classList.remove('audio-pulse');
+    btnPlay.textContent = '▶︎ Audio';
+  }
 }
 
 function applyMuteUI(){
@@ -837,11 +796,15 @@ async function playTTS(){
 
 document.getElementById('btnAudioPlay').onclick = async ()=>{
   setLessonAutoplayConsent(true);
+  btnPlay.classList.remove('audio-pulse');
+  btnPlay.textContent = '▶︎ Audio';
   await playTTS();
 };
 document.getElementById('btnAudioPause').onclick = ()=> ttsAudio.pause();
 document.getElementById('btnAudioRew').onclick = async ()=>{
   setLessonAutoplayConsent(true);
+  btnPlay.classList.remove('audio-pulse');
+  btnPlay.textContent = '▶︎ Audio';
   ttsAudio.currentTime = 0;
   await playTTS();
 };
