@@ -764,8 +764,7 @@ function consumeAutoplay(){
   if (!hasLessonAutoplayConsent()) return;
 
   setTimeout(async ()=>{
-    const ok = await playTTS();
-    if (!ok) showAutoplayModal();
+    await playTTS();
   }, 350);
 }
 
