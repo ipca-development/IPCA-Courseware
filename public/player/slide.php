@@ -769,9 +769,6 @@ function consumeAutoplay(){
   }, 350);
 }
 
-// ---------- INIT ----------
-consumeAutoplay();
-
 // ✅ SHOW MODAL ONLY ONCE PER COHORT SESSION
 if (!hasLessonAutoplayConsent() && !hasLessonAutoplayPrompted()) {
   setTimeout(()=>{
