@@ -134,33 +134,74 @@ final class TimeBasedProgressionCron
         $this->lockAcquired = false;
     }
 
-    private function loadCandidateRows(): array
-    {
-        $sql = "
-            SELECT
-                la.user_id,
-                la.cohort_id,
-                la.lesson_id,
-                la.completion_status,
-                la.training_suspended,
-                la.effective_deadline_utc,
-                la.last_state_eval_at,
-                la.updated_at
-            FROM lesson_activity la
-            WHERE la.completion_status <> 'completed'
-              AND la.effective_deadline_utc IS NOT NULL
-              AND COALESCE(la.training_suspended, 0) = 0
-              AND la.effective_deadline_utc <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL :window_hours HOUR)
-            ORDER BY la.effective_deadline_utc ASC, la.user_id ASC, la.cohort_id ASC, la.lesson_id ASC
-        ";
+private function loadCandidateRows(): array
+{
+    $sql = "
+        SELECT
+            cs.user_id,
+            cs.cohort_id,
+            cld.lesson_id,
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->bindValue(':window_hours', self::APPROACHING_WINDOW_HOURS, PDO::PARAM_INT);
-        $stmt->execute();
+            COALESCE(sldo.new_deadline_utc, cld.deadline_utc) AS effective_deadline_utc,
 
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        return is_array($rows) ? $rows : array();
-    }
+            COALESCE(la.completion_status, '') AS completion_status,
+            COALESCE(la.training_suspended, 0) AS training_suspended,
+            la.last_state_eval_at,
+            la.updated_at
+
+        FROM cohort_students cs
+
+        INNER JOIN cohort_lesson_deadlines cld
+            ON cld.cohort_id = cs.cohort_id
+
+        LEFT JOIN (
+            SELECT o1.user_id, o1.cohort_id, o1.lesson_id, o1.new_deadline_utc
+            FROM student_lesson_deadline_overrides o1
+            INNER JOIN (
+                SELECT
+                    user_id,
+                    cohort_id,
+                    lesson_id,
+                    MAX(id) AS max_id
+                FROM student_lesson_deadline_overrides
+                WHERE is_active = 1
+                GROUP BY user_id, cohort_id, lesson_id
+            ) o2
+                ON o2.user_id = o1.user_id
+               AND o2.cohort_id = o1.cohort_id
+               AND o2.lesson_id = o1.lesson_id
+               AND o2.max_id = o1.id
+            WHERE o1.is_active = 1
+        ) sldo
+            ON sldo.user_id = cs.user_id
+           AND sldo.cohort_id = cs.cohort_id
+           AND sldo.lesson_id = cld.lesson_id
+
+        LEFT JOIN lesson_activity la
+            ON la.user_id = cs.user_id
+           AND la.cohort_id = cs.cohort_id
+           AND la.lesson_id = cld.lesson_id
+
+        WHERE cs.status = 'active'
+          AND cld.deadline_utc IS NOT NULL
+          AND COALESCE(la.completion_status, '') <> 'completed'
+          AND COALESCE(la.training_suspended, 0) = 0
+          AND COALESCE(sldo.new_deadline_utc, cld.deadline_utc) <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL :window_hours HOUR)
+
+        ORDER BY
+            COALESCE(sldo.new_deadline_utc, cld.deadline_utc) ASC,
+            cs.user_id ASC,
+            cs.cohort_id ASC,
+            cld.lesson_id ASC
+    ";
+
+    $stmt = $this->pdo->prepare($sql);
+    $stmt->bindValue(':window_hours', self::APPROACHING_WINDOW_HOURS, PDO::PARAM_INT);
+    $stmt->execute();
+
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    return is_array($rows) ? $rows : array();
+}
 
     private function processCandidate(array $candidateRow): array
     {
