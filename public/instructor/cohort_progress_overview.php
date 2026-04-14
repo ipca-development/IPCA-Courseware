@@ -903,7 +903,7 @@ foreach ($studentRows as $row) {
                 WHEN status = 'completed' THEN 1
                 ELSE 2
             END,
-            attempt_no DESC,
+            attempt DESC,
             id DESC
         LIMIT 1
         ",
