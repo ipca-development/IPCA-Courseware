@@ -650,13 +650,13 @@ function setLang(newLang){
 }
 
 const AUTO_KEY = 'ipca_autoplay_next';
-function armAutoplay(){ localStorage.setItem(AUTO_KEY, '1'); }
+
+function armAutoplay(){
+  localStorage.removeItem(AUTO_KEY);
+}
+
 function consumeAutoplay(){
-  const v = localStorage.getItem(AUTO_KEY);
-  if (v === '1') {
-    localStorage.removeItem(AUTO_KEY);
-    setTimeout(()=>playTTS(), 350);
-  }
+  localStorage.removeItem(AUTO_KEY);
 }
 
 langSel.addEventListener('change', ()=>{
