@@ -18,6 +18,16 @@ if (!in_array($currentRole, $allowedRoles, true)) {
 
 $engine = new CoursewareProgressionV2($pdo);
 
+
+function ptr_fetch_one(PDO $pdo, string $sql, array $params = array()): ?array
+{
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+
 function cpo_h(mixed $value): string
 {
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
@@ -877,9 +887,42 @@ foreach ($studentRows as $row) {
     }
 
     $actionToken = trim((string)($row['latest_instructor_action_token'] ?? ''));
-$openUrl = $actionToken !== ''
-    ? '/instructor/instructor_approval.php?token=' . rawurlencode($actionToken)
-    : '';
+    $latestInstructorActionId = (int)($row['latest_instructor_action_id'] ?? 0);
+
+    $reviewTestId = 0;
+
+    $latestTestRow = ptr_fetch_one(
+        $pdo,
+        "
+        SELECT id
+        FROM progress_tests_v2
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id = ?
+        ORDER BY
+            CASE
+                WHEN status = 'ready' THEN 0
+                WHEN status = 'completed' THEN 1
+                ELSE 2
+            END,
+            attempt_no DESC,
+            id DESC
+        LIMIT 1
+        ",
+        array(
+            (int)$row['user_id'],
+            (int)$row['cohort_id'],
+            (int)($row['current_lesson_id'] ?? 0)
+        )
+    );
+
+    if ($latestTestRow && !empty($latestTestRow['id'])) {
+        $reviewTestId = (int)$latestTestRow['id'];
+    }
+
+    $openUrl = $reviewTestId > 0
+        ? '/instructor/progress_test_review.php?test_id=' . $reviewTestId
+        : '';
 
 $currentLessonId = (int)($row['current_lesson_id'] ?? 0);
 $progressReviewUrl = '';
