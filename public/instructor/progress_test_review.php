@@ -18,6 +18,15 @@ if (!in_array($currentRole, $allowedRoles, true)) {
 
 $engine = new CoursewareProgressionV2($pdo);
 
+function ptr_fetch_one(PDO $pdo, string $sql, array $params = array()): ?array
+{
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+
 function ptr_h($value): string
 {
     return htmlspecialchars((string)$value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
@@ -548,10 +557,41 @@ function ptr_safe_recover(PDO $pdo, array $testRow, int $actorUserId): array
     }
 }
 
-$testId = (int)($_GET['test_id'] ?? $_POST['test_id'] ?? 0);
+$testId = (int)($_GET['test_id'] ?? 0);
+$cohortId = (int)($_GET['cohort_id'] ?? 0);
+$userId   = (int)($_GET['user_id'] ?? 0);
+$lessonId = (int)($_GET['lesson_id'] ?? 0);
+
+if ($testId <= 0 && $cohortId > 0 && $userId > 0 && $lessonId > 0) {
+    $resolvedTest = ptr_fetch_one(
+        $pdo,
+        "
+        SELECT id
+        FROM progress_tests_v2
+        WHERE cohort_id = ?
+          AND user_id = ?
+          AND lesson_id = ?
+        ORDER BY
+            CASE
+                WHEN status = 'ready' THEN 0
+                WHEN status = 'in_progress' THEN 1
+                WHEN status = 'completed' THEN 2
+                ELSE 3
+            END,
+            attempt DESC,
+            id DESC
+        LIMIT 1
+        ",
+        array($cohortId, $userId, $lessonId)
+    );
+
+    if ($resolvedTest && !empty($resolvedTest['id'])) {
+        $testId = (int)$resolvedTest['id'];
+    }
+}
+
 if ($testId <= 0) {
-    http_response_code(400);
-    exit('Missing test_id');
+    exit('Missing Test ID');
 }
 
 $flashSuccess = '';
