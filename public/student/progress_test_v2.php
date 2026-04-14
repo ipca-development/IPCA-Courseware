@@ -24,8 +24,8 @@ if ($role === 'student') {
     }
 }
 
-$userName = (string)($u['name'] ?? 'Student');
-$firstName = trim(explode(' ', trim($userName))[0] ?? 'Student');
+$userName = trim((string)($u['name'] ?? 'Student'));
+$firstName = trim(explode(' ', $userName)[0] ?? 'Student');
 
 $INSTRUCTOR_NAME = 'Maya';
 $INSTRUCTOR_AVATAR = '/assets/avatars/maya.png';
@@ -515,7 +515,7 @@ cw_header('Progress Test');
           <div class="cam circle-lock">
             <video id="studentCam" autoplay playsinline muted></video>
             <div class="fallback" id="camFallback">CAM</div>
-            <div class="label"><?= h($userName) ?></div>
+            <div class="label"><?= h($firstName) ?></div>
           </div>
         </div>
         <div class="person-name"><?= h($userName) ?></div>
