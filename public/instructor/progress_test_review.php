@@ -18,6 +18,14 @@ if (!in_array($currentRole, $allowedRoles, true)) {
 
 $engine = new CoursewareProgressionV2($pdo);
 
+function ptr_fetch_one(PDO $pdo, string $sql, array $params = array()): ?array
+{
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
 
 function ptr_h($value): string
 {
@@ -51,14 +59,6 @@ function ptr_create_token(): string
     } catch (Throwable $e) {
         return md5(uniqid((string)mt_rand(), true));
     }
-}
-
-function ptr_fetch_one(PDO $pdo, string $sql, array $params = array()): ?array
-{
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
-    return $row ?: null;
 }
 
 function ptr_fetch_all(PDO $pdo, string $sql, array $params = array()): array
