@@ -330,7 +330,7 @@ cw_header('Progress Test');
 
   .cam{
     background:#000;
-    border:4px solid rgba(59,130,246,0.35);
+    border:4px solid rgba(255,255,255,0.85);
     box-shadow:0 10px 30px rgba(0,0,0,0.12);
   }
   .cam video{
