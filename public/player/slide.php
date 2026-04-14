@@ -141,10 +141,25 @@ $isAdminViewer = ($role === 'admin');
     .btnx:hover{ background: rgba(30,60,114,0.14); }
     .btnx:disabled{ opacity:.4; cursor:not-allowed; }
     .btnx.on{ background: rgba(30,60,114,0.20); border-color: rgba(30,60,114,0.45); }
- 	.btnx.locked-disabled{
-  		opacity:.45;
-  		cursor:not-allowed;
-  		pointer-events:auto;
+ 	.btnx:hover{ background: rgba(30,60,114,0.14); }
+	.btnx:disabled{ opacity:.4; cursor:not-allowed; }
+	.btnx.on{ background: rgba(30,60,114,0.20); border-color: rgba(30,60,114,0.45); }
+
+	.btnx.audio-primary{
+	  background:#1e3c72;
+	  border-color:#1e3c72;
+	  color:#fff;
+	}
+	.btnx.audio-primary:hover{
+	  background:#2a5298;
+	  border-color:#2a5298;
+	  color:#fff;
+	}
+
+	.btnx.locked-disabled{
+	  opacity:.45;
+	  cursor:not-allowed;
+	  pointer-events:auto;
 	}
 	  
 	  
@@ -462,9 +477,12 @@ $isAdminViewer = ($role === 'admin');
     }
 	  
 	.btnx.audio-pulse{
-      animation:audioPulse 1.2s ease-in-out infinite;
-      box-shadow:0 0 0 0 rgba(30,60,114,0.45);
-    }
+	  background:#1e3c72;
+	  border-color:#1e3c72;
+	  color:#fff;
+	  animation:audioPulse 1.2s ease-in-out infinite;
+	  box-shadow:0 0 0 0 rgba(30,60,114,0.45);
+	}
 
     @keyframes audioPulse{
       0%{
@@ -501,7 +519,7 @@ $isAdminViewer = ($role === 'admin');
       </select>
     </label>
 
-    <button class="btnx" id="btnAudioPlay">▶︎ Audio</button>
+    <button class="btnx audio-primary" id="btnAudioPlay">▶︎ Audio</button>
     <button class="btnx" id="btnAudioPause">⏸︎</button>
     <button class="btnx" id="btnAudioRew">↺</button>
     <button class="btnx" id="btnAudioMute">Mute</button>
