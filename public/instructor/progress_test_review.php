@@ -26,6 +26,13 @@ function ptr_fetch_one(PDO $pdo, string $sql, array $params = array()): ?array
     return $row ?: null;
 }
 
+function ptr_fetch_all(PDO $pdo, string $sql, array $params = array()): array
+{
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute($params);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    return $rows ?: array();
+}
 
 function ptr_h($value): string
 {
@@ -55,18 +62,10 @@ function ptr_format_dt(?string $dt): string
 function ptr_create_token(): string
 {
     try {
-        return bin2hex(random_bytes(16));
+        return bin2hex(random_bytes(32));
     } catch (Throwable $e) {
-        return md5(uniqid((string)mt_rand(), true));
+        return hash('sha256', uniqid((string)mt_rand(), true));
     }
-}
-
-function ptr_fetch_all(PDO $pdo, string $sql, array $params = array()): array
-{
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    return $rows ?: array();
 }
 
 function ptr_column_exists(PDO $pdo, string $table, string $column): bool
@@ -139,16 +138,26 @@ function ptr_find_latest_open_action(PDO $pdo, int $userId, int $cohortId, int $
 function ptr_mark_opened_if_needed(PDO $pdo, int $actionId): void
 {
     $hasUpdatedAt = ptr_column_exists($pdo, 'student_required_actions', 'updated_at');
+    $hasOpenedAt  = ptr_column_exists($pdo, 'student_required_actions', 'opened_at');
 
-    $sql = "UPDATE student_required_actions SET status = CASE WHEN status = 'pending' THEN 'opened' ELSE status END";
+    $sets = array(
+        "status = CASE WHEN status = 'pending' THEN 'opened' ELSE status END"
+    );
+    $params = array();
+
     if ($hasUpdatedAt) {
-        $sql .= ", updated_at = ?";
-        $params = array(ptr_now_utc(), $actionId);
-    } else {
-        $params = array($actionId);
+        $sets[] = "updated_at = ?";
+        $params[] = ptr_now_utc();
     }
-    $sql .= " WHERE id = ?";
 
+    if ($hasOpenedAt) {
+        $sets[] = "opened_at = CASE WHEN opened_at IS NULL AND status = 'pending' THEN ? ELSE opened_at END";
+        $params[] = ptr_now_utc();
+    }
+
+    $params[] = $actionId;
+
+    $sql = "UPDATE student_required_actions SET " . implode(', ', $sets) . " WHERE id = ?";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
 }
@@ -166,8 +175,12 @@ function ptr_insert_instructor_action(PDO $pdo, array $testRow, int $createdByUs
         'action_type',
         'status',
         'token',
+        'title',
+        'instructions_html',
+        'instructions_text',
         'created_at'
     );
+
     $values = array(
         (int)$testRow['user_id'],
         (int)$testRow['cohort_id'],
@@ -176,6 +189,9 @@ function ptr_insert_instructor_action(PDO $pdo, array $testRow, int $createdByUs
         'instructor_approval',
         'pending',
         $token,
+        'Instructor Review Required',
+        '<p>An instructor review has been opened for this progress test.</p><p>Please review the attempt history and decide the next step.</p>',
+        'An instructor review has been opened for this progress test. Please review the attempt history and decide the next step.',
         $nowUtc
     );
 
@@ -183,14 +199,17 @@ function ptr_insert_instructor_action(PDO $pdo, array $testRow, int $createdByUs
         $columns[] = 'updated_at';
         $values[] = $nowUtc;
     }
+
     if (ptr_column_exists($pdo, 'student_required_actions', 'created_by_user_id')) {
         $columns[] = 'created_by_user_id';
         $values[] = $createdByUserId;
     }
+
     if (ptr_column_exists($pdo, 'student_required_actions', 'required_by_utc')) {
         $columns[] = 'required_by_utc';
         $values[] = null;
     }
+
     if (ptr_column_exists($pdo, 'student_required_actions', 'metadata_json')) {
         $columns[] = 'metadata_json';
         $values[] = json_encode(array(
@@ -199,6 +218,7 @@ function ptr_insert_instructor_action(PDO $pdo, array $testRow, int $createdByUs
             'reason' => 'Manual recovery created instructor approval because no active instructor link existed.'
         ));
     }
+
     if (ptr_column_exists($pdo, 'student_required_actions', 'notes')) {
         $columns[] = 'notes';
         $values[] = 'Manually created by admin recovery in progress_test_review.php';
@@ -230,29 +250,52 @@ function ptr_refresh_lesson_activity(PDO $pdo, array $testRow): void
         WHERE user_id = ?
           AND cohort_id = ?
           AND lesson_id = ?
-        ORDER BY attempt_no ASC, id ASC
+        ORDER BY attempt ASC, id ASC
         ",
         array($userId, $cohortId, $lessonId)
     );
 
-    $completedAttempts = 0;
-    $latestCompleted   = null;
-    $hasPass           = 0;
-    $hasUnsat          = 0;
-    $latestReady       = null;
+    $latestCompleted = null;
+    $hasPass = 0;
+    $hasUnsat = 0;
+    $latestReady = null;
+    $attemptCount = 0;
+    $bestScore = null;
+    $startedAt = null;
+    $completedAt = null;
 
     foreach ($attempts as $attemptRow) {
+        $attemptCount++;
+
+        $rowStartedAt = trim((string)($attemptRow['started_at'] ?? ''));
+        $rowCompletedAt = trim((string)($attemptRow['completed_at'] ?? ''));
+        $rowScore = $attemptRow['score_pct'];
+
+        if ($startedAt === null && $rowStartedAt !== '') {
+            $startedAt = $rowStartedAt;
+        }
+
+        if ($rowScore !== null) {
+            $rowScoreInt = (int)$rowScore;
+            if ($bestScore === null || $rowScoreInt > $bestScore) {
+                $bestScore = $rowScoreInt;
+            }
+        }
+
         $status = trim((string)($attemptRow['status'] ?? ''));
+
         if ($status === 'completed') {
-            $completedAttempts++;
             $latestCompleted = $attemptRow;
+            if ($rowCompletedAt !== '') {
+                $completedAt = $rowCompletedAt;
+            }
 
             if ((int)($attemptRow['pass_gate_met'] ?? 0) === 1 || strtoupper((string)($attemptRow['formal_result_code'] ?? '')) === 'PASS') {
                 $hasPass = 1;
             } else {
                 $hasUnsat = 1;
             }
-        } elseif ($status === 'ready') {
+        } elseif ($status === 'ready' || $status === 'in_progress' || $status === 'processing' || $status === 'preparing') {
             $latestReady = $attemptRow;
         }
     }
@@ -272,11 +315,13 @@ function ptr_refresh_lesson_activity(PDO $pdo, array $testRow): void
     );
 
     $summaryStatus = trim((string)($summary['review_status'] ?? ''));
-    $summaryStateForActivity = 'not_started';
+    $summaryStateForActivity = 'missing';
     if ($summaryStatus === 'acceptable') {
         $summaryStateForActivity = 'acceptable';
-    } elseif ($summaryStatus === 'needs_revision' || $summaryStatus === 'rejected') {
+    } elseif ($summaryStatus === 'needs_revision') {
         $summaryStateForActivity = 'needs_revision';
+    } elseif ($summaryStatus === 'rejected') {
+        $summaryStateForActivity = 'rejected';
     } elseif ($summaryStatus === 'pending') {
         $summaryStateForActivity = 'pending';
     }
@@ -287,10 +332,13 @@ function ptr_refresh_lesson_activity(PDO $pdo, array $testRow): void
     } elseif ($hasUnsat) {
         $testPassStatus = 'failed';
     } elseif ($latestReady) {
-        $testPassStatus = 'ready';
+        $testPassStatus = 'in_progress';
     }
 
-    $completionStatus = 'in_progress';
+    $completionStatus = 'not_started';
+    if ($attemptCount > 0 || $summaryStateForActivity !== 'missing') {
+        $completionStatus = 'in_progress';
+    }
     if ($summaryStateForActivity === 'acceptable' && $testPassStatus === 'passed') {
         $completionStatus = 'completed';
     }
@@ -343,12 +391,28 @@ function ptr_refresh_lesson_activity(PDO $pdo, array $testRow): void
         array($userId, $cohortId, $lessonId)
     );
 
-    $reasonRequired      = $pendingReason ? 1 : 0;
-    $reasonSubmitted     = 0;
-    $trainingSuspended   = $pendingInstructor ? 1 : 0;
-    $oneOnOneRequired    = 0;
-    $oneOnOneCompleted   = 0;
+    if ($pendingInstructor) {
+        $completionStatus = 'instructor_required';
+    } elseif ($pendingRemediation) {
+        $completionStatus = 'remediation_required';
+    } elseif ($pendingReason) {
+        $completionStatus = 'deadline_blocked';
+    } elseif ($summaryStateForActivity === 'pending') {
+        $completionStatus = 'awaiting_summary_review';
+    } elseif ($summaryStateForActivity === 'acceptable' && $testPassStatus !== 'passed') {
+        $completionStatus = 'awaiting_test_completion';
+    } elseif ($summaryStateForActivity === 'needs_revision' || $summaryStateForActivity === 'rejected') {
+        $completionStatus = 'summary_required';
+    }
+
+    $reasonRequired = $pendingReason ? 1 : 0;
+    $reasonSubmitted = 0;
+    $reasonDecision = null;
+    $trainingSuspended = $pendingInstructor ? 1 : 0;
+    $oneOnOneRequired = 0;
+    $oneOnOneCompleted = 0;
     $grantedExtraAttempts = 0;
+    $latestInstructorActionId = $pendingInstructor ? (int)$pendingInstructor['id'] : null;
 
     $existing = ptr_fetch_one(
         $pdo,
@@ -366,29 +430,43 @@ function ptr_refresh_lesson_activity(PDO $pdo, array $testRow): void
     if ($existing) {
         $sql = "
             UPDATE lesson_activity
-            SET completion_status = ?,
+            SET started_at = ?,
+                completed_at = ?,
+                attempt_count = ?,
+                best_score = ?,
                 summary_status = ?,
                 test_pass_status = ?,
-                training_suspended = ?,
-                reason_required = ?,
-                reason_submitted = ?,
+                completion_status = ?,
+                granted_extra_attempts = ?,
                 one_on_one_required = ?,
                 one_on_one_completed = ?,
-                granted_extra_attempts = ?,
+                training_suspended = ?,
+                latest_instructor_action_id = ?,
+                reason_required = ?,
+                reason_submitted = ?,
+                reason_decision = ?,
+                last_state_eval_at = ?,
                 updated_at = ?
             WHERE id = ?
         ";
         $stmt = $pdo->prepare($sql);
         $stmt->execute(array(
-            $completionStatus,
+            $startedAt,
+            $completedAt,
+            $attemptCount,
+            $bestScore,
             $summaryStateForActivity,
             $testPassStatus,
-            $trainingSuspended,
-            $reasonRequired,
-            $reasonSubmitted,
+            $completionStatus,
+            $grantedExtraAttempts,
             $oneOnOneRequired,
             $oneOnOneCompleted,
-            $grantedExtraAttempts,
+            $trainingSuspended,
+            $latestInstructorActionId,
+            $reasonRequired,
+            $reasonSubmitted,
+            $reasonDecision,
+            ptr_now_utc(),
             ptr_now_utc(),
             (int)$existing['id']
         ));
@@ -398,33 +476,49 @@ function ptr_refresh_lesson_activity(PDO $pdo, array $testRow): void
                 user_id,
                 cohort_id,
                 lesson_id,
-                completion_status,
+                started_at,
+                completed_at,
+                attempt_count,
+                best_score,
                 summary_status,
                 test_pass_status,
-                training_suspended,
-                reason_required,
-                reason_submitted,
+                completion_status,
+                granted_extra_attempts,
                 one_on_one_required,
                 one_on_one_completed,
-                granted_extra_attempts,
+                training_suspended,
+                latest_instructor_action_id,
+                reason_required,
+                reason_submitted,
+                reason_decision,
+                last_state_eval_at,
+                status,
                 created_at,
                 updated_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ";
         $stmt = $pdo->prepare($sql);
         $stmt->execute(array(
             $userId,
             $cohortId,
             $lessonId,
-            $completionStatus,
+            $startedAt,
+            $completedAt,
+            $attemptCount,
+            $bestScore,
             $summaryStateForActivity,
             $testPassStatus,
-            $trainingSuspended,
-            $reasonRequired,
-            $reasonSubmitted,
+            $completionStatus,
+            $grantedExtraAttempts,
             $oneOnOneRequired,
             $oneOnOneCompleted,
-            $grantedExtraAttempts,
+            $trainingSuspended,
+            $latestInstructorActionId,
+            $reasonRequired,
+            $reasonSubmitted,
+            $reasonDecision,
+            ptr_now_utc(),
+            'in_progress',
             ptr_now_utc(),
             ptr_now_utc()
         ));
@@ -469,7 +563,7 @@ function ptr_safe_recover(PDO $pdo, array $testRow, int $actorUserId): array
             WHERE user_id = ?
               AND cohort_id = ?
               AND lesson_id = ?
-            ORDER BY attempt_no ASC, id ASC
+            ORDER BY attempt ASC, id ASC
             FOR UPDATE
             ",
             array($userId, $cohortId, $lessonId)
@@ -477,7 +571,6 @@ function ptr_safe_recover(PDO $pdo, array $testRow, int $actorUserId): array
 
         $completedCount = 0;
         $readyCount = 0;
-        $latestReady = null;
         $latestCompleted = null;
 
         foreach ($attemptRows as $row) {
@@ -486,15 +579,14 @@ function ptr_safe_recover(PDO $pdo, array $testRow, int $actorUserId): array
                 $completedCount++;
                 $latestCompleted = $row;
             }
-            if ($status === 'ready') {
+            if ($status === 'ready' || $status === 'in_progress' || $status === 'processing' || $status === 'preparing') {
                 $readyCount++;
-                $latestReady = $row;
             }
         }
 
         $result['messages'][] = 'Locked all attempts for this user/cohort/lesson.';
         $result['messages'][] = 'Completed attempts found: ' . $completedCount . '.';
-        $result['messages'][] = 'Ready attempts found: ' . $readyCount . '.';
+        $result['messages'][] = 'Active non-completed attempts found: ' . $readyCount . '.';
 
         $instructorAction = ptr_find_latest_open_action($pdo, $userId, $cohortId, $lessonId, 'instructor_approval');
         $remediationAction = ptr_find_latest_open_action($pdo, $userId, $cohortId, $lessonId, 'remediation_acknowledgement');
@@ -502,8 +594,7 @@ function ptr_safe_recover(PDO $pdo, array $testRow, int $actorUserId): array
 
         if ($instructorAction) {
             ptr_mark_opened_if_needed($pdo, (int)$instructorAction['id']);
-            $url = ptr_required_action_url($instructorAction);
-            $result['opened_action_url'] = $url;
+            $result['opened_action_url'] = ptr_required_action_url($instructorAction);
             $result['messages'][] = 'Existing instructor action found and restored.';
         } elseif ($remediationAction) {
             $result['opened_action_url'] = ptr_required_action_url($remediationAction);
@@ -531,7 +622,7 @@ function ptr_safe_recover(PDO $pdo, array $testRow, int $actorUserId): array
                     $result['messages'][] = 'New instructor approval action created because no active action existed.';
                 }
             } else {
-                $result['messages'][] = 'No active action existed, but the latest completed attempt did not justify creating a new instructor approval action.';
+                $result['messages'][] = 'No active action existed, and no new instructor approval action was justified from the latest completed attempt.';
             }
         }
 
@@ -549,7 +640,7 @@ function ptr_safe_recover(PDO $pdo, array $testRow, int $actorUserId): array
     }
 }
 
-$testId = (int)($_GET['test_id'] ?? 0);
+$testId   = (int)($_GET['test_id'] ?? 0);
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 $userId   = (int)($_GET['user_id'] ?? 0);
 $lessonId = (int)($_GET['lesson_id'] ?? 0);
@@ -567,10 +658,12 @@ if ($testId <= 0 && $cohortId > 0 && $userId > 0 && $lessonId > 0) {
             CASE
                 WHEN status = 'ready' THEN 0
                 WHEN status = 'in_progress' THEN 1
-                WHEN status = 'completed' THEN 2
-                ELSE 3
+                WHEN status = 'processing' THEN 2
+                WHEN status = 'preparing' THEN 3
+                WHEN status = 'completed' THEN 4
+                ELSE 5
             END,
-            attempt_no DESC,
+            attempt DESC,
             id DESC
         LIMIT 1
         ",
@@ -674,7 +767,7 @@ $attemptRows = ptr_fetch_all(
     WHERE user_id = ?
       AND cohort_id = ?
       AND lesson_id = ?
-    ORDER BY attempt_no ASC, id ASC
+    ORDER BY attempt ASC, id ASC
     ",
     array(
         (int)$testRow['user_id'],
@@ -771,7 +864,7 @@ $latestCompletedId = 0;
 
 foreach ($attemptRows as $attemptRow) {
     $status = trim((string)($attemptRow['status'] ?? ''));
-    if ($status === 'ready') {
+    if ($status === 'ready' || $status === 'in_progress' || $status === 'processing' || $status === 'preparing') {
         $readyCount++;
         $latestReadyId = (int)$attemptRow['id'];
     } elseif ($status === 'completed') {
@@ -877,7 +970,7 @@ cw_header('Progress Test Review');
             </div>
             <div class="ptr-kv">
                 <div class="ptr-kv-label">Attempt No</div>
-                <div class="ptr-kv-value"><?php echo (int)($testRow['attempt_no'] ?? 0); ?></div>
+                <div class="ptr-kv-value"><?php echo (int)($testRow['attempt'] ?? 0); ?></div>
             </div>
             <div class="ptr-kv">
                 <div class="ptr-kv-label">Status</div>
@@ -906,12 +999,16 @@ cw_header('Progress Test Review');
                 <div class="ptr-kv-value"><?php echo ptr_h(ptr_format_dt((string)($testRow['created_at'] ?? ''))); ?></div>
             </div>
             <div class="ptr-kv">
+                <div class="ptr-kv-label">Started At</div>
+                <div class="ptr-kv-value"><?php echo ptr_h(ptr_format_dt((string)($testRow['started_at'] ?? ''))); ?></div>
+            </div>
+            <div class="ptr-kv">
                 <div class="ptr-kv-label">Completed At</div>
                 <div class="ptr-kv-value"><?php echo ptr_h(ptr_format_dt((string)($testRow['completed_at'] ?? ''))); ?></div>
             </div>
             <div class="ptr-kv">
                 <div class="ptr-kv-label">Available Until</div>
-                <div class="ptr-kv-value"><?php echo ptr_h(ptr_format_dt((string)($testRow['available_until_utc'] ?? ''))); ?></div>
+                <div class="ptr-kv-value"><?php echo ptr_h(ptr_format_dt((string)($testRow['effective_deadline_utc'] ?? ''))); ?></div>
             </div>
 
             <div class="ptr-chip-row">
@@ -919,10 +1016,10 @@ cw_header('Progress Test Review');
                     Completed Attempts: <?php echo $completedCount; ?>
                 </span>
                 <span class="ptr-chip <?php echo $readyCount > 1 ? 'danger' : ($readyCount === 1 ? 'warning' : 'info'); ?>">
-                    Ready Attempts: <?php echo $readyCount; ?>
+                    Active Non-Completed Attempts: <?php echo $readyCount; ?>
                 </span>
                 <span class="ptr-chip <?php echo $hasDuplicateReady ? 'danger' : 'ok'; ?>">
-                    Duplicate Ready Rows: <?php echo $hasDuplicateReady ? 'Yes' : 'No'; ?>
+                    Duplicate Active Rows: <?php echo $hasDuplicateReady ? 'Yes' : 'No'; ?>
                 </span>
             </div>
 
@@ -994,8 +1091,8 @@ cw_header('Progress Test Review');
         </section>
 
     </div>
-
-    <section class="card ptr-card">
+	
+	    <section class="card ptr-card">
         <h2 class="ptr-card-title">All Attempts for This Lesson</h2>
         <div class="ptr-table-wrap">
             <table class="ptr-table">
@@ -1008,6 +1105,7 @@ cw_header('Progress Test Review');
                         <th>Formal Result</th>
                         <th>Pass Gate</th>
                         <th>Created</th>
+                        <th>Started</th>
                         <th>Completed</th>
                         <th>Timing</th>
                     </tr>
@@ -1016,19 +1114,20 @@ cw_header('Progress Test Review');
                     <?php foreach ($attemptRows as $row): ?>
                         <tr>
                             <td><?php echo (int)$row['id']; ?></td>
-                            <td><?php echo (int)($row['attempt_no'] ?? 0); ?></td>
+                            <td><?php echo (int)($row['attempt'] ?? 0); ?></td>
                             <td><?php echo ptr_h((string)($row['status'] ?? '')); ?></td>
                             <td><?php echo ptr_h((string)($row['score_pct'] ?? '—')); ?></td>
                             <td><?php echo ptr_h(trim((string)($row['formal_result_label'] ?? '')) !== '' ? (string)$row['formal_result_label'] : (string)($row['formal_result_code'] ?? '—')); ?></td>
                             <td><?php echo (int)($row['pass_gate_met'] ?? 0); ?></td>
                             <td><?php echo ptr_h(ptr_format_dt((string)($row['created_at'] ?? ''))); ?></td>
+                            <td><?php echo ptr_h(ptr_format_dt((string)($row['started_at'] ?? ''))); ?></td>
                             <td><?php echo ptr_h(ptr_format_dt((string)($row['completed_at'] ?? ''))); ?></td>
                             <td><?php echo ptr_h((string)($row['timing_status'] ?? '—')); ?></td>
                         </tr>
                     <?php endforeach; ?>
                     <?php if (!$attemptRows): ?>
                         <tr>
-                            <td colspan="9">No attempts found.</td>
+                            <td colspan="10">No attempts found.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
@@ -1055,12 +1154,28 @@ cw_header('Progress Test Review');
                     <div class="ptr-kv-value"><?php echo ptr_h((string)($lessonActivity['test_pass_status'] ?? '—')); ?></div>
                 </div>
                 <div class="ptr-kv">
+                    <div class="ptr-kv-label">Attempt Count</div>
+                    <div class="ptr-kv-value"><?php echo ptr_h((string)($lessonActivity['attempt_count'] ?? '—')); ?></div>
+                </div>
+                <div class="ptr-kv">
+                    <div class="ptr-kv-label">Best Score</div>
+                    <div class="ptr-kv-value"><?php echo ptr_h((string)($lessonActivity['best_score'] ?? '—')); ?></div>
+                </div>
+                <div class="ptr-kv">
                     <div class="ptr-kv-label">Training Suspended</div>
                     <div class="ptr-kv-value"><?php echo (int)($lessonActivity['training_suspended'] ?? 0); ?></div>
                 </div>
                 <div class="ptr-kv">
                     <div class="ptr-kv-label">Reason Required</div>
                     <div class="ptr-kv-value"><?php echo (int)($lessonActivity['reason_required'] ?? 0); ?></div>
+                </div>
+                <div class="ptr-kv">
+                    <div class="ptr-kv-label">Latest Instructor Action ID</div>
+                    <div class="ptr-kv-value"><?php echo ptr_h((string)($lessonActivity['latest_instructor_action_id'] ?? '—')); ?></div>
+                </div>
+                <div class="ptr-kv">
+                    <div class="ptr-kv-label">Last State Eval At</div>
+                    <div class="ptr-kv-value"><?php echo ptr_h(ptr_format_dt((string)($lessonActivity['last_state_eval_at'] ?? ''))); ?></div>
                 </div>
                 <div class="ptr-kv">
                     <div class="ptr-kv-label">Updated At</div>
@@ -1103,6 +1218,7 @@ cw_header('Progress Test Review');
                         <th>ID</th>
                         <th>Type</th>
                         <th>Status</th>
+                        <th>Title</th>
                         <th>Token</th>
                         <th>Created</th>
                         <th>Updated</th>
@@ -1116,6 +1232,7 @@ cw_header('Progress Test Review');
                             <td><?php echo (int)$action['id']; ?></td>
                             <td><?php echo ptr_h((string)($action['action_type'] ?? '')); ?></td>
                             <td><?php echo ptr_h((string)($action['status'] ?? '')); ?></td>
+                            <td><?php echo ptr_h((string)($action['title'] ?? '—')); ?></td>
                             <td class="ptr-code"><?php echo ptr_h((string)($action['token'] ?? '')); ?></td>
                             <td><?php echo ptr_h(ptr_format_dt((string)($action['created_at'] ?? ''))); ?></td>
                             <td><?php echo ptr_h(ptr_format_dt((string)($action['updated_at'] ?? ''))); ?></td>
@@ -1130,7 +1247,7 @@ cw_header('Progress Test Review');
                     <?php endforeach; ?>
                     <?php if (!$requiredActions): ?>
                         <tr>
-                            <td colspan="7">No required actions found for this lesson.</td>
+                            <td colspan="8">No required actions found for this lesson.</td>
                         </tr>
                     <?php endif; ?>
                 </tbody>
