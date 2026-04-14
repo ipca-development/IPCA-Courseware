@@ -877,20 +877,31 @@ foreach ($studentRows as $row) {
     }
 
     $actionToken = trim((string)($row['latest_instructor_action_token'] ?? ''));
-    $openUrl = $actionToken !== ''
-        ? '/instructor/instructor_approval.php?token=' . rawurlencode($actionToken)
-        : '';
+$openUrl = $actionToken !== ''
+    ? '/instructor/instructor_approval.php?token=' . rawurlencode($actionToken)
+    : '';
 
-    $cards[] = array(
-        'row' => $row,
-        'student_name' => $studentName,
-        'motivation' => $motivation,
-        'progress_percent' => $progressPercent,
-        'rank_score' => $rankScore,
-        'urgency' => $urgency,
-        'pills' => $pills,
-        'open_url' => $openUrl,
-    );
+$currentLessonId = (int)($row['current_lesson_id'] ?? 0);
+$progressReviewUrl = '';
+
+if ($cohortId > 0 && (int)($row['user_id'] ?? 0) > 0 && $currentLessonId > 0) {
+    $progressReviewUrl = '/instructor/progress_test_review.php?cohort_id='
+        . rawurlencode((string)$cohortId)
+        . '&user_id=' . rawurlencode((string)((int)$row['user_id']))
+        . '&lesson_id=' . rawurlencode((string)$currentLessonId);
+}
+
+$cards[] = array(
+    'row' => $row,
+    'student_name' => $studentName,
+    'motivation' => $motivation,
+    'progress_percent' => $progressPercent,
+    'rank_score' => $rankScore,
+    'urgency' => $urgency,
+    'pills' => $pills,
+    'open_url' => $openUrl,
+    'progress_review_url' => $progressReviewUrl,
+);
 
     $summaryMetrics['students']++;
     $summaryMetrics['avg_score'] += (float)($row['avg_score'] ?? 0.0);
@@ -1299,11 +1310,17 @@ cw_header('Cohort Progress Overview');
                                 </span>
                                 <span class="cpo-rank-badge">#<?php echo (int)($index + 1); ?></span>
 
-                                <?php if ($card['open_url'] !== ''): ?>
-                                    <a class="cpo-btn" href="<?php echo cpo_h($card['open_url']); ?>">Open Intervention</a>
-                                <?php else: ?>
-                                    <span class="cpo-btn secondary" style="opacity:.65;cursor:default;">No Active Instructor Link</span>
-                                <?php endif; ?>
+                                <?php if (!empty($card['progress_review_url'])): ?>
+    <a class="cpo-btn secondary" href="<?php echo cpo_h($card['progress_review_url']); ?>">Open Progress Test Review</a>
+<?php else: ?>
+    <span class="cpo-btn secondary" style="opacity:.65;cursor:default;">No Progress Test Review Available</span>
+<?php endif; ?>
+
+<?php if ($card['open_url'] !== ''): ?>
+    <a class="cpo-btn" href="<?php echo cpo_h($card['open_url']); ?>">Open Intervention</a>
+<?php else: ?>
+    <span class="cpo-btn secondary" style="opacity:.65;cursor:default;">No Active Instructor Link</span>
+<?php endif; ?>
                             </div>
                         </div>
 
