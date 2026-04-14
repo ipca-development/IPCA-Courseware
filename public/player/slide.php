@@ -460,27 +460,26 @@ $isAdminViewer = ($role === 'admin');
     .summary-alert-close:hover{
       background:rgba(0,0,0,0.06);
     }
-
-	.btnx.audio-pulse{
-  animation:audioPulse 1.2s ease-in-out infinite;
-  box-shadow:0 0 0 0 rgba(30,60,114,0.45);
-}
-
-@keyframes audioPulse{
-  0%{
-    transform:scale(1);
-    box-shadow:0 0 0 0 rgba(30,60,114,0.45);
-  }
-  50%{
-    transform:scale(1.04);
-    box-shadow:0 0 0 10px rgba(30,60,114,0);
-  }
-  100%{
-    transform:scale(1);
-    box-shadow:0 0 0 0 rgba(30,60,114,0);
-  }
-}  
 	  
+	.btnx.audio-pulse{
+      animation:audioPulse 1.2s ease-in-out infinite;
+      box-shadow:0 0 0 0 rgba(30,60,114,0.45);
+    }
+
+    @keyframes audioPulse{
+      0%{
+        transform:scale(1);
+        box-shadow:0 0 0 0 rgba(30,60,114,0.45);
+      }
+      50%{
+        transform:scale(1.04);
+        box-shadow:0 0 0 10px rgba(30,60,114,0);
+      }
+      100%{
+        transform:scale(1);
+        box-shadow:0 0 0 0 rgba(30,60,114,0);
+      }
+    }  
 	  
 	  
 	  
@@ -598,8 +597,7 @@ $isAdminViewer = ($role === 'admin');
       <video id="vid" controls playsinline></video>
     </div>
   </div>
-	
-	
+
 <script>
 let isLocked = false;
 let currentReviewStatus = 'pending';	
@@ -645,90 +643,21 @@ const ES_TEXT = <?= json_encode($esText) ?>;
 function applyLangUI(){
   btnTxtES.style.display = (lang==='es') ? 'inline-block' : 'none';
 }
-
-	
 function setLang(newLang){
   lang = newLang;
   localStorage.setItem(PREF_KEY, lang);
   applyLangUI();
 }
 
-const COHORT_ID = <?= (int)$cohortId ?>;
-const LESSON_ID = <?= (int)$lessonId ?>;
-
-
-// ==============================
-// AUTOPLAY (CLEAN VERSION)
-// ==============================
-
 const AUTO_KEY = 'ipca_autoplay_next';
-
-// ✅ COHORT-LEVEL (NOT lesson!)
-const LESSON_AUTOPLAY_KEY = 'ipca_lesson_autoplay|cohort:' + String(COHORT_ID);
-const LESSON_AUTOPLAY_PROMPTED_KEY = 'ipca_lesson_autoplay_prompted|cohort:' + String(COHORT_ID);
-
-// ---------- STATE ----------
-function hasLessonAutoplayConsent(){
-  try {
-    return localStorage.getItem(LESSON_AUTOPLAY_KEY) === '1';
-  } catch(e){
-    return false;
-  }
-}
-
-function setLessonAutoplayConsent(enabled){
-  try {
-    if (enabled) {
-      localStorage.setItem(LESSON_AUTOPLAY_KEY, '1');
-    } else {
-      localStorage.removeItem(LESSON_AUTOPLAY_KEY);
-    }
-  } catch(e){}
-}
-
-function hasLessonAutoplayPrompted(){
-  try {
-    return localStorage.getItem(LESSON_AUTOPLAY_PROMPTED_KEY) === '1';
-  } catch(e){
-    return false;
-  }
-}
-
-function markLessonAutoplayPrompted(){
-  try {
-    localStorage.setItem(LESSON_AUTOPLAY_PROMPTED_KEY, '1');
-  } catch(e){}
-}
-
-
-
-// ---------- NAVIGATION ----------
-function armAutoplay(){
-  if (hasLessonAutoplayConsent()) {
-    localStorage.setItem(AUTO_KEY, '1');
-  } else {
-    localStorage.removeItem(AUTO_KEY);
-  }
-}
-
+function armAutoplay(){ localStorage.setItem(AUTO_KEY, '1'); }
 function consumeAutoplay(){
   const v = localStorage.getItem(AUTO_KEY);
-  if (v !== '1') return;
-
-  localStorage.removeItem(AUTO_KEY);
-
-  if (!hasLessonAutoplayConsent()) return;
-
-  setTimeout(async ()=>{
-    const ok = await playTTS();
-    if (!ok) {
-      btnPlay.classList.add('audio-pulse');
-      btnPlay.textContent = 'Tap to continue audio';
-    }
-  }, 350);
+  if (v === '1') {
+    localStorage.removeItem(AUTO_KEY);
+    setTimeout(()=>playTTS(), 350);
+  }
 }
-
-
 
 langSel.addEventListener('change', ()=>{
   setLang(langSel.value);
@@ -749,12 +678,20 @@ const btnMute  = document.getElementById('btnAudioMute');
 
 const MUTE_KEY = 'ipca_tts_muted';
 
+	
+function startAudioPulse(){
+  btnPlay.classList.add('audio-pulse');
+}
+
+function stopAudioPulse(){
+  btnPlay.classList.remove('audio-pulse');
+}	
+	
 function setPlayLabel(state){
   if (state === 'generating') {
-    btnPlay.classList.remove('audio-pulse');
+    stopAudioPulse();
     btnPlay.textContent = 'Generating Audio…';
   } else {
-    btnPlay.classList.remove('audio-pulse');
     btnPlay.textContent = '▶︎ Audio';
   }
 }
@@ -786,27 +723,20 @@ async function playTTS(){
   try {
     await ttsAudio.play();
     setPlayLabel('idle');
-    return true;
   } catch(e) {
     setPlayLabel('idle');
-    return false;
   }
 }
 
-
-document.getElementById('btnAudioPlay').onclick = async ()=>{
-  setLessonAutoplayConsent(true);
-  btnPlay.classList.remove('audio-pulse');
-  btnPlay.textContent = '▶︎ Audio';
-  await playTTS();
+document.getElementById('btnAudioPlay').onclick = ()=>{
+  stopAudioPulse();
+  playTTS();
 };
 document.getElementById('btnAudioPause').onclick = ()=> ttsAudio.pause();
-document.getElementById('btnAudioRew').onclick = async ()=>{
-  setLessonAutoplayConsent(true);
-  btnPlay.classList.remove('audio-pulse');
-  btnPlay.textContent = '▶︎ Audio';
+document.getElementById('btnAudioRew').onclick = ()=>{
+  stopAudioPulse();
   ttsAudio.currentTime = 0;
-  await playTTS();
+  playTTS();
 };
 
 btnMute.onclick = ()=>{
@@ -823,13 +753,7 @@ ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
 
 applyMuteUI();
 consumeAutoplay();
-
-// ✅ FORCE pulse if user has NOT enabled autoplay yet
-if (!hasLessonAutoplayConsent()) {
-  btnPlay.classList.add('audio-pulse');
-  btnPlay.textContent = 'Tap to start audio';
-}
-
+startAudioPulse();
 
 async function prefetchOne(slideId){
   if (!slideId || slideId <= 0) return;
@@ -930,6 +854,9 @@ btnTxtES.onclick = ()=>{
 };
 document.getElementById('btnCloseES').onclick = ()=> modalES.style.display='none';
 modalES.addEventListener('click', (e)=>{ if(e.target===modalES) modalES.style.display='none'; });
+
+const COHORT_ID = <?= (int)$cohortId ?>;
+const LESSON_ID = <?= (int)$lessonId ?>;
 
 const drawer = document.getElementById('drawer');
 const rte = document.getElementById('rte');
