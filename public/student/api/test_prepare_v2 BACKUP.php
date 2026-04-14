@@ -96,7 +96,7 @@ function read_json(string $s): array {
     return is_array($j) ? $j : [];
 }
 
-function clamp_questions(array $questions, int $target): array {
+function clamp_questions(array $questions, int $target = 3): array {
     $out = [];
     foreach ($questions as $q) {
         if (!is_array($q)) continue;
@@ -105,33 +105,6 @@ function clamp_questions(array $questions, int $target): array {
     if (count($out) > $target) $out = array_slice($out, 0, $target);
     return $out;
 }
-
-
-function get_progress_test_question_count(PDO $pdo): int {
-    try {
-        $st = $pdo->prepare("
-            SELECT value_text
-            FROM system_policy_values
-            WHERE policy_key = 'progress_test_question_count'
-              AND is_active = 1
-              AND scope_type = 'global'
-              AND scope_id IS NULL
-            ORDER BY id DESC
-            LIMIT 1
-        ");
-        $st->execute();
-
-        $raw = $st->fetchColumn();
-        $val = (int)trim((string)$raw);
-
-        if ($val >= 1 && $val <= 20) {
-            return $val;
-        }
-    } catch (Throwable $e) {}
-
-    return 5;
-}
-
 
 function normalize_generated_questions(array $questions): array {
     $out = [];
@@ -278,7 +251,7 @@ function generate_oral_questions(PDO $pdo, string $truth, string $summary): arra
     $systemFallback = <<<'TXT'
 You are generating an oral aviation progress test.
 
-Create exactly {{QUESTION_COUNT}} oral-friendly questions.
+Create exactly 3 oral-friendly questions.
 Use ONLY the lesson narration text as truth.
 Use summary only to detect misconceptions.
 
@@ -327,14 +300,12 @@ FORMAT RULES:
   correct.min_points_to_pass = integer
 
 TARGET MIX:
-- balanced mix of yesno, mcq, and open
-- prefer more open questions for higher counts
+- around 1 yesno
+- around 1 mcq
+- around 1 open
 TXT;
 
-    $target = get_progress_test_question_count($pdo);
-
     $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_generate_questions_system', $systemFallback);
-    $systemPrompt = str_replace('{{QUESTION_COUNT}}', (string)$target, $systemPrompt);
 
     $payload = [
         "model" => cw_openai_model(),
@@ -367,16 +338,15 @@ TXT;
     $r = cw_openai_responses($payload);
     $j = cw_openai_extract_json_text($r);
     $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
-
-    return normalize_generated_questions(clamp_questions($q, $target));
+    return normalize_generated_questions(clamp_questions($q, 3));
 }
 
 function validate_and_rewrite_questions(PDO $pdo, string $truth, array $questions): array {
     $systemFallback = <<<'TXT'
 You are reviewing oral aviation test questions for quality.
 
-You will receive candidate questions.
-Your job is to return a corrected final set of {{QUESTION_COUNT}} questions.
+You will receive 3 candidate questions.
+Your job is to return a corrected final set of 10 questions.
 
 REVIEW RULES:
 - Remove ambiguity.
@@ -398,13 +368,10 @@ IMPORTANT:
 - Prefer precise spoken questions.
 - For nuanced concepts, prefer open or mcq over weak yes/no.
 
-Return exactly {{QUESTION_COUNT}} final cleaned questions.
+Return exactly 3 final cleaned questions.
 TXT;
 
-    $target = get_progress_test_question_count($pdo);
-
     $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_validate_questions_system', $systemFallback);
-    $systemPrompt = str_replace('{{QUESTION_COUNT}}', (string)$target, $systemPrompt);
 
     $payload = [
         "model" => cw_openai_model(),
@@ -439,8 +406,7 @@ json_encode(['questions' => $questions], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED
     $r = cw_openai_responses($payload);
     $j = cw_openai_extract_json_text($r);
     $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
-
-    return normalize_generated_questions(clamp_questions($q, $target));
+    return normalize_generated_questions(clamp_questions($q, 10));
 }
 
 function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $payload): array {
@@ -595,90 +561,62 @@ try {
     $summary = trim((string)$sq->fetchColumn());
     if ($summary === '') $summary = "(No student summary.)";
 
-    $target = get_progress_test_question_count($pdo);
+    set_prepare_progress($pdo, $testId, 15, 'Generating oral questions...');
+    $q = generate_oral_questions($pdo, $truth, $summary);
 
-	set_prepare_progress($pdo, $testId, 15, 'Generating oral questions...');
-	$q = generate_oral_questions($pdo, $truth, $summary);
-
-	// ✅ WARNING: AI returned too few questions
-	if (count($q) < (int)floor($target * 0.5)) {
-		set_prepare_progress($pdo, $testId, 30, 'Low question count detected, applying fallback...');
-	}
-
-	set_prepare_progress($pdo, $testId, 35, 'Checking question quality...');
-
-	// Only validate if we have a meaningful set
-	if (count($q) >= 3) {
-
-    $q2 = validate_and_rewrite_questions($pdo, $truth, $q);
-
-    // Accept rewrite only if it didn't degrade
-    if (count($q2) >= count($q)) {
-        $q = $q2;
-		}
-	}
+    set_prepare_progress($pdo, $testId, 35, 'Checking question quality...');
+    if (count($q) >= 6) {
+        $q2 = validate_and_rewrite_questions($pdo, $truth, $q);
+        if (count($q2) >= 6) {
+            $q = $q2;
+        }
+    }
 
     set_prepare_progress($pdo, $testId, 50, 'Saving questions...');
-	
-	// ✅ SAFETY: ensure AI returned something usable
-		if (!is_array($q) || count($q) < 1) {
-    		throw new RuntimeException('AI returned zero valid questions.');
-		}
 
- if (count($q) < $target) {
-
-    $fallback = [
-        [
-            'kind' => 'yesno',
-            'prompt' => 'Is the checklist used to reduce errors? Answer yes or no, and briefly explain.',
-            'options' => [],
-            'correct' => [
-                'value' => true,
-                'answer_text' => null,
-                'alternatives' => [],
-                'type' => null,
-                'key_points' => [],
-                'min_points_to_pass' => null
-            ]
-        ],
-        [
-            'kind' => 'mcq',
-            'prompt' => 'Is the role of the wings to produce lift or to turn the airplane left and right?',
-            'options' => ['produce lift', 'turn the airplane left and right'],
-            'correct' => [
-                'value' => null,
-                'answer_text' => 'produce lift',
-                'alternatives' => ['lift', 'to produce lift'],
-                'type' => 'oral_choice',
-                'key_points' => [],
-                'min_points_to_pass' => null
-            ]
-        ],
-        [
-            'kind' => 'open',
-            'prompt' => 'Explain why pilots use checklists.',
-            'options' => [],
-            'correct' => [
-                'value' => null,
-                'answer_text' => null,
-                'alternatives' => [],
-                'type' => 'rubric',
-                'key_points' => ['reduce errors', 'standardize', 'safety'],
-                'min_points_to_pass' => 2
-            ]
-        ],
-    ];
-
-    // ✅ FILL UP instead of replacing
-    $i = 0;
-    while (count($q) < $target) {
-    $q[] = $fallback[$i % count($fallback)];
-    $i++;
-}
-
-// ✅ normalize again after fallback merge
-$q = normalize_generated_questions($q);
-}
+    if (count($q) < 3) {
+        $q = [
+            [
+                'kind' => 'yesno',
+                'prompt' => 'Is the checklist used to reduce errors? Answer yes or no, and briefly explain.',
+                'options' => [],
+                'correct' => [
+                    'value' => true,
+                    'answer_text' => null,
+                    'alternatives' => [],
+                    'type' => null,
+                    'key_points' => [],
+                    'min_points_to_pass' => null
+                ]
+            ],
+            [
+                'kind' => 'mcq',
+                'prompt' => 'Is the role of the wings to produce lift or to turn the airplane left and right?',
+                'options' => ['produce lift', 'turn the airplane left and right'],
+                'correct' => [
+                    'value' => null,
+                    'answer_text' => 'produce lift',
+                    'alternatives' => ['lift', 'to produce lift'],
+                    'type' => 'oral_choice',
+                    'key_points' => [],
+                    'min_points_to_pass' => null
+                ]
+            ],
+            [
+                'kind' => 'open',
+                'prompt' => 'Explain why pilots use checklists.',
+                'options' => [],
+                'correct' => [
+                    'value' => null,
+                    'answer_text' => null,
+                    'alternatives' => [],
+                    'type' => 'rubric',
+                    'key_points' => ['reduce errors', 'standardize', 'safety'],
+                    'min_points_to_pass' => 2
+                ]
+            ],
+        ];
+    }
 
     $ins = $pdo->prepare("
         INSERT INTO progress_test_items_v2
@@ -720,7 +658,7 @@ $q = normalize_generated_questions($q);
         ]);
 
         $idx++;
-        if ($idx > $target) break;
+        if ($idx > 3) break;
     }
 
     set_prepare_progress($pdo, $testId, 58, 'Preparing audio files...');

@@ -96,7 +96,7 @@ function tts_generate_local(string $text, string $file): void {
     }
 }
 
-function clamp_questions(array $questions, int $target = 3): array {
+function clamp_questions(array $questions, int $target): array {
     $out = [];
     foreach ($questions as $q) {
         if (!is_array($q)) continue;
@@ -104,6 +104,31 @@ function clamp_questions(array $questions, int $target = 3): array {
     }
     if (count($out) > $target) $out = array_slice($out, 0, $target);
     return $out;
+}
+
+function get_progress_test_question_count(PDO $pdo): int {
+    try {
+        $st = $pdo->prepare("
+            SELECT value_text
+            FROM system_policy_values
+            WHERE policy_key = 'progress_test_question_count'
+              AND is_active = 1
+              AND scope_type = 'global'
+              AND scope_id IS NULL
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $st->execute();
+
+        $raw = $st->fetchColumn();
+        $val = (int)trim((string)$raw);
+
+        if ($val >= 1 && $val <= 20) {
+            return $val;
+        }
+    } catch (Throwable $e) {}
+
+    return 5;
 }
 
 function normalize_generated_questions(array $questions): array {
@@ -227,28 +252,31 @@ function question_schema(): array {
     ];
 }
 
-function ai_prompt_text(PDO $pdo, string $promptKey, string $fallback): string {
+function ai_prompt_fetch(PDO $pdo, string $promptKey, string $fallback): string {
     try {
         $st = $pdo->prepare("
             SELECT prompt_text
             FROM ai_prompts
             WHERE prompt_key = ?
+            ORDER BY id DESC
             LIMIT 1
         ");
         $st->execute([$promptKey]);
         $txt = $st->fetchColumn();
-        $txt = is_string($txt) ? trim($txt) : '';
-        return $txt !== '' ? $txt : $fallback;
+        if (is_string($txt) && trim($txt) !== '') {
+            return trim($txt);
+        }
     } catch (Throwable $e) {
-        return $fallback;
+        // keep fallback silently
     }
+    return $fallback;
 }
 
 function generate_oral_questions(PDO $pdo, string $truth, string $summary): array {
-    $fallbackPrompt = <<<'TXT'
+    $systemFallback = <<<'TXT'
 You are generating an oral aviation progress test.
 
-Create exactly 3 oral-friendly questions.
+Create exactly {{QUESTION_COUNT}} oral-friendly questions.
 Use ONLY the lesson narration text as truth.
 Use summary only to detect misconceptions.
 
@@ -297,12 +325,14 @@ FORMAT RULES:
   correct.min_points_to_pass = integer
 
 TARGET MIX:
-- around 1 yesno
-- around 1 mcq
-- around 1 open
+- balanced mix of yesno, mcq, and open
+- prefer more open questions for higher counts
 TXT;
 
-    $systemPrompt = ai_prompt_text($pdo, 'progress_test_generate_questions', $fallbackPrompt);
+    $target = get_progress_test_question_count($pdo);
+
+    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_generate_questions_system', $systemFallback);
+    $systemPrompt = str_replace('{{QUESTION_COUNT}}', (string)$target, $systemPrompt);
 
     $payload = [
         "model" => cw_openai_model(),
@@ -335,15 +365,16 @@ TXT;
     $r = cw_openai_responses($payload);
     $j = cw_openai_extract_json_text($r);
     $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
-    return normalize_generated_questions(clamp_questions($q, 3));
+
+    return normalize_generated_questions(clamp_questions($q, $target));
 }
 
 function validate_and_rewrite_questions(PDO $pdo, string $truth, array $questions): array {
-    $fallbackPrompt = <<<'TXT'
+    $systemFallback = <<<'TXT'
 You are reviewing oral aviation test questions for quality.
 
-You will receive 3 candidate questions.
-Your job is to return a corrected final set of 10 questions.
+You will receive candidate questions.
+Your job is to return a corrected final set of {{QUESTION_COUNT}} questions.
 
 REVIEW RULES:
 - Remove ambiguity.
@@ -365,10 +396,13 @@ IMPORTANT:
 - Prefer precise spoken questions.
 - For nuanced concepts, prefer open or mcq over weak yes/no.
 
-Return exactly 3 final cleaned questions.
+Return exactly {{QUESTION_COUNT}} final cleaned questions.
 TXT;
 
-    $systemPrompt = ai_prompt_text($pdo, 'progress_test_validate_questions', $fallbackPrompt);
+    $target = get_progress_test_question_count($pdo);
+
+    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_validate_questions_system', $systemFallback);
+    $systemPrompt = str_replace('{{QUESTION_COUNT}}', (string)$target, $systemPrompt);
 
     $payload = [
         "model" => cw_openai_model(),
@@ -403,7 +437,8 @@ TXT;
     $r = cw_openai_responses($payload);
     $j = cw_openai_extract_json_text($r);
     $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
-    return normalize_generated_questions(clamp_questions($q, 3));
+
+    return normalize_generated_questions(clamp_questions($q, $target));
 }
 
 function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $payload): array {
@@ -484,54 +519,48 @@ try {
         json_ok(['ok' => false, 'error' => 'Forbidden']);
     }
 
-$userId = (int)($u['id'] ?? 0);
+    $userId = (int)($u['id'] ?? 0);
 
-$testId = (int)($_GET['test_id'] ?? 0);
-$cohortId = 0;
-$lessonId = 0;
+    $testId = (int)($_GET['test_id'] ?? 0);
+    $cohortId = 0;
+    $lessonId = 0;
 
-if ($testId > 0) {
+    if ($testId > 0) {
+        $testSt = $pdo->prepare("
+            SELECT *
+            FROM progress_tests_v2
+            WHERE id=?
+            LIMIT 1
+        ");
+        $testSt->execute([$testId]);
+        $test = $testSt->fetch(PDO::FETCH_ASSOC);
 
-    // Background runner call from test_prepare_start_v2.php
-    $testSt = $pdo->prepare("
-        SELECT *
-        FROM progress_tests_v2
-        WHERE id=?
-        LIMIT 1
-    ");
-    $testSt->execute([$testId]);
-    $test = $testSt->fetch(PDO::FETCH_ASSOC);
+        if (!$test) {
+            json_ok(['ok' => false, 'error' => 'Test not found']);
+        }
 
-    if (!$test) {
-        json_ok(['ok' => false, 'error' => 'Test not found']);
+        $cohortId = (int)($test['cohort_id'] ?? 0);
+        $lessonId = (int)($test['lesson_id'] ?? 0);
+        $testUserId = (int)($test['user_id'] ?? 0);
+
+        if ($role === 'student' && $testUserId !== $userId) {
+            http_response_code(403);
+            json_ok(['ok' => false, 'error' => 'Forbidden']);
+        }
+    } else {
+        $data = read_json((string)file_get_contents('php://input'));
+        if (!$data) {
+            json_ok(['ok' => false, 'error' => 'Invalid JSON']);
+        }
+
+        $testId   = (int)($data['test_id'] ?? 0);
+        $cohortId = (int)($data['cohort_id'] ?? 0);
+        $lessonId = (int)($data['lesson_id'] ?? 0);
+
+        if ($testId <= 0 || $cohortId <= 0 || $lessonId <= 0) {
+            json_ok(['ok' => false, 'error' => 'Missing test_id, cohort_id or lesson_id']);
+        }
     }
-
-    $cohortId = (int)($test['cohort_id'] ?? 0);
-    $lessonId = (int)($test['lesson_id'] ?? 0);
-    $testUserId = (int)($test['user_id'] ?? 0);
-
-    if ($role === 'student' && $testUserId !== $userId) {
-        http_response_code(403);
-        json_ok(['ok' => false, 'error' => 'Forbidden']);
-    }
-
-} else {
-
-    // Direct API call fallback (old behaviour)
-    $data = read_json((string)file_get_contents('php://input'));
-    if (!$data) {
-        json_ok(['ok' => false, 'error' => 'Invalid JSON']);
-    }
-
-    $testId   = (int)($data['test_id'] ?? 0);
-    $cohortId = (int)($data['cohort_id'] ?? 0);
-    $lessonId = (int)($data['lesson_id'] ?? 0);
-
-    if ($testId <= 0 || $cohortId <= 0 || $lessonId <= 0) {
-        json_ok(['ok' => false, 'error' => 'Missing test_id, cohort_id or lesson_id']);
-    }
-
-}
 
     if ($role === 'student') {
         $en = $pdo->prepare("
@@ -605,21 +634,33 @@ if ($testId > 0) {
     $summary = trim((string)$sq->fetchColumn());
     if ($summary === '') $summary = "(No student summary.)";
 
+    $target = get_progress_test_question_count($pdo);
+
     set_prepare_progress($pdo, $testId, 15, 'Generating oral questions...');
     $q = generate_oral_questions($pdo, $truth, $summary);
 
+    if (count($q) < (int)floor($target * 0.5)) {
+        set_prepare_progress($pdo, $testId, 30, 'Low question count detected, applying fallback...');
+    }
+
     set_prepare_progress($pdo, $testId, 35, 'Checking question quality...');
-    if (count($q) >= 6) {
+
+    if (count($q) >= 3) {
         $q2 = validate_and_rewrite_questions($pdo, $truth, $q);
-        if (count($q2) >= 6) {
+
+        if (count($q2) >= count($q)) {
             $q = $q2;
         }
     }
 
     set_prepare_progress($pdo, $testId, 50, 'Saving questions...');
 
-    if (count($q) < 3) {
-        $q = [
+    if (!is_array($q) || count($q) < 1) {
+        throw new RuntimeException('AI returned zero valid questions.');
+    }
+
+    if (count($q) < $target) {
+        $fallback = [
             [
                 'kind' => 'yesno',
                 'prompt' => 'Is the checklist used to reduce errors? Answer yes or no, and briefly explain.',
@@ -660,6 +701,14 @@ if ($testId > 0) {
                 ]
             ],
         ];
+
+        $i = 0;
+        while (count($q) < $target) {
+            $q[] = $fallback[$i % count($fallback)];
+            $i++;
+        }
+
+        $q = normalize_generated_questions($q);
     }
 
     $pdo->prepare("DELETE FROM progress_test_items_v2 WHERE test_id=?")->execute([$testId]);
@@ -704,7 +753,7 @@ if ($testId > 0) {
         ]);
 
         $idx++;
-        if ($idx > 3) break;
+        if ($idx > $target) break;
     }
 
     set_prepare_progress($pdo, $testId, 58, 'Preparing audio files...');
