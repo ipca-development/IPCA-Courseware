@@ -330,7 +330,7 @@ cw_header('Progress Test');
 
   .cam{
     background:#000;
-    border:4px solid rgba(59,130,246,0.35);
+    border:4px solid rgba(30,60,114,0.30);
     box-shadow:0 10px 30px rgba(0,0,0,0.12);
   }
   .cam video{
@@ -345,52 +345,16 @@ cw_header('Progress Test');
     color:#fff; font-weight:900; opacity:.85;
   }
   .cam .label{
-    display:none;
+    position:absolute; left:0; right:0; bottom:6px;
+    text-align:center; font-size:12px; color:#fff;
+    padding:0 8px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    text-shadow:0 1px 2px rgba(0,0,0,0.6);
+    box-sizing:border-box; pointer-events:none; line-height:1.1;
   }
 
-  .hero{
-    display:flex;
-    gap:20px;
-    align-items:flex-start;
-    flex-wrap:wrap;
-    margin-top:12px;
-  }
-
-  .person-block{
-    width:120px;
-    flex:0 0 120px;
-    display:flex;
-    flex-direction:column;
-    align-items:center;
-    text-align:center;
-  }
-
-  .person-name{
-    margin-top:10px;
-    font-weight:900;
-    color:#1e3c72;
-    font-size:18px;
-    line-height:1.15;
-    text-align:center;
-  }
-
-  .person-role{
-    margin-top:4px;
-    font-size:12px;
-    color:#64748b;
-    line-height:1.15;
-    text-align:center;
-  }
-
-  .hero-status{
-    min-width:260px;
-    flex:1 1 260px;
-    padding-top:8px;
-  }
-
-  .hero-status .muted{
-    margin-top:6px;
-  }
+  .meta .name{ font-weight:900; color:#1e3c72; font-size:18px; }
+  .meta .role{ font-size:12px; opacity:.75; }
 
   .sysline{
     margin-top:12px;
@@ -500,30 +464,24 @@ cw_header('Progress Test');
 <div class="wrap">
   <div class="card">
     <div class="hero">
-      <div class="person-block">
-        <div class="ring-wrap" id="instructorRing">
-          <div class="avatar-badge circle-lock">
-            <img src="<?= h($INSTRUCTOR_AVATAR) ?>" alt="Instructor">
-          </div>
+      <div class="ring-wrap" id="instructorRing">
+        <div class="avatar-badge circle-lock">
+          <img src="<?= h($INSTRUCTOR_AVATAR) ?>" alt="Instructor">
         </div>
-        <div class="person-name"><?= h($INSTRUCTOR_NAME) ?></div>
-        <div class="person-role">IPCA Instructor</div>
       </div>
 
-      <div class="person-block">
-        <div class="ring-wrap" id="studentRing">
-          <div class="cam circle-lock">
-            <video id="studentCam" autoplay playsinline muted></video>
-            <div class="fallback" id="camFallback">CAM</div>
-            <div class="label"><?= h($userName) ?></div>
-          </div>
+      <div class="ring-wrap" id="studentRing">
+        <div class="cam circle-lock">
+          <video id="studentCam" autoplay playsinline muted></video>
+          <div class="fallback" id="camFallback">CAM</div>
+          <div class="label"><?= h($userName) ?></div>
         </div>
-        <div class="person-name"><?= h($userName) ?></div>
-        <div class="person-role">Student</div>
       </div>
 
-      <div class="hero-status">
-        <div class="muted" id="camStatus">Camera permission requested on load.</div>
+      <div class="meta">
+        <div class="name"><?= h($INSTRUCTOR_NAME) ?></div>
+        <div class="role">AI Instructor</div>
+        <div class="muted" id="camStatus" style="margin-top:6px;">Camera permission requested on load.</div>
       </div>
     </div>
 
