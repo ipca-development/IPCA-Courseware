@@ -751,7 +751,6 @@ $hasDuplicateReady = $readyCount > 1 ? 1 : 0;
 
 cw_header('Progress Test Review');
 ?>
-
 <style>
 .ptr-page{display:flex;flex-direction:column;gap:18px}
 .ptr-hero{padding:22px 24px}
