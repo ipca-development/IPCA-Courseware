@@ -518,8 +518,8 @@ cw_header('Progress Test');
             <div class="label"><?= h($firstName) ?></div>
           </div>
         </div>
-        <div class="person-name"><?= h($userName) ?></div>
-        <div class="person-role">Student</div>
+        <div class="person-name"><?= h($firstName) ?></div>
+        <div class="person-role">IPCA Student</div>
       </div>
 
       <div class="hero-status">
