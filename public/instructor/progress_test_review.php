@@ -570,7 +570,7 @@ if ($testId <= 0 && $cohortId > 0 && $userId > 0 && $lessonId > 0) {
                 WHEN status = 'completed' THEN 2
                 ELSE 3
             END,
-            attempt DESC,
+            attempt_no DESC,
             id DESC
         LIMIT 1
         ",
