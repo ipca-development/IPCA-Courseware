@@ -1,26 +1,25 @@
 <?php
 declare(strict_types=1);
 
+putenv('DB_HOST=ipca-core-prod-do-user-23917502-0.i.db.ondigitalocean.com');
+putenv('DB_NAME=ipca_courseware');
+putenv('DB_USER=ipca_courseware_app');
+putenv('DB_PASS=AVNS_UmBSv-HZSDvE7z5r5EC');
+
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/courseware_progression_v2.php';
 
-$userId   = 38; // change if needed
-$cohortId = 1;  // set the real cohort_id
-$lessonId = 1;  // set the blocked lesson_id
+$userId   = 38;
+$cohortId = YOUR_COHORT_ID;
+$lessonId = YOUR_LESSON_ID;
 
 try {
     $engine = new CoursewareProgressionV2(cw_db());
-
     $result = $engine->reconcileAttemptAndRequiredActionState($userId, $cohortId, $lessonId);
 
     echo "Reconciliation completed.\n";
-    echo "User ID:   " . $userId . "\n";
-    echo "Cohort ID: " . $cohortId . "\n";
-    echo "Lesson ID: " . $lessonId . "\n";
-    echo "\nResult:\n";
     print_r($result);
 } catch (Throwable $e) {
     echo "ERROR: " . $e->getMessage() . "\n";
-    echo $e->getTraceAsString() . "\n";
     exit(1);
 }
