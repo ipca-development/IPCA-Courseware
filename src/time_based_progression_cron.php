@@ -50,8 +50,13 @@ final class TimeBasedProgressionCron
             'dispatch_successes' => 0,
             'dispatch_duplicates_skipped' => 0,
             'dispatch_state_mismatch_skipped' => 0,
+            'aggregated_buckets_built' => 0,
+            'aggregated_dispatch_attempts' => 0,
+            'aggregated_dispatch_successes' => 0,
+            'aggregated_dispatch_duplicates_skipped' => 0,
             'errors' => array(),
             'results' => array(),
+            'aggregated_results' => array(),
         );
 
         try {
@@ -67,6 +72,8 @@ final class TimeBasedProgressionCron
 
             $candidates = $this->loadCandidateRows();
             $summary['candidates_scanned'] = count($candidates);
+
+            $aggregatedReminderBuckets = array();
 
             foreach ($candidates as $candidateRow) {
                 $candidateResult = $this->processCandidate($candidateRow);
@@ -87,7 +94,42 @@ final class TimeBasedProgressionCron
                     }
                 }
 
+                if (!empty($candidateResult['reminder_candidates'])) {
+                    foreach ((array)$candidateResult['reminder_candidates'] as $reminderCandidate) {
+                        $this->addReminderCandidateToBuckets($aggregatedReminderBuckets, $reminderCandidate);
+                    }
+                }
+
                 $summary['results'][] = $candidateResult;
+            }
+
+            $summary['aggregated_buckets_built'] = count($aggregatedReminderBuckets);
+
+            foreach ($aggregatedReminderBuckets as $bucket) {
+                $bucketResult = $this->dispatchAggregatedReminderBucket($bucket);
+
+                $summary['aggregated_dispatch_attempts']++;
+                $summary['dispatch_attempts']++;
+
+                if (($bucketResult['status'] ?? '') === 'dispatched') {
+                    $summary['aggregated_dispatch_successes']++;
+                    $summary['dispatch_successes']++;
+                } elseif (($bucketResult['status'] ?? '') === 'skipped_duplicate') {
+                    $summary['aggregated_dispatch_duplicates_skipped']++;
+                    $summary['dispatch_duplicates_skipped']++;
+                }
+
+                if (!empty($bucketResult['error'])) {
+                    $summary['errors'][] = array(
+                        'scope' => 'aggregated_bucket',
+                        'event_key' => (string)($bucketResult['event_key'] ?? ''),
+                        'user_id' => (int)($bucketResult['user_id'] ?? 0),
+                        'cohort_id' => (int)($bucketResult['cohort_id'] ?? 0),
+                        'message' => (string)$bucketResult['error'],
+                    );
+                }
+
+                $summary['aggregated_results'][] = $bucketResult;
             }
         } catch (Throwable $e) {
             $summary['ok'] = false;
@@ -134,74 +176,74 @@ final class TimeBasedProgressionCron
         $this->lockAcquired = false;
     }
 
-private function loadCandidateRows(): array
-{
-    $sql = "
-        SELECT
-            cs.user_id,
-            cs.cohort_id,
-            cld.lesson_id,
+    private function loadCandidateRows(): array
+    {
+        $sql = "
+            SELECT
+                cs.user_id,
+                cs.cohort_id,
+                cld.lesson_id,
 
-            COALESCE(sldo.new_deadline_utc, cld.deadline_utc) AS effective_deadline_utc,
+                COALESCE(sldo.new_deadline_utc, cld.deadline_utc) AS effective_deadline_utc,
 
-            COALESCE(la.completion_status, '') AS completion_status,
-            COALESCE(la.training_suspended, 0) AS training_suspended,
-            la.last_state_eval_at,
-            la.updated_at
+                COALESCE(la.completion_status, '') AS completion_status,
+                COALESCE(la.training_suspended, 0) AS training_suspended,
+                la.last_state_eval_at,
+                la.updated_at
 
-        FROM cohort_students cs
+            FROM cohort_students cs
 
-        INNER JOIN cohort_lesson_deadlines cld
-            ON cld.cohort_id = cs.cohort_id
+            INNER JOIN cohort_lesson_deadlines cld
+                ON cld.cohort_id = cs.cohort_id
 
-        LEFT JOIN (
-            SELECT o1.user_id, o1.cohort_id, o1.lesson_id, o1.new_deadline_utc
-            FROM student_lesson_deadline_overrides o1
-            INNER JOIN (
-                SELECT
-                    user_id,
-                    cohort_id,
-                    lesson_id,
-                    MAX(id) AS max_id
-                FROM student_lesson_deadline_overrides
-                WHERE is_active = 1
-                GROUP BY user_id, cohort_id, lesson_id
-            ) o2
-                ON o2.user_id = o1.user_id
-               AND o2.cohort_id = o1.cohort_id
-               AND o2.lesson_id = o1.lesson_id
-               AND o2.max_id = o1.id
-            WHERE o1.is_active = 1
-        ) sldo
-            ON sldo.user_id = cs.user_id
-           AND sldo.cohort_id = cs.cohort_id
-           AND sldo.lesson_id = cld.lesson_id
+            LEFT JOIN (
+                SELECT o1.user_id, o1.cohort_id, o1.lesson_id, o1.new_deadline_utc
+                FROM student_lesson_deadline_overrides o1
+                INNER JOIN (
+                    SELECT
+                        user_id,
+                        cohort_id,
+                        lesson_id,
+                        MAX(id) AS max_id
+                    FROM student_lesson_deadline_overrides
+                    WHERE is_active = 1
+                    GROUP BY user_id, cohort_id, lesson_id
+                ) o2
+                    ON o2.user_id = o1.user_id
+                   AND o2.cohort_id = o1.cohort_id
+                   AND o2.lesson_id = o1.lesson_id
+                   AND o2.max_id = o1.id
+                WHERE o1.is_active = 1
+            ) sldo
+                ON sldo.user_id = cs.user_id
+               AND sldo.cohort_id = cs.cohort_id
+               AND sldo.lesson_id = cld.lesson_id
 
-        LEFT JOIN lesson_activity la
-            ON la.user_id = cs.user_id
-           AND la.cohort_id = cs.cohort_id
-           AND la.lesson_id = cld.lesson_id
+            LEFT JOIN lesson_activity la
+                ON la.user_id = cs.user_id
+               AND la.cohort_id = cs.cohort_id
+               AND la.lesson_id = cld.lesson_id
 
-        WHERE cs.status = 'active'
-          AND cld.deadline_utc IS NOT NULL
-          AND COALESCE(la.completion_status, '') <> 'completed'
-          AND COALESCE(la.training_suspended, 0) = 0
-          AND COALESCE(sldo.new_deadline_utc, cld.deadline_utc) <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL :window_hours HOUR)
+            WHERE cs.status = 'active'
+              AND cld.deadline_utc IS NOT NULL
+              AND COALESCE(la.completion_status, '') <> 'completed'
+              AND COALESCE(la.training_suspended, 0) = 0
+              AND COALESCE(sldo.new_deadline_utc, cld.deadline_utc) <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL :window_hours HOUR)
 
-        ORDER BY
-            COALESCE(sldo.new_deadline_utc, cld.deadline_utc) ASC,
-            cs.user_id ASC,
-            cs.cohort_id ASC,
-            cld.lesson_id ASC
-    ";
+            ORDER BY
+                COALESCE(sldo.new_deadline_utc, cld.deadline_utc) ASC,
+                cs.user_id ASC,
+                cs.cohort_id ASC,
+                cld.lesson_id ASC
+        ";
 
-    $stmt = $this->pdo->prepare($sql);
-    $stmt->bindValue(':window_hours', self::APPROACHING_WINDOW_HOURS, PDO::PARAM_INT);
-    $stmt->execute();
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->bindValue(':window_hours', self::APPROACHING_WINDOW_HOURS, PDO::PARAM_INT);
+        $stmt->execute();
 
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    return is_array($rows) ? $rows : array();
-}
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
 
     private function processCandidate(array $candidateRow): array
     {
@@ -220,6 +262,7 @@ private function loadCandidateRows(): array
             'dispatch_duplicates_skipped' => 0,
             'dispatch_state_mismatch_skipped' => 0,
             'trigger_results' => array(),
+            'reminder_candidates' => array(),
             'errors' => array(),
         );
 
@@ -268,202 +311,144 @@ private function loadCandidateRows(): array
             }
 
             foreach ($resolvedTriggers as $triggerEventKey) {
-    $result['dispatch_attempts']++;
+                if ($triggerEventKey === 'deadline_passed') {
+                    $result['dispatch_attempts']++;
 
-    $effectiveDeadlineUtc = trim((string)($deadlineState['effective_deadline_utc'] ?? ''));
-    if ($effectiveDeadlineUtc === '') {
-        $result['dispatch_state_mismatch_skipped']++;
-        $result['trigger_results'][] = $this->logStateMismatch(
-            $userId,
-            $cohortId,
-            $lessonId,
-            $triggerEventKey,
-            $candidateRow,
-            $deadlineState
-        );
-        continue;
-    }
+                    $effectiveDeadlineUtc = trim((string)($deadlineState['effective_deadline_utc'] ?? ''));
+                    if ($effectiveDeadlineUtc === '') {
+                        $result['dispatch_state_mismatch_skipped']++;
+                        $result['trigger_results'][] = $this->logStateMismatch(
+                            $userId,
+                            $cohortId,
+                            $lessonId,
+                            $triggerEventKey,
+                            $candidateRow,
+                            $deadlineState
+                        );
+                        continue;
+                    }
 
-    $dedupeKey = $this->buildDedupeKey(
-        $triggerEventKey,
-        $userId,
-        $cohortId,
-        $lessonId,
-        $effectiveDeadlineUtc
-    );
+                    $dedupeKey = $this->buildDedupeKey(
+                        $triggerEventKey,
+                        $userId,
+                        $cohortId,
+                        $lessonId,
+                        $effectiveDeadlineUtc
+                    );
 
-    if ($this->hasDispatchAlreadyOccurred($userId, $cohortId, $lessonId, $triggerEventKey, $dedupeKey)) {
-        $result['dispatch_duplicates_skipped']++;
-        $result['trigger_results'][] = $this->logSkippedDuplicate(
-            $userId,
-            $cohortId,
-            $lessonId,
-            $triggerEventKey,
-            $dedupeKey,
-            $effectiveDeadlineUtc
-        );
-        continue;
-    }
+                    if ($this->hasDispatchAlreadyOccurred($userId, $cohortId, $lessonId, $triggerEventKey, $dedupeKey)) {
+                        $result['dispatch_duplicates_skipped']++;
+                        $result['trigger_results'][] = $this->logSkippedDuplicate(
+                            $userId,
+                            $cohortId,
+                            $lessonId,
+                            $triggerEventKey,
+                            $dedupeKey,
+                            $effectiveDeadlineUtc
+                        );
+                        continue;
+                    }
 
-    if ($triggerEventKey === 'deadline_passed') {
-        $this->engine->logProgressionEvent(array(
-            'user_id' => $userId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => null,
-            'event_type' => 'deadline',
-            'event_code' => 'cron_deadline_passed_engine_before',
-            'event_status' => 'info',
-            'actor_type' => 'system',
-            'actor_user_id' => null,
-            'event_time' => gmdate('Y-m-d H:i:s'),
-            'payload' => array(
-                'event_key' => $triggerEventKey,
-                'dedupe_key' => $dedupeKey,
-                'effective_deadline_utc' => $effectiveDeadlineUtc,
-            ),
-            'legal_note' => 'Time-based progression cron is delegating canonical missed-deadline handling to CoursewareProgressionV2.',
-        ));
+                    $this->engine->logProgressionEvent(array(
+                        'user_id' => $userId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'progress_test_id' => null,
+                        'event_type' => 'deadline',
+                        'event_code' => 'cron_deadline_passed_engine_before',
+                        'event_status' => 'info',
+                        'actor_type' => 'system',
+                        'actor_user_id' => null,
+                        'event_time' => gmdate('Y-m-d H:i:s'),
+                        'payload' => array(
+                            'event_key' => $triggerEventKey,
+                            'dedupe_key' => $dedupeKey,
+                            'effective_deadline_utc' => $effectiveDeadlineUtc,
+                        ),
+                        'legal_note' => 'Time-based progression cron is delegating canonical missed-deadline handling to CoursewareProgressionV2.',
+                    ));
 
-        $engineResult = $this->engine->handleMissedDeadlineForLesson(
-            $userId,
-            $cohortId,
-            $lessonId,
-            null
-        );
+                    $engineResult = $this->engine->handleMissedDeadlineForLesson(
+                        $userId,
+                        $cohortId,
+                        $lessonId,
+                        null
+                    );
 
-        $this->engine->logProgressionEvent(array(
-            'user_id' => $userId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => null,
-            'event_type' => 'deadline',
-            'event_code' => 'cron_deadline_passed_engine_after',
-            'event_status' => 'info',
-            'actor_type' => 'system',
-            'actor_user_id' => null,
-            'event_time' => gmdate('Y-m-d H:i:s'),
-            'payload' => array(
-                'event_key' => $triggerEventKey,
-                'dedupe_key' => $dedupeKey,
-                'effective_deadline_utc' => $effectiveDeadlineUtc,
-                'engine_result' => $engineResult,
-            ),
-            'legal_note' => 'Time-based progression cron completed canonical missed-deadline handling through CoursewareProgressionV2.',
-        ));
+                    $this->engine->logProgressionEvent(array(
+                        'user_id' => $userId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'progress_test_id' => null,
+                        'event_type' => 'deadline',
+                        'event_code' => 'cron_deadline_passed_engine_after',
+                        'event_status' => 'info',
+                        'actor_type' => 'system',
+                        'actor_user_id' => null,
+                        'event_time' => gmdate('Y-m-d H:i:s'),
+                        'payload' => array(
+                            'event_key' => $triggerEventKey,
+                            'dedupe_key' => $dedupeKey,
+                            'effective_deadline_utc' => $effectiveDeadlineUtc,
+                            'engine_result' => $engineResult,
+                        ),
+                        'legal_note' => 'Time-based progression cron completed canonical missed-deadline handling through CoursewareProgressionV2.',
+                    ));
 
-        $this->engine->logProgressionEvent(array(
-            'user_id' => $userId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'progress_test_id' => null,
-            'event_type' => 'automation',
-            'event_code' => $this->getDedupeEventCodeForTrigger($triggerEventKey),
-            'event_status' => 'info',
-            'actor_type' => 'system',
-            'actor_user_id' => null,
-            'event_time' => gmdate('Y-m-d H:i:s'),
-            'payload' => array(
-                'event_key' => $triggerEventKey,
-                'dedupe_key' => $dedupeKey,
-                'effective_deadline_utc' => $effectiveDeadlineUtc,
-                'engine_handled' => 1,
-            ),
-            'legal_note' => 'Time-based progression cron recorded missed-deadline handling for dedupe after canonical engine processing.',
-        ));
+                    $this->engine->logProgressionEvent(array(
+                        'user_id' => $userId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'progress_test_id' => null,
+                        'event_type' => 'automation',
+                        'event_code' => $this->getDedupeEventCodeForTrigger($triggerEventKey),
+                        'event_status' => 'info',
+                        'actor_type' => 'system',
+                        'actor_user_id' => null,
+                        'event_time' => gmdate('Y-m-d H:i:s'),
+                        'payload' => array(
+                            'event_key' => $triggerEventKey,
+                            'dedupe_key' => $dedupeKey,
+                            'effective_deadline_utc' => $effectiveDeadlineUtc,
+                            'engine_handled' => 1,
+                        ),
+                        'legal_note' => 'Time-based progression cron recorded missed-deadline handling for dedupe after canonical engine processing.',
+                    ));
 
-        $result['dispatch_successes']++;
-        $result['trigger_results'][] = array(
-            'event_key' => $triggerEventKey,
-            'dedupe_key' => $dedupeKey,
-            'status' => 'engine_handled',
-            'engine_result' => $engineResult,
-        );
+                    $result['dispatch_successes']++;
+                    $result['trigger_results'][] = array(
+                        'event_key' => $triggerEventKey,
+                        'dedupe_key' => $dedupeKey,
+                        'status' => 'engine_handled',
+                        'engine_result' => $engineResult,
+                    );
 
-        continue;
-    }
+                    continue;
+                }
 
-    $automationContext = $this->buildAutomationContext(
-        $triggerEventKey,
-        $dedupeKey,
-        $progressionContext,
-        $deadlineState,
-        $attemptState
-    );
+                if ($this->isAggregatableReminderTrigger($triggerEventKey)) {
+                    $reminderCandidate = $this->buildReminderCandidate(
+                        $triggerEventKey,
+                        $progressionContext,
+                        $deadlineState,
+                        $attemptState
+                    );
 
-    $this->engine->logProgressionEvent(array(
-        'user_id' => $userId,
-        'cohort_id' => $cohortId,
-        'lesson_id' => $lessonId,
-        'progress_test_id' => isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null,
-        'event_type' => 'automation',
-        'event_code' => self::EVENT_CODE_DISPATCH_BEFORE,
-        'event_status' => 'info',
-        'actor_type' => 'system',
-        'actor_user_id' => null,
-        'event_time' => gmdate('Y-m-d H:i:s'),
-        'payload' => array(
-            'event_key' => $triggerEventKey,
-            'dedupe_key' => $dedupeKey,
-            'candidate' => array(
-                'user_id' => $userId,
-                'cohort_id' => $cohortId,
-                'lesson_id' => $lessonId,
-            ),
-            'effective_deadline_utc' => $effectiveDeadlineUtc,
-        ),
-        'legal_note' => 'Time-based progression cron dispatch starting.',
-    ));
+                    $result['reminder_candidates'][] = $reminderCandidate;
+                    $result['trigger_results'][] = array(
+                        'event_key' => $triggerEventKey,
+                        'bucket_key' => (string)$reminderCandidate['bucket_key'],
+                        'status' => 'queued_for_aggregation',
+                    );
+                    continue;
+                }
 
-    $automationResult = $this->automation->dispatchEvent($this->pdo, $triggerEventKey, $automationContext);
-
-    $this->engine->logProgressionEvent(array(
-        'user_id' => $userId,
-        'cohort_id' => $cohortId,
-        'lesson_id' => $lessonId,
-        'progress_test_id' => isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null,
-        'event_type' => 'automation',
-        'event_code' => self::EVENT_CODE_DISPATCH_AFTER,
-        'event_status' => 'info',
-        'actor_type' => 'system',
-        'actor_user_id' => null,
-        'event_time' => gmdate('Y-m-d H:i:s'),
-        'payload' => array(
-            'event_key' => $triggerEventKey,
-            'dedupe_key' => $dedupeKey,
-            'automation_result' => $automationResult,
-        ),
-        'legal_note' => 'Time-based progression cron dispatch completed.',
-    ));
-
-    $this->engine->logProgressionEvent(array(
-        'user_id' => $userId,
-        'cohort_id' => $cohortId,
-        'lesson_id' => $lessonId,
-        'progress_test_id' => isset($automationContext['progress_test_id']) ? (int)$automationContext['progress_test_id'] : null,
-        'event_type' => 'automation',
-        'event_code' => $this->getDedupeEventCodeForTrigger($triggerEventKey),
-        'event_status' => 'info',
-        'actor_type' => 'system',
-        'actor_user_id' => null,
-        'event_time' => gmdate('Y-m-d H:i:s'),
-        'payload' => array(
-            'event_key' => $triggerEventKey,
-            'dedupe_key' => $dedupeKey,
-            'effective_deadline_utc' => $effectiveDeadlineUtc,
-            'automation_result' => $automationResult,
-        ),
-        'legal_note' => 'Time-based progression cron dispatch recorded for dedupe.',
-    ));
-
-    $result['dispatch_successes']++;
-    $result['trigger_results'][] = array(
-        'event_key' => $triggerEventKey,
-        'dedupe_key' => $dedupeKey,
-        'status' => 'dispatched',
-        'automation_result' => $automationResult,
-    );
-}
+                $result['dispatch_state_mismatch_skipped']++;
+                $result['trigger_results'][] = array(
+                    'event_key' => $triggerEventKey,
+                    'status' => 'skipped_unknown_trigger_type',
+                );
+            }
         } catch (Throwable $e) {
             $result['errors'][] = array(
                 'user_id' => $userId,
@@ -565,6 +550,21 @@ private function loadCandidateRows(): array
             . $effectiveDeadlineUtc;
     }
 
+    private function buildAggregatedDedupeKey(
+        string $eventKey,
+        int $userId,
+        int $cohortId,
+        string $effectiveDeadlineUtc
+    ): string {
+        return $eventKey
+            . '|'
+            . $userId
+            . '|'
+            . $cohortId
+            . '|'
+            . $effectiveDeadlineUtc;
+    }
+
     private function hasDispatchAlreadyOccurred(
         int $userId,
         int $cohortId,
@@ -592,6 +592,38 @@ private function loadCandidateRows(): array
             ':user_id' => $userId,
             ':cohort_id' => $cohortId,
             ':lesson_id' => $lessonId,
+            ':event_code' => $eventCode,
+            ':payload_like' => '%' . $dedupeKey . '%',
+        ));
+
+        return (bool)$stmt->fetchColumn();
+    }
+
+    private function hasAggregatedDispatchAlreadyOccurred(
+        int $userId,
+        int $cohortId,
+        string $triggerEventKey,
+        string $dedupeKey
+    ): bool {
+        $eventCode = $this->getDedupeEventCodeForTrigger($triggerEventKey);
+
+        $sql = "
+            SELECT 1
+            FROM training_progression_events
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = 0
+              AND event_type = 'automation'
+              AND event_code = :event_code
+              AND payload_json IS NOT NULL
+              AND payload_json LIKE :payload_like
+            LIMIT 1
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(array(
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
             ':event_code' => $eventCode,
             ':payload_like' => '%' . $dedupeKey . '%',
         ));
@@ -717,6 +749,44 @@ private function loadCandidateRows(): array
         );
     }
 
+    private function logAggregatedSkippedDuplicate(
+        int $userId,
+        int $cohortId,
+        string $triggerEventKey,
+        string $dedupeKey,
+        string $effectiveDeadlineUtc,
+        int $affectedLessonsCount
+    ): array {
+        $this->engine->logProgressionEvent(array(
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => 0,
+            'progress_test_id' => null,
+            'event_type' => 'automation',
+            'event_code' => self::EVENT_CODE_SKIPPED_DUPLICATE,
+            'event_status' => 'info',
+            'actor_type' => 'system',
+            'actor_user_id' => null,
+            'event_time' => gmdate('Y-m-d H:i:s'),
+            'payload' => array(
+                'event_key' => $triggerEventKey,
+                'dedupe_key' => $dedupeKey,
+                'effective_deadline_utc' => $effectiveDeadlineUtc,
+                'aggregation_mode' => 'student_cohort_deadline',
+                'affected_lessons_count' => $affectedLessonsCount,
+            ),
+            'legal_note' => 'Time-based progression cron skipped duplicate aggregated reminder dispatch.',
+        ));
+
+        return array(
+            'event_key' => $triggerEventKey,
+            'dedupe_key' => $dedupeKey,
+            'status' => 'skipped_duplicate',
+            'aggregation_mode' => 'student_cohort_deadline',
+            'affected_lessons_count' => $affectedLessonsCount,
+        );
+    }
+
     private function logStateMismatch(
         int $userId,
         int $cohortId,
@@ -764,5 +834,389 @@ private function loadCandidateRows(): array
             'dedupe_key' => $dedupeKey,
             'status' => 'skipped_state_mismatch',
         );
+    }
+
+    private function isAggregatableReminderTrigger(string $triggerEventKey): bool
+    {
+        return in_array($triggerEventKey, array('deadline_approaching_48h', 'deadline_today'), true);
+    }
+
+    private function buildAggregatedBucketKey(
+        string $eventKey,
+        int $userId,
+        int $cohortId,
+        string $effectiveDeadlineUtc
+    ): string {
+        return $eventKey
+            . '|'
+            . $userId
+            . '|'
+            . $cohortId
+            . '|'
+            . $effectiveDeadlineUtc;
+    }
+
+    private function buildReminderCandidate(
+        string $triggerEventKey,
+        array $progressionContext,
+        array $deadlineState,
+        array $attemptState
+    ): array {
+        $userId = (int)($progressionContext['user_id'] ?? 0);
+        $cohortId = (int)($progressionContext['cohort_id'] ?? 0);
+        $lessonId = (int)($progressionContext['lesson_id'] ?? 0);
+
+        $studentRecipient = (array)($progressionContext['student_recipient'] ?? array());
+        $chiefRecipient = (array)($progressionContext['chief_instructor_recipient'] ?? array());
+        $activityState = (array)($progressionContext['activity_state'] ?? array());
+        $latestProgressTest = (array)($progressionContext['latest_progress_test'] ?? array());
+
+        $effectiveDeadlineUtc = trim((string)($deadlineState['effective_deadline_utc'] ?? ''));
+        $bucketKey = $this->buildAggregatedBucketKey(
+            $triggerEventKey,
+            $userId,
+            $cohortId,
+            $effectiveDeadlineUtc
+        );
+
+        return array(
+            'bucket_key' => $bucketKey,
+            'event_key' => $triggerEventKey,
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'effective_deadline_utc' => $effectiveDeadlineUtc,
+            'deadline_source' => (string)($deadlineState['deadline_source'] ?? ''),
+            'base_deadline_utc' => (string)($deadlineState['base_deadline_utc'] ?? ''),
+            'override_id' => isset($deadlineState['override_id']) ? (int)$deadlineState['override_id'] : null,
+            'student_name' => trim((string)($studentRecipient['name'] ?? '')),
+            'student_email' => trim((string)($studentRecipient['email'] ?? '')),
+            'chief_instructor_name' => trim((string)($chiefRecipient['name'] ?? '')),
+            'chief_instructor_email' => trim((string)($chiefRecipient['email'] ?? '')),
+            'cohort_title' => (string)($progressionContext['cohort_title'] ?? ''),
+            'lesson' => array(
+                'lesson_id' => $lessonId,
+                'lesson_title' => (string)($progressionContext['lesson_title'] ?? ''),
+                'progress_test_id' => isset($latestProgressTest['id']) ? (int)$latestProgressTest['id'] : null,
+                'completion_status' => (string)($activityState['completion_status'] ?? ''),
+                'summary_status' => (string)($activityState['summary_status'] ?? ''),
+                'test_pass_status' => (string)($activityState['test_pass_status'] ?? ''),
+                'training_suspended' => !empty($activityState['training_suspended']) ? 1 : 0,
+                'one_on_one_required' => !empty($activityState['one_on_one_required']) ? 1 : 0,
+                'one_on_one_completed' => !empty($activityState['one_on_one_completed']) ? 1 : 0,
+                'attempt_count' => (int)($attemptState['current_attempt_number'] ?? 0),
+                'remaining_attempts' => (int)($attemptState['remaining_attempts'] ?? 0),
+                'effective_allowed_attempts' => (int)($attemptState['effective_allowed_attempts'] ?? 0),
+                'next_attempt_number' => (int)($attemptState['next_attempt_number'] ?? 0),
+            ),
+        );
+    }
+
+    private function addReminderCandidateToBuckets(array &$buckets, array $candidate): void
+    {
+        $bucketKey = (string)($candidate['bucket_key'] ?? '');
+        if ($bucketKey === '') {
+            return;
+        }
+
+        if (!isset($buckets[$bucketKey])) {
+            $buckets[$bucketKey] = array(
+                'bucket_key' => $bucketKey,
+                'event_key' => (string)($candidate['event_key'] ?? ''),
+                'user_id' => (int)($candidate['user_id'] ?? 0),
+                'cohort_id' => (int)($candidate['cohort_id'] ?? 0),
+                'effective_deadline_utc' => (string)($candidate['effective_deadline_utc'] ?? ''),
+                'deadline_source' => (string)($candidate['deadline_source'] ?? ''),
+                'base_deadline_utc' => (string)($candidate['base_deadline_utc'] ?? ''),
+                'override_ids' => array(),
+                'student_name' => (string)($candidate['student_name'] ?? ''),
+                'student_email' => (string)($candidate['student_email'] ?? ''),
+                'chief_instructor_name' => (string)($candidate['chief_instructor_name'] ?? ''),
+                'chief_instructor_email' => (string)($candidate['chief_instructor_email'] ?? ''),
+                'cohort_title' => (string)($candidate['cohort_title'] ?? ''),
+                'lessons' => array(),
+            );
+        }
+
+        if (isset($candidate['override_id']) && $candidate['override_id'] !== null) {
+            $buckets[$bucketKey]['override_ids'][(string)$candidate['override_id']] = (int)$candidate['override_id'];
+        }
+
+        $lesson = (array)($candidate['lesson'] ?? array());
+        $lessonId = (int)($lesson['lesson_id'] ?? 0);
+        if ($lessonId > 0) {
+            $buckets[$bucketKey]['lessons'][(string)$lessonId] = $lesson;
+        }
+    }
+
+    private function dispatchAggregatedReminderBucket(array $bucket): array
+    {
+        $eventKey = (string)($bucket['event_key'] ?? '');
+        $userId = (int)($bucket['user_id'] ?? 0);
+        $cohortId = (int)($bucket['cohort_id'] ?? 0);
+        $effectiveDeadlineUtc = trim((string)($bucket['effective_deadline_utc'] ?? ''));
+
+        $lessons = array_values((array)($bucket['lessons'] ?? array()));
+        usort($lessons, array($this, 'sortLessonsById'));
+
+        $affectedLessonsCount = count($lessons);
+
+        if (
+            $eventKey === '' ||
+            $userId <= 0 ||
+            $cohortId <= 0 ||
+            $effectiveDeadlineUtc === '' ||
+            $affectedLessonsCount === 0
+        ) {
+            return array(
+                'event_key' => $eventKey,
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'status' => 'error',
+                'error' => 'Invalid aggregated reminder bucket.',
+            );
+        }
+
+        $dedupeKey = $this->buildAggregatedDedupeKey(
+            $eventKey,
+            $userId,
+            $cohortId,
+            $effectiveDeadlineUtc
+        );
+
+        if ($this->hasAggregatedDispatchAlreadyOccurred($userId, $cohortId, $eventKey, $dedupeKey)) {
+            return $this->logAggregatedSkippedDuplicate(
+                $userId,
+                $cohortId,
+                $eventKey,
+                $dedupeKey,
+                $effectiveDeadlineUtc,
+                $affectedLessonsCount
+            );
+        }
+
+        try {
+            $automationContext = $this->buildAggregatedAutomationContext($bucket, $dedupeKey, $lessons);
+
+            $this->engine->logProgressionEvent(array(
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => 0,
+                'progress_test_id' => null,
+                'event_type' => 'automation',
+                'event_code' => self::EVENT_CODE_DISPATCH_BEFORE,
+                'event_status' => 'info',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => gmdate('Y-m-d H:i:s'),
+                'payload' => array(
+                    'event_key' => $eventKey,
+                    'dedupe_key' => $dedupeKey,
+                    'aggregation_mode' => 'student_cohort_deadline',
+                    'affected_lessons_count' => $affectedLessonsCount,
+                    'effective_deadline_utc' => $effectiveDeadlineUtc,
+                ),
+                'legal_note' => 'Time-based progression cron aggregated reminder dispatch starting.',
+            ));
+
+            $automationResult = $this->automation->dispatchEvent($this->pdo, $eventKey, $automationContext);
+
+            $this->engine->logProgressionEvent(array(
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => 0,
+                'progress_test_id' => null,
+                'event_type' => 'automation',
+                'event_code' => self::EVENT_CODE_DISPATCH_AFTER,
+                'event_status' => 'info',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => gmdate('Y-m-d H:i:s'),
+                'payload' => array(
+                    'event_key' => $eventKey,
+                    'dedupe_key' => $dedupeKey,
+                    'aggregation_mode' => 'student_cohort_deadline',
+                    'affected_lessons_count' => $affectedLessonsCount,
+                    'automation_result' => $automationResult,
+                ),
+                'legal_note' => 'Time-based progression cron aggregated reminder dispatch completed.',
+            ));
+
+            $this->engine->logProgressionEvent(array(
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => 0,
+                'progress_test_id' => null,
+                'event_type' => 'automation',
+                'event_code' => $this->getDedupeEventCodeForTrigger($eventKey),
+                'event_status' => 'info',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => gmdate('Y-m-d H:i:s'),
+                'payload' => array(
+                    'event_key' => $eventKey,
+                    'dedupe_key' => $dedupeKey,
+                    'aggregation_mode' => 'student_cohort_deadline',
+                    'affected_lessons_count' => $affectedLessonsCount,
+                    'effective_deadline_utc' => $effectiveDeadlineUtc,
+                    'automation_result' => $automationResult,
+                ),
+                'legal_note' => 'Time-based progression cron aggregated reminder dispatch recorded for dedupe.',
+            ));
+
+            return array(
+                'event_key' => $eventKey,
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'dedupe_key' => $dedupeKey,
+                'status' => 'dispatched',
+                'aggregation_mode' => 'student_cohort_deadline',
+                'affected_lessons_count' => $affectedLessonsCount,
+                'lesson_ids' => array_map(array($this, 'extractLessonId'), $lessons),
+                'automation_result' => $automationResult,
+            );
+        } catch (Throwable $e) {
+            return array(
+                'event_key' => $eventKey,
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'dedupe_key' => $dedupeKey,
+                'status' => 'error',
+                'aggregation_mode' => 'student_cohort_deadline',
+                'affected_lessons_count' => $affectedLessonsCount,
+                'error' => $e->getMessage(),
+            );
+        }
+    }
+
+    private function buildAggregatedAutomationContext(array $bucket, string $dedupeKey, array $lessons): array
+    {
+        $studentName = trim((string)($bucket['student_name'] ?? ''));
+        if ($studentName === '') {
+            $studentName = 'Student';
+        }
+
+        $chiefInstructorName = trim((string)($bucket['chief_instructor_name'] ?? ''));
+        if ($chiefInstructorName === '') {
+            $chiefInstructorName = 'Chief Instructor';
+        }
+
+        $effectiveDeadlineUtc = trim((string)($bucket['effective_deadline_utc'] ?? ''));
+        $deadlineTs = $effectiveDeadlineUtc !== '' ? strtotime($effectiveDeadlineUtc) : false;
+        $nowTs = time();
+
+        $hoursUntilDeadline = null;
+        if ($deadlineTs !== false) {
+            $hoursUntilDeadline = round(($deadlineTs - $nowTs) / 3600, 2);
+        }
+
+        $affectedLessonsCount = count($lessons);
+
+        $lessonTitles = array();
+        $affectedLessonsTextLines = array();
+        $affectedLessonsHtmlItems = array();
+        $summaryMissingCount = 0;
+        $testInProgressCount = 0;
+        $failedCount = 0;
+
+        foreach ($lessons as $lesson) {
+            $lessonId = (int)($lesson['lesson_id'] ?? 0);
+            $lessonTitle = trim((string)($lesson['lesson_title'] ?? ('Lesson ' . $lessonId)));
+            $summaryStatus = trim((string)($lesson['summary_status'] ?? ''));
+            $testPassStatus = trim((string)($lesson['test_pass_status'] ?? ''));
+            $completionStatus = trim((string)($lesson['completion_status'] ?? ''));
+
+            $lessonTitles[] = $lessonTitle;
+
+            if ($summaryStatus === 'missing') {
+                $summaryMissingCount++;
+            }
+
+            if ($testPassStatus === 'in_progress') {
+                $testInProgressCount++;
+            }
+
+            if ($testPassStatus === 'failed' || $testPassStatus === 'deadline_missed') {
+                $failedCount++;
+            }
+
+            $affectedLessonsTextLines[] =
+                '- ' . $lessonTitle
+                . ' | Summary: ' . $summaryStatus
+                . ' | Test: ' . $testPassStatus
+                . ' | Completion: ' . $completionStatus;
+
+            $affectedLessonsHtmlItems[] =
+                '<li><strong>' . htmlspecialchars($lessonTitle, ENT_QUOTES, 'UTF-8') . '</strong>'
+                . ' — Summary: ' . htmlspecialchars($summaryStatus, ENT_QUOTES, 'UTF-8')
+                . ', Test: ' . htmlspecialchars($testPassStatus, ENT_QUOTES, 'UTF-8')
+                . ', Completion: ' . htmlspecialchars($completionStatus, ENT_QUOTES, 'UTF-8')
+                . '</li>';
+        }
+
+        $affectedLessonsText = implode("\n", $affectedLessonsTextLines);
+        $affectedLessonsHtml = '<ul style="margin:0;padding-left:20px;">' . implode('', $affectedLessonsHtmlItems) . '</ul>';
+        $affectedLessonsJson = json_encode($lessons, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        $lessonTitleForLegacyTemplates = $affectedLessonsCount === 1
+            ? (string)$lessonTitles[0]
+            : ((string)$affectedLessonsCount . ' lessons');
+
+        return array(
+            'user_id' => (int)($bucket['user_id'] ?? 0),
+            'cohort_id' => (int)($bucket['cohort_id'] ?? 0),
+            'lesson_id' => 0,
+            'progress_test_id' => null,
+
+            'event_key' => (string)($bucket['event_key'] ?? ''),
+            'dedupe_key' => $dedupeKey,
+
+            'student_name' => $studentName,
+            'student_email' => trim((string)($bucket['student_email'] ?? '')),
+            'chief_instructor_name' => $chiefInstructorName,
+            'chief_instructor_email' => trim((string)($bucket['chief_instructor_email'] ?? '')),
+
+            'lesson_title' => $lessonTitleForLegacyTemplates,
+            'cohort_title' => (string)($bucket['cohort_title'] ?? ''),
+
+            'effective_deadline_utc' => $effectiveDeadlineUtc,
+            'deadline_source' => (string)($bucket['deadline_source'] ?? ''),
+            'base_deadline_utc' => (string)($bucket['base_deadline_utc'] ?? ''),
+            'override_ids_json' => json_encode(array_values((array)($bucket['override_ids'] ?? array())), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            'deadline_passed' => 0,
+            'deadline_date_utc' => $deadlineTs !== false ? gmdate('Y-m-d', $deadlineTs) : '',
+            'deadline_time_utc' => $deadlineTs !== false ? gmdate('H:i:s', $deadlineTs) : '',
+            'hours_until_deadline' => $hoursUntilDeadline,
+
+            'affected_lessons_count' => $affectedLessonsCount,
+            'affected_lessons_text' => $affectedLessonsText,
+            'affected_lessons_html' => $affectedLessonsHtml,
+            'affected_lessons_json' => $affectedLessonsJson,
+
+            'summary_missing_count' => $summaryMissingCount,
+            'test_in_progress_count' => $testInProgressCount,
+            'failed_count' => $failedCount,
+
+            'completion_status' => $affectedLessonsCount === 1 ? (string)($lessons[0]['completion_status'] ?? '') : 'multiple_lessons',
+            'summary_status' => $affectedLessonsCount === 1 ? (string)($lessons[0]['summary_status'] ?? '') : 'multiple_lessons',
+            'test_pass_status' => $affectedLessonsCount === 1 ? (string)($lessons[0]['test_pass_status'] ?? '') : 'multiple_lessons',
+            'training_suspended' => 0,
+            'one_on_one_required' => 0,
+            'one_on_one_completed' => 0,
+
+            'attempt_count' => $affectedLessonsCount === 1 ? (string)((int)($lessons[0]['attempt_count'] ?? 0)) : '',
+            'remaining_attempts' => $affectedLessonsCount === 1 ? (string)((int)($lessons[0]['remaining_attempts'] ?? 0)) : '',
+            'effective_allowed_attempts' => $affectedLessonsCount === 1 ? (string)((int)($lessons[0]['effective_allowed_attempts'] ?? 0)) : '',
+            'next_attempt_number' => $affectedLessonsCount === 1 ? (string)((int)($lessons[0]['next_attempt_number'] ?? 0)) : '',
+        );
+    }
+
+    private function sortLessonsById(array $a, array $b): int
+    {
+        return ((int)($a['lesson_id'] ?? 0)) <=> ((int)($b['lesson_id'] ?? 0));
+    }
+
+    private function extractLessonId(array $lesson): int
+    {
+        return (int)($lesson['lesson_id'] ?? 0);
     }
 }
