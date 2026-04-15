@@ -1181,31 +1181,43 @@ final class CoursewareProgressionV2
 	
 public function prepareStartDecision(int $userId, int $cohortId, int $lessonId, array $scope = []): array
 {
-    $this->reconcileAttemptAndRequiredActionState($userId, $cohortId, $lessonId);
-
     $courseId = isset($scope['course_id']) ? (int)$scope['course_id'] : null;
 
     $policy = $this->resolveEffectivePolicySet($cohortId, $courseId);
     $behaviorMode = $this->resolveBehaviorMode($policy);
     $summaryState = $this->resolveSummaryState($userId, $cohortId, $lessonId, $policy);
-    $authoritativeAttempt = $this->getAuthoritativeProgressTestRowForLesson($userId, $cohortId, $lessonId);
-    $attemptState = $this->resolveAttemptPolicyState(
-        $userId,
-        $cohortId,
-        $lessonId,
-        $policy,
-        $authoritativeAttempt ? (int)$authoritativeAttempt['attempt'] : null,
-        $behaviorMode
-    );
+    $attemptState = $this->resolveAttemptPolicyState($userId, $cohortId, $lessonId, $policy, null, $behaviorMode);
     $deadlineState = $this->resolveDeadlineState($userId, $cohortId, $lessonId);
     $progressionContext = $this->getProgressionContextForUserLesson($userId, $cohortId, $lessonId);
 
-    $blockingActions = $this->collectPrepareStartBlockingActions(
-        $userId,
-        $cohortId,
-        $lessonId,
-        $authoritativeAttempt ? (int)$authoritativeAttempt['id'] : null
-    );
+    $blockingActions = [];
+
+    $actionTypesToBlock = [
+        'remediation_acknowledgement',
+        'instructor_approval',
+        'deadline_reason_submission'
+    ];
+
+    foreach ($actionTypesToBlock as $actionType) {
+        $pending = $this->getPendingRequiredAction(
+            $userId,
+            $cohortId,
+            $lessonId,
+            $actionType
+        );
+
+        if ($pending) {
+            $blockingActions[] = [
+                'action_type' => $actionType,
+                'action' => $pending,
+                'action_url' => $this->buildInternalAppUrl(
+                    $actionType === 'instructor_approval'
+                        ? '/instructor/instructor_approval.php?token=' . urlencode((string)$pending['token'])
+                        : '/student/remediation_action.php?token=' . urlencode((string)$pending['token'])
+                ),
+            ];
+        }
+    }
 
     $hasBlockingActions = !empty($blockingActions);
 
@@ -1215,13 +1227,6 @@ public function prepareStartDecision(int $userId, int $cohortId, int $lessonId, 
         'latest_instructor_action_id' => null,
         'blocking' => $hasBlockingActions,
     ];
-
-    foreach ($blockingActions as $blockingAction) {
-        if ((string)($blockingAction['action_type'] ?? '') === 'instructor_approval') {
-            $requiredActions['latest_instructor_action_id'] = (int)(($blockingAction['action']['id'] ?? 0));
-            break;
-        }
-    }
 
     $decision = $this->evaluateProgressionDecision([
         'phase' => 'prepare_start',
@@ -1557,13 +1562,6 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             ':completed_at' => $completedAt,
             ':id' => $progressTestId
         ]);
-
-        $this->expireSupersededAttemptBoundRequiredActions(
-            $userId,
-            $cohortId,
-            $lessonId,
-            $progressTestId
-        );
 
         $requiredActions = $this->ensureRequiredActionsForDecision(
             $progressTestId,
@@ -2110,7 +2108,7 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
         return (bool)$stmt->fetchColumn();
     }
 
-    public function getPendingRequiredAction(int $userId, int $cohortId, int $lessonId, string $actionType, ?int $progressTestId = null): ?array
+    public function getPendingRequiredAction(int $userId, int $cohortId, int $lessonId, string $actionType): ?array
     {
         $sql = "
             SELECT *
@@ -2120,28 +2118,17 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
               AND lesson_id = :lesson_id
               AND action_type = :action_type
               AND status IN ('pending','opened')
-        ";
-
-        $params = [
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-            ':action_type' => $actionType,
-        ];
-
-        if ($progressTestId !== null) {
-            $sql .= "
-              AND progress_test_id = :progress_test_id";
-            $params[':progress_test_id'] = $progressTestId;
-        }
-
-        $sql .= "
             ORDER BY id DESC
             LIMIT 1
         ";
 
         $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+            ':action_type' => $actionType,
+        ]);
 
         $row = $stmt->fetch();
         return $row ?: null;
@@ -2659,12 +2646,6 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
         throw $e;
     }
 
-    $this->reconcileAttemptAndRequiredActionState(
-        (int)$action['user_id'],
-        (int)$action['cohort_id'],
-        (int)$action['lesson_id']
-    );
-
     $automationResult = $this->dispatchAutomationEventIfAvailable(
         'instructor_decision_recorded',
         $automationContext,
@@ -2848,12 +2829,6 @@ if ($existingDecisionPayloadRaw !== '') {
 
         $this->pdo->commit();
 
-        $this->reconcileAttemptAndRequiredActionState(
-            (int)$action['user_id'],
-            (int)$action['cohort_id'],
-            (int)$action['lesson_id']
-        );
-
         $automationResult = null;
 
         $automationResult = $this->dispatchAutomationEventIfAvailable(
@@ -2947,12 +2922,6 @@ public function completeRequiredAction(int $actionId, string $responseText, ?str
     if ($stmt->rowCount() < 1) {
         throw new RuntimeException('Required action could not be completed.');
     }
-
-    $this->reconcileAttemptAndRequiredActionState(
-        (int)$action['user_id'],
-        (int)$action['cohort_id'],
-        (int)$action['lesson_id']
-    );
 }
 
     public function hasCompletedRequiredAction(int $userId, int $cohortId, int $lessonId, string $actionType): bool
@@ -3002,18 +2971,8 @@ public function completeRequiredAction(int $actionId, string $responseText, ?str
                 (int)$data['user_id'],
                 (int)$data['cohort_id'],
                 (int)$data['lesson_id'],
-                (string)$data['action_type'],
-                isset($data['progress_test_id']) ? (int)$data['progress_test_id'] : null
+                (string)$data['action_type']
             );
-
-            if (!$existing) {
-                $existing = $this->getPendingRequiredAction(
-                    (int)$data['user_id'],
-                    (int)$data['cohort_id'],
-                    (int)$data['lesson_id'],
-                    (string)$data['action_type']
-                );
-            }
 
             if ($existing) {
                 return [
@@ -4700,205 +4659,6 @@ private function dispatchAutomationEventIfAvailable(
     private function policyKeyExistsInArray(array $policy, string $key): bool
     {
         return array_key_exists($key, $policy);
-    }
-
-
-    public function reconcileAttemptAndRequiredActionState(int $userId, int $cohortId, int $lessonId): array
-    {
-        $ownsTransaction = !$this->pdo->inTransaction();
-
-        if ($ownsTransaction) {
-            $this->pdo->beginTransaction();
-        }
-
-        try {
-            $this->lockAttemptAndRequiredActionRows($userId, $cohortId, $lessonId);
-
-            $authoritativeAttempt = $this->getAuthoritativeProgressTestRowForLesson($userId, $cohortId, $lessonId);
-            $authoritativeProgressTestId = $authoritativeAttempt ? (int)$authoritativeAttempt['id'] : null;
-
-            $expiredCount = $this->expireSupersededAttemptBoundRequiredActions(
-                $userId,
-                $cohortId,
-                $lessonId,
-                $authoritativeProgressTestId
-            );
-
-            if ($ownsTransaction) {
-                $this->pdo->commit();
-            }
-
-            return [
-                'authoritative_progress_test_id' => $authoritativeProgressTestId,
-                'expired_required_action_count' => $expiredCount,
-            ];
-        } catch (Throwable $e) {
-            if ($ownsTransaction && $this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-
-            throw $e;
-        }
-    }
-
-    private function collectPrepareStartBlockingActions(int $userId, int $cohortId, int $lessonId, ?int $authoritativeProgressTestId = null): array
-    {
-        $blockingActions = [];
-
-        $deadlineReasonAction = $this->getPendingRequiredAction(
-            $userId,
-            $cohortId,
-            $lessonId,
-            'deadline_reason_submission'
-        );
-
-        if ($deadlineReasonAction) {
-            $blockingActions[] = [
-                'action_type' => 'deadline_reason_submission',
-                'action' => $deadlineReasonAction,
-                'action_url' => $this->buildInternalAppUrl(
-                    '/student/remediation_action.php?token=' . urlencode((string)$deadlineReasonAction['token'])
-                ),
-            ];
-        }
-
-        foreach (['remediation_acknowledgement', 'instructor_approval'] as $actionType) {
-            $pending = $authoritativeProgressTestId !== null
-                ? $this->getPendingRequiredAction($userId, $cohortId, $lessonId, $actionType, $authoritativeProgressTestId)
-                : null;
-
-            if (!$pending) {
-                continue;
-            }
-
-            $blockingActions[] = [
-                'action_type' => $actionType,
-                'action' => $pending,
-                'action_url' => $this->buildInternalAppUrl(
-                    $actionType === 'instructor_approval'
-                        ? '/instructor/instructor_approval.php?token=' . urlencode((string)$pending['token'])
-                        : '/student/remediation_action.php?token=' . urlencode((string)$pending['token'])
-                ),
-            ];
-        }
-
-        return $blockingActions;
-    }
-
-    private function lockAttemptAndRequiredActionRows(int $userId, int $cohortId, int $lessonId): void
-    {
-        $stmt = $this->pdo->prepare("
-            SELECT id
-            FROM progress_tests_v2
-            WHERE user_id = :user_id
-              AND cohort_id = :cohort_id
-              AND lesson_id = :lesson_id
-            ORDER BY id DESC
-            FOR UPDATE
-        ");
-        $stmt->execute([
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-        ]);
-        $stmt->fetchAll();
-
-        $stmt = $this->pdo->prepare("
-            SELECT id
-            FROM student_required_actions
-            WHERE user_id = :user_id
-              AND cohort_id = :cohort_id
-              AND lesson_id = :lesson_id
-            ORDER BY id DESC
-            FOR UPDATE
-        ");
-        $stmt->execute([
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-        ]);
-        $stmt->fetchAll();
-
-        $stmt = $this->pdo->prepare("
-            SELECT id
-            FROM lesson_activity
-            WHERE user_id = :user_id
-              AND cohort_id = :cohort_id
-              AND lesson_id = :lesson_id
-            LIMIT 1
-            FOR UPDATE
-        ");
-        $stmt->execute([
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-        ]);
-        $stmt->fetch();
-    }
-
-    private function getAuthoritativeProgressTestRowForLesson(int $userId, int $cohortId, int $lessonId): ?array
-    {
-        $stmt = $this->pdo->prepare("
-            SELECT *
-            FROM progress_tests_v2
-            WHERE user_id = :user_id
-              AND cohort_id = :cohort_id
-              AND lesson_id = :lesson_id
-            ORDER BY
-                CASE
-                    WHEN status IN ('preparing','ready','in_progress','processing') THEN 0
-                    ELSE 1
-                END ASC,
-                attempt DESC,
-                id DESC
-            LIMIT 1
-        ");
-        $stmt->execute([
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-        ]);
-
-        $row = $stmt->fetch();
-        return $row ?: null;
-    }
-
-    private function expireSupersededAttemptBoundRequiredActions(
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        ?int $authoritativeProgressTestId
-    ): int {
-        $sql = "
-            UPDATE student_required_actions
-            SET
-                status = 'expired',
-                updated_at = :updated_at
-            WHERE user_id = :user_id
-              AND cohort_id = :cohort_id
-              AND lesson_id = :lesson_id
-              AND action_type IN ('remediation_acknowledgement','instructor_approval')
-              AND progress_test_id IS NOT NULL
-              AND status IN ('pending','opened')
-        ";
-
-        $params = [
-            ':updated_at' => gmdate('Y-m-d H:i:s'),
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-        ];
-
-        if ($authoritativeProgressTestId !== null) {
-            $sql .= "
-              AND progress_test_id <> :authoritative_progress_test_id";
-            $params[':authoritative_progress_test_id'] = $authoritativeProgressTestId;
-        }
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-
-        return $stmt->rowCount();
     }
 
     private function getLatestAttemptNumber(int $userId, int $cohortId, int $lessonId): int
