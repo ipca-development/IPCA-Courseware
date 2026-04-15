@@ -631,13 +631,8 @@ final class NotificationService
             $sendResult = $this->sendLoggedProgressionEmailById($emailId);
         }
 
-        $ok = true;
-        if ($deliveryMode === 'immediate') {
-            $ok = !empty($sendResult['ok']);
-        }
-
         return [
-            'ok' => $ok,
+            'ok' => true,
             'suppressed' => false,
             'notification_key' => $notificationKey,
             'email_id' => $emailId,

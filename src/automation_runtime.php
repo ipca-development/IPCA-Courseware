@@ -127,7 +127,7 @@ final class AutomationRuntime
                     }
 
                     if ($actionKey === 'notify_all_instructors') {
-                        $result = $this->runNotifyAllByRoles($pdo, $flowRunId, $actionKey, $config, $context, array('instructor', 'supervisor'));
+                        $result = $this->runNotifyAllByRoles($pdo, $flowRunId, $actionKey, $config, $context, array('supervisor'));
                         $executedActions++;
                         $results[] = array(
                             'flow_id' => $flowId,
@@ -172,7 +172,7 @@ final class AutomationRuntime
                     }
 
                     if ($actionKey === 'notify_specific_instructor') {
-                        $result = $this->runNotifySpecificUser($pdo, $flowRunId, $actionKey, $config, $context, array('instructor', 'supervisor'));
+                        $result = $this->runNotifySpecificUser($pdo, $flowRunId, $actionKey, $config, $context, array('supervisor'));
                         $executedActions++;
                         $results[] = array(
                             'flow_id' => $flowId,
@@ -561,8 +561,7 @@ final class AutomationRuntime
             $headers
         );
 
-		
-		 require_once __DIR__ . '/courseware_progression_v2.php';
+        require_once __DIR__ . '/courseware_progression_v2.php';
         $progression = new CoursewareProgressionV2($pdo);
 
         $progression->recordAutomationEmailAudit([
@@ -584,7 +583,7 @@ final class AutomationRuntime
             'notification_template_version_id' => isset($sendResult['template_version_id']) ? (int)$sendResult['template_version_id'] : null,
             'render_context' => $notificationContext,
         ]);
-		
+
         $details = $this->encodeDetails(array(
             'notification_key' => $notificationKey,
             'to_email' => $toEmail,
@@ -594,6 +593,13 @@ final class AutomationRuntime
             'headers' => $headers,
             'send_result' => $sendResult,
         ));
+
+        if (empty($sendResult['ok'])) {
+            $this->insertActionRun($pdo, $flowRunId, $actionKey, 'error', $details);
+            throw new RuntimeException(
+                'Notification send failed: ' . (string)($sendResult['error'] ?? 'unknown error')
+            );
+        }
 
         $this->insertActionRun($pdo, $flowRunId, $actionKey, 'success', $details);
 
@@ -627,8 +633,28 @@ final class AutomationRuntime
         $stmt->execute($roles);
         $users = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+        if (!is_array($users) || empty($users)) {
+            $details = $this->encodeDetails(array(
+                'notification_key' => $notificationKey,
+                'roles' => $roles,
+                'recipient_count' => 0,
+                'results' => array(),
+                'reason' => 'no_matching_recipients',
+            ));
+            $this->insertActionRun($pdo, $flowRunId, $actionKey, 'skipped', $details);
+
+            return array(
+                'notification_key' => $notificationKey,
+                'recipient_count' => 0,
+                'results' => array(),
+                'skipped' => true,
+                'reason' => 'no_matching_recipients',
+            );
+        }
+
         $service = new NotificationService($pdo);
         $results = array();
+        $hadFailure = false;
 
         foreach ($users as $user) {
             $toEmail = trim((string)($user['email'] ?? ''));
@@ -645,39 +671,48 @@ final class AutomationRuntime
             }
 
             $sendResult = $service->sendSystemNotification(
-				$notificationKey,
-				$toEmail,
-				$toName,
-				$eventContext,
-				null,
-				array()
-			);
+                $notificationKey,
+                $toEmail,
+                $toName,
+                $eventContext,
+                null,
+                array()
+            );
 
-			// 🔥 NEW: audit log
-			require_once __DIR__ . '/courseware_progression_v2.php';
-			$progression = new CoursewareProgressionV2($pdo);
+            require_once __DIR__ . '/courseware_progression_v2.php';
+            $progression = new CoursewareProgressionV2($pdo);
 
-			$progression->recordAutomationEmailAudit([
-				'user_id' => (int)($eventContext['user_id'] ?? 0),
-				'cohort_id' => (int)($eventContext['cohort_id'] ?? 0),
-				'lesson_id' => (int)($eventContext['lesson_id'] ?? 0),
-				'progress_test_id' => isset($eventContext['progress_test_id']) ? (int)$eventContext['progress_test_id'] : null,
-				'email_type' => (string)$notificationKey,
-				'recipients_to' => [[
-					'email' => $toEmail,
-					'name' => $toName,
-				]],
-				'subject' => (string)($sendResult['rendered_subject'] ?? $notificationKey),
-				'body_html' => (string)($sendResult['rendered_html'] ?? ''),
-				'body_text' => (string)($sendResult['rendered_text'] ?? ''),
-				'sent_status' => !empty($sendResult['ok']) ? 'sent' : 'failed',
-				'sent_at' => !empty($sendResult['ok']) ? gmdate('Y-m-d H:i:s') : null,
-				'notification_template_id' => isset($sendResult['template_id']) ? (int)$sendResult['template_id'] : null,
-				'notification_template_version_id' => isset($sendResult['template_version_id']) ? (int)$sendResult['template_version_id'] : null,
-				'render_context' => $eventContext,
-			]);
+            $progression->recordAutomationEmailAudit([
+                'user_id' => (int)($eventContext['user_id'] ?? 0),
+                'cohort_id' => (int)($eventContext['cohort_id'] ?? 0),
+                'lesson_id' => (int)($eventContext['lesson_id'] ?? 0),
+                'progress_test_id' => isset($eventContext['progress_test_id']) ? (int)$eventContext['progress_test_id'] : null,
+                'email_type' => (string)$notificationKey,
+                'recipients_to' => [[
+                    'email' => $toEmail,
+                    'name' => $toName,
+                ]],
+                'subject' => (string)($sendResult['rendered_subject'] ?? $notificationKey),
+                'body_html' => (string)($sendResult['rendered_html'] ?? ''),
+                'body_text' => (string)($sendResult['rendered_text'] ?? ''),
+                'sent_status' => !empty($sendResult['ok']) ? 'sent' : 'failed',
+                'sent_at' => !empty($sendResult['ok']) ? gmdate('Y-m-d H:i:s') : null,
+                'notification_template_id' => isset($sendResult['template_id']) ? (int)$sendResult['template_id'] : null,
+                'notification_template_version_id' => isset($sendResult['template_version_id']) ? (int)$sendResult['template_version_id'] : null,
+                'render_context' => $eventContext,
+            ]);
 
-			$results[] = $sendResult;
+            if (empty($sendResult['ok'])) {
+                $hadFailure = true;
+            }
+
+            $results[] = array(
+                'user_id' => (int)($user['id'] ?? 0),
+                'role' => (string)($user['role'] ?? ''),
+                'email' => $toEmail,
+                'name' => $toName,
+                'send_result' => $sendResult,
+            );
         }
 
         $details = $this->encodeDetails(array(
@@ -686,6 +721,11 @@ final class AutomationRuntime
             'recipient_count' => count($results),
             'results' => $results,
         ));
+
+        if ($hadFailure) {
+            $this->insertActionRun($pdo, $flowRunId, $actionKey, 'error', $details);
+            throw new RuntimeException('One or more notification sends failed.');
+        }
 
         $this->insertActionRun($pdo, $flowRunId, $actionKey, 'success', $details);
 
@@ -743,37 +783,36 @@ final class AutomationRuntime
 
         $service = new NotificationService($pdo);
         $sendResult = $service->sendSystemNotification(
-				$notificationKey,
-				$toEmail,
-				$toName,
-				$eventContext,
-				null,
-				array()
-			);
+            $notificationKey,
+            $toEmail,
+            $toName,
+            $eventContext,
+            null,
+            array()
+        );
 
-			// 🔥 NEW: audit log
-			require_once __DIR__ . '/courseware_progression_v2.php';
-			$progression = new CoursewareProgressionV2($pdo);
+        require_once __DIR__ . '/courseware_progression_v2.php';
+        $progression = new CoursewareProgressionV2($pdo);
 
-			$progression->recordAutomationEmailAudit([
-				'user_id' => (int)($eventContext['user_id'] ?? 0),
-				'cohort_id' => (int)($eventContext['cohort_id'] ?? 0),
-				'lesson_id' => (int)($eventContext['lesson_id'] ?? 0),
-				'progress_test_id' => isset($eventContext['progress_test_id']) ? (int)$eventContext['progress_test_id'] : null,
-				'email_type' => (string)$notificationKey,
-				'recipients_to' => [[
-					'email' => $toEmail,
-					'name' => $toName,
-				]],
-				'subject' => (string)($sendResult['rendered_subject'] ?? $notificationKey),
-				'body_html' => (string)($sendResult['rendered_html'] ?? ''),
-				'body_text' => (string)($sendResult['rendered_text'] ?? ''),
-				'sent_status' => !empty($sendResult['ok']) ? 'sent' : 'failed',
-				'sent_at' => !empty($sendResult['ok']) ? gmdate('Y-m-d H:i:s') : null,
-				'notification_template_id' => isset($sendResult['template_id']) ? (int)$sendResult['template_id'] : null,
-				'notification_template_version_id' => isset($sendResult['template_version_id']) ? (int)$sendResult['template_version_id'] : null,
-				'render_context' => $eventContext,
-			]);
+        $progression->recordAutomationEmailAudit([
+            'user_id' => (int)($eventContext['user_id'] ?? 0),
+            'cohort_id' => (int)($eventContext['cohort_id'] ?? 0),
+            'lesson_id' => (int)($eventContext['lesson_id'] ?? 0),
+            'progress_test_id' => isset($eventContext['progress_test_id']) ? (int)$eventContext['progress_test_id'] : null,
+            'email_type' => (string)$notificationKey,
+            'recipients_to' => [[
+                'email' => $toEmail,
+                'name' => $toName,
+            ]],
+            'subject' => (string)($sendResult['rendered_subject'] ?? $notificationKey),
+            'body_html' => (string)($sendResult['rendered_html'] ?? ''),
+            'body_text' => (string)($sendResult['rendered_text'] ?? ''),
+            'sent_status' => !empty($sendResult['ok']) ? 'sent' : 'failed',
+            'sent_at' => !empty($sendResult['ok']) ? gmdate('Y-m-d H:i:s') : null,
+            'notification_template_id' => isset($sendResult['template_id']) ? (int)$sendResult['template_id'] : null,
+            'notification_template_version_id' => isset($sendResult['template_version_id']) ? (int)$sendResult['template_version_id'] : null,
+            'render_context' => $eventContext,
+        ]);
 
         $details = $this->encodeDetails(array(
             'notification_key' => $notificationKey,
@@ -783,6 +822,13 @@ final class AutomationRuntime
             'to_name' => $toName,
             'send_result' => $sendResult,
         ));
+
+        if (empty($sendResult['ok'])) {
+            $this->insertActionRun($pdo, $flowRunId, $actionKey, 'error', $details);
+            throw new RuntimeException(
+                'Notification send failed: ' . (string)($sendResult['error'] ?? 'unknown error')
+            );
+        }
 
         $this->insertActionRun($pdo, $flowRunId, $actionKey, 'success', $details);
 
