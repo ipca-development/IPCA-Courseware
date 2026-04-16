@@ -50,9 +50,57 @@ if ($role === 'student') {
     $cohortId = (int)($chk->fetchColumn() ?: 0);
 
     if ($cohortId <= 0) {
-        http_response_code(403);
-        exit('Forbidden');
+    http_response_code(403);
+    exit('Forbidden');
+}
+
+/**
+ * ============================================================
+ * STRICT SEQUENCING ENFORCEMENT (SSOT-COMPLIANT)
+ * ============================================================
+ */
+if ($role === 'student') {
+
+    // Get unlock dependency
+    $dep = $pdo->prepare("
+        SELECT unlock_after_lesson_id
+        FROM cohort_lesson_deadlines
+        WHERE cohort_id = ? AND lesson_id = ?
+        LIMIT 1
+    ");
+    $dep->execute([$cohortId, $lessonId]);
+    $requiredLessonId = (int)($dep->fetchColumn() ?: 0);
+
+    if ($requiredLessonId > 0) {
+
+        // Check if previous lesson is fully completed
+        $chk = $pdo->prepare("
+            SELECT 1
+            FROM lesson_activity
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND lesson_id = ?
+              AND completion_status = 'completed'
+              AND test_pass_status = 'passed'
+            LIMIT 1
+        ");
+        $chk->execute([$uid, $cohortId, $requiredLessonId]);
+
+        $isCompleted = (bool)$chk->fetchColumn();
+
+        if (!$isCompleted) {
+
+            // Redirect instead of Forbidden
+            header(
+                'Location: /student/course.php?cohort_id='
+                . (int)$cohortId
+                . '&blocked_lesson_id=' . (int)$lessonId
+                . '&required_lesson_id=' . (int)$requiredLessonId
+            );
+            exit;
+        }
     }
+}
 } else {
     $c = $pdo->prepare("SELECT id FROM cohorts WHERE course_id=? ORDER BY id DESC LIMIT 1");
     $c->execute([$courseId]);

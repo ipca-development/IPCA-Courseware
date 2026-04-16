@@ -935,7 +935,37 @@ $programProgressPct = percent($totalCompletedLessons, $totalLessons);
 $programAvgScore = $allBestScores ? (int)round(array_sum($allBestScores) / count($allBestScores)) : null;
 $studentOnTimePct = percent($onTimeCount, $onTimeEligible);
 
+
+
+
 $programId = (int)$cohort['program_id'];
+
+$blockedLessonMessage = '';
+$blockedRequiredLessonId = 0;
+$blockedAttemptedLessonId = 0;
+
+if ($role === 'student') {
+    $blockedRequiredLessonId = (int)($_GET['required_lesson_id'] ?? 0);
+    $blockedAttemptedLessonId = (int)($_GET['blocked_lesson_id'] ?? 0);
+
+    if ($blockedRequiredLessonId > 0) {
+        $stBlocked = $pdo->prepare("
+            SELECT title
+            FROM lessons
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $stBlocked->execute([$blockedRequiredLessonId]);
+        $blockedRequiredLessonTitle = trim((string)($stBlocked->fetchColumn() ?: ''));
+
+        if ($blockedRequiredLessonTitle !== '') {
+            $blockedLessonMessage = 'You need to finish lesson "' . $blockedRequiredLessonTitle . '" first.';
+        } else {
+            $blockedLessonMessage = 'You need to finish the previous required lesson first.';
+        }
+    }
+}
+
 $studentRankPct = null;
 $programAvgOnTimePct = null;
 
@@ -1446,6 +1476,14 @@ cw_header('Course');
 </style>
 
 <div class="course-page-stack">
+
+  <?php if ($blockedLessonMessage !== ''): ?>
+    <div class="card section-card" style="border:1px solid #f59e0b;background:#fff7ed;">
+      <div style="font-size:14px;font-weight:800;color:#9a3412;">
+        <?= h($blockedLessonMessage) ?>
+      </div>
+    </div>
+  <?php endif; ?>
 
   <div class="hero-grid">
     <div class="card hero-card">
