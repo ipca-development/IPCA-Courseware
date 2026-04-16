@@ -33,19 +33,22 @@ $pageNum  = (int)$slide['page_number'];
 $cohortId = 0;
 if ($role === 'student') {
     $uid = (int)$u['id'];
+
     $chk = $pdo->prepare("
       SELECT cs.cohort_id
       FROM cohort_students cs
-      JOIN cohorts co ON co.id = cs.cohort_id
-      JOIN cohort_lesson_deadlines d ON d.cohort_id = cs.cohort_id
+      JOIN cohort_lesson_deadlines d 
+        ON d.cohort_id = cs.cohort_id
       WHERE cs.user_id = ?
-        AND co.course_id = ?
         AND d.lesson_id = ?
       ORDER BY cs.id DESC
       LIMIT 1
     ");
-    $chk->execute([$uid, $courseId, $lessonId]);
+
+    $chk->execute([$uid, $lessonId]);
+
     $cohortId = (int)($chk->fetchColumn() ?: 0);
+
     if ($cohortId <= 0) {
         http_response_code(403);
         exit('Forbidden');
