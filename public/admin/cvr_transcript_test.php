@@ -333,26 +333,28 @@ function cvrt_audio_duration_seconds(string $filePath): float
         }
     }
 
-    throw new RuntimeException('Could not determine audio duration with ffprobe or ffmpeg. Check whether ffmpeg/ffprobe are installed and accessible to PHP.');
+    throw new RuntimeException('Could not determine audio duration with ffprobe or ffmpeg.');
 }
 
-function cvrt_split_audio_chunks(string $filePath, int $chunkSeconds): array
+function cvrt_extract_audio_excerpt(string $sourcePath, int $startMinute, int $durationMinute): array
 {
     if (!cvrt_ffmpeg_exists()) {
-        throw new RuntimeException('ffmpeg and ffprobe are required on the server for long audio chunking.');
+        throw new RuntimeException('ffmpeg and ffprobe are required on the server for excerpt extraction.');
     }
 
     if (!cvrt_shell_exec_available()) {
-        throw new RuntimeException('shell_exec is disabled in PHP, so ffmpeg chunking cannot run on this server.');
+        throw new RuntimeException('shell_exec is disabled in PHP, so ffmpeg excerpt extraction cannot run on this server.');
     }
 
-    if ($chunkSeconds < 60) {
-        $chunkSeconds = 60;
-    }
+    $startMinute = max(0, $startMinute);
+    $durationMinute = max(1, $durationMinute);
 
-    $duration = cvrt_audio_duration_seconds($filePath);
-    if ($duration <= 0) {
-        throw new RuntimeException('Audio duration is invalid.');
+    $startSeconds = $startMinute * 60;
+    $durationSeconds = $durationMinute * 60;
+
+    $fullDuration = cvrt_audio_duration_seconds($sourcePath);
+    if ($startSeconds >= $fullDuration) {
+        throw new RuntimeException('Start minute is beyond the end of the audio file.');
     }
 
     $ffmpeg = cvrt_find_binary([
@@ -366,61 +368,35 @@ function cvrt_split_audio_chunks(string $filePath, int $chunkSeconds): array
         throw new RuntimeException('ffmpeg binary was not found.');
     }
 
-    $baseDir = sys_get_temp_dir() . '/cvrt_chunks_' . uniqid('', true);
-    if (!@mkdir($baseDir, 0777, true) && !is_dir($baseDir)) {
-        throw new RuntimeException('Could not create chunk temp directory.');
+    $tmp = tempnam(sys_get_temp_dir(), 'cvrt_excerpt_');
+    if ($tmp === false) {
+        throw new RuntimeException('Could not create excerpt temp file.');
     }
 
-    $chunks = [];
-    $offset = 0;
-    $index = 0;
+    $outPath = $tmp . '.mp3';
+    @unlink($tmp);
 
-    while ($offset < $duration) {
-        $chunkPath = $baseDir . '/chunk_' . str_pad((string)$index, 4, '0', STR_PAD_LEFT) . '.mp3';
+    $cmd =
+        escapeshellcmd($ffmpeg) . ' -y -v error ' .
+        '-ss ' . escapeshellarg((string)$startSeconds) . ' ' .
+        '-t ' . escapeshellarg((string)$durationSeconds) . ' ' .
+        '-i ' . escapeshellarg($sourcePath) . ' ' .
+        '-ac 1 -ar 16000 -b:a 64k ' .
+        escapeshellarg($outPath) . ' 2>&1';
 
-        $cmd =
-            escapeshellcmd($ffmpeg) . ' -y -v error ' .
-            '-ss ' . escapeshellarg((string)$offset) . ' ' .
-            '-t ' . escapeshellarg((string)$chunkSeconds) . ' ' .
-            '-i ' . escapeshellarg($filePath) . ' ' .
-            '-ac 1 -ar 16000 -b:a 64k ' .
-            escapeshellarg($chunkPath) . ' 2>&1';
+    $out = @shell_exec($cmd);
 
-        @shell_exec($cmd);
-
-        if (!is_file($chunkPath) || filesize($chunkPath) === 0) {
-            throw new RuntimeException('Failed to create audio chunk at offset ' . $offset . ' seconds.');
-        }
-
-        $chunks[] = [
-            'path'   => $chunkPath,
-            'offset' => (float)$offset,
-        ];
-
-        $offset += $chunkSeconds;
-        $index++;
+    if (!is_file($outPath) || filesize($outPath) === 0) {
+        throw new RuntimeException('Failed to extract test excerpt. ' . trim((string)$out));
     }
 
-    return $chunks;
-}
+    $excerptDuration = cvrt_audio_duration_seconds($outPath);
 
-function cvrt_cleanup_chunk_files(array $chunks): void
-{
-    $dirs = [];
-    foreach ($chunks as $chunk) {
-        $path = (string)($chunk['path'] ?? '');
-        if ($path !== '' && is_file($path)) {
-            @unlink($path);
-            $dirs[] = dirname($path);
-        }
-    }
-
-    $dirs = array_values(array_unique($dirs));
-    foreach ($dirs as $dir) {
-        if (is_dir($dir)) {
-            @rmdir($dir);
-        }
-    }
+    return [
+        'path' => $outPath,
+        'start_seconds' => (float)$startSeconds,
+        'duration_seconds' => (float)$excerptDuration,
+    ];
 }
 
 function cvrt_openai_transcribe(string $audioFilePath, string $prompt): array
@@ -470,34 +446,6 @@ function cvrt_openai_transcribe(string $audioFilePath, string $prompt): array
     return $json;
 }
 
-function cvrt_transcribe_with_chunking(string $audioFilePath, string $prompt): array
-{
-    $duration = cvrt_audio_duration_seconds($audioFilePath);
-
-    if ($duration <= 1200.0) {
-        return cvrt_openai_transcribe($audioFilePath, $prompt);
-    }
-
-    $chunks = cvrt_split_audio_chunks($audioFilePath, 1200);
-    $texts = [];
-
-    try {
-        foreach ($chunks as $chunk) {
-            $resp = cvrt_openai_transcribe((string)$chunk['path'], $prompt);
-            $text = trim((string)($resp['text'] ?? ''));
-            if ($text !== '') {
-                $texts[] = $text;
-            }
-        }
-    } finally {
-        cvrt_cleanup_chunk_files($chunks);
-    }
-
-    return [
-        'text' => trim(implode("\n\n", $texts)),
-    ];
-}
-
 function cvrt_format_seconds($seconds): string
 {
     $seconds = (float)$seconds;
@@ -514,33 +462,6 @@ function cvrt_format_seconds($seconds): string
         return sprintf('%02d:%02d:%02d', $h, $m, $s);
     }
     return sprintf('%02d:%02d', $m, $s);
-}
-
-function cvrt_extract_json_text_from_responses(array $resp): array
-{
-    if (!empty($resp['output_text']) && is_string($resp['output_text'])) {
-        $decoded = json_decode($resp['output_text'], true);
-        if (is_array($decoded)) {
-            return $decoded;
-        }
-    }
-
-    if (!empty($resp['output']) && is_array($resp['output'])) {
-        foreach ($resp['output'] as $item) {
-            if (!empty($item['content']) && is_array($item['content'])) {
-                foreach ($item['content'] as $content) {
-                    if (isset($content['text']) && is_string($content['text'])) {
-                        $decoded = json_decode($content['text'], true);
-                        if (is_array($decoded)) {
-                            return $decoded;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    return [];
 }
 
 function cvrt_heuristic_label(string $text): string
@@ -574,97 +495,7 @@ function cvrt_heuristic_label(string $text): string
     return 'INTERCOM';
 }
 
-function cvrt_classify_segments(array $segments): array
-{
-    if (!$segments) {
-        return [];
-    }
-
-    $compact = [];
-    foreach ($segments as $seg) {
-        $compact[] = [
-            'id'      => (string)($seg['id'] ?? ''),
-            'speaker' => (string)($seg['speaker'] ?? ''),
-            'text'    => trim((string)($seg['text'] ?? '')),
-        ];
-    }
-
-    $payload = [
-        'model' => cw_openai_model(),
-        'input' => [
-            [
-                'role' => 'system',
-                'content' => 'You classify cockpit transcript segments. Return ONLY valid JSON. For each segment, choose exactly one label: ATC, INTERCOM, or NOISE. ATC means radio / controller / radio transmission style. INTERCOM means pilots talking to each other in the cockpit. NOISE means static, bumps, clicks, engines, unclear gibberish, or not useful speech. JSON format only: {"segments":[{"id":"...","label":"ATC"}]}'
-            ],
-            [
-                'role' => 'user',
-                'content' => json_encode([
-                    'segments' => $compact
-                ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
-            ]
-        ],
-        'max_output_tokens' => 1200,
-    ];
-
-    try {
-        $resp = cw_openai_responses($payload);
-        $json = cvrt_extract_json_text_from_responses($resp);
-
-        $map = [];
-        if (!empty($json['segments']) && is_array($json['segments'])) {
-            foreach ($json['segments'] as $row) {
-                $id = (string)($row['id'] ?? '');
-                $label = strtoupper(trim((string)($row['label'] ?? '')));
-                if ($id !== '' && in_array($label, ['ATC', 'INTERCOM', 'NOISE'], true)) {
-                    $map[$id] = $label;
-                }
-            }
-        }
-
-        foreach ($segments as $i => $seg) {
-            $id = (string)($seg['id'] ?? '');
-            $segments[$i]['detected_label'] = $map[$id] ?? cvrt_heuristic_label((string)($seg['text'] ?? ''));
-        }
-    } catch (Throwable $e) {
-        foreach ($segments as $i => $seg) {
-            $segments[$i]['detected_label'] = cvrt_heuristic_label((string)($seg['text'] ?? ''));
-        }
-    }
-
-    return $segments;
-}
-
-function cvrt_assign_pilot_labels(array $segments): array
-{
-    $pilotMap = [];
-    $pilotIndex = 0;
-    $pilotNames = ['Pilot A', 'Pilot B', 'Pilot C', 'Pilot D'];
-
-    foreach ($segments as $i => $seg) {
-        $segments[$i]['bubble_actor'] = '';
-        $label = (string)($seg['detected_label'] ?? '');
-
-        if ($label !== 'INTERCOM') {
-            continue;
-        }
-
-        $speaker = trim((string)($seg['speaker'] ?? ''));
-        if ($speaker === '') {
-            $speaker = 'UNK';
-        }
-
-        if (!isset($pilotMap[$speaker])) {
-            $pilotMap[$speaker] = $pilotNames[$pilotIndex] ?? ('Pilot ' . $speaker);
-            $pilotIndex++;
-        }
-
-        $segments[$i]['bubble_actor'] = $pilotMap[$speaker];
-    }
-
-    return $segments;
-}
-
-function cvrt_prepare_segments(array $transcription): array
+function cvrt_prepare_segments(array $transcription, float $baseOffsetSeconds): array
 {
     $segments = [];
 
@@ -678,7 +509,7 @@ function cvrt_prepare_segments(array $transcription): array
         $parts = [$fullText];
     }
 
-    $offsetSeconds = 0.0;
+    $offsetSeconds = $baseOffsetSeconds;
 
     foreach ($parts as $idx => $part) {
         $text = trim((string)$part);
@@ -686,19 +517,27 @@ function cvrt_prepare_segments(array $transcription): array
             continue;
         }
 
+        $label = cvrt_heuristic_label($text);
+        $actor = 'Pilot';
+        if ($label === 'ATC') {
+            $actor = 'ATC';
+        } elseif ($label === 'NOISE') {
+            $actor = 'Noise';
+        } else {
+            $actor = 'Pilot';
+        }
+
         $segments[] = [
-            'id'      => 'seg_' . $idx,
-            'start'   => $offsetSeconds,
-            'end'     => $offsetSeconds + 5.0,
-            'speaker' => '',
-            'text'    => $text,
+            'id' => 'seg_' . $idx,
+            'start' => $offsetSeconds,
+            'end' => $offsetSeconds + 5.0,
+            'text' => $text,
+            'detected_label' => $label,
+            'bubble_actor' => $actor,
         ];
 
         $offsetSeconds += 5.0;
     }
-
-    $segments = cvrt_classify_segments($segments);
-    $segments = cvrt_assign_pilot_labels($segments);
 
     return $segments;
 }
@@ -723,6 +562,9 @@ $transcriptionRaw = null;
 $selectedKey = '';
 $selectedMeta = null;
 $prompt = cvrt_default_prompt();
+$startMinute = 0;
+$durationMinute = 10;
+$excerptInfo = null;
 
 try {
     $files = cvrt_list_input_files($spacesPrefix);
@@ -730,6 +572,8 @@ try {
     if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $selectedKey = trim((string)($_POST['selected_key'] ?? ''));
         $prompt = trim((string)($_POST['prompt'] ?? ''));
+        $startMinute = (int)($_POST['start_minute'] ?? 0);
+        $durationMinute = (int)($_POST['duration_minute'] ?? 10);
 
         if ($prompt === '') {
             $prompt = cvrt_default_prompt();
@@ -752,12 +596,20 @@ try {
         }
 
         $tmpFile = cvrt_download_to_temp($selectedKey);
+        $excerptPath = '';
 
         try {
-            $transcriptionRaw = cvrt_transcribe_with_chunking($tmpFile, $prompt);
-            $segments = cvrt_prepare_segments($transcriptionRaw);
-            $success = 'Transcript test completed.';
+            $excerptInfo = cvrt_extract_audio_excerpt($tmpFile, $startMinute, $durationMinute);
+            $excerptPath = (string)$excerptInfo['path'];
+
+            $transcriptionRaw = cvrt_openai_transcribe($excerptPath, $prompt);
+            $segments = cvrt_prepare_segments($transcriptionRaw, (float)$excerptInfo['start_seconds']);
+
+            $success = 'Transcript test completed for selected excerpt.';
         } finally {
+            if ($excerptPath !== '' && is_file($excerptPath)) {
+                @unlink($excerptPath);
+            }
             if (is_file($tmpFile)) {
                 @unlink($tmpFile);
             }
@@ -834,6 +686,11 @@ cw_header('CVR Transcript Test');
   }
 
   .cvrt-field{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
+  .cvrt-row-fields{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:14px;
+  }
   .cvrt-label{
     font-size:12px;
     text-transform:uppercase;
@@ -842,6 +699,7 @@ cw_header('CVR Transcript Test');
     font-weight:800;
   }
   .cvrt-select,
+  .cvrt-input,
   .cvrt-textarea{
     width:100%;
     border-radius:14px;
@@ -852,7 +710,8 @@ cw_header('CVR Transcript Test');
     line-height:1.5;
     box-sizing:border-box;
   }
-  .cvrt-select{
+  .cvrt-select,
+  .cvrt-input{
     min-height:48px;
     padding:0 14px;
   }
@@ -1061,7 +920,8 @@ cw_header('CVR Transcript Test');
   }
 
   @media (max-width:760px){
-    .cvrt-meta-grid{grid-template-columns:1fr 1fr}
+    .cvrt-meta-grid,
+    .cvrt-row-fields{grid-template-columns:1fr}
     .cvrt-row{
       grid-template-columns:1fr;
       gap:6px;
@@ -1082,7 +942,7 @@ cw_header('CVR Transcript Test');
     <div class="cvrt-eyebrow">Admin Test Workspace</div>
     <h2 class="cvrt-title">CVR Transcript Test</h2>
     <div class="cvrt-sub">
-      Drop your test audio into <strong><?= cvrt_h($spacesPrefix) ?></strong> in DigitalOcean Spaces, select the file here, adjust the prompt, and review the output as ATC, intercom, and probable noise.
+      Drop your test audio into <strong><?= cvrt_h($spacesPrefix) ?></strong> in DigitalOcean Spaces, select the file here, choose a short excerpt, adjust the prompt, and review the output as ATC, intercom, and probable noise.
     </div>
   </div>
 
@@ -1099,7 +959,7 @@ cw_header('CVR Transcript Test');
       <div class="cvrt-card-head">
         <div>
           <h3 class="cvrt-card-title">Run Transcript Test</h3>
-          <div class="cvrt-card-sub">Select an audio file from Spaces, adjust the prompt, and run a fresh transcription.</div>
+          <div class="cvrt-card-sub">Select an audio file from Spaces, choose the section to test, adjust the prompt, and run a fresh transcription.</div>
         </div>
         <div class="cvrt-pill <?= count($files) > 0 ? 'ok' : 'warn' ?>">
           <?= count($files) > 0 ? 'Ready' : 'No Files' ?>
@@ -1117,6 +977,18 @@ cw_header('CVR Transcript Test');
               </option>
             <?php endforeach; ?>
           </select>
+        </div>
+
+        <div class="cvrt-row-fields">
+          <div class="cvrt-field">
+            <label class="cvrt-label" for="start_minute">Start Minute</label>
+            <input class="cvrt-input" type="number" min="0" step="1" id="start_minute" name="start_minute" value="<?= cvrt_h((string)$startMinute) ?>">
+          </div>
+
+          <div class="cvrt-field">
+            <label class="cvrt-label" for="duration_minute">Duration Minutes</label>
+            <input class="cvrt-input" type="number" min="1" max="20" step="1" id="duration_minute" name="duration_minute" value="<?= cvrt_h((string)$durationMinute) ?>">
+          </div>
         </div>
 
         <div class="cvrt-field">
@@ -1164,6 +1036,9 @@ cw_header('CVR Transcript Test');
           <strong>Object key:</strong> <?= cvrt_h((string)$selectedMeta['key']) ?><br>
           <strong>Size:</strong> <?= cvrt_h(cvrt_file_size_label((int)$selectedMeta['size_bytes'])) ?><br>
           <strong>Updated:</strong> <?= cvrt_h((string)$selectedMeta['last_modified']) ?>
+          <?php if ($excerptInfo): ?>
+            <br><strong>Excerpt:</strong> <?= cvrt_h(cvrt_format_seconds((float)$excerptInfo['start_seconds'])) ?> to <?= cvrt_h(cvrt_format_seconds((float)$excerptInfo['start_seconds'] + (float)$excerptInfo['duration_seconds'])) ?>
+          <?php endif; ?>
         </div>
       <?php else: ?>
         <div class="cvrt-empty" style="margin-top:16px;">
@@ -1186,7 +1061,7 @@ cw_header('CVR Transcript Test');
 
     <?php if (!$segments): ?>
       <div class="cvrt-empty">
-        No transcript result yet. Select a file, adjust the prompt, and run the test.
+        No transcript result yet. Select a file, choose a small excerpt like 10 minutes, adjust the prompt, and run the test.
       </div>
     <?php else: ?>
       <div class="cvrt-transcript-wrap">
@@ -1195,6 +1070,7 @@ cw_header('CVR Transcript Test');
             $label = (string)($seg['detected_label'] ?? 'INTERCOM');
             $rowClass = 'intercom';
             $actor = 'Pilot';
+
             if ($label === 'ATC') {
                 $rowClass = 'atc';
                 $actor = 'ATC';
