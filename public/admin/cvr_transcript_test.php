@@ -523,8 +523,6 @@ function cvrt_prepare_segments(array $transcription, float $baseOffsetSeconds): 
             $actor = 'ATC';
         } elseif ($label === 'NOISE') {
             $actor = 'Noise';
-        } else {
-            $actor = 'Pilot';
         }
 
         $segments[] = [
@@ -553,6 +551,12 @@ function cvrt_file_size_label(int $bytes): string
     return $bytes . ' B';
 }
 
+function cvrt_spaces_public_url(string $objectKey): string
+{
+    $cfg = cw_spaces_config();
+    return rtrim((string)$cfg['cdnBase'], '/') . '/' . ltrim($objectKey, '/');
+}
+
 $spacesPrefix = 'cvr_testing/input/';
 $error = '';
 $success = '';
@@ -565,6 +569,7 @@ $prompt = cvrt_default_prompt();
 $startMinute = 0;
 $durationMinute = 10;
 $excerptInfo = null;
+$audioPreviewUrl = '';
 
 try {
     $files = cvrt_list_input_files($spacesPrefix);
@@ -593,6 +598,10 @@ try {
                 $selectedMeta = $f;
                 break;
             }
+        }
+
+        if ($selectedMeta) {
+            $audioPreviewUrl = cvrt_spaces_public_url((string)$selectedMeta['key']);
         }
 
         $tmpFile = cvrt_download_to_temp($selectedKey);
@@ -626,6 +635,10 @@ if ($selectedMeta === null && $selectedKey !== '') {
             break;
         }
     }
+}
+
+if ($selectedMeta && $audioPreviewUrl === '') {
+    $audioPreviewUrl = cvrt_spaces_public_url((string)$selectedMeta['key']);
 }
 
 cw_header('CVR Transcript Test');
@@ -700,7 +713,8 @@ cw_header('CVR Transcript Test');
   }
   .cvrt-select,
   .cvrt-input,
-  .cvrt-textarea{
+  .cvrt-textarea,
+  .cvrt-audio{
     width:100%;
     border-radius:14px;
     border:1px solid rgba(15,23,42,0.10);
@@ -720,6 +734,9 @@ cw_header('CVR Transcript Test');
     resize:vertical;
     padding:14px 16px;
     font-family:inherit;
+  }
+  .cvrt-audio{
+    padding:10px;
   }
 
   .cvrt-actions{
@@ -869,6 +886,17 @@ cw_header('CVR Transcript Test');
     background:#f3f4f6;
     color:#6b7280;
   }
+  .cvrt-bubble.cvrt-playable{
+    cursor:pointer;
+    transition:transform .12s ease, box-shadow .12s ease, opacity .12s ease;
+  }
+  .cvrt-bubble.cvrt-playable:hover{
+    transform:translateY(-1px);
+    box-shadow:0 14px 28px rgba(15,23,42,0.10);
+  }
+  .cvrt-bubble.cvrt-playable:active{
+    transform:translateY(0);
+  }
 
   .cvrt-bubble-head{
     display:flex;
@@ -891,6 +919,13 @@ cw_header('CVR Transcript Test');
     line-height:1.55;
     white-space:pre-wrap;
     word-wrap:break-word;
+  }
+  .cvrt-bubble-hint{
+    margin-top:8px;
+    font-size:11px;
+    opacity:.82;
+    font-weight:700;
+    letter-spacing:.03em;
   }
 
   details.cvrt-debug{
@@ -942,7 +977,7 @@ cw_header('CVR Transcript Test');
     <div class="cvrt-eyebrow">Admin Test Workspace</div>
     <h2 class="cvrt-title">CVR Transcript Test</h2>
     <div class="cvrt-sub">
-      Drop your test audio into <strong><?= cvrt_h($spacesPrefix) ?></strong> in DigitalOcean Spaces, select the file here, choose a short excerpt, adjust the prompt, and review the output as ATC, intercom, and probable noise.
+      Drop your test audio into <strong><?= cvrt_h($spacesPrefix) ?></strong> in DigitalOcean Spaces, select the file here, choose a short excerpt, adjust the prompt, and review the output as ATC, intercom, and probable noise. Clicking a text balloon jumps the audio player to that segment.
     </div>
   </div>
 
@@ -1040,6 +1075,13 @@ cw_header('CVR Transcript Test');
             <br><strong>Excerpt:</strong> <?= cvrt_h(cvrt_format_seconds((float)$excerptInfo['start_seconds'])) ?> to <?= cvrt_h(cvrt_format_seconds((float)$excerptInfo['start_seconds'] + (float)$excerptInfo['duration_seconds'])) ?>
           <?php endif; ?>
         </div>
+
+        <?php if ($audioPreviewUrl !== ''): ?>
+          <div class="cvrt-field" style="margin-top:16px;margin-bottom:0;">
+            <label class="cvrt-label" for="cvrtAudioPlayer">Audio Preview</label>
+            <audio id="cvrtAudioPlayer" class="cvrt-audio" controls preload="metadata" src="<?= cvrt_h($audioPreviewUrl) ?>"></audio>
+          </div>
+        <?php endif; ?>
       <?php else: ?>
         <div class="cvrt-empty" style="margin-top:16px;">
           Drop test audio files into the Spaces folder <strong><?= cvrt_h($spacesPrefix) ?></strong> and they will appear in the selector above.
@@ -1052,7 +1094,7 @@ cw_header('CVR Transcript Test');
     <div class="cvrt-card-head">
       <div>
         <h3 class="cvrt-card-title">Transcript Output</h3>
-        <div class="cvrt-card-sub">ATC is aligned left, intercom is aligned right, and probable noise is centered.</div>
+        <div class="cvrt-card-sub">ATC is aligned left, intercom is aligned right, and probable noise is centered. Click a balloon to jump and play that segment.</div>
       </div>
       <div class="cvrt-pill <?= $segments ? 'ok' : 'warn' ?>">
         <?= $segments ? ((int)count($segments) . ' Segments') : 'Waiting' ?>
@@ -1085,19 +1127,28 @@ cw_header('CVR Transcript Test');
                 }
             }
 
-            $timeLabel = cvrt_format_seconds((float)($seg['start'] ?? 0));
-            if ((float)($seg['end'] ?? 0) > (float)($seg['start'] ?? 0)) {
-                $timeLabel .= '–' . cvrt_format_seconds((float)($seg['end'] ?? 0));
+            $segStart = (float)($seg['start'] ?? 0);
+            $segEnd   = (float)($seg['end'] ?? 0);
+
+            $timeLabel = cvrt_format_seconds($segStart);
+            if ($segEnd > $segStart) {
+                $timeLabel .= '–' . cvrt_format_seconds($segEnd);
             }
           ?>
           <div class="cvrt-row <?= cvrt_h($rowClass) ?>">
             <div class="cvrt-time"><?= cvrt_h($timeLabel) ?></div>
             <div class="cvrt-bubble-lane">
-              <div class="cvrt-bubble <?= cvrt_h($rowClass) ?>">
+              <div
+                class="cvrt-bubble <?= cvrt_h($rowClass) ?> <?= $audioPreviewUrl !== '' ? 'cvrt-playable' : '' ?>"
+                <?= $audioPreviewUrl !== '' ? 'data-start="' . cvrt_h((string)$segStart) . '" data-end="' . cvrt_h((string)$segEnd) . '"' : '' ?>
+              >
                 <div class="cvrt-bubble-head">
                   <div class="cvrt-actor <?= cvrt_h($rowClass) ?>"><?= cvrt_h($actor) ?></div>
                 </div>
                 <div class="cvrt-bubble-text"><?= cvrt_h((string)($seg['text'] ?? '')) ?></div>
+                <?php if ($audioPreviewUrl !== ''): ?>
+                  <div class="cvrt-bubble-hint">Tap to play from <?= cvrt_h(cvrt_format_seconds($segStart)) ?></div>
+                <?php endif; ?>
               </div>
             </div>
           </div>
@@ -1114,5 +1165,47 @@ cw_header('CVR Transcript Test');
   </div>
 
 </div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+  var player = document.getElementById('cvrtAudioPlayer');
+  if (!player) {
+    return;
+  }
+
+  var activeEnd = null;
+
+  player.addEventListener('timeupdate', function () {
+    if (activeEnd !== null && player.currentTime >= activeEnd) {
+      player.pause();
+      activeEnd = null;
+    }
+  });
+
+  document.querySelectorAll('.cvrt-playable').forEach(function (bubble) {
+    bubble.addEventListener('click', function () {
+      var start = parseFloat(bubble.getAttribute('data-start') || '');
+      var end = parseFloat(bubble.getAttribute('data-end') || '');
+
+      if (isNaN(start)) {
+        return;
+      }
+
+      activeEnd = (!isNaN(end) && end > start) ? end : null;
+
+      try {
+        player.currentTime = start;
+      } catch (e) {
+      }
+
+      var playPromise = player.play();
+      if (playPromise && typeof playPromise.catch === 'function') {
+        playPromise.catch(function () {
+        });
+      }
+    });
+  });
+});
+</script>
 
 <?php cw_footer(); ?>
