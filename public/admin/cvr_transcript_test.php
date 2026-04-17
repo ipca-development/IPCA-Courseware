@@ -6,6 +6,10 @@ require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/openai.php';
 require_once __DIR__ . '/../../src/spaces.php';
 
+@ini_set('max_execution_time', '300');
+@ini_set('memory_limit', '512M');
+set_time_limit(300);
+
 cw_require_admin();
 
 function cvrt_h($v): string
@@ -135,6 +139,7 @@ function cvrt_spaces_request(string $method, string $objectKey = '', array $quer
         'Authorization: ' . $authorization,
     ]);
     curl_setopt($ch, CURLOPT_TIMEOUT, 120);
+curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
 
     $body = curl_exec($ch);
     $err  = curl_error($ch);
@@ -250,12 +255,20 @@ function cvrt_openai_transcribe(string $audioFilePath, string $prompt): array
 
     $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_POST, true);
-    curl_setopt($ch, CURLOPT_HTTPHEADER, [
-        'Authorization: Bearer ' . $apiKey,
-    ]);
-    curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 600);
+curl_setopt($ch, CURLOPT_POST, true);
+curl_setopt($ch, CURLOPT_HTTPHEADER, [
+    'Authorization: Bearer ' . $apiKey,
+]);
+
+curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
+
+// 🔥 FIX 502 HERE
+curl_setopt($ch, CURLOPT_TIMEOUT, 300);           // total time
+curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20);     // connection timeout
+curl_setopt($ch, CURLOPT_BUFFERSIZE, 1024 * 256); // smoother streaming
+
+// 🔥 VERY IMPORTANT (prevents gateway choke)
+curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
 
     $resp = curl_exec($ch);
     $err  = curl_error($ch);
