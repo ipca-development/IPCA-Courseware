@@ -189,46 +189,66 @@ function summary_quality_meta(array $summaryState) {
     return ['label' => 'Draft saved', 'class' => 'info', 'sub' => 'Draft', 'pct' => 44];
 }
 
+
+
+
+
 function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
+    $nonStaleFilter = "
+        AND NOT (
+            COALESCE(formal_result_code, '') = 'STALE_ABORTED'
+            AND COALESCE(counts_as_unsat, 0) = 0
+            AND COALESCE(pass_gate_met, 0) = 0
+        )
+    ";
+
     $st = $pdo->prepare("
-      SELECT attempt, status, score_pct, started_at, completed_at
-      FROM progress_tests_v2
-      WHERE user_id=? AND cohort_id=? AND lesson_id=?
-      ORDER BY attempt DESC
-      LIMIT 1
+        SELECT attempt, status, score_pct, started_at, completed_at
+        FROM progress_tests_v2
+        WHERE user_id=?
+          AND cohort_id=?
+          AND lesson_id=?
+          {$nonStaleFilter}
+        ORDER BY attempt DESC, id DESC
+        LIMIT 1
     ");
     $st->execute([$userId, $cohortId, $lessonId]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
 
     $mx = $pdo->prepare("
-      SELECT MAX(attempt)
-      FROM progress_tests_v2
-      WHERE user_id=? AND cohort_id=? AND lesson_id=?
+        SELECT MAX(attempt)
+        FROM progress_tests_v2
+        WHERE user_id=?
+          AND cohort_id=?
+          AND lesson_id=?
+          {$nonStaleFilter}
     ");
     $mx->execute([$userId, $cohortId, $lessonId]);
     $maxAttempt = (int)($mx->fetchColumn() ?: 0);
 
     $best = $pdo->prepare("
-      SELECT MAX(score_pct)
-      FROM progress_tests_v2
-      WHERE user_id=? 
-        AND cohort_id=? 
-        AND lesson_id=? 
-        AND status='completed'
+        SELECT MAX(score_pct)
+        FROM progress_tests_v2
+        WHERE user_id=?
+          AND cohort_id=?
+          AND lesson_id=?
+          AND status='completed'
+          {$nonStaleFilter}
     ");
     $best->execute([$userId, $cohortId, $lessonId]);
     $bestScore = $best->fetchColumn();
     $bestScore = ($bestScore === null) ? null : (int)$bestScore;
 
     $pass = $pdo->prepare("
-      SELECT 1
-      FROM progress_tests_v2
-      WHERE user_id=? 
-        AND cohort_id=? 
-        AND lesson_id=? 
-        AND status='completed'
-        AND pass_gate_met=1
-      LIMIT 1
+        SELECT 1
+        FROM progress_tests_v2
+        WHERE user_id=?
+          AND cohort_id=?
+          AND lesson_id=?
+          AND status='completed'
+          AND pass_gate_met=1
+          {$nonStaleFilter}
+        LIMIT 1
     ");
     $pass->execute([$userId, $cohortId, $lessonId]);
     $passed = (bool)$pass->fetchColumn();
@@ -240,6 +260,8 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
         'passed' => $passed
     ];
 }
+
+
 
 function get_instructor_decision_state(PDO $pdo, $userId, $cohortId, $lessonId) {
     $st = $pdo->prepare("
@@ -1742,7 +1764,9 @@ cw_header('Course');
                       $scoreMeta = score_badge_meta($lx['test_passed'], $lx['best_score'], $last, $attemptsLeft);
                       $rowClass = ((int)$lx['lesson_id'] === $recommendedLessonId) ? 'resume-highlight' : '';
 
-                      $completionStatus = (string)($lx['activity_state']['completion_status'] ?? '');
+					  
+					  
+					 $completionStatus = (string)($lx['activity_state']['completion_status'] ?? '');
 $statusText = 'Study the lesson';
 $appendAttempts = false;
 
@@ -1787,29 +1811,35 @@ switch ($completionStatus) {
 }
 
 if ($appendAttempts && $attemptsLeft > 0) {
-    $statusText .= ' · ' . $attemptsLeft . ' attempt' . ($attemptsLeft === 1 ? '' : 's') . ' left';
+    $statusText .= ' · ' . $attemptsLeft . ' attempt' . ($attemptsLeft === 1 ? '' : 's') . ' remaining';
 }
 
-                      $studyHref = '';
-                      if ((int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
-                          $studyHref = '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'];
-                      }
+$studyHref = '';
+if ((int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
+    $studyHref = '/player/slide.php?slide_id=' . (int)$lx['first_slide_id'];
+}
 
-                      $testHref = '';
-						$testLabel = '';
-						$testBtnClass = 'primary';
+$testHref = '';
+$testLabel = '';
+$testBtnClass = 'primary';
 
-						if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])) {
-							$testHref = (string)$lx['action_required_url'];
-							$testLabel = 'Submit Reason';
-							$testBtnClass = 'warn';
-						} elseif (!empty($lx['can_test'])) {
-							$testHref = (string)$lx['progress_test_url'];
-							$testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
-							$testBtnClass = 'primary';
-						} else {
-							$testLabel = ($lx['test']['max_attempt'] > 0 ? 'Retake' : 'Take Test');
-						}
+if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])) {
+    $testHref = (string)$lx['action_required_url'];
+    $testLabel = 'Submit Reason';
+    $testBtnClass = 'warn';
+} elseif (!empty($lx['pending_remediation']) && !empty($lx['action_required_url'])) {
+    $testHref = (string)$lx['action_required_url'];
+    $testLabel = 'Complete Action';
+    $testBtnClass = 'warn';
+} elseif (!empty($lx['can_test'])) {
+    $testHref = (string)$lx['progress_test_url'];
+    $testLabel = 'Start Progress Test';
+    $testBtnClass = 'primary';
+} else {
+    $testLabel = 'Start Progress Test';
+} 
+					  
+					  
                     ?>
                     <tr class="<?= h($rowClass) ?>">
                       <td>
