@@ -5018,8 +5018,9 @@ private function getLatestAttemptNumber(int $userId, int $cohortId, int $lessonI
           AND cohort_id = :cohort_id
           AND lesson_id = :lesson_id
           AND NOT (
-              status = 'failed'
-              AND formal_result_code = 'STALE_ABORTED'
+              formal_result_code = 'STALE_ABORTED'
+              AND counts_as_unsat = 0
+              AND pass_gate_met = 0
           )
     ");
     $stmt->execute([
