@@ -112,8 +112,8 @@ function cvrt_spaces_request(string $method, string $objectKey = '', array $quer
         $credentialScope . "\n" .
         hash('sha256', $canonicalRequest);
 
-    $kDate    = cvrt_sign('AWS4' . $secretKey, $times['date_only']);
-    $kRegion  = cvrt_sign($kDate, $region);
+    $kDate = cvrt_sign('AWS4' . $secretKey, $times['date_only']);
+    $kRegion = cvrt_sign($kDate, $region);
     $kService = cvrt_sign($kRegion, 's3');
     $kSigning = cvrt_sign($kService, 'aws4_request');
     $signature = hash_hmac('sha256', $stringToSign, $kSigning);
@@ -142,7 +142,7 @@ function cvrt_spaces_request(string $method, string $objectKey = '', array $quer
     curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
 
     $body = curl_exec($ch);
-    $err  = curl_error($ch);
+    $err = curl_error($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
@@ -224,6 +224,98 @@ function cvrt_download_to_temp(string $objectKey): string
     return $tmpWithExt;
 }
 
+function cvrt_ffmpeg_exists(): bool
+{
+    $ffmpeg = @shell_exec('command -v ffmpeg 2>/dev/null');
+    $ffprobe = @shell_exec('command -v ffprobe 2>/dev/null');
+    return trim((string)$ffmpeg) !== '' && trim((string)$ffprobe) !== '';
+}
+
+function cvrt_audio_duration_seconds(string $filePath): float
+{
+    $cmd = 'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ' . escapeshellarg($filePath) . ' 2>/dev/null';
+    $out = @shell_exec($cmd);
+    $val = trim((string)$out);
+
+    if ($val === '' || !is_numeric($val)) {
+        throw new RuntimeException('Could not determine audio duration with ffprobe.');
+    }
+
+    return (float)$val;
+}
+
+function cvrt_split_audio_chunks(string $filePath, int $chunkSeconds): array
+{
+    if (!cvrt_ffmpeg_exists()) {
+        throw new RuntimeException('ffmpeg and ffprobe are required on the server for long audio chunking.');
+    }
+
+    if ($chunkSeconds < 60) {
+        $chunkSeconds = 60;
+    }
+
+    $duration = cvrt_audio_duration_seconds($filePath);
+    if ($duration <= 0) {
+        throw new RuntimeException('Audio duration is invalid.');
+    }
+
+    $baseDir = sys_get_temp_dir() . '/cvrt_chunks_' . uniqid('', true);
+    if (!@mkdir($baseDir, 0777, true) && !is_dir($baseDir)) {
+        throw new RuntimeException('Could not create chunk temp directory.');
+    }
+
+    $chunks = [];
+    $offset = 0;
+    $index = 0;
+
+    while ($offset < $duration) {
+        $chunkPath = $baseDir . '/chunk_' . str_pad((string)$index, 4, '0', STR_PAD_LEFT) . '.mp3';
+
+        $cmd =
+            'ffmpeg -y -v error ' .
+            '-ss ' . escapeshellarg((string)$offset) . ' ' .
+            '-t ' . escapeshellarg((string)$chunkSeconds) . ' ' .
+            '-i ' . escapeshellarg($filePath) . ' ' .
+            '-ac 1 -ar 16000 -b:a 64k ' .
+            escapeshellarg($chunkPath) . ' 2>&1';
+
+        @shell_exec($cmd);
+
+        if (!is_file($chunkPath) || filesize($chunkPath) === 0) {
+            throw new RuntimeException('Failed to create audio chunk at offset ' . $offset . ' seconds.');
+        }
+
+        $chunks[] = [
+            'path'   => $chunkPath,
+            'offset' => (float)$offset,
+        ];
+
+        $offset += $chunkSeconds;
+        $index++;
+    }
+
+    return $chunks;
+}
+
+function cvrt_cleanup_chunk_files(array $chunks): void
+{
+    $dirs = [];
+    foreach ($chunks as $chunk) {
+        $path = (string)($chunk['path'] ?? '');
+        if ($path !== '' && is_file($path)) {
+            @unlink($path);
+            $dirs[] = dirname($path);
+        }
+    }
+
+    $dirs = array_values(array_unique($dirs));
+    foreach ($dirs as $dir) {
+        if (is_dir($dir)) {
+            @rmdir($dir);
+        }
+    }
+}
+
 function cvrt_openai_transcribe(string $audioFilePath, string $prompt): array
 {
     $apiKey = cw_openai_key();
@@ -250,7 +342,7 @@ function cvrt_openai_transcribe(string $audioFilePath, string $prompt): array
     curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
 
     $resp = curl_exec($ch);
-    $err  = curl_error($ch);
+    $err = curl_error($ch);
     $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
     curl_close($ch);
 
@@ -269,6 +361,34 @@ function cvrt_openai_transcribe(string $audioFilePath, string $prompt): array
     }
 
     return $json;
+}
+
+function cvrt_transcribe_with_chunking(string $audioFilePath, string $prompt): array
+{
+    $duration = cvrt_audio_duration_seconds($audioFilePath);
+
+    if ($duration <= 1200.0) {
+        return cvrt_openai_transcribe($audioFilePath, $prompt);
+    }
+
+    $chunks = cvrt_split_audio_chunks($audioFilePath, 1200);
+    $texts = [];
+
+    try {
+        foreach ($chunks as $chunk) {
+            $resp = cvrt_openai_transcribe((string)$chunk['path'], $prompt);
+            $text = trim((string)($resp['text'] ?? ''));
+            if ($text !== '') {
+                $texts[] = $text;
+            }
+        }
+    } finally {
+        cvrt_cleanup_chunk_files($chunks);
+    }
+
+    return [
+        'text' => trim(implode("\n\n", $texts)),
+    ];
 }
 
 function cvrt_format_seconds($seconds): string
@@ -527,7 +647,7 @@ try {
         $tmpFile = cvrt_download_to_temp($selectedKey);
 
         try {
-            $transcriptionRaw = cvrt_openai_transcribe($tmpFile, $prompt);
+            $transcriptionRaw = cvrt_transcribe_with_chunking($tmpFile, $prompt);
             $segments = cvrt_prepare_segments($transcriptionRaw);
             $success = 'Transcript test completed.';
         } finally {
