@@ -4896,32 +4896,6 @@ private function getAuthoritativeProgressTestRowForLesson(int $userId, int $coho
     return $row ?: null;
 }	
 	
-	
-private function getLatestProgressTestRowForLesson(int $userId, int $cohortId, int $lessonId): ?array
-{
-    $stmt = $this->pdo->prepare("
-        SELECT *
-        FROM progress_tests_v2
-        WHERE user_id = :user_id
-          AND cohort_id = :cohort_id
-          AND lesson_id = :lesson_id
-          AND NOT (
-              formal_result_code = 'STALE_ABORTED'
-              AND counts_as_unsat = 0
-              AND pass_gate_met = 0
-          )
-        ORDER BY attempt DESC, id DESC
-        LIMIT 1
-    ");
-    $stmt->execute([
-        ':user_id' => $userId,
-        ':cohort_id' => $cohortId,
-        ':lesson_id' => $lessonId,
-    ]);
-
-    $row = $stmt->fetch();
-    return $row ?: null;
-}
 
     private function expireSupersededAttemptBoundRequiredActions(
         int $userId,
