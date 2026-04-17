@@ -845,9 +845,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'instructor_decision' => $instructorDecision,
         'progress_test_url' => $ptUrlV2,
         'first_slide_id' => $firstSlideId,
-		'activity_state' => ($role === 'admin')
-    ? []
-    : get_lesson_activity_state($pdo, $userId, $cohortId, $lessonId),
+		'activity_state' => $activityState,
     ];
 
     $row['primary_action'] = lesson_primary_action($row);
@@ -1787,8 +1785,10 @@ switch ($completionStatus) {
         $appendAttempts = true;
         break;
 }
-                          $statusText .= ' · ' . $attemptsLeft . ' attempt' . ($attemptsLeft === 1 ? '' : 's') . ' left';
-                      }
+
+if ($appendAttempts && $attemptsLeft > 0) {
+    $statusText .= ' · ' . $attemptsLeft . ' attempt' . ($attemptsLeft === 1 ? '' : 's') . ' left';
+}
 
                       $studyHref = '';
                       if ((int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
