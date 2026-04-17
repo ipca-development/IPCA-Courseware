@@ -5006,6 +5006,41 @@ private function dispatchAutomationEventIfAvailable(
         }
     }
 
+		
+	    if ($affected > 0) {
+        $latestNonStale = $this->getLatestProgressTestRowForLesson($userId, $cohortId, $lessonId);
+
+        $testPassStatus = 'not_started';
+        $completionStatus = 'not_started';
+
+        if ($latestNonStale) {
+            if (!empty($latestNonStale['pass_gate_met'])) {
+                $testPassStatus = 'passed';
+                $completionStatus = 'completed';
+            } elseif ((string)($latestNonStale['status'] ?? '') === 'completed') {
+                $testPassStatus = 'failed';
+                $completionStatus = 'in_progress';
+            } else {
+                $testPassStatus = 'failed';
+                $completionStatus = 'in_progress';
+            }
+        }
+
+        $this->persistLessonActivityProjection($userId, $cohortId, $lessonId, [
+            'engine_projection' => true,
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'phase' => 'stale_attempt_recovery',
+            'fields' => [
+                'test_pass_status' => $testPassStatus,
+                'completion_status' => $completionStatus,
+                'last_state_eval_at' => gmdate('Y-m-d H:i:s'),
+            ]
+        ]);
+    }	
+		
+		
     return $affected;
 }
 	
@@ -5083,26 +5118,31 @@ private function getLatestAttemptNumber(int $userId, int $cohortId, int $lessonI
     return $row ?: null;
 }
 		
-    private function getLatestProgressTestRowForLesson(int $userId, int $cohortId, int $lessonId): ?array
-    {
-        $stmt = $this->pdo->prepare("
-            SELECT *
-            FROM progress_tests_v2
-            WHERE user_id = :user_id
-              AND cohort_id = :cohort_id
-              AND lesson_id = :lesson_id
-            ORDER BY attempt DESC, id DESC
-            LIMIT 1
-        ");
-        $stmt->execute([
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-        ]);
+private function getLatestProgressTestRowForLesson(int $userId, int $cohortId, int $lessonId): ?array
+{
+    $stmt = $this->pdo->prepare("
+        SELECT *
+        FROM progress_tests_v2
+        WHERE user_id = :user_id
+          AND cohort_id = :cohort_id
+          AND lesson_id = :lesson_id
+          AND NOT (
+              formal_result_code = 'STALE_ABORTED'
+              AND counts_as_unsat = 0
+              AND pass_gate_met = 0
+          )
+        ORDER BY attempt DESC, id DESC
+        LIMIT 1
+    ");
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':cohort_id' => $cohortId,
+        ':lesson_id' => $lessonId,
+    ]);
 
-        $row = $stmt->fetch();
-        return $row ?: null;
-    }
+    $row = $stmt->fetch();
+    return $row ?: null;
+}
 
     private function getLessonSummaryRow(int $userId, int $cohortId, int $lessonId): ?array
     {
