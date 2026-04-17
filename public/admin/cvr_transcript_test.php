@@ -553,8 +553,7 @@ function cvrt_file_size_label(int $bytes): string
 
 function cvrt_spaces_public_url(string $objectKey): string
 {
-    $cfg = cw_spaces_config();
-    return rtrim((string)$cfg['cdnBase'], '/') . '/' . ltrim($objectKey, '/');
+    return '/admin/cvr_audio_preview.php?key=' . rawurlencode($objectKey);
 }
 
 $spacesPrefix = 'cvr_testing/input/';
