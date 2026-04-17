@@ -1741,49 +1741,44 @@ cw_header('Course');
                       $scoreMeta = score_badge_meta($lx['test_passed'], $lx['best_score'], $last, $attemptsLeft);
                       $rowClass = ((int)$lx['lesson_id'] === $recommendedLessonId) ? 'resume-highlight' : '';
 
-                      $completionStatus = (string)($lx['activity_state']['completion_status'] ?? '');
-$statusText = 'Study the lesson';
-$appendAttempts = false;
+                      $statusText = 'Study the lesson';
+						$appendAttempts = false;
 
-switch ($completionStatus) {
-    case 'training_suspended':
-        $statusText = 'Training paused';
-        break;
+						if (!empty($lx['locked'])) {
+							$statusText = 'Locked';
+						} elseif (!empty($lx['instructor_decision']['training_suspended'])) {
+							$statusText = 'Training paused';
+						} elseif (!empty($lx['passed'])) {
+							$statusText = 'Completed';
+						} elseif (!empty($lx['pending_deadline_reason'])) {
+							$statusText = 'Action required: submit deadline reason';
+						} elseif (!empty($lx['deadline_passed'])) {
+							$statusText = 'Deadline passed';
+						} elseif (!empty($lx['pending_instructor_approval'])) {
+							$statusText = 'Awaiting instructor approval';
+						} elseif (!empty($lx['pending_remediation'])) {
+							$statusText = 'Complete remedial study acknowledgement';
+						} elseif (!empty($lx['instructor_decision']['one_on_one_required']) && empty($lx['instructor_decision']['one_on_one_completed'])) {
+							$statusText = 'Instructor session required';
+						} elseif ((string)$lx['summary_review_status'] === 'pending') {
+							$statusText = 'Waiting for instructor review';
+						} elseif ($attemptsLeft <= 0) {
+							$statusText = 'No attempts left';
+						} elseif ((string)$lx['summary_review_status'] === 'needs_revision') {
+							$statusText = 'Improve summary';
+							$appendAttempts = true;
+						} elseif (!empty($lx['can_test'])) {
+							$statusText = 'Ready for progress test';
+							$appendAttempts = true;
+						} elseif (!$lx['test_passed'] && $last && isset($last['status']) && (string)$last['status'] === 'completed') {
+							$statusText = 'Improve progress test';
+							$appendAttempts = true;
+						} else {
+							$statusText = 'Study the lesson';
+							$appendAttempts = true;
+						}
 
-    case 'deadline_blocked':
-        $statusText = 'Deadline blocked';
-        break;
-
-    case 'instructor_required':
-        $statusText = 'Awaiting instructor approval';
-        break;
-
-    case 'remediation_required':
-        $statusText = 'Complete remedial study';
-        break;
-
-    case 'summary_required':
-        $statusText = 'Summary required';
-        break;
-
-    case 'awaiting_summary_review':
-        $statusText = 'Waiting for instructor review';
-        break;
-
-    case 'awaiting_test_completion':
-        $statusText = 'Complete progress test';
-        $appendAttempts = true;
-        break;
-
-    case 'completed':
-        $statusText = 'Completed';
-        break;
-
-    default:
-        $statusText = 'Study the lesson';
-        $appendAttempts = true;
-        break;
-}
+                      if ($appendAttempts && $attemptsLeft > 0) {
                           $statusText .= ' · ' . $attemptsLeft . ' attempt' . ($attemptsLeft === 1 ? '' : 's') . ' left';
                       }
 
