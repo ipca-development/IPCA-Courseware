@@ -139,7 +139,7 @@ function cvrt_spaces_request(string $method, string $objectKey = '', array $quer
         'Authorization: ' . $authorization,
     ]);
     curl_setopt($ch, CURLOPT_TIMEOUT, 120);
-curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 15);
 
     $body = curl_exec($ch);
     $err  = curl_error($ch);
@@ -224,51 +224,30 @@ function cvrt_download_to_temp(string $objectKey): string
     return $tmpWithExt;
 }
 
-function cvrt_format_seconds($seconds): string
-{
-    $seconds = (float)$seconds;
-    if ($seconds < 0) {
-        $seconds = 0;
-    }
-
-    $total = (int)floor($seconds);
-    $h = (int)floor($total / 3600);
-    $m = (int)floor(($total % 3600) / 60);
-    $s = $total % 60;
-
-    if ($h > 0) {
-        return sprintf('%02d:%02d:%02d', $h, $m, $s);
-    }
-    return sprintf('%02d:%02d', $m, $s);
-}
-
 function cvrt_openai_transcribe(string $audioFilePath, string $prompt): array
 {
     $apiKey = cw_openai_key();
 
     $postFields = [
-        'file'            => new CURLFile($audioFilePath, mime_content_type($audioFilePath) ?: 'audio/mpeg', basename($audioFilePath)),
-        'model'           => 'gpt-4o-transcribe-diarize',
-        'response_format' => 'diarized_json',
-        // DO NOT send prompt here; diarization models do not support it
+        'file'   => new CURLFile(
+            $audioFilePath,
+            mime_content_type($audioFilePath) ?: 'audio/mpeg',
+            basename($audioFilePath)
+        ),
+        'model'  => 'gpt-4o-transcribe',
+        'prompt' => $prompt,
     ];
 
     $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-curl_setopt($ch, CURLOPT_POST, true);
-curl_setopt($ch, CURLOPT_HTTPHEADER, [
-    'Authorization: Bearer ' . $apiKey,
-]);
-
-curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
-
-// 🔥 FIX 502 HERE
-curl_setopt($ch, CURLOPT_TIMEOUT, 300);           // total time
-curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20);     // connection timeout
-curl_setopt($ch, CURLOPT_BUFFERSIZE, 1024 * 256); // smoother streaming
-
-// 🔥 VERY IMPORTANT (prevents gateway choke)
-curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+    curl_setopt($ch, CURLOPT_POST, true);
+    curl_setopt($ch, CURLOPT_HTTPHEADER, [
+        'Authorization: Bearer ' . $apiKey,
+    ]);
+    curl_setopt($ch, CURLOPT_POSTFIELDS, $postFields);
+    curl_setopt($ch, CURLOPT_TIMEOUT, 300);
+    curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 20);
+    curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
 
     $resp = curl_exec($ch);
     $err  = curl_error($ch);
@@ -290,6 +269,24 @@ curl_setopt($ch, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     }
 
     return $json;
+}
+
+function cvrt_format_seconds($seconds): string
+{
+    $seconds = (float)$seconds;
+    if ($seconds < 0) {
+        $seconds = 0;
+    }
+
+    $total = (int)floor($seconds);
+    $h = (int)floor($total / 3600);
+    $m = (int)floor(($total % 3600) / 60);
+    $s = $total % 60;
+
+    if ($h > 0) {
+        return sprintf('%02d:%02d:%02d', $h, $m, $s);
+    }
+    return sprintf('%02d:%02d', $m, $s);
 }
 
 function cvrt_extract_json_text_from_responses(array $resp): array
@@ -370,7 +367,7 @@ function cvrt_classify_segments(array $segments): array
         'input' => [
             [
                 'role' => 'system',
-                'content' => 'You classify diarized cockpit transcript segments. Return ONLY valid JSON. For each segment, choose exactly one label: ATC, INTERCOM, or NOISE. ATC means radio / controller / radio transmission style. INTERCOM means pilots talking to each other in the cockpit. NOISE means static, bumps, clicks, engines, unclear gibberish, or not useful speech. JSON format only: {"segments":[{"id":"...","label":"ATC"}]}'
+                'content' => 'You classify cockpit transcript segments. Return ONLY valid JSON. For each segment, choose exactly one label: ATC, INTERCOM, or NOISE. ATC means radio / controller / radio transmission style. INTERCOM means pilots talking to each other in the cockpit. NOISE means static, bumps, clicks, engines, unclear gibberish, or not useful speech. JSON format only: {"segments":[{"id":"...","label":"ATC"}]}'
             ],
             [
                 'role' => 'user',
@@ -444,27 +441,33 @@ function cvrt_prepare_segments(array $transcription): array
 {
     $segments = [];
 
-    if (!empty($transcription['segments']) && is_array($transcription['segments'])) {
-        foreach ($transcription['segments'] as $seg) {
-            $segments[] = [
-                'id'      => (string)($seg['id'] ?? uniqid('seg_', true)),
-                'start'   => (float)($seg['start'] ?? 0),
-                'end'     => (float)($seg['end'] ?? 0),
-                'speaker' => (string)($seg['speaker'] ?? ''),
-                'text'    => trim((string)($seg['text'] ?? '')),
-            ];
+    $fullText = trim((string)($transcription['text'] ?? ''));
+    if ($fullText === '') {
+        return [];
+    }
+
+    $parts = preg_split('/(\r\n|\r|\n|(?<=[\.\!\?])\s+)/', $fullText);
+    if (!is_array($parts)) {
+        $parts = [$fullText];
+    }
+
+    $offsetSeconds = 0.0;
+
+    foreach ($parts as $idx => $part) {
+        $text = trim((string)$part);
+        if ($text === '') {
+            continue;
         }
-    } else {
-        $fullText = trim((string)($transcription['text'] ?? ''));
-        if ($fullText !== '') {
-            $segments[] = [
-                'id'      => 'seg_fallback',
-                'start'   => 0.0,
-                'end'     => 0.0,
-                'speaker' => '',
-                'text'    => $fullText,
-            ];
-        }
+
+        $segments[] = [
+            'id'      => 'seg_' . $idx,
+            'start'   => $offsetSeconds,
+            'end'     => $offsetSeconds + 5.0,
+            'speaker' => '',
+            'text'    => $text,
+        ];
+
+        $offsetSeconds += 5.0;
     }
 
     $segments = cvrt_classify_segments($segments);
