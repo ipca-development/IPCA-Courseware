@@ -1276,86 +1276,111 @@ public function createProgressTestAttempt(
     ?int $actorUserId = null,
     ?string $idempotencyKey = null
 ): array {
-    $startDecision = $this->prepareStartDecision($userId, $cohortId, $lessonId);
-
-    $decision = (array)($startDecision['decision'] ?? []);
-    $priority = (string)($decision['priority_state'] ?? 'normal');
-
-    if (!empty($decision['training_suspended'])) {
-        return [
-            'blocked' => true,
-            'reason' => 'training_suspended',
-            'decision' => $decision
-        ];
-    }
-
-    if (!empty($decision['deadline_blocked'])) {
-        return [
-            'blocked' => true,
-            'reason' => 'deadline',
-            'deadline_state' => $startDecision['deadline_state'],
-            'decision' => $decision
-        ];
-    }
-
-    if (!empty($decision['instructor_required'])) {
-        return [
-            'blocked' => true,
-            'reason' => 'instructor_required',
-            'decision' => $decision
-        ];
-    }
-
-    if ($idempotencyKey !== null && $idempotencyKey !== '') {
-        $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
-        if ($existing) {
-            return [
-                'blocked' => false,
-                'test_id' => (int)$existing['id'],
-                'attempt' => (int)$existing['attempt'],
-                'idempotent_reuse' => true
-            ];
-        }
-    }
-
-    if (!empty($decision['remediation_required'])) {
-        return [
-            'blocked' => true,
-            'reason' => 'remediation_required',
-            'decision' => $decision
-        ];
-    }
-
-    if (!empty($decision['summary_blocked'])) {
-        return [
-            'blocked' => true,
-            'reason' => 'summary_required',
-            'decision' => $decision
-        ];
-    }
-
-    if (empty($decision['allowed'])) {
-        return [
-            'blocked' => true,
-            'reason' => 'progression_rules',
-            'decision' => $decision
-        ];
-    }
-
-    $attempt = (int)($startDecision['attempt_state']['next_attempt_number'] ?? 1);
-    if ($attempt <= 0) {
-        $attempt = 1;
-    }
-
-    $effectiveDeadlineUtc = (string)$startDecision['deadline_state']['effective_deadline_utc'];
-    $deadlineSource = (string)$startDecision['deadline_state']['deadline_source'];
-
-    $nowUtc = gmdate('Y-m-d H:i:s');
-    $seed = bin2hex(random_bytes(16));
-
     $this->pdo->beginTransaction();
 
     try {
+        $this->lockAttemptAndRequiredActionRows($userId, $cohortId, $lessonId);
+
+        if ($idempotencyKey !== null && $idempotencyKey !== '') {
+            $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
+            if ($existing) {
+                $this->pdo->commit();
+
+                return [
+                    'blocked' => false,
+                    'test_id' => (int)$existing['id'],
+                    'attempt' => (int)$existing['attempt'],
+                    'idempotent_reuse' => true,
+                    'stale_cleanup_count' => 0,
+                ];
+            }
+        }
+
+        $staleCleanupCount = $this->markOlderOpenAttemptsAsStale($userId, $cohortId, $lessonId);
+
+        $startDecision = $this->prepareStartDecision($userId, $cohortId, $lessonId);
+
+        $decision = (array)($startDecision['decision'] ?? []);
+        $priority = (string)($decision['priority_state'] ?? 'normal');
+
+        if (!empty($decision['training_suspended'])) {
+            $this->pdo->commit();
+
+            return [
+                'blocked' => true,
+                'reason' => 'training_suspended',
+                'decision' => $decision,
+                'stale_cleanup_count' => $staleCleanupCount,
+            ];
+        }
+
+        if (!empty($decision['deadline_blocked'])) {
+            $this->pdo->commit();
+
+            return [
+                'blocked' => true,
+                'reason' => 'deadline',
+                'deadline_state' => $startDecision['deadline_state'],
+                'decision' => $decision,
+                'stale_cleanup_count' => $staleCleanupCount,
+            ];
+        }
+
+        if (!empty($decision['instructor_required'])) {
+            $this->pdo->commit();
+
+            return [
+                'blocked' => true,
+                'reason' => 'instructor_required',
+                'decision' => $decision,
+                'stale_cleanup_count' => $staleCleanupCount,
+            ];
+        }
+
+        if (!empty($decision['remediation_required'])) {
+            $this->pdo->commit();
+
+            return [
+                'blocked' => true,
+                'reason' => 'remediation_required',
+                'decision' => $decision,
+                'stale_cleanup_count' => $staleCleanupCount,
+            ];
+        }
+
+        if (!empty($decision['summary_blocked'])) {
+            $this->pdo->commit();
+
+            return [
+                'blocked' => true,
+                'reason' => 'summary_required',
+                'decision' => $decision,
+                'stale_cleanup_count' => $staleCleanupCount,
+            ];
+        }
+
+        if (empty($decision['allowed'])) {
+            $this->pdo->commit();
+
+            return [
+                'blocked' => true,
+                'reason' => 'progression_rules',
+                'decision' => $decision,
+                'stale_cleanup_count' => $staleCleanupCount,
+            ];
+        }
+
+        $attempt = (int)($startDecision['attempt_state']['next_attempt_number'] ?? 1);
+        if ($attempt <= 0) {
+            $attempt = 1;
+        }
+
+        $effectiveDeadlineUtc = (string)$startDecision['deadline_state']['effective_deadline_utc'];
+        $deadlineSource = (string)$startDecision['deadline_state']['deadline_source'];
+
+        $nowUtc = gmdate('Y-m-d H:i:s');
+        $seed = bin2hex(random_bytes(16));
+
         $stmt = $this->pdo->prepare("
             INSERT INTO progress_tests_v2
             (
@@ -1426,6 +1451,7 @@ public function createProgressTestAttempt(
             'test_id' => $testId,
             'attempt' => $attempt,
             'idempotent_reuse' => false,
+            'stale_cleanup_count' => $staleCleanupCount,
         ];
     } catch (Throwable $e) {
         if ($this->pdo->inTransaction()) {
@@ -1439,7 +1465,8 @@ public function createProgressTestAttempt(
                     'blocked' => false,
                     'test_id' => (int)$existing['id'],
                     'attempt' => (int)$existing['attempt'],
-                    'idempotent_reuse' => true
+                    'idempotent_reuse' => true,
+                    'stale_cleanup_count' => 0,
                 ];
             }
         }
@@ -4901,6 +4928,171 @@ private function dispatchAutomationEventIfAvailable(
         return $stmt->rowCount();
     }
 
+	private function markOlderOpenAttemptsAsStale(int $userId, int $cohortId, int $lessonId): array
+{
+    $select = $this->pdo->prepare("
+        SELECT id, status, attempt
+        FROM progress_tests_v2
+        WHERE user_id = :user_id
+          AND cohort_id = :cohort_id
+          AND lesson_id = :lesson_id
+          AND status IN ('preparing','ready','in_progress','processing')
+          AND completed_at IS NULL
+        ORDER BY id ASC
+    ");
+    $select->execute([
+        ':user_id' => $userId,
+        ':cohort_id' => $cohortId,
+        ':lesson_id' => $lessonId,
+    ]);
+
+    $rows = $select->fetchAll();
+    if (!$rows) {
+        return [
+            'affected_count' => 0,
+            'rows' => [],
+        ];
+    }
+
+    $update = $this->pdo->prepare("
+        UPDATE progress_tests_v2
+        SET
+            status = 'failed',
+            formal_result_code = 'STALE_ABORTED',
+            formal_result_label = 'Aborted (stale session)',
+            counts_as_unsat = 0,
+            pass_gate_met = 0,
+            timing_status = 'unknown',
+            completed_at = :completed_at,
+            updated_at = :updated_at,
+            status_text = 'Automatically marked stale before new attempt'
+        WHERE id = :id
+          AND status IN ('preparing','ready','in_progress','processing')
+          AND completed_at IS NULL
+        LIMIT 1
+    ");
+
+    $affected = 0;
+    $eventTime = gmdate('Y-m-d H:i:s');
+
+    foreach ($rows as $row) {
+        $update->execute([
+            ':completed_at' => $eventTime,
+            ':updated_at' => $eventTime,
+            ':id' => (int)$row['id'],
+        ]);
+
+        if ($update->rowCount() > 0) {
+            $affected++;
+
+            $this->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => (int)$row['id'],
+                'event_type' => 'system_recovery',
+                'event_code' => 'stale_progress_test_resolved',
+                'event_status' => 'warning',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => $eventTime,
+                'payload' => [
+                    'reason' => 'new_attempt_detected_previous_unfinished_attempt',
+                    'original_status' => (string)$row['status'],
+                    'original_attempt' => (int)$row['attempt'],
+                    'resolution' => 'marked_failed_non_blocking',
+                    'counts_as_unsat' => 0,
+                ],
+                'legal_note' => 'Unfinished prior progress test attempt was automatically marked stale so it would not block the student.',
+            ]);
+        }
+    }
+
+    return [
+        'affected_count' => $affected,
+        'rows' => $rows,
+    ];
+}
+	private function markOlderOpenAttemptsAsStale(int $userId, int $cohortId, int $lessonId): int
+{
+    $select = $this->pdo->prepare("
+        SELECT id, status, attempt
+        FROM progress_tests_v2
+        WHERE user_id = :user_id
+          AND cohort_id = :cohort_id
+          AND lesson_id = :lesson_id
+          AND status IN ('preparing','ready','in_progress','processing')
+          AND completed_at IS NULL
+        ORDER BY id ASC
+    ");
+    $select->execute([
+        ':user_id' => $userId,
+        ':cohort_id' => $cohortId,
+        ':lesson_id' => $lessonId,
+    ]);
+
+    $rows = $select->fetchAll();
+    if (!$rows) {
+        return 0;
+    }
+
+    $update = $this->pdo->prepare("
+        UPDATE progress_tests_v2
+        SET
+            status = 'failed',
+            formal_result_code = 'STALE_ABORTED',
+            formal_result_label = 'Aborted (stale session)',
+            counts_as_unsat = 0,
+            pass_gate_met = 0,
+            timing_status = 'unknown',
+            completed_at = :completed_at,
+            updated_at = :updated_at,
+            status_text = 'Automatically marked stale before new attempt'
+        WHERE id = :id
+          AND status IN ('preparing','ready','in_progress','processing')
+          AND completed_at IS NULL
+        LIMIT 1
+    ");
+
+    $affected = 0;
+    $eventTime = gmdate('Y-m-d H:i:s');
+
+    foreach ($rows as $row) {
+        $update->execute([
+            ':completed_at' => $eventTime,
+            ':updated_at' => $eventTime,
+            ':id' => (int)$row['id'],
+        ]);
+
+        if ($update->rowCount() > 0) {
+            $affected++;
+
+            $this->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => (int)$row['id'],
+                'event_type' => 'system_recovery',
+                'event_code' => 'stale_progress_test_resolved',
+                'event_status' => 'warning',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => $eventTime,
+                'payload' => [
+                    'reason' => 'new_attempt_detected_previous_unfinished_attempt',
+                    'original_status' => (string)$row['status'],
+                    'original_attempt' => (int)$row['attempt'],
+                    'resolution' => 'marked_failed_non_blocking',
+                    'counts_as_unsat' => 0,
+                ],
+                'legal_note' => 'Unfinished prior progress test attempt was automatically marked stale so it would not block the student.',
+            ]);
+        }
+    }
+
+    return $affected;
+}
+	
     private function getLatestAttemptNumber(int $userId, int $cohortId, int $lessonId): int
     {
         $stmt = $this->pdo->prepare("
