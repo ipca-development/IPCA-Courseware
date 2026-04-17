@@ -5009,23 +5009,27 @@ private function dispatchAutomationEventIfAvailable(
     return $affected;
 }
 	
-    private function getLatestAttemptNumber(int $userId, int $cohortId, int $lessonId): int
-    {
-        $stmt = $this->pdo->prepare("
-            SELECT MAX(attempt)
-            FROM progress_tests_v2
-            WHERE user_id = :user_id
-              AND cohort_id = :cohort_id
-              AND lesson_id = :lesson_id
-        ");
-        $stmt->execute([
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-        ]);
+private function getLatestAttemptNumber(int $userId, int $cohortId, int $lessonId): int
+{
+    $stmt = $this->pdo->prepare("
+        SELECT MAX(attempt)
+        FROM progress_tests_v2
+        WHERE user_id = :user_id
+          AND cohort_id = :cohort_id
+          AND lesson_id = :lesson_id
+          AND NOT (
+              status = 'failed'
+              AND formal_result_code = 'STALE_ABORTED'
+          )
+    ");
+    $stmt->execute([
+        ':user_id' => $userId,
+        ':cohort_id' => $cohortId,
+        ':lesson_id' => $lessonId,
+    ]);
 
-        return max(0, (int)$stmt->fetchColumn());
-    }
+    return max(0, (int)$stmt->fetchColumn());
+}
 
     private function getLessonActivityProjectionRow(int $userId, int $cohortId, int $lessonId): ?array
     {
