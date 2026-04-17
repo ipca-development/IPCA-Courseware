@@ -224,30 +224,126 @@ function cvrt_download_to_temp(string $objectKey): string
     return $tmpWithExt;
 }
 
+function cvrt_shell_exec_available(): bool
+{
+    if (!function_exists('shell_exec')) {
+        return false;
+    }
+
+    $disabled = (string)ini_get('disable_functions');
+    if ($disabled !== '') {
+        $parts = array_map('trim', explode(',', $disabled));
+        if (in_array('shell_exec', $parts, true)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function cvrt_find_binary(array $candidates): string
+{
+    foreach ($candidates as $candidate) {
+        if ($candidate === '') {
+            continue;
+        }
+
+        if (strpos($candidate, '/') !== false) {
+            if (is_file($candidate) && is_executable($candidate)) {
+                return $candidate;
+            }
+            continue;
+        }
+
+        if (!cvrt_shell_exec_available()) {
+            continue;
+        }
+
+        $cmd = 'command -v ' . escapeshellarg($candidate) . ' 2>/dev/null';
+        $out = @shell_exec($cmd);
+        $path = trim((string)$out);
+        if ($path !== '' && is_file($path) && is_executable($path)) {
+            return $path;
+        }
+    }
+
+    return '';
+}
+
 function cvrt_ffmpeg_exists(): bool
 {
-    $ffmpeg = @shell_exec('command -v ffmpeg 2>/dev/null');
-    $ffprobe = @shell_exec('command -v ffprobe 2>/dev/null');
-    return trim((string)$ffmpeg) !== '' && trim((string)$ffprobe) !== '';
+    $ffmpeg = cvrt_find_binary([
+        '/usr/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/bin/ffmpeg',
+        'ffmpeg',
+    ]);
+
+    $ffprobe = cvrt_find_binary([
+        '/usr/bin/ffprobe',
+        '/usr/local/bin/ffprobe',
+        '/bin/ffprobe',
+        'ffprobe',
+    ]);
+
+    return $ffmpeg !== '' && $ffprobe !== '';
 }
 
 function cvrt_audio_duration_seconds(string $filePath): float
 {
-    $cmd = 'ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ' . escapeshellarg($filePath) . ' 2>/dev/null';
-    $out = @shell_exec($cmd);
-    $val = trim((string)$out);
-
-    if ($val === '' || !is_numeric($val)) {
-        throw new RuntimeException('Could not determine audio duration with ffprobe.');
+    if (!is_file($filePath) || !is_readable($filePath)) {
+        throw new RuntimeException('Audio temp file is missing or not readable.');
     }
 
-    return (float)$val;
+    if (!cvrt_shell_exec_available()) {
+        throw new RuntimeException('shell_exec is disabled in PHP, so ffprobe/ffmpeg duration detection cannot run on this server.');
+    }
+
+    $ffprobe = cvrt_find_binary([
+        '/usr/bin/ffprobe',
+        '/usr/local/bin/ffprobe',
+        '/bin/ffprobe',
+        'ffprobe',
+    ]);
+
+    if ($ffprobe !== '') {
+        $cmd = escapeshellcmd($ffprobe) . ' -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ' . escapeshellarg($filePath) . ' 2>&1';
+        $out = @shell_exec($cmd);
+        $val = trim((string)$out);
+        if ($val !== '' && is_numeric($val)) {
+            return (float)$val;
+        }
+    }
+
+    $ffmpeg = cvrt_find_binary([
+        '/usr/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/bin/ffmpeg',
+        'ffmpeg',
+    ]);
+
+    if ($ffmpeg !== '') {
+        $cmd = escapeshellcmd($ffmpeg) . ' -i ' . escapeshellarg($filePath) . ' 2>&1';
+        $out = (string)@shell_exec($cmd);
+        if (preg_match('/Duration:\s*(\d{2}):(\d{2}):(\d{2}(?:\.\d+)?)/i', $out, $m)) {
+            $hours = (int)$m[1];
+            $mins  = (int)$m[2];
+            $secs  = (float)$m[3];
+            return ($hours * 3600) + ($mins * 60) + $secs;
+        }
+    }
+
+    throw new RuntimeException('Could not determine audio duration with ffprobe or ffmpeg. Check whether ffmpeg/ffprobe are installed and accessible to PHP.');
 }
 
 function cvrt_split_audio_chunks(string $filePath, int $chunkSeconds): array
 {
     if (!cvrt_ffmpeg_exists()) {
         throw new RuntimeException('ffmpeg and ffprobe are required on the server for long audio chunking.');
+    }
+
+    if (!cvrt_shell_exec_available()) {
+        throw new RuntimeException('shell_exec is disabled in PHP, so ffmpeg chunking cannot run on this server.');
     }
 
     if ($chunkSeconds < 60) {
@@ -257,6 +353,17 @@ function cvrt_split_audio_chunks(string $filePath, int $chunkSeconds): array
     $duration = cvrt_audio_duration_seconds($filePath);
     if ($duration <= 0) {
         throw new RuntimeException('Audio duration is invalid.');
+    }
+
+    $ffmpeg = cvrt_find_binary([
+        '/usr/bin/ffmpeg',
+        '/usr/local/bin/ffmpeg',
+        '/bin/ffmpeg',
+        'ffmpeg',
+    ]);
+
+    if ($ffmpeg === '') {
+        throw new RuntimeException('ffmpeg binary was not found.');
     }
 
     $baseDir = sys_get_temp_dir() . '/cvrt_chunks_' . uniqid('', true);
@@ -272,7 +379,7 @@ function cvrt_split_audio_chunks(string $filePath, int $chunkSeconds): array
         $chunkPath = $baseDir . '/chunk_' . str_pad((string)$index, 4, '0', STR_PAD_LEFT) . '.mp3';
 
         $cmd =
-            'ffmpeg -y -v error ' .
+            escapeshellcmd($ffmpeg) . ' -y -v error ' .
             '-ss ' . escapeshellarg((string)$offset) . ' ' .
             '-t ' . escapeshellarg((string)$chunkSeconds) . ' ' .
             '-i ' . escapeshellarg($filePath) . ' ' .
