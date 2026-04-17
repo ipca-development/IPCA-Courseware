@@ -245,7 +245,7 @@ function cvrt_openai_transcribe(string $audioFilePath, string $prompt): array
         'file'            => new CURLFile($audioFilePath, mime_content_type($audioFilePath) ?: 'audio/mpeg', basename($audioFilePath)),
         'model'           => 'gpt-4o-transcribe-diarize',
         'response_format' => 'diarized_json',
-        'prompt'          => $prompt,
+        // DO NOT send prompt here; diarization models do not support it
     ];
 
     $ch = curl_init('https://api.openai.com/v1/audio/transcriptions');
