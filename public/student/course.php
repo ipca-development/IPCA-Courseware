@@ -844,7 +844,10 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'can_test' => $canTest,
         'instructor_decision' => $instructorDecision,
         'progress_test_url' => $ptUrlV2,
-        'first_slide_id' => $firstSlideId
+        'first_slide_id' => $firstSlideId,
+		'activity_state' => ($role === 'admin')
+    ? []
+    : get_lesson_activity_state($pdo, $userId, $cohortId, $lessonId),
     ];
 
     $row['primary_action'] = lesson_primary_action($row);
