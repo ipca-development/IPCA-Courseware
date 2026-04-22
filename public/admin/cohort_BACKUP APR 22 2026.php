@@ -112,51 +112,6 @@ function cohort_selected_lessons(PDO $pdo, int $cohortId): array
     return $out;
 }
 
-
-function cohort_get_bool_policy_value(PDO $pdo, int $cohortId, string $policyKey, string $default = '0'): string
-{
-    $st = $pdo->prepare("
-        SELECT value_text
-        FROM system_policy_values
-        WHERE policy_key = ?
-          AND scope_type = 'cohort'
-          AND scope_id = ?
-          AND is_active = 1
-          AND (effective_to IS NULL OR effective_to > UTC_TIMESTAMP())
-        ORDER BY id DESC
-        LIMIT 1
-    ");
-    $st->execute(array($policyKey, $cohortId));
-    $value = $st->fetchColumn();
-    if ($value === false || $value === null || trim((string)$value) === '') {
-        return $default;
-    }
-    return ((string)$value === '1') ? '1' : '0';
-}
-
-function cohort_save_bool_policy_value(PDO $pdo, int $cohortId, string $policyKey, string $valueText, ?int $changedByUserId = null, string $reasonText = ''): void
-{
-    $valueText = ((string)$valueText === '1') ? '1' : '0';
-
-    $pdo->prepare("
-        UPDATE system_policy_values
-        SET is_active = 0,
-            effective_to = UTC_TIMESTAMP()
-        WHERE policy_key = ?
-          AND scope_type = 'cohort'
-          AND scope_id = ?
-          AND is_active = 1
-          AND effective_to IS NULL
-    ")->execute(array($policyKey, $cohortId));
-
-    $ins = $pdo->prepare("
-        INSERT INTO system_policy_values
-        (policy_key, scope_type, scope_id, value_text, is_active, changed_by_user_id, change_reason_text)
-        VALUES (?, 'cohort', ?, ?, 1, ?, ?)
-    ");
-    $ins->execute(array($policyKey, $cohortId, $valueText, $changedByUserId, $reasonText));
-}
-
 function cohort_save_course_selection(PDO $pdo, int $cohortId, int $programId, array $selectedCourseIds): void
 {
     $all = cohort_courses_for_program($pdo, $programId);
@@ -514,8 +469,6 @@ $courseLessonTree = ($programId > 0)
     ? cohort_build_course_lesson_tree($pdo, $programId, $enabledMap, $selectedLessonMap)
     : array();
 
-$allowFreeStudyWithinCourseBeforeTestCompletion = cohort_get_bool_policy_value($pdo, $cohortId, 'allow_free_study_within_course_before_test_completion', '0');
-
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
 
@@ -580,16 +533,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($primary > 0) {
                 $pdo->prepare("UPDATE cohorts SET course_id = ? WHERE id = ?")->execute(array($primary, $cohortId));
             }
-
-            $allowFreeStudy = ((string)($_POST['allow_free_study_within_course_before_test_completion'] ?? '0') === '1') ? '1' : '0';
-            cohort_save_bool_policy_value(
-                $pdo,
-                $cohortId,
-                'allow_free_study_within_course_before_test_completion',
-                $allowFreeStudy,
-                isset($u['id']) ? (int)$u['id'] : null,
-                'Updated from cohort courses and lesson scope settings'
-            );
 
             header('Location: /admin/cohort.php?cohort_id=' . $cohortId . '#courses');
             exit;
@@ -1172,28 +1115,9 @@ cw_header('Theory Training');
                 Admin-selected scope is authoritative. Advisory scheduling rules must never silently remove courses or lessons from storage.
             </p>
 
-            <div class="cohort-scope-card" style="margin-bottom:14px;">
-                <div class="cohort-scope-head">
-                    <div>
-                        <div class="cohort-scope-title">Allow free study within course before test completion</div>
-                        <div class="cohort-scope-meta" style="margin-top:6px; max-width:780px; white-space:normal;">
-                            When enabled, students may open and summarize any lesson within the same course before earlier lesson progress tests are passed. The next course remains locked until all lesson progress tests in the current course are passed.
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <form method="post">
                 <input type="hidden" name="action" value="save_scope">
                 <input type="hidden" name="program_id" value="<?php echo (int)$programId; ?>">
-
-                <div class="cohort-field" style="margin-bottom:14px; max-width:320px;">
-                    <label>Course study flow</label>
-                    <select class="cohort-select" name="allow_free_study_within_course_before_test_completion">
-                        <option value="0" <?php echo ($allowFreeStudyWithinCourseBeforeTestCompletion === '0') ? 'selected' : ''; ?>>OFF</option>
-                        <option value="1" <?php echo ($allowFreeStudyWithinCourseBeforeTestCompletion === '1') ? 'selected' : ''; ?>>ON</option>
-                    </select>
-                </div>
 
                 <?php if (!$programId || !$courseLessonTree): ?>
                     <div class="cohort-muted">No program or lessons available. Set a valid program above first.</div>

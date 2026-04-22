@@ -723,13 +723,9 @@ $pendingInstructorApproval = !empty($pendingActions['instructor_approval']);
     $passed = false;
 
     if ($role === 'student') {
-        $locked = !$progression->canAccessLessonContent(
-            $userId,
-            $cohortId,
-            $lessonId,
-            $courseId,
-            (int)$l['unlock_after_lesson_id']
-        );
+        if (!empty($l['unlock_after_lesson_id'])) {
+            $locked = !lesson_passed($pdo, $userId, $cohortId, (int)$l['unlock_after_lesson_id']);
+        }
         $passed = lesson_passed($pdo, $userId, $cohortId, $lessonId);
     }
 

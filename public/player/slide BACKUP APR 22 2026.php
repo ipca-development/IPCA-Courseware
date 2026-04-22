@@ -1,11 +1,8 @@
 <?php
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
-require_once __DIR__ . '/../../src/courseware_progression_v2.php';
 
 cw_require_login();
-
-$progression = new CoursewareProgressionV2($pdo);
 
 $u = cw_current_user($pdo);
 $role = (string)($u['role'] ?? '');
@@ -59,11 +56,12 @@ if ($role === 'student') {
 
 /**
  * ============================================================
- * COURSE-LEVEL STUDY ACCESS POLICY ENFORCEMENT (SSOT-COMPLIANT)
+ * STRICT SEQUENCING ENFORCEMENT (SSOT-COMPLIANT)
  * ============================================================
  */
 if ($role === 'student') {
 
+    // Get unlock dependency
     $dep = $pdo->prepare("
         SELECT unlock_after_lesson_id
         FROM cohort_lesson_deadlines
@@ -73,22 +71,34 @@ if ($role === 'student') {
     $dep->execute([$cohortId, $lessonId]);
     $requiredLessonId = (int)($dep->fetchColumn() ?: 0);
 
-    $canAccessLesson = $progression->canAccessLessonContent(
-        $uid,
-        $cohortId,
-        $lessonId,
-        $courseId,
-        $requiredLessonId
-    );
+    if ($requiredLessonId > 0) {
 
-    if (!$canAccessLesson) {
-        header(
-            'Location: /student/course.php?cohort_id='
-            . (int)$cohortId
-            . '&blocked_lesson_id=' . (int)$lessonId
-            . '&required_lesson_id=' . (int)$requiredLessonId
-        );
-        exit;
+        // Check if previous lesson is fully completed
+        $chk = $pdo->prepare("
+            SELECT 1
+            FROM lesson_activity
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND lesson_id = ?
+              AND completion_status = 'completed'
+              AND test_pass_status = 'passed'
+            LIMIT 1
+        ");
+        $chk->execute([$uid, $cohortId, $requiredLessonId]);
+
+        $isCompleted = (bool)$chk->fetchColumn();
+
+        if (!$isCompleted) {
+
+            // Redirect instead of Forbidden
+            header(
+                'Location: /student/course.php?cohort_id='
+                . (int)$cohortId
+                . '&blocked_lesson_id=' . (int)$lessonId
+                . '&required_lesson_id=' . (int)$requiredLessonId
+            );
+            exit;
+        }
     }
 }
 } else {
