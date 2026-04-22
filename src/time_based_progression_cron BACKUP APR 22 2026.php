@@ -226,15 +226,8 @@ final class TimeBasedProgressionCron
 
             WHERE cs.status = 'active'
               AND cld.deadline_utc IS NOT NULL
-              AND NOT EXISTS (
-                  SELECT 1
-                  FROM progress_tests_v2 pt
-                  WHERE pt.user_id = cs.user_id
-                    AND pt.cohort_id = cs.cohort_id
-                    AND pt.lesson_id = cld.lesson_id
-                    AND pt.status = 'completed'
-                    AND pt.pass_gate_met = 1
-              )
+              AND COALESCE(la.completion_status, '') <> 'completed'
+              AND COALESCE(la.training_suspended, 0) = 0
               AND COALESCE(sldo.new_deadline_utc, cld.deadline_utc) <= DATE_ADD(UTC_TIMESTAMP(), INTERVAL :window_hours HOUR)
 
             ORDER BY
@@ -272,29 +265,6 @@ final class TimeBasedProgressionCron
             'reminder_candidates' => array(),
             'errors' => array(),
         );
-
-        $passGuardStmt = $this->pdo->prepare("
-            SELECT 1
-            FROM progress_tests_v2
-            WHERE user_id = :user_id
-              AND cohort_id = :cohort_id
-              AND lesson_id = :lesson_id
-              AND status = 'completed'
-              AND pass_gate_met = 1
-            LIMIT 1
-        ");
-        $passGuardStmt->execute(array(
-            ':user_id' => $userId,
-            ':cohort_id' => $cohortId,
-            ':lesson_id' => $lessonId,
-        ));
-
-        if ((bool)$passGuardStmt->fetchColumn()) {
-            return $result + array(
-                'status' => 'skipped',
-                'skip_reason' => 'already_passed',
-            );
-        }
 
         try {
             $nowUtc = gmdate('Y-m-d H:i:s');
@@ -501,6 +471,11 @@ final class TimeBasedProgressionCron
             return array();
         }
 
+        $completionStatus = trim((string)($activityState['completion_status'] ?? ''));
+        if ($completionStatus === 'completed') {
+            return array();
+        }
+
         $nowTs = strtotime($nowUtc);
         $deadlineTs = strtotime($effectiveDeadlineUtc);
 
@@ -550,7 +525,9 @@ final class TimeBasedProgressionCron
 
         return $this->detectTriggers(
             $nowUtc,
-            array(),
+            array(
+                'completion_status' => (string)($candidateRow['completion_status'] ?? ''),
+            ),
             $projectedState
         );
     }
