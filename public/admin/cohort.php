@@ -1165,6 +1165,7 @@ cw_header('Theory Training');
         </section>
     </div>
 
+	
     <div class="cohort-grid-two">
         <section class="card cohort-card-pad" id="courses">
             <h2 class="cohort-section-title">Courses and lesson scope</h2>
