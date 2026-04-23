@@ -86,44 +86,7 @@ function cw_ui_date($value) {
     }
 }
 
-function lesson_passed(PDO $pdo, $userId, $cohortId, $lessonId) {
-    $st = $pdo->prepare("
-        SELECT completion_status, test_pass_status
-        FROM lesson_activity
-        WHERE user_id=? AND cohort_id=? AND lesson_id=?
-        LIMIT 1
-    ");
-    $st->execute([$userId, $cohortId, $lessonId]);
-    $row = $st->fetch(PDO::FETCH_ASSOC);
-
-    $completionStatus = (string)($row['completion_status'] ?? '');
-    $testPassStatus   = (string)($row['test_pass_status'] ?? '');
-
-    if ($completionStatus === 'completed' || $testPassStatus === 'passed') {
-        return true;
-    }
-
-    $pt = $pdo->prepare("
-        SELECT 1
-        FROM progress_tests_v2
-        WHERE user_id=? AND cohort_id=? AND lesson_id=? AND status='completed' AND pass_gate_met=1
-        LIMIT 1
-    ");
-    $pt->execute([$userId, $cohortId, $lessonId]);
-
-    return (bool)$pt->fetchColumn();
-}
-
-function get_summary_state(PDO $pdo, $userId, $cohortId, $lessonId) {
-    $st = $pdo->prepare("
-        SELECT summary_html, summary_plain, review_status, review_score, updated_at, review_feedback, review_notes_by_instructor
-        FROM lesson_summaries
-        WHERE user_id=? AND cohort_id=? AND lesson_id=?
-        LIMIT 1
-    ");
-    $st->execute([$userId, $cohortId, $lessonId]);
-    $row = $st->fetch(PDO::FETCH_ASSOC);
-
+function get_summary_state_from_row($row) {
     if (!$row || !is_array($row)) {
         return [
             'len' => 0,
@@ -189,105 +152,6 @@ function summary_quality_meta(array $summaryState) {
     return ['label' => 'Draft saved', 'class' => 'info', 'sub' => 'Draft', 'pct' => 44];
 }
 
-
-
-
-
-function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
-    $nonStaleFilter = "
-        AND NOT (
-            COALESCE(formal_result_code, '') = 'STALE_ABORTED'
-            AND COALESCE(counts_as_unsat, 0) = 0
-            AND COALESCE(pass_gate_met, 0) = 0
-        )
-    ";
-
-    $st = $pdo->prepare("
-        SELECT attempt, status, score_pct, started_at, completed_at
-        FROM progress_tests_v2
-        WHERE user_id=?
-          AND cohort_id=?
-          AND lesson_id=?
-          {$nonStaleFilter}
-        ORDER BY attempt DESC, id DESC
-        LIMIT 1
-    ");
-    $st->execute([$userId, $cohortId, $lessonId]);
-    $row = $st->fetch(PDO::FETCH_ASSOC);
-
-    $mx = $pdo->prepare("
-        SELECT MAX(attempt)
-        FROM progress_tests_v2
-        WHERE user_id=?
-          AND cohort_id=?
-          AND lesson_id=?
-          {$nonStaleFilter}
-    ");
-    $mx->execute([$userId, $cohortId, $lessonId]);
-    $maxAttempt = (int)($mx->fetchColumn() ?: 0);
-
-    $best = $pdo->prepare("
-        SELECT MAX(score_pct)
-        FROM progress_tests_v2
-        WHERE user_id=?
-          AND cohort_id=?
-          AND lesson_id=?
-          AND status='completed'
-          {$nonStaleFilter}
-    ");
-    $best->execute([$userId, $cohortId, $lessonId]);
-    $bestScore = $best->fetchColumn();
-    $bestScore = ($bestScore === null) ? null : (int)$bestScore;
-
-    $pass = $pdo->prepare("
-        SELECT 1
-        FROM progress_tests_v2
-        WHERE user_id=?
-          AND cohort_id=?
-          AND lesson_id=?
-          AND status='completed'
-          AND pass_gate_met=1
-          {$nonStaleFilter}
-        LIMIT 1
-    ");
-    $pass->execute([$userId, $cohortId, $lessonId]);
-    $passed = (bool)$pass->fetchColumn();
-
-    return [
-        'max_attempt' => $maxAttempt,
-        'last' => $row ?: null,
-        'best_score' => $bestScore,
-        'passed' => $passed
-    ];
-}
-
-
-
-function get_instructor_decision_state(PDO $pdo, $userId, $cohortId, $lessonId) {
-    $st = $pdo->prepare("
-        SELECT
-            granted_extra_attempts,
-            one_on_one_required,
-            one_on_one_completed,
-            training_suspended
-        FROM lesson_activity
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id = ?
-        LIMIT 1
-    ");
-    $st->execute([$userId, $cohortId, $lessonId]);
-    $row = $st->fetch(PDO::FETCH_ASSOC);
-
-    return [
-        'granted_extra_attempts' => (int)($row['granted_extra_attempts'] ?? 0),
-        'one_on_one_required' => (int)($row['one_on_one_required'] ?? 0),
-        'one_on_one_completed' => (int)($row['one_on_one_completed'] ?? 0),
-        'training_suspended' => (int)($row['training_suspended'] ?? 0),
-    ];
-}
-
-
 function get_pending_required_action_map(PDO $pdo, int $userId, int $cohortId): array {
     $st = $pdo->prepare("
         SELECT lesson_id, action_type, id, token, title
@@ -314,21 +178,6 @@ function get_pending_required_action_map(PDO $pdo, int $userId, int $cohortId): 
     }
 
     return $map;
-}
-
-function get_lesson_activity_state(PDO $pdo, int $userId, int $cohortId, int $lessonId): array {
-    $st = $pdo->prepare("
-        SELECT *
-        FROM lesson_activity
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id = ?
-        LIMIT 1
-    ");
-    $st->execute([$userId, $cohortId, $lessonId]);
-    $row = $st->fetch(PDO::FETCH_ASSOC);
-
-    return is_array($row) ? $row : [];
 }
 
 function deadline_meta($deadlineUtc, $displayTimezone = 'UTC') {
@@ -477,7 +326,7 @@ function score_badge_meta($testPassed, $bestScore, $last, $attemptsLeft) {
 
 function lesson_primary_action($lx) {
     $deadlineLabel = strtolower((string)($lx['deadline']['label'] ?? ''));
-	$isPriority = (!empty($lx['deadline_passed']) && empty($lx['passed']));
+    $isPriority = (!empty($lx['deadline_passed']) && empty($lx['passed']));
 
     if (!empty($lx['instructor_decision']['training_suspended'])) {
         return [
@@ -489,36 +338,36 @@ function lesson_primary_action($lx) {
         ];
     }
 
-		if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])) {
-		return [
-			'priority' => 5,
-			'label' => 'Submit Reason',
-			'href' => (string)$lx['action_required_url'],
-			'class' => 'warn',
-			'note' => 'Deadline reason required'
-		];
-	}
+    if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])) {
+        return [
+            'priority' => 5,
+            'label' => 'Submit Reason',
+            'href' => (string)$lx['action_required_url'],
+            'class' => 'warn',
+            'note' => 'Deadline reason required'
+        ];
+    }
 
-	if (!empty($lx['pending_remediation']) && !empty($lx['action_required_url'])) {
-		return [
-			'priority' => 6,
-			'label' => 'Complete Action',
-			'href' => (string)$lx['action_required_url'],
-			'class' => 'warn',
-			'note' => 'Remedial study acknowledgement required'
-		];
-	}
+    if (!empty($lx['pending_remediation']) && !empty($lx['action_required_url'])) {
+        return [
+            'priority' => 6,
+            'label' => 'Complete Action',
+            'href' => (string)$lx['action_required_url'],
+            'class' => 'warn',
+            'note' => 'Remedial study acknowledgement required'
+        ];
+    }
 
-	if (!empty($lx['pending_instructor_approval'])) {
-		return [
-			'priority' => 7,
-			'label' => '',
-			'href' => '',
-			'class' => 'warn',
-			'note' => 'Awaiting instructor approval'
-		];
-}	
-	
+    if (!empty($lx['pending_instructor_approval'])) {
+        return [
+            'priority' => 7,
+            'label' => '',
+            'href' => '',
+            'class' => 'warn',
+            'note' => 'Awaiting instructor approval'
+        ];
+    }
+
     if ((string)$lx['summary_review_status'] === 'needs_revision' && (int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
         return [
             'priority' => 10,
@@ -651,6 +500,181 @@ function module_motivation_meta(array $course) {
     return ['label' => 'On Track', 'class' => 'neutral', 'micro' => 'A manageable module to continue building steadily.'];
 }
 
+function course_sql_in_placeholders(array $ids) {
+    return implode(',', array_fill(0, count($ids), '?'));
+}
+
+function course_index_first_slide_map(PDO $pdo, array $lessonIds): array {
+    $map = [];
+    if (!$lessonIds) return $map;
+
+    $sql = "
+        SELECT lesson_id, id
+        FROM slides
+        WHERE is_deleted = 0
+          AND lesson_id IN (" . course_sql_in_placeholders($lessonIds) . ")
+        ORDER BY lesson_id ASC, page_number ASC, id ASC
+    ";
+    $st = $pdo->prepare($sql);
+    $st->execute($lessonIds);
+
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $lessonId = (int)$row['lesson_id'];
+        if (!isset($map[$lessonId])) {
+            $map[$lessonId] = (int)$row['id'];
+        }
+    }
+
+    return $map;
+}
+
+function course_index_lesson_activity_map(PDO $pdo, int $userId, int $cohortId, array $lessonIds): array {
+    $map = [];
+    if (!$lessonIds) return $map;
+
+    $params = array_merge([$userId, $cohortId], $lessonIds);
+
+    $sql = "
+        SELECT *
+        FROM lesson_activity
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id IN (" . course_sql_in_placeholders($lessonIds) . ")
+    ";
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[(int)$row['lesson_id']] = $row;
+    }
+
+    return $map;
+}
+
+function course_index_summary_map(PDO $pdo, int $userId, int $cohortId, array $lessonIds): array {
+    $map = [];
+    if (!$lessonIds) return $map;
+
+    $params = array_merge([$userId, $cohortId], $lessonIds);
+
+    $sql = "
+        SELECT lesson_id, summary_plain, review_status, review_score, updated_at, review_feedback, review_notes_by_instructor
+        FROM lesson_summaries
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id IN (" . course_sql_in_placeholders($lessonIds) . ")
+    ";
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[(int)$row['lesson_id']] = get_summary_state_from_row($row);
+    }
+
+    return $map;
+}
+
+function course_index_progress_test_map(PDO $pdo, int $userId, int $cohortId, array $lessonIds): array {
+    $map = [];
+    if (!$lessonIds) return $map;
+
+    foreach ($lessonIds as $lessonId) {
+        $map[(int)$lessonId] = [
+            'max_attempt' => 0,
+            'last' => null,
+            'best_score' => null,
+            'passed' => false
+        ];
+    }
+
+    $params = array_merge([$userId, $cohortId], $lessonIds);
+
+    $sql = "
+        SELECT lesson_id, attempt, status, score_pct, started_at, completed_at, pass_gate_met, formal_result_code, counts_as_unsat, id
+        FROM progress_tests_v2
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id IN (" . course_sql_in_placeholders($lessonIds) . ")
+        ORDER BY lesson_id ASC, attempt DESC, id DESC
+    ";
+    $st = $pdo->prepare($sql);
+    $st->execute($params);
+
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $lessonId = (int)$row['lesson_id'];
+        $formalResultCode = (string)($row['formal_result_code'] ?? '');
+        $countsAsUnsat = (int)($row['counts_as_unsat'] ?? 0);
+        $passGateMet = (int)($row['pass_gate_met'] ?? 0);
+        $status = (string)($row['status'] ?? '');
+
+        $isStaleNoise = ($formalResultCode === 'STALE_ABORTED' && $countsAsUnsat === 0 && $passGateMet === 0);
+        if ($isStaleNoise) {
+            continue;
+        }
+
+        $attempt = (int)($row['attempt'] ?? 0);
+        if ($attempt > $map[$lessonId]['max_attempt']) {
+            $map[$lessonId]['max_attempt'] = $attempt;
+        }
+
+        if ($map[$lessonId]['last'] === null) {
+            $map[$lessonId]['last'] = [
+                'attempt' => $attempt,
+                'status' => $status,
+                'score_pct' => ($row['score_pct'] === null ? null : (int)$row['score_pct']),
+                'started_at' => (string)($row['started_at'] ?? ''),
+                'completed_at' => (string)($row['completed_at'] ?? '')
+            ];
+        }
+
+        if ($status === 'completed' && $row['score_pct'] !== null) {
+            $score = (int)$row['score_pct'];
+            if ($map[$lessonId]['best_score'] === null || $score > $map[$lessonId]['best_score']) {
+                $map[$lessonId]['best_score'] = $score;
+            }
+        }
+
+        if ($status === 'completed' && $passGateMet === 1) {
+            $map[$lessonId]['passed'] = true;
+        }
+    }
+
+    return $map;
+}
+
+function course_lesson_passed_cached(array $activityMap, array $testMap, int $lessonId): bool {
+    $activity = isset($activityMap[$lessonId]) && is_array($activityMap[$lessonId]) ? $activityMap[$lessonId] : [];
+    $completionStatus = (string)($activity['completion_status'] ?? '');
+    $testPassStatus = (string)($activity['test_pass_status'] ?? '');
+
+    if ($completionStatus === 'completed' || $testPassStatus === 'passed') {
+        return true;
+    }
+
+    return !empty($testMap[$lessonId]['passed']);
+}
+
+function course_get_summary_state_cached(array $summaryMap, int $lessonId): array {
+    return isset($summaryMap[$lessonId]) && is_array($summaryMap[$lessonId])
+        ? $summaryMap[$lessonId]
+        : [
+            'len' => 0,
+            'review_status' => '',
+            'review_score' => null,
+            'updated_at' => '',
+            'review_feedback' => '',
+            'review_notes_by_instructor' => '',
+            'has_summary' => false,
+            'ok' => false
+        ];
+}
+
+function course_get_lesson_activity_state_cached(array $activityMap, int $lessonId): array {
+    return isset($activityMap[$lessonId]) && is_array($activityMap[$lessonId])
+        ? $activityMap[$lessonId]
+        : [];
+}
+
 $lessonRows = $pdo->prepare("
   SELECT
     d.deadline_utc,
@@ -671,6 +695,27 @@ $lessonRows = $pdo->prepare("
 $lessonRows->execute([$cohortId]);
 $lessonRows = $lessonRows->fetchAll(PDO::FETCH_ASSOC);
 
+$lessonIds = [];
+foreach ($lessonRows as $lr) {
+    $lessonIds[] = (int)$lr['lesson_id'];
+}
+
+$activityMap = [];
+$summaryMap = [];
+$testMap = [];
+$firstSlideMap = [];
+
+if ($role === 'student' && $lessonIds) {
+    $activityMap = course_index_lesson_activity_map($pdo, $userId, $cohortId, $lessonIds);
+    $summaryMap = course_index_summary_map($pdo, $userId, $cohortId, $lessonIds);
+    $testMap = course_index_progress_test_map($pdo, $userId, $cohortId, $lessonIds);
+    $firstSlideMap = course_index_first_slide_map($pdo, $lessonIds);
+}
+
+if ($role === 'admin' && $lessonIds) {
+    $firstSlideMap = course_index_first_slide_map($pdo, $lessonIds);
+}
+
 $courseBlocks = [];
 $totalLessons = 0;
 $totalCompletedLessons = 0;
@@ -683,32 +728,32 @@ foreach ($lessonRows as $l) {
     $lessonId = (int)$l['lesson_id'];
     $courseId = (int)$l['course_id'];
 
-$activityState = ($role === 'admin')
-    ? []
-    : get_lesson_activity_state($pdo, $userId, $cohortId, $lessonId);
+    $activityState = ($role === 'admin')
+        ? []
+        : course_get_lesson_activity_state_cached($activityMap, $lessonId);
 
-$effectiveDeadlineState = ($role === 'admin')
-    ? [
-        'effective_deadline_utc' => (string)$l['deadline_utc'],
-        'deadline_source' => 'cohort_default',
-        'base_deadline_utc' => (string)$l['deadline_utc'],
-        'override_id' => null,
-        'deadline_passed' => false,
-    ]
-    : $progression->resolveDeadlineState($userId, $cohortId, $lessonId);
+    $effectiveDeadlineState = ($role === 'admin')
+        ? [
+            'effective_deadline_utc' => (string)$l['deadline_utc'],
+            'deadline_source' => 'cohort_default',
+            'base_deadline_utc' => (string)$l['deadline_utc'],
+            'override_id' => null,
+            'deadline_passed' => false,
+        ]
+        : $progression->resolveDeadlineState($userId, $cohortId, $lessonId);
 
-$effectiveDeadlineUtc = (string)($effectiveDeadlineState['effective_deadline_utc'] ?? (string)$l['deadline_utc']);
-$baseDeadlineUtc = (string)($effectiveDeadlineState['base_deadline_utc'] ?? (string)$l['deadline_utc']);
-$deadlineSource = (string)($effectiveDeadlineState['deadline_source'] ?? 'cohort_default');
+    $effectiveDeadlineUtc = (string)($effectiveDeadlineState['effective_deadline_utc'] ?? (string)$l['deadline_utc']);
+    $baseDeadlineUtc = (string)($effectiveDeadlineState['base_deadline_utc'] ?? (string)$l['deadline_utc']);
+    $deadlineSource = (string)($effectiveDeadlineState['deadline_source'] ?? 'cohort_default');
 
-$pendingActions = ($role === 'admin')
-    ? []
-    : ($pendingRequiredActionsByLesson[$lessonId] ?? []);
+    $pendingActions = ($role === 'admin')
+        ? []
+        : ($pendingRequiredActionsByLesson[$lessonId] ?? []);
 
-$pendingDeadlineReason = !empty($pendingActions['deadline_reason_submission']);
-$pendingRemediation = !empty($pendingActions['remediation_acknowledgement']);
-$pendingInstructorApproval = !empty($pendingActions['instructor_approval']);
-	
+    $pendingDeadlineReason = !empty($pendingActions['deadline_reason_submission']);
+    $pendingRemediation = !empty($pendingActions['remediation_acknowledgement']);
+    $pendingInstructorApproval = !empty($pendingActions['instructor_approval']);
+
     if (!isset($courseBlocks[$courseId])) {
         $courseBlocks[$courseId] = [
             'course_id' => $courseId,
@@ -723,45 +768,37 @@ $pendingInstructorApproval = !empty($pendingActions['instructor_approval']);
     $passed = false;
 
     if ($role === 'student') {
-    try {
-        $locked = !$progression->canAccessLessonContent(
-            $userId,
-            $cohortId,
-            $lessonId,
-            $courseId,
-            (int)$l['unlock_after_lesson_id']
-        );
-    } catch (Throwable $e) {
-        error_log(
-            'COURSE_ACCESS_FALLBACK user_id=' . (int)$userId .
-            ' cohort_id=' . (int)$cohortId .
-            ' lesson_id=' . (int)$lessonId .
-            ' course_id=' . (int)$courseId .
-            ' msg=' . $e->getMessage()
-        );
+        try {
+            $locked = !$progression->canAccessLessonContent(
+                $userId,
+                $cohortId,
+                $lessonId,
+                $courseId,
+                (int)$l['unlock_after_lesson_id']
+            );
+        } catch (Throwable $e) {
+            error_log(
+                'COURSE_ACCESS_FALLBACK user_id=' . (int)$userId .
+                ' cohort_id=' . (int)$cohortId .
+                ' lesson_id=' . (int)$lessonId .
+                ' course_id=' . (int)$courseId .
+                ' msg=' . $e->getMessage()
+            );
 
-        $locked = false;
-        if ((int)$l['unlock_after_lesson_id'] > 0) {
-            $locked = !lesson_passed($pdo, $userId, $cohortId, (int)$l['unlock_after_lesson_id']);
+            $locked = false;
+            if ((int)$l['unlock_after_lesson_id'] > 0) {
+                $locked = !course_lesson_passed_cached($activityMap, $testMap, (int)$l['unlock_after_lesson_id']);
+            }
         }
+
+        $passed = course_lesson_passed_cached($activityMap, $testMap, $lessonId);
     }
 
-    $passed = lesson_passed($pdo, $userId, $cohortId, $lessonId);
-}
-
-    $first = $pdo->prepare("
-        SELECT id
-        FROM slides
-        WHERE lesson_id=? AND is_deleted=0
-        ORDER BY page_number ASC
-        LIMIT 1
-    ");
-    $first->execute([$lessonId]);
-    $firstSlideId = (int)$first->fetchColumn();
+    $firstSlideId = isset($firstSlideMap[$lessonId]) ? (int)$firstSlideMap[$lessonId] : 0;
 
     $summaryState = ($role === 'admin')
         ? ['len' => 9999, 'review_status' => 'acceptable', 'review_score' => 90, 'updated_at' => '', 'review_feedback' => '', 'review_notes_by_instructor' => '', 'has_summary' => true, 'ok' => true]
-        : get_summary_state($pdo, $userId, $cohortId, $lessonId);
+        : course_get_summary_state_cached($summaryMap, $lessonId);
 
     $summaryMeta = summary_quality_meta($summaryState);
     $sumLen = (int)$summaryState['len'];
@@ -772,61 +809,61 @@ $pendingInstructorApproval = !empty($pendingActions['instructor_approval']);
 
     $test = ($role === 'admin')
         ? ['max_attempt' => 0, 'last' => null, 'best_score' => null, 'passed' => false]
-        : get_test_status_v2($pdo, $userId, $cohortId, $lessonId);
+        : (isset($testMap[$lessonId]) ? $testMap[$lessonId] : ['max_attempt' => 0, 'last' => null, 'best_score' => null, 'passed' => false]);
 
     $last = $test['last'];
     $attemptsUsed = (int)$test['max_attempt'];
 
     $instructorDecision = ($role === 'admin')
-    ? [
-        'granted_extra_attempts' => 0,
-        'one_on_one_required' => 0,
-        'one_on_one_completed' => 0,
-        'training_suspended' => 0,
-    ]
-    : [
-        'granted_extra_attempts' => (int)($activityState['granted_extra_attempts'] ?? 0),
-        'one_on_one_required' => (int)($activityState['one_on_one_required'] ?? 0),
-        'one_on_one_completed' => (int)($activityState['one_on_one_completed'] ?? 0),
-        'training_suspended' => (int)($activityState['training_suspended'] ?? 0),
-    ];
+        ? [
+            'granted_extra_attempts' => 0,
+            'one_on_one_required' => 0,
+            'one_on_one_completed' => 0,
+            'training_suspended' => 0,
+        ]
+        : [
+            'granted_extra_attempts' => (int)($activityState['granted_extra_attempts'] ?? 0),
+            'one_on_one_required' => (int)($activityState['one_on_one_required'] ?? 0),
+            'one_on_one_completed' => (int)($activityState['one_on_one_completed'] ?? 0),
+            'training_suspended' => (int)($activityState['training_suspended'] ?? 0),
+        ];
 
-$attemptState = ($role === 'admin')
-    ? [
-        'effective_allowed_attempts' => $attemptsUsed,
-        'remaining_attempts' => 0,
-    ]
-    : $progression->resolveAttemptPolicyState(
-        $userId,
-        $cohortId,
-        $lessonId,
-        $policy,
-        $attemptsUsed
-    );
+    $attemptState = ($role === 'admin')
+        ? [
+            'effective_allowed_attempts' => $attemptsUsed,
+            'remaining_attempts' => 0,
+        ]
+        : $progression->resolveAttemptPolicyState(
+            $userId,
+            $cohortId,
+            $lessonId,
+            $policy,
+            $attemptsUsed
+        );
 
-$maxAllowedAttempts = (int)($attemptState['effective_allowed_attempts'] ?? $attemptsUsed);
-$attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
+    $maxAllowedAttempts = (int)($attemptState['effective_allowed_attempts'] ?? $attemptsUsed);
+    $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
 
     $testPassed = !empty($test['passed']);
     $bestScore = $test['best_score'];
 
-  	$canTest = true;
-	if ($role === 'student' && $locked) $canTest = false;
-	if ($role === 'student' && !$summaryOk) $canTest = false;
-	if ($role === 'student' && $testPassed) $canTest = false;
-	if ($role === 'student' && $attemptsLeft <= 0) $canTest = false;
-	if ($role === 'student' && (int)$instructorDecision['training_suspended'] === 1) $canTest = false;
-	if ($role === 'student' && $pendingDeadlineReason) $canTest = false;
-	if ($role === 'student' && $pendingRemediation) $canTest = false;
-	if ($role === 'student' && $pendingInstructorApproval) $canTest = false;
-	if ($role === 'student' && !empty($effectiveDeadlineState['deadline_passed'])) $canTest = false;
-	if (
-		$role === 'student' &&
-		(int)$instructorDecision['one_on_one_required'] === 1 &&
-		(int)$instructorDecision['one_on_one_completed'] !== 1
-	) {
-		$canTest = false;
-	}
+    $canTest = true;
+    if ($role === 'student' && $locked) $canTest = false;
+    if ($role === 'student' && !$summaryOk) $canTest = false;
+    if ($role === 'student' && $testPassed) $canTest = false;
+    if ($role === 'student' && $attemptsLeft <= 0) $canTest = false;
+    if ($role === 'student' && (int)$instructorDecision['training_suspended'] === 1) $canTest = false;
+    if ($role === 'student' && $pendingDeadlineReason) $canTest = false;
+    if ($role === 'student' && $pendingRemediation) $canTest = false;
+    if ($role === 'student' && $pendingInstructorApproval) $canTest = false;
+    if ($role === 'student' && !empty($effectiveDeadlineState['deadline_passed'])) $canTest = false;
+    if (
+        $role === 'student' &&
+        (int)$instructorDecision['one_on_one_required'] === 1 &&
+        (int)$instructorDecision['one_on_one_completed'] !== 1
+    ) {
+        $canTest = false;
+    }
 
     $ptUrlV2 = '/student/progress_test_v2.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
     $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc, $cohortTimezone);
@@ -860,17 +897,17 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'lesson_title' => (string)$l['lesson_title'],
         'course_title' => (string)$l['course_title'],
         'deadline_utc' => $effectiveDeadlineUtc,
-		'base_deadline_utc' => $baseDeadlineUtc,
-		'deadline_source' => (string)($effectiveDeadlineState['deadline_source'] ?? 'cohort_default'),
-		'deadline_passed' => !empty($effectiveDeadlineState['deadline_passed']),
-		'pending_deadline_reason' => $pendingDeadlineReason,
-		'pending_remediation' => $pendingRemediation,
-		'pending_instructor_approval' => $pendingInstructorApproval,
-		'action_required_url' => $pendingDeadlineReason
-			? ('/student/remediation_action.php?token=' . urlencode((string)$pendingActions['deadline_reason_submission']['token']))
-			: ($pendingRemediation
-        		? ('/student/remediation_action.php?token=' . urlencode((string)$pendingActions['remediation_acknowledgement']['token']))
-        		: ''),
+        'base_deadline_utc' => $baseDeadlineUtc,
+        'deadline_source' => (string)($effectiveDeadlineState['deadline_source'] ?? 'cohort_default'),
+        'deadline_passed' => !empty($effectiveDeadlineState['deadline_passed']),
+        'pending_deadline_reason' => $pendingDeadlineReason,
+        'pending_remediation' => $pendingRemediation,
+        'pending_instructor_approval' => $pendingInstructorApproval,
+        'action_required_url' => $pendingDeadlineReason
+            ? ('/student/remediation_action.php?token=' . urlencode((string)$pendingActions['deadline_reason_submission']['token']))
+            : ($pendingRemediation
+                ? ('/student/remediation_action.php?token=' . urlencode((string)$pendingActions['remediation_acknowledgement']['token']))
+                : ''),
         'deadline' => $deadline,
         'locked' => $locked,
         'passed' => $passed,
@@ -887,7 +924,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'instructor_decision' => $instructorDecision,
         'progress_test_url' => $ptUrlV2,
         'first_slide_id' => $firstSlideId,
-		'activity_state' => $activityState,
+        'activity_state' => $activityState,
     ];
 
     $row['primary_action'] = lesson_primary_action($row);
@@ -895,7 +932,6 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
     $courseBlocks[$courseId]['lessons'][] = $row;
     $courseBlocks[$courseId]['last_deadline_utc'] = $effectiveDeadlineUtc;
 }
-
 
 
 $courseBlocks = array_values($courseBlocks);
