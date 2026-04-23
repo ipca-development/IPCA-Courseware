@@ -807,8 +807,27 @@ cw_header('Theory Training');
 .cohort-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
 .cohort-field label{display:block;font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#64748b;margin-bottom:6px}
 .cohort-input,.cohort-select{
-    width:100%;box-sizing:border-box;border:1px solid rgba(15,23,42,.12);
-    border-radius:12px;padding:11px 12px;background:#fff;color:#102845;font:inherit;
+    width:100%;
+    box-sizing:border-box;
+    border:1px solid rgba(15,23,42,.12);
+    border-radius:12px;
+    padding:11px 12px;
+    min-height:44px;
+    height:44px;
+    background:#fff;
+    color:#102845;
+    font:inherit;
+    line-height:1.2;
+}
+.cohort-select{
+    -webkit-appearance:none;
+    -moz-appearance:none;
+    appearance:none;
+    background-image:linear-gradient(45deg, transparent 50%, #64748b 50%),linear-gradient(135deg, #64748b 50%, transparent 50%);
+    background-position:calc(100% - 18px) calc(50% - 2px), calc(100% - 12px) calc(50% - 2px);
+    background-size:6px 6px, 6px 6px;
+    background-repeat:no-repeat;
+    padding-right:34px;
 }
 .cohort-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
 .cohort-kpi{
@@ -1165,7 +1184,6 @@ cw_header('Theory Training');
         </section>
     </div>
 
-	
     <div class="cohort-grid-two">
         <section class="card cohort-card-pad" id="courses">
             <h2 class="cohort-section-title">Courses and lesson scope</h2>
