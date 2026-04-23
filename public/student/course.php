@@ -723,6 +723,7 @@ $pendingInstructorApproval = !empty($pendingActions['instructor_approval']);
     $passed = false;
 
     if ($role === 'student') {
+    try {
         $locked = !$progression->canAccessLessonContent(
             $userId,
             $cohortId,
@@ -730,8 +731,23 @@ $pendingInstructorApproval = !empty($pendingActions['instructor_approval']);
             $courseId,
             (int)$l['unlock_after_lesson_id']
         );
-        $passed = lesson_passed($pdo, $userId, $cohortId, $lessonId);
+    } catch (Throwable $e) {
+        error_log(
+            'COURSE_ACCESS_FALLBACK user_id=' . (int)$userId .
+            ' cohort_id=' . (int)$cohortId .
+            ' lesson_id=' . (int)$lessonId .
+            ' course_id=' . (int)$courseId .
+            ' msg=' . $e->getMessage()
+        );
+
+        $locked = false;
+        if ((int)$l['unlock_after_lesson_id'] > 0) {
+            $locked = !lesson_passed($pdo, $userId, $cohortId, (int)$l['unlock_after_lesson_id']);
+        }
     }
+
+    $passed = lesson_passed($pdo, $userId, $cohortId, $lessonId);
+}
 
     $first = $pdo->prepare("
         SELECT id
