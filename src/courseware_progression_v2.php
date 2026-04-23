@@ -323,61 +323,83 @@ final class CoursewareProgressionV2
         return true;
     }
 
-    public function canAccessLessonContent(
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        ?int $courseId = null,
-        ?int $unlockAfterLessonId = null
-    ): bool {
-        if ($lessonId <= 0) {
-            return false;
-        }
+public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId, $unlockAfterLessonId)
+{
+    // POLICY
+    $policies = $this->getAllPolicies(['cohort_id' => $cohortId]);
+    $allowFreeStudy = (int)($policies['allow_free_study_within_course_before_test_completion'] ?? 0) === 1;
 
-        $courseId = ($courseId !== null && $courseId > 0) ? $courseId : $this->getLessonCourseId($lessonId);
-        if ($courseId <= 0) {
-            return false;
-        }
+    // If policy OFF → default behavior
+    if (!$allowFreeStudy) {
+        if ((int)$unlockAfterLessonId <= 0) return true;
 
-        if ($unlockAfterLessonId === null) {
-            $depStmt = $this->pdo->prepare("
-                SELECT unlock_after_lesson_id
-                FROM cohort_lesson_deadlines
-                WHERE cohort_id = :cohort_id
-                  AND lesson_id = :lesson_id
-                LIMIT 1
-            "
-            );
-            $depStmt->execute([
-                ':cohort_id' => $cohortId,
-                ':lesson_id' => $lessonId,
-            ]);
-            $unlockAfterLessonId = (int)($depStmt->fetchColumn() ?: 0);
-        }
-
-        $unlockAfterLessonId = (int)$unlockAfterLessonId;
-        if ($unlockAfterLessonId <= 0) {
-            return true;
-        }
-
-        $requiredCourseId = $this->getLessonCourseId($unlockAfterLessonId);
-        if ($requiredCourseId <= 0) {
-            return false;
-        }
-
-        if (
-            $this->isFreeStudyWithinCourseEnabled($cohortId, $courseId)
-            && $requiredCourseId === $courseId
-        ) {
-            return true;
-        }
-
-        if ($requiredCourseId !== $courseId) {
-            return $this->isCourseCompletedForProgression($userId, $cohortId, $requiredCourseId);
-        }
-
-        return $this->lessonHasCanonicalPass($userId, $cohortId, $unlockAfterLessonId);
+        return $this->lessonHasCanonicalPass($userId, $cohortId, (int)$unlockAfterLessonId);
     }
+
+    // POLICY ON → free study within course
+
+    // 1. Get all courses in order for this cohort
+    $st = $this->pdo->prepare("
+        SELECT DISTINCT c.id, c.sort_order
+        FROM cohort_lesson_deadlines d
+        JOIN lessons l ON l.id = d.lesson_id
+        JOIN courses c ON c.id = l.course_id
+        WHERE d.cohort_id = ?
+        ORDER BY c.sort_order ASC
+    ");
+    $st->execute([$cohortId]);
+    $courses = $st->fetchAll(PDO::FETCH_ASSOC);
+
+    if (!$courses || !is_array($courses)) {
+        // Fail-safe: allow access instead of crashing
+        return true;
+    }
+
+    // 2. Find current course index
+    $currentCourseIndex = null;
+    foreach ($courses as $idx => $c) {
+        if ((int)$c['id'] === (int)$courseId) {
+            $currentCourseIndex = $idx;
+            break;
+        }
+    }
+
+    // If not found → fail-safe allow
+    if ($currentCourseIndex === null) {
+        return true;
+    }
+
+    // 3. FIRST COURSE → always allow study
+    if ($currentCourseIndex === 0) {
+        return true;
+    }
+
+    // 4. Check if previous course is fully passed
+    $previousCourseId = (int)$courses[$currentCourseIndex - 1]['id'];
+
+    $stLessons = $this->pdo->prepare("
+        SELECT l.id
+        FROM lessons l
+        WHERE l.course_id = ?
+    ");
+    $stLessons->execute([$previousCourseId]);
+    $lessonIds = $stLessons->fetchAll(PDO::FETCH_COLUMN);
+
+    if (!$lessonIds) {
+        // No lessons → allow
+        return true;
+    }
+
+    foreach ($lessonIds as $prevLessonId) {
+        if (!$this->lessonHasCanonicalPass($userId, $cohortId, (int)$prevLessonId)) {
+            // Previous course NOT completed → block next course
+            return false;
+        }
+    }
+
+    // Previous course fully passed → allow access
+    return true;
+}
 
     public function resolveBehaviorMode(array $policy): array
     {
