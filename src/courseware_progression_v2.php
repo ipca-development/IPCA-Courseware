@@ -330,27 +330,30 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
     static $courseListCache = array();
     static $courseIndexCache = array();
     static $courseLessonMapCache = array();
+    static $passedLessonMapCache = array();
     static $coursePassCache = array();
 
-    $cacheKeyBase = (int)$userId . ':' . (int)$cohortId;
+    $cohortId = (int)$cohortId;
+    $courseId = (int)$courseId;
+    $userId = (int)$userId;
+    $unlockAfterLessonId = (int)$unlockAfterLessonId;
 
     if (!isset($policyCache[$cohortId])) {
         $policies = $this->getAllPolicies(array('cohort_id' => $cohortId));
-        $policyCache[$cohortId] = (int)($policies['allow_free_study_within_course_before_test_completion'] ?? 0);
+        $policyCache[$cohortId] = !empty($policies['allow_free_study_within_course_before_test_completion']) ? 1 : 0;
     }
 
     $allowFreeStudy = ((int)$policyCache[$cohortId] === 1);
 
     // Policy OFF = old sequential behavior
     if (!$allowFreeStudy) {
-        if ((int)$unlockAfterLessonId <= 0) {
+        if ($unlockAfterLessonId <= 0) {
             return true;
         }
-
-        return $this->lessonHasCanonicalPass($userId, $cohortId, (int)$unlockAfterLessonId);
+        return $this->lessonHasCanonicalPass($userId, $cohortId, $unlockAfterLessonId);
     }
 
-    // Load ordered cohort course list once
+    // Ordered course list for this cohort
     if (!isset($courseListCache[$cohortId])) {
         $st = $this->pdo->prepare("
             SELECT DISTINCT c.id, c.sort_order
@@ -361,9 +364,9 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
             ORDER BY c.sort_order ASC, c.id ASC
         ");
         $st->execute(array($cohortId));
-        $courseRows = $st->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
 
-        $courseListCache[$cohortId] = is_array($courseRows) ? $courseRows : array();
+        $courseListCache[$cohortId] = is_array($rows) ? $rows : array();
         $courseIndexCache[$cohortId] = array();
 
         foreach ($courseListCache[$cohortId] as $idx => $row) {
@@ -372,11 +375,11 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
     }
 
     // Unknown course = fail-safe allow
-    if (!isset($courseIndexCache[$cohortId][(int)$courseId])) {
+    if (!isset($courseIndexCache[$cohortId][$courseId])) {
         return true;
     }
 
-    $currentCourseIndex = (int)$courseIndexCache[$cohortId][(int)$courseId];
+    $currentCourseIndex = (int)$courseIndexCache[$cohortId][$courseId];
 
     // First course = always allow study
     if ($currentCourseIndex === 0) {
@@ -385,37 +388,78 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
 
     $previousCourseId = (int)$courseListCache[$cohortId][$currentCourseIndex - 1]['id'];
 
-    // Load cohort-scoped lesson ids for that previous course once
-    if (!isset($courseLessonMapCache[$cohortId][$previousCourseId])) {
-        $stLessons = $this->pdo->prepare("
-            SELECT d.lesson_id
+    // Cohort-scoped lessons for each course
+    if (!isset($courseLessonMapCache[$cohortId])) {
+        $courseLessonMapCache[$cohortId] = array();
+
+        $st = $this->pdo->prepare("
+            SELECT l.course_id, d.lesson_id
             FROM cohort_lesson_deadlines d
             JOIN lessons l ON l.id = d.lesson_id
             WHERE d.cohort_id = ?
-              AND l.course_id = ?
-            ORDER BY d.sort_order ASC, d.id ASC
+            ORDER BY l.course_id ASC, d.sort_order ASC, d.id ASC
         ");
-        $stLessons->execute(array($cohortId, $previousCourseId));
-        $lessonIds = $stLessons->fetchAll(PDO::FETCH_COLUMN);
+        $st->execute(array($cohortId));
 
-        $courseLessonMapCache[$cohortId][$previousCourseId] = is_array($lessonIds) ? $lessonIds : array();
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $cid = (int)$row['course_id'];
+            $lid = (int)$row['lesson_id'];
+
+            if (!isset($courseLessonMapCache[$cohortId][$cid])) {
+                $courseLessonMapCache[$cohortId][$cid] = array();
+            }
+
+            $courseLessonMapCache[$cohortId][$cid][] = $lid;
+        }
     }
 
-    $previousCourseLessonIds = $courseLessonMapCache[$cohortId][$previousCourseId];
-
-    // No lessons mapped in this cohort = fail-safe allow
-    if (!$previousCourseLessonIds) {
+    if (empty($courseLessonMapCache[$cohortId][$previousCourseId])) {
         return true;
     }
 
-    $coursePassKey = $cacheKeyBase . ':' . $previousCourseId;
+    // Passed lessons for this user/cohort, loaded once
+    $passedCacheKey = $userId . ':' . $cohortId;
+    if (!isset($passedLessonMapCache[$passedCacheKey])) {
+        $passedLessonMapCache[$passedCacheKey] = array();
 
-    // Compute "entire previous course passed" once per user/cohort/course
+        $st = $this->pdo->prepare("
+            SELECT DISTINCT lesson_id
+            FROM progress_tests_v2
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND status = 'completed'
+              AND pass_gate_met = 1
+        ");
+        $st->execute(array($userId, $cohortId));
+
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $passedLessonId) {
+            $passedLessonMapCache[$passedCacheKey][(int)$passedLessonId] = true;
+        }
+
+        $st2 = $this->pdo->prepare("
+            SELECT lesson_id
+            FROM lesson_activity
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND (
+                  completion_status = 'completed'
+                  OR test_pass_status = 'passed'
+              )
+        ");
+        $st2->execute(array($userId, $cohortId));
+
+        foreach ($st2->fetchAll(PDO::FETCH_COLUMN) as $passedLessonId) {
+            $passedLessonMapCache[$passedCacheKey][(int)$passedLessonId] = true;
+        }
+    }
+
+    $coursePassKey = $passedCacheKey . ':' . $previousCourseId;
+
     if (!isset($coursePassCache[$coursePassKey])) {
         $allPassed = true;
 
-        foreach ($previousCourseLessonIds as $prevLessonId) {
-            if (!$this->lessonHasCanonicalPass($userId, $cohortId, (int)$prevLessonId)) {
+        foreach ($courseLessonMapCache[$cohortId][$previousCourseId] as $prevLessonId) {
+            if (empty($passedLessonMapCache[$passedCacheKey][(int)$prevLessonId])) {
                 $allPassed = false;
                 break;
             }
