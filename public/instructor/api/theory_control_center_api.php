@@ -691,77 +691,161 @@ try {
         ));
     }
 
-    if ($action === 'debug_report') {
-        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
-        $studentId = tcc_int($_GET['student_id'] ?? 0);
-        $lessonId = tcc_int($_GET['lesson_id'] ?? 0);
-        $issueType = tcc_str($_GET['issue_type'] ?? '');
+if ($action === 'debug_report') {
+    $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
+    $studentId = tcc_int($_GET['student_id'] ?? 0);
+    $lessonId = tcc_int($_GET['lesson_id'] ?? 0);
+    $issueType = tcc_str($_GET['issue_type'] ?? '');
 
-        if ($cohortId <= 0 || $studentId <= 0 || $lessonId <= 0) {
-            tcc_json(array('ok' => false, 'error' => 'missing_required_ids'), 400);
-        }
-
-        $pt = $pdo->prepare("\n            SELECT id, attempt, status, formal_result_code, result_label, pass_gate_met, counts_as_unsat, score_pct, started_at, completed_at, updated_at\n            FROM progress_tests_v2\n            WHERE cohort_id = ?\n              AND user_id = ?\n              AND lesson_id = ?\n            ORDER BY id DESC\n            LIMIT 20\n        ");
-        $pt->execute(array($cohortId, $studentId, $lessonId));
-        $progressTests = $pt->fetchAll(PDO::FETCH_ASSOC);
-
-        $la = $pdo->prepare("\n            SELECT *\n            FROM lesson_activity\n            WHERE cohort_id = ?\n              AND user_id = ?\n              AND lesson_id = ?\n            LIMIT 1\n        ");
-        $la->execute(array($cohortId, $studentId, $lessonId));
-        $lessonActivity = $la->fetch(PDO::FETCH_ASSOC) ?: null;
-
-        $ra = $pdo->prepare("\n            SELECT id, action_type, status, title, created_at, opened_at, completed_at, updated_at\n            FROM student_required_actions\n            WHERE cohort_id = ?\n              AND user_id = ?\n              AND lesson_id = ?\n            ORDER BY id DESC\n            LIMIT 20\n        ");
-        $ra->execute(array($cohortId, $studentId, $lessonId));
-        $requiredActions = $ra->fetchAll(PDO::FETCH_ASSOC);
-
-        $emails = array();
-        $emailColumnState = tcc_table_has_columns($pdo, 'training_progression_emails', array(
-            'id', 'email_type', 'subject', 'sent_status', 'created_at', 'sent_at', 'cohort_id', 'user_id', 'lesson_id'
-        ));
-
-        if (!empty($emailColumnState['id']) && !empty($emailColumnState['cohort_id']) && !empty($emailColumnState['user_id']) && !empty($emailColumnState['lesson_id'])) {
-            try {
-                $selectCols = array('id');
-                if (!empty($emailColumnState['email_type'])) $selectCols[] = 'email_type';
-                if (!empty($emailColumnState['subject'])) $selectCols[] = 'subject';
-                if (!empty($emailColumnState['sent_status'])) $selectCols[] = 'sent_status';
-                if (!empty($emailColumnState['created_at'])) $selectCols[] = 'created_at';
-                if (!empty($emailColumnState['sent_at'])) $selectCols[] = 'sent_at';
-
-                $em = $pdo->prepare("\n                    SELECT " . implode(', ', $selectCols) . "\n                    FROM training_progression_emails\n                    WHERE cohort_id = ?\n                      AND user_id = ?\n                      AND lesson_id = ?\n                    ORDER BY id DESC\n                    LIMIT 20\n                ");
-                $em->execute(array($cohortId, $studentId, $lessonId));
-                $emails = $em->fetchAll(PDO::FETCH_ASSOC);
-            } catch (Throwable $e) {
-                $emails = array();
-            }
-        }
-
+    if ($cohortId <= 0 || $studentId <= 0 || $lessonId <= 0) {
         tcc_json(array(
-            'ok' => true,
-            'action' => 'debug_report',
-            'generated_at_utc' => gmdate('Y-m-d H:i:s'),
-            'issue_type' => $issueType !== '' ? $issueType : 'manual_debug_report',
-            'student_id' => $studentId,
-            'cohort_id' => $cohortId,
-            'lesson_id' => $lessonId,
-            'canonical' => array(
-                'progress_tests_v2' => $progressTests,
-                'required_actions' => $requiredActions,
-                'emails' => $emails,
-            ),
-            'projection' => array(
-                'lesson_activity' => $lessonActivity,
-            ),
-            'agent_instructions' => array(
-                'purpose' => 'Use this report to diagnose SSOT drift or progression blockage without guessing.',
-                'rules' => array(
-                    'Do not treat lesson_activity as canonical truth.',
-                    'PASS in progress_tests_v2 is terminal.',
-                    'Required actions must be checked against canonical completion state.',
-                    'Any manual repair must be auditable.'
-                ),
-            ),
-        ));
+            'ok' => false,
+            'error' => 'missing_required_ids'
+        ), 400);
     }
+
+    $pt = $pdo->prepare("
+        SELECT
+            id,
+            attempt,
+            status,
+            formal_result_code,
+            pass_gate_met,
+            counts_as_unsat,
+            score_pct,
+            started_at,
+            completed_at,
+            updated_at
+        FROM progress_tests_v2
+        WHERE cohort_id = ?
+          AND user_id = ?
+          AND lesson_id = ?
+        ORDER BY id DESC
+        LIMIT 20
+    ");
+    $pt->execute(array($cohortId, $studentId, $lessonId));
+    $progressTests = $pt->fetchAll(PDO::FETCH_ASSOC);
+
+    $la = $pdo->prepare("
+        SELECT *
+        FROM lesson_activity
+        WHERE cohort_id = ?
+          AND user_id = ?
+          AND lesson_id = ?
+        LIMIT 1
+    ");
+    $la->execute(array($cohortId, $studentId, $lessonId));
+    $lessonActivity = $la->fetch(PDO::FETCH_ASSOC);
+    if (!$lessonActivity) {
+        $lessonActivity = null;
+    }
+
+    $ra = $pdo->prepare("
+        SELECT
+            id,
+            action_type,
+            status,
+            title,
+            created_at,
+            opened_at,
+            completed_at,
+            updated_at
+        FROM student_required_actions
+        WHERE cohort_id = ?
+          AND user_id = ?
+          AND lesson_id = ?
+        ORDER BY id DESC
+        LIMIT 20
+    ");
+    $ra->execute(array($cohortId, $studentId, $lessonId));
+    $requiredActions = $ra->fetchAll(PDO::FETCH_ASSOC);
+
+    $emails = array();
+
+    $emailColumnState = tcc_table_has_columns($pdo, 'training_progression_emails', array(
+        'id',
+        'email_type',
+        'subject',
+        'sent_status',
+        'created_at',
+        'sent_at',
+        'cohort_id',
+        'user_id',
+        'lesson_id'
+    ));
+
+    if (
+        !empty($emailColumnState['id']) &&
+        !empty($emailColumnState['cohort_id']) &&
+        !empty($emailColumnState['user_id']) &&
+        !empty($emailColumnState['lesson_id'])
+    ) {
+        try {
+            $selectCols = array('id');
+
+            if (!empty($emailColumnState['email_type'])) {
+                $selectCols[] = 'email_type';
+            }
+
+            if (!empty($emailColumnState['subject'])) {
+                $selectCols[] = 'subject';
+            }
+
+            if (!empty($emailColumnState['sent_status'])) {
+                $selectCols[] = 'sent_status';
+            }
+
+            if (!empty($emailColumnState['created_at'])) {
+                $selectCols[] = 'created_at';
+            }
+
+            if (!empty($emailColumnState['sent_at'])) {
+                $selectCols[] = 'sent_at';
+            }
+
+            $em = $pdo->prepare("
+                SELECT " . implode(', ', $selectCols) . "
+                FROM training_progression_emails
+                WHERE cohort_id = ?
+                  AND user_id = ?
+                  AND lesson_id = ?
+                ORDER BY id DESC
+                LIMIT 20
+            ");
+            $em->execute(array($cohortId, $studentId, $lessonId));
+            $emails = $em->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            $emails = array();
+        }
+    }
+
+    tcc_json(array(
+        'ok' => true,
+        'action' => 'debug_report',
+        'generated_at_utc' => gmdate('Y-m-d H:i:s'),
+        'issue_type' => ($issueType !== '' ? $issueType : 'manual_debug_report'),
+        'student_id' => $studentId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
+        'canonical' => array(
+            'progress_tests_v2' => $progressTests,
+            'required_actions' => $requiredActions,
+            'emails' => $emails
+        ),
+        'projection' => array(
+            'lesson_activity' => $lessonActivity
+        ),
+        'agent_instructions' => array(
+            'purpose' => 'Use this report to diagnose SSOT drift or progression blockage without guessing.',
+            'rules' => array(
+                'Do not treat lesson_activity as canonical truth.',
+                'PASS in progress_tests_v2 is terminal.',
+                'Required actions must be checked against canonical completion state.',
+                'Any manual repair must be auditable.'
+            )
+        )
+    ));
+}
 
     tcc_json(array(
         'ok' => false,
