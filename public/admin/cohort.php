@@ -889,8 +889,12 @@ cw_header('Theory Training');
     background:#e5e7eb;
     color:#64748b;
 }
-.cohort-scope-title{font-size:15px;font-weight:800;color:#102845}
-.cohort-scope-meta{font-size:12px;color:#64748b;margin-top:4px}
+.cohort-scope-title{font-size:15px;font-weight:800;color:#102845;line-height:1.25;overflow-wrap:anywhere;word-break:break-word}
+.cohort-scope-meta{font-size:12px;color:#64748b;margin-top:4px;line-height:1.6;white-space:normal;overflow-wrap:anywhere;word-break:break-word}
+.cohort-policy-card{overflow:hidden}
+.cohort-policy-card .cohort-scope-head{display:block}
+.cohort-policy-card .cohort-scope-meta{max-width:none}
+.cohort-policy-toggle-wrap{margin-top:14px;max-width:320px}
 .cohort-scope-lessons{display:grid;gap:8px;margin-top:12px}
 .cohort-scope-lesson{
     display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:12px;background:#fff;border:1px solid rgba(15,23,42,.05);
@@ -1191,27 +1195,26 @@ cw_header('Theory Training');
                 Admin-selected scope is authoritative. Advisory scheduling rules must never silently remove courses or lessons from storage.
             </p>
 
-            <div class="cohort-scope-card" style="margin-bottom:14px;">
-                <div class="cohort-scope-head">
-                    <div>
-                        <div class="cohort-scope-title">Allow free study within course before test completion</div>
-                        <div class="cohort-scope-meta" style="margin-top:6px; max-width:780px; white-space:normal;">
-                            When enabled, students may open and summarize any lesson within the same course before earlier lesson progress tests are passed. The next course remains locked until all lesson progress tests in the current course are passed.
-                        </div>
-                    </div>
-                </div>
-            </div>
-
             <form method="post">
                 <input type="hidden" name="action" value="save_scope">
                 <input type="hidden" name="program_id" value="<?php echo (int)$programId; ?>">
 
-                <div class="cohort-field" style="margin-bottom:14px; max-width:320px;">
-                    <label>Course study flow</label>
-                    <select class="cohort-select" name="allow_free_study_within_course_before_test_completion">
-                        <option value="0" <?php echo ($allowFreeStudyWithinCourseBeforeTestCompletion === '0') ? 'selected' : ''; ?>>OFF</option>
-                        <option value="1" <?php echo ($allowFreeStudyWithinCourseBeforeTestCompletion === '1') ? 'selected' : ''; ?>>ON</option>
-                    </select>
+                <div class="cohort-scope-card cohort-policy-card" style="margin-bottom:14px;">
+                    <div class="cohort-scope-head">
+                        <div>
+                            <div class="cohort-scope-title">Allow Lesson Study</div>
+                            <div class="cohort-scope-meta" style="margin-top:6px;">
+                                When enabled, students may open and summarize any lesson within the same course before earlier lesson progress tests are passed. The next course remains locked until all lesson progress tests in the current course are passed.
+                            </div>
+                        </div>
+                    </div>
+                    <div class="cohort-policy-toggle-wrap">
+                        <label>Course study flow</label>
+                        <select class="cohort-select" name="allow_free_study_within_course_before_test_completion">
+                            <option value="0" <?php echo ($allowFreeStudyWithinCourseBeforeTestCompletion === '0') ? 'selected' : ''; ?>>OFF</option>
+                            <option value="1" <?php echo ($allowFreeStudyWithinCourseBeforeTestCompletion === '1') ? 'selected' : ''; ?>>ON</option>
+                        </select>
+                    </div>
                 </div>
 
                 <?php if (!$programId || !$courseLessonTree): ?>
