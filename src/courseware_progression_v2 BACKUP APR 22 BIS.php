@@ -271,114 +271,6 @@ final class CoursewareProgressionV2
         return $this->getAllPolicies($scope);
     }
 
-    public function isFreeStudyWithinCourseEnabled(int $cohortId, ?int $courseId = null): bool
-    {
-        $policy = $this->resolveEffectivePolicySet($cohortId, $courseId);
-        return !empty($policy['allow_free_study_within_course_before_test_completion']);
-    }
-
-    public function getLessonCourseId(int $lessonId): int
-    {
-        $stmt = $this->pdo->prepare("
-            SELECT course_id
-            FROM lessons
-            WHERE id = :lesson_id
-            LIMIT 1
-        "
-        );
-        $stmt->execute([':lesson_id' => $lessonId]);
-        return (int)($stmt->fetchColumn() ?: 0);
-    }
-
-    public function isCourseCompletedForProgression(int $userId, int $cohortId, int $courseId): bool
-    {
-        if ($courseId <= 0) {
-            return false;
-        }
-
-        $lessonSql = "
-            SELECT d.lesson_id
-            FROM cohort_lesson_deadlines d
-            JOIN lessons l ON l.id = d.lesson_id
-            WHERE d.cohort_id = :cohort_id
-              AND l.course_id = :course_id
-        ";
-        $lessonStmt = $this->pdo->prepare($lessonSql);
-        $lessonStmt->execute([
-            ':cohort_id' => $cohortId,
-            ':course_id' => $courseId,
-        ]);
-        $lessonIds = $lessonStmt->fetchAll(PDO::FETCH_COLUMN);
-
-        if (!$lessonIds) {
-            return false;
-        }
-
-        foreach ($lessonIds as $lessonId) {
-            if (!$this->lessonHasCanonicalPass($userId, $cohortId, (int)$lessonId)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    public function canAccessLessonContent(
-        int $userId,
-        int $cohortId,
-        int $lessonId,
-        ?int $courseId = null,
-        ?int $unlockAfterLessonId = null
-    ): bool {
-        if ($lessonId <= 0) {
-            return false;
-        }
-
-        $courseId = ($courseId !== null && $courseId > 0) ? $courseId : $this->getLessonCourseId($lessonId);
-        if ($courseId <= 0) {
-            return false;
-        }
-
-        if ($unlockAfterLessonId === null) {
-            $depStmt = $this->pdo->prepare("
-                SELECT unlock_after_lesson_id
-                FROM cohort_lesson_deadlines
-                WHERE cohort_id = :cohort_id
-                  AND lesson_id = :lesson_id
-                LIMIT 1
-            "
-            );
-            $depStmt->execute([
-                ':cohort_id' => $cohortId,
-                ':lesson_id' => $lessonId,
-            ]);
-            $unlockAfterLessonId = (int)($depStmt->fetchColumn() ?: 0);
-        }
-
-        $unlockAfterLessonId = (int)$unlockAfterLessonId;
-        if ($unlockAfterLessonId <= 0) {
-            return true;
-        }
-
-        $requiredCourseId = $this->getLessonCourseId($unlockAfterLessonId);
-        if ($requiredCourseId <= 0) {
-            return false;
-        }
-
-        if (
-            $this->isFreeStudyWithinCourseEnabled($cohortId, $courseId)
-            && $requiredCourseId === $courseId
-        ) {
-            return true;
-        }
-
-        if ($requiredCourseId !== $courseId) {
-            return $this->isCourseCompletedForProgression($userId, $cohortId, $requiredCourseId);
-        }
-
-        return $this->lessonHasCanonicalPass($userId, $cohortId, $unlockAfterLessonId);
-    }
-
     public function resolveBehaviorMode(array $policy): array
     {
         $fallbackMapUsed = [];
@@ -539,15 +431,30 @@ final class CoursewareProgressionV2
         ];
     }
 
+    private function lessonHasCanonicalPass(int $userId, int $cohortId, int $lessonId): bool
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT 1
+            FROM progress_tests_v2
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+              AND status = 'completed'
+              AND pass_gate_met = 1
+            LIMIT 1
+        ");
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+        ]);
+
+        return (bool)$stmt->fetchColumn();
+    }
+
 	    public function isLessonCompletedForDeadlinePurposes(int $userId, int $cohortId, int $lessonId): bool
     {
-        $summary = $this->getLessonSummaryRow($userId, $cohortId, $lessonId);
-        $latestTest = $this->getLatestProgressTestRowForLesson($userId, $cohortId, $lessonId);
-
-        $summaryAccepted = $summary && (string)($summary['review_status'] ?? '') === 'acceptable';
-        $testPassed = $latestTest && !empty($latestTest['pass_gate_met']);
-
-        return $summaryAccepted && $testPassed;
+        return $this->lessonHasCanonicalPass($userId, $cohortId, $lessonId);
     }
 
     public function countDeadlineExtensionsForLesson(int $userId, int $cohortId, int $lessonId): int
@@ -594,6 +501,14 @@ final class CoursewareProgressionV2
 ): array {
     if ($this->pdo->inTransaction()) {
         throw new RuntimeException('handleMissedDeadlineForLesson must own its transaction.');
+    }
+
+    if ($this->lessonHasCanonicalPass($userId, $cohortId, $lessonId)) {
+        return [
+            'ok' => true,
+            'handled' => false,
+            'reason' => 'already_passed',
+        ];
     }
 
     $policy = $this->resolveEffectivePolicySet($cohortId);
@@ -1291,6 +1206,48 @@ public function prepareStartDecision(int $userId, int $cohortId, int $lessonId, 
 {
     $this->reconcileAttemptAndRequiredActionState($userId, $cohortId, $lessonId);
 
+    if ($this->lessonHasCanonicalPass($userId, $cohortId, $lessonId)) {
+        return [
+            'allowed' => false,
+            'decision' => [
+                'phase' => 'prepare_start',
+                'priority_state' => 'already_passed',
+                'allowed' => false,
+                'required_action_decision' => [
+                    'should_create_any' => false,
+                    'action_types' => [],
+                ],
+                'training_suspended' => false,
+                'deadline_blocked' => false,
+                'instructor_required' => false,
+                'remediation_required' => false,
+                'summary_blocked' => false,
+            ],
+            'summary_state' => $this->resolveSummaryState($userId, $cohortId, $lessonId, $this->resolveEffectivePolicySet($cohortId, isset($scope['course_id']) ? (int)$scope['course_id'] : null)),
+            'attempt_state' => [],
+            'deadline_state' => $this->resolveDeadlineState($userId, $cohortId, $lessonId),
+            'required_actions' => [
+                'should_create_any' => false,
+                'actions' => [],
+                'latest_instructor_action_id' => null,
+                'blocking' => false,
+            ],
+            'notification_decision' => [],
+            'lesson_activity_projection' => [
+                'engine_projection' => true,
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'phase' => 'prepare_start_already_passed',
+                'fields' => [
+                    'completion_status' => 'completed',
+                    'test_pass_status' => 'passed',
+                    'last_state_eval_at' => gmdate('Y-m-d H:i:s'),
+                ],
+            ],
+        ];
+    }
+
     $courseId = isset($scope['course_id']) ? (int)$scope['course_id'] : null;
 
     $policy = $this->resolveEffectivePolicySet($cohortId, $courseId);
@@ -1389,9 +1346,57 @@ public function createProgressTestAttempt(
     try {
         $this->lockAttemptAndRequiredActionRows($userId, $cohortId, $lessonId);
 
+        if ($this->lessonHasCanonicalPass($userId, $cohortId, $lessonId)) {
+            $this->pdo->commit();
+
+            return [
+                'blocked' => true,
+                'reason' => 'already_passed',
+                'decision' => [
+                    'phase' => 'prepare_start',
+                    'priority_state' => 'already_passed',
+                    'allowed' => false,
+                    'required_action_decision' => [
+                        'should_create_any' => false,
+                        'action_types' => [],
+                    ],
+                    'training_suspended' => false,
+                    'deadline_blocked' => false,
+                    'instructor_required' => false,
+                    'remediation_required' => false,
+                    'summary_blocked' => false,
+                ],
+                'stale_cleanup_count' => 0,
+            ];
+        }
+
         if ($idempotencyKey !== null && $idempotencyKey !== '') {
             $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
             if ($existing) {
+                if ($this->lessonHasCanonicalPass($userId, $cohortId, $lessonId)) {
+                    $this->pdo->commit();
+
+                    return [
+                        'blocked' => true,
+                        'reason' => 'already_passed',
+                        'decision' => [
+                            'phase' => 'prepare_start',
+                            'priority_state' => 'already_passed',
+                            'allowed' => false,
+                            'required_action_decision' => [
+                                'should_create_any' => false,
+                                'action_types' => [],
+                            ],
+                            'training_suspended' => false,
+                            'deadline_blocked' => false,
+                            'instructor_required' => false,
+                            'remediation_required' => false,
+                            'summary_blocked' => false,
+                        ],
+                        'stale_cleanup_count' => 0,
+                    ];
+                }
+
                 $this->pdo->commit();
 
                 return [
@@ -1399,9 +1404,40 @@ public function createProgressTestAttempt(
                     'test_id' => (int)$existing['id'],
                     'attempt' => (int)$existing['attempt'],
                     'idempotent_reuse' => true,
+                    'active_attempt_reuse' => false,
                     'stale_cleanup_count' => 0,
                 ];
             }
+        }
+
+        $activeAttemptStmt = $this->pdo->prepare("
+            SELECT *
+            FROM progress_tests_v2
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+              AND status IN ('preparing','ready','in_progress','processing')
+              AND completed_at IS NULL
+            ORDER BY attempt DESC, id DESC
+            LIMIT 1
+        ");
+        $activeAttemptStmt->execute([
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+        ]);
+        $activeAttempt = $activeAttemptStmt->fetch();
+        if ($activeAttempt) {
+            $this->pdo->commit();
+
+            return [
+                'blocked' => false,
+                'test_id' => (int)$activeAttempt['id'],
+                'attempt' => (int)$activeAttempt['attempt'],
+                'idempotent_reuse' => false,
+                'active_attempt_reuse' => true,
+                'stale_cleanup_count' => 0,
+            ];
         }
 
         $staleCleanupCount = $this->markOlderOpenAttemptsAsStale($userId, $cohortId, $lessonId);
@@ -1409,7 +1445,6 @@ public function createProgressTestAttempt(
         $startDecision = $this->prepareStartDecision($userId, $cohortId, $lessonId);
 
         $decision = (array)($startDecision['decision'] ?? []);
-        $priority = (string)($decision['priority_state'] ?? 'normal');
 
         if (!empty($decision['training_suspended'])) {
             $this->pdo->commit();
@@ -1559,6 +1594,7 @@ public function createProgressTestAttempt(
             'test_id' => $testId,
             'attempt' => $attempt,
             'idempotent_reuse' => false,
+            'active_attempt_reuse' => false,
             'stale_cleanup_count' => $staleCleanupCount,
         ];
     } catch (Throwable $e) {
@@ -1566,7 +1602,7 @@ public function createProgressTestAttempt(
             $this->pdo->rollBack();
         }
 
-        if ($idempotencyKey !== null && $idempotencyKey !== '') {
+        if ($idempotencyKey !== null && $idempotencyKey !== '' && !$this->lessonHasCanonicalPass($userId, $cohortId, $lessonId)) {
             $existing = $this->getProgressTestByIdempotencyKey($idempotencyKey);
             if ($existing) {
                 return [
@@ -1574,6 +1610,7 @@ public function createProgressTestAttempt(
                     'test_id' => (int)$existing['id'],
                     'attempt' => (int)$existing['attempt'],
                     'idempotent_reuse' => true,
+                    'active_attempt_reuse' => false,
                     'stale_cleanup_count' => 0,
                 ];
             }
@@ -1581,8 +1618,8 @@ public function createProgressTestAttempt(
 
         throw $e;
     }
-}	
-	
+}
+
 public function finalizeAssessedProgressTest(int $progressTestId, array $assessment): array
 {
     if ($this->pdo->inTransaction()) {
@@ -2375,6 +2412,11 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
 
     public function approveRequiredAction(int $actionId, ?string $ipAddress = null, ?string $userAgent = null): void
     {
+        $action = $this->getRequiredActionById($actionId);
+        if (!$action) {
+            throw new RuntimeException('Required action not found.');
+        }
+
         $sql = "
             UPDATE student_required_actions
             SET
@@ -2387,15 +2429,90 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
             WHERE id = :id
         ";
 
+        $nowUtc = gmdate('Y-m-d H:i:s');
+
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
-            ':approved_at' => gmdate('Y-m-d H:i:s'),
-            ':completed_at' => gmdate('Y-m-d H:i:s'),
+            ':approved_at' => $nowUtc,
+            ':completed_at' => $nowUtc,
             ':ip_address' => $ipAddress,
             ':user_agent' => $userAgent,
-            ':updated_at' => gmdate('Y-m-d H:i:s'),
+            ':updated_at' => $nowUtc,
             ':id' => $actionId,
         ]);
+
+        $this->reconcileAttemptAndRequiredActionState(
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id']
+        );
+
+        $policy = $this->resolveEffectivePolicySet((int)$action['cohort_id']);
+        $behaviorMode = $this->resolveBehaviorMode($policy);
+        $summaryState = $this->resolveSummaryState((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id'], $policy);
+        $authoritativeAttempt = $this->getAuthoritativeProgressTestRowForLesson((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id']);
+        $attemptState = $this->resolveAttemptPolicyState(
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id'],
+            $policy,
+            $authoritativeAttempt ? (int)$authoritativeAttempt['attempt'] : null,
+            $behaviorMode
+        );
+        $deadlineState = $this->resolveDeadlineState((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id']);
+        $progressionContext = $this->getProgressionContextForUserLesson((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id']);
+        $blockingActions = $this->collectPrepareStartBlockingActions(
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id'],
+            $authoritativeAttempt ? (int)$authoritativeAttempt['id'] : null
+        );
+        $requiredActions = [
+            'should_create_any' => false,
+            'actions' => $blockingActions,
+            'latest_instructor_action_id' => null,
+            'blocking' => !empty($blockingActions),
+        ];
+
+        foreach ($blockingActions as $blockingAction) {
+            if ((string)($blockingAction['action_type'] ?? '') === 'instructor_approval') {
+                $requiredActions['latest_instructor_action_id'] = (int)(($blockingAction['action']['id'] ?? 0));
+                break;
+            }
+        }
+
+        $decision = $this->evaluateProgressionDecision([
+            'phase' => 'required_action_completion',
+            'user_id' => (int)$action['user_id'],
+            'cohort_id' => (int)$action['cohort_id'],
+            'lesson_id' => (int)$action['lesson_id'],
+            'activity_state' => $progressionContext['activity_state'],
+            'summary_state' => $summaryState,
+            'attempt_state' => $attemptState,
+            'deadline_state' => $deadlineState,
+            'classification' => [],
+            'required_actions' => $requiredActions,
+        ]);
+
+        $projection = $this->computeLessonActivityProjection([
+            'phase' => 'required_action_completion',
+            'user_id' => (int)$action['user_id'],
+            'cohort_id' => (int)$action['cohort_id'],
+            'lesson_id' => (int)$action['lesson_id'],
+            'summary_state' => $summaryState,
+            'attempt_state' => $attemptState,
+            'deadline_state' => $deadlineState,
+            'classification' => [],
+            'activity_state' => $progressionContext['activity_state'],
+            'required_actions' => $requiredActions,
+        ], $decision);
+
+        $this->persistLessonActivityProjection(
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id'],
+            $projection
+        );
     }
 
     public function recordInstructorDecision(
@@ -2800,6 +2917,73 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
         (int)$action['lesson_id']
     );
 
+    $policyAfterDecision = $this->resolveEffectivePolicySet((int)$action['cohort_id']);
+    $behaviorModeAfterDecision = $this->resolveBehaviorMode($policyAfterDecision);
+    $summaryStateAfterDecision = $this->resolveSummaryState((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id'], $policyAfterDecision);
+    $authoritativeAttemptAfterDecision = $this->getAuthoritativeProgressTestRowForLesson((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id']);
+    $attemptStateAfterDecision = $this->resolveAttemptPolicyState(
+        (int)$action['user_id'],
+        (int)$action['cohort_id'],
+        (int)$action['lesson_id'],
+        $policyAfterDecision,
+        $authoritativeAttemptAfterDecision ? (int)$authoritativeAttemptAfterDecision['attempt'] : null,
+        $behaviorModeAfterDecision
+    );
+    $deadlineStateAfterDecision = $this->resolveDeadlineState((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id']);
+    $progressionContextAfterDecision = $this->getProgressionContextForUserLesson((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id']);
+    $blockingActionsAfterDecision = $this->collectPrepareStartBlockingActions(
+        (int)$action['user_id'],
+        (int)$action['cohort_id'],
+        (int)$action['lesson_id'],
+        $authoritativeAttemptAfterDecision ? (int)$authoritativeAttemptAfterDecision['id'] : null
+    );
+    $requiredActionsAfterDecision = [
+        'should_create_any' => false,
+        'actions' => $blockingActionsAfterDecision,
+        'latest_instructor_action_id' => null,
+        'blocking' => !empty($blockingActionsAfterDecision),
+    ];
+
+    foreach ($blockingActionsAfterDecision as $blockingActionAfterDecision) {
+        if ((string)($blockingActionAfterDecision['action_type'] ?? '') === 'instructor_approval') {
+            $requiredActionsAfterDecision['latest_instructor_action_id'] = (int)(($blockingActionAfterDecision['action']['id'] ?? 0));
+            break;
+        }
+    }
+
+    $decisionAfterAction = $this->evaluateProgressionDecision([
+        'phase' => 'required_action_completion',
+        'user_id' => (int)$action['user_id'],
+        'cohort_id' => (int)$action['cohort_id'],
+        'lesson_id' => (int)$action['lesson_id'],
+        'activity_state' => $progressionContextAfterDecision['activity_state'],
+        'summary_state' => $summaryStateAfterDecision,
+        'attempt_state' => $attemptStateAfterDecision,
+        'deadline_state' => $deadlineStateAfterDecision,
+        'classification' => [],
+        'required_actions' => $requiredActionsAfterDecision,
+    ]);
+
+    $projectionAfterAction = $this->computeLessonActivityProjection([
+        'phase' => 'required_action_completion',
+        'user_id' => (int)$action['user_id'],
+        'cohort_id' => (int)$action['cohort_id'],
+        'lesson_id' => (int)$action['lesson_id'],
+        'summary_state' => $summaryStateAfterDecision,
+        'attempt_state' => $attemptStateAfterDecision,
+        'deadline_state' => $deadlineStateAfterDecision,
+        'classification' => [],
+        'activity_state' => $progressionContextAfterDecision['activity_state'],
+        'required_actions' => $requiredActionsAfterDecision,
+    ], $decisionAfterAction);
+
+    $this->persistLessonActivityProjection(
+        (int)$action['user_id'],
+        (int)$action['cohort_id'],
+        (int)$action['lesson_id'],
+        $projectionAfterAction
+    );
+
     $automationResult = $this->dispatchAutomationEventIfAvailable(
         'instructor_decision_recorded',
         $automationContext,
@@ -3087,6 +3271,73 @@ public function completeRequiredAction(int $actionId, string $responseText, ?str
         (int)$action['user_id'],
         (int)$action['cohort_id'],
         (int)$action['lesson_id']
+    );
+
+    $policy = $this->resolveEffectivePolicySet((int)$action['cohort_id']);
+    $behaviorMode = $this->resolveBehaviorMode($policy);
+    $summaryState = $this->resolveSummaryState((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id'], $policy);
+    $authoritativeAttempt = $this->getAuthoritativeProgressTestRowForLesson((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id']);
+    $attemptState = $this->resolveAttemptPolicyState(
+        (int)$action['user_id'],
+        (int)$action['cohort_id'],
+        (int)$action['lesson_id'],
+        $policy,
+        $authoritativeAttempt ? (int)$authoritativeAttempt['attempt'] : null,
+        $behaviorMode
+    );
+    $deadlineState = $this->resolveDeadlineState((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id']);
+    $progressionContext = $this->getProgressionContextForUserLesson((int)$action['user_id'], (int)$action['cohort_id'], (int)$action['lesson_id']);
+    $blockingActions = $this->collectPrepareStartBlockingActions(
+        (int)$action['user_id'],
+        (int)$action['cohort_id'],
+        (int)$action['lesson_id'],
+        $authoritativeAttempt ? (int)$authoritativeAttempt['id'] : null
+    );
+    $requiredActions = [
+        'should_create_any' => false,
+        'actions' => $blockingActions,
+        'latest_instructor_action_id' => null,
+        'blocking' => !empty($blockingActions),
+    ];
+
+    foreach ($blockingActions as $blockingAction) {
+        if ((string)($blockingAction['action_type'] ?? '') === 'instructor_approval') {
+            $requiredActions['latest_instructor_action_id'] = (int)(($blockingAction['action']['id'] ?? 0));
+            break;
+        }
+    }
+
+    $decision = $this->evaluateProgressionDecision([
+        'phase' => 'required_action_completion',
+        'user_id' => (int)$action['user_id'],
+        'cohort_id' => (int)$action['cohort_id'],
+        'lesson_id' => (int)$action['lesson_id'],
+        'activity_state' => $progressionContext['activity_state'],
+        'summary_state' => $summaryState,
+        'attempt_state' => $attemptState,
+        'deadline_state' => $deadlineState,
+        'classification' => [],
+        'required_actions' => $requiredActions,
+    ]);
+
+    $projection = $this->computeLessonActivityProjection([
+        'phase' => 'required_action_completion',
+        'user_id' => (int)$action['user_id'],
+        'cohort_id' => (int)$action['cohort_id'],
+        'lesson_id' => (int)$action['lesson_id'],
+        'summary_state' => $summaryState,
+        'attempt_state' => $attemptState,
+        'deadline_state' => $deadlineState,
+        'classification' => [],
+        'activity_state' => $progressionContext['activity_state'],
+        'required_actions' => $requiredActions,
+    ], $decision);
+
+    $this->persistLessonActivityProjection(
+        (int)$action['user_id'],
+        (int)$action['cohort_id'],
+        (int)$action['lesson_id'],
+        $projection
     );
 }
 
@@ -4980,15 +5231,12 @@ private function getAuthoritativeProgressTestRowForLesson(int $userId, int $coho
         WHERE user_id = :user_id
           AND cohort_id = :cohort_id
           AND lesson_id = :lesson_id
-          AND NOT (
-              COALESCE(formal_result_code, '') = 'STALE_ABORTED'
-              AND COALESCE(counts_as_unsat, 0) = 0
-              AND COALESCE(pass_gate_met, 0) = 0
-          )
         ORDER BY
             CASE
-                WHEN status IN ('preparing','ready','in_progress','processing') THEN 0
-                ELSE 1
+                WHEN status = 'completed' AND COALESCE(pass_gate_met, 0) = 1 THEN 0
+                WHEN status = 'completed' AND COALESCE(formal_result_code, '') <> 'STALE_ABORTED' THEN 1
+                WHEN status IN ('preparing','ready','in_progress','processing') THEN 2
+                ELSE 3
             END ASC,
             attempt DESC,
             id DESC
