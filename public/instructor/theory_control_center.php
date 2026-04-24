@@ -118,6 +118,33 @@ cw_header('Instructor Theory Control Center');
 .tcc-summary-safe-frame p{margin:0 0 12px 0}.tcc-summary-safe-frame ul,.tcc-summary-safe-frame ol{margin:0 0 12px 22px}.tcc-summary-safe-frame li{margin:0 0 6px 0}.tcc-summary-safe-frame b,.tcc-summary-safe-frame strong{color:#16263c}
 @media(max-width:800px){.tcc-ai-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tcc-chat-bubble{max-width:92%}}
 
+.tcc-ai-live-panel{margin-top:12px;border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#ffffff;overflow:hidden}
+.tcc-ai-live-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:13px 15px;background:#f8fafc;border-bottom:1px solid rgba(15,23,42,.06)}
+.tcc-ai-live-title{font-size:13px;font-weight:900;color:#102845;line-height:1.2}
+.tcc-ai-live-sub{margin-top:4px;font-size:11px;color:#64748b;line-height:1.35;font-weight:700}
+.tcc-ai-live-body{padding:13px 15px}
+.tcc-ai-action-btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;border-radius:10px;padding:0 11px;font-size:11px;font-weight:900;border:1px solid rgba(15,23,42,.08);background:#12355f;color:#fff;cursor:pointer;white-space:nowrap}
+.tcc-ai-action-btn[disabled]{opacity:.55;cursor:not-allowed}
+.tcc-ai-result-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}
+.tcc-ai-result-card{border:1px solid rgba(15,23,42,.08);border-radius:15px;background:#fbfdff;padding:11px;min-width:0}
+.tcc-ai-result-card.ok{background:#f0fdf4;border-color:#bbf7d0}
+.tcc-ai-result-card.warn{background:#fffbeb;border-color:#fde68a}
+.tcc-ai-result-card.danger{background:#fef2f2;border-color:#fecaca}
+.tcc-ai-result-label{font-size:9px;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:#64748b}
+.tcc-ai-result-value{margin-top:6px;font-size:14px;font-weight:900;color:#102845;line-height:1.2}
+.tcc-ai-result-card.ok .tcc-ai-result-value{color:#166534}
+.tcc-ai-result-card.warn .tcc-ai-result-value{color:#92400e}
+.tcc-ai-result-card.danger .tcc-ai-result-value{color:#991b1b}
+.tcc-ai-take-box{margin-top:10px;border-radius:15px;background:#fbfdff;border:1px solid rgba(15,23,42,.07);padding:12px;font-size:13px;color:#334155;line-height:1.5}
+.tcc-ai-list-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:10px}
+.tcc-ai-list-box{border-radius:15px;border:1px solid rgba(15,23,42,.07);background:#fff;padding:12px}
+.tcc-ai-list-title{font-size:11px;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:#64748b;margin-bottom:8px}
+.tcc-ai-list-box ul{margin:0 0 0 18px;padding:0}
+.tcc-ai-list-box li{font-size:12px;color:#334155;line-height:1.45;margin-bottom:5px}
+.tcc-ai-error-box{padding:12px;border-radius:14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;font-size:13px;line-height:1.45}
+.tcc-ai-loading-box{padding:12px;border-radius:14px;border:1px dashed rgba(15,23,42,.16);background:#fbfdff;color:#64748b;font-size:13px}
+@media(max-width:900px){.tcc-ai-result-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.tcc-ai-list-grid{grid-template-columns:1fr}}
+@media(max-width:520px){.tcc-ai-result-grid{grid-template-columns:1fr}}
 </style>
 
 <div class="tcc-page">
@@ -276,8 +303,120 @@ function openSummaryLargeModalById(key){const item=(window.tccSummaryCache||{})[
 
 function reviewStatusPill(status){const clean=String(status||'neutral').toLowerCase();return '<span class="tcc-review-pill '+escapeHtml(clean)+'">'+escapeHtml(prettyStatus(clean))+'</span>';}
 function reviewScoreBar(score){const n=(score!==null&&score!==undefined&&score!=='')?clampPct(score):0;const cls=n>=85?'ok':(n>=70?'warn':'danger');return '<div class="tcc-review-score-row"><div class="tcc-review-score-bar"><span class="'+cls+'" style="width:'+n+'%;"></span></div><div class="tcc-review-score-value">'+(score!==null&&score!==undefined&&score!==''?escapeHtml(score)+'%':'—')+'</div></div>';}
-function aiSignalClass(value){const s=String(value||'').toLowerCase();if(s.indexOf('high')>=0||s.indexOf('likely')>=0||s.indexOf('poor')>=0)return 'danger';if(s.indexOf('medium')>=0||s.indexOf('possible')>=0||s.indexOf('partial')>=0)return 'warn';if(s.indexOf('low')>=0||s.indexOf('unlikely')>=0||s.indexOf('good')>=0||s.indexOf('strong')>=0)return 'ok';return '';}
-function renderAiInterpretation(ai){ai=ai||{};const copy=ai.copy_paste_likelihood||ai.copyPasteLikelihood||ai.copied_likelihood||'Not evaluated';const tool=ai.ai_tool_likelihood||ai.aiToolLikelihood||ai.ai_likelihood||'Not evaluated';const sim=ai.highest_similarity||ai.similarity||ai.similarity_score||'Not evaluated';const understanding=ai.deep_understanding||ai.understanding_level||ai.understanding||'Not evaluated';const feedback=ai.quality_feedback||ai.feedback||ai.summary||'AI interpretation is not generated yet. This panel is ready for copy/paste detection, AI-use likelihood, similarity patterns, highlighted weaknesses, improvement suggestions, and deep-understanding assessment once the backend evaluator is connected.';return '<div class="tcc-ai-grid"><div class="tcc-ai-signal '+aiSignalClass(copy)+'"><div class="tcc-ai-signal-label">Copy/Paste</div><div class="tcc-ai-signal-value">'+escapeHtml(copy)+'</div></div><div class="tcc-ai-signal '+aiSignalClass(tool)+'"><div class="tcc-ai-signal-label">AI Tool</div><div class="tcc-ai-signal-value">'+escapeHtml(tool)+'</div></div><div class="tcc-ai-signal '+aiSignalClass(sim)+'"><div class="tcc-ai-signal-label">Similarity</div><div class="tcc-ai-signal-value">'+escapeHtml(sim)+'</div></div><div class="tcc-ai-signal '+aiSignalClass(understanding)+'"><div class="tcc-ai-signal-label">Understanding</div><div class="tcc-ai-signal-value">'+escapeHtml(understanding)+'</div></div></div><div class="tcc-inline-ai-box">'+escapeHtml(feedback)+'</div>';}
+function aiSignalClass(value){
+    const s=String(value||'').toLowerCase();
+    if(s.indexOf('high')>=0||s.indexOf('likely')>=0||s.indexOf('weak')>=0||s.indexOf('poor')>=0)return 'danger';
+    if(s.indexOf('medium')>=0||s.indexOf('possible')>=0||s.indexOf('developing')>=0||s.indexOf('adequate')>=0)return 'warn';
+    if(s.indexOf('low')>=0||s.indexOf('unlikely')>=0||s.indexOf('strong')>=0||s.indexOf('excellent')>=0)return 'ok';
+    return '';
+}
+
+function aiList(items){
+    items=Array.isArray(items)?items:[];
+    if(!items.length)return '<div class="tcc-modal-muted">No items generated yet.</div>';
+    let html='<ul>';
+    items.slice(0,6).forEach(function(item){
+        html+='<li>'+escapeHtml(item)+'</li>';
+    });
+    html+='</ul>';
+    return html;
+}
+
+function renderAiAnalysisObject(ai){
+    ai=ai||{};
+    const copy=ai.copy_paste_likelihood||'Not generated';
+    const tool=ai.ai_tool_likelihood||'Not generated';
+    const sim=ai.highest_similarity||'Not generated';
+    const simStudent=ai.highest_similarity_student||'—';
+    const simPct=(ai.highest_similarity_pct!==undefined&&ai.highest_similarity_pct!==null)?String(ai.highest_similarity_pct)+'%':'—';
+    const understandingLabel=ai.deep_understanding_label||'Not generated';
+    const understandingScore=(ai.deep_understanding_score!==undefined&&ai.deep_understanding_score!==null)?String(ai.deep_understanding_score)+'%':'—';
+
+    let html='<div class="tcc-ai-result-grid">';
+    html+='<div class="tcc-ai-result-card '+aiSignalClass(copy)+'"><div class="tcc-ai-result-label">Copy/Paste</div><div class="tcc-ai-result-value">'+escapeHtml(copy)+'</div></div>';
+    html+='<div class="tcc-ai-result-card '+aiSignalClass(tool)+'"><div class="tcc-ai-result-label">AI Tool Use</div><div class="tcc-ai-result-value">'+escapeHtml(tool)+'</div></div>';
+    html+='<div class="tcc-ai-result-card '+aiSignalClass(sim)+'"><div class="tcc-ai-result-label">Similarity</div><div class="tcc-ai-result-value">'+escapeHtml(sim)+' · '+escapeHtml(simPct)+'</div><div class="tcc-modal-muted" style="margin-top:5px;">'+escapeHtml(simStudent)+'</div></div>';
+    html+='<div class="tcc-ai-result-card '+aiSignalClass(understandingLabel)+'"><div class="tcc-ai-result-label">Understanding</div><div class="tcc-ai-result-value">'+escapeHtml(understandingLabel)+' · '+escapeHtml(understandingScore)+'</div></div>';
+    html+='</div>';
+
+    html+='<div class="tcc-ai-take-box"><strong>Instructor quick take:</strong><br>'+escapeHtml(ai.instructor_quick_take||ai.quality_feedback||'No AI analysis generated yet.')+'</div>';
+
+    html+='<div class="tcc-ai-list-grid">';
+    html+='<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Strong Points</div>'+aiList(ai.substantially_good)+'</div>';
+    html+='<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Weak Points</div>'+aiList(ai.substantially_weak)+'</div>';
+    html+='<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Suggestions</div>'+aiList(ai.improvement_suggestions)+'</div>';
+    html+='</div>';
+
+    if(ai.student_safe_feedback){
+        html+='<div class="tcc-ai-take-box"><strong>Student-safe feedback:</strong><br>'+escapeHtml(ai.student_safe_feedback)+'</div>';
+    }
+
+    return html;
+}
+
+function renderAiInterpretation(ai, studentId, lessonId){
+    ai=ai||{};
+    const hasGenerated = (ai.analysis_status === 'generated' || ai.copy_paste_likelihood || ai.ai_tool_likelihood || ai.deep_understanding_score);
+    const panelId='aiPanel_'+parseInt(studentId||0,10)+'_'+parseInt(lessonId||0,10);
+    const btnId='aiBtn_'+parseInt(studentId||0,10)+'_'+parseInt(lessonId||0,10);
+
+    let body = hasGenerated
+        ? renderAiAnalysisObject(ai)
+        : '<div class="tcc-ai-loading-box">No AI analysis generated yet. Click “Generate AI Analysis” to create an instructor advisory review for this summary.</div>';
+
+    return '<div id="'+panelId+'" class="tcc-ai-live-panel">'+
+        '<div class="tcc-ai-live-head">'+
+            '<div><div class="tcc-ai-live-title">AI Summary Analysis</div><div class="tcc-ai-live-sub">Advisory only. Does not change progression status or canonical records.</div></div>'+
+            '<button id="'+btnId+'" type="button" class="tcc-ai-action-btn" onclick="generateAiSummaryAnalysis('+parseInt(studentId||0,10)+','+parseInt(lessonId||0,10)+','+JSON.stringify(panelId)+','+JSON.stringify(btnId)+')">Generate AI Analysis</button>'+
+        '</div>'+
+        '<div class="tcc-ai-live-body">'+body+'</div>'+
+    '</div>';
+}
+function generateAiSummaryAnalysis(studentId, lessonId, panelId, btnId){
+    studentId=parseInt(studentId,10)||selectedStudentId;
+    lessonId=parseInt(lessonId,10)||0;
+
+    const panel=document.getElementById(panelId);
+    const btn=document.getElementById(btnId);
+
+    if(!panel||!studentId||!lessonId||!cohortId){
+        openTccModal('AI Summary Analysis','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');
+        return;
+    }
+
+    const body=panel.querySelector('.tcc-ai-live-body');
+
+    if(btn){
+        btn.disabled=true;
+        btn.textContent='Analyzing…';
+    }
+
+    if(body){
+        body.innerHTML='<div class="tcc-ai-loading-box">Generating AI analysis. This is advisory only and will not change student progression state…</div>';
+    }
+
+    api('ai_summary_analysis',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){
+        if(!resp.ok){
+            if(body){
+                body.innerHTML='<div class="tcc-ai-error-box">'+escapeHtml(resp.message||resp.error||'AI analysis failed.')+'</div>';
+            }
+            return;
+        }
+
+        if(body){
+            body.innerHTML=renderAiAnalysisObject(resp.analysis||{});
+        }
+    }).catch(function(){
+        if(body){
+            body.innerHTML='<div class="tcc-ai-error-box">Unable to generate AI analysis.</div>';
+        }
+    }).finally(function(){
+        if(btn){
+            btn.disabled=false;
+            btn.textContent='Regenerate AI Analysis';
+        }
+    });
+}
 function openSummaryLargeModal(title, htmlContent){openTccModal(title||'Lesson Summary','<div class="tcc-summary-paper nb-content" style="max-height:70vh;">'+htmlContent+'</div>');}
 function openAnswerAudioModal(question, transcript, audioUrl, score){let body='<div class="tcc-modal-muted" style="margin-bottom:10px;">'+escapeHtml(question||'Progress test answer')+'</div>';if(audioUrl){body+='<audio class="tcc-audio" controls preload="none" src="'+escapeHtml(audioUrl)+'"></audio>';}else{body+='<div class="tcc-empty">No audio file is attached to this answer.</div>';}body+='<div class="tcc-modal-section full" style="margin-top:12px;"><div class="tcc-modal-section-title">Student Answer Transcript</div><div class="tcc-modal-readable">'+escapeHtml(transcript||'—')+'</div><div class="tcc-modal-muted" style="margin-top:8px;">Score: '+escapeHtml(score||'—')+'</div></div>';openTccModal('Answer Audio + Transcript',body);}
 function openInterventionDetailModal(item){item=item||{};const title=item.title||item.email_type||item.event_type||item.override_type||item.action_type||('Intervention #'+(item.id||''));openTccModal('Intervention Detail','<div class="tcc-debug-meta">'+escapeHtml(title)+'</div><pre class="tcc-debug-pre">'+escapeHtml(JSON.stringify(item,null,2))+'</pre>');}
@@ -286,7 +425,7 @@ function openDebugReport(studentId,lessonId,issueType){studentId=parseInt(studen
 function openSystemWatchForStudent(studentId){studentId=parseInt(studentId,10)||selectedStudentId;if(!cohortId||!studentId){openTccModal('System Watch','<div class="tcc-error">Missing cohort or student id.</div>');return;}openTccModal('System Watch','<div class="tcc-loading">Loading system watch…</div>');api('system_watch',{cohort_id:cohortId,student_id:studentId}).then(function(data){openTccModal('System Watch','<pre class="tcc-debug-pre">'+escapeHtml(JSON.stringify(data,null,2))+'</pre>');}).catch(function(){openTccModal('System Watch','<div class="tcc-error">Unable to load system watch.</div>');});}
 
 function openLessonSummary(studentId,lessonId){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId||!lessonId){openTccModal('Lesson Summary','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');return;}openTccModal('Lesson Summary','<div class="tcc-loading">Loading lesson summary…</div>');api('lesson_summary_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){if(!resp.ok){openTccModal('Lesson Summary','<div class="tcc-error">'+escapeHtml(resp.message||resp.error||'Unable to load summary.')+'</div>');return;}const d=resp.data||{};const lesson=d.lesson||{};const s=d.summary||{};const ai=d.ai_interpretation||{};const title=(lesson.lesson_title||'Lesson Summary');const summaryHtml=rawSummaryHtml(s);
-    const summaryKey=cacheSummaryHtml((lesson.lesson_title||'Lesson Summary')+' — Student Summary', summaryHtml);const html='<div class="tcc-modal-grid"><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Status</div>'+modalStatusRows([['Module',lesson.course_title||'—'],['Lesson',lesson.lesson_title||'—'],['Updated',niceDateTime(s.updated_at)]])+'<div style="margin-top:10px;">'+reviewStatusPill(s.review_status||'neutral')+'</div></div><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Score</div>'+reviewScoreBar(s.review_score)+'</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Summary</div><div class="tcc-summary-paper nb-content">'+summaryHtml+'</div></div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">AI Interpretation</div>'+renderAiInterpretation(ai)+'</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Instructor Feedback</div><div class="tcc-modal-readable">'+escapeHtml(s.review_feedback||s.review_notes_by_instructor||'No instructor feedback recorded for this summary yet.')+'</div></div></div>';openTccModal(title,html);}).catch(function(){openTccModal('Lesson Summary','<div class="tcc-error">Unable to load summary.</div>');});}
+    const summaryKey=cacheSummaryHtml((lesson.lesson_title||'Lesson Summary')+' — Student Summary', summaryHtml);const html='<div class="tcc-modal-grid"><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Status</div>'+modalStatusRows([['Module',lesson.course_title||'—'],['Lesson',lesson.lesson_title||'—'],['Updated',niceDateTime(s.updated_at)]])+'<div style="margin-top:10px;">'+reviewStatusPill(s.review_status||'neutral')+'</div></div><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Score</div>'+reviewScoreBar(s.review_score)+'</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Summary</div><div class="tcc-summary-paper nb-content">'+summaryHtml+'</div></div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">AI Interpretation</div>'+renderAiInterpretation(ai, studentId, lessonId)+'</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Instructor Feedback</div><div class="tcc-modal-readable">'+escapeHtml(s.review_feedback||s.review_notes_by_instructor||'No instructor feedback recorded for this summary yet.')+'</div></div></div>';openTccModal(title,html);}).catch(function(){openTccModal('Lesson Summary','<div class="tcc-error">Unable to load summary.</div>');});}
 function renderAttemptItems(items){if(!items||!items.length)return '<div class="tcc-modal-muted">No answer-level items found for this attempt.</div>';let html='<div class="tcc-chat-thread">';items.forEach(function(item,idx){const score=formatScoreValue(item.score_points,item.max_points);const q=item.prompt||item.question_text||'Question';const transcript=item.transcript_text||item.answer_text||item.student_answer||'—';const audio=item.audio_url||item.audio_path||item.answer_audio_url||item.recording_url||item.media_url||'';html+='<div class="tcc-chat-bubble ai"><strong>Question '+(idx+1)+':</strong> '+escapeHtml(q)+'</div>';html+='<div class="tcc-chat-bubble student" onclick="openAnswerAudioModal('+jsArg(q)+','+jsArg(transcript)+','+jsArg(audio)+','+jsArg(score)+')">'+escapeHtml(transcript)+'<div class="tcc-chat-score">Score: '+escapeHtml(score)+'</div><span class="tcc-chat-play">▶ Play audio</span></div>';});html+='</div>';return html;}
 function openAttemptDetails(studentId,lessonId){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId||!lessonId){openTccModal('Progress Test Details','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');return;}openTccModal('Progress Test Details','<div class="tcc-loading">Loading progress test attempts…</div>');api('lesson_attempts_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){if(!resp.ok){openTccModal('Progress Test Details','<div class="tcc-error">'+escapeHtml(resp.message||resp.error||'Unable to load attempts.')+'</div>');return;}const d=resp.data||{};const lesson=d.lesson||{};const attempts=d.attempts||[];let html='<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Lesson</div><div class="tcc-modal-muted">'+escapeHtml((lesson.course_title||'Module')+' · '+(lesson.lesson_title||'Lesson'))+'</div></div>';if(!attempts.length){html+='<div class="tcc-empty">No progress test attempts found.</div>';}attempts.forEach(function(a){const score=a.score_pct!==null&&a.score_pct!==undefined?a.score_pct+'%':'—';html+='<div class="tcc-attempt-card"><div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt '+escapeHtml(a.attempt||'—')+' · '+escapeHtml(a.formal_result_code||a.status||'')+'</div><div class="tcc-attempt-meta">Started: '+escapeHtml(niceDate(a.started_at))+' · Completed: '+escapeHtml(niceDate(a.completed_at))+'</div></div><span class="tcc-score-pill '+(parseInt(a.pass_gate_met,10)===1?'ok':'danger')+'">'+escapeHtml(score)+'</span></div>'+renderAttemptItems(a.items||[])+'</div>';});openTccModal('Progress Test Details',html);}).catch(function(){openTccModal('Progress Test Details','<div class="tcc-error">Unable to load attempts.</div>');});}
 function interventionBlock(title,items){let html='<div class="tcc-modal-section full"><div class="tcc-modal-section-title">'+escapeHtml(title)+' ('+(items?items.length:0)+')</div>';if(!items||!items.length){html+='<div class="tcc-modal-muted">No records found.</div></div>';return html;}html+='<div class="tcc-intervention-list">';items.forEach(function(item){const label=item.title||item.email_type||item.event_type||item.override_type||item.action_type||('Record #'+(item.id||''));const meta=[item.status||item.sent_status||'',item.created_at?niceDateTime(item.created_at):'',item.sent_at?('Sent '+niceDateTime(item.sent_at)):''].filter(Boolean).join(' · ');html+='<div class="tcc-intervention-item tcc-intervention-clickable" onclick="openInterventionDetailModal('+escapeHtml(JSON.stringify(item)).replace(/"/g,'&quot;')+')"><div class="tcc-intervention-title">'+escapeHtml(label)+'</div><div class="tcc-intervention-meta">'+escapeHtml(meta||'—')+'</div></div>';});html+='</div></div>';return html;}
@@ -335,7 +474,7 @@ function renderInlineSummary(resp, studentId, lessonId){
     ])+
     '<div style="display:grid;grid-template-columns:minmax(120px,.45fr) 1fr;gap:12px;margin-bottom:10px;"><div><div class="tcc-inline-mini-label">Review Status</div><div style="margin-top:6px;">'+reviewStatusPill(s.review_status||'neutral')+'</div></div><div><div class="tcc-inline-mini-label">Review Score</div><div style="margin-top:6px;">'+reviewScoreBar(s.review_score)+'</div></div></div>'+
     '<div class="tcc-summary-safe-frame">'+summaryHtml+'</div>'+
-    renderAiInterpretation(ai);
+    renderAiInterpretation(ai, studentId, lessonId);
     return inlineSection('1. Lesson Summary Details','Student summary, review status, score, and AI interpretation.',body,'<button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
 }
 function renderInlineAttempts(resp, studentId, lessonId){
@@ -639,6 +778,7 @@ window.closeTccModal = closeTccModal;
 window.openDebugReport = openDebugReport;
 window.openSystemWatchForStudent = openSystemWatchForStudent;
 window.openLessonSummary = openLessonSummary;
+window.generateAiSummaryAnalysis = generateAiSummaryAnalysis;
 window.openAttemptDetails = openAttemptDetails;
 window.openInterventions = openInterventions;
 window.loadStudentLessons = loadStudentLessons;

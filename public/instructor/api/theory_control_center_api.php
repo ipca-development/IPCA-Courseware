@@ -907,6 +907,343 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
     ];
 }
 
+function tcc_ai_env_key(): string
+{
+    $keys = [
+        'CW_OPENAI_API_KEY',
+        'OPENAI_API_KEY',
+        'IPCA_OPENAI_API_KEY',
+    ];
+
+    foreach ($keys as $key) {
+        $value = trim((string)getenv($key));
+        if ($value !== '') {
+            return $value;
+        }
+    }
+
+    return '';
+}
+
+function tcc_strip_summary_for_ai(string $html, string $plain): string
+{
+    $text = trim($plain);
+    if ($text === '') {
+        $text = trim(strip_tags($html));
+    }
+
+    $text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $text = preg_replace('/[ \t]+/', ' ', $text);
+    $text = preg_replace('/\R{3,}/', "\n\n", $text);
+    $text = trim((string)$text);
+
+    if (function_exists('mb_substr')) {
+        return mb_substr($text, 0, 9000);
+    }
+
+    return substr($text, 0, 9000);
+}
+
+function tcc_word_count_for_ai(string $text): int
+{
+    $text = trim($text);
+    if ($text === '') {
+        return 0;
+    }
+
+    $parts = preg_split('/\s+/u', $text);
+    return is_array($parts) ? count(array_filter($parts)) : 0;
+}
+
+function tcc_text_similarity_pct(string $a, string $b): float
+{
+    $a = trim(preg_replace('/\s+/', ' ', strtolower($a)));
+    $b = trim(preg_replace('/\s+/', ' ', strtolower($b)));
+
+    if ($a === '' || $b === '') {
+        return 0.0;
+    }
+
+    if (function_exists('mb_substr')) {
+        $a = mb_substr($a, 0, 4000);
+        $b = mb_substr($b, 0, 4000);
+    } else {
+        $a = substr($a, 0, 4000);
+        $b = substr($b, 0, 4000);
+    }
+
+    similar_text($a, $b, $pct);
+    return round((float)$pct, 1);
+}
+
+function tcc_extract_response_text(array $response): string
+{
+    if (isset($response['output_text']) && is_string($response['output_text'])) {
+        return trim($response['output_text']);
+    }
+
+    $chunks = [];
+
+    if (!empty($response['output']) && is_array($response['output'])) {
+        foreach ($response['output'] as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+
+            if (!empty($item['content']) && is_array($item['content'])) {
+                foreach ($item['content'] as $contentItem) {
+                    if (!is_array($contentItem)) {
+                        continue;
+                    }
+
+                    if (isset($contentItem['text']) && is_string($contentItem['text'])) {
+                        $chunks[] = $contentItem['text'];
+                    }
+                }
+            }
+        }
+    }
+
+    return trim(implode("\n", $chunks));
+}
+
+function tcc_safe_json_from_ai(string $text): array
+{
+    $text = trim($text);
+
+    if ($text === '') {
+        return [];
+    }
+
+    $decoded = json_decode($text, true);
+    if (is_array($decoded)) {
+        return $decoded;
+    }
+
+    if (preg_match('/\{.*\}/s', $text, $m)) {
+        $decoded = json_decode($m[0], true);
+        if (is_array($decoded)) {
+            return $decoded;
+        }
+    }
+
+    return [
+        'analysis_status' => 'unparsed',
+        'raw_text' => $text,
+    ];
+}
+
+function tcc_call_openai_summary_analysis(array $payload): array
+{
+    $apiKey = tcc_ai_env_key();
+
+    if ($apiKey === '') {
+        return [
+            'ok' => false,
+            'error' => 'missing_openai_api_key',
+            'message' => 'No OpenAI API key found in environment. Expected CW_OPENAI_API_KEY or OPENAI_API_KEY.',
+        ];
+    }
+
+    $instructions = <<<TXT
+You are an aviation theory instructor assistant for IPCA.
+
+Analyze a student's lesson summary. Return ONLY valid JSON. Do not include markdown.
+
+Important rules:
+- This is advisory only. Do not decide progression state.
+- Do not accuse the student. Use likelihood language.
+- Be practical for an instructor who wants fast risk visibility.
+- Evaluate deep understanding based on evidence in the student's summary.
+- Identify copied/AI-like patterns cautiously.
+- If there is not enough evidence, say so.
+- Keep values concise and UI-friendly.
+
+Return this exact JSON structure:
+{
+  "analysis_status": "generated",
+  "copy_paste_likelihood": "Low|Medium|High|Not enough evidence",
+  "copy_paste_reason": "...",
+  "ai_tool_likelihood": "Low|Medium|High|Not enough evidence",
+  "ai_tool_reason": "...",
+  "highest_similarity": "Low|Medium|High|Not evaluated",
+  "highest_similarity_student": "Name or null",
+  "highest_similarity_pct": 0,
+  "deep_understanding_score": 0,
+  "deep_understanding_label": "Weak|Developing|Adequate|Strong|Excellent",
+  "substantially_good": ["...", "..."],
+  "substantially_weak": ["...", "..."],
+  "improvement_suggestions": ["...", "..."],
+  "instructor_quick_take": "...",
+  "student_safe_feedback": "...",
+  "highlight_phrases": [
+    {"phrase":"...", "type":"good|weak", "reason":"..."}
+  ]
+}
+TXT;
+
+    $input = [
+        [
+            'role' => 'developer',
+            'content' => [
+                [
+                    'type' => 'input_text',
+                    'text' => $instructions,
+                ],
+            ],
+        ],
+        [
+            'role' => 'user',
+            'content' => [
+                [
+                    'type' => 'input_text',
+                    'text' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                ],
+            ],
+        ],
+    ];
+
+    $body = [
+        'model' => 'gpt-5.1-mini',
+        'input' => $input,
+        'text' => [
+            'format' => [
+                'type' => 'json_object',
+            ],
+            'verbosity' => 'low',
+        ],
+    ];
+
+    $ch = curl_init('https://api.openai.com/v1/responses');
+    curl_setopt_array($ch, [
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_POST => true,
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $apiKey,
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        CURLOPT_TIMEOUT => 45,
+    ]);
+
+    $raw = curl_exec($ch);
+    $curlError = curl_error($ch);
+    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($raw === false || $raw === '') {
+        return [
+            'ok' => false,
+            'error' => 'openai_curl_error',
+            'message' => $curlError !== '' ? $curlError : 'Empty OpenAI response.',
+        ];
+    }
+
+    $decoded = json_decode($raw, true);
+
+    if (!is_array($decoded)) {
+        return [
+            'ok' => false,
+            'error' => 'openai_invalid_json',
+            'message' => 'OpenAI returned non-JSON response.',
+            'http_status' => $status,
+            'raw' => $raw,
+        ];
+    }
+
+    if ($status < 200 || $status >= 300) {
+        return [
+            'ok' => false,
+            'error' => 'openai_http_error',
+            'message' => (string)($decoded['error']['message'] ?? 'OpenAI request failed.'),
+            'http_status' => $status,
+            'openai_error' => $decoded['error'] ?? null,
+        ];
+    }
+
+    $text = tcc_extract_response_text($decoded);
+    $analysis = tcc_safe_json_from_ai($text);
+
+    return [
+        'ok' => true,
+        'analysis' => $analysis,
+        'model' => (string)($decoded['model'] ?? 'gpt-5.1-mini'),
+        'response_id' => (string)($decoded['id'] ?? ''),
+    ];
+}
+
+function tcc_similarity_context_for_summary(PDO $pdo, int $cohortId, int $studentId, int $lessonId, string $summaryText): array
+{
+    $out = [
+        'highest_similarity' => 'Not evaluated',
+        'highest_similarity_student' => null,
+        'highest_similarity_pct' => 0,
+        'matches' => [],
+    ];
+
+    if (trim($summaryText) === '') {
+        return $out;
+    }
+
+    try {
+        $st = $pdo->prepare("
+            SELECT
+                ls.user_id,
+                COALESCE(NULLIF(TRIM(CONCAT(COALESCE(u.first_name,''), ' ', COALESCE(u.last_name,''))), ''), u.email, CONCAT('User #', u.id)) AS student_name,
+                ls.summary_html,
+                ls.summary_plain
+            FROM lesson_summaries ls
+            JOIN users u ON u.id = ls.user_id
+            WHERE ls.cohort_id = ?
+              AND ls.lesson_id = ?
+              AND ls.user_id <> ?
+            LIMIT 50
+        ");
+        $st->execute([$cohortId, $lessonId, $studentId]);
+
+        $best = null;
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $otherText = tcc_strip_summary_for_ai((string)($row['summary_html'] ?? ''), (string)($row['summary_plain'] ?? ''));
+            $pct = tcc_text_similarity_pct($summaryText, $otherText);
+
+            $match = [
+                'student_id' => (int)$row['user_id'],
+                'student_name' => (string)$row['student_name'],
+                'similarity_pct' => $pct,
+            ];
+
+            $out['matches'][] = $match;
+
+            if ($best === null || $pct > (float)$best['similarity_pct']) {
+                $best = $match;
+            }
+        }
+
+        usort($out['matches'], function ($a, $b) {
+            return (float)$b['similarity_pct'] <=> (float)$a['similarity_pct'];
+        });
+
+        $out['matches'] = array_slice($out['matches'], 0, 5);
+
+        if ($best !== null) {
+            $out['highest_similarity_student'] = $best['student_name'];
+            $out['highest_similarity_pct'] = $best['similarity_pct'];
+
+            if ($best['similarity_pct'] >= 82) {
+                $out['highest_similarity'] = 'High';
+            } elseif ($best['similarity_pct'] >= 62) {
+                $out['highest_similarity'] = 'Medium';
+            } elseif ($best['similarity_pct'] > 0) {
+                $out['highest_similarity'] = 'Low';
+            }
+        }
+    } catch (Throwable $e) {
+        $out['highest_similarity'] = 'Not evaluated';
+    }
+
+    return $out;
+}
+
 $action = tcc_str($_GET['action'] ?? '');
 
 if ($action === '') {
@@ -1144,6 +1481,128 @@ try {
     }
 
 
+    if ($action === 'ai_summary_analysis') {
+        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
+        $studentId = tcc_int($_GET['student_id'] ?? 0);
+        $lessonId = tcc_int($_GET['lesson_id'] ?? 0);
+    
+        if ($cohortId <= 0 || $studentId <= 0 || $lessonId <= 0) {
+            tcc_json([
+                'ok' => false,
+                'error' => 'missing_required_ids',
+            ], 400);
+        }
+    
+        $summarySt = $pdo->prepare("
+            SELECT
+                ls.summary_html,
+                ls.summary_plain,
+                ls.review_status,
+                ls.review_score,
+                ls.review_feedback,
+                ls.review_notes_by_instructor,
+                ls.updated_at,
+                l.title AS lesson_title,
+                c.title AS course_title
+            FROM lesson_summaries ls
+            JOIN lessons l ON l.id = ls.lesson_id
+            JOIN courses c ON c.id = l.course_id
+            WHERE ls.cohort_id = ?
+              AND ls.user_id = ?
+              AND ls.lesson_id = ?
+            LIMIT 1
+        ");
+        $summarySt->execute([$cohortId, $studentId, $lessonId]);
+        $summary = $summarySt->fetch(PDO::FETCH_ASSOC);
+    
+        if (!$summary || !is_array($summary)) {
+            tcc_json([
+                'ok' => false,
+                'error' => 'summary_not_found',
+                'message' => 'No lesson summary found for this student and lesson.',
+            ], 404);
+        }
+    
+        $studentSt = $pdo->prepare("
+            SELECT
+                id,
+                email,
+                COALESCE(NULLIF(TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))), ''), email, CONCAT('User #', id)) AS student_name
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $studentSt->execute([$studentId]);
+        $student = $studentSt->fetch(PDO::FETCH_ASSOC) ?: [];
+    
+        $summaryText = tcc_strip_summary_for_ai((string)($summary['summary_html'] ?? ''), (string)($summary['summary_plain'] ?? ''));
+        $similarity = tcc_similarity_context_for_summary($pdo, $cohortId, $studentId, $lessonId, $summaryText);
+    
+        $payload = [
+            'student' => [
+                'student_id' => $studentId,
+                'student_name' => (string)($student['student_name'] ?? ('Student #' . $studentId)),
+            ],
+            'cohort_id' => $cohortId,
+            'lesson' => [
+                'lesson_id' => $lessonId,
+                'lesson_title' => (string)($summary['lesson_title'] ?? ''),
+                'course_title' => (string)($summary['course_title'] ?? ''),
+            ],
+            'summary' => [
+                'review_status' => (string)($summary['review_status'] ?? ''),
+                'review_score' => $summary['review_score'] === null ? null : (int)$summary['review_score'],
+                'word_count' => tcc_word_count_for_ai($summaryText),
+                'text' => $summaryText,
+            ],
+            'cohort_similarity_context' => $similarity,
+        ];
+    
+        $result = tcc_call_openai_summary_analysis($payload);
+    
+        if (empty($result['ok'])) {
+            tcc_json([
+                'ok' => false,
+                'action' => 'ai_summary_analysis',
+                'error' => $result['error'] ?? 'ai_analysis_failed',
+                'message' => $result['message'] ?? 'AI summary analysis failed.',
+                'advisory_only' => true,
+            ], 500);
+        }
+    
+        $analysis = is_array($result['analysis'] ?? null) ? $result['analysis'] : [];
+    
+        if (!isset($analysis['highest_similarity']) || $analysis['highest_similarity'] === 'Not evaluated') {
+            $analysis['highest_similarity'] = $similarity['highest_similarity'];
+            $analysis['highest_similarity_student'] = $similarity['highest_similarity_student'];
+            $analysis['highest_similarity_pct'] = $similarity['highest_similarity_pct'];
+        }
+    
+        tcc_json([
+            'ok' => true,
+            'action' => 'ai_summary_analysis',
+            'generated_at_utc' => gmdate('Y-m-d H:i:s'),
+            'advisory_only' => true,
+            'student_id' => $studentId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'model' => (string)($result['model'] ?? 'gpt-5.1-mini'),
+            'response_id' => (string)($result['response_id'] ?? ''),
+            'analysis' => $analysis,
+            'similarity_context' => $similarity,
+            'agent_instructions' => [
+                'purpose' => 'Instructor advisory insight only. Do not use as canonical progression truth.',
+                'rules' => [
+                    'AI analysis does not change lesson_activity.',
+                    'AI analysis does not create or close required actions.',
+                    'AI analysis is not proof of misconduct.',
+                    'Use as instructor review support only.',
+                ],
+            ],
+        ]);
+    }
+    
+    
     if ($action === 'student_lessons') {
         $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
         $studentId = tcc_int($_GET['student_id'] ?? 0);
