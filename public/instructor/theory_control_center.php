@@ -23,24 +23,54 @@ cw_header('Instructor Theory Control Center');
 .tcc-page{display:flex;flex-direction:column;gap:18px;padding-bottom:24px}.tcc-card{background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:22px;box-shadow:0 14px 30px rgba(15,23,42,.06)}.tcc-hero{padding:20px 22px;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff;overflow:hidden}.tcc-hero-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-end}.tcc-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.16em;font-weight:900;color:rgba(255,255,255,.72)}.tcc-hero h1{margin:6px 0 0;font-size:30px;line-height:1.02;letter-spacing:-.04em;color:#fff}.tcc-hero-sub{margin-top:8px;font-size:13px;line-height:1.55;color:rgba(255,255,255,.84);max-width:860px}.tcc-toolbar{display:flex;align-items:flex-end;gap:10px;flex:0 0 auto}.tcc-field{display:flex;flex-direction:column;gap:6px;min-width:300px}.tcc-field label{font-size:11px;font-weight:800;color:rgba(255,255,255,.78);letter-spacing:.12em;text-transform:uppercase}.tcc-select{min-height:44px;border-radius:14px;border:1px solid rgba(15,23,42,.12);background:rgba(255,255,255,.96);color:#102845;padding:10px 12px;font:inherit;font-size:14px;font-weight:400;outline:none}.tcc-select:focus{box-shadow:0 0 0 3px rgba(255,255,255,.22)}.tcc-section{padding:18px 20px}.tcc-section-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}.tcc-section-title{margin:0;font-size:20px;line-height:1.1;font-weight:900;color:#102845;letter-spacing:-.03em}.tcc-section-sub{margin-top:5px;font-size:13px;color:#64748b;line-height:1.4}.tcc-count-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:7px 11px;background:#edf4ff;color:#1d4f91;font-size:12px;font-weight:800;border:1px solid #d3e3ff;white-space:nowrap}.tcc-health-strip{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px}.tcc-health-card{border-radius:17px;background:linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%);border:1px solid rgba(15,23,42,.07);padding:15px 16px;min-width:0}.tcc-health-label{font-size:10px;color:#64748b;font-weight:900;text-transform:uppercase;letter-spacing:.13em;white-space:nowrap}.tcc-health-value{margin-top:8px;font-size:30px;line-height:1;font-weight:900;color:#102845;letter-spacing:-.04em}.tcc-health-note{margin-top:7px;font-size:12px;color:#64748b;line-height:1.35}
 .tcc-radar-wrap{position:relative;min-height:158px;margin-top:4px;padding:30px 28px 58px;border-radius:20px;background:linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%);border:1px solid rgba(15,23,42,.06);overflow:hidden}.tcc-radar-line{position:absolute;top:64px;left:34px;right:34px;height:9px;background:linear-gradient(90deg,#071a31 0%,#12355f 42%,#2b6dcc 100%);border-radius:999px;box-shadow:inset 0 1px 2px rgba(255,255,255,.18),0 8px 18px rgba(18,53,95,.16)}.tcc-radar-marker{position:absolute;top:84px;font-size:10px;color:#64748b;font-weight:900;white-space:nowrap}.tcc-radar-marker.start{left:34px}.tcc-radar-marker.end{right:34px}.tcc-radar-tools{position:absolute;right:20px;bottom:16px;display:flex;gap:8px;align-items:center;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:8px 10px;box-shadow:0 10px 24px rgba(15,23,42,.08)}.tcc-radar-tools label{font-size:10px;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:.1em;white-space:nowrap}.tcc-student-select{min-height:36px;min-width:230px;border-radius:11px;border:1px solid rgba(15,23,42,.14);background:#fff;color:#102845;padding:7px 10px;font:inherit;font-size:13px;font-weight:400;outline:none}.tcc-radar-avatar{position:absolute;top:64px;transform:translate(-50%,-50%);width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;color:#fff;font-size:12px;cursor:pointer;box-shadow:0 8px 20px rgba(15,23,42,.22);background:#12355f;border:4px solid #fff;transition:transform .15s ease,box-shadow .15s ease;user-select:none;overflow:visible}.tcc-radar-avatar:hover{transform:translate(-50%,-50%) scale(1.05);box-shadow:0 12px 26px rgba(15,23,42,.30)}.tcc-radar-avatar.selected{outline:3px solid rgba(18,53,95,.28);outline-offset:4px}.tcc-radar-avatar .tcc-avatar-inner{position:relative;width:40px;height:40px;border-radius:999px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff}.tcc-radar-avatar img,.tcc-avatar img,.tcc-student-avatar img{width:100%;height:100%;object-fit:cover;display:block}.tcc-radar-avatar.green{border-color:#16a34a}.tcc-radar-avatar.orange{border-color:#f59e0b}.tcc-radar-avatar.red{border-color:#dc2626}.tcc-radar-avatar.blue{border-color:#2563eb}.tcc-radar-avatar.purple{border-color:#7c3aed}.tcc-radar-score{position:absolute;top:-29px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:900;color:#334155;background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:999px;padding:3px 7px;white-space:nowrap}.tcc-radar-label{position:absolute;top:52px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:900;color:#334155;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}.tcc-radar-legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}.tcc-legend-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 9px;background:#f8fafc;border:1px solid rgba(15,23,42,.06);font-size:11px;font-weight:800;color:#475569}.tcc-dot{width:9px;height:9px;border-radius:999px;display:inline-block}.tcc-dot.green{background:#16a34a}.tcc-dot.orange{background:#f59e0b}.tcc-dot.red{background:#dc2626}.tcc-dot.blue{background:#2563eb}.tcc-dot.purple{background:#7c3aed}
 .tcc-student-placeholder{padding:18px;border-radius:18px;border:1px dashed rgba(15,23,42,.16);background:#fbfdff;color:#64748b;font-size:14px;line-height:1.5}.tcc-student-head{display:flex;align-items:center;gap:14px;margin-bottom:14px}.tcc-student-avatar{width:58px;height:58px;border-radius:20px;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:17px;flex:0 0 auto;overflow:hidden;border:4px solid #dbe7f4}.tcc-student-avatar.green{border-color:#16a34a}.tcc-student-avatar.orange{border-color:#f59e0b}.tcc-student-avatar.red{border-color:#dc2626}.tcc-student-avatar.blue{border-color:#2563eb}.tcc-student-avatar.purple{border-color:#7c3aed}.tcc-student-name{font-size:24px;line-height:1.05;font-weight:900;color:#102845;letter-spacing:-.03em}.tcc-student-email{margin-top:5px;font-size:13px;color:#64748b}.tcc-student-state-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.tcc-status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:7px 10px;background:#f8fafc;border:1px solid rgba(15,23,42,.08);font-size:12px;font-weight:900;color:#334155}.tcc-status-pill.strong{background:#ecfdf5;color:#166534;border-color:#bbf7d0}.tcc-status-pill.stable{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.tcc-status-pill.drifting{background:#fef3c7;color:#92400e;border-color:#fde68a}.tcc-status-pill.needs_contact{background:#fee2e2;color:#991b1b;border-color:#fca5a5}.tcc-snapshot-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin-bottom:16px}.tcc-snapshot-tile{border-radius:17px;background:#f8fafc;border:1px solid rgba(15,23,42,.07);padding:14px 15px;min-width:0}.tcc-snapshot-label{font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:#64748b}.tcc-snapshot-value{margin-top:8px;font-size:28px;font-weight:900;line-height:1;color:#102845;letter-spacing:-.04em}.tcc-snapshot-sub{margin-top:8px;font-size:12px;color:#64748b;line-height:1.4}.tcc-mini-bar{height:9px;border-radius:999px;background:#e5eef7;overflow:hidden;margin-top:10px}.tcc-mini-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#12355f 0%,#2b6dcc 100%)}.tcc-mini-bar span.ok{background:linear-gradient(90deg,#166534 0%,#22c55e 100%)}.tcc-mini-bar span.warn{background:linear-gradient(90deg,#d97706 0%,#f59e0b 100%)}.tcc-mini-bar span.danger{background:linear-gradient(90deg,#b91c1c 0%,#ef4444 100%)}
-.tcc-issues-list{display:flex;flex-direction:column;gap:9px}.tcc-issue-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:11px 12px;border-radius:15px;background:#fbfdff;border:1px solid rgba(15,23,42,.06)}.tcc-issue-title{font-size:13px;font-weight:900;color:#102845;line-height:1.35}.tcc-issue-meta{margin-top:4px;font-size:12px;color:#64748b;line-height:1.35}.tcc-panel-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.tcc-queue{display:flex;flex-direction:column;gap:12px}.tcc-item{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:14px;border-radius:16px;background:#f8fbfd;border:1px solid rgba(15,23,42,.06)}.tcc-item-left{display:flex;gap:12px;align-items:center;min-width:0}.tcc-avatar{width:44px;height:44px;border-radius:50%;background:#12355f;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;flex:0 0 auto;overflow:hidden;border:3px solid #dbe7f4}.tcc-avatar.green{border-color:#16a34a}.tcc-avatar.orange{border-color:#f59e0b}.tcc-avatar.red{border-color:#dc2626}.tcc-avatar.blue{border-color:#2563eb}.tcc-avatar.purple{border-color:#7c3aed}.tcc-meta{display:flex;flex-direction:column;min-width:0}.tcc-name{font-weight:900;color:#102845;line-height:1.25}.tcc-sub{font-size:12px;color:#64748b;line-height:1.35;overflow:hidden;text-overflow:ellipsis}.tcc-severity{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-top:6px;align-self:flex-start}.tcc-severity.high{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}.tcc-severity.medium{background:#fef3c7;color:#92400e;border:1px solid #fde68a}.tcc-severity.low{background:#e0f2fe;color:#075985;border:1px solid #bae6fd}.tcc-actions{display:flex;gap:8px;flex:0 0 auto}.tcc-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 12px;border-radius:11px;font-size:12px;font-weight:900;border:1px solid rgba(15,23,42,.08);cursor:pointer;text-decoration:none}.tcc-btn.primary{background:#12355f;color:#fff;border-color:#12355f}.tcc-btn.warn{background:#fff7ed;color:#92400e;border-color:#fed7aa}.tcc-btn.secondary{background:#f1f5f9;color:#334155}.tcc-empty,.tcc-loading{padding:16px;border-radius:16px;border:1px dashed rgba(15,23,42,.15);background:#fbfdff;color:#64748b;font-size:14px}.tcc-error{padding:14px;border-radius:14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;font-size:14px}
+.tcc-issues-list{display:flex;flex-direction:column;gap:9px}.tcc-issue-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:11px 12px;border-radius:15px;background:#fbfdff;border:1px solid rgba(15,23,42,.06)}.tcc-issue-title{font-size:13px;font-weight:900;color:#102845;line-height:1.35}.tcc-issue-meta{margin-top:4px;font-size:12px;color:#64748b;line-height:1.35}.tcc-panel-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.tcc-queue{display:flex;flex-direction:column;gap:12px}.tcc-item{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:14px;border-radius:16px;background:#f8fbfd;border:1px solid rgba(15,23,42,.06)}.tcc-item-left{display:flex;gap:12px;align-items:center;min-width:0}.tcc-avatar{width:44px;height:44px;border-radius:50%;background:#12355f;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;flex:0 0 auto;overflow:hidden;border:3px solid #dbe7f4}.tcc-avatar.green{border-color:#16a34a}.tcc-avatar.orange{border-color:#f59e0b}.tcc-avatar.red{border-color:#dc2626}.tcc-avatar.blue{border-color:#2563eb}.tcc-avatar.purple{border-color:#7c3aed}.tcc-meta{display:flex;flex-direction:column;min-width:0}.tcc-name{font-weight:900;color:#102845;line-height:1.25}.tcc-sub{font-size:12px;color:#64748b;line-height:1.35;overflow:hidden;text-overflow:ellipsis}.tcc-severity{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-top:6px;align-self:flex-start}.tcc-severity.high{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}.tcc-severity.medium{background:#fef3c7;color:#92400e;border:1px solid #fde68a}.tcc-severity.low{background:#e0f2fe;color:#075985;border:1px solid #bae6fd}.tcc-actions{display:flex;gap:8px;flex:0 0 auto}.tcc-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 12px;border-radius:11px;font-size:12px;font-weight:900;border:1px solid rgba(15,23,42,.08);cursor:pointer;text-decoration:none}.tcc-btn.primary{background:#12355f;color:#fff;border-color:#12355f}.tcc-btn.warn{background:#fff7ed;color:#92400e;border-color:#fed7aa}.tcc-btn.secondary{background:#f1f5f9;color:#334155}.tcc-empty,.tcc-loading,.tcc-timeline-loading{padding:16px;border-radius:16px;border:1px dashed rgba(15,23,42,.15);background:#fbfdff;color:#64748b;font-size:14px}.tcc-error,.tcc-timeline-error{padding:14px;border-radius:14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;font-size:14px}
 .tcc-issue-row{align-items:center}.tcc-issue-main{min-width:0;flex:1}.tcc-issue-actions{display:flex;gap:7px;flex:0 0 auto;align-items:center;flex-wrap:wrap;justify-content:flex-end}.tcc-issue-actions .tcc-btn{min-height:30px;padding:7px 10px;font-size:11px}.tcc-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}.tcc-modal-overlay.open{display:flex}.tcc-modal-card{width:min(980px,96vw);max-height:88vh;overflow:hidden;background:#fff;border-radius:22px;border:1px solid rgba(15,23,42,.10);box-shadow:0 24px 70px rgba(15,23,42,.35);display:flex;flex-direction:column}.tcc-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:17px 19px;border-bottom:1px solid rgba(15,23,42,.08);background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff}.tcc-modal-kicker{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.14em;color:rgba(255,255,255,.72)}.tcc-modal-title{margin-top:5px;font-size:20px;font-weight:900;line-height:1.1;color:#fff}.tcc-modal-close{border:0;background:rgba(255,255,255,.16);color:#fff;border-radius:12px;width:34px;height:34px;font-size:24px;line-height:1;cursor:pointer}.tcc-modal-body{padding:16px 18px;overflow:auto}.tcc-debug-pre{white-space:pre-wrap;background:#0f172a;color:#e2e8f0;border-radius:16px;padding:14px;font-size:12px;line-height:1.45;overflow:auto}.tcc-debug-meta{font-size:13px;color:#475569;margin-bottom:10px;line-height:1.45}
 @media (max-width:1100px){.tcc-hero-head{flex-direction:column;align-items:stretch}.tcc-toolbar{width:100%}.tcc-field{min-width:0;width:100%}.tcc-health-strip,.tcc-snapshot-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:700px){.tcc-hero{padding:18px}.tcc-hero h1{font-size:25px}.tcc-health-strip,.tcc-snapshot-grid{grid-template-columns:1fr}.tcc-radar-wrap{min-height:214px;padding-left:18px;padding-right:18px;overflow-x:auto}.tcc-radar-line{left:24px;right:24px}.tcc-radar-tools{position:absolute;left:16px;right:16px;bottom:14px;justify-content:space-between}.tcc-student-select{min-width:0;width:100%}.tcc-item{align-items:flex-start;flex-direction:column}.tcc-actions{width:100%;justify-content:flex-start}.tcc-section-head{flex-direction:column}.tcc-student-head{align-items:flex-start}.tcc-student-name{font-size:21px}}
 
-/* Phase 2G correction: course.php-style instructor lesson modules */
+/* Course.php-style instructor lesson modules */
 .tcc-lesson-timeline{margin-top:16px;border-radius:20px;border:1px solid rgba(15,23,42,.07);background:#fff;overflow:hidden}
 .tcc-lesson-timeline-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:16px 18px;border-bottom:1px solid rgba(15,23,42,.06);background:linear-gradient(180deg,#ffffff 0%,#fbfdff 100%)}
 .tcc-lesson-timeline-title{font-size:18px;line-height:1.1;font-weight:900;color:#102845;letter-spacing:-.03em}.tcc-lesson-timeline-sub{margin-top:5px;font-size:12px;color:#64748b;line-height:1.4}
 .tcc-module-stack{display:flex;flex-direction:column;gap:12px;padding:14px;background:#fbfdff}.tcc-module-card{border:1px solid rgba(15,23,42,.07);border-radius:18px;background:#fff;overflow:hidden;box-shadow:0 8px 20px rgba(15,23,42,.04)}.tcc-module-card summary{list-style:none;cursor:pointer;padding:14px 16px;background:#fff}.tcc-module-card summary::-webkit-details-marker{display:none}.tcc-module-head{display:grid;grid-template-columns:52px minmax(0,1fr) 140px 140px;gap:12px;align-items:center}.tcc-module-badge{width:42px;height:42px;border-radius:999px;background:linear-gradient(135deg,#081c33 0%,#11345d 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:15px}.tcc-module-label{font-size:10px;color:#5f718d;margin-bottom:4px;font-weight:900;text-transform:uppercase;letter-spacing:.13em}.tcc-module-title{font-size:19px;font-weight:900;color:#152235;line-height:1.12;letter-spacing:-.02em;word-break:break-word}.tcc-module-mini{font-size:11px;color:#64748b;font-weight:800;text-transform:uppercase;letter-spacing:.08em}.tcc-module-value{margin-top:4px;font-size:18px;font-weight:900;color:#102845;line-height:1}.tcc-module-body{border-top:1px solid rgba(15,23,42,.06);background:#fff}
 .tcc-instructor-lesson-wrap{overflow-x:auto}.tcc-instructor-lesson-table{width:100%;border-collapse:collapse;table-layout:fixed;min-width:1080px}.tcc-instructor-lesson-table th{padding:11px 8px;border-bottom:1px solid rgba(15,23,42,.07);font-size:10px;text-transform:uppercase;letter-spacing:.13em;color:#60718b;font-weight:900;text-align:left;white-space:nowrap;background:#fbfdff}.tcc-instructor-lesson-table td{padding:10px 8px;border-bottom:1px solid rgba(15,23,42,.06);vertical-align:middle;text-align:left}.tcc-instructor-lesson-table tr.tcc-lesson-row{cursor:pointer;transition:background .12s ease}.tcc-instructor-lesson-table tr.tcc-lesson-row:hover td{background:#f8fbfd}.tcc-instructor-lesson-table th:first-child,.tcc-instructor-lesson-table td:first-child{padding-left:15px}.tcc-instructor-lesson-table th:last-child,.tcc-instructor-lesson-table td:last-child{padding-right:15px}
-.tcc-lesson-main{display:flex;gap:8px;align-items:flex-start;min-width:0}.tcc-lesson-num{flex:0 0 auto;color:#3b4f68;font-weight:900;font-size:12px;line-height:1.25;min-width:18px;text-align:right}.tcc-lesson-name{font-size:13px;font-weight:900;color:#152235;line-height:1.25;word-break:break-word}.tcc-date-stack{display:flex;flex-direction:column;gap:5px;min-width:0}.tcc-date-line{font-size:11px;color:#152235;line-height:1.2;font-weight:800;white-space:normal}.tcc-date-line span{display:inline-block;min-width:56px;color:#64748b;font-weight:900;text-transform:uppercase;font-size:9px;letter-spacing:.08em}.tcc-small-grey{font-size:10px;color:#64748b;line-height:1.25;font-weight:700}.tcc-extension-ok{font-size:10px;color:#166534;line-height:1.25;font-weight:900}.tcc-extension-warn{font-size:10px;color:#991b1b;line-height:1.25;font-weight:900}.tcc-finish-date{font-size:11px;font-weight:800;color:#152235;line-height:1.2}.tcc-delta{font-size:10px;line-height:1.25;font-weight:900;margin-top:4px}.tcc-delta.ok{color:#166534}.tcc-delta.danger{color:#991b1b}.tcc-delta.neutral{color:#64748b}.tcc-delta.warn{color:#92400e}
+.tcc-lesson-main{display:flex;gap:8px;align-items:flex-start;min-width:0}.tcc-lesson-num{flex:0 0 auto;color:#3b4f68;font-weight:900;font-size:12px;line-height:1.25;min-width:18px;text-align:right}.tcc-lesson-name{font-size:13px;font-weight:900;color:#152235;line-height:1.25;word-break:break-word}.tcc-date-stack{display:flex;flex-direction:column;gap:5px;min-width:0}.tcc-date-line{font-size:11px;color:#152235;line-height:1.2;font-weight:800;white-space:normal}.tcc-date-line span{display:inline-block;min-width:56px;color:#64748b;font-weight:900;text-transform:uppercase;font-size:9px;letter-spacing:.08em}.tcc-small-grey{font-size:10px;color:#64748b;line-height:1.25;font-weight:700}.tcc-extension-ok{font-size:10px;color:#166534;line-height:1.25;font-weight:900}.tcc-extension-warn{font-size:10px;color:#991b1b;line-height:1.25;font-weight:900}.tcc-delta{font-size:10px;line-height:1.25;font-weight:900;margin-top:4px}.tcc-delta.ok{color:#166534}.tcc-delta.danger{color:#991b1b}.tcc-delta.neutral{color:#64748b}.tcc-delta.warn{color:#92400e}
 .tcc-quality-wrap{min-width:0}.tcc-quality-top{font-size:12px;font-weight:900;color:#102845;line-height:1.2}.tcc-quality-bar{width:100%;height:7px;border-radius:999px;overflow:hidden;background:#e7edf4;margin-top:5px}.tcc-quality-bar span{display:block;height:7px;border-radius:999px;background:linear-gradient(90deg,#64748b 0%,#94a3b8 100%)}.tcc-quality-bar span.ok{background:linear-gradient(90deg,#166534 0%,#22c55e 100%)}.tcc-quality-bar span.warn{background:linear-gradient(90deg,#b45309 0%,#f59e0b 100%)}.tcc-quality-bar span.danger{background:linear-gradient(90deg,#b91c1c 0%,#ef4444 100%)}.tcc-quality-bar span.info{background:linear-gradient(90deg,#1d4f91 0%,#3b82f6 100%)}
-.tcc-score-pill{display:inline-flex;align-items:center;justify-content:center;min-width:34px;border-radius:999px;padding:5px 8px;font-size:11px;font-weight:900;border:1px solid transparent}.tcc-score-pill.ok{background:#dcfce7;border-color:#86efac;color:#166534}.tcc-score-pill.danger{background:#fee2e2;border-color:#fca5a5;color:#991b1b}.tcc-score-pill.neutral{background:#edf2f7;border-color:#d7dee9;color:#475569}.tcc-score-sub{font-size:10px;color:#64748b;font-weight:800;margin-top:4px;line-height:1.2}.tcc-count-mini{display:inline-flex;align-items:center;justify-content:center;min-width:34px;border-radius:999px;padding:5px 8px;font-size:11px;font-weight:900;background:#edf4ff;color:#1d4f91;border:1px solid #d3e3ff}.tcc-count-mini.warn{background:#fff7ed;color:#92400e;border-color:#fed7aa}.tcc-count-mini.neutral{background:#edf2f7;color:#475569;border-color:#d7dee9}
-.tcc-lesson-detail-row td{padding:0!important;background:#fbfdff!important}.tcc-lesson-detail{display:none;padding:14px 16px;border-top:1px solid rgba(15,23,42,.05)}.tcc-lesson-detail.open{display:block}.tcc-detail-grid{display:grid;grid-template-columns:1.2fr 1fr 1fr;gap:12px}.tcc-detail-card{border-radius:16px;background:#fff;border:1px solid rgba(15,23,42,.07);padding:14px}.tcc-detail-title{font-size:13px;font-weight:900;color:#102845;margin-bottom:6px}.tcc-detail-text{font-size:12px;color:#64748b;line-height:1.45}.tcc-detail-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}.tcc-detail-btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;border-radius:10px;padding:0 10px;font-size:11px;font-weight:900;text-decoration:none;border:1px solid rgba(15,23,42,.08);background:#f1f5f9;color:#334155}.tcc-detail-btn.primary{background:#12355f;color:#fff;border-color:#12355f}
-@media (max-width:900px){.tcc-module-head{grid-template-columns:46px 1fr}.tcc-module-mini,.tcc-module-value{display:none}.tcc-detail-grid{grid-template-columns:1fr}.tcc-instructor-lesson-table{min-width:980px}}
+.tcc-score-pill{display:inline-flex;align-items:center;justify-content:center;min-width:34px;border-radius:999px;padding:5px 8px;font-size:11px;font-weight:900;border:1px solid transparent}.tcc-score-pill.ok{background:#dcfce7;border-color:#86efac;color:#166534}.tcc-score-pill.danger{background:#fee2e2;border-color:#fca5a5;color:#991b1b}.tcc-score-pill.warn{background:#fef3c7;border-color:#fde68a;color:#92400e}.tcc-score-pill.neutral{background:#edf2f7;border-color:#d7dee9;color:#475569}.tcc-count-mini{display:inline-flex;align-items:center;justify-content:center;min-width:34px;border-radius:999px;padding:5px 8px;font-size:11px;font-weight:900;background:#edf4ff;color:#1d4f91;border:1px solid #d3e3ff}.tcc-count-mini.warn{background:#fff7ed;color:#92400e;border-color:#fed7aa}.tcc-count-mini.neutral{background:#edf2f7;color:#475569;border-color:#d7dee9}
+.tcc-lesson-detail-row td{padding:0!important;background:#fbfdff!important}.tcc-lesson-detail{display:none;padding:14px 16px;border-top:1px solid rgba(15,23,42,.05);background:#fbfdff}.tcc-lesson-detail.open{display:block}
+.tcc-detail-btn{display:inline-flex;align-items:center;justify-content:center;min-height:32px;border-radius:10px;padding:0 10px;font-size:11px;font-weight:900;text-decoration:none;border:1px solid rgba(15,23,42,.08);background:#f1f5f9;color:#334155;cursor:pointer}.tcc-detail-btn.primary{background:#12355f;color:#fff;border-color:#12355f}
+@media (max-width:900px){.tcc-module-head{grid-template-columns:46px 1fr}.tcc-module-mini,.tcc-module-value{display:none}.tcc-instructor-lesson-table{min-width:980px}}
 
+/* Modal detail styles */
 .tcc-modal-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.tcc-modal-section{border:1px solid rgba(15,23,42,.08);border-radius:16px;background:#fbfdff;padding:14px;min-width:0}.tcc-modal-section.full{grid-column:1/-1}.tcc-modal-section-title{font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.12em;color:#64748b;margin-bottom:8px}.tcc-modal-readable{font-size:13px;line-height:1.55;color:#102845;max-height:300px;overflow:auto;white-space:pre-wrap;background:#fff;border:1px solid rgba(15,23,42,.06);border-radius:12px;padding:12px}.tcc-modal-muted{font-size:12px;color:#64748b;line-height:1.45}.tcc-modal-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid rgba(15,23,42,.06);font-size:13px}.tcc-modal-row:last-child{border-bottom:0}.tcc-modal-label{color:#64748b;font-weight:800}.tcc-modal-value{color:#102845;font-weight:800;text-align:right}.tcc-attempt-card{border:1px solid rgba(15,23,42,.08);border-radius:16px;background:#fff;margin-bottom:12px;overflow:hidden}.tcc-attempt-head{display:flex;justify-content:space-between;gap:12px;padding:12px 14px;background:#f8fafc;border-bottom:1px solid rgba(15,23,42,.06)}.tcc-attempt-title{font-weight:900;color:#102845}.tcc-attempt-meta{font-size:12px;color:#64748b;margin-top:3px}.tcc-question-list{padding:10px 14px;display:flex;flex-direction:column;gap:10px}.tcc-question-card{border:1px solid rgba(15,23,42,.06);border-radius:14px;padding:11px;background:#fbfdff}.tcc-question-prompt{font-weight:900;color:#102845;font-size:13px;line-height:1.4}.tcc-question-answer{margin-top:7px;font-size:13px;color:#334155;line-height:1.45;white-space:pre-wrap}.tcc-audio{margin-top:8px;width:100%}.tcc-ai-placeholder{border:1px dashed rgba(15,23,42,.18);border-radius:14px;background:#fff;padding:12px;color:#64748b;font-size:13px;line-height:1.5}.tcc-intervention-list{display:flex;flex-direction:column;gap:10px}.tcc-intervention-item{border:1px solid rgba(15,23,42,.07);border-radius:14px;background:#fff;padding:11px}.tcc-intervention-title{font-size:13px;font-weight:900;color:#102845}.tcc-intervention-meta{margin-top:4px;font-size:12px;color:#64748b}.tcc-json-mini{margin-top:8px;white-space:pre-wrap;background:#0f172a;color:#e2e8f0;border-radius:12px;padding:10px;font-size:11px;max-height:180px;overflow:auto}@media(max-width:800px){.tcc-modal-grid{grid-template-columns:1fr}.tcc-modal-card{width:98vw}.tcc-modal-section.full{grid-column:auto}}
 
+/* Inline stacked lesson details */
+.tcc-inline-detail-stack{display:flex;flex-direction:column;gap:14px}
+.tcc-inline-section{border:1px solid rgba(15,23,42,.08);border-radius:18px;background:#fff;overflow:hidden;box-shadow:0 8px 18px rgba(15,23,42,.035)}
+.tcc-inline-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:13px 15px;background:linear-gradient(180deg,#ffffff 0%,#f8fafc 100%);border-bottom:1px solid rgba(15,23,42,.06)}
+.tcc-inline-section-title{font-size:14px;font-weight:900;color:#102845;line-height:1.15;letter-spacing:-.015em}
+.tcc-inline-section-sub{margin-top:4px;font-size:11px;color:#64748b;line-height:1.35;font-weight:700}
+.tcc-inline-section-body{padding:14px 15px}
+.tcc-inline-summary-text{max-height:260px;overflow:auto;white-space:pre-wrap;font-size:13px;line-height:1.55;color:#102845;background:#fbfdff;border:1px solid rgba(15,23,42,.06);border-radius:14px;padding:12px}
+.tcc-inline-ai-box{margin-top:10px;border:1px dashed rgba(15,23,42,.18);border-radius:14px;background:#fff;padding:12px;color:#64748b;font-size:12px;line-height:1.5}
+.tcc-inline-attempt{border:1px solid rgba(15,23,42,.07);border-radius:15px;background:#fbfdff;margin-bottom:10px;overflow:hidden}
+.tcc-inline-attempt-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;padding:11px 12px;background:#fff;border-bottom:1px solid rgba(15,23,42,.06)}
+.tcc-inline-attempt-title{font-size:13px;font-weight:900;color:#102845;line-height:1.25}
+.tcc-inline-attempt-meta{margin-top:3px;font-size:11px;color:#64748b;line-height:1.35;font-weight:700}
+.tcc-inline-question{padding:10px 12px;border-top:1px solid rgba(15,23,42,.05)}
+.tcc-inline-question:first-child{border-top:0}
+.tcc-inline-question-title{font-size:12px;font-weight:900;color:#102845;line-height:1.35}
+.tcc-inline-question-answer{margin-top:6px;font-size:12px;color:#334155;line-height:1.45;white-space:pre-wrap}
+.tcc-inline-intervention{border:1px solid rgba(15,23,42,.07);border-radius:14px;background:#fbfdff;padding:11px 12px;margin-bottom:9px}
+.tcc-inline-intervention-title{font-size:12px;font-weight:900;color:#102845;line-height:1.3}
+.tcc-inline-intervention-meta{margin-top:4px;font-size:11px;color:#64748b;line-height:1.35;font-weight:700}
+.tcc-inline-loading{padding:13px;border:1px dashed rgba(15,23,42,.14);border-radius:14px;background:#fff;color:#64748b;font-size:13px}
+.tcc-inline-error{padding:13px;border:1px solid #fecaca;border-radius:14px;background:#fef2f2;color:#991b1b;font-size:13px}
+.tcc-inline-empty{padding:13px;border:1px dashed rgba(15,23,42,.14);border-radius:14px;background:#fff;color:#64748b;font-size:13px}
+.tcc-inline-mini-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}
+.tcc-inline-mini-card{border-radius:13px;background:#fbfdff;border:1px solid rgba(15,23,42,.06);padding:10px}
+.tcc-inline-mini-label{font-size:9px;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:#64748b}
+.tcc-inline-mini-value{margin-top:5px;font-size:13px;font-weight:900;color:#102845;line-height:1.2}
+@media(max-width:800px){.tcc-inline-mini-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 </style>
 
 <div class="tcc-page">
@@ -137,6 +167,7 @@ cw_header('Instructor Theory Control Center');
 <script>
 (function(){
 'use strict';
+
 let cohortId = 0;
 let selectedStudentId = 0;
 let cohortStudents = [];
@@ -145,29 +176,27 @@ function escapeHtml(value){return String(value===null||value===undefined?'':valu
 function api(action,params){params=params||{};params.action=action;return fetch('/instructor/api/theory_control_center_api.php?'+new URLSearchParams(params),{credentials:'same-origin'}).then(function(r){return r.json();});}
 function openTccModal(title,bodyHtml){document.getElementById('tccModalTitle').textContent=title||'Diagnostic';document.getElementById('tccModalBody').innerHTML=bodyHtml||'';const o=document.getElementById('tccModalOverlay');o.classList.add('open');o.setAttribute('aria-hidden','false');}
 function closeTccModal(){const o=document.getElementById('tccModalOverlay');o.classList.remove('open');o.setAttribute('aria-hidden','true');}
+function showError(id,msg){const el=document.getElementById(id);if(el){el.innerHTML='<div class="tcc-error">'+escapeHtml(msg)+'</div>';}}
+function clampPct(v){v=parseFloat(v);if(isNaN(v))v=0;if(v<0)v=0;if(v>100)v=100;return Math.round(v);}
+function firstName(name){return String(name||'Student').trim().split(/\s+/)[0]||'Student';}
+function photoPath(o){let path=String((o&&(o.photo_path||o.avatar_url||o.photoPath||o.image_url))||'').trim();if(path==='')return '';if(path.indexOf('http://')===0||path.indexOf('https://')===0||path.indexOf('/')===0)return path;return '/'+path.replace(/^\/+/,'');}
+function avatarHtml(o,cls){const path=photoPath(o);const initials=escapeHtml((o&&o.avatar_initials)||'S');if(path!==''){return '<div class="'+cls+'"><img src="'+escapeHtml(path)+'" alt="'+escapeHtml((o&&o.name)||'Student')+'"></div>';}return '<div class="'+cls+'">'+initials+'</div>';}
+function radarColor(s){if(s.state==='blocked')return'red';if(s.pending_action_count&&parseInt(s.pending_action_count,10)>0)return'blue';if(s.state==='at_risk')return'orange';return'green';}
 function blockerReviewHref(issue){if(issue.action_url)return String(issue.action_url);if(issue.token){if(issue.type==='instructor_approval')return '/instructor/instructor_approval.php?token='+encodeURIComponent(issue.token);return '/student/remediation_action.php?token='+encodeURIComponent(issue.token);}return '';}
+function niceDate(v){if(!v)return '—';const d=new Date(String(v).replace(' ','T')+'Z');if(isNaN(d.getTime()))return String(v).slice(0,16);const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return days[d.getUTCDay()]+' '+months[d.getUTCMonth()]+' '+d.getUTCDate()+', '+d.getUTCFullYear();}
+function prettyStatus(s){s=String(s||'').replace(/_/g,' ');return s? s.charAt(0).toUpperCase()+s.slice(1):'Not started';}
+function formatScoreValue(value,max){if(value===null||value===undefined||value==='')return '—';if(max!==undefined&&max!==null&&max!=='')return String(value)+' / '+String(max);return String(value);}
+function modalStatusRows(rows){let html='';rows.forEach(function(row){html+='<div class="tcc-modal-row"><div class="tcc-modal-label">'+escapeHtml(row[0])+'</div><div class="tcc-modal-value">'+escapeHtml(row[1])+'</div></div>';});return html;}
+
 function openDebugReport(studentId,lessonId,issueType){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId||!lessonId){openTccModal('Debug Report','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');return;}openTccModal('Debug Report','<div class="tcc-loading">Generating diagnostic report…</div>');api('debug_report',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId,issue_type:issueType||'manual_check'}).then(function(data){openTccModal('Debug Report','<div class="tcc-debug-meta">Copy this JSON into Jake/Steven if this blocker represents an unexpected software state.</div><pre class="tcc-debug-pre">'+escapeHtml(JSON.stringify(data,null,2))+'</pre>');}).catch(function(){openTccModal('Debug Report','<div class="tcc-error">Unable to generate diagnostic report.</div>');});}
 function openSystemWatchForStudent(studentId){studentId=parseInt(studentId,10)||selectedStudentId;if(!cohortId||!studentId){openTccModal('System Watch','<div class="tcc-error">Missing cohort or student id.</div>');return;}openTccModal('System Watch','<div class="tcc-loading">Loading system watch…</div>');api('system_watch',{cohort_id:cohortId,student_id:studentId}).then(function(data){openTccModal('System Watch','<pre class="tcc-debug-pre">'+escapeHtml(JSON.stringify(data,null,2))+'</pre>');}).catch(function(){openTccModal('System Watch','<div class="tcc-error">Unable to load system watch.</div>');});}
 
-function modalStatusRows(rows){let html='';rows.forEach(function(row){html+='<div class="tcc-modal-row"><div class="tcc-modal-label">'+escapeHtml(row[0])+'</div><div class="tcc-modal-value">'+escapeHtml(row[1])+'</div></div>';});return html;}
-function formatScoreValue(value,max){if(value===null||value===undefined||value==='')return '—';if(max!==undefined&&max!==null&&max!=='')return String(value)+' / '+String(max);return String(value);}
 function openLessonSummary(studentId,lessonId){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId||!lessonId){openTccModal('Lesson Summary','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');return;}openTccModal('Lesson Summary','<div class="tcc-loading">Loading lesson summary…</div>');api('lesson_summary_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){if(!resp.ok){openTccModal('Lesson Summary','<div class="tcc-error">'+escapeHtml(resp.message||resp.error||'Unable to load summary.')+'</div>');return;}const d=resp.data||{};const lesson=d.lesson||{};const s=d.summary||{};const ai=d.ai_interpretation||{};const title=(lesson.lesson_title||'Lesson Summary');const plain=s.summary_plain||s.summary_text||'';const html='<div class="tcc-modal-grid"><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Status</div>'+modalStatusRows([['Module',lesson.course_title||'—'],['Lesson',lesson.lesson_title||'—'],['Review Status',s.review_status||'—'],['Review Score',s.review_score!==undefined&&s.review_score!==null?s.review_score:'—'],['Updated',niceDate(s.updated_at)]])+'</div><div class="tcc-modal-section"><div class="tcc-modal-section-title">Instructor Feedback</div><div class="tcc-modal-readable">'+escapeHtml(s.review_feedback||s.review_notes_by_instructor||'No instructor feedback recorded for this summary yet.')+'</div></div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Summary</div><div class="tcc-modal-readable">'+escapeHtml(plain||'No student summary text found.')+'</div></div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">AI Interpretation</div><div class="tcc-ai-placeholder"><strong>Status:</strong> '+escapeHtml(ai.status||'not_generated')+'<br><br>'+escapeHtml(ai.quality_feedback||'AI interpretation is intentionally not generated yet in this phase. The modal is ready for copy/paste, AI-use, similarity, highlighting, and improvement analysis once the backend evaluator is connected.')+'</div></div></div>';openTccModal(title,html);}).catch(function(){openTccModal('Lesson Summary','<div class="tcc-error">Unable to load summary.</div>');});}
 function renderAttemptItems(items){if(!items||!items.length)return '<div class="tcc-modal-muted">No answer-level items found for this attempt.</div>';let html='<div class="tcc-question-list">';items.forEach(function(item,idx){const score=formatScoreValue(item.score_points,item.max_points);const audio=item.audio_url?'<audio class="tcc-audio" controls preload="none" src="'+escapeHtml(item.audio_url)+'"></audio>':'';html+='<div class="tcc-question-card"><div class="tcc-question-prompt">Q'+(idx+1)+'. '+escapeHtml(item.prompt||item.question_text||'Question')+'</div><div class="tcc-question-answer"><strong>Answer:</strong> '+escapeHtml(item.transcript_text||item.answer_text||item.student_answer||'—')+'</div><div class="tcc-question-answer"><strong>Score:</strong> '+escapeHtml(score)+' · <strong>Correct:</strong> '+escapeHtml(item.is_correct===null||item.is_correct===undefined?'—':item.is_correct)+'</div>'+audio+'<div class="tcc-modal-muted" style="margin-top:8px;">Script-reading likelihood: not evaluated in this phase. Override hook will be connected later.</div></div>';});html+='</div>';return html;}
 function openAttemptDetails(studentId,lessonId){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId||!lessonId){openTccModal('Progress Test Details','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');return;}openTccModal('Progress Test Details','<div class="tcc-loading">Loading progress test attempts…</div>');api('lesson_attempts_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){if(!resp.ok){openTccModal('Progress Test Details','<div class="tcc-error">'+escapeHtml(resp.message||resp.error||'Unable to load attempts.')+'</div>');return;}const d=resp.data||{};const lesson=d.lesson||{};const attempts=d.attempts||[];let html='<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Lesson</div><div class="tcc-modal-muted">'+escapeHtml((lesson.course_title||'Module')+' · '+(lesson.lesson_title||'Lesson'))+'</div></div>';if(!attempts.length){html+='<div class="tcc-empty">No progress test attempts found.</div>';}attempts.forEach(function(a){const score=a.score_pct!==null&&a.score_pct!==undefined?a.score_pct+'%':'—';html+='<div class="tcc-attempt-card"><div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt '+escapeHtml(a.attempt||'—')+' · '+escapeHtml(a.formal_result_code||a.status||'')+'</div><div class="tcc-attempt-meta">Started: '+escapeHtml(niceDate(a.started_at))+' · Completed: '+escapeHtml(niceDate(a.completed_at))+'</div></div><span class="tcc-score-pill '+(parseInt(a.pass_gate_met,10)===1?'ok':'danger')+'">'+escapeHtml(score)+'</span></div>'+renderAttemptItems(a.items||[])+'</div>';});openTccModal('Progress Test Details',html);}).catch(function(){openTccModal('Progress Test Details','<div class="tcc-error">Unable to load attempts.</div>');});}
 function interventionBlock(title,items){let html='<div class="tcc-modal-section full"><div class="tcc-modal-section-title">'+escapeHtml(title)+' ('+(items?items.length:0)+')</div>';if(!items||!items.length){html+='<div class="tcc-modal-muted">No records found.</div></div>';return html;}html+='<div class="tcc-intervention-list">';items.forEach(function(item){const label=item.title||item.email_type||item.event_type||item.override_type||item.action_type||('Record #'+(item.id||''));const meta=[item.status||item.sent_status||'',item.created_at?niceDate(item.created_at):'',item.sent_at?('Sent '+niceDate(item.sent_at)):''].filter(Boolean).join(' · ');html+='<div class="tcc-intervention-item"><div class="tcc-intervention-title">'+escapeHtml(label)+'</div><div class="tcc-intervention-meta">'+escapeHtml(meta||'—')+'</div><pre class="tcc-json-mini">'+escapeHtml(JSON.stringify(item,null,2))+'</pre></div>';});html+='</div></div>';return html;}
 function openInterventions(studentId,lessonId){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId){openTccModal('Interventions','<div class="tcc-error">Missing cohort or student id.</div>');return;}openTccModal('Interventions','<div class="tcc-loading">Loading interventions…</div>');api('lesson_interventions_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){if(!resp.ok){openTccModal('Interventions','<div class="tcc-error">'+escapeHtml(resp.message||resp.error||'Unable to load interventions.')+'</div>');return;}const d=resp.data||{};const lesson=d.lesson||{};let subtitle=lessonId>0?((lesson.course_title||'Module')+' · '+(lesson.lesson_title||'Lesson')):'Entire program';let html='<div class="tcc-modal-muted" style="margin-bottom:12px;">'+escapeHtml(subtitle)+'</div>';html+=interventionBlock('Required Actions',d.required_actions||[]);html+=interventionBlock('Deadline Overrides / Extensions',d.deadline_overrides||[]);html+=interventionBlock('Email Trace',d.emails||[]);html+=interventionBlock('Progression Events',d.events||[]);openTccModal('Interventions',html);}).catch(function(){openTccModal('Interventions','<div class="tcc-error">Unable to load interventions.</div>');});}
 
-function showError(id,msg){const el=document.getElementById(id);if(el){el.innerHTML='<div class="tcc-error">'+escapeHtml(msg)+'</div>';}}
-function clampPct(v){v=parseFloat(v);if(isNaN(v))v=0;if(v<0)v=0;if(v>100)v=100;return Math.round(v);}
-function firstName(name){return String(name||'Student').trim().split(/\s+/)[0]||'Student';}
-function photoPath(o){
-    let path=String((o&&(o.photo_path||o.avatar_url||o.photoPath||o.image_url))||'').trim();
-    if(path==='') return '';
-    if(path.indexOf('http://')===0||path.indexOf('https://')===0||path.indexOf('/')===0) return path;
-    return '/' + path.replace(/^\/+/, '');
-}
-function avatarHtml(o,cls){const path=photoPath(o);const initials=escapeHtml((o&&o.avatar_initials)||'S');if(path!==''){return '<div class="'+cls+'"><img src="'+escapeHtml(path)+'" alt="'+escapeHtml((o&&o.name)||'Student')+'"></div>';}return '<div class="'+cls+'">'+initials+'</div>';}
-function radarColor(s){if(s.state==='blocked')return'red';if(s.pending_action_count&&parseInt(s.pending_action_count,10)>0)return'blue';if(s.state==='at_risk')return'orange';return'green';}
 function barClass(value,average,higherIsBetter){const v=parseFloat(value);const a=parseFloat(average);if(isNaN(v))return'warn';if(isNaN(a)){return higherIsBetter?(v>=75?'ok':(v>=70?'warn':'danger')):(v===0?'ok':'warn');}if(higherIsBetter){if(v>=a&&v>=75)return'ok';if(v>=70)return'warn';return'danger';}if(v<=a)return'ok';if(v<=a*1.5+0.5)return'warn';return'danger';}
 function metricPct(value,average,higherIsBetter){const v=parseFloat(value);const a=parseFloat(average);if(isNaN(v))return 0;if(higherIsBetter)return clampPct(v);const max=Math.max(v,a*2,1);return clampPct((v/max)*100);}
 function metricTile(title,value,barPct,barCls,sub){return '<div class="tcc-snapshot-tile"><div class="tcc-snapshot-label">'+escapeHtml(title)+'</div><div class="tcc-snapshot-value">'+escapeHtml(value)+'</div><div class="tcc-mini-bar"><span class="'+escapeHtml(barCls)+'" style="width:'+clampPct(barPct)+'%;"></span></div><div class="tcc-snapshot-sub">'+escapeHtml(sub)+'</div></div>';}
@@ -179,23 +208,324 @@ function renderHealth(data){const s=data.summary||{};document.getElementById('he
 function renderRadar(data){const container=document.getElementById('radarAvatars');const count=document.getElementById('radarCount');const select=document.getElementById('studentSelect');const students=data.students||[];cohortStudents=students;container.innerHTML='';select.innerHTML='<option value="0">Select student…</option>';count.textContent=students.length+' student'+(students.length===1?'':'s');if(!students.length){container.innerHTML='<div class="tcc-empty">No students found for this cohort.</div>';return;}students.forEach(function(s,idx){const progress=clampPct(s.progress_pct);const color=radarColor(s);const opt=document.createElement('option');opt.value=s.student_id||0;opt.textContent=(s.name||'Student')+' · '+progress+'%';select.appendChild(opt);const verticalNudge=(idx%3)*7;const el=document.createElement('div');el.className='tcc-radar-avatar '+color;el.style.left=progress+'%';el.style.top=(64+verticalNudge)+'px';el.title=(s.name||'Student')+' · '+progress+'% · '+(s.state||'');el.setAttribute('role','button');el.setAttribute('tabindex','0');el.setAttribute('aria-label',(s.name||'Student')+' progress '+progress+' percent');el.setAttribute('data-student-id',s.student_id||0);const path=photoPath(s);const inner=path!==''?'<span class="tcc-avatar-inner"><img src="'+escapeHtml(path)+'" alt="'+escapeHtml(s.name||'Student')+'"></span>':'<span class="tcc-avatar-inner">'+escapeHtml(s.avatar_initials||'S')+'</span>';el.innerHTML='<span class="tcc-radar-score">'+progress+'%</span>'+inner+'<span class="tcc-radar-label">'+escapeHtml(firstName(s.name))+'</span>';el.onclick=function(){loadStudentPanel(s.student_id);};el.onkeydown=function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();el.click();}};container.appendChild(el);});}
 function selectStudentInUi(studentId){selectedStudentId=parseInt(studentId,10)||0;const select=document.getElementById('studentSelect');if(select)select.value=String(selectedStudentId||0);Array.prototype.forEach.call(document.querySelectorAll('.tcc-radar-avatar'),function(el){el.classList.remove('selected');if(parseInt(el.getAttribute('data-student-id')||'0',10)===selectedStudentId)el.classList.add('selected');});}
 
-function niceDate(v){if(!v)return '—';const d=new Date(String(v).replace(' ','T')+'Z');if(isNaN(d.getTime()))return String(v).slice(0,16);const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return days[d.getUTCDay()]+' '+months[d.getUTCMonth()]+' '+d.getUTCDate()+', '+d.getUTCFullYear();}
-function timelinePillClass(v){v=String(v||'').toLowerCase();if(v==='ok'||v==='acceptable'||v==='passed'||v==='completed')return 'ok';if(v==='danger'||v.indexOf('late')!==-1||v==='failed'||v==='needs_revision'||v==='rejected')return 'danger';if(v==='pending'||v==='opened'||v==='warn')return 'warn';if(v==='not completed'||v==='not_started'||v==='')return 'neutral';return 'info';}
-function scoreClass(score){score=Number(score||0);if(score>=80)return 'ok';if(score>=70)return 'warn';return 'danger';}
-function scoreMini(score){if(score===null||score===undefined||score==='')return '<span class="tcc-pill neutral">—</span>';score=Number(score);return '<div class="tcc-score-mini"><strong>'+escapeHtml(score)+'%</strong><div class="tcc-score-mini-bar"><span class="'+scoreClass(score)+'" style="width:'+clampPct(score)+'%;"></span></div></div>';}
 function summaryQualityPct(status,score){if(score!==null&&score!==undefined&&score!=='')return clampPct(score);status=String(status||'').toLowerCase();if(status==='acceptable')return 82;if(status==='pending')return 58;if(status==='needs_revision')return 32;if(status==='rejected')return 20;return 0;}
 function summaryQualityClass(status,score){status=String(status||'').toLowerCase();if(status==='acceptable')return'ok';if(status==='pending')return'warn';if(status==='needs_revision'||status==='rejected')return'danger';if(score!==null&&score!==undefined&&Number(score)>0)return'info';return'neutral';}
-function prettyStatus(s){s=String(s||'').replace(/_/g,' ');return s? s.charAt(0).toUpperCase()+s.slice(1):'Not started';}
 function lessonDeltaClass(l){const c=String(l.deadline_delta_class||'').toLowerCase();if(c==='early'||c==='on_time'||c==='ok')return'ok';if(c==='late'||c==='danger')return'danger';if(c==='warn')return'warn';const label=String(l.deadline_delta_label||'').toLowerCase();if(label.indexOf('late')>=0)return'danger';if(label.indexOf('early')>=0||label.indexOf('on time')>=0)return'ok';return'neutral';}
 function renderSummaryQuality(l){const status=l.summary_status||'not_started';const pct=summaryQualityPct(status,l.summary_score);const cls=summaryQualityClass(status,l.summary_score);return '<div class="tcc-quality-wrap"><div class="tcc-quality-top">'+pct+'%</div><div class="tcc-quality-bar"><span class="'+escapeHtml(cls)+'" style="width:'+pct+'%;"></span></div><div class="tcc-small-grey">'+escapeHtml(prettyStatus(status))+'</div></div>';}
 function renderTestScore(l){const score=(l.last_score!==null&&l.last_score!==undefined)?Number(l.last_score):null;const cls=l.test_passed?'ok':(score!==null?'danger':'neutral');const label=score!==null?(score+'%'):'—';return '<span class="tcc-score-pill '+cls+'">'+escapeHtml(label)+'</span>';}
-function toggleLessonDetail(id){const el=document.getElementById(id);if(!el)return;el.classList.toggle('open');}
-function renderLessonTimeline(lessons){const target=document.getElementById('studentLessonTimelineBody');if(!target)return;if(!lessons||!lessons.length){target.innerHTML='<div class="tcc-empty">No lesson rows returned for this student.</div>';return;}const modules=[];const moduleMap={};lessons.forEach(function(l){const key=String(l.course_id||l.course_title||'module');if(!moduleMap[key]){moduleMap[key]={course_id:l.course_id||0,course_title:l.course_title||'Module',lessons:[]};modules.push(moduleMap[key]);}moduleMap[key].lessons.push(l);});let html='<div class="tcc-module-stack">';modules.forEach(function(mod,moduleIndex){const total=mod.lessons.length;const passed=mod.lessons.filter(function(l){return !!l.test_passed;}).length;const avgScores=mod.lessons.filter(function(l){return l.last_score!==null&&l.last_score!==undefined;}).map(function(l){return Number(l.last_score);});const avg=avgScores.length?Math.round(avgScores.reduce(function(a,b){return a+b;},0)/avgScores.length):null;html+='<details class="tcc-module-card" '+(moduleIndex===0?'open':'')+'>';html+='<summary><div class="tcc-module-head"><div class="tcc-module-badge">'+(moduleIndex+1)+'</div><div><div class="tcc-module-label">Module</div><div class="tcc-module-title">'+escapeHtml(mod.course_title)+'</div></div><div><div class="tcc-module-mini">Progress</div><div class="tcc-module-value">'+passed+'/'+total+'</div></div><div><div class="tcc-module-mini">Avg Score</div><div class="tcc-module-value">'+(avg!==null?avg+'%':'—')+'</div></div></div></summary>';html+='<div class="tcc-module-body"><div class="tcc-instructor-lesson-wrap"><table class="tcc-instructor-lesson-table"><colgroup><col style="width:27%"><col style="width:18%"><col style="width:13%"><col style="width:15%"><col style="width:11%"><col style="width:8%"><col style="width:8%"></colgroup><thead><tr><th>Lesson</th><th>Deadlines</th><th>Finished</th><th>Summary Quality</th><th>Progress Test</th><th>Attempts</th><th>Interventions</th></tr></thead><tbody>';mod.lessons.forEach(function(l,lessonIndex){const detailId='lessonDetail_'+String(l.course_id||moduleIndex)+'_'+String(l.lesson_id||lessonIndex);const ext=Number(l.extension_count||0);const extText=ext===1?'1 Extension':ext+' Extensions';const extClass=ext>0?'tcc-extension-warn':'tcc-extension-ok';const deltaClass=lessonDeltaClass(l);const interventionCount=Number(l.intervention_count||0);html+='<tr class="tcc-lesson-row" onclick="toggleLessonDetail(\''+detailId+'\')">';html+='<td><div class="tcc-lesson-main"><span class="tcc-lesson-num">'+(lessonIndex+1)+'.</span><div class="tcc-lesson-name">'+escapeHtml(l.lesson_title||'Lesson')+'</div></div></td>';html+='<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Orig</span>'+escapeHtml(niceDate(l.original_deadline_utc))+'</div><div class="tcc-date-line"><span>Eff</span>'+escapeHtml(niceDate(l.effective_deadline_utc))+'</div><div class="'+extClass+'">'+escapeHtml(ext>0?extText:'No Extensions')+'</div></div></td>';html+='<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Finished</span>'+escapeHtml(niceDate(l.completed_at))+'</div><div class="tcc-small-grey">&nbsp;</div><div class="tcc-delta '+deltaClass+'">'+escapeHtml(l.deadline_delta_label||'—')+'</div></div></td>';html+='<td>'+renderSummaryQuality(l)+'</td>';html+='<td>'+renderTestScore(l)+'</td>';html+='<td><span class="tcc-count-mini info">'+escapeHtml(l.attempt_count||0)+'</span></td>';html+='<td><span class="tcc-count-mini '+(interventionCount>0?'warn':'neutral')+'">'+escapeHtml(interventionCount)+'</span></td>';html+='</tr>';html+='<tr class="tcc-lesson-detail-row"><td colspan="7"><div id="'+detailId+'" class="tcc-lesson-detail"><div class="tcc-detail-grid"><div class="tcc-detail-card"><div class="tcc-detail-title">Lesson Summary</div><div class="tcc-detail-text">Open the full student summary, instructor review status, and future AI interpretation/highlighting from here.</div><div class="tcc-detail-actions"><button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary(selectedStudentId,'+parseInt(l.lesson_id||0,10)+')">Lesson Summary Details</button></div></div><div class="tcc-detail-card"><div class="tcc-detail-title">Progress Test</div><div class="tcc-detail-text">Review attempts, scores, answer detail, audio playback, and future answer-level override tools.</div><div class="tcc-detail-actions"><button type="button" class="tcc-detail-btn primary" onclick="openAttemptDetails(selectedStudentId,'+parseInt(l.lesson_id||0,10)+')">Progress Test Details</button></div></div><div class="tcc-detail-card"><div class="tcc-detail-title">Interventions</div><div class="tcc-detail-text">View deadline events, automatic actions, instructor actions, and email trace for this lesson.</div><div class="tcc-detail-actions"><button type="button" class="tcc-detail-btn primary" onclick="openInterventions(selectedStudentId,'+parseInt(l.lesson_id||0,10)+')">Interventions</button></div></div></div></div></td></tr>';});html+='</tbody></table></div></div></details>';});html+='</div>';target.innerHTML=html;}function loadStudentLessons(studentId){const target=document.getElementById('studentLessonTimelineBody');if(target)target.innerHTML='<div class="tcc-timeline-loading">Loading lesson timeline…</div>';api('student_lessons',{cohort_id:cohortId,student_id:studentId}).then(function(data){if(!data.ok){if(target)target.innerHTML='<div class="tcc-timeline-error">'+escapeHtml(data.message||data.error||'Unable to load lesson timeline.')+'</div>';return;}renderLessonTimeline(data.lessons||[]);}).catch(function(){if(target)target.innerHTML='<div class="tcc-timeline-error">Unable to load lesson timeline.</div>';});}
 
-function loadStudentPanel(studentId){selectStudentInUi(studentId);const panel=document.getElementById('studentPanel');if(!selectedStudentId||!panel)return;document.getElementById('studentPanelCount').textContent='Loading';panel.className='';panel.innerHTML='<div class="tcc-loading">Loading student snapshot…</div>';api('student_snapshot',{cohort_id:cohortId,student_id:selectedStudentId}).then(function(data){if(!data.ok){document.getElementById('studentPanelCount').textContent='Error';panel.innerHTML='<div class="tcc-error">'+escapeHtml(data.message||data.error||'Unable to load student snapshot.')+'</div>';return;}renderStudentPanel(data);}).catch(function(){document.getElementById('studentPanelCount').textContent='Error';panel.innerHTML='<div class="tcc-error">Unable to load student snapshot.</div>';});}
-function renderStudentPanel(data){const panel=document.getElementById('studentPanel');const st=data.student||{};const p=data.progress||{};const c=data.comparison||{};const m=data.motivation||{};const issues=data.main_issues||[];const radarStudent=cohortStudents.find(function(s){return parseInt(s.student_id,10)===parseInt(st.student_id,10);})||{};const merged=Object.assign({},radarStudent,st);const color=radarColor(radarStudent);const progressPct=clampPct(p.progress_pct);document.getElementById('studentPanelCount').textContent=(issues.length||0)+' issue'+(issues.length===1?'':'s');let issueHtml='';if(!issues.length){issueHtml='<div class="tcc-empty">No current blockers or system issues returned for this student.</div>';}else{issues.slice(0,10).forEach(function(issue){const reviewHref=blockerReviewHref(issue);const lessonId=parseInt(issue.lesson_id,10)||0;const safeIssueType=String(issue.type||'manual_check').replace(/[^a-zA-Z0-9_\-]/g,'');let actions='<div class="tcc-issue-actions">';if(reviewHref!==''){actions+='<a class="tcc-btn primary" href="'+escapeHtml(reviewHref)+'">Review</a>';}else{actions+='<button class="tcc-btn secondary" type="button" onclick="openDebugReport('+parseInt(st.student_id,10)+','+lessonId+',\''+safeIssueType+'\')">Inspect</button>';}actions+='<button class="tcc-btn warn" type="button" onclick="openDebugReport('+parseInt(st.student_id,10)+','+lessonId+',\''+safeIssueType+'\')">State Fix</button>';actions+='</div>';issueHtml+='<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">'+escapeHtml(issue.title||issue.type||'Issue')+'</div><div class="tcc-issue-meta">Lesson '+escapeHtml(issue.lesson_id||'—')+' · '+escapeHtml(issue.lesson_title||'')+' · '+escapeHtml(issue.status||'')+'</div></div>'+actions+'</div>';});if(issues.length>10){issueHtml+='<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">+'+(issues.length-10)+' more issue(s)</div><div class="tcc-issue-meta">The lesson module view below keeps the full instructor workflow organized.</div></div><div class="tcc-issue-actions"><button class="tcc-btn secondary" type="button" onclick="loadStudentLessons('+parseInt(st.student_id,10)+')">Open Lessons</button></div></div>';}}const avgScore=c.avg_score!==null&&c.avg_score!==undefined?Number(c.avg_score):null;const cohortAvgScore=c.cohort_avg_score!==null&&c.cohort_avg_score!==undefined?Number(c.cohort_avg_score):null;const missed=Number(c.deadlines_missed||0);const cohortMissed=Number(c.cohort_avg_deadlines_missed||0);const failed=Number(c.failed_attempts||0);const cohortFailed=Number(c.cohort_avg_failed_attempts||0);const tiles=metricTile('Progress',progressPct+'%',progressPct,'',''+(p.passed_lessons||0)+'/'+(p.total_lessons||0)+' lessons passed')+metricTile('Avg Score',avgScore!==null?avgScore+'%':'—',metricPct(avgScore,cohortAvgScore,true),barClass(avgScore,cohortAvgScore,true),'Cohort Average: '+(cohortAvgScore!==null?cohortAvgScore+'%':'—'))+metricTile('Deadlines Missed',missed,metricPct(missed,cohortMissed,false),barClass(missed,cohortMissed,false),'Cohort Average: '+cohortMissed)+metricTile('Failed Attempts',failed,metricPct(failed,cohortFailed,false),barClass(failed,cohortFailed,false),'Cohort Average: '+cohortFailed);panel.className='';panel.innerHTML='<div class="tcc-student-head"><div class="tcc-student-avatar '+escapeHtml(color)+'">'+(photoPath(merged)!==''?'<img src="'+escapeHtml(photoPath(merged))+'" alt="'+escapeHtml(st.name||'Student')+'">':escapeHtml(st.avatar_initials||radarStudent.avatar_initials||'S'))+'</div><div style="min-width:0;"><div class="tcc-student-name">'+escapeHtml(st.name||'Student')+'</div><div class="tcc-student-email">'+escapeHtml(st.email||'')+'</div></div></div><div class="tcc-student-state-row"><span class="tcc-status-pill '+escapeHtml(m.level||'')+'">'+escapeHtml(m.label||'Motivation signal')+'</span><span class="tcc-status-pill">Trend: '+escapeHtml(m.trend||'—')+'</span><span class="tcc-status-pill">Issues: '+escapeHtml(issues.length)+'</span></div><div class="tcc-snapshot-grid">'+tiles+'</div><h3 class="tcc-section-title" style="font-size:17px;margin:4px 0 10px;">Current Blockers / Issues</h3><div class="tcc-issues-list">'+issueHtml+'</div><div class="tcc-panel-actions"><button class="tcc-btn primary" type="button" onclick="loadStudentLessons('+parseInt(st.student_id,10)+')">Lessons</button><button class="tcc-btn secondary" type="button" onclick="openInterventions(selectedStudentId,0)">Interventions</button><button class="tcc-btn warn" type="button" onclick="openSystemWatchForStudent('+parseInt(st.student_id,10)+')">System Watch</button></div><div class="tcc-lesson-timeline"><div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by Module</div><div class="tcc-lesson-timeline-sub">Instructor overview styled like the student course page, grouped by module with compact deadline, summary, test, attempts, and intervention data.</div></div><span class="tcc-count-pill">Live</span></div><div id="studentLessonTimelineBody" class="tcc-timeline-loading">Loading lesson modules…</div></div>';loadStudentLessons(st.student_id);}function loadQueue(){document.getElementById('actionQueue').innerHTML='<div class="tcc-loading">Loading action queue…</div>';document.getElementById('queueCount').textContent='—';api('action_queue',{cohort_id:cohortId}).then(function(data){const container=document.getElementById('actionQueue');const count=document.getElementById('queueCount');if(!data.ok){showError('actionQueue',data.message||data.error||'Unable to load action queue.');return;}const items=data.items||[];count.textContent=items.length+' item'+(items.length===1?'':'s');container.innerHTML='';if(!items.length){container.innerHTML='<div class="tcc-empty">No instructor actions required for this cohort right now.</div>';return;}items.forEach(function(item){let reviewHref='';if(item.token){if(item.action_type==='instructor_approval')reviewHref='/instructor/instructor_approval.php?token='+encodeURIComponent(item.token);else reviewHref='/student/remediation_action.php?token='+encodeURIComponent(item.token);}const severity=item.severity||'low';const radarStudent=cohortStudents.find(function(s){return parseInt(s.student_id,10)===parseInt(item.student_id,10);})||{};const color=radarColor(radarStudent.state?radarStudent:{state:item.severity==='high'?'blocked':'at_risk',pending_action_count:1});const avatarObj=Object.assign({},radarStudent,{photo_path:item.photo_path||radarStudent.photo_path,avatar_initials:item.avatar_initials||radarStudent.avatar_initials,name:item.student_name});const el=document.createElement('div');el.className='tcc-item';el.innerHTML='<div class="tcc-item-left">'+avatarHtml(avatarObj,'tcc-avatar '+color)+'<div class="tcc-meta"><div class="tcc-name">'+escapeHtml(item.student_name||'Student')+'</div><div class="tcc-sub">'+escapeHtml(item.lesson_title||'No lesson title')+'</div><div class="tcc-sub">'+escapeHtml(item.reason||item.action_type||'Required action')+'</div><span class="tcc-severity '+escapeHtml(severity)+'">'+escapeHtml(severity)+'</span></div></div><div class="tcc-actions">'+(reviewHref?'<a class="tcc-btn primary" href="'+escapeHtml(reviewHref)+'">Review</a>':'<button class="tcc-btn primary" type="button">Review</button>')+'<button class="tcc-btn warn" type="button" data-action-id="'+escapeHtml(item.required_action_id||'')+'">Safe Fix</button></div>';const left=el.querySelector('.tcc-item-left');if(left){left.style.cursor='pointer';left.onclick=function(){loadStudentPanel(item.student_id);};}container.appendChild(el);});}).catch(function(){showError('actionQueue','Unable to load action queue.');});}
-	
-	
+function inlineSection(title, sub, bodyHtml, rightHtml){
+    return '<section class="tcc-inline-section"><div class="tcc-inline-section-head"><div><div class="tcc-inline-section-title">'+escapeHtml(title)+'</div><div class="tcc-inline-section-sub">'+escapeHtml(sub||'')+'</div></div>'+(rightHtml||'')+'</div><div class="tcc-inline-section-body">'+(bodyHtml||'')+'</div></section>';
+}
+function inlineMiniGrid(rows){
+    let html='<div class="tcc-inline-mini-grid">';
+    rows.forEach(function(row){html+='<div class="tcc-inline-mini-card"><div class="tcc-inline-mini-label">'+escapeHtml(row[0])+'</div><div class="tcc-inline-mini-value">'+escapeHtml(row[1])+'</div></div>';});
+    html+='</div>';
+    return html;
+}
+function renderInlineSummary(resp, studentId, lessonId){
+    if(!resp||!resp.ok){
+        return inlineSection('1. Lesson Summary Details','Student summary and instructor review status.','<div class="tcc-inline-error">Unable to load summary details.</div>','<button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
+    }
+    const d=resp.data||{};
+    const s=d.summary||{};
+    const lesson=d.lesson||{};
+    const plain=s.summary_plain||s.summary_text||'';
+    const ai=d.ai_interpretation||{};
+    const body=inlineMiniGrid([
+        ['Module',lesson.course_title||'—'],
+        ['Review Status',prettyStatus(s.review_status||'—')],
+        ['Review Score',(s.review_score!==null&&s.review_score!==undefined&&s.review_score!=='')?String(s.review_score):'—'],
+        ['Updated',niceDate(s.updated_at)]
+    ])+'<div class="tcc-inline-summary-text">'+escapeHtml(plain||'No student summary text found.')+'</div><div class="tcc-inline-ai-box"><strong>AI Interpretation:</strong><br>'+escapeHtml(ai.quality_feedback||'Not generated yet in this phase. This section is ready for copy/paste detection, AI-use likelihood, similarity analysis, text highlighting, improvement suggestions, and deep-understanding assessment once the backend evaluator is connected.')+'</div>';
+    return inlineSection('1. Lesson Summary Details','Student summary, review status, and future AI interpretation.',body,'<button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
+}
+function renderInlineAttempts(resp, studentId, lessonId){
+    if(!resp||!resp.ok){
+        return inlineSection('2. Progress Test Details','Attempts, answers, scores, and audio trace.','<div class="tcc-inline-error">Unable to load progress test details.</div>','<button type="button" class="tcc-detail-btn primary" onclick="openAttemptDetails('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
+    }
+    const d=resp.data||{};
+    const attempts=d.attempts||[];
+    let body='';
+    if(!attempts.length){
+        body='<div class="tcc-inline-empty">No progress test attempts found for this lesson.</div>';
+    }else{
+        attempts.forEach(function(a){
+            const score=(a.score_pct!==null&&a.score_pct!==undefined)?(a.score_pct+'%'):'—';
+            const cls=parseInt(a.pass_gate_met,10)===1?'ok':'danger';
+            body+='<div class="tcc-inline-attempt"><div class="tcc-inline-attempt-head"><div><div class="tcc-inline-attempt-title">Attempt '+escapeHtml(a.attempt||'—')+' · '+escapeHtml(a.formal_result_code||a.status||'')+'</div><div class="tcc-inline-attempt-meta">Started: '+escapeHtml(niceDate(a.started_at))+' · Completed: '+escapeHtml(niceDate(a.completed_at))+'</div></div><span class="tcc-score-pill '+cls+'">'+escapeHtml(score)+'</span></div>';
+            const items=a.items||[];
+            if(!items.length){
+                body+='<div class="tcc-inline-question"><div class="tcc-inline-question-answer">No answer-level detail found for this attempt.</div></div>';
+            }else{
+                items.forEach(function(item,idx){
+                    const audio=item.audio_url?'<audio class="tcc-audio" controls preload="none" src="'+escapeHtml(item.audio_url)+'"></audio>':'';
+                    body+='<div class="tcc-inline-question"><div class="tcc-inline-question-title">Q'+(idx+1)+'. '+escapeHtml(item.prompt||item.question_text||'Question')+'</div><div class="tcc-inline-question-answer"><strong>Answer:</strong> '+escapeHtml(item.transcript_text||item.answer_text||item.student_answer||'—')+'</div><div class="tcc-inline-question-answer"><strong>Score:</strong> '+escapeHtml(formatScoreValue(item.score_points,item.max_points))+'</div>'+audio+'</div>';
+                });
+            }
+            body+='</div>';
+        });
+    }
+    return inlineSection('2. Progress Test Details','Attempt history, answer detail, score trace, and audio playback where available.',body,'<button type="button" class="tcc-detail-btn primary" onclick="openAttemptDetails('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
+}
+function renderInlineInterventions(resp, studentId, lessonId){
+    if(!resp||!resp.ok){
+        return inlineSection('3. Interventions','Required actions, extensions, emails, and progression events.','<div class="tcc-inline-error">Unable to load intervention details.</div>','<button type="button" class="tcc-detail-btn primary" onclick="openInterventions('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
+    }
+    const d=resp.data||{};
+    const groups=[
+        ['Required Actions',d.required_actions||[]],
+        ['Deadline Overrides / Extensions',d.deadline_overrides||[]],
+        ['Email Trace',d.emails||[]],
+        ['Progression Events',d.events||[]]
+    ];
+    let body='';
+    groups.forEach(function(group){
+        const title=group[0];
+        const items=group[1]||[];
+        body+='<div class="tcc-inline-section-title" style="font-size:12px;margin:10px 0 8px;">'+escapeHtml(title)+' ('+items.length+')</div>';
+        if(!items.length){
+            body+='<div class="tcc-inline-empty">No records found.</div>';
+        }else{
+            items.slice(0,8).forEach(function(item){
+                const label=item.title||item.email_type||item.event_type||item.override_type||item.action_type||('Record #'+(item.id||''));
+                const meta=[item.status||item.sent_status||'',item.created_at?niceDate(item.created_at):'',item.sent_at?('Sent '+niceDate(item.sent_at)):''].filter(Boolean).join(' · ');
+                body+='<div class="tcc-inline-intervention"><div class="tcc-inline-intervention-title">'+escapeHtml(label)+'</div><div class="tcc-inline-intervention-meta">'+escapeHtml(meta||'—')+'</div></div>';
+            });
+            if(items.length>8){
+                body+='<div class="tcc-inline-empty">+'+(items.length-8)+' more records. Open modal for the full trace.</div>';
+            }
+        }
+    });
+    return inlineSection('3. Interventions','Chronological intervention evidence connected to this lesson.',body,'<button type="button" class="tcc-detail-btn primary" onclick="openInterventions('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
+}
+function renderInlineLessonDetail(summaryResp, attemptsResp, interventionsResp, studentId, lessonId){
+    return '<div class="tcc-inline-detail-stack">'+renderInlineSummary(summaryResp,studentId,lessonId)+renderInlineAttempts(attemptsResp,studentId,lessonId)+renderInlineInterventions(interventionsResp,studentId,lessonId)+'</div>';
+}
+function toggleLessonInlineDetail(id, studentId, lessonId){
+    const el=document.getElementById(id);
+    if(!el)return;
+    if(el.classList.contains('open')){
+        el.classList.remove('open');
+        return;
+    }
+    el.classList.add('open');
+    if(el.getAttribute('data-loaded')==='1')return;
+    el.innerHTML='<div class="tcc-inline-loading">Loading lesson detail sections…</div>';
+    Promise.all([
+        api('lesson_summary_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).catch(function(){return {ok:false,error:'summary_load_failed'};}),
+        api('lesson_attempts_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).catch(function(){return {ok:false,error:'attempts_load_failed'};}),
+        api('lesson_interventions_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).catch(function(){return {ok:false,error:'interventions_load_failed'};})
+    ]).then(function(results){
+        el.setAttribute('data-loaded','1');
+        el.innerHTML=renderInlineLessonDetail(results[0],results[1],results[2],studentId,lessonId);
+    }).catch(function(){
+        el.innerHTML='<div class="tcc-inline-error">Unable to load lesson detail sections.</div>';
+    });
+}
+
+function renderLessonTimeline(lessons){
+    const target=document.getElementById('studentLessonTimelineBody');
+    if(!target)return;
+    if(!lessons||!lessons.length){
+        target.innerHTML='<div class="tcc-empty">No lesson rows returned for this student.</div>';
+        return;
+    }
+
+    const modules=[];
+    const moduleMap={};
+
+    lessons.forEach(function(l){
+        const key=String(l.course_id||l.course_title||'module');
+        if(!moduleMap[key]){
+            moduleMap[key]={course_id:l.course_id||0,course_title:l.course_title||'Module',lessons:[]};
+            modules.push(moduleMap[key]);
+        }
+        moduleMap[key].lessons.push(l);
+    });
+
+    let html='<div class="tcc-module-stack">';
+
+    modules.forEach(function(mod,moduleIndex){
+        const total=mod.lessons.length;
+        const passed=mod.lessons.filter(function(l){return !!l.test_passed;}).length;
+        const avgScores=mod.lessons.filter(function(l){return l.last_score!==null&&l.last_score!==undefined;}).map(function(l){return Number(l.last_score);});
+        const avg=avgScores.length?Math.round(avgScores.reduce(function(a,b){return a+b;},0)/avgScores.length):null;
+
+        html+='<details class="tcc-module-card" '+(moduleIndex===0?'open':'')+'>';
+        html+='<summary><div class="tcc-module-head"><div class="tcc-module-badge">'+(moduleIndex+1)+'</div><div><div class="tcc-module-label">Module</div><div class="tcc-module-title">'+escapeHtml(mod.course_title)+'</div></div><div><div class="tcc-module-mini">Progress</div><div class="tcc-module-value">'+passed+'/'+total+'</div></div><div><div class="tcc-module-mini">Avg Score</div><div class="tcc-module-value">'+(avg!==null?avg+'%':'—')+'</div></div></div></summary>';
+        html+='<div class="tcc-module-body"><div class="tcc-instructor-lesson-wrap"><table class="tcc-instructor-lesson-table"><colgroup><col style="width:27%"><col style="width:18%"><col style="width:13%"><col style="width:15%"><col style="width:11%"><col style="width:8%"><col style="width:8%"></colgroup><thead><tr><th>Lesson</th><th>Deadlines</th><th>Finished</th><th>Summary Quality</th><th>Progress Test</th><th>Attempts</th><th>Interventions</th></tr></thead><tbody>';
+
+        mod.lessons.forEach(function(l,lessonIndex){
+            const lessonId=parseInt(l.lesson_id||0,10);
+            const studentId=parseInt(selectedStudentId||0,10);
+            const detailId='lessonDetail_'+String(l.course_id||moduleIndex)+'_'+String(l.lesson_id||lessonIndex);
+            const ext=Number(l.extension_count||0);
+            const extText=ext===1?'1 Extension':ext+' Extensions';
+            const extClass=ext>0?'tcc-extension-warn':'tcc-extension-ok';
+            const deltaClass=lessonDeltaClass(l);
+            const interventionCount=Number(l.intervention_count||0);
+
+            html+='<tr class="tcc-lesson-row" onclick="toggleLessonInlineDetail(\''+detailId+'\','+studentId+','+lessonId+')">';
+            html+='<td><div class="tcc-lesson-main"><span class="tcc-lesson-num">'+(lessonIndex+1)+'.</span><div class="tcc-lesson-name">'+escapeHtml(l.lesson_title||'Lesson')+'</div></div></td>';
+            html+='<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Orig</span>'+escapeHtml(niceDate(l.original_deadline_utc))+'</div><div class="tcc-date-line"><span>Eff</span>'+escapeHtml(niceDate(l.effective_deadline_utc))+'</div><div class="'+extClass+'">'+escapeHtml(ext>0?extText:'No Extensions')+'</div></div></td>';
+            html+='<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Finished</span>'+escapeHtml(niceDate(l.completed_at))+'</div><div class="tcc-small-grey">&nbsp;</div><div class="tcc-delta '+deltaClass+'">'+escapeHtml(l.deadline_delta_label||'—')+'</div></div></td>';
+            html+='<td>'+renderSummaryQuality(l)+'</td>';
+            html+='<td>'+renderTestScore(l)+'</td>';
+            html+='<td><span class="tcc-count-mini info">'+escapeHtml(l.attempt_count||0)+'</span></td>';
+            html+='<td><span class="tcc-count-mini '+(interventionCount>0?'warn':'neutral')+'">'+escapeHtml(interventionCount)+'</span></td>';
+            html+='</tr>';
+            html+='<tr class="tcc-lesson-detail-row"><td colspan="7"><div id="'+detailId+'" class="tcc-lesson-detail" data-loaded="0"></div></td></tr>';
+        });
+
+        html+='</tbody></table></div></div></details>';
+    });
+
+    html+='</div>';
+    target.innerHTML=html;
+}
+
+function loadStudentLessons(studentId){
+    const target=document.getElementById('studentLessonTimelineBody');
+    if(target)target.innerHTML='<div class="tcc-timeline-loading">Loading lesson timeline…</div>';
+    api('student_lessons',{cohort_id:cohortId,student_id:studentId}).then(function(data){
+        if(!data.ok){
+            if(target)target.innerHTML='<div class="tcc-timeline-error">'+escapeHtml(data.message||data.error||'Unable to load lesson timeline.')+'</div>';
+            return;
+        }
+        renderLessonTimeline(data.lessons||[]);
+    }).catch(function(){
+        if(target)target.innerHTML='<div class="tcc-timeline-error">Unable to load lesson timeline.</div>';
+    });
+}
+
+function loadStudentPanel(studentId){
+    selectStudentInUi(studentId);
+    const panel=document.getElementById('studentPanel');
+    if(!selectedStudentId||!panel)return;
+    document.getElementById('studentPanelCount').textContent='Loading';
+    panel.className='';
+    panel.innerHTML='<div class="tcc-loading">Loading student snapshot…</div>';
+    api('student_snapshot',{cohort_id:cohortId,student_id:selectedStudentId}).then(function(data){
+        if(!data.ok){
+            document.getElementById('studentPanelCount').textContent='Error';
+            panel.innerHTML='<div class="tcc-error">'+escapeHtml(data.message||data.error||'Unable to load student snapshot.')+'</div>';
+            return;
+        }
+        renderStudentPanel(data);
+    }).catch(function(){
+        document.getElementById('studentPanelCount').textContent='Error';
+        panel.innerHTML='<div class="tcc-error">Unable to load student snapshot.</div>';
+    });
+}
+
+function renderStudentPanel(data){
+    const panel=document.getElementById('studentPanel');
+    const st=data.student||{};
+    const p=data.progress||{};
+    const c=data.comparison||{};
+    const m=data.motivation||{};
+    const issues=data.main_issues||[];
+    const radarStudent=cohortStudents.find(function(s){return parseInt(s.student_id,10)===parseInt(st.student_id,10);})||{};
+    const merged=Object.assign({},radarStudent,st);
+    const color=radarColor(radarStudent);
+    const progressPct=clampPct(p.progress_pct);
+
+    document.getElementById('studentPanelCount').textContent=(issues.length||0)+' issue'+(issues.length===1?'':'s');
+
+    let issueHtml='';
+    if(!issues.length){
+        issueHtml='<div class="tcc-empty">No current blockers or system issues returned for this student.</div>';
+    }else{
+        issues.slice(0,10).forEach(function(issue){
+            const reviewHref=blockerReviewHref(issue);
+            const lessonId=parseInt(issue.lesson_id,10)||0;
+            const safeIssueType=String(issue.type||'manual_check').replace(/[^a-zA-Z0-9_\-]/g,'');
+            let actions='<div class="tcc-issue-actions">';
+            if(reviewHref!==''){
+                actions+='<a class="tcc-btn primary" href="'+escapeHtml(reviewHref)+'">Review</a>';
+            }else{
+                actions+='<button class="tcc-btn secondary" type="button" onclick="openDebugReport('+parseInt(st.student_id,10)+','+lessonId+',\''+safeIssueType+'\')">Inspect</button>';
+            }
+            actions+='<button class="tcc-btn warn" type="button" onclick="openDebugReport('+parseInt(st.student_id,10)+','+lessonId+',\''+safeIssueType+'\')">State Fix</button>';
+            actions+='</div>';
+            issueHtml+='<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">'+escapeHtml(issue.title||issue.type||'Issue')+'</div><div class="tcc-issue-meta">Lesson '+escapeHtml(issue.lesson_id||'—')+' · '+escapeHtml(issue.lesson_title||'')+' · '+escapeHtml(issue.status||'')+'</div></div>'+actions+'</div>';
+        });
+        if(issues.length>10){
+            issueHtml+='<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">+'+(issues.length-10)+' more issue(s)</div><div class="tcc-issue-meta">The lesson module view below keeps the full instructor workflow organized.</div></div><div class="tcc-issue-actions"><button class="tcc-btn secondary" type="button" onclick="loadStudentLessons('+parseInt(st.student_id,10)+')">Open Lessons</button></div></div>';
+        }
+    }
+
+    const avgScore=c.avg_score!==null&&c.avg_score!==undefined?Number(c.avg_score):null;
+    const cohortAvgScore=c.cohort_avg_score!==null&&c.cohort_avg_score!==undefined?Number(c.cohort_avg_score):null;
+    const missed=Number(c.deadlines_missed||0);
+    const cohortMissed=Number(c.cohort_avg_deadlines_missed||0);
+    const failed=Number(c.failed_attempts||0);
+    const cohortFailed=Number(c.cohort_avg_failed_attempts||0);
+
+    const tiles=
+        metricTile('Progress',progressPct+'%',progressPct,'',''+(p.passed_lessons||0)+'/'+(p.total_lessons||0)+' lessons passed')+
+        metricTile('Avg Score',avgScore!==null?avgScore+'%':'—',metricPct(avgScore,cohortAvgScore,true),barClass(avgScore,cohortAvgScore,true),'Cohort Average: '+(cohortAvgScore!==null?cohortAvgScore+'%':'—'))+
+        metricTile('Deadlines Missed',missed,metricPct(missed,cohortMissed,false),barClass(missed,cohortMissed,false),'Cohort Average: '+cohortMissed)+
+        metricTile('Failed Attempts',failed,metricPct(failed,cohortFailed,false),barClass(failed,cohortFailed,false),'Cohort Average: '+cohortFailed);
+
+    panel.className='';
+    panel.innerHTML=
+        '<div class="tcc-student-head"><div class="tcc-student-avatar '+escapeHtml(color)+'">'+
+        (photoPath(merged)!==''?'<img src="'+escapeHtml(photoPath(merged))+'" alt="'+escapeHtml(st.name||'Student')+'">':escapeHtml(st.avatar_initials||radarStudent.avatar_initials||'S'))+
+        '</div><div style="min-width:0;"><div class="tcc-student-name">'+escapeHtml(st.name||'Student')+'</div><div class="tcc-student-email">'+escapeHtml(st.email||'')+'</div></div></div>'+
+        '<div class="tcc-student-state-row"><span class="tcc-status-pill '+escapeHtml(m.level||'')+'">'+escapeHtml(m.label||'Motivation signal')+'</span><span class="tcc-status-pill">Trend: '+escapeHtml(m.trend||'—')+'</span><span class="tcc-status-pill">Issues: '+escapeHtml(issues.length)+'</span></div>'+
+        '<div class="tcc-snapshot-grid">'+tiles+'</div>'+
+        '<h3 class="tcc-section-title" style="font-size:17px;margin:4px 0 10px;">Current Blockers / Issues</h3>'+
+        '<div class="tcc-issues-list">'+issueHtml+'</div>'+
+        '<div class="tcc-panel-actions"><button class="tcc-btn primary" type="button" onclick="loadStudentLessons('+parseInt(st.student_id,10)+')">Lessons</button><button class="tcc-btn secondary" type="button" onclick="openInterventions(selectedStudentId,0)">Interventions</button><button class="tcc-btn warn" type="button" onclick="openSystemWatchForStudent('+parseInt(st.student_id,10)+')">System Watch</button></div>'+
+        '<div class="tcc-lesson-timeline"><div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by Module</div><div class="tcc-lesson-timeline-sub">Instructor overview styled like the student course page, grouped by module with compact deadline, summary, test, attempts, and intervention data.</div></div><span class="tcc-count-pill">Live</span></div><div id="studentLessonTimelineBody" class="tcc-timeline-loading">Loading lesson modules…</div></div>';
+
+    loadStudentLessons(st.student_id);
+}
+
+function loadQueue(){
+    document.getElementById('actionQueue').innerHTML='<div class="tcc-loading">Loading action queue…</div>';
+    document.getElementById('queueCount').textContent='—';
+    api('action_queue',{cohort_id:cohortId}).then(function(data){
+        const container=document.getElementById('actionQueue');
+        const count=document.getElementById('queueCount');
+        if(!data.ok){
+            showError('actionQueue',data.message||data.error||'Unable to load action queue.');
+            return;
+        }
+        const items=data.items||[];
+        count.textContent=items.length+' item'+(items.length===1?'':'s');
+        container.innerHTML='';
+        if(!items.length){
+            container.innerHTML='<div class="tcc-empty">No instructor actions required for this cohort right now.</div>';
+            return;
+        }
+        items.forEach(function(item){
+            let reviewHref='';
+            if(item.token){
+                if(item.action_type==='instructor_approval')reviewHref='/instructor/instructor_approval.php?token='+encodeURIComponent(item.token);
+                else reviewHref='/student/remediation_action.php?token='+encodeURIComponent(item.token);
+            }
+            const severity=item.severity||'low';
+            const radarStudent=cohortStudents.find(function(s){return parseInt(s.student_id,10)===parseInt(item.student_id,10);})||{};
+            const color=radarColor(radarStudent.state?radarStudent:{state:item.severity==='high'?'blocked':'at_risk',pending_action_count:1});
+            const avatarObj=Object.assign({},radarStudent,{photo_path:item.photo_path||radarStudent.photo_path,avatar_initials:item.avatar_initials||radarStudent.avatar_initials,name:item.student_name});
+            const el=document.createElement('div');
+            el.className='tcc-item';
+            el.innerHTML='<div class="tcc-item-left">'+avatarHtml(avatarObj,'tcc-avatar '+color)+'<div class="tcc-meta"><div class="tcc-name">'+escapeHtml(item.student_name||'Student')+'</div><div class="tcc-sub">'+escapeHtml(item.lesson_title||'No lesson title')+'</div><div class="tcc-sub">'+escapeHtml(item.reason||item.action_type||'Required action')+'</div><span class="tcc-severity '+escapeHtml(severity)+'">'+escapeHtml(severity)+'</span></div></div><div class="tcc-actions">'+(reviewHref?'<a class="tcc-btn primary" href="'+escapeHtml(reviewHref)+'">Review</a>':'<button class="tcc-btn primary" type="button">Review</button>')+'<button class="tcc-btn warn" type="button" data-action-id="'+escapeHtml(item.required_action_id||'')+'">Safe Fix</button></div>';
+            const left=el.querySelector('.tcc-item-left');
+            if(left){
+                left.style.cursor='pointer';
+                left.onclick=function(){loadStudentPanel(item.student_id);};
+            }
+            container.appendChild(el);
+        });
+    }).catch(function(){
+        showError('actionQueue','Unable to load action queue.');
+    });
+}
+
 window.closeTccModal = closeTccModal;
 window.openDebugReport = openDebugReport;
 window.openSystemWatchForStudent = openSystemWatchForStudent;
@@ -203,10 +533,15 @@ window.openLessonSummary = openLessonSummary;
 window.openAttemptDetails = openAttemptDetails;
 window.openInterventions = openInterventions;
 window.loadStudentLessons = loadStudentLessons;
-window.toggleLessonDetail = toggleLessonDetail;	
-	
-document.getElementById('cohortSelect').addEventListener('change',function(){cohortId=parseInt(this.value,10)||0;loadAll();});document.getElementById('studentSelect').addEventListener('change',function(){const sid=parseInt(this.value,10)||0;if(sid>0)loadStudentPanel(sid);});loadCohorts();
+window.toggleLessonInlineDetail = toggleLessonInlineDetail;
+window.toggleLessonDetail = toggleLessonInlineDetail;
+
+document.getElementById('cohortSelect').addEventListener('change',function(){cohortId=parseInt(this.value,10)||0;loadAll();});
+document.getElementById('studentSelect').addEventListener('change',function(){const sid=parseInt(this.value,10)||0;if(sid>0)loadStudentPanel(sid);});
+loadCohorts();
+
 })();
 </script>
 
 <?php cw_footer(); ?>
+
