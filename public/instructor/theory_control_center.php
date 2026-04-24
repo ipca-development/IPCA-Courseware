@@ -262,8 +262,7 @@ function sanitizeSummaryHtml(html){
     });
     return tpl.innerHTML;
 }
-function rawSummaryHtml(s){const html=String((s&&(s.summary_html||s.summaryHtml))||'').trim();if(html!=='')return sanitizeSummaryHtml(html);const plain=String((s&&(s.summary_plain||s.summary_text))||'').trim();return plain!==''?escapeHtml(plain).replace(/
-/g,'<br>'):'No student summary text found.';}
+function rawSummaryHtml(s){const html=String((s&&(s.summary_html||s.summaryHtml))||'').trim();if(html!=='')return sanitizeSummaryHtml(html);const plain=String((s&&(s.summary_plain||s.summary_text))||'').trim();return plain!==''?escapeHtml(plain).replace(/\n/g,'<br>'):'No student summary text found.';}
 function cacheSummaryHtml(title, htmlContent){window.tccSummaryCache=window.tccSummaryCache||{};const key='s_'+Date.now()+'_'+Math.floor(Math.random()*1000000);window.tccSummaryCache[key]={title:String(title||'Lesson Summary'),html:String(htmlContent||'')};return key;}
 function openSummaryLargeModalById(key){const item=(window.tccSummaryCache||{})[key]||{};openSummaryLargeModal(item.title||'Lesson Summary',item.html||'');}
 
@@ -613,7 +612,7 @@ function loadQueue(){
             const el=document.createElement('div');
             el.className='tcc-item';
             const lessonId=parseInt(item.lesson_id||0,10);const issueType=String(item.action_type||'manual_check').replace(/[^a-zA-Z0-9_\-]/g,'');
-            el.innerHTML='<div class="tcc-item-left">'+avatarHtml(avatarObj,'tcc-avatar '+color)+'<div class="tcc-meta"><div class="tcc-name">'+escapeHtml(item.student_name||'Student')+'</div><div class="tcc-sub">'+escapeHtml(item.lesson_title||'No lesson title')+'</div><div class="tcc-sub">'+escapeHtml(item.reason||item.action_type||'Required action')+'</div><span class="tcc-severity '+escapeHtml(severity)+'">'+escapeHtml(severity)+'</span></div></div><div class="tcc-actions">'+(reviewHref?'<a class="tcc-btn primary" href="'+escapeHtml(reviewHref)+'">Review</a>':'<button class="tcc-btn primary" type="button" onclick="loadStudentPanel('+parseInt(item.student_id||0,10)+')">Review</button>')+'<button class="tcc-btn secondary" type="button" onclick="openDebugReport('+parseInt(item.student_id||0,10)+','+lessonId+',''+issueType+'')">Inspect</button><button class="tcc-btn warn" type="button" onclick="openDebugReport('+parseInt(item.student_id||0,10)+','+lessonId+',''+issueType+'')">State Fix</button></div>';
+            el.innerHTML='<div class="tcc-item-left">'+avatarHtml(avatarObj,'tcc-avatar '+color)+'<div class="tcc-meta"><div class="tcc-name">'+escapeHtml(item.student_name||'Student')+'</div><div class="tcc-sub">'+escapeHtml(item.lesson_title||'No lesson title')+'</div><div class="tcc-sub">'+escapeHtml(item.reason||item.action_type||'Required action')+'</div><span class="tcc-severity '+escapeHtml(severity)+'">'+escapeHtml(severity)+'</span></div></div><div class="tcc-actions">'+(reviewHref?'<a class="tcc-btn primary" href="'+escapeHtml(reviewHref)+'">Review</a>':'<button class="tcc-btn primary" type="button" onclick="loadStudentPanel('+parseInt(item.student_id||0,10)+')">Review</button>')+'<button class="tcc-btn secondary" type="button" onclick="openDebugReport('+parseInt(item.student_id||0,10)+','+lessonId+','+jsArg(issueType)+')">Inspect</button><button class="tcc-btn warn" type="button" onclick="openDebugReport('+parseInt(item.student_id||0,10)+','+lessonId+','+jsArg(issueType)+')">State Fix</button></div>';
             const left=el.querySelector('.tcc-item-left');
             if(left){
                 left.style.cursor='pointer';
@@ -648,3 +647,4 @@ loadCohorts();
 </script>
 
 <?php cw_footer(); ?>
+
