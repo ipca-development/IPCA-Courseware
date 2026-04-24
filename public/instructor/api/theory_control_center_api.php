@@ -685,6 +685,228 @@ function tcc_student_lesson_timeline(PDO $pdo, int $cohortId, int $studentId): a
     return $timeline;
 }
 
+
+function tcc_audio_url(?string $audioPath): string {
+    $audioPath = trim((string)$audioPath);
+    if ($audioPath === '') {
+        return '';
+    }
+    if (preg_match('~^https?://~i', $audioPath)) {
+        return $audioPath;
+    }
+    $base = 'https://ipca-media.nyc3.cdn.digitaloceanspaces.com/';
+    return $base . ltrim($audioPath, '/');
+}
+
+function tcc_lesson_identity(PDO $pdo, int $cohortId, int $lessonId): array {
+    $st = $pdo->prepare("
+        SELECT
+            l.id AS lesson_id,
+            l.external_lesson_id,
+            l.title AS lesson_title,
+            c.id AS course_id,
+            c.title AS course_title,
+            d.deadline_utc AS original_deadline_utc,
+            d.sort_order AS cohort_lesson_sort_order
+        FROM cohort_lesson_deadlines d
+        JOIN lessons l ON l.id = d.lesson_id
+        JOIN courses c ON c.id = l.course_id
+        WHERE d.cohort_id = ?
+          AND d.lesson_id = ?
+        LIMIT 1
+    ");
+    $st->execute([$cohortId, $lessonId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: [];
+}
+
+function tcc_lesson_summary_detail(PDO $pdo, int $cohortId, int $studentId, int $lessonId): array {
+    $lesson = tcc_lesson_identity($pdo, $cohortId, $lessonId);
+
+    $st = $pdo->prepare("
+        SELECT *
+        FROM lesson_summaries
+        WHERE cohort_id = ?
+          AND user_id = ?
+          AND lesson_id = ?
+        LIMIT 1
+    ");
+    $st->execute([$cohortId, $studentId, $lessonId]);
+    $summary = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+
+    $versions = [];
+    try {
+        $vs = $pdo->prepare("
+            SELECT *
+            FROM lesson_summary_versions
+            WHERE cohort_id = ?
+              AND user_id = ?
+              AND lesson_id = ?
+            ORDER BY id DESC
+            LIMIT 10
+        ");
+        $vs->execute([$cohortId, $studentId, $lessonId]);
+        $versions = $vs->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $versions = [];
+    }
+
+    return [
+        'lesson' => $lesson,
+        'summary' => $summary,
+        'versions' => $versions,
+        'ai_interpretation' => [
+            'status' => 'not_generated_in_phase_2j',
+            'copy_paste_check' => 'Not evaluated yet.',
+            'ai_generated_check' => 'Not evaluated yet.',
+            'similarity_check' => 'Not evaluated yet.',
+            'quality_feedback' => 'AI interpretation will be added after the UI and canonical data views are stable.',
+            'improvement_suggestions' => []
+        ]
+    ];
+}
+
+function tcc_lesson_attempts_detail(PDO $pdo, int $cohortId, int $studentId, int $lessonId): array {
+    $lesson = tcc_lesson_identity($pdo, $cohortId, $lessonId);
+
+    $attemptStmt = $pdo->prepare("
+        SELECT *
+        FROM progress_tests_v2
+        WHERE cohort_id = ?
+          AND user_id = ?
+          AND lesson_id = ?
+        ORDER BY attempt DESC, id DESC
+        LIMIT 20
+    ");
+    $attemptStmt->execute([$cohortId, $studentId, $lessonId]);
+    $attempts = $attemptStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $attemptIds = [];
+    foreach ($attempts as $a) {
+        $attemptIds[] = (int)($a['id'] ?? 0);
+    }
+    $attemptIds = array_values(array_filter($attemptIds));
+
+    $itemsByAttempt = [];
+    if ($attemptIds) {
+        $placeholders = implode(',', array_fill(0, count($attemptIds), '?'));
+        try {
+            $itemStmt = $pdo->prepare("
+                SELECT *
+                FROM progress_test_items_v2
+                WHERE test_id IN (" . $placeholders . ")
+                ORDER BY test_id DESC, idx ASC, id ASC
+            ");
+            $itemStmt->execute($attemptIds);
+            foreach ($itemStmt->fetchAll(PDO::FETCH_ASSOC) as $item) {
+                $testId = (int)($item['test_id'] ?? 0);
+                if (!isset($itemsByAttempt[$testId])) {
+                    $itemsByAttempt[$testId] = [];
+                }
+                if (isset($item['audio_path'])) {
+                    $item['audio_url'] = tcc_audio_url((string)$item['audio_path']);
+                } else {
+                    $item['audio_url'] = '';
+                }
+                $itemsByAttempt[$testId][] = $item;
+            }
+        } catch (Throwable $e) {
+            $itemsByAttempt = [];
+        }
+    }
+
+    foreach ($attempts as &$attempt) {
+        $testId = (int)($attempt['id'] ?? 0);
+        $attempt['items'] = $itemsByAttempt[$testId] ?? [];
+    }
+    unset($attempt);
+
+    return [
+        'lesson' => $lesson,
+        'attempts' => $attempts
+    ];
+}
+
+function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId, int $lessonId = 0): array {
+    $lesson = $lessonId > 0 ? tcc_lesson_identity($pdo, $cohortId, $lessonId) : [];
+    $lessonWhere = $lessonId > 0 ? ' AND lesson_id = ? ' : '';
+
+    $actionsParams = $lessonId > 0 ? [$cohortId, $studentId, $lessonId] : [$cohortId, $studentId];
+    $actionsStmt = $pdo->prepare("
+        SELECT *
+        FROM student_required_actions
+        WHERE cohort_id = ?
+          AND user_id = ?
+          " . $lessonWhere . "
+        ORDER BY created_at DESC, id DESC
+        LIMIT 100
+    ");
+    $actionsStmt->execute($actionsParams);
+    $requiredActions = $actionsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $deadlineOverrides = [];
+    try {
+        $overrideParams = $lessonId > 0 ? [$cohortId, $studentId, $lessonId] : [$cohortId, $studentId];
+        $overrideStmt = $pdo->prepare("
+            SELECT *
+            FROM student_lesson_deadline_overrides
+            WHERE cohort_id = ?
+              AND user_id = ?
+              " . $lessonWhere . "
+            ORDER BY created_at DESC, id DESC
+            LIMIT 100
+        ");
+        $overrideStmt->execute($overrideParams);
+        $deadlineOverrides = $overrideStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $deadlineOverrides = [];
+    }
+
+    $emails = [];
+    try {
+        $emailParams = $lessonId > 0 ? [$cohortId, $studentId, $lessonId] : [$cohortId, $studentId];
+        $emailStmt = $pdo->prepare("
+            SELECT *
+            FROM training_progression_emails
+            WHERE cohort_id = ?
+              AND user_id = ?
+              " . $lessonWhere . "
+            ORDER BY created_at DESC, id DESC
+            LIMIT 100
+        ");
+        $emailStmt->execute($emailParams);
+        $emails = $emailStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $emails = [];
+    }
+
+    $events = [];
+    try {
+        $eventParams = $lessonId > 0 ? [$cohortId, $studentId, $lessonId] : [$cohortId, $studentId];
+        $eventStmt = $pdo->prepare("
+            SELECT *
+            FROM training_progression_events
+            WHERE cohort_id = ?
+              AND user_id = ?
+              " . $lessonWhere . "
+            ORDER BY created_at DESC, id DESC
+            LIMIT 100
+        ");
+        $eventStmt->execute($eventParams);
+        $events = $eventStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $events = [];
+    }
+
+    return [
+        'lesson' => $lesson,
+        'required_actions' => $requiredActions,
+        'deadline_overrides' => $deadlineOverrides,
+        'emails' => $emails,
+        'events' => $events
+    ];
+}
+
 $action = tcc_str($_GET['action'] ?? '');
 
 if ($action === '') {
@@ -697,6 +919,9 @@ if ($action === '') {
             'student_snapshot',
             'system_watch',
             'student_lessons',
+            'lesson_summary_detail',
+            'lesson_attempts_detail',
+            'lesson_interventions_detail',
             'debug_report'
         ]
     ], 400);
@@ -939,6 +1164,64 @@ try {
             'student_id' => $studentId,
             'count' => count($timeline),
             'lessons' => $timeline
+        ]);
+    }
+
+
+    if ($action === 'lesson_summary_detail') {
+        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
+        $studentId = tcc_int($_GET['student_id'] ?? 0);
+        $lessonId = tcc_int($_GET['lesson_id'] ?? 0);
+
+        if ($cohortId <= 0 || $studentId <= 0 || $lessonId <= 0) {
+            tcc_json(['ok' => false, 'error' => 'missing_required_ids'], 400);
+        }
+
+        tcc_json([
+            'ok' => true,
+            'action' => 'lesson_summary_detail',
+            'cohort_id' => $cohortId,
+            'student_id' => $studentId,
+            'lesson_id' => $lessonId,
+            'data' => tcc_lesson_summary_detail($pdo, $cohortId, $studentId, $lessonId)
+        ]);
+    }
+
+    if ($action === 'lesson_attempts_detail') {
+        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
+        $studentId = tcc_int($_GET['student_id'] ?? 0);
+        $lessonId = tcc_int($_GET['lesson_id'] ?? 0);
+
+        if ($cohortId <= 0 || $studentId <= 0 || $lessonId <= 0) {
+            tcc_json(['ok' => false, 'error' => 'missing_required_ids'], 400);
+        }
+
+        tcc_json([
+            'ok' => true,
+            'action' => 'lesson_attempts_detail',
+            'cohort_id' => $cohortId,
+            'student_id' => $studentId,
+            'lesson_id' => $lessonId,
+            'data' => tcc_lesson_attempts_detail($pdo, $cohortId, $studentId, $lessonId)
+        ]);
+    }
+
+    if ($action === 'lesson_interventions_detail') {
+        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
+        $studentId = tcc_int($_GET['student_id'] ?? 0);
+        $lessonId = tcc_int($_GET['lesson_id'] ?? 0);
+
+        if ($cohortId <= 0 || $studentId <= 0) {
+            tcc_json(['ok' => false, 'error' => 'missing_required_ids'], 400);
+        }
+
+        tcc_json([
+            'ok' => true,
+            'action' => 'lesson_interventions_detail',
+            'cohort_id' => $cohortId,
+            'student_id' => $studentId,
+            'lesson_id' => $lessonId,
+            'data' => tcc_lesson_interventions_detail($pdo, $cohortId, $studentId, $lessonId)
         ]);
     }
 
