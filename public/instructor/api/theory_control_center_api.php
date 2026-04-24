@@ -453,238 +453,6 @@ function tcc_system_watch(PDO $pdo, int $cohortId, ?int $userId = null): array {
     return $issues;
 }
 
-
-function tcc_deadline_delta(?string $completedAt, ?string $deadlineUtc): array {
-    $completedAt = trim((string)$completedAt);
-    $deadlineUtc = trim((string)$deadlineUtc);
-
-    if ($completedAt === '') {
-        return [
-            'label' => 'Not completed',
-            'days' => null,
-            'class' => 'neutral'
-        ];
-    }
-
-    if ($deadlineUtc === '') {
-        return [
-            'label' => 'Completed',
-            'days' => null,
-            'class' => 'ok'
-        ];
-    }
-
-    try {
-        $completed = new DateTime($completedAt, new DateTimeZone('UTC'));
-        $deadline = new DateTime($deadlineUtc, new DateTimeZone('UTC'));
-        $seconds = $completed->getTimestamp() - $deadline->getTimestamp();
-        $days = (int)ceil(abs($seconds) / 86400);
-
-        if ($seconds <= 0) {
-            return [
-                'label' => ($days <= 0 ? 'On time' : $days . ' day' . ($days === 1 ? '' : 's') . ' early'),
-                'days' => -$days,
-                'class' => 'ok'
-            ];
-        }
-
-        return [
-            'label' => $days . ' day' . ($days === 1 ? '' : 's') . ' late',
-            'days' => $days,
-            'class' => 'danger'
-        ];
-    } catch (Throwable $e) {
-        return [
-            'label' => 'Unknown',
-            'days' => null,
-            'class' => 'neutral'
-        ];
-    }
-}
-
-function tcc_student_lesson_timeline(PDO $pdo, int $cohortId, int $studentId): array {
-    $lessonStmt = $pdo->prepare("
-        SELECT
-            d.lesson_id,
-            d.deadline_utc AS original_deadline_utc,
-            d.sort_order AS cohort_lesson_sort_order,
-            l.external_lesson_id,
-            l.title AS lesson_title,
-            c.id AS course_id,
-            c.title AS course_title,
-            c.sort_order AS course_sort_order,
-            la.completed_at,
-            la.effective_deadline_utc,
-            la.extension_count,
-            la.summary_status,
-            la.test_pass_status,
-            la.completion_status,
-            ls.review_status AS summary_review_status,
-            ls.review_score AS summary_review_score,
-            ls.updated_at AS summary_updated_at
-        FROM cohort_lesson_deadlines d
-        JOIN lessons l ON l.id = d.lesson_id
-        JOIN courses c ON c.id = l.course_id
-        LEFT JOIN lesson_activity la
-               ON la.user_id = ?
-              AND la.cohort_id = d.cohort_id
-              AND la.lesson_id = d.lesson_id
-        LEFT JOIN lesson_summaries ls
-               ON ls.user_id = ?
-              AND ls.cohort_id = d.cohort_id
-              AND ls.lesson_id = d.lesson_id
-        WHERE d.cohort_id = ?
-        ORDER BY c.sort_order ASC, c.id ASC, d.sort_order ASC, d.id ASC
-    ");
-    $lessonStmt->execute([$studentId, $studentId, $cohortId]);
-    $rows = $lessonStmt->fetchAll(PDO::FETCH_ASSOC);
-
-    $lessonIds = array_map(static fn($row): int => (int)$row['lesson_id'], $rows);
-
-    if (!$lessonIds) {
-        return [];
-    }
-
-    $placeholders = implode(',', array_fill(0, count($lessonIds), '?'));
-
-    $testMap = [];
-    foreach ($lessonIds as $lessonId) {
-        $testMap[$lessonId] = [
-            'attempt_count' => 0,
-            'last_score' => null,
-            'last_status' => '',
-            'last_completed_at' => '',
-            'passed' => false
-        ];
-    }
-
-    $testParams = array_merge([$studentId, $cohortId], $lessonIds);
-    $testStmt = $pdo->prepare("
-        SELECT
-            id,
-            lesson_id,
-            attempt,
-            status,
-            pass_gate_met,
-            score_pct,
-            completed_at,
-            formal_result_code,
-            counts_as_unsat
-        FROM progress_tests_v2
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id IN (" . $placeholders . ")
-        ORDER BY lesson_id ASC, id DESC
-    ");
-    $testStmt->execute($testParams);
-
-    foreach ($testStmt->fetchAll(PDO::FETCH_ASSOC) as $testRow) {
-        $lessonId = (int)$testRow['lesson_id'];
-        $formalCode = (string)($testRow['formal_result_code'] ?? '');
-        $countsAsUnsat = (int)($testRow['counts_as_unsat'] ?? 0);
-        $passGateMet = (int)($testRow['pass_gate_met'] ?? 0);
-        $isStaleNoise = ($formalCode === 'STALE_ABORTED' && $countsAsUnsat === 0 && $passGateMet === 0);
-
-        if ($isStaleNoise) {
-            continue;
-        }
-
-        $testMap[$lessonId]['attempt_count']++;
-
-        if ($testMap[$lessonId]['last_status'] === '') {
-            $testMap[$lessonId]['last_status'] = (string)($testRow['status'] ?? '');
-            $testMap[$lessonId]['last_score'] = ($testRow['score_pct'] === null ? null : (int)$testRow['score_pct']);
-            $testMap[$lessonId]['last_completed_at'] = (string)($testRow['completed_at'] ?? '');
-        }
-
-        if ((string)($testRow['status'] ?? '') === 'completed' && $passGateMet === 1) {
-            $testMap[$lessonId]['passed'] = true;
-        }
-    }
-
-    $interventionMap = array_fill_keys($lessonIds, 0);
-    $actionParams = array_merge([$studentId, $cohortId], $lessonIds);
-    $actionStmt = $pdo->prepare("
-        SELECT lesson_id, COUNT(*) AS intervention_count
-        FROM student_required_actions
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id IN (" . $placeholders . ")
-        GROUP BY lesson_id
-    ");
-    $actionStmt->execute($actionParams);
-    foreach ($actionStmt->fetchAll(PDO::FETCH_ASSOC) as $actionRow) {
-        $interventionMap[(int)$actionRow['lesson_id']] = (int)$actionRow['intervention_count'];
-    }
-
-    $overrideMap = array_fill_keys($lessonIds, 0);
-    try {
-        $overrideParams = array_merge([$studentId, $cohortId], $lessonIds);
-        $overrideStmt = $pdo->prepare("
-            SELECT lesson_id, COUNT(*) AS override_count
-            FROM student_lesson_deadline_overrides
-            WHERE user_id = ?
-              AND cohort_id = ?
-              AND is_active = 1
-              AND lesson_id IN (" . $placeholders . ")
-            GROUP BY lesson_id
-        ");
-        $overrideStmt->execute($overrideParams);
-        foreach ($overrideStmt->fetchAll(PDO::FETCH_ASSOC) as $overrideRow) {
-            $overrideMap[(int)$overrideRow['lesson_id']] = (int)$overrideRow['override_count'];
-        }
-    } catch (Throwable $e) {
-        $overrideMap = array_fill_keys($lessonIds, 0);
-    }
-
-    $timeline = [];
-    foreach ($rows as $row) {
-        $lessonId = (int)$row['lesson_id'];
-        $effectiveDeadline = trim((string)($row['effective_deadline_utc'] ?? ''));
-        if ($effectiveDeadline === '') {
-            $effectiveDeadline = (string)($row['original_deadline_utc'] ?? '');
-        }
-
-        $completedAt = (string)($row['completed_at'] ?? '');
-        $delta = tcc_deadline_delta($completedAt, $effectiveDeadline);
-        $summaryStatus = (string)($row['summary_review_status'] ?? '');
-        if ($summaryStatus === '') {
-            $summaryStatus = (string)($row['summary_status'] ?? '');
-        }
-
-        $extensionCount = (int)($row['extension_count'] ?? 0);
-        if (isset($overrideMap[$lessonId]) && $overrideMap[$lessonId] > $extensionCount) {
-            $extensionCount = $overrideMap[$lessonId];
-        }
-
-        $timeline[] = [
-            'course_id' => (int)$row['course_id'],
-            'course_title' => (string)$row['course_title'],
-            'lesson_id' => $lessonId,
-            'external_lesson_id' => (int)($row['external_lesson_id'] ?? 0),
-            'lesson_title' => (string)$row['lesson_title'],
-            'original_deadline_utc' => (string)($row['original_deadline_utc'] ?? ''),
-            'effective_deadline_utc' => $effectiveDeadline,
-            'completed_at' => $completedAt,
-            'deadline_delta_label' => $delta['label'],
-            'deadline_delta_days' => $delta['days'],
-            'deadline_delta_class' => $delta['class'],
-            'extension_count' => $extensionCount,
-            'summary_status' => $summaryStatus,
-            'summary_score' => ($row['summary_review_score'] === null ? null : (int)$row['summary_review_score']),
-            'summary_updated_at' => (string)($row['summary_updated_at'] ?? ''),
-            'test_status' => $testMap[$lessonId]['last_status'] ?? '',
-            'test_passed' => !empty($testMap[$lessonId]['passed']),
-            'last_score' => $testMap[$lessonId]['last_score'] ?? null,
-            'attempt_count' => (int)($testMap[$lessonId]['attempt_count'] ?? 0),
-            'intervention_count' => (int)($interventionMap[$lessonId] ?? 0),
-            'completion_status' => (string)($row['completion_status'] ?? '')
-        ];
-    }
-
-    return $timeline;
-}
-
 $action = tcc_str($_GET['action'] ?? '');
 
 if ($action === '') {
@@ -696,7 +464,6 @@ if ($action === '') {
             'action_queue',
             'student_snapshot',
             'system_watch',
-            'student_lessons',
             'debug_report'
         ]
     ], 400);
@@ -747,7 +514,6 @@ try {
                 'student_id' => $sid,
                 'name' => $name,
                 'email' => (string)($student['email'] ?? ''),
-                'photo_path' => (string)($student['photo_path'] ?? ''),
                 'avatar_initials' => tcc_avatar_initials($name),
                 'progress_pct' => $progressPct,
                 'passed_lessons' => $passed,
@@ -804,7 +570,6 @@ try {
                 'required_action_id' => (int)$row['id'],
                 'student_id' => (int)$row['user_id'],
                 'student_name' => $studentName,
-                'photo_path' => (string)($row['student_photo_path'] ?? ''),
                 'avatar_initials' => tcc_avatar_initials($studentName),
                 'cohort_id' => (int)$row['cohort_id'],
                 'lesson_id' => (int)$row['lesson_id'],
@@ -893,7 +658,6 @@ try {
                 'student_id' => $studentId,
                 'name' => $name,
                 'email' => (string)($student['email'] ?? ''),
-                'photo_path' => (string)($student['photo_path'] ?? ''),
                 'avatar_initials' => tcc_avatar_initials($name),
             ],
             'cohort_id' => $cohortId,
@@ -915,30 +679,6 @@ try {
             'pending_action_count' => count($pending),
             'completed_intervention_count' => count($completedActions),
             'system_issue_count' => count($systemIssues),
-        ]);
-    }
-
-
-    if ($action === 'student_lessons') {
-        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
-        $studentId = tcc_int($_GET['student_id'] ?? 0);
-
-        if ($cohortId <= 0 || $studentId <= 0) {
-            tcc_json([
-                'ok' => false,
-                'error' => 'missing_cohort_or_student_id'
-            ], 400);
-        }
-
-        $timeline = tcc_student_lesson_timeline($pdo, $cohortId, $studentId);
-
-        tcc_json([
-            'ok' => true,
-            'action' => 'student_lessons',
-            'cohort_id' => $cohortId,
-            'student_id' => $studentId,
-            'count' => count($timeline),
-            'lessons' => $timeline
         ]);
     }
 
@@ -973,7 +713,7 @@ try {
         }
 
         $pt = $pdo->prepare("
-            SELECT id, attempt, status, formal_result_code, pass_gate_met, counts_as_unsat, score_pct, started_at, completed_at, updated_at
+            SELECT id, attempt, status, formal_result_code, result_label, pass_gate_met, counts_as_unsat, score_pct, started_at, completed_at, updated_at
             FROM progress_tests_v2
             WHERE cohort_id = ?
               AND user_id = ?
@@ -1007,7 +747,7 @@ try {
         $emails = [];
         try {
             $em = $pdo->prepare("
-                SELECT id, email_type, subject, sent_status, created_at, sent_at
+                SELECT id, notification_key, subject, status, created_at, sent_at
                 FROM training_progression_emails
                 WHERE cohort_id = ?
                   AND user_id = ?
