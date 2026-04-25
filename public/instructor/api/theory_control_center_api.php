@@ -74,7 +74,8 @@ function tcc_fetch_cohorts(PDO $pdo): array {
             co.start_date,
             co.end_date,
             c.title AS course_title,
-            p.program_key
+            p.program_key,
+            co.timezone
         FROM cohorts co
         JOIN courses c ON c.id = co.course_id
         JOIN programs p ON p.id = c.program_id
@@ -1036,51 +1037,96 @@ function tcc_safe_json_from_ai(string $text): array
 
 require_once __DIR__ . '/../../../src/openai.php';
 
-function tcc_call_openai_summary_analysis($summaryText)
+function tcc_call_openai_summary_analysis(array $payload): array
 {
-    $prompt = "
-You are an aviation theory instructor AI.
-
-Analyze the following student lesson summary.
-
-Return STRICT JSON ONLY with:
-{
-  \"copy_paste_likelihood\": \"Low/Medium/High\",
-  \"ai_tool_likelihood\": \"Low/Medium/High\",
-  \"similarity\": \"Low/Medium/High\",
-  \"understanding\": \"Poor/Partial/Good/Strong\",
-  \"quality_feedback\": \"Short actionable feedback\"
-}
-
-SUMMARY:
-" . $summaryText;
-
-    $resp = cw_openai_responses([
-        'model' => cw_openai_model(),
-        'input' => $prompt,
-    ]);
-
-    $text = cw_openai_extract_json_text($resp);
-    if (!$text) {
+    $summaryText = trim((string)($payload['summary']['text'] ?? ''));
+    if ($summaryText === '') {
         return [
             'ok' => false,
-            'error' => 'no_ai_output'
+            'error' => 'empty_summary_text',
+            'message' => 'The lesson summary text is empty.',
         ];
     }
 
-    $json = json_decode($text, true);
-    if (!is_array($json)) {
-        return [
-            'ok' => false,
-            'error' => 'invalid_json',
-            'raw' => $text
-        ];
-    }
+    $studentName = (string)($payload['student']['student_name'] ?? 'Student');
+    $lessonTitle = (string)($payload['lesson']['lesson_title'] ?? 'Lesson');
+    $courseTitle = (string)($payload['lesson']['course_title'] ?? 'Module');
+    $reviewStatus = (string)($payload['summary']['review_status'] ?? '');
+    $reviewScore = $payload['summary']['review_score'] ?? null;
+    $wordCount = (int)($payload['summary']['word_count'] ?? 0);
+    $similarityContext = $payload['cohort_similarity_context'] ?? [];
 
-    return [
-        'ok' => true,
-        'data' => $json
+    $promptPayload = [
+        'task' => 'Analyze an aviation theory lesson summary for instructor advisory review only.',
+        'important_rules' => [
+            'Return valid JSON only. No markdown. No prose outside JSON.',
+            'Do not accuse the student of misconduct. Use likelihood language only.',
+            'This is advisory only and must not be treated as canonical progression truth.',
+            'Base the educational quality assessment on the supplied summary text only.',
+        ],
+        'required_json_schema' => [
+            'copy_paste_likelihood' => 'Low|Medium|High|Not evaluated',
+            'ai_tool_likelihood' => 'Low|Medium|High|Not evaluated',
+            'similarity' => 'Low|Medium|High|Not evaluated',
+            'highest_similarity' => 'Low|Medium|High|Not evaluated',
+            'highest_similarity_student' => 'student name or null',
+            'highest_similarity_pct' => 'number 0-100',
+            'understanding' => 'Poor|Partial|Good|Strong|Not evaluated',
+            'deep_understanding' => 'Poor|Partial|Good|Strong|Not evaluated',
+            'quality_feedback' => 'short instructor-facing paragraph',
+            'substantially_good' => ['short bullet strings'],
+            'substantially_weak' => ['short bullet strings'],
+            'suggestions' => ['short actionable improvement suggestions'],
+            'red_flags' => ['short caution signals, empty if none'],
+        ],
+        'student' => [
+            'name' => $studentName,
+        ],
+        'lesson' => [
+            'module' => $courseTitle,
+            'lesson' => $lessonTitle,
+        ],
+        'current_review_state' => [
+            'review_status' => $reviewStatus,
+            'review_score' => $reviewScore,
+            'word_count' => $wordCount,
+        ],
+        'cohort_similarity_context' => $similarityContext,
+        'student_summary_text' => $summaryText,
     ];
+
+    try {
+        $model = cw_openai_model();
+
+        $resp = cw_openai_responses([
+            'model' => $model,
+            'input' => json_encode($promptPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'max_output_tokens' => 900,
+        ]);
+
+        $analysis = cw_openai_extract_json_text($resp);
+
+        if (!is_array($analysis) || !$analysis) {
+            return [
+                'ok' => false,
+                'error' => 'empty_or_invalid_ai_json',
+                'message' => 'OpenAI returned no usable JSON analysis.',
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'model' => $model,
+            'response_id' => (string)($resp['id'] ?? ''),
+            'analysis' => $analysis,
+        ];
+    } catch (Throwable $e) {
+        return [
+            'ok' => false,
+            'error' => 'openai_request_failed',
+            'message' => $e->getMessage(),
+        ];
+    }
 }
 
 
@@ -1172,7 +1218,8 @@ if ($action === '') {
             'lesson_summary_detail',
             'lesson_attempts_detail',
             'lesson_interventions_detail',
-            'debug_report'
+            'debug_report',
+            'ai_summary_analysis'
         ]
     ], 400);
 }
