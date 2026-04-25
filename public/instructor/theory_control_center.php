@@ -239,557 +239,1370 @@ cw_header('Instructor Theory Control Center');
 </div>
 
 <script>
-(function(){
-'use strict';
+(function () {
+    'use strict';
 
-let cohortId = 0;
-let selectedStudentId = 0;
-let cohortStudents = [];
+    let cohortId = 0;
+    let selectedStudentId = 0;
+    let cohortStudents = [];
 
-function escapeHtml(value){return String(value===null||value===undefined?'':value).replace(/[&<>'"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c];});}
-function api(action,params){params=params||{};params.action=action;return fetch('/instructor/api/theory_control_center_api.php?'+new URLSearchParams(params),{credentials:'same-origin'}).then(function(r){return r.json();});}
-function openTccModal(title,bodyHtml){document.getElementById('tccModalTitle').textContent=title||'Diagnostic';document.getElementById('tccModalBody').innerHTML=bodyHtml||'';const o=document.getElementById('tccModalOverlay');o.classList.add('open');o.setAttribute('aria-hidden','false');}
-function closeTccModal(){const o=document.getElementById('tccModalOverlay');o.classList.remove('open');o.setAttribute('aria-hidden','true');}
-function showError(id,msg){const el=document.getElementById(id);if(el){el.innerHTML='<div class="tcc-error">'+escapeHtml(msg)+'</div>';}}
-function clampPct(v){v=parseFloat(v);if(isNaN(v))v=0;if(v<0)v=0;if(v>100)v=100;return Math.round(v);}
-function firstName(name){return String(name||'Student').trim().split(/\s+/)[0]||'Student';}
-function photoPath(o){let path=String((o&&(o.photo_path||o.avatar_url||o.photoPath||o.image_url))||'').trim();if(path==='')return '';if(path.indexOf('http://')===0||path.indexOf('https://')===0||path.indexOf('/')===0)return path;return '/'+path.replace(/^\/+/,'');}
-function avatarHtml(o,cls){const path=photoPath(o);const initials=escapeHtml((o&&o.avatar_initials)||'S');if(path!==''){return '<div class="'+cls+'"><img src="'+escapeHtml(path)+'" alt="'+escapeHtml((o&&o.name)||'Student')+'"></div>';}return '<div class="'+cls+'">'+initials+'</div>';}
-function radarColor(s){if(s.state==='blocked')return'red';if(s.pending_action_count&&parseInt(s.pending_action_count,10)>0)return'blue';if(s.state==='at_risk')return'orange';return'green';}
-function blockerReviewHref(issue){if(issue.action_url)return String(issue.action_url);if(issue.token){if(issue.type==='instructor_approval')return '/instructor/instructor_approval.php?token='+encodeURIComponent(issue.token);return '/student/remediation_action.php?token='+encodeURIComponent(issue.token);}return '';}
-function cohortTimeZone(){return window.tccCohortTimezone || 'UTC';}
-function parseUtcDate(v){if(!v)return null;const raw=String(v).trim();if(raw==='')return null;const iso=raw.indexOf('T')>=0?raw:(raw.replace(' ','T')+'Z');const d=new Date(iso);return isNaN(d.getTime())?null:d;}
-function partsInCohortTime(v){const d=parseUtcDate(v);if(!d)return null;try{const fmt=new Intl.DateTimeFormat('en-US',{timeZone:cohortTimeZone(),weekday:'short',month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit',hour12:false});const parts={};fmt.formatToParts(d).forEach(function(p){parts[p.type]=p.value;});return parts;}catch(e){return null;}}
-function niceDate(v){const p=partsInCohortTime(v);if(!p)return v?String(v).slice(0,16):'—';return p.weekday+' '+p.month+' '+p.day+', '+p.year;}
-function niceDateTime(v){const p=partsInCohortTime(v);if(!p)return v?String(v).slice(0,16):'—';return p.weekday+' '+p.month+' '+p.day+', '+p.year+' '+p.hour+':'+p.minute;}
-function niceTime(v){const p=partsInCohortTime(v);if(!p)return '—';return p.hour+':'+p.minute;}
-function prettyStatus(s){s=String(s||'').replace(/_/g,' ');return s? s.charAt(0).toUpperCase()+s.slice(1):'Not started';}
-function formatScoreValue(value,max){if(value===null||value===undefined||value==='')return '—';if(max!==undefined&&max!==null&&max!=='')return String(value)+' / '+String(max);return String(value);}
-function modalStatusRows(rows){let html='';rows.forEach(function(row){html+='<div class="tcc-modal-row"><div class="tcc-modal-label">'+escapeHtml(row[0])+'</div><div class="tcc-modal-value">'+escapeHtml(row[1])+'</div></div>';});return html;}
-
-function jsArg(value){
-    return '\'' + String(value===null||value===undefined?'':value)
-        .replace(/\\/g,'\\\\')
-        .replace(/'/g,"\\'")
-        .replace(/\r/g,'\\r')
-        .replace(/\n/g,'\\n')
-        .replace(/</g,'\\x3C')
-        .replace(/>/g,'\\x3E') + '\'';
-}
-function sanitizeSummaryHtml(html){
-    html=String(html||'');
-    const tpl=document.createElement('template');
-    tpl.innerHTML=html;
-    const allowedTags={P:1,BR:1,UL:1,OL:1,LI:1,STRONG:1,B:1,EM:1,I:1,U:1,H1:1,H2:1,H3:1,H4:1,BLOCKQUOTE:1,SPAN:1,DIV:1,MARK:1};
-    const walker=document.createTreeWalker(tpl.content,NodeFilter.SHOW_ELEMENT,null);
-    const remove=[];
-    while(walker.nextNode()){
-        const el=walker.currentNode;
-        if(!allowedTags[el.tagName]){remove.push(el);continue;}
-        Array.prototype.slice.call(el.attributes).forEach(function(a){
-            const n=a.name.toLowerCase();
-            if(n!=='class')el.removeAttribute(a.name);
+    function escapeHtml(value) {
+        return String(value === null || value === undefined ? '' : value).replace(/[&<>'"]/g, function (c) {
+            return {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                "'": '&#039;',
+                '"': '&quot;'
+            }[c];
         });
     }
-    remove.forEach(function(el){
-        const text=document.createTextNode(el.textContent||'');
-        if(el.parentNode)el.parentNode.replaceChild(text,el);
-    });
-    return tpl.innerHTML;
-}
-function rawSummaryHtml(s){const html=String((s&&(s.summary_html||s.summaryHtml))||'').trim();if(html!=='')return sanitizeSummaryHtml(html);const plain=String((s&&(s.summary_plain||s.summary_text))||'').trim();return plain!==''?escapeHtml(plain).replace(/\n/g,'<br>'):'No student summary text found.';}
-function cacheSummaryHtml(title, htmlContent){window.tccSummaryCache=window.tccSummaryCache||{};const key='s_'+Date.now()+'_'+Math.floor(Math.random()*1000000);window.tccSummaryCache[key]={title:String(title||'Lesson Summary'),html:String(htmlContent||'')};return key;}
-function openSummaryLargeModalById(key){const item=(window.tccSummaryCache||{})[key]||{};openSummaryLargeModal(item.title||'Lesson Summary',item.html||'');}
 
-function reviewStatusPill(status){const clean=String(status||'neutral').toLowerCase();return '<span class="tcc-review-pill '+escapeHtml(clean)+'">'+escapeHtml(prettyStatus(clean))+'</span>';}
-function reviewScoreBar(score){const n=(score!==null&&score!==undefined&&score!=='')?clampPct(score):0;const cls=n>=85?'ok':(n>=70?'warn':'danger');return '<div class="tcc-review-score-row"><div class="tcc-review-score-bar"><span class="'+cls+'" style="width:'+n+'%;"></span></div><div class="tcc-review-score-value">'+(score!==null&&score!==undefined&&score!==''?escapeHtml(score)+'%':'—')+'</div></div>';}
-function aiSignalClass(value){
-    const s=String(value||'').toLowerCase();
-    if(s.indexOf('high')>=0||s.indexOf('likely')>=0||s.indexOf('weak')>=0||s.indexOf('poor')>=0)return 'danger';
-    if(s.indexOf('medium')>=0||s.indexOf('possible')>=0||s.indexOf('developing')>=0||s.indexOf('adequate')>=0)return 'warn';
-    if(s.indexOf('low')>=0||s.indexOf('unlikely')>=0||s.indexOf('strong')>=0||s.indexOf('excellent')>=0)return 'ok';
-    return '';
-}
+    function api(action, params) {
+        params = params || {};
+        params.action = action;
 
-function aiList(items){
-    items=Array.isArray(items)?items:[];
-    if(!items.length)return '<div class="tcc-modal-muted">No items generated yet.</div>';
-    let html='<ul>';
-    items.slice(0,6).forEach(function(item){
-        html+='<li>'+escapeHtml(item)+'</li>';
-    });
-    html+='</ul>';
-    return html;
-}
-
-function renderAiAnalysisObject(ai){
-    ai=ai||{};
-    const copy=ai.copy_paste_likelihood||'Not generated';
-    const tool=ai.ai_tool_likelihood||'Not generated';
-    const sim=ai.highest_similarity||'Not generated';
-    const simStudent=ai.highest_similarity_student||'—';
-    const simPct=(ai.highest_similarity_pct!==undefined&&ai.highest_similarity_pct!==null)?String(ai.highest_similarity_pct)+'%':'—';
-    const understandingLabel=ai.deep_understanding_label||'Not generated';
-    const understandingScore=(ai.deep_understanding_score!==undefined&&ai.deep_understanding_score!==null)?String(ai.deep_understanding_score)+'%':'—';
-
-    let html='<div class="tcc-ai-result-grid">';
-    html+='<div class="tcc-ai-result-card '+aiSignalClass(copy)+'"><div class="tcc-ai-result-label">Copy/Paste</div><div class="tcc-ai-result-value">'+escapeHtml(copy)+'</div></div>';
-    html+='<div class="tcc-ai-result-card '+aiSignalClass(tool)+'"><div class="tcc-ai-result-label">AI Tool Use</div><div class="tcc-ai-result-value">'+escapeHtml(tool)+'</div></div>';
-    html+='<div class="tcc-ai-result-card '+aiSignalClass(sim)+'"><div class="tcc-ai-result-label">Similarity</div><div class="tcc-ai-result-value">'+escapeHtml(sim)+' · '+escapeHtml(simPct)+'</div><div class="tcc-modal-muted" style="margin-top:5px;">'+escapeHtml(simStudent)+'</div></div>';
-    html+='<div class="tcc-ai-result-card '+aiSignalClass(understandingLabel)+'"><div class="tcc-ai-result-label">Understanding</div><div class="tcc-ai-result-value">'+escapeHtml(understandingLabel)+' · '+escapeHtml(understandingScore)+'</div></div>';
-    html+='</div>';
-
-    html+='<div class="tcc-ai-take-box"><strong>Instructor quick take:</strong><br>'+escapeHtml(ai.instructor_quick_take||ai.quality_feedback||'No AI analysis generated yet.')+'</div>';
-
-    html+='<div class="tcc-ai-list-grid">';
-    html+='<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Strong Points</div>'+aiList(ai.substantially_good)+'</div>';
-    html+='<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Weak Points</div>'+aiList(ai.substantially_weak)+'</div>';
-    html+='<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Suggestions</div>'+aiList(ai.improvement_suggestions)+'</div>';
-    html+='</div>';
-
-    if(ai.student_safe_feedback){
-        html+='<div class="tcc-ai-take-box"><strong>Student-safe feedback:</strong><br>'+escapeHtml(ai.student_safe_feedback)+'</div>';
-    }
-
-    return html;
-}
-
-function renderAiInterpretation(ai, studentId, lessonId){
-    ai=ai||{};
-    const hasGenerated = (ai.analysis_status === 'generated' || ai.copy_paste_likelihood || ai.ai_tool_likelihood || ai.deep_understanding_score);
-    const panelId='aiPanel_'+parseInt(studentId||0,10)+'_'+parseInt(lessonId||0,10);
-    const btnId='aiBtn_'+parseInt(studentId||0,10)+'_'+parseInt(lessonId||0,10);
-
-    let body = hasGenerated
-        ? renderAiAnalysisObject(ai)
-        : '<div class="tcc-ai-loading-box">No AI analysis generated yet. Click “Generate AI Analysis” to create an instructor advisory review for this summary.</div>';
-
-    return '<div id="'+panelId+'" class="tcc-ai-live-panel">'+
-        '<div class="tcc-ai-live-head">'+
-            '<div><div class="tcc-ai-live-title">AI Summary Analysis</div><div class="tcc-ai-live-sub">Advisory only. Does not change progression status or canonical records.</div></div>'+
-            '<button id="'+btnId+'" type="button" class="tcc-ai-action-btn" onclick="generateAiSummaryAnalysis('+parseInt(studentId||0,10)+','+parseInt(lessonId||0,10)+','+JSON.stringify(panelId)+','+JSON.stringify(btnId)+')">Generate AI Analysis</button>'+
-        '</div>'+
-        '<div class="tcc-ai-live-body">'+body+'</div>'+
-    '</div>';
-}
-function generateAiSummaryAnalysis(studentId, lessonId, panelId, btnId){
-    studentId=parseInt(studentId,10)||selectedStudentId;
-    lessonId=parseInt(lessonId,10)||0;
-
-    const panel=document.getElementById(panelId);
-    const btn=document.getElementById(btnId);
-
-    if(!panel||!studentId||!lessonId||!cohortId){
-        openTccModal('AI Summary Analysis','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');
-        return;
-    }
-
-    const body=panel.querySelector('.tcc-ai-live-body');
-
-    if(btn){
-        btn.disabled=true;
-        btn.textContent='Analyzing…';
-    }
-
-    if(body){
-        body.innerHTML='<div class="tcc-ai-loading-box">Generating AI analysis. This is advisory only and will not change student progression state…</div>';
-    }
-
-    api('ai_summary_analysis',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){
-        if(!resp.ok){
-            if(body){
-                body.innerHTML='<div class="tcc-ai-error-box">'+escapeHtml(resp.message||resp.error||'AI analysis failed.')+'</div>';
-            }
-            return;
-        }
-
-        if(body){
-            body.innerHTML=renderAiAnalysisObject(resp.analysis||{});
-        }
-    }).catch(function(){
-        if(body){
-            body.innerHTML='<div class="tcc-ai-error-box">Unable to generate AI analysis.</div>';
-        }
-    }).finally(function(){
-        if(btn){
-            btn.disabled=false;
-            btn.textContent='Regenerate AI Analysis';
-        }
-    });
-}
-function openSummaryLargeModal(title, htmlContent){openTccModal(title||'Lesson Summary','<div class="tcc-summary-paper nb-content" style="max-height:70vh;">'+htmlContent+'</div>');}
-function openAnswerAudioModal(question, transcript, audioUrl, score){let body='<div class="tcc-modal-muted" style="margin-bottom:10px;">'+escapeHtml(question||'Progress test answer')+'</div>';if(audioUrl){body+='<audio class="tcc-audio" controls preload="none" src="'+escapeHtml(audioUrl)+'"></audio>';}else{body+='<div class="tcc-empty">No audio file is attached to this answer.</div>';}body+='<div class="tcc-modal-section full" style="margin-top:12px;"><div class="tcc-modal-section-title">Student Answer Transcript</div><div class="tcc-modal-readable">'+escapeHtml(transcript||'—')+'</div><div class="tcc-modal-muted" style="margin-top:8px;">Score: '+escapeHtml(score||'—')+'</div></div>';openTccModal('Answer Audio + Transcript',body);}
-function openInterventionDetailModal(item){item=item||{};const title=item.title||item.email_type||item.event_type||item.override_type||item.action_type||('Intervention #'+(item.id||''));openTccModal('Intervention Detail','<div class="tcc-debug-meta">'+escapeHtml(title)+'</div><pre class="tcc-debug-pre">'+escapeHtml(JSON.stringify(item,null,2))+'</pre>');}
-
-function openDebugReport(studentId,lessonId,issueType){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId||!lessonId){openTccModal('Debug Report','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');return;}openTccModal('Debug Report','<div class="tcc-loading">Generating diagnostic report…</div>');api('debug_report',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId,issue_type:issueType||'manual_check'}).then(function(data){openTccModal('Debug Report','<div class="tcc-debug-meta">Copy this JSON into Jake/Steven if this blocker represents an unexpected software state.</div><pre class="tcc-debug-pre">'+escapeHtml(JSON.stringify(data,null,2))+'</pre>');}).catch(function(){openTccModal('Debug Report','<div class="tcc-error">Unable to generate diagnostic report.</div>');});}
-function openSystemWatchForStudent(studentId){studentId=parseInt(studentId,10)||selectedStudentId;if(!cohortId||!studentId){openTccModal('System Watch','<div class="tcc-error">Missing cohort or student id.</div>');return;}openTccModal('System Watch','<div class="tcc-loading">Loading system watch…</div>');api('system_watch',{cohort_id:cohortId,student_id:studentId}).then(function(data){openTccModal('System Watch','<pre class="tcc-debug-pre">'+escapeHtml(JSON.stringify(data,null,2))+'</pre>');}).catch(function(){openTccModal('System Watch','<div class="tcc-error">Unable to load system watch.</div>');});}
-
-function openLessonSummary(studentId,lessonId){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId||!lessonId){openTccModal('Lesson Summary','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');return;}openTccModal('Lesson Summary','<div class="tcc-loading">Loading lesson summary…</div>');api('lesson_summary_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){if(!resp.ok){openTccModal('Lesson Summary','<div class="tcc-error">'+escapeHtml(resp.message||resp.error||'Unable to load summary.')+'</div>');return;}const d=resp.data||{};const lesson=d.lesson||{};const s=d.summary||{};const ai=d.ai_interpretation||{};const title=(lesson.lesson_title||'Lesson Summary');const summaryHtml=rawSummaryHtml(s);
-    const summaryKey=cacheSummaryHtml((lesson.lesson_title||'Lesson Summary')+' — Student Summary', summaryHtml);const html='<div class="tcc-modal-grid"><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Status</div>'+modalStatusRows([['Module',lesson.course_title||'—'],['Lesson',lesson.lesson_title||'—'],['Updated',niceDateTime(s.updated_at)]])+'<div style="margin-top:10px;">'+reviewStatusPill(s.review_status||'neutral')+'</div></div><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Score</div>'+reviewScoreBar(s.review_score)+'</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Summary</div><div class="tcc-summary-paper nb-content">'+summaryHtml+'</div></div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">AI Interpretation</div>'+renderAiInterpretation(ai, studentId, lessonId)+'</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Instructor Feedback</div><div class="tcc-modal-readable">'+escapeHtml(s.review_feedback||s.review_notes_by_instructor||'No instructor feedback recorded for this summary yet.')+'</div></div></div>';openTccModal(title,html);}).catch(function(){openTccModal('Lesson Summary','<div class="tcc-error">Unable to load summary.</div>');});}
-function renderAttemptItems(items){if(!items||!items.length)return '<div class="tcc-modal-muted">No answer-level items found for this attempt.</div>';let html='<div class="tcc-chat-thread">';items.forEach(function(item,idx){const score=formatScoreValue(item.score_points,item.max_points);const q=item.prompt||item.question_text||'Question';const transcript=item.transcript_text||item.answer_text||item.student_answer||'—';const audio=item.audio_url||item.audio_path||item.answer_audio_url||item.recording_url||item.media_url||'';html+='<div class="tcc-chat-bubble ai"><strong>Question '+(idx+1)+':</strong> '+escapeHtml(q)+'</div>';html+='<div class="tcc-chat-bubble student" onclick="openAnswerAudioModal('+jsArg(q)+','+jsArg(transcript)+','+jsArg(audio)+','+jsArg(score)+')">'+escapeHtml(transcript)+'<div class="tcc-chat-score">Score: '+escapeHtml(score)+'</div><span class="tcc-chat-play">▶ Play audio</span></div>';});html+='</div>';return html;}
-function openAttemptDetails(studentId,lessonId){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId||!lessonId){openTccModal('Progress Test Details','<div class="tcc-error">Missing cohort, student, or lesson id.</div>');return;}openTccModal('Progress Test Details','<div class="tcc-loading">Loading progress test attempts…</div>');api('lesson_attempts_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){if(!resp.ok){openTccModal('Progress Test Details','<div class="tcc-error">'+escapeHtml(resp.message||resp.error||'Unable to load attempts.')+'</div>');return;}const d=resp.data||{};const lesson=d.lesson||{};const attempts=d.attempts||[];let html='<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Lesson</div><div class="tcc-modal-muted">'+escapeHtml((lesson.course_title||'Module')+' · '+(lesson.lesson_title||'Lesson'))+'</div></div>';if(!attempts.length){html+='<div class="tcc-empty">No progress test attempts found.</div>';}attempts.forEach(function(a){const score=a.score_pct!==null&&a.score_pct!==undefined?a.score_pct+'%':'—';html+='<div class="tcc-attempt-card"><div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt '+escapeHtml(a.attempt||'—')+' · '+escapeHtml(a.formal_result_code||a.status||'')+'</div><div class="tcc-attempt-meta">Started: '+escapeHtml(niceDate(a.started_at))+' · Completed: '+escapeHtml(niceDate(a.completed_at))+'</div></div><span class="tcc-score-pill '+(parseInt(a.pass_gate_met,10)===1?'ok':'danger')+'">'+escapeHtml(score)+'</span></div>'+renderAttemptItems(a.items||[])+'</div>';});openTccModal('Progress Test Details',html);}).catch(function(){openTccModal('Progress Test Details','<div class="tcc-error">Unable to load attempts.</div>');});}
-function interventionBlock(title,items){let html='<div class="tcc-modal-section full"><div class="tcc-modal-section-title">'+escapeHtml(title)+' ('+(items?items.length:0)+')</div>';if(!items||!items.length){html+='<div class="tcc-modal-muted">No records found.</div></div>';return html;}html+='<div class="tcc-intervention-list">';items.forEach(function(item){const label=item.title||item.email_type||item.event_type||item.override_type||item.action_type||('Record #'+(item.id||''));const meta=[item.status||item.sent_status||'',item.created_at?niceDateTime(item.created_at):'',item.sent_at?('Sent '+niceDateTime(item.sent_at)):''].filter(Boolean).join(' · ');html+='<div class="tcc-intervention-item tcc-intervention-clickable" onclick="openInterventionDetailModal('+escapeHtml(JSON.stringify(item)).replace(/"/g,'&quot;')+')"><div class="tcc-intervention-title">'+escapeHtml(label)+'</div><div class="tcc-intervention-meta">'+escapeHtml(meta||'—')+'</div></div>';});html+='</div></div>';return html;}
-function openInterventions(studentId,lessonId){studentId=parseInt(studentId,10)||selectedStudentId;lessonId=parseInt(lessonId,10)||0;if(!cohortId||!studentId){openTccModal('Interventions','<div class="tcc-error">Missing cohort or student id.</div>');return;}openTccModal('Interventions','<div class="tcc-loading">Loading interventions…</div>');api('lesson_interventions_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).then(function(resp){if(!resp.ok){openTccModal('Interventions','<div class="tcc-error">'+escapeHtml(resp.message||resp.error||'Unable to load interventions.')+'</div>');return;}const d=resp.data||{};const lesson=d.lesson||{};let subtitle=lessonId>0?((lesson.course_title||'Module')+' · '+(lesson.lesson_title||'Lesson')):'Entire program';let html='<div class="tcc-modal-muted" style="margin-bottom:12px;">'+escapeHtml(subtitle)+'</div>';html+=interventionBlock('Required Actions',d.required_actions||[]);html+=interventionBlock('Deadline Overrides / Extensions',d.deadline_overrides||[]);html+=interventionBlock('Email Trace',d.emails||[]);html+=interventionBlock('Progression Events',d.events||[]);openTccModal('Interventions',html);}).catch(function(){openTccModal('Interventions','<div class="tcc-error">Unable to load interventions.</div>');});}
-
-function barClass(value,average,higherIsBetter){const v=parseFloat(value);const a=parseFloat(average);if(isNaN(v))return'warn';if(isNaN(a)){return higherIsBetter?(v>=75?'ok':(v>=70?'warn':'danger')):(v===0?'ok':'warn');}if(higherIsBetter){if(v>=a&&v>=75)return'ok';if(v>=70)return'warn';return'danger';}if(v<=a)return'ok';if(v<=a*1.5+0.5)return'warn';return'danger';}
-function metricPct(value,average,higherIsBetter){const v=parseFloat(value);const a=parseFloat(average);if(isNaN(v))return 0;if(higherIsBetter)return clampPct(v);const max=Math.max(v,a*2,1);return clampPct((v/max)*100);}
-function metricTile(title,value,barPct,barCls,sub){return '<div class="tcc-snapshot-tile"><div class="tcc-snapshot-label">'+escapeHtml(title)+'</div><div class="tcc-snapshot-value">'+escapeHtml(value)+'</div><div class="tcc-mini-bar"><span class="'+escapeHtml(barCls)+'" style="width:'+clampPct(barPct)+'%;"></span></div><div class="tcc-snapshot-sub">'+escapeHtml(sub)+'</div></div>';}
-
-function loadCohorts(){api('cohort_overview').then(function(data){const select=document.getElementById('cohortSelect');select.innerHTML='';if(!data.ok||!data.cohorts||!data.cohorts.length){select.innerHTML='<option value="0">No cohorts available</option>';return;}data.cohorts.forEach(function(c){const opt=document.createElement('option');opt.value=c.id;opt.textContent=c.name;if(c.timezone||c.cohort_timezone){opt.setAttribute('data-timezone',c.timezone||c.cohort_timezone);}select.appendChild(opt);});cohortId=parseInt(data.cohorts[0].id,10)||0;window.tccCohortTimezone=data.cohorts[0].timezone||data.cohorts[0].cohort_timezone||'UTC';select.value=cohortId;loadAll();}).catch(function(){showError('healthStrip','Unable to load cohorts.');});}
-function loadAll(){if(!cohortId)return;selectedStudentId=0;document.getElementById('studentPanelCount').textContent='Select student';document.getElementById('studentPanel').className='tcc-student-placeholder';document.getElementById('studentPanel').innerHTML='Tap a student avatar in the Cohort Radar, choose a student from the selector, or tap a student in the Action Queue to open the student deep dive here.';loadOverview();loadQueue();}
-function loadOverview(){document.getElementById('healthStrip').innerHTML='<div class="tcc-loading">Loading cohort health…</div>';document.getElementById('radarAvatars').innerHTML='';document.getElementById('radarCount').textContent='—';api('cohort_overview',{cohort_id:cohortId}).then(function(data){if(!data.ok){showError('healthStrip',data.message||data.error||'Unable to load cohort overview.');return;}renderHealth(data);renderRadar(data);}).catch(function(){showError('healthStrip','Unable to load cohort overview.');});}
-function renderHealth(data){const s=data.summary||{};document.getElementById('healthCount').textContent=(s.student_count||0)+' students';document.getElementById('healthStrip').innerHTML='<div class="tcc-health-card"><div class="tcc-health-label">Students</div><div class="tcc-health-value">'+escapeHtml(s.student_count||0)+'</div><div class="tcc-health-note">Active in this cohort</div></div><div class="tcc-health-card"><div class="tcc-health-label">On Track</div><div class="tcc-health-value">'+escapeHtml(s.on_track_count||0)+'</div><div class="tcc-health-note">No immediate action</div></div><div class="tcc-health-card"><div class="tcc-health-label">At Risk</div><div class="tcc-health-value">'+escapeHtml(s.at_risk_count||0)+'</div><div class="tcc-health-note">Needs monitoring</div></div><div class="tcc-health-card"><div class="tcc-health-label">Blocked</div><div class="tcc-health-value">'+escapeHtml(s.blocked_count||0)+'</div><div class="tcc-health-note">Action required</div></div>';}
-function renderRadar(data){const container=document.getElementById('radarAvatars');const count=document.getElementById('radarCount');const select=document.getElementById('studentSelect');const students=data.students||[];cohortStudents=students;container.innerHTML='';select.innerHTML='<option value="0">Select student…</option>';count.textContent=students.length+' student'+(students.length===1?'':'s');if(!students.length){container.innerHTML='<div class="tcc-empty">No students found for this cohort.</div>';return;}students.forEach(function(s,idx){const progress=clampPct(s.progress_pct);const color=radarColor(s);const opt=document.createElement('option');opt.value=s.student_id||0;opt.textContent=(s.name||'Student')+' · '+progress+'%';select.appendChild(opt);const verticalNudge=(idx%3)*7;const el=document.createElement('div');el.className='tcc-radar-avatar '+color;el.style.left=progress+'%';el.style.top=(64+verticalNudge)+'px';el.title=(s.name||'Student')+' · '+progress+'% · '+(s.state||'');el.setAttribute('role','button');el.setAttribute('tabindex','0');el.setAttribute('aria-label',(s.name||'Student')+' progress '+progress+' percent');el.setAttribute('data-student-id',s.student_id||0);const path=photoPath(s);const inner=path!==''?'<span class="tcc-avatar-inner"><img src="'+escapeHtml(path)+'" alt="'+escapeHtml(s.name||'Student')+'"></span>':'<span class="tcc-avatar-inner">'+escapeHtml(s.avatar_initials||'S')+'</span>';el.innerHTML='<span class="tcc-radar-score">'+progress+'%</span>'+inner+'<span class="tcc-radar-label">'+escapeHtml(firstName(s.name))+'</span>';el.onclick=function(){loadStudentPanel(s.student_id);};el.onkeydown=function(ev){if(ev.key==='Enter'||ev.key===' '){ev.preventDefault();el.click();}};container.appendChild(el);});}
-function selectStudentInUi(studentId){selectedStudentId=parseInt(studentId,10)||0;const select=document.getElementById('studentSelect');if(select)select.value=String(selectedStudentId||0);Array.prototype.forEach.call(document.querySelectorAll('.tcc-radar-avatar'),function(el){el.classList.remove('selected');if(parseInt(el.getAttribute('data-student-id')||'0',10)===selectedStudentId)el.classList.add('selected');});}
-
-function summaryQualityPct(status,score){if(score!==null&&score!==undefined&&score!=='')return clampPct(score);status=String(status||'').toLowerCase();if(status==='acceptable')return 82;if(status==='pending')return 58;if(status==='needs_revision')return 32;if(status==='rejected')return 20;return 0;}
-function summaryQualityClass(status,score){status=String(status||'').toLowerCase();if(status==='acceptable')return'ok';if(status==='pending')return'warn';if(status==='needs_revision'||status==='rejected')return'danger';if(score!==null&&score!==undefined&&Number(score)>0)return'info';return'neutral';}
-function lessonDeltaClass(l){const c=String(l.deadline_delta_class||'').toLowerCase();if(c==='early'||c==='on_time'||c==='ok')return'ok';if(c==='late'||c==='danger')return'danger';if(c==='warn')return'warn';const label=String(l.deadline_delta_label||'').toLowerCase();if(label.indexOf('late')>=0)return'danger';if(label.indexOf('early')>=0||label.indexOf('on time')>=0)return'ok';return'neutral';}
-function renderSummaryQuality(l){const status=l.summary_status||'not_started';const pct=summaryQualityPct(status,l.summary_score);const cls=summaryQualityClass(status,l.summary_score);return '<div class="tcc-quality-wrap"><div class="tcc-quality-top">'+pct+'%</div><div class="tcc-quality-bar"><span class="'+escapeHtml(cls)+'" style="width:'+pct+'%;"></span></div><div class="tcc-small-grey">'+escapeHtml(prettyStatus(status))+'</div></div>';}
-function renderTestScore(l){const score=(l.last_score!==null&&l.last_score!==undefined)?Number(l.last_score):null;const cls=l.test_passed?'ok':(score!==null?'danger':'neutral');const label=score!==null?(score+'%'):'—';return '<span class="tcc-score-pill '+cls+'">'+escapeHtml(label)+'</span>';}
-
-function inlineSection(title, sub, bodyHtml, rightHtml){
-    return '<section class="tcc-inline-section"><div class="tcc-inline-section-head"><div><div class="tcc-inline-section-title">'+escapeHtml(title)+'</div><div class="tcc-inline-section-sub">'+escapeHtml(sub||'')+'</div></div>'+(rightHtml||'')+'</div><div class="tcc-inline-section-body">'+(bodyHtml||'')+'</div></section>';
-}
-function inlineMiniGrid(rows){
-    let html='<div class="tcc-inline-mini-grid">';
-    rows.forEach(function(row){html+='<div class="tcc-inline-mini-card"><div class="tcc-inline-mini-label">'+escapeHtml(row[0])+'</div><div class="tcc-inline-mini-value">'+escapeHtml(row[1])+'</div></div>';});
-    html+='</div>';
-    return html;
-}
-function renderInlineSummary(resp, studentId, lessonId){
-    if(!resp||!resp.ok){
-        return inlineSection('1. Lesson Summary Details','Student summary and instructor review status.','<div class="tcc-inline-error">Unable to load summary details.</div>','<button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
-    }
-    const d=resp.data||{};
-    const s=d.summary||{};
-    const lesson=d.lesson||{};
-    const ai=d.ai_interpretation||{};
-    const summaryHtml=rawSummaryHtml(s);
-    const body=inlineMiniGrid([
-        ['Module',lesson.course_title||'—'],
-        ['Review Status',prettyStatus(s.review_status||'—')],
-        ['Updated',niceDateTime(s.updated_at)],
-        ['Local Time',niceTime(s.updated_at)]
-    ])+
-    '<div style="display:grid;grid-template-columns:minmax(120px,.45fr) 1fr;gap:12px;margin-bottom:10px;"><div><div class="tcc-inline-mini-label">Review Status</div><div style="margin-top:6px;">'+reviewStatusPill(s.review_status||'neutral')+'</div></div><div><div class="tcc-inline-mini-label">Review Score</div><div style="margin-top:6px;">'+reviewScoreBar(s.review_score)+'</div></div></div>'+
-    '<div class="tcc-summary-safe-frame">'+summaryHtml+'</div>'+
-    renderAiInterpretation(ai, studentId, lessonId);
-    return inlineSection('1. Lesson Summary Details','Student summary, review status, score, and AI interpretation.',body,'<button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
-}
-function renderInlineAttempts(resp, studentId, lessonId){
-    if(!resp||!resp.ok){
-        return inlineSection('2. Progress Test Details','Attempts, answers, scores, and audio trace.','<div class="tcc-inline-error">Unable to load progress test details.</div>','<button type="button" class="tcc-detail-btn primary" onclick="openAttemptDetails('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
-    }
-    const d=resp.data||{};
-    const attempts=d.attempts||[];
-    let body='';
-    if(!attempts.length){
-        body='<div class="tcc-inline-empty">No progress test attempts found for this lesson.</div>';
-    }else{
-        attempts.forEach(function(a){
-            const score=(a.score_pct!==null&&a.score_pct!==undefined)?(a.score_pct+'%'):'—';
-            const cls=parseInt(a.pass_gate_met,10)===1?'ok':'danger';
-            body+='<div class="tcc-inline-attempt"><div class="tcc-inline-attempt-head"><div><div class="tcc-inline-attempt-title">Attempt '+escapeHtml(a.attempt||'—')+' · '+escapeHtml(a.formal_result_code||a.status||'')+'</div><div class="tcc-inline-attempt-meta">Started: '+escapeHtml(niceDateTime(a.started_at))+' · Completed: '+escapeHtml(niceDateTime(a.completed_at))+' · Time: '+escapeHtml(niceTime(a.completed_at))+'</div></div><span class="tcc-score-pill '+cls+'">'+escapeHtml(score)+'</span></div>';
-            const items=a.items||[];
-            if(!items.length){
-                body+='<div class="tcc-inline-question"><div class="tcc-inline-question-answer">No answer-level detail found for this attempt.</div></div>';
-            }else{
-                body+='<div class="tcc-chat-thread">';
-                items.forEach(function(item,idx){
-                    const q=item.prompt||item.question_text||'Question';
-                    const transcript=item.transcript_text||item.answer_text||item.student_answer||'—';
-                    const answerScore=formatScoreValue(item.score_points,item.max_points);
-                    const audio=item.audio_url||item.audio_path||item.answer_audio_url||item.recording_url||item.media_url||'';
-                    body+='<div class="tcc-chat-bubble ai"><strong>Question '+(idx+1)+':</strong> '+escapeHtml(q)+'</div>';
-                    body+='<div class="tcc-chat-bubble student" onclick="openAnswerAudioModal('+jsArg(q)+','+jsArg(transcript)+','+jsArg(audio)+','+jsArg(answerScore)+')">'+escapeHtml(transcript)+'<div class="tcc-chat-score">Score: '+escapeHtml(answerScore)+'</div><span class="tcc-chat-play">▶ Play audio</span></div>';
-                });
-                body+='</div>';
-            }
-            body+='</div>';
+        return fetch('/instructor/api/theory_control_center_api.php?' + new URLSearchParams(params), {
+            credentials: 'same-origin'
+        }).then(function (r) {
+            return r.json();
         });
     }
-    return inlineSection('2. Progress Test Details','Attempt history, answer detail, score trace, and clickable audio transcript bubbles.',body,'<button type="button" class="tcc-detail-btn primary" onclick="openAttemptDetails('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
-}
-function renderInlineInterventions(resp, studentId, lessonId){
-    if(!resp||!resp.ok){
-        return inlineSection('3. Interventions','Required actions, extensions, emails, and progression events.','<div class="tcc-inline-error">Unable to load intervention details.</div>','<button type="button" class="tcc-detail-btn primary" onclick="openInterventions('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
+
+    function openTccModal(title, bodyHtml) {
+        document.getElementById('tccModalTitle').textContent = title || 'Diagnostic';
+        document.getElementById('tccModalBody').innerHTML = bodyHtml || '';
+
+        const o = document.getElementById('tccModalOverlay');
+        o.classList.add('open');
+        o.setAttribute('aria-hidden', 'false');
     }
-    const d=resp.data||{};
-    const groups=[
-        ['Required Actions',d.required_actions||[]],
-        ['Deadline Overrides / Extensions',d.deadline_overrides||[]],
-        ['Email Trace',d.emails||[]],
-        ['Progression Events',d.events||[]]
-    ];
-    let body='';
-    groups.forEach(function(group){
-        const title=group[0];
-        const items=group[1]||[];
-        body+='<div class="tcc-inline-section-title" style="font-size:12px;margin:10px 0 8px;">'+escapeHtml(title)+' ('+items.length+')</div>';
-        if(!items.length){
-            body+='<div class="tcc-inline-empty">No records found.</div>';
-        }else{
-            items.slice(0,8).forEach(function(item){
-                const label=item.title||item.email_type||item.event_type||item.override_type||item.action_type||('Record #'+(item.id||''));
-                const meta=[item.status||item.sent_status||'',item.created_at?niceDateTime(item.created_at):'',item.sent_at?('Sent '+niceDateTime(item.sent_at)):''].filter(Boolean).join(' · ');
-                body+='<div class="tcc-inline-intervention tcc-intervention-clickable" onclick="openInterventionDetailModal('+escapeHtml(JSON.stringify(item)).replace(/"/g,'&quot;')+')"><div class="tcc-inline-intervention-title">'+escapeHtml(label)+'</div><div class="tcc-inline-intervention-meta">'+escapeHtml(meta||'—')+'</div></div>';
+
+    function closeTccModal() {
+        const o = document.getElementById('tccModalOverlay');
+        o.classList.remove('open');
+        o.setAttribute('aria-hidden', 'true');
+    }
+
+    function showError(id, msg) {
+        const el = document.getElementById(id);
+        if (el) {
+            el.innerHTML = '<div class="tcc-error">' + escapeHtml(msg) + '</div>';
+        }
+    }
+
+    function clampPct(v) {
+        v = parseFloat(v);
+        if (isNaN(v)) v = 0;
+        if (v < 0) v = 0;
+        if (v > 100) v = 100;
+        return Math.round(v);
+    }
+
+    function firstName(name) {
+        return String(name || 'Student').trim().split(/\s+/)[0] || 'Student';
+    }
+
+    function photoPath(o) {
+        let path = String((o && (o.photo_path || o.avatar_url || o.photoPath || o.image_url)) || '').trim();
+        if (path === '') return '';
+        if (path.indexOf('http://') === 0 || path.indexOf('https://') === 0 || path.indexOf('/') === 0) return path;
+        return '/' + path.replace(/^\/+/, '');
+    }
+
+    function avatarHtml(o, cls) {
+        const path = photoPath(o);
+        const initials = escapeHtml((o && o.avatar_initials) || 'S');
+
+        if (path !== '') {
+            return '<div class="' + cls + '"><img src="' + escapeHtml(path) + '" alt="' + escapeHtml((o && o.name) || 'Student') + '"></div>';
+        }
+
+        return '<div class="' + cls + '">' + initials + '</div>';
+    }
+
+    function radarColor(s) {
+        if (s.state === 'blocked') return 'red';
+        if (s.pending_action_count && parseInt(s.pending_action_count, 10) > 0) return 'blue';
+        if (s.state === 'at_risk') return 'orange';
+        return 'green';
+    }
+
+    function blockerReviewHref(issue) {
+        if (issue.action_url) return String(issue.action_url);
+
+        if (issue.token) {
+            if (issue.type === 'instructor_approval') {
+                return '/instructor/instructor_approval.php?token=' + encodeURIComponent(issue.token);
+            }
+
+            return '/student/remediation_action.php?token=' + encodeURIComponent(issue.token);
+        }
+
+        return '';
+    }
+
+    function cohortTimeZone() {
+        return window.tccCohortTimezone || 'UTC';
+    }
+
+    function parseUtcDate(v) {
+        if (!v) return null;
+
+        const raw = String(v).trim();
+        if (raw === '') return null;
+
+        const iso = raw.indexOf('T') >= 0 ? raw : (raw.replace(' ', 'T') + 'Z');
+        const d = new Date(iso);
+
+        return isNaN(d.getTime()) ? null : d;
+    }
+
+    function partsInCohortTime(v) {
+        const d = parseUtcDate(v);
+        if (!d) return null;
+
+        try {
+            const fmt = new Intl.DateTimeFormat('en-US', {
+                timeZone: cohortTimeZone(),
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                hour: '2-digit',
+                minute: '2-digit',
+                hour12: false
             });
-            if(items.length>8){
-                body+='<div class="tcc-inline-empty">+'+(items.length-8)+' more records. Open modal for the full trace.</div>';
-            }
-        }
-    });
-    return inlineSection('3. Interventions','Chronological intervention evidence connected to this lesson. Tap any item for full details.',body,'<button type="button" class="tcc-detail-btn primary" onclick="openInterventions('+parseInt(studentId,10)+','+parseInt(lessonId,10)+')">Open Modal</button>');
-}
-function renderInlineLessonDetail(summaryResp, attemptsResp, interventionsResp, studentId, lessonId){
-    return '<div class="tcc-inline-detail-stack">'+renderInlineSummary(summaryResp,studentId,lessonId)+renderInlineAttempts(attemptsResp,studentId,lessonId)+renderInlineInterventions(interventionsResp,studentId,lessonId)+'</div>';
-}
-function toggleLessonInlineDetail(id, studentId, lessonId){
-    const el=document.getElementById(id);
-    if(!el)return;
-    if(el.classList.contains('open')){
-        el.classList.remove('open');
-        return;
-    }
-    el.classList.add('open');
-    if(el.getAttribute('data-loaded')==='1')return;
-    el.innerHTML='<div class="tcc-inline-loading">Loading lesson detail sections…</div>';
-    Promise.all([
-        api('lesson_summary_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).catch(function(){return {ok:false,error:'summary_load_failed'};}),
-        api('lesson_attempts_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).catch(function(){return {ok:false,error:'attempts_load_failed'};}),
-        api('lesson_interventions_detail',{cohort_id:cohortId,student_id:studentId,lesson_id:lessonId}).catch(function(){return {ok:false,error:'interventions_load_failed'};})
-    ]).then(function(results){
-        el.setAttribute('data-loaded','1');
-        el.innerHTML=renderInlineLessonDetail(results[0],results[1],results[2],studentId,lessonId);
-    }).catch(function(){
-        el.innerHTML='<div class="tcc-inline-error">Unable to load lesson detail sections.</div>';
-    });
-}
 
-function renderLessonTimeline(lessons){
-    const target=document.getElementById('studentLessonTimelineBody');
-    if(!target)return;
-    if(!lessons||!lessons.length){
-        target.innerHTML='<div class="tcc-empty">No lesson rows returned for this student.</div>';
-        return;
+            const parts = {};
+            fmt.formatToParts(d).forEach(function (p) {
+                parts[p.type] = p.value;
+            });
+
+            return parts;
+        } catch (e) {
+            return null;
+        }
     }
 
-    const modules=[];
-    const moduleMap={};
+    function niceDate(v) {
+        const p = partsInCohortTime(v);
+        if (!p) return v ? String(v).slice(0, 16) : '—';
+        return p.weekday + ' ' + p.month + ' ' + p.day + ', ' + p.year;
+    }
 
-    lessons.forEach(function(l){
-        const key=String(l.course_id||l.course_title||'module');
-        if(!moduleMap[key]){
-            moduleMap[key]={course_id:l.course_id||0,course_title:l.course_title||'Module',lessons:[]};
-            modules.push(moduleMap[key]);
-        }
-        moduleMap[key].lessons.push(l);
-    });
+    function niceDateTime(v) {
+        const p = partsInCohortTime(v);
+        if (!p) return v ? String(v).slice(0, 16) : '—';
+        return p.weekday + ' ' + p.month + ' ' + p.day + ', ' + p.year + ' ' + p.hour + ':' + p.minute;
+    }
 
-    let html='<div class="tcc-module-stack">';
+    function niceTime(v) {
+        const p = partsInCohortTime(v);
+        if (!p) return '—';
+        return p.hour + ':' + p.minute;
+    }
 
-    modules.forEach(function(mod,moduleIndex){
-        const total=mod.lessons.length;
-        const passed=mod.lessons.filter(function(l){return !!l.test_passed;}).length;
-        const avgScores=mod.lessons.filter(function(l){return l.last_score!==null&&l.last_score!==undefined;}).map(function(l){return Number(l.last_score);});
-        const avg=avgScores.length?Math.round(avgScores.reduce(function(a,b){return a+b;},0)/avgScores.length):null;
+    function prettyStatus(s) {
+        s = String(s || '').replace(/_/g, ' ');
+        return s ? s.charAt(0).toUpperCase() + s.slice(1) : 'Not started';
+    }
 
-        html+='<details class="tcc-module-card" '+(moduleIndex===0?'open':'')+'>';
-        html+='<summary><div class="tcc-module-head"><div class="tcc-module-badge">'+(moduleIndex+1)+'</div><div><div class="tcc-module-label">Module</div><div class="tcc-module-title">'+escapeHtml(mod.course_title)+'</div></div><div><div class="tcc-module-mini">Progress</div><div class="tcc-module-value">'+passed+'/'+total+'</div></div><div><div class="tcc-module-mini">Avg Score</div><div class="tcc-module-value">'+(avg!==null?avg+'%':'—')+'</div></div></div></summary>';
-        html+='<div class="tcc-module-body"><div class="tcc-instructor-lesson-wrap"><table class="tcc-instructor-lesson-table"><colgroup><col style="width:27%"><col style="width:18%"><col style="width:13%"><col style="width:15%"><col style="width:11%"><col style="width:8%"><col style="width:8%"></colgroup><thead><tr><th>Lesson</th><th>Deadlines</th><th>Finished</th><th>Summary Quality</th><th>Progress Test</th><th>Attempts</th><th>Interventions</th></tr></thead><tbody>';
+    function formatScoreValue(value, max) {
+        if (value === null || value === undefined || value === '') return '—';
+        if (max !== undefined && max !== null && max !== '') return String(value) + ' / ' + String(max);
+        return String(value);
+    }
 
-        mod.lessons.forEach(function(l,lessonIndex){
-            const lessonId=parseInt(l.lesson_id||0,10);
-            const studentId=parseInt(selectedStudentId||0,10);
-            const detailId='lessonDetail_'+String(l.course_id||moduleIndex)+'_'+String(l.lesson_id||lessonIndex);
-            const ext=Number(l.extension_count||0);
-            const extText=ext===1?'1 Extension':ext+' Extensions';
-            const extClass=ext>0?'tcc-extension-warn':'tcc-extension-ok';
-            const deltaClass=lessonDeltaClass(l);
-            const interventionCount=Number(l.intervention_count||0);
+    function modalStatusRows(rows) {
+        let html = '';
 
-            html+='<tr class="tcc-lesson-row" onclick="toggleLessonInlineDetail(\''+detailId+'\','+studentId+','+lessonId+')">';
-            html+='<td><div class="tcc-lesson-main"><span class="tcc-lesson-num">'+(lessonIndex+1)+'.</span><div class="tcc-lesson-name">'+escapeHtml(l.lesson_title||'Lesson')+'</div></div></td>';
-            html+='<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Orig</span>'+escapeHtml(niceDate(l.original_deadline_utc))+'</div><div class="tcc-date-line"><span>Eff</span>'+escapeHtml(niceDate(l.effective_deadline_utc))+'</div><div class="'+extClass+'">'+escapeHtml(ext>0?extText:'No Extensions')+'</div></div></td>';
-            html+='<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Finished</span>'+escapeHtml(niceDate(l.completed_at))+'</div><div class="tcc-small-grey">&nbsp;</div><div class="tcc-delta '+deltaClass+'">'+escapeHtml(l.deadline_delta_label||'—')+'</div></div></td>';
-            html+='<td>'+renderSummaryQuality(l)+'</td>';
-            html+='<td>'+renderTestScore(l)+'</td>';
-            html+='<td><span class="tcc-count-mini info">'+escapeHtml(l.attempt_count||0)+'</span></td>';
-            html+='<td><span class="tcc-count-mini '+(interventionCount>0?'warn':'neutral')+'">'+escapeHtml(interventionCount)+'</span></td>';
-            html+='</tr>';
-            html+='<tr class="tcc-lesson-detail-row"><td colspan="7"><div id="'+detailId+'" class="tcc-lesson-detail" data-loaded="0"></div></td></tr>';
+        rows.forEach(function (row) {
+            html += '<div class="tcc-modal-row"><div class="tcc-modal-label">' + escapeHtml(row[0]) + '</div><div class="tcc-modal-value">' + escapeHtml(row[1]) + '</div></div>';
         });
 
-        html+='</tbody></table></div></div></details>';
-    });
-
-    html+='</div>';
-    target.innerHTML=html;
-}
-
-function loadStudentLessons(studentId){
-    const target=document.getElementById('studentLessonTimelineBody');
-    if(target)target.innerHTML='<div class="tcc-timeline-loading">Loading lesson timeline…</div>';
-    api('student_lessons',{cohort_id:cohortId,student_id:studentId}).then(function(data){
-        if(!data.ok){
-            if(target)target.innerHTML='<div class="tcc-timeline-error">'+escapeHtml(data.message||data.error||'Unable to load lesson timeline.')+'</div>';
-            return;
-        }
-        renderLessonTimeline(data.lessons||[]);
-    }).catch(function(){
-        if(target)target.innerHTML='<div class="tcc-timeline-error">Unable to load lesson timeline.</div>';
-    });
-}
-
-function loadStudentPanel(studentId){
-    selectStudentInUi(studentId);
-    const panel=document.getElementById('studentPanel');
-    if(!selectedStudentId||!panel)return;
-    document.getElementById('studentPanelCount').textContent='Loading';
-    panel.className='';
-    panel.innerHTML='<div class="tcc-loading">Loading student snapshot…</div>';
-    api('student_snapshot',{cohort_id:cohortId,student_id:selectedStudentId}).then(function(data){
-        if(!data.ok){
-            document.getElementById('studentPanelCount').textContent='Error';
-            panel.innerHTML='<div class="tcc-error">'+escapeHtml(data.message||data.error||'Unable to load student snapshot.')+'</div>';
-            return;
-        }
-        renderStudentPanel(data);
-    }).catch(function(){
-        document.getElementById('studentPanelCount').textContent='Error';
-        panel.innerHTML='<div class="tcc-error">Unable to load student snapshot.</div>';
-    });
-}
-
-function renderStudentPanel(data){
-    const panel=document.getElementById('studentPanel');
-    const st=data.student||{};
-    const p=data.progress||{};
-    const c=data.comparison||{};
-    const m=data.motivation||{};
-    const issues=data.main_issues||[];
-    const radarStudent=cohortStudents.find(function(s){return parseInt(s.student_id,10)===parseInt(st.student_id,10);})||{};
-    const merged=Object.assign({},radarStudent,st);
-    const color=radarColor(radarStudent);
-    const progressPct=clampPct(p.progress_pct);
-
-    document.getElementById('studentPanelCount').textContent=(issues.length||0)+' issue'+(issues.length===1?'':'s');
-
-    let issueHtml='';
-    if(!issues.length){
-        issueHtml='<div class="tcc-empty">No current blockers or system issues returned for this student.</div>';
-    }else{
-        issues.slice(0,10).forEach(function(issue){
-            const reviewHref=blockerReviewHref(issue);
-            const lessonId=parseInt(issue.lesson_id,10)||0;
-            const safeIssueType=String(issue.type||'manual_check').replace(/[^a-zA-Z0-9_\-]/g,'');
-            let actions='<div class="tcc-issue-actions">';
-            if(reviewHref!==''){
-                actions+='<a class="tcc-btn primary" href="'+escapeHtml(reviewHref)+'">Review</a>';
-            }else{
-                actions+='<button class="tcc-btn secondary" type="button" onclick="openDebugReport('+parseInt(st.student_id,10)+','+lessonId+',\''+safeIssueType+'\')">Inspect</button>';
-            }
-            actions+='<button class="tcc-btn warn" type="button" onclick="openDebugReport('+parseInt(st.student_id,10)+','+lessonId+',\''+safeIssueType+'\')">State Fix</button>';
-            actions+='</div>';
-            issueHtml+='<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">'+escapeHtml(issue.title||issue.type||'Issue')+'</div><div class="tcc-issue-meta">Lesson '+escapeHtml(issue.lesson_id||'—')+' · '+escapeHtml(issue.lesson_title||'')+' · '+escapeHtml(issue.status||'')+'</div></div>'+actions+'</div>';
-        });
-        if(issues.length>10){
-            issueHtml+='<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">+'+(issues.length-10)+' more issue(s)</div><div class="tcc-issue-meta">The lesson module view below keeps the full instructor workflow organized.</div></div><div class="tcc-issue-actions"><button class="tcc-btn secondary" type="button" onclick="loadStudentLessons('+parseInt(st.student_id,10)+')">Open Lessons</button></div></div>';
-        }
+        return html;
     }
 
-    const avgScore=c.avg_score!==null&&c.avg_score!==undefined?Number(c.avg_score):null;
-    const cohortAvgScore=c.cohort_avg_score!==null&&c.cohort_avg_score!==undefined?Number(c.cohort_avg_score):null;
-    const missed=Number(c.deadlines_missed||0);
-    const cohortMissed=Number(c.cohort_avg_deadlines_missed||0);
-    const failed=Number(c.failed_attempts||0);
-    const cohortFailed=Number(c.cohort_avg_failed_attempts||0);
+    function jsArg(value) {
+        return '\'' + String(value === null || value === undefined ? '' : value)
+            .replace(/\\/g, '\\\\')
+            .replace(/'/g, "\\'")
+            .replace(/\r/g, '\\r')
+            .replace(/\n/g, '\\n')
+            .replace(/</g, '\\x3C')
+            .replace(/>/g, '\\x3E') + '\'';
+    }
 
-    const tiles=
-        metricTile('Progress',progressPct+'%',progressPct,'',''+(p.passed_lessons||0)+'/'+(p.total_lessons||0)+' lessons passed')+
-        metricTile('Avg Score',avgScore!==null?avgScore+'%':'—',metricPct(avgScore,cohortAvgScore,true),barClass(avgScore,cohortAvgScore,true),'Cohort Average: '+(cohortAvgScore!==null?cohortAvgScore+'%':'—'))+
-        metricTile('Deadlines Missed',missed,metricPct(missed,cohortMissed,false),barClass(missed,cohortMissed,false),'Cohort Average: '+cohortMissed)+
-        metricTile('Failed Attempts',failed,metricPct(failed,cohortFailed,false),barClass(failed,cohortFailed,false),'Cohort Average: '+cohortFailed);
+    function sanitizeSummaryHtml(html) {
+        html = String(html || '');
 
-    panel.className='';
-    panel.innerHTML=
-        '<div class="tcc-student-head"><div class="tcc-student-avatar '+escapeHtml(color)+'">'+
-        (photoPath(merged)!==''?'<img src="'+escapeHtml(photoPath(merged))+'" alt="'+escapeHtml(st.name||'Student')+'">':escapeHtml(st.avatar_initials||radarStudent.avatar_initials||'S'))+
-        '</div><div style="min-width:0;"><div class="tcc-student-name">'+escapeHtml(st.name||'Student')+'</div><div class="tcc-student-email">'+escapeHtml(st.email||'')+'</div></div></div>'+
-        '<div class="tcc-student-state-row"><span class="tcc-status-pill '+escapeHtml(m.level||'')+'">'+escapeHtml(m.label||'Motivation signal')+'</span><span class="tcc-status-pill">Trend: '+escapeHtml(m.trend||'—')+'</span><span class="tcc-status-pill">Issues: '+escapeHtml(issues.length)+'</span></div>'+
-        '<div class="tcc-snapshot-grid">'+tiles+'</div>'+
-        '<h3 class="tcc-section-title" style="font-size:17px;margin:4px 0 10px;">Current Blockers / Issues</h3>'+
-        '<div class="tcc-issues-list">'+issueHtml+'</div>'+
-        '<div class="tcc-panel-actions"><button class="tcc-btn primary" type="button" onclick="loadStudentLessons('+parseInt(st.student_id,10)+')">Lessons</button><button class="tcc-btn secondary" type="button" onclick="openInterventions(selectedStudentId,0)">Interventions</button><button class="tcc-btn warn" type="button" onclick="openSystemWatchForStudent('+parseInt(st.student_id,10)+')">System Watch</button></div>'+
-        '<div class="tcc-lesson-timeline"><div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by Module</div><div class="tcc-lesson-timeline-sub">Instructor overview styled like the student course page, grouped by module with compact deadline, summary, test, attempts, and intervention data.</div></div><span class="tcc-count-pill">Live</span></div><div id="studentLessonTimelineBody" class="tcc-timeline-loading">Loading lesson modules…</div></div>';
+        const tpl = document.createElement('template');
+        tpl.innerHTML = html;
 
-    loadStudentLessons(st.student_id);
-}
+        const allowedTags = {
+            P: 1,
+            BR: 1,
+            UL: 1,
+            OL: 1,
+            LI: 1,
+            STRONG: 1,
+            B: 1,
+            EM: 1,
+            I: 1,
+            U: 1,
+            H1: 1,
+            H2: 1,
+            H3: 1,
+            H4: 1,
+            BLOCKQUOTE: 1,
+            SPAN: 1,
+            DIV: 1,
+            MARK: 1
+        };
 
-function loadQueue(){
-    document.getElementById('actionQueue').innerHTML='<div class="tcc-loading">Loading action queue…</div>';
-    document.getElementById('queueCount').textContent='—';
-    api('action_queue',{cohort_id:cohortId}).then(function(data){
-        const container=document.getElementById('actionQueue');
-        const count=document.getElementById('queueCount');
-        if(!data.ok){
-            showError('actionQueue',data.message||data.error||'Unable to load action queue.');
+        const walker = document.createTreeWalker(tpl.content, NodeFilter.SHOW_ELEMENT, null);
+        const remove = [];
+
+        while (walker.nextNode()) {
+            const el = walker.currentNode;
+
+            if (!allowedTags[el.tagName]) {
+                remove.push(el);
+                continue;
+            }
+
+            Array.prototype.slice.call(el.attributes).forEach(function (a) {
+                const n = a.name.toLowerCase();
+                if (n !== 'class') el.removeAttribute(a.name);
+            });
+        }
+
+        remove.forEach(function (el) {
+            const text = document.createTextNode(el.textContent || '');
+            if (el.parentNode) el.parentNode.replaceChild(text, el);
+        });
+
+        return tpl.innerHTML;
+    }
+
+    function rawSummaryHtml(s) {
+        const html = String((s && (s.summary_html || s.summaryHtml)) || '').trim();
+        if (html !== '') return sanitizeSummaryHtml(html);
+
+        const plain = String((s && (s.summary_plain || s.summary_text)) || '').trim();
+        return plain !== '' ? escapeHtml(plain).replace(/\n/g, '<br>') : 'No student summary text found.';
+    }
+
+    function cacheSummaryHtml(title, htmlContent) {
+        window.tccSummaryCache = window.tccSummaryCache || {};
+
+        const key = 's_' + Date.now() + '_' + Math.floor(Math.random() * 1000000);
+        window.tccSummaryCache[key] = {
+            title: String(title || 'Lesson Summary'),
+            html: String(htmlContent || '')
+        };
+
+        return key;
+    }
+
+    function openSummaryLargeModalById(key) {
+        const item = (window.tccSummaryCache || {})[key] || {};
+        openSummaryLargeModal(item.title || 'Lesson Summary', item.html || '');
+    }
+
+    function reviewStatusPill(status) {
+        const clean = String(status || 'neutral').toLowerCase();
+        return '<span class="tcc-review-pill ' + escapeHtml(clean) + '">' + escapeHtml(prettyStatus(clean)) + '</span>';
+    }
+
+    function reviewScoreBar(score) {
+        const n = (score !== null && score !== undefined && score !== '') ? clampPct(score) : 0;
+        const cls = n >= 85 ? 'ok' : (n >= 70 ? 'warn' : 'danger');
+
+        return '<div class="tcc-review-score-row"><div class="tcc-review-score-bar"><span class="' + cls + '" style="width:' + n + '%;"></span></div><div class="tcc-review-score-value">' + (score !== null && score !== undefined && score !== '' ? escapeHtml(score) + '%' : '—') + '</div></div>';
+    }
+
+    function aiSignalClass(value) {
+        const s = String(value || '').toLowerCase();
+
+        if (s.indexOf('high') >= 0 || s.indexOf('likely') >= 0 || s.indexOf('weak') >= 0 || s.indexOf('poor') >= 0) return 'danger';
+        if (s.indexOf('medium') >= 0 || s.indexOf('possible') >= 0 || s.indexOf('developing') >= 0 || s.indexOf('adequate') >= 0) return 'warn';
+        if (s.indexOf('low') >= 0 || s.indexOf('unlikely') >= 0 || s.indexOf('strong') >= 0 || s.indexOf('excellent') >= 0) return 'ok';
+
+        return '';
+    }
+
+    function aiList(items) {
+        items = Array.isArray(items) ? items : [];
+
+        if (!items.length) return '<div class="tcc-modal-muted">No items generated yet.</div>';
+
+        let html = '<ul>';
+        items.slice(0, 6).forEach(function (item) {
+            html += '<li>' + escapeHtml(item) + '</li>';
+        });
+        html += '</ul>';
+
+        return html;
+    }
+
+    function renderAiAnalysisObject(ai) {
+        ai = ai || {};
+
+        const copy = ai.copy_paste_likelihood || 'Not generated';
+        const tool = ai.ai_tool_likelihood || 'Not generated';
+        const sim = ai.highest_similarity || 'Not generated';
+        const simStudent = ai.highest_similarity_student || '—';
+        const simPct = (ai.highest_similarity_pct !== undefined && ai.highest_similarity_pct !== null) ? String(ai.highest_similarity_pct) + '%' : '—';
+        const understandingLabel = ai.deep_understanding_label || ai.deep_understanding || ai.understanding || 'Not generated';
+        const understandingScore = (ai.deep_understanding_score !== undefined && ai.deep_understanding_score !== null) ? String(ai.deep_understanding_score) + '%' : '—';
+
+        let html = '<div class="tcc-ai-result-grid">';
+        html += '<div class="tcc-ai-result-card ' + aiSignalClass(copy) + '"><div class="tcc-ai-result-label">Copy/Paste</div><div class="tcc-ai-result-value">' + escapeHtml(copy) + '</div></div>';
+        html += '<div class="tcc-ai-result-card ' + aiSignalClass(tool) + '"><div class="tcc-ai-result-label">AI Tool Use</div><div class="tcc-ai-result-value">' + escapeHtml(tool) + '</div></div>';
+        html += '<div class="tcc-ai-result-card ' + aiSignalClass(sim) + '"><div class="tcc-ai-result-label">Similarity</div><div class="tcc-ai-result-value">' + escapeHtml(sim) + ' · ' + escapeHtml(simPct) + '</div><div class="tcc-modal-muted" style="margin-top:5px;">' + escapeHtml(simStudent) + '</div></div>';
+        html += '<div class="tcc-ai-result-card ' + aiSignalClass(understandingLabel) + '"><div class="tcc-ai-result-label">Understanding</div><div class="tcc-ai-result-value">' + escapeHtml(understandingLabel) + ' · ' + escapeHtml(understandingScore) + '</div></div>';
+        html += '</div>';
+
+        html += '<div class="tcc-ai-take-box"><strong>Instructor quick take:</strong><br>' + escapeHtml(ai.instructor_quick_take || ai.quality_feedback || 'No AI analysis generated yet.') + '</div>';
+
+        html += '<div class="tcc-ai-list-grid">';
+        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Strong Points</div>' + aiList(ai.substantially_good) + '</div>';
+        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Weak Points</div>' + aiList(ai.substantially_weak) + '</div>';
+        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Suggestions</div>' + aiList(ai.improvement_suggestions || ai.suggestions) + '</div>';
+        html += '</div>';
+
+        if (ai.student_safe_feedback) {
+            html += '<div class="tcc-ai-take-box"><strong>Student-safe feedback:</strong><br>' + escapeHtml(ai.student_safe_feedback) + '</div>';
+        }
+
+        return html;
+    }
+
+    function renderAiInterpretation(ai, studentId, lessonId) {
+        ai = ai || {};
+
+        const hasGenerated = (ai.analysis_status === 'generated' || ai.copy_paste_likelihood || ai.ai_tool_likelihood || ai.deep_understanding_score || ai.deep_understanding);
+        const panelId = 'aiPanel_' + parseInt(studentId || 0, 10) + '_' + parseInt(lessonId || 0, 10);
+        const btnId = 'aiBtn_' + parseInt(studentId || 0, 10) + '_' + parseInt(lessonId || 0, 10);
+
+        const body = hasGenerated
+            ? renderAiAnalysisObject(ai)
+            : '<div class="tcc-ai-loading-box">No AI analysis generated yet. Click “Generate AI Analysis” to create an instructor advisory review for this summary.</div>';
+
+        return '<div id="' + panelId + '" class="tcc-ai-live-panel">' +
+            '<div class="tcc-ai-live-head">' +
+                '<div><div class="tcc-ai-live-title">AI Summary Analysis</div><div class="tcc-ai-live-sub">Advisory only. Does not change progression status or canonical records.</div></div>' +
+                '<button id="' + btnId + '" type="button" class="tcc-ai-action-btn" onclick="generateAiSummaryAnalysis(' + parseInt(studentId || 0, 10) + ',' + parseInt(lessonId || 0, 10) + ',' + jsArg(panelId) + ',' + jsArg(btnId) + ')">Generate AI Analysis</button>' +
+            '</div>' +
+            '<div class="tcc-ai-live-body">' + body + '</div>' +
+        '</div>';
+    }
+
+    function generateAiSummaryAnalysis(studentId, lessonId, panelId, btnId) {
+        studentId = parseInt(studentId, 10) || selectedStudentId;
+        lessonId = parseInt(lessonId, 10) || 0;
+
+        const panel = document.getElementById(panelId);
+        const btn = document.getElementById(btnId);
+
+        if (!panel || !studentId || !lessonId || !cohortId) {
+            openTccModal('AI Summary Analysis', '<div class="tcc-error">Missing cohort, student, or lesson id.</div>');
             return;
         }
-        const items=data.items||[];
-        count.textContent=items.length+' item'+(items.length===1?'':'s');
-        container.innerHTML='';
-        if(!items.length){
-            container.innerHTML='<div class="tcc-empty">No instructor actions required for this cohort right now.</div>';
+
+        const body = panel.querySelector('.tcc-ai-live-body');
+
+        if (btn) {
+            btn.disabled = true;
+            btn.textContent = 'Analyzing…';
+        }
+
+        if (body) {
+            body.innerHTML = '<div class="tcc-ai-loading-box">Generating AI analysis. This is advisory only and will not change student progression state…</div>';
+        }
+
+        api('ai_summary_analysis', {
+            cohort_id: cohortId,
+            student_id: studentId,
+            lesson_id: lessonId
+        }).then(function (resp) {
+            if (!resp.ok) {
+                if (body) {
+                    body.innerHTML = '<div class="tcc-ai-error-box">' + escapeHtml(resp.message || resp.error || 'AI analysis failed.') + '</div>';
+                }
+                return;
+            }
+
+            if (body) {
+                body.innerHTML = renderAiAnalysisObject(resp.analysis || {});
+            }
+        }).catch(function () {
+            if (body) {
+                body.innerHTML = '<div class="tcc-ai-error-box">Unable to generate AI analysis.</div>';
+            }
+        }).finally(function () {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Regenerate AI Analysis';
+            }
+        });
+    }
+
+    function openSummaryLargeModal(title, htmlContent) {
+        openTccModal(title || 'Lesson Summary', '<div class="tcc-summary-paper nb-content" style="max-height:70vh;">' + htmlContent + '</div>');
+    }
+
+    function openAnswerAudioModal(question, transcript, audioUrl, score) {
+        let body = '<div class="tcc-modal-muted" style="margin-bottom:10px;">' + escapeHtml(question || 'Progress test answer') + '</div>';
+
+        if (audioUrl) {
+            body += '<audio class="tcc-audio" controls preload="none" src="' + escapeHtml(audioUrl) + '"></audio>';
+        } else {
+            body += '<div class="tcc-empty">No audio file is attached to this answer.</div>';
+        }
+
+        body += '<div class="tcc-modal-section full" style="margin-top:12px;"><div class="tcc-modal-section-title">Student Answer Transcript</div><div class="tcc-modal-readable">' + escapeHtml(transcript || '—') + '</div><div class="tcc-modal-muted" style="margin-top:8px;">Score: ' + escapeHtml(score || '—') + '</div></div>';
+
+        openTccModal('Answer Audio + Transcript', body);
+    }
+
+    function openInterventionDetailModal(item) {
+        item = item || {};
+
+        const title = item.title || item.email_type || item.event_type || item.override_type || item.action_type || ('Intervention #' + (item.id || ''));
+        openTccModal('Intervention Detail', '<div class="tcc-debug-meta">' + escapeHtml(title) + '</div><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(item, null, 2)) + '</pre>');
+    }
+
+    function openDebugReport(studentId, lessonId, issueType) {
+        studentId = parseInt(studentId, 10) || selectedStudentId;
+        lessonId = parseInt(lessonId, 10) || 0;
+
+        if (!cohortId || !studentId || !lessonId) {
+            openTccModal('Debug Report', '<div class="tcc-error">Missing cohort, student, or lesson id.</div>');
             return;
         }
-        items.forEach(function(item){
-            let reviewHref='';
-            if(item.token){
-                if(item.action_type==='instructor_approval')reviewHref='/instructor/instructor_approval.php?token='+encodeURIComponent(item.token);
-                else reviewHref='/student/remediation_action.php?token='+encodeURIComponent(item.token);
+
+        openTccModal('Debug Report', '<div class="tcc-loading">Generating diagnostic report…</div>');
+
+        api('debug_report', {
+            cohort_id: cohortId,
+            student_id: studentId,
+            lesson_id: lessonId,
+            issue_type: issueType || 'manual_check'
+        }).then(function (data) {
+            openTccModal('Debug Report', '<div class="tcc-debug-meta">Copy this JSON into Jake/Steven if this blocker represents an unexpected software state.</div><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(data, null, 2)) + '</pre>');
+        }).catch(function () {
+            openTccModal('Debug Report', '<div class="tcc-error">Unable to generate diagnostic report.</div>');
+        });
+    }
+
+    function openSystemWatchForStudent(studentId) {
+        studentId = parseInt(studentId, 10) || selectedStudentId;
+
+        if (!cohortId || !studentId) {
+            openTccModal('System Watch', '<div class="tcc-error">Missing cohort or student id.</div>');
+            return;
+        }
+
+        openTccModal('System Watch', '<div class="tcc-loading">Loading system watch…</div>');
+
+        api('system_watch', {
+            cohort_id: cohortId,
+            student_id: studentId
+        }).then(function (data) {
+            openTccModal('System Watch', '<pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(data, null, 2)) + '</pre>');
+        }).catch(function () {
+            openTccModal('System Watch', '<div class="tcc-error">Unable to load system watch.</div>');
+        });
+    }
+
+    function openLessonSummary(studentId, lessonId) {
+        studentId = parseInt(studentId, 10) || selectedStudentId;
+        lessonId = parseInt(lessonId, 10) || 0;
+
+        if (!cohortId || !studentId || !lessonId) {
+            openTccModal('Lesson Summary', '<div class="tcc-error">Missing cohort, student, or lesson id.</div>');
+            return;
+        }
+
+        openTccModal('Lesson Summary', '<div class="tcc-loading">Loading lesson summary…</div>');
+
+        api('lesson_summary_detail', {
+            cohort_id: cohortId,
+            student_id: studentId,
+            lesson_id: lessonId
+        }).then(function (resp) {
+            if (!resp.ok) {
+                openTccModal('Lesson Summary', '<div class="tcc-error">' + escapeHtml(resp.message || resp.error || 'Unable to load summary.') + '</div>');
+                return;
             }
-            const severity=item.severity||'low';
-            const radarStudent=cohortStudents.find(function(s){return parseInt(s.student_id,10)===parseInt(item.student_id,10);})||{};
-            const color=radarColor(radarStudent.state?radarStudent:{state:item.severity==='high'?'blocked':'at_risk',pending_action_count:1});
-            const avatarObj=Object.assign({},radarStudent,{photo_path:item.photo_path||radarStudent.photo_path,avatar_initials:item.avatar_initials||radarStudent.avatar_initials,name:item.student_name});
-            const el=document.createElement('div');
-            el.className='tcc-item';
-            const lessonId=parseInt(item.lesson_id||0,10);const issueType=String(item.action_type||'manual_check').replace(/[^a-zA-Z0-9_\-]/g,'');
-            el.innerHTML='<div class="tcc-item-left">'+avatarHtml(avatarObj,'tcc-avatar '+color)+'<div class="tcc-meta"><div class="tcc-name">'+escapeHtml(item.student_name||'Student')+'</div><div class="tcc-sub">'+escapeHtml(item.lesson_title||'No lesson title')+'</div><div class="tcc-sub">'+escapeHtml(item.reason||item.action_type||'Required action')+'</div><span class="tcc-severity '+escapeHtml(severity)+'">'+escapeHtml(severity)+'</span></div></div><div class="tcc-actions">'+(reviewHref?'<a class="tcc-btn primary" href="'+escapeHtml(reviewHref)+'">Review</a>':'<button class="tcc-btn primary" type="button" onclick="loadStudentPanel('+parseInt(item.student_id||0,10)+')">Review</button>')+'<button class="tcc-btn secondary" type="button" onclick="openDebugReport('+parseInt(item.student_id||0,10)+','+lessonId+','+jsArg(issueType)+')">Inspect</button><button class="tcc-btn warn" type="button" onclick="openDebugReport('+parseInt(item.student_id||0,10)+','+lessonId+','+jsArg(issueType)+')">State Fix</button></div>';
-            const left=el.querySelector('.tcc-item-left');
-            if(left){
-                left.style.cursor='pointer';
-                left.onclick=function(){loadStudentPanel(item.student_id);};
+
+            const d = resp.data || {};
+            const lesson = d.lesson || {};
+            const s = d.summary || {};
+            const ai = d.ai_interpretation || {};
+            const title = lesson.lesson_title || 'Lesson Summary';
+            const summaryHtml = rawSummaryHtml(s);
+
+            const html = '<div class="tcc-modal-grid">' +
+                '<div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Status</div>' +
+                    modalStatusRows([
+                        ['Module', lesson.course_title || '—'],
+                        ['Lesson', lesson.lesson_title || '—'],
+                        ['Updated', niceDateTime(s.updated_at)]
+                    ]) +
+                    '<div style="margin-top:10px;">' + reviewStatusPill(s.review_status || 'neutral') + '</div>' +
+                '</div>' +
+                '<div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Score</div>' + reviewScoreBar(s.review_score) + '</div>' +
+                '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Summary</div><div class="tcc-summary-paper nb-content">' + summaryHtml + '</div></div>' +
+                '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">AI Interpretation</div>' + renderAiInterpretation(ai, studentId, lessonId) + '</div>' +
+                '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Instructor Feedback</div><div class="tcc-modal-readable">' + escapeHtml(s.review_feedback || s.review_notes_by_instructor || 'No instructor feedback recorded for this summary yet.') + '</div></div>' +
+            '</div>';
+
+            openTccModal(title, html);
+        }).catch(function () {
+            openTccModal('Lesson Summary', '<div class="tcc-error">Unable to load summary.</div>');
+        });
+    }
+
+    function renderAttemptItems(items) {
+        if (!items || !items.length) return '<div class="tcc-modal-muted">No answer-level items found for this attempt.</div>';
+
+        let html = '<div class="tcc-chat-thread">';
+
+        items.forEach(function (item, idx) {
+            const score = formatScoreValue(item.score_points, item.max_points);
+            const q = item.prompt || item.question_text || 'Question';
+            const transcript = item.transcript_text || item.answer_text || item.student_answer || '—';
+            const audio = item.audio_url || item.audio_path || item.answer_audio_url || item.recording_url || item.media_url || '';
+
+            html += '<div class="tcc-chat-bubble ai"><strong>Question ' + (idx + 1) + ':</strong> ' + escapeHtml(q) + '</div>';
+            html += '<div class="tcc-chat-bubble student" onclick="openAnswerAudioModal(' + jsArg(q) + ',' + jsArg(transcript) + ',' + jsArg(audio) + ',' + jsArg(score) + ')">' + escapeHtml(transcript) + '<div class="tcc-chat-score">Score: ' + escapeHtml(score) + '</div><span class="tcc-chat-play">▶ Play audio</span></div>';
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    function openAttemptDetails(studentId, lessonId) {
+        studentId = parseInt(studentId, 10) || selectedStudentId;
+        lessonId = parseInt(lessonId, 10) || 0;
+
+        if (!cohortId || !studentId || !lessonId) {
+            openTccModal('Progress Test Details', '<div class="tcc-error">Missing cohort, student, or lesson id.</div>');
+            return;
+        }
+
+        openTccModal('Progress Test Details', '<div class="tcc-loading">Loading progress test attempts…</div>');
+
+        api('lesson_attempts_detail', {
+            cohort_id: cohortId,
+            student_id: studentId,
+            lesson_id: lessonId
+        }).then(function (resp) {
+            if (!resp.ok) {
+                openTccModal('Progress Test Details', '<div class="tcc-error">' + escapeHtml(resp.message || resp.error || 'Unable to load attempts.') + '</div>');
+                return;
             }
+
+            const d = resp.data || {};
+            const lesson = d.lesson || {};
+            const attempts = d.attempts || [];
+
+            let html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Lesson</div><div class="tcc-modal-muted">' + escapeHtml((lesson.course_title || 'Module') + ' · ' + (lesson.lesson_title || 'Lesson')) + '</div></div>';
+
+            if (!attempts.length) {
+                html += '<div class="tcc-empty">No progress test attempts found.</div>';
+            }
+
+            attempts.forEach(function (a) {
+                const score = a.score_pct !== null && a.score_pct !== undefined ? a.score_pct + '%' : '—';
+                html += '<div class="tcc-attempt-card"><div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt ' + escapeHtml(a.attempt || '—') + ' · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div><div class="tcc-attempt-meta">Started: ' + escapeHtml(niceDate(a.started_at)) + ' · Completed: ' + escapeHtml(niceDate(a.completed_at)) + '</div></div><span class="tcc-score-pill ' + (parseInt(a.pass_gate_met, 10) === 1 ? 'ok' : 'danger') + '">' + escapeHtml(score) + '</span></div>' + renderAttemptItems(a.items || []) + '</div>';
+            });
+
+            openTccModal('Progress Test Details', html);
+        }).catch(function () {
+            openTccModal('Progress Test Details', '<div class="tcc-error">Unable to load attempts.</div>');
+        });
+    }
+
+    function serializeForOnclick(value) {
+        return escapeHtml(JSON.stringify(value)).replace(/"/g, '&quot;');
+    }
+
+    function interventionBlock(title, items) {
+        let html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">' + escapeHtml(title) + ' (' + (items ? items.length : 0) + ')</div>';
+
+        if (!items || !items.length) {
+            html += '<div class="tcc-modal-muted">No records found.</div></div>';
+            return html;
+        }
+
+        html += '<div class="tcc-intervention-list">';
+
+        items.forEach(function (item) {
+            const label = item.title || item.email_type || item.event_type || item.override_type || item.action_type || ('Record #' + (item.id || ''));
+            const meta = [
+                item.status || item.sent_status || '',
+                item.created_at ? niceDateTime(item.created_at) : '',
+                item.sent_at ? ('Sent ' + niceDateTime(item.sent_at)) : ''
+            ].filter(Boolean).join(' · ');
+
+            html += '<div class="tcc-intervention-item tcc-intervention-clickable" onclick="openInterventionDetailModal(' + serializeForOnclick(item) + ')"><div class="tcc-intervention-title">' + escapeHtml(label) + '</div><div class="tcc-intervention-meta">' + escapeHtml(meta || '—') + '</div></div>';
+        });
+
+        html += '</div></div>';
+        return html;
+    }
+
+    function openInterventions(studentId, lessonId) {
+        studentId = parseInt(studentId, 10) || selectedStudentId;
+        lessonId = parseInt(lessonId, 10) || 0;
+
+        if (!cohortId || !studentId) {
+            openTccModal('Interventions', '<div class="tcc-error">Missing cohort or student id.</div>');
+            return;
+        }
+
+        openTccModal('Interventions', '<div class="tcc-loading">Loading interventions…</div>');
+
+        api('lesson_interventions_detail', {
+            cohort_id: cohortId,
+            student_id: studentId,
+            lesson_id: lessonId
+        }).then(function (resp) {
+            if (!resp.ok) {
+                openTccModal('Interventions', '<div class="tcc-error">' + escapeHtml(resp.message || resp.error || 'Unable to load interventions.') + '</div>');
+                return;
+            }
+
+            const d = resp.data || {};
+            const lesson = d.lesson || {};
+            const subtitle = lessonId > 0 ? ((lesson.course_title || 'Module') + ' · ' + (lesson.lesson_title || 'Lesson')) : 'Entire program';
+
+            let html = '<div class="tcc-modal-muted" style="margin-bottom:12px;">' + escapeHtml(subtitle) + '</div>';
+            html += interventionBlock('Required Actions', d.required_actions || []);
+            html += interventionBlock('Deadline Overrides / Extensions', d.deadline_overrides || []);
+            html += interventionBlock('Email Trace', d.emails || []);
+            html += interventionBlock('Progression Events', d.events || []);
+
+            openTccModal('Interventions', html);
+        }).catch(function () {
+            openTccModal('Interventions', '<div class="tcc-error">Unable to load interventions.</div>');
+        });
+    }
+
+    function barClass(value, average, higherIsBetter) {
+        const v = parseFloat(value);
+        const a = parseFloat(average);
+
+        if (isNaN(v)) return 'warn';
+
+        if (isNaN(a)) {
+            return higherIsBetter ? (v >= 75 ? 'ok' : (v >= 70 ? 'warn' : 'danger')) : (v === 0 ? 'ok' : 'warn');
+        }
+
+        if (higherIsBetter) {
+            if (v >= a && v >= 75) return 'ok';
+            if (v >= 70) return 'warn';
+            return 'danger';
+        }
+
+        if (v <= a) return 'ok';
+        if (v <= a * 1.5 + 0.5) return 'warn';
+        return 'danger';
+    }
+
+    function metricPct(value, average, higherIsBetter) {
+        const v = parseFloat(value);
+        const a = parseFloat(average);
+
+        if (isNaN(v)) return 0;
+        if (higherIsBetter) return clampPct(v);
+
+        const max = Math.max(v, a * 2, 1);
+        return clampPct((v / max) * 100);
+    }
+
+    function metricTile(title, value, barPct, barCls, sub) {
+        return '<div class="tcc-snapshot-tile"><div class="tcc-snapshot-label">' + escapeHtml(title) + '</div><div class="tcc-snapshot-value">' + escapeHtml(value) + '</div><div class="tcc-mini-bar"><span class="' + escapeHtml(barCls) + '" style="width:' + clampPct(barPct) + '%;"></span></div><div class="tcc-snapshot-sub">' + escapeHtml(sub) + '</div></div>';
+    }
+
+    function loadCohorts() {
+        api('cohort_overview').then(function (data) {
+            const select = document.getElementById('cohortSelect');
+            select.innerHTML = '';
+
+            if (!data.ok || !data.cohorts || !data.cohorts.length) {
+                select.innerHTML = '<option value="0">No cohorts available</option>';
+                return;
+            }
+
+            data.cohorts.forEach(function (c) {
+                const opt = document.createElement('option');
+                opt.value = c.id;
+                opt.textContent = c.name;
+
+                if (c.timezone || c.cohort_timezone) {
+                    opt.setAttribute('data-timezone', c.timezone || c.cohort_timezone);
+                }
+
+                select.appendChild(opt);
+            });
+
+            cohortId = parseInt(data.cohorts[0].id, 10) || 0;
+            window.tccCohortTimezone = data.cohorts[0].timezone || data.cohorts[0].cohort_timezone || 'UTC';
+            select.value = cohortId;
+
+            loadAll();
+        }).catch(function () {
+            showError('healthStrip', 'Unable to load cohorts.');
+        });
+    }
+
+    function loadAll() {
+        if (!cohortId) return;
+
+        selectedStudentId = 0;
+        document.getElementById('studentPanelCount').textContent = 'Select student';
+        document.getElementById('studentPanel').className = 'tcc-student-placeholder';
+        document.getElementById('studentPanel').innerHTML = 'Tap a student avatar in the Cohort Radar, choose a student from the selector, or tap a student in the Action Queue to open the student deep dive here.';
+
+        loadOverview();
+        loadQueue();
+    }
+
+    function loadOverview() {
+        document.getElementById('healthStrip').innerHTML = '<div class="tcc-loading">Loading cohort health…</div>';
+        document.getElementById('radarAvatars').innerHTML = '';
+        document.getElementById('radarCount').textContent = '—';
+
+        api('cohort_overview', {
+            cohort_id: cohortId
+        }).then(function (data) {
+            if (!data.ok) {
+                showError('healthStrip', data.message || data.error || 'Unable to load cohort overview.');
+                return;
+            }
+
+            renderHealth(data);
+            renderRadar(data);
+        }).catch(function () {
+            showError('healthStrip', 'Unable to load cohort overview.');
+        });
+    }
+
+    function renderHealth(data) {
+        const s = data.summary || {};
+
+        document.getElementById('healthCount').textContent = (s.student_count || 0) + ' students';
+        document.getElementById('healthStrip').innerHTML =
+            '<div class="tcc-health-card"><div class="tcc-health-label">Students</div><div class="tcc-health-value">' + escapeHtml(s.student_count || 0) + '</div><div class="tcc-health-note">Active in this cohort</div></div>' +
+            '<div class="tcc-health-card"><div class="tcc-health-label">On Track</div><div class="tcc-health-value">' + escapeHtml(s.on_track_count || 0) + '</div><div class="tcc-health-note">No immediate action</div></div>' +
+            '<div class="tcc-health-card"><div class="tcc-health-label">At Risk</div><div class="tcc-health-value">' + escapeHtml(s.at_risk_count || 0) + '</div><div class="tcc-health-note">Needs monitoring</div></div>' +
+            '<div class="tcc-health-card"><div class="tcc-health-label">Blocked</div><div class="tcc-health-value">' + escapeHtml(s.blocked_count || 0) + '</div><div class="tcc-health-note">Action required</div></div>';
+    }
+
+    function renderRadar(data) {
+        const container = document.getElementById('radarAvatars');
+        const count = document.getElementById('radarCount');
+        const select = document.getElementById('studentSelect');
+        const students = data.students || [];
+
+        cohortStudents = students;
+        container.innerHTML = '';
+        select.innerHTML = '<option value="0">Select student…</option>';
+        count.textContent = students.length + ' student' + (students.length === 1 ? '' : 's');
+
+        if (!students.length) {
+            container.innerHTML = '<div class="tcc-empty">No students found for this cohort.</div>';
+            return;
+        }
+
+        students.forEach(function (s, idx) {
+            const progress = clampPct(s.progress_pct);
+            const color = radarColor(s);
+
+            const opt = document.createElement('option');
+            opt.value = s.student_id || 0;
+            opt.textContent = (s.name || 'Student') + ' · ' + progress + '%';
+            select.appendChild(opt);
+
+            const verticalNudge = (idx % 3) * 7;
+            const el = document.createElement('div');
+
+            el.className = 'tcc-radar-avatar ' + color;
+            el.style.left = progress + '%';
+            el.style.top = (64 + verticalNudge) + 'px';
+            el.title = (s.name || 'Student') + ' · ' + progress + '% · ' + (s.state || '');
+            el.setAttribute('role', 'button');
+            el.setAttribute('tabindex', '0');
+            el.setAttribute('aria-label', (s.name || 'Student') + ' progress ' + progress + ' percent');
+            el.setAttribute('data-student-id', s.student_id || 0);
+
+            const path = photoPath(s);
+            const inner = path !== ''
+                ? '<span class="tcc-avatar-inner"><img src="' + escapeHtml(path) + '" alt="' + escapeHtml(s.name || 'Student') + '"></span>'
+                : '<span class="tcc-avatar-inner">' + escapeHtml(s.avatar_initials || 'S') + '</span>';
+
+            el.innerHTML = '<span class="tcc-radar-score">' + progress + '%</span>' + inner + '<span class="tcc-radar-label">' + escapeHtml(firstName(s.name)) + '</span>';
+            el.onclick = function () {
+                loadStudentPanel(s.student_id);
+            };
+            el.onkeydown = function (ev) {
+                if (ev.key === 'Enter' || ev.key === ' ') {
+                    ev.preventDefault();
+                    el.click();
+                }
+            };
+
             container.appendChild(el);
         });
-    }).catch(function(){
-        showError('actionQueue','Unable to load action queue.');
+    }
+
+    function selectStudentInUi(studentId) {
+        selectedStudentId = parseInt(studentId, 10) || 0;
+
+        const select = document.getElementById('studentSelect');
+        if (select) select.value = String(selectedStudentId || 0);
+
+        Array.prototype.forEach.call(document.querySelectorAll('.tcc-radar-avatar'), function (el) {
+            el.classList.remove('selected');
+            if (parseInt(el.getAttribute('data-student-id') || '0', 10) === selectedStudentId) el.classList.add('selected');
+        });
+    }
+
+    function summaryQualityPct(status, score) {
+        if (score !== null && score !== undefined && score !== '') return clampPct(score);
+
+        status = String(status || '').toLowerCase();
+        if (status === 'acceptable') return 82;
+        if (status === 'pending') return 58;
+        if (status === 'needs_revision') return 32;
+        if (status === 'rejected') return 20;
+        return 0;
+    }
+
+    function summaryQualityClass(status, score) {
+        status = String(status || '').toLowerCase();
+
+        if (status === 'acceptable') return 'ok';
+        if (status === 'pending') return 'warn';
+        if (status === 'needs_revision' || status === 'rejected') return 'danger';
+        if (score !== null && score !== undefined && Number(score) > 0) return 'info';
+        return 'neutral';
+    }
+
+    function lessonDeltaClass(l) {
+        const c = String(l.deadline_delta_class || '').toLowerCase();
+
+        if (c === 'early' || c === 'on_time' || c === 'ok') return 'ok';
+        if (c === 'late' || c === 'danger') return 'danger';
+        if (c === 'warn') return 'warn';
+
+        const label = String(l.deadline_delta_label || '').toLowerCase();
+        if (label.indexOf('late') >= 0) return 'danger';
+        if (label.indexOf('early') >= 0 || label.indexOf('on time') >= 0) return 'ok';
+
+        return 'neutral';
+    }
+
+    function renderSummaryQuality(l) {
+        const status = l.summary_status || 'not_started';
+        const pct = summaryQualityPct(status, l.summary_score);
+        const cls = summaryQualityClass(status, l.summary_score);
+
+        return '<div class="tcc-quality-wrap"><div class="tcc-quality-top">' + pct + '%</div><div class="tcc-quality-bar"><span class="' + escapeHtml(cls) + '" style="width:' + pct + '%;"></span></div><div class="tcc-small-grey">' + escapeHtml(prettyStatus(status)) + '</div></div>';
+    }
+
+    function renderTestScore(l) {
+        const score = (l.last_score !== null && l.last_score !== undefined) ? Number(l.last_score) : null;
+        const cls = l.test_passed ? 'ok' : (score !== null ? 'danger' : 'neutral');
+        const label = score !== null ? (score + '%') : '—';
+
+        return '<span class="tcc-score-pill ' + cls + '">' + escapeHtml(label) + '</span>';
+    }
+
+    function inlineSection(title, sub, bodyHtml, rightHtml) {
+        return '<section class="tcc-inline-section"><div class="tcc-inline-section-head"><div><div class="tcc-inline-section-title">' + escapeHtml(title) + '</div><div class="tcc-inline-section-sub">' + escapeHtml(sub || '') + '</div></div>' + (rightHtml || '') + '</div><div class="tcc-inline-section-body">' + (bodyHtml || '') + '</div></section>';
+    }
+
+    function inlineMiniGrid(rows) {
+        let html = '<div class="tcc-inline-mini-grid">';
+
+        rows.forEach(function (row) {
+            html += '<div class="tcc-inline-mini-card"><div class="tcc-inline-mini-label">' + escapeHtml(row[0]) + '</div><div class="tcc-inline-mini-value">' + escapeHtml(row[1]) + '</div></div>';
+        });
+
+        html += '</div>';
+        return html;
+    }
+
+    function renderInlineSummary(resp, studentId, lessonId) {
+        if (!resp || !resp.ok) {
+            return inlineSection(
+                '1. Lesson Summary Details',
+                'Student summary and instructor review status.',
+                '<div class="tcc-inline-error">Unable to load summary details.</div>',
+                '<button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>'
+            );
+        }
+
+        const d = resp.data || {};
+        const s = d.summary || {};
+        const lesson = d.lesson || {};
+        const ai = d.ai_interpretation || {};
+        const summaryHtml = rawSummaryHtml(s);
+
+        const body = inlineMiniGrid([
+            ['Module', lesson.course_title || '—'],
+            ['Review Status', prettyStatus(s.review_status || '—')],
+            ['Updated', niceDateTime(s.updated_at)],
+            ['Local Time', niceTime(s.updated_at)]
+        ]) +
+            '<div style="display:grid;grid-template-columns:minmax(120px,.45fr) 1fr;gap:12px;margin-bottom:10px;"><div><div class="tcc-inline-mini-label">Review Status</div><div style="margin-top:6px;">' + reviewStatusPill(s.review_status || 'neutral') + '</div></div><div><div class="tcc-inline-mini-label">Review Score</div><div style="margin-top:6px;">' + reviewScoreBar(s.review_score) + '</div></div></div>' +
+            '<div class="tcc-summary-safe-frame">' + summaryHtml + '</div>' +
+            renderAiInterpretation(ai, studentId, lessonId);
+
+        return inlineSection(
+            '1. Lesson Summary Details',
+            'Student summary, review status, score, and AI interpretation.',
+            body,
+            '<button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>'
+        );
+    }
+
+    function renderInlineAttempts(resp, studentId, lessonId) {
+        if (!resp || !resp.ok) {
+            return inlineSection(
+                '2. Progress Test Details',
+                'Attempts, answers, scores, and audio trace.',
+                '<div class="tcc-inline-error">Unable to load progress test details.</div>',
+                '<button type="button" class="tcc-detail-btn primary" onclick="openAttemptDetails(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>'
+            );
+        }
+
+        const d = resp.data || {};
+        const attempts = d.attempts || [];
+        let body = '';
+
+        if (!attempts.length) {
+            body = '<div class="tcc-inline-empty">No progress test attempts found for this lesson.</div>';
+        } else {
+            attempts.forEach(function (a) {
+                const score = (a.score_pct !== null && a.score_pct !== undefined) ? (a.score_pct + '%') : '—';
+                const cls = parseInt(a.pass_gate_met, 10) === 1 ? 'ok' : 'danger';
+
+                body += '<div class="tcc-inline-attempt"><div class="tcc-inline-attempt-head"><div><div class="tcc-inline-attempt-title">Attempt ' + escapeHtml(a.attempt || '—') + ' · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div><div class="tcc-inline-attempt-meta">Started: ' + escapeHtml(niceDateTime(a.started_at)) + ' · Completed: ' + escapeHtml(niceDateTime(a.completed_at)) + ' · Time: ' + escapeHtml(niceTime(a.completed_at)) + '</div></div><span class="tcc-score-pill ' + cls + '">' + escapeHtml(score) + '</span></div>';
+
+                const items = a.items || [];
+
+                if (!items.length) {
+                    body += '<div class="tcc-inline-question"><div class="tcc-inline-question-answer">No answer-level detail found for this attempt.</div></div>';
+                } else {
+                    body += '<div class="tcc-chat-thread">';
+
+                    items.forEach(function (item, idx) {
+                        const q = item.prompt || item.question_text || 'Question';
+                        const transcript = item.transcript_text || item.answer_text || item.student_answer || '—';
+                        const answerScore = formatScoreValue(item.score_points, item.max_points);
+                        const audio = item.audio_url || item.audio_path || item.answer_audio_url || item.recording_url || item.media_url || '';
+
+                        body += '<div class="tcc-chat-bubble ai"><strong>Question ' + (idx + 1) + ':</strong> ' + escapeHtml(q) + '</div>';
+                        body += '<div class="tcc-chat-bubble student" onclick="openAnswerAudioModal(' + jsArg(q) + ',' + jsArg(transcript) + ',' + jsArg(audio) + ',' + jsArg(answerScore) + ')">' + escapeHtml(transcript) + '<div class="tcc-chat-score">Score: ' + escapeHtml(answerScore) + '</div><span class="tcc-chat-play">▶ Play audio</span></div>';
+                    });
+
+                    body += '</div>';
+                }
+
+                body += '</div>';
+            });
+        }
+
+        return inlineSection(
+            '2. Progress Test Details',
+            'Attempt history, answer detail, score trace, and clickable audio transcript bubbles.',
+            body,
+            '<button type="button" class="tcc-detail-btn primary" onclick="openAttemptDetails(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>'
+        );
+    }
+
+    function renderInlineInterventions(resp, studentId, lessonId) {
+        if (!resp || !resp.ok) {
+            return inlineSection(
+                '3. Interventions',
+                'Required actions, extensions, emails, and progression events.',
+                '<div class="tcc-inline-error">Unable to load intervention details.</div>',
+                '<button type="button" class="tcc-detail-btn primary" onclick="openInterventions(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>'
+            );
+        }
+
+        const d = resp.data || {};
+        const groups = [
+            ['Required Actions', d.required_actions || []],
+            ['Deadline Overrides / Extensions', d.deadline_overrides || []],
+            ['Email Trace', d.emails || []],
+            ['Progression Events', d.events || []]
+        ];
+
+        let body = '';
+
+        groups.forEach(function (group) {
+            const title = group[0];
+            const items = group[1] || [];
+
+            body += '<div class="tcc-inline-section-title" style="font-size:12px;margin:10px 0 8px;">' + escapeHtml(title) + ' (' + items.length + ')</div>';
+
+            if (!items.length) {
+                body += '<div class="tcc-inline-empty">No records found.</div>';
+            } else {
+                items.slice(0, 8).forEach(function (item) {
+                    const label = item.title || item.email_type || item.event_type || item.override_type || item.action_type || ('Record #' + (item.id || ''));
+                    const meta = [
+                        item.status || item.sent_status || '',
+                        item.created_at ? niceDateTime(item.created_at) : '',
+                        item.sent_at ? ('Sent ' + niceDateTime(item.sent_at)) : ''
+                    ].filter(Boolean).join(' · ');
+
+                    body += '<div class="tcc-inline-intervention tcc-intervention-clickable" onclick="openInterventionDetailModal(' + serializeForOnclick(item) + ')"><div class="tcc-inline-intervention-title">' + escapeHtml(label) + '</div><div class="tcc-inline-intervention-meta">' + escapeHtml(meta || '—') + '</div></div>';
+                });
+
+                if (items.length > 8) {
+                    body += '<div class="tcc-inline-empty">+' + (items.length - 8) + ' more records. Open modal for the full trace.</div>';
+                }
+            }
+        });
+
+        return inlineSection(
+            '3. Interventions',
+            'Chronological intervention evidence connected to this lesson. Tap any item for full details.',
+            body,
+            '<button type="button" class="tcc-detail-btn primary" onclick="openInterventions(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>'
+        );
+    }
+
+    function renderInlineLessonDetail(summaryResp, attemptsResp, interventionsResp, studentId, lessonId) {
+        return '<div class="tcc-inline-detail-stack">' +
+            renderInlineSummary(summaryResp, studentId, lessonId) +
+            renderInlineAttempts(attemptsResp, studentId, lessonId) +
+            renderInlineInterventions(interventionsResp, studentId, lessonId) +
+        '</div>';
+    }
+
+    function toggleLessonInlineDetail(id, studentId, lessonId) {
+        const el = document.getElementById(id);
+        if (!el) return;
+
+        if (el.classList.contains('open')) {
+            el.classList.remove('open');
+            return;
+        }
+
+        el.classList.add('open');
+
+        if (el.getAttribute('data-loaded') === '1') return;
+
+        el.innerHTML = '<div class="tcc-inline-loading">Loading lesson detail sections…</div>';
+
+        Promise.all([
+            api('lesson_summary_detail', { cohort_id: cohortId, student_id: studentId, lesson_id: lessonId }).catch(function () { return { ok: false, error: 'summary_load_failed' }; }),
+            api('lesson_attempts_detail', { cohort_id: cohortId, student_id: studentId, lesson_id: lessonId }).catch(function () { return { ok: false, error: 'attempts_load_failed' }; }),
+            api('lesson_interventions_detail', { cohort_id: cohortId, student_id: studentId, lesson_id: lessonId }).catch(function () { return { ok: false, error: 'interventions_load_failed' }; })
+        ]).then(function (results) {
+            el.setAttribute('data-loaded', '1');
+            el.innerHTML = renderInlineLessonDetail(results[0], results[1], results[2], studentId, lessonId);
+        }).catch(function () {
+            el.innerHTML = '<div class="tcc-inline-error">Unable to load lesson detail sections.</div>';
+        });
+    }
+
+    function renderLessonTimeline(lessons) {
+        const target = document.getElementById('studentLessonTimelineBody');
+        if (!target) return;
+
+        if (!lessons || !lessons.length) {
+            target.innerHTML = '<div class="tcc-empty">No lesson rows returned for this student.</div>';
+            return;
+        }
+
+        const modules = [];
+        const moduleMap = {};
+
+        lessons.forEach(function (l) {
+            const key = String(l.course_id || l.course_title || 'module');
+
+            if (!moduleMap[key]) {
+                moduleMap[key] = {
+                    course_id: l.course_id || 0,
+                    course_title: l.course_title || 'Module',
+                    lessons: []
+                };
+                modules.push(moduleMap[key]);
+            }
+
+            moduleMap[key].lessons.push(l);
+        });
+
+        let html = '<div class="tcc-module-stack">';
+
+        modules.forEach(function (mod, moduleIndex) {
+            const total = mod.lessons.length;
+            const passed = mod.lessons.filter(function (l) { return !!l.test_passed; }).length;
+            const avgScores = mod.lessons.filter(function (l) { return l.last_score !== null && l.last_score !== undefined; }).map(function (l) { return Number(l.last_score); });
+            const avg = avgScores.length ? Math.round(avgScores.reduce(function (a, b) { return a + b; }, 0) / avgScores.length) : null;
+
+            html += '<details class="tcc-module-card" ' + (moduleIndex === 0 ? 'open' : '') + '>';
+            html += '<summary><div class="tcc-module-head"><div class="tcc-module-badge">' + (moduleIndex + 1) + '</div><div><div class="tcc-module-label">Module</div><div class="tcc-module-title">' + escapeHtml(mod.course_title) + '</div></div><div><div class="tcc-module-mini">Progress</div><div class="tcc-module-value">' + passed + '/' + total + '</div></div><div><div class="tcc-module-mini">Avg Score</div><div class="tcc-module-value">' + (avg !== null ? avg + '%' : '—') + '</div></div></div></summary>';
+            html += '<div class="tcc-module-body"><div class="tcc-instructor-lesson-wrap"><table class="tcc-instructor-lesson-table"><colgroup><col style="width:27%"><col style="width:18%"><col style="width:13%"><col style="width:15%"><col style="width:11%"><col style="width:8%"><col style="width:8%"></colgroup><thead><tr><th>Lesson</th><th>Deadlines</th><th>Finished</th><th>Summary Quality</th><th>Progress Test</th><th>Attempts</th><th>Interventions</th></tr></thead><tbody>';
+
+            mod.lessons.forEach(function (l, lessonIndex) {
+                const lessonId = parseInt(l.lesson_id || 0, 10);
+                const studentId = parseInt(selectedStudentId || 0, 10);
+                const detailId = 'lessonDetail_' + String(l.course_id || moduleIndex) + '_' + String(l.lesson_id || lessonIndex);
+                const ext = Number(l.extension_count || 0);
+                const extText = ext === 1 ? '1 Extension' : ext + ' Extensions';
+                const extClass = ext > 0 ? 'tcc-extension-warn' : 'tcc-extension-ok';
+                const deltaClass = lessonDeltaClass(l);
+                const interventionCount = Number(l.intervention_count || 0);
+
+                html += '<tr class="tcc-lesson-row" onclick="toggleLessonInlineDetail(' + jsArg(detailId) + ',' + studentId + ',' + lessonId + ')">';
+                html += '<td><div class="tcc-lesson-main"><span class="tcc-lesson-num">' + (lessonIndex + 1) + '.</span><div class="tcc-lesson-name">' + escapeHtml(l.lesson_title || 'Lesson') + '</div></div></td>';
+                html += '<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Orig</span>' + escapeHtml(niceDate(l.original_deadline_utc)) + '</div><div class="tcc-date-line"><span>Eff</span>' + escapeHtml(niceDate(l.effective_deadline_utc)) + '</div><div class="' + extClass + '">' + escapeHtml(ext > 0 ? extText : 'No Extensions') + '</div></div></td>';
+                html += '<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Finished</span>' + escapeHtml(niceDate(l.completed_at)) + '</div><div class="tcc-small-grey">&nbsp;</div><div class="tcc-delta ' + deltaClass + '">' + escapeHtml(l.deadline_delta_label || '—') + '</div></div></td>';
+                html += '<td>' + renderSummaryQuality(l) + '</td>';
+                html += '<td>' + renderTestScore(l) + '</td>';
+                html += '<td><span class="tcc-count-mini info">' + escapeHtml(l.attempt_count || 0) + '</span></td>';
+                html += '<td><span class="tcc-count-mini ' + (interventionCount > 0 ? 'warn' : 'neutral') + '">' + escapeHtml(interventionCount) + '</span></td>';
+                html += '</tr>';
+                html += '<tr class="tcc-lesson-detail-row"><td colspan="7"><div id="' + detailId + '" class="tcc-lesson-detail" data-loaded="0"></div></td></tr>';
+            });
+
+            html += '</tbody></table></div></div></details>';
+        });
+
+        html += '</div>';
+        target.innerHTML = html;
+    }
+
+    function loadStudentLessons(studentId) {
+        const target = document.getElementById('studentLessonTimelineBody');
+        if (target) target.innerHTML = '<div class="tcc-timeline-loading">Loading lesson timeline…</div>';
+
+        api('student_lessons', {
+            cohort_id: cohortId,
+            student_id: studentId
+        }).then(function (data) {
+            if (!data.ok) {
+                if (target) target.innerHTML = '<div class="tcc-timeline-error">' + escapeHtml(data.message || data.error || 'Unable to load lesson timeline.') + '</div>';
+                return;
+            }
+
+            renderLessonTimeline(data.lessons || []);
+        }).catch(function () {
+            if (target) target.innerHTML = '<div class="tcc-timeline-error">Unable to load lesson timeline.</div>';
+        });
+    }
+
+    function loadStudentPanel(studentId) {
+        selectStudentInUi(studentId);
+
+        const panel = document.getElementById('studentPanel');
+        if (!selectedStudentId || !panel) return;
+
+        document.getElementById('studentPanelCount').textContent = 'Loading';
+        panel.className = '';
+        panel.innerHTML = '<div class="tcc-loading">Loading student snapshot…</div>';
+
+        api('student_snapshot', {
+            cohort_id: cohortId,
+            student_id: selectedStudentId
+        }).then(function (data) {
+            if (!data.ok) {
+                document.getElementById('studentPanelCount').textContent = 'Error';
+                panel.innerHTML = '<div class="tcc-error">' + escapeHtml(data.message || data.error || 'Unable to load student snapshot.') + '</div>';
+                return;
+            }
+
+            renderStudentPanel(data);
+        }).catch(function () {
+            document.getElementById('studentPanelCount').textContent = 'Error';
+            panel.innerHTML = '<div class="tcc-error">Unable to load student snapshot.</div>';
+        });
+    }
+
+    function renderStudentPanel(data) {
+        const panel = document.getElementById('studentPanel');
+        const st = data.student || {};
+        const p = data.progress || {};
+        const c = data.comparison || {};
+        const m = data.motivation || {};
+        const issues = data.main_issues || [];
+        const radarStudent = cohortStudents.find(function (s) { return parseInt(s.student_id, 10) === parseInt(st.student_id, 10); }) || {};
+        const merged = Object.assign({}, radarStudent, st);
+        const color = radarColor(radarStudent);
+        const progressPct = clampPct(p.progress_pct);
+
+        document.getElementById('studentPanelCount').textContent = (issues.length || 0) + ' issue' + (issues.length === 1 ? '' : 's');
+
+        let issueHtml = '';
+
+        if (!issues.length) {
+            issueHtml = '<div class="tcc-empty">No current blockers or system issues returned for this student.</div>';
+        } else {
+            issues.slice(0, 10).forEach(function (issue) {
+                const reviewHref = blockerReviewHref(issue);
+                const lessonId = parseInt(issue.lesson_id, 10) || 0;
+                const safeIssueType = String(issue.type || 'manual_check').replace(/[^a-zA-Z0-9_\-]/g, '');
+
+                let actions = '<div class="tcc-issue-actions">';
+
+                if (reviewHref !== '') {
+                    actions += '<a class="tcc-btn primary" href="' + escapeHtml(reviewHref) + '">Review</a>';
+                } else {
+                    actions += '<button class="tcc-btn secondary" type="button" onclick="openDebugReport(' + parseInt(st.student_id, 10) + ',' + lessonId + ',' + jsArg(safeIssueType) + ')">Inspect</button>';
+                }
+
+                actions += '<button class="tcc-btn warn" type="button" onclick="openDebugReport(' + parseInt(st.student_id, 10) + ',' + lessonId + ',' + jsArg(safeIssueType) + ')">State Fix</button>';
+                actions += '</div>';
+
+                issueHtml += '<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">' + escapeHtml(issue.title || issue.type || 'Issue') + '</div><div class="tcc-issue-meta">Lesson ' + escapeHtml(issue.lesson_id || '—') + ' · ' + escapeHtml(issue.lesson_title || '') + ' · ' + escapeHtml(issue.status || '') + '</div></div>' + actions + '</div>';
+            });
+
+            if (issues.length > 10) {
+                issueHtml += '<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">+' + (issues.length - 10) + ' more issue(s)</div><div class="tcc-issue-meta">The lesson module view below keeps the full instructor workflow organized.</div></div><div class="tcc-issue-actions"><button class="tcc-btn secondary" type="button" onclick="loadStudentLessons(' + parseInt(st.student_id, 10) + ')">Open Lessons</button></div></div>';
+            }
+        }
+
+        const avgScore = c.avg_score !== null && c.avg_score !== undefined ? Number(c.avg_score) : null;
+        const cohortAvgScore = c.cohort_avg_score !== null && c.cohort_avg_score !== undefined ? Number(c.cohort_avg_score) : null;
+        const missed = Number(c.deadlines_missed || 0);
+        const cohortMissed = Number(c.cohort_avg_deadlines_missed || 0);
+        const failed = Number(c.failed_attempts || 0);
+        const cohortFailed = Number(c.cohort_avg_failed_attempts || 0);
+
+        const tiles =
+            metricTile('Progress', progressPct + '%', progressPct, '', '' + (p.passed_lessons || 0) + '/' + (p.total_lessons || 0) + ' lessons passed') +
+            metricTile('Avg Score', avgScore !== null ? avgScore + '%' : '—', metricPct(avgScore, cohortAvgScore, true), barClass(avgScore, cohortAvgScore, true), 'Cohort Average: ' + (cohortAvgScore !== null ? cohortAvgScore + '%' : '—')) +
+            metricTile('Deadlines Missed', missed, metricPct(missed, cohortMissed, false), barClass(missed, cohortMissed, false), 'Cohort Average: ' + cohortMissed) +
+            metricTile('Failed Attempts', failed, metricPct(failed, cohortFailed, false), barClass(failed, cohortFailed, false), 'Cohort Average: ' + cohortFailed);
+
+        panel.className = '';
+        panel.innerHTML =
+            '<div class="tcc-student-head"><div class="tcc-student-avatar ' + escapeHtml(color) + '">' +
+                (photoPath(merged) !== '' ? '<img src="' + escapeHtml(photoPath(merged)) + '" alt="' + escapeHtml(st.name || 'Student') + '">' : escapeHtml(st.avatar_initials || radarStudent.avatar_initials || 'S')) +
+            '</div><div style="min-width:0;"><div class="tcc-student-name">' + escapeHtml(st.name || 'Student') + '</div><div class="tcc-student-email">' + escapeHtml(st.email || '') + '</div></div></div>' +
+            '<div class="tcc-student-state-row"><span class="tcc-status-pill ' + escapeHtml(m.level || '') + '">' + escapeHtml(m.label || 'Motivation signal') + '</span><span class="tcc-status-pill">Trend: ' + escapeHtml(m.trend || '—') + '</span><span class="tcc-status-pill">Issues: ' + escapeHtml(issues.length) + '</span></div>' +
+            '<div class="tcc-snapshot-grid">' + tiles + '</div>' +
+            '<h3 class="tcc-section-title" style="font-size:17px;margin:4px 0 10px;">Current Blockers / Issues</h3>' +
+            '<div class="tcc-issues-list">' + issueHtml + '</div>' +
+            '<div class="tcc-panel-actions"><button class="tcc-btn primary" type="button" onclick="loadStudentLessons(' + parseInt(st.student_id, 10) + ')">Lessons</button><button class="tcc-btn secondary" type="button" onclick="openInterventions(selectedStudentId,0)">Interventions</button><button class="tcc-btn warn" type="button" onclick="openSystemWatchForStudent(' + parseInt(st.student_id, 10) + ')">System Watch</button></div>' +
+            '<div class="tcc-lesson-timeline"><div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by Module</div><div class="tcc-lesson-timeline-sub">Instructor overview styled like the student course page, grouped by module with compact deadline, summary, test, attempts, and intervention data.</div></div><span class="tcc-count-pill">Live</span></div><div id="studentLessonTimelineBody" class="tcc-timeline-loading">Loading lesson modules…</div></div>';
+
+        loadStudentLessons(st.student_id);
+    }
+
+    function loadQueue() {
+        document.getElementById('actionQueue').innerHTML = '<div class="tcc-loading">Loading action queue…</div>';
+        document.getElementById('queueCount').textContent = '—';
+
+        api('action_queue', {
+            cohort_id: cohortId
+        }).then(function (data) {
+            const container = document.getElementById('actionQueue');
+            const count = document.getElementById('queueCount');
+
+            if (!data.ok) {
+                showError('actionQueue', data.message || data.error || 'Unable to load action queue.');
+                return;
+            }
+
+            const items = data.items || [];
+            count.textContent = items.length + ' item' + (items.length === 1 ? '' : 's');
+            container.innerHTML = '';
+
+            if (!items.length) {
+                container.innerHTML = '<div class="tcc-empty">No instructor actions required for this cohort right now.</div>';
+                return;
+            }
+
+            items.forEach(function (item) {
+                let reviewHref = '';
+
+                if (item.token) {
+                    if (item.action_type === 'instructor_approval') reviewHref = '/instructor/instructor_approval.php?token=' + encodeURIComponent(item.token);
+                    else reviewHref = '/student/remediation_action.php?token=' + encodeURIComponent(item.token);
+                }
+
+                const severity = item.severity || 'low';
+                const radarStudent = cohortStudents.find(function (s) { return parseInt(s.student_id, 10) === parseInt(item.student_id, 10); }) || {};
+                const color = radarColor(radarStudent.state ? radarStudent : { state: item.severity === 'high' ? 'blocked' : 'at_risk', pending_action_count: 1 });
+                const avatarObj = Object.assign({}, radarStudent, {
+                    photo_path: item.photo_path || radarStudent.photo_path,
+                    avatar_initials: item.avatar_initials || radarStudent.avatar_initials,
+                    name: item.student_name
+                });
+                const lessonId = parseInt(item.lesson_id || 0, 10);
+                const issueType = String(item.action_type || 'manual_check').replace(/[^a-zA-Z0-9_\-]/g, '');
+                const el = document.createElement('div');
+
+                el.className = 'tcc-item';
+                el.innerHTML = '<div class="tcc-item-left">' + avatarHtml(avatarObj, 'tcc-avatar ' + color) + '<div class="tcc-meta"><div class="tcc-name">' + escapeHtml(item.student_name || 'Student') + '</div><div class="tcc-sub">' + escapeHtml(item.lesson_title || 'No lesson title') + '</div><div class="tcc-sub">' + escapeHtml(item.reason || item.action_type || 'Required action') + '</div><span class="tcc-severity ' + escapeHtml(severity) + '">' + escapeHtml(severity) + '</span></div></div><div class="tcc-actions">' +
+                    (reviewHref ? '<a class="tcc-btn primary" href="' + escapeHtml(reviewHref) + '">Review</a>' : '<button class="tcc-btn primary" type="button" onclick="loadStudentPanel(' + parseInt(item.student_id || 0, 10) + ')">Review</button>') +
+                    '<button class="tcc-btn secondary" type="button" onclick="openDebugReport(' + parseInt(item.student_id || 0, 10) + ',' + lessonId + ',' + jsArg(issueType) + ')">Inspect</button>' +
+                    '<button class="tcc-btn warn" type="button" onclick="openDebugReport(' + parseInt(item.student_id || 0, 10) + ',' + lessonId + ',' + jsArg(issueType) + ')">State Fix</button>' +
+                '</div>';
+
+                const left = el.querySelector('.tcc-item-left');
+                if (left) {
+                    left.style.cursor = 'pointer';
+                    left.onclick = function () {
+                        loadStudentPanel(item.student_id);
+                    };
+                }
+
+                container.appendChild(el);
+            });
+        }).catch(function () {
+            showError('actionQueue', 'Unable to load action queue.');
+        });
+    }
+
+    window.openAnswerAudioModal = openAnswerAudioModal;
+    window.openInterventionDetailModal = openInterventionDetailModal;
+    window.openSummaryLargeModal = openSummaryLargeModal;
+    window.openSummaryLargeModalById = openSummaryLargeModalById;
+    window.closeTccModal = closeTccModal;
+    window.openDebugReport = openDebugReport;
+    window.openSystemWatchForStudent = openSystemWatchForStudent;
+    window.openLessonSummary = openLessonSummary;
+    window.generateAiSummaryAnalysis = generateAiSummaryAnalysis;
+    window.openAttemptDetails = openAttemptDetails;
+    window.openInterventions = openInterventions;
+    window.loadStudentLessons = loadStudentLessons;
+    window.toggleLessonInlineDetail = toggleLessonInlineDetail;
+    window.toggleLessonDetail = toggleLessonInlineDetail;
+
+    document.getElementById('cohortSelect').addEventListener('change', function () {
+        cohortId = parseInt(this.value, 10) || 0;
+
+        const match = Array.prototype.find.call(this.options, function (o) {
+            return parseInt(o.value, 10) === cohortId;
+        });
+
+        window.tccCohortTimezone = (match && match.getAttribute('data-timezone')) || window.tccCohortTimezone || 'UTC';
+        loadAll();
     });
-}
 
-window.openAnswerAudioModal = openAnswerAudioModal;
-window.openInterventionDetailModal = openInterventionDetailModal;
-window.openSummaryLargeModal = openSummaryLargeModal;
-window.openSummaryLargeModalById = openSummaryLargeModalById;
-window.closeTccModal = closeTccModal;
-window.openDebugReport = openDebugReport;
-window.openSystemWatchForStudent = openSystemWatchForStudent;
-window.openLessonSummary = openLessonSummary;
-window.generateAiSummaryAnalysis = generateAiSummaryAnalysis;
-window.openAttemptDetails = openAttemptDetails;
-window.openInterventions = openInterventions;
-window.loadStudentLessons = loadStudentLessons;
-window.toggleLessonInlineDetail = toggleLessonInlineDetail;
-window.toggleLessonDetail = toggleLessonInlineDetail;
+    document.getElementById('studentSelect').addEventListener('change', function () {
+        const sid = parseInt(this.value, 10) || 0;
+        if (sid > 0) loadStudentPanel(sid);
+    });
 
-document.getElementById('cohortSelect').addEventListener('change',function(){cohortId=parseInt(this.value,10)||0;const match=Array.prototype.find.call(this.options,function(o){return parseInt(o.value,10)===cohortId;});window.tccCohortTimezone=(match&&match.getAttribute('data-timezone'))||window.tccCohortTimezone||'UTC';loadAll();});
-document.getElementById('studentSelect').addEventListener('change',function(){const sid=parseInt(this.value,10)||0;if(sid>0)loadStudentPanel(sid);});
-loadCohorts();
-
+    loadCohorts();
 })();
 </script>
+
 
 <?php cw_footer(); ?>
