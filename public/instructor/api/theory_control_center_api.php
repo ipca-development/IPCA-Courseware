@@ -1033,144 +1033,57 @@ function tcc_safe_json_from_ai(string $text): array
     ];
 }
 
-function tcc_call_openai_summary_analysis(array $payload): array
+
+require_once __DIR__ . '/../../../src/openai.php';
+
+function tcc_call_openai_summary_analysis($summaryText)
 {
-    $apiKey = tcc_ai_env_key();
+    $prompt = "
+You are an aviation theory instructor AI.
 
-    if ($apiKey === '') {
-        return [
-            'ok' => false,
-            'error' => 'missing_openai_api_key',
-            'message' => 'No OpenAI API key found in environment. Expected CW_OPENAI_API_KEY or OPENAI_API_KEY.',
-        ];
-    }
+Analyze the following student lesson summary.
 
-    $instructions = <<<TXT
-You are an aviation theory instructor assistant for IPCA.
-
-Analyze a student's lesson summary. Return ONLY valid JSON. Do not include markdown.
-
-Important rules:
-- This is advisory only. Do not decide progression state.
-- Do not accuse the student. Use likelihood language.
-- Be practical for an instructor who wants fast risk visibility.
-- Evaluate deep understanding based on evidence in the student's summary.
-- Identify copied/AI-like patterns cautiously.
-- If there is not enough evidence, say so.
-- Keep values concise and UI-friendly.
-
-Return this exact JSON structure:
+Return STRICT JSON ONLY with:
 {
-  "analysis_status": "generated",
-  "copy_paste_likelihood": "Low|Medium|High|Not enough evidence",
-  "copy_paste_reason": "...",
-  "ai_tool_likelihood": "Low|Medium|High|Not enough evidence",
-  "ai_tool_reason": "...",
-  "highest_similarity": "Low|Medium|High|Not evaluated",
-  "highest_similarity_student": "Name or null",
-  "highest_similarity_pct": 0,
-  "deep_understanding_score": 0,
-  "deep_understanding_label": "Weak|Developing|Adequate|Strong|Excellent",
-  "substantially_good": ["...", "..."],
-  "substantially_weak": ["...", "..."],
-  "improvement_suggestions": ["...", "..."],
-  "instructor_quick_take": "...",
-  "student_safe_feedback": "...",
-  "highlight_phrases": [
-    {"phrase":"...", "type":"good|weak", "reason":"..."}
-  ]
+  \"copy_paste_likelihood\": \"Low/Medium/High\",
+  \"ai_tool_likelihood\": \"Low/Medium/High\",
+  \"similarity\": \"Low/Medium/High\",
+  \"understanding\": \"Poor/Partial/Good/Strong\",
+  \"quality_feedback\": \"Short actionable feedback\"
 }
-TXT;
 
-    $input = [
-        [
-            'role' => 'developer',
-            'content' => [
-                [
-                    'type' => 'input_text',
-                    'text' => $instructions,
-                ],
-            ],
-        ],
-        [
-            'role' => 'user',
-            'content' => [
-                [
-                    'type' => 'input_text',
-                    'text' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-                ],
-            ],
-        ],
-    ];
+SUMMARY:
+" . $summaryText;
 
-    $body = [
-        'model' => 'gpt-5.1-mini',
-        'input' => $input,
-        'text' => [
-            'format' => [
-                'type' => 'json_object',
-            ],
-            'verbosity' => 'low',
-        ],
-    ];
-
-    $ch = curl_init('https://api.openai.com/v1/responses');
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_POST => true,
-        CURLOPT_HTTPHEADER => [
-            'Authorization: Bearer ' . $apiKey,
-            'Content-Type: application/json',
-        ],
-        CURLOPT_POSTFIELDS => json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-        CURLOPT_TIMEOUT => 45,
+    $resp = cw_openai_responses([
+        'model' => cw_openai_model(),
+        'input' => $prompt,
     ]);
 
-    $raw = curl_exec($ch);
-    $curlError = curl_error($ch);
-    $status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
-
-    if ($raw === false || $raw === '') {
+    $text = cw_openai_extract_json_text($resp);
+    if (!$text) {
         return [
             'ok' => false,
-            'error' => 'openai_curl_error',
-            'message' => $curlError !== '' ? $curlError : 'Empty OpenAI response.',
+            'error' => 'no_ai_output'
         ];
     }
 
-    $decoded = json_decode($raw, true);
-
-    if (!is_array($decoded)) {
+    $json = json_decode($text, true);
+    if (!is_array($json)) {
         return [
             'ok' => false,
-            'error' => 'openai_invalid_json',
-            'message' => 'OpenAI returned non-JSON response.',
-            'http_status' => $status,
-            'raw' => $raw,
+            'error' => 'invalid_json',
+            'raw' => $text
         ];
     }
-
-    if ($status < 200 || $status >= 300) {
-        return [
-            'ok' => false,
-            'error' => 'openai_http_error',
-            'message' => (string)($decoded['error']['message'] ?? 'OpenAI request failed.'),
-            'http_status' => $status,
-            'openai_error' => $decoded['error'] ?? null,
-        ];
-    }
-
-    $text = tcc_extract_response_text($decoded);
-    $analysis = tcc_safe_json_from_ai($text);
 
     return [
         'ok' => true,
-        'analysis' => $analysis,
-        'model' => (string)($decoded['model'] ?? 'gpt-5.1-mini'),
-        'response_id' => (string)($decoded['id'] ?? ''),
+        'data' => $json
     ];
 }
+
+
 
 function tcc_similarity_context_for_summary(PDO $pdo, int $cohortId, int $studentId, int $lessonId, string $summaryText): array
 {
