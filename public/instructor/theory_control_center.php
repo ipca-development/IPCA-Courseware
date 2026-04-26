@@ -24,7 +24,13 @@ cw_header('Instructor Theory Control Center');
 .tcc-radar-wrap{position:relative;min-height:158px;margin-top:4px;padding:30px 28px 58px;border-radius:20px;background:linear-gradient(180deg,#fbfdff 0%,#f8fafc 100%);border:1px solid rgba(15,23,42,.06);overflow:hidden}.tcc-radar-line{position:absolute;top:64px;left:34px;right:34px;height:9px;background:linear-gradient(90deg,#071a31 0%,#12355f 42%,#2b6dcc 100%);border-radius:999px;box-shadow:inset 0 1px 2px rgba(255,255,255,.18),0 8px 18px rgba(18,53,95,.16)}.tcc-radar-marker{position:absolute;top:84px;font-size:10px;color:#64748b;font-weight:900;white-space:nowrap}.tcc-radar-marker.start{left:34px}.tcc-radar-marker.end{right:34px}.tcc-radar-tools{position:absolute;right:20px;bottom:16px;display:flex;gap:8px;align-items:center;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);border:1px solid rgba(15,23,42,.08);border-radius:16px;padding:8px 10px;box-shadow:0 10px 24px rgba(15,23,42,.08)}.tcc-radar-tools label{font-size:10px;font-weight:900;color:#64748b;text-transform:uppercase;letter-spacing:.1em;white-space:nowrap}.tcc-student-select{min-height:36px;min-width:230px;border-radius:11px;border:1px solid rgba(15,23,42,.14);background:#fff;color:#102845;padding:7px 10px;font:inherit;font-size:13px;font-weight:400;outline:none}.tcc-radar-avatar{position:absolute;top:64px;transform:translate(-50%,-50%);width:50px;height:50px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:900;color:#fff;font-size:12px;cursor:pointer;box-shadow:0 8px 20px rgba(15,23,42,.22);background:#12355f;border:4px solid #fff;transition:transform .15s ease,box-shadow .15s ease;user-select:none;overflow:visible}.tcc-radar-avatar:hover{transform:translate(-50%,-50%) scale(1.05);box-shadow:0 12px 26px rgba(15,23,42,.30)}.tcc-radar-avatar.selected{outline:3px solid rgba(18,53,95,.28);outline-offset:4px}.tcc-radar-avatar .tcc-avatar-inner{position:relative;width:40px;height:40px;border-radius:999px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff}.tcc-radar-avatar img,.tcc-avatar img,.tcc-student-avatar img{width:100%;height:100%;object-fit:cover;display:block}.tcc-radar-avatar.green{border-color:#16a34a}.tcc-radar-avatar.orange{border-color:#f59e0b}.tcc-radar-avatar.red{border-color:#dc2626}.tcc-radar-avatar.blue{border-color:#2563eb}.tcc-radar-avatar.purple{border-color:#7c3aed}.tcc-radar-score{position:absolute;top:-29px;left:50%;transform:translateX(-50%);font-size:10px;font-weight:900;color:#334155;background:#fff;border:1px solid rgba(15,23,42,.08);border-radius:999px;padding:3px 7px;white-space:nowrap}.tcc-radar-label{position:absolute;top:52px;left:50%;transform:translateX(-50%);font-size:11px;font-weight:900;color:#334155;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}.tcc-radar-legend{display:flex;flex-wrap:wrap;gap:8px;margin-top:13px}.tcc-legend-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:6px 9px;background:#f8fafc;border:1px solid rgba(15,23,42,.06);font-size:11px;font-weight:800;color:#475569}.tcc-dot{width:9px;height:9px;border-radius:999px;display:inline-block}.tcc-dot.green{background:#16a34a}.tcc-dot.orange{background:#f59e0b}.tcc-dot.red{background:#dc2626}.tcc-dot.blue{background:#2563eb}.tcc-dot.purple{background:#7c3aed}
 .tcc-student-placeholder{padding:18px;border-radius:18px;border:1px dashed rgba(15,23,42,.16);background:#fbfdff;color:#64748b;font-size:14px;line-height:1.5}.tcc-student-head{display:flex;align-items:center;gap:14px;margin-bottom:14px}.tcc-student-avatar{width:58px;height:58px;border-radius:20px;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;font-size:17px;flex:0 0 auto;overflow:hidden;border:4px solid #dbe7f4}.tcc-student-avatar.green{border-color:#16a34a}.tcc-student-avatar.orange{border-color:#f59e0b}.tcc-student-avatar.red{border-color:#dc2626}.tcc-student-avatar.blue{border-color:#2563eb}.tcc-student-avatar.purple{border-color:#7c3aed}.tcc-student-name{font-size:24px;line-height:1.05;font-weight:900;color:#102845;letter-spacing:-.03em}.tcc-student-email{margin-top:5px;font-size:13px;color:#64748b}.tcc-student-state-row{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}.tcc-status-pill{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:7px 10px;background:#f8fafc;border:1px solid rgba(15,23,42,.08);font-size:12px;font-weight:900;color:#334155}.tcc-status-pill.strong{background:#ecfdf5;color:#166534;border-color:#bbf7d0}.tcc-status-pill.stable{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}.tcc-status-pill.drifting{background:#fef3c7;color:#92400e;border-color:#fde68a}.tcc-status-pill.needs_contact{background:#fee2e2;color:#991b1b;border-color:#fca5a5}.tcc-snapshot-grid{display:grid;grid-template-columns:repeat(4,minmax(150px,1fr));gap:12px;margin-bottom:16px}.tcc-snapshot-tile{border-radius:17px;background:#f8fafc;border:1px solid rgba(15,23,42,.07);padding:14px 15px;min-width:0}.tcc-snapshot-label{font-size:10px;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:#64748b}.tcc-snapshot-value{margin-top:8px;font-size:28px;font-weight:900;line-height:1;color:#102845;letter-spacing:-.04em}.tcc-snapshot-sub{margin-top:8px;font-size:12px;color:#64748b;line-height:1.4}.tcc-mini-bar{height:9px;border-radius:999px;background:#e5eef7;overflow:hidden;margin-top:10px}.tcc-mini-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#12355f 0%,#2b6dcc 100%)}.tcc-mini-bar span.ok{background:linear-gradient(90deg,#166534 0%,#22c55e 100%)}.tcc-mini-bar span.warn{background:linear-gradient(90deg,#d97706 0%,#f59e0b 100%)}.tcc-mini-bar span.danger{background:linear-gradient(90deg,#b91c1c 0%,#ef4444 100%)}
 .tcc-issues-list{display:flex;flex-direction:column;gap:9px}.tcc-issue-row{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;padding:11px 12px;border-radius:15px;background:#fbfdff;border:1px solid rgba(15,23,42,.06)}.tcc-issue-title{font-size:13px;font-weight:900;color:#102845;line-height:1.35}.tcc-issue-meta{margin-top:4px;font-size:12px;color:#64748b;line-height:1.35}.tcc-panel-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}.tcc-queue{display:flex;flex-direction:column;gap:12px}.tcc-item{display:flex;justify-content:space-between;align-items:center;gap:14px;padding:14px;border-radius:16px;background:#f8fbfd;border:1px solid rgba(15,23,42,.06)}.tcc-item-left{display:flex;gap:12px;align-items:center;min-width:0}.tcc-avatar{width:44px;height:44px;border-radius:50%;background:#12355f;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;flex:0 0 auto;overflow:hidden;border:3px solid #dbe7f4}.tcc-avatar.green{border-color:#16a34a}.tcc-avatar.orange{border-color:#f59e0b}.tcc-avatar.red{border-color:#dc2626}.tcc-avatar.blue{border-color:#2563eb}.tcc-avatar.purple{border-color:#7c3aed}.tcc-meta{display:flex;flex-direction:column;min-width:0}.tcc-name{font-weight:900;color:#102845;line-height:1.25}.tcc-sub{font-size:12px;color:#64748b;line-height:1.35;overflow:hidden;text-overflow:ellipsis}.tcc-severity{display:inline-flex;align-items:center;justify-content:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;margin-top:6px;align-self:flex-start}.tcc-severity.high{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5}.tcc-severity.medium{background:#fef3c7;color:#92400e;border:1px solid #fde68a}.tcc-severity.low{background:#e0f2fe;color:#075985;border:1px solid #bae6fd}.tcc-actions{display:flex;gap:8px;flex:0 0 auto}.tcc-btn{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 12px;border-radius:11px;font-size:12px;font-weight:900;border:1px solid rgba(15,23,42,.08);cursor:pointer;text-decoration:none}.tcc-btn.primary{background:#12355f;color:#fff;border-color:#12355f}.tcc-btn.warn{background:#fff7ed;color:#92400e;border-color:#fed7aa}.tcc-btn.secondary{background:#f1f5f9;color:#334155}.tcc-empty,.tcc-loading,.tcc-timeline-loading{padding:16px;border-radius:16px;border:1px dashed rgba(15,23,42,.15);background:#fbfdff;color:#64748b;font-size:14px}.tcc-error,.tcc-timeline-error{padding:14px;border-radius:14px;border:1px solid #fecaca;background:#fef2f2;color:#991b1b;font-size:14px}
-.tcc-issue-row{align-items:center}.tcc-issue-main{min-width:0;flex:1}.tcc-issue-actions{display:flex;gap:7px;flex:0 0 auto;align-items:center;flex-wrap:wrap;justify-content:flex-end}.tcc-issue-actions .tcc-btn{min-height:30px;padding:7px 10px;font-size:11px}.tcc-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}.tcc-modal-overlay.open{display:flex}.tcc-modal-card{width:min(980px,96vw);max-height:88vh;overflow:hidden;background:#fff;border-radius:22px;border:1px solid rgba(15,23,42,.10);box-shadow:0 24px 70px rgba(15,23,42,.35);display:flex;flex-direction:column}.tcc-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:17px 19px;border-bottom:1px solid rgba(15,23,42,.08);background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff}.tcc-modal-kicker{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.14em;color:rgba(255,255,255,.72)}.tcc-modal-title{margin-top:5px;font-size:20px;font-weight:900;line-height:1.1;color:#fff}.tcc-modal-close{border:0;background:rgba(255,255,255,.16);color:#fff;border-radius:12px;width:34px;height:34px;font-size:24px;line-height:1;cursor:pointer}.tcc-modal-body{padding:16px 18px;overflow:auto}.tcc-debug-pre{white-space:pre-wrap;background:#0f172a;color:#e2e8f0;border-radius:16px;padding:14px;font-size:12px;line-height:1.45;overflow:auto}.tcc-debug-meta{font-size:13px;color:#475569;margin-bottom:10px;line-height:1.45}
+.tcc-issue-row{align-items:center}.tcc-issue-main{min-width:0;flex:1}.tcc-issue-actions{display:flex;gap:7px;flex:0 0 auto;align-items:center;flex-wrap:wrap;justify-content:flex-end}.tcc-issue-actions .tcc-btn{min-height:30px;padding:7px 10px;font-size:11px}
+	
+.tcc-btn.fix{background:#166534;color:#fff;border-color:#166534}
+
+.tcc-btn.fix[disabled]{opacity:.55;cursor:not-allowed}	
+	
+	.tcc-modal-overlay{position:fixed;inset:0;background:rgba(15,23,42,.45);display:none;align-items:center;justify-content:center;z-index:9999;padding:18px}.tcc-modal-overlay.open{display:flex}.tcc-modal-card{width:min(980px,96vw);max-height:88vh;overflow:hidden;background:#fff;border-radius:22px;border:1px solid rgba(15,23,42,.10);box-shadow:0 24px 70px rgba(15,23,42,.35);display:flex;flex-direction:column}.tcc-modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:17px 19px;border-bottom:1px solid rgba(15,23,42,.08);background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff}.tcc-modal-kicker{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.14em;color:rgba(255,255,255,.72)}.tcc-modal-title{margin-top:5px;font-size:20px;font-weight:900;line-height:1.1;color:#fff}.tcc-modal-close{border:0;background:rgba(255,255,255,.16);color:#fff;border-radius:12px;width:34px;height:34px;font-size:24px;line-height:1;cursor:pointer}.tcc-modal-body{padding:16px 18px;overflow:auto}.tcc-debug-pre{white-space:pre-wrap;background:#0f172a;color:#e2e8f0;border-radius:16px;padding:14px;font-size:12px;line-height:1.45;overflow:auto}.tcc-debug-meta{font-size:13px;color:#475569;margin-bottom:10px;line-height:1.45}
 @media (max-width:1100px){.tcc-hero-head{flex-direction:column;align-items:stretch}.tcc-toolbar{width:100%}.tcc-field{min-width:0;width:100%}.tcc-health-strip,.tcc-snapshot-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media (max-width:700px){.tcc-hero{padding:18px}.tcc-hero h1{font-size:25px}.tcc-health-strip,.tcc-snapshot-grid{grid-template-columns:1fr}.tcc-radar-wrap{min-height:214px;padding-left:18px;padding-right:18px;overflow-x:auto}.tcc-radar-line{left:24px;right:24px}.tcc-radar-tools{position:absolute;left:16px;right:16px;bottom:14px;justify-content:space-between}.tcc-student-select{min-width:0;width:100%}.tcc-item{align-items:flex-start;flex-direction:column}.tcc-actions{width:100%;justify-content:flex-start}.tcc-section-head{flex-direction:column}.tcc-student-head{align-items:flex-start}.tcc-student-name{font-size:21px}}
 
 /* Course.php-style instructor lesson modules */
@@ -269,6 +275,20 @@ cw_header('Instructor Theory Control Center');
         });
     }
 
+	function repairApi(payload) {
+    return fetch('/instructor/api/theory_control_center_repair_execute.php', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload || {})
+    }).then(function (r) {
+        return r.json();
+    });
+}
+	
+	
     function openTccModal(title, bodyHtml) {
         document.getElementById('tccModalTitle').textContent = title || 'Diagnostic';
         document.getElementById('tccModalBody').innerHTML = bodyHtml || '';
@@ -1449,6 +1469,79 @@ cw_header('Instructor Theory Control Center');
         });
     }
 
+	
+function issueCanOneClickRepair(issue) {
+    issue = issue || {};
+
+    return issue.repair_allowed === true &&
+        String(issue.blocker_category || '') === 'stale_bug' &&
+        String(issue.repair_code || '') === 'cleanup_old_active_attempt_after_pass' &&
+        issue.evidence &&
+        parseInt(issue.evidence.test_id || 0, 10) > 0;
+}
+
+function repairPayloadFromIssue(issue, studentId, lessonId) {
+    issue = issue || {};
+
+    return {
+        student_id: parseInt(issue.student_id || studentId || selectedStudentId || 0, 10),
+        cohort_id: parseInt(issue.cohort_id || cohortId || 0, 10),
+        lesson_id: parseInt(issue.lesson_id || lessonId || 0, 10),
+        repair_code: String(issue.repair_code || ''),
+        issue_type: String(issue.issue_type || issue.type || 'old_active_progress_test_attempt'),
+        blocker_category: String(issue.blocker_category || ''),
+        recurrence_key: String(issue.recurrence_key || ''),
+        evidence: issue.evidence || {}
+    };
+}
+
+function executeTccRepairFromIssue(issueJson, btn) {
+    let issue = {};
+
+    try {
+        issue = JSON.parse(issueJson || '{}');
+    } catch (e) {
+        openTccModal('Fix Issue', '<div class="tcc-error">Invalid repair payload.</div>');
+        return;
+    }
+
+    const payload = repairPayloadFromIssue(issue, issue.student_id, issue.lesson_id);
+
+    if (!issueCanOneClickRepair(issue)) {
+        openTccModal('Fix Issue', '<div class="tcc-error">This issue is not eligible for one-click repair.</div>');
+        return;
+    }
+
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Fixing…';
+    }
+
+    repairApi(payload).then(function (resp) {
+        if (!resp.ok) {
+            openTccModal('Fix Issue Failed', '<div class="tcc-error">' + escapeHtml(resp.message || resp.error || 'Repair failed.') + '</div><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(resp, null, 2)) + '</pre>');
+            return;
+        }
+
+        openTccModal('Fix Issue Complete', '<div class="tcc-empty">Stale blocker cleaned and audit log written.</div><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(resp, null, 2)) + '</pre>');
+
+        if (selectedStudentId > 0) {
+            loadStudentPanel(selectedStudentId);
+        }
+
+        loadQueue();
+        loadOverview();
+    }).catch(function () {
+        openTccModal('Fix Issue Failed', '<div class="tcc-error">Unable to execute repair.</div>');
+    }).finally(function () {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Fix Issue';
+        }
+    });
+}	
+	
+	
     function renderStudentPanel(data) {
         const panel = document.getElementById('studentPanel');
         const st = data.student || {};
@@ -1475,14 +1568,17 @@ cw_header('Instructor Theory Control Center');
 
                 let actions = '<div class="tcc-issue-actions">';
 
-                if (reviewHref !== '') {
-                    actions += '<a class="tcc-btn primary" href="' + escapeHtml(reviewHref) + '">Review</a>';
-                } else {
-                    actions += '<button class="tcc-btn secondary" type="button" onclick="openDebugReport(' + parseInt(st.student_id, 10) + ',' + lessonId + ',' + jsArg(safeIssueType) + ')">Inspect</button>';
-                }
+if (reviewHref !== '') {
+    actions += '<a class="tcc-btn primary" href="' + escapeHtml(reviewHref) + '">Review</a>';
+} else {
+    actions += '<button class="tcc-btn secondary" type="button" onclick="openDebugReport(' + parseInt(st.student_id, 10) + ',' + lessonId + ',' + jsArg(safeIssueType) + ')">Inspect</button>';
+}
 
-                actions += '<button class="tcc-btn warn" type="button" onclick="openDebugReport(' + parseInt(st.student_id, 10) + ',' + lessonId + ',' + jsArg(safeIssueType) + ')">State Fix</button>';
-                actions += '</div>';
+if (issueCanOneClickRepair(issue)) {
+    actions += '<button class="tcc-btn fix" type="button" onclick="executeTccRepairFromIssue(' + jsArg(JSON.stringify(issue)) + ', this)">Fix Issue</button>';
+}
+
+actions += '</div>';
 
                 issueHtml += '<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">' + escapeHtml(issue.title || issue.type || 'Issue') + '</div><div class="tcc-issue-meta">Lesson ' + escapeHtml(issue.lesson_id || '—') + ' · ' + escapeHtml(issue.lesson_title || '') + ' · ' + escapeHtml(issue.status || '') + '</div></div>' + actions + '</div>';
             });
@@ -1567,9 +1663,7 @@ cw_header('Instructor Theory Control Center');
                 el.className = 'tcc-item';
                 el.innerHTML = '<div class="tcc-item-left">' + avatarHtml(avatarObj, 'tcc-avatar ' + color) + '<div class="tcc-meta"><div class="tcc-name">' + escapeHtml(item.student_name || 'Student') + '</div><div class="tcc-sub">' + escapeHtml(item.lesson_title || 'No lesson title') + '</div><div class="tcc-sub">' + escapeHtml(item.reason || item.action_type || 'Required action') + '</div><span class="tcc-severity ' + escapeHtml(severity) + '">' + escapeHtml(severity) + '</span></div></div><div class="tcc-actions">' +
                     (reviewHref ? '<a class="tcc-btn primary" href="' + escapeHtml(reviewHref) + '">Review</a>' : '<button class="tcc-btn primary" type="button" onclick="loadStudentPanel(' + parseInt(item.student_id || 0, 10) + ')">Review</button>') +
-                    '<button class="tcc-btn secondary" type="button" onclick="openDebugReport(' + parseInt(item.student_id || 0, 10) + ',' + lessonId + ',' + jsArg(issueType) + ')">Inspect</button>' +
-                    '<button class="tcc-btn warn" type="button" onclick="openDebugReport(' + parseInt(item.student_id || 0, 10) + ',' + lessonId + ',' + jsArg(issueType) + ')">State Fix</button>' +
-                '</div>';
+                    '<button class="tcc-btn secondary" type="button" onclick="openDebugReport(' + parseInt(item.student_id || 0, 10) + ',' + lessonId + ',' + jsArg(issueType) + ')">Inspect</button>' + '</div>';
 
                 const left = el.querySelector('.tcc-item-left');
                 if (left) {
@@ -1601,6 +1695,7 @@ cw_header('Instructor Theory Control Center');
     window.toggleLessonInlineDetail = toggleLessonInlineDetail;
     window.toggleLessonDetail = toggleLessonInlineDetail;
 	window.generateAiSummaryAnalysisFromButton = generateAiSummaryAnalysisFromButton;
+	window.executeTccRepairFromIssue = executeTccRepairFromIssue;
 	
 	
     document.getElementById('cohortSelect').addEventListener('change', function () {
@@ -1620,6 +1715,9 @@ cw_header('Instructor Theory Control Center');
     });
 
     loadCohorts();
+	
+	window.executeTccRepairFromIssue = executeTccRepairFromIssue;
+	
 })();
 </script>
 

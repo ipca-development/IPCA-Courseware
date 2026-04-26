@@ -451,6 +451,114 @@ function tcc_system_watch(PDO $pdo, int $cohortId, ?int $userId = null): array {
         ];
     }
 
+	
+	    $params = array($cohortId);
+    $userSql = '';
+
+    if ($userId !== null && $userId > 0) {
+        $userSql = ' AND pt.user_id = ? ';
+        $params[] = $userId;
+    }
+
+    $st = $pdo->prepare("
+        SELECT
+            pt.id AS test_id,
+            pt.user_id,
+            pt.user_id AS student_id,
+            pt.cohort_id,
+            pt.lesson_id,
+            pt.attempt,
+            pt.status,
+            pt.created_at,
+            pt.started_at,
+            pt.updated_at,
+            u.name AS student_name,
+            u.email AS student_email,
+            l.title AS lesson_title,
+            (
+                SELECT COUNT(*)
+                FROM progress_tests_v2 pass_pt
+                WHERE pass_pt.user_id = pt.user_id
+                  AND pass_pt.cohort_id = pt.cohort_id
+                  AND pass_pt.lesson_id = pt.lesson_id
+                  AND pass_pt.status = 'completed'
+                  AND pass_pt.pass_gate_met = 1
+            ) AS canonical_pass_count
+        FROM progress_tests_v2 pt
+        JOIN users u ON u.id = pt.user_id
+        LEFT JOIN lessons l ON l.id = pt.lesson_id
+        WHERE pt.cohort_id = ?
+          {$userSql}
+          AND pt.status IN ('ready','in_progress','processing','preparing')
+          AND COALESCE(pt.updated_at, pt.started_at, pt.created_at) < DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)
+        ORDER BY COALESCE(pt.updated_at, pt.started_at, pt.created_at) ASC
+        LIMIT 100
+    ");
+    $st->execute($params);
+
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $passCount = (int)($row['canonical_pass_count'] ?? 0);
+
+        if ($passCount <= 0) {
+            $issues[] = array(
+                'issue_type' => 'old_active_progress_test_attempt',
+                'type' => 'old_active_progress_test_attempt',
+                'blocker_category' => 'ambiguous',
+                'severity' => 'high',
+                'repair_allowed' => false,
+                'repair_code' => 'inspect_only',
+                'student_id' => (int)$row['user_id'],
+                'cohort_id' => (int)$row['cohort_id'],
+                'lesson_id' => (int)$row['lesson_id'],
+                'student_name' => tcc_student_name($row),
+                'lesson_title' => (string)($row['lesson_title'] ?? ''),
+                'title' => 'Old active progress test attempt',
+                'summary' => 'Old active progress test attempt exists without canonical PASS. Inspect only.',
+                'recurrence_key' => 'old_active_progress_test_attempt|cohort:' . (int)$row['cohort_id'] . '|lesson:' . (int)$row['lesson_id'],
+                'evidence' => array(
+                    'test_id' => (int)$row['test_id'],
+                    'attempt' => (int)$row['attempt'],
+                    'status' => (string)$row['status'],
+                    'created_at' => (string)($row['created_at'] ?? ''),
+                    'started_at' => (string)($row['started_at'] ?? ''),
+                    'updated_at' => (string)($row['updated_at'] ?? ''),
+                    'canonical_pass_count' => $passCount,
+                    'stale_hours_threshold' => 24
+                )
+            );
+            continue;
+        }
+
+        $issues[] = array(
+            'issue_type' => 'old_active_progress_test_attempt',
+            'type' => 'old_active_progress_test_attempt',
+            'blocker_category' => 'stale_bug',
+            'severity' => 'medium',
+            'repair_allowed' => true,
+            'repair_code' => 'cleanup_old_active_attempt_after_pass',
+            'student_id' => (int)$row['user_id'],
+            'cohort_id' => (int)$row['cohort_id'],
+            'lesson_id' => (int)$row['lesson_id'],
+            'student_name' => tcc_student_name($row),
+            'lesson_title' => (string)($row['lesson_title'] ?? ''),
+            'title' => 'Stale progress test attempt after PASS',
+            'summary' => 'Old active progress test attempt exists after canonical PASS. Eligible for one-click stale cleanup.',
+            'recurrence_key' => 'old_active_progress_test_attempt|cohort:' . (int)$row['cohort_id'] . '|lesson:' . (int)$row['lesson_id'],
+            'evidence' => array(
+                'test_id' => (int)$row['test_id'],
+                'attempt' => (int)$row['attempt'],
+                'status' => (string)$row['status'],
+                'created_at' => (string)($row['created_at'] ?? ''),
+                'started_at' => (string)($row['started_at'] ?? ''),
+                'updated_at' => (string)($row['updated_at'] ?? ''),
+                'canonical_pass_count' => $passCount,
+                'stale_hours_threshold' => 24
+            )
+        );
+    }
+	
+	
+	
     return $issues;
 }
 
@@ -1388,22 +1496,46 @@ try {
         $issues = [];
         foreach ($pending as $p) {
             $issues[] = [
-                'type' => (string)$p['action_type'],
-                'status' => (string)$p['status'],
-                'lesson_id' => (int)$p['lesson_id'],
-                'lesson_title' => (string)($p['lesson_title'] ?? ''),
-                'title' => (string)($p['title'] ?? ''),
-            ];
+    'type' => (string)$p['action_type'],
+    'issue_type' => 'open_required_action_' . (string)$p['action_type'],
+    'blocker_category' => 'policy',
+    'repair_allowed' => false,
+    'repair_code' => 'official_flow_only',
+    'status' => (string)$p['status'],
+    'student_id' => $studentId,
+    'cohort_id' => $cohortId,
+    'lesson_id' => (int)$p['lesson_id'],
+    'lesson_title' => (string)($p['lesson_title'] ?? ''),
+    'title' => (string)($p['title'] ?? ''),
+    'token' => (string)($p['token'] ?? ''),
+    'evidence' => [
+        'required_action_id' => (int)$p['id'],
+        'action_type' => (string)$p['action_type'],
+        'status' => (string)$p['status'],
+        'created_at' => (string)($p['created_at'] ?? ''),
+        'opened_at' => (string)($p['opened_at'] ?? ''),
+        'has_token' => trim((string)($p['token'] ?? '')) !== '',
+    ],
+];
         }
 
         foreach ($systemIssues as $si) {
             $issues[] = [
-                'type' => (string)$si['issue_type'],
-                'status' => 'system_watch',
-                'lesson_id' => (int)$si['lesson_id'],
-                'lesson_title' => (string)($si['lesson_title'] ?? ''),
-                'title' => (string)$si['summary'],
-            ];
+    'type' => (string)($si['type'] ?? $si['issue_type'] ?? 'system_watch'),
+    'issue_type' => (string)($si['issue_type'] ?? $si['type'] ?? 'system_watch'),
+    'blocker_category' => (string)($si['blocker_category'] ?? 'ambiguous'),
+    'repair_allowed' => !empty($si['repair_allowed']),
+    'repair_code' => (string)($si['repair_code'] ?? 'inspect_only'),
+    'status' => 'system_watch',
+    'student_id' => (int)($si['student_id'] ?? $studentId),
+    'cohort_id' => (int)($si['cohort_id'] ?? $cohortId),
+    'lesson_id' => (int)($si['lesson_id'] ?? 0),
+    'lesson_title' => (string)($si['lesson_title'] ?? ''),
+    'title' => (string)($si['summary'] ?? $si['title'] ?? 'System watch issue'),
+    'summary' => (string)($si['summary'] ?? ''),
+    'recurrence_key' => (string)($si['recurrence_key'] ?? ''),
+    'evidence' => is_array($si['evidence'] ?? null) ? $si['evidence'] : [],
+];
         }
 
         $name = tcc_student_name($student);
