@@ -1600,7 +1600,9 @@ cw_header('Instructor Theory Control Center');
     window.loadStudentLessons = loadStudentLessons;
     window.toggleLessonInlineDetail = toggleLessonInlineDetail;
     window.toggleLessonDetail = toggleLessonInlineDetail;
-
+	window.generateAiSummaryAnalysisFromButton = generateAiSummaryAnalysisFromButton;
+	
+	
     document.getElementById('cohortSelect').addEventListener('change', function () {
         cohortId = parseInt(this.value, 10) || 0;
 
