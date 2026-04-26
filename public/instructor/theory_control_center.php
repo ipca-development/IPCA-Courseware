@@ -594,7 +594,7 @@ cw_header('Instructor Theory Control Center');
         return '<div id="' + panelId + '" class="tcc-ai-live-panel">' +
             '<div class="tcc-ai-live-head">' +
                 '<div><div class="tcc-ai-live-title">AI Summary Analysis</div><div class="tcc-ai-live-sub">Advisory only. Does not change progression status or canonical records.</div></div>' +
-                '<button id="' + btnId + '" type="button" class="tcc-ai-action-btn" onclick="generateAiSummaryAnalysis(' + parseInt(studentId || 0, 10) + ',' + parseInt(lessonId || 0, 10) + ',' + jsArg(panelId) + ',' + jsArg(btnId) + ')">Generate AI Analysis</button>' +
+                '<button id="' + btnId + '" type="button" class="tcc-ai-action-btn" data-student-id="' + parseInt(studentId || 0, 10) + '" data-lesson-id="' + parseInt(lessonId || 0, 10) + '" data-panel-id="' + escapeHtml(panelId) + '" data-btn-id="' + escapeHtml(btnId) + '" onclick="window.generateAiSummaryAnalysisFromButton(this)">Generate AI Analysis</button>' +
             '</div>' +
             '<div class="tcc-ai-live-body">' + body + '</div>' +
         '</div>';
@@ -650,6 +650,23 @@ cw_header('Instructor Theory Control Center');
         });
     }
 
+	function generateAiSummaryAnalysisFromButton(btn) {
+
+    generateAiSummaryAnalysis(
+
+        parseInt(btn.getAttribute('data-student-id') || '0', 10),
+
+        parseInt(btn.getAttribute('data-lesson-id') || '0', 10),
+
+        btn.getAttribute('data-panel-id') || '',
+
+        btn.getAttribute('data-btn-id') || ''
+
+    );
+
+}
+	
+	
     function openSummaryLargeModal(title, htmlContent) {
         openTccModal(title || 'Lesson Summary', '<div class="tcc-summary-paper nb-content" style="max-height:70vh;">' + htmlContent + '</div>');
     }
