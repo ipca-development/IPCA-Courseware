@@ -105,6 +105,21 @@ function scan_column_exists(PDO $pdo, string $tableName, string $columnName): bo
     }
 }
 
+
+function scan_in_clause(string $column, array $ids, array &$params): string
+{
+    $ids = array_values(array_filter(array_map('intval', $ids)));
+
+    if (!$ids) {
+        return '';
+    }
+
+    $params = array_merge($params, $ids);
+
+    return ' AND ' . $column . ' IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ';
+}
+
+
 function scan_student_name(array $row): string
 {
     $name = trim((string)($row['student_name'] ?? $row['name'] ?? ''));
@@ -346,7 +361,18 @@ function scan_collect_context_for_summary(PDO $pdo, int $cohortId, int $studentI
     );
 }
 
-$cohortId = scan_int($_GET['cohort_id'] ?? 0);
+$cohortIdRaw = scan_str($_GET['cohort_id'] ?? '');
+$cohortIds = array();
+foreach (preg_split('/[, ]+/', $cohortIdRaw) as $part) {
+    $id = (int)$part;
+    if ($id > 0 && !in_array($id, $cohortIds, true)) {
+        $cohortIds[] = $id;
+    }
+}
+
+$cohortId = count($cohortIds) === 1 ? $cohortIds[0] : 0;
+
+
 $studentId = scan_int($_GET['student_id'] ?? 0);
 $lessonId = scan_int($_GET['lesson_id'] ?? 0);
 $limit = scan_limit($_GET['limit'] ?? 250);
@@ -501,8 +527,6 @@ try {
             la.summary_status,
             la.test_pass_status,
             la.training_suspended,
-            la.deadline_blocked,
-            la.summary_blocked,
             la.effective_deadline_utc,
             la.completed_at,
             u.name AS student_name,
@@ -527,8 +551,6 @@ try {
               COALESCE(la.completion_status, '') <> 'completed'
               OR COALESCE(la.test_pass_status, '') <> 'passed'
               OR COALESCE(la.training_suspended, 0) <> 0
-              OR COALESCE(la.deadline_blocked, 0) <> 0
-              OR COALESCE(la.summary_blocked, 0) <> 0
           )
         GROUP BY
             la.user_id,
@@ -538,8 +560,6 @@ try {
             la.summary_status,
             la.test_pass_status,
             la.training_suspended,
-            la.deadline_blocked,
-            la.summary_blocked,
             la.effective_deadline_utc,
             la.completed_at,
             u.name,
@@ -557,7 +577,7 @@ try {
             'stale_bug',
             'pass_exists_projection_not_completed',
             'high',
-            'Canonical PASS exists in progress_tests_v2, but lesson_activity still shows incomplete, not passed, suspended, or blocked.',
+            'Canonical PASS exists in progress_tests_v2, but lesson_activity still shows incomplete, not passed, or suspended.',
             $row,
             true,
             'recompute_projection',
@@ -567,8 +587,6 @@ try {
                 'summary_status' => (string)($row['summary_status'] ?? ''),
                 'test_pass_status' => (string)($row['test_pass_status'] ?? ''),
                 'training_suspended' => scan_boolish($row['training_suspended'] ?? 0),
-                'deadline_blocked' => scan_boolish($row['deadline_blocked'] ?? 0),
-                'summary_blocked' => scan_boolish($row['summary_blocked'] ?? 0),
                 'pass_test_id' => (int)($row['pass_test_id'] ?? 0),
                 'pass_completed_at' => (string)($row['pass_completed_at'] ?? ''),
             )
@@ -923,7 +941,7 @@ try {
             la.cohort_id,
             la.lesson_id,
             la.summary_status AS activity_summary_status,
-            la.summary_blocked,
+            la.completion_status AS activity_completion_status,
             ls.review_status,
             ls.review_score,
             ls.updated_at AS summary_updated_at,
@@ -943,8 +961,8 @@ try {
           " . $sqlLesson . "
           AND COALESCE(ls.review_status, '') IN ('acceptable','approved','accepted')
           AND (
-              COALESCE(la.summary_blocked, 0) <> 0
-              OR COALESCE(la.summary_status, '') NOT IN ('accepted','acceptable','approved')
+              COALESCE(la.summary_status, '') NOT IN ('acceptable')
+              OR COALESCE(la.completion_status, '') IN ('summary_required','awaiting_summary_review')
           )
         ORDER BY ls.updated_at DESC
         LIMIT " . (int)$limit . "
@@ -965,14 +983,14 @@ try {
             'stale_bug',
             'accepted_summary_projection_blocked',
             'medium',
-            'Lesson summary appears accepted/reviewed, but lesson_activity still shows blocked or non-accepted summary projection.',
+            'Lesson summary appears accepted/reviewed, but lesson_activity still shows a non-accepted summary projection.',
             $row,
             true,
             'recompute_projection',
             '',
             array(
                 'activity_summary_status' => (string)($row['activity_summary_status'] ?? ''),
-                'summary_blocked' => scan_boolish($row['summary_blocked'] ?? 0),
+                'activity_completion_status' => (string)($row['activity_completion_status'] ?? ''),
                 'review_status' => (string)($row['review_status'] ?? ''),
                 'review_score' => $row['review_score'] === null ? null : (int)$row['review_score'],
                 'summary_updated_at' => (string)($row['summary_updated_at'] ?? ''),
@@ -1027,9 +1045,8 @@ try {
                 o.lesson_id,
                 o.is_active,
                 " . $deadlineColumn . " AS override_deadline_utc,
-                o.created_at,
+                o.granted_at,
                 la.effective_deadline_utc,
-                la.deadline_blocked,
                 u.name AS student_name,
                 u.email AS student_email,
                 l.title AS lesson_title
@@ -1049,7 +1066,7 @@ try {
                   la.effective_deadline_utc IS NULL
                   OR la.effective_deadline_utc <> " . $deadlineColumn . "
               )
-            ORDER BY o.created_at DESC, o.id DESC
+            ORDER BY o.granted_at DESC, o.id DESC
             LIMIT " . (int)$limit . "
         ";
 
@@ -1070,7 +1087,6 @@ try {
                     'override_id' => (int)($row['override_id'] ?? 0),
                     'override_deadline_utc' => (string)($row['override_deadline_utc'] ?? ''),
                     'effective_deadline_utc' => (string)($row['effective_deadline_utc'] ?? ''),
-                    'deadline_blocked' => scan_boolish($row['deadline_blocked'] ?? 0),
                 )
             );
         }
