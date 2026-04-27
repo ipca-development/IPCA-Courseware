@@ -1495,6 +1495,22 @@ function repairPayloadFromIssue(issue, studentId, lessonId) {
     };
 }
 
+	
+function executeTccRepairButton(btn) {
+    if (!btn) return;
+
+    let issue = {};
+
+    try {
+        issue = JSON.parse(btn.getAttribute('data-issue-json') || '{}');
+    } catch (e) {
+        openTccModal('Fix Issue', '<div class="tcc-error">Invalid repair payload.</div>');
+        return;
+    }
+
+    executeTccRepairFromIssue(JSON.stringify(issue), btn);
+}	
+	
 function executeTccRepairFromIssue(issueJson, btn) {
     let issue = {};
 
@@ -1575,7 +1591,7 @@ if (reviewHref !== '') {
 }
 
 if (issueCanOneClickRepair(issue)) {
-    actions += '<button class="tcc-btn fix" type="button" onclick="executeTccRepairFromIssue(' + jsArg(JSON.stringify(issue)) + ', this)">Fix Issue</button>';
+    actions += '<button class="tcc-btn fix" type="button" data-issue-json="' + escapeHtml(JSON.stringify(issue)) + '" onclick="executeTccRepairButton(this)">Fix Issue</button>';
 }
 
 actions += '</div>';
@@ -1696,6 +1712,7 @@ actions += '</div>';
     window.toggleLessonInlineDetail = toggleLessonInlineDetail;
     window.toggleLessonDetail = toggleLessonInlineDetail;
     window.generateAiSummaryAnalysisFromButton = generateAiSummaryAnalysisFromButton;
+	window.executeTccRepairButton = executeTccRepairButton;
     window.executeTccRepairFromIssue = executeTccRepairFromIssue;
 
     document.getElementById('cohortSelect').addEventListener('change', function () {
