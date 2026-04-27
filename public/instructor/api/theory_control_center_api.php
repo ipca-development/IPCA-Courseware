@@ -75,7 +75,7 @@ function tcc_fetch_cohorts(PDO $pdo): array {
             co.end_date,
             c.title AS course_title,
             p.program_key,
-            co.timezone
+            'UTC' AS timezone
         FROM cohorts co
         JOIN courses c ON c.id = co.course_id
         JOIN programs p ON p.id = c.program_id
