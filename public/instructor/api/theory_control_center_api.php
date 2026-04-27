@@ -288,25 +288,20 @@ function tcc_recommended_action(string $actionType): string {
     return 'review_required_action';
 }
 
-
 function tcc_official_flow_url(string $actionType, string $token): string {
+
     $actionType = trim($actionType);
     $token = trim($token);
 
-    if ($token === '') {
-        return '';
-    }
-
-    if ($actionType === 'instructor_approval') {
+    // ONLY instructor approval is allowed to open that page
+    if ($actionType === 'instructor_approval' && $token !== '') {
         return '/instructor/instructor_approval.php?token=' . rawurlencode($token);
     }
 
-    if ($actionType === 'deadline_reason_submission') {
-        return '/instructor/instructor_approval.php?token=' . rawurlencode($token);
-    }
-
+    // EVERYTHING ELSE must stay inside TCC (no redirect)
     return '';
 }
+
 
 
 function tcc_safe_actions(string $actionType): array {
