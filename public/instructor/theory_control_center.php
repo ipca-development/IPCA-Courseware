@@ -1662,16 +1662,14 @@ actions += '</div>';
                 return;
             }
 
-            items.forEach(function (item) {
-                let reviewHref = '';
+items.forEach(function (item) {
+    let reviewHref = '';
 
-                let reviewHref = '';
-
-if (item.official_flow_url) {
-    reviewHref = String(item.official_flow_url);
-} else if (item.token && item.action_type === 'instructor_approval') {
-    reviewHref = '/instructor/instructor_approval.php?token=' + encodeURIComponent(item.token);
-}
+    if (item.official_flow_url) {
+        reviewHref = String(item.official_flow_url);
+    } else if (item.token && item.action_type === 'instructor_approval') {
+        reviewHref = '/instructor/instructor_approval.php?token=' + encodeURIComponent(item.token);
+    }
 
                 const severity = item.severity || 'low';
                 const radarStudent = cohortStudents.find(function (s) { return parseInt(s.student_id, 10) === parseInt(item.student_id, 10); }) || {};
