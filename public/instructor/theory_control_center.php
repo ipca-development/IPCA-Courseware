@@ -431,16 +431,20 @@ cw_header('Instructor Theory Control Center');
             studentReason = 'No student reason text recorded.';
         }
         var instructions = String(item.instructions_text || '').trim();
+        var systemTs = niceDateTime(item.created_at || item.opened_at || '');
+        var studentTs = niceDateTime(item.completed_at || item.updated_at || item.created_at || '');
         var html = '<div class="tcc-modal-grid">';
         html += '<div class="tcc-modal-section"><div class="tcc-modal-section-title">Submission Details</div>' + modalStatusRows([
             ['Status', prettyStatus(item.status || '—')],
-            ['Submitted', niceDateTime(item.completed_at || item.updated_at || item.created_at || '')],
+            ['Submitted', studentTs],
             ['Opened', niceDateTime(item.opened_at || '')]
         ]) + '</div>';
-        html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Reason Submission</div><div class="tcc-modal-readable">' + escapeHtml(studentReason) + '</div></div>';
+        html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Conversation</div><div class="tcc-chat-thread">';
         if (instructions !== '') {
-            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Original Prompt</div><div class="tcc-modal-readable">' + escapeHtml(instructions) + '</div></div>';
+            html += '<div class="tcc-chat-bubble ai"><strong>System</strong><div style="margin-top:4px;">' + escapeHtml(instructions) + '</div><div class="tcc-chat-score">Sent: ' + escapeHtml(systemTs) + '</div></div>';
         }
+        html += '<div class="tcc-chat-bubble student"><strong>Student</strong><div style="margin-top:4px;">' + escapeHtml(studentReason) + '</div><div class="tcc-chat-score">Sent: ' + escapeHtml(studentTs) + '</div></div>';
+        html += '</div></div>';
         html += '</div>';
         openTccModal(title, html, 'Student Reason Submission');
     }
