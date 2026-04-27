@@ -349,18 +349,24 @@ cw_header('Instructor Theory Control Center');
     }
 
     function blockerReviewHref(issue) {
-        if (issue.action_url) return String(issue.action_url);
+    issue = issue || {};
 
-        if (issue.token) {
-            if (issue.type === 'instructor_approval') {
-                return '/instructor/instructor_approval.php?token=' + encodeURIComponent(issue.token);
-            }
+    const officialUrl = String(issue.official_flow_url || issue.action_url || '').trim();
 
-            return '/student/remediation_action.php?token=' + encodeURIComponent(issue.token);
+    if (officialUrl !== '') {
+        if (officialUrl.indexOf('/student/') === 0) {
+            return '';
         }
 
-        return '';
+        return officialUrl;
     }
+
+    if (issue.token && issue.type === 'instructor_approval') {
+        return '/instructor/instructor_approval.php?token=' + encodeURIComponent(issue.token);
+    }
+
+    return '';
+}
 
     function cohortTimeZone() {
         return window.tccCohortTimezone || 'UTC';
