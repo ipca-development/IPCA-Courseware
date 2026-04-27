@@ -415,8 +415,34 @@ cw_header('Instructor Theory Control Center');
             openEmailBodyModal(item);
             return;
         }
+        if (String(item.action_type || '') === 'deadline_reason_submission') {
+            openDeadlineReasonModal(item);
+            return;
+        }
         var title = item.title || item.email_type || item.event_type || item.override_type || item.action_type || ('Intervention #' + (item.id || ''));
         openTccModal('Intervention Detail', '<div class="tcc-debug-meta">' + escapeHtml(title) + '</div><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(item, null, 2)) + '</pre>');
+    }
+
+    function openDeadlineReasonModal(item) {
+        item = item || {};
+        var title = item.title || 'Deadline reason submission';
+        var studentReason = String(item.student_response_text || '').trim();
+        if (studentReason === '') {
+            studentReason = 'No student reason text recorded.';
+        }
+        var instructions = String(item.instructions_text || '').trim();
+        var html = '<div class="tcc-modal-grid">';
+        html += '<div class="tcc-modal-section"><div class="tcc-modal-section-title">Submission Details</div>' + modalStatusRows([
+            ['Status', prettyStatus(item.status || '—')],
+            ['Submitted', niceDateTime(item.completed_at || item.updated_at || item.created_at || '')],
+            ['Opened', niceDateTime(item.opened_at || '')]
+        ]) + '</div>';
+        html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Reason Submission</div><div class="tcc-modal-readable">' + escapeHtml(studentReason) + '</div></div>';
+        if (instructions !== '') {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Original Prompt</div><div class="tcc-modal-readable">' + escapeHtml(instructions) + '</div></div>';
+        }
+        html += '</div>';
+        openTccModal(title, html, 'Student Reason Submission');
     }
 
     function openEmailBodyModal(item) {
