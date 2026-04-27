@@ -1667,7 +1667,7 @@ items.forEach(function (item) {
 
     if (item.official_flow_url) {
         reviewHref = String(item.official_flow_url);
-    } else if (item.token && item.action_type === 'instructor_approval') {
+    } else if (item.token && (item.action_type === 'instructor_approval' || item.action_type === 'deadline_reason_submission')) {
         reviewHref = '/instructor/instructor_approval.php?token=' + encodeURIComponent(item.token);
     }
 

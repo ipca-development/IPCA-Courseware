@@ -288,20 +288,24 @@ function tcc_recommended_action(string $actionType): string {
     return 'review_required_action';
 }
 
+
 function tcc_official_flow_url(string $actionType, string $token): string {
-
     $actionType = trim($actionType);
-
     $token = trim($token);
 
-    if ($actionType === 'instructor_approval' && $token !== '') {
+    if ($token === '') {
+        return '';
+    }
 
+    if ($actionType === 'instructor_approval') {
         return '/instructor/instructor_approval.php?token=' . rawurlencode($token);
+    }
 
+    if ($actionType === 'deadline_reason_submission') {
+        return '/instructor/instructor_approval.php?token=' . rawurlencode($token);
     }
 
     return '';
-
 }
 
 
