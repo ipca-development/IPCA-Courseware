@@ -1681,21 +1681,38 @@ actions += '</div>';
     }
 
     window.openAnswerAudioModal = openAnswerAudioModal;
+
     window.openInterventionDetailModal = openInterventionDetailModal;
+
     window.openSummaryLargeModal = openSummaryLargeModal;
+
     window.openSummaryLargeModalById = openSummaryLargeModalById;
+
     window.closeTccModal = closeTccModal;
+
     window.openDebugReport = openDebugReport;
+
     window.openSystemWatchForStudent = openSystemWatchForStudent;
+
     window.openLessonSummary = openLessonSummary;
+
     window.generateAiSummaryAnalysis = generateAiSummaryAnalysis;
+
     window.openAttemptDetails = openAttemptDetails;
+
     window.openInterventions = openInterventions;
+
     window.loadStudentLessons = loadStudentLessons;
+
     window.toggleLessonInlineDetail = toggleLessonInlineDetail;
+
     window.toggleLessonDetail = toggleLessonInlineDetail;
-	window.generateAiSummaryAnalysisFromButton = generateAiSummaryAnalysisFromButton;
-	window.executeTccRepairFromIssue = executeTccRepairFromIssue;
+
+    window.generateAiSummaryAnalysisFromButton = generateAiSummaryAnalysisFromButton;
+
+    window.executeTccRepairFromIssue = executeTccRepairFromIssue;
+
+    loadCohorts();
 	
 	
     document.getElementById('cohortSelect').addEventListener('change', function () {
