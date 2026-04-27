@@ -823,6 +823,50 @@ function tcc_audio_url(?string $audioPath): string {
     return $base . ltrim($audioPath, '/');
 }
 
+function tcc_email_recipient_label(array $row): string {
+    $recipientType = strtolower(trim((string)($row['recipient_type'] ?? '')));
+    if ($recipientType === 'student' || $recipientType === 'instructor') {
+        return $recipientType;
+    }
+
+    $emailType = strtolower(trim((string)($row['email_type'] ?? '')));
+    if (strpos($emailType, 'chief') !== false || strpos($emailType, 'instructor') !== false) {
+        return 'instructor';
+    }
+
+    return 'student';
+}
+
+function tcc_email_delivery_status(array $row): string {
+    $sentStatus = strtolower(trim((string)($row['sent_status'] ?? '')));
+    if (in_array($sentStatus, ['sent', 'failed', 'queued', 'pending'], true)) {
+        return $sentStatus === 'queued' || $sentStatus === 'pending' ? 'sent' : $sentStatus;
+    }
+
+    return trim((string)($row['sent_at'] ?? '')) !== '' ? 'sent' : 'failed';
+}
+
+function tcc_email_readable_body(array $row): string {
+    $html = trim((string)($row['body_html'] ?? ''));
+    $text = trim((string)($row['body_text'] ?? ''));
+    if ($text !== '') {
+        return $text;
+    }
+
+    if ($html === '') {
+        return 'No rendered email body available.';
+    }
+
+    $normalized = preg_replace('/<br\s*\/?>/i', "\n", $html);
+    $normalized = preg_replace('/<\/p>/i', "\n\n", (string)$normalized);
+    $plain = strip_tags((string)$normalized);
+    $plain = html_entity_decode($plain, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $plain = preg_replace('/[ \t]+/', ' ', $plain);
+    $plain = preg_replace('/\R{3,}/', "\n\n", $plain);
+    $plain = trim((string)$plain);
+    return $plain !== '' ? $plain : 'No rendered email body available.';
+}
+
 function tcc_lesson_identity(PDO $pdo, int $cohortId, int $lessonId): array {
     $st = $pdo->prepare("
         SELECT
@@ -963,7 +1007,7 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
         WHERE cohort_id = ?
           AND user_id = ?
           " . $lessonWhere . "
-        ORDER BY created_at DESC, id DESC
+        ORDER BY created_at ASC, id ASC
         LIMIT 100
     ");
     $actionsStmt->execute($actionsParams);
@@ -978,7 +1022,7 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
             WHERE cohort_id = ?
               AND user_id = ?
               " . $lessonWhere . "
-            ORDER BY created_at DESC, id DESC
+            ORDER BY created_at ASC, id ASC
             LIMIT 100
         ");
         $overrideStmt->execute($overrideParams);
@@ -996,11 +1040,21 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
             WHERE cohort_id = ?
               AND user_id = ?
               " . $lessonWhere . "
-            ORDER BY created_at DESC, id DESC
+            ORDER BY created_at ASC, id ASC
             LIMIT 100
         ");
         $emailStmt->execute($emailParams);
         $emails = $emailStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($emails as &$emailRow) {
+            $emailRow['recipient_label'] = tcc_email_recipient_label($emailRow);
+            $emailRow['delivery_status'] = tcc_email_delivery_status($emailRow);
+            $emailRow['sent_timestamp'] = (string)($emailRow['sent_at'] ?? $emailRow['created_at'] ?? '');
+            $emailRow['readable_body'] = tcc_email_readable_body($emailRow);
+            if (trim((string)($emailRow['title'] ?? '')) === '') {
+                $emailRow['title'] = (string)($emailRow['subject'] ?? $emailRow['email_type'] ?? 'Progression Email');
+            }
+        }
+        unset($emailRow);
     } catch (Throwable $e) {
         $emails = [];
     }
@@ -1014,7 +1068,7 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
             WHERE cohort_id = ?
               AND user_id = ?
               " . $lessonWhere . "
-            ORDER BY created_at DESC, id DESC
+            ORDER BY created_at ASC, id ASC
             LIMIT 100
         ");
         $eventStmt->execute($eventParams);

@@ -411,8 +411,26 @@ cw_header('Instructor Theory Control Center');
 
     function openInterventionDetailModal(item) {
         item = item || {};
+        if (item.readable_body || item.delivery_status || item.recipient_label) {
+            openEmailBodyModal(item);
+            return;
+        }
         var title = item.title || item.email_type || item.event_type || item.override_type || item.action_type || ('Intervention #' + (item.id || ''));
         openTccModal('Intervention Detail', '<div class="tcc-debug-meta">' + escapeHtml(title) + '</div><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(item, null, 2)) + '</pre>');
+    }
+
+    function openEmailBodyModal(item) {
+        item = item || {};
+        var title = item.subject || item.title || 'Progression Email';
+        var sentAt = item.sent_timestamp || item.sent_at || item.created_at || '';
+        var recipient = item.recipient_label || 'student';
+        var status = item.delivery_status || item.sent_status || 'sent';
+        var body = item.readable_body || item.body_text || 'No rendered email body available.';
+        var html = '<div class="tcc-modal-grid">';
+        html += '<div class="tcc-modal-section"><div class="tcc-modal-section-title">Email Metadata</div>' + modalStatusRows([['Sent', niceDateTime(sentAt)], ['Delivery', prettyStatus(status)], ['Recipient', prettyStatus(recipient)]]) + '</div>';
+        html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Rendered Content</div><div class="tcc-modal-readable">' + escapeHtml(body) + '</div></div>';
+        html += '</div>';
+        openTccModal(title, html, 'Readable Email');
     }
 
     function openDebugReport(studentId, lessonId, issueType) {
@@ -501,7 +519,12 @@ cw_header('Instructor Theory Control Center');
         html += '<div class="tcc-intervention-list">';
         items.forEach(function (item) {
             var label = item.title || item.email_type || item.event_type || item.override_type || item.action_type || ('Record #' + (item.id || ''));
-            var meta = [item.status || item.sent_status || '', item.created_at ? niceDateTime(item.created_at) : '', item.sent_at ? ('Sent ' + niceDateTime(item.sent_at)) : ''].filter(Boolean).join(' · ');
+            var statusText = item.delivery_status || item.status || item.sent_status || '';
+            var created = item.created_at ? niceDateTime(item.created_at) : '';
+            var sent = item.sent_timestamp || item.sent_at;
+            var sentText = sent ? ('Sent ' + niceDateTime(sent)) : '';
+            var recipientText = item.recipient_label ? ('Recipient: ' + prettyStatus(item.recipient_label)) : '';
+            var meta = [statusText, created, sentText, recipientText].filter(Boolean).join(' · ');
             html += '<div class="tcc-intervention-item tcc-intervention-clickable" onclick="openInterventionDetailModal(' + serializeForOnclick(item) + ')"><div class="tcc-intervention-title">' + escapeHtml(label) + '</div><div class="tcc-intervention-meta">' + escapeHtml(meta || '—') + '</div></div>';
         });
         html += '</div></div>';
@@ -561,18 +584,56 @@ cw_header('Instructor Theory Control Center');
         });
     }
 
-    function decisionOptionsHtml(officialHref) {
-        var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Instructor Remedial Actions</div>';
-        html += '<div class="tcc-approval-alert">This modal is read-only context. The buttons below must be executed on the official workflow page so CoursewareProgressionV2 remains the only canonical decision engine and automation triggers remain respected.</div>';
-        html += '<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;">';
-        html += '<div class="tcc-decision-option"><div class="tcc-decision-title">Approve additional attempts</div><div class="tcc-decision-help">Student may continue with additional attempts.</div></div>';
-        html += '<div class="tcc-decision-option"><div class="tcc-decision-title">Approve, but require summary revision</div><div class="tcc-decision-help">Student must improve the lesson summary before normal continuation.</div></div>';
-        html += '<div class="tcc-decision-option"><div class="tcc-decision-title">Approve, but require one-on-one</div><div class="tcc-decision-help">Instructor session required before continuation.</div></div>';
-        html += '<div class="tcc-decision-option"><div class="tcc-decision-title">Suspend training</div><div class="tcc-decision-help">Progression paused pending stronger intervention.</div></div>';
-        html += '</div><div class="tcc-approval-action-strip">';
-        if (officialHref) html += '<a class="tcc-btn primary" href="' + escapeHtml(officialHref) + '">Open Official Approval Workflow</a>';
-        else html += '<button class="tcc-btn secondary" type="button" disabled>No official approval workflow URL supplied</button>';
-        html += '</div></div>';
+    function blockerCategory(issue) {
+        issue = issue || {};
+        var raw = String(issue.blocker_category || '').toLowerCase();
+        if (raw === 'stale_bug') return 'system_bug';
+        var type = String(issue.type || issue.issue_type || issue.action_type || '').toLowerCase();
+        var title = String(issue.title || issue.reason || '').toLowerCase();
+        if (raw === 'policy' && type.indexOf('deadline') >= 0) return 'deadline';
+        if (type.indexOf('deadline') >= 0 || title.indexOf('deadline') >= 0) return 'deadline';
+        if (type.indexOf('test') >= 0 || type.indexOf('attempt') >= 0 || type.indexOf('approval') >= 0) return 'progress_test';
+        if (raw === 'ambiguous' || raw === 'system' || raw === 'stale_bug') return 'system_bug';
+        return 'progress_test';
+    }
+
+    function blockerLabel(category) {
+        if (category === 'deadline') return 'Deadline blocker';
+        if (category === 'progress_test') return 'Progress test blocker';
+        return 'System/bug blocker';
+    }
+
+    function blockerIcon(category) {
+        if (category === 'deadline') {
+            return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="16" rx="2.5" stroke="#1d4f89" stroke-width="1.8"/><path d="M8 2.8V6.2M16 2.8V6.2M3.5 9.2H20.5" stroke="#1d4f89" stroke-width="1.8" stroke-linecap="round"/><circle cx="12" cy="14.2" r="3.2" stroke="#1d4f89" stroke-width="1.8"/><path d="M12 12.6V14.6L13.4 15.4" stroke="#1d4f89" stroke-width="1.8" stroke-linecap="round"/></svg>';
+        }
+        if (category === 'progress_test') {
+            return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5" stroke="#1d4f89" stroke-width="1.8"/><path d="M8 12l2.2 2.2L16.5 8" stroke="#1d4f89" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        }
+        return '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 3.6 21 19.2H3L12 3.6Z" stroke="#1d4f89" stroke-width="1.8" stroke-linejoin="round"/><path d="M12 9.2V13.4M12 16.8h.01" stroke="#1d4f89" stroke-width="1.8" stroke-linecap="round"/></svg>';
+    }
+
+    function timelineTs(item) {
+        return item.ts || item.timestamp || item.created_at || item.sent_at || '';
+    }
+
+    function renderChronologicalTimeline(items) {
+        if (!items.length) return '<div class="tcc-empty">No timeline records found for this blocker.</div>';
+        var html = '<div class="tcc-intervention-list">';
+        items.sort(function (a, b) {
+            var ta = new Date(String(timelineTs(a) || '').replace(' ', 'T') + 'Z').getTime();
+            var tb = new Date(String(timelineTs(b) || '').replace(' ', 'T') + 'Z').getTime();
+            if (isNaN(ta)) ta = 0;
+            if (isNaN(tb)) tb = 0;
+            return ta - tb;
+        });
+        items.forEach(function (item) {
+            var click = item.kind === 'email'
+                ? 'openEmailBodyModal(' + serializeForOnclick(item.payload || {}) + ')'
+                : 'openInterventionDetailModal(' + serializeForOnclick(item.payload || item) + ')';
+            html += '<div class="tcc-intervention-item tcc-intervention-clickable" onclick="' + click + '"><div class="tcc-intervention-title">' + escapeHtml(item.label || 'Timeline') + '</div><div class="tcc-intervention-meta">' + escapeHtml(niceDateTime(timelineTs(item)) + ' · ' + (item.meta || '—')) + '</div></div>';
+        });
+        html += '</div>';
         return html;
     }
 
@@ -609,7 +670,7 @@ cw_header('Instructor Theory Control Center');
         issue = issue || {};
         var studentId = parseInt(issue.student_id || selectedStudentId || 0, 10);
         var lessonId = parseInt(issue.lesson_id || 0, 10);
-        var officialHref = officialFlowHref(issue);
+        var category = blockerCategory(issue);
         var lessonInfo = (summaryResp && summaryResp.data && summaryResp.data.lesson) || (attemptsResp && attemptsResp.data && attemptsResp.data.lesson) || (interventionsResp && interventionsResp.data && interventionsResp.data.lesson) || {};
         var lessonRow = findLessonRow((lessonsResp && lessonsResp.lessons) || [], lessonId) || {};
         var interventions = (interventionsResp && interventionsResp.data) || {};
@@ -618,32 +679,67 @@ cw_header('Instructor Theory Control Center');
         var summaryHtml = rawSummaryHtml(summary);
         var originalDeadline = lessonRow.original_deadline_utc || lessonInfo.original_deadline_utc || '';
         var effectiveDeadline = lessonRow.effective_deadline_utc || lessonInfo.effective_deadline_utc || '';
-        var issueType = String(issue.type || issue.action_type || issue.issue_type || '');
-        var reasonBlock = '';
+        var timeline = [];
+        var actions = interventions.required_actions || [];
+        var emails = interventions.emails || [];
+        var overrides = interventions.deadline_overrides || [];
+        var events = interventions.events || [];
+        var latest = attempts.length ? attempts[0] : null;
 
-        if (issueType === 'deadline_reason_submission' || /deadline/i.test(issue.title || issue.reason || issueType)) {
-            reasonBlock = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Deadline Reason / Extension Trace</div><div class="tcc-modal-readable">' + escapeHtml(latestDeadlineReason(interventions)) + '</div></div>';
+        if (category === 'deadline') {
+            if (originalDeadline) timeline.push({kind: 'event', ts: originalDeadline, label: 'Deadline expiration', meta: 'Original deadline', payload: {timestamp: originalDeadline, type: 'deadline_expiration'}});
+            actions.forEach(function (a) {
+                if (String(a.action_type || '') === 'deadline_reason_submission') {
+                    timeline.push({kind: 'event', ts: a.created_at || a.opened_at || '', label: 'Student reason submission', meta: (a.title || a.status || 'deadline_reason_submission'), payload: a});
+                    if (a.decision_notes || a.decision_payload_json) {
+                        timeline.push({kind: 'event', ts: a.updated_at || a.completed_at || a.created_at || '', label: 'AI approval decision', meta: (a.status || 'decision_recorded'), payload: a});
+                    }
+                }
+            });
+            overrides.forEach(function (o) {
+                timeline.push({kind: 'event', ts: o.created_at || '', label: 'Extension granted', meta: (o.override_deadline_utc ? ('New deadline ' + niceDateTime(o.override_deadline_utc)) : 'Deadline override'), payload: o});
+            });
+            emails.forEach(function (e) {
+                timeline.push({kind: 'email', ts: e.sent_timestamp || e.sent_at || e.created_at || '', label: 'Email sent', meta: (e.delivery_status || e.sent_status || 'sent') + ' · ' + (e.recipient_label || 'student'), payload: e});
+            });
+        } else if (category === 'progress_test') {
+            if (summary.updated_at || summary.created_at) {
+                timeline.push({kind: 'event', ts: summary.updated_at || summary.created_at, label: 'Summary created', meta: summary.review_status || 'summary', payload: summary});
+            }
+            attempts.forEach(function (a) {
+                timeline.push({kind: 'event', ts: a.completed_at || a.updated_at || a.created_at || '', label: 'Attempt history', meta: 'Attempt ' + (a.attempt || '—') + ' · ' + (a.formal_result_code || a.status || '—'), payload: a});
+            });
+            actions.forEach(function (a) {
+                timeline.push({kind: 'event', ts: a.updated_at || a.created_at || '', label: 'Instructor action', meta: (a.action_type || 'required_action') + ' · ' + (a.status || '—'), payload: a});
+            });
+            if (summary.review_status || summary.review_score !== null) {
+                timeline.push({kind: 'event', ts: summary.updated_at || '', label: 'AI evaluation', meta: (summary.review_status || 'review') + (summary.review_score !== null && summary.review_score !== undefined ? (' · ' + summary.review_score + '%') : ''), payload: summary});
+            }
         } else {
-            var latest = attempts.length ? attempts[0] : null;
-            reasonBlock = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Progress Test Attempt Context</div>';
-            reasonBlock += latest ? modalStatusRows([['Latest Attempt', latest.attempt || '—'], ['Latest Status', latest.status || '—'], ['Latest Result', latest.formal_result_code || '—'], ['Latest Score', latest.score_pct !== null && latest.score_pct !== undefined ? latest.score_pct + '%' : '—'], ['Completed', niceDateTime(latest.completed_at)]]) : '<div class="tcc-modal-muted">No progress test attempts were returned for this lesson.</div>';
-            reasonBlock += '</div>';
+            timeline.push({kind: 'event', ts: issue.created_at || issue.updated_at || '', label: 'Human-readable explanation', meta: issue.title || issue.summary || issue.issue_type || 'System issue', payload: issue});
+            timeline.push({kind: 'event', ts: issue.created_at || issue.updated_at || '', label: 'JSON evidence', meta: 'Open detail', payload: issue.evidence || issue});
+            emails.forEach(function (e) {
+                timeline.push({kind: 'email', ts: e.sent_timestamp || e.sent_at || e.created_at || '', label: 'Email sent', meta: (e.delivery_status || e.sent_status || 'sent') + ' · ' + (e.recipient_label || 'student'), payload: e});
+            });
         }
 
         var html = '<div class="tcc-modal-grid">';
-        html += '<div class="tcc-modal-section"><div class="tcc-modal-section-title">A. Lesson Info</div>' + modalStatusRows([['Module', lessonInfo.course_title || lessonRow.course_title || '—'], ['Lesson', lessonInfo.lesson_title || lessonRow.lesson_title || issue.lesson_title || '—'], ['Lesson ID', lessonId || '—'], ['Student ID', studentId || '—']]) + '</div>';
-        html += '<div class="tcc-modal-section"><div class="tcc-modal-section-title">B/C. Deadlines</div>' + modalStatusRows([['Original Deadline', niceDateTime(originalDeadline)], ['Effective Deadline', niceDateTime(effectiveDeadline)], ['Finished', niceDateTime(lessonRow.completed_at)], ['Timing', lessonRow.deadline_delta_label || '—'], ['Extensions', lessonRow.extension_count !== undefined ? lessonRow.extension_count : '—']]) + '</div>';
-        html += reasonBlock;
-        html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Summary</div><div class="tcc-summary-paper nb-content">' + summaryHtml + '</div>' + renderAiInterpretation((summaryResp && summaryResp.data && summaryResp.data.ai_interpretation) || {}, studentId, lessonId) + '</div>';
-        html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Progress Test Attempts</div>' + renderAttemptCards(attempts) + '</div>';
-        html += interventionBlock('Required Actions', interventions.required_actions || []);
-        html += interventionBlock('Deadline Overrides / Extensions', interventions.deadline_overrides || []);
-        html += interventionBlock('Email Trace', interventions.emails || []);
-        html += interventionBlock('Progression Events', interventions.events || []);
-        html += decisionOptionsHtml(officialHref);
+        html += '<div class="tcc-modal-section"><div class="tcc-modal-section-title">Blocker Category</div><div style="display:flex;align-items:center;gap:8px;font-weight:900;color:#102845;">' + blockerIcon(category) + '<span>' + escapeHtml(blockerLabel(category)) + '</span></div>' + modalStatusRows([['Issue', issue.title || issue.issue_type || issue.type || '—'], ['Module', lessonInfo.course_title || lessonRow.course_title || '—'], ['Lesson', lessonInfo.lesson_title || lessonRow.lesson_title || issue.lesson_title || '—']]) + '</div>';
+        html += '<div class="tcc-modal-section"><div class="tcc-modal-section-title">Timeline Context</div>' + modalStatusRows([['Original Deadline', niceDateTime(originalDeadline)], ['Effective Deadline', niceDateTime(effectiveDeadline)], ['Completed', niceDateTime(lessonRow.completed_at)], ['Timing', lessonRow.deadline_delta_label || '—'], ['Student ID', studentId || '—']]) + '</div>';
+        html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Chronological Timeline</div>' + renderChronologicalTimeline(timeline) + '</div>';
+        if (category === 'progress_test') {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Progress Test Attempt Context</div>' + (latest ? modalStatusRows([['Latest Attempt', latest.attempt || '—'], ['Latest Status', latest.status || '—'], ['Latest Result', latest.formal_result_code || '—'], ['Latest Score', latest.score_pct !== null && latest.score_pct !== undefined ? latest.score_pct + '%' : '—'], ['Completed', niceDateTime(latest.completed_at)]]) : '<div class="tcc-modal-muted">No progress test attempts were returned for this lesson.</div>') + '</div>';
+        }
+        if (summaryHtml && summaryHtml !== '—') {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Summary Snapshot</div><div class="tcc-summary-paper nb-content">' + summaryHtml + '</div></div>';
+        }
+        if (category === 'system_bug' && issueCanOneClickRepair(issue)) {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Repair</div><div class="tcc-modal-muted" style="margin-bottom:10px;">This stale bug blocker is marked repairable by API and can be fixed with the safe repair endpoint.</div><button class="tcc-btn fix" type="button" data-issue-json="' + escapeHtml(JSON.stringify(issue)) + '" onclick="executeTccRepairButton(this)">Fix Issue</button></div>';
+        }
+        html += '<div class="tcc-modal-section full"><div class="tcc-approval-alert">Modal is read-only diagnostic and navigation context only. Decision execution remains outside this modal.</div></div>';
         html += '</div>';
 
-        openTccModal('Instructor Approval Context', html, 'Read-Only Workflow Context');
+        openTccModal('Review Context', html, 'Read-Only Workflow Context');
     }
 
     function openApprovalContextFromIssue(issue) {
