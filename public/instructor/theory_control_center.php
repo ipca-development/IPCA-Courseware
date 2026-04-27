@@ -348,20 +348,18 @@ cw_header('Instructor Theory Control Center');
         return 'green';
     }
 
-    function blockerReviewHref(issue) {
+function blockerReviewHref(issue) {
     issue = issue || {};
 
-    const officialUrl = String(issue.official_flow_url || issue.action_url || '').trim();
-
-    if (officialUrl !== '') {
-        if (officialUrl.indexOf('/student/') === 0) {
-            return '';
-        }
-
-        return officialUrl;
+    if (issue.official_flow_url) {
+        return String(issue.official_flow_url);
     }
 
-    if (issue.token && issue.type === 'instructor_approval') {
+    if (issue.action_url) {
+        return String(issue.action_url);
+    }
+
+    if (issue.token && String(issue.type || '') === 'instructor_approval') {
         return '/instructor/instructor_approval.php?token=' + encodeURIComponent(issue.token);
     }
 
@@ -1592,6 +1590,8 @@ function executeTccRepairFromIssue(issueJson, btn) {
 
 if (reviewHref !== '') {
     actions += '<a class="tcc-btn primary" href="' + escapeHtml(reviewHref) + '">Review</a>';
+} else if (String(issue.blocker_category || '') === 'policy') {
+    actions += '<button class="tcc-btn secondary" type="button" disabled>Official Workflow Only</button>';
 } else {
     actions += '<button class="tcc-btn secondary" type="button" onclick="openDebugReport(' + parseInt(st.student_id, 10) + ',' + lessonId + ',' + jsArg(safeIssueType) + ')">Inspect</button>';
 }
