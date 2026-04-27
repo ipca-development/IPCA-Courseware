@@ -288,6 +288,23 @@ function tcc_recommended_action(string $actionType): string {
     return 'review_required_action';
 }
 
+function tcc_official_flow_url(string $actionType, string $token): string {
+
+    $actionType = trim($actionType);
+
+    $token = trim($token);
+
+    if ($actionType === 'instructor_approval' && $token !== '') {
+
+        return '/instructor/instructor_approval.php?token=' . rawurlencode($token);
+
+    }
+
+    return '';
+
+}
+
+
 function tcc_safe_actions(string $actionType): array {
     if ($actionType === 'instructor_approval') {
         return ['review', 'grant_attempts', 'require_one_on_one', 'suspend_training'];
@@ -1494,30 +1511,37 @@ try {
         $systemIssues = tcc_system_watch($pdo, $cohortId, $studentId);
 
         $issues = [];
-        foreach ($pending as $p) {
+
+		
+foreach ($pending as $p) {
+            $actionType = (string)$p['action_type'];
+            $token = (string)($p['token'] ?? '');
+
             $issues[] = [
-    'type' => (string)$p['action_type'],
-    'issue_type' => 'open_required_action_' . (string)$p['action_type'],
-    'blocker_category' => 'policy',
-    'repair_allowed' => false,
-    'repair_code' => 'official_flow_only',
-    'status' => (string)$p['status'],
-    'student_id' => $studentId,
-    'cohort_id' => $cohortId,
-    'lesson_id' => (int)$p['lesson_id'],
-    'lesson_title' => (string)($p['lesson_title'] ?? ''),
-    'title' => (string)($p['title'] ?? ''),
-    'token' => (string)($p['token'] ?? ''),
-    'evidence' => [
-        'required_action_id' => (int)$p['id'],
-        'action_type' => (string)$p['action_type'],
-        'status' => (string)$p['status'],
-        'created_at' => (string)($p['created_at'] ?? ''),
-        'opened_at' => (string)($p['opened_at'] ?? ''),
-        'has_token' => trim((string)($p['token'] ?? '')) !== '',
-    ],
-];
-        }
+                'type' => $actionType,
+                'issue_type' => 'open_required_action_' . $actionType,
+                'blocker_category' => 'policy',
+                'repair_allowed' => false,
+                'repair_code' => 'official_flow_only',
+                'official_flow_url' => tcc_official_flow_url($actionType, $token),
+                'status' => (string)$p['status'],
+                'student_id' => $studentId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => (int)$p['lesson_id'],
+                'lesson_title' => (string)($p['lesson_title'] ?? ''),
+                'title' => (string)($p['title'] ?? ''),
+                'token' => $token,
+                'evidence' => [
+                    'required_action_id' => (int)$p['id'],
+                    'action_type' => $actionType,
+                    'status' => (string)$p['status'],
+                    'created_at' => (string)($p['created_at'] ?? ''),
+                    'opened_at' => (string)($p['opened_at'] ?? ''),
+                    'has_token' => trim($token) !== '',
+                ],
+            ];
+        }		
+		
 
         foreach ($systemIssues as $si) {
             $issues[] = [
