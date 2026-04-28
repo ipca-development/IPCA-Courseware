@@ -2203,6 +2203,9 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
         'test_pass_status',
         'completion_status',
         'effective_deadline_utc',
+        'reason_required',
+        'reason_submitted',
+        'reason_decision',
         'last_state_eval_at',
         'next_lesson_unlocked_at',
         'latest_instructor_action_id',
@@ -2216,6 +2219,15 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
     foreach ($allowedFields as $key) {
         if (array_key_exists($key, $projection['fields'])) {
             $fields[$key] = $projection['fields'][$key];
+        }
+    }
+
+    if (array_key_exists('reason_decision', $fields)) {
+        $rd = $fields['reason_decision'];
+        if ($rd !== null && $rd !== '' && !in_array((string)$rd, ['pending', 'accepted', 'rejected'], true)) {
+            throw new InvalidArgumentException(
+                'lesson_activity.reason_decision must be one of pending, accepted, rejected, or null.'
+            );
         }
     }
 
@@ -2635,7 +2647,8 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
             ]);
 
             $projectionFields = [
-                'reason_decision' => 'approved',
+                'reason_required' => 0,
+                'reason_decision' => 'accepted',
                 'completion_status' => 'in_progress',
                 'test_pass_status' => 'in_progress',
                 'last_state_eval_at' => $nowUtc,

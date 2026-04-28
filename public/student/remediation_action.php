@@ -183,7 +183,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $updActivity = $pdo->prepare("
                         UPDATE lesson_activity
                         SET
-                            reason_decision = 'approved',
+                            reason_decision = 'accepted',
                             updated_at = NOW()
                         WHERE user_id = ?
                           AND cohort_id = ?
