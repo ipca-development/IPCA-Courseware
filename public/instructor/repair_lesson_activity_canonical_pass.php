@@ -21,10 +21,11 @@ cw_require_login();
 
 $u = cw_current_user($pdo);
 $role = (string)($u['role'] ?? '');
-if (!in_array($role, ['admin', 'chief_instructor'], true)) {
+$allowedRoles = ['admin', 'supervisor', 'instructor', 'chief_instructor'];
+if (!in_array($role, $allowedRoles, true)) {
     http_response_code(403);
     header('Content-Type: text/plain; charset=utf-8');
-    echo 'Forbidden: admin or chief_instructor only. Delete this file after use.';
+    echo 'Forbidden: instructor workspace role required (same as Theory Control Center). Delete this file after use.';
     exit;
 }
 
