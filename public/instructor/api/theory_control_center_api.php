@@ -324,10 +324,21 @@ function tcc_safe_actions(string $actionType): array {
     return ['review'];
 }
 
-function tcc_blocker_family(string $actionType): string
+/**
+ * UI grouping for bulk-select families. Uses action_type; instructor_approval titles
+ * from deadline escalation use "Missed Deadline" and belong with deadline workflows.
+ */
+function tcc_blocker_family(string $actionType, string $title = ''): string
 {
-    if ($actionType === 'deadline_reason_submission') return 'deadline_related';
-    if ($actionType === 'instructor_approval') return 'progress_test_failure_related';
+    if ($actionType === 'deadline_reason_submission') {
+        return 'deadline_related';
+    }
+    if ($actionType === 'instructor_approval') {
+        if (stripos($title, 'Missed Deadline') !== false) {
+            return 'deadline_related';
+        }
+        return 'progress_test_failure_related';
+    }
     return 'other';
 }
 
@@ -1613,7 +1624,7 @@ try {
                 'action_type' => $actionType,
 				'status' => (string)$row['status'],
 				'severity' => tcc_action_severity($actionType),
-                'blocker_family' => tcc_blocker_family($actionType),
+                'blocker_family' => tcc_blocker_family($actionType, (string)($row['title'] ?? '')),
                 'sort_rank' => tcc_action_sort_rank($actionType),
 				'official_flow_url' => tcc_official_flow_url($actionType, (string)($row['token'] ?? '')),
                 'reason' => (string)($row['title'] ?? $actionType),

@@ -1222,6 +1222,14 @@ cw_header('Instructor Theory Control Center');
                 issue.cohort_id = issue.cohort_id || cohortId;
                 var lessonId = parseInt(issue.lesson_id, 10) || 0;
                 var safeIssueType = String(issue.type || 'manual_check').replace(/[^a-zA-Z0-9_\-]/g, '');
+                var statusLabel = (function () {
+                    var t = String(issue.type || '');
+                    var st = String(issue.status || '');
+                    if (t === 'deadline_reason_submission' && st === 'completed') {
+                        return 'reason submitted — awaiting instructor approval';
+                    }
+                    return st;
+                })();
                 var actions = '<div class="tcc-issue-actions">';
                 if (String(issue.blocker_category || '') === 'policy' || officialFlowHref(issue) !== '') {
                     actions += '<button class="tcc-btn primary" type="button" data-issue-json="' + escapeHtml(JSON.stringify(issue)) + '" onclick="openApprovalContextFromButton(this)">Review</button>';
@@ -1232,7 +1240,7 @@ cw_header('Instructor Theory Control Center');
                     actions += '<button class="tcc-btn fix" type="button" data-issue-json="' + escapeHtml(JSON.stringify(issue)) + '" onclick="executeTccRepairButton(this)">Fix Issue</button>';
                 }
                 actions += '</div>';
-                issueHtml += '<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">' + escapeHtml(issue.title || issue.type || 'Issue') + '</div><div class="tcc-issue-meta">Lesson ' + escapeHtml(issue.lesson_id || '—') + ' · ' + escapeHtml(issue.lesson_title || '') + ' · ' + escapeHtml(issue.status || '') + '</div></div>' + actions + '</div>';
+                issueHtml += '<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">' + escapeHtml(issue.title || issue.type || 'Issue') + '</div><div class="tcc-issue-meta">Lesson ' + escapeHtml(issue.lesson_id || '—') + ' · ' + escapeHtml(issue.lesson_title || '') + ' · ' + escapeHtml(statusLabel) + '</div></div>' + actions + '</div>';
             });
             if (issues.length > 10) {
                 issueHtml += '<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">+' + (issues.length - 10) + ' more issue(s)</div><div class="tcc-issue-meta">The lesson module view below keeps the full instructor workflow organized.</div></div><div class="tcc-issue-actions"><button class="tcc-btn secondary" type="button" onclick="loadStudentLessons(' + parseInt(st.student_id, 10) + ')">Open Lessons</button></div></div>';
