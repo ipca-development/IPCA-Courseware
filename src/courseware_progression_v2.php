@@ -2616,6 +2616,44 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
                 'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
             ];
 
+            $uid = (int)$action['user_id'];
+            $cid = (int)$action['cohort_id'];
+            $lid = (int)$action['lesson_id'];
+            $policy = $this->resolveEffectivePolicySet($cid);
+            $canonicalPassRow = $this->getLatestCanonicalPassProgressTestRow($uid, $cid, $lid);
+
+            $projectionFields = [
+                'reason_required' => 0,
+                'reason_decision' => 'accepted',
+                'last_state_eval_at' => $nowUtc,
+            ];
+
+            if ($canonicalPassRow !== null) {
+                // Bulk deadline approval must not wipe a recorded PASS (matches finalizeAssessedProgressTest / system_watch).
+                $summaryState = $this->resolveSummaryState($uid, $cid, $lid, $policy);
+                $projectionFields['test_pass_status'] = 'passed';
+                $projectionFields['completion_status'] = ((string)($summaryState['summary_status'] ?? '') === 'acceptable')
+                    ? 'completed'
+                    : 'awaiting_summary_review';
+                if ($projectionFields['completion_status'] === 'completed') {
+                    $existingLa = $this->getLessonActivityProjectionRow($uid, $cid, $lid);
+                    $projectionFields['completed_at'] = !empty($existingLa['completed_at'])
+                        ? (string)$existingLa['completed_at']
+                        : $nowUtc;
+                    $projectionFields['next_lesson_unlocked_at'] = !empty($existingLa['next_lesson_unlocked_at'])
+                        ? (string)$existingLa['next_lesson_unlocked_at']
+                        : $projectionFields['completed_at'];
+                }
+                $decisionPayload['preserved_canonical_pass_projection'] = 1;
+            } else {
+                $projectionFields['completion_status'] = 'in_progress';
+                $projectionFields['test_pass_status'] = 'in_progress';
+            }
+
+            if ($reopenedEffectiveDeadlineUtc !== null) {
+                $projectionFields['effective_deadline_utc'] = $reopenedEffectiveDeadlineUtc;
+            }
+
             $stmt = $this->pdo->prepare("
                 UPDATE student_required_actions
                 SET
@@ -2645,17 +2683,6 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
                 ':updated_at' => $nowUtc,
                 ':id' => $actionId,
             ]);
-
-            $projectionFields = [
-                'reason_required' => 0,
-                'reason_decision' => 'accepted',
-                'completion_status' => 'in_progress',
-                'test_pass_status' => 'in_progress',
-                'last_state_eval_at' => $nowUtc,
-            ];
-            if ($reopenedEffectiveDeadlineUtc !== null) {
-                $projectionFields['effective_deadline_utc'] = $reopenedEffectiveDeadlineUtc;
-            }
 
             $projectionResult = $this->persistLessonActivityProjection(
                 (int)$action['user_id'],
@@ -5568,6 +5595,32 @@ private function getLatestProgressTestRowForLesson(int $userId, int $cohortId, i
     $row = $stmt->fetch();
     return $row ?: null;
 }
+
+    /**
+     * Latest completed passing attempt (matches system_watch “canonical PASS”).
+     */
+    private function getLatestCanonicalPassProgressTestRow(int $userId, int $cohortId, int $lessonId): ?array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT *
+            FROM progress_tests_v2
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+              AND status = 'completed'
+              AND pass_gate_met = 1
+            ORDER BY attempt DESC, id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+        ]);
+
+        $row = $stmt->fetch();
+        return $row ?: null;
+    }
 
     private function getLessonSummaryRow(int $userId, int $cohortId, int $lessonId): ?array
     {

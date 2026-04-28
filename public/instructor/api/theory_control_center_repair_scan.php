@@ -548,9 +548,11 @@ try {
           " . $sqlStudent . "
           " . $sqlLesson . "
           AND (
-              COALESCE(la.completion_status, '') <> 'completed'
-              OR COALESCE(la.test_pass_status, '') <> 'passed'
-              OR COALESCE(la.training_suspended, 0) <> 0
+              COALESCE(la.training_suspended, 0) <> 0
+              OR NOT (
+                  COALESCE(la.test_pass_status, '') = 'passed'
+                  AND COALESCE(la.completion_status, '') IN ('completed', 'awaiting_summary_review')
+              )
           )
         GROUP BY
             la.user_id,
@@ -577,7 +579,7 @@ try {
             'stale_bug',
             'pass_exists_projection_not_completed',
             'high',
-            'Canonical PASS exists in progress_tests_v2, but lesson_activity still shows incomplete, not passed, or suspended.',
+            'Canonical PASS exists in progress_tests_v2, but lesson_activity looks inconsistent (excluding awaiting summary review after a passed test).',
             $row,
             true,
             'recompute_projection',

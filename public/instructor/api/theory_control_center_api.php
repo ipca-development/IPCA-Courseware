@@ -501,9 +501,10 @@ function tcc_system_watch(PDO $pdo, int $cohortId, ?int $userId = null): array {
                 AND pt.status = 'completed'
                 AND pt.pass_gate_met = 1
           )
-          AND (
-              COALESCE(la.completion_status, '') <> 'completed'
-              OR COALESCE(la.test_pass_status, '') <> 'passed'
+          /* Exclude normal states after a canonical PASS: lesson completed, or test passed and summary review pending. */
+          AND NOT (
+              COALESCE(la.test_pass_status, '') = 'passed'
+              AND COALESCE(la.completion_status, '') IN ('completed', 'awaiting_summary_review')
           )
         LIMIT 100
     ");
@@ -518,7 +519,7 @@ function tcc_system_watch(PDO $pdo, int $cohortId, ?int $userId = null): array {
             'lesson_id' => (int)$row['lesson_id'],
             'student_name' => tcc_student_name($row),
             'lesson_title' => (string)($row['lesson_title'] ?? ''),
-            'summary' => 'Canonical PASS exists, but lesson_activity does not show completed/passed.',
+            'summary' => 'Canonical PASS exists, but lesson_activity still looks wrong (test not marked passed, or lesson stuck outside awaiting-summary / completed).',
             'recommended_safe_action' => 'recompute_projection',
         ];
     }
