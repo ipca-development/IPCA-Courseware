@@ -316,25 +316,15 @@ try {
         ), 409);
     }
 
-    $latestStmt = $pdo->prepare("
-        SELECT id
-        FROM progress_tests_v2
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id = ?
-        ORDER BY id DESC
-        LIMIT 1
-        FOR UPDATE
-    ");
-    $latestStmt->execute(array($studentId, $cohortId, $lessonId));
-    $latestId = (int)$latestStmt->fetchColumn();
-
-    if ($latestId === (int)$target['id']) {
+    // Stale rows created after a canonical PASS often have the highest id — refusing "latest row"
+    // would block the main real-world case. Only block cleaning the canonical PASS row itself
+    // (should never be active+completed PASS at once; defensive).
+    if ((int)$target['id'] === (int)$passRow['id']) {
         $pdo->rollBack();
         tcc_repair_json(array(
             'ok' => false,
-            'error' => 'refusing_to_kill_latest_attempt',
-            'message' => 'Target is the latest attempt. Not safe to auto-clean.'
+            'error' => 'target_is_canonical_pass_row',
+            'message' => 'Target matches canonical PASS row; cannot stale-abort that attempt.'
         ), 409);
     }
 
@@ -369,7 +359,11 @@ try {
 
     $passCompletedRaw = (string)($passRow['completed_at'] ?? '');
     $passCompletedTimestamp = strtotime($passCompletedRaw);
-    $targetCreatedTimestamp = strtotime((string)($target['created_at'] ?? ''));
+    $targetAnchorRaw = (string)($target['created_at'] ?? '');
+    if ($targetAnchorRaw === '') {
+        $targetAnchorRaw = (string)($target['started_at'] ?? '');
+    }
+    $targetCreatedTimestamp = strtotime($targetAnchorRaw);
 
     if ($passCompletedTimestamp === false || $targetCreatedTimestamp === false) {
         $pdo->rollBack();
@@ -380,12 +374,13 @@ try {
         ), 409);
     }
 
-    if ($passCompletedTimestamp < $targetCreatedTimestamp) {
+    // Allow only when the open attempt clearly started after the canonical PASS finished (orphan session).
+    if ($targetCreatedTimestamp <= $passCompletedTimestamp) {
         $pdo->rollBack();
         tcc_repair_json(array(
             'ok' => false,
-            'error' => 'pass_before_attempt_inconsistent',
-            'message' => 'PASS occurred before this attempt. Not a safe stale cleanup case.'
+            'error' => 'target_not_after_canonical_pass',
+            'message' => 'This active attempt does not start after the canonical PASS completed; not a safe stale cleanup case.'
         ), 409);
     }
 
