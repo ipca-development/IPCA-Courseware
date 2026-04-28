@@ -148,7 +148,11 @@ function tcc_pending_actions(PDO $pdo, int $cohortId, ?int $userId = null): arra
         LEFT JOIN lessons l ON l.id = sra.lesson_id
         WHERE sra.cohort_id = ?
           {$userSql}
-          AND sra.status IN ('pending','opened')
+          AND (
+              (sra.action_type = 'deadline_reason_submission' AND sra.status IN ('pending','opened','completed'))
+              OR
+              (sra.action_type <> 'deadline_reason_submission' AND sra.status IN ('pending','opened'))
+          )
         ORDER BY sra.created_at ASC, sra.id ASC
     ");
     $st->execute($params);
@@ -338,9 +342,12 @@ function tcc_bulk_allowed_actions_for_item(array $item): array
 {
     $actionType = (string)($item['action_type'] ?? '');
     $status = (string)($item['status'] ?? '');
+    if ($actionType === 'deadline_reason_submission') {
+        if (!in_array($status, ['pending', 'opened', 'completed'], true)) return [];
+        return ['approve_deadline_reason_submission'];
+    }
     if (!in_array($status, ['pending', 'opened'], true)) return [];
 
-    if ($actionType === 'deadline_reason_submission') return ['approve_deadline_reason_submission'];
     if ($actionType === 'instructor_approval') return ['approve_additional_attempts'];
     return [];
 }
@@ -1692,6 +1699,8 @@ try {
             } elseif ($actionCode === 'approve_deadline_reason_submission') {
                 if ((string)$row['action_type'] !== 'deadline_reason_submission') {
                     $validation = 'not_deadline_reason_submission';
+                } elseif (!in_array((string)$row['status'], ['pending', 'opened', 'completed'], true)) {
+                    $validation = 'deadline_reason_not_actionable';
                 }
             }
 
@@ -1749,12 +1758,26 @@ try {
                 $automationDispatch = null;
                 $automationDispatchError = null;
                 if ($actionCode === 'approve_deadline_reason_submission') {
-                    $engine->approveRequiredAction($rowId, $ip, $ua);
+                    $engine->approveDeadlineReasonSubmissionByInstructor(
+                        $rowId,
+                        $currentUserId,
+                        $decisionNotes,
+                        $deadlineExtensionDays,
+                        $ip,
+                        $ua
+                    );
                     try {
+                        $decisionNotesText = $decisionNotes !== '' ? $decisionNotes : 'Approved by instructor.';
+                        $decisionNotesHtml = nl2br(htmlspecialchars($decisionNotesText, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
                         $automationDispatch = $engine->dispatchRequiredActionCompletedAutomationEvent(
                             $rowId,
                             $currentUserId,
-                            'admin'
+                            'admin',
+                            [
+                                'decision_code' => 'approve_deadline_reason_submission',
+                                'decision_notes_text' => $decisionNotesText,
+                                'decision_notes_html' => $decisionNotesHtml,
+                            ]
                         );
                     } catch (Throwable $dispatchError) {
                         $automationDispatchError = $dispatchError->getMessage();

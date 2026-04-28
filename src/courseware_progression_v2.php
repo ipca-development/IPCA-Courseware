@@ -2495,7 +2495,8 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
     public function dispatchRequiredActionCompletedAutomationEvent(
         int $actionId,
         int $actorUserId = 0,
-        string $actorType = 'admin'
+        string $actorType = 'admin',
+        array $extraContext = []
     ): ?array {
         $action = $this->getRequiredActionById($actionId);
         if (!$action) {
@@ -2526,6 +2527,9 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
             'actor_type' => $actorType,
             'actor_user_id' => $actorUserId > 0 ? $actorUserId : null,
         ]);
+        if (!empty($extraContext)) {
+            $automationContext = array_merge($automationContext, $extraContext);
+        }
 
         return $this->dispatchAutomationEventIfAvailable(
             'required_action_completed',
@@ -2535,6 +2539,160 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
             $lessonId,
             $progressTestId
         );
+    }
+
+    public function approveDeadlineReasonSubmissionByInstructor(
+        int $actionId,
+        int $actorUserId,
+        string $decisionNotes = '',
+        int $deadlineExtensionDays = 0,
+        ?string $ipAddress = null,
+        ?string $userAgent = null
+    ): array {
+        $action = $this->getRequiredActionById($actionId);
+        if (!$action) {
+            throw new RuntimeException('Required action not found.');
+        }
+        if ((string)$action['action_type'] !== 'deadline_reason_submission') {
+            throw new RuntimeException('Required action is not deadline_reason_submission.');
+        }
+        $status = (string)($action['status'] ?? '');
+        if (!in_array($status, ['pending', 'opened', 'completed', 'approved'], true)) {
+            throw new RuntimeException('Deadline reason action is no longer actionable.');
+        }
+
+        $deadlineExtensionDays = max(0, min(10, $deadlineExtensionDays));
+        $decisionNotes = trim($decisionNotes);
+        $nowUtc = gmdate('Y-m-d H:i:s');
+        $reopenedEffectiveDeadlineUtc = null;
+
+        $deadlineStateBefore = $this->resolveDeadlineState(
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id']
+        );
+
+        $this->pdo->beginTransaction();
+        try {
+            if ($deadlineExtensionDays > 0) {
+                $baseDeadlineUtc = (string)($deadlineStateBefore['base_deadline_utc'] ?? '');
+                $currentEffectiveDeadlineUtc = (string)($deadlineStateBefore['effective_deadline_utc'] ?? '');
+                $reopenedEffectiveDeadlineUtc = gmdate(
+                    'Y-m-d H:i:s',
+                    strtotime($nowUtc . ' +' . $deadlineExtensionDays . ' days')
+                );
+
+                $this->replaceActiveDeadlineOverride([
+                    'user_id' => (int)$action['user_id'],
+                    'cohort_id' => (int)$action['cohort_id'],
+                    'lesson_id' => (int)$action['lesson_id'],
+                    'override_type' => 'manual_override',
+                    'base_deadline_utc' => $baseDeadlineUtc !== '' ? $baseDeadlineUtc : $currentEffectiveDeadlineUtc,
+                    'new_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+                    'granted_reason_code' => 'instructor_deadline_extension',
+                    'granted_reason_text' => 'Instructor approved deadline reason and granted manual extension.',
+                    'approval_source' => 'admin_manual',
+                    'granted_by_user_id' => $actorUserId > 0 ? $actorUserId : null,
+                ]);
+            }
+
+            $decisionPayload = [
+                'decision_code' => 'approve_deadline_reason_submission',
+                'decision_notes' => $decisionNotes,
+                'deadline_extension_days' => $deadlineExtensionDays,
+                'deadline_reopened' => $reopenedEffectiveDeadlineUtc !== null ? 1 : 0,
+                'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+            ];
+
+            $stmt = $this->pdo->prepare("
+                UPDATE student_required_actions
+                SET
+                    status = 'approved',
+                    approved_at = :approved_at,
+                    completed_at = COALESCE(completed_at, :completed_at),
+                    ip_address = COALESCE(:ip_address, ip_address),
+                    user_agent = COALESCE(:user_agent, user_agent),
+                    decision_code = :decision_code,
+                    decision_notes = :decision_notes,
+                    decision_payload_json = :decision_payload_json,
+                    decision_by_user_id = :decision_by_user_id,
+                    decision_at = :decision_at,
+                    updated_at = :updated_at
+                WHERE id = :id
+            ");
+            $stmt->execute([
+                ':approved_at' => $nowUtc,
+                ':completed_at' => $nowUtc,
+                ':ip_address' => $ipAddress,
+                ':user_agent' => $userAgent,
+                ':decision_code' => 'approve_deadline_reason_submission',
+                ':decision_notes' => $decisionNotes,
+                ':decision_payload_json' => json_encode($decisionPayload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR),
+                ':decision_by_user_id' => $actorUserId > 0 ? $actorUserId : null,
+                ':decision_at' => $nowUtc,
+                ':updated_at' => $nowUtc,
+                ':id' => $actionId,
+            ]);
+
+            $projectionFields = [
+                'reason_decision' => 'approved',
+                'completion_status' => 'in_progress',
+                'test_pass_status' => 'in_progress',
+                'last_state_eval_at' => $nowUtc,
+            ];
+            if ($reopenedEffectiveDeadlineUtc !== null) {
+                $projectionFields['effective_deadline_utc'] = $reopenedEffectiveDeadlineUtc;
+            }
+
+            $projectionResult = $this->persistLessonActivityProjection(
+                (int)$action['user_id'],
+                (int)$action['cohort_id'],
+                (int)$action['lesson_id'],
+                [
+                    'engine_projection' => true,
+                    'user_id' => (int)$action['user_id'],
+                    'cohort_id' => (int)$action['cohort_id'],
+                    'lesson_id' => (int)$action['lesson_id'],
+                    'phase' => 'deadline_reason_approved_by_instructor',
+                    'fields' => $projectionFields,
+                ]
+            );
+
+            $this->logProgressionEvent([
+                'user_id' => (int)$action['user_id'],
+                'cohort_id' => (int)$action['cohort_id'],
+                'lesson_id' => (int)$action['lesson_id'],
+                'progress_test_id' => isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null,
+                'event_type' => 'deadline',
+                'event_code' => 'deadline_reason_approved_by_instructor',
+                'event_status' => 'info',
+                'actor_type' => 'admin',
+                'actor_user_id' => $actorUserId > 0 ? $actorUserId : null,
+                'event_time' => $nowUtc,
+                'payload' => [
+                    'required_action_id' => $actionId,
+                    'deadline_extension_days' => $deadlineExtensionDays,
+                    'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+                    'projection_result' => $projectionResult,
+                ],
+                'legal_note' => 'Instructor approved deadline reason submission through CoursewareProgressionV2.',
+            ]);
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        $updatedAction = $this->getRequiredActionById($actionId) ?: [];
+        return [
+            'message' => 'Deadline reason approved successfully.',
+            'deadline_reopened' => $reopenedEffectiveDeadlineUtc !== null ? 1 : 0,
+            'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
+            'action' => $updatedAction,
+        ];
     }
 
     public function recordInstructorDecision(
