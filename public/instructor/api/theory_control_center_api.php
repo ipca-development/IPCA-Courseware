@@ -1653,6 +1653,13 @@ try {
     }
 
     if ($action === 'bulk_action_preview' || $action === 'bulk_action_execute') {
+        if (function_exists('set_time_limit')) {
+            @set_time_limit($action === 'bulk_action_execute' ? 900 : 300);
+        }
+        if ($action === 'bulk_action_execute' && function_exists('ignore_user_abort')) {
+            @ignore_user_abort(true);
+        }
+
         $payload = json_decode((string)file_get_contents('php://input'), true);
         if (!is_array($payload)) $payload = [];
 

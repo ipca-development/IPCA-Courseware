@@ -1388,28 +1388,72 @@ cw_header('Instructor Theory Control Center');
         }).then(function (r) { return r.json(); });
     }
 
+    /** Keeps each bulk API request within typical reverse-proxy / browser limits; server still processes sequentially per chunk. */
+    var TCC_BULK_CHUNK_SIZE = 50;
+
+    function tccChunkIds(ids, chunkSize) {
+        ids = Array.isArray(ids) ? ids.slice() : [];
+        var out = [];
+        var i = 0;
+        for (; i < ids.length; i += chunkSize) {
+            out.push(ids.slice(i, i + chunkSize));
+        }
+        return out;
+    }
+
     function previewBulkAction() {
         var payload = currentBulkPayload();
         if (!payload.required_action_ids.length || !payload.bulk_action_code) {
             openTccModal('Bulk Preview', '<div class="tcc-error">Select at least one blocker and choose an action.</div>');
             return;
         }
-        openTccModal('Bulk Preview', '<div class="tcc-loading">Validating bulk intervention…</div>');
-        postBulk('bulk_action_preview', payload).then(function (resp) {
-            if (!resp.ok) {
-                openTccModal('Bulk Preview', '<div class="tcc-error">' + escapeHtml(resp.error || resp.message || 'Preview failed.') + '</div>');
+        var allIds = payload.required_action_ids;
+        var chunks = tccChunkIds(allIds, TCC_BULK_CHUNK_SIZE);
+        var totalChunks = chunks.length;
+
+        function setPreviewLoading(chunkIdx) {
+            var msg = totalChunks <= 1
+                ? 'Validating bulk intervention…'
+                : ('Validating bulk intervention… (part ' + (chunkIdx + 1) + ' of ' + totalChunks + ')');
+            openTccModal('Bulk Preview', '<div class="tcc-loading">' + msg + '</div>');
+        }
+
+        setPreviewLoading(0);
+
+        var merged = { matched: 0, allowed: 0, mergedResults: [] };
+        var idx = 0;
+
+        function runNext() {
+            if (idx >= chunks.length) {
+                var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Preview Summary</div>' +
+                    modalStatusRows([['Requested', allIds.length], ['Matched', merged.matched], ['Allowed', merged.allowed]]) + '</div>';
+                html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Per Item Validation</div><div class="tcc-intervention-list">';
+                merged.mergedResults.forEach(function (r) {
+                    html += '<div class="tcc-intervention-item"><div class="tcc-intervention-title">Required Action #' + escapeHtml(r.required_action_id) + ' · lesson ' + escapeHtml(r.lesson_id) + '</div><div class="tcc-intervention-meta">' + escapeHtml(r.allowed ? 'allowed' : ('blocked: ' + (r.validation_error || 'unknown'))) + '</div></div>';
+                });
+                html += '</div></div>';
+                openTccModal('Bulk Preview', html, 'Bulk Intervention');
                 return;
             }
-            var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Preview Summary</div>' + modalStatusRows([['Requested', resp.requested_count || 0], ['Matched', resp.matched_count || 0], ['Allowed', resp.allowed_count || 0]]) + '</div>';
-            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Per Item Validation</div><div class="tcc-intervention-list">';
-            (resp.results || []).forEach(function (r) {
-                html += '<div class="tcc-intervention-item"><div class="tcc-intervention-title">Required Action #' + escapeHtml(r.required_action_id) + ' · lesson ' + escapeHtml(r.lesson_id) + '</div><div class="tcc-intervention-meta">' + escapeHtml(r.allowed ? 'allowed' : ('blocked: ' + (r.validation_error || 'unknown'))) + '</div></div>';
+
+            setPreviewLoading(idx);
+            var p = Object.assign({}, payload, { required_action_ids: chunks[idx] });
+            postBulk('bulk_action_preview', p).then(function (resp) {
+                if (!resp || !resp.ok) {
+                    openTccModal('Bulk Preview', '<div class="tcc-error">' + escapeHtml((resp && (resp.error || resp.message)) || 'Preview failed.') + '<br><small>Stopped at part ' + (idx + 1) + ' of ' + totalChunks + '.</small></div>');
+                    return;
+                }
+                merged.matched += (resp.matched_count || 0);
+                merged.allowed += (resp.allowed_count || 0);
+                (resp.results || []).forEach(function (r) { merged.mergedResults.push(r); });
+                idx += 1;
+                runNext();
+            }).catch(function () {
+                openTccModal('Bulk Preview', '<div class="tcc-error">Unable to preview bulk action (network or timeout).<br><small>Try again; large selections are processed in parts of ' + TCC_BULK_CHUNK_SIZE + '.</small></div>');
             });
-            html += '</div></div>';
-            openTccModal('Bulk Preview', html, 'Bulk Intervention');
-        }).catch(function () {
-            openTccModal('Bulk Preview', '<div class="tcc-error">Unable to preview bulk action.</div>');
-        });
+        }
+
+        runNext();
     }
 
     function executeBulkAction() {
@@ -1418,22 +1462,32 @@ cw_header('Instructor Theory Control Center');
             openTccModal('Bulk Execute', '<div class="tcc-error">Select at least one blocker and choose an action.</div>');
             return;
         }
-        openTccModal('Bulk Execute', '<div class="tcc-loading">Executing bulk intervention…</div>');
-        postBulk('bulk_action_execute', payload).then(function (resp) {
-            if (!resp.ok) {
-                openTccModal('Bulk Execute', '<div class="tcc-error">' + escapeHtml(resp.error || resp.message || 'Execution failed.') + '</div>');
-                return;
-            }
-            var s = resp.summary || {};
-            var affectedStudentIds = {};
-            (resp.results || []).forEach(function (r) {
-                if (r.status === 'success' && parseInt(r.user_id || 0, 10) > 0) {
-                    affectedStudentIds[String(parseInt(r.user_id, 10))] = 1;
-                }
-            });
-            var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Execution Summary</div>' + modalStatusRows([['Batch ID', resp.batch_id || '—'], ['Success', s.success || 0], ['Failed', s.failed || 0], ['Skipped', s.skipped || 0]]) + '</div>';
+
+        var allIds = payload.required_action_ids;
+        var chunks = tccChunkIds(allIds, TCC_BULK_CHUNK_SIZE);
+        var totalChunks = chunks.length;
+
+        var allBatchIds = [];
+        var cumulative = { success: 0, failed: 0, skipped: 0 };
+        var allResults = [];
+        var affectedStudentIds = {};
+        var chunkIndex = 0;
+
+        function setExecuteLoading() {
+            var msg = totalChunks <= 1
+                ? 'Executing bulk intervention…'
+                : ('Executing bulk intervention… (part ' + (chunkIndex + 1) + ' of ' + totalChunks + ', ' + allIds.length + ' items total)');
+            openTccModal('Bulk Execute', '<div class="tcc-loading">' + msg + '</div>');
+        }
+
+        function finishSuccess() {
+            var batchLabel = allBatchIds.length === 1
+                ? allBatchIds[0]
+                : allBatchIds.join(', ') + ' (' + allBatchIds.length + ' runs)';
+            var s = cumulative;
+            var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Execution Summary</div>' + modalStatusRows([['Batch ID(s)', batchLabel], ['Success', s.success || 0], ['Failed', s.failed || 0], ['Skipped', s.skipped || 0]]) + '</div>';
             html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Per Item Result</div><div class="tcc-intervention-list">';
-            (resp.results || []).forEach(function (r) {
+            allResults.forEach(function (r) {
                 html += '<div class="tcc-intervention-item"><div class="tcc-intervention-title">Required Action #' + escapeHtml(r.required_action_id) + '</div><div class="tcc-intervention-meta">' + escapeHtml((r.status || 'unknown') + ' · ' + (r.message || '')) + '</div></div>';
             });
             html += '</div></div>';
@@ -1446,9 +1500,48 @@ cw_header('Instructor Theory Control Center');
                 var keys = Object.keys(affectedStudentIds);
                 if (keys.length === 1) loadStudentPanel(parseInt(keys[0], 10));
             }
-        }).catch(function () {
-            openTccModal('Bulk Execute', '<div class="tcc-error">Unable to execute bulk action.</div>');
-        });
+        }
+
+        setExecuteLoading();
+
+        function runNextChunk() {
+            if (chunkIndex >= chunks.length) {
+                finishSuccess();
+                return;
+            }
+
+            setExecuteLoading();
+            var p = Object.assign({}, payload, { required_action_ids: chunks[chunkIndex] });
+            postBulk('bulk_action_execute', p).then(function (resp) {
+                if (!resp || !resp.ok) {
+                    openTccModal('Bulk Execute', '<div class="tcc-error">' + escapeHtml((resp && (resp.error || resp.message)) || 'Execution failed.') + '<br><small>Stopped at part ' + (chunkIndex + 1) + ' of ' + totalChunks + '. Earlier parts may already be committed — refresh the queue and run again on the remainder.</small></div>');
+                    loadQueue();
+                    loadOverview();
+                    return;
+                }
+                if (resp.batch_id) {
+                    allBatchIds.push(resp.batch_id);
+                }
+                var summ = resp.summary || {};
+                cumulative.success += summ.success || 0;
+                cumulative.failed += summ.failed || 0;
+                cumulative.skipped += summ.skipped || 0;
+                (resp.results || []).forEach(function (r) {
+                    allResults.push(r);
+                    if (r.status === 'success' && parseInt(r.user_id || 0, 10) > 0) {
+                        affectedStudentIds[String(parseInt(r.user_id, 10))] = 1;
+                    }
+                });
+                chunkIndex += 1;
+                runNextChunk();
+            }).catch(function () {
+                openTccModal('Bulk Execute', '<div class="tcc-error">Unable to execute bulk action (network or timeout).<br><small>If a long run disconnected, completed chunks may already be saved. Refresh the queue and continue with remaining items.</small></div>');
+                loadQueue();
+                loadOverview();
+            });
+        }
+
+        runNextChunk();
     }
 
     function openApprovalContextFromButton(btn) {
