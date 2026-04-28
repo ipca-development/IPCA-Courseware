@@ -1237,7 +1237,7 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
             WHERE cohort_id = ?
               AND user_id = ?
               " . $lessonWhere . "
-            ORDER BY created_at ASC, id ASC
+            ORDER BY granted_at ASC, id ASC
             LIMIT 100
         ");
         $overrideStmt->execute($overrideParams);
@@ -1283,7 +1283,7 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
             WHERE cohort_id = ?
               AND user_id = ?
               " . $lessonWhere . "
-            ORDER BY created_at ASC, id ASC
+            ORDER BY event_time ASC, id ASC
             LIMIT 100
         ");
         $eventStmt->execute($eventParams);
@@ -1298,6 +1298,205 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
         'deadline_overrides' => $deadlineOverrides,
         'emails' => $emails,
         'events' => $events
+    ];
+}
+
+function tcc_lesson_titles_by_ids(PDO $pdo, array $lessonIds): array
+{
+    $lessonIds = array_values(array_unique(array_filter(array_map('intval', $lessonIds))));
+    if (!$lessonIds) {
+        return [];
+    }
+
+    $placeholders = implode(',', array_fill(0, count($lessonIds), '?'));
+    $st = $pdo->prepare("SELECT id, title FROM lessons WHERE id IN ({$placeholders})");
+    $st->execute($lessonIds);
+    $map = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $map[(int)$row['id']] = (string)($row['title'] ?? '');
+    }
+
+    return $map;
+}
+
+function tcc_audit_pick_ts(string ...$candidates): string
+{
+    foreach ($candidates as $c) {
+        $c = trim((string)$c);
+        if ($c !== '') {
+            return $c;
+        }
+    }
+
+    return '1970-01-01 00:00:00';
+}
+
+/**
+ * Full cohort-level intervention / email / progression audit for one student (chronological timeline).
+ */
+function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId, int $maxPerSource = 500): array
+{
+    $maxPerSource = max(50, min(800, $maxPerSource));
+
+    $actionsStmt = $pdo->prepare("
+        SELECT *
+        FROM student_required_actions
+        WHERE cohort_id = ?
+          AND user_id = ?
+        ORDER BY created_at ASC, id ASC
+        LIMIT {$maxPerSource}
+    ");
+    $actionsStmt->execute([$cohortId, $studentId]);
+    $requiredActions = $actionsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+    $deadlineOverrides = [];
+    try {
+        $overrideStmt = $pdo->prepare("
+            SELECT *
+            FROM student_lesson_deadline_overrides
+            WHERE cohort_id = ?
+              AND user_id = ?
+            ORDER BY granted_at ASC, id ASC
+            LIMIT {$maxPerSource}
+        ");
+        $overrideStmt->execute([$cohortId, $studentId]);
+        $deadlineOverrides = $overrideStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $deadlineOverrides = [];
+    }
+
+    $emails = [];
+    try {
+        $emailStmt = $pdo->prepare("
+            SELECT *
+            FROM training_progression_emails
+            WHERE cohort_id = ?
+              AND user_id = ?
+            ORDER BY created_at ASC, id ASC
+            LIMIT {$maxPerSource}
+        ");
+        $emailStmt->execute([$cohortId, $studentId]);
+        $emails = $emailStmt->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($emails as &$emailRow) {
+            $emailRow['recipient_label'] = tcc_email_recipient_label($emailRow);
+            $emailRow['delivery_status'] = tcc_email_delivery_status($emailRow);
+            $emailRow['sent_timestamp'] = (string)($emailRow['sent_at'] ?? $emailRow['created_at'] ?? '');
+            $emailRow['readable_body'] = tcc_email_readable_body($emailRow);
+            if (trim((string)($emailRow['title'] ?? '')) === '') {
+                $emailRow['title'] = (string)($emailRow['subject'] ?? $emailRow['email_type'] ?? 'Progression Email');
+            }
+        }
+        unset($emailRow);
+    } catch (Throwable $e) {
+        $emails = [];
+    }
+
+    $events = [];
+    try {
+        $eventStmt = $pdo->prepare("
+            SELECT *
+            FROM training_progression_events
+            WHERE cohort_id = ?
+              AND user_id = ?
+            ORDER BY event_time ASC, id ASC
+            LIMIT {$maxPerSource}
+        ");
+        $eventStmt->execute([$cohortId, $studentId]);
+        $events = $eventStmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $events = [];
+    }
+
+    $lessonIds = [];
+    foreach ($requiredActions as $r) {
+        $lessonIds[] = (int)($r['lesson_id'] ?? 0);
+    }
+    foreach ($deadlineOverrides as $r) {
+        $lessonIds[] = (int)($r['lesson_id'] ?? 0);
+    }
+    foreach ($emails as $r) {
+        $lessonIds[] = (int)($r['lesson_id'] ?? 0);
+    }
+    foreach ($events as $r) {
+        $lessonIds[] = (int)($r['lesson_id'] ?? 0);
+    }
+    $lessonTitles = tcc_lesson_titles_by_ids($pdo, $lessonIds);
+
+    $timeline = [];
+
+    foreach ($requiredActions as $row) {
+        $lid = (int)($row['lesson_id'] ?? 0);
+        $sortTs = tcc_audit_pick_ts((string)($row['created_at'] ?? ''), (string)($row['updated_at'] ?? ''));
+        $timeline[] = [
+            'kind' => 'required_action',
+            'sort_ts' => $sortTs,
+            'lesson_id' => $lid,
+            'lesson_title' => $lessonTitles[$lid] ?? '',
+            'label' => (string)($row['title'] ?? $row['action_type'] ?? 'Required action'),
+            'meta' => trim((string)($row['action_type'] ?? '') . ' · status ' . (string)($row['status'] ?? '')),
+            'payload' => $row,
+        ];
+    }
+
+    foreach ($deadlineOverrides as $row) {
+        $lid = (int)($row['lesson_id'] ?? 0);
+        $sortTs = tcc_audit_pick_ts((string)($row['granted_at'] ?? ''), (string)($row['created_at'] ?? ''));
+        $timeline[] = [
+            'kind' => 'deadline_override',
+            'sort_ts' => $sortTs,
+            'lesson_id' => $lid,
+            'lesson_title' => $lessonTitles[$lid] ?? '',
+            'label' => (string)($row['override_type'] ?? 'Deadline override'),
+            'meta' => 'New deadline: ' . (string)($row['new_deadline_utc'] ?? '—'),
+            'payload' => $row,
+        ];
+    }
+
+    foreach ($emails as $row) {
+        $lid = (int)($row['lesson_id'] ?? 0);
+        $sortTs = tcc_audit_pick_ts((string)($row['created_at'] ?? ''), (string)($row['sent_at'] ?? ''));
+        $timeline[] = [
+            'kind' => 'email',
+            'sort_ts' => $sortTs,
+            'lesson_id' => $lid,
+            'lesson_title' => $lessonTitles[$lid] ?? '',
+            'label' => (string)($row['title'] ?? $row['subject'] ?? $row['email_type'] ?? 'Email'),
+            'meta' => trim((string)($row['email_type'] ?? '') . ' · ' . (string)($row['delivery_status'] ?? $row['sent_status'] ?? '')),
+            'payload' => $row,
+        ];
+    }
+
+    foreach ($events as $row) {
+        $lid = (int)($row['lesson_id'] ?? 0);
+        $sortTs = tcc_audit_pick_ts((string)($row['event_time'] ?? ''), (string)($row['created_at'] ?? ''));
+        $timeline[] = [
+            'kind' => 'progression_event',
+            'sort_ts' => $sortTs,
+            'lesson_id' => $lid,
+            'lesson_title' => $lessonTitles[$lid] ?? '',
+            'label' => (string)($row['event_code'] ?? $row['event_type'] ?? 'Event'),
+            'meta' => trim((string)($row['event_type'] ?? '') . ' · ' . (string)($row['event_status'] ?? '')),
+            'payload' => $row,
+        ];
+    }
+
+    usort($timeline, static function (array $a, array $b): int {
+        return strcmp((string)$a['sort_ts'], (string)$b['sort_ts']);
+    });
+
+    return [
+        'required_actions' => $requiredActions,
+        'deadline_overrides' => $deadlineOverrides,
+        'emails' => $emails,
+        'events' => $events,
+        'timeline' => $timeline,
+        'counts' => [
+            'required_actions' => count($requiredActions),
+            'deadline_overrides' => count($deadlineOverrides),
+            'emails' => count($emails),
+            'events' => count($events),
+            'timeline' => count($timeline),
+        ],
     ];
 }
 
@@ -1613,6 +1812,7 @@ if ($action === '') {
             'lesson_summary_detail',
             'lesson_attempts_detail',
             'lesson_interventions_detail',
+            'student_interventions_audit',
             'debug_report',
             'ai_summary_analysis'
         ]
@@ -2330,6 +2530,23 @@ foreach ($pending as $p) {
             'student_id' => $studentId,
             'lesson_id' => $lessonId,
             'data' => tcc_lesson_interventions_detail($pdo, $cohortId, $studentId, $lessonId)
+        ]);
+    }
+
+    if ($action === 'student_interventions_audit') {
+        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
+        $studentId = tcc_int($_GET['student_id'] ?? 0);
+
+        if ($cohortId <= 0 || $studentId <= 0) {
+            tcc_json(['ok' => false, 'error' => 'missing_required_ids'], 400);
+        }
+
+        tcc_json([
+            'ok' => true,
+            'action' => 'student_interventions_audit',
+            'cohort_id' => $cohortId,
+            'student_id' => $studentId,
+            'data' => tcc_student_interventions_audit($pdo, $cohortId, $studentId),
         ]);
     }
 
