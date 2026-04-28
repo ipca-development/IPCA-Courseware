@@ -55,7 +55,7 @@ cw_header('Instructor Theory Control Center');
         <div class="tcc-section-head">
             <div>
                 <h2 class="tcc-section-title">Cohort Radar</h2>
-                <div class="tcc-section-sub">Student position and risk state across the theory program. Tap an avatar or use the selector when students overlap.</div>
+                <div class="tcc-section-sub">Position = course progress. Ring color: blue when a required action is open, red when blocked, green on track, orange when the engagement score is weak but the queue is clear. Hover an avatar for the full engagement explanation.</div>
             </div>
             <div id="radarCount" class="tcc-count-pill">—</div>
         </div>
@@ -71,7 +71,7 @@ cw_header('Instructor Theory Control Center');
         </div>
         <div class="tcc-radar-legend">
             <span class="tcc-legend-pill"><span class="tcc-dot green"></span>On track</span>
-            <span class="tcc-legend-pill"><span class="tcc-dot orange"></span>At risk</span>
+            <span class="tcc-legend-pill"><span class="tcc-dot orange"></span>At risk (engagement)</span>
             <span class="tcc-legend-pill"><span class="tcc-dot red"></span>Blocked</span>
             <span class="tcc-legend-pill"><span class="tcc-dot blue"></span>Action pending</span>
             <span class="tcc-legend-pill"><span class="tcc-dot purple"></span>System watch</span>
@@ -923,7 +923,7 @@ cw_header('Instructor Theory Control Center');
             el.className = 'tcc-radar-avatar ' + color;
             el.style.left = progress + '%';
             el.style.top = (64 + (idx % 3) * 7) + 'px';
-            el.title = (s.name || 'Student') + ' · ' + progress + '% · ' + (s.state || '');
+            el.title = (s.name || 'Student') + ' · ' + progress + '% · ' + (s.state || '') + (s.motivation_detail ? ' — ' + String(s.motivation_detail) : '');
             el.setAttribute('role', 'button');
             el.setAttribute('tabindex', '0');
             el.setAttribute('aria-label', (s.name || 'Student') + ' progress ' + progress + ' percent');
@@ -1247,13 +1247,18 @@ cw_header('Instructor Theory Control Center');
         }
         var avgScore = c.avg_score !== null && c.avg_score !== undefined ? Number(c.avg_score) : null;
         var cohortAvgScore = c.cohort_avg_score !== null && c.cohort_avg_score !== undefined ? Number(c.cohort_avg_score) : null;
-        var missed = Number(c.deadlines_missed || 0);
-        var cohortMissed = Number(c.cohort_avg_deadlines_missed || 0);
+        var activeDl = (c.active_deadline_issues !== undefined && c.active_deadline_issues !== null && c.active_deadline_issues !== '') ? Number(c.active_deadline_issues) : Number(c.deadlines_missed || 0);
+        var cohortDlRaw = (c.cohort_avg_active_deadline_issues !== undefined && c.cohort_avg_active_deadline_issues !== null && c.cohort_avg_active_deadline_issues !== '') ? c.cohort_avg_active_deadline_issues : c.cohort_avg_deadlines_missed;
+        var cohortDl = Number(cohortDlRaw || 0);
+        var resolvedDl = (c.resolved_deadline_issues !== undefined && c.resolved_deadline_issues !== null && c.resolved_deadline_issues !== '') ? Number(c.resolved_deadline_issues) : null;
+        var dlSub = 'Cohort avg: ' + cohortDl + (resolvedDl !== null && !isNaN(resolvedDl) ? ' · Resolved (lifetime): ' + resolvedDl : '');
         var failed = Number(c.failed_attempts || 0);
         var cohortFailed = Number(c.cohort_avg_failed_attempts || 0);
-        var tiles = metricTile('Progress', progressPct + '%', progressPct, '', '' + (p.passed_lessons || 0) + '/' + (p.total_lessons || 0) + ' lessons passed') + metricTile('Avg Score', avgScore !== null ? avgScore + '%' : '—', metricPct(avgScore, cohortAvgScore, true), barClass(avgScore, cohortAvgScore, true), 'Cohort Average: ' + (cohortAvgScore !== null ? cohortAvgScore + '%' : '—')) + metricTile('Deadlines Missed', missed, metricPct(missed, cohortMissed, false), barClass(missed, cohortMissed, false), 'Cohort Average: ' + cohortMissed) + metricTile('Failed Attempts', failed, metricPct(failed, cohortFailed, false), barClass(failed, cohortFailed, false), 'Cohort Average: ' + cohortFailed);
+        var tiles = metricTile('Progress', progressPct + '%', progressPct, '', '' + (p.passed_lessons || 0) + '/' + (p.total_lessons || 0) + ' lessons passed') + metricTile('Avg Score', avgScore !== null ? avgScore + '%' : '—', metricPct(avgScore, cohortAvgScore, true), barClass(avgScore, cohortAvgScore, true), 'Cohort Average: ' + (cohortAvgScore !== null ? cohortAvgScore + '%' : '—')) + metricTile('Active deadline issues', activeDl, metricPct(activeDl, cohortDl, false), barClass(activeDl, cohortDl, false), dlSub) + metricTile('Failed Attempts', failed, metricPct(failed, cohortFailed, false), barClass(failed, cohortFailed, false), 'Cohort Average: ' + cohortFailed);
+        var motDetail = String((m.detail || m.motivation_detail || '')).trim();
+        var motHint = motDetail !== '' ? '<div class="tcc-motivation-detail" style="font-size:12px;line-height:1.5;color:#475569;margin-top:10px;max-width:720px;">' + escapeHtml(motDetail) + '</div>' : '';
         panel.className = '';
-        panel.innerHTML = '<div class="tcc-student-head"><div class="tcc-student-avatar ' + escapeHtml(color) + '">' + (photoPath(merged) !== '' ? '<img src="' + escapeHtml(photoPath(merged)) + '" alt="' + escapeHtml(st.name || 'Student') + '">' : escapeHtml(st.avatar_initials || radarStudent.avatar_initials || 'S')) + '</div><div style="min-width:0;"><div class="tcc-student-name">' + escapeHtml(st.name || 'Student') + '</div><div class="tcc-student-email">' + escapeHtml(st.email || '') + '</div></div></div><div class="tcc-student-state-row"><span class="tcc-status-pill ' + escapeHtml(m.level || '') + '">' + escapeHtml(m.label || 'Motivation signal') + '</span><span class="tcc-status-pill">Trend: ' + escapeHtml(m.trend || '—') + '</span><span class="tcc-status-pill">Issues: ' + escapeHtml(issues.length) + '</span></div><div class="tcc-snapshot-grid">' + tiles + '</div><h3 class="tcc-section-title" style="font-size:17px;margin:4px 0 10px;">Current Blockers / Issues</h3><div class="tcc-issues-list">' + issueHtml + '</div><div class="tcc-panel-actions"><button class="tcc-btn primary" type="button" onclick="loadStudentLessons(' + parseInt(st.student_id, 10) + ')">Lessons</button><button class="tcc-btn secondary" type="button" onclick="openInterventions(selectedStudentId,0)">Interventions</button><button class="tcc-btn warn" type="button" onclick="openSystemWatchForStudent(' + parseInt(st.student_id, 10) + ')">System Watch</button></div><div class="tcc-lesson-timeline"><div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by Module</div><div class="tcc-lesson-timeline-sub">Instructor overview styled like the student course page, grouped by module with compact deadline, summary, test, attempts, and intervention data.</div></div><span class="tcc-count-pill">Live</span></div><div id="studentLessonTimelineBody" class="tcc-timeline-loading">Loading lesson modules…</div></div>';
+        panel.innerHTML = '<div class="tcc-student-head"><div class="tcc-student-avatar ' + escapeHtml(color) + '">' + (photoPath(merged) !== '' ? '<img src="' + escapeHtml(photoPath(merged)) + '" alt="' + escapeHtml(st.name || 'Student') + '">' : escapeHtml(st.avatar_initials || radarStudent.avatar_initials || 'S')) + '</div><div style="min-width:0;"><div class="tcc-student-name">' + escapeHtml(st.name || 'Student') + '</div><div class="tcc-student-email">' + escapeHtml(st.email || '') + '</div></div></div><div class="tcc-student-state-row"><span class="tcc-status-pill ' + escapeHtml(m.level || '') + '">' + escapeHtml(m.label || 'Motivation signal') + '</span><span class="tcc-status-pill">Trend: ' + escapeHtml(m.trend || '—') + '</span><span class="tcc-status-pill">Issues: ' + escapeHtml(issues.length) + '</span></div>' + motHint + '<div class="tcc-snapshot-grid">' + tiles + '</div><h3 class="tcc-section-title" style="font-size:17px;margin:4px 0 10px;">Current Blockers / Issues</h3><div class="tcc-issues-list">' + issueHtml + '</div><div class="tcc-panel-actions"><button class="tcc-btn primary" type="button" onclick="loadStudentLessons(' + parseInt(st.student_id, 10) + ')">Lessons</button><button class="tcc-btn secondary" type="button" onclick="openInterventions(selectedStudentId,0)">Interventions</button><button class="tcc-btn warn" type="button" onclick="openSystemWatchForStudent(' + parseInt(st.student_id, 10) + ')">System Watch</button></div><div class="tcc-lesson-timeline"><div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by Module</div><div class="tcc-lesson-timeline-sub">Instructor overview styled like the student course page, grouped by module with compact deadline, summary, test, attempts, and intervention data.</div></div><span class="tcc-count-pill">Live</span></div><div id="studentLessonTimelineBody" class="tcc-timeline-loading">Loading lesson modules…</div></div>';
         loadStudentLessons(st.student_id);
     }
 

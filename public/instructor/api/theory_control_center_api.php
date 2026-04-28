@@ -205,17 +205,77 @@ function tcc_student_attempt_stats(PDO $pdo, int $cohortId, int $userId): array 
     ];
 }
 
-function tcc_deadline_missed_count(PDO $pdo, int $cohortId, int $userId): int {
+/**
+ * Open deadline-reason workflows (student or instructor still active).
+ * Excludes approved rows so resolved history does not inflate risk forever.
+ */
+function tcc_deadline_reason_active_count(PDO $pdo, int $cohortId, int $userId): int {
     $st = $pdo->prepare("
         SELECT COUNT(*)
         FROM student_required_actions
         WHERE cohort_id = ?
           AND user_id = ?
           AND action_type = 'deadline_reason_submission'
+          AND status IN ('pending', 'opened', 'completed')
     ");
     $st->execute([$cohortId, $userId]);
 
     return (int)$st->fetchColumn();
+}
+
+/** Instructor-approved deadline reasons (historical; informational). */
+function tcc_deadline_reason_resolved_count(PDO $pdo, int $cohortId, int $userId): int {
+    $st = $pdo->prepare("
+        SELECT COUNT(*)
+        FROM student_required_actions
+        WHERE cohort_id = ?
+          AND user_id = ?
+          AND action_type = 'deadline_reason_submission'
+          AND status = 'approved'
+    ");
+    $st->execute([$cohortId, $userId]);
+
+    return (int)$st->fetchColumn();
+}
+
+/** Pending actions excluding deadline_reason_submission (those are counted separately). */
+function tcc_pending_non_deadline_actions_count(array $pendingActions): int {
+    $n = 0;
+    foreach ($pendingActions as $row) {
+        if ((string)($row['action_type'] ?? '') !== 'deadline_reason_submission') {
+            $n++;
+        }
+    }
+
+    return $n;
+}
+
+function tcc_motivation_detail_summary(array $stats, int $activeDeadlineIssues, int $otherPendingActions, int $score): string {
+    $parts = [];
+
+    if ($activeDeadlineIssues > 0) {
+        $parts[] = $activeDeadlineIssues === 1
+            ? '1 open deadline workflow'
+            : $activeDeadlineIssues . ' open deadline workflows';
+    }
+    if ($otherPendingActions > 0) {
+        $parts[] = $otherPendingActions === 1
+            ? '1 other pending action'
+            : $otherPendingActions . ' other pending actions';
+    }
+    $failed = (int)($stats['failed_attempts'] ?? 0);
+    if ($failed > 0) {
+        $parts[] = $failed === 1 ? '1 failed attempt' : $failed . ' failed attempts';
+    }
+    if ($stats['avg_score'] !== null && (float)$stats['avg_score'] < 70) {
+        $parts[] = 'average score below 70%';
+    }
+
+    if ($parts === []) {
+        return 'Engagement score ' . $score . '/100 (no negative signals in this snapshot).';
+    }
+
+    return 'Engagement score ' . $score . '/100 — based on ' . implode('; ', $parts) . '.';
 }
 
 function tcc_cohort_metric_averages(PDO $pdo, int $cohortId): array {
@@ -223,7 +283,7 @@ function tcc_cohort_metric_averages(PDO $pdo, int $cohortId): array {
 
     if (!$students) {
         return [
-            'avg_deadlines_missed' => 0,
+            'avg_active_deadline_issues' => 0,
             'avg_failed_attempts' => 0,
             'avg_score' => null,
         ];
@@ -235,7 +295,7 @@ function tcc_cohort_metric_averages(PDO $pdo, int $cohortId): array {
 
     foreach ($students as $s) {
         $sid = (int)$s['id'];
-        $deadlineCounts[] = tcc_deadline_missed_count($pdo, $cohortId, $sid);
+        $deadlineCounts[] = tcc_deadline_reason_active_count($pdo, $cohortId, $sid);
 
         $stats = tcc_student_attempt_stats($pdo, $cohortId, $sid);
         $failedCounts[] = (int)$stats['failed_attempts'];
@@ -246,22 +306,28 @@ function tcc_cohort_metric_averages(PDO $pdo, int $cohortId): array {
     }
 
     return [
-        'avg_deadlines_missed' => round(array_sum($deadlineCounts) / max(1, count($deadlineCounts)), 1),
+        'avg_active_deadline_issues' => round(array_sum($deadlineCounts) / max(1, count($deadlineCounts)), 1),
         'avg_failed_attempts' => round(array_sum($failedCounts) / max(1, count($failedCounts)), 1),
         'avg_score' => $scores ? round(array_sum($scores) / count($scores), 1) : null,
     ];
 }
 
-function tcc_motivation_signal(array $stats, int $deadlineMisses, int $pendingActions): array {
+/**
+ * Engagement heuristic: open deadline workflows and other pending actions are counted separately
+ * (avoid double-counting the same deadline_reason_submission rows).
+ */
+function tcc_motivation_signal(array $stats, int $activeDeadlineReasonCount, int $otherPendingActionsCount): array {
     $score = 100;
 
-    $score -= min(40, $deadlineMisses * 10);
+    $score -= min(35, $activeDeadlineReasonCount * 10);
     $score -= min(35, ((int)$stats['failed_attempts']) * 7);
-    $score -= min(25, $pendingActions * 10);
+    $score -= min(25, $otherPendingActionsCount * 10);
 
     if ($stats['avg_score'] !== null && (float)$stats['avg_score'] < 70) {
         $score -= 10;
     }
+
+    $score = max(0, $score);
 
     if ($score >= 80) {
         return ['level' => 'strong', 'label' => 'Strong engagement', 'trend' => 'stable', 'score' => $score];
@@ -275,7 +341,7 @@ function tcc_motivation_signal(array $stats, int $deadlineMisses, int $pendingAc
         return ['level' => 'drifting', 'label' => 'Drifting', 'trend' => 'down', 'score' => $score];
     }
 
-    return ['level' => 'needs_contact', 'label' => 'Needs instructor contact', 'trend' => 'down', 'score' => max(0, $score)];
+    return ['level' => 'needs_contact', 'label' => 'Needs instructor contact', 'trend' => 'down', 'score' => $score];
 }
 
 function tcc_action_severity(string $actionType): string {
@@ -1580,8 +1646,10 @@ try {
             $progressPct = $totalLessons > 0 ? (int)round(($passed / $totalLessons) * 100) : 0;
             $actions = tcc_pending_actions($pdo, $cohortId, $sid);
             $stats = tcc_student_attempt_stats($pdo, $cohortId, $sid);
-            $deadlineMisses = tcc_deadline_missed_count($pdo, $cohortId, $sid);
-            $motivation = tcc_motivation_signal($stats, $deadlineMisses, count($actions));
+            $activeDeadlineIssues = tcc_deadline_reason_active_count($pdo, $cohortId, $sid);
+            $otherPending = tcc_pending_non_deadline_actions_count($actions);
+            $motivation = tcc_motivation_signal($stats, $activeDeadlineIssues, $otherPending);
+            $motivationDetail = tcc_motivation_detail_summary($stats, $activeDeadlineIssues, $otherPending, (int)$motivation['score']);
 
             $state = 'on_track';
             if (count($actions) > 0) {
@@ -1606,8 +1674,10 @@ try {
                 'pending_action_count' => count($actions),
                 'failed_attempts' => $stats['failed_attempts'],
                 'avg_score' => $stats['avg_score'],
-                'deadline_misses' => $deadlineMisses,
+                'active_deadline_issues' => $activeDeadlineIssues,
+                'deadline_misses' => $activeDeadlineIssues,
                 'motivation' => $motivation,
+                'motivation_detail' => $motivationDetail,
                 'state' => $state,
             ];
         }
@@ -1955,9 +2025,19 @@ try {
         $pending = tcc_pending_actions($pdo, $cohortId, $studentId);
         $completedActions = tcc_completed_actions($pdo, $cohortId, $studentId);
         $stats = tcc_student_attempt_stats($pdo, $cohortId, $studentId);
-        $deadlineMisses = tcc_deadline_missed_count($pdo, $cohortId, $studentId);
+        $activeDeadlineIssues = tcc_deadline_reason_active_count($pdo, $cohortId, $studentId);
+        $resolvedDeadlineIssues = tcc_deadline_reason_resolved_count($pdo, $cohortId, $studentId);
+        $otherPending = tcc_pending_non_deadline_actions_count($pending);
         $cohortAvg = tcc_cohort_metric_averages($pdo, $cohortId);
-        $motivation = tcc_motivation_signal($stats, $deadlineMisses, count($pending));
+        $motivation = tcc_motivation_signal($stats, $activeDeadlineIssues, $otherPending);
+        $motivation['detail'] = tcc_motivation_detail_summary($stats, $activeDeadlineIssues, $otherPending, (int)$motivation['score']);
+        $motivation['inputs'] = [
+            'active_deadline_issues' => $activeDeadlineIssues,
+            'resolved_deadline_issues' => $resolvedDeadlineIssues,
+            'other_pending_actions' => $otherPending,
+            'failed_attempts' => (int)$stats['failed_attempts'],
+            'avg_score' => $stats['avg_score'],
+        ];
         $systemIssues = tcc_system_watch($pdo, $cohortId, $studentId);
 
         $issues = [];
@@ -2031,8 +2111,11 @@ foreach ($pending as $p) {
                 'progress_pct' => $progressPct,
             ],
             'comparison' => [
-                'deadlines_missed' => $deadlineMisses,
-                'cohort_avg_deadlines_missed' => $cohortAvg['avg_deadlines_missed'],
+                'active_deadline_issues' => $activeDeadlineIssues,
+                'resolved_deadline_issues' => $resolvedDeadlineIssues,
+                'deadlines_missed' => $activeDeadlineIssues,
+                'cohort_avg_active_deadline_issues' => $cohortAvg['avg_active_deadline_issues'],
+                'cohort_avg_deadlines_missed' => $cohortAvg['avg_active_deadline_issues'],
                 'failed_attempts' => $stats['failed_attempts'],
                 'cohort_avg_failed_attempts' => $cohortAvg['avg_failed_attempts'],
                 'avg_score' => $stats['avg_score'],
