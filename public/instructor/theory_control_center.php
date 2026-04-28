@@ -97,6 +97,26 @@ cw_header('Instructor Theory Control Center');
             </div>
             <div id="queueCount" class="tcc-count-pill">—</div>
         </div>
+        <div id="bulkActionBar" class="tcc-item" style="margin-bottom:12px;">
+            <div class="tcc-item-left">
+                <div class="tcc-meta">
+                    <div class="tcc-name">Bulk Intervention</div>
+                    <div class="tcc-sub">Select blockers below and run a cohort-safe action.</div>
+                </div>
+            </div>
+            <div class="tcc-actions" style="flex-wrap:wrap;">
+                <select id="bulkActionCode" class="tcc-select" style="min-width:260px;min-height:36px;padding:6px 10px;">
+                    <option value="">Choose action…</option>
+                    <option value="approve_deadline_reason_submission">Approve deadline reason submissions</option>
+                    <option value="approve_additional_attempts">Approve instructor approvals (additional attempts)</option>
+                </select>
+                <input id="bulkDecisionNotes" type="text" class="tcc-select" style="min-width:260px;min-height:36px;padding:6px 10px;" placeholder="Decision notes (required for instructor approvals)">
+                <input id="bulkGrantedAttempts" type="number" min="0" max="5" class="tcc-select" style="width:120px;min-height:36px;padding:6px 10px;" placeholder="+Attempts">
+                <input id="bulkExtensionDays" type="number" min="0" max="10" class="tcc-select" style="width:120px;min-height:36px;padding:6px 10px;" placeholder="+Days">
+                <button id="bulkPreviewBtn" class="tcc-btn secondary" type="button">Preview</button>
+                <button id="bulkExecuteBtn" class="tcc-btn primary" type="button">Execute</button>
+            </div>
+        </div>
         <div id="actionQueue" class="tcc-queue"><div class="tcc-loading">Loading action queue…</div></div>
     </section>
 </div>
@@ -121,6 +141,8 @@ cw_header('Instructor Theory Control Center');
     var cohortId = 0;
     var selectedStudentId = 0;
     var cohortStudents = [];
+    var queueItemsById = {};
+    var selectedQueueIds = {};
 
     function escapeHtml(value) {
         return String(value === null || value === undefined ? '' : value).replace(/[&<>'"]/g, function (c) {
@@ -1229,6 +1251,8 @@ cw_header('Instructor Theory Control Center');
     function loadQueue() {
         document.getElementById('actionQueue').innerHTML = '<div class="tcc-loading">Loading action queue…</div>';
         document.getElementById('queueCount').textContent = '—';
+        queueItemsById = {};
+        selectedQueueIds = {};
         api('action_queue', {cohort_id: cohortId}).then(function (data) {
             var container = document.getElementById('actionQueue');
             var count = document.getElementById('queueCount');
@@ -1243,28 +1267,125 @@ cw_header('Instructor Theory Control Center');
                 container.innerHTML = '<div class="tcc-empty">No instructor actions required for this cohort right now.</div>';
                 return;
             }
+            var grouped = {deadline_related: [], progress_test_failure_related: [], other: []};
             items.forEach(function (item) {
-                var severity = item.severity || 'low';
-                var radarStudent = cohortStudents.find(function (s) { return parseInt(s.student_id, 10) === parseInt(item.student_id, 10); }) || {};
-                var color = radarColor(radarStudent.state ? radarStudent : {state: item.severity === 'high' ? 'blocked' : 'at_risk', pending_action_count: 1});
-                var avatarObj = Object.assign({}, radarStudent, {photo_path: item.photo_path || radarStudent.photo_path, avatar_initials: item.avatar_initials || radarStudent.avatar_initials, name: item.student_name});
-                var lessonId = parseInt(item.lesson_id || 0, 10);
-                var issueType = String(item.action_type || 'manual_check').replace(/[^a-zA-Z0-9_\-]/g, '');
-                var el = document.createElement('div');
-                el.className = 'tcc-item';
-                item.type = item.action_type || item.type || '';
-                item.title = item.reason || item.title || item.action_type || 'Required action';
-                item.official_flow_url = item.official_flow_url || officialFlowHref(item);
-                el.innerHTML = '<div class="tcc-item-left">' + avatarHtml(avatarObj, 'tcc-avatar ' + color) + '<div class="tcc-meta"><div class="tcc-name">' + escapeHtml(item.student_name || 'Student') + '</div><div class="tcc-sub">' + escapeHtml(item.lesson_title || 'No lesson title') + '</div><div class="tcc-sub">' + escapeHtml(item.reason || item.action_type || 'Required action') + '</div><span class="tcc-severity ' + escapeHtml(severity) + '">' + escapeHtml(severity) + '</span></div></div><div class="tcc-actions"><button class="tcc-btn primary" type="button" data-issue-json="' + escapeHtml(JSON.stringify(item)) + '" onclick="openApprovalContextFromButton(this)">Review</button><button class="tcc-btn secondary" type="button" onclick="openDebugReport(' + parseInt(item.student_id || 0, 10) + ',' + lessonId + ',' + jsArg(issueType) + ')">Inspect</button></div>';
-                var left = el.querySelector('.tcc-item-left');
-                if (left) {
-                    left.style.cursor = 'pointer';
-                    left.onclick = function () { loadStudentPanel(item.student_id); };
-                }
-                container.appendChild(el);
+                var family = String(item.blocker_family || 'other');
+                if (!grouped[family]) grouped[family] = [];
+                grouped[family].push(item);
+                queueItemsById[String(item.required_action_id)] = item;
+            });
+
+            function renderGroup(title, list) {
+                if (!list || !list.length) return '';
+                var html = '<div class="tcc-module-card" style="margin-bottom:10px;"><div style="padding:10px 12px;border-bottom:1px solid rgba(15,23,42,.06);font-weight:900;color:#102845;">' + escapeHtml(title) + ' (' + list.length + ')</div><div style="padding:8px;">';
+                list.forEach(function (item) {
+                    var severity = item.severity || 'low';
+                    var radarStudent = cohortStudents.find(function (s) { return parseInt(s.student_id, 10) === parseInt(item.student_id, 10); }) || {};
+                    var color = radarColor(radarStudent.state ? radarStudent : {state: item.severity === 'high' ? 'blocked' : 'at_risk', pending_action_count: 1});
+                    var avatarObj = Object.assign({}, radarStudent, {photo_path: item.photo_path || radarStudent.photo_path, avatar_initials: item.avatar_initials || radarStudent.avatar_initials, name: item.student_name});
+                    var lessonId = parseInt(item.lesson_id || 0, 10);
+                    var issueType = String(item.action_type || 'manual_check').replace(/[^a-zA-Z0-9_\-]/g, '');
+                    var rid = parseInt(item.required_action_id || 0, 10);
+                    item.type = item.action_type || item.type || '';
+                    item.title = item.reason || item.title || item.action_type || 'Required action';
+                    item.official_flow_url = item.official_flow_url || officialFlowHref(item);
+                    html += '<div class="tcc-item"><div class="tcc-item-left"><label style="display:flex;align-items:center;gap:10px;cursor:pointer;"><input type="checkbox" class="tcc-bulk-checkbox" data-required-action-id="' + rid + '">' + avatarHtml(avatarObj, 'tcc-avatar ' + color) + '<span class="tcc-meta"><span class="tcc-name">' + escapeHtml(item.student_name || 'Student') + '</span><span class="tcc-sub">' + escapeHtml(item.lesson_title || 'No lesson title') + '</span><span class="tcc-sub">' + escapeHtml(item.reason || item.action_type || 'Required action') + '</span><span class="tcc-severity ' + escapeHtml(severity) + '">' + escapeHtml(severity) + '</span></span></label></div><div class="tcc-actions"><button class="tcc-btn primary" type="button" data-issue-json="' + escapeHtml(JSON.stringify(item)) + '" onclick="openApprovalContextFromButton(this)">Review</button><button class="tcc-btn secondary" type="button" onclick="openDebugReport(' + parseInt(item.student_id || 0, 10) + ',' + lessonId + ',' + jsArg(issueType) + ')">Inspect</button></div></div>';
+                });
+                html += '</div></div>';
+                return html;
+            }
+
+            var html = '';
+            html += renderGroup('Deadline Related', grouped.deadline_related);
+            html += renderGroup('Progress Test Failure Related', grouped.progress_test_failure_related);
+            html += renderGroup('Other', grouped.other);
+            container.innerHTML = html;
+
+            Array.prototype.forEach.call(container.querySelectorAll('.tcc-bulk-checkbox'), function (cb) {
+                cb.addEventListener('change', function () {
+                    var rid = String(cb.getAttribute('data-required-action-id') || '');
+                    if (!rid) return;
+                    if (cb.checked) selectedQueueIds[rid] = 1;
+                    else delete selectedQueueIds[rid];
+                });
             });
         }).catch(function () {
             showError('actionQueue', 'Unable to load action queue.');
+        });
+    }
+
+    function selectedRequiredActionIds() {
+        return Object.keys(selectedQueueIds).map(function (k) { return parseInt(k, 10); }).filter(function (n) { return n > 0; });
+    }
+
+    function currentBulkPayload() {
+        return {
+            cohort_id: cohortId,
+            required_action_ids: selectedRequiredActionIds(),
+            bulk_action_code: String((document.getElementById('bulkActionCode') || {}).value || ''),
+            decision_notes: String((document.getElementById('bulkDecisionNotes') || {}).value || '').trim(),
+            granted_extra_attempts: parseInt((document.getElementById('bulkGrantedAttempts') || {}).value || '0', 10) || 0,
+            deadline_extension_days: parseInt((document.getElementById('bulkExtensionDays') || {}).value || '0', 10) || 0
+        };
+    }
+
+    function postBulk(action, payload) {
+        return fetch('/instructor/api/theory_control_center_api.php?action=' + encodeURIComponent(action), {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload || {})
+        }).then(function (r) { return r.json(); });
+    }
+
+    function previewBulkAction() {
+        var payload = currentBulkPayload();
+        if (!payload.required_action_ids.length || !payload.bulk_action_code) {
+            openTccModal('Bulk Preview', '<div class="tcc-error">Select at least one blocker and choose an action.</div>');
+            return;
+        }
+        openTccModal('Bulk Preview', '<div class="tcc-loading">Validating bulk intervention…</div>');
+        postBulk('bulk_action_preview', payload).then(function (resp) {
+            if (!resp.ok) {
+                openTccModal('Bulk Preview', '<div class="tcc-error">' + escapeHtml(resp.error || resp.message || 'Preview failed.') + '</div>');
+                return;
+            }
+            var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Preview Summary</div>' + modalStatusRows([['Requested', resp.requested_count || 0], ['Matched', resp.matched_count || 0], ['Allowed', resp.allowed_count || 0]]) + '</div>';
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Per Item Validation</div><div class="tcc-intervention-list">';
+            (resp.results || []).forEach(function (r) {
+                html += '<div class="tcc-intervention-item"><div class="tcc-intervention-title">Required Action #' + escapeHtml(r.required_action_id) + ' · lesson ' + escapeHtml(r.lesson_id) + '</div><div class="tcc-intervention-meta">' + escapeHtml(r.allowed ? 'allowed' : ('blocked: ' + (r.validation_error || 'unknown'))) + '</div></div>';
+            });
+            html += '</div></div>';
+            openTccModal('Bulk Preview', html, 'Bulk Intervention');
+        }).catch(function () {
+            openTccModal('Bulk Preview', '<div class="tcc-error">Unable to preview bulk action.</div>');
+        });
+    }
+
+    function executeBulkAction() {
+        var payload = currentBulkPayload();
+        if (!payload.required_action_ids.length || !payload.bulk_action_code) {
+            openTccModal('Bulk Execute', '<div class="tcc-error">Select at least one blocker and choose an action.</div>');
+            return;
+        }
+        openTccModal('Bulk Execute', '<div class="tcc-loading">Executing bulk intervention…</div>');
+        postBulk('bulk_action_execute', payload).then(function (resp) {
+            if (!resp.ok) {
+                openTccModal('Bulk Execute', '<div class="tcc-error">' + escapeHtml(resp.error || resp.message || 'Execution failed.') + '</div>');
+                return;
+            }
+            var s = resp.summary || {};
+            var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Execution Summary</div>' + modalStatusRows([['Batch ID', resp.batch_id || '—'], ['Success', s.success || 0], ['Failed', s.failed || 0], ['Skipped', s.skipped || 0]]) + '</div>';
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Per Item Result</div><div class="tcc-intervention-list">';
+            (resp.results || []).forEach(function (r) {
+                html += '<div class="tcc-intervention-item"><div class="tcc-intervention-title">Required Action #' + escapeHtml(r.required_action_id) + '</div><div class="tcc-intervention-meta">' + escapeHtml((r.status || 'unknown') + ' · ' + (r.message || '')) + '</div></div>';
+            });
+            html += '</div></div>';
+            openTccModal('Bulk Execute Result', html, 'Bulk Intervention');
+            loadQueue();
+            if (selectedStudentId > 0) loadStudentPanel(selectedStudentId);
+        }).catch(function () {
+            openTccModal('Bulk Execute', '<div class="tcc-error">Unable to execute bulk action.</div>');
         });
     }
 
@@ -1306,6 +1427,9 @@ cw_header('Instructor Theory Control Center');
         var sid = parseInt(this.value, 10) || 0;
         if (sid > 0) loadStudentPanel(sid);
     });
+
+    document.getElementById('bulkPreviewBtn').addEventListener('click', previewBulkAction);
+    document.getElementById('bulkExecuteBtn').addEventListener('click', executeBulkAction);
 
     document.getElementById('tccModalOverlay').addEventListener('click', function (e) {
         if (e.target === this) closeTccModal();

@@ -320,6 +320,98 @@ function tcc_safe_actions(string $actionType): array {
     return ['review'];
 }
 
+function tcc_blocker_family(string $actionType): string
+{
+    if ($actionType === 'deadline_reason_submission') return 'deadline_related';
+    if ($actionType === 'instructor_approval') return 'progress_test_failure_related';
+    return 'other';
+}
+
+function tcc_action_sort_rank(string $actionType): int
+{
+    if ($actionType === 'deadline_reason_submission') return 10;
+    if ($actionType === 'instructor_approval') return 20;
+    return 90;
+}
+
+function tcc_bulk_allowed_actions_for_item(array $item): array
+{
+    $actionType = (string)($item['action_type'] ?? '');
+    $status = (string)($item['status'] ?? '');
+    if (!in_array($status, ['pending', 'opened'], true)) return [];
+
+    if ($actionType === 'deadline_reason_submission') return ['approve_deadline_reason_submission'];
+    if ($actionType === 'instructor_approval') return ['approve_additional_attempts'];
+    return [];
+}
+
+function tcc_actor_ip(): string
+{
+    return trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
+}
+
+function tcc_actor_user_agent(): string
+{
+    return trim((string)($_SERVER['HTTP_USER_AGENT'] ?? ''));
+}
+
+function tcc_log_bulk_event(PDO $pdo, array $row, int $actorUserId, string $actionCode, string $batchId, array $payload, string $status): void
+{
+    $st = $pdo->prepare("
+        INSERT INTO training_progression_events
+        (
+            user_id,
+            cohort_id,
+            lesson_id,
+            progress_test_id,
+            event_type,
+            event_code,
+            event_status,
+            actor_type,
+            actor_user_id,
+            event_time,
+            payload_json,
+            legal_note
+        )
+        VALUES
+        (
+            :user_id,
+            :cohort_id,
+            :lesson_id,
+            :progress_test_id,
+            :event_type,
+            :event_code,
+            :event_status,
+            :actor_type,
+            :actor_user_id,
+            :event_time,
+            :payload_json,
+            :legal_note
+        )
+    ");
+
+    $st->execute([
+        ':user_id' => (int)$row['user_id'],
+        ':cohort_id' => (int)$row['cohort_id'],
+        ':lesson_id' => (int)$row['lesson_id'],
+        ':progress_test_id' => $row['progress_test_id'] === null ? null : (int)$row['progress_test_id'],
+        ':event_type' => 'instructor_bulk_intervention',
+        ':event_code' => $actionCode,
+        ':event_status' => $status,
+        ':actor_type' => 'admin',
+        ':actor_user_id' => $actorUserId,
+        ':event_time' => gmdate('Y-m-d H:i:s'),
+        ':payload_json' => json_encode([
+            'batch_id' => $batchId,
+            'required_action_id' => (int)$row['id'],
+            'action_type' => (string)$row['action_type'],
+            'status_before' => (string)$row['status'],
+            'requested_payload' => $payload,
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+        ':legal_note' => 'Bulk intervention executed by instructor via Theory Control Center.',
+    ]);
+}
+
 function tcc_system_watch(PDO $pdo, int $cohortId, ?int $userId = null): array {
     $issues = [];
 
@@ -1390,6 +1482,8 @@ if ($action === '') {
         'allowed_actions' => [
             'cohort_overview',
             'action_queue',
+            'bulk_action_preview',
+            'bulk_action_execute',
             'student_snapshot',
             'system_watch',
             'student_lessons',
@@ -1512,15 +1606,35 @@ try {
                 'action_type' => $actionType,
 				'status' => (string)$row['status'],
 				'severity' => tcc_action_severity($actionType),
+                'blocker_family' => tcc_blocker_family($actionType),
+                'sort_rank' => tcc_action_sort_rank($actionType),
 				'official_flow_url' => tcc_official_flow_url($actionType, (string)($row['token'] ?? '')),
                 'reason' => (string)($row['title'] ?? $actionType),
                 'recommended_action' => tcc_recommended_action($actionType),
                 'safe_actions' => tcc_safe_actions($actionType),
+                'bulk_allowed_actions' => tcc_bulk_allowed_actions_for_item($row),
                 'created_at' => (string)($row['created_at'] ?? ''),
                 'opened_at' => (string)($row['opened_at'] ?? ''),
                 'token' => (string)($row['token'] ?? ''),
             ];
         }
+
+        usort($items, static function (array $a, array $b): int {
+            $ar = (int)($a['sort_rank'] ?? 99);
+            $br = (int)($b['sort_rank'] ?? 99);
+            if ($ar !== $br) return $ar <=> $br;
+
+            $severityRank = ['high' => 1, 'medium' => 2, 'low' => 3];
+            $sa = $severityRank[(string)($a['severity'] ?? '')] ?? 9;
+            $sb = $severityRank[(string)($b['severity'] ?? '')] ?? 9;
+            if ($sa !== $sb) return $sa <=> $sb;
+
+            $at = strtotime((string)($a['created_at'] ?? '')) ?: PHP_INT_MAX;
+            $bt = strtotime((string)($b['created_at'] ?? '')) ?: PHP_INT_MAX;
+            if ($at !== $bt) return $at <=> $bt;
+
+            return strcmp((string)($a['student_name'] ?? ''), (string)($b['student_name'] ?? ''));
+        });
 
         tcc_json([
             'ok' => true,
@@ -1528,6 +1642,171 @@ try {
             'cohort_id' => $cohortId,
             'count' => count($items),
             'items' => $items,
+        ]);
+    }
+
+    if ($action === 'bulk_action_preview' || $action === 'bulk_action_execute') {
+        $payload = json_decode((string)file_get_contents('php://input'), true);
+        if (!is_array($payload)) $payload = [];
+
+        $cohortId = (int)($payload['cohort_id'] ?? 0);
+        $requiredActionIds = array_values(array_unique(array_map('intval', (array)($payload['required_action_ids'] ?? []))));
+        $actionCode = trim((string)($payload['bulk_action_code'] ?? ''));
+        $decisionNotes = trim((string)($payload['decision_notes'] ?? ''));
+        $grantedExtraAttempts = max(0, min(5, (int)($payload['granted_extra_attempts'] ?? 0)));
+        $deadlineExtensionDays = max(0, min(10, (int)($payload['deadline_extension_days'] ?? 0)));
+
+        if ($cohortId <= 0 || !$requiredActionIds || $actionCode === '') {
+            tcc_json(['ok' => false, 'error' => 'missing_bulk_payload'], 400);
+        }
+
+        $ph = implode(',', array_fill(0, count($requiredActionIds), '?'));
+        $params = array_merge([$cohortId], $requiredActionIds);
+        $st = $pdo->prepare("
+            SELECT id,user_id,cohort_id,lesson_id,progress_test_id,action_type,status,title,token,created_at,updated_at
+            FROM student_required_actions
+            WHERE cohort_id = ?
+              AND id IN ($ph)
+            ORDER BY created_at ASC, id ASC
+        ");
+        $st->execute($params);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        $results = [];
+        $allowedCount = 0;
+        foreach ($rows as $row) {
+            $allowedActions = tcc_bulk_allowed_actions_for_item($row);
+            $isAllowed = in_array($actionCode, $allowedActions, true);
+            $validation = null;
+
+            if (!$isAllowed) {
+                $validation = 'not_allowed_for_action_type_or_status';
+            } elseif ($actionCode === 'approve_additional_attempts') {
+                if ((string)$row['action_type'] !== 'instructor_approval') {
+                    $validation = 'not_instructor_approval';
+                } elseif ($grantedExtraAttempts < 1) {
+                    $validation = 'granted_extra_attempts_must_be_at_least_1';
+                } elseif ($decisionNotes === '') {
+                    $validation = 'decision_notes_required';
+                }
+            } elseif ($actionCode === 'approve_deadline_reason_submission') {
+                if ((string)$row['action_type'] !== 'deadline_reason_submission') {
+                    $validation = 'not_deadline_reason_submission';
+                }
+            }
+
+            if ($validation === null) $allowedCount++;
+
+            $results[] = [
+                'required_action_id' => (int)$row['id'],
+                'user_id' => (int)$row['user_id'],
+                'lesson_id' => (int)$row['lesson_id'],
+                'action_type' => (string)$row['action_type'],
+                'status' => (string)$row['status'],
+                'title' => (string)$row['title'],
+                'allowed' => $validation === null,
+                'validation_error' => $validation,
+            ];
+        }
+
+        if ($action === 'bulk_action_preview') {
+            tcc_json([
+                'ok' => true,
+                'action' => 'bulk_action_preview',
+                'bulk_action_code' => $actionCode,
+                'requested_count' => count($requiredActionIds),
+                'matched_count' => count($rows),
+                'allowed_count' => $allowedCount,
+                'results' => $results,
+            ]);
+        }
+
+        $batchId = 'BULK-' . gmdate('YmdHis') . '-' . bin2hex(random_bytes(4));
+        $ip = tcc_actor_ip();
+        $ua = tcc_actor_user_agent();
+        $executeResults = [];
+
+        foreach ($rows as $row) {
+            $rowId = (int)$row['id'];
+            $rowResult = null;
+            foreach ($results as $r) {
+                if ((int)$r['required_action_id'] === $rowId) {
+                    $rowResult = $r;
+                    break;
+                }
+            }
+            if (!$rowResult || empty($rowResult['allowed'])) {
+                $executeResults[] = [
+                    'required_action_id' => $rowId,
+                    'executed' => false,
+                    'status' => 'skipped',
+                    'message' => (string)($rowResult['validation_error'] ?? 'validation_failed'),
+                ];
+                continue;
+            }
+
+            try {
+                if ($actionCode === 'approve_deadline_reason_submission') {
+                    $engine->approveRequiredAction($rowId, $ip, $ua);
+                } elseif ($actionCode === 'approve_additional_attempts') {
+                    $engine->processInstructorApprovalDecision(
+                        $rowId,
+                        [
+                            'decision_code' => 'approve_additional_attempts',
+                            'decision_notes' => $decisionNotes,
+                            'granted_extra_attempts' => $grantedExtraAttempts,
+                            'deadline_extension_days' => $deadlineExtensionDays,
+                        ],
+                        $currentUserId,
+                        $ip,
+                        $ua
+                    );
+                } else {
+                    throw new RuntimeException('Unsupported bulk action code.');
+                }
+
+                tcc_log_bulk_event($pdo, $row, $currentUserId, $actionCode, $batchId, [
+                    'decision_notes' => $decisionNotes,
+                    'granted_extra_attempts' => $grantedExtraAttempts,
+                    'deadline_extension_days' => $deadlineExtensionDays,
+                ], 'success');
+
+                $executeResults[] = [
+                    'required_action_id' => $rowId,
+                    'executed' => true,
+                    'status' => 'success',
+                    'message' => 'applied',
+                ];
+            } catch (Throwable $e) {
+                tcc_log_bulk_event($pdo, $row, $currentUserId, $actionCode, $batchId, [
+                    'decision_notes' => $decisionNotes,
+                    'granted_extra_attempts' => $grantedExtraAttempts,
+                    'deadline_extension_days' => $deadlineExtensionDays,
+                ], 'failure');
+
+                $executeResults[] = [
+                    'required_action_id' => $rowId,
+                    'executed' => false,
+                    'status' => 'failed',
+                    'message' => $e->getMessage(),
+                ];
+            }
+        }
+
+        $summary = ['success' => 0, 'failed' => 0, 'skipped' => 0];
+        foreach ($executeResults as $r) {
+            if ($r['status'] === 'success') $summary['success']++;
+            elseif ($r['status'] === 'failed') $summary['failed']++;
+            else $summary['skipped']++;
+        }
+
+        tcc_json([
+            'ok' => true,
+            'action' => 'bulk_action_execute',
+            'batch_id' => $batchId,
+            'bulk_action_code' => $actionCode,
+            'summary' => $summary,
+            'results' => $executeResults,
         ]);
     }
 
