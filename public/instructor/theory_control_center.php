@@ -105,10 +105,10 @@ cw_header('Instructor Theory Control Center');
                 </div>
             </div>
             <div class="tcc-actions" style="flex-wrap:wrap;">
-                <select id="bulkActionCode" class="tcc-select" style="min-width:260px;min-height:36px;padding:6px 10px;">
+                <select id="bulkActionCode" class="tcc-select" style="min-width:280px;min-height:36px;padding:6px 10px;">
                     <option value="">Choose action…</option>
-                    <option value="approve_deadline_reason_submission">Approve deadline reason submissions</option>
-                    <option value="approve_additional_attempts">Approve instructor approvals (additional attempts)</option>
+                    <option value="approve_deadline_reason_submission">Deadline reason: approve student explanation (+ optional +Days)</option>
+                    <option value="approve_additional_attempts">Instructor approval: grant attempts (+Days optional) — use for “Missed final deadline” queue rows</option>
                 </select>
                 <input id="bulkDecisionNotes" type="text" class="tcc-select" style="min-width:260px;min-height:36px;padding:6px 10px;" placeholder="Decision notes (required for instructor approvals)">
                 <input id="bulkGrantedAttempts" type="number" min="0" max="5" class="tcc-select" style="width:120px;min-height:36px;padding:6px 10px;" placeholder="+Attempts">
@@ -116,6 +116,7 @@ cw_header('Instructor Theory Control Center');
                 <button id="bulkPreviewBtn" class="tcc-btn secondary" type="button">Preview</button>
                 <button id="bulkExecuteBtn" class="tcc-btn primary" type="button">Execute</button>
             </div>
+            <p id="bulkActionHint" style="margin:8px 0 0;font-size:12px;line-height:1.5;color:rgba(15,23,42,.62);max-width:960px;">Choose a bulk action, select queue rows, then Preview.</p>
         </div>
         <div id="bulkFamilyControls" class="tcc-panel-actions" style="margin-top:0;margin-bottom:12px;"></div>
         <div id="actionQueue" class="tcc-queue"><div class="tcc-loading">Loading action queue…</div></div>
@@ -1312,14 +1313,14 @@ cw_header('Instructor Theory Control Center');
             }
 
             var html = '';
-            html += renderGroup('Deadline Related', grouped.deadline_related);
-            html += renderGroup('Progress Test Failure Related', grouped.progress_test_failure_related);
+            html += renderGroup('Deadline-related (reason submissions + missed-final-deadline approvals)', grouped.deadline_related);
+            html += renderGroup('Instructor approval — other (e.g. failed test)', grouped.progress_test_failure_related);
             html += renderGroup('Other', grouped.other);
             container.innerHTML = html;
             if (familyControls) {
                 familyControls.innerHTML = ''
-                    + '<button id="bulkSelectDeadlineFamilyBtn" class="tcc-btn secondary" type="button">Select deadline (' + grouped.deadline_related.length + ')</button>'
-                    + '<button id="bulkSelectProgressFamilyBtn" class="tcc-btn secondary" type="button">Select progress-test (' + grouped.progress_test_failure_related.length + ')</button>'
+                    + '<button id="bulkSelectDeadlineFamilyBtn" class="tcc-btn secondary" type="button">Select deadline-related (' + grouped.deadline_related.length + ')</button>'
+                    + '<button id="bulkSelectProgressFamilyBtn" class="tcc-btn secondary" type="button">Select instructor-approval other (' + grouped.progress_test_failure_related.length + ')</button>'
                     + '<button id="bulkSelectOtherFamilyBtn" class="tcc-btn secondary" type="button">Select other (' + grouped.other.length + ')</button>'
                     + '<button id="bulkClearSelectionBtn" class="tcc-btn secondary" type="button">Clear selection</button>';
             }
@@ -1437,7 +1438,7 @@ cw_header('Instructor Theory Control Center');
                     modalStatusRows([['Requested', allIds.length], ['Matched', merged.matched], ['Allowed', merged.allowed]]) + '</div>';
                 html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Per Item Validation</div><div class="tcc-intervention-list">';
                 merged.mergedResults.forEach(function (r) {
-                    html += '<div class="tcc-intervention-item"><div class="tcc-intervention-title">Required Action #' + escapeHtml(r.required_action_id) + ' · lesson ' + escapeHtml(r.lesson_id) + '</div><div class="tcc-intervention-meta">' + escapeHtml(r.allowed ? 'allowed' : ('blocked: ' + (r.validation_error || 'unknown'))) + '</div></div>';
+                    html += '<div class="tcc-intervention-item"><div class="tcc-intervention-title">Required Action #' + escapeHtml(r.required_action_id) + ' · lesson ' + escapeHtml(r.lesson_id) + '</div><div class="tcc-intervention-meta">' + escapeHtml(r.allowed ? 'allowed' : ('blocked: ' + (r.validation_message || r.validation_error || 'unknown'))) + '</div></div>';
                 });
                 html += '</div></div>';
                 openTccModal('Bulk Preview', html, 'Bulk Intervention');
@@ -1590,6 +1591,22 @@ cw_header('Instructor Theory Control Center');
         var sid = parseInt(this.value, 10) || 0;
         if (sid > 0) loadStudentPanel(sid);
     });
+
+    function refreshBulkActionHint() {
+        var sel = document.getElementById('bulkActionCode');
+        var hint = document.getElementById('bulkActionHint');
+        if (!sel || !hint) return;
+        var v = String(sel.value || '');
+        if (v === 'approve_deadline_reason_submission') {
+            hint.textContent = 'Use only when the row is a deadline-reason submission (student explained a missed deadline). Set +Days to extend. Does not apply to “Instructor approval required — Missed final deadline” rows — those need the second option.';
+        } else if (v === 'approve_additional_attempts') {
+            hint.textContent = 'Use for instructor-approval rows (failed progress test, missed final deadline, etc.). Decision notes and at least +1 attempt are required. +Days is optional where policy allows.';
+        } else {
+            hint.textContent = 'Choose a bulk action, select queue rows, then Preview. Always run Preview first; the list will explain any row that cannot run with the action you picked.';
+        }
+    }
+    document.getElementById('bulkActionCode').addEventListener('change', refreshBulkActionHint);
+    refreshBulkActionHint();
 
     document.getElementById('bulkPreviewBtn').addEventListener('click', previewBulkAction);
     document.getElementById('bulkExecuteBtn').addEventListener('click', executeBulkAction);

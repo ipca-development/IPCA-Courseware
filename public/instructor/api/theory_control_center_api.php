@@ -363,6 +363,44 @@ function tcc_bulk_allowed_actions_for_item(array $item): array
     return [];
 }
 
+/** Plain-language text for instructors (bulk preview / execute). */
+function tcc_bulk_validation_message(?string $code): string
+{
+    if ($code === null || $code === '') {
+        return '';
+    }
+
+    static $map = [
+        'use_bulk_approve_additional_attempts_for_instructor_approval_rows' => 'Wrong bulk mode for this row: it is an instructor-approval item (for example “Missed final deadline”). Use “Instructor approval queue…” instead, with decision notes and at least +1 attempt.',
+        'bulk_deadline_reason_only_for_deadline_reason_submission_actions' => 'Wrong bulk mode: “Approve deadline reason…” only applies to deadline-reason submission rows, not this action type.',
+        'deadline_reason_not_actionable' => 'This deadline-reason row cannot be approved in its current status.',
+        'use_bulk_approve_deadline_reason_for_deadline_reason_submission_rows' => 'Wrong bulk mode for this row: it is a deadline-reason submission. Use “Student submitted a deadline reason…” instead (and set +Days if you extend).',
+        'bulk_additional_attempts_only_for_instructor_approval_actions' => 'Wrong bulk mode: “Instructor approval queue…” only applies to instructor-approval rows.',
+        'granted_extra_attempts_must_be_at_least_1' => 'Enter +Attempts as at least 1 when using instructor-approval bulk.',
+        'decision_notes_required' => 'Enter decision notes (required for instructor-approval bulk).',
+        'not_allowed_for_action_type_or_status' => 'This row’s type or status does not allow the selected bulk action.',
+        'unknown_bulk_action_code' => 'Unknown bulk action. Refresh the page and try again.',
+    ];
+
+    if (isset($map[$code])) {
+        return $map[$code];
+    }
+
+    $pfxDeadline = 'deadline_reason_not_actionable_status_';
+    if (strncmp($code, $pfxDeadline, strlen($pfxDeadline)) === 0) {
+        $st = substr($code, strlen($pfxDeadline));
+        return 'This deadline-reason row is in status “' . $st . '” and cannot be approved with this bulk action.';
+    }
+
+    $pfxInstructor = 'instructor_approval_not_pending_or_open_status_';
+    if (strncmp($code, $pfxInstructor, strlen($pfxInstructor)) === 0) {
+        $st = substr($code, strlen($pfxInstructor));
+        return 'This instructor-approval row is in status “' . $st . '”. Bulk only applies when status is pending or opened.';
+    }
+
+    return $code;
+}
+
 function tcc_actor_ip(): string
 {
     return trim((string)($_SERVER['REMOTE_ADDR'] ?? ''));
@@ -1701,28 +1739,43 @@ try {
         $allowedCount = 0;
         foreach ($rows as $row) {
             $allowedActions = tcc_bulk_allowed_actions_for_item($row);
-            $isAllowed = in_array($actionCode, $allowedActions, true);
+            $rowActionType = (string)$row['action_type'];
+            $rowStatus = (string)$row['status'];
             $validation = null;
 
-            if (!$isAllowed) {
-                $validation = 'not_allowed_for_action_type_or_status';
+            // Validate chosen bulk code against this row (specific messages first; do not short-circuit with a generic code).
+            if ($actionCode === 'approve_deadline_reason_submission') {
+                if ($rowActionType !== 'deadline_reason_submission') {
+                    $validation = $rowActionType === 'instructor_approval'
+                        ? 'use_bulk_approve_additional_attempts_for_instructor_approval_rows'
+                        : 'bulk_deadline_reason_only_for_deadline_reason_submission_actions';
+                } elseif (!in_array($rowStatus, ['pending', 'opened', 'completed'], true)) {
+                    $validation = 'deadline_reason_not_actionable_status_' . $rowStatus;
+                } elseif (!in_array($actionCode, $allowedActions, true)) {
+                    $validation = 'deadline_reason_not_actionable';
+                }
             } elseif ($actionCode === 'approve_additional_attempts') {
-                if ((string)$row['action_type'] !== 'instructor_approval') {
-                    $validation = 'not_instructor_approval';
+                if ($rowActionType !== 'instructor_approval') {
+                    $validation = $rowActionType === 'deadline_reason_submission'
+                        ? 'use_bulk_approve_deadline_reason_for_deadline_reason_submission_rows'
+                        : 'bulk_additional_attempts_only_for_instructor_approval_actions';
+                } elseif (!in_array($rowStatus, ['pending', 'opened'], true)) {
+                    $validation = 'instructor_approval_not_pending_or_open_status_' . $rowStatus;
                 } elseif ($grantedExtraAttempts < 1) {
                     $validation = 'granted_extra_attempts_must_be_at_least_1';
                 } elseif ($decisionNotes === '') {
                     $validation = 'decision_notes_required';
+                } elseif (!in_array($actionCode, $allowedActions, true)) {
+                    $validation = 'not_allowed_for_action_type_or_status';
                 }
-            } elseif ($actionCode === 'approve_deadline_reason_submission') {
-                if ((string)$row['action_type'] !== 'deadline_reason_submission') {
-                    $validation = 'not_deadline_reason_submission';
-                } elseif (!in_array((string)$row['status'], ['pending', 'opened', 'completed'], true)) {
-                    $validation = 'deadline_reason_not_actionable';
-                }
+            } else {
+                $validation = 'unknown_bulk_action_code';
             }
 
-            if ($validation === null) $allowedCount++;
+            $isAllowed = $validation === null;
+            if ($isAllowed) {
+                $allowedCount++;
+            }
 
             $results[] = [
                 'required_action_id' => (int)$row['id'],
@@ -1733,6 +1786,7 @@ try {
                 'title' => (string)$row['title'],
                 'allowed' => $validation === null,
                 'validation_error' => $validation,
+                'validation_message' => tcc_bulk_validation_message($validation),
             ];
         }
 
@@ -1763,11 +1817,17 @@ try {
                 }
             }
             if (!$rowResult || empty($rowResult['allowed'])) {
+                $skipCode = (string)($rowResult['validation_error'] ?? 'validation_failed');
+                $skipMsg = tcc_bulk_validation_message($skipCode !== '' ? $skipCode : null);
+                if ($skipMsg === '' && $skipCode !== '') {
+                    $skipMsg = $skipCode;
+                }
                 $executeResults[] = [
                     'required_action_id' => $rowId,
                     'executed' => false,
                     'status' => 'skipped',
-                    'message' => (string)($rowResult['validation_error'] ?? 'validation_failed'),
+                    'message' => $skipMsg,
+                    'validation_code' => $skipCode,
                 ];
                 continue;
             }
