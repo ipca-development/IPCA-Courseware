@@ -65,6 +65,7 @@ if (!function_exists('tap_theory_event_catalog')) {
             'deadline_reason_submitted' => 'Deadline reason submitted',
             'deadline_reason_approved' => 'Deadline reason approved',
             'deadline_reason_rejected' => 'Deadline reason rejected',
+            'required_action_completed' => 'Required action completed',
             'multiple_unsat_threshold_reached' => 'Multiple unsat threshold reached',
             'instructor_decision_recorded' => 'Instructor decision recorded',
             'one_on_one_completed' => 'One-on-one completed',

@@ -2492,6 +2492,51 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
         ]);
     }
 
+    public function dispatchRequiredActionCompletedAutomationEvent(
+        int $actionId,
+        int $actorUserId = 0,
+        string $actorType = 'admin'
+    ): ?array {
+        $action = $this->getRequiredActionById($actionId);
+        if (!$action) {
+            throw new RuntimeException('Required action not found for automation dispatch.');
+        }
+
+        $userId = (int)($action['user_id'] ?? 0);
+        $cohortId = (int)($action['cohort_id'] ?? 0);
+        $lessonId = (int)($action['lesson_id'] ?? 0);
+        $progressTestId = isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null;
+        $progressionContext = $this->getProgressionContextForUserLesson($userId, $cohortId, $lessonId);
+        $studentRecipient = (array)($progressionContext['student_recipient'] ?? []);
+
+        $automationContext = array_merge($progressionContext, [
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'progress_test_id' => $progressTestId,
+            'required_action_id' => (int)($action['id'] ?? 0),
+            'required_action_type' => (string)($action['action_type'] ?? ''),
+            'required_action_status' => (string)($action['status'] ?? ''),
+            'required_action_title' => (string)($action['title'] ?? ''),
+            'required_action_token' => (string)($action['token'] ?? ''),
+            'required_action_completed_at' => (string)($action['completed_at'] ?? ''),
+            'required_action_approved_at' => (string)($action['approved_at'] ?? ''),
+            'student_name' => (string)($studentRecipient['name'] ?? ''),
+            'student_email' => (string)($studentRecipient['email'] ?? ''),
+            'actor_type' => $actorType,
+            'actor_user_id' => $actorUserId > 0 ? $actorUserId : null,
+        ]);
+
+        return $this->dispatchAutomationEventIfAvailable(
+            'required_action_completed',
+            $automationContext,
+            $userId,
+            $cohortId,
+            $lessonId,
+            $progressTestId
+        );
+    }
+
     public function recordInstructorDecision(
         int $actionId,
         array $decision,

@@ -117,6 +117,7 @@ cw_header('Instructor Theory Control Center');
                 <button id="bulkExecuteBtn" class="tcc-btn primary" type="button">Execute</button>
             </div>
         </div>
+        <div id="bulkFamilyControls" class="tcc-panel-actions" style="margin-top:0;margin-bottom:12px;"></div>
         <div id="actionQueue" class="tcc-queue"><div class="tcc-loading">Loading action queue…</div></div>
     </section>
 </div>
@@ -143,6 +144,7 @@ cw_header('Instructor Theory Control Center');
     var cohortStudents = [];
     var queueItemsById = {};
     var selectedQueueIds = {};
+    var queueFamilyMemberIds = {deadline_related: [], progress_test_failure_related: [], other: []};
 
     function escapeHtml(value) {
         return String(value === null || value === undefined ? '' : value).replace(/[&<>'"]/g, function (c) {
@@ -1253,11 +1255,14 @@ cw_header('Instructor Theory Control Center');
         document.getElementById('queueCount').textContent = '—';
         queueItemsById = {};
         selectedQueueIds = {};
+        queueFamilyMemberIds = {deadline_related: [], progress_test_failure_related: [], other: []};
         api('action_queue', {cohort_id: cohortId}).then(function (data) {
             var container = document.getElementById('actionQueue');
             var count = document.getElementById('queueCount');
+            var familyControls = document.getElementById('bulkFamilyControls');
             if (!data.ok) {
                 showError('actionQueue', data.message || data.error || 'Unable to load action queue.');
+                if (familyControls) familyControls.innerHTML = '';
                 return;
             }
             var items = data.items || [];
@@ -1265,6 +1270,7 @@ cw_header('Instructor Theory Control Center');
             container.innerHTML = '';
             if (!items.length) {
                 container.innerHTML = '<div class="tcc-empty">No instructor actions required for this cohort right now.</div>';
+                if (familyControls) familyControls.innerHTML = '';
                 return;
             }
             var grouped = {deadline_related: [], progress_test_failure_related: [], other: []};
@@ -1273,6 +1279,8 @@ cw_header('Instructor Theory Control Center');
                 if (!grouped[family]) grouped[family] = [];
                 grouped[family].push(item);
                 queueItemsById[String(item.required_action_id)] = item;
+                queueFamilyMemberIds[family] = queueFamilyMemberIds[family] || [];
+                queueFamilyMemberIds[family].push(parseInt(item.required_action_id || 0, 10));
             });
 
             function renderGroup(title, list) {
@@ -1300,6 +1308,13 @@ cw_header('Instructor Theory Control Center');
             html += renderGroup('Progress Test Failure Related', grouped.progress_test_failure_related);
             html += renderGroup('Other', grouped.other);
             container.innerHTML = html;
+            if (familyControls) {
+                familyControls.innerHTML = ''
+                    + '<button id="bulkSelectDeadlineFamilyBtn" class="tcc-btn secondary" type="button">Select deadline (' + grouped.deadline_related.length + ')</button>'
+                    + '<button id="bulkSelectProgressFamilyBtn" class="tcc-btn secondary" type="button">Select progress-test (' + grouped.progress_test_failure_related.length + ')</button>'
+                    + '<button id="bulkSelectOtherFamilyBtn" class="tcc-btn secondary" type="button">Select other (' + grouped.other.length + ')</button>'
+                    + '<button id="bulkClearSelectionBtn" class="tcc-btn secondary" type="button">Clear selection</button>';
+            }
 
             Array.prototype.forEach.call(container.querySelectorAll('.tcc-bulk-checkbox'), function (cb) {
                 cb.addEventListener('change', function () {
@@ -1309,9 +1324,44 @@ cw_header('Instructor Theory Control Center');
                     else delete selectedQueueIds[rid];
                 });
             });
+            bindBulkFamilyControls();
         }).catch(function () {
             showError('actionQueue', 'Unable to load action queue.');
+            var familyControls = document.getElementById('bulkFamilyControls');
+            if (familyControls) familyControls.innerHTML = '';
         });
+    }
+
+    function setBulkSelectionByIds(ids, append) {
+        ids = Array.isArray(ids) ? ids : [];
+        if (!append) selectedQueueIds = {};
+        ids.forEach(function (id) {
+            var rid = String(parseInt(id, 10) || 0);
+            if (rid !== '0') selectedQueueIds[rid] = 1;
+        });
+        Array.prototype.forEach.call(document.querySelectorAll('#actionQueue .tcc-bulk-checkbox'), function (cb) {
+            var rid = String(cb.getAttribute('data-required-action-id') || '');
+            cb.checked = !!selectedQueueIds[rid];
+        });
+    }
+
+    function bindBulkFamilyControls() {
+        function onClick(id, family) {
+            var btn = document.getElementById(id);
+            if (!btn) return;
+            btn.addEventListener('click', function () {
+                setBulkSelectionByIds(queueFamilyMemberIds[family] || [], false);
+            });
+        }
+        onClick('bulkSelectDeadlineFamilyBtn', 'deadline_related');
+        onClick('bulkSelectProgressFamilyBtn', 'progress_test_failure_related');
+        onClick('bulkSelectOtherFamilyBtn', 'other');
+        var clearBtn = document.getElementById('bulkClearSelectionBtn');
+        if (clearBtn) {
+            clearBtn.addEventListener('click', function () {
+                setBulkSelectionByIds([], false);
+            });
+        }
     }
 
     function selectedRequiredActionIds() {
@@ -1375,6 +1425,12 @@ cw_header('Instructor Theory Control Center');
                 return;
             }
             var s = resp.summary || {};
+            var affectedStudentIds = {};
+            (resp.results || []).forEach(function (r) {
+                if (r.status === 'success' && parseInt(r.user_id || 0, 10) > 0) {
+                    affectedStudentIds[String(parseInt(r.user_id, 10))] = 1;
+                }
+            });
             var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Execution Summary</div>' + modalStatusRows([['Batch ID', resp.batch_id || '—'], ['Success', s.success || 0], ['Failed', s.failed || 0], ['Skipped', s.skipped || 0]]) + '</div>';
             html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Per Item Result</div><div class="tcc-intervention-list">';
             (resp.results || []).forEach(function (r) {
@@ -1383,7 +1439,13 @@ cw_header('Instructor Theory Control Center');
             html += '</div></div>';
             openTccModal('Bulk Execute Result', html, 'Bulk Intervention');
             loadQueue();
-            if (selectedStudentId > 0) loadStudentPanel(selectedStudentId);
+            loadOverview();
+            if (selectedStudentId > 0 && affectedStudentIds[String(selectedStudentId)]) {
+                loadStudentPanel(selectedStudentId);
+            } else if (selectedStudentId <= 0) {
+                var keys = Object.keys(affectedStudentIds);
+                if (keys.length === 1) loadStudentPanel(parseInt(keys[0], 10));
+            }
         }).catch(function () {
             openTccModal('Bulk Execute', '<div class="tcc-error">Unable to execute bulk action.</div>');
         });

@@ -1746,8 +1746,19 @@ try {
             }
 
             try {
+                $automationDispatch = null;
+                $automationDispatchError = null;
                 if ($actionCode === 'approve_deadline_reason_submission') {
                     $engine->approveRequiredAction($rowId, $ip, $ua);
+                    try {
+                        $automationDispatch = $engine->dispatchRequiredActionCompletedAutomationEvent(
+                            $rowId,
+                            $currentUserId,
+                            'admin'
+                        );
+                    } catch (Throwable $dispatchError) {
+                        $automationDispatchError = $dispatchError->getMessage();
+                    }
                 } elseif ($actionCode === 'approve_additional_attempts') {
                     $engine->processInstructorApprovalDecision(
                         $rowId,
@@ -1769,13 +1780,16 @@ try {
                     'decision_notes' => $decisionNotes,
                     'granted_extra_attempts' => $grantedExtraAttempts,
                     'deadline_extension_days' => $deadlineExtensionDays,
+                    'automation_dispatch' => $automationDispatch,
+                    'automation_dispatch_error' => $automationDispatchError,
                 ], 'success');
 
                 $executeResults[] = [
                     'required_action_id' => $rowId,
+                    'user_id' => (int)$row['user_id'],
                     'executed' => true,
                     'status' => 'success',
-                    'message' => 'applied',
+                    'message' => $automationDispatchError === null ? 'applied' : ('applied_with_notification_warning: ' . $automationDispatchError),
                 ];
             } catch (Throwable $e) {
                 tcc_log_bulk_event($pdo, $row, $currentUserId, $actionCode, $batchId, [
@@ -1786,6 +1800,7 @@ try {
 
                 $executeResults[] = [
                     'required_action_id' => $rowId,
+                    'user_id' => (int)$row['user_id'],
                     'executed' => false,
                     'status' => 'failed',
                     'message' => $e->getMessage(),
