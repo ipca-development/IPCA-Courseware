@@ -1500,6 +1500,33 @@ public function createProgressTestAttempt(
 
         $staleCleanupCount = $this->markOlderOpenAttemptsAsStale($userId, $cohortId, $lessonId);
 
+        $canonicalPassRow = $this->getLatestCanonicalPassProgressTestRow($userId, $cohortId, $lessonId);
+        if ($canonicalPassRow !== null) {
+            $nowUtc = gmdate('Y-m-d H:i:s');
+            $this->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => (int)$canonicalPassRow['id'],
+                'event_type' => 'attempt',
+                'event_code' => 'progress_test_start_blocked_canonical_pass_exists',
+                'event_status' => 'warning',
+                'actor_type' => $actorType,
+                'actor_user_id' => $actorUserId,
+                'event_time' => $nowUtc,
+                'payload' => ['canonical_pass_test_id' => (int)$canonicalPassRow['id']],
+                'legal_note' => 'Blocked new progress_tests_v2 row: canonical PASS already recorded for this lesson.',
+            ]);
+            $this->pdo->commit();
+
+            return [
+                'blocked' => true,
+                'reason' => 'canonical_pass_already_recorded',
+                'canonical_pass_test_id' => (int)$canonicalPassRow['id'],
+                'stale_cleanup_count' => $staleCleanupCount,
+            ];
+        }
+
         $startDecision = $this->prepareStartDecision($userId, $cohortId, $lessonId);
 
         $decision = (array)($startDecision['decision'] ?? []);
@@ -1675,7 +1702,13 @@ public function createProgressTestAttempt(
 
         throw $e;
     }
-}	
+}
+
+/** True when a completed passing attempt exists (canonical PASS); new attempts must not be inserted. */
+public function hasCanonicalPassProgressTest(int $userId, int $cohortId, int $lessonId): bool
+{
+    return $this->getLatestCanonicalPassProgressTestRow($userId, $cohortId, $lessonId) !== null;
+}
 	
 public function finalizeAssessedProgressTest(int $progressTestId, array $assessment): array
 {

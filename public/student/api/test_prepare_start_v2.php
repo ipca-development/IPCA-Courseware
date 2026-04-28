@@ -124,6 +124,8 @@ if (!empty($create['blocked'])) {
         $message = 'Remediation is required before another attempt can begin.';
     } elseif ($reason === 'summary_required') {
         $message = 'An acceptable lesson summary is required before this progress test can begin.';
+    } elseif ($reason === 'canonical_pass_already_recorded') {
+        $message = 'This lesson already has a passing progress test on record; another attempt cannot be started.';
     }
 
     json_ok([

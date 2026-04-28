@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
 require_once __DIR__ . '/../../../src/openai.php';
 
 cw_require_login();
@@ -552,6 +553,11 @@ try {
     $mx->execute([$userId, $cohortId, $lessonId]);
     $attempt = (int)$mx->fetchColumn() + 1;
     if ($attempt <= 0) $attempt = 1;
+
+    $progressionEngine = new CoursewareProgressionV2($pdo);
+    if ($progressionEngine->hasCanonicalPassProgressTest($userId, $cohortId, $lessonId)) {
+        json_ok(['ok' => false, 'error' => 'canonical_pass_already_recorded']);
+    }
 
     $seed = bin2hex(random_bytes(16));
 
