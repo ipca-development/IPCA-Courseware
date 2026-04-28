@@ -2553,6 +2553,118 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
         );
     }
 
+    /**
+     * Align lesson_activity with a recorded canonical PASS + current summary review (same rules as finalize).
+     *
+     * @return array<string,mixed>|null null when no canonical PASS exists for the lesson
+     */
+    private function buildLessonActivityProjectionFieldsAfterCanonicalPass(int $userId, int $cohortId, int $lessonId, string $nowUtc): ?array
+    {
+        $passRow = $this->getLatestCanonicalPassProgressTestRow($userId, $cohortId, $lessonId);
+        if ($passRow === null) {
+            return null;
+        }
+
+        $policy = $this->resolveEffectivePolicySet($cohortId);
+        $summaryState = $this->resolveSummaryState($userId, $cohortId, $lessonId, $policy);
+        $fields = [
+            'test_pass_status' => 'passed',
+            'completion_status' => ((string)($summaryState['summary_status'] ?? '') === 'acceptable')
+                ? 'completed'
+                : 'awaiting_summary_review',
+            'last_state_eval_at' => $nowUtc,
+            'attempt_count' => (int)($passRow['attempt'] ?? 0),
+        ];
+        if (array_key_exists('score_pct', $passRow) && $passRow['score_pct'] !== null && $passRow['score_pct'] !== '') {
+            $fields['best_score'] = (int)$passRow['score_pct'];
+        }
+
+        $existingLa = $this->getLessonActivityProjectionRow($userId, $cohortId, $lessonId) ?: [];
+        if ($fields['completion_status'] === 'completed') {
+            $fields['completed_at'] = !empty($existingLa['completed_at'])
+                ? (string)$existingLa['completed_at']
+                : $nowUtc;
+            $fields['next_lesson_unlocked_at'] = !empty($existingLa['next_lesson_unlocked_at'])
+                ? (string)$existingLa['next_lesson_unlocked_at']
+                : $fields['completed_at'];
+        }
+
+        return $fields;
+    }
+
+    /**
+     * One-off / batch repair: lesson_activity drift where progress_tests_v2 already has canonical PASS.
+     */
+    public function repairLessonActivityForCanonicalPassIfNeeded(int $userId, int $cohortId, int $lessonId): array
+    {
+        $nowUtc = gmdate('Y-m-d H:i:s');
+        $existingLa = $this->getLessonActivityProjectionRow($userId, $cohortId, $lessonId);
+        if (!$existingLa) {
+            return ['ok' => true, 'action' => 'skipped', 'reason' => 'no_lesson_activity_row'];
+        }
+
+        $ts = (string)($existingLa['test_pass_status'] ?? '');
+        $cs = (string)($existingLa['completion_status'] ?? '');
+        if ($ts === 'passed' && in_array($cs, ['completed', 'awaiting_summary_review'], true)) {
+            return ['ok' => true, 'action' => 'skipped', 'reason' => 'already_consistent'];
+        }
+
+        $passRow = $this->getLatestCanonicalPassProgressTestRow($userId, $cohortId, $lessonId);
+        if ($passRow === null) {
+            return ['ok' => true, 'action' => 'skipped', 'reason' => 'no_canonical_pass'];
+        }
+
+        $fields = $this->buildLessonActivityProjectionFieldsAfterCanonicalPass($userId, $cohortId, $lessonId, $nowUtc);
+        if ($fields === null) {
+            return ['ok' => true, 'action' => 'skipped', 'reason' => 'no_canonical_pass'];
+        }
+
+        $this->pdo->beginTransaction();
+        try {
+            $projectionResult = $this->persistLessonActivityProjection($userId, $cohortId, $lessonId, [
+                'engine_projection' => true,
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'phase' => 'repair_canonical_pass_lesson_activity',
+                'fields' => $fields,
+            ]);
+
+            $this->logProgressionEvent([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => (((int)($passRow['id'] ?? 0)) > 0 ? (int)$passRow['id'] : null),
+                'event_type' => 'system',
+                'event_code' => 'lesson_activity_repaired_canonical_pass',
+                'event_status' => 'info',
+                'actor_type' => 'system',
+                'actor_user_id' => null,
+                'event_time' => $nowUtc,
+                'payload' => [
+                    'projection_result' => $projectionResult,
+                ],
+                'legal_note' => 'Automated repair: lesson_activity aligned with canonical PASS (historical projection drift).',
+            ]);
+
+            $this->pdo->commit();
+        } catch (Throwable $e) {
+            if ($this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return [
+            'ok' => true,
+            'action' => 'repaired',
+            'user_id' => $userId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'projection_result' => $projectionResult,
+        ];
+    }
+
     public function approveDeadlineReasonSubmissionByInstructor(
         int $actionId,
         int $actorUserId,
@@ -2619,33 +2731,18 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
             $uid = (int)$action['user_id'];
             $cid = (int)$action['cohort_id'];
             $lid = (int)$action['lesson_id'];
-            $policy = $this->resolveEffectivePolicySet($cid);
-            $canonicalPassRow = $this->getLatestCanonicalPassProgressTestRow($uid, $cid, $lid);
 
             $projectionFields = [
                 'reason_required' => 0,
                 'reason_decision' => 'accepted',
-                'last_state_eval_at' => $nowUtc,
             ];
 
-            if ($canonicalPassRow !== null) {
-                // Bulk deadline approval must not wipe a recorded PASS (matches finalizeAssessedProgressTest / system_watch).
-                $summaryState = $this->resolveSummaryState($uid, $cid, $lid, $policy);
-                $projectionFields['test_pass_status'] = 'passed';
-                $projectionFields['completion_status'] = ((string)($summaryState['summary_status'] ?? '') === 'acceptable')
-                    ? 'completed'
-                    : 'awaiting_summary_review';
-                if ($projectionFields['completion_status'] === 'completed') {
-                    $existingLa = $this->getLessonActivityProjectionRow($uid, $cid, $lid);
-                    $projectionFields['completed_at'] = !empty($existingLa['completed_at'])
-                        ? (string)$existingLa['completed_at']
-                        : $nowUtc;
-                    $projectionFields['next_lesson_unlocked_at'] = !empty($existingLa['next_lesson_unlocked_at'])
-                        ? (string)$existingLa['next_lesson_unlocked_at']
-                        : $projectionFields['completed_at'];
-                }
+            $afterPass = $this->buildLessonActivityProjectionFieldsAfterCanonicalPass($uid, $cid, $lid, $nowUtc);
+            if ($afterPass !== null) {
+                $projectionFields = array_merge($projectionFields, $afterPass);
                 $decisionPayload['preserved_canonical_pass_projection'] = 1;
             } else {
+                $projectionFields['last_state_eval_at'] = $nowUtc;
                 $projectionFields['completion_status'] = 'in_progress';
                 $projectionFields['test_pass_status'] = 'in_progress';
             }
