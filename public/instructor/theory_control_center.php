@@ -59,6 +59,16 @@ cw_header('Instructor Theory Control Center');
 .tcc-oral-ai-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:10px}
 .tcc-policy-alert{border-radius:12px;padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-weight:800;font-size:12px;margin-bottom:10px;line-height:1.45}
 .tcc-inline-json{margin-top:10px;font-size:11px}
+.tcc-attempt-stack{display:flex;flex-direction:column;gap:10px}
+.tcc-attempt-details{border:1px solid rgba(15,23,42,.08);border-radius:16px;background:#fff;overflow:hidden}
+.tcc-attempt-details.tcc-attempt-stale{border-color:#f59e0b;background:#fffbeb}
+.tcc-attempt-details>summary.tcc-attempt-row-summary{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;padding:12px 14px;background:#f8fafc;border-bottom:1px solid transparent;cursor:pointer;list-style:none}
+.tcc-attempt-details[open]>summary.tcc-attempt-row-summary{border-bottom-color:rgba(15,23,42,.06)}
+.tcc-attempt-details>summary.tcc-attempt-row-summary::-webkit-details-marker{display:none}
+.tcc-attempt-details>summary.tcc-attempt-row-summary::after{content:'▸';flex-shrink:0;font-size:12px;color:#64748b;margin-left:8px;transition:transform .15s ease}
+.tcc-attempt-details[open]>summary.tcc-attempt-row-summary::after{transform:rotate(90deg)}
+.tcc-attempt-detail-body{padding:12px 14px 14px;border-top:1px solid rgba(15,23,42,.06);background:#fff}
+.tcc-attempt-pass-first-note{font-size:12px;color:#166534;font-weight:800;margin-bottom:8px}
 .tcc-li-toolbar .tcc-btn.active{outline:2px solid rgba(18,53,95,.35);outline-offset:2px}
 </style>
 
@@ -772,24 +782,52 @@ cw_header('Instructor Theory Control Center');
         return html;
     }
 
+    function renderAttemptRowSummary(a) {
+        var score = a.score_pct !== null && a.score_pct !== undefined ? a.score_pct + '%' : '—';
+        var passFail = parseInt(a.pass_gate_met, 10) === 1 ? 'PASS' : 'FAIL';
+        var dur = tccAttemptDuration(a.started_at, a.completed_at);
+        return '<div style="flex:1;min-width:0;"><div class="tcc-attempt-title">Attempt ' + escapeHtml(a.attempt || '—') + ' · ' + escapeHtml(passFail) + ' · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div>'
+            + '<div class="tcc-attempt-meta">Started: ' + escapeHtml(niceDateTime(a.started_at)) + ' · Completed: ' + escapeHtml(niceDateTime(a.completed_at)) + ' (Duration: ' + escapeHtml(dur) + ')</div></div>'
+            + '<span class="tcc-score-pill ' + (parseInt(a.pass_gate_met, 10) === 1 ? 'ok' : 'danger') + '">' + escapeHtml(score) + '</span>';
+    }
+
+    function renderAttemptDetailInner(a) {
+        var jsonBlock = '<details class="tcc-inline-json"><summary style="cursor:pointer;font-weight:800;color:#64748b;">Raw attempt JSON (troubleshooting)</summary><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(a, null, 2)) + '</pre></details>';
+        return renderAttemptItems(a.items || []) + jsonBlock;
+    }
+
     function renderAttemptCards(attempts) {
-        var html = '';
         if (!attempts || !attempts.length) return '<div class="tcc-empty">No progress test attempts found.</div>';
         var list = attempts.slice().sort(function (a, b) {
             return (parseInt(a.attempt, 10) || 0) - (parseInt(b.attempt, 10) || 0);
         });
+
+        var passedOnFirstAttempt = list.length === 1
+            && parseInt(list[0].attempt, 10) === 1
+            && parseInt(list[0].pass_gate_met, 10) === 1
+            && !list[0].is_stale_attempt;
+
+        if (passedOnFirstAttempt) {
+            var a = list[0];
+            return '<div class="tcc-attempt-stack">'
+                + '<div class="tcc-attempt-card"><div class="tcc-attempt-pass-first-note">Passed on first attempt — oral detail open below (no extra click).</div>'
+                + '<div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt 1 · PASS · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div>'
+                + '<div class="tcc-attempt-meta">Started: ' + escapeHtml(niceDateTime(a.started_at)) + ' · Completed: ' + escapeHtml(niceDateTime(a.completed_at)) + ' (Duration: ' + escapeHtml(tccAttemptDuration(a.started_at, a.completed_at)) + ')</div></div>'
+                + '<span class="tcc-score-pill ok">' + escapeHtml(a.score_pct !== null && a.score_pct !== undefined ? a.score_pct + '%' : '—') + '</span></div>'
+                + renderAttemptDetailInner(a)
+                + '</div></div>';
+        }
+
+        var html = '<div class="tcc-attempt-stack">';
         list.forEach(function (a) {
-            var score = a.score_pct !== null && a.score_pct !== undefined ? a.score_pct + '%' : '—';
-            var passFail = parseInt(a.pass_gate_met, 10) === 1 ? 'PASS' : 'FAIL';
             var stale = !!a.is_stale_attempt;
-            var dur = tccAttemptDuration(a.started_at, a.completed_at);
-            var cardCls = 'tcc-attempt-card' + (stale ? ' tcc-attempt-stale' : '');
-            html += '<div class="' + cardCls + '"><div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt ' + escapeHtml(a.attempt || '—') + ' · ' + escapeHtml(passFail) + ' · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div>';
-            html += '<div class="tcc-attempt-meta">Started: ' + escapeHtml(niceDateTime(a.started_at)) + ' · Completed: ' + escapeHtml(niceDateTime(a.completed_at)) + ' (Duration: ' + escapeHtml(dur) + ')</div>';
-            html += '</div><span class="tcc-score-pill ' + (parseInt(a.pass_gate_met, 10) === 1 ? 'ok' : 'danger') + '">' + escapeHtml(score) + '</span></div>';
-            html += '<details class="tcc-inline-json"><summary style="cursor:pointer;font-weight:800;color:#64748b;">Raw attempt JSON (troubleshooting)</summary><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(a, null, 2)) + '</pre></details>';
-            html += renderAttemptItems(a.items || []) + '</div>';
+            var detCls = 'tcc-attempt-details' + (stale ? ' tcc-attempt-stale' : '');
+            html += '<details class="' + detCls + '">';
+            html += '<summary class="tcc-attempt-row-summary">' + renderAttemptRowSummary(a) + '</summary>';
+            html += '<div class="tcc-attempt-detail-body">' + renderAttemptDetailInner(a) + '</div>';
+            html += '</details>';
         });
+        html += '</div>';
         return html;
     }
 
