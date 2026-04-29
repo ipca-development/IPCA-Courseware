@@ -1301,7 +1301,7 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
     ];
 }
 
-function tcc_lesson_titles_by_ids(PDO $pdo, array $lessonIds): array
+function tcc_lesson_course_meta_by_ids(PDO $pdo, array $lessonIds): array
 {
     $lessonIds = array_values(array_unique(array_filter(array_map('intval', $lessonIds))));
     if (!$lessonIds) {
@@ -1309,11 +1309,24 @@ function tcc_lesson_titles_by_ids(PDO $pdo, array $lessonIds): array
     }
 
     $placeholders = implode(',', array_fill(0, count($lessonIds), '?'));
-    $st = $pdo->prepare("SELECT id, title FROM lessons WHERE id IN ({$placeholders})");
+    $st = $pdo->prepare("
+        SELECT
+            l.id,
+            l.title AS lesson_title,
+            l.course_id,
+            c.title AS course_title
+        FROM lessons l
+        LEFT JOIN courses c ON c.id = l.course_id
+        WHERE l.id IN ({$placeholders})
+    ");
     $st->execute($lessonIds);
     $map = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $map[(int)$row['id']] = (string)($row['title'] ?? '');
+        $map[(int)$row['id']] = [
+            'lesson_title' => (string)($row['lesson_title'] ?? ''),
+            'course_id' => (int)($row['course_id'] ?? 0),
+            'course_title' => (string)($row['course_title'] ?? ''),
+        ];
     }
 
     return $map;
@@ -1420,18 +1433,21 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
     foreach ($events as $r) {
         $lessonIds[] = (int)($r['lesson_id'] ?? 0);
     }
-    $lessonTitles = tcc_lesson_titles_by_ids($pdo, $lessonIds);
+    $lessonMeta = tcc_lesson_course_meta_by_ids($pdo, $lessonIds);
 
     $timeline = [];
 
     foreach ($requiredActions as $row) {
         $lid = (int)($row['lesson_id'] ?? 0);
+        $lm = $lessonMeta[$lid] ?? ['lesson_title' => '', 'course_id' => 0, 'course_title' => ''];
         $sortTs = tcc_audit_pick_ts((string)($row['created_at'] ?? ''), (string)($row['updated_at'] ?? ''));
         $timeline[] = [
             'kind' => 'required_action',
             'sort_ts' => $sortTs,
             'lesson_id' => $lid,
-            'lesson_title' => $lessonTitles[$lid] ?? '',
+            'lesson_title' => (string)($lm['lesson_title'] ?? ''),
+            'course_id' => (int)($lm['course_id'] ?? 0),
+            'course_title' => (string)($lm['course_title'] ?? ''),
             'label' => (string)($row['title'] ?? $row['action_type'] ?? 'Required action'),
             'meta' => trim((string)($row['action_type'] ?? '') . ' · status ' . (string)($row['status'] ?? '')),
             'payload' => $row,
@@ -1440,12 +1456,15 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
 
     foreach ($deadlineOverrides as $row) {
         $lid = (int)($row['lesson_id'] ?? 0);
+        $lm = $lessonMeta[$lid] ?? ['lesson_title' => '', 'course_id' => 0, 'course_title' => ''];
         $sortTs = tcc_audit_pick_ts((string)($row['granted_at'] ?? ''), (string)($row['created_at'] ?? ''));
         $timeline[] = [
             'kind' => 'deadline_override',
             'sort_ts' => $sortTs,
             'lesson_id' => $lid,
-            'lesson_title' => $lessonTitles[$lid] ?? '',
+            'lesson_title' => (string)($lm['lesson_title'] ?? ''),
+            'course_id' => (int)($lm['course_id'] ?? 0),
+            'course_title' => (string)($lm['course_title'] ?? ''),
             'label' => (string)($row['override_type'] ?? 'Deadline override'),
             'meta' => 'New deadline: ' . (string)($row['new_deadline_utc'] ?? '—'),
             'payload' => $row,
@@ -1454,12 +1473,15 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
 
     foreach ($emails as $row) {
         $lid = (int)($row['lesson_id'] ?? 0);
+        $lm = $lessonMeta[$lid] ?? ['lesson_title' => '', 'course_id' => 0, 'course_title' => ''];
         $sortTs = tcc_audit_pick_ts((string)($row['created_at'] ?? ''), (string)($row['sent_at'] ?? ''));
         $timeline[] = [
             'kind' => 'email',
             'sort_ts' => $sortTs,
             'lesson_id' => $lid,
-            'lesson_title' => $lessonTitles[$lid] ?? '',
+            'lesson_title' => (string)($lm['lesson_title'] ?? ''),
+            'course_id' => (int)($lm['course_id'] ?? 0),
+            'course_title' => (string)($lm['course_title'] ?? ''),
             'label' => (string)($row['title'] ?? $row['subject'] ?? $row['email_type'] ?? 'Email'),
             'meta' => trim((string)($row['email_type'] ?? '') . ' · ' . (string)($row['delivery_status'] ?? $row['sent_status'] ?? '')),
             'payload' => $row,
@@ -1468,12 +1490,15 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
 
     foreach ($events as $row) {
         $lid = (int)($row['lesson_id'] ?? 0);
+        $lm = $lessonMeta[$lid] ?? ['lesson_title' => '', 'course_id' => 0, 'course_title' => ''];
         $sortTs = tcc_audit_pick_ts((string)($row['event_time'] ?? ''), (string)($row['created_at'] ?? ''));
         $timeline[] = [
             'kind' => 'progression_event',
             'sort_ts' => $sortTs,
             'lesson_id' => $lid,
-            'lesson_title' => $lessonTitles[$lid] ?? '',
+            'lesson_title' => (string)($lm['lesson_title'] ?? ''),
+            'course_id' => (int)($lm['course_id'] ?? 0),
+            'course_title' => (string)($lm['course_title'] ?? ''),
             'label' => (string)($row['event_code'] ?? $row['event_type'] ?? 'Event'),
             'meta' => trim((string)($row['event_type'] ?? '') . ' · ' . (string)($row['event_status'] ?? '')),
             'payload' => $row,

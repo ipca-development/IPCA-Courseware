@@ -40,6 +40,18 @@ cw_header('Instructor Theory Control Center');
 .tcc-audit-mail{flex:0 0 auto;border:1px solid rgba(15,23,42,.12);background:#fff;border-radius:12px;width:40px;height:40px;cursor:pointer;font-size:18px;line-height:1;display:inline-flex;align-items:center;justify-content:center;color:#0f766e;transition:transform .1s ease,box-shadow .12s ease}
 .tcc-audit-mail:hover{transform:scale(1.06);box-shadow:0 6px 14px rgba(15,23,42,.12)}
 .tcc-audit-row .tcc-audit-row-main.tcc-intervention-clickable{cursor:pointer}
+.tcc-li-toolbar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;padding:0 2px}
+.tcc-li-pane{margin-top:4px}
+.tcc-audit-controls-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 14px;margin-bottom:14px;padding:14px 16px;border-radius:16px;background:#f8fafc;border:1px solid rgba(15,23,42,.07)}
+.tcc-audit-field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.tcc-audit-field label{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.1em;color:#64748b}
+.tcc-audit-field select,.tcc-audit-field input{font:inherit;font-size:13px;padding:7px 9px;border-radius:10px;border:1px solid rgba(15,23,42,.12);background:#fff;color:#102845}
+.tcc-audit-toggles{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:center;font-size:13px;font-weight:800;color:#334155}
+.tcc-audit-toggles label{display:inline-flex;gap:7px;align-items:center;cursor:pointer}
+.tcc-engine-details{margin-top:14px;border-radius:16px;border:1px solid rgba(15,23,42,.08);background:#fafafa;padding:0 14px 12px}
+.tcc-engine-details summary{cursor:pointer;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#64748b;padding:12px 4px;list-style:none}
+.tcc-engine-details summary::-webkit-details-marker{display:none}
+.tcc-li-toolbar .tcc-btn.active{outline:2px solid rgba(18,53,95,.35);outline-offset:2px}
 </style>
 
 <div class="tcc-page">
@@ -97,18 +109,28 @@ cw_header('Instructor Theory Control Center');
         </div>
     </section>
 
-    <section class="tcc-card tcc-section">
+    <section id="tccStudentSnapshotSection" class="tcc-card tcc-section" style="display:none">
         <div class="tcc-section-head">
             <div>
                 <h2 class="tcc-section-title">Student Deep Dive</h2>
-                <div class="tcc-section-sub">Snapshot of the selected student's progress, friction points, and comparative indicators.</div>
+                <div class="tcc-section-sub">Snapshot of the selected student's progress, friction points, blockers, and comparative indicators.</div>
             </div>
-            <div id="studentPanelCount" class="tcc-count-pill">Select student</div>
+            <div id="studentPanelCount" class="tcc-count-pill">—</div>
         </div>
-        <div id="studentPanel" class="tcc-student-placeholder">Tap a student avatar in the Cohort Radar, choose a student from the selector, or tap a student in the Action Queue to open the student deep dive here.</div>
+        <div id="studentPanel"></div>
     </section>
 
-    <section class="tcc-card tcc-section">
+    <section id="tccLessonInterventionsSection" class="tcc-card tcc-section" style="display:none">
+        <div class="tcc-section-head">
+            <div>
+                <h2 class="tcc-section-title">Lesson & Interventions</h2>
+                <div class="tcc-section-sub">Lessons by module, chronological interventions, and related mail.</div>
+            </div>
+        </div>
+        <div id="lessonInterventionsInner"></div>
+    </section>
+
+    <section id="needsMyActionSection" class="tcc-card tcc-section">
         <div class="tcc-section-head">
             <div>
                 <h2 class="tcc-section-title">Needs My Action</h2>
@@ -159,11 +181,45 @@ cw_header('Instructor Theory Control Center');
 
     var cohortId = 0;
     var selectedStudentId = 0;
-    var studentAuditTrailLoadedFor = 0;
+    var studentAuditTimelineCache = null;
+    var studentAuditTimelineCacheStudentId = 0;
     var cohortStudents = [];
     var queueItemsById = {};
     var selectedQueueIds = {};
     var queueFamilyMemberIds = {deadline_related: [], progress_test_failure_related: [], other: []};
+
+    function setNeedsMyActionSectionVisible(visible) {
+        var el = document.getElementById('needsMyActionSection');
+        if (el) el.style.display = visible ? '' : 'none';
+    }
+
+    function setStudentDeepDiveSectionVisible(visible) {
+        var el = document.getElementById('tccStudentSnapshotSection');
+        if (el) el.style.display = visible ? '' : 'none';
+    }
+
+    function setLessonInterventionsSectionVisible(visible) {
+        var el = document.getElementById('tccLessonInterventionsSection');
+        if (el) el.style.display = visible ? '' : 'none';
+    }
+
+    function clearStudentSelectionUi() {
+        selectedStudentId = 0;
+        studentAuditTimelineCache = null;
+        studentAuditTimelineCacheStudentId = 0;
+        selectStudentInUi(0);
+        setNeedsMyActionSectionVisible(true);
+        setStudentDeepDiveSectionVisible(false);
+        setLessonInterventionsSectionVisible(false);
+        var panel = document.getElementById('studentPanel');
+        if (panel) {
+            panel.className = 'tcc-student-placeholder';
+            panel.innerHTML = 'Tap a student avatar in the Cohort Radar, choose a student from the selector, or tap a student in the Action Queue to open the student deep dive here.';
+        }
+        var liInner = document.getElementById('lessonInterventionsInner');
+        if (liInner) liInner.innerHTML = '';
+        document.getElementById('studentPanelCount').textContent = 'Select student';
+    }
 
     function escapeHtml(value) {
         return String(value === null || value === undefined ? '' : value).replace(/[&<>'"]/g, function (c) {
@@ -633,28 +689,67 @@ cw_header('Instructor Theory Control Center');
         });
     }
 
-    function switchStudentDeepTab(which) {
-        which = which || 'lessons';
-        var bL = document.getElementById('deepTabLessons');
-        var bA = document.getElementById('deepTabAudit');
-        var pL = document.getElementById('deepPaneLessons');
-        var pA = document.getElementById('deepPaneAudit');
-        if (!pL || !pA) return;
-        if (which === 'audit') {
-            if (bL) { bL.classList.remove('active'); bL.setAttribute('aria-selected', 'false'); }
-            if (bA) { bA.classList.add('active'); bA.setAttribute('aria-selected', 'true'); }
-            pL.style.display = 'none';
-            pA.style.display = 'block';
-            var sid = parseInt(selectedStudentId, 10) || 0;
-            if (sid && studentAuditTrailLoadedFor !== sid) {
-                loadStudentInterventionsAudit();
-            }
-        } else {
-            if (bA) { bA.classList.remove('active'); bA.setAttribute('aria-selected', 'false'); }
-            if (bL) { bL.classList.add('active'); bL.setAttribute('aria-selected', 'true'); }
-            pA.style.display = 'none';
-            pL.style.display = 'block';
+    function cohortNowParts() {
+        try {
+            var fmt = new Intl.DateTimeFormat('en-US', {timeZone: cohortTimeZone(), year: 'numeric', month: 'numeric', day: 'numeric'});
+            var y = 0;
+            var m = 0;
+            var d = 0;
+            fmt.formatToParts(new Date()).forEach(function (p) {
+                if (p.type === 'year') y = parseInt(p.value, 10);
+                if (p.type === 'month') m = parseInt(p.value, 10);
+                if (p.type === 'day') d = parseInt(p.value, 10);
+            });
+            return { y: y, m: m, d: d };
+        } catch (e) {
+            return { y: new Date().getUTCFullYear(), m: new Date().getUTCMonth() + 1, d: new Date().getUTCDate() };
         }
+    }
+
+    function sortTsToCohortYmd(sortTs) {
+        var d = parseUtcDate(sortTs);
+        if (!d) return '';
+        try {
+            return new Intl.DateTimeFormat('en-CA', {timeZone: cohortTimeZone(), year: 'numeric', month: '2-digit', day: '2-digit'}).format(d);
+        } catch (e) {
+            return '';
+        }
+    }
+
+    function cohortTodayYmd() {
+        var p = cohortNowParts();
+        return String(p.y) + '-' + String(p.m).padStart(2, '0') + '-' + String(p.d).padStart(2, '0');
+    }
+
+    function auditRowMatchesPreset(row, preset) {
+        var rowYmd = sortTsToCohortYmd(row.sort_ts);
+        var d = parseUtcDate(row.sort_ts);
+        var t = d ? d.getTime() : 0;
+        var now = Date.now();
+        if (preset === 'all' || !preset) return true;
+        if (!rowYmd && !t) return true;
+        if (preset === 'today') return rowYmd === cohortTodayYmd();
+        if (preset === 'last7') return t >= now - 7 * 86400000 && t <= now + 86400000;
+        if (preset === 'last30') return t >= now - 30 * 86400000 && t <= now + 86400000;
+        if (preset === 'mtd') {
+            var p = cohortNowParts();
+            var start = String(p.y) + '-' + String(p.m).padStart(2, '0') + '-01';
+            return rowYmd >= start && rowYmd <= cohortTodayYmd();
+        }
+        if (preset === 'prev_month') {
+            var pm = cohortNowParts();
+            var mo = pm.m - 1;
+            var yr = pm.y;
+            if (mo < 1) {
+                mo = 12;
+                yr--;
+            }
+            var start = String(yr) + '-' + String(mo).padStart(2, '0') + '-01';
+            var dim = new Date(yr, mo, 0).getDate();
+            var end = String(yr) + '-' + String(mo).padStart(2, '0') + '-' + String(dim).padStart(2, '0');
+            return rowYmd >= start && rowYmd <= end;
+        }
+        return true;
     }
 
     function auditKindLabel(kind) {
@@ -662,23 +757,135 @@ cw_header('Instructor Theory Control Center');
         return map[kind] || kind;
     }
 
-    function renderStudentAuditTrail(data) {
-        data = data || {};
-        var rows = (data.timeline || []).slice();
-        if (!rows.length) {
-            return '<div class="tcc-empty">No audit records found for this student in the selected cohort.</div>';
-        }
+    function lessonLineFromRow(row) {
+        var lid = parseInt(row.lesson_id, 10) || 0;
+        var lt = row.lesson_title ? String(row.lesson_title) : (lid ? ('Lesson ' + lid) : 'Cohort-wide');
+        var ct = row.course_title ? String(row.course_title) : '';
+        return ct ? (ct + ' · ' + lt) : lt;
+    }
+
+    function renderAuditRows(rows, allowMail) {
+        if (!rows.length) return '<div class="tcc-empty">No rows match the current filters.</div>';
         var html = '<div class="tcc-audit-feed">';
         rows.forEach(function (row) {
             var kind = String(row.kind || '');
-            var lid = parseInt(row.lesson_id, 10) || 0;
-            var lt = row.lesson_title ? String(row.lesson_title) : (lid ? ('Lesson ' + lid) : 'Cohort-wide');
             var chipCls = 'tcc-audit-chip' + (kind ? (' ' + kind) : '');
-            var mailBtn = kind === 'email' ? '<button type="button" class="tcc-audit-mail" title="View email content" aria-label="View email" onclick="event.preventDefault();event.stopPropagation();openEmailBodyModal(' + serializeForOnclick(row.payload || {}) + ')">✉</button>' : '';
-            html += '<div class="tcc-audit-row"><div class="tcc-audit-row-main tcc-intervention-clickable" onclick="openInterventionDetailModal(' + serializeForOnclick(row.payload || {}) + ')"><div class="tcc-audit-row-head"><span class="' + escapeHtml(chipCls) + '">' + escapeHtml(auditKindLabel(kind)) + '</span><span class="tcc-audit-ts">' + escapeHtml(niceDateTime(row.sort_ts || '')) + '</span><span class="tcc-audit-lesson" title="' + escapeHtml(lt) + '">' + escapeHtml(lt) + '</span></div><div class="tcc-audit-label">' + escapeHtml(row.label || '—') + '</div><div class="tcc-audit-meta">' + escapeHtml(row.meta || '—') + '</div></div>' + mailBtn + '</div>';
+            var line = lessonLineFromRow(row);
+            var mailBtn = allowMail && kind === 'email' ? '<button type="button" class="tcc-audit-mail" title="View email content" aria-label="View email" onclick="event.preventDefault();event.stopPropagation();openEmailBodyModal(' + serializeForOnclick(row.payload || {}) + ')">✉</button>' : '';
+            html += '<div class="tcc-audit-row"><div class="tcc-audit-row-main tcc-intervention-clickable" onclick="openInterventionDetailModal(' + serializeForOnclick(row.payload || {}) + ')"><div class="tcc-audit-row-head"><span class="' + escapeHtml(chipCls) + '">' + escapeHtml(auditKindLabel(kind)) + '</span><span class="tcc-audit-ts">' + escapeHtml(niceDateTime(row.sort_ts || '')) + '</span><span class="tcc-audit-lesson" title="' + escapeHtml(line) + '">' + escapeHtml(line) + '</span></div><div class="tcc-audit-label">' + escapeHtml(row.label || '—') + '</div><div class="tcc-audit-meta">' + escapeHtml(row.meta || '—') + '</div></div>' + mailBtn + '</div>';
         });
         html += '</div>';
         return html;
+    }
+
+    function auditApplyFiltersAndSort(rows) {
+        var sortOrder = (document.getElementById('auditSortOrder') && document.getElementById('auditSortOrder').value) || 'asc';
+        var sortMode = (document.getElementById('auditSortMode') && document.getElementById('auditSortMode').value) || 'date';
+        var preset = (document.getElementById('auditDatePreset') && document.getElementById('auditDatePreset').value) || 'all';
+        var mailOn = !document.getElementById('auditToggleMail') || document.getElementById('auditToggleMail').checked;
+        var reqOn = !document.getElementById('auditToggleReq') || document.getElementById('auditToggleReq').checked;
+        var dlOn = !document.getElementById('auditToggleDl') || document.getElementById('auditToggleDl').checked;
+        var list = rows.filter(function (row) {
+            if (!auditRowMatchesPreset(row, preset)) return false;
+            var k = String(row.kind || '');
+            if (k === 'email' && !mailOn) return false;
+            if (k === 'required_action' && !reqOn) return false;
+            if (k === 'deadline_override' && !dlOn) return false;
+            return true;
+        });
+        if (sortMode === 'course') {
+            list.sort(function (a, b) {
+                var ca = String(a.course_title || 'ZZZ').localeCompare(String(b.course_title || 'ZZZ'));
+                if (ca !== 0) return ca;
+                var la = String(a.lesson_title || '').localeCompare(String(b.lesson_title || ''));
+                if (la !== 0) return la;
+                return String(a.sort_ts || '').localeCompare(String(b.sort_ts || ''));
+            });
+            if (sortOrder === 'desc') list.reverse();
+        } else {
+            list.sort(function (a, b) {
+                return String(a.sort_ts || '').localeCompare(String(b.sort_ts || ''));
+            });
+            if (sortOrder === 'desc') list.reverse();
+        }
+        return list;
+    }
+
+    function refreshAuditView() {
+        var sid = parseInt(selectedStudentId, 10) || 0;
+        if (!sid || studentAuditTimelineCacheStudentId !== sid || !studentAuditTimelineCache) return;
+        var full = studentAuditTimelineCache.slice();
+        var instructorRows = full.filter(function (r) { return String(r.kind || '') !== 'progression_event'; });
+        var engineRows = full.filter(function (r) { return String(r.kind || '') === 'progression_event'; });
+        var mainList = auditApplyFiltersAndSort(instructorRows);
+        var engList = auditApplyFiltersAndSort(engineRows);
+        var body = document.getElementById('studentAuditBody');
+        var engBody = document.getElementById('studentEngineEventsBody');
+        var pill = document.getElementById('auditCountPill');
+        if (pill) pill.textContent = mainList.length + ' shown · ' + engineRows.length + ' engine';
+        if (body) body.innerHTML = renderAuditRows(mainList, true);
+        if (engBody) engBody.innerHTML = renderAuditRows(engList, false);
+    }
+
+    document.addEventListener('change', function (e) {
+        var t = e.target;
+        if (!t || !t.classList || !t.classList.contains('tcc-audit-control')) return;
+        if (!t.closest || !t.closest('#tccLessonInterventionsSection')) return;
+        refreshAuditView();
+    });
+
+    function buildLessonInterventionsHtml(sidNum) {
+        return '<div class="tcc-li-toolbar">' +
+            '<button type="button" class="tcc-btn primary active" id="liBtnLessons" onclick="switchStudentDeepTab(\'lessons\')">Lessons</button>' +
+            '<button type="button" class="tcc-btn secondary" id="liBtnInterventions" onclick="switchStudentDeepTab(\'audit\')">Interventions</button>' +
+            '<button type="button" class="tcc-btn warn" onclick="openSystemWatchForStudent(' + sidNum + ')">System Watch</button>' +
+            '</div>' +
+            '<div id="deepPaneLessons" class="tcc-li-pane" style="display:block">' +
+            '<div class="tcc-lesson-timeline">' +
+            '<div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by module</div><div class="tcc-lesson-timeline-sub">Grouped by course module with deadlines, summary quality, tests, and drill-down.</div></div><span class="tcc-count-pill">Live</span></div>' +
+            '<div id="studentLessonTimelineBody" class="tcc-timeline-loading">Loading lesson modules…</div>' +
+            '</div></div>' +
+            '<div id="deepPaneAudit" class="tcc-li-pane" style="display:none">' +
+            '<div class="tcc-audit-controls-grid">' +
+            '<div class="tcc-audit-field"><label for="auditSortOrder">Sort direction</label><select id="auditSortOrder" class="tcc-audit-control"><option value="asc">Oldest first</option><option value="desc">Newest first</option></select></div>' +
+            '<div class="tcc-audit-field"><label for="auditSortMode">Sort by</label><select id="auditSortMode" class="tcc-audit-control"><option value="date">Date / time</option><option value="course">Course, then lesson</option></select></div>' +
+            '<div class="tcc-audit-field"><label for="auditDatePreset">Date range</label><select id="auditDatePreset" class="tcc-audit-control"><option value="all">All time</option><option value="today">Today</option><option value="last7">Last 7 days</option><option value="last30">Last 30 days</option><option value="mtd">Month to date</option><option value="prev_month">Previous calendar month</option></select></div>' +
+            '</div>' +
+            '<div class="tcc-audit-toggles">' +
+            '<label><input type="checkbox" id="auditToggleMail" class="tcc-audit-control" checked> Emails</label>' +
+            '<label><input type="checkbox" id="auditToggleReq" class="tcc-audit-control" checked> Required actions</label>' +
+            '<label><input type="checkbox" id="auditToggleDl" class="tcc-audit-control" checked> Deadline changes</label>' +
+            '</div>' +
+            '<div class="tcc-lesson-timeline-head" style="margin-top:8px;border-top:1px solid rgba(15,23,42,.06);padding-top:14px"><div><div class="tcc-lesson-timeline-title">Chronological interventions</div><div class="tcc-lesson-timeline-sub">Filtered instructor-facing events (emails, actions, deadline overrides).</div></div><span class="tcc-count-pill" id="auditCountPill">—</span></div>' +
+            '<div id="studentAuditBody" class="tcc-timeline-loading">Loading…</div>' +
+            '<details class="tcc-engine-details" id="engineEventsDetails"><summary>ENGINE EVENTS</summary><div id="studentEngineEventsBody" class="tcc-modal-muted" style="padding:10px 4px 4px;font-size:12px;line-height:1.45">Lower-level progression engine diagnostics. Same filters apply.</div></details>' +
+            '</div>';
+    }
+
+    function switchStudentDeepTab(which) {
+        which = which || 'lessons';
+        var bL = document.getElementById('liBtnLessons');
+        var bA = document.getElementById('liBtnInterventions');
+        var pL = document.getElementById('deepPaneLessons');
+        var pA = document.getElementById('deepPaneAudit');
+        if (!pL || !pA) return;
+        if (which === 'audit') {
+            if (bL) { bL.classList.remove('active'); }
+            if (bA) { bA.classList.add('active'); }
+            pL.style.display = 'none';
+            pA.style.display = 'block';
+            var sid = parseInt(selectedStudentId, 10) || 0;
+            if (sid && studentAuditTimelineCacheStudentId !== sid) {
+                loadStudentInterventionsAudit();
+            } else {
+                refreshAuditView();
+            }
+        } else {
+            if (bA) { bA.classList.remove('active'); }
+            if (bL) { bL.classList.add('active'); }
+            pA.style.display = 'none';
+            pL.style.display = 'block';
+        }
     }
 
     function loadStudentInterventionsAudit() {
@@ -686,19 +893,22 @@ cw_header('Instructor Theory Control Center');
         var body = document.getElementById('studentAuditBody');
         if (!cohortId || !sid || !body) return;
         body.innerHTML = '<div class="tcc-timeline-loading">Loading interventions audit…</div>';
+        var eng = document.getElementById('studentEngineEventsBody');
+        if (eng) eng.innerHTML = '<div class="tcc-timeline-loading">Loading…</div>';
         api('student_interventions_audit', { cohort_id: cohortId, student_id: sid }).then(function (resp) {
             if (!resp || resp.ok === false) {
-                body.innerHTML = '<div class="tcc-timeline-error">' + escapeHtml((resp && (resp.message || resp.error)) || 'Unable to load audit trail.') + '</div>';
+                var err = '<div class="tcc-timeline-error">' + escapeHtml((resp && (resp.message || resp.error)) || 'Unable to load audit trail.') + '</div>';
+                body.innerHTML = err;
+                if (eng) eng.innerHTML = err;
                 return;
             }
-            studentAuditTrailLoadedFor = sid;
             var d = resp.data || {};
-            var n = (d.timeline || []).length;
-            var pill = document.getElementById('auditCountPill');
-            if (pill) pill.textContent = n + ' event' + (n === 1 ? '' : 's');
-            body.innerHTML = renderStudentAuditTrail(d);
+            studentAuditTimelineCache = Array.isArray(d.timeline) ? d.timeline.slice() : [];
+            studentAuditTimelineCacheStudentId = sid;
+            refreshAuditView();
         }).catch(function () {
             body.innerHTML = '<div class="tcc-timeline-error">Unable to load audit trail.</div>';
+            if (eng) eng.innerHTML = '<div class="tcc-timeline-error">Unable to load engine events.</div>';
         });
     }
 
@@ -957,9 +1167,16 @@ cw_header('Instructor Theory Control Center');
     function loadAll() {
         if (!cohortId) return;
         selectedStudentId = 0;
+        studentAuditTimelineCache = null;
+        studentAuditTimelineCacheStudentId = 0;
+        setNeedsMyActionSectionVisible(true);
+        setStudentDeepDiveSectionVisible(false);
+        setLessonInterventionsSectionVisible(false);
         document.getElementById('studentPanelCount').textContent = 'Select student';
         document.getElementById('studentPanel').className = 'tcc-student-placeholder';
         document.getElementById('studentPanel').innerHTML = 'Tap a student avatar in the Cohort Radar, choose a student from the selector, or tap a student in the Action Queue to open the student deep dive here.';
+        var liInner = document.getElementById('lessonInterventionsInner');
+        if (liInner) liInner.innerHTML = '';
         loadOverview();
         loadQueue();
     }
@@ -1275,6 +1492,11 @@ cw_header('Instructor Theory Control Center');
         selectStudentInUi(studentId);
         var panel = document.getElementById('studentPanel');
         if (!selectedStudentId || !panel) return;
+        setNeedsMyActionSectionVisible(false);
+        setStudentDeepDiveSectionVisible(true);
+        setLessonInterventionsSectionVisible(true);
+        var liInner = document.getElementById('lessonInterventionsInner');
+        if (liInner) liInner.innerHTML = '<div class="tcc-loading">Loading lessons & interventions…</div>';
         document.getElementById('studentPanelCount').textContent = 'Loading';
         panel.className = '';
         panel.innerHTML = '<div class="tcc-loading">Loading student snapshot…</div>';
@@ -1282,12 +1504,14 @@ cw_header('Instructor Theory Control Center');
             if (!data.ok) {
                 document.getElementById('studentPanelCount').textContent = 'Error';
                 panel.innerHTML = '<div class="tcc-error">' + escapeHtml(data.message || data.error || 'Unable to load student snapshot.') + '</div>';
+                if (liInner) liInner.innerHTML = '';
                 return;
             }
             renderStudentPanel(data);
         }).catch(function () {
             document.getElementById('studentPanelCount').textContent = 'Error';
             panel.innerHTML = '<div class="tcc-error">Unable to load student snapshot.</div>';
+            if (liInner) liInner.innerHTML = '';
         });
     }
 
@@ -1333,7 +1557,7 @@ cw_header('Instructor Theory Control Center');
                 issueHtml += '<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">' + escapeHtml(issue.title || issue.type || 'Issue') + '</div><div class="tcc-issue-meta">Lesson ' + escapeHtml(issue.lesson_id || '—') + ' · ' + escapeHtml(issue.lesson_title || '') + ' · ' + escapeHtml(statusLabel) + '</div></div>' + actions + '</div>';
             });
             if (issues.length > 10) {
-                issueHtml += '<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">+' + (issues.length - 10) + ' more issue(s)</div><div class="tcc-issue-meta">The lesson module view below keeps the full instructor workflow organized.</div></div><div class="tcc-issue-actions"><button class="tcc-btn secondary" type="button" onclick="loadStudentLessons(' + parseInt(st.student_id, 10) + ')">Open Lessons</button></div></div>';
+                issueHtml += '<div class="tcc-issue-row"><div class="tcc-issue-main"><div class="tcc-issue-title">+' + (issues.length - 10) + ' more issue(s)</div><div class="tcc-issue-meta">The lesson module view below keeps the full instructor workflow organized.</div></div><div class="tcc-issue-actions"><button class="tcc-btn secondary" type="button" onclick="switchStudentDeepTab(\'lessons\');loadStudentLessons(' + parseInt(st.student_id, 10) + ')">Open Lessons</button></div></div>';
             }
         }
         var avgScore = c.avg_score !== null && c.avg_score !== undefined ? Number(c.avg_score) : null;
@@ -1348,14 +1572,11 @@ cw_header('Instructor Theory Control Center');
         var tiles = metricTile('Progress', progressPct + '%', progressPct, '', '' + (p.passed_lessons || 0) + '/' + (p.total_lessons || 0) + ' lessons passed') + metricTile('Avg Score', avgScore !== null ? avgScore + '%' : '—', metricPct(avgScore, cohortAvgScore, true), barClass(avgScore, cohortAvgScore, true), 'Cohort Average: ' + (cohortAvgScore !== null ? cohortAvgScore + '%' : '—')) + metricTile('Active deadline issues', activeDl, metricPct(activeDl, cohortDl, false), barClass(activeDl, cohortDl, false), dlSub) + metricTile('Failed Attempts', failed, metricPct(failed, cohortFailed, false), barClass(failed, cohortFailed, false), 'Cohort Average: ' + cohortFailed);
         var motDetail = String((m.detail || m.motivation_detail || '')).trim();
         var motHint = motDetail !== '' ? '<div class="tcc-motivation-detail" style="font-size:12px;line-height:1.5;color:#475569;margin-top:10px;max-width:720px;">' + escapeHtml(motDetail) + '</div>' : '';
-        studentAuditTrailLoadedFor = 0;
         var sidNum = parseInt(st.student_id, 10) || 0;
-        var deepTabs = '<div class="tcc-deep-tab-row" role="tablist"><button type="button" class="tcc-deep-tab active" id="deepTabLessons" role="tab" aria-selected="true" onclick="switchStudentDeepTab(\'lessons\')">Lessons by module</button><button type="button" class="tcc-deep-tab" id="deepTabAudit" role="tab" aria-selected="false" onclick="switchStudentDeepTab(\'audit\')">Interventions audit</button></div>';
-        var paneLessons = '<div id="deepPaneLessons" class="tcc-deep-pane" role="tabpanel" style="display:block"><div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by module</div><div class="tcc-lesson-timeline-sub">Grouped by course module: deadlines, summary quality, progress tests, attempt counts, and per-lesson drill-down.</div></div><span class="tcc-count-pill">Live</span></div><div id="studentLessonTimelineBody" class="tcc-timeline-loading">Loading lesson modules…</div></div>';
-        var paneAudit = '<div id="deepPaneAudit" class="tcc-deep-pane" role="tabpanel" style="display:none"><div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Interventions audit trail</div><div class="tcc-lesson-timeline-sub">Chronological history in this cohort: required actions, deadline changes, emails, and engine events. Row opens details; envelope opens email content.</div></div><span class="tcc-count-pill" id="auditCountPill">—</span></div><div id="studentAuditBody" class="tcc-timeline-loading">Open this tab to load the audit trail.</div></div>';
-        var deepBlock = '<div class="tcc-lesson-timeline">' + deepTabs + paneLessons + paneAudit + '</div>';
         panel.className = '';
-        panel.innerHTML = '<div class="tcc-student-head"><div class="tcc-student-avatar ' + escapeHtml(color) + '">' + (photoPath(merged) !== '' ? '<img src="' + escapeHtml(photoPath(merged)) + '" alt="' + escapeHtml(st.name || 'Student') + '">' : escapeHtml(st.avatar_initials || radarStudent.avatar_initials || 'S')) + '</div><div style="min-width:0;"><div class="tcc-student-name">' + escapeHtml(st.name || 'Student') + '</div><div class="tcc-student-email">' + escapeHtml(st.email || '') + '</div></div></div><div class="tcc-student-state-row"><span class="tcc-status-pill ' + escapeHtml(m.level || '') + '">' + escapeHtml(m.label || 'Motivation signal') + '</span><span class="tcc-status-pill">Trend: ' + escapeHtml(m.trend || '—') + '</span><span class="tcc-status-pill">Issues: ' + escapeHtml(issues.length) + '</span></div>' + motHint + '<div class="tcc-snapshot-grid">' + tiles + '</div><h3 class="tcc-section-title" style="font-size:17px;margin:4px 0 10px;">Current Blockers / Issues</h3><div class="tcc-issues-list">' + issueHtml + '</div><div class="tcc-panel-actions"><button class="tcc-btn primary" type="button" onclick="switchStudentDeepTab(\'lessons\');loadStudentLessons(' + sidNum + ')">Lessons</button><button class="tcc-btn secondary" type="button" onclick="switchStudentDeepTab(\'audit\');">Interventions</button><button class="tcc-btn warn" type="button" onclick="openSystemWatchForStudent(' + sidNum + ')">System Watch</button></div>' + deepBlock;
+        panel.innerHTML = '<div class="tcc-student-head"><div class="tcc-student-avatar ' + escapeHtml(color) + '">' + (photoPath(merged) !== '' ? '<img src="' + escapeHtml(photoPath(merged)) + '" alt="' + escapeHtml(st.name || 'Student') + '">' : escapeHtml(st.avatar_initials || radarStudent.avatar_initials || 'S')) + '</div><div style="min-width:0;"><div class="tcc-student-name">' + escapeHtml(st.name || 'Student') + '</div><div class="tcc-student-email">' + escapeHtml(st.email || '') + '</div></div></div><div class="tcc-student-state-row"><span class="tcc-status-pill ' + escapeHtml(m.level || '') + '">' + escapeHtml(m.label || 'Motivation signal') + '</span><span class="tcc-status-pill">Trend: ' + escapeHtml(m.trend || '—') + '</span><span class="tcc-status-pill">Issues: ' + escapeHtml(issues.length) + '</span></div>' + motHint + '<div class="tcc-snapshot-grid">' + tiles + '</div><h3 class="tcc-section-title" style="font-size:17px;margin:4px 0 10px;">Current Blockers / Issues</h3><div class="tcc-issues-list">' + issueHtml + '</div>';
+        var liInner = document.getElementById('lessonInterventionsInner');
+        if (liInner) liInner.innerHTML = buildLessonInterventionsHtml(sidNum);
         loadStudentLessons(st.student_id);
     }
 
@@ -1681,6 +1902,7 @@ cw_header('Instructor Theory Control Center');
     window.executeTccRepairFromIssue = executeTccRepairFromIssue;
     window.openApprovalContextFromButton = openApprovalContextFromButton;
     window.openApprovalContextFromIssue = openApprovalContextFromIssue;
+    window.openEmailBodyModal = openEmailBodyModal;
 
     document.getElementById('cohortSelect').addEventListener('change', function () {
         cohortId = parseInt(this.value, 10) || 0;
@@ -1692,6 +1914,7 @@ cw_header('Instructor Theory Control Center');
     document.getElementById('studentSelect').addEventListener('change', function () {
         var sid = parseInt(this.value, 10) || 0;
         if (sid > 0) loadStudentPanel(sid);
+        else clearStudentSelectionUi();
     });
 
     function refreshBulkActionHint() {
