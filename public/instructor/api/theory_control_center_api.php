@@ -26,6 +26,8 @@ if (!in_array($role, $allowedRoles, true)) {
 
 $engine = new CoursewareProgressionV2($pdo);
 
+tcc_ensure_theory_instructor_ai_cache($pdo);
+
 function tcc_json($data, int $status = 200): void {
     http_response_code($status);
     echo json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
@@ -38,6 +40,255 @@ function tcc_int($value): int {
 
 function tcc_str($value): string {
     return trim((string)($value ?? ''));
+}
+
+function tcc_ensure_theory_instructor_ai_cache(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) {
+        return;
+    }
+    $done = true;
+    try {
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS theory_instructor_ai_cache (
+                id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                cohort_id INT UNSIGNED NOT NULL,
+                user_id INT UNSIGNED NOT NULL,
+                lesson_id INT UNSIGNED NOT NULL,
+                cache_kind VARCHAR(32) NOT NULL,
+                fingerprint CHAR(64) NOT NULL,
+                analysis_json MEDIUMTEXT NOT NULL,
+                model VARCHAR(80) DEFAULT NULL,
+                created_at DATETIME NOT NULL,
+                updated_at DATETIME NOT NULL,
+                PRIMARY KEY (id),
+                UNIQUE KEY uniq_tcc_ai (cohort_id, user_id, lesson_id, cache_kind)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    } catch (Throwable $e) {
+        // Table may already exist with different shape in rare deployments; AI cache is optional.
+    }
+}
+
+function tcc_student_contact_row(PDO $pdo, int $userId): array
+{
+    if ($userId <= 0) {
+        return ['display' => '', 'email' => ''];
+    }
+    try {
+        $st = $pdo->prepare("
+            SELECT
+                email,
+                COALESCE(NULLIF(TRIM(name), ''), email, CONCAT('User #', id)) AS display_name
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $st->execute([$userId]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$r) {
+            return ['display' => 'User #' . $userId, 'email' => ''];
+        }
+        $name = trim((string)($r['display_name'] ?? ''));
+        $em = trim((string)($r['email'] ?? ''));
+        $line = $name;
+        if ($em !== '') {
+            $line = $name !== '' ? ($name . ' <' . $em . '>') : $em;
+        }
+
+        return ['display' => $line !== '' ? $line : $em, 'email' => $em, 'name' => $name];
+    } catch (Throwable $e) {
+        return ['display' => 'User #' . $userId, 'email' => ''];
+    }
+}
+
+function tcc_decode_recipients_pretty(string $raw): string
+{
+    $raw = trim($raw);
+    if ($raw === '') {
+        return '';
+    }
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)) {
+        return $raw;
+    }
+    $parts = [];
+    foreach ($decoded as $entry) {
+        if (is_string($entry)) {
+            $parts[] = $entry;
+            continue;
+        }
+        if (!is_array($entry)) {
+            continue;
+        }
+        $email = trim((string)($entry['email'] ?? $entry['address'] ?? ''));
+        $name = trim((string)($entry['name'] ?? ''));
+        if ($email !== '' && $name !== '') {
+            $parts[] = $name . ' <' . $email . '>';
+        } elseif ($email !== '') {
+            $parts[] = $email;
+        }
+    }
+
+    return $parts ? implode(', ', $parts) : $raw;
+}
+
+function tcc_enrich_training_email_row(PDO $pdo, array $row, int $studentUserId): array
+{
+    $student = tcc_student_contact_row($pdo, $studentUserId);
+    $toPretty = tcc_decode_recipients_pretty((string)($row['recipients_to'] ?? ''));
+    $row['recipients_to_display'] = $toPretty;
+    $type = strtolower(trim((string)($row['recipient_type'] ?? '')));
+    $emailType = strtolower((string)($row['email_type'] ?? ''));
+    if ($type === '' && (strpos($emailType, 'instructor') !== false || strpos($emailType, 'chief') !== false)) {
+        $type = 'instructor';
+    }
+    if ($type === 'instructor' || $toPretty !== '') {
+        $row['recipient_display'] = $toPretty !== '' ? $toPretty : 'Instructor / staff (see To:)';
+    } else {
+        $row['recipient_display'] = $student['display'] !== '' ? $student['display'] : ($toPretty !== '' ? $toPretty : 'Student');
+    }
+    $sent = strtolower(trim((string)($row['sent_status'] ?? '')));
+    $row['delivery_success'] = ($sent === 'sent' && trim((string)($row['sent_at'] ?? '')) !== '');
+    $row['delivery_label'] = $row['delivery_success'] ? 'Sent successfully' : ($sent === 'failed' ? 'Send failed' : ($sent === 'queued' || $sent === 'pending' ? 'Queued / pending' : ($sent !== '' ? ucfirst($sent) : 'Unknown')));
+
+    return $row;
+}
+
+function tcc_summary_cache_fingerprint(array $summaryRow): string
+{
+    $plain = tcc_strip_summary_for_ai((string)($summaryRow['summary_html'] ?? ''), (string)($summaryRow['summary_plain'] ?? ''));
+    $updated = (string)($summaryRow['updated_at'] ?? $summaryRow['created_at'] ?? '');
+
+    return hash('sha256', $updated . '|' . hash('sha256', $plain));
+}
+
+function tcc_attempts_cache_fingerprint(array $attempts): string
+{
+    $parts = [];
+    foreach ($attempts as $a) {
+        if (!is_array($a)) {
+            continue;
+        }
+        $parts[] = (string)($a['id'] ?? '') . '|' . (string)($a['completed_at'] ?? '') . '|' . (string)($a['score_pct'] ?? '') . '|' . (string)($a['status'] ?? '') . '|' . (string)($a['formal_result_code'] ?? '');
+    }
+    sort($parts);
+
+    return hash('sha256', implode("\n", $parts));
+}
+
+function tcc_ai_cache_get(PDO $pdo, int $cohortId, int $userId, int $lessonId, string $kind): ?array
+{
+    try {
+        $st = $pdo->prepare('
+            SELECT fingerprint, analysis_json, model, updated_at
+            FROM theory_instructor_ai_cache
+            WHERE cohort_id = ?
+              AND user_id = ?
+              AND lesson_id = ?
+              AND cache_kind = ?
+            LIMIT 1
+        ');
+        $st->execute([$cohortId, $userId, $lessonId, $kind]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+
+        return $row ?: null;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+function tcc_ai_cache_put(PDO $pdo, int $cohortId, int $userId, int $lessonId, string $kind, string $fingerprint, array $analysis, ?string $model): void
+{
+    try {
+        $now = gmdate('Y-m-d H:i:s');
+        $json = json_encode($analysis, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $st = $pdo->prepare('
+            INSERT INTO theory_instructor_ai_cache
+                (cohort_id, user_id, lesson_id, cache_kind, fingerprint, analysis_json, model, created_at, updated_at)
+            VALUES (?,?,?,?,?,?,?,?,?)
+            ON DUPLICATE KEY UPDATE
+                fingerprint = VALUES(fingerprint),
+                analysis_json = VALUES(analysis_json),
+                model = VALUES(model),
+                updated_at = VALUES(updated_at)
+        ');
+        $st->execute([$cohortId, $userId, $lessonId, $kind, $fingerprint, $json, $model, $now, $now]);
+    } catch (Throwable $e) {
+        // ignore
+    }
+}
+
+function tcc_normalize_summary_ai_response(array $analysis): array
+{
+    $u = trim((string)($analysis['understanding'] ?? ''));
+    $du = trim((string)($analysis['deep_understanding'] ?? ''));
+    $label = trim((string)($analysis['deep_understanding_label'] ?? ''));
+    if ($label === '' && $du !== '') {
+        $label = $du;
+    }
+    if ($label === '' && $u !== '') {
+        $label = $u;
+    }
+    if ($label === '') {
+        $label = 'Not evaluated';
+    }
+    $analysis['deep_understanding_label'] = $label;
+    if (!isset($analysis['deep_understanding_score']) || $analysis['deep_understanding_score'] === '' || $analysis['deep_understanding_score'] === null) {
+        $map = ['strong' => 92, 'good' => 78, 'partial' => 58, 'poor' => 38, 'not evaluated' => 0];
+        $k = strtolower($label);
+        foreach ($map as $word => $pct) {
+            if (strpos($k, $word) !== false) {
+                $analysis['deep_understanding_score'] = $pct;
+                break;
+            }
+        }
+        if (!isset($analysis['deep_understanding_score'])) {
+            $analysis['deep_understanding_score'] = null;
+        }
+    }
+    $sg = $analysis['substantially_good'] ?? null;
+    if (!is_array($sg) && !empty($analysis['strong_points'])) {
+        $analysis['substantially_good'] = is_array($analysis['strong_points']) ? $analysis['strong_points'] : [$analysis['strong_points']];
+    }
+    $sw = $analysis['substantially_weak'] ?? null;
+    if (!is_array($sw) && !empty($analysis['weak_points'])) {
+        $analysis['substantially_weak'] = is_array($analysis['weak_points']) ? $analysis['weak_points'] : [$analysis['weak_points']];
+    }
+    $sug = $analysis['improvement_suggestions'] ?? null;
+    if (!is_array($sug)) {
+        $fb = $analysis['suggestions'] ?? [];
+        $analysis['improvement_suggestions'] = is_array($fb) ? $fb : ($fb !== '' ? [$fb] : []);
+    }
+    $analysis['analysis_status'] = 'generated';
+
+    return $analysis;
+}
+
+function tcc_normalize_progress_test_ai_response(array $analysis): array
+{
+    $analysis['analysis_status'] = 'generated';
+    foreach (['strong_points', 'weak_points', 'suggestions', 'official_references'] as $k) {
+        if (isset($analysis[$k]) && !is_array($analysis[$k])) {
+            $analysis[$k] = $analysis[$k] !== '' ? [$analysis[$k]] : [];
+        }
+        if (!isset($analysis[$k])) {
+            $analysis[$k] = [];
+        }
+    }
+
+    return $analysis;
+}
+
+function tcc_user_display_by_id(PDO $pdo, ?int $uid): string
+{
+    if ($uid === null || $uid <= 0) {
+        return 'System';
+    }
+    $r = tcc_student_contact_row($pdo, $uid);
+
+    return $r['display'] !== '' ? $r['display'] : ('User #' . $uid);
 }
 
 function tcc_student_name(array $row): string {
@@ -1135,18 +1386,40 @@ function tcc_lesson_summary_detail(PDO $pdo, int $cohortId, int $studentId, int 
         $versions = [];
     }
 
+    $aiInterpretation = [
+        'analysis_status' => 'pending',
+        'copy_paste_likelihood' => '',
+        'ai_tool_likelihood' => '',
+        'instructor_quick_take' => '',
+        'substantially_good' => [],
+        'substantially_weak' => [],
+        'improvement_suggestions' => [],
+    ];
+    $summaryFingerprint = '';
+    $aiCacheStale = false;
+
+    if (is_array($summary) && !empty($summary)) {
+        $summaryFingerprint = tcc_summary_cache_fingerprint($summary);
+        $cached = tcc_ai_cache_get($pdo, $cohortId, $studentId, $lessonId, 'summary');
+        if ($cached && hash_equals((string)($cached['fingerprint'] ?? ''), $summaryFingerprint)) {
+            $decoded = json_decode((string)($cached['analysis_json'] ?? '{}'), true);
+            if (is_array($decoded) && !empty($decoded)) {
+                $aiInterpretation = array_merge($aiInterpretation, tcc_normalize_summary_ai_response($decoded));
+                $aiInterpretation['cached_at_utc'] = (string)($cached['updated_at'] ?? '');
+                $aiInterpretation['cache_model'] = (string)($cached['model'] ?? '');
+            }
+        } else {
+            $aiCacheStale = $cached !== null;
+        }
+    }
+
     return [
         'lesson' => $lesson,
         'summary' => $summary,
         'versions' => $versions,
-        'ai_interpretation' => [
-            'status' => 'not_generated_in_phase_2j',
-            'copy_paste_check' => 'Not evaluated yet.',
-            'ai_generated_check' => 'Not evaluated yet.',
-            'similarity_check' => 'Not evaluated yet.',
-            'quality_feedback' => 'AI interpretation will be added after the UI and canonical data views are stable.',
-            'improvement_suggestions' => []
-        ]
+        'summary_content_fingerprint' => $summaryFingerprint,
+        'ai_cache_stale' => $aiCacheStale,
+        'ai_interpretation' => $aiInterpretation,
     ];
 }
 
@@ -1202,12 +1475,30 @@ function tcc_lesson_attempts_detail(PDO $pdo, int $cohortId, int $studentId, int
     foreach ($attempts as &$attempt) {
         $testId = (int)($attempt['id'] ?? 0);
         $attempt['items'] = $itemsByAttempt[$testId] ?? [];
+        $formalCode = (string)($attempt['formal_result_code'] ?? '');
+        $countsAsUnsat = (int)($attempt['counts_as_unsat'] ?? 0);
+        $passGateMet = (int)($attempt['pass_gate_met'] ?? 0);
+        $attempt['is_stale_attempt'] = ($formalCode === 'STALE_ABORTED' && $countsAsUnsat === 0 && $passGateMet === 0);
     }
     unset($attempt);
 
+    $fp = tcc_attempts_cache_fingerprint($attempts);
+    $cachedPt = tcc_ai_cache_get($pdo, $cohortId, $studentId, $lessonId, 'progress_test');
+    $oralAnalysis = [];
+    $oralStale = false;
+    if ($cachedPt && hash_equals((string)($cachedPt['fingerprint'] ?? ''), $fp)) {
+        $decodedOral = json_decode((string)($cachedPt['analysis_json'] ?? '{}'), true);
+        $oralAnalysis = is_array($decodedOral) ? tcc_normalize_progress_test_ai_response($decodedOral) : [];
+    } elseif ($cachedPt !== null) {
+        $oralStale = true;
+    }
+
     return [
         'lesson' => $lesson,
-        'attempts' => $attempts
+        'attempts' => $attempts,
+        'attempts_fingerprint' => $fp,
+        'oral_analysis' => $oralAnalysis,
+        'oral_analysis_stale' => $oralStale,
     ];
 }
 
@@ -1268,6 +1559,7 @@ function tcc_lesson_interventions_detail(PDO $pdo, int $cohortId, int $studentId
             if (trim((string)($emailRow['title'] ?? '')) === '') {
                 $emailRow['title'] = (string)($emailRow['subject'] ?? $emailRow['email_type'] ?? 'Progression Email');
             }
+            $emailRow = tcc_enrich_training_email_row($pdo, $emailRow, $studentId);
         }
         unset($emailRow);
     } catch (Throwable $e) {
@@ -1374,6 +1666,13 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
         ");
         $overrideStmt->execute([$cohortId, $studentId]);
         $deadlineOverrides = $overrideStmt->fetchAll(PDO::FETCH_ASSOC);
+        $deadlineExtSeq = [];
+        foreach ($deadlineOverrides as &$drow) {
+            $lid = (int)($drow['lesson_id'] ?? 0);
+            $deadlineExtSeq[$lid] = ($deadlineExtSeq[$lid] ?? 0) + 1;
+            $drow['extension_sequence'] = $deadlineExtSeq[$lid];
+        }
+        unset($drow);
     } catch (Throwable $e) {
         $deadlineOverrides = [];
     }
@@ -1398,6 +1697,7 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
             if (trim((string)($emailRow['title'] ?? '')) === '') {
                 $emailRow['title'] = (string)($emailRow['subject'] ?? $emailRow['email_type'] ?? 'Progression Email');
             }
+            $emailRow = tcc_enrich_training_email_row($pdo, $emailRow, $studentId);
         }
         unset($emailRow);
     } catch (Throwable $e) {
@@ -1746,6 +2046,110 @@ function tcc_call_openai_summary_analysis(array $payload): array
     }
 }
 
+function tcc_call_openai_progress_test_analysis(array $payload): array
+{
+    $attempts = $payload['attempts'] ?? [];
+    if (!is_array($attempts) || !$attempts) {
+        return [
+            'ok' => false,
+            'error' => 'no_attempts',
+            'message' => 'No progress test attempts to analyze.',
+        ];
+    }
+
+    $lessonTitle = (string)($payload['lesson']['lesson_title'] ?? 'Lesson');
+    $courseTitle = (string)($payload['lesson']['course_title'] ?? 'Module');
+    $studentName = (string)($payload['student']['student_name'] ?? 'Student');
+
+    $attemptSummaries = [];
+    foreach ($attempts as $a) {
+        if (!is_array($a)) {
+            continue;
+        }
+        $items = $a['items'] ?? [];
+        $snippets = [];
+        if (is_array($items)) {
+            foreach ($items as $it) {
+                if (!is_array($it)) {
+                    continue;
+                }
+                $t = trim((string)($it['transcript_text'] ?? $it['answer_text'] ?? ''));
+                if ($t !== '') {
+                    $snippets[] = mb_substr($t, 0, 600);
+                }
+                if (count($snippets) >= 4) {
+                    break;
+                }
+            }
+        }
+        $attemptSummaries[] = [
+            'attempt' => $a['attempt'] ?? null,
+            'status' => $a['status'] ?? '',
+            'formal_result_code' => $a['formal_result_code'] ?? '',
+            'score_pct' => $a['score_pct'] ?? null,
+            'pass_gate_met' => $a['pass_gate_met'] ?? null,
+            'oral_transcript_excerpts' => $snippets,
+        ];
+    }
+
+    $promptPayload = [
+        'task' => 'Analyze oral progress test attempts for instructor-only integrity hints (aviation theory course).',
+        'important_rules' => [
+            'Return valid JSON only. No markdown.',
+            'Do not accuse the student; use likelihood language.',
+            'Advisory only — not proof of cheating.',
+        ],
+        'required_json_schema' => [
+            'natural_speech_likelihood' => 'Low|Medium|High|Not evaluated',
+            'script_reading_likelihood' => 'Low|Medium|High|Not evaluated',
+            'multiple_voices_or_coaching_likelihood' => 'Low|Medium|High|Not evaluated',
+            'overall_integrity_risk' => 'Low|Medium|High|Not evaluated',
+            'instructor_summary' => '2-4 sentences',
+            'strong_points' => ['bullet strings'],
+            'weak_points' => ['bullet strings'],
+            'suggestions' => ['bullet strings with ICAO/EASA-style references where relevant'],
+            'official_references' => ['short refs e.g. ICAO Annex / EASA AMC GM'],
+            'evidence_notes' => ['what in transcripts/audio timing supports the assessment'],
+        ],
+        'student' => ['name' => $studentName],
+        'lesson' => ['module' => $courseTitle, 'lesson' => $lessonTitle],
+        'attempts' => $attemptSummaries,
+    ];
+
+    try {
+        $model = cw_openai_model();
+
+        $resp = cw_openai_responses([
+            'model' => $model,
+            'input' => json_encode($promptPayload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'max_output_tokens' => 1100,
+        ]);
+
+        $analysis = cw_openai_extract_json_text($resp);
+
+        if (!is_array($analysis) || !$analysis) {
+            return [
+                'ok' => false,
+                'error' => 'empty_or_invalid_ai_json',
+                'message' => 'OpenAI returned no usable JSON for oral analysis.',
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'model' => $model,
+            'response_id' => (string)($resp['id'] ?? ''),
+            'analysis' => $analysis,
+        ];
+    } catch (Throwable $e) {
+        return [
+            'ok' => false,
+            'error' => 'openai_request_failed',
+            'message' => $e->getMessage(),
+        ];
+    }
+}
+
 
 
 function tcc_similarity_context_for_summary(PDO $pdo, int $cohortId, int $studentId, int $lessonId, string $summaryText): array
@@ -1839,7 +2243,8 @@ if ($action === '') {
             'lesson_interventions_detail',
             'student_interventions_audit',
             'debug_report',
-            'ai_summary_analysis'
+            'ai_summary_analysis',
+            'ai_progress_test_analysis'
         ]
     ], 400);
 }
@@ -2411,7 +2816,28 @@ foreach ($pending as $p) {
     
         $summaryText = tcc_strip_summary_for_ai((string)($summary['summary_html'] ?? ''), (string)($summary['summary_plain'] ?? ''));
         $similarity = tcc_similarity_context_for_summary($pdo, $cohortId, $studentId, $lessonId, $summaryText);
-    
+
+        $fp = tcc_summary_cache_fingerprint($summary);
+        $force = (string)($_GET['force'] ?? '') === '1';
+        if (!$force) {
+            $cachedRow = tcc_ai_cache_get($pdo, $cohortId, $studentId, $lessonId, 'summary');
+            if ($cachedRow && hash_equals((string)($cachedRow['fingerprint'] ?? ''), $fp)) {
+                $cachedAnalysis = json_decode((string)($cachedRow['analysis_json'] ?? '{}'), true);
+                $analysisOut = is_array($cachedAnalysis) ? tcc_normalize_summary_ai_response($cachedAnalysis) : [];
+                tcc_json([
+                    'ok' => true,
+                    'action' => 'ai_summary_analysis',
+                    'from_cache' => true,
+                    'advisory_only' => true,
+                    'student_id' => $studentId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'analysis' => $analysisOut,
+                    'similarity_context' => $similarity,
+                ]);
+            }
+        }
+
         $payload = [
             'student' => [
                 'student_id' => $studentId,
@@ -2445,13 +2871,16 @@ foreach ($pending as $p) {
         }
     
         $analysis = is_array($result['analysis'] ?? null) ? $result['analysis'] : [];
-    
+
         if (!isset($analysis['highest_similarity']) || $analysis['highest_similarity'] === 'Not evaluated') {
             $analysis['highest_similarity'] = $similarity['highest_similarity'];
             $analysis['highest_similarity_student'] = $similarity['highest_similarity_student'];
             $analysis['highest_similarity_pct'] = $similarity['highest_similarity_pct'];
         }
-    
+
+        $analysis = tcc_normalize_summary_ai_response($analysis);
+        tcc_ai_cache_put($pdo, $cohortId, $studentId, $lessonId, 'summary', $fp, $analysis, (string)($result['model'] ?? ''));
+
         tcc_json([
             'ok' => true,
             'action' => 'ai_summary_analysis',
@@ -2475,8 +2904,92 @@ foreach ($pending as $p) {
             ],
         ]);
     }
-    
-    
+
+    if ($action === 'ai_progress_test_analysis') {
+        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
+        $studentId = tcc_int($_GET['student_id'] ?? 0);
+        $lessonId = tcc_int($_GET['lesson_id'] ?? 0);
+
+        if ($cohortId <= 0 || $studentId <= 0 || $lessonId <= 0) {
+            tcc_json(['ok' => false, 'error' => 'missing_required_ids'], 400);
+        }
+
+        $data = tcc_lesson_attempts_detail($pdo, $cohortId, $studentId, $lessonId);
+        $attempts = $data['attempts'] ?? [];
+        $fp = (string)($data['attempts_fingerprint'] ?? tcc_attempts_cache_fingerprint($attempts));
+        $force = (string)($_GET['force'] ?? '') === '1';
+        if (!$force) {
+            $cachedRow = tcc_ai_cache_get($pdo, $cohortId, $studentId, $lessonId, 'progress_test');
+            if ($cachedRow && hash_equals((string)($cachedRow['fingerprint'] ?? ''), $fp)) {
+                $cachedAnalysis = json_decode((string)($cachedRow['analysis_json'] ?? '{}'), true);
+                $analysisOut = is_array($cachedAnalysis) ? tcc_normalize_progress_test_ai_response($cachedAnalysis) : [];
+                tcc_json([
+                    'ok' => true,
+                    'action' => 'ai_progress_test_analysis',
+                    'from_cache' => true,
+                    'advisory_only' => true,
+                    'student_id' => $studentId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'analysis' => $analysisOut,
+                ]);
+            }
+        }
+
+        $studentSt = $pdo->prepare("
+            SELECT
+                id,
+                COALESCE(NULLIF(TRIM(CONCAT(COALESCE(first_name,''), ' ', COALESCE(last_name,''))), ''), email, CONCAT('User #', id)) AS student_name
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $studentSt->execute([$studentId]);
+        $student = $studentSt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $lesson = $data['lesson'] ?? [];
+        $payload = [
+            'student' => [
+                'student_id' => $studentId,
+                'student_name' => (string)($student['student_name'] ?? ('Student #' . $studentId)),
+            ],
+            'lesson' => [
+                'lesson_title' => (string)($lesson['lesson_title'] ?? ''),
+                'course_title' => (string)($lesson['course_title'] ?? ''),
+            ],
+            'attempts' => $attempts,
+        ];
+
+        $result = tcc_call_openai_progress_test_analysis($payload);
+
+        if (empty($result['ok'])) {
+            tcc_json([
+                'ok' => false,
+                'action' => 'ai_progress_test_analysis',
+                'error' => $result['error'] ?? 'ai_analysis_failed',
+                'message' => $result['message'] ?? 'AI oral analysis failed.',
+                'advisory_only' => true,
+            ], 500);
+        }
+
+        $analysis = is_array($result['analysis'] ?? null) ? $result['analysis'] : [];
+        $analysis = tcc_normalize_progress_test_ai_response($analysis);
+        tcc_ai_cache_put($pdo, $cohortId, $studentId, $lessonId, 'progress_test', $fp, $analysis, (string)($result['model'] ?? ''));
+
+        tcc_json([
+            'ok' => true,
+            'action' => 'ai_progress_test_analysis',
+            'generated_at_utc' => gmdate('Y-m-d H:i:s'),
+            'advisory_only' => true,
+            'student_id' => $studentId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'model' => (string)($result['model'] ?? ''),
+            'response_id' => (string)($result['response_id'] ?? ''),
+            'analysis' => $analysis,
+        ]);
+    }
+
     if ($action === 'student_lessons') {
         $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
         $studentId = tcc_int($_GET['student_id'] ?? 0);

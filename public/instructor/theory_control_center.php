@@ -51,6 +51,14 @@ cw_header('Instructor Theory Control Center');
 .tcc-engine-details{margin-top:14px;border-radius:16px;border:1px solid rgba(15,23,42,.08);background:#fafafa;padding:0 14px 12px}
 .tcc-engine-details summary{cursor:pointer;font-size:12px;font-weight:900;text-transform:uppercase;letter-spacing:.08em;color:#64748b;padding:12px 4px;list-style:none}
 .tcc-engine-details summary::-webkit-details-marker{display:none}
+.tcc-audit-row-highlight{outline:2px solid #1d4f89;box-shadow:0 0 0 4px rgba(29,79,137,.12)}
+.tcc-lesson-click{cursor:pointer;border-radius:12px;padding:4px 6px;margin:-4px -6px;transition:background .15s;display:inline-block}
+.tcc-lesson-click:hover{background:rgba(29,79,137,.08)}
+.tcc-attempt-stale{border-color:#f59e0b!important;background:#fffbeb!important}
+.tcc-oral-ai-panel{border-radius:16px;border:1px solid rgba(15,23,42,.08);background:#f8fafc;padding:14px;margin-bottom:14px}
+.tcc-oral-ai-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:10px}
+.tcc-policy-alert{border-radius:12px;padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-weight:800;font-size:12px;margin-bottom:10px;line-height:1.45}
+.tcc-inline-json{margin-top:10px;font-size:11px}
 .tcc-li-toolbar .tcc-btn.active{outline:2px solid rgba(18,53,95,.35);outline-offset:2px}
 </style>
 
@@ -183,6 +191,7 @@ cw_header('Instructor Theory Control Center');
     var selectedStudentId = 0;
     var studentAuditTimelineCache = null;
     var studentAuditTimelineCacheStudentId = 0;
+    var pendingAuditHighlightLessonId = 0;
     var cohortStudents = [];
     var queueItemsById = {};
     var selectedQueueIds = {};
@@ -441,18 +450,18 @@ cw_header('Instructor Theory Control Center');
         var simStudent = ai.highest_similarity_student || '—';
         var simPct = (ai.highest_similarity_pct !== undefined && ai.highest_similarity_pct !== null) ? String(ai.highest_similarity_pct) + '%' : '—';
         var understandingLabel = ai.deep_understanding_label || ai.deep_understanding || ai.understanding || 'Not generated';
-        var understandingScore = (ai.deep_understanding_score !== undefined && ai.deep_understanding_score !== null) ? String(ai.deep_understanding_score) + '%' : '—';
+        var understandingScore = (ai.deep_understanding_score !== undefined && ai.deep_understanding_score !== null && String(ai.deep_understanding_score) !== '') ? String(ai.deep_understanding_score) + '%' : '';
         var html = '<div class="tcc-ai-result-grid">';
         html += '<div class="tcc-ai-result-card ' + aiSignalClass(copy) + '"><div class="tcc-ai-result-label">Copy/Paste</div><div class="tcc-ai-result-value">' + escapeHtml(copy) + '</div></div>';
         html += '<div class="tcc-ai-result-card ' + aiSignalClass(tool) + '"><div class="tcc-ai-result-label">AI Tool Use</div><div class="tcc-ai-result-value">' + escapeHtml(tool) + '</div></div>';
         html += '<div class="tcc-ai-result-card ' + aiSignalClass(sim) + '"><div class="tcc-ai-result-label">Similarity</div><div class="tcc-ai-result-value">' + escapeHtml(sim) + ' · ' + escapeHtml(simPct) + '</div><div class="tcc-modal-muted" style="margin-top:5px;">' + escapeHtml(simStudent) + '</div></div>';
-        html += '<div class="tcc-ai-result-card ' + aiSignalClass(understandingLabel) + '"><div class="tcc-ai-result-label">Understanding</div><div class="tcc-ai-result-value">' + escapeHtml(understandingLabel) + ' · ' + escapeHtml(understandingScore) + '</div></div>';
+        html += '<div class="tcc-ai-result-card ' + aiSignalClass(understandingLabel) + '"><div class="tcc-ai-result-label">Understanding</div><div class="tcc-ai-result-value">' + escapeHtml(understandingLabel) + (understandingScore ? (' · ' + escapeHtml(understandingScore)) : '') + '</div></div>';
         html += '</div>';
         html += '<div class="tcc-ai-take-box"><strong>Instructor quick take:</strong><br>' + escapeHtml(ai.instructor_quick_take || ai.quality_feedback || 'No AI analysis generated yet.') + '</div>';
         html += '<div class="tcc-ai-list-grid">';
-        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Strong Points</div>' + aiList(ai.substantially_good) + '</div>';
-        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Weak Points</div>' + aiList(ai.substantially_weak) + '</div>';
-        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">Suggestions</div>' + aiList(ai.improvement_suggestions || ai.suggestions) + '</div>';
+        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">STRONG POINTS</div>' + aiList(ai.substantially_good) + '</div>';
+        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">WEAK POINTS</div>' + aiList(ai.substantially_weak) + '</div>';
+        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">SUGGESTIONS</div>' + aiList(ai.improvement_suggestions || ai.suggestions) + '</div>';
         html += '</div>';
         if (ai.student_safe_feedback) html += '<div class="tcc-ai-take-box"><strong>Student-safe feedback:</strong><br>' + escapeHtml(ai.student_safe_feedback) + '</div>';
         return html;
@@ -460,7 +469,7 @@ cw_header('Instructor Theory Control Center');
 
     function renderAiInterpretation(ai, studentId, lessonId) {
         ai = ai || {};
-        var hasGenerated = (ai.analysis_status === 'generated' || ai.copy_paste_likelihood || ai.ai_tool_likelihood || ai.deep_understanding_score || ai.deep_understanding);
+        var hasGenerated = (ai.analysis_status === 'generated' || (ai.copy_paste_likelihood && String(ai.copy_paste_likelihood).indexOf('Not generated') === -1) || (ai.deep_understanding_label && String(ai.deep_understanding_label).indexOf('Not generated') === -1 && String(ai.deep_understanding_label).indexOf('Not evaluated') === -1));
         var panelId = 'aiPanel_' + parseInt(studentId || 0, 10) + '_' + parseInt(lessonId || 0, 10);
         var btnId = 'aiBtn_' + parseInt(studentId || 0, 10) + '_' + parseInt(lessonId || 0, 10);
         var body = hasGenerated ? renderAiAnalysisObject(ai) : '<div class="tcc-ai-loading-box">No AI analysis generated yet. Click “Generate AI Analysis” to create an instructor advisory review for this summary.</div>';
@@ -479,7 +488,7 @@ cw_header('Instructor Theory Control Center');
         var body = panel.querySelector('.tcc-ai-live-body');
         if (btn) { btn.disabled = true; btn.textContent = 'Analyzing…'; }
         if (body) body.innerHTML = '<div class="tcc-ai-loading-box">Generating AI analysis. This is advisory only and will not change student progression state…</div>';
-        api('ai_summary_analysis', {cohort_id: cohortId, student_id: studentId, lesson_id: lessonId}).then(function (resp) {
+        api('ai_summary_analysis', {cohort_id: cohortId, student_id: studentId, lesson_id: lessonId, force: 1}).then(function (resp) {
             if (!resp.ok) {
                 if (body) body.innerHTML = '<div class="tcc-ai-error-box">' + escapeHtml(resp.message || resp.error || 'AI analysis failed.') + '</div>';
                 return;
@@ -508,9 +517,86 @@ cw_header('Instructor Theory Control Center');
         openTccModal('Answer Audio + Transcript', body);
     }
 
+    function openRequiredActionDetailModal(item) {
+        item = item || {};
+        var title = item.title || prettyStatus(item.action_type || 'Required action');
+        var notes = String(item.decision_notes || item.instructor_notes || item.review_notes || '').trim();
+        var html = '<div class="tcc-modal-grid">';
+        html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Action overview</div>' + modalStatusRows([
+            ['Action type', prettyStatus(item.action_type || '—')],
+            ['Status', prettyStatus(item.status || '—')],
+            ['Title', item.title || '—'],
+            ['Created', niceDateTime(item.created_at || '')],
+            ['Opened', niceDateTime(item.opened_at || '')],
+            ['Completed', niceDateTime(item.completed_at || '')],
+            ['Approved', niceDateTime(item.approved_at || '')],
+            ['Extra attempts granted', String(item.granted_extra_attempts !== undefined && item.granted_extra_attempts !== null ? item.granted_extra_attempts : '—')],
+            ['Progress test id', String(item.progress_test_id || '—')],
+            ['Required action id', String(item.id || '—')]
+        ]) + '</div>';
+        if (String(item.instructions_text || item.instructions_html || '').trim() !== '') {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Instructions to student</div><div class="tcc-modal-readable">' + escapeHtml(String(item.instructions_text || '').trim() || 'See HTML instructions in records.') + '</div></div>';
+        }
+        var sr = String(item.student_response_text || '').trim();
+        if (sr !== '') {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student response</div><div class="tcc-modal-readable">' + escapeHtml(sr) + '</div></div>';
+        }
+        if (notes !== '') {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Instructor / decision notes</div><div class="tcc-modal-readable">' + escapeHtml(notes) + '</div></div>';
+        }
+        html += '<details class="tcc-inline-json"><summary style="cursor:pointer;font-weight:800;color:#64748b;">Raw JSON (troubleshooting)</summary><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(item, null, 2)) + '</pre></details>';
+        html += '</div>';
+        openTccModal(title, html, 'Required intervention');
+    }
+
+    function openDeadlineOverrideDetailModal(item) {
+        item = item || {};
+        var title = 'Deadline change · ' + (item.override_type || 'override');
+        var seq = parseInt(item.extension_sequence || 0, 10) || 0;
+        var policyAlert = '';
+        if (seq >= 3) {
+            policyAlert = '<div class="tcc-policy-alert">Extension #' + seq + ': From the 3rd extension onward this pathway normally requires explicit instructor attention (policy: up to two automated / AI-reviewed reason-based extensions; further moves are escalation).</div>';
+        }
+        var grantedBy = item.granted_by_user_id ? ('User #' + String(item.granted_by_user_id)) : 'System / automation';
+        var html = '<div class="tcc-modal-grid">' + policyAlert;
+        html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Deadlines</div>' + modalStatusRows([
+            ['Original / base deadline (UTC)', niceDateTime(item.base_deadline_utc || '')],
+            ['New effective deadline (UTC)', niceDateTime(item.new_deadline_utc || '')],
+            ['Granted at', niceDateTime(item.granted_at || item.created_at || '')],
+            ['Extension # (this lesson)', seq ? String(seq) : '—'],
+            ['Approval source', item.approval_source || '—'],
+            ['Reason code', item.granted_reason_code || '—'],
+            ['Granted by', grantedBy]
+        ]) + '</div>';
+        var gt = String(item.granted_reason_text || '').trim();
+        if (gt !== '') {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Reason text</div><div class="tcc-modal-readable">' + escapeHtml(gt) + '</div></div>';
+        }
+        html += '<details class="tcc-inline-json"><summary style="cursor:pointer;font-weight:800;color:#64748b;">Raw JSON (troubleshooting)</summary><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(item, null, 2)) + '</pre></details>';
+        html += '</div>';
+        openTccModal(title, html, 'Deadline change');
+    }
+
+    function openProgressionEventDetailModal(item) {
+        item = item || {};
+        var title = item.event_code || item.event_type || 'Progression event';
+        var html = '<div class="tcc-modal-grid"><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Event</div>' + modalStatusRows([
+            ['Code', item.event_code || '—'],
+            ['Type', item.event_type || '—'],
+            ['Status', item.event_status || '—'],
+            ['Time', niceDateTime(item.event_time || item.created_at || '')],
+            ['Lesson id', String(item.lesson_id || '—')]
+        ]) + '</div>';
+        if (String(item.legal_note || '').trim() !== '') {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Note</div><div class="tcc-modal-readable">' + escapeHtml(item.legal_note) + '</div></div>';
+        }
+        html += '<details class="tcc-inline-json"><summary style="cursor:pointer;font-weight:800;color:#64748b;">Raw JSON (troubleshooting)</summary><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(item, null, 2)) + '</pre></details></div>';
+        openTccModal(title, html, 'Engine / progression event');
+    }
+
     function openInterventionDetailModal(item) {
         item = item || {};
-        if (item.readable_body || item.delivery_status || item.recipient_label) {
+        if (item.email_type || (item.recipients_to !== undefined && item.subject !== undefined)) {
             openEmailBodyModal(item);
             return;
         }
@@ -518,7 +604,19 @@ cw_header('Instructor Theory Control Center');
             openDeadlineReasonModal(item);
             return;
         }
-        var title = item.title || item.email_type || item.event_type || item.override_type || item.action_type || ('Intervention #' + (item.id || ''));
+        if (item.base_deadline_utc !== undefined && item.new_deadline_utc !== undefined) {
+            openDeadlineOverrideDetailModal(item);
+            return;
+        }
+        if (item.event_code !== undefined || (item.event_type !== undefined && item.event_time !== undefined)) {
+            openProgressionEventDetailModal(item);
+            return;
+        }
+        if (item.action_type !== undefined && item.cohort_id !== undefined) {
+            openRequiredActionDetailModal(item);
+            return;
+        }
+        var title = item.title || item.email_type || item.event_type || item.override_type || item.action_type || ('Record #' + (item.id || ''));
         openTccModal('Intervention Detail', '<div class="tcc-debug-meta">' + escapeHtml(title) + '</div><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(item, null, 2)) + '</pre>');
     }
 
@@ -552,11 +650,20 @@ cw_header('Instructor Theory Control Center');
         item = item || {};
         var title = item.subject || item.title || 'Progression Email';
         var sentAt = item.sent_timestamp || item.sent_at || item.created_at || '';
-        var recipient = item.recipient_label || 'student';
-        var status = item.delivery_status || item.sent_status || 'sent';
+        var recipient = item.recipient_display || item.recipients_to_display || item.recipient_label || '—';
+        var deliveryLine = item.delivery_label || '';
+        if (!deliveryLine) {
+            var st = String(item.sent_status || item.delivery_status || '').toLowerCase();
+            deliveryLine = item.delivery_success === true || st === 'sent' ? 'Sent successfully' : (st === 'failed' ? 'Send failed' : prettyStatus(item.delivery_status || item.sent_status || 'unknown'));
+        }
         var body = item.readable_body || item.body_text || 'No rendered email body available.';
         var html = '<div class="tcc-modal-grid">';
-        html += '<div class="tcc-modal-section"><div class="tcc-modal-section-title">Email Metadata</div>' + modalStatusRows([['Sent', niceDateTime(sentAt)], ['Delivery', prettyStatus(status)], ['Recipient', prettyStatus(recipient)]]) + '</div>';
+        html += '<div class="tcc-modal-section"><div class="tcc-modal-section-title">Delivery</div>' + modalStatusRows([
+            ['Sent at', niceDateTime(sentAt)],
+            ['Status', deliveryLine],
+            ['Recipient', recipient],
+            ['Email type', item.email_type || '—']
+        ]) + '</div>';
         html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Rendered Content</div><div class="tcc-modal-readable">' + escapeHtml(body) + '</div></div>';
         html += '</div>';
         openTccModal(title, html, 'Readable Email');
@@ -591,6 +698,35 @@ cw_header('Instructor Theory Control Center');
         });
     }
 
+    function tccAttemptDuration(started, completed) {
+        try {
+            var a = new Date(String(started || '').replace(' ', 'T') + 'Z').getTime();
+            var b = new Date(String(completed || '').replace(' ', 'T') + 'Z').getTime();
+            if (isNaN(a) || isNaN(b) || b <= a) return '—';
+            var sec = Math.round((b - a) / 1000);
+            var m = Math.floor(sec / 60);
+            var s = sec % 60;
+            return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+        } catch (e) {
+            return '—';
+        }
+    }
+
+    function tccToggleInlineAudio(btn) {
+        if (!btn) return;
+        var wrap = btn.parentNode;
+        if (!wrap) return;
+        var a = wrap.querySelector('audio');
+        if (!a) return;
+        if (a.paused) {
+            a.play();
+            btn.textContent = 'Pause audio';
+        } else {
+            a.pause();
+            btn.textContent = 'Play audio';
+        }
+    }
+
     function renderAttemptItems(items) {
         if (!items || !items.length) return '<div class="tcc-modal-muted">No answer-level items found for this attempt.</div>';
         var html = '<div class="tcc-chat-thread">';
@@ -600,20 +736,77 @@ cw_header('Instructor Theory Control Center');
             var transcript = item.transcript_text || item.answer_text || item.student_answer || '—';
             var audio = item.audio_url || item.audio_path || item.answer_audio_url || item.recording_url || item.media_url || '';
             html += '<div class="tcc-chat-bubble ai"><strong>Question ' + (idx + 1) + ':</strong> ' + escapeHtml(q) + '</div>';
-            html += '<div class="tcc-chat-bubble student" onclick="openAnswerAudioModal(' + jsArg(q) + ',' + jsArg(transcript) + ',' + jsArg(audio) + ',' + jsArg(score) + ')">' + escapeHtml(transcript) + '<div class="tcc-chat-score">Score: ' + escapeHtml(score) + '</div><span class="tcc-chat-play">▶ Play audio</span></div>';
+            html += '<div class="tcc-chat-bubble student">';
+            if (audio) {
+                html += '<div class="tcc-answer-audio-wrap" style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">';
+                html += '<button type="button" class="tcc-btn secondary" onclick="event.stopPropagation();tccToggleInlineAudio(this)">Play audio</button>';
+                html += '<audio preload="none" src="' + escapeHtml(audio) + '"></audio></div>';
+            }
+            html += escapeHtml(transcript) + '<div class="tcc-chat-score">Score: ' + escapeHtml(score) + '</div></div>';
         });
         html += '</div>';
+        return html;
+    }
+
+    function renderOralIntegrityAnalysis(ai) {
+        ai = ai || {};
+        var sum = String(ai.instructor_summary || '').trim();
+        var html = '<div class="tcc-modal-muted" style="line-height:1.55;">' + escapeHtml(sum || '—') + '</div>';
+        html += '<div class="tcc-ai-result-grid" style="margin-top:12px;">';
+        html += '<div class="tcc-ai-result-card"><div class="tcc-ai-result-label">Natural speech</div><div class="tcc-ai-result-value">' + escapeHtml(ai.natural_speech_likelihood || '—') + '</div></div>';
+        html += '<div class="tcc-ai-result-card"><div class="tcc-ai-result-label">Script reading</div><div class="tcc-ai-result-value">' + escapeHtml(ai.script_reading_likelihood || '—') + '</div></div>';
+        html += '<div class="tcc-ai-result-card"><div class="tcc-ai-result-label">Other voices / coaching</div><div class="tcc-ai-result-value">' + escapeHtml(ai.multiple_voices_or_coaching_likelihood || '—') + '</div></div>';
+        html += '<div class="tcc-ai-result-card"><div class="tcc-ai-result-label">Overall integrity risk</div><div class="tcc-ai-result-value">' + escapeHtml(ai.overall_integrity_risk || '—') + '</div></div>';
+        html += '</div>';
+        html += '<div class="tcc-oral-ai-cols">';
+        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">STRONG POINTS</div>' + aiList(ai.strong_points || []) + '</div>';
+        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">WEAK POINTS</div>' + aiList(ai.weak_points || []) + '</div>';
+        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">SUGGESTIONS</div>' + aiList(ai.suggestions || []) + '</div>';
+        html += '</div>';
+        if (ai.official_references && ai.official_references.length) {
+            html += '<div style="margin-top:10px;font-size:12px;color:#475569;"><strong>References:</strong> ' + escapeHtml(ai.official_references.join(' · ')) + '</div>';
+        }
+        if (ai.evidence_notes && ai.evidence_notes.length) {
+            html += '<div class="tcc-modal-section full" style="margin-top:10px;"><div class="tcc-modal-section-title">Evidence notes</div>' + aiList(ai.evidence_notes) + '</div>';
+        }
         return html;
     }
 
     function renderAttemptCards(attempts) {
         var html = '';
         if (!attempts || !attempts.length) return '<div class="tcc-empty">No progress test attempts found.</div>';
-        attempts.forEach(function (a) {
+        var list = attempts.slice().sort(function (a, b) {
+            return (parseInt(a.attempt, 10) || 0) - (parseInt(b.attempt, 10) || 0);
+        });
+        list.forEach(function (a) {
             var score = a.score_pct !== null && a.score_pct !== undefined ? a.score_pct + '%' : '—';
-            html += '<div class="tcc-attempt-card"><div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt ' + escapeHtml(a.attempt || '—') + ' · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div><div class="tcc-attempt-meta">Started: ' + escapeHtml(niceDateTime(a.started_at)) + ' · Completed: ' + escapeHtml(niceDateTime(a.completed_at)) + '</div></div><span class="tcc-score-pill ' + (parseInt(a.pass_gate_met, 10) === 1 ? 'ok' : 'danger') + '">' + escapeHtml(score) + '</span></div>' + renderAttemptItems(a.items || []) + '</div>';
+            var passFail = parseInt(a.pass_gate_met, 10) === 1 ? 'PASS' : 'FAIL';
+            var stale = !!a.is_stale_attempt;
+            var dur = tccAttemptDuration(a.started_at, a.completed_at);
+            var cardCls = 'tcc-attempt-card' + (stale ? ' tcc-attempt-stale' : '');
+            html += '<div class="' + cardCls + '"><div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt ' + escapeHtml(a.attempt || '—') + ' · ' + escapeHtml(passFail) + ' · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div>';
+            html += '<div class="tcc-attempt-meta">Started: ' + escapeHtml(niceDateTime(a.started_at)) + ' · Completed: ' + escapeHtml(niceDateTime(a.completed_at)) + ' (Duration: ' + escapeHtml(dur) + ')</div>';
+            html += '</div><span class="tcc-score-pill ' + (parseInt(a.pass_gate_met, 10) === 1 ? 'ok' : 'danger') + '">' + escapeHtml(score) + '</span></div>';
+            html += '<details open class="tcc-inline-json"><summary style="cursor:pointer;font-weight:800;color:#64748b;">Raw attempt JSON</summary><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(a, null, 2)) + '</pre></details>';
+            html += renderAttemptItems(a.items || []) + '</div>';
         });
         return html;
+    }
+
+    function buildProgressTestModalHtml(d, oralAnalysis, aiLoading) {
+        var lesson = d.lesson || {};
+        var sub = escapeHtml((lesson.course_title || 'Module') + ' · ' + (lesson.lesson_title || 'Lesson'));
+        var oralBlock = '';
+        if (aiLoading) {
+            oralBlock = '<div class="tcc-loading">Generating AI oral-integrity analysis…</div>';
+        } else if (oralAnalysis && (oralAnalysis.instructor_summary || oralAnalysis.natural_speech_likelihood)) {
+            oralBlock = renderOralIntegrityAnalysis(oralAnalysis);
+        } else {
+            oralBlock = '<div class="tcc-modal-muted">AI oral analysis will appear here once generated.</div>';
+        }
+        return '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Lesson</div><div class="tcc-modal-muted">' + sub + '</div></div>'
+            + '<div class="tcc-oral-ai-panel"><div class="tcc-modal-section-title">AI oral integrity review</div>' + oralBlock + '</div>'
+            + renderAttemptCards(d.attempts || []);
     }
 
     function openAttemptDetails(studentId, lessonId) {
@@ -630,9 +823,21 @@ cw_header('Instructor Theory Control Center');
                 return;
             }
             var d = resp.data || {};
-            var lesson = d.lesson || {};
-            var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Lesson</div><div class="tcc-modal-muted">' + escapeHtml((lesson.course_title || 'Module') + ' · ' + (lesson.lesson_title || 'Lesson')) + '</div></div>' + renderAttemptCards(d.attempts || []);
-            openTccModal('Progress Test Details', html);
+            var oral = d.oral_analysis || {};
+            var needOral = (!oral || (!oral.instructor_summary && !oral.natural_speech_likelihood)) || d.oral_analysis_stale === true;
+            if (!needOral) {
+                openTccModal('Progress Test Details', buildProgressTestModalHtml(d, oral, false));
+                return;
+            }
+            openTccModal('Progress Test Details', buildProgressTestModalHtml(d, {}, true));
+            api('ai_progress_test_analysis', {cohort_id: cohortId, student_id: studentId, lesson_id: lessonId}).then(function (ar) {
+                if (ar.ok) {
+                    oral = ar.analysis || {};
+                }
+                openTccModal('Progress Test Details', buildProgressTestModalHtml(d, oral, false));
+            }).catch(function () {
+                openTccModal('Progress Test Details', buildProgressTestModalHtml(d, {}, false));
+            });
         }).catch(function () {
             openTccModal('Progress Test Details', '<div class="tcc-error">Unable to load attempts.</div>');
         });
@@ -772,7 +977,8 @@ cw_header('Instructor Theory Control Center');
             var chipCls = 'tcc-audit-chip' + (kind ? (' ' + kind) : '');
             var line = lessonLineFromRow(row);
             var mailBtn = allowMail && kind === 'email' ? '<button type="button" class="tcc-audit-mail" title="View email content" aria-label="View email" onclick="event.preventDefault();event.stopPropagation();openEmailBodyModal(' + serializeForOnclick(row.payload || {}) + ')">✉</button>' : '';
-            html += '<div class="tcc-audit-row"><div class="tcc-audit-row-main tcc-intervention-clickable" onclick="openInterventionDetailModal(' + serializeForOnclick(row.payload || {}) + ')"><div class="tcc-audit-row-head"><span class="' + escapeHtml(chipCls) + '">' + escapeHtml(auditKindLabel(kind)) + '</span><span class="tcc-audit-ts">' + escapeHtml(niceDateTime(row.sort_ts || '')) + '</span><span class="tcc-audit-lesson" title="' + escapeHtml(line) + '">' + escapeHtml(line) + '</span></div><div class="tcc-audit-label">' + escapeHtml(row.label || '—') + '</div><div class="tcc-audit-meta">' + escapeHtml(row.meta || '—') + '</div></div>' + mailBtn + '</div>';
+            var lidAttr = String(parseInt(row.lesson_id, 10) || '');
+            html += '<div class="tcc-audit-row" data-lesson-id="' + escapeHtml(lidAttr) + '"><div class="tcc-audit-row-main tcc-intervention-clickable" onclick="openInterventionDetailModal(' + serializeForOnclick(row.payload || {}) + ')"><div class="tcc-audit-row-head"><span class="' + escapeHtml(chipCls) + '">' + escapeHtml(auditKindLabel(kind)) + '</span><span class="tcc-audit-ts">' + escapeHtml(niceDateTime(row.sort_ts || '')) + '</span><span class="tcc-audit-lesson" title="' + escapeHtml(line) + '">' + escapeHtml(line) + '</span></div><div class="tcc-audit-label">' + escapeHtml(row.label || '—') + '</div><div class="tcc-audit-meta">' + escapeHtml(row.meta || '—') + '</div></div>' + mailBtn + '</div>';
         });
         html += '</div>';
         return html;
@@ -825,6 +1031,16 @@ cw_header('Instructor Theory Control Center');
         if (pill) pill.textContent = mainList.length + ' shown · ' + engineRows.length + ' engine';
         if (body) body.innerHTML = renderAuditRows(mainList, true);
         if (engBody) engBody.innerHTML = renderAuditRows(engList, false);
+        if (pendingAuditHighlightLessonId > 0) {
+            var hl = pendingAuditHighlightLessonId;
+            pendingAuditHighlightLessonId = 0;
+            document.querySelectorAll('.tcc-audit-row-highlight').forEach(function (n) { n.classList.remove('tcc-audit-row-highlight'); });
+            var target = document.querySelector('#studentAuditBody .tcc-audit-row[data-lesson-id="' + String(hl) + '"]');
+            if (target) {
+                target.classList.add('tcc-audit-row-highlight');
+                target.scrollIntoView({behavior: 'smooth', block: 'center'});
+            }
+        }
     }
 
     document.addEventListener('change', function (e) {
@@ -842,7 +1058,7 @@ cw_header('Instructor Theory Control Center');
             '</div>' +
             '<div id="deepPaneLessons" class="tcc-li-pane" style="display:block">' +
             '<div class="tcc-lesson-timeline">' +
-            '<div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by module</div><div class="tcc-lesson-timeline-sub">Grouped by course module with deadlines, summary quality, tests, and drill-down.</div></div><span class="tcc-count-pill">Live</span></div>' +
+            '<div class="tcc-lesson-timeline-head"><div><div class="tcc-lesson-timeline-title">Lessons by module</div><div class="tcc-lesson-timeline-sub">Click summary, progress test, attempts, or interventions — each opens the modal or timeline.</div></div><span class="tcc-count-pill">Live</span></div>' +
             '<div id="studentLessonTimelineBody" class="tcc-timeline-loading">Loading lesson modules…</div>' +
             '</div></div>' +
             '<div id="deepPaneAudit" class="tcc-li-pane" style="display:none">' +
@@ -912,30 +1128,61 @@ cw_header('Instructor Theory Control Center');
         });
     }
 
+    function renderTheorySummaryModalInner(d, studentId, lessonId, aiBanner) {
+        d = d || {};
+        var lesson = d.lesson || {};
+        var s = d.summary || {};
+        var ai = d.ai_interpretation || {};
+        var summaryHtml = rawSummaryHtml(s);
+        var banner = aiBanner ? '<div style="padding:10px 12px;background:#eff6ff;border-radius:12px;border:1px solid rgba(29,79,137,.18);margin-bottom:12px;font-size:13px;line-height:1.45;color:#0f2745;font-weight:700;">' + escapeHtml(aiBanner) + '</div>' : '';
+        return banner + '<div class="tcc-modal-grid"><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Status</div>' + modalStatusRows([['Module', lesson.course_title || '—'], ['Lesson', lesson.lesson_title || '—'], ['Updated', niceDateTime(s.updated_at)]]) + '<div style="margin-top:10px;">' + reviewStatusPill(s.review_status || 'neutral') + '</div></div><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Score</div>' + reviewScoreBar(s.review_score) + '</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Summary</div><div class="tcc-summary-paper nb-content">' + summaryHtml + '</div></div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">AI Interpretation</div>' + renderAiInterpretation(ai, studentId, lessonId) + '</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Instructor Feedback</div><div class="tcc-modal-readable">' + escapeHtml(s.review_feedback || s.review_notes_by_instructor || 'No instructor feedback recorded for this summary yet.') + '</div></div></div>';
+    }
+
     function openLessonSummary(studentId, lessonId) {
         studentId = parseInt(studentId, 10) || selectedStudentId;
         lessonId = parseInt(lessonId, 10) || 0;
         if (!cohortId || !studentId || !lessonId) {
-            openTccModal('Lesson Summary', '<div class="tcc-error">Missing cohort, student, or lesson id.</div>');
+            openTccModal('Theory Summary', '<div class="tcc-error">Missing cohort, student, or lesson id.</div>');
             return;
         }
-        openTccModal('Lesson Summary', '<div class="tcc-loading">Loading lesson summary…</div>');
+        var title = 'Lesson Summary';
+        openTccModal(title, '<div class="tcc-loading">Loading theory summary…</div>');
         api('lesson_summary_detail', {cohort_id: cohortId, student_id: studentId, lesson_id: lessonId}).then(function (resp) {
             if (!resp.ok) {
-                openTccModal('Lesson Summary', '<div class="tcc-error">' + escapeHtml(resp.message || resp.error || 'Unable to load summary.') + '</div>');
+                openTccModal('Theory Summary', '<div class="tcc-error">' + escapeHtml(resp.message || resp.error || 'Unable to load summary.') + '</div>');
                 return;
             }
             var d = resp.data || {};
             var lesson = d.lesson || {};
-            var s = d.summary || {};
+            title = lesson.lesson_title || 'Theory Summary';
             var ai = d.ai_interpretation || {};
-            var title = lesson.lesson_title || 'Lesson Summary';
-            var summaryHtml = rawSummaryHtml(s);
-            var html = '<div class="tcc-modal-grid"><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Status</div>' + modalStatusRows([['Module', lesson.course_title || '—'], ['Lesson', lesson.lesson_title || '—'], ['Updated', niceDateTime(s.updated_at)]]) + '<div style="margin-top:10px;">' + reviewStatusPill(s.review_status || 'neutral') + '</div></div><div class="tcc-modal-section"><div class="tcc-modal-section-title">Review Score</div>' + reviewScoreBar(s.review_score) + '</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Student Summary</div><div class="tcc-summary-paper nb-content">' + summaryHtml + '</div></div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">AI Interpretation</div>' + renderAiInterpretation(ai, studentId, lessonId) + '</div><div class="tcc-modal-section full"><div class="tcc-modal-section-title">Instructor Feedback</div><div class="tcc-modal-readable">' + escapeHtml(s.review_feedback || s.review_notes_by_instructor || 'No instructor feedback recorded for this summary yet.') + '</div></div></div>';
-            openTccModal(title, html);
+            var needsAi = d.ai_cache_stale === true || String(ai.analysis_status || '') !== 'generated';
+            function paint(banner) {
+                openTccModal(title, renderTheorySummaryModalInner(d, studentId, lessonId, banner));
+            }
+            if (!needsAi) {
+                paint('AI status: advisory analysis is stored for this summary revision.');
+                return;
+            }
+            paint('AI status: generating advisory analysis for the current summary text…');
+            api('ai_summary_analysis', {cohort_id: cohortId, student_id: studentId, lesson_id: lessonId}).then(function (air) {
+                if (air.ok && air.analysis) {
+                    d.ai_interpretation = Object.assign({}, ai, air.analysis);
+                }
+                paint(air.ok ? 'AI status: generated and stored; tied to the current summary revision.' : 'AI status: generation failed — you can retry with “Regenerate AI Analysis”.');
+            }).catch(function () {
+                paint('AI status: request failed — try “Regenerate AI Analysis”.');
+            });
         }).catch(function () {
-            openTccModal('Lesson Summary', '<div class="tcc-error">Unable to load summary.</div>');
+            openTccModal('Theory Summary', '<div class="tcc-error">Unable to load summary.</div>');
         });
+    }
+
+    function jumpToInterventionsForLesson(lessonId) {
+        lessonId = parseInt(lessonId, 10) || 0;
+        if (!lessonId) return;
+        pendingAuditHighlightLessonId = lessonId;
+        switchStudentDeepTab('audit');
     }
 
     function blockerCategory(issue) {
@@ -1299,81 +1546,6 @@ cw_header('Instructor Theory Control Center');
         return '<span class="tcc-score-pill ' + cls + '">' + escapeHtml(label) + '</span>';
     }
 
-    function inlineSection(title, sub, bodyHtml, rightHtml) {
-        return '<section class="tcc-inline-section"><div class="tcc-inline-section-head"><div><div class="tcc-inline-section-title">' + escapeHtml(title) + '</div><div class="tcc-inline-section-sub">' + escapeHtml(sub || '') + '</div></div>' + (rightHtml || '') + '</div><div class="tcc-inline-section-body">' + (bodyHtml || '') + '</div></section>';
-    }
-
-    function inlineMiniGrid(rows) {
-        var html = '<div class="tcc-inline-mini-grid">';
-        rows.forEach(function (row) {
-            html += '<div class="tcc-inline-mini-card"><div class="tcc-inline-mini-label">' + escapeHtml(row[0]) + '</div><div class="tcc-inline-mini-value">' + escapeHtml(row[1]) + '</div></div>';
-        });
-        return html + '</div>';
-    }
-
-    function renderInlineSummary(resp, studentId, lessonId) {
-        if (!resp || !resp.ok) return inlineSection('1. Lesson Summary Details', 'Student summary and instructor review status.', '<div class="tcc-inline-error">Unable to load summary details.</div>', '<button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>');
-        var d = resp.data || {};
-        var s = d.summary || {};
-        var lesson = d.lesson || {};
-        var ai = d.ai_interpretation || {};
-        var body = inlineMiniGrid([['Module', lesson.course_title || '—'], ['Review Status', prettyStatus(s.review_status || '—')], ['Updated', niceDateTime(s.updated_at)], ['Local Time', niceTime(s.updated_at)]]) + '<div style="display:grid;grid-template-columns:minmax(120px,.45fr) 1fr;gap:12px;margin-bottom:10px;"><div><div class="tcc-inline-mini-label">Review Status</div><div style="margin-top:6px;">' + reviewStatusPill(s.review_status || 'neutral') + '</div></div><div><div class="tcc-inline-mini-label">Review Score</div><div style="margin-top:6px;">' + reviewScoreBar(s.review_score) + '</div></div></div><div class="tcc-summary-safe-frame">' + rawSummaryHtml(s) + '</div>' + renderAiInterpretation(ai, studentId, lessonId);
-        return inlineSection('1. Lesson Summary Details', 'Student summary, review status, score, and AI interpretation.', body, '<button type="button" class="tcc-detail-btn primary" onclick="openLessonSummary(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>');
-    }
-
-    function renderInlineAttempts(resp, studentId, lessonId) {
-        if (!resp || !resp.ok) return inlineSection('2. Progress Test Details', 'Attempts, answers, scores, and audio trace.', '<div class="tcc-inline-error">Unable to load progress test details.</div>', '<button type="button" class="tcc-detail-btn primary" onclick="openAttemptDetails(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>');
-        var attempts = (resp.data || {}).attempts || [];
-        var body = attempts.length ? renderAttemptCards(attempts) : '<div class="tcc-inline-empty">No progress test attempts found for this lesson.</div>';
-        return inlineSection('2. Progress Test Details', 'Attempt history, answer detail, score trace, and clickable audio transcript bubbles.', body, '<button type="button" class="tcc-detail-btn primary" onclick="openAttemptDetails(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>');
-    }
-
-    function renderInlineInterventions(resp, studentId, lessonId) {
-        if (!resp || !resp.ok) return inlineSection('3. Interventions', 'Required actions, extensions, emails, and progression events.', '<div class="tcc-inline-error">Unable to load intervention details.</div>', '<button type="button" class="tcc-detail-btn primary" onclick="openInterventions(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>');
-        var d = resp.data || {};
-        var groups = [['Required Actions', d.required_actions || []], ['Deadline Overrides / Extensions', d.deadline_overrides || []], ['Email Trace', d.emails || []], ['Progression Events', d.events || []]];
-        var body = '';
-        groups.forEach(function (group) {
-            var title = group[0];
-            var items = group[1] || [];
-            body += '<div class="tcc-inline-section-title" style="font-size:12px;margin:10px 0 8px;color:#102845;">' + escapeHtml(title) + ' (' + items.length + ')</div>';
-            if (!items.length) {
-                body += '<div class="tcc-inline-empty">No records found.</div>';
-            } else {
-                items.slice(0, 8).forEach(function (item) {
-                    var label = item.title || item.email_type || item.event_type || item.override_type || item.action_type || ('Record #' + (item.id || ''));
-                    var meta = [item.status || item.sent_status || '', item.created_at ? niceDateTime(item.created_at) : '', item.sent_at ? ('Sent ' + niceDateTime(item.sent_at)) : ''].filter(Boolean).join(' · ');
-                    body += '<div class="tcc-inline-intervention tcc-intervention-clickable" onclick="openInterventionDetailModal(' + serializeForOnclick(item) + ')"><div class="tcc-inline-intervention-title">' + escapeHtml(label) + '</div><div class="tcc-inline-intervention-meta">' + escapeHtml(meta || '—') + '</div></div>';
-                });
-                if (items.length > 8) body += '<div class="tcc-inline-empty">+' + (items.length - 8) + ' more records. Open modal for the full trace.</div>';
-            }
-        });
-        return inlineSection('3. Interventions', 'Chronological intervention evidence connected to this lesson. Tap any item for full details.', body, '<button type="button" class="tcc-detail-btn primary" onclick="openInterventions(' + parseInt(studentId, 10) + ',' + parseInt(lessonId, 10) + ')">Open Modal</button>');
-    }
-
-    function renderInlineLessonDetail(summaryResp, attemptsResp, interventionsResp, studentId, lessonId) {
-        return '<div class="tcc-inline-detail-stack">' + renderInlineSummary(summaryResp, studentId, lessonId) + renderInlineAttempts(attemptsResp, studentId, lessonId) + renderInlineInterventions(interventionsResp, studentId, lessonId) + '</div>';
-    }
-
-    function toggleLessonInlineDetail(id, studentId, lessonId) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        if (el.classList.contains('open')) { el.classList.remove('open'); return; }
-        el.classList.add('open');
-        if (el.getAttribute('data-loaded') === '1') return;
-        el.innerHTML = '<div class="tcc-inline-loading">Loading lesson detail sections…</div>';
-        Promise.all([
-            api('lesson_summary_detail', {cohort_id: cohortId, student_id: studentId, lesson_id: lessonId}).catch(function () { return {ok:false,error:'summary_load_failed'}; }),
-            api('lesson_attempts_detail', {cohort_id: cohortId, student_id: studentId, lesson_id: lessonId}).catch(function () { return {ok:false,error:'attempts_load_failed'}; }),
-            api('lesson_interventions_detail', {cohort_id: cohortId, student_id: studentId, lesson_id: lessonId}).catch(function () { return {ok:false,error:'interventions_load_failed'}; })
-        ]).then(function (results) {
-            el.setAttribute('data-loaded', '1');
-            el.innerHTML = renderInlineLessonDetail(results[0], results[1], results[2], studentId, lessonId);
-        }).catch(function () {
-            el.innerHTML = '<div class="tcc-inline-error">Unable to load lesson detail sections.</div>';
-        });
-    }
-
     function renderLessonTimeline(lessons) {
         var target = document.getElementById('studentLessonTimelineBody');
         if (!target) return;
@@ -1402,18 +1574,24 @@ cw_header('Instructor Theory Control Center');
             mod.lessons.forEach(function (l, lessonIndex) {
                 var lessonId = parseInt(l.lesson_id || 0, 10);
                 var studentId = parseInt(selectedStudentId || 0, 10);
-                var detailId = 'lessonDetail_' + String(l.course_id || moduleIndex) + '_' + String(l.lesson_id || lessonIndex);
                 var ext = Number(l.extension_count || 0);
                 var extText = ext === 1 ? '1 Extension' : ext + ' Extensions';
                 var extClass = ext > 0 ? 'tcc-extension-warn' : 'tcc-extension-ok';
                 var deltaClass = lessonDeltaClass(l);
                 var interventionCount = Number(l.intervention_count || 0);
-                html += '<tr class="tcc-lesson-row" onclick="toggleLessonInlineDetail(' + jsArg(detailId) + ',' + studentId + ',' + lessonId + ')">';
+                html += '<tr class="tcc-lesson-row">';
                 html += '<td><div class="tcc-lesson-main"><span class="tcc-lesson-num">' + (lessonIndex + 1) + '.</span><div class="tcc-lesson-name">' + escapeHtml(l.lesson_title || 'Lesson') + '</div></div></td>';
                 html += '<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Orig</span>' + escapeHtml(niceDate(l.original_deadline_utc)) + '</div><div class="tcc-date-line"><span>Eff</span>' + escapeHtml(niceDate(l.effective_deadline_utc)) + '</div><div class="' + extClass + '">' + escapeHtml(ext > 0 ? extText : 'No Extensions') + '</div></div></td>';
                 html += '<td><div class="tcc-date-stack"><div class="tcc-date-line"><span>Finished</span>' + escapeHtml(niceDate(l.completed_at)) + '</div><div class="tcc-small-grey">&nbsp;</div><div class="tcc-delta ' + deltaClass + '">' + escapeHtml(l.deadline_delta_label || '—') + '</div></div></td>';
-                html += '<td>' + renderSummaryQuality(l) + '</td><td>' + renderTestScore(l) + '</td><td><span class="tcc-count-mini info">' + escapeHtml(l.attempt_count || 0) + '</span></td><td><span class="tcc-count-mini ' + (interventionCount > 0 ? 'warn' : 'neutral') + '">' + escapeHtml(interventionCount) + '</span></td>';
-                html += '</tr><tr class="tcc-lesson-detail-row"><td colspan="7"><div id="' + detailId + '" class="tcc-lesson-detail" data-loaded="0"></div></td></tr>';
+                html += '<td><span class="tcc-lesson-click" role="button" tabindex="0" onclick="event.stopPropagation();openLessonSummary(' + studentId + ',' + lessonId + ')">' + renderSummaryQuality(l) + '</span></td>';
+                html += '<td><span class="tcc-lesson-click" role="button" tabindex="0" onclick="event.stopPropagation();openAttemptDetails(' + studentId + ',' + lessonId + ')">' + renderTestScore(l) + '</span></td>';
+                html += '<td><span class="tcc-lesson-click" role="button" tabindex="0" onclick="event.stopPropagation();openAttemptDetails(' + studentId + ',' + lessonId + ')"><span class="tcc-count-mini info">' + escapeHtml(l.attempt_count || 0) + '</span></span></td>';
+                var ivCell = '<span class="tcc-count-mini ' + (interventionCount > 0 ? 'warn' : 'neutral') + '">' + escapeHtml(interventionCount) + '</span>';
+                if (interventionCount > 0) {
+                    ivCell = '<span class="tcc-lesson-click" role="button" tabindex="0" onclick="event.stopPropagation();jumpToInterventionsForLesson(' + lessonId + ')">' + ivCell + '</span>';
+                }
+                html += '<td>' + ivCell + '</td>';
+                html += '</tr>';
             });
             html += '</tbody></table></div></div></details>';
         });
@@ -1895,8 +2073,8 @@ cw_header('Instructor Theory Control Center');
     window.switchStudentDeepTab = switchStudentDeepTab;
     window.loadStudentInterventionsAudit = loadStudentInterventionsAudit;
     window.loadStudentLessons = loadStudentLessons;
-    window.toggleLessonInlineDetail = toggleLessonInlineDetail;
-    window.toggleLessonDetail = toggleLessonInlineDetail;
+    window.tccToggleInlineAudio = tccToggleInlineAudio;
+    window.jumpToInterventionsForLesson = jumpToInterventionsForLesson;
     window.generateAiSummaryAnalysisFromButton = generateAiSummaryAnalysisFromButton;
     window.executeTccRepairButton = executeTccRepairButton;
     window.executeTccRepairFromIssue = executeTccRepairFromIssue;
