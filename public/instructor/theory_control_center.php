@@ -1507,7 +1507,16 @@ cw_header('Instructor Theory Control Center');
             });
             cohortId = parseInt(data.cohorts[0].id, 10) || 0;
             window.tccCohortTimezone = data.cohorts[0].timezone || data.cohorts[0].cohort_timezone || 'UTC';
-            select.value = cohortId;
+            var urlParams = new URLSearchParams(window.location.search || '');
+            var wantedCohort = parseInt(urlParams.get('cohort_id') || urlParams.get('cohort') || '0', 10) || 0;
+            if (wantedCohort > 0) {
+                var match = data.cohorts.find(function (c) { return parseInt(c.id, 10) === wantedCohort; });
+                if (match) {
+                    cohortId = wantedCohort;
+                    window.tccCohortTimezone = match.timezone || match.cohort_timezone || window.tccCohortTimezone || 'UTC';
+                }
+            }
+            select.value = String(cohortId);
             loadAll();
         }).catch(function () {
             showError('healthStrip', 'Unable to load cohorts.');

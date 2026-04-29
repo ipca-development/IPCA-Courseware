@@ -893,10 +893,31 @@ foreach ($attemptHistory as $attemptRow) {
 $decisionOptions = ia_decision_ui_options();
 $completionStatusUi = ia_human_completion_status((string)($activity['completion_status'] ?? ''));
 
-cw_header('Instructor Intervention');
+$iaBackToTccHref = '/instructor/theory_control_center.php';
+if ($cohortId > 0) {
+    $iaBackToTccHref .= '?cohort_id=' . $cohortId;
+}
+
+cw_header('Instructor approval');
 ?>
 
 <style>
+.ia-bridge-bar{
+    display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;
+    padding:16px 20px;border-radius:20px;margin-bottom:6px;
+    background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);
+    color:#fff;border:1px solid rgba(15,23,42,.12);
+    box-shadow:0 14px 30px rgba(15,23,42,.08);
+}
+.ia-bridge-copy{font-size:12px;line-height:1.45;color:rgba(255,255,255,.88);max-width:520px;font-weight:600}
+.ia-back-to-tcc{
+    display:inline-flex;align-items:center;justify-content:center;gap:8px;
+    min-height:40px;padding:0 16px;border-radius:12px;font-size:13px;font-weight:900;
+    text-decoration:none;white-space:nowrap;flex-shrink:0;
+    background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.32);
+    cursor:pointer;
+}
+.ia-back-to-tcc:hover{background:rgba(255,255,255,.22);color:#fff}
 .ia-page{display:flex;flex-direction:column;gap:18px}
 .ia-flash{padding:14px 16px;border-radius:14px;font-size:14px;font-weight:700}
 .ia-flash.success{background:rgba(22,101,52,.09);color:#166534;border:1px solid rgba(22,101,52,.18)}
@@ -1041,6 +1062,13 @@ cw_header('Instructor Intervention');
 
 <div class="ia-page">
 
+    <div class="ia-bridge-bar">
+        <a class="ia-back-to-tcc" href="<?php echo ia_h($iaBackToTccHref); ?>">← Back to Instructor Theory Control Center</a>
+        <p class="ia-bridge-copy">
+            Record the formal approval decision here. To select multiple open items and run cohort-safe bulk actions (for example the instructor-approval queue mode), use the Needs My Action section on the Control Center.
+        </p>
+    </div>
+
     <?php if ($flashError !== ''): ?>
         <div class="ia-flash error"><?php echo ia_h($flashError); ?></div>
     <?php endif; ?>
@@ -1050,8 +1078,8 @@ cw_header('Instructor Intervention');
     <?php endif; ?>
 
     <section class="card ia-hero">
-        <div class="ia-eyebrow">Instructor Platform · Theory Intervention</div>
-        <h1 class="ia-title">Instructor Intervention</h1>
+        <div class="ia-eyebrow">Instructor Platform · Theory progression</div>
+        <h1 class="ia-title">Instructor approval</h1>
 
         <div class="ia-chip-row">
             <span class="ia-chip info"><?php echo ia_h((string)($state['cohort_title'] ?? '')); ?></span>

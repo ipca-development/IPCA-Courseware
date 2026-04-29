@@ -44,13 +44,22 @@ return [
         'icon' => 'theory',
         'items' => [
             [
+                'key' => 'theory_control_center',
+                'label' => 'Theory Control Center',
+                'icon' => 'dashboard',
+                'href' => '/instructor/theory_control_center.php',
+                'match_paths' => [
+                    '/instructor/theory_control_center.php',
+                    '/instructor/instructor_approval.php',
+                ],
+            ],
+            [
                 'key' => 'cohort_progress',
                 'label' => 'Cohort Progress',
                 'icon' => 'reviews',
                 'href' => '/instructor/cohort_progress_overview.php',
                 'match_paths' => [
                     '/instructor/cohort_progress_overview.php',
-                    '/instructor/instructor_approval.php',
                 ],
             ],
             [
