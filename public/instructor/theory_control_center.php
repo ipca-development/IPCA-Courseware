@@ -787,7 +787,7 @@ cw_header('Instructor Theory Control Center');
             html += '<div class="' + cardCls + '"><div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt ' + escapeHtml(a.attempt || '—') + ' · ' + escapeHtml(passFail) + ' · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div>';
             html += '<div class="tcc-attempt-meta">Started: ' + escapeHtml(niceDateTime(a.started_at)) + ' · Completed: ' + escapeHtml(niceDateTime(a.completed_at)) + ' (Duration: ' + escapeHtml(dur) + ')</div>';
             html += '</div><span class="tcc-score-pill ' + (parseInt(a.pass_gate_met, 10) === 1 ? 'ok' : 'danger') + '">' + escapeHtml(score) + '</span></div>';
-            html += '<details open class="tcc-inline-json"><summary style="cursor:pointer;font-weight:800;color:#64748b;">Raw attempt JSON</summary><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(a, null, 2)) + '</pre></details>';
+            html += '<details class="tcc-inline-json"><summary style="cursor:pointer;font-weight:800;color:#64748b;">Raw attempt JSON (troubleshooting)</summary><pre class="tcc-debug-pre">' + escapeHtml(JSON.stringify(a, null, 2)) + '</pre></details>';
             html += renderAttemptItems(a.items || []) + '</div>';
         });
         return html;
