@@ -269,7 +269,7 @@ function tcc_normalize_summary_ai_response(array $analysis): array
 function tcc_normalize_progress_test_ai_response(array $analysis): array
 {
     $analysis['analysis_status'] = 'generated';
-    foreach (['strong_points', 'weak_points', 'suggestions', 'official_references'] as $k) {
+    foreach (['strong_points', 'weak_points', 'suggestions', 'official_references', 'integrity_concern_weak_points', 'integrity_concern_suggestions'] as $k) {
         if (isset($analysis[$k]) && !is_array($analysis[$k])) {
             $analysis[$k] = $analysis[$k] !== '' ? [$analysis[$k]] : [];
         }
@@ -277,8 +277,121 @@ function tcc_normalize_progress_test_ai_response(array $analysis): array
             $analysis[$k] = [];
         }
     }
+    unset($analysis['evidence_notes']);
 
     return $analysis;
+}
+
+function tcc_is_placeholder_progress_feedback_line(string $line): bool
+{
+    $line = strtolower(trim($line));
+    if ($line === '') {
+        return true;
+    }
+    $needles = [
+        'no specific summary issues',
+        'no specific summary corrections',
+        'no repeated misunderstanding',
+        'could not be fully assessed',
+        'you completed the progress test. review the areas below',
+        'review the items that were incomplete or uncertain',
+    ];
+    foreach ($needles as $n) {
+        if (strpos($line, $n) !== false) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/** @return string[] */
+function tcc_split_feedback_text_to_lines(string $text): array
+{
+    $text = trim($text);
+    if ($text === '') {
+        return [];
+    }
+    $parts = preg_split('/\R+/u', $text) ?: [];
+    $out = [];
+    foreach ($parts as $p) {
+        $p = trim((string)$p);
+        if ($p === '' || tcc_is_placeholder_progress_feedback_line($p)) {
+            continue;
+        }
+        $p = preg_replace('/^[\-\*•]\s*/u', '', $p) ?? $p;
+        if ($p !== '') {
+            $out[] = $p;
+        }
+    }
+    if (!$out && !tcc_is_placeholder_progress_feedback_line($text)) {
+        return [$text];
+    }
+
+    return $out;
+}
+
+/**
+ * STRONG / WEAK / SUGGESTIONS from debrief fields saved when each progress test was finalized.
+ * $attempts should be newest-first (same order as progress_tests_v2 query).
+ *
+ * @param array<int,array<string,mixed>> $attempts
+ * @return array{strong_points:string[],weak_points:string[],suggestions:string[]}
+ */
+function tcc_aggregate_saved_progress_test_feedback(array $attempts): array
+{
+    $strong = [];
+    $weak = [];
+    $suggestions = [];
+
+    foreach ($attempts as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $n = (int)($row['attempt'] ?? 0);
+        $pfx = $n > 0 ? ('Attempt ' . $n . ' — ') : '';
+
+        foreach (tcc_split_feedback_text_to_lines((string)($row['summary_quality'] ?? '')) as $line) {
+            $strong[] = $pfx . $line;
+        }
+        foreach (tcc_split_feedback_text_to_lines((string)($row['weak_areas'] ?? '')) as $line) {
+            $weak[] = $pfx . $line;
+        }
+        foreach (tcc_split_feedback_text_to_lines((string)($row['summary_issues'] ?? '')) as $line) {
+            $weak[] = $pfx . $line;
+        }
+        foreach (tcc_split_feedback_text_to_lines((string)($row['confirmed_misunderstandings'] ?? '')) as $line) {
+            $weak[] = $pfx . $line;
+        }
+        foreach (tcc_split_feedback_text_to_lines((string)($row['summary_corrections'] ?? '')) as $line) {
+            $suggestions[] = $pfx . $line;
+        }
+
+        $written = trim((string)($row['ai_summary'] ?? ''));
+        if ($written !== '' && !tcc_is_placeholder_progress_feedback_line($written)) {
+            $parts = preg_split('/\R{2,}/u', $written) ?: [];
+            foreach ($parts as $para) {
+                $para = trim($para);
+                if ($para === '' || tcc_is_placeholder_progress_feedback_line($para)) {
+                    continue;
+                }
+                $paraWithPfx = $pfx . $para;
+                if (preg_match('/\b(review|revisit|focus on|study|practice|correct|revise|ensure|reread|re-read)\b/i', $para)) {
+                    $suggestions[] = $paraWithPfx;
+                } elseif (preg_match('/\b(incorrect|wrong|weak|missed|failed|did not|uncertain|incomplete|gap|error|struggle)\b/i', $para)) {
+                    $weak[] = $paraWithPfx;
+                } else {
+                    $strong[] = $paraWithPfx;
+                }
+            }
+        }
+    }
+
+    return [
+        'strong_points' => array_values(array_unique($strong)),
+        'weak_points' => array_values(array_unique($weak)),
+        'suggestions' => array_values(array_unique($suggestions)),
+    ];
 }
 
 function tcc_user_display_by_id(PDO $pdo, ?int $uid): string
@@ -1493,12 +1606,15 @@ function tcc_lesson_attempts_detail(PDO $pdo, int $cohortId, int $studentId, int
         $oralStale = true;
     }
 
+    $knowledgeFeedback = tcc_aggregate_saved_progress_test_feedback($attempts);
+
     return [
         'lesson' => $lesson,
         'attempts' => $attempts,
         'attempts_fingerprint' => $fp,
         'oral_analysis' => $oralAnalysis,
         'oral_analysis_stale' => $oralStale,
+        'knowledge_feedback' => $knowledgeFeedback,
     ];
 }
 
@@ -2093,23 +2209,21 @@ function tcc_call_openai_progress_test_analysis(array $payload): array
     }
 
     $promptPayload = [
-        'task' => 'Analyze oral progress test attempts for instructor-only integrity hints (aviation theory course).',
+        'task' => 'Analyze oral progress test attempts for instructor-only integrity likelihoods (aviation theory course). Do NOT restate lesson knowledge strengths/weaknesses here — those come from the saved test debrief elsewhere.',
         'important_rules' => [
             'Return valid JSON only. No markdown.',
             'Do not accuse the student; use likelihood language.',
             'Advisory only — not proof of cheating.',
+            'If overall_integrity_risk is High, populate integrity_concern_weak_points and integrity_concern_suggestions with short non-accusatory instructor bullets (empty arrays when risk is not High).',
         ],
         'required_json_schema' => [
-            'natural_speech_likelihood' => 'Low|Medium|High|Not evaluated',
+            'natural_speech_likelihood' => 'Low|Medium|High|Not evaluated (likelihood transcript reflects natural spontaneous speech vs stiff/script-like)',
             'script_reading_likelihood' => 'Low|Medium|High|Not evaluated',
             'multiple_voices_or_coaching_likelihood' => 'Low|Medium|High|Not evaluated',
             'overall_integrity_risk' => 'Low|Medium|High|Not evaluated',
-            'instructor_summary' => '2-4 sentences',
-            'strong_points' => ['bullet strings'],
-            'weak_points' => ['bullet strings'],
-            'suggestions' => ['bullet strings with ICAO/EASA-style references where relevant'],
-            'official_references' => ['short refs e.g. ICAO Annex / EASA AMC GM'],
-            'evidence_notes' => ['what in transcripts/audio timing supports the assessment'],
+            'official_references' => ['short refs e.g. ICAO Annex / EASA AMC GM when regulation helps frame review; may be empty'],
+            'integrity_concern_weak_points' => ['only when overall_integrity_risk is High: 2-4 advisory bullets for instructor review, else []'],
+            'integrity_concern_suggestions' => ['only when overall_integrity_risk is High: 2-4 follow-up suggestions (human verification, audio review), else []'],
         ],
         'student' => ['name' => $studentName],
         'lesson' => ['module' => $courseTitle, 'lesson' => $lessonTitle],

@@ -55,7 +55,8 @@ cw_header('Instructor Theory Control Center');
 .tcc-lesson-click{cursor:pointer;border-radius:12px;padding:4px 6px;margin:-4px -6px;transition:background .15s;display:inline-block}
 .tcc-lesson-click:hover{background:rgba(29,79,137,.08)}
 .tcc-attempt-stale{border-color:#f59e0b!important;background:#fffbeb!important}
-.tcc-oral-ai-panel{border-radius:16px;border:1px solid rgba(15,23,42,.08);background:#f8fafc;padding:14px;margin-bottom:14px}
+.tcc-progress-test-lesson-spacer{margin-bottom:28px}
+.tcc-oral-ai-panel{border-radius:16px;border:1px solid rgba(15,23,42,.08);background:#f8fafc;padding:14px;margin-top:4px;margin-bottom:14px}
 .tcc-oral-ai-cols{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:10px}
 .tcc-policy-alert{border-radius:12px;padding:10px 12px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;font-weight:800;font-size:12px;margin-bottom:10px;line-height:1.45}
 .tcc-inline-json{margin-top:10px;font-size:11px}
@@ -68,7 +69,6 @@ cw_header('Instructor Theory Control Center');
 .tcc-attempt-details>summary.tcc-attempt-row-summary::after{content:'▸';flex-shrink:0;font-size:12px;color:#64748b;margin-left:8px;transition:transform .15s ease}
 .tcc-attempt-details[open]>summary.tcc-attempt-row-summary::after{transform:rotate(90deg)}
 .tcc-attempt-detail-body{padding:12px 14px 14px;border-top:1px solid rgba(15,23,42,.06);background:#fff}
-.tcc-attempt-pass-first-note{font-size:12px;color:#166534;font-weight:800;margin-bottom:8px}
 .tcc-li-toolbar .tcc-btn.active{outline:2px solid rgba(18,53,95,.35);outline-offset:2px}
 </style>
 
@@ -444,12 +444,108 @@ cw_header('Instructor Theory Control Center');
         return '';
     }
 
-    function aiList(items) {
+    function aiList(items, maxItems) {
         items = Array.isArray(items) ? items : [];
+        maxItems = maxItems === undefined || maxItems === null ? 8 : parseInt(maxItems, 10) || 8;
         if (!items.length) return '<div class="tcc-modal-muted">No items generated yet.</div>';
         var html = '<ul>';
-        items.slice(0, 6).forEach(function (item) { html += '<li>' + escapeHtml(item) + '</li>'; });
+        items.slice(0, maxItems).forEach(function (item) { html += '<li>' + escapeHtml(item) + '</li>'; });
         return html + '</ul>';
+    }
+
+    function oralIntegrityLikelihoodClass(value) {
+        var s = String(value || '').toLowerCase();
+        if (s.indexOf('not eval') >= 0) return '';
+        if (/\bhigh\b/.test(s)) return 'danger';
+        if (/\bmedium\b/.test(s)) return 'warn';
+        if (/\blow\b/.test(s)) return 'ok';
+        return '';
+    }
+
+    function mergeKnowledgeFeedbackWithOral(knowledgeFb, oral) {
+        oral = oral || {};
+        knowledgeFb = knowledgeFb || {};
+        var kf = {
+            strong_points: [].concat(knowledgeFb.strong_points || []),
+            weak_points: [].concat(knowledgeFb.weak_points || []),
+            suggestions: [].concat(knowledgeFb.suggestions || [])
+        };
+        var risk = String(oral.overall_integrity_risk || '').trim().toLowerCase();
+        if (risk === 'high') {
+            var w = oral.integrity_concern_weak_points;
+            var s = oral.integrity_concern_suggestions;
+            if (Array.isArray(w)) {
+                w.forEach(function (x) {
+                    var t = String(x || '').trim();
+                    if (t) kf.weak_points.push(t);
+                });
+            }
+            if (Array.isArray(s)) {
+                s.forEach(function (x) {
+                    var t = String(x || '').trim();
+                    if (t) kf.suggestions.push(t);
+                });
+            }
+            if ((!w || !w.length) && (!s || !s.length)) {
+                kf.weak_points.push('Oral integrity signals indicate high overall integrity risk (advisory only — verify with human review).');
+                kf.suggestions.push('Follow institutional procedures for suspected irregular test behavior; have a human reviewer listen to the attempt audio and timing before any formal action.');
+            }
+        }
+        function uniq(arr) {
+            var seen = {};
+            return arr.filter(function (x) {
+                var k = String(x);
+                if (seen[k]) return false;
+                seen[k] = true;
+                return true;
+            });
+        }
+        kf.strong_points = uniq(kf.strong_points);
+        kf.weak_points = uniq(kf.weak_points);
+        kf.suggestions = uniq(kf.suggestions);
+        return kf;
+    }
+
+    function renderReferencesListBox(refs) {
+        refs = Array.isArray(refs) ? refs : [];
+        var body = refs.length
+            ? aiList(refs, 24)
+            : '<div class="tcc-modal-muted">None listed.</div>';
+        return '<div class="tcc-ai-list-box" style="margin-top:12px;"><div class="tcc-ai-list-title">References</div>' + body + '</div>';
+    }
+
+    function renderProgressTestOralAndKnowledgeSection(oral, mergedKnowledge, aiLoading) {
+        oral = oral || {};
+        mergedKnowledge = mergedKnowledge || {};
+        if (aiLoading) {
+            return '<div class="tcc-loading" style="margin-bottom:12px;">Generating AI oral-integrity analysis…</div>'
+                + '<div class="tcc-modal-section-title" style="margin-top:4px;">Answer quality (saved test debrief)</div>'
+                + '<div class="tcc-oral-ai-cols">' +
+                '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">STRONG POINTS</div>' + aiList(mergedKnowledge.strong_points || [], 16) + '</div>' +
+                '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">WEAK POINTS</div>' + aiList(mergedKnowledge.weak_points || [], 16) + '</div>' +
+                '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">SUGGESTIONS</div>' + aiList(mergedKnowledge.suggestions || [], 16) + '</div>' +
+                '</div>';
+        }
+        var hasLikelihood = !!(oral.natural_speech_likelihood || oral.script_reading_likelihood || oral.multiple_voices_or_coaching_likelihood || oral.overall_integrity_risk);
+        var grid = '';
+        if (hasLikelihood) {
+            grid = '<div class="tcc-ai-result-grid" style="margin-top:4px;">';
+            grid += '<div class="tcc-ai-result-card ' + oralIntegrityLikelihoodClass(oral.natural_speech_likelihood) + '"><div class="tcc-ai-result-label">Natural speech</div><div class="tcc-ai-result-value">' + escapeHtml(oral.natural_speech_likelihood || '—') + '</div></div>';
+            grid += '<div class="tcc-ai-result-card ' + oralIntegrityLikelihoodClass(oral.script_reading_likelihood) + '"><div class="tcc-ai-result-label">Script reading</div><div class="tcc-ai-result-value">' + escapeHtml(oral.script_reading_likelihood || '—') + '</div></div>';
+            grid += '<div class="tcc-ai-result-card ' + oralIntegrityLikelihoodClass(oral.multiple_voices_or_coaching_likelihood) + '"><div class="tcc-ai-result-label">Other voices / coaching</div><div class="tcc-ai-result-value">' + escapeHtml(oral.multiple_voices_or_coaching_likelihood || '—') + '</div></div>';
+            grid += '<div class="tcc-ai-result-card ' + oralIntegrityLikelihoodClass(oral.overall_integrity_risk) + '"><div class="tcc-ai-result-label">Overall integrity risk</div><div class="tcc-ai-result-value">' + escapeHtml(oral.overall_integrity_risk || '—') + '</div></div>';
+            grid += '</div>';
+            grid += renderReferencesListBox(oral.official_references || []);
+        } else {
+            grid = '<div class="tcc-modal-muted" style="margin-bottom:12px;">AI oral likelihoods will appear here once generated.</div>';
+        }
+        grid += '<div class="tcc-modal-section-title" style="margin-top:18px;">Answer quality (saved test debrief)</div>';
+        grid += '<div class="tcc-oral-ai-cols">';
+        grid += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">STRONG POINTS</div>' + aiList(mergedKnowledge.strong_points || [], 16) + '</div>';
+        grid += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">WEAK POINTS</div>' + aiList(mergedKnowledge.weak_points || [], 16) + '</div>';
+        grid += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">SUGGESTIONS</div>' + aiList(mergedKnowledge.suggestions || [], 16) + '</div>';
+        grid += '</div>';
+        return grid;
     }
 
     function renderAiAnalysisObject(ai) {
@@ -758,30 +854,6 @@ cw_header('Instructor Theory Control Center');
         return html;
     }
 
-    function renderOralIntegrityAnalysis(ai) {
-        ai = ai || {};
-        var sum = String(ai.instructor_summary || '').trim();
-        var html = '<div class="tcc-modal-muted" style="line-height:1.55;">' + escapeHtml(sum || '—') + '</div>';
-        html += '<div class="tcc-ai-result-grid" style="margin-top:12px;">';
-        html += '<div class="tcc-ai-result-card"><div class="tcc-ai-result-label">Natural speech</div><div class="tcc-ai-result-value">' + escapeHtml(ai.natural_speech_likelihood || '—') + '</div></div>';
-        html += '<div class="tcc-ai-result-card"><div class="tcc-ai-result-label">Script reading</div><div class="tcc-ai-result-value">' + escapeHtml(ai.script_reading_likelihood || '—') + '</div></div>';
-        html += '<div class="tcc-ai-result-card"><div class="tcc-ai-result-label">Other voices / coaching</div><div class="tcc-ai-result-value">' + escapeHtml(ai.multiple_voices_or_coaching_likelihood || '—') + '</div></div>';
-        html += '<div class="tcc-ai-result-card"><div class="tcc-ai-result-label">Overall integrity risk</div><div class="tcc-ai-result-value">' + escapeHtml(ai.overall_integrity_risk || '—') + '</div></div>';
-        html += '</div>';
-        html += '<div class="tcc-oral-ai-cols">';
-        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">STRONG POINTS</div>' + aiList(ai.strong_points || []) + '</div>';
-        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">WEAK POINTS</div>' + aiList(ai.weak_points || []) + '</div>';
-        html += '<div class="tcc-ai-list-box"><div class="tcc-ai-list-title">SUGGESTIONS</div>' + aiList(ai.suggestions || []) + '</div>';
-        html += '</div>';
-        if (ai.official_references && ai.official_references.length) {
-            html += '<div style="margin-top:10px;font-size:12px;color:#475569;"><strong>References:</strong> ' + escapeHtml(ai.official_references.join(' · ')) + '</div>';
-        }
-        if (ai.evidence_notes && ai.evidence_notes.length) {
-            html += '<div class="tcc-modal-section full" style="margin-top:10px;"><div class="tcc-modal-section-title">Evidence notes</div>' + aiList(ai.evidence_notes) + '</div>';
-        }
-        return html;
-    }
-
     function renderAttemptRowSummary(a) {
         var score = a.score_pct !== null && a.score_pct !== undefined ? a.score_pct + '%' : '—';
         var passFail = parseInt(a.pass_gate_met, 10) === 1 ? 'PASS' : 'FAIL';
@@ -799,7 +871,7 @@ cw_header('Instructor Theory Control Center');
     function renderAttemptCards(attempts) {
         if (!attempts || !attempts.length) return '<div class="tcc-empty">No progress test attempts found.</div>';
         var list = attempts.slice().sort(function (a, b) {
-            return (parseInt(a.attempt, 10) || 0) - (parseInt(b.attempt, 10) || 0);
+            return (parseInt(b.attempt, 10) || 0) - (parseInt(a.attempt, 10) || 0);
         });
 
         var passedOnFirstAttempt = list.length === 1
@@ -810,8 +882,7 @@ cw_header('Instructor Theory Control Center');
         if (passedOnFirstAttempt) {
             var a = list[0];
             return '<div class="tcc-attempt-stack">'
-                + '<div class="tcc-attempt-card"><div class="tcc-attempt-pass-first-note">Passed on first attempt — oral detail open below (no extra click).</div>'
-                + '<div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt 1 · PASS · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div>'
+                + '<div class="tcc-attempt-card"><div class="tcc-attempt-head"><div><div class="tcc-attempt-title">Attempt 1 · PASS · ' + escapeHtml(a.formal_result_code || a.status || '') + '</div>'
                 + '<div class="tcc-attempt-meta">Started: ' + escapeHtml(niceDateTime(a.started_at)) + ' · Completed: ' + escapeHtml(niceDateTime(a.completed_at)) + ' (Duration: ' + escapeHtml(tccAttemptDuration(a.started_at, a.completed_at)) + ')</div></div>'
                 + '<span class="tcc-score-pill ok">' + escapeHtml(a.score_pct !== null && a.score_pct !== undefined ? a.score_pct + '%' : '—') + '</span></div>'
                 + renderAttemptDetailInner(a)
@@ -834,15 +905,9 @@ cw_header('Instructor Theory Control Center');
     function buildProgressTestModalHtml(d, oralAnalysis, aiLoading) {
         var lesson = d.lesson || {};
         var sub = escapeHtml((lesson.course_title || 'Module') + ' · ' + (lesson.lesson_title || 'Lesson'));
-        var oralBlock = '';
-        if (aiLoading) {
-            oralBlock = '<div class="tcc-loading">Generating AI oral-integrity analysis…</div>';
-        } else if (oralAnalysis && (oralAnalysis.instructor_summary || oralAnalysis.natural_speech_likelihood)) {
-            oralBlock = renderOralIntegrityAnalysis(oralAnalysis);
-        } else {
-            oralBlock = '<div class="tcc-modal-muted">AI oral analysis will appear here once generated.</div>';
-        }
-        return '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Lesson</div><div class="tcc-modal-muted">' + sub + '</div></div>'
+        var mergedK = mergeKnowledgeFeedbackWithOral(d.knowledge_feedback || {}, oralAnalysis || {});
+        var oralBlock = renderProgressTestOralAndKnowledgeSection(oralAnalysis || {}, mergedK, !!aiLoading);
+        return '<div class="tcc-modal-section full tcc-progress-test-lesson-spacer"><div class="tcc-modal-section-title">Lesson</div><div class="tcc-modal-muted">' + sub + '</div></div>'
             + '<div class="tcc-oral-ai-panel"><div class="tcc-modal-section-title">AI oral integrity review</div>' + oralBlock + '</div>'
             + renderAttemptCards(d.attempts || []);
     }
@@ -862,7 +927,7 @@ cw_header('Instructor Theory Control Center');
             }
             var d = resp.data || {};
             var oral = d.oral_analysis || {};
-            var needOral = (!oral || (!oral.instructor_summary && !oral.natural_speech_likelihood)) || d.oral_analysis_stale === true;
+            var needOral = (!oral || (!oral.natural_speech_likelihood && !oral.script_reading_likelihood && !oral.multiple_voices_or_coaching_likelihood && !oral.overall_integrity_risk)) || d.oral_analysis_stale === true;
             if (!needOral) {
                 openTccModal('Progress Test Details', buildProgressTestModalHtml(d, oral, false));
                 return;
