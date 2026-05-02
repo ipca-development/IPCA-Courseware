@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
+require_once __DIR__ . '/../../../src/theory_ai_training_report_job.php';
 
 cw_require_login();
 
@@ -27,6 +28,7 @@ if (!in_array($role, $allowedRoles, true)) {
 $engine = new CoursewareProgressionV2($pdo);
 
 tcc_ensure_theory_instructor_ai_cache($pdo);
+tatr_ensure_table($pdo);
 
 function tcc_json($data, int $status = 200): void {
     http_response_code($status);
@@ -3399,6 +3401,125 @@ foreach ($pending as $p) {
                     'Any manual repair must be auditable.'
                 ],
             ],
+        ]);
+    }
+
+    if ($action === 'theory_ai_training_report_start') {
+        $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
+        $studentId = tcc_int($_GET['student_id'] ?? 0);
+        if ($cohortId <= 0 || $studentId <= 0) {
+            tcc_json(['ok' => false, 'error' => 'missing_cohort_or_student'], 400);
+        }
+        try {
+            $out = tatr_start_or_resume($pdo, $cohortId, $studentId);
+        } catch (Throwable $e) {
+            tcc_json(['ok' => false, 'error' => 'start_failed', 'message' => $e->getMessage()], 400);
+        }
+        if ($out['ready']) {
+            $pdfUrl = '/instructor/export_student_theory_ai_report_pdf.php?cohort_id=' . rawurlencode((string)$cohortId)
+                . '&student_id=' . rawurlencode((string)$studentId) . '&stored=1';
+            tcc_json([
+                'ok' => true,
+                'action' => $action,
+                'ready' => true,
+                'job_id' => $out['job_id'],
+                'pdf_url' => $pdfUrl,
+                'fingerprint' => $out['fingerprint'],
+            ]);
+        }
+        tcc_json([
+            'ok' => true,
+            'action' => $action,
+            'ready' => false,
+            'job_id' => $out['job_id'],
+            'worker_spawned' => $out['worker_spawned'],
+            'fingerprint' => $out['fingerprint'],
+        ]);
+    }
+
+    if ($action === 'theory_ai_training_report_poll') {
+        $jobId = tcc_int($_GET['job_id'] ?? 0);
+        if ($jobId <= 0) {
+            tcc_json(['ok' => false, 'error' => 'missing_job_id'], 400);
+        }
+        $row = tatr_get_job($pdo, $jobId);
+        if (!$row) {
+            tcc_json(['ok' => false, 'error' => 'job_not_found'], 404);
+        }
+        $cohortId = (int)$row['cohort_id'];
+        $studentId = (int)$row['student_id'];
+        try {
+            InstructorTheoryTrainingReportAi::verifyCohortStudent($pdo, $cohortId, $studentId);
+        } catch (Throwable $e) {
+            tcc_json(['ok' => false, 'error' => 'forbidden'], 403);
+        }
+        tatr_reset_stale_running($pdo, $cohortId, $studentId);
+        $row = tatr_get_job($pdo, $jobId);
+        if (!$row) {
+            tcc_json(['ok' => false, 'error' => 'job_not_found'], 404);
+        }
+        $status = (string)$row['status'];
+        $ready = $status === 'complete';
+        $pdfUrl = $ready
+            ? ('/instructor/export_student_theory_ai_report_pdf.php?cohort_id=' . rawurlencode((string)$cohortId)
+                . '&student_id=' . rawurlencode((string)$studentId) . '&stored=1')
+            : null;
+        tcc_json([
+            'ok' => true,
+            'action' => $action,
+            'job_id' => $jobId,
+            'status' => $status,
+            'progress' => (int)$row['progress'],
+            'error_text' => $row['error_text'] !== null ? (string)$row['error_text'] : null,
+            'ready' => $ready,
+            'pdf_url' => $pdfUrl,
+            'cohort_id' => $cohortId,
+            'student_id' => $studentId,
+        ]);
+    }
+
+    if ($action === 'theory_ai_training_report_run' && strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? '')) === 'POST') {
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(0);
+        }
+        if (function_exists('ignore_user_abort')) {
+            @ignore_user_abort(true);
+        }
+        $payload = json_decode((string)file_get_contents('php://input'), true);
+        if (!is_array($payload)) {
+            $payload = [];
+        }
+        $jobId = tcc_int($payload['job_id'] ?? 0);
+        if ($jobId <= 0) {
+            tcc_json(['ok' => false, 'error' => 'missing_job_id'], 400);
+        }
+        $row = tatr_get_job($pdo, $jobId);
+        if (!$row) {
+            tcc_json(['ok' => false, 'error' => 'job_not_found'], 404);
+        }
+        $cohortId = (int)$row['cohort_id'];
+        $studentId = (int)$row['student_id'];
+        try {
+            InstructorTheoryTrainingReportAi::verifyCohortStudent($pdo, $cohortId, $studentId);
+        } catch (Throwable $e) {
+            tcc_json(['ok' => false, 'error' => 'forbidden'], 403);
+        }
+        tatr_process_job($pdo, $jobId);
+        $row = tatr_get_job($pdo, $jobId);
+        $ready = $row && (string)$row['status'] === 'complete';
+        $pdfUrl = $ready
+            ? ('/instructor/export_student_theory_ai_report_pdf.php?cohort_id=' . rawurlencode((string)$cohortId)
+                . '&student_id=' . rawurlencode((string)$studentId) . '&stored=1')
+            : null;
+        tcc_json([
+            'ok' => true,
+            'action' => $action,
+            'job_id' => $jobId,
+            'status' => $row ? (string)$row['status'] : 'unknown',
+            'progress' => $row ? (int)$row['progress'] : 0,
+            'ready' => $ready,
+            'pdf_url' => $pdfUrl,
+            'error_text' => $row && $row['error_text'] !== null ? (string)$row['error_text'] : null,
         ]);
     }
 

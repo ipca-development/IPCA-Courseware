@@ -78,6 +78,29 @@ body{
   margin-top:4px;
   margin-bottom:10px;
 }
+.ecfr-official{
+  border:1px solid #cbd5e1;
+  border-radius:8px;
+  padding:10px 12px;
+  margin:10px 0 16px 0;
+  background:#f8fafc;
+}
+.ecfr-head{
+  font-size:11pt;
+  font-weight:bold;
+  margin:0 0 8px 0;
+  color:#0f172a;
+}
+.ecfr-p{
+  margin:4px 0;
+  line-height:1.45;
+  font-size:9.5pt;
+}
+.ecfr-cita{
+  margin-top:8px;
+  font-size:8.5pt;
+  color:#64748b;
+}
 </style>
 </head>
 <body>

@@ -257,6 +257,15 @@ cw_header('Instructor Theory Control Center');
         return fetch('/instructor/api/theory_control_center_api.php?' + new URLSearchParams(params), {credentials: 'same-origin'}).then(function (r) { return r.json(); });
     }
 
+    function apiTccPost(action, body) {
+        return fetch('/instructor/api/theory_control_center_api.php?action=' + encodeURIComponent(action), {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(body || {})
+        }).then(function (r) { return r.json(); });
+    }
+
     function repairApi(payload) {
         return fetch('/instructor/api/theory_control_center_repair_execute.php', {
             method: 'POST',
@@ -822,8 +831,126 @@ cw_header('Instructor Theory Control Center');
             openTccModal('AI training report', '<div class="tcc-error">Select a cohort and student first.</div>');
             return;
         }
-        var url = '/instructor/export_student_theory_ai_report_pdf.php?cohort_id=' + encodeURIComponent(String(cohortId)) + '&student_id=' + encodeURIComponent(String(studentId));
-        window.open(url, '_blank', 'noopener,noreferrer');
+        var pollTimer = null;
+        var pollCount = 0;
+        var fallbackSent = false;
+        var jobId = 0;
+        function stopPoll() {
+            if (pollTimer) {
+                clearInterval(pollTimer);
+                pollTimer = null;
+            }
+        }
+        function setBar(pct) {
+            var bar = document.getElementById('tatrProgressBar');
+            if (bar) bar.style.width = clampPct(pct) + '%';
+        }
+        function setStatus(msg) {
+            var el = document.getElementById('tatrStatus');
+            if (el) el.textContent = msg || '';
+        }
+        function setErr(msg) {
+            var el = document.getElementById('tatrErr');
+            if (!el) return;
+            if (msg) {
+                el.style.display = 'block';
+                el.textContent = msg;
+            } else {
+                el.style.display = 'none';
+                el.textContent = '';
+            }
+        }
+        function enablePdf(url) {
+            var btn = document.getElementById('tatrOpenPdf');
+            if (!btn) return;
+            btn.disabled = false;
+            btn.onclick = function () {
+                window.open(url, '_blank', 'noopener,noreferrer');
+            };
+        }
+        var html = ''
+            + '<p class="tcc-modal-muted" style="margin-top:0;">The server prepares the AI sections and stores them so opening the PDF does not repeat the long AI call. This step can take several minutes.</p>'
+            + '<div id="tatrProgressOuter" style="height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden;margin:12px 0;">'
+            + '<div id="tatrProgressBar" style="height:100%;width:0%;background:#0f766e;transition:width .3s ease;"></div></div>'
+            + '<div id="tatrStatus" class="tcc-modal-muted">Starting…</div>'
+            + '<div id="tatrErr" class="tcc-error" style="display:none;margin-top:10px;"></div>'
+            + '<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">'
+            + '<button type="button" class="tcc-btn" id="tatrOpenPdf" disabled>Open PDF</button>'
+            + '<button type="button" class="tcc-btn secondary" id="tatrCloseBtn">Close</button></div>';
+        openTccModal('AI training report (PDF)', html, 'Prepare & download');
+        document.getElementById('tatrCloseBtn').onclick = function () {
+            stopPoll();
+            closeTccModal();
+        };
+        function applyPoll(data) {
+            if (!data || !data.ok) {
+                stopPoll();
+                setErr((data && data.error) ? String(data.error) : 'Poll failed');
+                return;
+            }
+            setBar(typeof data.progress === 'number' ? data.progress : 0);
+            if (data.status === 'running') setStatus('Generating report…');
+            else if (data.status === 'pending') setStatus('Queued…');
+            else if (data.status === 'failed') {
+                stopPoll();
+                setErr(data.error_text || 'Generation failed');
+                return;
+            } else if (data.status === 'complete') setStatus('Ready.');
+            if (data.ready && data.pdf_url) {
+                stopPoll();
+                setBar(100);
+                setStatus('Ready — you can open the PDF.');
+                enablePdf(data.pdf_url);
+            }
+        }
+        function pollOnce() {
+            api('theory_ai_training_report_poll', {job_id: jobId}).then(applyPoll).catch(function () {
+                stopPoll();
+                setErr('Lost connection while checking status.');
+            });
+        }
+        api('theory_ai_training_report_start', {cohort_id: cohortId, student_id: studentId}).then(function (data) {
+            if (!data || !data.ok) {
+                setErr((data && data.message) ? String(data.message) : (data && data.error) ? String(data.error) : 'Could not start report job.');
+                return;
+            }
+            if (data.ready && data.pdf_url) {
+                setBar(100);
+                setStatus('A current prepared report is already available.');
+                enablePdf(data.pdf_url);
+                return;
+            }
+            jobId = parseInt(data.job_id, 10) || 0;
+            if (!jobId) {
+                setErr('No job id returned.');
+                return;
+            }
+            setStatus(data.worker_spawned ? 'Running in background…' : 'Running in this browser session…');
+            if (!data.worker_spawned) {
+                apiTccPost('theory_ai_training_report_run', {job_id: jobId}).then(function (runData) {
+                    applyPoll(runData);
+                    if (!runData || !runData.ready) {
+                        pollOnce();
+                    }
+                }).catch(function () {
+                    setErr('Report run failed (network or timeout). Try again or contact support.');
+                });
+                return;
+            }
+            pollTimer = setInterval(function () {
+                pollCount += 1;
+                pollOnce();
+                if (!fallbackSent && pollCount >= 12) {
+                    fallbackSent = true;
+                    apiTccPost('theory_ai_training_report_run', {job_id: jobId}).then(function (runData) {
+                        if (runData && runData.ok) applyPoll(runData);
+                    });
+                }
+            }, 2500);
+            pollOnce();
+        }).catch(function () {
+            setErr('Could not reach the server to start the report.');
+        });
     }
 
     function openSystemWatchForStudent(studentId) {
@@ -1219,7 +1346,7 @@ cw_header('Instructor Theory Control Center');
             '<button type="button" class="tcc-btn primary active" id="liBtnLessons" onclick="switchStudentDeepTab(\'lessons\')">Lessons</button>' +
             '<button type="button" class="tcc-btn secondary" id="liBtnInterventions" onclick="switchStudentDeepTab(\'audit\')">Interventions</button>' +
             '<button type="button" class="tcc-btn secondary" onclick="openExportStudentSummariesPdf(' + sidNum + ')" title="Same PDF layout as the student Theory Training Summary export">Export PDF Summary</button>' +
-            '<button type="button" class="tcc-btn secondary" onclick="openExportStudentTheoryAiReportPdf(' + sidNum + ')" title="AI-generated focus &amp; study report with 61.105 sign-off sheet (may take up to a few minutes)">AI training report (PDF)</button>' +
+            '<button type="button" class="tcc-btn secondary" onclick="openExportStudentTheoryAiReportPdf(' + sidNum + ')" title="Prepares the AI report on the server (cached), then opens the PDF — avoids repeating long AI calls">AI training report (PDF)</button>' +
             '<button type="button" class="tcc-btn warn" onclick="openSystemWatchForStudent(' + sidNum + ')">System Watch</button>' +
             '</div>' +
             '<div id="deepPaneLessons" class="tcc-li-pane" style="display:block">' +
