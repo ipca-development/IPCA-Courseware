@@ -1986,6 +1986,15 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
 
         $this->pdo->commit();
 
+        $policyNotificationAuditIds = $this->dispatchProgressTestFailurePolicyNotifications(
+            $decision,
+            $classification,
+            $context,
+            $policy,
+            $progressTestId,
+            $automationEventContext
+        );
+
         $eventKey = !empty($classification['pass_gate_met'])
             ? 'progress_test_passed'
             : 'progress_test_failed';
@@ -2009,6 +2018,7 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             'summary_state' => $summaryState,
             'activity_state' => $projection['fields'],
             'queued_email_ids' => $queuedEmailIds,
+            'policy_notification_audit_ids' => $policyNotificationAuditIds,
             'remediation_triggered' => !empty($decision['remediation_required']),
             'instructor_escalation_triggered' => !empty($decision['instructor_required']),
             'automation_result' => $automationResult,
@@ -4160,6 +4170,164 @@ public function buildNotificationDecision(array $progressionContext, array $deci
         ];
     }
 
+    /**
+     * Sends policy-linked notifications after a failed progress test is committed.
+     * Remediation (typically 3rd fail): student `third_fail_remediation` with remediation_url.
+     * Instructor escalation (typically 5th fail): student `instructor_approval_required`
+     * and chief `instructor_approval_required_chief` with approval_url.
+     *
+     * Disable overlapping theory-automation send_email steps for the same notification keys
+     * on `progress_test_failed` to avoid duplicate messages.
+     *
+     * @return list<int> Audit row ids in training_progression_emails when a send was recorded.
+     */
+    private function dispatchProgressTestFailurePolicyNotifications(
+        array $decision,
+        array $classification,
+        array $progressionContext,
+        array $policy,
+        int $progressTestId,
+        array $eventContext
+    ): array {
+        $auditIds = [];
+
+        if (!empty($classification['pass_gate_met'])) {
+            return $auditIds;
+        }
+
+        require_once __DIR__ . '/notification_service.php';
+
+        $notificationService = new NotificationService($this->pdo, $this);
+
+        $studentRec = $progressionContext['student_recipient'] ?? [];
+        $chiefRec = $progressionContext['chief_instructor_recipient'] ?? [];
+
+        $chiefName = trim((string)($chiefRec['name'] ?? ''));
+        if ($chiefName === '') {
+            $chiefName = 'Chief Instructor';
+        }
+
+        $notificationCtx = array_merge($eventContext, [
+            'chief_name' => $chiefName,
+        ]);
+
+        $userId = (int)($notificationCtx['user_id'] ?? 0);
+        $cohortId = (int)($notificationCtx['cohort_id'] ?? 0);
+        $lessonId = (int)($notificationCtx['lesson_id'] ?? 0);
+
+        $recordAudit = function (array $sendResult, string $notificationKey, string $toEmail, string $toName) use (
+            &$auditIds,
+            $userId,
+            $cohortId,
+            $lessonId,
+            $progressTestId,
+            $notificationCtx
+        ): void {
+            if (empty($sendResult['ok']) || !empty($sendResult['suppressed'])) {
+                return;
+            }
+            $auditIds[] = $this->recordAutomationEmailAudit([
+                'user_id' => $userId,
+                'cohort_id' => $cohortId,
+                'lesson_id' => $lessonId,
+                'progress_test_id' => $progressTestId,
+                'email_type' => $notificationKey,
+                'recipients_to' => [[
+                    'email' => $toEmail,
+                    'name' => $toName,
+                ]],
+                'subject' => (string)($sendResult['rendered_subject'] ?? $notificationKey),
+                'body_html' => (string)($sendResult['rendered_html'] ?? ''),
+                'body_text' => (string)($sendResult['rendered_text'] ?? ''),
+                'sent_status' => 'sent',
+                'sent_at' => gmdate('Y-m-d H:i:s'),
+                'notification_template_id' => isset($sendResult['template_id']) ? (int)$sendResult['template_id'] : null,
+                'notification_template_version_id' => isset($sendResult['template_version_id']) ? (int)$sendResult['template_version_id'] : null,
+                'render_context' => $notificationCtx,
+            ]);
+        };
+
+        $trySend = function (string $notificationKey, string $toEmail, string $toName) use (
+            $notificationService,
+            $notificationCtx,
+            $recordAudit,
+            $userId,
+            $cohortId,
+            $lessonId,
+            $progressTestId
+        ): void {
+            $toEmail = trim($toEmail);
+            $toName = trim($toName);
+            if ($toEmail === '' || !filter_var($toEmail, FILTER_VALIDATE_EMAIL)) {
+                $this->logProgressionEvent([
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $progressTestId,
+                    'event_type' => 'notification_policy',
+                    'event_code' => 'policy_progress_test_notification_skipped',
+                    'event_status' => 'warning',
+                    'actor_type' => 'system',
+                    'event_time' => gmdate('Y-m-d H:i:s'),
+                    'payload' => [
+                        'notification_key' => $notificationKey,
+                        'reason' => 'invalid_or_missing_recipient_email',
+                    ],
+                ]);
+                return;
+            }
+
+            try {
+                $sendResult = $notificationService->sendSystemNotification(
+                    $notificationKey,
+                    $toEmail,
+                    $toName !== '' ? $toName : $toEmail,
+                    $notificationCtx,
+                    null,
+                    []
+                );
+                $recordAudit($sendResult, $notificationKey, $toEmail, $toName !== '' ? $toName : $toEmail);
+            } catch (Throwable $e) {
+                $this->logProgressionEvent([
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $progressTestId,
+                    'event_type' => 'notification_policy',
+                    'event_code' => 'policy_progress_test_notification_failed',
+                    'event_status' => 'warning',
+                    'actor_type' => 'system',
+                    'event_time' => gmdate('Y-m-d H:i:s'),
+                    'payload' => [
+                        'notification_key' => $notificationKey,
+                        'target_email' => $toEmail,
+                        'error' => $e->getMessage(),
+                    ],
+                ]);
+            }
+        };
+
+        $sendThirdFailEmail = (bool)$this->resolveProgressionPolicyValue($policy, 'send_email_after_third_fail', [], true);
+        $remediationUrl = trim((string)($notificationCtx['remediation_url'] ?? ''));
+        if (!empty($decision['remediation_required']) && $sendThirdFailEmail && $remediationUrl !== '') {
+            $stuEmail = trim((string)($studentRec['email'] ?? ''));
+            $stuName = trim((string)(($studentRec['name'] ?? '') ?: $stuEmail));
+            $trySend('third_fail_remediation', $stuEmail, $stuName);
+        }
+
+        $approvalUrl = trim((string)($notificationCtx['approval_url'] ?? ''));
+        if (!empty($decision['instructor_required']) && $approvalUrl !== '') {
+            $stuEmail = trim((string)($studentRec['email'] ?? ''));
+            $stuName = trim((string)(($studentRec['name'] ?? '') ?: $stuEmail));
+            $trySend('instructor_approval_required', $stuEmail, $stuName);
+
+            $chiefEmail = trim((string)($chiefRec['email'] ?? ''));
+            $chiefDisp = trim((string)(($chiefRec['name'] ?? '') ?: $chiefEmail));
+            $trySend('instructor_approval_required_chief', $chiefEmail, $chiefDisp);
+        }
+
+        return $auditIds;
+    }
 
 private function dispatchAutomationEventIfAvailable(
     string $eventKey,

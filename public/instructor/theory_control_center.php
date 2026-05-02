@@ -1440,6 +1440,11 @@ cw_header('Instructor Theory Control Center');
         if (category === 'system_bug' && issueCanOneClickRepair(issue)) {
             html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Repair</div><div class="tcc-modal-muted" style="margin-bottom:10px;">This stale bug blocker is marked repairable by API and can be fixed with the safe repair endpoint.</div><button class="tcc-btn fix" type="button" data-issue-json="' + escapeHtml(JSON.stringify(issue)) + '" onclick="executeTccRepairButton(this)">Fix Issue</button></div>';
         }
+        var approvalFlowUrl = String(issue.official_flow_url || officialFlowHref(issue) || '');
+        var isInstructorApprovalQueue = String(issue.action_type || issue.type || '').toLowerCase() === 'instructor_approval';
+        if (isInstructorApprovalQueue && approvalFlowUrl && approvalFlowUrl.indexOf('instructor_approval.php') >= 0) {
+            html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Full approval flow</div><div class="tcc-modal-muted" style="margin-bottom:10px;">Resolve this case in bulk from TCC above, or open the standard tokenized instructor approval page.</div><a class="tcc-btn secondary" href="' + escapeHtml(approvalFlowUrl) + '" target="_blank" rel="noopener noreferrer">Open instructor approval page</a></div>';
+        }
         html += '<div class="tcc-modal-section full"><div class="tcc-approval-alert">Modal is read-only diagnostic and navigation context only. Decision execution remains outside this modal.</div></div>';
         html += '</div>';
 
@@ -1924,14 +1929,14 @@ cw_header('Instructor Theory Control Center');
             }
 
             var html = '';
-            html += renderGroup('Deadline-related (reason submissions + missed-final-deadline approvals)', grouped.deadline_related);
             html += renderGroup('Instructor approval — other (e.g. failed test)', grouped.progress_test_failure_related);
+            html += renderGroup('Deadline-related (reason submissions + missed-final-deadline approvals)', grouped.deadline_related);
             html += renderGroup('Other', grouped.other);
             container.innerHTML = html;
             if (familyControls) {
                 familyControls.innerHTML = ''
-                    + '<button id="bulkSelectDeadlineFamilyBtn" class="tcc-btn secondary" type="button">Select deadline-related (' + grouped.deadline_related.length + ')</button>'
                     + '<button id="bulkSelectProgressFamilyBtn" class="tcc-btn secondary" type="button">Select instructor-approval other (' + grouped.progress_test_failure_related.length + ')</button>'
+                    + '<button id="bulkSelectDeadlineFamilyBtn" class="tcc-btn secondary" type="button">Select deadline-related (' + grouped.deadline_related.length + ')</button>'
                     + '<button id="bulkSelectOtherFamilyBtn" class="tcc-btn secondary" type="button">Select other (' + grouped.other.length + ')</button>'
                     + '<button id="bulkClearSelectionBtn" class="tcc-btn secondary" type="button">Clear selection</button>';
             }

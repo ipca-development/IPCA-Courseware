@@ -121,6 +121,32 @@ if (!function_exists('tap_is_theory_event_key')) {
     }
 }
 
+/**
+ * Exact keys present on the automation context for theory events (finalize path).
+ * Conditions use field_key lookups — typos (e.g. "attempt" vs attempt_count) skip the flow silently.
+ */
+if (!function_exists('tap_theory_automation_context_cheat_sheet')) {
+    function tap_theory_automation_context_cheat_sheet(string $eventKey): string
+    {
+        $eventKey = trim($eventKey);
+        if ($eventKey === 'progress_test_failed') {
+            return 'Typical keys from finalize: attempt_count (string, e.g. 3), counts_as_unsat (1 on UNSAT), '
+                . 'pass_gate_met (0 on fail), score_pct (string), formal_result_code / formal_result_label, '
+                . 'timing_status, remediation_required (1 only when engine requires remediation this finalize), '
+                . 'instructor_required (1 for instructor-escalation finalize), max_attempts_reached (0|1), '
+                . 'student_email, remediation_url (filled after required actions are created), approval_url, '
+                . 'lesson_title, cohort_title. For “third fail remediation” email, prefer remediation_required = 1 '
+                . 'and/or attempt_count = 3 with counts_as_unsat = 1.';
+        }
+        if ($eventKey === 'progress_test_passed') {
+            return 'Typical keys: attempt_count, pass_gate_met (1), score_pct, counts_as_unsat (usually 0), '
+                . 'student_email, lesson_title, cohort_title.';
+        }
+
+        return '';
+    }
+}
+
 if (!function_exists('tap_validate_flow_core')) {
     function tap_validate_flow_core(string $name, string $eventKey, int $priority): void
     {
@@ -948,6 +974,14 @@ if ($tapSelectedFlowId > 0) {
                         <div>
                             <h3 class="tap-section-title" style="margin-bottom:4px;">Conditions</h3>
                             <div class="tap-sub">All conditions must match for the flow to run.</div>
+                            <?php
+                            $tapCtxHelp = tap_theory_automation_context_cheat_sheet((string)($tapSelectedFlow['event_key'] ?? ''));
+                            if ($tapCtxHelp !== ''):
+                            ?>
+                                <div class="tap-help" style="margin-top:10px;padding:10px 12px;border-radius:12px;background:rgba(29,79,137,.08);border:1px solid rgba(29,79,137,.15);line-height:1.45;">
+                                    <strong>Context keys for this event</strong> — <?php echo tap_h($tapCtxHelp); ?>
+                                </div>
+                            <?php endif; ?>
                         </div>
 
                         <form method="post" style="margin:0;">
