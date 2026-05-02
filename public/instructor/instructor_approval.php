@@ -442,7 +442,6 @@ function ia_collect_official_references(PDO $pdo, int $lessonId): array
                 sr.ref_code,
                 sr.ref_title,
                 sr.notes,
-                sr.ref_detail,
                 sr.confidence,
                 s.id AS slide_id,
                 s.title AS slide_title
@@ -465,7 +464,6 @@ function ia_collect_official_references(PDO $pdo, int $lessonId): array
                 sr.ref_code,
                 sr.ref_title,
                 sr.notes,
-                sr.ref_detail,
                 sr.confidence,
                 s.id AS slide_id,
                 s.title AS slide_title
@@ -492,6 +490,31 @@ function ia_collect_official_references(PDO $pdo, int $lessonId): array
             }
         } catch (Throwable $e) {
         }
+    }
+
+    try {
+        $stmt = $pdo->prepare("
+            SELECT DISTINCT
+                'OTHER' AS ref_type,
+                CONCAT('Slide ', COALESCE(NULLIF(s.page_number, 0), s.id)) AS ref_code,
+                COALESCE(NULLIF(s.title, ''), 'Lesson slide (enriched)') AS ref_title,
+                'Linked via slide_enrichment (no formal ref rows on file)' AS notes,
+                0.5 AS confidence,
+                s.id AS slide_id,
+                COALESCE(NULLIF(s.title, ''), CONCAT('Slide ', s.id)) AS slide_title
+            FROM slides s
+            INNER JOIN slide_enrichment se ON se.slide_id = s.id
+            WHERE s.lesson_id = ?
+              AND COALESCE(s.is_deleted, 0) = 0
+            ORDER BY s.page_number ASC, s.id ASC
+            LIMIT 40
+        ");
+        $stmt->execute(array($lessonId));
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        if ($rows) {
+            return $rows;
+        }
+    } catch (Throwable $e) {
     }
 
     return array();
@@ -582,6 +605,57 @@ function ia_build_difficulty_struct(array $attempts, array $attemptItems): array
     }
 
     return array('oral' => $oral, 'gaps' => $gaps);
+}
+
+/**
+ * Turn stored weak-area blobs (often "1. … 2. …" on one line, sometimes prefixed with
+ * "Review these areas:") into separate list items for readable HTML output.
+ *
+ * @param array<int,string> $lines
+ * @return array<int,string>
+ */
+function ia_expand_core_gap_lines(array $lines): array
+{
+    $out = array();
+
+    foreach ($lines as $line) {
+        $line = trim((string)$line);
+        if ($line === '') {
+            continue;
+        }
+
+        $line = preg_replace('/^(review\s+these\s+areas:\s*)+/iu', '', $line);
+        $line = trim((string)$line);
+        if ($line === '') {
+            continue;
+        }
+
+        $parts = preg_split('/(?<!\d)(?=\d{1,3}\.\s)/u', $line);
+        foreach ($parts as $part) {
+            $part = trim((string)$part);
+            if ($part === '') {
+                continue;
+            }
+            $part = preg_replace('/^\d{1,3}\.\s*/u', '', $part);
+            $part = trim((string)$part);
+            if ($part !== '') {
+                $out[] = $part;
+            }
+        }
+    }
+
+    $seen = array();
+    $uniq = array();
+    foreach ($out as $p) {
+        $k = function_exists('mb_strtolower') ? mb_strtolower($p, 'UTF-8') : strtolower($p);
+        if (isset($seen[$k])) {
+            continue;
+        }
+        $seen[$k] = true;
+        $uniq[] = $p;
+    }
+
+    return $uniq;
 }
 
 function ia_group_references(array $references): array
@@ -1343,9 +1417,11 @@ cw_header('Instructor approval');
 .ia-action-note-meta{font-size:11px;font-weight:800;color:#64748b;margin-bottom:8px;line-height:1.45}
 .ia-action-note-body{font-size:13px;line-height:1.6;color:#334155;white-space:pre-wrap}
 .ia-role-caps{margin-top:3px;font-size:10px;font-weight:900;letter-spacing:.12em;color:#64748b;text-transform:uppercase}
-.ia-kv-clickable{cursor:pointer;border-radius:16px;transition:box-shadow .12s ease,transform .08s ease;border:1px solid transparent}
-.ia-kv-clickable:hover{box-shadow:0 8px 22px rgba(15,23,42,.08);transform:translateY(-1px);border-color:rgba(29,79,137,.12)}
-.ia-kv-clickable:focus{outline:2px solid rgba(29,79,137,.35);outline-offset:2px}
+.ia-kv.ia-kv-clickable{cursor:pointer;border:1px solid rgba(15,23,42,.10);border-radius:16px;transition:box-shadow .12s ease,transform .08s ease,border-color .12s ease;background:#fff}
+.ia-kv.ia-kv-clickable:hover{box-shadow:0 8px 22px rgba(15,23,42,.08);transform:translateY(-1px);border-color:rgba(29,79,137,.22)}
+.ia-kv.ia-kv-clickable:focus{outline:2px solid rgba(29,79,137,.35);outline-offset:2px}
+.ia-int-detail-meta{font-size:12px;font-weight:800;color:#64748b;line-height:1.45}
+.ia-int-notes{white-space:pre-wrap;font-size:13px;line-height:1.55;color:#334155}
 .ia-usage-inline{display:flex;align-items:center;gap:12px;width:100%}
 .ia-usage-ratio{min-width:48px;font-size:15px;font-weight:900;color:#102845;text-align:left;flex:0 0 auto}
 .ia-int-table{width:100%;border-collapse:collapse;font-size:11px}
@@ -1354,8 +1430,6 @@ cw_header('Instructor approval');
 .ia-int-toggle-row{cursor:pointer}
 .ia-int-toggle-row:hover td{background:#f8fafc}
 .ia-int-detail-row td{padding:12px 10px;background:#fbfdff;font-size:12px;line-height:1.5}
-.ia-int-detail-meta{color:#64748b;font-weight:800;margin-bottom:8px}
-.ia-int-notes{white-space:pre-wrap;color:#102845}
 .ia-diff-block{margin-top:14px}
 .ia-diff-block h4{margin:0 0 8px 0;font-size:13px;font-weight:900;color:#102845}
 .ia-diff-block ol{margin:6px 0 0 18px;padding:0;color:#334155;font-size:13px;line-height:1.55}
@@ -1520,8 +1594,9 @@ cw_header('Instructor approval');
                 <?php
                 $difficultyOral = (array)($difficultyStruct['oral'] ?? array());
                 $difficultyGaps = (array)($difficultyStruct['gaps'] ?? array());
+                $difficultyGapsDisplay = ia_expand_core_gap_lines($difficultyGaps);
                 ?>
-                <?php if (!$difficultyOral && !$difficultyGaps): ?>
+                <?php if (!$difficultyOral && !$difficultyGapsDisplay): ?>
                     <div class="ia-note-list">
                         <div class="ia-note-row">
                             <span class="ia-note-dot"></span>
@@ -1539,12 +1614,12 @@ cw_header('Instructor approval');
                             </ol>
                         </div>
                     <?php endif; ?>
-                    <?php if ($difficultyGaps): ?>
+                    <?php if ($difficultyGapsDisplay): ?>
                         <div class="ia-diff-block">
                             <p style="margin:0 0 6px 0;font-size:13px;line-height:1.45;color:#102845;"><strong>Core gaps</strong></p>
                             <div style="font-size:12px;color:#64748b;font-weight:700;margin-bottom:6px;">Review these areas:</div>
                             <ol>
-                                <?php foreach ($difficultyGaps as $line): ?>
+                                <?php foreach ($difficultyGapsDisplay as $line): ?>
                                     <li><?php echo ia_h($line); ?></li>
                                 <?php endforeach; ?>
                             </ol>

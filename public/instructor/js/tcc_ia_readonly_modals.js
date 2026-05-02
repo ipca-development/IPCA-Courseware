@@ -516,4 +516,5 @@
     };
     window.closeTccModal = closeTccModal;
     window.generateAiSummaryAnalysisFromButton = generateAiSummaryAnalysisFromButton;
+    window.tccToggleInlineAudio = tccToggleInlineAudio;
 })();
