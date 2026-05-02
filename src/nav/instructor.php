@@ -54,15 +54,6 @@ return [
                 ],
             ],
             [
-                'key' => 'cohort_progress',
-                'label' => 'Cohort Progress',
-                'icon' => 'reviews',
-                'href' => '/instructor/cohort_progress_overview.php',
-                'match_paths' => [
-                    '/instructor/cohort_progress_overview.php',
-                ],
-            ],
-            [
                 'key' => 'summary_reviews',
                 'label' => 'Summary Reviews',
                 'icon' => 'reviews',
