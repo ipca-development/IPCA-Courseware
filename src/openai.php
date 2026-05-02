@@ -11,8 +11,15 @@ function cw_openai_model(): string {
     return getenv('CW_OPENAI_MODEL') ?: 'gpt-5.4';
 }
 
-function cw_openai_responses(array $payload): array {
+function cw_openai_responses(array $payload, int $timeoutSeconds = 90): array {
     $key = cw_openai_key();
+
+    if ($timeoutSeconds < 30) {
+        $timeoutSeconds = 30;
+    }
+    if ($timeoutSeconds > 600) {
+        $timeoutSeconds = 600;
+    }
 
     $ch = curl_init('https://api.openai.com/v1/responses');
     curl_setopt($ch, CURLOPT_POST, true);
@@ -22,7 +29,7 @@ function cw_openai_responses(array $payload): array {
     ]);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 90);
+    curl_setopt($ch, CURLOPT_TIMEOUT, $timeoutSeconds);
 
     $resp = curl_exec($ch);
     $err = curl_error($ch);

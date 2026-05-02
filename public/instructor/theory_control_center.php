@@ -806,6 +806,26 @@ cw_header('Instructor Theory Control Center');
         });
     }
 
+    function openExportStudentSummariesPdf(studentId) {
+        studentId = parseInt(studentId, 10) || parseInt(selectedStudentId, 10) || 0;
+        if (!cohortId || !studentId) {
+            openTccModal('Export PDF Summary', '<div class="tcc-error">Select a cohort and student first.</div>');
+            return;
+        }
+        var url = '/instructor/export_student_lesson_summaries_pdf.php?cohort_id=' + encodeURIComponent(String(cohortId)) + '&student_id=' + encodeURIComponent(String(studentId));
+        window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
+    function openExportStudentTheoryAiReportPdf(studentId) {
+        studentId = parseInt(studentId, 10) || parseInt(selectedStudentId, 10) || 0;
+        if (!cohortId || !studentId) {
+            openTccModal('AI training report', '<div class="tcc-error">Select a cohort and student first.</div>');
+            return;
+        }
+        var url = '/instructor/export_student_theory_ai_report_pdf.php?cohort_id=' + encodeURIComponent(String(cohortId)) + '&student_id=' + encodeURIComponent(String(studentId));
+        window.open(url, '_blank', 'noopener,noreferrer');
+    }
+
     function openSystemWatchForStudent(studentId) {
         studentId = parseInt(studentId, 10) || selectedStudentId;
         if (!cohortId || !studentId) {
@@ -1198,6 +1218,8 @@ cw_header('Instructor Theory Control Center');
         return '<div class="tcc-li-toolbar">' +
             '<button type="button" class="tcc-btn primary active" id="liBtnLessons" onclick="switchStudentDeepTab(\'lessons\')">Lessons</button>' +
             '<button type="button" class="tcc-btn secondary" id="liBtnInterventions" onclick="switchStudentDeepTab(\'audit\')">Interventions</button>' +
+            '<button type="button" class="tcc-btn secondary" onclick="openExportStudentSummariesPdf(' + sidNum + ')" title="Same PDF layout as the student Theory Training Summary export">Export PDF Summary</button>' +
+            '<button type="button" class="tcc-btn secondary" onclick="openExportStudentTheoryAiReportPdf(' + sidNum + ')" title="AI-generated focus &amp; study report with 61.105 sign-off sheet (may take up to a few minutes)">AI training report (PDF)</button>' +
             '<button type="button" class="tcc-btn warn" onclick="openSystemWatchForStudent(' + sidNum + ')">System Watch</button>' +
             '</div>' +
             '<div id="deepPaneLessons" class="tcc-li-pane" style="display:block">' +
@@ -2297,6 +2319,8 @@ cw_header('Instructor Theory Control Center');
     window.closeTccModal = closeTccModal;
     window.openDebugReport = openDebugReport;
     window.openSystemWatchForStudent = openSystemWatchForStudent;
+    window.openExportStudentSummariesPdf = openExportStudentSummariesPdf;
+    window.openExportStudentTheoryAiReportPdf = openExportStudentTheoryAiReportPdf;
     window.openLessonSummary = openLessonSummary;
     window.generateAiSummaryAnalysis = generateAiSummaryAnalysis;
     window.openAttemptDetails = openAttemptDetails;
