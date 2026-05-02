@@ -174,6 +174,78 @@ function ia_decision_code_label(string $code): string
     };
 }
 
+function ia_avatar_initials(string $name): string
+{
+    $name = trim($name);
+    if ($name === '') {
+        return 'S';
+    }
+
+    $parts = preg_split('/\s+/u', $name) ?: array();
+    $parts = array_values(array_filter($parts, static fn($p): bool => trim((string)$p) !== ''));
+    $sub = static function (string $s, int $start, int $len): string {
+        if (function_exists('mb_substr')) {
+            return (string)mb_substr($s, $start, $len, 'UTF-8');
+        }
+
+        return substr($s, $start, $len);
+    };
+
+    if (count($parts) >= 2) {
+        $a = strtoupper($sub($parts[0], 0, 1));
+        $b = strtoupper($sub($parts[count($parts) - 1], 0, 1));
+
+        return $a . $b;
+    }
+
+    return strtoupper($sub($parts[0] ?? $name, 0, 2));
+}
+
+function ia_tcc_radar_color_student(array $activity, array $action, bool $deadlinePassed): string
+{
+    $cs = (string)($activity['completion_status'] ?? '');
+
+    if (!empty($activity['training_suspended']) || $cs === 'training_suspended' || $cs === 'deadline_blocked') {
+        return 'red';
+    }
+    if ($deadlinePassed && $cs !== 'completed') {
+        return 'red';
+    }
+    if (in_array((string)($action['status'] ?? ''), array('pending', 'opened'), true)) {
+        return 'blue';
+    }
+    if (in_array($cs, array(
+        'remediation_required',
+        'instructor_required',
+        'summary_required',
+        'awaiting_summary_review',
+        'awaiting_test_completion',
+    ), true)) {
+        return 'orange';
+    }
+
+    return 'green';
+}
+
+function ia_tcc_avatar_markup(array $user, string $displayName, string $radarColor): string
+{
+    $photoPath = trim((string)($user['photo_path'] ?? ''));
+    $san = preg_replace('/[^a-z]/', '', strtolower($radarColor));
+    $radarColor = is_string($san) ? $san : '';
+    if ($radarColor === '' || !in_array($radarColor, array('green', 'orange', 'red', 'blue', 'purple'), true)) {
+        $radarColor = 'green';
+    }
+
+    $cls = 'tcc-avatar ' . $radarColor;
+    $initials = ia_avatar_initials($displayName);
+
+    if ($photoPath !== '') {
+        return '<div class="' . ia_h($cls) . '"><span class="tcc-avatar-inner"><img src="' . ia_h($photoPath) . '" alt="' . ia_h($displayName) . '"></span></div>';
+    }
+
+    return '<div class="' . ia_h($cls) . '"><span class="tcc-avatar-inner">' . ia_h($initials) . '</span></div>';
+}
+
 function ia_collect_instructor_interventions(PDO $pdo, int $userId, int $cohortId, int $lessonId): array
 {
     $stmt = $pdo->prepare("
@@ -287,6 +359,11 @@ function ia_collect_attempt_history(PDO $pdo, int $userId, int $cohortId, int $l
         WHERE pt.user_id = ?
           AND pt.cohort_id = ?
           AND pt.lesson_id = ?
+          AND NOT (
+              COALESCE(pt.formal_result_code, '') = 'STALE_ABORTED'
+              AND COALESCE(pt.counts_as_unsat, 0) = 0
+              AND COALESCE(pt.pass_gate_met, 0) = 0
+          )
         ORDER BY pt.attempt DESC, pt.id DESC
     ");
     $stmt->execute(array($userId, $cohortId, $lessonId));
@@ -844,17 +921,31 @@ if ($scheduledOneOnOneInstructorId > 0) {
 $lessonSummary = array();
 try {
     $summaryStmt = $pdo->prepare("
-        SELECT *
-        FROM lesson_summaries
-        WHERE user_id = ?
-          AND cohort_id = ?
-          AND lesson_id = ?
+        SELECT
+            ls.*,
+            ru.name AS reviewed_by_name,
+            ru.first_name AS reviewed_by_first_name,
+            ru.last_name AS reviewed_by_last_name
+        FROM lesson_summaries ls
+        LEFT JOIN users ru
+            ON ru.id = ls.reviewed_by_user_id
+        WHERE ls.user_id = ?
+          AND ls.cohort_id = ?
+          AND ls.lesson_id = ?
         LIMIT 1
     ");
     $summaryStmt->execute(array($studentUserId, $cohortId, $lessonId));
     $lessonSummary = $summaryStmt->fetch(PDO::FETCH_ASSOC) ?: array();
 } catch (Throwable $e) {
     $lessonSummary = array();
+}
+
+$reviewedByDisplayName = trim((string)($lessonSummary['reviewed_by_name'] ?? ''));
+if ($reviewedByDisplayName === '') {
+    $reviewedByDisplayName = trim((string)($lessonSummary['reviewed_by_first_name'] ?? '') . ' ' . (string)($lessonSummary['reviewed_by_last_name'] ?? ''));
+}
+if ($reviewedByDisplayName === '' && !empty($lessonSummary['reviewed_by_user_id'])) {
+    $reviewedByDisplayName = 'Instructor #' . (int)$lessonSummary['reviewed_by_user_id'];
 }
 
 $attemptHistory = ia_collect_attempt_history($pdo, $studentUserId, $cohortId, $lessonId);
@@ -879,7 +970,6 @@ $latestScore = isset($latestProgressTest['score_pct']) && $latestProgressTest['s
 $latestResultCode = trim((string)($latestProgressTest['formal_result_code'] ?? ''));
 $latestResultLabel = trim((string)($latestProgressTest['formal_result_label'] ?? ''));
 
-$attemptCount = count($attemptHistory);
 $bestScore = null;
 foreach ($attemptHistory as $attemptRow) {
     if (isset($attemptRow['score_pct']) && $attemptRow['score_pct'] !== null) {
@@ -892,6 +982,66 @@ foreach ($attemptHistory as $attemptRow) {
 
 $decisionOptions = ia_decision_ui_options();
 $completionStatusUi = ia_human_completion_status((string)($activity['completion_status'] ?? ''));
+
+$studentRadarColor = ia_tcc_radar_color_student($activity, $action, $deadlinePassedForUi);
+
+$policy = $engine->resolveEffectivePolicySet($cohortId);
+$behaviorMode = $engine->resolveBehaviorMode($policy);
+$attemptState = $engine->resolveAttemptPolicyState($studentUserId, $cohortId, $lessonId, $policy, null, $behaviorMode);
+$attemptUsed = (int)($attemptState['current_attempt_number'] ?? 0);
+$attemptCap = max(1, (int)($attemptState['effective_allowed_attempts'] ?? 1));
+$attemptBarPct = min(100, (int)round(100 * $attemptUsed / $attemptCap));
+$attemptBarCls = 'ok';
+if ($attemptUsed >= $attemptCap) {
+    $attemptBarCls = 'danger';
+} elseif ($attemptCap > 1 && $attemptUsed >= $attemptCap - 1) {
+    $attemptBarCls = 'warn';
+} elseif ($attemptBarPct >= 70) {
+    $attemptBarCls = 'warn';
+}
+$attemptSubParts = array($attemptUsed . ' of ' . $attemptCap . ' attempts used');
+$grantedPolicyExtras = (int)($attemptState['instructor_granted_extra_attempts'] ?? 0);
+if ($grantedPolicyExtras > 0) {
+    $attemptSubParts[] = 'including +' . $grantedPolicyExtras . ' granted extra';
+}
+$attemptSubLine = implode(' · ', $attemptSubParts);
+
+$decisionByUser = array();
+$decisionById = (int)($action['decision_by_user_id'] ?? 0);
+if ($decisionById > 0) {
+    try {
+        $decByStmt = $pdo->prepare("
+            SELECT id, name, first_name, last_name, email
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $decByStmt->execute(array($decisionById));
+        $decisionByUser = $decByStmt->fetch(PDO::FETCH_ASSOC) ?: array();
+    } catch (Throwable $e) {
+        $decisionByUser = array();
+    }
+}
+$decisionByDisplayName = trim((string)($decisionByUser['name'] ?? ''));
+if ($decisionByDisplayName === '') {
+    $decisionByDisplayName = trim((string)($decisionByUser['first_name'] ?? '') . ' ' . (string)($decisionByUser['last_name'] ?? ''));
+}
+if ($decisionByDisplayName === '') {
+    $decisionByDisplayName = $decisionById > 0 ? 'User #' . $decisionById : '';
+}
+
+$latestActivityUtc = trim((string)($latestProgressTest['completed_at'] ?? ''));
+if ($latestActivityUtc === '') {
+    $latestActivityUtc = trim((string)($latestProgressTest['updated_at'] ?? ''));
+}
+if ($latestActivityUtc === '') {
+    $latestActivityUtc = trim((string)($activity['last_state_eval_at'] ?? ''));
+}
+$latestActivityCohortTz = $latestActivityUtc !== ''
+    ? cw_dt_cohort_tz($latestActivityUtc, $pdo, $cohortId, $studentUserId)
+    : '—';
+
+$lessonTitleForSections = trim((string)($state['lesson_title'] ?? ''));
 
 $iaBackToTccHref = '/instructor/theory_control_center.php';
 if ($cohortId > 0) {
@@ -1058,6 +1208,28 @@ cw_header('Instructor approval');
     .ia-override-grid{grid-template-columns:1fr}
     .ia-detail-grid{grid-template-columns:1fr}
 }
+/* Theory Control Center queue avatar + meta + attempt mini-bar (mirrored for consistency) */
+.ia-tcc-people-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:20px 32px}
+.ia-tcc-person{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 260px}
+.tcc-avatar-inner{position:relative;width:40px;height:40px;border-radius:999px;display:flex;align-items:center;justify-content:center;overflow:hidden;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff;font-weight:900;font-size:13px}
+.tcc-avatar-inner img{width:100%;height:100%;object-fit:cover;display:block}
+.tcc-avatar{width:44px;height:44px;border-radius:50%;background:#12355f;color:#fff;display:flex;align-items:center;justify-content:center;font-weight:900;flex:0 0 auto;overflow:hidden;border:3px solid #dbe7f4}
+.tcc-avatar.green{border-color:#16a34a}
+.tcc-avatar.orange{border-color:#f59e0b}
+.tcc-avatar.red{border-color:#dc2626}
+.tcc-avatar.blue{border-color:#2563eb}
+.tcc-avatar.purple{border-color:#7c3aed}
+.tcc-meta{display:flex;flex-direction:column;min-width:0}
+.tcc-name{font-weight:900;color:#102845;line-height:1.25}
+.tcc-sub{font-size:12px;color:#64748b;line-height:1.35;overflow:hidden;text-overflow:ellipsis}
+.tcc-mini-bar{height:9px;border-radius:999px;background:#e5eef7;overflow:hidden;margin-top:4px}
+.tcc-mini-bar span{display:block;height:100%;border-radius:999px;background:linear-gradient(90deg,#12355f 0%,#2b6dcc 100%)}
+.tcc-mini-bar span.ok{background:linear-gradient(90deg,#166534 0%,#22c55e 100%)}
+.tcc-mini-bar span.warn{background:linear-gradient(90deg,#d97706 0%,#f59e0b 100%)}
+.tcc-mini-bar span.danger{background:linear-gradient(90deg,#b91c1c 0%,#ef4444 100%)}
+.ia-action-note{margin-top:14px;padding:14px;border-radius:16px;border:1px solid rgba(15,23,42,.06);background:#fff}
+.ia-action-note-meta{font-size:11px;font-weight:800;color:#64748b;margin-bottom:8px;line-height:1.45}
+.ia-action-note-body{font-size:13px;line-height:1.6;color:#334155;white-space:pre-wrap}
 </style>
 
 <div class="ia-page">
@@ -1078,12 +1250,12 @@ cw_header('Instructor approval');
     <?php endif; ?>
 
     <section class="card ia-hero">
-        <div class="ia-eyebrow">Instructor Platform · Theory progression</div>
-        <h1 class="ia-title">Instructor approval</h1>
+        <div class="ia-eyebrow">INSTRUCTOR WORKSPACE · Instructor Approval</div>
+        <h1 class="ia-title">Instructor Approval</h1>
 
         <div class="ia-chip-row">
-            <span class="ia-chip info"><?php echo ia_h((string)($state['cohort_title'] ?? '')); ?></span>
-            <span class="ia-chip info"><?php echo ia_h((string)($state['lesson_title'] ?? '')); ?></span>
+            <span class="ia-chip info">Cohort: <?php echo ia_h((string)($state['cohort_title'] ?? '')); ?></span>
+            <span class="ia-chip info">Lesson: <?php echo ia_h((string)($state['lesson_title'] ?? '')); ?></span>
             <span class="ia-chip <?php echo ia_h((string)($action['status'] ?? '') === 'approved' ? 'ok' : 'warning'); ?>">
                 Action: <?php echo ia_h((string)($action['status'] ?? '')); ?>
             </span>
@@ -1101,36 +1273,34 @@ cw_header('Instructor approval');
         <div style="display:flex;flex-direction:column;gap:18px;">
 
             <section class="card ia-card">
-                <div class="ia-student-top">
-                    <div class="ia-person">
-                        <?php echo ia_avatar_html($studentUser, $studentName, 84); ?>
-                        <div class="ia-person-copy">
-                            <div class="ia-person-role">Student</div>
-                            <div class="ia-person-name"><?php echo ia_h($studentName); ?></div>
-                            <div class="ia-person-sub">
-                                Lesson: <strong><?php echo ia_h((string)($state['lesson_title'] ?? '')); ?></strong><br>
-                                Cohort: <strong><?php echo ia_h((string)($state['cohort_title'] ?? '')); ?></strong><br>
-                                Email: <strong><?php echo ia_h((string)($studentUser['email'] ?? '—')); ?></strong>
-                            </div>
-                        </div>
+                <div class="ia-tcc-people-row">
+                    <div class="ia-tcc-person">
+                        <?php echo ia_tcc_avatar_markup($studentUser, $studentName, $studentRadarColor); ?>
+                        <span class="tcc-meta">
+                            <span class="tcc-name"><?php echo ia_h($studentName); ?></span>
+                            <span class="tcc-sub"><?php echo ia_h((string)($studentUser['email'] ?? '—')); ?></span>
+                        </span>
                     </div>
-
-                    <div class="ia-chief-card">
-                        <?php echo ia_avatar_html($chiefUser, $chiefName, 56); ?>
-                        <div class="ia-chief-copy">
-                            <div class="ia-chief-label">Chief Instructor</div>
-                            <div class="ia-chief-name"><?php echo ia_h($chiefName); ?></div>
-                            <div class="ia-chief-sub"><?php echo ia_h((string)($chiefUser['email'] ?? 'Configured from policy')); ?></div>
-                        </div>
+                    <div class="ia-tcc-person">
+                        <?php echo ia_tcc_avatar_markup($chiefUser, $chiefName, 'green'); ?>
+                        <span class="tcc-meta">
+                            <span class="tcc-name"><?php echo ia_h($chiefName); ?></span>
+                            <span class="tcc-sub"><?php echo ia_h((string)($chiefUser['email'] ?? '') !== '' ? (string)$chiefUser['email'] : '—'); ?></span>
+                        </span>
                     </div>
                 </div>
 
                 <div style="margin-top:18px;">
-                    <div class="ia-section-title">Current Operational State</div>
+                    <div class="ia-section-title">
+                        Progress Test<?php echo $lessonTitleForSections !== '' ? ' - ' . ia_h($lessonTitleForSections) : ''; ?>
+                    </div>
                     <div class="ia-kv-grid">
                         <div class="ia-kv">
-                            <div class="ia-kv-label">Attempt Count</div>
-                            <div class="ia-kv-value"><?php echo $attemptCount; ?></div>
+                            <div class="ia-kv-label">Attempt usage</div>
+                            <div class="ia-kv-value" style="font-size:15px;font-weight:700;">
+                                <div class="tcc-mini-bar"><span class="<?php echo ia_h($attemptBarCls); ?>" style="width:<?php echo (int)$attemptBarPct; ?>%;"></span></div>
+                                <div style="margin-top:10px;font-size:12px;color:#64748b;font-weight:700;line-height:1.45;"><?php echo ia_h($attemptSubLine); ?></div>
+                            </div>
                         </div>
 
                         <div class="ia-kv">
@@ -1203,7 +1373,7 @@ cw_header('Instructor approval');
                         <div class="ia-kv">
                             <div class="ia-kv-label">Latest Activity</div>
                             <div class="ia-kv-value">
-                                <span class="ia-small-status info"><?php echo ia_h(ia_format_datetime_utc((string)($latestProgressTest['completed_at'] ?? $latestProgressTest['updated_at'] ?? ''))); ?></span>
+                                <span class="ia-small-status info"><?php echo ia_h($latestActivityCohortTz); ?></span>
                             </div>
                         </div>
                     </div>
@@ -1366,14 +1536,47 @@ cw_header('Instructor approval');
                     <?php endif; ?>
                 </div>
 
+                <?php
+                $summaryInstructorNotes = trim((string)($lessonSummary['review_notes_by_instructor'] ?? ''));
+                $summaryNotesUpdatedUtc = trim((string)($lessonSummary['updated_at'] ?? ''));
+                $summaryNotesWhen = $summaryNotesUpdatedUtc !== ''
+                    ? cw_dt_cohort_tz($summaryNotesUpdatedUtc, $pdo, $cohortId, $studentUserId)
+                    : '—';
+                ?>
+                <?php if ($summaryInstructorNotes !== ''): ?>
+                    <div class="ia-action-note">
+                        <div class="ia-action-note-meta">
+                            Lesson summary — instructor notes
+                            <?php if ($reviewedByDisplayName !== ''): ?>
+                                · <?php echo ia_h($reviewedByDisplayName); ?>
+                            <?php endif; ?>
+                            · <?php echo ia_h($summaryNotesWhen); ?>
+                        </div>
+                        <div class="ia-action-note-body"><?php echo ia_h($summaryInstructorNotes); ?></div>
+                    </div>
+                <?php endif; ?>
+
                 <?php if (trim((string)($action['decision_notes'] ?? '')) !== ''): ?>
-                    <div style="margin-top:14px;padding:14px;border-radius:16px;border:1px solid rgba(15,23,42,.06);background:#fff;">
-                        <div class="ia-label" style="margin-bottom:8px;">Recorded Instructor Notes</div>
-                        <div style="font-size:13px;line-height:1.6;color:#334155;white-space:pre-wrap;"><?php echo ia_h((string)$action['decision_notes']); ?></div>
+                    <div class="ia-action-note">
+                        <div class="ia-action-note-meta">
+                            Formal decision notes
+                            <?php if ($decisionByDisplayName !== ''): ?>
+                                · <?php echo ia_h($decisionByDisplayName); ?>
+                            <?php endif; ?>
+                            <?php
+                            $decisionAtUtc = trim((string)($action['decision_at'] ?? ''));
+                            $decisionWhen = $decisionAtUtc !== ''
+                                ? cw_dt_cohort_tz($decisionAtUtc, $pdo, $cohortId, $studentUserId)
+                                : '—';
+                            ?>
+                            · <?php echo ia_h($decisionWhen); ?>
+                        </div>
+                        <div class="ia-action-note-body"><?php echo ia_h((string)$action['decision_notes']); ?></div>
                     </div>
                 <?php endif; ?>
             </section>
 
+            <?php if ((string)($action['status'] ?? '') !== 'approved'): ?>
             <section class="card ia-actions-card">
                 <div class="ia-section-title">Record Instructor Decision</div>
 
@@ -1386,7 +1589,6 @@ cw_header('Instructor approval');
                     <?php endforeach; ?>
                 </div>
 
-                <?php if ((string)($action['status'] ?? '') !== 'approved'): ?>
                     <form method="post" id="ia-decision-form">
                         <input type="hidden" name="page_action" value="record_decision">
 
@@ -1504,12 +1706,8 @@ cw_header('Instructor approval');
                             <button type="submit" class="ia-btn">Record Instructor Decision</button>
                         </div>
                     </form>
-                <?php else: ?>
-                    <div style="font-size:13px;line-height:1.6;color:#64748b;">
-                        This instructor approval action has already been approved. You can still review the historical data and mark the one-on-one completion if it is still pending.
-                    </div>
-                <?php endif; ?>
             </section>
+            <?php endif; ?>
 
             <?php if (
                 (string)($action['status'] ?? '') === 'approved'
