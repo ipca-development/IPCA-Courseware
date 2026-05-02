@@ -3303,6 +3303,68 @@ public function processInstructorApprovalDecision(int $requiredActionId, array $
     ];
 }
 
+    /**
+     * Re-dispatch automation for instructor_decision_recorded using the stored decision payload.
+     * Used when an instructor manually re-sends notification emails from the approval page.
+     */
+    public function resendInstructorDecisionRecordedAutomationEmails(int $requiredActionId, int $actorUserId): array
+    {
+        $action = $this->getRequiredActionById($requiredActionId);
+        if (!$action) {
+            throw new RuntimeException('Required action not found.');
+        }
+        if ((string)($action['action_type'] ?? '') !== 'instructor_approval') {
+            throw new RuntimeException('Required action is not instructor_approval.');
+        }
+        if ((string)($action['status'] ?? '') !== 'approved') {
+            throw new RuntimeException('Decision must be recorded before resending notification emails.');
+        }
+
+        $raw = trim((string)($action['decision_payload_json'] ?? ''));
+        if ($raw === '') {
+            throw new RuntimeException('No stored decision payload is available to resend emails.');
+        }
+
+        $decoded = json_decode($raw, true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Unable to read stored decision payload.');
+        }
+
+        $activity = $this->getLessonActivityProjectionRow(
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id']
+        ) ?? [];
+
+        $projectionFields = array(
+            'completion_status' => (string)($activity['completion_status'] ?? ''),
+            'one_on_one_completed' => (int)($activity['one_on_one_completed'] ?? 0),
+            'granted_extra_attempts' => (int)($activity['granted_extra_attempts'] ?? 0),
+            'one_on_one_required' => (int)($activity['one_on_one_required'] ?? 0),
+            'training_suspended' => (int)($activity['training_suspended'] ?? 0),
+        );
+
+        $automationContext = $this->buildInstructorDecisionAutomationContext(
+            $action,
+            $decoded,
+            $projectionFields
+        );
+
+        $automationResult = $this->dispatchAutomationEventIfAvailable(
+            'instructor_decision_recorded',
+            $automationContext,
+            (int)$action['user_id'],
+            (int)$action['cohort_id'],
+            (int)$action['lesson_id'],
+            isset($action['progress_test_id']) ? (int)$action['progress_test_id'] : null
+        );
+
+        return array(
+            'message' => 'Instructor decision notification emails were dispatched again through automation.',
+            'automation_result' => $automationResult,
+        );
+    }
+
     public function getInstructorApprovalPageStateByToken(string $token): ?array
     {
         $action = $this->getRequiredActionByToken($token);
