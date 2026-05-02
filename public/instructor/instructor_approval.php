@@ -1243,13 +1243,18 @@ cw_header('Instructor approval');
     padding:20px 22px;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff;overflow:hidden;
     border-radius:22px;border:1px solid rgba(15,23,42,.08);box-shadow:0 14px 30px rgba(15,23,42,.06);
 }
-.ia-hero-banner-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-end;flex-wrap:wrap}
-.ia-hero-banner-main{min-width:0;flex:1 1 320px}
+.ia-hero-banner-head{display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap}
+.ia-hero-banner-main{min-width:0;flex:1 1 280px}
+.ia-hero-banner-actions{flex:0 0 auto;padding-top:2px}
+.ia-hero-back-btn{
+    display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 18px;border-radius:12px;
+    font-size:13px;font-weight:900;text-decoration:none;white-space:nowrap;
+    background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.32);
+}
+.ia-hero-back-btn:hover{background:rgba(255,255,255,.22);color:#fff}
 .ia-hero-banner-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;font-weight:900;color:rgba(255,255,255,.72)}
 .ia-hero-banner h1{margin:6px 0 0;font-size:30px;line-height:1.02;letter-spacing:-.04em;color:#fff;font-weight:900}
 .ia-hero-banner-sub{margin-top:8px;font-size:13px;line-height:1.55;color:rgba(255,255,255,.84);max-width:860px}
-.ia-hero-banner-back{display:inline-block;margin-top:10px;font-size:12px;font-weight:800;color:rgba(255,255,255,.92);text-decoration:underline;text-underline-offset:3px}
-.ia-hero-banner-back:hover{color:#fff}
 .ia-hero-banner-chips{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
 .ia-chip--hero{
     display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:0 10px;border-radius:999px;
@@ -1397,6 +1402,8 @@ cw_header('Instructor approval');
 }
 @media (max-width:1100px){
     .ia-hero-banner-head{flex-direction:column;align-items:stretch}
+    .ia-hero-banner-actions{padding-top:4px;width:100%}
+    .ia-hero-back-btn{width:100%;justify-content:center}
 }
 @media (max-width:700px){
     .ia-hero-banner{padding:18px}
@@ -1451,7 +1458,9 @@ cw_header('Instructor approval');
                 <p class="ia-hero-banner-sub">
                     Record the formal approval decision here. To select multiple open items and run cohort-safe bulk actions (for example the instructor-approval queue mode), use the Needs My Action section on the Control Center.
                 </p>
-                <a class="ia-hero-banner-back" href="<?php echo ia_h($iaBackToTccHref); ?>">← Instructor Theory Control Center</a>
+            </div>
+            <div class="ia-hero-banner-actions">
+                <a class="ia-hero-back-btn" href="<?php echo ia_h($iaBackToTccHref); ?>">Back</a>
             </div>
         </div>
         <div class="ia-hero-banner-chips">
@@ -1636,55 +1645,6 @@ cw_header('Instructor approval');
                             </ol>
                         </div>
                     <?php endif; ?>
-                <?php endif; ?>
-            </section>
-
-            <section class="card ia-card">
-                <div class="ia-section-title">Official References Requiring Attention</div>
-
-                <?php if (!$officialReferences): ?>
-                    <div class="ia-note-list">
-                        <div class="ia-note-row">
-                            <span class="ia-note-dot"></span>
-                            <span>No official reference rows were found for this lesson.</span>
-                        </div>
-                    </div>
-                <?php else: ?>
-                    <div class="ia-reference-groups">
-                        <?php foreach ($groupedReferences as $groupName => $rows): ?>
-                            <?php if (!$rows): continue; endif; ?>
-                            <div class="ia-reference-group">
-                                <div class="ia-reference-head">
-                                    <div class="ia-reference-title"><?php echo ia_h($groupName); ?></div>
-                                </div>
-                                <div class="ia-reference-list">
-                                    <?php foreach ($rows as $ref): ?>
-                                        <?php
-                                        $copyText = trim((string)($ref['ref_type'] ?? ''))
-                                            . ' | '
-                                            . trim((string)($ref['ref_code'] ?? ''))
-                                            . ' | '
-                                            . trim((string)($ref['ref_title'] ?? ''))
-                                            . ' | Slide '
-                                            . (int)($ref['slide_id'] ?? 0)
-                                            . ' | '
-                                            . trim((string)($ref['slide_title'] ?? ''));
-                                        ?>
-                                        <span class="ia-ref-pill">
-                                            <?php echo ia_h(trim((string)($ref['ref_code'] ?? '')) !== '' ? (string)$ref['ref_code'] : $groupName); ?>
-                                            <?php if (trim((string)($ref['ref_title'] ?? '')) !== ''): ?>
-                                                · <?php echo ia_h((string)$ref['ref_title']); ?>
-                                            <?php endif; ?>
-                                            <?php if (trim((string)($ref['slide_title'] ?? '')) !== ''): ?>
-                                                · Slide: <?php echo ia_h((string)$ref['slide_title']); ?>
-                                            <?php endif; ?>
-                                            <button type="button" class="ia-ref-copy" data-copy="<?php echo ia_h($copyText); ?>">Copy</button>
-                                        </span>
-                                    <?php endforeach; ?>
-                                </div>
-                            </div>
-                        <?php endforeach; ?>
-                    </div>
                 <?php endif; ?>
             </section>
 
@@ -1944,6 +1904,55 @@ cw_header('Instructor approval');
                     </form>
                 </section>
             <?php endif; ?>
+
+            <section class="card ia-card">
+                <div class="ia-section-title">Official References Requiring Attention</div>
+
+                <?php if (!$officialReferences): ?>
+                    <div class="ia-note-list">
+                        <div class="ia-note-row">
+                            <span class="ia-note-dot"></span>
+                            <span>No official reference rows were found for this lesson.</span>
+                        </div>
+                    </div>
+                <?php else: ?>
+                    <div class="ia-reference-groups">
+                        <?php foreach ($groupedReferences as $groupName => $rows): ?>
+                            <?php if (!$rows): continue; endif; ?>
+                            <div class="ia-reference-group">
+                                <div class="ia-reference-head">
+                                    <div class="ia-reference-title"><?php echo ia_h($groupName); ?></div>
+                                </div>
+                                <div class="ia-reference-list">
+                                    <?php foreach ($rows as $ref): ?>
+                                        <?php
+                                        $copyText = trim((string)($ref['ref_type'] ?? ''))
+                                            . ' | '
+                                            . trim((string)($ref['ref_code'] ?? ''))
+                                            . ' | '
+                                            . trim((string)($ref['ref_title'] ?? ''))
+                                            . ' | Slide '
+                                            . (int)($ref['slide_id'] ?? 0)
+                                            . ' | '
+                                            . trim((string)($ref['slide_title'] ?? ''));
+                                        ?>
+                                        <span class="ia-ref-pill">
+                                            <?php echo ia_h(trim((string)($ref['ref_code'] ?? '')) !== '' ? (string)$ref['ref_code'] : $groupName); ?>
+                                            <?php if (trim((string)($ref['ref_title'] ?? '')) !== ''): ?>
+                                                · <?php echo ia_h((string)$ref['ref_title']); ?>
+                                            <?php endif; ?>
+                                            <?php if (trim((string)($ref['slide_title'] ?? '')) !== ''): ?>
+                                                · Slide: <?php echo ia_h((string)$ref['slide_title']); ?>
+                                            <?php endif; ?>
+                                            <button type="button" class="ia-ref-copy" data-copy="<?php echo ia_h($copyText); ?>">Copy</button>
+                                        </span>
+                                    <?php endforeach; ?>
+                                </div>
+                            </div>
+                        <?php endforeach; ?>
+                    </div>
+                <?php endif; ?>
+            </section>
 
         </div>
 

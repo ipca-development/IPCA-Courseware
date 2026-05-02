@@ -201,6 +201,8 @@ cw_header('Instructor Theory Control Center');
     var selectedStudentId = 0;
     var studentAuditTimelineCache = null;
     var studentAuditTimelineCacheStudentId = 0;
+    var auditTimelineNextOffset = 0;
+    var auditTimelineHasMore = false;
     var pendingAuditHighlightLessonId = 0;
     var cohortStudents = [];
     var queueItemsById = {};
@@ -238,6 +240,9 @@ cw_header('Instructor Theory Control Center');
         var liInner = document.getElementById('lessonInterventionsInner');
         if (liInner) liInner.innerHTML = '';
         document.getElementById('studentPanelCount').textContent = 'Select student';
+        auditTimelineNextOffset = 0;
+        auditTimelineHasMore = false;
+        window.auditTimelineMergedTotal = 0;
     }
 
     function escapeHtml(value) {
@@ -1088,9 +1093,9 @@ cw_header('Instructor Theory Control Center');
     }
 
     function auditApplyFiltersAndSort(rows) {
-        var sortOrder = (document.getElementById('auditSortOrder') && document.getElementById('auditSortOrder').value) || 'asc';
+        var sortOrder = (document.getElementById('auditSortOrder') && document.getElementById('auditSortOrder').value) || 'desc';
         var sortMode = (document.getElementById('auditSortMode') && document.getElementById('auditSortMode').value) || 'date';
-        var preset = (document.getElementById('auditDatePreset') && document.getElementById('auditDatePreset').value) || 'all';
+        var preset = (document.getElementById('auditDatePreset') && document.getElementById('auditDatePreset').value) || 'last7';
         var mailOn = !document.getElementById('auditToggleMail') || document.getElementById('auditToggleMail').checked;
         var reqOn = !document.getElementById('auditToggleReq') || document.getElementById('auditToggleReq').checked;
         var dlOn = !document.getElementById('auditToggleDl') || document.getElementById('auditToggleDl').checked;
@@ -1131,7 +1136,10 @@ cw_header('Instructor Theory Control Center');
         var body = document.getElementById('studentAuditBody');
         var engBody = document.getElementById('studentEngineEventsBody');
         var pill = document.getElementById('auditCountPill');
-        if (pill) pill.textContent = mainList.length + ' shown · ' + engineRows.length + ' engine';
+        if (pill) {
+            var inRange = typeof window.auditTimelineMergedTotal === 'number' ? window.auditTimelineMergedTotal : '—';
+            pill.textContent = mainList.length + ' shown · ' + engineRows.length + ' engine · ' + inRange + ' in range';
+        }
         if (body) body.innerHTML = renderAuditRows(mainList, true);
         if (engBody) engBody.innerHTML = renderAuditRows(engList, false);
         if (pendingAuditHighlightLessonId > 0) {
@@ -1150,6 +1158,10 @@ cw_header('Instructor Theory Control Center');
         var t = e.target;
         if (!t || !t.classList || !t.classList.contains('tcc-audit-control')) return;
         if (!t.closest || !t.closest('#tccLessonInterventionsSection')) return;
+        if (t.id === 'auditDatePreset') {
+            loadStudentInterventionsAudit();
+            return;
+        }
         refreshAuditView();
     });
 
@@ -1166,9 +1178,9 @@ cw_header('Instructor Theory Control Center');
             '</div></div>' +
             '<div id="deepPaneAudit" class="tcc-li-pane" style="display:none">' +
             '<div class="tcc-audit-controls-grid">' +
-            '<div class="tcc-audit-field"><label for="auditSortOrder">Sort direction</label><select id="auditSortOrder" class="tcc-audit-control"><option value="asc">Oldest first</option><option value="desc">Newest first</option></select></div>' +
+            '<div class="tcc-audit-field"><label for="auditSortOrder">Sort direction</label><select id="auditSortOrder" class="tcc-audit-control"><option value="desc" selected>Newest first</option><option value="asc">Oldest first</option></select></div>' +
             '<div class="tcc-audit-field"><label for="auditSortMode">Sort by</label><select id="auditSortMode" class="tcc-audit-control"><option value="date">Date / time</option><option value="course">Course, then lesson</option></select></div>' +
-            '<div class="tcc-audit-field"><label for="auditDatePreset">Date range</label><select id="auditDatePreset" class="tcc-audit-control"><option value="all">All time</option><option value="today">Today</option><option value="last7">Last 7 days</option><option value="last30">Last 30 days</option><option value="mtd">Month to date</option><option value="prev_month">Previous calendar month</option></select></div>' +
+            '<div class="tcc-audit-field"><label for="auditDatePreset">Date range</label><select id="auditDatePreset" class="tcc-audit-control"><option value="all">All time</option><option value="today">Today</option><option value="last7" selected>Last 7 days</option><option value="last30">Last 30 days</option><option value="mtd">Month to date</option><option value="prev_month">Previous calendar month</option></select></div>' +
             '</div>' +
             '<div class="tcc-audit-toggles">' +
             '<label><input type="checkbox" id="auditToggleMail" class="tcc-audit-control" checked> Emails</label>' +
@@ -1177,6 +1189,7 @@ cw_header('Instructor Theory Control Center');
             '</div>' +
             '<div class="tcc-lesson-timeline-head" style="margin-top:8px;border-top:1px solid rgba(15,23,42,.06);padding-top:14px"><div><div class="tcc-lesson-timeline-title">Chronological interventions</div><div class="tcc-lesson-timeline-sub">Filtered instructor-facing events (emails, actions, deadline overrides).</div></div><span class="tcc-count-pill" id="auditCountPill">—</span></div>' +
             '<div id="studentAuditBody" class="tcc-timeline-loading">Loading…</div>' +
+            '<div style="margin-top:12px;text-align:center"><button type="button" id="auditViewMoreBtn" class="tcc-btn secondary" style="display:none">View more</button></div>' +
             '<details class="tcc-engine-details" id="engineEventsDetails"><summary>ENGINE EVENTS</summary><div id="studentEngineEventsBody" class="tcc-modal-muted" style="padding:10px 4px 4px;font-size:12px;line-height:1.45">Lower-level progression engine diagnostics. Same filters apply.</div></details>' +
             '</div>';
     }
@@ -1207,28 +1220,85 @@ cw_header('Instructor Theory Control Center');
         }
     }
 
-    function loadStudentInterventionsAudit() {
+    function auditPresetToSinceDays(preset) {
+        preset = String(preset || 'last7');
+        if (preset === 'all') return 0;
+        if (preset === 'today') return 1;
+        if (preset === 'last7') return 7;
+        if (preset === 'last30') return 30;
+        if (preset === 'mtd') {
+            try {
+                var p = cohortNowParts();
+                return Math.min(120, Math.max(1, (p.d || 1) + ((p.m || 1) - 1) * 31));
+            } catch (e2) {
+                return 40;
+            }
+        }
+        if (preset === 'prev_month') return 62;
+        return 7;
+    }
+
+    function updateAuditViewMoreButton() {
+        var btn = document.getElementById('auditViewMoreBtn');
+        if (!btn) return;
+        btn.style.display = auditTimelineHasMore ? 'inline-flex' : 'none';
+    }
+
+    function loadStudentInterventionsAudit(opts) {
+        opts = opts || {};
+        var append = !!opts.append;
         var sid = parseInt(selectedStudentId, 10) || 0;
         var body = document.getElementById('studentAuditBody');
         if (!cohortId || !sid || !body) return;
-        body.innerHTML = '<div class="tcc-timeline-loading">Loading interventions audit…</div>';
+        if (!append) {
+            body.innerHTML = '<div class="tcc-timeline-loading">Loading interventions audit…</div>';
+            auditTimelineNextOffset = 0;
+        }
         var eng = document.getElementById('studentEngineEventsBody');
-        if (eng) eng.innerHTML = '<div class="tcc-timeline-loading">Loading…</div>';
-        api('student_interventions_audit', { cohort_id: cohortId, student_id: sid }).then(function (resp) {
+        if (eng && !append) eng.innerHTML = '<div class="tcc-timeline-loading">Loading…</div>';
+        var presetEl = document.getElementById('auditDatePreset');
+        var preset = presetEl && presetEl.value ? presetEl.value : 'last7';
+        var sinceDays = auditPresetToSinceDays(preset);
+        var reqOffset = append ? auditTimelineNextOffset : 0;
+        api('student_interventions_audit', {
+            cohort_id: cohortId,
+            student_id: sid,
+            since_days: sinceDays,
+            limit: 20,
+            offset: reqOffset
+        }).then(function (resp) {
             if (!resp || resp.ok === false) {
                 var err = '<div class="tcc-timeline-error">' + escapeHtml((resp && (resp.message || resp.error)) || 'Unable to load audit trail.') + '</div>';
                 body.innerHTML = err;
                 if (eng) eng.innerHTML = err;
+                auditTimelineHasMore = false;
+                updateAuditViewMoreButton();
                 return;
             }
             var d = resp.data || {};
-            studentAuditTimelineCache = Array.isArray(d.timeline) ? d.timeline.slice() : [];
-            studentAuditTimelineCacheStudentId = sid;
+            var chunk = Array.isArray(d.timeline) ? d.timeline.slice() : [];
+            auditTimelineHasMore = !!d.has_more;
+            window.auditTimelineMergedTotal = typeof d.timeline_total_merged === 'number' ? d.timeline_total_merged : 0;
+            auditTimelineNextOffset = typeof d.next_offset === 'number' ? d.next_offset : (reqOffset + chunk.length);
+            if (append && studentAuditTimelineCache && studentAuditTimelineCacheStudentId === sid) {
+                studentAuditTimelineCache = studentAuditTimelineCache.concat(chunk);
+            } else {
+                studentAuditTimelineCache = chunk;
+                studentAuditTimelineCacheStudentId = sid;
+            }
             refreshAuditView();
+            updateAuditViewMoreButton();
         }).catch(function () {
             body.innerHTML = '<div class="tcc-timeline-error">Unable to load audit trail.</div>';
             if (eng) eng.innerHTML = '<div class="tcc-timeline-error">Unable to load engine events.</div>';
+            auditTimelineHasMore = false;
+            updateAuditViewMoreButton();
         });
+    }
+
+    function loadAuditTimelineNext() {
+        if (!auditTimelineHasMore) return;
+        loadStudentInterventionsAudit({ append: true });
     }
 
     function renderTheorySummaryModalInner(d, studentId, lessonId, aiBanner) {
@@ -1871,7 +1941,18 @@ cw_header('Instructor Theory Control Center');
         panel.className = '';
         panel.innerHTML = '<div class="tcc-student-head"><div class="tcc-student-avatar ' + escapeHtml(color) + '">' + (photoPath(merged) !== '' ? '<img src="' + escapeHtml(photoPath(merged)) + '" alt="' + escapeHtml(st.name || 'Student') + '">' : escapeHtml(st.avatar_initials || radarStudent.avatar_initials || 'S')) + '</div><div style="min-width:0;"><div class="tcc-student-name">' + escapeHtml(st.name || 'Student') + '</div><div class="tcc-student-email">' + escapeHtml(st.email || '') + '</div></div></div><div class="tcc-student-state-row"><span class="tcc-status-pill ' + escapeHtml(m.level || '') + '">' + escapeHtml(m.label || 'Motivation signal') + '</span><span class="tcc-status-pill">Trend: ' + escapeHtml(m.trend || '—') + '</span><span class="tcc-status-pill">Issues: ' + escapeHtml(issues.length) + '</span></div>' + motHint + '<div class="tcc-snapshot-grid">' + tiles + '</div><h3 class="tcc-section-title" style="font-size:17px;margin:4px 0 10px;">Current Blockers / Issues</h3><div class="tcc-issues-list">' + issueHtml + '</div>';
         var liInner = document.getElementById('lessonInterventionsInner');
-        if (liInner) liInner.innerHTML = buildLessonInterventionsHtml(sidNum);
+        if (liInner) {
+            liInner.innerHTML = buildLessonInterventionsHtml(sidNum);
+            var vm = document.getElementById('auditViewMoreBtn');
+            if (vm) {
+                vm.onclick = function (e) {
+                    e.preventDefault();
+                    if (window.loadAuditTimelineNext) {
+                        window.loadAuditTimelineNext();
+                    }
+                };
+            }
+        }
         loadStudentLessons(st.student_id);
     }
 
@@ -2189,6 +2270,7 @@ cw_header('Instructor Theory Control Center');
     window.openInterventions = openInterventions;
     window.switchStudentDeepTab = switchStudentDeepTab;
     window.loadStudentInterventionsAudit = loadStudentInterventionsAudit;
+    window.loadAuditTimelineNext = loadAuditTimelineNext;
     window.loadStudentLessons = loadStudentLessons;
     window.tccToggleInlineAudio = tccToggleInlineAudio;
     window.jumpToInterventionsForLesson = jumpToInterventionsForLesson;

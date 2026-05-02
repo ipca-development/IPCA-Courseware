@@ -1753,22 +1753,47 @@ function tcc_audit_pick_ts(string ...$candidates): string
 }
 
 /**
- * Full cohort-level intervention / email / progression audit for one student (chronological timeline).
+ * Intervention / email / progression audit for one student.
+ *
+ * Options:
+ * - since_days (int): only rows with activity in the last N UTC days; 0 = no date filter (heavier).
+ * - timeline_limit (int): page size for merged timeline (default 20).
+ * - timeline_offset (int): offset into merged timeline sorted newest-first (default 0).
+ * - per_source_cap (int): max rows pulled per underlying table after filters (default 600).
+ *
+ * Previously each source used ORDER BY … ASC LIMIT 500, which dropped newer emails/events once
+ * a student had more than 500 historical rows. Resend + automation audit rows live in the newest slice.
  */
-function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId, int $maxPerSource = 500): array
+function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId, array $options = []): array
 {
-    $maxPerSource = max(50, min(800, $maxPerSource));
+    $sinceDays = array_key_exists('since_days', $options) ? max(0, (int)$options['since_days']) : 7;
+    $timelineLimit = isset($options['timeline_limit']) ? max(1, min(100, (int)$options['timeline_limit'])) : 20;
+    $timelineOffset = isset($options['timeline_offset']) ? max(0, (int)$options['timeline_offset']) : 0;
+    $perSourceCap = isset($options['per_source_cap']) ? max(80, min(1200, (int)$options['per_source_cap'])) : 600;
+
+    $dateSqlActions = '';
+    $dateSqlOverrides = '';
+    $dateSqlEmails = '';
+    $dateSqlEvents = '';
+    if ($sinceDays > 0) {
+        $d = (int)$sinceDays;
+        $dateSqlActions = " AND COALESCE(updated_at, created_at) >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL {$d} DAY) ";
+        $dateSqlOverrides = " AND COALESCE(granted_at, created_at) >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL {$d} DAY) ";
+        $dateSqlEmails = " AND COALESCE(sent_at, created_at) >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL {$d} DAY) ";
+        $dateSqlEvents = " AND COALESCE(event_time, created_at) >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL {$d} DAY) ";
+    }
 
     $actionsStmt = $pdo->prepare("
         SELECT *
         FROM student_required_actions
         WHERE cohort_id = ?
           AND user_id = ?
-        ORDER BY created_at ASC, id ASC
-        LIMIT {$maxPerSource}
+          {$dateSqlActions}
+        ORDER BY COALESCE(updated_at, created_at) DESC, id DESC
+        LIMIT {$perSourceCap}
     ");
     $actionsStmt->execute([$cohortId, $studentId]);
-    $requiredActions = $actionsStmt->fetchAll(PDO::FETCH_ASSOC);
+    $requiredActions = $actionsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
     $deadlineOverrides = [];
     try {
@@ -1777,11 +1802,18 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
             FROM student_lesson_deadline_overrides
             WHERE cohort_id = ?
               AND user_id = ?
-            ORDER BY granted_at ASC, id ASC
-            LIMIT {$maxPerSource}
+              {$dateSqlOverrides}
+            ORDER BY COALESCE(granted_at, created_at) DESC, id DESC
+            LIMIT {$perSourceCap}
         ");
         $overrideStmt->execute([$cohortId, $studentId]);
-        $deadlineOverrides = $overrideStmt->fetchAll(PDO::FETCH_ASSOC);
+        $deadlineOverrides = $overrideStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        usort($deadlineOverrides, static function (array $a, array $b): int {
+            return strcmp(
+                (string)tcc_audit_pick_ts((string)($a['granted_at'] ?? ''), (string)($a['created_at'] ?? '')),
+                (string)tcc_audit_pick_ts((string)($b['granted_at'] ?? ''), (string)($b['created_at'] ?? ''))
+            );
+        });
         $deadlineExtSeq = [];
         foreach ($deadlineOverrides as &$drow) {
             $lid = (int)($drow['lesson_id'] ?? 0);
@@ -1800,11 +1832,12 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
             FROM training_progression_emails
             WHERE cohort_id = ?
               AND user_id = ?
-            ORDER BY created_at ASC, id ASC
-            LIMIT {$maxPerSource}
+              {$dateSqlEmails}
+        ORDER BY COALESCE(sent_at, created_at) DESC, id DESC
+            LIMIT {$perSourceCap}
         ");
         $emailStmt->execute([$cohortId, $studentId]);
-        $emails = $emailStmt->fetchAll(PDO::FETCH_ASSOC);
+        $emails = $emailStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         foreach ($emails as &$emailRow) {
             $emailRow['recipient_label'] = tcc_email_recipient_label($emailRow);
             $emailRow['delivery_status'] = tcc_email_delivery_status($emailRow);
@@ -1827,11 +1860,12 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
             FROM training_progression_events
             WHERE cohort_id = ?
               AND user_id = ?
-            ORDER BY event_time ASC, id ASC
-            LIMIT {$maxPerSource}
+              {$dateSqlEvents}
+        ORDER BY COALESCE(event_time, created_at) DESC, id DESC
+            LIMIT {$perSourceCap}
         ");
         $eventStmt->execute([$cohortId, $studentId]);
-        $events = $eventStmt->fetchAll(PDO::FETCH_ASSOC);
+        $events = $eventStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     } catch (Throwable $e) {
         $events = [];
     }
@@ -1851,13 +1885,13 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
     }
     $lessonMeta = tcc_lesson_course_meta_by_ids($pdo, $lessonIds);
 
-    $timeline = [];
+    $timelineFull = [];
 
     foreach ($requiredActions as $row) {
         $lid = (int)($row['lesson_id'] ?? 0);
         $lm = $lessonMeta[$lid] ?? ['lesson_title' => '', 'course_id' => 0, 'course_title' => ''];
         $sortTs = tcc_audit_pick_ts((string)($row['created_at'] ?? ''), (string)($row['updated_at'] ?? ''));
-        $timeline[] = [
+        $timelineFull[] = [
             'kind' => 'required_action',
             'sort_ts' => $sortTs,
             'lesson_id' => $lid,
@@ -1874,7 +1908,7 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
         $lid = (int)($row['lesson_id'] ?? 0);
         $lm = $lessonMeta[$lid] ?? ['lesson_title' => '', 'course_id' => 0, 'course_title' => ''];
         $sortTs = tcc_audit_pick_ts((string)($row['granted_at'] ?? ''), (string)($row['created_at'] ?? ''));
-        $timeline[] = [
+        $timelineFull[] = [
             'kind' => 'deadline_override',
             'sort_ts' => $sortTs,
             'lesson_id' => $lid,
@@ -1891,7 +1925,7 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
         $lid = (int)($row['lesson_id'] ?? 0);
         $lm = $lessonMeta[$lid] ?? ['lesson_title' => '', 'course_id' => 0, 'course_title' => ''];
         $sortTs = tcc_audit_pick_ts((string)($row['created_at'] ?? ''), (string)($row['sent_at'] ?? ''));
-        $timeline[] = [
+        $timelineFull[] = [
             'kind' => 'email',
             'sort_ts' => $sortTs,
             'lesson_id' => $lid,
@@ -1908,7 +1942,7 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
         $lid = (int)($row['lesson_id'] ?? 0);
         $lm = $lessonMeta[$lid] ?? ['lesson_title' => '', 'course_id' => 0, 'course_title' => ''];
         $sortTs = tcc_audit_pick_ts((string)($row['event_time'] ?? ''), (string)($row['created_at'] ?? ''));
-        $timeline[] = [
+        $timelineFull[] = [
             'kind' => 'progression_event',
             'sort_ts' => $sortTs,
             'lesson_id' => $lid,
@@ -1921,8 +1955,31 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
         ];
     }
 
-    usort($timeline, static function (array $a, array $b): int {
-        return strcmp((string)$a['sort_ts'], (string)$b['sort_ts']);
+    usort($timelineFull, static function (array $a, array $b): int {
+        return strcmp((string)$b['sort_ts'], (string)$a['sort_ts']);
+    });
+
+    $engineTimeline = [];
+    $instructorTimeline = [];
+    foreach ($timelineFull as $row) {
+        if (($row['kind'] ?? '') === 'progression_event') {
+            $engineTimeline[] = $row;
+        } else {
+            $instructorTimeline[] = $row;
+        }
+    }
+
+    $instructorMergedCount = count($instructorTimeline);
+    $window = array_slice($instructorTimeline, $timelineOffset, $timelineLimit + 1);
+    $hasMore = count($window) > $timelineLimit;
+    if ($hasMore) {
+        array_pop($window);
+    }
+
+    $engineCap = ($timelineOffset === 0) ? array_slice($engineTimeline, 0, 120) : [];
+    $outTimeline = array_merge($window, $engineCap);
+    usort($outTimeline, static function (array $a, array $b): int {
+        return strcmp((string)$b['sort_ts'], (string)$a['sort_ts']);
     });
 
     return [
@@ -1930,13 +1987,21 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
         'deadline_overrides' => $deadlineOverrides,
         'emails' => $emails,
         'events' => $events,
-        'timeline' => $timeline,
+        'timeline' => $outTimeline,
+        'timeline_total_merged' => count($timelineFull),
+        'timeline_instructor_merged' => $instructorMergedCount,
+        'has_more' => $hasMore,
+        'since_days' => $sinceDays,
+        'timeline_limit' => $timelineLimit,
+        'timeline_offset' => $timelineOffset,
+        'next_offset' => $timelineOffset + count($window),
         'counts' => [
             'required_actions' => count($requiredActions),
             'deadline_overrides' => count($deadlineOverrides),
             'emails' => count($emails),
             'events' => count($events),
-            'timeline' => count($timeline),
+            'timeline' => count($outTimeline),
+            'timeline_merged' => count($timelineFull),
         ],
     ];
 }
@@ -3193,12 +3258,25 @@ foreach ($pending as $p) {
             tcc_json(['ok' => false, 'error' => 'missing_required_ids'], 400);
         }
 
+        $sinceDaysRaw = $_GET['since_days'] ?? null;
+        if ($sinceDaysRaw === null || $sinceDaysRaw === '') {
+            $sinceDays = 7;
+        } else {
+            $sinceDays = max(0, min(3660, tcc_int($sinceDaysRaw)));
+        }
+        $timelineLimit = max(1, min(100, tcc_int($_GET['limit'] ?? 20)));
+        $timelineOffset = max(0, tcc_int($_GET['offset'] ?? 0));
+
         tcc_json([
             'ok' => true,
             'action' => 'student_interventions_audit',
             'cohort_id' => $cohortId,
             'student_id' => $studentId,
-            'data' => tcc_student_interventions_audit($pdo, $cohortId, $studentId),
+            'data' => tcc_student_interventions_audit($pdo, $cohortId, $studentId, [
+                'since_days' => $sinceDays,
+                'timeline_limit' => $timelineLimit,
+                'timeline_offset' => $timelineOffset,
+            ]),
         ]);
     }
 
