@@ -439,7 +439,7 @@ function tcc_fetch_cohorts(PDO $pdo): array {
             co.end_date,
             c.title AS course_title,
             p.program_key,
-            'UTC' AS timezone
+            COALESCE(NULLIF(TRIM(co.timezone), ''), 'UTC') AS timezone
         FROM cohorts co
         JOIN courses c ON c.id = co.course_id
         JOIN programs p ON p.id = c.program_id
@@ -2500,10 +2500,23 @@ try {
             return $b['progress_pct'] <=> $a['progress_pct'];
         });
 
+        $cohortTimezone = 'UTC';
+        try {
+            $tzStmt = $pdo->prepare('SELECT timezone FROM cohorts WHERE id = ? LIMIT 1');
+            $tzStmt->execute([$cohortId]);
+            $rawTz = trim((string)$tzStmt->fetchColumn());
+            if ($rawTz !== '') {
+                $cohortTimezone = $rawTz;
+            }
+        } catch (Throwable $e) {
+            $cohortTimezone = 'UTC';
+        }
+
         tcc_json([
             'ok' => true,
             'action' => 'cohort_overview',
             'cohort_id' => $cohortId,
+            'cohort_timezone' => $cohortTimezone,
             'summary' => [
                 'student_count' => count($students),
                 'total_lessons' => $totalLessons,

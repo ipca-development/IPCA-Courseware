@@ -330,6 +330,7 @@ cw_header('Instructor Theory Control Center');
         return window.tccCohortTimezone || 'UTC';
     }
 
+    // Stored timestamps from the API are treated as UTC instants (naive "YYYY-MM-DD HH:MM:SS" → append Z).
     function parseUtcDate(v) {
         if (!v) return null;
         var raw = String(v).trim();
@@ -339,28 +340,38 @@ cw_header('Instructor Theory Control Center');
         return isNaN(d.getTime()) ? null : d;
     }
 
-    function partsInCohortTime(v) {
+    function partsInTimeZone(v, tz) {
         var d = parseUtcDate(v);
         if (!d) return null;
+        var fmt = new Intl.DateTimeFormat('en-US', {timeZone: tz, weekday:'short', month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false});
+        var parts = {};
+        fmt.formatToParts(d).forEach(function (p) { parts[p.type] = p.value; });
+        return parts;
+    }
+
+    function partsInCohortTime(v) {
+        var tz = cohortTimeZone();
         try {
-            var fmt = new Intl.DateTimeFormat('en-US', {timeZone: cohortTimeZone(), weekday:'short', month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false});
-            var parts = {};
-            fmt.formatToParts(d).forEach(function (p) { parts[p.type] = p.value; });
-            return parts;
-        } catch (e) {
+            return partsInTimeZone(v, tz);
+        } catch (e1) {
+            if (tz !== 'UTC') {
+                try {
+                    return partsInTimeZone(v, 'UTC');
+                } catch (e2) {}
+            }
             return null;
         }
     }
 
     function niceDate(v) {
         var p = partsInCohortTime(v);
-        if (!p) return v ? String(v).slice(0, 16) : '—';
+        if (!p) return '—';
         return p.weekday + ' ' + p.month + ' ' + p.day + ', ' + p.year;
     }
 
     function niceDateTime(v) {
         var p = partsInCohortTime(v);
-        if (!p) return v ? String(v).slice(0, 16) : '—';
+        if (!p) return '—';
         return p.weekday + ' ' + p.month + ' ' + p.day + ', ' + p.year + ' ' + p.hour + ':' + p.minute;
     }
 
@@ -671,8 +682,8 @@ cw_header('Instructor Theory Control Center');
         var grantedBy = item.granted_by_user_id ? ('User #' + String(item.granted_by_user_id)) : 'System / automation';
         var html = '<div class="tcc-modal-grid">' + policyAlert;
         html += '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Deadlines</div>' + modalStatusRows([
-            ['Original / base deadline (UTC)', niceDateTime(item.base_deadline_utc || '')],
-            ['New effective deadline (UTC)', niceDateTime(item.new_deadline_utc || '')],
+            ['Original / base deadline', niceDateTime(item.base_deadline_utc || '')],
+            ['New effective deadline', niceDateTime(item.new_deadline_utc || '')],
             ['Granted at', niceDateTime(item.granted_at || item.created_at || '')],
             ['Extension # (this lesson)', seq ? String(seq) : '—'],
             ['Approval source', item.approval_source || '—'],
@@ -1015,7 +1026,21 @@ cw_header('Instructor Theory Control Center');
             });
             return { y: y, m: m, d: d };
         } catch (e) {
-            return { y: new Date().getUTCFullYear(), m: new Date().getUTCMonth() + 1, d: new Date().getUTCDate() };
+            try {
+                var fmtUtc = new Intl.DateTimeFormat('en-US', {timeZone: 'UTC', year: 'numeric', month: 'numeric', day: 'numeric'});
+                var y2 = 0;
+                var m2 = 0;
+                var d2 = 0;
+                fmtUtc.formatToParts(new Date()).forEach(function (p) {
+                    if (p.type === 'year') y2 = parseInt(p.value, 10);
+                    if (p.type === 'month') m2 = parseInt(p.value, 10);
+                    if (p.type === 'day') d2 = parseInt(p.value, 10);
+                });
+                return { y: y2, m: m2, d: d2 };
+            } catch (e2) {
+                var now = new Date();
+                return { y: now.getFullYear(), m: now.getMonth() + 1, d: now.getDate() };
+            }
         }
     }
 
@@ -1025,7 +1050,11 @@ cw_header('Instructor Theory Control Center');
         try {
             return new Intl.DateTimeFormat('en-CA', {timeZone: cohortTimeZone(), year: 'numeric', month: '2-digit', day: '2-digit'}).format(d);
         } catch (e) {
-            return '';
+            try {
+                return new Intl.DateTimeFormat('en-CA', {timeZone: 'UTC', year: 'numeric', month: '2-digit', day: '2-digit'}).format(d);
+            } catch (e2) {
+                return '';
+            }
         }
     }
 
@@ -1623,6 +1652,10 @@ cw_header('Instructor Theory Control Center');
             if (!data.ok) {
                 showError('healthStrip', data.message || data.error || 'Unable to load cohort overview.');
                 return;
+            }
+            var tz = data.cohort_timezone || data.timezone;
+            if (tz && String(tz).trim() !== '') {
+                window.tccCohortTimezone = String(tz).trim();
             }
             renderHealth(data);
             renderRadar(data);
