@@ -1924,7 +1924,9 @@ function tcc_student_interventions_audit(PDO $pdo, int $cohortId, int $studentId
     foreach ($emails as $row) {
         $lid = (int)($row['lesson_id'] ?? 0);
         $lm = $lessonMeta[$lid] ?? ['lesson_title' => '', 'course_id' => 0, 'course_title' => ''];
-        $sortTs = tcc_audit_pick_ts((string)($row['created_at'] ?? ''), (string)($row['sent_at'] ?? ''));
+        // Align with SQL filter COALESCE(sent_at, created_at): prefer sent_at so client date presets
+        // (auditRowMatchesPreset) match rows included by the server; resends often touch sent_at.
+        $sortTs = tcc_audit_pick_ts((string)($row['sent_at'] ?? ''), (string)($row['created_at'] ?? ''));
         $timelineFull[] = [
             'kind' => 'email',
             'sort_ts' => $sortTs,

@@ -1207,7 +1207,7 @@ cw_header('Instructor Theory Control Center');
             pL.style.display = 'none';
             pA.style.display = 'block';
             var sid = parseInt(selectedStudentId, 10) || 0;
-            if (sid && studentAuditTimelineCacheStudentId !== sid) {
+            if (sid) {
                 loadStudentInterventionsAudit();
             } else {
                 refreshAuditView();
