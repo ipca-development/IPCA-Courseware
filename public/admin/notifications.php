@@ -31,6 +31,8 @@ if ($scope === 'theory_training') {
         'third_fail_remediation',
         'instructor_approval_required',
         'instructor_approval_required_chief',
+        'instructor_approval_decision_student',
+        'instructor_approval_decision_chief',
         'summary_needs_revision',
         'summary_approved',
         'deadline_missed_reason_required',

@@ -25,6 +25,8 @@ if (!function_exists('ttnp_is_theory_notification')) {
             'third_fail_remediation',
             'instructor_approval_required',
             'instructor_approval_required_chief',
+            'instructor_approval_decision_student',
+            'instructor_approval_decision_chief',
             'multiple_unsat_remedial_meeting',
             'deadline_missed_extension_1',
             'final_extension_granted_last_warning',

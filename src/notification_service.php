@@ -1284,6 +1284,16 @@ final class NotificationService
                 $base['decision_notes_html'] = 'Additional documentation was required.';
                 $base['decision_notes_text'] = 'Additional documentation was required.';
                 break;
+
+            case 'instructor_approval_decision_student':
+            case 'instructor_approval_decision_chief':
+                $base['decision_code'] = 'approve_additional_attempts';
+                $base['granted_extra_attempts'] = '2';
+                $base['chief_instructor_name'] = $base['chief_name'];
+                $base['decision_notes_html'] = 'Your instructor approved additional attempts. See details in the Academy.';
+                $base['decision_notes_text'] = 'Your instructor approved additional attempts. See details in the Academy.';
+                $base['reopened_effective_deadline_utc'] = '2026-04-30 23:59:00';
+                break;
         }
 
         if (!$variables) {

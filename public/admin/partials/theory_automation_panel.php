@@ -130,17 +130,28 @@ if (!function_exists('tap_theory_automation_context_cheat_sheet')) {
     {
         $eventKey = trim($eventKey);
         if ($eventKey === 'progress_test_failed') {
-            return 'Typical keys from finalize: attempt_count (string, e.g. 3), counts_as_unsat (1 on UNSAT), '
-                . 'pass_gate_met (0 on fail), score_pct (string), formal_result_code / formal_result_label, '
-                . 'timing_status, remediation_required (1 only when engine requires remediation this finalize), '
-                . 'instructor_required (1 for instructor-escalation finalize), max_attempts_reached (0|1), '
-                . 'student_email, remediation_url (filled after required actions are created), approval_url, '
-                . 'lesson_title, cohort_title. For “third fail remediation” email, prefer remediation_required = 1 '
-                . 'and/or attempt_count = 3 with counts_as_unsat = 1.';
+            return 'Typical keys from finalize (for automation conditions + send_email context): attempt_count (string), '
+                . 'counts_as_unsat (1 on UNSAT), pass_gate_met (0 on fail), score_pct, formal_result_code / formal_result_label, '
+                . 'timing_status, remediation_required (1 when remediation required this finalize), instructor_required (1 when '
+                . 'instructor escalation required), max_attempts_reached (0|1), student_email / student_name, chief_instructor_email / '
+                . 'chief_instructor_name, remediation_url, approval_url, lesson_title, cohort_title, weak_areas_text/html, '
+                . 'written_debrief_text/html. SSOT: progression emails are sent via theory automation + templates (not engine-hardcoded); '
+                . 'use conditions to gate (e.g. remediation_required = 1 for third_fail_remediation; instructor_required = 1 for '
+                . 'instructor_approval_required / chief; optionally suppress attempt 4 mail by excluding attempt_count = 4).';
         }
         if ($eventKey === 'progress_test_passed') {
             return 'Typical keys: attempt_count, pass_gate_met (1), score_pct, counts_as_unsat (usually 0), '
                 . 'student_email, lesson_title, cohort_title.';
+        }
+        if ($eventKey === 'instructor_decision_recorded') {
+            return 'Context from instructor approval save (send_email): decision_code, decision_notes_text, decision_notes_html, '
+                . 'granted_extra_attempts, deadline_extension_days, deadline_reopened (0|1), reopened_effective_deadline_utc, '
+                . 'summary_revision_required, one_on_one_required, one_on_one_completed, training_suspended, major_intervention_flag, '
+                . 'student_name, student_email, chief_instructor_name, chief_instructor_email, lesson_title, cohort_title, '
+                . 'attempt_count, score_pct, formal_result_code / formal_result_label, approval_url, completion_status, '
+                . 'weak_areas_text/html, written_debrief_text/html, summary_status, review_notes_text. '
+                . 'Use notification templates instructor_approval_decision_student (to {{student_email}}) and optionally '
+                . 'instructor_approval_decision_chief (to {{chief_instructor_email}}).';
         }
 
         return '';
