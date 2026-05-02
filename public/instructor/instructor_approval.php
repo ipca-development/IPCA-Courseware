@@ -1238,29 +1238,30 @@ cw_header('Instructor approval');
 <link rel="stylesheet" href="/instructor/css/tcc_ia_shared.css">
 
 <style>
-.ia-bridge-bar{
-    display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:14px;
-    padding:16px 20px;border-radius:20px;margin-bottom:6px;
-    background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);
-    color:#fff;border:1px solid rgba(15,23,42,.12);
-    box-shadow:0 14px 30px rgba(15,23,42,.08);
-}
-.ia-bridge-copy{font-size:12px;line-height:1.45;color:rgba(255,255,255,.88);max-width:520px;font-weight:600}
-.ia-back-to-tcc{
-    display:inline-flex;align-items:center;justify-content:center;gap:8px;
-    min-height:40px;padding:0 16px;border-radius:12px;font-size:13px;font-weight:900;
-    text-decoration:none;white-space:nowrap;flex-shrink:0;
-    background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.32);
-    cursor:pointer;
-}
-.ia-back-to-tcc:hover{background:rgba(255,255,255,.22);color:#fff}
 .ia-page{display:flex;flex-direction:column;gap:18px}
+.ia-hero-banner{
+    padding:20px 22px;background:linear-gradient(135deg,#0f2745 0%,#1d4f89 100%);color:#fff;overflow:hidden;
+    border-radius:22px;border:1px solid rgba(15,23,42,.08);box-shadow:0 14px 30px rgba(15,23,42,.06);
+}
+.ia-hero-banner-head{display:flex;justify-content:space-between;gap:16px;align-items:flex-end;flex-wrap:wrap}
+.ia-hero-banner-main{min-width:0;flex:1 1 320px}
+.ia-hero-banner-kicker{font-size:11px;text-transform:uppercase;letter-spacing:.14em;font-weight:900;color:rgba(255,255,255,.72)}
+.ia-hero-banner h1{margin:6px 0 0;font-size:30px;line-height:1.02;letter-spacing:-.04em;color:#fff;font-weight:900}
+.ia-hero-banner-sub{margin-top:8px;font-size:13px;line-height:1.55;color:rgba(255,255,255,.84);max-width:860px}
+.ia-hero-banner-back{display:inline-block;margin-top:10px;font-size:12px;font-weight:800;color:rgba(255,255,255,.92);text-decoration:underline;text-underline-offset:3px}
+.ia-hero-banner-back:hover{color:#fff}
+.ia-hero-banner-chips{margin-top:14px;display:flex;gap:8px;flex-wrap:wrap}
+.ia-chip--hero{
+    display:inline-flex;align-items:center;justify-content:center;min-height:30px;padding:0 10px;border-radius:999px;
+    font-size:11px;font-weight:800;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.12);color:#fff;
+}
+.ia-chip--hero.ok{background:rgba(220,252,231,.18);color:#bbf7d0;border-color:rgba(187,247,208,.45)}
+.ia-chip--hero.warning{background:rgba(254,243,199,.16);color:#fde68a;border-color:rgba(253,230,138,.4)}
+.ia-chip--hero.danger{background:rgba(254,226,226,.14);color:#fecaca;border-color:rgba(252,165,165,.45)}
+.ia-chip--hero.info{background:rgba(239,246,255,.14);color:#bfdbfe;border-color:rgba(191,219,254,.4)}
 .ia-flash{padding:14px 16px;border-radius:14px;font-size:14px;font-weight:700}
 .ia-flash.success{background:rgba(22,101,52,.09);color:#166534;border:1px solid rgba(22,101,52,.18)}
 .ia-flash.error{background:rgba(153,27,27,.08);color:#991b1b;border:1px solid rgba(153,27,27,.16)}
-.ia-hero{padding:22px 24px}
-.ia-eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:#64748b;font-weight:800;margin-bottom:8px}
-.ia-title{margin:0;font-size:32px;line-height:1.05;letter-spacing:-.04em;color:#102845}
 .ia-chip-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 .ia-chip{
     display:inline-flex;align-items:center;justify-content:center;min-height:30px;
@@ -1295,7 +1296,7 @@ cw_header('Instructor approval');
 .ia-kv-value{margin-top:8px;font-size:20px;font-weight:820;color:#102845;letter-spacing:-.03em}
 .ia-progress-row{display:flex;flex-direction:column;gap:7px}
 .ia-inline-bar{display:flex;align-items:center;gap:12px}
-.ia-inline-bar .ia-progress-value{min-width:52px;text-align:right;font-size:14px;font-weight:900;color:#102845}
+.ia-inline-bar .ia-progress-value{min-width:56px;text-align:right;font-size:14px;font-weight:900;color:#102845;flex-shrink:0}
 .ia-track{flex:1 1 auto;height:14px;border-radius:999px;overflow:hidden;background:#e7edf5}
 .ia-fill{height:100%;border-radius:999px}
 .ia-fill.good{background:linear-gradient(90deg,#166534 0%,#22c55e 100%)}
@@ -1394,6 +1395,13 @@ cw_header('Instructor approval');
     .ia-override-grid{grid-template-columns:1fr}
     .ia-detail-grid{grid-template-columns:1fr}
 }
+@media (max-width:1100px){
+    .ia-hero-banner-head{flex-direction:column;align-items:stretch}
+}
+@media (max-width:700px){
+    .ia-hero-banner{padding:18px}
+    .ia-hero-banner h1{font-size:25px}
+}
 /* Theory Control Center queue avatar + meta + attempt mini-bar (mirrored for consistency) */
 .ia-tcc-people-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:20px 32px}
 .ia-tcc-person{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 260px}
@@ -1422,8 +1430,6 @@ cw_header('Instructor approval');
 .ia-kv.ia-kv-clickable:focus{outline:2px solid rgba(29,79,137,.35);outline-offset:2px}
 .ia-int-detail-meta{font-size:12px;font-weight:800;color:#64748b;line-height:1.45}
 .ia-int-notes{white-space:pre-wrap;font-size:13px;line-height:1.55;color:#334155}
-.ia-usage-inline{display:flex;align-items:center;gap:12px;width:100%}
-.ia-usage-ratio{min-width:48px;font-size:15px;font-weight:900;color:#102845;text-align:left;flex:0 0 auto}
 .ia-int-table{width:100%;border-collapse:collapse;font-size:11px}
 .ia-int-table th,.ia-int-table td{padding:8px 6px;border-bottom:1px solid rgba(15,23,42,.06);text-align:left;vertical-align:middle}
 .ia-int-table th{font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#64748b;white-space:nowrap}
@@ -1437,12 +1443,34 @@ cw_header('Instructor approval');
 
 <div class="ia-page">
 
-    <div class="ia-bridge-bar">
-        <a class="ia-back-to-tcc" href="<?php echo ia_h($iaBackToTccHref); ?>">← Back to Instructor Theory Control Center</a>
-        <p class="ia-bridge-copy">
-            Record the formal approval decision here. To select multiple open items and run cohort-safe bulk actions (for example the instructor-approval queue mode), use the Needs My Action section on the Control Center.
-        </p>
-    </div>
+    <section class="ia-hero-banner" aria-label="Instructor approval context">
+        <div class="ia-hero-banner-head">
+            <div class="ia-hero-banner-main">
+                <div class="ia-hero-banner-kicker">Instructor Workspace · Instructor Approval</div>
+                <h1>Instructor Approval</h1>
+                <p class="ia-hero-banner-sub">
+                    Record the formal approval decision here. To select multiple open items and run cohort-safe bulk actions (for example the instructor-approval queue mode), use the Needs My Action section on the Control Center.
+                </p>
+                <a class="ia-hero-banner-back" href="<?php echo ia_h($iaBackToTccHref); ?>">← Instructor Theory Control Center</a>
+            </div>
+        </div>
+        <div class="ia-hero-banner-chips">
+            <span class="ia-chip--hero info">Cohort: <?php echo ia_h((string)($state['cohort_title'] ?? '')); ?></span>
+            <span class="ia-chip--hero info">Lesson: <?php echo ia_h((string)($state['lesson_title'] ?? '')); ?></span>
+            <span class="ia-chip--hero <?php echo ia_h((string)($action['status'] ?? '') === 'approved' ? 'ok' : 'warning'); ?>">
+                Action: <?php echo ia_h((string)($action['status'] ?? '')); ?>
+            </span>
+            <?php if (!empty($activity['training_suspended'])): ?>
+                <span class="ia-chip--hero danger">Training Suspended</span>
+            <?php endif; ?>
+            <?php if (!empty($activity['one_on_one_required']) && empty($activity['one_on_one_completed'])): ?>
+                <span class="ia-chip--hero warning">One-on-One Required</span>
+            <?php endif; ?>
+            <?php if (!empty($activity['one_on_one_completed'])): ?>
+                <span class="ia-chip--hero ok">One-on-One Completed</span>
+            <?php endif; ?>
+        </div>
+    </section>
 
     <?php if ($flashError !== ''): ?>
         <div class="ia-flash error"><?php echo ia_h($flashError); ?></div>
@@ -1451,25 +1479,6 @@ cw_header('Instructor approval');
     <?php if ($flashSuccess !== ''): ?>
         <div class="ia-flash success"><?php echo ia_h($flashSuccess); ?></div>
     <?php endif; ?>
-
-    <section class="card ia-hero">
-        <div class="ia-eyebrow">INSTRUCTOR WORKSPACE · Instructor Approval</div>
-        <h1 class="ia-title">Instructor Approval</h1>
-
-        <div class="ia-chip-row">
-            <span class="ia-chip info">Cohort: <?php echo ia_h((string)($state['cohort_title'] ?? '')); ?></span>
-            <span class="ia-chip info">Lesson: <?php echo ia_h((string)($state['lesson_title'] ?? '')); ?></span>
-            <span class="ia-chip <?php echo ia_h((string)($action['status'] ?? '') === 'approved' ? 'ok' : 'warning'); ?>">
-                Action: <?php echo ia_h((string)($action['status'] ?? '')); ?>
-            </span>
-            <?php if (!empty($activity['training_suspended'])): ?>
-                <span class="ia-chip danger">Training Suspended</span>
-            <?php endif; ?>
-            <?php if (!empty($activity['one_on_one_required']) && empty($activity['one_on_one_completed'])): ?>
-                <span class="ia-chip warning">One-on-One Required</span>
-            <?php endif; ?>
-        </div>
-    </section>
 
     <div class="ia-grid">
 
@@ -1502,11 +1511,13 @@ cw_header('Instructor approval');
                     <div class="ia-kv-grid">
                         <div class="ia-kv ia-kv-clickable" role="button" tabindex="0" data-ia-open="attempts" title="Open progress test details (same view as Theory Control Center)">
                             <div class="ia-kv-label">Attempt usage</div>
-                            <div class="ia-kv-value" style="font-size:15px;font-weight:700;">
-                                <div class="ia-usage-inline">
-                                    <div class="ia-usage-ratio"><?php echo ia_h($attemptRatioText); ?></div>
-                                    <div class="ia-track" style="flex:1 1 auto;">
-                                        <div class="ia-fill <?php echo ia_h($attemptBarCls === 'ok' ? 'good' : ($attemptBarCls === 'warn' ? 'amber' : ($attemptBarCls === 'danger' ? 'danger' : 'neutral'))); ?>" style="width:<?php echo (int)$attemptBarPct; ?>%;"></div>
+                            <div class="ia-kv-value">
+                                <div class="ia-progress-row">
+                                    <div class="ia-inline-bar">
+                                        <div class="ia-progress-value"><?php echo ia_h($attemptRatioText); ?></div>
+                                        <div class="ia-track">
+                                            <div class="ia-fill <?php echo ia_h($attemptBarCls === 'ok' ? 'good' : ($attemptBarCls === 'warn' ? 'amber' : ($attemptBarCls === 'danger' ? 'danger' : 'neutral'))); ?>" style="width:<?php echo (int)$attemptBarPct; ?>%;"></div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
