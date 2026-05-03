@@ -338,6 +338,123 @@ function import_lab_discover_bundles_from_disk(string $programRoot, int $synthet
 }
 
 /**
+ * Build import bundles from aggregated lesson page counts (folder name → lessonId → max page).
+ * lesson_roots left empty (CDN / Spaces URLs used for AI).
+ *
+ * @param array<string, array<int, int>> $buckets
+ * @return list<array{lab_id:int, lesson_ids:list<int>, page_counts:array<int,int>, lesson_roots:array<int,string>, course_title:string, course_slug:string}>
+ */
+function import_lab_course_buckets_to_bundles(array $buckets, int $syntheticLabStart): array
+{
+    if ($syntheticLabStart <= 0) {
+        $syntheticLabStart = 900000;
+    }
+    $flat = $buckets[''] ?? [];
+    unset($buckets['']);
+
+    $bundles = [];
+    $labSeq = 0;
+
+    foreach ($buckets as $folderName => $lessonsMap) {
+        if ($lessonsMap === []) {
+            continue;
+        }
+        ksort($lessonsMap, SORT_NUMERIC);
+        $lessonIds = array_map('intval', array_keys($lessonsMap));
+        $roots = [];
+        $title = import_lab_title_from_dirname((string) $folderName);
+        $bundles[] = [
+            'lab_id' => $syntheticLabStart + $labSeq,
+            'lesson_ids' => $lessonIds,
+            'page_counts' => $lessonsMap,
+            'lesson_roots' => $roots,
+            'course_title' => $title,
+            'course_slug' => slugify((string) $folderName),
+        ];
+        $labSeq++;
+    }
+
+    if ($bundles !== []) {
+        if ($flat !== []) {
+            ksort($flat, SORT_NUMERIC);
+            $bundles[] = [
+                'lab_id' => $syntheticLabStart + $labSeq,
+                'lesson_ids' => array_map('intval', array_keys($flat)),
+                'page_counts' => $flat,
+                'lesson_roots' => [],
+                'course_title' => '',
+                'course_slug' => '',
+            ];
+        }
+        return $bundles;
+    }
+
+    if ($flat !== []) {
+        ksort($flat, SORT_NUMERIC);
+        return [[
+            'lab_id' => $syntheticLabStart,
+            'lesson_ids' => array_map('intval', array_keys($flat)),
+            'page_counts' => $flat,
+            'lesson_roots' => [],
+            'course_title' => '',
+            'course_slug' => '',
+        ]];
+    }
+
+    return [];
+}
+
+function import_lab_spaces_gather_keys(string $programKey): array
+{
+    require_once __DIR__ . '/../../src/spaces.php';
+    $prefixes = ['ks_images/' . $programKey . '/'];
+    $alt = program_folder_for_images($programKey);
+    if ($alt !== $programKey) {
+        $prefixes[] = 'ks_images/' . $alt . '/';
+    }
+    $seen = [];
+    foreach ($prefixes as $pref) {
+        foreach (cw_spaces_list_all_keys_under_prefix($pref) as $k) {
+            $seen[$k] = true;
+        }
+    }
+
+    return array_keys($seen);
+}
+
+/**
+ * @param list<string> $keys
+ */
+function import_lab_bundles_from_spaces_keys(array $keys, string $programKey, int $syntheticLabStart): array
+{
+    $alt = program_folder_for_images($programKey);
+    $pkQ = preg_quote($programKey, '#');
+    $altQ = preg_quote($alt, '#');
+    $progSeg = '(?:' . $pkQ . '|' . $altQ . ')';
+    $pat = '#^ks_images/' . $progSeg . '/(?:([^/]+)/)?lesson_(\d+)/lesson_\2_page_(\d+)\.(png|jpe?g|webp)$#i';
+
+    /** @var array<string, array<int, int>> $buckets */
+    $buckets = [];
+    foreach ($keys as $key) {
+        if (!preg_match($pat, $key, $m)) {
+            continue;
+        }
+        $folder = trim((string) ($m[1] ?? ''));
+        if (preg_match('#^lesson_\d+$#i', $folder)) {
+            continue;
+        }
+        $lid = (int) $m[2];
+        $pg = (int) $m[3];
+        if (!isset($buckets[$folder])) {
+            $buckets[$folder] = [];
+        }
+        $buckets[$folder][$lid] = max($buckets[$folder][$lid] ?? 0, $pg);
+    }
+
+    return import_lab_course_buckets_to_bundles($buckets, $syntheticLabStart);
+}
+
+/**
  * First slide file on disk (page 001) for OpenAI image input.
  */
 function import_lab_find_page_file(string $lessonDir, int $lessonId, int $pageNum): ?string {
@@ -481,6 +598,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $aiCourseTitles = isset($_POST['ai_course_titles']) ? 1 : 0;
     $aiLessonTitles = isset($_POST['ai_titles']) ? 1 : 0;
 
+    $scanFromSpaces = isset($_POST['scan_from_spaces']);
     $scanFromDisk = isset($_POST['scan_from_disk']);
     $localKsRoot = trim((string)($_POST['local_ks_root'] ?? ''));
     if ($localKsRoot === '') {
@@ -495,7 +613,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $labs = [];
-    if ($scanFromDisk && $localKsRoot !== '') {
+    if ($scanFromSpaces) {
+        require_once __DIR__ . '/../../src/spaces.php';
+        try {
+            progress('Listing objects from DigitalOcean Spaces (same bucket as the player CDN — no server folder path needed)…');
+            $keys = import_lab_spaces_gather_keys($programKey);
+            progress('Found ' . count($keys) . ' object key(s) matching ks_images/' . $programKey . '/…');
+        } catch (Throwable $e) {
+            progress('ERROR: Spaces listing failed: ' . $e->getMessage());
+            progress('Set CW_SPACES_KEY, CW_SPACES_SECRET, CW_SPACES_BUCKET, CW_SPACES_ENDPOINT, and CW_SPACES_CDN_BASE (same as media uploads).');
+            echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
+            exit;
+        }
+        if ($keys === []) {
+            progress('ERROR: No objects under that prefix — check Program key matches the folder name in Spaces (e.g. instrument).');
+            echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
+            exit;
+        }
+        $labs = import_lab_bundles_from_spaces_keys($keys, $programKey, $syntheticLabBase);
+        if ($labs === []) {
+            progress('ERROR: No lesson_* paths matched the expected pattern (ks_images/{program}/lesson_ID/lesson_ID_page_NNN.png).');
+            echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
+            exit;
+        }
+        progress('Discovered ' . count($labs) . ' course bundle(s) from Spaces keys.');
+    } elseif ($scanFromDisk && $localKsRoot !== '') {
         progress('Discovering lessons from local disk (no manifest)…');
         $programFolder = import_lab_resolve_program_folder($localKsRoot, $programKey);
         if ($programFolder === null) {
@@ -526,7 +668,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lessonIds = parse_lesson_ids((string)($_POST['lesson_ids_json'] ?? ''));
 
         if ($labId <= 0 || $courseTitle === '' || !$lessonIds) {
-            progress('ERROR: Enable “Scan local folders”, paste Bulk Labs JSON, OR use Lab ID + Course Title + Lesson IDs JSON.');
+            progress('ERROR: Enable “Scan from Spaces”, “Scan local folders”, paste Bulk Labs JSON, OR use Lab ID + Course Title + Lesson IDs JSON.');
             echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
             exit;
         }
@@ -660,7 +802,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 progress("Lesson {$extLessonId}: probing page_count via CDN…");
                 $pageCount = detect_page_count($CDN_BASE, $programKey, $extLessonId, 300);
             } else {
-                progress("Lesson {$extLessonId}: page_count={$pageCount} (from local files)");
+                progress("Lesson {$extLessonId}: page_count={$pageCount} (from folder or Spaces listing)");
             }
 
             $title = "Lesson {$extLessonId}";
@@ -727,12 +869,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 cw_header('Import Lab');
+$playerImgExample = cdn_url($CDN_BASE, 'ks_images/instrument/lesson_10101/lesson_10101_page_001.png');
 ?>
 <div class="card">
   <p class="muted">
-    Bulk import: create Course → Lessons → Slides. Use a <strong>manifest JSON</strong>, or <strong>scan folders</strong> on this server that match
-    <code>ks_images/{program}/lesson_{id}/lesson_{id}_page_001.png</code> (same layout as the CDN). Page counts come from local files when scanning; otherwise from the CDN.
-    Optional AI for course titles (per lab) and lesson titles (per lesson) — when scanning, page 001 is read from disk for AI if present.
+    Bulk import: create Course → Lessons → Slides. Use a <strong>manifest JSON</strong>, <strong>scan DigitalOcean Spaces</strong> (same keys the player uses — no filesystem path),
+    or <strong>scan a local folder</strong> on this PHP server. Slide paths in the DB always look like
+    <code>ks_images/{program}/lesson_{id}/lesson_{id}_page_001.png</code> (see <code>public/player/slide.php</code>: <code>cdn_url($CDN_BASE, $slide['image_path'])</code>).
+  </p>
+  <p class="muted" style="font-size:13px;">
+    Example image URL for program <code>instrument</code> (after you pick program in the form):<br>
+    <a href="<?= h($playerImgExample) ?>" target="_blank" rel="noopener"><?= h($playerImgExample) ?></a><br>
+    CDN base: <code><?= h($CDN_BASE) ?></code>
   </p>
 
   <form method="post" class="form-grid">
@@ -756,6 +904,14 @@ cw_header('Import Lab');
     <label>AI detect LESSON titles (per lesson)</label>
     <input type="checkbox" name="ai_titles" value="1" checked>
 
+    <label>Scan from Spaces (no manifest, no local path)</label>
+    <div>
+      <label><input type="checkbox" name="scan_from_spaces" value="1"> List objects in your Spaces bucket under <code>ks_images/{program_key}/</code> and import (uses <code>CW_SPACES_*</code> credentials)</label>
+      <p class="muted" style="margin:8px 0 0 0; font-size:13px;">
+        Use this when images live only on DigitalOcean Spaces. The importer calls the S3 ListObjects API (same bucket as uploads). Course/lesson layout rules match local scan: optional subfolders under the program become separate courses.
+      </p>
+    </div>
+
     <label>Scan local folders (no manifest)</label>
     <div>
       <label><input type="checkbox" name="scan_from_disk" value="1"> Discover <code>lesson_*</code> under the program folder and import (ignores Bulk Labs JSON)</label>
@@ -768,15 +924,15 @@ cw_header('Import Lab');
     <label>Local path to media root</label>
     <div>
       <input name="local_ks_root" type="text" style="width:100%; max-width:42rem;"
-        placeholder="Absolute path, e.g. /var/www/media or parent of ks_images"
+        placeholder="Only when scanning this server’s disk — e.g. /var/www/media"
         value="<?= h(trim((string)(getenv('CW_KS_IMAGES_ROOT') ?: ''))) ?>">
       <p class="muted" style="margin:6px 0 0 0; font-size:13px;">
-        Pre-filled from env <code>CW_KS_IMAGES_ROOT</code> if set. The importer looks for
-        <code>{path}/ks_images/{program_key}/</code> or, if <code>path</code> already ends with <code>ks_images</code>, <code>{path}/{program_key}/</code>.
+        <strong>Not used for Spaces.</strong> Only when “Scan local folders” is checked. Pre-filled from <code>CW_KS_IMAGES_ROOT</code> if set. Looks for
+        <code>{path}/ks_images/{program_key}/</code> or <code>{path}/{program_key}/</code> when <code>path</code> ends with <code>ks_images</code>.
       </p>
     </div>
 
-    <label>Synthetic lab IDs (disk scan)</label>
+    <label>Synthetic lab IDs (folder / Spaces scan)</label>
     <div>
       <input name="synthetic_lab_base" type="number" value="900000" min="1" style="width:8rem;">
       <p class="muted" style="margin:6px 0 0 0; font-size:13px;">
@@ -789,7 +945,7 @@ cw_header('Import Lab');
       placeholder='Paste your manifest JSON here. Example: {"labs":[{"labId":10009,"lessonIds":[10102,10103]}], "lab_range":[10001,10026]}'></textarea>
 
     <div class="muted" style="grid-column:1/-1; padding:6px 0;">
-      If “Scan local folders” is checked, this JSON is ignored. Otherwise, if JSON is provided, the single-lab fields below are ignored.
+      If “Scan from Spaces” or “Scan local folders” is checked, Bulk Labs JSON is ignored. Otherwise, if JSON is provided, the single-lab fields below are ignored.
     </div>
 
     <label>Lab ID</label>
