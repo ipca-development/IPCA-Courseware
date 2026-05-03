@@ -183,11 +183,21 @@ cw_header('Bulk Canonical Builder');
     <input type="number" name="limit" value="0" min="0">
 
     <label>Long runs</label>
-    <label><input type="checkbox" id="becMainAutoBatch" checked> Auto-split into batches of <strong>15</strong> slides per tab when Limit is <strong>0</strong> (recommended; avoids blocked pop-ups and proxy timeouts)</label>
+    <div style="display:flex; flex-wrap:wrap; gap:12px; align-items:center;">
+      <label style="margin:0;"><input type="checkbox" id="becMainAutoBatch" checked> Auto-split when Limit is <strong>0</strong> (runs batches <strong>on this page</strong> — no tab flood)</label>
+      <label style="margin:0;">Slides per batch
+        <input type="number" id="becMainBatchSize" value="40" min="5" max="120" step="1" style="width:4.5rem; margin-left:4px;" title="Higher = fewer batches but longer requests (proxy timeouts). Try 25–60.">
+      </label>
+    </div>
 
     <div></div>
-    <button class="btn" type="submit">Run Bulk Build (opens new tab)</button>
+    <button class="btn" type="submit" id="becMainSubmitBtn">Run Bulk Build</button>
   </form>
+
+  <div id="becInlineRunPanel" style="display:none; margin-top:16px; border:1px solid #e5e7eb; border-radius:10px; padding:12px; background:#f8fafc;">
+    <div id="becInlineRunStatus" style="font-weight:600; margin-bottom:8px;"></div>
+    <div id="becInlineRunLog" style="max-height:55vh; overflow:auto; font-size:13px; border:1px solid #e2e8f0; border-radius:8px; padding:10px; background:#fff;"></div>
+  </div>
 
   <p class="muted" style="margin-top:14px;">
     Make sure <code>public/assets/kings_videos_manifest.json</code> exists for auto hotspots.
@@ -195,7 +205,29 @@ cw_header('Bulk Canonical Builder');
   </p>
   <script>
   (function () {
-    var BEC_MAIN_BATCH = 15;
+    window.becGetSlideBatchSize = function () {
+      var el = document.getElementById('becMainBatchSize');
+      var v = el ? parseInt(el.value, 10) : 40;
+      if (isNaN(v) || v < 5) return 5;
+      if (v > 120) return 120;
+      return v;
+    };
+    window.becAppendRunHtml = function (container, title, html) {
+      var wrap = document.createElement('div');
+      wrap.style.cssText = 'border-top:2px solid #e2e8f0;margin-top:12px;padding-top:12px;';
+      var h = document.createElement('div');
+      h.style.cssText = 'font-weight:600;margin-bottom:8px;color:#334155;';
+      h.textContent = title;
+      wrap.appendChild(h);
+      var inner = document.createElement('div');
+      var doc = new DOMParser().parseFromString(html, 'text/html');
+      while (doc.body && doc.body.firstChild) {
+        inner.appendChild(doc.body.firstChild);
+      }
+      wrap.appendChild(inner);
+      container.appendChild(wrap);
+    };
+
     var main = document.getElementById('bulkMainForm');
     if (!main) return;
     main.addEventListener('submit', function (ev) {
@@ -211,6 +243,7 @@ cw_header('Bulk Canonical Builder');
       if (scope === 'lesson' && lid <= 0) return;
 
       ev.preventDefault();
+      var batchSize = window.becGetSlideBatchSize();
       var q = 'course_id=' + encodeURIComponent(String(cid))
         + '&scope=' + encodeURIComponent(scope)
         + '&lesson_id=' + encodeURIComponent(String(lid));
@@ -226,56 +259,66 @@ cw_header('Bulk Canonical Builder');
             window.alert('No slides in scope.');
             return;
           }
-          if (n <= BEC_MAIN_BATCH) {
+          if (n <= batchSize) {
             main.target = '_blank';
             main.submit();
             return;
           }
-          var batches = Math.ceil(n / BEC_MAIN_BATCH);
-          if (!window.confirm('Run ' + n + ' slides in ' + batches + ' separate tabs (~' + BEC_MAIN_BATCH + ' slides each)? Allow pop-ups if the browser asks.')) {
+          var batches = Math.ceil(n / batchSize);
+          if (!window.confirm('Run ' + n + ' slides in ' + batches + ' sequential batches (~' + batchSize + ' slides each) on this page? Keep the tab open until finished.')) {
             return;
           }
-          var key = Date.now();
-          var names = [];
-          for (var w = 0; w < batches; w++) {
-            names[w] = 'becMainBatch_' + key + '_' + w;
-            window.open('about:blank', names[w]);
-          }
-          function addH(form, name, value) {
-            var x = document.createElement('input');
-            x.type = 'hidden';
-            x.name = name;
-            x.value = String(value);
-            form.appendChild(x);
-          }
-          function mirrorCheckboxes(form) {
+          var panel = document.getElementById('becInlineRunPanel');
+          var statusEl = document.getElementById('becInlineRunStatus');
+          var logEl = document.getElementById('becInlineRunLog');
+          var submitBtn = document.getElementById('becMainSubmitBtn');
+          panel.style.display = 'block';
+          logEl.innerHTML = '';
+          statusEl.textContent = 'Starting…';
+          if (submitBtn) submitBtn.disabled = true;
+
+          function mirrorCheckboxesFd(fd) {
             main.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
               if (!cb.name || !cb.checked) return;
-              addH(form, cb.name, cb.value || '1');
+              fd.append(cb.name, cb.value || '1');
             });
           }
-          function runBatch(idx) {
-            if (idx >= batches) return;
-            var f = document.createElement('form');
-            f.method = 'post';
-            f.action = '/admin/api/bulk_enrich_run.php';
-            f.target = names[idx];
-            f.acceptCharset = 'UTF-8';
-            addH(f, 'scope', scope);
-            addH(f, 'course_id', String(cid));
-            addH(f, 'lesson_id', String(lid));
+          function batchFormData(idx) {
+            var fd = new FormData();
+            fd.append('scope', scope);
+            fd.append('course_id', String(cid));
+            fd.append('lesson_id', String(lid));
             var pk = main.elements.program_key;
-            addH(f, 'program_key', pk ? pk.value : 'private');
-            addH(f, 'limit', '0');
-            addH(f, 'batch_offset', String(idx * BEC_MAIN_BATCH));
-            addH(f, 'batch_size', String(Math.min(BEC_MAIN_BATCH, n - idx * BEC_MAIN_BATCH)));
-            mirrorCheckboxes(f);
-            document.body.appendChild(f);
-            f.submit();
-            document.body.removeChild(f);
-            if (idx + 1 < batches) {
-              window.setTimeout(function () { runBatch(idx + 1); }, 600);
+            fd.append('program_key', pk ? pk.value : 'private');
+            fd.append('limit', '0');
+            fd.append('batch_offset', String(idx * batchSize));
+            fd.append('batch_size', String(Math.min(batchSize, n - idx * batchSize)));
+            mirrorCheckboxesFd(fd);
+            return fd;
+          }
+          function runBatch(idx) {
+            if (idx >= batches) {
+              statusEl.textContent = 'All ' + batches + ' batches finished.';
+              if (submitBtn) submitBtn.disabled = false;
+              return;
             }
+            statusEl.textContent = 'Batch ' + (idx + 1) + ' of ' + batches + '…';
+            fetch('/admin/api/bulk_enrich_run.php', {
+              method: 'POST',
+              body: batchFormData(idx),
+              credentials: 'same-origin'
+            })
+              .then(function (r) { return r.text(); })
+              .then(function (html) {
+                window.becAppendRunHtml(logEl, 'Batch ' + (idx + 1) + ' of ' + batches, html);
+                panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                runBatch(idx + 1);
+              })
+              .catch(function () {
+                statusEl.textContent = 'Batch ' + (idx + 1) + ' failed (network).';
+                window.becAppendRunHtml(logEl, 'Error', '<p>Network error — try a smaller slides-per-batch value or check the connection.</p>');
+                if (submitBtn) submitBtn.disabled = false;
+              });
           }
           runBatch(0);
         })
@@ -292,7 +335,7 @@ cw_header('Bulk Canonical Builder');
     Per-slide checks across <strong>every active slide</strong> in the chosen scope (<strong>whole program</strong> or <strong>single course</strong>), using
     <code>slide_content</code>, <code>slide_enrichment</code>, <code>slide_references</code>, and <code>slide_hotspots</code> vs the Kings manifest when applicable.
     The lesson filter lists lessons from the <strong>program scope only</strong> when a program is selected; with a single course it lists all lessons system-wide for cross-course drill-down.
-    Lessons with <strong>no active slides</strong> show one placeholder row. Re-enrich opens one browser tab <strong>per course</strong> if your selection spans multiple courses.
+    Lessons with <strong>no active slides</strong> show one placeholder row.
   </p>
   <div class="form-grid" style="margin-bottom:12px;">
     <label>Focus audit</label>
@@ -344,18 +387,9 @@ cw_header('Bulk Canonical Builder');
   <p class="muted" style="margin-top:10px;">
     Re-enrich runs the same pipeline as above for <strong>only</strong> the checked slide IDs. “Skip already processed” is ignored for that run.
     Uncheck any actions you do not want to overwrite (e.g. turn off Extract English if you only want hotspots).
-    Large selections are split into batches of <strong id="becChunkHintN">15</strong> slides per tab so proxies are less likely to time out; the list page can stay open — only the progress tabs need to complete.
+    Re-enrich uses the same <strong>slides per batch</strong> value as above and runs batches <strong>sequentially on this page</strong> (log appears under the main form) so you do not get dozens of browser tabs.
   </p>
 </div>
-
-<form id="bulkTargetForm" method="post" action="/admin/api/bulk_enrich_run.php" target="_blank" style="display:none;">
-  <input type="hidden" name="scope" value="course">
-  <input type="hidden" name="lesson_id" value="0">
-  <input type="hidden" name="limit" value="0">
-  <input type="hidden" name="course_id" value="<?= (int)($courseId > 0 ? $courseId : 0) ?>">
-  <input type="hidden" name="program_key" id="becTfProgramKey" value="private">
-  <div id="becTfSlideIds"></div>
-</form>
 
 <style>
   .bec-cov-table tbody tr.flagged { background: #fffbeb; }
@@ -368,8 +402,9 @@ cw_header('Bulk Canonical Builder');
 
 <script>
 (function () {
-  /** Max slides per POST to reduce nginx/Cloudflare idle timeouts on long AI runs. */
-  var BEC_MAX_SLIDES_PER_RUN = 15;
+  function becSlideBatchSize() {
+    return typeof window.becGetSlideBatchSize === 'function' ? window.becGetSlideBatchSize() : 40;
+  }
 
   var pageCourseId = <?= (int)$courseId ?>;
   var programId = <?= (int)$programId ?>;
@@ -379,8 +414,6 @@ cw_header('Bulk Canonical Builder');
   var tbody = document.getElementById('becTbody');
   var summaryEl = document.getElementById('becSummary');
   var lastRows = [];
-  var chunkHint = document.getElementById('becChunkHintN');
-  if (chunkHint) chunkHint.textContent = String(BEC_MAX_SLIDES_PER_RUN);
 
   function becChunkArray(arr, size) {
     var out = [];
@@ -534,71 +567,78 @@ cw_header('Bulk Canonical Builder');
       alert('Select at least one slide.');
       return;
     }
+    var bs = becSlideBatchSize();
     var jobs = [];
     courseIds.forEach(function (k) {
       var cid = parseInt(k, 10);
-      becChunkArray(byCourse[k], BEC_MAX_SLIDES_PER_RUN).forEach(function (chunk) {
+      becChunkArray(byCourse[k], bs).forEach(function (chunk) {
         jobs.push({ courseId: cid, slideIds: chunk });
       });
     });
     var totalSlides = jobs.reduce(function (n, j) { return n + j.slideIds.length; }, 0);
     var msg = 'Re-run bulk enrich for ' + totalSlides + ' slide(s)';
     if (jobs.length > 1) {
-      msg += ' in ' + jobs.length + ' batches (opens ' + jobs.length + ' tabs, ~' + BEC_MAX_SLIDES_PER_RUN + ' slides each) to avoid timeouts.';
+      msg += ' in ' + jobs.length + ' sequential batches (~' + bs + ' slides each) on this page.';
     } else {
-      msg += '?';
+      msg += ' (one batch on this page)?';
     }
     msg += ' Enabled actions will overwrite existing data for those slides.';
     if (!confirm(msg)) return;
 
-    var batchWinNames = [];
-    if (jobs.length > 1) {
-      var wkey = String(Date.now());
-      for (var wi = 0; wi < jobs.length; wi++) {
-        batchWinNames[wi] = 'becReenrich_' + wkey + '_' + wi;
-        window.open('about:blank', batchWinNames[wi]);
-      }
+    var panel = document.getElementById('becInlineRunPanel');
+    var statusEl = document.getElementById('becInlineRunStatus');
+    var logEl = document.getElementById('becInlineRunLog');
+    if (!panel || !statusEl || !logEl || typeof window.becAppendRunHtml !== 'function') {
+      window.alert('Run log panel missing — reload the page.');
+      return;
     }
+    panel.style.display = 'block';
+    logEl.innerHTML = '';
+    statusEl.textContent = 'Re-enrich: starting…';
 
-    function mirrorActions(tf) {
+    function reenrichFormData(job) {
+      var fd = new FormData();
+      fd.append('scope', 'course');
+      fd.append('lesson_id', '0');
+      fd.append('limit', '0');
+      fd.append('course_id', String(job.courseId));
+      var pk = main.elements.program_key;
+      fd.append('program_key', pk ? pk.value : 'private');
+      job.slideIds.forEach(function (id) {
+        fd.append('target_slide_ids[]', String(id));
+      });
       ['do_en', 'do_es', 'do_narration', 'do_refs', 'do_hotspots'].forEach(function (name) {
         var el = main.querySelector('[name="' + name + '"]');
         if (el && el.checked) {
-          var hi = document.createElement('input');
-          hi.type = 'hidden';
-          hi.name = name;
-          hi.value = '1';
-          hi.className = 'js-action-mirror';
-          tf.appendChild(hi);
+          fd.append(name, '1');
         }
       });
+      return fd;
     }
 
-    function submitJob(job, idx) {
-      var tf = document.getElementById('bulkTargetForm');
-      tf.target = jobs.length > 1 ? batchWinNames[idx] : '_blank';
-      var box = document.getElementById('becTfSlideIds');
-      box.innerHTML = '';
-      tf.querySelectorAll('.js-action-mirror').forEach(function (n) { n.remove(); });
-      job.slideIds.forEach(function (id) {
-        var h = document.createElement('input');
-        h.type = 'hidden';
-        h.name = 'target_slide_ids[]';
-        h.value = String(id);
-        box.appendChild(h);
-      });
-      mirrorActions(tf);
-      tf.elements.course_id.value = String(job.courseId);
-      var pk = main.elements.program_key;
-      document.getElementById('becTfProgramKey').value = pk ? pk.value : 'private';
-      tf.submit();
-      if (idx + 1 < jobs.length) {
-        setTimeout(function () {
-          submitJob(jobs[idx + 1], idx + 1);
-        }, 600);
+    function runJob(idx) {
+      if (idx >= jobs.length) {
+        statusEl.textContent = 'Re-enrich: all ' + jobs.length + ' batch(es) finished.';
+        return;
       }
+      statusEl.textContent = 'Re-enrich: batch ' + (idx + 1) + ' of ' + jobs.length + '…';
+      fetch('/admin/api/bulk_enrich_run.php', {
+        method: 'POST',
+        body: reenrichFormData(jobs[idx]),
+        credentials: 'same-origin'
+      })
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+          window.becAppendRunHtml(logEl, 'Re-enrich batch ' + (idx + 1) + ' · course ' + jobs[idx].courseId + ' · ' + jobs[idx].slideIds.length + ' slide(s)', html);
+          panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          runJob(idx + 1);
+        })
+        .catch(function () {
+          statusEl.textContent = 'Re-enrich: batch ' + (idx + 1) + ' failed (network).';
+          window.becAppendRunHtml(logEl, 'Network error', '<p>Try a smaller slides-per-batch value or retry.</p>');
+        });
     }
-    submitJob(jobs[0], 0);
+    runJob(0);
   };
 })();
 </script>
