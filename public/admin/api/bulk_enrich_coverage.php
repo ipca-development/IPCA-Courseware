@@ -75,11 +75,27 @@ if ($lessonId > 0) {
     $params[] = $lessonId;
 }
 
-$sql .= ' ORDER BY l.sort_order, l.external_lesson_id, s.page_number ';
+$sql .= ' ORDER BY l.sort_order, l.external_lesson_id, l.id, s.page_number ';
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+$countSql = '
+  SELECT COUNT(*)
+  FROM slides s
+  INNER JOIN lessons l ON l.id = s.lesson_id
+  WHERE COALESCE(s.is_deleted, 0) = 0
+    AND l.course_id = ?
+';
+$countParams = [$courseId];
+if ($lessonId > 0) {
+    $countSql .= ' AND l.id = ? ';
+    $countParams[] = $lessonId;
+}
+$cntStmt = $pdo->prepare($countSql);
+$cntStmt->execute($countParams);
+$slidesExpectedFromDb = (int)$cntStmt->fetchColumn();
 
 $sqlLessons = "
   SELECT
@@ -99,20 +115,11 @@ if ($lessonId > 0) {
     $paramsLessons[] = $lessonId;
 }
 $sqlLessons .= ' GROUP BY l.id, l.external_lesson_id, l.title, l.sort_order
-  ORDER BY l.sort_order, l.external_lesson_id ';
+  ORDER BY l.sort_order, l.external_lesson_id, l.id ';
 
 $stmtLessons = $pdo->prepare($sqlLessons);
 $stmtLessons->execute($paramsLessons);
 $lessonList = $stmtLessons->fetchAll(PDO::FETCH_ASSOC);
-
-$byLesson = [];
-foreach ($rows as $r) {
-    $lid = (int)$r['lesson_id'];
-    if (!isset($byLesson[$lid])) {
-        $byLesson[$lid] = [];
-    }
-    $byLesson[$lid][] = $r;
-}
 
 const BEC_MIN_EN_LEN = 24;
 const BEC_MIN_ES_LEN = 12;
@@ -134,15 +141,159 @@ $counts = [
     'hotspot_expected' => 0,
     'lessons_in_scope' => count($lessonList),
     'lessons_without_active_slides' => 0,
+    'lessons_slide_aggregate_mismatch' => 0,
+    'slides_rows_from_query' => count($rows),
+    'slides_expected_db_count' => $slidesExpectedFromDb,
 ];
+
+/**
+ * Append one slide audit row (mutates $slides, $counts).
+ *
+ * @param array<string,mixed> $r
+ */
+$appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts, $courseId): void {
+    $slideId = (int)$r['slide_id'];
+    $extLessonId = (int)$r['external_lesson_id'];
+    $pageNum = (int)$r['page_number'];
+
+    $enPlain = trim((string)($r['en_plain'] ?? ''));
+    $esPlain = trim((string)($r['es_plain'] ?? ''));
+    $narrEn = trim((string)($r['narration_en'] ?? ''));
+    $narrEs = trim((string)($r['narration_es'] ?? ''));
+
+    $enOk = mb_strlen($enPlain) >= BEC_MIN_EN_LEN;
+    $esOk = $enOk && mb_strlen($esPlain) >= BEC_MIN_ES_LEN;
+    $narrEnOk = $enOk && mb_strlen($narrEn) >= BEC_MIN_NARR_EN;
+    $narrEsOk = $narrEnOk && mb_strlen($narrEs) >= BEC_MIN_NARR_ES;
+
+    $phakCnt = (int)($r['phak_cnt'] ?? 0);
+    $acsCnt = (int)($r['acs_cnt'] ?? 0);
+    $phakOk = $phakCnt >= 1;
+    $acsOk = $acsCnt >= 1;
+
+    $minConf = $r['min_ref_confidence'];
+    $minConfF = is_numeric($minConf) ? (float)$minConf : null;
+    $refsLowConfidence = $minConfF !== null && $minConfF < BEC_LOW_CONF;
+
+    $manifestVideo = bec_manifest_has_video($extLessonId, $pageNum);
+    $hotspotCnt = (int)($r['hotspot_cnt'] ?? 0);
+    $hotspotOk = !$manifestVideo || $hotspotCnt > 0;
+
+    $reasons = [];
+    if (!$enOk) {
+        $reasons[] = 'missing_or_short_en';
+    }
+    if ($enOk && !$esOk) {
+        $reasons[] = 'missing_or_short_es';
+    }
+    if ($enOk && !$narrEnOk) {
+        $reasons[] = 'missing_or_short_narration_en';
+    }
+    if ($narrEnOk && !$narrEsOk) {
+        $reasons[] = 'missing_or_short_narration_es';
+    }
+    if (!$phakOk) {
+        $reasons[] = 'no_phak_refs';
+    }
+    if (!$acsOk) {
+        $reasons[] = 'no_acs_refs';
+    }
+    if ($refsLowConfidence) {
+        $reasons[] = 'low_reference_confidence';
+    }
+    if ($manifestVideo && $hotspotCnt <= 0) {
+        $reasons[] = 'manifest_video_but_no_hotspot';
+    }
+
+    $flagged = $reasons !== [];
+
+    $counts['total']++;
+    if ($flagged) {
+        $counts['flagged']++;
+    }
+    if ($enOk) {
+        $counts['en_ok']++;
+    }
+    if ($esOk) {
+        $counts['es_ok']++;
+    }
+    if ($narrEnOk) {
+        $counts['narr_en_ok']++;
+    }
+    if ($narrEsOk) {
+        $counts['narr_es_ok']++;
+    }
+    if ($phakOk) {
+        $counts['phak_ok']++;
+    }
+    if ($acsOk) {
+        $counts['acs_ok']++;
+    }
+    if ($manifestVideo) {
+        $counts['hotspot_expected']++;
+        if ($hotspotOk) {
+            $counts['hotspot_expected_ok']++;
+        }
+    }
+
+    $slides[] = [
+        'slide_id' => $slideId,
+        'placeholder' => false,
+        'lesson_id' => $lessonRowId,
+        'lesson_title' => (string)$r['lesson_title'],
+        'external_lesson_id' => $extLessonId,
+        'page_number' => $pageNum,
+        'checks' => [
+            'extract_en' => $enOk,
+            'translate_es' => $esOk,
+            'narration_en' => $narrEnOk,
+            'narration_es' => $narrEsOk,
+            'phak_refs' => $phakOk,
+            'acs_refs' => $acsOk,
+            'refs_low_confidence' => $refsLowConfidence,
+            'other_refs_count' => (int)($r['other_ref_cnt'] ?? 0),
+            'video_hotspot' => $hotspotOk,
+            'manifest_lists_video' => $manifestVideo,
+        ],
+        'metrics' => [
+            'en_len' => mb_strlen($enPlain),
+            'es_len' => mb_strlen($esPlain),
+            'narr_en_len' => mb_strlen($narrEn),
+            'narr_es_len' => mb_strlen($narrEs),
+            'phak_count' => $phakCnt,
+            'acs_count' => $acsCnt,
+            'hotspot_count' => $hotspotCnt,
+            'min_phak_acs_confidence' => $minConfF,
+        ],
+        'flagged' => $flagged,
+        'flag_reasons' => $reasons,
+        'overlay_editor_url' => '/admin/slide_overlay_editor.php?slide_id=' . $slideId . '&course_id=' . $courseId . '&lesson_id=' . $lessonRowId,
+    ];
+};
+
+$slideChunks = [];
+foreach ($rows as $r) {
+    $chunkLid = (int)$r['lesson_id'];
+    if (!isset($slideChunks[$chunkLid])) {
+        $slideChunks[$chunkLid] = [];
+    }
+    $slideChunks[$chunkLid][] = $r;
+}
 
 foreach ($lessonList as $les) {
     $lid = (int)$les['id'];
-    $lessonRows = $byLesson[$lid] ?? [];
     $activeCount = (int)$les['active_slides'];
     $deletedCount = (int)$les['deleted_slides'];
+    $chunk = $slideChunks[$lid] ?? [];
 
-    if ($lessonRows === [] && $activeCount === 0) {
+    if ($chunk !== []) {
+        foreach ($chunk as $r) {
+            $appendSlideRow($r, $lid);
+        }
+        continue;
+    }
+
+    if ($activeCount === 0) {
         $counts['lessons_without_active_slides']++;
         $slides[] = [
             'slide_id' => 0,
@@ -185,128 +336,61 @@ foreach ($lessonList as $les) {
         continue;
     }
 
-    foreach ($lessonRows as $r) {
-        if ((int)($r['slide_is_deleted'] ?? 0) !== 0) {
-            continue;
-        }
-        $slideId = (int)$r['slide_id'];
-        $extLessonId = (int)$r['external_lesson_id'];
-        $pageNum = (int)$r['page_number'];
+    $counts['lessons_slide_aggregate_mismatch']++;
+    $slides[] = [
+        'slide_id' => 0,
+        'placeholder' => true,
+        'lesson_id' => $lid,
+        'lesson_title' => (string)$les['title'],
+        'external_lesson_id' => (int)$les['external_lesson_id'],
+        'page_number' => null,
+        'checks' => [
+            'extract_en' => false,
+            'translate_es' => false,
+            'narration_en' => false,
+            'narration_es' => false,
+            'phak_refs' => false,
+            'acs_refs' => false,
+            'refs_low_confidence' => false,
+            'other_refs_count' => 0,
+            'video_hotspot' => false,
+            'manifest_lists_video' => false,
+        ],
+        'metrics' => [
+            'en_len' => 0,
+            'es_len' => 0,
+            'narr_en_len' => 0,
+            'narr_es_len' => 0,
+            'phak_count' => 0,
+            'acs_count' => 0,
+            'hotspot_count' => 0,
+            'min_phak_acs_confidence' => null,
+            'active_slides' => $activeCount,
+            'deleted_slides' => $deletedCount,
+        ],
+        'flagged' => true,
+        'flag_reasons' => ['lesson_slide_count_mismatch_db_reports_' . $activeCount . '_active_but_main_query_returned_zero_rows'],
+        'overlay_editor_url' => '/admin/slides.php?course_id=' . $courseId . '&lesson_id=' . $lid,
+    ];
+    $counts['flagged']++;
+}
 
-        $enPlain = trim((string)($r['en_plain'] ?? ''));
-        $esPlain = trim((string)($r['es_plain'] ?? ''));
-        $narrEn = trim((string)($r['narration_en'] ?? ''));
-        $narrEs = trim((string)($r['narration_es'] ?? ''));
-
-        $enOk = mb_strlen($enPlain) >= BEC_MIN_EN_LEN;
-        $esOk = $enOk && mb_strlen($esPlain) >= BEC_MIN_ES_LEN;
-        $narrEnOk = $enOk && mb_strlen($narrEn) >= BEC_MIN_NARR_EN;
-        $narrEsOk = $narrEnOk && mb_strlen($narrEs) >= BEC_MIN_NARR_ES;
-
-        $phakCnt = (int)($r['phak_cnt'] ?? 0);
-        $acsCnt = (int)($r['acs_cnt'] ?? 0);
-        $phakOk = $phakCnt >= 1;
-        $acsOk = $acsCnt >= 1;
-
-        $minConf = $r['min_ref_confidence'];
-        $minConfF = is_numeric($minConf) ? (float)$minConf : null;
-        $refsLowConfidence = $minConfF !== null && $minConfF < BEC_LOW_CONF;
-
-        $manifestVideo = bec_manifest_has_video($extLessonId, $pageNum);
-        $hotspotCnt = (int)($r['hotspot_cnt'] ?? 0);
-        $hotspotOk = !$manifestVideo || $hotspotCnt > 0;
-
-        $reasons = [];
-        if (!$enOk) {
-            $reasons[] = 'missing_or_short_en';
-        }
-        if ($enOk && !$esOk) {
-            $reasons[] = 'missing_or_short_es';
-        }
-        if ($enOk && !$narrEnOk) {
-            $reasons[] = 'missing_or_short_narration_en';
-        }
-        if ($narrEnOk && !$narrEsOk) {
-            $reasons[] = 'missing_or_short_narration_es';
-        }
-        if (!$phakOk) {
-            $reasons[] = 'no_phak_refs';
-        }
-        if (!$acsOk) {
-            $reasons[] = 'no_acs_refs';
-        }
-        if ($refsLowConfidence) {
-            $reasons[] = 'low_reference_confidence';
-        }
-        if ($manifestVideo && $hotspotCnt <= 0) {
-            $reasons[] = 'manifest_video_but_no_hotspot';
-        }
-
-        $flagged = $reasons !== [];
-
-        $counts['total']++;
-        if ($flagged) {
-            $counts['flagged']++;
-        }
-        if ($enOk) {
-            $counts['en_ok']++;
-        }
-        if ($esOk) {
-            $counts['es_ok']++;
-        }
-        if ($narrEnOk) {
-            $counts['narr_en_ok']++;
-        }
-        if ($narrEsOk) {
-            $counts['narr_es_ok']++;
-        }
-        if ($phakOk) {
-            $counts['phak_ok']++;
-        }
-        if ($acsOk) {
-            $counts['acs_ok']++;
-        }
-        if ($manifestVideo) {
-            $counts['hotspot_expected']++;
-            if ($hotspotOk) {
-                $counts['hotspot_expected_ok']++;
-            }
-        }
-
-        $slides[] = [
-            'slide_id' => $slideId,
-            'placeholder' => false,
-            'lesson_id' => $lid,
-            'lesson_title' => (string)$r['lesson_title'],
-            'external_lesson_id' => $extLessonId,
-            'page_number' => $pageNum,
-            'checks' => [
-                'extract_en' => $enOk,
-                'translate_es' => $esOk,
-                'narration_en' => $narrEnOk,
-                'narration_es' => $narrEsOk,
-                'phak_refs' => $phakOk,
-                'acs_refs' => $acsOk,
-                'refs_low_confidence' => $refsLowConfidence,
-                'other_refs_count' => (int)($r['other_ref_cnt'] ?? 0),
-                'video_hotspot' => $hotspotOk,
-                'manifest_lists_video' => $manifestVideo,
-            ],
-            'metrics' => [
-                'en_len' => mb_strlen($enPlain),
-                'es_len' => mb_strlen($esPlain),
-                'narr_en_len' => mb_strlen($narrEn),
-                'narr_es_len' => mb_strlen($narrEs),
-                'phak_count' => $phakCnt,
-                'acs_count' => $acsCnt,
-                'hotspot_count' => $hotspotCnt,
-                'min_phak_acs_confidence' => $minConfF,
-            ],
-            'flagged' => $flagged,
-            'flag_reasons' => $reasons,
-            'overlay_editor_url' => '/admin/slide_overlay_editor.php?slide_id=' . $slideId . '&course_id=' . $courseId . '&lesson_id=' . $lid,
-        ];
+$listedLessonIds = array_fill_keys(array_map('intval', array_column($lessonList, 'id')), true);
+foreach ($slideChunks as $orphanLid => $chunk) {
+    if (isset($listedLessonIds[$orphanLid])) {
+        continue;
     }
+    foreach ($chunk as $r) {
+        $appendSlideRow($r, $orphanLid);
+    }
+}
+
+$counts['slides_processed_matches_query'] = ($counts['total'] === $slidesExpectedFromDb && count($rows) === $slidesExpectedFromDb);
+if ($counts['total'] !== $slidesExpectedFromDb || count($rows) !== $slidesExpectedFromDb) {
+    $counts['coverage_warning'] = 'Slide row count mismatch: summary.total=' . $counts['total']
+        . ', fetched_rows=' . count($rows) . ', db_count=' . $slidesExpectedFromDb;
+} else {
+    $counts['coverage_warning'] = null;
 }
 
 echo json_encode([

@@ -249,9 +249,14 @@ cw_header('Bulk Canonical Builder');
       if ((s.lessons_without_active_slides || 0) > 0) {
         lessonLine += ' · <strong>' + s.lessons_without_active_slides + '</strong> with no active slides';
       }
-      summaryEl.innerHTML = lessonLine + ' · Slide rows: <strong>' + s.total + '</strong> · Flagged rows: <strong>' + s.flagged + '</strong> · '
+      summaryEl.innerHTML = lessonLine + ' · Slide rows (audit): <strong>' + s.total + '</strong>'
+        + (s.slides_expected_db_count != null ? ' · DB active-slide count: <strong>' + s.slides_expected_db_count + '</strong>' : '')
+        + ' · Flagged rows: <strong>' + s.flagged + '</strong> · '
         + 'EN ok: ' + s.en_ok + ' · ES ok: ' + s.es_ok + ' · Narr EN: ' + s.narr_en_ok + ' · Narr ES: ' + s.narr_es_ok + ' · '
         + 'PHAK: ' + s.phak_ok + ' · ACS: ' + s.acs_ok;
+      if (s.coverage_warning) {
+        summaryEl.innerHTML += '<br><span style="color:#b45309;font-weight:600;">' + esc(String(s.coverage_warning)) + '</span>';
+      }
       if (s.hotspot_expected > 0) {
         summaryEl.innerHTML += ' · Manifest video pages with hotspot: ' + s.hotspot_expected_ok + ' / ' + s.hotspot_expected;
       }

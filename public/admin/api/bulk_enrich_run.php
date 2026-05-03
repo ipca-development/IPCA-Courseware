@@ -276,7 +276,7 @@ if ($scope === 'course') {
     $params[] = $lessonId;
 }
 
-$sql .= " ORDER BY l.sort_order, l.external_lesson_id, s.page_number ";
+$sql .= " ORDER BY l.sort_order, l.external_lesson_id, l.id, s.page_number ";
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
