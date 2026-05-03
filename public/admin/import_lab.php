@@ -164,6 +164,214 @@ function parse_labs_json(string $raw): array {
 }
 
 /**
+ * Resolve server directory for ks_images/{program}/…
+ * $localRoot may be the parent of ks_images, or ks_images itself, or the program folder.
+ */
+function import_lab_resolve_program_folder(string $localRoot, string $programKey): ?string {
+    $trim = trim($localRoot);
+    if ($trim === '') {
+        return null;
+    }
+    $r = realpath($trim);
+    if ($r === false || !is_dir($r)) {
+        return null;
+    }
+    $folderKey = program_folder_for_images($programKey);
+    $candidates = [
+        $r . DIRECTORY_SEPARATOR . 'ks_images' . DIRECTORY_SEPARATOR . $programKey,
+        $r . DIRECTORY_SEPARATOR . 'ks_images' . DIRECTORY_SEPARATOR . $folderKey,
+    ];
+    $base = strtolower(basename($r));
+    if ($base === 'ks_images') {
+        $candidates[] = $r . DIRECTORY_SEPARATOR . $programKey;
+        $candidates[] = $r . DIRECTORY_SEPARATOR . $folderKey;
+    }
+    foreach ($candidates as $c) {
+        $rp = realpath($c);
+        if ($rp !== false && is_dir($rp)) {
+            return $rp;
+        }
+    }
+    return null;
+}
+
+function import_lab_count_pages_in_lesson_dir(string $lessonDir, int $lessonId): int {
+    $max = 0;
+    $patterns = [
+        $lessonDir . sprintf('/lesson_%d_page_*.*', $lessonId),
+    ];
+    foreach (glob($patterns[0], GLOB_NOSORT) ?: [] as $f) {
+        if (!is_file($f)) {
+            continue;
+        }
+        if (preg_match('#_page_(\d+)\.#i', $f, $m)) {
+            $max = max($max, (int)$m[1]);
+        }
+    }
+    return $max;
+}
+
+/**
+ * @return array<int, array{lesson_id:int, dir:string, pages:int}>
+ */
+function import_lab_collect_lesson_dirs(string $parentDir): array {
+    $out = [];
+    foreach (scandir($parentDir) ?: [] as $name) {
+        if ($name === '.' || $name === '..') {
+            continue;
+        }
+        if (!preg_match('#^lesson_(\d+)$#', $name, $m)) {
+            continue;
+        }
+        $lessonDir = $parentDir . DIRECTORY_SEPARATOR . $name;
+        if (!is_dir($lessonDir)) {
+            continue;
+        }
+        $lid = (int)$m[1];
+        $pages = import_lab_count_pages_in_lesson_dir($lessonDir, $lid);
+        $out[] = ['lesson_id' => $lid, 'dir' => $lessonDir, 'pages' => $pages];
+    }
+    usort($out, static fn (array $a, array $b): int => $a['lesson_id'] <=> $b['lesson_id']);
+    return $out;
+}
+
+/**
+ * Human-readable title from a folder name (course bucket).
+ */
+function import_lab_title_from_dirname(string $name): string {
+    $s = str_replace(['_', '-'], ' ', $name);
+    $s = preg_replace('/\s+/', ' ', $s);
+    return trim((string)$s) !== '' ? trim((string)$s) : $name;
+}
+
+/**
+ * Build lab rows from disk: either flat lesson_* under program, or one course per subfolder that contains lesson_*.
+ *
+ * @return list<array{lab_id:int, lesson_ids:list<int>, page_counts:array<int,int>, lesson_roots:array<int,string>, course_title:string, course_slug:string}>
+ */
+function import_lab_discover_bundles_from_disk(string $programRoot, int $syntheticLabStart): array {
+    if ($syntheticLabStart <= 0) {
+        $syntheticLabStart = 900000;
+    }
+    $bundles = [];
+    $labSeq = 0;
+
+    $nestedCourses = [];
+    foreach (scandir($programRoot) ?: [] as $name) {
+        if ($name === '.' || $name === '..') {
+            continue;
+        }
+        $path = $programRoot . DIRECTORY_SEPARATOR . $name;
+        if (!is_dir($path)) {
+            continue;
+        }
+        if (preg_match('#^lesson_\d+$#', $name)) {
+            continue;
+        }
+        $lessons = import_lab_collect_lesson_dirs($path);
+        if ($lessons === []) {
+            continue;
+        }
+        $lessonIds = array_map(static fn (array $x): int => $x['lesson_id'], $lessons);
+        $pageCounts = [];
+        $roots = [];
+        foreach ($lessons as $L) {
+            $pageCounts[$L['lesson_id']] = $L['pages'];
+            $roots[$L['lesson_id']] = $L['dir'];
+        }
+        $title = import_lab_title_from_dirname($name);
+        $nestedCourses[] = [
+            'lab_id' => $syntheticLabStart + $labSeq,
+            'lesson_ids' => $lessonIds,
+            'page_counts' => $pageCounts,
+            'lesson_roots' => $roots,
+            'course_title' => $title,
+            'course_slug' => slugify($title),
+        ];
+        $labSeq++;
+    }
+
+    $flatLessons = import_lab_collect_lesson_dirs($programRoot);
+    $flatIds = array_map(static fn (array $x): int => $x['lesson_id'], $flatLessons);
+
+    if ($nestedCourses !== []) {
+        foreach ($nestedCourses as $nc) {
+            $bundles[] = $nc;
+        }
+        if ($flatLessons !== []) {
+            $pageCounts = [];
+            $roots = [];
+            foreach ($flatLessons as $L) {
+                $pageCounts[$L['lesson_id']] = $L['pages'];
+                $roots[$L['lesson_id']] = $L['dir'];
+            }
+            $bundles[] = [
+                'lab_id' => $syntheticLabStart + $labSeq,
+                'lesson_ids' => $flatIds,
+                'page_counts' => $pageCounts,
+                'lesson_roots' => $roots,
+                'course_title' => '',
+                'course_slug' => '',
+            ];
+            $labSeq++;
+        }
+        return $bundles;
+    }
+
+    if ($flatLessons === []) {
+        return [];
+    }
+    $pageCounts = [];
+    $roots = [];
+    foreach ($flatLessons as $L) {
+        $pageCounts[$L['lesson_id']] = $L['pages'];
+        $roots[$L['lesson_id']] = $L['dir'];
+    }
+    return [[
+        'lab_id' => $syntheticLabStart,
+        'lesson_ids' => $flatIds,
+        'page_counts' => $pageCounts,
+        'lesson_roots' => $roots,
+        'course_title' => '',
+        'course_slug' => '',
+    ]];
+}
+
+/**
+ * First slide file on disk (page 001) for OpenAI image input.
+ */
+function import_lab_find_page_file(string $lessonDir, int $lessonId, int $pageNum): ?string {
+    $pad = str_pad((string)$pageNum, 3, '0', STR_PAD_LEFT);
+    foreach (['png', 'jpg', 'jpeg', 'webp'] as $ext) {
+        $f = $lessonDir . sprintf('/lesson_%d_page_%s.%s', $lessonId, $pad, $ext);
+        if (is_file($f) && is_readable($f)) {
+            return $f;
+        }
+    }
+    return null;
+}
+
+/**
+ * data: URL for OpenAI (fallback when CDN not populated yet).
+ */
+function import_lab_local_file_as_data_url(string $absPath): ?string {
+    $raw = @file_get_contents($absPath);
+    if ($raw === false || $raw === '') {
+        return null;
+    }
+    if (strlen($raw) > 4500000) {
+        return null;
+    }
+    $mime = 'image/png';
+    if (preg_match('#\.jpe?g$#i', $absPath)) {
+        $mime = 'image/jpeg';
+    } elseif (preg_match('#\.webp$#i', $absPath)) {
+        $mime = 'image/webp';
+    }
+    return 'data:' . $mime . ';base64,' . base64_encode($raw);
+}
+
+/**
  * AI: extract course title from the seed lesson page 001 screenshot.
  * We want the big centered course title (e.g. "Getting To Know Your Airplane").
  * Ignore phase titles and UI chrome.
@@ -273,9 +481,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $aiCourseTitles = isset($_POST['ai_course_titles']) ? 1 : 0;
     $aiLessonTitles = isset($_POST['ai_titles']) ? 1 : 0;
 
-    // Bulk mode
-    $bulkRaw = (string)($_POST['labs_json'] ?? '');
-    $labs = parse_labs_json($bulkRaw);
+    $scanFromDisk = isset($_POST['scan_from_disk']);
+    $localKsRoot = trim((string)($_POST['local_ks_root'] ?? ''));
+    if ($localKsRoot === '') {
+        $envRoot = getenv('CW_KS_IMAGES_ROOT');
+        if (is_string($envRoot) && trim($envRoot) !== '') {
+            $localKsRoot = trim($envRoot);
+        }
+    }
+    $syntheticLabBase = (int)($_POST['synthetic_lab_base'] ?? 900000);
+    if ($syntheticLabBase <= 0) {
+        $syntheticLabBase = 900000;
+    }
+
+    $labs = [];
+    if ($scanFromDisk && $localKsRoot !== '') {
+        progress('Discovering lessons from local disk (no manifest)…');
+        $programFolder = import_lab_resolve_program_folder($localKsRoot, $programKey);
+        if ($programFolder === null) {
+            progress('ERROR: Could not find program folder for key "' . $programKey . '" under: ' . $localKsRoot);
+            progress('Expected something like …/ks_images/' . $programKey . '/lesson_12345/ or …/ks_images/ with that program inside.');
+            echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
+            exit;
+        }
+        progress('Program image root: ' . $programFolder);
+        $labs = import_lab_discover_bundles_from_disk($programFolder, $syntheticLabBase);
+        if ($labs === []) {
+            progress('ERROR: No lesson_* folders with slide files found under ' . $programFolder);
+            echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
+            exit;
+        }
+        progress('Discovered ' . count($labs) . ' course bundle(s) from folder layout.');
+    } else {
+        $bulkRaw = (string)($_POST['labs_json'] ?? '');
+        $labs = parse_labs_json($bulkRaw);
+    }
 
     // Single-lab mode fallback
     if (!$labs) {
@@ -286,19 +526,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $lessonIds = parse_lesson_ids((string)($_POST['lesson_ids_json'] ?? ''));
 
         if ($labId <= 0 || $courseTitle === '' || !$lessonIds) {
-            progress("ERROR: Provide Bulk Labs JSON (manifest) OR Lab ID + Course Title + Lesson IDs JSON.");
+            progress('ERROR: Enable “Scan local folders”, paste Bulk Labs JSON, OR use Lab ID + Course Title + Lesson IDs JSON.');
             echo "<p><a href='/admin/import_lab.php'>Back</a></p></body></html>";
             exit;
         }
-        if ($courseSlug === '') $courseSlug = slugify($courseTitle);
+        if ($courseSlug === '') {
+            $courseSlug = slugify($courseTitle);
+        }
 
         $labs = [[
             'lab_id' => $labId,
             'lesson_ids' => $lessonIds,
-            // single-lab uses provided title
             'course_title' => $courseTitle,
             'course_slug' => $courseSlug,
-            'course_order' => $courseOrder
+            'course_order' => $courseOrder,
         ]];
     }
 
@@ -352,7 +593,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach ($labs as $lab) {
         $labId = (int)$lab['lab_id'];
         $lessonIds = (array)$lab['lesson_ids'];
-        if (!$lessonIds) continue;
+        if (!$lessonIds) {
+            continue;
+        }
+
+        $lessonRoots = (array)($lab['lesson_roots'] ?? []);
+        $pageCountsLocal = (array)($lab['page_counts'] ?? []);
 
         // Determine course title
         $courseTitle = trim((string)($lab['course_title'] ?? ''));
@@ -362,7 +608,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($courseTitle === '' && $aiCourseTitles) {
             $seedLessonId = (int)$lessonIds[0];
             $seedPath = image_path_for($programKey, $seedLessonId, 1);
-            $seedUrl  = cdn_url($CDN_BASE, $seedPath);
+            $seedUrl = cdn_url($CDN_BASE, $seedPath);
+            $seedRoot = (string)($lessonRoots[$seedLessonId] ?? '');
+            if ($seedRoot !== '' && is_dir($seedRoot)) {
+                $seedFile = import_lab_find_page_file($seedRoot, $seedLessonId, 1);
+                if ($seedFile !== null) {
+                    $localSeed = import_lab_local_file_as_data_url($seedFile);
+                    if ($localSeed !== null) {
+                        $seedUrl = $localSeed;
+                    }
+                }
+            }
 
             progress("Lab {$labId}: AI detecting COURSE title from lesson {$seedLessonId} page 001…");
 
@@ -398,14 +654,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         foreach ($lessonIds as $extLessonId) {
             $totalLessons++;
-            progress("Lesson {$extLessonId}: probing page_count…");
-            $pageCount = detect_page_count($CDN_BASE, $programKey, (int)$extLessonId, 300);
+            $extLessonId = (int)$extLessonId;
+            $pageCount = (int)($pageCountsLocal[$extLessonId] ?? 0);
+            if ($pageCount <= 0) {
+                progress("Lesson {$extLessonId}: probing page_count via CDN…");
+                $pageCount = detect_page_count($CDN_BASE, $programKey, $extLessonId, 300);
+            } else {
+                progress("Lesson {$extLessonId}: page_count={$pageCount} (from local files)");
+            }
 
             $title = "Lesson {$extLessonId}";
 
             if ($aiLessonTitles && $pageCount > 0) {
-                $imgPath = image_path_for($programKey, (int)$extLessonId, 1);
+                $imgPath = image_path_for($programKey, $extLessonId, 1);
                 $imgUrl = cdn_url($CDN_BASE, $imgPath);
+                $lr = (string)($lessonRoots[$extLessonId] ?? '');
+                if ($lr !== '' && is_dir($lr)) {
+                    $p1 = import_lab_find_page_file($lr, $extLessonId, 1);
+                    if ($p1 !== null) {
+                        $dataImg = import_lab_local_file_as_data_url($p1);
+                        if ($dataImg !== null) {
+                            $imgUrl = $dataImg;
+                        }
+                    }
+                }
 
                 try {
                     progress("Lesson {$extLessonId}: AI detecting title from page 001…");
@@ -421,15 +693,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
-            $insLesson->execute([$courseId, (int)$extLessonId, $title, $sort, $pageCount, $defaultTpl]);
-            $getLessonId->execute([$courseId, (int)$extLessonId]);
+            $insLesson->execute([$courseId, $extLessonId, $title, $sort, $pageCount, $defaultTpl]);
+            $getLessonId->execute([$courseId, $extLessonId]);
             $lessonRowId = (int)$getLessonId->fetchColumn();
 
             progress("Lesson {$extLessonId}: page_count={$pageCount} (lesson_row_id={$lessonRowId})");
 
             if ($pageCount > 0) {
                 for ($p = 1; $p <= $pageCount; $p++) {
-                    $imgPath = image_path_for($programKey, (int)$extLessonId, $p);
+                    $imgPath = image_path_for($programKey, $extLessonId, $p);
                     $insSlide->execute([$lessonRowId, $p, $defaultTpl, $imgPath]);
                     $totalSlides++;
                 }
@@ -458,8 +730,9 @@ cw_header('Import Lab');
 ?>
 <div class="card">
   <p class="muted">
-    Bulk import from your KS manifest. This will create Course → Lessons → Slides and detect page_count via CDN.
-    Optionally AI-detects course titles (per lab) and lesson titles (per lesson).
+    Bulk import: create Course → Lessons → Slides. Use a <strong>manifest JSON</strong>, or <strong>scan folders</strong> on this server that match
+    <code>ks_images/{program}/lesson_{id}/lesson_{id}_page_001.png</code> (same layout as the CDN). Page counts come from local files when scanning; otherwise from the CDN.
+    Optional AI for course titles (per lab) and lesson titles (per lesson) — when scanning, page 001 is read from disk for AI if present.
   </p>
 
   <form method="post" class="form-grid">
@@ -483,12 +756,40 @@ cw_header('Import Lab');
     <label>AI detect LESSON titles (per lesson)</label>
     <input type="checkbox" name="ai_titles" value="1" checked>
 
+    <label>Scan local folders (no manifest)</label>
+    <div>
+      <label><input type="checkbox" name="scan_from_disk" value="1"> Discover <code>lesson_*</code> under the program folder and import (ignores Bulk Labs JSON)</label>
+      <p class="muted" style="margin:8px 0 0 0; font-size:13px;">
+        <strong>Flat layout:</strong> <code>…/ks_images/instrument/lesson_10101/…</code> → one course; subfolder name is ignored.<br>
+        <strong>Course folders:</strong> <code>…/ks_images/instrument/My_Course_Name/lesson_10101/…</code> → one course per subfolder; course title defaults from folder name (spaces for underscores). Top-level <code>lesson_*</code> alongside those folders becomes an extra course “import” bucket.
+      </p>
+    </div>
+
+    <label>Local path to media root</label>
+    <div>
+      <input name="local_ks_root" type="text" style="width:100%; max-width:42rem;"
+        placeholder="Absolute path, e.g. /var/www/media or parent of ks_images"
+        value="<?= h(trim((string)(getenv('CW_KS_IMAGES_ROOT') ?: ''))) ?>">
+      <p class="muted" style="margin:6px 0 0 0; font-size:13px;">
+        Pre-filled from env <code>CW_KS_IMAGES_ROOT</code> if set. The importer looks for
+        <code>{path}/ks_images/{program_key}/</code> or, if <code>path</code> already ends with <code>ks_images</code>, <code>{path}/{program_key}/</code>.
+      </p>
+    </div>
+
+    <label>Synthetic lab IDs (disk scan)</label>
+    <div>
+      <input name="synthetic_lab_base" type="number" value="900000" min="1" style="width:8rem;">
+      <p class="muted" style="margin:6px 0 0 0; font-size:13px;">
+        Stored as <code>courses.external_lab_id</code>. Use a range that does not collide with real Kings lab IDs (e.g. 900000+).
+      </p>
+    </div>
+
     <label>Bulk Labs JSON (your manifest)</label>
     <textarea name="labs_json" rows="12" style="width:100%; grid-column: 2 / 3;"
       placeholder='Paste your manifest JSON here. Example: {"labs":[{"labId":10009,"lessonIds":[10102,10103]}], "lab_range":[10001,10026]}'></textarea>
 
     <div class="muted" style="grid-column:1/-1; padding:6px 0;">
-      If Bulk Labs JSON is provided, the single-lab fields below are ignored.
+      If “Scan local folders” is checked, this JSON is ignored. Otherwise, if JSON is provided, the single-lab fields below are ignored.
     </div>
 
     <label>Lab ID</label>
