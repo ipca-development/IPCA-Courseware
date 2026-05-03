@@ -4,21 +4,65 @@ require_once __DIR__ . '/../../src/layout.php';
 cw_require_admin();
 
 $courses = $pdo->query("
-  SELECT c.id, c.title, p.program_key
+  SELECT c.id, c.title, c.program_id, p.program_key
   FROM courses c JOIN programs p ON p.id=c.program_id
   ORDER BY p.sort_order, c.sort_order, c.id
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-$lessons = [];
+$programs = $pdo->query('SELECT id, program_key FROM programs ORDER BY sort_order, id')->fetchAll(PDO::FETCH_ASSOC);
+$programCourses = [];
+foreach ($courses as $cRow) {
+    $pid = (int)$cRow['program_id'];
+    if (!isset($programCourses[$pid])) {
+        $programCourses[$pid] = [];
+    }
+    $programCourses[$pid][] = $cRow;
+}
+
+$pick = trim((string)($_GET['pick'] ?? ''));
+$programId = (int)($_GET['program_id'] ?? 0);
 $courseId = (int)($_GET['course_id'] ?? 0);
-if ($courseId > 0) {
-    $stmt = $pdo->prepare("SELECT id, external_lesson_id, title FROM lessons WHERE course_id=? ORDER BY sort_order, external_lesson_id");
+if ($pick !== '') {
+    if (preg_match('/^program:(\d+)$/', $pick, $m)) {
+        $programId = (int)$m[1];
+        $courseId = 0;
+    } elseif (preg_match('/^course:(\d+)$/', $pick, $m)) {
+        $courseId = (int)$m[1];
+        $programId = 0;
+    }
+}
+
+$lessons = [];
+if ($programId > 0) {
+    $stmt = $pdo->prepare("
+        SELECT l.id, l.external_lesson_id, l.title, l.course_id, c.title AS course_title
+        FROM lessons l
+        INNER JOIN courses c ON c.id = l.course_id
+        WHERE c.program_id = ?
+        ORDER BY c.sort_order, c.id, l.sort_order, l.external_lesson_id
+    ");
+    $stmt->execute([$programId]);
+    $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} elseif ($courseId > 0) {
+    $stmt = $pdo->prepare('SELECT id, external_lesson_id, title, course_id FROM lessons WHERE course_id=? ORDER BY sort_order, external_lesson_id');
     $stmt->execute([$courseId]);
     $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 $lessonsAllCourses = [];
-if ($courseId > 0) {
+if ($programId > 0) {
+    $stmt = $pdo->prepare("
+        SELECT l.id, l.external_lesson_id, l.title, l.course_id,
+               c.title AS course_title, p.program_key
+        FROM lessons l
+        INNER JOIN courses c ON c.id = l.course_id
+        INNER JOIN programs p ON p.id = c.program_id
+        WHERE c.program_id = ?
+        ORDER BY c.sort_order, c.id, l.sort_order, l.external_lesson_id
+    ");
+    $stmt->execute([$programId]);
+    $lessonsAllCourses = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} elseif ($courseId > 0) {
     $lessonsAllCourses = $pdo->query("
       SELECT l.id, l.external_lesson_id, l.title, l.course_id,
              c.title AS course_title, p.program_key
@@ -36,9 +80,22 @@ foreach ($courses as $c) {
         break;
     }
 }
-$fullCourseAuditLabel = trim(trim((string)($selectedCourseMeta['program_key'] ?? '')) . ' — ' . trim((string)($selectedCourseMeta['title'] ?? '')));
-if ($fullCourseAuditLabel === '' || $fullCourseAuditLabel === '—') {
-    $fullCourseAuditLabel = 'course #' . $courseId;
+$fullCourseAuditLabel = '';
+if ($programId > 0) {
+    foreach ($programs as $p) {
+        if ((int)$p['id'] === $programId) {
+            $fullCourseAuditLabel = 'Entire program — ' . trim((string)($p['program_key'] ?? ''));
+            break;
+        }
+    }
+    if ($fullCourseAuditLabel === '') {
+        $fullCourseAuditLabel = 'program #' . $programId;
+    }
+} else {
+    $fullCourseAuditLabel = trim(trim((string)($selectedCourseMeta['program_key'] ?? '')) . ' — ' . trim((string)($selectedCourseMeta['title'] ?? '')));
+    if ($fullCourseAuditLabel === '' || $fullCourseAuditLabel === '—') {
+        $fullCourseAuditLabel = 'course #' . $courseId;
+    }
 }
 
 cw_header('Bulk Canonical Builder');
@@ -51,13 +108,22 @@ cw_header('Bulk Canonical Builder');
   </p>
 
   <form method="get" class="form-grid" style="margin-bottom:16px;">
-    <label>Pick course (loads lessons)</label>
-    <select name="course_id" onchange="this.form.submit()">
-      <option value="0">— Select course —</option>
-      <?php foreach ($courses as $c): ?>
-        <option value="<?= (int)$c['id'] ?>" <?= ($courseId === (int)$c['id']) ? 'selected' : '' ?>>
-          <?= h($c['program_key']) ?> — <?= h($c['title']) ?>
+    <label>Pick course <em>or</em> entire program (loads lessons / coverage scope)</label>
+    <select name="pick" onchange="this.form.submit()">
+      <option value="">— Select —</option>
+      <?php foreach ($programs as $p): ?>
+        <?php
+          $pid = (int)$p['id'];
+          $progSelected = ($programId === $pid && $courseId === 0);
+        ?>
+        <option value="program:<?= $pid ?>" <?= $progSelected ? 'selected' : '' ?>>
+          <?= h('Entire program — ' . (string)($p['program_key'] ?? '')) ?>
         </option>
+        <?php foreach ($programCourses[$pid] ?? [] as $c): ?>
+          <option value="course:<?= (int)$c['id'] ?>" <?= ($courseId === (int)$c['id'] && $programId === 0) ? 'selected' : '' ?>>
+            <?= h((string)($c['program_key'] ?? '')) ?> — <?= h((string)($c['title'] ?? '')) ?>
+          </option>
+        <?php endforeach; ?>
       <?php endforeach; ?>
     </select>
     <div></div><div></div>
@@ -85,7 +151,11 @@ cw_header('Bulk Canonical Builder');
       <option value="0">— Select lesson —</option>
       <?php foreach ($lessons as $l): ?>
         <option value="<?= (int)$l['id'] ?>">
-          <?= (int)$l['external_lesson_id'] ?> — <?= h($l['title']) ?>
+          <?php if ($programId > 0 && isset($l['course_title'])): ?>
+            <?= h((string)$l['course_title']) ?> · <?= (int)$l['external_lesson_id'] ?> — <?= h((string)$l['title']) ?>
+          <?php else: ?>
+            <?= (int)$l['external_lesson_id'] ?> — <?= h((string)$l['title']) ?>
+          <?php endif; ?>
         </option>
       <?php endforeach; ?>
     </select>
@@ -118,17 +188,18 @@ cw_header('Bulk Canonical Builder');
 
   <p class="muted" style="margin-top:14px;">
     Make sure <code>public/assets/kings_videos_manifest.json</code> exists for auto hotspots.
+    For whole-course runs, use <strong>Limit</strong> (e.g. 10–20) and run again until done — long single requests often hit nginx/Cloudflare timeouts even though PHP allows longer.
   </p>
 </div>
 
-<?php if ($courseId > 0): ?>
+<?php if ($courseId > 0 || $programId > 0): ?>
 <div class="card" style="margin-top:18px;">
   <h2>Coverage audit</h2>
   <p class="muted">
-    Per-slide checks against <code>slide_content</code> (EN/ES), <code>slide_enrichment</code> (narration),
-    <code>slide_references</code> (PHAK/ACS + low confidence), and <code>slide_hotspots</code> when the Kings manifest lists a video for that page.
-    Bulk enrich does not create eCFR rows — only PHAK/ACS. “Other refs” counts are informational.
-    “Full course” uses the course selected at the top of this page. The lesson list includes <strong>every lesson in the database</strong> (all courses), labeled by program and course. Lessons with <strong>no active slides</strong> still appear as one placeholder row in the report.
+    Per-slide checks across <strong>every active slide</strong> in the chosen scope (<strong>whole program</strong> or <strong>single course</strong>), using
+    <code>slide_content</code>, <code>slide_enrichment</code>, <code>slide_references</code>, and <code>slide_hotspots</code> vs the Kings manifest when applicable.
+    The lesson filter lists lessons from the <strong>program scope only</strong> when a program is selected; with a single course it lists all lessons system-wide for cross-course drill-down.
+    Lessons with <strong>no active slides</strong> show one placeholder row. Re-enrich opens one browser tab <strong>per course</strong> if your selection spans multiple courses.
   </p>
   <div class="form-grid" style="margin-bottom:12px;">
     <label>Focus audit</label>
@@ -152,6 +223,7 @@ cw_header('Bulk Canonical Builder');
         <tr>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;"><input type="checkbox" id="becToggleAll" title="Toggle all visible"></th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;" title="Kings / external lesson id">Ext</th>
+          <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Course</th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Lesson</th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Pg</th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Slide</th>
@@ -179,6 +251,7 @@ cw_header('Bulk Canonical Builder');
   <p class="muted" style="margin-top:10px;">
     Re-enrich runs the same pipeline as above for <strong>only</strong> the checked slide IDs. “Skip already processed” is ignored for that run.
     Uncheck any actions you do not want to overwrite (e.g. turn off Extract English if you only want hotspots).
+    Large selections are split into batches of <strong id="becChunkHintN">15</strong> slides per tab so proxies are less likely to time out; the list page can stay open — only the progress tabs need to complete.
   </p>
 </div>
 
@@ -186,7 +259,7 @@ cw_header('Bulk Canonical Builder');
   <input type="hidden" name="scope" value="course">
   <input type="hidden" name="lesson_id" value="0">
   <input type="hidden" name="limit" value="0">
-  <input type="hidden" name="course_id" value="<?= (int)$courseId ?>">
+  <input type="hidden" name="course_id" value="<?= (int)($courseId > 0 ? $courseId : 0) ?>">
   <input type="hidden" name="program_key" id="becTfProgramKey" value="private">
   <div id="becTfSlideIds"></div>
 </form>
@@ -202,13 +275,27 @@ cw_header('Bulk Canonical Builder');
 
 <script>
 (function () {
-  var courseId = <?= (int)$courseId ?>;
-  /** Course id from the last successful coverage fetch (correct when auditing another course’s lesson). */
-  var lastCoverageCourseId = courseId;
+  /** Max slides per POST to reduce nginx/Cloudflare idle timeouts on long AI runs. */
+  var BEC_MAX_SLIDES_PER_RUN = 15;
+
+  var pageCourseId = <?= (int)$courseId ?>;
+  var programId = <?= (int)$programId ?>;
+  /** Course id from the last successful coverage fetch (0 when scope was whole program). */
+  var lastCoverageCourseId = pageCourseId;
   var main = document.getElementById('bulkMainForm');
   var tbody = document.getElementById('becTbody');
   var summaryEl = document.getElementById('becSummary');
   var lastRows = [];
+  var chunkHint = document.getElementById('becChunkHintN');
+  if (chunkHint) chunkHint.textContent = String(BEC_MAX_SLIDES_PER_RUN);
+
+  function becChunkArray(arr, size) {
+    var out = [];
+    for (var i = 0; i < arr.length; i += size) {
+      out.push(arr.slice(i, i + size));
+    }
+    return out;
+  }
 
   function cellOk(ok) {
     return ok ? '<span class="bec-cell-ok">✓</span>' : '<span class="bec-cell-bad">✗</span>';
@@ -225,15 +312,20 @@ cw_header('Bulk Canonical Builder');
   document.getElementById('becLoadCoverage').onclick = function () {
     var sel = document.getElementById('becLessonFilter');
     var lid = parseInt(sel.value, 10) || 0;
-    var cid = courseId;
-    if (lid > 0) {
-      var opt = sel.options[sel.selectedIndex];
-      var dc = opt ? opt.getAttribute('data-course-id') : null;
-      if (dc) {
-        cid = parseInt(dc, 10) || cid;
+    var url;
+    if (programId > 0) {
+      url = '/admin/api/bulk_enrich_coverage.php?program_id=' + encodeURIComponent(String(programId));
+    } else {
+      var cid = pageCourseId;
+      if (lid > 0) {
+        var opt = sel.options[sel.selectedIndex];
+        var dc = opt ? opt.getAttribute('data-course-id') : null;
+        if (dc) {
+          cid = parseInt(dc, 10) || cid;
+        }
       }
+      url = '/admin/api/bulk_enrich_coverage.php?course_id=' + encodeURIComponent(String(cid));
     }
-    var url = '/admin/api/bulk_enrich_coverage.php?course_id=' + encodeURIComponent(String(cid));
     if (lid > 0) url += '&lesson_id=' + encodeURIComponent(String(lid));
     summaryEl.textContent = 'Loading…';
     tbody.innerHTML = '';
@@ -242,7 +334,7 @@ cw_header('Bulk Canonical Builder');
         summaryEl.textContent = 'Could not load coverage.';
         return;
       }
-      lastCoverageCourseId = parseInt(data.course_id, 10) || courseId;
+      lastCoverageCourseId = (data.scope === 'program') ? 0 : (parseInt(data.course_id, 10) || pageCourseId);
       lastRows = data.slides || [];
       var s = data.summary || {};
       var lessonLine = 'Lessons: <strong>' + (s.lessons_in_scope != null ? s.lessons_in_scope : '—') + '</strong>';
@@ -278,10 +370,12 @@ cw_header('Bulk Canonical Builder');
         var extId = row.external_lesson_id != null ? String(row.external_lesson_id) : '—';
         var pg = row.page_number != null ? esc(String(row.page_number)) : '<span class="bec-cell-na">—</span>';
         var sid = ph ? '<span class="bec-cell-na">—</span>' : String(row.slide_id);
+        var cidAttr = ph ? '0' : String(parseInt(row.course_id, 10) || 0);
         var cbCell = ph
           ? '<span class="bec-cell-na" title="No slides to enrich">—</span>'
-          : '<input type="checkbox" class="bec-sl" data-id="' + row.slide_id + '"' + (row.flagged ? ' checked' : '') + '>';
+          : '<input type="checkbox" class="bec-sl" data-id="' + row.slide_id + '" data-course-id="' + cidAttr + '"' + (row.flagged ? ' checked' : '') + '>';
         var naCols = ph ? '<td colspan="8" style="padding:6px 8px; border-bottom:1px solid #f1f5f9; text-align:center;" class="bec-cell-na">No active slides in this lesson</td>' : '';
+        var courseCell = esc(String(row.course_title || '—'));
         var detailCols = ph ? '' : (
           '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellOk(!!ch.extract_en) + '</td>' +
           '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellOk(!!ch.translate_es) + '</td>' +
@@ -297,6 +391,7 @@ cw_header('Bulk Canonical Builder');
         tr.innerHTML =
           '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + cbCell + '</td>' +
           '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9; white-space:nowrap;">' + esc(extId) + '</td>' +
+          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9; max-width:140px; font-size:12px;">' + courseCell + '</td>' +
           '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9; max-width:160px;">' + esc(row.lesson_title || '') + '</td>' +
           '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + pg + '</td>' +
           '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + sid + '</td>' +
@@ -333,44 +428,74 @@ cw_header('Bulk Canonical Builder');
 
   document.getElementById('becRunSelected').onclick = function () {
     if (!main) return;
-    var ids = [];
+    var byCourse = {};
     tbody.querySelectorAll('input.bec-sl:checked').forEach(function (c) {
       var id = parseInt(c.getAttribute('data-id'), 10);
-      if (id > 0) ids.push(id);
+      var cid = parseInt(c.getAttribute('data-course-id'), 10) || 0;
+      if (id <= 0 || cid <= 0) return;
+      if (!byCourse[cid]) byCourse[cid] = [];
+      byCourse[cid].push(id);
     });
-    if (!ids.length) {
+    var courseIds = Object.keys(byCourse);
+    if (!courseIds.length) {
       alert('Select at least one slide.');
       return;
     }
-    var tf = document.getElementById('bulkTargetForm');
-    var box = document.getElementById('becTfSlideIds');
-    box.innerHTML = '';
-    tf.querySelectorAll('.js-action-mirror').forEach(function (n) { n.remove(); });
-    ids.forEach(function (id) {
-      var h = document.createElement('input');
-      h.type = 'hidden';
-      h.name = 'target_slide_ids[]';
-      h.value = String(id);
-      box.appendChild(h);
+    var jobs = [];
+    courseIds.forEach(function (k) {
+      var cid = parseInt(k, 10);
+      becChunkArray(byCourse[k], BEC_MAX_SLIDES_PER_RUN).forEach(function (chunk) {
+        jobs.push({ courseId: cid, slideIds: chunk });
+      });
     });
-    ['do_en', 'do_es', 'do_narration', 'do_refs', 'do_hotspots'].forEach(function (name) {
-      var el = main.querySelector('[name="' + name + '"]');
-      if (el && el.checked) {
-        var hi = document.createElement('input');
-        hi.type = 'hidden';
-        hi.name = name;
-        hi.value = '1';
-        hi.className = 'js-action-mirror';
-        tf.appendChild(hi);
-      }
-    });
-    tf.elements.course_id.value = String(lastCoverageCourseId);
-    var pk = main.elements.program_key;
-    document.getElementById('becTfProgramKey').value = pk ? pk.value : 'private';
-    if (!confirm('Re-run bulk enrich for ' + ids.length + ' slide(s)? Enabled actions will overwrite existing data for those slides.')) {
-      return;
+    var totalSlides = jobs.reduce(function (n, j) { return n + j.slideIds.length; }, 0);
+    var msg = 'Re-run bulk enrich for ' + totalSlides + ' slide(s)';
+    if (jobs.length > 1) {
+      msg += ' in ' + jobs.length + ' batches (opens ' + jobs.length + ' tabs, ~' + BEC_MAX_SLIDES_PER_RUN + ' slides each) to avoid timeouts.';
+    } else {
+      msg += '?';
     }
-    tf.submit();
+    msg += ' Enabled actions will overwrite existing data for those slides.';
+    if (!confirm(msg)) return;
+
+    function mirrorActions(tf) {
+      ['do_en', 'do_es', 'do_narration', 'do_refs', 'do_hotspots'].forEach(function (name) {
+        var el = main.querySelector('[name="' + name + '"]');
+        if (el && el.checked) {
+          var hi = document.createElement('input');
+          hi.type = 'hidden';
+          hi.name = name;
+          hi.value = '1';
+          hi.className = 'js-action-mirror';
+          tf.appendChild(hi);
+        }
+      });
+    }
+
+    function submitJob(job, idx) {
+      var tf = document.getElementById('bulkTargetForm');
+      var box = document.getElementById('becTfSlideIds');
+      box.innerHTML = '';
+      tf.querySelectorAll('.js-action-mirror').forEach(function (n) { n.remove(); });
+      job.slideIds.forEach(function (id) {
+        var h = document.createElement('input');
+        h.type = 'hidden';
+        h.name = 'target_slide_ids[]';
+        h.value = String(id);
+        box.appendChild(h);
+      });
+      mirrorActions(tf);
+      tf.elements.course_id.value = String(job.courseId);
+      var pk = main.elements.program_key;
+      document.getElementById('becTfProgramKey').value = pk ? pk.value : 'private';
+      tf.submit();
+      if (idx + 1 < jobs.length) {
+        setTimeout(function () {
+          submitJob(jobs[idx + 1], idx + 1);
+        }, 500);
+      }
+    }
+    submitJob(jobs[0], 0);
   };
 })();
 </script>

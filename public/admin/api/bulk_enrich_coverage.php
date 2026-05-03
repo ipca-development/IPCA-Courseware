@@ -35,13 +35,16 @@ function bec_manifest_has_video(int $extLessonId, int $pageNum): bool
     return false;
 }
 
+$programId = (int)($_GET['program_id'] ?? 0);
 $courseId = (int)($_GET['course_id'] ?? 0);
 $lessonId = (int)($_GET['lesson_id'] ?? 0);
 
-if ($courseId <= 0) {
-    echo json_encode(['ok' => false, 'error' => 'course_id required']);
+if ($programId <= 0 && $courseId <= 0) {
+    echo json_encode(['ok' => false, 'error' => 'course_id or program_id required']);
     exit;
 }
+
+$scopeProgram = $programId > 0;
 
 $sql = "
   SELECT
@@ -50,6 +53,8 @@ $sql = "
     s.page_number,
     l.external_lesson_id,
     l.id AS lesson_id,
+    l.course_id AS slide_course_id,
+    c.title AS course_title,
     l.title AS lesson_title,
     sc_en.plain_text AS en_plain,
     sc_es.plain_text AS es_plain,
@@ -62,20 +67,21 @@ $sql = "
     (SELECT MIN(r.confidence) FROM slide_references r WHERE r.slide_id = s.id AND r.ref_type IN ('PHAK','ACS')) AS min_ref_confidence
   FROM slides s
   INNER JOIN lessons l ON l.id = s.lesson_id
+  INNER JOIN courses c ON c.id = l.course_id
   LEFT JOIN slide_content sc_en ON sc_en.slide_id = s.id AND sc_en.lang = 'en'
   LEFT JOIN slide_content sc_es ON sc_es.slide_id = s.id AND sc_es.lang = 'es'
   LEFT JOIN slide_enrichment se ON se.slide_id = s.id
   WHERE COALESCE(s.is_deleted, 0) = 0
-    AND l.course_id = ?
+    AND " . ($scopeProgram ? 'c.program_id = ?' : 'l.course_id = ?') . "
 ";
-$params = [$courseId];
+$params = [$scopeProgram ? $programId : $courseId];
 
 if ($lessonId > 0) {
     $sql .= ' AND l.id = ? ';
     $params[] = $lessonId;
 }
 
-$sql .= ' ORDER BY l.sort_order, l.external_lesson_id, l.id, s.page_number ';
+$sql .= ' ORDER BY c.sort_order, c.id, l.sort_order, l.external_lesson_id, l.id, s.page_number ';
 
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
@@ -85,10 +91,11 @@ $countSql = '
   SELECT COUNT(*)
   FROM slides s
   INNER JOIN lessons l ON l.id = s.lesson_id
+  INNER JOIN courses c ON c.id = l.course_id
   WHERE COALESCE(s.is_deleted, 0) = 0
-    AND l.course_id = ?
+    AND ' . ($scopeProgram ? 'c.program_id = ?' : 'l.course_id = ?') . '
 ';
-$countParams = [$courseId];
+$countParams = [$scopeProgram ? $programId : $courseId];
 if ($lessonId > 0) {
     $countSql .= ' AND l.id = ? ';
     $countParams[] = $lessonId;
@@ -103,19 +110,22 @@ $sqlLessons = "
     l.external_lesson_id,
     l.title,
     l.sort_order,
+    l.course_id AS lesson_course_id,
+    c.title AS course_title,
     COALESCE(SUM(CASE WHEN COALESCE(s.is_deleted, 0) = 0 THEN 1 ELSE 0 END), 0) AS active_slides,
     COALESCE(SUM(CASE WHEN s.is_deleted = 1 THEN 1 ELSE 0 END), 0) AS deleted_slides
   FROM lessons l
+  INNER JOIN courses c ON c.id = l.course_id
   LEFT JOIN slides s ON s.lesson_id = l.id
-  WHERE l.course_id = ?
-";
-$paramsLessons = [$courseId];
+  WHERE " . ($scopeProgram ? 'c.program_id = ?' : 'l.course_id = ?') . '
+';
+$paramsLessons = [$scopeProgram ? $programId : $courseId];
 if ($lessonId > 0) {
     $sqlLessons .= ' AND l.id = ? ';
     $paramsLessons[] = $lessonId;
 }
-$sqlLessons .= ' GROUP BY l.id, l.external_lesson_id, l.title, l.sort_order
-  ORDER BY l.sort_order, l.external_lesson_id, l.id ';
+$sqlLessons .= ' GROUP BY l.id, l.external_lesson_id, l.title, l.sort_order, l.course_id, c.sort_order, c.id, c.title
+  ORDER BY c.sort_order, c.id, l.sort_order, l.external_lesson_id, l.id ';
 
 $stmtLessons = $pdo->prepare($sqlLessons);
 $stmtLessons->execute($paramsLessons);
@@ -151,8 +161,9 @@ $counts = [
  *
  * @param array<string,mixed> $r
  */
-$appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts, $courseId): void {
+$appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts): void {
     $slideId = (int)$r['slide_id'];
+    $slideCourseId = (int)($r['slide_course_id'] ?? 0);
     $extLessonId = (int)$r['external_lesson_id'];
     $pageNum = (int)$r['page_number'];
 
@@ -239,6 +250,8 @@ $appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts,
     $slides[] = [
         'slide_id' => $slideId,
         'placeholder' => false,
+        'course_id' => $slideCourseId,
+        'course_title' => (string)($r['course_title'] ?? ''),
         'lesson_id' => $lessonRowId,
         'lesson_title' => (string)$r['lesson_title'],
         'external_lesson_id' => $extLessonId,
@@ -267,7 +280,7 @@ $appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts,
         ],
         'flagged' => $flagged,
         'flag_reasons' => $reasons,
-        'overlay_editor_url' => '/admin/slide_overlay_editor.php?slide_id=' . $slideId . '&course_id=' . $courseId . '&lesson_id=' . $lessonRowId,
+        'overlay_editor_url' => '/admin/slide_overlay_editor.php?slide_id=' . $slideId . '&course_id=' . $slideCourseId . '&lesson_id=' . $lessonRowId,
     ];
 };
 
@@ -295,9 +308,12 @@ foreach ($lessonList as $les) {
 
     if ($activeCount === 0) {
         $counts['lessons_without_active_slides']++;
+        $lcourseId = (int)($les['lesson_course_id'] ?? 0);
         $slides[] = [
             'slide_id' => 0,
             'placeholder' => true,
+            'course_id' => $lcourseId,
+            'course_title' => (string)($les['course_title'] ?? ''),
             'lesson_id' => $lid,
             'lesson_title' => (string)$les['title'],
             'external_lesson_id' => (int)$les['external_lesson_id'],
@@ -330,16 +346,19 @@ foreach ($lessonList as $les) {
             'flag_reasons' => $deletedCount > 0
                 ? ['no_active_slides', 'only_deleted_slides_count_' . $deletedCount]
                 : ['no_active_slides'],
-            'overlay_editor_url' => '/admin/slides.php?course_id=' . $courseId . '&lesson_id=' . $lid,
+            'overlay_editor_url' => '/admin/slides.php?course_id=' . $lcourseId . '&lesson_id=' . $lid,
         ];
         $counts['flagged']++;
         continue;
     }
 
     $counts['lessons_slide_aggregate_mismatch']++;
+    $lcourseId = (int)($les['lesson_course_id'] ?? 0);
     $slides[] = [
         'slide_id' => 0,
         'placeholder' => true,
+        'course_id' => $lcourseId,
+        'course_title' => (string)($les['course_title'] ?? ''),
         'lesson_id' => $lid,
         'lesson_title' => (string)$les['title'],
         'external_lesson_id' => (int)$les['external_lesson_id'],
@@ -370,7 +389,7 @@ foreach ($lessonList as $les) {
         ],
         'flagged' => true,
         'flag_reasons' => ['lesson_slide_count_mismatch_db_reports_' . $activeCount . '_active_but_main_query_returned_zero_rows'],
-        'overlay_editor_url' => '/admin/slides.php?course_id=' . $courseId . '&lesson_id=' . $lid,
+        'overlay_editor_url' => '/admin/slides.php?course_id=' . $lcourseId . '&lesson_id=' . $lid,
     ];
     $counts['flagged']++;
 }
@@ -395,7 +414,9 @@ if ($counts['total'] !== $slidesExpectedFromDb || count($rows) !== $slidesExpect
 
 echo json_encode([
     'ok' => true,
-    'course_id' => $courseId,
+    'program_id' => $scopeProgram ? $programId : null,
+    'course_id' => $courseId > 0 ? $courseId : null,
+    'scope' => $scopeProgram ? 'program' : 'course',
     'lesson_id' => $lessonId,
     'thresholds' => [
         'min_en_len' => BEC_MIN_EN_LEN,

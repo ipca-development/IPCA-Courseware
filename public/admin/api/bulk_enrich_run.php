@@ -9,6 +9,8 @@ cw_require_admin();
 
 session_write_close();
 
+ignore_user_abort(true);
+
 header('Content-Type: text/html; charset=utf-8');
 header('Cache-Control: no-cache, no-store, must-revalidate');
 header('Pragma: no-cache');
@@ -18,7 +20,8 @@ header('X-Accel-Buffering: no');
 // streaming output
 @set_time_limit(1800);
 @ini_set('max_execution_time', '1800');
-@ini_set('default_socket_timeout', '60');
+// Vision + structured output can exceed 60s per slide; proxies still may cut the connection earlier.
+@ini_set('default_socket_timeout', '600');
 @ini_set('output_buffering', 'off');
 @ini_set('zlib.output_compression', '0');
 
@@ -420,6 +423,8 @@ TXT;
             ],
             'temperature' => 0.2
         ];
+
+        progress('  → calling model (may take 1–3 min for vision)…');
 
         try {
             $resp = cw_openai_responses($payload);
