@@ -224,6 +224,22 @@ $doHotspots = isset($_POST['do_hotspots']);
 $skipExisting = isset($_POST['skip_existing']);
 $limit = (int)($_POST['limit'] ?? 0);
 
+$targetSlideIds = [];
+$rawTargets = $_POST['target_slide_ids'] ?? null;
+if (is_array($rawTargets)) {
+    $targetSlideIds = array_values(array_unique(array_map('intval', $rawTargets)));
+} elseif (is_string($rawTargets) && trim($rawTargets) !== '') {
+    $targetSlideIds = array_values(array_unique(array_map('intval', preg_split('/\s*,\s*/', $rawTargets))));
+}
+$targetSlideIds = array_values(array_filter($targetSlideIds, function ($x) {
+    return (int)$x > 0;
+}));
+
+if ($targetSlideIds !== []) {
+    // Targeted re-run: only selected slides; do not skip slides that already have EN.
+    $skipExisting = false;
+}
+
 echo "<!doctype html><html><head><meta charset='utf-8'><title>Bulk Canonical Builder</title></head><body style='padding:16px'>";
 echo str_repeat(' ', 4096);
 @flush();
@@ -265,6 +281,19 @@ $sql .= " ORDER BY l.sort_order, l.external_lesson_id, s.page_number ";
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $slides = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+if ($targetSlideIds !== []) {
+    $allowed = array_flip($targetSlideIds);
+    $slides = array_values(array_filter($slides, function ($row) use ($allowed) {
+        return isset($allowed[(int)$row['slide_id']]);
+    }));
+    progress('Targeted slide ids: ' . count($targetSlideIds) . ' — matched in scope: ' . count($slides));
+    if ($slides === []) {
+        progress('ERROR: No slides matched (wrong course/lesson or invalid ids).');
+        echo "</body></html>";
+        exit;
+    }
+}
 
 progress("Slides in scope: " . count($slides));
 
