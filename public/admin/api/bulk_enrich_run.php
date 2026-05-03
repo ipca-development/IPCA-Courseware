@@ -264,7 +264,7 @@ $sql = "
          l.external_lesson_id, l.id AS lesson_row_id
   FROM slides s
   JOIN lessons l ON l.id = s.lesson_id
-  WHERE s.is_deleted=0
+  WHERE COALESCE(s.is_deleted, 0) = 0
 ";
 $params = [];
 

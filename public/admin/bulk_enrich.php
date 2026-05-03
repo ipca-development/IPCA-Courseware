@@ -104,6 +104,7 @@ cw_header('Bulk Canonical Builder');
     Per-slide checks against <code>slide_content</code> (EN/ES), <code>slide_enrichment</code> (narration),
     <code>slide_references</code> (PHAK/ACS + low confidence), and <code>slide_hotspots</code> when the Kings manifest lists a video for that page.
     Bulk enrich does not create eCFR rows — only PHAK/ACS. “Other refs” counts are informational.
+    Every lesson in the course is listed in lesson order; lessons with <strong>no active slides</strong> appear as one placeholder row (upload slides first).
   </p>
   <div class="form-grid" style="margin-bottom:12px;">
     <label>Limit audit to lesson</label>
@@ -124,6 +125,7 @@ cw_header('Bulk Canonical Builder');
       <thead style="position:sticky; top:0; background:#f8fafc; z-index:1;">
         <tr>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;"><input type="checkbox" id="becToggleAll" title="Toggle all visible"></th>
+          <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;" title="Kings / external lesson id">Ext</th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Lesson</th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Pg</th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb;">Slide</th>
@@ -205,7 +207,11 @@ cw_header('Bulk Canonical Builder');
       }
       lastRows = data.slides || [];
       var s = data.summary || {};
-      summaryEl.innerHTML = 'Slides: <strong>' + s.total + '</strong> · Flagged: <strong>' + s.flagged + '</strong> · '
+      var lessonLine = 'Lessons: <strong>' + (s.lessons_in_scope != null ? s.lessons_in_scope : '—') + '</strong>';
+      if ((s.lessons_without_active_slides || 0) > 0) {
+        lessonLine += ' · <strong>' + s.lessons_without_active_slides + '</strong> with no active slides';
+      }
+      summaryEl.innerHTML = lessonLine + ' · Slide rows: <strong>' + s.total + '</strong> · Flagged rows: <strong>' + s.flagged + '</strong> · '
         + 'EN ok: ' + s.en_ok + ' · ES ok: ' + s.es_ok + ' · Narr EN: ' + s.narr_en_ok + ' · Narr ES: ' + s.narr_es_ok + ' · '
         + 'PHAK: ' + s.phak_ok + ' · ACS: ' + s.acs_ok;
       if (s.hotspot_expected > 0) {
@@ -221,15 +227,19 @@ cw_header('Bulk Canonical Builder');
         var ch = row.checks || {};
         var tr = document.createElement('tr');
         tr.className = row.flagged ? 'flagged' : 'okish';
+        var ph = !!row.placeholder;
         var reasons = (row.flag_reasons || []).join(', ');
         var lowConf = !!ch.refs_low_confidence;
         var otherRef = typeof ch.other_refs_count === 'number' && ch.other_refs_count > 0;
         var notes = reasons + (otherRef ? ' · other_refs:' + ch.other_refs_count : '');
-        tr.innerHTML =
-          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;"><input type="checkbox" class="bec-sl" data-id="' + row.slide_id + '"' + (row.flagged ? ' checked' : '') + '></td>' +
-          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9; max-width:160px;">' + esc(row.lesson_title || '') + '</td>' +
-          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + esc(String(row.page_number)) + '</td>' +
-          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + row.slide_id + '</td>' +
+        var extId = row.external_lesson_id != null ? String(row.external_lesson_id) : '—';
+        var pg = row.page_number != null ? esc(String(row.page_number)) : '<span class="bec-cell-na">—</span>';
+        var sid = ph ? '<span class="bec-cell-na">—</span>' : String(row.slide_id);
+        var cbCell = ph
+          ? '<span class="bec-cell-na" title="No slides to enrich">—</span>'
+          : '<input type="checkbox" class="bec-sl" data-id="' + row.slide_id + '"' + (row.flagged ? ' checked' : '') + '>';
+        var naCols = ph ? '<td colspan="8" style="padding:6px 8px; border-bottom:1px solid #f1f5f9; text-align:center;" class="bec-cell-na">No active slides in this lesson</td>' : '';
+        var detailCols = ph ? '' : (
           '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellOk(!!ch.extract_en) + '</td>' +
           '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellOk(!!ch.translate_es) + '</td>' +
           '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellOk(!!ch.narration_en) + '</td>' +
@@ -237,10 +247,20 @@ cw_header('Bulk Canonical Builder');
           '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellOk(!!ch.phak_refs) + '</td>' +
           '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellOk(!!ch.acs_refs) + '</td>' +
           '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellOk(!!ch.video_hotspot) + '</td>' +
-          '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + (ch.manifest_lists_video ? '<span class="bec-cell-ok">yes</span>' : '<span class="bec-cell-na">no</span>') + '</td>' +
-          '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellWarn(lowConf) + '</td>' +
+          '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + (ch.manifest_lists_video ? '<span class="bec-cell-ok">yes</span>' : '<span class="bec-cell-na">no</span>') + '</td>'
+        );
+        var warnCell = ph ? '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;"><span class="bec-cell-na">—</span></td>' : '<td style="text-align:center; padding:6px; border-bottom:1px solid #f1f5f9;">' + cellWarn(lowConf) + '</td>';
+        var linkLabel = ph ? 'Slides' : 'Edit';
+        tr.innerHTML =
+          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + cbCell + '</td>' +
+          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9; white-space:nowrap;">' + esc(extId) + '</td>' +
+          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9; max-width:160px;">' + esc(row.lesson_title || '') + '</td>' +
+          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + pg + '</td>' +
+          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;">' + sid + '</td>' +
+          detailCols + naCols +
+          warnCell +
           '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9; font-size:12px; max-width:240px;">' + esc(notes || '—') + '</td>' +
-          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;"><a href="' + esc(row.overlay_editor_url) + '">Edit</a></td>';
+          '<td style="padding:6px 8px; border-bottom:1px solid #f1f5f9;"><a href="' + esc(row.overlay_editor_url) + '">' + esc(linkLabel) + '</a></td>';
         tbody.appendChild(tr);
       });
     }).catch(function () {
