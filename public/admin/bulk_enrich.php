@@ -182,14 +182,107 @@ cw_header('Bulk Canonical Builder');
     <label>Limit (0 = no limit)</label>
     <input type="number" name="limit" value="0" min="0">
 
+    <label>Long runs</label>
+    <label><input type="checkbox" id="becMainAutoBatch" checked> Auto-split into batches of <strong>15</strong> slides per tab when Limit is <strong>0</strong> (recommended; avoids blocked pop-ups and proxy timeouts)</label>
+
     <div></div>
     <button class="btn" type="submit">Run Bulk Build (opens new tab)</button>
   </form>
 
   <p class="muted" style="margin-top:14px;">
     Make sure <code>public/assets/kings_videos_manifest.json</code> exists for auto hotspots.
-    For whole-course runs, use <strong>Limit</strong> (e.g. 10–20) and run again until done — long single requests often hit nginx/Cloudflare timeouts even though PHP allows longer.
+    With auto-split off, use <strong>Limit</strong> (e.g. 10–20) and run again until done if a single tab times out.
   </p>
+  <script>
+  (function () {
+    var BEC_MAIN_BATCH = 15;
+    var main = document.getElementById('bulkMainForm');
+    if (!main) return;
+    main.addEventListener('submit', function (ev) {
+      var auto = document.getElementById('becMainAutoBatch');
+      if (!auto || !auto.checked) return;
+      var limEl = main.elements.limit;
+      var lim = limEl ? (parseInt(limEl.value, 10) || 0) : 0;
+      if (lim > 0) return;
+      var cid = parseInt(main.elements.course_id.value, 10) || 0;
+      if (cid <= 0) return;
+      var scope = main.elements.scope ? main.elements.scope.value : 'course';
+      var lid = main.elements.lesson_id ? (parseInt(main.elements.lesson_id.value, 10) || 0) : 0;
+      if (scope === 'lesson' && lid <= 0) return;
+
+      ev.preventDefault();
+      var q = 'course_id=' + encodeURIComponent(String(cid))
+        + '&scope=' + encodeURIComponent(scope)
+        + '&lesson_id=' + encodeURIComponent(String(lid));
+      fetch('/admin/api/bulk_enrich_slide_count.php?' + q, { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (!data || !data.ok) {
+            window.alert(data && data.error ? data.error : 'Could not count slides.');
+            return;
+          }
+          var n = parseInt(data.slide_count, 10) || 0;
+          if (n <= 0) {
+            window.alert('No slides in scope.');
+            return;
+          }
+          if (n <= BEC_MAIN_BATCH) {
+            main.target = '_blank';
+            main.submit();
+            return;
+          }
+          var batches = Math.ceil(n / BEC_MAIN_BATCH);
+          if (!window.confirm('Run ' + n + ' slides in ' + batches + ' separate tabs (~' + BEC_MAIN_BATCH + ' slides each)? Allow pop-ups if the browser asks.')) {
+            return;
+          }
+          var key = Date.now();
+          var names = [];
+          for (var w = 0; w < batches; w++) {
+            names[w] = 'becMainBatch_' + key + '_' + w;
+            window.open('about:blank', names[w]);
+          }
+          function addH(form, name, value) {
+            var x = document.createElement('input');
+            x.type = 'hidden';
+            x.name = name;
+            x.value = String(value);
+            form.appendChild(x);
+          }
+          function mirrorCheckboxes(form) {
+            main.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+              if (!cb.name || !cb.checked) return;
+              addH(form, cb.name, cb.value || '1');
+            });
+          }
+          function runBatch(idx) {
+            if (idx >= batches) return;
+            var f = document.createElement('form');
+            f.method = 'post';
+            f.action = '/admin/api/bulk_enrich_run.php';
+            f.target = names[idx];
+            f.acceptCharset = 'UTF-8';
+            addH(f, 'scope', scope);
+            addH(f, 'course_id', String(cid));
+            addH(f, 'lesson_id', String(lid));
+            var pk = main.elements.program_key;
+            addH(f, 'program_key', pk ? pk.value : 'private');
+            addH(f, 'limit', '0');
+            addH(f, 'batch_offset', String(idx * BEC_MAIN_BATCH));
+            addH(f, 'batch_size', String(Math.min(BEC_MAIN_BATCH, n - idx * BEC_MAIN_BATCH)));
+            mirrorCheckboxes(f);
+            document.body.appendChild(f);
+            f.submit();
+            document.body.removeChild(f);
+            if (idx + 1 < batches) {
+              window.setTimeout(function () { runBatch(idx + 1); }, 600);
+            }
+          }
+          runBatch(0);
+        })
+        .catch(function () { window.alert('Could not count slides (network).'); });
+    });
+  })();
+  </script>
 </div>
 
 <?php if ($courseId > 0 || $programId > 0): ?>
@@ -458,6 +551,15 @@ cw_header('Bulk Canonical Builder');
     msg += ' Enabled actions will overwrite existing data for those slides.';
     if (!confirm(msg)) return;
 
+    var batchWinNames = [];
+    if (jobs.length > 1) {
+      var wkey = String(Date.now());
+      for (var wi = 0; wi < jobs.length; wi++) {
+        batchWinNames[wi] = 'becReenrich_' + wkey + '_' + wi;
+        window.open('about:blank', batchWinNames[wi]);
+      }
+    }
+
     function mirrorActions(tf) {
       ['do_en', 'do_es', 'do_narration', 'do_refs', 'do_hotspots'].forEach(function (name) {
         var el = main.querySelector('[name="' + name + '"]');
@@ -474,6 +576,7 @@ cw_header('Bulk Canonical Builder');
 
     function submitJob(job, idx) {
       var tf = document.getElementById('bulkTargetForm');
+      tf.target = jobs.length > 1 ? batchWinNames[idx] : '_blank';
       var box = document.getElementById('becTfSlideIds');
       box.innerHTML = '';
       tf.querySelectorAll('.js-action-mirror').forEach(function (n) { n.remove(); });
@@ -492,7 +595,7 @@ cw_header('Bulk Canonical Builder');
       if (idx + 1 < jobs.length) {
         setTimeout(function () {
           submitJob(jobs[idx + 1], idx + 1);
-        }, 500);
+        }, 600);
       }
     }
     submitJob(jobs[0], 0);

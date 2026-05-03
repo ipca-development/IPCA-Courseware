@@ -226,6 +226,8 @@ $doRefs = isset($_POST['do_refs']);
 $doHotspots = isset($_POST['do_hotspots']);
 $skipExisting = isset($_POST['skip_existing']);
 $limit = (int)($_POST['limit'] ?? 0);
+$batchSize = max(0, (int)($_POST['batch_size'] ?? 0));
+$batchOffset = max(0, (int)($_POST['batch_offset'] ?? 0));
 
 $targetSlideIds = [];
 $rawTargets = $_POST['target_slide_ids'] ?? null;
@@ -298,7 +300,23 @@ if ($targetSlideIds !== []) {
     }
 }
 
-progress("Slides in scope: " . count($slides));
+$totalInScope = count($slides);
+// Server-side batching (main form): preserves skip_existing; ignored when targeting specific slide IDs.
+if ($targetSlideIds === [] && $batchSize > 0) {
+    $slides = array_slice($slides, $batchOffset, $batchSize);
+}
+
+if ($slides === []) {
+    progress('ERROR: No slides in this batch or scope.');
+    echo "</body></html>";
+    exit;
+}
+
+if ($targetSlideIds === [] && $batchSize > 0) {
+    progress('Batch offset ' . $batchOffset . ', size ' . $batchSize . ' — running ' . count($slides) . ' slide(s) (full scope: ' . $totalInScope . ').');
+} else {
+    progress('Slides in scope: ' . count($slides));
+}
 
 $processed = 0;
 
