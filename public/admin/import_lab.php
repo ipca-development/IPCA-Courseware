@@ -163,6 +163,173 @@ function parse_labs_json(string $raw): array {
     return $out;
 }
 
+function import_lab_json_is_list(array $a): bool
+{
+    if ($a === []) {
+        return false;
+    }
+    if (function_exists('array_is_list')) {
+        return array_is_list($a);
+    }
+    $i = 0;
+    foreach ($a as $k => $_) {
+        if ($k !== $i) {
+            return false;
+        }
+        $i++;
+    }
+    return true;
+}
+
+/**
+ * Kings IR / export pipeline: top-level JSON array of
+ * { "lesson_id"|"lessonId", "title"?, "pages": [ { "page", "screenshot"? }, ... ] }.
+ * Produces one synthetic "lab" (course) containing all lessons; use Synthetic lab ID from the form.
+ *
+ * @param list<array<string, mixed>> $rows
+ * @return list<array<string, mixed>>
+ */
+function parse_kings_lesson_pages_manifest_array(array $rows, int $fallbackLabId): array
+{
+    $lessonIds = [];
+    $pageCounts = [];
+    $lessonTitles = [];
+
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $lid = (int) ($row['lesson_id'] ?? $row['lessonId'] ?? 0);
+        if ($lid <= 0) {
+            continue;
+        }
+        $pages = $row['pages'] ?? [];
+        if (!is_array($pages)) {
+            $pages = [];
+        }
+        $maxP = 0;
+        foreach ($pages as $p) {
+            if (!is_array($p)) {
+                continue;
+            }
+            $maxP = max($maxP, (int) ($p['page'] ?? 0));
+        }
+        if ($maxP === 0 && $pages !== []) {
+            $maxP = count($pages);
+        }
+        $lessonIds[] = $lid;
+        $pageCounts[$lid] = $maxP;
+        $ttl = trim((string) ($row['title'] ?? ''));
+        if ($ttl !== '') {
+            $lessonTitles[$lid] = $ttl;
+        }
+    }
+
+    if ($lessonIds === []) {
+        return [];
+    }
+
+    $lessonIds = array_values(array_unique($lessonIds));
+    sort($lessonIds, SORT_NUMERIC);
+
+    return [[
+        'lab_id' => max(1, $fallbackLabId),
+        'lesson_ids' => $lessonIds,
+        'page_counts' => $pageCounts,
+        'lesson_roots' => [],
+        'lesson_titles' => $lessonTitles,
+        'course_title' => '',
+        'course_slug' => '',
+    ]];
+}
+
+/**
+ * Accepts:
+ * - Legacy / bulk: { "labs": [ { "labId", "lessonIds" } ] } (same as parse_labs_json).
+ * - Pipeline export: { "labs": [...], "lessons": [ { "lessonId", "pages", "status" }, ... ] } — merges per-lesson page counts into each lab.
+ * - Lesson-only array: [ { "lesson_id", "title", "pages": [...] }, ... ] — one course using $fallbackLabId.
+ */
+function parse_labs_json_enhanced(string $raw, int $fallbackLabId): array
+{
+    $raw = trim($raw);
+    if ($raw === '') {
+        return [];
+    }
+    $data = json_decode($raw, true);
+    if (!is_array($data)) {
+        return [];
+    }
+
+    if (import_lab_json_is_list($data)) {
+        $first = $data[0] ?? null;
+        if (is_array($first) && isset($first['pages']) && is_array($first['pages'])) {
+            $hasLesson = ((int) ($first['lesson_id'] ?? $first['lessonId'] ?? 0)) > 0;
+            if ($hasLesson) {
+                return parse_kings_lesson_pages_manifest_array($data, $fallbackLabId);
+            }
+        }
+    }
+
+    if (isset($data['labs']) && is_array($data['labs']) && $data['labs'] !== []) {
+        $labsOut = [];
+        foreach ($data['labs'] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $labId = (int) ($row['labId'] ?? $row['lab_id'] ?? 0);
+            $lessonIds = $row['lessonIds'] ?? $row['lesson_ids'] ?? [];
+            if (!is_array($lessonIds)) {
+                $lessonIds = [];
+            }
+            $lessonIds = array_values(array_map('intval', array_filter($lessonIds, 'is_numeric')));
+            if ($labId <= 0 || $lessonIds === []) {
+                continue;
+            }
+            $labsOut[] = [
+                'lab_id' => $labId,
+                'lesson_ids' => $lessonIds,
+            ];
+        }
+        if ($labsOut === []) {
+            return [];
+        }
+
+        $byLesson = [];
+        if (isset($data['lessons']) && is_array($data['lessons'])) {
+            foreach ($data['lessons'] as $lr) {
+                if (!is_array($lr)) {
+                    continue;
+                }
+                $lid = (int) ($lr['lessonId'] ?? $lr['lesson_id'] ?? 0);
+                if ($lid <= 0) {
+                    continue;
+                }
+                $pc = (int) ($lr['pages'] ?? 0);
+                if ($pc > 0) {
+                    $byLesson[$lid] = $pc;
+                }
+            }
+        }
+        if ($byLesson !== []) {
+            foreach ($labsOut as $i => $lab) {
+                $m = [];
+                foreach ($lab['lesson_ids'] as $lid) {
+                    if (isset($byLesson[$lid])) {
+                        $m[$lid] = $byLesson[$lid];
+                    }
+                }
+                if ($m !== []) {
+                    $labsOut[$i]['page_counts'] = $m;
+                }
+            }
+        }
+
+        return $labsOut;
+    }
+
+    return parse_labs_json($raw);
+}
+
 /**
  * Resolve server directory for ks_images/{program}/…
  * $localRoot may be the parent of ks_images, or ks_images itself, or the program folder.
@@ -656,7 +823,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         progress('Discovered ' . count($labs) . ' course bundle(s) from folder layout.');
     } else {
         $bulkRaw = (string)($_POST['labs_json'] ?? '');
-        $labs = parse_labs_json($bulkRaw);
+        $labs = parse_labs_json_enhanced($bulkRaw, $syntheticLabBase);
     }
 
     // Single-lab mode fallback
@@ -741,6 +908,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $lessonRoots = (array)($lab['lesson_roots'] ?? []);
         $pageCountsLocal = (array)($lab['page_counts'] ?? []);
+        $lessonTitlesFromManifest = (array)($lab['lesson_titles'] ?? []);
 
         // Determine course title
         $courseTitle = trim((string)($lab['course_title'] ?? ''));
@@ -806,6 +974,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $title = "Lesson {$extLessonId}";
+            if (isset($lessonTitlesFromManifest[$extLessonId])) {
+                $mt = trim((string) $lessonTitlesFromManifest[$extLessonId]);
+                if ($mt !== '') {
+                    $title = $mt;
+                }
+            }
 
             if ($aiLessonTitles && $pageCount > 0) {
                 $imgPath = image_path_for($programKey, $extLessonId, 1);
@@ -873,8 +1047,8 @@ $playerImgExample = cdn_url($CDN_BASE, 'ks_images/instrument/lesson_10101/lesson
 ?>
 <div class="card">
   <p class="muted">
-    Bulk import: create Course → Lessons → Slides. Use a <strong>manifest JSON</strong>, <strong>scan DigitalOcean Spaces</strong> (same keys the player uses — no filesystem path),
-    or <strong>scan a local folder</strong> on this PHP server. Slide paths in the DB always look like
+    Bulk import: create Course → Lessons → Slides. Paste a <strong>manifest JSON</strong> (Kings <code>labs</code> list, pipeline <code>labs</code>+<code>lessons</code>, or a lesson-only array with <code>pages</code>),
+    <strong>scan DigitalOcean Spaces</strong>, or <strong>scan a local folder</strong>. Slide paths in the DB always look like
     <code>ks_images/{program}/lesson_{id}/lesson_{id}_page_001.png</code> (see <code>public/player/slide.php</code>: <code>cdn_url($CDN_BASE, $slide['image_path'])</code>).
   </p>
   <p class="muted" style="font-size:13px;">
@@ -942,7 +1116,7 @@ $playerImgExample = cdn_url($CDN_BASE, 'ks_images/instrument/lesson_10101/lesson
 
     <label>Bulk Labs JSON (your manifest)</label>
     <textarea name="labs_json" rows="12" style="width:100%; grid-column: 2 / 3;"
-      placeholder='Paste your manifest JSON here. Example: {"labs":[{"labId":10009,"lessonIds":[10102,10103]}], "lab_range":[10001,10026]}'></textarea>
+      placeholder='Supported: (1) {"labs":[{"labId":20001,"lessonIds":[20002,...]}]} — optionally with "lessons":[{"lessonId":20002,"pages":7},...] from kings_ir_export_pipeline; (2) a JSON array of {lesson_id, title, pages:[{page,screenshot}]} lesson exports (one course — set Synthetic lab ID).'></textarea>
 
     <div class="muted" style="grid-column:1/-1; padding:6px 0;">
       If “Scan from Spaces” or “Scan local folders” is checked, Bulk Labs JSON is ignored. Otherwise, if JSON is provided, the single-lab fields below are ignored.
