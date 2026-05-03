@@ -132,7 +132,7 @@ function parse_lesson_ids(string $raw): array {
  * Parse your manifest as-is:
  * { "labs": [ { "labId":10009, "lessonIds":[...] }, ... ], ... }
  * courseTitle is NOT required (we AI-generate it).
- * Empty labs are skipped.
+ * Labs with empty lessonIds still become courses (Kings private manifest includes shell labs).
  */
 function parse_labs_json(string $raw): array {
     $raw = trim($raw);
@@ -153,7 +153,6 @@ function parse_labs_json(string $raw): array {
         $lessonIds = array_values(array_map('intval', array_filter($lessonIds, 'is_numeric')));
 
         if ($labId <= 0) continue;
-        if (!$lessonIds) continue; // skip empty labs
 
         $out[] = [
             'lab_id' => $labId,
@@ -282,7 +281,7 @@ function parse_labs_json_enhanced(string $raw, int $fallbackLabId): array
                 $lessonIds = [];
             }
             $lessonIds = array_values(array_map('intval', array_filter($lessonIds, 'is_numeric')));
-            if ($labId <= 0 || $lessonIds === []) {
+            if ($labId <= 0) {
                 continue;
             }
             $labsOut[] = [
@@ -902,9 +901,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     foreach ($labs as $lab) {
         $labId = (int)$lab['lab_id'];
         $lessonIds = (array)$lab['lesson_ids'];
-        if (!$lessonIds) {
-            continue;
-        }
 
         $lessonRoots = (array)($lab['lesson_roots'] ?? []);
         $pageCountsLocal = (array)($lab['page_counts'] ?? []);
@@ -915,7 +911,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $courseSlug  = trim((string)($lab['course_slug'] ?? ''));
         $courseOrder = (int)($lab['course_order'] ?? $labOrder);
 
-        if ($courseTitle === '' && $aiCourseTitles) {
+        if ($courseTitle === '' && $aiCourseTitles && $lessonIds !== []) {
             $seedLessonId = (int)$lessonIds[0];
             $seedPath = image_path_for($programKey, $seedLessonId, 1);
             $seedUrl = cdn_url($CDN_BASE, $seedPath);
@@ -947,8 +943,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        if ($courseTitle === '') $courseTitle = "Lab {$labId}";
-        if ($courseSlug === '') $courseSlug = slugify($courseTitle);
+        if ($courseTitle === '') {
+            $courseTitle = "Lab {$labId}";
+        }
+        if ($courseSlug === '') {
+            // Slug is unique per (program_id, slug). Same synthetic lab id for different programs
+            // must not both become "lab-900000" — include program_key in the slug.
+            $courseSlug = slugify($courseTitle . ' ' . $programKey);
+        }
 
         progress("----");
         progress("Lab {$labId}: creating/updating course '{$courseTitle}' …");
@@ -1026,7 +1028,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sort += 10;
         }
 
-        progress("Lab {$labId} complete. Slides so far: {$totalSlides}");
+        if ($lessonIds === []) {
+            progress("Lab {$labId} complete (course shell — no lessons in manifest). Slides so far: {$totalSlides}");
+        } else {
+            progress("Lab {$labId} complete. Slides so far: {$totalSlides}");
+        }
         $labOrder += 10;
     }
 
@@ -1047,8 +1053,7 @@ $playerImgExample = cdn_url($CDN_BASE, 'ks_images/instrument/lesson_10101/lesson
 ?>
 <div class="card">
   <p class="muted">
-    Bulk import: create Course → Lessons → Slides. Paste a <strong>manifest JSON</strong> (Kings <code>labs</code> list, pipeline <code>labs</code>+<code>lessons</code>, or a lesson-only array with <code>pages</code>),
-    <strong>scan DigitalOcean Spaces</strong>, or <strong>scan a local folder</strong>. Slide paths in the DB always look like
+    Bulk import: create Course → Lessons → Slides. Paste a <strong>manifest JSON</strong> in Kings form: <code>{"labs":[{"labId":10001,"lessonIds":[10002,…]},…]}</code> — each lab is one course (<code>external_lab_id</code> = Kings lab id); labs with empty <code>lessonIds</code> still create a course shell. Optional <code>lessons</code> array supplies page counts; or use <strong>scan Spaces</strong> / <strong>scan local folder</strong>. Slide paths look like
     <code>ks_images/{program}/lesson_{id}/lesson_{id}_page_001.png</code> (see <code>public/player/slide.php</code>: <code>cdn_url($CDN_BASE, $slide['image_path'])</code>).
   </p>
   <p class="muted" style="font-size:13px;">
