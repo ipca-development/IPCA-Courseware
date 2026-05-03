@@ -17,6 +17,30 @@ if ($courseId > 0) {
     $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+$lessonsAllCourses = [];
+if ($courseId > 0) {
+    $lessonsAllCourses = $pdo->query("
+      SELECT l.id, l.external_lesson_id, l.title, l.course_id,
+             c.title AS course_title, p.program_key
+      FROM lessons l
+      INNER JOIN courses c ON c.id = l.course_id
+      INNER JOIN programs p ON p.id = c.program_id
+      ORDER BY p.sort_order, c.sort_order, c.id, l.sort_order, l.external_lesson_id
+    ")->fetchAll(PDO::FETCH_ASSOC);
+}
+
+$selectedCourseMeta = ['program_key' => '', 'title' => ''];
+foreach ($courses as $c) {
+    if ((int)$c['id'] === $courseId) {
+        $selectedCourseMeta = $c;
+        break;
+    }
+}
+$fullCourseAuditLabel = trim(trim((string)($selectedCourseMeta['program_key'] ?? '')) . ' — ' . trim((string)($selectedCourseMeta['title'] ?? '')));
+if ($fullCourseAuditLabel === '' || $fullCourseAuditLabel === '—') {
+    $fullCourseAuditLabel = 'course #' . $courseId;
+}
+
 cw_header('Bulk Canonical Builder');
 ?>
 <div class="card">
@@ -104,14 +128,16 @@ cw_header('Bulk Canonical Builder');
     Per-slide checks against <code>slide_content</code> (EN/ES), <code>slide_enrichment</code> (narration),
     <code>slide_references</code> (PHAK/ACS + low confidence), and <code>slide_hotspots</code> when the Kings manifest lists a video for that page.
     Bulk enrich does not create eCFR rows — only PHAK/ACS. “Other refs” counts are informational.
-    Every lesson in the course is listed in lesson order; lessons with <strong>no active slides</strong> appear as one placeholder row (upload slides first).
+    “Full course” uses the course selected at the top of this page. The lesson list includes <strong>every lesson in the database</strong> (all courses), labeled by program and course. Lessons with <strong>no active slides</strong> still appear as one placeholder row in the report.
   </p>
   <div class="form-grid" style="margin-bottom:12px;">
-    <label>Limit audit to lesson</label>
+    <label>Focus audit</label>
     <select id="becLessonFilter">
-      <option value="0">All lessons in course</option>
-      <?php foreach ($lessons as $l): ?>
-        <option value="<?= (int)$l['id'] ?>"><?= (int)$l['external_lesson_id'] ?> — <?= h($l['title']) ?></option>
+      <option value="0">Full course (<?= h($fullCourseAuditLabel) ?>)</option>
+      <?php foreach ($lessonsAllCourses as $l): ?>
+        <option value="<?= (int)$l['id'] ?>" data-course-id="<?= (int)$l['course_id'] ?>">
+          <?= h((string)$l['program_key']) ?> — <?= h((string)$l['course_title']) ?> — <?= (int)$l['external_lesson_id'] ?> — <?= h((string)$l['title']) ?>
+        </option>
       <?php endforeach; ?>
     </select>
     <div></div>
@@ -177,6 +203,8 @@ cw_header('Bulk Canonical Builder');
 <script>
 (function () {
   var courseId = <?= (int)$courseId ?>;
+  /** Course id from the last successful coverage fetch (correct when auditing another course’s lesson). */
+  var lastCoverageCourseId = courseId;
   var main = document.getElementById('bulkMainForm');
   var tbody = document.getElementById('becTbody');
   var summaryEl = document.getElementById('becSummary');
@@ -195,8 +223,17 @@ cw_header('Bulk Canonical Builder');
   }
 
   document.getElementById('becLoadCoverage').onclick = function () {
-    var lid = parseInt(document.getElementById('becLessonFilter').value, 10) || 0;
-    var url = '/admin/api/bulk_enrich_coverage.php?course_id=' + encodeURIComponent(String(courseId));
+    var sel = document.getElementById('becLessonFilter');
+    var lid = parseInt(sel.value, 10) || 0;
+    var cid = courseId;
+    if (lid > 0) {
+      var opt = sel.options[sel.selectedIndex];
+      var dc = opt ? opt.getAttribute('data-course-id') : null;
+      if (dc) {
+        cid = parseInt(dc, 10) || cid;
+      }
+    }
+    var url = '/admin/api/bulk_enrich_coverage.php?course_id=' + encodeURIComponent(String(cid));
     if (lid > 0) url += '&lesson_id=' + encodeURIComponent(String(lid));
     summaryEl.textContent = 'Loading…';
     tbody.innerHTML = '';
@@ -205,6 +242,7 @@ cw_header('Bulk Canonical Builder');
         summaryEl.textContent = 'Could not load coverage.';
         return;
       }
+      lastCoverageCourseId = parseInt(data.course_id, 10) || courseId;
       lastRows = data.slides || [];
       var s = data.summary || {};
       var lessonLine = 'Lessons: <strong>' + (s.lessons_in_scope != null ? s.lessons_in_scope : '—') + '</strong>';
@@ -321,7 +359,7 @@ cw_header('Bulk Canonical Builder');
         tf.appendChild(hi);
       }
     });
-    tf.elements.course_id.value = main.elements.course_id.value;
+    tf.elements.course_id.value = String(lastCoverageCourseId);
     var pk = main.elements.program_key;
     document.getElementById('becTfProgramKey').value = pk ? pk.value : 'private';
     if (!confirm('Re-run bulk enrich for ' + ids.length + ' slide(s)? Enabled actions will overwrite existing data for those slides.')) {
