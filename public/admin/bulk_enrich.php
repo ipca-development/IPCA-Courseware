@@ -296,6 +296,7 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
   }
 
   function fillProgram(skipLoad) {
+    skipLoad = skipLoad === true;
     var pid = parseInt(el('becProgram').value, 10) || 0;
     state.programId = pid;
     var opt = el('becProgram').selectedOptions[0];
@@ -356,10 +357,11 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
   function coverageUrl(extra) {
     var q = [];
     q.push('video_manifest=' + encodeURIComponent(state.videoManifest));
+    if (state.courseId > 0) {
+      q.push('course_id=' + encodeURIComponent(String(state.courseId)));
+    }
     if (state.programId > 0) {
       q.push('program_id=' + encodeURIComponent(String(state.programId)));
-    } else if (state.courseId > 0) {
-      q.push('course_id=' + encodeURIComponent(String(state.courseId)));
     }
     if (state.lessonId > 0) q.push('lesson_id=' + encodeURIComponent(String(state.lessonId)));
     if (state.filter && state.filter !== 'all') q.push('filter=' + encodeURIComponent(state.filter));
@@ -836,6 +838,8 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     var dc = opt ? parseInt(opt.getAttribute('data-course-id') || '0', 10) : 0;
     if (state.lessonId > 0 && dc > 0) {
       state.courseId = dc;
+    } else {
+      state.courseId = parseInt(el('becCourse').value, 10) || 0;
     }
     loadCoverage(false);
   });

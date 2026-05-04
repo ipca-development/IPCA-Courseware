@@ -33,7 +33,8 @@ if ($programId <= 0 && $courseId <= 0) {
     exit;
 }
 
-$scopeProgram = $programId > 0;
+// Course narrows scope: when course_id is set, query that course (not the whole program), even if program_id is also sent.
+$scopeProgram = $programId > 0 && $courseId <= 0;
 if ($scopeProgram) {
     $pkStmt = $pdo->prepare('SELECT program_key FROM programs WHERE id = ? LIMIT 1');
     $pkStmt->execute([$programId]);
