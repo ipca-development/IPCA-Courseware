@@ -93,6 +93,16 @@ cw_header('Bulk enrich');
 
     <label>Video manifest</label>
     <select id="becVideoManifest" title="JSON files in public/assets/"></select>
+
+    <label title="Saved in this browser">Rows / page</label>
+    <select id="becPageSize" title="Coverage table page size (saved locally)">
+      <option value="50">50</option>
+      <option value="100">100</option>
+      <option value="200">200</option>
+      <option value="300">300</option>
+      <option value="400">400</option>
+      <option value="500">500</option>
+    </select>
   </div>
 
   <div id="becStatsRow" class="bec-stats bec-hidden">
@@ -177,6 +187,7 @@ cw_header('Bulk enrich');
       <button type="button" class="btn secondary" id="becClearSel">Clear selection</button>
       <button type="button" class="btn secondary" id="becLoadMore">Load more rows</button>
       <button type="button" class="btn" id="becBtnSelected">Enrich selected slides</button>
+      <button type="button" class="btn secondary" id="becBtnSoftDeleteSelected">Soft-delete selected</button>
       <span class="muted" id="becPageHint"></span>
     </div>
     <div class="bec-table-scroll">
@@ -226,9 +237,9 @@ cw_header('Bulk enrich');
 .bec-grid-table { width:100%; border-collapse:collapse; font-size:12px; }
 .bec-grid-table th, .bec-grid-table td { border-bottom:1px solid #f1f5f9; padding:6px 8px; vertical-align:top; }
 .bec-grid-table th { position:sticky; top:0; background:#f8fafc; z-index:1; text-align:left; }
-.bec-thumb { width:72px; height:54px; object-fit:cover; border-radius:6px; background:#e2e8f0; display:block; }
-.bec-ov-thumb { position:relative; width:72px; height:41px; border-radius:6px; overflow:hidden; background:#e2e8f0; display:inline-block; vertical-align:middle; border:1px solid #e5e7eb; }
-.bec-ov-thumb .bec-ov-stage { position:absolute; left:0; top:0; width:1600px; height:900px; transform:scale(0.045); transform-origin:top left; background:#fff; }
+.bec-thumb { width:94px; height:70px; object-fit:cover; border-radius:6px; background:#e2e8f0; display:block; }
+.bec-ov-thumb { position:relative; width:94px; height:53px; border-radius:6px; overflow:hidden; background:#e2e8f0; display:inline-block; vertical-align:middle; border:1px solid #e5e7eb; }
+.bec-ov-thumb .bec-ov-stage { position:absolute; left:0; top:0; width:1600px; height:900px; transform:scale(0.05875); transform-origin:top left; background:#fff; }
 .bec-ov-thumb .bec-ov-content { position:absolute; width:1315px; height:900px; left:calc((1600px - 1315px) / 2); top:0; object-fit:contain; background:#fff; }
 .bec-ov-thumb .bec-ov-head { position:absolute; left:0; top:0; width:1600px; height:125px; object-fit:cover; pointer-events:none; }
 .bec-ov-thumb .bec-ov-foot { position:absolute; left:0; bottom:0; width:1600px; height:90px; object-fit:cover; pointer-events:none; }
@@ -249,6 +260,9 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
 (function () {
   var DATA = BEC_DATA;
 
+  var BEC_LIST_LIMIT_KEY = 'bec_list_limit';
+  var BEC_PAGE_SIZES = [50, 100, 200, 300, 400, 500];
+
   var state = {
     programId: 0,
     programKey: '',
@@ -257,6 +271,7 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     videoManifest: 'kings_videos_manifest.json',
     filter: 'all',
     offset: 0,
+    pageSize: 100,
     lastPayload: null,
     running: false,
     abortRun: false
@@ -280,7 +295,7 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     return v ? '<span class="bec-yes">Yes</span>' : '<span class="bec-no">No</span>';
   }
 
-  function fillProgram() {
+  function fillProgram(skipLoad) {
     var pid = parseInt(el('becProgram').value, 10) || 0;
     state.programId = pid;
     var opt = el('becProgram').selectedOptions[0];
@@ -313,7 +328,7 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     });
     cSel.disabled = false;
     fillLessons();
-    loadCoverage(false);
+    if (!skipLoad) loadCoverage(false);
   }
 
   function fillLessons() {
@@ -349,7 +364,7 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     if (state.lessonId > 0) q.push('lesson_id=' + encodeURIComponent(String(state.lessonId)));
     if (state.filter && state.filter !== 'all') q.push('filter=' + encodeURIComponent(state.filter));
     q.push('offset=' + encodeURIComponent(String(state.offset)));
-    q.push('limit=80');
+    q.push('limit=' + encodeURIComponent(String(state.pageSize)));
     if (extra) q.push(extra);
     return '/admin/api/bulk_enrich_coverage.php?' + q.join('&');
   }
@@ -396,13 +411,24 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
       if (row.placeholder) return;
       var ch = row.checks || {};
       var tr = document.createElement('tr');
+      tr.id = 'bec-row-' + row.slide_id;
       if (row.flagged) tr.className = 'bec-row-flagged';
       var low = ch.refs_low_confidence ? '⚠' : '—';
       var vidCell = ch.manifest_lists_video
         ? (ch.video_hotspot ? '<span class="bec-yes">Ready</span>' : '<span class="bec-no">Missing HS</span>')
         : '<span class="muted">n/a</span>';
-      var editorUrl = row.overlay_editor_url
-        || ('/admin/slide_overlay_editor.php?slide_id=' + row.slide_id + '&course_id=' + row.course_id + '&lesson_id=' + (row.lesson_id || 0) + '&return_to=bulk_enrich');
+      var editorUrl = row.overlay_editor_url;
+      if (!editorUrl) {
+        var qEditor = [
+          'slide_id=' + encodeURIComponent(String(row.slide_id)),
+          'course_id=' + encodeURIComponent(String(row.course_id)),
+          'lesson_id=' + encodeURIComponent(String(row.lesson_id || 0)),
+          'return_to=bulk_enrich',
+          'program_id=' + encodeURIComponent(String(row.program_id || state.programId || 0)),
+          'video_manifest=' + encodeURIComponent(state.videoManifest || 'kings_videos_manifest.json')
+        ];
+        editorUrl = '/admin/slide_overlay_editor.php?' + qEditor.join('&');
+      }
       var thumb = row.thumb_url
         ? ('<a class="bec-thumb-link" href="' + esc(editorUrl) + '" title="Open Designer (IPCA overlay)">'
           + '<span class="bec-ov-thumb"><span class="bec-ov-stage">'
@@ -448,12 +474,66 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
         var pag = data.pagination || {};
         el('becPageHint').textContent = 'Showing ' + (pag.returned || 0) + ' of ' + (pag.filtered_total || 0)
           + (pag.has_more ? ' · more available' : '');
+        scrollToFocusSlideFromUrl();
       })
       .catch(function () { alert('Network error loading coverage'); });
   }
 
+  function scrollToFocusSlideFromUrl() {
+    var p = new URLSearchParams(window.location.search);
+    var fid = parseInt(p.get('focus_slide') || '0', 10);
+    if (fid <= 0) return;
+    var row = document.getElementById('bec-row-' + fid);
+    if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    p.delete('focus_slide');
+    var q = p.toString();
+    var path = window.location.pathname + (q ? '?' + q : '') + window.location.hash;
+    window.history.replaceState({}, '', path);
+  }
+
+  function hydrateBulkFromQuery() {
+    var p = new URLSearchParams(window.location.search);
+    var pid = parseInt(p.get('program_id') || '0', 10);
+    if (pid <= 0) return;
+    el('becProgram').value = String(pid);
+    fillProgram(true);
+    var cid = parseInt(p.get('course_id') || '0', 10);
+    if (cid > 0) {
+      var cOpt = el('becCourse').querySelector('option[value="' + String(cid) + '"]');
+      if (cOpt) el('becCourse').value = String(cid);
+    }
+    fillLessons();
+    var lid = parseInt(p.get('lesson_id') || '0', 10);
+    if (lid > 0) {
+      var lOpt = el('becLesson').querySelector('option[value="' + String(lid) + '"]');
+      if (lOpt) el('becLesson').value = String(lid);
+    }
+    state.lessonId = parseInt(el('becLesson').value, 10) || 0;
+    state.courseId = parseInt(el('becCourse').value, 10) || 0;
+    if (state.lessonId > 0) {
+      var opt = el('becLesson').selectedOptions[0];
+      var dc = opt ? parseInt(opt.getAttribute('data-course-id') || '0', 10) : 0;
+      if (dc > 0) state.courseId = dc;
+    }
+    var vm = p.get('video_manifest');
+    if (vm) {
+      state.videoManifest = vm;
+      var sel = el('becVideoManifest');
+      var found = false;
+      sel.querySelectorAll('option').forEach(function (o) { if (o.value === vm) found = true; });
+      if (!found) {
+        var o = document.createElement('option');
+        o.value = vm;
+        o.textContent = vm;
+        sel.appendChild(o);
+      }
+      sel.value = vm;
+    }
+    loadCoverage(false);
+  }
+
   function loadManifests() {
-    fetch('/admin/api/bulk_enrich_manifest_list.php', { credentials: 'same-origin' })
+    return fetch('/admin/api/bulk_enrich_manifest_list.php', { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         var sel = el('becVideoManifest');
@@ -775,7 +855,7 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
 
   el('becBtnReload').onclick = function () { loadCoverage(false); };
   el('becLoadMore').onclick = function () {
-    state.offset += 80;
+    state.offset += state.pageSize;
     fetch(coverageUrl(''), { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (data) {
@@ -856,6 +936,37 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     runJob();
   };
 
+  el('becBtnSoftDeleteSelected').onclick = function () {
+    var ids = [];
+    document.querySelectorAll('#becTbody .bec-sl:checked').forEach(function (c) {
+      var sid = parseInt(c.getAttribute('data-id'), 10);
+      if (sid > 0) ids.push(sid);
+    });
+    if (!ids.length) {
+      alert('Select at least one slide.');
+      return;
+    }
+    if (!confirm('Soft-delete ' + ids.length + ' slide(s)? They will be hidden from coverage until restored in Slides.')) return;
+    Promise.all(ids.map(function (sid) {
+      var fd = new FormData();
+      fd.append('slide_id', String(sid));
+      fd.append('is_deleted', '1');
+      return fetch('/admin/api/bulk_enrich_slide_soft_toggle.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) throw new Error((j && j.error) || ('Slide ' + sid));
+          return sid;
+        });
+    })).then(function () {
+      loadCoverage(false);
+      document.querySelectorAll('#becTbody .bec-sl').forEach(function (c) { c.checked = false; });
+      el('becToggleAll').checked = false;
+    }).catch(function (e) {
+      alert(e && e.message ? e.message : 'Soft-delete failed');
+      loadCoverage(false);
+    });
+  };
+
   el('becBtnRun').onclick = function () {
     if (state.programId <= 0 && state.courseId <= 0) {
       alert('Select a program (or course) first.');
@@ -906,7 +1017,25 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     }
   });
 
-  loadManifests();
+  (function initPageSize() {
+    var saved = parseInt(localStorage.getItem(BEC_LIST_LIMIT_KEY) || '100', 10);
+    if (BEC_PAGE_SIZES.indexOf(saved) < 0) saved = 100;
+    state.pageSize = saved;
+    el('becPageSize').value = String(saved);
+  })();
+
+  el('becPageSize').addEventListener('change', function () {
+    var v = parseInt(el('becPageSize').value, 10) || 100;
+    if (BEC_PAGE_SIZES.indexOf(v) < 0) v = 100;
+    state.pageSize = v;
+    localStorage.setItem(BEC_LIST_LIMIT_KEY, String(v));
+    state.offset = 0;
+    if (state.programId > 0) loadCoverage(false);
+  });
+
+  loadManifests().then(function () {
+    hydrateBulkFromQuery();
+  });
 })();
 </script>
 

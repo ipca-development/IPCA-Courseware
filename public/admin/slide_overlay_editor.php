@@ -10,7 +10,7 @@ $lessonId = (int)($_GET['lesson_id'] ?? 0);
 if ($slideId <= 0) exit('Missing slide_id');
 
 $stmt = $pdo->prepare("
-  SELECT s.*, l.external_lesson_id, l.course_id, c.title AS course_title, p.program_key
+  SELECT s.*, l.external_lesson_id, l.course_id, c.title AS course_title, p.program_key, p.id AS program_id
   FROM slides s
   JOIN lessons l ON l.id=s.lesson_id
   JOIN courses c ON c.id=l.course_id
@@ -33,10 +33,41 @@ if ($returnTo !== 'bulk_enrich' && $returnTo !== 'slides') {
 }
 
 $backToSlidesUrl = '/admin/slides.php?course_id=' . (int)$courseId . '&lesson_id=' . (int)$lessonId . '&focus_slide=' . (int)$slideId;
-$backToBulkUrl = '/admin/bulk_enrich.php';
 
+$videoManifestGET = trim((string)($_GET['video_manifest'] ?? ''));
+$programIdFromGet = (int)($_GET['program_id'] ?? 0);
+$bulkProgramId = $programIdFromGet > 0 ? $programIdFromGet : (int)($slide['program_id'] ?? 0);
+
+$bulkReturnQuery = [
+    'program_id' => $bulkProgramId,
+    'focus_slide' => (int)$slideId,
+];
+if ($courseId > 0) {
+    $bulkReturnQuery['course_id'] = (int)$courseId;
+}
+if ($lessonId > 0) {
+    $bulkReturnQuery['lesson_id'] = (int)$lessonId;
+}
+if ($videoManifestGET !== '') {
+    $bulkReturnQuery['video_manifest'] = $videoManifestGET;
+}
+$backToBulkUrl = '/admin/bulk_enrich.php?' . http_build_query($bulkReturnQuery, '', '&', PHP_QUERY_RFC3986);
+
+$navBulkBits = [
+    'return_to' => 'bulk_enrich',
+    'program_id' => $bulkProgramId,
+];
+if ($courseId > 0) {
+    $navBulkBits['course_id'] = (int)$courseId;
+}
+if ($lessonId > 0) {
+    $navBulkBits['lesson_id'] = (int)$lessonId;
+}
+if ($videoManifestGET !== '') {
+    $navBulkBits['video_manifest'] = $videoManifestGET;
+}
 $navTail = $returnTo === 'bulk_enrich'
-    ? '&return_to=bulk_enrich'
+    ? ('&' . http_build_query($navBulkBits, '', '&', PHP_QUERY_RFC3986))
     : '&return_to=slides';
 
 // Prev/Next slide in this lesson (skip deleted slides)

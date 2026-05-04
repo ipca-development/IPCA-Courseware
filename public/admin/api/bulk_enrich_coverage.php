@@ -26,7 +26,7 @@ $listLimit = (int)($_GET['limit'] ?? 0);
 if ($listLimit <= 0) {
     $listLimit = 400;
 }
-$listLimit = min(800, max(25, $listLimit));
+$listLimit = min(500, max(25, $listLimit));
 
 if ($programId <= 0 && $courseId <= 0) {
     echo json_encode(['ok' => false, 'error' => 'course_id or program_id required']);
@@ -53,6 +53,7 @@ $sql = "
     l.external_lesson_id,
     l.id AS lesson_id,
     l.course_id AS slide_course_id,
+    c.program_id AS course_program_id,
     c.title AS course_title,
     l.title AS lesson_title,
     sc_en.plain_text AS en_plain,
@@ -191,7 +192,7 @@ $counts = [
  *
  * @param array<string,mixed> $r
  */
-$appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts, $videoManifestPath, $CDN_BASE): void {
+$appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts, $videoManifestPath, $CDN_BASE, $videoManifestFile): void {
     $slideId = (int)$r['slide_id'];
     $slideCourseId = (int)($r['slide_course_id'] ?? 0);
     $extLessonId = (int)$r['external_lesson_id'];
@@ -209,8 +210,11 @@ $appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts,
 
     $phakCnt = (int)($r['phak_cnt'] ?? 0);
     $acsCnt = (int)($r['acs_cnt'] ?? 0);
+    $otherRefCnt = (int)($r['other_ref_cnt'] ?? 0);
     $phakOk = $phakCnt >= 1;
     $acsOk = $acsCnt >= 1;
+    $refRowCount = $phakCnt + $acsCnt + $otherRefCnt;
+    $hasAnyReference = $refRowCount >= 1;
 
     $minConf = $r['min_ref_confidence'];
     $minConfF = is_numeric($minConf) ? (float)$minConf : null;
@@ -233,14 +237,8 @@ $appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts,
     if ($narrEnOk && !$narrEsOk) {
         $reasons[] = 'missing_or_short_narration_es';
     }
-    if (!$phakOk) {
-        $reasons[] = 'no_phak_refs';
-    }
-    if (!$acsOk) {
-        $reasons[] = 'no_acs_refs';
-    }
-    if ($refsLowConfidence) {
-        $reasons[] = 'low_reference_confidence';
+    if (!$hasAnyReference) {
+        $reasons[] = 'no_references';
     }
     if ($manifestVideo && $hotspotCnt <= 0) {
         $reasons[] = 'manifest_video_but_no_hotspot';
@@ -248,7 +246,8 @@ $appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts,
 
     $flagged = $reasons !== [];
 
-    $refsOk = $phakOk && $acsOk && !$refsLowConfidence;
+    // OK if the slide has at least one stored reference (PHAK-only, ACS-only, mixed, or other types).
+    $refsOk = $hasAnyReference;
 
     $counts['total']++;
     if ($flagged) {
@@ -289,6 +288,7 @@ $appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts,
         'course_title' => (string)($r['course_title'] ?? ''),
         'lesson_id' => $lessonRowId,
         'lesson_title' => (string)$r['lesson_title'],
+        'program_id' => (int)($r['course_program_id'] ?? 0),
         'external_lesson_id' => $extLessonId,
         'page_number' => $pageNum,
         'checks' => [
@@ -298,6 +298,7 @@ $appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts,
             'narration_es' => $narrEsOk,
             'phak_refs' => $phakOk,
             'acs_refs' => $acsOk,
+            'has_any_reference' => $hasAnyReference,
             'refs_ok' => $refsOk,
             'refs_low_confidence' => $refsLowConfidence,
             'other_refs_count' => (int)($r['other_ref_cnt'] ?? 0),
@@ -318,12 +319,21 @@ $appendSlideRow = function (array $r, int $lessonRowId) use (&$slides, &$counts,
             'narr_es_len' => mb_strlen($narrEs),
             'phak_count' => $phakCnt,
             'acs_count' => $acsCnt,
+            'other_ref_count' => $otherRefCnt,
+            'reference_row_total' => $refRowCount,
             'hotspot_count' => $hotspotCnt,
             'min_phak_acs_confidence' => $minConfF,
         ],
         'flagged' => $flagged,
         'flag_reasons' => $reasons,
-        'overlay_editor_url' => '/admin/slide_overlay_editor.php?slide_id=' . $slideId . '&course_id=' . $slideCourseId . '&lesson_id=' . $lessonRowId . '&return_to=bulk_enrich',
+        'overlay_editor_url' => '/admin/slide_overlay_editor.php?' . http_build_query([
+            'slide_id' => $slideId,
+            'course_id' => $slideCourseId,
+            'lesson_id' => $lessonRowId,
+            'return_to' => 'bulk_enrich',
+            'program_id' => (int)($r['course_program_id'] ?? 0),
+            'video_manifest' => $videoManifestFile,
+        ], '', '&', PHP_QUERY_RFC3986),
     ];
 };
 
@@ -368,6 +378,7 @@ foreach ($lessonList as $les) {
                 'narration_es' => false,
                 'phak_refs' => false,
                 'acs_refs' => false,
+                'has_any_reference' => false,
                 'refs_ok' => false,
                 'refs_low_confidence' => false,
                 'other_refs_count' => 0,
@@ -419,6 +430,7 @@ foreach ($lessonList as $les) {
                 'narration_es' => false,
                 'phak_refs' => false,
                 'acs_refs' => false,
+                'has_any_reference' => false,
                 'refs_ok' => false,
                 'refs_low_confidence' => false,
                 'other_refs_count' => 0,
@@ -548,7 +560,7 @@ echo json_encode([
     'notes' => [
         'lesson_coverage' => 'Every lesson in scope appears: lessons with no active slides show one placeholder row. Soft-deleted slides (slides.is_deleted = 1) are never listed and do not count toward active slides.',
         'bulk_pipeline' => 'Bulk enrich writes EN/ES slide_content, narration_en/es in slide_enrichment, PHAK+ACS in slide_references, and optional hotspots from the selected video manifest JSON in public/assets/.',
-        'other_refs' => 'References outside PHAK/ACS are not created by bulk_enrich_run.php; other_ref_count is informational.',
+        'other_refs' => 'Coverage treats refs as OK when the slide has at least one slide_references row (PHAK, ACS, or any other ref_type). Low confidence alone does not flag a row.',
         'ecfr' => 'eCFR/FAR rows are not produced by the current bulk enrich script — only PHAK and ACS.',
     ],
     'summary' => $counts,
