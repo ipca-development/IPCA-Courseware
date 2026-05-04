@@ -31,20 +31,6 @@ if ($courseId > 0) {
     $lessons = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $action = (string)($_POST['action'] ?? '');
-    $lessonId = (int)($_POST['lesson_id'] ?? $lessonId);
-
-    if ($action === 'delete_slide') {
-        $pdo->prepare("UPDATE slides SET is_deleted=1 WHERE id=?")->execute([(int)$_POST['slide_id']]);
-        redirect('/admin/slides.php?course_id='.$courseId.'&lesson_id='.$lessonId);
-    }
-    if ($action === 'restore_slide') {
-        $pdo->prepare("UPDATE slides SET is_deleted=0 WHERE id=?")->execute([(int)$_POST['slide_id']]);
-        redirect('/admin/slides.php?course_id='.$courseId.'&lesson_id='.$lessonId);
-    }
-}
-
 $lesson = null;
 $slides = [];
 if ($lessonId > 0) {
@@ -123,6 +109,37 @@ cw_header('Slides');
   object-fit: cover;
   pointer-events:none;
 }
+
+.cw-slide-card{ scroll-margin-top: 88px; }
+
+a.cw-designer-hit{
+  display:block;
+  text-decoration:none;
+  color:inherit;
+  border-radius:12px;
+  cursor:pointer;
+}
+a.cw-designer-hit:focus{
+  outline:2px solid #2563eb;
+  outline-offset:3px;
+}
+
+#slidesToast{
+  display:none;
+  position:fixed;
+  bottom:28px;
+  left:50%;
+  transform:translateX(-50%);
+  z-index:2000;
+  padding:12px 20px;
+  border-radius:10px;
+  background:#0f172a;
+  color:#f8fafc;
+  font-size:14px;
+  box-shadow:0 8px 24px rgba(15,23,42,.35);
+  max-width:90vw;
+}
+#slidesToast.slides-toast-on{ display:block; }
 </style>
 
 <div class="card">
@@ -163,20 +180,25 @@ cw_header('Slides');
 <?php if ($lesson): ?>
 <div class="card">
   <h2>Slide overview</h2>
-  <p class="muted">Designer is the Overlay Slide Editor. Double-click screenshot to open.</p>
+  <p class="muted">Click the slide preview (IPCA overlay) to open the Designer.</p>
+
+  <div id="slidesToast" role="status" aria-live="polite"></div>
 
   <div class="cw-slides-grid">
     <?php foreach ($slides as $s): ?>
       <?php
         $isDeleted = ((int)$s['is_deleted'] === 1);
         $imgUrl = cdn_url($CDN_BASE, (string)$s['image_path']);
-        $overlayEditorUrl = '/admin/slide_overlay_editor.php?slide_id='.(int)$s['id'];
+        $overlayEditorUrl = '/admin/slide_overlay_editor.php?slide_id=' . (int)$s['id']
+          . '&course_id=' . (int)$courseId
+          . '&lesson_id=' . (int)$lessonId
+          . '&return_to=slides';
 
         // Overlay assets (same as editor)
         $headerUrl = '/assets/overlay/header.png';
         $footerUrl = '/assets/overlay/footer.png';
       ?>
-      <div class="cw-slide-card <?= $isDeleted ? 'cw-deleted' : '' ?>">
+      <div class="cw-slide-card <?= $isDeleted ? 'cw-deleted' : '' ?>" id="slide-card-<?= (int)$s['id'] ?>">
         <div class="cw-slide-top">
           <div>
             <strong>Page <?= (int)$s['page_number'] ?></strong>
@@ -187,35 +209,15 @@ cw_header('Slides');
             <a class="btn btn-sm" href="<?= h($overlayEditorUrl) ?>">Designer</a>
 
             <?php if (!$isDeleted): ?>
-              <form method="post" style="display:inline">
-                <input type="hidden" name="action" value="delete_slide">
-                <input type="hidden" name="slide_id" value="<?= (int)$s['id'] ?>">
-                <input type="hidden" name="lesson_id" value="<?= (int)$lessonId ?>">
-                <button class="btn btn-sm" type="submit">Delete</button>
-              </form>
+              <button class="btn btn-sm cw-soft-delete" type="button" data-slide-id="<?= (int)$s['id'] ?>">Soft-delete</button>
             <?php else: ?>
-              <form method="post" style="display:inline">
-                <input type="hidden" name="action" value="restore_slide">
-                <input type="hidden" name="slide_id" value="<?= (int)$s['id'] ?>">
-                <input type="hidden" name="lesson_id" value="<?= (int)$lessonId ?>">
-                <button class="btn btn-sm" type="submit">Restore</button>
-              </form>
+              <button class="btn btn-sm cw-restore-slide" type="button" data-slide-id="<?= (int)$s['id'] ?>">Restore</button>
             <?php endif; ?>
           </div>
         </div>
 
-        <div class="cw-slide-body" style="grid-template-columns: 420px 420px; gap:12px;">
-          <!-- Screenshot thumb -->
-          <div class="cw-shot" ondblclick="location.href='<?= h($overlayEditorUrl) ?>'">
-            <a target="_blank" href="<?= h($imgUrl) ?>">
-              <div class="thumb-viewport">
-                <img src="<?= h($imgUrl) ?>" alt="">
-              </div>
-            </a>
-          </div>
-
-          <!-- Overlay thumb (what student sees) -->
-          <div class="cw-mini" ondblclick="location.href='<?= h($overlayEditorUrl) ?>'">
+        <div class="cw-slide-body" style="grid-template-columns: 420px; gap:12px;">
+          <a class="cw-designer-hit" href="<?= h($overlayEditorUrl) ?>" title="Open Designer">
             <div class="thumb-viewport">
               <div class="thumb-stage">
                 <img class="ov-content" src="<?= h($imgUrl) ?>" alt="">
@@ -223,13 +225,109 @@ cw_header('Slides');
                 <img class="ov-footer" src="<?= h($footerUrl) ?>" alt="">
               </div>
             </div>
-          </div>
+          </a>
         </div>
 
       </div>
     <?php endforeach; ?>
   </div>
 </div>
+<script>
+(function () {
+  var toast = document.getElementById('slidesToast');
+  var tHide = null;
+  function showToast(msg) {
+    if (!toast) return;
+    toast.textContent = msg;
+    toast.classList.add('slides-toast-on');
+    if (tHide) clearTimeout(tHide);
+    tHide = setTimeout(function () {
+      toast.classList.remove('slides-toast-on');
+    }, 2800);
+  }
+
+  var params = new URLSearchParams(window.location.search);
+  var focusId = parseInt(params.get('focus_slide') || '0', 10);
+  if (focusId > 0) {
+    var el = document.getElementById('slide-card-' + focusId);
+    if (el) {
+      el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+    params.delete('focus_slide');
+    var q = params.toString();
+    var path = window.location.pathname + (q ? '?' + q : '') + window.location.hash;
+    window.history.replaceState({}, '', path);
+  }
+
+  function postToggle(slideId, isDeleted) {
+    var fd = new FormData();
+    fd.append('slide_id', String(slideId));
+    fd.append('is_deleted', String(isDeleted));
+    return fetch('/admin/api/bulk_enrich_slide_soft_toggle.php', {
+      method: 'POST',
+      body: fd,
+      credentials: 'same-origin'
+    }).then(function (r) { return r.json(); });
+  }
+
+  var grid = document.querySelector('.cw-slides-grid');
+  if (grid) {
+    grid.addEventListener('click', function (ev) {
+      var t = ev.target;
+      if (!t.classList.contains('cw-soft-delete') && !t.classList.contains('cw-restore-slide')) {
+        return;
+      }
+      var sid = parseInt(t.getAttribute('data-slide-id') || '0', 10);
+      if (!sid) return;
+
+      var card = document.getElementById('slide-card-' + sid);
+      var actions = card ? card.querySelector('.cw-actions') : null;
+
+      if (t.classList.contains('cw-soft-delete')) {
+        if (!confirm('Soft-delete slide ' + sid + '?')) return;
+        postToggle(sid, 1).then(function (j) {
+          if (!j || !j.ok) {
+            alert((j && j.error) || 'Request failed');
+            return;
+          }
+          if (card) card.classList.add('cw-deleted');
+          t.remove();
+          if (actions) {
+            var rb = document.createElement('button');
+            rb.type = 'button';
+            rb.className = 'btn btn-sm cw-restore-slide';
+            rb.setAttribute('data-slide-id', String(sid));
+            rb.textContent = 'Restore';
+            actions.appendChild(rb);
+          }
+          showToast('Slide soft-deleted.');
+        }).catch(function () { alert('Network error'); });
+        return;
+      }
+
+      if (t.classList.contains('cw-restore-slide')) {
+        postToggle(sid, 0).then(function (j) {
+          if (!j || !j.ok) {
+            alert((j && j.error) || 'Request failed');
+            return;
+          }
+          if (card) card.classList.remove('cw-deleted');
+          t.remove();
+          if (actions) {
+            var db = document.createElement('button');
+            db.type = 'button';
+            db.className = 'btn btn-sm cw-soft-delete';
+            db.setAttribute('data-slide-id', String(sid));
+            db.textContent = 'Soft-delete';
+            actions.appendChild(db);
+          }
+          showToast('Slide restored.');
+        }).catch(function () { alert('Network error'); });
+      }
+    });
+  }
+})();
+</script>
 <?php endif; ?>
 
 <?php cw_footer(); ?>

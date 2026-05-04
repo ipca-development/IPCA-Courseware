@@ -27,7 +27,17 @@ $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
 if ($lessonId <= 0) $lessonId = (int)$slide['lesson_id'];
 if ($courseId <= 0) $courseId = (int)$slide['course_id'];
 
-$backUrl = '/admin/slides.php?course_id='.(int)$courseId.'&lesson_id='.(int)$lessonId;
+$returnTo = trim((string)($_GET['return_to'] ?? ''));
+if ($returnTo !== 'bulk_enrich' && $returnTo !== 'slides') {
+    $returnTo = 'slides';
+}
+
+$backToSlidesUrl = '/admin/slides.php?course_id=' . (int)$courseId . '&lesson_id=' . (int)$lessonId . '&focus_slide=' . (int)$slideId;
+$backToBulkUrl = '/admin/bulk_enrich.php';
+
+$navTail = $returnTo === 'bulk_enrich'
+    ? '&return_to=bulk_enrich'
+    : '&return_to=slides';
 
 // Prev/Next slide in this lesson (skip deleted slides)
 $prevId = 0; $nextId = 0;
@@ -39,8 +49,8 @@ $stmt = $pdo->prepare("SELECT id FROM slides WHERE lesson_id=? AND is_deleted=0 
 $stmt->execute([(int)$lessonId, (int)$slide['page_number']]);
 $nextId = (int)$stmt->fetchColumn();
 
-$prevUrl = $prevId ? '/admin/slide_overlay_editor.php?slide_id='.$prevId.'&course_id='.(int)$courseId.'&lesson_id='.(int)$lessonId : '';
-$nextUrl = $nextId ? '/admin/slide_overlay_editor.php?slide_id='.$nextId.'&course_id='.(int)$courseId.'&lesson_id='.(int)$lessonId : '';
+$prevUrl = $prevId ? '/admin/slide_overlay_editor.php?slide_id='.$prevId.'&course_id='.(int)$courseId.'&lesson_id='.(int)$lessonId.$navTail : '';
+$nextUrl = $nextId ? '/admin/slide_overlay_editor.php?slide_id='.$nextId.'&course_id='.(int)$courseId.'&lesson_id='.(int)$lessonId.$navTail : '';
 
 // Fixed overlays
 $HEADER = "/assets/overlay/header.png"; // 1600x125
@@ -159,13 +169,17 @@ cw_header('Overlay Slide Editor');
     </div>
     <div class="row">
       <?php if ($prevUrl): ?>
-        <a class="btn btn-sm navlink" href="<?= h($prevUrl) ?>">← Prev</a>
+        <a class="btn btn-sm soe-nav-guard" href="<?= h($prevUrl) ?>">← Prev</a>
       <?php endif; ?>
       <?php if ($nextUrl): ?>
-        <a class="btn btn-sm navlink" href="<?= h($nextUrl) ?>">Next →</a>
+        <a class="btn btn-sm soe-nav-guard" href="<?= h($nextUrl) ?>">Next →</a>
       <?php endif; ?>
-      <a class="btn btn-sm navlink" href="<?= h($backUrl) ?>">← Back to Slides</a>
-      <a class="btn btn-sm" target="_blank" href="/player/slide.php?slide_id=<?= (int)$slideId ?>">Student View</a>
+      <?php if ($returnTo === 'bulk_enrich'): ?>
+        <a class="btn btn-sm soe-nav-guard" href="<?= h($backToBulkUrl) ?>">← Return to Bulk Enrich</a>
+      <?php else: ?>
+        <a class="btn btn-sm soe-nav-guard" href="<?= h($backToSlidesUrl) ?>">← Back to Slides</a>
+      <?php endif; ?>
+      <a class="btn btn-sm soe-nav-guard" target="_blank" rel="noopener" href="/player/slide.php?slide_id=<?= (int)$slideId ?>">Student View</a>
     </div>
   </div>
 
@@ -202,9 +216,12 @@ cw_header('Overlay Slide Editor');
       <div class="card">
         <h2 style="margin:0 0 8px 0;">Canonical data</h2>
 
-        <div class="row" style="margin-bottom:8px;">
-          <button class="btn" id="btnExtractEN" type="button">AI Extract (EN)</button>
-          <button class="btn btn-sm" id="btnExtractES" type="button">AI Translate (ES)</button>
+        <div class="row" style="margin-bottom:8px; flex-wrap:wrap; gap:6px;">
+          <button class="btn btn-sm" id="btnExtractEN" type="button">AI · English text</button>
+          <button class="btn btn-sm" id="btnExtractES" type="button">AI · Spanish text</button>
+          <button class="btn btn-sm" id="btnNarrEN" type="button">AI · English narration</button>
+          <button class="btn btn-sm" id="btnNarrES" type="button">AI · Spanish narration</button>
+          <button class="btn btn-sm" id="btnRefsAI" type="button">AI · References</button>
         </div>
 
         <label class="small muted">English (editable)</label>
@@ -270,28 +287,29 @@ setTimeout(fitStage, 50);
 function setStatus(msg){ statusEl.textContent = msg; }
 
 // ------------------------
-// Unsaved changes tracking
+// Unsaved changes tracking (canonical text vs hotspots)
 // ------------------------
-let dirty = false;
-function markDirty(){ dirty = true; }
-function markSaved(){ dirty = false; }
+let dirtyCanonical = false;
+let dirtyHotspots = false;
+function markDirtyCanonical(){ dirtyCanonical = true; }
+function markDirtyHotspots(){ dirtyHotspots = true; }
+function hasUnsaved(){ return dirtyCanonical || dirtyHotspots; }
 
 ['taEN','taES','taNarrEN','taNarrES'].forEach(id=>{
   const el = document.getElementById(id);
-  if (el) el.addEventListener('input', markDirty);
+  if (el) el.addEventListener('input', markDirtyCanonical);
 });
 
 window.addEventListener('beforeunload', (e)=>{
-  if (!dirty) return;
+  if (!hasUnsaved()) return;
   e.preventDefault();
   e.returnValue = '';
 });
 
-// Intercept navigation links (Prev/Next/Back)
-document.querySelectorAll('a.navlink').forEach(a=>{
+document.querySelectorAll('a.soe-nav-guard').forEach(a=>{
   a.addEventListener('click', (e)=>{
-    if (!dirty) return;
-    if (!confirm('You have unsaved changes. Leave without saving?')) {
+    if (!hasUnsaved()) return;
+    if (!confirm('You have unsaved changes (canonical text and/or hotspots). Leave without saving?')) {
       e.preventDefault();
     }
   });
@@ -350,7 +368,7 @@ function renderHotspots(){
         d.style.left = h.x + 'px';
         d.style.top  = h.y + 'px';
         renderHotspotList();
-        markDirty();
+        markDirtyHotspots();
       }
       if (rsz) {
         const dx = (ev.clientX - rsz.sx) / scale;
@@ -360,7 +378,7 @@ function renderHotspots(){
         d.style.width = h.w + 'px';
         d.style.height = h.h + 'px';
         renderHotspotList();
-        markDirty();
+        markDirtyHotspots();
       }
     });
     window.addEventListener('mouseup', () => { drag = null; rsz = null; });
@@ -397,7 +415,7 @@ function renderHotspotList(){
       if (!h) return;
       h[k] = inp.value;
       renderHotspots();
-      markDirty();
+      markDirtyHotspots();
     });
   });
 
@@ -409,7 +427,7 @@ function renderHotspotList(){
       h.src = suggestedSrc;
       renderHotspots();
       renderHotspotList();
-      markDirty();
+      markDirtyHotspots();
     });
   });
 
@@ -421,7 +439,7 @@ function renderHotspotList(){
       h.is_deleted = 1;
       renderHotspots();
       renderHotspotList();
-      markDirty();
+      markDirtyHotspots();
     });
   });
 }
@@ -437,7 +455,10 @@ async function loadHotspots(){
   renderHotspotList();
 }
 
-document.getElementById('btnReloadHotspots').addEventListener('click', loadHotspots);
+document.getElementById('btnReloadHotspots').addEventListener('click', ()=>{
+  if (dirtyHotspots && !confirm('Reload hotspots from server? Unsaved hotspot edits will be lost.')) return;
+  loadHotspots().then(()=>{ dirtyHotspots = false; });
+});
 
 document.getElementById('btnSaveHotspots').addEventListener('click', async ()=>{
   setStatus('Saving hotspots…');
@@ -449,7 +470,7 @@ document.getElementById('btnSaveHotspots').addEventListener('click', async ()=>{
   const j = await res.json();
   if (!j.ok) { setStatus('Hotspot save failed: ' + (j.error||'')); return; }
   setStatus('Hotspots saved.');
-  markSaved();
+  dirtyHotspots = false;
   await loadHotspots();
 });
 
@@ -500,7 +521,7 @@ window.addEventListener('mouseup', ()=>{
 
   renderHotspots();
   renderHotspotList();
-  markDirty();
+  markDirtyHotspots();
 });
 
 function updateDrawEl(){
@@ -543,7 +564,15 @@ async function loadCanonical(){
   }
 
   setStatus('Ready.');
-  markSaved();
+  dirtyCanonical = false;
+}
+
+async function reloadRefsFromServer(){
+  const res2 = await fetch('/admin/api/slide_canonical_get.php?slide_id=' + SLIDE_ID);
+  const j2 = await res2.json();
+  if (!j2.ok) return;
+  renderRefs(phakRefsEl, j2.phak || []);
+  renderRefs(acsRefsEl, j2.acs || []);
 }
 
 function renderRefs(container, refs){
@@ -558,8 +587,6 @@ function renderRefs(container, refs){
     return `<span class="pill">${code}${title ? ' — ' + title : ''}${conf ? ' ('+conf+')' : ''}</span>`;
   }).join(' ');
 }
-
-document.getElementById('btnReloadCanonical').addEventListener('click', loadCanonical);
 
 document.getElementById('btnSaveCanonical').addEventListener('click', async ()=>{
   setStatus('Saving canonical…');
@@ -583,10 +610,15 @@ document.getElementById('btnSaveCanonical').addEventListener('click', async ()=>
   if (!j2.ok) { setStatus('Save narration failed: ' + (j2.error||'')); return; }
 
   setStatus('Saved canonical data.');
-  markSaved();
+  dirtyCanonical = false;
 });
 
-// AI buttons (EN extract / ES translate)
+document.getElementById('btnReloadCanonical').addEventListener('click', ()=>{
+  if (hasUnsaved() && !confirm('Reload from server? Unsaved canonical text or hotspot edits will be lost.')) return;
+  loadCanonical();
+});
+
+// AI buttons
 document.getElementById('btnExtractEN').addEventListener('click', async ()=>{
   setStatus('AI extracting EN…');
   const res = await fetch('/admin/api/ai_extract_content.php', {
@@ -597,8 +629,8 @@ document.getElementById('btnExtractEN').addEventListener('click', async ()=>{
   const j = await res.json();
   if (!j.ok) { setStatus('AI EN failed: ' + (j.error||'')); return; }
   taEN.value = j.plain_text || '';
-  setStatus('EN extracted.');
-  markDirty();
+  setStatus('EN extracted and saved.');
+  dirtyCanonical = false;
 });
 
 document.getElementById('btnExtractES').addEventListener('click', async ()=>{
@@ -611,13 +643,58 @@ document.getElementById('btnExtractES').addEventListener('click', async ()=>{
   const j = await res.json();
   if (!j.ok) { setStatus('AI ES failed: ' + (j.error||'')); return; }
   taES.value = j.plain_text || '';
-  setStatus('ES translated.');
-  markDirty();
+  setStatus('ES translated and saved.');
+  dirtyCanonical = false;
 });
 
-// init
-loadHotspots();
-loadCanonical();
+document.getElementById('btnNarrEN').addEventListener('click', async ()=>{
+  setStatus('AI English narration (vision)…');
+  const res = await fetch('/admin/api/slide_enrich_ai_action.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ slide_id: SLIDE_ID, step:'narration_en' })
+  });
+  const j = await res.json();
+  if (!j.ok) { setStatus('AI narration EN failed: ' + (j.error||'')); return; }
+  taNarrEN.value = j.narration_en || '';
+  setStatus('English narration saved.');
+  dirtyCanonical = false;
+});
+
+document.getElementById('btnNarrES').addEventListener('click', async ()=>{
+  setStatus('AI Spanish narration…');
+  const res = await fetch('/admin/api/slide_enrich_ai_action.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ slide_id: SLIDE_ID, step:'narration_es' })
+  });
+  const j = await res.json();
+  if (!j.ok) { setStatus('AI narration ES failed: ' + (j.error||'')); return; }
+  taNarrES.value = j.narration_es || '';
+  setStatus('Spanish narration saved.');
+  dirtyCanonical = false;
+});
+
+document.getElementById('btnRefsAI').addEventListener('click', async ()=>{
+  if (dirtyCanonical && !confirm('AI References will reload reference lists from the database. Save canonical text first if needed. Continue?')) return;
+  setStatus('AI references (vision)…');
+  const res = await fetch('/admin/api/slide_enrich_ai_action.php', {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ slide_id: SLIDE_ID, step:'refs' })
+  });
+  const j = await res.json();
+  if (!j.ok) { setStatus('AI references failed: ' + (j.error||'')); return; }
+  await reloadRefsFromServer();
+  setStatus('References saved (PHAK ' + (j.phak_count||0) + ', ACS ' + (j.acs_count||0) + ').');
+});
+
+// init: load server state then mark pristine
+(async function(){
+  await loadHotspots();
+  dirtyHotspots = false;
+  await loadCanonical();
+})();
 </script>
 
 <?php cw_footer(); ?>
