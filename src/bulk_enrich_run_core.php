@@ -43,6 +43,9 @@ function bulk_enrich_core_replace_refs(PDO $pdo, int $slideId, array $phak, arra
       INSERT INTO slide_references (slide_id, ref_type, ref_code, ref_title, confidence, notes)
       VALUES (?,?,?,?,?,?)
     ");
+    $refCodeMax = bulk_enrich_core_col_max_len($pdo, 'slide_references', 'ref_code', 128);
+    $refTitleMax = bulk_enrich_core_col_max_len($pdo, 'slide_references', 'ref_title', 255);
+    $refNotesMax = bulk_enrich_core_col_max_len($pdo, 'slide_references', 'notes', 2000);
 
     foreach ($phak as $r) {
         $chapter = trim((string)($r['chapter'] ?? ''));
@@ -52,14 +55,15 @@ function bulk_enrich_core_replace_refs(PDO $pdo, int $slideId, array $phak, arra
         if ($code === '') {
             $code = 'PHAK';
         }
+        $code = bulk_enrich_core_clip($code, $refCodeMax);
 
         $ins->execute([
             $slideId,
             'PHAK',
             $code,
-            (string)($r['title'] ?? ''),
-            (float)($r['confidence'] ?? 0.6),
-            (string)($r['notes'] ?? ''),
+            bulk_enrich_core_clip((string)($r['title'] ?? ''), $refTitleMax),
+            bulk_enrich_core_clamp_conf((float)($r['confidence'] ?? 0.6)),
+            bulk_enrich_core_clip((string)($r['notes'] ?? ''), $refNotesMax),
         ]);
     }
 
@@ -68,16 +72,68 @@ function bulk_enrich_core_replace_refs(PDO $pdo, int $slideId, array $phak, arra
         if ($code === '') {
             continue;
         }
+        $code = bulk_enrich_core_clip($code, $refCodeMax);
 
         $ins->execute([
             $slideId,
             'ACS',
             $code,
-            (string)($r['task'] ?? ''),
-            (float)($r['confidence'] ?? 0.6),
-            (string)($r['notes'] ?? ''),
+            bulk_enrich_core_clip((string)($r['task'] ?? ''), $refTitleMax),
+            bulk_enrich_core_clamp_conf((float)($r['confidence'] ?? 0.6)),
+            bulk_enrich_core_clip((string)($r['notes'] ?? ''), $refNotesMax),
         ]);
     }
+}
+
+function bulk_enrich_core_col_max_len(PDO $pdo, string $table, string $column, int $fallback): int
+{
+    static $cache = [];
+    $k = $table . '.' . $column;
+    if (isset($cache[$k])) {
+        return $cache[$k];
+    }
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM {$table} LIKE ?");
+        $stmt->execute([$column]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $type = strtolower((string)($row['Type'] ?? ''));
+        if (preg_match('/\((\d+)\)/', $type, $m)) {
+            $n = (int)$m[1];
+            if ($n > 0) {
+                $cache[$k] = $n;
+                return $n;
+            }
+        }
+    } catch (Throwable $e) {
+        // Use fallback
+    }
+    $cache[$k] = $fallback;
+    return $fallback;
+}
+
+function bulk_enrich_core_clip(string $value, int $maxLen): string
+{
+    $value = trim($value);
+    if ($maxLen <= 0 || strlen($value) <= $maxLen) {
+        return $value;
+    }
+
+    return substr($value, 0, $maxLen);
+}
+
+function bulk_enrich_core_clamp_conf(float $v): float
+{
+    if (!is_finite($v)) {
+        return 0.6;
+    }
+    if ($v < 0.0) {
+        return 0.0;
+    }
+    if ($v > 1.0) {
+        return 1.0;
+    }
+
+    return $v;
 }
 
 function bulk_enrich_core_read_manifest_match(string $manifestPath, int $extLessonId, int $pageNum, string $programKey): string
