@@ -4,11 +4,13 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/resource_library_ingest.php';
+require_once __DIR__ . '/../../src/resource_library_aim.php';
 
 cw_require_admin();
 
 $apiHref = '/admin/api/resource_library_api.php';
 $searchTestHref = '/admin/api/resource_library_search_test.php';
+$aimApiHref = '/admin/api/resource_library_aim_api.php';
 
 /**
  * @return array{ok: bool, rows: list<array<string, mixed>>, error?: string}
@@ -233,6 +235,17 @@ cw_header('Resource Library');
     background: #fff;
   }
   .rl-api-list code { font-size: 12px; background: #f1f5f9; padding: 2px 6px; border-radius: 6px; }
+  .rl-aim-db-stats {
+    font-size: 13px;
+    color: #475569;
+    line-height: 1.55;
+    margin: 12px 0 0;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+  }
+  .rl-aim-db-stats strong { color: #0f172a; }
   .rl-intro {
     color: #64748b;
     font-size: 14px;
@@ -740,15 +753,47 @@ cw_header('Resource Library');
       </nav>
 
       <?php if ($rlCrawl === 'aim'): ?>
+        <?php $aimDashboard = rl_aim_slot_dashboard($pdo, 'aim'); ?>
         <div class="rl-crawl-grid">
           <article class="rl-crawler-card" data-resource-type="crawler_aim">
             <div class="rl-card-thumb">
               <img class="rl-card-cover" src="/assets/icons/documents.svg" alt="" width="120" height="120" loading="lazy">
             </div>
             <div class="rl-card-body">
-              <span class="rl-type-pill">Data crawler · Planned</span>
+              <span class="rl-type-pill">Data crawler · <?= !empty($aimDashboard['schema']) ? 'Database' : 'Setup' ?></span>
               <h2 class="rl-card-title">FAA AIM (HTML)</h2>
               <p class="rl-meta" style="margin:0;font-size:13px;color:#64748b;">Canonical crawl under <code>faa.gov/.../atpubs/aim_html/</code> — child page URLs, preserved anchors, absolute links only.</p>
+              <?php if (empty($aimDashboard['schema'])): ?>
+                <div class="rl-alert" style="margin-top:12px;text-align:left;">
+                  AIM index tables are not installed. Apply <code>scripts/sql/resource_library_aim_crawl.sql</code> to this database, then reload.
+                </div>
+              <?php elseif (!empty($aimDashboard['error'])): ?>
+                <div class="rl-alert" style="margin-top:12px;text-align:left;"><?= h((string) $aimDashboard['error']) ?></div>
+              <?php else: ?>
+                <?php
+                  $aimSrc = is_array($aimDashboard['source'] ?? null) ? $aimDashboard['source'] : [];
+                  $aimCounts = is_array($aimDashboard['counts'] ?? null) ? $aimDashboard['counts'] : [];
+                  $aimRun = is_array($aimDashboard['last_run'] ?? null) ? $aimDashboard['last_run'] : null;
+                  $sid = (int) ($aimSrc['id'] ?? 0);
+                  $st = (string) ($aimSrc['status'] ?? '');
+                  $tot = (int) ($aimCounts['total'] ?? 0);
+                  $act = (int) ($aimCounts['active'] ?? 0);
+                  $runLine = 'No crawl runs yet.';
+                  if ($aimRun) {
+                      $rs = (string) ($aimRun['run_status'] ?? '');
+                      $ps = (int) ($aimRun['paragraphs_upserted'] ?? 0);
+                      $stAt = (string) ($aimRun['started_at'] ?? '');
+                      $runLine = $rs . ' · paragraphs upserted ' . $ps . ' · started ' . $stAt;
+                  }
+                ?>
+                <div class="rl-aim-db-stats">
+                  <strong>Index status</strong> — Source id <?= $sid > 0 ? (string) $sid : '—' ?> · status <code><?= h($st !== '' ? $st : '—') ?></code><br>
+                  Rows in <code>resource_library_aim_paragraphs</code>: <?= $tot ?> total
+                  (<?= $act ?> active<?= $tot - $act > 0 ? ', ' . ($tot - $act) . ' non-active' : '' ?>).<br>
+                  <strong>Last crawl run</strong> — <?= h($runLine) ?><br>
+                  JSON: <code><?= h($aimApiHref) ?>?slot=aim</code>
+                </div>
+              <?php endif; ?>
             </div>
             <div class="rl-crawler-spec">
               <strong>Indexed record fields (planned):</strong>
@@ -761,7 +806,7 @@ cw_header('Resource Library');
               </ul>
               <p style="margin:10px 0 0;"><strong>AI prompt rule (planned):</strong> For AIM answers, only use retrieved local index rows; every AIM factual claim includes paragraph id + FAA URL — no generic FAA pages when a specific AIM URL exists.</p>
             </div>
-            <div class="rl-card-hint">Crawler UI and database wiring will open from this card in a later release (same modal pattern as JSON / Book).</div>
+            <div class="rl-card-hint">Crawl worker (fetch HTML, normalize URLs, upsert rows) ships next; schema and status API are live.</div>
           </article>
           <?php
             rl_add_source_card(
@@ -847,6 +892,10 @@ cw_header('Resource Library');
           <strong>Retrieval test (admin)</strong> — FULLTEXT search and optional model answer over indexed blocks.<br>
           <code><?= h($searchTestHref) ?></code>
         </li>
+        <li>
+          <strong>AIM crawler status (admin)</strong> — schema detection, source row, paragraph counts, last run.<br>
+          <code><?= h($aimApiHref) ?>?slot=aim</code> (also <code>?slot=reserved2</code> / <code>reserved3</code> return a placeholder until those slots have schema.)
+        </li>
       </ul>
       <div class="rl-crawl-grid" style="margin-top:18px;">
         <?php
@@ -860,7 +909,7 @@ cw_header('Resource Library');
           );
         ?>
       </div>
-      <p class="rl-intro" style="margin-top:16px;">When the AIM crawler ships, its admin API will be listed here alongside ingestion status and re-crawl controls.</p>
+      <p class="rl-intro" style="margin-top:16px;">The AIM status endpoint is listed above; POST crawl triggers and URL revalidation will be added with the crawl worker.</p>
     </div>
   <?php endif; ?>
 </div>
