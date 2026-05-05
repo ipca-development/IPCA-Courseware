@@ -472,6 +472,16 @@ cw_header('Resource Library');
         </div>
       </div>
 
+      <div class="rl-panel">
+        <h3>AI database</h3>
+        <p id="rlBlocksInfo">Blocks are not loaded into MySQL yet.</p>
+        <p class="rl-drop-meta" style="margin-top:6px;">Applies <code>scripts/sql/resource_library_blocks.sql</code> first, then sync so AI features can query
+          <code>resource_library_blocks</code> (FULLTEXT on body text).</p>
+        <div class="rl-panel-actions">
+          <button type="button" class="btn btn-sm" id="rlSyncBlocks">Sync JSON → database</button>
+        </div>
+      </div>
+
       <div class="rl-msg" id="rlMsg" role="status"></div>
     </div>
     <div class="rl-modal-foot">
@@ -502,6 +512,8 @@ cw_header('Resource Library');
   var thumbPreview = document.getElementById('rlThumbPreview');
   var msg = document.getElementById('rlMsg');
   var sourceInfo = document.getElementById('rlSourceInfo');
+  var blocksInfo = document.getElementById('rlBlocksInfo');
+  var syncBlocksBtn = document.getElementById('rlSyncBlocks');
 
   function formatBytes(n) {
     n = Number(n) || 0;
@@ -571,6 +583,7 @@ cw_header('Resource Library');
       .then(function (x) {
         if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Upload failed');
         if (x.j.edition) fillForm(x.j.edition);
+        if (x.j.blocks) setBlocksUI(x.j.blocks);
         updateThumbPreview();
         showMsg('Cover image saved.', 'ok');
       })
@@ -601,6 +614,25 @@ cw_header('Resource Library');
       if (present && id) dl.href = api + '?id=' + encodeURIComponent(id) + '&download=1';
     }
     if (delBtn) delBtn.style.display = present ? 'inline-block' : 'none';
+  }
+
+  function setBlocksUI(bl) {
+    bl = bl || {};
+    if (!blocksInfo) return;
+    if (!bl.table_ok) {
+      var err = bl.error || '';
+      if (err === 'table_missing') {
+        blocksInfo.textContent = 'Run scripts/sql/resource_library_blocks.sql on this database, then use “Sync JSON → database”.';
+      } else if (err) {
+        blocksInfo.textContent = 'Blocks table: ' + err;
+      } else {
+        blocksInfo.textContent = 'Blocks table not available.';
+      }
+      return;
+    }
+    var n = bl.row_count || 0;
+    var c = bl.chapter_count || 0;
+    blocksInfo.textContent = n + ' blocks in MySQL across ' + c + ' chapters (FULLTEXT on body_text for AI search).';
   }
 
   function trapFocus(e) {
@@ -705,6 +737,7 @@ cw_header('Resource Library');
         if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Load failed');
         fillForm(x.j.edition);
         setSourceUI(x.j.source);
+        setBlocksUI(x.j.blocks);
         openModal();
       })
       .catch(function (err) {
@@ -771,6 +804,7 @@ cw_header('Resource Library');
       .then(function (x) {
         if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Upload failed');
         setSourceUI(x.j.source);
+        if (x.j.blocks) setBlocksUI(x.j.blocks);
         fileInput.value = '';
         showMsg('JSON uploaded and validated.', 'ok');
       })
@@ -778,6 +812,30 @@ cw_header('Resource Library');
         showMsg(e.message || 'Upload failed', 'err');
       })
       .finally(function () { uploadBtn.disabled = false; });
+  });
+
+  if (syncBlocksBtn) syncBlocksBtn.addEventListener('click', function () {
+    clearMsg();
+    var id = parseInt(document.getElementById('rlFieldId').value, 10);
+    if (!id) return;
+    syncBlocksBtn.disabled = true;
+    fetch(api, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ action: 'import_blocks', id: id })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Sync failed');
+        if (x.j.blocks) setBlocksUI(x.j.blocks);
+        var n = x.j.imported != null ? x.j.imported : (x.j.blocks && x.j.blocks.row_count);
+        showMsg('Database sync complete' + (n != null ? ' (' + n + ' blocks).' : '.'), 'ok');
+      })
+      .catch(function (e) {
+        showMsg(e.message || 'Sync failed', 'err');
+      })
+      .finally(function () { syncBlocksBtn.disabled = false; });
   });
 
   if (delBtn) delBtn.addEventListener('click', function () {
@@ -796,6 +854,7 @@ cw_header('Resource Library');
       .then(function (x) {
         if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Remove failed');
         setSourceUI(x.j.source);
+        if (x.j.blocks) setBlocksUI(x.j.blocks);
         showMsg('JSON file removed.', 'ok');
       })
       .catch(function (e) {

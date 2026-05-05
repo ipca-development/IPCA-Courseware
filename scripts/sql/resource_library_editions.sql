@@ -3,6 +3,9 @@
 --
 -- Structured JSON uploads (admin Resource Library modal) are stored on disk, not in this table:
 --   {project}/storage/resource_library/{edition_id}/source.json
+--
+-- For AI / SQL retrieval, run scripts/sql/resource_library_blocks.sql then sync from admin
+-- ("Sync JSON → database") or: php scripts/import_resource_library_blocks.php {edition_id}
 
 CREATE TABLE IF NOT EXISTS resource_library_editions (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,

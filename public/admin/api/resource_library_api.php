@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/resource_library_storage.php';
+require_once __DIR__ . '/../../../src/resource_library_ingest.php';
 
 cw_require_admin();
 
@@ -122,10 +123,12 @@ if ($method === 'GET') {
     }
 
     $stat = rl_source_stat($id);
+    $blocks = rl_blocks_stats($pdo, $id);
     rl_api_json_out(200, [
         'ok' => true,
         'edition' => $edition,
         'source' => $stat,
+        'blocks' => $blocks,
     ]);
 }
 
@@ -205,6 +208,7 @@ if ($hasJsonUpload || $hasThumbUpload || str_contains($contentType, 'multipart/f
         'ok' => true,
         'edition' => $row,
         'source' => rl_source_stat($editionId),
+        'blocks' => rl_blocks_stats($pdo, $editionId),
         'did_thumbnail' => $didThumb,
         'did_source_json' => $didJson,
     ]);
@@ -229,7 +233,35 @@ if ($action === 'delete_source') {
         rl_api_json_out(404, ['ok' => false, 'error' => 'Edition not found']);
     }
     rl_delete_source_json($id);
-    rl_api_json_out(200, ['ok' => true, 'source' => rl_source_stat($id)]);
+    rl_delete_blocks_for_edition($pdo, $id);
+    rl_api_json_out(200, [
+        'ok' => true,
+        'source' => rl_source_stat($id),
+        'blocks' => rl_blocks_stats($pdo, $id),
+    ]);
+}
+
+if ($action === 'import_blocks') {
+    @set_time_limit(600);
+    $id = (int)($data['id'] ?? 0);
+    $edition = rl_api_load_edition($pdo, $id);
+    if (!$edition) {
+        rl_api_json_out(404, ['ok' => false, 'error' => 'Edition not found']);
+    }
+    try {
+        $stats = rl_ingest_blocks_from_source_file($pdo, $id);
+    } catch (Throwable $e) {
+        rl_api_json_out(400, ['ok' => false, 'error' => $e->getMessage()]);
+    }
+    $row = rl_api_load_edition($pdo, $id);
+    rl_api_json_out(200, [
+        'ok' => true,
+        'imported' => $stats['imported'],
+        'chapter_count' => $stats['chapter_count'],
+        'edition' => $row,
+        'source' => rl_source_stat($id),
+        'blocks' => rl_blocks_stats($pdo, $id),
+    ]);
 }
 
 if ($action !== 'save') {
@@ -310,4 +342,5 @@ rl_api_json_out(200, [
     'ok' => true,
     'edition' => $row,
     'source' => rl_source_stat($id),
+    'blocks' => rl_blocks_stats($pdo, $id),
 ]);
