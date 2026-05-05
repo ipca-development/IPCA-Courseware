@@ -326,22 +326,25 @@ final class InstructorTheoryTrainingReportAi
             'signoff_rows MUST be an array of exactly 13 objects in the same order as the static subject list provided. Each object: {"sessions":[{"at_utc":"ISO-8601 UTC or MySQL UTC datetime string","hours_approx":0.5,"note":"short"}],"total_hours_approx":0.0}. Use lesson summary update times and progress test completion times from the supplied evidence to propose realistic study sessions; if uncertain, use conservative estimates and say so in note.',
             'course_total_hours_approx should approximate total ground-study time across the program from the same evidence.',
             'All HTML string fields must be simple tags (h2,h3,p,ul,ol,li,strong,em,br,table,tr,th,td) only — no attributes except colspan/rowspan on table cells if needed.',
+            'phak_oral_quiz_items MUST be an array of 12 to 28 objects for instructor-led oral prep with the student. Aim for roughly 18–24 when evidence is rich; never more than 28.',
+            'Each phak_oral_quiz_items element MUST be an object with keys: topic_label (string), depth_tag (string: one of recall, application, correlation, scenario), scenario_html (HTML string; use empty string if not scenario-based), question_html (HTML; sharp instructor oral question), instructor_answer_key_html (HTML; detailed model answer for grading and teaching points), phak_official_lookup_html (HTML; REQUIRED lookup aid — numbered steps listing official handbook identifier, chapter/section titles, and when excerpts provide them the exact [chapter / block_id] tags plus 1–3 short anchor phrases to search in the PDF so an answer can be found quickly).',
+            'At least half of the items MUST use depth_tag scenario or correlation. Many questions should place the student in a realistic flight/ops context and require linking two or more concepts.',
+            'Do NOT output phak_sections or broad PHAK narrative chapters; only phak_oral_quiz_items for the PHAK portion.',
         ];
         if ($hasRlPhak) {
-            $rules[] = 'resource_library_phak_excerpts contains indexed PHAK plain text from this school\'s Resource Library (same handbook used in courseware). You MUST ground phak_sections in that material: use matching definitions, standard terminology, and structure where they apply to the student evidence. Synthesize concise instructor-facing study narrative in body_html; you may use short verbatim phrases from excerpts when needed for accuracy. Do not assert handbook claims unsupported by excerpts or evidence.';
-            $rules[] = 'phak_reference and chapter_title should align with excerpt bracket lines [chapter / block_id]. If resource_library_handbook_label is provided, cite it in phak_reference; prefer American English aviation terminology as in the excerpts.';
+            $rules[] = 'resource_library_phak_excerpts contains indexed PHAK plain text from this school\'s Resource Library. Every instructor_answer_key_html and phak_official_lookup_html MUST be traceable to those excerpts (and student evidence) when an excerpt applies; use exact bracket tags [chapter / block_id] from excerpts inside phak_official_lookup_html whenever possible so instructors can jump to the same block in the official PHAK PDF. Do not invent handbook claims absent from excerpts+evidence.';
+            $rules[] = 'Prefer American English aviation terminology as in the excerpts. When resource_library_handbook_label is set, repeat that revision/title in phak_official_lookup_html for each item.';
         } else {
-            $rules[] = 'Use original educational phrasing; do not paste long verbatim excerpts from copyrighted FAA publications.';
-            $rules[] = 'Align headings and explanations conceptually to the FAA Pilot\'s Handbook of Aeronautical Knowledge (PHAK) chapter themes (e.g. Introduction to Flying, Aeronautical Decision Making, Principles of Flight, …) and cite references like "FAA PHAK FAA-H-8083-25B, Chapter N" where appropriate.';
+            $rules[] = 'Without indexed excerpts, still write phak_official_lookup_html with the best concrete PHAK chapter/section names and FAA handbook identifiers you can infer from the topic (e.g. FAA-H-8083-25) so instructors can find material in the official PDF; avoid vague references.';
         }
 
         $payload = [
-            'task' => 'Create an instructor-facing theory training study and focus report for one student. Return JSON only.',
+            'task' => 'Create an instructor-facing theory training report for one student. The PHAK portion is an oral-prep quiz bank (not a broad narrative chapter summary). Return JSON only.',
             'rules' => $rules,
             'static_signoff_subject_order' => $subjectBlock,
             'required_top_level_json_keys' => [
                 'focus_items_html',
-                'phak_sections',
+                'phak_oral_quiz_items',
                 'acs_section_html',
                 'regulatory_notes_html',
                 'signoff_rows',
@@ -362,7 +365,7 @@ final class InstructorTheoryTrainingReportAi
         $resp = cw_openai_responses([
             'model' => $model,
             'input' => json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-            'max_output_tokens' => 12000,
+            'max_output_tokens' => 18000,
         ], 240);
 
         $json = cw_openai_extract_json_text($resp);
@@ -370,32 +373,37 @@ final class InstructorTheoryTrainingReportAi
             throw new RuntimeException('AI returned no usable JSON for the training report');
         }
 
-        foreach (['focus_items_html', 'phak_sections', 'acs_section_html', 'regulatory_notes_html', 'signoff_rows'] as $k) {
+        foreach (['focus_items_html', 'phak_oral_quiz_items', 'acs_section_html', 'regulatory_notes_html', 'signoff_rows'] as $k) {
             if (!array_key_exists($k, $json)) {
                 throw new RuntimeException('AI JSON missing key: ' . $k);
             }
         }
 
-        $json['focus_items_html'] = self::sanitizeAiHtml((string)$json['focus_items_html']);
-        $json['acs_section_html'] = self::sanitizeAiHtml((string)$json['acs_section_html']);
-        $json['regulatory_notes_html'] = self::sanitizeAiHtml((string)$json['regulatory_notes_html']);
+        $json['focus_items_html'] = self::sanitizeAiHtml((string)($json['focus_items_html'] ?? ''));
+        $json['acs_section_html'] = self::sanitizeAiHtml((string)($json['acs_section_html'] ?? ''));
+        $json['regulatory_notes_html'] = self::sanitizeAiHtml((string)($json['regulatory_notes_html'] ?? ''));
 
-        $sections = $json['phak_sections'] ?? [];
-        if (is_array($sections)) {
-            $clean = [];
-            foreach ($sections as $sec) {
-                if (!is_array($sec)) {
-                    continue;
-                }
-                $clean[] = [
-                    'chapter_title' => (string)($sec['chapter_title'] ?? ''),
-                    'phak_reference' => (string)($sec['phak_reference'] ?? ''),
-                    'body_html' => self::sanitizeAiHtml((string)($sec['body_html'] ?? '')),
-                ];
+        $quiz = $json['phak_oral_quiz_items'] ?? [];
+        if (!is_array($quiz)) {
+            $quiz = [];
+        }
+        $cleanQuiz = [];
+        foreach ($quiz as $row) {
+            if (!is_array($row)) {
+                continue;
             }
-            $json['phak_sections'] = $clean;
-        } else {
-            $json['phak_sections'] = [];
+            $cleanQuiz[] = [
+                'topic_label' => (string)($row['topic_label'] ?? ''),
+                'depth_tag' => (string)($row['depth_tag'] ?? ''),
+                'scenario_html' => self::sanitizeAiHtml((string)($row['scenario_html'] ?? '')),
+                'question_html' => self::sanitizeAiHtml((string)($row['question_html'] ?? '')),
+                'instructor_answer_key_html' => self::sanitizeAiHtml((string)($row['instructor_answer_key_html'] ?? '')),
+                'phak_official_lookup_html' => self::sanitizeAiHtml((string)($row['phak_official_lookup_html'] ?? '')),
+            ];
+        }
+        $json['phak_oral_quiz_items'] = $cleanQuiz;
+        if (count($cleanQuiz) < 12) {
+            throw new RuntimeException('AI returned too few phak_oral_quiz_items (minimum 12); retry report generation');
         }
 
         return $json;

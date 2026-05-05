@@ -174,8 +174,8 @@ function tatr_build_export_payload(PDO $pdo, int $cohortId, int $studentId, ?cal
     $signoffHtml = InstructorTheoryTrainingReportAi::renderSignoffTableHtml($ai, $cohortTz, $chiefName);
 
     $phakDisclaimerLine = $phakLibraryPack !== ''
-        ? 'PHAK narrative paragraphs are grounded in indexed handbook text from your <strong>Resource Library</strong> when a <strong>Live</strong> edition is configured; cross-check critical items against the official FAA PHAK PDF before checkrides. '
-        : 'PHAK-aligned sections are study aids and may paraphrase official materials; use the current FAA PHAK (FAA-H-8083-25) as authority. ';
+        ? 'PHAK oral quiz items are grounded in indexed handbook text from your <strong>Resource Library</strong> when a <strong>Live</strong> edition is configured; instructors must still verify questions, answer keys, and lookup lines against the official FAA PHAK PDF before checkrides. '
+        : 'PHAK oral quiz items are study aids; use the current FAA PHAK (FAA-H-8083-25) as authority for official wording. ';
 
     $disclaimer = '<div class="lesson-meta" style="padding:12px;background:#fff7ed;border:1px solid #fdba74;border-radius:10px;">'
         . '<strong>Advisory document.</strong> This PDF was generated with AI assistance from progression and summary records. '
@@ -186,17 +186,17 @@ function tatr_build_export_payload(PDO $pdo, int $cohortId, int $studentId, ?cal
         . '61.105 sign-off timing and hours are model estimates from available timestamps — reconcile with the student logbook.'
         . '</div>';
 
-    $defaultPhakIntro = 'Section titles follow the Pilot&rsquo;s Handbook of Aeronautical Knowledge (PHAK) organization. Body text is an educational synthesis for study — verify technical and regulatory details against current FAA publications.';
+    $defaultPhakIntro = 'Use this bank in a dedicated oral prep session: instructor asks each question aloud; student reasons aloud; debrief with the answer key. Each item includes <strong>PHAK official lookup</strong> lines so you can open the FAA PHAK PDF and find the supporting passage quickly.';
     if ($phakLibraryPack !== '') {
         if ($phakHandbookLabel !== '') {
-            $phakSectionsIntro = '<p class="lesson-meta">PHAK explanations are synthesized for this student from indexed text in your Resource Library (<strong>'
+            $phakSectionsIntro = '<p class="lesson-meta">Questions and answer keys are tailored to this student&rsquo;s evidence and grounded in indexed text from your Resource Library (<strong>'
                 . htmlspecialchars($phakHandbookLabel, ENT_QUOTES | ENT_HTML5, 'UTF-8')
-                . '</strong>) together with progression evidence. Verify critical items against the official FAA PHAK before checkrides.</p>';
+                . '</strong>). <strong>PHAK official lookup</strong> blocks cite chapter/block tags from that index where possible so they align with the same blocks in the official publication. Verify before checkrides.</p>';
         } else {
-            $phakSectionsIntro = '<p class="lesson-meta">PHAK explanations are synthesized from indexed Resource Library handbook text and progression evidence. Verify critical items against the official FAA PHAK before checkrides.</p>';
+            $phakSectionsIntro = '<p class="lesson-meta">Questions and answer keys are grounded in indexed Resource Library handbook text and progression evidence. Use each <strong>PHAK official lookup</strong> block to jump to the handbook quickly; verify before checkrides.</p>';
         }
     } else {
-        $phakSectionsIntro = '<p class="lesson-meta">' . $defaultPhakIntro . '</p>';
+        $phakSectionsIntro = '<p class="lesson-meta">' . $defaultPhakIntro . ' Verify lookup lines and answers against the current FAA PHAK PDF.</p>';
     }
 
     $bannerPath = realpath(__DIR__ . '/../public/assets/pdf/ipca_header.jpg');
@@ -215,7 +215,8 @@ function tatr_build_export_payload(PDO $pdo, int $cohortId, int $studentId, ?cal
         'banner_url' => 'file://' . $bannerPath,
         'focus_items_html' => (string)($ai['focus_items_html'] ?? ''),
         'phak_sections_intro_html' => $phakSectionsIntro,
-        'phak_sections' => $ai['phak_sections'] ?? [],
+        'phak_oral_quiz_items' => $ai['phak_oral_quiz_items'] ?? [],
+        'phak_sections' => [],
         'acs_section_html' => (string)($ai['acs_section_html'] ?? ''),
         'regulatory_notes_html' => $mergedRegulatory,
         'signoff_html' => $signoffHtml,
@@ -256,7 +257,7 @@ function tatr_reset_stale_running(PDO $pdo, int $cohortId, int $studentId): void
 /**
  * @return array{ready: bool, job_id: int, worker_spawned: bool, fingerprint: string}
  */
-function tatr_start_or_resume(PDO $pdo, int $cohortId, int $studentId): array
+function tatr_start_or_resume(PDO $pdo, int $cohortId, int $studentId, bool $forceRegenerate = false): array
 {
     tatr_ensure_table($pdo);
     InstructorTheoryTrainingReportAi::verifyCohortStudent($pdo, $cohortId, $studentId);
@@ -268,6 +269,24 @@ function tatr_start_or_resume(PDO $pdo, int $cohortId, int $studentId): array
     $sel = $pdo->prepare('SELECT * FROM theory_ai_training_report_jobs WHERE cohort_id = ? AND student_id = ? LIMIT 1');
     $sel->execute([$cohortId, $studentId]);
     $row = $sel->fetch(PDO::FETCH_ASSOC);
+
+    if ($forceRegenerate && $row) {
+        $upd = $pdo->prepare("
+            UPDATE theory_ai_training_report_jobs
+            SET status = 'pending',
+                progress = 0,
+                result_json = NULL,
+                error_text = NULL,
+                started_at = NULL,
+                completed_at = NULL,
+                fingerprint = ?,
+                updated_at = NOW()
+            WHERE cohort_id = ? AND student_id = ?
+        ");
+        $upd->execute([$fingerprint, $cohortId, $studentId]);
+        $sel->execute([$cohortId, $studentId]);
+        $row = $sel->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
 
     if ($row && (string)$row['status'] === 'complete' && (string)$row['fingerprint'] === $fingerprint) {
         return [

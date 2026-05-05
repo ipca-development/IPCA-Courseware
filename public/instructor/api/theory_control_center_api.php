@@ -3407,11 +3407,12 @@ foreach ($pending as $p) {
     if ($action === 'theory_ai_training_report_start') {
         $cohortId = tcc_int($_GET['cohort_id'] ?? 0);
         $studentId = tcc_int($_GET['student_id'] ?? 0);
+        $forceRegenerate = ((int)($_GET['force'] ?? 0) === 1);
         if ($cohortId <= 0 || $studentId <= 0) {
             tcc_json(['ok' => false, 'error' => 'missing_cohort_or_student'], 400);
         }
         try {
-            $out = tatr_start_or_resume($pdo, $cohortId, $studentId);
+            $out = tatr_start_or_resume($pdo, $cohortId, $studentId, $forceRegenerate);
         } catch (Throwable $e) {
             tcc_json(['ok' => false, 'error' => 'start_failed', 'message' => $e->getMessage()], 400);
         }

@@ -870,10 +870,14 @@ cw_header('Instructor Theory Control Center');
         }
         var html = ''
             + '<p class="tcc-modal-muted" style="margin-top:0;">The server prepares the AI sections and stores them so opening the PDF does not repeat the long AI call. This step can take several minutes.</p>'
+            + '<p class="tcc-modal-muted" style="margin-top:0;">If nothing changed in this student&rsquo;s theory tests or lesson summaries since the last run, you&rsquo;ll see the cached PDF immediately. Use <strong>Regenerate report</strong> for a fresh AI run (e.g. after Resource Library updates).</p>'
             + '<div id="tatrProgressOuter" style="height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden;margin:12px 0;">'
             + '<div id="tatrProgressBar" style="height:100%;width:0%;background:#0f766e;transition:width .3s ease;"></div></div>'
             + '<div id="tatrStatus" class="tcc-modal-muted">Starting…</div>'
             + '<div id="tatrErr" class="tcc-error" style="display:none;margin-top:10px;"></div>'
+            + '<div style="margin-top:12px;display:none;flex-wrap:wrap;gap:10px;align-items:center;" id="tatrRegenWrap">'
+            + '<button type="button" class="tcc-btn secondary" id="tatrRegenBtn">Regenerate report</button>'
+            + '<span class="tcc-modal-muted" style="font-size:11px;">Runs AI again; takes several minutes.</span></div>'
             + '<div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">'
             + '<button type="button" class="tcc-btn" id="tatrOpenPdf" disabled>Open PDF</button>'
             + '<button type="button" class="tcc-btn secondary" id="tatrCloseBtn">Close</button></div>';
@@ -901,6 +905,11 @@ cw_header('Instructor Theory Control Center');
                 setBar(100);
                 setStatus('Ready — you can open the PDF.');
                 enablePdf(data.pdf_url);
+                var rw = document.getElementById('tatrRegenWrap');
+                if (rw) {
+                    rw.style.display = 'flex';
+                }
+                wireRegen();
             }
         }
         function pollOnce() {
@@ -909,15 +918,38 @@ cw_header('Instructor Theory Control Center');
                 setErr('Lost connection while checking status.');
             });
         }
-        api('theory_ai_training_report_start', {cohort_id: cohortId, student_id: studentId}).then(function (data) {
+        function wireRegen() {
+            var btn = document.getElementById('tatrRegenBtn');
+            if (!btn) return;
+            btn.onclick = function () {
+                stopPoll();
+                setErr('');
+                setBar(0);
+                var pdfBtn = document.getElementById('tatrOpenPdf');
+                if (pdfBtn) { pdfBtn.disabled = true; pdfBtn.onclick = null; }
+                var rw = document.getElementById('tatrRegenWrap');
+                if (rw) rw.style.display = 'none';
+                setStatus('Starting fresh report…');
+                runStart(true);
+            };
+        }
+        function runStart(force) {
+        api('theory_ai_training_report_start', {
+            cohort_id: cohortId,
+            student_id: studentId,
+            force: force ? '1' : '0'
+        }).then(function (data) {
             if (!data || !data.ok) {
                 setErr((data && data.message) ? String(data.message) : (data && data.error) ? String(data.error) : 'Could not start report job.');
                 return;
             }
             if (data.ready && data.pdf_url) {
                 setBar(100);
-                setStatus('A current prepared report is already available.');
+                setStatus('A prepared PDF is already up to date for this student’s latest theory data. Open it below, or use Regenerate report if you need a new AI run.');
                 enablePdf(data.pdf_url);
+                var rw0 = document.getElementById('tatrRegenWrap');
+                if (rw0) rw0.style.display = 'flex';
+                wireRegen();
                 return;
             }
             jobId = parseInt(data.job_id, 10) || 0;
@@ -951,6 +983,8 @@ cw_header('Instructor Theory Control Center');
         }).catch(function () {
             setErr('Could not reach the server to start the report.');
         });
+        }
+        runStart(false);
     }
 
     function openSystemWatchForStudent(studentId) {
