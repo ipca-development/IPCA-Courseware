@@ -5,7 +5,7 @@ declare(strict_types=1);
  * Return the current logged in user row, or null.
  * Accepts optional PDO for convenience.
  */
-function cw_current_user(PDO $pdo = null): ?array {
+function cw_current_user(?PDO $pdo = null): ?array {
     if ($pdo === null) {
         if (isset($GLOBALS['pdo']) && $GLOBALS['pdo'] instanceof PDO) {
             $pdo = $GLOBALS['pdo'];
