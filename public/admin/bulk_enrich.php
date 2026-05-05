@@ -50,6 +50,17 @@ foreach ($courses as $cRow) {
     ];
 }
 
+$resourceLibraryEditions = [];
+try {
+    $resourceLibraryEditions = $pdo->query("
+        SELECT id, title, revision_code, status
+        FROM resource_library_editions
+        ORDER BY sort_order ASC, id ASC
+    ")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    $resourceLibraryEditions = [];
+}
+
 $becEmbed = [
     'programs' => array_map(static function ($p) {
         return [
@@ -60,6 +71,25 @@ $becEmbed = [
     }, $programs),
     'coursesByProgram' => $coursesByProgram,
     'lessonsByProgram' => $lessonsByProgram,
+    'resourceLibraryEditions' => array_map(static function ($row) {
+        $id = (int)($row['id'] ?? 0);
+        $title = trim((string)($row['title'] ?? ''));
+        $rev = trim((string)($row['revision_code'] ?? ''));
+        $st = trim((string)($row['status'] ?? ''));
+        $label = $title !== '' ? $title : ('Edition ' . $id);
+        if ($rev !== '') {
+            $label .= ' (' . $rev . ')';
+        }
+        if ($st !== '' && strtolower($st) !== 'live') {
+            $label .= ' [' . $st . ']';
+        }
+
+        return [
+            'id' => $id,
+            'label' => $label,
+            'status' => $st,
+        ];
+    }, $resourceLibraryEditions),
 ];
 cw_header('Bulk enrich');
 ?>
@@ -159,6 +189,11 @@ cw_header('Bulk enrich');
       <label><input type="checkbox" id="becDoHotspots" checked> 6) Video hotspots (manifest)</label>
       <label class="muted" style="grid-column:1/-1; font-size:12px;">Slide Spanish (2) and narration Spanish (4) are independent. Legacy API clients that only send <code>do_narration</code> + <code>do_es</code> still imply Spanish narration.</label>
       <label><input type="checkbox" id="becSkipExisting" checked> Skip slides that already have EN extract</label>
+      <label style="grid-column:1/-1;"><input type="checkbox" id="becUseRl"> Add Resource Library excerpts to vision (PHAK blocks from DB; improves narration + references when indexed)</label>
+      <div style="grid-column:1/-1; display:flex; flex-wrap:wrap; gap:8px; align-items:center;">
+        <label for="becRlEdition" class="muted" style="font-size:12px;">Edition for retrieval</label>
+        <select id="becRlEdition" class="bec-select-wide" style="max-width:28rem;"></select>
+      </div>
     </div>
     <div class="bec-run-row">
       <label>Slides / batch
@@ -278,6 +313,22 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
   };
 
   function el(id) { return document.getElementById(id); }
+
+  function fillResourceLibrarySelect() {
+    var sel = el('becRlEdition');
+    if (!sel) return;
+    sel.innerHTML = '';
+    var o0 = document.createElement('option');
+    o0.value = '0';
+    o0.textContent = 'Default (CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID or first live edition)';
+    sel.appendChild(o0);
+    (DATA.resourceLibraryEditions || []).forEach(function (row) {
+      var o = document.createElement('option');
+      o.value = String(row.id);
+      o.textContent = row.label || ('Edition ' + row.id);
+      sel.appendChild(o);
+    });
+  }
 
   function setHidden(id, on) {
     var n = el(id);
@@ -592,6 +643,16 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
       ? flags.skip_existing
       : el('becSkipExisting').checked;
     if (skip) fd.append('skip_existing', '1');
+    var useRl = Object.prototype.hasOwnProperty.call(flags, 'use_resource_library')
+      ? !!flags.use_resource_library
+      : el('becUseRl').checked;
+    if (useRl) {
+      fd.append('use_resource_library', '1');
+      var rlEd = Object.prototype.hasOwnProperty.call(flags, 'resource_library_edition_id')
+        ? String(flags.resource_library_edition_id)
+        : (el('becRlEdition') ? el('becRlEdition').value : '0');
+      fd.append('resource_library_edition_id', rlEd || '0');
+    }
     fd.append('program_key', state.programKey || 'private');
     fd.append('video_manifest', state.videoManifest);
   }
@@ -1036,6 +1097,8 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     state.offset = 0;
     if (state.programId > 0) loadCoverage(false);
   });
+
+  fillResourceLibrarySelect();
 
   loadManifests().then(function () {
     hydrateBulkFromQuery();

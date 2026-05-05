@@ -30,9 +30,13 @@ if ($slideId <= 0 || !in_array($step, $allowed, true)) {
     exit;
 }
 
+$useRl = !empty($data['use_resource_library']);
+$rlRequested = (int)($data['resource_library_edition_id'] ?? 0);
+$rlEdition = $useRl ? rl_enrich_resolve_edition_id($pdo, $rlRequested > 0 ? $rlRequested : null) : 0;
+
 try {
     if ($step === 'narration_en') {
-        $bundle = bulk_enrich_core_vision_bundle_slide($pdo, $CDN_BASE, $slideId);
+        $bundle = bulk_enrich_core_vision_bundle_slide($pdo, $CDN_BASE, $slideId, $rlEdition);
         $narrEn = $bundle['narration_script_en'];
         if ($narrEn === '') {
             throw new RuntimeException('Vision returned empty narration EN');
@@ -59,7 +63,7 @@ try {
     }
 
     if ($step === 'refs') {
-        $bundle = bulk_enrich_core_vision_bundle_slide($pdo, $CDN_BASE, $slideId);
+        $bundle = bulk_enrich_core_vision_bundle_slide($pdo, $CDN_BASE, $slideId, $rlEdition);
         bulk_enrich_core_replace_refs($pdo, $slideId, $bundle['phak'], $bundle['acs']);
         $phakN = is_array($bundle['phak']) ? count($bundle['phak']) : 0;
         $acsN = is_array($bundle['acs']) ? count($bundle['acs']) : 0;

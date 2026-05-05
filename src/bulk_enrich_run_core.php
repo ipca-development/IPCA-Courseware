@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/resource_library_enrich_context.php';
+
 /**
  * Shared bulk canonical enrichment (slides) — used by HTML and SSE entrypoints.
  *
@@ -166,7 +168,7 @@ function bulk_enrich_core_ai_translate_es(string $text): string
  *
  * @return array{english_text: string, narration_script_en: string, phak: list<array<string,mixed>>, acs: list<array<string,mixed>>}
  */
-function bulk_enrich_core_vision_bundle_slide(PDO $pdo, string $cdnBase, int $slideId): array
+function bulk_enrich_core_vision_bundle_slide(PDO $pdo, string $cdnBase, int $slideId, int $resourceLibraryEditionId = 0): array
 {
     $stmt = $pdo->prepare('SELECT image_path FROM slides WHERE id=? LIMIT 1');
     $stmt->execute([$slideId]);
@@ -230,6 +232,23 @@ RULES:
 Return JSON that matches the schema.
 TXT;
 
+    $rlPack = '';
+    if ($resourceLibraryEditionId > 0) {
+        $hint = rl_enrich_search_hint_for_slide($pdo, $slideId);
+        $rlPack = rl_enrich_context_pack_for_slide($pdo, $resourceLibraryEditionId, $hint, 12000, 14);
+        if ($rlPack !== '') {
+            $instructions .= "\n\nINDEXED HANDBOOK CONTEXT (when provided below the slide request):\n"
+                . "- These excerpts come from the Resource Library database (retrieval). Prefer them to ground PHAK reference rows when they clearly apply to the slide topic.\n"
+                . "- Still extract visible instructional content from the IMAGE as the primary source.\n"
+                . "- Do not assert facts that are neither visible on the slide nor supported by the excerpts.\n";
+        }
+    }
+
+    $userLead = 'Extract canonical content + narration + PHAK + ACS from the slide.';
+    if ($rlPack !== '') {
+        $userLead .= "\n\nRetrieval context (indexed handbook excerpts):\n\n" . $rlPack;
+    }
+
     $payload = [
         'model' => cw_openai_model(),
         'input' => [
@@ -242,7 +261,7 @@ TXT;
             [
                 'role' => 'user',
                 'content' => [
-                    ['type' => 'input_text', 'text' => 'Extract canonical content + narration + PHAK + ACS.'],
+                    ['type' => 'input_text', 'text' => $userLead],
                     ['type' => 'input_image', 'image_url' => $imgUrl],
                 ],
             ],
@@ -295,6 +314,8 @@ function bulk_enrich_core_parse_flags(array $p): array
         'do_narration_es' => $doNarrEs,
         'do_refs' => $doRefs,
         'do_hotspots' => $doHotspots,
+        'use_resource_library' => isset($p['use_resource_library']),
+        'resource_library_edition_id' => (int)($p['resource_library_edition_id'] ?? 0),
     ];
 }
 
@@ -319,6 +340,30 @@ function bulk_enrich_core_run(
     $doNarrEs = !empty($flags['do_narration_es']);
     $doRefs = !empty($flags['do_refs']);
     $doHotspots = !empty($flags['do_hotspots']);
+
+    $useRl = !empty($flags['use_resource_library']);
+    $rlRequested = (int)($flags['resource_library_edition_id'] ?? 0);
+    $rlEdition = $useRl ? rl_enrich_resolve_edition_id($pdo, $rlRequested > 0 ? $rlRequested : null) : 0;
+    if ($useRl && $rlEdition <= 0) {
+        $emit('step', [
+            'phase' => 'resource_library',
+            'message' => 'Resource Library context requested but no edition resolved (set edition in UI or CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID / sync blocks). Vision runs without DB excerpts.',
+        ]);
+    } elseif ($useRl && $rlEdition > 0) {
+        try {
+            $cst = $pdo->prepare('SELECT COUNT(*) FROM resource_library_blocks WHERE edition_id = ?');
+            $cst->execute([$rlEdition]);
+            $bc = (int)$cst->fetchColumn();
+            if ($bc <= 0) {
+                $emit('step', [
+                    'phase' => 'resource_library',
+                    'message' => 'Resource Library edition ' . $rlEdition . ' has no indexed blocks yet; run Sync JSON → database on Resource Library. Vision runs without excerpts.',
+                ]);
+            }
+        } catch (Throwable $e) {
+            // ignore
+        }
+    }
 
     $processed = 0;
     $visionNeeded = $doEN || $doNarrEn || $doRefs;
@@ -375,7 +420,7 @@ function bulk_enrich_core_run(
             $emit('step', ['slide_id' => $slideId, 'phase' => 'vision', 'message' => 'Calling vision model (may take 1–3 min)…']);
 
             try {
-                $bundle = bulk_enrich_core_vision_bundle_slide($pdo, $cdnBase, $slideId);
+                $bundle = bulk_enrich_core_vision_bundle_slide($pdo, $cdnBase, $slideId, $rlEdition);
                 $englishText = $bundle['english_text'];
                 $narrationEn = $bundle['narration_script_en'];
                 $phak = $bundle['phak'];
