@@ -14,6 +14,8 @@ require_once __DIR__ . '/resource_library_aim.php';
 final class AimBootstrapImporter
 {
     private const USER_AGENT = 'IPCA-Courseware/AIM-Bootstrap-Importer/1.0';
+    /** @var ?\Closure(string):void */
+    private readonly ?\Closure $progressCb;
 
     public function __construct(
         private readonly PDO $pdo,
@@ -26,7 +28,9 @@ final class AimBootstrapImporter
         private readonly string $snapshotDir,
         private readonly int $maxPages,
         private readonly int $sleepMsBetweenRequests,
+        ?callable $progressCb = null,
     ) {
+        $this->progressCb = $progressCb !== null ? \Closure::fromCallable($progressCb) : null;
     }
 
     /**
@@ -34,6 +38,7 @@ final class AimBootstrapImporter
      */
     public function run(): array
     {
+        $this->progress('Starting AIM bootstrap import.');
         if (!rl_aim_tables_present($this->pdo)) {
             return ['ok' => false, 'error' => 'AIM tables missing; apply scripts/sql/resource_library_aim_crawl.sql'];
         }
@@ -50,10 +55,12 @@ final class AimBootstrapImporter
             return ['ok' => false, 'error' => 'Could not create snapshot directory: ' . $this->snapshotDir];
         }
 
+        $this->progress('Fetching index: ' . $this->indexUrl);
         $indexHtml = self::httpGet($this->indexUrl);
         if ($indexHtml['code'] < 200 || $indexHtml['code'] >= 400 || $indexHtml['body'] === '') {
             return ['ok' => false, 'error' => 'Index fetch failed HTTP ' . $indexHtml['code']];
         }
+        $this->progress('Index fetched (HTTP ' . $indexHtml['code'] . ').');
 
         $meta = self::parseIndexMeta($indexHtml['body']);
         $effective = $meta['effective_date'];
@@ -61,6 +68,7 @@ final class AimBootstrapImporter
 
         $pageBodies = $this->discoverPageBodies($this->indexUrl, $prefix, $indexHtml['body']);
         $pages = array_keys($pageBodies);
+        $this->progress('Crawl complete. Pages discovered: ' . count($pages) . '.');
 
         $allParagraphs = [];
         foreach ($pageBodies as $pageUrl => $html) {
@@ -69,6 +77,7 @@ final class AimBootstrapImporter
                 $allParagraphs[] = $row;
             }
         }
+        $this->progress('Paragraph extraction complete. Rows: ' . count($allParagraphs) . '.');
 
         $runId = 0;
         if (!$this->dryRun) {
@@ -77,12 +86,15 @@ final class AimBootstrapImporter
 
         try {
             if (!$this->dryRun && $this->replace) {
+                $this->progress('Replace mode: deleting existing paragraphs for this edition.');
                 $this->deleteEditionParagraphs();
             }
             if (!$this->dryRun) {
+                $this->progress('Upserting paragraphs...');
                 $this->upsertParagraphs($allParagraphs, $effective, $changeLabel);
             }
             if (!$this->dryRun && $this->syncEditionMeta && ($effective !== null || $changeLabel !== null)) {
+                $this->progress('Updating edition metadata from index.');
                 $this->updateEditionMeta($effective, $changeLabel);
             }
         } catch (Throwable $e) {
@@ -128,6 +140,7 @@ final class AimBootstrapImporter
 
             return ['ok' => false, 'error' => 'Could not write manifest: ' . $manifestPath];
         }
+        $this->progress('Manifest written: ' . $manifestPath);
 
         if ($runId > 0) {
             $this->finishRun($runId, 'success', count($pages), count($allParagraphs), null, $manifestPath, $manifestHash);
@@ -140,6 +153,13 @@ final class AimBootstrapImporter
             'manifest_path' => $manifestPath,
             'run_id' => $runId,
         ];
+    }
+
+    private function progress(string $message): void
+    {
+        if ($this->progressCb !== null) {
+            ($this->progressCb)($message);
+        }
     }
 
     public static function normalizePrefix(string $p): string
@@ -268,6 +288,10 @@ final class AimBootstrapImporter
 
             $visited[$u] = true;
             $bodies[$u] = $body;
+            $visitedCount = count($visited);
+            if ($visitedCount <= 5 || $visitedCount % 25 === 0) {
+                $this->progress('Crawled page ' . $visitedCount . ': ' . $u);
+            }
 
             $baseForLinks = $u;
             self::collectLinksFromHtml($body, $baseForLinks, static function (string $abs) use (&$queue, &$queued, $norm, $prefixNorm): void {
@@ -505,20 +529,17 @@ final class AimBootstrapImporter
 
     private function startRun(): int
     {
-        $col = rl_aim_runs_fk_column($this->pdo);
         $meta = json_encode([
             'importer' => 'aim_bootstrap_importer',
             'version' => 1,
             'index_url' => $this->indexUrl,
             'allowed_prefix' => $this->allowedPrefix,
         ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $stmt = $this->pdo->prepare("
-            INSERT INTO resource_library_crawler_runs ({$col}, run_status, pages_discovered, paragraphs_upserted, meta_json)
-            VALUES (?, 'running', 0, 0, ?)
-        ");
-        $stmt->execute([$this->editionId, $meta]);
+        if ($meta === false) {
+            throw new \RuntimeException('Could not encode crawler run meta JSON.');
+        }
 
-        return (int) $this->pdo->lastInsertId();
+        return rl_aim_insert_crawler_run_started($this->pdo, $this->editionId, $meta);
     }
 
     private function finishRun(int $runId, string $status, int $pages, int $paras, ?string $err, ?string $manifestPath = null, ?string $manifestHash = null): void

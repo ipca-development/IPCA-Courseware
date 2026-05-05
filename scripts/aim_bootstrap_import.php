@@ -27,6 +27,29 @@ declare(strict_types=1);
 require_once __DIR__ . '/../src/bootstrap.php';
 require_once __DIR__ . '/../src/aim_bootstrap_importer.php';
 
+error_reporting(E_ALL);
+ini_set('display_errors', '1');
+
+if (function_exists('ob_get_level')) {
+    while (ob_get_level() > 0) {
+        @ob_end_flush();
+    }
+}
+if (function_exists('ob_implicit_flush')) {
+    @ob_implicit_flush(true);
+}
+
+/**
+ * @param resource $stream
+ */
+function aim_cli_log($stream, string $message): void
+{
+    fwrite($stream, '[' . date('Y-m-d H:i:s') . '] ' . $message . PHP_EOL);
+    if (function_exists('fflush')) {
+        @fflush($stream);
+    }
+}
+
 $argvList = array_slice($argv, 1);
 $opts = [
     'edition_id' => 0,
@@ -70,7 +93,7 @@ try {
     if ($editionId <= 0) {
         $edition = rl_catalog_fetch_crawler_edition_by_slot($pdo, 'aim');
         if (!$edition) {
-            fwrite(STDERR, "AIM crawler edition not found. Apply scripts/sql/resource_library_aim_crawl.sql or pass --edition-id=\n");
+            aim_cli_log(STDERR, "AIM crawler edition not found. Apply scripts/sql/resource_library_aim_crawl.sql or pass --edition-id=");
             exit(1);
         }
         $editionId = (int) ($edition['id'] ?? 0);
@@ -78,7 +101,7 @@ try {
     } else {
         $row = rl_catalog_fetch_edition($pdo, $editionId);
         if (!is_array($row)) {
-            fwrite(STDERR, "Edition {$editionId} not found.\n");
+            aim_cli_log(STDERR, "Edition {$editionId} not found.");
             exit(1);
         }
     }
@@ -86,7 +109,7 @@ try {
     $extra = rl_catalog_decode_extra(isset($row['extra_config_json']) ? (string) $row['extra_config_json'] : null);
     $prefix = trim((string) ($extra['allowed_url_prefix'] ?? ''));
     if ($prefix === '') {
-        fwrite(STDERR, "Edition has no extra_config_json.allowed_url_prefix.\n");
+        aim_cli_log(STDERR, "Edition has no extra_config_json.allowed_url_prefix.");
         exit(1);
     }
     $prefix = AimBootstrapImporter::normalizePrefix($prefix);
@@ -95,6 +118,19 @@ try {
     if ($indexUrl === null || $indexUrl === '') {
         $indexUrl = rtrim($prefix, '/') . '/index.html';
     }
+    aim_cli_log(STDOUT, 'AIM bootstrap import starting.');
+    aim_cli_log(STDOUT, 'Edition ID: ' . $editionId);
+    aim_cli_log(STDOUT, 'Allowed prefix: ' . $prefix);
+    aim_cli_log(STDOUT, 'Index URL: ' . $indexUrl);
+    aim_cli_log(STDOUT, 'Snapshot dir: ' . (string)$opts['snapshot_dir']);
+    aim_cli_log(STDOUT, sprintf(
+        'Flags: dry_run=%s replace=%s sync_edition=%s max_pages=%d sleep_ms=%d',
+        $opts['dry_run'] ? 'yes' : 'no',
+        $opts['replace'] ? 'yes' : 'no',
+        $opts['sync_edition'] ? 'yes' : 'no',
+        (int)$opts['max_pages'],
+        (int)$opts['sleep_ms']
+    ));
 
     $importer = new AimBootstrapImporter(
         $pdo,
@@ -107,21 +143,29 @@ try {
         $opts['snapshot_dir'],
         $opts['max_pages'],
         $opts['sleep_ms'],
+        static function (string $msg): void {
+            aim_cli_log(STDOUT, $msg);
+        }
     );
 
     $result = $importer->run();
 } catch (Throwable $e) {
-    fwrite(STDERR, 'Error: ' . $e->getMessage() . "\n");
+    aim_cli_log(STDERR, 'Error: ' . $e->getMessage());
+    aim_cli_log(STDERR, 'At: ' . $e->getFile() . ':' . $e->getLine());
+    $trace = $e->getTraceAsString();
+    if ($trace !== '') {
+        aim_cli_log(STDERR, "Trace:\n" . $trace);
+    }
     exit(1);
 }
 
 if (empty($result['ok'])) {
-    fwrite(STDERR, 'Import failed: ' . ($result['error'] ?? 'unknown') . "\n");
+    aim_cli_log(STDERR, 'Import failed: ' . ($result['error'] ?? 'unknown'));
     exit(1);
 }
 
-fwrite(STDOUT, sprintf(
-    "AIM bootstrap OK — pages: %d, paragraphs: %d, manifest: %s\n",
+aim_cli_log(STDOUT, sprintf(
+    "AIM bootstrap OK - pages: %d, paragraphs: %d, manifest: %s",
     (int) ($result['pages'] ?? 0),
     (int) ($result['paragraphs'] ?? 0),
     (string) ($result['manifest_path'] ?? '')
