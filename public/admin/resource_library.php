@@ -3,10 +3,12 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
+require_once __DIR__ . '/../../src/resource_library_ingest.php';
 
 cw_require_admin();
 
 $apiHref = '/admin/api/resource_library_api.php';
+$searchTestHref = '/admin/api/resource_library_search_test.php';
 
 /**
  * @return array{ok: bool, rows: list<array<string, mixed>>, error?: string}
@@ -76,6 +78,7 @@ function rl_status_class(string $status): string
 $result = rl_fetch_editions($pdo);
 $rows = $result['rows'];
 $tableError = (!$result['ok']) ? ($result['error'] ?? 'Unknown error') : '';
+$blockCounts = $result['ok'] ? rl_block_counts_by_edition_map($pdo) : [];
 
 cw_header('Resource Library');
 ?>
@@ -99,8 +102,9 @@ cw_header('Resource Library');
   .rl-alert code { font-size: 13px; background: rgba(255,255,255,.7); padding: 2px 6px; border-radius: 6px; }
   .rl-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
     gap: 18px;
+    align-items: stretch;
   }
   .rl-card {
     border: 1px solid #e2e8f0;
@@ -112,6 +116,8 @@ cw_header('Resource Library');
     flex-direction: column;
     text-align: left;
     width: 100%;
+    min-height: 440px;
+    height: 100%;
     padding: 0;
     font: inherit;
     color: inherit;
@@ -133,20 +139,29 @@ cw_header('Resource Library');
     margin-top: auto;
   }
   .rl-card-thumb {
-    aspect-ratio: 4 / 3;
-    background: linear-gradient(145deg, #f1f5f9, #e2e8f0);
+    flex: 0 0 auto;
+    height: 268px;
+    min-height: 268px;
+    background: linear-gradient(165deg, #eef2f7 0%, #e2e8f0 45%, #dce3ec 100%);
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 16px;
+    padding: 20px 16px;
     pointer-events: none;
   }
-  .rl-card-thumb img {
-    max-width: 100%;
-    max-height: 140px;
+  .rl-card-thumb img.rl-card-cover {
+    display: block;
+    width: auto;
+    height: auto;
+    max-height: 228px;
+    max-width: 82%;
     object-fit: contain;
-    border-radius: 8px;
-    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
+    object-position: center;
+    border-radius: 10px;
+    box-shadow:
+      0 1px 2px rgba(15, 23, 42, 0.06),
+      0 10px 24px rgba(15, 23, 42, 0.16),
+      0 24px 48px rgba(15, 23, 42, 0.12);
   }
   .rl-card-body { padding: 14px 16px 8px; flex: 1; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
   .rl-card-title {
@@ -174,6 +189,15 @@ cw_header('Resource Library');
   .rl-status-live { background: #dcfce7; color: #166534; }
   .rl-status-draft { background: #f1f5f9; color: #475569; }
   .rl-status-archived { background: #fee2e2; color: #991b1b; }
+  .rl-status-validated { background: #dbeafe; color: #1e40af; }
+  .rl-status-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+    margin: 0;
+  }
+  .rl-meta dd.rl-status-dd { margin-left: 7.5rem; }
   .rl-empty {
     border: 1px dashed #cbd5e1;
     border-radius: 14px;
@@ -199,7 +223,7 @@ cw_header('Resource Library');
   .rl-modal {
     background: #fff;
     border-radius: 16px;
-    max-width: 560px;
+    max-width: 720px;
     width: 100%;
     max-height: min(92vh, 900px);
     overflow: hidden;
@@ -347,9 +371,28 @@ cw_header('Resource Library');
     border: 1px solid #e2e8f0;
     box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
   }
+
+  .rl-test-panel .rl-field { margin-bottom: 10px; }
+  .rl-test-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .rl-test-out {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    background: #f8fafc;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 260px;
+    overflow-y: auto;
+    color: #0f172a;
+    min-height: 3rem;
+  }
 </style>
 
-<div class="rl-wrap" id="rlPage" data-api="<?= h($apiHref) ?>">
+<div class="rl-wrap" id="rlPage" data-api="<?= h($apiHref) ?>" data-search-api="<?= h($searchTestHref) ?>">
   <p class="rl-intro">
     Reference editions for the platform. Click a book to edit metadata or upload / replace the JSON used as the live resource body
     (stored under <code>storage/resource_library/{id}/source.json</code> on the server).
@@ -372,10 +415,13 @@ cw_header('Resource Library');
           $thumb = rl_thumb_src(isset($row['thumbnail_path']) ? (string)$row['thumbnail_path'] : '');
           $ts = $revDate !== '' ? strtotime($revDate . 'T12:00:00') : false;
           $revDisplay = ($ts !== false) ? date('F j, Y', $ts) : '—';
+          $blockN = (int)($blockCounts[$eid] ?? 0);
+          $sourcePresent = rl_source_stat($eid)['present'] ?? false;
+          $validated = $sourcePresent && $blockN > 0;
         ?>
         <button type="button" class="rl-card" data-id="<?= $eid ?>" aria-label="Edit <?= h($title) ?>">
           <div class="rl-card-thumb">
-            <img src="<?= h($thumb) ?>" alt="" loading="lazy" width="200" height="150">
+            <img class="rl-card-cover" src="<?= h($thumb) ?>" alt="" loading="lazy" width="180" height="240">
           </div>
           <div class="rl-card-body">
             <h2 class="rl-card-title"><?= h($title) ?></h2>
@@ -385,10 +431,17 @@ cw_header('Resource Library');
               <dt>Revision date</dt>
               <dd><?= h($revDisplay) ?></dd>
               <dt>Status</dt>
-              <dd><span class="<?= h(rl_status_class($status)) ?>"><?= h(rl_status_label($status)) ?></span></dd>
+              <dd class="rl-status-dd">
+                <div class="rl-status-badges">
+                  <span class="<?= h(rl_status_class($status)) ?>"><?= h(rl_status_label($status)) ?></span>
+                  <?php if ($validated): ?>
+                    <span class="rl-status rl-status-validated">Validated</span>
+                  <?php endif; ?>
+                </div>
+              </dd>
             </dl>
           </div>
-          <div class="rl-card-hint">Click to edit · upload JSON</div>
+          <div class="rl-card-hint">Click to edit · sync · test search</div>
         </button>
       <?php endforeach; ?>
     </div>
@@ -482,6 +535,20 @@ cw_header('Resource Library');
         </div>
       </div>
 
+      <div class="rl-panel rl-test-panel">
+        <h3>Test retrieval</h3>
+        <p class="rl-drop-meta" style="margin-top:0;">Search indexed blocks for this edition, or ask the model using the top hits as context (requires <code>CW_OPENAI_API_KEY</code>).</p>
+        <div class="rl-field" style="margin-bottom:8px;">
+          <label for="rlTestQuery">Topic or question</label>
+          <input type="text" id="rlTestQuery" placeholder="e.g. weight and balance, stall speed, ADM" autocomplete="off">
+        </div>
+        <div class="rl-test-actions">
+          <button type="button" class="btn btn-sm" id="rlTestDb">Search database</button>
+          <button type="button" class="btn btn-sm" id="rlTestAi">Ask AI (uses hits)</button>
+        </div>
+        <pre class="rl-test-out" id="rlTestOut" aria-live="polite"></pre>
+      </div>
+
       <div class="rl-msg" id="rlMsg" role="status"></div>
     </div>
     <div class="rl-modal-foot">
@@ -496,6 +563,7 @@ cw_header('Resource Library');
   var page = document.getElementById('rlPage');
   if (!page) return;
   var api = page.getAttribute('data-api') || '';
+  var searchApi = page.getAttribute('data-search-api') || '';
   var grid = document.getElementById('rlGrid');
   var backdrop = document.getElementById('rlBackdrop');
   if (!grid || !backdrop) return;
@@ -514,6 +582,10 @@ cw_header('Resource Library');
   var sourceInfo = document.getElementById('rlSourceInfo');
   var blocksInfo = document.getElementById('rlBlocksInfo');
   var syncBlocksBtn = document.getElementById('rlSyncBlocks');
+  var testQuery = document.getElementById('rlTestQuery');
+  var testDbBtn = document.getElementById('rlTestDb');
+  var testAiBtn = document.getElementById('rlTestAi');
+  var testOut = document.getElementById('rlTestOut');
 
   function formatBytes(n) {
     n = Number(n) || 0;
@@ -655,6 +727,8 @@ cw_header('Resource Library');
     if (fileInput) fileInput.value = '';
     if (thumbFileInput) thumbFileInput.value = '';
     if (dropThumb) dropThumb.classList.remove('is-dragover');
+    if (testOut) testOut.textContent = '';
+    if (testQuery) testQuery.value = '';
   }
 
   backdrop.addEventListener('click', function (e) {
@@ -828,15 +902,82 @@ cw_header('Resource Library');
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (x) {
         if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Sync failed');
-        if (x.j.blocks) setBlocksUI(x.j.blocks);
-        var n = x.j.imported != null ? x.j.imported : (x.j.blocks && x.j.blocks.row_count);
-        showMsg('Database sync complete' + (n != null ? ' (' + n + ' blocks).' : '.'), 'ok');
+        window.location.reload();
       })
       .catch(function (e) {
         showMsg(e.message || 'Sync failed', 'err');
       })
       .finally(function () { syncBlocksBtn.disabled = false; });
   });
+
+  function renderTestResults(data) {
+    if (!testOut) return;
+    if (!data || !data.ok) {
+      testOut.textContent = (data && data.error) ? data.error : 'Request failed.';
+      return;
+    }
+    var lines = [];
+    lines.push('Database hits: ' + (data.hit_count != null ? data.hit_count : (data.hits || []).length));
+    (data.hits || []).forEach(function (h, i) {
+      lines.push('');
+      lines.push(String(i + 1) + '. [' + (h.chapter || '') + ' / ' + (h.block_local_id || '') + ']');
+      lines.push(h.snippet || '');
+    });
+    if (data.ai_answer) {
+      lines.push('');
+      lines.push('--- AI answer (from excerpts above) ---');
+      lines.push(data.ai_answer);
+    }
+    if (data.ai_note) {
+      lines.push('');
+      lines.push(data.ai_note);
+    }
+    if (data.ai_error) {
+      lines.push('');
+      lines.push('AI error: ' + data.ai_error);
+    }
+    testOut.textContent = lines.join('\n');
+  }
+
+  function runTestSearch(useAi) {
+    if (!searchApi) {
+      if (testOut) testOut.textContent = 'Search API URL missing.';
+      return;
+    }
+    var id = parseInt(document.getElementById('rlFieldId').value, 10);
+    var q = testQuery ? (testQuery.value || '').trim() : '';
+    if (!id) return;
+    if (!q) {
+      showMsg('Enter a topic or question first.', 'err');
+      return;
+    }
+    if (testOut) testOut.textContent = useAi ? 'Calling AI…' : 'Searching…';
+    var body = { edition_id: id, query: q, use_ai: !!useAi };
+    fetch(searchApi, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j) {
+          renderTestResults({ ok: false, error: (x.j && x.j.error) || 'Search failed' });
+          return;
+        }
+        if (!x.j.ok) {
+          renderTestResults({ ok: false, error: x.j.error || 'Search failed' });
+          return;
+        }
+        renderTestResults(x.j);
+      })
+      .catch(function (e) {
+        renderTestResults({ ok: false, error: e.message || 'Network error' });
+      });
+  }
+
+  if (testDbBtn) testDbBtn.addEventListener('click', function () { clearMsg(); runTestSearch(false); });
+  if (testAiBtn) testAiBtn.addEventListener('click', function () { clearMsg(); runTestSearch(true); });
 
   if (delBtn) delBtn.addEventListener('click', function () {
     clearMsg();

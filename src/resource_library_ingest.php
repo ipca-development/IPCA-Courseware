@@ -175,3 +175,27 @@ function rl_delete_blocks_for_edition(PDO $pdo, int $editionId): void
         // Table may not exist yet
     }
 }
+
+/**
+ * Row counts per edition for UI badges (e.g. "Validated").
+ *
+ * @return array<int, int>
+ */
+function rl_block_counts_by_edition_map(PDO $pdo): array
+{
+    try {
+        $stmt = $pdo->query('SELECT edition_id, COUNT(*) AS c FROM resource_library_blocks GROUP BY edition_id');
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) {
+            return [];
+        }
+        $out = [];
+        foreach ($rows as $r) {
+            $out[(int)($r['edition_id'] ?? 0)] = (int)($r['c'] ?? 0);
+        }
+
+        return $out;
+    } catch (Throwable $e) {
+        return [];
+    }
+}
