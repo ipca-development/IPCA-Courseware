@@ -174,7 +174,8 @@ final class AimBootstrapImporter
         $body = curl_exec($ch);
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $final = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
-        curl_close($ch);
+        // No explicit close: curl handles are cleaned up automatically and curl_close()
+        // is deprecated in PHP 8.5 because it has been a no-op since PHP 8.0.
 
         return [
             'code' => $code,
