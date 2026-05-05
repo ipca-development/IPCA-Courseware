@@ -4,6 +4,7 @@
 -- (or a fresh editions.sql that already includes resource_type + extra_config_json).
 --
 -- Apply:  mysql ... < scripts/sql/resource_library_aim_crawl.sql
+-- Initial HTML import: php scripts/aim_bootstrap_import.php (see script docblock).
 
 CREATE TABLE IF NOT EXISTS resource_library_crawler_runs (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
