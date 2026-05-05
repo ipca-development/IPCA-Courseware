@@ -16,6 +16,7 @@ if ($CDN_BASE === '') {
 
 $videoManifestFile = trim((string)($_GET['video_manifest'] ?? 'kings_videos_manifest.json'));
 $videoManifestPath = bec_resolve_video_manifest_file($videoManifestFile) ?? '';
+$videoManifestStats = bec_manifest_coverage_stats($videoManifestPath !== '' ? $videoManifestPath : null, $videoManifestFile);
 
 $scopeProgramKey = '';
 $programId = (int)($_GET['program_id'] ?? 0);
@@ -551,6 +552,7 @@ echo json_encode([
     'lesson_id' => $lessonId,
     'video_manifest_requested' => $videoManifestFile,
     'video_manifest_resolved' => $videoManifestPath !== '' ? basename($videoManifestPath) : null,
+    'video_manifest_stats' => $videoManifestStats,
     'thresholds' => [
         'min_en_len' => BEC_MIN_EN_LEN,
         'min_es_len' => BEC_MIN_ES_LEN,
@@ -561,6 +563,7 @@ echo json_encode([
     'notes' => [
         'lesson_coverage' => 'Every lesson in scope appears: lessons with no active slides show one placeholder row. Soft-deleted slides (slides.is_deleted = 1) are never listed and do not count toward active slides.',
         'bulk_pipeline' => 'Bulk enrich writes EN/ES slide_content, narration_en/es in slide_enrichment, PHAK+ACS in slide_references, and optional hotspots from the selected video manifest JSON in public/assets/.',
+        'video_manifest' => 'Manifest rows match slides on (lessonId, page) to DB (lessons.external_lesson_id, slides.page_number). A different course file (e.g. PPL vs IR) or missing lesson/page rows in JSON will show manifest video as No even when the file loads.',
         'other_refs' => 'Coverage treats refs as OK when the slide has at least one slide_references row (PHAK, ACS, or any other ref_type). Low confidence alone does not flag a row.',
         'ecfr' => 'eCFR/FAR rows are not produced by the current bulk enrich script — only PHAK and ACS.',
     ],

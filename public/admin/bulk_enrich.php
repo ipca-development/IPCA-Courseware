@@ -298,6 +298,31 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     return v ? '<span class="bec-yes">Yes</span>' : '<span class="bec-no">No</span>';
   }
 
+  /** Guess Kings manifest from programs.program_key (dropdown must list the file under public/assets/). */
+  function suggestVideoManifestForProgramKey(key) {
+    key = (key || '').toLowerCase();
+    if (!key) return null;
+    if (key.indexOf('instrument') >= 0 || key.indexOf('ifr') >= 0 || key === 'ir') {
+      return 'kings_videos_manifest.json';
+    }
+    if (key.indexOf('private') >= 0 || key.indexOf('ppl') >= 0) {
+      return 'kings_videos_manifest_A.json';
+    }
+    return null;
+  }
+
+  function applySuggestedVideoManifest() {
+    var want = suggestVideoManifestForProgramKey(state.programKey);
+    if (!want) return;
+    var sel = el('becVideoManifest');
+    if (!sel) return;
+    var ok = false;
+    sel.querySelectorAll('option').forEach(function (o) { if (o.value === want) ok = true; });
+    if (!ok) return;
+    sel.value = want;
+    state.videoManifest = want;
+  }
+
   function fillProgram(skipLoad) {
     skipLoad = skipLoad === true;
     var pid = parseInt(el('becProgram').value, 10) || 0;
@@ -332,6 +357,7 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     });
     cSel.disabled = false;
     fillLessons();
+    applySuggestedVideoManifest();
     if (!skipLoad) loadCoverage(false);
   }
 
