@@ -19,8 +19,9 @@ $exportVersion   = (string)($exportData['export_version'] ?? '');
 $exportTimestamp = (string)($exportData['export_timestamp'] ?? '');
 $bannerUrl       = (string)($exportData['banner_url'] ?? '');
 $focusHtml       = (string)($exportData['focus_items_html'] ?? '');
-$phakSections    = (array)($exportData['phak_sections'] ?? []);
-$acsHtml         = (string)($exportData['acs_section_html'] ?? '');
+$phakSections       = (array)($exportData['phak_sections'] ?? []);
+$phakSectionsIntro  = (string)($exportData['phak_sections_intro_html'] ?? '');
+$acsHtml            = (string)($exportData['acs_section_html'] ?? '');
 $regHtml         = (string)($exportData['regulatory_notes_html'] ?? '');
 $signoffHtml     = (string)($exportData['signoff_html'] ?? '');
 $disclaimer      = (string)($exportData['disclaimer_html'] ?? '');
@@ -130,7 +131,11 @@ body{
 <div class="divider"></div>
 
 <h2 class="course-title">PHAK-aligned study narrative</h2>
-<p class="lesson-meta">Section titles follow the Pilot&rsquo;s Handbook of Aeronautical Knowledge (PHAK) organization. Body text is an educational synthesis for study — verify technical and regulatory details against current FAA publications.</p>
+<?php if ($phakSectionsIntro !== ''): ?>
+  <?= $phakSectionsIntro ?>
+<?php else: ?>
+  <p class="lesson-meta">Section titles follow the Pilot&rsquo;s Handbook of Aeronautical Knowledge (PHAK) organization. Body text is an educational synthesis for study — verify technical and regulatory details against current FAA publications.</p>
+<?php endif; ?>
 
 <?php foreach ($phakSections as $sec): ?>
   <?php if (!is_array($sec)) { continue; } ?>

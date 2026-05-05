@@ -30,9 +30,8 @@ if ($slideId <= 0 || !in_array($step, $allowed, true)) {
     exit;
 }
 
-$useRl = !empty($data['use_resource_library']);
 $rlRequested = (int)($data['resource_library_edition_id'] ?? 0);
-$rlEdition = $useRl ? rl_enrich_resolve_edition_id($pdo, $rlRequested > 0 ? $rlRequested : null) : 0;
+$rlEdition = rl_enrich_resolve_edition_id($pdo, $rlRequested > 0 ? $rlRequested : null);
 
 try {
     if ($step === 'narration_en') {

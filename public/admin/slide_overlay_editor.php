@@ -23,17 +23,6 @@ if (!$slide) {
     exit('Slide not found');
 }
 
-$resourceLibraryEditions = [];
-try {
-    $resourceLibraryEditions = $pdo->query("
-        SELECT id, title, revision_code, status
-        FROM resource_library_editions
-        ORDER BY sort_order ASC, id ASC
-    ")->fetchAll(PDO::FETCH_ASSOC);
-} catch (Throwable $e) {
-    $resourceLibraryEditions = [];
-}
-
 $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
 
 // If not passed, derive from slide
@@ -267,26 +256,9 @@ cw_header('Overlay Slide Editor');
           <button class="btn btn-sm" id="btnNarrES" type="button">AI · Spanish narration</button>
           <button class="btn btn-sm" id="btnRefsAI" type="button">AI · References</button>
         </div>
-        <div class="small muted" style="margin-bottom:10px;">
-          <label style="display:block;margin-bottom:4px;">
-            <input type="checkbox" id="soeUseRl"> Use Resource Library excerpts in vision (English narration + references)
-          </label>
-          <select id="soeRlEdition" style="width:100%;max-width:100%;">
-            <option value="0">Default (CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID or first live)</option>
-            <?php foreach ($resourceLibraryEditions as $er): ?>
-              <?php
-                $eid = (int)($er['id']);
-                $tl = trim((string)($er['title'] ?? ''));
-                $rc = trim((string)($er['revision_code'] ?? ''));
-                $lab = $tl !== '' ? $tl : ('Edition ' . $eid);
-                if ($rc !== '') {
-                    $lab .= ' (' . $rc . ')';
-                }
-                ?>
-              <option value="<?= $eid ?>"><?= h($lab) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </div>
+        <p class="small muted" style="margin:0 0 10px 0;">
+          English narration and references use Resource Library excerpts when an edition is <strong>Live</strong> (<a href="/admin/resource_library.php">Resource Library</a>).
+        </p>
 
         <label class="small muted">English (editable)</label>
         <textarea id="taEN" placeholder="English extracted content…"></textarea>
@@ -349,17 +321,6 @@ window.addEventListener('resize', () => setTimeout(fitStage, 60));
 setTimeout(fitStage, 50);
 
 function setStatus(msg){ statusEl.textContent = msg; }
-
-function soeRlAiPayload(extra) {
-  const o = Object.assign({ slide_id: SLIDE_ID }, extra || {});
-  const u = document.getElementById('soeUseRl');
-  const s = document.getElementById('soeRlEdition');
-  if (u && u.checked) {
-    o.use_resource_library = true;
-    o.resource_library_edition_id = s ? (parseInt(s.value, 10) || 0) : 0;
-  }
-  return o;
-}
 
 // ------------------------
 // Unsaved changes tracking (canonical text vs hotspots)
@@ -727,7 +688,7 @@ document.getElementById('btnNarrEN').addEventListener('click', async ()=>{
   const res = await fetch('/admin/api/slide_enrich_ai_action.php', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(soeRlAiPayload({ step:'narration_en' }))
+    body: JSON.stringify({ slide_id: SLIDE_ID, step:'narration_en' })
   });
   const j = await res.json();
   if (!j.ok) { setStatus('AI narration EN failed: ' + (j.error||'')); return; }
@@ -756,7 +717,7 @@ document.getElementById('btnRefsAI').addEventListener('click', async ()=>{
   const res = await fetch('/admin/api/slide_enrich_ai_action.php', {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(soeRlAiPayload({ step:'refs' }))
+    body: JSON.stringify({ slide_id: SLIDE_ID, step:'refs' })
   });
   const j = await res.json();
   if (!j.ok) { setStatus('AI references failed: ' + (j.error||'')); return; }

@@ -5,8 +5,10 @@ require_once __DIR__ . '/resource_library_ai.php';
 
 /**
  * Resolve which resource_library_editions.id to use for enrichment context.
- * - If $explicitId > 0 and row exists, use it.
- * - Else CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID env (if valid).
+ * Only editions with status = 'live' are used (Resource Library admin Live toggle).
+ *
+ * - If $explicitId > 0 and a matching live row exists, use it.
+ * - Else CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID env (if that id is live).
  * - Else first live edition by sort_order.
  *
  * @return int 0 if none available
@@ -15,7 +17,7 @@ function rl_enrich_resolve_edition_id(PDO $pdo, ?int $explicitId): int
 {
     if ($explicitId !== null && $explicitId > 0) {
         try {
-            $st = $pdo->prepare('SELECT id FROM resource_library_editions WHERE id = ? LIMIT 1');
+            $st = $pdo->prepare("SELECT id FROM resource_library_editions WHERE id = ? AND status = 'live' LIMIT 1");
             $st->execute([$explicitId]);
             $found = (int)$st->fetchColumn();
             if ($found > 0) {
@@ -29,7 +31,7 @@ function rl_enrich_resolve_edition_id(PDO $pdo, ?int $explicitId): int
     $env = (int)(getenv('CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID') ?: 0);
     if ($env > 0) {
         try {
-            $st = $pdo->prepare('SELECT id FROM resource_library_editions WHERE id = ? LIMIT 1');
+            $st = $pdo->prepare("SELECT id FROM resource_library_editions WHERE id = ? AND status = 'live' LIMIT 1");
             $st->execute([$env]);
             $found = (int)$st->fetchColumn();
             if ($found > 0) {

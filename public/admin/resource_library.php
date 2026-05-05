@@ -396,6 +396,7 @@ cw_header('Resource Library');
   <p class="rl-intro">
     Reference editions for the platform. Click a book to edit metadata or upload / replace the JSON used as the live resource body
     (stored under <code>storage/resource_library/{id}/source.json</code> on the server).
+    Editions marked <strong>Live</strong> are used automatically to enrich bulk slide vision and overlay narration/references (when blocks are indexed); set an edition to Draft to stop using it for AI context.
   </p>
 
   <?php if (!$result['ok']): ?>

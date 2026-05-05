@@ -314,7 +314,7 @@ function bulk_enrich_core_parse_flags(array $p): array
         'do_narration_es' => $doNarrEs,
         'do_refs' => $doRefs,
         'do_hotspots' => $doHotspots,
-        'use_resource_library' => isset($p['use_resource_library']),
+        // Optional POST: live edition id; 0 = CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID or first live
         'resource_library_edition_id' => (int)($p['resource_library_edition_id'] ?? 0),
     ];
 }
@@ -341,15 +341,9 @@ function bulk_enrich_core_run(
     $doRefs = !empty($flags['do_refs']);
     $doHotspots = !empty($flags['do_hotspots']);
 
-    $useRl = !empty($flags['use_resource_library']);
     $rlRequested = (int)($flags['resource_library_edition_id'] ?? 0);
-    $rlEdition = $useRl ? rl_enrich_resolve_edition_id($pdo, $rlRequested > 0 ? $rlRequested : null) : 0;
-    if ($useRl && $rlEdition <= 0) {
-        $emit('step', [
-            'phase' => 'resource_library',
-            'message' => 'Resource Library context requested but no edition resolved (set edition in UI or CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID / sync blocks). Vision runs without DB excerpts.',
-        ]);
-    } elseif ($useRl && $rlEdition > 0) {
+    $rlEdition = rl_enrich_resolve_edition_id($pdo, $rlRequested > 0 ? $rlRequested : null);
+    if ($rlEdition > 0) {
         try {
             $cst = $pdo->prepare('SELECT COUNT(*) FROM resource_library_blocks WHERE edition_id = ?');
             $cst->execute([$rlEdition]);
@@ -357,7 +351,7 @@ function bulk_enrich_core_run(
             if ($bc <= 0) {
                 $emit('step', [
                     'phase' => 'resource_library',
-                    'message' => 'Resource Library edition ' . $rlEdition . ' has no indexed blocks yet; run Sync JSON → database on Resource Library. Vision runs without excerpts.',
+                    'message' => 'Resource Library edition ' . $rlEdition . ' (live) has no indexed blocks yet; run Sync JSON → database on Resource Library. Vision runs without excerpts.',
                 ]);
             }
         } catch (Throwable $e) {

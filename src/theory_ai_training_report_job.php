@@ -128,8 +128,20 @@ function tatr_build_export_payload(PDO $pdo, int $cohortId, int $studentId, ?cal
     $context = InstructorTheoryTrainingReportAi::collectContext($pdo, $cohortId, $studentId);
     $cohortTitle = (string)($context['cohort_name'] ?? ('Cohort ' . $cohortId));
 
+    $tick(25);
+    $phakLibraryPack = InstructorTheoryTrainingReportAi::collectPhakLibraryPack($pdo, $context);
+    $phakHandbookLabel = $phakLibraryPack !== ''
+        ? InstructorTheoryTrainingReportAi::liveResourceLibraryHandbookLabel($pdo)
+        : '';
+
     $tick(28);
-    $ai = InstructorTheoryTrainingReportAi::callOpenAiForReportJson($context, $studentName, $cohortTitle);
+    $ai = InstructorTheoryTrainingReportAi::callOpenAiForReportJson(
+        $context,
+        $studentName,
+        $cohortTitle,
+        $phakLibraryPack,
+        $phakHandbookLabel
+    );
 
     $tick(48);
     $ecfrOfficialBlock = '';
@@ -161,14 +173,31 @@ function tatr_build_export_payload(PDO $pdo, int $cohortId, int $studentId, ?cal
 
     $signoffHtml = InstructorTheoryTrainingReportAi::renderSignoffTableHtml($ai, $cohortTz, $chiefName);
 
+    $phakDisclaimerLine = $phakLibraryPack !== ''
+        ? 'PHAK narrative paragraphs are grounded in indexed handbook text from your <strong>Resource Library</strong> when a <strong>Live</strong> edition is configured; cross-check critical items against the official FAA PHAK PDF before checkrides. '
+        : 'PHAK-aligned sections are study aids and may paraphrase official materials; use the current FAA PHAK (FAA-H-8083-25) as authority. ';
+
     $disclaimer = '<div class="lesson-meta" style="padding:12px;background:#fff7ed;border:1px solid #fdba74;border-radius:10px;">'
         . '<strong>Advisory document.</strong> This PDF was generated with AI assistance from progression and summary records. '
         . 'It is not an FAA-approved curriculum document. Official <strong>14 CFR § 61.105</strong> text is loaded live from the <strong>eCFR versioner API</strong> (see <a href="https://www.ecfr.gov/developers/documentation/api/v1">eCFR API v1 documentation</a>). '
         . 'Other regulatory explanations must still be verified on <strong>ecfr.gov</strong> and relevant <strong>FAA.gov</strong> Advisory Circulars. '
-        . 'PHAK-aligned sections are study aids and may paraphrase official materials; use the current FAA PHAK (FAA-H-8083-25) as authority. '
+        . $phakDisclaimerLine
         . 'ACS references are included where applicable for self-assessment context (e.g. ACS PA.II.A.K1). '
         . '61.105 sign-off timing and hours are model estimates from available timestamps — reconcile with the student logbook.'
         . '</div>';
+
+    $defaultPhakIntro = 'Section titles follow the Pilot&rsquo;s Handbook of Aeronautical Knowledge (PHAK) organization. Body text is an educational synthesis for study — verify technical and regulatory details against current FAA publications.';
+    if ($phakLibraryPack !== '') {
+        if ($phakHandbookLabel !== '') {
+            $phakSectionsIntro = '<p class="lesson-meta">PHAK explanations are synthesized for this student from indexed text in your Resource Library (<strong>'
+                . htmlspecialchars($phakHandbookLabel, ENT_QUOTES | ENT_HTML5, 'UTF-8')
+                . '</strong>) together with progression evidence. Verify critical items against the official FAA PHAK before checkrides.</p>';
+        } else {
+            $phakSectionsIntro = '<p class="lesson-meta">PHAK explanations are synthesized from indexed Resource Library handbook text and progression evidence. Verify critical items against the official FAA PHAK before checkrides.</p>';
+        }
+    } else {
+        $phakSectionsIntro = '<p class="lesson-meta">' . $defaultPhakIntro . '</p>';
+    }
 
     $bannerPath = realpath(__DIR__ . '/../public/assets/pdf/ipca_header.jpg');
     if (!$bannerPath || !is_file($bannerPath)) {
@@ -185,6 +214,7 @@ function tatr_build_export_payload(PDO $pdo, int $cohortId, int $studentId, ?cal
         'export_timestamp' => $exportTimestamp,
         'banner_url' => 'file://' . $bannerPath,
         'focus_items_html' => (string)($ai['focus_items_html'] ?? ''),
+        'phak_sections_intro_html' => $phakSectionsIntro,
         'phak_sections' => $ai['phak_sections'] ?? [],
         'acs_section_html' => (string)($ai['acs_section_html'] ?? ''),
         'regulatory_notes_html' => $mergedRegulatory,

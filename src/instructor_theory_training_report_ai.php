@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/openai.php';
+require_once __DIR__ . '/resource_library_enrich_context.php';
 
 /**
  * Instructor-only: build theory training context + AI JSON for the PDF training report.
@@ -143,6 +144,154 @@ final class InstructorTheoryTrainingReportAi
         ];
     }
 
+    /**
+     * Human-readable label for the live Resource Library edition used for PHAK retrieval (empty if none).
+     */
+    public static function liveResourceLibraryHandbookLabel(PDO $pdo): string
+    {
+        $id = rl_enrich_resolve_edition_id($pdo, null);
+        if ($id <= 0) {
+            return '';
+        }
+        try {
+            $st = $pdo->prepare('SELECT title, revision_code FROM resource_library_editions WHERE id = ? LIMIT 1');
+            $st->execute([$id]);
+            $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+            $title = trim((string)($r['title'] ?? ''));
+            $rev = trim((string)($r['revision_code'] ?? ''));
+            if ($title !== '' && $rev !== '') {
+                return $title . ' (' . $rev . ')';
+            }
+            if ($title !== '') {
+                return $title;
+            }
+            if ($rev !== '') {
+                return 'PHAK ' . $rev;
+            }
+
+            return 'Resource Library edition #' . $id;
+        } catch (Throwable $e) {
+            return '';
+        }
+    }
+
+    /**
+     * Pull ranked PHAK blocks for theory-report AI, using lesson titles and weak-area/summary text as search hints.
+     *
+     * @param array{attempts?:list<mixed>,summaries?:list<mixed>} $context
+     */
+    public static function collectPhakLibraryPack(PDO $pdo, array $context): string
+    {
+        $editionId = rl_enrich_resolve_edition_id($pdo, null);
+        if ($editionId <= 0) {
+            return '';
+        }
+        try {
+            $chk = $pdo->prepare('SELECT COUNT(*) FROM resource_library_blocks WHERE edition_id = ?');
+            $chk->execute([$editionId]);
+            if ((int)$chk->fetchColumn() <= 0) {
+                return '';
+            }
+        } catch (Throwable $e) {
+            return '';
+        }
+
+        $titleHints = [];
+        $otherHints = [];
+        $courseHint = trim((string)($context['course_title_hint'] ?? ''));
+        if ($courseHint !== '') {
+            $titleHints[] = $courseHint;
+        }
+        foreach ($context['attempts'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $t = trim((string)($row['lesson_title'] ?? ''));
+            if ($t !== '') {
+                $titleHints[] = $t;
+            }
+            $w = trim((string)($row['weak_areas'] ?? ''));
+            if ($w !== '') {
+                $otherHints[] = mb_substr($w, 0, 480);
+            }
+        }
+        foreach ($context['summaries'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $t = trim((string)($row['lesson_title'] ?? ''));
+            if ($t !== '') {
+                $titleHints[] = $t;
+            }
+            $s = trim((string)($row['summary_plain_excerpt'] ?? ''));
+            if ($s !== '') {
+                $otherHints[] = mb_substr($s, 0, 400);
+            }
+        }
+        $titleHints = array_values(array_unique(array_filter($titleHints)));
+        $otherHints = array_values(array_unique(array_filter($otherHints)));
+        $hints = $titleHints;
+        foreach ($otherHints as $o) {
+            if (count($hints) >= 18) {
+                break;
+            }
+            $hints[] = $o;
+        }
+        $hints = array_slice($hints, 0, 15);
+
+        $seen = [];
+        $lines = ['--- Indexed PHAK excerpts (Resource Library; use this wording where it applies) ---'];
+        $used = strlen($lines[0]) + 40;
+        $maxTotal = 20000;
+
+        foreach ($hints as $hint) {
+            if ($used >= $maxTotal) {
+                break;
+            }
+            if (mb_strlen($hint) < 3) {
+                continue;
+            }
+            try {
+                $hits = rl_ai_search_resource_blocks($pdo, $editionId, $hint, 6);
+            } catch (Throwable $e) {
+                continue;
+            }
+            foreach ($hits as $h) {
+                if (!is_array($h)) {
+                    continue;
+                }
+                $bk = trim((string)($h['block_key'] ?? ''));
+                $key = $bk !== '' ? $bk : ((string)($h['chapter'] ?? '') . '|' . (string)($h['block_local_id'] ?? ''));
+                if ($key === '' || $key === '|') {
+                    continue;
+                }
+                if (isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $body = (string)($h['body_text'] ?? '');
+                if ($body === '') {
+                    continue;
+                }
+                if (strlen($body) > 1100) {
+                    $body = substr($body, 0, 1100) . '…';
+                }
+                $chunk = '[' . (string)($h['chapter'] ?? '') . ' / ' . (string)($h['block_local_id'] ?? '') . "]\n" . $body;
+                if ($used + strlen($chunk) + 4 > $maxTotal) {
+                    break 2;
+                }
+                $lines[] = $chunk;
+                $used += strlen($chunk) + 4;
+            }
+        }
+
+        if (count($lines) <= 1) {
+            return '';
+        }
+
+        return implode("\n\n", $lines);
+    }
+
     public static function sanitizeAiHtml(string $html): string
     {
         $html = preg_replace('#<(script|iframe|object|embed)[^>]*>.*?</\\1>#is', '', $html) ?? '';
@@ -155,8 +304,13 @@ final class InstructorTheoryTrainingReportAi
      * @param array{attempts:list,summaries:list,cohort_name:string,course_title_hint:string} $context
      * @return array<string,mixed>
      */
-    public static function callOpenAiForReportJson(array $context, string $studentName, string $cohortTitle): array
-    {
+    public static function callOpenAiForReportJson(
+        array $context,
+        string $studentName,
+        string $cohortTitle,
+        string $phakLibraryPack = '',
+        string $phakHandbookLabel = ''
+    ): array {
         $subjectLines = [];
         foreach (self::SIGNOFF_SUBJECTS as $idx => $row) {
             $n = $idx + 1;
@@ -164,18 +318,26 @@ final class InstructorTheoryTrainingReportAi
         }
         $subjectBlock = implode("\n", $subjectLines);
 
+        $hasRlPhak = $phakLibraryPack !== '';
+        $rules = [
+            'Return valid JSON only. No markdown fences. No text outside JSON.',
+            'Where regulations apply, cite 14 CFR parts/sections and applicable Advisory Circular identifiers. The PDF will prepend official 14 CFR § 61.105 text fetched live from the U.S. Government eCFR API; use your regulatory_notes_html for other parts (e.g. cross-references) and remind instructors to verify current wording on https://www.ecfr.gov/ and https://www.faa.gov/.',
+            'Include Private Pilot ACS references when applicable (e.g. ACS PA.II.A.K1 — Pilot Self Assessment) with short applicability notes.',
+            'signoff_rows MUST be an array of exactly 13 objects in the same order as the static subject list provided. Each object: {"sessions":[{"at_utc":"ISO-8601 UTC or MySQL UTC datetime string","hours_approx":0.5,"note":"short"}],"total_hours_approx":0.0}. Use lesson summary update times and progress test completion times from the supplied evidence to propose realistic study sessions; if uncertain, use conservative estimates and say so in note.',
+            'course_total_hours_approx should approximate total ground-study time across the program from the same evidence.',
+            'All HTML string fields must be simple tags (h2,h3,p,ul,ol,li,strong,em,br,table,tr,th,td) only — no attributes except colspan/rowspan on table cells if needed.',
+        ];
+        if ($hasRlPhak) {
+            $rules[] = 'resource_library_phak_excerpts contains indexed PHAK plain text from this school\'s Resource Library (same handbook used in courseware). You MUST ground phak_sections in that material: use matching definitions, standard terminology, and structure where they apply to the student evidence. Synthesize concise instructor-facing study narrative in body_html; you may use short verbatim phrases from excerpts when needed for accuracy. Do not assert handbook claims unsupported by excerpts or evidence.';
+            $rules[] = 'phak_reference and chapter_title should align with excerpt bracket lines [chapter / block_id]. If resource_library_handbook_label is provided, cite it in phak_reference; prefer American English aviation terminology as in the excerpts.';
+        } else {
+            $rules[] = 'Use original educational phrasing; do not paste long verbatim excerpts from copyrighted FAA publications.';
+            $rules[] = 'Align headings and explanations conceptually to the FAA Pilot\'s Handbook of Aeronautical Knowledge (PHAK) chapter themes (e.g. Introduction to Flying, Aeronautical Decision Making, Principles of Flight, …) and cite references like "FAA PHAK FAA-H-8083-25B, Chapter N" where appropriate.';
+        }
+
         $payload = [
             'task' => 'Create an instructor-facing theory training study and focus report for one student. Return JSON only.',
-            'rules' => [
-                'Return valid JSON only. No markdown fences. No text outside JSON.',
-                'Use original educational phrasing; do not paste long verbatim excerpts from copyrighted FAA publications.',
-                'Align headings and explanations conceptually to the FAA Pilot\'s Handbook of Aeronautical Knowledge (PHAK) chapter themes (e.g. Introduction to Flying, Aeronautical Decision Making, Principles of Flight, …) and cite references like "FAA PHAK FAA-H-8083-25B, Chapter N" where appropriate.',
-                'Where regulations apply, cite 14 CFR parts/sections and applicable Advisory Circular identifiers. The PDF will prepend official 14 CFR § 61.105 text fetched live from the U.S. Government eCFR API; use your regulatory_notes_html for other parts (e.g. cross-references) and remind instructors to verify current wording on https://www.ecfr.gov/ and https://www.faa.gov/.',
-                'Include Private Pilot ACS references when applicable (e.g. ACS PA.II.A.K1 — Pilot Self Assessment) with short applicability notes.',
-                'signoff_rows MUST be an array of exactly 13 objects in the same order as the static subject list provided. Each object: {"sessions":[{"at_utc":"ISO-8601 UTC or MySQL UTC datetime string","hours_approx":0.5,"note":"short"}],"total_hours_approx":0.0}. Use lesson summary update times and progress test completion times from the supplied evidence to propose realistic study sessions; if uncertain, use conservative estimates and say so in note.',
-                'course_total_hours_approx should approximate total ground-study time across the program from the same evidence.',
-                'All HTML string fields must be simple tags (h2,h3,p,ul,ol,li,strong,em,br,table,tr,th,td) only — no attributes except colspan/rowspan on table cells if needed.',
-            ],
+            'rules' => $rules,
             'static_signoff_subject_order' => $subjectBlock,
             'required_top_level_json_keys' => [
                 'focus_items_html',
@@ -189,6 +351,12 @@ final class InstructorTheoryTrainingReportAi
             'cohort_title' => $cohortTitle,
             'evidence' => $context,
         ];
+        if ($phakHandbookLabel !== '') {
+            $payload['resource_library_handbook_label'] = $phakHandbookLabel;
+        }
+        if ($phakLibraryPack !== '') {
+            $payload['resource_library_phak_excerpts'] = $phakLibraryPack;
+        }
 
         $model = cw_openai_model();
         $resp = cw_openai_responses([
