@@ -14,6 +14,12 @@ require_once __DIR__ . '/resource_library_aim.php';
 final class AimBootstrapImporter
 {
     private const USER_AGENT = 'IPCA-Courseware/AIM-Bootstrap-Importer/1.0';
+
+    /** Stop concatenating sibling saveHTML() blobs beyond this (saves RAM on huge sections). */
+    private const PARAGRAPH_BODY_HTML_COLLECT_MAX = 196608;
+
+    /** Max bytes stored per paragraph in body_html (DB + in-memory manifest hashing). */
+    private const PARAGRAPH_BODY_HTML_STORE_MAX = 65536;
     /** @var ?\Closure(string):void */
     private readonly ?\Closure $progressCb;
 
@@ -66,17 +72,11 @@ final class AimBootstrapImporter
         $effective = $meta['effective_date'];
         $changeLabel = $meta['change'];
 
-        $pageBodies = $this->discoverPageBodies($this->indexUrl, $prefix, $indexHtml['body']);
-        $pages = array_keys($pageBodies);
-        $this->progress('Crawl complete. Pages discovered: ' . count($pages) . '.');
-
+        $pageUrls = [];
         $allParagraphs = [];
-        foreach ($pageBodies as $pageUrl => $html) {
-            $extracted = self::extractParagraphsFromPage($html, $pageUrl);
-            foreach ($extracted as $row) {
-                $allParagraphs[] = $row;
-            }
-        }
+        $this->crawlPagesExtractParagraphs($this->indexUrl, $prefix, $indexHtml['body'], $pageUrls, $allParagraphs);
+        $this->progress('Crawl complete. Pages discovered: ' . count($pageUrls) . '.');
+
         $this->progress('Paragraph extraction complete. Rows: ' . count($allParagraphs) . '.');
 
         $runId = 0;
@@ -99,7 +99,7 @@ final class AimBootstrapImporter
             }
         } catch (Throwable $e) {
             if ($runId > 0) {
-                $this->finishRun($runId, 'failed', count($pages), count($allParagraphs), $e->getMessage());
+                $this->finishRun($runId, 'failed', count($pageUrls), count($allParagraphs), $e->getMessage());
             }
 
             return ['ok' => false, 'error' => $e->getMessage()];
@@ -118,7 +118,7 @@ final class AimBootstrapImporter
             'effective_date' => $effective,
             'change' => $changeLabel,
             'generated_at' => $generatedAt,
-            'page_count' => count($pages),
+            'page_count' => count($pageUrls),
             'paragraph_count' => count($allParagraphs),
             'content_hash' => $manifestHash,
         ];
@@ -128,14 +128,14 @@ final class AimBootstrapImporter
         $json = json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
         if ($json === false) {
             if ($runId > 0) {
-                $this->finishRun($runId, 'partial', count($pages), count($allParagraphs), 'JSON encode failed');
+                $this->finishRun($runId, 'partial', count($pageUrls), count($allParagraphs), 'JSON encode failed');
             }
 
             return ['ok' => false, 'error' => 'Could not encode manifest JSON'];
         }
         if (file_put_contents($manifestPath, $json . "\n") === false) {
             if ($runId > 0) {
-                $this->finishRun($runId, 'partial', count($pages), count($allParagraphs), 'Manifest write failed');
+                $this->finishRun($runId, 'partial', count($pageUrls), count($allParagraphs), 'Manifest write failed');
             }
 
             return ['ok' => false, 'error' => 'Could not write manifest: ' . $manifestPath];
@@ -143,12 +143,12 @@ final class AimBootstrapImporter
         $this->progress('Manifest written: ' . $manifestPath);
 
         if ($runId > 0) {
-            $this->finishRun($runId, 'success', count($pages), count($allParagraphs), null, $manifestPath, $manifestHash);
+            $this->finishRun($runId, 'success', count($pageUrls), count($allParagraphs), null, $manifestPath, $manifestHash);
         }
 
         return [
             'ok' => true,
-            'pages' => count($pages),
+            'pages' => count($pageUrls),
             'paragraphs' => count($allParagraphs),
             'manifest_path' => $manifestPath,
             'run_id' => $runId,
@@ -240,12 +240,19 @@ final class AimBootstrapImporter
     }
 
     /**
-     * BFS crawl under allowed prefix; returns each page body once (no duplicate fetches for extraction).
+     * BFS crawl under allowed prefix; extracts paragraphs per page and does **not** retain all HTML
+     * in memory (avoids OOM on large AIM trees under default PHP memory_limit).
      *
-     * @return array<string, string> normalized URL => HTML
+     * @param list<string> $pageUrls out: normalized URLs successfully fetched (in visit order)
+     * @param list<array<string, mixed>> $allParagraphs out: merged extractParagraphsFromPage rows
      */
-    private function discoverPageBodies(string $indexUrl, string $prefixNorm, string $indexBody): array
-    {
+    private function crawlPagesExtractParagraphs(
+        string $indexUrl,
+        string $prefixNorm,
+        string $indexBody,
+        array &$pageUrls,
+        array &$allParagraphs,
+    ): void {
         $prefixNorm = self::normalizePrefix($prefixNorm);
         $norm = static function (string $u): string {
             $u = trim($u);
@@ -259,7 +266,6 @@ final class AimBootstrapImporter
         $queued = [];
         $queue = [$normIndex];
         $queued[$normIndex] = true;
-        $bodies = [];
 
         while ($queue !== []) {
             if (count($visited) >= $this->maxPages) {
@@ -287,27 +293,36 @@ final class AimBootstrapImporter
             }
 
             $visited[$u] = true;
-            $bodies[$u] = $body;
+            $pageUrls[] = $u;
+
+            self::collectLinksFromHtml(
+                $body,
+                $u,
+                static function (string $abs) use (&$queue, &$queued, $norm, $prefixNorm): void {
+                    $v = $norm($abs);
+                    if ($v === '' || !self::urlAllowedUnderPrefix($v, $prefixNorm)) {
+                        return;
+                    }
+                    if (isset($queued[$v])) {
+                        return;
+                    }
+                    $queued[$v] = true;
+                    $queue[] = $v;
+                }
+            );
+
+            $extracted = self::extractParagraphsFromPage($body, $u);
+            unset($body);
+            foreach ($extracted as $row) {
+                $allParagraphs[] = $row;
+            }
+            unset($extracted);
+
             $visitedCount = count($visited);
             if ($visitedCount <= 5 || $visitedCount % 25 === 0) {
                 $this->progress('Crawled page ' . $visitedCount . ': ' . $u);
             }
-
-            $baseForLinks = $u;
-            self::collectLinksFromHtml($body, $baseForLinks, static function (string $abs) use (&$queue, &$queued, $norm, $prefixNorm): void {
-                $v = $norm($abs);
-                if ($v === '' || !self::urlAllowedUnderPrefix($v, $prefixNorm)) {
-                    return;
-                }
-                if (isset($queued[$v])) {
-                    return;
-                }
-                $queued[$v] = true;
-                $queue[] = $v;
-            });
         }
-
-        return $bodies;
     }
 
     private static function urlAllowedUnderPrefix(string $abs, string $prefixNorm): bool
@@ -391,6 +406,8 @@ final class AimBootstrapImporter
         $xp = new DOMXPath($dom);
         $main = $xp->query("//*[contains(concat(' ', normalize-space(@class), ' '), ' main-content ')]")->item(0);
         if (!$main instanceof DOMElement) {
+            unset($dom, $xp, $html);
+
             return [];
         }
 
@@ -440,6 +457,8 @@ final class AimBootstrapImporter
             ];
         }
 
+        unset($dom, $xp, $heads, $main, $html);
+
         return $rows;
     }
 
@@ -465,6 +484,7 @@ final class AimBootstrapImporter
     public static function collectFollowingUntilNextParagraph(DOMElement $h4): array
     {
         $htmlParts = [];
+        $accum = 0;
         $n = $h4->nextSibling;
         while ($n !== null) {
             if ($n instanceof DOMElement && strtolower($n->tagName) === 'h4') {
@@ -476,17 +496,32 @@ final class AimBootstrapImporter
             if ($n instanceof DOMText) {
                 $t = trim($n->textContent);
                 if ($t !== '') {
-                    $htmlParts[] = '<p>' . htmlspecialchars($t, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>';
+                    $piece = '<p>' . htmlspecialchars($t, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</p>';
+                    $len = strlen($piece);
+                    if ($accum + $len > self::PARAGRAPH_BODY_HTML_COLLECT_MAX) {
+                        $htmlParts[] = '<!-- truncated -->';
+                        break;
+                    }
+                    $htmlParts[] = $piece;
+                    $accum += $len;
                 }
             } elseif ($n instanceof DOMElement) {
-                $htmlParts[] = $n->ownerDocument?->saveHTML($n) ?? '';
+                $piece = $n->ownerDocument?->saveHTML($n) ?? '';
+                $len = strlen($piece);
+                if ($accum + $len > self::PARAGRAPH_BODY_HTML_COLLECT_MAX) {
+                    $htmlParts[] = '<!-- truncated -->';
+                    break;
+                }
+                $htmlParts[] = $piece;
+                $accum += $len;
             }
             $n = $n->nextSibling;
         }
 
         $bodyHtml = trim(implode("\n", $htmlParts));
-        if (strlen($bodyHtml) > 500000) {
-            $bodyHtml = substr($bodyHtml, 0, 500000) . "\n<!-- truncated -->";
+        unset($htmlParts, $accum);
+        if (strlen($bodyHtml) > self::PARAGRAPH_BODY_HTML_STORE_MAX) {
+            $bodyHtml = substr($bodyHtml, 0, self::PARAGRAPH_BODY_HTML_STORE_MAX) . "\n<!-- truncated -->";
         }
         $withBreaks = preg_replace('#<br\s*/?>#i', "\n", $bodyHtml) ?? $bodyHtml;
         $plain = strip_tags($withBreaks);
