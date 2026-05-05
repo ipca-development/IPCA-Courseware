@@ -1,5 +1,8 @@
 -- Resource Library: canonical reference works (PHAK, ACS, etc.) for admin UI and future AI retrieval.
 -- Run against your IPCA courseware database (e.g. mysql < scripts/sql/resource_library_editions.sql).
+--
+-- Structured JSON uploads (admin Resource Library modal) are stored on disk, not in this table:
+--   {project}/storage/resource_library/{edition_id}/source.json
 
 CREATE TABLE IF NOT EXISTS resource_library_editions (
   id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,

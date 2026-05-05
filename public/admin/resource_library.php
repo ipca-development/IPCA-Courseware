@@ -6,6 +6,8 @@ require_once __DIR__ . '/../../src/layout.php';
 
 cw_require_admin();
 
+$apiHref = '/admin/api/resource_library_api.php';
+
 /**
  * @return array{ok: bool, rows: list<array<string, mixed>>, error?: string}
  */
@@ -108,6 +110,27 @@ cw_header('Resource Library');
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    text-align: left;
+    width: 100%;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .rl-card:hover {
+    border-color: #94a3b8;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.08);
+  }
+  .rl-card:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+  .rl-card-hint {
+    font-size: 12px;
+    color: #64748b;
+    padding: 0 16px 12px;
+    margin-top: auto;
   }
   .rl-card-thumb {
     aspect-ratio: 4 / 3;
@@ -116,6 +139,7 @@ cw_header('Resource Library');
     align-items: center;
     justify-content: center;
     padding: 16px;
+    pointer-events: none;
   }
   .rl-card-thumb img {
     max-width: 100%;
@@ -124,7 +148,7 @@ cw_header('Resource Library');
     border-radius: 8px;
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12);
   }
-  .rl-card-body { padding: 14px 16px 16px; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+  .rl-card-body { padding: 14px 16px 8px; flex: 1; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
   .rl-card-title {
     font-size: 16px;
     font-weight: 600;
@@ -159,23 +183,188 @@ cw_header('Resource Library');
     font-size: 14px;
     background: #f8fafc;
   }
+
+  .rl-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 500;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    box-sizing: border-box;
+  }
+  .rl-backdrop.is-open { display: flex; }
+  .rl-modal {
+    background: #fff;
+    border-radius: 16px;
+    max-width: 560px;
+    width: 100%;
+    max-height: min(92vh, 900px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+  }
+  .rl-modal-head {
+    padding: 18px 20px 12px;
+    border-bottom: 1px solid #e2e8f0;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .rl-modal-title { margin: 0; font-size: 18px; font-weight: 600; color: #0f172a; line-height: 1.3; }
+  .rl-modal-sub { margin: 6px 0 0; font-size: 13px; color: #64748b; }
+  .rl-modal-close {
+    border: none;
+    background: #f1f5f9;
+    color: #475569;
+    width: 36px;
+    height: 36px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 20px;
+    line-height: 1;
+    flex-shrink: 0;
+  }
+  .rl-modal-close:hover { background: #e2e8f0; }
+  .rl-modal-body { padding: 16px 20px 20px; overflow-y: auto; flex: 1; }
+  .rl-field { margin-bottom: 14px; }
+  .rl-field label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: #64748b;
+    margin-bottom: 6px;
+  }
+  .rl-field input, .rl-field select {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .rl-field input:focus, .rl-field select:focus {
+    outline: none;
+    border-color: #2563eb;
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  }
+  .rl-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 520px) { .rl-row2 { grid-template-columns: 1fr; } }
+  .rl-panel {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-top: 8px;
+    background: #f8fafc;
+  }
+  .rl-panel h3 { margin: 0 0 10px; font-size: 14px; font-weight: 600; color: #0f172a; }
+  .rl-panel p { margin: 0 0 10px; font-size: 13px; color: #475569; line-height: 1.45; }
+  .rl-panel-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+  .rl-msg {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 13px;
+    display: none;
+  }
+  .rl-msg.is-error { display: block; background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+  .rl-msg.is-ok { display: block; background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+  .rl-modal-foot {
+    padding: 14px 20px 18px;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: flex-end;
+  }
+  .btn-ghost {
+    background: #f1f5f9;
+    color: #334155;
+    border: none;
+    border-radius: 10px;
+    padding: 10px 14px;
+    cursor: pointer;
+    font-size: 14px;
+    font-family: inherit;
+  }
+  .btn-ghost:hover { background: #e2e8f0; }
+  .btn-danger {
+    background: #fef2f2;
+    color: #b91c1c;
+    border: 1px solid #fecaca;
+    border-radius: 10px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .btn-danger:hover { background: #fee2e2; }
+
+  .rl-drop-img {
+    border: 2px dashed #cbd5e1;
+    border-radius: 12px;
+    padding: 20px 16px;
+    text-align: center;
+    background: #fff;
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+    margin-top: 6px;
+  }
+  .rl-drop-img:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+  }
+  .rl-drop-img:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+  .rl-drop-img.is-dragover {
+    border-color: #2563eb;
+    background: #eff6ff;
+  }
+  .rl-drop-img.is-uploading {
+    pointer-events: none;
+    opacity: 0.65;
+  }
+  .rl-drop-img p { margin: 0; font-size: 14px; color: #475569; line-height: 1.45; }
+  .rl-drop-meta { margin: 8px 0 0 !important; font-size: 12px !important; color: #94a3b8 !important; }
+  .rl-thumb-preview-wrap {
+    margin-top: 12px;
+    min-height: 0;
+  }
+  .rl-thumb-preview-wrap img {
+    max-width: 100%;
+    max-height: 160px;
+    object-fit: contain;
+    border-radius: 10px;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
+  }
 </style>
 
-<div class="rl-wrap">
+<div class="rl-wrap" id="rlPage" data-api="<?= h($apiHref) ?>">
   <p class="rl-intro">
-    Controlled reference editions available to the platform (handbooks, manuals). Uploads and JSON imports will be added here;
-    for now this list reflects what is stored in the database.
+    Reference editions for the platform. Click a book to edit metadata or upload / replace the JSON used as the live resource body
+    (stored under <code>storage/resource_library/{id}/source.json</code> on the server).
   </p>
 
   <?php if (!$result['ok']): ?>
     <div class="rl-alert"><?= rl_table_missing_message($tableError) ?></div>
   <?php elseif ($rows === []): ?>
     <div class="rl-empty">No editions yet. After running <code>scripts/sql/resource_library_editions.sql</code>, add rows in
-      <code>resource_library_editions</code> or extend this UI with upload tools.</div>
+      <code>resource_library_editions</code>, then use this page to manage them.</div>
   <?php else: ?>
-    <div class="rl-grid">
+    <div class="rl-grid" id="rlGrid">
       <?php foreach ($rows as $row): ?>
         <?php
+          $eid = (int)($row['id'] ?? 0);
           $title = (string)($row['title'] ?? '');
           $revCode = (string)($row['revision_code'] ?? '');
           $revDate = (string)($row['revision_date'] ?? '');
@@ -184,7 +373,7 @@ cw_header('Resource Library');
           $ts = $revDate !== '' ? strtotime($revDate . 'T12:00:00') : false;
           $revDisplay = ($ts !== false) ? date('F j, Y', $ts) : '—';
         ?>
-        <article class="rl-card">
+        <button type="button" class="rl-card" data-id="<?= $eid ?>" aria-label="Edit <?= h($title) ?>">
           <div class="rl-card-thumb">
             <img src="<?= h($thumb) ?>" alt="" loading="lazy" width="200" height="150">
           </div>
@@ -199,10 +388,422 @@ cw_header('Resource Library');
               <dd><span class="<?= h(rl_status_class($status)) ?>"><?= h(rl_status_label($status)) ?></span></dd>
             </dl>
           </div>
-        </article>
+          <div class="rl-card-hint">Click to edit · upload JSON</div>
+        </button>
       <?php endforeach; ?>
     </div>
   <?php endif; ?>
 </div>
+
+<div class="rl-backdrop" id="rlBackdrop" aria-hidden="true">
+  <div class="rl-modal" role="dialog" aria-modal="true" aria-labelledby="rlModalTitle" tabindex="-1">
+    <div class="rl-modal-head">
+      <div>
+        <h2 class="rl-modal-title" id="rlModalTitle">Edition</h2>
+        <p class="rl-modal-sub" id="rlModalSub"></p>
+      </div>
+      <button type="button" class="rl-modal-close" id="rlClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="rl-modal-body">
+      <form id="rlMetaForm">
+        <input type="hidden" name="id" id="rlFieldId" value="">
+        <div class="rl-field">
+          <label for="rlFieldTitle">Book title</label>
+          <input type="text" id="rlFieldTitle" name="title" required maxlength="512" autocomplete="off">
+        </div>
+        <div class="rl-row2">
+          <div class="rl-field">
+            <label for="rlFieldRevCode">Version (e.g. FAA-H-8083-25C)</label>
+            <input type="text" id="rlFieldRevCode" name="revision_code" required maxlength="128" autocomplete="off">
+          </div>
+          <div class="rl-field">
+            <label for="rlFieldRevDate">Revision date</label>
+            <input type="date" id="rlFieldRevDate" name="revision_date" required>
+          </div>
+        </div>
+        <div class="rl-row2">
+          <div class="rl-field">
+            <label for="rlFieldStatus">Status</label>
+            <select id="rlFieldStatus" name="status">
+              <option value="draft">Draft</option>
+              <option value="live">Live</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+          <div class="rl-field">
+            <label for="rlFieldSort">Sort order</label>
+            <input type="number" id="rlFieldSort" name="sort_order" value="0" step="1">
+          </div>
+        </div>
+        <div class="rl-field">
+          <label for="rlFieldWork">Work code (optional)</label>
+          <input type="text" id="rlFieldWork" name="work_code" maxlength="64" placeholder="PHAK, ACS…" autocomplete="off">
+        </div>
+        <div class="rl-field">
+          <label id="rlDropThumbLabel">Cover thumbnail</label>
+          <div
+            class="rl-drop-img"
+            id="rlDropThumb"
+            role="button"
+            tabindex="0"
+            aria-labelledby="rlDropThumbLabel">
+            <input type="file" id="rlThumbFile" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden>
+            <p>Drag and drop a cover image here, or click to browse.</p>
+            <p class="rl-drop-meta">JPG, PNG, or WEBP · max 10 MB · saved on the server for this edition</p>
+          </div>
+          <div class="rl-thumb-preview-wrap">
+            <img id="rlThumbPreview" alt="Thumbnail preview" width="160" height="120" style="display:none;">
+          </div>
+        </div>
+        <div class="rl-field">
+          <label for="rlFieldThumb">Thumbnail URL or path (optional)</label>
+          <input type="text" id="rlFieldThumb" name="thumbnail_path" maxlength="1024" placeholder="/admin/resource_library_thumb.php?id=… or https://…" autocomplete="off">
+        </div>
+      </form>
+
+      <div class="rl-panel">
+        <h3>Resource JSON</h3>
+        <p id="rlSourceInfo">No file uploaded yet.</p>
+        <div class="rl-panel-actions">
+          <input type="file" id="rlJsonFile" accept=".json,application/json" style="max-width: 220px; font-size: 13px;">
+          <button type="button" class="btn btn-sm" id="rlUploadJson">Upload JSON</button>
+          <a class="btn btn-sm" id="rlDownloadJson" href="#" style="display:none;">Download</a>
+          <button type="button" class="btn-danger" id="rlDeleteJson" style="display:none;">Remove file</button>
+        </div>
+      </div>
+
+      <div class="rl-msg" id="rlMsg" role="status"></div>
+    </div>
+    <div class="rl-modal-foot">
+      <button type="button" class="btn-ghost" id="rlCancel">Cancel</button>
+      <button type="button" class="btn" id="rlSaveMeta">Save metadata</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var page = document.getElementById('rlPage');
+  if (!page) return;
+  var api = page.getAttribute('data-api') || '';
+  var grid = document.getElementById('rlGrid');
+  var backdrop = document.getElementById('rlBackdrop');
+  if (!grid || !backdrop) return;
+
+  var closeBtn = document.getElementById('rlClose');
+  var cancelBtn = document.getElementById('rlCancel');
+  var saveBtn = document.getElementById('rlSaveMeta');
+  var uploadBtn = document.getElementById('rlUploadJson');
+  var delBtn = document.getElementById('rlDeleteJson');
+  var dl = document.getElementById('rlDownloadJson');
+  var fileInput = document.getElementById('rlJsonFile');
+  var thumbFileInput = document.getElementById('rlThumbFile');
+  var dropThumb = document.getElementById('rlDropThumb');
+  var thumbPreview = document.getElementById('rlThumbPreview');
+  var msg = document.getElementById('rlMsg');
+  var sourceInfo = document.getElementById('rlSourceInfo');
+
+  function formatBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+
+  function showMsg(text, kind) {
+    if (!msg) return;
+    msg.textContent = text || '';
+    msg.className = 'rl-msg';
+    if (!text) return;
+    msg.classList.add(kind === 'ok' ? 'is-ok' : 'is-error');
+  }
+
+  function clearMsg() {
+    showMsg('', '');
+  }
+
+  function updateThumbPreview() {
+    var inp = document.getElementById('rlFieldThumb');
+    if (!inp || !thumbPreview) return;
+    var v = (inp.value || '').trim();
+    if (!v) {
+      thumbPreview.style.display = 'none';
+      thumbPreview.removeAttribute('src');
+      return;
+    }
+    var url;
+    if (v.indexOf('http://') === 0 || v.indexOf('https://') === 0) {
+      url = v;
+    } else {
+      url = (v.charAt(0) === '/') ? (window.location.origin + v) : (window.location.origin + '/' + v);
+    }
+    if (v.indexOf('resource_library_thumb.php') !== -1) {
+      url += (url.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now();
+    }
+    thumbPreview.onload = function () {
+      thumbPreview.style.display = 'block';
+    };
+    thumbPreview.onerror = function () {
+      thumbPreview.style.display = 'none';
+    };
+    thumbPreview.src = url;
+  }
+
+  function uploadCoverImage(file) {
+    clearMsg();
+    if (!file) {
+      showMsg('No image file selected.', 'err');
+      return;
+    }
+    var t = (file.type || '').toLowerCase();
+    if (t !== 'image/jpeg' && t !== 'image/png' && t !== 'image/webp') {
+      showMsg('Please use a JPG, PNG, or WEBP image.', 'err');
+      return;
+    }
+    var id = parseInt(document.getElementById('rlFieldId').value, 10);
+    if (!id) return;
+    var fd = new FormData();
+    fd.append('edition_id', String(id));
+    fd.append('thumbnail_image', file, file.name);
+    if (dropThumb) dropThumb.classList.add('is-uploading');
+    fetch(api, { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Upload failed');
+        if (x.j.edition) fillForm(x.j.edition);
+        updateThumbPreview();
+        showMsg('Cover image saved.', 'ok');
+      })
+      .catch(function (e) {
+        showMsg(e.message || 'Image upload failed', 'err');
+      })
+      .finally(function () {
+        if (dropThumb) dropThumb.classList.remove('is-uploading');
+        if (thumbFileInput) thumbFileInput.value = '';
+      });
+  }
+
+  function setSourceUI(src) {
+    src = src || {};
+    var present = !!src.present;
+    if (sourceInfo) {
+      if (!present) {
+        sourceInfo.textContent = 'No JSON file on disk yet. Upload a .json file to attach structured content to this edition.';
+      } else {
+        var when = src.modified_iso ? new Date(src.modified_iso).toLocaleString() : '—';
+        sourceInfo.textContent = 'File: source.json · ' + formatBytes(src.size) + ' · last updated ' + when + ' (UTC label may vary by browser).';
+      }
+    }
+    if (dl) {
+      var idVal = document.getElementById('rlFieldId');
+      var id = idVal ? idVal.value : '';
+      dl.style.display = present ? 'inline-block' : 'none';
+      if (present && id) dl.href = api + '?id=' + encodeURIComponent(id) + '&download=1';
+    }
+    if (delBtn) delBtn.style.display = present ? 'inline-block' : 'none';
+  }
+
+  function trapFocus(e) {
+    if (e.key === 'Escape') closeModal();
+  }
+
+  function openModal() {
+    backdrop.classList.add('is-open');
+    backdrop.setAttribute('aria-hidden', 'false');
+    document.addEventListener('keydown', trapFocus);
+    var t = document.getElementById('rlFieldTitle');
+    if (t) setTimeout(function () { t.focus(); }, 50);
+  }
+
+  function closeModal() {
+    backdrop.classList.remove('is-open');
+    backdrop.setAttribute('aria-hidden', 'true');
+    document.removeEventListener('keydown', trapFocus);
+    clearMsg();
+    if (fileInput) fileInput.value = '';
+    if (thumbFileInput) thumbFileInput.value = '';
+    if (dropThumb) dropThumb.classList.remove('is-dragover');
+  }
+
+  backdrop.addEventListener('click', function (e) {
+    if (e.target === backdrop) closeModal();
+  });
+  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+  function fillForm(ed) {
+    document.getElementById('rlFieldId').value = String(ed.id || '');
+    document.getElementById('rlFieldTitle').value = ed.title || '';
+    document.getElementById('rlFieldRevCode').value = ed.revision_code || '';
+    document.getElementById('rlFieldRevDate').value = (ed.revision_date || '').toString().slice(0, 10);
+    document.getElementById('rlFieldStatus').value = ed.status || 'draft';
+    document.getElementById('rlFieldSort').value = String(ed.sort_order != null ? ed.sort_order : 0);
+    document.getElementById('rlFieldWork').value = ed.work_code || '';
+    document.getElementById('rlFieldThumb').value = ed.thumbnail_path || '';
+    var mt = document.getElementById('rlModalTitle');
+    var ms = document.getElementById('rlModalSub');
+    if (mt) mt.textContent = ed.title || 'Edition';
+    if (ms) ms.textContent = (ed.revision_code || '') + (ed.work_code ? ' · ' + ed.work_code : '');
+    updateThumbPreview();
+  }
+
+  var thumbPathInput = document.getElementById('rlFieldThumb');
+  if (thumbPathInput) {
+    thumbPathInput.addEventListener('input', updateThumbPreview);
+    thumbPathInput.addEventListener('change', updateThumbPreview);
+  }
+
+  if (dropThumb && thumbFileInput) {
+    dropThumb.addEventListener('click', function () {
+      thumbFileInput.click();
+    });
+    dropThumb.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        thumbFileInput.click();
+      }
+    });
+    thumbFileInput.addEventListener('change', function () {
+      if (thumbFileInput.files && thumbFileInput.files[0]) {
+        uploadCoverImage(thumbFileInput.files[0]);
+      }
+    });
+    dropThumb.addEventListener('dragenter', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dropThumb.classList.add('is-dragover');
+    });
+    dropThumb.addEventListener('dragleave', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var rel = e.relatedTarget;
+      if (!rel || !dropThumb.contains(rel)) {
+        dropThumb.classList.remove('is-dragover');
+      }
+    });
+    dropThumb.addEventListener('dragover', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        e.dataTransfer.dropEffect = 'copy';
+      } catch (ignore) {}
+    });
+    dropThumb.addEventListener('drop', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      dropThumb.classList.remove('is-dragover');
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) uploadCoverImage(f);
+    });
+  }
+
+  function loadEdition(id) {
+    clearMsg();
+    return fetch(api + '?id=' + encodeURIComponent(id), { credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Load failed');
+        fillForm(x.j.edition);
+        setSourceUI(x.j.source);
+        openModal();
+      })
+      .catch(function (err) {
+        showMsg(err.message || 'Could not load edition', 'err');
+        openModal();
+      });
+  }
+
+  grid.querySelectorAll('.rl-card[data-id]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var id = btn.getAttribute('data-id');
+      if (!id) return;
+      loadEdition(id);
+    });
+  });
+
+  if (saveBtn) saveBtn.addEventListener('click', function () {
+    clearMsg();
+    var id = parseInt(document.getElementById('rlFieldId').value, 10);
+    if (!id) return;
+    var body = {
+      action: 'save',
+      id: id,
+      title: document.getElementById('rlFieldTitle').value,
+      revision_code: document.getElementById('rlFieldRevCode').value,
+      revision_date: document.getElementById('rlFieldRevDate').value,
+      status: document.getElementById('rlFieldStatus').value,
+      sort_order: parseInt(document.getElementById('rlFieldSort').value, 10) || 0,
+      work_code: document.getElementById('rlFieldWork').value,
+      thumbnail_path: document.getElementById('rlFieldThumb').value
+    };
+    saveBtn.disabled = true;
+    fetch(api, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(body)
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Save failed');
+        window.location.reload();
+      })
+      .catch(function (e) {
+        showMsg(e.message || 'Save failed', 'err');
+      })
+      .finally(function () { saveBtn.disabled = false; });
+  });
+
+  if (uploadBtn) uploadBtn.addEventListener('click', function () {
+    clearMsg();
+    var id = parseInt(document.getElementById('rlFieldId').value, 10);
+    if (!id) return;
+    if (!fileInput || !fileInput.files || !fileInput.files.length) {
+      showMsg('Choose a .json file first.', 'err');
+      return;
+    }
+    var fd = new FormData();
+    fd.append('edition_id', String(id));
+    fd.append('source_json', fileInput.files[0]);
+    uploadBtn.disabled = true;
+    fetch(api, { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Upload failed');
+        setSourceUI(x.j.source);
+        fileInput.value = '';
+        showMsg('JSON uploaded and validated.', 'ok');
+      })
+      .catch(function (e) {
+        showMsg(e.message || 'Upload failed', 'err');
+      })
+      .finally(function () { uploadBtn.disabled = false; });
+  });
+
+  if (delBtn) delBtn.addEventListener('click', function () {
+    clearMsg();
+    var id = parseInt(document.getElementById('rlFieldId').value, 10);
+    if (!id) return;
+    if (!window.confirm('Remove the uploaded JSON file from the server for this edition?')) return;
+    delBtn.disabled = true;
+    fetch(api, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ action: 'delete_source', id: id })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Remove failed');
+        setSourceUI(x.j.source);
+        showMsg('JSON file removed.', 'ok');
+      })
+      .catch(function (e) {
+        showMsg(e.message || 'Remove failed', 'err');
+      })
+      .finally(function () { delBtn.disabled = false; });
+  });
+})();
+</script>
 
 <?php cw_footer(); ?>

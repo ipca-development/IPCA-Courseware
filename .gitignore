@@ -2,3 +2,6 @@
 .env.save
 .DS_Store
 **/.DS_Store
+
+# Admin-uploaded resource library JSON (per-edition folders under storage/resource_library/)
+/storage/resource_library/
