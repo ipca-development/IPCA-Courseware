@@ -51,14 +51,14 @@ function rl_crawler_api_aim_stats(PDO $pdo, int $editionId): array
     if (!rl_aim_tables_present($pdo) || $editionId <= 0) {
         return $out;
     }
-    $col = rl_aim_paragraphs_fk_column($pdo);
+    $scope = rl_aim_paragraphs_where_edition($pdo, $editionId);
     $stmt = $pdo->prepare("
         SELECT citation_status, COUNT(*) AS c
         FROM resource_library_aim_paragraphs
-        WHERE {$col} = ?
+        WHERE {$scope['where']}
         GROUP BY citation_status
     ");
-    $stmt->execute([$editionId]);
+    $stmt->execute($scope['params']);
     while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
         $k = (string) ($r['citation_status'] ?? '');
         $n = (int) ($r['c'] ?? 0);
@@ -100,7 +100,6 @@ function rl_crawler_api_probe_url(string $url, int $timeoutSec = 18): array
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $final = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
         $cerr = curl_error($ch);
-        curl_close($ch);
         if ($code === 0) {
             return ['reachable' => false, 'http_code' => 0, 'error' => $cerr !== '' ? $cerr : 'No HTTP response'];
         }

@@ -588,8 +588,8 @@ final class AimBootstrapImporter
 
     private function deleteEditionParagraphs(): void
     {
-        $fk = rl_aim_paragraphs_fk_column($this->pdo);
-        $this->pdo->prepare("DELETE FROM resource_library_aim_paragraphs WHERE {$fk} = ?")->execute([$this->editionId]);
+        $scope = rl_aim_paragraphs_where_edition($this->pdo, $this->editionId);
+        $this->pdo->prepare('DELETE FROM resource_library_aim_paragraphs WHERE ' . $scope['where'])->execute($scope['params']);
     }
 
     /**
@@ -597,15 +597,25 @@ final class AimBootstrapImporter
      */
     private function upsertParagraphs(array $paragraphs, ?string $effectiveDate, ?string $changeNumber): void
     {
-        $fk = rl_aim_paragraphs_fk_column($this->pdo);
+        $fkVals = rl_aim_paragraph_fk_values_for_edition($this->pdo, $this->editionId);
+        $fkCols = [];
+        if ($fkVals['edition_id'] !== null) {
+            $fkCols[] = 'edition_id';
+        }
+        if ($fkVals['source_id'] !== null) {
+            $fkCols[] = 'source_id';
+        }
+        $fkSql = implode(', ', $fkCols);
+        $fkPlaceholders = implode(', ', array_fill(0, count($fkCols), '?'));
+
         $sql = "
             INSERT INTO resource_library_aim_paragraphs (
-                {$fk}, parent_id, node_type, chapter_number, section_number, paragraph_number,
+                {$fkSql}, parent_id, node_type, chapter_number, section_number, paragraph_number,
                 display_title, page_title, source_url, canonical_url, fragment,
                 effective_date, change_number, crawled_at, content_hash, body_text, body_html,
                 citation_status, stable_key
             ) VALUES (
-                ?, NULL, 'paragraph', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'active', ?
+                {$fkPlaceholders}, NULL, 'paragraph', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, ?, ?, 'active', ?
             )
             ON DUPLICATE KEY UPDATE
                 display_title = VALUES(display_title),
@@ -625,23 +635,28 @@ final class AimBootstrapImporter
         $effDb = $effectiveDate !== null ? self::clip($effectiveDate, 10) : null;
         $chgDb = $changeNumber !== null ? self::clip($changeNumber, 64) : null;
         foreach ($paragraphs as $p) {
-            $stmt->execute([
-                $this->editionId,
-                $p['chapter_number'] !== null ? self::clip((string) $p['chapter_number'], 32) : null,
-                $p['section_number'] !== null ? self::clip((string) $p['section_number'], 32) : null,
-                $p['paragraph_number'] !== null ? self::clip((string) $p['paragraph_number'], 64) : null,
-                self::clip((string) $p['display_title'], 512),
-                self::clip((string) $p['page_title'], 512),
-                self::clip((string) $p['source_url'], 2048),
-                self::clip((string) $p['canonical_url'], 2048),
-                $p['fragment'] !== null ? self::clip((string) $p['fragment'], 256) : null,
-                $effDb,
-                $chgDb,
-                $p['content_hash'],
-                (string) $p['body_text'],
-                (string) $p['body_html'],
-                self::clip((string) $p['stable_key'], 192),
-            ]);
+            $bind = [];
+            if ($fkVals['edition_id'] !== null) {
+                $bind[] = $fkVals['edition_id'];
+            }
+            if ($fkVals['source_id'] !== null) {
+                $bind[] = $fkVals['source_id'];
+            }
+            $bind[] = $p['chapter_number'] !== null ? self::clip((string) $p['chapter_number'], 32) : null;
+            $bind[] = $p['section_number'] !== null ? self::clip((string) $p['section_number'], 32) : null;
+            $bind[] = $p['paragraph_number'] !== null ? self::clip((string) $p['paragraph_number'], 64) : null;
+            $bind[] = self::clip((string) $p['display_title'], 512);
+            $bind[] = self::clip((string) $p['page_title'], 512);
+            $bind[] = self::clip((string) $p['source_url'], 2048);
+            $bind[] = self::clip((string) $p['canonical_url'], 2048);
+            $bind[] = $p['fragment'] !== null ? self::clip((string) $p['fragment'], 256) : null;
+            $bind[] = $effDb;
+            $bind[] = $chgDb;
+            $bind[] = $p['content_hash'];
+            $bind[] = (string) $p['body_text'];
+            $bind[] = (string) $p['body_html'];
+            $bind[] = self::clip((string) $p['stable_key'], 192);
+            $stmt->execute($bind);
         }
     }
 

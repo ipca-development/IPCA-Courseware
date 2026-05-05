@@ -31,28 +31,117 @@ function rl_aim_tables_present(PDO $pdo): bool
 }
 
 /**
- * True when paragraphs table uses edition_id (unified schema); false when legacy source_id exists.
+ * True when paragraphs table has an edition_id column (may also have legacy source_id).
  */
 function rl_aim_uses_edition_id(PDO $pdo): bool
+{
+    return rl_aim_paragraphs_fk_shape($pdo)['edition_id'];
+}
+
+/**
+ * Columns on resource_library_aim_paragraphs (legacy: source_id only; modern: edition_id; both possible mid-migration).
+ *
+ * @return array{edition_id: bool, source_id: bool}
+ */
+function rl_aim_paragraphs_fk_shape(PDO $pdo): array
 {
     static $cache = null;
     if ($cache !== null) {
         return $cache;
     }
+    $cache = ['edition_id' => false, 'source_id' => false];
+    $t = rl_aim_schema_table();
     try {
-        $stmt = $pdo->prepare('SHOW COLUMNS FROM resource_library_aim_paragraphs LIKE ?');
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM {$t} LIKE ?");
         $stmt->execute(['edition_id']);
-        $cache = (bool) $stmt->fetchColumn();
+        $cache['edition_id'] = (bool) $stmt->fetchColumn();
+        $stmt->execute(['source_id']);
+        $cache['source_id'] = (bool) $stmt->fetchColumn();
     } catch (Throwable) {
-        $cache = false;
+        // leave false
     }
 
     return $cache;
 }
 
+/**
+ * Single column name for simple filters (prefer edition_id when present).
+ */
 function rl_aim_paragraphs_fk_column(PDO $pdo): string
 {
-    return rl_aim_uses_edition_id($pdo) ? 'edition_id' : 'source_id';
+    $s = rl_aim_paragraphs_fk_shape($pdo);
+    if ($s['edition_id']) {
+        return 'edition_id';
+    }
+    if ($s['source_id']) {
+        return 'source_id';
+    }
+
+    return 'edition_id';
+}
+
+/**
+ * WHERE clause + params scoped to one crawler edition (handles legacy source_id).
+ *
+ * @return array{where: string, params: list<int>}
+ */
+function rl_aim_paragraphs_where_edition(PDO $pdo, int $editionId): array
+{
+    if ($editionId <= 0) {
+        throw new RuntimeException('Invalid edition id.');
+    }
+    $shape = rl_aim_paragraphs_fk_shape($pdo);
+    if ($shape['edition_id']) {
+        return ['where' => 'edition_id = ?', 'params' => [$editionId]];
+    }
+    if ($shape['source_id']) {
+        $sid = rl_catalog_resolve_legacy_crawler_source_id_for_edition($pdo, $editionId);
+        if ($sid === null || $sid <= 0) {
+            throw new RuntimeException(
+                'Cannot filter AIM paragraphs: legacy source_id is required but no resource_library_crawler_sources '
+                . 'row matched this edition’s crawler_slot.'
+            );
+        }
+
+        return ['where' => 'source_id = ?', 'params' => [$sid]];
+    }
+
+    throw new RuntimeException('resource_library_aim_paragraphs has neither edition_id nor source_id.');
+}
+
+/**
+ * FK column values for INSERT (set every present column; source_id is resolved from edition).
+ *
+ * @return array{edition_id: ?int, source_id: ?int}
+ */
+function rl_aim_paragraph_fk_values_for_edition(PDO $pdo, int $editionId): array
+{
+    if ($editionId <= 0) {
+        throw new RuntimeException('Invalid edition id.');
+    }
+    $shape = rl_aim_paragraphs_fk_shape($pdo);
+    $resolved = null;
+    if ($shape['source_id']) {
+        $resolved = rl_catalog_resolve_legacy_crawler_source_id_for_edition($pdo, $editionId);
+        if ($resolved === null || $resolved <= 0) {
+            throw new RuntimeException(
+                'Cannot upsert AIM paragraphs: legacy source_id must reference resource_library_crawler_sources.id, '
+                . 'but no source row matched this edition’s crawler_slot. Add the AIM source row or migrate to edition_id-only.'
+            );
+        }
+    }
+    $out = ['edition_id' => null, 'source_id' => null];
+    if ($shape['edition_id']) {
+        $out['edition_id'] = $editionId;
+    }
+    if ($shape['source_id']) {
+        $out['source_id'] = $resolved;
+    }
+    if (!$shape['edition_id'] && !$shape['source_id']) {
+        throw new RuntimeException('resource_library_aim_paragraphs has neither edition_id nor source_id.');
+    }
+
+    return $out;
 }
 
 /**
@@ -263,16 +352,16 @@ function rl_aim_slot_dashboard(PDO $pdo, string $slot): array
             return $out;
         }
         $eid = (int) ($edition['id'] ?? 0);
-        $fk = rl_aim_paragraphs_fk_column($pdo);
         $out['source'] = rl_catalog_crawler_row_as_source($edition);
 
+        $scope = rl_aim_paragraphs_where_edition($pdo, $eid);
         $stmt = $pdo->prepare("
             SELECT citation_status, COUNT(*) AS c
             FROM resource_library_aim_paragraphs
-            WHERE {$fk} = ?
+            WHERE {$scope['where']}
             GROUP BY citation_status
         ");
-        $stmt->execute([$eid]);
+        $stmt->execute($scope['params']);
         $counts = ['active' => 0, 'superseded' => 0, 'url_broken' => 0, 'total' => 0];
         while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $k = (string) ($r['citation_status'] ?? '');
