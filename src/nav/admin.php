@@ -142,6 +142,15 @@ return [
                 ],
             ],
             [
+                'key' => 'resource_library',
+                'label' => 'Resource Library',
+                'icon' => 'documents',
+                'href' => '/admin/resource_library.php',
+                'match_paths' => [
+                    '/admin/resource_library.php',
+                ],
+            ],
+            [
                 'key' => 'ai_dev_agents',
                 'label' => 'AI Dev Agents',
                 'icon' => 'settings',
