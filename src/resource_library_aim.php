@@ -1,8 +1,10 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/resource_library_catalog.php';
+
 /**
- * FAA AIM HTML crawler — database helpers and dashboard stats.
+ * FAA AIM HTML crawler — index tables reference resource_library_editions (resource_type = crawler).
  * Schema: scripts/sql/resource_library_aim_crawl.sql
  */
 
@@ -29,49 +31,63 @@ function rl_aim_tables_present(PDO $pdo): bool
 }
 
 /**
- * Pick the best crawler source row for a slot (prefer active, then newest id).
- *
- * @return array<string, mixed>|null
+ * True when paragraphs table uses edition_id (unified schema); false when legacy source_id exists.
  */
-function rl_aim_fetch_source_for_slot(PDO $pdo, string $slot, string $type = 'aim_html'): ?array
+function rl_aim_uses_edition_id(PDO $pdo): bool
 {
-    if (!rl_aim_tables_present($pdo)) {
-        return null;
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
     }
-    $slot = trim(strtolower($slot));
-    $type = trim(strtolower($type));
-    if ($slot === '' || $type === '') {
-        return null;
+    try {
+        $stmt = $pdo->prepare('SHOW COLUMNS FROM resource_library_aim_paragraphs LIKE ?');
+        $stmt->execute(['edition_id']);
+        $cache = (bool) $stmt->fetchColumn();
+    } catch (Throwable) {
+        $cache = false;
     }
-    $stmt = $pdo->prepare('
-        SELECT id, crawler_slot, crawler_type, label, allowed_url_prefix, effective_date, change_number, status, notes, created_at, updated_at
-        FROM resource_library_crawler_sources
-        WHERE crawler_slot = ? AND crawler_type = ?
-        ORDER BY FIELD(status, \'active\', \'draft\', \'archived\'), id DESC
-        LIMIT 1
-    ');
-    $stmt->execute([$slot, $type]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    return is_array($row) ? $row : null;
+    return $cache;
+}
+
+function rl_aim_paragraphs_fk_column(PDO $pdo): string
+{
+    return rl_aim_uses_edition_id($pdo) ? 'edition_id' : 'source_id';
+}
+
+function rl_aim_runs_fk_column(PDO $pdo): string
+{
+    try {
+        $stmt = $pdo->prepare('SHOW COLUMNS FROM resource_library_crawler_runs LIKE ?');
+        $stmt->execute(['edition_id']);
+        if ($stmt->fetchColumn()) {
+            return 'edition_id';
+        }
+    } catch (Throwable) {
+        // ignore
+    }
+
+    return 'source_id';
 }
 
 /**
  * @return array<string, mixed>|null
  */
-function rl_aim_fetch_last_run(PDO $pdo, int $sourceId): ?array
+function rl_aim_fetch_last_run(PDO $pdo, int $editionOrSourceId): ?array
 {
-    if ($sourceId <= 0 || !rl_aim_tables_present($pdo)) {
+    if ($editionOrSourceId <= 0 || !rl_aim_tables_present($pdo)) {
         return null;
     }
-    $stmt = $pdo->prepare('
-        SELECT id, source_id, started_at, completed_at, run_status, pages_discovered, paragraphs_upserted, error_message
+    $col = rl_aim_runs_fk_column($pdo);
+    $sql = "
+        SELECT id, {$col} AS edition_id, started_at, completed_at, run_status, pages_discovered, paragraphs_upserted, error_message
         FROM resource_library_crawler_runs
-        WHERE source_id = ?
+        WHERE {$col} = ?
         ORDER BY id DESC
         LIMIT 1
-    ');
-    $stmt->execute([$sourceId]);
+    ";
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute([$editionOrSourceId]);
     $row = $stmt->fetch(PDO::FETCH_ASSOC);
 
     return is_array($row) ? $row : null;
@@ -109,22 +125,28 @@ function rl_aim_slot_dashboard(PDO $pdo, string $slot): array
             return $out;
         }
         $out['schema'] = true;
-        $source = rl_aim_fetch_source_for_slot($pdo, 'aim', 'aim_html');
-        if (!$source) {
-            $out['error'] = 'AIM crawler source row missing; re-run scripts/sql/resource_library_aim_crawl.sql.';
+        if (!rl_catalog_has_resource_type_column($pdo)) {
+            $out['error'] = 'Run scripts/sql/resource_library_editions_extend_types.sql to add resource_type to editions.';
 
             return $out;
         }
-        $sid = (int) ($source['id'] ?? 0);
-        $out['source'] = $source;
+        $edition = rl_catalog_fetch_crawler_edition_by_slot($pdo, 'aim');
+        if (!$edition) {
+            $out['error'] = 'AIM crawler edition missing; run scripts/sql/resource_library_aim_crawl.sql.';
 
-        $stmt = $pdo->prepare('
+            return $out;
+        }
+        $eid = (int) ($edition['id'] ?? 0);
+        $fk = rl_aim_paragraphs_fk_column($pdo);
+        $out['source'] = rl_catalog_crawler_row_as_source($edition);
+
+        $stmt = $pdo->prepare("
             SELECT citation_status, COUNT(*) AS c
             FROM resource_library_aim_paragraphs
-            WHERE source_id = ?
+            WHERE {$fk} = ?
             GROUP BY citation_status
-        ');
-        $stmt->execute([$sid]);
+        ");
+        $stmt->execute([$eid]);
         $counts = ['active' => 0, 'superseded' => 0, 'url_broken' => 0, 'total' => 0];
         while ($r = $stmt->fetch(PDO::FETCH_ASSOC)) {
             $k = (string) ($r['citation_status'] ?? '');
@@ -135,7 +157,8 @@ function rl_aim_slot_dashboard(PDO $pdo, string $slot): array
             $counts['total'] += $n;
         }
         $out['counts'] = $counts;
-        $out['last_run'] = rl_aim_fetch_last_run($pdo, $sid);
+        $runId = rl_aim_uses_edition_id($pdo) ? $eid : $eid;
+        $out['last_run'] = rl_aim_fetch_last_run($pdo, $runId);
     } catch (Throwable $e) {
         $out['ok'] = false;
         $out['error'] = $e->getMessage();

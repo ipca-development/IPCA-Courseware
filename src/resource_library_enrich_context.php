@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/resource_library_ai.php';
+require_once __DIR__ . '/resource_library_catalog.php';
 
 /**
  * Resolve which resource_library_editions.id to use for enrichment context.
@@ -9,15 +10,19 @@ require_once __DIR__ . '/resource_library_ai.php';
  *
  * - If $explicitId > 0 and a matching live row exists, use it.
  * - Else CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID env (if that id is live).
- * - Else first live edition by sort_order.
+ * - Else first live json_book edition by sort_order.
  *
  * @return int 0 if none available
  */
 function rl_enrich_resolve_edition_id(PDO $pdo, ?int $explicitId): int
 {
+    $bookOnly = rl_catalog_has_resource_type_column($pdo)
+        ? " AND COALESCE(NULLIF(TRIM(resource_type), ''), 'json_book') = 'json_book'"
+        : '';
+
     if ($explicitId !== null && $explicitId > 0) {
         try {
-            $st = $pdo->prepare("SELECT id FROM resource_library_editions WHERE id = ? AND status = 'live' LIMIT 1");
+            $st = $pdo->prepare("SELECT id FROM resource_library_editions WHERE id = ? AND status = 'live'" . $bookOnly . ' LIMIT 1');
             $st->execute([$explicitId]);
             $found = (int)$st->fetchColumn();
             if ($found > 0) {
@@ -31,7 +36,7 @@ function rl_enrich_resolve_edition_id(PDO $pdo, ?int $explicitId): int
     $env = (int)(getenv('CW_RESOURCE_LIBRARY_ENRICH_EDITION_ID') ?: 0);
     if ($env > 0) {
         try {
-            $st = $pdo->prepare("SELECT id FROM resource_library_editions WHERE id = ? AND status = 'live' LIMIT 1");
+            $st = $pdo->prepare("SELECT id FROM resource_library_editions WHERE id = ? AND status = 'live'" . $bookOnly . ' LIMIT 1');
             $st->execute([$env]);
             $found = (int)$st->fetchColumn();
             if ($found > 0) {
@@ -45,7 +50,7 @@ function rl_enrich_resolve_edition_id(PDO $pdo, ?int $explicitId): int
     try {
         $st = $pdo->query("
             SELECT id FROM resource_library_editions
-            WHERE status = 'live'
+            WHERE status = 'live'" . $bookOnly . "
             ORDER BY sort_order ASC, id ASC
             LIMIT 1
         ");

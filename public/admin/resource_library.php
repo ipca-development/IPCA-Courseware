@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/resource_library_ingest.php';
+require_once __DIR__ . '/../../src/resource_library_catalog.php';
 require_once __DIR__ . '/../../src/resource_library_aim.php';
 
 cw_require_admin();
@@ -11,6 +12,7 @@ cw_require_admin();
 $apiHref = '/admin/api/resource_library_api.php';
 $searchTestHref = '/admin/api/resource_library_search_test.php';
 $aimApiHref = '/admin/api/resource_library_aim_api.php';
+$crawlerApiHref = '/admin/api/resource_library_crawler_api.php';
 
 /**
  * @return array{ok: bool, rows: list<array<string, mixed>>, error?: string}
@@ -18,12 +20,7 @@ $aimApiHref = '/admin/api/resource_library_aim_api.php';
 function rl_fetch_editions(PDO $pdo): array
 {
     try {
-        $stmt = $pdo->query("
-            SELECT id, title, revision_code, revision_date, status, thumbnail_path, work_code, sort_order, created_at, updated_at
-            FROM resource_library_editions
-            ORDER BY FIELD(status, 'live', 'draft', 'archived'), sort_order ASC, title ASC, id ASC
-        ");
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $rows = rl_catalog_fetch_editions_by_type($pdo, RL_RESOURCE_JSON_BOOK);
 
         return ['ok' => true, 'rows' => $rows];
     } catch (Throwable $e) {
@@ -59,6 +56,10 @@ function rl_thumb_src(?string $path): string
 
 function rl_status_label(string $status): string
 {
+    if ($status === 'active') {
+        return 'Live';
+    }
+
     return match ($status) {
         'live' => 'Live',
         'draft' => 'Draft',
@@ -69,6 +70,10 @@ function rl_status_label(string $status): string
 
 function rl_status_class(string $status): string
 {
+    if ($status === 'active') {
+        return 'rl-status rl-status-live';
+    }
+
     return match ($status) {
         'live' => 'rl-status rl-status-live',
         'draft' => 'rl-status rl-status-draft',
@@ -502,7 +507,7 @@ cw_header('Resource Library');
     color: #64748b;
     margin-bottom: 6px;
   }
-  .rl-field input, .rl-field select {
+  .rl-field input, .rl-field select, .rl-field textarea {
     width: 100%;
     box-sizing: border-box;
     border: 1px solid #cbd5e1;
@@ -511,7 +516,8 @@ cw_header('Resource Library');
     font-size: 14px;
     font-family: inherit;
   }
-  .rl-field input:focus, .rl-field select:focus {
+  .rl-field textarea { min-height: 88px; resize: vertical; line-height: 1.45; }
+  .rl-field input:focus, .rl-field select:focus, .rl-field textarea:focus {
     outline: none;
     border-color: #2563eb;
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
@@ -754,60 +760,62 @@ cw_header('Resource Library');
 
       <?php if ($rlCrawl === 'aim'): ?>
         <?php $aimDashboard = rl_aim_slot_dashboard($pdo, 'aim'); ?>
-        <div class="rl-crawl-grid">
-          <article class="rl-crawler-card" data-resource-type="crawler_aim">
-            <div class="rl-card-thumb">
-              <img class="rl-card-cover" src="/assets/icons/documents.svg" alt="" width="120" height="120" loading="lazy">
+        <div class="rl-grid">
+          <?php if (empty($aimDashboard['schema'])): ?>
+            <div class="rl-alert" style="grid-column: 1 / -1; margin: 0;">
+              AIM index tables are not installed. Apply <code>scripts/sql/resource_library_editions_extend_types.sql</code> (if needed), then <code>scripts/sql/resource_library_aim_crawl.sql</code>.
             </div>
-            <div class="rl-card-body">
-              <span class="rl-type-pill">Data crawler · <?= !empty($aimDashboard['schema']) ? 'Database' : 'Setup' ?></span>
-              <h2 class="rl-card-title">FAA AIM (HTML)</h2>
-              <p class="rl-meta" style="margin:0;font-size:13px;color:#64748b;">Canonical crawl under <code>faa.gov/.../atpubs/aim_html/</code> — child page URLs, preserved anchors, absolute links only.</p>
-              <?php if (empty($aimDashboard['schema'])): ?>
-                <div class="rl-alert" style="margin-top:12px;text-align:left;">
-                  AIM index tables are not installed. Apply <code>scripts/sql/resource_library_aim_crawl.sql</code> to this database, then reload.
-                </div>
-              <?php elseif (!empty($aimDashboard['error'])): ?>
-                <div class="rl-alert" style="margin-top:12px;text-align:left;"><?= h((string) $aimDashboard['error']) ?></div>
-              <?php else: ?>
-                <?php
-                  $aimSrc = is_array($aimDashboard['source'] ?? null) ? $aimDashboard['source'] : [];
-                  $aimCounts = is_array($aimDashboard['counts'] ?? null) ? $aimDashboard['counts'] : [];
-                  $aimRun = is_array($aimDashboard['last_run'] ?? null) ? $aimDashboard['last_run'] : null;
-                  $sid = (int) ($aimSrc['id'] ?? 0);
-                  $st = (string) ($aimSrc['status'] ?? '');
-                  $tot = (int) ($aimCounts['total'] ?? 0);
-                  $act = (int) ($aimCounts['active'] ?? 0);
-                  $runLine = 'No crawl runs yet.';
-                  if ($aimRun) {
-                      $rs = (string) ($aimRun['run_status'] ?? '');
-                      $ps = (int) ($aimRun['paragraphs_upserted'] ?? 0);
-                      $stAt = (string) ($aimRun['started_at'] ?? '');
-                      $runLine = $rs . ' · paragraphs upserted ' . $ps . ' · started ' . $stAt;
-                  }
-                ?>
-                <div class="rl-aim-db-stats">
-                  <strong>Index status</strong> — Source id <?= $sid > 0 ? (string) $sid : '—' ?> · status <code><?= h($st !== '' ? $st : '—') ?></code><br>
-                  Rows in <code>resource_library_aim_paragraphs</code>: <?= $tot ?> total
-                  (<?= $act ?> active<?= $tot - $act > 0 ? ', ' . ($tot - $act) . ' non-active' : '' ?>).<br>
-                  <strong>Last crawl run</strong> — <?= h($runLine) ?><br>
-                  JSON: <code><?= h($aimApiHref) ?>?slot=aim</code>
-                </div>
-              <?php endif; ?>
-            </div>
-            <div class="rl-crawler-spec">
-              <strong>Indexed record fields (planned):</strong>
-              <ul>
-                <li><code>source_url</code>, <code>canonical_url</code>, <code>page_title</code>, chapter / section / paragraph numbers, <code>effective_date</code>, <code>change_number</code>, <code>crawled_at</code>, <code>content_hash</code>.</li>
-                <li>Preserve internal anchors (<code>#aim0403</code>, etc.); citations prefer <strong>page + exact anchor</strong>, never only the AIM homepage when deeper URLs exist.</li>
-                <li>Normalize relative links to absolute <code>https://www.faa.gov/...</code>; restrict scope to the AIM HTML tree only.</li>
-                <li>Store parent hierarchy (chapter → section → paragraph) for citations like <em>AIM 4-3-2</em> with precise FAA URL.</li>
-                <li>Version traceability + supersede broken URLs on refresh runs; AI must refuse uncited AIM claims when retrieval misses.</li>
-              </ul>
-              <p style="margin:10px 0 0;"><strong>AI prompt rule (planned):</strong> For AIM answers, only use retrieved local index rows; every AIM factual claim includes paragraph id + FAA URL — no generic FAA pages when a specific AIM URL exists.</p>
-            </div>
-            <div class="rl-card-hint">Crawl worker (fetch HTML, normalize URLs, upsert rows) ships next; schema and status API are live.</div>
-          </article>
+          <?php elseif (!empty($aimDashboard['error'])): ?>
+            <div class="rl-alert" style="grid-column: 1 / -1; margin: 0;"><?= h((string) $aimDashboard['error']) ?></div>
+          <?php else: ?>
+            <?php
+              $aimEdition = rl_catalog_fetch_crawler_edition_by_slot($pdo, 'aim');
+              $aimSrc = is_array($aimDashboard['source'] ?? null) ? $aimDashboard['source'] : [];
+              $aimCounts = is_array($aimDashboard['counts'] ?? null) ? $aimDashboard['counts'] : [];
+              $sid = (int) ($aimEdition['id'] ?? $aimSrc['id'] ?? 0);
+              $aimSt = (string) ($aimSrc['status'] ?? 'draft');
+              if ($aimSt === 'active') {
+                  $aimSt = 'live';
+              }
+              $act = (int) ($aimCounts['active'] ?? 0);
+              $aimValidated = $act > 0;
+              $aimLabel = (string) ($aimSrc['label'] ?? 'FAA Aeronautical Information Manual (AIM)');
+              $chg = trim((string) ($aimSrc['change_number'] ?? ''));
+              $verDisp = $chg !== '' ? $chg : '—';
+              $effRaw = (string) ($aimSrc['effective_date'] ?? '');
+              $effDisp = '—';
+              if ($effRaw !== '') {
+                  $ets = strtotime($effRaw . 'T12:00:00');
+                  $effDisp = $ets !== false ? date('F j, Y', $ets) : '—';
+              }
+              $aimThumb = is_array($aimEdition) ? rl_catalog_edition_thumb_src($aimEdition) : '/assets/icons/documents.svg';
+            ?>
+            <button type="button" class="rl-card" id="rlAimCardOpen" data-edition-id="<?= $sid ?>" aria-label="Edit AIM crawler settings">
+              <div class="rl-card-thumb">
+                <img class="rl-card-cover" src="<?= h($aimThumb) ?>" alt="" loading="lazy" width="180" height="240">
+              </div>
+              <div class="rl-card-body">
+                <span class="rl-type-pill">Crawler</span>
+                <h2 class="rl-card-title"><?= h($aimLabel) ?></h2>
+                <dl class="rl-meta">
+                  <dt>Version</dt>
+                  <dd><?= h($verDisp) ?></dd>
+                  <dt>Revision date</dt>
+                  <dd><?= h($effDisp) ?></dd>
+                  <dt>Status</dt>
+                  <dd class="rl-status-dd">
+                    <div class="rl-status-badges">
+                      <span class="<?= h(rl_status_class($aimSt)) ?>"><?= h(rl_status_label($aimSt)) ?></span>
+                      <?php if ($aimValidated): ?>
+                        <span class="rl-status rl-status-validated">Validated</span>
+                      <?php endif; ?>
+                    </div>
+                  </dd>
+                </dl>
+              </div>
+              <div class="rl-card-hint">Click to edit · crawl URL · cover image · test connection</div>
+            </button>
+          <?php endif; ?>
           <?php
             rl_add_source_card(
                 'crawler_aim',
@@ -815,7 +823,7 @@ cw_header('Resource Library');
                 'Add data crawler',
                 'Another AIM HTML crawl source or profile in this slot (same type as this tab).',
                 true,
-                'Data crawler'
+                'Crawler'
             );
           ?>
         </div>
@@ -882,34 +890,87 @@ cw_header('Resource Library');
       </div>
     </section>
     <div class="rl-wrap rl-tab-panel">
-      <p class="rl-intro">HTTP endpoints used by this library. Authentication follows normal admin session rules.</p>
-      <ul class="rl-api-list">
-        <li>
-          <strong>Editions &amp; JSON file API</strong> — upload / download <code>source.json</code>, thumbnails, metadata, block sync.<br>
-          <code><?= h($apiHref) ?></code>
-        </li>
-        <li>
-          <strong>Retrieval test (admin)</strong> — FULLTEXT search and optional model answer over indexed blocks.<br>
-          <code><?= h($searchTestHref) ?></code>
-        </li>
-        <li>
-          <strong>AIM crawler status (admin)</strong> — schema detection, source row, paragraph counts, last run.<br>
-          <code><?= h($aimApiHref) ?>?slot=aim</code> (also <code>?slot=reserved2</code> / <code>reserved3</code> return a placeholder until those slots have schema.)
-        </li>
-      </ul>
-      <div class="rl-crawl-grid" style="margin-top:18px;">
+      <p class="rl-intro">
+        <strong>API resources</strong> are stored in <code>resource_library_editions</code> with <code>resource_type = api</code> (same metadata pattern as crawlers).
+        Technical HTTP entrypoints used by admin tools are listed below each card.
+      </p>
+      <?php
+        $apiEditionRows = rl_catalog_has_resource_type_column($pdo)
+          ? rl_catalog_fetch_editions_by_type($pdo, RL_RESOURCE_API)
+          : [];
+      ?>
+      <div class="rl-grid" style="margin-top:8px;">
+        <?php foreach ($apiEditionRows as $apiRow): ?>
+          <?php
+            $aeid = (int) ($apiRow['id'] ?? 0);
+            $apiSrc = rl_catalog_api_row_as_source($apiRow);
+            $apiSt = (string) ($apiSrc['status'] ?? 'draft');
+            if ($apiSt === 'active') {
+                $apiSt = 'live';
+            }
+            $apiLabel = (string) ($apiSrc['label'] ?? 'API');
+            $apiVer = trim((string) ($apiSrc['change_number'] ?? ''));
+            $apiVerDisp = $apiVer !== '' ? $apiVer : '—';
+            $apiEffRaw = (string) ($apiSrc['effective_date'] ?? '');
+            $apiEffDisp = '—';
+            if ($apiEffRaw !== '') {
+                $ets = strtotime($apiEffRaw . 'T12:00:00');
+                $apiEffDisp = $ets !== false ? date('F j, Y', $ets) : '—';
+            }
+            $apiThumb = rl_catalog_edition_thumb_src($apiRow);
+          ?>
+          <button type="button" class="rl-card rl-api-edition-card" data-edition-id="<?= $aeid ?>" aria-label="Edit <?= h($apiLabel) ?>">
+            <div class="rl-card-thumb">
+              <img class="rl-card-cover" src="<?= h($apiThumb) ?>" alt="" loading="lazy" width="180" height="240">
+            </div>
+            <div class="rl-card-body">
+              <span class="rl-type-pill">API</span>
+              <h2 class="rl-card-title"><?= h($apiLabel) ?></h2>
+              <dl class="rl-meta">
+                <dt>Version</dt>
+                <dd><?= h($apiVerDisp) ?></dd>
+                <dt>Revision date</dt>
+                <dd><?= h($apiEffDisp) ?></dd>
+                <dt>Status</dt>
+                <dd class="rl-status-dd">
+                  <div class="rl-status-badges">
+                    <span class="<?= h(rl_status_class($apiSt)) ?>"><?= h(rl_status_label($apiSt)) ?></span>
+                  </div>
+                </dd>
+              </dl>
+            </div>
+            <div class="rl-card-hint">Click to edit · base URL · cover image · test connection</div>
+          </button>
+        <?php endforeach; ?>
         <?php
           rl_add_source_card(
               'api',
-              'crawler',
-              'Add API',
-              'Register another library HTTP endpoint when the admin API is extended (same type as listed above).',
+              '',
+              'Add API resource',
+              'Another API entry registered as an edition row (same type as cards above).',
               true,
               'API'
           );
         ?>
       </div>
-      <p class="rl-intro" style="margin-top:16px;">The AIM status endpoint is listed above; POST crawl triggers and URL revalidation will be added with the crawl worker.</p>
+      <ul class="rl-api-list" style="margin-top:22px;">
+        <li>
+          <strong>Editions &amp; JSON file API</strong> — upload / download <code>source.json</code> for <code>json_book</code> rows only.<br>
+          <code><?= h($apiHref) ?></code>
+        </li>
+        <li>
+          <strong>Retrieval test (admin)</strong> — FULLTEXT search over indexed PHAK blocks.<br>
+          <code><?= h($searchTestHref) ?></code>
+        </li>
+        <li>
+          <strong>AIM crawler status</strong> — paragraph counts and last run (AIM slot).<br>
+          <code><?= h($aimApiHref) ?>?slot=aim</code>
+        </li>
+        <li>
+          <strong>Crawler &amp; API edition settings</strong> — load/save <code>resource_type</code> crawler or api rows, cover upload, URL test.<br>
+          <code><?= h($crawlerApiHref) ?>?id=</code><em>edition_id</em>
+        </li>
+      </ul>
     </div>
   <?php endif; ?>
 </div>
@@ -1022,6 +1083,174 @@ cw_header('Resource Library');
     <div class="rl-modal-foot">
       <button type="button" class="btn-ghost" id="rlCancel">Cancel</button>
       <button type="button" class="btn" id="rlSaveMeta">Save metadata</button>
+    </div>
+  </div>
+</div>
+
+<div class="rl-backdrop" id="rlAimBackdrop" aria-hidden="true" data-api="<?= h($crawlerApiHref) ?>">
+  <div class="rl-modal" role="dialog" aria-modal="true" aria-labelledby="rlAimModalTitle" tabindex="-1">
+    <div class="rl-modal-head">
+      <div>
+        <h2 class="rl-modal-title" id="rlAimModalTitle">AIM crawler</h2>
+        <p class="rl-modal-sub" id="rlAimModalSub"></p>
+      </div>
+      <button type="button" class="rl-modal-close" id="rlAimClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="rl-modal-body">
+      <input type="hidden" id="rlAimFieldId" value="">
+      <div class="rl-field">
+        <label for="rlAimFieldLabel">Title</label>
+        <input type="text" id="rlAimFieldLabel" maxlength="256" required autocomplete="off">
+      </div>
+      <div class="rl-field">
+        <label for="rlAimFieldUrl">Main URL to crawl (allowed path prefix)</label>
+        <input type="url" id="rlAimFieldUrl" maxlength="1024" required placeholder="https://www.faa.gov/.../aim_html/" autocomplete="off">
+      </div>
+      <div class="rl-row2">
+        <div class="rl-field">
+          <label for="rlAimFieldChange">Version (FAA change / as indexed)</label>
+          <input type="text" id="rlAimFieldChange" maxlength="64" autocomplete="off" placeholder="e.g. Change 3">
+        </div>
+        <div class="rl-field">
+          <label for="rlAimFieldEffective">Revision date (effective date)</label>
+          <input type="date" id="rlAimFieldEffective">
+        </div>
+      </div>
+      <div class="rl-field">
+        <label for="rlAimFieldStatus">Status</label>
+        <select id="rlAimFieldStatus">
+          <option value="draft">Draft</option>
+          <option value="live">Live</option>
+          <option value="archived">Archived</option>
+        </select>
+      </div>
+      <div class="rl-field">
+        <label for="rlAimFieldNotes">Notes (internal)</label>
+        <textarea id="rlAimFieldNotes" maxlength="8000" placeholder="Crawl notes, operator reminders…"></textarea>
+      </div>
+      <div class="rl-field">
+        <label id="rlAimDropThumbLabel">Cover image</label>
+        <div class="rl-drop-img" id="rlAimDropThumb" role="button" tabindex="0" aria-labelledby="rlAimDropThumbLabel">
+          <input type="file" id="rlAimThumbFile" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden>
+          <p>Drag and drop a cover image here, or click to browse.</p>
+          <p class="rl-drop-meta">JPG, PNG, or WEBP · max 10 MB · same layout as JSON / Book cards</p>
+        </div>
+        <div class="rl-thumb-preview-wrap">
+          <img id="rlAimThumbPreview" alt="Thumbnail preview" width="160" height="120" style="display:none;">
+        </div>
+      </div>
+      <div class="rl-field">
+        <label for="rlAimFieldThumb">Thumbnail URL or path (optional)</label>
+        <input type="text" id="rlAimFieldThumb" maxlength="1024" placeholder="/admin/resource_library_thumb.php?id=… or https://…" autocomplete="off">
+      </div>
+      <div class="rl-panel">
+        <h3>Index statistics</h3>
+        <p id="rlAimIndexInfo">—</p>
+      </div>
+      <details class="rl-panel" style="background:#fff;">
+        <summary style="cursor:pointer;font-weight:600;color:#0f172a;">Citation &amp; crawl rules (reference)</summary>
+        <ul style="margin:10px 0 0 1.1rem;padding:0;font-size:13px;color:#475569;line-height:1.5;">
+          <li>Store <code>source_url</code>, <code>canonical_url</code> (with fragment when known), <code>page_title</code>, chapter / section / paragraph, <code>effective_date</code>, <code>change_number</code>, <code>crawled_at</code>, <code>content_hash</code>.</li>
+          <li>Preserve anchors; cite page + exact anchor, not only the AIM homepage.</li>
+          <li>Normalize relative links to absolute <code>https://www.faa.gov/…</code>; crawl only under the allowed prefix.</li>
+          <li>Parent hierarchy for citations (e.g. AIM 4-3-2) with precise FAA URL.</li>
+          <li>Mark broken URLs <code>url_broken</code> / supersede; keep audit history.</li>
+        </ul>
+      </details>
+      <div class="rl-panel rl-test-panel">
+        <h3>Test connection</h3>
+        <p class="rl-drop-meta" style="margin-top:0;">Sends an HTTPS HEAD request (follows redirects). Leave blank to test the main URL above.</p>
+        <div class="rl-field" style="margin-bottom:8px;">
+          <label for="rlAimTestOverride">Optional URL override</label>
+          <input type="url" id="rlAimTestOverride" maxlength="2048" placeholder="Leave empty to use main URL" autocomplete="off">
+        </div>
+        <div class="rl-test-actions">
+          <button type="button" class="btn btn-sm" id="rlAimTestBtn">Test connection</button>
+        </div>
+        <pre class="rl-test-out" id="rlAimTestOut" aria-live="polite"></pre>
+      </div>
+      <div class="rl-msg" id="rlAimMsg" role="status"></div>
+    </div>
+    <div class="rl-modal-foot">
+      <button type="button" class="btn-ghost" id="rlAimCancel">Cancel</button>
+      <button type="button" class="btn" id="rlAimSaveMeta">Save settings</button>
+    </div>
+  </div>
+</div>
+
+<div class="rl-backdrop" id="rlApiBackdrop" aria-hidden="true" data-api="<?= h($crawlerApiHref) ?>">
+  <div class="rl-modal" role="dialog" aria-modal="true" aria-labelledby="rlApiModalTitle" tabindex="-1">
+    <div class="rl-modal-head">
+      <div>
+        <h2 class="rl-modal-title" id="rlApiModalTitle">API resource</h2>
+        <p class="rl-modal-sub" id="rlApiModalSub"></p>
+      </div>
+      <button type="button" class="rl-modal-close" id="rlApiClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="rl-modal-body">
+      <input type="hidden" id="rlApiFieldId" value="">
+      <div class="rl-field">
+        <label for="rlApiFieldLabel">Title</label>
+        <input type="text" id="rlApiFieldLabel" maxlength="512" required autocomplete="off">
+      </div>
+      <div class="rl-field">
+        <label for="rlApiFieldBaseUrl">API base URL (HTTPS)</label>
+        <input type="url" id="rlApiFieldBaseUrl" maxlength="1024" placeholder="https://api.example.com/v1/" autocomplete="off">
+      </div>
+      <div class="rl-row2">
+        <div class="rl-field">
+          <label for="rlApiFieldChange">Version label</label>
+          <input type="text" id="rlApiFieldChange" maxlength="128" autocomplete="off" placeholder="e.g. v1">
+        </div>
+        <div class="rl-field">
+          <label for="rlApiFieldEffective">Revision date</label>
+          <input type="date" id="rlApiFieldEffective">
+        </div>
+      </div>
+      <div class="rl-field">
+        <label for="rlApiFieldStatus">Status</label>
+        <select id="rlApiFieldStatus">
+          <option value="draft">Draft</option>
+          <option value="live">Live</option>
+          <option value="archived">Archived</option>
+        </select>
+      </div>
+      <div class="rl-field">
+        <label for="rlApiFieldNotes">Notes (internal)</label>
+        <textarea id="rlApiFieldNotes" maxlength="8000" placeholder="OpenAPI path, auth notes, consumers…"></textarea>
+      </div>
+      <div class="rl-field">
+        <label id="rlApiDropThumbLabel">Cover image</label>
+        <div class="rl-drop-img" id="rlApiDropThumb" role="button" tabindex="0" aria-labelledby="rlApiDropThumbLabel">
+          <input type="file" id="rlApiThumbFile" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden>
+          <p>Drag and drop a cover image here, or click to browse.</p>
+          <p class="rl-drop-meta">JPG, PNG, or WEBP · max 10 MB</p>
+        </div>
+        <div class="rl-thumb-preview-wrap">
+          <img id="rlApiThumbPreview" alt="Thumbnail preview" width="160" height="120" style="display:none;">
+        </div>
+      </div>
+      <div class="rl-field">
+        <label for="rlApiFieldThumb">Thumbnail URL or path (optional)</label>
+        <input type="text" id="rlApiFieldThumb" maxlength="1024" placeholder="/admin/resource_library_thumb.php?id=… or https://…" autocomplete="off">
+      </div>
+      <div class="rl-panel rl-test-panel">
+        <h3>Test connection</h3>
+        <p class="rl-drop-meta" style="margin-top:0;">HTTPS HEAD against the base URL (or override below).</p>
+        <div class="rl-field" style="margin-bottom:8px;">
+          <label for="rlApiTestOverride">Optional URL override</label>
+          <input type="url" id="rlApiTestOverride" maxlength="2048" placeholder="Leave empty to use API base URL" autocomplete="off">
+        </div>
+        <div class="rl-test-actions">
+          <button type="button" class="btn btn-sm" id="rlApiTestBtn">Test connection</button>
+        </div>
+        <pre class="rl-test-out" id="rlApiTestOut" aria-live="polite"></pre>
+      </div>
+      <div class="rl-msg" id="rlApiMsg" role="status"></div>
+    </div>
+    <div class="rl-modal-foot">
+      <button type="button" class="btn-ghost" id="rlApiCancel">Cancel</button>
+      <button type="button" class="btn" id="rlApiSaveMeta">Save settings</button>
     </div>
   </div>
 </div>
@@ -1500,6 +1729,539 @@ cw_header('Resource Library');
       toast.textContent = '';
     }, 4200);
   });
+})();
+</script>
+<script>
+(function () {
+  var aimBackdrop = document.getElementById('rlAimBackdrop');
+  if (!aimBackdrop) return;
+  var aimApi = aimBackdrop.getAttribute('data-api') || '';
+  var aimOpenBtn = document.getElementById('rlAimCardOpen');
+  var aimClose = document.getElementById('rlAimClose');
+  var aimCancel = document.getElementById('rlAimCancel');
+  var aimSave = document.getElementById('rlAimSaveMeta');
+
+  function showAimMsg(text, kind) {
+    var m = document.getElementById('rlAimMsg');
+    if (!m) return;
+    m.textContent = text || '';
+    m.className = 'rl-msg';
+    if (!text) return;
+    m.classList.add(kind === 'ok' ? 'is-ok' : 'is-error');
+  }
+  function clearAimMsg() { showAimMsg('', ''); }
+
+  function setAimIndexInfo(counts, lastRun) {
+    var el = document.getElementById('rlAimIndexInfo');
+    if (!el) return;
+    counts = counts || {};
+    var parts = [];
+    parts.push('Indexed rows: ' + (counts.total != null ? counts.total : 0) + ' total');
+    parts.push('active ' + (counts.active != null ? counts.active : 0));
+    parts.push('superseded ' + (counts.superseded != null ? counts.superseded : 0));
+    parts.push('url_broken ' + (counts.url_broken != null ? counts.url_broken : 0));
+    if (lastRun && lastRun.run_status) {
+      parts.push('Last run: ' + lastRun.run_status + ' · pages ' + (lastRun.pages_discovered != null ? lastRun.pages_discovered : 0) + ' · upserted ' + (lastRun.paragraphs_upserted != null ? lastRun.paragraphs_upserted : 0) + ' · started ' + (lastRun.started_at || ''));
+    } else {
+      parts.push('Last run: none yet.');
+    }
+    el.textContent = parts.join(' · ');
+  }
+
+  function updateAimThumbPreview() {
+    var inp = document.getElementById('rlAimFieldThumb');
+    var thumbPreview = document.getElementById('rlAimThumbPreview');
+    if (!inp || !thumbPreview) return;
+    var v = (inp.value || '').trim();
+    if (!v) {
+      thumbPreview.style.display = 'none';
+      thumbPreview.removeAttribute('src');
+      return;
+    }
+    var url;
+    if (v.indexOf('http://') === 0 || v.indexOf('https://') === 0) {
+      url = v;
+    } else {
+      url = (v.charAt(0) === '/') ? (window.location.origin + v) : (window.location.origin + '/' + v);
+    }
+    if (v.indexOf('resource_library_thumb.php') !== -1 || v.indexOf('resource_library_crawler_thumb.php') !== -1) {
+      url += (url.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now();
+    }
+    thumbPreview.onload = function () { thumbPreview.style.display = 'block'; };
+    thumbPreview.onerror = function () { thumbPreview.style.display = 'none'; };
+    thumbPreview.src = url;
+  }
+
+  function fillAimForm(src) {
+    document.getElementById('rlAimFieldId').value = String(src.id || '');
+    document.getElementById('rlAimFieldLabel').value = src.label || '';
+    document.getElementById('rlAimFieldUrl').value = src.allowed_url_prefix || '';
+    document.getElementById('rlAimFieldChange').value = src.change_number || '';
+    var ed = src.effective_date || '';
+    if (ed && String(ed).indexOf(' ') > 0) {
+      ed = String(ed).split(' ')[0];
+    }
+    document.getElementById('rlAimFieldEffective').value = ed ? String(ed).substring(0, 10) : '';
+    var st = src.status || 'draft';
+    if (st === 'active') st = 'live';
+    document.getElementById('rlAimFieldStatus').value = ['draft', 'live', 'archived'].indexOf(st) >= 0 ? st : 'draft';
+    document.getElementById('rlAimFieldNotes').value = src.notes || '';
+    document.getElementById('rlAimFieldThumb').value = src.thumbnail_path || '';
+    var titleEl = document.getElementById('rlAimModalTitle');
+    if (titleEl) titleEl.textContent = src.label || 'AIM crawler';
+    var sub = document.getElementById('rlAimModalSub');
+    if (sub) sub.textContent = (src.crawler_slot || '') + ' · ' + (src.crawler_type || '');
+    updateAimThumbPreview();
+  }
+
+  function loadAim(id) {
+    clearAimMsg();
+    if (!aimApi || !id) return Promise.reject(new Error('Missing API or id'));
+    return fetch(aimApi + '?id=' + encodeURIComponent(String(id)), { credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Load failed');
+        fillAimForm(x.j.source);
+        setAimIndexInfo(x.j.counts, x.j.last_run);
+        var ov = document.getElementById('rlAimTestOverride');
+        if (ov) ov.value = '';
+        var tout = document.getElementById('rlAimTestOut');
+        if (tout) tout.textContent = '';
+      });
+  }
+
+  function openAimModal() {
+    aimBackdrop.classList.add('is-open');
+    aimBackdrop.setAttribute('aria-hidden', 'false');
+    var m = aimBackdrop.querySelector('.rl-modal');
+    if (m) {
+      try { m.focus(); } catch (e1) { /* ignore */ }
+    }
+  }
+  function closeAimModal() {
+    aimBackdrop.classList.remove('is-open');
+    aimBackdrop.setAttribute('aria-hidden', 'true');
+  }
+
+  if (aimOpenBtn && aimApi) {
+    aimOpenBtn.addEventListener('click', function () {
+      var id = parseInt(aimOpenBtn.getAttribute('data-edition-id') || '0', 10);
+      if (!id) return;
+      loadAim(id).then(openAimModal).catch(function (e) {
+        showAimMsg(e.message || 'Could not load', 'err');
+        openAimModal();
+      });
+    });
+  }
+
+  if (aimClose) aimClose.addEventListener('click', closeAimModal);
+  if (aimCancel) aimCancel.addEventListener('click', closeAimModal);
+  aimBackdrop.addEventListener('click', function (e) {
+    if (e.target === aimBackdrop) closeAimModal();
+  });
+
+  var aimFldThumb = document.getElementById('rlAimFieldThumb');
+  if (aimFldThumb) aimFldThumb.addEventListener('input', updateAimThumbPreview);
+
+  var aimDropThumb = document.getElementById('rlAimDropThumb');
+  var aimThumbFile = document.getElementById('rlAimThumbFile');
+  function uploadAimCover(file) {
+    clearAimMsg();
+    if (!file) {
+      showAimMsg('No image file selected.', 'err');
+      return;
+    }
+    var t = (file.type || '').toLowerCase();
+    if (t !== 'image/jpeg' && t !== 'image/png' && t !== 'image/webp') {
+      showAimMsg('Please use JPG, PNG, or WEBP.', 'err');
+      return;
+    }
+    var id = parseInt(document.getElementById('rlAimFieldId').value, 10);
+    if (!id) return;
+    var fd = new FormData();
+    fd.append('edition_id', String(id));
+    fd.append('thumbnail_image', file, file.name);
+    if (aimDropThumb) aimDropThumb.classList.add('is-uploading');
+    fetch(aimApi, { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Upload failed');
+        fillAimForm(x.j.source);
+        setAimIndexInfo(x.j.counts, x.j.last_run);
+        updateAimThumbPreview();
+        showAimMsg('Cover image saved.', 'ok');
+      })
+      .catch(function (e) {
+        showAimMsg(e.message || 'Upload failed', 'err');
+      })
+      .finally(function () {
+        if (aimDropThumb) aimDropThumb.classList.remove('is-uploading');
+        if (aimThumbFile) aimThumbFile.value = '';
+      });
+  }
+  if (aimThumbFile) {
+    aimThumbFile.addEventListener('change', function () {
+      var f = aimThumbFile.files && aimThumbFile.files[0];
+      if (f) uploadAimCover(f);
+    });
+  }
+  if (aimDropThumb) {
+    aimDropThumb.addEventListener('click', function () { if (aimThumbFile) aimThumbFile.click(); });
+    aimDropThumb.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (aimThumbFile) aimThumbFile.click();
+      }
+    });
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      aimDropThumb.addEventListener(ev, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        aimDropThumb.classList.add('is-dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      aimDropThumb.addEventListener(ev, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        aimDropThumb.classList.remove('is-dragover');
+      });
+    });
+    aimDropThumb.addEventListener('drop', function (e) {
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) uploadAimCover(f);
+    });
+  }
+
+  if (aimSave) {
+    aimSave.addEventListener('click', function () {
+      clearAimMsg();
+      var id = parseInt(document.getElementById('rlAimFieldId').value, 10);
+      if (!id) return;
+      var body = {
+        action: 'save',
+        id: id,
+        label: document.getElementById('rlAimFieldLabel').value,
+        allowed_url_prefix: document.getElementById('rlAimFieldUrl').value,
+        change_number: document.getElementById('rlAimFieldChange').value,
+        effective_date: document.getElementById('rlAimFieldEffective').value,
+        status: document.getElementById('rlAimFieldStatus').value,
+        notes: document.getElementById('rlAimFieldNotes').value,
+        thumbnail_path: document.getElementById('rlAimFieldThumb').value
+      };
+      aimSave.disabled = true;
+      fetch(aimApi, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Save failed');
+          window.location.reload();
+        })
+        .catch(function (e) {
+          showAimMsg(e.message || 'Save failed', 'err');
+        })
+        .finally(function () { aimSave.disabled = false; });
+    });
+  }
+
+  var aimTestBtn = document.getElementById('rlAimTestBtn');
+  if (aimTestBtn) {
+    aimTestBtn.addEventListener('click', function () {
+      clearAimMsg();
+      var id = parseInt(document.getElementById('rlAimFieldId').value, 10);
+      if (!id) return;
+      var ov = (document.getElementById('rlAimTestOverride').value || '').trim();
+      var body = { action: 'test_url', id: id };
+      if (ov) body.url = ov;
+      var out = document.getElementById('rlAimTestOut');
+      if (out) out.textContent = 'Testing…';
+      fetch(aimApi, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          var j = x.j || {};
+          if (!x.ok || !j.ok) {
+            if (out) out.textContent = (j.error || 'Request failed');
+            return;
+          }
+          var lines = [];
+          lines.push('HTTP ' + (j.http_code != null ? j.http_code : 0));
+          if (j.final_url) lines.push('Final URL: ' + j.final_url);
+          lines.push(j.reachable ? 'Result: reachable (2xx/3xx)' : 'Result: not reachable or error');
+          if (j.error) lines.push('Detail: ' + j.error);
+          if (out) out.textContent = lines.join('\n');
+        })
+        .catch(function (e) {
+          if (out) out.textContent = e.message || 'Network error';
+        });
+    });
+  }
+})();
+</script>
+<script>
+(function () {
+  var apiBackdrop = document.getElementById('rlApiBackdrop');
+  if (!apiBackdrop) return;
+  var typedApi = apiBackdrop.getAttribute('data-api') || '';
+  var apiClose = document.getElementById('rlApiClose');
+  var apiCancel = document.getElementById('rlApiCancel');
+  var apiSave = document.getElementById('rlApiSaveMeta');
+  var apiTestBtn = document.getElementById('rlApiTestBtn');
+
+  function showApiMsg(text, kind) {
+    var m = document.getElementById('rlApiMsg');
+    if (!m) return;
+    m.textContent = text || '';
+    m.className = 'rl-msg';
+    if (!text) return;
+    m.classList.add(kind === 'ok' ? 'is-ok' : 'is-error');
+  }
+  function clearApiMsg() { showApiMsg('', ''); }
+
+  function updateApiThumbPreview() {
+    var inp = document.getElementById('rlApiFieldThumb');
+    var thumbPreview = document.getElementById('rlApiThumbPreview');
+    if (!inp || !thumbPreview) return;
+    var v = (inp.value || '').trim();
+    if (!v) {
+      thumbPreview.style.display = 'none';
+      thumbPreview.removeAttribute('src');
+      return;
+    }
+    var url;
+    if (v.indexOf('http://') === 0 || v.indexOf('https://') === 0) {
+      url = v;
+    } else {
+      url = (v.charAt(0) === '/') ? (window.location.origin + v) : (window.location.origin + '/' + v);
+    }
+    if (v.indexOf('resource_library_thumb.php') !== -1 || v.indexOf('resource_library_crawler_thumb.php') !== -1) {
+      url += (url.indexOf('?') >= 0 ? '&' : '?') + 'cb=' + Date.now();
+    }
+    thumbPreview.onload = function () { thumbPreview.style.display = 'block'; };
+    thumbPreview.onerror = function () { thumbPreview.style.display = 'none'; };
+    thumbPreview.src = url;
+  }
+
+  function fillApiForm(src) {
+    document.getElementById('rlApiFieldId').value = String(src.id || '');
+    document.getElementById('rlApiFieldLabel').value = src.label || '';
+    document.getElementById('rlApiFieldBaseUrl').value = src.api_base_url || '';
+    document.getElementById('rlApiFieldChange').value = src.change_number || '';
+    var ed = src.effective_date || '';
+    if (ed && String(ed).indexOf(' ') > 0) {
+      ed = String(ed).split(' ')[0];
+    }
+    document.getElementById('rlApiFieldEffective').value = ed ? String(ed).substring(0, 10) : '';
+    var st = src.status || 'draft';
+    if (st === 'active') st = 'live';
+    document.getElementById('rlApiFieldStatus').value = ['draft', 'live', 'archived'].indexOf(st) >= 0 ? st : 'draft';
+    document.getElementById('rlApiFieldNotes').value = src.notes || '';
+    document.getElementById('rlApiFieldThumb').value = src.thumbnail_path || '';
+    var titleEl = document.getElementById('rlApiModalTitle');
+    if (titleEl) titleEl.textContent = src.label || 'API resource';
+    var sub = document.getElementById('rlApiModalSub');
+    if (sub) sub.textContent = (src.work_code || '') + ' · api';
+    updateApiThumbPreview();
+  }
+
+  function loadApi(id) {
+    clearApiMsg();
+    if (!typedApi || !id) return Promise.reject(new Error('Missing API or id'));
+    return fetch(typedApi + '?id=' + encodeURIComponent(String(id)), { credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Load failed');
+        if ((x.j.resource_type || '') !== 'api') throw new Error('Not an API edition row');
+        fillApiForm(x.j.source);
+        var ov = document.getElementById('rlApiTestOverride');
+        if (ov) ov.value = '';
+        var tout = document.getElementById('rlApiTestOut');
+        if (tout) tout.textContent = '';
+      });
+  }
+
+  function openApiModal() {
+    apiBackdrop.classList.add('is-open');
+    apiBackdrop.setAttribute('aria-hidden', 'false');
+    var m = apiBackdrop.querySelector('.rl-modal');
+    if (m) {
+      try { m.focus(); } catch (e1) { /* ignore */ }
+    }
+  }
+  function closeApiModal() {
+    apiBackdrop.classList.remove('is-open');
+    apiBackdrop.setAttribute('aria-hidden', 'true');
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var card = t.closest('.rl-api-edition-card');
+    if (!card) return;
+    var id = parseInt(card.getAttribute('data-edition-id') || '0', 10);
+    if (!id) return;
+    loadApi(id).then(openApiModal).catch(function (err) {
+      showApiMsg(err.message || 'Could not load', 'err');
+      openApiModal();
+    });
+  });
+
+  if (apiClose) apiClose.addEventListener('click', closeApiModal);
+  if (apiCancel) apiCancel.addEventListener('click', closeApiModal);
+  apiBackdrop.addEventListener('click', function (e) {
+    if (e.target === apiBackdrop) closeApiModal();
+  });
+
+  var apiFldThumb = document.getElementById('rlApiFieldThumb');
+  if (apiFldThumb) apiFldThumb.addEventListener('input', updateApiThumbPreview);
+
+  var apiDropThumb = document.getElementById('rlApiDropThumb');
+  var apiThumbFile = document.getElementById('rlApiThumbFile');
+  function uploadApiCover(file) {
+    clearApiMsg();
+    if (!file) {
+      showApiMsg('No image file selected.', 'err');
+      return;
+    }
+    var ty = (file.type || '').toLowerCase();
+    if (ty !== 'image/jpeg' && ty !== 'image/png' && ty !== 'image/webp') {
+      showApiMsg('Please use JPG, PNG, or WEBP.', 'err');
+      return;
+    }
+    var id = parseInt(document.getElementById('rlApiFieldId').value, 10);
+    if (!id) return;
+    var fd = new FormData();
+    fd.append('edition_id', String(id));
+    fd.append('thumbnail_image', file, file.name);
+    if (apiDropThumb) apiDropThumb.classList.add('is-uploading');
+    fetch(typedApi, { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Upload failed');
+        fillApiForm(x.j.source);
+        updateApiThumbPreview();
+        showApiMsg('Cover image saved.', 'ok');
+      })
+      .catch(function (err) {
+        showApiMsg(err.message || 'Upload failed', 'err');
+      })
+      .finally(function () {
+        if (apiDropThumb) apiDropThumb.classList.remove('is-uploading');
+        if (apiThumbFile) apiThumbFile.value = '';
+      });
+  }
+  if (apiThumbFile) {
+    apiThumbFile.addEventListener('change', function () {
+      var f = apiThumbFile.files && apiThumbFile.files[0];
+      if (f) uploadApiCover(f);
+    });
+  }
+  if (apiDropThumb) {
+    apiDropThumb.addEventListener('click', function () { if (apiThumbFile) apiThumbFile.click(); });
+    apiDropThumb.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        if (apiThumbFile) apiThumbFile.click();
+      }
+    });
+    ['dragenter', 'dragover'].forEach(function (ev) {
+      apiDropThumb.addEventListener(ev, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        apiDropThumb.classList.add('is-dragover');
+      });
+    });
+    ['dragleave', 'drop'].forEach(function (ev) {
+      apiDropThumb.addEventListener(ev, function (e) {
+        e.preventDefault();
+        e.stopPropagation();
+        apiDropThumb.classList.remove('is-dragover');
+      });
+    });
+    apiDropThumb.addEventListener('drop', function (e) {
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) uploadApiCover(f);
+    });
+  }
+
+  if (apiSave) {
+    apiSave.addEventListener('click', function () {
+      clearApiMsg();
+      var id = parseInt(document.getElementById('rlApiFieldId').value, 10);
+      if (!id) return;
+      var body = {
+        action: 'save',
+        id: id,
+        label: document.getElementById('rlApiFieldLabel').value,
+        api_base_url: document.getElementById('rlApiFieldBaseUrl').value,
+        change_number: document.getElementById('rlApiFieldChange').value,
+        effective_date: document.getElementById('rlApiFieldEffective').value,
+        status: document.getElementById('rlApiFieldStatus').value,
+        notes: document.getElementById('rlApiFieldNotes').value,
+        thumbnail_path: document.getElementById('rlApiFieldThumb').value
+      };
+      apiSave.disabled = true;
+      fetch(typedApi, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Save failed');
+          window.location.reload();
+        })
+        .catch(function (err) {
+          showApiMsg(err.message || 'Save failed', 'err');
+        })
+        .finally(function () { apiSave.disabled = false; });
+    });
+  }
+
+  if (apiTestBtn) {
+    apiTestBtn.addEventListener('click', function () {
+      clearApiMsg();
+      var id = parseInt(document.getElementById('rlApiFieldId').value, 10);
+      if (!id) return;
+      var ov = (document.getElementById('rlApiTestOverride').value || '').trim();
+      var body = { action: 'test_url', id: id };
+      if (ov) body.url = ov;
+      var out = document.getElementById('rlApiTestOut');
+      if (out) out.textContent = 'Testing…';
+      fetch(typedApi, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          var j = x.j || {};
+          if (!x.ok || !j.ok) {
+            if (out) out.textContent = (j.error || 'Request failed');
+            return;
+          }
+          var lines = [];
+          lines.push('HTTP ' + (j.http_code != null ? j.http_code : 0));
+          if (j.final_url) lines.push('Final URL: ' + j.final_url);
+          lines.push(j.reachable ? 'Result: reachable (2xx/3xx)' : 'Result: not reachable or error');
+          if (j.error) lines.push('Detail: ' + j.error);
+          if (out) out.textContent = lines.join('\n');
+        })
+        .catch(function (err) {
+          if (out) out.textContent = err.message || 'Network error';
+        });
+    });
+  }
 })();
 </script>
 

@@ -197,3 +197,126 @@ function rl_write_thumbnail_from_tmp(int $editionId, string $tmpPath): string
 
     return rl_thumbnail_public_url($editionId);
 }
+
+/* ---- Crawler source covers: storage/resource_library/crawler/{source_id}/thumb.* ---- */
+
+function rl_crawler_source_dir(int $sourceId): string
+{
+    if ($sourceId <= 0) {
+        throw new InvalidArgumentException('Invalid crawler source id');
+    }
+
+    return rl_project_root() . '/storage/resource_library/crawler/' . $sourceId;
+}
+
+function rl_ensure_crawler_dir(int $sourceId): void
+{
+    $dir = rl_crawler_source_dir($sourceId);
+    if (is_dir($dir)) {
+        return;
+    }
+    if (!mkdir($dir, 0755, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not create crawler storage directory');
+    }
+}
+
+function rl_crawler_thumb_public_url(int $sourceId): string
+{
+    return '/admin/resource_library_thumb.php?id=' . $sourceId;
+}
+
+function rl_delete_crawler_thumbnail_files(int $sourceId): void
+{
+    if ($sourceId <= 0) {
+        return;
+    }
+    $dir = rl_crawler_source_dir($sourceId);
+    if (!is_dir($dir)) {
+        return;
+    }
+    foreach (['thumb.jpg', 'thumb.png', 'thumb.webp'] as $f) {
+        $p = $dir . '/' . $f;
+        if (is_file($p)) {
+            @unlink($p);
+        }
+    }
+}
+
+/**
+ * @return array{path: string, mime: string, ext: string}|null
+ */
+function rl_thumbnail_disk_file_crawler(int $sourceId): ?array
+{
+    if ($sourceId <= 0) {
+        return null;
+    }
+    $dir = rl_crawler_source_dir($sourceId);
+    $mimeByExt = [
+        'jpg' => 'image/jpeg',
+        'jpeg' => 'image/jpeg',
+        'png' => 'image/png',
+        'webp' => 'image/webp',
+    ];
+    foreach (['thumb.jpg', 'thumb.png', 'thumb.webp'] as $f) {
+        $p = $dir . '/' . $f;
+        if (is_file($p)) {
+            $ext = strtolower(pathinfo($f, PATHINFO_EXTENSION));
+
+            return [
+                'path' => $p,
+                'mime' => $mimeByExt[$ext] ?? 'application/octet-stream',
+                'ext' => $ext,
+            ];
+        }
+    }
+
+    return null;
+}
+
+/**
+ * @return string Public URL path for thumbnail_path column
+ */
+function rl_write_crawler_thumbnail_from_tmp(int $sourceId, string $tmpPath): string
+{
+    if ($sourceId <= 0) {
+        throw new InvalidArgumentException('Invalid crawler source id');
+    }
+    if ($tmpPath === '' || !is_uploaded_file($tmpPath)) {
+        throw new RuntimeException('Invalid upload');
+    }
+
+    $raw = file_get_contents($tmpPath);
+    if ($raw === false) {
+        throw new RuntimeException('Could not read image');
+    }
+    $len = strlen($raw);
+    if ($len === 0) {
+        throw new RuntimeException('Empty file');
+    }
+    if ($len > RL_THUMB_MAX_BYTES) {
+        throw new RuntimeException('Image is too large (max 10 MB)');
+    }
+
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime = (string) $finfo->buffer($raw);
+    $map = rl_thumbnail_mime_to_ext();
+    if (!isset($map[$mime])) {
+        throw new RuntimeException('Unsupported image type. Use JPG, PNG, or WEBP.');
+    }
+    $ext = $map[$mime];
+
+    rl_ensure_crawler_dir($sourceId);
+    rl_delete_crawler_thumbnail_files($sourceId);
+
+    $final = rl_crawler_source_dir($sourceId) . '/thumb.' . $ext;
+    $tmpOut = $final . '.tmp.' . bin2hex(random_bytes(4));
+    if (file_put_contents($tmpOut, $raw) === false) {
+        throw new RuntimeException('Could not write image');
+    }
+    if (!rename($tmpOut, $final)) {
+        @unlink($tmpOut);
+        throw new RuntimeException('Could not finalize image');
+    }
+
+    return rl_crawler_thumb_public_url($sourceId);
+}

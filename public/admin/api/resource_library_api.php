@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/resource_library_storage.php';
 require_once __DIR__ . '/../../../src/resource_library_ingest.php';
+require_once __DIR__ . '/../../../src/resource_library_catalog.php';
 
 cw_require_admin();
 
@@ -22,16 +23,41 @@ function rl_api_load_edition(PDO $pdo, int $id): ?array
     if ($id <= 0) {
         return null;
     }
-    $stmt = $pdo->prepare('
-        SELECT id, title, revision_code, revision_date, status, thumbnail_path, work_code, sort_order, created_at, updated_at
-        FROM resource_library_editions
-        WHERE id = ?
-        LIMIT 1
-    ');
-    $stmt->execute([$id]);
-    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    $row = rl_catalog_fetch_edition($pdo, $id);
+    if (!is_array($row)) {
+        return null;
+    }
+    if (rl_catalog_has_resource_type_column($pdo)) {
+        $rt = rl_catalog_normalize_resource_type(isset($row['resource_type']) ? (string) $row['resource_type'] : null);
+        if ($rt !== RL_RESOURCE_JSON_BOOK) {
+            return null;
+        }
+    }
 
-    return is_array($row) ? $row : null;
+    return [
+        'id' => (int) ($row['id'] ?? 0),
+        'title' => (string) ($row['title'] ?? ''),
+        'revision_code' => (string) ($row['revision_code'] ?? ''),
+        'revision_date' => $row['revision_date'] ?? null,
+        'status' => (string) ($row['status'] ?? ''),
+        'thumbnail_path' => $row['thumbnail_path'] ?? null,
+        'work_code' => $row['work_code'] ?? null,
+        'sort_order' => (int) ($row['sort_order'] ?? 0),
+        'created_at' => $row['created_at'] ?? null,
+        'updated_at' => $row['updated_at'] ?? null,
+    ];
+}
+
+/**
+ * WHERE fragment: only json_book rows when resource_type column exists.
+ */
+function rl_api_json_book_where(PDO $pdo): string
+{
+    if (!rl_catalog_has_resource_type_column($pdo)) {
+        return '';
+    }
+
+    return " AND COALESCE(NULLIF(TRIM(resource_type), ''), 'json_book') = 'json_book'";
 }
 
 function rl_api_json_out(int $code, array $payload): void
@@ -170,7 +196,9 @@ if ($hasJsonUpload || $hasThumbUpload || str_contains($contentType, 'multipart/f
         }
         try {
             $publicPath = rl_write_thumbnail_from_tmp($editionId, $tmpImg);
-            $stmtImg = $pdo->prepare('UPDATE resource_library_editions SET thumbnail_path = ? WHERE id = ?');
+            $stmtImg = $pdo->prepare(
+                'UPDATE resource_library_editions SET thumbnail_path = ? WHERE id = ?' . rl_api_json_book_where($pdo)
+            );
             $stmtImg->execute([$publicPath, $editionId]);
             $didThumb = true;
         } catch (Throwable $e) {
@@ -322,6 +350,7 @@ try {
         UPDATE resource_library_editions
         SET title = ?, revision_code = ?, revision_date = ?, status = ?, thumbnail_path = ?, work_code = ?, sort_order = ?
         WHERE id = ?
+        ' . rl_api_json_book_where($pdo) . '
     ');
     $stmt->execute([
         $title,

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/openai.php';
 require_once __DIR__ . '/../../../src/resource_library_ai.php';
+require_once __DIR__ . '/../../../src/resource_library_catalog.php';
 
 cw_require_admin();
 
@@ -65,10 +66,13 @@ if ($query === '') {
     rl_search_test_json_out(400, ['ok' => false, 'error' => 'query required']);
 }
 
-$stmt = $pdo->prepare('SELECT id FROM resource_library_editions WHERE id = ? LIMIT 1');
+$typeSql = rl_catalog_has_resource_type_column($pdo)
+    ? " AND COALESCE(NULLIF(TRIM(resource_type), ''), 'json_book') = 'json_book'"
+    : '';
+$stmt = $pdo->prepare('SELECT id FROM resource_library_editions WHERE id = ?' . $typeSql . ' LIMIT 1');
 $stmt->execute([$editionId]);
 if (!$stmt->fetchColumn()) {
-    rl_search_test_json_out(404, ['ok' => false, 'error' => 'Edition not found']);
+    rl_search_test_json_out(404, ['ok' => false, 'error' => 'Edition not found or not a JSON book resource']);
 }
 
 $hits = rl_ai_search_resource_blocks($pdo, $editionId, $query, 10);
