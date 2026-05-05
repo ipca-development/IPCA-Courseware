@@ -75,6 +75,32 @@ function rl_status_class(string $status): string
     };
 }
 
+/**
+ * @param 'card'|'crawler' $shell Card shell matches JSON grid; crawler shell matches AIM / reserved cards.
+ */
+function rl_add_source_card(string $dataKind, string $shell, string $title, string $blurb, bool $showTypePill = false, ?string $typePillLabel = null): void
+{
+    $classes = $shell === 'crawler'
+        ? 'rl-crawler-card rl-add-card'
+        : 'rl-card rl-add-card';
+    $aria = 'Add: ' . $title;
+    ?>
+    <button type="button" class="<?= h($classes) ?>" data-rl-add="<?= h($dataKind) ?>" aria-label="<?= h($aria) ?>">
+      <div class="rl-card-thumb">
+        <span class="rl-add-plus" aria-hidden="true">+</span>
+      </div>
+      <div class="rl-card-body rl-add-card-body">
+        <?php if ($showTypePill && $typePillLabel !== null && $typePillLabel !== ''): ?>
+          <span class="rl-type-pill"><?= h($typePillLabel) ?></span>
+        <?php endif; ?>
+        <h2 class="rl-card-title"><?= h($title) ?></h2>
+        <p class="rl-meta rl-add-blurb"><?= h($blurb) ?></p>
+      </div>
+      <div class="rl-card-hint">Create flow coming soon</div>
+    </button>
+    <?php
+}
+
 $result = rl_fetch_editions($pdo);
 $rows = $result['rows'];
 $tableError = (!$result['ok']) ? ($result['error'] ?? 'Unknown error') : '';
@@ -92,13 +118,7 @@ if (!in_array($rlCrawl, ['aim', 'reserved2', 'reserved3'], true)) {
 cw_header('Resource Library');
 ?>
 <style>
-  /* Match admin Theory Control Center shell */
-  .rl-admin-page {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 0 4px 40px;
-    box-sizing: border-box;
-  }
+  /* Match admin/theory_control_center.php: full-width .tcc-page inside .app-content (no extra max-width shell). */
   .tcc-page { display: flex; flex-direction: column; gap: 18px; }
   .tcc-hero { padding: 22px 24px; }
   .tcc-eyebrow {
@@ -139,8 +159,9 @@ cw_header('Resource Library');
     color: #102845;
   }
   .tcc-tab.active { background: #12355f; color: #fff; border-color: #12355f; }
-  .rl-tab-panel { margin-top: 0; }
-  .rl-wrap { max-width: 1100px; margin: 0 auto; }
+  .tcc-muted { font-size: 12px; color: #64748b; line-height: 1.5; }
+  .rl-tab-panel { margin-top: 0; width: 100%; }
+  .rl-wrap { width: 100%; box-sizing: border-box; }
   .rl-type-pill {
     display: inline-flex;
     align-items: center;
@@ -336,6 +357,81 @@ cw_header('Resource Library');
     background: #f8fafc;
   }
 
+  button.rl-crawler-card,
+  button.rl-add-card.rl-card {
+    appearance: none;
+    -webkit-appearance: none;
+    font: inherit;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    padding: 0;
+  }
+  .rl-add-card {
+    border-style: dashed;
+    border-color: #cbd5e1;
+    background: #fafbfc;
+    transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+  }
+  .rl-add-card:hover {
+    border-color: #94a3b8;
+    background: #f8fafc;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, 0.06);
+  }
+  .rl-add-card:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+  .rl-add-card .rl-card-thumb {
+    background: transparent;
+  }
+  .rl-add-plus {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 72px;
+    height: 72px;
+    border-radius: 16px;
+    border: 2px dashed #cbd5e1;
+    font-size: 40px;
+    font-weight: 300;
+    line-height: 1;
+    color: #64748b;
+    background: #fff;
+  }
+  .rl-add-card-body {
+    align-items: center;
+    text-align: center;
+  }
+  .rl-add-blurb {
+    margin: 0;
+    line-height: 1.45;
+  }
+  .rl-add-card.rl-crawler-card .rl-add-card-body {
+    flex: 1;
+    justify-content: center;
+  }
+
+  .rl-add-toast {
+    display: none;
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 600;
+    padding: 12px 20px;
+    border-radius: 12px;
+    background: #102845;
+    color: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.22);
+    max-width: min(480px, calc(100vw - 32px));
+    text-align: center;
+    line-height: 1.4;
+  }
+  .rl-add-toast.is-open { display: block; }
+
   .rl-backdrop {
     position: fixed;
     inset: 0;
@@ -520,7 +616,7 @@ cw_header('Resource Library');
   }
 </style>
 
-<div class="tcc-page rl-admin-page">
+<div class="tcc-page">
   <section class="card tcc-hero">
     <div class="tcc-eyebrow">Admin · Resource Library</div>
     <h1 class="tcc-title">Resource Library</h1>
@@ -531,14 +627,20 @@ cw_header('Resource Library');
   </section>
 
   <section class="card" style="padding:14px 16px;">
-    <nav class="tcc-tabs" aria-label="Resource library sections">
+    <div class="tcc-tabs" role="navigation" aria-label="Resource library sections">
       <a class="tcc-tab <?= $rlTab === 'json' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=json">JSON / Book references</a>
       <a class="tcc-tab <?= $rlTab === 'crawlers' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=crawlers">Data crawlers</a>
       <a class="tcc-tab <?= $rlTab === 'apis' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=apis">APIs</a>
-    </nav>
+    </div>
   </section>
 
   <?php if ($rlTab === 'json'): ?>
+    <section class="card" style="padding:14px 16px;">
+      <div class="tcc-muted">
+        You are managing <strong>global JSON / book editions</strong> for handbook-backed AI retrieval.
+        Course-level library overrides are not exposed in this control center.
+      </div>
+    </section>
     <div class="rl-wrap rl-tab-panel" id="rlPage" data-api="<?= h($apiHref) ?>" data-search-api="<?= h($searchTestHref) ?>">
       <p class="rl-intro">
         <strong>PHAK and other handbooks</strong> live here as JSON-backed editions. Click a book to edit metadata or upload / replace the JSON used as the live resource body
@@ -549,8 +651,20 @@ cw_header('Resource Library');
       <?php if (!$result['ok']): ?>
         <div class="rl-alert"><?= rl_table_missing_message($tableError) ?></div>
       <?php elseif ($rows === []): ?>
-        <div class="rl-empty">No editions yet. After running <code>scripts/sql/resource_library_editions.sql</code>, add rows in
-          <code>resource_library_editions</code>, then use this page to manage them.</div>
+        <p class="rl-intro" style="margin-top:0;">No editions yet. After running <code>scripts/sql/resource_library_editions.sql</code>, seed
+          <code>resource_library_editions</code> or use <strong>Add</strong> when creation is wired.</p>
+        <div class="rl-grid" id="rlGrid">
+          <?php
+            rl_add_source_card(
+                'json_book',
+                'card',
+                'Add JSON / book reference',
+                'New handbook edition for AI retrieval blocks (same type as cards above).',
+                true,
+                'JSON / Book'
+            );
+          ?>
+        </div>
       <?php else: ?>
         <div class="rl-grid" id="rlGrid">
           <?php foreach ($rows as $row): ?>
@@ -593,11 +707,27 @@ cw_header('Resource Library');
               <div class="rl-card-hint">Click to edit · sync · test search</div>
             </button>
           <?php endforeach; ?>
+          <?php
+            rl_add_source_card(
+                'json_book',
+                'card',
+                'Add JSON / book reference',
+                'New handbook edition for AI retrieval blocks (same type as cards above).',
+                true,
+                'JSON / Book'
+            );
+          ?>
         </div>
       <?php endif; ?>
     </div>
 
   <?php elseif ($rlTab === 'crawlers'): ?>
+    <section class="card" style="padding:14px 16px;">
+      <div class="tcc-muted">
+        You are viewing <strong>data crawler</strong> slots for official HTML sources.
+        Ingest runs, schedules, and per-course overrides are not exposed in this control center yet.
+      </div>
+    </section>
     <div class="rl-wrap rl-tab-panel">
       <p class="rl-intro">
         Data crawlers ingest <strong>official HTML publications</strong> (starting with the FAA AIM), normalize URLs and anchors, and store structured records for AI retrieval with verifiable citations.
@@ -633,6 +763,16 @@ cw_header('Resource Library');
             </div>
             <div class="rl-card-hint">Crawler UI and database wiring will open from this card in a later release (same modal pattern as JSON / Book).</div>
           </article>
+          <?php
+            rl_add_source_card(
+                'crawler_aim',
+                'crawler',
+                'Add data crawler',
+                'Another AIM HTML crawl source or profile in this slot (same type as this tab).',
+                true,
+                'Data crawler'
+            );
+          ?>
         </div>
 
       <?php elseif ($rlCrawl === 'reserved2'): ?>
@@ -649,6 +789,16 @@ cw_header('Resource Library');
             <div class="rl-crawler-spec">No crawler configured in this slot yet.</div>
             <div class="rl-card-hint">—</div>
           </article>
+          <?php
+            rl_add_source_card(
+                'crawler_reserved2',
+                'crawler',
+                'Add data crawler',
+                'Another crawler source in slot 2 (same type as this tab).',
+                true,
+                'Data crawler'
+            );
+          ?>
         </div>
 
       <?php else: ?>
@@ -665,11 +815,27 @@ cw_header('Resource Library');
             <div class="rl-crawler-spec">No crawler configured in this slot yet.</div>
             <div class="rl-card-hint">—</div>
           </article>
+          <?php
+            rl_add_source_card(
+                'crawler_reserved3',
+                'crawler',
+                'Add data crawler',
+                'Another crawler source in slot 3 (same type as this tab).',
+                true,
+                'Data crawler'
+            );
+          ?>
         </div>
       <?php endif; ?>
     </div>
 
   <?php else: ?>
+    <section class="card" style="padding:14px 16px;">
+      <div class="tcc-muted">
+        These <strong>HTTP entrypoints</strong> require an admin session.
+        New resource-type APIs will be listed here as they are added to the library.
+      </div>
+    </section>
     <div class="rl-wrap rl-tab-panel">
       <p class="rl-intro">HTTP endpoints used by this library. Authentication follows normal admin session rules.</p>
       <ul class="rl-api-list">
@@ -682,10 +848,24 @@ cw_header('Resource Library');
           <code><?= h($searchTestHref) ?></code>
         </li>
       </ul>
+      <div class="rl-crawl-grid" style="margin-top:18px;">
+        <?php
+          rl_add_source_card(
+              'api',
+              'crawler',
+              'Add API',
+              'Register another library HTTP endpoint when the admin API is extended (same type as listed above).',
+              true,
+              'API'
+          );
+        ?>
+      </div>
       <p class="rl-intro" style="margin-top:16px;">When the AIM crawler ships, its admin API will be listed here alongside ingestion status and re-crawl controls.</p>
     </div>
   <?php endif; ?>
 </div>
+
+<div id="rlAddToast" class="rl-add-toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
 <div class="rl-backdrop" id="rlBackdrop" aria-hidden="true">
   <div class="rl-modal" role="dialog" aria-modal="true" aria-labelledby="rlModalTitle" tabindex="-1">
@@ -1243,6 +1423,33 @@ cw_header('Resource Library');
         showMsg(e.message || 'Remove failed', 'err');
       })
       .finally(function () { delBtn.disabled = false; });
+  });
+})();
+</script>
+<script>
+(function () {
+  var toast = document.getElementById('rlAddToast');
+  if (!toast) return;
+  var labels = {
+    json_book: 'JSON / book reference',
+    crawler_aim: 'AIM HTML crawler',
+    crawler_reserved2: 'Crawler (slot 2)',
+    crawler_reserved3: 'Crawler (slot 3)',
+    api: 'API endpoint'
+  };
+  var hideTimer;
+  document.addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest && e.target.closest('[data-rl-add]');
+    if (!btn) return;
+    var k = btn.getAttribute('data-rl-add') || '';
+    var name = labels[k] || 'Resource';
+    toast.textContent = name + ' creation will open here in a future release.';
+    toast.classList.add('is-open');
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(function () {
+      toast.classList.remove('is-open');
+      toast.textContent = '';
+    }, 4200);
   });
 })();
 </script>
