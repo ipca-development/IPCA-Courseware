@@ -80,10 +80,138 @@ $rows = $result['rows'];
 $tableError = (!$result['ok']) ? ($result['error'] ?? 'Unknown error') : '';
 $blockCounts = $result['ok'] ? rl_block_counts_by_edition_map($pdo) : [];
 
+$rlTab = strtolower(trim((string)($_GET['tab'] ?? 'json')));
+if (!in_array($rlTab, ['json', 'crawlers', 'apis'], true)) {
+    $rlTab = 'json';
+}
+$rlCrawl = strtolower(trim((string)($_GET['crawl'] ?? 'aim')));
+if (!in_array($rlCrawl, ['aim', 'reserved2', 'reserved3'], true)) {
+    $rlCrawl = 'aim';
+}
+
 cw_header('Resource Library');
 ?>
 <style>
-  .rl-wrap { max-width: 1100px; }
+  /* Match admin Theory Control Center shell */
+  .rl-admin-page {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 0 4px 40px;
+    box-sizing: border-box;
+  }
+  .tcc-page { display: flex; flex-direction: column; gap: 18px; }
+  .tcc-hero { padding: 22px 24px; }
+  .tcc-eyebrow {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: #64748b;
+    font-weight: 800;
+    margin-bottom: 8px;
+  }
+  .tcc-title {
+    margin: 0;
+    font-size: 32px;
+    line-height: 1.05;
+    letter-spacing: -0.04em;
+    color: #102845;
+  }
+  .tcc-sub {
+    margin-top: 10px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: #56677f;
+    max-width: 980px;
+  }
+  .tcc-tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+  .tcc-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 42px;
+    padding: 0 14px;
+    border-radius: 12px;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 800;
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    background: #fff;
+    color: #102845;
+  }
+  .tcc-tab.active { background: #12355f; color: #fff; border-color: #12355f; }
+  .rl-tab-panel { margin-top: 0; }
+  .rl-wrap { max-width: 1100px; margin: 0 auto; }
+  .rl-type-pill {
+    display: inline-flex;
+    align-items: center;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 4px 9px;
+    border-radius: 999px;
+    background: #e0e7ff;
+    color: #1e3a8a;
+    border: 1px solid #c7d2fe;
+    margin-bottom: 8px;
+    width: fit-content;
+  }
+  .rl-crawl-subtabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 18px;
+  }
+  .rl-crawl-sub {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
+    padding: 0 12px;
+    border-radius: 10px;
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 800;
+    border: 1px solid rgba(15, 23, 42, 0.1);
+    background: #fff;
+    color: #475569;
+  }
+  .rl-crawl-sub.active { background: #102845; color: #fff; border-color: #102845; }
+  .rl-crawl-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 18px;
+    align-items: stretch;
+  }
+  .rl-crawler-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 440px;
+    text-align: left;
+  }
+  .rl-crawler-card .rl-card-thumb { pointer-events: none; }
+  .rl-crawler-spec {
+    font-size: 12px;
+    color: #475569;
+    line-height: 1.5;
+    padding: 0 16px 14px;
+    margin: 0;
+    flex: 1;
+  }
+  .rl-crawler-spec ul { margin: 8px 0 0 1.1rem; padding: 0; }
+  .rl-crawler-spec li { margin-bottom: 6px; }
+  .rl-api-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+  .rl-api-list li {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 14px 16px;
+    background: #fff;
+  }
+  .rl-api-list code { font-size: 12px; background: #f1f5f9; padding: 2px 6px; border-radius: 6px; }
   .rl-intro {
     color: #64748b;
     font-size: 14px;
@@ -392,59 +520,169 @@ cw_header('Resource Library');
   }
 </style>
 
-<div class="rl-wrap" id="rlPage" data-api="<?= h($apiHref) ?>" data-search-api="<?= h($searchTestHref) ?>">
-  <p class="rl-intro">
-    Reference editions for the platform. Click a book to edit metadata or upload / replace the JSON used as the live resource body
-    (stored under <code>storage/resource_library/{id}/source.json</code> on the server).
-    Editions marked <strong>Live</strong> are used automatically to enrich bulk slide vision and overlay narration/references (when blocks are indexed); set an edition to Draft to stop using it for AI context.
-  </p>
+<div class="tcc-page rl-admin-page">
+  <section class="card tcc-hero">
+    <div class="tcc-eyebrow">Admin · Resource Library</div>
+    <h1 class="tcc-title">Resource Library</h1>
+    <div class="tcc-sub">
+      Central library for <strong>JSON / book references</strong> (e.g. PHAK blocks for AI retrieval), upcoming <strong>data crawlers</strong> (FAA AIM HTML and other official sources),
+      and <strong>API</strong> entrypoints used by admin tools. Pick a tab to filter resource types; book cards and crawler cards share the same card layout — only the editor modal differs by type.
+    </div>
+  </section>
 
-  <?php if (!$result['ok']): ?>
-    <div class="rl-alert"><?= rl_table_missing_message($tableError) ?></div>
-  <?php elseif ($rows === []): ?>
-    <div class="rl-empty">No editions yet. After running <code>scripts/sql/resource_library_editions.sql</code>, add rows in
-      <code>resource_library_editions</code>, then use this page to manage them.</div>
+  <section class="card" style="padding:14px 16px;">
+    <nav class="tcc-tabs" aria-label="Resource library sections">
+      <a class="tcc-tab <?= $rlTab === 'json' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=json">JSON / Book references</a>
+      <a class="tcc-tab <?= $rlTab === 'crawlers' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=crawlers">Data crawlers</a>
+      <a class="tcc-tab <?= $rlTab === 'apis' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=apis">APIs</a>
+    </nav>
+  </section>
+
+  <?php if ($rlTab === 'json'): ?>
+    <div class="rl-wrap rl-tab-panel" id="rlPage" data-api="<?= h($apiHref) ?>" data-search-api="<?= h($searchTestHref) ?>">
+      <p class="rl-intro">
+        <strong>PHAK and other handbooks</strong> live here as JSON-backed editions. Click a book to edit metadata or upload / replace the JSON used as the live resource body
+        (stored under <code>storage/resource_library/{id}/source.json</code> on the server).
+        Editions marked <strong>Live</strong> are used automatically to enrich bulk slide vision, overlay narration/references, and instructor training reports when blocks are indexed; set an edition to Draft to stop using it for AI context.
+      </p>
+
+      <?php if (!$result['ok']): ?>
+        <div class="rl-alert"><?= rl_table_missing_message($tableError) ?></div>
+      <?php elseif ($rows === []): ?>
+        <div class="rl-empty">No editions yet. After running <code>scripts/sql/resource_library_editions.sql</code>, add rows in
+          <code>resource_library_editions</code>, then use this page to manage them.</div>
+      <?php else: ?>
+        <div class="rl-grid" id="rlGrid">
+          <?php foreach ($rows as $row): ?>
+            <?php
+              $eid = (int)($row['id'] ?? 0);
+              $title = (string)($row['title'] ?? '');
+              $revCode = (string)($row['revision_code'] ?? '');
+              $revDate = (string)($row['revision_date'] ?? '');
+              $status = (string)($row['status'] ?? 'draft');
+              $thumb = rl_thumb_src(isset($row['thumbnail_path']) ? (string)$row['thumbnail_path'] : '');
+              $ts = $revDate !== '' ? strtotime($revDate . 'T12:00:00') : false;
+              $revDisplay = ($ts !== false) ? date('F j, Y', $ts) : '—';
+              $blockN = (int)($blockCounts[$eid] ?? 0);
+              $sourcePresent = rl_source_stat($eid)['present'] ?? false;
+              $validated = $sourcePresent && $blockN > 0;
+            ?>
+            <button type="button" class="rl-card" data-id="<?= $eid ?>" data-resource-type="json_book" aria-label="Edit <?= h($title) ?>">
+              <div class="rl-card-thumb">
+                <img class="rl-card-cover" src="<?= h($thumb) ?>" alt="" loading="lazy" width="180" height="240">
+              </div>
+              <div class="rl-card-body">
+                <span class="rl-type-pill">JSON / Book</span>
+                <h2 class="rl-card-title"><?= h($title) ?></h2>
+                <dl class="rl-meta">
+                  <dt>Version</dt>
+                  <dd><?= h($revCode) ?></dd>
+                  <dt>Revision date</dt>
+                  <dd><?= h($revDisplay) ?></dd>
+                  <dt>Status</dt>
+                  <dd class="rl-status-dd">
+                    <div class="rl-status-badges">
+                      <span class="<?= h(rl_status_class($status)) ?>"><?= h(rl_status_label($status)) ?></span>
+                      <?php if ($validated): ?>
+                        <span class="rl-status rl-status-validated">Validated</span>
+                      <?php endif; ?>
+                    </div>
+                  </dd>
+                </dl>
+              </div>
+              <div class="rl-card-hint">Click to edit · sync · test search</div>
+            </button>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+    </div>
+
+  <?php elseif ($rlTab === 'crawlers'): ?>
+    <div class="rl-wrap rl-tab-panel">
+      <p class="rl-intro">
+        Data crawlers ingest <strong>official HTML publications</strong> (starting with the FAA AIM), normalize URLs and anchors, and store structured records for AI retrieval with verifiable citations.
+        Use the three crawler slots below to switch specifications; implementation is staged per slot.
+      </p>
+      <nav class="rl-crawl-subtabs" aria-label="Crawler slots">
+        <a class="rl-crawl-sub <?= $rlCrawl === 'aim' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=crawlers&amp;crawl=aim">AIM (HTML)</a>
+        <a class="rl-crawl-sub <?= $rlCrawl === 'reserved2' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=crawlers&amp;crawl=reserved2">Crawler slot 2</a>
+        <a class="rl-crawl-sub <?= $rlCrawl === 'reserved3' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=crawlers&amp;crawl=reserved3">Crawler slot 3</a>
+      </nav>
+
+      <?php if ($rlCrawl === 'aim'): ?>
+        <div class="rl-crawl-grid">
+          <article class="rl-crawler-card" data-resource-type="crawler_aim">
+            <div class="rl-card-thumb">
+              <img class="rl-card-cover" src="/assets/icons/documents.svg" alt="" width="120" height="120" loading="lazy">
+            </div>
+            <div class="rl-card-body">
+              <span class="rl-type-pill">Data crawler · Planned</span>
+              <h2 class="rl-card-title">FAA AIM (HTML)</h2>
+              <p class="rl-meta" style="margin:0;font-size:13px;color:#64748b;">Canonical crawl under <code>faa.gov/.../atpubs/aim_html/</code> — child page URLs, preserved anchors, absolute links only.</p>
+            </div>
+            <div class="rl-crawler-spec">
+              <strong>Indexed record fields (planned):</strong>
+              <ul>
+                <li><code>source_url</code>, <code>canonical_url</code>, <code>page_title</code>, chapter / section / paragraph numbers, <code>effective_date</code>, <code>change_number</code>, <code>crawled_at</code>, <code>content_hash</code>.</li>
+                <li>Preserve internal anchors (<code>#aim0403</code>, etc.); citations prefer <strong>page + exact anchor</strong>, never only the AIM homepage when deeper URLs exist.</li>
+                <li>Normalize relative links to absolute <code>https://www.faa.gov/...</code>; restrict scope to the AIM HTML tree only.</li>
+                <li>Store parent hierarchy (chapter → section → paragraph) for citations like <em>AIM 4-3-2</em> with precise FAA URL.</li>
+                <li>Version traceability + supersede broken URLs on refresh runs; AI must refuse uncited AIM claims when retrieval misses.</li>
+              </ul>
+              <p style="margin:10px 0 0;"><strong>AI prompt rule (planned):</strong> For AIM answers, only use retrieved local index rows; every AIM factual claim includes paragraph id + FAA URL — no generic FAA pages when a specific AIM URL exists.</p>
+            </div>
+            <div class="rl-card-hint">Crawler UI and database wiring will open from this card in a later release (same modal pattern as JSON / Book).</div>
+          </article>
+        </div>
+
+      <?php elseif ($rlCrawl === 'reserved2'): ?>
+        <div class="rl-crawl-grid">
+          <article class="rl-crawler-card" data-resource-type="crawler_reserved">
+            <div class="rl-card-thumb">
+              <img class="rl-card-cover" src="/assets/icons/documents.svg" alt="" width="120" height="120" loading="lazy">
+            </div>
+            <div class="rl-card-body">
+              <span class="rl-type-pill">Data crawler · Reserved</span>
+              <h2 class="rl-card-title">Crawler slot 2</h2>
+              <p class="rl-meta" style="margin:0;font-size:13px;color:#64748b;">Reserved for a second official HTML or structured source (e.g. AC index). Same card and modal pattern as other library resources.</p>
+            </div>
+            <div class="rl-crawler-spec">No crawler configured in this slot yet.</div>
+            <div class="rl-card-hint">—</div>
+          </article>
+        </div>
+
+      <?php else: ?>
+        <div class="rl-crawl-grid">
+          <article class="rl-crawler-card" data-resource-type="crawler_reserved">
+            <div class="rl-card-thumb">
+              <img class="rl-card-cover" src="/assets/icons/documents.svg" alt="" width="120" height="120" loading="lazy">
+            </div>
+            <div class="rl-card-body">
+              <span class="rl-type-pill">Data crawler · Reserved</span>
+              <h2 class="rl-card-title">Crawler slot 3</h2>
+              <p class="rl-meta" style="margin:0;font-size:13px;color:#64748b;">Reserved for a third crawler source. Configuration and ingest will mirror slot 1.</p>
+            </div>
+            <div class="rl-crawler-spec">No crawler configured in this slot yet.</div>
+            <div class="rl-card-hint">—</div>
+          </article>
+        </div>
+      <?php endif; ?>
+    </div>
+
   <?php else: ?>
-    <div class="rl-grid" id="rlGrid">
-      <?php foreach ($rows as $row): ?>
-        <?php
-          $eid = (int)($row['id'] ?? 0);
-          $title = (string)($row['title'] ?? '');
-          $revCode = (string)($row['revision_code'] ?? '');
-          $revDate = (string)($row['revision_date'] ?? '');
-          $status = (string)($row['status'] ?? 'draft');
-          $thumb = rl_thumb_src(isset($row['thumbnail_path']) ? (string)$row['thumbnail_path'] : '');
-          $ts = $revDate !== '' ? strtotime($revDate . 'T12:00:00') : false;
-          $revDisplay = ($ts !== false) ? date('F j, Y', $ts) : '—';
-          $blockN = (int)($blockCounts[$eid] ?? 0);
-          $sourcePresent = rl_source_stat($eid)['present'] ?? false;
-          $validated = $sourcePresent && $blockN > 0;
-        ?>
-        <button type="button" class="rl-card" data-id="<?= $eid ?>" aria-label="Edit <?= h($title) ?>">
-          <div class="rl-card-thumb">
-            <img class="rl-card-cover" src="<?= h($thumb) ?>" alt="" loading="lazy" width="180" height="240">
-          </div>
-          <div class="rl-card-body">
-            <h2 class="rl-card-title"><?= h($title) ?></h2>
-            <dl class="rl-meta">
-              <dt>Version</dt>
-              <dd><?= h($revCode) ?></dd>
-              <dt>Revision date</dt>
-              <dd><?= h($revDisplay) ?></dd>
-              <dt>Status</dt>
-              <dd class="rl-status-dd">
-                <div class="rl-status-badges">
-                  <span class="<?= h(rl_status_class($status)) ?>"><?= h(rl_status_label($status)) ?></span>
-                  <?php if ($validated): ?>
-                    <span class="rl-status rl-status-validated">Validated</span>
-                  <?php endif; ?>
-                </div>
-              </dd>
-            </dl>
-          </div>
-          <div class="rl-card-hint">Click to edit · sync · test search</div>
-        </button>
-      <?php endforeach; ?>
+    <div class="rl-wrap rl-tab-panel">
+      <p class="rl-intro">HTTP endpoints used by this library. Authentication follows normal admin session rules.</p>
+      <ul class="rl-api-list">
+        <li>
+          <strong>Editions &amp; JSON file API</strong> — upload / download <code>source.json</code>, thumbnails, metadata, block sync.<br>
+          <code><?= h($apiHref) ?></code>
+        </li>
+        <li>
+          <strong>Retrieval test (admin)</strong> — FULLTEXT search and optional model answer over indexed blocks.<br>
+          <code><?= h($searchTestHref) ?></code>
+        </li>
+      </ul>
+      <p class="rl-intro" style="margin-top:16px;">When the AIM crawler ships, its admin API will be listed here alongside ingestion status and re-crawl controls.</p>
     </div>
   <?php endif; ?>
 </div>
@@ -567,7 +805,7 @@ cw_header('Resource Library');
   var searchApi = page.getAttribute('data-search-api') || '';
   var grid = document.getElementById('rlGrid');
   var backdrop = document.getElementById('rlBackdrop');
-  if (!grid || !backdrop) return;
+  if (!backdrop) return;
 
   var closeBtn = document.getElementById('rlClose');
   var cancelBtn = document.getElementById('rlCancel');
@@ -821,13 +1059,15 @@ cw_header('Resource Library');
       });
   }
 
-  grid.querySelectorAll('.rl-card[data-id]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      var id = btn.getAttribute('data-id');
-      if (!id) return;
-      loadEdition(id);
+  if (grid) {
+    grid.querySelectorAll('.rl-card[data-id]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        var id = btn.getAttribute('data-id');
+        if (!id) return;
+        loadEdition(id);
+      });
     });
-  });
+  }
 
   if (saveBtn) saveBtn.addEventListener('click', function () {
     clearMsg();
