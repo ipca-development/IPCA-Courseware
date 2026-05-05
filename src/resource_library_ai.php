@@ -113,7 +113,7 @@ function rl_ai_search_resource_blocks(PDO $pdo, int $editionId, string $query, i
             ORDER BY MATCH(body_text) AGAINST (? IN NATURAL LANGUAGE MODE) DESC
             LIMIT ?
         ');
-        $stmt->execute([$editionId, $query, $query, $limit]);
+        $stmt->execute([$editionId, $query, $query, (int)$limit]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if (is_array($rows) && $rows !== []) {
             return $rows;
@@ -131,29 +131,8 @@ function rl_ai_search_resource_blocks(PDO $pdo, int $editionId, string $query, i
         }
         $sumExpr = implode(' + ', $likeParts);
         $nKw = count($likeParams);
-        $minScore = $nKw >= 3 ? 2 : ($nKw === 2 ? 2 : 1);
-        if ($nKw >= 2) {
-            try {
-                $sql = "
-                    SELECT block_key, chapter, block_local_id, body_text, section_path_json, sort_index, block_type, `level`,
-                        {$sumExpr} AS kw_score
-                    FROM resource_library_blocks
-                    WHERE edition_id = ?
-                      AND {$sumExpr} >= ?
-                    ORDER BY kw_score DESC, sort_index ASC
-                    LIMIT ?
-                ";
-                $stmt = $pdo->prepare($sql);
-                $bind = array_merge($likeParams, [$editionId], $likeParams, [$minScore, $limit]);
-                $stmt->execute($bind);
-                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                if (is_array($rows) && $rows !== []) {
-                    return $rows;
-                }
-            } catch (Throwable $e) {
-                // continue
-            }
-        }
+        $limSql = (string)(int)$limit;
+
         if ($nKw === 1) {
             try {
                 $stmt = $pdo->prepare('
@@ -161,13 +140,37 @@ function rl_ai_search_resource_blocks(PDO $pdo, int $editionId, string $query, i
                     FROM resource_library_blocks
                     WHERE edition_id = ? AND body_text LIKE ?
                     ORDER BY sort_index ASC
-                    LIMIT ?
+                    LIMIT ' . $limSql . '
                 ');
-                $stmt->execute([$editionId, $likeParams[0], $limit]);
+                $stmt->execute([$editionId, $likeParams[0]]);
 
                 return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             } catch (Throwable $e) {
                 return [];
+            }
+        }
+
+        if ($nKw >= 2) {
+            $orExpr = implode(' OR ', $likeParts);
+            try {
+                $sql = "
+                    SELECT block_key, chapter, block_local_id, body_text, section_path_json, sort_index, block_type, `level`,
+                        {$sumExpr} AS kw_score
+                    FROM resource_library_blocks
+                    WHERE edition_id = ?
+                      AND ({$orExpr})
+                    ORDER BY kw_score DESC, sort_index ASC
+                    LIMIT {$limSql}
+                ";
+                $stmt = $pdo->prepare($sql);
+                $bind = array_merge($likeParams, [$editionId], $likeParams);
+                $stmt->execute($bind);
+                $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                if (is_array($rows) && $rows !== []) {
+                    return $rows;
+                }
+            } catch (Throwable $e) {
+                // continue
             }
         }
     }
