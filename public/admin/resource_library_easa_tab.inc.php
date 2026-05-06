@@ -72,6 +72,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   @media (max-width: 900px) {
     .rl-easa-split { grid-template-columns: 1fr; }
   }
+  .rl-msg.rl-easa-msg.is-info {
+    display: block;
+    background: #eff6ff;
+    color: #1e40af;
+    border: 1px solid #bfdbfe;
+  }
 </style>
 
 <section class="card" style="padding:14px 16px;">
@@ -234,7 +240,31 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     var el = document.getElementById('rlEasaUploadMsg');
     if (!el) return;
     el.textContent = text || '';
-    el.className = 'rl-msg rl-easa-msg' + (text ? (kind === 'ok' ? ' is-ok' : ' is-error') : '');
+    var suffix = '';
+    if (text) {
+      if (kind === 'ok') suffix = ' is-ok';
+      else if (kind === 'info') suffix = ' is-info';
+      else suffix = ' is-error';
+    }
+    el.className = 'rl-msg rl-easa-msg' + suffix;
+  }
+
+  function rlEasaParseUploadResponse(r) {
+    return r.text().then(function (t) {
+      var j = null;
+      if (t) {
+        try {
+          j = JSON.parse(t);
+        } catch (e) {
+          /* fall through */
+        }
+      }
+      if (!j || typeof j !== 'object') {
+        var snippet = String(t || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
+        throw new Error(snippet || ('HTTP ' + r.status + ' ' + (r.statusText || '')));
+      }
+      return { ok: r.ok, j: j };
+    });
   }
 
   function loadStatus() {
@@ -377,8 +407,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       var fd = new FormData();
       fd.append('erules_xml', fileInp.files[0]);
       uploadBtn.disabled = true;
+      setUploadMsg('Uploading…', 'info');
+      var msgEl = document.getElementById('rlEasaUploadMsg');
+      if (msgEl && msgEl.scrollIntoView) msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       fetch(api, { method: 'POST', body: fd, credentials: 'same-origin' })
-        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(rlEasaParseUploadResponse)
         .then(function (x) {
           if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Upload failed');
           setUploadMsg(x.j.message || 'Uploaded.', 'ok');

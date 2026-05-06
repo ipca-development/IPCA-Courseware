@@ -128,12 +128,13 @@ if ($method !== 'POST') {
 
 $contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? ''));
 
-if (str_contains($contentType, 'multipart/form-data')) {
+// Prefer $_FILES over Content-Type: some stacks omit or rewrite CONTENT_TYPE while still populating FILES.
+$hasErulesUpload = isset($_FILES['erules_xml']) && is_array($_FILES['erules_xml']);
+$multipartLike = str_contains($contentType, 'multipart/form-data') || str_contains($contentType, 'multipart/');
+
+if ($hasErulesUpload) {
     if (!easa_download_monitor_tables_ok($pdo)) {
         rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules.sql first']);
-    }
-    if (!isset($_FILES['erules_xml']) || !is_array($_FILES['erules_xml'])) {
-        rl_easa_json_out(400, ['ok' => false, 'error' => 'Missing file field erules_xml']);
     }
     $err = (int) ($_FILES['erules_xml']['error'] ?? UPLOAD_ERR_NO_FILE);
     if ($err !== UPLOAD_ERR_OK) {
@@ -177,6 +178,13 @@ if (str_contains($contentType, 'multipart/form-data')) {
         'batch_id' => $batchId,
         'sha256' => $sha,
         'message' => 'File stored as official evidence. Click “Parse XML → staging” for this batch (after applying staging SQL if needed).',
+    ]);
+}
+
+if ($multipartLike) {
+    rl_easa_json_out(400, [
+        'ok' => false,
+        'error' => 'Missing file field erules_xml, or the upload exceeded PHP limits (post_max_size / upload_max_filesize).',
     ]);
 }
 
