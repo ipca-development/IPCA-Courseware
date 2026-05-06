@@ -6,8 +6,15 @@ declare(strict_types=1);
  * Settings live in resource_library_editions.extra_config_json:
  * - source_verify_url (optional; crawlers may fall back to allowed_url_prefix)
  * - source_verify_interval: off | daily | weekly | monthly
- * - source_verify_state: server-managed probe results (etag, last check, change flag)
+ * - source_verify_state: server-managed probe results (etag, last check, change flag,
+ *   and when available page_last_updated from the published HTML for document control)
+ *
+ * After headers succeed, a bounded GET reads HTML and extracts lines such as
+ * "Last updated: Friday, November 3, 2023" (e.g. FAA handbook pages) for audit evidence.
  */
+
+/** Maximum HTML bytes to download for on-page "Last updated" extraction (footer may be late in document). */
+const RL_SOURCE_VERIFY_HTML_CAP_BYTES = 2097152; // 2 MiB
 
 /**
  * @return list<string>
@@ -95,7 +102,106 @@ function rl_source_verify_validate_https_url(string $url, int $maxLen = 2048): ?
 }
 
 /**
- * Lightweight HEAD (or GET fallback) with response headers for change detection.
+ * Extract published "last updated" / similar editorial lines from HTML (document control).
+ * Tuned for FAA handbook-style pages, e.g. "Last updated: Friday, November 3, 2023".
+ */
+function rl_source_verify_parse_page_last_updated(string $html): ?string
+{
+    // Prefer blocks that close before the next tag (FAA often wraps the date in inline markup).
+    $patterns = [
+        '/Last\s+updated\s*:\s*(.+?)<\/(?:p|div|h\d|li|span|td|section)/isu',
+        '/Page\s+last\s+updated\s*:\s*(.+?)<\/(?:p|div|li|span|td)/isu',
+        '/Date\s+last\s+updated\s*:\s*(.+?)<\/(?:p|div|li|span|td)/isu',
+        '/Last\s+revised\s*:\s*(.+?)<\/(?:p|div|li|span|td)/isu',
+        '/Last\s+updated\s*:\s*([^<\n\r]+)/iu',
+        '/Page\s+last\s+updated\s*:\s*([^<\n\r]+)/iu',
+        '/Date\s+last\s+updated\s*:\s*([^<\n\r]+)/iu',
+        '/Last\s+revised\s*:\s*([^<\n\r]+)/iu',
+    ];
+    foreach ($patterns as $pattern) {
+        if (preg_match($pattern, $html, $m)) {
+            $t = trim(html_entity_decode(strip_tags($m[1]), ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+            $t = preg_replace('/\s+/u', ' ', $t) ?? $t;
+            if ($t !== '' && strlen($t) <= 512) {
+                return $t;
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * GET up to $maxBytes of HTML from URL (follow redirects) for on-page date extraction.
+ *
+ * @return array{ok: bool, http_code: int, final_url: string, body: string, error?: string}
+ */
+function rl_source_verify_fetch_html_snippet(string $url, int $maxBytes, int $timeoutSec): array
+{
+    $url = trim($url);
+    if ($url === '' || !function_exists('curl_init')) {
+        return ['ok' => false, 'http_code' => 0, 'final_url' => $url, 'body' => '', 'error' => 'Missing URL or cURL'];
+    }
+
+    $buf = '';
+    $writer = static function ($ch, string $data) use (&$buf): int {
+        $buf .= $data;
+
+        return strlen($data);
+    };
+    $ch = curl_init($url);
+    if ($ch === false) {
+        return ['ok' => false, 'http_code' => 0, 'final_url' => $url, 'body' => '', 'error' => 'curl_init failed'];
+    }
+    $opts = [
+        CURLOPT_HTTPGET => true,
+        CURLOPT_HEADER => false,
+        CURLOPT_FOLLOWLOCATION => true,
+        CURLOPT_MAXREDIRS => 10,
+        CURLOPT_TIMEOUT => $timeoutSec,
+        CURLOPT_CONNECTTIMEOUT => min(12, $timeoutSec),
+        CURLOPT_SSL_VERIFYPEER => true,
+        CURLOPT_USERAGENT => 'IPCA-ResourceLibrary/1.2 (source verify; HTML snippet)',
+        CURLOPT_WRITEFUNCTION => $writer,
+    ];
+    if (!defined('CURLOPT_MAXFILESIZE')) {
+        $opts[CURLOPT_HTTPHEADER] = ['Range: bytes=0-' . (string) ($maxBytes - 1)];
+    }
+    curl_setopt_array($ch, $opts);
+    if (defined('CURLOPT_MAXFILESIZE')) {
+        curl_setopt($ch, CURLOPT_MAXFILESIZE, $maxBytes);
+    }
+    $execOk = curl_exec($ch);
+    $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $final = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
+    $cerr = curl_error($ch);
+    $final = $final !== '' ? $final : $url;
+    if ($code === 0 && $buf === '') {
+        return ['ok' => false, 'http_code' => 0, 'final_url' => $final, 'body' => '', 'error' => $cerr !== '' ? $cerr : 'No HTTP response'];
+    }
+    $truncated = !$execOk && $buf !== '' && str_contains(strtolower($cerr), 'maximum file size exceeded');
+    $ok = $code >= 200 && $code < 400 && ($execOk || $truncated);
+    if (!$ok && $buf === '') {
+        return [
+            'ok' => false,
+            'http_code' => $code,
+            'final_url' => $final,
+            'body' => '',
+            'error' => 'HTTP ' . $code . ($cerr !== '' ? ' · ' . $cerr : ''),
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'http_code' => $code,
+        'final_url' => $final,
+        'body' => $buf,
+        'error' => null,
+    ];
+}
+
+/**
+ * HEAD (or minimal GET) with response headers only.
  *
  * @return array{
  *   ok: bool,
@@ -107,7 +213,7 @@ function rl_source_verify_validate_https_url(string $url, int $maxLen = 2048): ?
  *   error?: string
  * }
  */
-function rl_source_verify_http_probe(string $url, int $timeoutSec = 20): array
+function rl_source_verify_http_probe_headers(string $url, int $timeoutSec = 20): array
 {
     $url = trim($url);
     if ($url === '') {
@@ -162,7 +268,6 @@ function rl_source_verify_http_probe(string $url, int $timeoutSec = 20): array
                 : 'IPCA-ResourceLibrary/1.1 (source verify; GET)',
         ];
         if (!$nobody) {
-            // Servers that reject HEAD: request a single byte to keep headers + minimal body.
             $opts[CURLOPT_HTTPHEADER] = ['Range: bytes=0-0'];
         }
         curl_setopt_array($ch, $opts);
@@ -170,14 +275,12 @@ function rl_source_verify_http_probe(string $url, int $timeoutSec = 20): array
         $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
         $final = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
         $cerr = curl_error($ch);
-        curl_close($ch);
 
         return ['code' => $code, 'final' => $final !== '' ? $final : $url, 'cerr' => $cerr];
     };
 
     $hdr = [];
     $first = $run(true);
-    // Some servers return 405/501 for HEAD; retry once with GET (no body via range not universally supported).
     if ($first['code'] === 405 || $first['code'] === 501 || $first['code'] === 400) {
         $hdr = [];
         $first = $run(false);
@@ -217,6 +320,43 @@ function rl_source_verify_http_probe(string $url, int $timeoutSec = 20): array
 }
 
 /**
+ * Headers plus bounded HTML read to capture on-page "Last updated" (document control / compliance).
+ *
+ * @return array{
+ *   ok: bool,
+ *   http_code: int,
+ *   final_url: string,
+ *   etag?: string,
+ *   last_modified?: string,
+ *   content_length?: string,
+ *   page_last_updated?: string,
+ *   page_body_fetch_error?: string,
+ *   error?: string
+ * }
+ */
+function rl_source_verify_http_probe(string $url, int $timeoutSec = 20): array
+{
+    $out = rl_source_verify_http_probe_headers($url, $timeoutSec);
+    if (!($out['ok'] ?? false)) {
+        return $out;
+    }
+
+    $getUrl = (string) ($out['final_url'] ?? $url);
+    $snippet = rl_source_verify_fetch_html_snippet($getUrl, RL_SOURCE_VERIFY_HTML_CAP_BYTES, $timeoutSec);
+    if (!($snippet['ok'] ?? false)) {
+        $out['page_body_fetch_error'] = (string) ($snippet['error'] ?? 'HTML snippet fetch failed');
+
+        return $out;
+    }
+
+    $html = (string) ($snippet['body'] ?? '');
+    $parsed = $html !== '' ? rl_source_verify_parse_page_last_updated($html) : null;
+    $out['page_last_updated'] = $parsed ?? '';
+
+    return $out;
+}
+
+/**
  * Build a compact signature string for change detection.
  *
  * @param array<string, mixed> $probe
@@ -229,6 +369,7 @@ function rl_source_verify_signature_from_probe(array $probe): string
         (string) ($probe['content_length'] ?? ''),
         (string) ($probe['final_url'] ?? ''),
         (string) ($probe['http_code'] ?? ''),
+        (string) ($probe['page_last_updated'] ?? ''),
     ];
 
     return implode("\n", $parts);
@@ -256,6 +397,14 @@ function rl_source_verify_advance_state(array $oldState, array $probe, DateTimeI
     if (isset($probe['content_length'])) {
         $next['content_length'] = (string) $probe['content_length'];
     }
+    if (array_key_exists('page_last_updated', $probe)) {
+        $next['page_last_updated'] = (string) $probe['page_last_updated'];
+    } elseif (isset($probe['page_body_fetch_error'], $oldState['page_last_updated']) && (string) $oldState['page_last_updated'] !== '') {
+        $next['page_last_updated'] = (string) $oldState['page_last_updated'];
+    }
+    if (isset($probe['page_body_fetch_error'])) {
+        $next['page_body_fetch_error'] = (string) $probe['page_body_fetch_error'];
+    }
 
     if (!($probe['ok'] ?? false)) {
         $next['last_error'] = (string) ($probe['error'] ?? 'Probe failed');
@@ -270,6 +419,9 @@ function rl_source_verify_advance_state(array $oldState, array $probe, DateTimeI
     }
 
     unset($next['last_error']);
+    if (!isset($probe['page_body_fetch_error'])) {
+        unset($next['page_body_fetch_error']);
+    }
     $sig = rl_source_verify_signature_from_probe($probe);
     $next['signature'] = $sig;
     $prevSig = trim((string) ($oldState['signature'] ?? ''));

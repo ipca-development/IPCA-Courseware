@@ -94,6 +94,9 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         if (!empty($newState['change_detected'])) {
             $line .= ' · CHANGE_DETECTED';
         }
+        if (!empty($newState['page_last_updated'])) {
+            $line .= ' · page_last_updated=' . $newState['page_last_updated'];
+        }
         echo $line . "\n";
     } catch (Throwable $e) {
         ++$nErrors;

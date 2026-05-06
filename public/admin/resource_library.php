@@ -1043,7 +1043,8 @@ cw_header('Resource Library');
         </div>
         <div class="rl-field">
           <label for="rlEditionVerifyUrl">Official page to verify (HTTPS)</label>
-          <input type="url" id="rlEditionVerifyUrl" maxlength="2048" placeholder="FAA page where this handbook revision is published" autocomplete="off">
+          <input type="url" id="rlEditionVerifyUrl" maxlength="2048" placeholder="e.g. FAA PHAK handbook listing page" autocomplete="off">
+          <p class="rl-drop-meta" style="margin-top:6px;">For document control, the verifier records the official page's declared <strong>Last updated</strong> line from the HTML (when present), in addition to HTTP headers. Compare this to your edition metadata when the FAA publishes a new revision.</p>
         </div>
         <div class="rl-field">
           <label for="rlEditionVerifyInterval">Automatically verify</label>
@@ -1153,6 +1154,7 @@ cw_header('Resource Library');
         <div class="rl-field">
           <label for="rlAimVerifyUrl">Official page to check for updates (optional)</label>
           <input type="url" id="rlAimVerifyUrl" maxlength="2048" placeholder="Leave empty to use the main crawl URL" autocomplete="off">
+          <p class="rl-drop-meta" style="margin-top:6px;">When set, the same HTML <strong>Last updated</strong> capture applies for audit evidence (aviation document control).</p>
         </div>
         <div class="rl-field">
           <label for="rlAimVerifyInterval">Automatically verify</label>
@@ -1481,7 +1483,14 @@ cw_header('Resource Library');
     var parts = ['Schedule: ' + interval];
     if (st.checked_at) parts.push('Last check (UTC): ' + st.checked_at);
     if (st.http_code != null && st.http_code !== '') parts.push('Last HTTP ' + st.http_code);
-    if (st.change_detected) parts.push('Change suspected — compare headers or re-import JSON');
+    if (st.page_last_updated) {
+      parts.push('Source declares (HTML): ' + st.page_last_updated);
+    } else if (st.page_body_fetch_error) {
+      parts.push('HTML capture: ' + st.page_body_fetch_error);
+    } else if (st.checked_at && !st.last_error) {
+      parts.push('On-page Last updated: not found in first 2 MiB of HTML');
+    }
+    if (st.change_detected) parts.push('Change suspected — official page or headers changed; confirm revision');
     if (st.last_error) parts.push('Probe error: ' + st.last_error);
     el.textContent = parts.length > 1 ? parts.join(' · ') : (parts[0] || '—');
   }
@@ -1657,6 +1666,9 @@ cw_header('Resource Library');
           lines.push(j.reachable ? 'Result: reachable (2xx/3xx)' : 'Result: not reachable or error');
           if (j.etag) lines.push('ETag: ' + j.etag);
           if (j.last_modified) lines.push('Last-Modified: ' + j.last_modified);
+          if (j.page_last_updated) lines.push('On-page Last updated (HTML): ' + j.page_last_updated);
+          else if (j.reachable && !j.page_body_fetch_error) lines.push('On-page Last updated: not matched in HTML (first 2 MiB)');
+          if (j.page_body_fetch_error) lines.push('HTML capture: ' + j.page_body_fetch_error);
           if (j.error) lines.push('Detail: ' + j.error);
           if (out) out.textContent = lines.join('\n');
         })
@@ -1907,7 +1919,14 @@ cw_header('Resource Library');
     var parts = ['Schedule: ' + interval];
     if (st.checked_at) parts.push('Last check (UTC): ' + st.checked_at);
     if (st.http_code != null && st.http_code !== '') parts.push('Last HTTP ' + st.http_code);
-    if (st.change_detected) parts.push('Change suspected — compare headers or re-import');
+    if (st.page_last_updated) {
+      parts.push('Source declares (HTML): ' + st.page_last_updated);
+    } else if (st.page_body_fetch_error) {
+      parts.push('HTML capture: ' + st.page_body_fetch_error);
+    } else if (st.checked_at && !st.last_error) {
+      parts.push('On-page Last updated: not found in first 2 MiB of HTML');
+    }
+    if (st.change_detected) parts.push('Change suspected — official page or headers changed');
     if (st.last_error) parts.push('Probe error: ' + st.last_error);
     el.textContent = parts.length > 1 ? parts.join(' · ') : (parts[0] || '—');
   }
@@ -2128,6 +2147,9 @@ cw_header('Resource Library');
           lines.push(j.reachable ? 'Result: reachable (2xx/3xx)' : 'Result: not reachable or error');
           if (j.etag) lines.push('ETag: ' + j.etag);
           if (j.last_modified) lines.push('Last-Modified: ' + j.last_modified);
+          if (j.page_last_updated) lines.push('On-page Last updated (HTML): ' + j.page_last_updated);
+          else if (j.reachable && !j.page_body_fetch_error) lines.push('On-page Last updated: not matched in HTML (first 2 MiB)');
+          if (j.page_body_fetch_error) lines.push('HTML capture: ' + j.page_body_fetch_error);
           if (j.error) lines.push('Detail: ' + j.error);
           if (out) out.textContent = lines.join('\n');
         })
@@ -2386,6 +2408,11 @@ cw_header('Resource Library');
           lines.push('HTTP ' + (j.http_code != null ? j.http_code : 0));
           if (j.final_url) lines.push('Final URL: ' + j.final_url);
           lines.push(j.reachable ? 'Result: reachable (2xx/3xx)' : 'Result: not reachable or error');
+          if (j.etag) lines.push('ETag: ' + j.etag);
+          if (j.last_modified) lines.push('Last-Modified: ' + j.last_modified);
+          if (j.page_last_updated) lines.push('On-page Last updated (HTML): ' + j.page_last_updated);
+          else if (j.reachable && !j.page_body_fetch_error) lines.push('On-page Last updated: not matched in HTML (first 2 MiB)');
+          if (j.page_body_fetch_error) lines.push('HTML capture: ' + j.page_body_fetch_error);
           if (j.error) lines.push('Detail: ' + j.error);
           if (out) out.textContent = lines.join('\n');
         })

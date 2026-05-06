@@ -94,6 +94,12 @@ function rl_crawler_api_probe_url(string $url, int $timeoutSec = 18): array
     } else {
         $out['last_modified'] = null;
     }
+    if (array_key_exists('page_last_updated', $p)) {
+        $out['page_last_updated'] = (string) $p['page_last_updated'];
+    } else {
+        $out['page_last_updated'] = null;
+    }
+    $out['page_body_fetch_error'] = isset($p['page_body_fetch_error']) ? (string) $p['page_body_fetch_error'] : null;
 
     return $out;
 }
@@ -216,6 +222,8 @@ if ($action === 'test_url') {
         'error' => $probe['error'] ?? null,
         'etag' => $probe['etag'] ?? null,
         'last_modified' => $probe['last_modified'] ?? null,
+        'page_last_updated' => $probe['page_last_updated'] ?? null,
+        'page_body_fetch_error' => $probe['page_body_fetch_error'] ?? null,
     ]);
 }
 

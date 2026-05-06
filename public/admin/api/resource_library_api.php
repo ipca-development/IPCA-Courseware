@@ -302,6 +302,8 @@ if ($action === 'test_source_verify') {
         'error' => $probe['error'] ?? null,
         'etag' => $probe['etag'] ?? null,
         'last_modified' => $probe['last_modified'] ?? null,
+        'page_last_updated' => array_key_exists('page_last_updated', $probe) ? (string) $probe['page_last_updated'] : null,
+        'page_body_fetch_error' => $probe['page_body_fetch_error'] ?? null,
     ]);
 }
 
