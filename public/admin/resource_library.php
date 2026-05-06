@@ -83,6 +83,29 @@ function rl_status_class(string $status): string
 }
 
 /**
+ * Card line for automatic source verification (UTC).
+ *
+ * @param array<string, mixed>|null $verifyState source_verify_state from extra_config_json
+ */
+function rl_resource_library_card_last_checked(?array $verifyState): string
+{
+    if (!is_array($verifyState)) {
+        return '—';
+    }
+    $raw = trim((string) ($verifyState['checked_at'] ?? ''));
+    if ($raw === '') {
+        return '—';
+    }
+    try {
+        $dt = new DateTimeImmutable($raw, new DateTimeZone('UTC'));
+
+        return $dt->format('M j, Y g:i A') . ' UTC';
+    } catch (Throwable) {
+        return $raw;
+    }
+}
+
+/**
  * @param 'card'|'crawler' $shell Card shell matches JSON grid; crawler shell matches AIM / reserved cards.
  */
 function rl_add_source_card(string $dataKind, string $shell, string $title, string $blurb, bool $showTypePill = false, ?string $typePillLabel = null): void
@@ -338,9 +361,28 @@ cw_header('Resource Library');
     line-height: 1.35;
     margin: 0;
   }
-  .rl-meta { font-size: 13px; color: #475569; display: flex; flex-direction: column; gap: 4px; }
-  .rl-meta dt { float: left; clear: left; width: 7.5rem; color: #64748b; font-weight: 500; }
-  .rl-meta dd { margin: 0 0 0 7.5rem; color: #0f172a; }
+  .rl-meta {
+    font-size: 13px;
+    color: #475569;
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    column-gap: 10px;
+    row-gap: 8px;
+    align-items: start;
+  }
+  .rl-meta dt {
+    margin: 0;
+    color: #64748b;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .rl-meta dt::after { content: ':'; }
+  .rl-meta dd {
+    margin: 0;
+    color: #0f172a;
+    min-width: 0;
+    text-align: left;
+  }
   .rl-status {
     display: inline-flex;
     align-items: center;
@@ -351,7 +393,6 @@ cw_header('Resource Library');
     padding: 4px 10px;
     border-radius: 999px;
     width: fit-content;
-    margin-top: 4px;
   }
   .rl-status-live { background: #dcfce7; color: #166534; }
   .rl-status-draft { background: #f1f5f9; color: #475569; }
@@ -364,7 +405,6 @@ cw_header('Resource Library');
     align-items: center;
     margin: 0;
   }
-  .rl-meta dd.rl-status-dd { margin-left: 7.5rem; }
   .rl-empty {
     border: 1px dashed #cbd5e1;
     border-radius: 14px;
@@ -699,6 +739,14 @@ cw_header('Resource Library');
               $blockN = (int)($blockCounts[$eid] ?? 0);
               $sourcePresent = rl_source_stat($eid)['present'] ?? false;
               $validated = $sourcePresent && $blockN > 0;
+              $jsonVerifyExtra = [];
+              if (array_key_exists('extra_config_json', $row)) {
+                  $jsonVerifyExtra = rl_catalog_decode_extra($row['extra_config_json'] !== null && (string) $row['extra_config_json'] !== ''
+                      ? (string) $row['extra_config_json']
+                      : null);
+              }
+              $jsonSvState = is_array($jsonVerifyExtra['source_verify_state'] ?? null) ? $jsonVerifyExtra['source_verify_state'] : [];
+              $jsonLastChecked = rl_resource_library_card_last_checked($jsonSvState);
             ?>
             <button type="button" class="rl-card" data-id="<?= $eid ?>" data-resource-type="json_book" aria-label="Edit <?= h($title) ?>">
               <div class="rl-card-thumb">
@@ -712,6 +760,8 @@ cw_header('Resource Library');
                   <dd><?= h($revCode) ?></dd>
                   <dt>Revision date</dt>
                   <dd><?= h($revDisplay) ?></dd>
+                  <dt>Last checked on</dt>
+                  <dd><?= h($jsonLastChecked) ?></dd>
                   <dt>Status</dt>
                   <dd class="rl-status-dd">
                     <div class="rl-status-badges">
@@ -789,6 +839,8 @@ cw_header('Resource Library');
                   $effDisp = $ets !== false ? date('F j, Y', $ets) : '—';
               }
               $aimThumb = is_array($aimEdition) ? rl_catalog_edition_thumb_src($aimEdition) : '/assets/icons/documents.svg';
+              $aimSvState = is_array($aimSrc['source_verify_state'] ?? null) ? $aimSrc['source_verify_state'] : [];
+              $aimLastChecked = rl_resource_library_card_last_checked($aimSvState);
             ?>
             <button type="button" class="rl-card" id="rlAimCardOpen" data-edition-id="<?= $sid ?>" aria-label="Edit AIM crawler settings">
               <div class="rl-card-thumb">
@@ -802,6 +854,8 @@ cw_header('Resource Library');
                   <dd><?= h($verDisp) ?></dd>
                   <dt>Revision date</dt>
                   <dd><?= h($effDisp) ?></dd>
+                  <dt>Last checked on</dt>
+                  <dd><?= h($aimLastChecked) ?></dd>
                   <dt>Status</dt>
                   <dd class="rl-status-dd">
                     <div class="rl-status-badges">
@@ -918,6 +972,8 @@ cw_header('Resource Library');
                 $apiEffDisp = $ets !== false ? date('F j, Y', $ets) : '—';
             }
             $apiThumb = rl_catalog_edition_thumb_src($apiRow);
+            $apiSvState = is_array($apiSrc['source_verify_state'] ?? null) ? $apiSrc['source_verify_state'] : [];
+            $apiLastChecked = rl_resource_library_card_last_checked($apiSvState);
           ?>
           <button type="button" class="rl-card rl-api-edition-card" data-edition-id="<?= $aeid ?>" aria-label="Edit <?= h($apiLabel) ?>">
             <div class="rl-card-thumb">
@@ -931,6 +987,8 @@ cw_header('Resource Library');
                 <dd><?= h($apiVerDisp) ?></dd>
                 <dt>Revision date</dt>
                 <dd><?= h($apiEffDisp) ?></dd>
+                <dt>Last checked on</dt>
+                <dd><?= h($apiLastChecked) ?></dd>
                 <dt>Status</dt>
                 <dd class="rl-status-dd">
                   <div class="rl-status-badges">
