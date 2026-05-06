@@ -227,6 +227,67 @@ if ($action === 'test_url') {
     ]);
 }
 
+if ($action === 'create') {
+    $kind = trim((string) ($data['edition_kind'] ?? ''));
+    $allowedKind = ['crawler_aim', 'crawler_reserved2', 'crawler_reserved3', 'api'];
+    if (!in_array($kind, $allowedKind, true)) {
+        rl_crawler_api_json(400, ['ok' => false, 'error' => 'Invalid edition_kind for create (expected crawler_aim, crawler_reserved2, crawler_reserved3, or api).']);
+    }
+    try {
+        $payload = rl_catalog_creation_defaults($kind);
+    } catch (InvalidArgumentException $e) {
+        rl_crawler_api_json(400, ['ok' => false, 'error' => $e->getMessage()]);
+    }
+    if ($payload['resource_type'] === RL_RESOURCE_CRAWLER) {
+        $slotCheck = trim((string) ($payload['extra']['crawler_slot'] ?? ''));
+        if ($slotCheck !== '' && rl_catalog_fetch_crawler_edition_by_slot($pdo, $slotCheck) !== null) {
+            rl_crawler_api_json(409, [
+                'ok' => false,
+                'error' => 'This crawler slot already has an edition. Edit the existing card, or archive it before adding another.',
+                'slot' => $slotCheck,
+            ]);
+        }
+    }
+    try {
+        $newId = rl_catalog_insert_edition(
+            $pdo,
+            (string) $payload['resource_type'],
+            (string) $payload['title'],
+            (string) $payload['revision_code'],
+            $payload['revision_date'],
+            (string) $payload['status'],
+            $payload['work_code'],
+            null,
+            is_array($payload['extra']) ? $payload['extra'] : []
+        );
+    } catch (Throwable $e) {
+        rl_crawler_api_json(500, ['ok' => false, 'error' => $e->getMessage()]);
+    }
+    $rowIns = rl_catalog_fetch_edition($pdo, $newId);
+    if (!is_array($rowIns)) {
+        rl_crawler_api_json(500, ['ok' => false, 'error' => 'Inserted row could not be reloaded']);
+    }
+    $rtIns = rl_catalog_normalize_resource_type(isset($rowIns['resource_type']) ? (string) $rowIns['resource_type'] : null);
+    $srcIns = $rtIns === RL_RESOURCE_CRAWLER ? rl_catalog_crawler_row_as_source($rowIns) : rl_catalog_api_row_as_source($rowIns);
+    $extraIns = rl_catalog_decode_extra(isset($rowIns['extra_config_json']) ? (string) $rowIns['extra_config_json'] : null);
+    $slotIns = (string) ($extraIns['crawler_slot'] ?? '');
+    $ctypeIns = (string) ($extraIns['crawler_type'] ?? '');
+    $statsIns = ($rtIns === RL_RESOURCE_CRAWLER && $slotIns === 'aim' && $ctypeIns === 'aim_html')
+        ? rl_crawler_api_aim_stats($pdo, $newId)
+        : [
+            'counts' => ['active' => 0, 'superseded' => 0, 'url_broken' => 0, 'total' => 0],
+            'last_run' => null,
+        ];
+    rl_crawler_api_json(201, [
+        'ok' => true,
+        'id' => $newId,
+        'resource_type' => $rtIns,
+        'source' => $srcIns,
+        'counts' => $statsIns['counts'],
+        'last_run' => $statsIns['last_run'],
+    ]);
+}
+
 if ($action !== 'save') {
     rl_crawler_api_json(400, ['ok' => false, 'error' => 'Unknown action']);
 }

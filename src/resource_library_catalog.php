@@ -68,6 +68,159 @@ function rl_catalog_encode_extra(array $data): string
     return $enc;
 }
 
+function rl_catalog_next_sort_order(PDO $pdo, string $resourceType): int
+{
+    if (!rl_catalog_has_resource_type_column($pdo)) {
+        return 0;
+    }
+    $rt = rl_catalog_normalize_resource_type($resourceType);
+    $stmt = $pdo->prepare('SELECT COALESCE(MAX(sort_order), 0) FROM resource_library_editions WHERE resource_type = ?');
+    $stmt->execute([$rt]);
+
+    return ((int) $stmt->fetchColumn()) + 10;
+}
+
+/**
+ * Insert a new editions row (admin “Add” flows).
+ *
+ * @param array<string, mixed> $extra Merged into extra_config_json (may be empty).
+ *
+ * @throws RuntimeException validation / DB errors
+ */
+function rl_catalog_insert_edition(
+    PDO $pdo,
+    string $resourceType,
+    string $title,
+    string $revisionCode,
+    ?string $revisionDateYmd,
+    string $status,
+    ?string $workCode,
+    ?int $sortOrder,
+    array $extra
+): int {
+    if (!rl_catalog_has_resource_type_column($pdo)) {
+        throw new RuntimeException(
+            'resource_library_editions.resource_type is missing. Apply scripts/sql/resource_library_editions_extend_types.sql'
+        );
+    }
+    $rt = rl_catalog_normalize_resource_type($resourceType);
+    if ($rt !== RL_RESOURCE_JSON_BOOK && $rt !== RL_RESOURCE_CRAWLER && $rt !== RL_RESOURCE_API) {
+        throw new RuntimeException('Invalid resource_type for insert');
+    }
+    if (!in_array($status, ['draft', 'live', 'archived'], true)) {
+        throw new RuntimeException('Invalid status');
+    }
+    $title = trim($title);
+    if ($title === '' || strlen($title) > 512) {
+        throw new RuntimeException('Title is required (max 512 characters)');
+    }
+    $revisionCode = trim($revisionCode);
+    if (strlen($revisionCode) > 128) {
+        throw new RuntimeException('Revision / version code is too long');
+    }
+    $workDb = ($workCode !== null && trim((string) $workCode) !== '') ? trim((string) $workCode) : null;
+    $so = $sortOrder ?? rl_catalog_next_sort_order($pdo, $rt);
+    $enc = rl_catalog_encode_extra($extra);
+    $stmt = $pdo->prepare('
+        INSERT INTO resource_library_editions (
+            title, revision_code, revision_date, status, thumbnail_path, work_code, sort_order, resource_type, extra_config_json
+        ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?)
+    ');
+    $stmt->execute([
+        $title,
+        $revisionCode,
+        $revisionDateYmd,
+        $status,
+        $workDb,
+        $so,
+        $rt,
+        $enc,
+    ]);
+    $newId = (int) $pdo->lastInsertId();
+    if ($newId <= 0) {
+        throw new RuntimeException('Insert did not return an edition id');
+    }
+
+    return $newId;
+}
+
+/**
+ * Default payloads for Resource Library “Add” buttons (edition_kind matches data-rl-add).
+ *
+ * @return array{resource_type:string,title:string,revision_code:string,revision_date:?string,status:string,work_code:?string,extra:array<string,mixed>}
+ */
+function rl_catalog_creation_defaults(string $editionKind): array
+{
+    $today = gmdate('Y-m-d');
+
+    return match ($editionKind) {
+        'json_book' => [
+            'resource_type' => RL_RESOURCE_JSON_BOOK,
+            'title' => 'New handbook edition',
+            'revision_code' => 'draft',
+            'revision_date' => $today,
+            'status' => 'draft',
+            'work_code' => null,
+            'extra' => [],
+        ],
+        'crawler_aim' => [
+            'resource_type' => RL_RESOURCE_CRAWLER,
+            'title' => 'FAA AIM HTML crawler',
+            'revision_code' => '',
+            'revision_date' => null,
+            'status' => 'draft',
+            'work_code' => null,
+            'extra' => [
+                'crawler_slot' => 'aim',
+                'crawler_type' => 'aim_html',
+                'allowed_url_prefix' => 'https://www.faa.gov/Air_traffic/Publications/atpubs/aim_html/',
+                'notes' => '',
+            ],
+        ],
+        'crawler_reserved2' => [
+            'resource_type' => RL_RESOURCE_CRAWLER,
+            'title' => 'Reserved crawler (slot 2)',
+            'revision_code' => '',
+            'revision_date' => null,
+            'status' => 'draft',
+            'work_code' => null,
+            'extra' => [
+                'crawler_slot' => 'reserved2',
+                'crawler_type' => 'reserved',
+                'allowed_url_prefix' => 'https://www.faa.gov/',
+                'notes' => 'Placeholder URL — replace when slot 2 crawler is configured.',
+            ],
+        ],
+        'crawler_reserved3' => [
+            'resource_type' => RL_RESOURCE_CRAWLER,
+            'title' => 'Reserved crawler (slot 3)',
+            'revision_code' => '',
+            'revision_date' => null,
+            'status' => 'draft',
+            'work_code' => null,
+            'extra' => [
+                'crawler_slot' => 'reserved3',
+                'crawler_type' => 'reserved',
+                'allowed_url_prefix' => 'https://www.faa.gov/',
+                'notes' => 'Placeholder URL — replace when slot 3 crawler is configured.',
+            ],
+        ],
+        'api' => [
+            'resource_type' => RL_RESOURCE_API,
+            'title' => 'Registered API source',
+            'revision_code' => 'v1',
+            'revision_date' => $today,
+            'status' => 'draft',
+            'work_code' => null,
+            'extra' => [
+                'api_base_url' => '',
+                'notes' => '',
+            ],
+        ],
+        default => throw new InvalidArgumentException('Unknown edition_kind for creation'),
+    };
+}
+
 /**
  * @return array<string, mixed>|null
  */

@@ -107,12 +107,13 @@ function rl_resource_library_card_last_checked(?array $verifyState): string
 /**
  * @param 'card'|'crawler' $shell Card shell matches JSON grid; crawler shell matches AIM / reserved cards.
  */
-function rl_add_source_card(string $dataKind, string $shell, string $title, string $blurb, bool $showTypePill = false, ?string $typePillLabel = null): void
+function rl_add_source_card(string $dataKind, string $shell, string $title, string $blurb, bool $showTypePill = false, ?string $typePillLabel = null, ?string $hintFoot = null): void
 {
     $classes = $shell === 'crawler'
         ? 'rl-crawler-card rl-add-card'
         : 'rl-card rl-add-card';
     $aria = 'Add: ' . $title;
+    $hint = $hintFoot !== null && $hintFoot !== '' ? $hintFoot : 'Creates a new catalog row (draft). You can edit it next.';
     ?>
     <button type="button" class="<?= h($classes) ?>" data-rl-add="<?= h($dataKind) ?>" aria-label="<?= h($aria) ?>">
       <div class="rl-card-thumb">
@@ -125,7 +126,7 @@ function rl_add_source_card(string $dataKind, string $shell, string $title, stri
         <h2 class="rl-card-title"><?= h($title) ?></h2>
         <p class="rl-meta rl-add-blurb"><?= h($blurb) ?></p>
       </div>
-      <div class="rl-card-hint">Create flow coming soon</div>
+      <div class="rl-card-hint"><?= h($hint) ?></div>
     </button>
     <?php
 }
@@ -1441,6 +1442,11 @@ cw_header('Resource Library');
     msg.className = 'rl-msg';
     if (!text) return;
     msg.classList.add(kind === 'ok' ? 'is-ok' : 'is-error');
+    if (kind !== 'ok') {
+      try {
+        msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (ignore) { /* IE / older */ }
+    }
   }
 
   function clearMsg() {
@@ -1486,7 +1492,10 @@ cw_header('Resource Library');
       return;
     }
     var id = parseInt(document.getElementById('rlFieldId').value, 10);
-    if (!id) return;
+    if (!id) {
+      showMsg('Save the edition first so it has an id, or reopen it from the list, then upload a cover.', 'err');
+      return;
+    }
     var fd = new FormData();
     fd.append('edition_id', String(id));
     fd.append('thumbnail_image', file, file.name);
@@ -1708,14 +1717,36 @@ cw_header('Resource Library');
 
   if (saveBtn) saveBtn.addEventListener('click', function () {
     clearMsg();
+    var titleTrim = (document.getElementById('rlFieldTitle').value || '').trim();
+    var revTrim = (document.getElementById('rlFieldRevCode').value || '').trim();
+    var rdVal = (document.getElementById('rlFieldRevDate').value || '').trim();
+    var bookProblems = [];
+    if (!titleTrim) bookProblems.push('Book title is required.');
+    if (!revTrim) bookProblems.push('Version / revision code is required (e.g. FAA handbook id such as FAA-H-8083-25C).');
+    if (!rdVal) bookProblems.push('Revision date is required.');
+    else if (!/^\d{4}-\d{2}-\d{2}$/.test(rdVal)) bookProblems.push('Revision date must be complete (YYYY-MM-DD).');
+    if (bookProblems.length) {
+      showMsg(bookProblems.join(' '), 'err');
+      return;
+    }
+    var metaForm = document.getElementById('rlMetaForm');
+    if (metaForm && typeof metaForm.checkValidity === 'function' && !metaForm.checkValidity()) {
+      if (typeof metaForm.reportValidity === 'function') {
+        metaForm.reportValidity();
+      }
+      return;
+    }
     var id = parseInt(document.getElementById('rlFieldId').value, 10);
-    if (!id) return;
+    if (!id) {
+      showMsg('No edition loaded. Close the dialog, click your book card, then save.', 'err');
+      return;
+    }
     var body = {
       action: 'save',
       id: id,
-      title: document.getElementById('rlFieldTitle').value,
-      revision_code: document.getElementById('rlFieldRevCode').value,
-      revision_date: document.getElementById('rlFieldRevDate').value,
+      title: titleTrim,
+      revision_code: revTrim,
+      revision_date: rdVal,
       status: document.getElementById('rlFieldStatus').value,
       sort_order: parseInt(document.getElementById('rlFieldSort').value, 10) || 0,
       work_code: document.getElementById('rlFieldWork').value,
@@ -1749,8 +1780,16 @@ cw_header('Resource Library');
     editionVerifyTestBtn.addEventListener('click', function () {
       clearMsg();
       var id = parseInt(document.getElementById('rlFieldId').value, 10);
-      if (!id) return;
+      if (!id) {
+        showMsg('Open a saved edition first before testing the verify URL.', 'err');
+        return;
+      }
       var ov = (document.getElementById('rlEditionVerifyTestOverride') && document.getElementById('rlEditionVerifyTestOverride').value || '').trim();
+      var vu = (document.getElementById('rlEditionVerifyUrl') && document.getElementById('rlEditionVerifyUrl').value || '').trim();
+      if (!ov && !vu) {
+        showMsg('Provide an official verify URL in the field above or enter an optional override for this test.', 'err');
+        return;
+      }
       var body = { action: 'test_source_verify', id: id };
       if (ov) body.url = ov;
       var out = document.getElementById('rlEditionVerifyTestOut');
@@ -1790,7 +1829,10 @@ cw_header('Resource Library');
   if (uploadBtn) uploadBtn.addEventListener('click', function () {
     clearMsg();
     var id = parseInt(document.getElementById('rlFieldId').value, 10);
-    if (!id) return;
+    if (!id) {
+      showMsg('Open a book edition from the list first (it needs an id before you can attach JSON).', 'err');
+      return;
+    }
     if (!fileInput || !fileInput.files || !fileInput.files.length) {
       showMsg('Choose a .json file first.', 'err');
       return;
@@ -1817,7 +1859,10 @@ cw_header('Resource Library');
   if (syncBlocksBtn) syncBlocksBtn.addEventListener('click', function () {
     clearMsg();
     var id = parseInt(document.getElementById('rlFieldId').value, 10);
-    if (!id) return;
+    if (!id) {
+      showMsg('Open a saved book edition first, then sync after JSON is uploaded.', 'err');
+      return;
+    }
     syncBlocksBtn.disabled = true;
     fetch(api, {
       method: 'POST',
@@ -1872,7 +1917,10 @@ cw_header('Resource Library');
     }
     var id = parseInt(document.getElementById('rlFieldId').value, 10);
     var q = testQuery ? (testQuery.value || '').trim() : '';
-    if (!id) return;
+    if (!id) {
+      showMsg('Open an edition first so retrieval tests apply to it.', 'err');
+      return;
+    }
     if (!q) {
       showMsg('Enter a topic or question first.', 'err');
       return;
@@ -1935,26 +1983,93 @@ cw_header('Resource Library');
 (function () {
   var toast = document.getElementById('rlAddToast');
   if (!toast) return;
+  var jsonApi = <?= json_encode($apiHref, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+  var editionApi = <?= json_encode($crawlerApiHref, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
   var labels = {
     json_book: 'JSON / book reference',
     crawler_aim: 'AIM HTML crawler',
     crawler_reserved2: 'Crawler (slot 2)',
     crawler_reserved3: 'Crawler (slot 3)',
-    api: 'API endpoint'
+    api: 'API source'
+  };
+  var redirectTab = {
+    json_book: '?tab=json',
+    crawler_aim: '?tab=crawlers&crawl=aim',
+    crawler_reserved2: '?tab=crawlers&crawl=reserved2',
+    crawler_reserved3: '?tab=crawlers&crawl=reserved3',
+    api: '?tab=apis'
   };
   var hideTimer;
-  document.addEventListener('click', function (e) {
-    var btn = e.target && e.target.closest && e.target.closest('[data-rl-add]');
-    if (!btn) return;
-    var k = btn.getAttribute('data-rl-add') || '';
-    var name = labels[k] || 'Resource';
-    toast.textContent = name + ' creation will open here in a future release.';
+
+  function openToast(msg, isErr) {
+    toast.textContent = msg || '';
+    toast.style.background = isErr ? '#991b1b' : '#102845';
     toast.classList.add('is-open');
     clearTimeout(hideTimer);
     hideTimer = setTimeout(function () {
       toast.classList.remove('is-open');
       toast.textContent = '';
-    }, 4200);
+      toast.style.background = '';
+    }, isErr ? 6500 : 3200);
+  }
+
+  document.addEventListener('click', function (e) {
+    var btn = e.target && e.target.closest && e.target.closest('[data-rl-add]');
+    if (!btn) return;
+    e.preventDefault();
+    var k = btn.getAttribute('data-rl-add') || '';
+    if (!redirectTab[k]) {
+      openToast('Unknown add action.', true);
+      return;
+    }
+    if (btn.disabled) return;
+    btn.disabled = true;
+    var label = labels[k] || 'Resource';
+    openToast('Creating ' + label + '…', false);
+
+    if (k === 'json_book') {
+      fetch(jsonApi, {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'create' })
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+        .then(function (x) {
+          if (!x.ok || !x.j || !x.j.ok) {
+            var err = (x.j && x.j.error) ? x.j.error : 'Create failed';
+            if (x.status === 409 || x.status === 400) openToast(err, true);
+            else openToast(err + (x.status ? ' (HTTP ' + x.status + ')' : ''), true);
+            return;
+          }
+          window.location.href = window.location.pathname + redirectTab[k];
+        })
+        .catch(function (err) {
+          openToast(err.message || 'Network error', true);
+        })
+        .finally(function () { btn.disabled = false; });
+      return;
+    }
+
+    fetch(editionApi, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', edition_kind: k })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+      .then(function (x) {
+        if (!x.ok || !x.j || !x.j.ok) {
+          var er = (x.j && x.j.error) ? x.j.error : 'Create failed';
+          openToast(er, true);
+          return;
+        }
+        window.location.href = window.location.pathname + redirectTab[k];
+      })
+      .catch(function (err) {
+        openToast(err.message || 'Network error', true);
+      })
+      .finally(function () { btn.disabled = false; });
   });
 })();
 </script>
@@ -1975,6 +2090,11 @@ cw_header('Resource Library');
     m.className = 'rl-msg';
     if (!text) return;
     m.classList.add(kind === 'ok' ? 'is-ok' : 'is-error');
+    if (kind !== 'ok') {
+      try {
+        m.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (ignore) { /* ignore */ }
+    }
   }
   function clearAimMsg() { showAimMsg('', ''); }
 
@@ -2133,7 +2253,10 @@ cw_header('Resource Library');
       return;
     }
     var id = parseInt(document.getElementById('rlAimFieldId').value, 10);
-    if (!id) return;
+    if (!id) {
+      showAimMsg('Reload the crawler from the AIM card before uploading a cover.', 'err');
+      return;
+    }
     var fd = new FormData();
     fd.append('edition_id', String(id));
     fd.append('thumbnail_image', file, file.name);
@@ -2192,15 +2315,33 @@ cw_header('Resource Library');
   if (aimSave) {
     aimSave.addEventListener('click', function () {
       clearAimMsg();
+      var labelEl = document.getElementById('rlAimFieldLabel');
+      var urlEl = document.getElementById('rlAimFieldUrl');
+      var effEl = document.getElementById('rlAimFieldEffective');
+      var lab = (labelEl && labelEl.value || '').trim();
+      var crawlUrl = (urlEl && urlEl.value || '').trim();
+      var effRaw = (effEl && effEl.value || '').trim();
+      var aimProblems = [];
+      if (!lab) aimProblems.push('Title is required.');
+      if (!crawlUrl) aimProblems.push('Main crawl URL (allowed path prefix) is required.');
+      else if (!/^https:\/\//i.test(crawlUrl)) aimProblems.push('Main crawl URL must start with https://');
+      if (effRaw && !/^\d{4}-\d{2}-\d{2}$/.test(effRaw)) aimProblems.push('Revision / effective date must be a full date (YYYY-MM-DD) or left empty.');
+      if (aimProblems.length) {
+        showAimMsg(aimProblems.join(' '), 'err');
+        return;
+      }
       var id = parseInt(document.getElementById('rlAimFieldId').value, 10);
-      if (!id) return;
+      if (!id) {
+        showAimMsg('No crawler edition loaded. Close the dialog and open the AIM card again.', 'err');
+        return;
+      }
       var body = {
         action: 'save',
         id: id,
-        label: document.getElementById('rlAimFieldLabel').value,
-        allowed_url_prefix: document.getElementById('rlAimFieldUrl').value,
-        change_number: document.getElementById('rlAimFieldChange').value,
-        effective_date: document.getElementById('rlAimFieldEffective').value,
+        label: lab,
+        allowed_url_prefix: crawlUrl,
+        change_number: (document.getElementById('rlAimFieldChange').value || '').trim(),
+        effective_date: effRaw,
         status: document.getElementById('rlAimFieldStatus').value,
         notes: document.getElementById('rlAimFieldNotes').value,
         thumbnail_path: document.getElementById('rlAimFieldThumb').value,
@@ -2231,7 +2372,10 @@ cw_header('Resource Library');
     aimTestBtn.addEventListener('click', function () {
       clearAimMsg();
       var id = parseInt(document.getElementById('rlAimFieldId').value, 10);
-      if (!id) return;
+      if (!id) {
+        showAimMsg('Open the AIM crawler edition first.', 'err');
+        return;
+      }
       var ov = (document.getElementById('rlAimTestOverride').value || '').trim();
       var body = { action: 'test_url', id: id };
       if (ov) body.url = ov;
@@ -2286,6 +2430,11 @@ cw_header('Resource Library');
     m.className = 'rl-msg';
     if (!text) return;
     m.classList.add(kind === 'ok' ? 'is-ok' : 'is-error');
+    if (kind !== 'ok') {
+      try {
+        m.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      } catch (ignore) { /* ignore */ }
+    }
   }
   function clearApiMsg() { showApiMsg('', ''); }
 
@@ -2436,7 +2585,10 @@ cw_header('Resource Library');
       return;
     }
     var id = parseInt(document.getElementById('rlApiFieldId').value, 10);
-    if (!id) return;
+    if (!id) {
+      showApiMsg('Open an API edition from the list before uploading a cover.', 'err');
+      return;
+    }
     var fd = new FormData();
     fd.append('edition_id', String(id));
     fd.append('thumbnail_image', file, file.name);
@@ -2494,15 +2646,34 @@ cw_header('Resource Library');
   if (apiSave) {
     apiSave.addEventListener('click', function () {
       clearApiMsg();
+      var labelApi = (document.getElementById('rlApiFieldLabel').value || '').trim();
+      var baseApi = (document.getElementById('rlApiFieldBaseUrl').value || '').trim();
+      var effApi = (document.getElementById('rlApiFieldEffective').value || '').trim();
+      var apiProblems = [];
+      if (!labelApi) apiProblems.push('Title is required.');
+      if (baseApi && !/^https:\/\//i.test(baseApi)) apiProblems.push('API base URL must start with https:// or be left empty until configured.');
+      if (effApi && !/^\d{4}-\d{2}-\d{2}$/.test(effApi)) apiProblems.push('Revision date must be YYYY-MM-DD or empty.');
+      var vn = parseInt(String(document.getElementById('rlApiEcfrTitleNum').value || ''), 10);
+      var secEl = document.getElementById('rlApiEcfrSection');
+      var secV = secEl ? String(secEl.value || '').trim() : '';
+      if (!isNaN(vn) && vn < 1) apiProblems.push('CFR title number must be blank (default 14) or a positive integer.');
+      if (secV.length > 64) apiProblems.push('Section id is too long (max 64 characters).');
+      if (apiProblems.length) {
+        showApiMsg(apiProblems.join(' '), 'err');
+        return;
+      }
       var id = parseInt(document.getElementById('rlApiFieldId').value, 10);
-      if (!id) return;
+      if (!id) {
+        showApiMsg('No API edition loaded. Close the dialog and click the API card again.', 'err');
+        return;
+      }
       var body = {
         action: 'save',
         id: id,
-        label: document.getElementById('rlApiFieldLabel').value,
-        api_base_url: document.getElementById('rlApiFieldBaseUrl').value,
-        change_number: document.getElementById('rlApiFieldChange').value,
-        effective_date: document.getElementById('rlApiFieldEffective').value,
+        label: labelApi,
+        api_base_url: baseApi,
+        change_number: (document.getElementById('rlApiFieldChange').value || '').trim(),
+        effective_date: effApi,
         status: document.getElementById('rlApiFieldStatus').value,
         notes: document.getElementById('rlApiFieldNotes').value,
         thumbnail_path: document.getElementById('rlApiFieldThumb').value,
@@ -2539,8 +2710,16 @@ cw_header('Resource Library');
     apiTestBtn.addEventListener('click', function () {
       clearApiMsg();
       var id = parseInt(document.getElementById('rlApiFieldId').value, 10);
-      if (!id) return;
+      if (!id) {
+        showApiMsg('Open an API edition first, then run the connection test.', 'err');
+        return;
+      }
       var ov = (document.getElementById('rlApiTestOverride').value || '').trim();
+      var defBase = (document.getElementById('rlApiFieldBaseUrl').value || '').trim();
+      if (!ov && !defBase) {
+        showApiMsg('Set an API base URL or enter an optional test override URL.', 'err');
+        return;
+      }
       var body = { action: 'test_url', id: id };
       if (ov) body.url = ov;
       var out = document.getElementById('rlApiTestOut');

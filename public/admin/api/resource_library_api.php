@@ -333,6 +333,60 @@ if ($action === 'import_blocks') {
     ]);
 }
 
+if ($action === 'create') {
+    if (!rl_catalog_has_resource_type_column($pdo)) {
+        rl_api_json_out(400, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_editions_extend_types.sql so resource_type exists, then retry.']);
+    }
+    try {
+        $def = rl_catalog_creation_defaults('json_book');
+    } catch (Throwable $e) {
+        rl_api_json_out(500, ['ok' => false, 'error' => $e->getMessage()]);
+    }
+    $title = trim((string) ($data['title'] ?? $def['title']));
+    $revisionCode = trim((string) ($data['revision_code'] ?? $def['revision_code']));
+    $revisionDate = trim((string) ($data['revision_date'] ?? (string) $def['revision_date']));
+    $workIn = array_key_exists('work_code', $data) ? trim((string) $data['work_code']) : ($def['work_code'] ?? '');
+    $workCreate = $workIn === '' ? null : $workIn;
+    if ($title === '' || strlen($title) > 512) {
+        rl_api_json_out(400, ['ok' => false, 'error' => 'Title is required (max 512 characters).']);
+    }
+    if ($revisionCode === '' || strlen($revisionCode) > 128) {
+        rl_api_json_out(400, ['ok' => false, 'error' => 'Version / revision code is required (max 128 characters).']);
+    }
+    if ($revisionDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $revisionDate)) {
+        rl_api_json_out(400, ['ok' => false, 'error' => 'revision_date must be YYYY-MM-DD']);
+    }
+    if ($workCreate !== null && strlen($workCreate) > 64) {
+        rl_api_json_out(400, ['ok' => false, 'error' => 'Work code is too long']);
+    }
+    try {
+        $newId = rl_catalog_insert_edition(
+            $pdo,
+            RL_RESOURCE_JSON_BOOK,
+            $title,
+            $revisionCode,
+            $revisionDate,
+            'draft',
+            $workCreate,
+            null,
+            is_array($def['extra']) ? $def['extra'] : []
+        );
+    } catch (Throwable $e) {
+        rl_api_json_out(500, ['ok' => false, 'error' => $e->getMessage()]);
+    }
+    $rowOut = rl_api_load_edition($pdo, $newId);
+    if (!$rowOut) {
+        rl_api_json_out(500, ['ok' => false, 'error' => 'Created edition could not be loaded']);
+    }
+    rl_api_json_out(201, [
+        'ok' => true,
+        'id' => $newId,
+        'edition' => $rowOut,
+        'source' => rl_source_stat($newId),
+        'blocks' => rl_blocks_stats($pdo, $newId),
+    ]);
+}
+
 if ($action !== 'save') {
     rl_api_json_out(400, ['ok' => false, 'error' => 'Unknown action']);
 }
