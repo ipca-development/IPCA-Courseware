@@ -118,6 +118,90 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     color: #475569;
     font-variant-numeric: tabular-nums;
   }
+  .rl-easa-browse-grid {
+    display: grid;
+    grid-template-columns: minmax(280px, 1fr) minmax(320px, 1.1fr);
+    gap: 16px;
+    align-items: start;
+    margin-top: 12px;
+  }
+  @media (max-width: 960px) {
+    .rl-easa-browse-grid { grid-template-columns: 1fr; }
+  }
+  .rl-easa-tree-panel {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px 12px;
+    max-height: min(70vh, 560px);
+    overflow: auto;
+    background: #fafbfc;
+    font-size: 13px;
+  }
+  .rl-easa-tree-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 0 0 2px;
+  }
+  .rl-easa-tree-list .rl-easa-tree-list {
+    margin-left: 10px;
+    padding-left: 8px;
+    border-left: 1px solid #e2e8f0;
+  }
+  .rl-easa-tree-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 4px;
+    margin: 2px 0;
+    line-height: 1.35;
+  }
+  .rl-easa-tree-exp {
+    flex: 0 0 auto;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 0 2px;
+    color: #0369a1;
+    font-size: 12px;
+    width: 1.25rem;
+  }
+  .rl-easa-tree-exp:disabled {
+    visibility: hidden;
+    cursor: default;
+  }
+  .rl-easa-tree-label {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 0;
+    color: #0f172a;
+    font-size: 13px;
+  }
+  .rl-easa-tree-label:hover { text-decoration: underline; color: #0369a1; }
+  .rl-easa-tree-type {
+    flex: 0 0 auto;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: #64748b;
+    margin-left: 4px;
+  }
+  .rl-easa-detail-meta {
+    font-size: 12px;
+    color: #475569;
+    margin-bottom: 8px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .rl-easa-detail-body {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
 </style>
 
 <section class="card" style="padding:14px 16px;">
@@ -216,7 +300,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     <span class="rl-easa-badge">Quick retrieval</span>
     <h3>Search &amp; AI (EASA corpus)</h3>
     <p class="rl-drop-meta" style="margin-top:0;">
-      Searches <strong>staging</strong> plain text after you parse an upload (LIKE match, capped at 25 hits). Optional batch id limits scope.
+      Full-text style search over <strong>staging</strong> (plain text, titles, ERulesId, breadcrumb, path). Optional batch id narrows scope; default page size 50 (API max 200, use <code>limit</code>/<code>offset</code> for pagination).
     </p>
     <div class="rl-field" style="margin-bottom:8px;">
       <label for="rlEasaSearchBatch">Batch ID (optional)</label>
@@ -229,19 +313,53 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     <div class="rl-test-actions">
       <button type="button" class="btn btn-sm" id="rlEasaSearchBtn">Search EASA index</button>
     </div>
-    <pre class="rl-test-out" id="rlEasaSearchOut" aria-live="polite" style="margin-top:12px; max-height:200px;"></pre>
+    <pre class="rl-test-out" id="rlEasaSearchOut" aria-live="polite" style="margin-top:12px; max-height:220px;"></pre>
+  </section>
+
+  <section class="card rl-easa-panel" style="padding:16px 18px; margin-top:12px;">
+    <span class="rl-easa-badge">Browse corpus</span>
+    <h3>Rule tree &amp; full text</h3>
+    <p class="rl-drop-meta" style="margin-top:0;">
+      Expand nodes by regulatory structure (same parent links as in the XML). Click a row to load full <strong>plain text</strong> for that rule block.
+      Search above matches titles, ids, paths, and body (paginated on the API via <code>limit</code>/<code>offset</code>).
+      A future step is <strong>natural-language Q&amp;A</strong> over this same staging data with mandatory citations—your compare block below is an early pattern (optional AI).
+    </p>
+    <div class="rl-field" style="margin-bottom:10px;">
+      <label for="rlEasaTreeBatch">Batch (required)</label>
+      <select id="rlEasaTreeBatch" style="max-width:100%;min-width:260px;font-size:13px;">
+        <option value="">Load batches from status…</option>
+      </select>
+      <button type="button" class="btn btn-sm" id="rlEasaTreeLoadRoots" style="margin-left:8px;">Load tree roots</button>
+    </div>
+    <div class="rl-easa-browse-grid">
+      <div>
+        <p class="rl-drop-meta" id="rlEasaTreeHint" style="margin:0 0 8px;">Choose a batch and load roots (batch id matches the table above).</p>
+        <div class="rl-easa-tree-panel" id="rlEasaTreeMount" aria-label="Rule tree"></div>
+      </div>
+      <div>
+        <h4 style="margin:0 0 8px; font-size:14px; color:#0f172a;">Selected node</h4>
+        <div class="rl-easa-detail-meta" id="rlEasaNodeDetailMeta">—</div>
+        <pre class="rl-test-out rl-easa-detail-body" id="rlEasaNodeDetailBody" style="margin:0; max-height:min(60vh,480px); min-height:4rem;">—</pre>
+      </div>
+    </div>
   </section>
 
   <section class="card rl-easa-panel" style="padding:16px 18px; margin-top:12px;">
     <span class="rl-easa-badge">Cross‑jurisdiction</span>
     <h3>Compare EASA concepts with U.S. eCFR (optional)</h3>
     <p class="rl-drop-meta" style="margin-top:0;">
-      Uses your configured <strong>eCFR versioner API</strong> (same as training reports) when you tick “Include 14 CFR excerpt”.
-      EASA indexed text appears here after ingest; until then the model is explicitly told the EU corpus is not loaded.
+      The server loads **matching excerpts** from <code>easa_erules_import_nodes_staging</code> using the same logic as “Search EASA index”, then sends them to the model together with your question.
+      Optional **batch** narrows EASA retrieval to one upload. Uses your <strong>eCFR versioner API</strong> when you include a 14 CFR section.
     </p>
     <div class="rl-field" style="margin-bottom:8px;">
       <label for="rlEasaCompareQ">Question</label>
       <input type="text" id="rlEasaCompareQ" placeholder="e.g. How does pilot recency compare EU vs US?" autocomplete="off" style="width:100%;">
+    </div>
+    <div class="rl-field" style="margin-bottom:8px;">
+      <label for="rlEasaCompareBatch">EASA batch (optional)</label>
+      <select id="rlEasaCompareBatch" style="max-width:100%;min-width:280px;font-size:13px;">
+        <option value="">All batches — match staging across imports</option>
+      </select>
     </div>
     <div class="rl-easa-split">
       <div class="rl-field">
@@ -398,6 +516,33 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         } else if (limEl) {
           limEl.textContent = '';
         }
+        var treeSel = document.getElementById('rlEasaTreeBatch');
+        function rlEasaFillBatchSelect(sel, placeholder, prevVal) {
+          if (!sel) return;
+          var prev = prevVal != null ? prevVal : sel.value;
+          sel.innerHTML = '';
+          var ph = document.createElement('option');
+          ph.value = '';
+          ph.textContent = placeholder;
+          sel.appendChild(ph);
+          (x.j.batches || []).forEach(function (b) {
+            var o = document.createElement('option');
+            o.value = String(b.id);
+            var sn = b.staging_nodes != null ? String(b.staging_nodes) : '?';
+            o.textContent = '#' + b.id + ' — ' + (b.original_filename || 'batch') + ' (' + sn + ' nodes)';
+            sel.appendChild(o);
+          });
+          if (prev) {
+            for (var ti = 0; ti < sel.options.length; ti++) {
+              if (sel.options[ti].value === prev) {
+                sel.selectedIndex = ti;
+                break;
+              }
+            }
+          }
+        }
+        rlEasaFillBatchSelect(treeSel, '— Select batch —');
+        rlEasaFillBatchSelect(document.getElementById('rlEasaCompareBatch'), 'All batches — match staging across imports');
         if (hint) {
           var parts = [];
           if (x.j.migrate_hint) parts.push(x.j.migrate_hint);
@@ -733,7 +878,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       if (searchOut) searchOut.textContent = 'Searching…';
       var batchEl = document.getElementById('rlEasaSearchBatch');
       var bid = batchEl && batchEl.value ? parseInt(batchEl.value, 10) : 0;
-      var payload = { action: 'search', query: q };
+      var payload = { action: 'search', query: q, limit: 100 };
       if (bid > 0) payload.batch_id = bid;
       fetch(api, {
         method: 'POST',
@@ -762,6 +907,143 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
+  function rlEasaShowNodeDetail(batchId, uid) {
+    var meta = document.getElementById('rlEasaNodeDetailMeta');
+    var body = document.getElementById('rlEasaNodeDetailBody');
+    if (meta) meta.textContent = 'Loading…';
+    if (body) body.textContent = '';
+    fetch(api + '?action=node_detail&batch_id=' + encodeURIComponent(String(batchId)) + '&node_uid=' + encodeURIComponent(uid), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (j) {
+        if (!j.ok || !j.node) throw new Error((j && j.error) || 'Load failed');
+        var n = j.node;
+        var bits = [];
+        bits.push('batch_id=' + (n.batch_id || ''));
+        bits.push('node_uid=' + (n.node_uid || ''));
+        bits.push('node_type=' + (n.node_type || ''));
+        if (n.source_erules_id) bits.push('ERulesId=' + n.source_erules_id);
+        if (n.title) bits.push('title=' + n.title);
+        if (n.breadcrumb) bits.push('breadcrumb=' + String(n.breadcrumb).replace(/\s+/g, ' ').slice(0, 500));
+        if (n.plain_text_truncated) bits.push('[Body truncated in API payload; very large nodes may be clipped at ~400k chars]');
+        if (meta) meta.textContent = bits.join('\n');
+        if (body) body.textContent = n.plain_text || '';
+      })
+      .catch(function (e) {
+        if (meta) meta.textContent = e.message || 'Error';
+        if (body) body.textContent = '';
+      });
+  }
+
+  function rlEasaCreateTreeLi(batchId, n) {
+    var li = document.createElement('li');
+    var uid = n.node_uid || '';
+    var kids = parseInt(n.child_count, 10) || 0;
+    var row = document.createElement('div');
+    row.className = 'rl-easa-tree-row';
+    var exp = document.createElement('button');
+    exp.type = 'button';
+    exp.className = 'rl-easa-tree-exp';
+    exp.setAttribute('aria-expanded', 'false');
+    if (kids < 1) {
+      exp.disabled = true;
+      exp.textContent = '·';
+    } else {
+      exp.textContent = '▶';
+      exp.setAttribute('aria-label', 'Expand children');
+    }
+    var lab = document.createElement('button');
+    lab.type = 'button';
+    lab.className = 'rl-easa-tree-label';
+    lab.textContent = (n.title || n.source_erules_id || n.node_uid || n.node_type || '—');
+    var ty = document.createElement('span');
+    ty.className = 'rl-easa-tree-type';
+    ty.textContent = n.node_type || '';
+    row.appendChild(exp);
+    row.appendChild(lab);
+    row.appendChild(ty);
+    li.appendChild(row);
+    if (kids > 0) {
+      var chUl = document.createElement('ul');
+      chUl.className = 'rl-easa-tree-list';
+      chUl.hidden = true;
+      chUl.setAttribute('data-loaded', '0');
+      li.appendChild(chUl);
+      exp.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var sub = li.querySelector(':scope > ul.rl-easa-tree-list');
+        if (!sub) return;
+        if (sub.getAttribute('data-loaded') === '1' && !sub.hidden) {
+          sub.hidden = true;
+          exp.textContent = '▶';
+          exp.setAttribute('aria-expanded', 'false');
+          return;
+        }
+        if (sub.getAttribute('data-loaded') === '1' && sub.children.length > 0) {
+          sub.hidden = false;
+          exp.textContent = '▼';
+          exp.setAttribute('aria-expanded', 'true');
+          return;
+        }
+        sub.innerHTML = '';
+        exp.disabled = true;
+        fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId)) + '&parent_uid=' + encodeURIComponent(uid), { credentials: 'same-origin' })
+          .then(function (r) { return r.json(); })
+          .then(function (j) {
+            exp.disabled = false;
+            if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Tree load failed');
+            j.nodes.forEach(function (c) {
+              sub.appendChild(rlEasaCreateTreeLi(batchId, c));
+            });
+            sub.setAttribute('data-loaded', '1');
+            sub.hidden = false;
+            exp.textContent = '▼';
+            exp.setAttribute('aria-expanded', 'true');
+          })
+          .catch(function (err) {
+            exp.disabled = false;
+            sub.textContent = err.message || 'Error';
+          });
+      });
+    }
+    lab.addEventListener('click', function () {
+      rlEasaShowNodeDetail(batchId, uid);
+    });
+    return li;
+  }
+
+  var rlEasaTreeLoadBtn = document.getElementById('rlEasaTreeLoadRoots');
+  var rlEasaTreeMount = document.getElementById('rlEasaTreeMount');
+  var rlEasaTreeHint = document.getElementById('rlEasaTreeHint');
+  if (rlEasaTreeLoadBtn && rlEasaTreeMount) {
+    rlEasaTreeLoadBtn.addEventListener('click', function () {
+      var sel = document.getElementById('rlEasaTreeBatch');
+      var bid = sel && sel.value ? parseInt(sel.value, 10) : 0;
+      if (!bid) {
+        if (rlEasaTreeHint) rlEasaTreeHint.textContent = 'Select a batch in the dropdown first.';
+        return;
+      }
+      rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading roots…</p>';
+      fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
+          rlEasaTreeMount.innerHTML = '';
+          if (rlEasaTreeHint) {
+            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j.nodes.length + ' root row(s). Click ▶ to load children; click the title for full text.';
+          }
+          var ul = document.createElement('ul');
+          ul.className = 'rl-easa-tree-list';
+          j.nodes.forEach(function (n) {
+            ul.appendChild(rlEasaCreateTreeLi(bid, n));
+          });
+          rlEasaTreeMount.appendChild(ul);
+        })
+        .catch(function (e) {
+          rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="color:#991b1b;margin:0;">' + esc(e.message || 'Error') + '</p>';
+        });
+    });
+  }
+
   var cmpBtn = document.getElementById('rlEasaCompareBtn');
   var cmpOut = document.getElementById('rlEasaCompareOut');
   if (cmpBtn) {
@@ -776,6 +1058,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       var secEl = document.getElementById('rlEasaEcfrSec');
       var incEcfr = document.getElementById('rlEasaIncludeEcfr');
       var useAi = document.getElementById('rlEasaUseAi');
+      var cmpBatchEl = document.getElementById('rlEasaCompareBatch');
+      var cmpBid = cmpBatchEl && cmpBatchEl.value ? parseInt(cmpBatchEl.value, 10) : 0;
       var body = {
         action: 'regulatory_compare_ai',
         query: q,
@@ -784,6 +1068,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         ecfr_title_number: titleEl ? parseInt(titleEl.value, 10) || 14 : 14,
         ecfr_section: secEl ? (secEl.value || '').trim() : ''
       };
+      if (cmpBid > 0) body.batch_id = cmpBid;
       if (cmpOut) cmpOut.textContent = 'Working…';
       cmpBtn.disabled = true;
       fetch(api, {
@@ -797,8 +1082,17 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Request failed');
           var lines = [];
           if (x.j.easa_context_note) {
-            lines.push('--- EASA side (index status) ---');
+            lines.push('--- EASA staging (fed to model) ---');
             lines.push(x.j.easa_context_note);
+          }
+          if (x.j.easa_staging_hits != null) {
+            lines.push('Excerpt rows matched: ' + x.j.easa_staging_hits);
+          }
+          if (x.j.easa_sources && x.j.easa_sources.length) {
+            lines.push('Source refs (batch · ERulesId / title):');
+            x.j.easa_sources.slice(0, 12).forEach(function (s) {
+              lines.push('  · batch ' + (s.batch_id || '—') + ' · ' + (s.source_erules_id || s.title || s.node_uid || '—'));
+            });
           }
           if (x.j.ecfr_note) {
             lines.push('');

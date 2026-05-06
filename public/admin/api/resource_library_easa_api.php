@@ -63,6 +63,140 @@ function rl_easa_search_like_patterns(string $q): array
     return [$like, $esc(trim($noDots))];
 }
 
+/**
+ * Same WHERE clause as Search EASA index (titles, ids, paths, plain_text).
+ *
+ * @return array{where: string, bind: list<mixed>}
+ */
+function rl_easa_search_match_clause(string $q): array
+{
+    [$like, $likeNoDots] = rl_easa_search_like_patterns($q);
+    $matchCols = ['plain_text', 'title', 'source_title', 'breadcrumb', 'source_erules_id', 'path'];
+    $matchParts = [];
+    $bind = [];
+    foreach ($matchCols as $col) {
+        $matchParts[] = "COALESCE({$col}, '') LIKE ? ESCAPE '\\\\'";
+        $bind[] = $like;
+    }
+    if ($likeNoDots !== null) {
+        foreach (['source_erules_id', 'path', 'title', 'breadcrumb'] as $col) {
+            $matchParts[] = "COALESCE({$col}, '') LIKE ? ESCAPE '\\\\'";
+            $bind[] = $likeNoDots;
+        }
+    }
+
+    return ['where' => '(' . implode(' OR ', $matchParts) . ')', 'bind' => $bind];
+}
+
+/**
+ * Pull staging excerpts for AI compare using the same matching rules as search.
+ *
+ * @return array{hit_count: int, bundle: string, sources: list<array<string, mixed>>, summary: string}
+ */
+function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFilter): array
+{
+    $out = [
+        'hit_count' => 0,
+        'bundle' => '',
+        'sources' => [],
+        'summary' => '',
+    ];
+    if (!easa_erules_staging_tables_ok($pdo)) {
+        $out['summary'] = 'EASA staging is not available (apply scripts/sql/resource_library_easa_erules_staging.sql).';
+
+        return $out;
+    }
+    try {
+        $total = (int) $pdo->query('SELECT COUNT(*) FROM easa_erules_import_nodes_staging')->fetchColumn();
+    } catch (Throwable) {
+        $out['summary'] = 'Could not read easa_erules_import_nodes_staging.';
+
+        return $out;
+    }
+    if ($total === 0) {
+        $out['summary'] = 'No rows in staging yet. Upload official Easy Access XML and run “Parse XML → staging”.';
+
+        return $out;
+    }
+    $m = rl_easa_search_match_clause($q);
+    $whereMatch = $m['where'];
+    $bind = $m['bind'];
+    $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'toc\',\'backmatter\') THEN 1 ELSE 0 END)';
+    $maxRows = 15;
+    $excerptLen = 4500;
+    if ($batchFilter > 0) {
+        $sql = "
+            SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
+                   SUBSTRING(plain_text, 1, {$excerptLen}) AS excerpt
+            FROM easa_erules_import_nodes_staging
+            WHERE batch_id = ? AND {$whereMatch}
+            ORDER BY {$wrapRank} ASC, id ASC
+            LIMIT {$maxRows}
+        ";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute(array_merge([$batchFilter], $bind));
+    } else {
+        $sql = "
+            SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
+                   SUBSTRING(plain_text, 1, {$excerptLen}) AS excerpt
+            FROM easa_erules_import_nodes_staging
+            WHERE {$whereMatch}
+            ORDER BY {$wrapRank} ASC, id DESC
+            LIMIT {$maxRows}
+        ";
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($bind);
+    }
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    $out['hit_count'] = count($rows);
+    foreach ($rows as $r) {
+        $out['sources'][] = [
+            'batch_id' => (int) ($r['batch_id'] ?? 0),
+            'node_uid' => (string) ($r['node_uid'] ?? ''),
+            'node_type' => (string) ($r['node_type'] ?? ''),
+            'source_erules_id' => (string) ($r['source_erules_id'] ?? ''),
+            'title' => (string) ($r['title'] ?? ''),
+        ];
+    }
+    $maxBundle = 38000;
+    $parts = [];
+    $totalChars = 0;
+    foreach ($rows as $i => $r) {
+        $hdr = sprintf(
+            "--- Source %d | batch_id=%s | node_uid=%s | type=%s | ERulesId=%s ---\nTitle: %s\nBreadcrumb: %s\nExcerpt:\n%s\n",
+            $i + 1,
+            (string) ($r['batch_id'] ?? ''),
+            (string) ($r['node_uid'] ?? ''),
+            (string) ($r['node_type'] ?? ''),
+            (string) ($r['source_erules_id'] ?? ''),
+            (string) ($r['title'] ?? ''),
+            (string) ($r['breadcrumb'] ?? ''),
+            (string) ($r['excerpt'] ?? '')
+        );
+        if (strlen($hdr) > 14000) {
+            $hdr = substr($hdr, 0, 14000) . "\n… [truncated]";
+        }
+        if ($totalChars + strlen($hdr) > $maxBundle && $parts !== []) {
+            $parts[] = '[Further matched rows omitted to stay within model context size.]';
+
+            break;
+        }
+        $parts[] = $hdr;
+        $totalChars += strlen($hdr);
+    }
+    $out['bundle'] = implode("\n", $parts);
+    if ($out['hit_count'] > 0) {
+        $out['summary'] = sprintf(
+            'Loaded %d excerpt(s) from easa_erules_import_nodes_staging (parsed Easy Access XML). Quote with batch_id + node_uid and/or ERulesId; verify on official EASA sources.',
+            $out['hit_count']
+        );
+    } else {
+        $out['summary'] = 'No staging rows matched your question. Use keywords or rule ids (e.g. FCL.055), optional batch filter, or the rule tree. Always verify on EASA and national portals.';
+    }
+
+    return $out;
+}
+
 function rl_easa_extract_ai_text(array $resp): string
 {
     if (!empty($resp['output_text']) && is_string($resp['output_text'])) {
@@ -115,6 +249,91 @@ if ($method === 'GET') {
             'ok' => true,
             'batch' => $batchRow,
         ]);
+    }
+
+    if ($action === 'tree_children') {
+        if (!easa_erules_staging_tables_ok($pdo)) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql first']);
+        }
+        $batchId = (int) ($_GET['batch_id'] ?? 0);
+        if ($batchId <= 0) {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id required']);
+        }
+        $parentRaw = isset($_GET['parent_uid']) ? trim((string) $_GET['parent_uid']) : null;
+        $isRoot = $parentRaw === null || $parentRaw === '';
+        try {
+            if ($isRoot) {
+                $sql = "
+                    SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
+                           n.source_erules_id, n.title, n.breadcrumb,
+                           (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
+                            WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
+                    FROM easa_erules_import_nodes_staging n
+                    WHERE n.batch_id = ?
+                      AND (n.parent_node_uid IS NULL OR n.parent_node_uid = '')
+                    ORDER BY n.sort_order ASC, n.id ASC
+                ";
+                $st = $pdo->prepare($sql);
+                $st->execute([$batchId]);
+            } else {
+                $sql = "
+                    SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
+                           n.source_erules_id, n.title, n.breadcrumb,
+                           (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
+                            WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
+                    FROM easa_erules_import_nodes_staging n
+                    WHERE n.batch_id = ? AND n.parent_node_uid = ?
+                    ORDER BY n.sort_order ASC, n.id ASC
+                ";
+                $st = $pdo->prepare($sql);
+                $st->execute([$batchId, $parentRaw]);
+            }
+            $nodes = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable $e) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
+        }
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'batch_id' => $batchId,
+            'parent_uid' => $isRoot ? null : $parentRaw,
+            'nodes' => $nodes,
+        ]);
+    }
+
+    if ($action === 'node_detail') {
+        if (!easa_erules_staging_tables_ok($pdo)) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql first']);
+        }
+        $batchId = (int) ($_GET['batch_id'] ?? 0);
+        $nodeUid = trim((string) ($_GET['node_uid'] ?? ''));
+        if ($batchId <= 0 || $nodeUid === '') {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id and node_uid required']);
+        }
+        try {
+            $st = $pdo->prepare('
+                SELECT batch_id, node_uid, parent_node_uid, node_type, depth, sort_order,
+                       source_erules_id, title, source_title, breadcrumb, path,
+                       plain_text, xml_fragment, metadata_json
+                FROM easa_erules_import_nodes_staging
+                WHERE batch_id = ? AND node_uid = ?
+                LIMIT 1
+            ');
+            $st->execute([$batchId, $nodeUid]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
+        }
+        if (!is_array($row)) {
+            rl_easa_json_out(404, ['ok' => false, 'error' => 'Node not found']);
+        }
+        $plain = (string) ($row['plain_text'] ?? '');
+        $maxPlain = 400000;
+        $truncated = strlen($plain) > $maxPlain;
+        if ($truncated) {
+            $row['plain_text'] = substr($plain, 0, $maxPlain) . "\n\n… [truncated for API; full text is in the database row]";
+        }
+        $row['plain_text_truncated'] = $truncated;
+        rl_easa_json_out(200, ['ok' => true, 'node' => $row]);
     }
 
     if ($action !== 'status') {
@@ -268,22 +487,12 @@ if ($action === 'search') {
         ]);
     }
     $batchFilter = (int) ($data['batch_id'] ?? 0);
-    [$like, $likeNoDots] = rl_easa_search_like_patterns($q);
-    // Match titles / ERulesId / path as well as body: many rules keep references out of plain_text chunks.
-    $matchCols = ['plain_text', 'title', 'source_title', 'breadcrumb', 'source_erules_id', 'path'];
-    $matchParts = [];
-    $bind = [];
-    foreach ($matchCols as $col) {
-        $matchParts[] = "COALESCE({$col}, '') LIKE ? ESCAPE '\\\\'";
-        $bind[] = $like;
-    }
-    if ($likeNoDots !== null) {
-        foreach (['source_erules_id', 'path', 'title', 'breadcrumb'] as $col) {
-            $matchParts[] = "COALESCE({$col}, '') LIKE ? ESCAPE '\\\\'";
-            $bind[] = $likeNoDots;
-        }
-    }
-    $whereMatch = '(' . implode(' OR ', $matchParts) . ')';
+    $limit = (int) ($data['limit'] ?? 50);
+    $limit = min(200, max(1, $limit));
+    $offset = max(0, (int) ($data['offset'] ?? 0));
+    $mSearch = rl_easa_search_match_clause($q);
+    $whereMatch = $mSearch['where'];
+    $bind = $mSearch['bind'];
     // Root <document> / frontmatter / toc / backmatter: sort after rows that look like real rules.
     $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'toc\',\'backmatter\') THEN 1 ELSE 0 END)';
     $snippet = "SUBSTRING(TRIM(CONCAT_WS(CHAR(10),
@@ -299,7 +508,7 @@ if ($action === 'search') {
             FROM easa_erules_import_nodes_staging
             WHERE batch_id = ? AND {$whereMatch}
             ORDER BY {$wrapRank} ASC, id ASC
-            LIMIT 50
+            LIMIT {$limit} OFFSET {$offset}
         ";
         $stmt = $pdo->prepare($sql);
         $stmt->execute(array_merge([$batchFilter], $bind));
@@ -310,7 +519,7 @@ if ($action === 'search') {
             FROM easa_erules_import_nodes_staging
             WHERE {$whereMatch}
             ORDER BY {$wrapRank} ASC, id DESC
-            LIMIT 50
+            LIMIT {$limit} OFFSET {$offset}
         ";
         $stmt = $pdo->prepare($sql);
         $stmt->execute($bind);
@@ -320,6 +529,8 @@ if ($action === 'search') {
         'ok' => true,
         'hits' => $hits,
         'hit_count' => count($hits),
+        'limit' => $limit,
+        'offset' => $offset,
         'note' => $hits === []
             ? 'No matches in staging. Searches plain_text, title, source_title, breadcrumb, source_erules_id, and path (with a dotless variant for ids like FCL.055 vs FCL055).'
             : null,
@@ -408,8 +619,11 @@ if ($action === 'regulatory_compare_ai') {
     $includeEcfr = !empty($data['include_ecfr']);
     $titleNum = (int) ($data['ecfr_title_number'] ?? 14);
     $section = trim((string) ($data['ecfr_section'] ?? ''));
+    $compareBatchId = (int) ($data['batch_id'] ?? 0);
 
-    $easaCtx = 'No EASA Easy Access Rules excerpts are indexed in this database yet. Upload official XML via this center, then run the ingest pipeline when available. Always verify binding law on EASA and national portals; this assistant is not legal advice.';
+    $stagingCompare = rl_easa_build_compare_staging_bundle($pdo, $q, $compareBatchId);
+    $easaCtx = $stagingCompare['summary'];
+    $easaExcerptBundle = trim((string) ($stagingCompare['bundle'] ?? ''));
 
     $ecfrHtml = '';
     $ecfrNote = '';
@@ -434,6 +648,8 @@ if ($action === 'regulatory_compare_ai') {
     $payload = [
         'ok' => true,
         'easa_context_note' => $easaCtx,
+        'easa_staging_hits' => $stagingCompare['hit_count'],
+        'easa_sources' => $stagingCompare['sources'],
         'ecfr_html' => $ecfrHtml !== '' ? $ecfrHtml : null,
         'ecfr_note' => $ecfrNote !== '' ? $ecfrNote : null,
         'ai_answer' => '',
@@ -444,7 +660,12 @@ if ($action === 'regulatory_compare_ai') {
         rl_easa_json_out(200, $payload);
     }
 
-    $bundle = "EU / EASA context (indexed excerpts):\n" . $easaCtx . "\n\n";
+    $bundle = "EU / EASA — official excerpts from this installation’s staging table (easa_erules_import_nodes_staging), matched by your question using the same rules as “Search EASA index”. Each block is labeled with batch_id and node_uid for traceability.\n\n";
+    if ($easaExcerptBundle !== '') {
+        $bundle .= $easaExcerptBundle . "\n\n";
+    } else {
+        $bundle .= "(No row-level excerpts matched — refer to easa_context_note above.)\n\n";
+    }
     if ($ecfrHtml !== '') {
         $strip = preg_replace('/\s+/', ' ', strip_tags($ecfrHtml));
         $strip = is_string($strip) ? trim($strip) : '';
@@ -463,7 +684,7 @@ if ($action === 'regulatory_compare_ai') {
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => 'You help aviation compliance staff compare regulatory concepts. The EU side may lack indexed excerpts in this installation—say so when true. When U.S. text is provided from eCFR, label it clearly as U.S. 14 CFR and do not conflate with EASA. Never replace official sources; cite what jurisdiction each paragraph belongs to. Not legal advice.',
+                            'text' => 'You help aviation compliance staff compare regulatory concepts. When the bundle includes EASA blocks labeled with batch_id/node_uid/ERulesId, treat those as the installation’s parsed Easy Access staging excerpts—quote them accurately and cite batch_id + node_uid or ERulesId. If no excerpts matched, say so clearly. When U.S. text is provided from eCFR, label it as U.S. 14 CFR. Never replace official sources; not legal advice.',
                         ],
                     ],
                 ],
