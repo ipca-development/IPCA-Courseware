@@ -4,7 +4,94 @@ declare(strict_types=1);
 require_once __DIR__ . '/resource_library_storage.php';
 
 /**
- * Replace all blocks for an edition from on-disk source.json (array of block objects).
+ * True when $arr is a JSON-like sequential list (0..n-1), including empty.
+ */
+function rl_json_decoded_is_list(array $arr): bool
+{
+    if (function_exists('array_is_list')) {
+        return array_is_list($arr);
+    }
+    $i = 0;
+    foreach ($arr as $k => $_) {
+        if ($k !== $i) {
+            return false;
+        }
+        $i++;
+    }
+
+    return true;
+}
+
+/**
+ * Normalize decoded source.json to a flat list of block rows.
+ *
+ * Supports:
+ * - Top-level JSON array of block objects (PHAK-style).
+ * - Canonical envelope: object with `chapters`, each chapter having `blocks` (Instrument Flying Handbook merges).
+ * - Object with top-level `blocks` array.
+ *
+ * @return list<array<string, mixed>>
+ */
+function rl_normalize_resource_library_source_blocks(array $decoded): array
+{
+    if ($decoded === []) {
+        return [];
+    }
+
+    if (rl_json_decoded_is_list($decoded)) {
+        return array_values(array_filter($decoded, 'is_array'));
+    }
+
+    if (isset($decoded['chapters']) && is_array($decoded['chapters'])) {
+        $out = [];
+        foreach ($decoded['chapters'] as $ch) {
+            if (!is_array($ch)) {
+                continue;
+            }
+            $bl = $ch['blocks'] ?? null;
+            if (!is_array($bl)) {
+                continue;
+            }
+            foreach ($bl as $b) {
+                if (is_array($b)) {
+                    $out[] = $b;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    if (isset($decoded['blocks']) && is_array($decoded['blocks'])) {
+        return array_values(array_filter($decoded['blocks'], 'is_array'));
+    }
+
+    throw new RuntimeException(
+        'source.json must be a JSON array of blocks, or an object with "chapters" (each with "blocks"), or an object with top-level "blocks".'
+    );
+}
+
+/**
+ * Stable local id for indexing: prefer id, then original_id (canonical IFH exports).
+ *
+ * @param int|string $idx Foreach index used only when no id fields exist.
+ */
+function rl_resource_library_block_local_id(array $row, $idx): string
+{
+    $localId = trim((string)($row['id'] ?? ''));
+    if ($localId === '') {
+        $localId = trim((string)($row['original_id'] ?? ''));
+    }
+    if ($localId === '') {
+        $localId = 'idx_' . $idx;
+    }
+
+    return $localId;
+}
+
+/**
+ * Replace all blocks for an edition from on-disk source.json (array of block objects,
+ * or canonical envelope with chapters[].blocks).
  *
  * @return array{imported: int, chapter_count: int}
  */
@@ -25,17 +112,19 @@ function rl_ingest_blocks_from_source_file(PDO $pdo, int $editionId): array
     }
 
     try {
-        $blocks = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+        $decoded = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
     } catch (\JsonException $e) {
         throw new RuntimeException('Invalid JSON in source.json: ' . $e->getMessage());
     }
 
-    if (!is_array($blocks)) {
-        throw new RuntimeException('source.json root must be a JSON array of blocks');
+    if (!is_array($decoded)) {
+        throw new RuntimeException('source.json root must be a JSON array or object');
     }
 
+    $blocks = rl_normalize_resource_library_source_blocks($decoded);
+
     if ($blocks === []) {
-        throw new RuntimeException('source.json array is empty');
+        throw new RuntimeException('source.json contains no block objects to import');
     }
 
     $ins = $pdo->prepare('
@@ -56,10 +145,7 @@ function rl_ingest_blocks_from_source_file(PDO $pdo, int $editionId): array
             }
 
             $chapter = trim((string)($row['chapter'] ?? ''));
-            $localId = trim((string)($row['id'] ?? ''));
-            if ($localId === '') {
-                $localId = 'idx_' . $idx;
-            }
+            $localId = rl_resource_library_block_local_id($row, $idx);
             if ($chapter === '') {
                 $chapter = '_unknown';
             }

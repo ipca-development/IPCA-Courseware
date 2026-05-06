@@ -124,6 +124,11 @@ function rl_api_validate_and_encode_uploaded_json(string $raw): string
         throw new RuntimeException('JSON root must be an object or array');
     }
 
+    $blocks = rl_normalize_resource_library_source_blocks($decoded);
+    if ($blocks === []) {
+        throw new RuntimeException('JSON contains no importable blocks (use a block array, or chapters[].blocks, or top-level blocks).');
+    }
+
     $out = json_encode($decoded, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT);
     if ($out === false) {
         throw new RuntimeException('Could not serialize JSON');

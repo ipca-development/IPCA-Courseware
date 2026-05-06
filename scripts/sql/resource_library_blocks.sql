@@ -1,6 +1,7 @@
 -- AI-friendly block store for Resource Library editions (PHAK, etc.).
 -- Populated from storage/resource_library/{edition_id}/source.json via admin "Sync JSON → database"
 -- or scripts/import_resource_library_blocks.php.
+-- source.json may be a flat array of blocks (PHAK-style) or a canonical envelope with chapters[].blocks (IFH-style).
 --
 -- Run after resource_library_editions.sql exists.
 
