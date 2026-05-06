@@ -46,8 +46,10 @@ function rl_api_load_edition(PDO $pdo, int $id): ?array
         'created_at' => $row['created_at'] ?? null,
         'updated_at' => $row['updated_at'] ?? null,
     ];
-    if (isset($row['extra_config_json'])) {
-        $ex = rl_catalog_decode_extra((string) ($row['extra_config_json'] ?? ''));
+    // Use array_key_exists: column may exist with NULL (isset() is false for null).
+    if (array_key_exists('extra_config_json', $row)) {
+        $raw = $row['extra_config_json'];
+        $ex = rl_catalog_decode_extra($raw !== null && $raw !== '' ? (string) $raw : null);
         $svState = $ex['source_verify_state'] ?? [];
         $out['source_verify_url'] = trim((string) ($ex['source_verify_url'] ?? ''));
         $out['source_verify_interval'] = rl_source_verify_normalize_interval((string) ($ex['source_verify_interval'] ?? 'off'));
@@ -384,13 +386,17 @@ $rowFull = rl_catalog_fetch_edition($pdo, $id);
 if (!is_array($rowFull)) {
     rl_api_json_out(500, ['ok' => false, 'error' => 'Reload failed']);
 }
-$extra = rl_catalog_decode_extra(isset($rowFull['extra_config_json']) ? (string) $rowFull['extra_config_json'] : null);
+$extra = rl_catalog_decode_extra(
+    array_key_exists('extra_config_json', $rowFull) && $rowFull['extra_config_json'] !== null && $rowFull['extra_config_json'] !== ''
+        ? (string) $rowFull['extra_config_json']
+        : null
+);
 $mergedSv = rl_source_verify_merge_user_extra($extra, $data);
 if (isset($mergedSv['error'])) {
     rl_api_json_out(400, ['ok' => false, 'error' => $mergedSv['error']]);
 }
 $extra = $mergedSv['extra'];
-$extraEnc = isset($rowFull['extra_config_json']) ? rl_catalog_encode_extra($extra) : null;
+$extraEnc = array_key_exists('extra_config_json', $rowFull) ? rl_catalog_encode_extra($extra) : null;
 
 try {
     if ($thumbDb === null) {
