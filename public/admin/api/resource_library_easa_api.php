@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/ecfr_api_client.php';
 require_once __DIR__ . '/../../../src/resource_library_catalog.php';
 require_once __DIR__ . '/../../../src/easa_erules_storage.php';
 require_once __DIR__ . '/../../../src/easa_download_monitor.php';
+require_once __DIR__ . '/../../../src/easa_erules_xml_import.php';
 
 cw_require_admin();
 
@@ -51,24 +52,70 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
     $action = trim((string) ($_GET['action'] ?? 'status'));
+
+    if ($action === 'batch_progress') {
+        $bid = (int) ($_GET['batch_id'] ?? 0);
+        if ($bid <= 0) {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id required']);
+        }
+        try {
+            $st = $pdo->prepare('SELECT * FROM easa_erules_import_batches WHERE id = ? LIMIT 1');
+            $st->execute([$bid]);
+            $batchRow = $st->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => 'easa_erules_import_batches not available']);
+        }
+        if (!is_array($batchRow)) {
+            rl_easa_json_out(404, ['ok' => false, 'error' => 'Batch not found']);
+        }
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'batch' => $batchRow,
+        ]);
+    }
+
     if ($action !== 'status') {
         rl_easa_json_out(400, ['ok' => false, 'error' => 'Unknown action']);
     }
 
     $tablesOk = easa_download_monitor_tables_ok($pdo);
+    $stagingOk = easa_erules_staging_tables_ok($pdo);
+    $progressOk = easa_erules_batch_progress_available($pdo);
     $monitor = [];
     $batches = [];
+    $stagingNodes = 0;
     if ($tablesOk) {
         $monitor = $pdo->query('SELECT id, url, label, checked_at, http_status, final_url, etag, last_modified, content_length, changed_flag, last_error FROM easa_download_monitor ORDER BY id ASC')->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        $batches = $pdo->query('SELECT id, status, original_filename, file_sha256, file_size, rows_detected, created_at, updated_at, error_message FROM easa_erules_import_batches ORDER BY id DESC LIMIT 25')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $batches = $pdo->query('SELECT * FROM easa_erules_import_batches ORDER BY id DESC LIMIT 25')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if ($stagingOk) {
+            $stagingNodes = (int) $pdo->query('SELECT COUNT(*) FROM easa_erules_import_nodes_staging')->fetchColumn();
+            $stmtN = $pdo->query('SELECT batch_id, COUNT(*) AS c FROM easa_erules_import_nodes_staging GROUP BY batch_id');
+            $byBatch = [];
+            if ($stmtN instanceof PDOStatement) {
+                while ($r = $stmtN->fetch(PDO::FETCH_ASSOC)) {
+                    $byBatch[(int) ($r['batch_id'] ?? 0)] = (int) ($r['c'] ?? 0);
+                }
+            }
+            foreach ($batches as $k => $br) {
+                $bid = (int) ($br['id'] ?? 0);
+                $batches[$k]['staging_nodes'] = $byBatch[$bid] ?? 0;
+            }
+        }
     }
 
     rl_easa_json_out(200, [
         'ok' => true,
         'tables_ok' => $tablesOk,
+        'staging_tables_ok' => $stagingOk,
+        'progress_columns_ok' => $progressOk,
         'migrate_hint' => $tablesOk ? null : 'Apply scripts/sql/resource_library_easa_erules.sql',
-        'indexed_nodes' => 0,
-        'indexed_hint' => 'Canonical regulatory_nodes + search chunks will appear after the XML ingest pipeline is enabled.',
+        'staging_migrate_hint' => ($tablesOk && !$stagingOk) ? 'Apply scripts/sql/resource_library_easa_erules_staging.sql for XML node staging.' : null,
+        'progress_migrate_hint' => ($tablesOk && !$progressOk) ? 'Apply scripts/sql/resource_library_easa_erules_batch_progress.sql for live import progress (parse_phase, heartbeat).' : null,
+        'supports_async_parse' => function_exists('fastcgi_finish_request'),
+        'indexed_nodes' => $stagingOk ? $stagingNodes : 0,
+        'indexed_hint' => $stagingOk
+            ? 'Staging rows hold parsed XML nodes (streaming import). Canonical publish + search chunks are a later step.'
+            : 'Apply staging migration, then use Parse XML → staging on a batch.',
         'monitor' => $monitor,
         'batches' => $batches,
         'ecfr_configured' => rl_catalog_resolve_ecfr_training_report_edition($pdo) !== null,
@@ -129,7 +176,7 @@ if (str_contains($contentType, 'multipart/form-data')) {
         'ok' => true,
         'batch_id' => $batchId,
         'sha256' => $sha,
-        'message' => 'File stored as official evidence. Staging parse & approval UI will process this batch next.',
+        'message' => 'File stored as official evidence. Click “Parse XML → staging” for this batch (after applying staging SQL if needed).',
     ]);
 }
 
@@ -154,12 +201,119 @@ if ($action === 'search') {
     if ($q === '') {
         rl_easa_json_out(400, ['ok' => false, 'error' => 'query required']);
     }
+    if (!easa_erules_staging_tables_ok($pdo)) {
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'hits' => [],
+            'hit_count' => 0,
+            'note' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql and parse a batch first.',
+        ]);
+    }
+    $batchFilter = (int) ($data['batch_id'] ?? 0);
+    $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $q) . '%';
+    if ($batchFilter > 0) {
+        $sql = '
+            SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
+                   SUBSTRING(plain_text, 1, 520) AS snippet
+            FROM easa_erules_import_nodes_staging
+            WHERE batch_id = ? AND plain_text LIKE ? ESCAPE \'\\\\\'
+            ORDER BY id ASC
+            LIMIT 25
+        ';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$batchFilter, $like]);
+    } else {
+        $sql = '
+            SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
+                   SUBSTRING(plain_text, 1, 520) AS snippet
+            FROM easa_erules_import_nodes_staging
+            WHERE plain_text LIKE ? ESCAPE \'\\\\\'
+            ORDER BY id DESC
+            LIMIT 25
+        ';
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute([$like]);
+    }
+    $hits = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     rl_easa_json_out(200, [
         'ok' => true,
-        'hits' => [],
-        'hit_count' => 0,
-        'note' => 'Indexed EASA chunks are not deployed yet. After ingest + publish, results will appear here (FULLTEXT / semantic).',
+        'hits' => $hits,
+        'hit_count' => count($hits),
+        'note' => $hits === [] ? 'No matches in staging (different wording, or parse the XML batch first).' : null,
     ]);
+}
+
+if ($action === 'parse_batch') {
+    @ini_set('memory_limit', '768M');
+    @set_time_limit(0);
+
+    if (!easa_erules_staging_tables_ok($pdo)) {
+        rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql first']);
+    }
+
+    $batchId = (int) ($data['batch_id'] ?? 0);
+    if ($batchId <= 0) {
+        rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id required']);
+    }
+
+    $syncWait = !empty($data['sync_wait']) || !empty($data['sync']);
+    $useAsync = !$syncWait && function_exists('fastcgi_finish_request');
+
+    $pdo->prepare('UPDATE easa_erules_import_batches SET status = \'staging\', error_message = NULL WHERE id = ?')->execute([$batchId]);
+
+    $runImport = function () use ($pdo, $batchId): array {
+        return easa_erules_import_batch_xml_to_staging($pdo, $batchId);
+    };
+
+    $finishOk = function (array $result) use ($pdo, $batchId): void {
+        easa_erules_import_finalize_success($pdo, $batchId, (int) $result['imported'], $result['publication_meta'] ?? null);
+    };
+
+    $finishErr = function (Throwable $e) use ($pdo, $batchId): void {
+        easa_erules_import_finalize_failure($pdo, $batchId, $e->getMessage());
+    };
+
+    if ($useAsync) {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Connection: close');
+        http_response_code(202);
+        echo json_encode([
+            'ok' => true,
+            'async' => true,
+            'batch_id' => $batchId,
+            'message' => 'Import started on the server. Status updates every few seconds in the batch row (poll batch_progress).',
+            'poll_hint' => 'GET ?action=batch_progress&batch_id=' . $batchId,
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (function_exists('fastcgi_finish_request')) {
+            fastcgi_finish_request();
+        } else {
+            flush();
+        }
+
+        try {
+            $result = $runImport();
+            $finishOk($result);
+        } catch (Throwable $e) {
+            $finishErr($e);
+        }
+        exit(0);
+    }
+
+    try {
+        $result = $runImport();
+        $finishOk($result);
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'async' => false,
+            'imported' => (int) $result['imported'],
+            'batch_id' => $batchId,
+            'publication_meta' => $result['publication_meta'],
+            'message' => 'Parsed into easa_erules_import_nodes_staging. Review rows before any canonical publish.',
+        ]);
+    } catch (Throwable $e) {
+        $finishErr($e);
+        rl_easa_json_out(400, ['ok' => false, 'error' => $e->getMessage()]);
+    }
 }
 
 if ($action === 'regulatory_compare_ai') {

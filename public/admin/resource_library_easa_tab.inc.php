@@ -112,6 +112,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     </section>
   </div>
 
+  <section class="card rl-easa-panel" style="padding:14px 18px; margin-top:12px; border-left:4px solid #0369a1;">
+    <span class="rl-easa-badge">Import activity</span>
+    <h3 style="margin:0 0 6px; font-size:15px;">Parse status</h3>
+    <p class="rl-drop-meta" style="margin:0;">Large XML files are processed as a <strong>stream</strong> (no whole-file DOM). Progress appears below while the server inserts rows; if PHP-FPM is available, the UI returns immediately and polls until completion.</p>
+    <pre class="rl-test-out" id="rlEasaParseProgress" aria-live="polite" style="margin-top:10px; max-height:120px; min-height:2.5rem;">—</pre>
+  </section>
+
   <section class="card rl-easa-panel" style="padding:16px 18px; margin-top:12px;">
     <span class="rl-easa-badge">Watch list</span>
     <h3>Monitored URLs</h3>
@@ -139,9 +146,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           <tr>
             <th>ID</th>
             <th>Status</th>
+            <th>Staging rows</th>
             <th>File</th>
             <th>SHA-256</th>
             <th>Created</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody id="rlEasaBatchBody"></tbody>
@@ -153,8 +162,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     <span class="rl-easa-badge">Quick retrieval</span>
     <h3>Search &amp; AI (EASA corpus)</h3>
     <p class="rl-drop-meta" style="margin-top:0;">
-      Once chunks are published from approved imports, this box will search indexed text. Until then, results stay empty by design.
+      Searches <strong>staging</strong> plain text after you parse an upload (LIKE match, capped at 25 hits). Optional batch id limits scope.
     </p>
+    <div class="rl-field" style="margin-bottom:8px;">
+      <label for="rlEasaSearchBatch">Batch ID (optional)</label>
+      <input type="number" id="rlEasaSearchBatch" placeholder="Leave empty = all batches" min="1" step="1" style="max-width:160px;">
+    </div>
     <div class="rl-field" style="margin-bottom:8px;">
       <label for="rlEasaSearchQ">Topic or keyword</label>
       <input type="text" id="rlEasaSearchQ" placeholder="e.g. FCL.055, alternate aerodrome, continuing airworthiness" autocomplete="off" style="width:100%;max-width:520px;">
@@ -231,7 +244,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       .then(function (x) {
         if (!x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Status failed');
         if (hint) {
-          hint.textContent = x.j.migrate_hint || ('Indexed nodes (canonical): ' + (x.j.indexed_nodes || 0) + '. ' + (x.j.indexed_hint || ''));
+          var parts = [];
+          if (x.j.migrate_hint) parts.push(x.j.migrate_hint);
+          if (x.j.staging_migrate_hint) parts.push(x.j.staging_migrate_hint);
+          if (x.j.progress_migrate_hint) parts.push(x.j.progress_migrate_hint);
+          parts.push('Staging nodes: ' + (x.j.indexed_nodes || 0) + '. ' + (x.j.indexed_hint || ''));
+          if (x.j.supports_async_parse) parts.push('Async parse after button click: enabled (PHP-FPM).');
+          hint.textContent = parts.filter(Boolean).join(' ');
         }
         var tbody = document.getElementById('rlEasaMonitorBody');
         if (tbody) {
@@ -255,12 +274,89 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           (x.j.batches || []).forEach(function (b) {
             var tr = document.createElement('tr');
             var sha = (b.file_sha256 || '').substring(0, 16) + '…';
+            var sn = b.staging_nodes != null ? String(b.staging_nodes) : '—';
+            var bid = parseInt(b.id, 10) || 0;
             tr.innerHTML = '<td>' + esc(b.id) + '</td>'
               + '<td>' + esc(b.status) + '</td>'
+              + '<td>' + esc(sn) + '</td>'
               + '<td>' + esc(b.original_filename) + '</td>'
               + '<td title="' + esc(b.file_sha256 || '') + '">' + esc(sha) + '</td>'
-              + '<td>' + esc(b.created_at || '') + '</td>';
+              + '<td>' + esc(b.created_at || '') + '</td>'
+              + '<td><button type="button" class="btn btn-sm rl-easa-parse" data-batch-id="' + bid + '">Parse XML → staging</button></td>';
             btbody.appendChild(tr);
+          });
+          btbody.querySelectorAll('.rl-easa-parse').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+              var id = parseInt(btn.getAttribute('data-batch-id') || '0', 10);
+              if (!id) return;
+              btn.disabled = true;
+              var prog = document.getElementById('rlEasaParseProgress');
+              if (prog) prog.textContent = 'Starting parse…';
+              fetch(api, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                credentials: 'same-origin',
+                body: JSON.stringify({ action: 'parse_batch', batch_id: id })
+              })
+                .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                .then(function (x) {
+                  if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Parse failed');
+                  if (x.j.async) {
+                    if (prog) prog.textContent = 'Import running on server (batch ' + id + '). Polling status…';
+                    var tries = 0;
+                    var timer = setInterval(function () {
+                      tries++;
+                      fetch(api + '?action=batch_progress&batch_id=' + encodeURIComponent(String(id)), { credentials: 'same-origin' })
+                        .then(function (r2) { return r2.json(); })
+                        .then(function (pj) {
+                          if (!pj.ok || !pj.batch) return;
+                          var b = pj.batch;
+                          var line = [
+                            'status=' + (b.status || ''),
+                            'phase=' + (b.parse_phase || '—'),
+                            'rows=' + (b.parse_rows_so_far != null ? b.parse_rows_so_far : '—'),
+                            (b.parse_last_node_type ? 'last<' + b.parse_last_node_type + '>' : ''),
+                            (b.parse_detail || '')
+                          ].filter(Boolean).join(' · ');
+                          if (prog) prog.textContent = line || '—';
+                          if (b.status === 'ready_for_review' || b.status === 'failed') {
+                            clearInterval(timer);
+                            btn.disabled = false;
+                            loadStatus();
+                            var hint = document.getElementById('rlEasaMigrateHint');
+                            if (hint && b.status === 'ready_for_review') {
+                              hint.textContent = 'Import finished: ' + (b.rows_detected || b.parse_rows_so_far || 0) + ' nodes staged.';
+                            }
+                            if (hint && b.status === 'failed') {
+                              hint.textContent = 'Import failed: ' + (b.error_message || b.parse_detail || 'see batch row');
+                            }
+                          }
+                        })
+                        .catch(function () { /* ignore transient */ });
+                      if (tries > 800) {
+                        clearInterval(timer);
+                        btn.disabled = false;
+                        if (prog) prog.textContent += '\nStopped polling after timeout; reload the page to see final status.';
+                      }
+                    }, 1500);
+                    return;
+                  }
+                  if (prog) prog.textContent = 'Done: ' + (x.j.imported || 0) + ' nodes.';
+                  var hint = document.getElementById('rlEasaMigrateHint');
+                  if (hint) hint.textContent = x.j.message || ('Imported ' + (x.j.imported || 0) + ' nodes.');
+                  loadStatus();
+                })
+                .catch(function (e) {
+                  var hint = document.getElementById('rlEasaMigrateHint');
+                  if (hint) hint.textContent = e.message || 'Parse failed';
+                  if (prog) prog.textContent = e.message || 'Parse failed';
+                })
+                .finally(function () {
+                  var progEl = document.getElementById('rlEasaParseProgress');
+                  var asyncPoll = progEl && progEl.textContent.indexOf('Polling') >= 0;
+                  if (!asyncPoll) btn.disabled = false;
+                });
+            });
           });
         }
       })
@@ -330,11 +426,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         return;
       }
       if (searchOut) searchOut.textContent = 'Searching…';
+      var batchEl = document.getElementById('rlEasaSearchBatch');
+      var bid = batchEl && batchEl.value ? parseInt(batchEl.value, 10) : 0;
+      var payload = { action: 'search', query: q };
+      if (bid > 0) payload.batch_id = bid;
       fetch(api, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ action: 'search', query: q })
+        body: JSON.stringify(payload)
       })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (x) {
@@ -344,7 +444,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           if (x.j.note) lines.push(x.j.note);
           (x.j.hits || []).forEach(function (h, i) {
             lines.push('');
-            lines.push(String(i + 1) + '. ' + JSON.stringify(h));
+            lines.push(String(i + 1) + '. [' + (h.node_type || '') + '] ' + (h.source_erules_id || h.title || h.node_uid || ''));
+            if (h.breadcrumb) lines.push('   Path: ' + h.breadcrumb);
+            lines.push('   ' + (h.snippet || '').replace(/\s+/g, ' ').trim());
           });
           if (searchOut) searchOut.textContent = lines.join('\n');
         })
