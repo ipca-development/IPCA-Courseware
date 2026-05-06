@@ -11,8 +11,13 @@ declare(strict_types=1);
  * Usage:
  *   php cli/cron_resource_library_source_verify.php
  *   php cli/cron_resource_library_source_verify.php --dry-run
+ *   php cli/cron_resource_library_source_verify.php --force
  *
  * With --dry-run (or -n): probes and prints the same log lines but does not UPDATE the database.
+ *
+ * With --force (or -f): run probes even when the edition's interval has not elapsed yet (daily /
+ * weekly / monthly throttle). Still skips editions with interval "off", archived status, or no
+ * verify URL. Use for manual smoke tests; scheduled cron should omit --force.
  *
  * Environment: same database credentials as the web app (see src/db.php).
  */
@@ -30,8 +35,12 @@ ini_set('display_errors', '1');
 
 $argvList = $argv ?? [];
 $dryRun = in_array('--dry-run', $argvList, true) || in_array('-n', $argvList, true);
+$force = in_array('--force', $argvList, true) || in_array('-f', $argvList, true);
 if ($dryRun) {
     fwrite(STDERR, "Dry run: no database writes.\n");
+}
+if ($force) {
+    fwrite(STDERR, "Force: probing eligible editions regardless of interval throttle.\n");
 }
 
 $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
@@ -52,6 +61,7 @@ if ($stmt === false) {
 
 $nChecked = 0;
 $nSkipped = 0;
+$nSkippedInterval = 0;
 $nErrors = 0;
 
 while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
@@ -78,8 +88,9 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
     $extra = rl_catalog_decode_extra(isset($row['extra_config_json']) ? (string) $row['extra_config_json'] : null);
     $interval = rl_source_verify_normalize_interval((string) ($extra['source_verify_interval'] ?? 'off'));
     $state = is_array($extra['source_verify_state'] ?? null) ? $extra['source_verify_state'] : [];
-    if (!rl_source_verify_should_run($state, $interval, $now)) {
+    if (!$force && !rl_source_verify_should_run($state, $interval, $now)) {
         ++$nSkipped;
+        ++$nSkippedInterval;
         continue;
     }
     $url = rl_source_verify_resolve_url($extra, $rt);
@@ -118,7 +129,11 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
     }
 }
 
-echo 'Done. Probes run: ' . $nChecked . ', skipped: ' . $nSkipped . ', with HTTP/DB issues: ' . $nErrors;
+echo 'Done. Probes run: ' . $nChecked . ', skipped: ' . $nSkipped;
+if ($nSkippedInterval > 0 && !$force) {
+    echo ' (' . $nSkippedInterval . ' skipped: interval not elapsed yet)';
+}
+echo ', with HTTP/DB issues: ' . $nErrors;
 if ($dryRun) {
     echo ' (dry run, no DB writes)';
 }
