@@ -13,6 +13,8 @@ RUN apt-get update \
 
 RUN a2enmod rewrite
 
+COPY docker/php-uploads.ini /usr/local/etc/php/conf.d/ipca-uploads.ini
+
 COPY public/ /var/www/html/
 COPY src/ /var/www/src/
 COPY vendor/ /var/www/vendor/
