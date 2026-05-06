@@ -250,16 +250,16 @@ if ($action === 'search') {
     }
     $batchFilter = (int) ($data['batch_id'] ?? 0);
     $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $q) . '%';
-    // Root <document> and front/toc wrappers aggregate EUR-Lex boilerplate; they match almost any
-    // substring and (with ORDER BY id DESC) crowd out real hits. Search regulatory nodes only.
-    $excludeTypes = "LOWER(node_type) NOT IN ('document','frontmatter','toc','backmatter')";
+    // Root <document> / frontmatter / toc / backmatter rows carry boilerplate and match many queries;
+    // sort them after real regulatory rows instead of excluding them (some exports only match there).
+    $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'toc\',\'backmatter\') THEN 1 ELSE 0 END)';
     if ($batchFilter > 0) {
         $sql = "
             SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
                    SUBSTRING(plain_text, 1, 520) AS snippet
             FROM easa_erules_import_nodes_staging
-            WHERE batch_id = ? AND {$excludeTypes} AND plain_text LIKE ? ESCAPE '\\\\'
-            ORDER BY id ASC
+            WHERE batch_id = ? AND plain_text LIKE ? ESCAPE '\\\\'
+            ORDER BY {$wrapRank} ASC, id ASC
             LIMIT 25
         ";
         $stmt = $pdo->prepare($sql);
@@ -269,8 +269,8 @@ if ($action === 'search') {
             SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
                    SUBSTRING(plain_text, 1, 520) AS snippet
             FROM easa_erules_import_nodes_staging
-            WHERE {$excludeTypes} AND plain_text LIKE ? ESCAPE '\\\\'
-            ORDER BY id DESC
+            WHERE plain_text LIKE ? ESCAPE '\\\\'
+            ORDER BY {$wrapRank} ASC, id DESC
             LIMIT 25
         ";
         $stmt = $pdo->prepare($sql);
@@ -281,9 +281,7 @@ if ($action === 'search') {
         'ok' => true,
         'hits' => $hits,
         'hit_count' => count($hits),
-        'note' => $hits === []
-            ? 'No matches in staging (different wording, or parse the XML batch first). Searches skip wrapper nodes (document, frontmatter, toc, backmatter).'
-            : null,
+        'note' => $hits === [] ? 'No matches in staging (different wording, or parse the XML batch first).' : null,
     ]);
 }
 
