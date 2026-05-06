@@ -5,3 +5,4 @@
 
 # Admin-uploaded resource library JSON (per-edition folders under storage/resource_library/)
 /storage/resource_library/
+/storage/easa_erules/

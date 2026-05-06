@@ -137,7 +137,7 @@ $tableError = (!$result['ok']) ? ($result['error'] ?? 'Unknown error') : '';
 $blockCounts = $result['ok'] ? rl_block_counts_by_edition_map($pdo) : [];
 
 $rlTab = strtolower(trim((string)($_GET['tab'] ?? 'json')));
-if (!in_array($rlTab, ['json', 'crawlers', 'apis'], true)) {
+if (!in_array($rlTab, ['json', 'crawlers', 'apis', 'easa'], true)) {
     $rlTab = 'json';
 }
 $rlCrawl = strtolower(trim((string)($_GET['crawl'] ?? 'aim')));
@@ -711,8 +711,13 @@ cw_header('Resource Library');
     <div class="tcc-eyebrow">Admin · Resource Library</div>
     <h1 class="tcc-title">Resource Library</h1>
     <div class="tcc-sub">
-      Central library for <strong>JSON / book references</strong> (e.g. PHAK blocks for AI retrieval), <strong>data crawlers</strong> (FAA AIM HTML and other official sources),
-      and <strong>registered external APIs</strong> (e.g. the eCFR versioner). Pick a tab to filter resource types; cards share the same layout — only the editor modal differs by type.
+      <?php if ($rlTab === 'easa'): ?>
+        <strong>EASA Easy Access Rules</strong> — upload official XML exports, monitor EASA’s downloads page for newer packages, and search indexed EU regulatory text once published.
+        Optionally compare concepts with live U.S. <strong>eCFR</strong> excerpts for dual‑jurisdiction clarity. Designed for <strong>Compliance &amp; Safety</strong> as well as theory and training.
+      <?php else: ?>
+        Central library for <strong>JSON / book references</strong> (e.g. PHAK blocks for AI retrieval), <strong>data crawlers</strong> (FAA AIM HTML and other official sources),
+        and <strong>registered external APIs</strong> (e.g. the eCFR versioner). Pick a tab to filter resource types; the <a href="/admin/resource_library.php?tab=easa">EASA Easy Access Rules</a> tab hosts EU regulatory imports separately.
+      <?php endif; ?>
     </div>
   </section>
 
@@ -721,6 +726,7 @@ cw_header('Resource Library');
       <a class="tcc-tab <?= $rlTab === 'json' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=json">JSON / Book references</a>
       <a class="tcc-tab <?= $rlTab === 'crawlers' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=crawlers">Data crawlers</a>
       <a class="tcc-tab <?= $rlTab === 'apis' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=apis">APIs</a>
+      <a class="tcc-tab <?= $rlTab === 'easa' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=easa">EASA Easy Access Rules</a>
     </div>
   </section>
 
@@ -967,7 +973,7 @@ cw_header('Resource Library');
       <?php endif; ?>
     </div>
 
-  <?php else: ?>
+  <?php elseif ($rlTab === 'apis'): ?>
     <section class="card" style="padding:14px 16px;">
       <div class="tcc-muted">
         Each card is a <strong>registered API source</strong> (database row with <code>resource_type = api</code>), for example the U.S. Government <strong>eCFR</strong> versioner base URL and metadata used when fetching official regulatory text. Click a card to edit.
@@ -1041,6 +1047,11 @@ cw_header('Resource Library');
         ?>
       </div>
     </div>
+  <?php elseif ($rlTab === 'easa'): ?>
+    <?php
+      $easaApiHref = '/admin/api/resource_library_easa_api.php';
+      require __DIR__ . '/resource_library_easa_tab.inc.php';
+    ?>
   <?php endif; ?>
 </div>
 
