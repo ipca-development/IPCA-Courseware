@@ -327,6 +327,24 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return { ok: httpOk, j: j };
   }
 
+  function rlEasaParseJsonResponse(r) {
+    return r.text().then(function (t) {
+      var j = null;
+      if (t) {
+        try {
+          j = JSON.parse(t);
+        } catch (e) {
+          /* fall through */
+        }
+      }
+      if (!j || typeof j !== 'object') {
+        var snippet = String(t || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
+        throw new Error(snippet || ('HTTP ' + r.status + ' ' + (r.statusText || '')));
+      }
+      return { ok: r.ok, status: r.status, j: j };
+    });
+  }
+
   function rlEasaSetUploadProgressUi(opts) {
     var wrap = document.getElementById('rlEasaUploadProgressWrap');
     var track = document.getElementById('rlEasaUploadProgressTrack');
@@ -426,39 +444,77 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
             btn.addEventListener('click', function () {
               var id = parseInt(btn.getAttribute('data-batch-id') || '0', 10);
               if (!id) return;
+              var asyncPolling = false;
               btn.disabled = true;
+              btn.setAttribute('aria-busy', 'true');
               var prog = document.getElementById('rlEasaParseProgress');
-              if (prog) prog.textContent = 'Starting parse…';
+              if (prog) {
+                prog.textContent = 'Starting parse… (large XML can take several minutes in synchronous mode)';
+              }
               fetch(api, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 credentials: 'same-origin',
                 body: JSON.stringify({ action: 'parse_batch', batch_id: id })
               })
-                .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, status: r.status, j: j }; }); })
+                .then(rlEasaParseJsonResponse)
                 .then(function (x) {
-                  if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Parse failed');
-                  if (x.j.async) {
-                    if (prog) prog.textContent = 'Import running on server (batch ' + id + '). Polling status…';
+                  if (!x.j || !x.j.ok) {
+                    throw new Error((x.j && x.j.error) || ('Parse failed (HTTP ' + (x.status || '') + ')'));
+                  }
+                  if (x.status === 202 || x.j.async) {
+                    asyncPolling = true;
+                    if (prog) {
+                      prog.textContent = 'Import running on server (batch ' + id + '). Polling progress every 1.5s…';
+                    }
                     var tries = 0;
-                    var timer = setInterval(function () {
+                    var pollErrs = 0;
+                    var timer = null;
+                    function pollBatch() {
                       tries++;
                       fetch(api + '?action=batch_progress&batch_id=' + encodeURIComponent(String(id)), { credentials: 'same-origin' })
-                        .then(function (r2) { return r2.json(); })
-                        .then(function (pj) {
-                          if (!pj.ok || !pj.batch) return;
-                          var b = pj.batch;
+                        .then(rlEasaParseJsonResponse)
+                        .then(function (pr) {
+                          if (!pr.j.ok || !pr.j.batch) {
+                            pollErrs++;
+                            var errMsg = (pr.j && pr.j.error) ? pr.j.error : ('HTTP ' + pr.status);
+                            if (prog) {
+                              prog.textContent = 'Could not read batch progress: ' + errMsg + ' · retrying…';
+                            }
+                            return;
+                          }
+                          pollErrs = 0;
+                          var b = pr.j.batch;
+                          var rowCount = b.parse_rows_so_far;
+                          if (rowCount == null || rowCount === '') {
+                            rowCount = b.rows_detected;
+                          }
+                          if (rowCount == null || rowCount === '') {
+                            rowCount = '—';
+                          }
+                          var phase = b.parse_phase;
+                          if (!phase && b.status === 'ready_for_review') {
+                            phase = 'completed';
+                          } else if (!phase && b.status === 'failed') {
+                            phase = 'failed';
+                          } else if (!phase && b.status === 'staging') {
+                            phase = 'running';
+                          }
+                          if (!phase) {
+                            phase = '—';
+                          }
                           var line = [
                             'status=' + (b.status || ''),
-                            'phase=' + (b.parse_phase || '—'),
-                            'rows=' + (b.parse_rows_so_far != null ? b.parse_rows_so_far : '—'),
+                            'phase=' + phase,
+                            'rows=' + rowCount,
                             (b.parse_last_node_type ? 'last<' + b.parse_last_node_type + '>' : ''),
                             (b.parse_detail || '')
                           ].filter(Boolean).join(' · ');
                           if (prog) prog.textContent = line || '—';
                           if (b.status === 'ready_for_review' || b.status === 'failed') {
-                            clearInterval(timer);
+                            if (timer) clearInterval(timer);
                             btn.disabled = false;
+                            btn.removeAttribute('aria-busy');
                             loadStatus();
                             var hint = document.getElementById('rlEasaMigrateHint');
                             if (hint && b.status === 'ready_for_review') {
@@ -469,13 +525,21 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
                             }
                           }
                         })
-                        .catch(function () { /* ignore transient */ });
+                        .catch(function (e) {
+                          pollErrs++;
+                          if (prog) {
+                            prog.textContent = 'Polling failed (' + pollErrs + '): ' + (e.message || 'network') + ' · retrying…';
+                          }
+                        });
                       if (tries > 800) {
-                        clearInterval(timer);
+                        if (timer) clearInterval(timer);
                         btn.disabled = false;
+                        btn.removeAttribute('aria-busy');
                         if (prog) prog.textContent += '\nStopped polling after timeout; reload the page to see final status.';
                       }
-                    }, 1500);
+                    }
+                    pollBatch();
+                    timer = setInterval(pollBatch, 1500);
                     return;
                   }
                   if (prog) prog.textContent = 'Done: ' + (x.j.imported || 0) + ' nodes.';
@@ -489,9 +553,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
                   if (prog) prog.textContent = e.message || 'Parse failed';
                 })
                 .finally(function () {
-                  var progEl = document.getElementById('rlEasaParseProgress');
-                  var asyncPoll = progEl && progEl.textContent.indexOf('Polling') >= 0;
-                  if (!asyncPoll) btn.disabled = false;
+                  if (!asyncPolling) {
+                    btn.disabled = false;
+                    btn.removeAttribute('aria-busy');
+                  }
                 });
             });
           });
