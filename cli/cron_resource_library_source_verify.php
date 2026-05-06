@@ -10,6 +10,9 @@ declare(strict_types=1);
  *
  * Usage:
  *   php cli/cron_resource_library_source_verify.php
+ *   php cli/cron_resource_library_source_verify.php --dry-run
+ *
+ * With --dry-run (or -n): probes and prints the same log lines but does not UPDATE the database.
  *
  * Environment: same database credentials as the web app (see src/db.php).
  */
@@ -24,6 +27,12 @@ require_once __DIR__ . '/../src/resource_library_catalog.php';
 
 error_reporting(E_ALL);
 ini_set('display_errors', '1');
+
+$argvList = $argv ?? [];
+$dryRun = in_array('--dry-run', $argvList, true) || in_array('-n', $argvList, true);
+if ($dryRun) {
+    fwrite(STDERR, "Dry run: no database writes.\n");
+}
 
 $now = new DateTimeImmutable('now', new DateTimeZone('UTC'));
 
@@ -84,8 +93,10 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
     $extra['source_verify_state'] = $newState;
     $enc = rl_catalog_encode_extra($extra);
     try {
-        $up = $pdo->prepare('UPDATE resource_library_editions SET extra_config_json = ? WHERE id = ?');
-        $up->execute([$enc, $id]);
+        if (!$dryRun) {
+            $up = $pdo->prepare('UPDATE resource_library_editions SET extra_config_json = ? WHERE id = ?');
+            $up->execute([$enc, $id]);
+        }
         ++$nChecked;
         if (!($probe['ok'] ?? false)) {
             ++$nErrors;
@@ -97,6 +108,9 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         if (!empty($newState['page_last_updated'])) {
             $line .= ' · page_last_updated=' . $newState['page_last_updated'];
         }
+        if ($dryRun) {
+            $line .= ' · DRY_RUN';
+        }
         echo $line . "\n";
     } catch (Throwable $e) {
         ++$nErrors;
@@ -104,5 +118,9 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
     }
 }
 
-echo 'Done. Probes run: ' . $nChecked . ', skipped: ' . $nSkipped . ', with HTTP/DB issues: ' . $nErrors . "\n";
+echo 'Done. Probes run: ' . $nChecked . ', skipped: ' . $nSkipped . ', with HTTP/DB issues: ' . $nErrors;
+if ($dryRun) {
+    echo ' (dry run, no DB writes)';
+}
+echo "\n";
 exit($nErrors > 0 ? 2 : 0);
