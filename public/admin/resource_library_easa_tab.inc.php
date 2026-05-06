@@ -749,7 +749,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           if (x.j.note) lines.push(x.j.note);
           (x.j.hits || []).forEach(function (h, i) {
             lines.push('');
-            lines.push(String(i + 1) + '. [' + (h.node_type || '') + '] ' + (h.source_erules_id || h.title || h.node_uid || ''));
+            lines.push(String(i + 1) + '. batch ' + (h.batch_id != null ? h.batch_id : '—')
+              + ' · [' + (h.node_type || '') + '] ' + (h.source_erules_id || h.title || h.node_uid || ''));
             if (h.breadcrumb) lines.push('   Path: ' + h.breadcrumb);
             lines.push('   ' + (h.snippet || '').replace(/\s+/g, ' ').trim());
           });

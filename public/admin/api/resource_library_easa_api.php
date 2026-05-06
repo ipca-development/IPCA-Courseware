@@ -44,6 +44,25 @@ function rl_easa_ini_bytes(string $iniKey): int
     };
 }
 
+/**
+ * LIKE patterns for staging search (escape % and _). Second pattern drops dots so FCL.055 also matches FCL055-style ids.
+ *
+ * @return array{0: string, 1: string|null}
+ */
+function rl_easa_search_like_patterns(string $q): array
+{
+    $esc = static function (string $s): string {
+        return '%' . str_replace(['%', '_'], ['\\%', '\\_'], $s) . '%';
+    };
+    $like = $esc($q);
+    $noDots = str_replace(['.', '·', "\u{00B7}"], '', $q);
+    if ($noDots === $q || strlen(trim($noDots)) < 2) {
+        return [$like, null];
+    }
+
+    return [$like, $esc(trim($noDots))];
+}
+
 function rl_easa_extract_ai_text(array $resp): string
 {
     if (!empty($resp['output_text']) && is_string($resp['output_text'])) {
@@ -249,39 +268,61 @@ if ($action === 'search') {
         ]);
     }
     $batchFilter = (int) ($data['batch_id'] ?? 0);
-    $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $q) . '%';
-    // Root <document> / frontmatter / toc / backmatter rows carry boilerplate and match many queries;
-    // sort them after real regulatory rows instead of excluding them (some exports only match there).
+    [$like, $likeNoDots] = rl_easa_search_like_patterns($q);
+    // Match titles / ERulesId / path as well as body: many rules keep references out of plain_text chunks.
+    $matchCols = ['plain_text', 'title', 'source_title', 'breadcrumb', 'source_erules_id', 'path'];
+    $matchParts = [];
+    $bind = [];
+    foreach ($matchCols as $col) {
+        $matchParts[] = "COALESCE({$col}, '') LIKE ? ESCAPE '\\\\'";
+        $bind[] = $like;
+    }
+    if ($likeNoDots !== null) {
+        foreach (['source_erules_id', 'path', 'title', 'breadcrumb'] as $col) {
+            $matchParts[] = "COALESCE({$col}, '') LIKE ? ESCAPE '\\\\'";
+            $bind[] = $likeNoDots;
+        }
+    }
+    $whereMatch = '(' . implode(' OR ', $matchParts) . ')';
+    // Root <document> / frontmatter / toc / backmatter: sort after rows that look like real rules.
     $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'toc\',\'backmatter\') THEN 1 ELSE 0 END)';
+    $snippet = "SUBSTRING(TRIM(CONCAT_WS(CHAR(10),
+        NULLIF(TRIM(COALESCE(source_erules_id,'')), ''),
+        NULLIF(TRIM(COALESCE(title,'')), ''),
+        NULLIF(TRIM(COALESCE(source_title,'')), ''),
+        NULLIF(TRIM(COALESCE(breadcrumb,'')), ''),
+        plain_text)), 1, 520)";
     if ($batchFilter > 0) {
         $sql = "
             SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
-                   SUBSTRING(plain_text, 1, 520) AS snippet
+                   {$snippet} AS snippet
             FROM easa_erules_import_nodes_staging
-            WHERE batch_id = ? AND plain_text LIKE ? ESCAPE '\\\\'
+            WHERE batch_id = ? AND {$whereMatch}
             ORDER BY {$wrapRank} ASC, id ASC
-            LIMIT 25
+            LIMIT 50
         ";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$batchFilter, $like]);
+        $stmt->execute(array_merge([$batchFilter], $bind));
     } else {
         $sql = "
             SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
-                   SUBSTRING(plain_text, 1, 520) AS snippet
+                   {$snippet} AS snippet
             FROM easa_erules_import_nodes_staging
-            WHERE plain_text LIKE ? ESCAPE '\\\\'
+            WHERE {$whereMatch}
             ORDER BY {$wrapRank} ASC, id DESC
-            LIMIT 25
+            LIMIT 50
         ";
         $stmt = $pdo->prepare($sql);
-        $stmt->execute([$like]);
+        $stmt->execute($bind);
     }
     $hits = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     rl_easa_json_out(200, [
         'ok' => true,
         'hits' => $hits,
         'hit_count' => count($hits),
-        'note' => $hits === [] ? 'No matches in staging (different wording, or parse the XML batch first).' : null,
+        'note' => $hits === []
+            ? 'No matches in staging. Searches plain_text, title, source_title, breadcrumb, source_erules_id, and path (with a dotless variant for ids like FCL.055 vs FCL055).'
+            : null,
     ]);
 }
 
