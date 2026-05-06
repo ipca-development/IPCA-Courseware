@@ -250,26 +250,29 @@ if ($action === 'search') {
     }
     $batchFilter = (int) ($data['batch_id'] ?? 0);
     $like = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $q) . '%';
+    // Root <document> and front/toc wrappers aggregate EUR-Lex boilerplate; they match almost any
+    // substring and (with ORDER BY id DESC) crowd out real hits. Search regulatory nodes only.
+    $excludeTypes = "LOWER(node_type) NOT IN ('document','frontmatter','toc','backmatter')";
     if ($batchFilter > 0) {
-        $sql = '
+        $sql = "
             SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
                    SUBSTRING(plain_text, 1, 520) AS snippet
             FROM easa_erules_import_nodes_staging
-            WHERE batch_id = ? AND plain_text LIKE ? ESCAPE \'\\\\\'
+            WHERE batch_id = ? AND {$excludeTypes} AND plain_text LIKE ? ESCAPE '\\\\'
             ORDER BY id ASC
             LIMIT 25
-        ';
+        ";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$batchFilter, $like]);
     } else {
-        $sql = '
+        $sql = "
             SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
                    SUBSTRING(plain_text, 1, 520) AS snippet
             FROM easa_erules_import_nodes_staging
-            WHERE plain_text LIKE ? ESCAPE \'\\\\\'
+            WHERE {$excludeTypes} AND plain_text LIKE ? ESCAPE '\\\\'
             ORDER BY id DESC
             LIMIT 25
-        ';
+        ";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$like]);
     }
@@ -278,7 +281,9 @@ if ($action === 'search') {
         'ok' => true,
         'hits' => $hits,
         'hit_count' => count($hits),
-        'note' => $hits === [] ? 'No matches in staging (different wording, or parse the XML batch first).' : null,
+        'note' => $hits === []
+            ? 'No matches in staging (different wording, or parse the XML batch first). Searches skip wrapper nodes (document, frontmatter, toc, backmatter).'
+            : null,
     ]);
 }
 
