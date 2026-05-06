@@ -372,10 +372,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         if (x.j.max_body_bytes != null && x.j.max_body_bytes > 0) {
           rlEasaMaxUploadBytes = parseInt(x.j.max_body_bytes, 10) || 0;
           if (limEl) {
-            limEl.textContent = 'Server upload cap (PHP, effective): ~' + rlEasaFormatBytes(rlEasaMaxUploadBytes)
-              + ' — upload_max_filesize=' + (x.j.php_upload_max_filesize || '?')
+            limEl.textContent = 'PHP upload cap (effective): ~' + rlEasaFormatBytes(rlEasaMaxUploadBytes)
+              + ' (upload_max_filesize=' + (x.j.php_upload_max_filesize || '?')
               + ', post_max_size=' + (x.j.php_post_max_size || '?')
-              + '. On nginx add client_max_body_size; stuck mid-upload usually means a lower limit on the host.';
+              + '). If uploads stall around ~25MB while this is high, nginx (or Traefik, CDN, load balancer) is still limiting body size — set client_max_body_size 128m; (see deploy/nginx/ipca_upload_limits.conf), reload the proxy, retry.';
           }
         } else if (limEl) {
           limEl.textContent = '';
@@ -543,11 +543,14 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         if (lastLoadedAmt >= file.size && file.size > 0) return;
         if (stallEl) {
           stallEl.style.display = 'block';
-          stallEl.textContent = 'No progress for ~22s — upload is likely blocked by a server limit (PHP post_max_size / upload_max_filesize, or nginx client_max_body_size). '
-            + (rlEasaMaxUploadBytes > 0
-              ? 'This page reports max ~' + rlEasaFormatBytes(rlEasaMaxUploadBytes) + '. '
-              : '')
-            + 'Fix limits on the server, then retry.';
+          var phpAllowsFile = rlEasaMaxUploadBytes > 0 && file.size <= rlEasaMaxUploadBytes;
+          if (phpAllowsFile) {
+            stallEl.textContent = 'No progress for ~22s — PHP already allows this file size, so the limit is almost certainly in front of PHP: nginx client_max_body_size (often ~25m), Traefik, CDN, or load balancer. Raise client_max_body_size to 128m (include deploy/nginx/ipca_upload_limits.conf), reload nginx, retry.';
+          } else {
+            stallEl.textContent = 'No progress for ~22s — likely PHP post_max_size/upload_max_filesize or nginx client_max_body_size. '
+              + (rlEasaMaxUploadBytes > 0 ? 'This page reports PHP max ~' + rlEasaFormatBytes(rlEasaMaxUploadBytes) + '. ' : '')
+              + 'Fix limits on the server, then retry.';
+          }
         }
       }, 4000);
 
