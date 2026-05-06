@@ -34,7 +34,7 @@ function rl_api_load_edition(PDO $pdo, int $id): ?array
         }
     }
 
-    return [
+    $out = [
         'id' => (int) ($row['id'] ?? 0),
         'title' => (string) ($row['title'] ?? ''),
         'revision_code' => (string) ($row['revision_code'] ?? ''),
@@ -46,6 +46,15 @@ function rl_api_load_edition(PDO $pdo, int $id): ?array
         'created_at' => $row['created_at'] ?? null,
         'updated_at' => $row['updated_at'] ?? null,
     ];
+    if (isset($row['extra_config_json'])) {
+        $ex = rl_catalog_decode_extra((string) ($row['extra_config_json'] ?? ''));
+        $svState = $ex['source_verify_state'] ?? [];
+        $out['source_verify_url'] = trim((string) ($ex['source_verify_url'] ?? ''));
+        $out['source_verify_interval'] = rl_source_verify_normalize_interval((string) ($ex['source_verify_interval'] ?? 'off'));
+        $out['source_verify_state'] = is_array($svState) ? $svState : [];
+    }
+
+    return $out;
 }
 
 /**
@@ -269,6 +278,33 @@ if ($action === 'delete_source') {
     ]);
 }
 
+if ($action === 'test_source_verify') {
+    $id = (int) ($data['id'] ?? 0);
+    $edition = rl_api_load_edition($pdo, $id);
+    if (!$edition) {
+        rl_api_json_out(404, ['ok' => false, 'error' => 'Edition not found']);
+    }
+    $row = rl_catalog_fetch_edition($pdo, $id);
+    $extra = is_array($row) ? rl_catalog_decode_extra(isset($row['extra_config_json']) ? (string) $row['extra_config_json'] : null) : [];
+    $testUrl = trim((string) ($data['url'] ?? ''));
+    if ($testUrl === '') {
+        $testUrl = rl_source_verify_resolve_url($extra, RL_RESOURCE_JSON_BOOK);
+    }
+    if ($testUrl === '') {
+        rl_api_json_out(400, ['ok' => false, 'error' => 'Set an official verify URL for this edition, or pass a url in the request.']);
+    }
+    $probe = rl_source_verify_http_probe($testUrl);
+    rl_api_json_out(200, [
+        'ok' => true,
+        'reachable' => (bool) ($probe['ok'] ?? false),
+        'http_code' => (int) ($probe['http_code'] ?? 0),
+        'final_url' => (string) ($probe['final_url'] ?? ''),
+        'error' => $probe['error'] ?? null,
+        'etag' => $probe['etag'] ?? null,
+        'last_modified' => $probe['last_modified'] ?? null,
+    ]);
+}
+
 if ($action === 'import_blocks') {
     @set_time_limit(600);
     $id = (int)($data['id'] ?? 0);
@@ -342,26 +378,58 @@ if (strlen($thumb) > 1024) {
 }
 $thumbDb = $thumb === '' ? null : $thumb;
 
+$rowFull = rl_catalog_fetch_edition($pdo, $id);
+if (!is_array($rowFull)) {
+    rl_api_json_out(500, ['ok' => false, 'error' => 'Reload failed']);
+}
+$extra = rl_catalog_decode_extra(isset($rowFull['extra_config_json']) ? (string) $rowFull['extra_config_json'] : null);
+$mergedSv = rl_source_verify_merge_user_extra($extra, $data);
+if (isset($mergedSv['error'])) {
+    rl_api_json_out(400, ['ok' => false, 'error' => $mergedSv['error']]);
+}
+$extra = $mergedSv['extra'];
+$extraEnc = isset($rowFull['extra_config_json']) ? rl_catalog_encode_extra($extra) : null;
+
 try {
     if ($thumbDb === null) {
         rl_delete_thumbnail_files($id);
     }
-    $stmt = $pdo->prepare('
-        UPDATE resource_library_editions
-        SET title = ?, revision_code = ?, revision_date = ?, status = ?, thumbnail_path = ?, work_code = ?, sort_order = ?
-        WHERE id = ?
-        ' . rl_api_json_book_where($pdo) . '
-    ');
-    $stmt->execute([
-        $title,
-        $revisionCode,
-        $revisionDate,
-        $status,
-        $thumbDb,
-        $workCodeDb,
-        $sortOrder,
-        $id,
-    ]);
+    if ($extraEnc !== null) {
+        $stmt = $pdo->prepare('
+            UPDATE resource_library_editions
+            SET title = ?, revision_code = ?, revision_date = ?, status = ?, thumbnail_path = ?, work_code = ?, sort_order = ?, extra_config_json = ?
+            WHERE id = ?
+            ' . rl_api_json_book_where($pdo) . '
+        ');
+        $stmt->execute([
+            $title,
+            $revisionCode,
+            $revisionDate,
+            $status,
+            $thumbDb,
+            $workCodeDb,
+            $sortOrder,
+            $extraEnc,
+            $id,
+        ]);
+    } else {
+        $stmt = $pdo->prepare('
+            UPDATE resource_library_editions
+            SET title = ?, revision_code = ?, revision_date = ?, status = ?, thumbnail_path = ?, work_code = ?, sort_order = ?
+            WHERE id = ?
+            ' . rl_api_json_book_where($pdo) . '
+        ');
+        $stmt->execute([
+            $title,
+            $revisionCode,
+            $revisionDate,
+            $status,
+            $thumbDb,
+            $workCodeDb,
+            $sortOrder,
+            $id,
+        ]);
+    }
 } catch (Throwable $e) {
     rl_api_json_out(500, ['ok' => false, 'error' => 'Database error: ' . $e->getMessage()]);
 }

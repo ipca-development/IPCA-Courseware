@@ -73,68 +73,29 @@ function rl_crawler_api_aim_stats(PDO $pdo, int $editionId): array
 }
 
 /**
- * @return array{reachable: bool, http_code: int, final_url?: string, error?: string}
+ * @return array{reachable: bool, http_code: int, final_url?: string, error?: string, etag?: string|null, last_modified?: string|null}
  */
 function rl_crawler_api_probe_url(string $url, int $timeoutSec = 18): array
 {
-    $url = trim($url);
-    if ($url === '' || !preg_match('#^https://#i', $url)) {
-        return ['reachable' => false, 'http_code' => 0, 'error' => 'URL must start with https://'];
+    $p = rl_source_verify_http_probe($url, $timeoutSec);
+    $out = [
+        'reachable' => (bool) ($p['ok'] ?? false),
+        'http_code' => (int) ($p['http_code'] ?? 0),
+        'final_url' => (string) ($p['final_url'] ?? ''),
+        'error' => isset($p['error']) ? (string) $p['error'] : null,
+    ];
+    if (isset($p['etag'])) {
+        $out['etag'] = (string) $p['etag'];
+    } else {
+        $out['etag'] = null;
+    }
+    if (isset($p['last_modified'])) {
+        $out['last_modified'] = (string) $p['last_modified'];
+    } else {
+        $out['last_modified'] = null;
     }
 
-    if (function_exists('curl_init')) {
-        $ch = curl_init($url);
-        if ($ch === false) {
-            return ['reachable' => false, 'http_code' => 0, 'error' => 'Could not initialize request'];
-        }
-        curl_setopt_array($ch, [
-            CURLOPT_NOBODY => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 10,
-            CURLOPT_TIMEOUT => $timeoutSec,
-            CURLOPT_CONNECTTIMEOUT => min(12, $timeoutSec),
-            CURLOPT_SSL_VERIFYPEER => true,
-            CURLOPT_USERAGENT => 'IPCA-ResourceLibrary/1.0 (typed edition; link test)',
-        ]);
-        curl_exec($ch);
-        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        $final = (string) curl_getinfo($ch, CURLINFO_EFFECTIVE_URL);
-        $cerr = curl_error($ch);
-        if ($code === 0) {
-            return ['reachable' => false, 'http_code' => 0, 'error' => $cerr !== '' ? $cerr : 'No HTTP response'];
-        }
-
-        return [
-            'reachable' => $code >= 200 && $code < 400,
-            'http_code' => $code,
-            'final_url' => $final !== '' ? $final : $url,
-        ];
-    }
-
-    $ctx = stream_context_create([
-        'http' => [
-            'method' => 'HEAD',
-            'timeout' => $timeoutSec,
-            'header' => "User-Agent: IPCA-ResourceLibrary/1.0\r\n",
-            'follow_location' => 1,
-            'max_redirects' => 8,
-        ],
-        'ssl' => [
-            'verify_peer' => true,
-            'verify_peer_name' => true,
-        ],
-    ]);
-    $headers = @get_headers($url, 1, $ctx);
-    if ($headers === false) {
-        return ['reachable' => false, 'http_code' => 0, 'error' => 'Could not reach URL (no cURL extension and stream probe failed)'];
-    }
-    $line = is_array($headers) && isset($headers[0]) ? (string) $headers[0] : '';
-    $code = 0;
-    if (preg_match('#HTTP/\S+\s+(\d{3})#', $line, $m)) {
-        $code = (int) $m[1];
-    }
-
-    return ['reachable' => $code >= 200 && $code < 400, 'http_code' => $code, 'final_url' => $url];
+    return $out;
 }
 
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
@@ -253,6 +214,8 @@ if ($action === 'test_url') {
         'http_code' => $probe['http_code'] ?? 0,
         'final_url' => $probe['final_url'] ?? '',
         'error' => $probe['error'] ?? null,
+        'etag' => $probe['etag'] ?? null,
+        'last_modified' => $probe['last_modified'] ?? null,
     ]);
 }
 
@@ -320,6 +283,11 @@ if ($rt === RL_RESOURCE_CRAWLER) {
     if (empty($extra['crawler_type'])) {
         $extra['crawler_type'] = 'aim_html';
     }
+    $mergedSv = rl_source_verify_merge_user_extra($extra, $data);
+    if (isset($mergedSv['error'])) {
+        rl_crawler_api_json(400, ['ok' => false, 'error' => $mergedSv['error']]);
+    }
+    $extra = $mergedSv['extra'];
 } else {
     $apiUrl = trim((string) ($data['api_base_url'] ?? ''));
     if ($apiUrl !== '' && strlen($apiUrl) > 1024) {
@@ -330,6 +298,11 @@ if ($rt === RL_RESOURCE_CRAWLER) {
     }
     $extra['api_base_url'] = $apiUrl;
     $extra['notes'] = $notes;
+    $mergedSv = rl_source_verify_merge_user_extra($extra, $data);
+    if (isset($mergedSv['error'])) {
+        rl_crawler_api_json(400, ['ok' => false, 'error' => $mergedSv['error']]);
+    }
+    $extra = $mergedSv['extra'];
 }
 
 try {

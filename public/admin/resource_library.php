@@ -1041,6 +1041,28 @@ cw_header('Resource Library');
           <label for="rlFieldThumb">Thumbnail URL or path (optional)</label>
           <input type="text" id="rlFieldThumb" name="thumbnail_path" maxlength="1024" placeholder="/admin/resource_library_thumb.php?id=… or https://…" autocomplete="off">
         </div>
+        <div class="rl-field">
+          <label for="rlEditionVerifyUrl">Official page to verify (HTTPS)</label>
+          <input type="url" id="rlEditionVerifyUrl" maxlength="2048" placeholder="FAA page where this handbook revision is published" autocomplete="off">
+        </div>
+        <div class="rl-field">
+          <label for="rlEditionVerifyInterval">Automatically verify</label>
+          <select id="rlEditionVerifyInterval">
+            <option value="off">Off</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+        <p class="rl-drop-meta" id="rlEditionVerifyStatus" style="margin-top:0;">—</p>
+        <div class="rl-field rl-test-panel" style="margin-top:8px;">
+          <label for="rlEditionVerifyTestOverride">Optional URL override for test</label>
+          <div class="rl-test-actions" style="margin-top:6px;">
+            <input type="url" id="rlEditionVerifyTestOverride" maxlength="2048" placeholder="Leave empty to use verify URL above" autocomplete="off" style="flex:1; min-width:180px;">
+            <button type="button" class="btn btn-sm" id="rlEditionVerifyTestBtn">Test URL</button>
+          </div>
+          <pre class="rl-test-out" id="rlEditionVerifyTestOut" aria-live="polite" style="margin-top:8px;"></pre>
+        </div>
       </form>
 
       <div class="rl-panel">
@@ -1128,8 +1150,22 @@ cw_header('Resource Library');
         <label for="rlAimFieldNotes">Notes (internal)</label>
         <textarea id="rlAimFieldNotes" maxlength="8000" placeholder="Crawl notes, operator reminders…"></textarea>
       </div>
-      <div class="rl-field">
-        <label id="rlAimDropThumbLabel">Cover image</label>
+        <div class="rl-field">
+          <label for="rlAimVerifyUrl">Official page to check for updates (optional)</label>
+          <input type="url" id="rlAimVerifyUrl" maxlength="2048" placeholder="Leave empty to use the main crawl URL" autocomplete="off">
+        </div>
+        <div class="rl-field">
+          <label for="rlAimVerifyInterval">Automatically verify</label>
+          <select id="rlAimVerifyInterval">
+            <option value="off">Off</option>
+            <option value="daily">Daily</option>
+            <option value="weekly">Weekly</option>
+            <option value="monthly">Monthly</option>
+          </select>
+        </div>
+        <p class="rl-drop-meta" id="rlAimVerifyStatus" style="margin-top:0;">—</p>
+        <div class="rl-field">
+          <label id="rlAimDropThumbLabel">Cover image</label>
         <div class="rl-drop-img" id="rlAimDropThumb" role="button" tabindex="0" aria-labelledby="rlAimDropThumbLabel">
           <input type="file" id="rlAimThumbFile" accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp" hidden>
           <p>Drag and drop a cover image here, or click to browse.</p>
@@ -1426,6 +1462,8 @@ cw_header('Resource Library');
     if (dropThumb) dropThumb.classList.remove('is-dragover');
     if (testOut) testOut.textContent = '';
     if (testQuery) testQuery.value = '';
+    var evOut = document.getElementById('rlEditionVerifyTestOut');
+    if (evOut) evOut.textContent = '';
   }
 
   backdrop.addEventListener('click', function (e) {
@@ -1433,6 +1471,20 @@ cw_header('Resource Library');
   });
   if (closeBtn) closeBtn.addEventListener('click', closeModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+
+  function setEditionVerifyStatus(ed) {
+    var el = document.getElementById('rlEditionVerifyStatus');
+    if (!el) return;
+    ed = ed || {};
+    var interval = ed.source_verify_interval || 'off';
+    var st = ed.source_verify_state || {};
+    var parts = ['Schedule: ' + interval];
+    if (st.checked_at) parts.push('Last check (UTC): ' + st.checked_at);
+    if (st.http_code != null && st.http_code !== '') parts.push('Last HTTP ' + st.http_code);
+    if (st.change_detected) parts.push('Change suspected — compare headers or re-import JSON');
+    if (st.last_error) parts.push('Probe error: ' + st.last_error);
+    el.textContent = parts.length > 1 ? parts.join(' · ') : (parts[0] || '—');
+  }
 
   function fillForm(ed) {
     document.getElementById('rlFieldId').value = String(ed.id || '');
@@ -1443,6 +1495,18 @@ cw_header('Resource Library');
     document.getElementById('rlFieldSort').value = String(ed.sort_order != null ? ed.sort_order : 0);
     document.getElementById('rlFieldWork').value = ed.work_code || '';
     document.getElementById('rlFieldThumb').value = ed.thumbnail_path || '';
+    var evu = document.getElementById('rlEditionVerifyUrl');
+    if (evu) evu.value = ed.source_verify_url || '';
+    var evi = document.getElementById('rlEditionVerifyInterval');
+    if (evi) {
+      var iv = ed.source_verify_interval || 'off';
+      evi.value = ['off', 'daily', 'weekly', 'monthly'].indexOf(iv) >= 0 ? iv : 'off';
+    }
+    var evo = document.getElementById('rlEditionVerifyTestOverride');
+    if (evo) evo.value = '';
+    var evOut = document.getElementById('rlEditionVerifyTestOut');
+    if (evOut) evOut.textContent = '';
+    setEditionVerifyStatus(ed);
     var mt = document.getElementById('rlModalTitle');
     var ms = document.getElementById('rlModalSub');
     if (mt) mt.textContent = ed.title || 'Edition';
@@ -1540,7 +1604,9 @@ cw_header('Resource Library');
       status: document.getElementById('rlFieldStatus').value,
       sort_order: parseInt(document.getElementById('rlFieldSort').value, 10) || 0,
       work_code: document.getElementById('rlFieldWork').value,
-      thumbnail_path: document.getElementById('rlFieldThumb').value
+      thumbnail_path: document.getElementById('rlFieldThumb').value,
+      source_verify_url: (document.getElementById('rlEditionVerifyUrl') && document.getElementById('rlEditionVerifyUrl').value) || '',
+      source_verify_interval: (document.getElementById('rlEditionVerifyInterval') && document.getElementById('rlEditionVerifyInterval').value) || 'off'
     };
     saveBtn.disabled = true;
     fetch(api, {
@@ -1559,6 +1625,46 @@ cw_header('Resource Library');
       })
       .finally(function () { saveBtn.disabled = false; });
   });
+
+  var editionVerifyTestBtn = document.getElementById('rlEditionVerifyTestBtn');
+  if (editionVerifyTestBtn) {
+    editionVerifyTestBtn.addEventListener('click', function () {
+      clearMsg();
+      var id = parseInt(document.getElementById('rlFieldId').value, 10);
+      if (!id) return;
+      var ov = (document.getElementById('rlEditionVerifyTestOverride') && document.getElementById('rlEditionVerifyTestOverride').value || '').trim();
+      var body = { action: 'test_source_verify', id: id };
+      if (ov) body.url = ov;
+      var out = document.getElementById('rlEditionVerifyTestOut');
+      if (out) out.textContent = 'Testing…';
+      fetch(api, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(body)
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          var j = x.j || {};
+          if (!x.ok || !j.ok) {
+            if (out) out.textContent = (j.error || 'Request failed');
+            showMsg(j.error || 'Test failed', 'err');
+            return;
+          }
+          var lines = [];
+          lines.push('HTTP ' + (j.http_code != null ? j.http_code : 0));
+          if (j.final_url) lines.push('Final URL: ' + j.final_url);
+          lines.push(j.reachable ? 'Result: reachable (2xx/3xx)' : 'Result: not reachable or error');
+          if (j.etag) lines.push('ETag: ' + j.etag);
+          if (j.last_modified) lines.push('Last-Modified: ' + j.last_modified);
+          if (j.error) lines.push('Detail: ' + j.error);
+          if (out) out.textContent = lines.join('\n');
+        })
+        .catch(function (e) {
+          if (out) out.textContent = e.message || 'Network error';
+        });
+    });
+  }
 
   if (uploadBtn) uploadBtn.addEventListener('click', function () {
     clearMsg();
@@ -1792,6 +1898,20 @@ cw_header('Resource Library');
     thumbPreview.src = url;
   }
 
+  function setAimVerifyStatus(src) {
+    var el = document.getElementById('rlAimVerifyStatus');
+    if (!el) return;
+    src = src || {};
+    var interval = src.source_verify_interval || 'off';
+    var st = src.source_verify_state || {};
+    var parts = ['Schedule: ' + interval];
+    if (st.checked_at) parts.push('Last check (UTC): ' + st.checked_at);
+    if (st.http_code != null && st.http_code !== '') parts.push('Last HTTP ' + st.http_code);
+    if (st.change_detected) parts.push('Change suspected — compare headers or re-import');
+    if (st.last_error) parts.push('Probe error: ' + st.last_error);
+    el.textContent = parts.length > 1 ? parts.join(' · ') : (parts[0] || '—');
+  }
+
   function fillAimForm(src) {
     document.getElementById('rlAimFieldId').value = String(src.id || '');
     document.getElementById('rlAimFieldLabel').value = src.label || '';
@@ -1807,6 +1927,14 @@ cw_header('Resource Library');
     document.getElementById('rlAimFieldStatus').value = ['draft', 'live', 'archived'].indexOf(st) >= 0 ? st : 'draft';
     document.getElementById('rlAimFieldNotes').value = src.notes || '';
     document.getElementById('rlAimFieldThumb').value = src.thumbnail_path || '';
+    var aimVu = document.getElementById('rlAimVerifyUrl');
+    if (aimVu) aimVu.value = src.source_verify_url || '';
+    var aimVi = document.getElementById('rlAimVerifyInterval');
+    if (aimVi) {
+      var aiv = src.source_verify_interval || 'off';
+      aimVi.value = ['off', 'daily', 'weekly', 'monthly'].indexOf(aiv) >= 0 ? aiv : 'off';
+    }
+    setAimVerifyStatus(src);
     var titleEl = document.getElementById('rlAimModalTitle');
     if (titleEl) titleEl.textContent = src.label || 'AIM crawler';
     var sub = document.getElementById('rlAimModalSub');
@@ -1947,7 +2075,9 @@ cw_header('Resource Library');
         effective_date: document.getElementById('rlAimFieldEffective').value,
         status: document.getElementById('rlAimFieldStatus').value,
         notes: document.getElementById('rlAimFieldNotes').value,
-        thumbnail_path: document.getElementById('rlAimFieldThumb').value
+        thumbnail_path: document.getElementById('rlAimFieldThumb').value,
+        source_verify_url: (document.getElementById('rlAimVerifyUrl') && document.getElementById('rlAimVerifyUrl').value) || '',
+        source_verify_interval: (document.getElementById('rlAimVerifyInterval') && document.getElementById('rlAimVerifyInterval').value) || 'off'
       };
       aimSave.disabled = true;
       fetch(aimApi, {
@@ -1996,6 +2126,8 @@ cw_header('Resource Library');
           lines.push('HTTP ' + (j.http_code != null ? j.http_code : 0));
           if (j.final_url) lines.push('Final URL: ' + j.final_url);
           lines.push(j.reachable ? 'Result: reachable (2xx/3xx)' : 'Result: not reachable or error');
+          if (j.etag) lines.push('ETag: ' + j.etag);
+          if (j.last_modified) lines.push('Last-Modified: ' + j.last_modified);
           if (j.error) lines.push('Detail: ' + j.error);
           if (out) out.textContent = lines.join('\n');
         })

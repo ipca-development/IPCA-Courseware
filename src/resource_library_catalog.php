@@ -12,6 +12,8 @@ const RL_RESOURCE_CRAWLER = 'crawler';
 /** @var non-empty-string */
 const RL_RESOURCE_API = 'api';
 
+require_once __DIR__ . '/resource_library_source_verify.php';
+
 function rl_catalog_has_resource_type_column(PDO $pdo): bool
 {
     static $cache = null;
@@ -171,6 +173,8 @@ function rl_catalog_crawler_row_as_source(array $row): array
         $st = 'live';
     }
 
+    $svState = $extra['source_verify_state'] ?? [];
+
     return [
         'id' => (int) ($row['id'] ?? 0),
         'label' => (string) ($row['title'] ?? ''),
@@ -184,6 +188,9 @@ function rl_catalog_crawler_row_as_source(array $row): array
         'crawler_type' => (string) ($extra['crawler_type'] ?? ''),
         'resource_type' => rl_catalog_normalize_resource_type(isset($row['resource_type']) ? (string) $row['resource_type'] : null),
         'work_code' => (string) ($row['work_code'] ?? ''),
+        'source_verify_url' => trim((string) ($extra['source_verify_url'] ?? '')),
+        'source_verify_interval' => rl_source_verify_normalize_interval((string) ($extra['source_verify_interval'] ?? 'off')),
+        'source_verify_state' => is_array($svState) ? $svState : [],
     ];
 }
 
@@ -200,6 +207,7 @@ function rl_catalog_api_row_as_source(array $row): array
     if ($st === 'active') {
         $st = 'live';
     }
+    $svState = $extra['source_verify_state'] ?? [];
 
     return [
         'id' => (int) ($row['id'] ?? 0),
@@ -212,6 +220,9 @@ function rl_catalog_api_row_as_source(array $row): array
         'thumbnail_path' => $row['thumbnail_path'] ?? null,
         'resource_type' => RL_RESOURCE_API,
         'work_code' => (string) ($row['work_code'] ?? ''),
+        'source_verify_url' => trim((string) ($extra['source_verify_url'] ?? '')),
+        'source_verify_interval' => rl_source_verify_normalize_interval((string) ($extra['source_verify_interval'] ?? 'off')),
+        'source_verify_state' => is_array($svState) ? $svState : [],
     ];
 }
 
