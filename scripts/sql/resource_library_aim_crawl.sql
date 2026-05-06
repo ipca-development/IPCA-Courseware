@@ -106,3 +106,29 @@ SELECT * FROM (
 WHERE NOT EXISTS (
   SELECT 1 FROM resource_library_editions WHERE work_code = 'LIB_API_DEFAULT' AND resource_type = 'api' LIMIT 1
 );
+
+-- eCFR versioner — drives AI training report regulatory excerpt (Resource Library APIs tab).
+INSERT INTO resource_library_editions (
+  title, revision_code, revision_date, status, thumbnail_path, work_code, sort_order, resource_type, extra_config_json
+)
+SELECT * FROM (
+  SELECT
+    'U.S. Government eCFR API' AS title,
+    'v1' AS revision_code,
+    CURDATE() AS revision_date,
+    'live' AS status,
+    NULL AS thumbnail_path,
+    'ECFR_API' AS work_code,
+    58 AS sort_order,
+    'api' AS resource_type,
+    JSON_OBJECT(
+      'api_base_url', 'https://www.ecfr.gov',
+      'ecfr_title_number', 14,
+      'ecfr_section', '61.105',
+      'ecfr_training_report', TRUE,
+      'notes', 'eCFR versioner v1. Training report uses title + section from extra; api_base_url must be HTTPS host (paths are appended in code).'
+    ) AS extra_config_json
+) AS seed_ecfr
+WHERE NOT EXISTS (
+  SELECT 1 FROM resource_library_editions WHERE work_code = 'ECFR_API' AND resource_type = 'api' LIMIT 1
+);

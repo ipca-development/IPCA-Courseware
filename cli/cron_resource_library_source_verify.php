@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /**
- * CLI cron: probe official source URLs for json_book and crawler editions when
+ * CLI cron: probe official source URLs for json_book, crawler, and api editions when
  * extra_config_json.source_verify_interval is not "off".
  *
  * Point system cron here (daily or hourly is fine); each edition is probed only
@@ -50,7 +50,7 @@ if (!rl_catalog_has_resource_type_column($pdo)) {
 } else {
     $sql = "SELECT id, resource_type, extra_config_json, status
             FROM resource_library_editions
-            WHERE resource_type IN ('json_book', 'crawler')";
+            WHERE resource_type IN ('json_book', 'crawler', 'api')";
 }
 
 $stmt = $pdo->query($sql);
@@ -80,7 +80,7 @@ while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
     $rt = rl_catalog_has_resource_type_column($pdo)
         ? rl_catalog_normalize_resource_type(isset($row['resource_type']) ? (string) $row['resource_type'] : null)
         : RL_RESOURCE_JSON_BOOK;
-    if ($rt !== RL_RESOURCE_JSON_BOOK && $rt !== RL_RESOURCE_CRAWLER) {
+    if ($rt !== RL_RESOURCE_JSON_BOOK && $rt !== RL_RESOURCE_CRAWLER && $rt !== RL_RESOURCE_API) {
         ++$nSkipped;
         continue;
     }

@@ -306,6 +306,25 @@ if ($rt === RL_RESOURCE_CRAWLER) {
     }
     $extra['api_base_url'] = $apiUrl;
     $extra['notes'] = $notes;
+    if (array_key_exists('ecfr_title_number', $data)) {
+        $etn = (int) $data['ecfr_title_number'];
+        if ($etn > 0) {
+            $extra['ecfr_title_number'] = $etn;
+        } else {
+            unset($extra['ecfr_title_number']);
+        }
+    }
+    if (array_key_exists('ecfr_section', $data)) {
+        $es = trim((string) $data['ecfr_section']);
+        if ($es !== '' && strlen($es) <= 64) {
+            $extra['ecfr_section'] = $es;
+        } else {
+            unset($extra['ecfr_section']);
+        }
+    }
+    if (array_key_exists('ecfr_training_report', $data)) {
+        $extra['ecfr_training_report'] = !empty($data['ecfr_training_report']);
+    }
     $mergedSv = rl_source_verify_merge_user_extra($extra, $data);
     if (isset($mergedSv['error'])) {
         rl_crawler_api_json(400, ['ok' => false, 'error' => $mergedSv['error']]);

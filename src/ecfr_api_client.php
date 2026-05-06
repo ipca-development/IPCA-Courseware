@@ -8,19 +8,64 @@ declare(strict_types=1);
  * @see https://www.ecfr.gov/reader-aids/ecfr-developer-resources/rest-api-interactive-documentation (interactive endpoint reference)
  *
  * No API key is required. Use a descriptive User-Agent per eCFR guidance.
+ * Programmatic access may be rate-limited; follow official API documentation and site terms.
  */
 final class EcfrApiClient
 {
-    private const BASE = 'https://www.ecfr.gov';
+    /** Official eCFR REST API (v1) documentation — canonical reference for endpoints this client uses. */
+    public const DOCUMENTATION_V1_URL = 'https://www.ecfr.gov/developers/documentation/api/v1';
 
-    private const DEFAULT_UA = 'IPCA-Courseware/1.0 (+https://www.ecfr.gov/developers/documentation/api/v1)';
+    private const DEFAULT_BASE_ORIGIN = 'https://www.ecfr.gov';
+
+    private const DEFAULT_UA = 'IPCA-Courseware/1.0 (+' . self::DOCUMENTATION_V1_URL . ')';
 
     /** @var array<string,mixed>|null */
-    private static ?array $titlesCache = null;
+    private ?array $titlesCache = null;
 
+    private readonly string $baseOrigin;
+
+    /**
+     * @param string $apiBaseUrl Full HTTPS URL or origin only (e.g. https://www.ecfr.gov or https://www.ecfr.gov/). Path segments are ignored; only scheme, host, and port are used.
+     */
     public function __construct(
+        string $apiBaseUrl = self::DEFAULT_BASE_ORIGIN,
         private readonly string $userAgent = self::DEFAULT_UA
     ) {
+        $this->baseOrigin = self::normalizeOrigin($apiBaseUrl);
+    }
+
+    public function getBaseOrigin(): string
+    {
+        return $this->baseOrigin;
+    }
+
+    /**
+     * Reduce a pasted URL to scheme + host (+ port) for eCFR versioner paths rooted at /api/versioner/v1/.
+     */
+    public static function normalizeOrigin(string $url): string
+    {
+        $url = trim($url);
+        if ($url === '') {
+            return self::DEFAULT_BASE_ORIGIN;
+        }
+        $p = parse_url($url);
+        if (!is_array($p) || empty($p['scheme']) || empty($p['host'])) {
+            return self::DEFAULT_BASE_ORIGIN;
+        }
+        $scheme = strtolower((string) $p['scheme']);
+        if ($scheme !== 'https' && $scheme !== 'http') {
+            return self::DEFAULT_BASE_ORIGIN;
+        }
+        if ($scheme === 'http') {
+            $scheme = 'https';
+        }
+        $host = (string) $p['host'];
+        $origin = $scheme . '://' . $host;
+        if (!empty($p['port'])) {
+            $origin .= ':' . (int) $p['port'];
+        }
+
+        return $origin;
     }
 
     /**
@@ -28,18 +73,18 @@ final class EcfrApiClient
      */
     public function fetchTitles(): array
     {
-        if (self::$titlesCache !== null) {
-            return self::$titlesCache;
+        if ($this->titlesCache !== null) {
+            return $this->titlesCache;
         }
 
-        $url = self::BASE . '/api/versioner/v1/titles';
+        $url = $this->baseOrigin . '/api/versioner/v1/titles';
         $raw = $this->httpGet($url);
         $decoded = json_decode($raw, true);
         if (!is_array($decoded) || !isset($decoded['titles']) || !is_array($decoded['titles'])) {
             throw new RuntimeException('eCFR titles response was not valid JSON');
         }
 
-        self::$titlesCache = $decoded;
+        $this->titlesCache = $decoded;
 
         return $decoded;
     }
@@ -92,7 +137,7 @@ final class EcfrApiClient
 
         $url = sprintf(
             '%s/api/versioner/v1/full/%s/title-%d.xml?section=%s',
-            self::BASE,
+            $this->baseOrigin,
             rawurlencode($date),
             $titleNumber,
             rawurlencode($sectionId)
@@ -108,7 +153,7 @@ final class EcfrApiClient
     {
         return sprintf(
             '%s/current/title-%d/section-%s',
-            self::BASE,
+            $this->baseOrigin,
             $titleNumber,
             rawurlencode(trim($sectionId))
         );

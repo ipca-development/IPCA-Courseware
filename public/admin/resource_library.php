@@ -11,7 +11,6 @@ cw_require_admin();
 
 $apiHref = '/admin/api/resource_library_api.php';
 $searchTestHref = '/admin/api/resource_library_search_test.php';
-$aimApiHref = '/admin/api/resource_library_aim_api.php';
 $crawlerApiHref = '/admin/api/resource_library_crawler_api.php';
 
 /**
@@ -255,14 +254,6 @@ cw_header('Resource Library');
   }
   .rl-crawler-spec ul { margin: 8px 0 0 1.1rem; padding: 0; }
   .rl-crawler-spec li { margin-bottom: 6px; }
-  .rl-api-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
-  .rl-api-list li {
-    border: 1px solid #e2e8f0;
-    border-radius: 12px;
-    padding: 14px 16px;
-    background: #fff;
-  }
-  .rl-api-list code { font-size: 12px; background: #f1f5f9; padding: 2px 6px; border-radius: 6px; }
   .rl-aim-db-stats {
     font-size: 13px;
     color: #475569;
@@ -680,8 +671,8 @@ cw_header('Resource Library');
     <div class="tcc-eyebrow">Admin · Resource Library</div>
     <h1 class="tcc-title">Resource Library</h1>
     <div class="tcc-sub">
-      Central library for <strong>JSON / book references</strong> (e.g. PHAK blocks for AI retrieval), upcoming <strong>data crawlers</strong> (FAA AIM HTML and other official sources),
-      and <strong>API</strong> entrypoints used by admin tools. Pick a tab to filter resource types; book cards and crawler cards share the same card layout — only the editor modal differs by type.
+      Central library for <strong>JSON / book references</strong> (e.g. PHAK blocks for AI retrieval), <strong>data crawlers</strong> (FAA AIM HTML and other official sources),
+      and <strong>registered external APIs</strong> (e.g. the eCFR versioner). Pick a tab to filter resource types; cards share the same layout — only the editor modal differs by type.
     </div>
   </section>
 
@@ -939,14 +930,12 @@ cw_header('Resource Library');
   <?php else: ?>
     <section class="card" style="padding:14px 16px;">
       <div class="tcc-muted">
-        These <strong>HTTP entrypoints</strong> require an admin session.
-        New resource-type APIs will be listed here as they are added to the library.
+        Each card is a <strong>registered API source</strong> (database row with <code>resource_type = api</code>), for example the U.S. Government <strong>eCFR</strong> versioner base URL and metadata used when fetching official regulatory text. Click a card to edit.
       </div>
     </section>
     <div class="rl-wrap rl-tab-panel">
       <p class="rl-intro">
-        <strong>API resources</strong> are stored in <code>resource_library_editions</code> with <code>resource_type = api</code> (same metadata pattern as crawlers).
-        Technical HTTP entrypoints used by admin tools are listed below each card.
+        Configure the <strong>API base URL</strong> (HTTPS), optional <strong>official page</strong> used for automated verification, cover image, and status. For the eCFR integration, the live connection follows the <a href="https://www.ecfr.gov/developers/documentation/api/v1" target="_blank" rel="noopener noreferrer">eCFR API v1 documentation</a> (versioner host + <code>/api/versioner/v1/…</code> paths). JSON ingest and AIM crawler tools stay on other tabs.
       </p>
       <?php
         $apiEditionRows = rl_catalog_has_resource_type_column($pdo)
@@ -1005,30 +994,12 @@ cw_header('Resource Library');
               'api',
               '',
               'Add API resource',
-              'Another API entry registered as an edition row (same type as cards above).',
+              'Another registered HTTP API source (same edition type as eCFR / cards above).',
               true,
               'API'
           );
         ?>
       </div>
-      <ul class="rl-api-list" style="margin-top:22px;">
-        <li>
-          <strong>Editions &amp; JSON file API</strong> — upload / download <code>source.json</code> for <code>json_book</code> rows only.<br>
-          <code><?= h($apiHref) ?></code>
-        </li>
-        <li>
-          <strong>Retrieval test (admin)</strong> — FULLTEXT search over indexed PHAK blocks.<br>
-          <code><?= h($searchTestHref) ?></code>
-        </li>
-        <li>
-          <strong>AIM crawler status</strong> — paragraph counts and last run (AIM slot).<br>
-          <code><?= h($aimApiHref) ?>?slot=aim</code>
-        </li>
-        <li>
-          <strong>Crawler &amp; API edition settings</strong> — load/save <code>resource_type</code> crawler or api rows, cover upload, URL test.<br>
-          <code><?= h($crawlerApiHref) ?>?id=</code><em>edition_id</em>
-        </li>
-      </ul>
     </div>
   <?php endif; ?>
 </div>
@@ -1291,7 +1262,24 @@ cw_header('Resource Library');
       </div>
       <div class="rl-field">
         <label for="rlApiFieldBaseUrl">API base URL (HTTPS)</label>
-        <input type="url" id="rlApiFieldBaseUrl" maxlength="1024" placeholder="https://api.example.com/v1/" autocomplete="off">
+        <input type="url" id="rlApiFieldBaseUrl" maxlength="1024" placeholder="https://www.ecfr.gov" autocomplete="off">
+        <p class="rl-drop-meta" style="margin-top:6px;">Registers the HTTPS host for the official <strong>eCFR REST API</strong>; the server calls versioner paths documented at <a href="https://www.ecfr.gov/developers/documentation/api/v1" target="_blank" rel="noopener noreferrer">eCFR API v1 documentation</a> (typically <code>https://www.ecfr.gov</code> — paths such as <code>/api/versioner/v1/</code> are appended in code).</p>
+      </div>
+      <div class="rl-row2">
+        <div class="rl-field">
+          <label for="rlApiEcfrTitleNum">CFR title number</label>
+          <input type="number" id="rlApiEcfrTitleNum" min="1" max="999" step="1" placeholder="14" autocomplete="off" title="Leave empty for default (14)">
+        </div>
+        <div class="rl-field">
+          <label for="rlApiEcfrSection">Section id</label>
+          <input type="text" id="rlApiEcfrSection" maxlength="64" placeholder="61.105" autocomplete="off" spellcheck="false" title="Leave empty for default (61.105)">
+        </div>
+      </div>
+      <div class="rl-field">
+        <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;">
+          <input type="checkbox" id="rlApiEcfrTrainingReport" style="margin-top:4px;">
+          <span>Prefer this row for the AI training report eCFR block when multiple Live API editions exist (<code>work_code</code> <strong>ECFR_API</strong> or an <code>ecfr.gov</code> base URL also qualifies).</span>
+        </label>
       </div>
       <div class="rl-row2">
         <div class="rl-field">
@@ -1315,6 +1303,21 @@ cw_header('Resource Library');
         <label for="rlApiFieldNotes">Notes (internal)</label>
         <textarea id="rlApiFieldNotes" maxlength="8000" placeholder="OpenAPI path, auth notes, consumers…"></textarea>
       </div>
+      <div class="rl-field">
+        <label for="rlApiVerifyUrl">Official page to verify (optional)</label>
+        <input type="text" id="rlApiVerifyUrl" maxlength="2048" placeholder="Leave empty to verify the API base URL" autocomplete="off" inputmode="url" spellcheck="false">
+        <p class="rl-drop-meta" style="margin-top:6px;">When set, probes use this URL for HTML <strong>Last updated</strong> capture (document control). Otherwise the verifier probes <strong>API base URL</strong>.</p>
+      </div>
+      <div class="rl-field">
+        <label for="rlApiVerifyInterval">Automatically verify</label>
+        <select id="rlApiVerifyInterval">
+          <option value="off">Off</option>
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+      </div>
+      <p class="rl-drop-meta" id="rlApiVerifyStatus" style="margin-top:0;">—</p>
       <div class="rl-field">
         <label id="rlApiDropThumbLabel">Cover image</label>
         <div class="rl-drop-img" id="rlApiDropThumb" role="button" tabindex="0" aria-labelledby="rlApiDropThumbLabel">
@@ -2241,6 +2244,27 @@ cw_header('Resource Library');
   }
   function clearApiMsg() { showApiMsg('', ''); }
 
+  function setApiVerifyStatus(src) {
+    var el = document.getElementById('rlApiVerifyStatus');
+    if (!el) return;
+    src = src || {};
+    var interval = src.source_verify_interval || 'off';
+    var st = src.source_verify_state || {};
+    var parts = ['Schedule: ' + interval];
+    if (st.checked_at) parts.push('Last check (UTC): ' + st.checked_at);
+    if (st.http_code != null && st.http_code !== '') parts.push('Last HTTP ' + st.http_code);
+    if (st.page_last_updated) {
+      parts.push('Source declares (HTML): ' + st.page_last_updated);
+    } else if (st.page_body_fetch_error) {
+      parts.push('HTML capture: ' + st.page_body_fetch_error);
+    } else if (st.checked_at && !st.last_error) {
+      parts.push('On-page Last updated: not found in first 2 MiB of HTML');
+    }
+    if (st.change_detected) parts.push('Change suspected — official page or headers changed');
+    if (st.last_error) parts.push('Probe error: ' + st.last_error);
+    el.textContent = parts.length > 1 ? parts.join(' · ') : (parts[0] || '—');
+  }
+
   function updateApiThumbPreview() {
     var inp = document.getElementById('rlApiFieldThumb');
     var thumbPreview = document.getElementById('rlApiThumbPreview');
@@ -2280,6 +2304,21 @@ cw_header('Resource Library');
     document.getElementById('rlApiFieldStatus').value = ['draft', 'live', 'archived'].indexOf(st) >= 0 ? st : 'draft';
     document.getElementById('rlApiFieldNotes').value = src.notes || '';
     document.getElementById('rlApiFieldThumb').value = src.thumbnail_path || '';
+    var tn = parseInt(String(src.ecfr_title_number != null ? src.ecfr_title_number : ''), 10);
+    var etnEl = document.getElementById('rlApiEcfrTitleNum');
+    if (etnEl) etnEl.value = (!isNaN(tn) && tn > 0) ? String(tn) : '';
+    var esEl = document.getElementById('rlApiEcfrSection');
+    if (esEl) esEl.value = src.ecfr_section || '';
+    var trel = document.getElementById('rlApiEcfrTrainingReport');
+    if (trel) trel.checked = !!src.ecfr_training_report;
+    var apiVu = document.getElementById('rlApiVerifyUrl');
+    if (apiVu) apiVu.value = src.source_verify_url || '';
+    var apiVi = document.getElementById('rlApiVerifyInterval');
+    if (apiVi) {
+      var av = src.source_verify_interval || 'off';
+      apiVi.value = ['off', 'daily', 'weekly', 'monthly'].indexOf(av) >= 0 ? av : 'off';
+    }
+    setApiVerifyStatus(src);
     var titleEl = document.getElementById('rlApiModalTitle');
     if (titleEl) titleEl.textContent = src.label || 'API resource';
     var sub = document.getElementById('rlApiModalSub');
@@ -2421,7 +2460,16 @@ cw_header('Resource Library');
         effective_date: document.getElementById('rlApiFieldEffective').value,
         status: document.getElementById('rlApiFieldStatus').value,
         notes: document.getElementById('rlApiFieldNotes').value,
-        thumbnail_path: document.getElementById('rlApiFieldThumb').value
+        thumbnail_path: document.getElementById('rlApiFieldThumb').value,
+        source_verify_url: (document.getElementById('rlApiVerifyUrl') && document.getElementById('rlApiVerifyUrl').value) || '',
+        source_verify_interval: (document.getElementById('rlApiVerifyInterval') && document.getElementById('rlApiVerifyInterval').value) || 'off',
+        ecfr_title_number: (function () {
+          var el = document.getElementById('rlApiEcfrTitleNum');
+          var v = el ? parseInt(String(el.value || ''), 10) : 0;
+          return isNaN(v) ? 0 : v;
+        })(),
+        ecfr_section: (document.getElementById('rlApiEcfrSection') && document.getElementById('rlApiEcfrSection').value) || '',
+        ecfr_training_report: !!(document.getElementById('rlApiEcfrTrainingReport') && document.getElementById('rlApiEcfrTrainingReport').checked)
       };
       apiSave.disabled = true;
       fetch(typedApi, {

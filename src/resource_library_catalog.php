@@ -223,6 +223,103 @@ function rl_catalog_api_row_as_source(array $row): array
         'source_verify_url' => trim((string) ($extra['source_verify_url'] ?? '')),
         'source_verify_interval' => rl_source_verify_normalize_interval((string) ($extra['source_verify_interval'] ?? 'off')),
         'source_verify_state' => is_array($svState) ? $svState : [],
+        'ecfr_title_number' => (int) ($extra['ecfr_title_number'] ?? 0),
+        'ecfr_section' => (string) ($extra['ecfr_section'] ?? ''),
+        'ecfr_training_report' => !empty($extra['ecfr_training_report']),
+    ];
+}
+
+/**
+ * Live API edition that drives eCFR fetches in training report jobs.
+ *
+ * Priority: extra ecfr_training_report flag, work_code ECFR_API, then api_base_url containing ecfr.gov.
+ * If nothing matches, returns null (caller uses built-in defaults only).
+ *
+ * @return array<string, mixed>|null
+ */
+function rl_catalog_resolve_ecfr_training_report_edition(PDO $pdo): ?array
+{
+    if (!rl_catalog_has_resource_type_column($pdo)) {
+        return null;
+    }
+    try {
+        $stmt = $pdo->query("
+            SELECT id, title, revision_code, revision_date, status, thumbnail_path, work_code, sort_order,
+                   resource_type, extra_config_json
+            FROM resource_library_editions
+            WHERE resource_type = 'api'
+              AND LOWER(TRIM(status)) IN ('live', 'active')
+            ORDER BY sort_order ASC, id ASC
+        ");
+    } catch (Throwable) {
+        return null;
+    }
+    $rows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+    if ($rows === []) {
+        return null;
+    }
+
+    $decode = static function (array $row): array {
+        return rl_catalog_decode_extra(isset($row['extra_config_json']) ? (string) $row['extra_config_json'] : null);
+    };
+
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $ex = $decode($row);
+        if (!empty($ex['ecfr_training_report'])) {
+            return $row;
+        }
+    }
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        if (strtoupper(trim((string) ($row['work_code'] ?? ''))) === 'ECFR_API') {
+            return $row;
+        }
+    }
+    foreach ($rows as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $u = strtolower(trim((string) ($decode($row)['api_base_url'] ?? '')));
+        if ($u !== '' && str_contains($u, 'ecfr.gov')) {
+            return $row;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * eCFR parameters for reporting jobs (Resource Library api row + defaults).
+ *
+ * @return array{edition_id: int, api_base_url: string, title_number: int, section: string}
+ */
+function rl_catalog_ecfr_runtime_config(PDO $pdo): array
+{
+    $defaults = [
+        'edition_id' => 0,
+        'api_base_url' => '',
+        'title_number' => 14,
+        'section' => '61.105',
+    ];
+    $row = rl_catalog_resolve_ecfr_training_report_edition($pdo);
+    if ($row === null) {
+        return $defaults;
+    }
+    $extra = rl_catalog_decode_extra(isset($row['extra_config_json']) ? (string) $row['extra_config_json'] : null);
+    $base = trim((string) ($extra['api_base_url'] ?? ''));
+    $tn = (int) ($extra['ecfr_title_number'] ?? 0);
+    $sec = trim((string) ($extra['ecfr_section'] ?? ''));
+
+    return [
+        'edition_id' => (int) ($row['id'] ?? 0),
+        'api_base_url' => $base,
+        'title_number' => $tn > 0 ? $tn : 14,
+        'section' => $sec !== '' ? $sec : '61.105',
     ];
 }
 

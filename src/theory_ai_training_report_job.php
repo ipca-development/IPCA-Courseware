@@ -9,6 +9,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/lesson_summary_service.php';
 require_once __DIR__ . '/courseware_progression_v2.php';
 require_once __DIR__ . '/instructor_theory_training_report_ai.php';
+require_once __DIR__ . '/resource_library_catalog.php';
 require_once __DIR__ . '/ecfr_api_client.php';
 
 function tatr_ensure_table(PDO $pdo): void
@@ -144,24 +145,31 @@ function tatr_build_export_payload(PDO $pdo, int $cohortId, int $studentId, ?cal
     );
 
     $tick(48);
+    $ecfrCfg = rl_catalog_ecfr_runtime_config($pdo);
+    $ecfrClient = new EcfrApiClient($ecfrCfg['api_base_url']);
+    $ecfrTitleN = $ecfrCfg['title_number'];
+    $ecfrSection = $ecfrCfg['section'];
+    $ecfrCfrLabel = $ecfrTitleN . ' CFR § ' . $ecfrSection;
+    $ecfrDocsHref = EcfrApiClient::DOCUMENTATION_V1_URL;
+    $ecfrFallbackBrowse = $ecfrClient->sectionBrowseUrl($ecfrTitleN, $ecfrSection);
+
     $ecfrOfficialBlock = '';
     try {
-        $ecfr = new EcfrApiClient();
-        $snapshot = $ecfr->resolveTitleSnapshotDate(14);
-        $xml61 = $ecfr->fetchSectionXml(14, '61.105', $snapshot);
-        $html61 = $ecfr->sectionXmlToHtml($xml61);
-        $browse = $ecfr->sectionBrowseUrl(14, '61.105');
-        $apiPath = '/api/versioner/v1/full/' . rawurlencode($snapshot) . '/title-14.xml?section=61.105';
-        $ecfrOfficialBlock = '<h3 class="course-title">Official text — 14 CFR § 61.105 (eCFR API)</h3>'
-            . '<p class="lesson-meta">The following excerpt is retrieved from the U.S. Government <strong>eCFR</strong> versioner API (<a href="https://www.ecfr.gov/developers/documentation/api/v1">API documentation</a>). '
+        $snapshot = $ecfrClient->resolveTitleSnapshotDate($ecfrTitleN);
+        $xmlSection = $ecfrClient->fetchSectionXml($ecfrTitleN, $ecfrSection, $snapshot);
+        $htmlSection = $ecfrClient->sectionXmlToHtml($xmlSection);
+        $browse = $ecfrClient->sectionBrowseUrl($ecfrTitleN, $ecfrSection);
+        $apiPath = '/api/versioner/v1/full/' . rawurlencode($snapshot) . '/title-' . $ecfrTitleN . '.xml?section=' . rawurlencode($ecfrSection);
+        $ecfrOfficialBlock = '<h3 class="course-title">Official text — ' . htmlspecialchars($ecfrCfrLabel, ENT_QUOTES | ENT_HTML5, 'UTF-8') . ' (eCFR API)</h3>'
+            . '<p class="lesson-meta">The following excerpt is retrieved from the U.S. Government <strong>eCFR</strong> versioner API (<a href="' . htmlspecialchars($ecfrDocsHref, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '">API documentation</a>). '
             . 'Snapshot date: <strong>' . htmlspecialchars($snapshot, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</strong>. '
             . 'Endpoint: <code>' . htmlspecialchars($apiPath, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</code>. '
             . 'Browse current text: <a href="' . htmlspecialchars($browse, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '">' . htmlspecialchars($browse, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</a>.</p>'
-            . '<div class="ecfr-official">' . $html61 . '</div>';
+            . '<div class="ecfr-official">' . $htmlSection . '</div>';
     } catch (Throwable $e) {
-        $ecfrOfficialBlock = '<h3 class="course-title">Official text — 14 CFR § 61.105 (eCFR)</h3>'
+        $ecfrOfficialBlock = '<h3 class="course-title">Official text — ' . htmlspecialchars($ecfrCfrLabel, ENT_QUOTES | ENT_HTML5, 'UTF-8') . ' (eCFR)</h3>'
             . '<p class="lesson-meta">Could not load live text from the eCFR API (' . htmlspecialchars($e->getMessage(), ENT_QUOTES | ENT_HTML5, 'UTF-8') . '). '
-            . 'Open the current section at <a href="https://www.ecfr.gov/current/title-14/section-61.105">https://www.ecfr.gov/current/title-14/section-61.105</a>.</p>';
+            . 'Open the current section at <a href="' . htmlspecialchars($ecfrFallbackBrowse, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '">' . htmlspecialchars($ecfrFallbackBrowse, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</a>.</p>';
     }
 
     $mergedRegulatory = $ecfrOfficialBlock . (string)($ai['regulatory_notes_html'] ?? '');
@@ -179,7 +187,7 @@ function tatr_build_export_payload(PDO $pdo, int $cohortId, int $studentId, ?cal
 
     $disclaimer = '<div class="lesson-meta" style="padding:12px;background:#fff7ed;border:1px solid #fdba74;border-radius:10px;">'
         . '<strong>Advisory document.</strong> This PDF was generated with AI assistance from progression and summary records. '
-        . 'It is not an FAA-approved curriculum document. Official <strong>14 CFR § 61.105</strong> text is loaded live from the <strong>eCFR versioner API</strong> (see <a href="https://www.ecfr.gov/developers/documentation/api/v1">eCFR API v1 documentation</a>). '
+        . 'It is not an FAA-approved curriculum document. Official <strong>' . htmlspecialchars($ecfrCfrLabel, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</strong> text is loaded live from the <strong>eCFR versioner API</strong> (see <a href="' . htmlspecialchars($ecfrDocsHref, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '">eCFR API v1 documentation</a>). '
         . 'Other regulatory explanations must still be verified on <strong>ecfr.gov</strong> and relevant <strong>FAA.gov</strong> Advisory Circulars. '
         . $phakDisclaimerLine
         . 'ACS references are included where applicable for self-assessment context (e.g. ACS PA.II.A.K1). '
