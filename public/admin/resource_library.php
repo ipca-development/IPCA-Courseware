@@ -1864,6 +1864,8 @@ cw_header('Resource Library');
       return;
     }
     syncBlocksBtn.disabled = true;
+    var syncLabel = syncBlocksBtn.textContent;
+    syncBlocksBtn.textContent = 'Syncing…';
     fetch(api, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1873,12 +1875,24 @@ cw_header('Resource Library');
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (x) {
         if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Sync failed');
-        window.location.reload();
+        var j = x.j;
+        if (j.blocks) setBlocksUI(j.blocks);
+        var imp = j.imported != null ? j.imported : 0;
+        var ch = j.chapter_count != null ? j.chapter_count : 0;
+        showMsg('Database synchronized: ' + imp + ' blocks indexed across ' + ch + ' chapters. You can use “Test retrieval” below to confirm search hits.', 'ok');
+        if (msg) {
+          try {
+            msg.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          } catch (ignore) {}
+        }
       })
       .catch(function (e) {
         showMsg(e.message || 'Sync failed', 'err');
       })
-      .finally(function () { syncBlocksBtn.disabled = false; });
+      .finally(function () {
+        syncBlocksBtn.disabled = false;
+        syncBlocksBtn.textContent = syncLabel;
+      });
   });
 
   function renderTestResults(data) {
