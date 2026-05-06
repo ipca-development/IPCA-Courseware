@@ -498,6 +498,7 @@ cw_header('Resource Library');
     border-radius: 16px;
     max-width: 720px;
     width: 100%;
+    min-width: 0;
     max-height: min(92vh, 900px);
     overflow: hidden;
     display: flex;
@@ -527,8 +528,15 @@ cw_header('Resource Library');
     flex-shrink: 0;
   }
   .rl-modal-close:hover { background: #e2e8f0; }
-  .rl-modal-body { padding: 16px 20px 20px; overflow-y: auto; flex: 1; }
-  .rl-field { margin-bottom: 14px; }
+  .rl-modal-body {
+    padding: 16px 20px 20px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+  .rl-field { margin-bottom: 14px; min-width: 0; }
   .rl-field label {
     display: block;
     font-size: 12px;
@@ -553,8 +561,36 @@ cw_header('Resource Library');
     border-color: #2563eb;
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
   }
-  .rl-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .rl-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; min-width: 0; }
   @media (max-width: 520px) { .rl-row2 { grid-template-columns: 1fr; } }
+  /* Checkbox rows: undo uppercase label styling so long sentences wrap cleanly */
+  .rl-check-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    min-width: 0;
+  }
+  .rl-check-row > input[type="checkbox"] {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin-top: 3px;
+  }
+  .rl-field label.rl-check-label {
+    flex: 1;
+    min-width: 0;
+    margin-bottom: 0;
+    padding-top: 1px;
+    font-size: 14px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: normal;
+    color: #334155;
+    line-height: 1.45;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
   .rl-panel {
     border: 1px solid #e2e8f0;
     border-radius: 12px;
@@ -581,6 +617,9 @@ cw_header('Resource Library');
     flex-wrap: wrap;
     gap: 10px;
     justify-content: flex-end;
+    flex-shrink: 0;
+    min-width: 0;
+    box-sizing: border-box;
   }
   .btn-ghost {
     background: #f1f5f9;
@@ -1275,11 +1314,17 @@ cw_header('Resource Library');
           <input type="text" id="rlApiEcfrSection" maxlength="64" placeholder="61.105" autocomplete="off" spellcheck="false" title="Leave empty for default (61.105)">
         </div>
       </div>
+      <p class="rl-drop-meta" style="margin:-4px 0 10px;">
+        For FAA rules, the eCFR <strong>title</strong> is almost always <strong>14</strong> (aeronautics). <strong>Parts</strong> such as 61, 91, 103, and 141 are chapters <em>within</em> Title 14—they are not separate title numbers here. This form fetches <strong>one section</strong> (e.g. <code>61.105</code>) for the training-report excerpt; broader “prioritized parts” lists belong in retrieval/indexing features, not this single-field API row.
+      </p>
       <div class="rl-field">
-        <label style="display:flex;gap:10px;align-items:flex-start;cursor:pointer;">
-          <input type="checkbox" id="rlApiEcfrTrainingReport" style="margin-top:4px;">
-          <span>Prefer this row for the AI training report eCFR block when multiple Live API editions exist (<code>work_code</code> <strong>ECFR_API</strong> or an <code>ecfr.gov</code> base URL also qualifies).</span>
-        </label>
+        <div class="rl-check-row">
+          <input type="checkbox" id="rlApiEcfrTrainingReport" aria-describedby="rlApiEcfrTrainingReportHint">
+          <label class="rl-check-label" for="rlApiEcfrTrainingReport">Prefer this edition for the AI training report eCFR block when multiple Live API rows exist.</label>
+        </div>
+        <p class="rl-drop-meta" id="rlApiEcfrTrainingReportHint" style="margin-top:8px;margin-bottom:0;">
+          Otherwise the library picks a row flagged here, then <code>work_code</code> <strong>ECFR_API</strong>, then an <code>ecfr.gov</code> base URL.
+        </p>
       </div>
       <div class="rl-row2">
         <div class="rl-field">
