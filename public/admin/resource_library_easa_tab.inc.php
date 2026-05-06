@@ -78,6 +78,46 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     color: #1e40af;
     border: 1px solid #bfdbfe;
   }
+  .rl-easa-upload-progress {
+    margin-top: 10px;
+    max-width: 420px;
+  }
+  .rl-easa-upload-progress[hidden] {
+    display: none !important;
+  }
+  .rl-easa-upload-progress-track {
+    height: 8px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+    position: relative;
+  }
+  .rl-easa-upload-progress-track.is-indeterminate::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    width: 35%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #93c5fd, #2563eb, #93c5fd);
+    animation: rl-easa-upload-indet 1.1s ease-in-out infinite;
+  }
+  @keyframes rl-easa-upload-indet {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(320%); }
+  }
+  .rl-easa-upload-progress-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #3b82f6, #2563eb);
+    transition: width 0.12s ease-out;
+  }
+  .rl-easa-upload-progress-label {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #475569;
+    font-variant-numeric: tabular-nums;
+  }
 </style>
 
 <section class="card" style="padding:14px 16px;">
@@ -100,6 +140,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       <div class="rl-panel-actions" style="margin-top:10px;">
         <input type="file" id="rlEasaXmlFile" accept=".xml,application/xml,text/xml" style="max-width:240px;font-size:13px;">
         <button type="button" class="btn btn-sm" id="rlEasaUploadBtn">Upload XML</button>
+      </div>
+      <div id="rlEasaUploadProgressWrap" class="rl-easa-upload-progress" hidden aria-hidden="true" aria-live="polite">
+        <div id="rlEasaUploadProgressTrack" class="rl-easa-upload-progress-track">
+          <div id="rlEasaUploadProgressBar" class="rl-easa-upload-progress-bar"></div>
+        </div>
+        <div id="rlEasaUploadProgressLabel" class="rl-easa-upload-progress-label"></div>
       </div>
       <p class="rl-msg rl-easa-msg" id="rlEasaUploadMsg" role="status" style="margin-top:12px;"></p>
     </section>
@@ -249,22 +295,67 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     el.className = 'rl-msg rl-easa-msg' + suffix;
   }
 
-  function rlEasaParseUploadResponse(r) {
-    return r.text().then(function (t) {
-      var j = null;
-      if (t) {
-        try {
-          j = JSON.parse(t);
-        } catch (e) {
-          /* fall through */
-        }
+  function rlEasaFormatBytes(n) {
+    n = Number(n) || 0;
+    if (n < 1024) return n + ' B';
+    var u = ['KB', 'MB', 'GB'];
+    var i = -1;
+    do {
+      n /= 1024;
+      i++;
+    } while (n >= 1024 && i < u.length - 1);
+    return (n >= 10 ? n.toFixed(0) : n.toFixed(1)) + ' ' + u[i];
+  }
+
+  function rlEasaParseUploadBody(text, httpOk, statusLine) {
+    var j = null;
+    if (text) {
+      try {
+        j = JSON.parse(text);
+      } catch (e) {
+        /* fall through */
       }
-      if (!j || typeof j !== 'object') {
-        var snippet = String(t || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
-        throw new Error(snippet || ('HTTP ' + r.status + ' ' + (r.statusText || '')));
-      }
-      return { ok: r.ok, j: j };
-    });
+    }
+    if (!j || typeof j !== 'object') {
+      var snippet = String(text || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 280);
+      throw new Error(snippet || statusLine || 'Upload failed');
+    }
+    return { ok: httpOk, j: j };
+  }
+
+  function rlEasaSetUploadProgressUi(opts) {
+    var wrap = document.getElementById('rlEasaUploadProgressWrap');
+    var track = document.getElementById('rlEasaUploadProgressTrack');
+    var bar = document.getElementById('rlEasaUploadProgressBar');
+    var lab = document.getElementById('rlEasaUploadProgressLabel');
+    if (!wrap || !track || !bar || !lab) return;
+    if (!opts || !opts.show) {
+      wrap.hidden = true;
+      wrap.setAttribute('aria-hidden', 'true');
+      track.classList.remove('is-indeterminate');
+      bar.style.width = '0%';
+      lab.textContent = '';
+      return;
+    }
+    wrap.hidden = false;
+    wrap.setAttribute('aria-hidden', 'false');
+    if (opts.indeterminate) {
+      track.classList.add('is-indeterminate');
+      bar.style.width = '0%';
+      lab.textContent = opts.label || 'Sending…';
+      return;
+    }
+    track.classList.remove('is-indeterminate');
+    var loaded = opts.loaded || 0;
+    var total = opts.total || 0;
+    var pct = total > 0 ? Math.min(100, Math.round((loaded / total) * 1000) / 10) : 0;
+    bar.style.width = pct + '%';
+    var line = rlEasaFormatBytes(loaded);
+    if (total > 0) {
+      line += ' / ' + rlEasaFormatBytes(total) + ' · ' + pct + '%';
+    }
+    if (opts.extra) line += ' · ' + opts.extra;
+    lab.textContent = line;
   }
 
   function loadStatus() {
@@ -400,28 +491,88 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   if (uploadBtn && fileInp) {
     uploadBtn.addEventListener('click', function () {
       setUploadMsg('', '');
+      rlEasaSetUploadProgressUi(null);
       if (!fileInp.files || !fileInp.files.length) {
         setUploadMsg('Choose an XML file first.', 'err');
         return;
       }
+      var file = fileInp.files[0];
       var fd = new FormData();
-      fd.append('erules_xml', fileInp.files[0]);
+      fd.append('erules_xml', file);
       uploadBtn.disabled = true;
+      uploadBtn.setAttribute('aria-busy', 'true');
       setUploadMsg('Uploading…', 'info');
-      var msgEl = document.getElementById('rlEasaUploadMsg');
-      if (msgEl && msgEl.scrollIntoView) msgEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-      fetch(api, { method: 'POST', body: fd, credentials: 'same-origin' })
-        .then(rlEasaParseUploadResponse)
-        .then(function (x) {
+      if (file.size > 0) {
+        rlEasaSetUploadProgressUi({ show: true, indeterminate: false, loaded: 0, total: file.size });
+      } else {
+        rlEasaSetUploadProgressUi({ show: true, indeterminate: true, label: 'Sending… (size unknown)' });
+      }
+      var wrap = document.getElementById('rlEasaUploadProgressWrap');
+      if (wrap && wrap.scrollIntoView) wrap.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', api);
+      xhr.withCredentials = true;
+      xhr.timeout = 900000;
+      xhr.upload.addEventListener('progress', function (e) {
+        var total = 0;
+        if (e.lengthComputable && e.total > 0) {
+          total = e.total;
+        } else if (file.size > 0) {
+          total = file.size;
+        } else if (e.total > 0) {
+          total = e.total;
+        }
+        var loaded = e.loaded || 0;
+        if (!(total > 0)) {
+          rlEasaSetUploadProgressUi({
+            show: true,
+            indeterminate: true,
+            label: 'Sending… ' + rlEasaFormatBytes(loaded)
+          });
+          return;
+        }
+        rlEasaSetUploadProgressUi({
+          show: true,
+          indeterminate: false,
+          loaded: loaded,
+          total: total
+        });
+      });
+      xhr.addEventListener('load', function () {
+        try {
+          var text = xhr.responseText || '';
+          var httpOk = xhr.status >= 200 && xhr.status < 300;
+          var x = rlEasaParseUploadBody(text, httpOk, 'HTTP ' + xhr.status);
           if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Upload failed');
           setUploadMsg(x.j.message || 'Uploaded.', 'ok');
           fileInp.value = '';
           loadStatus();
-        })
-        .catch(function (e) {
-          setUploadMsg(e.message || 'Upload failed', 'err');
-        })
-        .finally(function () { uploadBtn.disabled = false; });
+        } catch (err) {
+          setUploadMsg(err.message || 'Upload failed', 'err');
+        } finally {
+          rlEasaSetUploadProgressUi(null);
+          uploadBtn.disabled = false;
+          uploadBtn.removeAttribute('aria-busy');
+        }
+      });
+      xhr.addEventListener('error', function () {
+        setUploadMsg('Network error while uploading.', 'err');
+        rlEasaSetUploadProgressUi(null);
+        uploadBtn.disabled = false;
+        uploadBtn.removeAttribute('aria-busy');
+      });
+      xhr.addEventListener('abort', function () {
+        rlEasaSetUploadProgressUi(null);
+        uploadBtn.disabled = false;
+        uploadBtn.removeAttribute('aria-busy');
+      });
+      xhr.addEventListener('timeout', function () {
+        setUploadMsg('Upload timed out after 15 minutes. Try again or split the file.', 'err');
+        rlEasaSetUploadProgressUi(null);
+        uploadBtn.disabled = false;
+        uploadBtn.removeAttribute('aria-busy');
+      });
+      xhr.send(fd);
     });
   }
 
