@@ -147,7 +147,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         </div>
         <div id="rlEasaUploadProgressLabel" class="rl-easa-upload-progress-label"></div>
       </div>
+      <p class="rl-drop-meta" id="rlEasaUploadStallWarn" style="display:none;margin-top:8px;color:#b45309;font-weight:600;"></p>
       <p class="rl-msg rl-easa-msg" id="rlEasaUploadMsg" role="status" style="margin-top:12px;"></p>
+      <p class="rl-drop-meta" id="rlEasaUploadLimitHint" style="margin-top:8px;"></p>
     </section>
 
     <section class="card rl-easa-panel" style="padding:16px 18px;">
@@ -275,6 +277,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   var root = document.getElementById('rlEasaPage');
   if (!root) return;
   var api = root.getAttribute('data-api') || '';
+  /** Effective max POST body (bytes) from last status; 0 = unknown. */
+  var rlEasaMaxUploadBytes = 0;
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -364,6 +368,18 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
       .then(function (x) {
         if (!x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Status failed');
+        var limEl = document.getElementById('rlEasaUploadLimitHint');
+        if (x.j.max_body_bytes != null && x.j.max_body_bytes > 0) {
+          rlEasaMaxUploadBytes = parseInt(x.j.max_body_bytes, 10) || 0;
+          if (limEl) {
+            limEl.textContent = 'Server upload cap (PHP, effective): ~' + rlEasaFormatBytes(rlEasaMaxUploadBytes)
+              + ' — upload_max_filesize=' + (x.j.php_upload_max_filesize || '?')
+              + ', post_max_size=' + (x.j.php_post_max_size || '?')
+              + '. On nginx add client_max_body_size; stuck mid-upload usually means a lower limit on the host.';
+          }
+        } else if (limEl) {
+          limEl.textContent = '';
+        }
         if (hint) {
           var parts = [];
           if (x.j.migrate_hint) parts.push(x.j.migrate_hint);
@@ -492,11 +508,22 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     uploadBtn.addEventListener('click', function () {
       setUploadMsg('', '');
       rlEasaSetUploadProgressUi(null);
+      var stallEl = document.getElementById('rlEasaUploadStallWarn');
+      if (stallEl) { stallEl.style.display = 'none'; stallEl.textContent = ''; }
       if (!fileInp.files || !fileInp.files.length) {
         setUploadMsg('Choose an XML file first.', 'err');
         return;
       }
       var file = fileInp.files[0];
+      if (rlEasaMaxUploadBytes > 0 && file.size > rlEasaMaxUploadBytes) {
+        setUploadMsg(
+          'This file (' + rlEasaFormatBytes(file.size) + ') exceeds the server limit (~'
+            + rlEasaFormatBytes(rlEasaMaxUploadBytes)
+            + '). Raise PHP upload_max_filesize and post_max_size (and nginx client_max_body_size if applicable), then reload.',
+          'err'
+        );
+        return;
+      }
       var fd = new FormData();
       fd.append('erules_xml', file);
       uploadBtn.disabled = true;
@@ -509,11 +536,28 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       }
       var wrap = document.getElementById('rlEasaUploadProgressWrap');
       if (wrap && wrap.scrollIntoView) wrap.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      var lastProgAt = Date.now();
+      var lastLoadedAmt = 0;
+      var stallIv = setInterval(function () {
+        if (Date.now() - lastProgAt < 22000) return;
+        if (lastLoadedAmt >= file.size && file.size > 0) return;
+        if (stallEl) {
+          stallEl.style.display = 'block';
+          stallEl.textContent = 'No progress for ~22s — upload is likely blocked by a server limit (PHP post_max_size / upload_max_filesize, or nginx client_max_body_size). '
+            + (rlEasaMaxUploadBytes > 0
+              ? 'This page reports max ~' + rlEasaFormatBytes(rlEasaMaxUploadBytes) + '. '
+              : '')
+            + 'Fix limits on the server, then retry.';
+        }
+      }, 4000);
+
       var xhr = new XMLHttpRequest();
       xhr.open('POST', api);
       xhr.withCredentials = true;
       xhr.timeout = 900000;
       xhr.upload.addEventListener('progress', function (e) {
+        lastProgAt = Date.now();
+        lastLoadedAmt = e.loaded || 0;
         var total = 0;
         if (e.lengthComputable && e.total > 0) {
           total = e.total;
@@ -538,7 +582,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           total: total
         });
       });
+      function rlEasaClearUploadWatch() {
+        if (stallIv) clearInterval(stallIv);
+        stallIv = null;
+      }
+
       xhr.addEventListener('load', function () {
+        rlEasaClearUploadWatch();
         try {
           var text = xhr.responseText || '';
           var httpOk = xhr.status >= 200 && xhr.status < 300;
@@ -556,17 +606,20 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         }
       });
       xhr.addEventListener('error', function () {
+        rlEasaClearUploadWatch();
         setUploadMsg('Network error while uploading.', 'err');
         rlEasaSetUploadProgressUi(null);
         uploadBtn.disabled = false;
         uploadBtn.removeAttribute('aria-busy');
       });
       xhr.addEventListener('abort', function () {
+        rlEasaClearUploadWatch();
         rlEasaSetUploadProgressUi(null);
         uploadBtn.disabled = false;
         uploadBtn.removeAttribute('aria-busy');
       });
       xhr.addEventListener('timeout', function () {
+        rlEasaClearUploadWatch();
         setUploadMsg('Upload timed out after 15 minutes. Try again or split the file.', 'err');
         rlEasaSetUploadProgressUi(null);
         uploadBtn.disabled = false;

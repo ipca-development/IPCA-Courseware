@@ -9,6 +9,9 @@ require_once __DIR__ . '/../../../src/easa_erules_storage.php';
 require_once __DIR__ . '/../../../src/easa_download_monitor.php';
 require_once __DIR__ . '/../../../src/easa_erules_xml_import.php';
 
+@ini_set('upload_max_filesize', '128M');
+@ini_set('post_max_size', '128M');
+
 cw_require_admin();
 
 header('Content-Type: application/json; charset=utf-8');
@@ -18,6 +21,27 @@ function rl_easa_json_out(int $code, array $payload): void
     http_response_code($code);
     echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit;
+}
+
+/** @return int Parsed byte size from php.ini strings such as "32M" (0 if unknown). */
+function rl_easa_ini_bytes(string $iniKey): int
+{
+    $raw = trim((string) ini_get($iniKey));
+    if ($raw === '' || $raw === '0') {
+        return 0;
+    }
+    if (!preg_match('/^(-?\d+(?:\.\d+)?)\s*([kmg]?)\s*$/i', str_replace(' ', '', $raw), $m)) {
+        return (int) $raw;
+    }
+    $num = (float) $m[1];
+    $u = strtolower($m[2] ?? '');
+
+    return match ($u) {
+        'g' => (int) round($num * 1073741824),
+        'm' => (int) round($num * 1048576),
+        'k' => (int) round($num * 1024),
+        default => (int) round($num),
+    };
 }
 
 function rl_easa_extract_ai_text(array $resp): string
@@ -103,11 +127,18 @@ if ($method === 'GET') {
         }
     }
 
+    $upBytes = rl_easa_ini_bytes('upload_max_filesize');
+    $postBytes = rl_easa_ini_bytes('post_max_size');
+    $maxBodyBytes = ($upBytes > 0 && $postBytes > 0) ? min($upBytes, $postBytes) : max($upBytes, $postBytes);
+
     rl_easa_json_out(200, [
         'ok' => true,
         'tables_ok' => $tablesOk,
         'staging_tables_ok' => $stagingOk,
         'progress_columns_ok' => $progressOk,
+        'php_upload_max_filesize' => ini_get('upload_max_filesize'),
+        'php_post_max_size' => ini_get('post_max_size'),
+        'max_body_bytes' => $maxBodyBytes,
         'migrate_hint' => $tablesOk ? null : 'Apply scripts/sql/resource_library_easa_erules.sql',
         'staging_migrate_hint' => ($tablesOk && !$stagingOk) ? 'Apply scripts/sql/resource_library_easa_erules_staging.sql for XML node staging.' : null,
         'progress_migrate_hint' => ($tablesOk && !$progressOk) ? 'Apply scripts/sql/resource_library_easa_erules_batch_progress.sql for live import progress (parse_phase, heartbeat).' : null,
