@@ -1043,7 +1043,7 @@ cw_header('Resource Library');
         </div>
         <div class="rl-field">
           <label for="rlEditionVerifyUrl">Official page to verify (HTTPS)</label>
-          <input type="url" id="rlEditionVerifyUrl" maxlength="2048" placeholder="e.g. FAA PHAK handbook listing page" autocomplete="off">
+          <input type="text" id="rlEditionVerifyUrl" maxlength="2048" placeholder="https://www.faa.gov/… (https required)" autocomplete="off" inputmode="url" spellcheck="false">
           <p class="rl-drop-meta" style="margin-top:6px;">For document control, the verifier records the official page's declared <strong>Last updated</strong> line from the HTML (when present), in addition to HTTP headers. Compare this to your edition metadata when the FAA publishes a new revision.</p>
         </div>
         <div class="rl-field">
@@ -1059,7 +1059,7 @@ cw_header('Resource Library');
         <div class="rl-field rl-test-panel" style="margin-top:8px;">
           <label for="rlEditionVerifyTestOverride">Optional URL override for test</label>
           <div class="rl-test-actions" style="margin-top:6px;">
-            <input type="url" id="rlEditionVerifyTestOverride" maxlength="2048" placeholder="Leave empty to use verify URL above" autocomplete="off" style="flex:1; min-width:180px;">
+            <input type="text" id="rlEditionVerifyTestOverride" maxlength="2048" placeholder="Leave empty to use verify URL above" autocomplete="off" inputmode="url" spellcheck="false" style="flex:1; min-width:180px;">
             <button type="button" class="btn btn-sm" id="rlEditionVerifyTestBtn">Test URL</button>
           </div>
           <pre class="rl-test-out" id="rlEditionVerifyTestOut" aria-live="polite" style="margin-top:8px;"></pre>
@@ -1614,7 +1614,10 @@ cw_header('Resource Library');
       sort_order: parseInt(document.getElementById('rlFieldSort').value, 10) || 0,
       work_code: document.getElementById('rlFieldWork').value,
       thumbnail_path: document.getElementById('rlFieldThumb').value,
-      source_verify_url: (document.getElementById('rlEditionVerifyUrl') && document.getElementById('rlEditionVerifyUrl').value) || '',
+      source_verify_url: (function () {
+        var u = document.getElementById('rlEditionVerifyUrl');
+        return u ? String(u.value || '').trim() : '';
+      })(),
       source_verify_interval: (document.getElementById('rlEditionVerifyInterval') && document.getElementById('rlEditionVerifyInterval').value) || 'off'
     };
     saveBtn.disabled = true;

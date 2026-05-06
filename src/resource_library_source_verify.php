@@ -102,6 +102,24 @@ function rl_source_verify_validate_https_url(string $url, int $maxLen = 2048): ?
 }
 
 /**
+ * Normalize pasted verify URLs (common paste sources use http:// or stray Unicode spaces).
+ */
+function rl_source_verify_sanitize_verify_url_input(string $url): string
+{
+    $url = trim($url);
+    if ($url === '') {
+        return '';
+    }
+    $url = preg_replace('/[\x{200B}-\x{200D}\x{FEFF}]/u', '', $url) ?? $url;
+    $url = trim($url);
+    if (preg_match('#^http://#i', $url)) {
+        $url = 'https://' . substr($url, 7);
+    }
+
+    return $url;
+}
+
+/**
  * Extract published "last updated" / similar editorial lines from HTML (document control).
  * Tuned for FAA handbook-style pages, e.g. "Last updated: Friday, November 3, 2023".
  */
@@ -336,6 +354,7 @@ function rl_source_verify_http_probe_headers(string $url, int $timeoutSec = 20):
  */
 function rl_source_verify_http_probe(string $url, int $timeoutSec = 20): array
 {
+    $url = rl_source_verify_sanitize_verify_url_input(trim($url));
     $out = rl_source_verify_http_probe_headers($url, $timeoutSec);
     if (!($out['ok'] ?? false)) {
         return $out;
@@ -451,7 +470,7 @@ function rl_source_verify_merge_user_extra(array $extra, array $input): array
 {
     $prevUrl = trim((string) ($extra['source_verify_url'] ?? ''));
     if (array_key_exists('source_verify_url', $input)) {
-        $url = trim((string) $input['source_verify_url']);
+        $url = rl_source_verify_sanitize_verify_url_input((string) $input['source_verify_url']);
         $urlErr = rl_source_verify_validate_https_url($url);
         if ($urlErr !== null) {
             return ['extra' => $extra, 'error' => $urlErr];

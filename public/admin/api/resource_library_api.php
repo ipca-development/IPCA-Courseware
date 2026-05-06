@@ -295,6 +295,7 @@ if ($action === 'test_source_verify') {
     if ($testUrl === '') {
         rl_api_json_out(400, ['ok' => false, 'error' => 'Set an official verify URL for this edition, or pass a url in the request.']);
     }
+    $testUrl = rl_source_verify_sanitize_verify_url_input($testUrl);
     $probe = rl_source_verify_http_probe($testUrl);
     rl_api_json_out(200, [
         'ok' => true,
