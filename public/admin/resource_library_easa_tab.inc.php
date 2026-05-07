@@ -239,6 +239,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     word-break: break-word;
   }
   .rl-easa-detail-body {
+    /* List markers like "(c)" must stay literal; UI fonts often map (c)→© via ligatures / calt. */
+    font-variant-ligatures: none;
+    font-feature-settings: "liga" 0, "clig" 0, "calt" 0, "dlig" 0;
     white-space: pre-wrap;
     word-break: break-word;
     margin: 0;
