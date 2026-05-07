@@ -180,6 +180,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     font-size: 13px;
   }
   .rl-easa-tree-label:hover { text-decoration: underline; color: #0369a1; }
+  .rl-easa-tree-label.rl-easa-tree-heading {
+    font-weight: 700;
+    cursor: default;
+    color: #0f172a;
+  }
+  .rl-easa-tree-label.rl-easa-tree-heading:hover {
+    text-decoration: none;
+    color: #0f172a;
+  }
   .rl-easa-tree-type {
     flex: 0 0 auto;
     font-size: 10px;
@@ -1187,9 +1196,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       exp.textContent = '▶';
       exp.setAttribute('aria-label', 'Expand children');
     }
-    var lab = document.createElement('button');
-    lab.type = 'button';
-    lab.className = 'rl-easa-tree-label';
+    var nodeTypeLc = String(n.node_type || '').toLowerCase();
+    var isHeading = nodeTypeLc === 'heading';
+    var lab = isHeading ? document.createElement('span') : document.createElement('button');
+    if (!isHeading) {
+      lab.type = 'button';
+    }
+    lab.className = isHeading ? 'rl-easa-tree-label rl-easa-tree-heading' : 'rl-easa-tree-label';
     lab.textContent = n.label_short || n.title || n.source_erules_id || n.node_uid || n.node_type || '—';
     var ty = document.createElement('span');
     ty.className = 'rl-easa-tree-type';
@@ -1242,9 +1255,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           });
       });
     }
-    lab.addEventListener('click', function () {
-      rlEasaShowNodeDetail(batchId, uid);
-    });
+    if (!isHeading) {
+      lab.addEventListener('click', function () {
+        rlEasaShowNodeDetail(batchId, uid);
+      });
+    }
     return li;
   }
 
@@ -1310,13 +1325,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
                   'Opened inside the main <strong>wrapper</strong> node (' + wrapLabel + ') so you see regulatory children (topics/headings) first — same idea as the EASA Easy Access left navigation. '
                   + '<strong>' + j2.nodes.length + '</strong> row(s) at this level.');
                 if (rlEasaTreeHint) {
-                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' items under wrapper (dots: blue IR, amber AMC, green GM, grey cover/TOC).';
+                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' items under wrapper. Headings are bold and not links; click topics for rule text (dots: IR / AMC / GM / cover).';
                 }
               });
           }
           rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes, null);
           if (rlEasaTreeHint) {
-            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root row(s). Click ▶ to expand; click title for rule text with colour band.';
+            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root row(s). ▶ expands; bold headings are section labels only — click other rows for rule text (colour band).';
           }
         })
         .catch(function (e) {
