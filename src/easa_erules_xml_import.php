@@ -152,6 +152,22 @@ function easa_erules_staging_content_hash(string $canonical, ?string $erulesId, 
 }
 
 /**
+ * Case-insensitive attribute getter by local-name (handles ERulesId variants).
+ *
+ * @param array<string,string> $attrs
+ */
+function easa_erules_attr_ci(array $attrs, string $name): ?string
+{
+    foreach ($attrs as $k => $v) {
+        if (strcasecmp((string) $k, $name) === 0) {
+            return (string) $v;
+        }
+    }
+
+    return null;
+}
+
+/**
  * Extract ordered descendant text from a full element outer-XML fragment (Word OOXML-safe).
  *
  * @return array{plain: string, canonical: string}
@@ -265,15 +281,17 @@ function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId
         return;
     }
 
-    $outerByEid = [];
+    /** @var array<string, array{outer:string,score:int}> $bestByEid */
+    $bestByEid = [];
     try {
         while ($reader->read()) {
             if ($reader->nodeType !== XMLReader::ELEMENT) {
                 continue;
             }
             $attrs = easa_erules_reader_collect_attributes($reader);
-            $er = isset($attrs['ERulesId']) ? trim((string) $attrs['ERulesId']) : '';
-            if ($er === '' || !isset($need[$er]) || isset($outerByEid[$er])) {
+            $erRaw = easa_erules_attr_ci($attrs, 'ERulesId');
+            $er = trim((string) ($erRaw ?? ''));
+            if ($er === '' || !isset($need[$er])) {
                 continue;
             }
             $outer = $reader->readOuterXml();
@@ -283,16 +301,20 @@ function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId
             if (strlen($outer) > EASA_ERULES_XML_FRAGMENT_STORE_MAX) {
                 $outer = substr($outer, 0, EASA_ERULES_XML_FRAGMENT_STORE_MAX) . "\n<!-- … truncated -->";
             }
-            $outerByEid[$er] = $outer;
-            if (count($outerByEid) >= count($need)) {
-                break;
+            $pc = easa_erules_plain_canonical_from_outer_xml($outer);
+            $plainLen = strlen(trim($pc['plain']));
+            $nameBonus = strcasecmp((string) $reader->localName, 'topic') === 0 ? 20000 : 0;
+            $score = $nameBonus + min($plainLen, 18000);
+            $existing = $bestByEid[$er]['score'] ?? -1;
+            if ($score > $existing) {
+                $bestByEid[$er] = ['outer' => $outer, 'score' => $score];
             }
         }
     } finally {
         $reader->close();
     }
 
-    if ($outerByEid === []) {
+    if ($bestByEid === []) {
         return;
     }
 
@@ -313,7 +335,8 @@ function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId
         'SELECT node_type FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND TRIM(source_erules_id) = ? LIMIT 1'
     );
 
-    foreach ($outerByEid as $eid => $outer) {
+    foreach ($bestByEid as $eid => $best) {
+        $outer = $best['outer'];
         $pc = easa_erules_plain_canonical_from_outer_xml($outer);
         $typeSt->execute([$batchId, $eid]);
         $tr = $typeSt->fetch(PDO::FETCH_ASSOC);
@@ -861,13 +884,16 @@ function easa_erules_extract_plain_text_from_source_xml_by_erules_id(string $abs
     if (!$reader->open($absoluteXmlPath, null, LIBXML_PARSEHUGE | LIBXML_NONET | LIBXML_COMPACT)) {
         return '';
     }
+    $bestText = '';
+    $bestScore = -1;
     try {
         while ($reader->read()) {
             if ($reader->nodeType !== XMLReader::ELEMENT) {
                 continue;
             }
             $attrs = easa_erules_reader_collect_attributes($reader);
-            $er = isset($attrs['ERulesId']) ? trim((string) $attrs['ERulesId']) : '';
+            $erRaw = easa_erules_attr_ci($attrs, 'ERulesId');
+            $er = trim((string) ($erRaw ?? ''));
             if ($er !== $want) {
                 continue;
             }
@@ -876,14 +902,18 @@ function easa_erules_extract_plain_text_from_source_xml_by_erules_id(string $abs
                 continue;
             }
             $pc = easa_erules_plain_canonical_from_outer_xml($outer);
-
-            return $pc['plain'];
+            $plain = trim($pc['plain']);
+            $score = strlen($plain) + (strcasecmp((string) $reader->localName, 'topic') === 0 ? 20000 : 0);
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestText = $pc['plain'];
+            }
         }
     } finally {
         $reader->close();
     }
 
-    return '';
+    return $bestText;
 }
 
 /**
