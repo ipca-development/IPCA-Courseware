@@ -994,6 +994,74 @@ function easa_erules_title_first_fcl_ref(?string $title): ?string
 }
 
 /**
+ * Easy Access often lists ANNEX I and all SUBPART A–K as siblings under &lt;document&gt;. The annex row
+ * then has no children while SUBPART A absorbs every following subpart in the UI. Reparent each
+ * SUBPART (&lt;heading&gt; or &lt;toc&gt; with a SUBPART title) to the latest preceding ANNEX sibling under the
+ * same parent so ANNEX I is the parent of SUBPART A, B, C, …
+ *
+ * Run before easa_erules_reparent_structural_heading_children so section/topic reparenting walks the
+ * correct sibling lists under each annex.
+ */
+function easa_erules_reparent_subparts_under_preceding_annex(PDO $pdo, int $batchId): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title, sort_order, id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?
+         ORDER BY id ASC'
+    );
+    $st->execute([$batchId]);
+    $all = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (is_array($r)) {
+            $all[] = $r;
+        }
+    }
+    $byParent = [];
+    foreach ($all as $r) {
+        $p = $r['parent_node_uid'] ?? null;
+        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
+        $byParent[easa_erules_parent_sort_key($p)][] = $r;
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND node_uid = ?
+           AND NOT (parent_node_uid <=> ?)'
+    );
+    foreach ($byParent as $rows) {
+        usort($rows, static function (array $a, array $b): int {
+            $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
+            if ($so !== 0) {
+                return $so;
+            }
+
+            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+        });
+        $annexUid = null;
+        foreach ($rows as $r) {
+            $uid = trim((string) ($r['node_uid'] ?? ''));
+            $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
+            $title = trim((string) ($r['title'] ?? ''));
+            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_annex_heading_row($title)) {
+                $annexUid = $uid !== '' ? $uid : null;
+                continue;
+            }
+            if ($annexUid === null || $uid === '') {
+                continue;
+            }
+            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_subpart_heading_row($title)) {
+                $upd->execute([$annexUid, $batchId, $uid, $annexUid]);
+            }
+        }
+    }
+}
+
+/**
  * Some EASA Easy Access XML nests SUBPART / SECTION block headings as siblings of the following rows
  * so structural headings get child_count 0 and the disclosure lands on the first &lt;toc&gt; child.
  * Reparent direct toc/topic siblings so SUBPART and SECTION headings become parents (SECTION wins over
@@ -1545,6 +1613,7 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
         $reader->close();
     }
 
+    easa_erules_reparent_subparts_under_preceding_annex($pdo, $batchId);
     easa_erules_reparent_structural_heading_children($pdo, $batchId);
     easa_erules_merge_duplicate_structural_heading_toc($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
