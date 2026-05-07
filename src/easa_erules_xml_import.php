@@ -1273,19 +1273,62 @@ function easa_erules_batch_source_xml_absolute_path(PDO $pdo, int $batchId): ?st
 }
 
 /**
+ * Insert paragraph breaks into collapsed rule text so the browse UI reads naturally.
+ *
+ * Targets EU Easy Access blobs (Regulation cites, numbered subparagraphs (1)(2)(a)).
+ */
+function easa_erules_format_body_for_reading(string $text): string
+{
+    $s = trim($text);
+    if ($s === '') {
+        return '';
+    }
+    $s = preg_replace('/\)\s*\[/u', ")\n\n[", $s) ?? $s;
+    $s = preg_replace('/(Regulation \(EU\) (?:No )?\s*\d+\/\d+[^.\s]{0,12})\.(?!\d)/iu', '$1.' . "\n\n", $s) ?? $s;
+    $s = preg_replace('/(Commission (?:Delegated )?Regulation \(EU\)[^.\n]{0,120})\./iu', '$1.' . "\n\n", $s) ?? $s;
+    $s = preg_replace('/(?<=[a-záéíóúàèùâêîôûäëïöüñ])\.\s+(?=\(\d+[a-z]?\))/iu', ".\n\n", $s) ?? $s;
+    $s = preg_replace('/(?<=[a-záéíóúàèùâêîôûäëïöüñ])(\(?[a-z]\))(?=\S)/iu', '$1 ', $s) ?? $s;
+    $s = preg_replace('/(?<=[a-z.;)])(\(\d+[a-z]?\))\s+(?=\S)/iu', '$1 ', $s) ?? $s;
+    $s = preg_replace('/(?<=[^.0-9])\s+(\d+)\.(?=\s*[A-Z(])/u', "\n\n$1.", $s) ?? $s;
+    $s = preg_replace('/\x{00a0}/u', ' ', $s) ?? $s;
+    $lines = preg_split('/\R+/u', $s) ?: [];
+    $acc = '';
+    foreach ($lines as $line) {
+        $line = preg_replace('/[ \t]+/u', ' ', trim((string) $line)) ?? trim((string) $line);
+        if ($line === '') {
+            continue;
+        }
+        $acc .= ($acc === '' ? '' : "\n\n") . $line;
+    }
+
+    return $acc;
+}
+
+/**
  * Short label for tree rows (sanitized, max length).
  */
 function easa_erules_short_tree_label(array $n): string
 {
     $raw = trim((string) ($n['title'] ?? ''));
     if ($raw === '') {
+        $raw = trim((string) ($n['first_child_title'] ?? ''));
+    }
+    if ($raw === '') {
+        $raw = trim((string) ($n['first_child_source_title'] ?? ''));
+    }
+    if ($raw === '') {
         $raw = trim((string) ($n['source_erules_id'] ?? ''));
     }
     if ($raw === '') {
         $raw = trim((string) ($n['source_title'] ?? ''));
     }
+    $nt = strtolower(trim((string) ($n['node_type'] ?? '')));
     if ($raw === '') {
-        $raw = (string) ($n['node_uid'] ?? '');
+        if (in_array($nt, ['toc', 'document', 'frontmatter', 'backmatter'], true)) {
+            $raw = ucfirst($nt === 'toc' ? 'Table of contents' : $nt);
+        } else {
+            $raw = (string) ($n['node_uid'] ?? '');
+        }
     }
     $s = easa_erules_sanitize_display_text($raw);
     if ($s === '') {

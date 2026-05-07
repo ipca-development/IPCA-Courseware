@@ -293,10 +293,19 @@ if ($method === 'GET') {
         $parentRaw = isset($_GET['parent_uid']) ? trim((string) $_GET['parent_uid']) : null;
         $isRoot = $parentRaw === null || $parentRaw === '';
         try {
+            $childPreview = ',
+                           (SELECT fc.title FROM easa_erules_import_nodes_staging fc
+                            WHERE fc.batch_id = n.batch_id AND fc.parent_node_uid = n.node_uid
+                              AND fc.title IS NOT NULL AND TRIM(fc.title) != \'\'
+                            ORDER BY fc.sort_order ASC, fc.id ASC LIMIT 1) AS first_child_title,
+                           (SELECT fc.source_title FROM easa_erules_import_nodes_staging fc
+                            WHERE fc.batch_id = n.batch_id AND fc.parent_node_uid = n.node_uid
+                              AND fc.source_title IS NOT NULL AND TRIM(fc.source_title) != \'\'
+                            ORDER BY fc.sort_order ASC, fc.id ASC LIMIT 1) AS first_child_source_title';
             if ($isRoot) {
                 $sql = "
                     SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
-                           n.source_erules_id, n.title, n.source_title, n.breadcrumb,
+                           n.source_erules_id, n.title, n.source_title, n.breadcrumb{$childPreview},
                            (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
                             WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
                     FROM easa_erules_import_nodes_staging n
@@ -309,7 +318,7 @@ if ($method === 'GET') {
             } else {
                 $sql = "
                     SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
-                           n.source_erules_id, n.title, n.source_title, n.breadcrumb,
+                           n.source_erules_id, n.title, n.source_title, n.breadcrumb{$childPreview},
                            (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
                             WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
                     FROM easa_erules_import_nodes_staging n
@@ -430,9 +439,13 @@ if ($method === 'GET') {
         }
         $row['plain_text_truncated'] = $truncated;
         $row['title_display'] = easa_erules_sanitize_display_text((string) ($row['title'] ?? ''));
-        $row['plain_text_display'] = easa_erules_sanitize_rule_body_text($truncated ? (string) $row['plain_text'] : $effectivePlain);
+        $sanitizedBody = easa_erules_sanitize_rule_body_text($truncated ? (string) $row['plain_text'] : $effectivePlain);
+        $row['plain_text_display'] = $sanitizedBody;
         if ($row['plain_text_display'] === '' && $row['plain_text_effective_source'] === 'none') {
             $row['plain_text_display'] = 'No rule text could be resolved: canonical_text and plain_text are empty, no text could be extracted from xml_fragment, no child rows contributed text, and source.xml could not be matched by ERulesId (or the file is missing). Expected file: storage/easa_erules/batches/' . (int) $batchId . '/source.xml — verify batch storage_relpath matches this batch id.';
+            $row['body_reading'] = '';
+        } else {
+            $row['body_reading'] = easa_erules_format_body_for_reading($sanitizedBody);
         }
         $row['rule_band'] = easa_erules_classify_display_band(
             $row['node_type'] ?? null,

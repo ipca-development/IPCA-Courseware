@@ -188,6 +188,27 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     color: #64748b;
     margin-left: 4px;
   }
+  .rl-easa-tech summary {
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.82rem;
+    color: #334155;
+    margin-bottom: 0.35rem;
+  }
+  .rl-easa-tech summary:hover { color: #0f172a; }
+  .rl-easa-tech pre {
+    margin: 0;
+    padding: 8px 10px;
+    background: #f8fafc;
+    border-radius: 6px;
+    font-size: 0.76rem;
+    line-height: 1.35;
+    max-height: 200px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #475569;
+  }
   .rl-easa-detail-meta {
     font-size: 12px;
     color: #475569;
@@ -196,11 +217,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     word-break: break-word;
   }
   .rl-easa-detail-body {
-    margin: 0;
-    font-size: 13px;
-    line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.65;
     color: #1e293b;
     padding: 14px 16px;
     background: #fff;
@@ -218,6 +239,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     font-weight: 700;
     color: #fff;
     line-height: 1.35;
+  }
+  .rl-easa-band-crumb {
+    display: block;
+    font-size: 0.82rem;
+    font-weight: normal;
+    opacity: 0.92;
+    margin-top: 0.35rem;
+    line-height: 1.35;
+    word-break: break-word;
   }
   .rl-easa-band small {
     display: block;
@@ -985,7 +1015,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       band.className = 'rl-easa-band rl-easa-band-neu';
       band.innerHTML = esc('Loading…') + '<small></small>';
     }
-    if (meta) meta.textContent = '';
+    if (meta) meta.innerHTML = '';
     if (body) body.textContent = '';
     fetch(api + '?action=node_detail&batch_id=' + encodeURIComponent(String(batchId)) + '&node_uid=' + encodeURIComponent(uid), { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
@@ -997,28 +1027,40 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         if (band) {
           band.className = 'rl-easa-band rl-easa-band-' + b;
           var titleLine = n.title_display || n.title || n.source_erules_id || n.node_uid || '—';
-          band.innerHTML = esc(titleLine) + '<small>' + esc(rlEasaBandLegend(b)) + '</small>';
+          var crumb = (n.breadcrumb || '').trim();
+          crumb = crumb.length > 320 ? crumb.slice(0, 317) + '…' : crumb;
+          var crumbHtml = crumb ? '<span class="rl-easa-band-crumb">' + esc(crumb) + '</span>' : '';
+          band.innerHTML = esc(titleLine) + crumbHtml + '<small>' + esc(rlEasaBandLegend(b)) + '</small>';
         }
         var bits = [];
         bits.push('batch_id=' + (n.batch_id || ''));
         bits.push('node_uid=' + (n.node_uid || ''));
         bits.push('node_type=' + (n.node_type || ''));
         if (n.source_erules_id) bits.push('ERulesId=' + n.source_erules_id);
-        if (n.breadcrumb) bits.push('breadcrumb=' + String(n.breadcrumb).replace(/\s+/g, ' ').slice(0, 720));
-        if (n.plain_text_composed_from_descendants) bits.push('[Body assembled from child rows — parent node had no plain_text in XML]');
-        if (n.plain_text_effective_source === 'canonical') bits.push('[Body shown from canonical_text — normalized for compare/hash]');
-        if (n.plain_text_effective_source === 'xml_fragment') bits.push('[Body extracted from stored xml_fragment — import fallback]');
-        if (n.plain_text_effective_source === 'source_xml_erules') bits.push('[Body read from stored source.xml by ERulesId — last-resort file match]');
-        if (n.plain_text_truncated) bits.push('[Body truncated in API payload at ~400k chars — full row remains in DB]');
-        if (meta) meta.textContent = bits.join('\n');
-        if (body) body.textContent = (n.plain_text_display != null && n.plain_text_display !== '') ? n.plain_text_display : (n.plain_text || '');
+        if (n.plain_text_composed_from_descendants) bits.push('[Body assembled from child rows — parent row had no text in XML]');
+        if (n.plain_text_effective_source === 'canonical') bits.push('[Rendered from canonical text — spaced for readability]');
+        if (n.plain_text_effective_source === 'xml_fragment') bits.push('[Body from stored xml_fragment]');
+        if (n.plain_text_effective_source === 'source_xml_erules') bits.push('[Body matched in source.xml by ERulesId]');
+        if (n.plain_text_truncated) bits.push('[Body truncated at ~400k chars in payload]');
+        if (meta) {
+          meta.innerHTML = '<details class="rl-easa-tech"><summary>Technical details</summary><pre>' + esc(bits.join('\n')) + '</pre></details>';
+        }
+        var bodySrc = '';
+        if (typeof n.body_reading === 'string' && (n.body_reading || '').trim() !== '') {
+          bodySrc = n.body_reading;
+        } else if (typeof n.plain_text_display === 'string' && n.plain_text_display.trim() !== '') {
+          bodySrc = n.plain_text_display;
+        } else if (typeof n.plain_text === 'string') {
+          bodySrc = n.plain_text;
+        }
+        if (body) body.textContent = bodySrc;
       })
       .catch(function (e) {
         if (band) {
           band.className = 'rl-easa-band rl-easa-band-neu';
           band.innerHTML = esc(e.message || 'Error') + '<small></small>';
         }
-        if (meta) meta.textContent = '';
+        if (meta) meta.innerHTML = '';
         if (body) body.textContent = '';
       });
   }
