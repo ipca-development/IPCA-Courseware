@@ -197,10 +197,70 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
   .rl-easa-detail-body {
     margin: 0;
-    font-size: 12px;
-    line-height: 1.45;
+    font-size: 13px;
+    line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
+    color: #1e293b;
+    padding: 14px 16px;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-top: none;
+    border-radius: 0 0 10px 10px;
+    max-height: min(65vh, 560px);
+    overflow: auto;
+  }
+  .rl-easa-node-detail-wrap { margin-top: 0; }
+  .rl-easa-band {
+    padding: 12px 16px;
+    border-radius: 10px 10px 0 0;
+    font-size: 14px;
+    font-weight: 700;
+    color: #fff;
+    line-height: 1.35;
+  }
+  .rl-easa-band small {
+    display: block;
+    margin-top: 6px;
+    font-size: 11px;
+    font-weight: 600;
+    opacity: 0.92;
+    letter-spacing: 0.02em;
+  }
+  .rl-easa-band-ir { background: linear-gradient(90deg, #1d4ed8, #2563eb); }
+  .rl-easa-band-amc { background: linear-gradient(90deg, #b45309, #d97706); }
+  .rl-easa-band-gm { background: linear-gradient(90deg, #166534, #15803d); }
+  .rl-easa-band-neu { background: linear-gradient(90deg, #475569, #64748b); }
+  .rl-easa-detail-meta-box {
+    padding: 10px 14px;
+    font-size: 12px;
+    color: #475569;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-top: none;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .rl-easa-tree-dot {
+    flex: 0 0 8px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-top: 6px;
+    margin-right: 2px;
+  }
+  .rl-easa-tree-dot-ir { background: #2563eb; }
+  .rl-easa-tree-dot-amc { background: #d97706; }
+  .rl-easa-tree-dot-gm { background: #16a34a; }
+  .rl-easa-tree-dot-neu { background: #94a3b8; }
+  .rl-easa-tree-virtual-note {
+    font-size: 11px;
+    color: #64748b;
+    margin: 0 0 8px 4px;
+    padding: 6px 8px;
+    background: #f1f5f9;
+    border-radius: 8px;
+    border-left: 3px solid #64748b;
   }
 </style>
 
@@ -320,9 +380,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     <span class="rl-easa-badge">Browse corpus</span>
     <h3>Rule tree &amp; full text</h3>
     <p class="rl-drop-meta" style="margin-top:0;">
-      Expand nodes by regulatory structure (same parent links as in the XML). Click a row to load full <strong>plain text</strong> for that rule block.
-      Search above matches titles, ids, paths, and body (paginated on the API via <code>limit</code>/<code>offset</code>).
-      A future step is <strong>natural-language Q&amp;A</strong> over this same staging data with mandatory citations—your compare block below is an early pattern (optional AI).
+      Loads the same hierarchy as the XML (<strong>topic</strong> / <strong>heading</strong> / <strong>document</strong>). If the export has a single root <code>document</code>, the UI opens <strong>one level in</strong> so you see articles and annexes instead of only boilerplate.
+      Selected rules use <strong>Easy Access–style bands</strong>: blue = IR / rule text, amber = AMC, green = GM (from titles). Word TOC field codes are stripped for readability.
     </p>
     <div class="rl-field" style="margin-bottom:10px;">
       <label for="rlEasaTreeBatch">Batch (required)</label>
@@ -337,9 +396,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         <div class="rl-easa-tree-panel" id="rlEasaTreeMount" aria-label="Rule tree"></div>
       </div>
       <div>
-        <h4 style="margin:0 0 8px; font-size:14px; color:#0f172a;">Selected node</h4>
-        <div class="rl-easa-detail-meta" id="rlEasaNodeDetailMeta">—</div>
-        <pre class="rl-test-out rl-easa-detail-body" id="rlEasaNodeDetailBody" style="margin:0; max-height:min(60vh,480px); min-height:4rem;">—</pre>
+        <h4 style="margin:0 0 8px; font-size:14px; color:#0f172a;">Selected rule</h4>
+        <div class="rl-easa-node-detail-wrap" id="rlEasaNodeDetailWrap">
+          <div id="rlEasaNodeDetailBand" class="rl-easa-band rl-easa-band-neu" style="display:none;"></div>
+          <div class="rl-easa-detail-meta-box" id="rlEasaNodeDetailMeta">—</div>
+          <div class="rl-easa-detail-body" id="rlEasaNodeDetailBody">—</div>
+        </div>
       </div>
     </div>
   </section>
@@ -907,29 +969,52 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
+  function rlEasaBandLegend(band) {
+    if (band === 'amc') return 'Acceptable means of compliance (AMC) — ED Decision style material in Easy Access.';
+    if (band === 'gm') return 'Guidance material (GM) — ED Decision style material in Easy Access.';
+    if (band === 'neu') return 'Cover / editorial / TOC wrapper — use the tree on the left to open articles and annexes.';
+    return 'Implementing / delegated rule or annex text — EU regulation layer (blue band on easa.europa.eu).';
+  }
+
   function rlEasaShowNodeDetail(batchId, uid) {
+    var band = document.getElementById('rlEasaNodeDetailBand');
     var meta = document.getElementById('rlEasaNodeDetailMeta');
     var body = document.getElementById('rlEasaNodeDetailBody');
-    if (meta) meta.textContent = 'Loading…';
+    if (band) {
+      band.style.display = 'block';
+      band.className = 'rl-easa-band rl-easa-band-neu';
+      band.innerHTML = esc('Loading…') + '<small></small>';
+    }
+    if (meta) meta.textContent = '';
     if (body) body.textContent = '';
     fetch(api + '?action=node_detail&batch_id=' + encodeURIComponent(String(batchId)) + '&node_uid=' + encodeURIComponent(uid), { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (j) {
         if (!j.ok || !j.node) throw new Error((j && j.error) || 'Load failed');
         var n = j.node;
+        var b = n.rule_band || 'ir';
+        if (['ir', 'amc', 'gm', 'neu'].indexOf(b) < 0) b = 'ir';
+        if (band) {
+          band.className = 'rl-easa-band rl-easa-band-' + b;
+          var titleLine = n.title_display || n.title || n.source_erules_id || n.node_uid || '—';
+          band.innerHTML = esc(titleLine) + '<small>' + esc(rlEasaBandLegend(b)) + '</small>';
+        }
         var bits = [];
         bits.push('batch_id=' + (n.batch_id || ''));
         bits.push('node_uid=' + (n.node_uid || ''));
         bits.push('node_type=' + (n.node_type || ''));
         if (n.source_erules_id) bits.push('ERulesId=' + n.source_erules_id);
-        if (n.title) bits.push('title=' + n.title);
-        if (n.breadcrumb) bits.push('breadcrumb=' + String(n.breadcrumb).replace(/\s+/g, ' ').slice(0, 500));
-        if (n.plain_text_truncated) bits.push('[Body truncated in API payload; very large nodes may be clipped at ~400k chars]');
+        if (n.breadcrumb) bits.push('breadcrumb=' + String(n.breadcrumb).replace(/\s+/g, ' ').slice(0, 720));
+        if (n.plain_text_truncated) bits.push('[Body truncated in API payload at ~400k chars — full row remains in DB]');
         if (meta) meta.textContent = bits.join('\n');
-        if (body) body.textContent = n.plain_text || '';
+        if (body) body.textContent = (n.plain_text_display != null && n.plain_text_display !== '') ? n.plain_text_display : (n.plain_text || '');
       })
       .catch(function (e) {
-        if (meta) meta.textContent = e.message || 'Error';
+        if (band) {
+          band.className = 'rl-easa-band rl-easa-band-neu';
+          band.innerHTML = esc(e.message || 'Error') + '<small></small>';
+        }
+        if (meta) meta.textContent = '';
         if (body) body.textContent = '';
       });
   }
@@ -938,8 +1023,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     var li = document.createElement('li');
     var uid = n.node_uid || '';
     var kids = parseInt(n.child_count, 10) || 0;
+    var rb = n.rule_band || 'ir';
+    if (['ir', 'amc', 'gm', 'neu'].indexOf(rb) < 0) rb = 'ir';
     var row = document.createElement('div');
     row.className = 'rl-easa-tree-row';
+    var dot = document.createElement('span');
+    dot.className = 'rl-easa-tree-dot rl-easa-tree-dot-' + rb;
+    dot.setAttribute('aria-hidden', 'true');
     var exp = document.createElement('button');
     exp.type = 'button';
     exp.className = 'rl-easa-tree-exp';
@@ -954,10 +1044,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     var lab = document.createElement('button');
     lab.type = 'button';
     lab.className = 'rl-easa-tree-label';
-    lab.textContent = (n.title || n.source_erules_id || n.node_uid || n.node_type || '—');
+    lab.textContent = n.label_short || n.title || n.source_erules_id || n.node_uid || n.node_type || '—';
     var ty = document.createElement('span');
     ty.className = 'rl-easa-tree-type';
     ty.textContent = n.node_type || '';
+    row.appendChild(dot);
     row.appendChild(exp);
     row.appendChild(lab);
     row.appendChild(ty);
@@ -1011,6 +1102,22 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return li;
   }
 
+  function rlEasaRenderTreeIntoMount(mount, bid, nodes, virtualNoteHtml) {
+    mount.innerHTML = '';
+    if (virtualNoteHtml) {
+      var note = document.createElement('p');
+      note.className = 'rl-easa-tree-virtual-note';
+      note.innerHTML = virtualNoteHtml;
+      mount.appendChild(note);
+    }
+    var ul = document.createElement('ul');
+    ul.className = 'rl-easa-tree-list';
+    (nodes || []).forEach(function (n) {
+      ul.appendChild(rlEasaCreateTreeLi(bid, n));
+    });
+    mount.appendChild(ul);
+  }
+
   var rlEasaTreeLoadBtn = document.getElementById('rlEasaTreeLoadRoots');
   var rlEasaTreeMount = document.getElementById('rlEasaTreeMount');
   var rlEasaTreeHint = document.getElementById('rlEasaTreeHint');
@@ -1027,16 +1134,44 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         .then(function (r) { return r.json(); })
         .then(function (j) {
           if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
-          rlEasaTreeMount.innerHTML = '';
-          if (rlEasaTreeHint) {
-            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j.nodes.length + ' root row(s). Click ▶ to load children; click the title for full text.';
+          var nodes = j.nodes || [];
+          var wrapTypes = { document: 1, frontmatter: 1, toc: 1, backmatter: 1 };
+          function rlEasaIsWrapperNode(n) {
+            return !!wrapTypes[String(n.node_type || '').toLowerCase()];
           }
-          var ul = document.createElement('ul');
-          ul.className = 'rl-easa-tree-list';
-          j.nodes.forEach(function (n) {
-            ul.appendChild(rlEasaCreateTreeLi(bid, n));
-          });
-          rlEasaTreeMount.appendChild(ul);
+          var unwrapUid = null;
+          var wrapNode = null;
+          if (nodes.length && nodes.every(rlEasaIsWrapperNode)) {
+            var bc = -1;
+            nodes.forEach(function (n) {
+              var c = parseInt(n.child_count, 10) || 0;
+              if (c > bc) {
+                bc = c;
+                wrapNode = n;
+              }
+            });
+            if (wrapNode && bc > 0) {
+              unwrapUid = wrapNode.node_uid;
+            }
+          }
+          if (unwrapUid) {
+            var wrapLabel = esc(wrapNode.label_short || wrapNode.title || wrapNode.node_type || 'wrapper');
+            return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)) + '&parent_uid=' + encodeURIComponent(unwrapUid), { credentials: 'same-origin' })
+              .then(function (r2) { return r2.json(); })
+              .then(function (j2) {
+                if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
+                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes,
+                  'Opened inside the main <strong>wrapper</strong> node (' + wrapLabel + ') so you see regulatory children (topics/headings) first — same idea as the EASA Easy Access left navigation. '
+                  + '<strong>' + j2.nodes.length + '</strong> row(s) at this level.');
+                if (rlEasaTreeHint) {
+                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' items under wrapper (dots: blue IR, amber AMC, green GM, grey cover/TOC).';
+                }
+              });
+          }
+          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes, null);
+          if (rlEasaTreeHint) {
+            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root row(s). Click ▶ to expand; click title for rule text with colour band.';
+          }
         })
         .catch(function (e) {
           rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="color:#991b1b;margin:0;">' + esc(e.message || 'Error') + '</p>';

@@ -265,7 +265,7 @@ if ($method === 'GET') {
             if ($isRoot) {
                 $sql = "
                     SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
-                           n.source_erules_id, n.title, n.breadcrumb,
+                           n.source_erules_id, n.title, n.source_title, n.breadcrumb,
                            (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
                             WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
                     FROM easa_erules_import_nodes_staging n
@@ -278,7 +278,7 @@ if ($method === 'GET') {
             } else {
                 $sql = "
                     SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
-                           n.source_erules_id, n.title, n.breadcrumb,
+                           n.source_erules_id, n.title, n.source_title, n.breadcrumb,
                            (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
                             WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
                     FROM easa_erules_import_nodes_staging n
@@ -289,6 +289,18 @@ if ($method === 'GET') {
                 $st->execute([$batchId, $parentRaw]);
             }
             $nodes = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($nodes as $k => $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $nodes[$k]['label_short'] = easa_erules_short_tree_label($row);
+                $nodes[$k]['rule_band'] = easa_erules_classify_display_band(
+                    $row['node_type'] ?? null,
+                    $row['title'] ?? null,
+                    $row['source_title'] ?? null,
+                    $row['source_erules_id'] ?? null
+                );
+            }
         } catch (Throwable $e) {
             rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
         }
@@ -333,6 +345,14 @@ if ($method === 'GET') {
             $row['plain_text'] = substr($plain, 0, $maxPlain) . "\n\n… [truncated for API; full text is in the database row]";
         }
         $row['plain_text_truncated'] = $truncated;
+        $row['title_display'] = easa_erules_sanitize_display_text((string) ($row['title'] ?? ''));
+        $row['plain_text_display'] = easa_erules_sanitize_display_text((string) ($row['plain_text'] ?? ''));
+        $row['rule_band'] = easa_erules_classify_display_band(
+            $row['node_type'] ?? null,
+            $row['title'] ?? null,
+            $row['source_title'] ?? null,
+            $row['source_erules_id'] ?? null
+        );
         rl_easa_json_out(200, ['ok' => true, 'node' => $row]);
     }
 

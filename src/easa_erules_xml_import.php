@@ -494,6 +494,78 @@ function easa_erules_import_finalize_failure(PDO $pdo, int $batchId, string $mes
 }
 
 /**
+ * Strip Word TOC / merge-field noise often embedded in Easy Access XML text nodes.
+ */
+function easa_erules_sanitize_display_text(string $s): string
+{
+    if ($s === '') {
+        return '';
+    }
+    $s = preg_replace('/\\\\\*+\s*MERGEFORMAT\s*/iu', '', $s) ?? $s;
+    $s = preg_replace('/DATE\s*\\\\@[^"\s]*\s*"[^"]*"\s*(?:\\\\\*+\s*MERGEFORMAT\s*)?[^\s"\\\\]*/iu', '', $s) ?? $s;
+    $s = preg_replace('/PAGEREF\s+_[A-Za-z0-9]+\s*\\\\[a-z]+\s*\d*/iu', '', $s) ?? $s;
+    $s = preg_replace('/HYPERLINK\s+\\\\l\s+"[^"]*"\s*/iu', '', $s) ?? $s;
+    $s = preg_replace('/\\s{2,}/u', ' ', $s) ?? $s;
+
+    return trim($s);
+}
+
+/**
+ * Short label for tree rows (sanitized, max length).
+ */
+function easa_erules_short_tree_label(array $n): string
+{
+    $raw = trim((string) ($n['title'] ?? ''));
+    if ($raw === '') {
+        $raw = trim((string) ($n['source_erules_id'] ?? ''));
+    }
+    if ($raw === '') {
+        $raw = trim((string) ($n['source_title'] ?? ''));
+    }
+    if ($raw === '') {
+        $raw = (string) ($n['node_uid'] ?? '');
+    }
+    $s = easa_erules_sanitize_display_text($raw);
+    if ($s === '') {
+        $s = (string) ($n['node_type'] ?? '—');
+    }
+    if (strlen($s) > 180) {
+        $s = substr($s, 0, 177) . '…';
+    }
+
+    return $s;
+}
+
+/**
+ * UI colour band aligned with EASA Easy Access: IR (blue), AMC (amber), GM (green), wrappers (slate).
+ *
+ * @return 'ir'|'amc'|'gm'|'neu'
+ */
+function easa_erules_classify_display_band(?string $nodeType, ?string $title, ?string $sourceTitle, ?string $erulesId): string
+{
+    $nt = strtolower(trim((string) $nodeType));
+    if (in_array($nt, ['document', 'frontmatter', 'toc', 'backmatter'], true)) {
+        return 'neu';
+    }
+    $blob = trim((string) $title . "\n" . (string) $sourceTitle . "\n" . (string) $erulesId);
+    $blobOneLine = preg_replace('/\s+/u', ' ', $blob) ?? $blob;
+    if (preg_match('/^\s*AMC\d*\b/iu', $blobOneLine)) {
+        return 'amc';
+    }
+    if (preg_match('/^\s*GM\d*\b/iu', $blobOneLine)) {
+        return 'gm';
+    }
+    if (preg_match('/(?i)\bacceptable\s+means\s+of\s+compliance\b/', $blobOneLine)) {
+        return 'amc';
+    }
+    if (preg_match('/(?i)\bguidance\s+material\b/', $blobOneLine) && preg_match('/(?i)\bGM\d*\b/', $blobOneLine)) {
+        return 'gm';
+    }
+
+    return 'ir';
+}
+
+/**
  * @return bool
  */
 function easa_erules_staging_tables_ok(PDO $pdo): bool
