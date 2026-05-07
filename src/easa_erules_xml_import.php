@@ -6,6 +6,9 @@ require_once __DIR__ . '/easa_erules_storage.php';
 /** Max stored outer XML fragment when we only store a synthetic opening tag (streaming mode). */
 const EASA_ERULES_XML_FRAGMENT_MAX = 65535;
 
+/** MySQL MEDIUMTEXT upper bound minus headroom for UPDATE safety. */
+const EASA_ERULES_XML_FRAGMENT_STORE_MAX = 16777215;
+
 const EASA_ERULES_PROGRESS_INTERVAL = 80;
 
 /**
@@ -112,6 +115,221 @@ function easa_erules_batch_progress_available(PDO $pdo): bool
     }
 }
 
+function easa_erules_staging_has_canonical_column(PDO $pdo): bool
+{
+    try {
+        $st = $pdo->query("SHOW COLUMNS FROM easa_erules_import_nodes_staging LIKE 'canonical_text'");
+
+        return $st instanceof PDOStatement && $st->rowCount() > 0;
+    } catch (Throwable) {
+        return false;
+    }
+}
+
+/**
+ * Normalised rule body for hashing / compare (single-line whitespace collapse).
+ */
+function easa_erules_body_canonical_for_hash(string $s): string
+{
+    if ($s === '') {
+        return '';
+    }
+    $s = str_replace(["\xc2\xa0"], ' ', $s);
+    $s = html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+    return trim(preg_replace('/\s+/u', ' ', $s) ?? $s);
+}
+
+/**
+ * Stable content hash: canonical body + ids (align with enrich pass).
+ */
+function easa_erules_staging_content_hash(string $canonical, ?string $erulesId, string $nodeType): string
+{
+    return hash(
+        'sha256',
+        $canonical . "\n|\n" . ($erulesId ?? '') . "\n|\n" . $nodeType
+    );
+}
+
+/**
+ * Extract ordered descendant text from a full element outer-XML fragment (Word OOXML-safe).
+ *
+ * @return array{plain: string, canonical: string}
+ */
+function easa_erules_plain_canonical_from_outer_xml(string $outerXml): array
+{
+    $outerXml = trim($outerXml);
+    if ($outerXml === '') {
+        return ['plain' => '', 'canonical' => ''];
+    }
+    if (strlen($outerXml) > EASA_ERULES_XML_FRAGMENT_STORE_MAX) {
+        $outerXml = substr($outerXml, 0, EASA_ERULES_XML_FRAGMENT_STORE_MAX) . "\n<!-- … truncated -->";
+    }
+
+    $dom = new DOMDocument();
+    $ok = @$dom->loadXML($outerXml, LIBXML_NONET | LIBXML_PARSEHUGE);
+    if (!$ok) {
+        $noTags = $outerXml;
+        $noTags = str_replace(['<w:tab/>', '<w:tab />', '<w:br/>', '<w:br />'], ["\t", "\t", "\n", "\n"], $noTags);
+        $noTags = strip_tags($noTags);
+        $noTags = str_replace(["\xc2\xa0"], ' ', $noTags);
+        $noTags = html_entity_decode($noTags, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $plain = easa_erules_sanitize_rule_body_text($noTags);
+        $canonical = easa_erules_body_canonical_for_hash($noTags);
+
+        return ['plain' => $plain, 'canonical' => $canonical];
+    }
+
+    $xp = new DOMXPath($dom);
+    $buf = '';
+    foreach ($xp->query('//text()') ?? [] as $t) {
+        if ($t instanceof DOMText) {
+            $buf .= $t->data;
+        }
+    }
+    $buf = str_replace(["\xc2\xa0"], ' ', $buf);
+    $buf = html_entity_decode($buf, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $plain = easa_erules_sanitize_rule_body_text($buf);
+    $canonical = easa_erules_body_canonical_for_hash($buf);
+
+    return ['plain' => $plain, 'canonical' => $canonical];
+}
+
+/**
+ * Readable body from a stored xml_fragment row (fallback when plain_text was not filled).
+ */
+function easa_erules_plain_text_from_stored_xml_fragment(string $fragment): string
+{
+    $fragment = trim($fragment);
+    if ($fragment === '') {
+        return '';
+    }
+    $pc = easa_erules_plain_canonical_from_outer_xml($fragment);
+
+    return $pc['plain'];
+}
+
+/**
+ * Ensure batch storage_relpath matches the canonical path for this batch_id and source.xml is readable.
+ *
+ * @throws RuntimeException when the file is missing
+ */
+function easa_erules_validate_batch_source_storage(int $batchId, string $storageRelFromDb, string $absolutePath): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $expected = easa_erules_batch_relative_path($batchId);
+    $normDb = str_replace('\\', '/', trim($storageRelFromDb));
+    if ($normDb !== '' && $normDb !== $expected) {
+        error_log('easa_erules: batch ' . $batchId . ' storage_relpath "' . $normDb . '" differs from expected "' . $expected . '"');
+    }
+    if (!is_file($absolutePath) || !is_readable($absolutePath)) {
+        throw new RuntimeException(
+            'EASA source XML not found at ' . $expected . ' (resolved: ' . $absolutePath . ')'
+        );
+    }
+}
+
+/**
+ * Second pass: for each distinct ERulesId in staging, read full outer XML from source.xml and fill plain / canonical / fragment.
+ */
+function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId, string $absoluteXmlPath): void
+{
+    if ($batchId <= 0 || !is_file($absoluteXmlPath) || !is_readable($absoluteXmlPath)) {
+        return;
+    }
+
+    $st = $pdo->prepare(
+        'SELECT DISTINCT TRIM(source_erules_id) AS eid
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ? AND source_erules_id IS NOT NULL AND TRIM(source_erules_id) != \'\''
+    );
+    $st->execute([$batchId]);
+    $need = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (!is_array($r)) {
+            continue;
+        }
+        $e = trim((string) ($r['eid'] ?? ''));
+        if ($e !== '') {
+            $need[$e] = true;
+        }
+    }
+    if ($need === []) {
+        return;
+    }
+
+    $reader = new XMLReader();
+    if (!$reader->open($absoluteXmlPath, null, LIBXML_PARSEHUGE | LIBXML_NONET | LIBXML_COMPACT)) {
+        return;
+    }
+
+    $outerByEid = [];
+    try {
+        while ($reader->read()) {
+            if ($reader->nodeType !== XMLReader::ELEMENT) {
+                continue;
+            }
+            $attrs = easa_erules_reader_collect_attributes($reader);
+            $er = isset($attrs['ERulesId']) ? trim((string) $attrs['ERulesId']) : '';
+            if ($er === '' || !isset($need[$er]) || isset($outerByEid[$er])) {
+                continue;
+            }
+            $outer = $reader->readOuterXml();
+            if (!is_string($outer) || $outer === '') {
+                continue;
+            }
+            if (strlen($outer) > EASA_ERULES_XML_FRAGMENT_STORE_MAX) {
+                $outer = substr($outer, 0, EASA_ERULES_XML_FRAGMENT_STORE_MAX) . "\n<!-- … truncated -->";
+            }
+            $outerByEid[$er] = $outer;
+            if (count($outerByEid) >= count($need)) {
+                break;
+            }
+        }
+    } finally {
+        $reader->close();
+    }
+
+    if ($outerByEid === []) {
+        return;
+    }
+
+    $hasCanon = easa_erules_staging_has_canonical_column($pdo);
+    $updCanon = $hasCanon
+        ? $pdo->prepare(
+            'UPDATE easa_erules_import_nodes_staging
+             SET plain_text = ?, canonical_text = ?, xml_fragment = ?, content_hash = ?
+             WHERE batch_id = ? AND TRIM(source_erules_id) = ?'
+        )
+        : $pdo->prepare(
+            'UPDATE easa_erules_import_nodes_staging
+             SET plain_text = ?, xml_fragment = ?, content_hash = ?
+             WHERE batch_id = ? AND TRIM(source_erules_id) = ?'
+        );
+
+    $typeSt = $pdo->prepare(
+        'SELECT node_type FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND TRIM(source_erules_id) = ? LIMIT 1'
+    );
+
+    foreach ($outerByEid as $eid => $outer) {
+        $pc = easa_erules_plain_canonical_from_outer_xml($outer);
+        $typeSt->execute([$batchId, $eid]);
+        $tr = $typeSt->fetch(PDO::FETCH_ASSOC);
+        $nodeType = is_array($tr) ? trim((string) ($tr['node_type'] ?? 'topic')) : 'topic';
+        if ($nodeType === '') {
+            $nodeType = 'topic';
+        }
+        $hash = easa_erules_staging_content_hash($pc['canonical'], $eid, $nodeType);
+        if ($hasCanon) {
+            $updCanon->execute([$pc['plain'], $pc['canonical'], $outer, $hash, $batchId, $eid]);
+        } else {
+            $updCanon->execute([$pc['plain'], $outer, $hash, $batchId, $eid]);
+        }
+    }
+}
+
 /**
  * @param array<string, string|null> $detailReplacements
  */
@@ -213,14 +431,26 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
         ')->execute(['Reading XML stream (file ' . round($size / 1048576, 1) . ' MiB)…', $batchId]);
     }
 
+    easa_erules_validate_batch_source_storage($batchId, $rel, $abs);
+
     $pdo->prepare('DELETE FROM easa_erules_import_nodes_staging WHERE batch_id = ?')->execute([$batchId]);
 
-    $ins = $pdo->prepare('
-        INSERT INTO easa_erules_import_nodes_staging (
-            batch_id, node_uid, source_erules_id, node_type, parent_node_uid, sort_order, depth,
-            path, breadcrumb, title, source_title, plain_text, xml_fragment, metadata_json, content_hash
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-    ');
+    $hasCanonicalCol = easa_erules_staging_has_canonical_column($pdo);
+    if ($hasCanonicalCol) {
+        $ins = $pdo->prepare('
+            INSERT INTO easa_erules_import_nodes_staging (
+                batch_id, node_uid, source_erules_id, node_type, parent_node_uid, sort_order, depth,
+                path, breadcrumb, title, source_title, plain_text, canonical_text, xml_fragment, metadata_json, content_hash
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ');
+    } else {
+        $ins = $pdo->prepare('
+            INSERT INTO easa_erules_import_nodes_staging (
+                batch_id, node_uid, source_erules_id, node_type, parent_node_uid, sort_order, depth,
+                path, breadcrumb, title, source_title, plain_text, xml_fragment, metadata_json, content_hash
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        ');
+    }
 
     $reader = new XMLReader();
     if (!$reader->open($abs, null, LIBXML_PARSEHUGE | LIBXML_NONET | LIBXML_COMPACT)) {
@@ -245,7 +475,7 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
         }
     };
 
-    $popFrame = static function () use (&$stack, &$candidateUidStack, &$titleByUid, &$siblingCount, &$seq, &$imported, &$publicationMeta, $pdo, $batchId, $ins, $flushProgress): void {
+    $popFrame = static function () use (&$stack, &$candidateUidStack, &$titleByUid, &$siblingCount, &$seq, &$imported, &$publicationMeta, $pdo, $batchId, $ins, $flushProgress, $hasCanonicalCol): void {
         /** @var array{frame: object, chunks: array} $p */
         $p = array_pop($stack);
         if (!is_array($p)) {
@@ -311,25 +541,47 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
                 'import_mode' => 'xmlreader_stream',
             ];
 
-            $hash = hash('sha256', $plain . "\n|\n" . ($erulesId ?? '') . "\n|\n" . $local);
+            $canonicalInit = easa_erules_body_canonical_for_hash($plain);
+            $hash = easa_erules_staging_content_hash($canonicalInit, $erulesId, $local);
 
-            $ins->execute([
-                $batchId,
-                $uid,
-                $erulesId,
-                $local,
-                $parentUid,
-                $sortOrder,
-                $frame->xmlDepth,
-                $pathStr !== '' ? mb_substr($pathStr, 0, 4000) : null,
-                $breadcrumb !== '' ? $breadcrumb : null,
-                $title !== '' ? $title : null,
-                $sourceTitle !== null && $sourceTitle !== '' ? mb_substr($sourceTitle, 0, 2000) : null,
-                $plain,
-                $frag,
-                json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}',
-                $hash,
-            ]);
+            if ($hasCanonicalCol) {
+                $ins->execute([
+                    $batchId,
+                    $uid,
+                    $erulesId,
+                    $local,
+                    $parentUid,
+                    $sortOrder,
+                    $frame->xmlDepth,
+                    $pathStr !== '' ? mb_substr($pathStr, 0, 4000) : null,
+                    $breadcrumb !== '' ? $breadcrumb : null,
+                    $title !== '' ? $title : null,
+                    $sourceTitle !== null && $sourceTitle !== '' ? mb_substr($sourceTitle, 0, 2000) : null,
+                    $plain,
+                    $canonicalInit !== '' ? $canonicalInit : null,
+                    $frag,
+                    json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}',
+                    $hash,
+                ]);
+            } else {
+                $ins->execute([
+                    $batchId,
+                    $uid,
+                    $erulesId,
+                    $local,
+                    $parentUid,
+                    $sortOrder,
+                    $frame->xmlDepth,
+                    $pathStr !== '' ? mb_substr($pathStr, 0, 4000) : null,
+                    $breadcrumb !== '' ? $breadcrumb : null,
+                    $title !== '' ? $title : null,
+                    $sourceTitle !== null && $sourceTitle !== '' ? mb_substr($sourceTitle, 0, 2000) : null,
+                    $plain,
+                    $frag,
+                    json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}',
+                    $hash,
+                ]);
+            }
             $imported++;
             $flushProgress($local, 'Inserted ' . $imported . ' nodes · last: <' . $local . '>');
 
@@ -423,6 +675,18 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     } finally {
         $reader->close();
     }
+
+    if (easa_erules_batch_progress_available($pdo)) {
+        $pdo->prepare('
+            UPDATE easa_erules_import_batches SET
+                parse_phase = ?,
+                parse_detail = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ')->execute(['enriching', 'Merging full topic XML by ERulesId (readOuterXml pass)…', $batchId]);
+    }
+
+    easa_erules_enrich_staging_from_source_outer_xml($pdo, $batchId, $abs);
 
     return [
         'imported' => $imported,
@@ -611,14 +875,9 @@ function easa_erules_extract_plain_text_from_source_xml_by_erules_id(string $abs
             if (!is_string($outer) || $outer === '') {
                 continue;
             }
-            if (strlen($outer) > 14 * 1024 * 1024) {
-                $outer = substr($outer, 0, 14 * 1024 * 1024) . "\n<!-- … -->";
-            }
-            $noTags = strip_tags(str_replace(['<w:tab/>', '<w:tab />', '<w:br/>', '<w:br />'], ["\t", "\t", "\n", "\n"], $outer));
-            $noTags = str_replace(["\xc2\xa0"], ' ', $noTags);
-            $noTags = html_entity_decode($noTags, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+            $pc = easa_erules_plain_canonical_from_outer_xml($outer);
 
-            return easa_erules_sanitize_rule_body_text($noTags);
+            return $pc['plain'];
         }
     } finally {
         $reader->close();

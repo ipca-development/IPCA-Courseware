@@ -64,14 +64,17 @@ function rl_easa_search_like_patterns(string $q): array
 }
 
 /**
- * Same WHERE clause as Search EASA index (titles, ids, paths, plain_text).
+ * Same WHERE clause as Search EASA index (titles, ids, paths, plain_text, optional canonical_text).
  *
  * @return array{where: string, bind: list<mixed>}
  */
-function rl_easa_search_match_clause(string $q): array
+function rl_easa_search_match_clause(PDO $pdo, string $q): array
 {
     [$like, $likeNoDots] = rl_easa_search_like_patterns($q);
     $matchCols = ['plain_text', 'title', 'source_title', 'breadcrumb', 'source_erules_id', 'path'];
+    if (easa_erules_staging_has_canonical_column($pdo)) {
+        $matchCols[] = 'canonical_text';
+    }
     $matchParts = [];
     $bind = [];
     foreach ($matchCols as $col) {
@@ -86,6 +89,18 @@ function rl_easa_search_match_clause(string $q): array
     }
 
     return ['where' => '(' . implode(' OR ', $matchParts) . ')', 'bind' => $bind];
+}
+
+/**
+ * Snippet column: prefers canonical body when the column exists (aligned with search/compare).
+ */
+function rl_easa_staging_snippet_concat_body(PDO $pdo): string
+{
+    if (easa_erules_staging_has_canonical_column($pdo)) {
+        return 'COALESCE(NULLIF(TRIM(canonical_text), \'\'), plain_text)';
+    }
+
+    return 'plain_text';
 }
 
 /**
@@ -118,16 +133,17 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
 
         return $out;
     }
-    $m = rl_easa_search_match_clause($q);
+    $m = rl_easa_search_match_clause($pdo, $q);
     $whereMatch = $m['where'];
     $bind = $m['bind'];
     $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'toc\',\'backmatter\') THEN 1 ELSE 0 END)';
     $maxRows = 15;
     $excerptLen = 4500;
+    $excerptBody = rl_easa_staging_snippet_concat_body($pdo);
     if ($batchFilter > 0) {
         $sql = "
             SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
-                   SUBSTRING(plain_text, 1, {$excerptLen}) AS excerpt
+                   SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
             FROM easa_erules_import_nodes_staging
             WHERE batch_id = ? AND {$whereMatch}
             ORDER BY {$wrapRank} ASC, id ASC
@@ -138,7 +154,7 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
     } else {
         $sql = "
             SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
-                   SUBSTRING(plain_text, 1, {$excerptLen}) AS excerpt
+                   SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
             FROM easa_erules_import_nodes_staging
             WHERE {$whereMatch}
             ORDER BY {$wrapRank} ASC, id DESC
@@ -322,14 +338,24 @@ if ($method === 'GET') {
             rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id and node_uid required']);
         }
         try {
-            $st = $pdo->prepare('
+            $detailSql = easa_erules_staging_has_canonical_column($pdo)
+                ? '
+                SELECT batch_id, node_uid, parent_node_uid, node_type, depth, sort_order,
+                       source_erules_id, title, source_title, breadcrumb, path,
+                       plain_text, canonical_text, xml_fragment, metadata_json
+                FROM easa_erules_import_nodes_staging
+                WHERE batch_id = ? AND node_uid = ?
+                LIMIT 1
+            '
+                : '
                 SELECT batch_id, node_uid, parent_node_uid, node_type, depth, sort_order,
                        source_erules_id, title, source_title, breadcrumb, path,
                        plain_text, xml_fragment, metadata_json
                 FROM easa_erules_import_nodes_staging
                 WHERE batch_id = ? AND node_uid = ?
                 LIMIT 1
-            ');
+            ';
+            $st = $pdo->prepare($detailSql);
             $st->execute([$batchId, $nodeUid]);
             $row = $st->fetch(PDO::FETCH_ASSOC);
         } catch (Throwable $e) {
@@ -338,34 +364,48 @@ if ($method === 'GET') {
         if (!is_array($row)) {
             rl_easa_json_out(404, ['ok' => false, 'error' => 'Node not found']);
         }
+        $canonicalRaw = trim((string) ($row['canonical_text'] ?? ''));
         $plainRaw = (string) ($row['plain_text'] ?? '');
         $plainTrim = trim($plainRaw);
         $composed = '';
         if ($plainTrim === '') {
             $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $nodeUid, 0);
         }
-        $effectivePlain = $plainTrim !== '' ? $plainRaw : $composed;
+        $stepPlain = $plainTrim !== '' ? $plainRaw : $composed;
+        $stepPlainTrim = trim($stepPlain);
+        $fromFrag = '';
+        if ($canonicalRaw === '' && $stepPlainTrim === '') {
+            $fragRaw = trim((string) ($row['xml_fragment'] ?? ''));
+            if ($fragRaw !== '') {
+                $fromFrag = easa_erules_plain_text_from_stored_xml_fragment($fragRaw);
+            }
+        }
         $srcEid = trim((string) ($row['source_erules_id'] ?? ''));
         $fromXml = '';
-        if (trim($effectivePlain) === '' && $srcEid !== '') {
+        if ($canonicalRaw === '' && $stepPlainTrim === '' && trim($fromFrag) === '' && $srcEid !== '') {
             $xmlAbs = easa_erules_batch_source_xml_absolute_path($pdo, $batchId);
             if ($xmlAbs !== null) {
                 $fromXml = easa_erules_extract_plain_text_from_source_xml_by_erules_id($xmlAbs, $srcEid);
             }
         }
-        if (trim($effectivePlain) === '' && trim($fromXml) !== '') {
-            $effectivePlain = $fromXml;
-        }
-        if ($plainTrim !== '') {
-            $row['plain_text_effective_source'] = 'node';
-        } elseif (trim($composed) !== '') {
-            $row['plain_text_effective_source'] = 'descendants';
+
+        $effectivePlain = '';
+        if ($canonicalRaw !== '') {
+            $effectivePlain = $canonicalRaw;
+            $row['plain_text_effective_source'] = 'canonical';
+        } elseif ($stepPlainTrim !== '') {
+            $effectivePlain = $stepPlain;
+            $row['plain_text_effective_source'] = $plainTrim !== '' ? 'node' : 'descendants';
+        } elseif (trim($fromFrag) !== '') {
+            $effectivePlain = $fromFrag;
+            $row['plain_text_effective_source'] = 'xml_fragment';
         } elseif (trim($fromXml) !== '') {
+            $effectivePlain = $fromXml;
             $row['plain_text_effective_source'] = 'source_xml_erules';
         } else {
             $row['plain_text_effective_source'] = 'none';
         }
-        $row['plain_text_composed_from_descendants'] = $plainTrim === '' && trim($composed) !== '';
+        $row['plain_text_composed_from_descendants'] = $canonicalRaw === '' && $plainTrim === '' && trim($composed) !== '';
         $maxPlain = 400000;
         $truncated = strlen($effectivePlain) > $maxPlain;
         if ($truncated) {
@@ -377,7 +417,7 @@ if ($method === 'GET') {
         $row['title_display'] = easa_erules_sanitize_display_text((string) ($row['title'] ?? ''));
         $row['plain_text_display'] = easa_erules_sanitize_rule_body_text($truncated ? (string) $row['plain_text'] : $effectivePlain);
         if ($row['plain_text_display'] === '' && $row['plain_text_effective_source'] === 'none') {
-            $row['plain_text_display'] = 'No rule text could be resolved: staging row is empty, no child text was found, and the source.xml file could not be matched by ERulesId (or the file is missing). Check that storage/easa_erules/batches/{id}/source.xml exists.';
+            $row['plain_text_display'] = 'No rule text could be resolved: canonical_text and plain_text are empty, no text could be extracted from xml_fragment, no child rows contributed text, and source.xml could not be matched by ERulesId (or the file is missing). Expected file: storage/easa_erules/batches/' . (int) $batchId . '/source.xml — verify batch storage_relpath matches this batch id.';
         }
         $row['rule_band'] = easa_erules_classify_display_band(
             $row['node_type'] ?? null,
@@ -542,17 +582,18 @@ if ($action === 'search') {
     $limit = (int) ($data['limit'] ?? 50);
     $limit = min(200, max(1, $limit));
     $offset = max(0, (int) ($data['offset'] ?? 0));
-    $mSearch = rl_easa_search_match_clause($q);
+    $mSearch = rl_easa_search_match_clause($pdo, $q);
     $whereMatch = $mSearch['where'];
     $bind = $mSearch['bind'];
     // Root <document> / frontmatter / toc / backmatter: sort after rows that look like real rules.
     $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'toc\',\'backmatter\') THEN 1 ELSE 0 END)';
+    $snippetBody = rl_easa_staging_snippet_concat_body($pdo);
     $snippet = "SUBSTRING(TRIM(CONCAT_WS(CHAR(10),
         NULLIF(TRIM(COALESCE(source_erules_id,'')), ''),
         NULLIF(TRIM(COALESCE(title,'')), ''),
         NULLIF(TRIM(COALESCE(source_title,'')), ''),
         NULLIF(TRIM(COALESCE(breadcrumb,'')), ''),
-        plain_text)), 1, 520)";
+        {$snippetBody})), 1, 520)";
     if ($batchFilter > 0) {
         $sql = "
             SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
@@ -584,7 +625,7 @@ if ($action === 'search') {
         'limit' => $limit,
         'offset' => $offset,
         'note' => $hits === []
-            ? 'No matches in staging. Searches plain_text, title, source_title, breadcrumb, source_erules_id, and path (with a dotless variant for ids like FCL.055 vs FCL055).'
+            ? 'No matches in staging. Searches plain_text' . (easa_erules_staging_has_canonical_column($pdo) ? ', canonical_text' : '') . ', title, source_title, breadcrumb, source_erules_id, and path (with a dotless variant for ids like FCL.055 vs FCL055).'
             : null,
     ]);
 }

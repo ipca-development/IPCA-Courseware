@@ -1006,7 +1006,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         if (n.source_erules_id) bits.push('ERulesId=' + n.source_erules_id);
         if (n.breadcrumb) bits.push('breadcrumb=' + String(n.breadcrumb).replace(/\s+/g, ' ').slice(0, 720));
         if (n.plain_text_composed_from_descendants) bits.push('[Body assembled from child rows — parent node had no plain_text in XML]');
-        if (n.plain_text_effective_source === 'source_xml_erules') bits.push('[Body read from stored source.xml by ERulesId — Easy Access OOXML inside topics]');
+        if (n.plain_text_effective_source === 'canonical') bits.push('[Body shown from canonical_text — normalized for compare/hash]');
+        if (n.plain_text_effective_source === 'xml_fragment') bits.push('[Body extracted from stored xml_fragment — import fallback]');
+        if (n.plain_text_effective_source === 'source_xml_erules') bits.push('[Body read from stored source.xml by ERulesId — last-resort file match]');
         if (n.plain_text_truncated) bits.push('[Body truncated in API payload at ~400k chars — full row remains in DB]');
         if (meta) meta.textContent = bits.join('\n');
         if (body) body.textContent = (n.plain_text_display != null && n.plain_text_display !== '') ? n.plain_text_display : (n.plain_text || '');
