@@ -949,6 +949,33 @@ function easa_erules_title_is_subpart_heading_row(string $title): bool
     return preg_match('/^\s*SUBPART\b/iu', $title) === 1;
 }
 
+function easa_erules_title_is_annex_heading_row(string $title): bool
+{
+    return preg_match('/^\s*ANNEX\b/iu', $title) === 1;
+}
+
+function easa_erules_norm_structural_title(?string $title): string
+{
+    $title = trim((string) $title);
+    if ($title === '') {
+        return '';
+    }
+    $collapsed = preg_replace('/\s+/u', ' ', $title) ?? $title;
+
+    if (function_exists('mb_strtolower')) {
+        return mb_strtolower($collapsed, 'UTF-8');
+    }
+
+    return strtolower($collapsed);
+}
+
+function easa_erules_title_is_structural_block_title(string $title): bool
+{
+    return easa_erules_title_is_annex_heading_row($title)
+        || easa_erules_title_is_subpart_heading_row($title)
+        || easa_erules_title_is_section_heading_row($title);
+}
+
 /**
  * First EASA Part-FCL style rule id in a title (FCL.100, FCL.205.A). Used to detect peer rules wrongly
  * nested under another rule’s &lt;toc&gt; row.
@@ -971,6 +998,10 @@ function easa_erules_title_first_fcl_ref(?string $title): ?string
  * so structural headings get child_count 0 and the disclosure lands on the first &lt;toc&gt; child.
  * Reparent direct toc/topic siblings so SUBPART and SECTION headings become parents (SECTION wins over
  * SUBPART when both apply in document order).
+ *
+ * Easy Access often stores SUBPART / SECTION labels as &lt;toc&gt; rows, not only &lt;heading&gt;. Those
+ * must reset the active block; otherwise every following &lt;toc&gt; (e.g. SUBPART B) is wrongly
+ * reparented under the previous SUBPART.
  */
 function easa_erules_reparent_structural_heading_children(PDO $pdo, int $batchId): void
 {
@@ -1019,12 +1050,17 @@ function easa_erules_reparent_structural_heading_children(PDO $pdo, int $batchId
             $uid = trim((string) ($r['node_uid'] ?? ''));
             $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
             $title = trim((string) ($r['title'] ?? ''));
-            if ($nt === 'heading' && easa_erules_title_is_subpart_heading_row($title)) {
+            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_annex_heading_row($title)) {
+                $activeSubpartUid = null;
+                $activeSectionUid = null;
+                continue;
+            }
+            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_subpart_heading_row($title)) {
                 $activeSubpartUid = $uid !== '' ? $uid : null;
                 $activeSectionUid = null;
                 continue;
             }
-            if ($nt === 'heading' && easa_erules_title_is_section_heading_row($title)) {
+            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_section_heading_row($title)) {
                 $activeSectionUid = $uid !== '' ? $uid : null;
                 continue;
             }
@@ -1037,6 +1073,94 @@ function easa_erules_reparent_structural_heading_children(PDO $pdo, int $batchId
             }
             $upd->execute([$target, $batchId, $uid, $target]);
         }
+    }
+}
+
+/**
+ * EASA exports often emit the same ANNEX / SUBPART / SECTION label twice: once as &lt;heading&gt; and
+ * again as a sibling &lt;toc&gt; navigation row. Remove the redundant toc row and attach its subtree
+ * to the heading so the UI does not show "SUBPART A" twice.
+ */
+function easa_erules_merge_duplicate_structural_heading_toc(PDO $pdo, int $batchId): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $updChildren = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND parent_node_uid = ?'
+    );
+    $del = $pdo->prepare(
+        'DELETE FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND node_uid = ?'
+    );
+
+    for ($guard = 0; $guard < 500; $guard++) {
+        $st = $pdo->prepare(
+            'SELECT node_uid, parent_node_uid, node_type, title, sort_order, id
+             FROM easa_erules_import_nodes_staging
+             WHERE batch_id = ?
+             ORDER BY id ASC'
+        );
+        $st->execute([$batchId]);
+        $all = [];
+        while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+            if (is_array($r)) {
+                $all[] = $r;
+            }
+        }
+        $byParent = [];
+        foreach ($all as $r) {
+            $p = $r['parent_node_uid'] ?? null;
+            $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
+            $byParent[easa_erules_parent_sort_key($p)][] = $r;
+        }
+        $found = null;
+        foreach ($byParent as $rows) {
+            usort($rows, static function (array $a, array $b): int {
+                $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
+                if ($so !== 0) {
+                    return $so;
+                }
+
+                return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+            });
+            $n = count($rows);
+            for ($i = 0; $i < $n - 1; $i++) {
+                $a = $rows[$i];
+                $b = $rows[$i + 1];
+                $nta = strtolower(trim((string) ($a['node_type'] ?? '')));
+                $ntb = strtolower(trim((string) ($b['node_type'] ?? '')));
+                $ta = trim((string) ($a['title'] ?? ''));
+                $tb = trim((string) ($b['title'] ?? ''));
+                if (!easa_erules_title_is_structural_block_title($ta) || !easa_erules_title_is_structural_block_title($tb)) {
+                    continue;
+                }
+                if (easa_erules_norm_structural_title($ta) !== easa_erules_norm_structural_title($tb)) {
+                    continue;
+                }
+                $headingUid = null;
+                $tocUid = null;
+                if ($nta === 'heading' && $ntb === 'toc') {
+                    $headingUid = trim((string) ($a['node_uid'] ?? ''));
+                    $tocUid = trim((string) ($b['node_uid'] ?? ''));
+                } elseif ($nta === 'toc' && $ntb === 'heading') {
+                    $tocUid = trim((string) ($a['node_uid'] ?? ''));
+                    $headingUid = trim((string) ($b['node_uid'] ?? ''));
+                }
+                if ($headingUid === '' || $tocUid === '' || $headingUid === $tocUid) {
+                    continue;
+                }
+                $found = ['heading' => $headingUid, 'toc' => $tocUid];
+                break 2;
+            }
+        }
+        if ($found === null) {
+            break;
+        }
+        $updChildren->execute([$found['heading'], $batchId, $found['toc']]);
+        $del->execute([$batchId, $found['toc']]);
     }
 }
 
@@ -1422,6 +1546,7 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     }
 
     easa_erules_reparent_structural_heading_children($pdo, $batchId);
+    easa_erules_merge_duplicate_structural_heading_toc($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
 
     if (easa_erules_batch_progress_available($pdo)) {
