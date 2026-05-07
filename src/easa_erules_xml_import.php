@@ -244,6 +244,194 @@ function easa_erules_plain_text_from_stored_xml_fragment(string $fragment): stri
  *
  * @throws RuntimeException when the file is missing
  */
+function easa_erules_is_wordprocessingml_namespace(?string $ns): bool
+{
+    return is_string($ns) && stripos($ns, 'wordprocessingml') !== false;
+}
+
+/**
+ * OOXML exposes rule bodies under w:sdt, correlated to EASA <topic sdt-id="…"> placeholders.
+ *
+ * Build map: trimmed id val => [plain, canonical, outer_fragment] (longest wins on duplicate ids).
+ *
+ * @return array<string, array{plain: string, canonical: string, outer: string}>
+ */
+function easa_erules_word_sdt_plain_index(string $absoluteXmlPath, int $maxSdtOuterBytes = 4194304): array
+{
+    if (!is_file($absoluteXmlPath) || !is_readable($absoluteXmlPath)) {
+        return [];
+    }
+    /** @var array<string, array{plain:string,canonical:string,outer:string}> */
+    $index = [];
+
+    $reader = new XMLReader();
+    if (!$reader->open($absoluteXmlPath, null, LIBXML_PARSEHUGE | LIBXML_NONET | LIBXML_COMPACT)) {
+        return [];
+    }
+    try {
+        while ($reader->read()) {
+            if ($reader->nodeType !== XMLReader::ELEMENT) {
+                continue;
+            }
+            if (strtolower($reader->localName) !== 'sdt') {
+                continue;
+            }
+            if (!easa_erules_is_wordprocessingml_namespace($reader->namespaceURI ?? null)) {
+                continue;
+            }
+            $outer = $reader->readOuterXml();
+            if (!is_string($outer) || $outer === '') {
+                continue;
+            }
+            if (strlen($outer) > $maxSdtOuterBytes) {
+                continue;
+            }
+
+            $dom = new DOMDocument();
+            if (!@$dom->loadXML($outer, LIBXML_NONET)) {
+                continue;
+            }
+            $xp = new DOMXPath($dom);
+            $idElList = $xp->query('//*[local-name()="sdtPr"]//*[local-name()="id"]');
+            if ($idElList === false || $idElList->length === 0) {
+                continue;
+            }
+
+            /** @var DOMElement|false $firstId */
+            $firstId = $idElList->item(0);
+            if (!$firstId instanceof DOMElement) {
+                continue;
+            }
+
+            $sdtNumericId = '';
+            foreach ($firstId->attributes ?? [] as $a) {
+                if (!$a instanceof DOMAttr) {
+                    continue;
+                }
+                $nameLc = strtolower($a->localName ?: $a->name);
+                if ($nameLc === 'val' || ($nameLc !== '' && str_ends_with($nameLc, ':val'))) {
+                    $sdtNumericId = trim((string) $a->value);
+                    break;
+                }
+            }
+
+            if ($sdtNumericId === '') {
+                foreach ($xp->query('//*[local-name()="id"]//@*[local-name()="val"]') ?: [] as $attr) {
+                    if (!$attr instanceof DOMAttr) {
+                        continue;
+                    }
+                    $sdtNumericId = trim((string) $attr->value);
+                    break;
+                }
+            }
+            if ($sdtNumericId === '') {
+                continue;
+            }
+
+            $plainBody = '';
+            $contentRoot = $xp->query('//*[local-name()="sdtContent"]')->item(0);
+            if ($contentRoot instanceof DOMElement) {
+                foreach ($xp->query('.//*[local-name()="t"]', $contentRoot) ?: [] as $t) {
+                    if (!$t instanceof DOMElement) {
+                        continue;
+                    }
+                    $plainBody .= $t->textContent;
+                }
+                $plainBody = trim($plainBody !== '' ? easa_erules_sanitize_rule_body_text($plainBody)
+                    : easa_erules_sanitize_rule_body_text($contentRoot->textContent ?? ''));
+            }
+            $canonicalBody = easa_erules_body_canonical_for_hash($plainBody !== '' ? $plainBody : '');
+
+            if ($plainBody === '' && $canonicalBody === '') {
+                continue;
+            }
+
+            $prev = $index[$sdtNumericId]['plain'] ?? '';
+            if (strlen(trim($plainBody)) < strlen(trim($prev))) {
+                continue;
+            }
+            $index[$sdtNumericId] = [
+                'plain' => $plainBody,
+                'canonical' => $canonicalBody,
+                'outer' => strlen($outer) <= EASA_ERULES_XML_FRAGMENT_STORE_MAX ? $outer : substr($outer, 0, EASA_ERULES_XML_FRAGMENT_STORE_MAX) . "\n<!-- … truncated -->",
+            ];
+        }
+    } finally {
+        $reader->close();
+    }
+
+    return $index;
+}
+
+/**
+ * Merge Word SDT body text into hollow <topic …> staging rows whose metadata.attributes['sdt-id'] matches SDT ids.
+ */
+function easa_erules_enrich_topics_from_word_sdt_index(PDO $pdo, int $batchId, array $sdtPlainIndex): void
+{
+    if ($batchId <= 0 || $sdtPlainIndex === []) {
+        return;
+    }
+    $hasCanon = easa_erules_staging_has_canonical_column($pdo);
+
+    $st = $pdo->prepare(
+        'SELECT node_uid, source_erules_id, node_type, metadata_json FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ? AND LOWER(node_type) = \'topic\' AND (plain_text IS NULL OR TRIM(plain_text) = \'\')'
+    );
+    $st->execute([$batchId]);
+
+    $updWithCanon = $hasCanon ? $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET plain_text = ?, canonical_text = ?, xml_fragment = ?, content_hash = ?
+         WHERE batch_id = ? AND node_uid = ?'
+    ) : $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET plain_text = ?, xml_fragment = ?, content_hash = ?
+         WHERE batch_id = ? AND node_uid = ?'
+    );
+
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (!is_array($r)) {
+            continue;
+        }
+        $uid = trim((string) ($r['node_uid'] ?? ''));
+        $metaRaw = isset($r['metadata_json']) ? (string) $r['metadata_json'] : '';
+        /** @var array<string,mixed>|null */
+        $meta = json_decode($metaRaw, true);
+        $attrs = is_array($meta) && isset($meta['attributes']) && is_array($meta['attributes']) ? $meta['attributes'] : [];
+        $sid = '';
+        foreach ($attrs as $k => $v) {
+            if (strcasecmp((string) $k, 'sdt-id') === 0 || strcasecmp((string) $k, 'sdt_id') === 0) {
+                $sid = trim((string) $v);
+                break;
+            }
+        }
+        if ($sid === '' || !isset($sdtPlainIndex[$sid])) {
+            continue;
+        }
+
+        $hit = $sdtPlainIndex[$sid];
+        $plain = trim((string) ($hit['plain'] ?? ''));
+        if ($plain === '') {
+            continue;
+        }
+        $canonical = (string) ($hit['canonical'] ?? easa_erules_body_canonical_for_hash($plain));
+        $frag = (string) ($hit['outer'] ?? '');
+        $erulesId = isset($r['source_erules_id']) ? trim((string) $r['source_erules_id']) : '';
+        $erulesDb = ($erulesId !== '' ? $erulesId : null);
+        $nodeType = strtolower(trim((string) ($r['node_type'] ?? 'topic')));
+        if ($nodeType === '') {
+            $nodeType = 'topic';
+        }
+        $hash = easa_erules_staging_content_hash($canonical, $erulesDb, $nodeType);
+
+        if ($hasCanon) {
+            $updWithCanon->execute([$plain, $canonical, $frag, $hash, $batchId, $uid]);
+        } else {
+            $updWithCanon->execute([$plain, $frag, $hash, $batchId, $uid]);
+        }
+    }
+}
+
 function easa_erules_validate_batch_source_storage(int $batchId, string $storageRelFromDb, string $absolutePath): void
 {
     if ($batchId <= 0) {
@@ -323,6 +511,12 @@ function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId
             $dbEid = $needByKey[$erKey];
             $outer = $reader->readOuterXml();
             if (!is_string($outer) || $outer === '') {
+                continue;
+            }
+            $pcPeek = easa_erules_plain_canonical_from_outer_xml($outer);
+            $peekPlainLen = strlen(trim($pcPeek['plain']));
+            if (strcasecmp((string) $reader->localName, 'topic') === 0
+                && $peekPlainLen < 80 && strpos($outer, '</') === false) {
                 continue;
             }
             if (strlen($outer) > EASA_ERULES_XML_FRAGMENT_STORE_MAX) {
@@ -759,6 +953,18 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     }
 
     easa_erules_enrich_staging_from_source_outer_xml($pdo, $batchId, $abs);
+
+    if (easa_erules_batch_progress_available($pdo)) {
+        $pdo->prepare('
+            UPDATE easa_erules_import_batches SET
+                parse_phase = ?,
+                parse_detail = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ')->execute(['sdt_merge', 'Merging OOXML <w:sdt> bodies keyed by topic sdt-id…', $batchId]);
+    }
+
+    easa_erules_enrich_topics_from_word_sdt_index($pdo, $batchId, easa_erules_word_sdt_plain_index($abs));
 
     return [
         'imported' => $imported,
