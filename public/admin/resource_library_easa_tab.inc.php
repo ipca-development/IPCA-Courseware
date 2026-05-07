@@ -583,6 +583,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     </div>
     <div class="rl-easa-browse-single">
       <p class="rl-drop-meta" id="rlEasaTreeHint" style="margin:0 0 8px;">Choose a batch and load roots (batch id matches the table above).</p>
+      <pre id="rlEasaTreeDebug" class="rl-drop-meta" style="margin:0 0 8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:140px;overflow:auto;" aria-live="polite">Tree debug: load a batch to show batch_id, unwrap, root node_uids, and last child fetch.</pre>
       <div class="rl-easa-tree-panel" id="rlEasaTreeMount" aria-label="Rule tree"></div>
     </div>
   </section>
@@ -1505,6 +1506,14 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
             sub.hidden = false;
             exp.textContent = '\u25bc';
             exp.setAttribute('aria-expanded', 'true');
+            if (rlEasaTreeDebug) {
+              var nch = j.nodes ? j.nodes.length : 0;
+              var rep = 'last_child_fetch: batch_id=' + batchId + ' parent_uid=' + uid + ' children_returned=' + nch;
+              var tx = rlEasaTreeDebug.textContent || '';
+              rlEasaTreeDebug.textContent = tx.indexOf('last_child_fetch:') >= 0
+                ? tx.replace(/last_child_fetch:[^\n]*/, rep)
+                : tx + '\n' + rep;
+            }
           })
           .catch(function (err) {
             exp.disabled = false;
@@ -1541,15 +1550,26 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   var rlEasaTreeLoadBtn = document.getElementById('rlEasaTreeLoadRoots');
   var rlEasaTreeMount = document.getElementById('rlEasaTreeMount');
   var rlEasaTreeHint = document.getElementById('rlEasaTreeHint');
+  var rlEasaTreeDebug = document.getElementById('rlEasaTreeDebug');
+  function rlEasaTreeSetDebug(lines) {
+    if (!rlEasaTreeDebug) return;
+    rlEasaTreeDebug.textContent = Array.isArray(lines) ? lines.join('\n') : String(lines || '');
+  }
   if (rlEasaTreeLoadBtn && rlEasaTreeMount) {
     rlEasaTreeLoadBtn.addEventListener('click', function () {
       var sel = document.getElementById('rlEasaTreeBatch');
       var bid = sel && sel.value ? parseInt(sel.value, 10) : 0;
       if (!bid) {
         if (rlEasaTreeHint) rlEasaTreeHint.textContent = 'Select a batch in the dropdown first.';
+        rlEasaTreeSetDebug(['batch_id: (none selected)']);
         return;
       }
       rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading roots…</p>';
+      rlEasaTreeSetDebug([
+        'batch_id=' + bid,
+        'GET ' + api + '?action=tree_children&batch_id=' + bid + ' (roots; parent_uid omitted)',
+        'last_child_fetch: (none until you expand a row)'
+      ]);
       fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (j) {
@@ -1581,12 +1601,27 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
                 if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
                 var inner = rlEasaPickBrowseRootNodes(j2.nodes || []);
                 rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, inner);
+                rlEasaTreeSetDebug([
+                  'batch_id=' + bid,
+                  'unwrap: used wrapper parent_uid=' + unwrapUid,
+                  'root rows rendered=' + inner.length,
+                  'root node_uids=' + inner.map(function (n) { return n.node_uid || n.id || '—'; }).join(', '),
+                  'last_child_fetch: (expand a row to record parent_uid request)'
+                ]);
                 if (rlEasaTreeHint) {
                   rlEasaTreeHint.textContent = 'Batch #' + bid + ' · tree rooted at annex when present; ▶ opens subparts and sections; rules use coloured bullets.';
                 }
               });
           }
-          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, rlEasaPickBrowseRootNodes(nodes));
+          var picked = rlEasaPickBrowseRootNodes(nodes);
+          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, picked);
+          rlEasaTreeSetDebug([
+            'batch_id=' + bid,
+            'unwrap: none (roots rendered as returned)',
+            'root rows rendered=' + picked.length,
+            'root node_uids=' + picked.map(function (n) { return n.node_uid || n.id || '—'; }).join(', '),
+            'last_child_fetch: (expand a row to record parent_uid request)'
+          ]);
           if (rlEasaTreeHint) {
             rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root entr' + (nodes.length === 1 ? 'y' : 'ies') + '. Use ▶ for structure; click a rule line to read it below.';
           }

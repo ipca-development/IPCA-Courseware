@@ -1062,6 +1062,142 @@ function easa_erules_reparent_subparts_under_preceding_annex(PDO $pdo, int $batc
 }
 
 /**
+ * Under the same parent, ANNEX I and an empty &lt;toc&gt; wrapper are often **siblings** (both children of
+ * document). SUBPART rows sit under the empty &lt;toc&gt;, so no ANNEX ancestor exists. Move every direct
+ * child of each empty &lt;toc&gt; that appears **after** an ANNEX heading/toc in sort order onto that ANNEX.
+ */
+function easa_erules_lift_children_of_post_annex_empty_toc_to_annex(PDO $pdo, int $batchId): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title, sort_order, id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?
+         ORDER BY id ASC'
+    );
+    $st->execute([$batchId]);
+    $all = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (is_array($r)) {
+            $all[] = $r;
+        }
+    }
+    $byParent = [];
+    foreach ($all as $r) {
+        $p = $r['parent_node_uid'] ?? null;
+        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
+        $byParent[easa_erules_parent_sort_key($p)][] = $r;
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND parent_node_uid = ?'
+    );
+    foreach ($byParent as $rows) {
+        usort($rows, static function (array $a, array $b): int {
+            $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
+            if ($so !== 0) {
+                return $so;
+            }
+
+            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+        });
+        $lastAnnexUid = null;
+        foreach ($rows as $r) {
+            $uid = trim((string) ($r['node_uid'] ?? ''));
+            $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
+            $title = trim((string) ($r['title'] ?? ''));
+            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_annex_heading_row($title)) {
+                $lastAnnexUid = $uid !== '' ? $uid : null;
+                continue;
+            }
+            if ($lastAnnexUid === null || $uid === '') {
+                continue;
+            }
+            if ($nt === 'toc' && $title === '') {
+                $upd->execute([$lastAnnexUid, $batchId, $uid]);
+            }
+        }
+    }
+}
+
+/**
+ * Part-FCL often nests: &lt;document&gt; → ANNEX I → &lt;toc&gt; wrapper → SUBPART A… so SUBPART rows are not
+ * direct siblings of ANNEX and the sibling-only pass above never runs. Walk each SUBPART’s parent chain
+ * upward; the first ANNEX (&lt;heading&gt; or &lt;toc&gt;) encountered is the legal parent — reparent the SUBPART
+ * there. Skip when the immediate parent is already another SUBPART (nested sub-structure).
+ */
+function easa_erules_lift_subparts_to_nearest_annex_ancestor(PDO $pdo, int $batchId): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?'
+    );
+    $st->execute([$batchId]);
+    $byUid = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (!is_array($r)) {
+            continue;
+        }
+        $u = trim((string) ($r['node_uid'] ?? ''));
+        if ($u !== '') {
+            $byUid[$u] = $r;
+        }
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND node_uid = ?
+           AND NOT (parent_node_uid <=> ?)'
+    );
+    foreach ($byUid as $uid => $r) {
+        $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
+        $title = trim((string) ($r['title'] ?? ''));
+        if (!in_array($nt, ['heading', 'toc'], true) || !easa_erules_title_is_subpart_heading_row($title)) {
+            continue;
+        }
+        $puid = trim((string) ($r['parent_node_uid'] ?? ''));
+        if ($puid === '' || !isset($byUid[$puid])) {
+            continue;
+        }
+        $pTitle = trim((string) ($byUid[$puid]['title'] ?? ''));
+        $pNt = strtolower(trim((string) ($byUid[$puid]['node_type'] ?? '')));
+        if (in_array($pNt, ['heading', 'toc'], true) && easa_erules_title_is_subpart_heading_row($pTitle)) {
+            continue;
+        }
+        $nearestAnnex = null;
+        $walk = $puid;
+        $guard = 0;
+        while ($walk !== '' && isset($byUid[$walk]) && $guard < 80) {
+            $guard++;
+            $wTitle = trim((string) ($byUid[$walk]['title'] ?? ''));
+            $wNt = strtolower(trim((string) ($byUid[$walk]['node_type'] ?? '')));
+            if (in_array($wNt, ['heading', 'toc'], true) && easa_erules_title_is_annex_heading_row($wTitle)) {
+                $nearestAnnex = $walk;
+                break;
+            }
+            $next = trim((string) ($byUid[$walk]['parent_node_uid'] ?? ''));
+            if ($next === '' || $next === $walk) {
+                break;
+            }
+            $walk = $next;
+        }
+        if ($nearestAnnex === null || $nearestAnnex === $puid) {
+            continue;
+        }
+        $upd->execute([$nearestAnnex, $batchId, $uid, $nearestAnnex]);
+    }
+}
+
+/**
  * Some EASA Easy Access XML nests SUBPART / SECTION block headings as siblings of the following rows
  * so structural headings get child_count 0 and the disclosure lands on the first &lt;toc&gt; child.
  * Reparent direct toc/topic siblings so SUBPART and SECTION headings become parents (SECTION wins over
@@ -1614,6 +1750,8 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     }
 
     easa_erules_reparent_subparts_under_preceding_annex($pdo, $batchId);
+    easa_erules_lift_children_of_post_annex_empty_toc_to_annex($pdo, $batchId);
+    easa_erules_lift_subparts_to_nearest_annex_ancestor($pdo, $batchId);
     easa_erules_reparent_structural_heading_children($pdo, $batchId);
     easa_erules_merge_duplicate_structural_heading_toc($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
