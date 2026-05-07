@@ -1327,7 +1327,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         || nodeTypeLc === 'frontmatter' || nodeTypeLc === 'backmatter') ? 'section' : 'rule';
     }
     var kids = parseInt(n.child_count, 10) || 0;
-    var expandable = typeof n.expandable === 'boolean' ? n.expandable : (kids > 0);
     var mt = String(n.material_type || '').toUpperCase();
     if (uiKind === 'section') {
       mt = 'HEADING';
@@ -1339,6 +1338,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     }
     var disp = n.display_title || n.label_short || n.title || n.source_erules_id || uid || '—';
     var isSupplement = mt === 'GM' || mt === 'AMC';
+    // Chevrons follow visible child_count only. Do not combine with API expandable — it can disagree and leave rows dead (no click handlers).
+    var showTreeExpand = kids > 0 && (uiKind === 'section' || !isSupplement);
 
     var row = document.createElement('div');
     row.className = 'rl-easa-tree-row' + (uiKind === 'section' ? ' rl-easa-tree-row--section' : ' rl-easa-tree-row--rule');
@@ -1347,7 +1348,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     exp.type = 'button';
     exp.className = 'rl-easa-tree-exp';
     exp.setAttribute('aria-expanded', 'false');
-    if (!expandable || kids < 1) {
+    if (!showTreeExpand) {
       exp.disabled = true;
       exp.textContent = '\u00a0';
       exp.style.visibility = 'hidden';
@@ -1382,7 +1383,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         sectionBtn.classList.add('rl-easa-tree-section-title--gm-amc');
       }
       sectionBtn.textContent = disp;
-      if (!expandable || kids < 1) sectionBtn.disabled = true;
+      if (!showTreeExpand) sectionBtn.disabled = true;
     } else {
       ruleBtn = document.createElement('button');
       ruleBtn.type = 'button';
@@ -1411,7 +1412,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       + '</div>';
     li.appendChild(inlineWrap);
 
-    if (kids > 0) {
+    if (showTreeExpand) {
       var chUl = document.createElement('ul');
       chUl.className = 'rl-easa-tree-list';
       chUl.hidden = true;
