@@ -939,6 +939,78 @@ function easa_erules_parent_sort_key(?string $parentCandidateUid): string
     return $parentCandidateUid ?? '';
 }
 
+function easa_erules_title_is_section_heading_row(string $title): bool
+{
+    return preg_match('/^\s*SECTION\s+/iu', $title) === 1;
+}
+
+/**
+ * Some EASA Easy Access XML places SECTION block headings as siblings of the following TOC/topic rows
+ * under the same parent. That leaves SECTION with child_count 0 and the expand control on the TOC row.
+ * Reparent direct toc/topic siblings that follow a SECTION heading (until the next SECTION) so SECTION
+ * becomes the parent and the tree UI shows the disclosure next to SECTION.
+ */
+function easa_erules_reparent_section_heading_children(PDO $pdo, int $batchId): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title, sort_order, id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?
+         ORDER BY id ASC'
+    );
+    $st->execute([$batchId]);
+    $all = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (is_array($r)) {
+            $all[] = $r;
+        }
+    }
+    $byParent = [];
+    foreach ($all as $r) {
+        $p = $r['parent_node_uid'] ?? null;
+        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
+        $k = easa_erules_parent_sort_key($p);
+        $byParent[$k][] = $r;
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND node_uid = ?
+           AND (parent_node_uid IS DISTINCT FROM ?)'
+    );
+    foreach ($byParent as $rows) {
+        usort($rows, static function (array $a, array $b): int {
+            $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
+            if ($so !== 0) {
+                return $so;
+            }
+
+            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+        });
+        $activeSectionUid = null;
+        foreach ($rows as $r) {
+            $uid = trim((string) ($r['node_uid'] ?? ''));
+            $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
+            $title = trim((string) ($r['title'] ?? ''));
+            if ($nt === 'heading' && easa_erules_title_is_section_heading_row($title)) {
+                $activeSectionUid = $uid !== '' ? $uid : null;
+                continue;
+            }
+            if ($activeSectionUid === null || $uid === '') {
+                continue;
+            }
+            if (!in_array($nt, ['toc', 'topic'], true)) {
+                continue;
+            }
+            $upd->execute([$activeSectionUid, $batchId, $uid, $activeSectionUid]);
+        }
+    }
+}
+
 /**
  * Streaming import: memory scales with tree depth + largest text buffers, not whole-file DOM.
  *
@@ -1250,6 +1322,8 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     } finally {
         $reader->close();
     }
+
+    easa_erules_reparent_section_heading_children($pdo, $batchId);
 
     if (easa_erules_batch_progress_available($pdo)) {
         $pdo->prepare('
