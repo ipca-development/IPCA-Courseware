@@ -189,6 +189,19 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     text-decoration: none;
     color: #0f172a;
   }
+  .rl-easa-tree-label.rl-easa-tree-toc {
+    font-style: italic;
+    color: #334155;
+  }
+  .rl-easa-tree-label.rl-easa-tree-toc-empty {
+    cursor: default;
+    font-style: italic;
+    color: #64748b;
+  }
+  .rl-easa-tree-label.rl-easa-tree-toc-empty:hover {
+    text-decoration: none;
+    color: #64748b;
+  }
   .rl-easa-tree-type {
     flex: 0 0 auto;
     font-size: 10px;
@@ -1198,11 +1211,22 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     }
     var nodeTypeLc = String(n.node_type || '').toLowerCase();
     var isHeading = nodeTypeLc === 'heading';
-    var lab = isHeading ? document.createElement('span') : document.createElement('button');
-    if (!isHeading) {
+    var isToc = nodeTypeLc === 'toc';
+    var lab;
+    if (isHeading) {
+      lab = document.createElement('span');
+      lab.className = 'rl-easa-tree-label rl-easa-tree-heading';
+    } else if (isToc && kids < 1) {
+      lab = document.createElement('span');
+      lab.className = 'rl-easa-tree-label rl-easa-tree-toc-empty';
+    } else {
+      lab = document.createElement('button');
       lab.type = 'button';
+      lab.className = 'rl-easa-tree-label' + (isToc ? ' rl-easa-tree-toc' : '');
+      if (isToc) {
+        lab.title = 'Show or hide entries under this table of contents';
+      }
     }
-    lab.className = isHeading ? 'rl-easa-tree-label rl-easa-tree-heading' : 'rl-easa-tree-label';
     lab.textContent = n.label_short || n.title || n.source_erules_id || n.node_uid || n.node_type || '—';
     var ty = document.createElement('span');
     ty.className = 'rl-easa-tree-type';
@@ -1218,8 +1242,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       chUl.hidden = true;
       chUl.setAttribute('data-loaded', '0');
       li.appendChild(chUl);
-      exp.addEventListener('click', function (e) {
-        e.stopPropagation();
+      var toggleChildList = function (e) {
+        if (e) {
+          e.stopPropagation();
+          e.preventDefault();
+        }
         var sub = li.querySelector(':scope > ul.rl-easa-tree-list');
         if (!sub) return;
         if (sub.getAttribute('data-loaded') === '1' && !sub.hidden) {
@@ -1253,9 +1280,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
             exp.disabled = false;
             sub.textContent = err.message || 'Error';
           });
-      });
+      };
+      exp.addEventListener('click', toggleChildList);
+      if (isToc) {
+        lab.addEventListener('click', toggleChildList);
+      }
     }
-    if (!isHeading) {
+    if (!isHeading && !isToc) {
       lab.addEventListener('click', function () {
         rlEasaShowNodeDetail(batchId, uid);
       });
@@ -1325,13 +1356,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
                   'Opened inside the main <strong>wrapper</strong> node (' + wrapLabel + ') so you see regulatory children (topics/headings) first — same idea as the EASA Easy Access left navigation. '
                   + '<strong>' + j2.nodes.length + '</strong> row(s) at this level.');
                 if (rlEasaTreeHint) {
-                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' items under wrapper. Headings are bold and not links; click topics for rule text (dots: IR / AMC / GM / cover).';
+                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' items under wrapper. Headings bold (not links); TOC (italic) opens children only; other rows → rule text (dots: IR / AMC / GM / cover).';
                 }
               });
           }
           rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes, null);
           if (rlEasaTreeHint) {
-            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root row(s). ▶ expands; bold headings are section labels only — click other rows for rule text (colour band).';
+            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root row(s). ▶ or TOC row expands subtree; headings bold non-links; topics etc. → rule panel (colour band).';
           }
         })
         .catch(function (e) {
