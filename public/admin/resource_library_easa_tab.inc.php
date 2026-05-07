@@ -398,15 +398,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   .rl-easa-tree-dot-amc { background: #d97706; }
   .rl-easa-tree-dot-gm { background: #16a34a; }
   .rl-easa-tree-dot-neu { background: #94a3b8; }
-  .rl-easa-tree-virtual-note {
-    font-size: 11px;
-    color: #64748b;
-    margin: 0 0 8px 4px;
-    padding: 6px 8px;
-    background: #f1f5f9;
-    border-radius: 8px;
-    border-left: 3px solid #64748b;
-  }
 </style>
 
 <section class="card" style="padding:14px 16px;">
@@ -593,8 +584,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   var root = document.getElementById('rlEasaPage');
   if (!root) return;
   var api = root.getAttribute('data-api') || '';
-  // Which tree row currently shows the expanded rule panel (inline under the topic).
-  var rlEasaDetailAnchorLi = null;
   /** Effective max POST body (bytes) from last status; 0 = unknown. */
   var rlEasaMaxUploadBytes = 0;
 
@@ -1155,18 +1144,19 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     var body = wrap.querySelector('.rl-easa-inline-body');
     if (!band || !meta || !body) return;
 
-    if (rlEasaDetailAnchorLi && rlEasaDetailAnchorLi !== liElm) {
-      var prevW = rlEasaDetailAnchorLi.querySelector(':scope > .rl-easa-inline-detail');
-      if (prevW) prevW.hidden = true;
+    // Second click on the same row closes this panel (open panels may stay open for side-by-side compare).
+    if (!wrap.hidden) {
+      var loading = wrap.getAttribute('data-loading') === '1';
+      var loadedHere = wrap.getAttribute('data-loaded-uid') === uid;
+      if (loading || loadedHere) {
+        wrap.hidden = true;
+        wrap.removeAttribute('data-loading');
+        return;
+      }
     }
-    // Second click on the same row closes the expanded panel (after it loaded this uid once).
-    if (rlEasaDetailAnchorLi === liElm && !wrap.hidden && wrap.getAttribute('data-loaded-uid') === uid) {
-      wrap.hidden = true;
-      rlEasaDetailAnchorLi = null;
-      return;
-    }
-    rlEasaDetailAnchorLi = liElm;
     wrap.hidden = false;
+    wrap.setAttribute('data-loading', '1');
+    wrap.removeAttribute('data-loaded-uid');
     band.className = 'rl-easa-inline-band rl-easa-band rl-easa-band-neu';
     band.innerHTML = esc('Loading…') + '<small></small>';
     meta.innerHTML = '';
@@ -1176,6 +1166,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     fetch(api + '?action=node_detail&batch_id=' + encodeURIComponent(String(batchId)) + '&node_uid=' + encodeURIComponent(uid), { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (j) {
+        if (wrap.hidden) return;
         if (!j.ok || !j.node) throw new Error((j && j.error) || 'Load failed');
         var n = j.node;
         var b = n.rule_band || 'ir';
@@ -1219,12 +1210,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           body.innerHTML = '';
           body.textContent = bodySrc;
         }
+        wrap.removeAttribute('data-loading');
         wrap.setAttribute('data-loaded-uid', uid);
         try {
           wrap.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } catch (e2) {}
       })
       .catch(function (e) {
+        if (wrap.hidden) return;
+        wrap.removeAttribute('data-loading');
         band.className = 'rl-easa-inline-band rl-easa-band rl-easa-band-neu';
         band.innerHTML = esc(e.message || 'Error') + '<small></small>';
         meta.innerHTML = '';
@@ -1353,15 +1347,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return li;
   }
 
-  function rlEasaRenderTreeIntoMount(mount, bid, nodes, virtualNoteHtml) {
-    rlEasaDetailAnchorLi = null;
+  function rlEasaRenderTreeIntoMount(mount, bid, nodes) {
     mount.innerHTML = '';
-    if (virtualNoteHtml) {
-      var note = document.createElement('p');
-      note.className = 'rl-easa-tree-virtual-note';
-      note.innerHTML = virtualNoteHtml;
-      mount.appendChild(note);
-    }
     var ul = document.createElement('ul');
     ul.className = 'rl-easa-tree-list';
     (nodes || []).forEach(function (n) {
@@ -1381,7 +1368,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         if (rlEasaTreeHint) rlEasaTreeHint.textContent = 'Select a batch in the dropdown first.';
         return;
       }
-      rlEasaDetailAnchorLi = null;
       rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading roots…</p>';
       fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
@@ -1408,20 +1394,17 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
             }
           }
           if (unwrapUid) {
-            var wrapLabel = esc(wrapNode.label_short || wrapNode.title || wrapNode.node_type || 'wrapper');
             return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)) + '&parent_uid=' + encodeURIComponent(unwrapUid), { credentials: 'same-origin' })
               .then(function (r2) { return r2.json(); })
               .then(function (j2) {
                 if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
-                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes,
-                  'Opened inside the main <strong>wrapper</strong> node (' + wrapLabel + ') so you see regulatory children (topics/headings) first — same idea as the EASA Easy Access left navigation. '
-                  + '<strong>' + j2.nodes.length + '</strong> row(s) at this level.');
+                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes);
                 if (rlEasaTreeHint) {
                   rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' items under wrapper. Headings bold (not links); TOC (italic) expands subtree only; other rows open rule text under the row (full width, dots: IR / AMC / GM / cover).';
                 }
               });
           }
-          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes, null);
+          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes);
           if (rlEasaTreeHint) {
             rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root row(s). ▶ or TOC expands subtree; headings bold; click topics for rule text opened below the row (colour band).';
           }
