@@ -949,283 +949,21 @@ function easa_erules_title_is_subpart_heading_row(string $title): bool
     return preg_match('/^\s*SUBPART\b/iu', $title) === 1;
 }
 
-function easa_erules_title_is_annex_heading_row(string $title): bool
-{
-    return preg_match('/^\s*ANNEX\b/iu', $title) === 1;
-}
-
-function easa_erules_norm_structural_title(?string $title): string
-{
-    $title = trim((string) $title);
-    if ($title === '') {
-        return '';
-    }
-    $collapsed = preg_replace('/\s+/u', ' ', $title) ?? $title;
-
-    if (function_exists('mb_strtolower')) {
-        return mb_strtolower($collapsed, 'UTF-8');
-    }
-
-    return strtolower($collapsed);
-}
-
-function easa_erules_title_is_structural_block_title(string $title): bool
-{
-    return easa_erules_title_is_annex_heading_row($title)
-        || easa_erules_title_is_subpart_heading_row($title)
-        || easa_erules_title_is_section_heading_row($title)
-        || preg_match('/^\s*APPENDIX\b/iu', $title) === 1
-        || preg_match('/^\s*CHAPTER\b/iu', $title) === 1
-        || preg_match('/^\s*TITLE\b/iu', $title) === 1
-        || preg_match('/^\s*PART\b\s+\d+/iu', $title) === 1;
-}
-
 /**
- * True when the row title is a GM / AMC line (not a structural SUBPART/SECTION heading).
- */
-function easa_erules_title_line_is_gm_or_amc(?string $title): bool
-{
-    $title = trim((string) $title);
-    if ($title === '') {
-        return false;
-    }
-
-    return preg_match('/^\s*GM\d*\b/iu', $title) === 1 || preg_match('/^\s*AMC\d*\b/iu', $title) === 1;
-}
-
-/**
- * First primary rule code in a title (FCL.100, ORA.140, CAT.001). Used to flatten peer rules wrongly
- * nested under another rule &lt;toc&gt; or &lt;topic&gt; row. Returns null for empty or GM/AMC-only lines
- * where the leading token is guidance/compliance, not the IR anchor.
- */
-function easa_erules_title_first_rule_code_ref(?string $title): ?string
-{
-    $title = trim((string) $title);
-    if ($title === '') {
-        return null;
-    }
-    if (easa_erules_title_line_is_gm_or_amc($title)) {
-        return null;
-    }
-    foreach (['FCL', 'ORA', 'CAT'] as $pfx) {
-        if (preg_match('/\b(' . $pfx . '\.\d+[A-Z]?)\b/i', $title, $m)) {
-            return strtoupper((string) $m[1]);
-        }
-    }
-
-    return null;
-}
-
-/**
- * @deprecated Use easa_erules_title_first_rule_code_ref (same behaviour, FCL-focused name retained).
+ * First EASA Part-FCL style rule id in a title (FCL.100, FCL.205.A). Used to detect peer rules wrongly
+ * nested under another rule’s &lt;toc&gt; row.
  */
 function easa_erules_title_first_fcl_ref(?string $title): ?string
 {
-    return easa_erules_title_first_rule_code_ref($title);
-}
+    $title = trim((string) $title);
+    if ($title === '') {
+        return null;
+    }
+    if (preg_match('/\b(FCL\.\d+[A-Z]?)\b/i', $title, $m)) {
+        return strtoupper((string) $m[1]);
+    }
 
-/**
- * Easy Access often lists ANNEX I and all SUBPART A–K as siblings under &lt;document&gt;. The annex row
- * then has no children while SUBPART A absorbs every following subpart in the UI. Reparent each
- * SUBPART (&lt;heading&gt; or &lt;toc&gt; with a SUBPART title) to the latest preceding ANNEX sibling under the
- * same parent so ANNEX I is the parent of SUBPART A, B, C, …
- *
- * Run before easa_erules_reparent_structural_heading_children so section/topic reparenting walks the
- * correct sibling lists under each annex.
- */
-function easa_erules_reparent_subparts_under_preceding_annex(PDO $pdo, int $batchId): void
-{
-    if ($batchId <= 0) {
-        return;
-    }
-    $st = $pdo->prepare(
-        'SELECT node_uid, parent_node_uid, node_type, title, sort_order, id
-         FROM easa_erules_import_nodes_staging
-         WHERE batch_id = ?
-         ORDER BY id ASC'
-    );
-    $st->execute([$batchId]);
-    $all = [];
-    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
-        if (is_array($r)) {
-            $all[] = $r;
-        }
-    }
-    $byParent = [];
-    foreach ($all as $r) {
-        $p = $r['parent_node_uid'] ?? null;
-        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
-        $byParent[easa_erules_parent_sort_key($p)][] = $r;
-    }
-    $upd = $pdo->prepare(
-        'UPDATE easa_erules_import_nodes_staging
-         SET parent_node_uid = ?
-         WHERE batch_id = ?
-           AND node_uid = ?
-           AND NOT (parent_node_uid <=> ?)'
-    );
-    foreach ($byParent as $rows) {
-        usort($rows, static function (array $a, array $b): int {
-            $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
-            if ($so !== 0) {
-                return $so;
-            }
-
-            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
-        });
-        $annexUid = null;
-        foreach ($rows as $r) {
-            $uid = trim((string) ($r['node_uid'] ?? ''));
-            $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
-            $title = trim((string) ($r['title'] ?? ''));
-            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_annex_heading_row($title)) {
-                $annexUid = $uid !== '' ? $uid : null;
-                continue;
-            }
-            if ($annexUid === null || $uid === '') {
-                continue;
-            }
-            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_subpart_heading_row($title)) {
-                $upd->execute([$annexUid, $batchId, $uid, $annexUid]);
-            }
-        }
-    }
-}
-
-/**
- * Under the same parent, ANNEX I and an empty &lt;toc&gt; wrapper are often **siblings** (both children of
- * document). SUBPART rows sit under the empty &lt;toc&gt;, so no ANNEX ancestor exists. Move every direct
- * child of each empty &lt;toc&gt; that appears **after** an ANNEX heading/toc in sort order onto that ANNEX.
- */
-function easa_erules_lift_children_of_post_annex_empty_toc_to_annex(PDO $pdo, int $batchId): void
-{
-    if ($batchId <= 0) {
-        return;
-    }
-    $st = $pdo->prepare(
-        'SELECT node_uid, parent_node_uid, node_type, title, sort_order, id
-         FROM easa_erules_import_nodes_staging
-         WHERE batch_id = ?
-         ORDER BY id ASC'
-    );
-    $st->execute([$batchId]);
-    $all = [];
-    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
-        if (is_array($r)) {
-            $all[] = $r;
-        }
-    }
-    $byParent = [];
-    foreach ($all as $r) {
-        $p = $r['parent_node_uid'] ?? null;
-        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
-        $byParent[easa_erules_parent_sort_key($p)][] = $r;
-    }
-    $upd = $pdo->prepare(
-        'UPDATE easa_erules_import_nodes_staging
-         SET parent_node_uid = ?
-         WHERE batch_id = ?
-           AND parent_node_uid = ?'
-    );
-    foreach ($byParent as $rows) {
-        usort($rows, static function (array $a, array $b): int {
-            $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
-            if ($so !== 0) {
-                return $so;
-            }
-
-            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
-        });
-        $lastAnnexUid = null;
-        foreach ($rows as $r) {
-            $uid = trim((string) ($r['node_uid'] ?? ''));
-            $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
-            $title = trim((string) ($r['title'] ?? ''));
-            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_annex_heading_row($title)) {
-                $lastAnnexUid = $uid !== '' ? $uid : null;
-                continue;
-            }
-            if ($lastAnnexUid === null || $uid === '') {
-                continue;
-            }
-            if ($nt === 'toc' && $title === '') {
-                $upd->execute([$lastAnnexUid, $batchId, $uid]);
-            }
-        }
-    }
-}
-
-/**
- * Part-FCL often nests: &lt;document&gt; → ANNEX I → &lt;toc&gt; wrapper → SUBPART A… so SUBPART rows are not
- * direct siblings of ANNEX and the sibling-only pass above never runs. Walk each SUBPART’s parent chain
- * upward; the first ANNEX (&lt;heading&gt; or &lt;toc&gt;) encountered is the legal parent — reparent the SUBPART
- * there. Skip when the immediate parent is already another SUBPART (nested sub-structure).
- */
-function easa_erules_lift_subparts_to_nearest_annex_ancestor(PDO $pdo, int $batchId): void
-{
-    if ($batchId <= 0) {
-        return;
-    }
-    $st = $pdo->prepare(
-        'SELECT node_uid, parent_node_uid, node_type, title
-         FROM easa_erules_import_nodes_staging
-         WHERE batch_id = ?'
-    );
-    $st->execute([$batchId]);
-    $byUid = [];
-    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
-        if (!is_array($r)) {
-            continue;
-        }
-        $u = trim((string) ($r['node_uid'] ?? ''));
-        if ($u !== '') {
-            $byUid[$u] = $r;
-        }
-    }
-    $upd = $pdo->prepare(
-        'UPDATE easa_erules_import_nodes_staging
-         SET parent_node_uid = ?
-         WHERE batch_id = ?
-           AND node_uid = ?
-           AND NOT (parent_node_uid <=> ?)'
-    );
-    foreach ($byUid as $uid => $r) {
-        $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
-        $title = trim((string) ($r['title'] ?? ''));
-        if (!in_array($nt, ['heading', 'toc'], true) || !easa_erules_title_is_subpart_heading_row($title)) {
-            continue;
-        }
-        $puid = trim((string) ($r['parent_node_uid'] ?? ''));
-        if ($puid === '' || !isset($byUid[$puid])) {
-            continue;
-        }
-        $pTitle = trim((string) ($byUid[$puid]['title'] ?? ''));
-        $pNt = strtolower(trim((string) ($byUid[$puid]['node_type'] ?? '')));
-        if (in_array($pNt, ['heading', 'toc'], true) && easa_erules_title_is_subpart_heading_row($pTitle)) {
-            continue;
-        }
-        $nearestAnnex = null;
-        $walk = $puid;
-        $guard = 0;
-        while ($walk !== '' && isset($byUid[$walk]) && $guard < 80) {
-            $guard++;
-            $wTitle = trim((string) ($byUid[$walk]['title'] ?? ''));
-            $wNt = strtolower(trim((string) ($byUid[$walk]['node_type'] ?? '')));
-            if (in_array($wNt, ['heading', 'toc'], true) && easa_erules_title_is_annex_heading_row($wTitle)) {
-                $nearestAnnex = $walk;
-                break;
-            }
-            $next = trim((string) ($byUid[$walk]['parent_node_uid'] ?? ''));
-            if ($next === '' || $next === $walk) {
-                break;
-            }
-            $walk = $next;
-        }
-        if ($nearestAnnex === null || $nearestAnnex === $puid) {
-            continue;
-        }
-        $upd->execute([$nearestAnnex, $batchId, $uid, $nearestAnnex]);
-    }
+    return null;
 }
 
 /**
@@ -1233,10 +971,6 @@ function easa_erules_lift_subparts_to_nearest_annex_ancestor(PDO $pdo, int $batc
  * so structural headings get child_count 0 and the disclosure lands on the first &lt;toc&gt; child.
  * Reparent direct toc/topic siblings so SUBPART and SECTION headings become parents (SECTION wins over
  * SUBPART when both apply in document order).
- *
- * Easy Access often stores SUBPART / SECTION labels as &lt;toc&gt; rows, not only &lt;heading&gt;. Those
- * must reset the active block; otherwise every following &lt;toc&gt; (e.g. SUBPART B) is wrongly
- * reparented under the previous SUBPART.
  */
 function easa_erules_reparent_structural_heading_children(PDO $pdo, int $batchId): void
 {
@@ -1285,17 +1019,12 @@ function easa_erules_reparent_structural_heading_children(PDO $pdo, int $batchId
             $uid = trim((string) ($r['node_uid'] ?? ''));
             $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
             $title = trim((string) ($r['title'] ?? ''));
-            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_annex_heading_row($title)) {
-                $activeSubpartUid = null;
-                $activeSectionUid = null;
-                continue;
-            }
-            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_subpart_heading_row($title)) {
+            if ($nt === 'heading' && easa_erules_title_is_subpart_heading_row($title)) {
                 $activeSubpartUid = $uid !== '' ? $uid : null;
                 $activeSectionUid = null;
                 continue;
             }
-            if (($nt === 'heading' || $nt === 'toc') && easa_erules_title_is_section_heading_row($title)) {
+            if ($nt === 'heading' && easa_erules_title_is_section_heading_row($title)) {
                 $activeSectionUid = $uid !== '' ? $uid : null;
                 continue;
             }
@@ -1312,97 +1041,8 @@ function easa_erules_reparent_structural_heading_children(PDO $pdo, int $batchId
 }
 
 /**
- * EASA exports often emit the same ANNEX / SUBPART / SECTION label twice: once as &lt;heading&gt; and
- * again as a sibling &lt;toc&gt; navigation row. Remove the redundant toc row and attach its subtree
- * to the heading so the UI does not show "SUBPART A" twice.
- */
-function easa_erules_merge_duplicate_structural_heading_toc(PDO $pdo, int $batchId): void
-{
-    if ($batchId <= 0) {
-        return;
-    }
-    $updChildren = $pdo->prepare(
-        'UPDATE easa_erules_import_nodes_staging
-         SET parent_node_uid = ?
-         WHERE batch_id = ?
-           AND parent_node_uid = ?'
-    );
-    $del = $pdo->prepare(
-        'DELETE FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND node_uid = ?'
-    );
-
-    for ($guard = 0; $guard < 500; $guard++) {
-        $st = $pdo->prepare(
-            'SELECT node_uid, parent_node_uid, node_type, title, sort_order, id
-             FROM easa_erules_import_nodes_staging
-             WHERE batch_id = ?
-             ORDER BY id ASC'
-        );
-        $st->execute([$batchId]);
-        $all = [];
-        while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
-            if (is_array($r)) {
-                $all[] = $r;
-            }
-        }
-        $byParent = [];
-        foreach ($all as $r) {
-            $p = $r['parent_node_uid'] ?? null;
-            $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
-            $byParent[easa_erules_parent_sort_key($p)][] = $r;
-        }
-        $found = null;
-        foreach ($byParent as $rows) {
-            usort($rows, static function (array $a, array $b): int {
-                $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
-                if ($so !== 0) {
-                    return $so;
-                }
-
-                return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
-            });
-            $n = count($rows);
-            for ($i = 0; $i < $n - 1; $i++) {
-                $a = $rows[$i];
-                $b = $rows[$i + 1];
-                $nta = strtolower(trim((string) ($a['node_type'] ?? '')));
-                $ntb = strtolower(trim((string) ($b['node_type'] ?? '')));
-                $ta = trim((string) ($a['title'] ?? ''));
-                $tb = trim((string) ($b['title'] ?? ''));
-                if (!easa_erules_title_is_structural_block_title($ta) || !easa_erules_title_is_structural_block_title($tb)) {
-                    continue;
-                }
-                if (easa_erules_norm_structural_title($ta) !== easa_erules_norm_structural_title($tb)) {
-                    continue;
-                }
-                $headingUid = null;
-                $tocUid = null;
-                if ($nta === 'heading' && $ntb === 'toc') {
-                    $headingUid = trim((string) ($a['node_uid'] ?? ''));
-                    $tocUid = trim((string) ($b['node_uid'] ?? ''));
-                } elseif ($nta === 'toc' && $ntb === 'heading') {
-                    $tocUid = trim((string) ($a['node_uid'] ?? ''));
-                    $headingUid = trim((string) ($b['node_uid'] ?? ''));
-                }
-                if ($headingUid === '' || $tocUid === '' || $headingUid === $tocUid) {
-                    continue;
-                }
-                $found = ['heading' => $headingUid, 'toc' => $tocUid];
-                break 2;
-            }
-        }
-        if ($found === null) {
-            break;
-        }
-        $updChildren->execute([$found['heading'], $batchId, $found['toc']]);
-        $del->execute([$batchId, $found['toc']]);
-    }
-}
-
-/**
- * XML nesting sometimes hangs peer IR rule rows (another FCL.&lt;n&gt;, ORA.&lt;n&gt;, …) under the first
- * rule &lt;toc&gt;, &lt;topic&gt;, or non-structural &lt;heading&gt; in a block. GM/AMC lines stay under their IR parent when nested;
- * peer IR rows are promoted to the same parent as that rule node.
+ * XML nesting sometimes hangs peer FCL rule rows (another FCL.&lt;n&gt; or AMC cross-ref) under the
+ * first rule &lt;toc&gt; in a section. Promote those rows to the same parent as the enclosing rule toc.
  */
 function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
 {
@@ -1437,14 +1077,7 @@ function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
         $changed = 0;
         foreach ($byUid as $uid => $r) {
             $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
-            if (!in_array($nt, ['toc', 'topic', 'heading'], true)) {
-                continue;
-            }
-            $cTitle = (string) ($r['title'] ?? '');
-            if ($nt === 'heading' && easa_erules_title_is_structural_block_title($cTitle)) {
-                continue;
-            }
-            if (easa_erules_title_line_is_gm_or_amc($cTitle)) {
+            if (!in_array($nt, ['toc', 'topic'], true)) {
                 continue;
             }
             $puid = trim((string) ($r['parent_node_uid'] ?? ''));
@@ -1452,19 +1085,11 @@ function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
                 continue;
             }
             $p = $byUid[$puid];
-            $pNt = strtolower(trim((string) ($p['node_type'] ?? '')));
-            if (!in_array($pNt, ['toc', 'topic', 'heading'], true)) {
+            if (strtolower(trim((string) ($p['node_type'] ?? ''))) !== 'toc') {
                 continue;
             }
-            $pTitle = (string) ($p['title'] ?? '');
-            if ($pNt === 'heading' && easa_erules_title_is_structural_block_title($pTitle)) {
-                continue;
-            }
-            if (easa_erules_title_line_is_gm_or_amc($pTitle)) {
-                continue;
-            }
-            $pF = easa_erules_title_first_rule_code_ref($pTitle);
-            $cF = easa_erules_title_first_rule_code_ref($cTitle);
+            $pF = easa_erules_title_first_fcl_ref((string) ($p['title'] ?? ''));
+            $cF = easa_erules_title_first_fcl_ref((string) ($r['title'] ?? ''));
             if ($pF === null || $cF === null || $pF === $cF) {
                 continue;
             }
@@ -1796,11 +1421,7 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
         $reader->close();
     }
 
-    easa_erules_reparent_subparts_under_preceding_annex($pdo, $batchId);
-    easa_erules_lift_children_of_post_annex_empty_toc_to_annex($pdo, $batchId);
-    easa_erules_lift_subparts_to_nearest_annex_ancestor($pdo, $batchId);
     easa_erules_reparent_structural_heading_children($pdo, $batchId);
-    easa_erules_merge_duplicate_structural_heading_toc($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
 
     if (easa_erules_batch_progress_available($pdo)) {
@@ -2241,16 +1862,11 @@ function easa_erules_format_body_for_reading(string $text): string
  */
 function easa_erules_short_tree_label(array $n): string
 {
-    $nt = strtolower(trim((string) ($n['node_type'] ?? '')));
-    // Do not label document/frontmatter/backmatter wrappers from the first child — that shows e.g.
-    // "SUBPART A" on the publication root and hides the real ANNEX row in the UI.
-    $skipFirstChildHints = in_array($nt, ['document', 'frontmatter', 'backmatter'], true);
-
     $raw = trim((string) ($n['title'] ?? ''));
-    if ($raw === '' && !$skipFirstChildHints) {
+    if ($raw === '') {
         $raw = trim((string) ($n['first_child_title'] ?? ''));
     }
-    if ($raw === '' && !$skipFirstChildHints) {
+    if ($raw === '') {
         $raw = trim((string) ($n['first_child_source_title'] ?? ''));
     }
     if ($raw === '') {
@@ -2259,13 +1875,10 @@ function easa_erules_short_tree_label(array $n): string
     if ($raw === '') {
         $raw = trim((string) ($n['source_title'] ?? ''));
     }
+    $nt = strtolower(trim((string) ($n['node_type'] ?? '')));
     if ($raw === '') {
         if (in_array($nt, ['toc', 'document', 'frontmatter', 'backmatter'], true)) {
-            if ($nt === 'document') {
-                $raw = 'Regulatory publication';
-            } else {
-                $raw = ucfirst($nt === 'toc' ? 'Table of contents' : $nt);
-            }
+            $raw = ucfirst($nt === 'toc' ? 'Table of contents' : $nt);
         } else {
             $raw = (string) ($n['node_uid'] ?? '');
         }
@@ -2289,11 +1902,28 @@ function easa_erules_short_tree_label(array $n): string
 function easa_erules_classify_display_band(?string $nodeType, ?string $title, ?string $sourceTitle, ?string $erulesId): string
 {
     $nt = strtolower(trim((string) $nodeType));
-    if (in_array($nt, ['document', 'frontmatter', 'toc', 'backmatter'], true)) {
+    if (in_array($nt, ['document', 'frontmatter', 'backmatter'], true)) {
         return 'neu';
     }
     $blob = trim((string) $title . "\n" . (string) $sourceTitle . "\n" . (string) $erulesId);
     $blobOneLine = preg_replace('/\s+/u', ' ', $blob) ?? $blob;
+    // <toc> rows are often navigation wrappers; still classify GM/AMC from title (was wrongly forced to neu).
+    if ($nt === 'toc') {
+        if (preg_match('/^\s*AMC\d*\b/iu', $blobOneLine)) {
+            return 'amc';
+        }
+        if (preg_match('/^\s*GM\d*\b/iu', $blobOneLine)) {
+            return 'gm';
+        }
+        if (preg_match('/(?i)\bacceptable\s+means\s+of\s+compliance\b/', $blobOneLine)) {
+            return 'amc';
+        }
+        if (preg_match('/(?i)\bguidance\s+material\b/', $blobOneLine) && preg_match('/(?i)\bGM\d*\b/', $blobOneLine)) {
+            return 'gm';
+        }
+
+        return 'neu';
+    }
     if (preg_match('/^\s*AMC\d*\b/iu', $blobOneLine)) {
         return 'amc';
     }
@@ -2360,54 +1990,20 @@ function easa_erules_tree_node_semantic_ui(array $row): array
         $row['source_erules_id'] ?? null
     );
 
-    $titleCheck = trim((string) ($row['title'] ?? ''));
-    if ($titleCheck === '') {
-        $titleCheck = $displayTitle;
-    }
-    // GM/AMC are rules even when stored as &lt;toc&gt; — never show as expandable structural sections.
-    if (in_array($nt, ['topic', 'toc'], true) && easa_erules_title_line_is_gm_or_amc($titleCheck)) {
-        return [
-            'id' => $uid,
-            'parent_id' => $parentId,
-            'display_title' => $displayTitle,
-            'ui_kind' => 'rule',
-            'material_type' => easa_erules_band_to_material_type($band),
-            'expandable' => false,
-            'click_action' => 'open_rule',
-            'depth' => (int) ($row['depth'] ?? 0),
-            'sort_order' => (int) ($row['sort_order'] ?? 0),
-        ];
-    }
-
-    // IR rows are often stored as &lt;toc&gt; or &lt;heading&gt;; only true structural blocks are tree sections.
-    if (in_array($nt, ['toc', 'heading'], true)
-        && !easa_erules_title_is_structural_block_title($titleCheck)
-        && easa_erules_title_first_rule_code_ref($titleCheck) !== null) {
-        $mat = easa_erules_band_to_material_type($band);
-        $expandRule = $childCount > 0 && $mat === 'IR';
-
-        return [
-            'id' => $uid,
-            'parent_id' => $parentId,
-            'display_title' => $displayTitle,
-            'ui_kind' => 'rule',
-            'material_type' => $mat,
-            'expandable' => $expandRule,
-            'click_action' => 'open_rule',
-            'depth' => (int) ($row['depth'] ?? 0),
-            'sort_order' => (int) ($row['sort_order'] ?? 0),
-        ];
-    }
-
     $isSectionType = in_array($nt, ['heading', 'toc', 'document', 'frontmatter', 'backmatter'], true);
 
     if ($isSectionType) {
+        $sectionMaterial = 'HEADING';
+        if ($nt === 'toc' && in_array($band, ['gm', 'amc'], true)) {
+            $sectionMaterial = easa_erules_band_to_material_type($band);
+        }
+
         return [
             'id' => $uid,
             'parent_id' => $parentId,
             'display_title' => $displayTitle,
             'ui_kind' => 'section',
-            'material_type' => 'HEADING',
+            'material_type' => $sectionMaterial,
             'expandable' => $childCount > 0,
             'click_action' => 'expand',
             'depth' => (int) ($row['depth'] ?? 0),
@@ -2415,17 +2011,16 @@ function easa_erules_tree_node_semantic_ui(array $row): array
         ];
     }
 
-    // Rule row: only IR (implementing rule) nodes may list GM/AMC children in the tree; GM/AMC stay terminal.
-    $mat = easa_erules_band_to_material_type($band);
-    $expandRule = $childCount > 0 && $mat === 'IR';
+    // Rule row (topic and any non-section candidate stored as topic-like)
+    $expandable = $childCount > 0;
 
     return [
         'id' => $uid,
         'parent_id' => $parentId,
         'display_title' => $displayTitle,
         'ui_kind' => 'rule',
-        'material_type' => $mat,
-        'expandable' => $expandRule,
+        'material_type' => easa_erules_band_to_material_type($band),
+        'expandable' => $expandable,
         'click_action' => 'open_rule',
         'depth' => (int) ($row['depth'] ?? 0),
         'sort_order' => (int) ($row['sort_order'] ?? 0),

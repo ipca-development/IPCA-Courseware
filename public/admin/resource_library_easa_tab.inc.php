@@ -185,15 +185,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     margin: 0;
     padding: 0;
   }
-  /* GM / AMC: extra inset so supplementary material reads under the IR rule block */
-  .rl-easa-tree-li.rl-easa-tree-li--gm {
-    padding-left: 22px;
-    box-sizing: border-box;
-  }
-  .rl-easa-tree-li.rl-easa-tree-li--amc {
-    padding-left: 22px;
-    box-sizing: border-box;
-  }
   .rl-easa-tree-li.rl-easa-tree-li-selected > .rl-easa-tree-row {
     background: #eff6ff;
     border-radius: 6px;
@@ -224,15 +215,33 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     font-size: 12px;
     width: 1.25rem;
   }
-  .rl-easa-tree-exp.rl-easa-tree-exp--gm:not(:disabled) {
+  .rl-easa-tree-exp--gm {
     color: #15803d;
   }
-  .rl-easa-tree-exp.rl-easa-tree-exp--amc:not(:disabled) {
-    color: #d97706;
+  .rl-easa-tree-exp--gm:hover:not(:disabled) {
+    color: #166534;
+  }
+  .rl-easa-tree-exp--amc {
+    color: #c2410c;
+  }
+  .rl-easa-tree-exp--amc:hover:not(:disabled) {
+    color: #9a3412;
   }
   .rl-easa-tree-exp:disabled {
     visibility: hidden;
     cursor: default;
+  }
+  /* GM / AMC navigational rows: extra inset so they read as under the preceding IR rule. */
+  .rl-easa-tree-li.rl-easa-tree-li-supplement > .rl-easa-tree-row {
+    padding-left: 1.35rem;
+  }
+  .rl-easa-tree-li.rl-easa-tree-li-supplement > ul.rl-easa-tree-list {
+    margin-left: 1.1rem;
+  }
+  .rl-easa-tree-section-title.rl-easa-tree-section-title--gm-amc {
+    font-style: italic;
+    font-weight: 600;
+    color: #334155;
   }
   .rl-easa-tree-section-title {
     flex: 1;
@@ -251,17 +260,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   .rl-easa-tree-section-title:disabled {
     cursor: default;
     color: #64748b;
-  }
-  .rl-easa-tree-section-title.rl-easa-tree-section-title--structural:disabled {
-    color: #0f172a;
-    opacity: 1;
-    font-weight: 700;
-    cursor: default;
-  }
-  .rl-easa-tree-section-title.rl-easa-tree-section-title--supplement {
-    font-style: italic;
-    font-weight: 600;
-    color: #334155;
   }
   .rl-easa-tree-rule-title {
     flex: 1;
@@ -583,7 +581,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     </div>
     <div class="rl-easa-browse-single">
       <p class="rl-drop-meta" id="rlEasaTreeHint" style="margin:0 0 8px;">Choose a batch and load roots (batch id matches the table above).</p>
-      <pre id="rlEasaTreeDebug" class="rl-drop-meta" style="margin:0 0 8px;padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:140px;overflow:auto;" aria-live="polite">Tree debug: load a batch to show batch_id, unwrap, root node_uids, and last child fetch.</pre>
       <div class="rl-easa-tree-panel" id="rlEasaTreeMount" aria-label="Rule tree"></div>
     </div>
   </section>
@@ -1291,67 +1288,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       });
   }
 
-  function rlEasaTreeTitleText(n) {
-    return String((n && (n.display_title || n.title || n.label_short)) || '').trim();
-  }
-  function rlEasaTreeIsAnnexPartFcl(n) {
-    var t = rlEasaTreeTitleText(n);
-    return /^\s*ANNEX\b/i.test(t) && /part[\s\-–—]*fcl/i.test(t);
-  }
-  function rlEasaTreeIsAnnexAny(n) {
-    return /^\s*ANNEX\b/i.test(rlEasaTreeTitleText(n));
-  }
-  function rlEasaSortBrowseNodes(arr) {
-    function rank(n) {
-      var t = rlEasaTreeTitleText(n);
-      if (/^\s*ANNEX\b/i.test(t) && /part[\s\-–—]*fcl/i.test(t)) return 0;
-      if (/^\s*ANNEX\b/i.test(t)) return 1;
-      if (/^\s*SUBPART\b/i.test(t)) return 10;
-      if (/^\s*SECTION\b/i.test(t)) return 20;
-      return 40;
-    }
-    return (arr || []).slice().sort(function (a, b) {
-      var ra = rank(a);
-      var rb = rank(b);
-      if (ra !== rb) return ra - rb;
-      var sa = parseInt(a.sort_order, 10) || 0;
-      var sb = parseInt(b.sort_order, 10) || 0;
-      if (sa !== sb) return sa - sb;
-      return 0;
-    });
-  }
-  /** Prefer a single ANNEX (Part-FCL) root when it has children, so the tree starts at the annex not at SUBPART A. */
-  function rlEasaPickBrowseRootNodes(nodes) {
-    var sorted = rlEasaSortBrowseNodes(nodes || []);
-    var i;
-    for (i = 0; i < sorted.length; i++) {
-      if (!rlEasaTreeIsAnnexPartFcl(sorted[i])) continue;
-      if ((parseInt(sorted[i].child_count, 10) || 0) > 0) {
-        return [sorted[i]];
-      }
-    }
-    for (i = 0; i < sorted.length; i++) {
-      if (!rlEasaTreeIsAnnexAny(sorted[i])) continue;
-      if ((parseInt(sorted[i].child_count, 10) || 0) > 0) {
-        return [sorted[i]];
-      }
-    }
-    return sorted;
-  }
-
   function rlEasaTreeMaterialDotClass(mt) {
     var m = String(mt || 'IR').toUpperCase();
     if (m === 'AMC') return 'rl-easa-tree-dot rl-easa-tree-dot-amc';
     if (m === 'GM') return 'rl-easa-tree-dot rl-easa-tree-dot-gm';
     return 'rl-easa-tree-dot rl-easa-tree-dot-ir';
-  }
-
-  /** When XML stores GM/AMC as &lt;toc&gt;, material_type is HEADING — infer from title for indent + chevron colour. */
-  function rlEasaTreeTitleSupplementKind(title) {
-    var t = String(title || '').trim();
-    if (/^AMC\d*\b/i.test(t)) return 'AMC';
-    if (/^GM\d*\b/i.test(t)) return 'GM';
-    return '';
   }
 
   function rlEasaCreateTreeLi(batchId, n) {
@@ -1365,12 +1306,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         || nodeTypeLc === 'frontmatter' || nodeTypeLc === 'backmatter') ? 'section' : 'rule';
     }
     var kids = parseInt(n.child_count, 10) || 0;
-    var expandable = false;
-    if (uiKind === 'section') {
-      expandable = typeof n.expandable === 'boolean' ? n.expandable : (kids > 0);
-    } else {
-      expandable = typeof n.expandable === 'boolean' ? n.expandable : false;
-    }
+    var expandable = typeof n.expandable === 'boolean' ? n.expandable : (kids > 0);
     var mt = String(n.material_type || '').toUpperCase();
     if (uiKind === 'section') {
       mt = 'HEADING';
@@ -1381,18 +1317,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       else mt = 'IR';
     }
     var disp = n.display_title || n.label_short || n.title || n.source_erules_id || uid || '—';
-
-    var supplementMat = '';
-    if (uiKind === 'rule' && (mt === 'GM' || mt === 'AMC')) {
-      supplementMat = mt;
-    } else {
-      supplementMat = rlEasaTreeTitleSupplementKind(disp);
-    }
-    if (supplementMat === 'GM') {
-      li.classList.add('rl-easa-tree-li--gm');
-    } else if (supplementMat === 'AMC') {
-      li.classList.add('rl-easa-tree-li--amc');
-    }
+    var isSupplement = mt === 'GM' || mt === 'AMC';
 
     var row = document.createElement('div');
     row.className = 'rl-easa-tree-row' + (uiKind === 'section' ? ' rl-easa-tree-row--section' : ' rl-easa-tree-row--rule');
@@ -1401,24 +1326,20 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     exp.type = 'button';
     exp.className = 'rl-easa-tree-exp';
     exp.setAttribute('aria-expanded', 'false');
-    if (expandable && kids > 0) {
+    if (!expandable || kids < 1) {
+      exp.disabled = true;
+      exp.textContent = '\u00a0';
+      exp.style.visibility = 'hidden';
+      exp.setAttribute('aria-hidden', 'true');
+    } else {
       exp.textContent = '\u25b6';
       exp.setAttribute('aria-label', uiKind === 'section' ? 'Expand section' : 'Expand nested rules');
-      if (supplementMat === 'GM') {
-        exp.classList.add('rl-easa-tree-exp--gm');
-      } else if (supplementMat === 'AMC') {
-        exp.classList.add('rl-easa-tree-exp--amc');
+      if (isSupplement) {
+        exp.classList.add(mt === 'GM' ? 'rl-easa-tree-exp--gm' : 'rl-easa-tree-exp--amc');
       }
-    } else {
-      exp.disabled = true;
-      if (uiKind === 'rule') {
-        exp.textContent = '\u2022';
-        exp.style.visibility = 'visible';
-      } else {
-        exp.textContent = '\u00a0';
-        exp.style.visibility = 'hidden';
-      }
-      exp.setAttribute('aria-hidden', 'true');
+    }
+    if (isSupplement) {
+      li.classList.add('rl-easa-tree-li-supplement');
     }
 
     var dot = document.createElement('span');
@@ -1436,10 +1357,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       sectionBtn = document.createElement('button');
       sectionBtn.type = 'button';
       sectionBtn.className = 'rl-easa-tree-section-title';
-      if (supplementMat === 'GM' || supplementMat === 'AMC') {
-        sectionBtn.classList.add('rl-easa-tree-section-title--supplement');
-      } else if (/^\s*(ANNEX|SUBPART|SECTION)\b/i.test(String(disp || '').trim())) {
-        sectionBtn.classList.add('rl-easa-tree-section-title--structural');
+      if (isSupplement) {
+        sectionBtn.classList.add('rl-easa-tree-section-title--gm-amc');
       }
       sectionBtn.textContent = disp;
       if (!expandable || kids < 1) sectionBtn.disabled = true;
@@ -1471,7 +1390,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       + '</div>';
     li.appendChild(inlineWrap);
 
-    if (kids > 0 && expandable) {
+    if (kids > 0) {
       var chUl = document.createElement('ul');
       chUl.className = 'rl-easa-tree-list';
       chUl.hidden = true;
@@ -1516,14 +1435,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
             sub.hidden = false;
             exp.textContent = '\u25bc';
             exp.setAttribute('aria-expanded', 'true');
-            if (rlEasaTreeDebug) {
-              var nch = j.nodes ? j.nodes.length : 0;
-              var rep = 'last_child_fetch: batch_id=' + batchId + ' parent_uid=' + uid + ' children_returned=' + nch;
-              var tx = rlEasaTreeDebug.textContent || '';
-              rlEasaTreeDebug.textContent = tx.indexOf('last_child_fetch:') >= 0
-                ? tx.replace(/last_child_fetch:[^\n]*/, rep)
-                : tx + '\n' + rep;
-            }
           })
           .catch(function (err) {
             exp.disabled = false;
@@ -1560,26 +1471,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   var rlEasaTreeLoadBtn = document.getElementById('rlEasaTreeLoadRoots');
   var rlEasaTreeMount = document.getElementById('rlEasaTreeMount');
   var rlEasaTreeHint = document.getElementById('rlEasaTreeHint');
-  var rlEasaTreeDebug = document.getElementById('rlEasaTreeDebug');
-  function rlEasaTreeSetDebug(lines) {
-    if (!rlEasaTreeDebug) return;
-    rlEasaTreeDebug.textContent = Array.isArray(lines) ? lines.join('\n') : String(lines || '');
-  }
   if (rlEasaTreeLoadBtn && rlEasaTreeMount) {
     rlEasaTreeLoadBtn.addEventListener('click', function () {
       var sel = document.getElementById('rlEasaTreeBatch');
       var bid = sel && sel.value ? parseInt(sel.value, 10) : 0;
       if (!bid) {
         if (rlEasaTreeHint) rlEasaTreeHint.textContent = 'Select a batch in the dropdown first.';
-        rlEasaTreeSetDebug(['batch_id: (none selected)']);
         return;
       }
       rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading roots…</p>';
-      rlEasaTreeSetDebug([
-        'batch_id=' + bid,
-        'GET ' + api + '?action=tree_children&batch_id=' + bid + ' (roots; parent_uid omitted)',
-        'last_child_fetch: (none until you expand a row)'
-      ]);
       fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), { credentials: 'same-origin' })
         .then(function (r) { return r.json(); })
         .then(function (j) {
@@ -1609,29 +1509,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
               .then(function (r2) { return r2.json(); })
               .then(function (j2) {
                 if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
-                var inner = rlEasaPickBrowseRootNodes(j2.nodes || []);
-                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, inner);
-                rlEasaTreeSetDebug([
-                  'batch_id=' + bid,
-                  'unwrap: used wrapper parent_uid=' + unwrapUid,
-                  'root rows rendered=' + inner.length,
-                  'root node_uids=' + inner.map(function (n) { return n.node_uid || n.id || '—'; }).join(', '),
-                  'last_child_fetch: (expand a row to record parent_uid request)'
-                ]);
+                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes);
                 if (rlEasaTreeHint) {
-                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · tree rooted at annex when present; ▶ opens subparts and sections; rules use coloured bullets.';
+                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' top-level entries. ▶ opens annexes and sections; rule lines open the text panel below (blue / green / amber bullets).';
                 }
               });
           }
-          var picked = rlEasaPickBrowseRootNodes(nodes);
-          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, picked);
-          rlEasaTreeSetDebug([
-            'batch_id=' + bid,
-            'unwrap: none (roots rendered as returned)',
-            'root rows rendered=' + picked.length,
-            'root node_uids=' + picked.map(function (n) { return n.node_uid || n.id || '—'; }).join(', '),
-            'last_child_fetch: (expand a row to record parent_uid request)'
-          ]);
+          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes);
           if (rlEasaTreeHint) {
             rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root entr' + (nodes.length === 1 ? 'y' : 'ies') + '. Use ▶ for structure; click a rule line to read it below.';
           }
