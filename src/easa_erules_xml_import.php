@@ -2012,19 +2012,335 @@ function easa_erules_tree_node_semantic_ui(array $row): array
     }
 
     // Rule row (topic and any non-section candidate stored as topic-like)
-    $expandable = $childCount > 0;
+    $mtRule = easa_erules_band_to_material_type($band);
+    // GM/AMC are always terminal in the browse tree (no chevron); IR may expand for nested material.
+    $expandable = $childCount > 0 && !in_array($mtRule, ['GM', 'AMC'], true);
 
     return [
         'id' => $uid,
         'parent_id' => $parentId,
         'display_title' => $displayTitle,
         'ui_kind' => 'rule',
-        'material_type' => easa_erules_band_to_material_type($band),
+        'material_type' => $mtRule,
         'expandable' => $expandable,
         'click_action' => 'open_rule',
         'depth' => (int) ($row['depth'] ?? 0),
         'sort_order' => (int) ($row['sort_order'] ?? 0),
     ];
+}
+
+function easa_erules_tree_title_first_line(?string $title): string
+{
+    $title = trim((string) $title);
+    if ($title === '') {
+        return '';
+    }
+    $parts = preg_split('/\R+/u', $title) ?: [];
+
+    return trim((string) ($parts[0] ?? $title));
+}
+
+/**
+ * True for annex / subpart / section style headings (not FCL.xxx rule lines).
+ */
+function easa_erules_tree_title_is_structural_section(?string $title): bool
+{
+    $line = easa_erules_tree_title_first_line($title);
+
+    return $line !== '' && preg_match(
+        '/^\s*(ANNEX|SUBPART|SECTION|APPENDIX|CHAPTER|TITLE|PART)\b/iu',
+        $line
+    ) === 1;
+}
+
+function easa_erules_tree_title_starts_gm_or_amc(?string $title): bool
+{
+    $line = easa_erules_tree_title_first_line($title);
+    if ($line === '') {
+        return false;
+    }
+
+    return preg_match('/^\s*GM\d*\b/iu', $line) === 1 || preg_match('/^\s*AMC\d*\b/iu', $line) === 1;
+}
+
+/**
+ * First (FCL|ORA|CAT).digits optional letter suffix in title, uppercased e.g. FCL.010, ORA.GEN.abc skip — keep simple: FCL.\d+[A-Z]?
+ */
+function easa_erules_tree_extract_rule_stub(?string $title): ?string
+{
+    $line = easa_erules_tree_title_first_line($title);
+    if ($line === '') {
+        return null;
+    }
+    if (preg_match('/\b(FCL|ORA|CAT)\.(\d+)([A-Z])?\b/i', $line, $m)) {
+        return strtoupper($m[1] . '.' . $m[2] . ($m[3] ?? ''));
+    }
+
+    return null;
+}
+
+/**
+ * True when every direct child is GM/AMC material or repeats the same primary rule stub as the parent
+ * (typical FCL.xxx toc whose children are GM/AMC topics or a duplicate FCL.xxx topic).
+ */
+function easa_erules_tree_children_all_supplements_for_rule_stub(string $parentTitle, array $childRows): bool
+{
+    $ps = easa_erules_tree_extract_rule_stub($parentTitle);
+    if ($ps === null) {
+        return false;
+    }
+    foreach ($childRows as $c) {
+        if (!is_array($c)) {
+            return false;
+        }
+        $ct = easa_erules_tree_title_first_line((string) ($c['title'] ?? ''));
+        if ($ct === '' && isset($c['source_title'])) {
+            $ct = easa_erules_tree_title_first_line((string) $c['source_title']);
+        }
+        if ($ct === '') {
+            return false;
+        }
+        if (easa_erules_tree_title_starts_gm_or_amc($ct)) {
+            continue;
+        }
+        $cs = easa_erules_tree_extract_rule_stub($ct);
+        if ($cs === null) {
+            return false;
+        }
+        if ($cs !== $ps) {
+            return false;
+        }
+    }
+
+    return $childRows !== [];
+}
+
+/**
+ * heading/toc rows that duplicate a rule nav shell (FCL.xxx / GMx / AMCx) should be omitted from the tree
+ * when their children are lifted to the grandparent, except real structural sections (ANNEX, SUBPART, …).
+ *
+ * @param list<array<string, mixed>> $childRows direct children of $row (already loaded)
+ */
+function easa_erules_tree_should_flatten_nav_wrapper(array $row, array $childRows): bool
+{
+    $nt = strtolower(trim((string) ($row['node_type'] ?? '')));
+    if (!in_array($nt, ['heading', 'toc'], true)) {
+        return false;
+    }
+    if ($childRows === []) {
+        return false;
+    }
+    $title = (string) ($row['title'] ?? '');
+    if (easa_erules_tree_title_is_structural_section($title)) {
+        return false;
+    }
+    if (easa_erules_tree_title_starts_gm_or_amc($title)) {
+        return true;
+    }
+    // IR-style rule line (FCL/ORA/CAT numbering at start) — flatten when children are not "only" supplements of this stub.
+    $line = easa_erules_tree_title_first_line($title);
+    if ($line === '' || preg_match('/^\s*(FCL|ORA|CAT)\.\d/iu', $line) !== 1) {
+        return false;
+    }
+    if (easa_erules_tree_children_all_supplements_for_rule_stub($title, $childRows)) {
+        // Same-stub duplicate IR shell (toc + lone topic) — still omit wrapper so only the topic row shows.
+        if (count($childRows) === 1) {
+            $c0 = $childRows[0];
+            if (!is_array($c0)) {
+                return false;
+            }
+            if (strtolower(trim((string) ($c0['node_type'] ?? ''))) === 'topic') {
+                $ct = easa_erules_tree_title_first_line((string) ($c0['title'] ?? ''));
+                if (!easa_erules_tree_title_starts_gm_or_amc($ct) && !easa_erules_tree_title_starts_gm_or_amc($line)) {
+                    $ps = easa_erules_tree_extract_rule_stub($title);
+                    $cs = easa_erules_tree_extract_rule_stub($ct);
+                    if ($ps !== null && $cs !== null && $ps === $cs) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * @param list<array<string, mixed>> $rows
+ *
+ * @return list<array<string, mixed>>
+ */
+function easa_erules_tree_dedupe_adjacent_wrapper_topic(array $rows): array
+{
+    $out = [];
+    foreach ($rows as $r) {
+        if (!is_array($r)) {
+            continue;
+        }
+        if ($out === []) {
+            $out[] = $r;
+            continue;
+        }
+        $prev = $out[count($out) - 1];
+        $a = mb_strtolower(trim(easa_erules_short_tree_label($prev)));
+        $b = mb_strtolower(trim(easa_erules_short_tree_label($r)));
+        if ($a !== '' && $a === $b) {
+            $pt = strtolower(trim((string) ($prev['node_type'] ?? '')));
+            $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
+            if ($pt !== 'topic' && $nt === 'topic') {
+                $out[count($out) - 1] = $r;
+
+                continue;
+            }
+            if ($pt === 'topic' && $nt !== 'topic') {
+                continue;
+            }
+        }
+        $out[] = $r;
+    }
+
+    return $out;
+}
+
+/**
+ * Direct children rows for browse tree (same shape as tree_children SQL).
+ *
+ * @return list<array<string, mixed>>
+ */
+function easa_erules_tree_fetch_direct_children_rows(PDO $pdo, int $batchId, ?string $parentUid): array
+{
+    if ($batchId <= 0) {
+        return [];
+    }
+    $childPreview = ',
+                           (SELECT fc.title FROM easa_erules_import_nodes_staging fc
+                            WHERE fc.batch_id = n.batch_id AND fc.parent_node_uid = n.node_uid
+                              AND fc.title IS NOT NULL AND TRIM(fc.title) != \'\'
+                            ORDER BY fc.sort_order ASC, fc.id ASC LIMIT 1) AS first_child_title,
+                           (SELECT fc.source_title FROM easa_erules_import_nodes_staging fc
+                            WHERE fc.batch_id = n.batch_id AND fc.parent_node_uid = n.node_uid
+                              AND fc.source_title IS NOT NULL AND TRIM(fc.source_title) != \'\'
+                            ORDER BY fc.sort_order ASC, fc.id ASC LIMIT 1) AS first_child_source_title';
+    $topicChildSql = ',
+                           (SELECT COUNT(*) FROM easa_erules_import_nodes_staging tc
+                            WHERE tc.batch_id = n.batch_id AND tc.parent_node_uid = n.node_uid
+                              AND LOWER(TRIM(tc.node_type)) = \'topic\') AS topic_child_count';
+    $isRoot = $parentUid === null || $parentUid === '';
+    if ($isRoot) {
+        $sql = "
+            SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
+                   n.source_erules_id, n.title, n.source_title, n.breadcrumb{$childPreview}{$topicChildSql},
+                   (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
+                    WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
+            FROM easa_erules_import_nodes_staging n
+            WHERE n.batch_id = ?
+              AND (n.parent_node_uid IS NULL OR n.parent_node_uid = '')
+            ORDER BY n.sort_order ASC, n.id ASC
+        ";
+        $st = $pdo->prepare($sql);
+        $st->execute([$batchId]);
+    } else {
+        $sql = "
+            SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
+                   n.source_erules_id, n.title, n.source_title, n.breadcrumb{$childPreview}{$topicChildSql},
+                   (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
+                    WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
+            FROM easa_erules_import_nodes_staging n
+            WHERE n.batch_id = ? AND n.parent_node_uid = ?
+            ORDER BY n.sort_order ASC, n.id ASC
+        ";
+        $st = $pdo->prepare($sql);
+        $st->execute([$batchId, $parentUid]);
+    }
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+    return is_array($rows) ? $rows : [];
+}
+
+/**
+ * Visible browse-tree children after removing navigational GM/AMC / rule-line wrappers.
+ *
+ * @return list<array<string, mixed>>
+ */
+function easa_erules_tree_children_rows_flattened(PDO $pdo, int $batchId, ?string $parentUid, int $depthGuard = 0): array
+{
+    if ($depthGuard > 48) {
+        return [];
+    }
+    if (!isset($GLOBALS['_easa_erules_tree_flatten_memo']) || !is_array($GLOBALS['_easa_erules_tree_flatten_memo'])) {
+        $GLOBALS['_easa_erules_tree_flatten_memo'] = [];
+    }
+    $memo = &$GLOBALS['_easa_erules_tree_flatten_memo'];
+    $key = (string) $batchId . "\0" . ($parentUid ?? '');
+    if (isset($memo[$key])) {
+        return $memo[$key];
+    }
+    $raw = easa_erules_tree_fetch_direct_children_rows($pdo, $batchId, $parentUid);
+    $out = [];
+    foreach ($raw as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $uid = trim((string) ($row['node_uid'] ?? ''));
+        if ($uid === '') {
+            continue;
+        }
+        $kids = easa_erules_tree_fetch_direct_children_rows($pdo, $batchId, $uid);
+        if (easa_erules_tree_should_flatten_nav_wrapper($row, $kids)) {
+            $lifted = easa_erules_tree_children_rows_flattened($pdo, $batchId, $uid, $depthGuard + 1);
+            foreach ($lifted as $L) {
+                $out[] = $L;
+            }
+        } else {
+            $out[] = $row;
+        }
+    }
+    $out = easa_erules_tree_dedupe_adjacent_wrapper_topic($out);
+    $memo[$key] = $out;
+
+    return $out;
+}
+
+/**
+ * @return list<array<string, mixed>>
+ */
+function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?string $parentUid): array
+{
+    $GLOBALS['_easa_erules_tree_flatten_memo'] = [];
+    $GLOBALS['_easa_erules_tree_visible_count_memo'] = [];
+
+    $flat = easa_erules_tree_children_rows_flattened($pdo, $batchId, $parentUid);
+    $nodes = [];
+    foreach ($flat as $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $uid = trim((string) ($row['node_uid'] ?? ''));
+        if ($uid === '') {
+            continue;
+        }
+        $vk = (string) $batchId . "\0" . $uid;
+        if (!isset($GLOBALS['_easa_erules_tree_visible_count_memo'][$vk])) {
+            $GLOBALS['_easa_erules_tree_visible_count_memo'][$vk] = count(easa_erules_tree_children_rows_flattened($pdo, $batchId, $uid));
+        }
+        $row['child_count'] = $GLOBALS['_easa_erules_tree_visible_count_memo'][$vk];
+        $row['label_short'] = easa_erules_short_tree_label($row);
+        $row['rule_band'] = easa_erules_classify_display_band(
+            $row['node_type'] ?? null,
+            $row['title'] ?? null,
+            $row['source_title'] ?? null,
+            $row['source_erules_id'] ?? null
+        );
+        $sem = easa_erules_tree_node_semantic_ui($row);
+        foreach ($sem as $semKey => $semVal) {
+            $row[$semKey] = $semVal;
+        }
+        $nodes[] = $row;
+    }
+
+    return $nodes;
 }
 
 /**
