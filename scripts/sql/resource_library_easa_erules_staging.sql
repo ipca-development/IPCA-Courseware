@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS easa_erules_import_nodes_staging (
   source_title TEXT NULL,
   plain_text MEDIUMTEXT NOT NULL,
   canonical_text MEDIUMTEXT NULL COMMENT 'Whitespace-collapsed/normalised body for hashing and compare',
+  structured_blocks_json JSON NULL COMMENT 'Canonical display blocks JSON for UI renderer (never raw OOXML/XML)',
   xml_fragment MEDIUMTEXT NULL COMMENT 'Full or truncated outer XML of the regulatory node',
   metadata_json JSON NULL,
   content_hash CHAR(64) NOT NULL,

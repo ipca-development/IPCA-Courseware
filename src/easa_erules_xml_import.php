@@ -126,6 +126,20 @@ function easa_erules_staging_has_canonical_column(PDO $pdo): bool
     }
 }
 
+function easa_erules_staging_has_structured_blocks_column(PDO $pdo): bool
+{
+    try {
+        $st = $pdo->query("SHOW COLUMNS FROM easa_erules_import_nodes_staging LIKE 'structured_blocks_json'");
+
+        return $st instanceof PDOStatement && $st->rowCount() > 0;
+    } catch (Throwable) {
+        return false;
+    }
+}
+
+/** Stored JSON ceiling (UTF-8 bytes); keep below MEDIUMTEXT overhead. */
+const EASA_ERULES_STRUCTURED_BLOCKS_JSON_BYTES_MAX = 400000;
+
 /**
  * Normalised rule body for hashing / compare (single-line whitespace collapse).
  */
@@ -240,10 +254,278 @@ function easa_erules_plain_text_from_stored_xml_fragment(string $fragment): stri
 }
 
 /**
- * Ensure batch storage_relpath matches the canonical path for this batch_id and source.xml is readable.
+ * Paragraph / table plaintext from OOXML runs inside a paragraph (excluding nested tables).
  *
- * @throws RuntimeException when the file is missing
+ * Tables are rendered separately via structured_blocks; runs here skip descendant tbl subtrees.
  */
+function easa_erules_word_runs_plain_excluding_tables(DOMElement $pOrRich): string
+{
+    $out = '';
+    $walk = static function (DOMNode $n) use (&$walk, &$out): void {
+        if ($n instanceof DOMText) {
+            $out .= $n->data;
+
+            return;
+        }
+        if (!($n instanceof DOMElement)) {
+            return;
+        }
+        $ln = $n->localName;
+        $ns = $n->namespaceURI ?? '';
+        if ($ln === 'tbl' && easa_erules_is_wordprocessingml_namespace($ns)) {
+            return;
+        }
+        if (easa_erules_is_wordprocessingml_namespace($ns)) {
+            if ($ln === 'tab') {
+                $out .= "\t";
+
+                return;
+            }
+            if ($ln === 'br' || $ln === 'cr') {
+                $out .= "\n";
+
+                return;
+            }
+        }
+        foreach ($n->childNodes ?? [] as $c) {
+            $walk($c);
+        }
+    };
+    foreach ($pOrRich->childNodes ?? [] as $c) {
+        $walk($c);
+    }
+
+    return str_replace(["\xc2\xa0"], ' ', $out);
+}
+
+/**
+ * OOXML paragraph style/outline → UI heading level, or null for body text.
+ */
+function easa_erules_word_paragraph_heading_level(DOMElement $p): ?int
+{
+    $doc = $p->ownerDocument;
+    if ($doc === null) {
+        return null;
+    }
+    $xp = new DOMXPath($doc);
+    $outline = $xp->query('.//*[local-name()="pPr"]//*[local-name()="outlineLvl"]/@*[local-name()="val"]', $p)->item(0);
+    if ($outline instanceof DOMAttr && is_numeric(trim($outline->value))) {
+        // outlineLvl counts from 0; map to semantic heading tiers in the viewer.
+        return max(2, min(6, ((int) $outline->value) + 2));
+    }
+    $pst = $xp->query('.//*[local-name()="pPr"]//*[local-name()="pStyle"]/@*[local-name()="val"]', $p)->item(0);
+    if ($pst instanceof DOMAttr) {
+        if (preg_match('/heading\s*(\d+)/i', (string) $pst->value, $m)) {
+            return max(1, min(6, (int) $m[1]));
+        }
+        $pv = strtolower((string) $pst->value);
+        if ($pv !== ''
+            && (str_contains($pv, 'heading') || str_contains($pv, 'title') || str_contains($pv, 'toc'))) {
+            return 3;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * @return array{text: string, marker?: string}|null
+ */
+function easa_erules_structured_marker_prefix(string $t): ?array
+{
+    $t = trim($t);
+    if ($t === '') {
+        return null;
+    }
+    // (a), (i), (1)—legal list openers glued to prose.
+    if (preg_match('/^\(\s*((?:[ivxlcdm]{1,8}|[a-z]|[1-9]\d{0,2}|0))\s*\)\s*(.*)$/su', $t, $m)) {
+        return ['marker' => '(' . trim($m[1]) . ')', 'text' => trim((string) ($m[2] ?? ''))];
+    }
+    if (preg_match('/^(\d{1,2}\.)\s+(.+)/su', $t, $m)) {
+        return ['marker' => $m[1], 'text' => trim((string) ($m[2] ?? ''))];
+    }
+
+    return null;
+}
+
+/**
+ * Rows for structured_blocks_json "table"; each row is a list of cell strings.
+ *
+ * @return list<list<string>>
+ */
+function easa_erules_word_tc_own_paragraph(DOMElement $p, DOMElement $tc): bool
+{
+    for ($n = $p->parentNode; $n instanceof DOMElement; $n = $n->parentNode) {
+        if ($n->isSameNode($tc)) {
+            return true;
+        }
+        if (($n->localName ?? '') === 'tbl' && easa_erules_is_wordprocessingml_namespace($n->namespaceURI ?? '')) {
+            return false;
+        }
+    }
+
+    return false;
+}
+
+function easa_erules_word_tbl_to_cell_rows(DOMElement $tbl): array
+{
+    $rows = [];
+    foreach ($tbl->getElementsByTagNameNS('*', 'tr') as $tr) {
+        if (!$tr instanceof DOMElement) {
+            continue;
+        }
+        $nearestTbl = null;
+        for ($walk = $tr->parentNode; $walk instanceof DOMElement; $walk = $walk->parentNode) {
+            if (($walk->localName ?? '') === 'tbl'
+                && easa_erules_is_wordprocessingml_namespace($walk->namespaceURI ?? '')) {
+                $nearestTbl = $walk;
+                break;
+            }
+        }
+        if ($nearestTbl === null || !$nearestTbl->isSameNode($tbl)) {
+            continue;
+        }
+
+        /** @var list<string> $cellsOut */
+        $cellsOut = [];
+        foreach ($tr->childNodes ?? [] as $cellNode) {
+            if (!$cellNode instanceof DOMElement || ($cellNode->localName ?? '') !== 'tc') {
+                continue;
+            }
+            $cellParas = [];
+            foreach ($cellNode->getElementsByTagNameNS('*', 'p') as $ccp) {
+                if (!$ccp instanceof DOMElement || !easa_erules_word_tc_own_paragraph($ccp, $cellNode)) {
+                    continue;
+                }
+                $line = trim(easa_erules_sanitize_rule_body_text(easa_erules_word_runs_plain_excluding_tables($ccp)));
+                if ($line !== '') {
+                    $cellParas[] = $line;
+                }
+            }
+            if ($cellParas === []) {
+                $fallback = trim(easa_erules_sanitize_rule_body_text($cellNode->textContent));
+                $cellsOut[] = $fallback;
+            } else {
+                $cellsOut[] = implode("\n\n", $cellParas);
+            }
+        }
+        if ($cellsOut !== []) {
+            $rows[] = $cellsOut;
+        }
+    }
+
+    return $rows;
+}
+
+/**
+ * Build ordered display blocks from a regulation node outer-XML fragment (EASA markup + embedded Word OOXML).
+ *
+ * UI must render ONLY this structure (decoded JSON), never raw fragments.
+ *
+ * @return non-empty-string JSON array
+ */
+function easa_erules_structured_blocks_json_from_outer_xml(string $outerXml): string
+{
+    $outerXml = trim($outerXml);
+    if ($outerXml === '') {
+        return '[]';
+    }
+
+    $pcPeek = easa_erules_plain_canonical_from_outer_xml($outerXml);
+    $fallbackPlain = trim((string) $pcPeek['plain']);
+
+    if (strlen($outerXml) > EASA_ERULES_XML_FRAGMENT_STORE_MAX) {
+        $outerXml = substr($outerXml, 0, EASA_ERULES_XML_FRAGMENT_STORE_MAX) . "\n<!-- … truncated -->";
+    }
+
+    $dom = new DOMDocument();
+    $ok = @$dom->loadXML($outerXml, LIBXML_NONET | LIBXML_PARSEHUGE);
+
+    /** @var list<array<string, mixed>> $blocks */
+    $blocks = [];
+
+    if ($ok && $dom->documentElement instanceof DOMElement) {
+        $root = $dom->documentElement;
+        $xp = new DOMXPath($dom);
+        $matched = $xp->query(
+            './/*[(local-name()="tbl") or (local-name()="p" and not(ancestor::*[local-name()="tbl"]))]',
+            $root
+        );
+
+        if ($matched !== false && $matched->length > 0) {
+            foreach ($matched as $el) {
+                if (!$el instanceof DOMElement) {
+                    continue;
+                }
+                $ln = $el->localName;
+                if ($ln === 'tbl' && easa_erules_is_wordprocessingml_namespace($el->namespaceURI ?? '')) {
+                    $rowGrid = easa_erules_word_tbl_to_cell_rows($el);
+                    if ($rowGrid !== []) {
+                        $blocks[] = ['type' => 'table', 'rows' => $rowGrid];
+                    }
+                    continue;
+                }
+                if ($ln !== 'p' || !easa_erules_is_wordprocessingml_namespace($el->namespaceURI ?? '')) {
+                    continue;
+                }
+                $plain = trim(easa_erules_sanitize_rule_body_text(easa_erules_word_runs_plain_excluding_tables($el)));
+                if ($plain === '') {
+                    continue;
+                }
+                $hl = easa_erules_word_paragraph_heading_level($el);
+                if ($hl !== null) {
+                    $blocks[] = ['type' => 'heading', 'level' => $hl, 'text' => $plain];
+                    continue;
+                }
+                $li = easa_erules_structured_marker_prefix($plain);
+                if ($li !== null && $li['text'] !== '') {
+                    $blocks[] = ['type' => 'list_item', 'marker' => $li['marker'] ?? '', 'text' => $li['text']];
+                    continue;
+                }
+                $blocks[] = ['type' => 'paragraph', 'text' => $plain];
+            }
+        } else {
+            foreach ($root->childNodes ?? [] as $ch) {
+                if (!$ch instanceof DOMElement) {
+                    continue;
+                }
+                $eln = strtolower((string) $ch->localName);
+                $inner = trim(easa_erules_sanitize_rule_body_text($ch->textContent));
+                if ($inner === '') {
+                    continue;
+                }
+                if (in_array($eln, ['heading', 'articletitle', 'sectiontitle'], true)) {
+                    $lvlRaw = isset($ch->attributes) ? ($ch->getAttribute('level') ?: '') : '';
+                    $lvl = ctype_digit(trim($lvlRaw)) ? max(1, min(6, (int) trim($lvlRaw))) : 2;
+                    $blocks[] = ['type' => 'heading', 'level' => $lvl, 'text' => $inner];
+                    continue;
+                }
+                $blocks[] = ['type' => 'paragraph', 'text' => $inner];
+            }
+        }
+    }
+
+    if ($blocks === [] && $fallbackPlain !== '') {
+        $blocks[] = ['type' => 'paragraph', 'text' => $fallbackPlain];
+    }
+
+    $json = json_encode($blocks, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    if (!is_string($json) || $json === '') {
+        $blocks = [['type' => 'paragraph', 'text' => mb_substr($fallbackPlain !== '' ? $fallbackPlain : '[encoding error]', 0, 200000)]];
+        $json = json_encode($blocks, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+    if (!is_string($json) || $json === '') {
+        $json = '[]';
+    }
+    if (strlen((string) $json) > EASA_ERULES_STRUCTURED_BLOCKS_JSON_BYTES_MAX) {
+        $trimmed = [['type' => 'paragraph', 'text' => mb_substr($fallbackPlain !== '' ? $fallbackPlain : (string) $json, 0, 120000)]];
+
+        return json_encode($trimmed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    return (string) $json;
+}
+
 function easa_erules_is_wordprocessingml_namespace(?string $ns): bool
 {
     return is_string($ns) && stripos($ns, 'wordprocessingml') !== false;
@@ -372,22 +654,27 @@ function easa_erules_enrich_topics_from_word_sdt_index(PDO $pdo, int $batchId, a
         return;
     }
     $hasCanon = easa_erules_staging_has_canonical_column($pdo);
+    $hasStructuredBlocksCol = easa_erules_staging_has_structured_blocks_column($pdo);
+    $updSets = ['plain_text = ?'];
+    if ($hasCanon) {
+        $updSets[] = 'canonical_text = ?';
+    }
+    if ($hasStructuredBlocksCol) {
+        $updSets[] = 'structured_blocks_json = ?';
+    }
+    $updSets[] = 'xml_fragment = ?';
+    $updSets[] = 'content_hash = ?';
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging SET '
+        . implode(', ', $updSets)
+        . ' WHERE batch_id = ? AND node_uid = ?'
+    );
 
     $st = $pdo->prepare(
         'SELECT node_uid, source_erules_id, node_type, metadata_json FROM easa_erules_import_nodes_staging
          WHERE batch_id = ? AND LOWER(node_type) = \'topic\' AND (plain_text IS NULL OR TRIM(plain_text) = \'\')'
     );
     $st->execute([$batchId]);
-
-    $updWithCanon = $hasCanon ? $pdo->prepare(
-        'UPDATE easa_erules_import_nodes_staging
-         SET plain_text = ?, canonical_text = ?, xml_fragment = ?, content_hash = ?
-         WHERE batch_id = ? AND node_uid = ?'
-    ) : $pdo->prepare(
-        'UPDATE easa_erules_import_nodes_staging
-         SET plain_text = ?, xml_fragment = ?, content_hash = ?
-         WHERE batch_id = ? AND node_uid = ?'
-    );
 
     while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
         if (!is_array($r)) {
@@ -424,14 +711,27 @@ function easa_erules_enrich_topics_from_word_sdt_index(PDO $pdo, int $batchId, a
         }
         $hash = easa_erules_staging_content_hash($canonical, $erulesDb, $nodeType);
 
+        $blocksJson = $hasStructuredBlocksCol ? easa_erules_structured_blocks_json_from_outer_xml($frag) : null;
+        $exe = [$plain];
         if ($hasCanon) {
-            $updWithCanon->execute([$plain, $canonical, $frag, $hash, $batchId, $uid]);
-        } else {
-            $updWithCanon->execute([$plain, $frag, $hash, $batchId, $uid]);
+            $exe[] = $canonical;
         }
+        if ($hasStructuredBlocksCol) {
+            $exe[] = $blocksJson;
+        }
+        $exe[] = $frag;
+        $exe[] = $hash;
+        $exe[] = $batchId;
+        $exe[] = $uid;
+        $upd->execute($exe);
     }
 }
 
+/**
+ * Ensure batch storage_relpath matches the canonical path for this batch_id and source.xml is readable.
+ *
+ * @throws RuntimeException when the file is missing
+ */
 function easa_erules_validate_batch_source_storage(int $batchId, string $storageRelFromDb, string $absolutePath): void
 {
     if ($batchId <= 0) {
@@ -540,17 +840,21 @@ function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId
     }
 
     $hasCanon = easa_erules_staging_has_canonical_column($pdo);
-    $updCanon = $hasCanon
-        ? $pdo->prepare(
-            'UPDATE easa_erules_import_nodes_staging
-             SET plain_text = ?, canonical_text = ?, xml_fragment = ?, content_hash = ?
-             WHERE batch_id = ? AND TRIM(source_erules_id) = ?'
-        )
-        : $pdo->prepare(
-            'UPDATE easa_erules_import_nodes_staging
-             SET plain_text = ?, xml_fragment = ?, content_hash = ?
-             WHERE batch_id = ? AND TRIM(source_erules_id) = ?'
-        );
+    $hasStructuredBlocksCol = easa_erules_staging_has_structured_blocks_column($pdo);
+    $srcUpdSets = ['plain_text = ?'];
+    if ($hasCanon) {
+        $srcUpdSets[] = 'canonical_text = ?';
+    }
+    if ($hasStructuredBlocksCol) {
+        $srcUpdSets[] = 'structured_blocks_json = ?';
+    }
+    $srcUpdSets[] = 'xml_fragment = ?';
+    $srcUpdSets[] = 'content_hash = ?';
+    $updCanon = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging SET '
+        . implode(', ', $srcUpdSets)
+        . ' WHERE batch_id = ? AND TRIM(source_erules_id) = ?'
+    );
 
     $typeSt = $pdo->prepare(
         'SELECT node_type FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND TRIM(source_erules_id) = ? LIMIT 1'
@@ -566,11 +870,19 @@ function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId
             $nodeType = 'topic';
         }
         $hash = easa_erules_staging_content_hash($pc['canonical'], $eid, $nodeType);
+        $blocksJson = $hasStructuredBlocksCol ? easa_erules_structured_blocks_json_from_outer_xml($outer) : null;
+        $exe = [$pc['plain']];
         if ($hasCanon) {
-            $updCanon->execute([$pc['plain'], $pc['canonical'], $outer, $hash, $batchId, $eid]);
-        } else {
-            $updCanon->execute([$pc['plain'], $outer, $hash, $batchId, $eid]);
+            $exe[] = $pc['canonical'];
         }
+        if ($hasStructuredBlocksCol) {
+            $exe[] = $blocksJson;
+        }
+        $exe[] = $outer;
+        $exe[] = $hash;
+        $exe[] = $batchId;
+        $exe[] = $eid;
+        $updCanon->execute($exe);
     }
 }
 
@@ -680,21 +992,24 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     $pdo->prepare('DELETE FROM easa_erules_import_nodes_staging WHERE batch_id = ?')->execute([$batchId]);
 
     $hasCanonicalCol = easa_erules_staging_has_canonical_column($pdo);
+    $hasStructuredBlocksCol = easa_erules_staging_has_structured_blocks_column($pdo);
+    $insertCols = [
+        'batch_id', 'node_uid', 'source_erules_id', 'node_type', 'parent_node_uid', 'sort_order', 'depth',
+        'path', 'breadcrumb', 'title', 'source_title', 'plain_text',
+    ];
     if ($hasCanonicalCol) {
-        $ins = $pdo->prepare('
-            INSERT INTO easa_erules_import_nodes_staging (
-                batch_id, node_uid, source_erules_id, node_type, parent_node_uid, sort_order, depth,
-                path, breadcrumb, title, source_title, plain_text, canonical_text, xml_fragment, metadata_json, content_hash
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ');
-    } else {
-        $ins = $pdo->prepare('
-            INSERT INTO easa_erules_import_nodes_staging (
-                batch_id, node_uid, source_erules_id, node_type, parent_node_uid, sort_order, depth,
-                path, breadcrumb, title, source_title, plain_text, xml_fragment, metadata_json, content_hash
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-        ');
+        $insertCols[] = 'canonical_text';
     }
+    if ($hasStructuredBlocksCol) {
+        $insertCols[] = 'structured_blocks_json';
+    }
+    $insertCols[] = 'xml_fragment';
+    $insertCols[] = 'metadata_json';
+    $insertCols[] = 'content_hash';
+    $ins = $pdo->prepare(
+        'INSERT INTO easa_erules_import_nodes_staging (' . implode(', ', $insertCols) . ') VALUES ('
+        . implode(', ', array_fill(0, count($insertCols), '?')) . ')'
+    );
 
     $reader = new XMLReader();
     if (!$reader->open($abs, null, LIBXML_PARSEHUGE | LIBXML_NONET | LIBXML_COMPACT)) {
@@ -719,7 +1034,7 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
         }
     };
 
-    $popFrame = static function () use (&$stack, &$candidateUidStack, &$titleByUid, &$siblingCount, &$seq, &$imported, &$publicationMeta, $pdo, $batchId, $ins, $flushProgress, $hasCanonicalCol): void {
+    $popFrame = static function () use (&$stack, &$candidateUidStack, &$titleByUid, &$siblingCount, &$seq, &$imported, &$publicationMeta, $pdo, $batchId, $ins, $flushProgress, $hasCanonicalCol, $hasStructuredBlocksCol): void {
         /** @var array{frame: object, chunks: array} $p */
         $p = array_pop($stack);
         if (!is_array($p)) {
@@ -794,47 +1109,41 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
                 'import_mode' => $forcedFragment !== '' ? 'xmlreader_stream_topic_outerxml' : 'xmlreader_stream',
             ];
 
+            $structuredBlocksPayload = null;
+            if ($hasStructuredBlocksCol) {
+                if ($forcedFragment !== '') {
+                    $structuredBlocksPayload = easa_erules_structured_blocks_json_from_outer_xml($forcedFragment);
+                }
+            }
+
             $canonicalInit = easa_erules_body_canonical_for_hash($plain);
             $hash = easa_erules_staging_content_hash($canonicalInit, $erulesId, $local);
 
+            $vals = [
+                $batchId,
+                $uid,
+                $erulesId,
+                $local,
+                $parentUid,
+                $sortOrder,
+                $frame->xmlDepth,
+                $pathStr !== '' ? mb_substr($pathStr, 0, 4000) : null,
+                $breadcrumb !== '' ? $breadcrumb : null,
+                $title !== '' ? $title : null,
+                $sourceTitle !== null && $sourceTitle !== '' ? mb_substr($sourceTitle, 0, 2000) : null,
+                $plain,
+            ];
             if ($hasCanonicalCol) {
-                $ins->execute([
-                    $batchId,
-                    $uid,
-                    $erulesId,
-                    $local,
-                    $parentUid,
-                    $sortOrder,
-                    $frame->xmlDepth,
-                    $pathStr !== '' ? mb_substr($pathStr, 0, 4000) : null,
-                    $breadcrumb !== '' ? $breadcrumb : null,
-                    $title !== '' ? $title : null,
-                    $sourceTitle !== null && $sourceTitle !== '' ? mb_substr($sourceTitle, 0, 2000) : null,
-                    $plain,
-                    $canonicalInit !== '' ? $canonicalInit : null,
-                    $frag,
-                    json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}',
-                    $hash,
-                ]);
-            } else {
-                $ins->execute([
-                    $batchId,
-                    $uid,
-                    $erulesId,
-                    $local,
-                    $parentUid,
-                    $sortOrder,
-                    $frame->xmlDepth,
-                    $pathStr !== '' ? mb_substr($pathStr, 0, 4000) : null,
-                    $breadcrumb !== '' ? $breadcrumb : null,
-                    $title !== '' ? $title : null,
-                    $sourceTitle !== null && $sourceTitle !== '' ? mb_substr($sourceTitle, 0, 2000) : null,
-                    $plain,
-                    $frag,
-                    json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}',
-                    $hash,
-                ]);
+                $vals[] = $canonicalInit !== '' ? $canonicalInit : null;
             }
+            if ($hasStructuredBlocksCol) {
+                $vals[] = $structuredBlocksPayload;
+            }
+            $vals[] = $frag;
+            $vals[] = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '{}';
+            $vals[] = $hash;
+
+            $ins->execute($vals);
             $imported++;
             $flushProgress($local, 'Inserted ' . $imported . ' nodes · last: <' . $local . '>');
 
@@ -1275,7 +1584,8 @@ function easa_erules_batch_source_xml_absolute_path(PDO $pdo, int $batchId): ?st
 /**
  * Insert paragraph breaks into collapsed rule text so the browse UI reads naturally.
  *
- * Targets EU Easy Access blobs (Regulation cites, numbered subparagraphs (1)(2)(a)).
+ * EU / EASA Easy Access exports often emit one long line (canonical) or tight glue; this pass
+ * adds breaks before known structural markers and after regulation citations.
  */
 function easa_erules_format_body_for_reading(string $text): string
 {
@@ -1283,18 +1593,88 @@ function easa_erules_format_body_for_reading(string $text): string
     if ($s === '') {
         return '';
     }
-    $s = preg_replace('/\)\s*\[/u', ")\n\n[", $s) ?? $s;
-    $s = preg_replace('/(Regulation \(EU\) (?:No )?\s*\d+\/\d+[^.\s]{0,12})\.(?!\d)/iu', '$1.' . "\n\n", $s) ?? $s;
-    $s = preg_replace('/(Commission (?:Delegated )?Regulation \(EU\)[^.\n]{0,120})\./iu', '$1.' . "\n\n", $s) ?? $s;
-    $s = preg_replace('/(?<=[a-záéíóúàèùâêîôûäëïöüñ])\.\s+(?=\(\d+[a-z]?\))/iu', ".\n\n", $s) ?? $s;
-    $s = preg_replace('/(?<=[a-záéíóúàèùâêîôûäëïöüñ])(\(?[a-z]\))(?=\S)/iu', '$1 ', $s) ?? $s;
-    $s = preg_replace('/(?<=[a-z.;)])(\(\d+[a-z]?\))\s+(?=\S)/iu', '$1 ', $s) ?? $s;
-    $s = preg_replace('/(?<=[^.0-9])\s+(\d+)\.(?=\s*[A-Z(])/u', "\n\n$1.", $s) ?? $s;
-    $s = preg_replace('/\x{00a0}/u', ' ', $s) ?? $s;
+    $s = str_replace("\xc2\xa0", ' ', $s);
+    $hadNewlines = str_contains($s, "\n");
+    if (!$hadNewlines) {
+        $s = trim(preg_replace('/[ \t]+/u', ' ', $s) ?? $s);
+    }
+
+    $rules = [
+        fn (string $x): string => preg_replace('/\)\s*\[/u', ")\n\n[", $x) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/(?<=[\p{L}\p{N}\)\]])(\s*|)(?=Article\s+\d+)/u',
+            "\n\n",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/(?<=[\p{L}\p{N}\)\]])(\s*|)(?=Annex\s+[IVX\d]+)/iu',
+            "\n\n",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/(?<=[\p{L}\p{N}\)\]])(\s*|)(?=SUBPART\s+[A-Z]|SECTION\s+\d+)/u',
+            "\n\n",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/(?<=[\p{L}\p{N}\)\]])(\s*|)(?=(?:Commission\s+)?(?:Delegated\s+)?Regulation\s*\(\s*EU\s*\)|Regulation\s*\(\s*EU\s*\)\s*(?:No\s*)?\d+\/\d+|Decision\s*\(\s*EU\s*\)\s*\d+\/\d+|Implementing\s+Regulation)/iu',
+            "\n\n",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/((?:Commission\s+)?(?:Delegated\s+)?Regulation\s*\(\s*EU\s*\)[^.\n]{0,160}|Regulation\s*\(\s*EU\s*\)\s*(?:No\s*)?\d+\/\d+[^.\n]{0,24}|Decision\s*\(\s*EU\s*\)\s*\d+\/\d+[^.\n]{0,24})\.(?!\d)/iu',
+            '$1.' . "\n\n",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/(?<=[\p{Ll}\p{Lo}0-9\)\]])(\(([1-9]\d{0,2}|0)\))(?=\s|\(|\.|[\p{Lu}\p{Ll}])/u',
+            "\n\n$1",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace('/;\s+(?=\([a-z]\))(?=\S)/u', ";\n\n", $x) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/(?<=[\p{Ll}\p{Lo}0-9\)\]])(\([a-z]\))(?=\S)/u',
+            "\n\n$1",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/(?<=[\p{Ll}\p{Lo}\)\]])(?<!\d)\s*(\d{1,2})\.(?=\s+[\p{Lu}(])/u',
+            "\n\n$1.",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/(?<=[\.\;\:\)\]])(\s*|)(?=AMC\d*\b|GM\s+\d|\bGM\s)/iu',
+            "\n\n",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/([\.\;\:])(\s+|)(?=The\b|Applicants\b|Notwithstanding\b|Unless\b|Where\b|Whenever\b|However\b|Failure\b|Moreover\b|In\s+addition\b|Without\s+prejudice\b|For\s+the\s+purposes\b|Compliance\b|Demonstration\b|Demonstrate\b|The\s+[A-Za-z]+\s+(?:requirements?|authority|agency)\b)/u',
+            "$1\n\n",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/([\.\;\)])(\(([1-9]\d{0,2}|0)\))(?=\s|\(|\.|[\p{Lu}\p{Ll}])/u',
+            "$1\n\n$2",
+            $x
+        ) ?? $x,
+        fn (string $x): string => preg_replace(
+            '/([\.\;\)])(\([a-z]\))(?=\S)/u',
+            "$1\n\n$2",
+            $x
+        ) ?? $x,
+    ];
+
+    foreach ($rules as $fn) {
+        $s = $fn($s);
+    }
+
+    $s = preg_replace('/[ \t]*\n[ \t]*/u', "\n", $s) ?? $s;
+    $s = preg_replace('/\n{3,}/u', "\n\n", $s) ?? $s;
+
     $lines = preg_split('/\R+/u', $s) ?: [];
     $acc = '';
     foreach ($lines as $line) {
-        $line = preg_replace('/[ \t]+/u', ' ', trim((string) $line)) ?? trim((string) $line);
+        $line = trim(preg_replace('/[ \t]{2,}/u', ' ', (string) $line) ?? (string) $line);
         if ($line === '') {
             continue;
         }

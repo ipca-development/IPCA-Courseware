@@ -231,6 +231,51 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     max-height: min(65vh, 560px);
     overflow: auto;
   }
+  .rl-easa-detail-body-structured {
+    white-space: normal;
+  }
+  .rl-easa-bl-article .rl-easa-bl-h:first-child {
+    margin-top: 0;
+  }
+  .rl-easa-bl-h {
+    margin: 0.85rem 0 0.4rem;
+    font-weight: 700;
+    line-height: 1.35;
+    color: #0f172a;
+  }
+  .rl-easa-bl-p {
+    margin: 0.35rem 0 0;
+  }
+  .rl-easa-bl-li {
+    margin: 0.35rem 0 0;
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+    max-width: 100%;
+  }
+  .rl-easa-bl-marker {
+    flex: 0 0 auto;
+    font-weight: 600;
+    color: #334155;
+    min-width: 2rem;
+  }
+  .rl-easa-bl-litext {
+    flex: 1 1 auto;
+    min-width: 0;
+    word-break: break-word;
+  }
+  .rl-easa-bl-tbl {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.6rem 0 0;
+    font-size: 12.5px;
+  }
+  .rl-easa-bl-tbl td,
+  .rl-easa-bl-tbl th {
+    border: 1px solid #cbd5e1;
+    padding: 6px 10px;
+    vertical-align: top;
+  }
   .rl-easa-node-detail-wrap { margin-top: 0; }
   .rl-easa-band {
     padding: 12px 16px;
@@ -999,6 +1044,38 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
+  function rlEasaStructuredBlocksHtml(blocks) {
+    if (!Array.isArray(blocks) || blocks.length < 1) return '';
+    var bits = '';
+    blocks.forEach(function (b) {
+      if (!b || typeof b !== 'object') return;
+      var ty = String(b.type || '');
+      if (ty === 'heading') {
+        var lvl = parseInt(String(b.level), 10);
+        if (!(lvl >= 1 && lvl <= 6)) lvl = 3;
+        bits += '<h' + lvl + ' class="rl-easa-bl-h">' + esc(b.text || '') + '</h' + lvl + '>';
+      } else if (ty === 'paragraph') {
+        bits += '<p class="rl-easa-bl-p">' + esc(b.text || '') + '</p>';
+      } else if (ty === 'list_item') {
+        bits += '<div class="rl-easa-bl-li"><span class="rl-easa-bl-marker">' + esc(b.marker != null ? b.marker : '') + '</span><span class="rl-easa-bl-litext">' + esc(b.text || '') + '</span></div>';
+      } else if (ty === 'table') {
+        bits += '<table class="rl-easa-bl-tbl">';
+        var rows = b.rows || [];
+        for (var r = 0; r < rows.length; r++) {
+          bits += '<tr>';
+          var row = rows[r];
+          var cells = Array.isArray(row) ? row : [];
+          for (var c = 0; c < cells.length; c++) {
+            bits += '<td>' + esc(cells[c] != null ? String(cells[c]) : '').replace(/\n/g, '<br>') + '</td>';
+          }
+          bits += '</tr>';
+        }
+        bits += '</table>';
+      }
+    });
+    return '<article class="rl-easa-bl-article" aria-label="Rule text">' + bits + '</article>';
+  }
+
   function rlEasaBandLegend(band) {
     if (band === 'amc') return 'Acceptable means of compliance (AMC) — ED Decision style material in Easy Access.';
     if (band === 'gm') return 'Guidance material (GM) — ED Decision style material in Easy Access.';
@@ -1016,7 +1093,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       band.innerHTML = esc('Loading…') + '<small></small>';
     }
     if (meta) meta.innerHTML = '';
-    if (body) body.textContent = '';
+    if (body) {
+      body.textContent = '';
+      body.innerHTML = '';
+      body.className = 'rl-easa-detail-body';
+    }
     fetch(api + '?action=node_detail&batch_id=' + encodeURIComponent(String(batchId)) + '&node_uid=' + encodeURIComponent(uid), { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .then(function (j) {
@@ -1042,9 +1123,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         if (n.plain_text_effective_source === 'xml_fragment') bits.push('[Body from stored xml_fragment]');
         if (n.plain_text_effective_source === 'source_xml_erules') bits.push('[Body matched in source.xml by ERulesId]');
         if (n.plain_text_truncated) bits.push('[Body truncated at ~400k chars in payload]');
+        if (Array.isArray(n.structured_blocks) && n.structured_blocks.length > 0) {
+          bits.push('[Display: canonical structured_blocks]');
+        }
         if (meta) {
           meta.innerHTML = '<details class="rl-easa-tech"><summary>Technical details</summary><pre>' + esc(bits.join('\n')) + '</pre></details>';
         }
+        var blkHtml = (Array.isArray(n.structured_blocks) && n.structured_blocks.length > 0)
+          ? rlEasaStructuredBlocksHtml(n.structured_blocks)
+          : '';
         var bodySrc = '';
         if (typeof n.body_reading === 'string' && (n.body_reading || '').trim() !== '') {
           bodySrc = n.body_reading;
@@ -1053,7 +1140,16 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         } else if (typeof n.plain_text === 'string') {
           bodySrc = n.plain_text;
         }
-        if (body) body.textContent = bodySrc;
+        if (body) {
+          if (blkHtml) {
+            body.className = 'rl-easa-detail-body rl-easa-detail-body-structured';
+            body.innerHTML = blkHtml;
+          } else {
+            body.className = 'rl-easa-detail-body';
+            body.innerHTML = '';
+            body.textContent = bodySrc;
+          }
+        }
       })
       .catch(function (e) {
         if (band) {
@@ -1061,7 +1157,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           band.innerHTML = esc(e.message || 'Error') + '<small></small>';
         }
         if (meta) meta.innerHTML = '';
-        if (body) body.textContent = '';
+        if (body) {
+          body.innerHTML = '';
+          body.textContent = '';
+          body.className = 'rl-easa-detail-body';
+        }
       });
   }
 

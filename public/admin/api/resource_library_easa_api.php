@@ -362,19 +362,21 @@ if ($method === 'GET') {
             rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id and node_uid required']);
         }
         try {
-            $detailSql = easa_erules_staging_has_canonical_column($pdo)
-                ? '
-                SELECT batch_id, node_uid, parent_node_uid, node_type, depth, sort_order,
-                       source_erules_id, title, source_title, breadcrumb, path,
-                       plain_text, canonical_text, xml_fragment, metadata_json
-                FROM easa_erules_import_nodes_staging
-                WHERE batch_id = ? AND node_uid = ?
-                LIMIT 1
-            '
-                : '
-                SELECT batch_id, node_uid, parent_node_uid, node_type, depth, sort_order,
-                       source_erules_id, title, source_title, breadcrumb, path,
-                       plain_text, xml_fragment, metadata_json
+            $detailCols = [
+                'batch_id', 'node_uid', 'parent_node_uid', 'node_type', 'depth', 'sort_order',
+                'source_erules_id', 'title', 'source_title', 'breadcrumb', 'path',
+                'plain_text',
+            ];
+            if (easa_erules_staging_has_canonical_column($pdo)) {
+                $detailCols[] = 'canonical_text';
+            }
+            if (easa_erules_staging_has_structured_blocks_column($pdo)) {
+                $detailCols[] = 'structured_blocks_json';
+            }
+            $detailCols[] = 'xml_fragment';
+            $detailCols[] = 'metadata_json';
+            $detailSql = '
+                SELECT ' . implode(', ', $detailCols) . '
                 FROM easa_erules_import_nodes_staging
                 WHERE batch_id = ? AND node_uid = ?
                 LIMIT 1
@@ -388,6 +390,28 @@ if ($method === 'GET') {
         if (!is_array($row)) {
             rl_easa_json_out(404, ['ok' => false, 'error' => 'Node not found']);
         }
+        $structuredBlocksDecoded = null;
+        if (easa_erules_staging_has_structured_blocks_column($pdo)) {
+            $sbRaw = isset($row['structured_blocks_json']) ? trim((string) $row['structured_blocks_json']) : '';
+            if ($sbRaw !== '') {
+                $dec = json_decode($sbRaw, true);
+                if (is_array($dec) && $dec !== []) {
+                    $structuredBlocksDecoded = $dec;
+                }
+            }
+            unset($row['structured_blocks_json']);
+        }
+        if ($structuredBlocksDecoded === null) {
+            $fragForBlocks = trim((string) ($row['xml_fragment'] ?? ''));
+            if ($fragForBlocks !== '' && strlen($fragForBlocks) < 600000) {
+                $gen = easa_erules_structured_blocks_json_from_outer_xml($fragForBlocks);
+                $dec2 = json_decode($gen, true);
+                if (is_array($dec2) && $dec2 !== []) {
+                    $structuredBlocksDecoded = $dec2;
+                }
+            }
+        }
+        $row['structured_blocks'] = $structuredBlocksDecoded;
         $canonicalRaw = trim((string) ($row['canonical_text'] ?? ''));
         $plainRaw = (string) ($row['plain_text'] ?? '');
         $plainTrim = trim($plainRaw);
@@ -445,7 +469,18 @@ if ($method === 'GET') {
             $row['plain_text_display'] = 'No rule text could be resolved: canonical_text and plain_text are empty, no text could be extracted from xml_fragment, no child rows contributed text, and source.xml could not be matched by ERulesId (or the file is missing). Expected file: storage/easa_erules/batches/' . (int) $batchId . '/source.xml — verify batch storage_relpath matches this batch id.';
             $row['body_reading'] = '';
         } else {
-            $row['body_reading'] = easa_erules_format_body_for_reading($sanitizedBody);
+            $sourceForReading = $sanitizedBody;
+            if (($row['plain_text_effective_source'] ?? '') === 'canonical' && $plainTrim !== '') {
+                $sanPlainLocal = easa_erules_sanitize_rule_body_text($plainRaw);
+                if ($sanPlainLocal !== '') {
+                    $nCanon = substr_count($sanitizedBody, "\n");
+                    $nPlain = substr_count($sanPlainLocal, "\n");
+                    if ($nPlain > $nCanon || ($nCanon === 0 && $nPlain >= 2)) {
+                        $sourceForReading = $sanPlainLocal;
+                    }
+                }
+            }
+            $row['body_reading'] = easa_erules_format_body_for_reading($sourceForReading);
         }
         $row['rule_band'] = easa_erules_classify_display_band(
             $row['node_type'] ?? null,

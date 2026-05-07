@@ -7,6 +7,7 @@ declare(strict_types=1);
  *   php scripts/easa_erules_parse_batch.php BATCH_ID
  *
  * Requires: scripts/sql/resource_library_easa_erules.sql and resource_library_easa_erules_staging.sql
+ * Optional: scripts/sql/resource_library_easa_erules_staging_structured_blocks.sql adds structured_blocks_json for the UI renderer.
  */
 
 require_once __DIR__ . '/../src/bootstrap.php';
