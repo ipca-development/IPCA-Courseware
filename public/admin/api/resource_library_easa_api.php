@@ -19,7 +19,20 @@ header('Content-Type: application/json; charset=utf-8');
 function rl_easa_json_out(int $code, array $payload): void
 {
     http_response_code($code);
-    echo json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+    if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+        $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+    }
+    $json = json_encode($payload, $flags);
+    if ($json === false) {
+        http_response_code(500);
+        echo json_encode([
+            'ok' => false,
+            'error' => 'json_encode failed: ' . json_last_error_msg(),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+    echo $json;
     exit;
 }
 

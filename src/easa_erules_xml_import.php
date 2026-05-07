@@ -2184,8 +2184,8 @@ function easa_erules_tree_dedupe_adjacent_wrapper_topic(array $rows): array
             continue;
         }
         $prev = $out[count($out) - 1];
-        $a = mb_strtolower(trim(easa_erules_short_tree_label($prev)));
-        $b = mb_strtolower(trim(easa_erules_short_tree_label($r)));
+        $a = strtolower(trim(easa_erules_short_tree_label($prev)));
+        $b = strtolower(trim(easa_erules_short_tree_label($r)));
         if ($a !== '' && $a === $b) {
             $pt = strtolower(trim((string) ($prev['node_type'] ?? '')));
             $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
@@ -2262,17 +2262,15 @@ function easa_erules_tree_fetch_direct_children_rows(PDO $pdo, int $batchId, ?st
 /**
  * Visible browse-tree children after removing navigational GM/AMC / rule-line wrappers.
  *
+ * @param array<string, list<array<string, mixed>>> $memo
+ *
  * @return list<array<string, mixed>>
  */
-function easa_erules_tree_children_rows_flattened(PDO $pdo, int $batchId, ?string $parentUid, int $depthGuard = 0): array
+function easa_erules_tree_children_rows_flattened(PDO $pdo, int $batchId, ?string $parentUid, int $depthGuard, array &$memo): array
 {
     if ($depthGuard > 48) {
         return [];
     }
-    if (!isset($GLOBALS['_easa_erules_tree_flatten_memo']) || !is_array($GLOBALS['_easa_erules_tree_flatten_memo'])) {
-        $GLOBALS['_easa_erules_tree_flatten_memo'] = [];
-    }
-    $memo = &$GLOBALS['_easa_erules_tree_flatten_memo'];
     $key = (string) $batchId . "\0" . ($parentUid ?? '');
     if (isset($memo[$key])) {
         return $memo[$key];
@@ -2289,7 +2287,7 @@ function easa_erules_tree_children_rows_flattened(PDO $pdo, int $batchId, ?strin
         }
         $kids = easa_erules_tree_fetch_direct_children_rows($pdo, $batchId, $uid);
         if (easa_erules_tree_should_flatten_nav_wrapper($row, $kids)) {
-            $lifted = easa_erules_tree_children_rows_flattened($pdo, $batchId, $uid, $depthGuard + 1);
+            $lifted = easa_erules_tree_children_rows_flattened($pdo, $batchId, $uid, $depthGuard + 1, $memo);
             foreach ($lifted as $L) {
                 $out[] = $L;
             }
@@ -2308,10 +2306,8 @@ function easa_erules_tree_children_rows_flattened(PDO $pdo, int $batchId, ?strin
  */
 function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?string $parentUid): array
 {
-    $GLOBALS['_easa_erules_tree_flatten_memo'] = [];
-    $GLOBALS['_easa_erules_tree_visible_count_memo'] = [];
-
-    $flat = easa_erules_tree_children_rows_flattened($pdo, $batchId, $parentUid);
+    $memo = [];
+    $flat = easa_erules_tree_children_rows_flattened($pdo, $batchId, $parentUid, 0, $memo);
     $nodes = [];
     foreach ($flat as $row) {
         if (!is_array($row)) {
@@ -2322,10 +2318,8 @@ function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?strin
             continue;
         }
         $vk = (string) $batchId . "\0" . $uid;
-        if (!isset($GLOBALS['_easa_erules_tree_visible_count_memo'][$vk])) {
-            $GLOBALS['_easa_erules_tree_visible_count_memo'][$vk] = count(easa_erules_tree_children_rows_flattened($pdo, $batchId, $uid));
-        }
-        $row['child_count'] = $GLOBALS['_easa_erules_tree_visible_count_memo'][$vk];
+        easa_erules_tree_children_rows_flattened($pdo, $batchId, $uid, 0, $memo);
+        $row['child_count'] = isset($memo[$vk]) && is_array($memo[$vk]) ? count($memo[$vk]) : 0;
         $row['label_short'] = easa_erules_short_tree_label($row);
         $row['rule_band'] = easa_erules_classify_display_band(
             $row['node_type'] ?? null,

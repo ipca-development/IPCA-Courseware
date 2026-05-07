@@ -705,6 +705,27 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
+  /** tree_children / node_detail: parse body as JSON with a clear error if PHP emitted HTML or warnings. */
+  function rlEasaFetchJsonBody(r) {
+    return r.text().then(function (t) {
+      var j = null;
+      try {
+        j = t && t.length ? JSON.parse(t) : null;
+      } catch (e0) {
+        var clip = String(t || '').replace(/\s+/g, ' ').trim().slice(0, 360);
+        throw new Error(
+          'Server response was not valid JSON (HTTP ' + (r.status || '') + '). '
+            + (e0 && e0.message ? e0.message + '. ' : '')
+            + (clip ? clip : '(empty body)')
+        );
+      }
+      if (!j || typeof j !== 'object') {
+        throw new Error('Server returned an empty or non-object JSON payload (HTTP ' + (r.status || '') + ').');
+      }
+      return j;
+    });
+  }
+
   function rlEasaSetUploadProgressUi(opts) {
     var wrap = document.getElementById('rlEasaUploadProgressWrap');
     var track = document.getElementById('rlEasaUploadProgressTrack');
@@ -1424,7 +1445,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         exp.style.visibility = 'visible';
         exp.removeAttribute('aria-hidden');
         fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId)) + '&parent_uid=' + encodeURIComponent(uid), { credentials: 'same-origin' })
-          .then(function (r) { return r.json(); })
+          .then(rlEasaFetchJsonBody)
           .then(function (j) {
             exp.disabled = false;
             if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Tree load failed');
@@ -1481,7 +1502,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       }
       rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading roots…</p>';
       fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), { credentials: 'same-origin' })
-        .then(function (r) { return r.json(); })
+        .then(rlEasaFetchJsonBody)
         .then(function (j) {
           if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
           var nodes = j.nodes || [];
@@ -1506,7 +1527,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           }
           if (unwrapUid) {
             return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)) + '&parent_uid=' + encodeURIComponent(unwrapUid), { credentials: 'same-origin' })
-              .then(function (r2) { return r2.json(); })
+              .then(rlEasaFetchJsonBody)
               .then(function (j2) {
                 if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
                 rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes);
