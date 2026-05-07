@@ -944,13 +944,35 @@ function easa_erules_title_is_section_heading_row(string $title): bool
     return preg_match('/^\s*SECTION\s+/iu', $title) === 1;
 }
 
+function easa_erules_title_is_subpart_heading_row(string $title): bool
+{
+    return preg_match('/^\s*SUBPART\b/iu', $title) === 1;
+}
+
 /**
- * Some EASA Easy Access XML places SECTION block headings as siblings of the following TOC/topic rows
- * under the same parent. That leaves SECTION with child_count 0 and the expand control on the TOC row.
- * Reparent direct toc/topic siblings that follow a SECTION heading (until the next SECTION) so SECTION
- * becomes the parent and the tree UI shows the disclosure next to SECTION.
+ * First EASA Part-FCL style rule id in a title (FCL.100, FCL.205.A). Used to detect peer rules wrongly
+ * nested under another rule’s &lt;toc&gt; row.
  */
-function easa_erules_reparent_section_heading_children(PDO $pdo, int $batchId): void
+function easa_erules_title_first_fcl_ref(?string $title): ?string
+{
+    $title = trim((string) $title);
+    if ($title === '') {
+        return null;
+    }
+    if (preg_match('/\b(FCL\.\d+[A-Z]?)\b/i', $title, $m)) {
+        return strtoupper((string) $m[1]);
+    }
+
+    return null;
+}
+
+/**
+ * Some EASA Easy Access XML nests SUBPART / SECTION block headings as siblings of the following rows
+ * so structural headings get child_count 0 and the disclosure lands on the first &lt;toc&gt; child.
+ * Reparent direct toc/topic siblings so SUBPART and SECTION headings become parents (SECTION wins over
+ * SUBPART when both apply in document order).
+ */
+function easa_erules_reparent_structural_heading_children(PDO $pdo, int $batchId): void
 {
     if ($batchId <= 0) {
         return;
@@ -991,22 +1013,98 @@ function easa_erules_reparent_section_heading_children(PDO $pdo, int $batchId): 
 
             return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
         });
+        $activeSubpartUid = null;
         $activeSectionUid = null;
         foreach ($rows as $r) {
             $uid = trim((string) ($r['node_uid'] ?? ''));
             $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
             $title = trim((string) ($r['title'] ?? ''));
+            if ($nt === 'heading' && easa_erules_title_is_subpart_heading_row($title)) {
+                $activeSubpartUid = $uid !== '' ? $uid : null;
+                $activeSectionUid = null;
+                continue;
+            }
             if ($nt === 'heading' && easa_erules_title_is_section_heading_row($title)) {
                 $activeSectionUid = $uid !== '' ? $uid : null;
                 continue;
             }
-            if ($activeSectionUid === null || $uid === '') {
+            $target = $activeSectionUid ?? $activeSubpartUid;
+            if ($target === null || $uid === '') {
                 continue;
             }
             if (!in_array($nt, ['toc', 'topic'], true)) {
                 continue;
             }
-            $upd->execute([$activeSectionUid, $batchId, $uid, $activeSectionUid]);
+            $upd->execute([$target, $batchId, $uid, $target]);
+        }
+    }
+}
+
+/**
+ * XML nesting sometimes hangs peer FCL rule rows (another FCL.&lt;n&gt; or AMC cross-ref) under the
+ * first rule &lt;toc&gt; in a section. Promote those rows to the same parent as the enclosing rule toc.
+ */
+function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?'
+    );
+    $st->execute([$batchId]);
+    $byUid = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (!is_array($r)) {
+            continue;
+        }
+        $u = trim((string) ($r['node_uid'] ?? ''));
+        if ($u === '') {
+            continue;
+        }
+        $byUid[$u] = $r;
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND node_uid = ?
+           AND NOT (parent_node_uid <=> ?)'
+    );
+    for ($iter = 0; $iter < 30; $iter++) {
+        $changed = 0;
+        foreach ($byUid as $uid => $r) {
+            $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
+            if (!in_array($nt, ['toc', 'topic'], true)) {
+                continue;
+            }
+            $puid = trim((string) ($r['parent_node_uid'] ?? ''));
+            if ($puid === '' || !isset($byUid[$puid])) {
+                continue;
+            }
+            $p = $byUid[$puid];
+            if (strtolower(trim((string) ($p['node_type'] ?? ''))) !== 'toc') {
+                continue;
+            }
+            $pF = easa_erules_title_first_fcl_ref((string) ($p['title'] ?? ''));
+            $cF = easa_erules_title_first_fcl_ref((string) ($r['title'] ?? ''));
+            if ($pF === null || $cF === null || $pF === $cF) {
+                continue;
+            }
+            $gp = trim((string) ($p['parent_node_uid'] ?? ''));
+            if ($gp === '') {
+                continue;
+            }
+            $upd->execute([$gp, $batchId, $uid, $gp]);
+            if ($upd->rowCount() > 0) {
+                $byUid[$uid]['parent_node_uid'] = $gp;
+                $changed++;
+            }
+        }
+        if ($changed === 0) {
+            break;
         }
     }
 }
@@ -1323,7 +1421,8 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
         $reader->close();
     }
 
-    easa_erules_reparent_section_heading_children($pdo, $batchId);
+    easa_erules_reparent_structural_heading_children($pdo, $batchId);
+    easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
 
     if (easa_erules_batch_progress_available($pdo)) {
         $pdo->prepare('
