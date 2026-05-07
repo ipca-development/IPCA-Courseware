@@ -410,6 +410,12 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
                     $ti = count($stack) - 1;
                     $stack[$ti]['chunks'][] = $v;
                 }
+            } elseif (defined('XMLReader::SIGNIFICANT_WHITESPACE') && $type === XMLReader::SIGNIFICANT_WHITESPACE) {
+                $v = $reader->value;
+                if (trim($v) !== '' && count($stack) > 0) {
+                    $ti = count($stack) - 1;
+                    $stack[$ti]['chunks'][] = $v;
+                }
             } elseif ($type === XMLReader::END_ELEMENT) {
                 $popFrame();
             }
@@ -575,6 +581,80 @@ function easa_erules_aggregate_descendant_plain_text(PDO $pdo, int $batchId, str
     }
 
     return implode("\n\n", $blocks);
+}
+
+/**
+ * When staging plain_text missed OOXML-in-topic content, pull text from the batch's stored source.xml
+ * by locating the element whose ERulesId matches (first occurrence).
+ */
+function easa_erules_extract_plain_text_from_source_xml_by_erules_id(string $absoluteXmlPath, string $erulesId): string
+{
+    $want = trim($erulesId);
+    if ($want === '' || !is_file($absoluteXmlPath) || !is_readable($absoluteXmlPath)) {
+        return '';
+    }
+    $reader = new XMLReader();
+    if (!$reader->open($absoluteXmlPath, null, LIBXML_PARSEHUGE | LIBXML_NONET | LIBXML_COMPACT)) {
+        return '';
+    }
+    try {
+        while ($reader->read()) {
+            if ($reader->nodeType !== XMLReader::ELEMENT) {
+                continue;
+            }
+            $attrs = easa_erules_reader_collect_attributes($reader);
+            $er = isset($attrs['ERulesId']) ? trim((string) $attrs['ERulesId']) : '';
+            if ($er !== $want) {
+                continue;
+            }
+            $outer = $reader->readOuterXml();
+            if (!is_string($outer) || $outer === '') {
+                continue;
+            }
+            if (strlen($outer) > 14 * 1024 * 1024) {
+                $outer = substr($outer, 0, 14 * 1024 * 1024) . "\n<!-- … -->";
+            }
+            $noTags = strip_tags(str_replace(['<w:tab/>', '<w:tab />', '<w:br/>', '<w:br />'], ["\t", "\t", "\n", "\n"], $outer));
+            $noTags = str_replace(["\xc2\xa0"], ' ', $noTags);
+            $noTags = html_entity_decode($noTags, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+            return easa_erules_sanitize_rule_body_text($noTags);
+        }
+    } finally {
+        $reader->close();
+    }
+
+    return '';
+}
+
+/**
+ * Resolve absolute path to batch source.xml for on-demand extraction.
+ */
+function easa_erules_batch_source_xml_absolute_path(PDO $pdo, int $batchId): ?string
+{
+    if ($batchId <= 0) {
+        return null;
+    }
+    try {
+        $st = $pdo->prepare('SELECT storage_relpath FROM easa_erules_import_batches WHERE id = ? LIMIT 1');
+        $st->execute([$batchId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable) {
+        return null;
+    }
+    $rel = is_array($row) ? trim((string) ($row['storage_relpath'] ?? '')) : '';
+    if ($rel !== '') {
+        $abs = rl_project_root() . '/' . str_replace('\\', '/', $rel);
+        if (is_file($abs)) {
+            return $abs;
+        }
+    }
+    $fallback = rl_project_root() . '/' . easa_erules_batch_relative_path($batchId);
+    if (is_file($fallback)) {
+        return $fallback;
+    }
+
+    return null;
 }
 
 /**

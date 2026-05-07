@@ -345,7 +345,26 @@ if ($method === 'GET') {
             $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $nodeUid, 0);
         }
         $effectivePlain = $plainTrim !== '' ? $plainRaw : $composed;
-        $row['plain_text_effective_source'] = $plainTrim !== '' ? 'node' : (trim($composed) !== '' ? 'descendants' : 'none');
+        $srcEid = trim((string) ($row['source_erules_id'] ?? ''));
+        $fromXml = '';
+        if (trim($effectivePlain) === '' && $srcEid !== '') {
+            $xmlAbs = easa_erules_batch_source_xml_absolute_path($pdo, $batchId);
+            if ($xmlAbs !== null) {
+                $fromXml = easa_erules_extract_plain_text_from_source_xml_by_erules_id($xmlAbs, $srcEid);
+            }
+        }
+        if (trim($effectivePlain) === '' && trim($fromXml) !== '') {
+            $effectivePlain = $fromXml;
+        }
+        if ($plainTrim !== '') {
+            $row['plain_text_effective_source'] = 'node';
+        } elseif (trim($composed) !== '') {
+            $row['plain_text_effective_source'] = 'descendants';
+        } elseif (trim($fromXml) !== '') {
+            $row['plain_text_effective_source'] = 'source_xml_erules';
+        } else {
+            $row['plain_text_effective_source'] = 'none';
+        }
         $row['plain_text_composed_from_descendants'] = $plainTrim === '' && trim($composed) !== '';
         $maxPlain = 400000;
         $truncated = strlen($effectivePlain) > $maxPlain;
@@ -358,7 +377,7 @@ if ($method === 'GET') {
         $row['title_display'] = easa_erules_sanitize_display_text((string) ($row['title'] ?? ''));
         $row['plain_text_display'] = easa_erules_sanitize_rule_body_text($truncated ? (string) $row['plain_text'] : $effectivePlain);
         if ($row['plain_text_display'] === '' && $row['plain_text_effective_source'] === 'none') {
-            $row['plain_text_display'] = 'No body text is stored on this node and no text was found on child nodes. Expand the tree and open a leaf block, or re-parse the batch after an importer update.';
+            $row['plain_text_display'] = 'No rule text could be resolved: staging row is empty, no child text was found, and the source.xml file could not be matched by ERulesId (or the file is missing). Check that storage/easa_erules/batches/{id}/source.xml exists.';
         }
         $row['rule_band'] = easa_erules_classify_display_band(
             $row['node_type'] ?? null,
