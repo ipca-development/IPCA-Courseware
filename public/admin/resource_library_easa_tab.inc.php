@@ -170,12 +170,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     border: none;
     border-radius: 0;
     border-top: none;
-    overflow-x: auto;
-  }
-  .rl-easa-inline-detail .rl-easa-bl-tbl {
-    width: max-content;
-    min-width: 100%;
-    max-width: none;
+    overflow-x: visible;
   }
   .rl-easa-tree-list {
     list-style: none;
@@ -330,16 +325,29 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     word-break: break-word;
   }
   .rl-easa-bl-tbl {
+    table-layout: fixed;
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     border-collapse: collapse;
     margin: 0.6rem 0 0;
-    font-size: 12.5px;
+    font-size: inherit;
+    line-height: inherit;
   }
   .rl-easa-bl-tbl td,
   .rl-easa-bl-tbl th {
     border: 1px solid #cbd5e1;
-    padding: 6px 10px;
+    padding: 5px 7px;
     vertical-align: top;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    font-size: inherit;
+    font-weight: normal;
+    -webkit-hyphens: auto;
+    hyphens: auto;
+  }
+  .rl-easa-bl-tbl th {
+    font-weight: 600;
   }
   .rl-easa-node-detail-wrap { margin-top: 0; }
   .rl-easa-tree-list li {
