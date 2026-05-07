@@ -1365,7 +1365,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         || nodeTypeLc === 'frontmatter' || nodeTypeLc === 'backmatter') ? 'section' : 'rule';
     }
     var kids = parseInt(n.child_count, 10) || 0;
-    var expandable = typeof n.expandable === 'boolean' ? n.expandable : (kids > 0);
+    var expandable = false;
+    if (uiKind === 'section') {
+      expandable = typeof n.expandable === 'boolean' ? n.expandable : (kids > 0);
+    } else {
+      expandable = typeof n.expandable === 'boolean' ? n.expandable : false;
+    }
     var mt = String(n.material_type || '').toUpperCase();
     if (uiKind === 'section') {
       mt = 'HEADING';
@@ -1396,12 +1401,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     exp.type = 'button';
     exp.className = 'rl-easa-tree-exp';
     exp.setAttribute('aria-expanded', 'false');
-    if (!expandable || kids < 1) {
-      exp.disabled = true;
-      exp.textContent = '\u00a0';
-      exp.style.visibility = 'hidden';
-      exp.setAttribute('aria-hidden', 'true');
-    } else {
+    if (expandable && kids > 0) {
       exp.textContent = '\u25b6';
       exp.setAttribute('aria-label', uiKind === 'section' ? 'Expand section' : 'Expand nested rules');
       if (supplementMat === 'GM') {
@@ -1409,6 +1409,16 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       } else if (supplementMat === 'AMC') {
         exp.classList.add('rl-easa-tree-exp--amc');
       }
+    } else {
+      exp.disabled = true;
+      if (uiKind === 'rule') {
+        exp.textContent = '\u2022';
+        exp.style.visibility = 'visible';
+      } else {
+        exp.textContent = '\u00a0';
+        exp.style.visibility = 'hidden';
+      }
+      exp.setAttribute('aria-hidden', 'true');
     }
 
     var dot = document.createElement('span');
@@ -1461,7 +1471,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       + '</div>';
     li.appendChild(inlineWrap);
 
-    if (kids > 0) {
+    if (kids > 0 && expandable) {
       var chUl = document.createElement('ul');
       chUl.className = 'rl-easa-tree-list';
       chUl.hidden = true;

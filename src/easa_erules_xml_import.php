@@ -973,24 +973,55 @@ function easa_erules_title_is_structural_block_title(string $title): bool
 {
     return easa_erules_title_is_annex_heading_row($title)
         || easa_erules_title_is_subpart_heading_row($title)
-        || easa_erules_title_is_section_heading_row($title);
+        || easa_erules_title_is_section_heading_row($title)
+        || preg_match('/^\s*APPENDIX\b/iu', $title) === 1
+        || preg_match('/^\s*CHAPTER\b/iu', $title) === 1
+        || preg_match('/^\s*TITLE\b/iu', $title) === 1
+        || preg_match('/^\s*PART\b\s+\d+/iu', $title) === 1;
 }
 
 /**
- * First EASA Part-FCL style rule id in a title (FCL.100, FCL.205.A). Used to detect peer rules wrongly
- * nested under another rule’s &lt;toc&gt; row.
+ * True when the row title is a GM / AMC line (not a structural SUBPART/SECTION heading).
  */
-function easa_erules_title_first_fcl_ref(?string $title): ?string
+function easa_erules_title_line_is_gm_or_amc(?string $title): bool
+{
+    $title = trim((string) $title);
+    if ($title === '') {
+        return false;
+    }
+
+    return preg_match('/^\s*GM\d*\b/iu', $title) === 1 || preg_match('/^\s*AMC\d*\b/iu', $title) === 1;
+}
+
+/**
+ * First primary rule code in a title (FCL.100, ORA.140, CAT.001). Used to flatten peer rules wrongly
+ * nested under another rule &lt;toc&gt; or &lt;topic&gt; row. Returns null for empty or GM/AMC-only lines
+ * where the leading token is guidance/compliance, not the IR anchor.
+ */
+function easa_erules_title_first_rule_code_ref(?string $title): ?string
 {
     $title = trim((string) $title);
     if ($title === '') {
         return null;
     }
-    if (preg_match('/\b(FCL\.\d+[A-Z]?)\b/i', $title, $m)) {
-        return strtoupper((string) $m[1]);
+    if (easa_erules_title_line_is_gm_or_amc($title)) {
+        return null;
+    }
+    foreach (['FCL', 'ORA', 'CAT'] as $pfx) {
+        if (preg_match('/\b(' . $pfx . '\.\d+[A-Z]?)\b/i', $title, $m)) {
+            return strtoupper((string) $m[1]);
+        }
     }
 
     return null;
+}
+
+/**
+ * @deprecated Use easa_erules_title_first_rule_code_ref (same behaviour, FCL-focused name retained).
+ */
+function easa_erules_title_first_fcl_ref(?string $title): ?string
+{
+    return easa_erules_title_first_rule_code_ref($title);
 }
 
 /**
@@ -1369,8 +1400,9 @@ function easa_erules_merge_duplicate_structural_heading_toc(PDO $pdo, int $batch
 }
 
 /**
- * XML nesting sometimes hangs peer FCL rule rows (another FCL.&lt;n&gt; or AMC cross-ref) under the
- * first rule &lt;toc&gt; in a section. Promote those rows to the same parent as the enclosing rule toc.
+ * XML nesting sometimes hangs peer IR rule rows (another FCL.&lt;n&gt;, ORA.&lt;n&gt;, …) under the first
+ * rule &lt;toc&gt;, &lt;topic&gt;, or non-structural &lt;heading&gt; in a block. GM/AMC lines stay under their IR parent when nested;
+ * peer IR rows are promoted to the same parent as that rule node.
  */
 function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
 {
@@ -1405,7 +1437,14 @@ function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
         $changed = 0;
         foreach ($byUid as $uid => $r) {
             $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
-            if (!in_array($nt, ['toc', 'topic'], true)) {
+            if (!in_array($nt, ['toc', 'topic', 'heading'], true)) {
+                continue;
+            }
+            $cTitle = (string) ($r['title'] ?? '');
+            if ($nt === 'heading' && easa_erules_title_is_structural_block_title($cTitle)) {
+                continue;
+            }
+            if (easa_erules_title_line_is_gm_or_amc($cTitle)) {
                 continue;
             }
             $puid = trim((string) ($r['parent_node_uid'] ?? ''));
@@ -1413,11 +1452,19 @@ function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
                 continue;
             }
             $p = $byUid[$puid];
-            if (strtolower(trim((string) ($p['node_type'] ?? ''))) !== 'toc') {
+            $pNt = strtolower(trim((string) ($p['node_type'] ?? '')));
+            if (!in_array($pNt, ['toc', 'topic', 'heading'], true)) {
                 continue;
             }
-            $pF = easa_erules_title_first_fcl_ref((string) ($p['title'] ?? ''));
-            $cF = easa_erules_title_first_fcl_ref((string) ($r['title'] ?? ''));
+            $pTitle = (string) ($p['title'] ?? '');
+            if ($pNt === 'heading' && easa_erules_title_is_structural_block_title($pTitle)) {
+                continue;
+            }
+            if (easa_erules_title_line_is_gm_or_amc($pTitle)) {
+                continue;
+            }
+            $pF = easa_erules_title_first_rule_code_ref($pTitle);
+            $cF = easa_erules_title_first_rule_code_ref($cTitle);
             if ($pF === null || $cF === null || $pF === $cF) {
                 continue;
             }
@@ -2313,6 +2360,45 @@ function easa_erules_tree_node_semantic_ui(array $row): array
         $row['source_erules_id'] ?? null
     );
 
+    $titleCheck = trim((string) ($row['title'] ?? ''));
+    if ($titleCheck === '') {
+        $titleCheck = $displayTitle;
+    }
+    // GM/AMC are rules even when stored as &lt;toc&gt; — never show as expandable structural sections.
+    if (in_array($nt, ['topic', 'toc'], true) && easa_erules_title_line_is_gm_or_amc($titleCheck)) {
+        return [
+            'id' => $uid,
+            'parent_id' => $parentId,
+            'display_title' => $displayTitle,
+            'ui_kind' => 'rule',
+            'material_type' => easa_erules_band_to_material_type($band),
+            'expandable' => false,
+            'click_action' => 'open_rule',
+            'depth' => (int) ($row['depth'] ?? 0),
+            'sort_order' => (int) ($row['sort_order'] ?? 0),
+        ];
+    }
+
+    // IR rows are often stored as &lt;toc&gt; or &lt;heading&gt;; only true structural blocks are tree sections.
+    if (in_array($nt, ['toc', 'heading'], true)
+        && !easa_erules_title_is_structural_block_title($titleCheck)
+        && easa_erules_title_first_rule_code_ref($titleCheck) !== null) {
+        $mat = easa_erules_band_to_material_type($band);
+        $expandRule = $childCount > 0 && $mat === 'IR';
+
+        return [
+            'id' => $uid,
+            'parent_id' => $parentId,
+            'display_title' => $displayTitle,
+            'ui_kind' => 'rule',
+            'material_type' => $mat,
+            'expandable' => $expandRule,
+            'click_action' => 'open_rule',
+            'depth' => (int) ($row['depth'] ?? 0),
+            'sort_order' => (int) ($row['sort_order'] ?? 0),
+        ];
+    }
+
     $isSectionType = in_array($nt, ['heading', 'toc', 'document', 'frontmatter', 'backmatter'], true);
 
     if ($isSectionType) {
@@ -2329,16 +2415,17 @@ function easa_erules_tree_node_semantic_ui(array $row): array
         ];
     }
 
-    // Rule row (topic and any non-section candidate stored as topic-like)
-    $expandable = $childCount > 0;
+    // Rule row: only IR (implementing rule) nodes may list GM/AMC children in the tree; GM/AMC stay terminal.
+    $mat = easa_erules_band_to_material_type($band);
+    $expandRule = $childCount > 0 && $mat === 'IR';
 
     return [
         'id' => $uid,
         'parent_id' => $parentId,
         'display_title' => $displayTitle,
         'ui_kind' => 'rule',
-        'material_type' => easa_erules_band_to_material_type($band),
-        'expandable' => $expandable,
+        'material_type' => $mat,
+        'expandable' => $expandRule,
         'click_action' => 'open_rule',
         'depth' => (int) ($row['depth'] ?? 0),
         'sort_order' => (int) ($row['sort_order'] ?? 0),
