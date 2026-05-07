@@ -66,3 +66,44 @@ function easa_erules_store_batch_upload(int $batchId, string $tmpPath): array
         'size' => (int) $size,
     ];
 }
+
+/**
+ * Runtime storage health snapshot (optionally include a batch source.xml check).
+ *
+ * @return array<string,mixed>
+ */
+function easa_erules_storage_health(?int $batchId = null): array
+{
+    $root = rl_project_root();
+    $storageRoot = easa_erules_storage_root();
+    $batchesDir = $storageRoot . '/batches';
+    $out = [
+        'project_root' => $root,
+        'storage_root' => $storageRoot,
+        'batches_dir' => $batchesDir,
+        'storage_root_exists' => is_dir($storageRoot),
+        'storage_root_writable' => is_dir($storageRoot) && is_writable($storageRoot),
+        'batches_dir_exists' => is_dir($batchesDir),
+        'batches_dir_writable' => is_dir($batchesDir) && is_writable($batchesDir),
+    ];
+
+    if ($batchId !== null && $batchId > 0) {
+        $rel = easa_erules_batch_relative_path($batchId);
+        $abs = $root . '/' . $rel;
+        $exists = is_file($abs);
+        $readable = $exists && is_readable($abs);
+        $size = $exists ? @filesize($abs) : false;
+        $sha = $readable ? @hash_file('sha256', $abs) : false;
+        $out['batch'] = [
+            'batch_id' => $batchId,
+            'expected_relpath' => $rel,
+            'expected_absolute_path' => $abs,
+            'source_exists' => $exists,
+            'source_readable' => $readable,
+            'source_size_bytes' => is_int($size) ? $size : null,
+            'source_sha256' => is_string($sha) ? $sha : null,
+        ];
+    }
+
+    return $out;
+}

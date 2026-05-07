@@ -533,7 +533,9 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
         }
         $frame = $p['frame'];
         $chunks = $p['chunks'];
-        $plain = easa_erules_merge_text_chunks($chunks);
+        $plain = isset($frame->forcedPlain)
+            ? (string) $frame->forcedPlain
+            : easa_erules_merge_text_chunks($chunks);
 
         if ($frame->isCandidate && $frame->candidateUid !== null) {
             array_pop($candidateUidStack);
@@ -574,21 +576,28 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
                 return $x !== '';
             }));
 
-            $openTag = '<' . htmlspecialchars($local, ENT_XML1 | ENT_QUOTES, 'UTF-8');
-            foreach ($attrs as $ak => $av) {
-                $openTag .= ' ' . htmlspecialchars((string) $ak, ENT_XML1 | ENT_QUOTES, 'UTF-8')
-                    . '="' . htmlspecialchars((string) $av, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '"';
+            $forcedFragment = isset($frame->forcedFragment) ? trim((string) $frame->forcedFragment) : '';
+            if ($forcedFragment !== '') {
+                $frag = strlen($forcedFragment) > EASA_ERULES_XML_FRAGMENT_STORE_MAX
+                    ? substr($forcedFragment, 0, EASA_ERULES_XML_FRAGMENT_STORE_MAX) . "\n<!-- … truncated -->"
+                    : $forcedFragment;
+            } else {
+                $openTag = '<' . htmlspecialchars($local, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+                foreach ($attrs as $ak => $av) {
+                    $openTag .= ' ' . htmlspecialchars((string) $ak, ENT_XML1 | ENT_QUOTES, 'UTF-8')
+                        . '="' . htmlspecialchars((string) $av, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '"';
+                }
+                $openTag .= '>';
+                $frag = strlen($openTag) > EASA_ERULES_XML_FRAGMENT_MAX
+                    ? substr($openTag, 0, EASA_ERULES_XML_FRAGMENT_MAX) . "\n<!-- … -->"
+                    : $openTag;
             }
-            $openTag .= '>';
-            $frag = strlen($openTag) > EASA_ERULES_XML_FRAGMENT_MAX
-                ? substr($openTag, 0, EASA_ERULES_XML_FRAGMENT_MAX) . "\n<!-- … -->"
-                : $openTag;
 
             $meta = [
                 'localName' => $local,
                 'namespaceURI' => $frame->namespaceUri,
                 'attributes' => $attrs,
-                'import_mode' => 'xmlreader_stream',
+                'import_mode' => $forcedFragment !== '' ? 'xmlreader_stream_topic_outerxml' : 'xmlreader_stream',
             ];
 
             $canonicalInit = easa_erules_body_canonical_for_hash($plain);
@@ -700,6 +709,19 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
                     'sortOrder' => $sortOrder,
                     'xmlDepth' => $depthIdx + 1,
                 ];
+
+                $isTopicCandidate = $isCand && strtolower((string) $ln) === 'topic';
+                if ($isTopicCandidate) {
+                    $outer = $reader->readOuterXml();
+                    if (is_string($outer) && trim($outer) !== '') {
+                        $pc = easa_erules_plain_canonical_from_outer_xml($outer);
+                        $frame->forcedPlain = $pc['plain'];
+                        $frame->forcedFragment = $outer;
+                    }
+                    $stack[] = ['frame' => $frame, 'chunks' => []];
+                    $popFrame();
+                    continue;
+                }
 
                 $stack[] = ['frame' => $frame, 'chunks' => []];
 

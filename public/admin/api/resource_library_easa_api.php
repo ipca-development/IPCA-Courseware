@@ -246,6 +246,21 @@ $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 if ($method === 'GET') {
     $action = trim((string) ($_GET['action'] ?? 'status'));
 
+    if ($action === 'storage_health') {
+        $batchId = (int) ($_GET['batch_id'] ?? 0);
+        $health = easa_erules_storage_health($batchId > 0 ? $batchId : null);
+        if ($batchId > 0) {
+            try {
+                $st = $pdo->prepare('SELECT id, storage_relpath, status, error_message, updated_at FROM easa_erules_import_batches WHERE id = ? LIMIT 1');
+                $st->execute([$batchId]);
+                $health['batch_row'] = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+            } catch (Throwable) {
+                $health['batch_row'] = null;
+            }
+        }
+        rl_easa_json_out(200, ['ok' => true, 'health' => $health]);
+    }
+
     if ($action === 'batch_progress') {
         $bid = (int) ($_GET['batch_id'] ?? 0);
         if ($bid <= 0) {
@@ -466,6 +481,7 @@ if ($method === 'GET') {
         'tables_ok' => $tablesOk,
         'staging_tables_ok' => $stagingOk,
         'progress_columns_ok' => $progressOk,
+        'storage_health' => easa_erules_storage_health(null),
         'php_upload_max_filesize' => ini_get('upload_max_filesize'),
         'php_post_max_size' => ini_get('post_max_size'),
         'max_body_bytes' => $maxBodyBytes,
@@ -641,6 +657,19 @@ if ($action === 'parse_batch') {
     $batchId = (int) ($data['batch_id'] ?? 0);
     if ($batchId <= 0) {
         rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id required']);
+    }
+
+    $preflight = easa_erules_storage_health($batchId);
+    $batchHealth = is_array($preflight['batch'] ?? null) ? $preflight['batch'] : [];
+    $sourceReadable = !empty($batchHealth['source_exists']) && !empty($batchHealth['source_readable']);
+    if (!$sourceReadable) {
+        $expectedRel = (string) ($batchHealth['expected_relpath'] ?? easa_erules_batch_relative_path($batchId));
+        $msg = 'Parser refused to start: source.xml missing/unreadable for batch '
+            . $batchId . ' at ' . $expectedRel
+            . '. Ensure storage/easa_erules/batches exists/writable, then upload again.';
+        $pdo->prepare('UPDATE easa_erules_import_batches SET status = \'failed\', error_message = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+            ->execute([$msg, $batchId]);
+        rl_easa_json_out(409, ['ok' => false, 'error' => $msg, 'storage_health' => $preflight]);
     }
 
     $syncWait = !empty($data['sync_wait']) || !empty($data['sync']);
