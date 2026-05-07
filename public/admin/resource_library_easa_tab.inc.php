@@ -132,23 +132,29 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     width: 100%;
     box-sizing: border-box;
   }
+  /* Indented to match the topic title text (after dot + expand), with air above/below and right margin. */
   .rl-easa-inline-detail {
     flex: none;
-    padding-top: 6px;
-    padding-bottom: 4px;
+    box-sizing: border-box;
+    padding-top: 16px;
+    padding-bottom: 20px;
+    /* Same offset as .rl-easa-tree-row: dot (8+2) + gap + exp (1.25rem) + gap → label text. */
+    padding-left: calc(8px + 2px + 4px + 1.25rem + 4px);
+    padding-right: 2.75rem;
   }
-  /* Bleed expanded rule text toward the browse panel edges (depth aligns with importer row depth). */
   .rl-easa-inline-detail-inner {
-    --rl-easa-detail-pull: 12px;
-    width: calc(100% + var(--rl-easa-detail-pull) + 12px);
-    margin-left: calc(-1 * var(--rl-easa-detail-pull));
-    margin-right: -12px;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
     box-sizing: border-box;
     border: 1px solid #e2e8f0;
     border-radius: 10px;
     overflow: hidden;
     background: #fff;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    box-shadow:
+      0 4px 18px rgba(15, 23, 42, 0.07),
+      0 2px 6px rgba(15, 23, 42, 0.05),
+      0 1px 0 rgba(255, 255, 255, 0.9) inset;
   }
   .rl-easa-inline-detail .rl-easa-inline-band {
     border-radius: 0 !important;
@@ -1278,13 +1284,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     row.appendChild(ty);
     li.appendChild(row);
 
-    var treeDepthVal = parseInt(String(n.depth != null ? n.depth : '1'), 10);
-    if (isNaN(treeDepthVal) || treeDepthVal < 1) treeDepthVal = 1;
-    var inlinePull = 12 + Math.max(0, treeDepthVal - 1) * 18;
     var inlineWrap = document.createElement('div');
     inlineWrap.className = 'rl-easa-inline-detail';
     inlineWrap.hidden = true;
-    inlineWrap.style.setProperty('--rl-easa-detail-pull', inlinePull + 'px');
     inlineWrap.innerHTML =
       '<div class="rl-easa-inline-detail-inner">'
       + '<div class="rl-easa-inline-band rl-easa-band rl-easa-band-neu"></div>'
