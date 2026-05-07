@@ -302,10 +302,14 @@ if ($method === 'GET') {
                             WHERE fc.batch_id = n.batch_id AND fc.parent_node_uid = n.node_uid
                               AND fc.source_title IS NOT NULL AND TRIM(fc.source_title) != \'\'
                             ORDER BY fc.sort_order ASC, fc.id ASC LIMIT 1) AS first_child_source_title';
+            $topicChildSql = ',
+                           (SELECT COUNT(*) FROM easa_erules_import_nodes_staging tc
+                            WHERE tc.batch_id = n.batch_id AND tc.parent_node_uid = n.node_uid
+                              AND LOWER(TRIM(tc.node_type)) = \'topic\') AS topic_child_count';
             if ($isRoot) {
                 $sql = "
                     SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
-                           n.source_erules_id, n.title, n.source_title, n.breadcrumb{$childPreview},
+                           n.source_erules_id, n.title, n.source_title, n.breadcrumb{$childPreview}{$topicChildSql},
                            (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
                             WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
                     FROM easa_erules_import_nodes_staging n
@@ -318,7 +322,7 @@ if ($method === 'GET') {
             } else {
                 $sql = "
                     SELECT n.batch_id, n.node_uid, n.parent_node_uid, n.node_type, n.sort_order, n.depth,
-                           n.source_erules_id, n.title, n.source_title, n.breadcrumb{$childPreview},
+                           n.source_erules_id, n.title, n.source_title, n.breadcrumb{$childPreview}{$topicChildSql},
                            (SELECT COUNT(*) FROM easa_erules_import_nodes_staging c
                             WHERE c.batch_id = n.batch_id AND c.parent_node_uid = n.node_uid) AS child_count
                     FROM easa_erules_import_nodes_staging n
@@ -340,6 +344,10 @@ if ($method === 'GET') {
                     $row['source_title'] ?? null,
                     $row['source_erules_id'] ?? null
                 );
+                $sem = easa_erules_tree_node_semantic_ui($row);
+                foreach ($sem as $semKey => $semVal) {
+                    $nodes[$k][$semKey] = $semVal;
+                }
             }
         } catch (Throwable $e) {
             rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);

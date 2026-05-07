@@ -1924,6 +1924,88 @@ function easa_erules_classify_display_band(?string $nodeType, ?string $title, ?s
 }
 
 /**
+ * Map colour band to API material_type for rule rows (Implementing Rule / AMC / GM).
+ *
+ * @return 'IR'|'AMC'|'GM'
+ */
+function easa_erules_band_to_material_type(string $band): string
+{
+    $b = strtolower(trim($band));
+
+    return match ($b) {
+        'amc' => 'AMC',
+        'gm' => 'GM',
+        default => 'IR',
+    };
+}
+
+/**
+ * Semantic fields for EASA browse tree (tree_children). Frontend should prefer these over raw node_type.
+ *
+ * @param array<string, mixed> $row Must include node_type, title, child_count
+ *
+ * @return array{
+ *   id: string,
+ *   parent_id: ?string,
+ *   display_title: string,
+ *   ui_kind: 'section'|'rule',
+ *   material_type: 'IR'|'AMC'|'GM'|'HEADING',
+ *   expandable: bool,
+ *   click_action: 'expand'|'open_rule',
+ *   depth: int,
+ *   sort_order: int
+ * }
+ */
+function easa_erules_tree_node_semantic_ui(array $row): array
+{
+    $uid = trim((string) ($row['node_uid'] ?? ''));
+    $pp = $row['parent_node_uid'] ?? null;
+    $parentId = ($pp !== null && trim((string) $pp) !== '') ? trim((string) $pp) : null;
+    $nt = strtolower(trim((string) ($row['node_type'] ?? '')));
+    $childCount = (int) ($row['child_count'] ?? 0);
+
+    $displayTitle = easa_erules_short_tree_label($row);
+
+    $band = easa_erules_classify_display_band(
+        $row['node_type'] ?? null,
+        $row['title'] ?? null,
+        $row['source_title'] ?? null,
+        $row['source_erules_id'] ?? null
+    );
+
+    $isSectionType = in_array($nt, ['heading', 'toc', 'document', 'frontmatter', 'backmatter'], true);
+
+    if ($isSectionType) {
+        return [
+            'id' => $uid,
+            'parent_id' => $parentId,
+            'display_title' => $displayTitle,
+            'ui_kind' => 'section',
+            'material_type' => 'HEADING',
+            'expandable' => $childCount > 0,
+            'click_action' => 'expand',
+            'depth' => (int) ($row['depth'] ?? 0),
+            'sort_order' => (int) ($row['sort_order'] ?? 0),
+        ];
+    }
+
+    // Rule row (topic and any non-section candidate stored as topic-like)
+    $expandable = $childCount > 0;
+
+    return [
+        'id' => $uid,
+        'parent_id' => $parentId,
+        'display_title' => $displayTitle,
+        'ui_kind' => 'rule',
+        'material_type' => easa_erules_band_to_material_type($band),
+        'expandable' => $expandable,
+        'click_action' => 'open_rule',
+        'depth' => (int) ($row['depth'] ?? 0),
+        'sort_order' => (int) ($row['sort_order'] ?? 0),
+    ];
+}
+
+/**
  * @return bool
  */
 function easa_erules_staging_tables_ok(PDO $pdo): bool

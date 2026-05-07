@@ -175,19 +175,35 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   .rl-easa-tree-list {
     list-style: none;
     margin: 0;
-    padding: 0 0 0 2px;
+    padding: 0;
   }
   .rl-easa-tree-list .rl-easa-tree-list {
-    margin-left: 10px;
-    padding-left: 8px;
-    border-left: 1px solid #e2e8f0;
+    margin-left: 14px;
+    padding-left: 0;
+  }
+  .rl-easa-tree-li {
+    margin: 0;
+    padding: 0;
+  }
+  .rl-easa-tree-li.rl-easa-tree-li-selected > .rl-easa-tree-row {
+    background: #eff6ff;
+    border-radius: 6px;
+    margin-left: -4px;
+    margin-right: -4px;
+    padding-left: 4px;
+    padding-right: 4px;
   }
   .rl-easa-tree-row {
     display: flex;
     align-items: flex-start;
     gap: 4px;
-    margin: 2px 0;
-    line-height: 1.35;
+    margin: 1px 0;
+    line-height: 1.4;
+  }
+  .rl-easa-tree-row--section .rl-easa-tree-section-title {
+    font-weight: 700;
+    color: #0f172a;
+    letter-spacing: -0.01em;
   }
   .rl-easa-tree-exp {
     flex: 0 0 auto;
@@ -203,47 +219,46 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     visibility: hidden;
     cursor: default;
   }
-  .rl-easa-tree-label {
+  .rl-easa-tree-section-title {
     flex: 1;
     min-width: 0;
     text-align: left;
     border: none;
     background: transparent;
     cursor: pointer;
-    padding: 0;
+    padding: 2px 0;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .rl-easa-tree-section-title:hover:not(:disabled) {
+    color: #0369a1;
+  }
+  .rl-easa-tree-section-title:disabled {
+    cursor: default;
+    color: #64748b;
+  }
+  .rl-easa-tree-rule-title {
+    flex: 1;
+    min-width: 0;
+    text-align: left;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    padding: 2px 0;
     color: #0f172a;
     font-size: 13px;
+    font-family: inherit;
   }
-  .rl-easa-tree-label:hover { text-decoration: underline; color: #0369a1; }
-  .rl-easa-tree-label.rl-easa-tree-heading {
-    font-weight: 700;
-    cursor: default;
-    color: #0f172a;
+  .rl-easa-tree-rule-title:hover {
+    text-decoration: underline;
+    color: #0369a1;
   }
-  .rl-easa-tree-label.rl-easa-tree-heading:hover {
-    text-decoration: none;
-    color: #0f172a;
-  }
-  .rl-easa-tree-label.rl-easa-tree-toc {
+  .rl-easa-tree-rule-supplement {
     font-style: italic;
     color: #334155;
   }
-  .rl-easa-tree-label.rl-easa-tree-toc-empty {
-    cursor: default;
-    font-style: italic;
-    color: #64748b;
-  }
-  .rl-easa-tree-label.rl-easa-tree-toc-empty:hover {
-    text-decoration: none;
-    color: #64748b;
-  }
-  .rl-easa-tree-type {
-    flex: 0 0 auto;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    color: #64748b;
-    margin-left: 4px;
+  .rl-easa-tree-rule-supplement:hover {
+    color: #0369a1;
   }
   .rl-easa-tech summary {
     cursor: pointer;
@@ -599,6 +614,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   var api = root.getAttribute('data-api') || '';
   /** Effective max POST body (bytes) from last status; 0 = unknown. */
   var rlEasaMaxUploadBytes = 0;
+  var rlEasaTreeSelectedLi = null;
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -1164,9 +1180,16 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       if (loading || loadedHere) {
         wrap.hidden = true;
         wrap.removeAttribute('data-loading');
+        liElm.classList.remove('rl-easa-tree-li-selected');
+        if (rlEasaTreeSelectedLi === liElm) rlEasaTreeSelectedLi = null;
         return;
       }
     }
+    if (rlEasaTreeSelectedLi && rlEasaTreeSelectedLi !== liElm) {
+      rlEasaTreeSelectedLi.classList.remove('rl-easa-tree-li-selected');
+    }
+    rlEasaTreeSelectedLi = liElm;
+    liElm.classList.add('rl-easa-tree-li-selected');
     wrap.hidden = false;
     wrap.setAttribute('data-loading', '1');
     wrap.removeAttribute('data-loaded-uid');
@@ -1241,54 +1264,85 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       });
   }
 
+  function rlEasaTreeMaterialDotClass(mt) {
+    var m = String(mt || 'IR').toUpperCase();
+    if (m === 'AMC') return 'rl-easa-tree-dot rl-easa-tree-dot-amc';
+    if (m === 'GM') return 'rl-easa-tree-dot rl-easa-tree-dot-gm';
+    return 'rl-easa-tree-dot rl-easa-tree-dot-ir';
+  }
+
   function rlEasaCreateTreeLi(batchId, n) {
     var li = document.createElement('li');
-    var uid = n.node_uid || '';
+    li.className = 'rl-easa-tree-li';
+    var uid = n.node_uid || n.id || '';
+    var nodeTypeLc = String(n.node_type || '').toLowerCase();
+    var uiKind = n.ui_kind;
+    if (!uiKind) {
+      uiKind = (nodeTypeLc === 'heading' || nodeTypeLc === 'toc' || nodeTypeLc === 'document'
+        || nodeTypeLc === 'frontmatter' || nodeTypeLc === 'backmatter') ? 'section' : 'rule';
+    }
     var kids = parseInt(n.child_count, 10) || 0;
-    var rb = n.rule_band || 'ir';
-    if (['ir', 'amc', 'gm', 'neu'].indexOf(rb) < 0) rb = 'ir';
+    var expandable = typeof n.expandable === 'boolean' ? n.expandable : (kids > 0);
+    var mt = String(n.material_type || '').toUpperCase();
+    if (uiKind === 'section') {
+      mt = 'HEADING';
+    } else if (!mt || mt === 'HEADING') {
+      var rb = n.rule_band || 'ir';
+      if (rb === 'amc') mt = 'AMC';
+      else if (rb === 'gm') mt = 'GM';
+      else mt = 'IR';
+    }
+    var disp = n.display_title || n.label_short || n.title || n.source_erules_id || uid || '—';
+
     var row = document.createElement('div');
-    row.className = 'rl-easa-tree-row';
-    var dot = document.createElement('span');
-    dot.className = 'rl-easa-tree-dot rl-easa-tree-dot-' + rb;
-    dot.setAttribute('aria-hidden', 'true');
+    row.className = 'rl-easa-tree-row' + (uiKind === 'section' ? ' rl-easa-tree-row--section' : ' rl-easa-tree-row--rule');
+
     var exp = document.createElement('button');
     exp.type = 'button';
     exp.className = 'rl-easa-tree-exp';
     exp.setAttribute('aria-expanded', 'false');
-    if (kids < 1) {
+    if (!expandable || kids < 1) {
       exp.disabled = true;
-      exp.textContent = '·';
+      exp.textContent = '\u00a0';
+      exp.style.visibility = 'hidden';
+      exp.setAttribute('aria-hidden', 'true');
     } else {
-      exp.textContent = '▶';
-      exp.setAttribute('aria-label', 'Expand children');
+      exp.textContent = '\u25b6';
+      exp.setAttribute('aria-label', uiKind === 'section' ? 'Expand section' : 'Expand nested rules');
     }
-    var nodeTypeLc = String(n.node_type || '').toLowerCase();
-    var isHeading = nodeTypeLc === 'heading';
-    var isToc = nodeTypeLc === 'toc';
-    var lab;
-    if (isHeading) {
-      lab = document.createElement('span');
-      lab.className = 'rl-easa-tree-label rl-easa-tree-heading';
-    } else if (isToc && kids < 1) {
-      lab = document.createElement('span');
-      lab.className = 'rl-easa-tree-label rl-easa-tree-toc-empty';
+
+    var dot = document.createElement('span');
+    if (uiKind === 'section') {
+      dot.setAttribute('aria-hidden', 'true');
+      dot.style.display = 'none';
     } else {
-      lab = document.createElement('button');
-      lab.type = 'button';
-      lab.className = 'rl-easa-tree-label' + (isToc ? ' rl-easa-tree-toc' : '');
-      if (isToc) {
-        lab.title = 'Show or hide entries under this table of contents';
-      }
+      dot.className = rlEasaTreeMaterialDotClass(mt);
+      dot.setAttribute('aria-hidden', 'true');
     }
-    lab.textContent = n.label_short || n.title || n.source_erules_id || n.node_uid || n.node_type || '—';
-    var ty = document.createElement('span');
-    ty.className = 'rl-easa-tree-type';
-    ty.textContent = n.node_type || '';
-    row.appendChild(dot);
+
+    var sectionBtn = null;
+    var ruleBtn = null;
+    if (uiKind === 'section') {
+      sectionBtn = document.createElement('button');
+      sectionBtn.type = 'button';
+      sectionBtn.className = 'rl-easa-tree-section-title';
+      sectionBtn.textContent = disp;
+      if (!expandable || kids < 1) sectionBtn.disabled = true;
+    } else {
+      ruleBtn = document.createElement('button');
+      ruleBtn.type = 'button';
+      ruleBtn.className = 'rl-easa-tree-rule-title';
+      if (mt === 'AMC' || mt === 'GM') ruleBtn.classList.add('rl-easa-tree-rule-supplement');
+      ruleBtn.textContent = disp;
+    }
+
     row.appendChild(exp);
-    row.appendChild(lab);
-    row.appendChild(ty);
+    if (uiKind === 'section') {
+      row.appendChild(sectionBtn);
+    } else {
+      row.appendChild(dot);
+      row.appendChild(ruleBtn);
+    }
     li.appendChild(row);
 
     var inlineWrap = document.createElement('div');
@@ -1317,18 +1371,24 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         if (!sub) return;
         if (sub.getAttribute('data-loaded') === '1' && !sub.hidden) {
           sub.hidden = true;
-          exp.textContent = '▶';
-          exp.setAttribute('aria-expanded', 'false');
+          if (!exp.disabled) {
+            exp.textContent = '\u25b6';
+            exp.setAttribute('aria-expanded', 'false');
+          }
           return;
         }
         if (sub.getAttribute('data-loaded') === '1' && sub.children.length > 0) {
           sub.hidden = false;
-          exp.textContent = '▼';
-          exp.setAttribute('aria-expanded', 'true');
+          if (!exp.disabled) {
+            exp.textContent = '\u25bc';
+            exp.setAttribute('aria-expanded', 'true');
+          }
           return;
         }
         sub.innerHTML = '';
         exp.disabled = true;
+        exp.style.visibility = 'visible';
+        exp.removeAttribute('aria-hidden');
         fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId)) + '&parent_uid=' + encodeURIComponent(uid), { credentials: 'same-origin' })
           .then(function (r) { return r.json(); })
           .then(function (j) {
@@ -1339,7 +1399,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
             });
             sub.setAttribute('data-loaded', '1');
             sub.hidden = false;
-            exp.textContent = '▼';
+            exp.textContent = '\u25bc';
             exp.setAttribute('aria-expanded', 'true');
           })
           .catch(function (err) {
@@ -1348,12 +1408,16 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           });
       };
       exp.addEventListener('click', toggleChildList);
-      if (isToc) {
-        lab.addEventListener('click', toggleChildList);
+      if (uiKind === 'section' && sectionBtn && !sectionBtn.disabled) {
+        sectionBtn.addEventListener('click', toggleChildList);
       }
-    }
-    if (!isHeading && !isToc) {
-      lab.addEventListener('click', function () {
+      if (uiKind === 'rule' && ruleBtn) {
+        ruleBtn.addEventListener('click', function () {
+          rlEasaShowNodeDetail(batchId, uid, li);
+        });
+      }
+    } else if (uiKind === 'rule' && ruleBtn) {
+      ruleBtn.addEventListener('click', function () {
         rlEasaShowNodeDetail(batchId, uid, li);
       });
     }
@@ -1413,13 +1477,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
                 if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
                 rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes);
                 if (rlEasaTreeHint) {
-                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' items under wrapper. Headings bold (not links); TOC (italic) expands subtree only; other rows open rule text under the row (full width, dots: IR / AMC / GM / cover).';
+                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' top-level entries. ▶ opens annexes and sections; rule lines open the text panel below (blue / green / amber bullets).';
                 }
               });
           }
           rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes);
           if (rlEasaTreeHint) {
-            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root row(s). ▶ or TOC expands subtree; headings bold; click topics for rule text opened below the row (colour band).';
+            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root entr' + (nodes.length === 1 ? 'y' : 'ies') + '. Use ▶ for structure; click a rule line to read it below.';
           }
         })
         .catch(function (e) {
