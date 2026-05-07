@@ -970,6 +970,73 @@ function easa_erules_extract_plain_text_from_source_xml_by_erules_id(string $abs
 }
 
 /**
+ * Runtime diagnostic: inspect source.xml candidates that match a given ERulesId.
+ *
+ * @return array<string,mixed>
+ */
+function easa_erules_probe_source_candidates_by_erules_id(string $absoluteXmlPath, string $erulesId, int $limit = 40): array
+{
+    $want = trim($erulesId);
+    $wantKey = easa_erules_id_match_key($want);
+    $out = [
+        'xml_path' => $absoluteXmlPath,
+        'xml_exists' => is_file($absoluteXmlPath),
+        'xml_readable' => is_readable($absoluteXmlPath),
+        'erules_id' => $want,
+        'erules_key' => $wantKey,
+        'matches' => [],
+        'match_count' => 0,
+    ];
+    if ($wantKey === '' || !is_file($absoluteXmlPath) || !is_readable($absoluteXmlPath)) {
+        return $out;
+    }
+    $limit = max(1, min(200, $limit));
+
+    $reader = new XMLReader();
+    if (!$reader->open($absoluteXmlPath, null, LIBXML_PARSEHUGE | LIBXML_NONET | LIBXML_COMPACT)) {
+        return $out;
+    }
+
+    try {
+        while ($reader->read()) {
+            if ($reader->nodeType !== XMLReader::ELEMENT) {
+                continue;
+            }
+            $attrs = easa_erules_reader_collect_attributes($reader);
+            $erRaw = easa_erules_attr_ci($attrs, 'ERulesId');
+            $er = trim((string) ($erRaw ?? ''));
+            if (easa_erules_id_match_key($er) !== $wantKey) {
+                continue;
+            }
+            $outer = $reader->readOuterXml();
+            if (!is_string($outer) || $outer === '') {
+                continue;
+            }
+            $pc = easa_erules_plain_canonical_from_outer_xml($outer);
+            $trimPlain = trim($pc['plain']);
+            $out['matches'][] = [
+                'local_name' => (string) $reader->localName,
+                'outer_len' => strlen($outer),
+                'plain_len' => strlen($trimPlain),
+                'plain_head' => substr($trimPlain, 0, 220),
+                'has_closing_tag' => str_contains($outer, '</'),
+                'sdt_id' => easa_erules_attr_ci($attrs, 'sdt-id'),
+                'source_title' => easa_erules_attr_ci($attrs, 'source-title'),
+            ];
+            if (count($out['matches']) >= $limit) {
+                break;
+            }
+        }
+    } finally {
+        $reader->close();
+    }
+
+    $out['match_count'] = count($out['matches']);
+
+    return $out;
+}
+
+/**
  * Resolve absolute path to batch source.xml for on-demand extraction.
  */
 function easa_erules_batch_source_xml_absolute_path(PDO $pdo, int $batchId): ?string

@@ -443,6 +443,104 @@ if ($method === 'GET') {
         rl_easa_json_out(200, ['ok' => true, 'node' => $row]);
     }
 
+    // GET action=source_probe — diagnostic: ERulesId matches in batch source.xml (deploy must include this block).
+    if ($action === 'source_probe') {
+        if (!easa_erules_staging_tables_ok($pdo)) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql first']);
+        }
+        $batchId = (int) ($_GET['batch_id'] ?? 0);
+        $nodeUid = trim((string) ($_GET['node_uid'] ?? ''));
+        $erulesParam = trim((string) ($_GET['erules_id'] ?? ''));
+        if ($batchId <= 0) {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id required']);
+        }
+        if ($erulesParam === '' && $nodeUid === '') {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'Provide node_uid or erules_id']);
+        }
+        $batchSummarySql = '
+            SELECT id, storage_relpath, status, rows_detected, error_message, parse_phase, updated_at
+            FROM easa_erules_import_batches
+            WHERE id = ?
+            LIMIT 1';
+        try {
+            $bst = $pdo->prepare($batchSummarySql);
+            $bst->execute([$batchId]);
+            $batchRow = $bst->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
+        }
+        $batchStorageRelpath = is_array($batchRow) ? trim((string) ($batchRow['storage_relpath'] ?? '')) : '';
+
+        $stagingSummary = null;
+        $probeId = $erulesParam;
+
+        $stagingSelect = '
+                SELECT batch_id, node_uid, node_type, source_erules_id, title, path, breadcrumb,
+                       CHAR_LENGTH(COALESCE(plain_text, \'\')) AS plain_len,
+                       CHAR_LENGTH(COALESCE(canonical_text, \'\')) AS canonical_len,
+                       CHAR_LENGTH(COALESCE(xml_fragment, \'\')) AS fragment_len
+                FROM easa_erules_import_nodes_staging
+                WHERE batch_id = ?';
+
+        try {
+            if ($nodeUid !== '') {
+                $st = $pdo->prepare($stagingSelect . ' AND node_uid = ? LIMIT 1');
+                $st->execute([$batchId, $nodeUid]);
+                $stagingSummary = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+                if ($stagingSummary !== null && $probeId === '') {
+                    $probeId = trim((string) ($stagingSummary['source_erules_id'] ?? ''));
+                }
+            } elseif ($probeId !== '') {
+                $st = $pdo->prepare($stagingSelect . ' AND TRIM(source_erules_id) = ? LIMIT 1');
+                $st->execute([$batchId, $probeId]);
+                $stagingSummary = $st->fetch(PDO::FETCH_ASSOC) ?: null;
+            }
+        } catch (Throwable $e) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
+        }
+
+        if ($probeId === '') {
+            rl_easa_json_out(404, ['ok' => false, 'error' => 'No ERulesId resolved for probe (node missing erules id or staging row not found).']);
+        }
+
+        $resolvedAbs = easa_erules_batch_source_xml_absolute_path($pdo, $batchId);
+        if ($resolvedAbs === null && $batchStorageRelpath !== '') {
+            $cand = rl_project_root() . '/' . str_replace('\\', '/', $batchStorageRelpath);
+            $resolvedAbs = is_file($cand) ? $cand : null;
+        }
+
+        $exists = $resolvedAbs !== null && is_file($resolvedAbs);
+        $readable = $exists && is_readable($resolvedAbs);
+        $sizeBytes = $exists ? (@filesize($resolvedAbs)) : false;
+        $sha256 = $readable ? (@hash_file('sha256', $resolvedAbs)) : false;
+
+        $matches = [];
+        $matchCount = 0;
+        if ($resolvedAbs !== null && $readable) {
+            $probe = easa_erules_probe_source_candidates_by_erules_id($resolvedAbs, $probeId, 80);
+            $matches = is_array($probe['matches'] ?? null) ? $probe['matches'] : [];
+            $matchCount = (int) ($probe['match_count'] ?? count($matches));
+        }
+
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'batch_id' => $batchId,
+            'staging_summary' => $stagingSummary,
+            'batch_row' => is_array($batchRow) ? $batchRow : null,
+            'batch_storage_relpath' => $batchStorageRelpath !== '' ? $batchStorageRelpath : null,
+            'resolved_source_xml_absolute_path' => $resolvedAbs,
+            'source_file_exists' => $exists,
+            'source_file_readable' => $readable,
+            'source_file_size_bytes' => is_int($sizeBytes) ? $sizeBytes : null,
+            'source_file_sha256' => is_string($sha256) ? $sha256 : null,
+            'probe_erules_id' => $probeId,
+            'match_count' => $matchCount,
+            'matches' => $matches,
+            'storage_health' => easa_erules_storage_health($batchId),
+            'project_root' => rl_project_root(),
+        ]);
+    }
+
     if ($action !== 'status') {
         rl_easa_json_out(400, ['ok' => false, 'error' => 'Unknown action']);
     }
