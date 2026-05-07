@@ -294,6 +294,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   .rl-easa-detail-body-structured {
     white-space: normal;
   }
+  .rl-easa-bl-article {
+    max-width: 100%;
+    min-width: 0;
+  }
   .rl-easa-bl-article .rl-easa-bl-h:first-child {
     margin-top: 0;
   }
@@ -324,20 +328,21 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     min-width: 0;
     word-break: break-word;
   }
+  /* Auto column widths (no equal split); compact font so wide syllabus tables fit the panel. */
   .rl-easa-bl-tbl {
-    table-layout: fixed;
+    table-layout: auto;
     width: 100%;
     max-width: 100%;
     min-width: 0;
     border-collapse: collapse;
     margin: 0.6rem 0 0;
-    font-size: inherit;
-    line-height: inherit;
+    font-size: 10.75px;
+    line-height: 1.45;
   }
   .rl-easa-bl-tbl td,
   .rl-easa-bl-tbl th {
     border: 1px solid #cbd5e1;
-    padding: 5px 7px;
+    padding: 3px 5px;
     vertical-align: top;
     word-break: break-word;
     overflow-wrap: anywhere;
