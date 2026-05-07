@@ -168,6 +168,20 @@ function easa_erules_attr_ci(array $attrs, string $name): ?string
 }
 
 /**
+ * Normalised ERulesId for tolerant matching across punctuation/case variants.
+ */
+function easa_erules_id_match_key(string $id): string
+{
+    $id = strtoupper(trim($id));
+    if ($id === '') {
+        return '';
+    }
+    $id = preg_replace('/[^A-Z0-9]+/', '', $id) ?? $id;
+
+    return $id;
+}
+
+/**
  * Extract ordered descendant text from a full element outer-XML fragment (Word OOXML-safe).
  *
  * @return array{plain: string, canonical: string}
@@ -275,6 +289,17 @@ function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId
     if ($need === []) {
         return;
     }
+    /** @var array<string, string> */
+    $needByKey = [];
+    foreach (array_keys($need) as $eid) {
+        $k = easa_erules_id_match_key((string) $eid);
+        if ($k !== '' && !isset($needByKey[$k])) {
+            $needByKey[$k] = (string) $eid;
+        }
+    }
+    if ($needByKey === []) {
+        return;
+    }
 
     $reader = new XMLReader();
     if (!$reader->open($absoluteXmlPath, null, LIBXML_PARSEHUGE | LIBXML_NONET | LIBXML_COMPACT)) {
@@ -291,9 +316,11 @@ function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId
             $attrs = easa_erules_reader_collect_attributes($reader);
             $erRaw = easa_erules_attr_ci($attrs, 'ERulesId');
             $er = trim((string) ($erRaw ?? ''));
-            if ($er === '' || !isset($need[$er])) {
+            $erKey = easa_erules_id_match_key($er);
+            if ($erKey === '' || !isset($needByKey[$erKey])) {
                 continue;
             }
+            $dbEid = $needByKey[$erKey];
             $outer = $reader->readOuterXml();
             if (!is_string($outer) || $outer === '') {
                 continue;
@@ -305,9 +332,9 @@ function easa_erules_enrich_staging_from_source_outer_xml(PDO $pdo, int $batchId
             $plainLen = strlen(trim($pc['plain']));
             $nameBonus = strcasecmp((string) $reader->localName, 'topic') === 0 ? 20000 : 0;
             $score = $nameBonus + min($plainLen, 18000);
-            $existing = $bestByEid[$er]['score'] ?? -1;
+            $existing = $bestByEid[$dbEid]['score'] ?? -1;
             if ($score > $existing) {
-                $bestByEid[$er] = ['outer' => $outer, 'score' => $score];
+                $bestByEid[$dbEid] = ['outer' => $outer, 'score' => $score];
             }
         }
     } finally {
@@ -880,6 +907,10 @@ function easa_erules_extract_plain_text_from_source_xml_by_erules_id(string $abs
     if ($want === '' || !is_file($absoluteXmlPath) || !is_readable($absoluteXmlPath)) {
         return '';
     }
+    $wantKey = easa_erules_id_match_key($want);
+    if ($wantKey === '') {
+        return '';
+    }
     $reader = new XMLReader();
     if (!$reader->open($absoluteXmlPath, null, LIBXML_PARSEHUGE | LIBXML_NONET | LIBXML_COMPACT)) {
         return '';
@@ -894,7 +925,7 @@ function easa_erules_extract_plain_text_from_source_xml_by_erules_id(string $abs
             $attrs = easa_erules_reader_collect_attributes($reader);
             $erRaw = easa_erules_attr_ci($attrs, 'ERulesId');
             $er = trim((string) ($erRaw ?? ''));
-            if ($er !== $want) {
+            if (easa_erules_id_match_key($er) !== $wantKey) {
                 continue;
             }
             $outer = $reader->readOuterXml();
