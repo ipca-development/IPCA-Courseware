@@ -338,15 +338,28 @@ if ($method === 'GET') {
         if (!is_array($row)) {
             rl_easa_json_out(404, ['ok' => false, 'error' => 'Node not found']);
         }
-        $plain = (string) ($row['plain_text'] ?? '');
+        $plainRaw = (string) ($row['plain_text'] ?? '');
+        $plainTrim = trim($plainRaw);
+        $composed = '';
+        if ($plainTrim === '') {
+            $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $nodeUid, 0);
+        }
+        $effectivePlain = $plainTrim !== '' ? $plainRaw : $composed;
+        $row['plain_text_effective_source'] = $plainTrim !== '' ? 'node' : (trim($composed) !== '' ? 'descendants' : 'none');
+        $row['plain_text_composed_from_descendants'] = $plainTrim === '' && trim($composed) !== '';
         $maxPlain = 400000;
-        $truncated = strlen($plain) > $maxPlain;
+        $truncated = strlen($effectivePlain) > $maxPlain;
         if ($truncated) {
-            $row['plain_text'] = substr($plain, 0, $maxPlain) . "\n\n… [truncated for API; full text is in the database row]";
+            $row['plain_text'] = substr($effectivePlain, 0, $maxPlain) . "\n\n… [truncated for API; full text is in the staging rows]";
+        } else {
+            $row['plain_text'] = $effectivePlain;
         }
         $row['plain_text_truncated'] = $truncated;
         $row['title_display'] = easa_erules_sanitize_display_text((string) ($row['title'] ?? ''));
-        $row['plain_text_display'] = easa_erules_sanitize_display_text((string) ($row['plain_text'] ?? ''));
+        $row['plain_text_display'] = easa_erules_sanitize_rule_body_text($truncated ? (string) $row['plain_text'] : $effectivePlain);
+        if ($row['plain_text_display'] === '' && $row['plain_text_effective_source'] === 'none') {
+            $row['plain_text_display'] = 'No body text is stored on this node and no text was found on child nodes. Expand the tree and open a leaf block, or re-parse the batch after an importer update.';
+        }
         $row['rule_band'] = easa_erules_classify_display_band(
             $row['node_type'] ?? null,
             $row['title'] ?? null,

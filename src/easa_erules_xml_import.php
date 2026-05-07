@@ -511,6 +511,73 @@ function easa_erules_sanitize_display_text(string $s): string
 }
 
 /**
+ * Sanitize rule body for display but keep line breaks (Easy Access exports can be multi-paragraph).
+ */
+function easa_erules_sanitize_rule_body_text(string $s): string
+{
+    if ($s === '') {
+        return '';
+    }
+    $s = preg_replace('/\\\\\*+\s*MERGEFORMAT\s*/iu', '', $s) ?? $s;
+    $s = preg_replace('/DATE\s*\\\\@[^"\s]*\s*"[^"]*"\s*(?:\\\\\*+\s*MERGEFORMAT\s*)?[^\s"\\\\]*/iu', '', $s) ?? $s;
+    $s = preg_replace('/PAGEREF\s+_[A-Za-z0-9]+\s*\\\\[a-z]+\s*\d*/iu', '', $s) ?? $s;
+    $s = preg_replace('/HYPERLINK\s+\\\\l\s+"[^"]*"\s*/iu', '', $s) ?? $s;
+    $parts = preg_split('/\R/u', $s) ?: [];
+    $out = [];
+    foreach ($parts as $line) {
+        $line = trim((string) preg_replace('/[ \t\f]+/u', ' ', $line) ?? '');
+        if ($line !== '') {
+            $out[] = $line;
+        }
+    }
+
+    return implode("\n", $out);
+}
+
+/**
+ * When a parent topic/heading row has empty plain_text (text stored only on child nodes), build body from descendants.
+ */
+function easa_erules_aggregate_descendant_plain_text(PDO $pdo, int $batchId, string $parentNodeUid, int $depth = 0): string
+{
+    if ($depth > 120) {
+        return '';
+    }
+    $st = $pdo->prepare('
+        SELECT node_uid, title, plain_text, sort_order
+        FROM easa_erules_import_nodes_staging
+        WHERE batch_id = ? AND parent_node_uid = ?
+        ORDER BY sort_order ASC, id ASC
+    ');
+    $st->execute([$batchId, $parentNodeUid]);
+    $blocks = [];
+    $childCount = 0;
+    while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (!is_array($row)) {
+            continue;
+        }
+        if (++$childCount > 2000) {
+            break;
+        }
+        $uid = (string) ($row['node_uid'] ?? '');
+        $title = trim((string) ($row['title'] ?? ''));
+        $own = trim((string) ($row['plain_text'] ?? ''));
+        if ($own === '' && $uid !== '') {
+            $own = trim(easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $uid, $depth + 1));
+        }
+        if ($own === '') {
+            continue;
+        }
+        if ($title !== '') {
+            $blocks[] = $title . "\n\n" . $own;
+        } else {
+            $blocks[] = $own;
+        }
+    }
+
+    return implode("\n\n", $blocks);
+}
+
+/**
  * Short label for tree rows (sanitized, max length).
  */
 function easa_erules_short_tree_label(array $n): string
