@@ -1987,11 +1987,16 @@ function easa_erules_format_body_for_reading(string $text): string
  */
 function easa_erules_short_tree_label(array $n): string
 {
+    $nt = strtolower(trim((string) ($n['node_type'] ?? '')));
+    // Do not label document/frontmatter/backmatter wrappers from the first child — that shows e.g.
+    // "SUBPART A" on the publication root and hides the real ANNEX row in the UI.
+    $skipFirstChildHints = in_array($nt, ['document', 'frontmatter', 'backmatter'], true);
+
     $raw = trim((string) ($n['title'] ?? ''));
-    if ($raw === '') {
+    if ($raw === '' && !$skipFirstChildHints) {
         $raw = trim((string) ($n['first_child_title'] ?? ''));
     }
-    if ($raw === '') {
+    if ($raw === '' && !$skipFirstChildHints) {
         $raw = trim((string) ($n['first_child_source_title'] ?? ''));
     }
     if ($raw === '') {
@@ -2000,10 +2005,13 @@ function easa_erules_short_tree_label(array $n): string
     if ($raw === '') {
         $raw = trim((string) ($n['source_title'] ?? ''));
     }
-    $nt = strtolower(trim((string) ($n['node_type'] ?? '')));
     if ($raw === '') {
         if (in_array($nt, ['toc', 'document', 'frontmatter', 'backmatter'], true)) {
-            $raw = ucfirst($nt === 'toc' ? 'Table of contents' : $nt);
+            if ($nt === 'document') {
+                $raw = 'Regulatory publication';
+            } else {
+                $raw = ucfirst($nt === 'toc' ? 'Table of contents' : $nt);
+            }
         } else {
             $raw = (string) ($n['node_uid'] ?? '');
         }

@@ -252,6 +252,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     cursor: default;
     color: #64748b;
   }
+  .rl-easa-tree-section-title.rl-easa-tree-section-title--structural:disabled {
+    color: #0f172a;
+    opacity: 1;
+    font-weight: 700;
+    cursor: default;
+  }
   .rl-easa-tree-section-title.rl-easa-tree-section-title--supplement {
     font-style: italic;
     font-weight: 600;
@@ -1284,6 +1290,54 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       });
   }
 
+  function rlEasaTreeTitleText(n) {
+    return String((n && (n.display_title || n.title || n.label_short)) || '').trim();
+  }
+  function rlEasaTreeIsAnnexPartFcl(n) {
+    var t = rlEasaTreeTitleText(n);
+    return /^\s*ANNEX\b/i.test(t) && /part[\s\-–—]*fcl/i.test(t);
+  }
+  function rlEasaTreeIsAnnexAny(n) {
+    return /^\s*ANNEX\b/i.test(rlEasaTreeTitleText(n));
+  }
+  function rlEasaSortBrowseNodes(arr) {
+    function rank(n) {
+      var t = rlEasaTreeTitleText(n);
+      if (/^\s*ANNEX\b/i.test(t) && /part[\s\-–—]*fcl/i.test(t)) return 0;
+      if (/^\s*ANNEX\b/i.test(t)) return 1;
+      if (/^\s*SUBPART\b/i.test(t)) return 10;
+      if (/^\s*SECTION\b/i.test(t)) return 20;
+      return 40;
+    }
+    return (arr || []).slice().sort(function (a, b) {
+      var ra = rank(a);
+      var rb = rank(b);
+      if (ra !== rb) return ra - rb;
+      var sa = parseInt(a.sort_order, 10) || 0;
+      var sb = parseInt(b.sort_order, 10) || 0;
+      if (sa !== sb) return sa - sb;
+      return 0;
+    });
+  }
+  /** Prefer a single ANNEX (Part-FCL) root when it has children, so the tree starts at the annex not at SUBPART A. */
+  function rlEasaPickBrowseRootNodes(nodes) {
+    var sorted = rlEasaSortBrowseNodes(nodes || []);
+    var i;
+    for (i = 0; i < sorted.length; i++) {
+      if (!rlEasaTreeIsAnnexPartFcl(sorted[i])) continue;
+      if ((parseInt(sorted[i].child_count, 10) || 0) > 0) {
+        return [sorted[i]];
+      }
+    }
+    for (i = 0; i < sorted.length; i++) {
+      if (!rlEasaTreeIsAnnexAny(sorted[i])) continue;
+      if ((parseInt(sorted[i].child_count, 10) || 0) > 0) {
+        return [sorted[i]];
+      }
+    }
+    return sorted;
+  }
+
   function rlEasaTreeMaterialDotClass(mt) {
     var m = String(mt || 'IR').toUpperCase();
     if (m === 'AMC') return 'rl-easa-tree-dot rl-easa-tree-dot-amc';
@@ -1373,6 +1427,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       sectionBtn.className = 'rl-easa-tree-section-title';
       if (supplementMat === 'GM' || supplementMat === 'AMC') {
         sectionBtn.classList.add('rl-easa-tree-section-title--supplement');
+      } else if (/^\s*(ANNEX|SUBPART|SECTION)\b/i.test(String(disp || '').trim())) {
+        sectionBtn.classList.add('rl-easa-tree-section-title--structural');
       }
       sectionBtn.textContent = disp;
       if (!expandable || kids < 1) sectionBtn.disabled = true;
@@ -1523,13 +1579,14 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
               .then(function (r2) { return r2.json(); })
               .then(function (j2) {
                 if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
-                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes);
+                var inner = rlEasaPickBrowseRootNodes(j2.nodes || []);
+                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, inner);
                 if (rlEasaTreeHint) {
-                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' top-level entries. ▶ opens annexes and sections; rule lines open the text panel below (blue / green / amber bullets).';
+                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · tree rooted at annex when present; ▶ opens subparts and sections; rules use coloured bullets.';
                 }
               });
           }
-          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes);
+          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, rlEasaPickBrowseRootNodes(nodes));
           if (rlEasaTreeHint) {
             rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root entr' + (nodes.length === 1 ? 'y' : 'ies') + '. Use ▶ for structure; click a rule line to read it below.';
           }
