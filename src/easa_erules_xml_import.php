@@ -980,7 +980,7 @@ function easa_erules_reparent_section_heading_children(PDO $pdo, int $batchId): 
          SET parent_node_uid = ?
          WHERE batch_id = ?
            AND node_uid = ?
-           AND (parent_node_uid IS DISTINCT FROM ?)'
+           AND NOT (parent_node_uid <=> ?)'
     );
     foreach ($byParent as $rows) {
         usort($rows, static function (array $a, array $b): int {
