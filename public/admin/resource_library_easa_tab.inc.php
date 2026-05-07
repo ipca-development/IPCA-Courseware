@@ -185,6 +185,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     margin: 0;
     padding: 0;
   }
+  /* GM / AMC: extra inset so supplementary material reads under the IR rule block */
+  .rl-easa-tree-li.rl-easa-tree-li--gm {
+    padding-left: 22px;
+    box-sizing: border-box;
+  }
+  .rl-easa-tree-li.rl-easa-tree-li--amc {
+    padding-left: 22px;
+    box-sizing: border-box;
+  }
   .rl-easa-tree-li.rl-easa-tree-li-selected > .rl-easa-tree-row {
     background: #eff6ff;
     border-radius: 6px;
@@ -215,6 +224,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     font-size: 12px;
     width: 1.25rem;
   }
+  .rl-easa-tree-exp.rl-easa-tree-exp--gm:not(:disabled) {
+    color: #15803d;
+  }
+  .rl-easa-tree-exp.rl-easa-tree-exp--amc:not(:disabled) {
+    color: #d97706;
+  }
   .rl-easa-tree-exp:disabled {
     visibility: hidden;
     cursor: default;
@@ -236,6 +251,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   .rl-easa-tree-section-title:disabled {
     cursor: default;
     color: #64748b;
+  }
+  .rl-easa-tree-section-title.rl-easa-tree-section-title--supplement {
+    font-style: italic;
+    font-weight: 600;
+    color: #334155;
   }
   .rl-easa-tree-rule-title {
     flex: 1;
@@ -1271,6 +1291,14 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return 'rl-easa-tree-dot rl-easa-tree-dot-ir';
   }
 
+  /** When XML stores GM/AMC as &lt;toc&gt;, material_type is HEADING — infer from title for indent + chevron colour. */
+  function rlEasaTreeTitleSupplementKind(title) {
+    var t = String(title || '').trim();
+    if (/^AMC\d*\b/i.test(t)) return 'AMC';
+    if (/^GM\d*\b/i.test(t)) return 'GM';
+    return '';
+  }
+
   function rlEasaCreateTreeLi(batchId, n) {
     var li = document.createElement('li');
     li.className = 'rl-easa-tree-li';
@@ -1294,6 +1322,18 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     }
     var disp = n.display_title || n.label_short || n.title || n.source_erules_id || uid || '—';
 
+    var supplementMat = '';
+    if (uiKind === 'rule' && (mt === 'GM' || mt === 'AMC')) {
+      supplementMat = mt;
+    } else {
+      supplementMat = rlEasaTreeTitleSupplementKind(disp);
+    }
+    if (supplementMat === 'GM') {
+      li.classList.add('rl-easa-tree-li--gm');
+    } else if (supplementMat === 'AMC') {
+      li.classList.add('rl-easa-tree-li--amc');
+    }
+
     var row = document.createElement('div');
     row.className = 'rl-easa-tree-row' + (uiKind === 'section' ? ' rl-easa-tree-row--section' : ' rl-easa-tree-row--rule');
 
@@ -1309,6 +1349,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     } else {
       exp.textContent = '\u25b6';
       exp.setAttribute('aria-label', uiKind === 'section' ? 'Expand section' : 'Expand nested rules');
+      if (supplementMat === 'GM') {
+        exp.classList.add('rl-easa-tree-exp--gm');
+      } else if (supplementMat === 'AMC') {
+        exp.classList.add('rl-easa-tree-exp--amc');
+      }
     }
 
     var dot = document.createElement('span');
@@ -1326,6 +1371,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       sectionBtn = document.createElement('button');
       sectionBtn.type = 'button';
       sectionBtn.className = 'rl-easa-tree-section-title';
+      if (supplementMat === 'GM' || supplementMat === 'AMC') {
+        sectionBtn.classList.add('rl-easa-tree-section-title--supplement');
+      }
       sectionBtn.textContent = disp;
       if (!expandable || kids < 1) sectionBtn.disabled = true;
     } else {
