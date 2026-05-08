@@ -8,6 +8,9 @@ declare(strict_types=1);
  *   php scripts/easa_erules_repair_batch_parents.php BATCH_ID
  *   php scripts/easa_erules_repair_batch_parents.php BATCH_ID --annex=b6_n65 --subpart=b6_n66
  *
+ * Peer-lift diagnostics for one wrapper (stderr): easa_erules_reparent_rule_ref_toc_peer_lift_once():
+ *   EASA_PEER_LIFT_DEBUG_UID=b6_n68 php scripts/easa_erules_repair_batch_parents.php 6
+ *
  * With --annex (and optional --subpart): prints DB probes before/after repair and exits with
  * status 2 if the annex node still has zero children after repair (acceptance check for tree_children).
  */

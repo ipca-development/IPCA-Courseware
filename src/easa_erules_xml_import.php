@@ -1337,6 +1337,13 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
     if ($batchId <= 0) {
         return 0;
     }
+    $diagUid = trim((string) (getenv('EASA_PEER_LIFT_DEBUG_UID') ?: ''));
+    $peerLiftDiag = static function (bool $enabled, string $line): void {
+        if (!$enabled) {
+            return;
+        }
+        fwrite(STDERR, '[easa_peer_lift] ' . $line . "\n");
+    };
     $st = $pdo->prepare(
         'SELECT node_uid, parent_node_uid, node_type, title, source_title, source_erules_id, sort_order, id
          FROM easa_erules_import_nodes_staging
@@ -1373,66 +1380,140 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
     );
     $changed = 0;
     foreach ($all as $w) {
+        $wUid = trim((string) ($w['node_uid'] ?? ''));
+        $diag = $diagUid !== '' && strcasecmp($wUid, $diagUid) === 0;
+        if ($diag) {
+            $peerLiftDiag(true, 'batch_id=' . $batchId . ' evaluating node_uid=' . $wUid);
+        }
         $nt = strtolower(trim((string) ($w['node_type'] ?? '')));
         if (!in_array($nt, ['heading', 'toc'], true)) {
+            $peerLiftDiag($diag, 'skip: node_type not heading/toc (got ' . $nt . ')');
+
             continue;
         }
         $wTitle = trim((string) ($w['title'] ?? ''));
         $wSrc = trim((string) ($w['source_title'] ?? ''));
+        $wEr = trim((string) ($w['source_erules_id'] ?? ''));
         $wBlob = $wTitle !== '' ? $wTitle : $wSrc;
+        if ($diag) {
+            $peerLiftDiag(
+                true,
+                'wrapper fields: title=' . json_encode(mb_substr($wTitle, 0, 200), JSON_UNESCAPED_UNICODE)
+                . ' source_title=' . json_encode(mb_substr($wSrc, 0, 200), JSON_UNESCAPED_UNICODE)
+                . ' source_erules_id=' . json_encode(mb_substr($wEr, 0, 120), JSON_UNESCAPED_UNICODE)
+            );
+        }
         if ($wBlob === '' || easa_erules_tree_title_is_structural_section($wBlob)) {
+            $peerLiftDiag($diag, 'skip: empty blob or structural section title');
+
             continue;
         }
         if (!easa_erules_tree_blob_has_ir_reference($wBlob)) {
+            $peerLiftDiag($diag, 'skip: blob_has_ir_reference=false on wBlob');
+
             continue;
         }
-        $wUid = trim((string) ($w['node_uid'] ?? ''));
         if ($wUid === '') {
+            $peerLiftDiag($diag, 'skip: empty node_uid');
+
             continue;
         }
         $pUid = trim((string) ($w['parent_node_uid'] ?? ''));
+        if ($diag) {
+            $peerLiftDiag(true, 'wrapper parent_node_uid=' . ($pUid !== '' ? $pUid : '(empty)'));
+        }
         if ($pUid === '') {
+            $peerLiftDiag($diag, 'skip: parent_node_uid empty');
+
             continue;
         }
+        $pRow = $byUid[$pUid] ?? null;
+        $pTitle = is_array($pRow) ? trim((string) ($pRow['title'] ?? '')) : '';
+        if ($diag) {
+            $peerLiftDiag(true, 'parent title=' . json_encode(mb_substr($pTitle, 0, 240), JSON_UNESCAPED_UNICODE));
+        }
         $kids = $byParent[easa_erules_parent_sort_key($wUid)] ?? [];
-        if (count($kids) < 2) {
+        $nk = count($kids);
+        if ($diag) {
+            $peerLiftDiag(true, 'direct child count=' . $nk);
+        }
+        if ($nk < 2) {
+            $peerLiftDiag($diag, 'skip: need >= 2 direct children');
+
             continue;
         }
         $stubSet = [];
+        $stubLines = [];
         foreach ($kids as $c) {
             if (!is_array($c)) {
                 continue;
             }
+            $cuid = trim((string) ($c['node_uid'] ?? ''));
             $key = easa_erules_tree_nav_rule_key_from_row($c);
             if ($key !== null) {
                 $stubSet[$key] = true;
             }
-        }
-        $lift = count($stubSet) >= 2;
-        if (!$lift) {
-            $pRow = $byUid[$pUid] ?? null;
-            $pTitle = is_array($pRow) ? trim((string) ($pRow['title'] ?? '')) : '';
-            if (
-                in_array($nt, ['toc', 'heading'], true)
-                && $pTitle !== ''
-                && easa_erules_tree_title_line_is_subpart_heading($pTitle)
-                && easa_erules_tree_blob_has_ir_reference($wBlob)
-            ) {
-                $lift = true;
+            if ($diag && $cuid !== '') {
+                $stubLines[] = $cuid . ':' . ($key ?? 'null');
             }
         }
+        if ($diag) {
+            $peerLiftDiag(true, 'child stub keys: ' . implode(', ', array_keys($stubSet)));
+            $peerLiftDiag(true, 'per-child [child_uid:stub]: ' . implode(' | ', array_slice($stubLines, 0, 40))
+                . (count($stubLines) > 40 ? ' … +' . (count($stubLines) - 40) . ' more' : ''));
+        }
+        $stubLift = count($stubSet) >= 2;
+        $subpartFallback = false;
+        if (
+            !$stubLift
+            && in_array($nt, ['toc', 'heading'], true)
+            && $pTitle !== ''
+            && easa_erules_tree_title_line_is_subpart_heading($pTitle)
+            && easa_erules_tree_blob_has_ir_reference($wBlob)
+        ) {
+            $subpartFallback = true;
+        }
+        $lift = $stubLift || $subpartFallback;
+        if ($diag) {
+            $peerLiftDiag(
+                true,
+                'lift decision: stubLift=' . ($stubLift ? 'true' : 'false')
+                . ' subpartFallback=' . ($subpartFallback ? 'true' : 'false')
+                . ' subpart_line_match=' . ($pTitle !== '' && easa_erules_tree_title_line_is_subpart_heading($pTitle) ? 'true' : 'false')
+                . ' lift=' . ($lift ? 'true' : 'false')
+            );
+        }
         if (!$lift) {
+            $peerLiftDiag($diag, 'skip: lift=false');
+
             continue;
         }
+        $updatesSqlRows = 0;
+        $attempted = 0;
+        $wrapperRowsAffected = 0;
         foreach ($kids as $c) {
             $cuid = trim((string) ($c['node_uid'] ?? ''));
             if ($cuid === '') {
                 continue;
             }
+            $attempted++;
             $upd->execute([$pUid, $batchId, $cuid, $pUid]);
-            if ($upd->rowCount() > 0) {
-                $changed++;
+            $rc = $upd->rowCount();
+            $updatesSqlRows += $rc;
+            if ($diag) {
+                $peerLiftDiag(true, 'UPDATE child ' . $cuid . ' → parent ' . $pUid . ' rowCount=' . $rc);
             }
+            if ($rc > 0) {
+                $changed++;
+                $wrapperRowsAffected++;
+            }
+        }
+        if ($diag) {
+            $peerLiftDiag(
+                true,
+                'summary: UPDATE attempted=' . $attempted . ' sum(rowCount)=' . $updatesSqlRows
+                . ' this_wrapper_rows_with_rowCount_gt_0=' . $wrapperRowsAffected
+            );
         }
     }
 
