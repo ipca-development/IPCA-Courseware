@@ -1373,9 +1373,159 @@ function easa_erules_peer_lift_wrapper_label_blob(array $w, array $sortedDirectC
 }
 
 /**
+ * AMC/GM guidance rows (titles / bands), as distinct from implementing-rule peers (FCL/ORA/CAT/…).
+ */
+function easa_erules_peer_lift_row_is_amc_gm_nav(array $c): bool
+{
+    $nt = strtolower(trim((string) ($c['node_type'] ?? '')));
+    $title = trim((string) ($c['title'] ?? ''));
+    $src = trim((string) ($c['source_title'] ?? ''));
+    $er = trim((string) ($c['source_erules_id'] ?? ''));
+    foreach ([$title, $src] as $blob) {
+        if ($blob === '') {
+            continue;
+        }
+        $line = easa_erules_tree_title_first_line($blob);
+        if ($line !== '' && easa_erules_tree_title_starts_gm_or_amc($line)) {
+            return true;
+        }
+    }
+    $band = easa_erules_classify_display_band(
+        $nt,
+        $title !== '' ? $title : null,
+        $src !== '' ? $src : null,
+        $er !== '' ? $er : null
+    );
+
+    return $band === 'amc' || $band === 'gm';
+}
+
+/** Peer implementing-rule row eligible to sit under SUBPART (not AMC/GM). */
+function easa_erules_peer_lift_row_is_liftable_ir_peer(array $c): bool
+{
+    if (easa_erules_peer_lift_row_is_amc_gm_nav($c)) {
+        return false;
+    }
+    if (easa_erules_tree_nav_rule_key_from_row($c) !== null) {
+        return true;
+    }
+    $title = trim((string) ($c['title'] ?? ''));
+    $src = trim((string) ($c['source_title'] ?? ''));
+    $er = trim((string) ($c['source_erules_id'] ?? ''));
+    foreach ([$title, $src, $er] as $blob) {
+        if ($blob !== '' && easa_erules_tree_blob_has_ir_reference($blob)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * After peer lift, AMC/GM may still be direct children of SUBPART — attach under matching IR sibling by stub (e.g. GM1 FCL.010 → FCL.010).
+ */
+function easa_erules_reparent_amc_gm_under_subpart_ir_peers(PDO $pdo, int $batchId): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title, source_title, source_erules_id, sort_order, id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?
+         ORDER BY id ASC'
+    );
+    $st->execute([$batchId]);
+    $all = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (is_array($r)) {
+            $all[] = $r;
+        }
+    }
+    $byUid = [];
+    foreach ($all as $r) {
+        $u = trim((string) ($r['node_uid'] ?? ''));
+        if ($u !== '') {
+            $byUid[$u] = $r;
+        }
+    }
+    $byParent = [];
+    foreach ($all as $r) {
+        $p = $r['parent_node_uid'] ?? null;
+        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
+        $k = easa_erules_parent_sort_key($p);
+        $byParent[$k][] = $r;
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND node_uid = ?
+           AND NOT (parent_node_uid <=> ?)'
+    );
+    foreach ($byParent as $pKey => $siblings) {
+        if ($pKey === '') {
+            continue;
+        }
+        $parent = $byUid[$pKey] ?? null;
+        if (!is_array($parent)) {
+            continue;
+        }
+        if (strtolower(trim((string) ($parent['node_type'] ?? ''))) !== 'heading') {
+            continue;
+        }
+        $pTitle = trim((string) ($parent['title'] ?? ''));
+        if ($pTitle === '' || !easa_erules_tree_title_line_is_subpart_heading($pTitle)) {
+            continue;
+        }
+        usort($siblings, static function (array $a, array $b): int {
+            $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
+            if ($so !== 0) {
+                return $so;
+            }
+
+            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+        });
+        $stubMap = [];
+        foreach ($siblings as $c) {
+            if (!is_array($c) || !easa_erules_peer_lift_row_is_liftable_ir_peer($c)) {
+                continue;
+            }
+            $k = easa_erules_tree_nav_rule_key_from_row($c);
+            $cuid = trim((string) ($c['node_uid'] ?? ''));
+            if ($k !== null && $cuid !== '' && !isset($stubMap[$k])) {
+                $stubMap[$k] = $cuid;
+            }
+        }
+        if ($stubMap === []) {
+            continue;
+        }
+        foreach ($siblings as $c) {
+            if (!is_array($c) || !easa_erules_peer_lift_row_is_amc_gm_nav($c)) {
+                continue;
+            }
+            $cuid = trim((string) ($c['node_uid'] ?? ''));
+            if ($cuid === '') {
+                continue;
+            }
+            $tk = easa_erules_tree_nav_rule_key_from_row($c);
+            if ($tk === null || !isset($stubMap[$tk])) {
+                continue;
+            }
+            $target = $stubMap[$tk];
+            if ($target === $cuid) {
+                continue;
+            }
+            $upd->execute([$target, $batchId, $cuid, $target]);
+        }
+    }
+}
+
+/**
  * &lt;toc&gt;/heading whose title is a rule id (FCL.001, ORA…, CAT…, DTA…, ARA…, MED…) but whose
- * children are peer rule rows must not sit between SUBPART and rules: lift all direct children to the
- * wrapper’s parent. The wrapper row stays (empty) and is hidden in tree_children.
+ * children are peer implementing-rule rows: lift **only IR peers** onto the SUBPART (wrapper parent).
+ * AMC/GM rows stay nested: reparent each to the IR peer whose stub matches the reference in its title (e.g. GM1 FCL.010).
+ * Rows that are neither remain under the wrapper. The wrapper may end empty and is hidden by tree_children skips.
  */
 function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId): int
 {
@@ -1501,30 +1651,38 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
         if ($diag) {
             $peerLiftDiag(true, 'parent title=' . json_encode(mb_substr($pTitle, 0, 240), JSON_UNESCAPED_UNICODE));
         }
-        $stubSet = [];
+        $stubSetIr = [];
         $stubLines = [];
+        $hasIrPeer = false;
         foreach ($kids as $c) {
             if (!is_array($c)) {
                 continue;
             }
             $cuid = trim((string) ($c['node_uid'] ?? ''));
+            $isGm = easa_erules_peer_lift_row_is_amc_gm_nav($c);
+            $isIr = easa_erules_peer_lift_row_is_liftable_ir_peer($c);
+            if ($isIr) {
+                $hasIrPeer = true;
+            }
             $key = easa_erules_tree_nav_rule_key_from_row($c);
-            if ($key !== null) {
-                $stubSet[$key] = true;
+            if ($isIr && $key !== null) {
+                $stubSetIr[$key] = true;
             }
             if ($diag && $cuid !== '') {
-                $stubLines[] = $cuid . ':' . ($key ?? 'null');
+                $tag = $isGm ? 'gm_amc' : ($isIr ? 'ir' : 'other');
+                $stubLines[] = $cuid . ':' . $tag . ':' . ($key ?? 'null');
             }
         }
         if ($diag) {
-            $peerLiftDiag(true, 'child stub keys: ' . implode(', ', array_keys($stubSet)));
-            $peerLiftDiag(true, 'per-child [child_uid:stub]: ' . implode(' | ', array_slice($stubLines, 0, 40))
+            $peerLiftDiag(true, 'ir_peer stub keys: ' . implode(', ', array_keys($stubSetIr)));
+            $peerLiftDiag(true, 'per-child [uid:kind:stub]: ' . implode(' | ', array_slice($stubLines, 0, 40))
                 . (count($stubLines) > 40 ? ' … +' . (count($stubLines) - 40) . ' more' : ''));
         }
-        $stubLift = count($stubSet) >= 2;
+        $stubLift = count($stubSetIr) >= 2;
         $subpartFallback = false;
         if (
             !$stubLift
+            && $hasIrPeer
             && in_array($nt, ['toc', 'heading'], true)
             && $pTitle !== ''
             && easa_erules_tree_title_line_is_subpart_heading($pTitle)
@@ -1538,6 +1696,7 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
                 true,
                 'lift decision: stubLift=' . ($stubLift ? 'true' : 'false')
                 . ' subpartFallback=' . ($subpartFallback ? 'true' : 'false')
+                . ' hasIrPeer=' . ($hasIrPeer ? 'true' : 'false')
                 . ' subpart_line_match=' . ($pTitle !== '' && easa_erules_tree_title_line_is_subpart_heading($pTitle) ? 'true' : 'false')
                 . ' lift=' . ($lift ? 'true' : 'false')
             );
@@ -1547,10 +1706,36 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
 
             continue;
         }
+        $irPeers = [];
+        $supplements = [];
+        foreach ($kids as $c) {
+            if (!is_array($c)) {
+                continue;
+            }
+            if (easa_erules_peer_lift_row_is_liftable_ir_peer($c)) {
+                $irPeers[] = $c;
+            } elseif (easa_erules_peer_lift_row_is_amc_gm_nav($c)) {
+                $supplements[] = $c;
+            }
+        }
+        if ($diag) {
+            $peerLiftDiag(true, 'partition: irPeers=' . count($irPeers) . ' supplements=' . count($supplements));
+        }
+        $stubMap = [];
+        foreach ($irPeers as $c) {
+            $cuid = trim((string) ($c['node_uid'] ?? ''));
+            if ($cuid === '') {
+                continue;
+            }
+            $k = easa_erules_tree_nav_rule_key_from_row($c);
+            if ($k !== null && !isset($stubMap[$k])) {
+                $stubMap[$k] = $cuid;
+            }
+        }
         $updatesSqlRows = 0;
         $attempted = 0;
         $wrapperRowsAffected = 0;
-        foreach ($kids as $c) {
+        foreach ($irPeers as $c) {
             $cuid = trim((string) ($c['node_uid'] ?? ''));
             if ($cuid === '') {
                 continue;
@@ -1560,7 +1745,36 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
             $rc = $upd->rowCount();
             $updatesSqlRows += $rc;
             if ($diag) {
-                $peerLiftDiag(true, 'UPDATE child ' . $cuid . ' → parent ' . $pUid . ' rowCount=' . $rc);
+                $peerLiftDiag(true, 'LIFT IR peer ' . $cuid . ' → subpart ' . $pUid . ' rowCount=' . $rc);
+            }
+            if ($rc > 0) {
+                $changed++;
+                $wrapperRowsAffected++;
+            }
+        }
+        foreach ($supplements as $c) {
+            $cuid = trim((string) ($c['node_uid'] ?? ''));
+            if ($cuid === '') {
+                continue;
+            }
+            $tk = easa_erules_tree_nav_rule_key_from_row($c);
+            if ($tk === null || !isset($stubMap[$tk])) {
+                if ($diag) {
+                    $peerLiftDiag(true, 'SKIP supplement ' . $cuid . ' (no stub map for ' . ($tk ?? 'null') . ')');
+                }
+
+                continue;
+            }
+            $target = $stubMap[$tk];
+            if ($target === $cuid) {
+                continue;
+            }
+            $attempted++;
+            $upd->execute([$target, $batchId, $cuid, $target]);
+            $rc = $upd->rowCount();
+            $updatesSqlRows += $rc;
+            if ($diag) {
+                $peerLiftDiag(true, 'ATTACH GM/AMC ' . $cuid . ' → IR ' . $target . ' (stub ' . $tk . ') rowCount=' . $rc);
             }
             if ($rc > 0) {
                 $changed++;
@@ -1570,8 +1784,8 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
         if ($diag) {
             $peerLiftDiag(
                 true,
-                'summary: UPDATE attempted=' . $attempted . ' sum(rowCount)=' . $updatesSqlRows
-                . ' this_wrapper_rows_with_rowCount_gt_0=' . $wrapperRowsAffected
+                'summary: operations attempted=' . $attempted . ' sum(rowCount)=' . $updatesSqlRows
+                . ' this_wrapper_rows_changed=' . $wrapperRowsAffected
             );
         }
     }
@@ -1586,6 +1800,7 @@ function easa_erules_reparent_rule_ref_toc_peer_lift(PDO $pdo, int $batchId): vo
             break;
         }
     }
+    easa_erules_reparent_amc_gm_under_subpart_ir_peers($pdo, $batchId);
 }
 
 /**
@@ -3025,6 +3240,9 @@ function easa_erules_tree_children_rows_flattened(
         if (easa_erules_tree_skip_empty_rule_ref_nav_wrapper($graph, $row)) {
             continue;
         }
+        if (easa_erules_tree_skip_empty_toc_placeholder($graph, $row)) {
+            continue;
+        }
         $kids = easa_erules_tree_graph_direct_children_enriched($graph, $uid);
         if (easa_erules_tree_skip_peer_subpart_outline_under_subpart($parentRow, $row, $kids)) {
             continue;
@@ -3074,6 +3292,32 @@ function easa_erules_tree_skip_empty_rule_ref_nav_wrapper(array $graph, array $r
     }
 
     return false;
+}
+
+/**
+ * Hide empty &lt;toc&gt; shells (no title metadata, no children): UI would show plain "Table of contents" only.
+ *
+ * @param array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>} $graph
+ */
+function easa_erules_tree_skip_empty_toc_placeholder(array $graph, array $row): bool
+{
+    $nt = strtolower(trim((string) ($row['node_type'] ?? '')));
+    if ($nt !== 'toc') {
+        return false;
+    }
+    $uid = trim((string) ($row['node_uid'] ?? ''));
+    if ($uid === '') {
+        return false;
+    }
+    $ch = $graph['by_parent'][$uid] ?? [];
+    if ($ch !== []) {
+        return false;
+    }
+    $title = trim((string) ($row['title'] ?? ''));
+    $src = trim((string) ($row['source_title'] ?? ''));
+    $er = trim((string) ($row['source_erules_id'] ?? ''));
+
+    return $title === '' && $src === '' && $er === '';
 }
 
 /**
