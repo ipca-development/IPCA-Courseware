@@ -320,6 +320,27 @@ function rl_easa_extract_ai_text(array $resp): string
     return trim($text);
 }
 
+function rl_easa_current_user_first_name(PDO $pdo): string
+{
+    $u = cw_current_user($pdo);
+    if (!is_array($u)) {
+        return '';
+    }
+    $first = trim((string) ($u['first_name'] ?? ''));
+    if ($first !== '') {
+        return $first;
+    }
+    $name = trim((string) ($u['name'] ?? ''));
+    if ($name !== '') {
+        $parts = preg_split('/\s+/u', $name) ?: [];
+        if ($parts !== []) {
+            return trim((string) $parts[0]);
+        }
+    }
+
+    return '';
+}
+
 $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'GET') {
@@ -924,6 +945,7 @@ if ($action === 'regulatory_compare_ai') {
     $titleNum = (int) ($data['ecfr_title_number'] ?? 14);
     $section = trim((string) ($data['ecfr_section'] ?? ''));
     $compareBatchId = (int) ($data['batch_id'] ?? 0);
+    $userFirstName = rl_easa_current_user_first_name($pdo);
 
     $stagingCompare = rl_easa_build_compare_staging_bundle($pdo, $q, $compareBatchId);
     $easaCtx = $stagingCompare['summary'];
@@ -951,6 +973,7 @@ if ($action === 'regulatory_compare_ai') {
 
     $payload = [
         'ok' => true,
+        'user_first_name' => $userFirstName !== '' ? $userFirstName : null,
         'easa_context_note' => $easaCtx,
         'easa_staging_hits' => $stagingCompare['hit_count'],
         'easa_sources' => $stagingCompare['sources'],
@@ -988,7 +1011,7 @@ if ($action === 'regulatory_compare_ai') {
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => 'You help aviation compliance staff compare regulatory concepts. When the bundle includes EASA blocks labeled with batch_id/node_uid/ERulesId, treat those as the installation’s parsed Easy Access staging excerpts—quote them accurately and cite batch_id + node_uid or ERulesId. If no excerpts matched, say so clearly. When U.S. text is provided from eCFR, label it as U.S. 14 CFR. Never replace official sources; not legal advice.',
+                            'text' => 'You help aviation compliance staff compare regulatory concepts. When the bundle includes EASA blocks labeled with batch_id/node_uid/ERulesId, treat those as the installation’s parsed Easy Access staging excerpts—quote them accurately and cite batch_id + node_uid or ERulesId. If no excerpts matched, say so clearly. When U.S. text is provided from eCFR, label it as U.S. 14 CFR. Address the user personally by first name at least once in every answer when a first name is provided in the user prompt context. Never replace official sources; not legal advice.',
                         ],
                     ],
                 ],
@@ -997,13 +1020,16 @@ if ($action === 'regulatory_compare_ai') {
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => "Question:\n" . $q . "\n\nReference bundle:\n" . $bundle,
+                            'text' => "User first name:\n" . ($userFirstName !== '' ? $userFirstName : '(unknown)') . "\n\nQuestion:\n" . $q . "\n\nReference bundle:\n" . $bundle,
                         ],
                     ],
                 ],
             ],
         ], 120);
         $payload['ai_answer'] = rl_easa_extract_ai_text($resp);
+        if ($userFirstName !== '' && $payload['ai_answer'] !== '' && stripos($payload['ai_answer'], $userFirstName) === false) {
+            $payload['ai_answer'] = $userFirstName . ', ' . $payload['ai_answer'];
+        }
     } catch (Throwable $e) {
         $payload['ai_error'] = $e->getMessage();
     }

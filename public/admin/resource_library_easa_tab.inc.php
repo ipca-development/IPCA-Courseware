@@ -628,14 +628,81 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
   .rl-easa-ai-output {
     margin-top: 14px;
-    padding: 14px 16px;
+    padding: 12px;
     border-radius: 10px;
-    background: #f8fafc;
+    background: #eef2f7;
     border: 1px solid #e2e8f0;
     font-size: 14px;
     line-height: 1.55;
     color: #1e293b;
     min-height: 3rem;
+  }
+  .rl-easa-chat-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .rl-easa-chat-row {
+    display: flex;
+    width: 100%;
+  }
+  .rl-easa-chat-row-user {
+    justify-content: flex-end;
+  }
+  .rl-easa-chat-row-system {
+    justify-content: flex-start;
+  }
+  .rl-easa-chat-bubble {
+    max-width: min(80%, 900px);
+    border-radius: 16px;
+    padding: 10px 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  }
+  .rl-easa-chat-bubble-user {
+    background: #0b84ff;
+    color: #fff;
+    border-top-right-radius: 6px;
+  }
+  .rl-easa-chat-bubble-system {
+    background: #fff;
+    color: #0f172a;
+    border: 1px solid #dbe3ee;
+    border-top-left-radius: 6px;
+  }
+  .rl-easa-chat-meta {
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    opacity: 0.8;
+  }
+  .rl-easa-chat-bubble-user .rl-easa-chat-meta {
+    color: rgba(255,255,255,0.92);
+  }
+  .rl-easa-chat-bubble-system .rl-easa-chat-meta {
+    color: #475569;
+  }
+  .rl-easa-ai-output p {
+    margin: 0 0 0.65rem;
+  }
+  .rl-easa-ai-output p:last-child {
+    margin-bottom: 0;
+  }
+  .rl-easa-ai-output ul {
+    margin: 0.2rem 0 0.7rem 1.2rem;
+    padding: 0;
+  }
+  .rl-easa-ai-output li {
+    margin: 0.2rem 0;
+  }
+  .rl-easa-ai-output code {
+    background: #e2e8f0;
+    border-radius: 4px;
+    padding: 0 3px;
+    font-size: 0.93em;
+  }
+  .rl-easa-chat-bubble-user code {
+    background: rgba(255,255,255,0.18);
+    color: #fff;
   }
   .rl-easa-ai-output.is-empty {
     color: #94a3b8;
@@ -1099,6 +1166,72 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c;
     });
+  }
+
+  function rlEasaFormatAiAnswerHtml(text) {
+    var src = String(text || '').replace(/\r\n?/g, '\n').trim();
+    if (!src) return '';
+    var lines = src.split('\n');
+    var html = [];
+    var para = [];
+    var list = [];
+
+    function inlineFmt(s) {
+      var h = esc(s);
+      h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+      return h;
+    }
+    function flushPara() {
+      if (!para.length) return;
+      html.push('<p>' + inlineFmt(para.join(' ')) + '</p>');
+      para = [];
+    }
+    function flushList() {
+      if (!list.length) return;
+      html.push('<ul>' + list.map(function (it) { return '<li>' + inlineFmt(it) + '</li>'; }).join('') + '</ul>');
+      list = [];
+    }
+
+    lines.forEach(function (raw) {
+      var line = raw.trim();
+      var m = /^[-*]\s+(.+)$/.exec(line);
+      if (m) {
+        flushPara();
+        list.push(m[1].trim());
+        return;
+      }
+      if (line === '') {
+        flushPara();
+        flushList();
+        return;
+      }
+      flushList();
+      para.push(line);
+    });
+    flushPara();
+    flushList();
+    return html.join('');
+  }
+
+  function rlEasaRenderChatWindowHtml(userText, aiText, userFirstName) {
+    var q = String(userText || '').trim();
+    var a = String(aiText || '').trim();
+    var fn = String(userFirstName || '').trim();
+    var userLabel = fn ? ('You (' + fn + ')') : 'You';
+    var aiHtml = rlEasaFormatAiAnswerHtml(a || '(No AI text returned.)');
+    var qHtml = '<p>' + esc(q || '—') + '</p>';
+
+    return '<div class="rl-easa-chat-thread">'
+      + '<div class="rl-easa-chat-row rl-easa-chat-row-user"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
+      + '<div class="rl-easa-chat-meta">' + esc(userLabel) + '</div>'
+      + qHtml
+      + '</div></div>'
+      + '<div class="rl-easa-chat-row rl-easa-chat-row-system"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+      + '<div class="rl-easa-chat-meta">System reply</div>'
+      + (aiHtml || '<p>(No AI text returned.)</p>')
+      + '</div></div>'
+      + '</div>';
   }
 
   function setUploadMsg(text, kind) {
@@ -2631,7 +2764,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       }
       if (chatAnswerEl) {
         chatAnswerEl.classList.remove('is-empty');
-        chatAnswerEl.textContent = 'Working…';
+        chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, 'Working…', '');
       }
       chatAskBtn.disabled = true;
       fetch(api, {
@@ -2660,15 +2793,20 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
             chatCtxNote.style.display = 'block';
           }
           var aiBlock = '';
+          var userFirst = x.j.user_first_name || '';
           if (x.j.ai_error) aiBlock = 'AI error: ' + x.j.ai_error;
           else if (x.j.ai_answer) aiBlock = x.j.ai_answer;
           else aiBlock = (useAi && useAi.checked)
             ? '(No AI text returned.)'
             : 'AI skipped — inspect official reference cards and context line above.';
-          if (chatAnswerEl) chatAnswerEl.textContent = aiBlock;
+          if (chatAnswerEl) {
+            chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, aiBlock, userFirst);
+          }
         })
         .catch(function (e) {
-          if (chatAnswerEl) chatAnswerEl.textContent = e.message || 'Error';
+          if (chatAnswerEl) {
+            chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, e.message || 'Error', '');
+          }
         })
         .finally(function () { chatAskBtn.disabled = false; });
     });
