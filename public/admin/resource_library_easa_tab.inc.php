@@ -459,18 +459,19 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
 
   /* —— EASA resource dashboard —— */
   .rl-easa-dash-header {
-    margin-bottom: 14px;
+    margin: 0;
   }
   .rl-easa-dash-header h2 {
-    margin: 0 0 4px;
-    font-size: 1.25rem;
+    margin: 0 0 6px;
+    font-size: 2rem;
     font-weight: 800;
     color: #0f172a;
     letter-spacing: -0.02em;
+    line-height: 1.2;
   }
   .rl-easa-dash-header p {
     margin: 0;
-    font-size: 13px;
+    font-size: 14px;
     color: #64748b;
     line-height: 1.45;
   }
@@ -509,19 +510,17 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
   .rl-easa-source-scroll-wrap {
     margin-bottom: 16px;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    padding-bottom: 4px;
+    overflow: visible;
+    padding-bottom: 0;
   }
   .rl-easa-source-row {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 10px;
     align-items: stretch;
-    min-height: 118px;
   }
   .rl-easa-source-card {
-    flex: 0 0 auto;
-    width: min(220px, 82vw);
+    width: 100%;
     background: #fff;
     border: 1px solid #e2e8f0;
     border-radius: 12px;
@@ -550,6 +549,26 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     justify-content: center;
     align-items: center;
     background: #f8fafc;
+  }
+  @media (max-width: 1400px) {
+    .rl-easa-source-row {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 1120px) {
+    .rl-easa-source-row {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 860px) {
+    .rl-easa-source-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 560px) {
+    .rl-easa-source-row {
+      grid-template-columns: 1fr;
+    }
   }
   .rl-easa-source-card--add:hover {
     background: #eff6ff;
@@ -860,19 +879,14 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
 </style>
 
-<section class="card" style="padding:14px 16px;">
-  <div class="tcc-muted">
-    <strong>EASA Easy Access Rules</strong> — official XML evidence, staging, and the semantic rule tree below.
-    U.S. <strong>eCFR</strong> tooling lives on the <a href="/admin/resource_library.php?tab=apis">APIs</a> tab; optional 14 CFR excerpts can be pulled into the AI panel here.
-  </div>
+<section class="card" style="padding:14px 16px; margin-bottom: 12px;">
+  <header class="rl-easa-dash-header">
+    <h2>EASA Easy Access Rules Dasboard</h2>
+    <p>Metrics, monitored download pages, AI Q&amp;A backed by staging excerpts, keyword search, and the canonical rule tree viewer.</p>
+  </header>
 </section>
 
 <div class="rl-wrap rl-tab-panel rl-easa-page" id="rlEasaPage" data-api="<?= h($easaApiHref) ?>">
-  <header class="rl-easa-dash-header">
-    <h2>EASA resource dashboard</h2>
-    <p>Metrics, monitored download pages, AI Q&amp;A backed by staging excerpts, keyword search, and the canonical rule tree viewer.</p>
-  </header>
-
   <div class="rl-easa-metrics" id="rlEasaMetrics" aria-live="polite">
     <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">XML batches</div><div class="rl-easa-metric-value" id="rlEasaMetricBatches">—</div></div>
     <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Indexed nodes</div><div class="rl-easa-metric-value" id="rlEasaMetricNodes">—</div></div>
@@ -1221,6 +1235,33 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return fn.length > 46 ? fn.slice(0, 43) + '…' : fn;
   }
 
+  function rlEasaSourceDisplayName(b) {
+    var raw = String(b.original_filename || '').replace(/\.xml$/i, '').trim();
+    if (!raw) return 'Source';
+    var s = raw.replace(/^easy access rules for\s+/i, '');
+    s = s.replace(/\s*-\s*part.*$/i, '');
+    s = s.replace(/\s+/g, ' ').trim();
+    if (!s) s = raw;
+    if (s.length > 34) s = s.slice(0, 31) + '…';
+    return s;
+  }
+
+  function rlEasaFormatUploadedUtc(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return '—';
+    var iso = s.replace(' ', 'T');
+    if (!/Z$/i.test(iso)) iso += 'Z';
+    var d = new Date(iso);
+    if (!(d instanceof Date) || isNaN(d.getTime())) return s;
+    var wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+    var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+    var day = d.getUTCDate();
+    var yr = d.getUTCFullYear();
+    var hh = String(d.getUTCHours()).padStart(2, '0');
+    var mm = String(d.getUTCMinutes()).padStart(2, '0');
+    return wd + ' ' + mon + ' ' + day + ', ' + yr + ' (' + hh + ':' + mm + ' UTC)';
+  }
+
   function rlEasaPublicationHint(b) {
     var raw = b.publication_meta_json;
     if (raw == null || raw === '') return '';
@@ -1283,15 +1324,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     var row = document.getElementById('rlEasaSourceRow');
     if (!row) return;
     row.innerHTML = '';
-    var add = document.createElement('button');
-    add.type = 'button';
-    add.className = 'rl-easa-source-card rl-easa-source-card--add';
-    add.innerHTML = '<span>+ Add XML Source</span>';
-    add.addEventListener('click', function () {
-      rlEasaOpenSourceModal('new', null);
-    });
-    row.appendChild(add);
-
     (j.monitor || []).forEach(function (m) {
       var card = document.createElement('button');
       card.type = 'button';
@@ -1337,11 +1369,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       var livePill = live
         ? '<span class="rl-easa-pill rl-easa-pill--live">Live</span>'
         : '<span class="rl-easa-pill rl-easa-pill--off">Not live</span>';
-      var pub = rlEasaPublicationHint(b);
-      var metaLine = 'Batch #' + bid + ' · ' + nodes + ' nodes';
-      if (pub) metaLine += '<br>' + esc(pub);
-      if (b.created_at) metaLine += '<br>' + esc(String(b.created_at));
-      card.innerHTML = '<div class="rl-easa-source-card-title">' + esc(rlEasaBatchLabel(b)) + '</div>'
+      var uploaded = rlEasaFormatUploadedUtc(b.created_at || '');
+      var metaLine = 'EASA EASY ACCESS RULES'
+        + '<br>Nodes: ' + esc(String(nodes))
+        + '<br>Uploaded on: ' + esc(uploaded);
+      card.innerHTML = '<div class="rl-easa-source-card-title">' + esc(rlEasaSourceDisplayName(b)) + '</div>'
         + '<div class="rl-easa-source-card-meta">' + metaLine + '</div>'
         + '<div class="rl-easa-pill-row">' + statusPill + livePill
         + '<span class="rl-easa-pill rl-easa-pill--muted">Manual</span></div>';
@@ -1350,6 +1382,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       });
       row.appendChild(card);
     });
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'rl-easa-source-card rl-easa-source-card--add';
+    add.innerHTML = '<span>+ Add XML Source</span>';
+    add.addEventListener('click', function () {
+      rlEasaOpenSourceModal('new', null);
+    });
+    row.appendChild(add);
   }
 
   function rlEasaSetModalParseProgressUi(opts) {
