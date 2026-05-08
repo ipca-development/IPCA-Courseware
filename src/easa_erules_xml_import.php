@@ -1778,9 +1778,29 @@ function easa_erules_peer_lift_row_is_liftable_ir_peer(array $c): bool
 }
 
 /**
- * After peer lift, AMC/GM may still be direct children of SUBPART — attach under matching IR sibling by stub (e.g. GM1 FCL.010 → FCL.010).
+ * Structural outline container (ANNEX, SUBPART, SECTION, APPENDIX): AMC/GM supplements attach under IR peers here.
+ *
+ * @param array<string, mixed> $parent
  */
-function easa_erules_reparent_amc_gm_under_subpart_ir_peers(PDO $pdo, int $batchId): void
+function easa_erules_parent_row_is_structural_amc_cluster_parent(array $parent): bool
+{
+    $pNt = strtolower(trim((string) ($parent['node_type'] ?? '')));
+    if (!in_array($pNt, ['heading', 'toc'], true)) {
+        return false;
+    }
+    $pTitle = trim((string) ($parent['title'] ?? ''));
+    if ($pTitle === '') {
+        return false;
+    }
+
+    return easa_erules_structural_outline_parent_kind_from_heading_title($pTitle) !== null;
+}
+
+/**
+ * After peer lift, AMC/GM may still sit directly under a structural section — attach under matching IR sibling by stub.
+ * Applies under SUBPART, SECTION, ANNEX, APPENDIX (same stub map + multi-stub supplements: first cited stub that exists among siblings).
+ */
+function easa_erules_reparent_amc_gm_under_structural_ir_peers(PDO $pdo, int $batchId): void
 {
     if ($batchId <= 0) {
         return;
@@ -1827,12 +1847,7 @@ function easa_erules_reparent_amc_gm_under_subpart_ir_peers(PDO $pdo, int $batch
         if (!is_array($parent)) {
             continue;
         }
-        $pNt = strtolower(trim((string) ($parent['node_type'] ?? '')));
-        if (!in_array($pNt, ['heading', 'toc'], true)) {
-            continue;
-        }
-        $pTitle = trim((string) ($parent['title'] ?? ''));
-        if ($pTitle === '' || !easa_erules_tree_title_line_is_subpart_heading($pTitle)) {
+        if (!easa_erules_parent_row_is_structural_amc_cluster_parent($parent)) {
             continue;
         }
         usort($siblings, static function (array $a, array $b): int {
@@ -1865,12 +1880,8 @@ function easa_erules_reparent_amc_gm_under_subpart_ir_peers(PDO $pdo, int $batch
             if ($cuid === '') {
                 continue;
             }
-            $tk = easa_erules_tree_nav_rule_key_from_row($c);
-            if ($tk === null || !isset($stubMap[$tk])) {
-                continue;
-            }
-            $target = $stubMap[$tk];
-            if ($target === $cuid) {
+            $target = easa_erules_tree_nav_rule_supplement_target_uid_from_stub_map($c, $stubMap);
+            if ($target === null || $target === $cuid) {
                 continue;
             }
             $upd->execute([$target, $batchId, $cuid, $target]);
@@ -1904,18 +1915,20 @@ function easa_erules_reparent_amc_gm_under_subpart_ir_peers(PDO $pdo, int $batch
                 if ($chUid === '') {
                     continue;
                 }
-                $tk = easa_erules_tree_nav_rule_key_from_row($ch);
-                if ($tk === null || !isset($stubMap[$tk])) {
-                    continue;
-                }
-                $target = $stubMap[$tk];
-                if ($target === $chUid) {
+                $target = easa_erules_tree_nav_rule_supplement_target_uid_from_stub_map($ch, $stubMap);
+                if ($target === null || $target === $chUid) {
                     continue;
                 }
                 $upd->execute([$target, $batchId, $chUid, $target]);
             }
         }
     }
+}
+
+/** @deprecated Use {@see easa_erules_reparent_amc_gm_under_structural_ir_peers} */
+function easa_erules_reparent_amc_gm_under_subpart_ir_peers(PDO $pdo, int $batchId): void
+{
+    easa_erules_reparent_amc_gm_under_structural_ir_peers($pdo, $batchId);
 }
 
 /**
@@ -2197,7 +2210,7 @@ function easa_erules_reparent_rule_ref_toc_peer_lift(PDO $pdo, int $batchId): vo
             break;
         }
     }
-    easa_erules_reparent_amc_gm_under_subpart_ir_peers($pdo, $batchId);
+    easa_erules_reparent_amc_gm_under_structural_ir_peers($pdo, $batchId);
 }
 
 /**
@@ -3116,6 +3129,60 @@ function easa_erules_tree_nav_rule_key_from_row(array $r): ?string
         $k2 = easa_erules_tree_nav_rule_key($blob);
         if ($k2 !== null) {
             return $k2;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * All codified rule stubs mentioned in a row (left-to-right, title then source then erules), deduped by first occurrence.
+ * Used to attach supplements like "AMC1 FCL.125; FCL.235" to the first sibling IR stub that exists (e.g. only FCL.235).
+ *
+ * @return list<string>
+ */
+function easa_erules_tree_nav_rule_stub_candidates_from_row(array $r): array
+{
+    $order = [];
+    $seen = [];
+    foreach (
+        [
+            trim((string) ($r['title'] ?? '')),
+            trim((string) ($r['source_title'] ?? '')),
+            trim((string) ($r['source_erules_id'] ?? '')),
+        ] as $blob
+    ) {
+        if ($blob === '') {
+            continue;
+        }
+        if (preg_match_all(
+            '/\b(FCL\.\d+[A-Z]?|(?:ORA|CAT|DTO|ARA|MED)(?:\.[A-Z0-9]+)+)\b/iu',
+            $blob,
+            $m
+        )) {
+            foreach ($m[1] as $tok) {
+                $k = strtoupper((string) $tok);
+                if (!isset($seen[$k])) {
+                    $seen[$k] = true;
+                    $order[] = $k;
+                }
+            }
+        }
+    }
+
+    return $order;
+}
+
+/**
+ * First stub from the supplement row that exists in $stubMap (node_uid per stub).
+ *
+ * @param array<string, string> $stubMap stub → node_uid
+ */
+function easa_erules_tree_nav_rule_supplement_target_uid_from_stub_map(array $r, array $stubMap): ?string
+{
+    foreach (easa_erules_tree_nav_rule_stub_candidates_from_row($r) as $stub) {
+        if (isset($stubMap[$stub])) {
+            return $stubMap[$stub];
         }
     }
 
