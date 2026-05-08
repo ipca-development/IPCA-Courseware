@@ -36,40 +36,52 @@ if ($role === 'student') {
     $chk = $pdo->prepare("
       SELECT 1
       FROM cohort_students cs
-      JOIN cohorts co ON co.id = cs.cohort_id
       JOIN cohort_lesson_deadlines d ON d.cohort_id = cs.cohort_id
       WHERE cs.user_id = ?
-        AND co.course_id = ?
         AND d.lesson_id = ?
       LIMIT 1
     ");
-    $chk->execute([$uid, $courseId, $lessonId]);
+    $chk->execute([$uid, $lessonId]);
     if (!$chk->fetchColumn()) {
         http_response_code(403);
         exit('Forbidden');
     }
 }
 
-// Pick text: narration if present else slide text
+// Pick text: narration if present else slide text (per content language column)
 $narrStmt = $pdo->prepare("SELECT narration_en, narration_es FROM slide_enrichment WHERE slide_id=? LIMIT 1");
 $narrStmt->execute([$slideId]);
 $narr = $narrStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-$text = '';
 
-if ($lang === 'es') {
-    $text = trim((string)($narr['narration_es'] ?? ''));
-    if ($text === '') {
-        $t = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='es' LIMIT 1");
-        $t->execute([$slideId]);
-        $text = trim((string)$t->fetchColumn());
+$plainEn = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='en' LIMIT 1");
+$plainEs = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='es' LIMIT 1");
+
+$slideTextFor = function (string $wantLang) use ($narr, $slideId, $plainEn, $plainEs): string {
+    $wantLang = strtolower($wantLang);
+    if ($wantLang === 'es') {
+        $t = trim((string)($narr['narration_es'] ?? ''));
+        if ($t !== '') {
+            return $t;
+        }
+        $plainEs->execute([$slideId]);
+        return trim((string)$plainEs->fetchColumn());
     }
-} else {
-    $text = trim((string)($narr['narration_en'] ?? ''));
-    if ($text === '') {
-        $t = $pdo->prepare("SELECT plain_text FROM slide_content WHERE slide_id=? AND lang='en' LIMIT 1");
-        $t->execute([$slideId]);
-        $text = trim((string)$t->fetchColumn());
+    $t = trim((string)($narr['narration_en'] ?? ''));
+    if ($t !== '') {
+        return $t;
     }
+    $plainEn->execute([$slideId]);
+    return trim((string)$plainEn->fetchColumn());
+};
+
+// Requested UI language (persisted client-side); cohort may publish EN-only narration for some courses.
+$requestedLang = $lang;
+$toneLang = $requestedLang;
+
+$text = $slideTextFor($requestedLang);
+if ($text === '' && $requestedLang === 'es') {
+    $text = $slideTextFor('en');
+    $toneLang = 'en';
 }
 
 if ($text === '') {
@@ -86,11 +98,12 @@ if ($apiKey === '') {
 
 $model = 'gpt-4o-mini-tts';
 $voice = 'coral';
-$instructions = ($lang === 'es')
+$instructions = ($toneLang === 'es')
   ? "Habla con un tono profesional, claro, didáctico, como instructor de vuelo. Mantén un ritmo natural."
   : "Speak in a professional, clear, friendly flight-instructor tone. Natural pacing, crisp articulation.";
 
-$sha = sha1($text . '|' . $lang . '|' . $voice . '|' . $model . '|' . $instructions);
+// Cache keyed by requested URL lang so prefetch matches the player; sha includes synthesis tone/text.
+$sha = sha1($text . '|' . $requestedLang . '|' . $toneLang . '|' . $voice . '|' . $model . '|' . $instructions);
 
 // Cache lookup
 $cache = $pdo->prepare("

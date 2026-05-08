@@ -40,7 +40,7 @@ if ($role === 'student') {
     $chk = $pdo->prepare("
       SELECT cs.cohort_id
       FROM cohort_students cs
-      JOIN cohort_lesson_deadlines d 
+      JOIN cohort_lesson_deadlines d
         ON d.cohort_id = cs.cohort_id
       WHERE cs.user_id = ?
         AND d.lesson_id = ?
@@ -767,6 +767,16 @@ function ttsUrl(prefetch=false, slideId=SLIDE_ID, useLang=lang){
   return `/player/api/tts.php?slide_id=${slideId}&lang=${encodeURIComponent(useLang)}${p}`;
 }
 
+function hintTTSFailure(kind){
+  const title = kind === 'play' ? 'Cannot start audio playback' : 'Could not load audio';
+  const msg = (
+    kind === 'play'
+      ? 'Your browser blocked playback after loading. Tap Audio again after unmuting.'
+      : 'The narration could not load (often: no narration text yet, access, or narration service outage). Reload the slide and try again, or notify support.'
+  );
+  btnPlay.title = `${title}: ${msg}`;
+}
+
 async function playTTS(){
   const want = ttsUrl(false, SLIDE_ID, lang);
 
@@ -777,13 +787,16 @@ async function playTTS(){
     ttsAudio.currentTime = 0;
     ttsAudio.src = want;
     ttsAudio.dataset.src = want;
+    btnPlay.title = '';
   }
 
   try {
     await ttsAudio.play();
     setPlayLabel('idle');
+    btnPlay.title = '';
   } catch(e) {
     setPlayLabel('idle');
+    hintTTSFailure('play');
   }
 }
 
@@ -809,6 +822,13 @@ ttsAudio.addEventListener('waiting', ()=> setPlayLabel('generating'));
 ttsAudio.addEventListener('canplay', ()=> setPlayLabel('idle'));
 ttsAudio.addEventListener('playing', ()=> setPlayLabel('idle'));
 ttsAudio.addEventListener('ended', ()=> setPlayLabel('idle'));
+
+ttsAudio.addEventListener('error', ()=>{
+  setPlayLabel('idle');
+  hintTTSFailure('load');
+});
+
+ttsAudio.addEventListener('abort', ()=> setPlayLabel('idle'));
 
 applyMuteUI();
 consumeAutoplay();

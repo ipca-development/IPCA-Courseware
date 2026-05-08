@@ -1373,17 +1373,66 @@ function easa_erules_peer_lift_wrapper_label_blob(array $w, array $sortedDirectC
 }
 
 /**
- * True when any logical line starts with AMC/GM markup (handles multi-line title/source fields).
+ * Title / source_erules identity line derived from **this row only** (not first_child_* enrichment).
+ *
+ * @param array<string, mixed> $row
  */
-function easa_erules_row_staging_multiline_blob_indicates_gm_amc(?string $blob): bool
+function easa_erules_tree_row_own_primary_navigation_line(array $row): string
 {
-    if ($blob === null || trim((string) $blob) === '') {
+    foreach (
+        [
+            trim((string) ($row['title'] ?? '')),
+            trim((string) ($row['source_title'] ?? '')),
+            trim((string) ($row['source_erules_id'] ?? '')),
+        ] as $blob
+    ) {
+        if ($blob !== '') {
+            return easa_erules_tree_title_first_line($blob);
+        }
+    }
+
+    return '';
+}
+
+/**
+ * True when a **single logical line begins** with FCL/stub codified implementing rule (rules out "GM1 FCL.005…").
+ *
+ * Covers FCL.020(a) and analogous ORA/CAT/DTO/ARA/MED lead tokens.
+ */
+function easa_erules_tree_line_leads_codified_ir_rule(?string $line): bool
+{
+    $line = trim((string) $line);
+    if ($line === '') {
         return false;
     }
-    foreach (preg_split('/\R+/u', (string) $blob) ?: [] as $ln) {
-        $ln = trim((string) $ln);
-        if ($ln !== '' && easa_erules_tree_title_starts_gm_or_amc($ln)) {
-            return true;
+    // FCL.010, FCL.010A, FCL.020(a) …
+    if (preg_match('/^\s*FCL\.\d+[A-Za-z]?(?:\([^)]*\))*\b/iu', $line) === 1) {
+        return true;
+    }
+
+    return preg_match('/^\s*(?:ORA|CAT|DTO|ARA|MED)(?:\.[A-Z0-9]+)+\b/iu', $line) === 1;
+}
+
+/**
+ * @param array<string, mixed> $row
+ */
+function easa_erules_row_own_fields_any_line_leads_codified_ir(array $row): bool
+{
+    foreach (
+        [
+            trim((string) ($row['title'] ?? '')),
+            trim((string) ($row['source_title'] ?? '')),
+            trim((string) ($row['source_erules_id'] ?? '')),
+        ] as $blob
+    ) {
+        if ($blob === '') {
+            continue;
+        }
+        foreach (preg_split('/\R+/u', $blob) ?: [] as $ln) {
+            $ln = trim((string) $ln);
+            if ($ln !== '' && easa_erules_tree_line_leads_codified_ir_rule($ln)) {
+                return true;
+            }
         }
     }
 
@@ -1391,35 +1440,36 @@ function easa_erules_row_staging_multiline_blob_indicates_gm_amc(?string $blob):
 }
 
 /**
- * Leading AM(G)C after collapsing whitespace — catches odd line breaks hiding GM1 / AMC2 on a later visual line.
+ * AMC/GM **supplement** row: own title/source/erules only; never inferred from child labels.
+ * If any own line leads with a codified IR stub, this is **not** an AMC/GM nav row (parent IR topic wins).
+ *
+ * @param array<string, mixed> $c
  */
-function easa_erules_row_collapsed_leading_blob_starts_gm_amc(?string $blob): bool
+function easa_erules_row_own_fields_indicate_gm_amc_supplement(array $c): bool
 {
-    if ($blob === null || trim((string) $blob) === '') {
+    if (easa_erules_row_own_fields_any_line_leads_codified_ir($c)) {
         return false;
     }
-    $one = preg_replace('/\s+/u', ' ', trim((string) $blob));
-
-    return is_string($one)
-        && (preg_match('/^\s*GM\d*\b/iu', $one) === 1 || preg_match('/^\s*AMC\d*\b/iu', $one) === 1);
-}
-
-/**
- * AMC/GM from persisted staging blobs (multi-line aware, includes source_erules_id — often the only populated field).
- */
-function easa_erules_row_staging_blob_indicates_gm_amc(array $c): bool
-{
-    $title = trim((string) ($c['title'] ?? ''));
-    $src = trim((string) ($c['source_title'] ?? ''));
-    $er = trim((string) ($c['source_erules_id'] ?? ''));
-    foreach ([$title, $src, $er] as $blob) {
+    foreach (
+        [
+            trim((string) ($c['title'] ?? '')),
+            trim((string) ($c['source_title'] ?? '')),
+            trim((string) ($c['source_erules_id'] ?? '')),
+        ] as $blob
+    ) {
         if ($blob === '') {
             continue;
         }
-        if (easa_erules_row_staging_multiline_blob_indicates_gm_amc($blob) || easa_erules_row_collapsed_leading_blob_starts_gm_amc($blob)) {
-            return true;
+        foreach (preg_split('/\R+/u', $blob) ?: [] as $ln) {
+            $ln = trim((string) $ln);
+            if ($ln !== '' && easa_erules_tree_title_starts_gm_or_amc($ln)) {
+                return true;
+            }
         }
     }
+    $title = trim((string) ($c['title'] ?? ''));
+    $src = trim((string) ($c['source_title'] ?? ''));
+    $er = trim((string) ($c['source_erules_id'] ?? ''));
     $band = easa_erules_classify_display_band(
         $c['node_type'] ?? null,
         $title !== '' ? $title : null,
@@ -1431,32 +1481,25 @@ function easa_erules_row_staging_blob_indicates_gm_amc(array $c): bool
 }
 
 /**
- * Like staging detection but includes graph-enrichment fields used for browse labels when title is sparse.
+ * True when toc/heading has no own textual label — safe to fall back to first_child_* for browse semantics only.
  *
  * @param array<string, mixed> $row
  */
-function easa_erules_row_graph_row_indicates_gm_amc(array $row): bool
+function easa_erules_tree_row_own_label_fields_empty(array $row): bool
 {
-    if (easa_erules_row_staging_blob_indicates_gm_amc($row)) {
-        return true;
-    }
-    foreach ([trim((string) ($row['first_child_title'] ?? '')), trim((string) ($row['first_child_source_title'] ?? ''))] as $blob) {
-        if ($blob !== '') {
-            if (easa_erules_row_staging_multiline_blob_indicates_gm_amc($blob) || easa_erules_row_collapsed_leading_blob_starts_gm_amc($blob)) {
-                return true;
-            }
-        }
-    }
-
-    return false;
+    return trim((string) ($row['title'] ?? '')) === ''
+        && trim((string) ($row['source_title'] ?? '')) === ''
+        && trim((string) ($row['source_erules_id'] ?? '')) === '';
 }
 
 /**
  * AMC/GM guidance rows (titles / bands), as distinct from implementing-rule peers (FCL/ORA/CAT/…).
+ *
+ * Uses **row identity only**. "GM1 FCL.005" is supplement; never an IR lift peer (even though it cites FCL).
  */
 function easa_erules_peer_lift_row_is_amc_gm_nav(array $c): bool
 {
-    return easa_erules_row_staging_blob_indicates_gm_amc($c);
+    return easa_erules_row_own_fields_indicate_gm_amc_supplement($c);
 }
 
 /** Peer implementing-rule row eligible to sit under SUBPART (not AMC/GM). */
@@ -1465,19 +1508,8 @@ function easa_erules_peer_lift_row_is_liftable_ir_peer(array $c): bool
     if (easa_erules_peer_lift_row_is_amc_gm_nav($c)) {
         return false;
     }
-    if (easa_erules_tree_nav_rule_key_from_row($c) !== null) {
-        return true;
-    }
-    $title = trim((string) ($c['title'] ?? ''));
-    $src = trim((string) ($c['source_title'] ?? ''));
-    $er = trim((string) ($c['source_erules_id'] ?? ''));
-    foreach ([$title, $src, $er] as $blob) {
-        if ($blob !== '' && easa_erules_tree_blob_has_ir_reference($blob)) {
-            return true;
-        }
-    }
 
-    return false;
+    return easa_erules_row_own_fields_any_line_leads_codified_ir($c);
 }
 
 /**
@@ -1530,7 +1562,8 @@ function easa_erules_reparent_amc_gm_under_subpart_ir_peers(PDO $pdo, int $batch
         if (!is_array($parent)) {
             continue;
         }
-        if (strtolower(trim((string) ($parent['node_type'] ?? ''))) !== 'heading') {
+        $pNt = strtolower(trim((string) ($parent['node_type'] ?? '')));
+        if (!in_array($pNt, ['heading', 'toc'], true)) {
             continue;
         }
         $pTitle = trim((string) ($parent['title'] ?? ''));
@@ -2801,7 +2834,13 @@ function easa_erules_tree_semantic_nav_classify(array $row): array
         return ['ui_kind' => 'section', 'material_type' => 'HEADING'];
     }
 
-    if (easa_erules_row_graph_row_indicates_gm_amc($row)) {
+    // A — Row material type from **own** title/source/erules only: codified implementing rule beats GM/AMC.
+    if (easa_erules_row_own_fields_any_line_leads_codified_ir($row)) {
+        return ['ui_kind' => 'rule', 'material_type' => 'IR'];
+    }
+
+    // B — AMC/GM from own fields only (never from first_child_* on populated IR toc/topic rows).
+    if (easa_erules_row_own_fields_indicate_gm_amc_supplement($row)) {
         $band = easa_erules_classify_display_band(
             $row['node_type'] ?? null,
             $title !== '' ? $title : null,
@@ -2809,27 +2848,32 @@ function easa_erules_tree_semantic_nav_classify(array $row): array
             $erules !== '' ? $erules : null
         );
         if ($band !== 'amc' && $band !== 'gm') {
-            $flat = preg_replace(
-                '/\s+/u',
-                ' ',
-                implode(
-                    ' ',
-                    array_filter(
-                        [
-                            $title,
-                            $sourceTitle,
-                            $erules,
-                            trim((string) ($row['first_child_title'] ?? '')),
-                            trim((string) ($row['first_child_source_title'] ?? '')),
-                        ],
-                        static fn (string $x): bool => $x !== ''
-                    )
-                )
-            ) ?? '';
-            $band = (is_string($flat) && preg_match('/^\s*AMC\d*\b/iu', $flat) === 1) ? 'amc' : 'gm';
+            $ln = easa_erules_tree_row_own_primary_navigation_line($row);
+            $band = (preg_match('/^\s*AMC\d*\b/iu', $ln) === 1) ? 'amc' : 'gm';
         }
 
         return ['ui_kind' => 'rule', 'material_type' => $band === 'amc' ? 'AMC' : 'GM'];
+    }
+
+    // C — Bare toc/heading shells: classify from **first_child** labels only when own fields are empty.
+    if (easa_erules_tree_row_own_label_fields_empty($row) && in_array($nt, ['toc', 'heading'], true)) {
+        $fc = trim((string) ($row['first_child_title'] ?? ''));
+        if ($fc === '') {
+            $fc = trim((string) ($row['first_child_source_title'] ?? ''));
+        }
+        if ($fc !== '') {
+            foreach (preg_split('/\R+/u', $fc) ?: [] as $fcLn) {
+                $fcLn = trim((string) $fcLn);
+                if ($fcLn !== '' && easa_erules_tree_line_leads_codified_ir_rule($fcLn)) {
+                    return ['ui_kind' => 'rule', 'material_type' => 'IR'];
+                }
+                if ($fcLn !== '' && easa_erules_tree_title_starts_gm_or_amc($fcLn)) {
+                    $mtFc = (preg_match('/^\s*AMC\d*\b/iu', $fcLn) === 1) ? 'AMC' : 'GM';
+
+                    return ['ui_kind' => 'rule', 'material_type' => $mtFc];
+                }
+            }
+        }
     }
 
     foreach ([$title, $sourceTitle, $erules] as $chunk) {
@@ -2848,10 +2892,10 @@ function easa_erules_tree_semantic_nav_classify(array $row): array
 
     if (in_array($nt, ['heading', 'toc'], true)) {
         $probe = $title !== '' ? $title : $sourceTitle;
-        if ($probe === '' && isset($row['first_child_title'])) {
+        if ($probe === '' && easa_erules_tree_row_own_label_fields_empty($row) && isset($row['first_child_title'])) {
             $probe = trim((string) $row['first_child_title']);
         }
-        if ($probe === '' && isset($row['first_child_source_title'])) {
+        if ($probe === '' && easa_erules_tree_row_own_label_fields_empty($row) && isset($row['first_child_source_title'])) {
             $probe = trim((string) $row['first_child_source_title']);
         }
         if ($probe !== '' && easa_erules_tree_blob_has_ir_reference($probe)) {
