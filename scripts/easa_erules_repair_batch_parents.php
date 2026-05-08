@@ -49,11 +49,7 @@ function easa_erules_repair_script_count_children(PDO $pdo, int $batchId, string
     return (int) $st->fetchColumn();
 }
 
-/**
- * First-line SUBPART A / B / C headings (Part-FCL style titles).
- *
- * @return list<array{node_uid: string, parent_node_uid: ?string, title: string}>
- */
+/** Fetch one staging row by batch + node_uid (probe annex/subpart existence). */
 function easa_erules_repair_script_fetch_node(PDO $pdo, int $batchId, string $nodeUid): ?array
 {
     $st = $pdo->prepare(
@@ -69,6 +65,12 @@ function easa_erules_repair_script_fetch_node(PDO $pdo, int $batchId, string $no
 }
 
 /**
+ * SUBPART A / B / C heading rows (Part-FCL style titles).
+ *
+ * @return list<array{node_uid: string, parent_node_uid: ?string, title: string}>
+ */
+function easa_erules_repair_script_fetch_subpart_abc(PDO $pdo, int $batchId): array
+{
     $st = $pdo->prepare(
         'SELECT node_uid, parent_node_uid, title
          FROM easa_erules_import_nodes_staging
