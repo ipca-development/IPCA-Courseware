@@ -1337,6 +1337,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
+  function rlEasaTreeFilterAnnexRows(nodes) {
+    return (nodes || []).filter(function (n) {
+      return rlEasaTreeTitleLooksLikeAnnex(rlEasaTreeDisplayTitle(n));
+    });
+  }
+
   /**
    * Pick one document / TOC shell to descend (not ANNEX/SUBPART/SECTION rows — those are legal content).
    */
@@ -1394,7 +1400,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
 
   /**
-   * Root → unwrap non-legal shells only → stop at EASA eRules, annex list, or rule rows.
+   * Root → unwrap non-legal shells only → stop at EASA eRules, or annex-only view (mixed rule/editorial
+   * siblings are dropped when any ANNEX row is present). Otherwise stop at rule rows with no ANNEX.
    * Does not auto-expand; does not flatten deep trees onto first paint.
    */
   function rlEasaTreeResolveLegalRootNodes(bid) {
@@ -1409,20 +1416,16 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           return Promise.resolve({ renderNodes: [nodes[i]], hint: 'er-node' });
         }
       }
-      var allAnnex =
-        nodes.length > 0 &&
-        nodes.every(function (n) {
-          return rlEasaTreeTitleLooksLikeAnnex(rlEasaTreeDisplayTitle(n));
-        });
-      if (allAnnex) {
-        var puid = rlEasaTreeNodeParentUid(nodes[0]);
-        if (puid) {
+      var annexRows = rlEasaTreeFilterAnnexRows(nodes);
+      if (annexRows.length > 0) {
+        var puidAnnex = rlEasaTreeNodeParentUid(annexRows[0]);
+        if (puidAnnex) {
           return Promise.resolve({
-            renderNodes: [rlEasaTreeSyntheticErRulesNode(puid, nodes.length)],
+            renderNodes: [rlEasaTreeSyntheticErRulesNode(puidAnnex, annexRows.length)],
             hint: 'synthetic-er'
           });
         }
-        return Promise.resolve({ renderNodes: nodes, hint: 'annex-flat' });
+        return Promise.resolve({ renderNodes: annexRows, hint: 'annex-flat' });
       }
       if (rlEasaTreeHasRuleRows(nodes)) {
         return Promise.resolve({ renderNodes: nodes, hint: 'stopped-rules' });
