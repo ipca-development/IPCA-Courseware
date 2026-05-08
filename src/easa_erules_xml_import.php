@@ -1328,6 +1328,51 @@ function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
 }
 
 /**
+ * Label text for peer-lift when &lt;toc&gt;/heading row has no title (same precedence as short_tree_label’s first line: title, source_title, erules; else first direct child).
+ *
+ * @param list<array<string, mixed>> $sortedDirectChildren by sort_order, id
+ *
+ * @return array{0: string, 1: string} [blob, source_tag for diagnostics]
+ */
+function easa_erules_peer_lift_wrapper_label_blob(array $w, array $sortedDirectChildren): array
+{
+    $wTitle = trim((string) ($w['title'] ?? ''));
+    $wSrc = trim((string) ($w['source_title'] ?? ''));
+    $wEr = trim((string) ($w['source_erules_id'] ?? ''));
+    if ($wTitle !== '') {
+        return [$wTitle, 'own:title'];
+    }
+    if ($wSrc !== '') {
+        return [$wSrc, 'own:source_title'];
+    }
+    if ($wEr !== '') {
+        return [$wEr, 'own:source_erules_id'];
+    }
+    foreach ($sortedDirectChildren as $c) {
+        if (!is_array($c)) {
+            continue;
+        }
+        $uid = trim((string) ($c['node_uid'] ?? ''));
+        $ct = trim((string) ($c['title'] ?? ''));
+        $cs = trim((string) ($c['source_title'] ?? ''));
+        $ce = trim((string) ($c['source_erules_id'] ?? ''));
+        if ($ct === '' && $cs === '' && $ce === '') {
+            continue;
+        }
+        if ($ct !== '') {
+            return [$ct, 'first_child:' . $uid . ':title'];
+        }
+        if ($cs !== '') {
+            return [$cs, 'first_child:' . $uid . ':source_title'];
+        }
+
+        return [$ce, 'first_child:' . $uid . ':source_erules_id'];
+    }
+
+    return ['', 'none'];
+}
+
+/**
  * &lt;toc&gt;/heading whose title is a rule id (FCL.001, ORA…, CAT…, DTA…, ARA…, MED…) but whose
  * children are peer rule rows must not sit between SUBPART and rules: lift all direct children to the
  * wrapper’s parent. The wrapper row stays (empty) and is hidden in tree_children.
@@ -1394,7 +1439,6 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
         $wTitle = trim((string) ($w['title'] ?? ''));
         $wSrc = trim((string) ($w['source_title'] ?? ''));
         $wEr = trim((string) ($w['source_erules_id'] ?? ''));
-        $wBlob = $wTitle !== '' ? $wTitle : $wSrc;
         if ($diag) {
             $peerLiftDiag(
                 true,
@@ -1402,16 +1446,6 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
                 . ' source_title=' . json_encode(mb_substr($wSrc, 0, 200), JSON_UNESCAPED_UNICODE)
                 . ' source_erules_id=' . json_encode(mb_substr($wEr, 0, 120), JSON_UNESCAPED_UNICODE)
             );
-        }
-        if ($wBlob === '' || easa_erules_tree_title_is_structural_section($wBlob)) {
-            $peerLiftDiag($diag, 'skip: empty blob or structural section title');
-
-            continue;
-        }
-        if (!easa_erules_tree_blob_has_ir_reference($wBlob)) {
-            $peerLiftDiag($diag, 'skip: blob_has_ir_reference=false on wBlob');
-
-            continue;
         }
         if ($wUid === '') {
             $peerLiftDiag($diag, 'skip: empty node_uid');
@@ -1427,12 +1461,15 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
 
             continue;
         }
-        $pRow = $byUid[$pUid] ?? null;
-        $pTitle = is_array($pRow) ? trim((string) ($pRow['title'] ?? '')) : '';
-        if ($diag) {
-            $peerLiftDiag(true, 'parent title=' . json_encode(mb_substr($pTitle, 0, 240), JSON_UNESCAPED_UNICODE));
-        }
         $kids = $byParent[easa_erules_parent_sort_key($wUid)] ?? [];
+        usort($kids, static function (array $a, array $b): int {
+            $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
+            if ($so !== 0) {
+                return $so;
+            }
+
+            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+        });
         $nk = count($kids);
         if ($diag) {
             $peerLiftDiag(true, 'direct child count=' . $nk);
@@ -1441,6 +1478,28 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
             $peerLiftDiag($diag, 'skip: need >= 2 direct children');
 
             continue;
+        }
+        [$wBlob, $labelSrc] = easa_erules_peer_lift_wrapper_label_blob($w, $kids);
+        if ($diag) {
+            $peerLiftDiag(
+                true,
+                'label_candidate: source=' . $labelSrc . ' blob=' . json_encode(mb_substr($wBlob, 0, 280), JSON_UNESCAPED_UNICODE)
+            );
+        }
+        if ($wBlob === '' || easa_erules_tree_title_is_structural_section($wBlob)) {
+            $peerLiftDiag($diag, 'skip: empty label blob or structural section title');
+
+            continue;
+        }
+        if (!easa_erules_tree_blob_has_ir_reference($wBlob)) {
+            $peerLiftDiag($diag, 'skip: blob_has_ir_reference=false on label blob');
+
+            continue;
+        }
+        $pRow = $byUid[$pUid] ?? null;
+        $pTitle = is_array($pRow) ? trim((string) ($pRow['title'] ?? '')) : '';
+        if ($diag) {
+            $peerLiftDiag(true, 'parent title=' . json_encode(mb_substr($pTitle, 0, 240), JSON_UNESCAPED_UNICODE));
         }
         $stubSet = [];
         $stubLines = [];
