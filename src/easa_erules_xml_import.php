@@ -1373,31 +1373,90 @@ function easa_erules_peer_lift_wrapper_label_blob(array $w, array $sortedDirectC
 }
 
 /**
- * AMC/GM guidance rows (titles / bands), as distinct from implementing-rule peers (FCL/ORA/CAT/…).
+ * True when any logical line starts with AMC/GM markup (handles multi-line title/source fields).
  */
-function easa_erules_peer_lift_row_is_amc_gm_nav(array $c): bool
+function easa_erules_row_staging_multiline_blob_indicates_gm_amc(?string $blob): bool
 {
-    $nt = strtolower(trim((string) ($c['node_type'] ?? '')));
+    if ($blob === null || trim((string) $blob) === '') {
+        return false;
+    }
+    foreach (preg_split('/\R+/u', (string) $blob) ?: [] as $ln) {
+        $ln = trim((string) $ln);
+        if ($ln !== '' && easa_erules_tree_title_starts_gm_or_amc($ln)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Leading AM(G)C after collapsing whitespace — catches odd line breaks hiding GM1 / AMC2 on a later visual line.
+ */
+function easa_erules_row_collapsed_leading_blob_starts_gm_amc(?string $blob): bool
+{
+    if ($blob === null || trim((string) $blob) === '') {
+        return false;
+    }
+    $one = preg_replace('/\s+/u', ' ', trim((string) $blob));
+
+    return is_string($one)
+        && (preg_match('/^\s*GM\d*\b/iu', $one) === 1 || preg_match('/^\s*AMC\d*\b/iu', $one) === 1);
+}
+
+/**
+ * AMC/GM from persisted staging blobs (multi-line aware, includes source_erules_id — often the only populated field).
+ */
+function easa_erules_row_staging_blob_indicates_gm_amc(array $c): bool
+{
     $title = trim((string) ($c['title'] ?? ''));
     $src = trim((string) ($c['source_title'] ?? ''));
     $er = trim((string) ($c['source_erules_id'] ?? ''));
-    foreach ([$title, $src] as $blob) {
+    foreach ([$title, $src, $er] as $blob) {
         if ($blob === '') {
             continue;
         }
-        $line = easa_erules_tree_title_first_line($blob);
-        if ($line !== '' && easa_erules_tree_title_starts_gm_or_amc($line)) {
+        if (easa_erules_row_staging_multiline_blob_indicates_gm_amc($blob) || easa_erules_row_collapsed_leading_blob_starts_gm_amc($blob)) {
             return true;
         }
     }
     $band = easa_erules_classify_display_band(
-        $nt,
+        $c['node_type'] ?? null,
         $title !== '' ? $title : null,
         $src !== '' ? $src : null,
         $er !== '' ? $er : null
     );
 
     return $band === 'amc' || $band === 'gm';
+}
+
+/**
+ * Like staging detection but includes graph-enrichment fields used for browse labels when title is sparse.
+ *
+ * @param array<string, mixed> $row
+ */
+function easa_erules_row_graph_row_indicates_gm_amc(array $row): bool
+{
+    if (easa_erules_row_staging_blob_indicates_gm_amc($row)) {
+        return true;
+    }
+    foreach ([trim((string) ($row['first_child_title'] ?? '')), trim((string) ($row['first_child_source_title'] ?? ''))] as $blob) {
+        if ($blob !== '') {
+            if (easa_erules_row_staging_multiline_blob_indicates_gm_amc($blob) || easa_erules_row_collapsed_leading_blob_starts_gm_amc($blob)) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * AMC/GM guidance rows (titles / bands), as distinct from implementing-rule peers (FCL/ORA/CAT/…).
+ */
+function easa_erules_peer_lift_row_is_amc_gm_nav(array $c): bool
+{
+    return easa_erules_row_staging_blob_indicates_gm_amc($c);
 }
 
 /** Peer implementing-rule row eligible to sit under SUBPART (not AMC/GM). */
@@ -2742,17 +2801,33 @@ function easa_erules_tree_semantic_nav_classify(array $row): array
         return ['ui_kind' => 'section', 'material_type' => 'HEADING'];
     }
 
-    $line = easa_erules_tree_title_first_line($title);
-    if ($line === '' && $sourceTitle !== '') {
-        $line = easa_erules_tree_title_first_line($sourceTitle);
-    }
-    if ($line !== '' && easa_erules_tree_title_starts_gm_or_amc($line)) {
+    if (easa_erules_row_graph_row_indicates_gm_amc($row)) {
         $band = easa_erules_classify_display_band(
             $row['node_type'] ?? null,
-            $title,
-            $sourceTitle,
+            $title !== '' ? $title : null,
+            $sourceTitle !== '' ? $sourceTitle : null,
             $erules !== '' ? $erules : null
         );
+        if ($band !== 'amc' && $band !== 'gm') {
+            $flat = preg_replace(
+                '/\s+/u',
+                ' ',
+                implode(
+                    ' ',
+                    array_filter(
+                        [
+                            $title,
+                            $sourceTitle,
+                            $erules,
+                            trim((string) ($row['first_child_title'] ?? '')),
+                            trim((string) ($row['first_child_source_title'] ?? '')),
+                        ],
+                        static fn (string $x): bool => $x !== ''
+                    )
+                )
+            ) ?? '';
+            $band = (is_string($flat) && preg_match('/^\s*AMC\d*\b/iu', $flat) === 1) ? 'amc' : 'gm';
+        }
 
         return ['ui_kind' => 'rule', 'material_type' => $band === 'amc' ? 'AMC' : 'GM'];
     }
@@ -2761,16 +2836,6 @@ function easa_erules_tree_semantic_nav_classify(array $row): array
         if ($chunk !== '' && easa_erules_tree_blob_has_ir_reference($chunk)) {
             return ['ui_kind' => 'rule', 'material_type' => 'IR'];
         }
-    }
-
-    $band = easa_erules_classify_display_band(
-        $row['node_type'] ?? null,
-        $title,
-        $sourceTitle,
-        $erules !== '' ? $erules : null
-    );
-    if (($band === 'amc' || $band === 'gm') && ($title !== '' || $sourceTitle !== '' || $erules !== '')) {
-        return ['ui_kind' => 'rule', 'material_type' => $band === 'amc' ? 'AMC' : 'GM'];
     }
 
     if (in_array($nt, ['document', 'frontmatter', 'backmatter'], true)) {
