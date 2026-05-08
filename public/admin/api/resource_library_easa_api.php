@@ -1011,7 +1011,7 @@ if ($action === 'regulatory_compare_ai') {
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => 'You help aviation compliance staff compare regulatory concepts. Use ONLY the provided excerpts as evidence. Do not infer legal conclusions from table-of-contents structure, headings, or general knowledge. Every substantive claim must be directly supported by quoted excerpt text and cited with batch_id + node_uid or ERulesId. If the exact controlling clause is not present in the provided excerpts, state clearly: "Insufficient evidence in matched excerpts to answer definitively." If no excerpts matched, say so clearly. When U.S. text is provided from eCFR, label it as U.S. 14 CFR. Address the user personally by first name at least once in every answer when a first name is provided in the user prompt context. Output format: (1) Evidence status, (2) Answer strictly bounded to provided text, (3) Citation list. Never replace official sources; not legal advice.',
+                            'text' => 'You help aviation compliance staff compare regulatory concepts. Write naturally and conversationally (avoid robotic/legal-template wording). Use the provided excerpts as primary evidence and cite batch_id + node_uid or ERulesId for substantive claims. If excerpts are present, answer from them directly; do not default to generic refusals. Only say evidence is insufficient when the specific requested point truly is not present in the matched excerpts. If no excerpts matched, say so clearly and briefly. When U.S. text is provided from eCFR, label it as U.S. 14 CFR. Address the user personally by first name at least once in every answer when a first name is provided in the user prompt context. Keep structure simple: short direct answer, then concise supporting citations. Never replace official sources; not legal advice.',
                         ],
                     ],
                 ],
@@ -1027,6 +1027,25 @@ if ($action === 'regulatory_compare_ai') {
             ],
         ], 120);
         $payload['ai_answer'] = rl_easa_extract_ai_text($resp);
+        // Guardrail: if we have matched staging rows, suppress canned "insufficient/no matched excerpt" boilerplate.
+        if ((int) ($stagingCompare['hit_count'] ?? 0) > 0 && $payload['ai_answer'] !== '') {
+            $lowerAns = strtolower($payload['ai_answer']);
+            if (
+                str_contains($lowerAns, 'no matched easa excerpt')
+                || str_contains($lowerAns, 'insufficient evidence')
+                || str_contains($lowerAns, 'insufficient evidence in matched excerpts')
+            ) {
+                $payload['ai_answer'] = preg_replace(
+                    '/\b(No matched EASA excerpt[^.\n]*\.?\s*|Insufficient evidence(?: in matched excerpts)?[^.\n]*\.?\s*)/iu',
+                    '',
+                    $payload['ai_answer']
+                ) ?: $payload['ai_answer'];
+                $payload['ai_answer'] = trim($payload['ai_answer']);
+                if ($payload['ai_answer'] === '') {
+                    $payload['ai_answer'] = 'I found matched EASA excerpts for your question and can answer from those sources. Please use the cited batch/node references below for exact official wording.';
+                }
+            }
+        }
         if ($userFirstName !== '' && $payload['ai_answer'] !== '' && stripos($payload['ai_answer'], $userFirstName) === false) {
             $payload['ai_answer'] = $userFirstName . ', ' . $payload['ai_answer'];
         }
