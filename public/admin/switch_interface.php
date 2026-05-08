@@ -26,7 +26,7 @@ if ($mode === 'student' && $targetStudentId > 0) {
 }
 
 redirect(match ($mode) {
-    'instructor' => '/instructor/cohorts.php',
+    'instructor' => '/instructor/dashboard.php',
     'student' => '/student/dashboard.php',
     default => '/admin/dashboard.php',
 });
