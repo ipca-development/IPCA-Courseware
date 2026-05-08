@@ -215,6 +215,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     font-size: 12px;
     width: 1.25rem;
   }
+  /* Semantic API: rule + expandable=true (IR with AMC/GM children only) — slightly smaller disclosure */
+  .rl-easa-tree-exp--rule-disclosure {
+    font-size: 10px;
+    line-height: 1.15;
+    opacity: 0.95;
+  }
   .rl-easa-tree-exp--gm {
     color: #15803d;
   }
@@ -450,64 +456,604 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   .rl-easa-tree-dot-amc { background: #d97706; }
   .rl-easa-tree-dot-gm { background: #16a34a; }
   .rl-easa-tree-dot-neu { background: #94a3b8; }
+
+  /* —— EASA resource dashboard —— */
+  .rl-easa-metrics {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  @media (max-width: 1280px) {
+    .rl-easa-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 860px) {
+    .rl-easa-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 560px) {
+    .rl-easa-metrics { grid-template-columns: 1fr; }
+  }
+  .rl-easa-metric-card {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 14px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+  .rl-easa-metric-card .rl-easa-metric-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    margin-bottom: 4px;
+  }
+  .rl-easa-metric-card .rl-easa-metric-value {
+    font-size: 1.35rem;
+    font-weight: 800;
+    color: #0f172a;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+  }
+  .rl-easa-metric-card .rl-easa-metric-sub {
+    margin-top: 4px;
+    font-size: 11px;
+    color: #94a3b8;
+  }
+  .rl-easa-source-scroll-wrap {
+    margin-bottom: 16px;
+    overflow: visible;
+    padding-bottom: 0;
+  }
+  .rl-easa-source-row {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+    align-items: stretch;
+  }
+  .rl-easa-source-card {
+    width: 100%;
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 12px 12px 10px;
+    cursor: pointer;
+    text-align: left;
+    font: inherit;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    transition: border-color 0.15s, box-shadow 0.15s;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  }
+  .rl-easa-source-card:hover {
+    border-color: #93c5fd;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.08);
+  }
+  .rl-easa-source-card:focus-visible {
+    outline: 2px solid #2563eb;
+    outline-offset: 2px;
+  }
+  .rl-easa-source-card--add {
+    border-style: dashed;
+    color: #0369a1;
+    font-weight: 700;
+    justify-content: center;
+    align-items: center;
+    background: #f8fafc;
+  }
+  @media (max-width: 1400px) {
+    .rl-easa-source-row {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 1120px) {
+    .rl-easa-source-row {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 860px) {
+    .rl-easa-source-row {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 560px) {
+    .rl-easa-source-row {
+      grid-template-columns: 1fr;
+    }
+  }
+  .rl-easa-source-card--add:hover {
+    background: #eff6ff;
+  }
+  .rl-easa-source-card-title {
+    font-weight: 800;
+    font-size: 13px;
+    color: #0f172a;
+    line-height: 1.3;
+    display: block;
+    min-height: calc(1.3em * 2);
+    max-height: calc(1.3em * 2);
+    overflow: hidden;
+    word-break: break-word;
+  }
+  .rl-easa-source-sublabel {
+    display: block;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .rl-easa-source-sublabel-gap {
+    display: block;
+    height: 10px;
+  }
+  .rl-easa-source-card-meta {
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.35;
+  }
+  .rl-easa-pill-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: auto;
+    padding-top: 4px;
+  }
+  .rl-easa-pill {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 3px 7px;
+    border-radius: 999px;
+    border: none;
+    line-height: 1.2;
+  }
+  .rl-easa-pill--ok { background: #dcfce7; color: #166534; }
+  .rl-easa-pill--warn { background: #ffedd5; color: #9a3412; }
+  .rl-easa-pill--bad { background: #fee2e2; color: #991b1b; }
+  .rl-easa-pill--muted { background: #f1f5f9; color: #475569; }
+  .rl-easa-pill--live { background: #dbeafe; color: #1d4ed8; }
+  .rl-easa-pill--off { background: #e2e8f0; color: #475569; }
+
+  .rl-easa-dash-panel h3 {
+    margin: 0 0 6px;
+    font-size: 16px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+  .rl-easa-dash-panel .rl-easa-dash-lead {
+    margin: 0 0 12px;
+    font-size: 13px;
+    color: #64748b;
+    line-height: 1.45;
+  }
+  .rl-easa-ai-output {
+    margin-top: 14px;
+    padding: 12px;
+    border-radius: 10px;
+    background: #eef2f7;
+    border: 1px solid #e2e8f0;
+    font-size: 14px;
+    line-height: 1.55;
+    color: #1e293b;
+    min-height: 3rem;
+  }
+  .rl-easa-chat-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .rl-easa-chat-row {
+    display: flex;
+    width: 100%;
+  }
+  .rl-easa-chat-row-user {
+    justify-content: flex-end;
+  }
+  .rl-easa-chat-row-system {
+    justify-content: flex-start;
+  }
+  .rl-easa-chat-bubble {
+    max-width: min(80%, 900px);
+    border-radius: 16px;
+    padding: 10px 12px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  }
+  .rl-easa-chat-bubble-user {
+    background: #0b84ff;
+    color: #fff;
+    border-top-right-radius: 6px;
+  }
+  .rl-easa-chat-bubble-system {
+    background: #fff;
+    color: #0f172a;
+    border: 1px solid #dbe3ee;
+    border-top-left-radius: 6px;
+  }
+  .rl-easa-chat-meta {
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    opacity: 0.8;
+  }
+  .rl-easa-chat-bubble-user .rl-easa-chat-meta {
+    color: rgba(255,255,255,0.92);
+  }
+  .rl-easa-chat-bubble-system .rl-easa-chat-meta {
+    color: #475569;
+  }
+  .rl-easa-ai-output p {
+    margin: 0 0 0.65rem;
+  }
+  .rl-easa-ai-output p:last-child {
+    margin-bottom: 0;
+  }
+  .rl-easa-ai-output ul {
+    margin: 0.2rem 0 0.7rem 1.2rem;
+    padding: 0;
+  }
+  .rl-easa-ai-output li {
+    margin: 0.2rem 0;
+  }
+  .rl-easa-ai-output code {
+    background: #e2e8f0;
+    border-radius: 4px;
+    padding: 0 3px;
+    font-size: 0.93em;
+  }
+  .rl-easa-chat-bubble-user code {
+    background: rgba(255,255,255,0.18);
+    color: #fff;
+  }
+  .rl-easa-ai-output.is-empty {
+    color: #94a3b8;
+    font-style: italic;
+  }
+  .rl-easa-citation-cards {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .rl-easa-cite-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 12px 14px;
+    background: #fff;
+  }
+  .rl-easa-cite-card h4 {
+    margin: 0 0 6px;
+    font-size: 13px;
+    font-weight: 800;
+    color: #0f172a;
+  }
+  .rl-easa-cite-meta {
+    font-size: 11px;
+    color: #64748b;
+    margin-bottom: 8px;
+    word-break: break-word;
+  }
+  .rl-easa-cite-excerpt {
+    font-size: 12px;
+    line-height: 1.5;
+    color: #334155;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 160px;
+    overflow: auto;
+    padding: 8px 10px;
+    background: #fefce8;
+    border-radius: 6px;
+    border: 1px solid #fef08a;
+  }
+  .rl-easa-cite-actions {
+    margin-top: 10px;
+  }
+  .rl-easa-search-hits {
+    margin-top: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    max-height: 280px;
+    overflow-y: auto;
+    background: #fff;
+  }
+  .rl-easa-search-hit {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 10px 12px;
+    border: none;
+    border-bottom: 1px solid #f1f5f9;
+    background: transparent;
+    cursor: pointer;
+    font: inherit;
+  }
+  .rl-easa-search-hit:last-child {
+    border-bottom: none;
+  }
+  .rl-easa-search-hit:hover {
+    background: #eff6ff;
+  }
+  .rl-easa-search-hit-title {
+    font-weight: 700;
+    font-size: 13px;
+    color: #0f172a;
+    margin-bottom: 4px;
+  }
+  .rl-easa-search-hit-snip {
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.4;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .rl-easa-kw-hl {
+    background: #fef08a;
+    color: inherit;
+    padding: 0 1px;
+    border-radius: 2px;
+  }
+
+  .rl-easa-modal-overlay[hidden] {
+    display: none !important;
+  }
+  .rl-easa-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 12000;
+    background: rgba(15, 23, 42, 0.45);
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 24px 16px;
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+  .rl-easa-modal-dialog {
+    width: min(640px, 100%);
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 22px 50px rgba(15, 23, 42, 0.18);
+    margin-bottom: 40px;
+  }
+  .rl-easa-modal-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 18px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .rl-easa-modal-head h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 800;
+    color: #0f172a;
+  }
+  .rl-easa-modal-close {
+    border: none;
+    background: #f1f5f9;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.25rem;
+    line-height: 1;
+    color: #475569;
+  }
+  .rl-easa-modal-close:hover {
+    background: #e2e8f0;
+  }
+  .rl-easa-modal-body {
+    padding: 16px 18px 20px;
+    max-height: min(78vh, 900px);
+    overflow-y: auto;
+  }
+  .rl-easa-modal-section {
+    margin-bottom: 18px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid #f1f5f9;
+  }
+  .rl-easa-modal-section:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+    padding-bottom: 0;
+  }
+  .rl-easa-modal-section h3 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: #64748b;
+  }
+  .rl-easa-dropzone {
+    border: 2px dashed #cbd5e1;
+    border-radius: 10px;
+    padding: 18px;
+    text-align: center;
+    background: #f8fafc;
+    cursor: pointer;
+    margin-bottom: 10px;
+    transition: border-color 0.15s, background 0.15s;
+  }
+  .rl-easa-dropzone.rl-easa-dropzone--hover {
+    border-color: #3b82f6;
+    background: #eff6ff;
+  }
+  .rl-easa-dropzone p {
+    margin: 0;
+    font-size: 13px;
+    color: #475569;
+  }
+  .rl-easa-parse-progress-wrap {
+    margin-top: 10px;
+  }
+  .rl-easa-parse-progress-track {
+    height: 8px;
+    border-radius: 999px;
+    background: #e2e8f0;
+    overflow: hidden;
+  }
+  .rl-easa-parse-progress-bar {
+    height: 100%;
+    width: 0%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #22c55e, #16a34a);
+    transition: width 0.2s ease-out;
+  }
+  .rl-easa-parse-progress-track.is-indeterminate::after {
+    content: '';
+    display: block;
+    height: 100%;
+    width: 40%;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #86efac, #22c55e);
+    animation: rl-easa-parse-indet 1s ease-in-out infinite;
+  }
+  @keyframes rl-easa-parse-indet {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(280%); }
+  }
+  .rl-easa-modal-footnote {
+    font-size: 12px;
+    color: #94a3b8;
+    margin-top: 8px;
+  }
+  .rl-easa-advanced-details {
+    margin-top: 14px;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 0 14px 12px;
+    background: #fff;
+  }
+  .rl-easa-advanced-details summary {
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 13px;
+    color: #334155;
+    padding: 12px 0;
+  }
+  .rl-easa-ecfr-fields[hidden] {
+    display: none !important;
+  }
+  .rl-easa-ai-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    margin: 12px 0 6px;
+  }
 </style>
 
-<section class="card" style="padding:14px 16px;">
-  <div class="tcc-muted">
-    This tab is dedicated to <strong>EASA Easy Access Rules</strong> (official XML evidence, staging, and retrieval). It complements your broader
-    <strong>Compliance &amp; Safety</strong> workflows and stays separate from PHAK JSON books, crawlers, and generic APIs.
-    U.S. <strong>eCFR</strong> remains on the <a href="/admin/resource_library.php?tab=apis">APIs</a> tab for versioner configuration; you can still pull a section here for side‑by‑side comparison.
-  </div>
-</section>
-
 <div class="rl-wrap rl-tab-panel rl-easa-page" id="rlEasaPage" data-api="<?= h($easaApiHref) ?>">
-  <div class="rl-easa-grid">
-    <section class="card rl-easa-panel" style="padding:16px 18px;">
-      <span class="rl-easa-badge">Import center</span>
-      <h3>Official XML upload</h3>
-      <p class="rl-drop-meta" style="margin-top:0;">
-        Download the current export from EASA manually when needed, then upload here. Files are stored immutably under
-        <code>storage/easa_erules/</code> for audit. Parsing into staging / canonical tables follows in a separate pipeline step.
-      </p>
-      <div class="rl-panel-actions" style="margin-top:10px;">
-        <input type="file" id="rlEasaXmlFile" accept=".xml,application/xml,text/xml" style="max-width:240px;font-size:13px;">
-        <button type="button" class="btn btn-sm" id="rlEasaUploadBtn">Upload XML</button>
-      </div>
-      <div id="rlEasaUploadProgressWrap" class="rl-easa-upload-progress" hidden aria-hidden="true" aria-live="polite">
-        <div id="rlEasaUploadProgressTrack" class="rl-easa-upload-progress-track">
-          <div id="rlEasaUploadProgressBar" class="rl-easa-upload-progress-bar"></div>
-        </div>
-        <div id="rlEasaUploadProgressLabel" class="rl-easa-upload-progress-label"></div>
-      </div>
-      <p class="rl-drop-meta" id="rlEasaUploadStallWarn" style="display:none;margin-top:8px;color:#b45309;font-weight:600;"></p>
-      <p class="rl-msg rl-easa-msg" id="rlEasaUploadMsg" role="status" style="margin-top:12px;"></p>
-      <p class="rl-drop-meta" id="rlEasaUploadLimitHint" style="margin-top:8px;"></p>
-    </section>
-
-    <section class="card rl-easa-panel" style="padding:16px 18px;">
-      <span class="rl-easa-badge">Official page monitor</span>
-      <h3>EASA download page probe</h3>
-      <p class="rl-drop-meta" style="margin-top:0;">
-        Daily cron runs a polite HEAD check (see <code>cli/cron_easa_download_monitor.php</code>). When headers change, the row flags
-        <strong>Update suspected</strong> so Compliance can fetch a fresh XML export.
-      </p>
-      <div class="rl-panel-actions" style="margin-top:10px;">
-        <button type="button" class="btn btn-sm" id="rlEasaProbeBtn">Probe now</button>
-      </div>
-      <p class="rl-drop-meta" id="rlEasaMigrateHint" style="margin-top:10px;"></p>
-    </section>
+  <div class="rl-easa-metrics" id="rlEasaMetrics" aria-live="polite">
+    <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">XML batches</div><div class="rl-easa-metric-value" id="rlEasaMetricBatches">—</div></div>
+    <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Indexed nodes</div><div class="rl-easa-metric-value" id="rlEasaMetricNodes">—</div></div>
+    <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Monitored URLs</div><div class="rl-easa-metric-value" id="rlEasaMetricMon">—</div></div>
+    <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Updates flagged</div><div class="rl-easa-metric-value" id="rlEasaMetricUpdates">—</div><div class="rl-easa-metric-sub">Download page monitor</div></div>
+    <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Last probe (UTC)</div><div class="rl-easa-metric-value" id="rlEasaMetricLastProbe" style="font-size:1rem;">—</div></div>
   </div>
 
-  <section class="card rl-easa-panel" style="padding:14px 18px; margin-top:12px; border-left:4px solid #0369a1;">
-    <span class="rl-easa-badge">Import activity</span>
-    <h3 style="margin:0 0 6px; font-size:15px;">Parse status</h3>
-    <p class="rl-drop-meta" style="margin:0;">Large XML files are processed as a <strong>stream</strong> (no whole-file DOM). Progress appears below while the server inserts rows; if PHP-FPM is available, the UI returns immediately and polls until completion.</p>
-    <pre class="rl-test-out" id="rlEasaParseProgress" aria-live="polite" style="margin-top:10px; max-height:120px; min-height:2.5rem;">—</pre>
+  <div class="rl-easa-source-scroll-wrap">
+    <div class="rl-easa-source-row" id="rlEasaSourceRow" aria-label="EASA sources"></div>
+  </div>
+
+  <section class="card rl-easa-dash-panel" style="padding:16px 18px; margin-bottom:14px;">
+    <span class="rl-easa-badge">AI · staging-backed</span>
+    <h3>Ask AI about official regulations</h3>
+    <p class="rl-easa-dash-lead">
+      The server loads <strong>matching staging excerpts</strong> (same matching rules as keyword search) and optional U.S. eCFR text, then asks the configured model.
+      Cards below list traceable batch / node references — verify every quote on official EASA sources.
+    </p>
+    <div class="rl-field" style="margin-bottom:8px;">
+      <label for="rlEasaChatSource">EASA source scope</label>
+      <select id="rlEasaChatSource" style="max-width:100%;min-width:280px;font-size:13px;">
+        <option value="">All indexed EASA sources (all batches)</option>
+      </select>
+    </div>
+    <div class="rl-field" style="margin-bottom:8px;">
+      <label class="rl-check-row" style="display:flex;gap:8px;align-items:flex-start;">
+        <input type="checkbox" id="rlEasaChatCompareEcfr" style="margin-top:3px;">
+        <span class="rl-check-label">Compare with U.S. eCFR / 14 CFR (optional excerpt via versioner API)</span>
+      </label>
+    </div>
+    <div class="rl-easa-split rl-easa-ecfr-fields" id="rlEasaChatEcfrFields" hidden>
+      <div class="rl-field">
+        <label for="rlEasaEcfrTitle">14 CFR Title</label>
+        <input type="number" id="rlEasaEcfrTitle" value="14" min="1" step="1">
+      </div>
+      <div class="rl-field">
+        <label for="rlEasaEcfrSec">Section (e.g. 61.57)</label>
+        <input type="text" id="rlEasaEcfrSec" placeholder="61.57" autocomplete="off">
+      </div>
+    </div>
+    <div class="rl-field" style="margin-bottom:8px;">
+      <label for="rlEasaChatQ">Your question</label>
+      <textarea id="rlEasaChatQ" rows="3" placeholder="e.g. Summarise recent pilot recency requirements and cite the relevant Easy Access blocks." style="width:100%;max-width:640px;font-family:inherit;font-size:13px;"></textarea>
+    </div>
+    <div class="rl-field" style="margin-bottom:8px;">
+      <label class="rl-check-row" style="display:flex;gap:8px;align-items:flex-start;">
+        <input type="checkbox" id="rlEasaChatUseAi" checked style="margin-top:3px;">
+        <span class="rl-check-label">Ask AI (OpenAI when configured). Uncheck to preview staging / eCFR context only.</span>
+      </label>
+    </div>
+    <div class="rl-test-actions">
+      <button type="button" class="btn btn-sm" id="rlEasaChatAskBtn">Ask</button>
+    </div>
+    <div class="rl-easa-ai-label">AI explanation (not a legal opinion; verify against official publications)</div>
+    <div class="rl-easa-ai-output is-empty" id="rlEasaChatAnswer" aria-live="polite">No answer yet.</div>
+    <div class="rl-easa-ai-label">Official references from this installation (staging excerpts fed to the model)</div>
+    <div class="rl-easa-citation-cards" id="rlEasaChatCitations"></div>
+    <p class="rl-drop-meta" id="rlEasaChatContextNote" style="margin-top:10px;display:none;"></p>
   </section>
 
-  <section class="card rl-easa-panel" style="padding:16px 18px; margin-top:12px;">
-    <span class="rl-easa-badge">Watch list</span>
-    <h3>Monitored URLs</h3>
+  <section class="card rl-easa-dash-panel" style="padding:16px 18px; margin-bottom:14px;">
+    <span class="rl-easa-badge">Database search</span>
+    <h3>Search official EASA XML database</h3>
+    <p class="rl-easa-dash-lead">Full-text search over parsed staging (titles, ERulesId, breadcrumb, path, body). Pick a result to open the rule tree and highlight your term.</p>
+    <div class="rl-field" style="margin-bottom:8px;">
+      <label for="rlEasaDbSearchBatch">Source (batch)</label>
+      <select id="rlEasaDbSearchBatch" style="max-width:100%;min-width:280px;font-size:13px;">
+        <option value="">All batches</option>
+      </select>
+    </div>
+    <div class="rl-field" style="margin-bottom:8px;">
+      <label for="rlEasaDbSearchQ">Keyword</label>
+      <input type="text" id="rlEasaDbSearchQ" placeholder="e.g. FCL.055, alternate aerodrome" autocomplete="off" style="width:100%;max-width:520px;">
+    </div>
+    <div class="rl-test-actions">
+      <button type="button" class="btn btn-sm" id="rlEasaDbSearchBtn">Search</button>
+    </div>
+    <div class="rl-easa-search-hits" id="rlEasaDbSearchHits" hidden></div>
+    <p class="rl-drop-meta" id="rlEasaDbSearchEmpty" style="margin-top:8px;display:none;">No results yet.</p>
+  </section>
+
+  <section class="card rl-easa-dash-panel rl-easa-tree-dash" id="rlEasaTreeSection" style="padding:16px 18px; margin-bottom:14px;">
+    <span class="rl-easa-badge">Browse corpus</span>
+    <h3>Rule tree &amp; full text</h3>
+    <p class="rl-easa-dash-lead">
+      Canonical regulation viewer: semantic <code>tree_children</code> / <code>node_detail</code> only (ui_kind, material_type, expandable, click_action, child_count, display_title).
+    </p>
+    <div class="rl-field" style="margin-bottom:10px;">
+      <label for="rlEasaTreeBatch">Batch (required)</label>
+      <select id="rlEasaTreeBatch" style="max-width:100%;min-width:260px;font-size:13px;">
+        <option value="">Load batches from status…</option>
+      </select>
+      <button type="button" class="btn btn-sm" id="rlEasaTreeLoadRoots" style="margin-left:8px;">Load tree roots</button>
+    </div>
+    <div class="rl-easa-browse-single">
+      <p class="rl-drop-meta" id="rlEasaTreeHint" style="margin:0 0 8px;">Choose a batch and load roots.</p>
+      <div class="rl-easa-tree-panel" id="rlEasaTreeMount" aria-label="Rule tree"></div>
+    </div>
+  </section>
+
+  <details class="rl-easa-advanced-details">
+    <summary>Tables · migration hints · full batch list</summary>
+    <p class="rl-drop-meta" id="rlEasaMigrateHint" style="margin-top:8px;"></p>
+    <p class="rl-drop-meta" style="margin-top:10px;font-weight:700;">Monitored download pages</p>
     <div class="rl-easa-table-wrap" id="rlEasaMonitorWrap">
       <table class="rl-easa-table" id="rlEasaMonitorTable">
         <thead>
@@ -521,11 +1067,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         <tbody id="rlEasaMonitorBody"></tbody>
       </table>
     </div>
-  </section>
-
-  <section class="card rl-easa-panel" style="padding:16px 18px; margin-top:12px;">
-    <span class="rl-easa-badge">Upload history</span>
-    <h3>Recent batches</h3>
+    <p class="rl-drop-meta" style="margin-top:14px;font-weight:700;">Recent batches</p>
     <div class="rl-easa-table-wrap">
       <table class="rl-easa-table">
         <thead>
@@ -542,93 +1084,71 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         <tbody id="rlEasaBatchBody"></tbody>
       </table>
     </div>
-  </section>
+  </details>
+</div>
 
-  <section class="card rl-easa-panel" style="padding:16px 18px; margin-top:12px;">
-    <span class="rl-easa-badge">Quick retrieval</span>
-    <h3>Search &amp; AI (EASA corpus)</h3>
-    <p class="rl-drop-meta" style="margin-top:0;">
-      Full-text style search over <strong>staging</strong> (plain text, titles, ERulesId, breadcrumb, path). Optional batch id narrows scope; default page size 50 (API max 200, use <code>limit</code>/<code>offset</code> for pagination).
-    </p>
-    <div class="rl-field" style="margin-bottom:8px;">
-      <label for="rlEasaSearchBatch">Batch ID (optional)</label>
-      <input type="number" id="rlEasaSearchBatch" placeholder="Leave empty = all batches" min="1" step="1" style="max-width:160px;">
+<div class="rl-easa-modal-overlay" id="rlEasaSourceModal" hidden>
+  <div class="rl-easa-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rlEasaModalTitle">
+    <div class="rl-easa-modal-head">
+      <h2 id="rlEasaModalTitle">EASA source</h2>
+      <button type="button" class="rl-easa-modal-close" id="rlEasaModalClose" aria-label="Close">&times;</button>
     </div>
-    <div class="rl-field" style="margin-bottom:8px;">
-      <label for="rlEasaSearchQ">Topic or keyword</label>
-      <input type="text" id="rlEasaSearchQ" placeholder="e.g. FCL.055, alternate aerodrome, continuing airworthiness" autocomplete="off" style="width:100%;max-width:520px;">
-    </div>
-    <div class="rl-test-actions">
-      <button type="button" class="btn btn-sm" id="rlEasaSearchBtn">Search EASA index</button>
-    </div>
-    <pre class="rl-test-out" id="rlEasaSearchOut" aria-live="polite" style="margin-top:12px; max-height:220px;"></pre>
-  </section>
-
-  <section class="card rl-easa-panel" style="padding:16px 18px; margin-top:12px;">
-    <span class="rl-easa-badge">Browse corpus</span>
-    <h3>Rule tree &amp; full text</h3>
-    <p class="rl-drop-meta" style="margin-top:0;">
-      Browse starts from <strong>EASA eRules</strong> (after peeling document shells): expand once to see ANNEX I, II, … — nothing opens automatically; use ▶ per level (search hits stay in the Search panel, not here).
-      Opening a topic shows <strong>the rule text immediately under that row</strong>, full width inside the coloured Easy Access band (blue IR, amber AMC, green GM — from titles).
-      Word TOC field codes are stripped; tables scroll horizontally within the expanded panel when needed.
-    </p>
-    <div class="rl-field" style="margin-bottom:10px;">
-      <label for="rlEasaTreeBatch">Batch (required)</label>
-      <select id="rlEasaTreeBatch" style="max-width:100%;min-width:260px;font-size:13px;">
-        <option value="">Load batches from status…</option>
-      </select>
-      <button type="button" class="btn btn-sm" id="rlEasaTreeLoadRoots" style="margin-left:8px;">Load tree roots</button>
-    </div>
-    <div class="rl-easa-browse-single">
-      <p class="rl-drop-meta" id="rlEasaTreeHint" style="margin:0 0 8px;">Choose a batch and load roots — the tree starts at EASA eRules → annexes (not search results).</p>
-      <div class="rl-easa-tree-panel" id="rlEasaTreeMount" aria-label="Rule tree"></div>
-    </div>
-  </section>
-
-  <section class="card rl-easa-panel" style="padding:16px 18px; margin-top:12px;">
-    <span class="rl-easa-badge">Cross‑jurisdiction</span>
-    <h3>Compare EASA concepts with U.S. eCFR (optional)</h3>
-    <p class="rl-drop-meta" style="margin-top:0;">
-      The server loads **matching excerpts** from <code>easa_erules_import_nodes_staging</code> using the same logic as “Search EASA index”, then sends them to the model together with your question.
-      Optional **batch** narrows EASA retrieval to one upload. Uses your <strong>eCFR versioner API</strong> when you include a 14 CFR section.
-    </p>
-    <div class="rl-field" style="margin-bottom:8px;">
-      <label for="rlEasaCompareQ">Question</label>
-      <input type="text" id="rlEasaCompareQ" placeholder="e.g. How does pilot recency compare EU vs US?" autocomplete="off" style="width:100%;">
-    </div>
-    <div class="rl-field" style="margin-bottom:8px;">
-      <label for="rlEasaCompareBatch">EASA batch (optional)</label>
-      <select id="rlEasaCompareBatch" style="max-width:100%;min-width:280px;font-size:13px;">
-        <option value="">All batches — match staging across imports</option>
-      </select>
-    </div>
-    <div class="rl-easa-split">
-      <div class="rl-field">
-        <label for="rlEasaEcfrTitle">14 CFR Title number</label>
-        <input type="number" id="rlEasaEcfrTitle" value="14" min="1" step="1">
+    <div class="rl-easa-modal-body">
+      <div class="rl-easa-modal-section" id="rlEasaModalSectionIdentity">
+        <h3>Source identity</h3>
+        <div id="rlEasaModalIdentityBody" class="rl-drop-meta" style="margin:0;line-height:1.5;"></div>
       </div>
-      <div class="rl-field">
-        <label for="rlEasaEcfrSec">Section (e.g. 61.57)</label>
-        <input type="text" id="rlEasaEcfrSec" placeholder="61.57" autocomplete="off">
+      <div class="rl-easa-modal-section">
+        <h3>Upload XML</h3>
+        <div class="rl-easa-dropzone" id="rlEasaDropzone" tabindex="0">
+          <p><strong>Drop a file</strong> or click to choose official Easy Access export · stored under <code>storage/easa_erules/</code></p>
+          <input type="file" id="rlEasaXmlFile" accept=".xml,application/xml,text/xml" style="position:absolute;width:0;height:0;opacity:0;pointer-events:none;">
+        </div>
+        <div class="rl-panel-actions">
+          <button type="button" class="btn btn-sm" id="rlEasaUploadBtn">Upload XML</button>
+        </div>
+        <div id="rlEasaUploadProgressWrap" class="rl-easa-upload-progress" hidden aria-hidden="true" aria-live="polite">
+          <div id="rlEasaUploadProgressTrack" class="rl-easa-upload-progress-track">
+            <div id="rlEasaUploadProgressBar" class="rl-easa-upload-progress-bar"></div>
+          </div>
+          <div id="rlEasaUploadProgressLabel" class="rl-easa-upload-progress-label"></div>
+        </div>
+        <p class="rl-drop-meta" id="rlEasaUploadStallWarn" style="display:none;margin-top:8px;color:#b45309;font-weight:600;"></p>
+        <p class="rl-msg rl-easa-msg" id="rlEasaUploadMsg" role="status" style="margin-top:12px;"></p>
+        <p class="rl-drop-meta" id="rlEasaUploadLimitHint" style="margin-top:8px;"></p>
+      </div>
+      <div class="rl-easa-modal-section" id="rlEasaModalSectionParse">
+        <h3>Parse XML → staging</h3>
+        <p class="rl-drop-meta" style="margin:0 0 8px;">Streams large files on the server; progress polls <code>batch_progress</code> when async.</p>
+        <div class="rl-panel-actions">
+          <button type="button" class="btn btn-sm" id="rlEasaModalParseBtn" disabled>Parse XML → staging</button>
+        </div>
+        <div class="rl-easa-parse-progress-wrap" id="rlEasaModalParseProgressWrap" hidden>
+          <div id="rlEasaModalParseProgressTrack" class="rl-easa-parse-progress-track">
+            <div id="rlEasaModalParseProgressBar" class="rl-easa-parse-progress-bar"></div>
+          </div>
+          <div id="rlEasaModalParseProgressLabel" class="rl-drop-meta" style="margin-top:6px;font-size:12px;"></div>
+        </div>
+        <pre class="rl-test-out" id="rlEasaParseProgress" aria-live="polite" style="margin-top:10px; max-height:100px; min-height:2rem;">—</pre>
+      </div>
+      <div class="rl-easa-modal-section">
+        <h3>Monitoring</h3>
+        <p class="rl-drop-meta" style="margin:0 0 8px;">Probe every registered EASA download URL (polite HEAD). Cron: <code>cli/cron_easa_download_monitor.php</code>.</p>
+        <div class="rl-panel-actions">
+          <button type="button" class="btn btn-sm" id="rlEasaProbeBtn">Check now</button>
+        </div>
+        <p class="rl-drop-meta rl-easa-modal-footnote">Per-source monitor frequency and auto/manual routing require a future API — today all rows share the same probe job.</p>
+      </div>
+      <div class="rl-easa-modal-section">
+        <h3>Live availability</h3>
+        <label class="rl-check-row" style="display:flex;gap:8px;align-items:flex-start;opacity:0.55;">
+          <input type="checkbox" id="rlEasaModalLiveToggle" disabled style="margin-top:3px;">
+          <span class="rl-check-label">Mark source live for the platform (requires backend support — UI placeholder)</span>
+        </label>
+        <p class="rl-drop-meta" style="margin:8px 0 0;">Only batches that finished parsing cleanly appear as <strong>Live</strong> in the dashboard strip. Platform-wide rollout still needs catalogue wiring.</p>
       </div>
     </div>
-    <div class="rl-field" style="margin-top:8px;">
-      <label class="rl-check-row" style="display:flex;gap:8px;align-items:flex-start;">
-        <input type="checkbox" id="rlEasaIncludeEcfr" style="margin-top:3px;">
-        <span class="rl-check-label">Include live U.S. eCFR excerpt for comparison (requires API row on the APIs tab)</span>
-      </label>
-    </div>
-    <div class="rl-field" style="margin-top:8px;">
-      <label class="rl-check-row" style="display:flex;gap:8px;align-items:flex-start;">
-        <input type="checkbox" id="rlEasaUseAi" checked style="margin-top:3px;">
-        <span class="rl-check-label">Ask AI (uses OpenAI when configured)</span>
-      </label>
-    </div>
-    <div class="rl-test-actions">
-      <button type="button" class="btn btn-sm" id="rlEasaCompareBtn">Run comparison</button>
-    </div>
-    <pre class="rl-test-out" id="rlEasaCompareOut" aria-live="polite" style="margin-top:12px; max-height:320px;"></pre>
-  </section>
+  </div>
 </div>
 
 <script>
@@ -639,11 +1159,79 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   /** Effective max POST body (bytes) from last status; 0 = unknown. */
   var rlEasaMaxUploadBytes = 0;
   var rlEasaTreeSelectedLi = null;
+  var rlEasaModalBatchId = 0;
+  var rlEasaPendingTreeHighlight = '';
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c;
     });
+  }
+
+  function rlEasaFormatAiAnswerHtml(text) {
+    var src = String(text || '').replace(/\r\n?/g, '\n').trim();
+    if (!src) return '';
+    var lines = src.split('\n');
+    var html = [];
+    var para = [];
+    var list = [];
+
+    function inlineFmt(s) {
+      var h = esc(s);
+      h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+      return h;
+    }
+    function flushPara() {
+      if (!para.length) return;
+      html.push('<p>' + inlineFmt(para.join(' ')) + '</p>');
+      para = [];
+    }
+    function flushList() {
+      if (!list.length) return;
+      html.push('<ul>' + list.map(function (it) { return '<li>' + inlineFmt(it) + '</li>'; }).join('') + '</ul>');
+      list = [];
+    }
+
+    lines.forEach(function (raw) {
+      var line = raw.trim();
+      var m = /^[-*]\s+(.+)$/.exec(line);
+      if (m) {
+        flushPara();
+        list.push(m[1].trim());
+        return;
+      }
+      if (line === '') {
+        flushPara();
+        flushList();
+        return;
+      }
+      flushList();
+      para.push(line);
+    });
+    flushPara();
+    flushList();
+    return html.join('');
+  }
+
+  function rlEasaRenderChatWindowHtml(userText, aiText, userFirstName) {
+    var q = String(userText || '').trim();
+    var a = String(aiText || '').trim();
+    var fn = String(userFirstName || '').trim();
+    var userLabel = fn ? ('You (' + fn + ')') : 'You';
+    var aiHtml = rlEasaFormatAiAnswerHtml(a || '(No AI text returned.)');
+    var qHtml = '<p>' + esc(q || '—') + '</p>';
+
+    return '<div class="rl-easa-chat-thread">'
+      + '<div class="rl-easa-chat-row rl-easa-chat-row-user"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
+      + '<div class="rl-easa-chat-meta">' + esc(userLabel) + '</div>'
+      + qHtml
+      + '</div></div>'
+      + '<div class="rl-easa-chat-row rl-easa-chat-row-system"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+      + '<div class="rl-easa-chat-meta">System reply</div>'
+      + (aiHtml || '<p>(No AI text returned.)</p>')
+      + '</div></div>'
+      + '</div>';
   }
 
   function setUploadMsg(text, kind) {
@@ -761,6 +1349,373 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     lab.textContent = line;
   }
 
+  function rlEasaCssEscape(s) {
+    s = String(s || '');
+    if (typeof CSS !== 'undefined' && CSS.escape) return CSS.escape(s);
+    return s.replace(/[^a-zA-Z0-9_-]/g, function (ch) {
+      return '\\' + ch;
+    });
+  }
+
+  function rlEasaBatchLabel(b) {
+    var fn = String(b.original_filename || 'batch').replace(/\.xml$/i, '');
+    return fn.length > 46 ? fn.slice(0, 43) + '…' : fn;
+  }
+
+  function rlEasaSourceDisplayName(b) {
+    var raw = String(b.original_filename || '').replace(/\.xml$/i, '').trim();
+    if (!raw) return 'Source';
+    var s = raw.replace(/^easy access rules for\s+/i, '');
+    s = s.replace(/\s*-\s*part.*$/i, '');
+    s = s.replace(/\s+/g, ' ').trim();
+    if (!s) s = raw;
+    return s;
+  }
+
+  function rlEasaFormatUploadedUtc(raw) {
+    var s = String(raw || '').trim();
+    if (!s) return '—';
+    var iso = s.replace(' ', 'T');
+    if (!/Z$/i.test(iso)) iso += 'Z';
+    var d = new Date(iso);
+    if (!(d instanceof Date) || isNaN(d.getTime())) return s;
+    var wd = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][d.getUTCDay()];
+    var mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()];
+    var day = d.getUTCDate();
+    var yr = d.getUTCFullYear();
+    var hh = String(d.getUTCHours()).padStart(2, '0');
+    var mm = String(d.getUTCMinutes()).padStart(2, '0');
+    return wd + ' ' + mon + ' ' + day + ', ' + yr + ' (' + hh + ':' + mm + ' UTC)';
+  }
+
+  function rlEasaPublicationHint(b) {
+    var raw = b.publication_meta_json;
+    if (raw == null || raw === '') return '';
+    var o = raw;
+    if (typeof raw === 'string') {
+      try {
+        o = JSON.parse(raw);
+      } catch (e) {
+        return '';
+      }
+    }
+    if (!o || typeof o !== 'object') return '';
+    var a = o.attributes;
+    if (a && typeof a === 'object') {
+      var bits = [];
+      ['issueDate', 'IssueDate', 'publicationDate', 'PublicationDate', 'version'].forEach(function (k) {
+        if (a[k]) bits.push(String(a[k]));
+      });
+      if (bits.length) return bits.join(' · ');
+    }
+    return '';
+  }
+
+  function rlEasaFillBatchSelects(j) {
+    function fill(sel, placeholder, blankFirstOptText) {
+      if (!sel) return;
+      var prev = sel.value;
+      sel.innerHTML = '';
+      var ph = document.createElement('option');
+      ph.value = '';
+      ph.textContent = placeholder;
+      sel.appendChild(ph);
+      (j.batches || []).forEach(function (b) {
+        var o = document.createElement('option');
+        o.value = String(b.id);
+        var sn = b.staging_nodes != null ? String(b.staging_nodes) : '?';
+        o.textContent = '#' + b.id + ' — ' + (b.original_filename || 'batch') + ' (' + sn + ' nodes)';
+        sel.appendChild(o);
+      });
+      if (prev) {
+        for (var ti = 0; ti < sel.options.length; ti++) {
+          if (sel.options[ti].value === prev) {
+            sel.selectedIndex = ti;
+            break;
+          }
+        }
+      }
+    }
+    fill(document.getElementById('rlEasaTreeBatch'), '— Select batch —');
+    fill(document.getElementById('rlEasaChatSource'), 'All indexed EASA sources (all batches)');
+    fill(document.getElementById('rlEasaDbSearchBatch'), 'All batches');
+  }
+
+  function rlEasaApplyMetricEl(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = val != null ? String(val) : '—';
+  }
+
+  function rlEasaRebuildSourceRow(j) {
+    var row = document.getElementById('rlEasaSourceRow');
+    if (!row) return;
+    row.innerHTML = '';
+    (j.monitor || []).forEach(function (m) {
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'rl-easa-source-card rl-easa-source-card--monitor';
+      var upd = !!(m.changed_flag === 1 || m.changed_flag === true);
+      var httpOk = parseInt(String(m.http_status || ''), 10) >= 200 && parseInt(String(m.http_status || ''), 10) < 400;
+      var statusPill = upd
+        ? '<span class="rl-easa-pill rl-easa-pill--warn">Update suspected</span>'
+        : '<span class="rl-easa-pill rl-easa-pill--ok">Page stable</span>';
+      if (!(m.checked_at || m.http_status)) {
+        statusPill = '<span class="rl-easa-pill rl-easa-pill--muted">Not probed</span>';
+      }
+      var metaHtml = '';
+      metaHtml += (m.last_modified || m.checked_at) ? esc(String(m.last_modified || m.checked_at)) : '—';
+      if (m.http_status != null) metaHtml += '<br>HTTP ' + esc(String(m.http_status));
+      card.innerHTML = '<div class="rl-easa-source-card-title">' + esc(m.label || 'Monitor') + '</div>'
+        + '<div class="rl-easa-source-card-meta">' + metaHtml + '</div>'
+        + '<div class="rl-easa-pill-row">'
+        + statusPill
+        + '<span class="rl-easa-pill rl-easa-pill--muted">Auto</span>'
+        + '<span class="rl-easa-pill rl-easa-pill--off">Not live</span>'
+        + '</div>';
+      card.addEventListener('click', function () {
+        rlEasaOpenSourceModal('monitor', m);
+      });
+      row.appendChild(card);
+    });
+
+    (j.batches || []).slice(0, 18).forEach(function (b) {
+      var card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'rl-easa-source-card rl-easa-source-card--batch';
+      var bid = parseInt(b.id, 10) || 0;
+      var nodes = parseInt(b.staging_nodes, 10) || 0;
+      var st = String(b.status || '');
+      var live = st === 'ready_for_review' && nodes > 0;
+      var statusPill = '';
+      if (st === 'failed') statusPill = '<span class="rl-easa-pill rl-easa-pill--bad">Failed</span>';
+      else if (st === 'staging') statusPill = '<span class="rl-easa-pill rl-easa-pill--warn">Parsing</span>';
+      else if (live) statusPill = '<span class="rl-easa-pill rl-easa-pill--ok">Up to date</span>';
+      else if (st === 'uploaded') statusPill = '<span class="rl-easa-pill rl-easa-pill--muted">Awaiting parse</span>';
+      else statusPill = '<span class="rl-easa-pill rl-easa-pill--muted">' + esc(st || '—') + '</span>';
+      var livePill = live
+        ? '<span class="rl-easa-pill rl-easa-pill--live">Live</span>'
+        : '<span class="rl-easa-pill rl-easa-pill--off">Not live</span>';
+      var uploaded = rlEasaFormatUploadedUtc(b.created_at || '');
+      var metaLine = '<span class="rl-easa-source-sublabel">EASA EASY ACCESS RULES</span>'
+        + '<span class="rl-easa-source-sublabel-gap" aria-hidden="true"></span>'
+        + 'Nodes: ' + esc(String(nodes))
+        + '<br>Uploaded on: ' + esc(uploaded);
+      card.innerHTML = '<div class="rl-easa-source-card-title">' + esc(rlEasaSourceDisplayName(b)) + '</div>'
+        + '<div class="rl-easa-source-card-meta">' + metaLine + '</div>'
+        + '<div class="rl-easa-pill-row">' + statusPill + livePill
+        + '<span class="rl-easa-pill rl-easa-pill--muted">Manual</span></div>';
+      card.addEventListener('click', function () {
+        rlEasaOpenSourceModal('batch', b);
+      });
+      row.appendChild(card);
+    });
+
+    var add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'rl-easa-source-card rl-easa-source-card--add';
+    add.innerHTML = '<span>+ Add XML Source</span>';
+    add.addEventListener('click', function () {
+      rlEasaOpenSourceModal('new', null);
+    });
+    row.appendChild(add);
+  }
+
+  function rlEasaSetModalParseProgressUi(opts) {
+    var wrap = document.getElementById('rlEasaModalParseProgressWrap');
+    var track = document.getElementById('rlEasaModalParseProgressTrack');
+    var bar = document.getElementById('rlEasaModalParseProgressBar');
+    var lab = document.getElementById('rlEasaModalParseProgressLabel');
+    if (!wrap || !track || !bar || !lab) return;
+    if (!opts || !opts.show) {
+      wrap.hidden = true;
+      track.classList.remove('is-indeterminate');
+      bar.style.width = '0%';
+      lab.textContent = '';
+      return;
+    }
+    wrap.hidden = false;
+    if (opts.indeterminate) {
+      track.classList.add('is-indeterminate');
+      bar.style.width = '0%';
+    } else {
+      track.classList.remove('is-indeterminate');
+      var p = opts.pct != null ? opts.pct : 0;
+      bar.style.width = Math.min(100, Math.max(0, p)) + '%';
+    }
+    lab.textContent = opts.label || '';
+  }
+
+  function rlEasaStartParse(batchId, busyBtn) {
+    var id = parseInt(batchId, 10) || 0;
+    if (!id) return;
+    var btn = busyBtn || document.getElementById('rlEasaModalParseBtn');
+    var asyncPolling = false;
+    if (btn) {
+      btn.disabled = true;
+      btn.setAttribute('aria-busy', 'true');
+    }
+    var prog = document.getElementById('rlEasaParseProgress');
+    if (prog) prog.textContent = 'Starting parse… (large XML can take several minutes in synchronous mode)';
+    rlEasaSetModalParseProgressUi({ show: true, indeterminate: true, label: 'Parse running…' });
+    fetch(api, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({ action: 'parse_batch', batch_id: id })
+    })
+      .then(rlEasaParseJsonResponse)
+      .then(function (x) {
+        if (!x.j || !x.j.ok) {
+          throw new Error((x.j && x.j.error) || ('Parse failed (HTTP ' + (x.status || '') + ')'));
+        }
+        if (x.status === 202 || x.j.async) {
+          asyncPolling = true;
+          if (prog) prog.textContent = 'Import running on server (batch ' + id + '). Polling progress every 1.5s…';
+          var tries = 0;
+          var pollErrs = 0;
+          var timer = null;
+          function pollBatch() {
+            tries++;
+            fetch(api + '?action=batch_progress&batch_id=' + encodeURIComponent(String(id)), { credentials: 'same-origin' })
+              .then(rlEasaParseJsonResponse)
+              .then(function (pr) {
+                if (!pr.j.ok || !pr.j.batch) {
+                  pollErrs++;
+                  var errMsg = (pr.j && pr.j.error) ? pr.j.error : ('HTTP ' + pr.status);
+                  if (prog) prog.textContent = 'Could not read batch progress: ' + errMsg + ' · retrying…';
+                  return;
+                }
+                pollErrs = 0;
+                var bb = pr.j.batch;
+                var rowCount = bb.parse_rows_so_far;
+                if (rowCount == null || rowCount === '') rowCount = bb.rows_detected;
+                if (rowCount == null || rowCount === '') rowCount = '—';
+                var rd = parseInt(bb.rows_detected, 10) || 0;
+                var rsf = parseInt(bb.parse_rows_so_far, 10) || 0;
+                var pct = rd > 0 ? Math.round((rsf / rd) * 1000) / 10 : null;
+                var phase = bb.parse_phase;
+                if (!phase && bb.status === 'ready_for_review') phase = 'completed';
+                else if (!phase && bb.status === 'failed') phase = 'failed';
+                else if (!phase && bb.status === 'staging') phase = 'running';
+                if (!phase) phase = '—';
+                var line = [
+                  'status=' + (bb.status || ''),
+                  'phase=' + phase,
+                  'rows=' + rowCount,
+                  (bb.parse_last_node_type ? 'last<' + bb.parse_last_node_type + '>' : ''),
+                  (bb.parse_detail || '')
+                ].filter(Boolean).join(' · ');
+                if (prog) prog.textContent = line || '—';
+                var labelLine = phase + ' · rows ' + rowCount + (pct != null && rd > 0 ? ' · ~' + pct + '%' : '');
+                rlEasaSetModalParseProgressUi({
+                  show: true,
+                  indeterminate: rd <= 0,
+                  pct: rd > 0 ? pct : 0,
+                  label: labelLine
+                });
+                if (bb.status === 'ready_for_review' || bb.status === 'failed') {
+                  if (timer) clearInterval(timer);
+                  rlEasaSetModalParseProgressUi({ show: true, indeterminate: false, pct: 100, label: bb.status === 'failed' ? 'Failed' : 'Completed' });
+                  if (btn) {
+                    btn.disabled = false;
+                    btn.removeAttribute('aria-busy');
+                  }
+                  loadStatus();
+                  var hint = document.getElementById('rlEasaMigrateHint');
+                  if (hint && bb.status === 'ready_for_review') {
+                    hint.textContent = 'Import finished: ' + (bb.rows_detected || bb.parse_rows_so_far || 0) + ' nodes staged.';
+                  }
+                  if (hint && bb.status === 'failed') {
+                    hint.textContent = 'Import failed: ' + (bb.error_message || bb.parse_detail || 'see batch row');
+                  }
+                }
+              })
+              .catch(function (e) {
+                pollErrs++;
+                if (prog) {
+                  prog.textContent = 'Polling failed (' + pollErrs + '): ' + (e.message || 'network') + ' · retrying…';
+                }
+              });
+            if (tries > 800) {
+              if (timer) clearInterval(timer);
+              if (btn) {
+                btn.disabled = false;
+                btn.removeAttribute('aria-busy');
+              }
+              if (prog) prog.textContent += '\nStopped polling after timeout; reload the page to see final status.';
+            }
+          }
+          pollBatch();
+          timer = setInterval(pollBatch, 1500);
+          return;
+        }
+        rlEasaSetModalParseProgressUi({ show: true, indeterminate: false, pct: 100, label: 'Completed (sync)' });
+        if (prog) prog.textContent = 'Done: ' + (x.j.imported || 0) + ' nodes.';
+        var mh = document.getElementById('rlEasaMigrateHint');
+        if (mh) mh.textContent = x.j.message || ('Imported ' + (x.j.imported || 0) + ' nodes.');
+        loadStatus();
+      })
+      .catch(function (e) {
+        var mh = document.getElementById('rlEasaMigrateHint');
+        if (mh) mh.textContent = e.message || 'Parse failed';
+        if (prog) prog.textContent = e.message || 'Parse failed';
+        rlEasaSetModalParseProgressUi(null);
+      })
+      .finally(function () {
+        if (!asyncPolling && btn) {
+          btn.disabled = false;
+          btn.removeAttribute('aria-busy');
+        }
+      });
+  }
+
+  function rlEasaCloseSourceModal() {
+    var m = document.getElementById('rlEasaSourceModal');
+    if (m) m.hidden = true;
+  }
+
+  function rlEasaOpenSourceModal(kind, payload) {
+    var m = document.getElementById('rlEasaSourceModal');
+    var titleEl = document.getElementById('rlEasaModalTitle');
+    var ident = document.getElementById('rlEasaModalIdentityBody');
+    var parseBtn = document.getElementById('rlEasaModalParseBtn');
+    if (!m || !titleEl || !ident || !parseBtn) return;
+    m.hidden = false;
+    rlEasaModalBatchId = 0;
+    parseBtn.disabled = true;
+    parseBtn.removeAttribute('data-batch-id');
+    if (kind === 'new') {
+      titleEl.textContent = 'Add XML source';
+      ident.innerHTML = '<p style="margin:0;">Upload a new Easy Access export, then parse it into staging.</p>';
+    } else if (kind === 'download_settings') {
+      titleEl.textContent = 'Easy Access Download settings';
+      ident.innerHTML = '<strong>Purpose</strong><br>Configure and monitor official EASA Easy Access download URLs.<br><br>'
+        + '<strong>How it works</strong><br>Use “Check now” to run a probe immediately. The watch list and update flags are shown in the tables area below this dashboard.';
+    } else if (kind === 'monitor' && payload) {
+      titleEl.textContent = payload.label ? String(payload.label) : 'Monitored URL';
+      var flag = !!(payload.changed_flag === 1 || payload.changed_flag === true);
+      ident.innerHTML = '<strong>URL</strong><br>'
+        + esc(String(payload.url || ''))
+        + '<br><br><strong>Last check (UTC)</strong> ' + esc(String(payload.checked_at || '—'))
+        + '<br><strong>Update suspected</strong> ' + (flag ? 'yes' : 'no');
+    } else if (kind === 'batch' && payload) {
+      rlEasaModalBatchId = parseInt(payload.id, 10) || 0;
+      parseBtn.disabled = rlEasaModalBatchId <= 0;
+      parseBtn.setAttribute('data-batch-id', String(rlEasaModalBatchId));
+      titleEl.textContent = rlEasaBatchLabel(payload);
+      var nodes = payload.staging_nodes != null ? String(payload.staging_nodes) : '?';
+      var pub = rlEasaPublicationHint(payload);
+      titleEl.textContent = titleEl.textContent + ' · #' + rlEasaModalBatchId;
+      ident.innerHTML = '<strong>Batch ID</strong> ' + esc(String(payload.id))
+        + '<br><strong>File</strong> ' + esc(String(payload.original_filename || ''))
+        + '<br><strong>Status</strong> ' + esc(String(payload.status || ''))
+        + '<br><strong>Nodes indexed</strong> ' + esc(nodes)
+        + (pub ? '<br><strong>Publication hints</strong> ' + esc(pub) : '')
+        + '<br><strong>SHA-256</strong> <span style="word-break:break-all;">' + esc(String(payload.file_sha256 || '')) + '</span>'
+        + '<br><strong>EASA download URL</strong> Configure in monitored URLs table above (batch rows are linked operationally via Compliance process).';
+    }
+  }
+
   function loadStatus() {
     var hint = document.getElementById('rlEasaMigrateHint');
     fetch(api + '?action=status', { credentials: 'same-origin' })
@@ -779,33 +1734,23 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         } else if (limEl) {
           limEl.textContent = '';
         }
-        var treeSel = document.getElementById('rlEasaTreeBatch');
-        function rlEasaFillBatchSelect(sel, placeholder, prevVal) {
-          if (!sel) return;
-          var prev = prevVal != null ? prevVal : sel.value;
-          sel.innerHTML = '';
-          var ph = document.createElement('option');
-          ph.value = '';
-          ph.textContent = placeholder;
-          sel.appendChild(ph);
-          (x.j.batches || []).forEach(function (b) {
-            var o = document.createElement('option');
-            o.value = String(b.id);
-            var sn = b.staging_nodes != null ? String(b.staging_nodes) : '?';
-            o.textContent = '#' + b.id + ' — ' + (b.original_filename || 'batch') + ' (' + sn + ' nodes)';
-            sel.appendChild(o);
-          });
-          if (prev) {
-            for (var ti = 0; ti < sel.options.length; ti++) {
-              if (sel.options[ti].value === prev) {
-                sel.selectedIndex = ti;
-                break;
-              }
-            }
-          }
-        }
-        rlEasaFillBatchSelect(treeSel, '— Select batch —');
-        rlEasaFillBatchSelect(document.getElementById('rlEasaCompareBatch'), 'All batches — match staging across imports');
+        rlEasaFillBatchSelects(x.j);
+        var batches = x.j.batches || [];
+        var monitors = x.j.monitor || [];
+        var indexed = parseInt(String(x.j.indexed_nodes || 0), 10) || 0;
+        var updates = 0;
+        var lastProbe = '';
+        monitors.forEach(function (r) {
+          if (r.changed_flag === 1 || r.changed_flag === true) updates++;
+          var ca = String(r.checked_at || '');
+          if (ca && (!lastProbe || ca > lastProbe)) lastProbe = ca;
+        });
+        rlEasaApplyMetricEl('rlEasaMetricBatches', batches.length);
+        rlEasaApplyMetricEl('rlEasaMetricNodes', indexed);
+        rlEasaApplyMetricEl('rlEasaMetricMon', monitors.length);
+        rlEasaApplyMetricEl('rlEasaMetricUpdates', updates);
+        rlEasaApplyMetricEl('rlEasaMetricLastProbe', lastProbe || '—');
+        rlEasaRebuildSourceRow(x.j);
         if (hint) {
           var parts = [];
           if (x.j.migrate_hint) parts.push(x.j.migrate_hint);
@@ -851,121 +1796,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           btbody.querySelectorAll('.rl-easa-parse').forEach(function (btn) {
             btn.addEventListener('click', function () {
               var id = parseInt(btn.getAttribute('data-batch-id') || '0', 10);
-              if (!id) return;
-              var asyncPolling = false;
-              btn.disabled = true;
-              btn.setAttribute('aria-busy', 'true');
-              var prog = document.getElementById('rlEasaParseProgress');
-              if (prog) {
-                prog.textContent = 'Starting parse… (large XML can take several minutes in synchronous mode)';
-              }
-              fetch(api, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                credentials: 'same-origin',
-                body: JSON.stringify({ action: 'parse_batch', batch_id: id })
-              })
-                .then(rlEasaParseJsonResponse)
-                .then(function (x) {
-                  if (!x.j || !x.j.ok) {
-                    throw new Error((x.j && x.j.error) || ('Parse failed (HTTP ' + (x.status || '') + ')'));
-                  }
-                  if (x.status === 202 || x.j.async) {
-                    asyncPolling = true;
-                    if (prog) {
-                      prog.textContent = 'Import running on server (batch ' + id + '). Polling progress every 1.5s…';
-                    }
-                    var tries = 0;
-                    var pollErrs = 0;
-                    var timer = null;
-                    function pollBatch() {
-                      tries++;
-                      fetch(api + '?action=batch_progress&batch_id=' + encodeURIComponent(String(id)), { credentials: 'same-origin' })
-                        .then(rlEasaParseJsonResponse)
-                        .then(function (pr) {
-                          if (!pr.j.ok || !pr.j.batch) {
-                            pollErrs++;
-                            var errMsg = (pr.j && pr.j.error) ? pr.j.error : ('HTTP ' + pr.status);
-                            if (prog) {
-                              prog.textContent = 'Could not read batch progress: ' + errMsg + ' · retrying…';
-                            }
-                            return;
-                          }
-                          pollErrs = 0;
-                          var b = pr.j.batch;
-                          var rowCount = b.parse_rows_so_far;
-                          if (rowCount == null || rowCount === '') {
-                            rowCount = b.rows_detected;
-                          }
-                          if (rowCount == null || rowCount === '') {
-                            rowCount = '—';
-                          }
-                          var phase = b.parse_phase;
-                          if (!phase && b.status === 'ready_for_review') {
-                            phase = 'completed';
-                          } else if (!phase && b.status === 'failed') {
-                            phase = 'failed';
-                          } else if (!phase && b.status === 'staging') {
-                            phase = 'running';
-                          }
-                          if (!phase) {
-                            phase = '—';
-                          }
-                          var line = [
-                            'status=' + (b.status || ''),
-                            'phase=' + phase,
-                            'rows=' + rowCount,
-                            (b.parse_last_node_type ? 'last<' + b.parse_last_node_type + '>' : ''),
-                            (b.parse_detail || '')
-                          ].filter(Boolean).join(' · ');
-                          if (prog) prog.textContent = line || '—';
-                          if (b.status === 'ready_for_review' || b.status === 'failed') {
-                            if (timer) clearInterval(timer);
-                            btn.disabled = false;
-                            btn.removeAttribute('aria-busy');
-                            loadStatus();
-                            var hint = document.getElementById('rlEasaMigrateHint');
-                            if (hint && b.status === 'ready_for_review') {
-                              hint.textContent = 'Import finished: ' + (b.rows_detected || b.parse_rows_so_far || 0) + ' nodes staged.';
-                            }
-                            if (hint && b.status === 'failed') {
-                              hint.textContent = 'Import failed: ' + (b.error_message || b.parse_detail || 'see batch row');
-                            }
-                          }
-                        })
-                        .catch(function (e) {
-                          pollErrs++;
-                          if (prog) {
-                            prog.textContent = 'Polling failed (' + pollErrs + '): ' + (e.message || 'network') + ' · retrying…';
-                          }
-                        });
-                      if (tries > 800) {
-                        if (timer) clearInterval(timer);
-                        btn.disabled = false;
-                        btn.removeAttribute('aria-busy');
-                        if (prog) prog.textContent += '\nStopped polling after timeout; reload the page to see final status.';
-                      }
-                    }
-                    pollBatch();
-                    timer = setInterval(pollBatch, 1500);
-                    return;
-                  }
-                  if (prog) prog.textContent = 'Done: ' + (x.j.imported || 0) + ' nodes.';
-                  var hint = document.getElementById('rlEasaMigrateHint');
-                  if (hint) hint.textContent = x.j.message || ('Imported ' + (x.j.imported || 0) + ' nodes.');
-                  loadStatus();
-                })
-                .catch(function (e) {
-                  var hint = document.getElementById('rlEasaMigrateHint');
-                  if (hint) hint.textContent = e.message || 'Parse failed';
-                  if (prog) prog.textContent = e.message || 'Parse failed';
-                })
-                .finally(function () {
-                  if (!asyncPolling) {
-                    btn.disabled = false;
-                    btn.removeAttribute('aria-busy');
-                  }
-                });
+              rlEasaStartParse(id, btn);
             });
           });
         }
@@ -1128,21 +1959,282 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
-  var searchBtn = document.getElementById('rlEasaSearchBtn');
-  var searchOut = document.getElementById('rlEasaSearchOut');
-  if (searchBtn) {
-    searchBtn.addEventListener('click', function () {
-      var qEl = document.getElementById('rlEasaSearchQ');
-      var q = qEl ? (qEl.value || '').trim() : '';
-      if (!q) {
-        if (searchOut) searchOut.textContent = 'Enter a search query.';
+  var modalOv = document.getElementById('rlEasaSourceModal');
+  var modalCloseBtn = document.getElementById('rlEasaModalClose');
+  if (modalOv && modalCloseBtn) {
+    modalCloseBtn.addEventListener('click', rlEasaCloseSourceModal);
+    modalOv.addEventListener('click', function (ev) {
+      if (ev.target === modalOv) rlEasaCloseSourceModal();
+    });
+    document.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape' && !modalOv.hidden) rlEasaCloseSourceModal();
+    });
+  }
+  var modalParseBtn = document.getElementById('rlEasaModalParseBtn');
+  if (modalParseBtn) {
+    modalParseBtn.addEventListener('click', function () {
+      var bid = parseInt(modalParseBtn.getAttribute('data-batch-id') || String(rlEasaModalBatchId) || '0', 10);
+      rlEasaStartParse(bid, modalParseBtn);
+    });
+  }
+  var dz = document.getElementById('rlEasaDropzone');
+  var fileInpGlob = document.getElementById('rlEasaXmlFile');
+  if (dz && fileInpGlob) {
+    function dzPick() {
+      fileInpGlob.click();
+    }
+    dz.addEventListener('click', dzPick);
+    dz.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        dzPick();
+      }
+    });
+    ['dragenter', 'dragover'].forEach(function (evn) {
+      dz.addEventListener(evn, function (e) {
+        e.preventDefault();
+        dz.classList.add('rl-easa-dropzone--hover');
+      });
+    });
+    ['dragleave', 'dragend'].forEach(function (evn) {
+      dz.addEventListener(evn, function () {
+        dz.classList.remove('rl-easa-dropzone--hover');
+      });
+    });
+    dz.addEventListener('drop', function (e) {
+      e.preventDefault();
+      dz.classList.remove('rl-easa-dropzone--hover');
+      var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f && fileInpGlob) {
+        try {
+          fileInpGlob.files = e.dataTransfer.files;
+        } catch (err) {
+          /* assign may fail on some browsers */
+        }
+        if (!fileInpGlob.files || !fileInpGlob.files.length) {
+          var dt = new DataTransfer();
+          dt.items.add(f);
+          fileInpGlob.files = dt.files;
+        }
+      }
+    });
+  }
+
+  var chatEcfrCh = document.getElementById('rlEasaChatCompareEcfr');
+  var chatEcfrFields = document.getElementById('rlEasaChatEcfrFields');
+  if (chatEcfrCh && chatEcfrFields) {
+    chatEcfrCh.addEventListener('change', function () {
+      chatEcfrFields.hidden = !chatEcfrCh.checked;
+    });
+  }
+
+  var heroSetBtn = document.getElementById('rlEasaHeroSettingsBtn');
+  if (heroSetBtn) {
+    heroSetBtn.addEventListener('click', function () {
+      rlEasaOpenSourceModal('download_settings', null);
+    });
+  }
+
+  function rlEasaHighlightInTextNodes(rootEl, needle) {
+    if (!rootEl || !needle) return;
+    var low = needle.toLowerCase();
+    var walk = rootEl.ownerDocument.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, null);
+    var n;
+    /* collect first — mutating expands NodeIterator */
+    var batch = [];
+    while ((n = walk.nextNode())) {
+      batch.push(n);
+    }
+    batch.forEach(function (textNode) {
+      var txt = textNode.nodeValue || '';
+      if (!txt.trim()) return;
+      var tl = txt.toLowerCase();
+      var idx = tl.indexOf(low);
+      if (idx < 0) return;
+      var frag = textNode.ownerDocument.createDocumentFragment();
+      var pos = 0;
+      while (idx >= 0) {
+        if (idx > pos) frag.appendChild(textNode.ownerDocument.createTextNode(txt.slice(pos, idx)));
+        var mk = textNode.ownerDocument.createElement('mark');
+        mk.className = 'rl-easa-kw-hl';
+        mk.appendChild(textNode.ownerDocument.createTextNode(txt.slice(idx, idx + needle.length)));
+        frag.appendChild(mk);
+        pos = idx + needle.length;
+        idx = tl.indexOf(low, pos);
+      }
+      if (pos < txt.length) frag.appendChild(textNode.ownerDocument.createTextNode(txt.slice(pos)));
+      textNode.parentNode.replaceChild(frag, textNode);
+    });
+  }
+
+  function rlEasaFetchNodeDetail(batchId, nodeUid) {
+    return fetch(
+      api + '?action=node_detail&batch_id=' + encodeURIComponent(String(batchId)) + '&node_uid=' + encodeURIComponent(nodeUid),
+      { credentials: 'same-origin' }
+    ).then(function (r) {
+      return r.json();
+    });
+  }
+
+  function rlEasaAncestorUidChain(batchId, nodeUid) {
+    return new Promise(function (resolve, reject) {
+      var chain = [];
+      var depthGuard = 0;
+      function step(uid) {
+        if (depthGuard++ > 800) {
+          reject(new Error('Ancestor walk depth exceeded'));
+          return;
+        }
+        rlEasaFetchNodeDetail(batchId, uid).then(function (j) {
+          if (!j.ok || !j.node) {
+            reject(new Error((j && j.error) || 'node_detail failed'));
+            return;
+          }
+          chain.push(uid);
+          var p = (j.node.parent_node_uid || '').trim();
+          if (!p) {
+            resolve(chain.reverse());
+            return;
+          }
+          step(p);
+        }).catch(reject);
+      }
+      step(nodeUid);
+    });
+  }
+
+  function rlEasaEnsureChildUlLoaded(li, batchId) {
+    return new Promise(function (resolve, reject) {
+      var sub = li.querySelector(':scope > ul.rl-easa-tree-list');
+      if (!sub) {
+        resolve();
         return;
       }
-      if (searchOut) searchOut.textContent = 'Searching…';
-      var batchEl = document.getElementById('rlEasaSearchBatch');
+      if (sub.getAttribute('data-loaded') === '1') {
+        resolve();
+        return;
+      }
+      sub.innerHTML = '';
+      var uid = li.getAttribute('data-node-uid') || '';
+      fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId)) + '&parent_uid=' + encodeURIComponent(uid), { credentials: 'same-origin' })
+        .then(rlEasaFetchJsonBody)
+        .then(function (j) {
+          if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Tree load failed');
+          j.nodes.forEach(function (c) {
+            sub.appendChild(rlEasaCreateTreeLi(batchId, c));
+          });
+          sub.setAttribute('data-loaded', '1');
+          sub.hidden = false;
+          var exp = li.querySelector(':scope > .rl-easa-tree-row > .rl-easa-tree-exp');
+          if (exp && !exp.disabled) {
+            exp.textContent = '\u25bc';
+            exp.setAttribute('aria-expanded', 'true');
+          }
+          resolve();
+        })
+        .catch(reject);
+    });
+  }
+
+  function rlEasaRevealTreeNode(batchId, targetUid, highlightNeedle) {
+    rlEasaPendingTreeHighlight = (highlightNeedle || '').trim();
+    var mount = document.getElementById('rlEasaTreeMount');
+    var sel = document.getElementById('rlEasaTreeBatch');
+    if (!mount || !sel) return Promise.reject(new Error('Tree UI missing'));
+    sel.value = String(batchId);
+    mount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading tree path…</p>';
+    return rlEasaAncestorUidChain(batchId, targetUid).then(function (chain) {
+      /* chain: root ... target */
+      if (!chain.length) throw new Error('Empty ancestor chain');
+      return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId)), { credentials: 'same-origin' })
+        .then(rlEasaFetchJsonBody)
+        .then(function (j) {
+          if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
+          var nodes = j.nodes || [];
+          function rlEasaIsSemanticShellRoot(n) {
+            return n.ui_kind === 'section'
+              && String(n.material_type || '').toUpperCase() === 'HEADING'
+              && rlEasaSemanticBool(n.expandable)
+              && (parseInt(n.child_count, 10) || 0) > 0;
+          }
+          var unwrapUid = null;
+          var wrapNode = null;
+          if (nodes.length && nodes.every(rlEasaIsSemanticShellRoot)) {
+            var bc = -1;
+            nodes.forEach(function (n) {
+              var c = parseInt(n.child_count, 10) || 0;
+              if (c > bc) {
+                bc = c;
+                wrapNode = n;
+              }
+            });
+            if (wrapNode && bc > 0) unwrapUid = wrapNode.id || wrapNode.node_uid;
+          }
+          var pRoots = unwrapUid
+            ? fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId)) + '&parent_uid=' + encodeURIComponent(unwrapUid), { credentials: 'same-origin' }).then(rlEasaFetchJsonBody)
+            : Promise.resolve(j);
+          return pRoots.then(function (jx) {
+            if (!jx.ok || !jx.nodes) throw new Error((jx && jx.error) || 'Failed to load inner tree');
+            rlEasaRenderTreeIntoMount(mount, batchId, jx.nodes);
+            var ul = mount.querySelector(':scope > ul.rl-easa-tree-list');
+            if (!ul) throw new Error('Tree mount empty');
+            var path = chain.slice();
+            while (path.length > 0) {
+              var head = path[0];
+              if (ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(head) + '"]')) break;
+              path.shift();
+            }
+            if (!path.length) throw new Error('Tree roots do not contain this ancestor chain.');
+            function descend(idx) {
+              if (idx >= path.length) return Promise.resolve(null);
+              var uid = path[idx];
+              var li = ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(uid) + '"]');
+              if (!li) return Promise.reject(new Error('Could not find node ' + uid + ' in tree (try Load tree roots).'));
+              if (idx === path.length - 1) return Promise.resolve(li);
+              return rlEasaEnsureChildUlLoaded(li, batchId).then(function () {
+                var nextUl = li.querySelector(':scope > ul.rl-easa-tree-list');
+                if (!nextUl) return Promise.reject(new Error('No children container'));
+                ul = nextUl;
+                return descend(idx + 1);
+              });
+            }
+            return descend(0).then(function (li) {
+              if (!li) return;
+              try {
+                li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              } catch (e0) {}
+              rlEasaShowNodeDetail(batchId, targetUid, li, true);
+            });
+          });
+        });
+    }).catch(function (e) {
+      mount.innerHTML = '<p class="rl-drop-meta" style="margin:0;color:#991b1b;">' + esc(e.message || 'Tree navigation failed') + '</p>';
+      throw e;
+    });
+  }
+
+  var dbSearchBtn = document.getElementById('rlEasaDbSearchBtn');
+  var dbHits = document.getElementById('rlEasaDbSearchHits');
+  var dbEmpty = document.getElementById('rlEasaDbSearchEmpty');
+  if (dbSearchBtn && dbHits) {
+    dbSearchBtn.addEventListener('click', function () {
+      var qEl = document.getElementById('rlEasaDbSearchQ');
+      var q = qEl ? (qEl.value || '').trim() : '';
+      dbHits.hidden = true;
+      dbHits.innerHTML = '';
+      if (dbEmpty) dbEmpty.style.display = 'none';
+      if (!q) {
+        if (dbEmpty) {
+          dbEmpty.textContent = 'Enter a keyword.';
+          dbEmpty.style.display = 'block';
+        }
+        return;
+      }
+      var batchEl = document.getElementById('rlEasaDbSearchBatch');
       var bid = batchEl && batchEl.value ? parseInt(batchEl.value, 10) : 0;
       var payload = { action: 'search', query: q, limit: 100 };
       if (bid > 0) payload.batch_id = bid;
+      dbSearchBtn.disabled = true;
       fetch(api, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1152,21 +2244,43 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (x) {
           if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Search failed');
-          var lines = [];
-          lines.push('Hits: ' + (x.j.hit_count || 0));
-          if (x.j.note) lines.push(x.j.note);
-          (x.j.hits || []).forEach(function (h, i) {
-            lines.push('');
-            lines.push(String(i + 1) + '. batch ' + (h.batch_id != null ? h.batch_id : '—')
-              + ' · [' + (h.node_type || '') + '] ' + (h.source_erules_id || h.title || h.node_uid || ''));
-            if (h.breadcrumb) lines.push('   Path: ' + h.breadcrumb);
-            lines.push('   ' + (h.snippet || '').replace(/\s+/g, ' ').trim());
+          var hits = x.j.hits || [];
+          if (hits.length === 0) {
+            dbHits.hidden = true;
+            if (dbEmpty) {
+              dbEmpty.textContent = (x.j.note || 'No matches.') + '';
+              dbEmpty.style.display = 'block';
+            }
+            return;
+          }
+          hits.forEach(function (h) {
+            var bt = document.createElement('button');
+            bt.type = 'button';
+            bt.className = 'rl-easa-search-hit';
+            var t = (h.source_erules_id || h.title || h.node_uid || 'Hit');
+            var sn = (h.snippet || '').replace(/\s+/g, ' ').trim();
+            bt.innerHTML = '<div class="rl-easa-search-hit-title">' + esc(String(t))
+              + ' <span class="rl-drop-meta">· batch ' + esc(String(h.batch_id != null ? h.batch_id : '—')) + '</span></div>'
+              + '<div class="rl-easa-search-hit-snip">' + esc(sn) + '</div>';
+            bt.addEventListener('click', function () {
+              var treeSec = document.getElementById('rlEasaTreeSection');
+              if (treeSec && treeSec.scrollIntoView) treeSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              var hBid = parseInt(h.batch_id, 10) || 0;
+              var nuid = (h.node_uid || '').trim();
+              if (!hBid || !nuid) return;
+              rlEasaRevealTreeNode(hBid, nuid, q).catch(function () {});
+            });
+            dbHits.appendChild(bt);
           });
-          if (searchOut) searchOut.textContent = lines.join('\n');
+          dbHits.hidden = false;
         })
         .catch(function (e) {
-          if (searchOut) searchOut.textContent = e.message || 'Error';
-        });
+          if (dbEmpty) {
+            dbEmpty.textContent = e.message || 'Error';
+            dbEmpty.style.display = 'block';
+          }
+        })
+        .finally(function () { dbSearchBtn.disabled = false; });
     });
   }
 
@@ -1209,7 +2323,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return 'Implementing / delegated rule or annex text — EU regulation layer (blue band on easa.europa.eu).';
   }
 
-  function rlEasaShowNodeDetail(batchId, uid, liElm) {
+  function rlEasaShowNodeDetail(batchId, uid, liElm, forceReload) {
     if (!liElm) return;
     var wrap = liElm.querySelector(':scope > .rl-easa-inline-detail');
     if (!wrap) return;
@@ -1219,7 +2333,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     if (!band || !meta || !body) return;
 
     // Second click on the same row closes this panel (open panels may stay open for side-by-side compare).
-    if (!wrap.hidden) {
+    if (!wrap.hidden && !forceReload) {
       var loading = wrap.getAttribute('data-loading') === '1';
       var loadedHere = wrap.getAttribute('data-loaded-uid') === uid;
       if (loading || loadedHere) {
@@ -1291,6 +2405,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           body.innerHTML = '';
           body.textContent = bodySrc;
         }
+        if (rlEasaPendingTreeHighlight) {
+          rlEasaHighlightInTextNodes(body, rlEasaPendingTreeHighlight);
+          rlEasaPendingTreeHighlight = '';
+        }
         wrap.removeAttribute('data-loading');
         wrap.setAttribute('data-loaded-uid', uid);
         try {
@@ -1309,163 +2427,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       });
   }
 
-  /** Display title from tree_children semantic node */
-  function rlEasaTreeDisplayTitle(n) {
-    return String((n && n.display_title) || '').trim();
-  }
-
-  /** Structural section row (ANNEX, SUBPART, SECTION, … in navigation). */
-  function rlEasaTreeTitleIsOutlineHeading(dt) {
-    return /^\s*(ANNEX|SUBPART|SECTION|APPENDIX)\b/i.test(String(dt || '').trim());
-  }
-
-  function rlEasaTreeTitleLooksLikeAnnex(dt) {
-    return /^\s*ANNEX\b/i.test(String(dt || '').trim());
-  }
-
-  function rlEasaTreeTitleLooksLikeErRules(dt) {
-    return /^\s*EASA\s+eRules\b/i.test(String(dt || '').trim());
-  }
-
-  function rlEasaTreeIsStructuralSectionHeading(n) {
-    return n && n.ui_kind === 'section' && String(n.material_type || '').toUpperCase() === 'HEADING';
-  }
-
-  function rlEasaTreeHasRuleRows(nodes) {
-    return (nodes || []).some(function (n) {
-      return n && n.ui_kind === 'rule';
-    });
-  }
-
-  function rlEasaTreeFilterAnnexRows(nodes) {
-    return (nodes || []).filter(function (n) {
-      return rlEasaTreeTitleLooksLikeAnnex(rlEasaTreeDisplayTitle(n));
-    });
-  }
-
-  /**
-   * Pick one document / TOC shell to descend (not ANNEX/SUBPART/SECTION rows — those are legal content).
-   */
-  function rlEasaTreePickDocumentShellToUnwrap(nodes) {
-    var candidates = (nodes || []).filter(function (n) {
-      if (!n) return false;
-      var dt = rlEasaTreeDisplayTitle(n);
-      if (rlEasaTreeTitleIsOutlineHeading(dt)) return false;
-      if (rlEasaTreeTitleLooksLikeErRules(dt)) return false;
-      if (!rlEasaTreeIsStructuralSectionHeading(n)) return false;
-      var cc = parseInt(n.child_count, 10) || 0;
-      return cc > 0;
-    });
-    if (!candidates.length) return null;
-    if (candidates.length === 1) return candidates[0];
-    var preferredRe = /eRules|EASA|Easy\s+Access|Consolidated|Regulation\s*\(EU\)|Official\s+Journal|table\s+of\s+contents|^Contents\b/i;
-    for (var i = 0; i < candidates.length; i++) {
-      if (preferredRe.test(rlEasaTreeDisplayTitle(candidates[i]))) return candidates[i];
-    }
-    var best = null;
-    var bc = -1;
-    candidates.forEach(function (s) {
-      var c = parseInt(s.child_count, 10) || 0;
-      if (c > bc) {
-        bc = c;
-        best = s;
-      }
-    });
-    return best;
-  }
-
-  /** Single visible root: lazy-load annexes under this uid (API parent of ANNEX rows). */
-  function rlEasaTreeSyntheticErRulesNode(parentUid, childCount) {
-    var k = parseInt(childCount, 10) || 0;
-    return {
-      id: parentUid,
-      node_uid: parentUid,
-      parent_id: null,
-      display_title: 'EASA eRules',
-      ui_kind: 'section',
-      material_type: 'HEADING',
-      expandable: k > 0,
-      click_action: 'expand',
-      child_count: k,
-      sort_order: 0,
-      depth: 0,
-      node_type: 'heading'
-    };
-  }
-
-  function rlEasaTreeNodeParentUid(n) {
-    if (!n || typeof n !== 'object') return '';
-    var p = n.parent_id != null ? n.parent_id : (n.parent_uid != null ? n.parent_uid : n.parentId);
-    return p != null ? String(p).trim() : '';
-  }
-
-  /**
-   * Root → unwrap non-legal shells only → stop at EASA eRules, or annex-only view (mixed rule/editorial
-   * siblings are dropped when any ANNEX row is present). Otherwise stop at rule rows with no ANNEX.
-   * Does not auto-expand; does not flatten deep trees onto first paint.
-   */
-  function rlEasaTreeResolveLegalRootNodes(bid) {
-    var maxHops = 14;
-    function step(nodes, hop) {
-      if (!nodes || !nodes.length) {
-        return Promise.resolve({ renderNodes: [], hint: 'empty' });
-      }
-      var i;
-      for (i = 0; i < nodes.length; i++) {
-        if (rlEasaTreeTitleLooksLikeErRules(rlEasaTreeDisplayTitle(nodes[i]))) {
-          return Promise.resolve({ renderNodes: [nodes[i]], hint: 'er-node' });
-        }
-      }
-      var annexRows = rlEasaTreeFilterAnnexRows(nodes);
-      if (annexRows.length > 0) {
-        var puidAnnex = rlEasaTreeNodeParentUid(annexRows[0]);
-        if (puidAnnex) {
-          return Promise.resolve({
-            renderNodes: [rlEasaTreeSyntheticErRulesNode(puidAnnex, annexRows.length)],
-            hint: 'synthetic-er'
-          });
-        }
-        return Promise.resolve({ renderNodes: annexRows, hint: 'annex-flat' });
-      }
-      if (rlEasaTreeHasRuleRows(nodes)) {
-        return Promise.resolve({ renderNodes: nodes, hint: 'stopped-rules' });
-      }
-      if (hop >= maxHops) {
-        return Promise.resolve({ renderNodes: nodes, hint: 'max-hops' });
-      }
-      var shell = rlEasaTreePickDocumentShellToUnwrap(nodes);
-      if (!shell) {
-        return Promise.resolve({ renderNodes: nodes, hint: 'no-shell' });
-      }
-      var suid = shell.id || shell.node_uid;
-      var cc = parseInt(shell.child_count, 10) || 0;
-      if (!suid || cc < 1) {
-        return Promise.resolve({ renderNodes: nodes, hint: 'shell-no-children' });
-      }
-      return fetch(
-        api +
-          '?action=tree_children&batch_id=' +
-          encodeURIComponent(String(bid)) +
-          '&parent_uid=' +
-          encodeURIComponent(suid),
-        { credentials: 'same-origin' }
-      )
-        .then(rlEasaFetchJsonBody)
-        .then(function (j) {
-          if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Tree load failed');
-          return step(j.nodes || [], hop + 1);
-        });
-    }
-    return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), {
-      credentials: 'same-origin'
-    })
-      .then(rlEasaFetchJsonBody)
-      .then(function (j) {
-        if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
-        return step(j.nodes || [], 0);
-      });
-  }
-
   function rlEasaTreeMaterialDotClass(mt) {
     var m = String(mt || 'IR').toUpperCase();
     if (m === 'AMC') return 'rl-easa-tree-dot rl-easa-tree-dot-amc';
@@ -1473,28 +2434,36 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return 'rl-easa-tree-dot rl-easa-tree-dot-ir';
   }
 
+  /** Parse semantic API boolean (expandable). */
+  function rlEasaSemanticBool(v) {
+    if (v === true || v === 1) return true;
+    if (typeof v === 'string') {
+      var s = v.toLowerCase();
+      return s === 'true' || s === '1';
+    }
+    return false;
+  }
+
   function rlEasaCreateTreeLi(batchId, n) {
     var li = document.createElement('li');
     li.className = 'rl-easa-tree-li';
-    var uid = n.id || n.node_uid || '';
-    // tree_children semantic contract only — do not infer from node_type or raw title.
+    var uid = String(n.id || n.node_uid || '').trim();
+    if (uid) li.setAttribute('data-node-uid', uid);
     var uiKind = n.ui_kind === 'section' ? 'section' : 'rule';
-    var kids = parseInt(n.child_count, 10) || 0;
-    var mt = String(n.material_type || '').toUpperCase();
-    if (uiKind === 'section') {
-      mt = 'HEADING';
-    } else if (!mt || mt === 'HEADING') {
+    var mtRaw = String(n.material_type || '').toUpperCase();
+    var mt = uiKind === 'section' ? 'HEADING' : mtRaw;
+    if (uiKind === 'rule' && (!mt || mt === 'HEADING')) {
       mt = 'IR';
     }
-    var disp = n.display_title || '';
-    if (!disp) {
-      disp = uid || '—';
-    }
-    var clickAction = n.click_action === 'expand' ? 'expand' : 'open_rule';
-    var expandable = n.expandable === true;
+    var expandable = rlEasaSemanticBool(n.expandable);
+    var clickAction = String(n.click_action || '');
+    var opensRule = clickAction === 'open_rule';
+    var kids = parseInt(n.child_count, 10) || 0;
+    var disp = (n.display_title != null && String(n.display_title).trim() !== '')
+      ? String(n.display_title).trim()
+      : (uid || '—');
     var isSupplement = mt === 'GM' || mt === 'AMC';
-    // Chevron / disclosure: section + expandable | rule + expandable (e.g. IR with AMC/GM children). GM/AMC rules stay non-expandable in API.
-    var showTreeExpand = expandable && kids > 0;
+    var showTreeExpand = expandable;
 
     var row = document.createElement('div');
     row.className = 'rl-easa-tree-row' + (uiKind === 'section' ? ' rl-easa-tree-row--section' : ' rl-easa-tree-row--rule');
@@ -1510,9 +2479,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       exp.setAttribute('aria-hidden', 'true');
     } else {
       exp.textContent = '\u25b6';
-      exp.setAttribute('aria-label', clickAction === 'expand' ? 'Expand section' : 'Expand supplements');
-      if (isSupplement) {
-        exp.classList.add(mt === 'GM' ? 'rl-easa-tree-exp--gm' : 'rl-easa-tree-exp--amc');
+      if (uiKind === 'section') {
+        exp.setAttribute('aria-label', 'Expand section');
+      } else {
+        exp.classList.add('rl-easa-tree-exp--rule-disclosure');
+        exp.setAttribute('aria-label', 'Show AMC and GM under this rule');
       }
     }
     if (isSupplement) {
@@ -1566,6 +2537,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       + '<div class="rl-easa-inline-body rl-easa-detail-body"></div>'
       + '</div>';
     li.appendChild(inlineWrap);
+
+    function attachOpenRuleIfApplicable() {
+      if (!ruleBtn || !opensRule) return;
+      ruleBtn.addEventListener('click', function () {
+        rlEasaShowNodeDetail(batchId, uid, li);
+      });
+    }
 
     if (showTreeExpand) {
       var chUl = document.createElement('ul');
@@ -1622,15 +2600,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       if (uiKind === 'section' && sectionBtn && !sectionBtn.disabled) {
         sectionBtn.addEventListener('click', toggleChildList);
       }
-      if (uiKind === 'rule' && ruleBtn) {
-        ruleBtn.addEventListener('click', function () {
-          rlEasaShowNodeDetail(batchId, uid, li);
-        });
-      }
-    } else if (uiKind === 'rule' && ruleBtn) {
-      ruleBtn.addEventListener('click', function () {
-        rlEasaShowNodeDetail(batchId, uid, li);
-      });
+      attachOpenRuleIfApplicable();
+    } else {
+      attachOpenRuleIfApplicable();
     }
     return li;
   }
@@ -1657,37 +2629,46 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         return;
       }
       rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading roots…</p>';
-      rlEasaTreeResolveLegalRootNodes(bid)
-        .then(function (pack) {
-          var nodes = pack.renderNodes || [];
+      fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), { credentials: 'same-origin' })
+        .then(rlEasaFetchJsonBody)
+        .then(function (j) {
+          if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
+          var nodes = j.nodes || [];
+          function rlEasaIsSemanticShellRoot(n) {
+            return n.ui_kind === 'section'
+              && String(n.material_type || '').toUpperCase() === 'HEADING'
+              && rlEasaSemanticBool(n.expandable)
+              && (parseInt(n.child_count, 10) || 0) > 0;
+          }
+          var unwrapUid = null;
+          var wrapNode = null;
+          if (nodes.length && nodes.every(rlEasaIsSemanticShellRoot)) {
+            var bc = -1;
+            nodes.forEach(function (n) {
+              var c = parseInt(n.child_count, 10) || 0;
+              if (c > bc) {
+                bc = c;
+                wrapNode = n;
+              }
+            });
+            if (wrapNode && bc > 0) {
+              unwrapUid = wrapNode.id || wrapNode.node_uid;
+            }
+          }
+          if (unwrapUid) {
+            return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)) + '&parent_uid=' + encodeURIComponent(unwrapUid), { credentials: 'same-origin' })
+              .then(rlEasaFetchJsonBody)
+              .then(function (j2) {
+                if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
+                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes);
+                if (rlEasaTreeHint) {
+                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' top-level entries. ▶ when the API marks expandable; rule titles open the panel below (dots by material_type).';
+                }
+              });
+          }
           rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes);
           if (rlEasaTreeHint) {
-            var nc = nodes.length;
-            var base =
-              'Batch #' +
-              bid +
-              ' · Legal navigation root (EASA eRules → ANNEX …). ▶ expands one level only; nothing opens automatically.';
-            if (pack.hint === 'synthetic-er' || pack.hint === 'er-node') {
-              rlEasaTreeHint.textContent =
-                base +
-                ' Expand “EASA eRules” to list annexes.';
-            } else if (pack.hint === 'annex-flat') {
-              rlEasaTreeHint.textContent =
-                base +
-                ' (' +
-                nc +
-                ' annex entr' +
-                (nc === 1 ? 'y' : 'ies') +
-                ' at top level — use ▶ to drill down.)';
-            } else {
-              rlEasaTreeHint.textContent =
-                base +
-                ' (' +
-                nc +
-                ' row' +
-                (nc === 1 ? '' : 's') +
-                ' at this level.)';
-            }
+            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root entr' + (nodes.length === 1 ? 'y' : 'ies') + '. ▶ only when expandable=true; click rule titles (open_rule) to read below.';
           }
         })
         .catch(function (e) {
@@ -1696,23 +2677,78 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
-  var cmpBtn = document.getElementById('rlEasaCompareBtn');
-  var cmpOut = document.getElementById('rlEasaCompareOut');
-  if (cmpBtn) {
-    cmpBtn.addEventListener('click', function () {
-      var qEl = document.getElementById('rlEasaCompareQ');
+  function rlEasaAppendCitationCard(host, s, queryForHighlight) {
+    if (!host) return;
+    var card = document.createElement('div');
+    card.className = 'rl-easa-cite-card';
+    var bid = parseInt(s.batch_id, 10) || 0;
+    var nuid = (s.node_uid || '').trim();
+    var eid = (s.source_erules_id || '').trim();
+    var title = (s.title || '').trim() || eid || nuid || 'Regulation node';
+    card.innerHTML = '<h4>' + esc(title) + '</h4>'
+      + '<div class="rl-easa-cite-meta">batch_id <strong>' + esc(String(bid || '—')) + '</strong>'
+      + (eid ? ' · ERulesId <strong>' + esc(eid) + '</strong>' : '')
+      + (nuid ? ' · node_uid <code>' + esc(nuid) + '</code>' : '')
+      + '</div>'
+      + '<div class="rl-easa-cite-excerpt">Loading official text…</div>'
+      + '<div class="rl-easa-cite-actions"><button type="button" class="btn btn-sm rl-easa-cite-open">Open in rule tree</button></div>';
+    host.appendChild(card);
+    var exEl = card.querySelector('.rl-easa-cite-excerpt');
+    var openBtn = card.querySelector('.rl-easa-cite-open');
+    if (openBtn && bid && nuid) {
+      openBtn.addEventListener('click', function () {
+        var treeSec = document.getElementById('rlEasaTreeSection');
+        if (treeSec && treeSec.scrollIntoView) treeSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        rlEasaRevealTreeNode(bid, nuid, queryForHighlight || '').catch(function () {});
+      });
+    } else if (openBtn) {
+      openBtn.disabled = true;
+    }
+    if (bid && nuid && exEl) {
+      rlEasaFetchNodeDetail(bid, nuid).then(function (j) {
+        if (!j.ok || !j.node) {
+          exEl.textContent = (j && j.error) ? j.error : 'Could not load node.';
+          return;
+        }
+        var br = (j.node.body_reading || j.node.plain_text_display || j.node.plain_text || '').trim();
+        if (br.length > 900) br = br.slice(0, 897) + '…';
+        exEl.textContent = br || '[No body text on this row]';
+        var bc = (j.node.breadcrumb || '').trim();
+        if (bc) {
+          var meta = card.querySelector('.rl-easa-cite-meta');
+          if (meta) meta.innerHTML += '<br>breadcrumb: ' + esc(bc);
+        }
+        if (queryForHighlight) rlEasaHighlightInTextNodes(exEl, queryForHighlight);
+      }).catch(function (e) {
+        exEl.textContent = e.message || 'Load failed';
+      });
+    } else if (exEl) {
+      exEl.textContent = 'Missing batch/node reference — citations must come from staging matches only.';
+    }
+  }
+
+  var chatAskBtn = document.getElementById('rlEasaChatAskBtn');
+  var chatAnswerEl = document.getElementById('rlEasaChatAnswer');
+  var chatCitEl = document.getElementById('rlEasaChatCitations');
+  var chatCtxNote = document.getElementById('rlEasaChatContextNote');
+  if (chatAskBtn) {
+    chatAskBtn.addEventListener('click', function () {
+      var qEl = document.getElementById('rlEasaChatQ');
       var q = qEl ? (qEl.value || '').trim() : '';
       if (!q) {
-        if (cmpOut) cmpOut.textContent = 'Enter a question.';
+        if (chatAnswerEl) {
+          chatAnswerEl.textContent = 'Enter a question first.';
+          chatAnswerEl.classList.add('is-empty');
+        }
         return;
       }
       var titleEl = document.getElementById('rlEasaEcfrTitle');
       var secEl = document.getElementById('rlEasaEcfrSec');
-      var incEcfr = document.getElementById('rlEasaIncludeEcfr');
-      var useAi = document.getElementById('rlEasaUseAi');
-      var cmpBatchEl = document.getElementById('rlEasaCompareBatch');
-      var cmpBid = cmpBatchEl && cmpBatchEl.value ? parseInt(cmpBatchEl.value, 10) : 0;
-      var body = {
+      var incEcfr = document.getElementById('rlEasaChatCompareEcfr');
+      var useAi = document.getElementById('rlEasaChatUseAi');
+      var srcEl = document.getElementById('rlEasaChatSource');
+      var srcBid = srcEl && srcEl.value ? parseInt(srcEl.value, 10) : 0;
+      var payload = {
         action: 'regulatory_compare_ai',
         query: q,
         use_ai: !!(useAi && useAi.checked),
@@ -1720,52 +2756,59 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         ecfr_title_number: titleEl ? parseInt(titleEl.value, 10) || 14 : 14,
         ecfr_section: secEl ? (secEl.value || '').trim() : ''
       };
-      if (cmpBid > 0) body.batch_id = cmpBid;
-      if (cmpOut) cmpOut.textContent = 'Working…';
-      cmpBtn.disabled = true;
+      if (srcBid > 0) payload.batch_id = srcBid;
+      if (chatCitEl) chatCitEl.innerHTML = '';
+      if (chatCtxNote) {
+        chatCtxNote.style.display = 'none';
+        chatCtxNote.textContent = '';
+      }
+      if (chatAnswerEl) {
+        chatAnswerEl.classList.remove('is-empty');
+        chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, 'Working…', '');
+      }
+      chatAskBtn.disabled = true;
       fetch(api, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify(body)
+        body: JSON.stringify(payload)
       })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (x) {
           if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Request failed');
-          var lines = [];
-          if (x.j.easa_context_note) {
-            lines.push('--- EASA staging (fed to model) ---');
-            lines.push(x.j.easa_context_note);
-          }
-          if (x.j.easa_staging_hits != null) {
-            lines.push('Excerpt rows matched: ' + x.j.easa_staging_hits);
-          }
-          if (x.j.easa_sources && x.j.easa_sources.length) {
-            lines.push('Source refs (batch · ERulesId / title):');
-            x.j.easa_sources.slice(0, 12).forEach(function (s) {
-              lines.push('  · batch ' + (s.batch_id || '—') + ' · ' + (s.source_erules_id || s.title || s.node_uid || '—'));
+          var citeQuery = '';
+          var srcs = Array.isArray(x.j.easa_sources) ? x.j.easa_sources : [];
+          if (srcs.length && q.length >= 3 && q.length < 160) citeQuery = q;
+          if (chatCitEl) {
+            srcs.slice(0, 16).forEach(function (s) {
+              rlEasaAppendCitationCard(chatCitEl, s, citeQuery);
             });
           }
-          if (x.j.ecfr_note) {
-            lines.push('');
-            lines.push('--- U.S. eCFR ---');
-            lines.push(x.j.ecfr_note);
+          var noteParts = [];
+          if (x.j.easa_context_note) noteParts.push(x.j.easa_context_note);
+          if (x.j.easa_staging_hits != null) noteParts.push('Staging rows fed to bundle: ' + x.j.easa_staging_hits + '.');
+          if (x.j.ecfr_note) noteParts.push('eCFR: ' + x.j.ecfr_note);
+          if (chatCtxNote && noteParts.length) {
+            chatCtxNote.textContent = noteParts.join(' ');
+            chatCtxNote.style.display = 'block';
           }
-          if (x.j.ai_answer) {
-            lines.push('');
-            lines.push('--- AI comparison ---');
-            lines.push(x.j.ai_answer);
+          var aiBlock = '';
+          var userFirst = x.j.user_first_name || '';
+          if (x.j.ai_error) aiBlock = 'AI error: ' + x.j.ai_error;
+          else if (x.j.ai_answer) aiBlock = x.j.ai_answer;
+          else aiBlock = (useAi && useAi.checked)
+            ? '(No AI text returned.)'
+            : 'AI skipped — inspect official reference cards and context line above.';
+          if (chatAnswerEl) {
+            chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, aiBlock, userFirst);
           }
-          if (x.j.ai_error) {
-            lines.push('');
-            lines.push('AI error: ' + x.j.ai_error);
-          }
-          if (cmpOut) cmpOut.textContent = lines.join('\n');
         })
         .catch(function (e) {
-          if (cmpOut) cmpOut.textContent = e.message || 'Error';
+          if (chatAnswerEl) {
+            chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, e.message || 'Error', '');
+          }
         })
-        .finally(function () { cmpBtn.disabled = false; });
+        .finally(function () { chatAskBtn.disabled = false; });
     });
   }
 
