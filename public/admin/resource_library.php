@@ -151,11 +151,18 @@ cw_header('Resource Library');
   /* Match admin/theory_control_center.php: full-width .tcc-page inside .app-content (no extra max-width shell). */
   .tcc-page { display: flex; flex-direction: column; gap: 18px; }
   .tcc-hero { padding: 22px 24px; }
+  .rl-master-hero {
+    padding: 22px 24px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 45%, #0ea5e9 100%);
+    box-shadow: 0 10px 24px rgba(30, 64, 175, 0.22);
+    color: #fff;
+  }
   .tcc-eyebrow {
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.14em;
-    color: #64748b;
+    color: rgba(255,255,255,0.76);
     font-weight: 800;
     margin-bottom: 8px;
   }
@@ -164,31 +171,35 @@ cw_header('Resource Library');
     font-size: 32px;
     line-height: 1.05;
     letter-spacing: -0.04em;
-    color: #102845;
+    color: #fff;
   }
   .tcc-sub {
     margin-top: 10px;
     font-size: 14px;
     line-height: 1.6;
-    color: #56677f;
+    color: rgba(255,255,255,0.86);
     max-width: 980px;
   }
-  .tcc-tabs { display: flex; gap: 10px; flex-wrap: wrap; }
+  .tcc-sub a { color: #fff; text-decoration: underline; text-underline-offset: 2px; }
+  .tcc-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
   .tcc-tab {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 42px;
-    padding: 0 14px;
-    border-radius: 12px;
+    min-height: 40px;
+    padding: 0 16px;
+    border-radius: 999px;
     text-decoration: none;
     font-size: 13px;
-    font-weight: 800;
-    border: 1px solid rgba(15, 23, 42, 0.1);
-    background: #fff;
-    color: #102845;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    transition: background .16s ease, transform .16s ease, border-color .16s ease;
   }
-  .tcc-tab.active { background: #12355f; color: #fff; border-color: #12355f; }
+  .tcc-tab:hover { background: rgba(255,255,255,0.13); transform: translateY(-1px); }
+  .tcc-tab.active { background: #fff; color: #1e40af; border-color: rgba(255,255,255,0.55); }
   .tcc-muted { font-size: 12px; color: #64748b; line-height: 1.5; }
   .rl-tab-panel { margin-top: 0; width: 100%; }
   .rl-wrap { width: 100%; box-sizing: border-box; }
@@ -707,7 +718,7 @@ cw_header('Resource Library');
 </style>
 
 <div class="tcc-page">
-  <section class="card tcc-hero">
+  <section class="rl-master-hero">
     <div class="tcc-eyebrow">Admin · Resource Library</div>
     <h1 class="tcc-title">Resource Library</h1>
     <div class="tcc-sub">
@@ -719,9 +730,6 @@ cw_header('Resource Library');
         and <strong>registered external APIs</strong> (e.g. the eCFR versioner). Pick a tab to filter resource types; the <a href="/admin/resource_library.php?tab=easa">EASA Easy Access Rules</a> tab hosts EU regulatory imports separately.
       <?php endif; ?>
     </div>
-  </section>
-
-  <section class="card" style="padding:14px 16px;">
     <div class="tcc-tabs" role="navigation" aria-label="Resource library sections">
       <a class="tcc-tab <?= $rlTab === 'json' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=json">JSON / Book references</a>
       <a class="tcc-tab <?= $rlTab === 'crawlers' ? 'active' : '' ?>" href="/admin/resource_library.php?tab=crawlers">Data crawlers</a>
