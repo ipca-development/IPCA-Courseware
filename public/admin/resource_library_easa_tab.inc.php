@@ -568,7 +568,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     <span class="rl-easa-badge">Browse corpus</span>
     <h3>Rule tree &amp; full text</h3>
     <p class="rl-drop-meta" style="margin-top:0;">
-      Full-width tree matching the XML (<strong>topic</strong> / <strong>heading</strong> / <strong>document</strong>). One root wrapper can auto-open inward so you reach articles quickly.
+      Browse starts from <strong>EASA eRules</strong> (after peeling document shells): expand once to see ANNEX I, II, … — nothing opens automatically; use ▶ per level (search hits stay in the Search panel, not here).
       Opening a topic shows <strong>the rule text immediately under that row</strong>, full width inside the coloured Easy Access band (blue IR, amber AMC, green GM — from titles).
       Word TOC field codes are stripped; tables scroll horizontally within the expanded panel when needed.
     </p>
@@ -580,7 +580,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       <button type="button" class="btn btn-sm" id="rlEasaTreeLoadRoots" style="margin-left:8px;">Load tree roots</button>
     </div>
     <div class="rl-easa-browse-single">
-      <p class="rl-drop-meta" id="rlEasaTreeHint" style="margin:0 0 8px;">Choose a batch and load roots (batch id matches the table above).</p>
+      <p class="rl-drop-meta" id="rlEasaTreeHint" style="margin:0 0 8px;">Choose a batch and load roots — the tree starts at EASA eRules → annexes (not search results).</p>
       <div class="rl-easa-tree-panel" id="rlEasaTreeMount" aria-label="Rule tree"></div>
     </div>
   </section>
@@ -1309,6 +1309,160 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       });
   }
 
+  /** Display title from tree_children semantic node */
+  function rlEasaTreeDisplayTitle(n) {
+    return String((n && n.display_title) || '').trim();
+  }
+
+  /** Structural section row (ANNEX, SUBPART, SECTION, … in navigation). */
+  function rlEasaTreeTitleIsOutlineHeading(dt) {
+    return /^\s*(ANNEX|SUBPART|SECTION|APPENDIX)\b/i.test(String(dt || '').trim());
+  }
+
+  function rlEasaTreeTitleLooksLikeAnnex(dt) {
+    return /^\s*ANNEX\b/i.test(String(dt || '').trim());
+  }
+
+  function rlEasaTreeTitleLooksLikeErRules(dt) {
+    return /^\s*EASA\s+eRules\b/i.test(String(dt || '').trim());
+  }
+
+  function rlEasaTreeIsStructuralSectionHeading(n) {
+    return n && n.ui_kind === 'section' && String(n.material_type || '').toUpperCase() === 'HEADING';
+  }
+
+  function rlEasaTreeHasRuleRows(nodes) {
+    return (nodes || []).some(function (n) {
+      return n && n.ui_kind === 'rule';
+    });
+  }
+
+  /**
+   * Pick one document / TOC shell to descend (not ANNEX/SUBPART/SECTION rows — those are legal content).
+   */
+  function rlEasaTreePickDocumentShellToUnwrap(nodes) {
+    var candidates = (nodes || []).filter(function (n) {
+      if (!n) return false;
+      var dt = rlEasaTreeDisplayTitle(n);
+      if (rlEasaTreeTitleIsOutlineHeading(dt)) return false;
+      if (rlEasaTreeTitleLooksLikeErRules(dt)) return false;
+      if (!rlEasaTreeIsStructuralSectionHeading(n)) return false;
+      var cc = parseInt(n.child_count, 10) || 0;
+      return cc > 0;
+    });
+    if (!candidates.length) return null;
+    if (candidates.length === 1) return candidates[0];
+    var preferredRe = /eRules|EASA|Easy\s+Access|Consolidated|Regulation\s*\(EU\)|Official\s+Journal|table\s+of\s+contents|^Contents\b/i;
+    for (var i = 0; i < candidates.length; i++) {
+      if (preferredRe.test(rlEasaTreeDisplayTitle(candidates[i]))) return candidates[i];
+    }
+    var best = null;
+    var bc = -1;
+    candidates.forEach(function (s) {
+      var c = parseInt(s.child_count, 10) || 0;
+      if (c > bc) {
+        bc = c;
+        best = s;
+      }
+    });
+    return best;
+  }
+
+  /** Single visible root: lazy-load annexes under this uid (API parent of ANNEX rows). */
+  function rlEasaTreeSyntheticErRulesNode(parentUid, childCount) {
+    var k = parseInt(childCount, 10) || 0;
+    return {
+      id: parentUid,
+      node_uid: parentUid,
+      parent_id: null,
+      display_title: 'EASA eRules',
+      ui_kind: 'section',
+      material_type: 'HEADING',
+      expandable: k > 0,
+      click_action: 'expand',
+      child_count: k,
+      sort_order: 0,
+      depth: 0,
+      node_type: 'heading'
+    };
+  }
+
+  function rlEasaTreeNodeParentUid(n) {
+    if (!n || typeof n !== 'object') return '';
+    var p = n.parent_id != null ? n.parent_id : (n.parent_uid != null ? n.parent_uid : n.parentId);
+    return p != null ? String(p).trim() : '';
+  }
+
+  /**
+   * Root → unwrap non-legal shells only → stop at EASA eRules, annex list, or rule rows.
+   * Does not auto-expand; does not flatten deep trees onto first paint.
+   */
+  function rlEasaTreeResolveLegalRootNodes(bid) {
+    var maxHops = 14;
+    function step(nodes, hop) {
+      if (!nodes || !nodes.length) {
+        return Promise.resolve({ renderNodes: [], hint: 'empty' });
+      }
+      var i;
+      for (i = 0; i < nodes.length; i++) {
+        if (rlEasaTreeTitleLooksLikeErRules(rlEasaTreeDisplayTitle(nodes[i]))) {
+          return Promise.resolve({ renderNodes: [nodes[i]], hint: 'er-node' });
+        }
+      }
+      var allAnnex =
+        nodes.length > 0 &&
+        nodes.every(function (n) {
+          return rlEasaTreeTitleLooksLikeAnnex(rlEasaTreeDisplayTitle(n));
+        });
+      if (allAnnex) {
+        var puid = rlEasaTreeNodeParentUid(nodes[0]);
+        if (puid) {
+          return Promise.resolve({
+            renderNodes: [rlEasaTreeSyntheticErRulesNode(puid, nodes.length)],
+            hint: 'synthetic-er'
+          });
+        }
+        return Promise.resolve({ renderNodes: nodes, hint: 'annex-flat' });
+      }
+      if (rlEasaTreeHasRuleRows(nodes)) {
+        return Promise.resolve({ renderNodes: nodes, hint: 'stopped-rules' });
+      }
+      if (hop >= maxHops) {
+        return Promise.resolve({ renderNodes: nodes, hint: 'max-hops' });
+      }
+      var shell = rlEasaTreePickDocumentShellToUnwrap(nodes);
+      if (!shell) {
+        return Promise.resolve({ renderNodes: nodes, hint: 'no-shell' });
+      }
+      var suid = shell.id || shell.node_uid;
+      var cc = parseInt(shell.child_count, 10) || 0;
+      if (!suid || cc < 1) {
+        return Promise.resolve({ renderNodes: nodes, hint: 'shell-no-children' });
+      }
+      return fetch(
+        api +
+          '?action=tree_children&batch_id=' +
+          encodeURIComponent(String(bid)) +
+          '&parent_uid=' +
+          encodeURIComponent(suid),
+        { credentials: 'same-origin' }
+      )
+        .then(rlEasaFetchJsonBody)
+        .then(function (j) {
+          if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Tree load failed');
+          return step(j.nodes || [], hop + 1);
+        });
+    }
+    return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), {
+      credentials: 'same-origin'
+    })
+      .then(rlEasaFetchJsonBody)
+      .then(function (j) {
+        if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
+        return step(j.nodes || [], 0);
+      });
+  }
+
   function rlEasaTreeMaterialDotClass(mt) {
     var m = String(mt || 'IR').toUpperCase();
     if (m === 'AMC') return 'rl-easa-tree-dot rl-easa-tree-dot-amc';
@@ -1500,44 +1654,37 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         return;
       }
       rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading roots…</p>';
-      fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), { credentials: 'same-origin' })
-        .then(rlEasaFetchJsonBody)
-        .then(function (j) {
-          if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
-          var nodes = j.nodes || [];
-          /** All roots are semantic sections (doc/toc shells) — peek inside the one with most children. */
-          function rlEasaIsSemanticRootShell(n) {
-            return n.ui_kind === 'section' && String(n.material_type || '').toUpperCase() === 'HEADING';
-          }
-          var unwrapUid = null;
-          var wrapNode = null;
-          if (nodes.length && nodes.every(rlEasaIsSemanticRootShell)) {
-            var bc = -1;
-            nodes.forEach(function (n) {
-              var c = parseInt(n.child_count, 10) || 0;
-              if (c > bc) {
-                bc = c;
-                wrapNode = n;
-              }
-            });
-            if (wrapNode && bc > 0) {
-              unwrapUid = wrapNode.node_uid || wrapNode.id;
-            }
-          }
-          if (unwrapUid) {
-            return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)) + '&parent_uid=' + encodeURIComponent(unwrapUid), { credentials: 'same-origin' })
-              .then(rlEasaFetchJsonBody)
-              .then(function (j2) {
-                if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
-                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes);
-                if (rlEasaTreeHint) {
-                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' top-level entries. ▶ opens annexes and sections; rule lines open the text panel below (blue / green / amber bullets).';
-                }
-              });
-          }
+      rlEasaTreeResolveLegalRootNodes(bid)
+        .then(function (pack) {
+          var nodes = pack.renderNodes || [];
           rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes);
           if (rlEasaTreeHint) {
-            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root entr' + (nodes.length === 1 ? 'y' : 'ies') + '. Use ▶ for structure; click a rule line to read it below.';
+            var nc = nodes.length;
+            var base =
+              'Batch #' +
+              bid +
+              ' · Legal navigation root (EASA eRules → ANNEX …). ▶ expands one level only; nothing opens automatically.';
+            if (pack.hint === 'synthetic-er' || pack.hint === 'er-node') {
+              rlEasaTreeHint.textContent =
+                base +
+                ' Expand “EASA eRules” to list annexes.';
+            } else if (pack.hint === 'annex-flat') {
+              rlEasaTreeHint.textContent =
+                base +
+                ' (' +
+                nc +
+                ' annex entr' +
+                (nc === 1 ? 'y' : 'ies') +
+                ' at top level — use ▶ to drill down.)';
+            } else {
+              rlEasaTreeHint.textContent =
+                base +
+                ' (' +
+                nc +
+                ' row' +
+                (nc === 1 ? '' : 's') +
+                ' at this level.)';
+            }
           }
         })
         .catch(function (e) {
