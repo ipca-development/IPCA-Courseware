@@ -1328,6 +1328,115 @@ function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
 }
 
 /**
+ * &lt;toc&gt;/heading whose title is a rule id (FCL.001, ORA…, CAT…, DTA…, ARA…, MED…) but whose
+ * children are peer rule rows must not sit between SUBPART and rules: lift all direct children to the
+ * wrapper’s parent. The wrapper row stays (empty) and is hidden in tree_children.
+ */
+function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId): int
+{
+    if ($batchId <= 0) {
+        return 0;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title, source_title, sort_order, id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?
+         ORDER BY id ASC'
+    );
+    $st->execute([$batchId]);
+    $all = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (is_array($r)) {
+            $all[] = $r;
+        }
+    }
+    $byParent = [];
+    foreach ($all as $r) {
+        $p = $r['parent_node_uid'] ?? null;
+        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
+        $k = easa_erules_parent_sort_key($p);
+        $byParent[$k][] = $r;
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND node_uid = ?
+           AND NOT (parent_node_uid <=> ?)'
+    );
+    $changed = 0;
+    foreach ($all as $w) {
+        $nt = strtolower(trim((string) ($w['node_type'] ?? '')));
+        if (!in_array($nt, ['heading', 'toc'], true)) {
+            continue;
+        }
+        $wTitle = trim((string) ($w['title'] ?? ''));
+        $wSrc = trim((string) ($w['source_title'] ?? ''));
+        $wBlob = $wTitle !== '' ? $wTitle : $wSrc;
+        if ($wBlob === '' || easa_erules_tree_title_is_structural_section($wBlob)) {
+            continue;
+        }
+        if (!easa_erules_tree_blob_has_ir_reference($wBlob)) {
+            continue;
+        }
+        $wUid = trim((string) ($w['node_uid'] ?? ''));
+        if ($wUid === '') {
+            continue;
+        }
+        $pUid = trim((string) ($w['parent_node_uid'] ?? ''));
+        if ($pUid === '') {
+            continue;
+        }
+        $kids = $byParent[easa_erules_parent_sort_key($wUid)] ?? [];
+        if (count($kids) < 2) {
+            continue;
+        }
+        $stubSet = [];
+        foreach ($kids as $c) {
+            if (!is_array($c)) {
+                continue;
+            }
+            $cnt = strtolower(trim((string) ($c['node_type'] ?? '')));
+            if (!in_array($cnt, ['toc', 'topic', 'heading'], true)) {
+                continue;
+            }
+            $ct = trim((string) ($c['title'] ?? ''));
+            if ($ct === '' && isset($c['source_title'])) {
+                $ct = trim((string) $c['source_title']);
+            }
+            $key = easa_erules_tree_nav_rule_key($ct);
+            if ($key !== null) {
+                $stubSet[$key] = true;
+            }
+        }
+        if (count($stubSet) < 2) {
+            continue;
+        }
+        foreach ($kids as $c) {
+            $cuid = trim((string) ($c['node_uid'] ?? ''));
+            if ($cuid === '') {
+                continue;
+            }
+            $upd->execute([$pUid, $batchId, $cuid, $pUid]);
+            if ($upd->rowCount() > 0) {
+                $changed++;
+            }
+        }
+    }
+
+    return $changed;
+}
+
+function easa_erules_reparent_rule_ref_toc_peer_lift(PDO $pdo, int $batchId): void
+{
+    for ($i = 0; $i < 12; $i++) {
+        if (easa_erules_reparent_rule_ref_toc_peer_lift_once($pdo, $batchId) === 0) {
+            break;
+        }
+    }
+}
+
+/**
  * Re-apply all staging parent-link passes (no XML re-parse). Safe for ops after deploying reparent fixes.
  */
 function easa_erules_repair_batch_tree_parents(PDO $pdo, int $batchId): void
@@ -1336,6 +1445,7 @@ function easa_erules_repair_batch_tree_parents(PDO $pdo, int $batchId): void
     easa_erules_reparent_annex_lift_toc_wrapper_children($pdo, $batchId);
     easa_erules_reparent_annex_subpart_appendix_headings($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
+    easa_erules_reparent_rule_ref_toc_peer_lift($pdo, $batchId);
 }
 
 /**
@@ -1654,6 +1764,7 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     easa_erules_reparent_annex_lift_toc_wrapper_children($pdo, $batchId);
     easa_erules_reparent_annex_subpart_appendix_headings($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
+    easa_erules_reparent_rule_ref_toc_peer_lift($pdo, $batchId);
 
     if (easa_erules_batch_progress_available($pdo)) {
         $pdo->prepare('
@@ -2172,13 +2283,16 @@ function easa_erules_classify_display_band(?string $nodeType, ?string $title, ?s
 }
 
 /**
- * True when text mentions an implementing-rule style id (FCL / ORA / CAT families).
+ * True when text mentions a codified rule id token (FCL / ORA / CAT / DTO / ARA / MED).
  */
 function easa_erules_tree_blob_has_ir_reference(string $text): bool
 {
     $text = trim($text);
 
-    return $text !== '' && preg_match('/\b(FCL|ORA|CAT)\./iu', $text) === 1;
+    return $text !== '' && preg_match(
+        '/\b(?:FCL\.\d+[A-Z]?|(?:ORA|CAT|DTO|ARA|MED)(?:\.[A-Z0-9]+)+)\b/iu',
+        $text
+    ) === 1;
 }
 
 /**
@@ -2197,6 +2311,15 @@ function easa_erules_tree_nav_rule_key(?string $title): ?string
         return strtoupper($m[1]);
     }
     if (preg_match('/\b(ORA(?:\.[A-Z0-9]+)+)\b/iu', $line, $m)) {
+        return strtoupper($m[1]);
+    }
+    if (preg_match('/\b(DTO(?:\.[A-Z0-9]+)+)\b/iu', $line, $m)) {
+        return strtoupper($m[1]);
+    }
+    if (preg_match('/\b(ARA(?:\.[A-Z0-9]+)+)\b/iu', $line, $m)) {
+        return strtoupper($m[1]);
+    }
+    if (preg_match('/\b(MED(?:\.[A-Z0-9]+)+)\b/iu', $line, $m)) {
         return strtoupper($m[1]);
     }
 
@@ -2262,6 +2385,17 @@ function easa_erules_tree_semantic_nav_classify(array $row): array
     }
 
     if (in_array($nt, ['heading', 'toc'], true)) {
+        $probe = $title !== '' ? $title : $sourceTitle;
+        if ($probe === '' && isset($row['first_child_title'])) {
+            $probe = trim((string) $row['first_child_title']);
+        }
+        if ($probe === '' && isset($row['first_child_source_title'])) {
+            $probe = trim((string) $row['first_child_source_title']);
+        }
+        if ($probe !== '' && easa_erules_tree_blob_has_ir_reference($probe)) {
+            return ['ui_kind' => 'rule', 'material_type' => 'IR'];
+        }
+
         return ['ui_kind' => 'section', 'material_type' => 'HEADING'];
     }
 
@@ -2669,6 +2803,9 @@ function easa_erules_tree_children_rows_flattened(
         if ($uid === '') {
             continue;
         }
+        if (easa_erules_tree_skip_empty_rule_ref_nav_wrapper($graph, $row)) {
+            continue;
+        }
         $kids = easa_erules_tree_graph_direct_children_enriched($graph, $uid);
         if (easa_erules_tree_skip_peer_subpart_outline_under_subpart($parentRow, $row, $kids)) {
             continue;
@@ -2686,6 +2823,38 @@ function easa_erules_tree_children_rows_flattened(
     $memo[$key] = $out;
 
     return $out;
+}
+
+/**
+ * After peer-lift reparent, rule-id &lt;toc&gt;/heading wrappers keep parent_node_uid but have no children.
+ * Omit them from browse JSON (not structural sections).
+ *
+ * @param array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>} $graph
+ */
+function easa_erules_tree_skip_empty_rule_ref_nav_wrapper(array $graph, array $row): bool
+{
+    $uid = trim((string) ($row['node_uid'] ?? ''));
+    if ($uid === '') {
+        return false;
+    }
+    $ch = $graph['by_parent'][$uid] ?? [];
+    if ($ch !== []) {
+        return false;
+    }
+    $nt = strtolower(trim((string) ($row['node_type'] ?? '')));
+    if (!in_array($nt, ['heading', 'toc'], true)) {
+        return false;
+    }
+    $title = trim((string) ($row['title'] ?? ''));
+    $src = trim((string) ($row['source_title'] ?? ''));
+    $er = trim((string) ($row['source_erules_id'] ?? ''));
+    foreach ([$title, $src, $er] as $chunk) {
+        if ($chunk !== '' && easa_erules_tree_blob_has_ir_reference($chunk)) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 /**
