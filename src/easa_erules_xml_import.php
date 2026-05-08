@@ -1338,7 +1338,7 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
         return 0;
     }
     $st = $pdo->prepare(
-        'SELECT node_uid, parent_node_uid, node_type, title, source_title, sort_order, id
+        'SELECT node_uid, parent_node_uid, node_type, title, source_title, source_erules_id, sort_order, id
          FROM easa_erules_import_nodes_staging
          WHERE batch_id = ?
          ORDER BY id ASC'
@@ -1356,6 +1356,13 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
         $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
         $k = easa_erules_parent_sort_key($p);
         $byParent[$k][] = $r;
+    }
+    $byUid = [];
+    foreach ($all as $r) {
+        $u = trim((string) ($r['node_uid'] ?? ''));
+        if ($u !== '') {
+            $byUid[$u] = $r;
+        }
     }
     $upd = $pdo->prepare(
         'UPDATE easa_erules_import_nodes_staging
@@ -1396,20 +1403,25 @@ function easa_erules_reparent_rule_ref_toc_peer_lift_once(PDO $pdo, int $batchId
             if (!is_array($c)) {
                 continue;
             }
-            $cnt = strtolower(trim((string) ($c['node_type'] ?? '')));
-            if (!in_array($cnt, ['toc', 'topic', 'heading'], true)) {
-                continue;
-            }
-            $ct = trim((string) ($c['title'] ?? ''));
-            if ($ct === '' && isset($c['source_title'])) {
-                $ct = trim((string) $c['source_title']);
-            }
-            $key = easa_erules_tree_nav_rule_key($ct);
+            $key = easa_erules_tree_nav_rule_key_from_row($c);
             if ($key !== null) {
                 $stubSet[$key] = true;
             }
         }
-        if (count($stubSet) < 2) {
+        $lift = count($stubSet) >= 2;
+        if (!$lift) {
+            $pRow = $byUid[$pUid] ?? null;
+            $pTitle = is_array($pRow) ? trim((string) ($pRow['title'] ?? '')) : '';
+            if (
+                in_array($nt, ['toc', 'heading'], true)
+                && $pTitle !== ''
+                && easa_erules_tree_title_line_is_subpart_heading($pTitle)
+                && easa_erules_tree_blob_has_ir_reference($wBlob)
+            ) {
+                $lift = true;
+            }
+        }
+        if (!$lift) {
             continue;
         }
         foreach ($kids as $c) {
@@ -2327,6 +2339,36 @@ function easa_erules_tree_nav_rule_key(?string $title): ?string
 }
 
 /**
+ * Rule stub from any title/source/ERulesId field (multi-line titles, sparse toc rows).
+ */
+function easa_erules_tree_nav_rule_key_from_row(array $r): ?string
+{
+    $chunks = [
+        trim((string) ($r['title'] ?? '')),
+        trim((string) ($r['source_title'] ?? '')),
+        trim((string) ($r['source_erules_id'] ?? '')),
+    ];
+    foreach ($chunks as $blob) {
+        if ($blob === '') {
+            continue;
+        }
+        $lines = preg_split('/\R+/u', $blob) ?: [];
+        foreach ($lines as $ln) {
+            $k = easa_erules_tree_nav_rule_key(trim($ln));
+            if ($k !== null) {
+                return $k;
+            }
+        }
+        $k2 = easa_erules_tree_nav_rule_key($blob);
+        if ($k2 !== null) {
+            return $k2;
+        }
+    }
+
+    return null;
+}
+
+/**
  * Legal navigation semantics for tree_children (title-led; independent of XML local name except wrappers).
  *
  * @return array{ui_kind: 'section'|'rule', material_type: 'IR'|'AMC'|'GM'|'HEADING'}
@@ -2403,9 +2445,39 @@ function easa_erules_tree_semantic_nav_classify(array $row): array
 }
 
 /**
+ * IR browse rows expand only to reveal AMC/GM (not nested peer IR rule lines).
+ *
+ * @param list<array<string, mixed>> $directChildStagingRows Visible flattened children (staging shape).
+ */
+function easa_erules_tree_ir_expandable_for_amc_gm_children_only(array $directChildStagingRows): bool
+{
+    if ($directChildStagingRows === []) {
+        return false;
+    }
+    foreach ($directChildStagingRows as $c) {
+        if (!is_array($c)) {
+            continue;
+        }
+        $cl = easa_erules_tree_semantic_nav_classify($c);
+        if ($cl['material_type'] === 'AMC' || $cl['material_type'] === 'GM') {
+            continue;
+        }
+        if ($cl['ui_kind'] === 'section') {
+            return false;
+        }
+        if ($cl['ui_kind'] === 'rule' && $cl['material_type'] === 'IR') {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+/**
  * Semantic contract for GET tree_children (no raw staging columns).
  *
  * @param array<string, mixed> $row Staging row plus computed child_count
+ * @param list<array<string, mixed>> $directChildStagingRows Visible children for expandable inference
  *
  * @return array{
  *   id: string,
@@ -2421,7 +2493,7 @@ function easa_erules_tree_semantic_nav_classify(array $row): array
  *   node_type: string
  * }
  */
-function easa_erules_tree_semantic_adapter(array $row): array
+function easa_erules_tree_semantic_adapter(array $row, array $directChildStagingRows = []): array
 {
     $uid = trim((string) ($row['node_uid'] ?? ''));
     $pp = $row['parent_node_uid'] ?? null;
@@ -2449,7 +2521,14 @@ function easa_erules_tree_semantic_adapter(array $row): array
         ];
     }
 
-    $expandable = $childCount > 0 && !in_array($mt, ['GM', 'AMC'], true);
+    $expandable = false;
+    if ($childCount > 0) {
+        if ($mt === 'IR') {
+            $expandable = easa_erules_tree_ir_expandable_for_amc_gm_children_only($directChildStagingRows);
+        } else {
+            $expandable = !in_array($mt, ['GM', 'AMC'], true);
+        }
+    }
 
     return [
         'id' => $uid,
@@ -2883,7 +2962,8 @@ function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?strin
             easa_erules_tree_children_rows_flattened($batchId, $graph, $uid, 0, $memo, $row);
         }
         $row['child_count'] = isset($memo[$vk]) && is_array($memo[$vk]) ? count($memo[$vk]) : 0;
-        $nodes[] = easa_erules_tree_semantic_adapter($row);
+        $childStaging = isset($memo[$vk]) && is_array($memo[$vk]) ? $memo[$vk] : [];
+        $nodes[] = easa_erules_tree_semantic_adapter($row, $childStaging);
     }
 
     return $nodes;
