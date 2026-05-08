@@ -181,6 +181,53 @@ body.app-shell-body{
   font-weight:540;
 }
 
+.admin-shell-switch{
+  padding:8px 12px 10px 12px;
+  border-top:1px solid rgba(255,255,255,0.06);
+}
+
+.admin-shell-switch-label{
+  font-size:10px;
+  font-weight:650;
+  letter-spacing:0.04em;
+  text-transform:uppercase;
+  color:rgba(193,205,225,0.55);
+  margin-bottom:8px;
+}
+
+.admin-shell-switch-row{
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+}
+
+.admin-shell-switch-option{
+  flex:1 1 auto;
+  min-width:0;
+  text-align:center;
+  font-size:11px;
+  font-weight:620;
+  padding:7px 8px;
+  border-radius:8px;
+  text-decoration:none;
+  color:rgba(226,234,248,0.92);
+  background:rgba(255,255,255,0.045);
+  border:1px solid rgba(255,255,255,0.08);
+  transition:background .15s ease, border-color .15s ease, color .15s ease;
+}
+
+.admin-shell-switch-option:hover{
+  background:rgba(255,255,255,0.085);
+  border-color:rgba(255,255,255,0.14);
+  color:#fff;
+}
+
+.admin-shell-switch-option.is-active{
+  background:rgba(124,168,255,0.16);
+  border-color:rgba(124,168,255,0.45);
+  color:#f2f6ff;
+}
+
 .sidebar-utility-actions{
   display:flex;
   flex-direction:column;

@@ -141,3 +141,132 @@ function cw_require_supervisor(): void {
         redirect(cw_home_path_for_role($role));
     }
 }
+
+/** @internal Session key — admin sidebar / shell mode */
+const CW_ADMIN_SHELL_MODE_KEY = 'cw_admin_shell_mode';
+
+/** @internal Session key — which student UI an admin is previewing */
+const CW_ADMIN_STUDENT_PREVIEW_ID_KEY = 'cw_admin_student_preview_id';
+
+function cw_users_id_is_student(PDO $pdo, int $id): bool {
+    if ($id <= 0) {
+        return false;
+    }
+    $st = $pdo->prepare('SELECT role FROM users WHERE id = ? LIMIT 1');
+    $st->execute([$id]);
+    $r = $st->fetchColumn();
+    return $r !== false && strtolower((string)$r) === 'student';
+}
+
+/**
+ * Effective student-context user id for pages that support admin preview via ?user_id= or persisted session.
+ * Non-admin users always get their own account id.
+ */
+function cw_student_view_user_id(PDO $pdo, ?array $u = null): int {
+    if ($u === null) {
+        $u = cw_current_user($pdo);
+    }
+    if (!$u) {
+        return 0;
+    }
+
+    $role = strtolower(trim((string)($u['role'] ?? '')));
+    $selfId = (int)($u['id'] ?? 0);
+
+    if ($role !== 'admin') {
+        return $selfId;
+    }
+
+    if (isset($_GET['user_id'])) {
+        $cand = (int)$_GET['user_id'];
+        if ($cand > 0 && cw_users_id_is_student($pdo, $cand)) {
+            $_SESSION[CW_ADMIN_STUDENT_PREVIEW_ID_KEY] = $cand;
+            return $cand;
+        }
+    }
+
+    $sid = isset($_SESSION[CW_ADMIN_STUDENT_PREVIEW_ID_KEY])
+        ? (int)$_SESSION[CW_ADMIN_STUDENT_PREVIEW_ID_KEY]
+        : 0;
+
+    if ($sid > 0 && cw_users_id_is_student($pdo, $sid)) {
+        return $sid;
+    }
+
+    unset($_SESSION[CW_ADMIN_STUDENT_PREVIEW_ID_KEY]);
+    return $selfId;
+}
+
+/**
+ * Admin-only: which sidebar shell should load (does not replace the authenticated account role in the database).
+ *
+ * @return 'admin'|'instructor'|'student'
+ */
+function cw_admin_shell_mode(): string {
+    $m = strtolower(trim((string)($_SESSION[CW_ADMIN_SHELL_MODE_KEY] ?? '')));
+    if ($m !== 'admin' && $m !== 'instructor' && $m !== 'student') {
+        return 'admin';
+    }
+    return $m;
+}
+
+/**
+ * Resolve which navigation preset to render in the shell.
+ *
+ * Stored admin shell mode overrides only when the signed-in DB role is admin.
+ */
+function cw_effective_navigation_role(?array $u): string {
+    if (!$u) {
+        return '';
+    }
+
+    $db = strtolower(trim((string)($u['role'] ?? '')));
+    if ($db !== 'admin') {
+        return $db;
+    }
+
+    return match (cw_admin_shell_mode()) {
+        'instructor' => 'instructor',
+        'student' => 'student',
+        default => 'admin',
+    };
+}
+
+/** Student-user id appended to nav links while an admin uses the Student shell with a preview target. */
+function cw_admin_navigation_student_preview_id(PDO $pdo, ?array $u): int {
+    if (!$u || strtolower(trim((string)($u['role'] ?? ''))) !== 'admin') {
+        return 0;
+    }
+    if (cw_effective_navigation_role($u) !== 'student') {
+        return 0;
+    }
+    $vid = cw_student_view_user_id($pdo, $u);
+
+    return cw_users_id_is_student($pdo, $vid) ? $vid : 0;
+}
+
+/**
+ * Build a navigation href that preserves optional admin student-preview query pairs.
+ *
+ * Used only when `$previewUserId` is a validated student row id.
+ */
+function cw_nav_href_with_admin_student_preview(string $href, int $previewUserId): string {
+    if ($previewUserId <= 0 || $href === '') {
+        return $href;
+    }
+
+    $path = parse_url($href, PHP_URL_PATH);
+    if (!is_string($path) || $path === '' || !str_starts_with($path, '/student/')) {
+        return $href;
+    }
+
+    $query = [];
+    $qRaw = parse_url($href, PHP_URL_QUERY);
+    if (is_string($qRaw) && $qRaw !== '') {
+        parse_str($qRaw, $query);
+    }
+
+    $query['user_id'] = $previewUserId;
+
+    return $path . '?' . http_build_query($query);
+}

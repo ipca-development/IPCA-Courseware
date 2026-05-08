@@ -13,7 +13,7 @@ cw_require_login();
 $currentUser = cw_current_user($pdo);
 $currentRole = strtolower(trim((string)($currentUser['role'] ?? '')));
 
-if (!in_array($currentRole, array('instructor', 'supervisor', 'chief_instructor'), true)) {
+if (!in_array($currentRole, array('admin', 'instructor', 'supervisor', 'chief_instructor'), true)) {
     http_response_code(403);
     exit('Forbidden');
 }

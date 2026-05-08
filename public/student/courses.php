@@ -13,11 +13,11 @@ if ($role !== 'student' && $role !== 'admin') {
     redirect(cw_home_path_for_role($role));
 }
 
-$userId = (int)$u['id'];
+$userId = cw_student_view_user_id($pdo, $u);
 
-if ($role === 'admin' && isset($_GET['user_id'])) {
-    $userId = (int)$_GET['user_id'];
-}
+$adminStudentPreviewQS = ($role === 'admin' && cw_users_id_is_student($pdo, $userId))
+    ? '&user_id=' . (int)$userId
+    : '';
 
 function courses_fmt_date(?string $value): string
 {
@@ -222,10 +222,10 @@ cw_header('My Courses');
           </div>
 
           <div class="open-row">
-            <a class="mini-action primary" href="/student/course.php?cohort_id=<?= $cohortId ?>">
+            <a class="mini-action primary" href="/student/course.php?cohort_id=<?= $cohortId ?><?= $adminStudentPreviewQS ?>">
               Open Course
             </a>
-            <a class="mini-action" href="/student/lesson_summaries.php?cohort_id=<?= $cohortId ?>">
+            <a class="mini-action" href="/student/lesson_summaries.php?cohort_id=<?= $cohortId ?><?= $adminStudentPreviewQS ?>">
               Open Notebook
             </a>
           </div>

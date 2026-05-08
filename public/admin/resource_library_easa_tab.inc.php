@@ -946,6 +946,25 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     color: #64748b;
     margin: 12px 0 6px;
   }
+  .rl-easa-ai-bundle-debug {
+    display: block;
+    margin-top: 12px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px dashed #cbd5e1;
+    background: #f8fafc;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    color: #475569;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 220px;
+    overflow-y: auto;
+  }
+  .rl-easa-ai-bundle-debug[hidden] {
+    display: none !important;
+  }
 </style>
 
 <div class="rl-wrap rl-tab-panel rl-easa-page" id="rlEasaPage" data-api="<?= h($easaApiHref) ?>">
@@ -1008,6 +1027,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     <div class="rl-easa-ai-label">Official references from this installation (staging excerpts fed to the model)</div>
     <div class="rl-easa-citation-cards" id="rlEasaChatCitations"></div>
     <p class="rl-drop-meta" id="rlEasaChatContextNote" style="margin-top:10px;display:none;"></p>
+    <pre class="rl-easa-ai-bundle-debug" id="rlEasaChatBundleDebug" hidden></pre>
   </section>
 
   <section class="card rl-easa-dash-panel" style="padding:16px 18px; margin-bottom:14px;">
@@ -2727,10 +2747,36 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     }
   }
 
+  function rlEasaFormatAiBundleDebug(d) {
+    if (!d || typeof d !== 'object') return '';
+    var m = d.meta || {};
+    var lines = [];
+    lines.push('[AI bundle debug — remove later]');
+    lines.push(
+      'pool_size=' + (m.pool_size != null ? m.pool_size : '—')
+        + ' · included_in_bundle=' + (m.included != null ? m.included : '—')
+        + ' · limit=' + (m.limit != null ? m.limit : '—')
+    );
+    (Array.isArray(d.ranked) ? d.ranked : []).forEach(function (r) {
+      var title = String(r.title || '').replace(/\s+/g, ' ').trim();
+      lines.push(
+        '#' + (r.rank != null ? r.rank : '?')
+          + ' score=' + (r.score != null ? r.score : '—')
+          + ' batch_id=' + (r.batch_id != null ? r.batch_id : '—')
+          + ' node_uid=' + (r.node_uid || '—')
+          + ' type=' + (r.node_type || '')
+          + ' ERulesId=' + (r.source_erules_id || '')
+          + (title ? ' | ' + title : '')
+      );
+    });
+    return lines.join('\n');
+  }
+
   var chatAskBtn = document.getElementById('rlEasaChatAskBtn');
   var chatAnswerEl = document.getElementById('rlEasaChatAnswer');
   var chatCitEl = document.getElementById('rlEasaChatCitations');
   var chatCtxNote = document.getElementById('rlEasaChatContextNote');
+  var chatBundleDbg = document.getElementById('rlEasaChatBundleDebug');
   if (chatAskBtn) {
     chatAskBtn.addEventListener('click', function () {
       var qEl = document.getElementById('rlEasaChatQ');
@@ -2761,6 +2807,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       if (chatCtxNote) {
         chatCtxNote.style.display = 'none';
         chatCtxNote.textContent = '';
+      }
+      if (chatBundleDbg) {
+        chatBundleDbg.textContent = '';
+        chatBundleDbg.hidden = true;
       }
       if (chatAnswerEl) {
         chatAnswerEl.classList.remove('is-empty');
@@ -2802,8 +2852,22 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           if (chatAnswerEl) {
             chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, aiBlock, userFirst);
           }
+          if (chatBundleDbg) {
+            var dbgText = rlEasaFormatAiBundleDebug(x.j.ai_bundle_debug);
+            if (dbgText) {
+              chatBundleDbg.textContent = dbgText;
+              chatBundleDbg.hidden = false;
+            } else {
+              chatBundleDbg.textContent = '';
+              chatBundleDbg.hidden = true;
+            }
+          }
         })
         .catch(function (e) {
+          if (chatBundleDbg) {
+            chatBundleDbg.textContent = '';
+            chatBundleDbg.hidden = true;
+          }
           if (chatAnswerEl) {
             chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, e.message || 'Error', '');
           }

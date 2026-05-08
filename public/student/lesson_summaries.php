@@ -7,13 +7,22 @@ cw_require_login();
 
 $u = cw_current_user($pdo);
 $role = (string)($u['role'] ?? '');
-if ($role !== 'student') {
+if ($role !== 'student' && $role !== 'admin') {
     http_response_code(403);
     exit('Forbidden');
 }
 
-$userId = (int)$u['id'];
-$studentName = (string)($u['name'] ?? 'Student');
+$userId = cw_student_view_user_id($pdo, $u);
+$nameSt = $pdo->prepare('SELECT name FROM users WHERE id = ? LIMIT 1');
+$nameSt->execute([$userId]);
+$studentName = trim((string)$nameSt->fetchColumn());
+if ($studentName === '') {
+    $studentName = 'Student';
+}
+
+$adminStudentPreviewQS = ($role === 'admin' && cw_users_id_is_student($pdo, $userId))
+    ? '&user_id=' . (int)$userId
+    : '';
 
 $service = new LessonSummaryService($pdo);
 $selectedCohortId = (int)($_GET['cohort_id'] ?? 0);
@@ -991,7 +1000,7 @@ body.nb-modal-open{
       <a
         class="nb-btn primary"
         id="exportBtn"
-        href="/student/export_lesson_summaries_pdf.php?cohort_id=<?= (int)$selectedCohortId ?>"
+        href="/student/export_lesson_summaries_pdf.php?cohort_id=<?= (int)$selectedCohortId ?><?= $adminStudentPreviewQS ?>"
         target="_blank"
         rel="noopener"
       >

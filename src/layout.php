@@ -19,24 +19,31 @@ function cw_header(string $title = ''): void
         $u = cw_current_user($pdo);
     }
 
-    $role = is_array($u) ? (string)($u['role'] ?? '') : '';
+    $dbRole = is_array($u) ? strtolower(trim((string)($u['role'] ?? ''))) : '';
     $name = is_array($u) ? (string)($u['name'] ?? '') : '';
 
     $pageTitle = trim($title) !== '' ? trim($title) : 'Dashboard';
 
     $roleLabel = 'User';
-    if ($role === 'admin') {
-        $roleLabel = 'Admin';
-    } elseif (in_array($role, ['supervisor', 'instructor', 'chief_instructor'], true)) {
+    if ($dbRole === 'admin') {
+        $roleLabel = match (cw_admin_shell_mode()) {
+            'student' => 'Admin · Student view',
+            'instructor' => 'Admin · Instructor view',
+            default => 'Admin',
+        };
+    } elseif (in_array($dbRole, ['supervisor', 'instructor', 'chief_instructor'], true)) {
         $roleLabel = 'Instructor';
-    } elseif ($role === 'student') {
+    } elseif ($dbRole === 'student') {
         $roleLabel = 'Student';
     }
 
     $displayName = $name !== '' ? $name : $roleLabel;
     $logoutHref = '/logout.php';
 
-    $navHtml = cw_render_navigation($role, $path, $roleLabel);
+    $navRole = cw_effective_navigation_role($u);
+    $navStudentPreviewId = cw_admin_navigation_student_preview_id($pdo, $u);
+
+    $navHtml = cw_render_navigation($navRole, $path, $roleLabel, $navStudentPreviewId);
     ?>
 <!doctype html>
 <html>
@@ -77,6 +84,30 @@ function cw_header(string $title = ''): void
         <div class="sidebar-utility-name"><?= h($displayName) ?></div>
         <div class="sidebar-utility-role"><?= h($roleLabel) ?></div>
       </div>
+
+      <?php if ($dbRole === 'admin'): ?>
+      <?php $shellMode = cw_admin_shell_mode(); ?>
+      <div class="admin-shell-switch" role="group" aria-label="Switch interface">
+        <div class="admin-shell-switch-label">Interface</div>
+        <div class="admin-shell-switch-row">
+          <a
+            class="admin-shell-switch-option<?= $shellMode === 'admin' ? ' is-active' : '' ?>"
+            href="<?= h('/admin/switch_interface.php?mode=admin') ?>">
+            Admin
+          </a>
+          <a
+            class="admin-shell-switch-option<?= $shellMode === 'instructor' ? ' is-active' : '' ?>"
+            href="<?= h('/admin/switch_interface.php?mode=instructor') ?>">
+            Instructor
+          </a>
+          <a
+            class="admin-shell-switch-option<?= $shellMode === 'student' ? ' is-active' : '' ?>"
+            href="<?= h('/admin/switch_interface.php?mode=student') ?>">
+            Student
+          </a>
+        </div>
+      </div>
+      <?php endif; ?>
 
       <div class="sidebar-utility-actions">
         <?php if (function_exists('cw_is_logged_in') && cw_is_logged_in()): ?>

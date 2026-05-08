@@ -166,7 +166,7 @@ function cw_nav_filter_items(array $items): array
     return $filtered;
 }
 
-function cw_render_navigation(string $role, string $currentPath, string $roleLabel = ''): string
+function cw_render_navigation(string $role, string $currentPath, string $roleLabel = '', int $adminStudentPreviewUserId = 0): string
 {
     $entries = cw_nav_items_for_role($role);
     $entries = cw_nav_filter_items($entries);
@@ -174,6 +174,13 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
     if (!$entries) {
         return '';
     }
+
+    $rewriteStudentPreview = static function (string $href) use ($adminStudentPreviewUserId): string {
+        if ($adminStudentPreviewUserId <= 0) {
+            return $href;
+        }
+        return cw_nav_href_with_admin_student_preview($href, $adminStudentPreviewUserId);
+    };
 
     $html = '';
     $html .= '<aside class="app-sidebar-shell">';
@@ -219,6 +226,7 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
                 $html .= '<span class="nav-link-label">' . $labelEsc . '</span>';
                 $html .= '</span>';
             } else {
+                $resolvedHref = $rewriteStudentPreview($href);
                 $class = 'nav-link';
                 $current = '';
                 if (cw_nav_item_is_current($entry, $currentPath)) {
@@ -226,7 +234,7 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
                     $current = ' aria-current="page"';
                 }
 
-                $html .= '<a class="' . $class . '" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '"' . $current . '>';
+                $html .= '<a class="' . $class . '" href="' . htmlspecialchars($resolvedHref, ENT_QUOTES, 'UTF-8') . '"' . $current . '>';
                 $html .= '<span class="nav-link-accent"></span>';
                 $html .= '<span class="nav-link-icon-rail">' . cw_nav_icon_img($icon, $label) . '</span>';
                 $html .= '<span class="nav-link-label">' . $labelEsc . '</span>';
@@ -282,7 +290,9 @@ function cw_render_navigation(string $role, string $currentPath, string $roleLab
                 $current = ' aria-current="page"';
             }
 
-            $html .= '<a class="' . $class . '" href="' . htmlspecialchars($itemHref, ENT_QUOTES, 'UTF-8') . '"' . $current . '>';
+            $resolvedChildHref = $rewriteStudentPreview($itemHref);
+
+            $html .= '<a class="' . $class . '" href="' . htmlspecialchars($resolvedChildHref, ENT_QUOTES, 'UTF-8') . '"' . $current . '>';
             $html .= '<span class="nav-link-accent"></span>';
             $html .= '<span class="nav-link-icon-rail">' . cw_nav_icon_img($itemIcon, $itemLabel) . '</span>';
             $html .= '<span class="nav-link-label">' . $itemLabelEsc . '</span>';

@@ -15,16 +15,23 @@ $cohortId = (int)($_GET['cohort_id'] ?? 0);
 $lessonId = (int)($_GET['lesson_id'] ?? 0);
 if ($cohortId <= 0 || $lessonId <= 0) exit('Missing cohort_id or lesson_id');
 
+$studentContextId = cw_student_view_user_id($pdo, $u);
+
 if ($role === 'student') {
     $check = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id=? AND user_id=? LIMIT 1");
-    $check->execute([$cohortId, (int)$u['id']]);
+    $check->execute([$cohortId, $studentContextId]);
     if (!$check->fetchColumn()) {
         http_response_code(403);
         exit('Not enrolled in this cohort');
     }
 }
 
-$userName = trim((string)($u['name'] ?? 'Student'));
+$userNameSt = $pdo->prepare('SELECT name FROM users WHERE id = ? LIMIT 1');
+$userNameSt->execute([$studentContextId]);
+$userName = trim((string)$userNameSt->fetchColumn());
+if ($userName === '') {
+    $userName = trim((string)($u['name'] ?? 'Student'));
+}
 $firstName = trim(explode(' ', $userName)[0] ?? 'Student');
 
 $INSTRUCTOR_NAME = 'Maya';
@@ -118,7 +125,7 @@ function pt_session_key(int $cohortId): string {
     return 'progress_test_access_ok_' . $cohortId;
 }
 
-$userId = (int)($u['id'] ?? 0);
+$userId = $studentContextId;
 $clientIp = pt_client_ip();
 $policy = pt_load_access_policy($pdo, $userId, $cohortId);
 $gateError = '';

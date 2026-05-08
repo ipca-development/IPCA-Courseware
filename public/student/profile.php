@@ -12,10 +12,16 @@ error_reporting(E_ALL);
 cw_require_login();
 
 $currentUser = cw_current_user($pdo);
-$currentUserId = (int)($currentUser['id'] ?? 0);
+$actorUserId = (int)($currentUser['id'] ?? 0);
 $currentRole = strtolower(trim((string)($currentUser['role'] ?? '')));
+$profileUserId = cw_student_view_user_id($pdo, $currentUser);
 
-if ($currentUserId <= 0 || $currentRole !== 'student') {
+if ($actorUserId <= 0 || !cw_users_id_is_student($pdo, $profileUserId)) {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
+if ($currentRole === 'student' && $profileUserId !== $actorUserId) {
     http_response_code(403);
     exit('Forbidden');
 }
@@ -454,6 +460,11 @@ $activeTab = sp_active_tab((string)($_GET['tab'] ?? 'personal'));
 $flashType = strtolower(trim((string)($_GET['flash_type'] ?? '')));
 $flashMessage = trim((string)($_GET['flash_message'] ?? ''));
 
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $currentRole === 'admin') {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $section = strtolower(trim((string)($_POST['form_section'] ?? '')));
     $postedTab = sp_active_tab((string)($_POST['tab'] ?? $activeTab));
@@ -461,17 +472,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         switch ($section) {
             case 'personal':
-                sp_update_personal_profile($pdo, $currentUserId);
+                sp_update_personal_profile($pdo, $profileUserId);
                 sp_flash_redirect('personal', 'success', 'Personal details updated.');
                 break;
 
             case 'emergency':
-                sp_update_emergency_contacts($pdo, $currentUserId);
+                sp_update_emergency_contacts($pdo, $profileUserId);
                 sp_flash_redirect('emergency', 'success', 'Emergency contacts updated.');
                 break;
 
             case 'password':
-                sp_update_password($pdo, $currentUserId);
+                sp_update_password($pdo, $profileUserId);
                 sp_flash_redirect('password', 'success', 'Password updated successfully.');
                 break;
 
@@ -483,9 +494,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-ups_recalculate_profile_requirements_status($pdo, $currentUserId);
+ups_recalculate_profile_requirements_status($pdo, $profileUserId);
 
-$workspace = ups_load_self_service_workspace($pdo, $currentUserId);
+$workspace = ups_load_self_service_workspace($pdo, $profileUserId);
 if (!$workspace) {
     http_response_code(404);
     exit('Profile not found.');
@@ -1098,7 +1109,7 @@ cw_header('My Profile');
 
                     <div class="sp-list-item">
                         <div class="sp-list-title">Last Evaluation</div>
-                        <div class="sp-list-meta"><?php echo h(cw_dt((string)($user['last_evaluated_at'] ?? ''), $pdo, $currentUserId)); ?></div>
+                        <div class="sp-list-meta"><?php echo h(cw_dt((string)($user['last_evaluated_at'] ?? ''), $pdo, $profileUserId)); ?></div>
                     </div>
                 </div>
 

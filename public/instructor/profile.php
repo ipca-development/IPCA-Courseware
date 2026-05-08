@@ -15,7 +15,7 @@ $currentUser = cw_current_user($pdo);
 $currentUserId = (int)($currentUser['id'] ?? 0);
 $currentRole = strtolower(trim((string)($currentUser['role'] ?? '')));
 
-$allowedRoles = array('instructor', 'supervisor', 'chief_instructor');
+$allowedRoles = array('admin', 'instructor', 'supervisor', 'chief_instructor');
 
 if ($currentUserId <= 0 || !in_array($currentRole, $allowedRoles, true)) {
     http_response_code(403);

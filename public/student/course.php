@@ -15,7 +15,13 @@ if ($role !== 'student' && $role !== 'admin') {
     exit('Forbidden');
 }
 
-$userId = (int)$u['id'];
+$userId = cw_student_view_user_id($pdo, $u);
+$adminStudentPreviewQS = ($role === 'admin' && cw_users_id_is_student($pdo, $userId))
+    ? '&user_id=' . (int)$userId
+    : '';
+$adminStudentPreviewLeadingQS = ($role === 'admin' && cw_users_id_is_student($pdo, $userId))
+    ? '?user_id=' . (int)$userId
+    : '';
 $cohortId = (int)($_GET['cohort_id'] ?? 0);
 if ($cohortId <= 0) exit('Missing cohort_id');
 
@@ -1440,10 +1446,10 @@ cw_header('Course');
       </div>
 
       <div class="hero-actions">
-        <a class="hero-btn" href="/student/dashboard.php">← Back to Dashboard</a>
+        <a class="hero-btn" href="/student/dashboard.php<?= $adminStudentPreviewLeadingQS ?>">← Back to Dashboard</a>
 
         <?php if ($summariesPageExists): ?>
-          <a class="hero-btn primary" href="/student/lesson_summaries.php?cohort_id=<?= (int)$cohortId ?>">My Lesson Summaries</a>
+          <a class="hero-btn primary" href="/student/lesson_summaries.php?cohort_id=<?= (int)$cohortId ?><?= $adminStudentPreviewQS ?>">My Lesson Summaries</a>
         <?php else: ?>
           <span class="hero-btn disabled">My Lesson Summaries</span>
         <?php endif; ?>

@@ -13,12 +13,13 @@ cw_require_login();
 
 try {
     $u = cw_current_user($pdo);
-    if (($u['role'] ?? '') !== 'student') {
+    $role = (string)($u['role'] ?? '');
+    if ($role !== 'student' && $role !== 'admin') {
         http_response_code(403);
         exit('Forbidden');
     }
 
-    $userId = (int)$u['id'];
+    $userId = cw_student_view_user_id($pdo, $u);
     $studentName = trim((string)$u['name'] ?: 'Student');
 
     $cohortId = (int)($_GET['cohort_id'] ?? 0);

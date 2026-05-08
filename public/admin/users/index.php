@@ -641,6 +641,13 @@ cw_header('User Accounts');
                                     <?php echo ua_svg('archive'); ?>
                                     <span>Audit</span>
                                 </a>
+
+                                <?php if (strtolower(trim((string)$row['role'])) === 'student'): ?>
+                                    <a class="app-btn app-btn-secondary ua-card-action" href="/admin/switch_interface.php?mode=student&amp;user_id=<?php echo $userId; ?>">
+                                        <?php echo ua_svg('open'); ?>
+                                        <span>Student UI</span>
+                                    </a>
+                                <?php endif; ?>
                             </div>
                         </div>
                     </div>

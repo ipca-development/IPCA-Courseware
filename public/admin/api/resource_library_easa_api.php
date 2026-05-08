@@ -148,6 +148,43 @@ function rl_easa_compare_query_needles(string $q): array
 }
 
 /**
+ * Relevance score for AI bundle ranking (higher = more relevant).
+ *
+ * @param array<string, mixed> $r staging row with excerpt, title, breadcrumb, etc.
+ * @param list<string> $needles from rl_easa_compare_query_needles()
+ */
+function rl_easa_compare_row_score(array $r, string $q, array $needles): int
+{
+    $eid = strtoupper((string) ($r['source_erules_id'] ?? ''));
+    $title = mb_strtolower((string) ($r['title'] ?? ''));
+    $crumb = mb_strtolower((string) ($r['breadcrumb'] ?? ''));
+    $excerpt = mb_strtolower((string) ($r['excerpt'] ?? ''));
+    $nt = mb_strtolower((string) ($r['node_type'] ?? ''));
+    $sq = mb_strtolower($q);
+    $s = 0;
+    if (in_array($nt, ['topic', 'article', 'section', 'point'], true)) {
+        $s += 12;
+    } elseif (in_array($nt, ['document', 'frontmatter', 'toc', 'backmatter'], true)) {
+        $s -= 10;
+    }
+    if ($sq !== '') {
+        if (mb_strpos($title, $sq) !== false) { $s += 24; }
+        if (mb_strpos($crumb, $sq) !== false) { $s += 20; }
+        if (mb_strpos($excerpt, $sq) !== false) { $s += 16; }
+    }
+    foreach ($needles as $n) {
+        $nu = strtoupper($n);
+        $nl = mb_strtolower($n);
+        if ($nu !== '' && mb_strpos($eid, $nu) !== false) { $s += 60; }
+        if ($nl !== '' && mb_strpos($title, $nl) !== false) { $s += 26; }
+        if ($nl !== '' && mb_strpos($crumb, $nl) !== false) { $s += 22; }
+        if ($nl !== '' && mb_strpos($excerpt, $nl) !== false) { $s += 14; }
+    }
+
+    return $s;
+}
+
+/**
  * Snippet column: prefers canonical body when the column exists (aligned with search/compare).
  */
 function rl_easa_staging_snippet_concat_body(PDO $pdo): string
@@ -162,7 +199,7 @@ function rl_easa_staging_snippet_concat_body(PDO $pdo): string
 /**
  * Pull staging excerpts for AI compare using the same matching rules as search.
  *
- * @return array{hit_count: int, bundle: string, sources: list<array<string, mixed>>, summary: string}
+ * @return array{hit_count: int, bundle: string, sources: list<array<string, mixed>>, summary: string, debug_bundle_ranking: list<array<string, mixed>>, debug_bundle_meta: array<string, int>}
  */
 function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFilter): array
 {
@@ -171,6 +208,8 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
         'bundle' => '',
         'sources' => [],
         'summary' => '',
+        'debug_bundle_ranking' => [],
+        'debug_bundle_meta' => ['pool_size' => 0, 'included' => 0, 'limit' => 15],
     ];
     if (!easa_erules_staging_tables_ok($pdo)) {
         $out['summary'] = 'EASA staging is not available (apply scripts/sql/resource_library_easa_erules_staging.sql).';
@@ -224,24 +263,57 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     };
 
-    $rows = $fetchMatches($q, $maxRows);
-    // Natural-language prompts rarely appear verbatim in legal text; fallback to ids + keywords.
-    if ($rows === []) {
-        $seen = [];
-        foreach (rl_easa_compare_query_needles($q) as $needle) {
-            $more = $fetchMatches($needle, 8);
-            foreach ($more as $r) {
-                $key = (string) ($r['batch_id'] ?? '') . '|' . (string) ($r['node_uid'] ?? '');
-                if ($key === '|' || isset($seen[$key])) {
-                    continue;
-                }
-                $seen[$key] = true;
-                $rows[] = $r;
-                if (count($rows) >= $maxRows) {
-                    break 2;
-                }
+    $rows = [];
+    $seen = [];
+    $appendUnique = static function (array $list) use (&$rows, &$seen): void {
+        foreach ($list as $r) {
+            $key = (string) ($r['batch_id'] ?? '') . '|' . (string) ($r['node_uid'] ?? '');
+            if ($key === '|' || isset($seen[$key])) {
+                continue;
             }
+            $seen[$key] = true;
+            $rows[] = $r;
         }
+    };
+
+    // Collect a broader candidate pool, then score/rank for question relevance.
+    $appendUnique($fetchMatches($q, 80));
+    foreach (rl_easa_compare_query_needles($q) as $needle) {
+        $appendUnique($fetchMatches($needle, 16));
+    }
+
+    $needles = rl_easa_compare_query_needles($q);
+    usort($rows, static function (array $a, array $b) use ($q, $needles): int {
+        $sa = rl_easa_compare_row_score($a, $q, $needles);
+        $sb = rl_easa_compare_row_score($b, $q, $needles);
+        if ($sa === $sb) {
+            // Stable tie-breaker: deterministic by batch/node.
+            $ka = (string) ($a['batch_id'] ?? '') . '|' . (string) ($a['node_uid'] ?? '');
+            $kb = (string) ($b['batch_id'] ?? '') . '|' . (string) ($b['node_uid'] ?? '');
+
+            return strcmp($ka, $kb);
+        }
+
+        return ($sb <=> $sa);
+    });
+    $poolSize = count($rows);
+    $out['debug_bundle_meta']['pool_size'] = $poolSize;
+    $out['debug_bundle_meta']['limit'] = $maxRows;
+    if (count($rows) > $maxRows) {
+        $rows = array_slice($rows, 0, $maxRows);
+    }
+    $out['debug_bundle_meta']['included'] = count($rows);
+
+    foreach ($rows as $i => $r) {
+        $out['debug_bundle_ranking'][] = [
+            'rank' => $i + 1,
+            'score' => rl_easa_compare_row_score($r, $q, $needles),
+            'batch_id' => (int) ($r['batch_id'] ?? 0),
+            'node_uid' => (string) ($r['node_uid'] ?? ''),
+            'node_type' => (string) ($r['node_type'] ?? ''),
+            'source_erules_id' => (string) ($r['source_erules_id'] ?? ''),
+            'title' => mb_substr((string) ($r['title'] ?? ''), 0, 160),
+        ];
     }
     $out['hit_count'] = count($rows);
     foreach ($rows as $r) {
@@ -971,6 +1043,10 @@ if ($action === 'regulatory_compare_ai') {
         }
     }
 
+    $bundleDebug = [
+        'meta' => $stagingCompare['debug_bundle_meta'] ?? ['pool_size' => 0, 'included' => 0, 'limit' => 15],
+        'ranked' => $stagingCompare['debug_bundle_ranking'] ?? [],
+    ];
     $payload = [
         'ok' => true,
         'user_first_name' => $userFirstName !== '' ? $userFirstName : null,
@@ -979,6 +1055,7 @@ if ($action === 'regulatory_compare_ai') {
         'easa_sources' => $stagingCompare['sources'],
         'ecfr_html' => $ecfrHtml !== '' ? $ecfrHtml : null,
         'ecfr_note' => $ecfrNote !== '' ? $ecfrNote : null,
+        'ai_bundle_debug' => $bundleDebug,
         'ai_answer' => '',
         'ai_error' => null,
     ];

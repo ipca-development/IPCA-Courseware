@@ -15,12 +15,11 @@ if ($role !== 'student' && $role !== 'admin') {
     redirect(cw_home_path_for_role($role));
 }
 
-$userId = (int)$u['id'];
+$userId = cw_student_view_user_id($pdo, $u);
 
-// If admin, optionally simulate a student view via ?user_id=
-if ($role === 'admin' && isset($_GET['user_id'])) {
-    $userId = (int)$_GET['user_id'];
-}
+$adminStudentPreviewQS = ($role === 'admin' && cw_users_id_is_student($pdo, $userId))
+    ? '&user_id=' . (int)$userId
+    : '';
 
 $displayUserSt = $pdo->prepare("SELECT * FROM users WHERE id = ? LIMIT 1");
 $displayUserSt->execute([$userId]);
@@ -734,6 +733,14 @@ $welcomeMessage = student_dashboard_generate_ai_welcome(
 cw_header('Dashboard');
 ?>
 
+<?php if ($role === 'admin' && !cw_users_id_is_student($pdo, $userId)): ?>
+  <div style="margin:0 0 18px;padding:12px 14px;border-radius:10px;background:rgba(255,183,77,0.12);border:1px solid rgba(255,183,77,0.35);color:#3d2910;font-size:13px;line-height:1.45;">
+    You are viewing the student interface as an admin without a learner selected. Pick someone from
+    <a href="/admin/users/index.php?role=student">User Accounts</a>
+    (<strong>Student UI</strong>), or append <code style="background:rgba(0,0,0,0.06);padding:0 4px;border-radius:4px;">?user_id=…</code> to preview that account.
+  </div>
+<?php endif; ?>
+
 <style>
   .dash-stack{
     display:flex;
@@ -1243,9 +1250,9 @@ cw_header('Dashboard');
 
         <div class="mini-actions">
           <?php if ($primaryCohortId !== null): ?>
-            <a class="mini-action" href="/student/course.php?cohort_id=<?= (int)$primaryCohortId ?>">Open Course</a>
+            <a class="mini-action" href="/student/course.php?cohort_id=<?= (int)$primaryCohortId ?><?= $adminStudentPreviewQS ?>">Open Course</a>
           <?php endif; ?>
-          <a class="mini-action" href="/student/dashboard.php<?= ($role === 'admin' && $userId > 0) ? '?user_id=' . (int)$userId : '' ?>">Refresh Overview</a>
+          <a class="mini-action" href="/student/dashboard.php<?= ($role === 'admin' && cw_users_id_is_student($pdo, $userId)) ? '?user_id=' . (int)$userId : '' ?>">Refresh Overview</a>
         </div>
       </div>
     </div>
@@ -1526,7 +1533,7 @@ cw_header('Dashboard');
             <?php endif; ?>
 
             <div class="open-row">
-              <a class="mini-action" href="/student/course.php?cohort_id=<?= $cohortId ?>">
+              <a class="mini-action" href="/student/course.php?cohort_id=<?= $cohortId ?><?= $adminStudentPreviewQS ?>">
                 Open Course
               </a>
             </div>
