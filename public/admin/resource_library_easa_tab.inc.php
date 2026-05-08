@@ -2420,7 +2420,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return false;
   }
 
-  /** GET tree_children (semantic nodes). Omit parentUid for corpus roots. */
+  /** GET tree_children (semantic nodes only). Omit parentUid for corpus roots. */
   function rlEasaTreeFetchTreeChildrenJson(batchId, parentUid) {
     var url = api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId));
     if (parentUid != null && String(parentUid).trim() !== '') {
@@ -2429,7 +2429,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return fetch(url, { credentials: 'same-origin' }).then(rlEasaFetchJsonBody);
   }
 
-  /** First line of API display_title (trusted contract field). */
+  /** First display line from API display_title (trusted semantic contract field). */
   function rlEasaSemanticDisplayTitleFirstLine(node) {
     var t = String(node && node.display_title != null ? node.display_title : '').trim();
     if (!t) return '';
@@ -2437,7 +2437,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return String(parts[0] || '').trim();
   }
 
-  /** Mirrors backend structural headings; uses display_title only. */
+  /** Matches backend easa_erules_tree_title_is_structural_section keywords on display_title only. */
   function rlEasaSemanticDisplayTitleIsStructuralNavHeading(node) {
     var line = rlEasaSemanticDisplayTitleFirstLine(node);
     return line !== '' && /^\s*(ANNEX|SUBPART|SECTION|APPENDIX|CHAPTER|TITLE|PART)\b/i.test(line);
@@ -2449,8 +2449,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
 
   /**
-   * Document / editorial shell: expandable section heading that is not ANNEX/SUBPART/…
-   * (ui_kind, material_type, expandable, click_action, child_count, display_title only).
+   * Document / editorial shell only: expandable section heading that is not legal nav (ANNEX/SUBPART/…).
+   * Uses only ui_kind, material_type, expandable, click_action, child_count, display_title — never child_count heuristics across siblings.
    */
   function rlEasaSemanticNodeIsDocumentShellUnwrappable(node) {
     if (!node || typeof node !== 'object') return false;
@@ -2463,7 +2463,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return true;
   }
 
-  /** When any sibling is an ANNEX row on display_title, drop non-annex siblings (DTO/editorial at this level). */
+  /** If any row is an ANNEX on display_title, keep only annex siblings (drops DTO/editorial noise at that level). */
   function rlEasaTreeAnnexSiblingFilter(nodes) {
     if (!nodes || !nodes.length) return nodes ? nodes.slice() : [];
     var annex = [];
@@ -2474,8 +2474,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
 
   /**
-   * Same legal-root shaping for corpus roots, search reveal, and every expanded branch:
-   * annex-only when applicable; deterministic single-node document-shell unwrap (no largest child_count).
+   * Legal-root shaping for corpus roots, search/citation reveal, and every expanded branch (same rules everywhere).
+   * Annex-only when applicable; deterministic single-node document-shell unwrap chain. No largest-child_count.
    *
    * @return Promise<{ nodes: array }>
    */
