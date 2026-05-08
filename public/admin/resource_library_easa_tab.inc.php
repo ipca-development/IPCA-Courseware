@@ -2146,65 +2146,40 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return rlEasaAncestorUidChain(batchId, targetUid).then(function (chain) {
       /* chain: root ... target */
       if (!chain.length) throw new Error('Empty ancestor chain');
-      return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId)), { credentials: 'same-origin' })
-        .then(rlEasaFetchJsonBody)
+      return rlEasaTreeFetchTreeChildrenJson(batchId, '')
         .then(function (j) {
-          if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
-          var nodes = j.nodes || [];
-          function rlEasaIsSemanticShellRoot(n) {
-            return n.ui_kind === 'section'
-              && String(n.material_type || '').toUpperCase() === 'HEADING'
-              && rlEasaSemanticBool(n.expandable)
-              && (parseInt(n.child_count, 10) || 0) > 0;
+          return rlEasaTreeResolveLegalRootNodes(batchId, j);
+        })
+        .then(function (resolved) {
+          rlEasaRenderTreeIntoMount(mount, batchId, resolved.nodes);
+          var ul = mount.querySelector(':scope > ul.rl-easa-tree-list');
+          if (!ul) throw new Error('Tree mount empty');
+          var path = chain.slice();
+          while (path.length > 0) {
+            var head = path[0];
+            if (ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(head) + '"]')) break;
+            path.shift();
           }
-          var unwrapUid = null;
-          var wrapNode = null;
-          if (nodes.length && nodes.every(rlEasaIsSemanticShellRoot)) {
-            var bc = -1;
-            nodes.forEach(function (n) {
-              var c = parseInt(n.child_count, 10) || 0;
-              if (c > bc) {
-                bc = c;
-                wrapNode = n;
-              }
+          if (!path.length) throw new Error('Tree roots do not contain this ancestor chain.');
+          function descend(idx) {
+            if (idx >= path.length) return Promise.resolve(null);
+            var uid = path[idx];
+            var li = ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(uid) + '"]');
+            if (!li) return Promise.reject(new Error('Could not find node ' + uid + ' in tree (try Load tree roots).'));
+            if (idx === path.length - 1) return Promise.resolve(li);
+            return rlEasaEnsureChildUlLoaded(li, batchId).then(function () {
+              var nextUl = li.querySelector(':scope > ul.rl-easa-tree-list');
+              if (!nextUl) return Promise.reject(new Error('No children container'));
+              ul = nextUl;
+              return descend(idx + 1);
             });
-            if (wrapNode && bc > 0) unwrapUid = wrapNode.id || wrapNode.node_uid;
           }
-          var pRoots = unwrapUid
-            ? fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId)) + '&parent_uid=' + encodeURIComponent(unwrapUid), { credentials: 'same-origin' }).then(rlEasaFetchJsonBody)
-            : Promise.resolve(j);
-          return pRoots.then(function (jx) {
-            if (!jx.ok || !jx.nodes) throw new Error((jx && jx.error) || 'Failed to load inner tree');
-            rlEasaRenderTreeIntoMount(mount, batchId, jx.nodes);
-            var ul = mount.querySelector(':scope > ul.rl-easa-tree-list');
-            if (!ul) throw new Error('Tree mount empty');
-            var path = chain.slice();
-            while (path.length > 0) {
-              var head = path[0];
-              if (ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(head) + '"]')) break;
-              path.shift();
-            }
-            if (!path.length) throw new Error('Tree roots do not contain this ancestor chain.');
-            function descend(idx) {
-              if (idx >= path.length) return Promise.resolve(null);
-              var uid = path[idx];
-              var li = ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(uid) + '"]');
-              if (!li) return Promise.reject(new Error('Could not find node ' + uid + ' in tree (try Load tree roots).'));
-              if (idx === path.length - 1) return Promise.resolve(li);
-              return rlEasaEnsureChildUlLoaded(li, batchId).then(function () {
-                var nextUl = li.querySelector(':scope > ul.rl-easa-tree-list');
-                if (!nextUl) return Promise.reject(new Error('No children container'));
-                ul = nextUl;
-                return descend(idx + 1);
-              });
-            }
-            return descend(0).then(function (li) {
-              if (!li) return;
-              try {
-                li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-              } catch (e0) {}
-              rlEasaShowNodeDetail(batchId, targetUid, li, true);
-            });
+          return descend(0).then(function (li) {
+            if (!li) return;
+            try {
+              li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            } catch (e0) {}
+            rlEasaShowNodeDetail(batchId, targetUid, li, true);
           });
         });
     }).catch(function (e) {
@@ -2444,6 +2419,97 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return false;
   }
 
+  /** GET tree_children (semantic nodes only). Omit parentUid for corpus roots. */
+  function rlEasaTreeFetchTreeChildrenJson(batchId, parentUid) {
+    var url = api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId));
+    if (parentUid != null && String(parentUid).trim() !== '') {
+      url += '&parent_uid=' + encodeURIComponent(String(parentUid).trim());
+    }
+    return fetch(url, { credentials: 'same-origin' }).then(rlEasaFetchJsonBody);
+  }
+
+  /** First display line from API display_title (trusted semantic contract field). */
+  function rlEasaSemanticDisplayTitleFirstLine(node) {
+    var t = String(node && node.display_title != null ? node.display_title : '').trim();
+    if (!t) return '';
+    var parts = t.split(/\r\n|\n|\r/);
+    return String(parts[0] || '').trim();
+  }
+
+  /** Matches backend easa_erules_tree_title_is_structural_section keywords on display_title only. */
+  function rlEasaSemanticDisplayTitleIsStructuralNavHeading(node) {
+    var line = rlEasaSemanticDisplayTitleFirstLine(node);
+    return line !== '' && /^\s*(ANNEX|SUBPART|SECTION|APPENDIX|CHAPTER|TITLE|PART)\b/i.test(line);
+  }
+
+  function rlEasaSemanticDisplayTitleIsAnnexRow(node) {
+    var line = rlEasaSemanticDisplayTitleFirstLine(node);
+    return line !== '' && /^\s*ANNEX\b/i.test(line);
+  }
+
+  /**
+   * Document / editorial shell only: section heading that expands but is not legal nav (ANNEX/SUBPART/…).
+   * Uses only ui_kind, material_type, expandable, click_action, child_count, display_title — never child_count heuristics across siblings.
+   */
+  function rlEasaSemanticNodeIsDocumentShellUnwrappable(node) {
+    if (!node || typeof node !== 'object') return false;
+    if (node.ui_kind !== 'section') return false;
+    if (String(node.material_type || '').toUpperCase() !== 'HEADING') return false;
+    if (!rlEasaSemanticBool(node.expandable)) return false;
+    if (String(node.click_action || '') !== 'expand') return false;
+    if ((parseInt(node.child_count, 10) || 0) <= 0) return false;
+    if (rlEasaSemanticDisplayTitleIsStructuralNavHeading(node)) return false;
+    return true;
+  }
+
+  /** If any row looks like ANNEX n on display_title, drop all non-annex siblings (DTO/editorial noise). */
+  function rlEasaTreeAnnexSiblingFilter(nodes) {
+    if (!nodes || !nodes.length) return nodes ? nodes.slice() : [];
+    var annex = [];
+    for (var i = 0; i < nodes.length; i++) {
+      if (rlEasaSemanticDisplayTitleIsAnnexRow(nodes[i])) annex.push(nodes[i]);
+    }
+    return annex.length ? annex : nodes.slice();
+  }
+
+  /**
+   * Single legal root resolution for initial tree load and search/citation reveal.
+   * Deterministic: optional single-node shell unwrap chain + annex-only level filter. No largest-child_count.
+   *
+   * @return Promise<{ nodes: array }>
+   */
+  function rlEasaTreeResolveLegalRootNodes(batchId, j) {
+    if (!j || !j.ok || !Array.isArray(j.nodes)) {
+      return Promise.reject(new Error((j && j.error) || 'Failed to load tree'));
+    }
+    function descend(nodes, depthGuard) {
+      if (depthGuard > 8) {
+        return Promise.resolve(nodes);
+      }
+      var level = rlEasaTreeAnnexSiblingFilter(nodes);
+      if (level.length !== 1) {
+        return Promise.resolve(level);
+      }
+      var sole = level[0];
+      if (!rlEasaSemanticNodeIsDocumentShellUnwrappable(sole)) {
+        return Promise.resolve(level);
+      }
+      var puid = String(sole.id || sole.node_uid || '').trim();
+      if (!puid) {
+        return Promise.resolve(level);
+      }
+      return rlEasaTreeFetchTreeChildrenJson(batchId, puid).then(function (jInner) {
+        if (!jInner || !jInner.ok || !Array.isArray(jInner.nodes)) {
+          throw new Error((jInner && jInner.error) || 'Tree load failed');
+        }
+        return descend(jInner.nodes, depthGuard + 1);
+      });
+    }
+    return descend(j.nodes, 0).then(function (finalNodes) {
+      return { nodes: finalNodes };
+    });
+  }
+
   function rlEasaCreateTreeLi(batchId, n) {
     var li = document.createElement('li');
     li.className = 'rl-easa-tree-li';
@@ -2629,46 +2695,16 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         return;
       }
       rlEasaTreeMount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading roots…</p>';
-      fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)), { credentials: 'same-origin' })
-        .then(rlEasaFetchJsonBody)
+      rlEasaTreeFetchTreeChildrenJson(bid, '')
         .then(function (j) {
-          if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
-          var nodes = j.nodes || [];
-          function rlEasaIsSemanticShellRoot(n) {
-            return n.ui_kind === 'section'
-              && String(n.material_type || '').toUpperCase() === 'HEADING'
-              && rlEasaSemanticBool(n.expandable)
-              && (parseInt(n.child_count, 10) || 0) > 0;
-          }
-          var unwrapUid = null;
-          var wrapNode = null;
-          if (nodes.length && nodes.every(rlEasaIsSemanticShellRoot)) {
-            var bc = -1;
-            nodes.forEach(function (n) {
-              var c = parseInt(n.child_count, 10) || 0;
-              if (c > bc) {
-                bc = c;
-                wrapNode = n;
-              }
-            });
-            if (wrapNode && bc > 0) {
-              unwrapUid = wrapNode.id || wrapNode.node_uid;
-            }
-          }
-          if (unwrapUid) {
-            return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid)) + '&parent_uid=' + encodeURIComponent(unwrapUid), { credentials: 'same-origin' })
-              .then(rlEasaFetchJsonBody)
-              .then(function (j2) {
-                if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
-                rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes);
-                if (rlEasaTreeHint) {
-                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' top-level entries. ▶ when the API marks expandable; rule titles open the panel below (dots by material_type).';
-                }
-              });
-          }
-          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes);
+          return rlEasaTreeResolveLegalRootNodes(bid, j);
+        })
+        .then(function (resolved) {
+          rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, resolved.nodes);
           if (rlEasaTreeHint) {
-            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root entr' + (nodes.length === 1 ? 'y' : 'ies') + '. ▶ only when expandable=true; click rule titles (open_rule) to read below.';
+            var n = resolved.nodes.length;
+            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + n + ' root entr' + (n === 1 ? 'y' : 'ies')
+              + '. ▶ only when expandable=true; click rule titles (open_rule) to read below.';
           }
         })
         .catch(function (e) {
