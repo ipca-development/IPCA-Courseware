@@ -1523,7 +1523,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
               }
             });
             if (wrapNode && bc > 0) {
-              unwrapUid = wrapNode.node_uid;
+              unwrapUid = wrapNode.node_uid || wrapNode.id;
             }
           }
           if (unwrapUid) {
