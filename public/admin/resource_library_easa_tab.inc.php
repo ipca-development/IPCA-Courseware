@@ -215,6 +215,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     font-size: 12px;
     width: 1.25rem;
   }
+  /* Semantic API: rule + expandable=true (IR with AMC/GM children only) — slightly smaller disclosure */
+  .rl-easa-tree-exp--rule-disclosure {
+    font-size: 10px;
+    line-height: 1.15;
+    opacity: 0.95;
+  }
   .rl-easa-tree-exp--gm {
     color: #15803d;
   }
@@ -1316,30 +1322,35 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return 'rl-easa-tree-dot rl-easa-tree-dot-ir';
   }
 
+  /** Parse semantic API boolean (expandable). */
+  function rlEasaSemanticBool(v) {
+    if (v === true || v === 1) return true;
+    if (typeof v === 'string') {
+      var s = v.toLowerCase();
+      return s === 'true' || s === '1';
+    }
+    return false;
+  }
+
   function rlEasaCreateTreeLi(batchId, n) {
     var li = document.createElement('li');
     li.className = 'rl-easa-tree-li';
-    var uid = n.node_uid || n.id || '';
-    var nodeTypeLc = String(n.node_type || '').toLowerCase();
-    var uiKind = n.ui_kind;
-    if (!uiKind) {
-      uiKind = (nodeTypeLc === 'heading' || nodeTypeLc === 'toc' || nodeTypeLc === 'document'
-        || nodeTypeLc === 'frontmatter' || nodeTypeLc === 'backmatter') ? 'section' : 'rule';
+    var uid = String(n.id || n.node_uid || '').trim();
+    var uiKind = n.ui_kind === 'section' ? 'section' : 'rule';
+    var mtRaw = String(n.material_type || '').toUpperCase();
+    var mt = uiKind === 'section' ? 'HEADING' : mtRaw;
+    if (uiKind === 'rule' && (!mt || mt === 'HEADING')) {
+      mt = 'IR';
     }
+    var expandable = rlEasaSemanticBool(n.expandable);
+    var clickAction = String(n.click_action || '');
+    var opensRule = clickAction === 'open_rule';
     var kids = parseInt(n.child_count, 10) || 0;
-    var mt = String(n.material_type || '').toUpperCase();
-    if (uiKind === 'section') {
-      mt = 'HEADING';
-    } else if (!mt || mt === 'HEADING') {
-      var rb = n.rule_band || 'ir';
-      if (rb === 'amc') mt = 'AMC';
-      else if (rb === 'gm') mt = 'GM';
-      else mt = 'IR';
-    }
-    var disp = n.display_title || n.label_short || n.title || n.source_erules_id || uid || '—';
+    var disp = (n.display_title != null && String(n.display_title).trim() !== '')
+      ? String(n.display_title).trim()
+      : (uid || '—');
     var isSupplement = mt === 'GM' || mt === 'AMC';
-    // Chevrons follow visible child_count only. Do not combine with API expandable — it can disagree and leave rows dead (no click handlers).
-    var showTreeExpand = kids > 0 && (uiKind === 'section' || !isSupplement);
+    var showTreeExpand = expandable;
 
     var row = document.createElement('div');
     row.className = 'rl-easa-tree-row' + (uiKind === 'section' ? ' rl-easa-tree-row--section' : ' rl-easa-tree-row--rule');
@@ -1355,9 +1366,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       exp.setAttribute('aria-hidden', 'true');
     } else {
       exp.textContent = '\u25b6';
-      exp.setAttribute('aria-label', uiKind === 'section' ? 'Expand section' : 'Expand nested rules');
-      if (isSupplement) {
-        exp.classList.add(mt === 'GM' ? 'rl-easa-tree-exp--gm' : 'rl-easa-tree-exp--amc');
+      if (uiKind === 'section') {
+        exp.setAttribute('aria-label', 'Expand section');
+      } else {
+        exp.classList.add('rl-easa-tree-exp--rule-disclosure');
+        exp.setAttribute('aria-label', 'Show AMC and GM under this rule');
       }
     }
     if (isSupplement) {
@@ -1411,6 +1424,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       + '<div class="rl-easa-inline-body rl-easa-detail-body"></div>'
       + '</div>';
     li.appendChild(inlineWrap);
+
+    function attachOpenRuleIfApplicable() {
+      if (!ruleBtn || !opensRule) return;
+      ruleBtn.addEventListener('click', function () {
+        rlEasaShowNodeDetail(batchId, uid, li);
+      });
+    }
 
     if (showTreeExpand) {
       var chUl = document.createElement('ul');
@@ -1467,15 +1487,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       if (uiKind === 'section' && sectionBtn && !sectionBtn.disabled) {
         sectionBtn.addEventListener('click', toggleChildList);
       }
-      if (uiKind === 'rule' && ruleBtn) {
-        ruleBtn.addEventListener('click', function () {
-          rlEasaShowNodeDetail(batchId, uid, li);
-        });
-      }
-    } else if (uiKind === 'rule' && ruleBtn) {
-      ruleBtn.addEventListener('click', function () {
-        rlEasaShowNodeDetail(batchId, uid, li);
-      });
+      attachOpenRuleIfApplicable();
+    } else {
+      attachOpenRuleIfApplicable();
     }
     return li;
   }
@@ -1507,13 +1521,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         .then(function (j) {
           if (!j.ok || !j.nodes) throw new Error((j && j.error) || 'Failed to load tree');
           var nodes = j.nodes || [];
-          var wrapTypes = { document: 1, frontmatter: 1, toc: 1, backmatter: 1 };
-          function rlEasaIsWrapperNode(n) {
-            return !!wrapTypes[String(n.node_type || '').toLowerCase()];
+          function rlEasaIsSemanticShellRoot(n) {
+            return n.ui_kind === 'section'
+              && String(n.material_type || '').toUpperCase() === 'HEADING'
+              && rlEasaSemanticBool(n.expandable)
+              && (parseInt(n.child_count, 10) || 0) > 0;
           }
           var unwrapUid = null;
           var wrapNode = null;
-          if (nodes.length && nodes.every(rlEasaIsWrapperNode)) {
+          if (nodes.length && nodes.every(rlEasaIsSemanticShellRoot)) {
             var bc = -1;
             nodes.forEach(function (n) {
               var c = parseInt(n.child_count, 10) || 0;
@@ -1523,7 +1539,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
               }
             });
             if (wrapNode && bc > 0) {
-              unwrapUid = wrapNode.node_uid || wrapNode.id;
+              unwrapUid = wrapNode.id || wrapNode.node_uid;
             }
           }
           if (unwrapUid) {
@@ -1533,13 +1549,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
                 if (!j2.ok || !j2.nodes) throw new Error((j2 && j2.error) || 'Failed to load inner tree');
                 rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, j2.nodes);
                 if (rlEasaTreeHint) {
-                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' top-level entries. ▶ opens annexes and sections; rule lines open the text panel below (blue / green / amber bullets).';
+                  rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + j2.nodes.length + ' top-level entries. ▶ when the API marks expandable; rule titles open the panel below (dots by material_type).';
                 }
               });
           }
           rlEasaRenderTreeIntoMount(rlEasaTreeMount, bid, nodes);
           if (rlEasaTreeHint) {
-            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root entr' + (nodes.length === 1 ? 'y' : 'ies') + '. Use ▶ for structure; click a rule line to read it below.';
+            rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + nodes.length + ' root entr' + (nodes.length === 1 ? 'y' : 'ies') + '. ▶ only when expandable=true; click rule titles (open_rule) to read below.';
           }
         })
         .catch(function (e) {
