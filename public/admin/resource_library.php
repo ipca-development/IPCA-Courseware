@@ -174,6 +174,40 @@ cw_header('Resource Library');
     max-width: 980px;
   }
   .tcc-sub a { color: #fff; text-decoration: underline; text-underline-offset: 2px; }
+  .rl-hero-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .rl-hero-head-main { min-width: 0; }
+  .rl-hero-action {
+    height: 40px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 16px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: rgba(255,255,255,0.08);
+    color: #fff;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: .01em;
+    cursor: pointer;
+    transition: background .16s ease, transform .16s ease, border-color .16s ease;
+  }
+  .rl-hero-action:hover {
+    background: rgba(255,255,255,0.13);
+    transform: translateY(-1px);
+  }
+  @media (max-width: 860px) {
+    .rl-hero-head {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+  }
   .tcc-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; }
   .tcc-tab {
     display: inline-flex;
@@ -712,15 +746,22 @@ cw_header('Resource Library');
 
 <div class="tcc-page">
   <section class="app-section-hero">
-    <div class="hero-overline">Admin · Resource Library</div>
-    <h1 class="tcc-title">Resource Library</h1>
-    <div class="tcc-sub">
+    <div class="rl-hero-head">
+      <div class="rl-hero-head-main">
+        <div class="hero-overline">Admin · Resource Library</div>
+        <h1 class="tcc-title">Resource Library</h1>
+        <div class="tcc-sub">
+          <?php if ($rlTab === 'easa'): ?>
+            <strong>EASA Easy Access Rules</strong> — upload official XML exports, monitor EASA’s downloads page for newer packages, and search indexed EU regulatory text once published.
+            Optionally compare concepts with live U.S. <strong>eCFR</strong> excerpts for dual‑jurisdiction clarity. Designed for <strong>Compliance &amp; Safety</strong> as well as theory and training.
+          <?php else: ?>
+            Central library for <strong>JSON / book references</strong> (e.g. PHAK blocks for AI retrieval), <strong>data crawlers</strong> (FAA AIM HTML and other official sources),
+            and <strong>registered external APIs</strong> (e.g. the eCFR versioner). Pick a tab to filter resource types; the <a href="/admin/resource_library.php?tab=easa">EASA Easy Access Rules</a> tab hosts EU regulatory imports separately.
+          <?php endif; ?>
+        </div>
+      </div>
       <?php if ($rlTab === 'easa'): ?>
-        <strong>EASA Easy Access Rules</strong> — upload official XML exports, monitor EASA’s downloads page for newer packages, and search indexed EU regulatory text once published.
-        Optionally compare concepts with live U.S. <strong>eCFR</strong> excerpts for dual‑jurisdiction clarity. Designed for <strong>Compliance &amp; Safety</strong> as well as theory and training.
-      <?php else: ?>
-        Central library for <strong>JSON / book references</strong> (e.g. PHAK blocks for AI retrieval), <strong>data crawlers</strong> (FAA AIM HTML and other official sources),
-        and <strong>registered external APIs</strong> (e.g. the eCFR versioner). Pick a tab to filter resource types; the <a href="/admin/resource_library.php?tab=easa">EASA Easy Access Rules</a> tab hosts EU regulatory imports separately.
+        <button type="button" class="rl-hero-action" id="rlEasaHeroSettingsBtn">Easy Access Download</button>
       <?php endif; ?>
     </div>
     <div class="tcc-tabs" role="navigation" aria-label="Resource library sections">

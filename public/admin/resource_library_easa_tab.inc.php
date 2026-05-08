@@ -460,9 +460,18 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   /* —— EASA resource dashboard —— */
   .rl-easa-metrics {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 10px;
     margin-bottom: 14px;
+  }
+  @media (max-width: 1280px) {
+    .rl-easa-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  }
+  @media (max-width: 860px) {
+    .rl-easa-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 560px) {
+    .rl-easa-metrics { grid-template-columns: 1fr; }
   }
   .rl-easa-metric-card {
     background: #fff;
@@ -561,10 +570,20 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     font-size: 13px;
     color: #0f172a;
     line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    display: block;
+    min-height: calc(1.3em * 2);
+    max-height: calc(1.3em * 2);
     overflow: hidden;
+    word-break: break-word;
+  }
+  .rl-easa-source-sublabel {
+    display: block;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+  .rl-easa-source-sublabel-gap {
+    display: block;
+    height: 10px;
   }
   .rl-easa-source-card-meta {
     font-size: 11px;
@@ -866,7 +885,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   <div class="rl-easa-metrics" id="rlEasaMetrics" aria-live="polite">
     <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">XML batches</div><div class="rl-easa-metric-value" id="rlEasaMetricBatches">—</div></div>
     <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Indexed nodes</div><div class="rl-easa-metric-value" id="rlEasaMetricNodes">—</div></div>
-    <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Live corpora</div><div class="rl-easa-metric-value" id="rlEasaMetricLive">—</div><div class="rl-easa-metric-sub">Parsed &amp; ready for tree</div></div>
     <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Monitored URLs</div><div class="rl-easa-metric-value" id="rlEasaMetricMon">—</div></div>
     <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Updates flagged</div><div class="rl-easa-metric-value" id="rlEasaMetricUpdates">—</div><div class="rl-easa-metric-sub">Download page monitor</div></div>
     <div class="rl-easa-metric-card"><div class="rl-easa-metric-label">Last probe (UTC)</div><div class="rl-easa-metric-value" id="rlEasaMetricLastProbe" style="font-size:1rem;">—</div></div>
@@ -1218,7 +1236,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     s = s.replace(/\s*-\s*part.*$/i, '');
     s = s.replace(/\s+/g, ' ').trim();
     if (!s) s = raw;
-    if (s.length > 34) s = s.slice(0, 31) + '…';
     return s;
   }
 
@@ -1346,8 +1363,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         ? '<span class="rl-easa-pill rl-easa-pill--live">Live</span>'
         : '<span class="rl-easa-pill rl-easa-pill--off">Not live</span>';
       var uploaded = rlEasaFormatUploadedUtc(b.created_at || '');
-      var metaLine = 'EASA EASY ACCESS RULES'
-        + '<br>Nodes: ' + esc(String(nodes))
+      var metaLine = '<span class="rl-easa-source-sublabel">EASA EASY ACCESS RULES</span>'
+        + '<span class="rl-easa-source-sublabel-gap" aria-hidden="true"></span>'
+        + 'Nodes: ' + esc(String(nodes))
         + '<br>Uploaded on: ' + esc(uploaded);
       card.innerHTML = '<div class="rl-easa-source-card-title">' + esc(rlEasaSourceDisplayName(b)) + '</div>'
         + '<div class="rl-easa-source-card-meta">' + metaLine + '</div>'
@@ -1536,6 +1554,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     if (kind === 'new') {
       titleEl.textContent = 'Add XML source';
       ident.innerHTML = '<p style="margin:0;">Upload a new Easy Access export, then parse it into staging.</p>';
+    } else if (kind === 'download_settings') {
+      titleEl.textContent = 'Easy Access Download settings';
+      ident.innerHTML = '<strong>Purpose</strong><br>Configure and monitor official EASA Easy Access download URLs.<br><br>'
+        + '<strong>How it works</strong><br>Use “Check now” to run a probe immediately. The watch list and update flags are shown in the tables area below this dashboard.';
     } else if (kind === 'monitor' && payload) {
       titleEl.textContent = payload.label ? String(payload.label) : 'Monitored URL';
       var flag = !!(payload.changed_flag === 1 || payload.changed_flag === true);
@@ -1583,12 +1605,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         var batches = x.j.batches || [];
         var monitors = x.j.monitor || [];
         var indexed = parseInt(String(x.j.indexed_nodes || 0), 10) || 0;
-        var liveCt = 0;
-        batches.forEach(function (b) {
-          var st = String(b.status || '');
-          var n = parseInt(b.staging_nodes, 10) || 0;
-          if (st === 'ready_for_review' && n > 0) liveCt++;
-        });
         var updates = 0;
         var lastProbe = '';
         monitors.forEach(function (r) {
@@ -1598,7 +1614,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         });
         rlEasaApplyMetricEl('rlEasaMetricBatches', batches.length);
         rlEasaApplyMetricEl('rlEasaMetricNodes', indexed);
-        rlEasaApplyMetricEl('rlEasaMetricLive', liveCt);
         rlEasaApplyMetricEl('rlEasaMetricMon', monitors.length);
         rlEasaApplyMetricEl('rlEasaMetricUpdates', updates);
         rlEasaApplyMetricEl('rlEasaMetricLastProbe', lastProbe || '—');
@@ -1877,6 +1892,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   if (chatEcfrCh && chatEcfrFields) {
     chatEcfrCh.addEventListener('change', function () {
       chatEcfrFields.hidden = !chatEcfrCh.checked;
+    });
+  }
+
+  var heroSetBtn = document.getElementById('rlEasaHeroSettingsBtn');
+  if (heroSetBtn) {
+    heroSetBtn.addEventListener('click', function () {
+      rlEasaOpenSourceModal('download_settings', null);
     });
   }
 
