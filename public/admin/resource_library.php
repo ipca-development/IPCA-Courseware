@@ -151,13 +151,6 @@ cw_header('Resource Library');
   /* Match admin/theory_control_center.php: full-width .tcc-page inside .app-content (no extra max-width shell). */
   .tcc-page { display: flex; flex-direction: column; gap: 18px; }
   .tcc-hero { padding: 22px 24px; }
-  .rl-master-hero {
-    padding: 22px 24px;
-    border-radius: 14px;
-    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 45%, #0ea5e9 100%);
-    box-shadow: 0 10px 24px rgba(30, 64, 175, 0.22);
-    color: #fff;
-  }
   .tcc-eyebrow {
     font-size: 11px;
     text-transform: uppercase;
@@ -718,8 +711,8 @@ cw_header('Resource Library');
 </style>
 
 <div class="tcc-page">
-  <section class="rl-master-hero">
-    <div class="tcc-eyebrow">Admin · Resource Library</div>
+  <section class="app-section-hero">
+    <div class="hero-overline">Admin · Resource Library</div>
     <h1 class="tcc-title">Resource Library</h1>
     <div class="tcc-sub">
       <?php if ($rlTab === 'easa'): ?>

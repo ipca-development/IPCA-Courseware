@@ -458,27 +458,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   .rl-easa-tree-dot-neu { background: #94a3b8; }
 
   /* —— EASA resource dashboard —— */
-  .rl-easa-dash-header {
-    margin: 0;
-    padding: 16px 18px;
-    border-radius: 10px;
-    background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 45%, #0ea5e9 100%);
-    box-shadow: 0 6px 18px rgba(30, 64, 175, 0.22);
-  }
-  .rl-easa-dash-header h2 {
-    margin: 0 0 6px;
-    font-size: 2rem;
-    font-weight: 800;
-    color: #ffffff;
-    letter-spacing: -0.02em;
-    line-height: 1.2;
-  }
-  .rl-easa-dash-header p {
-    margin: 0;
-    font-size: 14px;
-    color: #dbeafe;
-    line-height: 1.45;
-  }
   .rl-easa-metrics {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -882,13 +861,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     margin: 12px 0 6px;
   }
 </style>
-
-<section style="margin-bottom: 12px;">
-  <header class="rl-easa-dash-header">
-    <h2>EASA Easy Access Rules dashboard</h2>
-    <p>Metrics, monitored download pages, AI Q&amp;A backed by staging excerpts, keyword search, and the canonical rule tree viewer.</p>
-  </header>
-</section>
 
 <div class="rl-wrap rl-tab-panel rl-easa-page" id="rlEasaPage" data-api="<?= h($easaApiHref) ?>">
   <div class="rl-easa-metrics" id="rlEasaMetrics" aria-live="polite">
