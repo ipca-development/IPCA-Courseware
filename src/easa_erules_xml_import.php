@@ -959,8 +959,15 @@ function easa_erules_title_is_annex_heading_row(string $title): bool
 function easa_erules_title_is_appendix_heading_row(string $title): bool
 {
     $line = easa_erules_tree_title_first_line($title);
+    if ($line === '') {
+        return false;
+    }
+    if (preg_match('/^\s*APPENDIX\b/iu', $line) === 1) {
+        return true;
+    }
 
-    return $line !== '' && preg_match('/^\s*APPENDIX\b/iu', $line) === 1;
+    // Easy Access often uses "Appendices to Annex I" (plural) as the appendix block heading.
+    return preg_match('/^\s*Appendices\s+to\s+Annex\b/iu', $line) === 1;
 }
 
 /**
@@ -1140,7 +1147,36 @@ function easa_erules_reparent_annex_lift_toc_wrapper_children(PDO $pdo, int $bat
 }
 
 /**
- * True when &lt;toc&gt; acts as an empty navigation shell whose children include SUBPART headings.
+ * True when a heading under an ANNEX nav &lt;toc&gt; looks like real annex outline (not only Part-FCL SUBPART blocks).
+ * Annex II / III often use Articles or SECTION rows without any SUBPART; those must still lift out of the toc shell.
+ */
+function easa_erules_toc_heading_indicates_annex_interior_outline(string $headingTitle): bool
+{
+    $line = easa_erules_tree_title_first_line($headingTitle) ?: trim($headingTitle);
+    if ($line === '') {
+        return false;
+    }
+    if (easa_erules_title_is_subpart_heading_row($line)) {
+        return true;
+    }
+    if (easa_erules_title_is_section_heading_row($line)) {
+        return true;
+    }
+    if (easa_erules_title_is_appendix_heading_row($line)) {
+        return true;
+    }
+    if (preg_match('/^\s*Article\s+/iu', $line) === 1) {
+        return true;
+    }
+    if (preg_match('/^\s*CHAPTER\s+/iu', $line) === 1) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
+ * True when &lt;toc&gt; acts as an empty navigation shell whose children look like annex outline (SUBPART and more).
  *
  * @param list<array<string, mixed>> $tocDirectChildren
  */
@@ -1151,24 +1187,29 @@ function easa_erules_toc_is_annex_nav_wrapper_candidate(array $tocRow, array $to
     if (strlen($plain) > 2048) {
         return false;
     }
-    $hasSubpartHeading = false;
     foreach ($tocDirectChildren as $c) {
         if (!is_array($c)) {
             continue;
         }
-        if (strtolower(trim((string) ($c['node_type'] ?? ''))) !== 'heading') {
+        $nt = strtolower(trim((string) ($c['node_type'] ?? '')));
+        if ($nt === 'heading') {
+            $t = trim((string) ($c['title'] ?? ''));
+            if ($t !== '' && easa_erules_toc_heading_indicates_annex_interior_outline($t)) {
+                return true;
+            }
+
             continue;
         }
-        $t = trim((string) ($c['title'] ?? ''));
-        $line = easa_erules_tree_title_first_line($t) ?: $t;
-        if ($line !== '' && easa_erules_title_is_subpart_heading_row($line)) {
-            $hasSubpartHeading = true;
-
-            break;
+        if ($nt === 'topic') {
+            $t = trim((string) ($c['title'] ?? ''));
+            $line = easa_erules_tree_title_first_line($t) ?: $t;
+            if ($line !== '' && preg_match('/^\s*Article\s+/iu', $line) === 1) {
+                return true;
+            }
         }
     }
 
-    return $hasSubpartHeading;
+    return false;
 }
 
 /**
@@ -3400,8 +3441,14 @@ function easa_erules_tree_title_first_line(?string $title): string
 function easa_erules_tree_title_is_structural_section(?string $title): bool
 {
     $line = easa_erules_tree_title_first_line($title);
+    if ($line === '') {
+        return false;
+    }
+    if (easa_erules_title_is_appendix_heading_row($line)) {
+        return true;
+    }
 
-    return $line !== '' && preg_match(
+    return preg_match(
         '/^\s*(ANNEX|SUBPART|SECTION|APPENDIX|CHAPTER|TITLE|PART)\b/iu',
         $line
     ) === 1;

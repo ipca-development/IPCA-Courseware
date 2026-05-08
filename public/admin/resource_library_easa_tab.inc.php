@@ -2440,7 +2440,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   /** Matches backend easa_erules_tree_title_is_structural_section keywords on display_title only. */
   function rlEasaSemanticDisplayTitleIsStructuralNavHeading(node) {
     var line = rlEasaSemanticDisplayTitleFirstLine(node);
-    return line !== '' && /^\s*(ANNEX|SUBPART|SECTION|APPENDIX|CHAPTER|TITLE|PART)\b/i.test(line);
+    return line !== '' && (
+      /^\s*(ANNEX|SUBPART|SECTION|APPENDIX|CHAPTER|TITLE|PART)\b/i.test(line)
+      || /^\s*Appendices\s+to\s+Annex\b/i.test(line)
+    );
   }
 
   function rlEasaSemanticDisplayTitleIsAnnexRow(node) {
