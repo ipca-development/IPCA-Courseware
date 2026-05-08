@@ -1259,6 +1259,201 @@ function easa_erules_reparent_annex_subpart_appendix_headings(PDO $pdo, int $bat
 }
 
 /**
+ * Easy Access often nests the next outline level under an empty &lt;toc&gt; (SUBPART → SECTION rows,
+ * ANNEX → SUBPART rows, etc.). Lift those structural headings to the real parent so tree_children
+ * lists SECTION 1…N directly under SUBPART C, not under a single toc shell.
+ *
+ * @return int Number of rows whose parent_node_uid was changed
+ */
+function easa_erules_reparent_structural_lift_empty_toc_outline_children_once(PDO $pdo, int $batchId): int
+{
+    if ($batchId <= 0) {
+        return 0;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title, source_title, source_erules_id, plain_text, sort_order, id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?
+         ORDER BY id ASC'
+    );
+    $st->execute([$batchId]);
+    $all = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (is_array($r)) {
+            $all[] = $r;
+        }
+    }
+    $byParent = [];
+    foreach ($all as $r) {
+        $p = $r['parent_node_uid'] ?? null;
+        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
+        $k = easa_erules_parent_sort_key($p);
+        $byParent[$k][] = $r;
+    }
+    $byUid = [];
+    foreach ($all as $r) {
+        $u = trim((string) ($r['node_uid'] ?? ''));
+        if ($u !== '') {
+            $byUid[$u] = $r;
+        }
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND node_uid = ?
+           AND NOT (parent_node_uid <=> ?)'
+    );
+    $changed = 0;
+    foreach ($byUid as $pRow) {
+        $puid = trim((string) ($pRow['node_uid'] ?? ''));
+        if ($puid === '') {
+            continue;
+        }
+        if (strtolower(trim((string) ($pRow['node_type'] ?? ''))) !== 'heading') {
+            continue;
+        }
+        $pk = easa_erules_structural_outline_parent_kind_from_heading_title((string) ($pRow['title'] ?? ''));
+        if ($pk === null) {
+            continue;
+        }
+        $direct = easa_erules_tree_sorted_direct_children_from_map($puid, $byParent);
+        foreach ($direct as $w) {
+            if (!is_array($w)) {
+                continue;
+            }
+            if (strtolower(trim((string) ($w['node_type'] ?? ''))) !== 'toc') {
+                continue;
+            }
+            if (!easa_erules_toc_row_is_empty_structural_nav_shell($w)) {
+                continue;
+            }
+            $wuid = trim((string) ($w['node_uid'] ?? ''));
+            if ($wuid === '') {
+                continue;
+            }
+            $inner = easa_erules_tree_sorted_direct_children_from_map($wuid, $byParent);
+            if ($inner === []) {
+                continue;
+            }
+            foreach ($inner as $ch) {
+                if (!is_array($ch) || !easa_erules_outline_heading_child_matches_expected($pk, $ch)) {
+                    continue 2;
+                }
+            }
+            foreach ($inner as $ch) {
+                if (!is_array($ch)) {
+                    continue;
+                }
+                $cuid = trim((string) ($ch['node_uid'] ?? ''));
+                if ($cuid === '') {
+                    continue;
+                }
+                $upd->execute([$puid, $batchId, $cuid, $puid]);
+                $changed += $upd->rowCount();
+            }
+        }
+    }
+
+    return $changed;
+}
+
+/**
+ * ANNEX → SUBPART / appendix outline; SUBPART → SECTION outline; SECTION → lower structural outline when applicable.
+ */
+function easa_erules_structural_outline_parent_kind_from_heading_title(string $headingTitle): ?string
+{
+    $headingTitle = trim($headingTitle);
+    if ($headingTitle === '') {
+        return null;
+    }
+    $line = easa_erules_tree_title_first_line($headingTitle) ?: $headingTitle;
+    if (easa_erules_title_is_annex_heading_row($line)) {
+        return 'annex';
+    }
+    if (easa_erules_title_is_subpart_heading_row($line)) {
+        return 'subpart';
+    }
+    if (easa_erules_title_is_appendix_heading_row($line)) {
+        return 'appendix';
+    }
+    if (easa_erules_title_is_section_heading_row($line)) {
+        return 'section';
+    }
+
+    return null;
+}
+
+/**
+ * Empty / thin &lt;toc&gt; shell suitable for structural outline lift (matches annex nav wrapper idea).
+ *
+ * @param array<string, mixed> $tocRow
+ */
+function easa_erules_toc_row_is_empty_structural_nav_shell(array $tocRow): bool
+{
+    $nt = strtolower(trim((string) ($tocRow['node_type'] ?? '')));
+    if ($nt !== 'toc') {
+        return false;
+    }
+    $plain = (string) ($tocRow['plain_text'] ?? '');
+    if (strlen($plain) > 2048) {
+        return false;
+    }
+    $title = trim((string) ($tocRow['title'] ?? ''));
+    $src = trim((string) ($tocRow['source_title'] ?? ''));
+    $er = trim((string) ($tocRow['source_erules_id'] ?? ''));
+    if ($title === '' && $src === '' && $er === '') {
+        return true;
+    }
+    $blob = trim($title . "\n" . $src);
+    $one = trim((string) (preg_replace('/\s+/u', ' ', $blob) ?? $blob));
+
+    return $one !== '' && preg_match('/^table\s+of\s+contents\b/iu', $one) === 1;
+}
+
+/**
+ * Direct child under the toc is an outline heading for the tier below $parentKind.
+ *
+ * @param 'annex'|'subpart'|'appendix'|'section' $parentKind
+ * @param array<string, mixed> $childRow
+ */
+function easa_erules_outline_heading_child_matches_expected(string $parentKind, array $childRow): bool
+{
+    $nt = strtolower(trim((string) ($childRow['node_type'] ?? '')));
+    if ($nt !== 'heading') {
+        return false;
+    }
+    $t = trim((string) ($childRow['title'] ?? ''));
+    $line = easa_erules_tree_title_first_line($t) ?: $t;
+    if ($line === '') {
+        return false;
+    }
+    switch ($parentKind) {
+        case 'annex':
+            return easa_erules_title_is_subpart_heading_row($line)
+                || easa_erules_title_is_appendix_heading_row($line)
+                || easa_erules_title_is_section_heading_row($line);
+        case 'subpart':
+            return easa_erules_title_is_section_heading_row($line);
+        case 'appendix':
+            return easa_erules_title_is_section_heading_row($line);
+        case 'section':
+            return preg_match('/^\s*(SUBSECTION|CHAPTER|SECTION)\b/iu', $line) === 1;
+        default:
+            return false;
+    }
+}
+
+function easa_erules_reparent_structural_lift_empty_toc_outline_children(PDO $pdo, int $batchId): void
+{
+    for ($i = 0; $i < 12; $i++) {
+        if (easa_erules_reparent_structural_lift_empty_toc_outline_children_once($pdo, $batchId) === 0) {
+            break;
+        }
+    }
+}
+
+/**
  * XML nesting sometimes hangs peer FCL rule rows (another FCL.&lt;n&gt; or AMC cross-ref) under the
  * first rule &lt;toc&gt; in a section. Promote those rows to the same parent as the enclosing rule toc.
  */
@@ -2013,6 +2208,7 @@ function easa_erules_repair_batch_tree_parents(PDO $pdo, int $batchId): void
     easa_erules_reparent_structural_heading_children($pdo, $batchId);
     easa_erules_reparent_annex_lift_toc_wrapper_children($pdo, $batchId);
     easa_erules_reparent_annex_subpart_appendix_headings($pdo, $batchId);
+    easa_erules_reparent_structural_lift_empty_toc_outline_children($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
     easa_erules_reparent_rule_ref_toc_peer_lift($pdo, $batchId);
 }
@@ -2332,6 +2528,7 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     easa_erules_reparent_structural_heading_children($pdo, $batchId);
     easa_erules_reparent_annex_lift_toc_wrapper_children($pdo, $batchId);
     easa_erules_reparent_annex_subpart_appendix_headings($pdo, $batchId);
+    easa_erules_reparent_structural_lift_empty_toc_outline_children($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
     easa_erules_reparent_rule_ref_toc_peer_lift($pdo, $batchId);
 
