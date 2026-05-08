@@ -105,6 +105,49 @@ function rl_easa_search_match_clause(PDO $pdo, string $q): array
 }
 
 /**
+ * Rule-id and keyword fallbacks for natural-language compare questions.
+ *
+ * @return list<string>
+ */
+function rl_easa_compare_query_needles(string $q): array
+{
+    $q = trim($q);
+    if ($q === '') {
+        return [];
+    }
+    $needles = [];
+    if (preg_match_all('/\b(?:FCL\.\d+[A-Z]?|(?:ORA|CAT|DTO|ARA|MED)(?:\.[A-Z0-9]+)+)\b/iu', $q, $m)) {
+        foreach (($m[0] ?? []) as $id) {
+            $id = strtoupper(trim((string) $id));
+            if ($id !== '' && !in_array($id, $needles, true)) {
+                $needles[] = $id;
+            }
+        }
+    }
+    $raw = preg_split('/[^\p{L}\p{N}\.\-]+/u', mb_strtolower($q)) ?: [];
+    $stop = [
+        'the' => true, 'and' => true, 'for' => true, 'with' => true, 'from' => true, 'that' => true, 'this' => true,
+        'what' => true, 'when' => true, 'where' => true, 'which' => true, 'does' => true, 'about' => true,
+        'under' => true, 'into' => true, 'are' => true, 'can' => true, 'should' => true, 'must' => true,
+        'rule' => true, 'rules' => true, 'official' => true, 'regulation' => true, 'regulations' => true,
+    ];
+    foreach ($raw as $tok) {
+        $tok = trim((string) $tok, " \t\n\r\0\x0B.-");
+        if ($tok === '' || strlen($tok) < 4 || isset($stop[$tok])) {
+            continue;
+        }
+        if (!in_array($tok, $needles, true)) {
+            $needles[] = $tok;
+        }
+        if (count($needles) >= 10) {
+            break;
+        }
+    }
+
+    return $needles;
+}
+
+/**
  * Snippet column: prefers canonical body when the column exists (aligned with search/compare).
  */
 function rl_easa_staging_snippet_concat_body(PDO $pdo): string
@@ -146,37 +189,60 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
 
         return $out;
     }
-    $m = rl_easa_search_match_clause($pdo, $q);
-    $whereMatch = $m['where'];
-    $bind = $m['bind'];
     $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'toc\',\'backmatter\') THEN 1 ELSE 0 END)';
     $maxRows = 15;
     $excerptLen = 4500;
     $excerptBody = rl_easa_staging_snippet_concat_body($pdo);
-    if ($batchFilter > 0) {
-        $sql = "
-            SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
-                   SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
-            FROM easa_erules_import_nodes_staging
-            WHERE batch_id = ? AND {$whereMatch}
-            ORDER BY {$wrapRank} ASC, id ASC
-            LIMIT {$maxRows}
-        ";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute(array_merge([$batchFilter], $bind));
-    } else {
-        $sql = "
-            SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
-                   SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
-            FROM easa_erules_import_nodes_staging
-            WHERE {$whereMatch}
-            ORDER BY {$wrapRank} ASC, id DESC
-            LIMIT {$maxRows}
-        ";
-        $stmt = $pdo->prepare($sql);
-        $stmt->execute($bind);
+    $fetchMatches = static function (string $needle, int $limit) use ($pdo, $batchFilter, $wrapRank, $excerptBody, $excerptLen): array {
+        $m = rl_easa_search_match_clause($pdo, $needle);
+        $whereMatch = $m['where'];
+        $bind = $m['bind'];
+        if ($batchFilter > 0) {
+            $sql = "
+                SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
+                       SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
+                FROM easa_erules_import_nodes_staging
+                WHERE batch_id = ? AND {$whereMatch}
+                ORDER BY {$wrapRank} ASC, id ASC
+                LIMIT {$limit}
+            ";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute(array_merge([$batchFilter], $bind));
+        } else {
+            $sql = "
+                SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
+                       SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
+                FROM easa_erules_import_nodes_staging
+                WHERE {$whereMatch}
+                ORDER BY {$wrapRank} ASC, id DESC
+                LIMIT {$limit}
+            ";
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($bind);
+        }
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    };
+
+    $rows = $fetchMatches($q, $maxRows);
+    // Natural-language prompts rarely appear verbatim in legal text; fallback to ids + keywords.
+    if ($rows === []) {
+        $seen = [];
+        foreach (rl_easa_compare_query_needles($q) as $needle) {
+            $more = $fetchMatches($needle, 8);
+            foreach ($more as $r) {
+                $key = (string) ($r['batch_id'] ?? '') . '|' . (string) ($r['node_uid'] ?? '');
+                if ($key === '|' || isset($seen[$key])) {
+                    continue;
+                }
+                $seen[$key] = true;
+                $rows[] = $r;
+                if (count($rows) >= $maxRows) {
+                    break 2;
+                }
+            }
+        }
     }
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $out['hit_count'] = count($rows);
     foreach ($rows as $r) {
         $out['sources'][] = [
