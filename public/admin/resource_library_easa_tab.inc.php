@@ -2437,6 +2437,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return String(parts[0] || '').trim();
   }
 
+  /** Non-empty trimmed lines from display_title (for annex filter when label wraps past first line). */
+  function rlEasaSemanticDisplayTitleLines(node) {
+    var t = String(node && node.display_title != null ? node.display_title : '').trim();
+    if (!t) return [];
+    return t.split(/\r\n|\n|\r/).map(function (ln) {
+      return String(ln || '').trim();
+    }).filter(function (s) { return s !== ''; });
+  }
+
   /** Matches backend easa_erules_tree_title_is_structural_section keywords on display_title only. */
   function rlEasaSemanticDisplayTitleIsStructuralNavHeading(node) {
     var line = rlEasaSemanticDisplayTitleFirstLine(node);
@@ -2446,9 +2455,13 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     );
   }
 
+  /** True if any line of display_title is an ANNEX navigational row (sibling filter). */
   function rlEasaSemanticDisplayTitleIsAnnexRow(node) {
-    var line = rlEasaSemanticDisplayTitleFirstLine(node);
-    return line !== '' && /^\s*ANNEX\b/i.test(line);
+    var lines = rlEasaSemanticDisplayTitleLines(node);
+    for (var i = 0; i < lines.length; i++) {
+      if (/^\s*ANNEX\b/i.test(lines[i])) return true;
+    }
+    return false;
   }
 
   /**
@@ -2526,9 +2539,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       mt = 'IR';
     }
     var expandable = rlEasaSemanticBool(n.expandable);
-    var clickAction = String(n.click_action || '');
-    var opensRule = clickAction === 'open_rule';
-    var kids = parseInt(n.child_count, 10) || 0;
+    var opensRule = String(n.click_action || '') === 'open_rule';
+    /** Section rows use click_action expand in the API even when child_count=0; title then opens node_detail. */
+    var sectionTitleOpensDetail = uiKind === 'section' && (!expandable || opensRule);
+    var sectionTitleTogglesExpand = uiKind === 'section' && expandable && !opensRule;
     var disp = (n.display_title != null && String(n.display_title).trim() !== '')
       ? String(n.display_title).trim()
       : (uid || '—');
@@ -2579,7 +2593,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         sectionBtn.classList.add('rl-easa-tree-section-title--gm-amc');
       }
       sectionBtn.textContent = disp;
-      if (!showTreeExpand) sectionBtn.disabled = true;
+      if (!showTreeExpand && !sectionTitleOpensDetail) sectionBtn.disabled = true;
     } else {
       ruleBtn = document.createElement('button');
       ruleBtn.type = 'button';
@@ -2607,13 +2621,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       + '<div class="rl-easa-inline-body rl-easa-detail-body"></div>'
       + '</div>';
     li.appendChild(inlineWrap);
-
-    function attachOpenRuleIfApplicable() {
-      if (!ruleBtn || !opensRule) return;
-      ruleBtn.addEventListener('click', function () {
-        rlEasaShowNodeDetail(batchId, uid, li);
-      });
-    }
 
     if (showTreeExpand) {
       var chUl = document.createElement('ul');
@@ -2668,12 +2675,19 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           });
       };
       exp.addEventListener('click', toggleChildList);
-      if (uiKind === 'section' && sectionBtn && !sectionBtn.disabled) {
+      if (sectionTitleTogglesExpand && sectionBtn && !sectionBtn.disabled) {
         sectionBtn.addEventListener('click', toggleChildList);
       }
-      attachOpenRuleIfApplicable();
-    } else {
-      attachOpenRuleIfApplicable();
+    }
+    if (ruleBtn && opensRule) {
+      ruleBtn.addEventListener('click', function () {
+        rlEasaShowNodeDetail(batchId, uid, li);
+      });
+    }
+    if (sectionTitleOpensDetail && sectionBtn && !sectionBtn.disabled) {
+      sectionBtn.addEventListener('click', function () {
+        rlEasaShowNodeDetail(batchId, uid, li);
+      });
     }
     return li;
   }
@@ -2709,7 +2723,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           if (rlEasaTreeHint) {
             var n = resolved.nodes.length;
             rlEasaTreeHint.textContent = 'Batch #' + bid + ' · ' + n + ' root entr' + (n === 1 ? 'y' : 'ies')
-              + '. ▶ only when expandable=true; click rule titles (open_rule) to read below.';
+              + '. ▶ only when expandable=true; click rule titles or section rows without ▶ to read inline.';
           }
         })
         .catch(function (e) {
