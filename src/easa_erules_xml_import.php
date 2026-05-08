@@ -1493,6 +1493,76 @@ function easa_erules_tree_row_own_label_fields_empty(array $row): bool
 }
 
 /**
+ * Direct children from an in-memory by-parent map (same order as import / peer lift).
+ *
+ * @param array<string, list<array<string, mixed>>> $byParent
+ *
+ * @return list<array<string, mixed>>
+ */
+function easa_erules_tree_sorted_direct_children_from_map(string $parentUid, array $byParent): array
+{
+    $kids = $byParent[easa_erules_parent_sort_key($parentUid)] ?? [];
+    usort($kids, static function (array $a, array $b): int {
+        $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
+        if ($so !== 0) {
+            return $so;
+        }
+
+        return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+    });
+
+    return $kids;
+}
+
+/**
+ * Display / reparent identity for **empty** toc/heading wrappers: same sources as
+ * {@see easa_erules_short_tree_label()} fallback (first child's title / source_title / source_erules_id).
+ *
+ * @param array<string, mixed> $wrapper
+ * @param list<array<string, mixed>> $sortedDirectChildren
+ *
+ * @return array<string, mixed>|null Row-shaped slice of the first child for stub / GM-AMC checks; null if not applicable.
+ */
+function easa_erules_tree_empty_nav_wrapper_display_identity_row(array $wrapper, array $sortedDirectChildren): ?array
+{
+    $nt = strtolower(trim((string) ($wrapper['node_type'] ?? '')));
+    if (!in_array($nt, ['toc', 'heading'], true)) {
+        return null;
+    }
+    if (!easa_erules_tree_row_own_label_fields_empty($wrapper)) {
+        return null;
+    }
+    $fc = $sortedDirectChildren[0] ?? null;
+    if (!is_array($fc)) {
+        return null;
+    }
+
+    return [
+        'node_uid' => trim((string) ($fc['node_uid'] ?? '')),
+        'node_type' => $fc['node_type'] ?? '',
+        'title' => $fc['title'] ?? '',
+        'source_title' => $fc['source_title'] ?? '',
+        'source_erules_id' => $fc['source_erules_id'] ?? '',
+    ];
+}
+
+/**
+ * True when an empty toc/heading wrapper’s **first** direct child is an AMC/GM supplement (own fields).
+ *
+ * @param array<string, mixed> $wrapper
+ * @param list<array<string, mixed>> $sortedDirectChildren
+ */
+function easa_erules_tree_empty_nav_wrapper_first_child_is_gm_amc_supplement(array $wrapper, array $sortedDirectChildren): bool
+{
+    $id = easa_erules_tree_empty_nav_wrapper_display_identity_row($wrapper, $sortedDirectChildren);
+    if ($id === null || trim((string) ($id['node_uid'] ?? '')) === '') {
+        return false;
+    }
+
+    return easa_erules_row_own_fields_indicate_gm_amc_supplement($id);
+}
+
+/**
  * AMC/GM guidance rows (titles / bands), as distinct from implementing-rule peers (FCL/ORA/CAT/…).
  *
  * Uses **row identity only**. "GM1 FCL.005" is supplement; never an IR lift peer (even though it cites FCL).
@@ -1609,6 +1679,46 @@ function easa_erules_reparent_amc_gm_under_subpart_ir_peers(PDO $pdo, int $batch
                 continue;
             }
             $upd->execute([$target, $batchId, $cuid, $target]);
+        }
+
+        // Empty toc/heading shells borrow label from first child (short_tree_label): promote supplement topics under IR peers.
+        foreach ($siblings as $c) {
+            if (!is_array($c)) {
+                continue;
+            }
+            $cuid = trim((string) ($c['node_uid'] ?? ''));
+            if ($cuid === '') {
+                continue;
+            }
+            $cnt = strtolower(trim((string) ($c['node_type'] ?? '')));
+            if (!in_array($cnt, ['toc', 'heading'], true)) {
+                continue;
+            }
+            if (!easa_erules_tree_row_own_label_fields_empty($c)) {
+                continue;
+            }
+            $wrapKids = easa_erules_tree_sorted_direct_children_from_map($cuid, $byParent);
+            if (!easa_erules_tree_empty_nav_wrapper_first_child_is_gm_amc_supplement($c, $wrapKids)) {
+                continue;
+            }
+            foreach ($wrapKids as $ch) {
+                if (!is_array($ch) || !easa_erules_row_own_fields_indicate_gm_amc_supplement($ch)) {
+                    continue;
+                }
+                $chUid = trim((string) ($ch['node_uid'] ?? ''));
+                if ($chUid === '') {
+                    continue;
+                }
+                $tk = easa_erules_tree_nav_rule_key_from_row($ch);
+                if ($tk === null || !isset($stubMap[$tk])) {
+                    continue;
+                }
+                $target = $stubMap[$tk];
+                if ($target === $chUid) {
+                    continue;
+                }
+                $upd->execute([$target, $batchId, $chUid, $target]);
+            }
         }
     }
 }
@@ -3404,14 +3514,14 @@ function easa_erules_tree_skip_empty_rule_ref_nav_wrapper(array $graph, array $r
 }
 
 /**
- * Hide empty &lt;toc&gt; shells (no title metadata, no children): UI would show plain "Table of contents" only.
+ * Hide empty toc/heading shells (no title metadata, no children): UI would show plain "Table of contents" or uid-only noise.
  *
  * @param array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>} $graph
  */
 function easa_erules_tree_skip_empty_toc_placeholder(array $graph, array $row): bool
 {
     $nt = strtolower(trim((string) ($row['node_type'] ?? '')));
-    if ($nt !== 'toc') {
+    if (!in_array($nt, ['toc', 'heading'], true)) {
         return false;
     }
     $uid = trim((string) ($row['node_uid'] ?? ''));
