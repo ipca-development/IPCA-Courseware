@@ -1055,6 +1055,123 @@ function easa_erules_reparent_structural_heading_children(PDO $pdo, int $batchId
 }
 
 /**
+ * When ANNEX is a sibling of an effectively empty &lt;toc&gt; nav shell, SUBPART/SECTION headings often sit
+ * under the toc (not under the ANNEX). Lift **only** the toc’s direct children onto the ANNEX; leave the
+ * toc row’s own parent/parent_uid unchanged so the shell stays in place but ends up with no children.
+ */
+function easa_erules_reparent_annex_lift_toc_wrapper_children(PDO $pdo, int $batchId): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title, plain_text, sort_order, id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?
+         ORDER BY id ASC'
+    );
+    $st->execute([$batchId]);
+    $all = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (is_array($r)) {
+            $all[] = $r;
+        }
+    }
+    $byParent = [];
+    foreach ($all as $r) {
+        $p = $r['parent_node_uid'] ?? null;
+        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
+        $k = easa_erules_parent_sort_key($p);
+        $byParent[$k][] = $r;
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND node_uid = ?
+           AND NOT (parent_node_uid <=> ?)'
+    );
+    foreach ($byParent as $rows) {
+        usort($rows, static function (array $a, array $b): int {
+            $so = ((int) ($a['sort_order'] ?? 0)) <=> ((int) ($b['sort_order'] ?? 0));
+            if ($so !== 0) {
+                return $so;
+            }
+
+            return ((int) ($a['id'] ?? 0)) <=> ((int) ($b['id'] ?? 0));
+        });
+        $n = count($rows);
+        for ($i = 0; $i < $n; $i++) {
+            $r = $rows[$i];
+            $nt = strtolower(trim((string) ($r['node_type'] ?? '')));
+            $title = trim((string) ($r['title'] ?? ''));
+            if ($nt !== 'heading' || !easa_erules_title_is_annex_heading_row($title)) {
+                continue;
+            }
+            $annexUid = trim((string) ($r['node_uid'] ?? ''));
+            if ($annexUid === '' || $i + 1 >= $n) {
+                continue;
+            }
+            $next = $rows[$i + 1];
+            if (strtolower(trim((string) ($next['node_type'] ?? ''))) !== 'toc') {
+                continue;
+            }
+            $tocUid = trim((string) ($next['node_uid'] ?? ''));
+            if ($tocUid === '') {
+                continue;
+            }
+            $tocPk = easa_erules_parent_sort_key($tocUid);
+            $tocChildren = $byParent[$tocPk] ?? [];
+            if ($tocChildren === []) {
+                continue;
+            }
+            if (!easa_erules_toc_is_annex_nav_wrapper_candidate($next, $tocChildren)) {
+                continue;
+            }
+            foreach ($tocChildren as $ch) {
+                $cuid = trim((string) ($ch['node_uid'] ?? ''));
+                if ($cuid === '') {
+                    continue;
+                }
+                $upd->execute([$annexUid, $batchId, $cuid, $annexUid]);
+            }
+        }
+    }
+}
+
+/**
+ * True when &lt;toc&gt; acts as an empty navigation shell whose children include SUBPART headings.
+ *
+ * @param list<array<string, mixed>> $tocDirectChildren
+ */
+function easa_erules_toc_is_annex_nav_wrapper_candidate(array $tocRow, array $tocDirectChildren): bool
+{
+    $plain = trim((string) ($tocRow['plain_text'] ?? ''));
+    /** Nav shells should not carry rule body text (allow minor whitespace / merge noise). */
+    if (strlen($plain) > 2048) {
+        return false;
+    }
+    $hasSubpartHeading = false;
+    foreach ($tocDirectChildren as $c) {
+        if (!is_array($c)) {
+            continue;
+        }
+        if (strtolower(trim((string) ($c['node_type'] ?? ''))) !== 'heading') {
+            continue;
+        }
+        $t = trim((string) ($c['title'] ?? ''));
+        $line = easa_erules_tree_title_first_line($t) ?: $t;
+        if ($line !== '' && easa_erules_title_is_subpart_heading_row($line)) {
+            $hasSubpartHeading = true;
+
+            break;
+        }
+    }
+
+    return $hasSubpartHeading;
+}
+
+/**
  * Easy Access XML often emits ANNEX I and SUBPART A–K as sibling &lt;heading&gt; rows under the same
  * parent (document/toc shell). Reparent SUBPART, SECTION, APPENDIX headings under the preceding ANNEX
  * heading in document order; SECTION headings attach to the current SUBPART when one is active.
@@ -1216,6 +1333,7 @@ function easa_erules_promote_misnested_fcl_peers(PDO $pdo, int $batchId): void
 function easa_erules_repair_batch_tree_parents(PDO $pdo, int $batchId): void
 {
     easa_erules_reparent_structural_heading_children($pdo, $batchId);
+    easa_erules_reparent_annex_lift_toc_wrapper_children($pdo, $batchId);
     easa_erules_reparent_annex_subpart_appendix_headings($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
 }
@@ -1533,6 +1651,7 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     }
 
     easa_erules_reparent_structural_heading_children($pdo, $batchId);
+    easa_erules_reparent_annex_lift_toc_wrapper_children($pdo, $batchId);
     easa_erules_reparent_annex_subpart_appendix_headings($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
 
