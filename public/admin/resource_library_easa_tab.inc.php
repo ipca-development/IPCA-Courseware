@@ -2486,6 +2486,21 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
 
   /**
+   * Substantive corpus rows that must not be removed by ANNEX/SUBJECT-only sibling filtering
+   * (same contract as tree_children semantic adapter: rules/topics/IR/AMC/GM vs editorial noise).
+   */
+  function rlEasaTreeAnnexFilterMustKeepRealContent(node) {
+    if (!node || typeof node !== 'object') return false;
+    if (String(node.click_action || '') === 'open_rule') return true;
+    if (node.ui_kind !== 'section') return true;
+    var nt = String(node.node_type || '').toLowerCase();
+    if (nt === 'topic') return true;
+    var mt = String(node.material_type || '').toUpperCase();
+    if (mt === 'IR' || mt === 'AMC' || mt === 'GM') return true;
+    return false;
+  }
+
+  /**
    * Document / editorial shell only: expandable section heading that is not legal nav (ANNEX/SUBPART/…).
    * Uses only ui_kind, material_type, expandable, click_action, child_count, display_title — never child_count heuristics across siblings.
    */
@@ -2513,7 +2528,9 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     var kept = [];
     for (var j = 0; j < nodes.length; j++) {
       var n = nodes[j];
-      if (rlEasaSemanticDisplayTitleIsAnnexRow(n) || rlEasaSemanticDisplayTitleIsSubjectSyllabusRow(n)) {
+      if (rlEasaTreeAnnexFilterMustKeepRealContent(n)) {
+        kept.push(n);
+      } else if (rlEasaSemanticDisplayTitleIsAnnexRow(n) || rlEasaSemanticDisplayTitleIsSubjectSyllabusRow(n)) {
         kept.push(n);
       }
     }
