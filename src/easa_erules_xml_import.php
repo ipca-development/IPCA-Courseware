@@ -3106,6 +3106,53 @@ function easa_erules_staging_first_direct_child_label_fallback(PDO $pdo, int $ba
 }
 
 /**
+ * Empty-label AMC/GM supplement-bundle &lt;toc&gt; wrappers: authoritative body lives on numbered topic neighbours.
+ * Returns first topic node's UID under that wrapper when the staging graph matches browse flatten rules, otherwise null.
+ */
+function easa_erules_staging_anonymous_supplement_bundle_primary_topic_uid(PDO $pdo, int $batchId, string $wrapperNodeUid): ?string
+{
+    if ($batchId <= 0 || $wrapperNodeUid === '') {
+        return null;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, node_type, title, source_title, source_erules_id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ? AND node_uid = ?
+         LIMIT 1'
+    );
+    $st->execute([$batchId, $wrapperNodeUid]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+    if (!is_array($r)) {
+        return null;
+    }
+    if (strtolower(trim((string) ($r['node_type'] ?? ''))) !== 'toc') {
+        return null;
+    }
+    if (!easa_erules_tree_row_own_label_fields_empty($r)) {
+        return null;
+    }
+    $stk = $pdo->prepare(
+        'SELECT node_uid, node_type, title, source_title, source_erules_id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ? AND parent_node_uid = ?
+         ORDER BY sort_order ASC, id ASC'
+    );
+    $stk->execute([$batchId, $wrapperNodeUid]);
+    $kids = [];
+    while ($c = $stk->fetch(PDO::FETCH_ASSOC)) {
+        if (is_array($c)) {
+            $kids[] = $c;
+        }
+    }
+    if ($kids === [] || !easa_erules_tree_children_all_topics_amcgm_supplement_bundle($kids)) {
+        return null;
+    }
+    $u = trim((string) ($kids[0]['node_uid'] ?? ''));
+
+    return $u !== '' ? $u : null;
+}
+
+/**
  * Normalised AMC/GM stub from first line ("AMC1", "GM2", "AMC" when digits omitted).
  * Returns null when the line does not lead with AMC{…}|GM{…}.
  */
@@ -4379,6 +4426,32 @@ function easa_erules_tree_children_dominated_by_annex_appendix_topics(array $chi
 }
 
 /**
+ * True when direct children are exclusively topic rows and at least one is AMC/GM supplement-labelled.
+ *
+ * @param list<array<string, mixed>> $childRows
+ */
+function easa_erules_tree_children_all_topics_amcgm_supplement_bundle(array $childRows): bool
+{
+    if ($childRows === []) {
+        return false;
+    }
+    $anySupp = false;
+    foreach ($childRows as $c) {
+        if (!is_array($c)) {
+            return false;
+        }
+        if (strtolower(trim((string) ($c['node_type'] ?? ''))) !== 'topic') {
+            return false;
+        }
+        if (easa_erules_row_own_fields_indicate_gm_amc_supplement($c)) {
+            $anySupp = true;
+        }
+    }
+
+    return $anySupp;
+}
+
+/**
  * heading/toc rows that duplicate a rule nav shell (FCL.xxx / GMx / AMCx) should be omitted from the tree
  * when their children are lifted to the grandparent, except real structural sections (ANNEX, SUBPART, …).
  *
@@ -4399,6 +4472,14 @@ function easa_erules_tree_should_flatten_nav_wrapper(array $row, array $childRow
         && trim((string) ($row['title'] ?? '')) === ''
         && trim((string) ($row['source_title'] ?? '')) === ''
         && easa_erules_tree_children_dominated_by_annex_appendix_topics($childRows)
+    ) {
+        return true;
+    }
+    /** Anonymous &lt;toc&gt; shell whose children are AMC/GM &lt;topic&gt; neighbours — omit wrapper row; open topics directly. */
+    if (
+        $nt === 'toc'
+        && easa_erules_tree_row_own_label_fields_empty($row)
+        && easa_erules_tree_children_all_topics_amcgm_supplement_bundle($childRows)
     ) {
         return true;
     }

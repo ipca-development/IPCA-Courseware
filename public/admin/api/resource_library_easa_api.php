@@ -418,6 +418,9 @@ if ($method === 'GET') {
         if ($batchId <= 0 || $nodeUid === '') {
             rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id and node_uid required']);
         }
+        $requestedNodeUid = $nodeUid;
+        $detailLoadUid = easa_erules_staging_anonymous_supplement_bundle_primary_topic_uid($pdo, $batchId, $requestedNodeUid)
+            ?? $requestedNodeUid;
         try {
             $detailCols = [
                 'batch_id', 'node_uid', 'parent_node_uid', 'node_type', 'depth', 'sort_order',
@@ -439,13 +442,17 @@ if ($method === 'GET') {
                 LIMIT 1
             ';
             $st = $pdo->prepare($detailSql);
-            $st->execute([$batchId, $nodeUid]);
+            $st->execute([$batchId, $detailLoadUid]);
             $row = $st->fetch(PDO::FETCH_ASSOC);
         } catch (Throwable $e) {
             rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
         }
         if (!is_array($row)) {
             rl_easa_json_out(404, ['ok' => false, 'error' => 'Node not found']);
+        }
+        if ($detailLoadUid !== $requestedNodeUid) {
+            $row['requested_node_uid'] = $requestedNodeUid;
+            $row['effective_node_uid'] = $detailLoadUid;
         }
         $structuredBlocksDecoded = null;
         if (easa_erules_staging_has_structured_blocks_column($pdo)) {
@@ -469,7 +476,7 @@ if ($method === 'GET') {
             }
         }
         /** Mirror tree enrichment: appendix AMC/GM wrappers sometimes store labels only on children. */
-        $fcLabelSlice = easa_erules_staging_first_direct_child_label_fallback($pdo, $batchId, $nodeUid);
+        $fcLabelSlice = easa_erules_staging_first_direct_child_label_fallback($pdo, $batchId, $detailLoadUid);
         $treeLabelRow = $row;
         if ($fcLabelSlice !== null) {
             $treeLabelRow['first_child_title'] = trim((string) ($fcLabelSlice['title'] ?? ''));
@@ -489,7 +496,7 @@ if ($method === 'GET') {
             $liftSb = easa_erules_node_detail_resolve_structured_blocks_under_supplement_fence(
                 $pdo,
                 $batchId,
-                $nodeUid,
+                $detailLoadUid,
                 $designatorForSupplement,
                 $supplementFenceAppendixNums
             );
@@ -515,7 +522,7 @@ if ($method === 'GET') {
                         easa_erules_aggregate_descendant_plain_text_for_designator(
                             $pdo,
                             $batchId,
-                            $nodeUid,
+                            $detailLoadUid,
                             $designatorForBody,
                             0,
                             $supplementFenceAppendixNums
@@ -523,7 +530,7 @@ if ($method === 'GET') {
                     );
                 }
                 if ($composed === '' && !$suppressFullDescendantAggregate) {
-                    $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $nodeUid, 0);
+                    $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $detailLoadUid, 0);
                 }
             }
         }

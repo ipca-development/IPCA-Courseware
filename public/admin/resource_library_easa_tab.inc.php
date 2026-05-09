@@ -2352,6 +2352,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         bits.push('batch_id=' + (n.batch_id || ''));
         bits.push('node_uid=' + (n.node_uid || ''));
         bits.push('node_type=' + (n.node_type || ''));
+        if (n.requested_node_uid && String(n.requested_node_uid).trim() !== ''
+            && String(n.requested_node_uid) !== String(n.node_uid || '')) {
+          bits.push('requested_node_uid=' + String(n.requested_node_uid));
+          bits.push('effective_node_uid=' + String((n.effective_node_uid != null && String(n.effective_node_uid).trim() !== '')
+            ? n.effective_node_uid : n.node_uid || ''));
+        }
         if (n.source_erules_id) bits.push('ERulesId=' + n.source_erules_id);
         if (n.plain_text_composed_from_descendants) bits.push('[Body assembled from child rows — parent row had no text in XML]');
         if (n.plain_text_effective_source === 'canonical') bits.push('[Rendered from canonical text — spaced for readability]');
