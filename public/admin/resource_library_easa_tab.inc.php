@@ -995,6 +995,234 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     color: #64748b;
     margin: 12px 0 6px;
   }
+
+  /* —— Maya chat (AI layer only; scoped) —— */
+  .rl-easa-maya-chat {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    min-height: 0;
+  }
+  .rl-easa-maya-chat-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .rl-easa-maya-chat-header h3 {
+    margin: 0;
+    font-size: 1.15rem;
+    font-weight: 800;
+    color: #0f172a;
+    line-height: 1.3;
+    max-width: 100%;
+  }
+  .rl-easa-maya-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    flex-shrink: 0;
+  }
+  .rl-easa-maya-more {
+    font-size: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 2px 8px;
+    background: #fff;
+  }
+  .rl-easa-maya-more summary {
+    cursor: pointer;
+    font-weight: 700;
+    color: #475569;
+    list-style: none;
+  }
+  .rl-easa-maya-more summary::-webkit-details-marker { display: none; }
+  .rl-easa-maya-more-in {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #f1f5f9;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 220px;
+  }
+  .rl-easa-maya-lead {
+    margin: 0 0 12px;
+    font-size: 14px;
+    color: #475569;
+    line-height: 1.5;
+  }
+  .rl-easa-maya-thread {
+    flex: 1;
+    min-height: 200px;
+    max-height: min(52vh, 520px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 12px 10px;
+    margin: 0 0 12px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, #f1f5f9 0%, #e8eef5 100%);
+    border: 1px solid #e2e8f0;
+    -webkit-overflow-scrolling: touch;
+  }
+  .rl-easa-maya-msg-row {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 14px;
+    align-items: flex-end;
+  }
+  .rl-easa-maya-msg-row--user {
+    flex-direction: row-reverse;
+    justify-content: flex-start;
+  }
+  .rl-easa-maya-msg-row--maya {
+    flex-direction: row;
+    justify-content: flex-start;
+  }
+  .rl-easa-maya-bubble-wrap {
+    max-width: min(88%, 640px);
+    flex: 0 1 auto;
+  }
+  .rl-easa-maya-msg-row--user .rl-easa-chat-bubble-user {
+    border-radius: 18px 18px 4px 18px;
+    max-width: 100%;
+  }
+  .rl-easa-maya-msg-row--maya .rl-easa-chat-bubble-system {
+    border-radius: 18px 18px 18px 4px;
+    max-width: 100%;
+  }
+  .rl-easa-maya-avatar {
+    flex: 0 0 38px;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+    color: #fff;
+    font-weight: 800;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12);
+    user-select: none;
+  }
+  .rl-easa-maya-avatar.is-thinking {
+    animation: rl-easa-maya-glow 1.6s ease-in-out infinite;
+  }
+  @keyframes rl-easa-maya-glow {
+    0%, 100% { box-shadow: 0 0 0 rgba(37, 99, 235, 0); }
+    50% { box-shadow: 0 0 14px rgba(37, 99, 235, 0.28); }
+  }
+  .rl-easa-maya-msg-row--user .rl-easa-maya-avatar {
+    display: none;
+  }
+  .rl-easa-maya-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+    align-items: center;
+  }
+  .rl-easa-maya-chip-label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #0f172a;
+    background: #e0e7ff;
+    border: 1px solid #c7d2fe;
+    border-radius: 999px;
+    padding: 6px 12px;
+    max-width: 100%;
+    line-height: 1.3;
+  }
+  .rl-easa-maya-chip-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .rl-easa-maya-compose {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    margin-top: 4px;
+  }
+  .rl-easa-maya-compose textarea {
+    flex: 1 1 200px;
+    min-height: 44px;
+    max-height: 140px;
+    resize: vertical;
+    border-radius: 12px;
+    border: 1px solid #cbd5e1;
+    padding: 10px 12px;
+    font-size: 15px;
+    line-height: 1.45;
+    font-family: inherit;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .rl-easa-maya-send {
+    flex: 0 0 auto;
+    border-radius: 12px;
+    padding: 10px 18px;
+    font-weight: 700;
+    font-size: 14px;
+  }
+  .rl-easa-maya-chat .rl-easa-chat-bubble {
+    max-width: 100%;
+  }
+  .rl-easa-maya-chat .rl-easa-chat-bubble-system h2,
+  .rl-easa-maya-chat .rl-easa-chat-bubble-system h3 {
+    margin: 0.4rem 0 0.35rem;
+    font-size: 1rem;
+    font-weight: 800;
+    color: #0f172a;
+  }
+  .rl-easa-maya-excerpt-band {
+    border-radius: 10px 10px 0 0;
+    padding: 10px 12px;
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    line-height: 1.35;
+  }
+  .rl-easa-maya-excerpt-band small {
+    display: block;
+    font-weight: 500;
+    font-size: 11px;
+    opacity: 0.92;
+    margin-top: 4px;
+  }
+  .rl-easa-maya-excerpt-wrap {
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    overflow: hidden;
+    background: #fff;
+  }
+  .rl-easa-maya-excerpt-tech {
+    margin: 10px 12px 0;
+    font-size: 12px;
+    color: #64748b;
+  }
+  .rl-easa-maya-excerpt-tech pre {
+    margin: 6px 0 0;
+    font-size: 11px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 120px;
+    overflow: auto;
+    background: #f8fafc;
+    padding: 8px;
+    border-radius: 6px;
+    border: 1px solid #e2e8f0;
+  }
+  @media (max-width: 520px) {
+    .rl-easa-maya-thread { max-height: min(62vh, 560px); }
+    .rl-easa-maya-compose { flex-direction: column; align-items: stretch; }
+    .rl-easa-maya-send { width: 100%; }
+  }
 </style>
 
 <div class="rl-wrap rl-tab-panel rl-easa-page" id="rlEasaPage" data-api="<?= h($easaApiHref) ?>">
@@ -1010,59 +1238,35 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     <div class="rl-easa-source-row" id="rlEasaSourceRow" aria-label="EASA sources"></div>
   </div>
 
-  <section class="card rl-easa-dash-panel" style="padding:16px 18px; margin-bottom:14px;">
-    <span class="rl-easa-badge">AI · staging-backed</span>
-    <h3>Ask AI about official regulations</h3>
-    <p class="rl-easa-dash-lead">
-      The server runs the same staging search as the index, loads <strong>full canonical node_detail</strong> for the top matches (structured blocks, canonical and plain text), then asks the model to return structured JSON with traceable references. Optional U.S. eCFR text can be appended for comparison. Verify every quote on official EASA sources.
+  <section class="card rl-easa-dash-panel rl-easa-maya-chat" style="padding:16px 18px; margin-bottom:14px;">
+    <div class="rl-easa-maya-chat-header">
+      <h3>Ask Maya, your Regulations Assistant</h3>
+      <div class="rl-easa-maya-header-actions">
+        <details class="rl-easa-maya-more">
+          <summary>More</summary>
+          <div class="rl-easa-maya-more-in">
+            <label for="rlEasaSessionSelect" class="rl-drop-meta" style="font-weight:700;">Past chats</label>
+            <select id="rlEasaSessionSelect" style="width:100%;font-size:13px;"></select>
+            <label for="rlEasaChatSource" class="rl-drop-meta" style="font-weight:700;">Search scope (optional)</label>
+            <select id="rlEasaChatSource" style="width:100%;font-size:13px;">
+              <option value="">All EASA sources</option>
+            </select>
+            <p class="rl-drop-meta" id="rlEasaChatPersistHint" style="margin:0;"></p>
+          </div>
+        </details>
+        <button type="button" class="btn btn-sm" id="rlEasaNewChatBtn">New chat</button>
+      </div>
+    </div>
+    <p class="rl-easa-dash-lead rl-easa-maya-lead">
+      Maya helps you navigate EASA Easy Access Rules in plain language. Ask naturally — for a U.S. comparison, say something like &ldquo;How does this compare to the FAA rules?&rdquo; Not legal advice; always confirm on official publications.
     </p>
-    <div class="rl-easa-ai-session-bar" id="rlEasaAiSessionBar">
-      <label for="rlEasaSessionSelect">Chat session</label>
-      <select id="rlEasaSessionSelect" style="min-width:220px;max-width:100%;font-size:13px;"></select>
-      <button type="button" class="btn btn-sm" id="rlEasaNewChatBtn">New chat</button>
-      <span class="rl-drop-meta" id="rlEasaChatPersistHint" style="margin:0;"></span>
+    <div class="rl-easa-maya-thread" id="rlEasaChatHistory" aria-label="Chat with Maya"></div>
+    <div class="rl-easa-maya-compose">
+      <textarea id="rlEasaChatQ" rows="2" placeholder="Ask Maya anything about the regulations…" aria-label="Message to Maya"></textarea>
+      <button type="button" class="btn btn-sm rl-easa-maya-send" id="rlEasaChatSendBtn">Send</button>
     </div>
-    <div class="rl-easa-chat-history" id="rlEasaChatHistory" aria-label="Chat history"></div>
-    <div class="rl-field" style="margin-bottom:8px;">
-      <label for="rlEasaChatSource">EASA source scope</label>
-      <select id="rlEasaChatSource" style="max-width:100%;min-width:280px;font-size:13px;">
-        <option value="">All indexed EASA sources (all batches)</option>
-      </select>
-    </div>
-    <div class="rl-field" style="margin-bottom:8px;">
-      <label class="rl-check-row" style="display:flex;gap:8px;align-items:flex-start;">
-        <input type="checkbox" id="rlEasaChatCompareEcfr" style="margin-top:3px;">
-        <span class="rl-check-label">Compare with U.S. eCFR / 14 CFR (optional excerpt via versioner API)</span>
-      </label>
-    </div>
-    <div class="rl-easa-split rl-easa-ecfr-fields" id="rlEasaChatEcfrFields" hidden>
-      <div class="rl-field">
-        <label for="rlEasaEcfrTitle">14 CFR Title</label>
-        <input type="number" id="rlEasaEcfrTitle" value="14" min="1" step="1">
-      </div>
-      <div class="rl-field">
-        <label for="rlEasaEcfrSec">Section (e.g. 61.57)</label>
-        <input type="text" id="rlEasaEcfrSec" placeholder="61.57" autocomplete="off">
-      </div>
-    </div>
-    <div class="rl-field" style="margin-bottom:8px;">
-      <label for="rlEasaChatQ">Your question</label>
-      <textarea id="rlEasaChatQ" rows="3" placeholder="e.g. Summarise recent pilot recency requirements and cite the relevant Easy Access blocks." style="width:100%;max-width:640px;font-family:inherit;font-size:13px;"></textarea>
-    </div>
-    <div class="rl-field" style="margin-bottom:8px;">
-      <label class="rl-check-row" style="display:flex;gap:8px;align-items:flex-start;">
-        <input type="checkbox" id="rlEasaChatUseAi" checked style="margin-top:3px;">
-        <span class="rl-check-label">Ask AI (OpenAI when configured). Uncheck to preview staging / eCFR context only.</span>
-      </label>
-    </div>
-    <div class="rl-test-actions">
-      <button type="button" class="btn btn-sm" id="rlEasaChatAskBtn">Ask</button>
-    </div>
-    <div class="rl-easa-ai-label">AI explanation (not a legal opinion; verify against official publications)</div>
-    <div class="rl-easa-ai-output is-empty" id="rlEasaChatAnswer" aria-live="polite">No answer yet.</div>
-    <div class="rl-easa-ai-label">Official references from this installation (staging excerpts fed to the model)</div>
-    <div class="rl-easa-citation-cards" id="rlEasaChatCitations"></div>
-    <p class="rl-drop-meta" id="rlEasaChatContextNote" style="margin-top:10px;display:none;"></p>
+    <input type="hidden" id="rlEasaChatUseAi" value="1">
+    <p class="rl-drop-meta" style="margin:10px 0 0;font-size:11px;">Maya uses official indexed rules on this server. She never replaces the published text.</p>
   </section>
 
   <section class="card rl-easa-dash-panel" style="padding:16px 18px; margin-bottom:14px;">
@@ -1213,11 +1417,17 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       <button type="button" class="rl-easa-modal-close" id="rlEasaAiExcerptClose" aria-label="Close">&times;</button>
     </div>
     <div class="rl-easa-modal-body">
-      <div class="rl-easa-ai-excerpt-meta" id="rlEasaAiExcerptMeta"></div>
-      <div class="rl-panel-actions" style="margin-bottom:10px;">
-        <button type="button" class="btn btn-sm" id="rlEasaAiExcerptOpenTree">Open in rule tree</button>
+      <div class="rl-easa-maya-excerpt-wrap">
+        <div class="rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu" id="rlEasaAiExcerptBand">Loading…</div>
+        <details class="rl-easa-maya-excerpt-tech">
+          <summary>Technical details</summary>
+          <pre id="rlEasaAiExcerptTechPre"></pre>
+        </details>
+        <div class="rl-panel-actions" style="margin:10px 12px 12px;">
+          <button type="button" class="btn btn-sm" id="rlEasaAiExcerptOpenTree">Open this section in the tree</button>
+        </div>
+        <div class="rl-easa-ai-excerpt-body rl-easa-detail-body" id="rlEasaAiExcerptBody"></div>
       </div>
-      <div class="rl-easa-ai-excerpt-body rl-easa-detail-body" id="rlEasaAiExcerptBody"></div>
     </div>
   </div>
 </div>
@@ -1234,6 +1444,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   var rlEasaPendingTreeHighlight = '';
   var rlEasaAiSessionId = 0;
   var rlEasaAiExcerptState = { batchId: 0, nodeUid: '', terms: [] };
+  var rlEasaMayaThinkingTimers = [];
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -1249,6 +1460,92 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
+  function rlEasaMayaClearThinkingTimers() {
+    rlEasaMayaThinkingTimers.forEach(function (id) {
+      try { clearTimeout(id); } catch (e) { /* ignore */ }
+    });
+    rlEasaMayaThinkingTimers = [];
+  }
+
+  function rlEasaMayaRemoveThinkingRow() {
+    rlEasaMayaClearThinkingTimers();
+    var el = document.getElementById('rlEasaMayaThinkingRow');
+    if (el && el.parentNode) el.parentNode.removeChild(el);
+  }
+
+  function rlEasaMayaShowThinkingRow(host) {
+    if (!host) return;
+    rlEasaMayaRemoveThinkingRow();
+    var wrap = document.createElement('div');
+    wrap.id = 'rlEasaMayaThinkingRow';
+    wrap.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
+    wrap.innerHTML = '<div class="rl-easa-maya-avatar is-thinking" aria-hidden="true">M</div>'
+      + '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+      + '<div class="rl-easa-chat-meta">Maya</div>'
+      + '<p class="rl-easa-maya-thinking-text" id="rlEasaMayaThinkingText">Maya is thinking…</p></div></div>';
+    host.appendChild(wrap);
+    try { host.scrollTop = host.scrollHeight; } catch (e) { /* ignore */ }
+    var txt = document.getElementById('rlEasaMayaThinkingText');
+    var t1 = setTimeout(function () {
+      if (txt && document.getElementById('rlEasaMayaThinkingRow')) {
+        txt.textContent = 'Maya is looking this up in the regulations…';
+      }
+    }, 2400);
+    var t2 = setTimeout(function () {
+      if (txt && document.getElementById('rlEasaMayaThinkingRow')) {
+        txt.textContent = 'Maya is still checking the official material…';
+      }
+    }, 8000);
+    rlEasaMayaThinkingTimers.push(t1, t2);
+  }
+
+  function rlEasaMayaSanitizeAssistantMarkdown(md) {
+    return String(md || '')
+      .replace(/^\s*(?:batch_id|node_uid|ERulesId|ERULESID)\s*[:=]\s*\S+\s*$/gim, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function rlEasaMayaRenderChips(host, refs) {
+    if (!host || !Array.isArray(refs) || !refs.length) return;
+    refs.slice(0, 12).forEach(function (r) {
+      var bid = parseInt(String(r.batch_id), 10) || 0;
+      var nuid = String(r.node_uid || '').trim();
+      if (!bid || !nuid) return;
+      var title = String(r.title || '').trim() || 'Regulation';
+      var matched = Array.isArray(r.matched_terms) ? r.matched_terms : [];
+      var hl = (matched[0] || '').trim();
+      var row = document.createElement('div');
+      row.className = 'rl-easa-maya-chips';
+      var lab = document.createElement('span');
+      lab.className = 'rl-easa-maya-chip-label';
+      lab.textContent = title;
+      var act = document.createElement('span');
+      act.className = 'rl-easa-maya-chip-actions';
+      var b1 = document.createElement('button');
+      b1.type = 'button';
+      b1.className = 'btn btn-sm';
+      b1.textContent = 'Open excerpt';
+      b1.addEventListener('click', function () {
+        rlEasaAiOpenExcerptModal(bid, nuid, matched.length ? matched : (hl ? [hl] : []), title);
+      });
+      var b2 = document.createElement('button');
+      b2.type = 'button';
+      b2.className = 'btn btn-sm';
+      b2.textContent = 'Open in tree';
+      b2.addEventListener('click', function () {
+        var treeSec = document.getElementById('rlEasaTreeSection');
+        if (treeSec && treeSec.scrollIntoView) treeSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        rlEasaRevealTreeNode(bid, nuid, hl).catch(function () {});
+      });
+      act.appendChild(b1);
+      act.appendChild(b2);
+      row.appendChild(lab);
+      row.appendChild(act);
+      host.appendChild(row);
+    });
+  }
+
   function rlEasaAiCloseExcerptModal() {
     var m = document.getElementById('rlEasaAiExcerptModal');
     if (m) m.hidden = true;
@@ -1256,35 +1553,52 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
 
   function rlEasaAiOpenExcerptModal(batchId, nodeUid, terms, titleHint) {
     var m = document.getElementById('rlEasaAiExcerptModal');
-    var meta = document.getElementById('rlEasaAiExcerptMeta');
+    var band = document.getElementById('rlEasaAiExcerptBand');
+    var techPre = document.getElementById('rlEasaAiExcerptTechPre');
     var body = document.getElementById('rlEasaAiExcerptBody');
     var ttl = document.getElementById('rlEasaAiExcerptTitle');
-    if (!m || !meta || !body) return;
+    if (!m || !band || !body) return;
     rlEasaAiExcerptState = {
       batchId: parseInt(String(batchId), 10) || 0,
       nodeUid: String(nodeUid || '').trim(),
       terms: Array.isArray(terms) ? terms.slice() : []
     };
     if (ttl) ttl.textContent = titleHint ? String(titleHint) : 'Regulation excerpt';
-    meta.textContent = 'Loading…';
+    band.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu';
+    band.innerHTML = 'Loading…<small></small>';
+    if (techPre) techPre.textContent = '';
     body.innerHTML = '';
     body.className = 'rl-easa-ai-excerpt-body rl-easa-detail-body';
     m.hidden = false;
     rlEasaFetchNodeDetail(rlEasaAiExcerptState.batchId, rlEasaAiExcerptState.nodeUid).then(function (j) {
       if (!j.ok || !j.node) {
-        meta.textContent = (j && j.error) ? j.error : 'Load failed';
+        band.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu';
+        band.innerHTML = esc((j && j.error) ? j.error : 'Load failed') + '<small></small>';
         return;
       }
       var n = j.node;
-      var eid = (n.source_erules_id || '').trim();
+      var b = n.rule_band || 'ir';
+      if (['ir', 'amc', 'gm', 'neu'].indexOf(b) < 0) b = 'ir';
+      var titleLine = n.title_display || n.title || n.source_erules_id || n.node_uid || '—';
       var crumb = (n.breadcrumb || '').trim();
-      meta.innerHTML = ''
-        + '<div><strong>' + esc(n.title_display || n.title || n.node_uid || '—') + '</strong></div>'
-        + '<div>batch_id=' + esc(String(n.batch_id || ''))
-        + ' · node_uid=<code>' + esc(String(n.node_uid || '')) + '</code>'
-        + (eid ? ' · ERulesId=<code>' + esc(eid) + '</code>' : '')
-        + '</div>'
-        + (crumb ? '<div style="margin-top:6px;">' + esc(crumb) + '</div>' : '');
+      var leg = rlEasaBandLegend(b);
+      band.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-' + b;
+      band.innerHTML = esc(titleLine) + '<small>' + esc(leg) + '</small>';
+      if (crumb) {
+        var crumbSpan = document.createElement('div');
+        crumbSpan.className = 'rl-easa-band-crumb';
+        crumbSpan.style.cssText = 'margin-top:6px;font-size:12px;opacity:0.95;';
+        crumbSpan.textContent = crumb;
+        band.appendChild(crumbSpan);
+      }
+      var eid = (n.source_erules_id || '').trim();
+      if (techPre) {
+        techPre.textContent = [
+          'batch_id=' + String(n.batch_id || ''),
+          'node_uid=' + String(n.node_uid || ''),
+          eid ? 'ERulesId=' + eid : ''
+        ].filter(Boolean).join('\n');
+      }
       var blk = Array.isArray(n.structured_blocks) && n.structured_blocks.length > 0
         ? rlEasaStructuredBlocksHtml(n.structured_blocks)
         : '';
@@ -1298,7 +1612,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       }
       rlEasaAiHighlightTerms(body, rlEasaAiExcerptState.terms);
     }).catch(function (e) {
-      meta.textContent = e.message || 'Error';
+      band.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu';
+      band.innerHTML = esc(e.message || 'Error') + '<small></small>';
     });
   }
 
@@ -1349,34 +1664,48 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     (messages || []).forEach(function (row) {
       var role = String(row.role || '');
       if (role === 'user') {
-        var wrap = document.createElement('div');
-        wrap.className = 'rl-easa-hist-block';
-        wrap.innerHTML = '<div class="rl-easa-chat-row rl-easa-chat-row-user"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
-          + '<div class="rl-easa-chat-meta">You</div><p>' + esc(String(row.content || '')) + '</p></div></div>';
-        host.appendChild(wrap);
+        var urow = document.createElement('div');
+        urow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--user';
+        var ub = document.createElement('div');
+        ub.className = 'rl-easa-maya-bubble-wrap';
+        ub.innerHTML = '<div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
+          + '<div class="rl-easa-chat-meta">You</div><p>' + esc(String(row.content || '')) + '</p></div>';
+        urow.appendChild(ub);
+        host.appendChild(urow);
         return;
       }
       if (role === 'assistant') {
-        var w2 = document.createElement('div');
-        w2.className = 'rl-easa-hist-block';
-        var inner = rlEasaFormatAiAnswerHtml(String(row.content || ''));
-        w2.innerHTML = '<div class="rl-easa-chat-row rl-easa-chat-row-system"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
-          + '<div class="rl-easa-chat-meta">Assistant</div>' + (inner || '<p>(empty)</p>') + '</div></div>';
-        host.appendChild(w2);
-        var cardsHost = document.createElement('div');
-        cardsHost.className = 'rl-easa-citation-cards rl-easa-hist-cards';
-        host.appendChild(cardsHost);
+        var mrow = document.createElement('div');
+        mrow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
+        var av = document.createElement('div');
+        av.className = 'rl-easa-maya-avatar';
+        av.setAttribute('aria-hidden', 'true');
+        av.textContent = 'M';
+        var bw = document.createElement('div');
+        bw.className = 'rl-easa-maya-bubble-wrap';
+        var bubble = document.createElement('div');
+        bubble.className = 'rl-easa-chat-bubble rl-easa-chat-bubble-system';
+        var meta = document.createElement('div');
+        meta.className = 'rl-easa-chat-meta';
+        meta.textContent = 'Maya';
+        bubble.appendChild(meta);
+        var inner = rlEasaFormatAiAnswerHtml(rlEasaMayaSanitizeAssistantMarkdown(String(row.content || '')));
+        var body = document.createElement('div');
+        body.className = 'rl-easa-maya-msg-body';
+        body.innerHTML = inner || '<p>(empty)</p>';
+        bubble.appendChild(body);
         var pj = row.response_json;
         if (pj && typeof pj === 'string') {
           try {
             var o = JSON.parse(pj);
             var refs = (o && Array.isArray(o.primary_references)) ? o.primary_references : [];
-            refs.forEach(function (r) {
-              var mq = (Array.isArray(r.matched_terms) && r.matched_terms[0]) ? String(r.matched_terms[0]) : '';
-              rlEasaAppendCitationCard(cardsHost, r, mq, !!(r.quote && String(r.quote).trim()));
-            });
+            rlEasaMayaRenderChips(bubble, refs);
           } catch (e0) { /* ignore */ }
         }
+        bw.appendChild(bubble);
+        mrow.appendChild(av);
+        mrow.appendChild(bw);
+        host.appendChild(mrow);
       }
     });
     try {
@@ -1388,7 +1717,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     var hint = document.getElementById('rlEasaChatPersistHint');
     var boot = { action: 'easa_ai_chat_bootstrap' };
     if (rlEasaAiSessionId > 0) boot.session_id = rlEasaAiSessionId;
-    fetch(api, {
+    return fetch(api, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       credentials: 'same-origin',
@@ -1398,10 +1727,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       .then(function (x) {
         if (!x.j || !x.j.ok) return;
         if (!x.j.chat_supported) {
-          if (hint) hint.textContent = x.j.chat_migrate_hint || 'Chat persistence not available.';
+          if (hint) hint.textContent = x.j.chat_migrate_hint || '';
           return;
         }
-        if (hint) hint.textContent = 'Chat is saved for your account after reload.';
+        if (hint) hint.textContent = 'Saved for your account after reload.';
         var cur = parseInt(String(x.j.current_session_id || '0'), 10) || 0;
         if (cur > 0) rlEasaAiSessionId = cur;
         rlEasaAiFillSessionSelect(x.j.sessions || [], cur || rlEasaAiSessionId);
@@ -1439,6 +1768,25 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
 
     lines.forEach(function (raw) {
       var line = raw.trim();
+      var hm;
+      if ((hm = /^###\s+(.+)$/.exec(line))) {
+        flushPara();
+        flushList();
+        html.push('<h3>' + inlineFmt(hm[1].trim()) + '</h3>');
+        return;
+      }
+      if ((hm = /^##\s+(.+)$/.exec(line))) {
+        flushPara();
+        flushList();
+        html.push('<h2>' + inlineFmt(hm[1].trim()) + '</h2>');
+        return;
+      }
+      if ((hm = /^#\s+(.+)$/.exec(line))) {
+        flushPara();
+        flushList();
+        html.push('<h2>' + inlineFmt(hm[1].trim()) + '</h2>');
+        return;
+      }
       var m = /^[-*]\s+(.+)$/.exec(line);
       if (m) {
         flushPara();
@@ -1456,26 +1804,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     flushPara();
     flushList();
     return html.join('');
-  }
-
-  function rlEasaRenderChatWindowHtml(userText, aiText, userFirstName) {
-    var q = String(userText || '').trim();
-    var a = String(aiText || '').trim();
-    var fn = String(userFirstName || '').trim();
-    var userLabel = fn ? ('You (' + fn + ')') : 'You';
-    var aiHtml = rlEasaFormatAiAnswerHtml(a || '(No AI text returned.)');
-    var qHtml = '<p>' + esc(q || '—') + '</p>';
-
-    return '<div class="rl-easa-chat-thread">'
-      + '<div class="rl-easa-chat-row rl-easa-chat-row-user"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
-      + '<div class="rl-easa-chat-meta">' + esc(userLabel) + '</div>'
-      + qHtml
-      + '</div></div>'
-      + '<div class="rl-easa-chat-row rl-easa-chat-row-system"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
-      + '<div class="rl-easa-chat-meta">System reply</div>'
-      + (aiHtml || '<p>(No AI text returned.)</p>')
-      + '</div></div>'
-      + '</div>';
   }
 
   function setUploadMsg(text, kind) {
@@ -2262,14 +2590,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           fileInpGlob.files = dt.files;
         }
       }
-    });
-  }
-
-  var chatEcfrCh = document.getElementById('rlEasaChatCompareEcfr');
-  var chatEcfrFields = document.getElementById('rlEasaChatEcfrFields');
-  if (chatEcfrCh && chatEcfrFields) {
-    chatEcfrCh.addEventListener('change', function () {
-      chatEcfrFields.hidden = !chatEcfrCh.checked;
     });
   }
 
@@ -3181,47 +3501,44 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
-  var chatAskBtn = document.getElementById('rlEasaChatAskBtn');
-  var chatAnswerEl = document.getElementById('rlEasaChatAnswer');
-  var chatCitEl = document.getElementById('rlEasaChatCitations');
-  var chatCtxNote = document.getElementById('rlEasaChatContextNote');
-  if (chatAskBtn) {
-    chatAskBtn.addEventListener('click', function () {
+  var chatSendBtn = document.getElementById('rlEasaChatSendBtn') || document.getElementById('rlEasaChatAskBtn');
+  var chatHistEl = document.getElementById('rlEasaChatHistory');
+  if (chatSendBtn && chatHistEl) {
+    var qInput = document.getElementById('rlEasaChatQ');
+    if (qInput) {
+      qInput.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (!chatSendBtn.disabled) chatSendBtn.click();
+        }
+      });
+    }
+    chatSendBtn.addEventListener('click', function () {
       var qEl = document.getElementById('rlEasaChatQ');
       var q = qEl ? (qEl.value || '').trim() : '';
-      if (!q) {
-        if (chatAnswerEl) {
-          chatAnswerEl.textContent = 'Enter a question first.';
-          chatAnswerEl.classList.add('is-empty');
-        }
-        return;
-      }
-      var titleEl = document.getElementById('rlEasaEcfrTitle');
-      var secEl = document.getElementById('rlEasaEcfrSec');
-      var incEcfr = document.getElementById('rlEasaChatCompareEcfr');
-      var useAi = document.getElementById('rlEasaChatUseAi');
+      if (!q) return;
+      var useAiEl = document.getElementById('rlEasaChatUseAi');
+      var useAi = useAiEl ? (useAiEl.type === 'hidden' ? true : !!useAiEl.checked) : true;
       var srcEl = document.getElementById('rlEasaChatSource');
       var srcBid = srcEl && srcEl.value ? parseInt(srcEl.value, 10) : 0;
       var payload = {
         action: 'regulatory_compare_ai',
         query: q,
-        use_ai: !!(useAi && useAi.checked),
-        include_ecfr: !!(incEcfr && incEcfr.checked),
-        ecfr_title_number: titleEl ? parseInt(titleEl.value, 10) || 14 : 14,
-        ecfr_section: secEl ? (secEl.value || '').trim() : ''
+        use_ai: useAi,
+        include_ecfr: false,
+        ecfr_title_number: 14,
+        ecfr_section: ''
       };
       if (srcBid > 0) payload.batch_id = srcBid;
       if (rlEasaAiSessionId > 0) payload.session_id = rlEasaAiSessionId;
-      if (chatCitEl) chatCitEl.innerHTML = '';
-      if (chatCtxNote) {
-        chatCtxNote.style.display = 'none';
-        chatCtxNote.textContent = '';
-      }
-      if (chatAnswerEl) {
-        chatAnswerEl.classList.remove('is-empty');
-        chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, 'Working…', '');
-      }
-      chatAskBtn.disabled = true;
+      var urow = document.createElement('div');
+      urow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--user';
+      urow.innerHTML = '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
+        + '<div class="rl-easa-chat-meta">You</div><p>' + esc(q) + '</p></div></div>';
+      chatHistEl.appendChild(urow);
+      if (qEl) qEl.value = '';
+      rlEasaMayaShowThinkingRow(chatHistEl);
+      chatSendBtn.disabled = true;
       fetch(api, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3230,47 +3547,71 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       })
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (x) {
+          rlEasaMayaRemoveThinkingRow();
           if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Request failed');
-          var citeQuery = (q.length >= 3 && q.length < 160) ? q : '';
-          var refs = Array.isArray(x.j.primary_references) ? x.j.primary_references : [];
-          var srcs = Array.isArray(x.j.easa_sources) ? x.j.easa_sources : [];
-          var cards = refs.length ? refs : srcs;
-          if (chatCitEl) {
-            cards.slice(0, 16).forEach(function (s) {
-              var mq = (Array.isArray(s.matched_terms) && s.matched_terms[0]) ? String(s.matched_terms[0]) : citeQuery;
-              rlEasaAppendCitationCard(chatCitEl, s, mq, !!(s.quote && String(s.quote).trim()));
-            });
-          }
           if (x.j.session_id) {
             rlEasaAiSessionId = parseInt(String(x.j.session_id), 10) || rlEasaAiSessionId;
           }
-          rlEasaAiLoadBootstrap();
-          var noteParts = [];
-          if (x.j.easa_context_note) noteParts.push(x.j.easa_context_note);
-          if (x.j.easa_staging_hits != null) noteParts.push('Staging rows fed to bundle: ' + x.j.easa_staging_hits + '.');
-          if (x.j.ecfr_note) noteParts.push('eCFR: ' + x.j.ecfr_note);
-          if (chatCtxNote && noteParts.length) {
-            chatCtxNote.textContent = noteParts.join(' ');
-            chatCtxNote.style.display = 'block';
-          }
-          var aiBlock = '';
-          var userFirst = x.j.user_first_name || '';
-          if (x.j.ai_error) aiBlock = 'AI error: ' + x.j.ai_error;
-          else if (x.j.answer_markdown) aiBlock = x.j.answer_markdown;
-          else if (x.j.ai_answer) aiBlock = x.j.ai_answer;
-          else aiBlock = (useAi && useAi.checked)
-            ? '(No AI text returned.)'
-            : 'AI skipped — inspect official reference cards and context line above.';
-          if (chatAnswerEl) {
-            chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, aiBlock, userFirst);
-          }
+          var pl = x.j;
+          return rlEasaAiLoadBootstrap().then(function () {
+            var hist = document.getElementById('rlEasaChatHistory');
+            if (!hist) return;
+            if (pl.chat_supported) {
+              try { hist.scrollTop = hist.scrollHeight; } catch (e0) { /* ignore */ }
+              return;
+            }
+            var aiBlock = pl.ai_error ? 'Maya got stuck. Please try again.' : (pl.answer_markdown || pl.ai_answer || '');
+            var refs = Array.isArray(pl.primary_references) ? pl.primary_references : [];
+            if (!refs.length && Array.isArray(pl.easa_sources)) {
+              pl.easa_sources.slice(0, 8).forEach(function (s) {
+                refs.push({
+                  title: (s.title || '').trim() || 'Regulation',
+                  batch_id: s.batch_id,
+                  node_uid: s.node_uid,
+                  erules_id: s.source_erules_id || '',
+                  matched_terms: [],
+                  quote: ''
+                });
+              });
+            }
+            var mrow = document.createElement('div');
+            mrow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
+            var av = document.createElement('div');
+            av.className = 'rl-easa-maya-avatar';
+            av.setAttribute('aria-hidden', 'true');
+            av.textContent = 'M';
+            var bw = document.createElement('div');
+            bw.className = 'rl-easa-maya-bubble-wrap';
+            var bubble = document.createElement('div');
+            bubble.className = 'rl-easa-chat-bubble rl-easa-chat-bubble-system';
+            var meta = document.createElement('div');
+            meta.className = 'rl-easa-chat-meta';
+            meta.textContent = 'Maya';
+            bubble.appendChild(meta);
+            var body = document.createElement('div');
+            body.className = 'rl-easa-maya-msg-body';
+            body.innerHTML = rlEasaFormatAiAnswerHtml(rlEasaMayaSanitizeAssistantMarkdown(aiBlock)) || '<p>(empty)</p>';
+            bubble.appendChild(body);
+            rlEasaMayaRenderChips(bubble, refs);
+            bw.appendChild(bubble);
+            mrow.appendChild(av);
+            mrow.appendChild(bw);
+            hist.appendChild(mrow);
+            try { hist.scrollTop = hist.scrollHeight; } catch (e1) { /* ignore */ }
+          });
         })
         .catch(function (e) {
-          if (chatAnswerEl) {
-            chatAnswerEl.innerHTML = rlEasaRenderChatWindowHtml(q, e.message || 'Error', '');
-          }
+          rlEasaMayaRemoveThinkingRow();
+          var mrow = document.createElement('div');
+          mrow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
+          mrow.innerHTML = '<div class="rl-easa-maya-avatar" aria-hidden="true">M</div>'
+            + '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+            + '<div class="rl-easa-chat-meta">Maya</div><p>' + esc('Maya got stuck. Please try again.') + '</p>'
+            + '<p class="rl-drop-meta" style="margin:8px 0 0;">' + esc(e.message || 'Error') + '</p></div></div>';
+          chatHistEl.appendChild(mrow);
+          try { chatHistEl.scrollTop = chatHistEl.scrollHeight; } catch (e3) { /* ignore */ }
         })
-        .finally(function () { chatAskBtn.disabled = false; });
+        .finally(function () { chatSendBtn.disabled = false; });
     });
   }
 

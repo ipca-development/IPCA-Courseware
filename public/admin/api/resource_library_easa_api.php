@@ -553,6 +553,41 @@ function rl_easa_parse_ai_compare_response(array $resp): array
     }
 }
 
+function rl_easa_query_requests_us_ecfr_context(string $q): bool
+{
+    $ql = strtolower($q);
+    if (str_contains($ql, 'faa')) {
+        return true;
+    }
+    if (preg_match('/\b14\s*cfr\b/u', $q)) {
+        return true;
+    }
+    if (str_contains($ql, 'ecfr')) {
+        return true;
+    }
+    if (preg_match('/\bfar\b/', $ql)) {
+        return true;
+    }
+    if (str_contains($ql, 'compare') && (str_contains($ql, ' u.s') || str_contains($ql, ' us ') || str_contains($ql, 'faa'))) {
+        return true;
+    }
+    if (str_contains($ql, 'versus') && str_contains($ql, 'faa')) {
+        return true;
+    }
+
+    return false;
+}
+
+/** Best-effort 14 CFR section token like 61.57 from natural language. */
+function rl_easa_infer_ecfr_section_from_query(string $q): string
+{
+    if (preg_match('/\b(\d{1,2})\s*\.\s*([0-9]{1,4}[a-z]?)\b/iu', $q, $m)) {
+        return strtolower($m[1] . '.' . $m[2]);
+    }
+
+    return '';
+}
+
 function rl_easa_extract_ai_text(array $resp): string
 {
     if (!empty($resp['output_text']) && is_string($resp['output_text'])) {
@@ -1107,9 +1142,12 @@ if ($action === 'regulatory_compare_ai') {
         rl_easa_json_out(400, ['ok' => false, 'error' => 'query required']);
     }
     $useAi = !empty($data['use_ai']);
-    $includeEcfr = !empty($data['include_ecfr']);
+    $includeEcfr = !empty($data['include_ecfr']) || rl_easa_query_requests_us_ecfr_context($q);
     $titleNum = (int) ($data['ecfr_title_number'] ?? 14);
     $section = trim((string) ($data['ecfr_section'] ?? ''));
+    if ($includeEcfr && $section === '') {
+        $section = rl_easa_infer_ecfr_section_from_query($q);
+    }
     $compareBatchId = (int) ($data['batch_id'] ?? 0);
     $userFirstName = rl_easa_current_user_first_name($pdo);
 
@@ -1121,7 +1159,7 @@ if ($action === 'regulatory_compare_ai') {
     $ecfrNote = '';
     if ($includeEcfr) {
         if ($section === '') {
-            $ecfrNote = 'Include U.S. eCFR: provide ecfr_section (e.g. 61.105).';
+            $ecfrNote = 'U.S. comparison was requested but no 14 CFR section (e.g. 61.57) could be inferred — mention that in your reply and invite the user to name a section.';
         } else {
             try {
                 $cfg = rl_catalog_ecfr_runtime_config($pdo);
@@ -1204,10 +1242,10 @@ if ($action === 'regulatory_compare_ai') {
     }
 
     $jsonInstructions = <<<'TXT'
-Your entire model output must be a single JSON object (no markdown fences) with exactly these keys:
-- "answer_markdown": string (short structured Markdown answer; traceable statements must name batch_id + node_uid and/or ERulesId from the bundle).
-- "primary_references": array of objects, each with: "title", "batch_id" (int), "node_uid" (string), "erules_id" (string, ERules id or empty), "matched_terms" (array of strings), "quote" (short verbatim excerpt from the bundle for that node).
-- "secondary_references": same shape as primary_references (optional cross-links).
+You are "Maya", a warm, professional EASA regulations mentor (not a database UI). Your entire model output must be a single JSON object (no markdown fences) with exactly these keys:
+- "answer_markdown": string (Markdown: short paragraphs, optional ##/### headings, bullets, **bold**). Write for a pilot or instructor. NEVER put batch_id, node_uid, ERulesId, "staging", "XML", "canonical", file paths, or internal IDs in this field — those belong only in primary_references. Use friendly corpus names when helpful (e.g. "EAR Flight Crew"). If the user is vague, ask 1–3 short narrowing questions (which regulation set, licence level, aeroplane vs helicopter, topic: learning objectives vs privileges vs recency, etc.) before dumping technical content. If the user is specific, answer directly and keep tone conversational.
+- "primary_references": array of objects for traceability only (the UI shows these as chips, not in the markdown body). Each object: "title" (human section title), "batch_id" (int), "node_uid" (string), "erules_id" (string or empty), "matched_terms" (array of strings for highlighting), "quote" (short verbatim excerpt from the bundle for that node).
+- "secondary_references": same shape (optional).
 - "confidence": "high" | "medium" | "low"
 
 Only cite batch_id/node_uid pairs that appear in the CANONICAL NODE blocks. Do not invent ERulesIds.
@@ -1222,9 +1260,9 @@ TXT;
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => "You help aviation compliance staff interpret Easy Access Rules using ONLY the canonical EASA bundles provided. "
+                            'text' => "You are Maya, an EASA Easy Access mentor. Use ONLY the canonical EASA bundles provided plus any optional U.S. eCFR excerpt in the bundle. "
                                 . $jsonInstructions
-                                . " When U.S. text is provided from eCFR, label it as U.S. 14 CFR. Address the user by first name at least once when a first name is provided. Not legal advice; always verify on official EASA publications.",
+                                . " When U.S. text is present, clearly label it as U.S. 14 CFR for comparison. Greet by first name when provided (e.g. \"Hi {name},\"). Not legal advice; encourage checking official EASA publications.",
                         ],
                     ],
                 ],
