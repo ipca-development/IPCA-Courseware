@@ -2569,6 +2569,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       return Promise.reject(new Error((j && j.error) || 'Failed to load tree'));
     }
     var chainUids = (options && options.chainUids) || null;
+    function revealChainHasUid(uid) {
+      if (!chainUids || !chainUids.length || uid == null || uid === '') return false;
+      var u = String(uid).trim();
+      if (!u) return false;
+      for (var ci = 0; ci < chainUids.length; ci++) {
+        if (String(chainUids[ci] || '').trim() === u) return true;
+      }
+      return false;
+    }
     function descend(nodes, depthGuard) {
       if (depthGuard > 8) {
         return Promise.resolve(nodes);
@@ -2583,6 +2592,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       }
       var puid = String(sole.id || sole.node_uid || '').trim();
       if (!puid) {
+        return Promise.resolve(level);
+      }
+      /* Reveal path: never unwrap a shell row that is on the ancestor chain — DOM must keep that li (open-in-tree / node_detail target). */
+      if (revealChainHasUid(puid)) {
         return Promise.resolve(level);
       }
       return rlEasaTreeFetchTreeChildrenJson(batchId, puid).then(function (jInner) {
