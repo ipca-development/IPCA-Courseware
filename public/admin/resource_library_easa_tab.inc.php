@@ -2475,6 +2475,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return false;
   }
 
+  /** True if any display_title line is a SUBJECT syllabus row (Part-FCL / aircrew knowledge — must survive annex filtering). */
+  function rlEasaSemanticDisplayTitleIsSubjectSyllabusRow(node) {
+    var lines = rlEasaSemanticDisplayTitleLines(node);
+    for (var i = 0; i < lines.length; i++) {
+      if (/^\s*SUBJECT\b/i.test(lines[i])) return true;
+    }
+    return false;
+  }
+
   /**
    * Document / editorial shell only: expandable section heading that is not legal nav (ANNEX/SUBPART/…).
    * Uses only ui_kind, material_type, expandable, click_action, child_count, display_title — never child_count heuristics across siblings.
@@ -2490,19 +2499,29 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return true;
   }
 
-  /** If any row is an ANNEX on display_title, keep only annex siblings (drops DTO/editorial noise at that level). */
+  /** When any row is an ANNEX on display_title, keep ANNEX + SUBJECT syllabus peers; drop other non-legal noise (e.g. DTO). */
   function rlEasaTreeAnnexSiblingFilter(nodes) {
     if (!nodes || !nodes.length) return nodes ? nodes.slice() : [];
     var annex = [];
     for (var i = 0; i < nodes.length; i++) {
       if (rlEasaSemanticDisplayTitleIsAnnexRow(nodes[i])) annex.push(nodes[i]);
     }
-    return annex.length ? annex : nodes.slice();
+    if (!annex.length) {
+      return nodes.slice();
+    }
+    var kept = [];
+    for (var j = 0; j < nodes.length; j++) {
+      var n = nodes[j];
+      if (rlEasaSemanticDisplayTitleIsAnnexRow(n) || rlEasaSemanticDisplayTitleIsSubjectSyllabusRow(n)) {
+        kept.push(n);
+      }
+    }
+    return kept.length ? kept : nodes.slice();
   }
 
   /**
    * Legal-root shaping for corpus roots, search/citation reveal, and every expanded branch (same rules everywhere).
-   * Annex-only when applicable; deterministic single-node document-shell unwrap chain. No largest-child_count.
+   * When ANNEX rows exist at a level, siblings are reduced to ANNEX + SUBJECT syllabus peers; single document-shell unwrap chain.
    *
    * @return Promise<{ nodes: array }>
    */
