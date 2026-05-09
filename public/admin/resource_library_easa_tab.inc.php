@@ -2500,7 +2500,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return true;
   }
 
-  /** When any row is an ANNEX on display_title, keep ANNEX + SUBJECT syllabus peers; drop other non-legal noise (e.g. DTO). */
+  /**
+   * Strict ANNEX-level sibling policy (normal browsing). Do not broaden this for “content” exceptions — that reintroduces DTO/editorial pollution.
+   * When any sibling is an ANNEX row: keep only ANNEX + SUBJECT syllabus rows; drop the rest.
+   */
   function rlEasaTreeAnnexSiblingFilter(nodes) {
     if (!nodes || !nodes.length) return nodes ? nodes.slice() : [];
     var annex = [];
@@ -2521,8 +2524,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
 
   /**
-   * Annex sibling filter unless a node in chainUids would be removed (reveal / open-in-tree must preserve the full path).
-   * @param {?Array<string>} chainUids ancestor chain from rlEasaAncestorUidChain (optional)
+   * Reveal / open-in-tree ONLY: apply strict rlEasaTreeAnnexSiblingFilter, then put back siblings whose uid is in chainUids
+   * (in raw order). Never returns full rawNodes — avoids DTO.GEN / editorial branches reappearing at ANNEX levels during reveal.
+   * Normal browse never passes chainUids; Load roots / manual expand stay strict.
+   * @param {?Array<string>} chainUids ancestor chain from rlEasaAncestorUidChain (optional; reveal path only)
    */
   function rlEasaTreeApplyAnnexSiblingFilterPreservingChain(rawNodes, chainUids) {
     if (!rawNodes || !rawNodes.length) {
@@ -2532,35 +2537,37 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     if (!Array.isArray(chainUids) || chainUids.length === 0) {
       return filtered;
     }
-    for (var i = 0; i < chainUids.length; i++) {
-      var want = String(chainUids[i] || '').trim();
-      if (!want) {
-        continue;
-      }
-      var inRaw = false;
-      var inFilt = false;
-      for (var a = 0; a < rawNodes.length; a++) {
-        if (String(rawNodes[a].id || rawNodes[a].node_uid || '').trim() === want) {
-          inRaw = true;
-          break;
-        }
-      }
-      for (var b = 0; b < filtered.length; b++) {
-        if (String(filtered[b].id || filtered[b].node_uid || '').trim() === want) {
-          inFilt = true;
-          break;
-        }
-      }
-      if (inRaw && !inFilt) {
-        return rawNodes.slice();
+    var chainSet = {};
+    for (var ci = 0; ci < chainUids.length; ci++) {
+      var cx = String(chainUids[ci] || '').trim();
+      if (cx) {
+        chainSet[cx] = true;
       }
     }
-    return filtered;
+    var filtByUid = {};
+    for (var fi = 0; fi < filtered.length; fi++) {
+      var fu = String(filtered[fi].id || filtered[fi].node_uid || '').trim();
+      if (fu) {
+        filtByUid[fu] = true;
+      }
+    }
+    var out = [];
+    for (var ri = 0; ri < rawNodes.length; ri++) {
+      var n = rawNodes[ri];
+      var uid = String(n.id || n.node_uid || '').trim();
+      if (!uid) {
+        continue;
+      }
+      if (filtByUid[uid] || chainSet[uid]) {
+        out.push(n);
+      }
+    }
+    return out.length ? out : filtered.slice();
   }
 
   /**
-   * Legal-root shaping for corpus roots, citation reveal, and manual tree expand.
-   * options.chainUids: when set (reveal path), annex filtering never drops these uids from any level.
+   * Legal-root shaping for corpus roots, reveal, and manual tree expand.
+   * options.chainUids: set only for reveal — rlEasaTreeApplyAnnexSiblingFilterPreservingChain injects chain uids without dumping full raw siblings.
    *
    * @return Promise<{ nodes: array }>
    */
