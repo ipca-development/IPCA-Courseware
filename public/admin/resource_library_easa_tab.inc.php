@@ -242,7 +242,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     padding-left: 1.35rem;
   }
   .rl-easa-tree-li.rl-easa-tree-li-supplement > ul.rl-easa-tree-list {
-    margin-left: 1.1rem;
+    margin-left: 2.75rem;
   }
   .rl-easa-tree-section-title.rl-easa-tree-section-title--gm-amc {
     font-style: italic;
