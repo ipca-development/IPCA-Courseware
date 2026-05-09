@@ -671,6 +671,18 @@ if ($method === 'GET') {
             }
             $row['body_reading'] = easa_erules_format_body_for_reading($sourceForReading);
         }
+        $rowUidForRedirect = trim((string) ($row['node_uid'] ?? ''));
+        if ($rowUidForRedirect !== '' && function_exists('easa_erules_tree_redirected_parent_uid_for_node')) {
+            $redirectedParentUid = easa_erules_tree_redirected_parent_uid_for_node($pdo, $batchId, $rowUidForRedirect);
+            if ($redirectedParentUid !== null) {
+                $origParent = $row['parent_node_uid'] ?? null;
+                if ((string) $origParent !== $redirectedParentUid) {
+                    $row['parent_node_uid_original'] = $origParent;
+                    $row['parent_node_uid'] = $redirectedParentUid;
+                    $row['parent_redirected'] = true;
+                }
+            }
+        }
         rl_easa_json_out(200, ['ok' => true, 'node' => $row]);
     }
 

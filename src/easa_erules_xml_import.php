@@ -4708,6 +4708,477 @@ function easa_erules_tree_skip_peer_subpart_outline_under_subpart(?array $parent
 }
 
 /**
+ * Extract every rule key (FCL.\d+[A-Z]?[(letter)], or ORA/CAT/DTO/ARA/MED dotted) from a free-text blob.
+ *
+ * @return list<string>
+ */
+function easa_erules_tree_extract_all_rule_keys_from_text(string $text): array
+{
+    $text = trim($text);
+    if ($text === '') {
+        return [];
+    }
+    $out = [];
+    if (preg_match_all('/\b(FCL\.\d+[A-Z]?)(\(([a-zA-Z])\))?\b/iu', $text, $m1, PREG_SET_ORDER)) {
+        foreach ($m1 as $m) {
+            $key = strtoupper((string) $m[1]);
+            if (isset($m[3]) && $m[3] !== '') {
+                $key .= '(' . strtolower((string) $m[3]) . ')';
+            }
+            $out[$key] = true;
+        }
+    }
+    if (preg_match_all('/\b((?:ORA|CAT|DTO|ARA|MED)(?:\.[A-Z0-9]+)+)\b/iu', $text, $m2)) {
+        foreach ($m2[1] as $key) {
+            $out[strtoupper((string) $key)] = true;
+        }
+    }
+
+    return array_keys($out);
+}
+
+/**
+ * "Appendix to AMC1 FCL.310 …" → 'AMC'; "Appendix to GM1 …" → 'GM'; else null.
+ */
+function easa_erules_tree_appendix_target_prefix_family(string $appendixHeadingText): ?string
+{
+    if (preg_match('/^\s*Appendix\s+to\s+(AMC|GM)\d*\b/iu', $appendixHeadingText, $m) === 1) {
+        return strtoupper((string) $m[1]);
+    }
+
+    return null;
+}
+
+/**
+ * 'AMC' / 'GM' / null prefix family of a topic's first title line.
+ */
+function easa_erules_tree_topic_amc_or_gm_prefix_family(string $title): ?string
+{
+    $line = easa_erules_tree_title_first_line($title);
+    if ($line === '') {
+        return null;
+    }
+    if (preg_match('/^\s*AMC\d*\b/iu', $line) === 1) {
+        return 'AMC';
+    }
+    if (preg_match('/^\s*GM\d*\b/iu', $line) === 1) {
+        return 'GM';
+    }
+
+    return null;
+}
+
+/**
+ * True when at least two children look like SUBJECT NNN topics (Part-FCL syllabus container heuristic).
+ *
+ * @param list<array<string, mixed>> $childRows
+ */
+function easa_erules_tree_children_dominantly_subject_topics(array $childRows): bool
+{
+    $hits = 0;
+    foreach ($childRows as $c) {
+        if (!is_array($c)) {
+            continue;
+        }
+        if (strtolower(trim((string) ($c['node_type'] ?? ''))) !== 'topic') {
+            continue;
+        }
+        $t = trim((string) ($c['title'] ?? ''));
+        if ($t === '') {
+            $t = trim((string) ($c['source_title'] ?? ''));
+        }
+        if ($t !== '' && preg_match('/^\s*SUBJECT\s+/iu', $t) === 1) {
+            ++$hits;
+            if ($hits >= 2) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * DFS within an anonymous TOC branch for the inner toc whose direct children are SUBJECT NNN topics, sitting next
+ * to a heading "Appendix to AMC/GM …" whose rule keys overlap $keys and whose prefix family matches $prefixFamily.
+ *
+ * @param array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>} $graph
+ * @param list<string> $keys rule designator set the appendix must reference
+ */
+function easa_erules_tree_dfs_find_appendix_subjects_container(array $graph, string $rootUid, array $keys, ?string $prefixFamily, int $depth): ?string
+{
+    if ($depth > 6 || $rootUid === '') {
+        return null;
+    }
+    foreach ($graph['by_parent'][$rootUid] ?? [] as $kid) {
+        if (!is_array($kid)) {
+            continue;
+        }
+        $kUid = trim((string) ($kid['node_uid'] ?? ''));
+        if ($kUid === '') {
+            continue;
+        }
+        $ktype = strtolower(trim((string) ($kid['node_type'] ?? '')));
+        $ktitle = trim((string) ($kid['title'] ?? ''));
+        if ($ktitle === '') {
+            $ktitle = trim((string) ($kid['source_title'] ?? ''));
+        }
+        $isAppendixHeading = $ktype === 'heading'
+            && $ktitle !== ''
+            && stripos($ktitle, 'Appendix to ') === 0;
+        if ($isAppendixHeading) {
+            $tfam = easa_erules_tree_appendix_target_prefix_family($ktitle);
+            if ($prefixFamily === null || $tfam === null || $tfam === $prefixFamily) {
+                $rk = easa_erules_tree_extract_all_rule_keys_from_text($ktitle);
+                $hit = false;
+                foreach ($rk as $r) {
+                    if (in_array($r, $keys, true)) {
+                        $hit = true;
+                        break;
+                    }
+                }
+                if ($hit) {
+                    foreach ($graph['by_parent'][$rootUid] ?? [] as $sib) {
+                        if (!is_array($sib)) {
+                            continue;
+                        }
+                        $sUid = trim((string) ($sib['node_uid'] ?? ''));
+                        if ($sUid === '' || $sUid === $kUid) {
+                            continue;
+                        }
+                        if (strtolower(trim((string) ($sib['node_type'] ?? ''))) !== 'toc') {
+                            continue;
+                        }
+                        $kk = $graph['by_parent'][$sUid] ?? [];
+                        if (easa_erules_tree_children_dominantly_subject_topics($kk)) {
+                            return $sUid;
+                        }
+                    }
+                }
+            }
+        }
+        $rec = easa_erules_tree_dfs_find_appendix_subjects_container($graph, $kUid, $keys, $prefixFamily, $depth + 1);
+        if ($rec !== null) {
+            return $rec;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * For an AMC/GM topic, find the sibling anonymous-TOC branch (under topic's grandparent) whose subtree carries
+ * "Appendix to <SAME_FAMILY> …" matching designators, and return the inner SUBJECT container uid.
+ * Memoized per topic uid (per request).
+ *
+ * @param array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>} $graph
+ */
+function easa_erules_tree_appendix_subjects_container_uid_for_topic(array $graph, array $topicRow): ?string
+{
+    static $memo = [];
+    $tUid = trim((string) ($topicRow['node_uid'] ?? ''));
+    if ($tUid === '') {
+        return null;
+    }
+    if (\array_key_exists($tUid, $memo)) {
+        return $memo[$tUid];
+    }
+    $memo[$tUid] = null;
+    $title = trim((string) ($topicRow['title'] ?? ''));
+    if ($title === '' || strtolower(trim((string) ($topicRow['node_type'] ?? ''))) !== 'topic') {
+        return null;
+    }
+    $family = easa_erules_tree_topic_amc_or_gm_prefix_family($title);
+    if ($family === null) {
+        return null;
+    }
+    $keys = easa_erules_tree_extract_all_rule_keys_from_text($title);
+    if ($keys === []) {
+        return null;
+    }
+    $parentUid = trim((string) ($topicRow['parent_node_uid'] ?? ''));
+    if ($parentUid === '') {
+        return null;
+    }
+    $parentRow = $graph['by_uid'][$parentUid] ?? null;
+    if (!is_array($parentRow)) {
+        return null;
+    }
+    $grandUid = trim((string) ($parentRow['parent_node_uid'] ?? ''));
+    if ($grandUid === '') {
+        return null;
+    }
+    foreach ($graph['by_parent'][$grandUid] ?? [] as $sib) {
+        if (!is_array($sib)) {
+            continue;
+        }
+        $sUid = trim((string) ($sib['node_uid'] ?? ''));
+        if ($sUid === '' || $sUid === $parentUid) {
+            continue;
+        }
+        $stype = strtolower(trim((string) ($sib['node_type'] ?? '')));
+        if (!in_array($stype, ['toc', 'heading'], true)) {
+            continue;
+        }
+        $hit = easa_erules_tree_dfs_find_appendix_subjects_container($graph, $sUid, $keys, $family, 0);
+        if ($hit !== null) {
+            $memo[$tUid] = $hit;
+
+            return $hit;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * DFS for the first "Appendix to AMC/GM …" heading text in $rootUid's subtree (own row not included).
+ *
+ * @param array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>} $graph
+ */
+function easa_erules_tree_dfs_first_appendix_heading_text(array $graph, string $rootUid, int $depth): ?string
+{
+    if ($depth > 6 || $rootUid === '') {
+        return null;
+    }
+    foreach ($graph['by_parent'][$rootUid] ?? [] as $kid) {
+        if (!is_array($kid)) {
+            continue;
+        }
+        $kUid = trim((string) ($kid['node_uid'] ?? ''));
+        if ($kUid === '') {
+            continue;
+        }
+        $ktype = strtolower(trim((string) ($kid['node_type'] ?? '')));
+        $ktitle = trim((string) ($kid['title'] ?? ''));
+        if ($ktitle === '') {
+            $ktitle = trim((string) ($kid['source_title'] ?? ''));
+        }
+        if ($ktype === 'heading' && $ktitle !== '' && stripos($ktitle, 'Appendix to ') === 0) {
+            return $ktitle;
+        }
+        $r = easa_erules_tree_dfs_first_appendix_heading_text($graph, $kUid, $depth + 1);
+        if ($r !== null) {
+            return $r;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * True if some topic in $rootUid's subtree (excluding $excludeUid) is an AMC/GM topic of $prefixFamily whose
+ * rule keys overlap $keys — used to skip a duplicate "Table of contents" branch when its subjects have been
+ * hoisted under a real AMC topic.
+ *
+ * @param array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>} $graph
+ * @param list<string> $keys
+ */
+function easa_erules_tree_subtree_has_amc_or_gm_topic_with_keys(
+    array $graph,
+    string $rootUid,
+    array $keys,
+    ?string $prefixFamily,
+    string $excludeUid,
+    int $depth
+): bool {
+    if ($depth > 6 || $rootUid === '') {
+        return false;
+    }
+    foreach ($graph['by_parent'][$rootUid] ?? [] as $kid) {
+        if (!is_array($kid)) {
+            continue;
+        }
+        $kUid = trim((string) ($kid['node_uid'] ?? ''));
+        if ($kUid === '' || $kUid === $excludeUid) {
+            continue;
+        }
+        $ktype = strtolower(trim((string) ($kid['node_type'] ?? '')));
+        $ktitle = trim((string) ($kid['title'] ?? ''));
+        if ($ktype === 'topic' && $ktitle !== '') {
+            $fam = easa_erules_tree_topic_amc_or_gm_prefix_family($ktitle);
+            if ($fam !== null && ($prefixFamily === null || $fam === $prefixFamily)) {
+                $rk = easa_erules_tree_extract_all_rule_keys_from_text($ktitle);
+                foreach ($rk as $r) {
+                    if (in_array($r, $keys, true)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        if (easa_erules_tree_subtree_has_amc_or_gm_topic_with_keys($graph, $kUid, $keys, $prefixFamily, $excludeUid, $depth + 1)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Anonymous-TOC sibling branch hides at $parentUid level when its subtree opens with "Appendix to AMC/GM …"
+ * and a same-prefix AMC/GM topic with overlapping designators exists somewhere else under $parentUid:
+ * its SUBJECT children are hoisted under that topic, so we drop the duplicate "Table of contents" branch.
+ *
+ * @param array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>} $graph
+ */
+function easa_erules_tree_should_skip_appendix_branch_redirected_to_amc_descendant_topic(array $graph, array $row, ?string $parentUid): bool
+{
+    static $memo = [];
+    $rowUid = trim((string) ($row['node_uid'] ?? ''));
+    if ($rowUid === '' || $parentUid === null || $parentUid === '') {
+        return false;
+    }
+    $key = $parentUid . "\0" . $rowUid;
+    if (\array_key_exists($key, $memo)) {
+        return $memo[$key];
+    }
+    $memo[$key] = false;
+
+    $nt = strtolower(trim((string) ($row['node_type'] ?? '')));
+    if (!in_array($nt, ['toc', 'heading'], true)) {
+        return false;
+    }
+    $titleRaw = trim((string) ($row['title'] ?? ''));
+    $srcRaw = trim((string) ($row['source_title'] ?? ''));
+    if ($titleRaw !== '' || $srcRaw !== '') {
+        return false;
+    }
+    $appText = easa_erules_tree_dfs_first_appendix_heading_text($graph, $rowUid, 0);
+    if ($appText === null) {
+        return false;
+    }
+    $keys = easa_erules_tree_extract_all_rule_keys_from_text($appText);
+    if ($keys === []) {
+        return false;
+    }
+    $family = easa_erules_tree_appendix_target_prefix_family($appText);
+    if (!easa_erules_tree_subtree_has_amc_or_gm_topic_with_keys($graph, $parentUid, $keys, $family, $rowUid, 0)) {
+        return false;
+    }
+
+    $memo[$key] = true;
+
+    return true;
+}
+
+/**
+ * For node_detail: when $nodeUid is a SUBJECT topic whose graph parent is the redirected SUBJECT container under an
+ * "Appendix to AMC/GM …" branch, return the AMC/GM topic uid that should appear as parent_node_uid in the response so
+ * reveal/open-in-tree walks via the visible AMC topic. Returns null when no redirection applies.
+ */
+function easa_erules_tree_redirected_parent_uid_for_node(PDO $pdo, int $batchId, string $nodeUid): ?string
+{
+    $nodeUid = trim($nodeUid);
+    if ($nodeUid === '' || $batchId <= 0) {
+        return null;
+    }
+    $graph = easa_erules_tree_batch_graph($pdo, $batchId);
+    $row = $graph['by_uid'][$nodeUid] ?? null;
+    if (!is_array($row)) {
+        return null;
+    }
+    $pUid = trim((string) ($row['parent_node_uid'] ?? ''));
+    if ($pUid === '') {
+        return null;
+    }
+    $pRow = $graph['by_uid'][$pUid] ?? null;
+    if (!is_array($pRow) || strtolower(trim((string) ($pRow['node_type'] ?? ''))) !== 'toc') {
+        return null;
+    }
+    $branchRootUid = trim((string) ($pRow['parent_node_uid'] ?? ''));
+    if ($branchRootUid === '') {
+        return null;
+    }
+    $appText = null;
+    foreach ($graph['by_parent'][$branchRootUid] ?? [] as $sib) {
+        if (!is_array($sib)) {
+            continue;
+        }
+        $st = strtolower(trim((string) ($sib['node_type'] ?? '')));
+        $tt = trim((string) ($sib['title'] ?? ''));
+        if ($tt === '') {
+            $tt = trim((string) ($sib['source_title'] ?? ''));
+        }
+        if ($st === 'heading' && $tt !== '' && stripos($tt, 'Appendix to ') === 0) {
+            $appText = $tt;
+            break;
+        }
+    }
+    if ($appText === null) {
+        return null;
+    }
+    $keys = easa_erules_tree_extract_all_rule_keys_from_text($appText);
+    if ($keys === []) {
+        return null;
+    }
+    $family = easa_erules_tree_appendix_target_prefix_family($appText);
+    /* Walk up: branchRoot.parent → branch root container (anonymous toc), then again to SECTION ancestor that hosts the AMC topic. */
+    $branchRoot = $graph['by_uid'][$branchRootUid] ?? null;
+    if (!is_array($branchRoot)) {
+        return null;
+    }
+    $branchTopUid = trim((string) ($branchRoot['parent_node_uid'] ?? ''));
+    if ($branchTopUid === '') {
+        return null;
+    }
+    $branchTop = $graph['by_uid'][$branchTopUid] ?? null;
+    if (!is_array($branchTop)) {
+        return null;
+    }
+    $sectionUid = trim((string) ($branchTop['parent_node_uid'] ?? ''));
+    if ($sectionUid === '') {
+        return null;
+    }
+
+    return easa_erules_tree_first_amc_or_gm_topic_uid_with_keys_under($graph, $sectionUid, $keys, $family, $branchTopUid, 0);
+}
+
+/**
+ * @param array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>} $graph
+ * @param list<string> $keys
+ */
+function easa_erules_tree_first_amc_or_gm_topic_uid_with_keys_under(
+    array $graph,
+    string $rootUid,
+    array $keys,
+    ?string $prefixFamily,
+    string $excludeUid,
+    int $depth
+): ?string {
+    if ($depth > 6 || $rootUid === '') {
+        return null;
+    }
+    foreach ($graph['by_parent'][$rootUid] ?? [] as $kid) {
+        if (!is_array($kid)) {
+            continue;
+        }
+        $kUid = trim((string) ($kid['node_uid'] ?? ''));
+        if ($kUid === '' || $kUid === $excludeUid) {
+            continue;
+        }
+        $ktype = strtolower(trim((string) ($kid['node_type'] ?? '')));
+        $ktitle = trim((string) ($kid['title'] ?? ''));
+        if ($ktype === 'topic' && $ktitle !== '') {
+            $fam = easa_erules_tree_topic_amc_or_gm_prefix_family($ktitle);
+            if ($fam !== null && ($prefixFamily === null || $fam === $prefixFamily)) {
+                $rk = easa_erules_tree_extract_all_rule_keys_from_text($ktitle);
+                foreach ($rk as $r) {
+                    if (in_array($r, $keys, true)) {
+                        return $kUid;
+                    }
+                }
+            }
+        }
+        $rec = easa_erules_tree_first_amc_or_gm_topic_uid_with_keys_under($graph, $kUid, $keys, $prefixFamily, $excludeUid, $depth + 1);
+        if ($rec !== null) {
+            return $rec;
+        }
+    }
+
+    return null;
+}
+
+/**
  * Memo key for flattened visible children of a parent node.
  */
 function easa_erules_tree_memo_key(int $batchId, ?string $parentUid): string
@@ -4753,6 +5224,9 @@ function easa_erules_tree_children_rows_flattened(
         if (easa_erules_tree_skip_empty_toc_placeholder($graph, $row)) {
             continue;
         }
+        if (easa_erules_tree_should_skip_appendix_branch_redirected_to_amc_descendant_topic($graph, $row, $parentUid)) {
+            continue;
+        }
         $kids = easa_erules_tree_graph_direct_children_enriched($graph, $uid);
         if (easa_erules_tree_skip_peer_subpart_outline_under_subpart($parentRow, $row, $kids)) {
             continue;
@@ -4767,6 +5241,33 @@ function easa_erules_tree_children_rows_flattened(
         }
     }
     $out = easa_erules_tree_dedupe_adjacent_wrapper_topic($out);
+    /* Hoist: when this parent is itself an AMC/GM topic with a sibling "Appendix to …" SUBJECT branch, surface the
+       SUBJECT topics as direct children so the user clicks straight from the AMC topic into per-SUBJECT detail. */
+    if (is_array($parentRow)) {
+        $contUid = easa_erules_tree_appendix_subjects_container_uid_for_topic($graph, $parentRow);
+        if ($contUid !== null) {
+            $alreadyPresent = [];
+            foreach ($out as $existing) {
+                if (is_array($existing)) {
+                    $eu = trim((string) ($existing['node_uid'] ?? ''));
+                    if ($eu !== '') {
+                        $alreadyPresent[$eu] = true;
+                    }
+                }
+            }
+            foreach (easa_erules_tree_graph_direct_children_enriched($graph, $contUid) as $hoist) {
+                if (!is_array($hoist)) {
+                    continue;
+                }
+                $hu = trim((string) ($hoist['node_uid'] ?? ''));
+                if ($hu === '' || isset($alreadyPresent[$hu])) {
+                    continue;
+                }
+                $out[] = $hoist;
+                $alreadyPresent[$hu] = true;
+            }
+        }
+    }
     $memo[$key] = $out;
 
     return $out;
@@ -5287,6 +5788,14 @@ function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?strin
         $childStaging = isset($memo[$vk]) && is_array($memo[$vk]) ? $memo[$vk] : [];
         $sem = easa_erules_tree_semantic_adapter($row, $childStaging);
         easa_erules_tree_semantic_adapter_apply_synthetic_parent_nav_hints($pdo, $batchId, $sem);
+        /* Hoisted appendix-SUBJECT children must report the AMC topic as their semantic parent, not the original
+           Table-of-contents container (which is hidden from normal browsing). */
+        if ($parentUid !== null && $parentUid !== '') {
+            $rowParentUid = trim((string) ($row['parent_node_uid'] ?? ''));
+            if ($rowParentUid !== '' && $rowParentUid !== $parentUid) {
+                $sem['parent_id'] = $parentUid;
+            }
+        }
         $nodes[] = $sem;
     }
 
