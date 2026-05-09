@@ -3083,6 +3083,225 @@ function easa_erules_aggregate_descendant_plain_text(PDO $pdo, int $batchId, str
 }
 
 /**
+ * Staging helpers: node_detail has no enriched first_child_*; mirror tree graph fallbacks cheaply (single SQL).
+ *
+ * @return array<string, string>|null { title, source_title, source_erules_id } trimmed strings, or null when no child exists
+ */
+function easa_erules_staging_first_direct_child_label_fallback(PDO $pdo, int $batchId, string $parentNodeUid): ?array
+{
+    if ($batchId <= 0 || $parentNodeUid === '') {
+        return null;
+    }
+    $st = $pdo->prepare(
+        'SELECT title, source_title, source_erules_id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ? AND parent_node_uid = ?
+         ORDER BY sort_order ASC, id ASC
+         LIMIT 1'
+    );
+    $st->execute([$batchId, $parentNodeUid]);
+    $r = $st->fetch(PDO::FETCH_ASSOC);
+
+    return is_array($r) ? $r : null;
+}
+
+/**
+ * Normalised AMC/GM stub from first line ("AMC1", "GM2", "AMC" when digits omitted).
+ * Returns null when the line does not lead with AMC{…}|GM{…}.
+ */
+function easa_erules_title_line_amc_gm_designator_key(?string $line): ?string
+{
+    $ln = easa_erules_tree_title_first_line((string) $line);
+    if ($ln === '') {
+        return null;
+    }
+    if (preg_match('/^\s*AMC\s*(\d*)\b/iu', $ln, $m) === 1) {
+        $d = (string) ($m[1] ?? '');
+
+        return 'AMC' . strtoupper(trim($d));
+    }
+    if (preg_match('/^\s*GM\s*(\d*)\b/iu', $ln, $m) === 1) {
+        $d = (string) ($m[1] ?? '');
+
+        return 'GM' . strtoupper(trim($d));
+    }
+
+    return null;
+}
+
+/**
+ * Prefer designator stamped on structured title/source lines (first match wins).
+ *
+ * @param array<string, mixed> $r
+ */
+function easa_erules_row_title_blob_amc_gm_designator_key(array $r): ?string
+{
+    foreach (
+        [
+            trim((string) ($r['title'] ?? '')),
+            trim((string) ($r['source_title'] ?? '')),
+            trim((string) ($r['source_erules_id'] ?? '')),
+        ] as $blob
+    ) {
+        if ($blob === '') {
+            continue;
+        }
+        foreach (preg_split('/\R+/u', $blob) ?: [] as $ln) {
+            $dk = easa_erules_title_line_amc_gm_designator_key((string) $ln);
+            if ($dk !== null) {
+                return $dk;
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * True when leading AMCn / GMn designators denote the same block (digits omitted on one side = same family wildcard).
+ *
+ * @param non-empty-string $a
+ * @param non-empty-string $b
+ */
+function easa_erules_amc_gm_designator_keys_equivalent(string $a, string $b): bool
+{
+    $a = strtoupper(trim($a));
+    $b = strtoupper(trim($b));
+    if ($a === $b) {
+        return true;
+    }
+    $pa = preg_match('/^(AMC|GM)(\d*)$/', $a, $ma);
+    $pb = preg_match('/^(AMC|GM)(\d*)$/', $b, $mb);
+    if ($pa !== 1 || $pb !== 1 || strtoupper((string) ($ma[1] ?? '')) !== strtoupper((string) ($mb[1] ?? ''))) {
+        return false;
+    }
+    $da = (string) ($ma[2] ?? '');
+    $db = (string) ($mb[2] ?? '');
+
+    return $da === '' || $db === '' || $da === $db;
+}
+
+/**
+ * Probe AMC/GM designator from node staging fields (full lines) plus optional first direct child's labels.
+ *
+ * @param array<string, mixed>      $stagingRow
+ * @param array<string, string>|null $firstChildTitles from {@see easa_erules_staging_first_direct_child_label_fallback}
+ */
+function easa_erules_node_detail_amc_gm_designator_key(array $stagingRow, ?array $firstChildTitles): ?string
+{
+    $try = [
+        trim((string) ($stagingRow['title'] ?? '')),
+        trim((string) ($stagingRow['source_title'] ?? '')),
+        trim((string) ($stagingRow['source_erules_id'] ?? '')),
+    ];
+    if (is_array($firstChildTitles)) {
+        $try[] = trim((string) ($firstChildTitles['title'] ?? ''));
+        $try[] = trim((string) ($firstChildTitles['source_title'] ?? ''));
+        $er = trim((string) ($firstChildTitles['source_erules_id'] ?? ''));
+        if ($er !== '') {
+            $try[] = $er;
+        }
+    }
+    foreach ($try as $blob) {
+        if ($blob === '') {
+            continue;
+        }
+        foreach (preg_split('/\R+/u', $blob) ?: [] as $ln) {
+            $dk = easa_erules_title_line_amc_gm_designator_key((string) $ln);
+            if ($dk !== null) {
+                return $dk;
+            }
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Same aggregate precedence as {@see easa_erules_aggregate_descendant_plain_text}, but skips whole subtrees whose
+ * first explicit AMC/GM stub (on title/source/erules) differs from $expectedDesignator — prevents appendix wrappers
+ * from mashing later GM/AMC siblings into one body.
+ *
+ * Rows with no detectable AMC/GM stub are included while walking under a matching ancestor (anonymous body/topics).
+ *
+ * @param non-empty-string $expectedDesignator e.g. "AMC1", "GM2"
+ */
+function easa_erules_aggregate_descendant_plain_text_for_designator(
+    PDO $pdo,
+    int $batchId,
+    string $parentNodeUid,
+    string $expectedDesignator,
+    int $depth = 0
+): string {
+    if ($depth > 120 || $batchId <= 0 || $parentNodeUid === '' || trim($expectedDesignator) === '') {
+        return '';
+    }
+    $hasCanon = easa_erules_staging_has_canonical_column($pdo);
+    $selectCols = 'node_uid, node_type, title, source_title, source_erules_id, plain_text, xml_fragment, sort_order';
+    if ($hasCanon) {
+        $selectCols = 'node_uid, node_type, title, source_title, source_erules_id, plain_text, canonical_text, xml_fragment, sort_order';
+    }
+    $st = $pdo->prepare(
+        'SELECT ' . $selectCols . '
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ? AND parent_node_uid = ?
+         ORDER BY sort_order ASC, id ASC'
+    );
+    $st->execute([$batchId, $parentNodeUid]);
+    $blocks = [];
+    $childCount = 0;
+    while ($row = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (!is_array($row)) {
+            continue;
+        }
+        if (++$childCount > 2000) {
+            break;
+        }
+        $uid = (string) ($row['node_uid'] ?? '');
+        $childKey = easa_erules_row_title_blob_amc_gm_designator_key($row);
+        if (
+            $childKey !== null
+            && trim($expectedDesignator) !== ''
+            && !easa_erules_amc_gm_designator_keys_equivalent($expectedDesignator, $childKey)
+        ) {
+            continue;
+        }
+
+        $title = trim((string) ($row['title'] ?? ''));
+        $plainTrim = trim((string) ($row['plain_text'] ?? ''));
+        $canonTrim = $hasCanon ? trim((string) ($row['canonical_text'] ?? '')) : '';
+        $own = $canonTrim !== '' ? $canonTrim : $plainTrim;
+        if ($own === '') {
+            $fragRaw = trim((string) ($row['xml_fragment'] ?? ''));
+            if ($fragRaw !== '' && strlen($fragRaw) < 600000) {
+                $own = trim(easa_erules_plain_text_from_stored_xml_fragment($fragRaw));
+            }
+        }
+        if ($own === '' && $uid !== '') {
+            $own = trim(
+                easa_erules_aggregate_descendant_plain_text_for_designator(
+                    $pdo,
+                    $batchId,
+                    $uid,
+                    $expectedDesignator,
+                    $depth + 1
+                )
+            );
+        }
+        if ($own === '') {
+            continue;
+        }
+        if ($title !== '') {
+            $blocks[] = $title . "\n\n" . $own;
+        } else {
+            $blocks[] = $own;
+        }
+    }
+
+    return implode("\n\n", $blocks);
+}
+
+/**
  * When staging plain_text missed OOXML-in-topic content, pull text from the batch's stored source.xml
  * by locating the element whose ERulesId matches (first occurrence).
  */
@@ -3630,6 +3849,16 @@ function easa_erules_tree_semantic_nav_classify(array $row): array
             return ['ui_kind' => 'rule', 'material_type' => 'IR'];
         }
 
+        /** Empty-label wrappers reuse first_child for display_title; classify AMC/GM from that label, not neutral TOC/editorial. */
+        $fallbackLine = easa_erules_tree_title_first_line(easa_erules_short_tree_label($row));
+        if ($fallbackLine !== '' && !easa_erules_tree_title_is_structural_section($fallbackLine)) {
+            if (easa_erules_tree_title_starts_gm_or_amc($fallbackLine)) {
+                $mtFb = (preg_match('/^\s*AMC\d*\b/iu', $fallbackLine) === 1) ? 'AMC' : 'GM';
+
+                return ['ui_kind' => 'rule', 'material_type' => $mtFb];
+            }
+        }
+
         return ['ui_kind' => 'section', 'material_type' => 'HEADING'];
     }
 
@@ -3888,7 +4117,27 @@ function easa_erules_tree_should_flatten_nav_wrapper(array $row, array $childRow
         return false;
     }
     if (easa_erules_tree_title_starts_gm_or_amc($title)) {
-        return true;
+        /** Keep AMC/GM-titled wrappers in the tree unless they are a lone duplicate shell of the same-titled topic. */
+        if (count($childRows) !== 1) {
+            return false;
+        }
+        $c0 = $childRows[0];
+        if (!is_array($c0)) {
+            return false;
+        }
+        if (strtolower(trim((string) ($c0['node_type'] ?? ''))) !== 'topic') {
+            return false;
+        }
+        $ct = easa_erules_tree_title_first_line((string) ($c0['title'] ?? ''));
+        if ($ct === '') {
+            $ct = easa_erules_tree_title_first_line((string) ($c0['source_title'] ?? ''));
+        }
+        $pt = easa_erules_tree_title_first_line($title);
+        if ($ct !== '' && $pt !== '' && strcasecmp($ct, $pt) === 0) {
+            return true;
+        }
+
+        return false;
     }
     // IR-style rule line (FCL / ORA / CAT) — flatten when children are not "only" supplements of this stub.
     $line = easa_erules_tree_title_first_line($title);

@@ -469,12 +469,36 @@ if ($method === 'GET') {
             }
         }
         $row['structured_blocks'] = $structuredBlocksDecoded;
+
+        /** Mirror tree enrichment: appendix AMC/GM wrappers sometimes store labels only on children. */
+        $fcLabelSlice = easa_erules_staging_first_direct_child_label_fallback($pdo, $batchId, $nodeUid);
+        $treeLabelRow = $row;
+        if ($fcLabelSlice !== null) {
+            $treeLabelRow['first_child_title'] = trim((string) ($fcLabelSlice['title'] ?? ''));
+            $treeLabelRow['first_child_source_title'] = trim((string) ($fcLabelSlice['source_title'] ?? ''));
+        }
+
         $canonicalRaw = trim((string) ($row['canonical_text'] ?? ''));
         $plainRaw = (string) ($row['plain_text'] ?? '');
         $plainTrim = trim($plainRaw);
         $composed = '';
         if ($plainTrim === '') {
-            $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $nodeUid, 0);
+            $ntLc = strtolower(trim((string) ($row['node_type'] ?? '')));
+            $designatorForBody = easa_erules_node_detail_amc_gm_designator_key($row, $fcLabelSlice);
+            if ($designatorForBody !== null && in_array($ntLc, ['toc', 'heading'], true)) {
+                $composed = trim(
+                    easa_erules_aggregate_descendant_plain_text_for_designator(
+                        $pdo,
+                        $batchId,
+                        $nodeUid,
+                        $designatorForBody,
+                        0
+                    )
+                );
+            }
+            if ($composed === '') {
+                $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $nodeUid, 0);
+            }
         }
         $stepPlain = $plainTrim !== '' ? $plainRaw : $composed;
         $stepPlainTrim = trim($stepPlain);
@@ -519,7 +543,27 @@ if ($method === 'GET') {
             $row['plain_text'] = $effectivePlain;
         }
         $row['plain_text_truncated'] = $truncated;
-        $row['title_display'] = easa_erules_sanitize_display_text((string) ($row['title'] ?? ''));
+        $bandPieces = [
+            trim((string) ($row['title'] ?? '')),
+            trim((string) ($row['source_title'] ?? '')),
+            trim((string) ($row['source_erules_id'] ?? '')),
+        ];
+        if ($fcLabelSlice !== null) {
+            $bandPieces[] = trim((string) ($fcLabelSlice['title'] ?? ''));
+            $bandPieces[] = trim((string) ($fcLabelSlice['source_title'] ?? ''));
+            $eec = trim((string) ($fcLabelSlice['source_erules_id'] ?? ''));
+            if ($eec !== '') {
+                $bandPieces[] = $eec;
+            }
+        }
+        $bandProbeBlob = implode("\n", array_filter($bandPieces, static fn(string $x): bool => $x !== ''));
+        $row['rule_band'] = easa_erules_classify_display_band(
+            $row['node_type'] ?? null,
+            $bandProbeBlob !== '' ? $bandProbeBlob : null,
+            null,
+            null
+        );
+        $row['title_display'] = easa_erules_sanitize_display_text(easa_erules_short_tree_label($treeLabelRow));
         $sanitizedBody = easa_erules_sanitize_rule_body_text($truncated ? (string) $row['plain_text'] : $effectivePlain);
         $row['plain_text_display'] = $sanitizedBody;
         $sbPresent = is_array($row['structured_blocks'] ?? null) && ($row['structured_blocks'] ?? []) !== [];
@@ -547,12 +591,6 @@ if ($method === 'GET') {
             }
             $row['body_reading'] = easa_erules_format_body_for_reading($sourceForReading);
         }
-        $row['rule_band'] = easa_erules_classify_display_band(
-            $row['node_type'] ?? null,
-            $row['title'] ?? null,
-            $row['source_title'] ?? null,
-            $row['source_erules_id'] ?? null
-        );
         rl_easa_json_out(200, ['ok' => true, 'node' => $row]);
     }
 
