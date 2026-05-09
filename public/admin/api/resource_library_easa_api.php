@@ -513,9 +513,12 @@ if ($method === 'GET') {
         }
         if ($syntheticBlockIndex !== null) {
             if (!is_array($structuredBlocksDecoded) || $structuredBlocksDecoded === []) {
+                $structuredBlocksDecoded = easa_erules_node_structured_blocks_or_subject_aggregate($pdo, $batchId, $detailLoadUid);
+            }
+            if (!is_array($structuredBlocksDecoded) || $structuredBlocksDecoded === []) {
                 rl_easa_json_out(404, ['ok' => false, 'error' => 'No structured blocks for this synthetic section']);
             }
-            $sliced = easa_erules_structured_blocks_slice_from_heading_index($structuredBlocksDecoded, $syntheticBlockIndex);
+            $sliced = easa_erules_structured_blocks_slice_for_synthetic_detail($structuredBlocksDecoded, $syntheticBlockIndex);
             if ($sliced === []) {
                 rl_easa_json_out(404, ['ok' => false, 'error' => 'Synthetic block index out of range']);
             }

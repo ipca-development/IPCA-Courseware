@@ -4866,9 +4866,19 @@ function easa_erules_staging_node_structured_blocks_decoded(PDO $pdo, int $batch
     }
     $sbRaw = '';
     $frag = '';
+    $canonCol = '';
+    $plainCol = '';
+
     if (easa_erules_staging_has_structured_blocks_column($pdo)) {
+        $baseCols = 'structured_blocks_json, xml_fragment, plain_text';
+        if (easa_erules_staging_has_canonical_column($pdo)) {
+            $baseCols = 'structured_blocks_json, xml_fragment, canonical_text, plain_text';
+        }
         $st = $pdo->prepare(
-            'SELECT structured_blocks_json, xml_fragment FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND node_uid = ? LIMIT 1'
+            'SELECT ' . $baseCols . '
+            FROM easa_erules_import_nodes_staging
+            WHERE batch_id = ? AND node_uid = ?
+            LIMIT 1'
         );
         $st->execute([$batchId, $nodeUid]);
         $r = $st->fetch(PDO::FETCH_ASSOC);
@@ -4877,9 +4887,13 @@ function easa_erules_staging_node_structured_blocks_decoded(PDO $pdo, int $batch
         }
         $sbRaw = trim((string) ($r['structured_blocks_json'] ?? ''));
         $frag = trim((string) ($r['xml_fragment'] ?? ''));
+        $plainCol = trim((string) ($r['plain_text'] ?? ''));
+        if (isset($r['canonical_text'])) {
+            $canonCol = trim((string) $r['canonical_text']);
+        }
     } else {
         $st = $pdo->prepare(
-            'SELECT xml_fragment FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND node_uid = ? LIMIT 1'
+            'SELECT xml_fragment, plain_text FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND node_uid = ? LIMIT 1'
         );
         $st->execute([$batchId, $nodeUid]);
         $r = $st->fetch(PDO::FETCH_ASSOC);
@@ -4887,6 +4901,7 @@ function easa_erules_staging_node_structured_blocks_decoded(PDO $pdo, int $batch
             return null;
         }
         $frag = trim((string) ($r['xml_fragment'] ?? ''));
+        $plainCol = trim((string) ($r['plain_text'] ?? ''));
     }
     if ($sbRaw !== '') {
         $dec = json_decode($sbRaw, true);
@@ -4903,8 +4918,97 @@ function easa_erules_staging_node_structured_blocks_decoded(PDO $pdo, int $batch
             return $dec2;
         }
     }
+    if ($canonCol !== '') {
+        $fromCanon = easa_erules_structured_subject_blocks_from_plain_text($canonCol);
+        if (is_array($fromCanon) && $fromCanon !== []) {
+            return $fromCanon;
+        }
+    }
+    if ($plainCol !== '') {
+        $fromPlain = easa_erules_structured_subject_blocks_from_plain_text($plainCol);
+        if (is_array($fromPlain) && $fromPlain !== []) {
+            return $fromPlain;
+        }
+    }
 
     return null;
+}
+
+/**
+ * True when a heading's first visible line opens a syllabus SUBJECT stanza (e.g. SUBJECT 010 – AIR LAW).
+ */
+function easa_erules_structured_heading_line_is_subject_syllabus(?string $text): bool
+{
+    $t = trim((string) $text);
+    if ($t === '') {
+        return false;
+    }
+    $parts = preg_split('/\R+/u', $t);
+    $line = trim((string) (($parts !== false && isset($parts[0]) && $parts[0] !== '') ? $parts[0] : $t));
+
+    return preg_match('/^\s*SUBJECT\s+[0-9A-Z]{3,}\b/iu', $line) === 1;
+}
+
+/**
+ * Build pseudo structured_blocks alternating heading + paragraph from plain text SUBJECT headings (no XML parse).
+ *
+ * @return list<array<string, mixed>>|null
+ */
+function easa_erules_structured_subject_blocks_from_plain_text(?string $text): ?array
+{
+    $text = (string) $text;
+    if (trim($text) === '') {
+        return null;
+    }
+    if (
+        preg_match_all(
+            '/(?m)^\s*(SUBJECT\s+[0-9A-Z]{3,}\b.*)$/iu',
+            $text,
+            $matches,
+            PREG_OFFSET_CAPTURE
+        ) === false || !isset($matches[0]) || count($matches[0]) < 1
+    ) {
+        return null;
+    }
+    $blocks = [];
+    foreach ($matches[0] as $idx => $hit) {
+        $lineRaw = isset($hit[0]) ? trim((string) $hit[0]) : '';
+        $pos = (int) ($hit[1] ?? 0);
+        if ($lineRaw === '') {
+            continue;
+        }
+        $nextPos = isset($matches[0][$idx + 1]) ? (int) ($matches[0][$idx + 1][1] ?? strlen($text)) : strlen($text);
+        $spanToNext = max(0, $nextPos - $pos - strlen($lineRaw));
+        $suffix = substr($text, $pos + strlen($lineRaw), $spanToNext);
+        $body = trim((string) $suffix);
+        $blocks[] = ['type' => 'heading', 'level' => 3, 'text' => $lineRaw];
+        if ($body !== '') {
+            $blocks[] = ['type' => 'paragraph', 'text' => $body];
+        }
+    }
+
+    return $blocks !== [] ? $blocks : null;
+}
+
+/**
+ * Row json/fragment/canonical/subject-plain; if missing, descendant plain aggregated and split by SUBJECT — for
+ * appendix/toc syllabus containers with flattened empty children only (tree synthetic path — can be costly).
+ *
+ * @return list<array<string, mixed>>|null
+ */
+function easa_erules_node_structured_blocks_or_subject_aggregate(PDO $pdo, int $batchId, string $nodeUid): ?array
+{
+    $nodeUid = trim($nodeUid);
+    if ($nodeUid === '') {
+        return null;
+    }
+    $direct = easa_erules_staging_node_structured_blocks_decoded($pdo, $batchId, $nodeUid);
+    if (is_array($direct) && $direct !== []) {
+        return $direct;
+    }
+    $composed = trim(easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $nodeUid, 0));
+
+    return easa_erules_structured_subject_blocks_from_plain_text($composed);
 }
 
 /**
@@ -4912,6 +5016,9 @@ function easa_erules_staging_node_structured_blocks_decoded(PDO $pdo, int $batch
  */
 function easa_erules_structured_heading_qualifies_for_synthetic_tree(string $headingText, int $level): bool
 {
+    if (easa_erules_structured_heading_line_is_subject_syllabus($headingText)) {
+        return true;
+    }
     $tt = trim($headingText);
     $parts = preg_split('/\R+/u', $tt);
     if (!is_array($parts)) {
@@ -4978,6 +5085,45 @@ function easa_erules_structured_blocks_slice_from_heading_index(array $blocks, i
 }
 
 /**
+ * Slice for synthetic detail: SUBJECT headings end at the next SUBJECT heading; otherwise use outline levels.
+ *
+ * @param list<array<string, mixed>> $blocks
+ *
+ * @return list<array<string, mixed>>
+ */
+function easa_erules_structured_blocks_slice_for_synthetic_detail(array $blocks, int $startIndex): array
+{
+    $n = count($blocks);
+    if ($startIndex < 0 || $startIndex >= $n) {
+        return [];
+    }
+    $first = $blocks[$startIndex];
+    if (($first['type'] ?? '') !== 'heading') {
+        return easa_erules_structured_blocks_slice_from_heading_index($blocks, $startIndex);
+    }
+    $ft = trim((string) ($first['text'] ?? ''));
+    if (!easa_erules_structured_heading_line_is_subject_syllabus($ft)) {
+        return easa_erules_structured_blocks_slice_from_heading_index($blocks, $startIndex);
+    }
+
+    $out = [$first];
+    for ($i = $startIndex + 1; $i < $n; $i++) {
+        $b = $blocks[$i];
+        if (($b['type'] ?? '') === 'heading') {
+            $bt = trim((string) ($b['text'] ?? ''));
+            $parts = preg_split('/\R+/u', $bt);
+            $hline = trim((string) (($parts !== false && isset($parts[0]) && $parts[0] !== '') ? $parts[0] : $bt));
+            if (easa_erules_structured_heading_line_is_subject_syllabus($hline)) {
+                break;
+            }
+        }
+        $out[] = $b;
+    }
+
+    return $out;
+}
+
+/**
  * Synthetic tree rows derived from structured_blocks headings on a parent with no staging children.
  * Does not touch ANNEX-level browse: only invoked when the real flattened child list is empty.
  *
@@ -4989,7 +5135,7 @@ function easa_erules_tree_synthetic_block_children_for_parent(PDO $pdo, int $bat
     if ($parentUid === '') {
         return [];
     }
-    $blocks = easa_erules_staging_node_structured_blocks_decoded($pdo, $batchId, $parentUid);
+    $blocks = easa_erules_node_structured_blocks_or_subject_aggregate($pdo, $batchId, $parentUid);
     if ($blocks === null || $blocks === []) {
         return [];
     }
@@ -5033,13 +5179,14 @@ function easa_erules_tree_synthetic_block_children_for_parent(PDO $pdo, int $bat
             }
         }
         $synthId = easa_erules_tree_synthetic_block_child_id($parentUid, $i);
-        $sectionLike = $hl <= 3;
+        $isSubject = easa_erules_structured_heading_line_is_subject_syllabus($disp !== '' ? $disp : $text);
+        $sectionLike = !$isSubject && $hl <= 3;
         $out[] = [
             'id' => $synthId,
             'parent_id' => $parentUid,
             'display_title' => $disp !== '' ? $disp : ('§ block ' . (string) $i),
-            'ui_kind' => $sectionLike ? 'section' : 'rule',
-            'material_type' => $sectionLike ? 'HEADING' : 'IR',
+            'ui_kind' => $isSubject ? 'rule' : ($sectionLike ? 'section' : 'rule'),
+            'material_type' => $isSubject ? 'IR' : ($sectionLike ? 'HEADING' : 'IR'),
             'expandable' => false,
             'click_action' => 'open_rule',
             'depth' => $baseDepth + 1,
