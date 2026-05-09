@@ -2449,7 +2449,12 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   /** Matches backend easa_erules_tree_title_is_structural_section keywords on display_title only. */
   function rlEasaSemanticDisplayTitleIsStructuralNavHeading(node) {
     var line = rlEasaSemanticDisplayTitleFirstLine(node);
-    return line !== '' && (
+    if (line === '') return false;
+    // Align with backend: "Appendix 1 – …" is IR body text, not structural APPENDIX nav.
+    if (/^\s*Appendix\s+([0-9]+|[IVXLCDM]+)\b/i.test(line)) {
+      return false;
+    }
+    return (
       /^\s*(ANNEX|SUBPART|SECTION|APPENDIX|CHAPTER|TITLE|PART)\b/i.test(line)
       || /^\s*Appendices\s+to\s+Annex\b/i.test(line)
     );

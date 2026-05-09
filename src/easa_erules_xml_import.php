@@ -956,8 +956,25 @@ function easa_erules_title_is_annex_heading_row(string $title): bool
     return $line !== '' && preg_match('/^\s*ANNEX\b/iu', $line) === 1;
 }
 
+/**
+ * Annex appendix *material* titles (Easy Access numbering), not block headings ("Appendices to Annex I", "Appendix to Annex V").
+ * Must not be treated as structural APPENDIX nav in the browse tree (they are readable IR bodies).
+ */
+function easa_erules_tree_title_is_annex_appendix_body_line(?string $title): bool
+{
+    $line = easa_erules_tree_title_first_line((string) $title);
+    if ($line === '') {
+        return false;
+    }
+
+    return preg_match('/^\s*Appendix\s+([0-9]+|[IVXLCDM]+)\b/iu', $line) === 1;
+}
+
 function easa_erules_title_is_appendix_heading_row(string $title): bool
 {
+    if (easa_erules_tree_title_is_annex_appendix_body_line($title)) {
+        return false;
+    }
     $line = easa_erules_tree_title_first_line($title);
     if ($line === '') {
         return false;
@@ -3740,7 +3757,10 @@ function easa_erules_tree_title_is_structural_section(?string $title): bool
     if ($line === '') {
         return false;
     }
-    if (easa_erules_title_is_appendix_heading_row($line)) {
+    if (easa_erules_tree_title_is_annex_appendix_body_line($title)) {
+        return false;
+    }
+    if (easa_erules_title_is_appendix_heading_row($title)) {
         return true;
     }
 
@@ -3813,6 +3833,33 @@ function easa_erules_tree_children_all_supplements_for_rule_stub(string $parentT
 }
 
 /**
+ * True when direct staging children include several Annex-style "Appendix N …" topics (Part-FCL list block).
+ *
+ * @param list<array<string, mixed>> $childRows
+ */
+function easa_erules_tree_children_dominated_by_annex_appendix_topics(array $childRows): bool
+{
+    $n = 0;
+    foreach ($childRows as $c) {
+        if (!is_array($c)) {
+            continue;
+        }
+        if (strtolower(trim((string) ($c['node_type'] ?? ''))) !== 'topic') {
+            continue;
+        }
+        $t = (string) ($c['title'] ?? '');
+        if (easa_erules_tree_title_is_annex_appendix_body_line($t)) {
+            ++$n;
+        }
+        if ($n >= 2) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
  * heading/toc rows that duplicate a rule nav shell (FCL.xxx / GMx / AMCx) should be omitted from the tree
  * when their children are lifted to the grandparent, except real structural sections (ANNEX, SUBPART, …).
  *
@@ -3826,6 +3873,15 @@ function easa_erules_tree_should_flatten_nav_wrapper(array $row, array $childRow
     }
     if ($childRows === []) {
         return false;
+    }
+    /** Empty appendix-list &lt;toc&gt; under "Appendices to Annex …" — lift topics so Appendix N rows render as IR, not duplicate wrapper titles. */
+    if (
+        $nt === 'toc'
+        && trim((string) ($row['title'] ?? '')) === ''
+        && trim((string) ($row['source_title'] ?? '')) === ''
+        && easa_erules_tree_children_dominated_by_annex_appendix_topics($childRows)
+    ) {
+        return true;
     }
     $title = (string) ($row['title'] ?? '');
     if (easa_erules_tree_title_is_structural_section($title)) {
@@ -3893,6 +3949,14 @@ function easa_erules_tree_dedupe_adjacent_wrapper_topic(array $rows): array
             }
             if ($pt === 'topic' && $nt !== 'topic') {
                 continue;
+            }
+            if ($pt === 'topic' && $nt === 'topic') {
+                if (
+                    easa_erules_tree_title_is_annex_appendix_body_line((string) ($prev['title'] ?? ''))
+                    && easa_erules_tree_title_is_annex_appendix_body_line((string) ($r['title'] ?? ''))
+                ) {
+                    continue;
+                }
             }
         }
         $out[] = $r;
