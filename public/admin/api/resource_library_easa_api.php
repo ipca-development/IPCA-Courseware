@@ -522,9 +522,17 @@ if ($method === 'GET') {
         $row['title_display'] = easa_erules_sanitize_display_text((string) ($row['title'] ?? ''));
         $sanitizedBody = easa_erules_sanitize_rule_body_text($truncated ? (string) $row['plain_text'] : $effectivePlain);
         $row['plain_text_display'] = $sanitizedBody;
-        if ($row['plain_text_display'] === '' && $row['plain_text_effective_source'] === 'none') {
-            $row['plain_text_display'] = 'No rule text could be resolved: canonical_text and plain_text are empty, no text could be extracted from xml_fragment, no child rows contributed text, and source.xml could not be matched by ERulesId (or the file is missing). Expected file: storage/easa_erules/batches/' . (int) $batchId . '/source.xml — verify batch storage_relpath matches this batch id.';
-            $row['body_reading'] = '';
+        $sbPresent = is_array($row['structured_blocks'] ?? null) && ($row['structured_blocks'] ?? []) !== [];
+        if ($row['plain_text_display'] === '' && $row['plain_text_effective_source'] === 'none' && !$sbPresent) {
+            $ntLow = strtolower(trim((string) ($row['node_type'] ?? '')));
+            $noErules = trim((string) ($row['source_erules_id'] ?? '')) === '';
+            if (in_array($ntLow, ['heading', 'toc'], true) && $noErules) {
+                $row['plain_text_display'] = 'No body text on this navigation heading — expand branches below if topics appear in the tree.';
+                $row['body_reading'] = '';
+            } else {
+                $row['plain_text_display'] = 'No rule text could be resolved: canonical_text and plain_text are empty, no text could be extracted from xml_fragment, no child rows contributed text, and source.xml could not be matched by ERulesId (or the file is missing). Expected file: storage/easa_erules/batches/' . (int) $batchId . '/source.xml — verify batch storage_relpath matches this batch id.';
+                $row['body_reading'] = '';
+            }
         } else {
             $sourceForReading = $sanitizedBody;
             if (($row['plain_text_effective_source'] ?? '') === 'canonical' && $plainTrim !== '') {

@@ -1300,6 +1300,286 @@ function easa_erules_reparent_annex_subpart_appendix_headings(PDO $pdo, int $bat
 }
 
 /**
+ * Major ANNEX … heading uid walking ancestors from any staging row (same annex subtree).
+ */
+function easa_erules_annex_major_heading_uid_for_row(array $byUid, string $startUid): ?string
+{
+    $u = $startUid;
+    for ($guard = 0; $guard < 120; $guard++) {
+        if ($u === '' || !isset($byUid[$u])) {
+            return null;
+        }
+        $row = $byUid[$u];
+        $nt = strtolower(trim((string) ($row['node_type'] ?? '')));
+        $title = trim((string) ($row['title'] ?? ''));
+        if ($nt === 'heading' && easa_erules_title_is_annex_heading_row($title)) {
+            return $u;
+        }
+        $p = trim((string) ($row['parent_node_uid'] ?? ''));
+        if ($p === '') {
+            return null;
+        }
+        $u = $p;
+    }
+
+    return null;
+}
+
+/**
+ * Count topic rows directly under a toc whose titles look like annex appendix bodies (mode-specific).
+ *
+ * @param 'plural_block'|'singular_appendix_to_annex' $mode
+ */
+function easa_erules_toc_direct_topic_appendix_score_for_mode(array $byParent, string $tocUid, string $mode): int
+{
+    $kids = $byParent[easa_erules_parent_sort_key($tocUid)] ?? [];
+    $score = 0;
+    foreach ($kids as $ch) {
+        if (!is_array($ch)) {
+            continue;
+        }
+        if (strtolower(trim((string) ($ch['node_type'] ?? ''))) !== 'topic') {
+            continue;
+        }
+        $line = easa_erules_tree_title_first_line((string) ($ch['title'] ?? ''));
+        if ($line === '') {
+            continue;
+        }
+        if ($mode === 'plural_block') {
+            if (preg_match('/^\s*Appendix\s+[0-9]+\b/u', $line) === 1) {
+                ++$score;
+            }
+        } elseif ($mode === 'singular_appendix_to_annex') {
+            if (preg_match('/^\s*Appendix\s+[0-9]+\s+to\b/iu', $line) === 1) {
+                ++$score;
+            }
+        }
+    }
+
+    return $score;
+}
+
+/**
+ * Plural "Appendices to Annex …" block heading vs singular "Appendix to Annex …".
+ */
+function easa_erules_heading_annex_appendix_bundle_mode(?string $title): ?string
+{
+    $line = easa_erules_tree_title_first_line((string) $title);
+    if ($line === '') {
+        return null;
+    }
+    if (preg_match('/^\s*Appendices\s+to\s+Annex\b/iu', $line) === 1) {
+        return 'plural_block';
+    }
+    if (preg_match('/^\s*Appendix\s+to\s+Annex\b/iu', $line) === 1) {
+        return 'singular_appendix_to_annex';
+    }
+
+    return null;
+}
+
+function easa_erules_heading_has_appendix_bundle_toc_child(array $byParent, string $headingUid, string $mode): bool
+{
+    $minScore = $mode === 'plural_block' ? 2 : 1;
+    foreach ($byParent[easa_erules_parent_sort_key($headingUid)] ?? [] as $ch) {
+        if (!is_array($ch)) {
+            continue;
+        }
+        if (strtolower(trim((string) ($ch['node_type'] ?? ''))) !== 'toc') {
+            continue;
+        }
+        $tUid = trim((string) ($ch['node_uid'] ?? ''));
+        if ($tUid === '') {
+            continue;
+        }
+        if (easa_erules_toc_direct_topic_appendix_score_for_mode($byParent, $tUid, $mode) >= $minScore) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Roman/digit annex marker parsed from topic titles under a toc ("Appendix 1 to Annex VIII …" → VIII).
+ */
+function easa_erules_toc_appendix_annex_token_from_topics(array $byParent, string $tocUid): ?string
+{
+    foreach ($byParent[easa_erules_parent_sort_key($tocUid)] ?? [] as $ch) {
+        if (!is_array($ch)) {
+            continue;
+        }
+        if (strtolower(trim((string) ($ch['node_type'] ?? ''))) !== 'topic') {
+            continue;
+        }
+        $line = easa_erules_tree_title_first_line((string) ($ch['title'] ?? ''));
+        if ($line === '') {
+            continue;
+        }
+        if (preg_match('/\bAnnex\s+([IVXLCDM]+|\d+)\b/iu', $line, $m) === 1) {
+            return strtoupper(trim($m[1]));
+        }
+    }
+
+    return null;
+}
+
+function easa_erules_annex_heading_uid_for_annex_token(array $all, string $token): ?string
+{
+    $token = trim($token);
+    if ($token === '') {
+        return null;
+    }
+    foreach ($all as $r) {
+        if (!is_array($r)) {
+            continue;
+        }
+        if (strtolower(trim((string) ($r['node_type'] ?? ''))) !== 'heading') {
+            continue;
+        }
+        $title = (string) ($r['title'] ?? '');
+        if (!easa_erules_title_is_annex_heading_row($title)) {
+            continue;
+        }
+        $line = easa_erules_tree_title_first_line($title) ?: $title;
+        if ($line === '') {
+            continue;
+        }
+        if (preg_match('/\bANNEX\s+' . preg_quote($token, '/') . '\b/iu', $line) === 1) {
+            $u = trim((string) ($r['node_uid'] ?? ''));
+
+            return $u !== '' ? $u : null;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Easy Access often emits "Appendices to Annex I" / "Appendix to Annex V" as headings while the actual
+ * appendix topics sit under a toc wrongly nested under SUBPART/SECTION. Attach that toc under the block heading.
+ */
+function easa_erules_reparent_misnested_annex_appendix_bundle_tocs(PDO $pdo, int $batchId): void
+{
+    if ($batchId <= 0) {
+        return;
+    }
+    $st = $pdo->prepare(
+        'SELECT node_uid, parent_node_uid, node_type, title, sort_order, id
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ?
+         ORDER BY id ASC'
+    );
+    $st->execute([$batchId]);
+    $all = [];
+    while ($r = $st->fetch(PDO::FETCH_ASSOC)) {
+        if (is_array($r)) {
+            $all[] = $r;
+        }
+    }
+    $byParent = [];
+    foreach ($all as $r) {
+        $p = $r['parent_node_uid'] ?? null;
+        $p = ($p !== null && (string) $p !== '') ? (string) $p : null;
+        $k = easa_erules_parent_sort_key($p);
+        $byParent[$k][] = $r;
+    }
+    $byUid = [];
+    foreach ($all as $r) {
+        $u = trim((string) ($r['node_uid'] ?? ''));
+        if ($u !== '') {
+            $byUid[$u] = $r;
+        }
+    }
+    $upd = $pdo->prepare(
+        'UPDATE easa_erules_import_nodes_staging
+         SET parent_node_uid = ?
+         WHERE batch_id = ?
+           AND node_uid = ?
+           AND NOT (parent_node_uid <=> ?)'
+    );
+    $assignedToc = [];
+    foreach ($all as $hRow) {
+        $hUid = trim((string) ($hRow['node_uid'] ?? ''));
+        if ($hUid === '') {
+            continue;
+        }
+        if (strtolower(trim((string) ($hRow['node_type'] ?? ''))) !== 'heading') {
+            continue;
+        }
+        $mode = easa_erules_heading_annex_appendix_bundle_mode((string) ($hRow['title'] ?? ''));
+        if ($mode === null) {
+            continue;
+        }
+        if (easa_erules_heading_has_appendix_bundle_toc_child($byParent, $hUid, $mode)) {
+            continue;
+        }
+        $annexH = easa_erules_annex_major_heading_uid_for_row($byUid, $hUid);
+        if ($annexH === null) {
+            continue;
+        }
+        $minScore = $mode === 'plural_block' ? 2 : 1;
+        $bestT = '';
+        $bestScore = -1;
+        $bestId = PHP_INT_MAX;
+        foreach ($all as $tRow) {
+            if (!is_array($tRow)) {
+                continue;
+            }
+            if (strtolower(trim((string) ($tRow['node_type'] ?? ''))) !== 'toc') {
+                continue;
+            }
+            $tUid = trim((string) ($tRow['node_uid'] ?? ''));
+            if ($tUid === '' || isset($assignedToc[$tUid])) {
+                continue;
+            }
+            $score = easa_erules_toc_direct_topic_appendix_score_for_mode($byParent, $tUid, $mode);
+            if ($score < $minScore) {
+                continue;
+            }
+            $annexFromT = easa_erules_annex_major_heading_uid_for_row($byUid, $tUid);
+            if ($annexFromT !== $annexH) {
+                $token = easa_erules_toc_appendix_annex_token_from_topics($byParent, $tUid);
+                $annexViaTitle = $token !== null ? easa_erules_annex_heading_uid_for_annex_token($all, $token) : null;
+                if ($annexViaTitle !== $annexH) {
+                    continue;
+                }
+            }
+            if (trim((string) ($tRow['parent_node_uid'] ?? '')) === $hUid) {
+                continue;
+            }
+            $candId = (int) ($tRow['id'] ?? 0);
+            if ($score > $bestScore || ($score === $bestScore && $candId < $bestId)) {
+                $bestScore = $score;
+                $bestT = $tUid;
+                $bestId = $candId;
+            }
+        }
+        if ($bestT === '') {
+            continue;
+        }
+        $assignedToc[$bestT] = true;
+        $oldParent = trim((string) ($byUid[$bestT]['parent_node_uid'] ?? ''));
+        $upd->execute([$hUid, $batchId, $bestT, $hUid]);
+        $byUid[$bestT]['parent_node_uid'] = $hUid;
+        if ($oldParent !== '') {
+            $opk = easa_erules_parent_sort_key($oldParent);
+            if (isset($byParent[$opk])) {
+                $byParent[$opk] = array_values(array_filter(
+                    $byParent[$opk],
+                    static fn (array $x): bool => trim((string) ($x['node_uid'] ?? '')) !== $bestT
+                ));
+            }
+        }
+        $npk = easa_erules_parent_sort_key($hUid);
+        if (!isset($byParent[$npk])) {
+            $byParent[$npk] = [];
+        }
+        $byParent[$npk][] = $byUid[$bestT];
+    }
+}
+
+/**
  * Easy Access often nests the next outline level under an empty &lt;toc&gt; (SUBPART → SECTION rows,
  * ANNEX → SUBPART rows, etc.). Lift those structural headings to the real parent so tree_children
  * lists SECTION 1…N directly under SUBPART C, not under a single toc shell.
@@ -2265,6 +2545,7 @@ function easa_erules_repair_batch_tree_parents(PDO $pdo, int $batchId): void
     easa_erules_reparent_structural_lift_empty_toc_outline_children($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
     easa_erules_reparent_rule_ref_toc_peer_lift($pdo, $batchId);
+    easa_erules_reparent_misnested_annex_appendix_bundle_tocs($pdo, $batchId);
 }
 
 /**
@@ -2585,6 +2866,7 @@ function easa_erules_import_batch_xml_to_staging(PDO $pdo, int $batchId): array
     easa_erules_reparent_structural_lift_empty_toc_outline_children($pdo, $batchId);
     easa_erules_promote_misnested_fcl_peers($pdo, $batchId);
     easa_erules_reparent_rule_ref_toc_peer_lift($pdo, $batchId);
+    easa_erules_reparent_misnested_annex_appendix_bundle_tocs($pdo, $batchId);
 
     if (easa_erules_batch_progress_available($pdo)) {
         $pdo->prepare('
@@ -2728,14 +3010,20 @@ function easa_erules_sanitize_rule_body_text(string $s): string
 
 /**
  * When a parent topic/heading row has empty plain_text (text stored only on child nodes), build body from descendants.
+ * Uses the same per-row precedence as node_detail: canonical_text (if column exists), then plain_text, then xml_fragment.
  */
 function easa_erules_aggregate_descendant_plain_text(PDO $pdo, int $batchId, string $parentNodeUid, int $depth = 0): string
 {
     if ($depth > 120) {
         return '';
     }
+    $hasCanon = easa_erules_staging_has_canonical_column($pdo);
+    $selectCols = 'node_uid, title, plain_text, xml_fragment, sort_order';
+    if ($hasCanon) {
+        $selectCols = 'node_uid, title, plain_text, canonical_text, xml_fragment, sort_order';
+    }
     $st = $pdo->prepare('
-        SELECT node_uid, title, plain_text, sort_order
+        SELECT ' . $selectCols . '
         FROM easa_erules_import_nodes_staging
         WHERE batch_id = ? AND parent_node_uid = ?
         ORDER BY sort_order ASC, id ASC
@@ -2752,7 +3040,15 @@ function easa_erules_aggregate_descendant_plain_text(PDO $pdo, int $batchId, str
         }
         $uid = (string) ($row['node_uid'] ?? '');
         $title = trim((string) ($row['title'] ?? ''));
-        $own = trim((string) ($row['plain_text'] ?? ''));
+        $plainTrim = trim((string) ($row['plain_text'] ?? ''));
+        $canonTrim = $hasCanon ? trim((string) ($row['canonical_text'] ?? '')) : '';
+        $own = $canonTrim !== '' ? $canonTrim : $plainTrim;
+        if ($own === '') {
+            $fragRaw = trim((string) ($row['xml_fragment'] ?? ''));
+            if ($fragRaw !== '' && strlen($fragRaw) < 600000) {
+                $own = trim(easa_erules_plain_text_from_stored_xml_fragment($fragRaw));
+            }
+        }
         if ($own === '' && $uid !== '') {
             $own = trim(easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $uid, $depth + 1));
         }

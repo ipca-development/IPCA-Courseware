@@ -178,7 +178,7 @@ if ($annexForProbe !== null || $subpartForProbe !== null) {
 
 try {
     easa_erules_repair_batch_tree_parents($pdo, $id);
-    fwrite(STDOUT, "\nRepaired parent links for batch {$id} (structural → annex/toc-lift → annex/subpart/appendix → FCL promote → rule-ref peer lift).\n");
+    fwrite(STDOUT, "\nRepaired parent links for batch {$id} (structural → annex/toc-lift → annex/subpart/appendix → outline lift → FCL promote → rule-ref peer lift → annex appendix-bundle toc attach).\n");
 } catch (Throwable $e) {
     fwrite(STDERR, 'Error: ' . $e->getMessage() . "\n");
     exit(1);
