@@ -2103,7 +2103,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
-  function rlEasaEnsureChildUlLoaded(li, batchId) {
+  function rlEasaEnsureChildUlLoaded(li, batchId, treeResolveOptions) {
     return new Promise(function (resolve, reject) {
       var sub = li.querySelector(':scope > ul.rl-easa-tree-list');
       if (!sub) {
@@ -2118,7 +2118,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       var uid = li.getAttribute('data-node-uid') || '';
       rlEasaTreeFetchTreeChildrenJson(batchId, uid)
         .then(function (j) {
-          return rlEasaTreeResolveLegalRootNodes(batchId, j);
+          return rlEasaTreeResolveLegalRootNodes(batchId, j, treeResolveOptions);
         })
         .then(function (resolved) {
           resolved.nodes.forEach(function (c) {
@@ -2147,9 +2147,10 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     return rlEasaAncestorUidChain(batchId, targetUid).then(function (chain) {
       /* chain: root ... target */
       if (!chain.length) throw new Error('Empty ancestor chain');
+      var revealOpts = { chainUids: chain };
       return rlEasaTreeFetchTreeChildrenJson(batchId, '')
         .then(function (j) {
-          return rlEasaTreeResolveLegalRootNodes(batchId, j);
+          return rlEasaTreeResolveLegalRootNodes(batchId, j, revealOpts);
         })
         .then(function (resolved) {
           rlEasaRenderTreeIntoMount(mount, batchId, resolved.nodes);
@@ -2168,7 +2169,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
             var li = ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(uid) + '"]');
             if (!li) return Promise.reject(new Error('Could not find node ' + uid + ' in tree (try Load tree roots).'));
             if (idx === path.length - 1) return Promise.resolve(li);
-            return rlEasaEnsureChildUlLoaded(li, batchId).then(function () {
+            return rlEasaEnsureChildUlLoaded(li, batchId, revealOpts).then(function () {
               var nextUl = li.querySelector(':scope > ul.rl-easa-tree-list');
               if (!nextUl) return Promise.reject(new Error('No children container'));
               ul = nextUl;
@@ -2520,20 +2521,59 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   }
 
   /**
-   * Legal-root shaping for corpus roots, search/citation reveal, and every expanded branch (same rules everywhere).
-   * When ANNEX rows exist at a level, siblings are reduced to ANNEX + SUBJECT syllabus peers; single document-shell unwrap chain.
+   * Annex sibling filter unless a node in chainUids would be removed (reveal / open-in-tree must preserve the full path).
+   * @param {?Array<string>} chainUids ancestor chain from rlEasaAncestorUidChain (optional)
+   */
+  function rlEasaTreeApplyAnnexSiblingFilterPreservingChain(rawNodes, chainUids) {
+    if (!rawNodes || !rawNodes.length) {
+      return [];
+    }
+    var filtered = rlEasaTreeAnnexSiblingFilter(rawNodes);
+    if (!Array.isArray(chainUids) || chainUids.length === 0) {
+      return filtered;
+    }
+    for (var i = 0; i < chainUids.length; i++) {
+      var want = String(chainUids[i] || '').trim();
+      if (!want) {
+        continue;
+      }
+      var inRaw = false;
+      var inFilt = false;
+      for (var a = 0; a < rawNodes.length; a++) {
+        if (String(rawNodes[a].id || rawNodes[a].node_uid || '').trim() === want) {
+          inRaw = true;
+          break;
+        }
+      }
+      for (var b = 0; b < filtered.length; b++) {
+        if (String(filtered[b].id || filtered[b].node_uid || '').trim() === want) {
+          inFilt = true;
+          break;
+        }
+      }
+      if (inRaw && !inFilt) {
+        return rawNodes.slice();
+      }
+    }
+    return filtered;
+  }
+
+  /**
+   * Legal-root shaping for corpus roots, citation reveal, and manual tree expand.
+   * options.chainUids: when set (reveal path), annex filtering never drops these uids from any level.
    *
    * @return Promise<{ nodes: array }>
    */
-  function rlEasaTreeResolveLegalRootNodes(batchId, j) {
+  function rlEasaTreeResolveLegalRootNodes(batchId, j, options) {
     if (!j || !j.ok || !Array.isArray(j.nodes)) {
       return Promise.reject(new Error((j && j.error) || 'Failed to load tree'));
     }
+    var chainUids = (options && options.chainUids) || null;
     function descend(nodes, depthGuard) {
       if (depthGuard > 8) {
         return Promise.resolve(nodes);
       }
-      var level = rlEasaTreeAnnexSiblingFilter(nodes);
+      var level = rlEasaTreeApplyAnnexSiblingFilterPreservingChain(nodes, chainUids);
       if (level.length !== 1) {
         return Promise.resolve(level);
       }
