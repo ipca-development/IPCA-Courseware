@@ -5788,6 +5788,17 @@ function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?strin
         $childStaging = isset($memo[$vk]) && is_array($memo[$vk]) ? $memo[$vk] : [];
         $sem = easa_erules_tree_semantic_adapter($row, $childStaging);
         easa_erules_tree_semantic_adapter_apply_synthetic_parent_nav_hints($pdo, $batchId, $sem);
+        /* AMC/GM topics that have hoisted appendix-SUBJECT children must show the chevron: keep them clickable as
+           rules (click_action stays open_rule, material_type stays AMC/GM), but advertise expandable=true so the
+           frontend renders the disclosure triangle and expands to the 17 SUBJECT rows. */
+        if (
+            ($sem['ui_kind'] ?? '') === 'rule'
+            && ($sem['expandable'] ?? false) === false
+            && ((int) ($sem['child_count'] ?? 0)) > 0
+            && easa_erules_tree_appendix_subjects_container_uid_for_topic($graph, $row) !== null
+        ) {
+            $sem['expandable'] = true;
+        }
         /* Hoisted appendix-SUBJECT children must report the AMC topic as their semantic parent, not the original
            Table-of-contents container (which is hidden from normal browsing). */
         if ($parentUid !== null && $parentUid !== '') {
