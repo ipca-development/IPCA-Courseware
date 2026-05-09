@@ -161,6 +161,119 @@ function rl_easa_staging_snippet_concat_body(PDO $pdo): string
 }
 
 /**
+ * Detect whether a free-text question is about pilot/FCL/Aircrew topics or about Part-IS / information security.
+ *
+ * @return array{is_fcl: bool, is_partis: bool}
+ */
+function rl_easa_query_topic_filter(string $q): array
+{
+    $ql = ' ' . strtolower($q) . ' ';
+    $partisKw = [
+        'part-is', 'part is ', 'information security', 'isms',
+        'iso 27001', 'iso27001', 'cyber', 'cybersecurity',
+        'security management', 'infosec',
+    ];
+    $isPartis = false;
+    foreach ($partisKw as $kw) {
+        if (str_contains($ql, $kw)) {
+            $isPartis = true;
+            break;
+        }
+    }
+    $fclKw = [
+        ' ppl ', ' cpl ', ' atpl ', ' lapl ', ' mpl ', ' sfcl ', ' bfcl ',
+        ' bir ', ' ir ', ' fcl ', ' part-fcl ', 'part fcl',
+        'theoretical knowledge', 'theory exam', 'theory examination',
+        'learning objective', 'learning objectives',
+        'air law', 'meteorology', 'principles of flight', 'navigation',
+        'flight performance', 'human performance', 'communications',
+        'aircraft general knowledge', 'operational procedures',
+        'flight planning', 'mass and balance',
+        'subject 010', 'subject 020', 'subject 021', 'subject 022', 'subject 030',
+        'subject 031', 'subject 032', 'subject 033', 'subject 034', 'subject 040',
+        'subject 050', 'subject 060', 'subject 061', 'subject 062', 'subject 070',
+        'subject 080', 'subject 081', 'subject 082', 'subject 090', 'subject 091',
+        'class rating', 'type rating', 'instructor rating', 'instrument rating',
+        'pilot licence', 'pilot license', 'flight crew', 'aircrew',
+        'student pilot', 'flight instructor', 'examiner',
+        'medical certificate', ' medical class', ' part-med ', ' part-mc ',
+    ];
+    $isFcl = false;
+    foreach ($fclKw as $kw) {
+        if (str_contains($ql, $kw)) {
+            $isFcl = true;
+            break;
+        }
+    }
+
+    return ['is_fcl' => $isFcl, 'is_partis' => $isPartis];
+}
+
+/**
+ * Inspect the available batches and decide which to boost / hide based on the question topic.
+ * Hard exclusion is only applied when at least one positive replacement batch exists, so we never
+ * empty the result set just to enforce a topic.
+ *
+ * @return array{exclude_batch_ids: list<int>, boost_batch_ids: list<int>, intent: array{is_fcl: bool, is_partis: bool}}
+ */
+function rl_easa_query_batch_filtering(PDO $pdo, string $q): array
+{
+    $intent = rl_easa_query_topic_filter($q);
+    $out = ['exclude_batch_ids' => [], 'boost_batch_ids' => [], 'intent' => $intent];
+    if (!$intent['is_fcl'] && !$intent['is_partis']) {
+        return $out;
+    }
+    try {
+        $rows = $pdo->query("SELECT id, LOWER(COALESCE(original_filename, '')) AS f FROM easa_erules_import_batches")
+            ->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Throwable) {
+        return $out;
+    }
+    $partis = [];
+    $fcl = [];
+    $ops = [];
+    $other = [];
+    foreach ($rows as $r) {
+        $bid = (int) ($r['id'] ?? 0);
+        $f = (string) ($r['f'] ?? '');
+        if ($bid <= 0) {
+            continue;
+        }
+        if (str_contains($f, 'part-is') || str_contains($f, 'information security') || str_contains($f, 'partis')) {
+            $partis[] = $bid;
+            continue;
+        }
+        if (str_contains($f, 'aircrew') || str_contains($f, 'fcl') || str_contains($f, 'flight crew') || str_contains($f, 'flight-crew')) {
+            $fcl[] = $bid;
+            continue;
+        }
+        if (str_contains($f, 'air-ops') || str_contains($f, 'flight operations') || str_contains($f, 'flight-ops') || str_contains($f, 'air ops')) {
+            $ops[] = $bid;
+            continue;
+        }
+        $other[] = $bid;
+    }
+    if ($intent['is_fcl'] && !$intent['is_partis']) {
+        $out['boost_batch_ids'] = $fcl;
+        if ($fcl !== [] || $ops !== [] || $other !== []) {
+            $out['exclude_batch_ids'] = $partis;
+        }
+
+        return $out;
+    }
+    if ($intent['is_partis'] && !$intent['is_fcl']) {
+        $out['boost_batch_ids'] = $partis;
+        if ($partis !== []) {
+            $out['exclude_batch_ids'] = array_merge($fcl, $ops, $other);
+        }
+
+        return $out;
+    }
+
+    return $out;
+}
+
+/**
  * Pull staging excerpts for AI compare using the same matching rules as search.
  *
  * @return array{hit_count: int, bundle: string, sources: list<array<string, mixed>>, summary: string}
@@ -194,7 +307,18 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
     $maxRows = 15;
     $excerptLen = 4500;
     $excerptBody = rl_easa_staging_snippet_concat_body($pdo);
-    $fetchMatches = static function (string $needle, int $limit) use ($pdo, $batchFilter, $wrapRank, $excerptBody, $excerptLen): array {
+    $bf = rl_easa_query_batch_filtering($pdo, $q);
+    $excludeIds = $bf['exclude_batch_ids'];
+    $boostIds = $bf['boost_batch_ids'];
+    $excludeSql = '';
+    if ($excludeIds !== [] && $batchFilter <= 0) {
+        $excludeSql = ' AND batch_id NOT IN (' . implode(',', array_map('intval', $excludeIds)) . ') ';
+    }
+    $boostRank = '0';
+    if ($boostIds !== [] && $batchFilter <= 0) {
+        $boostRank = '(CASE WHEN batch_id IN (' . implode(',', array_map('intval', $boostIds)) . ') THEN 0 ELSE 1 END)';
+    }
+    $fetchMatches = static function (string $needle, int $limit) use ($pdo, $batchFilter, $wrapRank, $excerptBody, $excerptLen, $excludeSql, $boostRank): array {
         $m = rl_easa_search_match_clause($pdo, $needle);
         $whereMatch = $m['where'];
         $bind = $m['bind'];
@@ -214,8 +338,8 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
                 SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
                        SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
                 FROM easa_erules_import_nodes_staging
-                WHERE {$whereMatch}
-                ORDER BY {$wrapRank} ASC, id DESC
+                WHERE {$whereMatch} {$excludeSql}
+                ORDER BY {$boostRank} ASC, {$wrapRank} ASC, id DESC
                 LIMIT {$limit}
             ";
             $stmt = $pdo->prepare($sql);
@@ -415,8 +539,8 @@ function rl_easa_ai_chat_tables_ok(PDO $pdo): bool
     return true;
 }
 
-/** GET or POST: EASA AI chat bootstrap (sessions + messages). */
-function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession): void
+/** GET or POST: EASA AI chat bootstrap (sessions + messages). Supports `before_id` for lazy older-page loading. */
+function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $beforeId = 0, int $limit = 20): void
 {
     $chatSupported = rl_easa_ai_chat_tables_ok($pdo);
     if (!$chatSupported) {
@@ -427,12 +551,18 @@ function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession): void
             'sessions' => [],
             'messages' => [],
             'current_session_id' => null,
+            'has_more' => false,
         ]);
     }
     $u = cw_current_user($pdo);
     $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
     if ($userId <= 0) {
         rl_easa_json_out(401, ['ok' => false, 'error' => 'Not authenticated']);
+    }
+    if ($limit < 5) {
+        $limit = 5;
+    } elseif ($limit > 80) {
+        $limit = 80;
     }
     try {
         $st = $pdo->prepare('SELECT id, title, created_at, updated_at FROM easa_ai_chat_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 40');
@@ -446,13 +576,25 @@ function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession): void
         $current = (int) ($sessions[0]['id'] ?? 0);
     }
     $messages = [];
+    $hasMore = false;
     if ($current > 0) {
         $chk = $pdo->prepare('SELECT id FROM easa_ai_chat_sessions WHERE id = ? AND user_id = ? LIMIT 1');
         $chk->execute([$current, $userId]);
         if ($chk->fetchColumn()) {
-            $mst = $pdo->prepare('SELECT id, role, content, response_json, created_at FROM easa_ai_chat_messages WHERE session_id = ? ORDER BY id ASC');
-            $mst->execute([$current]);
-            $messages = $mst->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            $fetchLimit = $limit + 1;
+            if ($beforeId > 0) {
+                $mst = $pdo->prepare('SELECT id, role, content, response_json, created_at FROM easa_ai_chat_messages WHERE session_id = ? AND id < ? ORDER BY id DESC LIMIT ' . (int) $fetchLimit);
+                $mst->execute([$current, $beforeId]);
+            } else {
+                $mst = $pdo->prepare('SELECT id, role, content, response_json, created_at FROM easa_ai_chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT ' . (int) $fetchLimit);
+                $mst->execute([$current]);
+            }
+            $rows = $mst->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            if (count($rows) > $limit) {
+                $hasMore = true;
+                array_pop($rows);
+            }
+            $messages = array_reverse($rows);
         } else {
             $current = 0;
         }
@@ -463,6 +605,7 @@ function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession): void
         'sessions' => $sessions,
         'messages' => $messages,
         'current_session_id' => $current > 0 ? $current : null,
+        'has_more' => $hasMore,
     ]);
 }
 
@@ -722,7 +865,12 @@ if ($method === 'GET') {
     }
 
     if ($action === 'easa_ai_chat_bootstrap') {
-        rl_easa_ai_chat_bootstrap_output($pdo, (int) ($_GET['session_id'] ?? 0));
+        rl_easa_ai_chat_bootstrap_output(
+            $pdo,
+            (int) ($_GET['session_id'] ?? 0),
+            (int) ($_GET['before_id'] ?? 0),
+            (int) ($_GET['limit'] ?? 20)
+        );
     }
 
     // GET action=source_probe — diagnostic: ERulesId matches in batch source.xml (deploy must include this block).
@@ -1027,7 +1175,12 @@ if ($action === 'search') {
 }
 
 if ($action === 'easa_ai_chat_bootstrap') {
-    rl_easa_ai_chat_bootstrap_output($pdo, (int) ($data['session_id'] ?? 0));
+    rl_easa_ai_chat_bootstrap_output(
+        $pdo,
+        (int) ($data['session_id'] ?? 0),
+        (int) ($data['before_id'] ?? 0),
+        (int) ($data['limit'] ?? 20)
+    );
 }
 
 if ($action === 'easa_ai_chat_session_create') {
@@ -1242,13 +1395,32 @@ if ($action === 'regulatory_compare_ai') {
     }
 
     $jsonInstructions = <<<'TXT'
-You are "Maya", a warm, professional EASA regulations mentor (not a database UI). Your entire model output must be a single JSON object (no markdown fences) with exactly these keys:
-- "answer_markdown": string (Markdown: short paragraphs, optional ##/### headings, bullets, **bold**). Write for a pilot or instructor. NEVER put batch_id, node_uid, ERulesId, "staging", "XML", "canonical", file paths, or internal IDs in this field — those belong only in primary_references. Use friendly corpus names when helpful (e.g. "EAR Flight Crew"). If the user is vague, ask 1–3 short narrowing questions (which regulation set, licence level, aeroplane vs helicopter, topic: learning objectives vs privileges vs recency, etc.) before dumping technical content. If the user is specific, answer directly and keep tone conversational.
-- "primary_references": array of objects for traceability only (the UI shows these as chips, not in the markdown body). Each object: "title" (human section title), "batch_id" (int), "node_uid" (string), "erules_id" (string or empty), "matched_terms" (array of strings for highlighting), "quote" (short verbatim excerpt from the bundle for that node).
-- "secondary_references": same shape (optional).
+You are "Maya", a warm, professional EASA regulations mentor — like a friendly flight instructor, NOT a legal memo or database UI.
+
+Your entire model output MUST be a single JSON object (no markdown fences, no preface) with exactly these keys:
+
+- "answer_markdown": string. Conversational Markdown for a pilot or instructor: short paragraphs, optional ##/### headings, bullets, **bold**. ALWAYS:
+    * Greet the user by first name when one is provided ("Hi Kay,", "Good question, Kay,").
+    * If the question is broad or ambiguous (e.g. "Where can I find PPL rules on the theory exam?"), ask 1–3 short narrowing questions BEFORE giving technical detail. Examples: "Which EASA regulation set are you working from — Aircrew (Part-FCL) or Air Operations?" / "Which licence level — LAPL, PPL, CPL or ATPL?" / "Aeroplane, helicopter, balloon, or sailplane?" / "Are you after the syllabus / learning objectives, the exam-pass requirements, or the privileges?"
+    * If the question is already specific, answer directly without unnecessary narrowing.
+    * Keep the tone friendly and instructor-like, not lawyerly.
+    * Use FRIENDLY corpus names only ("EAR Flight Crew", "EAR Flight Operations", "EAR Part-IS", "EAR CS-FSTD"). NEVER reveal raw .xml file names, batch_id, node_uid, ERulesId, "staging", or "canonical" — those belong ONLY in primary_references. Do not write phrases like "the material you attached" unless the user actually attached something in this turn.
+    * If the canonical bundle does not contain a relevant Aircrew/Part-FCL match for an FCL question, state honestly that the available indexed material doesn't cover this and ask the user to confirm which regulation set, instead of citing unrelated material like Part-IS.
+
+- "primary_references": array of objects (the UI shows these as chips inside your bubble — they are how the user clicks through). Each object MUST have:
+    * "title" (string, human section title — e.g. "FCL.025 Theoretical knowledge examinations" or "SUBJECT 050 — METEOROLOGY". Never raw .xml filenames, never internal IDs).
+    * "batch_id" (int)
+    * "node_uid" (string)
+    * "erules_id" (string or empty)
+    * "matched_terms" (array of short strings to highlight)
+    * "quote" (short verbatim excerpt copied from the bundle for that node)
+   Prefer specific rule/AMC/GM/Subject nodes over TOC/wrapper/document/frontmatter nodes when both are available in the bundle.
+
+- "secondary_references": same object shape (optional).
+
 - "confidence": "high" | "medium" | "low"
 
-Only cite batch_id/node_uid pairs that appear in the CANONICAL NODE blocks. Do not invent ERulesIds.
+Only cite batch_id/node_uid pairs that actually appear in the CANONICAL NODE blocks of the bundle. Do not invent ERulesIds. If you have no matching nodes, return an empty primary_references array and explain in answer_markdown that the indexed material doesn't cover this topic; suggest the user confirm which regulation they have in mind.
 TXT;
 
     try {

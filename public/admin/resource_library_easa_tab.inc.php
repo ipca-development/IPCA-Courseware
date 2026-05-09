@@ -1026,28 +1026,23 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     align-items: center;
     flex-shrink: 0;
   }
-  .rl-easa-maya-more {
-    font-size: 12px;
-    border: 1px solid #e2e8f0;
-    border-radius: 8px;
-    padding: 2px 8px;
-    background: #fff;
+  .rl-easa-maya-loadmore {
+    text-align: center;
+    padding: 6px 0 10px;
   }
-  .rl-easa-maya-more summary {
-    cursor: pointer;
-    font-weight: 700;
+  .rl-easa-maya-loadmore[hidden] { display: none !important; }
+  .rl-easa-maya-loadmore button {
+    font-size: 11px;
     color: #475569;
-    list-style: none;
+    background: transparent;
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    padding: 3px 12px;
+    cursor: pointer;
   }
-  .rl-easa-maya-more summary::-webkit-details-marker { display: none; }
-  .rl-easa-maya-more-in {
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid #f1f5f9;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    min-width: 220px;
+  .rl-easa-maya-loadmore button[disabled] {
+    opacity: 0.6;
+    cursor: progress;
   }
   .rl-easa-maya-lead {
     margin: 0 0 12px;
@@ -1242,25 +1237,16 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     <div class="rl-easa-maya-chat-header">
       <h3>Ask Maya, your Regulations Assistant</h3>
       <div class="rl-easa-maya-header-actions">
-        <details class="rl-easa-maya-more">
-          <summary>More</summary>
-          <div class="rl-easa-maya-more-in">
-            <label for="rlEasaSessionSelect" class="rl-drop-meta" style="font-weight:700;">Past chats</label>
-            <select id="rlEasaSessionSelect" style="width:100%;font-size:13px;"></select>
-            <label for="rlEasaChatSource" class="rl-drop-meta" style="font-weight:700;">Search scope (optional)</label>
-            <select id="rlEasaChatSource" style="width:100%;font-size:13px;">
-              <option value="">All EASA sources</option>
-            </select>
-            <p class="rl-drop-meta" id="rlEasaChatPersistHint" style="margin:0;"></p>
-          </div>
-        </details>
-        <button type="button" class="btn btn-sm" id="rlEasaNewChatBtn">New chat</button>
+        <button type="button" class="btn btn-sm" id="rlEasaNewChatBtn" title="Start a fresh chat with Maya">New chat</button>
       </div>
     </div>
     <p class="rl-easa-dash-lead rl-easa-maya-lead">
       Maya helps you navigate EASA Easy Access Rules in plain language. Ask naturally — for a U.S. comparison, say something like &ldquo;How does this compare to the FAA rules?&rdquo; Not legal advice; always confirm on official publications.
     </p>
-    <div class="rl-easa-maya-thread" id="rlEasaChatHistory" aria-label="Chat with Maya"></div>
+    <div class="rl-easa-maya-thread" id="rlEasaChatHistory" aria-label="Chat with Maya">
+      <div class="rl-easa-maya-loadmore" id="rlEasaChatLoadMore" hidden></div>
+    </div>
+    <p class="rl-drop-meta" id="rlEasaChatPersistHint" style="margin:6px 2px 0;font-size:11px;"></p>
     <div class="rl-easa-maya-compose">
       <textarea id="rlEasaChatQ" rows="2" placeholder="Ask Maya anything about the regulations…" aria-label="Message to Maya"></textarea>
       <button type="button" class="btn btn-sm rl-easa-maya-send" id="rlEasaChatSendBtn">Send</button>
@@ -1512,14 +1498,16 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       var bid = parseInt(String(r.batch_id), 10) || 0;
       var nuid = String(r.node_uid || '').trim();
       if (!bid || !nuid) return;
-      var title = String(r.title || '').trim() || 'Regulation';
+      var rawTitle = rlEasaMayaCleanTitle(String(r.title || ''));
+      var corpus = rlEasaMayaBatchName(bid);
+      var title = rawTitle || corpus || 'Regulation reference';
       var matched = Array.isArray(r.matched_terms) ? r.matched_terms : [];
       var hl = (matched[0] || '').trim();
       var row = document.createElement('div');
       row.className = 'rl-easa-maya-chips';
       var lab = document.createElement('span');
       lab.className = 'rl-easa-maya-chip-label';
-      lab.textContent = title;
+      lab.textContent = corpus && rawTitle ? (corpus + ' · ' + rawTitle) : title;
       var act = document.createElement('span');
       act.className = 'rl-easa-maya-chip-actions';
       var b1 = document.createElement('button');
@@ -1527,7 +1515,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       b1.className = 'btn btn-sm';
       b1.textContent = 'Open excerpt';
       b1.addEventListener('click', function () {
-        rlEasaAiOpenExcerptModal(bid, nuid, matched.length ? matched : (hl ? [hl] : []), title);
+        rlEasaAiOpenExcerptModal(bid, nuid, matched.length ? matched : (hl ? [hl] : []), rawTitle || corpus || 'Regulation excerpt');
       });
       var b2 = document.createElement('button');
       b2.type = 'button';
@@ -1536,7 +1524,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       b2.addEventListener('click', function () {
         var treeSec = document.getElementById('rlEasaTreeSection');
         if (treeSec && treeSec.scrollIntoView) treeSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        rlEasaRevealTreeNode(bid, nuid, hl).catch(function () {});
+        var prom = rlEasaRevealTreeNode(bid, nuid, hl);
+        if (prom && typeof prom.catch === 'function') {
+          prom.catch(function (err) {
+            try {
+              var msg = (err && err.message) ? String(err.message) : 'Could not reveal that section in the tree.';
+              alert('Maya cannot reveal this section right now.\n\n' + msg);
+            } catch (e) { /* ignore */ }
+          });
+        }
       });
       act.appendChild(b1);
       act.appendChild(b2);
@@ -1549,6 +1545,49 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   function rlEasaAiCloseExcerptModal() {
     var m = document.getElementById('rlEasaAiExcerptModal');
     if (m) m.hidden = true;
+  }
+
+  /**
+   * If the AI references a wrapper/TOC, walk down via tree_children and pick the first substantive descendant.
+   * Read-only — does not modify any tree state. Returns a Promise of { batchId, nodeUid } to actually display.
+   */
+  function rlEasaMayaResolveSubstantiveTarget(batchId, nodeUid, depth) {
+    var bid = parseInt(String(batchId), 10) || 0;
+    var nuid = String(nodeUid || '').trim();
+    if (!bid || !nuid || depth >= 4) {
+      return Promise.resolve({ batchId: bid, nodeUid: nuid });
+    }
+    return rlEasaFetchNodeDetail(bid, nuid).then(function (j) {
+      if (!j.ok || !j.node) return { batchId: bid, nodeUid: nuid, _detail: j };
+      var n = j.node;
+      var nt = String(n.node_type || '').toLowerCase();
+      var isWrapper = nt === 'document' || nt === 'frontmatter' || nt === 'toc' || nt === 'backmatter';
+      var hasStructured = Array.isArray(n.structured_blocks) && n.structured_blocks.length > 0;
+      if (!isWrapper) return { batchId: bid, nodeUid: nuid, _detail: j };
+      if (hasStructured && depth >= 1) return { batchId: bid, nodeUid: nuid, _detail: j };
+      return fetch(api + '?action=tree_children&batch_id=' + encodeURIComponent(String(bid))
+          + '&parent_uid=' + encodeURIComponent(nuid), { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .then(function (kids) {
+          if (!kids || !kids.ok || !Array.isArray(kids.nodes) || !kids.nodes.length) {
+            return { batchId: bid, nodeUid: nuid, _detail: j };
+          }
+          var pick = null;
+          for (var i = 0; i < kids.nodes.length; i++) {
+            var c = kids.nodes[i];
+            var cnt = String(c.node_type || '').toLowerCase();
+            if (cnt && cnt !== 'document' && cnt !== 'frontmatter' && cnt !== 'toc' && cnt !== 'backmatter') {
+              pick = c;
+              break;
+            }
+          }
+          if (!pick) pick = kids.nodes[0];
+          var childUid = String((pick && pick.node_uid) || '').trim();
+          if (!childUid || childUid === nuid) return { batchId: bid, nodeUid: nuid, _detail: j };
+          return rlEasaMayaResolveSubstantiveTarget(bid, childUid, depth + 1);
+        })
+        .catch(function () { return { batchId: bid, nodeUid: nuid, _detail: j }; });
+    }).catch(function () { return { batchId: bid, nodeUid: nuid }; });
   }
 
   function rlEasaAiOpenExcerptModal(batchId, nodeUid, terms, titleHint) {
@@ -1570,13 +1609,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     body.innerHTML = '';
     body.className = 'rl-easa-ai-excerpt-body rl-easa-detail-body';
     m.hidden = false;
-    rlEasaFetchNodeDetail(rlEasaAiExcerptState.batchId, rlEasaAiExcerptState.nodeUid).then(function (j) {
-      if (!j.ok || !j.node) {
-        band.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu';
-        band.innerHTML = esc((j && j.error) ? j.error : 'Load failed') + '<small></small>';
-        return;
-      }
-      var n = j.node;
+
+    function renderNode(n) {
       var b = n.rule_band || 'ir';
       if (['ir', 'amc', 'gm', 'neu'].indexOf(b) < 0) b = 'ir';
       var titleLine = n.title_display || n.title || n.source_erules_id || n.node_uid || '—';
@@ -1608,13 +1642,37 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       } else {
         body.className = 'rl-easa-ai-excerpt-body rl-easa-detail-body';
         var br = (n.body_reading || n.plain_text_display || n.plain_text || '').trim();
-        body.textContent = br || '[No body text]';
+        body.textContent = br || '[No body text on this section]';
       }
       rlEasaAiHighlightTerms(body, rlEasaAiExcerptState.terms);
-    }).catch(function (e) {
-      band.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu';
-      band.innerHTML = esc(e.message || 'Error') + '<small></small>';
-    });
+    }
+
+    rlEasaMayaResolveSubstantiveTarget(rlEasaAiExcerptState.batchId, rlEasaAiExcerptState.nodeUid, 0)
+      .then(function (resolved) {
+        var rb = parseInt(String(resolved.batchId), 10) || rlEasaAiExcerptState.batchId;
+        var ru = String(resolved.nodeUid || rlEasaAiExcerptState.nodeUid).trim();
+        rlEasaAiExcerptState.batchId = rb;
+        rlEasaAiExcerptState.nodeUid = ru;
+        if (resolved._detail && resolved._detail.ok && resolved._detail.node
+            && String(resolved._detail.node.node_uid || '') === ru) {
+          renderNode(resolved._detail.node);
+          return;
+        }
+        return rlEasaFetchNodeDetail(rb, ru).then(function (j) {
+          if (!j.ok || !j.node) {
+            band.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu';
+            band.innerHTML = esc((j && j.error) ? j.error : 'Maya could not load this section.') + '<small></small>';
+            body.className = 'rl-easa-ai-excerpt-body rl-easa-detail-body';
+            body.textContent = 'The referenced section could not be opened. Try clicking "Open in tree" instead, or ask Maya to point to a more specific rule.';
+            return;
+          }
+          renderNode(j.node);
+        });
+      })
+      .catch(function (e) {
+        band.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu';
+        band.innerHTML = esc((e && e.message) || 'Error') + '<small></small>';
+      });
   }
 
   (function bindAiExcerptModal() {
@@ -1642,80 +1700,198 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     }
   })();
 
-  function rlEasaAiFillSessionSelect(sessions, currentId) {
-    var sel = document.getElementById('rlEasaSessionSelect');
-    if (!sel) return;
-    sel.innerHTML = '';
-    (sessions || []).forEach(function (s) {
-      var opt = document.createElement('option');
-      opt.value = String(s.id);
-      var t = (s.title || '').trim();
-      var lab = '#' + s.id + (t ? (' — ' + t) : '');
-      opt.textContent = lab.length > 80 ? lab.slice(0, 77) + '…' : lab;
-      sel.appendChild(opt);
-    });
-    if (currentId) sel.value = String(currentId);
+  /** Friendly corpus name from a batch row from /status (no raw .xml file names). */
+  function rlEasaMayaFriendlyBatchName(b) {
+    if (!b || typeof b !== 'object') return '';
+    var raw = String(b.original_filename || '').toLowerCase();
+    if (/aircrew/.test(raw) || /\bfcl\b/.test(raw) || /\bpart-fcl\b/.test(raw) || /flight\s*crew/.test(raw)) return 'EAR Flight Crew';
+    if (/\bair[-\s]*ops\b/.test(raw) || /flight\s*operations/.test(raw) || /\bops\b/.test(raw)) return 'EAR Flight Operations';
+    if (/\bpart[-\s]*is\b/.test(raw) || /information\s*security/.test(raw)) return 'EAR Part-IS';
+    if (/cs[-\s]*fstd/.test(raw) || /fstd/.test(raw) || /simulator/.test(raw)) return 'EAR CS-FSTD';
+    if (/\bmed\b/.test(raw) || /medical/.test(raw)) return 'EAR Aircrew Medical';
+    if (/\bcat\b/.test(raw) || /commercial\s*air\s*transport/.test(raw)) return 'EAR Air Operations (CAT)';
+    if (/\bnco\b/.test(raw) || /\bspo\b/.test(raw)) return 'EAR Air Operations';
+    if (/balloon/.test(raw)) return 'EAR Balloons';
+    if (/sailplane/.test(raw)) return 'EAR Sailplanes';
+    return '';
   }
 
-  function rlEasaAiRenderHistory(messages) {
+  /** Cached map of batch_id -> friendly name, populated from /status. */
+  var rlEasaMayaBatchNames = {};
+  function rlEasaMayaApplyBatchNamesFromStatus(j) {
+    if (!j || !Array.isArray(j.batches)) return;
+    j.batches.forEach(function (b) {
+      var bid = parseInt(String(b.id || '0'), 10);
+      if (!bid) return;
+      rlEasaMayaBatchNames[bid] = rlEasaMayaFriendlyBatchName(b)
+        || ('EAR batch ' + bid);
+    });
+  }
+  function rlEasaMayaBatchName(bid) {
+    var n = parseInt(String(bid), 10) || 0;
+    if (!n) return '';
+    return rlEasaMayaBatchNames[n] || '';
+  }
+
+  /** Strip raw .xml filenames and internal IDs from any titles surfaced by the model. */
+  function rlEasaMayaCleanTitle(raw) {
+    var t = String(raw == null ? '' : raw).trim();
+    if (!t) return '';
+    if (/\.xml$/i.test(t)) {
+      t = t.replace(/^easy access rules for\s+/i, '');
+      t = t.replace(/\.xml$/i, '');
+      t = t.replace(/\s*-\s*part.*$/i, '');
+    }
+    t = t.replace(/\b(batch_id|node_uid|ERulesId)\s*[:=]\s*[A-Za-z0-9_\-]+/gi, '');
+    return t.replace(/\s+/g, ' ').trim();
+  }
+
+  function rlEasaAiFillSessionSelect(_sessions, _currentId) { /* dropdown removed */ }
+
+  function rlEasaMayaCreateUserRow(text) {
+    var urow = document.createElement('div');
+    urow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--user';
+    urow.innerHTML = '<div class="rl-easa-maya-bubble-wrap">'
+      + '<div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
+      + '<div class="rl-easa-chat-meta">You</div><p>' + esc(String(text || '')) + '</p></div></div>';
+    return urow;
+  }
+
+  function rlEasaMayaCreateAssistantRow(content, responseJsonStr) {
+    var mrow = document.createElement('div');
+    mrow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
+    var av = document.createElement('div');
+    av.className = 'rl-easa-maya-avatar';
+    av.setAttribute('aria-hidden', 'true');
+    av.textContent = 'M';
+    var bw = document.createElement('div');
+    bw.className = 'rl-easa-maya-bubble-wrap';
+    var bubble = document.createElement('div');
+    bubble.className = 'rl-easa-chat-bubble rl-easa-chat-bubble-system';
+    var meta = document.createElement('div');
+    meta.className = 'rl-easa-chat-meta';
+    meta.textContent = 'Maya';
+    bubble.appendChild(meta);
+    var body = document.createElement('div');
+    body.className = 'rl-easa-maya-msg-body';
+    body.innerHTML = rlEasaFormatAiAnswerHtml(rlEasaMayaSanitizeAssistantMarkdown(String(content || ''))) || '<p>(empty)</p>';
+    bubble.appendChild(body);
+    if (responseJsonStr && typeof responseJsonStr === 'string') {
+      try {
+        var o = JSON.parse(responseJsonStr);
+        var refs = (o && Array.isArray(o.primary_references)) ? o.primary_references : [];
+        rlEasaMayaRenderChips(bubble, refs);
+      } catch (e0) { /* ignore */ }
+    }
+    bw.appendChild(bubble);
+    mrow.appendChild(av);
+    mrow.appendChild(bw);
+    return mrow;
+  }
+
+  /**
+   * Cursor-based history state (auto-restore latest, lazy-load older).
+   * `loaded` = current oldest message id rendered (0 if none).
+   */
+  var rlEasaMayaHist = {
+    sessionId: 0,
+    oldestId: 0,
+    hasMore: false,
+    loading: false
+  };
+
+  function rlEasaMayaResetThreadAndRender(messages, hasMore) {
     var host = document.getElementById('rlEasaChatHistory');
     if (!host) return;
     host.innerHTML = '';
+    var lm = document.createElement('div');
+    lm.className = 'rl-easa-maya-loadmore';
+    lm.id = 'rlEasaChatLoadMore';
+    lm.hidden = !hasMore;
+    lm.innerHTML = '<button type="button" id="rlEasaChatLoadMoreBtn">Load earlier messages</button>';
+    host.appendChild(lm);
+    var firstId = 0;
     (messages || []).forEach(function (row) {
       var role = String(row.role || '');
-      if (role === 'user') {
-        var urow = document.createElement('div');
-        urow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--user';
-        var ub = document.createElement('div');
-        ub.className = 'rl-easa-maya-bubble-wrap';
-        ub.innerHTML = '<div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
-          + '<div class="rl-easa-chat-meta">You</div><p>' + esc(String(row.content || '')) + '</p></div>';
-        urow.appendChild(ub);
-        host.appendChild(urow);
-        return;
-      }
-      if (role === 'assistant') {
-        var mrow = document.createElement('div');
-        mrow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
-        var av = document.createElement('div');
-        av.className = 'rl-easa-maya-avatar';
-        av.setAttribute('aria-hidden', 'true');
-        av.textContent = 'M';
-        var bw = document.createElement('div');
-        bw.className = 'rl-easa-maya-bubble-wrap';
-        var bubble = document.createElement('div');
-        bubble.className = 'rl-easa-chat-bubble rl-easa-chat-bubble-system';
-        var meta = document.createElement('div');
-        meta.className = 'rl-easa-chat-meta';
-        meta.textContent = 'Maya';
-        bubble.appendChild(meta);
-        var inner = rlEasaFormatAiAnswerHtml(rlEasaMayaSanitizeAssistantMarkdown(String(row.content || '')));
-        var body = document.createElement('div');
-        body.className = 'rl-easa-maya-msg-body';
-        body.innerHTML = inner || '<p>(empty)</p>';
-        bubble.appendChild(body);
-        var pj = row.response_json;
-        if (pj && typeof pj === 'string') {
-          try {
-            var o = JSON.parse(pj);
-            var refs = (o && Array.isArray(o.primary_references)) ? o.primary_references : [];
-            rlEasaMayaRenderChips(bubble, refs);
-          } catch (e0) { /* ignore */ }
-        }
-        bw.appendChild(bubble);
-        mrow.appendChild(av);
-        mrow.appendChild(bw);
-        host.appendChild(mrow);
+      var node;
+      if (role === 'user') node = rlEasaMayaCreateUserRow(row.content);
+      else if (role === 'assistant') node = rlEasaMayaCreateAssistantRow(row.content, row.response_json);
+      if (node) {
+        host.appendChild(node);
+        var rid = parseInt(String(row.id || '0'), 10);
+        if (rid && (firstId === 0 || rid < firstId)) firstId = rid;
       }
     });
+    rlEasaMayaHist.oldestId = firstId;
+    rlEasaMayaHist.hasMore = !!hasMore;
+    var btn = document.getElementById('rlEasaChatLoadMoreBtn');
+    if (btn) btn.addEventListener('click', rlEasaMayaLoadOlder);
+    try { host.scrollTop = host.scrollHeight; } catch (e1) { /* ignore */ }
+  }
+
+  function rlEasaMayaPrependOlder(messages, hasMore) {
+    var host = document.getElementById('rlEasaChatHistory');
+    var lm = document.getElementById('rlEasaChatLoadMore');
+    if (!host) return;
+    var prevHeight = host.scrollHeight;
+    var anchor = lm ? lm.nextSibling : host.firstChild;
+    var firstId = rlEasaMayaHist.oldestId;
+    (messages || []).forEach(function (row) {
+      var role = String(row.role || '');
+      var node;
+      if (role === 'user') node = rlEasaMayaCreateUserRow(row.content);
+      else if (role === 'assistant') node = rlEasaMayaCreateAssistantRow(row.content, row.response_json);
+      if (node) {
+        if (anchor) host.insertBefore(node, anchor); else host.appendChild(node);
+        var rid = parseInt(String(row.id || '0'), 10);
+        if (rid && (firstId === 0 || rid < firstId)) firstId = rid;
+      }
+    });
+    rlEasaMayaHist.oldestId = firstId;
+    rlEasaMayaHist.hasMore = !!hasMore;
+    if (lm) lm.hidden = !hasMore;
     try {
-      host.scrollTop = host.scrollHeight;
-    } catch (e1) { /* ignore */ }
+      var newHeight = host.scrollHeight;
+      host.scrollTop = newHeight - prevHeight;
+    } catch (e2) { /* ignore */ }
+  }
+
+  function rlEasaMayaLoadOlder() {
+    if (rlEasaMayaHist.loading || !rlEasaMayaHist.hasMore || !rlEasaMayaHist.sessionId) return;
+    if (rlEasaMayaHist.oldestId <= 0) return;
+    rlEasaMayaHist.loading = true;
+    var btn = document.getElementById('rlEasaChatLoadMoreBtn');
+    if (btn) btn.disabled = true;
+    fetch(api, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify({
+        action: 'easa_ai_chat_bootstrap',
+        session_id: rlEasaMayaHist.sessionId,
+        before_id: rlEasaMayaHist.oldestId,
+        limit: 20
+      })
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.j || !x.j.ok) return;
+        rlEasaMayaPrependOlder(x.j.messages || [], !!x.j.has_more);
+      })
+      .catch(function () { /* ignore */ })
+      .finally(function () {
+        rlEasaMayaHist.loading = false;
+        if (btn) btn.disabled = false;
+      });
+  }
+
+  function rlEasaAiRenderHistory(messages, hasMore) {
+    rlEasaMayaResetThreadAndRender(messages || [], !!hasMore);
   }
 
   function rlEasaAiLoadBootstrap() {
     var hint = document.getElementById('rlEasaChatPersistHint');
-    var boot = { action: 'easa_ai_chat_bootstrap' };
+    var boot = { action: 'easa_ai_chat_bootstrap', limit: 20 };
     if (rlEasaAiSessionId > 0) boot.session_id = rlEasaAiSessionId;
     return fetch(api, {
       method: 'POST',
@@ -1730,11 +1906,11 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           if (hint) hint.textContent = x.j.chat_migrate_hint || '';
           return;
         }
-        if (hint) hint.textContent = 'Saved for your account after reload.';
+        if (hint) hint.textContent = 'Maya remembers this chat after reload.';
         var cur = parseInt(String(x.j.current_session_id || '0'), 10) || 0;
         if (cur > 0) rlEasaAiSessionId = cur;
-        rlEasaAiFillSessionSelect(x.j.sessions || [], cur || rlEasaAiSessionId);
-        rlEasaAiRenderHistory(x.j.messages || []);
+        rlEasaMayaHist.sessionId = rlEasaAiSessionId;
+        rlEasaAiRenderHistory(x.j.messages || [], !!x.j.has_more);
       })
       .catch(function () {
         if (hint) hint.textContent = '';
@@ -2307,6 +2483,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           limEl.textContent = '';
         }
         rlEasaFillBatchSelects(x.j);
+        rlEasaMayaApplyBatchNamesFromStatus(x.j);
         var batches = x.j.batches || [];
         var monitors = x.j.monitor || [];
         var indexed = parseInt(String(x.j.indexed_nodes || 0), 10) || 0;
@@ -3456,25 +3633,6 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     }
   }
 
-  var sessSel = document.getElementById('rlEasaSessionSelect');
-  if (sessSel) {
-    sessSel.addEventListener('change', function () {
-      var id = parseInt(sessSel.value, 10) || 0;
-      rlEasaAiSessionId = id;
-      fetch(api, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({ action: 'easa_ai_chat_bootstrap', session_id: id })
-      })
-        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
-        .then(function (x) {
-          if (!x.j || !x.j.ok) return;
-          rlEasaAiRenderHistory(x.j.messages || []);
-        })
-        .catch(function () {});
-    });
-  }
   var newChatBtn = document.getElementById('rlEasaNewChatBtn');
   if (newChatBtn) {
     newChatBtn.addEventListener('click', function () {
@@ -3517,19 +3675,14 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
       var qEl = document.getElementById('rlEasaChatQ');
       var q = qEl ? (qEl.value || '').trim() : '';
       if (!q) return;
-      var useAiEl = document.getElementById('rlEasaChatUseAi');
-      var useAi = useAiEl ? (useAiEl.type === 'hidden' ? true : !!useAiEl.checked) : true;
-      var srcEl = document.getElementById('rlEasaChatSource');
-      var srcBid = srcEl && srcEl.value ? parseInt(srcEl.value, 10) : 0;
       var payload = {
         action: 'regulatory_compare_ai',
         query: q,
-        use_ai: useAi,
+        use_ai: true,
         include_ecfr: false,
         ecfr_title_number: 14,
         ecfr_section: ''
       };
-      if (srcBid > 0) payload.batch_id = srcBid;
       if (rlEasaAiSessionId > 0) payload.session_id = rlEasaAiSessionId;
       var urow = document.createElement('div');
       urow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--user';
