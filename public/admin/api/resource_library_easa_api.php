@@ -468,8 +468,6 @@ if ($method === 'GET') {
                 }
             }
         }
-        $row['structured_blocks'] = $structuredBlocksDecoded;
-
         /** Mirror tree enrichment: appendix AMC/GM wrappers sometimes store labels only on children. */
         $fcLabelSlice = easa_erules_staging_first_direct_child_label_fallback($pdo, $batchId, $nodeUid);
         $treeLabelRow = $row;
@@ -478,32 +476,64 @@ if ($method === 'GET') {
             $treeLabelRow['first_child_source_title'] = trim((string) ($fcLabelSlice['source_title'] ?? ''));
         }
 
+        $ntLcSupp = strtolower(trim((string) ($row['node_type'] ?? '')));
+        $designatorForSupplement = easa_erules_node_detail_amc_gm_designator_key($row, $fcLabelSlice);
+        $supplementFenceAppendixNums = [];
+        $sbPriorToFenceLiftEmpty = ($structuredBlocksDecoded === null || $structuredBlocksDecoded === []);
+        if (
+            $sbPriorToFenceLiftEmpty
+            && $designatorForSupplement !== null
+            && in_array($ntLcSupp, ['toc', 'heading'], true)
+        ) {
+            $supplementFenceAppendixNums = easa_erules_supplement_navigation_appendix_lock_ordinals($row, $fcLabelSlice);
+            $liftSb = easa_erules_node_detail_resolve_structured_blocks_under_supplement_fence(
+                $pdo,
+                $batchId,
+                $nodeUid,
+                $designatorForSupplement,
+                $supplementFenceAppendixNums
+            );
+            if (is_array($liftSb) && $liftSb !== []) {
+                $structuredBlocksDecoded = $liftSb;
+            }
+        }
+        $row['structured_blocks'] = $structuredBlocksDecoded;
+
+        $sbHasStructuredContent = $structuredBlocksDecoded !== null && $structuredBlocksDecoded !== [];
         $canonicalRaw = trim((string) ($row['canonical_text'] ?? ''));
         $plainRaw = (string) ($row['plain_text'] ?? '');
         $plainTrim = trim($plainRaw);
         $composed = '';
+        $suppressFullDescendantAggregate = false;
         if ($plainTrim === '') {
-            $ntLc = strtolower(trim((string) ($row['node_type'] ?? '')));
-            $designatorForBody = easa_erules_node_detail_amc_gm_designator_key($row, $fcLabelSlice);
-            if ($designatorForBody !== null && in_array($ntLc, ['toc', 'heading'], true)) {
-                $composed = trim(
-                    easa_erules_aggregate_descendant_plain_text_for_designator(
-                        $pdo,
-                        $batchId,
-                        $nodeUid,
-                        $designatorForBody,
-                        0
-                    )
-                );
-            }
-            if ($composed === '') {
-                $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $nodeUid, 0);
+            if (!$sbHasStructuredContent) {
+                $ntLc = strtolower(trim((string) ($row['node_type'] ?? '')));
+                $designatorForBody = $designatorForSupplement;
+                if ($designatorForBody !== null && in_array($ntLc, ['toc', 'heading'], true)) {
+                    $suppressFullDescendantAggregate = true;
+                    $composed = trim(
+                        easa_erules_aggregate_descendant_plain_text_for_designator(
+                            $pdo,
+                            $batchId,
+                            $nodeUid,
+                            $designatorForBody,
+                            0,
+                            $supplementFenceAppendixNums
+                        )
+                    );
+                }
+                if ($composed === '' && !$suppressFullDescendantAggregate) {
+                    $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $nodeUid, 0);
+                }
             }
         }
         $stepPlain = $plainTrim !== '' ? $plainRaw : $composed;
         $stepPlainTrim = trim($stepPlain);
+        /** Canonical rendering path only — wrapper xml_fragment/source.xml must not mask lifted structured descendant bodies. */
+        $preferStructuredCanonical = $sbHasStructuredContent && $canonicalRaw === '';
+
         $fromFrag = '';
-        if ($canonicalRaw === '' && $stepPlainTrim === '') {
+        if (!$preferStructuredCanonical && $canonicalRaw === '' && $stepPlainTrim === '') {
             $fragRaw = trim((string) ($row['xml_fragment'] ?? ''));
             if ($fragRaw !== '') {
                 $fromFrag = easa_erules_plain_text_from_stored_xml_fragment($fragRaw);
@@ -511,7 +541,7 @@ if ($method === 'GET') {
         }
         $srcEid = trim((string) ($row['source_erules_id'] ?? ''));
         $fromXml = '';
-        if ($canonicalRaw === '' && $stepPlainTrim === '' && trim($fromFrag) === '' && $srcEid !== '') {
+        if (!$preferStructuredCanonical && $canonicalRaw === '' && $stepPlainTrim === '' && trim($fromFrag) === '' && $srcEid !== '') {
             $xmlAbs = easa_erules_batch_source_xml_absolute_path($pdo, $batchId);
             if ($xmlAbs !== null) {
                 $fromXml = easa_erules_extract_plain_text_from_source_xml_by_erules_id($xmlAbs, $srcEid);
@@ -522,6 +552,9 @@ if ($method === 'GET') {
         if ($canonicalRaw !== '') {
             $effectivePlain = $canonicalRaw;
             $row['plain_text_effective_source'] = 'canonical';
+        } elseif ($preferStructuredCanonical) {
+            $effectivePlain = '';
+            $row['plain_text_effective_source'] = 'structured_blocks';
         } elseif ($stepPlainTrim !== '') {
             $effectivePlain = $stepPlain;
             $row['plain_text_effective_source'] = $plainTrim !== '' ? 'node' : 'descendants';
@@ -531,6 +564,12 @@ if ($method === 'GET') {
         } elseif (trim($fromXml) !== '') {
             $effectivePlain = $fromXml;
             $row['plain_text_effective_source'] = 'source_xml_erules';
+        } elseif ($suppressFullDescendantAggregate && $designatorForSupplement !== null) {
+            $effectivePlain =
+                'This AMC/GM row is only a bounded navigation wrapper — no descendant text survived the appendix '
+                . 'fence (neighbouring supplement material was deliberately excluded). If expected content is '
+                . 'missing, inspect the numbered topic descendant for stored canonical or structured_blocks.';
+            $row['plain_text_effective_source'] = 'supplement_wrapper_no_bounded_plain';
         } else {
             $row['plain_text_effective_source'] = 'none';
         }

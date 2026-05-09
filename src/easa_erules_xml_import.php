@@ -3218,24 +3218,245 @@ function easa_erules_node_detail_amc_gm_designator_key(array $stagingRow, ?array
 }
 
 /**
- * Same aggregate precedence as {@see easa_erules_aggregate_descendant_plain_text}, but skips whole subtrees whose
- * first explicit AMC/GM stub (on title/source/erules) differs from $expectedDesignator — prevents appendix wrappers
- * from mashing later GM/AMC siblings into one body.
+ * All numeric appendix ordinals mentioned in blobs (digits only — "Appendix 3").
  *
- * Rows with no detectable AMC/GM stub are included while walking under a matching ancestor (anonymous body/topics).
+ * @return list<int>
+ */
+function easa_erules_nav_blob_appendix_numeric_ordinals(string ...$blobs): array
+{
+    $out = [];
+    foreach ($blobs as $blob) {
+        $blob = trim($blob);
+        if ($blob === '') {
+            continue;
+        }
+        if (preg_match_all('/\bAppendix\s+(\d+)\b/iu', $blob, $m) > 0) {
+            foreach ((array) ($m[1] ?? []) as $d) {
+                $n = (int) trim((string) $d);
+                if ($n > 0) {
+                    $out[] = $n;
+                }
+            }
+        }
+    }
+
+    return $out === [] ? [] : array_values(array_unique($out));
+}
+
+/**
+ * Annex appendix body heading ordinal on title first line ("Appendix 5 – …").
+ */
+function easa_erules_row_standalone_annex_appendix_heading_ordinal(?string $titleBlob): ?int
+{
+    $line = easa_erules_tree_title_first_line((string) $titleBlob);
+
+    return easa_erules_standalone_annex_appendix_heading_ordinal_from_line($line);
+}
+
+function easa_erules_standalone_annex_appendix_heading_ordinal_from_line(string $line): ?int
+{
+    $line = trim($line);
+    if ($line === '' || !easa_erules_tree_title_is_annex_appendix_body_line($line)) {
+        return null;
+    }
+    if (preg_match('/^\s*Appendix\s+(\d+)\b/iu', $line, $m) === 1) {
+        $n = (int) trim((string) ($m[1] ?? ''));
+
+        return $n > 0 ? $n : null;
+    }
+
+    return null;
+}
+
+/**
+ * @return array{fam: string, designator_key: string, appendix_nums: list<int>}
+ */
+function easa_erules_supplement_aggregate_fence_unpack(string $expectedDesignator, array $lockedAppendixOrdinals): array
+{
+    $d = strtoupper(trim($expectedDesignator));
+    $fam = str_starts_with($d, 'GM') ? 'GM' : 'AMC';
+    /** @var list<int> $nums */
+    $nums = array_values(array_unique(array_map(static fn ($x): int => (int) $x, $lockedAppendixOrdinals)));
+
+    return [
+        'fam' => $fam,
+        'designator_key' => $d,
+        'appendix_nums' => $nums,
+    ];
+}
+
+/**
+ * True when direct sibling $childRow starts a navigational block that ends the current supplement run.
  *
- * @param non-empty-string $expectedDesignator e.g. "AMC1", "GM2"
+ * @param array{fam: string, designator_key: string, appendix_nums: list<int>}|null $fence
+ */
+function easa_erules_supplement_aggregate_row_is_fence_boundary_sibling(?array $fence, array $childRow): bool
+{
+    if ($fence === null || trim((string) ($fence['designator_key'] ?? '')) === '') {
+        return false;
+    }
+
+    $probeBits = [];
+    foreach (['title', 'source_title'] as $k) {
+        $b = trim((string) ($childRow[$k] ?? ''));
+        if ($b === '') {
+            continue;
+        }
+        $parts = preg_split('/\R+/u', $b) ?: [];
+        foreach ($parts as $idx => $ln) {
+            if ($idx >= 3) {
+                break;
+            }
+            $ln = trim((string) $ln);
+            if ($ln !== '') {
+                $probeBits[] = $ln;
+            }
+        }
+    }
+
+    if ($probeBits === []) {
+        return false;
+    }
+
+    $expectedKey = trim((string) $fence['designator_key']);
+    $locked = array_map(static fn ($x): int => (int) $x, $fence['appendix_nums'] ?? []);
+
+    $expFam = (string) ($fence['fam'] ?? 'AMC');
+
+    $soloApp = easa_erules_row_standalone_annex_appendix_heading_ordinal((string) ($childRow['title'] ?? ''));
+    if ($soloApp !== null && $locked !== [] && !in_array($soloApp, $locked, true)) {
+        return true;
+    }
+
+    foreach ($probeBits as $ln) {
+        $childDesk = easa_erules_title_line_amc_gm_designator_key($ln);
+        if ($childDesk === null) {
+            continue;
+        }
+        $cFam = str_starts_with(strtoupper(trim($childDesk)), 'GM') ? 'GM' : 'AMC';
+        if ($cFam !== $expFam) {
+            return true;
+        }
+
+        if ($locked !== []) {
+            $lineNums = easa_erules_nav_blob_appendix_numeric_ordinals($ln);
+            $inter = array_values(array_intersect($lineNums, $locked));
+            if ($lineNums !== [] && $inter === []) {
+                return true;
+            }
+        }
+
+        if (!easa_erules_amc_gm_designator_keys_equivalent($expectedKey, $childDesk)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    if ($locked !== []) {
+        $probeJoined = implode("\n", $probeBits);
+        $floatingNums = easa_erules_nav_blob_appendix_numeric_ordinals($probeJoined);
+        if ($floatingNums !== []) {
+            $hit = array_values(array_intersect($floatingNums, $locked));
+            if ($hit === []) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Prefer "to Appendix N" / leading-line appendix anchors from supplement titles (narrower lock than corpus-wide appendix union).
+ *
+ * @param array<string, mixed>        $stagingRow
+ * @param array<string, string>|null $firstChildTitles
+ *
+ * @return list<int>
+ */
+function easa_erules_supplement_navigation_appendix_lock_ordinals(array $stagingRow, ?array $firstChildTitles): array
+{
+    $blobs = [
+        trim((string) ($stagingRow['title'] ?? '')),
+        trim((string) ($stagingRow['source_title'] ?? '')),
+        trim((string) ($stagingRow['source_erules_id'] ?? '')),
+    ];
+    if (is_array($firstChildTitles)) {
+        $blobs[] = trim((string) ($firstChildTitles['title'] ?? ''));
+        $blobs[] = trim((string) ($firstChildTitles['source_title'] ?? ''));
+    }
+    foreach ($blobs as $blob) {
+        $ln = easa_erules_tree_title_first_line($blob);
+        if ($ln === '') {
+            continue;
+        }
+        if (preg_match('/to\s+Appendix\s+(\d+)\b/iu', $ln, $m) === 1) {
+            $n = (int) trim((string) ($m[1] ?? ''));
+
+            return $n > 0 ? [$n] : [];
+        }
+        if (preg_match('/\bAppendix\s+(\d+)\b/iu', $ln, $m2) === 1) {
+            $n2 = (int) trim((string) ($m2[1] ?? ''));
+
+            return $n2 > 0 ? [$n2] : [];
+        }
+    }
+
+    $unionMap = [];
+    foreach ($blobs as $blob) {
+        foreach (easa_erules_nav_blob_appendix_numeric_ordinals($blob) as $o) {
+            $unionMap[(int) $o] = true;
+        }
+    }
+
+    return $unionMap === [] ? [] : array_values(array_map(static fn ($k): int => (int) $k, array_keys($unionMap)));
+}
+
+/**
+ * Appendix-aware AMC/GM body assembly: aggregates only the first contiguous run of direct descendants under each
+ * parent, stopping before sibling peers whose titles target a competing supplement (different AMC number, AMC↔GM,
+ * appendix ordinal mismatch versus $lockedAppendixOrdinals).
+ *
+ * @param non-empty-string                  $expectedDesignator e.g. "AMC1", "GM2"
+ * @param list<int>                          $lockedAppendixOrdinals e.g. [3]; empty disables appendix-relative sibling boundaries
  */
 function easa_erules_aggregate_descendant_plain_text_for_designator(
     PDO $pdo,
     int $batchId,
     string $parentNodeUid,
     string $expectedDesignator,
+    int $depth = 0,
+    array $lockedAppendixOrdinals = []
+): string {
+    return easa_erules_aggregate_supplement_fence_contiguous_plain(
+        $pdo,
+        $batchId,
+        $parentNodeUid,
+        $expectedDesignator,
+        $lockedAppendixOrdinals,
+        $depth
+    );
+}
+
+/**
+ * Same contract as legacy {@see easa_erules_aggregate_descendant_plain_text_for_designator} with appendix lock set.
+ *
+ * @param non-empty-string $designatorKey
+ * @param list<int>        $lockedAppendixOrdinals
+ */
+function easa_erules_aggregate_supplement_fence_contiguous_plain(
+    PDO $pdo,
+    int $batchId,
+    string $parentNodeUid,
+    string $designatorKey,
+    array $lockedAppendixOrdinals,
     int $depth = 0
 ): string {
-    if ($depth > 120 || $batchId <= 0 || $parentNodeUid === '' || trim($expectedDesignator) === '') {
+    if ($depth > 120 || $batchId <= 0 || $parentNodeUid === '' || trim($designatorKey) === '') {
         return '';
     }
+    $fence = easa_erules_supplement_aggregate_fence_unpack($designatorKey, $lockedAppendixOrdinals);
     $hasCanon = easa_erules_staging_has_canonical_column($pdo);
     $selectCols = 'node_uid, node_type, title, source_title, source_erules_id, plain_text, xml_fragment, sort_order';
     if ($hasCanon) {
@@ -3257,16 +3478,10 @@ function easa_erules_aggregate_descendant_plain_text_for_designator(
         if (++$childCount > 2000) {
             break;
         }
-        $uid = (string) ($row['node_uid'] ?? '');
-        $childKey = easa_erules_row_title_blob_amc_gm_designator_key($row);
-        if (
-            $childKey !== null
-            && trim($expectedDesignator) !== ''
-            && !easa_erules_amc_gm_designator_keys_equivalent($expectedDesignator, $childKey)
-        ) {
-            continue;
+        if (easa_erules_supplement_aggregate_row_is_fence_boundary_sibling($fence, $row)) {
+            break;
         }
-
+        $uid = (string) ($row['node_uid'] ?? '');
         $title = trim((string) ($row['title'] ?? ''));
         $plainTrim = trim((string) ($row['plain_text'] ?? ''));
         $canonTrim = $hasCanon ? trim((string) ($row['canonical_text'] ?? '')) : '';
@@ -3279,11 +3494,12 @@ function easa_erules_aggregate_descendant_plain_text_for_designator(
         }
         if ($own === '' && $uid !== '') {
             $own = trim(
-                easa_erules_aggregate_descendant_plain_text_for_designator(
+                easa_erules_aggregate_supplement_fence_contiguous_plain(
                     $pdo,
                     $batchId,
                     $uid,
-                    $expectedDesignator,
+                    $designatorKey,
+                    $lockedAppendixOrdinals,
                     $depth + 1
                 )
             );
@@ -3299,6 +3515,80 @@ function easa_erules_aggregate_descendant_plain_text_for_designator(
     }
 
     return implode("\n\n", $blocks);
+}
+
+/**
+ * First decoded structured_blocks array under contiguous supplement fence starting at wrapper $rootParentUid (depth-first).
+ *
+ * @return list<mixed>|null
+ */
+function easa_erules_node_detail_resolve_structured_blocks_under_supplement_fence(
+    PDO $pdo,
+    int $batchId,
+    string $rootParentUid,
+    string $designatorKey,
+    array $lockedAppendixOrdinals
+): ?array {
+    if ($batchId <= 0 || $rootParentUid === '' || trim($designatorKey) === '' || !easa_erules_staging_has_structured_blocks_column($pdo)) {
+        return null;
+    }
+    $fence = easa_erules_supplement_aggregate_fence_unpack($designatorKey, $lockedAppendixOrdinals);
+    return easa_erules_staging_dfs_first_structured_blocks_child($pdo, $batchId, $rootParentUid, $fence);
+}
+
+/**
+ * @param array{fam: string, designator_key: string, appendix_nums: list<int>} $fence
+ *
+ * @return list<mixed>|null
+ */
+function easa_erules_staging_dfs_first_structured_blocks_child(
+    PDO $pdo,
+    int $batchId,
+    string $parentNodeUid,
+    array $fence
+): ?array {
+    $stKids = $pdo->prepare(
+        'SELECT node_uid, node_type, title, source_title, structured_blocks_json
+         FROM easa_erules_import_nodes_staging
+         WHERE batch_id = ? AND parent_node_uid = ?
+         ORDER BY sort_order ASC, id ASC'
+    );
+    $stKids->execute([$batchId, $parentNodeUid]);
+    $childCount = 0;
+    while ($r = $stKids->fetch(PDO::FETCH_ASSOC)) {
+        if (!is_array($r)) {
+            continue;
+        }
+        if (++$childCount > 2000) {
+            break;
+        }
+        if (easa_erules_supplement_aggregate_row_is_fence_boundary_sibling($fence, $r)) {
+            break;
+        }
+
+        $uid = trim((string) ($r['node_uid'] ?? ''));
+        if ($uid !== '') {
+            $sbRaw = trim((string) ($r['structured_blocks_json'] ?? ''));
+            if ($sbRaw !== '') {
+                $dec = json_decode($sbRaw, true);
+                if (is_array($dec) && $dec !== []) {
+                    /** @var list<mixed> $outDec */
+                    $outDec = $dec;
+
+                    return $outDec;
+                }
+            }
+        }
+
+        if ($uid !== '') {
+            $sub = easa_erules_staging_dfs_first_structured_blocks_child($pdo, $batchId, $uid, $fence);
+            if ($sub !== null) {
+                return $sub;
+            }
+        }
+    }
+
+    return null;
 }
 
 /**
