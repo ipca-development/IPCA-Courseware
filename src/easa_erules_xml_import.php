@@ -5124,6 +5124,59 @@ function easa_erules_structured_blocks_slice_for_synthetic_detail(array $blocks,
 }
 
 /**
+ * Request-scoped memo for synthetic navigation children (expensive aggregate fallback).
+ *
+ * @return list<array<string, mixed>>
+ */
+function easa_erules_tree_synthetic_nav_children_memoized(PDO $pdo, int $batchId, string $parentUid): array
+{
+    static $memo = [];
+    $pk = (string) $batchId . "\0" . trim($parentUid);
+    if (\array_key_exists($pk, $memo)) {
+        return $memo[$pk];
+    }
+    $memo[$pk] = easa_erules_tree_synthetic_block_children_for_parent($pdo, $batchId, trim($parentUid));
+
+    return $memo[$pk];
+}
+
+/**
+ * When a section/toc wrapper has zero staged flattened children but API will inject synthetic SUBJECT (or LO) rows on expand,
+ * mark it expandable so the viewer uses disclosure + expand instead of opening the aggregated parent blob.
+ *
+ * Mutates &$node semantic tree_children shape (never widens ANNEX filters).
+ */
+function easa_erules_tree_semantic_adapter_apply_synthetic_parent_nav_hints(PDO $pdo, int $batchId, array &$node): void
+{
+    if (($node['synthetic'] ?? false) === true) {
+        return;
+    }
+    if ((int) ($node['child_count'] ?? 0) > 0) {
+        return;
+    }
+    $uid = trim((string) ($node['id'] ?? ''));
+    if ($uid === '') {
+        return;
+    }
+    $synth = easa_erules_tree_synthetic_nav_children_memoized($pdo, $batchId, $uid);
+    if ($synth === []) {
+        return;
+    }
+    $ntLc = strtolower(trim((string) ($node['node_type'] ?? '')));
+    $sectionLike = (($node['ui_kind'] ?? '') === 'section') || in_array($ntLc, ['toc', 'heading'], true);
+    if (!$sectionLike) {
+        return;
+    }
+    if (($node['ui_kind'] ?? '') !== 'section' && in_array($ntLc, ['toc', 'heading'], true)) {
+        $node['ui_kind'] = 'section';
+        $node['material_type'] = 'HEADING';
+    }
+    $node['child_count'] = count($synth);
+    $node['expandable'] = true;
+    $node['click_action'] = 'expand';
+}
+
+/**
  * Synthetic tree rows derived from structured_blocks headings on a parent with no staging children.
  * Does not touch ANNEX-level browse: only invoked when the real flattened child list is empty.
  *
@@ -5232,11 +5285,13 @@ function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?strin
         }
         $row['child_count'] = isset($memo[$vk]) && is_array($memo[$vk]) ? count($memo[$vk]) : 0;
         $childStaging = isset($memo[$vk]) && is_array($memo[$vk]) ? $memo[$vk] : [];
-        $nodes[] = easa_erules_tree_semantic_adapter($row, $childStaging);
+        $sem = easa_erules_tree_semantic_adapter($row, $childStaging);
+        easa_erules_tree_semantic_adapter_apply_synthetic_parent_nav_hints($pdo, $batchId, $sem);
+        $nodes[] = $sem;
     }
 
     if ($nodes === [] && $parentUid !== null && $parentUid !== '') {
-        $syn = easa_erules_tree_synthetic_block_children_for_parent($pdo, $batchId, $parentUid);
+        $syn = easa_erules_tree_synthetic_nav_children_memoized($pdo, $batchId, $parentUid);
         if ($syn !== []) {
             return $syn;
         }
