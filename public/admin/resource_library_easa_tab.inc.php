@@ -745,6 +745,55 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     border-radius: 6px;
     border: 1px solid #fef08a;
   }
+  .rl-easa-ai-session-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin: 10px 0 12px;
+  }
+  .rl-easa-ai-session-bar label {
+    font-size: 12px;
+    font-weight: 700;
+    color: #475569;
+  }
+  .rl-easa-chat-history {
+    margin-top: 12px;
+    max-height: 340px;
+    overflow-y: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    padding: 10px;
+    background: #f8fafc;
+  }
+  .rl-easa-chat-history:empty {
+    display: none;
+  }
+  .rl-easa-hist-block {
+    margin-bottom: 12px;
+  }
+  .rl-easa-hist-block:last-child {
+    margin-bottom: 0;
+  }
+  .rl-easa-hist-cards {
+    margin-top: 8px;
+  }
+  .rl-easa-ai-excerpt-modal .rl-easa-modal-dialog {
+    max-width: min(920px, 96vw);
+    max-height: min(90vh, 1200px);
+  }
+  .rl-easa-ai-excerpt-body {
+    max-height: min(70vh, 800px);
+    overflow: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .rl-easa-ai-excerpt-meta {
+    font-size: 12px;
+    color: #64748b;
+    margin-bottom: 10px;
+    word-break: break-word;
+  }
   .rl-easa-cite-actions {
     margin-top: 10px;
   }
@@ -965,9 +1014,15 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     <span class="rl-easa-badge">AI · staging-backed</span>
     <h3>Ask AI about official regulations</h3>
     <p class="rl-easa-dash-lead">
-      The server loads <strong>matching staging excerpts</strong> (same matching rules as keyword search) and optional U.S. eCFR text, then asks the configured model.
-      Cards below list traceable batch / node references — verify every quote on official EASA sources.
+      The server runs the same staging search as the index, loads <strong>full canonical node_detail</strong> for the top matches (structured blocks, canonical and plain text), then asks the model to return structured JSON with traceable references. Optional U.S. eCFR text can be appended for comparison. Verify every quote on official EASA sources.
     </p>
+    <div class="rl-easa-ai-session-bar" id="rlEasaAiSessionBar">
+      <label for="rlEasaSessionSelect">Chat session</label>
+      <select id="rlEasaSessionSelect" style="min-width:220px;max-width:100%;font-size:13px;"></select>
+      <button type="button" class="btn btn-sm" id="rlEasaNewChatBtn">New chat</button>
+      <span class="rl-drop-meta" id="rlEasaChatPersistHint" style="margin:0;"></span>
+    </div>
+    <div class="rl-easa-chat-history" id="rlEasaChatHistory" aria-label="Chat history"></div>
     <div class="rl-field" style="margin-bottom:8px;">
       <label for="rlEasaChatSource">EASA source scope</label>
       <select id="rlEasaChatSource" style="max-width:100%;min-width:280px;font-size:13px;">
@@ -1151,6 +1206,22 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   </div>
 </div>
 
+<div class="rl-easa-modal-overlay rl-easa-ai-excerpt-modal" id="rlEasaAiExcerptModal" hidden>
+  <div class="rl-easa-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rlEasaAiExcerptTitle">
+    <div class="rl-easa-modal-head">
+      <h2 id="rlEasaAiExcerptTitle">Regulation excerpt</h2>
+      <button type="button" class="rl-easa-modal-close" id="rlEasaAiExcerptClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="rl-easa-modal-body">
+      <div class="rl-easa-ai-excerpt-meta" id="rlEasaAiExcerptMeta"></div>
+      <div class="rl-panel-actions" style="margin-bottom:10px;">
+        <button type="button" class="btn btn-sm" id="rlEasaAiExcerptOpenTree">Open in rule tree</button>
+      </div>
+      <div class="rl-easa-ai-excerpt-body rl-easa-detail-body" id="rlEasaAiExcerptBody"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   var root = document.getElementById('rlEasaPage');
@@ -1161,11 +1232,184 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
   var rlEasaTreeSelectedLi = null;
   var rlEasaModalBatchId = 0;
   var rlEasaPendingTreeHighlight = '';
+  var rlEasaAiSessionId = 0;
+  var rlEasaAiExcerptState = { batchId: 0, nodeUid: '', terms: [] };
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] || c;
     });
+  }
+
+  function rlEasaAiHighlightTerms(rootEl, terms) {
+    if (!rootEl || !Array.isArray(terms)) return;
+    terms.forEach(function (t) {
+      var n = String(t || '').trim();
+      if (n.length >= 2) rlEasaHighlightInTextNodes(rootEl, n);
+    });
+  }
+
+  function rlEasaAiCloseExcerptModal() {
+    var m = document.getElementById('rlEasaAiExcerptModal');
+    if (m) m.hidden = true;
+  }
+
+  function rlEasaAiOpenExcerptModal(batchId, nodeUid, terms, titleHint) {
+    var m = document.getElementById('rlEasaAiExcerptModal');
+    var meta = document.getElementById('rlEasaAiExcerptMeta');
+    var body = document.getElementById('rlEasaAiExcerptBody');
+    var ttl = document.getElementById('rlEasaAiExcerptTitle');
+    if (!m || !meta || !body) return;
+    rlEasaAiExcerptState = {
+      batchId: parseInt(String(batchId), 10) || 0,
+      nodeUid: String(nodeUid || '').trim(),
+      terms: Array.isArray(terms) ? terms.slice() : []
+    };
+    if (ttl) ttl.textContent = titleHint ? String(titleHint) : 'Regulation excerpt';
+    meta.textContent = 'Loading…';
+    body.innerHTML = '';
+    body.className = 'rl-easa-ai-excerpt-body rl-easa-detail-body';
+    m.hidden = false;
+    rlEasaFetchNodeDetail(rlEasaAiExcerptState.batchId, rlEasaAiExcerptState.nodeUid).then(function (j) {
+      if (!j.ok || !j.node) {
+        meta.textContent = (j && j.error) ? j.error : 'Load failed';
+        return;
+      }
+      var n = j.node;
+      var eid = (n.source_erules_id || '').trim();
+      var crumb = (n.breadcrumb || '').trim();
+      meta.innerHTML = ''
+        + '<div><strong>' + esc(n.title_display || n.title || n.node_uid || '—') + '</strong></div>'
+        + '<div>batch_id=' + esc(String(n.batch_id || ''))
+        + ' · node_uid=<code>' + esc(String(n.node_uid || '')) + '</code>'
+        + (eid ? ' · ERulesId=<code>' + esc(eid) + '</code>' : '')
+        + '</div>'
+        + (crumb ? '<div style="margin-top:6px;">' + esc(crumb) + '</div>' : '');
+      var blk = Array.isArray(n.structured_blocks) && n.structured_blocks.length > 0
+        ? rlEasaStructuredBlocksHtml(n.structured_blocks)
+        : '';
+      if (blk) {
+        body.className = 'rl-easa-ai-excerpt-body rl-easa-detail-body rl-easa-detail-body-structured';
+        body.innerHTML = blk;
+      } else {
+        body.className = 'rl-easa-ai-excerpt-body rl-easa-detail-body';
+        var br = (n.body_reading || n.plain_text_display || n.plain_text || '').trim();
+        body.textContent = br || '[No body text]';
+      }
+      rlEasaAiHighlightTerms(body, rlEasaAiExcerptState.terms);
+    }).catch(function (e) {
+      meta.textContent = e.message || 'Error';
+    });
+  }
+
+  (function bindAiExcerptModal() {
+    var cl = document.getElementById('rlEasaAiExcerptClose');
+    var m = document.getElementById('rlEasaAiExcerptModal');
+    var treeBtn = document.getElementById('rlEasaAiExcerptOpenTree');
+    if (cl) cl.addEventListener('click', rlEasaAiCloseExcerptModal);
+    if (m) {
+      m.addEventListener('click', function (e) {
+        if (e.target === m) rlEasaAiCloseExcerptModal();
+      });
+    }
+    if (treeBtn) {
+      treeBtn.addEventListener('click', function () {
+        var bid = rlEasaAiExcerptState.batchId;
+        var uid = rlEasaAiExcerptState.nodeUid;
+        var terms = rlEasaAiExcerptState.terms || [];
+        var needle = (terms[0] || '').trim();
+        rlEasaAiCloseExcerptModal();
+        if (!bid || !uid) return;
+        var treeSec = document.getElementById('rlEasaTreeSection');
+        if (treeSec && treeSec.scrollIntoView) treeSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        rlEasaRevealTreeNode(bid, uid, needle).catch(function () {});
+      });
+    }
+  })();
+
+  function rlEasaAiFillSessionSelect(sessions, currentId) {
+    var sel = document.getElementById('rlEasaSessionSelect');
+    if (!sel) return;
+    sel.innerHTML = '';
+    (sessions || []).forEach(function (s) {
+      var opt = document.createElement('option');
+      opt.value = String(s.id);
+      var t = (s.title || '').trim();
+      var lab = '#' + s.id + (t ? (' — ' + t) : '');
+      opt.textContent = lab.length > 80 ? lab.slice(0, 77) + '…' : lab;
+      sel.appendChild(opt);
+    });
+    if (currentId) sel.value = String(currentId);
+  }
+
+  function rlEasaAiRenderHistory(messages) {
+    var host = document.getElementById('rlEasaChatHistory');
+    if (!host) return;
+    host.innerHTML = '';
+    (messages || []).forEach(function (row) {
+      var role = String(row.role || '');
+      if (role === 'user') {
+        var wrap = document.createElement('div');
+        wrap.className = 'rl-easa-hist-block';
+        wrap.innerHTML = '<div class="rl-easa-chat-row rl-easa-chat-row-user"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
+          + '<div class="rl-easa-chat-meta">You</div><p>' + esc(String(row.content || '')) + '</p></div></div>';
+        host.appendChild(wrap);
+        return;
+      }
+      if (role === 'assistant') {
+        var w2 = document.createElement('div');
+        w2.className = 'rl-easa-hist-block';
+        var inner = rlEasaFormatAiAnswerHtml(String(row.content || ''));
+        w2.innerHTML = '<div class="rl-easa-chat-row rl-easa-chat-row-system"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+          + '<div class="rl-easa-chat-meta">Assistant</div>' + (inner || '<p>(empty)</p>') + '</div></div>';
+        host.appendChild(w2);
+        var cardsHost = document.createElement('div');
+        cardsHost.className = 'rl-easa-citation-cards rl-easa-hist-cards';
+        host.appendChild(cardsHost);
+        var pj = row.response_json;
+        if (pj && typeof pj === 'string') {
+          try {
+            var o = JSON.parse(pj);
+            var refs = (o && Array.isArray(o.primary_references)) ? o.primary_references : [];
+            refs.forEach(function (r) {
+              var mq = (Array.isArray(r.matched_terms) && r.matched_terms[0]) ? String(r.matched_terms[0]) : '';
+              rlEasaAppendCitationCard(cardsHost, r, mq, !!(r.quote && String(r.quote).trim()));
+            });
+          } catch (e0) { /* ignore */ }
+        }
+      }
+    });
+    try {
+      host.scrollTop = host.scrollHeight;
+    } catch (e1) { /* ignore */ }
+  }
+
+  function rlEasaAiLoadBootstrap() {
+    var hint = document.getElementById('rlEasaChatPersistHint');
+    var boot = { action: 'easa_ai_chat_bootstrap' };
+    if (rlEasaAiSessionId > 0) boot.session_id = rlEasaAiSessionId;
+    fetch(api, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'same-origin',
+      body: JSON.stringify(boot)
+    })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (x) {
+        if (!x.j || !x.j.ok) return;
+        if (!x.j.chat_supported) {
+          if (hint) hint.textContent = x.j.chat_migrate_hint || 'Chat persistence not available.';
+          return;
+        }
+        if (hint) hint.textContent = 'Chat is saved for your account after reload.';
+        var cur = parseInt(String(x.j.current_session_id || '0'), 10) || 0;
+        if (cur > 0) rlEasaAiSessionId = cur;
+        rlEasaAiFillSessionSelect(x.j.sessions || [], cur || rlEasaAiSessionId);
+        rlEasaAiRenderHistory(x.j.messages || []);
+      })
+      .catch(function () {
+        if (hint) hint.textContent = '';
+      });
   }
 
   function rlEasaFormatAiAnswerHtml(text) {
@@ -1760,7 +2004,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           if (x.j.supports_async_parse) parts.push('Async parse after button click: enabled (PHP-FPM).');
           hint.textContent = parts.filter(Boolean).join(' ');
         }
-        var tbody = document.getElementById('rlEasaMonitorBody');
+            var tbody = document.getElementById('rlEasaMonitorBody');
         if (tbody) {
           tbody.innerHTML = '';
           (x.j.monitor || []).forEach(function (row) {
@@ -1776,6 +2020,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
             tbody.appendChild(tr);
           });
         }
+        rlEasaAiLoadBootstrap();
         var btbody = document.getElementById('rlEasaBatchBody');
         if (btbody) {
           btbody.innerHTML = '';
@@ -2822,34 +3067,53 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
     });
   }
 
-  function rlEasaAppendCitationCard(host, s, queryForHighlight) {
+  function rlEasaAppendCitationCard(host, s, queryForHighlight, skipPrefetch) {
     if (!host) return;
     var card = document.createElement('div');
     card.className = 'rl-easa-cite-card';
     var bid = parseInt(s.batch_id, 10) || 0;
     var nuid = (s.node_uid || '').trim();
-    var eid = (s.source_erules_id || '').trim();
+    var eid = String(s.erules_id != null && String(s.erules_id).trim() !== '' ? s.erules_id : (s.source_erules_id || '')).trim();
     var title = (s.title || '').trim() || eid || nuid || 'Regulation node';
+    var matched = Array.isArray(s.matched_terms) ? s.matched_terms : [];
+    var hlNeedle = (matched[0] || queryForHighlight || '').trim();
+    var quotePre = (s.quote || '').trim();
     card.innerHTML = '<h4>' + esc(title) + '</h4>'
       + '<div class="rl-easa-cite-meta">batch_id <strong>' + esc(String(bid || '—')) + '</strong>'
       + (eid ? ' · ERulesId <strong>' + esc(eid) + '</strong>' : '')
       + (nuid ? ' · node_uid <code>' + esc(nuid) + '</code>' : '')
       + '</div>'
-      + '<div class="rl-easa-cite-excerpt">Loading official text…</div>'
-      + '<div class="rl-easa-cite-actions"><button type="button" class="btn btn-sm rl-easa-cite-open">Open in rule tree</button></div>';
+      + '<div class="rl-easa-cite-excerpt">' + (quotePre ? esc(quotePre) : 'Loading official text…') + '</div>'
+      + '<div class="rl-easa-cite-actions">'
+      + '<button type="button" class="btn btn-sm rl-easa-cite-excerpt-btn">Open excerpt</button> '
+      + '<button type="button" class="btn btn-sm rl-easa-cite-open">Open in rule tree</button>'
+      + '</div>';
     host.appendChild(card);
     var exEl = card.querySelector('.rl-easa-cite-excerpt');
     var openBtn = card.querySelector('.rl-easa-cite-open');
+    var exBtn = card.querySelector('.rl-easa-cite-excerpt-btn');
+    if (exBtn && bid && nuid) {
+      exBtn.addEventListener('click', function () {
+        rlEasaAiOpenExcerptModal(bid, nuid, matched.length ? matched : (hlNeedle ? [hlNeedle] : []), title);
+      });
+    } else if (exBtn) {
+      exBtn.disabled = true;
+    }
     if (openBtn && bid && nuid) {
       openBtn.addEventListener('click', function () {
         var treeSec = document.getElementById('rlEasaTreeSection');
         if (treeSec && treeSec.scrollIntoView) treeSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        rlEasaRevealTreeNode(bid, nuid, queryForHighlight || '').catch(function () {});
+        rlEasaRevealTreeNode(bid, nuid, hlNeedle || '').catch(function () {});
       });
     } else if (openBtn) {
       openBtn.disabled = true;
     }
-    if (bid && nuid && exEl) {
+    if (quotePre && exEl) {
+      exEl.classList.add('rl-easa-cite-excerpt--quote');
+      if (hlNeedle) rlEasaHighlightInTextNodes(exEl, hlNeedle);
+    }
+    if (skipPrefetch) return;
+    if (bid && nuid && exEl && !quotePre) {
       rlEasaFetchNodeDetail(bid, nuid).then(function (j) {
         if (!j.ok || !j.node) {
           exEl.textContent = (j && j.error) ? j.error : 'Could not load node.';
@@ -2863,13 +3127,58 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           var meta = card.querySelector('.rl-easa-cite-meta');
           if (meta) meta.innerHTML += '<br>breadcrumb: ' + esc(bc);
         }
-        if (queryForHighlight) rlEasaHighlightInTextNodes(exEl, queryForHighlight);
+        if (hlNeedle) rlEasaHighlightInTextNodes(exEl, hlNeedle);
       }).catch(function (e) {
         exEl.textContent = e.message || 'Load failed';
       });
-    } else if (exEl) {
+    } else if (exEl && !quotePre && (!bid || !nuid)) {
       exEl.textContent = 'Missing batch/node reference — citations must come from staging matches only.';
     }
+  }
+
+  var sessSel = document.getElementById('rlEasaSessionSelect');
+  if (sessSel) {
+    sessSel.addEventListener('change', function () {
+      var id = parseInt(sessSel.value, 10) || 0;
+      rlEasaAiSessionId = id;
+      fetch(api, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ action: 'easa_ai_chat_bootstrap', session_id: id })
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          if (!x.j || !x.j.ok) return;
+          rlEasaAiRenderHistory(x.j.messages || []);
+        })
+        .catch(function () {});
+    });
+  }
+  var newChatBtn = document.getElementById('rlEasaNewChatBtn');
+  if (newChatBtn) {
+    newChatBtn.addEventListener('click', function () {
+      newChatBtn.disabled = true;
+      fetch(api, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ action: 'easa_ai_chat_session_create' })
+      })
+        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        .then(function (x) {
+          if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Could not start chat');
+          rlEasaAiSessionId = parseInt(String(x.j.session_id || '0'), 10) || 0;
+          var h = document.getElementById('rlEasaChatHistory');
+          if (h) h.innerHTML = '';
+          rlEasaAiLoadBootstrap();
+        })
+        .catch(function (e) {
+          var hint = document.getElementById('rlEasaChatPersistHint');
+          if (hint) hint.textContent = e.message || 'Error';
+        })
+        .finally(function () { newChatBtn.disabled = false; });
+    });
   }
 
   var chatAskBtn = document.getElementById('rlEasaChatAskBtn');
@@ -2902,6 +3211,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         ecfr_section: secEl ? (secEl.value || '').trim() : ''
       };
       if (srcBid > 0) payload.batch_id = srcBid;
+      if (rlEasaAiSessionId > 0) payload.session_id = rlEasaAiSessionId;
       if (chatCitEl) chatCitEl.innerHTML = '';
       if (chatCtxNote) {
         chatCtxNote.style.display = 'none';
@@ -2921,14 +3231,20 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
         .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
         .then(function (x) {
           if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Request failed');
-          var citeQuery = '';
+          var citeQuery = (q.length >= 3 && q.length < 160) ? q : '';
+          var refs = Array.isArray(x.j.primary_references) ? x.j.primary_references : [];
           var srcs = Array.isArray(x.j.easa_sources) ? x.j.easa_sources : [];
-          if (srcs.length && q.length >= 3 && q.length < 160) citeQuery = q;
+          var cards = refs.length ? refs : srcs;
           if (chatCitEl) {
-            srcs.slice(0, 16).forEach(function (s) {
-              rlEasaAppendCitationCard(chatCitEl, s, citeQuery);
+            cards.slice(0, 16).forEach(function (s) {
+              var mq = (Array.isArray(s.matched_terms) && s.matched_terms[0]) ? String(s.matched_terms[0]) : citeQuery;
+              rlEasaAppendCitationCard(chatCitEl, s, mq, !!(s.quote && String(s.quote).trim()));
             });
           }
+          if (x.j.session_id) {
+            rlEasaAiSessionId = parseInt(String(x.j.session_id), 10) || rlEasaAiSessionId;
+          }
+          rlEasaAiLoadBootstrap();
           var noteParts = [];
           if (x.j.easa_context_note) noteParts.push(x.j.easa_context_note);
           if (x.j.easa_staging_hits != null) noteParts.push('Staging rows fed to bundle: ' + x.j.easa_staging_hits + '.');
@@ -2940,6 +3256,7 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
           var aiBlock = '';
           var userFirst = x.j.user_first_name || '';
           if (x.j.ai_error) aiBlock = 'AI error: ' + x.j.ai_error;
+          else if (x.j.answer_markdown) aiBlock = x.j.answer_markdown;
           else if (x.j.ai_answer) aiBlock = x.j.ai_answer;
           else aiBlock = (useAi && useAi.checked)
             ? '(No AI text returned.)'

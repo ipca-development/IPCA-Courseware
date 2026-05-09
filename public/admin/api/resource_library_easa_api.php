@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../../src/resource_library_catalog.php';
 require_once __DIR__ . '/../../../src/easa_erules_storage.php';
 require_once __DIR__ . '/../../../src/easa_download_monitor.php';
 require_once __DIR__ . '/../../../src/easa_erules_xml_import.php';
+require_once __DIR__ . '/../../../src/resource_library_easa_node_detail_build.php';
 
 @ini_set('upload_max_filesize', '128M');
 @ini_set('post_max_size', '128M');
@@ -292,6 +293,266 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
     return $out;
 }
 
+/**
+ * Staging search → unique node_uids → full node_detail payloads for AI (canonical regulation text, not snippets only).
+ *
+ * @return array{
+ *   summary: string,
+ *   hit_count: int,
+ *   sources: list<array<string, mixed>>,
+ *   model_bundle: string,
+ *   full_nodes: list<array{batch_id: int, node_uid: string, node: array<string, mixed>}>
+ * }
+ */
+function rl_easa_build_ai_canonical_regulatory_bundle(PDO $pdo, string $q, int $batchFilter): array
+{
+    $stagingCompare = rl_easa_build_compare_staging_bundle($pdo, $q, $batchFilter);
+    $out = [
+        'summary' => (string) ($stagingCompare['summary'] ?? ''),
+        'hit_count' => (int) ($stagingCompare['hit_count'] ?? 0),
+        'sources' => is_array($stagingCompare['sources'] ?? null) ? $stagingCompare['sources'] : [],
+        'model_bundle' => '',
+        'full_nodes' => [],
+    ];
+    if (!easa_erules_staging_tables_ok($pdo) || $out['hit_count'] === 0) {
+        $out['model_bundle'] = '(No staging matches — no full node payloads loaded.)';
+
+        return $out;
+    }
+    $seen = [];
+    $pairs = [];
+    foreach ($out['sources'] as $src) {
+        if (!is_array($src)) {
+            continue;
+        }
+        $bid = (int) ($src['batch_id'] ?? 0);
+        $nuid = trim((string) ($src['node_uid'] ?? ''));
+        if ($bid <= 0 || $nuid === '') {
+            continue;
+        }
+        $k = $bid . '|' . $nuid;
+        if (isset($seen[$k])) {
+            continue;
+        }
+        $seen[$k] = true;
+        $pairs[] = ['batch_id' => $bid, 'node_uid' => $nuid];
+        if (count($pairs) >= 8) {
+            break;
+        }
+    }
+    $maxTotal = 220000;
+    $total = 0;
+    $parts = [];
+    $idx = 0;
+    foreach ($pairs as $pair) {
+        $bid = $pair['batch_id'];
+        $nuid = $pair['node_uid'];
+        $det = rl_easa_api_node_detail_build($pdo, $bid, $nuid);
+        if (!$det['ok'] || !is_array($det['node'] ?? null)) {
+            continue;
+        }
+        $node = $det['node'];
+        $out['full_nodes'][] = ['batch_id' => $bid, 'node_uid' => $nuid, 'node' => $node];
+        $idx++;
+        $sb = $node['structured_blocks'] ?? null;
+        $sbJson = '';
+        if (is_array($sb) && $sb !== []) {
+            $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+            if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+                $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+            }
+            $enc = json_encode($sb, $flags);
+            $sbJson = is_string($enc) ? $enc : '';
+            if (strlen($sbJson) > 120000) {
+                $sbJson = substr($sbJson, 0, 120000) . "\n… [structured_blocks_json truncated for model context]";
+            }
+        }
+        $canon = trim((string) ($node['canonical_text'] ?? ''));
+        $plain = (string) ($node['plain_text'] ?? '');
+        if (strlen($plain) > 120000) {
+            $plain = substr($plain, 0, 120000) . "\n… [plain_text truncated for model context]";
+        }
+        if (strlen($canon) > 120000) {
+            $canon = substr($canon, 0, 120000) . "\n… [canonical_text truncated for model context]";
+        }
+        $hdr = sprintf(
+            "--- CANONICAL NODE %d ---\nbatch_id=%d\nnode_uid=%s\nERulesId=%s\ntitle_display=%s\nbreadcrumb=%s\nstructured_blocks_json:\n%s\n\ncanonical_text:\n%s\n\nplain_text (effective body field from node_detail):\n%s\n",
+            $idx,
+            $bid,
+            $nuid,
+            trim((string) ($node['source_erules_id'] ?? '')),
+            trim((string) ($node['title_display'] ?? '')),
+            trim((string) ($node['breadcrumb'] ?? '')),
+            $sbJson !== '' ? $sbJson : '(none — rely on canonical_text/plain_text)',
+            $canon !== '' ? $canon : '(empty in staging row)',
+            $plain !== '' ? $plain : '(empty)'
+        );
+        if ($total + strlen($hdr) > $maxTotal && $parts !== []) {
+            $parts[] = '[Further canonical nodes omitted to stay within model context budget.]';
+            break;
+        }
+        $parts[] = $hdr;
+        $total += strlen($hdr);
+    }
+    if ($parts === []) {
+        $out['model_bundle'] = 'Staging matched rows but full node_detail could not be loaded for any candidate (check staging integrity).';
+    } else {
+        $out['model_bundle'] = implode("\n", $parts);
+        $out['summary'] .= sprintf(' Loaded %d full node_detail payload(s) for the model.', count($parts));
+    }
+
+    return $out;
+}
+
+function rl_easa_ai_chat_tables_ok(PDO $pdo): bool
+{
+    try {
+        $pdo->query('SELECT 1 FROM easa_ai_chat_sessions LIMIT 1');
+    } catch (Throwable) {
+        return false;
+    }
+
+    return true;
+}
+
+/** GET or POST: EASA AI chat bootstrap (sessions + messages). */
+function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession): void
+{
+    $chatSupported = rl_easa_ai_chat_tables_ok($pdo);
+    if (!$chatSupported) {
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'chat_supported' => false,
+            'chat_migrate_hint' => 'Apply scripts/sql/resource_library_easa_ai_chat.sql to enable persistent EASA AI chat.',
+            'sessions' => [],
+            'messages' => [],
+            'current_session_id' => null,
+        ]);
+    }
+    $u = cw_current_user($pdo);
+    $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
+    if ($userId <= 0) {
+        rl_easa_json_out(401, ['ok' => false, 'error' => 'Not authenticated']);
+    }
+    try {
+        $st = $pdo->prepare('SELECT id, title, created_at, updated_at FROM easa_ai_chat_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 40');
+        $st->execute([$userId]);
+        $sessions = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Throwable $e) {
+        rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
+    }
+    $current = $wantSession;
+    if ($current <= 0 && $sessions !== []) {
+        $current = (int) ($sessions[0]['id'] ?? 0);
+    }
+    $messages = [];
+    if ($current > 0) {
+        $chk = $pdo->prepare('SELECT id FROM easa_ai_chat_sessions WHERE id = ? AND user_id = ? LIMIT 1');
+        $chk->execute([$current, $userId]);
+        if ($chk->fetchColumn()) {
+            $mst = $pdo->prepare('SELECT id, role, content, response_json, created_at FROM easa_ai_chat_messages WHERE session_id = ? ORDER BY id ASC');
+            $mst->execute([$current]);
+            $messages = $mst->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } else {
+            $current = 0;
+        }
+    }
+    rl_easa_json_out(200, [
+        'ok' => true,
+        'chat_supported' => true,
+        'sessions' => $sessions,
+        'messages' => $messages,
+        'current_session_id' => $current > 0 ? $current : null,
+    ]);
+}
+
+/** @return array{answer_markdown: string, primary_references: list<array<string, mixed>>, secondary_references: list<array<string, mixed>>, confidence: string} */
+function rl_easa_normalize_ai_json_payload(array $j): array
+{
+    $md = trim((string) ($j['answer_markdown'] ?? ''));
+    $conf = strtolower(trim((string) ($j['confidence'] ?? 'medium')));
+    if (!in_array($conf, ['high', 'medium', 'low'], true)) {
+        $conf = 'medium';
+    }
+    $prim = $j['primary_references'] ?? [];
+    $sec = $j['secondary_references'] ?? [];
+    if (!is_array($prim)) {
+        $prim = [];
+    }
+    if (!is_array($sec)) {
+        $sec = [];
+    }
+    $mapRef = static function (mixed $r): ?array {
+        if (!is_array($r)) {
+            return null;
+        }
+        $bid = (int) ($r['batch_id'] ?? 0);
+        $nuid = trim((string) ($r['node_uid'] ?? ''));
+        if ($bid <= 0 || $nuid === '') {
+            return null;
+        }
+        $eid = trim((string) ($r['erules_id'] ?? $r['source_erules_id'] ?? ''));
+        $title = trim((string) ($r['title'] ?? ''));
+        $mt = $r['matched_terms'] ?? [];
+        if (!is_array($mt)) {
+            $mt = [];
+        }
+        $mt = array_values(array_filter(array_map(static fn($x) => trim((string) $x), $mt), static fn(string $x): bool => $x !== ''));
+        $quote = trim((string) ($r['quote'] ?? ''));
+
+        return [
+            'title' => $title !== '' ? $title : $nuid,
+            'batch_id' => $bid,
+            'node_uid' => $nuid,
+            'erules_id' => $eid,
+            'matched_terms' => $mt,
+            'quote' => $quote,
+        ];
+    };
+    $primOut = [];
+    foreach ($prim as $r) {
+        $m = $mapRef($r);
+        if ($m !== null) {
+            $primOut[] = $m;
+        }
+    }
+    $secOut = [];
+    foreach ($sec as $r) {
+        $m = $mapRef($r);
+        if ($m !== null) {
+            $secOut[] = $m;
+        }
+    }
+
+    return [
+        'answer_markdown' => $md,
+        'primary_references' => $primOut,
+        'secondary_references' => $secOut,
+        'confidence' => $conf,
+    ];
+}
+
+function rl_easa_parse_ai_compare_response(array $resp): array
+{
+    try {
+        $j = cw_openai_extract_json_text($resp);
+        if (!is_array($j)) {
+            throw new RuntimeException('non-array');
+        }
+
+        return rl_easa_normalize_ai_json_payload($j);
+    } catch (Throwable) {
+        $t = rl_easa_extract_ai_text($resp);
+
+        return [
+            'answer_markdown' => $t,
+            'primary_references' => [],
+            'secondary_references' => [],
+            'confidence' => 'low',
+        ];
+    }
+}
+
 function rl_easa_extract_ai_text(array $resp): string
 {
     if (!empty($resp['output_text']) && is_string($resp['output_text'])) {
@@ -418,272 +679,15 @@ if ($method === 'GET') {
         if ($batchId <= 0 || $nodeUid === '') {
             rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id and node_uid required']);
         }
-        $requestedNodeUid = $nodeUid;
-        $syntheticBlockIndex = null;
-        $synParsed = easa_erules_tree_parse_synthetic_block_node_uid($requestedNodeUid);
-        if ($synParsed !== null) {
-            $detailLoadUid = $synParsed['parent'];
-            $syntheticBlockIndex = $synParsed['block_index'];
-        } else {
-            $detailLoadUid = easa_erules_staging_anonymous_supplement_bundle_primary_topic_uid($pdo, $batchId, $requestedNodeUid)
-                ?? $requestedNodeUid;
+        $res = rl_easa_api_node_detail_build($pdo, $batchId, $nodeUid);
+        if (!$res['ok']) {
+            rl_easa_json_out($res['http'], ['ok' => false, 'error' => $res['error']]);
         }
-        try {
-            $detailCols = [
-                'batch_id', 'node_uid', 'parent_node_uid', 'node_type', 'depth', 'sort_order',
-                'source_erules_id', 'title', 'source_title', 'breadcrumb', 'path',
-                'plain_text',
-            ];
-            if (easa_erules_staging_has_canonical_column($pdo)) {
-                $detailCols[] = 'canonical_text';
-            }
-            if (easa_erules_staging_has_structured_blocks_column($pdo)) {
-                $detailCols[] = 'structured_blocks_json';
-            }
-            $detailCols[] = 'xml_fragment';
-            $detailCols[] = 'metadata_json';
-            $detailSql = '
-                SELECT ' . implode(', ', $detailCols) . '
-                FROM easa_erules_import_nodes_staging
-                WHERE batch_id = ? AND node_uid = ?
-                LIMIT 1
-            ';
-            $st = $pdo->prepare($detailSql);
-            $st->execute([$batchId, $detailLoadUid]);
-            $row = $st->fetch(PDO::FETCH_ASSOC);
-        } catch (Throwable $e) {
-            rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
-        }
-        if (!is_array($row)) {
-            rl_easa_json_out(404, ['ok' => false, 'error' => 'Node not found']);
-        }
-        if ($detailLoadUid !== $requestedNodeUid) {
-            $row['requested_node_uid'] = $requestedNodeUid;
-            $row['effective_node_uid'] = $detailLoadUid;
-        }
-        $structuredBlocksDecoded = null;
-        if (easa_erules_staging_has_structured_blocks_column($pdo)) {
-            $sbRaw = isset($row['structured_blocks_json']) ? trim((string) $row['structured_blocks_json']) : '';
-            if ($sbRaw !== '') {
-                $dec = json_decode($sbRaw, true);
-                if (is_array($dec) && $dec !== []) {
-                    $structuredBlocksDecoded = $dec;
-                }
-            }
-            unset($row['structured_blocks_json']);
-        }
-        if ($structuredBlocksDecoded === null) {
-            $fragForBlocks = trim((string) ($row['xml_fragment'] ?? ''));
-            if ($fragForBlocks !== '' && strlen($fragForBlocks) < 600000) {
-                $gen = easa_erules_structured_blocks_json_from_outer_xml($fragForBlocks);
-                $dec2 = json_decode($gen, true);
-                if (is_array($dec2) && $dec2 !== []) {
-                    $structuredBlocksDecoded = $dec2;
-                }
-            }
-        }
-        /** Mirror tree enrichment: appendix AMC/GM wrappers sometimes store labels only on children. */
-        $fcLabelSlice = easa_erules_staging_first_direct_child_label_fallback($pdo, $batchId, $detailLoadUid);
-        $treeLabelRow = $row;
-        if ($fcLabelSlice !== null) {
-            $treeLabelRow['first_child_title'] = trim((string) ($fcLabelSlice['title'] ?? ''));
-            $treeLabelRow['first_child_source_title'] = trim((string) ($fcLabelSlice['source_title'] ?? ''));
-        }
+        rl_easa_json_out(200, ['ok' => true, 'node' => $res['node']]);
+    }
 
-        $ntLcSupp = strtolower(trim((string) ($row['node_type'] ?? '')));
-        $designatorForSupplement = easa_erules_node_detail_amc_gm_designator_key($row, $fcLabelSlice);
-        $supplementFenceAppendixNums = [];
-        $sbPriorToFenceLiftEmpty = ($structuredBlocksDecoded === null || $structuredBlocksDecoded === []);
-        if (
-            $sbPriorToFenceLiftEmpty
-            && $designatorForSupplement !== null
-            && in_array($ntLcSupp, ['toc', 'heading'], true)
-        ) {
-            $supplementFenceAppendixNums = easa_erules_supplement_navigation_appendix_lock_ordinals($row, $fcLabelSlice);
-            $liftSb = easa_erules_node_detail_resolve_structured_blocks_under_supplement_fence(
-                $pdo,
-                $batchId,
-                $detailLoadUid,
-                $designatorForSupplement,
-                $supplementFenceAppendixNums
-            );
-            if (is_array($liftSb) && $liftSb !== []) {
-                $structuredBlocksDecoded = $liftSb;
-            }
-        }
-        if ($syntheticBlockIndex !== null) {
-            if (!is_array($structuredBlocksDecoded) || $structuredBlocksDecoded === []) {
-                $structuredBlocksDecoded = easa_erules_node_structured_blocks_or_subject_aggregate($pdo, $batchId, $detailLoadUid);
-            }
-            if (!is_array($structuredBlocksDecoded) || $structuredBlocksDecoded === []) {
-                rl_easa_json_out(404, ['ok' => false, 'error' => 'No structured blocks for this synthetic section']);
-            }
-            $sliced = easa_erules_structured_blocks_slice_for_synthetic_detail($structuredBlocksDecoded, $syntheticBlockIndex);
-            if ($sliced === []) {
-                rl_easa_json_out(404, ['ok' => false, 'error' => 'Synthetic block index out of range']);
-            }
-            $structuredBlocksDecoded = $sliced;
-            $row['synthetic'] = true;
-            $row['synthetic_block_start_index'] = $syntheticBlockIndex;
-            $row['synthetic_detail_node_uid'] = $requestedNodeUid;
-        }
-        $row['structured_blocks'] = $structuredBlocksDecoded;
-
-        $sbHasStructuredContent = $structuredBlocksDecoded !== null && $structuredBlocksDecoded !== [];
-        $canonicalRaw = trim((string) ($row['canonical_text'] ?? ''));
-        $plainRaw = (string) ($row['plain_text'] ?? '');
-        $plainTrim = trim($plainRaw);
-        $composed = '';
-        $suppressFullDescendantAggregate = false;
-        if ($plainTrim === '') {
-            if (!$sbHasStructuredContent) {
-                $ntLc = strtolower(trim((string) ($row['node_type'] ?? '')));
-                $designatorForBody = $designatorForSupplement;
-                if ($designatorForBody !== null && in_array($ntLc, ['toc', 'heading'], true)) {
-                    $suppressFullDescendantAggregate = true;
-                    $composed = trim(
-                        easa_erules_aggregate_descendant_plain_text_for_designator(
-                            $pdo,
-                            $batchId,
-                            $detailLoadUid,
-                            $designatorForBody,
-                            0,
-                            $supplementFenceAppendixNums
-                        )
-                    );
-                }
-                if ($composed === '' && !$suppressFullDescendantAggregate) {
-                    $composed = easa_erules_aggregate_descendant_plain_text($pdo, $batchId, $detailLoadUid, 0);
-                }
-            }
-        }
-        $stepPlain = $plainTrim !== '' ? $plainRaw : $composed;
-        $stepPlainTrim = trim($stepPlain);
-        /** Canonical rendering path only — wrapper xml_fragment/source.xml must not mask lifted structured descendant bodies. */
-        $preferStructuredCanonical = $sbHasStructuredContent && $canonicalRaw === '';
-
-        $fromFrag = '';
-        if (!$preferStructuredCanonical && $canonicalRaw === '' && $stepPlainTrim === '') {
-            $fragRaw = trim((string) ($row['xml_fragment'] ?? ''));
-            if ($fragRaw !== '') {
-                $fromFrag = easa_erules_plain_text_from_stored_xml_fragment($fragRaw);
-            }
-        }
-        $srcEid = trim((string) ($row['source_erules_id'] ?? ''));
-        $fromXml = '';
-        if (!$preferStructuredCanonical && $canonicalRaw === '' && $stepPlainTrim === '' && trim($fromFrag) === '' && $srcEid !== '') {
-            $xmlAbs = easa_erules_batch_source_xml_absolute_path($pdo, $batchId);
-            if ($xmlAbs !== null) {
-                $fromXml = easa_erules_extract_plain_text_from_source_xml_by_erules_id($xmlAbs, $srcEid);
-            }
-        }
-
-        $effectivePlain = '';
-        if ($canonicalRaw !== '') {
-            $effectivePlain = $canonicalRaw;
-            $row['plain_text_effective_source'] = 'canonical';
-        } elseif ($preferStructuredCanonical) {
-            $effectivePlain = '';
-            $row['plain_text_effective_source'] = 'structured_blocks';
-        } elseif ($stepPlainTrim !== '') {
-            $effectivePlain = $stepPlain;
-            $row['plain_text_effective_source'] = $plainTrim !== '' ? 'node' : 'descendants';
-        } elseif (trim($fromFrag) !== '') {
-            $effectivePlain = $fromFrag;
-            $row['plain_text_effective_source'] = 'xml_fragment';
-        } elseif (trim($fromXml) !== '') {
-            $effectivePlain = $fromXml;
-            $row['plain_text_effective_source'] = 'source_xml_erules';
-        } elseif ($suppressFullDescendantAggregate && $designatorForSupplement !== null) {
-            $effectivePlain =
-                'This AMC/GM row is only a bounded navigation wrapper — no descendant text survived the appendix '
-                . 'fence (neighbouring supplement material was deliberately excluded). If expected content is '
-                . 'missing, inspect the numbered topic descendant for stored canonical or structured_blocks.';
-            $row['plain_text_effective_source'] = 'supplement_wrapper_no_bounded_plain';
-        } else {
-            $row['plain_text_effective_source'] = 'none';
-        }
-        $row['plain_text_composed_from_descendants'] = $canonicalRaw === '' && $plainTrim === '' && trim($composed) !== '';
-        $maxPlain = 400000;
-        $truncated = strlen($effectivePlain) > $maxPlain;
-        if ($truncated) {
-            $row['plain_text'] = substr($effectivePlain, 0, $maxPlain) . "\n\n… [truncated for API; full text is in the staging rows]";
-        } else {
-            $row['plain_text'] = $effectivePlain;
-        }
-        $row['plain_text_truncated'] = $truncated;
-        $bandPieces = [
-            trim((string) ($row['title'] ?? '')),
-            trim((string) ($row['source_title'] ?? '')),
-            trim((string) ($row['source_erules_id'] ?? '')),
-        ];
-        if ($fcLabelSlice !== null) {
-            $bandPieces[] = trim((string) ($fcLabelSlice['title'] ?? ''));
-            $bandPieces[] = trim((string) ($fcLabelSlice['source_title'] ?? ''));
-            $eec = trim((string) ($fcLabelSlice['source_erules_id'] ?? ''));
-            if ($eec !== '') {
-                $bandPieces[] = $eec;
-            }
-        }
-        $bandProbeBlob = implode("\n", array_filter($bandPieces, static fn(string $x): bool => $x !== ''));
-        $row['rule_band'] = easa_erules_classify_display_band(
-            $row['node_type'] ?? null,
-            $bandProbeBlob !== '' ? $bandProbeBlob : null,
-            null,
-            null
-        );
-        $row['title_display'] = easa_erules_sanitize_display_text(easa_erules_short_tree_label($treeLabelRow));
-        if ($syntheticBlockIndex !== null && is_array($structuredBlocksDecoded) && $structuredBlocksDecoded !== []) {
-            $hd0 = $structuredBlocksDecoded[0];
-            if (is_array($hd0) && ($hd0['type'] ?? '') === 'heading') {
-                $td = trim((string) ($hd0['text'] ?? ''));
-                if ($td !== '') {
-                    $partsLn = preg_split('/\R+/u', $td);
-                    $line0 = (is_array($partsLn) && isset($partsLn[0])) ? trim((string) $partsLn[0]) : $td;
-                    $row['title_display'] = easa_erules_sanitize_display_text($line0);
-                }
-            }
-        }
-        $sanitizedBody = easa_erules_sanitize_rule_body_text($truncated ? (string) $row['plain_text'] : $effectivePlain);
-        $row['plain_text_display'] = $sanitizedBody;
-        $sbPresent = is_array($row['structured_blocks'] ?? null) && ($row['structured_blocks'] ?? []) !== [];
-        if ($row['plain_text_display'] === '' && $row['plain_text_effective_source'] === 'none' && !$sbPresent) {
-            $ntLow = strtolower(trim((string) ($row['node_type'] ?? '')));
-            $noErules = trim((string) ($row['source_erules_id'] ?? '')) === '';
-            if (in_array($ntLow, ['heading', 'toc'], true) && $noErules) {
-                $row['plain_text_display'] = 'No body text on this navigation heading — expand branches below if topics appear in the tree.';
-                $row['body_reading'] = '';
-            } else {
-                $row['plain_text_display'] = 'No rule text could be resolved: canonical_text and plain_text are empty, no text could be extracted from xml_fragment, no child rows contributed text, and source.xml could not be matched by ERulesId (or the file is missing). Expected file: storage/easa_erules/batches/' . (int) $batchId . '/source.xml — verify batch storage_relpath matches this batch id.';
-                $row['body_reading'] = '';
-            }
-        } else {
-            $sourceForReading = $sanitizedBody;
-            if (($row['plain_text_effective_source'] ?? '') === 'canonical' && $plainTrim !== '') {
-                $sanPlainLocal = easa_erules_sanitize_rule_body_text($plainRaw);
-                if ($sanPlainLocal !== '') {
-                    $nCanon = substr_count($sanitizedBody, "\n");
-                    $nPlain = substr_count($sanPlainLocal, "\n");
-                    if ($nPlain > $nCanon || ($nCanon === 0 && $nPlain >= 2)) {
-                        $sourceForReading = $sanPlainLocal;
-                    }
-                }
-            }
-            $row['body_reading'] = easa_erules_format_body_for_reading($sourceForReading);
-        }
-        $rowUidForRedirect = trim((string) ($row['node_uid'] ?? ''));
-        if ($rowUidForRedirect !== '' && function_exists('easa_erules_tree_redirected_parent_uid_for_node')) {
-            $redirectedParentUid = easa_erules_tree_redirected_parent_uid_for_node($pdo, $batchId, $rowUidForRedirect);
-            if ($redirectedParentUid !== null) {
-                $origParent = $row['parent_node_uid'] ?? null;
-                if ((string) $origParent !== $redirectedParentUid) {
-                    $row['parent_node_uid_original'] = $origParent;
-                    $row['parent_node_uid'] = $redirectedParentUid;
-                    $row['parent_redirected'] = true;
-                }
-            }
-        }
-        rl_easa_json_out(200, ['ok' => true, 'node' => $row]);
+    if ($action === 'easa_ai_chat_bootstrap') {
+        rl_easa_ai_chat_bootstrap_output($pdo, (int) ($_GET['session_id'] ?? 0));
     }
 
     // GET action=source_probe — diagnostic: ERulesId matches in batch source.xml (deploy must include this block).
@@ -987,6 +991,30 @@ if ($action === 'search') {
     ]);
 }
 
+if ($action === 'easa_ai_chat_bootstrap') {
+    rl_easa_ai_chat_bootstrap_output($pdo, (int) ($data['session_id'] ?? 0));
+}
+
+if ($action === 'easa_ai_chat_session_create') {
+    if (!rl_easa_ai_chat_tables_ok($pdo)) {
+        rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_ai_chat.sql first']);
+    }
+    $u = cw_current_user($pdo);
+    $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
+    if ($userId <= 0) {
+        rl_easa_json_out(401, ['ok' => false, 'error' => 'Not authenticated']);
+    }
+    $title = isset($data['title']) ? trim((string) $data['title']) : '';
+    $title = $title !== '' ? substr($title, 0, 255) : null;
+    try {
+        $pdo->prepare('INSERT INTO easa_ai_chat_sessions (user_id, title, created_at, updated_at) VALUES (?, ?, NOW(), NOW())')->execute([$userId, $title]);
+        $sid = (int) $pdo->lastInsertId();
+    } catch (Throwable $e) {
+        rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
+    }
+    rl_easa_json_out(200, ['ok' => true, 'session_id' => $sid]);
+}
+
 if ($action === 'parse_batch') {
     @ini_set('memory_limit', '768M');
     @set_time_limit(0);
@@ -1085,9 +1113,9 @@ if ($action === 'regulatory_compare_ai') {
     $compareBatchId = (int) ($data['batch_id'] ?? 0);
     $userFirstName = rl_easa_current_user_first_name($pdo);
 
-    $stagingCompare = rl_easa_build_compare_staging_bundle($pdo, $q, $compareBatchId);
-    $easaCtx = $stagingCompare['summary'];
-    $easaExcerptBundle = trim((string) ($stagingCompare['bundle'] ?? ''));
+    $canon = rl_easa_build_ai_canonical_regulatory_bundle($pdo, $q, $compareBatchId);
+    $easaCtx = (string) ($canon['summary'] ?? '');
+    $easaModelBundle = trim((string) ($canon['model_bundle'] ?? ''));
 
     $ecfrHtml = '';
     $ecfrNote = '';
@@ -1109,27 +1137,62 @@ if ($action === 'regulatory_compare_ai') {
         }
     }
 
+    $chatSupported = rl_easa_ai_chat_tables_ok($pdo);
+    $u = cw_current_user($pdo);
+    $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
+    $sessionId = (int) ($data['session_id'] ?? 0);
+    if ($chatSupported && $userId > 0) {
+        try {
+            if ($sessionId <= 0) {
+                $pdo->prepare('INSERT INTO easa_ai_chat_sessions (user_id, title, created_at, updated_at) VALUES (?, NULL, NOW(), NOW())')->execute([$userId]);
+                $sessionId = (int) $pdo->lastInsertId();
+            } else {
+                $chk = $pdo->prepare('SELECT id FROM easa_ai_chat_sessions WHERE id = ? AND user_id = ? LIMIT 1');
+                $chk->execute([$sessionId, $userId]);
+                if (!$chk->fetchColumn()) {
+                    $pdo->prepare('INSERT INTO easa_ai_chat_sessions (user_id, title, created_at, updated_at) VALUES (?, NULL, NOW(), NOW())')->execute([$userId]);
+                    $sessionId = (int) $pdo->lastInsertId();
+                }
+            }
+            $pdo->prepare('INSERT INTO easa_ai_chat_messages (session_id, role, content, response_json, created_at) VALUES (?, \'user\', ?, NULL, NOW())')->execute([$sessionId, $q]);
+            $pdo->prepare('UPDATE easa_ai_chat_sessions SET updated_at = NOW(), title = COALESCE(title, ?) WHERE id = ? AND user_id = ?')->execute([substr($q, 0, 255), $sessionId, $userId]);
+        } catch (Throwable) {
+            $sessionId = 0;
+        }
+    } else {
+        $sessionId = 0;
+    }
+
     $payload = [
         'ok' => true,
         'user_first_name' => $userFirstName !== '' ? $userFirstName : null,
         'easa_context_note' => $easaCtx,
-        'easa_staging_hits' => $stagingCompare['hit_count'],
-        'easa_sources' => $stagingCompare['sources'],
+        'easa_staging_hits' => (int) ($canon['hit_count'] ?? 0),
+        'easa_sources' => is_array($canon['sources'] ?? null) ? $canon['sources'] : [],
+        'canonical_nodes_loaded' => is_array($canon['full_nodes'] ?? null) ? count($canon['full_nodes']) : 0,
         'ecfr_html' => $ecfrHtml !== '' ? $ecfrHtml : null,
         'ecfr_note' => $ecfrNote !== '' ? $ecfrNote : null,
         'ai_answer' => '',
         'ai_error' => null,
+        'answer_markdown' => '',
+        'primary_references' => [],
+        'secondary_references' => [],
+        'confidence' => 'medium',
+        'session_id' => $sessionId > 0 ? $sessionId : null,
+        'chat_supported' => $chatSupported && $userId > 0,
     ];
 
     if (!$useAi) {
         rl_easa_json_out(200, $payload);
     }
 
-    $bundle = "EU / EASA — official excerpts from this installation’s staging table (easa_erules_import_nodes_staging), matched by your question using the same rules as “Search EASA index”. Each block is labeled with batch_id and node_uid for traceability.\n\n";
-    if ($easaExcerptBundle !== '') {
-        $bundle .= $easaExcerptBundle . "\n\n";
+    $bundle = "EU / EASA — FULL canonical regulation payloads from this installation (same resolver as GET node_detail). "
+        . "Each CANONICAL NODE block includes structured_blocks_json, canonical_text, plain_text, title_display, breadcrumb, batch_id, node_uid, ERulesId. "
+        . "Answer ONLY from this material; quote accurately. If blocks are empty or truncated, say so.\n\n";
+    if ($easaModelBundle !== '') {
+        $bundle .= $easaModelBundle . "\n\n";
     } else {
-        $bundle .= "(No row-level excerpts matched — refer to easa_context_note above.)\n\n";
+        $bundle .= "(No canonical node payloads loaded — refer to easa_context_note above.)\n\n";
     }
     if ($ecfrHtml !== '') {
         $strip = preg_replace('/\s+/', ' ', strip_tags($ecfrHtml));
@@ -1140,6 +1203,16 @@ if ($action === 'regulatory_compare_ai') {
         $bundle .= "U.S. 14 CFR excerpt (eCFR API, for comparison only):\n" . $strip . "\n\n";
     }
 
+    $jsonInstructions = <<<'TXT'
+Your entire model output must be a single JSON object (no markdown fences) with exactly these keys:
+- "answer_markdown": string (short structured Markdown answer; traceable statements must name batch_id + node_uid and/or ERulesId from the bundle).
+- "primary_references": array of objects, each with: "title", "batch_id" (int), "node_uid" (string), "erules_id" (string, ERules id or empty), "matched_terms" (array of strings), "quote" (short verbatim excerpt from the bundle for that node).
+- "secondary_references": same shape as primary_references (optional cross-links).
+- "confidence": "high" | "medium" | "low"
+
+Only cite batch_id/node_uid pairs that appear in the CANONICAL NODE blocks. Do not invent ERulesIds.
+TXT;
+
     try {
         $resp = cw_openai_responses([
             'model' => cw_openai_model(),
@@ -1149,7 +1222,9 @@ if ($action === 'regulatory_compare_ai') {
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => 'You help aviation compliance staff compare regulatory concepts. When the bundle includes EASA blocks labeled with batch_id/node_uid/ERulesId, treat those as the installation’s parsed Easy Access staging excerpts—quote them accurately and cite batch_id + node_uid or ERulesId. If no excerpts matched, say so clearly. When U.S. text is provided from eCFR, label it as U.S. 14 CFR. Address the user personally by first name at least once in every answer when a first name is provided in the user prompt context. Never replace official sources; not legal advice.',
+                            'text' => "You help aviation compliance staff interpret Easy Access Rules using ONLY the canonical EASA bundles provided. "
+                                . $jsonInstructions
+                                . " When U.S. text is provided from eCFR, label it as U.S. 14 CFR. Address the user by first name at least once when a first name is provided. Not legal advice; always verify on official EASA publications.",
                         ],
                     ],
                 ],
@@ -1163,10 +1238,38 @@ if ($action === 'regulatory_compare_ai') {
                     ],
                 ],
             ],
-        ], 120);
-        $payload['ai_answer'] = rl_easa_extract_ai_text($resp);
+        ], 180);
+        $parsed = rl_easa_parse_ai_compare_response($resp);
+        $payload['answer_markdown'] = $parsed['answer_markdown'];
+        $payload['primary_references'] = $parsed['primary_references'];
+        $payload['secondary_references'] = $parsed['secondary_references'];
+        $payload['confidence'] = $parsed['confidence'];
+        $payload['ai_answer'] = $parsed['answer_markdown'];
         if ($userFirstName !== '' && $payload['ai_answer'] !== '' && stripos($payload['ai_answer'], $userFirstName) === false) {
             $payload['ai_answer'] = $userFirstName . ', ' . $payload['ai_answer'];
+            $payload['answer_markdown'] = $payload['ai_answer'];
+        }
+        if ($chatSupported && $userId > 0 && $sessionId > 0) {
+            $persist = [
+                'ok' => true,
+                'answer_markdown' => $payload['answer_markdown'],
+                'primary_references' => $payload['primary_references'],
+                'secondary_references' => $payload['secondary_references'],
+                'confidence' => $payload['confidence'],
+            ];
+            $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
+            if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+                $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+            }
+            $pj = json_encode($persist, $flags);
+            if ($pj === false) {
+                $pj = '{"ok":false}';
+            }
+            try {
+                $pdo->prepare('INSERT INTO easa_ai_chat_messages (session_id, role, content, response_json, created_at) VALUES (?, \'assistant\', ?, ?, NOW())')->execute([$sessionId, $payload['answer_markdown'], $pj]);
+                $pdo->prepare('UPDATE easa_ai_chat_sessions SET updated_at = NOW() WHERE id = ?')->execute([$sessionId]);
+            } catch (Throwable) {
+            }
         }
     } catch (Throwable $e) {
         $payload['ai_error'] = $e->getMessage();
