@@ -419,8 +419,15 @@ if ($method === 'GET') {
             rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id and node_uid required']);
         }
         $requestedNodeUid = $nodeUid;
-        $detailLoadUid = easa_erules_staging_anonymous_supplement_bundle_primary_topic_uid($pdo, $batchId, $requestedNodeUid)
-            ?? $requestedNodeUid;
+        $syntheticBlockIndex = null;
+        $synParsed = easa_erules_tree_parse_synthetic_block_node_uid($requestedNodeUid);
+        if ($synParsed !== null) {
+            $detailLoadUid = $synParsed['parent'];
+            $syntheticBlockIndex = $synParsed['block_index'];
+        } else {
+            $detailLoadUid = easa_erules_staging_anonymous_supplement_bundle_primary_topic_uid($pdo, $batchId, $requestedNodeUid)
+                ?? $requestedNodeUid;
+        }
         try {
             $detailCols = [
                 'batch_id', 'node_uid', 'parent_node_uid', 'node_type', 'depth', 'sort_order',
@@ -503,6 +510,19 @@ if ($method === 'GET') {
             if (is_array($liftSb) && $liftSb !== []) {
                 $structuredBlocksDecoded = $liftSb;
             }
+        }
+        if ($syntheticBlockIndex !== null) {
+            if (!is_array($structuredBlocksDecoded) || $structuredBlocksDecoded === []) {
+                rl_easa_json_out(404, ['ok' => false, 'error' => 'No structured blocks for this synthetic section']);
+            }
+            $sliced = easa_erules_structured_blocks_slice_from_heading_index($structuredBlocksDecoded, $syntheticBlockIndex);
+            if ($sliced === []) {
+                rl_easa_json_out(404, ['ok' => false, 'error' => 'Synthetic block index out of range']);
+            }
+            $structuredBlocksDecoded = $sliced;
+            $row['synthetic'] = true;
+            $row['synthetic_block_start_index'] = $syntheticBlockIndex;
+            $row['synthetic_detail_node_uid'] = $requestedNodeUid;
         }
         $row['structured_blocks'] = $structuredBlocksDecoded;
 
@@ -610,6 +630,17 @@ if ($method === 'GET') {
             null
         );
         $row['title_display'] = easa_erules_sanitize_display_text(easa_erules_short_tree_label($treeLabelRow));
+        if ($syntheticBlockIndex !== null && is_array($structuredBlocksDecoded) && $structuredBlocksDecoded !== []) {
+            $hd0 = $structuredBlocksDecoded[0];
+            if (is_array($hd0) && ($hd0['type'] ?? '') === 'heading') {
+                $td = trim((string) ($hd0['text'] ?? ''));
+                if ($td !== '') {
+                    $partsLn = preg_split('/\R+/u', $td);
+                    $line0 = (is_array($partsLn) && isset($partsLn[0])) ? trim((string) $partsLn[0]) : $td;
+                    $row['title_display'] = easa_erules_sanitize_display_text($line0);
+                }
+            }
+        }
         $sanitizedBody = easa_erules_sanitize_rule_body_text($truncated ? (string) $row['plain_text'] : $effectivePlain);
         $row['plain_text_display'] = $sanitizedBody;
         $sbPresent = is_array($row['structured_blocks'] ?? null) && ($row['structured_blocks'] ?? []) !== [];

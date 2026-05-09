@@ -4831,6 +4831,234 @@ function easa_erules_tree_skip_empty_toc_placeholder(array $graph, array $row): 
 }
 
 /**
+ * Parse synthetic tree/detail node uid "parentUid__blk_index" (index = position in structured_blocks array).
+ *
+ * @return array{parent:string, block_index:int}|null
+ */
+function easa_erules_tree_parse_synthetic_block_node_uid(string $nodeUid): ?array
+{
+    $nodeUid = trim($nodeUid);
+    if ($nodeUid === '' || !preg_match('/^(.+)__blk_(\d+)$/u', $nodeUid, $m)) {
+        return null;
+    }
+
+    return ['parent' => $m[1], 'block_index' => (int) $m[2]];
+}
+
+/**
+ * Stable synthetic id for a structured_blocks heading row (no DB insert).
+ */
+function easa_erules_tree_synthetic_block_child_id(string $parentUid, int $blockIndex): string
+{
+    return $parentUid . '__blk_' . (string) $blockIndex;
+}
+
+/**
+ * Load decoded structured blocks for a staging row (JSON column, else regenerated from xml_fragment).
+ *
+ * @return list<array<string, mixed>>|null
+ */
+function easa_erules_staging_node_structured_blocks_decoded(PDO $pdo, int $batchId, string $nodeUid): ?array
+{
+    $nodeUid = trim($nodeUid);
+    if ($nodeUid === '') {
+        return null;
+    }
+    $sbRaw = '';
+    $frag = '';
+    if (easa_erules_staging_has_structured_blocks_column($pdo)) {
+        $st = $pdo->prepare(
+            'SELECT structured_blocks_json, xml_fragment FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND node_uid = ? LIMIT 1'
+        );
+        $st->execute([$batchId, $nodeUid]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($r)) {
+            return null;
+        }
+        $sbRaw = trim((string) ($r['structured_blocks_json'] ?? ''));
+        $frag = trim((string) ($r['xml_fragment'] ?? ''));
+    } else {
+        $st = $pdo->prepare(
+            'SELECT xml_fragment FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND node_uid = ? LIMIT 1'
+        );
+        $st->execute([$batchId, $nodeUid]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($r)) {
+            return null;
+        }
+        $frag = trim((string) ($r['xml_fragment'] ?? ''));
+    }
+    if ($sbRaw !== '') {
+        $dec = json_decode($sbRaw, true);
+        if (is_array($dec) && $dec !== []) {
+            /** @var list<array<string, mixed>> $dec */
+            return $dec;
+        }
+    }
+    if ($frag !== '' && strlen($frag) < 600000) {
+        $gen = easa_erules_structured_blocks_json_from_outer_xml($frag);
+        $dec2 = json_decode($gen, true);
+        if (is_array($dec2) && $dec2 !== []) {
+            /** @var list<array<string, mixed>> $dec2 */
+            return $dec2;
+        }
+    }
+
+    return null;
+}
+
+/**
+ * Whether a heading block should appear as a synthetic browse-tree row under its parent topic.
+ */
+function easa_erules_structured_heading_qualifies_for_synthetic_tree(string $headingText, int $level): bool
+{
+    $tt = trim($headingText);
+    $parts = preg_split('/\R+/u', $tt);
+    if (!is_array($parts)) {
+        $parts = [];
+    }
+    $line = trim((string) (($parts[0] ?? '') !== '' ? $parts[0] : $tt));
+    if ($line === '') {
+        return false;
+    }
+    $patterns = [
+        '/\bLearning\s+objectives?\b/iu',
+        '/\bTheoretical\s+knowledge\b/iu',
+        '/\bGENERAL\b/u',
+        '/\bCREDITING\b/iu',
+        '/\bFLYING\s+TRAINING\b/iu',
+        '/\bPRACTICAL\s+SKILL\b/iu',
+        '/\bSKILL\s+TEST\b/iu',
+    ];
+    foreach ($patterns as $re) {
+        if (preg_match($re, $line) === 1) {
+            return true;
+        }
+    }
+    // Short AMC-style section title: one line, mostly uppercase letters / punctuation (GENERAL-style lists).
+    if (strlen($line) >= 6 && strlen($line) <= 120 && $level >= 2 && $level <= 4) {
+        if (preg_match('/^[A-Z0-9][A-Z0-9\s\-\(\),.:;\/]+$/u', $line) === 1 && preg_match('/[A-Z]{3,}/', $line) === 1) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/**
+ * Slice structured blocks from a heading index through content until the next heading of the same or higher outline level.
+ *
+ * @param list<array<string, mixed>> $blocks
+ *
+ * @return list<array<string, mixed>>
+ */
+function easa_erules_structured_blocks_slice_from_heading_index(array $blocks, int $startIndex): array
+{
+    if ($startIndex < 0 || $startIndex >= count($blocks)) {
+        return [];
+    }
+    $first = $blocks[$startIndex];
+    $out = [$first];
+    $lvl = 4;
+    if (($first['type'] ?? '') === 'heading') {
+        $lvl = max(1, min(6, (int) ($first['level'] ?? 3)));
+    }
+    for ($i = $startIndex + 1, $n = count($blocks); $i < $n; $i++) {
+        $b = $blocks[$i];
+        if (($b['type'] ?? '') === 'heading') {
+            $l2 = max(1, min(6, (int) ($b['level'] ?? 3)));
+            if ($l2 <= $lvl) {
+                break;
+            }
+        }
+        $out[] = $b;
+    }
+
+    return $out;
+}
+
+/**
+ * Synthetic tree rows derived from structured_blocks headings on a parent with no staging children.
+ * Does not touch ANNEX-level browse: only invoked when the real flattened child list is empty.
+ *
+ * @return list<array<string, mixed>>
+ */
+function easa_erules_tree_synthetic_block_children_for_parent(PDO $pdo, int $batchId, string $parentUid): array
+{
+    $parentUid = trim($parentUid);
+    if ($parentUid === '') {
+        return [];
+    }
+    $blocks = easa_erules_staging_node_structured_blocks_decoded($pdo, $batchId, $parentUid);
+    if ($blocks === null || $blocks === []) {
+        return [];
+    }
+    $st = $pdo->prepare(
+        'SELECT depth, sort_order, node_type, title, source_title FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND node_uid = ? LIMIT 1'
+    );
+    $st->execute([$batchId, $parentUid]);
+    $pr = $st->fetch(PDO::FETCH_ASSOC);
+    $baseDepth = is_array($pr) ? (int) ($pr['depth'] ?? 0) : 0;
+    $parentSort = is_array($pr) ? (int) ($pr['sort_order'] ?? 0) : 0;
+    $parentFirstLine = '';
+    if (is_array($pr)) {
+        $pt = trim((string) ($pr['title'] ?? ''));
+        if ($pt === '') {
+            $pt = trim((string) ($pr['source_title'] ?? ''));
+        }
+        if ($pt !== '') {
+            $parentFirstLine = strtolower(easa_erules_tree_title_first_line($pt));
+        }
+    }
+
+    $out = [];
+    foreach ($blocks as $i => $b) {
+        if (!is_array($b) || ($b['type'] ?? '') !== 'heading') {
+            continue;
+        }
+        $text = trim((string) ($b['text'] ?? ''));
+        $hl = max(1, min(6, (int) ($b['level'] ?? 3)));
+        if (!easa_erules_structured_heading_qualifies_for_synthetic_tree($text, $hl)) {
+            continue;
+        }
+        $disp = $text;
+        if ($disp !== '' && str_contains($disp, "\n")) {
+            $parts = preg_split('/\R+/u', $disp) ?: [];
+            $disp = trim((string) ($parts[0] ?? $disp));
+        }
+        if ($parentFirstLine !== '') {
+            $headFirst = strtolower(easa_erules_tree_title_first_line($disp));
+            if ($headFirst !== '' && $headFirst === $parentFirstLine) {
+                continue;
+            }
+        }
+        $synthId = easa_erules_tree_synthetic_block_child_id($parentUid, $i);
+        $sectionLike = $hl <= 3;
+        $out[] = [
+            'id' => $synthId,
+            'parent_id' => $parentUid,
+            'display_title' => $disp !== '' ? $disp : ('§ block ' . (string) $i),
+            'ui_kind' => $sectionLike ? 'section' : 'rule',
+            'material_type' => $sectionLike ? 'HEADING' : 'IR',
+            'expandable' => false,
+            'click_action' => 'open_rule',
+            'depth' => $baseDepth + 1,
+            'sort_order' => $parentSort * 1000 + $i,
+            'child_count' => 0,
+            'node_type' => 'topic',
+            'synthetic' => true,
+            'synthetic_parent_node_uid' => $parentUid,
+            'synthetic_block_index' => $i,
+        ];
+    }
+
+    return $out;
+}
+
+/**
+ * Semantic browse children. When staging has no rows under $parentUid, optional synthetic rows from
+ * structured_blocks headings on the parent are appended (same API shape + synthetic: true).
+ *
  * @return list<array<string, mixed>>
  */
 function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?string $parentUid): array
@@ -4858,6 +5086,13 @@ function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?strin
         $row['child_count'] = isset($memo[$vk]) && is_array($memo[$vk]) ? count($memo[$vk]) : 0;
         $childStaging = isset($memo[$vk]) && is_array($memo[$vk]) ? $memo[$vk] : [];
         $nodes[] = easa_erules_tree_semantic_adapter($row, $childStaging);
+    }
+
+    if ($nodes === [] && $parentUid !== null && $parentUid !== '') {
+        $syn = easa_erules_tree_synthetic_block_children_for_parent($pdo, $batchId, $parentUid);
+        if ($syn !== []) {
+            return $syn;
+        }
     }
 
     return $nodes;
