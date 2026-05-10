@@ -1096,8 +1096,8 @@ cw_header('Resource Library');
       /** Always expose URL; missing files are handled in the UI via onerror + circular fallback. */
       $easaMayaAvatarHref = '/assets/avatars/maya.png';
       $easaCu = cw_current_user($pdo);
-      if (is_array($easaCu) && trim((string) ($easaCu['photo_path'] ?? '')) !== '') {
-          $easaUserPhotoHref = rl_thumb_src($easaCu['photo_path']);
+      if (is_array($easaCu)) {
+          $easaUserPhotoHref = trim((string) ($easaCu['photo_path'] ?? ''));
       }
       require __DIR__ . '/resource_library_easa_tab.inc.php';
     ?>

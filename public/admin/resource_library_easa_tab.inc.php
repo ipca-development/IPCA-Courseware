@@ -1704,8 +1704,13 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     }
     if (!d || isNaN(d.getTime())) return '';
     try {
-      return d.toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' });
-    } catch (e) {
+      if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
+        return new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(d);
+      }
+    } catch (e) { /* Safari/WebKit can throw "The string did not match the expected pattern" for unsupported option combos */ }
+    try {
+      return d.toLocaleString();
+    } catch (e2) {
       return '';
     }
   }
@@ -1717,25 +1722,60 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     return row.created_at || '';
   }
 
-  function rlEasaMayaAvatarHtml(isMaya, thinkingClass) {
-    var cls = 'rl-easa-maya-avatar' + (thinkingClass ? ' ' + thinkingClass : '');
-    var imgErr = 'var w=this;w.style.display=\'none\';var p=w&&w.parentNode;if(p)p.classList.add(\'rl-easa-maya-avatar--img-broken\');';
+  /** Build avatar DOM (avoids innerHTML/onerror quirks and keeps img.src as a raw URL). */
+  function rlEasaMayaBuildAvatarEl(isMaya, thinkingClass) {
+    var div = document.createElement('div');
+    div.className = 'rl-easa-maya-avatar' + (thinkingClass ? ' ' + thinkingClass : '');
+    div.setAttribute('aria-hidden', 'true');
+    function bindImgErr(img) {
+      img.addEventListener('error', function () {
+        try {
+          img.style.display = 'none';
+          if (img.parentNode) img.parentNode.classList.add('rl-easa-maya-avatar--img-broken');
+        } catch (e) { /* ignore */ }
+      }, { once: true });
+    }
     if (isMaya) {
-      var src = String(rlEasaMayaAvatarSrc || '').trim();
-      if (src) {
-        return '<div class="' + cls + ' rl-easa-maya-avatar--has-img" aria-hidden="true">'
-          + '<img class="rl-easa-maya-avatar-img" src="' + esc(src) + '" alt="" width="36" height="36" decoding="async" loading="lazy" onerror="' + imgErr + '"/>'
-          + '<span class="rl-easa-maya-avatar-letter" aria-hidden="true">M</span></div>';
-      }
-      return '<div class="' + cls + ' rl-easa-maya-avatar--img-broken" aria-hidden="true"><span class="rl-easa-maya-avatar-letter" aria-hidden="true">M</span></div>';
+      var msrc = String(rlEasaMayaAvatarSrc || '').trim() || '/assets/avatars/maya.png';
+      div.classList.add('rl-easa-maya-avatar--has-img');
+      var mimg = document.createElement('img');
+      mimg.className = 'rl-easa-maya-avatar-img';
+      mimg.alt = '';
+      mimg.width = 36;
+      mimg.height = 36;
+      mimg.decoding = 'async';
+      mimg.loading = 'lazy';
+      mimg.src = msrc;
+      bindImgErr(mimg);
+      var letter = document.createElement('span');
+      letter.className = 'rl-easa-maya-avatar-letter';
+      letter.setAttribute('aria-hidden', 'true');
+      letter.textContent = 'M';
+      div.appendChild(mimg);
+      div.appendChild(letter);
+      return div;
     }
     var up = String(rlEasaUserPhoto || '').trim();
     if (up) {
-      return '<div class="' + cls + ' rl-easa-maya-avatar--has-img rl-easa-maya-avatar--user-img" aria-hidden="true">'
-        + '<img class="rl-easa-maya-avatar-img" src="' + esc(up) + '" alt="" width="36" height="36" decoding="async" loading="lazy" onerror="' + imgErr + '"/>'
-        + '<span class="rl-easa-maya-avatar-user-fallback" aria-hidden="true"></span></div>';
+      div.classList.add('rl-easa-maya-avatar--has-img', 'rl-easa-maya-avatar--user-img');
+      var uimg = document.createElement('img');
+      uimg.className = 'rl-easa-maya-avatar-img';
+      uimg.alt = '';
+      uimg.width = 36;
+      uimg.height = 36;
+      uimg.decoding = 'async';
+      uimg.loading = 'lazy';
+      uimg.src = up;
+      bindImgErr(uimg);
+      var ufb = document.createElement('span');
+      ufb.className = 'rl-easa-maya-avatar-user-fallback';
+      ufb.setAttribute('aria-hidden', 'true');
+      div.appendChild(uimg);
+      div.appendChild(ufb);
+      return div;
     }
-    return '<div class="' + cls + ' rl-easa-maya-avatar--img-broken rl-easa-maya-avatar--user-fallback" aria-hidden="true"></div>';
+    div.classList.add('rl-easa-maya-avatar--img-broken', 'rl-easa-maya-avatar--user-fallback');
+    return div;
   }
 
   function rlEasaMayaClearThinkingTimers() {
@@ -1757,10 +1797,13 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     var wrap = document.createElement('div');
     wrap.id = 'rlEasaMayaThinkingRow';
     wrap.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
-    wrap.innerHTML = rlEasaMayaAvatarHtml(true, 'is-thinking')
-      + '<div class="rl-easa-maya-msg-stack"><div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+    wrap.appendChild(rlEasaMayaBuildAvatarEl(true, 'is-thinking'));
+    var thinkStack = document.createElement('div');
+    thinkStack.className = 'rl-easa-maya-msg-stack';
+    thinkStack.innerHTML = '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
       + '<div class="rl-easa-chat-meta">Maya</div>'
-      + '<p class="rl-easa-maya-thinking-text" id="rlEasaMayaThinkingText">Maya is thinking…</p></div></div></div>';
+      + '<p class="rl-easa-maya-thinking-text" id="rlEasaMayaThinkingText">Maya is thinking…</p></div></div>';
+    wrap.appendChild(thinkStack);
     host.appendChild(wrap);
     try { host.scrollTop = host.scrollHeight; } catch (e) { /* ignore */ }
     var txt = document.getElementById('rlEasaMayaThinkingText');
@@ -2044,12 +2087,14 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     var ts = rlEasaFormatChatTime(createdAt == null ? '' : createdAt);
     var urow = document.createElement('div');
     urow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--user';
-    urow.innerHTML = rlEasaMayaAvatarHtml(false, '')
-      + '<div class="rl-easa-maya-msg-stack"><div class="rl-easa-maya-bubble-wrap">'
+    urow.appendChild(rlEasaMayaBuildAvatarEl(false, ''));
+    var ustack = document.createElement('div');
+    ustack.className = 'rl-easa-maya-msg-stack';
+    ustack.innerHTML = '<div class="rl-easa-maya-bubble-wrap">'
       + '<div class="rl-easa-chat-bubble rl-easa-chat-bubble-user">'
       + '<div class="rl-easa-chat-meta">You</div><p>' + esc(String(text || '')) + '</p></div></div>'
-      + (ts ? '<span class="rl-easa-maya-msg-time">' + esc(ts) + '</span>' : '')
-      + '</div>';
+      + (ts ? '<span class="rl-easa-maya-msg-time">' + esc(ts) + '</span>' : '');
+    urow.appendChild(ustack);
     return urow;
   }
 
@@ -2058,12 +2103,14 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     var innerBody = rlEasaFormatAiAnswerHtml(rlEasaMayaSanitizeAssistantMarkdown(String(content || ''))) || '<p>(empty)</p>';
     var mrow = document.createElement('div');
     mrow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
-    mrow.innerHTML = rlEasaMayaAvatarHtml(true, '')
-      + '<div class="rl-easa-maya-msg-stack"><div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+    mrow.appendChild(rlEasaMayaBuildAvatarEl(true, ''));
+    var mstack = document.createElement('div');
+    mstack.className = 'rl-easa-maya-msg-stack';
+    mstack.innerHTML = '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
       + '<div class="rl-easa-chat-meta">Maya</div>'
       + '<div class="rl-easa-maya-msg-body">' + innerBody + '</div></div></div>'
-      + (ts ? '<span class="rl-easa-maya-msg-time">' + esc(ts) + '</span>' : '')
-      + '</div>';
+      + (ts ? '<span class="rl-easa-maya-msg-time">' + esc(ts) + '</span>' : '');
+    mrow.appendChild(mstack);
     var bubble = mrow.querySelector('.rl-easa-chat-bubble');
     if (bubble && responseJsonStr && typeof responseJsonStr === 'string') {
       try {
@@ -3441,12 +3488,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     if (!mount || !sel) return Promise.reject(new Error('Tree UI missing'));
     sel.value = String(batchId);
 
-    function revealProgressFull(msg, pct) {
+    function revealProgressFull(msg) {
       mount.innerHTML = '<div class="rl-easa-tree-loading-center rl-easa-tree-reveal-full" role="status">'
-        + '<div class="rl-easa-tree-reveal-pct" aria-live="polite">' + (pct != null && !isNaN(pct) ? Math.round(Math.min(100, Math.max(0, pct))) + '%' : '')
-        + '</div><span class="rl-easa-tree-reveal-msg">' + esc(msg) + '</span></div>';
+        + '<span class="rl-easa-tree-reveal-msg" aria-live="polite">' + esc(msg) + '</span></div>';
     }
-    function revealProgressBar(msg, pct) {
+    function revealProgressBar(msg) {
       var bar = mount.querySelector(':scope > .rl-easa-tree-reveal-status');
       if (!bar) {
         bar = document.createElement('div');
@@ -3454,21 +3500,24 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         bar.setAttribute('role', 'status');
         mount.insertBefore(bar, mount.firstChild);
       }
-      var pctNum = pct != null && !isNaN(pct) ? Math.round(Math.min(100, Math.max(0, pct))) : null;
-      bar.innerHTML = (pctNum != null ? '<span class="rl-easa-tree-reveal-pct" aria-live="polite">' + pctNum + '%</span> · ' : '')
-        + '<span class="rl-easa-tree-reveal-msg">' + esc(msg) + '</span>';
+      bar.innerHTML = '<span class="rl-easa-tree-reveal-msg" aria-live="polite">' + esc(msg) + '</span>';
+    }
+    function revealDescendLabel(idx) {
+      if (idx === 0) return 'Opening Part-FCL…';
+      if (idx === 1) return 'Opening Annex I…';
+      return 'Opening nested section…';
     }
     function revealProgressClear() {
       var bar = mount.querySelector(':scope > .rl-easa-tree-reveal-status');
       if (bar) bar.remove();
     }
 
-    revealProgressFull('Opening regulation tree…', 5);
+    revealProgressFull('Opening regulation tree…');
 
     return rlEasaAncestorUidChain(batchId, targetUid).then(function (chain) {
       /* chain: root ... target */
       if (!chain.length) throw new Error('Empty ancestor chain');
-      revealProgressFull('Finding parent sections…', 18);
+      revealProgressFull('Finding parent sections…');
       var revealOpts = { chainUids: chain };
       return rlEasaTreeFetchTreeChildrenJson(batchId, '')
         .then(function (j) {
@@ -3485,20 +3534,16 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
             path.shift();
           }
           if (!path.length) throw new Error('Tree roots do not contain this ancestor chain.');
-          var openStepsTotal = Math.max(1, path.length - 1);
-          function pctForStep(stepIdx) {
-            return Math.round((stepIdx / openStepsTotal) * 82) + 12;
-          }
           function descend(idx) {
             if (idx >= path.length) return Promise.resolve(null);
             var uid = path[idx];
             var li = ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(uid) + '"]');
             if (!li) return Promise.reject(new Error('Could not find node ' + uid + ' in tree (try Load tree roots).'));
             if (idx === path.length - 1) {
-              revealProgressBar('Opening final section…', 96);
+              revealProgressBar('Opening selected section…');
               return Promise.resolve(li);
             }
-            revealProgressBar('Opening section ' + (idx + 1) + ' of ' + openStepsTotal + '…', pctForStep(idx + 1));
+            revealProgressBar(revealDescendLabel(idx));
             return rlEasaEnsureChildUlLoaded(li, batchId, revealOpts).then(function () {
               var nextUl = li.querySelector(':scope > ul.rl-easa-tree-list');
               if (!nextUl) return Promise.reject(new Error('No children container'));
@@ -4163,11 +4208,14 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           rlEasaMayaRemoveThinkingRow();
           var mrow = document.createElement('div');
           mrow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
-          mrow.innerHTML = rlEasaMayaAvatarHtml(true, '')
-            + '<div class="rl-easa-maya-msg-stack"><div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+          mrow.appendChild(rlEasaMayaBuildAvatarEl(true, ''));
+          var estack = document.createElement('div');
+          estack.className = 'rl-easa-maya-msg-stack';
+          estack.innerHTML = '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
             + '<div class="rl-easa-chat-meta">Maya</div><p>' + esc('Maya got stuck. Please try again.') + '</p>'
             + '<p class="rl-drop-meta" style="margin:8px 0 0;">' + esc(e.message || 'Error') + '</p></div></div>'
-            + '<span class="rl-easa-maya-msg-time">' + esc(rlEasaFormatChatTime(Date.now())) + '</span></div>';
+            + '<span class="rl-easa-maya-msg-time">' + esc(rlEasaFormatChatTime(Date.now())) + '</span>';
+          mrow.appendChild(estack);
           chatHistEl.appendChild(mrow);
           try { chatHistEl.scrollTop = chatHistEl.scrollHeight; } catch (e3) { /* ignore */ }
         })
