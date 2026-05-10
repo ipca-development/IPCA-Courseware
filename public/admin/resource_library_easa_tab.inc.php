@@ -3458,19 +3458,22 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     });
   }
 
+  /**
+   * Loads children into li's nested ul. Coalesces concurrent loads (default-open / reveal vs expand click)
+   * so two in-flight fetches cannot both append — that produced duplicate ANNEX rows under one parent.
+   */
   function rlEasaEnsureChildUlLoaded(li, batchId, treeResolveOptions) {
-    return new Promise(function (resolve, reject) {
-      var sub = li.querySelector(':scope > ul.rl-easa-tree-list');
-      if (!sub) {
-        resolve();
-        return;
-      }
-      if (sub.getAttribute('data-loaded') === '1') {
-        resolve();
-        return;
-      }
+    if (!li) return Promise.resolve();
+    if (li._rlEasaChildLoadP) return li._rlEasaChildLoadP;
+    var sub = li.querySelector(':scope > ul.rl-easa-tree-list');
+    if (!sub) return Promise.resolve();
+    if (sub.getAttribute('data-loaded') === '1') return Promise.resolve();
+
+    var uid = li.getAttribute('data-node-uid') || '';
+    var pr;
+    pr = new Promise(function (resolve, reject) {
+      li._rlEasaChildLoadP = pr;
       sub.innerHTML = '';
-      var uid = li.getAttribute('data-node-uid') || '';
       rlEasaTreeFetchTreeChildrenJson(batchId, uid)
         .then(function (j) {
           return rlEasaTreeResolveLegalRootNodes(batchId, j, treeResolveOptions);
@@ -3482,7 +3485,8 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           sub.setAttribute('data-loaded', '1');
           sub.hidden = false;
           var exp = li.querySelector(':scope > .rl-easa-tree-row > .rl-easa-tree-exp');
-          if (exp && !exp.disabled) {
+          if (exp) {
+            exp.disabled = false;
             exp.textContent = '\u25bc';
             exp.setAttribute('aria-expanded', 'true');
           }
@@ -3490,6 +3494,16 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         })
         .catch(reject);
     });
+    return pr.then(
+      function (v) {
+        if (li._rlEasaChildLoadP === pr) li._rlEasaChildLoadP = null;
+        return v;
+      },
+      function (e) {
+        if (li._rlEasaChildLoadP === pr) li._rlEasaChildLoadP = null;
+        throw e;
+      }
+    );
   }
 
   function rlEasaRevealTreeNode(batchId, targetUid, highlightNeedle) {
@@ -4057,23 +4071,12 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           }
           return;
         }
-        sub.innerHTML = '';
         exp.disabled = true;
         exp.style.visibility = 'visible';
         exp.removeAttribute('aria-hidden');
-        rlEasaTreeFetchTreeChildrenJson(batchId, uid)
-          .then(function (j) {
-            return rlEasaTreeResolveLegalRootNodes(batchId, j);
-          })
-          .then(function (resolved) {
+        rlEasaEnsureChildUlLoaded(li, batchId, null)
+          .then(function () {
             exp.disabled = false;
-            resolved.nodes.forEach(function (c) {
-              sub.appendChild(rlEasaCreateTreeLi(batchId, c));
-            });
-            sub.setAttribute('data-loaded', '1');
-            sub.hidden = false;
-            exp.textContent = '\u25bc';
-            exp.setAttribute('aria-expanded', 'true');
           })
           .catch(function (err) {
             exp.disabled = false;
