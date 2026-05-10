@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /** @var string $easaApiHref */
 /** @var string $easaUserPhotoHref URL for current admin user profile photo (empty if none). */
-/** @var string $easaMayaAvatarHref Maya avatar URL when the asset exists on disk (empty otherwise). */
+/** @var string $easaMayaAvatarHref Maya avatar URL (broken/missing files use onerror fallback in the UI). */
 
 if (!isset($easaApiHref) || $easaApiHref === '') {
     $easaApiHref = '/admin/api/resource_library_easa_api.php';
@@ -11,8 +11,8 @@ if (!isset($easaApiHref) || $easaApiHref === '') {
 if (!isset($easaUserPhotoHref)) {
     $easaUserPhotoHref = '';
 }
-if (!isset($easaMayaAvatarHref)) {
-    $easaMayaAvatarHref = '';
+if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
+    $easaMayaAvatarHref = '/assets/avatars/maya.png';
 }
 ?>
 <style>
@@ -184,6 +184,26 @@ if (!isset($easaMayaAvatarHref)) {
     margin: 0 auto;
     line-height: 1.45;
   }
+  .rl-easa-tree-reveal-full {
+    min-height: 200px;
+  }
+  .rl-easa-tree-reveal-full .rl-easa-tree-reveal-pct,
+  .rl-easa-tree-reveal-status .rl-easa-tree-reveal-pct {
+    font-size: 12px;
+    font-weight: 700;
+    color: #102845;
+    font-variant-numeric: tabular-nums;
+  }
+  .rl-easa-tree-reveal-status {
+    padding: 6px 10px 8px;
+    margin: 0 0 8px;
+    border-radius: 8px;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    font-size: 12px;
+    color: #475569;
+    line-height: 1.35;
+  }
   .rl-easa-tree-toolbar {
     display: flex;
     flex-wrap: wrap;
@@ -281,7 +301,7 @@ if (!isset($easaMayaAvatarHref)) {
   }
   .rl-easa-tree-row {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     gap: 4px;
     margin: 1px 0;
     line-height: 1.4;
@@ -300,11 +320,19 @@ if (!isset($easaMayaAvatarHref)) {
     color: #102845;
     font-size: 12px;
     width: 1.25rem;
+    line-height: 1;
+    height: 1.25rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
   }
   /* Semantic API: rule + expandable=true (IR with AMC/GM children only) — slightly smaller disclosure */
   .rl-easa-tree-exp--rule-disclosure {
     font-size: 10px;
-    line-height: 1.15;
+    line-height: 1;
+    height: 1.1rem;
+    width: 1.1rem;
     opacity: 0.95;
   }
   .rl-easa-tree-exp--gm {
@@ -536,7 +564,7 @@ if (!isset($easaMayaAvatarHref)) {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    margin-top: 6px;
+    margin-top: 0;
     margin-right: 2px;
   }
   .rl-easa-tree-dot-ir { background: #102845; }
@@ -1181,7 +1209,7 @@ if (!isset($easaMayaAvatarHref)) {
     display: flex;
     gap: 10px;
     margin-bottom: 14px;
-    align-items: flex-end;
+    align-items: flex-start;
   }
   .rl-easa-maya-msg-row--user {
     flex-direction: row-reverse;
@@ -1225,6 +1253,9 @@ if (!isset($easaMayaAvatarHref)) {
     object-fit: cover;
     display: block;
     border-radius: 50%;
+    flex-shrink: 0;
+    position: relative;
+    z-index: 1;
   }
   .rl-easa-maya-avatar--has-img .rl-easa-maya-avatar-letter,
   .rl-easa-maya-avatar--has-img .rl-easa-maya-avatar-user-fallback {
@@ -1457,7 +1488,6 @@ if (!isset($easaMayaAvatarHref)) {
       <button type="button" class="btn btn-sm rl-easa-maya-send" id="rlEasaChatSendBtn">Send</button>
     </div>
     <input type="hidden" id="rlEasaChatUseAi" value="1">
-    <p class="rl-drop-meta" style="margin:10px 0 0;font-size:11px;">Maya uses official indexed rules on this server. She never replaces the published text.</p>
   </section>
 
   <section class="card rl-easa-dash-panel rl-easa-tree-dash" id="rlEasaTreeSection" style="padding:16px 18px; margin-bottom:14px;">
@@ -1619,7 +1649,21 @@ if (!isset($easaMayaAvatarHref)) {
   var rlEasaAiExcerptState = { batchId: 0, nodeUid: '', terms: [] };
   var rlEasaMayaThinkingTimers = [];
   var rlEasaUserPhoto = (root && root.getAttribute('data-user-photo')) ? String(root.getAttribute('data-user-photo')).trim() : '';
-  var rlEasaMayaAvatarSrc = (root && root.getAttribute('data-maya-avatar')) ? String(root.getAttribute('data-maya-avatar')).trim() : '';
+  var rlEasaMayaAvatarSrc = (function () {
+    var u = (root && root.getAttribute('data-maya-avatar')) ? String(root.getAttribute('data-maya-avatar')).trim() : '';
+    return u || '/assets/avatars/maya.png';
+  })();
+  /** Latest batch rows from /status, keyed by id — used for corpus label checks (default tree open). */
+  var rlEasaStatusBatchesById = {};
+  /**
+   * Placeholder for a future “page settings” modal. Hardcoded defaults: Aircrew + Part-FCL + ANNEX I expanded.
+   * expandPathTitleRegex: title match on each level (section or rule row), in order.
+   */
+  var rlEasaTreeDefaultOpenConfig = {
+    enabled: true,
+    corpusShortLabel: 'Aircrew',
+    expandPathTitleRegex: [/\bPART[\s.-]*FCL\b/i, /\bANNEX\s*I\b/i]
+  };
   var rlEasaMayaChatIo = null;
   var RL_EASA_TREE_LOADING_HTML = '<div class="rl-easa-tree-loading-center" role="status"><div class="rl-easa-tree-spinner" aria-hidden="true"></div><span>Loading regulations…</span></div>';
   /** When true, <select id="rlEasaTreeBatch"> change events from programmatic selection are ignored. */
@@ -2614,6 +2658,48 @@ if (!isset($easaMayaAvatarHref)) {
     }
   }
 
+  function rlEasaGetBatchRow(batchId) {
+    var bid = parseInt(String(batchId || '0'), 10) || 0;
+    return bid ? (rlEasaStatusBatchesById[bid] || null) : null;
+  }
+
+  function rlEasaTreeFindFirstLiMatchingTitle(ul, re) {
+    if (!ul || !re) return null;
+    var lis = ul.querySelectorAll(':scope > li');
+    for (var i = 0; i < lis.length; i++) {
+      var li = lis[i];
+      var tit = li.querySelector(':scope > .rl-easa-tree-row .rl-easa-tree-section-title, :scope > .rl-easa-tree-row .rl-easa-tree-rule-title');
+      var t = tit ? String(tit.textContent || '').trim() : '';
+      if (t && re.test(t)) return li;
+    }
+    return null;
+  }
+
+  /** Uses rlEasaEnsureChildUlLoaded only — no changes to tree data or filtering. */
+  function rlEasaTreeApplyDefaultOpenState(batchId, mount) {
+    if (!rlEasaTreeDefaultOpenConfig.enabled || !mount) return Promise.resolve();
+    var b = rlEasaGetBatchRow(batchId);
+    if (!b || rlEasaTreeBatchShortLabel(b) !== rlEasaTreeDefaultOpenConfig.corpusShortLabel) {
+      return Promise.resolve();
+    }
+    var pats = rlEasaTreeDefaultOpenConfig.expandPathTitleRegex;
+    if (!pats || !pats.length) return Promise.resolve();
+    var ul0 = mount.querySelector(':scope > ul.rl-easa-tree-list');
+    if (!ul0) return Promise.resolve();
+
+    function step(pi, parentUl) {
+      if (pi >= pats.length) return Promise.resolve();
+      var li = rlEasaTreeFindFirstLiMatchingTitle(parentUl, pats[pi]);
+      if (!li) return Promise.resolve();
+      return rlEasaEnsureChildUlLoaded(li, batchId, null).then(function () {
+        var nextUl = li.querySelector(':scope > ul.rl-easa-tree-list');
+        if (!nextUl) return;
+        return step(pi + 1, nextUl);
+      });
+    }
+    return step(0, ul0).catch(function () { /* optional default path missing in corpus */ });
+  }
+
   function rlEasaExecuteLoadTreeRoots(bid) {
     var mount = document.getElementById('rlEasaTreeMount');
     var hint = document.getElementById('rlEasaTreeHint');
@@ -2632,12 +2718,8 @@ if (!isset($easaMayaAvatarHref)) {
       })
       .then(function (resolved) {
         rlEasaRenderTreeIntoMount(mount, b, resolved.nodes);
-        if (hint) {
-          var n = resolved.nodes.length;
-          hint.textContent = n
-            ? ('Showing ' + n + ' top-level section' + (n === 1 ? '' : 's') + '. Expand to browse, or click a rule to read the text.')
-            : 'No top-level sections returned for this regulation.';
-        }
+        if (hint) hint.textContent = '';
+        return rlEasaTreeApplyDefaultOpenState(b, mount);
       })
       .catch(function (e) {
         mount.innerHTML = '<p class="rl-easa-tree-loading-msg" style="margin:0;color:#991b1b;">'
@@ -2943,10 +3025,8 @@ if (!isset($easaMayaAvatarHref)) {
         if (x.j.max_body_bytes != null && x.j.max_body_bytes > 0) {
           rlEasaMaxUploadBytes = parseInt(x.j.max_body_bytes, 10) || 0;
           if (limEl) {
-            limEl.textContent = 'PHP upload cap (effective): ~' + rlEasaFormatBytes(rlEasaMaxUploadBytes)
-              + ' (upload_max_filesize=' + (x.j.php_upload_max_filesize || '?')
-              + ', post_max_size=' + (x.j.php_post_max_size || '?')
-              + '). If uploads stall around ~25MB while this is high, nginx (or Traefik, CDN, load balancer) is still limiting body size — set client_max_body_size 128m; (see deploy/nginx/ipca_upload_limits.conf), reload the proxy, retry.';
+            var mbCap = rlEasaMaxUploadBytes / (1024 * 1024);
+            limEl.textContent = 'Max ' + (Math.round(mbCap * 10) / 10) + 'MB';
           }
         } else if (limEl) {
           limEl.textContent = '';
@@ -2968,6 +3048,11 @@ if (!isset($easaMayaAvatarHref)) {
         rlEasaApplyMetricEl('rlEasaMetricMon', monitors.length);
         rlEasaApplyMetricEl('rlEasaMetricUpdates', updates);
         rlEasaApplyMetricEl('rlEasaMetricLastProbe', lastProbe || '—');
+        rlEasaStatusBatchesById = {};
+        batches.forEach(function (bb) {
+          var bid0 = parseInt(String(bb && bb.id != null ? bb.id : '0'), 10) || 0;
+          if (bid0) rlEasaStatusBatchesById[bid0] = bb;
+        });
         rlEasaRebuildSourceRow(x.j);
         rlEasaApplyDefaultTreeSelectionAfterStatus(x.j);
         if (hint) {
@@ -3355,10 +3440,35 @@ if (!isset($easaMayaAvatarHref)) {
     var sel = document.getElementById('rlEasaTreeBatch');
     if (!mount || !sel) return Promise.reject(new Error('Tree UI missing'));
     sel.value = String(batchId);
-    mount.innerHTML = '<p class="rl-drop-meta" style="margin:0;">Loading tree path…</p>';
+
+    function revealProgressFull(msg, pct) {
+      mount.innerHTML = '<div class="rl-easa-tree-loading-center rl-easa-tree-reveal-full" role="status">'
+        + '<div class="rl-easa-tree-reveal-pct" aria-live="polite">' + (pct != null && !isNaN(pct) ? Math.round(Math.min(100, Math.max(0, pct))) + '%' : '')
+        + '</div><span class="rl-easa-tree-reveal-msg">' + esc(msg) + '</span></div>';
+    }
+    function revealProgressBar(msg, pct) {
+      var bar = mount.querySelector(':scope > .rl-easa-tree-reveal-status');
+      if (!bar) {
+        bar = document.createElement('div');
+        bar.className = 'rl-easa-tree-reveal-status';
+        bar.setAttribute('role', 'status');
+        mount.insertBefore(bar, mount.firstChild);
+      }
+      var pctNum = pct != null && !isNaN(pct) ? Math.round(Math.min(100, Math.max(0, pct))) : null;
+      bar.innerHTML = (pctNum != null ? '<span class="rl-easa-tree-reveal-pct" aria-live="polite">' + pctNum + '%</span> · ' : '')
+        + '<span class="rl-easa-tree-reveal-msg">' + esc(msg) + '</span>';
+    }
+    function revealProgressClear() {
+      var bar = mount.querySelector(':scope > .rl-easa-tree-reveal-status');
+      if (bar) bar.remove();
+    }
+
+    revealProgressFull('Opening regulation tree…', 5);
+
     return rlEasaAncestorUidChain(batchId, targetUid).then(function (chain) {
       /* chain: root ... target */
       if (!chain.length) throw new Error('Empty ancestor chain');
+      revealProgressFull('Finding parent sections…', 18);
       var revealOpts = { chainUids: chain };
       return rlEasaTreeFetchTreeChildrenJson(batchId, '')
         .then(function (j) {
@@ -3370,17 +3480,25 @@ if (!isset($easaMayaAvatarHref)) {
           if (!ul) throw new Error('Tree mount empty');
           var path = chain.slice();
           while (path.length > 0) {
-            var head = path[0];
-            if (ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(head) + '"]')) break;
+            var head0 = path[0];
+            if (ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(head0) + '"]')) break;
             path.shift();
           }
           if (!path.length) throw new Error('Tree roots do not contain this ancestor chain.');
+          var openStepsTotal = Math.max(1, path.length - 1);
+          function pctForStep(stepIdx) {
+            return Math.round((stepIdx / openStepsTotal) * 82) + 12;
+          }
           function descend(idx) {
             if (idx >= path.length) return Promise.resolve(null);
             var uid = path[idx];
             var li = ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(uid) + '"]');
             if (!li) return Promise.reject(new Error('Could not find node ' + uid + ' in tree (try Load tree roots).'));
-            if (idx === path.length - 1) return Promise.resolve(li);
+            if (idx === path.length - 1) {
+              revealProgressBar('Opening final section…', 96);
+              return Promise.resolve(li);
+            }
+            revealProgressBar('Opening section ' + (idx + 1) + ' of ' + openStepsTotal + '…', pctForStep(idx + 1));
             return rlEasaEnsureChildUlLoaded(li, batchId, revealOpts).then(function () {
               var nextUl = li.querySelector(':scope > ul.rl-easa-tree-list');
               if (!nextUl) return Promise.reject(new Error('No children container'));
@@ -3389,6 +3507,7 @@ if (!isset($easaMayaAvatarHref)) {
             });
           }
           return descend(0).then(function (li) {
+            revealProgressClear();
             if (!li) return;
             try {
               li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -3397,7 +3516,7 @@ if (!isset($easaMayaAvatarHref)) {
           });
         });
     }).catch(function (e) {
-      mount.innerHTML = '<p class="rl-drop-meta" style="margin:0;color:#991b1b;">' + esc(e.message || 'Tree navigation failed') + '</p>';
+      mount.innerHTML = '<p class="rl-easa-tree-loading-msg" style="margin:0;color:#991b1b;">' + esc(e.message || 'Tree navigation failed') + '</p>';
       throw e;
     });
   }
