@@ -1704,13 +1704,13 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     }
     if (!d || isNaN(d.getTime())) return '';
     try {
-      if (typeof Intl !== 'undefined' && Intl.DateTimeFormat) {
-        return new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(d);
+      function pad2(n) {
+        var v = parseInt(String(n), 10) || 0;
+        return (v < 10 ? '0' : '') + v;
       }
-    } catch (e) { /* Safari/WebKit can throw "The string did not match the expected pattern" for unsupported option combos */ }
-    try {
-      return d.toLocaleString();
-    } catch (e2) {
+      return pad2(d.getMonth() + 1) + '/' + pad2(d.getDate()) + '/' + d.getFullYear()
+        + ', ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+    } catch (e) {
       return '';
     }
   }
