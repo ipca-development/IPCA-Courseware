@@ -540,7 +540,7 @@ function rl_easa_ai_chat_tables_ok(PDO $pdo): bool
 }
 
 /** GET or POST: EASA AI chat bootstrap (sessions + messages). Supports `before_id` for lazy older-page loading. */
-function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $beforeId = 0, int $limit = 20): void
+function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $beforeId = 0, int $limit = 5): void
 {
     $chatSupported = rl_easa_ai_chat_tables_ok($pdo);
     if (!$chatSupported) {
@@ -559,8 +559,8 @@ function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $befor
     if ($userId <= 0) {
         rl_easa_json_out(401, ['ok' => false, 'error' => 'Not authenticated']);
     }
-    if ($limit < 5) {
-        $limit = 5;
+    if ($limit < 1) {
+        $limit = 1;
     } elseif ($limit > 80) {
         $limit = 80;
     }
@@ -597,6 +597,26 @@ function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $befor
             $messages = array_reverse($rows);
         } else {
             $current = 0;
+        }
+    }
+    foreach ($messages as $idx => $row) {
+        if (!is_array($row)) {
+            continue;
+        }
+        $caStr = trim((string) ($row['created_at'] ?? ''));
+        if ($caStr === '') {
+            $messages[$idx]['created_at_iso'] = null;
+            continue;
+        }
+        try {
+            if (preg_match('/[zZ]|[+-]\d{2}:?\d{2}$/', $caStr)) {
+                $dt = new DateTimeImmutable($caStr);
+            } else {
+                $dt = new DateTimeImmutable(str_replace(' ', 'T', $caStr), new DateTimeZone('UTC'));
+            }
+            $messages[$idx]['created_at_iso'] = $dt->setTimezone(new DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z');
+        } catch (Throwable) {
+            $messages[$idx]['created_at_iso'] = str_replace(' ', 'T', $caStr) . 'Z';
         }
     }
     rl_easa_json_out(200, [
@@ -869,7 +889,7 @@ if ($method === 'GET') {
             $pdo,
             (int) ($_GET['session_id'] ?? 0),
             (int) ($_GET['before_id'] ?? 0),
-            (int) ($_GET['limit'] ?? 20)
+            (int) ($_GET['limit'] ?? 5)
         );
     }
 
@@ -1179,7 +1199,7 @@ if ($action === 'easa_ai_chat_bootstrap') {
         $pdo,
         (int) ($data['session_id'] ?? 0),
         (int) ($data['before_id'] ?? 0),
-        (int) ($data['limit'] ?? 20)
+        (int) ($data['limit'] ?? 5)
     );
 }
 
