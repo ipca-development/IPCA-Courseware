@@ -1728,12 +1728,14 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     div.className = 'rl-easa-maya-avatar' + (thinkingClass ? ' ' + thinkingClass : '');
     div.setAttribute('aria-hidden', 'true');
     function bindImgErr(img) {
-      img.addEventListener('error', function () {
+      function onImgErr() {
         try {
+          img.removeEventListener('error', onImgErr);
           img.style.display = 'none';
           if (img.parentNode) img.parentNode.classList.add('rl-easa-maya-avatar--img-broken');
         } catch (e) { /* ignore */ }
-      }, { once: true });
+      }
+      img.addEventListener('error', onImgErr);
     }
     if (isMaya) {
       var msrc = String(rlEasaMayaAvatarSrc || '').trim() || '/assets/avatars/maya.png';
@@ -2164,12 +2166,17 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     }
     sen.hidden = false;
     rlEasaMayaUpdateLoadEarlierFallbackVisibility();
-    rlEasaMayaChatIo = new IntersectionObserver(function (entries) {
-      entries.forEach(function (en) {
-        if (en.isIntersecting && en.target === sen) rlEasaMayaLoadOlder();
-      });
-    }, { root: host, rootMargin: '72px 0px 0px 0px', threshold: 0 });
-    rlEasaMayaChatIo.observe(sen);
+    try {
+      rlEasaMayaChatIo = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting && en.target === sen) rlEasaMayaLoadOlder();
+        });
+      }, { root: host, threshold: 0 });
+      rlEasaMayaChatIo.observe(sen);
+    } catch (e) {
+      rlEasaMayaChatIo = null;
+      rlEasaMayaUpdateLoadEarlierFallbackVisibility();
+    }
   }
 
   function rlEasaMayaResetThreadAndRender(messages, hasMore) {
@@ -2309,68 +2316,72 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   }
 
   function rlEasaFormatAiAnswerHtml(text) {
-    var src = String(text || '').replace(/\r\n?/g, '\n').trim();
-    if (!src) return '';
-    var lines = src.split('\n');
-    var html = [];
-    var para = [];
-    var list = [];
+    try {
+      var src = String(text || '').replace(/\r\n?/g, '\n').trim();
+      if (!src) return '';
+      var lines = src.split('\n');
+      var html = [];
+      var para = [];
+      var list = [];
 
-    function inlineFmt(s) {
-      var h = esc(s);
-      h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-      h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
-      return h;
-    }
-    function flushPara() {
-      if (!para.length) return;
-      html.push('<p>' + inlineFmt(para.join(' ')) + '</p>');
-      para = [];
-    }
-    function flushList() {
-      if (!list.length) return;
-      html.push('<ul>' + list.map(function (it) { return '<li>' + inlineFmt(it) + '</li>'; }).join('') + '</ul>');
-      list = [];
-    }
+      function inlineFmt(s) {
+        var h = esc(s);
+        h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        h = h.replace(/`([^`]+)`/g, '<code>$1</code>');
+        return h;
+      }
+      function flushPara() {
+        if (!para.length) return;
+        html.push('<p>' + inlineFmt(para.join(' ')) + '</p>');
+        para = [];
+      }
+      function flushList() {
+        if (!list.length) return;
+        html.push('<ul>' + list.map(function (it) { return '<li>' + inlineFmt(it) + '</li>'; }).join('') + '</ul>');
+        list = [];
+      }
 
-    lines.forEach(function (raw) {
-      var line = raw.trim();
-      var hm;
-      if ((hm = /^###\s+(.+)$/.exec(line))) {
-        flushPara();
+      lines.forEach(function (raw) {
+        var line = raw.trim();
+        var hm;
+        if ((hm = /^###\s+(.+)$/.exec(line))) {
+          flushPara();
+          flushList();
+          html.push('<h3>' + inlineFmt(hm[1].trim()) + '</h3>');
+          return;
+        }
+        if ((hm = /^##\s+(.+)$/.exec(line))) {
+          flushPara();
+          flushList();
+          html.push('<h2>' + inlineFmt(hm[1].trim()) + '</h2>');
+          return;
+        }
+        if ((hm = /^#\s+(.+)$/.exec(line))) {
+          flushPara();
+          flushList();
+          html.push('<h2>' + inlineFmt(hm[1].trim()) + '</h2>');
+          return;
+        }
+        var m = /^[-*]\s+(.+)$/.exec(line);
+        if (m) {
+          flushPara();
+          list.push(m[1].trim());
+          return;
+        }
+        if (line === '') {
+          flushPara();
+          flushList();
+          return;
+        }
         flushList();
-        html.push('<h3>' + inlineFmt(hm[1].trim()) + '</h3>');
-        return;
-      }
-      if ((hm = /^##\s+(.+)$/.exec(line))) {
-        flushPara();
-        flushList();
-        html.push('<h2>' + inlineFmt(hm[1].trim()) + '</h2>');
-        return;
-      }
-      if ((hm = /^#\s+(.+)$/.exec(line))) {
-        flushPara();
-        flushList();
-        html.push('<h2>' + inlineFmt(hm[1].trim()) + '</h2>');
-        return;
-      }
-      var m = /^[-*]\s+(.+)$/.exec(line);
-      if (m) {
-        flushPara();
-        list.push(m[1].trim());
-        return;
-      }
-      if (line === '') {
-        flushPara();
-        flushList();
-        return;
-      }
+        para.push(line);
+      });
+      flushPara();
       flushList();
-      para.push(line);
-    });
-    flushPara();
-    flushList();
-    return html.join('');
+      return html.join('');
+    } catch (e) {
+      return '<p>' + esc(String(text || '')) + '</p>';
+    }
   }
 
   function setUploadMsg(text, kind) {

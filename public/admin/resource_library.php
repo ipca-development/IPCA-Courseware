@@ -1097,7 +1097,16 @@ cw_header('Resource Library');
       $easaMayaAvatarHref = '/assets/avatars/maya.png';
       $easaCu = cw_current_user($pdo);
       if (is_array($easaCu)) {
-          $easaUserPhotoHref = trim((string) ($easaCu['photo_path'] ?? ''));
+          $easaUid = (int) ($easaCu['id'] ?? 0);
+          if ($easaUid > 0) {
+              $easaPhotoStmt = $pdo->prepare('SELECT photo_path FROM users WHERE id = ? LIMIT 1');
+              $easaPhotoStmt->execute([$easaUid]);
+              $easaPhotoRow = $easaPhotoStmt->fetch(PDO::FETCH_ASSOC);
+              $easaPhotoRaw = trim((string) ($easaPhotoRow['photo_path'] ?? ''));
+              if ($easaPhotoRaw !== '') {
+                  $easaUserPhotoHref = rl_thumb_src($easaPhotoRaw);
+              }
+          }
       }
       require __DIR__ . '/resource_library_easa_tab.inc.php';
     ?>
