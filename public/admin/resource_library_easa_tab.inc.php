@@ -1152,6 +1152,42 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   .rl-easa-maya-chat-settings-slot:empty {
     display: none;
   }
+  .rl-easa-maya-chat-settings-btn {
+    background: #0f172a;
+    color: #fff;
+    border: 1px solid #0f172a;
+    border-radius: 999px;
+    padding: 4px 14px;
+    font-weight: 600;
+    font-size: 12px;
+    letter-spacing: 0.01em;
+    line-height: 1.4;
+    cursor: pointer;
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  .rl-easa-maya-chat-settings-btn:hover { background: #1e293b; }
+  .rl-easa-maya-chat-settings-btn:active { transform: translateY(1px); }
+  .rl-easa-semantic-auto-tree ul {
+    list-style: disc;
+    margin: 4px 0 4px 22px;
+    padding: 0;
+  }
+  .rl-easa-semantic-auto-tree li {
+    margin: 1px 0;
+  }
+  .rl-easa-semantic-auto-tree .rl-easa-semantic-batch {
+    font-weight: 700;
+    margin-top: 8px;
+    color: #0f172a;
+  }
+  .rl-easa-semantic-auto-tree .rl-easa-semantic-batch:first-child {
+    margin-top: 0;
+  }
+  .rl-easa-semantic-auto-tree .rl-easa-semantic-rules {
+    color: #475569;
+    font-size: 12px;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+  }
   .rl-easa-maya-chat-header h3 {
     margin: 0;
     font-size: 1.05rem;
@@ -1474,7 +1510,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     <div class="rl-easa-maya-chat-header">
       <div class="rl-easa-maya-chat-title-block">
         <h3>Ask Maya, your Regulations Assistant</h3>
-        <span class="rl-easa-maya-chat-settings-slot" id="rlEasaMayaChatSettingsSlot" aria-hidden="true"></span>
+        <span class="rl-easa-maya-chat-settings-slot" id="rlEasaMayaChatSettingsSlot">
+          <button type="button" class="btn btn-sm rl-easa-maya-chat-settings-btn" id="rlEasaMayaChatSettingsBtn" aria-haspopup="dialog" aria-controls="rlEasaSemanticMapModal" title="Open Maya's regulatory map editor">
+            AI Chat Settings
+          </button>
+        </span>
       </div>
       <div class="rl-easa-maya-header-actions" aria-hidden="true"></div>
     </div>
@@ -1607,6 +1647,60 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
             </thead>
             <tbody id="rlEasaBatchBody"></tbody>
           </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="rl-easa-modal-overlay rl-easa-semantic-map-modal" id="rlEasaSemanticMapModal" hidden>
+  <div class="rl-easa-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rlEasaSemanticMapTitle">
+    <div class="rl-easa-modal-head">
+      <div class="rl-easa-modal-head-text">
+        <h2 id="rlEasaSemanticMapTitle">AI Chat Settings — Maya's regulatory map</h2>
+        <p class="rl-easa-modal-intro">
+          Curate cross-references, "do-not-confuse" warnings, editorial overrides, and (optionally) regulatory-map patches that
+          Maya uses on every chat turn. The corpus tree below is auto-derived from your imported EASA XML — it's read-only here
+          but is always combined with this overlay when Maya answers.
+        </p>
+      </div>
+      <button type="button" class="rl-easa-modal-close" id="rlEasaSemanticMapClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="rl-easa-modal-body">
+      <div class="rl-easa-modal-section" id="rlEasaSemanticMapStatusSection">
+        <div class="rl-msg rl-easa-msg" id="rlEasaSemanticMapStatus" role="status" style="margin:0;">Loading…</div>
+      </div>
+
+      <div class="rl-easa-modal-section">
+        <h3 style="margin:0 0 6px;">Curated overlay (JSON)</h3>
+        <p class="rl-drop-meta" style="margin:0 0 8px;">
+          Edit the JSON below and click <strong>Save</strong>. Use <strong>Validate JSON</strong> first to catch typos.
+          Unknown keys are stripped on save; warnings appear below the textarea.
+        </p>
+        <textarea id="rlEasaSemanticMapEditor" rows="22" spellcheck="false"
+          style="width:100%;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#0f172a08;"></textarea>
+        <div class="rl-panel-actions" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-sm" id="rlEasaSemanticMapValidateBtn">Validate JSON</button>
+          <button type="button" class="btn btn-sm" id="rlEasaSemanticMapSaveBtn">Save</button>
+          <button type="button" class="btn btn-sm" id="rlEasaSemanticMapRestoreBtn" title="Replace the editor contents with the shipped defaults (does not save until you click Save)">Restore defaults</button>
+          <button type="button" class="btn btn-sm" id="rlEasaSemanticMapFormatBtn" title="Re-indent the JSON with 2-space indentation">Format JSON</button>
+          <span class="rl-drop-meta" id="rlEasaSemanticMapEditorMeta" style="margin-left:auto;font-size:11px;align-self:center;"></span>
+        </div>
+        <div class="rl-msg rl-easa-msg" id="rlEasaSemanticMapEditorMsg" role="status" style="margin-top:10px;display:none;"></div>
+      </div>
+
+      <div class="rl-easa-modal-section">
+        <h3 style="margin:0 0 6px;">Corpus tree (auto-derived — read-only)</h3>
+        <p class="rl-drop-meta" style="margin:0 0 8px;">
+          Generated live from <code>easa_erules_import_nodes_staging</code>. Re-import EASA XML to refresh.
+        </p>
+        <div class="rl-panel-actions" style="margin:0 0 8px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-sm" id="rlEasaSemanticMapReloadAutoBtn">Refresh corpus tree</button>
+          <span class="rl-drop-meta" id="rlEasaSemanticMapAutoMeta" style="margin-left:auto;font-size:11px;align-self:center;"></span>
+        </div>
+        <div id="rlEasaSemanticMapAutoTree" class="rl-easa-semantic-auto-tree"
+             style="max-height:340px;overflow:auto;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;font-size:13px;line-height:1.5;">
+          <em>Loading…</em>
         </div>
       </div>
     </div>
@@ -4307,6 +4401,269 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         .finally(function () { chatSendBtn.disabled = false; });
     });
   }
+
+  /**
+   * "AI Chat Settings" modal — edits Maya's curated semantic-map overlay (cross-references,
+   * do-not-confuse warnings, editorial overrides) and previews the auto-derived corpus tree.
+   * Talks to the new ai_semantic_map_get / _validate / _save / _autoderive_preview endpoints.
+   */
+  (function bindSemanticMapModal() {
+    var btn = document.getElementById('rlEasaMayaChatSettingsBtn');
+    var modal = document.getElementById('rlEasaSemanticMapModal');
+    var closeBtn = document.getElementById('rlEasaSemanticMapClose');
+    var editor = document.getElementById('rlEasaSemanticMapEditor');
+    var validateBtn = document.getElementById('rlEasaSemanticMapValidateBtn');
+    var saveBtn = document.getElementById('rlEasaSemanticMapSaveBtn');
+    var restoreBtn = document.getElementById('rlEasaSemanticMapRestoreBtn');
+    var formatBtn = document.getElementById('rlEasaSemanticMapFormatBtn');
+    var reloadAutoBtn = document.getElementById('rlEasaSemanticMapReloadAutoBtn');
+    var statusEl = document.getElementById('rlEasaSemanticMapStatus');
+    var editorMsg = document.getElementById('rlEasaSemanticMapEditorMsg');
+    var editorMeta = document.getElementById('rlEasaSemanticMapEditorMeta');
+    var autoMeta = document.getElementById('rlEasaSemanticMapAutoMeta');
+    var autoMount = document.getElementById('rlEasaSemanticMapAutoTree');
+    if (!btn || !modal || !editor) return;
+    /** Cached "shipped defaults" object returned from the server — used by Restore defaults. */
+    var lastDefaults = null;
+
+    function setStatus(text, kind) {
+      if (!statusEl) return;
+      statusEl.textContent = text || '';
+      var suffix = '';
+      if (text) {
+        if (kind === 'ok') suffix = ' is-ok';
+        else if (kind === 'info') suffix = ' is-info';
+        else if (kind === 'error') suffix = ' is-error';
+      }
+      statusEl.className = 'rl-msg rl-easa-msg' + suffix;
+    }
+    function setEditorMsg(text, kind) {
+      if (!editorMsg) return;
+      if (!text) { editorMsg.style.display = 'none'; editorMsg.textContent = ''; return; }
+      editorMsg.style.display = '';
+      editorMsg.textContent = text;
+      var suffix = '';
+      if (kind === 'ok') suffix = ' is-ok';
+      else if (kind === 'info') suffix = ' is-info';
+      else suffix = ' is-error';
+      editorMsg.className = 'rl-msg rl-easa-msg' + suffix;
+    }
+
+    function jsonPretty(obj) {
+      try { return JSON.stringify(obj, null, 2); } catch (e) { return ''; }
+    }
+
+    function renderAutoTree(tree) {
+      if (!autoMount) return;
+      autoMount.innerHTML = '';
+      if (!tree || typeof tree !== 'object') {
+        autoMount.innerHTML = '<em>Corpus tree unavailable. Apply the EASA staging migration and import at least one Easy Access XML.</em>';
+        return;
+      }
+      var batchIds = Object.keys(tree);
+      if (!batchIds.length) {
+        autoMount.innerHTML = '<em>No batches found in staging yet — import an EASA XML to populate the tree.</em>';
+        return;
+      }
+      batchIds.forEach(function (bid) {
+        var batch = tree[bid] || {};
+        var batchDiv = document.createElement('div');
+        batchDiv.className = 'rl-easa-semantic-batch';
+        batchDiv.textContent = String(batch.batch_label || ('Batch ' + bid));
+        autoMount.appendChild(batchDiv);
+        var children = batch.children || {};
+        var annexUl = document.createElement('ul');
+        Object.keys(children).forEach(function (annex) {
+          var annexLi = document.createElement('li');
+          annexLi.textContent = annex;
+          var subUl = document.createElement('ul');
+          var subparts = children[annex] || {};
+          Object.keys(subparts).forEach(function (subpart) {
+            var subLi = document.createElement('li');
+            subLi.textContent = subpart;
+            var secUl = document.createElement('ul');
+            var sections = subparts[subpart] || {};
+            Object.keys(sections).forEach(function (section) {
+              var secLi = document.createElement('li');
+              var rules = sections[section] || [];
+              var ids = [];
+              rules.slice(0, 16).forEach(function (r) {
+                if (r && r.id) ids.push(String(r.id));
+              });
+              secLi.textContent = section;
+              if (ids.length) {
+                var idsSpan = document.createElement('span');
+                idsSpan.className = 'rl-easa-semantic-rules';
+                idsSpan.textContent = ' — ' + ids.join(', ') + (rules.length > 16 ? ' …' : '');
+                secLi.appendChild(idsSpan);
+              }
+              secUl.appendChild(secLi);
+            });
+            if (secUl.children.length) subLi.appendChild(secUl);
+            subUl.appendChild(subLi);
+          });
+          if (subUl.children.length) annexLi.appendChild(subUl);
+          annexUl.appendChild(annexLi);
+        });
+        autoMount.appendChild(annexUl);
+      });
+    }
+
+    function loadAll() {
+      setStatus('Loading semantic map…', 'info');
+      setEditorMsg('');
+      fetch(api + '?action=ai_semantic_map_get', { credentials: 'same-origin' })
+        .then(rlEasaParseJsonResponse)
+        .then(function (x) {
+          if (!x.ok || !x.j || !x.j.ok) {
+            throw new Error((x.j && x.j.error) || 'Could not load semantic map');
+          }
+          var j = x.j;
+          lastDefaults = j.defaults || null;
+          if (j.tables_ok === false) {
+            setStatus(j.migrate_hint || 'Apply scripts/sql/resource_library_easa_semantic_map.sql to enable saving.', 'error');
+          } else {
+            var when = j.overlay_updated_at ? (' · last edited ' + j.overlay_updated_at + ' UTC') : '';
+            var who = j.overlay_updated_by ? (' by user #' + j.overlay_updated_by) : '';
+            setStatus(j.overlay_persisted
+              ? ('Saved overlay loaded' + when + who + ' · auto-derived tree has ' + (j.auto_tree_batch_count || 0) + ' batch(es).')
+              : ('No saved overlay yet — editor is pre-filled with the shipped defaults. Click Save to persist. Auto-derived tree has ' + (j.auto_tree_batch_count || 0) + ' batch(es).'),
+              j.overlay_persisted ? 'ok' : 'info');
+          }
+          editor.value = jsonPretty(j.overlay || {});
+          editorMeta.textContent = (editor.value || '').length.toLocaleString() + ' chars';
+          autoMeta.textContent = (j.auto_tree_batch_count || 0) + ' batch(es)';
+          renderAutoTree(j.auto_tree || {});
+        })
+        .catch(function (e) {
+          setStatus((e && e.message) ? ('Load failed: ' + e.message) : 'Load failed.', 'error');
+        });
+    }
+
+    function openModal() {
+      modal.hidden = false;
+      loadAll();
+    }
+    function closeModal() {
+      modal.hidden = true;
+    }
+    btn.addEventListener('click', openModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+    if (formatBtn) {
+      formatBtn.addEventListener('click', function () {
+        try {
+          var obj = JSON.parse(editor.value || '{}');
+          editor.value = jsonPretty(obj);
+          editorMeta.textContent = (editor.value || '').length.toLocaleString() + ' chars';
+          setEditorMsg('Formatted.', 'ok');
+        } catch (e) {
+          setEditorMsg('Cannot format — invalid JSON: ' + (e && e.message ? e.message : e), 'error');
+        }
+      });
+    }
+    if (restoreBtn) {
+      restoreBtn.addEventListener('click', function () {
+        if (!lastDefaults) {
+          setEditorMsg('Defaults not loaded yet — reopen the modal first.', 'error');
+          return;
+        }
+        if (!confirm('Replace the editor contents with the shipped defaults? (You still need to click Save to persist.)')) return;
+        editor.value = jsonPretty(lastDefaults);
+        editorMeta.textContent = (editor.value || '').length.toLocaleString() + ' chars';
+        setEditorMsg('Editor reset to defaults — click Save to persist.', 'info');
+      });
+    }
+    if (validateBtn) {
+      validateBtn.addEventListener('click', function () {
+        var raw = editor.value || '';
+        var parsed;
+        try { parsed = JSON.parse(raw); }
+        catch (e) {
+          setEditorMsg('JSON parse error: ' + (e && e.message ? e.message : e), 'error');
+          return;
+        }
+        fetch(api, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ action: 'ai_semantic_map_validate', overlay: parsed })
+        })
+          .then(rlEasaParseJsonResponse)
+          .then(function (x) {
+            if (!x.j) { setEditorMsg('Validation failed.', 'error'); return; }
+            var warns = (x.j.warnings || []);
+            if (x.j.ok && !warns.length) {
+              setEditorMsg('Looks good — no warnings.', 'ok');
+            } else if (x.j.ok) {
+              setEditorMsg('Valid, with ' + warns.length + ' note(s): ' + warns.join(' | '), 'info');
+            } else {
+              setEditorMsg('Validation issues: ' + warns.join(' | '), 'error');
+            }
+          })
+          .catch(function (e) { setEditorMsg('Validation request failed: ' + (e && e.message ? e.message : e), 'error'); });
+      });
+    }
+    if (saveBtn) {
+      saveBtn.addEventListener('click', function () {
+        var raw = editor.value || '';
+        var parsed;
+        try { parsed = JSON.parse(raw); }
+        catch (e) {
+          setEditorMsg('JSON parse error: ' + (e && e.message ? e.message : e), 'error');
+          return;
+        }
+        saveBtn.disabled = true;
+        fetch(api, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({ action: 'ai_semantic_map_save', overlay: parsed })
+        })
+          .then(rlEasaParseJsonResponse)
+          .then(function (x) {
+            if (!x.ok || !x.j || !x.j.ok) {
+              throw new Error((x.j && x.j.error) || 'Save failed');
+            }
+            var warns = x.j.validation_warnings || [];
+            var when = x.j.overlay_updated_at ? (' (saved ' + x.j.overlay_updated_at + ' UTC)') : '';
+            if (warns.length) {
+              setEditorMsg('Saved' + when + ' · stripped ' + warns.length + ' unknown key(s): ' + warns.join(' | '), 'info');
+            } else {
+              setEditorMsg('Saved' + when + '.', 'ok');
+            }
+            editor.value = jsonPretty(x.j.overlay || {});
+            editorMeta.textContent = (editor.value || '').length.toLocaleString() + ' chars';
+            setStatus('Saved overlay is now live for Maya' + when + '.', 'ok');
+          })
+          .catch(function (e) { setEditorMsg('Save failed: ' + (e && e.message ? e.message : e), 'error'); })
+          .finally(function () { saveBtn.disabled = false; });
+      });
+    }
+    if (reloadAutoBtn) {
+      reloadAutoBtn.addEventListener('click', function () {
+        reloadAutoBtn.disabled = true;
+        autoMount.innerHTML = '<em>Refreshing…</em>';
+        fetch(api + '?action=ai_semantic_map_autoderive_preview', { credentials: 'same-origin' })
+          .then(rlEasaParseJsonResponse)
+          .then(function (x) {
+            if (!x.ok || !x.j || !x.j.ok) {
+              throw new Error((x.j && x.j.error) || 'Refresh failed');
+            }
+            autoMeta.textContent = (x.j.auto_tree_batch_count || 0) + ' batch(es)';
+            renderAutoTree(x.j.auto_tree || {});
+          })
+          .catch(function (e) {
+            autoMount.innerHTML = '<em>' + esc('Refresh failed: ' + (e && e.message ? e.message : e)) + '</em>';
+          })
+          .finally(function () { reloadAutoBtn.disabled = false; });
+      });
+    }
+    editor.addEventListener('input', function () {
+      editorMeta.textContent = (editor.value || '').length.toLocaleString() + ' chars';
+    });
+  })();
 
   loadStatus();
 })();

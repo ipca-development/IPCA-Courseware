@@ -9,6 +9,7 @@ require_once __DIR__ . '/../../../src/easa_erules_storage.php';
 require_once __DIR__ . '/../../../src/easa_download_monitor.php';
 require_once __DIR__ . '/../../../src/easa_erules_xml_import.php';
 require_once __DIR__ . '/../../../src/resource_library_easa_node_detail_build.php';
+require_once __DIR__ . '/../../../src/easa_semantic_map.php';
 
 @ini_set('upload_max_filesize', '128M');
 @ini_set('post_max_size', '128M');
@@ -1540,6 +1541,37 @@ if ($method === 'GET') {
         );
     }
 
+    /** GET ?action=ai_semantic_map_get
+     *  Returns the curated overlay + a fresh preview of the auto-derived tree. Used by the
+     *  "AI Chat Settings" modal to populate the editor.  */
+    if ($action === 'ai_semantic_map_get') {
+        $loaded = easa_semantic_map_load($pdo);
+        $auto = easa_semantic_map_build_auto_tree($pdo);
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'tables_ok' => easa_semantic_map_tables_ok($pdo),
+            'migrate_hint' => easa_semantic_map_tables_ok($pdo) ? null : 'Apply scripts/sql/resource_library_easa_semantic_map.sql to enable persistent semantic map.',
+            'overlay' => $loaded['json'],
+            'overlay_persisted' => $loaded['persisted'],
+            'overlay_updated_at' => $loaded['updated_at'],
+            'overlay_updated_by' => $loaded['updated_by'],
+            'auto_tree' => $auto,
+            'auto_tree_batch_count' => count($auto),
+            'defaults' => easa_semantic_map_default_overlay(),
+        ]);
+    }
+
+    /** GET ?action=ai_semantic_map_autoderive_preview
+     *  Re-runs the auto-derivation only. Used by the "Refresh from corpus" button in the modal. */
+    if ($action === 'ai_semantic_map_autoderive_preview') {
+        $auto = easa_semantic_map_build_auto_tree($pdo);
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'auto_tree' => $auto,
+            'auto_tree_batch_count' => count($auto),
+        ]);
+    }
+
     /**
      * GET ?action=ai_retrieval_probe&q=...&batch_id=N
      * Diagnostic: runs the same needle expansion + ranking + canonical-bundle build that the chat uses,
@@ -1958,6 +1990,75 @@ if ($action === 'easa_ai_chat_bootstrap') {
     );
 }
 
+if ($action === 'ai_semantic_map_save') {
+    if (!easa_semantic_map_tables_ok($pdo)) {
+        rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_semantic_map.sql first']);
+    }
+    $u = cw_current_user($pdo);
+    $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
+    if ($userId <= 0) {
+        rl_easa_json_out(401, ['ok' => false, 'error' => 'Not authenticated']);
+    }
+    $payload = $data['overlay'] ?? null;
+    if (is_string($payload)) {
+        $decoded = json_decode($payload, true);
+        if (!is_array($decoded)) {
+            rl_easa_json_out(400, [
+                'ok' => false,
+                'error' => 'overlay JSON did not parse: ' . json_last_error_msg(),
+            ]);
+        }
+        $payload = $decoded;
+    }
+    if (!is_array($payload)) {
+        rl_easa_json_out(400, ['ok' => false, 'error' => 'overlay (JSON object) is required']);
+    }
+    $v = easa_semantic_map_validate($payload);
+    if (!$v['ok']) {
+        /** Soft-fail validation: keep the warnings but still save the normalised payload, so
+            unknown keys are dropped rather than blocking the save. The UI surfaces the warnings. */
+    }
+    try {
+        $saved = easa_semantic_map_save($pdo, $v['normalised'], $userId);
+    } catch (Throwable $e) {
+        rl_easa_json_out(500, ['ok' => false, 'error' => $e->getMessage()]);
+    }
+    rl_easa_json_out(200, [
+        'ok' => true,
+        'validation_warnings' => $v['errors'],
+        'overlay' => $saved['json'],
+        'overlay_updated_at' => $saved['updated_at'],
+        'overlay_updated_by' => $saved['updated_by'],
+        'overlay_persisted' => $saved['persisted'],
+    ]);
+}
+
+if ($action === 'ai_semantic_map_validate') {
+    /** Validate-only — no save, no auth needed beyond the admin gate already enforced at the top. */
+    $payload = $data['overlay'] ?? null;
+    if (is_string($payload)) {
+        $decoded = json_decode($payload, true);
+        if (!is_array($decoded)) {
+            rl_easa_json_out(200, [
+                'ok' => false,
+                'parse_error' => json_last_error_msg(),
+                'warnings' => [],
+                'normalised' => null,
+            ]);
+        }
+        $payload = $decoded;
+    }
+    if (!is_array($payload)) {
+        rl_easa_json_out(400, ['ok' => false, 'error' => 'overlay (JSON object) is required']);
+    }
+    $v = easa_semantic_map_validate($payload);
+    rl_easa_json_out(200, [
+        'ok' => $v['ok'],
+        'warnings' => $v['errors'],
+        'normalised' => $v['normalised'],
+    ]);
+}
+
 if ($action === 'easa_ai_chat_session_create') {
     if (!rl_easa_ai_chat_tables_ok($pdo)) {
         rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_ai_chat.sql first']);
@@ -2124,6 +2225,15 @@ if ($action === 'regulatory_compare_ai') {
     /** STEP 2: build the regulatory bundle using the intent-derived needles (plus the regex
         keyword fallback inside the bundle builder). */
     $canon = rl_easa_build_ai_canonical_regulatory_bundle($pdo, $q, $compareBatchId, $extraNeedles, $intent);
+
+    /** STEP 2b: load the curated overlay + auto-derived tree and render them into a
+        compact prompt block. This is Maya's authoritative outline — pasted into the
+        system prompt so she always knows the Subpart/Section shape, cross-references,
+        "do not confuse" warnings and editorial overrides regardless of which rows the
+        retrieval step happened to surface. */
+    $semanticMapLoaded = easa_semantic_map_load($pdo);
+    $semanticAutoTree = easa_semantic_map_build_auto_tree($pdo);
+    $semanticMapBlock = easa_semantic_map_render_for_ai($semanticMapLoaded['json'] ?? [], $semanticAutoTree);
     $easaCtx = (string) ($canon['summary'] ?? '');
     $easaModelBundle = trim((string) ($canon['model_bundle'] ?? ''));
 
@@ -2190,6 +2300,12 @@ if ($action === 'regulatory_compare_ai') {
         'intent' => $intent,
         'intent_fallback' => $intentWasFallback,
         'intent_error' => $intentError,
+        'semantic_map' => [
+            'overlay_persisted' => (bool) ($semanticMapLoaded['persisted'] ?? false),
+            'overlay_updated_at' => $semanticMapLoaded['updated_at'] ?? null,
+            'auto_tree_batch_count' => count($semanticAutoTree),
+            'prompt_block_chars' => strlen($semanticMapBlock),
+        ],
     ];
 
     if (!$useAi) {
@@ -2274,6 +2390,7 @@ Your entire model output MUST be a single JSON object (no markdown fences, no pr
     * Recent conversation turns are provided above. Treat them as memory — short follow-ups like "What are those requirements?", "Tell me more.", "And for the modular course?" continue the previous topic and should be answered against that same Part-FCL area.
     * NEVER repeat a previous Maya turn verbatim. If the user's new message is a refinement or follow-up, answer the NEW question with the EXTRA detail they asked for (e.g. previous turn introduced FCL.600; follow-up "what are those requirements" → answer with FCL.610 pre-requisites, FCL.615 theoretical knowledge & flight instruction, FCL.620 skill test from the bundle).
     * If the new question is clearly a new topic (different licence, different corpus), just start fresh — don't try to thread the old topic in.
+    * DRILL-DOWN follow-ups ("break it down", "in simple steps", "step by step", "walk me through", "explain in detail", "go deeper"): DO NOT re-print the high-level rule list you already gave in the previous turn. Skip that intro completely. Open with one short line ("Hi Kay, here's the modular IR(A) path step-by-step:") then go STRAIGHT to the numbered or bulleted steps with rule ids in parentheses for citation. The reader already saw the rule list — your job now is the substance, not the table of contents.
 
 - "primary_references": array of objects (the UI shows these as chips inside your bubble — they are how the user clicks through). Each object MUST have:
     * "title" (string, human section title — e.g. "FCL.300 CPL — Minimum age". Never raw .xml filenames, never internal IDs).
@@ -2302,7 +2419,8 @@ TXT;
                             'type' => 'input_text',
                             'text' => "You are Maya, an EASA Easy Access mentor. Use ONLY the canonical EASA bundles provided plus any optional U.S. eCFR excerpt in the bundle. "
                                 . $jsonInstructions
-                                . " When U.S. text is present, clearly label it as U.S. 14 CFR for comparison. Greet by first name when provided (e.g. \"Hi {name},\"). Do not add any boilerplate verification footer; the style rules above are the final word on tone.",
+                                . " When U.S. text is present, clearly label it as U.S. 14 CFR for comparison. Greet by first name when provided (e.g. \"Hi {name},\"). Do not add any boilerplate verification footer; the style rules above are the final word on tone."
+                                . ($semanticMapBlock !== '' ? "\n\n" . $semanticMapBlock : ''),
                         ],
                     ],
                 ],
