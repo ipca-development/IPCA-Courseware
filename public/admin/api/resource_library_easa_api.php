@@ -405,22 +405,19 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
 
         return $out;
     }
-    $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'toc\',\'backmatter\') THEN 1 ELSE 0 END)';
-    /** Prefer concrete rule-level nodes (rule/IR/CS) and supplementary AMC/GM over wrappers / annex / subpart shells. */
+    /** Document shells are useless for the model. Toc/heading nodes are nav scaffolding — keep them, but rank them below real bodies. */
+    $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'backmatter\') THEN 1 ELSE 0 END)';
+    /** EASA staging node_type taxonomy is essentially: document / frontmatter / backmatter / toc / heading / topic.
+        "topic" rows carry the actual rule body (FCL.300 etc.). Prefer them; demote toc/heading; require body presence
+        (non-empty source_erules_id OR non-empty plain_text) to filter out empty nav rows that just contain a label. */
     $kindRank = "(CASE LOWER(COALESCE(node_type, ''))
-        WHEN 'rule' THEN 0
-        WHEN 'ir' THEN 0
-        WHEN 'cs' THEN 0
-        WHEN 'amc' THEN 1
-        WHEN 'gm' THEN 1
-        WHEN 'topic' THEN 2
-        WHEN 'subject' THEN 2
-        WHEN 'section' THEN 3
-        WHEN 'subpart' THEN 3
-        WHEN 'chapter' THEN 3
-        WHEN 'annex' THEN 4
-        ELSE 5
+        WHEN 'topic' THEN 0
+        WHEN 'heading' THEN 2
+        WHEN 'toc' THEN 3
+        ELSE 1
     END)";
+    /** Rule-body presence: rows with an ERulesId or plain_text are real rule/AMC/GM bodies; rows missing both are typically empty nav shells. */
+    $bodyRank = "(CASE WHEN (COALESCE(source_erules_id, '') <> '' OR LENGTH(COALESCE(plain_text, '')) > 80) THEN 0 ELSE 1 END)";
     $maxRows = 18;
     $excerptLen = 4500;
     $excerptBody = rl_easa_staging_snippet_concat_body($pdo);
@@ -435,7 +432,7 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
     if ($boostIds !== [] && $batchFilter <= 0) {
         $boostRank = '(CASE WHEN batch_id IN (' . implode(',', array_map('intval', $boostIds)) . ') THEN 0 ELSE 1 END)';
     }
-    $fetchMatches = static function (string $needle, int $limit) use ($pdo, $batchFilter, $wrapRank, $kindRank, $excerptBody, $excerptLen, $excludeSql, $boostRank): array {
+    $fetchMatches = static function (string $needle, int $limit) use ($pdo, $batchFilter, $wrapRank, $kindRank, $bodyRank, $excerptBody, $excerptLen, $excludeSql, $boostRank): array {
         $m = rl_easa_search_match_clause($pdo, $needle);
         $whereMatch = $m['where'];
         $bind = $m['bind'];
@@ -455,7 +452,7 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
                        SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
                 FROM easa_erules_import_nodes_staging
                 WHERE batch_id = ? AND {$whereMatch}
-                ORDER BY {$wrapRank} ASC, {$kindRank} ASC, {$titleRankSql} ASC, id ASC
+                ORDER BY {$wrapRank} ASC, {$bodyRank} ASC, {$kindRank} ASC, {$titleRankSql} ASC, id ASC
                 LIMIT {$limit}
             ";
             $stmt = $pdo->prepare($sql);
@@ -466,7 +463,7 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
                        SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
                 FROM easa_erules_import_nodes_staging
                 WHERE {$whereMatch} {$excludeSql}
-                ORDER BY {$boostRank} ASC, {$wrapRank} ASC, {$kindRank} ASC, {$titleRankSql} ASC, id ASC
+                ORDER BY {$boostRank} ASC, {$wrapRank} ASC, {$bodyRank} ASC, {$kindRank} ASC, {$titleRankSql} ASC, id ASC
                 LIMIT {$limit}
             ";
             $stmt = $pdo->prepare($sql);
@@ -1524,10 +1521,16 @@ if ($action === 'regulatory_compare_ai') {
         rl_easa_json_out(200, $payload);
     }
 
+    $loadedNodeCount = is_array($canon['full_nodes'] ?? null) ? count($canon['full_nodes']) : 0;
     $bundle = "EU / EASA — FULL canonical regulation payloads from this installation (same resolver as GET node_detail). "
         . "Each CANONICAL NODE block includes structured_blocks_json, canonical_text, plain_text, title_display, breadcrumb, batch_id, node_uid, ERulesId. "
         . "Answer ONLY from this material; quote accurately. If blocks are empty or truncated, say so.\n\n";
     if ($easaModelBundle !== '') {
+        $bundle .= sprintf(
+            "*** %d CANONICAL NODE block(s) follow. These were selected by the server retrieval pipeline to be the most relevant material for the user's question. ***\n"
+            . "*** You MUST treat this list as the available regulatory material. If even one block is about the topic asked, answer FROM IT — do not claim the bundle 'does not include' the topic. ***\n\n",
+            $loadedNodeCount
+        );
         $bundle .= $easaModelBundle . "\n\n";
     } else {
         $bundle .= "(No canonical node payloads loaded — refer to easa_context_note above.)\n\n";
@@ -1552,7 +1555,8 @@ Your entire model output MUST be a single JSON object (no markdown fences, no pr
     * If the question is already specific, answer directly without unnecessary narrowing.
     * Keep the tone friendly and instructor-like, not lawyerly.
     * Use FRIENDLY corpus names only ("EAR Flight Crew", "EAR Flight Operations", "EAR Part-IS", "EAR CS-FSTD"). NEVER reveal raw .xml file names, batch_id, node_uid, ERulesId, "staging", or "canonical" — those belong ONLY in primary_references. Do not write phrases like "the material you attached" unless the user actually attached something in this turn.
-    * If the canonical bundle does not contain a relevant Aircrew/Part-FCL match for an FCL question, state honestly that the available indexed material doesn't cover this and ask the user to confirm which regulation set, instead of citing unrelated material like Part-IS.
+    * READ THE BUNDLE BEFORE REFUSING. If the bundle includes any node whose title, breadcrumb, ERulesId, structured_blocks_json, canonical_text, or plain_text mentions the asked licence/topic (e.g. FCL.200/210/215 for PPL, FCL.300/305/310/315/320/325 for CPL, FCL.500/505/510/515 for ATPL, FCL.400/405/410 for MPL, FCL.100/105/110 for LAPL, FCL.600/615/620 for IR, FCL.835 for BIR, FCL.025 for theoretical knowledge, FCL.030 for skill test) — then ANSWER from it. Do NOT say "the bundle does not include the rules" if any Part-FCL node about the topic is present; if only some sub-rules are present, answer from those and note that you are summarising what is available in this installation's indexed material.
+    * If, and only if, no node in the bundle is on the asked topic, state honestly that the available indexed material doesn't cover this and ask the user to confirm which regulation set — but do this only after actually scanning the listed CANONICAL NODE blocks.
 
 - "primary_references": array of objects (the UI shows these as chips inside your bubble — they are how the user clicks through). Each object MUST have:
     * "title" (string, human section title — e.g. "FCL.025 Theoretical knowledge examinations" or "SUBJECT 050 — METEOROLOGY". Never raw .xml filenames, never internal IDs).
