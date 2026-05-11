@@ -1640,18 +1640,41 @@ if ($action === 'regulatory_compare_ai') {
     }
 
     $loadedNodeCount = is_array($canon['full_nodes'] ?? null) ? count($canon['full_nodes']) : 0;
-    $bundle = "EU / EASA — FULL canonical regulation payloads from this installation (same resolver as GET node_detail). "
-        . "Each CANONICAL NODE block includes structured_blocks_json, canonical_text, plain_text, title_display, breadcrumb, batch_id, node_uid, ERulesId. "
-        . "Answer ONLY from this material; quote accurately. If blocks are empty or truncated, say so.\n\n";
+    /** Build a short, model-facing index of titles + FCL ids so the model cannot pretend the rules are absent. */
+    $bundleTitleIndex = '';
+    if (is_array($canon['full_nodes'] ?? null) && $canon['full_nodes'] !== []) {
+        $idxLines = [];
+        foreach ($canon['full_nodes'] as $fn) {
+            if (!is_array($fn) || !is_array($fn['node'] ?? null)) {
+                continue;
+            }
+            $title = trim((string) ($fn['node']['title'] ?? ''));
+            if ($title === '') {
+                continue;
+            }
+            $idxLines[] = '  • ' . $title;
+            if (count($idxLines) >= 16) {
+                break;
+            }
+        }
+        if ($idxLines !== []) {
+            $bundleTitleIndex = "Rule titles present in this bundle (use these verbatim in your outline):\n" . implode("\n", $idxLines) . "\n\n";
+        }
+    }
+    $bundle = "EU / EASA — FULL canonical regulation payloads from this installation. "
+        . "Each CANONICAL NODE block below is a real Part-FCL rule that the server has already matched to the user's question. "
+        . "Build your answer FROM the listed blocks. Never claim a topic is missing — if there are nodes, you have material.\n\n";
     if ($easaModelBundle !== '') {
         $bundle .= sprintf(
-            "*** %d CANONICAL NODE block(s) follow. These were selected by the server retrieval pipeline to be the most relevant material for the user's question. ***\n"
-            . "*** You MUST treat this list as the available regulatory material. If even one block is about the topic asked, answer FROM IT — do not claim the bundle 'does not include' the topic. ***\n\n",
+            "*** %d CANONICAL NODE block(s) follow. These ARE the relevant rules for this question. ***\n",
             $loadedNodeCount
         );
+        if ($bundleTitleIndex !== '') {
+            $bundle .= "\n" . $bundleTitleIndex;
+        }
         $bundle .= $easaModelBundle . "\n\n";
     } else {
-        $bundle .= "(No canonical node payloads loaded — refer to easa_context_note above.)\n\n";
+        $bundle .= "(No canonical node payloads loaded — say so plainly and ask which regulation the user means.)\n\n";
     }
     if ($ecfrHtml !== '') {
         $strip = preg_replace('/\s+/', ' ', strip_tags($ecfrHtml));
@@ -1669,23 +1692,26 @@ Your entire model output MUST be a single JSON object (no markdown fences, no pr
 
 - "answer_markdown": string. Tight, friendly Markdown for a pilot or instructor.
 
+  ABSOLUTE RULE (read this first, then follow it):
+    The reference bundle below ALWAYS contains rule nodes that the server has already matched to the user's question. Each block's title (e.g. "FCL.300 CPL – Minimum age") and breadcrumb tell you what the rule is and where it lives in the tree. You MUST build the answer FROM those blocks. You are NOT allowed to say the rules are missing, not indexed, not present, not in the bundle, not in the installation, or anything equivalent. You are NOT allowed to ask the user to confirm which regulation set when their question already names one (Part-FCL, Aircrew, CPL, PPL, ATPL, etc.). Refusal phrasing is forbidden — there is always something to say from the listed CANONICAL NODE blocks.
+
   STRICT STYLE (this is what makes the reply useful — don't drift from it):
     * Open with a single short greeting line: "Hi <FirstName>," when a first name is provided, otherwise "Hi there,".
     * Second line: state the location of the topic in the tree, e.g. "to get more details on the EASA Commercial Pilot Licence, the following rules can be found under Aircrew, Annex I (Part-FCL), Subpart D – Commercial Pilot Licence."
-    * Then a compact bulleted outline organised by SECTION (Section 1, Section 2, …) when the bundle shows that structure. Each bullet lists rule TITLES with their ID in parentheses, e.g.
-        - Common Requirements: Minimum Age (FCL.300), Privileges and Conditions (FCL.305), Theoretical Knowledge Examinations (FCL.310), Training Course (FCL.315), Skill Test (FCL.320) — Section 1.
-        - Section 2 – Aeroplane category: Training Course (FCL.315.A), Specific Requirements for MPL holders (FCL.325.A).
+    * Then a compact bulleted outline grouped by Section / Subpart where the bundle shows that structure. Each bullet lists rule TITLES with their FCL id in parentheses, e.g.
+        - Section 1 – Common requirements: Minimum age (FCL.300), Privileges and conditions (FCL.305), Theoretical knowledge examinations (FCL.310), Training course (FCL.315), Skill test (FCL.320).
+        - Section 2 – Aeroplane category: Training course (FCL.315.A), Specific requirements for applicants who hold an MPL (FCL.325.A).
+        - Cross-references: Training courses for the issue of a CPL and an ATPL (Appendix 3).
     * End with ONE short focused offer to go deeper, e.g. "What would you like me to check more in depth for you here?". Do not list multiple numbered options unless the user explicitly asked you to narrow.
-    * NEVER include disclaimers, hedges, or commentary about the dataset. Do NOT say "the indexed material does not include", "the bundle does not contain", "in this installation slice", "the available material is mostly", or any equivalent phrasing. Do NOT mention "batches", "staging", "canonical", "node_uid", "ERulesId", "retrieval", or how the back-end works.
+    * NEVER include disclaimers, hedges, or commentary about the dataset. Do NOT say "the indexed material does not include", "the bundle does not contain", "in this installation slice", "the available material is mostly", "those specific rules", "not indexed here yet", or any equivalent phrasing. Do NOT mention "batches", "staging", "canonical", "node_uid", "ERulesId", "retrieval", or how the back-end works.
     * Do NOT add boilerplate like "always verify against the official EASA publication".
     * Keep total length around 90–180 words for a straight overview question. Do not pad.
     * Use FRIENDLY corpus names only ("EAR Flight Crew", "EAR Flight Operations", "EAR Part-IS", "EAR CS-FSTD"). Never raw .xml file names. Never internal IDs in prose — rule ids like FCL.300 ARE fine in prose because they're the natural way pilots cite rules.
 
   CONTENT RULES:
-    * Build the answer from the CANONICAL NODE blocks in the bundle. The bundle's breadcrumb/title fields tell you which Subpart and Section each rule lives under — use those to assemble the structured outline.
-    * If the user's question is already specific (mentions a licence type or rule id), answer directly. Don't ask narrowing questions before giving the overview.
-    * If multiple licence categories are present (e.g. Subpart D has Section 2 for aeroplanes, Section 3 for helicopters, etc.), summarise the structure and only expand the category the user asked about (or list available categories and offer to expand one at the end).
-    * If, AND ONLY IF, after scanning the bundle there is genuinely no Part-FCL node about the asked topic, say in one short line "I don't have those specific rules indexed here yet — want me to point you to where they live in the regulation?" and stop.
+    * Use the CANONICAL NODE titles and FCL ids verbatim. Do not invent new rule ids.
+    * If multiple licence categories appear (Subpart D has Section 2 for aeroplanes, Section 3 for helicopters, etc.), summarise the structure and only expand the category the user asked about (or list available categories and offer to expand one in the closing line).
+    * ARA.FCL.300 nodes (Air Operations Authority Requirements – Examination procedures) are about the COMPETENT AUTHORITY's exam procedures, NOT about pilot CPL licensing — mention them only if the user explicitly asked about authority/examiner procedures; otherwise focus on the FCL.300–FCL.325 (and FCL.300.A–FCL.325.A) pilot rules.
 
 - "primary_references": array of objects (the UI shows these as chips inside your bubble — they are how the user clicks through). Each object MUST have:
     * "title" (string, human section title — e.g. "FCL.300 CPL — Minimum age". Never raw .xml filenames, never internal IDs).
