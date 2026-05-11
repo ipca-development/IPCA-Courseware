@@ -108,6 +108,12 @@ function rl_easa_search_match_clause(PDO $pdo, string $q): array
 /**
  * Rule-id and keyword fallbacks for natural-language compare questions.
  *
+ * Order matters: needles are searched in order until the row budget is full, so we put
+ * high-signal tokens (rule ids, EASA licence abbreviations, technical phrases) first and
+ * push generic English words to the tail. Short domain abbreviations (FCL, CPL, PPL, ATPL,
+ * MPL, LAPL, IR, BIR, SFCL, BFCL) are kept regardless of length — those are the tokens that
+ * actually pick out the Part-FCL nodes a pilot is asking about.
+ *
  * @return list<string>
  */
 function rl_easa_compare_query_needles(string $q): array
@@ -116,36 +122,129 @@ function rl_easa_compare_query_needles(string $q): array
     if ($q === '') {
         return [];
     }
-    $needles = [];
-    if (preg_match_all('/\b(?:FCL\.\d+[A-Z]?|(?:ORA|CAT|DTO|ARA|MED)(?:\.[A-Z0-9]+)+)\b/iu', $q, $m)) {
+    $highSignal = [];
+    $domainPhrases = [];
+    $generic = [];
+    $pushUnique = static function (array &$bucket, string $value): void {
+        $v = trim($value);
+        if ($v === '') {
+            return;
+        }
+        foreach ($bucket as $existing) {
+            if (strcasecmp($existing, $v) === 0) {
+                return;
+            }
+        }
+        $bucket[] = $v;
+    };
+
+    if (preg_match_all('/\b(?:FCL\.\d+[A-Z]?|(?:ORA|CAT|DTO|ARA|MED|ARO|NCO|NCC|SPO|SPA|CC)(?:\.[A-Z0-9]+)+)\b/iu', $q, $m)) {
         foreach (($m[0] ?? []) as $id) {
-            $id = strtoupper(trim((string) $id));
-            if ($id !== '' && !in_array($id, $needles, true)) {
-                $needles[] = $id;
+            $pushUnique($highSignal, strtoupper((string) $id));
+        }
+    }
+
+    /** Lowercase, collapse non-letters to single spaces so "license?" / "license," / "license." all match phrase synonyms. */
+    $qlNorm = ' ' . trim((string) preg_replace('/[^\p{L}\p{N}\.\-]+/u', ' ', mb_strtolower($q))) . ' ';
+    $ql = $qlNorm;
+    /** Natural-language phrases mapped to the rule abbreviations / id families that actually appear in Part-FCL legal text. */
+    $phraseSynonyms = [
+        'commercial pilot licence' => ['CPL', 'FCL.300', 'commercial pilot'],
+        'commercial pilot license' => ['CPL', 'FCL.300', 'commercial pilot'],
+        'private pilot licence' => ['PPL', 'FCL.200', 'private pilot'],
+        'private pilot license' => ['PPL', 'FCL.200', 'private pilot'],
+        'airline transport pilot licence' => ['ATPL', 'FCL.500', 'airline transport pilot'],
+        'airline transport pilot license' => ['ATPL', 'FCL.500', 'airline transport pilot'],
+        'multi-crew pilot licence' => ['MPL', 'FCL.400'],
+        'multi-crew pilot license' => ['MPL', 'FCL.400'],
+        'multi crew pilot licence' => ['MPL', 'FCL.400'],
+        'light aircraft pilot licence' => ['LAPL', 'FCL.100'],
+        'light aircraft pilot license' => ['LAPL', 'FCL.100'],
+        'sailplane pilot licence' => ['SFCL', 'sailplane'],
+        'balloon pilot licence' => ['BFCL', 'balloon'],
+        'instrument rating' => ['IR', 'FCL.600'],
+        'basic instrument rating' => ['BIR', 'FCL.835'],
+        'class rating' => ['class rating', 'FCL.700'],
+        'type rating' => ['type rating', 'FCL.700'],
+        'instructor rating' => ['instructor', 'FCL.900'],
+        'examiner' => ['examiner', 'FCL.1000'],
+        'theoretical knowledge examination' => ['theoretical knowledge', 'FCL.025'],
+        'theory exam' => ['theoretical knowledge', 'FCL.025'],
+        'theory examination' => ['theoretical knowledge', 'FCL.025'],
+        'skill test' => ['skill test', 'FCL.030'],
+        'medical certificate' => ['medical certificate', 'Part-MED', 'MED.A.030'],
+    ];
+    foreach ($phraseSynonyms as $phrase => $expansions) {
+        if (str_contains($ql, ' ' . $phrase . ' ')) {
+            foreach ($expansions as $exp) {
+                $pushUnique($domainPhrases, $exp);
             }
         }
     }
+
+    /** Standalone licence/rating abbreviations the user actually typed (keep even if short). */
+    if (preg_match_all('/\b(FCL|CPL|PPL|ATPL|MPL|LAPL|SFCL|BFCL|BIR|IR|AMC|GM|ORA|DTO|ATO|FSTD|PART-FCL|PART-MED|PART-ARA|PART-ORA|PART-DTO|PART-IS|AIRCREW)\b/iu', $q, $m2)) {
+        foreach (($m2[0] ?? []) as $tok) {
+            $pushUnique($highSignal, strtoupper((string) $tok));
+        }
+    }
+
     $raw = preg_split('/[^\p{L}\p{N}\.\-]+/u', mb_strtolower($q)) ?: [];
+    /** Generic chatter that drowns out signal in LIKE matches against legal text. Keep this list aggressive. */
     $stop = [
         'the' => true, 'and' => true, 'for' => true, 'with' => true, 'from' => true, 'that' => true, 'this' => true,
         'what' => true, 'when' => true, 'where' => true, 'which' => true, 'does' => true, 'about' => true,
         'under' => true, 'into' => true, 'are' => true, 'can' => true, 'should' => true, 'must' => true,
         'rule' => true, 'rules' => true, 'official' => true, 'regulation' => true, 'regulations' => true,
+        'need' => true, 'needs' => true, 'more' => true, 'most' => true, 'detail' => true, 'details' => true,
+        'detailed' => true, 'information' => true, 'info' => true, 'please' => true, 'thanks' => true,
+        'thank' => true, 'help' => true, 'know' => true, 'tell' => true, 'show' => true, 'give' => true,
+        'obtain' => true, 'obtaining' => true, 'get' => true, 'getting' => true,
+        'license' => true, 'licence' => true, 'pilot' => true, 'pilots' => true,
+        'requirement' => true, 'requirements' => true, 'required' => true, 'require' => true,
+        'looking' => true, 'find' => true, 'finding' => true, 'want' => true, 'wants' => true,
+        'how' => true, 'why' => true, 'who' => true, 'whom' => true, 'whose' => true,
+        'have' => true, 'has' => true, 'had' => true, 'been' => true, 'being' => true,
+        'will' => true, 'would' => true, 'could' => true, 'going' => true,
+        'part' => true, 'section' => true, 'chapter' => true, 'subpart' => true, 'annex' => true,
     ];
     foreach ($raw as $tok) {
         $tok = trim((string) $tok, " \t\n\r\0\x0B.-");
-        if ($tok === '' || strlen($tok) < 4 || isset($stop[$tok])) {
+        if ($tok === '') {
             continue;
         }
-        if (!in_array($tok, $needles, true)) {
-            $needles[] = $tok;
+        /** Domain abbreviations: keep even at 2–3 chars (FCL/CPL/PPL/IR/etc.) — these are the most precise tokens. */
+        $upper = strtoupper($tok);
+        $isDomainAbbrev = in_array($upper, [
+            'FCL', 'CPL', 'PPL', 'ATPL', 'MPL', 'LAPL', 'SFCL', 'BFCL', 'BIR', 'IR',
+            'AMC', 'GM', 'ORA', 'DTO', 'ATO', 'FSTD', 'AIRCREW',
+        ], true);
+        if ($isDomainAbbrev) {
+            $pushUnique($highSignal, $upper);
+            continue;
         }
-        if (count($needles) >= 10) {
-            break;
+        if (strlen($tok) < 4 || isset($stop[$tok])) {
+            continue;
+        }
+        $pushUnique($generic, $tok);
+    }
+
+    /** Final dedupe across buckets (case-insensitive) — preserves bucket order: highSignal → domainPhrases → generic. */
+    $needles = [];
+    foreach (array_merge($highSignal, $domainPhrases, $generic) as $cand) {
+        $hit = false;
+        foreach ($needles as $existing) {
+            if (strcasecmp($existing, $cand) === 0) {
+                $hit = true;
+                break;
+            }
+        }
+        if (!$hit) {
+            $needles[] = $cand;
         }
     }
 
-    return $needles;
+    return array_slice($needles, 0, 12);
 }
 
 /**
@@ -195,6 +294,9 @@ function rl_easa_query_topic_filter(string $q): array
         'subject 080', 'subject 081', 'subject 082', 'subject 090', 'subject 091',
         'class rating', 'type rating', 'instructor rating', 'instrument rating',
         'pilot licence', 'pilot license', 'flight crew', 'aircrew',
+        'commercial pilot', 'private pilot', 'airline transport pilot',
+        'light aircraft pilot', 'multi-crew pilot', 'multi crew pilot',
+        'sailplane pilot', 'balloon pilot',
         'student pilot', 'flight instructor', 'examiner',
         'medical certificate', ' medical class', ' part-med ', ' part-mc ',
     ];
@@ -304,7 +406,22 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
         return $out;
     }
     $wrapRank = '(CASE WHEN LOWER(node_type) IN (\'document\',\'frontmatter\',\'toc\',\'backmatter\') THEN 1 ELSE 0 END)';
-    $maxRows = 15;
+    /** Prefer concrete rule-level nodes (rule/IR/CS) and supplementary AMC/GM over wrappers / annex / subpart shells. */
+    $kindRank = "(CASE LOWER(COALESCE(node_type, ''))
+        WHEN 'rule' THEN 0
+        WHEN 'ir' THEN 0
+        WHEN 'cs' THEN 0
+        WHEN 'amc' THEN 1
+        WHEN 'gm' THEN 1
+        WHEN 'topic' THEN 2
+        WHEN 'subject' THEN 2
+        WHEN 'section' THEN 3
+        WHEN 'subpart' THEN 3
+        WHEN 'chapter' THEN 3
+        WHEN 'annex' THEN 4
+        ELSE 5
+    END)";
+    $maxRows = 18;
     $excerptLen = 4500;
     $excerptBody = rl_easa_staging_snippet_concat_body($pdo);
     $bf = rl_easa_query_batch_filtering($pdo, $q);
@@ -318,32 +435,42 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
     if ($boostIds !== [] && $batchFilter <= 0) {
         $boostRank = '(CASE WHEN batch_id IN (' . implode(',', array_map('intval', $boostIds)) . ') THEN 0 ELSE 1 END)';
     }
-    $fetchMatches = static function (string $needle, int $limit) use ($pdo, $batchFilter, $wrapRank, $excerptBody, $excerptLen, $excludeSql, $boostRank): array {
+    $fetchMatches = static function (string $needle, int $limit) use ($pdo, $batchFilter, $wrapRank, $kindRank, $excerptBody, $excerptLen, $excludeSql, $boostRank): array {
         $m = rl_easa_search_match_clause($pdo, $needle);
         $whereMatch = $m['where'];
         $bind = $m['bind'];
+        /** Match-location rank uses the same LIKE pattern as the WHERE clause but on title / id / breadcrumb only,
+            so rows where the needle hits a real title or ERulesId outrank rows where it only hits anywhere in plain_text. */
+        [$likeForRank] = rl_easa_search_like_patterns($needle);
+        $titleRankSql = '(CASE
+            WHEN COALESCE(source_erules_id, \'\') LIKE ? ESCAPE \'\\\\\' THEN 0
+            WHEN COALESCE(title, \'\') LIKE ? ESCAPE \'\\\\\' THEN 1
+            WHEN COALESCE(breadcrumb, \'\') LIKE ? ESCAPE \'\\\\\' THEN 2
+            ELSE 3
+        END)';
+        $titleRankBind = [$likeForRank, $likeForRank, $likeForRank];
         if ($batchFilter > 0) {
             $sql = "
                 SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
                        SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
                 FROM easa_erules_import_nodes_staging
                 WHERE batch_id = ? AND {$whereMatch}
-                ORDER BY {$wrapRank} ASC, id ASC
+                ORDER BY {$wrapRank} ASC, {$kindRank} ASC, {$titleRankSql} ASC, id ASC
                 LIMIT {$limit}
             ";
             $stmt = $pdo->prepare($sql);
-            $stmt->execute(array_merge([$batchFilter], $bind));
+            $stmt->execute(array_merge([$batchFilter], $bind, $titleRankBind));
         } else {
             $sql = "
                 SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb,
                        SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
                 FROM easa_erules_import_nodes_staging
                 WHERE {$whereMatch} {$excludeSql}
-                ORDER BY {$boostRank} ASC, {$wrapRank} ASC, id DESC
+                ORDER BY {$boostRank} ASC, {$wrapRank} ASC, {$kindRank} ASC, {$titleRankSql} ASC, id ASC
                 LIMIT {$limit}
             ";
             $stmt = $pdo->prepare($sql);
-            $stmt->execute($bind);
+            $stmt->execute(array_merge($bind, $titleRankBind));
         }
 
         return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
@@ -460,7 +587,7 @@ function rl_easa_build_ai_canonical_regulatory_bundle(PDO $pdo, string $q, int $
         }
         $seen[$k] = true;
         $pairs[] = ['batch_id' => $bid, 'node_uid' => $nuid];
-        if (count($pairs) >= 8) {
+        if (count($pairs) >= 12) {
             break;
         }
     }
