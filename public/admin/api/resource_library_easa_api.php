@@ -144,9 +144,9 @@ function rl_easa_compare_query_needles(string $q): array
         }
     }
 
-    /** Lowercase, collapse non-letters to single spaces so "license?" / "license," / "license." all match phrase synonyms. */
-    $qlNorm = ' ' . trim((string) preg_replace('/[^\p{L}\p{N}\.\-]+/u', ' ', mb_strtolower($q))) . ' ';
-    $ql = $qlNorm;
+    /** For phrase synonym matching, collapse ALL non-letter/non-digit characters (including dots, commas, ?, !) to single spaces
+        so "license?" / "license," / "license." / "Licence." all match. Token splitting below uses a different regex that preserves dots in rule ids. */
+    $ql = ' ' . trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', mb_strtolower($q))) . ' ';
     /** Natural-language phrases mapped to the rule abbreviations / id families that actually appear in Part-FCL legal text. */
     $phraseSynonyms = [
         'commercial pilot licence' => ['CPL', 'FCL.300', 'commercial pilot'],
@@ -229,9 +229,35 @@ function rl_easa_compare_query_needles(string $q): array
         $pushUnique($generic, $tok);
     }
 
-    /** Final dedupe across buckets (case-insensitive) — preserves bucket order: highSignal → domainPhrases → generic. */
+    /** Bare licence-family abbreviations (FCL, CPL, PPL, ATPL, MPL, LAPL) match too broadly when the corpus is Aircrew:
+        every FCL rule contains "FCL" in its source_erules_id, so LIKE '%FCL%' returns the lowest-id 8 intro rules
+        (FCL.001/005/010/065/…) and starves the row budget. Demote those if we already have a specific rule id
+        (FCL.300, FCL.025, …) or a domain phrase (commercial pilot, instrument rating, theoretical knowledge, …). */
+    $haveSpecificRuleId = false;
+    foreach (array_merge($highSignal, $domainPhrases) as $tok) {
+        if (preg_match('/^(FCL|ORA|CAT|DTO|ARA|MED)\.\d/i', $tok) === 1) {
+            $haveSpecificRuleId = true;
+            break;
+        }
+    }
+    /** Corpus-level tokens that match the entire Aircrew batch via source_erules_id LIKE '%FCL%'. Demote when more specific tokens exist. */
+    $broadAbbrev = ['FCL' => true, 'AIRCREW' => true, 'PART-FCL' => true];
+    $highRule = [];
+    $highCarry = [];
+    foreach ($highSignal as $tok) {
+        $u = strtoupper($tok);
+        if (preg_match('/^(FCL|ORA|CAT|DTO|ARA|MED)\.\d/i', $u) === 1) {
+            $highRule[] = $tok;
+        } elseif (isset($broadAbbrev[$u]) && $haveSpecificRuleId) {
+            /* drop broad abbreviation — specific rule ids are enough and won't flood with intro rules. */
+            continue;
+        } else {
+            $highCarry[] = $tok;
+        }
+    }
+    /** Final order: specific rule ids first (FCL.300 etc.) → domain phrases (commercial pilot, CPL) → other high-signal tokens → generic words. */
     $needles = [];
-    foreach (array_merge($highSignal, $domainPhrases, $generic) as $cand) {
+    foreach (array_merge($highRule, $domainPhrases, $highCarry, $generic) as $cand) {
         $hit = false;
         foreach ($needles as $existing) {
             if (strcasecmp($existing, $cand) === 0) {
@@ -1549,29 +1575,40 @@ You are "Maya", a warm, professional EASA regulations mentor — like a friendly
 
 Your entire model output MUST be a single JSON object (no markdown fences, no preface) with exactly these keys:
 
-- "answer_markdown": string. Conversational Markdown for a pilot or instructor: short paragraphs, optional ##/### headings, bullets, **bold**. ALWAYS:
-    * Greet the user by first name when one is provided ("Hi Kay,", "Good question, Kay,").
-    * If the question is broad or ambiguous (e.g. "Where can I find PPL rules on the theory exam?"), ask 1–3 short narrowing questions BEFORE giving technical detail. Examples: "Which EASA regulation set are you working from — Aircrew (Part-FCL) or Air Operations?" / "Which licence level — LAPL, PPL, CPL or ATPL?" / "Aeroplane, helicopter, balloon, or sailplane?" / "Are you after the syllabus / learning objectives, the exam-pass requirements, or the privileges?"
-    * If the question is already specific, answer directly without unnecessary narrowing.
-    * Keep the tone friendly and instructor-like, not lawyerly.
-    * Use FRIENDLY corpus names only ("EAR Flight Crew", "EAR Flight Operations", "EAR Part-IS", "EAR CS-FSTD"). NEVER reveal raw .xml file names, batch_id, node_uid, ERulesId, "staging", or "canonical" — those belong ONLY in primary_references. Do not write phrases like "the material you attached" unless the user actually attached something in this turn.
-    * READ THE BUNDLE BEFORE REFUSING. If the bundle includes any node whose title, breadcrumb, ERulesId, structured_blocks_json, canonical_text, or plain_text mentions the asked licence/topic (e.g. FCL.200/210/215 for PPL, FCL.300/305/310/315/320/325 for CPL, FCL.500/505/510/515 for ATPL, FCL.400/405/410 for MPL, FCL.100/105/110 for LAPL, FCL.600/615/620 for IR, FCL.835 for BIR, FCL.025 for theoretical knowledge, FCL.030 for skill test) — then ANSWER from it. Do NOT say "the bundle does not include the rules" if any Part-FCL node about the topic is present; if only some sub-rules are present, answer from those and note that you are summarising what is available in this installation's indexed material.
-    * If, and only if, no node in the bundle is on the asked topic, state honestly that the available indexed material doesn't cover this and ask the user to confirm which regulation set — but do this only after actually scanning the listed CANONICAL NODE blocks.
+- "answer_markdown": string. Tight, friendly Markdown for a pilot or instructor.
+
+  STRICT STYLE (this is what makes the reply useful — don't drift from it):
+    * Open with a single short greeting line: "Hi <FirstName>," when a first name is provided, otherwise "Hi there,".
+    * Second line: state the location of the topic in the tree, e.g. "to get more details on the EASA Commercial Pilot Licence, the following rules can be found under Aircrew, Annex I (Part-FCL), Subpart D – Commercial Pilot Licence."
+    * Then a compact bulleted outline organised by SECTION (Section 1, Section 2, …) when the bundle shows that structure. Each bullet lists rule TITLES with their ID in parentheses, e.g.
+        - Common Requirements: Minimum Age (FCL.300), Privileges and Conditions (FCL.305), Theoretical Knowledge Examinations (FCL.310), Training Course (FCL.315), Skill Test (FCL.320) — Section 1.
+        - Section 2 – Aeroplane category: Training Course (FCL.315.A), Specific Requirements for MPL holders (FCL.325.A).
+    * End with ONE short focused offer to go deeper, e.g. "What would you like me to check more in depth for you here?". Do not list multiple numbered options unless the user explicitly asked you to narrow.
+    * NEVER include disclaimers, hedges, or commentary about the dataset. Do NOT say "the indexed material does not include", "the bundle does not contain", "in this installation slice", "the available material is mostly", or any equivalent phrasing. Do NOT mention "batches", "staging", "canonical", "node_uid", "ERulesId", "retrieval", or how the back-end works.
+    * Do NOT add boilerplate like "always verify against the official EASA publication".
+    * Keep total length around 90–180 words for a straight overview question. Do not pad.
+    * Use FRIENDLY corpus names only ("EAR Flight Crew", "EAR Flight Operations", "EAR Part-IS", "EAR CS-FSTD"). Never raw .xml file names. Never internal IDs in prose — rule ids like FCL.300 ARE fine in prose because they're the natural way pilots cite rules.
+
+  CONTENT RULES:
+    * Build the answer from the CANONICAL NODE blocks in the bundle. The bundle's breadcrumb/title fields tell you which Subpart and Section each rule lives under — use those to assemble the structured outline.
+    * If the user's question is already specific (mentions a licence type or rule id), answer directly. Don't ask narrowing questions before giving the overview.
+    * If multiple licence categories are present (e.g. Subpart D has Section 2 for aeroplanes, Section 3 for helicopters, etc.), summarise the structure and only expand the category the user asked about (or list available categories and offer to expand one at the end).
+    * If, AND ONLY IF, after scanning the bundle there is genuinely no Part-FCL node about the asked topic, say in one short line "I don't have those specific rules indexed here yet — want me to point you to where they live in the regulation?" and stop.
 
 - "primary_references": array of objects (the UI shows these as chips inside your bubble — they are how the user clicks through). Each object MUST have:
-    * "title" (string, human section title — e.g. "FCL.025 Theoretical knowledge examinations" or "SUBJECT 050 — METEOROLOGY". Never raw .xml filenames, never internal IDs).
+    * "title" (string, human section title — e.g. "FCL.300 CPL — Minimum age". Never raw .xml filenames, never internal IDs).
     * "batch_id" (int)
     * "node_uid" (string)
     * "erules_id" (string or empty)
     * "matched_terms" (array of short strings to highlight)
     * "quote" (short verbatim excerpt copied from the bundle for that node)
-   Prefer specific rule/AMC/GM/Subject nodes over TOC/wrapper/document/frontmatter nodes when both are available in the bundle.
+  Limit primary_references to the 4–8 rules you actually named in the outline. Prefer specific rule / AMC / GM nodes over TOC / wrapper / document / frontmatter nodes when both are available.
 
 - "secondary_references": same object shape (optional).
 
 - "confidence": "high" | "medium" | "low"
 
-Only cite batch_id/node_uid pairs that actually appear in the CANONICAL NODE blocks of the bundle. Do not invent ERulesIds. If you have no matching nodes, return an empty primary_references array and explain in answer_markdown that the indexed material doesn't cover this topic; suggest the user confirm which regulation they have in mind.
+Only cite batch_id/node_uid pairs that actually appear in the CANONICAL NODE blocks of the bundle. Do not invent ERulesIds.
 TXT;
 
     try {
@@ -1585,7 +1622,7 @@ TXT;
                             'type' => 'input_text',
                             'text' => "You are Maya, an EASA Easy Access mentor. Use ONLY the canonical EASA bundles provided plus any optional U.S. eCFR excerpt in the bundle. "
                                 . $jsonInstructions
-                                . " When U.S. text is present, clearly label it as U.S. 14 CFR for comparison. Greet by first name when provided (e.g. \"Hi {name},\"). Not legal advice; encourage checking official EASA publications.",
+                                . " When U.S. text is present, clearly label it as U.S. 14 CFR for comparison. Greet by first name when provided (e.g. \"Hi {name},\"). Do not add any boilerplate verification footer; the style rules above are the final word on tone.",
                         ],
                     ],
                 ],
