@@ -453,9 +453,12 @@ function rl_easa_query_batch_filtering(PDO $pdo, string $q, array $aiIntent = []
  * back to the keyword-only pipeline in that case. A user-visible "(This was a fall-back)"
  * note is appended to the final answer by the calling action when fallback is true.
  *
+ * @param list<array{role?: string, content?: string}> $history Optional recent conversation
+ *        turns (oldest first). Used so short follow-ups like "What are the requirements?"
+ *        are interpreted in context of the previous turn.
  * @return array{ok: bool, fallback: bool, intent: array<string, mixed>, error: ?string}
  */
-function rl_easa_ai_extract_query_intent(string $q): array
+function rl_easa_ai_extract_query_intent(string $q, array $history = []): array
 {
     $empty = [
         'corpus' => null,
@@ -548,6 +551,36 @@ Q: "Hi"
 A: {"corpus":null,"licence":null,"category":null,"topics":[],"rule_ids":[],"keywords":[],"summary":"Greeting only; no regulatory topic identified."}
 TXT;
 
+    /** Render up to the last 6 turns of conversation as a compact transcript so short
+        follow-ups ("What are those requirements?") inherit the previous topic. Each turn
+        is hard-capped at 600 chars so a long answer body can't blow up the prompt. */
+    $historyBlock = '';
+    if ($history !== []) {
+        $lines = [];
+        $start = max(0, count($history) - 6);
+        for ($i = $start; $i < count($history); $i++) {
+            $row = $history[$i];
+            if (!is_array($row)) {
+                continue;
+            }
+            $role = strtolower((string) ($row['role'] ?? ''));
+            if ($role !== 'user' && $role !== 'assistant') {
+                continue;
+            }
+            $content = trim((string) ($row['content'] ?? ''));
+            if ($content === '') {
+                continue;
+            }
+            if (mb_strlen($content) > 600) {
+                $content = mb_substr($content, 0, 600) . '…';
+            }
+            $lines[] = ($role === 'user' ? 'User:' : 'Maya:') . ' ' . $content;
+        }
+        if ($lines !== []) {
+            $historyBlock = "Recent conversation (oldest first, last 6 turns):\n" . implode("\n", $lines) . "\n\n";
+        }
+    }
+
     try {
         $resp = cw_openai_responses([
             'model' => cw_openai_model(),
@@ -561,7 +594,7 @@ TXT;
                 [
                     'role' => 'user',
                     'content' => [
-                        ['type' => 'input_text', 'text' => 'User question:' . "\n" . $q],
+                        ['type' => 'input_text', 'text' => $historyBlock . 'New user question:' . "\n" . $q],
                     ],
                 ],
             ],
@@ -708,50 +741,94 @@ function rl_easa_intent_to_extra_needles(array $intent): array
         $push($out, $licence);
     }
 
-    /** 3. Category-specific suffix expansion. EASA uses .A (aeroplane), .H (helicopter),
+    /** Licence-specific EASA Part-FCL appendices. These cross-reference the training-course
+        layouts, skill-test schedules and credit tables and are essential when the user asks
+        about course structure / pre-entry / experience. */
+    $licenceAppendices = [
+        'PPL'  => ['Appendix 9'],
+        'LAPL' => ['Appendix 9'],
+        'CPL'  => ['Appendix 3', 'Appendix 4'],
+        'ATPL' => ['Appendix 3', 'Appendix 9'],
+        'MPL'  => ['Appendix 5'],
+        'IR'   => ['Appendix 6', 'Appendix 7', 'Appendix 9'],
+        'BIR'  => ['Appendix 8'],
+    ];
+    if ($licence !== '' && isset($licenceAppendices[$licence])) {
+        foreach ($licenceAppendices[$licence] as $appx) {
+            $push($out, $appx);
+        }
+    }
+
+    /** 3. Topic-specific RULE IDs first (highest signal — FCL.025/030/055 etc.). These are
+        intentionally pushed before the broader phrase needles so even when the 16-needle cap
+        clips the tail, the precise rule ids survive. */
+    $topicRuleIds = [
+        'theoretical_knowledge'  => ['FCL.025'],
+        'skill_test'             => ['FCL.030'],
+        'language_proficiency'   => ['FCL.055'],
+        'medical'                => ['MED.A.030'],
+        'instructor_certificate' => ['FCL.900'],
+        'examiner_certificate'   => ['FCL.1000'],
+    ];
+    $topicsIn = (array) ($intent['topics'] ?? []);
+    foreach ($topicsIn as $topic) {
+        $t = is_string($topic) ? strtolower(trim($topic)) : '';
+        if ($t !== '' && isset($topicRuleIds[$t])) {
+            foreach ($topicRuleIds[$t] as $tn) {
+                $push($out, $tn);
+            }
+        }
+    }
+
+    /** 4. Category-specific suffix expansion. EASA uses .A (aeroplane), .H (helicopter),
         .S (sailplane), .B (balloon), .As (airship), .PL (powered-lift). Only added when
-        the user constrained to a single category. */
+        the user constrained to a single category — and only for licences that actually
+        have category-specific sub-rules. The IR / BIR rule set is category-agnostic so the
+        .A variants don't exist there; skip them to avoid wasting needle budget. */
     $category = strtolower((string) ($intent['category'] ?? ''));
     $categorySuffix = [
         'aeroplane' => 'A', 'helicopter' => 'H', 'balloon' => 'B',
         'sailplane' => 'S', 'airship' => 'As', 'powered_lift' => 'PL',
     ];
-    if ($licence !== '' && isset($licenceRuleFamilies[$licence]) && isset($categorySuffix[$category])) {
+    $licencesWithCategorySuffix = ['LAPL' => true, 'PPL' => true, 'CPL' => true, 'ATPL' => true];
+    if ($licence !== ''
+        && isset($licenceRuleFamilies[$licence])
+        && isset($categorySuffix[$category])
+        && isset($licencesWithCategorySuffix[$licence])) {
         $suf = $categorySuffix[$category];
         foreach ($licenceRuleFamilies[$licence] as $rid) {
             $push($out, $rid . '.' . $suf);
         }
     }
 
-    /** 4. Topic-specific needles — short EASA phrases that actually appear in rule bodies. */
-    $topicNeedles = [
-        'overview'               => [],
+    /** 5. Topic phrases — broader LIKE matches against legal text. */
+    $topicPhrases = [
         'minimum_age'            => ['minimum age'],
         'privileges'             => ['privileges and conditions'],
-        'theoretical_knowledge'  => ['theoretical knowledge', 'theoretical knowledge examination', 'FCL.025'],
+        'theoretical_knowledge'  => ['theoretical knowledge', 'theoretical knowledge examination'],
         'training'               => ['training course'],
-        'skill_test'             => ['skill test', 'FCL.030'],
+        'skill_test'             => ['skill test'],
         'proficiency_check'      => ['proficiency check'],
-        'medical'                => ['medical certificate', 'Part-MED', 'MED.A.030'],
-        'language_proficiency'   => ['language proficiency', 'FCL.055'],
+        'medical'                => ['medical certificate', 'Part-MED'],
+        'language_proficiency'   => ['language proficiency'],
         'experience'             => ['flight experience'],
         'credit'                 => ['crediting'],
         'validation'             => ['validation'],
         'conversion'             => ['conversion'],
         'renewal'                => ['renewal', 'revalidation'],
-        'instructor_certificate' => ['instructor', 'FCL.900'],
-        'examiner_certificate'   => ['examiner', 'FCL.1000'],
+        'instructor_certificate' => ['instructor'],
+        'examiner_certificate'   => ['examiner'],
     ];
-    foreach ((array) ($intent['topics'] ?? []) as $topic) {
+    foreach ($topicsIn as $topic) {
         $t = is_string($topic) ? strtolower(trim($topic)) : '';
-        if ($t !== '' && isset($topicNeedles[$t])) {
-            foreach ($topicNeedles[$t] as $tn) {
+        if ($t !== '' && isset($topicPhrases[$t])) {
+            foreach ($topicPhrases[$t] as $tn) {
                 $push($out, $tn);
             }
         }
     }
 
-    /** 5. Free-text keywords from the model — last so they don't hog the budget. */
+    /** 6. Free-text keywords from the model — last so they don't hog the budget. */
     foreach ((array) ($intent['keywords'] ?? []) as $kw) {
         if (is_string($kw) && trim($kw) !== '') {
             $push($out, trim($kw));
@@ -808,7 +885,17 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
     END)";
     /** Rule-body presence: rows with an ERulesId or plain_text are real rule/AMC/GM bodies; rows missing both are typically empty nav shells. */
     $bodyRank = "(CASE WHEN (COALESCE(source_erules_id, '') <> '' OR LENGTH(COALESCE(plain_text, '')) > 80) THEN 0 ELSE 1 END)";
-    $maxRows = 18;
+    /** AMC/GM demotion: in EASA staging the *original* rule body (e.g. "FCL.600 IR – General")
+        and its acceptable means of compliance / guidance material rows (e.g. "AMC1 FCL.600 …",
+        "GM1 FCL.600 …", "AMC1 FCL.600(b) …") are ALL stored as node_type='topic'. Without help,
+        a needle for "FCL.600" can fill the row budget with 6–8 AMC/GM variants before sibling
+        rules (FCL.605, FCL.610, …) get a single slot. We demote anything whose TITLE starts
+        with "AMC<num>" or "GM<num>" so the actual rule body always ranks first. */
+    $amcGmRank = "(CASE
+        WHEN UPPER(COALESCE(title, '')) REGEXP '^[[:space:]]*(AMC|GM)[0-9]+' THEN 1
+        ELSE 0
+    END)";
+    $maxRows = 24;
     $excerptLen = 4500;
     $excerptBody = rl_easa_staging_snippet_concat_body($pdo);
     $bf = rl_easa_query_batch_filtering($pdo, $q, $intent);
@@ -822,7 +909,7 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
     if ($boostIds !== [] && $batchFilter <= 0) {
         $boostRank = '(CASE WHEN batch_id IN (' . implode(',', array_map('intval', $boostIds)) . ') THEN 0 ELSE 1 END)';
     }
-    $fetchMatches = static function (string $needle, int $limit) use ($pdo, $batchFilter, $wrapRank, $kindRank, $bodyRank, $excerptBody, $excerptLen, $excludeSql, $boostRank): array {
+    $fetchMatches = static function (string $needle, int $limit) use ($pdo, $batchFilter, $wrapRank, $kindRank, $bodyRank, $amcGmRank, $excerptBody, $excerptLen, $excludeSql, $boostRank): array {
         $m = rl_easa_search_match_clause($pdo, $needle);
         $whereMatch = $m['where'];
         $bind = $m['bind'];
@@ -842,7 +929,7 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
                        SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
                 FROM easa_erules_import_nodes_staging
                 WHERE batch_id = ? AND {$whereMatch}
-                ORDER BY {$wrapRank} ASC, {$bodyRank} ASC, {$kindRank} ASC, {$titleRankSql} ASC, id ASC
+                ORDER BY {$wrapRank} ASC, {$bodyRank} ASC, {$kindRank} ASC, {$amcGmRank} ASC, {$titleRankSql} ASC, id ASC
                 LIMIT {$limit}
             ";
             $stmt = $pdo->prepare($sql);
@@ -853,7 +940,7 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
                        SUBSTRING({$excerptBody}, 1, {$excerptLen}) AS excerpt
                 FROM easa_erules_import_nodes_staging
                 WHERE {$whereMatch} {$excludeSql}
-                ORDER BY {$boostRank} ASC, {$wrapRank} ASC, {$bodyRank} ASC, {$kindRank} ASC, {$titleRankSql} ASC, id ASC
+                ORDER BY {$boostRank} ASC, {$wrapRank} ASC, {$bodyRank} ASC, {$kindRank} ASC, {$amcGmRank} ASC, {$titleRankSql} ASC, id ASC
                 LIMIT {$limit}
             ";
             $stmt = $pdo->prepare($sql);
@@ -893,9 +980,29 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
         /** Bound how many distinct needles we try so a noisy intent payload can't blow up
             staging query count. The first ~16 are always the highest-signal ones. */
         $combined = array_slice($combined, 0, 16);
+
+        /** Pre-fetch up to $perNeedle candidates per needle, then interleave round-robin.
+            This guarantees that needle FCL.600 contributes its top row (the actual rule),
+            then needle FCL.605 contributes its top row, etc. — BEFORE any one needle gets
+            to add a second row (typically its first AMC/GM). Combined with the amc_gm_rank
+            SQL demotion above, this fills the bundle with distinct rule bodies first. */
+        $perNeedle = 6;
+        $rowsByNeedle = [];
         foreach ($combined as $needle) {
-            $more = $fetchMatches($needle, 8);
-            foreach ($more as $r) {
+            $rowsByNeedle[] = $fetchMatches($needle, $perNeedle);
+        }
+        $maxRound = 0;
+        foreach ($rowsByNeedle as $rb) {
+            if (count($rb) > $maxRound) {
+                $maxRound = count($rb);
+            }
+        }
+        for ($round = 0; $round < $maxRound; $round++) {
+            foreach ($rowsByNeedle as $needleRows) {
+                if (!isset($needleRows[$round])) {
+                    continue;
+                }
+                $r = $needleRows[$round];
                 $key = (string) ($r['batch_id'] ?? '') . '|' . (string) ($r['node_uid'] ?? '');
                 if ($key === '|' || isset($seen[$key])) {
                     continue;
@@ -1000,7 +1107,7 @@ function rl_easa_build_ai_canonical_regulatory_bundle(PDO $pdo, string $q, int $
         }
         $seen[$k] = true;
         $pairs[] = ['batch_id' => $bid, 'node_uid' => $nuid];
-        if (count($pairs) >= 12) {
+        if (count($pairs) >= 14) {
             break;
         }
     }
@@ -1958,6 +2065,13 @@ if ($action === 'parse_batch') {
 }
 
 if ($action === 'regulatory_compare_ai') {
+    /** This action triggers two OpenAI calls (intent extraction + answer). Together they can
+        approach ~3 minutes worst-case. Raise the script time budget so a slow second call
+        doesn't get killed mid-flight by PHP, which would leave the client with a truncated
+        body and a WebKit "did not match the expected pattern" JSON.parse error. */
+    @set_time_limit(300);
+    @ini_set('max_execution_time', '300');
+
     $q = trim((string) ($data['query'] ?? ''));
     if ($q === '') {
         rl_easa_json_out(400, ['ok' => false, 'error' => 'query required']);
@@ -1972,12 +2086,36 @@ if ($action === 'regulatory_compare_ai') {
     $compareBatchId = (int) ($data['batch_id'] ?? 0);
     $userFirstName = rl_easa_current_user_first_name($pdo);
 
+    /** Load recent conversation history from this session (if it exists) BEFORE the new user
+        message is inserted, so the intent + answer calls can interpret follow-ups in context.
+        We load the last 8 turns (capped); both calls then see the last 6. */
+    $sessionIdRequested = (int) ($data['session_id'] ?? 0);
+    $historyForAi = [];
+    $chatSupported = rl_easa_ai_chat_tables_ok($pdo);
+    $u = cw_current_user($pdo);
+    $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
+    if ($chatSupported && $userId > 0 && $sessionIdRequested > 0) {
+        try {
+            $chk = $pdo->prepare('SELECT id FROM easa_ai_chat_sessions WHERE id = ? AND user_id = ? LIMIT 1');
+            $chk->execute([$sessionIdRequested, $userId]);
+            if ($chk->fetchColumn()) {
+                $hst = $pdo->prepare('SELECT role, content FROM easa_ai_chat_messages WHERE session_id = ? ORDER BY id DESC LIMIT 8');
+                $hst->execute([$sessionIdRequested]);
+                $historyForAi = array_reverse($hst->fetchAll(PDO::FETCH_ASSOC) ?: []);
+            }
+        } catch (Throwable) {
+            $historyForAi = [];
+        }
+    }
+
     /** STEP 1 of the two-step pipeline: ask the model to classify the question into a
         structured intent (corpus / licence / category / topics / rule_ids / keywords / summary).
+        With prior history attached, follow-ups like "What are those requirements?" resolve
+        against the previous turn instead of producing an empty intent.
         If this call fails (timeout, network, non-JSON), $intentRes['fallback'] becomes true and
         we proceed with the keyword-only pipeline + append a small "(This was a fall-back)" note
         on the final answer so the user knows quality may be reduced. */
-    $intentRes = rl_easa_ai_extract_query_intent($q);
+    $intentRes = rl_easa_ai_extract_query_intent($q, $historyForAi);
     $intent = is_array($intentRes['intent'] ?? null) ? $intentRes['intent'] : [];
     $intentWasFallback = !empty($intentRes['fallback']);
     $intentError = isset($intentRes['error']) ? (string) $intentRes['error'] : null;
@@ -2009,10 +2147,7 @@ if ($action === 'regulatory_compare_ai') {
         }
     }
 
-    $chatSupported = rl_easa_ai_chat_tables_ok($pdo);
-    $u = cw_current_user($pdo);
-    $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
-    $sessionId = (int) ($data['session_id'] ?? 0);
+    $sessionId = $sessionIdRequested;
     if ($chatSupported && $userId > 0) {
         try {
             if ($sessionId <= 0) {
@@ -2135,6 +2270,11 @@ Your entire model output MUST be a single JSON object (no markdown fences, no pr
     * If multiple licence categories appear (Subpart D has Section 2 for aeroplanes, Section 3 for helicopters, etc.), summarise the structure and only expand the category the user asked about (or list available categories and offer to expand one in the closing line).
     * ARA.FCL.300 nodes (Air Operations Authority Requirements – Examination procedures) are about the COMPETENT AUTHORITY's exam procedures, NOT about pilot CPL licensing — mention them only if the user explicitly asked about authority/examiner procedures; otherwise focus on the FCL.300–FCL.325 (and FCL.300.A–FCL.325.A) pilot rules.
 
+  CONVERSATION-HISTORY RULES:
+    * Recent conversation turns are provided above. Treat them as memory — short follow-ups like "What are those requirements?", "Tell me more.", "And for the modular course?" continue the previous topic and should be answered against that same Part-FCL area.
+    * NEVER repeat a previous Maya turn verbatim. If the user's new message is a refinement or follow-up, answer the NEW question with the EXTRA detail they asked for (e.g. previous turn introduced FCL.600; follow-up "what are those requirements" → answer with FCL.610 pre-requisites, FCL.615 theoretical knowledge & flight instruction, FCL.620 skill test from the bundle).
+    * If the new question is clearly a new topic (different licence, different corpus), just start fresh — don't try to thread the old topic in.
+
 - "primary_references": array of objects (the UI shows these as chips inside your bubble — they are how the user clicks through). Each object MUST have:
     * "title" (string, human section title — e.g. "FCL.300 CPL — Minimum age". Never raw .xml filenames, never internal IDs).
     * "batch_id" (int)
@@ -2172,7 +2312,31 @@ TXT;
                         [
                             'type' => 'input_text',
                             'text' => "User first name:\n" . ($userFirstName !== '' ? $userFirstName : '(unknown)')
-                                . "\n\nQuestion:\n" . $q
+                                . "\n\n" . (function (array $hist): string {
+                                    if ($hist === []) {
+                                        return "Recent conversation (oldest first): (none — this is the first turn)\n";
+                                    }
+                                    $lines = [];
+                                    $start = max(0, count($hist) - 6);
+                                    for ($i = $start; $i < count($hist); $i++) {
+                                        $row = is_array($hist[$i]) ? $hist[$i] : [];
+                                        $role = strtolower((string) ($row['role'] ?? ''));
+                                        if ($role !== 'user' && $role !== 'assistant') {
+                                            continue;
+                                        }
+                                        $content = trim((string) ($row['content'] ?? ''));
+                                        if ($content === '') {
+                                            continue;
+                                        }
+                                        if (mb_strlen($content) > 800) {
+                                            $content = mb_substr($content, 0, 800) . '…';
+                                        }
+                                        $lines[] = ($role === 'user' ? 'User:' : 'Maya:') . ' ' . $content;
+                                    }
+
+                                    return "Recent conversation (oldest first, last 6 turns):\n" . implode("\n\n", $lines) . "\n";
+                                })($historyForAi)
+                                . "\nCurrent question:\n" . $q
                                 . "\n\nQuery intent (machine-derived, step 1 of the pipeline — use this to focus your answer; do NOT discuss it in the reply):\n"
                                 . (function (array $i): string {
                                     $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT;

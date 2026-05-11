@@ -2298,7 +2298,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         limit: 15
       })
     })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(rlEasaParseJsonResponse)
       .then(function (x) {
         if (!x.j || !x.j.ok) return;
         rlEasaMayaPrependOlder(x.j.messages || [], !!x.j.has_more);
@@ -2324,7 +2324,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       credentials: 'same-origin',
       body: JSON.stringify(boot)
     })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(rlEasaParseJsonResponse)
       .then(function (x) {
         if (!x.j || !x.j.ok) return;
         if (!x.j.chat_supported) {
@@ -4182,7 +4182,12 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         credentials: 'same-origin',
         body: JSON.stringify(payload)
       })
-        .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+        /** Parse via r.text()+JSON.parse so we get a clear error if PHP timed out and the
+            body is HTML/truncated/empty. WebKit's native r.json() can otherwise throw the
+            cryptic "SyntaxError: The string did not match the expected pattern.", which is
+            what kept showing up after the second OpenAI call slipped past the script time
+            budget. */
+        .then(rlEasaParseJsonResponse)
         .then(function (x) {
           rlEasaMayaRemoveThinkingRow();
           if (!x.ok || !x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Request failed');
