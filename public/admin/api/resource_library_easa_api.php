@@ -469,6 +469,8 @@ function rl_easa_ai_extract_query_intent(string $q, array $history = []): array
         'rule_ids' => [],
         'keywords' => [],
         'summary' => '',
+        'wants_us_compare' => false,
+        'cfr_section_hints' => [],
     ];
     $q = trim($q);
     if ($q === '') {
@@ -478,7 +480,17 @@ function rl_easa_ai_extract_query_intent(string $q, array $history = []): array
     $instructions = <<<'TXT'
 You are a query analyser for an EASA Easy Access regulations retrieval engine. Read the
 user's free-text question and return a SINGLE JSON object (no markdown fences, no prose,
-no commentary). The JSON must have exactly these keys with these allowed values:
+no commentary). The JSON must have exactly these keys (in addition to the EASA fields)
+when the user wants a U.S. comparison:
+
+  - "wants_us_compare": true | false. True when the user mentions FAA, 14 CFR, eCFR,
+    "FAR", "the US", "in the United States", or otherwise asks for a comparison with
+    U.S. regulations. False for pure EASA questions.
+  - "cfr_section_hints": array of explicit 14 CFR section ids mentioned in the question
+    (e.g. ["61.57", "91.205"]). Format: "TT.NNN" where TT is the title number and
+    NNN is the section. Empty array if none.
+
+For EASA fields, the keys + allowed values are:
 
 - "corpus":
     one of "aircrew" | "air_ops" | "part_is" | "cs_fstd" | null.
@@ -550,6 +562,15 @@ A: {"corpus":"part_is","licence":null,"category":null,"topics":[],"rule_ids":[],
 
 Q: "Hi"
 A: {"corpus":null,"licence":null,"category":null,"topics":[],"rule_ids":[],"keywords":[],"summary":"Greeting only; no regulatory topic identified."}
+
+Q: "Compare the EASA PPL with the FAA Private Pilot Licence."
+A: {"corpus":"aircrew","licence":"PPL","category":null,"topics":["overview","training","theoretical_knowledge","skill_test","privileges","minimum_age"],"rule_ids":[],"keywords":["private pilot licence","Part-FCL"],"summary":"User wants a side-by-side comparison of the EASA PPL with the FAA Private Pilot Certificate.","wants_us_compare":true,"cfr_section_hints":[]}
+
+Q: "What does 14 CFR 61.57 say compared to FCL.060?"
+A: {"corpus":"aircrew","licence":null,"category":null,"topics":["experience"],"rule_ids":["FCL.060"],"keywords":["recent flight experience","passenger carrying"],"summary":"User wants 14 CFR 61.57 (recency of experience) compared to FCL.060.","wants_us_compare":true,"cfr_section_hints":["61.57"]}
+
+Q: "How does EASA Part-FCL theoretical knowledge for the ATPL compare with the FAA ATP?"
+A: {"corpus":"aircrew","licence":"ATPL","category":null,"topics":["theoretical_knowledge"],"rule_ids":[],"keywords":["airline transport pilot","theoretical knowledge"],"summary":"User wants the EASA ATPL theoretical knowledge subjects compared with FAA ATP knowledge requirements.","wants_us_compare":true,"cfr_section_hints":[]}
 TXT;
 
     /** Render up to the last 6 turns of conversation as a compact transcript so short
@@ -668,6 +689,23 @@ TXT;
         $summary = mb_substr($summary, 0, 240) . '…';
     }
 
+    /** U.S. comparison fields. Default false / empty so existing EASA-only callers are unaffected. */
+    $wantsUsCompare = !empty($j['wants_us_compare']);
+    $cfrHints = [];
+    foreach ((array) ($j['cfr_section_hints'] ?? []) as $h) {
+        $hs = trim((string) $h);
+        /** Accept "61.57" / "91.205c" / "121.155" form. Reject anything that looks like an EASA rule id. */
+        if ($hs !== '' && preg_match('/^\d{1,2}\.\d{1,4}[a-z]?$/i', $hs)) {
+            $hs = strtolower($hs);
+            if (!in_array($hs, $cfrHints, true)) {
+                $cfrHints[] = $hs;
+                if (count($cfrHints) >= 6) {
+                    break;
+                }
+            }
+        }
+    }
+
     return [
         'ok' => true,
         'fallback' => false,
@@ -679,6 +717,8 @@ TXT;
             'rule_ids' => $ruleIds,
             'keywords' => $keywords,
             'summary' => $summary,
+            'wants_us_compare' => $wantsUsCompare,
+            'cfr_section_hints' => $cfrHints,
         ],
         'error' => null,
     ];
@@ -1399,6 +1439,137 @@ function rl_easa_infer_ecfr_section_from_query(string $q): string
     return '';
 }
 
+/**
+ * Map structured intent to a prioritised list of 14 CFR sections worth fetching for a comparison.
+ * Explicit hints from the user (intent.cfr_section_hints) win. Then per-licence defaults from
+ * Title 14 Part 61 (Certification of pilots) — these are the sections that line up best with
+ * the EASA Part-FCL families a pilot would naturally want to compare. Finally, a handful of
+ * topic-driven additions (medical, language, IFR, recency).
+ *
+ * @return list<array{title: int, section: string, why: string}>
+ */
+function rl_easa_intent_to_cfr_sections(array $intent, int $maxSections = 5): array
+{
+    $out = [];
+    $push = static function (int $title, string $section, string $why) use (&$out): void {
+        $section = strtolower(trim($section));
+        if ($section === '' || $title <= 0) {
+            return;
+        }
+        foreach ($out as $existing) {
+            if ($existing['title'] === $title && $existing['section'] === $section) {
+                return;
+            }
+        }
+        $out[] = ['title' => $title, 'section' => $section, 'why' => $why];
+    };
+
+    /** 1. Explicit hints from the question (user typed "61.57" / "91.205" / …). */
+    foreach ((array) ($intent['cfr_section_hints'] ?? []) as $h) {
+        if (!is_string($h) || $h === '') {
+            continue;
+        }
+        $hs = strtolower(trim($h));
+        if (preg_match('/^(\d{1,2})\.(\d{1,4}[a-z]?)$/', $hs, $m)) {
+            $push((int) $m[1], $m[1] . '.' . $m[2], 'explicit-section-hint');
+        }
+    }
+
+    /** 2. Licence-driven Part 61 mappings. These are the FAA sections that pilots and
+        instructors actually cite when comparing across the Atlantic. We do NOT try to
+        cover every FAR subpart — just the headline rules per licence/rating. */
+    $licence = strtoupper((string) ($intent['licence'] ?? ''));
+    $licenceMap = [
+        'PPL' => [
+            ['61.103', 'PPL — eligibility'],
+            ['61.105', 'PPL — aeronautical knowledge'],
+            ['61.107', 'PPL — flight proficiency'],
+            ['61.109', 'PPL — aeronautical experience'],
+            ['61.113', 'PPL — privileges and limitations'],
+        ],
+        'CPL' => [
+            ['61.121', 'CPL — applicability'],
+            ['61.123', 'CPL — eligibility'],
+            ['61.125', 'CPL — aeronautical knowledge'],
+            ['61.127', 'CPL — flight proficiency'],
+            ['61.129', 'CPL — aeronautical experience'],
+            ['61.133', 'CPL — privileges and limitations'],
+        ],
+        'ATPL' => [
+            ['61.151', 'ATP — eligibility'],
+            ['61.153', 'ATP — eligibility (cont.)'],
+            ['61.155', 'ATP — aeronautical knowledge'],
+            ['61.157', 'ATP — flight proficiency'],
+            ['61.159', 'ATP — aeronautical experience (aeroplane)'],
+        ],
+        'MPL' => [
+            ['61.153', 'ATP eligibility — closest US analogue to MPL is the ATP'],
+        ],
+        'LAPL' => [
+            ['61.96', 'Recreational/Sport pilot — closest US analogue to LAPL'],
+            ['61.99', 'Recreational pilot — aeronautical knowledge'],
+            ['61.101', 'Recreational pilot — privileges'],
+        ],
+        'IR' => [
+            ['61.65', 'Instrument rating — requirements'],
+        ],
+        'BIR' => [
+            ['61.65', 'Instrument rating — no direct US analogue to BIR; comparing to IR'],
+        ],
+        'FI' => [
+            ['61.183', 'CFI — eligibility'],
+            ['61.185', 'CFI — aeronautical knowledge'],
+            ['61.187', 'CFI — flight proficiency'],
+            ['61.193', 'CFI — privileges'],
+            ['61.195', 'CFI — limitations'],
+        ],
+        'TRI' => [
+            ['61.187', 'CFI — flight proficiency (closest US analogue)'],
+        ],
+        'CRI' => [
+            ['61.187', 'CFI — flight proficiency (closest US analogue)'],
+        ],
+        'IRI' => [
+            ['61.183', 'CFI-I — covered under §61.183/§61.187'],
+            ['61.187', 'CFI-I — flight proficiency'],
+        ],
+        'EXAMINER' => [
+            ['61.46', 'DPE — language test'],
+            ['61.47', 'DPE — status of an examiner'],
+        ],
+    ];
+    if (isset($licenceMap[$licence])) {
+        foreach ($licenceMap[$licence] as $pair) {
+            $push(14, $pair[0], 'licence:' . $licence . ' — ' . $pair[1]);
+        }
+    }
+
+    /** 3. Topic-driven additions. Independent of licence, so they apply even on rule-only queries. */
+    $topics = (array) ($intent['topics'] ?? []);
+    if (in_array('medical', $topics, true)) {
+        $push(14, '61.23', 'topic:medical — medical certificates and validity periods');
+    }
+    if (in_array('language_proficiency', $topics, true)) {
+        $push(14, '61.13', 'topic:language_proficiency — eligibility incl. English proficiency');
+    }
+    if (in_array('experience', $topics, true)) {
+        $push(14, '61.57', 'topic:experience — recent flight experience (currency)');
+    }
+    if (in_array('renewal', $topics, true)) {
+        $push(14, '61.56', 'topic:renewal — flight review');
+        $push(14, '61.57', 'topic:renewal — recent flight experience');
+    }
+    if (in_array('skill_test', $topics, true)) {
+        $push(14, '61.43', 'topic:skill_test — practical test');
+    }
+    if (in_array('theoretical_knowledge', $topics, true)) {
+        $push(14, '61.35', 'topic:theoretical_knowledge — knowledge test prerequisites');
+        $push(14, '61.39', 'topic:theoretical_knowledge — knowledge test eligibility');
+    }
+
+    return array_slice($out, 0, $maxSections);
+}
+
 function rl_easa_extract_ai_text(array $resp): string
 {
     if (!empty($resp['output_text']) && is_string($resp['output_text'])) {
@@ -1594,6 +1765,7 @@ if ($method === 'GET') {
             : ['ok' => true, 'fallback' => false, 'intent' => [
                 'corpus' => null, 'licence' => null, 'category' => null,
                 'topics' => [], 'rule_ids' => [], 'keywords' => [], 'summary' => '',
+                'wants_us_compare' => false, 'cfr_section_hints' => [],
             ], 'error' => null];
         $probeAiIntent = is_array($probeAiIntentRes['intent'] ?? null) ? $probeAiIntentRes['intent'] : [];
         $probeExtraNeedles = $wantAiIntent && empty($probeAiIntentRes['fallback'])
@@ -1677,6 +1849,115 @@ if ($method === 'GET') {
                 ];
             }, is_array($probeCanon['full_nodes'] ?? null) ? $probeCanon['full_nodes'] : []),
             'cpl_corpus_coverage' => $cplCoverage,
+        ]);
+    }
+
+    /**
+     * GET ?action=ai_ecfr_probe&q=...
+     * Diagnostic for the "compare with FAA / 14 CFR" path. Runs detection + section inference
+     * + intent extraction + the EASA→CFR section map + an actual multi-section eCFR fetch,
+     * and returns everything as JSON without calling the answering OpenAI model. Useful to
+     * verify the comparison pipeline end-to-end without burning credits.
+     * Query params:
+     *   q             — natural language question (required).
+     *   skip_fetch=1  — do not actually call eCFR; just return the section list.
+     *   ai_intent=0   — skip the intent extractor OpenAI call (keyword path only).
+     */
+    if ($action === 'ai_ecfr_probe') {
+        $probeQ = trim((string) ($_GET['q'] ?? ''));
+        if ($probeQ === '') {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'q (query) required']);
+        }
+        $skipFetch = (string) ($_GET['skip_fetch'] ?? '') === '1';
+        $wantAiIntent = !isset($_GET['ai_intent']) || (string) $_GET['ai_intent'] !== '0';
+
+        $keywordWantsCompare = rl_easa_query_requests_us_ecfr_context($probeQ);
+        $explicitSection = rl_easa_infer_ecfr_section_from_query($probeQ);
+
+        $intentRes = $wantAiIntent
+            ? rl_easa_ai_extract_query_intent($probeQ)
+            : ['ok' => true, 'fallback' => true, 'intent' => [
+                'corpus' => null, 'licence' => null, 'category' => null,
+                'topics' => [], 'rule_ids' => [], 'keywords' => [], 'summary' => '',
+                'wants_us_compare' => false, 'cfr_section_hints' => [],
+            ], 'error' => 'ai_intent=0 — skipped'];
+        $intent = is_array($intentRes['intent'] ?? null) ? $intentRes['intent'] : [];
+        $intentWasFallback = !empty($intentRes['fallback']);
+
+        $includeEcfr = $keywordWantsCompare || !empty($intent['wants_us_compare']);
+
+        $cfrSections = $intentWasFallback ? [] : rl_easa_intent_to_cfr_sections($intent, 5);
+        $sectionsToFetch = [];
+        $pushSec = static function (int $t, string $s, string $why) use (&$sectionsToFetch): void {
+            $s = strtolower(trim($s));
+            if ($t <= 0 || $s === '') {
+                return;
+            }
+            foreach ($sectionsToFetch as $existing) {
+                if ($existing['title'] === $t && $existing['section'] === $s) {
+                    return;
+                }
+            }
+            $sectionsToFetch[] = ['title' => $t, 'section' => $s, 'why' => $why];
+        };
+        if ($explicitSection !== '') {
+            $pushSec(14, $explicitSection, 'explicit-from-query');
+        }
+        foreach ($cfrSections as $is) {
+            $pushSec($is['title'], $is['section'], $is['why']);
+        }
+        $sectionsToFetch = array_slice($sectionsToFetch, 0, 5);
+
+        $fetched = [];
+        $snapshot = '';
+        $fetchErrors = [];
+        $fetchSkipped = $skipFetch;
+        if (!$skipFetch && $includeEcfr && $sectionsToFetch !== []) {
+            try {
+                $cfg = rl_catalog_ecfr_runtime_config($pdo);
+                $client = new EcfrApiClient($cfg['api_base_url']);
+                $snapshot = $client->resolveTitleSnapshotDate($sectionsToFetch[0]['title']);
+                foreach ($sectionsToFetch as $sec) {
+                    try {
+                        $xml = $client->fetchSectionXml($sec['title'], $sec['section'], $snapshot);
+                        $html = $client->sectionXmlToHtml($xml);
+                        $strip = preg_replace('/\s+/', ' ', strip_tags($html));
+                        $strip = is_string($strip) ? trim($strip) : '';
+                        $fetched[] = [
+                            'title_number' => $sec['title'],
+                            'section' => $sec['section'],
+                            'snapshot' => $snapshot,
+                            'browse_url' => $client->sectionBrowseUrl($sec['title'], $sec['section']),
+                            'why' => $sec['why'],
+                            'text_chars' => strlen($strip),
+                            'text_preview' => mb_substr($strip, 0, 320),
+                        ];
+                    } catch (Throwable $e) {
+                        $fetchErrors[] = sprintf('§%s — %s', $sec['section'], $e->getMessage());
+                    }
+                }
+            } catch (Throwable $e) {
+                $fetchErrors[] = 'snapshot resolve failed — ' . $e->getMessage();
+            }
+        }
+
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'query' => $probeQ,
+            'detection' => [
+                'keyword_compare' => $keywordWantsCompare,
+                'intent_compare' => !empty($intent['wants_us_compare']),
+                'include_ecfr_effective' => $includeEcfr,
+                'explicit_section_inferred' => $explicitSection,
+            ],
+            'ai_intent' => $intent,
+            'ai_intent_fallback' => $intentWasFallback,
+            'ai_intent_error' => $intentRes['error'] ?? null,
+            'cfr_sections_planned' => $sectionsToFetch,
+            'cfr_sections_fetched' => $fetched,
+            'cfr_snapshot' => $snapshot,
+            'fetch_skipped' => $fetchSkipped,
+            'fetch_errors' => $fetchErrors,
         ]);
     }
 
@@ -2178,6 +2459,11 @@ if ($action === 'regulatory_compare_ai') {
         rl_easa_json_out(400, ['ok' => false, 'error' => 'query required']);
     }
     $useAi = !empty($data['use_ai']);
+    /** Comparison can be triggered three ways:
+        - explicit POST flag `include_ecfr=true` from a future UI toggle,
+        - keyword detector against the raw question text,
+        - intent extractor (see below) flagging wants_us_compare:true.
+        We OR the first two here; the intent fold-in happens after step 1 runs. */
     $includeEcfr = !empty($data['include_ecfr']) || rl_easa_query_requests_us_ecfr_context($q);
     $titleNum = (int) ($data['ecfr_title_number'] ?? 14);
     $section = trim((string) ($data['ecfr_section'] ?? ''));
@@ -2222,6 +2508,14 @@ if ($action === 'regulatory_compare_ai') {
     $intentError = isset($intentRes['error']) ? (string) $intentRes['error'] : null;
     $extraNeedles = $intentWasFallback ? [] : rl_easa_intent_to_extra_needles($intent);
 
+    /** Fold the intent's wants_us_compare hint into $includeEcfr. The intent extractor
+        catches phrases the keyword detector misses ("in the United States", "the FAR side",
+        "what about American rules", etc.) — but the keyword detector is still useful for
+        short / one-word follow-ups where the model returned an empty intent. */
+    if (!$includeEcfr && !empty($intent['wants_us_compare'])) {
+        $includeEcfr = true;
+    }
+
     /** STEP 2: build the regulatory bundle using the intent-derived needles (plus the regex
         keyword fallback inside the bundle builder). */
     $canon = rl_easa_build_ai_canonical_regulatory_bundle($pdo, $q, $compareBatchId, $extraNeedles, $intent);
@@ -2237,22 +2531,111 @@ if ($action === 'regulatory_compare_ai') {
     $easaCtx = (string) ($canon['summary'] ?? '');
     $easaModelBundle = trim((string) ($canon['model_bundle'] ?? ''));
 
-    $ecfrHtml = '';
+    /** Comparison mode: when a U.S. comparison is requested we now fetch UP TO FIVE relevant
+        14 CFR sections from the eCFR versioner API. The priority is:
+          1. Explicit section in $section (from POST or regex over the question).
+          2. Intent-derived sections (intent.cfr_section_hints + licence/topic mapping).
+          3. Cap at $maxEcfrSections to keep latency bounded — each fetch is ~1s.
+        Every successful fetch contributes a stripped-text excerpt to $ecfrFetched and a
+        provenance row to $ecfrSources. Failures are collected into per-section notes so the
+        model can apologise instead of hallucinating an answer. */
+    $ecfrHtml = '';       /** retained for legacy field in payload (first section's HTML) */
     $ecfrNote = '';
+    $ecfrFetched = [];    /** list<array{title_number:int,section:string,snapshot:string,browse_url:string,text:string}> */
+    $ecfrSources = [];    /** list of provenance rows shipped to the UI */
+    $ecfrSnapshot = '';
+    $maxEcfrSections = 5;
+
     if ($includeEcfr) {
-        if ($section === '') {
-            $ecfrNote = 'U.S. comparison was requested but no 14 CFR section (e.g. 61.57) could be inferred — mention that in your reply and invite the user to name a section.';
+        /** Build the prioritised section list. */
+        $sectionsToFetch = [];
+        $pushSec = static function (int $t, string $s, string $why) use (&$sectionsToFetch): void {
+            $s = strtolower(trim($s));
+            if ($t <= 0 || $s === '') {
+                return;
+            }
+            foreach ($sectionsToFetch as $existing) {
+                if ($existing['title'] === $t && $existing['section'] === $s) {
+                    return;
+                }
+            }
+            $sectionsToFetch[] = ['title' => $t, 'section' => $s, 'why' => $why];
+        };
+        if ($section !== '') {
+            $pushSec($titleNum > 0 ? $titleNum : 14, $section, 'explicit-from-query');
+        }
+        if (!$intentWasFallback) {
+            foreach (rl_easa_intent_to_cfr_sections($intent, $maxEcfrSections) as $is) {
+                $pushSec($is['title'], $is['section'], $is['why']);
+            }
+        }
+        $sectionsToFetch = array_slice($sectionsToFetch, 0, $maxEcfrSections);
+
+        if ($sectionsToFetch === []) {
+            $ecfrNote = 'U.S. comparison was requested but no 14 CFR section could be inferred from the question. The model should still answer the EASA side fully and offer a high-level comparison from general FAA knowledge, while inviting the user to name a specific 14 CFR section for an authoritative excerpt.';
         } else {
             try {
                 $cfg = rl_catalog_ecfr_runtime_config($pdo);
                 $client = new EcfrApiClient($cfg['api_base_url']);
-                $snap = $client->resolveTitleSnapshotDate($titleNum > 0 ? $titleNum : 14);
-                $xml = $client->fetchSectionXml($titleNum > 0 ? $titleNum : 14, $section, $snap);
-                $ecfrHtml = $client->sectionXmlToHtml($xml);
-                $browse = $client->sectionBrowseUrl($titleNum > 0 ? $titleNum : 14, $section);
-                $ecfrNote = 'Official excerpt via eCFR versioner API · snapshot ' . $snap . ' · Browse: ' . $browse;
+                /** Resolve the title snapshot date ONCE per request — all subsequent section
+                    fetches reuse the same snapshot so the comparison is internally consistent. */
+                $primaryTitle = $sectionsToFetch[0]['title'];
+                $snap = $client->resolveTitleSnapshotDate($primaryTitle);
+                $ecfrSnapshot = $snap;
+                $errors = [];
+
+                foreach ($sectionsToFetch as $sec) {
+                    try {
+                        $xml = $client->fetchSectionXml($sec['title'], $sec['section'], $snap);
+                        $html = $client->sectionXmlToHtml($xml);
+                        if ($ecfrHtml === '') {
+                            $ecfrHtml = $html; /** keep first section as legacy ecfr_html */
+                        }
+                        $strip = preg_replace('/\s+/', ' ', strip_tags($html));
+                        $strip = is_string($strip) ? trim($strip) : '';
+                        if ($strip === '') {
+                            $errors[] = sprintf('14 CFR §%s returned no text', $sec['section']);
+                            continue;
+                        }
+                        $browseUrl = $client->sectionBrowseUrl($sec['title'], $sec['section']);
+                        $ecfrFetched[] = [
+                            'title_number' => $sec['title'],
+                            'section' => $sec['section'],
+                            'snapshot' => $snap,
+                            'browse_url' => $browseUrl,
+                            'text' => $strip,
+                            'why' => $sec['why'],
+                        ];
+                        $ecfrSources[] = [
+                            'title_number' => $sec['title'],
+                            'section' => $sec['section'],
+                            'snapshot' => $snap,
+                            'browse_url' => $browseUrl,
+                            'label' => sprintf('14 CFR §%s', $sec['section']),
+                            'why' => $sec['why'],
+                        ];
+                    } catch (Throwable $e) {
+                        $errors[] = sprintf('14 CFR §%s fetch failed (%s)', $sec['section'], $e->getMessage());
+                    }
+                }
+
+                if ($ecfrFetched === []) {
+                    $ecfrNote = 'eCFR fetch returned no usable text for the inferred sections. '
+                        . 'Maya must mention that the live U.S. excerpt could not be loaded and offer to compare based on general FAA knowledge.'
+                        . ($errors !== [] ? ' Details: ' . implode('; ', $errors) : '');
+                } else {
+                    $ecfrNote = sprintf(
+                        'Loaded %d official 14 CFR section(s) via eCFR versioner API · snapshot %s',
+                        count($ecfrFetched),
+                        $snap
+                    );
+                    if ($errors !== []) {
+                        $ecfrNote .= ' · partial errors: ' . implode('; ', $errors);
+                    }
+                }
             } catch (Throwable $e) {
-                $ecfrNote = 'eCFR fetch failed: ' . $e->getMessage();
+                $ecfrNote = 'eCFR fetch failed: ' . $e->getMessage()
+                    . ' — Maya must not invent FAA citations; fall back to a high-level comparison and apologise for the missing live excerpt.';
             }
         }
     }
@@ -2289,6 +2672,9 @@ if ($action === 'regulatory_compare_ai') {
         'canonical_nodes_loaded' => is_array($canon['full_nodes'] ?? null) ? count($canon['full_nodes']) : 0,
         'ecfr_html' => $ecfrHtml !== '' ? $ecfrHtml : null,
         'ecfr_note' => $ecfrNote !== '' ? $ecfrNote : null,
+        'ecfr_sources' => $ecfrSources,
+        'ecfr_snapshot' => $ecfrSnapshot !== '' ? $ecfrSnapshot : null,
+        'compare_mode' => $includeEcfr,
         'ai_answer' => '',
         'ai_error' => null,
         'answer_markdown' => '',
@@ -2349,13 +2735,48 @@ if ($action === 'regulatory_compare_ai') {
     } else {
         $bundle .= "(No canonical node payloads loaded — say so plainly and ask which regulation the user means.)\n\n";
     }
-    if ($ecfrHtml !== '') {
-        $strip = preg_replace('/\s+/', ' ', strip_tags($ecfrHtml));
-        $strip = is_string($strip) ? trim($strip) : '';
-        if (strlen($strip) > 12000) {
-            $strip = substr($strip, 0, 12000) . '…';
+    /** Comparison mode bundle injection. When live eCFR text is available we add a clearly
+        delimited U.S. block with one paragraph per section. When the fetch failed we still
+        pass the operational note so the model knows to apologise instead of inventing FAA
+        citations. */
+    if ($ecfrFetched !== []) {
+        $bundle .= sprintf(
+            "U.S. 14 CFR excerpts (eCFR versioner API · snapshot %s · %d section(s) loaded):\n\n",
+            $ecfrSnapshot !== '' ? $ecfrSnapshot : 'current',
+            count($ecfrFetched)
+        );
+        /** Budget the U.S. block so a long Part 61 section can't crowd out the EASA bundle. */
+        $perSectionCap = 4000;
+        $totalCap = 14000;
+        $usedChars = 0;
+        foreach ($ecfrFetched as $f) {
+            $body = (string) ($f['text'] ?? '');
+            if (strlen($body) > $perSectionCap) {
+                $body = substr($body, 0, $perSectionCap) . '…';
+            }
+            $headline = sprintf(
+                "--- 14 CFR §%s (Title %d, snapshot %s) — Browse: %s ---\n",
+                $f['section'],
+                (int) $f['title_number'],
+                (string) $f['snapshot'],
+                (string) $f['browse_url']
+            );
+            $chunk = $headline . $body . "\n\n";
+            if ($usedChars + strlen($chunk) > $totalCap) {
+                $bundle .= sprintf(
+                    "(…remaining U.S. sections truncated for budget — %d total fetched.)\n\n",
+                    count($ecfrFetched)
+                );
+                break;
+            }
+            $bundle .= $chunk;
+            $usedChars += strlen($chunk);
         }
-        $bundle .= "U.S. 14 CFR excerpt (eCFR API, for comparison only):\n" . $strip . "\n\n";
+    }
+    if ($includeEcfr && $ecfrNote !== '') {
+        /** Always echo the operational note into the bundle so the model can act on it. */
+        $bundle .= "U.S. comparison status note (read before writing the U.S. side):\n"
+            . $ecfrNote . "\n\n";
     }
 
     $jsonInstructions = <<<'TXT'
@@ -2392,6 +2813,16 @@ Your entire model output MUST be a single JSON object (no markdown fences, no pr
     * If the new question is clearly a new topic (different licence, different corpus), just start fresh — don't try to thread the old topic in.
     * DRILL-DOWN follow-ups ("break it down", "in simple steps", "step by step", "walk me through", "explain in detail", "go deeper"): DO NOT re-print the high-level rule list you already gave in the previous turn. Skip that intro completely. Open with one short line ("Hi Kay, here's the modular IR(A) path step-by-step:") then go STRAIGHT to the numbered or bulleted steps with rule ids in parentheses for citation. The reader already saw the rule list — your job now is the substance, not the table of contents.
 
+  COMPARISON MODE — engage ONLY when "U.S. 14 CFR excerpts" or a "U.S. comparison status note" appear in the bundle:
+    * After the standard EASA outline (greeting + tree location + Section/Subpart bullets), add a new section titled exactly "## Comparison with U.S. 14 CFR".
+    * Format that section as a short table or paired bullets. Each pair shows the EASA rule on the left and the U.S. analogue on the right, e.g.:
+        - **EASA — Eligibility (FCL.210 PPL)** ↔ **U.S. — Eligibility (14 CFR §61.103)**: short side-by-side comment (4–8 lines max).
+        - **EASA — Aeronautical experience (FCL.210 PPL)** ↔ **U.S. — Aeronautical experience (14 CFR §61.109)**: list the headline numerical differences (hours, dual, solo, cross-country).
+    * Quote the eCFR text MINIMALLY (a phrase or short sentence). Always cite the U.S. section as "14 CFR §XX.YY" (no other format). Do NOT cite any 14 CFR section that is NOT listed under "U.S. 14 CFR excerpts" in the bundle.
+    * If a "U.S. comparison status note" is present and there are NO U.S. excerpts, write a short paragraph like: "I couldn't pull the current 14 CFR text from eCFR just now, but at a high level the FAA analogues for what you're asking about are §… — would you like me to focus on a specific U.S. section so I can quote it precisely?" Do NOT invent verbatim FAA quotes when there are no excerpts.
+    * Close the comparison subsection with ONE focused offer that mentions BOTH sides, e.g. "Want me to dig into the EASA solo cross-country requirement or the FAA dual-instruction minimum next?".
+    * Total length when comparison mode is engaged may go up to ~250 words. Stay disciplined — pilots want side-by-side, not essays.
+
 - "primary_references": array of objects (the UI shows these as chips inside your bubble — they are how the user clicks through). Each object MUST have:
     * "title" (string, human section title — e.g. "FCL.300 CPL — Minimum age". Never raw .xml filenames, never internal IDs).
     * "batch_id" (int)
@@ -2417,9 +2848,9 @@ TXT;
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => "You are Maya, an EASA Easy Access mentor. Use ONLY the canonical EASA bundles provided plus any optional U.S. eCFR excerpt in the bundle. "
+                            'text' => "You are Maya, an EASA Easy Access mentor. Use ONLY the canonical EASA bundles provided plus any optional U.S. eCFR excerpts / status note in the bundle. "
                                 . $jsonInstructions
-                                . " When U.S. text is present, clearly label it as U.S. 14 CFR for comparison. Greet by first name when provided (e.g. \"Hi {name},\"). Do not add any boilerplate verification footer; the style rules above are the final word on tone."
+                                . " When U.S. text or a U.S. comparison status note is present in the bundle, engage COMPARISON MODE as defined above. Greet by first name when provided (e.g. \"Hi {name},\"). Do not add any boilerplate verification footer; the style rules above are the final word on tone."
                                 . ($semanticMapBlock !== '' ? "\n\n" . $semanticMapBlock : ''),
                         ],
                     ],
@@ -2496,6 +2927,12 @@ TXT;
                 'primary_references' => $payload['primary_references'],
                 'secondary_references' => $payload['secondary_references'],
                 'confidence' => $payload['confidence'],
+                /** Carry the comparison-mode artefacts so re-rendering this row on chat
+                    reload also shows the eCFR footer with snapshot date + browse chips. */
+                'compare_mode' => (bool) ($payload['compare_mode'] ?? false),
+                'ecfr_sources' => is_array($payload['ecfr_sources'] ?? null) ? $payload['ecfr_sources'] : [],
+                'ecfr_snapshot' => $payload['ecfr_snapshot'] ?? null,
+                'ecfr_note' => $payload['ecfr_note'] ?? null,
             ];
             $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES;
             if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {

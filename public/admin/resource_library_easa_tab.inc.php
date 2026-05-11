@@ -1393,6 +1393,50 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     flex-wrap: wrap;
     gap: 6px;
   }
+  .rl-easa-maya-ecfr-sources {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed #cbd5e1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .rl-easa-maya-ecfr-head {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #475569;
+  }
+  .rl-easa-maya-ecfr-chiprow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .rl-easa-maya-ecfr-chip {
+    display: inline-flex;
+    align-items: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: #0c4a6e;
+    background: #e0f2fe;
+    border: 1px solid #7dd3fc;
+    border-radius: 999px;
+    padding: 4px 10px;
+    text-decoration: none;
+    line-height: 1.25;
+  }
+  .rl-easa-maya-ecfr-chip:hover,
+  .rl-easa-maya-ecfr-chip:focus {
+    background: #bae6fd;
+    color: #0c4a6e;
+    text-decoration: none;
+  }
+  .rl-easa-maya-ecfr-note {
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.4;
+  }
   .rl-easa-maya-compose {
     display: flex;
     gap: 10px;
@@ -1923,6 +1967,71 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       .trim();
   }
 
+  /**
+   * Render a small "Official 14 CFR (eCFR) sources" footer on an assistant bubble.
+   * `host` is the .rl-easa-chat-bubble element; `sources` is the ecfr_sources array
+   * (`{title_number, section, snapshot, browse_url, label, why}` rows). When `note`
+   * is supplied AND `sources` is empty we still render a single muted line so the
+   * user knows the comparison failed gracefully.
+   */
+  function rlEasaMayaRenderEcfrSources(host, sources, note, snapshot) {
+    if (!host) return;
+    var rows = Array.isArray(sources) ? sources : [];
+    var noteStr = String(note || '').trim();
+    if (!rows.length && !noteStr) return;
+
+    var box = document.createElement('div');
+    box.className = 'rl-easa-maya-ecfr-sources';
+
+    var head = document.createElement('div');
+    head.className = 'rl-easa-maya-ecfr-head';
+    var snap = String(snapshot || '').trim();
+    if (rows.length) {
+      head.textContent = snap
+        ? ('Official 14 CFR (eCFR) — snapshot ' + snap)
+        : 'Official 14 CFR (eCFR) sources';
+    } else {
+      head.textContent = 'U.S. comparison';
+    }
+    box.appendChild(head);
+
+    if (rows.length) {
+      var chipRow = document.createElement('div');
+      chipRow.className = 'rl-easa-maya-ecfr-chiprow';
+      rows.slice(0, 8).forEach(function (s) {
+        var title = parseInt(String(s.title_number), 10) || 14;
+        var section = String(s.section || '').trim();
+        if (!section) return;
+        var label = String(s.label || ('14 CFR §' + section));
+        var url = String(s.browse_url || '').trim();
+        var chip;
+        if (url) {
+          chip = document.createElement('a');
+          chip.href = url;
+          chip.target = '_blank';
+          chip.rel = 'noopener noreferrer';
+        } else {
+          chip = document.createElement('span');
+        }
+        chip.className = 'rl-easa-maya-ecfr-chip';
+        chip.textContent = label;
+        var why = String(s.why || '').trim();
+        if (why) chip.title = why;
+        chipRow.appendChild(chip);
+      });
+      box.appendChild(chipRow);
+    }
+
+    if (noteStr) {
+      var noteEl = document.createElement('div');
+      noteEl.className = 'rl-easa-maya-ecfr-note';
+      noteEl.textContent = noteStr;
+      box.appendChild(noteEl);
+    }
+
+    host.appendChild(box);
+  }
+
   function rlEasaMayaRenderChips(host, refs) {
     if (!host || !Array.isArray(refs) || !refs.length) return;
     refs.slice(0, 12).forEach(function (r) {
@@ -2225,6 +2334,13 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           var o = JSON.parse(responseJsonStr);
           var refs = (o && Array.isArray(o.primary_references)) ? o.primary_references : [];
           rlEasaMayaRenderChips(bubble, refs);
+          var ecfrSrc = (o && Array.isArray(o.ecfr_sources)) ? o.ecfr_sources : [];
+          var ecfrNote = (o && typeof o.ecfr_note === 'string') ? o.ecfr_note : '';
+          var ecfrSnap = (o && typeof o.ecfr_snapshot === 'string') ? o.ecfr_snapshot : '';
+          var compareMode = !!(o && o.compare_mode);
+          if (compareMode || ecfrSrc.length || ecfrNote) {
+            rlEasaMayaRenderEcfrSources(bubble, ecfrSrc, ecfrNote, ecfrSnap);
+          }
         } catch (e0) { /* ignore */ }
       }
       return mrow;
@@ -4319,7 +4435,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
               answer_markdown: aiBlock2,
               primary_references: refs2,
               secondary_references: Array.isArray(pl.secondary_references) ? pl.secondary_references : [],
-              confidence: pl.confidence || 'medium'
+              confidence: pl.confidence || 'medium',
+              compare_mode: !!pl.compare_mode,
+              ecfr_sources: Array.isArray(pl.ecfr_sources) ? pl.ecfr_sources : [],
+              ecfr_snapshot: pl.ecfr_snapshot || '',
+              ecfr_note: pl.ecfr_note || ''
             });
             try {
               hist.appendChild(rlEasaMayaCreateAssistantRow(aiBlock2, pj2, Date.now()));
@@ -4358,7 +4478,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
               answer_markdown: aiBlock,
               primary_references: refs,
               secondary_references: Array.isArray(pl.secondary_references) ? pl.secondary_references : [],
-              confidence: pl.confidence || 'medium'
+              confidence: pl.confidence || 'medium',
+              compare_mode: !!pl.compare_mode,
+              ecfr_sources: Array.isArray(pl.ecfr_sources) ? pl.ecfr_sources : [],
+              ecfr_snapshot: pl.ecfr_snapshot || '',
+              ecfr_note: pl.ecfr_note || ''
             });
             try {
               hist.appendChild(rlEasaMayaCreateAssistantRow(aiBlock, pj, Date.now()));
