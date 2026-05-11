@@ -1468,6 +1468,503 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     font-size: 12.5px;
     padding: 6px 14px;
   }
+
+  /* ─── Live tree — header row (hosts the My Bookmarks button) ─── */
+  .rl-easa-tree-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .rl-easa-tree-header-row h3 {
+    margin: 0;
+  }
+  .rl-easa-bookmarks-open-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: #fff7ed;
+    color: #92400e;
+    border: 1px solid #fed7aa;
+    font-weight: 600;
+  }
+  .rl-easa-bookmarks-open-btn:hover,
+  .rl-easa-bookmarks-open-btn:focus {
+    background: #ffedd5;
+    color: #7c2d12;
+    border-color: #fdba74;
+  }
+  .rl-easa-bookmarks-icon {
+    color: #f59e0b;
+    font-size: 13px;
+    line-height: 1;
+  }
+
+  /* ─── Rule panel action row (Bookmark + Highlight buttons) ─── */
+  .rl-easa-rule-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    padding: 8px 12px 4px;
+    border-bottom: 1px dashed #e2e8f0;
+    margin-bottom: 6px;
+  }
+  .rl-easa-rule-actions-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: #f1f5f9;
+    color: #0f172a;
+    border: 1px solid #cbd5e1;
+    border-radius: 999px;
+    padding: 4px 11px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+    line-height: 1.25;
+  }
+  .rl-easa-rule-actions-btn:hover:not(:disabled),
+  .rl-easa-rule-actions-btn:focus-visible:not(:disabled) {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+    outline: none;
+  }
+  .rl-easa-rule-actions-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .rl-easa-rule-actions-btn--bookmark.is-saved {
+    background: #fef3c7;
+    border-color: #facc15;
+    color: #854d0e;
+  }
+  .rl-easa-rule-actions-btn--highlight {
+    background: #fff8db;
+    border-color: #fde68a;
+    color: #92400e;
+  }
+  .rl-easa-rule-actions-btn--highlight:hover:not(:disabled) {
+    background: #fef3c7;
+  }
+  .rl-easa-rule-actions-btn--highlight.is-remove {
+    background: #fee2e2;
+    border-color: #fca5a5;
+    color: #991b1b;
+  }
+  .rl-easa-rule-actions-btn-icon {
+    font-size: 13px;
+    line-height: 1;
+  }
+  .rl-easa-rule-actions-spacer {
+    flex: 1;
+  }
+  .rl-easa-rule-actions-status {
+    font-size: 11px;
+    color: #475569;
+    font-style: italic;
+  }
+
+  /* ─── User highlights (yellow marker) ─── */
+  mark.rl-easa-user-mark {
+    background: #fde68a;
+    color: inherit;
+    padding: 0 2px;
+    border-radius: 2px;
+    cursor: pointer;
+    box-decoration-break: clone;
+    -webkit-box-decoration-break: clone;
+  }
+  mark.rl-easa-user-mark.is-noted {
+    box-shadow: inset 0 -2px 0 0 #f59e0b;
+  }
+  mark.rl-easa-user-mark.is-focused {
+    background: #fcd34d;
+  }
+  .rl-easa-user-mark-popover {
+    position: absolute;
+    z-index: 1000;
+    background: #1f2937;
+    color: #f9fafb;
+    border-radius: 8px;
+    padding: 8px 10px;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 220px;
+    max-width: 320px;
+    font-size: 12px;
+  }
+  .rl-easa-user-mark-popover textarea {
+    resize: vertical;
+    min-height: 50px;
+    max-height: 140px;
+    border-radius: 6px;
+    border: 1px solid #4b5563;
+    background: #111827;
+    color: #f9fafb;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .rl-easa-user-mark-popover-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 6px;
+  }
+  .rl-easa-user-mark-popover-btn {
+    background: #4b5563;
+    color: #f9fafb;
+    border: 1px solid #6b7280;
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .rl-easa-user-mark-popover-btn:hover {
+    background: #6b7280;
+  }
+  .rl-easa-user-mark-popover-btn.is-danger {
+    background: #b91c1c;
+    border-color: #ef4444;
+  }
+  .rl-easa-user-mark-popover-btn.is-danger:hover {
+    background: #dc2626;
+  }
+
+  /* ─── Bookmarks modal ─── */
+  .rl-easa-bookmarks-dialog {
+    width: 880px;
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 64px);
+  }
+  .rl-easa-bookmarks-tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 0 16px;
+  }
+  .rl-easa-bookmarks-tab {
+    background: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 10px 16px;
+    font-size: 13px;
+    font-weight: 600;
+    color: #64748b;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .rl-easa-bookmarks-tab:hover {
+    color: #0f172a;
+  }
+  .rl-easa-bookmarks-tab.is-active {
+    color: #0f172a;
+    border-bottom-color: #f59e0b;
+  }
+  .rl-easa-bookmarks-body {
+    padding: 0;
+  }
+  .rl-easa-bookmarks-pane--list {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: 360px;
+    max-height: 65vh;
+  }
+  .rl-easa-bookmarks-sidebar {
+    background: #f8fafc;
+    border-right: 1px solid #e2e8f0;
+    padding: 12px 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .rl-easa-bookmarks-sidebar-head {
+    padding: 4px 14px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: #94a3b8;
+  }
+  .rl-easa-bookmarks-cat-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex: 1;
+  }
+  .rl-easa-bookmarks-cat-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 6px 14px;
+    cursor: pointer;
+    font-size: 13px;
+    color: #0f172a;
+  }
+  .rl-easa-bookmarks-cat-list li:hover {
+    background: #e2e8f0;
+  }
+  .rl-easa-bookmarks-cat-list li.is-active {
+    background: #fef3c7;
+    color: #854d0e;
+    font-weight: 600;
+  }
+  .rl-easa-bookmarks-cat-list li .rl-easa-bookmarks-cat-count {
+    font-size: 11px;
+    color: #64748b;
+    background: #e2e8f0;
+    border-radius: 999px;
+    padding: 1px 7px;
+  }
+  .rl-easa-bookmarks-cat-list li.is-active .rl-easa-bookmarks-cat-count {
+    background: #fde68a;
+    color: #854d0e;
+  }
+  .rl-easa-bookmarks-cat-actions {
+    display: none;
+    gap: 4px;
+  }
+  .rl-easa-bookmarks-cat-list li:hover .rl-easa-bookmarks-cat-actions {
+    display: inline-flex;
+  }
+  .rl-easa-bookmarks-cat-mini-btn {
+    background: transparent;
+    border: none;
+    color: #64748b;
+    font-size: 11px;
+    padding: 0 4px;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .rl-easa-bookmarks-cat-mini-btn:hover {
+    color: #0f172a;
+  }
+  .rl-easa-bookmarks-cat-add {
+    padding: 10px 14px;
+    border-top: 1px solid #e2e8f0;
+  }
+  .rl-easa-bookmarks-cat-add-btn {
+    width: 100%;
+    background: transparent;
+    border: 1px dashed #cbd5e1;
+    color: #475569;
+  }
+  .rl-easa-bookmarks-cat-form input[type="text"] {
+    width: 100%;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    padding: 5px 8px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .rl-easa-bookmarks-cat-form-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+  }
+  .rl-easa-bookmarks-cat-err {
+    color: #b91c1c;
+    font-size: 11px;
+    margin: 4px 0 0;
+  }
+  .rl-easa-bookmarks-cat-cancel {
+    background: transparent;
+    color: #64748b;
+  }
+  .rl-easa-bookmarks-listpane {
+    padding: 14px 18px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+  }
+  .rl-easa-bookmarks-listpane-head {
+    font-size: 13px;
+    font-weight: 700;
+    color: #0f172a;
+    margin-bottom: 10px;
+  }
+  .rl-easa-bookmarks-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .rl-easa-bookmarks-empty {
+    color: #64748b;
+    font-size: 13px;
+    text-align: center;
+    padding: 40px 16px;
+    font-style: italic;
+  }
+  .rl-easa-bookmarks-row {
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #fff;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+  .rl-easa-bookmarks-row:hover {
+    border-color: #cbd5e1;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+  }
+  .rl-easa-bookmarks-row-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .rl-easa-bookmarks-row-crumb {
+    font-size: 11px;
+    color: #64748b;
+  }
+  .rl-easa-bookmarks-row-note {
+    font-size: 12px;
+    color: #1f2937;
+    background: #fef3c7;
+    border-left: 3px solid #f59e0b;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-top: 2px;
+    white-space: pre-wrap;
+  }
+  .rl-easa-bookmarks-row-snippet {
+    font-size: 12px;
+    color: #0f172a;
+    background: #fffbeb;
+    border-left: 3px solid #facc15;
+    padding: 4px 8px;
+    border-radius: 4px;
+    margin-top: 2px;
+    line-height: 1.4;
+  }
+  .rl-easa-bookmarks-row-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+  }
+  .rl-easa-bookmarks-row-actions .btn {
+    font-size: 11px;
+    padding: 3px 9px;
+  }
+  .rl-easa-bookmarks-row-delete {
+    color: #b91c1c;
+  }
+
+  /* ─── Save mode form ─── */
+  .rl-easa-bookmarks-pane--save {
+    padding: 18px 22px 22px;
+  }
+  .rl-easa-bookmarks-saveform {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .rl-easa-bookmarks-saveform-rule {
+    background: #f8fafc;
+    border-radius: 8px;
+    padding: 10px 12px;
+    border: 1px solid #e2e8f0;
+  }
+  .rl-easa-bookmarks-saveform-label {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: #64748b;
+    margin-bottom: 4px;
+  }
+  .rl-easa-bookmarks-saveform-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #0f172a;
+  }
+  .rl-easa-bookmarks-saveform-crumb {
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 4px;
+  }
+  .rl-easa-bookmarks-saveform-catrow {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .rl-easa-bookmarks-saveform-catrow select {
+    flex: 1;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .rl-easa-bookmarks-saveform-newcatwrap {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-top: 6px;
+  }
+  .rl-easa-bookmarks-saveform-newcatwrap input[type="text"] {
+    flex: 1;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+  }
+  .rl-easa-bookmarks-saveform textarea {
+    width: 100%;
+    border-radius: 6px;
+    border: 1px solid #cbd5e1;
+    padding: 8px 10px;
+    font-size: 13px;
+    font-family: inherit;
+    resize: vertical;
+  }
+  .rl-easa-bookmarks-saveform-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .rl-easa-bookmarks-saveform-save {
+    background: #f59e0b;
+    color: #fff;
+    border-color: #d97706;
+  }
+  .rl-easa-bookmarks-saveform-save:hover {
+    background: #d97706;
+  }
+  .rl-easa-bookmarks-saveform-cancel {
+    background: transparent;
+    color: #64748b;
+  }
+  .rl-easa-bookmarks-saveform-status {
+    font-size: 11px;
+    color: #64748b;
+  }
+  .rl-easa-bookmarks-saveform-status.is-error {
+    color: #b91c1c;
+  }
+  .rl-easa-bookmarks-saveform-status.is-success {
+    color: #166534;
+  }
+  @media (max-width: 720px) {
+    .rl-easa-bookmarks-pane--list {
+      grid-template-columns: 1fr;
+    }
+    .rl-easa-bookmarks-sidebar {
+      border-right: none;
+      border-bottom: 1px solid #e2e8f0;
+    }
+  }
   .rl-easa-maya-ecfr-note {
     font-size: 11px;
     color: #64748b;
@@ -1611,7 +2108,13 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   </section>
 
   <section class="card rl-easa-dash-panel rl-easa-tree-dash" id="rlEasaTreeSection" style="padding:16px 18px; margin-bottom:14px;">
-    <h3>Live Easy Access Rules</h3>
+    <div class="rl-easa-tree-header-row">
+      <h3>Live Easy Access Rules</h3>
+      <button type="button" class="btn btn-sm rl-easa-bookmarks-open-btn" id="rlEasaBookmarksOpenBtn" hidden>
+        <span class="rl-easa-bookmarks-icon" aria-hidden="true">&#9733;</span>
+        <span>My Bookmarks</span>
+      </button>
+    </div>
     <p class="rl-easa-dash-lead">Browse the official Easy Access text as indexed on this server. Pick a regulation set, then open sections in the tree and read the published wording beside it.</p>
     <div class="rl-easa-tree-toolbar">
       <label class="rl-easa-tree-batch-label" for="rlEasaTreeBatch">Select your EASA Easy Access Rules</label>
@@ -1781,6 +2284,90 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         <div id="rlEasaSemanticMapAutoTree" class="rl-easa-semantic-auto-tree"
              style="max-height:340px;overflow:auto;padding:10px 12px;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;font-size:13px;line-height:1.5;">
           <em>Loading…</em>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="rl-easa-modal-overlay rl-easa-bookmarks-modal" id="rlEasaBookmarksModal" hidden>
+  <div class="rl-easa-modal-dialog rl-easa-bookmarks-dialog" role="dialog" aria-modal="true" aria-labelledby="rlEasaBookmarksModalTitle">
+    <div class="rl-easa-modal-head">
+      <h2 id="rlEasaBookmarksModalTitle">My Bookmarks</h2>
+      <button type="button" class="rl-easa-modal-close" id="rlEasaBookmarksModalClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="rl-easa-bookmarks-tabs" role="tablist">
+      <button type="button" class="rl-easa-bookmarks-tab is-active" id="rlEasaBookmarksTabBookmarks" role="tab" aria-selected="true" data-mode="list">Bookmarks</button>
+      <button type="button" class="rl-easa-bookmarks-tab" id="rlEasaBookmarksTabHighlights" role="tab" aria-selected="false" data-mode="highlights">Highlights</button>
+    </div>
+    <div class="rl-easa-modal-body rl-easa-bookmarks-body">
+      <!-- LIST MODE — categories sidebar + bookmark list pane -->
+      <div class="rl-easa-bookmarks-pane rl-easa-bookmarks-pane--list" id="rlEasaBookmarksListPane">
+        <aside class="rl-easa-bookmarks-sidebar" aria-label="Bookmark categories">
+          <div class="rl-easa-bookmarks-sidebar-head">Categories</div>
+          <ul class="rl-easa-bookmarks-cat-list" id="rlEasaBookmarksCatList" role="listbox"></ul>
+          <div class="rl-easa-bookmarks-cat-add">
+            <button type="button" class="btn btn-sm rl-easa-bookmarks-cat-add-btn" id="rlEasaBookmarksCatAddBtn">+ New category</button>
+            <form class="rl-easa-bookmarks-cat-form" id="rlEasaBookmarksCatForm" hidden>
+              <input type="text" id="rlEasaBookmarksCatInput" placeholder="Category name" maxlength="80" autocomplete="off">
+              <div class="rl-easa-bookmarks-cat-form-actions">
+                <button type="submit" class="btn btn-sm" id="rlEasaBookmarksCatSaveBtn">Save</button>
+                <button type="button" class="btn btn-sm rl-easa-bookmarks-cat-cancel" id="rlEasaBookmarksCatCancelBtn">Cancel</button>
+              </div>
+              <p class="rl-easa-bookmarks-cat-err" id="rlEasaBookmarksCatErr" hidden></p>
+            </form>
+          </div>
+        </aside>
+        <div class="rl-easa-bookmarks-listpane">
+          <div class="rl-easa-bookmarks-listpane-head" id="rlEasaBookmarksListHead"></div>
+          <div class="rl-easa-bookmarks-list" id="rlEasaBookmarksList"></div>
+          <div class="rl-easa-bookmarks-empty" id="rlEasaBookmarksListEmpty" hidden>
+            No bookmarks here yet. Open a rule in the tree and use <strong>Bookmark</strong> to add one.
+          </div>
+        </div>
+      </div>
+
+      <!-- SAVE MODE — appears when opened from "Add Bookmark" in the rule panel -->
+      <div class="rl-easa-bookmarks-pane rl-easa-bookmarks-pane--save" id="rlEasaBookmarksSavePane" hidden>
+        <form class="rl-easa-bookmarks-saveform" id="rlEasaBookmarksSaveForm">
+          <div class="rl-easa-bookmarks-saveform-rule">
+            <div class="rl-easa-bookmarks-saveform-label">Rule</div>
+            <div class="rl-easa-bookmarks-saveform-title" id="rlEasaBookmarksSaveTitle">—</div>
+            <div class="rl-easa-bookmarks-saveform-crumb" id="rlEasaBookmarksSaveCrumb"></div>
+          </div>
+          <div class="rl-easa-bookmarks-saveform-row">
+            <label class="rl-easa-bookmarks-saveform-label" for="rlEasaBookmarksSaveCategory">Category</label>
+            <div class="rl-easa-bookmarks-saveform-catrow">
+              <select id="rlEasaBookmarksSaveCategory"></select>
+              <button type="button" class="btn btn-sm rl-easa-bookmarks-saveform-newcat" id="rlEasaBookmarksSaveNewCatBtn">+ New</button>
+            </div>
+            <div class="rl-easa-bookmarks-saveform-newcatwrap" id="rlEasaBookmarksSaveNewCatWrap" hidden>
+              <input type="text" id="rlEasaBookmarksSaveNewCatInput" placeholder="New category name" maxlength="80">
+              <button type="button" class="btn btn-sm" id="rlEasaBookmarksSaveNewCatSave">Save</button>
+              <button type="button" class="btn btn-sm rl-easa-bookmarks-cat-cancel" id="rlEasaBookmarksSaveNewCatCancel">Cancel</button>
+              <p class="rl-easa-bookmarks-cat-err" id="rlEasaBookmarksSaveNewCatErr" hidden></p>
+            </div>
+          </div>
+          <div class="rl-easa-bookmarks-saveform-row">
+            <label class="rl-easa-bookmarks-saveform-label" for="rlEasaBookmarksSaveNote">Remark</label>
+            <textarea id="rlEasaBookmarksSaveNote" rows="4" maxlength="2000" placeholder="Optional remark — what to remember about this rule"></textarea>
+          </div>
+          <div class="rl-easa-bookmarks-saveform-actions">
+            <button type="submit" class="btn btn-sm rl-easa-bookmarks-saveform-save" id="rlEasaBookmarksSaveBtn">Save bookmark</button>
+            <button type="button" class="btn btn-sm rl-easa-bookmarks-saveform-cancel" id="rlEasaBookmarksSaveCancelBtn">Cancel</button>
+            <span class="rl-easa-bookmarks-saveform-status" id="rlEasaBookmarksSaveStatus"></span>
+          </div>
+        </form>
+      </div>
+
+      <!-- HIGHLIGHTS MODE — flat list grouped by rule -->
+      <div class="rl-easa-bookmarks-pane rl-easa-bookmarks-pane--highlights" id="rlEasaBookmarksHighlightsPane" hidden>
+        <div class="rl-easa-bookmarks-listpane">
+          <div class="rl-easa-bookmarks-listpane-head">All highlights</div>
+          <div class="rl-easa-bookmarks-list" id="rlEasaBookmarksHighlightsList"></div>
+          <div class="rl-easa-bookmarks-empty" id="rlEasaBookmarksHighlightsEmpty" hidden>
+            No highlights yet. Select text in a rule and click the <strong>Highlight</strong> button.
+          </div>
         </div>
       </div>
     </div>
@@ -4969,6 +5556,1217 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       editorMeta.textContent = (editor.value || '').length.toLocaleString() + ' chars';
     });
   })();
+
+  /* ════════════════════════════════════════════════════════════════════════════
+     Per-user bookmarks & highlights.
+
+     All UI lives below as additive code. The integration with the existing
+     tree detail panel is done via a MutationObserver watching for
+     `data-loaded-uid` attribute changes on `.rl-easa-inline-detail` elements;
+     no tree handler is modified.
+
+     State is kept in two small in-memory caches:
+       rlEasaBookmarksState  — modal-related state (loaded categories, mode)
+       rlEasaHighlightsState — id allocator for newly-saved highlights so they
+                               can be removed without a full re-render
+
+     All API calls are gated by a `rlEasaBookmarksEnabled` flag set by the
+     bookmarks_status probe at boot. When false (no migration / signed out)
+     the action row + modal stay hidden and the tree is unaffected.
+     ════════════════════════════════════════════════════════════════════════════ */
+  var rlEasaBookmarksEnabled = false;
+  var rlEasaBookmarksState = {
+    categories: [],
+    selectedCategoryId: -1,
+    selectedKind: 'all',
+    mode: 'list',
+    saveContext: null
+  };
+  var rlEasaHighlightUidSeq = 0;
+
+  function rlEasaCurrentTreeBatchId() {
+    var sel = document.getElementById('rlEasaTreeBatch');
+    if (!sel) return 0;
+    var v = parseInt(String(sel.value || ''), 10);
+    return v > 0 ? v : 0;
+  }
+
+  /* ─── Bootstrap: ask the server whether the feature is wired up ─── */
+  function rlEasaBookmarksBoot() {
+    fetch(api + '?action=bookmarks_status', { credentials: 'same-origin' })
+      .then(rlEasaParseJsonResponse)
+      .then(function (j) {
+        if (!j || !j.ok || !j.enabled) {
+          rlEasaBookmarksEnabled = false;
+          return;
+        }
+        rlEasaBookmarksEnabled = true;
+        var headBtn = document.getElementById('rlEasaBookmarksOpenBtn');
+        if (headBtn) headBtn.hidden = false;
+        rlEasaBookmarksRefreshCategoriesSilently();
+      })
+      .catch(function () {
+        rlEasaBookmarksEnabled = false;
+      });
+  }
+
+  function rlEasaBookmarksRefreshCategoriesSilently() {
+    if (!rlEasaBookmarksEnabled) return Promise.resolve();
+    return fetch(api + '?action=bookmark_categories_list', { credentials: 'same-origin' })
+      .then(rlEasaParseJsonResponse)
+      .then(function (j) {
+        if (j && j.ok && Array.isArray(j.categories)) {
+          rlEasaBookmarksState.categories = j.categories;
+        }
+      })
+      .catch(function () { /* ignore */ });
+  }
+
+  /* ─── Modal open/close + mode switching ─── */
+  function rlEasaBookmarksCloseModal() {
+    var m = document.getElementById('rlEasaBookmarksModal');
+    if (m) m.hidden = true;
+  }
+
+  function rlEasaBookmarksOpenList() {
+    if (!rlEasaBookmarksEnabled) return;
+    rlEasaBookmarksState.mode = 'list';
+    var m = document.getElementById('rlEasaBookmarksModal');
+    if (!m) return;
+    m.hidden = false;
+    rlEasaBookmarksShowPane('list');
+    rlEasaBookmarksRefreshCategoriesAndList();
+  }
+
+  function rlEasaBookmarksOpenSave(ctx) {
+    if (!rlEasaBookmarksEnabled) return;
+    rlEasaBookmarksState.mode = 'save';
+    rlEasaBookmarksState.saveContext = ctx;
+    var m = document.getElementById('rlEasaBookmarksModal');
+    if (!m) return;
+    m.hidden = false;
+    rlEasaBookmarksShowPane('save');
+
+    var titleEl = document.getElementById('rlEasaBookmarksSaveTitle');
+    var crumbEl = document.getElementById('rlEasaBookmarksSaveCrumb');
+    var noteEl  = document.getElementById('rlEasaBookmarksSaveNote');
+    var statusEl = document.getElementById('rlEasaBookmarksSaveStatus');
+    if (titleEl) titleEl.textContent = ctx.title || ('Node ' + (ctx.node_uid || ''));
+    if (crumbEl) crumbEl.textContent = ctx.breadcrumb || '';
+    if (noteEl) noteEl.value = ctx.existingAnnotation || '';
+    if (statusEl) {
+      statusEl.textContent = '';
+      statusEl.className = 'rl-easa-bookmarks-saveform-status';
+    }
+    var btn = document.getElementById('rlEasaBookmarksSaveBtn');
+    if (btn) btn.textContent = ctx.existingId ? 'Update bookmark' : 'Save bookmark';
+
+    rlEasaBookmarksRefreshCategoriesSilently().then(function () {
+      rlEasaBookmarksRenderCategorySelect(ctx.existingCategoryId || null);
+    });
+  }
+
+  function rlEasaBookmarksShowPane(mode) {
+    var list = document.getElementById('rlEasaBookmarksListPane');
+    var save = document.getElementById('rlEasaBookmarksSavePane');
+    var hl   = document.getElementById('rlEasaBookmarksHighlightsPane');
+    var tabBookmarks = document.getElementById('rlEasaBookmarksTabBookmarks');
+    var tabHighlights = document.getElementById('rlEasaBookmarksTabHighlights');
+    var titleEl = document.getElementById('rlEasaBookmarksModalTitle');
+
+    if (list) list.hidden = mode !== 'list';
+    if (save) save.hidden = mode !== 'save';
+    if (hl)   hl.hidden   = mode !== 'highlights';
+
+    if (mode === 'save') {
+      if (tabBookmarks) tabBookmarks.classList.remove('is-active');
+      if (tabHighlights) tabHighlights.classList.remove('is-active');
+      if (titleEl) titleEl.textContent = 'Add Bookmark';
+    } else if (mode === 'highlights') {
+      if (tabBookmarks) { tabBookmarks.classList.remove('is-active'); tabBookmarks.setAttribute('aria-selected', 'false'); }
+      if (tabHighlights) { tabHighlights.classList.add('is-active'); tabHighlights.setAttribute('aria-selected', 'true'); }
+      if (titleEl) titleEl.textContent = 'My Highlights';
+      rlEasaBookmarksLoadHighlightsTab();
+    } else {
+      if (tabBookmarks) { tabBookmarks.classList.add('is-active'); tabBookmarks.setAttribute('aria-selected', 'true'); }
+      if (tabHighlights) { tabHighlights.classList.remove('is-active'); tabHighlights.setAttribute('aria-selected', 'false'); }
+      if (titleEl) titleEl.textContent = 'My Bookmarks';
+    }
+  }
+
+  /* ─── List mode rendering ─── */
+  function rlEasaBookmarksRefreshCategoriesAndList() {
+    return rlEasaBookmarksRefreshCategoriesSilently().then(function () {
+      rlEasaBookmarksRenderCategorySidebar();
+      rlEasaBookmarksLoadCurrentList();
+    });
+  }
+
+  function rlEasaBookmarksRenderCategorySidebar() {
+    var ul = document.getElementById('rlEasaBookmarksCatList');
+    if (!ul) return;
+    ul.innerHTML = '';
+    var cats = rlEasaBookmarksState.categories || [];
+    var selectedId = rlEasaBookmarksState.selectedCategoryId;
+
+    var entries = [{ id: -1, name: 'All bookmarks', count: cats.reduce(function (a, c) { return a + (c.bookmark_count || 0); }, 0), special: 'all' }];
+    cats.forEach(function (c) {
+      entries.push({ id: parseInt(c.id, 10) || 0, name: c.name, count: c.bookmark_count || 0 });
+    });
+    entries.push({ id: 0, name: 'Uncategorized', count: -1, special: 'uncat' });
+
+    entries.forEach(function (e) {
+      var li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      if (e.id === selectedId || (selectedId === -1 && e.id === -1)) li.classList.add('is-active');
+      var label = document.createElement('span');
+      label.className = 'rl-easa-bookmarks-cat-label';
+      label.textContent = e.name;
+      li.appendChild(label);
+
+      if (e.count >= 0) {
+        var count = document.createElement('span');
+        count.className = 'rl-easa-bookmarks-cat-count';
+        count.textContent = String(e.count);
+        li.appendChild(count);
+      }
+
+      li.addEventListener('click', function (ev) {
+        if (ev && ev.target && ev.target.matches('.rl-easa-bookmarks-cat-mini-btn')) return;
+        rlEasaBookmarksState.selectedCategoryId = e.id;
+        rlEasaBookmarksRenderCategorySidebar();
+        rlEasaBookmarksLoadCurrentList();
+      });
+
+      if (!e.special) {
+        var actions = document.createElement('span');
+        actions.className = 'rl-easa-bookmarks-cat-actions';
+        var renBtn = document.createElement('button');
+        renBtn.type = 'button';
+        renBtn.className = 'rl-easa-bookmarks-cat-mini-btn';
+        renBtn.textContent = 'rename';
+        renBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          var newName = window.prompt('Rename category', e.name);
+          if (newName == null) return;
+          newName = String(newName).trim();
+          if (!newName || newName === e.name) return;
+          fetch(api + '?action=bookmark_category_rename', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: e.id, name: newName })
+          }).then(rlEasaParseJsonResponse).then(function (j) {
+            if (!j.ok) throw new Error(j.error || 'Rename failed');
+            rlEasaBookmarksRefreshCategoriesAndList();
+          }).catch(function (err) {
+            alert(err.message || 'Rename failed');
+          });
+        });
+        var delBtn = document.createElement('button');
+        delBtn.type = 'button';
+        delBtn.className = 'rl-easa-bookmarks-cat-mini-btn';
+        delBtn.textContent = 'delete';
+        delBtn.addEventListener('click', function (ev) {
+          ev.stopPropagation();
+          if (!window.confirm('Delete category "' + e.name + '"? Bookmarks inside it will be moved to Uncategorized.')) return;
+          fetch(api + '?action=bookmark_category_delete', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: e.id })
+          }).then(rlEasaParseJsonResponse).then(function (j) {
+            if (!j.ok) throw new Error(j.error || 'Delete failed');
+            if (rlEasaBookmarksState.selectedCategoryId === e.id) rlEasaBookmarksState.selectedCategoryId = -1;
+            rlEasaBookmarksRefreshCategoriesAndList();
+          }).catch(function (err) {
+            alert(err.message || 'Delete failed');
+          });
+        });
+        actions.appendChild(renBtn);
+        actions.appendChild(delBtn);
+        li.appendChild(actions);
+      }
+
+      ul.appendChild(li);
+    });
+  }
+
+  function rlEasaBookmarksLoadCurrentList() {
+    var listEl = document.getElementById('rlEasaBookmarksList');
+    var emptyEl = document.getElementById('rlEasaBookmarksListEmpty');
+    var headEl = document.getElementById('rlEasaBookmarksListHead');
+    if (!listEl) return;
+    listEl.innerHTML = '<p class="rl-easa-bookmarks-empty" style="padding:20px;">Loading…</p>';
+    if (emptyEl) emptyEl.hidden = true;
+
+    var sel = rlEasaBookmarksState.selectedCategoryId;
+    var qs = '';
+    if (sel === 0) qs = '&category_id=0';
+    else if (sel > 0) qs = '&category_id=' + sel;
+
+    if (headEl) {
+      if (sel === -1) headEl.textContent = 'All bookmarks';
+      else if (sel === 0) headEl.textContent = 'Uncategorized bookmarks';
+      else {
+        var c = rlEasaBookmarksState.categories.find(function (x) { return x.id === sel; });
+        headEl.textContent = c ? c.name : 'Bookmarks';
+      }
+    }
+
+    fetch(api + '?action=bookmarks_list' + qs, { credentials: 'same-origin' })
+      .then(rlEasaParseJsonResponse)
+      .then(function (j) {
+        if (!j.ok) throw new Error(j.error || 'Load failed');
+        var bms = Array.isArray(j.bookmarks) ? j.bookmarks : [];
+        rlEasaBookmarksRenderBookmarkList(bms, listEl, emptyEl);
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<p class="rl-easa-bookmarks-empty" style="padding:20px;color:#b91c1c;">' + esc(err.message || 'Failed to load') + '</p>';
+      });
+  }
+
+  function rlEasaBookmarksRenderBookmarkList(rows, listEl, emptyEl) {
+    listEl.innerHTML = '';
+    if (!rows.length) {
+      if (emptyEl) emptyEl.hidden = false;
+      return;
+    }
+    if (emptyEl) emptyEl.hidden = true;
+    rows.forEach(function (b) {
+      var row = document.createElement('div');
+      row.className = 'rl-easa-bookmarks-row';
+      var title = document.createElement('div');
+      title.className = 'rl-easa-bookmarks-row-title';
+      title.textContent = b.title_snapshot || b.erules_id_snapshot || ('Node ' + b.node_uid);
+      row.appendChild(title);
+      if (b.breadcrumb_snapshot) {
+        var crumb = document.createElement('div');
+        crumb.className = 'rl-easa-bookmarks-row-crumb';
+        crumb.textContent = b.breadcrumb_snapshot;
+        row.appendChild(crumb);
+      }
+      if (b.annotation) {
+        var note = document.createElement('div');
+        note.className = 'rl-easa-bookmarks-row-note';
+        note.textContent = b.annotation;
+        row.appendChild(note);
+      }
+      var actions = document.createElement('div');
+      actions.className = 'rl-easa-bookmarks-row-actions';
+      var openBtn = document.createElement('button');
+      openBtn.type = 'button';
+      openBtn.className = 'btn btn-sm';
+      openBtn.textContent = 'Open in tree';
+      openBtn.addEventListener('click', function () {
+        rlEasaBookmarksCloseModal();
+        var treeSec = document.getElementById('rlEasaTreeSection');
+        if (treeSec && treeSec.scrollIntoView) treeSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        var prom = rlEasaRevealTreeNode(b.batch_id, b.node_uid, '');
+        if (prom && typeof prom.catch === 'function') {
+          prom.catch(function (err) {
+            alert((err && err.message) || 'Could not open that node.');
+          });
+        }
+      });
+      var editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = 'btn btn-sm';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', function () {
+        rlEasaBookmarksOpenSave({
+          batch_id: b.batch_id,
+          node_uid: b.node_uid,
+          title: b.title_snapshot || b.erules_id_snapshot || '',
+          breadcrumb: b.breadcrumb_snapshot || '',
+          existingId: b.id,
+          existingCategoryId: b.category_id || null,
+          existingAnnotation: b.annotation || ''
+        });
+      });
+      var delBtn = document.createElement('button');
+      delBtn.type = 'button';
+      delBtn.className = 'btn btn-sm rl-easa-bookmarks-row-delete';
+      delBtn.textContent = 'Delete';
+      delBtn.addEventListener('click', function () {
+        if (!window.confirm('Delete this bookmark?')) return;
+        fetch(api + '?action=bookmark_delete', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: b.id })
+        }).then(rlEasaParseJsonResponse).then(function (j) {
+          if (!j.ok) throw new Error(j.error || 'Delete failed');
+          rlEasaBookmarksRefreshCategoriesAndList();
+          rlEasaUpdateBookmarkButtonForActive();
+        }).catch(function (err) {
+          alert(err.message || 'Delete failed');
+        });
+      });
+      actions.appendChild(openBtn);
+      actions.appendChild(editBtn);
+      actions.appendChild(delBtn);
+      row.appendChild(actions);
+      listEl.appendChild(row);
+    });
+  }
+
+  /* ─── Save mode: category dropdown ─── */
+  function rlEasaBookmarksRenderCategorySelect(selectedId) {
+    var sel = document.getElementById('rlEasaBookmarksSaveCategory');
+    if (!sel) return;
+    sel.innerHTML = '';
+    var optNone = document.createElement('option');
+    optNone.value = '';
+    optNone.textContent = '— Uncategorized —';
+    sel.appendChild(optNone);
+    (rlEasaBookmarksState.categories || []).forEach(function (c) {
+      var opt = document.createElement('option');
+      opt.value = String(c.id);
+      opt.textContent = c.name;
+      if (selectedId && c.id === selectedId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    if (!selectedId) sel.value = '';
+  }
+
+  /* ─── Inline category creation (used by both list and save panes) ─── */
+  function rlEasaBookmarksCreateCategory(name, onSuccess, errEl) {
+    name = (name || '').trim();
+    if (!name) {
+      if (errEl) { errEl.textContent = 'Name is required.'; errEl.hidden = false; }
+      return;
+    }
+    if (errEl) errEl.hidden = true;
+    fetch(api + '?action=bookmark_category_create', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name })
+    }).then(rlEasaParseJsonResponse).then(function (j) {
+      if (!j.ok) {
+        var msg = 'Could not create category.';
+        if (j.error === 'duplicate_name') msg = 'A category with that name already exists.';
+        else if (j.error === 'name_required') msg = 'Name is required.';
+        throw new Error(msg);
+      }
+      var newId = parseInt(j.id, 10) || 0;
+      rlEasaBookmarksRefreshCategoriesSilently().then(function () {
+        if (onSuccess) onSuccess(newId);
+      });
+    }).catch(function (err) {
+      if (errEl) { errEl.textContent = err.message || 'Could not create category.'; errEl.hidden = false; }
+      else alert(err.message || 'Could not create category.');
+    });
+  }
+
+  /* ─── Highlights tab in modal ─── */
+  function rlEasaBookmarksLoadHighlightsTab() {
+    var listEl = document.getElementById('rlEasaBookmarksHighlightsList');
+    var emptyEl = document.getElementById('rlEasaBookmarksHighlightsEmpty');
+    if (!listEl) return;
+    listEl.innerHTML = '<p class="rl-easa-bookmarks-empty" style="padding:20px;">Loading…</p>';
+    if (emptyEl) emptyEl.hidden = true;
+    fetch(api + '?action=highlights_list_all', { credentials: 'same-origin' })
+      .then(rlEasaParseJsonResponse)
+      .then(function (j) {
+        if (!j.ok) throw new Error(j.error || 'Load failed');
+        var rows = Array.isArray(j.highlights) ? j.highlights : [];
+        listEl.innerHTML = '';
+        if (!rows.length) {
+          if (emptyEl) emptyEl.hidden = false;
+          return;
+        }
+        rows.forEach(function (h) {
+          var row = document.createElement('div');
+          row.className = 'rl-easa-bookmarks-row';
+          var title = document.createElement('div');
+          title.className = 'rl-easa-bookmarks-row-title';
+          title.textContent = h.title_snapshot || h.erules_id_snapshot || ('Node ' + h.node_uid);
+          row.appendChild(title);
+          if (h.breadcrumb_snapshot) {
+            var crumb = document.createElement('div');
+            crumb.className = 'rl-easa-bookmarks-row-crumb';
+            crumb.textContent = h.breadcrumb_snapshot;
+            row.appendChild(crumb);
+          }
+          var sel = (h.selection && typeof h.selection === 'object') ? h.selection : {};
+          if (sel.text) {
+            var snip = document.createElement('div');
+            snip.className = 'rl-easa-bookmarks-row-snippet';
+            snip.textContent = '\u201C' + sel.text + '\u201D';
+            row.appendChild(snip);
+          }
+          if (h.annotation) {
+            var note = document.createElement('div');
+            note.className = 'rl-easa-bookmarks-row-note';
+            note.textContent = h.annotation;
+            row.appendChild(note);
+          }
+          var actions = document.createElement('div');
+          actions.className = 'rl-easa-bookmarks-row-actions';
+          var openBtn = document.createElement('button');
+          openBtn.type = 'button';
+          openBtn.className = 'btn btn-sm';
+          openBtn.textContent = 'Open in tree';
+          openBtn.addEventListener('click', function () {
+            rlEasaBookmarksCloseModal();
+            var treeSec = document.getElementById('rlEasaTreeSection');
+            if (treeSec && treeSec.scrollIntoView) treeSec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            var prom = rlEasaRevealTreeNode(h.batch_id, h.node_uid, sel.text || '');
+            if (prom && typeof prom.catch === 'function') prom.catch(function () {});
+          });
+          var delBtn = document.createElement('button');
+          delBtn.type = 'button';
+          delBtn.className = 'btn btn-sm rl-easa-bookmarks-row-delete';
+          delBtn.textContent = 'Delete';
+          delBtn.addEventListener('click', function () {
+            if (!window.confirm('Delete this highlight?')) return;
+            fetch(api + '?action=highlight_delete', {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: h.id })
+            }).then(rlEasaParseJsonResponse).then(function (j2) {
+              if (!j2.ok) throw new Error(j2.error || 'Delete failed');
+              rlEasaBookmarksLoadHighlightsTab();
+              rlEasaRefreshHighlightsForActive();
+            }).catch(function (err) {
+              alert(err.message || 'Delete failed');
+            });
+          });
+          actions.appendChild(openBtn);
+          actions.appendChild(delBtn);
+          row.appendChild(actions);
+          listEl.appendChild(row);
+        });
+      })
+      .catch(function (err) {
+        listEl.innerHTML = '<p class="rl-easa-bookmarks-empty" style="padding:20px;color:#b91c1c;">' + esc(err.message || 'Failed to load') + '</p>';
+      });
+  }
+
+  /* ─── Bind the modal's static handlers exactly once ─── */
+  (function bindBookmarksModal() {
+    var openBtn = document.getElementById('rlEasaBookmarksOpenBtn');
+    if (openBtn) openBtn.addEventListener('click', rlEasaBookmarksOpenList);
+
+    var closeBtn = document.getElementById('rlEasaBookmarksModalClose');
+    if (closeBtn) closeBtn.addEventListener('click', rlEasaBookmarksCloseModal);
+
+    var modal = document.getElementById('rlEasaBookmarksModal');
+    if (modal) {
+      modal.addEventListener('click', function (e) {
+        if (e.target === modal) rlEasaBookmarksCloseModal();
+      });
+    }
+
+    var tabBookmarks = document.getElementById('rlEasaBookmarksTabBookmarks');
+    var tabHighlights = document.getElementById('rlEasaBookmarksTabHighlights');
+    if (tabBookmarks) {
+      tabBookmarks.addEventListener('click', function () {
+        rlEasaBookmarksState.mode = 'list';
+        rlEasaBookmarksShowPane('list');
+        rlEasaBookmarksRefreshCategoriesAndList();
+      });
+    }
+    if (tabHighlights) {
+      tabHighlights.addEventListener('click', function () {
+        rlEasaBookmarksState.mode = 'highlights';
+        rlEasaBookmarksShowPane('highlights');
+      });
+    }
+
+    /* Sidebar: + New category */
+    var catAddBtn = document.getElementById('rlEasaBookmarksCatAddBtn');
+    var catForm = document.getElementById('rlEasaBookmarksCatForm');
+    var catInput = document.getElementById('rlEasaBookmarksCatInput');
+    var catCancel = document.getElementById('rlEasaBookmarksCatCancelBtn');
+    var catErr = document.getElementById('rlEasaBookmarksCatErr');
+    if (catAddBtn && catForm && catInput) {
+      catAddBtn.addEventListener('click', function () {
+        catAddBtn.hidden = true;
+        catForm.hidden = false;
+        if (catErr) catErr.hidden = true;
+        catInput.value = '';
+        catInput.focus();
+      });
+      catForm.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        rlEasaBookmarksCreateCategory(catInput.value, function () {
+          catForm.hidden = true;
+          catAddBtn.hidden = false;
+          rlEasaBookmarksRenderCategorySidebar();
+        }, catErr);
+      });
+      if (catCancel) {
+        catCancel.addEventListener('click', function () {
+          catForm.hidden = true;
+          catAddBtn.hidden = false;
+        });
+      }
+    }
+
+    /* Save pane handlers */
+    var newCatBtn = document.getElementById('rlEasaBookmarksSaveNewCatBtn');
+    var newCatWrap = document.getElementById('rlEasaBookmarksSaveNewCatWrap');
+    var newCatInput = document.getElementById('rlEasaBookmarksSaveNewCatInput');
+    var newCatSave = document.getElementById('rlEasaBookmarksSaveNewCatSave');
+    var newCatCancel = document.getElementById('rlEasaBookmarksSaveNewCatCancel');
+    var newCatErr = document.getElementById('rlEasaBookmarksSaveNewCatErr');
+    if (newCatBtn && newCatWrap) {
+      newCatBtn.addEventListener('click', function () {
+        newCatWrap.hidden = false;
+        if (newCatErr) newCatErr.hidden = true;
+        if (newCatInput) { newCatInput.value = ''; newCatInput.focus(); }
+      });
+    }
+    if (newCatCancel) {
+      newCatCancel.addEventListener('click', function () {
+        if (newCatWrap) newCatWrap.hidden = true;
+      });
+    }
+    if (newCatSave) {
+      newCatSave.addEventListener('click', function () {
+        rlEasaBookmarksCreateCategory(newCatInput.value, function (newId) {
+          if (newCatWrap) newCatWrap.hidden = true;
+          rlEasaBookmarksRenderCategorySelect(newId);
+        }, newCatErr);
+      });
+    }
+
+    var saveForm = document.getElementById('rlEasaBookmarksSaveForm');
+    var cancelBtn = document.getElementById('rlEasaBookmarksSaveCancelBtn');
+    var noteEl = document.getElementById('rlEasaBookmarksSaveNote');
+    var catSel = document.getElementById('rlEasaBookmarksSaveCategory');
+    var statusEl = document.getElementById('rlEasaBookmarksSaveStatus');
+    if (cancelBtn) cancelBtn.addEventListener('click', rlEasaBookmarksCloseModal);
+    if (saveForm) {
+      saveForm.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        var ctx = rlEasaBookmarksState.saveContext;
+        if (!ctx) return;
+        var categoryId = catSel ? (parseInt(catSel.value, 10) || null) : null;
+        var annotation = noteEl ? noteEl.value : '';
+        if (statusEl) {
+          statusEl.textContent = 'Saving…';
+          statusEl.className = 'rl-easa-bookmarks-saveform-status';
+        }
+        fetch(api + '?action=bookmark_save', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            batch_id: ctx.batch_id,
+            node_uid: ctx.node_uid,
+            category_id: categoryId,
+            annotation: annotation
+          })
+        }).then(rlEasaParseJsonResponse).then(function (j) {
+          if (!j.ok) throw new Error(j.error || 'Save failed');
+          if (statusEl) {
+            statusEl.textContent = j.created ? 'Bookmark saved.' : 'Bookmark updated.';
+            statusEl.className = 'rl-easa-bookmarks-saveform-status is-success';
+          }
+          rlEasaUpdateBookmarkButtonForActive();
+          window.setTimeout(rlEasaBookmarksCloseModal, 600);
+        }).catch(function (err) {
+          if (statusEl) {
+            statusEl.textContent = err.message || 'Save failed';
+            statusEl.className = 'rl-easa-bookmarks-saveform-status is-error';
+          }
+        });
+      });
+    }
+  })();
+
+  /* ════════════════════════════════════════════════════════════════════════════
+     Rule-panel integration — additive only, no tree code touched.
+
+     When `data-loaded-uid` flips to a non-empty value on a `.rl-easa-inline-detail`,
+     the rule detail just rendered. We:
+       (a) prepend an action row (Bookmark + Highlight buttons) to the detail-inner.
+       (b) fetch user highlights for that (batch, node) and wrap them in <mark>s.
+       (c) install a selection listener on the inline body to keep the Highlight
+           button's label in sync with what the user has selected.
+     If the feature is disabled (signed out / no migration), we do nothing.
+     ════════════════════════════════════════════════════════════════════════════ */
+
+  var rlEasaActiveRuleCtx = null; /** { wrap, body, batchId, nodeUid, title, breadcrumb } */
+
+  function rlEasaInjectRuleActionRow(detailWrap, batchId, nodeUid) {
+    if (!rlEasaBookmarksEnabled || !detailWrap) return;
+    var inner = detailWrap.querySelector(':scope > .rl-easa-inline-detail-inner');
+    if (!inner) return;
+    /** Only inject once per panel; refresh in place if already present. */
+    var actionsRow = inner.querySelector(':scope > .rl-easa-rule-actions');
+    if (!actionsRow) {
+      actionsRow = document.createElement('div');
+      actionsRow.className = 'rl-easa-rule-actions';
+
+      var bmBtn = document.createElement('button');
+      bmBtn.type = 'button';
+      bmBtn.className = 'rl-easa-rule-actions-btn rl-easa-rule-actions-btn--bookmark';
+      bmBtn.dataset.role = 'bookmark';
+      bmBtn.innerHTML = '<span class="rl-easa-rule-actions-btn-icon">&#9733;</span><span data-role="label">Bookmark</span>';
+      actionsRow.appendChild(bmBtn);
+
+      var hlBtn = document.createElement('button');
+      hlBtn.type = 'button';
+      hlBtn.className = 'rl-easa-rule-actions-btn rl-easa-rule-actions-btn--highlight';
+      hlBtn.dataset.role = 'highlight';
+      hlBtn.disabled = true;
+      hlBtn.innerHTML = '<span class="rl-easa-rule-actions-btn-icon">&#9999;&#65039;</span><span data-role="label">Highlight</span>';
+      actionsRow.appendChild(hlBtn);
+
+      var spacer = document.createElement('span');
+      spacer.className = 'rl-easa-rule-actions-spacer';
+      actionsRow.appendChild(spacer);
+
+      var status = document.createElement('span');
+      status.className = 'rl-easa-rule-actions-status';
+      status.dataset.role = 'status';
+      actionsRow.appendChild(status);
+
+      /** Inject just before the inline body so it sits under the band/meta. */
+      var body = inner.querySelector(':scope > .rl-easa-inline-body');
+      if (body) inner.insertBefore(actionsRow, body);
+      else inner.appendChild(actionsRow);
+
+      bmBtn.addEventListener('click', function () { rlEasaHandleBookmarkClick(actionsRow); });
+      hlBtn.addEventListener('click', function () { rlEasaHandleHighlightClick(actionsRow); });
+    }
+
+    actionsRow.dataset.batchId = String(batchId);
+    actionsRow.dataset.nodeUid = String(nodeUid);
+
+    var body2 = inner.querySelector(':scope > .rl-easa-inline-body');
+    var band = inner.querySelector(':scope > .rl-easa-inline-band');
+    var titleText = band ? (band.querySelector('.rl-easa-band-crumb') ? band.firstChild.textContent : band.textContent).trim() : '';
+    var crumbText = '';
+    if (band) {
+      var crumbEl = band.querySelector('.rl-easa-band-crumb');
+      if (crumbEl) crumbText = crumbEl.textContent.trim();
+    }
+
+    rlEasaActiveRuleCtx = {
+      wrap: detailWrap,
+      body: body2,
+      actionsRow: actionsRow,
+      batchId: batchId,
+      nodeUid: nodeUid,
+      title: titleText,
+      breadcrumb: crumbText
+    };
+
+    rlEasaUpdateBookmarkButtonForActive();
+    rlEasaRefreshHighlightsForActive();
+
+    if (body2 && !body2.dataset.rlEasaHlBound) {
+      body2.dataset.rlEasaHlBound = '1';
+      var refreshHlBtn = function () { rlEasaUpdateHighlightButtonForActive(); };
+      body2.addEventListener('mouseup', refreshHlBtn);
+      body2.addEventListener('keyup', refreshHlBtn);
+      document.addEventListener('selectionchange', function () {
+        if (rlEasaActiveRuleCtx && rlEasaActiveRuleCtx.body === body2) {
+          rlEasaUpdateHighlightButtonForActive();
+        }
+      });
+    }
+  }
+
+  function rlEasaSetActionStatus(actionsRow, msg, cls) {
+    if (!actionsRow) return;
+    var status = actionsRow.querySelector('[data-role="status"]');
+    if (!status) return;
+    status.textContent = msg || '';
+    status.className = 'rl-easa-rule-actions-status' + (cls ? ' ' + cls : '');
+  }
+
+  /* ─── Bookmark button: open save modal pre-filled ─── */
+  function rlEasaHandleBookmarkClick(actionsRow) {
+    if (!rlEasaActiveRuleCtx) return;
+    rlEasaBookmarksOpenSave({
+      batch_id: rlEasaActiveRuleCtx.batchId,
+      node_uid: rlEasaActiveRuleCtx.nodeUid,
+      title: rlEasaActiveRuleCtx.title,
+      breadcrumb: rlEasaActiveRuleCtx.breadcrumb,
+      existingId: actionsRow.dataset.bmId ? parseInt(actionsRow.dataset.bmId, 10) : 0,
+      existingCategoryId: actionsRow.dataset.bmCategoryId ? parseInt(actionsRow.dataset.bmCategoryId, 10) : null,
+      existingAnnotation: actionsRow.dataset.bmAnnotation || ''
+    });
+  }
+
+  /** Re-query the bookmark for the active node so the button reflects saved state. */
+  function rlEasaUpdateBookmarkButtonForActive() {
+    if (!rlEasaActiveRuleCtx || !rlEasaBookmarksEnabled) return;
+    var ctx = rlEasaActiveRuleCtx;
+    var btn = ctx.actionsRow.querySelector('[data-role="bookmark"]');
+    if (!btn) return;
+    var label = btn.querySelector('[data-role="label"]');
+    /** Light-weight check: pull only bookmarks; filter by node. */
+    fetch(api + '?action=bookmarks_list', { credentials: 'same-origin' })
+      .then(rlEasaParseJsonResponse)
+      .then(function (j) {
+        if (!j.ok) return;
+        var match = (j.bookmarks || []).find(function (b) {
+          return b.batch_id === ctx.batchId && String(b.node_uid) === String(ctx.nodeUid);
+        });
+        if (match) {
+          btn.classList.add('is-saved');
+          if (label) label.textContent = 'Bookmarked';
+          ctx.actionsRow.dataset.bmId = String(match.id);
+          ctx.actionsRow.dataset.bmCategoryId = match.category_id ? String(match.category_id) : '';
+          ctx.actionsRow.dataset.bmAnnotation = match.annotation || '';
+        } else {
+          btn.classList.remove('is-saved');
+          if (label) label.textContent = 'Bookmark';
+          delete ctx.actionsRow.dataset.bmId;
+          delete ctx.actionsRow.dataset.bmCategoryId;
+          delete ctx.actionsRow.dataset.bmAnnotation;
+        }
+      })
+      .catch(function () { /* ignore */ });
+  }
+
+  /* ─── Highlight button selection-aware toggle ─── */
+  function rlEasaCurrentSelectionInBody(body) {
+    var sel = window.getSelection ? window.getSelection() : null;
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+    var rng = sel.getRangeAt(0);
+    if (!body.contains(rng.commonAncestorContainer)) return null;
+    return rng;
+  }
+
+  function rlEasaUpdateHighlightButtonForActive() {
+    if (!rlEasaActiveRuleCtx || !rlEasaBookmarksEnabled) return;
+    var ctx = rlEasaActiveRuleCtx;
+    var btn = ctx.actionsRow.querySelector('[data-role="highlight"]');
+    if (!btn || !ctx.body) return;
+    var label = btn.querySelector('[data-role="label"]');
+    var rng = rlEasaCurrentSelectionInBody(ctx.body);
+    if (!rng) {
+      btn.disabled = true;
+      btn.classList.remove('is-remove');
+      if (label) label.textContent = 'Highlight';
+      btn.title = 'Select text in the rule to highlight.';
+      return;
+    }
+    btn.disabled = false;
+    btn.title = '';
+    var rangeMarks = rlEasaCollectMarksInRange(rng);
+    if (rangeMarks.length > 0) {
+      btn.classList.add('is-remove');
+      if (label) label.textContent = 'Remove highlight';
+    } else {
+      btn.classList.remove('is-remove');
+      if (label) label.textContent = 'Highlight';
+    }
+  }
+
+  /** Find all `mark.rl-easa-user-mark` elements that intersect a Range. */
+  function rlEasaCollectMarksInRange(range) {
+    var out = [];
+    if (!range) return out;
+    var common = range.commonAncestorContainer;
+    var root = (common.nodeType === 1) ? common : common.parentNode;
+    if (!root) return out;
+    /** Walk an ancestor wide enough to cover both range ends. */
+    while (root && !range.intersectsNode) {
+      root = root.parentNode;
+    }
+    var marks;
+    try {
+      marks = root.querySelectorAll('mark.rl-easa-user-mark');
+    } catch (e) { return out; }
+    for (var i = 0; i < marks.length; i++) {
+      var m = marks[i];
+      try {
+        if (range.intersectsNode(m)) out.push(m);
+      } catch (e2) { /* ignore */ }
+    }
+    return out;
+  }
+
+  function rlEasaHandleHighlightClick(actionsRow) {
+    if (!rlEasaActiveRuleCtx) return;
+    var ctx = rlEasaActiveRuleCtx;
+    var btn = ctx.actionsRow.querySelector('[data-role="highlight"]');
+    var rng = rlEasaCurrentSelectionInBody(ctx.body);
+    if (!rng) return;
+    var existingMarks = rlEasaCollectMarksInRange(rng);
+    if (existingMarks.length > 0) {
+      /** Remove any highlight intersecting the selection. */
+      var ids = existingMarks.map(function (m) {
+        return parseInt(m.getAttribute('data-mark-id'), 10) || 0;
+      }).filter(function (n) { return n > 0; });
+      /** Dedupe (cross-node marks share an id). */
+      var uniq = Array.from(new Set(ids));
+      Promise.all(uniq.map(function (id) {
+        return fetch(api + '?action=highlight_delete', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: id })
+        }).then(rlEasaParseJsonResponse);
+      })).then(function () {
+        rlEasaRefreshHighlightsForActive();
+        rlEasaSetActionStatus(actionsRow, 'Highlight removed.', '');
+        window.setTimeout(function () { rlEasaSetActionStatus(actionsRow, '', ''); }, 1500);
+      }).catch(function (err) {
+        rlEasaSetActionStatus(actionsRow, err.message || 'Delete failed', 'is-error');
+      });
+      return;
+    }
+
+    /** Add a new highlight. Capture selection text + prefix/suffix context against the body's plain text. */
+    var bodyText = ctx.body.innerText || ctx.body.textContent || '';
+    var selText = String(rng.toString() || '').trim();
+    if (!selText) return;
+    /** Locate the selection inside bodyText with a simple containment check. */
+    var idx = bodyText.indexOf(selText);
+    if (idx < 0) {
+      /** Whitespace differences between Range.toString() and innerText can shift; fall back to a normalised search. */
+      var norm = selText.replace(/\s+/g, ' ');
+      var normBody = bodyText.replace(/\s+/g, ' ');
+      idx = normBody.indexOf(norm);
+      if (idx >= 0) {
+        /** Translate the normalised offset back — approximate, but good enough for context capture. */
+        idx = bodyText.indexOf(norm.slice(0, 12));
+      }
+    }
+    var prefix = '';
+    var suffix = '';
+    if (idx >= 0) {
+      var pStart = Math.max(0, idx - 30);
+      prefix = bodyText.substring(pStart, idx);
+      var sStart = idx + selText.length;
+      suffix = bodyText.substring(sStart, sStart + 30);
+    }
+    fetch(api + '?action=highlight_save', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        batch_id: ctx.batchId,
+        node_uid: ctx.nodeUid,
+        selection: { text: selText, prefix: prefix, suffix: suffix },
+        color_hex: '#fde68a'
+      })
+    }).then(rlEasaParseJsonResponse).then(function (j) {
+      if (!j.ok) throw new Error(j.error || 'Save failed');
+      rlEasaSetActionStatus(actionsRow, 'Highlight saved.', '');
+      window.setTimeout(function () { rlEasaSetActionStatus(actionsRow, '', ''); }, 1500);
+      rlEasaRefreshHighlightsForActive();
+      try { window.getSelection().removeAllRanges(); } catch (e) {}
+    }).catch(function (err) {
+      rlEasaSetActionStatus(actionsRow, err.message || 'Save failed', 'is-error');
+    });
+  }
+
+  /* ─── Fetch + apply highlights to the active rule body ─── */
+  function rlEasaRefreshHighlightsForActive() {
+    if (!rlEasaActiveRuleCtx || !rlEasaBookmarksEnabled) return;
+    var ctx = rlEasaActiveRuleCtx;
+    if (!ctx.body) return;
+    fetch(api + '?action=highlights_list'
+      + '&batch_id=' + encodeURIComponent(String(ctx.batchId))
+      + '&node_uid=' + encodeURIComponent(String(ctx.nodeUid)),
+      { credentials: 'same-origin' })
+      .then(rlEasaParseJsonResponse)
+      .then(function (j) {
+        if (!j.ok) return;
+        rlEasaApplyHighlightsToBody(ctx.body, Array.isArray(j.highlights) ? j.highlights : []);
+        rlEasaUpdateHighlightButtonForActive();
+      })
+      .catch(function () { /* ignore */ });
+  }
+
+  /**
+   * Walk text nodes in document order, build a plain-text index, then for each
+   * highlight find `prefix + text + suffix` (or fall back to `text` alone) and
+   * wrap the matched range in <mark> spans. Existing marks are unwrapped first
+   * so a re-render after a save/delete starts from a clean DOM.
+   */
+  function rlEasaApplyHighlightsToBody(body, highlights) {
+    if (!body) return;
+    rlEasaUnwrapAllUserMarks(body);
+    if (!highlights || !highlights.length) return;
+
+    highlights.forEach(function (h) {
+      var sel = (h && h.selection) || {};
+      var text = String(sel.text || '');
+      if (!text) return;
+      var prefix = String(sel.prefix || '');
+      var suffix = String(sel.suffix || '');
+      var color = String(h.color_hex || '#fde68a');
+      var id = parseInt(h.id, 10) || 0;
+      var ann = String(h.annotation || '');
+
+      var index = rlEasaBuildTextIndex(body);
+      if (!index.text) return;
+
+      var target = prefix + text + suffix;
+      var idx = index.text.indexOf(target);
+      var startInTarget = prefix.length;
+      var lenInTarget = text.length;
+      if (idx < 0) {
+        idx = index.text.indexOf(text);
+        if (idx < 0) return;
+        startInTarget = 0;
+      }
+      var start = idx + startInTarget;
+      var end = start + lenInTarget;
+      rlEasaWrapRangeInMark(index, start, end, id, color, ann);
+    });
+  }
+
+  function rlEasaUnwrapAllUserMarks(root) {
+    if (!root) return;
+    var marks = root.querySelectorAll('mark.rl-easa-user-mark');
+    for (var i = 0; i < marks.length; i++) {
+      var m = marks[i];
+      while (m.firstChild) m.parentNode.insertBefore(m.firstChild, m);
+      m.parentNode.removeChild(m);
+    }
+    /** Coalesce adjacent text nodes for a clean re-index. */
+    try { root.normalize(); } catch (e) { /* ignore */ }
+  }
+
+  /** Build a flat plain-text index with per-character text-node + offset mapping. */
+  function rlEasaBuildTextIndex(root) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var pieces = [];
+    var nodes = [];
+    var offsets = [];
+    var cursor = 0;
+    var n;
+    while ((n = walker.nextNode())) {
+      /** Skip text nodes inside script/style or any explicit no-highlight container. */
+      if (n.parentNode && (n.parentNode.tagName === 'SCRIPT' || n.parentNode.tagName === 'STYLE')) continue;
+      var v = n.nodeValue || '';
+      if (!v.length) continue;
+      pieces.push(v);
+      nodes.push(n);
+      offsets.push(cursor);
+      cursor += v.length;
+    }
+    return { text: pieces.join(''), nodes: nodes, offsets: offsets, lengths: pieces.map(function (p) { return p.length; }) };
+  }
+
+  /** Wrap [start, end) (in plain-text coordinates) with <mark>; cross-node by creating multiple marks with the same id. */
+  function rlEasaWrapRangeInMark(index, start, end, markId, color, annotation) {
+    if (start >= end) return;
+    /** Locate node containing start. */
+    var startNode = -1;
+    var endNode = -1;
+    for (var i = 0; i < index.nodes.length; i++) {
+      var s = index.offsets[i];
+      var e = s + index.lengths[i];
+      if (startNode === -1 && start >= s && start < e) startNode = i;
+      if (endNode === -1 && end > s && end <= e) endNode = i;
+      if (startNode !== -1 && endNode !== -1) break;
+    }
+    if (startNode === -1) return;
+    if (endNode === -1) endNode = index.nodes.length - 1;
+
+    /** If entire range fits inside one text node — single wrap, simple. */
+    if (startNode === endNode) {
+      var node = index.nodes[startNode];
+      var offS = start - index.offsets[startNode];
+      var offE = end - index.offsets[startNode];
+      var mid = node.splitText(offS);
+      mid.splitText(offE - offS);
+      rlEasaWrapTextNodeInMark(mid, markId, color, annotation);
+      return;
+    }
+
+    /** Cross-node: wrap suffix of first, all middle nodes, prefix of last. */
+    /** First node: keep the slice from offS to end-of-node. */
+    var firstNode = index.nodes[startNode];
+    var firstOffS = start - index.offsets[startNode];
+    var firstTail = firstNode.splitText(firstOffS);
+    rlEasaWrapTextNodeInMark(firstTail, markId, color, annotation);
+
+    /** Middle nodes: wrap whole. */
+    for (var k = startNode + 1; k < endNode; k++) {
+      rlEasaWrapTextNodeInMark(index.nodes[k], markId, color, annotation);
+    }
+
+    /** Last node: wrap slice [start-of-node, offE). */
+    var lastNode = index.nodes[endNode];
+    var lastOffE = end - index.offsets[endNode];
+    if (lastOffE > 0) {
+      lastNode.splitText(lastOffE);
+      rlEasaWrapTextNodeInMark(lastNode, markId, color, annotation);
+    }
+  }
+
+  function rlEasaWrapTextNodeInMark(node, markId, color, annotation) {
+    if (!node || !node.parentNode) return;
+    var mark = document.createElement('mark');
+    mark.className = 'rl-easa-user-mark' + (annotation ? ' is-noted' : '');
+    mark.setAttribute('data-mark-id', String(markId));
+    if (color) mark.style.background = color;
+    if (annotation) mark.title = annotation;
+    node.parentNode.insertBefore(mark, node);
+    mark.appendChild(node);
+    mark.addEventListener('click', function (ev) {
+      ev.stopPropagation();
+      rlEasaOpenMarkPopover(mark);
+    });
+  }
+
+  /* ─── Per-mark popover (Remove + Add/Edit note) ─── */
+  var rlEasaActivePopover = null;
+  function rlEasaCloseMarkPopover() {
+    if (rlEasaActivePopover && rlEasaActivePopover.parentNode) {
+      rlEasaActivePopover.parentNode.removeChild(rlEasaActivePopover);
+    }
+    rlEasaActivePopover = null;
+    var prev = document.querySelectorAll('mark.rl-easa-user-mark.is-focused');
+    for (var i = 0; i < prev.length; i++) prev[i].classList.remove('is-focused');
+  }
+  document.addEventListener('click', function (ev) {
+    if (!rlEasaActivePopover) return;
+    if (rlEasaActivePopover.contains(ev.target)) return;
+    if (ev.target.closest && ev.target.closest('mark.rl-easa-user-mark')) return;
+    rlEasaCloseMarkPopover();
+  });
+
+  function rlEasaOpenMarkPopover(markEl) {
+    rlEasaCloseMarkPopover();
+    if (!markEl) return;
+    var id = parseInt(markEl.getAttribute('data-mark-id'), 10) || 0;
+    if (!id) return;
+    /** Mark all siblings with the same id (cross-node) as focused. */
+    var siblings = document.querySelectorAll('mark.rl-easa-user-mark[data-mark-id="' + id + '"]');
+    for (var i = 0; i < siblings.length; i++) siblings[i].classList.add('is-focused');
+
+    var pop = document.createElement('div');
+    pop.className = 'rl-easa-user-mark-popover';
+
+    var existingNote = markEl.title || '';
+    var note = document.createElement('textarea');
+    note.placeholder = existingNote ? 'Edit note' : 'Add a note for this highlight';
+    note.value = existingNote;
+    pop.appendChild(note);
+
+    var row = document.createElement('div');
+    row.className = 'rl-easa-user-mark-popover-row';
+
+    var saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.className = 'rl-easa-user-mark-popover-btn';
+    saveBtn.textContent = existingNote ? 'Update note' : 'Save note';
+    saveBtn.addEventListener('click', function () {
+      fetch(api + '?action=highlight_update_note', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: id, annotation: note.value })
+      }).then(rlEasaParseJsonResponse).then(function (j) {
+        if (!j.ok) throw new Error(j.error || 'Save failed');
+        /** Update both the title attribute and the noted styling on every sibling. */
+        var noteStr = String(note.value || '').trim();
+        for (var k = 0; k < siblings.length; k++) {
+          if (noteStr) {
+            siblings[k].title = noteStr;
+            siblings[k].classList.add('is-noted');
+          } else {
+            siblings[k].removeAttribute('title');
+            siblings[k].classList.remove('is-noted');
+          }
+        }
+        rlEasaCloseMarkPopover();
+      }).catch(function (err) {
+        alert(err.message || 'Save failed');
+      });
+    });
+
+    var delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'rl-easa-user-mark-popover-btn is-danger';
+    delBtn.textContent = 'Remove highlight';
+    delBtn.addEventListener('click', function () {
+      fetch(api + '?action=highlight_delete', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: id })
+      }).then(rlEasaParseJsonResponse).then(function (j) {
+        if (!j.ok) throw new Error(j.error || 'Delete failed');
+        rlEasaCloseMarkPopover();
+        rlEasaRefreshHighlightsForActive();
+      }).catch(function (err) {
+        alert(err.message || 'Delete failed');
+      });
+    });
+
+    row.appendChild(saveBtn);
+    row.appendChild(delBtn);
+    pop.appendChild(row);
+
+    /** Position above the mark (or below if there's no room). */
+    document.body.appendChild(pop);
+    var rect = markEl.getBoundingClientRect();
+    var popH = pop.offsetHeight;
+    var top = window.scrollY + rect.top - popH - 8;
+    if (rect.top - popH - 8 < 8) {
+      top = window.scrollY + rect.bottom + 8;
+    }
+    pop.style.top = Math.max(8, top) + 'px';
+    pop.style.left = Math.max(8, window.scrollX + rect.left) + 'px';
+    rlEasaActivePopover = pop;
+    try { note.focus(); } catch (e) { /* ignore */ }
+  }
+
+  /* ════════════════════════════════════════════════════════════════════════════
+     MutationObserver — watches every `.rl-easa-inline-detail` for `data-loaded-uid`
+     changes (set by rlEasaShowNodeDetail after a successful fetch). This is the
+     entire integration point with the tree: we never call any tree function.
+     ════════════════════════════════════════════════════════════════════════════ */
+  (function bindTreeObserver() {
+    var mount = document.getElementById('rlEasaTreeMount');
+    if (!mount) return;
+    var observed = new WeakSet();
+
+    function attachObserverIfDetail(node) {
+      if (!node || node.nodeType !== 1) return;
+      if (node.matches && node.matches('.rl-easa-inline-detail') && !observed.has(node)) {
+        observed.add(node);
+        var attrObs = new MutationObserver(function () {
+          var uid = node.getAttribute('data-loaded-uid') || '';
+          if (uid === '' || node.hidden) return;
+          var batchId = rlEasaCurrentTreeBatchId();
+          if (!batchId) return;
+          rlEasaInjectRuleActionRow(node, batchId, uid);
+        });
+        attrObs.observe(node, { attributes: true, attributeFilter: ['data-loaded-uid', 'hidden'] });
+      }
+      if (node.querySelectorAll) {
+        var inner = node.querySelectorAll('.rl-easa-inline-detail');
+        for (var i = 0; i < inner.length; i++) attachObserverIfDetail(inner[i]);
+      }
+    }
+
+    /** Watch the tree mount for newly-added .rl-easa-inline-detail elements. */
+    var rootObs = new MutationObserver(function (records) {
+      for (var i = 0; i < records.length; i++) {
+        var rec = records[i];
+        for (var j = 0; j < rec.addedNodes.length; j++) {
+          attachObserverIfDetail(rec.addedNodes[j]);
+        }
+      }
+    });
+    rootObs.observe(mount, { childList: true, subtree: true });
+
+    /** Catch anything already in the DOM at boot. */
+    var existing = mount.querySelectorAll('.rl-easa-inline-detail');
+    for (var k = 0; k < existing.length; k++) attachObserverIfDetail(existing[k]);
+  })();
+
+  rlEasaBookmarksBoot();
 
   loadStatus();
 })();
