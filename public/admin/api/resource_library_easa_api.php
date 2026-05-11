@@ -1043,6 +1043,98 @@ if ($method === 'GET') {
         );
     }
 
+    /**
+     * GET ?action=ai_retrieval_probe&q=...&batch_id=N
+     * Diagnostic: runs the same needle expansion + ranking + canonical-bundle build that the chat uses,
+     * but returns the candidates JSON instead of calling OpenAI. Use to verify CPL/PPL/etc. rules are being matched.
+     */
+    if ($action === 'ai_retrieval_probe') {
+        if (!easa_erules_staging_tables_ok($pdo)) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql first']);
+        }
+        $probeQ = trim((string) ($_GET['q'] ?? ''));
+        if ($probeQ === '') {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'q (query) required']);
+        }
+        $probeBatch = (int) ($_GET['batch_id'] ?? 0);
+        $probeNeedles = rl_easa_compare_query_needles($probeQ);
+        $probeIntent = rl_easa_query_topic_filter($probeQ);
+        $probeBf = rl_easa_query_batch_filtering($pdo, $probeQ);
+        $probeBundle = rl_easa_build_compare_staging_bundle($pdo, $probeQ, $probeBatch);
+        $probeCanon = rl_easa_build_ai_canonical_regulatory_bundle($pdo, $probeQ, $probeBatch);
+        /** Per-needle row counts in the FCL batch only (when boost is active), to expose retrieval coverage. */
+        $boostFcl = $probeBf['boost_batch_ids'] ?? [];
+        $perNeedle = [];
+        foreach ($probeNeedles as $n) {
+            $m = rl_easa_search_match_clause($pdo, $n);
+            try {
+                if ($probeBatch > 0) {
+                    $sql = 'SELECT COUNT(*) FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND ' . $m['where'];
+                    $st = $pdo->prepare($sql);
+                    $st->execute(array_merge([$probeBatch], $m['bind']));
+                    $perNeedle[$n] = ['all' => (int) $st->fetchColumn()];
+                } elseif ($boostFcl !== []) {
+                    $sql = 'SELECT COUNT(*) FROM easa_erules_import_nodes_staging WHERE batch_id IN ('
+                        . implode(',', array_map('intval', $boostFcl)) . ') AND ' . $m['where'];
+                    $st = $pdo->prepare($sql);
+                    $st->execute($m['bind']);
+                    $perNeedle[$n] = ['in_fcl_batches' => (int) $st->fetchColumn()];
+                } else {
+                    $sql = 'SELECT COUNT(*) FROM easa_erules_import_nodes_staging WHERE ' . $m['where'];
+                    $st = $pdo->prepare($sql);
+                    $st->execute($m['bind']);
+                    $perNeedle[$n] = ['all' => (int) $st->fetchColumn()];
+                }
+            } catch (Throwable $e) {
+                $perNeedle[$n] = ['error' => $e->getMessage()];
+            }
+        }
+        /** Show whether the corpus actually contains canonical FCL.300-series CPL rows, regardless of needles. */
+        $cplCoverage = [];
+        try {
+            $sqlCov = "SELECT batch_id, node_uid, node_type, source_erules_id, title, breadcrumb
+                       FROM easa_erules_import_nodes_staging
+                       WHERE (COALESCE(source_erules_id, '') LIKE 'FCL.30%'
+                              OR COALESCE(source_erules_id, '') LIKE 'FCL.31%'
+                              OR COALESCE(source_erules_id, '') LIKE 'FCL.32%'
+                              OR COALESCE(title, '') LIKE '%Commercial Pilot%'
+                              OR COALESCE(breadcrumb, '') LIKE '%Commercial Pilot%')
+                       ORDER BY batch_id, source_erules_id, id
+                       LIMIT 40";
+            $cplCoverage = $pdo->query($sqlCov)->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable $e) {
+            $cplCoverage = ['error' => $e->getMessage()];
+        }
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'query' => $probeQ,
+            'batch_id' => $probeBatch,
+            'topic_intent' => $probeIntent,
+            'batch_filtering' => $probeBf,
+            'needles' => $probeNeedles,
+            'needle_row_counts' => $perNeedle,
+            'compare_summary' => $probeBundle['summary'] ?? '',
+            'compare_hit_count' => $probeBundle['hit_count'] ?? 0,
+            'compare_sources' => $probeBundle['sources'] ?? [],
+            'canonical_loaded_count' => is_array($probeCanon['full_nodes'] ?? null) ? count($probeCanon['full_nodes']) : 0,
+            'canonical_sources' => $probeCanon['sources'] ?? [],
+            'canonical_nodes_summary' => array_map(static function (array $fn): array {
+                $n = is_array($fn['node'] ?? null) ? $fn['node'] : [];
+                return [
+                    'batch_id' => $fn['batch_id'] ?? 0,
+                    'node_uid' => $fn['node_uid'] ?? '',
+                    'node_type' => (string) ($n['node_type'] ?? ''),
+                    'source_erules_id' => (string) ($n['source_erules_id'] ?? ''),
+                    'title' => (string) ($n['title'] ?? ''),
+                    'breadcrumb' => (string) ($n['breadcrumb'] ?? ''),
+                    'plain_text_len' => strlen((string) ($n['plain_text'] ?? '')),
+                    'has_structured_blocks' => is_array($n['structured_blocks'] ?? null) && !empty($n['structured_blocks']),
+                ];
+            }, is_array($probeCanon['full_nodes'] ?? null) ? $probeCanon['full_nodes'] : []),
+            'cpl_corpus_coverage' => $cplCoverage,
+        ]);
+    }
+
     // GET action=source_probe — diagnostic: ERulesId matches in batch source.xml (deploy must include this block).
     if ($action === 'source_probe') {
         if (!easa_erules_staging_tables_ok($pdo)) {
