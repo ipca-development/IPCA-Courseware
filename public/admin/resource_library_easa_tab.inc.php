@@ -1425,12 +1425,48 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     padding: 4px 10px;
     text-decoration: none;
     line-height: 1.25;
+    cursor: pointer;
+    font-family: inherit;
   }
   .rl-easa-maya-ecfr-chip:hover,
   .rl-easa-maya-ecfr-chip:focus {
     background: #bae6fd;
     color: #0c4a6e;
     text-decoration: none;
+    outline: none;
+  }
+  .rl-easa-maya-ecfr-chip:focus-visible {
+    box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.45);
+  }
+  .rl-easa-ecfr-body {
+    padding: 4px 14px 18px;
+    font-size: 13.5px;
+    line-height: 1.55;
+    color: #0f172a;
+  }
+  .rl-easa-ecfr-body h1,
+  .rl-easa-ecfr-body h2,
+  .rl-easa-ecfr-body h3,
+  .rl-easa-ecfr-body h4 {
+    margin: 16px 0 6px;
+    line-height: 1.3;
+  }
+  .rl-easa-ecfr-body h1 { font-size: 17px; }
+  .rl-easa-ecfr-body h2 { font-size: 15px; }
+  .rl-easa-ecfr-body h3 { font-size: 14px; }
+  .rl-easa-ecfr-body p,
+  .rl-easa-ecfr-body li {
+    margin: 6px 0;
+  }
+  .rl-easa-ecfr-body ol,
+  .rl-easa-ecfr-body ul {
+    padding-left: 22px;
+  }
+  .rl-easa-maya-ecfr-loading,
+  .rl-easa-maya-ecfr-empty {
+    color: #64748b;
+    font-size: 12.5px;
+    padding: 6px 14px;
   }
   .rl-easa-maya-ecfr-note {
     font-size: 11px;
@@ -1751,6 +1787,24 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   </div>
 </div>
 
+<div class="rl-easa-modal-overlay rl-easa-ai-excerpt-modal" id="rlEasaEcfrExcerptModal" hidden>
+  <div class="rl-easa-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rlEasaEcfrExcerptTitle">
+    <div class="rl-easa-modal-head">
+      <h2 id="rlEasaEcfrExcerptTitle">14 CFR excerpt</h2>
+      <button type="button" class="rl-easa-modal-close" id="rlEasaEcfrExcerptClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="rl-easa-modal-body">
+      <div class="rl-easa-maya-excerpt-wrap">
+        <div class="rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu" id="rlEasaEcfrExcerptBand">Loading…</div>
+        <div class="rl-panel-actions" style="margin:10px 12px 12px;">
+          <a id="rlEasaEcfrExcerptExternal" class="btn btn-sm" href="#" target="_blank" rel="noopener noreferrer">Open on eCFR.gov</a>
+        </div>
+        <div class="rl-easa-ai-excerpt-body rl-easa-detail-body rl-easa-ecfr-body" id="rlEasaEcfrExcerptBody"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="rl-easa-modal-overlay rl-easa-ai-excerpt-modal" id="rlEasaAiExcerptModal" hidden>
   <div class="rl-easa-modal-dialog" role="dialog" aria-modal="true" aria-labelledby="rlEasaAiExcerptTitle">
     <div class="rl-easa-modal-head">
@@ -2003,20 +2057,27 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         var section = String(s.section || '').trim();
         if (!section) return;
         var label = String(s.label || ('14 CFR §' + section));
-        var url = String(s.browse_url || '').trim();
-        var chip;
-        if (url) {
-          chip = document.createElement('a');
-          chip.href = url;
-          chip.target = '_blank';
-          chip.rel = 'noopener noreferrer';
-        } else {
-          chip = document.createElement('span');
-        }
+        /** Render as a button so click opens the in-app modal instead of leaving the chat;
+            the external eCFR.gov link is still available inside the modal as a backup. */
+        var chip = document.createElement('button');
+        chip.type = 'button';
         chip.className = 'rl-easa-maya-ecfr-chip';
         chip.textContent = label;
         var why = String(s.why || '').trim();
         if (why) chip.title = why;
+        var snapshot = String(s.snapshot || '').trim();
+        var browseUrl = String(s.browse_url || '').trim();
+        var preloadedHtml = (s && typeof s.html === 'string') ? s.html : '';
+        chip.addEventListener('click', function () {
+          rlEasaOpenEcfrModal({
+            title_number: title,
+            section: section,
+            snapshot: snapshot,
+            browse_url: browseUrl,
+            label: label,
+            html: preloadedHtml
+          });
+        });
         chipRow.appendChild(chip);
       });
       box.appendChild(chipRow);
@@ -2031,6 +2092,126 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
 
     host.appendChild(box);
   }
+
+  /**
+   * eCFR section modal (in-app excerpt viewer).
+   * If the chip was rendered from a LIVE assistant turn the section HTML is preloaded
+   * (no roundtrip); reloaded chats persist only the section metadata in response_json
+   * so we lazy-fetch via ?action=ai_ecfr_fetch_section. The modal also exposes a
+   * backup "Open on eCFR.gov" link in case the user wants the authoritative page.
+   */
+  function rlEasaCloseEcfrModal() {
+    var m = document.getElementById('rlEasaEcfrExcerptModal');
+    if (m) m.hidden = true;
+  }
+
+  function rlEasaOpenEcfrModal(src) {
+    var m = document.getElementById('rlEasaEcfrExcerptModal');
+    if (!m || !src) return;
+    var titleEl = document.getElementById('rlEasaEcfrExcerptTitle');
+    var bandEl = document.getElementById('rlEasaEcfrExcerptBand');
+    var bodyEl = document.getElementById('rlEasaEcfrExcerptBody');
+    var extEl = document.getElementById('rlEasaEcfrExcerptExternal');
+
+    var label = String(src.label || ('14 CFR §' + (src.section || '')));
+    var section = String(src.section || '').trim();
+    var titleNum = parseInt(String(src.title_number), 10) || 14;
+    var snapshot = String(src.snapshot || '').trim();
+    var browseUrl = String(src.browse_url || '').trim();
+    var preloaded = (src && typeof src.html === 'string') ? src.html : '';
+
+    if (titleEl) titleEl.textContent = label;
+    if (extEl) {
+      if (browseUrl) {
+        extEl.href = browseUrl;
+        extEl.hidden = false;
+      } else {
+        extEl.removeAttribute('href');
+        extEl.hidden = true;
+      }
+    }
+    if (bandEl) {
+      bandEl.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu';
+      bandEl.innerHTML = snapshot
+        ? ('Official excerpt · 14 CFR §' + esc(section) + ' · snapshot ' + esc(snapshot))
+        : ('Official excerpt · 14 CFR §' + esc(section));
+    }
+    if (bodyEl) bodyEl.innerHTML = '';
+
+    m.hidden = false;
+
+    var renderHtml = function (html) {
+      if (!bodyEl) return;
+      var safe = String(html || '').trim();
+      if (!safe) {
+        bodyEl.innerHTML = '<p class="rl-easa-maya-ecfr-empty">eCFR returned no text for this section.</p>';
+        return;
+      }
+      bodyEl.innerHTML = safe;
+    };
+    var renderError = function (msg) {
+      if (bandEl) {
+        bandEl.className = 'rl-easa-maya-excerpt-band rl-easa-inline-band rl-easa-band rl-easa-band-neu';
+        bandEl.textContent = String(msg || 'Could not load 14 CFR excerpt.');
+      }
+      if (bodyEl) {
+        bodyEl.innerHTML = '<p class="rl-easa-maya-ecfr-empty">' + esc(String(msg || '')) + '</p>';
+      }
+    };
+
+    if (preloaded) {
+      renderHtml(preloaded);
+      return;
+    }
+    if (!section) {
+      renderError('Missing 14 CFR section id.');
+      return;
+    }
+    if (bodyEl) {
+      bodyEl.innerHTML = '<p class="rl-easa-maya-ecfr-loading">Loading 14 CFR §' + esc(section) + '…</p>';
+    }
+    var url = api + '?action=ai_ecfr_fetch_section'
+      + '&title=' + encodeURIComponent(String(titleNum))
+      + '&section=' + encodeURIComponent(section)
+      + (snapshot ? ('&snapshot=' + encodeURIComponent(snapshot)) : '');
+    fetch(url, { credentials: 'same-origin' })
+      .then(rlEasaParseJsonResponse)
+      .then(function (j) {
+        if (!j || !j.ok) {
+          throw new Error((j && j.error) ? j.error : 'eCFR fetch failed.');
+        }
+        if (j.snapshot && bandEl) {
+          bandEl.innerHTML = 'Official excerpt · 14 CFR §' + esc(section) + ' · snapshot ' + esc(j.snapshot);
+        }
+        if (j.browse_url && extEl) {
+          extEl.href = String(j.browse_url);
+          extEl.hidden = false;
+        }
+        renderHtml(j.html);
+      })
+      .catch(function (e) {
+        renderError((e && e.message) || 'Could not load 14 CFR excerpt.');
+      });
+  }
+
+  (function bindEcfrExcerptModal() {
+    var cl = document.getElementById('rlEasaEcfrExcerptClose');
+    var m = document.getElementById('rlEasaEcfrExcerptModal');
+    if (cl) cl.addEventListener('click', rlEasaCloseEcfrModal);
+    if (m) {
+      m.addEventListener('click', function (e) {
+        if (e.target === m) rlEasaCloseEcfrModal();
+      });
+    }
+    /** ESC closes the eCFR modal; we re-use the same listener strategy as the EASA modal
+        but only act when the eCFR modal is the visible one. */
+    document.addEventListener('keydown', function (e) {
+      if (e && (e.key === 'Escape' || e.keyCode === 27)) {
+        var mm = document.getElementById('rlEasaEcfrExcerptModal');
+        if (mm && !mm.hidden) rlEasaCloseEcfrModal();
+      }
+    });
+  })();
 
   function rlEasaMayaRenderChips(host, refs) {
     if (!host || !Array.isArray(refs) || !refs.length) return;

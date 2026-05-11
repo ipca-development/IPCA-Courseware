@@ -1961,6 +1961,44 @@ if ($method === 'GET') {
         ]);
     }
 
+    /**
+     * GET ?action=ai_ecfr_fetch_section&title=14&section=61.103[&snapshot=YYYY-MM-DD]
+     * Lazy-fetch a single eCFR section for the in-chat modal. Used when the assistant
+     * row was reloaded from DB (where the per-section HTML was stripped to keep the
+     * row small). Returns: {ok, html, snapshot, browse_url, title_number, section}.
+     */
+    if ($action === 'ai_ecfr_fetch_section') {
+        $title = (int) ($_GET['title'] ?? 14);
+        $section = strtolower(trim((string) ($_GET['section'] ?? '')));
+        $snapshot = trim((string) ($_GET['snapshot'] ?? ''));
+        if ($title <= 0) {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'title required']);
+        }
+        /** Reject anything that isn't the canonical "NN.NNNN[a]" CFR section form. */
+        if (!preg_match('/^\d{1,2}\.\d{1,4}[a-z]?$/', $section)) {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'section must look like 61.103']);
+        }
+        try {
+            $cfg = rl_catalog_ecfr_runtime_config($pdo);
+            $client = new EcfrApiClient($cfg['api_base_url']);
+            if ($snapshot === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $snapshot)) {
+                $snapshot = $client->resolveTitleSnapshotDate($title);
+            }
+            $xml = $client->fetchSectionXml($title, $section, $snapshot);
+            $html = $client->sectionXmlToHtml($xml);
+            rl_easa_json_out(200, [
+                'ok' => true,
+                'title_number' => $title,
+                'section' => $section,
+                'snapshot' => $snapshot,
+                'browse_url' => $client->sectionBrowseUrl($title, $section),
+                'html' => $html,
+            ]);
+        } catch (Throwable $e) {
+            rl_easa_json_out(502, ['ok' => false, 'error' => $e->getMessage()]);
+        }
+    }
+
     // GET action=source_probe — diagnostic: ERulesId matches in batch source.xml (deploy must include this block).
     if ($action === 'source_probe') {
         if (!easa_erules_staging_tables_ok($pdo)) {
@@ -2606,6 +2644,11 @@ if ($action === 'regulatory_compare_ai') {
                             'text' => $strip,
                             'why' => $sec['why'],
                         ];
+                        /** `html` is included in the LIVE response so the chip-modal can
+                            open instantly without another roundtrip. It gets stripped
+                            before we persist to easa_ai_chat_messages.response_json (see
+                            $persist below) to keep DB rows small; reloaded chats lazy-fetch
+                            through ?action=ai_ecfr_fetch_section. */
                         $ecfrSources[] = [
                             'title_number' => $sec['title'],
                             'section' => $sec['section'],
@@ -2613,6 +2656,7 @@ if ($action === 'regulatory_compare_ai') {
                             'browse_url' => $browseUrl,
                             'label' => sprintf('14 CFR §%s', $sec['section']),
                             'why' => $sec['why'],
+                            'html' => $html,
                         ];
                     } catch (Throwable $e) {
                         $errors[] = sprintf('14 CFR §%s fetch failed (%s)', $sec['section'], $e->getMessage());
@@ -2921,6 +2965,18 @@ TXT;
             $payload['ai_answer'] = $payload['answer_markdown'];
         }
         if ($chatSupported && $userId > 0 && $sessionId > 0) {
+            /** Strip the per-section `html` blob before persisting — modal will lazy-fetch on click. */
+            $persistedEcfrSources = [];
+            if (is_array($payload['ecfr_sources'] ?? null)) {
+                foreach ($payload['ecfr_sources'] as $src) {
+                    if (!is_array($src)) {
+                        continue;
+                    }
+                    $slim = $src;
+                    unset($slim['html']);
+                    $persistedEcfrSources[] = $slim;
+                }
+            }
             $persist = [
                 'ok' => true,
                 'answer_markdown' => $payload['answer_markdown'],
@@ -2930,7 +2986,7 @@ TXT;
                 /** Carry the comparison-mode artefacts so re-rendering this row on chat
                     reload also shows the eCFR footer with snapshot date + browse chips. */
                 'compare_mode' => (bool) ($payload['compare_mode'] ?? false),
-                'ecfr_sources' => is_array($payload['ecfr_sources'] ?? null) ? $payload['ecfr_sources'] : [],
+                'ecfr_sources' => $persistedEcfrSources,
                 'ecfr_snapshot' => $payload['ecfr_snapshot'] ?? null,
                 'ecfr_note' => $payload['ecfr_note'] ?? null,
             ];
