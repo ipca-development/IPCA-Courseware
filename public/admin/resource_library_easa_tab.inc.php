@@ -2100,28 +2100,55 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     return urow;
   }
 
+  /**
+   * Build Maya assistant row. Defensive: any rendering failure falls back to a plaintext bubble
+   * so a render error cannot trigger the chat send catch handler with a misleading "Maya got stuck".
+   */
   function rlEasaMayaCreateAssistantRow(content, responseJsonStr, createdAt) {
-    var ts = rlEasaFormatChatTime(createdAt == null ? '' : createdAt);
-    var innerBody = rlEasaFormatAiAnswerHtml(rlEasaMayaSanitizeAssistantMarkdown(String(content || ''))) || '<p>(empty)</p>';
     var mrow = document.createElement('div');
     mrow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
-    mrow.appendChild(rlEasaMayaBuildAvatarEl(true, ''));
-    var mstack = document.createElement('div');
-    mstack.className = 'rl-easa-maya-msg-stack';
-    mstack.innerHTML = '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
-      + '<div class="rl-easa-chat-meta">Maya</div>'
-      + '<div class="rl-easa-maya-msg-body">' + innerBody + '</div></div></div>'
-      + (ts ? '<span class="rl-easa-maya-msg-time">' + esc(ts) + '</span>' : '');
-    mrow.appendChild(mstack);
-    var bubble = mrow.querySelector('.rl-easa-chat-bubble');
-    if (bubble && responseJsonStr && typeof responseJsonStr === 'string') {
+    try {
+      var ts = '';
+      try { ts = rlEasaFormatChatTime(createdAt == null ? '' : createdAt); } catch (eTs) { ts = ''; }
+      var sanitized = '';
+      try { sanitized = rlEasaMayaSanitizeAssistantMarkdown(String(content || '')); } catch (eSan) { sanitized = String(content || ''); }
+      var innerBody = '';
+      try { innerBody = rlEasaFormatAiAnswerHtml(sanitized); } catch (eFmt) { innerBody = ''; }
+      if (!innerBody) innerBody = '<p>' + esc(sanitized) + '</p>';
       try {
-        var o = JSON.parse(responseJsonStr);
-        var refs = (o && Array.isArray(o.primary_references)) ? o.primary_references : [];
-        rlEasaMayaRenderChips(bubble, refs);
-      } catch (e0) { /* ignore */ }
+        mrow.appendChild(rlEasaMayaBuildAvatarEl(true, ''));
+      } catch (eAv) { /* ignore */ }
+      var mstack = document.createElement('div');
+      mstack.className = 'rl-easa-maya-msg-stack';
+      mstack.innerHTML = '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+        + '<div class="rl-easa-chat-meta">Maya</div>'
+        + '<div class="rl-easa-maya-msg-body">' + innerBody + '</div></div></div>'
+        + (ts ? '<span class="rl-easa-maya-msg-time">' + esc(ts) + '</span>' : '');
+      mrow.appendChild(mstack);
+      var bubble = mrow.querySelector('.rl-easa-chat-bubble');
+      if (bubble && responseJsonStr && typeof responseJsonStr === 'string') {
+        try {
+          var o = JSON.parse(responseJsonStr);
+          var refs = (o && Array.isArray(o.primary_references)) ? o.primary_references : [];
+          rlEasaMayaRenderChips(bubble, refs);
+        } catch (e0) { /* ignore */ }
+      }
+      return mrow;
+    } catch (eOuter) {
+      try {
+        if (window && window.console && typeof console.error === 'function') {
+          console.error('rlEasaMayaCreateAssistantRow render failed', eOuter);
+        }
+      } catch (eLog) { /* ignore */ }
+      mrow.innerHTML = '';
+      var fbStack = document.createElement('div');
+      fbStack.className = 'rl-easa-maya-msg-stack';
+      fbStack.innerHTML = '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+        + '<div class="rl-easa-chat-meta">Maya</div>'
+        + '<div class="rl-easa-maya-msg-body"><p>' + esc(String(content || '')) + '</p></div></div></div>';
+      mrow.appendChild(fbStack);
+      return mrow;
     }
-    return mrow;
   }
 
   /**
@@ -4164,9 +4191,17 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           }
           var pl = x.j;
           var hist = document.getElementById('rlEasaChatHistory');
+          /** When OpenAI itself errored on the server, show the real reason — not a blank "Maya got stuck". */
+          function rlEasaBuildAiBlock(p) {
+            if (!p.ai_error) return p.answer_markdown || p.ai_answer || '';
+            var detail = String(p.ai_error || '').trim();
+            return detail
+              ? ('Sorry, I could not finish that answer.\n\n**Details:** ' + detail)
+              : 'Sorry, I could not finish that answer. Please try again.';
+          }
           if (pl.chat_supported && hist) {
             rlEasaMayaHist.sessionId = rlEasaAiSessionId;
-            var aiBlock2 = pl.ai_error ? 'Maya got stuck. Please try again.' : (pl.answer_markdown || pl.ai_answer || '');
+            var aiBlock2 = rlEasaBuildAiBlock(pl);
             var refs2 = Array.isArray(pl.primary_references) ? pl.primary_references : [];
             if (!refs2.length && Array.isArray(pl.easa_sources)) {
               pl.easa_sources.slice(0, 8).forEach(function (s) {
@@ -4187,13 +4222,25 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
               secondary_references: Array.isArray(pl.secondary_references) ? pl.secondary_references : [],
               confidence: pl.confidence || 'medium'
             });
-            hist.appendChild(rlEasaMayaCreateAssistantRow(aiBlock2, pj2, Date.now()));
+            try {
+              hist.appendChild(rlEasaMayaCreateAssistantRow(aiBlock2, pj2, Date.now()));
+            } catch (eAppend) {
+              try { if (window && window.console) console.error('rlEasa chat append failed', eAppend); } catch (eL) { /* ignore */ }
+              var fbWrap = document.createElement('div');
+              fbWrap.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
+              fbWrap.innerHTML = '<div class="rl-easa-maya-msg-stack"><div class="rl-easa-maya-bubble-wrap">'
+                + '<div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+                + '<div class="rl-easa-chat-meta">Maya</div>'
+                + '<p>' + esc(aiBlock2) + '</p>'
+                + '</div></div></div>';
+              hist.appendChild(fbWrap);
+            }
             try { hist.scrollTop = hist.scrollHeight; } catch (e0) { /* ignore */ }
             return;
           }
           return rlEasaAiLoadBootstrap().then(function () {
             if (!hist) return;
-            var aiBlock = pl.ai_error ? 'Maya got stuck. Please try again.' : (pl.answer_markdown || pl.ai_answer || '');
+            var aiBlock = rlEasaBuildAiBlock(pl);
             var refs = Array.isArray(pl.primary_references) ? pl.primary_references : [];
             if (!refs.length && Array.isArray(pl.easa_sources)) {
               pl.easa_sources.slice(0, 8).forEach(function (s) {
@@ -4214,20 +4261,39 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
               secondary_references: Array.isArray(pl.secondary_references) ? pl.secondary_references : [],
               confidence: pl.confidence || 'medium'
             });
-            hist.appendChild(rlEasaMayaCreateAssistantRow(aiBlock, pj, Date.now()));
+            try {
+              hist.appendChild(rlEasaMayaCreateAssistantRow(aiBlock, pj, Date.now()));
+            } catch (eAppend2) {
+              try { if (window && window.console) console.error('rlEasa chat append failed', eAppend2); } catch (eL2) { /* ignore */ }
+              var fbWrap2 = document.createElement('div');
+              fbWrap2.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
+              fbWrap2.innerHTML = '<div class="rl-easa-maya-msg-stack"><div class="rl-easa-maya-bubble-wrap">'
+                + '<div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
+                + '<div class="rl-easa-chat-meta">Maya</div>'
+                + '<p>' + esc(aiBlock) + '</p>'
+                + '</div></div></div>';
+              hist.appendChild(fbWrap2);
+            }
             try { hist.scrollTop = hist.scrollHeight; } catch (e1) { /* ignore */ }
           });
         })
         .catch(function (e) {
           rlEasaMayaRemoveThinkingRow();
+          try { if (window && window.console) console.error('rlEasa chat send failed', e); } catch (eL3) { /* ignore */ }
           var mrow = document.createElement('div');
           mrow.className = 'rl-easa-maya-msg-row rl-easa-maya-msg-row--maya';
           mrow.appendChild(rlEasaMayaBuildAvatarEl(true, ''));
           var estack = document.createElement('div');
           estack.className = 'rl-easa-maya-msg-stack';
+          var detail = '';
+          try {
+            var nm = e && e.name ? String(e.name) : '';
+            var msg = e && e.message ? String(e.message) : '';
+            detail = (nm && msg) ? (nm + ': ' + msg) : (msg || nm || 'Error');
+          } catch (eD) { detail = 'Error'; }
           estack.innerHTML = '<div class="rl-easa-maya-bubble-wrap"><div class="rl-easa-chat-bubble rl-easa-chat-bubble-system">'
-            + '<div class="rl-easa-chat-meta">Maya</div><p>' + esc('Maya got stuck. Please try again.') + '</p>'
-            + '<p class="rl-drop-meta" style="margin:8px 0 0;">' + esc(e.message || 'Error') + '</p></div></div>'
+            + '<div class="rl-easa-chat-meta">Maya</div><p>' + esc('Maya could not reach the regulations server. Please try again.') + '</p>'
+            + '<p class="rl-drop-meta" style="margin:8px 0 0;">' + esc(detail) + '</p></div></div>'
             + '<span class="rl-easa-maya-msg-time">' + esc(rlEasaFormatChatTime(Date.now())) + '</span>';
           mrow.appendChild(estack);
           chatHistEl.appendChild(mrow);
