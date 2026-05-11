@@ -144,9 +144,36 @@ function rl_easa_compare_query_needles(string $q): array
         }
     }
 
-    /** For phrase synonym matching, collapse ALL non-letter/non-digit characters (including dots, commas, ?, !) to single spaces
-        so "license?" / "license," / "license." / "Licence." all match. Token splitting below uses a different regex that preserves dots in rule ids. */
-    $ql = ' ' . trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', mb_strtolower($q))) . ' ';
+    /** For phrase synonym matching: lowercase, strip punctuation, normalise US↔UK spellings and basic plurals so the corpus
+        (which uses EASA / British spelling) is reachable from common natural-language US wording. */
+    $qlBase = trim((string) preg_replace('/[^\p{L}\p{N}]+/u', ' ', mb_strtolower($q)));
+    /** US ↔ EASA spelling: EASA uses British spellings throughout (aeroplane, licence, manoeuvre, …). Map US forms to the EASA form first. */
+    $qlBase = str_replace(
+        [
+            'airplanes', 'airplane',
+            'licenses', 'license',
+            'maneuvers', 'maneuver',
+            'organizations', 'organization',
+            'authorizes', 'authorize',
+            'recognizes', 'recognize',
+        ],
+        [
+            'aeroplanes', 'aeroplane',
+            'licences', 'licence',
+            'manoeuvres', 'manoeuvre',
+            'organisations', 'organisation',
+            'authorises', 'authorise',
+            'recognises', 'recognise',
+        ],
+        $qlBase
+    );
+    /** Lightweight plural fold for phrase lookup: collapse trailing "s" on common EASA domain nouns so plural queries match singular synonyms. */
+    $qlBase = preg_replace_callback(
+        '/\b(licences|aeroplanes|helicopters|balloons|sailplanes|gliders|ratings|examinations|tests|courses|operators|operations)\b/u',
+        static fn(array $m): string => rtrim($m[1], 's'),
+        $qlBase
+    ) ?? $qlBase;
+    $ql = ' ' . $qlBase . ' ';
     /** Natural-language phrases mapped to the rule abbreviations / id families that actually appear in Part-FCL legal text. */
     $phraseSynonyms = [
         'commercial pilot licence' => ['CPL', 'FCL.300', 'commercial pilot'],
@@ -290,7 +317,7 @@ function rl_easa_staging_snippet_concat_body(PDO $pdo): string
  *
  * @return array{is_fcl: bool, is_partis: bool}
  */
-function rl_easa_query_topic_filter(string $q): array
+function rl_easa_query_topic_filter(string $q, array $intent = []): array
 {
     $ql = ' ' . strtolower($q) . ' ';
     $partisKw = [
@@ -334,6 +361,16 @@ function rl_easa_query_topic_filter(string $q): array
         }
     }
 
+    /** Intent-driven override: when the AI intent step says corpus="aircrew", treat the question
+        as Aircrew/Part-FCL even if the user used wording the keyword list didn't anticipate
+        (e.g. "I want to fly commercially for a living" → CPL → corpus aircrew). Same for Part-IS. */
+    $intentCorpus = strtolower((string) ($intent['corpus'] ?? ''));
+    if ($intentCorpus === 'aircrew') {
+        $isFcl = true;
+    } elseif ($intentCorpus === 'part_is') {
+        $isPartis = true;
+    }
+
     return ['is_fcl' => $isFcl, 'is_partis' => $isPartis];
 }
 
@@ -344,9 +381,9 @@ function rl_easa_query_topic_filter(string $q): array
  *
  * @return array{exclude_batch_ids: list<int>, boost_batch_ids: list<int>, intent: array{is_fcl: bool, is_partis: bool}}
  */
-function rl_easa_query_batch_filtering(PDO $pdo, string $q): array
+function rl_easa_query_batch_filtering(PDO $pdo, string $q, array $aiIntent = []): array
 {
-    $intent = rl_easa_query_topic_filter($q);
+    $intent = rl_easa_query_topic_filter($q, $aiIntent);
     $out = ['exclude_batch_ids' => [], 'boost_batch_ids' => [], 'intent' => $intent];
     if (!$intent['is_fcl'] && !$intent['is_partis']) {
         return $out;
@@ -402,11 +439,338 @@ function rl_easa_query_batch_filtering(PDO $pdo, string $q): array
 }
 
 /**
+ * STEP 1 of the two-step pipeline: ask the model to read the user's free-text question
+ * and return a structured "intent" object. This is what makes Maya robust to phrasing
+ * variations (plurals, US/UK spelling, abbreviation vs phrase, indirect topic references)
+ * without us hand-coding every synonym.
+ *
+ * On success returns:
+ *   ['ok' => true, 'fallback' => false, 'intent' => [...], 'error' => null]
+ * On any failure (API error, timeout, model returned non-JSON) returns:
+ *   ['ok' => false, 'fallback' => true, 'intent' => [...empty defaults...], 'error' => string]
+ *
+ * The caller MUST always be able to keep going with the empty defaults — retrieval falls
+ * back to the keyword-only pipeline in that case. A user-visible "(This was a fall-back)"
+ * note is appended to the final answer by the calling action when fallback is true.
+ *
+ * @return array{ok: bool, fallback: bool, intent: array<string, mixed>, error: ?string}
+ */
+function rl_easa_ai_extract_query_intent(string $q): array
+{
+    $empty = [
+        'corpus' => null,
+        'licence' => null,
+        'category' => null,
+        'topics' => [],
+        'rule_ids' => [],
+        'keywords' => [],
+        'summary' => '',
+    ];
+    $q = trim($q);
+    if ($q === '') {
+        return ['ok' => true, 'fallback' => false, 'intent' => $empty, 'error' => null];
+    }
+
+    $instructions = <<<'TXT'
+You are a query analyser for an EASA Easy Access regulations retrieval engine. Read the
+user's free-text question and return a SINGLE JSON object (no markdown fences, no prose,
+no commentary). The JSON must have exactly these keys with these allowed values:
+
+- "corpus":
+    one of "aircrew" | "air_ops" | "part_is" | "cs_fstd" | null.
+    Use:
+      * "aircrew" for anything about pilot licensing, Part-FCL, Part-MED, Part-ARA-FCL,
+        Part-ORA-FCL, Part-DTO, language proficiency, theoretical knowledge, skill tests,
+        instructor / examiner certificates, PPL / CPL / ATPL / MPL / LAPL / SFCL / BFCL /
+        IR / BIR / class & type ratings.
+      * "air_ops" for Part-CAT, Part-NCO, Part-NCC, Part-SPO, Part-ORO, cabin crew (Part-CC),
+        commercial operations, flight time limitations.
+      * "part_is" for Part-IS information security, ISMS, cyber, infosec.
+      * "cs_fstd" for flight simulation training device certification specifications.
+      * null only if the question is greeting / off-topic / cannot be classified.
+
+- "licence":
+    one EASA licence/rating abbreviation when the question is clearly about a specific
+    licence or rating, otherwise null. Allowed values:
+    "PPL" | "CPL" | "ATPL" | "MPL" | "LAPL" | "SFCL" | "BFCL" | "IR" | "BIR" |
+    "FI" | "TRI" | "CRI" | "IRI" | "EXAMINER" | null.
+    US "license" and UK "licence" map to the same value.
+
+- "category":
+    aircraft category when the question is clearly limited to one, otherwise null.
+    Allowed values: "aeroplane" | "helicopter" | "balloon" | "sailplane" | "airship" |
+    "powered_lift" | null.
+    Always use EASA British spelling. US "airplane" / "airplanes" maps to "aeroplane".
+
+- "topics":
+    array of zero or more topic tags chosen ONLY from this fixed vocabulary:
+    "overview", "minimum_age", "privileges", "theoretical_knowledge", "training",
+    "skill_test", "proficiency_check", "medical", "language_proficiency",
+    "experience", "credit", "validation", "conversion", "renewal",
+    "instructor_certificate", "examiner_certificate".
+    Use "overview" when the user wants the general requirements / structure for a licence
+    and isn't drilling into one sub-area.
+
+- "rule_ids":
+    array of explicit EASA rule ids the user already mentioned in the question
+    (e.g. "FCL.300", "MED.A.030", "ARA.FCL.300"). Empty array if none.
+    Do NOT invent or expand rule ids here — that happens server-side.
+
+- "keywords":
+    up to 8 extra natural-language keywords or short phrases (EASA British spelling) that
+    should be searched in addition to the structured fields. Prefer phrases that appear in
+    EASA legal text (e.g. "theoretical knowledge examination", "skill test",
+    "privileges and conditions"). Do NOT include generic chatter
+    (need / details / more / regulations / requirements / etc.).
+
+- "summary":
+    one short sentence (≤ 20 words) restating what the user is actually asking, in plain
+    English. Used for logging + to focus the answering model.
+
+Examples:
+
+Q: "What is required to obtain a private pilot license?"
+A: {"corpus":"aircrew","licence":"PPL","category":null,"topics":["overview","training","theoretical_knowledge","skill_test","minimum_age"],"rule_ids":[],"keywords":["private pilot licence"],"summary":"User wants the EASA Part-FCL requirements to obtain a Private Pilot Licence (PPL)."}
+
+Q: "I would like to learn more about the Regulations on Private Pilot Licenses for Airplanes?"
+A: {"corpus":"aircrew","licence":"PPL","category":"aeroplane","topics":["overview","training","skill_test","privileges"],"rule_ids":[],"keywords":["private pilot licence","aeroplane"],"summary":"User wants the EASA Part-FCL rules for the PPL(A) aeroplane category."}
+
+Q: "I need to get more details on the regulations under Part FCL for the Commercial Pilot License."
+A: {"corpus":"aircrew","licence":"CPL","category":null,"topics":["overview","training","theoretical_knowledge","skill_test","privileges","minimum_age"],"rule_ids":[],"keywords":["commercial pilot licence"],"summary":"User wants the EASA Part-FCL Commercial Pilot Licence (CPL) rules overview."}
+
+Q: "What does FCL.055 say about language proficiency?"
+A: {"corpus":"aircrew","licence":null,"category":null,"topics":["language_proficiency"],"rule_ids":["FCL.055"],"keywords":["language proficiency"],"summary":"User wants the text of FCL.055 on language proficiency."}
+
+Q: "Tell me about information security rules"
+A: {"corpus":"part_is","licence":null,"category":null,"topics":[],"rule_ids":[],"keywords":["information security","ISMS"],"summary":"User wants an overview of EASA Part-IS information security requirements."}
+
+Q: "Hi"
+A: {"corpus":null,"licence":null,"category":null,"topics":[],"rule_ids":[],"keywords":[],"summary":"Greeting only; no regulatory topic identified."}
+TXT;
+
+    try {
+        $resp = cw_openai_responses([
+            'model' => cw_openai_model(),
+            'input' => [
+                [
+                    'role' => 'system',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => $instructions],
+                    ],
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => 'User question:' . "\n" . $q],
+                    ],
+                ],
+            ],
+            'max_output_tokens' => 700,
+        ], 45);
+    } catch (Throwable $e) {
+        return ['ok' => false, 'fallback' => true, 'intent' => $empty, 'error' => $e->getMessage()];
+    }
+
+    try {
+        $j = cw_openai_extract_json_text($resp);
+    } catch (Throwable $e) {
+        return ['ok' => false, 'fallback' => true, 'intent' => $empty, 'error' => 'intent JSON parse: ' . $e->getMessage()];
+    }
+    if (!is_array($j)) {
+        return ['ok' => false, 'fallback' => true, 'intent' => $empty, 'error' => 'intent JSON not an object'];
+    }
+
+    /** Normalise + clamp into the strict shape, regardless of what the model returns. */
+    $allowedCorpus = ['aircrew' => true, 'air_ops' => true, 'part_is' => true, 'cs_fstd' => true];
+    $corpus = strtolower(trim((string) ($j['corpus'] ?? '')));
+    $corpus = isset($allowedCorpus[$corpus]) ? $corpus : null;
+
+    $allowedLicence = ['PPL' => true, 'CPL' => true, 'ATPL' => true, 'MPL' => true, 'LAPL' => true,
+        'SFCL' => true, 'BFCL' => true, 'IR' => true, 'BIR' => true, 'FI' => true,
+        'TRI' => true, 'CRI' => true, 'IRI' => true, 'EXAMINER' => true];
+    $licence = strtoupper(trim((string) ($j['licence'] ?? '')));
+    $licence = isset($allowedLicence[$licence]) ? $licence : null;
+
+    $allowedCategory = ['aeroplane' => true, 'helicopter' => true, 'balloon' => true,
+        'sailplane' => true, 'airship' => true, 'powered_lift' => true];
+    $category = strtolower(trim((string) ($j['category'] ?? '')));
+    $category = isset($allowedCategory[$category]) ? $category : null;
+
+    $allowedTopics = ['overview' => true, 'minimum_age' => true, 'privileges' => true,
+        'theoretical_knowledge' => true, 'training' => true, 'skill_test' => true,
+        'proficiency_check' => true, 'medical' => true, 'language_proficiency' => true,
+        'experience' => true, 'credit' => true, 'validation' => true, 'conversion' => true,
+        'renewal' => true, 'instructor_certificate' => true, 'examiner_certificate' => true];
+    $topics = [];
+    foreach ((array) ($j['topics'] ?? []) as $t) {
+        $tn = strtolower(trim((string) $t));
+        if ($tn !== '' && isset($allowedTopics[$tn]) && !in_array($tn, $topics, true)) {
+            $topics[] = $tn;
+        }
+    }
+
+    $ruleIds = [];
+    foreach ((array) ($j['rule_ids'] ?? []) as $r) {
+        $rn = strtoupper(trim((string) $r));
+        /** Accept anything that looks like a real EASA rule id (FCL.300, MED.A.030, ARA.FCL.300, ORO.GEN.110, …). */
+        if ($rn !== '' && preg_match('/^[A-Z]{2,5}(?:\.[A-Z0-9]+)+$/u', $rn) === 1 && !in_array($rn, $ruleIds, true)) {
+            $ruleIds[] = $rn;
+        }
+    }
+
+    $keywords = [];
+    foreach ((array) ($j['keywords'] ?? []) as $k) {
+        $kn = trim((string) $k);
+        if ($kn !== '' && mb_strlen($kn) <= 80 && !in_array($kn, $keywords, true)) {
+            $keywords[] = $kn;
+            if (count($keywords) >= 8) {
+                break;
+            }
+        }
+    }
+
+    $summary = trim((string) ($j['summary'] ?? ''));
+    if (mb_strlen($summary) > 240) {
+        $summary = mb_substr($summary, 0, 240) . '…';
+    }
+
+    return [
+        'ok' => true,
+        'fallback' => false,
+        'intent' => [
+            'corpus' => $corpus,
+            'licence' => $licence,
+            'category' => $category,
+            'topics' => $topics,
+            'rule_ids' => $ruleIds,
+            'keywords' => $keywords,
+            'summary' => $summary,
+        ],
+        'error' => null,
+    ];
+}
+
+/**
+ * Map the structured intent from rl_easa_ai_extract_query_intent into extra search needles
+ * for the staging bundle. Needles are returned high-signal first so the retrieval row
+ * budget is spent on actually relevant rules.
+ *
+ * @param array<string, mixed> $intent
+ * @return list<string>
+ */
+function rl_easa_intent_to_extra_needles(array $intent): array
+{
+    $out = [];
+    $push = static function (array &$bucket, string $value): void {
+        $v = trim($value);
+        if ($v === '') {
+            return;
+        }
+        foreach ($bucket as $existing) {
+            if (strcasecmp($existing, $v) === 0) {
+                return;
+            }
+        }
+        $bucket[] = $v;
+    };
+
+    /** 1. Explicit rule ids the user mentioned — strongest signal. */
+    foreach ((array) ($intent['rule_ids'] ?? []) as $rid) {
+        if (is_string($rid) && $rid !== '') {
+            $push($out, strtoupper(trim($rid)));
+        }
+    }
+
+    /** 2. Licence-family rule id expansions. These are the canonical sub-rule lists that
+        actually live under each Part-FCL subpart in EASA Aircrew. */
+    $licence = strtoupper((string) ($intent['licence'] ?? ''));
+    $licenceRuleFamilies = [
+        'LAPL' => ['FCL.100', 'FCL.105', 'FCL.110', 'FCL.115', 'FCL.120', 'FCL.125', 'FCL.130', 'FCL.135'],
+        'PPL'  => ['FCL.200', 'FCL.205', 'FCL.210', 'FCL.215', 'FCL.220', 'FCL.225', 'FCL.230', 'FCL.235'],
+        'CPL'  => ['FCL.300', 'FCL.305', 'FCL.310', 'FCL.315', 'FCL.320', 'FCL.325'],
+        'MPL'  => ['FCL.400', 'FCL.405', 'FCL.410', 'FCL.415', 'FCL.420', 'FCL.425', 'FCL.430', 'FCL.435'],
+        'ATPL' => ['FCL.500', 'FCL.505', 'FCL.510', 'FCL.515', 'FCL.520', 'FCL.525'],
+        'IR'   => ['FCL.600', 'FCL.605', 'FCL.610', 'FCL.615', 'FCL.620', 'FCL.625', 'FCL.630'],
+        'BIR'  => ['FCL.835'],
+        'SFCL' => ['SFCL.115', 'SFCL.125', 'SFCL.130', 'SFCL.135', 'SFCL.140', 'SFCL.145', 'SFCL.150', 'SFCL.155'],
+        'BFCL' => ['BFCL.115', 'BFCL.125', 'BFCL.130', 'BFCL.135', 'BFCL.140', 'BFCL.145', 'BFCL.150', 'BFCL.155'],
+        'FI'   => ['FCL.905', 'FCL.910', 'FCL.915', 'FCL.920', 'FCL.930', 'FCL.940'],
+        'TRI'  => ['FCL.905.TRI', 'FCL.910.TRI', 'FCL.915.TRI', 'FCL.920.TRI', 'FCL.930.TRI'],
+        'CRI'  => ['FCL.905.CRI', 'FCL.910.CRI', 'FCL.915.CRI', 'FCL.920.CRI', 'FCL.930.CRI'],
+        'IRI'  => ['FCL.905.IRI', 'FCL.915.IRI', 'FCL.920.IRI', 'FCL.930.IRI'],
+        'EXAMINER' => ['FCL.1000', 'FCL.1005', 'FCL.1010', 'FCL.1015', 'FCL.1020', 'FCL.1025'],
+    ];
+    if ($licence !== '' && isset($licenceRuleFamilies[$licence])) {
+        foreach ($licenceRuleFamilies[$licence] as $rid) {
+            $push($out, $rid);
+        }
+        /** Keep the licence abbreviation as a needle too (LIKE %CPL% matches titles like "FCL.300 CPL – Minimum age"). */
+        $push($out, $licence);
+    }
+
+    /** 3. Category-specific suffix expansion. EASA uses .A (aeroplane), .H (helicopter),
+        .S (sailplane), .B (balloon), .As (airship), .PL (powered-lift). Only added when
+        the user constrained to a single category. */
+    $category = strtolower((string) ($intent['category'] ?? ''));
+    $categorySuffix = [
+        'aeroplane' => 'A', 'helicopter' => 'H', 'balloon' => 'B',
+        'sailplane' => 'S', 'airship' => 'As', 'powered_lift' => 'PL',
+    ];
+    if ($licence !== '' && isset($licenceRuleFamilies[$licence]) && isset($categorySuffix[$category])) {
+        $suf = $categorySuffix[$category];
+        foreach ($licenceRuleFamilies[$licence] as $rid) {
+            $push($out, $rid . '.' . $suf);
+        }
+    }
+
+    /** 4. Topic-specific needles — short EASA phrases that actually appear in rule bodies. */
+    $topicNeedles = [
+        'overview'               => [],
+        'minimum_age'            => ['minimum age'],
+        'privileges'             => ['privileges and conditions'],
+        'theoretical_knowledge'  => ['theoretical knowledge', 'theoretical knowledge examination', 'FCL.025'],
+        'training'               => ['training course'],
+        'skill_test'             => ['skill test', 'FCL.030'],
+        'proficiency_check'      => ['proficiency check'],
+        'medical'                => ['medical certificate', 'Part-MED', 'MED.A.030'],
+        'language_proficiency'   => ['language proficiency', 'FCL.055'],
+        'experience'             => ['flight experience'],
+        'credit'                 => ['crediting'],
+        'validation'             => ['validation'],
+        'conversion'             => ['conversion'],
+        'renewal'                => ['renewal', 'revalidation'],
+        'instructor_certificate' => ['instructor', 'FCL.900'],
+        'examiner_certificate'   => ['examiner', 'FCL.1000'],
+    ];
+    foreach ((array) ($intent['topics'] ?? []) as $topic) {
+        $t = is_string($topic) ? strtolower(trim($topic)) : '';
+        if ($t !== '' && isset($topicNeedles[$t])) {
+            foreach ($topicNeedles[$t] as $tn) {
+                $push($out, $tn);
+            }
+        }
+    }
+
+    /** 5. Free-text keywords from the model — last so they don't hog the budget. */
+    foreach ((array) ($intent['keywords'] ?? []) as $kw) {
+        if (is_string($kw) && trim($kw) !== '') {
+            $push($out, trim($kw));
+        }
+    }
+
+    return $out;
+}
+
+/**
  * Pull staging excerpts for AI compare using the same matching rules as search.
  *
+ * @param list<string> $extraNeedles Optional high-signal needles from the intent step. These are tried
+ *        in order BEFORE the regex-derived ones so intent-driven rule ids (FCL.200…) win the budget.
+ * @param array<string, mixed> $intent Optional structured intent from rl_easa_ai_extract_query_intent.
+ *        Used here only to nudge corpus selection in batch filtering.
  * @return array{hit_count: int, bundle: string, sources: list<array<string, mixed>>, summary: string}
  */
-function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFilter): array
+function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFilter, array $extraNeedles = [], array $intent = []): array
 {
     $out = [
         'hit_count' => 0,
@@ -447,7 +811,7 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
     $maxRows = 18;
     $excerptLen = 4500;
     $excerptBody = rl_easa_staging_snippet_concat_body($pdo);
-    $bf = rl_easa_query_batch_filtering($pdo, $q);
+    $bf = rl_easa_query_batch_filtering($pdo, $q, $intent);
     $excludeIds = $bf['exclude_batch_ids'];
     $boostIds = $bf['boost_batch_ids'];
     $excludeSql = '';
@@ -503,7 +867,33 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
     // Natural-language prompts rarely appear verbatim in legal text; fallback to ids + keywords.
     if ($rows === []) {
         $seen = [];
-        foreach (rl_easa_compare_query_needles($q) as $needle) {
+        /** Combine intent-derived needles (rule ids + topic-precise phrases — strongest signal)
+            with the regex-derived ones. De-dupe case-insensitively. */
+        $combined = [];
+        $pushNeedle = static function (string $n) use (&$combined): void {
+            $n = trim($n);
+            if ($n === '') {
+                return;
+            }
+            foreach ($combined as $existing) {
+                if (strcasecmp($existing, $n) === 0) {
+                    return;
+                }
+            }
+            $combined[] = $n;
+        };
+        foreach ($extraNeedles as $n) {
+            if (is_string($n)) {
+                $pushNeedle($n);
+            }
+        }
+        foreach (rl_easa_compare_query_needles($q) as $n) {
+            $pushNeedle($n);
+        }
+        /** Bound how many distinct needles we try so a noisy intent payload can't blow up
+            staging query count. The first ~16 are always the highest-signal ones. */
+        $combined = array_slice($combined, 0, 16);
+        foreach ($combined as $needle) {
             $more = $fetchMatches($needle, 8);
             foreach ($more as $r) {
                 $key = (string) ($r['batch_id'] ?? '') . '|' . (string) ($r['node_uid'] ?? '');
@@ -578,9 +968,9 @@ function rl_easa_build_compare_staging_bundle(PDO $pdo, string $q, int $batchFil
  *   full_nodes: list<array{batch_id: int, node_uid: string, node: array<string, mixed>}>
  * }
  */
-function rl_easa_build_ai_canonical_regulatory_bundle(PDO $pdo, string $q, int $batchFilter): array
+function rl_easa_build_ai_canonical_regulatory_bundle(PDO $pdo, string $q, int $batchFilter, array $extraNeedles = [], array $intent = []): array
 {
-    $stagingCompare = rl_easa_build_compare_staging_bundle($pdo, $q, $batchFilter);
+    $stagingCompare = rl_easa_build_compare_staging_bundle($pdo, $q, $batchFilter, $extraNeedles, $intent);
     $out = [
         'summary' => (string) ($stagingCompare['summary'] ?? ''),
         'hit_count' => (int) ($stagingCompare['hit_count'] ?? 0),
@@ -1058,10 +1448,22 @@ if ($method === 'GET') {
         }
         $probeBatch = (int) ($_GET['batch_id'] ?? 0);
         $probeNeedles = rl_easa_compare_query_needles($probeQ);
-        $probeIntent = rl_easa_query_topic_filter($probeQ);
-        $probeBf = rl_easa_query_batch_filtering($pdo, $probeQ);
-        $probeBundle = rl_easa_build_compare_staging_bundle($pdo, $probeQ, $probeBatch);
-        $probeCanon = rl_easa_build_ai_canonical_regulatory_bundle($pdo, $probeQ, $probeBatch);
+        /** Optional: skip the AI intent call when ?ai_intent=0 (diagnostic shortcut). */
+        $wantAiIntent = !isset($_GET['ai_intent']) || (string) $_GET['ai_intent'] !== '0';
+        $probeAiIntentRes = $wantAiIntent
+            ? rl_easa_ai_extract_query_intent($probeQ)
+            : ['ok' => true, 'fallback' => false, 'intent' => [
+                'corpus' => null, 'licence' => null, 'category' => null,
+                'topics' => [], 'rule_ids' => [], 'keywords' => [], 'summary' => '',
+            ], 'error' => null];
+        $probeAiIntent = is_array($probeAiIntentRes['intent'] ?? null) ? $probeAiIntentRes['intent'] : [];
+        $probeExtraNeedles = $wantAiIntent && empty($probeAiIntentRes['fallback'])
+            ? rl_easa_intent_to_extra_needles($probeAiIntent)
+            : [];
+        $probeIntent = rl_easa_query_topic_filter($probeQ, $probeAiIntent);
+        $probeBf = rl_easa_query_batch_filtering($pdo, $probeQ, $probeAiIntent);
+        $probeBundle = rl_easa_build_compare_staging_bundle($pdo, $probeQ, $probeBatch, $probeExtraNeedles, $probeAiIntent);
+        $probeCanon = rl_easa_build_ai_canonical_regulatory_bundle($pdo, $probeQ, $probeBatch, $probeExtraNeedles, $probeAiIntent);
         /** Per-needle row counts in the FCL batch only (when boost is active), to expose retrieval coverage. */
         $boostFcl = $probeBf['boost_batch_ids'] ?? [];
         $perNeedle = [];
@@ -1109,6 +1511,10 @@ if ($method === 'GET') {
             'ok' => true,
             'query' => $probeQ,
             'batch_id' => $probeBatch,
+            'ai_intent' => $probeAiIntent,
+            'ai_intent_fallback' => !empty($probeAiIntentRes['fallback']),
+            'ai_intent_error' => $probeAiIntentRes['error'] ?? null,
+            'ai_intent_extra_needles' => $probeExtraNeedles,
             'topic_intent' => $probeIntent,
             'batch_filtering' => $probeBf,
             'needles' => $probeNeedles,
@@ -1566,7 +1972,20 @@ if ($action === 'regulatory_compare_ai') {
     $compareBatchId = (int) ($data['batch_id'] ?? 0);
     $userFirstName = rl_easa_current_user_first_name($pdo);
 
-    $canon = rl_easa_build_ai_canonical_regulatory_bundle($pdo, $q, $compareBatchId);
+    /** STEP 1 of the two-step pipeline: ask the model to classify the question into a
+        structured intent (corpus / licence / category / topics / rule_ids / keywords / summary).
+        If this call fails (timeout, network, non-JSON), $intentRes['fallback'] becomes true and
+        we proceed with the keyword-only pipeline + append a small "(This was a fall-back)" note
+        on the final answer so the user knows quality may be reduced. */
+    $intentRes = rl_easa_ai_extract_query_intent($q);
+    $intent = is_array($intentRes['intent'] ?? null) ? $intentRes['intent'] : [];
+    $intentWasFallback = !empty($intentRes['fallback']);
+    $intentError = isset($intentRes['error']) ? (string) $intentRes['error'] : null;
+    $extraNeedles = $intentWasFallback ? [] : rl_easa_intent_to_extra_needles($intent);
+
+    /** STEP 2: build the regulatory bundle using the intent-derived needles (plus the regex
+        keyword fallback inside the bundle builder). */
+    $canon = rl_easa_build_ai_canonical_regulatory_bundle($pdo, $q, $compareBatchId, $extraNeedles, $intent);
     $easaCtx = (string) ($canon['summary'] ?? '');
     $easaModelBundle = trim((string) ($canon['model_bundle'] ?? ''));
 
@@ -1633,6 +2052,9 @@ if ($action === 'regulatory_compare_ai') {
         'confidence' => 'medium',
         'session_id' => $sessionId > 0 ? $sessionId : null,
         'chat_supported' => $chatSupported && $userId > 0,
+        'intent' => $intent,
+        'intent_fallback' => $intentWasFallback,
+        'intent_error' => $intentError,
     ];
 
     if (!$useAi) {
@@ -1749,7 +2171,19 @@ TXT;
                     'content' => [
                         [
                             'type' => 'input_text',
-                            'text' => "User first name:\n" . ($userFirstName !== '' ? $userFirstName : '(unknown)') . "\n\nQuestion:\n" . $q . "\n\nReference bundle:\n" . $bundle,
+                            'text' => "User first name:\n" . ($userFirstName !== '' ? $userFirstName : '(unknown)')
+                                . "\n\nQuestion:\n" . $q
+                                . "\n\nQuery intent (machine-derived, step 1 of the pipeline — use this to focus your answer; do NOT discuss it in the reply):\n"
+                                . (function (array $i): string {
+                                    $flags = JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT;
+                                    if (defined('JSON_INVALID_UTF8_SUBSTITUTE')) {
+                                        $flags |= JSON_INVALID_UTF8_SUBSTITUTE;
+                                    }
+                                    $enc = json_encode($i, $flags);
+
+                                    return is_string($enc) ? $enc : '(intent unavailable)';
+                                })($intent)
+                                . "\n\nReference bundle:\n" . $bundle,
                         ],
                     ],
                 ],
@@ -1764,6 +2198,14 @@ TXT;
         if ($userFirstName !== '' && $payload['ai_answer'] !== '' && stripos($payload['ai_answer'], $userFirstName) === false) {
             $payload['ai_answer'] = $userFirstName . ', ' . $payload['ai_answer'];
             $payload['answer_markdown'] = $payload['ai_answer'];
+        }
+        /** When intent extraction (step 1) failed, the answer was produced from the keyword-only
+            retrieval path. Make that visible to the user as a small italic note at the end so
+            they know quality may be reduced for this turn. */
+        if ($intentWasFallback && $payload['answer_markdown'] !== '') {
+            $fallbackNote = "\n\n_(This was a fall-back — the question analyser was unavailable, so I answered from the keyword-search pipeline only.)_";
+            $payload['answer_markdown'] .= $fallbackNote;
+            $payload['ai_answer'] = $payload['answer_markdown'];
         }
         if ($chatSupported && $userId > 0 && $sessionId > 0) {
             $persist = [
