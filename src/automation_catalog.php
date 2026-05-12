@@ -216,6 +216,13 @@ if (!function_exists('automation_default_event_definitions')) {
                 'category_key' => 'compliance',
                 'sort_order' => 100,
             ),
+            array(
+                'event_key' => 'compliance.inbox.email_received',
+                'label' => 'Compliance Inbox — Email Received',
+                'description' => 'Triggered when the Postmark inbound webhook delivers a new email to the compliance inbox.',
+                'category_key' => 'compliance',
+                'sort_order' => 110,
+            ),
         );
     }
 }
