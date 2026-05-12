@@ -671,8 +671,8 @@ try {
         $target = isset($fr[11]) && is_string($fr[11]) && $fr[11] !== '' ? substr($fr[11], 0, 10) : null;
         $closed = isset($fr[12]) && is_string($fr[12]) && $fr[12] !== '' ? substr($fr[12], 0, 10) : null;
         $domainId = isset($fr[13]) ? (int)$fr[13] : 0;
-        $createdAt = is_string($fr[14] ?? null) ? $fr[14] : date('Y-m-d H:i:s');
-        $updatedAt = is_string($fr[15] ?? null) ? $fr[15] : $createdAt;
+        $createdAt = (is_string($fr[14] ?? null) && trim($fr[14]) !== '') ? $fr[14] : date('Y-m-d H:i:s');
+        $updatedAt = (is_string($fr[15] ?? null) && trim($fr[15]) !== '') ? $fr[15] : $createdAt;
         $capOpt = isset($fr[16]) && is_string($fr[16]) && $fr[16] !== '' ? substr($fr[16], 0, 16) : null;
         $capEff = isset($fr[17]) && is_string($fr[17]) && $fr[17] !== '' ? substr($fr[17], 0, 32) : null;
         $notes = isset($fr[18]) && is_string($fr[18]) && $fr[18] !== '' ? $fr[18] : null;
@@ -712,6 +712,8 @@ try {
             $rootCause = isset($rr[5]) && is_string($rr[5]) && $rr[5] !== '' ? $rr[5] : null;
             $lockedAt = isset($rr[6]) && is_string($rr[6]) && $rr[6] !== '' ? $rr[6] : null;
             $lockReason = isset($rr[8]) && is_string($rr[8]) && $rr[8] !== '' ? $rr[8] : null;
+            $rcaCreated = (is_string($rr[3] ?? null) && trim($rr[3]) !== '') ? $rr[3] : $createdAt;
+            $rcaUpdated = (is_string($rr[4] ?? null) && trim($rr[4]) !== '') ? $rr[4] : $rcaCreated;
             $insRca->execute(array(
                 $newFid,
                 $stepsJson,
@@ -735,7 +737,7 @@ try {
                 }
                 $due = isset($ar[5]) && is_string($ar[5]) && $ar[5] !== '' ? substr($ar[5], 0, 10) : null;
                 $completedAt = isset($ar[6]) && is_string($ar[6]) && $ar[6] !== '' ? $ar[6] : null;
-                $actionCreated = is_string($ar[8] ?? null) ? $ar[8] : date('Y-m-d H:i:s');
+                $actionCreated = (is_string($ar[8] ?? null) && trim($ar[8]) !== '') ? $ar[8] : date('Y-m-d H:i:s');
                 $capStatus = $completedAt !== null ? 'COMPLETED' : 'PROPOSED';
 
                 $titleCap = $desc;
