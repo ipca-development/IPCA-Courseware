@@ -4590,6 +4590,100 @@ function easa_erules_tree_dedupe_adjacent_wrapper_topic(array $rows): array
  *
  * @return array{by_parent: array<string, list<array<string, mixed>>>, by_uid: array<string, array<string, mixed>>}
  */
+/**
+ * APCu memoization layer for the tree pipeline. These helpers are SSOT-safe:
+ * they cache the *output* of the existing semantic adapter functions and are
+ * invalidated by a (file_sha256, batch updated_at) token, so any new XML
+ * import drops the cache automatically. When APCu is not available (CLI, some
+ * shared hosts) every helper degrades to a passthrough — behavior is
+ * identical to the uncached path, just slower.
+ *
+ * Schema-bump convention: bump _v1 → _v2 in cache key namespaces below
+ * whenever the cached value's structure changes.
+ */
+function easa_erules_tree_cache_enabled(): bool
+{
+    static $enabled = null;
+    if ($enabled !== null) {
+        return $enabled;
+    }
+    $enabled = function_exists('apcu_fetch')
+        && function_exists('apcu_store')
+        && (bool) ini_get('apc.enabled');
+
+    return $enabled;
+}
+
+/**
+ * Returns an opaque token that flips whenever the staging rows for this
+ * batch would semantically change. We tie it to the batch row's file_sha256
+ * (changes on re-upload) and updated_at (changes on re-parse / status flip).
+ * The token itself is cached for 60s in APCu so callers don't hit the DB for
+ * every tree_children request.
+ */
+function easa_erules_tree_cache_version_token(PDO $pdo, int $batchId): string
+{
+    if ($batchId <= 0) {
+        return 'v0';
+    }
+    $verKey = 'easa_tree_ver_v1:' . $batchId;
+    if (easa_erules_tree_cache_enabled()) {
+        $okFetch = false;
+        $cached = apcu_fetch($verKey, $okFetch);
+        if ($okFetch && is_string($cached) && $cached !== '') {
+            return $cached;
+        }
+    }
+    try {
+        $st = $pdo->prepare(
+            'SELECT file_sha256, UNIX_TIMESTAMP(updated_at) AS upd
+             FROM easa_erules_import_batches
+             WHERE id = ?'
+        );
+        $st->execute([$batchId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            $token = 'missing_' . $batchId;
+        } else {
+            $sha = substr((string) ($row['file_sha256'] ?? ''), 0, 16);
+            $upd = (int) ($row['upd'] ?? 0);
+            $token = ($sha !== '' ? $sha : 'nosha') . '_' . $upd;
+        }
+    } catch (Throwable) {
+        $token = 'err_' . $batchId;
+    }
+    if (easa_erules_tree_cache_enabled()) {
+        apcu_store($verKey, $token, 60);
+    }
+
+    return $token;
+}
+
+/**
+ * @return array{0: bool, 1: mixed} [hit, value]
+ */
+function easa_erules_tree_cache_fetch(string $key): array
+{
+    if (!easa_erules_tree_cache_enabled()) {
+        return [false, null];
+    }
+    $ok = false;
+    $val = apcu_fetch($key, $ok);
+    if (!$ok) {
+        return [false, null];
+    }
+
+    return [true, $val];
+}
+
+function easa_erules_tree_cache_store(string $key, mixed $value, int $ttlSeconds = 86400): void
+{
+    if (!easa_erules_tree_cache_enabled()) {
+        return;
+    }
+    apcu_store($key, $value, $ttlSeconds);
+}
+
 function easa_erules_tree_batch_graph(PDO $pdo, int $batchId): array
 {
     static $cache = [];
@@ -4599,6 +4693,25 @@ function easa_erules_tree_batch_graph(PDO $pdo, int $batchId): array
     if (isset($cache[$batchId])) {
         return $cache[$batchId];
     }
+
+    /* Cross-request APCu cache. Survives PHP-FPM teardown so the entire
+       staging set is only read from MySQL once per batch import. The version
+       token flips whenever file_sha256 / updated_at changes, so a re-parse
+       transparently invalidates every dependent cache key. */
+    $ver = easa_erules_tree_cache_version_token($pdo, $batchId);
+    $cacheKey = 'easa_tree_graph_v1:' . $batchId . ':' . $ver;
+    [$hit, $cachedVal] = easa_erules_tree_cache_fetch($cacheKey);
+    if ($hit
+        && is_array($cachedVal)
+        && isset($cachedVal['by_parent'], $cachedVal['by_uid'])
+        && is_array($cachedVal['by_parent'])
+        && is_array($cachedVal['by_uid'])
+    ) {
+        $cache[$batchId] = $cachedVal;
+
+        return $cachedVal;
+    }
+
     $st = $pdo->prepare(
         'SELECT batch_id, node_uid, parent_node_uid, node_type, sort_order, id, depth,
                 source_erules_id, title, source_title, breadcrumb
@@ -4622,9 +4735,11 @@ function easa_erules_tree_batch_graph(PDO $pdo, int $batchId): array
         $byParent[$pk][] = $r;
         $byUid[$uid] = $r;
     }
-    $cache[$batchId] = ['by_parent' => $byParent, 'by_uid' => $byUid];
+    $built = ['by_parent' => $byParent, 'by_uid' => $byUid];
+    $cache[$batchId] = $built;
+    easa_erules_tree_cache_store($cacheKey, $built, 86400);
 
-    return $cache[$batchId];
+    return $built;
 }
 
 /**
@@ -5764,6 +5879,19 @@ function easa_erules_tree_synthetic_block_children_for_parent(PDO $pdo, int $bat
  */
 function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?string $parentUid): array
 {
+    /* Cross-request APCu cache for the fully-adapted node list. The graph
+       wrapper above already caches the staging rows; this layer also caches
+       the final semantic-adapter output so identical (batch_id, parent_uid)
+       requests skip the entire flatten + filter + synthetic-nav pass. Same
+       version token, so any re-parse invalidates everything together. */
+    $verToken = easa_erules_tree_cache_version_token($pdo, $batchId);
+    $parentKey = ($parentUid !== null && $parentUid !== '') ? $parentUid : '';
+    $cacheKey = 'easa_tree_kids_v1:' . $batchId . ':' . $verToken . ':' . md5($parentKey);
+    [$hit, $cachedNodes] = easa_erules_tree_cache_fetch($cacheKey);
+    if ($hit && is_array($cachedNodes)) {
+        return $cachedNodes;
+    }
+
     $graph = easa_erules_tree_batch_graph($pdo, $batchId);
     $parentRow = null;
     if ($parentUid !== null && $parentUid !== '') {
@@ -5813,9 +5941,13 @@ function easa_erules_tree_children_response_nodes(PDO $pdo, int $batchId, ?strin
     if ($nodes === [] && $parentUid !== null && $parentUid !== '') {
         $syn = easa_erules_tree_synthetic_nav_children_memoized($pdo, $batchId, $parentUid);
         if ($syn !== []) {
+            easa_erules_tree_cache_store($cacheKey, $syn, 86400);
+
             return $syn;
         }
     }
+
+    easa_erules_tree_cache_store($cacheKey, $nodes, 86400);
 
     return $nodes;
 }

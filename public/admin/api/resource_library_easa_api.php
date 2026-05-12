@@ -1711,6 +1711,107 @@ if ($method === 'GET') {
         ]);
     }
 
+    /**
+     * GET ?action=tree_bootstrap&batch_id=N&open[]=<regex_source>&open[]=<…>
+     *
+     * Returns root nodes plus, for each `open[]` pattern in order, the children of
+     * the first node at the current level whose `display_title` first line matches
+     * that regex (compiled case-insensitive). Lets the client render the auto-open
+     * boot path (Aircrew → Part-FCL → Annex I) from a single round trip instead of
+     * 3 sequential `tree_children` calls.
+     *
+     * SSOT: every level is produced by the same `easa_erules_tree_children_response_nodes()`
+     * that `tree_children` uses, so node shapes, filters, and synthetic-nav behavior
+     * are byte-identical to the per-level path.
+     */
+    if ($action === 'tree_bootstrap') {
+        if (!easa_erules_staging_tables_ok($pdo)) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql first']);
+        }
+        $batchId = (int) ($_GET['batch_id'] ?? 0);
+        if ($batchId <= 0) {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id required']);
+        }
+        /* Sanitise the open-path regex list:
+            - max 4 patterns (boot path is small by design — guards against abuse).
+            - each pattern ≤ 200 chars.
+            - must compile cleanly with PCRE; reject otherwise. */
+        $rawOpen = $_GET['open'] ?? [];
+        if (!is_array($rawOpen)) {
+            $rawOpen = [];
+        }
+        $patterns = [];
+        foreach ($rawOpen as $p) {
+            if (count($patterns) >= 4) {
+                break;
+            }
+            $s = trim((string) $p);
+            if ($s === '' || strlen($s) > 200) {
+                continue;
+            }
+            $compiled = '/' . str_replace('/', '\\/', $s) . '/iu';
+            if (@preg_match($compiled, '') === false) {
+                continue;
+            }
+            $patterns[] = ['source' => $s, 'compiled' => $compiled];
+        }
+
+        try {
+            $levels = [];
+            $rootNodes = easa_erules_tree_children_response_nodes($pdo, $batchId, null);
+            $levels[] = [
+                'parent_uid' => null,
+                'nodes' => $rootNodes,
+                'matched_for' => null,
+            ];
+            $currentLevel = $rootNodes;
+            foreach ($patterns as $pat) {
+                $matchedUid = null;
+                foreach ($currentLevel as $node) {
+                    if (!is_array($node)) {
+                        continue;
+                    }
+                    $titleRaw = (string) ($node['display_title'] ?? '');
+                    if ($titleRaw === '') {
+                        continue;
+                    }
+                    $firstLine = strtok($titleRaw, "\r\n");
+                    if ($firstLine === false) {
+                        continue;
+                    }
+                    $firstLine = trim((string) $firstLine);
+                    if ($firstLine === '') {
+                        continue;
+                    }
+                    if (@preg_match($pat['compiled'], $firstLine) === 1) {
+                        $u = trim((string) ($node['node_uid'] ?? ''));
+                        if ($u !== '') {
+                            $matchedUid = $u;
+                            break;
+                        }
+                    }
+                }
+                if ($matchedUid === null) {
+                    break;
+                }
+                $childNodes = easa_erules_tree_children_response_nodes($pdo, $batchId, $matchedUid);
+                $levels[] = [
+                    'parent_uid' => $matchedUid,
+                    'nodes' => $childNodes,
+                    'matched_for' => $pat['source'],
+                ];
+                $currentLevel = $childNodes;
+            }
+        } catch (Throwable $e) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
+        }
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'batch_id' => $batchId,
+            'levels' => $levels,
+        ]);
+    }
+
     if ($action === 'node_detail') {
         if (!easa_erules_staging_tables_ok($pdo)) {
             rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql first']);

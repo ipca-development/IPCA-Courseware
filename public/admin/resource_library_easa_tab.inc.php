@@ -1484,9 +1484,9 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: #fff7ed;
-    color: #92400e;
-    border: 1px solid #fed7aa;
+    background: #0b2a4a;
+    color: #fff;
+    border: 1px solid #0b2a4a;
     font-weight: 600;
   }
   /* Our `display: inline-flex` above would otherwise win over the UA default
@@ -1497,12 +1497,13 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   }
   .rl-easa-bookmarks-open-btn:hover,
   .rl-easa-bookmarks-open-btn:focus {
-    background: #ffedd5;
-    color: #7c2d12;
-    border-color: #fdba74;
+    background: #0f355f;
+    color: #fff;
+    border-color: #0f355f;
   }
+  /* Keep the star marker warm so it reads as a "bookmark" cue against navy. */
   .rl-easa-bookmarks-icon {
-    color: #f59e0b;
+    color: #fbbf24;
     font-size: 13px;
     line-height: 1;
   }
@@ -1649,6 +1650,16 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     width: 880px;
     max-width: calc(100vw - 32px);
     max-height: calc(100vh - 64px);
+    /* Clip the gray sidebar / panes to the dialog's 14px border-radius so every
+       corner — including the bottom-left under the categories rail — renders
+       rounded. Inner scrolling is handled by `.rl-easa-modal-body`. */
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .rl-easa-bookmarks-dialog > .rl-easa-modal-body {
+    flex: 1 1 auto;
+    min-height: 0;
   }
   .rl-easa-bookmarks-tabs {
     display: flex;
@@ -1671,8 +1682,8 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     color: #0f172a;
   }
   .rl-easa-bookmarks-tab.is-active {
-    color: #0f172a;
-    border-bottom-color: #f59e0b;
+    color: #0b2a4a;
+    border-bottom-color: #0b2a4a;
   }
   .rl-easa-bookmarks-body {
     padding: 0;
@@ -1719,8 +1730,8 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     background: #e2e8f0;
   }
   .rl-easa-bookmarks-cat-list li.is-active {
-    background: #fef3c7;
-    color: #854d0e;
+    background: #e0e7ef;
+    color: #0b2a4a;
     font-weight: 600;
   }
   .rl-easa-bookmarks-cat-list li .rl-easa-bookmarks-cat-count {
@@ -1731,8 +1742,8 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     padding: 1px 7px;
   }
   .rl-easa-bookmarks-cat-list li.is-active .rl-easa-bookmarks-cat-count {
-    background: #fde68a;
-    color: #854d0e;
+    background: #0b2a4a;
+    color: #fff;
   }
   .rl-easa-bookmarks-cat-actions {
     display: none;
@@ -1790,6 +1801,10 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     overflow-y: auto;
     display: flex;
     flex-direction: column;
+    /* Grid items default to `min-width: auto` (their intrinsic min width), which
+       lets long titles or breadcrumbs push the listpane wider than its column
+       and trigger horizontal overflow. Pin it so the listpane can shrink. */
+    min-width: 0;
   }
   .rl-easa-bookmarks-listpane-head {
     font-size: 13px;
@@ -1817,6 +1832,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     display: flex;
     flex-direction: column;
     gap: 5px;
+    min-width: 0;
   }
   .rl-easa-bookmarks-row:hover {
     border-color: #cbd5e1;
@@ -1826,10 +1842,16 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     font-size: 13px;
     font-weight: 700;
     color: #0f172a;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.35;
   }
   .rl-easa-bookmarks-row-crumb {
     font-size: 11px;
     color: #64748b;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.4;
   }
   .rl-easa-bookmarks-row-note {
     font-size: 12px;
@@ -1892,11 +1914,17 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     font-size: 14px;
     font-weight: 700;
     color: #0f172a;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.35;
   }
   .rl-easa-bookmarks-saveform-crumb {
     font-size: 11px;
     color: #64748b;
     margin-top: 4px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.4;
   }
   .rl-easa-bookmarks-saveform-catrow {
     display: flex;
@@ -1941,12 +1969,13 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     gap: 10px;
   }
   .rl-easa-bookmarks-saveform-save {
-    background: #f59e0b;
+    background: #0b2a4a;
     color: #fff;
-    border-color: #d97706;
+    border-color: #0b2a4a;
   }
   .rl-easa-bookmarks-saveform-save:hover {
-    background: #d97706;
+    background: #0f355f;
+    border-color: #0f355f;
   }
   .rl-easa-bookmarks-saveform-cancel {
     background: transparent;
@@ -3781,9 +3810,39 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     }
     mount.innerHTML = RL_EASA_TREE_LOADING_HTML;
     if (hint) hint.textContent = 'Loading regulation tree…';
-    rlEasaTreeFetchTreeChildrenJson(b, '')
-      .then(function (j) {
-        return rlEasaTreeResolveLegalRootNodes(b, j);
+
+    /* If the batch has an auto-open path configured for its corpus
+       (Aircrew → Part-FCL → Annex I today), bundle the entire path into one
+       `tree_bootstrap` request. The server returns roots PLUS pre-resolved
+       children for each pattern in order; we stash those into the preseed
+       table so `rlEasaTreeApplyDefaultOpenState`'s subsequent
+       `rlEasaEnsureChildUlLoaded` calls consume them synchronously instead
+       of issuing 2 extra round trips. Other corpora pass [] and the
+       bootstrap call effectively becomes a roots-only fetch — equivalent to
+       the legacy `tree_children` root call. */
+    var openPatternSources = rlEasaTreeComputeBootstrapPatternSources(b);
+
+    rlEasaTreeFetchTreeBootstrapJson(b, openPatternSources)
+      .then(function (boot) {
+        var levels = (boot && Array.isArray(boot.levels)) ? boot.levels : [];
+        if (!levels.length) {
+          /* Server returned no levels (unexpected, but handle gracefully):
+             fall back to the legacy roots-only path. */
+          return rlEasaTreeFetchTreeChildrenJson(b, '').then(function (j) {
+            return rlEasaTreeResolveLegalRootNodes(b, j);
+          });
+        }
+        /* Stash every non-root level into the preseed table BEFORE the
+           default-open walk starts, so when it calls into
+           rlEasaTreeFetchTreeChildrenJson(batchId, parentUid) the response
+           comes from memory. Order doesn't matter — keys are (batchId, uid). */
+        for (var i = 1; i < levels.length; i++) {
+          var lvl = levels[i] || {};
+          if (lvl.parent_uid) {
+            rlEasaTreeBootstrapStash(b, lvl.parent_uid, Array.isArray(lvl.nodes) ? lvl.nodes : []);
+          }
+        }
+        return rlEasaTreeResolveLegalRootNodes(b, { nodes: (levels[0] && levels[0].nodes) || [] });
       })
       .then(function (resolved) {
         rlEasaRenderTreeIntoMount(mount, b, resolved.nodes);
@@ -3795,6 +3854,31 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           + esc(e.message || 'Could not load the regulation tree.') + '</p>';
         if (hint) hint.textContent = 'Something went wrong while loading the tree.';
       });
+  }
+
+  /**
+   * Mirror of `rlEasaTreeApplyDefaultOpenState`'s gating logic: returns the
+   * regex sources to pass to `tree_bootstrap` for the given batch. When the
+   * batch isn't the configured auto-open corpus, returns [] so the bootstrap
+   * call only fetches roots (still benefiting from the single-round-trip API,
+   * just with no auto-open). Never throws; falls back to [] on any uncertainty.
+   */
+  function rlEasaTreeComputeBootstrapPatternSources(batchId) {
+    if (!rlEasaTreeDefaultOpenConfig || !rlEasaTreeDefaultOpenConfig.enabled) return [];
+    var b = rlEasaGetBatchRow(batchId);
+    if (!b) return [];
+    var label = '';
+    try { label = rlEasaTreeBatchShortLabel(b); } catch (e) { return []; }
+    if (label !== rlEasaTreeDefaultOpenConfig.corpusShortLabel) return [];
+    var pats = rlEasaTreeDefaultOpenConfig.expandPathTitleRegex || [];
+    var out = [];
+    for (var i = 0; i < pats.length; i++) {
+      var re = pats[i];
+      if (re && typeof re.source === 'string' && re.source !== '') {
+        out.push(re.source);
+      }
+    }
+    return out;
   }
 
   function rlEasaApplyMetricEl(id, val) {
@@ -4768,12 +4852,70 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     return false;
   }
 
+  /**
+   * Preseed table for the tree_bootstrap optimisation. When the page-load
+   * bootstrap fetches roots + the auto-open path's children in one HTTP
+   * round trip, every non-root level is stashed here keyed by
+   * `batchId|parentUid`. The very next call to `rlEasaTreeFetchTreeChildrenJson`
+   * for one of those parents pulls the cached node list and resolves
+   * synchronously instead of issuing a redundant network request. Entries
+   * are consumed (removed) on read so stale data can never survive past a
+   * re-render. Never read by anything except the tree fetch helper below.
+   */
+  var rlEasaTreeBootstrapPreseed = {};
+
+  function rlEasaTreeBootstrapPreseedKey(batchId, parentUid) {
+    return String(batchId || 0) + '|' + String(parentUid || '');
+  }
+
+  function rlEasaTreeBootstrapStash(batchId, parentUid, nodes) {
+    if (!Array.isArray(nodes)) return;
+    rlEasaTreeBootstrapPreseed[rlEasaTreeBootstrapPreseedKey(batchId, parentUid)] = nodes.slice();
+  }
+
+  function rlEasaTreeBootstrapTake(batchId, parentUid) {
+    var k = rlEasaTreeBootstrapPreseedKey(batchId, parentUid);
+    if (!Object.prototype.hasOwnProperty.call(rlEasaTreeBootstrapPreseed, k)) return null;
+    var v = rlEasaTreeBootstrapPreseed[k];
+    delete rlEasaTreeBootstrapPreseed[k];
+    return v;
+  }
+
   /** GET tree_children (semantic nodes only). Omit parentUid for corpus roots. */
   function rlEasaTreeFetchTreeChildrenJson(batchId, parentUid) {
+    /* If the boot bootstrap stashed this level already, return it instead of
+       firing a network round trip. The cached response is byte-equivalent to
+       what the server would have returned because the bootstrap endpoint
+       calls the same `easa_erules_tree_children_response_nodes()`. */
+    var preseeded = rlEasaTreeBootstrapTake(batchId, parentUid);
+    if (preseeded) {
+      return Promise.resolve({
+        ok: true,
+        batch_id: batchId,
+        parent_uid: (parentUid != null && String(parentUid).trim() !== '') ? String(parentUid).trim() : null,
+        nodes: preseeded
+      });
+    }
     var url = api + '?action=tree_children&batch_id=' + encodeURIComponent(String(batchId));
     if (parentUid != null && String(parentUid).trim() !== '') {
       url += '&parent_uid=' + encodeURIComponent(String(parentUid).trim());
     }
+    return fetch(url, { credentials: 'same-origin' }).then(rlEasaFetchJsonBody);
+  }
+
+  /**
+   * GET tree_bootstrap — fetch roots + the auto-open path's children in a
+   * single request. `openPatternSources` is an array of regex SOURCE strings
+   * (e.g. JS `regex.source`) which the server compiles with `i` flag. Returns
+   * a plain JSON: `{ ok, batch_id, levels: [{ parent_uid, nodes }, …] }`.
+   * When the patterns array is empty this behaves like a roots-only fetch.
+   */
+  function rlEasaTreeFetchTreeBootstrapJson(batchId, openPatternSources) {
+    var url = api + '?action=tree_bootstrap&batch_id=' + encodeURIComponent(String(batchId));
+    (openPatternSources || []).forEach(function (src) {
+      if (!src) return;
+      url += '&open[]=' + encodeURIComponent(String(src));
+    });
     return fetch(url, { credentials: 'same-origin' }).then(rlEasaFetchJsonBody);
   }
 
