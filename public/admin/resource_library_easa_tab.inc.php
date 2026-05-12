@@ -5751,11 +5751,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           if (newName == null) return;
           newName = String(newName).trim();
           if (!newName || newName === e.name) return;
-          fetch(api + '?action=bookmark_category_rename', {
+          fetch(api, {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: e.id, name: newName })
+            body: JSON.stringify({ action: 'bookmark_category_rename', id: e.id, name: newName })
           }).then(rlEasaParseJsonResponse).then(function (j) {
             if (!j.ok) throw new Error(j.error || 'Rename failed');
             rlEasaBookmarksRefreshCategoriesAndList();
@@ -5770,11 +5770,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         delBtn.addEventListener('click', function (ev) {
           ev.stopPropagation();
           if (!window.confirm('Delete category "' + e.name + '"? Bookmarks inside it will be moved to Uncategorized.')) return;
-          fetch(api + '?action=bookmark_category_delete', {
+          fetch(api, {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: e.id })
+            body: JSON.stringify({ action: 'bookmark_category_delete', id: e.id })
           }).then(rlEasaParseJsonResponse).then(function (j) {
             if (!j.ok) throw new Error(j.error || 'Delete failed');
             if (rlEasaBookmarksState.selectedCategoryId === e.id) rlEasaBookmarksState.selectedCategoryId = -1;
@@ -5890,11 +5890,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       delBtn.textContent = 'Delete';
       delBtn.addEventListener('click', function () {
         if (!window.confirm('Delete this bookmark?')) return;
-        fetch(api + '?action=bookmark_delete', {
+        fetch(api, {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: b.id })
+          body: JSON.stringify({ action: 'bookmark_delete', id: b.id })
         }).then(rlEasaParseJsonResponse).then(function (j) {
           if (!j.ok) throw new Error(j.error || 'Delete failed');
           rlEasaBookmarksRefreshCategoriesAndList();
@@ -5938,11 +5938,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       return;
     }
     if (errEl) errEl.hidden = true;
-    fetch(api + '?action=bookmark_category_create', {
+    fetch(api, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name })
+      body: JSON.stringify({ action: 'bookmark_category_create', name: name })
     }).then(rlEasaParseJsonResponse).then(function (j) {
       if (!j.ok) {
         var msg = 'Could not create category.';
@@ -6022,11 +6022,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           delBtn.textContent = 'Delete';
           delBtn.addEventListener('click', function () {
             if (!window.confirm('Delete this highlight?')) return;
-            fetch(api + '?action=highlight_delete', {
+            fetch(api, {
               method: 'POST',
               credentials: 'same-origin',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: h.id })
+              body: JSON.stringify({ action: 'highlight_delete', id: h.id })
             }).then(rlEasaParseJsonResponse).then(function (j2) {
               if (!j2.ok) throw new Error(j2.error || 'Delete failed');
               rlEasaBookmarksLoadHighlightsTab();
@@ -6152,11 +6152,12 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           statusEl.textContent = 'Saving…';
           statusEl.className = 'rl-easa-bookmarks-saveform-status';
         }
-        fetch(api + '?action=bookmark_save', {
+        fetch(api, {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            action: 'bookmark_save',
             batch_id: ctx.batch_id,
             node_uid: ctx.node_uid,
             category_id: categoryId,
@@ -6403,11 +6404,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       /** Dedupe (cross-node marks share an id). */
       var uniq = Array.from(new Set(ids));
       Promise.all(uniq.map(function (id) {
-        return fetch(api + '?action=highlight_delete', {
+        return fetch(api, {
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: id })
+          body: JSON.stringify({ action: 'highlight_delete', id: id })
         }).then(rlEasaParseJsonResponse);
       })).then(function () {
         rlEasaRefreshHighlightsForActive();
@@ -6443,11 +6444,12 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       var sStart = idx + selText.length;
       suffix = bodyText.substring(sStart, sStart + 30);
     }
-    fetch(api + '?action=highlight_save', {
+    fetch(api, {
       method: 'POST',
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        action: 'highlight_save',
         batch_id: ctx.batchId,
         node_uid: ctx.nodeUid,
         selection: { text: selText, prefix: prefix, suffix: suffix },
@@ -6660,11 +6662,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     saveBtn.className = 'rl-easa-user-mark-popover-btn';
     saveBtn.textContent = existingNote ? 'Update note' : 'Save note';
     saveBtn.addEventListener('click', function () {
-      fetch(api + '?action=highlight_update_note', {
+      fetch(api, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: id, annotation: note.value })
+        body: JSON.stringify({ action: 'highlight_update_note', id: id, annotation: note.value })
       }).then(rlEasaParseJsonResponse).then(function (j) {
         if (!j.ok) throw new Error(j.error || 'Save failed');
         /** Update both the title attribute and the noted styling on every sibling. */
@@ -6689,11 +6691,11 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     delBtn.className = 'rl-easa-user-mark-popover-btn is-danger';
     delBtn.textContent = 'Remove highlight';
     delBtn.addEventListener('click', function () {
-      fetch(api + '?action=highlight_delete', {
+      fetch(api, {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: id })
+        body: JSON.stringify({ action: 'highlight_delete', id: id })
       }).then(rlEasaParseJsonResponse).then(function (j) {
         if (!j.ok) throw new Error(j.error || 'Delete failed');
         rlEasaCloseMarkPopover();

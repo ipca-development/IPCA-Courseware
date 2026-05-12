@@ -39,6 +39,29 @@ function rl_easa_json_out(int $code, array $payload): void
     exit;
 }
 
+/**
+ * Resolve the current authenticated user for bookmarks/highlights endpoints.
+ * On failure (no migration applied / user not signed in) this terminates the
+ * request with a clear JSON error, so callers can rely on the returned id > 0.
+ * `bookmarks_status` does NOT use this guard — it returns a quiet `enabled:false`
+ * instead, so the UI can hide its buttons without throwing console errors.
+ */
+function rl_easa_require_bookmarks_user(PDO $pdo): int
+{
+    if (!easa_bookmarks_tables_ok($pdo)) {
+        rl_easa_json_out(503, [
+            'ok' => false,
+            'error' => 'Apply scripts/sql/resource_library_easa_user_bookmarks.sql first',
+        ]);
+    }
+    $u = cw_current_user($pdo);
+    $uid = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
+    if ($uid <= 0) {
+        rl_easa_json_out(401, ['ok' => false, 'error' => 'Sign in to use bookmarks']);
+    }
+    return $uid;
+}
+
 /** @return int Parsed byte size from php.ini strings such as "32M" (0 if unknown). */
 function rl_easa_ini_bytes(string $iniKey): int
 {
@@ -2098,6 +2121,73 @@ if ($method === 'GET') {
         ]);
     }
 
+    /* ────────────────────────────────────────────────────────────────────────
+       Per-user bookmarks & highlights — GET handlers.
+
+       All scoped by the authenticated user; data set by one user is invisible
+       to anyone else. `bookmarks_status` is the only deliberately tolerant
+       endpoint: it returns enabled:false (no 401/503) so the UI can hide its
+       buttons silently when the migration is missing or the visitor is signed
+       out. Every other GET below uses rl_easa_require_bookmarks_user().
+       ──────────────────────────────────────────────────────────────────────── */
+
+    if ($action === 'bookmarks_status') {
+        $u = cw_current_user($pdo);
+        $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
+        $tablesOk = easa_bookmarks_tables_ok($pdo);
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'supported' => $tablesOk,
+            'signed_in' => $userId > 0,
+            'enabled' => $tablesOk && $userId > 0,
+            'user_id' => $userId > 0 ? $userId : null,
+        ]);
+    }
+
+    if ($action === 'bookmark_categories_list') {
+        $uid = rl_easa_require_bookmarks_user($pdo);
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'categories' => easa_bookmarks_category_list($pdo, $uid),
+        ]);
+    }
+
+    if ($action === 'bookmarks_list') {
+        $uid = rl_easa_require_bookmarks_user($pdo);
+        /** `category_id=0` is reserved for the Uncategorized filter; omitting it returns all. */
+        $catRaw = $_GET['category_id'] ?? null;
+        $catId = null;
+        if ($catRaw !== null && $catRaw !== '') {
+            $catId = (int) $catRaw;
+        }
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'bookmarks' => easa_bookmarks_list($pdo, $uid, $catId),
+            'category_id' => $catId,
+        ]);
+    }
+
+    if ($action === 'highlights_list') {
+        $uid = rl_easa_require_bookmarks_user($pdo);
+        $batchId = (int) ($_GET['batch_id'] ?? 0);
+        $nodeUid = trim((string) ($_GET['node_uid'] ?? ''));
+        if ($batchId <= 0 || $nodeUid === '') {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id and node_uid required']);
+        }
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'highlights' => easa_highlights_list($pdo, $uid, $batchId, $nodeUid),
+        ]);
+    }
+
+    if ($action === 'highlights_list_all') {
+        $uid = rl_easa_require_bookmarks_user($pdo);
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'highlights' => easa_highlights_list_all($pdo, $uid),
+        ]);
+    }
+
     if ($action !== 'status') {
         rl_easa_json_out(400, ['ok' => false, 'error' => 'Unknown action']);
     }
@@ -3013,217 +3103,99 @@ TXT;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
-   Per-user bookmarks & highlights for the Live Easy Access Rules tree.
+   Per-user bookmarks & highlights — POST handlers.
 
-   All actions below are scoped by the authenticated user (cw_current_user).
-   A bookmark or highlight created by one user is never visible to anyone else.
-   Storage helpers live in src/easa_bookmarks.php; the migration is at
-   scripts/sql/resource_library_easa_user_bookmarks.sql. The status endpoint
-   `bookmarks_status` exists so the UI can hide its buttons silently when the
-   tables haven't been migrated yet or the visitor isn't signed in.
+   All scoped by the authenticated user via rl_easa_require_bookmarks_user().
+   Body is the JSON already decoded into $data at the top of the POST block.
    ──────────────────────────────────────────────────────────────────────────── */
 
-if ($action === 'bookmarks_status') {
-    $u = cw_current_user($pdo);
-    $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
-    $tablesOk = easa_bookmarks_tables_ok($pdo);
-    rl_easa_json_out(200, [
-        'ok' => true,
-        'supported' => $tablesOk,
-        'signed_in' => $userId > 0,
-        'enabled' => $tablesOk && $userId > 0,
-        'user_id' => $userId > 0 ? $userId : null,
-    ]);
+if ($action === 'bookmark_category_create') {
+    $uid = rl_easa_require_bookmarks_user($pdo);
+    $name  = trim((string) ($data['name'] ?? ''));
+    $color = trim((string) ($data['color_hex'] ?? ''));
+    $res = easa_bookmarks_category_create($pdo, $uid, $name, $color !== '' ? $color : null);
+    rl_easa_json_out($res['ok'] ? 200 : 400, $res);
 }
 
-/** Guard used by every other bookmarks endpoint below — short-circuits with a clear error. */
-$bookmarksAction = in_array($action, [
-    'bookmark_categories_list',
-    'bookmark_category_create',
-    'bookmark_category_rename',
-    'bookmark_category_delete',
-    'bookmarks_list',
-    'bookmark_save',
-    'bookmark_delete',
-    'highlights_list',
-    'highlights_list_all',
-    'highlight_save',
-    'highlight_update_note',
-    'highlight_delete',
-], true);
-if ($bookmarksAction) {
-    if (!easa_bookmarks_tables_ok($pdo)) {
-        rl_easa_json_out(503, [
-            'ok' => false,
-            'error' => 'Apply scripts/sql/resource_library_easa_user_bookmarks.sql first',
-        ]);
-    }
-    $bmUser = cw_current_user($pdo);
-    $bmUserId = is_array($bmUser) ? (int) ($bmUser['id'] ?? 0) : 0;
-    if ($bmUserId <= 0) {
-        rl_easa_json_out(401, ['ok' => false, 'error' => 'Sign in to use bookmarks']);
-    }
+if ($action === 'bookmark_category_rename') {
+    $uid = rl_easa_require_bookmarks_user($pdo);
+    $id   = (int) ($data['id'] ?? 0);
+    $name = trim((string) ($data['name'] ?? ''));
+    $res = easa_bookmarks_category_rename($pdo, $uid, $id, $name);
+    rl_easa_json_out($res['ok'] ? 200 : 400, $res);
+}
 
-    if ($action === 'bookmark_categories_list') {
-        rl_easa_json_out(200, [
-            'ok' => true,
-            'categories' => easa_bookmarks_category_list($pdo, $bmUserId),
-        ]);
-    }
+if ($action === 'bookmark_category_delete') {
+    $uid = rl_easa_require_bookmarks_user($pdo);
+    $id = (int) ($data['id'] ?? 0);
+    $res = easa_bookmarks_category_delete($pdo, $uid, $id);
+    rl_easa_json_out($res['ok'] ? 200 : 400, $res);
+}
 
-    if ($action === 'bookmark_category_create') {
-        $raw = file_get_contents('php://input') ?: '';
-        $data = $raw !== '' ? json_decode($raw, true) : [];
-        if (!is_array($data)) {
-            $data = [];
-        }
-        $name = trim((string) ($data['name'] ?? $_POST['name'] ?? ''));
-        $color = trim((string) ($data['color_hex'] ?? $_POST['color_hex'] ?? ''));
-        $res = easa_bookmarks_category_create($pdo, $bmUserId, $name, $color !== '' ? $color : null);
-        rl_easa_json_out($res['ok'] ? 200 : 400, $res);
+if ($action === 'bookmark_save') {
+    $uid = rl_easa_require_bookmarks_user($pdo);
+    $batchId = (int) ($data['batch_id'] ?? 0);
+    $nodeUid = trim((string) ($data['node_uid'] ?? ''));
+    $catRaw  = $data['category_id'] ?? null;
+    $ann     = $data['annotation'] ?? null;
+    $catId = null;
+    if ($catRaw !== null && $catRaw !== '') {
+        $cv = (int) $catRaw;
+        $catId = $cv > 0 ? $cv : null;
     }
+    $res = easa_bookmarks_save(
+        $pdo,
+        $uid,
+        $batchId,
+        $nodeUid,
+        $catId,
+        is_string($ann) ? $ann : null
+    );
+    rl_easa_json_out($res['ok'] ? 200 : 400, $res);
+}
 
-    if ($action === 'bookmark_category_rename') {
-        $raw = file_get_contents('php://input') ?: '';
-        $data = $raw !== '' ? json_decode($raw, true) : [];
-        if (!is_array($data)) {
-            $data = [];
-        }
-        $id = (int) ($data['id'] ?? $_POST['id'] ?? 0);
-        $name = trim((string) ($data['name'] ?? $_POST['name'] ?? ''));
-        $res = easa_bookmarks_category_rename($pdo, $bmUserId, $id, $name);
-        rl_easa_json_out($res['ok'] ? 200 : 400, $res);
-    }
+if ($action === 'bookmark_delete') {
+    $uid = rl_easa_require_bookmarks_user($pdo);
+    $id = (int) ($data['id'] ?? 0);
+    $res = easa_bookmarks_delete($pdo, $uid, $id);
+    rl_easa_json_out($res['ok'] ? 200 : 400, $res);
+}
 
-    if ($action === 'bookmark_category_delete') {
-        $raw = file_get_contents('php://input') ?: '';
-        $data = $raw !== '' ? json_decode($raw, true) : [];
-        if (!is_array($data)) {
-            $data = [];
-        }
-        $id = (int) ($data['id'] ?? $_POST['id'] ?? 0);
-        $res = easa_bookmarks_category_delete($pdo, $bmUserId, $id);
-        rl_easa_json_out($res['ok'] ? 200 : 400, $res);
+if ($action === 'highlight_save') {
+    $uid = rl_easa_require_bookmarks_user($pdo);
+    $batchId = (int) ($data['batch_id'] ?? 0);
+    $nodeUid = trim((string) ($data['node_uid'] ?? ''));
+    $selection = is_array($data['selection'] ?? null) ? $data['selection'] : [];
+    $color = (string) ($data['color_hex'] ?? '');
+    $ann = $data['annotation'] ?? null;
+    if ($batchId <= 0 || $nodeUid === '' || empty($selection['text'])) {
+        rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id, node_uid and selection.text required']);
     }
+    $res = easa_highlights_save(
+        $pdo,
+        $uid,
+        $batchId,
+        $nodeUid,
+        $selection,
+        $color,
+        is_string($ann) ? $ann : null
+    );
+    rl_easa_json_out($res['ok'] ? 200 : 400, $res);
+}
 
-    if ($action === 'bookmarks_list') {
-        $catRaw = $_GET['category_id'] ?? null;
-        /** `category_id=0` is reserved for the "Uncategorized" filter; omitted = all. */
-        $catId = null;
-        if ($catRaw !== null && $catRaw !== '') {
-            $catId = (int) $catRaw;
-        }
-        rl_easa_json_out(200, [
-            'ok' => true,
-            'bookmarks' => easa_bookmarks_list($pdo, $bmUserId, $catId),
-            'category_id' => $catId,
-        ]);
-    }
+if ($action === 'highlight_update_note') {
+    $uid = rl_easa_require_bookmarks_user($pdo);
+    $id  = (int) ($data['id'] ?? 0);
+    $ann = $data['annotation'] ?? null;
+    $res = easa_highlights_update_note($pdo, $uid, $id, is_string($ann) ? $ann : null);
+    rl_easa_json_out($res['ok'] ? 200 : 400, $res);
+}
 
-    if ($action === 'bookmark_save') {
-        $raw = file_get_contents('php://input') ?: '';
-        $data = $raw !== '' ? json_decode($raw, true) : [];
-        if (!is_array($data)) {
-            $data = [];
-        }
-        $batchId = (int) ($data['batch_id'] ?? $_POST['batch_id'] ?? 0);
-        $nodeUid = trim((string) ($data['node_uid'] ?? $_POST['node_uid'] ?? ''));
-        $catRaw  = $data['category_id'] ?? $_POST['category_id'] ?? null;
-        $ann     = $data['annotation'] ?? $_POST['annotation'] ?? null;
-        $catId = null;
-        if ($catRaw !== null && $catRaw !== '') {
-            $cv = (int) $catRaw;
-            $catId = $cv > 0 ? $cv : null;
-        }
-        $res = easa_bookmarks_save(
-            $pdo,
-            $bmUserId,
-            $batchId,
-            $nodeUid,
-            $catId,
-            is_string($ann) ? $ann : null
-        );
-        rl_easa_json_out($res['ok'] ? 200 : 400, $res);
-    }
-
-    if ($action === 'bookmark_delete') {
-        $raw = file_get_contents('php://input') ?: '';
-        $data = $raw !== '' ? json_decode($raw, true) : [];
-        if (!is_array($data)) {
-            $data = [];
-        }
-        $id = (int) ($data['id'] ?? $_POST['id'] ?? 0);
-        $res = easa_bookmarks_delete($pdo, $bmUserId, $id);
-        rl_easa_json_out($res['ok'] ? 200 : 400, $res);
-    }
-
-    if ($action === 'highlights_list') {
-        $batchId = (int) ($_GET['batch_id'] ?? 0);
-        $nodeUid = trim((string) ($_GET['node_uid'] ?? ''));
-        if ($batchId <= 0 || $nodeUid === '') {
-            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id and node_uid required']);
-        }
-        rl_easa_json_out(200, [
-            'ok' => true,
-            'highlights' => easa_highlights_list($pdo, $bmUserId, $batchId, $nodeUid),
-        ]);
-    }
-
-    if ($action === 'highlights_list_all') {
-        rl_easa_json_out(200, [
-            'ok' => true,
-            'highlights' => easa_highlights_list_all($pdo, $bmUserId),
-        ]);
-    }
-
-    if ($action === 'highlight_save') {
-        $raw = file_get_contents('php://input') ?: '';
-        $data = $raw !== '' ? json_decode($raw, true) : [];
-        if (!is_array($data)) {
-            $data = [];
-        }
-        $batchId = (int) ($data['batch_id'] ?? 0);
-        $nodeUid = trim((string) ($data['node_uid'] ?? ''));
-        $selection = is_array($data['selection'] ?? null) ? $data['selection'] : [];
-        $color = (string) ($data['color_hex'] ?? '');
-        $ann = $data['annotation'] ?? null;
-        if ($batchId <= 0 || $nodeUid === '' || empty($selection['text'])) {
-            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id, node_uid and selection.text required']);
-        }
-        $res = easa_highlights_save(
-            $pdo,
-            $bmUserId,
-            $batchId,
-            $nodeUid,
-            $selection,
-            $color,
-            is_string($ann) ? $ann : null
-        );
-        rl_easa_json_out($res['ok'] ? 200 : 400, $res);
-    }
-
-    if ($action === 'highlight_update_note') {
-        $raw = file_get_contents('php://input') ?: '';
-        $data = $raw !== '' ? json_decode($raw, true) : [];
-        if (!is_array($data)) {
-            $data = [];
-        }
-        $id = (int) ($data['id'] ?? 0);
-        $ann = $data['annotation'] ?? null;
-        $res = easa_highlights_update_note($pdo, $bmUserId, $id, is_string($ann) ? $ann : null);
-        rl_easa_json_out($res['ok'] ? 200 : 400, $res);
-    }
-
-    if ($action === 'highlight_delete') {
-        $raw = file_get_contents('php://input') ?: '';
-        $data = $raw !== '' ? json_decode($raw, true) : [];
-        if (!is_array($data)) {
-            $data = [];
-        }
-        $id = (int) ($data['id'] ?? 0);
-        $res = easa_highlights_delete($pdo, $bmUserId, $id);
-        rl_easa_json_out($res['ok'] ? 200 : 400, $res);
-    }
+if ($action === 'highlight_delete') {
+    $uid = rl_easa_require_bookmarks_user($pdo);
+    $id = (int) ($data['id'] ?? 0);
+    $res = easa_highlights_delete($pdo, $uid, $id);
+    rl_easa_json_out($res['ok'] ? 200 : 400, $res);
 }
 
 rl_easa_json_out(400, ['ok' => false, 'error' => 'Unknown action']);
