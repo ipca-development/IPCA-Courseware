@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceFindingEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceRcaCapEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceCapEngine.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -489,6 +490,61 @@ if ($detailId > 0) {
                 </button>
               </form>
             </div>
+            <?php endif; ?>
+        </section>
+
+        <?php
+        $capItems = array();
+        try {
+            $capItems = ComplianceCapEngine::listForFinding($pdo, $detailId);
+        } catch (Throwable $e) {
+            $capItems = array();
+        }
+        ?>
+        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
+          <h2 style="margin:0 0 8px;font-size:20px;">Corrective actions (CAP)</h2>
+          <p style="color:#64748b;font-size:14px;margin:0 0 12px;line-height:1.5;">
+            Manage CAP items linked to this finding or export a combined PDF (finding + RCA + actions).
+          </p>
+          <p style="margin:0 0 14px;">
+            <a href="/admin/compliance/corrective_actions.php?finding_id=<?= (int)$detailId ?>"
+              style="display:inline-block;background:#1e3c72;color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:700;">
+              Open CAP workspace
+            </a>
+            <a href="/admin/compliance/export_rca_cap_pdf.php?finding_id=<?= (int)$detailId ?>"
+              style="display:inline-block;margin-left:10px;background:#f1f5f9;color:#1e3c72;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:700;border:1px solid #cbd5e1;">
+              Export PDF
+            </a>
+          </p>
+          <?php if ($capItems === array()): ?>
+            <p style="color:#64748b;font-size:14px;margin:0;">No corrective actions yet for this finding.</p>
+          <?php else: ?>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
+              <thead>
+                <tr style="background:#f8fafc;text-align:left;">
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Code</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Title</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Status</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Due</th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($capItems as $c): ?>
+                  <tr>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;font-family:ui-monospace,monospace;font-size:12px;">
+                      <a href="/admin/compliance/corrective_actions.php?id=<?= (int)$c['id'] ?>" style="color:#1e3c72;font-weight:700;">
+                        <?= h((string)$c['action_code']) ?>
+                      </a>
+                    </td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= h((string)$c['title']) ?></td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= h((string)$c['status']) ?></td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#64748b;">
+                      <?= !empty($c['due_date']) ? h(substr((string)$c['due_date'], 0, 10)) : '—' ?>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
           <?php endif; ?>
         </section>
         <?php

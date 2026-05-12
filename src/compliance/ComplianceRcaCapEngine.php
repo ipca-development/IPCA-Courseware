@@ -7,8 +7,7 @@ require_once __DIR__ . '/ComplianceCaseEvents.php';
 require_once __DIR__ . '/ComplianceFindingEngine.php';
 
 /**
- * Root-cause analysis (5-Whys) + future CAP orchestration.
- * Phase 3a: RCA only — port of legacy RcaAiService::generateNextStep logic.
+ * Root-cause analysis (5-Whys). Corrective actions live in ComplianceCapEngine.
  */
 final class ComplianceRcaCapEngine
 {

@@ -153,6 +153,13 @@ if (!function_exists('automation_default_event_definitions')) {
                 'category_key' => 'compliance',
                 'sort_order' => 10,
             ),
+            array(
+                'event_key' => 'compliance.cap.created',
+                'label' => 'Compliance Corrective Action Created',
+                'description' => 'Triggered when a new corrective action (CAP item) is created for a finding in the Compliance Operating System.',
+                'category_key' => 'compliance',
+                'sort_order' => 20,
+            ),
         );
     }
 }
