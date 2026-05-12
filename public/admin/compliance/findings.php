@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceFindingEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceRcaCapEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCapEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceRegulatoryLinkEngine.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -186,6 +187,66 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             redirect('/admin/compliance/findings.php?id=' . $fid);
         }
+
+        if ($action === 'attach_regulation_link') {
+            $fid = (int)($_POST['finding_id'] ?? 0);
+            if ($fid <= 0) {
+                throw new RuntimeException('Invalid finding.');
+            }
+            $row = ComplianceFindingEngine::getById($pdo, $fid);
+            if ($row === null) {
+                throw new RuntimeException('Finding not found.');
+            }
+            if (!empty($row['locked_at'])) {
+                throw new RuntimeException('Finding is locked.');
+            }
+            $kind = trim((string)($_POST['source_kind'] ?? ''));
+            $sourceId = trim((string)($_POST['source_id'] ?? ''));
+            $citationUrl = trim((string)($_POST['citation_url'] ?? ''));
+            $citationUrl = $citationUrl !== '' ? $citationUrl : null;
+            $extLabel = trim((string)($_POST['citation_label'] ?? ''));
+            if ($kind === ComplianceRegulatoryLinkEngine::KIND_EXTERNAL) {
+                $rawUrl = trim((string)($_POST['external_url'] ?? ''));
+                if ($rawUrl === '' && $sourceId !== '') {
+                    $rawUrl = $sourceId;
+                }
+                $norm = ComplianceRegulatoryLinkEngine::normaliseExternalSourceId($rawUrl);
+                $sourceId = $norm[0];
+                $citationUrl = $norm[1];
+            }
+            ComplianceRegulatoryLinkEngine::attach(
+                $pdo,
+                $fid,
+                $kind,
+                $sourceId,
+                $extLabel !== '' ? $extLabel : null,
+                $citationUrl,
+                (string)($_POST['link_type'] ?? 'PRIMARY'),
+                (string)($_POST['confidence'] ?? 'MANUAL'),
+                trim((string)($_POST['notes'] ?? '')) !== '' ? trim((string)($_POST['notes'] ?? '')) : null,
+                $uid
+            );
+            cmp_flash_set('success', 'Regulatory citation attached.');
+            redirect('/admin/compliance/findings.php?id=' . $fid);
+        }
+
+        if ($action === 'detach_regulation_link') {
+            $fid = (int)($_POST['finding_id'] ?? 0);
+            $linkId = (int)($_POST['link_id'] ?? 0);
+            if ($fid <= 0 || $linkId <= 0) {
+                throw new RuntimeException('Invalid link or finding.');
+            }
+            $row = ComplianceFindingEngine::getById($pdo, $fid);
+            if ($row === null) {
+                throw new RuntimeException('Finding not found.');
+            }
+            if (!empty($row['locked_at'])) {
+                throw new RuntimeException('Finding is locked.');
+            }
+            ComplianceRegulatoryLinkEngine::detach($pdo, $linkId, $fid);
+            cmp_flash_set('success', 'Citation removed.');
+            redirect('/admin/compliance/findings.php?id=' . $fid);
+        }
     } catch (Throwable $e) {
         cmp_flash_set('error', $e->getMessage());
         $backId = (int)($_POST['finding_id'] ?? 0);
@@ -275,6 +336,13 @@ if ($detailId > 0) {
 
         $findingLocked = !empty($finding['locked_at']);
         $rcaLocked = $rca !== null && !empty($rca['locked_at']);
+
+        $regLinks = array();
+        try {
+            $regLinks = ComplianceRegulatoryLinkEngine::listForFinding($pdo, $detailId);
+        } catch (Throwable $e) {
+            $regLinks = array();
+        }
 
         ?>
         <p style="margin-bottom:20px;">
@@ -404,6 +472,70 @@ if ($detailId > 0) {
               </button>
             <?php endif; ?>
           </form>
+        </section>
+
+        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
+          <h2 style="margin:0 0 8px;font-size:20px;">Regulatory citations</h2>
+          <p style="color:#64748b;font-size:14px;margin:0 0 14px;line-height:1.5;">
+            Structured links in <code>ipca_compliance_finding_regulatory_links</code> (AIM paragraphs, EASA eRules nodes, or external https URLs).
+            Use the regulation search to attach from indexed libraries.
+          </p>
+          <p style="margin:0 0 16px;">
+            <a href="/admin/compliance/regulations.php?finding_id=<?= (int)$detailId ?>"
+              style="display:inline-block;background:#3730a3;color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:700;">
+              Search regulations & attach
+            </a>
+          </p>
+          <?php if ($regLinks === array()): ?>
+            <p style="color:#64748b;font-size:14px;margin:0;">No citations attached yet.</p>
+          <?php else: ?>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+              <thead>
+                <tr style="background:#f8fafc;text-align:left;">
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Kind</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Label</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Ref</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Type</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <?php foreach ($regLinks as $L):
+                    $k = (string)($L['source_kind'] ?? '');
+                    $kindLab = $k === ComplianceRegulatoryLinkEngine::KIND_AIM ? 'AIM'
+                        : ($k === ComplianceRegulatoryLinkEngine::KIND_EASA ? 'EASA' : ($k === ComplianceRegulatoryLinkEngine::KIND_EXTERNAL ? 'URL' : $k));
+                    $label = trim((string)($L['citation_label'] ?? ''));
+                    $curl = trim((string)($L['citation_url'] ?? ''));
+                    ?>
+                  <tr>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= h($kindLab) ?></td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= $label !== '' ? h($label) : '—' ?></td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;font-family:ui-monospace,monospace;font-size:11px;word-break:break-all;">
+                      <?php if ($curl !== ''): ?>
+                        <a href="<?= h($curl) ?>" target="_blank" rel="noopener" style="color:#1e3c72;"><?= h((string)($L['source_id'] ?? '')) ?></a>
+                      <?php else: ?>
+                        <?= h((string)($L['source_id'] ?? '')) ?>
+                      <?php endif; ?>
+                    </td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= h((string)($L['link_type'] ?? '')) ?></td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right;">
+                      <?php if (!$findingLocked): ?>
+                        <form method="post" action="/admin/compliance/findings.php?id=<?= (int)$detailId ?>" style="display:inline;"
+                          onsubmit="return confirm('Remove this citation?');">
+                          <input type="hidden" name="action" value="detach_regulation_link">
+                          <input type="hidden" name="finding_id" value="<?= (int)$detailId ?>">
+                          <input type="hidden" name="link_id" value="<?= (int)($L['id'] ?? 0) ?>">
+                          <button type="submit" style="background:#fee2e2;color:#991b1b;border:0;padding:6px 12px;border-radius:8px;font-size:12px;font-weight:700;cursor:pointer;">
+                            Remove
+                          </button>
+                        </form>
+                      <?php endif; ?>
+                    </td>
+                  </tr>
+                <?php endforeach; ?>
+              </tbody>
+            </table>
+          <?php endif; ?>
         </section>
 
         <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
