@@ -109,18 +109,180 @@ return [
         'coming_soon' => true,
     ],
     [
-        'key' => 'compliance_monitoring',
-        'label' => 'Compliance Monitoring',
+        'key' => 'compliance_os',
+        'label' => 'Compliance Operating System',
         'icon' => 'compliance',
-        'href' => null,
-        'coming_soon' => true,
-    ],
-    [
-        'key' => 'safety_management',
-        'label' => 'Safety Management',
-        'icon' => 'safety',
-        'href' => null,
-        'coming_soon' => true,
+        'match_paths' => [
+            '/admin/compliance/index.php',
+        ],
+        'visible' => static function (): bool {
+            if (!function_exists('cw_current_user')) {
+                return false;
+            }
+            global $pdo;
+            if (!isset($pdo) || !($pdo instanceof PDO)) {
+                return false;
+            }
+
+            $access = __DIR__ . '/../compliance/ComplianceAccess.php';
+            if (is_file($access)) {
+                require_once $access;
+            }
+
+            try {
+                $u = cw_current_user($pdo);
+            } catch (Throwable $e) {
+                return false;
+            }
+
+            if (!function_exists('compliance_user_has_access')) {
+                return false;
+            }
+
+            return compliance_user_has_access($u);
+        },
+        'items' => [
+            [
+                'key' => 'compliance_dashboard',
+                'label' => 'Dashboard',
+                'icon' => 'dashboard',
+                'href' => '/admin/compliance/index.php',
+            ],
+
+            [
+                'type' => 'section',
+                'label' => 'Compliance',
+            ],
+            [
+                'key' => 'compliance_audits',
+                'label' => 'Audits',
+                'icon' => 'reviews',
+                'href' => '/admin/compliance/audits.php',
+            ],
+            [
+                'key' => 'compliance_findings',
+                'label' => 'Findings',
+                'icon' => 'decisions',
+                'href' => '/admin/compliance/findings.php',
+            ],
+            [
+                'key' => 'compliance_corrective_actions',
+                'label' => 'Corrective Actions',
+                'icon' => 'tools',
+                'href' => '/admin/compliance/corrective_actions.php',
+            ],
+            [
+                'key' => 'compliance_meetings',
+                'label' => 'Meetings',
+                'icon' => 'schedule',
+                'href' => '/admin/compliance/meetings.php',
+            ],
+            [
+                'key' => 'compliance_inbox',
+                'label' => 'Inbox',
+                'icon' => 'documents',
+                'href' => '/admin/compliance/inbox.php',
+            ],
+            [
+                'key' => 'compliance_reports',
+                'label' => 'Reports',
+                'icon' => 'documents',
+                'href' => '/admin/compliance/reports.php',
+            ],
+
+            [
+                'type' => 'section',
+                'label' => 'Manuals',
+            ],
+            [
+                'key' => 'compliance_regulations',
+                'label' => 'Regulations',
+                'icon' => 'documents',
+                'href' => '/admin/compliance/regulations.php',
+            ],
+            [
+                'key' => 'compliance_procedures',
+                'label' => 'Procedures',
+                'icon' => 'documents',
+                'href' => '/admin/compliance/procedures.php',
+            ],
+            [
+                'key' => 'compliance_manual_drafts',
+                'label' => 'Draft Manuals',
+                'icon' => 'documents',
+                'href' => '/admin/compliance/manual_drafts.php',
+            ],
+            [
+                'key' => 'compliance_manual_approved',
+                'label' => 'Approved Manuals',
+                'icon' => 'documents',
+                'href' => '/admin/compliance/manual_approved.php',
+            ],
+            [
+                'key' => 'compliance_change_requests',
+                'label' => 'Change Requests',
+                'icon' => 'tools',
+                'href' => '/admin/compliance/change_requests.php',
+            ],
+            [
+                'key' => 'compliance_moc',
+                'label' => 'Management of Change',
+                'icon' => 'maintenance',
+                'href' => '/admin/compliance/moc.php',
+            ],
+
+            [
+                'type' => 'section',
+                'label' => 'Monitoring',
+            ],
+            [
+                'key' => 'compliance_live_monitoring',
+                'label' => 'Live Monitoring',
+                'icon' => 'scanner',
+                'href' => '/admin/compliance/live_monitoring.php',
+            ],
+            [
+                'key' => 'compliance_cap_monitoring',
+                'label' => 'CAP Monitoring',
+                'icon' => 'scanner',
+                'href' => '/admin/compliance/cap_monitoring.php',
+            ],
+            [
+                'key' => 'compliance_fstd_monitoring',
+                'label' => 'FSTD Monitoring',
+                'icon' => 'flight',
+                'href' => '/admin/compliance/fstd_monitoring.php',
+            ],
+            [
+                'key' => 'compliance_safety_monitoring',
+                'label' => 'Safety Monitoring',
+                'icon' => 'safety',
+                'href' => '/admin/compliance/safety_monitoring.php',
+            ],
+            [
+                'key' => 'compliance_part_is',
+                'label' => 'Cyber / Part-IS',
+                'icon' => 'safety',
+                'href' => '/admin/compliance/part_is.php',
+            ],
+            [
+                'key' => 'compliance_monitoring_rules',
+                'label' => 'Monitoring Rules',
+                'icon' => 'tools',
+                'href' => '/admin/compliance/monitoring_rules.php',
+            ],
+
+            [
+                'type' => 'section',
+                'label' => 'System',
+            ],
+            [
+                'key' => 'compliance_settings',
+                'label' => 'Settings',
+                'icon' => 'settings',
+                'href' => '/admin/compliance/settings.php',
+            ],
+        ],
     ],
 
     [

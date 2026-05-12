@@ -3822,8 +3822,19 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
        the legacy `tree_children` root call. */
     var openPatternSources = rlEasaTreeComputeBootstrapPatternSources(b);
 
+    /* Lightweight diagnostic logging so we can see in DevTools console
+       exactly which phase of the boot is slow. Cheap; safe to leave on. */
+    var tStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    try { console.log('[rl-easa-tree] boot start, batch_id=' + b + ', openPatterns=' + (openPatternSources && openPatternSources.length || 0)); } catch (e) {}
+
     rlEasaTreeFetchTreeBootstrapJson(b, openPatternSources)
       .then(function (boot) {
+        var tFetchEnd = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        try {
+          var srv = boot && boot.timing_ms ? boot.timing_ms : null;
+          console.log('[rl-easa-tree] fetch done in ' + Math.round(tFetchEnd - tStart) + ' ms; server timing: '
+            + (srv ? JSON.stringify(srv) : '(none)'));
+        } catch (e) {}
         var levels = (boot && Array.isArray(boot.levels)) ? boot.levels : [];
         if (!levels.length) {
           /* Server returned no levels (unexpected, but handle gracefully):
@@ -3854,14 +3865,22 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         });
       })
       .then(function (resolved) {
+        var tRenderStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         rlEasaRenderTreeIntoMount(mount, b, resolved.nodes);
+        var tRenderEnd = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        try { console.log('[rl-easa-tree] root render in ' + Math.round(tRenderEnd - tRenderStart) + ' ms (' + ((resolved.nodes && resolved.nodes.length) || 0) + ' root nodes)'); } catch (e) {}
         if (hint) hint.textContent = '';
-        return rlEasaTreeApplyDefaultOpenState(b, mount);
+        var tOpenStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+        return rlEasaTreeApplyDefaultOpenState(b, mount).then(function () {
+          var tOpenEnd = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+          try { console.log('[rl-easa-tree] auto-open + descend in ' + Math.round(tOpenEnd - tOpenStart) + ' ms; total boot ' + Math.round(tOpenEnd - tStart) + ' ms'); } catch (e) {}
+        });
       })
       .catch(function (e) {
         mount.innerHTML = '<p class="rl-easa-tree-loading-msg" style="margin:0;color:#991b1b;">'
           + esc(e.message || 'Could not load the regulation tree.') + '</p>';
         if (hint) hint.textContent = 'Something went wrong while loading the tree.';
+        try { console.error('[rl-easa-tree] boot failed:', e); } catch (ee) {}
       });
   }
 
