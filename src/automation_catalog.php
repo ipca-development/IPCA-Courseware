@@ -146,6 +146,13 @@ if (!function_exists('automation_default_event_definitions')) {
                 'category_key' => 'user_management',
                 'sort_order' => 30,
             ),
+            array(
+                'event_key' => 'compliance.finding.created',
+                'label' => 'Compliance Finding Created',
+                'description' => 'Triggered when a new compliance finding (NCR) is recorded in the Compliance Operating System.',
+                'category_key' => 'compliance',
+                'sort_order' => 10,
+            ),
         );
     }
 }

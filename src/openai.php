@@ -53,6 +53,49 @@ function cw_openai_responses(array $payload, int $timeoutSeconds = 90): array {
     return $json;
 }
 
+/**
+ * Call the OpenAI Responses API with a plain-text prompt (input-only) and
+ * return the concatenated output_text segments. Used by compliance RCA and
+ * similar flows — matches the legacy Slim backend's OpenAiClient::responseText
+ * payload shape: { "model": "…", "input": "…" }.
+ */
+function cw_openai_prompt_plaintext(string $input, ?string $modelOverride = null, int $timeoutSeconds = 90): string
+{
+    $model = ($modelOverride !== null && trim($modelOverride) !== '')
+        ? trim($modelOverride)
+        : cw_openai_model();
+
+    $payload = array(
+        'model' => $model,
+        'input' => $input,
+    );
+
+    $resp = cw_openai_responses($payload, $timeoutSeconds);
+
+    $out = $resp['output'] ?? array();
+    if (!is_array($out)) {
+        return '';
+    }
+
+    $text = '';
+    foreach ($out as $item) {
+        if (!is_array($item)) {
+            continue;
+        }
+        $content = $item['content'] ?? array();
+        if (!is_array($content)) {
+            continue;
+        }
+        foreach ($content as $c) {
+            if (is_array($c) && ($c['type'] ?? '') === 'output_text') {
+                $text .= (string)($c['text'] ?? '');
+            }
+        }
+    }
+
+    return trim($text);
+}
+
 function cw_openai_extract_json_text(array $resp): array {
     $out = $resp['output'] ?? [];
     if (!is_array($out)) return [];

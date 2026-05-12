@@ -4,39 +4,604 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
-require_once __DIR__ . '/../../../src/compliance/ComplianceShell.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceFindingEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceRcaCapEngine.php';
 
-compliance_require_access($pdo);
+$user = compliance_require_access($pdo);
+$uid = (int)($user['id'] ?? 0);
+
+/**
+ * @param 'success'|'error' $type
+ */
+function cmp_flash_set(string $type, string $message): void
+{
+    $_SESSION['_ipca_compliance_flash'] = array(
+        'type' => $type,
+        'message' => $message,
+    );
+}
+
+/**
+ * @return array{type:string,message:string}|null
+ */
+function cmp_flash_take(): ?array
+{
+    if (empty($_SESSION['_ipca_compliance_flash']) || !is_array($_SESSION['_ipca_compliance_flash'])) {
+        return null;
+    }
+    $f = $_SESSION['_ipca_compliance_flash'];
+    unset($_SESSION['_ipca_compliance_flash']);
+    return $f;
+}
+
+/**
+ * @return list<array{whyNumber:int,question:string,answer:string}>
+ */
+function cmp_rca_steps_from_post(): array
+{
+    $steps = array();
+    for ($i = 1; $i <= 5; $i++) {
+        $q = trim((string)($_POST['why_' . $i . '_q'] ?? ''));
+        $a = trim((string)($_POST['why_' . $i . '_a'] ?? ''));
+        if ($q === '' && $a === '') {
+            continue;
+        }
+        $steps[] = array(
+            'whyNumber' => $i,
+            'question' => $q,
+            'answer' => $a,
+        );
+    }
+    return ComplianceRcaCapEngine::normaliseSteps($steps);
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = (string)($_POST['action'] ?? '');
+
+    try {
+        if ($action === 'create_finding') {
+            $auditRaw = trim((string)($_POST['audit_id'] ?? ''));
+            $auditId = $auditRaw !== '' ? (int)$auditRaw : null;
+            if ($auditId !== null && $auditId <= 0) {
+                $auditId = null;
+            }
+
+            $id = ComplianceFindingEngine::create($pdo, array(
+                'title' => (string)($_POST['title'] ?? ''),
+                'description' => (string)($_POST['description'] ?? ''),
+                'classification' => (string)($_POST['classification'] ?? 'LEVEL_3'),
+                'severity' => (string)($_POST['severity'] ?? 'MEDIUM'),
+                'status' => (string)($_POST['status'] ?? 'OPEN'),
+                'reference' => (string)($_POST['reference'] ?? ''),
+                'raised_date' => (string)($_POST['raised_date'] ?? ''),
+                'target_date' => (string)($_POST['target_date'] ?? ''),
+                'regulation_summary' => (string)($_POST['regulation_summary'] ?? ''),
+                'notes' => (string)($_POST['notes'] ?? ''),
+                'domain_code' => (string)($_POST['domain_code'] ?? ''),
+                'requirement_key' => (string)($_POST['requirement_key'] ?? ''),
+                'audit_id' => $auditId,
+            ), $uid);
+            cmp_flash_set('success', 'Finding created.');
+            redirect('/admin/compliance/findings.php?id=' . $id);
+        }
+
+        if ($action === 'update_finding') {
+            $fid = (int)($_POST['finding_id'] ?? 0);
+            if ($fid <= 0) {
+                throw new RuntimeException('Invalid finding.');
+            }
+            $auditRaw = trim((string)($_POST['audit_id'] ?? ''));
+            $auditId = $auditRaw !== '' ? (int)$auditRaw : null;
+            if ($auditId !== null && $auditId <= 0) {
+                $auditId = null;
+            }
+
+            ComplianceFindingEngine::update($pdo, $fid, array(
+                'title' => (string)($_POST['title'] ?? ''),
+                'description' => (string)($_POST['description'] ?? ''),
+                'classification' => (string)($_POST['classification'] ?? ''),
+                'severity' => (string)($_POST['severity'] ?? ''),
+                'status' => (string)($_POST['status'] ?? ''),
+                'reference' => (string)($_POST['reference'] ?? ''),
+                'raised_date' => (string)($_POST['raised_date'] ?? ''),
+                'target_date' => (string)($_POST['target_date'] ?? ''),
+                'regulation_summary' => (string)($_POST['regulation_summary'] ?? ''),
+                'notes' => (string)($_POST['notes'] ?? ''),
+                'domain_code' => (string)($_POST['domain_code'] ?? ''),
+                'requirement_key' => (string)($_POST['requirement_key'] ?? ''),
+                'audit_id' => $auditId,
+            ), $uid);
+            cmp_flash_set('success', 'Finding saved.');
+            redirect('/admin/compliance/findings.php?id=' . $fid);
+        }
+
+        if ($action === 'save_rca') {
+            $fid = (int)($_POST['finding_id'] ?? 0);
+            if ($fid <= 0) {
+                throw new RuntimeException('Invalid finding.');
+            }
+            $row = ComplianceFindingEngine::getById($pdo, $fid);
+            if ($row === null) {
+                throw new RuntimeException('Finding not found.');
+            }
+            $steps = cmp_rca_steps_from_post();
+            $root = trim((string)($_POST['root_cause'] ?? ''));
+            $rootCause = $root !== '' ? $root : null;
+
+            $existingRca = ComplianceRcaCapEngine::getRcaForFinding($pdo, $fid);
+            $aiAssist = $existingRca !== null && !empty($existingRca['ai_assisted']);
+
+            ComplianceRcaCapEngine::saveRcaDraft(
+                $pdo,
+                $fid,
+                $row,
+                $steps,
+                $rootCause,
+                $uid,
+                $aiAssist,
+                isset($existingRca['ai_run_id']) ? (int)$existingRca['ai_run_id'] : null,
+                false
+            );
+            cmp_flash_set('success', 'RCA draft saved.');
+            redirect('/admin/compliance/findings.php?id=' . $fid);
+        }
+
+        if ($action === 'lock_rca') {
+            $fid = (int)($_POST['finding_id'] ?? 0);
+            if ($fid <= 0) {
+                throw new RuntimeException('Invalid finding.');
+            }
+            $row = ComplianceFindingEngine::getById($pdo, $fid);
+            if ($row === null) {
+                throw new RuntimeException('Finding not found.');
+            }
+            $approverName = trim((string)($_POST['approver_name'] ?? (string)($user['name'] ?? '')));
+            $lockReason = trim((string)($_POST['lock_reason'] ?? ''));
+            ComplianceRcaCapEngine::lockRca(
+                $pdo,
+                $fid,
+                $row,
+                $uid,
+                $approverName,
+                $lockReason !== '' ? $lockReason : null
+            );
+            cmp_flash_set('success', 'RCA locked (immutable).');
+            redirect('/admin/compliance/findings.php?id=' . $fid);
+        }
+
+        if ($action === 'ai_rca_next') {
+            $fid = (int)($_POST['finding_id'] ?? 0);
+            if ($fid <= 0) {
+                throw new RuntimeException('Invalid finding.');
+            }
+            $row = ComplianceFindingEngine::getById($pdo, $fid);
+            if ($row === null) {
+                throw new RuntimeException('Finding not found.');
+            }
+            $step = ComplianceRcaCapEngine::suggestNextWhyStep($pdo, $fid, $row, $uid);
+            cmp_flash_set(
+                'success',
+                'AI added Why ' . (int)($step['whyNumber'] ?? 0) . ' — review and save if needed.'
+            );
+            redirect('/admin/compliance/findings.php?id=' . $fid);
+        }
+    } catch (Throwable $e) {
+        cmp_flash_set('error', $e->getMessage());
+        $backId = (int)($_POST['finding_id'] ?? 0);
+        if ($backId > 0) {
+            redirect('/admin/compliance/findings.php?id=' . $backId);
+        }
+        redirect('/admin/compliance/findings.php');
+    }
+}
+
+$flash = cmp_flash_take();
+$detailId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 cw_header('Compliance · Findings');
 
-compliance_render_placeholder(
-    'Findings',
-    'Phase 3 — Wrap Findings / RCA / CAP',
-    'Raise, classify and resolve compliance findings (NCRs). Each finding can be raised in isolation or against an audit, supports AI-assisted 5-Whys RCA, links to regulations and manual sections, and drives corrective action plans.',
-    [
-        'bullets' => [
-            'Create findings with classification (Level 1-3 / Observation / Information) and severity.',
-            'Attach evidence, link to regulations (eCFR, FAA AIM, EASA eRules) and manual sections.',
-            'AI-assisted 5-Whys RCA chain; locked once approved.',
-            'Roll up CAP status into the parent finding.',
-        ],
-        'tables_used' => [
-            'ipca_compliance_findings',
-            'ipca_compliance_finding_documents',
-            'ipca_compliance_finding_regulatory_links',
-            'ipca_compliance_finding_manual_links',
-            'ipca_compliance_finding_mccf_links',
-            'ipca_compliance_finding_rca',
-            'ipca_compliance_ai_runs',
-        ],
-        'bridges_used' => [
-            'ComplianceFindingEngine',
-            'ComplianceRcaCapEngine',
-            'ComplianceRegulatoryBridge → resource_library_*, easa_erules_*',
-            'ComplianceManualBridge → resource_library_blocks / easa_erules_import_nodes_staging',
-        ],
-    ]
+$optionsClass = array(
+    'LEVEL_1' => 'Level 1',
+    'LEVEL_2' => 'Level 2',
+    'LEVEL_3' => 'Level 3',
+    'OBSERVATION' => 'Observation',
+    'INFORMATION' => 'Information',
 );
+$optionsSev = array(
+    'LOW' => 'Low',
+    'MEDIUM' => 'Medium',
+    'HIGH' => 'High',
+    'CRITICAL' => 'Critical',
+);
+$optionsStatus = array(
+    'OPEN' => 'Open',
+    'IN_PROGRESS' => 'In progress',
+    'WAITING_AUTHORITY' => 'Waiting authority',
+    'CLOSED' => 'Closed',
+    'CANCELLED' => 'Cancelled',
+);
+
+if ($flash !== null) {
+    $cls = ($flash['type'] === 'success') ? 'is-ok' : 'is-danger';
+    echo '<div class="queue-status ' . h($cls) . '" style="margin-bottom:16px;padding:12px 16px;border-radius:12px;">'
+        . h((string)$flash['message']) . '</div>';
+}
+
+try {
+    $audits = ComplianceFindingEngine::listAuditsForSelect($pdo);
+} catch (Throwable $e) {
+    $audits = array();
+    echo '<p class="queue-status is-warn" style="padding:12px;">Could not load audits (run Phase 1 migrations?). '
+        . h($e->getMessage()) . '</p>';
+}
+
+if ($detailId > 0) {
+    try {
+        $finding = ComplianceFindingEngine::getById($pdo, $detailId);
+    } catch (Throwable $e) {
+        $finding = null;
+        echo '<p class="queue-status is-danger">Database error: ' . h($e->getMessage()) . '</p>';
+    }
+
+    if ($finding === null) {
+        echo '<p>Finding not found.</p>';
+        echo '<p><a class="nav-link" href="/admin/compliance/findings.php">← All findings</a></p>';
+    } else {
+        $rca = null;
+        try {
+            $rca = ComplianceRcaCapEngine::getRcaForFinding($pdo, $detailId);
+        } catch (Throwable $e) {
+            echo '<p class="queue-status is-warn">' . h($e->getMessage()) . '</p>';
+        }
+
+        $steps = array();
+        if ($rca !== null && !empty($rca['steps_json'])) {
+            $rawJ = $rca['steps_json'];
+            if (is_array($rawJ)) {
+                $steps = ComplianceRcaCapEngine::normaliseSteps($rawJ);
+            } elseif (is_string($rawJ)) {
+                $dec = json_decode($rawJ, true);
+                if (is_array($dec)) {
+                    $steps = ComplianceRcaCapEngine::normaliseSteps($dec);
+                }
+            }
+        }
+
+        $byWhy = array();
+        foreach ($steps as $s) {
+            $byWhy[(int)$s['whyNumber']] = $s;
+        }
+
+        $findingLocked = !empty($finding['locked_at']);
+        $rcaLocked = $rca !== null && !empty($rca['locked_at']);
+
+        ?>
+        <p style="margin-bottom:20px;">
+          <a href="/admin/compliance/findings.php" style="color:#1e3c72;font-weight:700;">← All findings</a>
+          <span style="color:#64748b;margin:0 8px;">|</span>
+          <span style="font-family:ui-monospace,monospace;font-size:13px;"><?= h((string)$finding['finding_code']) ?></span>
+        </p>
+
+        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
+          <h2 style="margin:0 0 8px;font-size:20px;">Finding details</h2>
+          <?php if ($findingLocked): ?>
+            <p class="queue-status is-warn" style="display:inline-block;">This finding is locked.</p>
+          <?php endif; ?>
+
+          <form method="post" action="/admin/compliance/findings.php?id=<?= (int)$detailId ?>" style="margin-top:16px;">
+            <input type="hidden" name="action" value="update_finding">
+            <input type="hidden" name="finding_id" value="<?= (int)$detailId ?>">
+
+            <label style="display:block;margin-bottom:12px;">
+              <span style="display:block;font-size:12px;font-weight:700;color:#64748b;margin-bottom:4px;">Audit (optional)</span>
+              <select name="audit_id" style="width:100%;max-width:480px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+                <option value="">— None —</option>
+                <?php foreach ($audits as $a): ?>
+                  <option value="<?= (int)$a['id'] ?>"
+                    <?= ((int)($finding['audit_id'] ?? 0) === (int)$a['id']) ? 'selected' : '' ?>>
+                    <?= h((string)$a['audit_code'] . ' — ' . (string)$a['title']) ?>
+                  </option>
+                <?php endforeach; ?>
+              </select>
+            </label>
+
+            <label style="display:block;margin-bottom:12px;">
+              <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Title *</span>
+              <input name="title" required value="<?= h((string)$finding['title']) ?>"
+                style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                <?= $findingLocked ? 'disabled' : '' ?>>
+            </label>
+
+            <label style="display:block;margin-bottom:12px;">
+              <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Description *</span>
+              <textarea name="description" required rows="6"
+                style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                <?= $findingLocked ? 'disabled' : '' ?>><?= h((string)$finding['description']) ?></textarea>
+            </label>
+
+            <div style="display:flex;flex-wrap:wrap;gap:16px;">
+              <label>
+                <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Classification</span>
+                <select name="classification" style="padding:8px;border-radius:8px;" <?= $findingLocked ? 'disabled' : '' ?>>
+                  <?php foreach ($optionsClass as $k => $lab): ?>
+                    <option value="<?= h($k) ?>" <?= ((string)$finding['classification'] === $k) ? 'selected' : '' ?>><?= h($lab) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <label>
+                <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Severity</span>
+                <select name="severity" style="padding:8px;border-radius:8px;" <?= $findingLocked ? 'disabled' : '' ?>>
+                  <?php foreach ($optionsSev as $k => $lab): ?>
+                    <option value="<?= h($k) ?>" <?= ((string)$finding['severity'] === $k) ? 'selected' : '' ?>><?= h($lab) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <label>
+                <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Status</span>
+                <select name="status" style="padding:8px;border-radius:8px;" <?= $findingLocked ? 'disabled' : '' ?>>
+                  <?php foreach ($optionsStatus as $k => $lab): ?>
+                    <option value="<?= h($k) ?>" <?= ((string)$finding['status'] === $k) ? 'selected' : '' ?>><?= h($lab) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+            </div>
+
+            <label style="display:block;margin:12px 0;">
+              <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Authority reference</span>
+              <input name="reference" value="<?= h((string)($finding['reference'] ?? '')) ?>"
+                style="width:100%;max-width:480px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                <?= $findingLocked ? 'disabled' : '' ?>>
+            </label>
+
+            <div style="display:flex;flex-wrap:wrap;gap:16px;">
+              <label>
+                <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Raised date</span>
+                <input type="date" name="raised_date" value="<?= h(substr((string)$finding['raised_date'], 0, 10)) ?>"
+                  style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                  <?= $findingLocked ? 'disabled' : '' ?>>
+              </label>
+              <label>
+                <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Target date</span>
+                <input type="date" name="target_date"
+                  value="<?= !empty($finding['target_date']) ? h(substr((string)$finding['target_date'], 0, 10)) : '' ?>"
+                  style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                  <?= $findingLocked ? 'disabled' : '' ?>>
+              </label>
+            </div>
+
+            <label style="display:block;margin:12px 0;">
+              <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Regulation summary (cache / free text)</span>
+              <textarea name="regulation_summary" rows="3"
+                style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                <?= $findingLocked ? 'disabled' : '' ?>><?= h((string)($finding['regulation_summary'] ?? '')) ?></textarea>
+            </label>
+
+            <label style="display:block;margin-bottom:12px;">
+              <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Domain code</span>
+              <input name="domain_code" value="<?= h((string)($finding['domain_code'] ?? '')) ?>"
+                style="width:100%;max-width:320px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                <?= $findingLocked ? 'disabled' : '' ?>>
+            </label>
+
+            <label style="display:block;margin-bottom:12px;">
+              <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">MCCF requirement key</span>
+              <input name="requirement_key" value="<?= h((string)($finding['requirement_key'] ?? '')) ?>"
+                style="width:100%;max-width:480px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                <?= $findingLocked ? 'disabled' : '' ?>>
+            </label>
+
+            <label style="display:block;margin-bottom:16px;">
+              <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Notes</span>
+              <textarea name="notes" rows="3"
+                style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                <?= $findingLocked ? 'disabled' : '' ?>><?= h((string)($finding['notes'] ?? '')) ?></textarea>
+            </label>
+
+            <?php if (!$findingLocked): ?>
+              <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">
+                Save finding
+              </button>
+            <?php endif; ?>
+          </form>
+        </section>
+
+        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
+          <h2 style="margin:0 0 8px;font-size:20px;">Root cause analysis (5 Whys)</h2>
+          <p style="color:#64748b;font-size:14px;margin:0 0 16px;line-height:1.5;">
+            AI suggests the <em>next</em> Why step (legacy parity). Each suggestion is logged in
+            <code>ipca_compliance_ai_runs</code>. Locking the RCA requires a human approver name — AI cannot lock.
+          </p>
+          <?php if ($rcaLocked): ?>
+            <p class="queue-status is-ok" style="display:inline-block;margin-bottom:12px;">
+              RCA locked<?php
+                $an = (string)($rca['approved_by_name'] ?? '');
+                echo $an !== '' ? ' — approved by ' . h($an) : '';
+              ?>.
+            </p>
+          <?php endif; ?>
+
+          <form method="post" action="/admin/compliance/findings.php?id=<?= (int)$detailId ?>" style="margin-bottom:16px;">
+            <input type="hidden" name="action" value="save_rca">
+            <input type="hidden" name="finding_id" value="<?= (int)$detailId ?>">
+
+            <?php for ($i = 1; $i <= 5; $i++):
+                $rowS = $byWhy[$i] ?? null;
+                $q = $rowS ? (string)$rowS['question'] : '';
+                $a = $rowS ? (string)$rowS['answer'] : '';
+                ?>
+              <div style="margin-bottom:18px;padding:14px;background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0;">
+                <div style="font-weight:800;color:#1e3c72;margin-bottom:8px;">Why <?= $i ?></div>
+                <label style="display:block;margin-bottom:8px;">
+                  <span style="font-size:12px;color:#64748b;">Question</span>
+                  <input name="why_<?= $i ?>_q" value="<?= h($q) ?>"
+                    style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                    <?= ($findingLocked || $rcaLocked) ? 'disabled' : '' ?>>
+                </label>
+                <label style="display:block;">
+                  <span style="font-size:12px;color:#64748b;">Answer</span>
+                  <textarea name="why_<?= $i ?>_a" rows="2"
+                    style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                    <?= ($findingLocked || $rcaLocked) ? 'disabled' : '' ?>><?= h($a) ?></textarea>
+                </label>
+              </div>
+            <?php endfor; ?>
+
+            <label style="display:block;margin-bottom:16px;">
+              <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Root cause statement</span>
+              <textarea name="root_cause" rows="3"
+                style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
+                <?= ($findingLocked || $rcaLocked) ? 'disabled' : '' ?>><?= h((string)($rca['root_cause_text'] ?? '')) ?></textarea>
+            </label>
+
+            <?php if (!$findingLocked && !$rcaLocked): ?>
+              <button type="submit" style="background:#0f766e;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;margin-right:8px;">
+                Save RCA draft
+              </button>
+            <?php endif; ?>
+          </form>
+
+          <?php if (!$findingLocked && !$rcaLocked): ?>
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+              <form method="post" action="/admin/compliance/findings.php?id=<?= (int)$detailId ?>" onsubmit="return confirm('Request next Why from AI?');">
+                <input type="hidden" name="action" value="ai_rca_next">
+                <input type="hidden" name="finding_id" value="<?= (int)$detailId ?>">
+                <button type="submit" style="background:#3730a3;color:#fff;border:0;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;">
+                  AI: suggest next Why
+                </button>
+              </form>
+
+              <form method="post" action="/admin/compliance/findings.php?id=<?= (int)$detailId ?>" style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;">
+                <input type="hidden" name="action" value="lock_rca">
+                <input type="hidden" name="finding_id" value="<?= (int)$detailId ?>">
+                <label style="margin:0;">
+                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Approver name *</span>
+                  <input name="approver_name" required value="<?= h((string)($user['name'] ?? '')) ?>"
+                    style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;min-width:200px;">
+                </label>
+                <label style="margin:0;">
+                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Lock reason</span>
+                  <input name="lock_reason" placeholder="Optional"
+                    style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;min-width:200px;">
+                </label>
+                <button type="submit" style="background:#b45309;color:#fff;border:0;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;"
+                  onclick="return confirm('Lock RCA? It will become immutable.');">
+                  Lock RCA
+                </button>
+              </form>
+            </div>
+          <?php endif; ?>
+        </section>
+        <?php
+    }
+} else {
+    try {
+        $rows = ComplianceFindingEngine::listRecent($pdo, 150);
+    } catch (Throwable $e) {
+        $rows = array();
+        echo '<p class="queue-status is-danger">Could not load findings. Apply Phase 1 SQL migrations first.<br>'
+            . h($e->getMessage()) . '</p>';
+    }
+
+    ?>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:24px;max-width:1100px;">
+      <div>
+        <h2 style="margin:0 0 6px;font-size:20px;">Findings</h2>
+        <p style="margin:0;color:#64748b;font-size:14px;">Create and manage NCRs; open a row for 5-Whys RCA.</p>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 360px;gap:24px;align-items:start;max-width:1100px;">
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <thead>
+            <tr style="background:#f1f5f9;text-align:left;">
+              <th style="padding:12px 14px;">Code</th>
+              <th style="padding:12px 14px;">Title</th>
+              <th style="padding:12px 14px;">Class</th>
+              <th style="padding:12px 14px;">Severity</th>
+              <th style="padding:12px 14px;">Status</th>
+              <th style="padding:12px 14px;">Updated</th>
+            </tr>
+          </thead>
+          <tbody>
+            <?php if (!$rows): ?>
+              <tr><td colspan="6" style="padding:20px;color:#64748b;">No findings yet.</td></tr>
+            <?php endif; ?>
+            <?php foreach ($rows as $r): ?>
+              <tr style="border-top:1px solid #e2e8f0;">
+                <td style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:12px;">
+                  <a href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>" style="color:#1e3c72;font-weight:700;">
+                    <?= h((string)$r['finding_code']) ?>
+                  </a>
+                </td>
+                <td style="padding:10px 14px;"><?= h((string)$r['title']) ?></td>
+                <td style="padding:10px 14px;"><?= h((string)$r['classification']) ?></td>
+                <td style="padding:10px 14px;"><?= h((string)$r['severity']) ?></td>
+                <td style="padding:10px 14px;"><?= h((string)$r['status']) ?></td>
+                <td style="padding:10px 14px;color:#64748b;font-size:12px;"><?= h((string)$r['updated_at']) ?></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;">
+        <h3 style="margin:0 0 14px;font-size:16px;">New finding</h3>
+        <form method="post" action="/admin/compliance/findings.php">
+          <input type="hidden" name="action" value="create_finding">
+
+          <label style="display:block;margin-bottom:10px;">
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px;">Audit (optional)</span>
+            <select name="audit_id" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+              <option value="">— None —</option>
+              <?php foreach ($audits as $a): ?>
+                <option value="<?= (int)$a['id'] ?>"><?= h((string)$a['audit_code'] . ' — ' . (string)$a['title']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+
+          <label style="display:block;margin-bottom:10px;">
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Title *</span>
+            <input name="title" required style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+          </label>
+
+          <label style="display:block;margin-bottom:10px;">
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Description *</span>
+            <textarea name="description" required rows="5" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"></textarea>
+          </label>
+
+          <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
+            <label>
+              <span style="font-size:11px;font-weight:700;color:#64748b;">Classification</span>
+              <select name="classification" style="width:100%;padding:8px;border-radius:8px;">
+                <?php foreach ($optionsClass as $k => $lab): ?>
+                  <option value="<?= h($k) ?>" <?= $k === 'LEVEL_3' ? 'selected' : '' ?>><?= h($lab) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </label>
+            <label>
+              <span style="font-size:11px;font-weight:700;color:#64748b;">Severity</span>
+              <select name="severity" style="width:100%;padding:8px;border-radius:8px;">
+                <?php foreach ($optionsSev as $k => $lab): ?>
+                  <option value="<?= h($k) ?>" <?= $k === 'MEDIUM' ? 'selected' : '' ?>><?= h($lab) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </label>
+          </div>
+
+          <label style="display:block;margin-bottom:10px;">
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Raised date</span>
+            <input type="date" name="raised_date" value="<?= h(date('Y-m-d')) ?>"
+              style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+          </label>
+
+          <button type="submit" style="width:100%;background:#1e3c72;color:#fff;border:0;padding:12px;border-radius:10px;font-weight:800;cursor:pointer;margin-top:8px;">
+            Create finding
+          </button>
+        </form>
+      </div>
+    </div>
+    <?php
+}
 
 cw_footer();
