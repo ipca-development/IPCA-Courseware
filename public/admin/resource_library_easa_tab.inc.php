@@ -3832,7 +3832,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         var tFetchEnd = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         try {
           var srv = boot && boot.timing_ms ? boot.timing_ms : null;
-          console.log('[rl-easa-tree] fetch done in ' + Math.round(tFetchEnd - tStart) + ' ms; server timing: '
+          console.log('[rl-easa-tree] fetch done in ' + Math.round(tFetchEnd - tStart) + ' ms; server phase timings (ms): '
             + (srv ? JSON.stringify(srv) : '(none)'));
         } catch (e) {}
         var levels = (boot && Array.isArray(boot.levels)) ? boot.levels : [];

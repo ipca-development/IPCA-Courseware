@@ -1833,7 +1833,9 @@ if ($method === 'GET') {
             $levels = [];
             $tBlock = microtime(true);
             $rootNodes = easa_erules_tree_children_response_nodes($pdo, $batchId, null);
-            $stPhase['roots'] = (int) round((microtime(true) - $tBlock) * 1000);
+            /* Milliseconds spent in easa_erules_tree_children_response_nodes for corpus
+               roots — NOT a node count (see levels[0].nodes.length on the client). */
+            $stPhase['roots_ms'] = (int) round((microtime(true) - $tBlock) * 1000);
             $levels[] = [
                 'parent_uid' => null,
                 'nodes' => $rootNodes,
@@ -1872,7 +1874,7 @@ if ($method === 'GET') {
                 }
                 $tBlock = microtime(true);
                 $childNodes = easa_erules_tree_children_response_nodes($pdo, $batchId, $matchedUid);
-                $stPhase['lvl' . $levelIdx] = (int) round((microtime(true) - $tBlock) * 1000);
+                $stPhase['open_lvl_' . $levelIdx . '_ms'] = (int) round((microtime(true) - $tBlock) * 1000);
                 $levels[] = [
                     'parent_uid' => $matchedUid,
                     'nodes' => $childNodes,
