@@ -13,7 +13,7 @@ declare(strict_types=1);
  * ai_runs.created_by, and RCA approved fields (approved_by_name/approved_at from legacy are not stored).
  *
  * Does NOT import manual_excerpts / mccf_* catalog rows (different product surface). Re-run is blocked if
- * the target audit_code already exists (override with --force).
+ * the target audit_code already exists (override with --force, which deletes that audit and its findings first).
  *
  * Usage:
  *   Requires Phase 1 `ipca_compliance_*` tables. CW_DB_* env vars must be set (same as app), except for --parse-only.
@@ -579,6 +579,30 @@ usort($findingRows, static function (array $a, array $b): int {
 $pdo->beginTransaction();
 
 try {
+    if ($force) {
+        $lookup = $pdo->prepare('SELECT id FROM ipca_compliance_audits WHERE audit_code = ? LIMIT 1');
+        $lookup->execute(array($auditCode));
+        $oldAuditId = $lookup->fetchColumn();
+        if ($oldAuditId !== false) {
+            $oldAuditId = (int)$oldAuditId;
+            $idsStmt = $pdo->prepare('SELECT id FROM ipca_compliance_findings WHERE audit_id = ?');
+            $idsStmt->execute(array($oldAuditId));
+            /** @var list<int> $findingIds */
+            $findingIds = array_map('intval', $idsStmt->fetchAll(PDO::FETCH_COLUMN));
+            if ($findingIds !== array()) {
+                $placeholders = implode(',', array_fill(0, count($findingIds), '?'));
+                $pdo->prepare(
+                    "DELETE FROM ipca_compliance_ai_runs WHERE source_object_type = 'finding' AND source_object_id IN ({$placeholders})"
+                )->execute($findingIds);
+            }
+            $pdo->prepare(
+                "DELETE FROM ipca_compliance_ai_runs WHERE source_object_type = 'audit' AND source_object_id = ?"
+            )->execute(array($oldAuditId));
+            $pdo->prepare('DELETE FROM ipca_compliance_findings WHERE audit_id = ?')->execute(array($oldAuditId));
+            $pdo->prepare('DELETE FROM ipca_compliance_audits WHERE id = ?')->execute(array($oldAuditId));
+        }
+    }
+
     $insAudit = $pdo->prepare(
         'INSERT INTO ipca_compliance_audits (
             case_id, audit_code, title, authority, audit_category, audit_type, audit_entity,
