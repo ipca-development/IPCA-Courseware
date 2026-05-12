@@ -4736,56 +4736,79 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
 
     revealProgressFull('Opening regulation tree…');
 
-    return rlEasaAncestorUidChain(batchId, targetUid).then(function (chain) {
-      /* chain: root ... target */
-      if (!chain.length) throw new Error('Empty ancestor chain');
-      revealProgressFull('Finding parent sections…');
-      var revealOpts = { chainUids: chain };
-      return rlEasaTreeFetchTreeChildrenJson(batchId, '')
-        .then(function (j) {
-          return rlEasaTreeResolveLegalRootNodes(batchId, j, revealOpts);
-        })
-        .then(function (resolved) {
-          rlEasaRenderTreeIntoMount(mount, batchId, resolved.nodes);
-          var ul = mount.querySelector(':scope > ul.rl-easa-tree-list');
-          if (!ul) throw new Error('Tree mount empty');
-          var path = chain.slice();
-          while (path.length > 0) {
-            var head0 = path[0];
-            if (ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(head0) + '"]')) break;
-            path.shift();
-          }
-          if (!path.length) throw new Error('Tree roots do not contain this ancestor chain.');
-          function descend(idx) {
-            if (idx >= path.length) return Promise.resolve(null);
-            var uid = path[idx];
-            var li = ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(uid) + '"]');
-            if (!li) return Promise.reject(new Error('Could not find node ' + uid + ' in tree (try Load tree roots).'));
-            if (idx === path.length - 1) {
-              revealProgressBar('Opening selected section…');
-              return Promise.resolve(li);
-            }
-            revealProgressBar(revealDescendLabel(idx));
-            return rlEasaEnsureChildUlLoaded(li, batchId, revealOpts).then(function () {
-              var nextUl = li.querySelector(':scope > ul.rl-easa-tree-list');
-              if (!nextUl) return Promise.reject(new Error('No children container'));
-              ul = nextUl;
-              return descend(idx + 1);
-            });
-          }
-          return descend(0).then(function (li) {
-            revealProgressClear();
-            if (!li) return;
-            try {
-              li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-            } catch (e0) {}
-            rlEasaShowNodeDetail(batchId, targetUid, li, true);
-          });
+    var revealUrl = api + '?action=tree_reveal&batch_id=' + encodeURIComponent(String(batchId))
+      + '&node_uid=' + encodeURIComponent(String(targetUid));
+
+    return fetch(revealUrl, { credentials: 'same-origin' })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { j: j };
         });
-    }).catch(function (e) {
-      mount.innerHTML = '<p class="rl-easa-tree-loading-msg" style="margin:0;color:#991b1b;">' + esc(e.message || 'Tree navigation failed') + '</p>';
-      throw e;
-    });
+      })
+      .then(function (pack) {
+        var j = pack.j;
+        if (!j || !j.ok) {
+          throw new Error((j && j.error) || 'tree_reveal failed');
+        }
+        var chain = j.chain || [];
+        if (!chain.length) throw new Error('Empty ancestor chain');
+        if (rlEasaTreeDebugEnabled() && j.timing_ms) {
+          rlEasaTreeDebugLog('[rl-easa-tree] tree_reveal: ' + JSON.stringify(j.timing_ms));
+        }
+        var levels = j.levels || [];
+        for (var lix = 0; lix < levels.length; lix++) {
+          var lv = levels[lix] || {};
+          var puid = lv.parent_uid != null && String(lv.parent_uid).trim() !== '' ? String(lv.parent_uid).trim() : '';
+          rlEasaTreeBootstrapStash(batchId, puid, Array.isArray(lv.nodes) ? lv.nodes : []);
+        }
+        revealProgressFull('Finding parent sections…');
+        var revealOpts = { chainUids: chain };
+        return rlEasaTreeFetchTreeChildrenJson(batchId, '')
+          .then(function (j0) {
+            return rlEasaTreeResolveLegalRootNodes(batchId, j0, revealOpts);
+          })
+          .then(function (resolved) {
+            rlEasaRenderTreeIntoMount(mount, batchId, resolved.nodes);
+            var ul = mount.querySelector(':scope > ul.rl-easa-tree-list');
+            if (!ul) throw new Error('Tree mount empty');
+            var path = chain.slice();
+            while (path.length > 0) {
+              var head0 = path[0];
+              if (ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(head0) + '"]')) break;
+              path.shift();
+            }
+            if (!path.length) throw new Error('Tree roots do not contain this ancestor chain.');
+            function descend(idx) {
+              if (idx >= path.length) return Promise.resolve(null);
+              var uid = path[idx];
+              var li = ul.querySelector(':scope > li[data-node-uid="' + rlEasaCssEscape(uid) + '"]');
+              if (!li) return Promise.reject(new Error('Could not find node ' + uid + ' in tree (try Load tree roots).'));
+              if (idx === path.length - 1) {
+                revealProgressBar('Opening selected section…');
+                return Promise.resolve(li);
+              }
+              revealProgressBar(revealDescendLabel(idx));
+              return rlEasaEnsureChildUlLoaded(li, batchId, revealOpts).then(function () {
+                var nextUl = li.querySelector(':scope > ul.rl-easa-tree-list');
+                if (!nextUl) return Promise.reject(new Error('No children container'));
+                ul = nextUl;
+                return descend(idx + 1);
+              });
+            }
+            return descend(0).then(function (li) {
+              revealProgressClear();
+              if (!li) return;
+              try {
+                li.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+              } catch (e0) {}
+              rlEasaShowNodeDetail(batchId, targetUid, li, true);
+            });
+          });
+      })
+      .catch(function (e) {
+        mount.innerHTML = '<p class="rl-easa-tree-loading-msg" style="margin:0;color:#991b1b;">' + esc(e.message || 'Tree navigation failed') + '</p>';
+        throw e;
+      });
   }
 
   function rlEasaStructuredBlocksHtml(blocks) {

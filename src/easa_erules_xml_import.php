@@ -5872,6 +5872,37 @@ function easa_erules_tree_synthetic_block_children_for_parent(PDO $pdo, int $bat
 }
 
 /**
+ * Walk staging parent pointers from $nodeUid up to the corpus root (empty parent).
+ *
+ * @return list<string> Root-first … target (same order as the legacy client chain after reverse)
+ */
+function easa_erules_staging_ancestor_chain_root_to_target(PDO $pdo, int $batchId, string $nodeUid): array
+{
+    $nodeUid = trim($nodeUid);
+    if ($nodeUid === '' || $batchId <= 0) {
+        return [];
+    }
+    $stmt = $pdo->prepare('SELECT parent_node_uid FROM easa_erules_import_nodes_staging WHERE batch_id = ? AND node_uid = ? LIMIT 1');
+    $forward = [];
+    $uid = $nodeUid;
+    for ($guard = 0; $guard < 800; $guard++) {
+        $forward[] = $uid;
+        $stmt->execute([$batchId, $uid]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return [];
+        }
+        $p = trim((string) ($row['parent_node_uid'] ?? ''));
+        if ($p === '') {
+            return array_values(array_reverse($forward));
+        }
+        $uid = $p;
+    }
+
+    return [];
+}
+
+/**
  * Semantic browse children. When staging has no rows under $parentUid, optional synthetic rows from
  * structured_blocks headings on the parent are appended (same API shape + synthetic: true).
  *

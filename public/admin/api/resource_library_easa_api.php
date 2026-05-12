@@ -1904,6 +1904,72 @@ if ($method === 'GET') {
         ]);
     }
 
+    /**
+     * GET ?action=tree_reveal&batch_id=N&node_uid=…
+     *
+     * One round trip for “show in tree”: ancestor chain from staging + every tree level from
+     * corpus root down to the target’s parent (same SSOT as tree_children / tree_bootstrap).
+     * Replaces N sequential node_detail + M sequential tree_children calls from the browser.
+     */
+    if ($action === 'tree_reveal') {
+        if (!easa_erules_staging_tables_ok($pdo)) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql first']);
+        }
+        $batchId = (int) ($_GET['batch_id'] ?? 0);
+        $nodeUid = trim((string) ($_GET['node_uid'] ?? ''));
+        if ($batchId <= 0 || $nodeUid === '') {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id and node_uid required']);
+        }
+        $stT0 = microtime(true);
+        $stPhase = [];
+        $stApcuStatus = easa_erules_tree_cache_enabled() ? 'enabled' : 'disabled';
+        try {
+            $tB = microtime(true);
+            $chain = easa_erules_staging_ancestor_chain_root_to_target($pdo, $batchId, $nodeUid);
+            $stPhase['chain_ms'] = (int) round((microtime(true) - $tB) * 1000);
+            if ($chain === []) {
+                rl_easa_json_out(404, ['ok' => false, 'error' => 'Node not found in staging for this batch']);
+            }
+            $levels = [];
+            $tB = microtime(true);
+            $rootNodes = easa_erules_tree_children_response_nodes($pdo, $batchId, null);
+            $stPhase['roots_ms'] = (int) round((microtime(true) - $tB) * 1000);
+            $levels[] = [
+                'parent_uid' => null,
+                'nodes' => $rootNodes,
+            ];
+            $n = count($chain);
+            for ($i = 0; $i < $n - 1; $i++) {
+                $parent = $chain[$i];
+                $tB = microtime(true);
+                $kids = easa_erules_tree_children_response_nodes($pdo, $batchId, $parent);
+                $stPhase['reveal_lvl_' . $i . '_ms'] = (int) round((microtime(true) - $tB) * 1000);
+                $levels[] = [
+                    'parent_uid' => $parent,
+                    'nodes' => $kids,
+                ];
+            }
+        } catch (Throwable $e) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
+        }
+        $stTotal = (int) round((microtime(true) - $stT0) * 1000);
+        $stParts = ['total;dur=' . $stTotal, 'cache;desc="' . $stApcuStatus . '"'];
+        foreach ($stPhase as $k => $ms) {
+            $stParts[] = $k . ';dur=' . $ms;
+        }
+        if (!headers_sent()) {
+            header('Server-Timing: ' . implode(', ', $stParts));
+        }
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'batch_id' => $batchId,
+            'node_uid' => $nodeUid,
+            'chain' => $chain,
+            'levels' => $levels,
+            'timing_ms' => array_merge(['total' => $stTotal, 'cache' => $stApcuStatus], $stPhase),
+        ]);
+    }
+
     if ($action === 'node_detail') {
         if (!easa_erules_staging_tables_ok($pdo)) {
             rl_easa_json_out(503, ['ok' => false, 'error' => 'Apply scripts/sql/resource_library_easa_erules_staging.sql first']);
