@@ -13,6 +13,8 @@ declare(strict_types=1);
  *
  * Usage:
  *   Requires Phase 1 `ipca_compliance_*` tables. CW_DB_* env vars must be set (same as app), except for --parse-only.
+ *   Repo seed (after deploy): `scripts/run_compliance_legacy_seed.sh` or pass
+ *   `scripts/sql/seeds/legacy_compliance_tableplus_dump.sql` explicitly.
  *   php scripts/compliance_import_legacy_tableplus_dump.php /path/to/compliance_DB.sql
  *   php scripts/compliance_import_legacy_tableplus_dump.php /path/to/compliance_DB.sql --with-ai
  *   php scripts/compliance_import_legacy_tableplus_dump.php /path/to/compliance_DB.sql --force
