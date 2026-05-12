@@ -1694,6 +1694,7 @@ if ($method === 'GET') {
         }
         $parentRaw = isset($_GET['parent_uid']) ? trim((string) $_GET['parent_uid']) : null;
         $isRoot = $parentRaw === null || $parentRaw === '';
+        $stT0 = microtime(true);
         try {
             $nodes = easa_erules_tree_children_response_nodes(
                 $pdo,
@@ -1703,11 +1704,52 @@ if ($method === 'GET') {
         } catch (Throwable $e) {
             rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
         }
+        $stMs = (int) round((microtime(true) - $stT0) * 1000);
+        $stCache = easa_erules_tree_cache_enabled() ? 'enabled' : 'disabled';
+        if (!headers_sent()) {
+            header('Server-Timing: total;dur=' . $stMs . ', cache;desc="' . $stCache . '"');
+        }
         rl_easa_json_out(200, [
             'ok' => true,
             'batch_id' => $batchId,
             'parent_uid' => $isRoot ? null : $parentRaw,
             'nodes' => $nodes,
+        ]);
+    }
+
+    /**
+     * GET ?action=tree_perf_probe&batch_id=N
+     *
+     * Diagnostic-only: runs the same internals as `tree_bootstrap` but
+     * returns ONLY timing + counts. Use to sanity-check whether APCu is
+     * actually hit on this host and where the time is being spent.
+     */
+    if ($action === 'tree_perf_probe') {
+        if (!easa_erules_staging_tables_ok($pdo)) {
+            rl_easa_json_out(503, ['ok' => false, 'error' => 'staging missing']);
+        }
+        $batchId = (int) ($_GET['batch_id'] ?? 0);
+        if ($batchId <= 0) {
+            rl_easa_json_out(400, ['ok' => false, 'error' => 'batch_id required']);
+        }
+        $apcu = easa_erules_tree_cache_enabled() ? 'enabled' : 'disabled';
+        $t0 = microtime(true);
+        $tA = microtime(true);
+        $ver = easa_erules_tree_cache_version_token($pdo, $batchId);
+        $verMs = (int) round((microtime(true) - $tA) * 1000);
+        $tA = microtime(true);
+        $roots = easa_erules_tree_children_response_nodes($pdo, $batchId, null);
+        $rootsMs = (int) round((microtime(true) - $tA) * 1000);
+        $totalMs = (int) round((microtime(true) - $t0) * 1000);
+        rl_easa_json_out(200, [
+            'ok' => true,
+            'batch_id' => $batchId,
+            'apcu' => $apcu,
+            'version_token' => $ver,
+            'version_token_ms' => $verMs,
+            'root_nodes_ms' => $rootsMs,
+            'root_node_count' => count($roots),
+            'total_ms' => $totalMs,
         ]);
     }
 
@@ -1756,15 +1798,26 @@ if ($method === 'GET') {
             $patterns[] = ['source' => $s, 'compiled' => $compiled];
         }
 
+        /* Diagnostic Server-Timing payload — emitted alongside the response
+           so we can attribute wall time to each phase in DevTools → Network
+           → headers. Doubles as a smoke test for whether APCu is even
+           enabled on this host (`cache=disabled` is the giveaway). */
+        $stT0 = microtime(true);
+        $stPhase = [];
+        $stApcuStatus = easa_erules_tree_cache_enabled() ? 'enabled' : 'disabled';
+
         try {
             $levels = [];
+            $tBlock = microtime(true);
             $rootNodes = easa_erules_tree_children_response_nodes($pdo, $batchId, null);
+            $stPhase['roots'] = (int) round((microtime(true) - $tBlock) * 1000);
             $levels[] = [
                 'parent_uid' => null,
                 'nodes' => $rootNodes,
                 'matched_for' => null,
             ];
             $currentLevel = $rootNodes;
+            $levelIdx = 1;
             foreach ($patterns as $pat) {
                 $matchedUid = null;
                 foreach ($currentLevel as $node) {
@@ -1794,21 +1847,35 @@ if ($method === 'GET') {
                 if ($matchedUid === null) {
                     break;
                 }
+                $tBlock = microtime(true);
                 $childNodes = easa_erules_tree_children_response_nodes($pdo, $batchId, $matchedUid);
+                $stPhase['lvl' . $levelIdx] = (int) round((microtime(true) - $tBlock) * 1000);
                 $levels[] = [
                     'parent_uid' => $matchedUid,
                     'nodes' => $childNodes,
                     'matched_for' => $pat['source'],
                 ];
                 $currentLevel = $childNodes;
+                $levelIdx++;
             }
         } catch (Throwable $e) {
             rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
         }
+
+        $stTotal = (int) round((microtime(true) - $stT0) * 1000);
+        $stParts = ['total;dur=' . $stTotal, 'cache;desc="' . $stApcuStatus . '"'];
+        foreach ($stPhase as $k => $ms) {
+            $stParts[] = $k . ';dur=' . $ms;
+        }
+        if (!headers_sent()) {
+            header('Server-Timing: ' . implode(', ', $stParts));
+        }
+
         rl_easa_json_out(200, [
             'ok' => true,
             'batch_id' => $batchId,
             'levels' => $levels,
+            'timing_ms' => array_merge(['total' => $stTotal, 'cache' => $stApcuStatus], $stPhase),
         ]);
     }
 
