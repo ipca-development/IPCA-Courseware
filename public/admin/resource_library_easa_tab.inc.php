@@ -2482,6 +2482,14 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   var RL_EASA_TREE_LOADING_HTML = '<div class="rl-easa-tree-loading-center" role="status"><div class="rl-easa-tree-spinner" aria-hidden="true"></div><span>Loading regulations…</span></div>';
   /** When true, <select id="rlEasaTreeBatch"> change events from programmatic selection are ignored. */
   var rlEasaTreeBatchSilent = false;
+  /** sessionStorage key: last batch id that successfully rendered the tree (cross-reload optimistic load). */
+  var RL_EASA_TREE_LAST_BATCH_SS = 'rlEasaTreeLastBatchId';
+  /** Same-session hint for corpus label when `status` has not filled `rlEasaStatusBatchesById` yet. */
+  var RL_EASA_TREE_LAST_LABEL_SS = 'rlEasaTreeLastBatchShortLabel';
+  /** Non-zero while a tree bootstrap network round-trip is in flight for that batch. */
+  var rlEasaTreeLoadInFlightBid = 0;
+  /** Last batch id for which the mount contains a rendered tree (ul). */
+  var rlEasaTreeRenderedBid = 0;
 
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -3724,13 +3732,15 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     if (!treeSel) return;
     var defaultBid = rlEasaPickDefaultLiveBatchId(j && j.batches ? j.batches : []);
     if (!defaultBid) {
+      rlEasaTreeRenderedBid = 0;
+      rlEasaTreeLoadInFlightBid = 0;
       rlEasaTreeBatchSilent = true;
       try {
         treeSel.selectedIndex = 0;
       } finally {
         setTimeout(function () { rlEasaTreeBatchSilent = false; }, 0);
       }
-      if (mount && rlEasaTreeMountIsEmptyish()) {
+      if (mount) {
         mount.innerHTML = '<div class="rl-easa-tree-empty rl-easa-tree-loading-center" role="status">'
           + '<span>No live regulation set is ready yet. Open <strong>Easy Access Download</strong>, finish parsing and indexing, then refresh this page.</span></div>';
       }
@@ -3751,7 +3761,31 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       setTimeout(function () { rlEasaTreeBatchSilent = false; }, 0);
     }
     if (th) th.textContent = 'Loading regulation tree…';
-    if (mount && rlEasaTreeMountIsEmptyish()) {
+    if (!mount) return;
+    var haveUl = !!mount.querySelector('ul.rl-easa-tree-list');
+    if (haveUl && rlEasaTreeRenderedBid === defaultBid) {
+      if (th) th.textContent = '';
+      var rowOk = rlEasaGetBatchRow(defaultBid);
+      if (rowOk) {
+        try {
+          var labSync = rlEasaTreeBatchShortLabel(rowOk);
+          if (labSync) {
+            sessionStorage.setItem(RL_EASA_TREE_LAST_BATCH_SS, String(defaultBid));
+            sessionStorage.setItem(RL_EASA_TREE_LAST_LABEL_SS, labSync);
+          }
+        } catch (eSy) { /* ignore */ }
+        rlEasaTreeApplyDefaultOpenState(defaultBid, mount).catch(function () { /* optional path */ });
+      }
+      return;
+    }
+    if (rlEasaTreeLoadInFlightBid === defaultBid && mount.querySelector('.rl-easa-tree-loading-center')) {
+      return;
+    }
+    if (haveUl && rlEasaTreeRenderedBid !== defaultBid) {
+      rlEasaExecuteLoadTreeRoots(defaultBid);
+      return;
+    }
+    if (rlEasaTreeMountIsEmptyish()) {
       rlEasaExecuteLoadTreeRoots(defaultBid);
     }
   }
@@ -3759,6 +3793,25 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   function rlEasaGetBatchRow(batchId) {
     var bid = parseInt(String(batchId || '0'), 10) || 0;
     return bid ? (rlEasaStatusBatchesById[bid] || null) : null;
+  }
+
+  /**
+   * Batch row is missing until `?action=status` returns; reuse the last persisted
+   * short label for the same batch id so optimistic tree bootstrap still gets
+   * Part-FCL open-path patterns and auto-open.
+   */
+  function rlEasaTreeResolveBatchShortLabel(batchId) {
+    var bid = parseInt(String(batchId || '0'), 10) || 0;
+    if (!bid) return '';
+    var b = rlEasaGetBatchRow(bid);
+    if (b) {
+      try { return rlEasaTreeBatchShortLabel(b); } catch (e) { return ''; }
+    }
+    try {
+      var sid = parseInt(sessionStorage.getItem(RL_EASA_TREE_LAST_BATCH_SS) || '0', 10) || 0;
+      if (sid === bid) return String(sessionStorage.getItem(RL_EASA_TREE_LAST_LABEL_SS) || '');
+    } catch (e) { /* ignore */ }
+    return '';
   }
 
   function rlEasaTreeFindFirstLiMatchingTitle(ul, re) {
@@ -3776,8 +3829,8 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   /** Uses rlEasaEnsureChildUlLoaded only — no changes to tree data or filtering. */
   function rlEasaTreeApplyDefaultOpenState(batchId, mount) {
     if (!rlEasaTreeDefaultOpenConfig.enabled || !mount) return Promise.resolve();
-    var b = rlEasaGetBatchRow(batchId);
-    if (!b || rlEasaTreeBatchShortLabel(b) !== rlEasaTreeDefaultOpenConfig.corpusShortLabel) {
+    var label = rlEasaTreeResolveBatchShortLabel(batchId);
+    if (!label || label !== rlEasaTreeDefaultOpenConfig.corpusShortLabel) {
       return Promise.resolve();
     }
     var pats = rlEasaTreeDefaultOpenConfig.expandPathTitleRegex;
@@ -3804,10 +3857,12 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     if (!mount) return;
     var b = parseInt(String(bid), 10) || 0;
     if (!b) {
+      rlEasaTreeLoadInFlightBid = 0;
       mount.innerHTML = '<p class="rl-easa-tree-loading-msg" style="margin:0;color:#64748b;">Select a regulation set above to load the tree.</p>';
       if (hint) hint.textContent = 'Choose an Easy Access regulation from the list.';
       return;
     }
+    rlEasaTreeLoadInFlightBid = b;
     mount.innerHTML = RL_EASA_TREE_LOADING_HTML;
     if (hint) hint.textContent = 'Loading regulation tree…';
 
@@ -3874,13 +3929,24 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         return rlEasaTreeApplyDefaultOpenState(b, mount).then(function () {
           var tOpenEnd = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
           try { console.log('[rl-easa-tree] auto-open + descend in ' + Math.round(tOpenEnd - tOpenStart) + ' ms; total boot ' + Math.round(tOpenEnd - tStart) + ' ms'); } catch (e) {}
+          rlEasaTreeRenderedBid = b;
+          var lab = rlEasaTreeResolveBatchShortLabel(b);
+          try {
+            sessionStorage.setItem(RL_EASA_TREE_LAST_BATCH_SS, String(b));
+            if (lab) sessionStorage.setItem(RL_EASA_TREE_LAST_LABEL_SS, lab);
+          } catch (eS) { /* private mode / quota */ }
         });
       })
       .catch(function (e) {
+        rlEasaTreeRenderedBid = 0;
+        try { sessionStorage.removeItem(RL_EASA_TREE_LAST_BATCH_SS); sessionStorage.removeItem(RL_EASA_TREE_LAST_LABEL_SS); } catch (eS) { /* ignore */ }
         mount.innerHTML = '<p class="rl-easa-tree-loading-msg" style="margin:0;color:#991b1b;">'
           + esc(e.message || 'Could not load the regulation tree.') + '</p>';
         if (hint) hint.textContent = 'Something went wrong while loading the tree.';
         try { console.error('[rl-easa-tree] boot failed:', e); } catch (ee) {}
+      })
+      .finally(function () {
+        rlEasaTreeLoadInFlightBid = 0;
       });
   }
 
@@ -3893,10 +3959,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
    */
   function rlEasaTreeComputeBootstrapPatternSources(batchId) {
     if (!rlEasaTreeDefaultOpenConfig || !rlEasaTreeDefaultOpenConfig.enabled) return [];
-    var b = rlEasaGetBatchRow(batchId);
-    if (!b) return [];
-    var label = '';
-    try { label = rlEasaTreeBatchShortLabel(b); } catch (e) { return []; }
+    var label = rlEasaTreeResolveBatchShortLabel(batchId);
     if (label !== rlEasaTreeDefaultOpenConfig.corpusShortLabel) return [];
     var pats = rlEasaTreeDefaultOpenConfig.expandPathTitleRegex || [];
     var out = [];
@@ -5764,7 +5827,10 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     var sel = document.getElementById('rlEasaTreeBatch');
     if (!sel) return 0;
     var v = parseInt(String(sel.value || ''), 10);
-    return v > 0 ? v : 0;
+    if (v > 0) return v;
+    if (rlEasaTreeRenderedBid > 0) return rlEasaTreeRenderedBid;
+    if (rlEasaTreeLoadInFlightBid > 0) return rlEasaTreeLoadInFlightBid;
+    return 0;
   }
 
   /**
@@ -6959,6 +7025,13 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   })();
 
   rlEasaBookmarksBoot();
+
+  try {
+    var __optBid = parseInt(sessionStorage.getItem(RL_EASA_TREE_LAST_BATCH_SS) || '0', 10) || 0;
+    if (__optBid > 0) {
+      rlEasaExecuteLoadTreeRoots(__optBid);
+    }
+  } catch (__eOpt) { /* ignore */ }
 
   loadStatus();
 })();
