@@ -3842,7 +3842,16 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
             rlEasaTreeBootstrapStash(b, lvl.parent_uid, Array.isArray(lvl.nodes) ? lvl.nodes : []);
           }
         }
-        return rlEasaTreeResolveLegalRootNodes(b, { nodes: (levels[0] && levels[0].nodes) || [] });
+        /* Match the JSON contract `rlEasaTreeResolveLegalRootNodes` enforces
+           — it requires `ok: true` and an array `nodes`. Synthesising the
+           same shape here keeps the renderer pipeline byte-identical between
+           the bootstrap and legacy paths. */
+        return rlEasaTreeResolveLegalRootNodes(b, {
+          ok: true,
+          batch_id: b,
+          parent_uid: null,
+          nodes: (levels[0] && Array.isArray(levels[0].nodes)) ? levels[0].nodes : []
+        });
       })
       .then(function (resolved) {
         rlEasaRenderTreeIntoMount(mount, b, resolved.nodes);
