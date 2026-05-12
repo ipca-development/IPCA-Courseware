@@ -1489,6 +1489,12 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     border: 1px solid #fed7aa;
     font-weight: 600;
   }
+  /* Our `display: inline-flex` above would otherwise win over the UA default
+     `[hidden] { display: none }` because of selector specificity, leaving the
+     button visible before bookmark bootstrap finishes. Force-hide it here. */
+  .rl-easa-bookmarks-open-btn[hidden] {
+    display: none !important;
+  }
   .rl-easa-bookmarks-open-btn:hover,
   .rl-easa-bookmarks-open-btn:focus {
     background: #ffedd5;
@@ -5591,10 +5597,24 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     return v > 0 ? v : 0;
   }
 
+  /**
+   * Bookmark fetches expect to read the parsed JSON body directly (e.g. `j.ok`,
+   * `j.categories`, `j.error`). The shared `rlEasaParseJsonResponse` wraps the
+   * body in `{ ok, status, j }`, so we use a dedicated parser here that returns
+   * the body unwrapped. Returns `{}` on parse failure to keep callbacks simple.
+   */
+  function rlEasaBmBody(r) {
+    return r.text().then(function (t) {
+      if (!t) return {};
+      try { var j = JSON.parse(t); return (j && typeof j === 'object') ? j : {}; }
+      catch (e) { return {}; }
+    });
+  }
+
   /* ─── Bootstrap: ask the server whether the feature is wired up ─── */
   function rlEasaBookmarksBoot() {
     fetch(api + '?action=bookmarks_status', { credentials: 'same-origin' })
-      .then(rlEasaParseJsonResponse)
+      .then(rlEasaBmBody)
       .then(function (j) {
         if (!j || !j.ok || !j.enabled) {
           rlEasaBookmarksEnabled = false;
@@ -5613,7 +5633,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   function rlEasaBookmarksRefreshCategoriesSilently() {
     if (!rlEasaBookmarksEnabled) return Promise.resolve();
     return fetch(api + '?action=bookmark_categories_list', { credentials: 'same-origin' })
-      .then(rlEasaParseJsonResponse)
+      .then(rlEasaBmBody)
       .then(function (j) {
         if (j && j.ok && Array.isArray(j.categories)) {
           rlEasaBookmarksState.categories = j.categories;
@@ -5756,7 +5776,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'bookmark_category_rename', id: e.id, name: newName })
-          }).then(rlEasaParseJsonResponse).then(function (j) {
+          }).then(rlEasaBmBody).then(function (j) {
             if (!j.ok) throw new Error(j.error || 'Rename failed');
             rlEasaBookmarksRefreshCategoriesAndList();
           }).catch(function (err) {
@@ -5775,7 +5795,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action: 'bookmark_category_delete', id: e.id })
-          }).then(rlEasaParseJsonResponse).then(function (j) {
+          }).then(rlEasaBmBody).then(function (j) {
             if (!j.ok) throw new Error(j.error || 'Delete failed');
             if (rlEasaBookmarksState.selectedCategoryId === e.id) rlEasaBookmarksState.selectedCategoryId = -1;
             rlEasaBookmarksRefreshCategoriesAndList();
@@ -5815,7 +5835,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     }
 
     fetch(api + '?action=bookmarks_list' + qs, { credentials: 'same-origin' })
-      .then(rlEasaParseJsonResponse)
+      .then(rlEasaBmBody)
       .then(function (j) {
         if (!j.ok) throw new Error(j.error || 'Load failed');
         var bms = Array.isArray(j.bookmarks) ? j.bookmarks : [];
@@ -5895,7 +5915,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'bookmark_delete', id: b.id })
-        }).then(rlEasaParseJsonResponse).then(function (j) {
+        }).then(rlEasaBmBody).then(function (j) {
           if (!j.ok) throw new Error(j.error || 'Delete failed');
           rlEasaBookmarksRefreshCategoriesAndList();
           rlEasaUpdateBookmarkButtonForActive();
@@ -5943,7 +5963,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'bookmark_category_create', name: name })
-    }).then(rlEasaParseJsonResponse).then(function (j) {
+    }).then(rlEasaBmBody).then(function (j) {
       if (!j.ok) {
         var msg = 'Could not create category.';
         if (j.error === 'duplicate_name') msg = 'A category with that name already exists.';
@@ -5968,7 +5988,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     listEl.innerHTML = '<p class="rl-easa-bookmarks-empty" style="padding:20px;">Loading…</p>';
     if (emptyEl) emptyEl.hidden = true;
     fetch(api + '?action=highlights_list_all', { credentials: 'same-origin' })
-      .then(rlEasaParseJsonResponse)
+      .then(rlEasaBmBody)
       .then(function (j) {
         if (!j.ok) throw new Error(j.error || 'Load failed');
         var rows = Array.isArray(j.highlights) ? j.highlights : [];
@@ -6027,7 +6047,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
               credentials: 'same-origin',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ action: 'highlight_delete', id: h.id })
-            }).then(rlEasaParseJsonResponse).then(function (j2) {
+            }).then(rlEasaBmBody).then(function (j2) {
               if (!j2.ok) throw new Error(j2.error || 'Delete failed');
               rlEasaBookmarksLoadHighlightsTab();
               rlEasaRefreshHighlightsForActive();
@@ -6163,7 +6183,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
             category_id: categoryId,
             annotation: annotation
           })
-        }).then(rlEasaParseJsonResponse).then(function (j) {
+        }).then(rlEasaBmBody).then(function (j) {
           if (!j.ok) throw new Error(j.error || 'Save failed');
           if (statusEl) {
             statusEl.textContent = j.created ? 'Bookmark saved.' : 'Bookmark updated.';
@@ -6307,7 +6327,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     var label = btn.querySelector('[data-role="label"]');
     /** Light-weight check: pull only bookmarks; filter by node. */
     fetch(api + '?action=bookmarks_list', { credentials: 'same-origin' })
-      .then(rlEasaParseJsonResponse)
+      .then(rlEasaBmBody)
       .then(function (j) {
         if (!j.ok) return;
         var match = (j.bookmarks || []).find(function (b) {
@@ -6409,7 +6429,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ action: 'highlight_delete', id: id })
-        }).then(rlEasaParseJsonResponse);
+        }).then(rlEasaBmBody);
       })).then(function () {
         rlEasaRefreshHighlightsForActive();
         rlEasaSetActionStatus(actionsRow, 'Highlight removed.', '');
@@ -6455,7 +6475,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         selection: { text: selText, prefix: prefix, suffix: suffix },
         color_hex: '#fde68a'
       })
-    }).then(rlEasaParseJsonResponse).then(function (j) {
+    }).then(rlEasaBmBody).then(function (j) {
       if (!j.ok) throw new Error(j.error || 'Save failed');
       rlEasaSetActionStatus(actionsRow, 'Highlight saved.', '');
       window.setTimeout(function () { rlEasaSetActionStatus(actionsRow, '', ''); }, 1500);
@@ -6475,7 +6495,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       + '&batch_id=' + encodeURIComponent(String(ctx.batchId))
       + '&node_uid=' + encodeURIComponent(String(ctx.nodeUid)),
       { credentials: 'same-origin' })
-      .then(rlEasaParseJsonResponse)
+      .then(rlEasaBmBody)
       .then(function (j) {
         if (!j.ok) return;
         rlEasaApplyHighlightsToBody(ctx.body, Array.isArray(j.highlights) ? j.highlights : []);
@@ -6667,7 +6687,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'highlight_update_note', id: id, annotation: note.value })
-      }).then(rlEasaParseJsonResponse).then(function (j) {
+      }).then(rlEasaBmBody).then(function (j) {
         if (!j.ok) throw new Error(j.error || 'Save failed');
         /** Update both the title attribute and the noted styling on every sibling. */
         var noteStr = String(note.value || '').trim();
@@ -6696,7 +6716,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'highlight_delete', id: id })
-      }).then(rlEasaParseJsonResponse).then(function (j) {
+      }).then(rlEasaBmBody).then(function (j) {
         if (!j.ok) throw new Error(j.error || 'Delete failed');
         rlEasaCloseMarkPopover();
         rlEasaRefreshHighlightsForActive();
