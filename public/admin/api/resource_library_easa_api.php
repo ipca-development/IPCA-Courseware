@@ -1254,7 +1254,16 @@ function rl_easa_ai_chat_tables_ok(PDO $pdo): bool
 /** GET or POST: EASA AI chat bootstrap (sessions + messages). Supports `before_id` for lazy older-page loading. */
 function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $beforeId = 0, int $limit = 5): void
 {
+    $stT0 = microtime(true);
+    $stPhase = [];
+    $stMark = static function (string $label) use (&$stPhase, &$stT0): void {
+        $now = microtime(true);
+        $stPhase[$label] = (int) round(($now - $stT0) * 1000);
+        $stT0 = $now;
+    };
+
     $chatSupported = rl_easa_ai_chat_tables_ok($pdo);
+    $stMark('tables_ok');
     if (!$chatSupported) {
         rl_easa_json_out(200, [
             'ok' => true,
@@ -1267,6 +1276,7 @@ function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $befor
         ]);
     }
     $u = cw_current_user($pdo);
+    $stMark('current_user');
     $userId = is_array($u) ? (int) ($u['id'] ?? 0) : 0;
     if ($userId <= 0) {
         rl_easa_json_out(401, ['ok' => false, 'error' => 'Not authenticated']);
@@ -1280,6 +1290,7 @@ function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $befor
         $st = $pdo->prepare('SELECT id, title, created_at, updated_at FROM easa_ai_chat_sessions WHERE user_id = ? ORDER BY updated_at DESC LIMIT 40');
         $st->execute([$userId]);
         $sessions = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $stMark('sessions_q');
     } catch (Throwable $e) {
         rl_easa_json_out(503, ['ok' => false, 'error' => $e->getMessage()]);
     }
@@ -1307,6 +1318,7 @@ function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $befor
                 array_pop($rows);
             }
             $messages = array_reverse($rows);
+            $stMark('messages_q');
         } else {
             $current = 0;
         }
@@ -1330,6 +1342,17 @@ function rl_easa_ai_chat_bootstrap_output(PDO $pdo, int $wantSession, int $befor
         } catch (Throwable) {
             $messages[$idx]['created_at_iso'] = str_replace(' ', 'T', $caStr) . 'Z';
         }
+    }
+    $stMark('iso_format');
+    if (!headers_sent()) {
+        $stParts = [];
+        $stTotal = 0;
+        foreach ($stPhase as $k => $ms) {
+            $stParts[] = $k . ';dur=' . $ms;
+            $stTotal += $ms;
+        }
+        array_unshift($stParts, 'total;dur=' . $stTotal);
+        header('Server-Timing: ' . implode(', ', $stParts));
     }
     rl_easa_json_out(200, [
         'ok' => true,
@@ -2360,17 +2383,34 @@ if ($method === 'GET') {
         rl_easa_json_out(400, ['ok' => false, 'error' => 'Unknown action']);
     }
 
+    /* Diagnostic: emit per-phase wall time as Server-Timing so DevTools →
+       Network → status response → Server Timing tab shows exactly where each
+       millisecond goes. Cheap and safe to leave on. */
+    $stT0 = microtime(true);
+    $stPhase = [];
+    $stMark = function (string $label) use (&$stPhase, &$stT0) {
+        $now = microtime(true);
+        $stPhase[$label] = (int) round(($now - $stT0) * 1000);
+        $stT0 = $now;
+    };
+
     $tablesOk = easa_download_monitor_tables_ok($pdo);
+    $stMark('tables_ok');
     $stagingOk = easa_erules_staging_tables_ok($pdo);
+    $stMark('staging_ok');
     $progressOk = easa_erules_batch_progress_available($pdo);
+    $stMark('progress_ok');
     $monitor = [];
     $batches = [];
     $stagingNodes = 0;
     if ($tablesOk) {
         $monitor = $pdo->query('SELECT id, url, label, checked_at, http_status, final_url, etag, last_modified, content_length, changed_flag, last_error FROM easa_download_monitor ORDER BY id ASC')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $stMark('monitor_q');
         $batches = $pdo->query('SELECT * FROM easa_erules_import_batches ORDER BY id DESC LIMIT 25')->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $stMark('batches_q');
         if ($stagingOk) {
             $stagingNodes = (int) $pdo->query('SELECT COUNT(*) FROM easa_erules_import_nodes_staging')->fetchColumn();
+            $stMark('staging_count');
             $stmtN = $pdo->query('SELECT batch_id, COUNT(*) AS c FROM easa_erules_import_nodes_staging GROUP BY batch_id');
             $byBatch = [];
             if ($stmtN instanceof PDOStatement) {
@@ -2378,6 +2418,7 @@ if ($method === 'GET') {
                     $byBatch[(int) ($r['batch_id'] ?? 0)] = (int) ($r['c'] ?? 0);
                 }
             }
+            $stMark('staging_groupby');
             foreach ($batches as $k => $br) {
                 $bid = (int) ($br['id'] ?? 0);
                 $batches[$k]['staging_nodes'] = $byBatch[$bid] ?? 0;
@@ -2389,12 +2430,28 @@ if ($method === 'GET') {
     $postBytes = rl_easa_ini_bytes('post_max_size');
     $maxBodyBytes = ($upBytes > 0 && $postBytes > 0) ? min($upBytes, $postBytes) : max($upBytes, $postBytes);
 
+    $storageHealth = easa_erules_storage_health(null);
+    $stMark('storage_health');
+    $ecfrEdition = rl_catalog_resolve_ecfr_training_report_edition($pdo);
+    $stMark('ecfr_edition');
+
+    if (!headers_sent()) {
+        $stParts = [];
+        $stTotal = 0;
+        foreach ($stPhase as $k => $ms) {
+            $stParts[] = $k . ';dur=' . $ms;
+            $stTotal += $ms;
+        }
+        array_unshift($stParts, 'total;dur=' . $stTotal);
+        header('Server-Timing: ' . implode(', ', $stParts));
+    }
+
     rl_easa_json_out(200, [
         'ok' => true,
         'tables_ok' => $tablesOk,
         'staging_tables_ok' => $stagingOk,
         'progress_columns_ok' => $progressOk,
-        'storage_health' => easa_erules_storage_health(null),
+        'storage_health' => $storageHealth,
         'php_upload_max_filesize' => ini_get('upload_max_filesize'),
         'php_post_max_size' => ini_get('post_max_size'),
         'max_body_bytes' => $maxBodyBytes,
@@ -2408,7 +2465,7 @@ if ($method === 'GET') {
             : 'Apply staging migration, then use Parse XML → staging on a batch.',
         'monitor' => $monitor,
         'batches' => $batches,
-        'ecfr_configured' => rl_catalog_resolve_ecfr_training_report_edition($pdo) !== null,
+        'ecfr_configured' => $ecfrEdition !== null,
     ]);
 }
 

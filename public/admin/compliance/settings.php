@@ -13,20 +13,21 @@ cw_header('Compliance · Settings');
 compliance_render_placeholder(
     'Settings',
     'Phase 2+ — Continuous',
-    'Compliance OS settings. Today this page is intentionally minimal — global compliance configuration will land here as later phases bring it online (authority directory, default templates, AI model selection, retention policies, and per-admin compliance privileges).',
+    'Compliance OS settings. The per-admin access flag (`users.is_compliance_admin`) is now in place — the management UI that lets a master admin toggle it for other admins lands as the first real feature on this page.',
     [
         'bullets' => [
-            'Per-admin Compliance OS access grants (planned: users.is_compliance_admin or ipca_compliance_admin_grants).',
+            'Per-admin Compliance OS access toggle (column `users.is_compliance_admin` exists; UI pending).',
             'Default AI model and prompt-storage policy for ipca_compliance_ai_runs.',
             'Document retention windows per doc_kind.',
             'Authority directory (BCAA, FAA, EASA, INTERNAL, OTHER) — labels, contact threads, default notification keys.',
         ],
         'tables_used' => [
+            'users (column: is_compliance_admin)',
             'ipca_compliance_ai_runs',
             'ipca_compliance_monitor_rules',
         ],
         'bridges_used' => [
-            'users (existing platform auth — no parallel user table)',
+            'ComplianceAccess.php (gates every /admin/compliance/* page)',
         ],
     ]
 );
