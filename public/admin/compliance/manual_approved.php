@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceManualControlEngine.php';
+require_once __DIR__ . '/../../../src/compliance/CompliancePackagePdfService.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -78,6 +79,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             mr_flash('success', 'Approval recorded.');
             redirect('/admin/compliance/manual_approved.php?id=' . $id);
         }
+        if ($action === 'generate_pdf') {
+            $id = (int)($_POST['package_id'] ?? 0);
+            $r = CompliancePackagePdfService::generateAndStore($pdo, $id);
+            mr_flash('success', 'PDF generated (' . number_format($r['bytes']) . ' bytes, sha256 ' . substr($r['sha256'], 0, 12) . '…).');
+            redirect('/admin/compliance/manual_approved.php?id=' . $id);
+        }
     } catch (Throwable $e) {
         mr_flash('error', $e->getMessage());
         $id = (int)($_POST['package_id'] ?? 0);
@@ -123,36 +130,49 @@ if ($detailId > 0) {
         </div>
 
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:16px;max-width:960px;">
-          <h2 style="margin:0 0 12px;">Package</h2>
+          <h2 style="margin:0 0 12px;font-size:18px;">Package</h2>
           <?php if (!$locked): ?>
             <form method="post">
               <input type="hidden" name="action" value="update_pkg">
               <input type="hidden" name="package_id" value="<?= (int)$detailId ?>">
-              <label style="display:block;margin-bottom:8px;">Title *
-                <input name="title" required value="<?= h((string)$row['title']) ?>" style="width:100%;max-width:480px;padding:8px;">
+              <label style="display:block;margin-bottom:10px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Title *</span>
+                <input name="title" required value="<?= h((string)$row['title']) ?>" style="width:100%;max-width:480px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
               </label>
-              <div style="display:flex;gap:12px;flex-wrap:wrap;">
-                <label>manual_code <input name="manual_code" value="<?= h((string)($row['manual_code'] ?? '')) ?>" style="padding:8px;width:120px;"></label>
-                <label>target_revision <input name="target_revision" value="<?= h((string)($row['target_revision'] ?? '')) ?>" style="padding:8px;width:120px;"></label>
-                <label>effective_date <input type="date" name="effective_date" value="<?= h(substr((string)($row['effective_date'] ?? ''),0,10)) ?>" style="padding:8px;"></label>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+                <label>
+                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">manual_code</span>
+                  <input name="manual_code" value="<?= h((string)($row['manual_code'] ?? '')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:140px;">
+                </label>
+                <label>
+                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">target_revision</span>
+                  <input name="target_revision" value="<?= h((string)($row['target_revision'] ?? '')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:140px;">
+                </label>
+                <label>
+                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">effective_date</span>
+                  <input type="date" name="effective_date" value="<?= h(substr((string)($row['effective_date'] ?? ''), 0, 10)) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+                </label>
               </div>
-              <label style="display:block;margin-top:10px;">drafts_json
-                <textarea name="drafts_json" rows="6" style="width:100%;font-family:monospace;font-size:12px;padding:8px;"><?= h((string)$dj) ?></textarea>
+              <label style="display:block;margin-bottom:14px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">drafts_json</span>
+                <textarea name="drafts_json" rows="6" style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"><?= h((string)$dj) ?></textarea>
               </label>
-              <button type="submit" style="margin-top:10px;background:#1e3c72;color:#fff;border:0;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;">Save</button>
+              <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Save</button>
             </form>
-            <form method="post" style="margin-top:20px;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+            <form method="post" style="margin-top:20px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
               <input type="hidden" name="action" value="pkg_status">
               <input type="hidden" name="package_id" value="<?= (int)$detailId ?>">
-              <label>Workflow status
-                <select name="status">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Workflow status</span>
+                <select name="status" style="padding:8px;border-radius:8px;">
                   <?php foreach ($pkgStatuses as $s): ?>
                     <option value="<?= $s ?>" <?= ((string)$row['status'] === $s) ? 'selected' : '' ?>><?= $s ?></option>
                   <?php endforeach; ?>
                 </select>
               </label>
-              <label>Releaser name (for RELEASED)
-                <input name="releaser_name" value="<?= h((string)($user['name'] ?? '')) ?>" style="padding:8px;">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Releaser name (for RELEASED)</span>
+                <input name="releaser_name" value="<?= h((string)($user['name'] ?? '')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
               </label>
               <button type="submit" style="background:#0f766e;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">Apply</button>
             </form>
@@ -164,40 +184,100 @@ if ($detailId > 0) {
           <?php endif; ?>
         </div>
 
+        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:16px;max-width:960px;">
+          <h2 style="margin:0 0 12px;font-size:18px;">PDF release file</h2>
+          <?php
+            $pdfRel = (string)($row['pdf_storage_relpath'] ?? '');
+            $pdfSha = (string)($row['pdf_sha256'] ?? '');
+          ?>
+          <?php if ($pdfRel !== ''): ?>
+            <p style="margin:0 0 8px;color:#334155;font-size:14px;">
+              Stored at <code style="font-family:ui-monospace,monospace;font-size:12px;background:#f1f5f9;padding:2px 6px;border-radius:6px;"><?= h($pdfRel) ?></code>
+            </p>
+            <p class="small" style="margin:0 0 12px;color:#64748b;font-size:12px;">
+              sha256 <code style="font-family:ui-monospace,monospace;font-size:11px;"><?= h($pdfSha) ?></code>
+            </p>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+              <a href="/admin/compliance/manual_release_pdf.php?package_id=<?= (int)$detailId ?>" target="_blank"
+                style="background:#1e3c72;color:#fff;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;">View PDF</a>
+              <a href="/admin/compliance/manual_release_pdf.php?package_id=<?= (int)$detailId ?>&dl=1"
+                style="background:#0f766e;color:#fff;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;">Download PDF</a>
+              <?php if (!$locked): ?>
+                <form method="post" style="display:inline;">
+                  <input type="hidden" name="action" value="generate_pdf">
+                  <input type="hidden" name="package_id" value="<?= (int)$detailId ?>">
+                  <button type="submit" style="background:#334155;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer;">Regenerate</button>
+                </form>
+              <?php endif; ?>
+            </div>
+          <?php else: ?>
+            <p style="margin:0 0 10px;color:#64748b;font-size:13px;">No PDF generated yet for this package.</p>
+            <?php if (!$locked): ?>
+              <form method="post">
+                <input type="hidden" name="action" value="generate_pdf">
+                <input type="hidden" name="package_id" value="<?= (int)$detailId ?>">
+                <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">Generate PDF</button>
+              </form>
+            <?php else: ?>
+              <form method="post">
+                <input type="hidden" name="action" value="generate_pdf">
+                <input type="hidden" name="package_id" value="<?= (int)$detailId ?>">
+                <button type="submit" style="background:#334155;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">Generate PDF</button>
+              </form>
+            <?php endif; ?>
+          <?php endif; ?>
+        </div>
+
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;max-width:960px;">
-          <h2 style="margin:0 0 12px;">Approvals</h2>
+          <h2 style="margin:0 0 12px;font-size:18px;">Approvals</h2>
           <table style="width:100%;font-size:13px;border-collapse:collapse;">
-            <thead><tr style="text-align:left;background:#f8fafc;"><th style="padding:8px;">Name</th><th style="padding:8px;">Role</th><th style="padding:8px;">Decision</th><th style="padding:8px;">At</th></tr></thead>
+            <thead><tr style="background:#f1f5f9;text-align:left;">
+              <th style="padding:8px 10px;">Name</th>
+              <th style="padding:8px 10px;">Role</th>
+              <th style="padding:8px 10px;">Decision</th>
+              <th style="padding:8px 10px;">At</th>
+              <th style="padding:8px 10px;">Comments</th>
+            </tr></thead>
             <tbody>
+              <?php if (!$apprs): ?>
+                <tr><td colspan="5" style="padding:14px;color:#64748b;">No approvals recorded.</td></tr>
+              <?php endif; ?>
               <?php foreach ($apprs as $a): ?>
                 <tr style="border-top:1px solid #e2e8f0;">
-                  <td style="padding:8px;"><?= h((string)$a['approver_name']) ?></td>
-                  <td style="padding:8px;"><?= h((string)($a['approver_role'] ?? '—')) ?></td>
-                  <td style="padding:8px;"><?= h((string)$a['decision']) ?></td>
-                  <td style="padding:8px;"><?= h((string)($a['decided_at'] ?? '—')) ?></td>
+                  <td style="padding:8px 10px;"><?= h((string)$a['approver_name']) ?></td>
+                  <td style="padding:8px 10px;"><?= h((string)($a['approver_role'] ?? '—')) ?></td>
+                  <td style="padding:8px 10px;"><?= h((string)$a['decision']) ?></td>
+                  <td style="padding:8px 10px;color:#64748b;font-size:12px;"><?= h((string)($a['decided_at'] ?? '—')) ?></td>
+                  <td style="padding:8px 10px;color:#475569;font-size:12px;"><?= h((string)($a['comments'] ?? '')) ?></td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
           </table>
           <?php if (!$locked): ?>
-            <form method="post" style="margin-top:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+            <form method="post" style="margin-top:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
               <input type="hidden" name="action" value="add_approval">
               <input type="hidden" name="package_id" value="<?= (int)$detailId ?>">
-              <label>Approver *
-                <input name="approver_name" required value="<?= h((string)($user['name'] ?? '')) ?>" style="padding:8px;">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Approver *</span>
+                <input name="approver_name" required value="<?= h((string)($user['name'] ?? '')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
               </label>
-              <label>Role
-                <input name="approver_role" placeholder="COMPLIANCE_OFFICER" style="padding:8px;width:160px;">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Role</span>
+                <input name="approver_role" placeholder="COMPLIANCE_OFFICER" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:200px;">
               </label>
-              <label>Decision
-                <select name="decision"><?php foreach ($decisions as $d): ?>
-                  <option value="<?= $d ?>"><?= $d ?></option>
-                <?php endforeach; ?></select>
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Decision</span>
+                <select name="decision" style="padding:8px;border-radius:8px;">
+                  <?php foreach ($decisions as $d): ?>
+                    <option value="<?= $d ?>"><?= $d ?></option>
+                  <?php endforeach; ?>
+                </select>
               </label>
-              <label>Comments
-                <input name="comments" style="padding:8px;width:200px;">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Comments</span>
+                <input name="comments" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:240px;">
               </label>
-              <button type="submit" style="background:#334155;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer;">Record</button>
+              <button type="submit" style="background:#334155;color:#fff;border:0;padding:10px 14px;border-radius:8px;font-weight:700;cursor:pointer;">Record</button>
             </form>
           <?php endif; ?>
         </div>
@@ -213,32 +293,60 @@ if ($detailId > 0) {
       <h2 style="margin:0 0 12px;font-size:18px;">New package</h2>
       <form method="post">
         <input type="hidden" name="action" value="create_pkg">
-        <label style="display:block;margin-bottom:8px;">Title *
-          <input name="title" required style="width:100%;padding:8px;">
+        <label style="display:block;margin-bottom:10px;">
+          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Title *</span>
+          <input name="title" required style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
         </label>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <label>manual_code <input name="manual_code" placeholder="OM" style="padding:8px;width:100px;"></label>
-          <label>target_revision <input name="target_revision" placeholder="7.0" style="padding:8px;width:100px;"></label>
-          <label>effective_date <input type="date" name="effective_date" style="padding:8px;"></label>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+          <label>
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">manual_code</span>
+            <input name="manual_code" placeholder="OM" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:120px;">
+          </label>
+          <label>
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">target_revision</span>
+            <input name="target_revision" placeholder="7.0" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:120px;">
+          </label>
+          <label>
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">effective_date</span>
+            <input type="date" name="effective_date" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+          </label>
         </div>
-        <label style="display:block;margin-top:10px;">drafts_json
-          <textarea name="drafts_json" rows="4" style="width:100%;font-family:monospace;font-size:12px;">[]</textarea>
+        <label style="display:block;margin-bottom:14px;">
+          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">drafts_json</span>
+          <textarea name="drafts_json" rows="4" style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">[]</textarea>
         </label>
-        <button type="submit" style="margin-top:10px;background:#1e3c72;color:#fff;border:0;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;">Create</button>
+        <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Create</button>
       </form>
     </div>
 
     <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;max-width:1100px;">
       <table style="width:100%;border-collapse:collapse;font-size:14px;">
-        <thead><tr style="background:#f1f5f9;text-align:left;"><th>Code</th><th>Title</th><th>Status</th><th>Effective</th><th></th></tr></thead>
+        <thead><tr style="background:#f1f5f9;text-align:left;">
+          <th style="padding:12px 14px;">Code</th>
+          <th style="padding:12px 14px;">Title</th>
+          <th style="padding:12px 14px;">Status</th>
+          <th style="padding:12px 14px;">Effective</th>
+          <th style="padding:12px 14px;">PDF</th>
+          <th style="padding:12px 14px;"></th>
+        </tr></thead>
         <tbody>
+          <?php if (!$rows): ?>
+            <tr><td colspan="6" style="padding:20px;color:#64748b;">No packages yet.</td></tr>
+          <?php endif; ?>
           <?php foreach ($rows as $r): ?>
             <tr style="border-top:1px solid #e2e8f0;">
-              <td style="padding:10px;font-family:monospace;font-size:12px;"><?= h((string)$r['package_code']) ?></td>
-              <td style="padding:10px;"><?= h((string)$r['title']) ?></td>
-              <td style="padding:10px;"><?= h((string)$r['status']) ?></td>
-              <td style="padding:10px;"><?= h((string)($r['effective_date'] ?? '—')) ?></td>
-              <td style="padding:10px;"><a href="/admin/compliance/manual_approved.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1e3c72;">Open</a></td>
+              <td style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$r['package_code']) ?></td>
+              <td style="padding:10px 14px;"><?= h((string)$r['title']) ?></td>
+              <td style="padding:10px 14px;"><?= h((string)$r['status']) ?></td>
+              <td style="padding:10px 14px;color:#64748b;font-size:12px;"><?= h((string)($r['effective_date'] ?? '—')) ?></td>
+              <td style="padding:10px 14px;font-size:12px;">
+                <?php if (!empty($r['pdf_storage_relpath'])): ?>
+                  <a href="/admin/compliance/manual_release_pdf.php?package_id=<?= (int)$r['id'] ?>" target="_blank" style="color:#0f766e;font-weight:700;">PDF</a>
+                <?php else: ?>
+                  <span style="color:#94a3b8;">—</span>
+                <?php endif; ?>
+              </td>
+              <td style="padding:10px 14px;"><a href="/admin/compliance/manual_approved.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1e3c72;">Open</a></td>
             </tr>
           <?php endforeach; ?>
         </tbody>

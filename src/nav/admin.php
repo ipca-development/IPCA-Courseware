@@ -110,7 +110,7 @@ return [
     ],
     [
         'key' => 'compliance_os',
-        'label' => 'Compliance Operating System',
+        'label' => 'Compliance',
         'icon' => 'compliance',
         'match_paths' => [
             '/admin/compliance/index.php',

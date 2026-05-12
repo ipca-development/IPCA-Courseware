@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ComplianceAutomationDispatch.php';
+
 /**
  * Phase 4+ — Manual change requests, drafts, release packages (governance metadata only).
  */
@@ -116,7 +118,20 @@ final class ComplianceManualControlEngine
             $userId > 0 ? $userId : null,
         ));
 
-        return (int)$pdo->lastInsertId();
+        $newId = (int)$pdo->lastInsertId();
+
+        ComplianceAutomationDispatch::fire($pdo, 'compliance.manual.change_requested', array(
+            'change_request_id' => $newId,
+            'request_code' => substr($code, 0, 64),
+            'title' => substr($title, 0, 255),
+            'manual_kind' => $kind,
+            'priority' => $prio,
+            'status' => $status,
+            'case_id' => $caseId,
+            'raised_by_user_id' => $userId,
+        ));
+
+        return $newId;
     }
 
     /**
@@ -211,6 +226,17 @@ final class ComplianceManualControlEngine
             $relAt,
             $id,
         ));
+
+        if ($s === 'APPROVED') {
+            ComplianceAutomationDispatch::fire($pdo, 'compliance.manual.cr_approved', array(
+                'change_request_id' => $id,
+                'request_code' => (string)($row['request_code'] ?? ''),
+                'title' => (string)($row['title'] ?? ''),
+                'manual_kind' => (string)($row['manual_kind'] ?? ''),
+                'approved_by_user_id' => $userId,
+                'approved_by_name' => $apprName,
+            ));
+        }
     }
 
     /**
@@ -426,6 +452,18 @@ final class ComplianceManualControlEngine
             $userId > 0 ? $userId : null,
             $id,
         ));
+
+        if ($s === 'PUBLISHED') {
+            ComplianceAutomationDispatch::fire($pdo, 'compliance.manual.draft_published', array(
+                'draft_id' => $id,
+                'draft_code' => (string)($row['draft_code'] ?? ''),
+                'draft_title' => (string)($row['draft_title'] ?? ''),
+                'manual_kind' => (string)($row['manual_kind'] ?? ''),
+                'request_id' => isset($row['request_id']) ? (int)$row['request_id'] : null,
+                'published_by_user_id' => $userId,
+                'published_by_name' => $apprName,
+            ));
+        }
     }
 
     // --- Release packages ---
@@ -666,5 +704,18 @@ final class ComplianceManualControlEngine
             $userId > 0 ? $userId : null,
             $id,
         ));
+
+        if ($s === 'RELEASED') {
+            ComplianceAutomationDispatch::fire($pdo, 'compliance.manual.package_released', array(
+                'package_id' => $id,
+                'package_code' => (string)($row['package_code'] ?? ''),
+                'title' => (string)($row['title'] ?? ''),
+                'manual_code' => (string)($row['manual_code'] ?? ''),
+                'target_revision' => (string)($row['target_revision'] ?? ''),
+                'effective_date' => (string)($row['effective_date'] ?? ''),
+                'released_by_user_id' => $userId,
+                'released_by_name' => $releasedName,
+            ));
+        }
     }
 }

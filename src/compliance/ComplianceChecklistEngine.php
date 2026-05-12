@@ -1,6 +1,8 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/ComplianceAutomationDispatch.php';
+
 /**
  * Phase 4 — Checklist templates, versions, items (editable until version locked).
  */
@@ -419,6 +421,18 @@ final class ComplianceChecklistEngine
         $pdo->prepare(
             'UPDATE ipca_compliance_checklist_templates SET current_version_id = ?, updated_by = ? WHERE id = ?'
         )->execute(array($versionId, $userId > 0 ? $userId : null, $tid));
+
+        $tplRow = self::getTemplate($pdo, $tid);
+        ComplianceAutomationDispatch::fire($pdo, 'compliance.checklist.approved', array(
+            'template_id' => $tid,
+            'template_code' => (string)($tplRow['template_code'] ?? ''),
+            'template_title' => (string)($tplRow['title'] ?? ''),
+            'version_id' => $versionId,
+            'version_no' => (int)($v['version_no'] ?? 0),
+            'items_count' => (int)($v['items_count'] ?? 0),
+            'approved_by_user_id' => $userId,
+            'approved_by_name' => substr($name, 0, 255),
+        ));
     }
 
     private static function coerceJsonField(mixed $raw): string
@@ -458,5 +472,289 @@ final class ComplianceChecklistEngine
         }
 
         return '{}';
+    }
+
+    // ---------------------------------------------------------------------
+    //  Phase 5 — Audit checklist snapshots & answers
+    // ---------------------------------------------------------------------
+
+    /**
+     * Generate (or return existing) immutable snapshot of an APPROVED checklist
+     * version onto an audit. The snapshot freezes the item list as JSON and
+     * stores a sha256 integrity hash. Re-running for the same (audit, template)
+     * is idempotent.
+     *
+     * @return array{snapshot_id:int,items_count:int,sha256:string,created:bool}
+     */
+    public static function createSnapshotForAudit(PDO $pdo, int $auditId, int $versionId, int $userId): array
+    {
+        if ($auditId <= 0 || $versionId <= 0) {
+            throw new InvalidArgumentException('audit_id and version_id are required.');
+        }
+        $v = self::getVersion($pdo, $versionId);
+        if ($v === null) {
+            throw new RuntimeException('Checklist version not found.');
+        }
+        $status = strtoupper((string)($v['status'] ?? ''));
+        if ($status !== 'APPROVED') {
+            throw new RuntimeException('Only APPROVED checklist versions can be snapshotted.');
+        }
+        $tid = (int)$v['template_id'];
+
+        $st = $pdo->prepare(
+            'SELECT * FROM ipca_compliance_audit_checklist_snapshots
+              WHERE audit_id = ? AND template_id = ? LIMIT 1'
+        );
+        $st->execute(array($auditId, $tid));
+        $existing = $st->fetch(PDO::FETCH_ASSOC);
+        if (is_array($existing)) {
+            return array(
+                'snapshot_id' => (int)$existing['id'],
+                'items_count' => (int)($v['items_count'] ?? 0),
+                'sha256' => (string)$existing['items_snapshot_sha256'],
+                'created' => false,
+            );
+        }
+
+        $items = self::listItems($pdo, $versionId);
+        $frozen = array();
+        foreach ($items as $row) {
+            $frozen[] = array(
+                'id' => (int)$row['id'],
+                'item_code' => (string)($row['item_code'] ?? ''),
+                'parent_item_id' => isset($row['parent_item_id']) ? (int)$row['parent_item_id'] : null,
+                'sort_order' => (int)($row['sort_order'] ?? 0),
+                'item_type' => (string)($row['item_type'] ?? 'QUESTION'),
+                'prompt' => (string)($row['prompt'] ?? ''),
+                'guidance' => (string)($row['guidance'] ?? ''),
+                'is_required' => (int)($row['is_required'] ?? 0),
+                'weight' => isset($row['weight']) ? (int)$row['weight'] : null,
+                'options_json' => self::jsonColumnToString($row['options_json'] ?? null),
+                'reg_refs_json' => self::jsonColumnToString($row['reg_refs_json'] ?? null),
+                'manual_refs_json' => self::jsonColumnToString($row['manual_refs_json'] ?? null),
+            );
+        }
+        $json = json_encode($frozen, JSON_UNESCAPED_UNICODE);
+        if (!is_string($json)) {
+            throw new RuntimeException('Failed to encode checklist snapshot');
+        }
+        $sha = hash('sha256', $json);
+
+        $ins = $pdo->prepare(
+            'INSERT INTO ipca_compliance_audit_checklist_snapshots (
+                audit_id, template_id, version_id, items_snapshot_json,
+                items_snapshot_sha256, status, generated_by
+            ) VALUES (?, ?, ?, CAST(? AS JSON), ?, ?, ?)'
+        );
+        $ins->execute(array(
+            $auditId,
+            $tid,
+            $versionId,
+            $json,
+            $sha,
+            'OPEN',
+            $userId > 0 ? $userId : null,
+        ));
+        $sid = (int)$pdo->lastInsertId();
+
+        return array(
+            'snapshot_id' => $sid,
+            'items_count' => count($frozen),
+            'sha256' => $sha,
+            'created' => true,
+        );
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public static function listSnapshotsForAudit(PDO $pdo, int $auditId): array
+    {
+        $st = $pdo->prepare(
+            'SELECT s.*,
+                    t.template_code,
+                    t.title AS template_title,
+                    v.version_no
+               FROM ipca_compliance_audit_checklist_snapshots s
+               JOIN ipca_compliance_checklist_templates t ON t.id = s.template_id
+               JOIN ipca_compliance_checklist_versions v ON v.id = s.version_id
+              WHERE s.audit_id = ?
+              ORDER BY s.id ASC'
+        );
+        $st->execute(array($auditId));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public static function getSnapshot(PDO $pdo, int $snapshotId): ?array
+    {
+        $st = $pdo->prepare(
+            'SELECT s.*,
+                    a.audit_code, a.title AS audit_title, a.status AS audit_status,
+                    t.template_code, t.title AS template_title,
+                    v.version_no
+               FROM ipca_compliance_audit_checklist_snapshots s
+               JOIN ipca_compliance_audits a ON a.id = s.audit_id
+               JOIN ipca_compliance_checklist_templates t ON t.id = s.template_id
+               JOIN ipca_compliance_checklist_versions v ON v.id = s.version_id
+              WHERE s.id = ? LIMIT 1'
+        );
+        $st->execute(array($snapshotId));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * Decode the frozen items snapshot. Returns [] if the JSON is missing/invalid.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function decodeSnapshotItems(mixed $raw): array
+    {
+        if ($raw === null || $raw === '') {
+            return array();
+        }
+        $decoded = is_string($raw) ? json_decode($raw, true) : $raw;
+
+        return is_array($decoded) ? array_values($decoded) : array();
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public static function listAnswers(PDO $pdo, int $snapshotId): array
+    {
+        $st = $pdo->prepare(
+            'SELECT * FROM ipca_compliance_audit_checklist_answers
+              WHERE snapshot_id = ?
+              ORDER BY id ASC'
+        );
+        $st->execute(array($snapshotId));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * Upsert (one per item) a snapshot answer. Used by audit fill UI.
+     *
+     * @param array{
+     *   answer_value?:string|null,answer_text?:string|null,
+     *   compliance_state?:string|null,
+     *   answer_payload_json?:string|null
+     * } $data
+     */
+    public static function upsertAnswer(PDO $pdo, int $snapshotId, int $itemId, array $data, int $userId): void
+    {
+        $snap = self::getSnapshot($pdo, $snapshotId);
+        if ($snap === null) {
+            throw new RuntimeException('Snapshot not found.');
+        }
+        if (!empty($snap['locked_at'])) {
+            throw new RuntimeException('Snapshot is locked.');
+        }
+        $state = isset($data['compliance_state']) ? strtoupper(trim((string)$data['compliance_state'])) : null;
+        if ($state !== null && $state !== '') {
+            $allowed = array('COMPLIANT', 'NON_COMPLIANT', 'OBSERVATION', 'N_A', 'PARTIAL', 'PENDING');
+            if (!in_array($state, $allowed, true)) {
+                throw new InvalidArgumentException('Invalid compliance_state.');
+            }
+        } else {
+            $state = null;
+        }
+        $val = isset($data['answer_value']) ? trim((string)$data['answer_value']) : '';
+        $val = $val !== '' ? substr($val, 0, 64) : null;
+        $txt = isset($data['answer_text']) ? trim((string)$data['answer_text']) : '';
+        $txt = $txt !== '' ? $txt : null;
+
+        $pj = isset($data['answer_payload_json']) ? trim((string)$data['answer_payload_json']) : '';
+        if ($pj !== '') {
+            json_decode($pj);
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new InvalidArgumentException('answer_payload_json must be valid JSON.');
+            }
+        } else {
+            $pj = null;
+        }
+
+        $st = $pdo->prepare(
+            'SELECT id FROM ipca_compliance_audit_checklist_answers
+              WHERE snapshot_id = ? AND item_id = ? LIMIT 1'
+        );
+        $st->execute(array($snapshotId, $itemId));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+
+        if (is_array($row) && (int)$row['id'] > 0) {
+            $up = $pdo->prepare(
+                'UPDATE ipca_compliance_audit_checklist_answers SET
+                    answer_value = ?, answer_text = ?,
+                    compliance_state = ?,
+                    answer_payload_json = CASE WHEN ? IS NULL THEN answer_payload_json ELSE CAST(? AS JSON) END,
+                    answered_by = ?,
+                    answered_at = CURRENT_TIMESTAMP
+                 WHERE id = ?'
+            );
+            $up->execute(array(
+                $val,
+                $txt,
+                $state,
+                $pj,
+                $pj,
+                $userId > 0 ? $userId : null,
+                (int)$row['id'],
+            ));
+        } else {
+            $ins = $pdo->prepare(
+                'INSERT INTO ipca_compliance_audit_checklist_answers (
+                    snapshot_id, item_id, answer_value, answer_text,
+                    compliance_state, answer_payload_json, answered_by
+                ) VALUES (?, ?, ?, ?, ?, CAST(? AS JSON), ?)'
+            );
+            $ins->execute(array(
+                $snapshotId,
+                $itemId,
+                $val,
+                $txt,
+                $state,
+                $pj ?? '{}',
+                $userId > 0 ? $userId : null,
+            ));
+        }
+
+        if (strtoupper((string)($snap['status'] ?? '')) === 'OPEN') {
+            $pdo->prepare(
+                'UPDATE ipca_compliance_audit_checklist_snapshots SET status = \'IN_PROGRESS\' WHERE id = ?'
+            )->execute(array($snapshotId));
+        }
+    }
+
+    public static function setSnapshotStatus(PDO $pdo, int $snapshotId, string $status, int $userId): void
+    {
+        $snap = self::getSnapshot($pdo, $snapshotId);
+        if ($snap === null) {
+            throw new RuntimeException('Snapshot not found.');
+        }
+        if (!empty($snap['locked_at'])) {
+            throw new RuntimeException('Snapshot is locked.');
+        }
+        $s = strtoupper(trim($status));
+        if (!in_array($s, array('OPEN', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'), true)) {
+            throw new InvalidArgumentException('Invalid snapshot status.');
+        }
+        $now = date('Y-m-d H:i:s');
+        $lockedAt = $s === 'COMPLETED' ? $now : null;
+        $lockedBy = $lockedAt !== null && $userId > 0 ? $userId : null;
+        $pdo->prepare(
+            'UPDATE ipca_compliance_audit_checklist_snapshots SET
+                status = ?,
+                locked_at = COALESCE(?, locked_at),
+                locked_by = COALESCE(?, locked_by)
+             WHERE id = ?'
+        )->execute(array($s, $lockedAt, $lockedBy, $snapshotId));
     }
 }

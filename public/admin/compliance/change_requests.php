@@ -140,39 +140,49 @@ if ($detailId > 0) {
             <form method="post">
               <input type="hidden" name="action" value="update_cr">
               <input type="hidden" name="request_id" value="<?= (int)$detailId ?>">
-              <label style="display:block;margin-bottom:8px;">Title *
-                <input name="title" required value="<?= h((string)$row['title']) ?>" style="width:100%;max-width:480px;padding:8px;">
+              <label style="display:block;margin-bottom:10px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Title *</span>
+                <input name="title" required value="<?= h((string)$row['title']) ?>" style="width:100%;max-width:480px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
               </label>
-              <label style="display:block;margin-bottom:8px;">Description *
-                <textarea name="description" required rows="4" style="width:100%;max-width:720px;padding:8px;"><?= h((string)$row['description']) ?></textarea>
+              <label style="display:block;margin-bottom:10px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Description *</span>
+                <textarea name="description" required rows="4" style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"><?= h((string)$row['description']) ?></textarea>
               </label>
-              <label style="display:block;margin-bottom:8px;">Manual kind
-                <select name="manual_kind">
-                  <?php foreach ($kinds as $kv => $lab): ?>
-                    <option value="<?= h($kv) ?>" <?= ((string)$row['manual_kind'] === $kv) ? 'selected' : '' ?>><?= h($lab) ?></option>
-                  <?php endforeach; ?>
-                </select>
+              <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+                <label>
+                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Manual kind</span>
+                  <select name="manual_kind" style="padding:8px;border-radius:8px;">
+                    <?php foreach ($kinds as $kv => $lab): ?>
+                      <option value="<?= h($kv) ?>" <?= ((string)$row['manual_kind'] === $kv) ? 'selected' : '' ?>><?= h($lab) ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </label>
+                <label>
+                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Priority</span>
+                  <select name="priority" style="padding:8px;border-radius:8px;">
+                    <?php foreach (array('LOW', 'NORMAL', 'HIGH', 'URGENT') as $p): ?>
+                      <option value="<?= $p ?>" <?= ((string)$row['priority'] === $p) ? 'selected' : '' ?>><?= $p ?></option>
+                    <?php endforeach; ?>
+                  </select>
+                </label>
+              </div>
+              <label style="display:block;margin-bottom:10px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">manual_ref_id</span>
+                <input name="manual_ref_id" value="<?= h((string)($row['manual_ref_id'] ?? '')) ?>" style="width:100%;max-width:480px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
               </label>
-              <label style="display:block;margin-bottom:8px;">manual_ref_id
-                <input name="manual_ref_id" value="<?= h((string)($row['manual_ref_id'] ?? '')) ?>" style="width:100%;max-width:480px;padding:8px;">
+              <label style="display:block;margin-bottom:10px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">manual_label</span>
+                <input name="manual_label" value="<?= h((string)($row['manual_label'] ?? '')) ?>" style="width:100%;max-width:480px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
               </label>
-              <label style="display:block;margin-bottom:8px;">manual_label
-                <input name="manual_label" value="<?= h((string)($row['manual_label'] ?? '')) ?>" style="width:100%;max-width:480px;padding:8px;">
+              <label style="display:block;margin-bottom:10px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Proposed text</span>
+                <textarea name="proposed_text" rows="6" style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"><?= h((string)($row['proposed_text'] ?? '')) ?></textarea>
               </label>
-              <label style="display:block;margin-bottom:8px;">Proposed text
-                <textarea name="proposed_text" rows="6" style="width:100%;max-width:720px;padding:8px;"><?= h((string)($row['proposed_text'] ?? '')) ?></textarea>
+              <label style="display:block;margin-bottom:10px;">
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Rationale</span>
+                <textarea name="rationale" rows="3" style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"><?= h((string)($row['rationale'] ?? '')) ?></textarea>
               </label>
-              <label style="display:block;margin-bottom:8px;">Rationale
-                <textarea name="rationale" rows="3" style="width:100%;max-width:720px;padding:8px;"><?= h((string)($row['rationale'] ?? '')) ?></textarea>
-              </label>
-              <label>Priority
-                <select name="priority">
-                  <?php foreach (array('LOW', 'NORMAL', 'HIGH', 'URGENT') as $p): ?>
-                    <option value="<?= $p ?>" <?= ((string)$row['priority'] === $p) ? 'selected' : '' ?>><?= $p ?></option>
-                  <?php endforeach; ?>
-                </select>
-              </label>
-              <button type="submit" style="display:block;margin-top:12px;background:#1e3c72;color:#fff;border:0;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;">Save</button>
+              <button type="submit" style="margin-top:6px;background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Save</button>
             </form>
           <?php else: ?>
             <p><?= nl2br(h((string)$row['description'])) ?></p>
@@ -182,18 +192,20 @@ if ($detailId > 0) {
         <?php if (!$locked): ?>
           <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:20px;max-width:920px;">
             <h2 style="margin:0 0 12px;">Workflow</h2>
-            <form method="post" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+            <form method="post" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
               <input type="hidden" name="action" value="set_status">
               <input type="hidden" name="request_id" value="<?= (int)$detailId ?>">
-              <label>Next status
-                <select name="status">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Next status</span>
+                <select name="status" style="padding:8px;border-radius:8px;">
                   <?php foreach ($statuses as $s): ?>
                     <option value="<?= $s ?>" <?= ((string)$row['status'] === $s) ? 'selected' : '' ?>><?= $s ?></option>
                   <?php endforeach; ?>
                 </select>
               </label>
-              <label>Approver name (if APPROVED)
-                <input name="approver_name" value="<?= h((string)($user['name'] ?? '')) ?>" style="padding:8px;">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Approver name (if APPROVED)</span>
+                <input name="approver_name" value="<?= h((string)($user['name'] ?? '')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
               </label>
               <button type="submit" style="background:#0f766e;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">Apply</button>
             </form>
@@ -201,41 +213,45 @@ if ($detailId > 0) {
         <?php endif; ?>
 
         <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:20px;max-width:920px;">
-          <h2 style="margin:0 0 12px;">Links</h2>
+          <h2 style="margin:0 0 12px;font-size:18px;">Links</h2>
           <table style="width:100%;font-size:13px;border-collapse:collapse;">
-            <thead><tr style="text-align:left;background:#f8fafc;"><th style="padding:8px;">Type</th><th style="padding:8px;">Entity</th><th style="padding:8px;">Relation</th></tr></thead>
+            <thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:8px 10px;">Type</th><th style="padding:8px 10px;">Entity</th><th style="padding:8px 10px;">Relation</th></tr></thead>
             <tbody>
               <?php foreach ($links as $L): ?>
                 <tr style="border-top:1px solid #e2e8f0;">
-                  <td style="padding:8px;"><?= h((string)$L['entity_type']) ?></td>
-                  <td style="padding:8px;"><?= $L['entity_id'] !== null ? (int)$L['entity_id'] : h((string)($L['external_ref'] ?? '—')) ?></td>
-                  <td style="padding:8px;"><?= h((string)($L['relation'] ?? '—')) ?></td>
+                  <td style="padding:8px 10px;"><?= h((string)$L['entity_type']) ?></td>
+                  <td style="padding:8px 10px;"><?= $L['entity_id'] !== null ? (int)$L['entity_id'] : h((string)($L['external_ref'] ?? '—')) ?></td>
+                  <td style="padding:8px 10px;"><?= h((string)($L['relation'] ?? '—')) ?></td>
                 </tr>
               <?php endforeach; ?>
             </tbody>
           </table>
           <?php if (!$locked): ?>
-            <form method="post" style="margin-top:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+            <form method="post" style="margin-top:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
               <input type="hidden" name="action" value="add_link">
               <input type="hidden" name="request_id" value="<?= (int)$detailId ?>">
-              <label>entity_type
-                <select name="entity_type">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">entity_type</span>
+                <select name="entity_type" style="padding:8px;border-radius:8px;">
                   <option value="finding">finding</option>
                   <option value="audit">audit</option>
                   <option value="corrective_action">corrective_action</option>
                   <option value="other">other</option>
                 </select>
               </label>
-              <label>entity_id
-                <input type="number" name="entity_id" min="1" placeholder="id" style="padding:8px;width:100px;">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">entity_id</span>
+                <input type="number" name="entity_id" min="1" placeholder="id" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:100px;">
               </label>
-              <label>external_ref
-                <input name="external_ref" placeholder="optional URL/note" style="padding:8px;width:200px;">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">external_ref</span>
+                <input name="external_ref" placeholder="optional URL/note" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:200px;">
               </label>
-              <label>relation
-                <input name="relation" placeholder="CAUSED_BY" style="padding:8px;width:120px;">
+              <label>
+                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">relation</span>
+                <input name="relation" placeholder="CAUSED_BY" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:140px;">
               </label>
-              <button type="submit" style="background:#334155;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer;">Add link</button>
+              <button type="submit" style="background:#334155;color:#fff;border:0;padding:10px 14px;border-radius:8px;font-weight:700;cursor:pointer;">Add link</button>
             </form>
           <?php endif; ?>
         </div>
@@ -255,59 +271,82 @@ if ($detailId > 0) {
       <h2 style="margin:0 0 12px;font-size:18px;">New request</h2>
       <form method="post">
         <input type="hidden" name="action" value="create_cr">
-        <label style="display:block;margin-bottom:8px;">Title *
-          <input name="title" required style="width:100%;padding:8px;">
+        <label style="display:block;margin-bottom:10px;">
+          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Title *</span>
+          <input name="title" required style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
         </label>
-        <label style="display:block;margin-bottom:8px;">Description *
-          <textarea name="description" required rows="3" style="width:100%;padding:8px;"></textarea>
+        <label style="display:block;margin-bottom:10px;">
+          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Description *</span>
+          <textarea name="description" required rows="3" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"></textarea>
         </label>
-        <label style="display:block;margin-bottom:8px;">Manual kind
-          <select name="manual_kind">
-            <?php foreach ($kinds as $kv => $lab): ?>
-              <option value="<?= h($kv) ?>"><?= h($lab) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </label>
-        <label style="display:block;margin-bottom:8px;">manual_ref_id
-          <input name="manual_ref_id" style="width:100%;padding:8px;">
-        </label>
-        <label style="display:block;margin-bottom:8px;">manual_label
-          <input name="manual_label" style="width:100%;padding:8px;">
-        </label>
-        <label style="display:block;margin-bottom:8px;">Proposed text
-          <textarea name="proposed_text" rows="4" style="width:100%;padding:8px;"></textarea>
-        </label>
-        <label style="display:block;margin-bottom:8px;">Rationale
-          <textarea name="rationale" rows="2" style="width:100%;padding:8px;"></textarea>
-        </label>
-        <div style="display:flex;gap:12px;">
-          <label>Priority
-            <select name="priority"><?php foreach (array('LOW', 'NORMAL', 'HIGH', 'URGENT') as $p): ?>
-              <option value="<?= $p ?>"><?= $p ?></option><?php endforeach; ?>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+          <label>
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Manual kind</span>
+            <select name="manual_kind" style="padding:8px;border-radius:8px;">
+              <?php foreach ($kinds as $kv => $lab): ?>
+                <option value="<?= h($kv) ?>"><?= h($lab) ?></option>
+              <?php endforeach; ?>
             </select>
           </label>
-          <label>Initial status
-            <select name="status"><?php foreach ($statuses as $s): ?>
-              <option value="<?= $s ?>" <?= $s === 'DRAFT' ? 'selected' : '' ?>><?= $s ?></option><?php endforeach; ?>
+          <label>
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Priority</span>
+            <select name="priority" style="padding:8px;border-radius:8px;">
+              <?php foreach (array('LOW', 'NORMAL', 'HIGH', 'URGENT') as $p): ?>
+                <option value="<?= $p ?>"><?= $p ?></option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+          <label>
+            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Initial status</span>
+            <select name="status" style="padding:8px;border-radius:8px;">
+              <?php foreach ($statuses as $s): ?>
+                <option value="<?= $s ?>" <?= $s === 'DRAFT' ? 'selected' : '' ?>><?= $s ?></option>
+              <?php endforeach; ?>
             </select>
           </label>
         </div>
-        <button type="submit" style="margin-top:12px;background:#1e3c72;color:#fff;border:0;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;">Create</button>
+        <label style="display:block;margin-bottom:10px;">
+          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">manual_ref_id</span>
+          <input name="manual_ref_id" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+        </label>
+        <label style="display:block;margin-bottom:10px;">
+          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">manual_label</span>
+          <input name="manual_label" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+        </label>
+        <label style="display:block;margin-bottom:10px;">
+          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Proposed text</span>
+          <textarea name="proposed_text" rows="4" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"></textarea>
+        </label>
+        <label style="display:block;margin-bottom:14px;">
+          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Rationale</span>
+          <textarea name="rationale" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"></textarea>
+        </label>
+        <button type="submit" style="margin-top:4px;background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Create</button>
       </form>
     </div>
 
     <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;max-width:1100px;">
       <table style="width:100%;border-collapse:collapse;font-size:14px;">
-        <thead><tr style="background:#f1f5f9;text-align:left;"><th>Code</th><th>Title</th><th>Status</th><th>Target</th><th>Updated</th><th></th></tr></thead>
+        <thead><tr style="background:#f1f5f9;text-align:left;">
+          <th style="padding:12px 14px;">Code</th>
+          <th style="padding:12px 14px;">Title</th>
+          <th style="padding:12px 14px;">Status</th>
+          <th style="padding:12px 14px;">Target</th>
+          <th style="padding:12px 14px;">Updated</th>
+          <th style="padding:12px 14px;"></th>
+        </tr></thead>
         <tbody>
+          <?php if (!$rows): ?>
+            <tr><td colspan="6" style="padding:20px;color:#64748b;">No change requests yet.</td></tr>
+          <?php endif; ?>
           <?php foreach ($rows as $r): ?>
             <tr style="border-top:1px solid #e2e8f0;">
-              <td style="padding:10px;font-family:monospace;font-size:12px;"><?= h((string)$r['request_code']) ?></td>
-              <td style="padding:10px;"><?= h((string)$r['title']) ?></td>
-              <td style="padding:10px;"><?= h((string)$r['status']) ?></td>
-              <td style="padding:10px;font-size:12px;color:#64748b;"><?= h((string)($r['manual_label'] ?: $r['manual_ref_id'] ?: '—')) ?></td>
-              <td style="padding:10px;font-size:12px;color:#64748b;"><?= h((string)$r['updated_at']) ?></td>
-              <td style="padding:10px;"><a href="/admin/compliance/change_requests.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1e3c72;">Open</a></td>
+              <td style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$r['request_code']) ?></td>
+              <td style="padding:10px 14px;"><?= h((string)$r['title']) ?></td>
+              <td style="padding:10px 14px;"><?= h((string)$r['status']) ?></td>
+              <td style="padding:10px 14px;font-size:12px;color:#64748b;"><?= h((string)($r['manual_label'] ?: $r['manual_ref_id'] ?: '—')) ?></td>
+              <td style="padding:10px 14px;font-size:12px;color:#64748b;"><?= h((string)$r['updated_at']) ?></td>
+              <td style="padding:10px 14px;"><a href="/admin/compliance/change_requests.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1e3c72;">Open</a></td>
             </tr>
           <?php endforeach; ?>
         </tbody>

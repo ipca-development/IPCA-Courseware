@@ -120,7 +120,7 @@ function compliance_render_placeholder(string $pageTitle, string $phaseLabel, st
       </style>
 
       <div class="compliance-shell-card">
-        <div class="compliance-shell-overline">Compliance Operating System</div>
+        <div class="compliance-shell-overline">Compliance</div>
         <h2 class="compliance-shell-title"><?= $titleEsc ?></h2>
         <div class="compliance-shell-phase"><?= $phaseEsc ?></div>
         <p class="compliance-shell-description"><?= $descriptionEsc ?></p>

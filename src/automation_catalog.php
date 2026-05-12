@@ -160,6 +160,62 @@ if (!function_exists('automation_default_event_definitions')) {
                 'category_key' => 'compliance',
                 'sort_order' => 20,
             ),
+            array(
+                'event_key' => 'compliance.checklist.approved',
+                'label' => 'Compliance Checklist Version Approved',
+                'description' => 'Triggered when a compliance checklist template version is approved and locked.',
+                'category_key' => 'compliance',
+                'sort_order' => 30,
+            ),
+            array(
+                'event_key' => 'compliance.audit.created',
+                'label' => 'Compliance Audit Created',
+                'description' => 'Triggered when a new compliance audit is created.',
+                'category_key' => 'compliance',
+                'sort_order' => 40,
+            ),
+            array(
+                'event_key' => 'compliance.audit.checklist_attached',
+                'label' => 'Compliance Audit Checklist Snapshot Attached',
+                'description' => 'Triggered when an approved checklist version is snapshotted onto an audit.',
+                'category_key' => 'compliance',
+                'sort_order' => 50,
+            ),
+            array(
+                'event_key' => 'compliance.manual.change_requested',
+                'label' => 'Manual Change Requested',
+                'description' => 'Triggered when a new manual change request is raised.',
+                'category_key' => 'compliance',
+                'sort_order' => 60,
+            ),
+            array(
+                'event_key' => 'compliance.manual.cr_approved',
+                'label' => 'Manual Change Request Approved',
+                'description' => 'Triggered when a manual change request moves to APPROVED.',
+                'category_key' => 'compliance',
+                'sort_order' => 70,
+            ),
+            array(
+                'event_key' => 'compliance.manual.draft_published',
+                'label' => 'Manual Draft Published',
+                'description' => 'Triggered when a manual draft is published and locked.',
+                'category_key' => 'compliance',
+                'sort_order' => 80,
+            ),
+            array(
+                'event_key' => 'compliance.manual.package_released',
+                'label' => 'Manual Release Package Released',
+                'description' => 'Triggered when a manual release package is released and locked for distribution.',
+                'category_key' => 'compliance',
+                'sort_order' => 90,
+            ),
+            array(
+                'event_key' => 'compliance.case.opened',
+                'label' => 'Compliance Case Opened',
+                'description' => 'Triggered when a compliance case (audit, NCR, MoC, etc.) is opened.',
+                'category_key' => 'compliance',
+                'sort_order' => 100,
+            ),
         );
     }
 }
