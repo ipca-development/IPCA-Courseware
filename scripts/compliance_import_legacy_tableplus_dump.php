@@ -6,9 +6,13 @@ declare(strict_types=1);
  *
  * Reads INSERT blocks for: audits, compliance_domains, findings, finding_rca, finding_actions,
  * finding_mccf_links (+ mccf_items / mccf_manuals / mccf_requirements to resolve requirement_key),
- * and optionally ai_finding_runs (--with-ai, large rows).
+ * and ai_finding_runs (included by default; pass --no-ai to skip).
  *
- * Does NOT import manual_excerpts / mccf_* (different product surface). Re-run is blocked if
+ * User / account linkage: Courseware user rows are never imported. Inserts use NULL for
+ * lead_auditor_id, created_by, updated_by, corrective-action responsible_user_id/name,
+ * ai_runs.created_by, and RCA approved fields (approved_by_name/approved_at from legacy are not stored).
+ *
+ * Does NOT import manual_excerpts / mccf_* catalog rows (different product surface). Re-run is blocked if
  * the target audit_code already exists (override with --force).
  *
  * Usage:
@@ -16,7 +20,7 @@ declare(strict_types=1);
  *   Repo seed (after deploy): `scripts/run_compliance_legacy_seed.sh` or pass
  *   `scripts/sql/seeds/legacy_compliance_tableplus_dump.sql` explicitly.
  *   php scripts/compliance_import_legacy_tableplus_dump.php /path/to/compliance_DB.sql
- *   php scripts/compliance_import_legacy_tableplus_dump.php /path/to/compliance_DB.sql --with-ai
+ *   php scripts/compliance_import_legacy_tableplus_dump.php /path/to/compliance_DB.sql --no-ai
  *   php scripts/compliance_import_legacy_tableplus_dump.php /path/to/compliance_DB.sql --force
  *   php scripts/compliance_import_legacy_tableplus_dump.php /path/to/compliance_DB.sql --parse-only
  */
@@ -27,12 +31,12 @@ if (PHP_SAPI !== 'cli') {
 }
 
 $path = $argv[1] ?? '';
-$withAi = in_array('--with-ai', $argv, true);
+$withAi = !in_array('--no-ai', $argv, true);
 $force = in_array('--force', $argv, true);
 $parseOnly = in_array('--parse-only', $argv, true);
 
 if ($path === '' || str_starts_with($path, '--')) {
-    fwrite(STDERR, "Usage: php " . basename(__FILE__) . " /path/to/compliance_DB.sql [--with-ai] [--force] [--parse-only]\n");
+    fwrite(STDERR, "Usage: php " . basename(__FILE__) . " /path/to/compliance_DB.sql [--no-ai] [--force] [--parse-only]\n");
     exit(1);
 }
 
@@ -708,22 +712,12 @@ try {
             $rootCause = isset($rr[5]) && is_string($rr[5]) && $rr[5] !== '' ? $rr[5] : null;
             $lockedAt = isset($rr[6]) && is_string($rr[6]) && $rr[6] !== '' ? $rr[6] : null;
             $lockReason = isset($rr[8]) && is_string($rr[8]) && $rr[8] !== '' ? $rr[8] : null;
-            $apprName = isset($rr[9]) && is_string($rr[9]) && $rr[9] !== '' ? $rr[9] : null;
-            $apprAt = isset($rr[10]) && is_string($rr[10]) && $rr[10] !== '' ? $rr[10] : null;
-            $rcaCreated = is_string($rr[3] ?? null) ? $rr[3] : $createdAt;
-            $rcaUpdated = is_string($rr[4] ?? null) ? $rr[4] : $rcaCreated;
-
-            json_decode($stepsJson, true);
-            if (json_last_error() !== JSON_ERROR_NONE) {
-                $stepsJson = '[]';
-            }
-
             $insRca->execute(array(
                 $newFid,
                 $stepsJson,
                 $rootCause,
-                $apprName,
-                $apprAt,
+                null,
+                null,
                 $lockedAt,
                 $lockReason,
                 $rcaCreated,
@@ -825,7 +819,7 @@ try {
         . ', mccf_links junction=' . (int)$mccfStats['from_junction']
         . ' finding_key=' . (int)$mccfStats['from_finding']
         . ' junction_skipped=' . (int)$mccfStats['skipped_junction']
-        . ($withAi ? ', ai_runs imported' : '') . "\n";
+        . ($withAi ? ', ai_runs imported' : ', ai_runs skipped (--no-ai)') . "\n";
 } catch (Throwable $e) {
     $pdo->rollBack();
     fwrite(STDERR, 'Import failed: ' . $e->getMessage() . "\n");
