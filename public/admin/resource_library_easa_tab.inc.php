@@ -2159,6 +2159,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
     </div>
     <div class="rl-easa-browse-single">
       <p class="rl-drop-meta" id="rlEasaTreeHint" style="margin:0 0 8px;">Loading regulations…</p>
+      <p class="rl-drop-meta rl-easa-perf-debug" id="rlEasaPerfDebug" hidden style="margin:0 0 8px;white-space:pre-line;color:#475569;font-size:12px;"></p>
       <div class="rl-easa-tree-panel" id="rlEasaTreeMount" aria-label="Easy Access rule tree">
         <div class="rl-easa-tree-loading-center" role="status">
           <div class="rl-easa-tree-spinner" aria-hidden="true"></div>
@@ -2484,8 +2485,10 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   var rlEasaTreeBatchSilent = false;
 
   /**
-   * Tree timing logs are off by default (production stays quiet; avoids mistaking logs for failures).
+   * Tree / tab timing: off by default. When on, shows a small panel under the tree (no DevTools)
+   * and mirrors the same lines to console.
    * Enable: sessionStorage.setItem('rlEasaDebugTree','1'); location.reload()
+   * Disable: sessionStorage.removeItem('rlEasaDebugTree'); location.reload()
    * Or before load: window.__RL_EASA_TREE_DEBUG__ = true;
    */
   function rlEasaTreeDebugEnabled() {
@@ -2498,6 +2501,39 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
   function rlEasaTreeDebugLog(msg) {
     if (!rlEasaTreeDebugEnabled()) return;
     try { console.log(msg); } catch (e) {}
+  }
+
+  var rlEasaPerfLastStatusMs = null;
+  var rlEasaPerfLastTreeTotalMs = null;
+  var rlEasaPerfLastTreeServerMs = null;
+  var rlEasaPerfLastTreeTimingJson = '';
+
+  function rlEasaPerfDebugPanelRefresh() {
+    var el = document.getElementById('rlEasaPerfDebug');
+    if (!el) return;
+    if (!rlEasaTreeDebugEnabled()) {
+      el.hidden = true;
+      el.textContent = '';
+      return;
+    }
+    var lines = [
+      'Diagnostics (off: sessionStorage.removeItem("rlEasaDebugTree"); location.reload())',
+    ];
+    if (rlEasaPerfLastStatusMs != null) {
+      lines.push('Status request (until JSON parsed): ~' + rlEasaPerfLastStatusMs + ' ms');
+    }
+    if (rlEasaPerfLastTreeTotalMs != null) {
+      var ln = 'Tree boot (browser end-to-end): ~' + rlEasaPerfLastTreeTotalMs + ' ms';
+      if (rlEasaPerfLastTreeServerMs != null) {
+        ln += '; server reported total ' + rlEasaPerfLastTreeServerMs + ' ms';
+      }
+      lines.push(ln);
+      if (rlEasaPerfLastTreeTimingJson) {
+        lines.push('Server phases (JSON): ' + rlEasaPerfLastTreeTimingJson);
+      }
+    }
+    el.textContent = lines.join('\n');
+    el.hidden = lines.length <= 1;
   }
 
   function esc(s) {
@@ -3825,6 +3861,10 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       if (hint) hint.textContent = 'Choose an Easy Access regulation from the list.';
       return;
     }
+    rlEasaPerfLastTreeTotalMs = null;
+    rlEasaPerfLastTreeServerMs = null;
+    rlEasaPerfLastTreeTimingJson = '';
+    rlEasaPerfDebugPanelRefresh();
     mount.innerHTML = RL_EASA_TREE_LOADING_HTML;
     if (hint) hint.textContent = 'Loading regulation tree…';
 
@@ -3839,13 +3879,14 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
        the legacy `tree_children` root call. */
     var openPatternSources = rlEasaTreeComputeBootstrapPatternSources(b);
 
-    /* Optional timing when rlEasaTreeDebugEnabled(); otherwise use DevTools Network
-       on tree_bootstrap / tree_children and the Server-Timing response header. */
+    /* Optional timing when rlEasaTreeDebugEnabled(): on-page panel + console. */
     var tStart = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    var lastBootTimingMs = null;
     rlEasaTreeDebugLog('[rl-easa-tree] boot start, batch_id=' + b + ', openPatterns=' + (openPatternSources && openPatternSources.length || 0));
 
     rlEasaTreeFetchTreeBootstrapJson(b, openPatternSources)
       .then(function (boot) {
+        lastBootTimingMs = boot && boot.timing_ms ? boot.timing_ms : null;
         var tFetchEnd = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
         var srv = boot && boot.timing_ms ? boot.timing_ms : null;
         rlEasaTreeDebugLog('[rl-easa-tree] fetch done in ' + Math.round(tFetchEnd - tStart) + ' ms; server phase timings (ms): '
@@ -3889,9 +3930,18 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         return rlEasaTreeApplyDefaultOpenState(b, mount).then(function () {
           var tOpenEnd = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
           rlEasaTreeDebugLog('[rl-easa-tree] auto-open + descend in ' + Math.round(tOpenEnd - tOpenStart) + ' ms; total boot ' + Math.round(tOpenEnd - tStart) + ' ms');
+          rlEasaPerfLastTreeTotalMs = Math.round(tOpenEnd - tStart);
+          var srv = lastBootTimingMs;
+          rlEasaPerfLastTreeServerMs = srv && typeof srv.total === 'number' ? srv.total : null;
+          rlEasaPerfLastTreeTimingJson = srv ? JSON.stringify(srv) : '';
+          rlEasaPerfDebugPanelRefresh();
         });
       })
       .catch(function (e) {
+        rlEasaPerfLastTreeTotalMs = null;
+        rlEasaPerfLastTreeServerMs = null;
+        rlEasaPerfLastTreeTimingJson = '';
+        rlEasaPerfDebugPanelRefresh();
         mount.innerHTML = '<p class="rl-easa-tree-loading-msg" style="margin:0;color:#991b1b;">'
           + esc(e.message || 'Could not load the regulation tree.') + '</p>';
         if (hint) hint.textContent = 'Something went wrong while loading the tree.';
@@ -4213,8 +4263,15 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
 
   function loadStatus() {
     var hint = document.getElementById('rlEasaMigrateHint');
+    var tSt = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     fetch(api + '?action=status', { credentials: 'same-origin' })
-      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j }; }); })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          var tEn = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+          rlEasaPerfLastStatusMs = Math.round(tEn - tSt);
+          return { ok: r.ok, j: j };
+        });
+      })
       .then(function (x) {
         if (!x.j || !x.j.ok) throw new Error((x.j && x.j.error) || 'Status failed');
         var limEl = document.getElementById('rlEasaUploadLimitHint');
@@ -4251,6 +4308,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
         });
         rlEasaRebuildSourceRow(x.j);
         rlEasaApplyDefaultTreeSelectionAfterStatus(x.j);
+        rlEasaPerfDebugPanelRefresh();
         if (hint) {
           var parts = [];
           if (x.j.migrate_hint) parts.push(x.j.migrate_hint);
@@ -4304,6 +4362,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
       })
       .catch(function (e) {
         if (hint) hint.textContent = e.message || 'Could not load status';
+        rlEasaPerfDebugPanelRefresh();
       });
   }
 
@@ -6975,6 +7034,7 @@ if (!isset($easaMayaAvatarHref) || $easaMayaAvatarHref === '') {
 
   rlEasaBookmarksBoot();
 
+  rlEasaPerfDebugPanelRefresh();
   loadStatus();
 })();
 </script>
