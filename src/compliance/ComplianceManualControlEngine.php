@@ -301,6 +301,102 @@ final class ComplianceManualControlEngine
     }
 
     /**
+     * Drafts eligible to be bundled into a release package — APPROVED or PUBLISHED.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function listReleasableDrafts(PDO $pdo, int $limit = 200): array
+    {
+        $limit = max(1, min(500, $limit));
+        $sql = "SELECT id, draft_code, draft_title, status, manual_kind, manual_label, manual_ref_id, version_no
+                  FROM ipca_compliance_manual_drafts
+                 WHERE status IN ('APPROVED','PUBLISHED')
+                 ORDER BY draft_code ASC
+                 LIMIT " . (int)$limit;
+        $st = $pdo->query($sql);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * Decode the drafts_json column to a plain list of draft IDs.
+     * Accepts: `[1,2]`, `[{"id":1},...]`, `[{"draft_id":1},...]`.
+     *
+     * @return list<int>
+     */
+    public static function extractDraftIds(mixed $rawJson): array
+    {
+        if ($rawJson === null || $rawJson === '') {
+            return array();
+        }
+        $decoded = is_string($rawJson) ? json_decode($rawJson, true) : $rawJson;
+        if (!is_array($decoded)) {
+            return array();
+        }
+        $ids = array();
+        foreach ($decoded as $entry) {
+            if (is_int($entry) && $entry > 0) {
+                $ids[] = $entry;
+                continue;
+            }
+            if (is_string($entry) && ctype_digit($entry) && (int)$entry > 0) {
+                $ids[] = (int)$entry;
+                continue;
+            }
+            if (is_array($entry)) {
+                if (isset($entry['id']) && (int)$entry['id'] > 0) {
+                    $ids[] = (int)$entry['id'];
+                    continue;
+                }
+                if (isset($entry['draft_id']) && (int)$entry['draft_id'] > 0) {
+                    $ids[] = (int)$entry['draft_id'];
+                }
+            }
+        }
+
+        return array_values(array_unique($ids));
+    }
+
+    /**
+     * Build a friendly drafts_json payload from selected IDs.
+     * Stores `{id, draft_code, draft_title}` per entry so the PDF and audit
+     * trail show meaningful labels even if a draft is later renamed.
+     */
+    public static function buildDraftsJsonFromIds(PDO $pdo, array $ids): string
+    {
+        $clean = array();
+        foreach ($ids as $v) {
+            $n = (int)$v;
+            if ($n > 0) {
+                $clean[$n] = $n;
+            }
+        }
+        if ($clean === array()) {
+            return '[]';
+        }
+        $placeholders = implode(',', array_fill(0, count($clean), '?'));
+        $st = $pdo->prepare(
+            'SELECT id, draft_code, draft_title
+               FROM ipca_compliance_manual_drafts
+              WHERE id IN (' . $placeholders . ')
+              ORDER BY draft_code ASC'
+        );
+        $st->execute(array_values($clean));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $out = array();
+        foreach ($rows as $r) {
+            $out[] = array(
+                'id' => (int)$r['id'],
+                'draft_code' => (string)($r['draft_code'] ?? ''),
+                'draft_title' => (string)($r['draft_title'] ?? ''),
+            );
+        }
+
+        return json_encode($out, JSON_UNESCAPED_UNICODE) ?: '[]';
+    }
+
+    /**
      * @return array<string,mixed>|null
      */
     public static function getDraft(PDO $pdo, int $id): ?array

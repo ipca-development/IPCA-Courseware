@@ -26,29 +26,48 @@ function mr_flash_take(): ?array
     return $f;
 }
 
+function mr_post_draft_ids(): array
+{
+    $raw = $_POST['draft_ids'] ?? array();
+    if (!is_array($raw)) {
+        return array();
+    }
+    $out = array();
+    foreach ($raw as $v) {
+        $n = (int)$v;
+        if ($n > 0) {
+            $out[$n] = $n;
+        }
+    }
+
+    return array_values($out);
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     try {
         if ($action === 'create_pkg') {
+            $draftsJson = ComplianceManualControlEngine::buildDraftsJsonFromIds($pdo, mr_post_draft_ids());
             $id = ComplianceManualControlEngine::createPackage($pdo, array(
                 'title' => (string)($_POST['title'] ?? ''),
                 'manual_code' => (string)($_POST['manual_code'] ?? ''),
                 'target_revision' => (string)($_POST['target_revision'] ?? ''),
                 'effective_date' => (string)($_POST['effective_date'] ?? ''),
                 'status' => (string)($_POST['status'] ?? 'PLANNED'),
-                'drafts_json' => (string)($_POST['drafts_json'] ?? '[]'),
+                'drafts_json' => $draftsJson,
             ), $uid);
             mr_flash('success', 'Package created.');
             redirect('/admin/compliance/manual_approved.php?id=' . $id);
         }
         if ($action === 'update_pkg') {
             $id = (int)($_POST['package_id'] ?? 0);
+            $draftsJson = ComplianceManualControlEngine::buildDraftsJsonFromIds($pdo, mr_post_draft_ids());
             ComplianceManualControlEngine::updatePackage($pdo, $id, array(
                 'title' => (string)($_POST['title'] ?? ''),
                 'manual_code' => (string)($_POST['manual_code'] ?? ''),
                 'target_revision' => (string)($_POST['target_revision'] ?? ''),
                 'effective_date' => (string)($_POST['effective_date'] ?? ''),
-                'drafts_json' => (string)($_POST['drafts_json'] ?? ''),
+                'drafts_json' => $draftsJson,
             ), $uid);
             mr_flash('success', 'Package saved.');
             redirect('/admin/compliance/manual_approved.php?id=' . $id);
@@ -116,9 +135,26 @@ if ($detailId > 0) {
     } else {
         $locked = !empty($row['locked_at']);
         $apprs = ComplianceManualControlEngine::listPackageApprovals($pdo, $detailId);
-        $dj = $row['drafts_json'] ?? '[]';
-        if (!is_string($dj)) {
-            $dj = json_encode($dj, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT) ?: '[]';
+        $selectedDraftIds = ComplianceManualControlEngine::extractDraftIds($row['drafts_json'] ?? null);
+        $availableDrafts = ComplianceManualControlEngine::listReleasableDrafts($pdo);
+        $availableDraftIds = array();
+        foreach ($availableDrafts as $d) {
+            $availableDraftIds[(int)$d['id']] = true;
+        }
+        $orphanIds = array();
+        foreach ($selectedDraftIds as $sid) {
+            if (!isset($availableDraftIds[$sid])) {
+                $orphanIds[] = $sid;
+            }
+        }
+        $orphanRows = array();
+        if ($orphanIds !== array()) {
+            $ph = implode(',', array_fill(0, count($orphanIds), '?'));
+            $st = $pdo->prepare(
+                'SELECT id, draft_code, draft_title, status FROM ipca_compliance_manual_drafts WHERE id IN (' . $ph . ')'
+            );
+            $st->execute($orphanIds);
+            $orphanRows = $st->fetchAll(PDO::FETCH_ASSOC) ?: array();
         }
         ?>
         <p><a href="/admin/compliance/manual_approved.php" style="font-weight:700;color:#1e3c72;">← Packages</a></p>
@@ -153,10 +189,58 @@ if ($detailId > 0) {
                   <input type="date" name="effective_date" value="<?= h(substr((string)($row['effective_date'] ?? ''), 0, 10)) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
                 </label>
               </div>
-              <label style="display:block;margin-bottom:14px;">
-                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">drafts_json</span>
-                <textarea name="drafts_json" rows="6" style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"><?= h((string)$dj) ?></textarea>
-              </label>
+              <div style="margin-bottom:14px;">
+                <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px;">Drafts included in this release</div>
+                <?php if ($availableDrafts === array() && $selectedDraftIds === array()): ?>
+                  <p style="margin:0;color:#64748b;font-size:13px;">No APPROVED / PUBLISHED drafts available.
+                    <a href="/admin/compliance/manual_drafts.php" style="color:#1e3c72;font-weight:700;">Author one →</a>
+                  </p>
+                <?php else: ?>
+                  <div style="border:1px solid #e2e8f0;border-radius:10px;max-height:260px;overflow-y:auto;background:#f8fafc;">
+                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                      <thead><tr style="background:#f1f5f9;text-align:left;position:sticky;top:0;">
+                        <th style="padding:8px 10px;width:32px;"></th>
+                        <th style="padding:8px 10px;">Code</th>
+                        <th style="padding:8px 10px;">Title</th>
+                        <th style="padding:8px 10px;">Manual</th>
+                        <th style="padding:8px 10px;">Status</th>
+                      </tr></thead>
+                      <tbody>
+                        <?php foreach ($availableDrafts as $d):
+                            $did = (int)$d['id'];
+                            $checked = in_array($did, $selectedDraftIds, true) ? 'checked' : '';
+                            ?>
+                          <tr style="border-top:1px solid #e2e8f0;background:#fff;">
+                            <td style="padding:8px 10px;text-align:center;">
+                              <input type="checkbox" name="draft_ids[]" value="<?= $did ?>" <?= $checked ?>>
+                            </td>
+                            <td style="padding:8px 10px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$d['draft_code']) ?></td>
+                            <td style="padding:8px 10px;"><?= h((string)$d['draft_title']) ?></td>
+                            <td style="padding:8px 10px;color:#64748b;font-size:12px;">
+                              <?= h((string)($d['manual_label'] ?: ($d['manual_kind'] ?? '—'))) ?>
+                            </td>
+                            <td style="padding:8px 10px;"><?= h((string)$d['status']) ?></td>
+                          </tr>
+                        <?php endforeach; ?>
+                        <?php foreach ($orphanRows as $d):
+                            $did = (int)$d['id'];
+                            ?>
+                          <tr style="border-top:1px solid #e2e8f0;background:#fff;color:#7c2d12;">
+                            <td style="padding:8px 10px;text-align:center;">
+                              <input type="checkbox" name="draft_ids[]" value="<?= $did ?>" checked>
+                            </td>
+                            <td style="padding:8px 10px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$d['draft_code']) ?></td>
+                            <td style="padding:8px 10px;"><?= h((string)$d['draft_title']) ?></td>
+                            <td style="padding:8px 10px;font-size:12px;">(no longer releasable)</td>
+                            <td style="padding:8px 10px;"><?= h((string)$d['status']) ?></td>
+                          </tr>
+                        <?php endforeach; ?>
+                      </tbody>
+                    </table>
+                  </div>
+                  <p style="margin:6px 0 0;color:#64748b;font-size:12px;">Only drafts in status APPROVED or PUBLISHED can be bundled.</p>
+                <?php endif; ?>
+              </div>
               <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Save</button>
             </form>
             <form method="post" style="margin-top:20px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
@@ -181,6 +265,34 @@ if ($detailId > 0) {
             <p style="color:#64748b;font-size:14px;">Released: <?= h((string)($row['released_at'] ?? '—')) ?>
               <?= !empty($row['released_by_name']) ? (' · ' . h((string)$row['released_by_name'])) : '' ?>
             </p>
+            <?php if ($selectedDraftIds !== array()):
+                $ph = implode(',', array_fill(0, count($selectedDraftIds), '?'));
+                $st = $pdo->prepare(
+                    'SELECT id, draft_code, draft_title, status FROM ipca_compliance_manual_drafts WHERE id IN (' . $ph . ') ORDER BY draft_code ASC'
+                );
+                $st->execute($selectedDraftIds);
+                $lockedDrafts = $st->fetchAll(PDO::FETCH_ASSOC) ?: array();
+                ?>
+              <div style="margin-top:14px;">
+                <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px;">Included drafts</div>
+                <table style="width:100%;font-size:13px;border-collapse:collapse;">
+                  <thead><tr style="background:#f1f5f9;text-align:left;">
+                    <th style="padding:8px 10px;">Code</th>
+                    <th style="padding:8px 10px;">Title</th>
+                    <th style="padding:8px 10px;">Status</th>
+                  </tr></thead>
+                  <tbody>
+                    <?php foreach ($lockedDrafts as $d): ?>
+                      <tr style="border-top:1px solid #e2e8f0;">
+                        <td style="padding:8px 10px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$d['draft_code']) ?></td>
+                        <td style="padding:8px 10px;"><?= h((string)$d['draft_title']) ?></td>
+                        <td style="padding:8px 10px;"><?= h((string)$d['status']) ?></td>
+                      </tr>
+                    <?php endforeach; ?>
+                  </tbody>
+                </table>
+              </div>
+            <?php endif; ?>
           <?php endif; ?>
         </div>
 
@@ -285,11 +397,12 @@ if ($detailId > 0) {
     }
 } else {
     $rows = ComplianceManualControlEngine::listPackages($pdo);
+    $availableDrafts = ComplianceManualControlEngine::listReleasableDrafts($pdo);
     ?>
     <h1 style="margin:0 0 8px;">Manual release packages</h1>
     <p style="color:#64748b;margin:0 0 20px;">Phase 4+ — bundle approved drafts for authority sign-off.</p>
 
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:720px;">
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:820px;">
       <h2 style="margin:0 0 12px;font-size:18px;">New package</h2>
       <form method="post">
         <input type="hidden" name="action" value="create_pkg">
@@ -311,10 +424,37 @@ if ($detailId > 0) {
             <input type="date" name="effective_date" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
           </label>
         </div>
-        <label style="display:block;margin-bottom:14px;">
-          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">drafts_json</span>
-          <textarea name="drafts_json" rows="4" style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">[]</textarea>
-        </label>
+        <div style="margin-bottom:14px;">
+          <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px;">Drafts to include (APPROVED / PUBLISHED only)</div>
+          <?php if ($availableDrafts === array()): ?>
+            <p style="margin:0;color:#64748b;font-size:13px;">No releasable drafts yet.
+              <a href="/admin/compliance/manual_drafts.php" style="color:#1e3c72;font-weight:700;">Author one →</a>
+            </p>
+          <?php else: ?>
+            <div style="border:1px solid #e2e8f0;border-radius:10px;max-height:220px;overflow-y:auto;background:#f8fafc;">
+              <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead><tr style="background:#f1f5f9;text-align:left;position:sticky;top:0;">
+                  <th style="padding:8px 10px;width:32px;"></th>
+                  <th style="padding:8px 10px;">Code</th>
+                  <th style="padding:8px 10px;">Title</th>
+                  <th style="padding:8px 10px;">Status</th>
+                </tr></thead>
+                <tbody>
+                  <?php foreach ($availableDrafts as $d): ?>
+                    <tr style="border-top:1px solid #e2e8f0;background:#fff;">
+                      <td style="padding:8px 10px;text-align:center;">
+                        <input type="checkbox" name="draft_ids[]" value="<?= (int)$d['id'] ?>">
+                      </td>
+                      <td style="padding:8px 10px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$d['draft_code']) ?></td>
+                      <td style="padding:8px 10px;"><?= h((string)$d['draft_title']) ?></td>
+                      <td style="padding:8px 10px;"><?= h((string)$d['status']) ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+          <?php endif; ?>
+        </div>
         <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Create</button>
       </form>
     </div>
