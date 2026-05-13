@@ -240,6 +240,46 @@ cw_header('Compliance · Compose');
   }
   details.cmpec-html{margin-top:10px;}
   details.cmpec-html summary{cursor:pointer;font-weight:700;color:#3730a3;font-size:13px;}
+
+  .cmpec-dropzone-wrap{position:relative;}
+  .cmpec-dropzone-label{
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:4px;padding:26px 16px;border:2px dashed #cbd5e1;border-radius:12px;
+    background:#f8fafc;color:#475569;cursor:pointer;text-align:center;
+    transition:background .12s ease,border-color .12s ease,color .12s ease;
+  }
+  .cmpec-dropzone-label:hover{background:#f1f5f9;border-color:#94a3b8;}
+  .cmpec-dropzone-wrap.is-drag .cmpec-dropzone-label{
+    background:#eef2ff;border-color:#1e3c72;color:#1e3c72;
+  }
+  .cmpec-dropzone-icon{font-size:22px;line-height:1;color:#94a3b8;margin-bottom:4px;}
+  .cmpec-dropzone-wrap.is-drag .cmpec-dropzone-icon{color:#1e3c72;}
+  .cmpec-dropzone-title{font-weight:700;font-size:14px;color:#0f172a;margin:0;}
+  .cmpec-dropzone-sub{font-size:12px;color:#64748b;margin:0;}
+  .cmpec-dropzone-sub .cmpec-dropzone-link{color:#1e3c72;font-weight:700;text-decoration:underline;}
+  .cmpec-dropzone-hint{font-size:11px;color:#94a3b8;margin:8px 0 0;line-height:1.4;}
+  .cmpec-fileinput-hidden{
+    position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;
+    clip:rect(0,0,0,0);white-space:nowrap;border:0;
+  }
+  .cmpec-pending{list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px;}
+  .cmpec-pending[hidden]{display:none;}
+  .cmpec-pending-item{
+    display:flex;align-items:center;gap:10px;background:#ffffff;border:1px solid #c7d2fe;
+    border-radius:10px;padding:8px 12px;font-size:13px;
+  }
+  .cmpec-pending-name{color:#0f172a;font-weight:700;}
+  .cmpec-pending-meta{color:#64748b;font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;}
+  .cmpec-pending-spacer{flex:1;}
+  .cmpec-pending-remove{
+    padding:4px 10px;font-size:11px;border:0;border-radius:8px;cursor:pointer;
+    background:#fee2e2;color:#991b1b;font-weight:800;
+  }
+  .cmpec-pending-remove:hover{background:#fecaca;}
+  .cmpec-existing-h{
+    margin:18px 0 6px;font-size:12px;color:#475569;letter-spacing:.04em;
+    text-transform:uppercase;font-weight:800;
+  }
 </style>
 
 <p style="margin-bottom:12px;">
@@ -332,20 +372,30 @@ cw_header('Compliance · Compose');
     </details>
 
     <div class="cmpec-row" style="margin-top:14px;">
-      <label for="attachments">Attachments</label>
+      <label>Attachments</label>
       <div>
-        <input class="cmpec-input" type="file" id="attachments" name="attachments[]" multiple>
-        <div class="cmpec-note">
-          Each file ≤ 50 MiB. Executable extensions (exe, msi, bat, etc.) are rejected.
-          Existing draft attachments survive Save / Send.
+        <div class="cmpec-dropzone-wrap" id="attDropzone">
+          <label class="cmpec-dropzone-label" for="attachments">
+            <div class="cmpec-dropzone-icon" aria-hidden="true">⤓</div>
+            <p class="cmpec-dropzone-title">Drop files here</p>
+            <p class="cmpec-dropzone-sub">or <span class="cmpec-dropzone-link">click to browse</span></p>
+            <p class="cmpec-dropzone-hint">
+              Each file ≤ 50 MiB. Executable extensions (.exe, .msi, .bat, …) are rejected.
+              Existing draft attachments survive Save / Send.
+            </p>
+          </label>
+          <input class="cmpec-fileinput-hidden" type="file" id="attachments" name="attachments[]" multiple>
+          <ul class="cmpec-pending" id="attPending" hidden></ul>
         </div>
+
         <?php
           $currentAttachments = $draftId > 0
               ? ComplianceCommsCenterEngine::listDraftAttachments($pdo, $draftId)
               : array();
         ?>
         <?php if ($currentAttachments !== array()): ?>
-          <ul style="list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px;">
+          <p class="cmpec-existing-h">Already attached to this draft</p>
+          <ul style="list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px;">
             <?php foreach ($currentAttachments as $att):
               $isCdn = (string)$att['storage_disk'] === 'spaces' && !empty($att['public_url']);
             ?>
@@ -398,6 +448,161 @@ cw_header('Compliance · Compose');
     </div>
   </form>
 </section>
+
+<script>
+(function () {
+  var wrap = document.getElementById('attDropzone');
+  var input = document.getElementById('attachments');
+  var pending = document.getElementById('attPending');
+  if (!wrap || !input || !pending) {
+    return;
+  }
+  if (typeof window.DataTransfer === 'undefined') {
+    // Old browser — keep the native input visible so users can still attach files.
+    input.classList.remove('cmpec-fileinput-hidden');
+    return;
+  }
+
+  // Authoritative in-memory list. We mirror it into input.files via DataTransfer
+  // on every change so the existing server-side parser sees the same files.
+  var staged = [];
+  var syncing = false;
+
+  function fmtBytes(n) {
+    if (n < 1024) { return n + ' B'; }
+    if (n < 1024 * 1024) { return Math.round(n / 1024) + ' KB'; }
+    return (Math.round((n / 1024 / 1024) * 10) / 10) + ' MB';
+  }
+
+  function fileKey(f) {
+    return f.name + '\u0000' + f.size + '\u0000' + (f.lastModified || 0);
+  }
+
+  function syncInputFiles() {
+    var dt = new DataTransfer();
+    staged.forEach(function (f) { dt.items.add(f); });
+    syncing = true;
+    input.files = dt.files;
+    syncing = false;
+  }
+
+  function render() {
+    while (pending.firstChild) { pending.removeChild(pending.firstChild); }
+    if (staged.length === 0) {
+      pending.hidden = true;
+      return;
+    }
+    pending.hidden = false;
+    staged.forEach(function (f, idx) {
+      var li = document.createElement('li');
+      li.className = 'cmpec-pending-item';
+
+      var name = document.createElement('span');
+      name.className = 'cmpec-pending-name';
+      name.textContent = f.name;
+      li.appendChild(name);
+
+      var meta = document.createElement('span');
+      meta.className = 'cmpec-pending-meta';
+      meta.textContent = '· ' + fmtBytes(f.size);
+      li.appendChild(meta);
+
+      var spacer = document.createElement('span');
+      spacer.className = 'cmpec-pending-spacer';
+      li.appendChild(spacer);
+
+      var remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'cmpec-pending-remove';
+      remove.textContent = 'Remove';
+      remove.addEventListener('click', function (ev) {
+        ev.preventDefault();
+        ev.stopPropagation();
+        staged.splice(idx, 1);
+        syncInputFiles();
+        render();
+      });
+      li.appendChild(remove);
+
+      pending.appendChild(li);
+    });
+  }
+
+  function addFiles(fileList) {
+    if (!fileList || fileList.length === 0) { return; }
+    var seen = {};
+    staged.forEach(function (f) { seen[fileKey(f)] = true; });
+    Array.prototype.forEach.call(fileList, function (f) {
+      var k = fileKey(f);
+      if (!seen[k]) {
+        staged.push(f);
+        seen[k] = true;
+      }
+    });
+    syncInputFiles();
+    render();
+  }
+
+  // Native file picker → append rather than replace.
+  input.addEventListener('change', function () {
+    if (syncing) { return; }
+    addFiles(input.files);
+  });
+
+  // Drag highlight uses an enter/leave counter so child elements don't flicker.
+  var dragDepth = 0;
+  wrap.addEventListener('dragenter', function (ev) {
+    if (!ev.dataTransfer || !ev.dataTransfer.types) { return; }
+    var types = ev.dataTransfer.types;
+    var hasFiles = false;
+    for (var i = 0; i < types.length; i++) {
+      if (types[i] === 'Files') { hasFiles = true; break; }
+    }
+    if (!hasFiles) { return; }
+    ev.preventDefault();
+    dragDepth++;
+    wrap.classList.add('is-drag');
+  });
+  wrap.addEventListener('dragover', function (ev) {
+    if (!ev.dataTransfer || !ev.dataTransfer.types) { return; }
+    var types = ev.dataTransfer.types;
+    var hasFiles = false;
+    for (var i = 0; i < types.length; i++) {
+      if (types[i] === 'Files') { hasFiles = true; break; }
+    }
+    if (!hasFiles) { return; }
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'copy';
+  });
+  wrap.addEventListener('dragleave', function (ev) {
+    ev.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) { wrap.classList.remove('is-drag'); }
+  });
+  wrap.addEventListener('drop', function (ev) {
+    if (!ev.dataTransfer) { return; }
+    ev.preventDefault();
+    dragDepth = 0;
+    wrap.classList.remove('is-drag');
+    if (ev.dataTransfer.files && ev.dataTransfer.files.length > 0) {
+      addFiles(ev.dataTransfer.files);
+    }
+  });
+
+  // Prevent the browser from navigating away if a file is dropped just outside
+  // the dropzone (e.g. on the form margin).
+  function blockOutside(ev) {
+    if (wrap.contains(ev.target)) { return; }
+    if (!ev.dataTransfer || !ev.dataTransfer.types) { return; }
+    var types = ev.dataTransfer.types;
+    for (var i = 0; i < types.length; i++) {
+      if (types[i] === 'Files') { ev.preventDefault(); return; }
+    }
+  }
+  window.addEventListener('dragover', blockOutside);
+  window.addEventListener('drop', blockOutside);
+})();
+</script>
 
 <?php
 cw_footer();
