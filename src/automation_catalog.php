@@ -223,6 +223,20 @@ if (!function_exists('automation_default_event_definitions')) {
                 'category_key' => 'compliance',
                 'sort_order' => 110,
             ),
+            array(
+                'event_key' => 'compliance.inbox.email_sent',
+                'label' => 'Compliance Inbox — Email Sent',
+                'description' => 'Triggered when a compliance admin sends an outbound email (reply or new message) via Postmark.',
+                'category_key' => 'compliance',
+                'sort_order' => 111,
+            ),
+            array(
+                'event_key' => 'compliance.inbox.email_bounced',
+                'label' => 'Compliance Inbox — Email Bounced',
+                'description' => 'Triggered when Postmark reports a hard/soft bounce or spam complaint on an outbound compliance email.',
+                'category_key' => 'compliance',
+                'sort_order' => 112,
+            ),
         );
     }
 }

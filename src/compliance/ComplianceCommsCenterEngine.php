@@ -2,21 +2,27 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ComplianceAutomationDispatch.php';
+require_once __DIR__ . '/CompliancePostmarkConfig.php';
 
 /**
  * Phase 8 — Compliance Communications Center engine.
  *
- * Stage 1 surface area (inbound only):
- *   - ingestPostmarkInbound()        primary entry called from the webhook.
- *   - resolveOrCreateThread()        thread matcher: in-reply-to → references
- *                                    → mailbox-hash → subject+contact → new.
+ * Stage 1 — inbound:
+ *   - ingestPostmarkInbound()        primary entry called from the inbound webhook.
+ *   - resolveOrCreateThread()        thread matcher (in-reply-to / references /
+ *                                    mailbox-hash / subject+contact / new).
  *   - storeInboundEmail()            dedup-aware INSERT into ipca_compliance_emails.
  *   - storeAttachment()              base64 decode + sha256 + Spaces upload
  *                                    (local fallback) + DB row.
  *   - logEvent()                     ipca_compliance_email_events row.
  *
- * Stage 2 (outbound) will add sendOutbound() etc; we deliberately leave those
- * methods out until the inbound path is proven in production.
+ * Stage 2 — outbound + tracking + linking:
+ *   - createDraft() / updateDraft() / getDraft() / listDrafts() / cancelDraft()
+ *   - sendOutbound()                 POSTs to Postmark /email, persists outbound row,
+ *                                    fires automation event.
+ *   - processPostmarkEvent()         Delivery / Open / Click / Bounce / SpamComplaint
+ *                                    → event row + parent email status update.
+ *   - linkObject() / unlinkObject() / linkableObjectTypes()
  */
 final class ComplianceCommsCenterEngine
 {
@@ -846,5 +852,764 @@ final class ComplianceCommsCenterEngine
     public static function storageRoot(): string
     {
         return dirname(__DIR__, 2) . '/storage';
+    }
+
+    // ==================================================================
+    //                       STAGE 2 — OUTBOUND
+    // ==================================================================
+
+    /** Postmark REST endpoint for transactional sends. */
+    public const POSTMARK_SEND_URL = 'https://api.postmarkapp.com/email';
+
+    /**
+     * Object types an email/thread can be linked to. Keep aligned with the
+     * `linked_object_type` strings the rest of the compliance schema uses.
+     *
+     * @return array<string,string> machine_value => display label
+     */
+    public static function linkableObjectTypes(): array
+    {
+        return array(
+            'compliance_case' => 'Case / MoC',
+            'finding' => 'Finding',
+            'audit' => 'Audit',
+            'corrective_action' => 'Corrective Action',
+            'manual_change_request' => 'Manual Change Request',
+            'meeting' => 'Meeting',
+            'regulatory_change' => 'Regulatory Change',
+            'authority_report' => 'Authority Report',
+        );
+    }
+
+    /**
+     * Link types — the *role* an email plays for the linked object.
+     *
+     * @return array<string,string>
+     */
+    public static function linkTypes(): array
+    {
+        return array(
+            'evidence' => 'Evidence',
+            'authority_communication' => 'Authority Communication',
+            'source' => 'Source',
+            'follow_up' => 'Follow-up',
+            'context' => 'Context',
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Drafts
+    // ------------------------------------------------------------------
+
+    /**
+     * Create a new outbound draft. The recipients/subject/body fields are
+     * validated and normalised here so the caller (a controller) can stay
+     * tiny.
+     *
+     * @param array<string,mixed> $opts
+     *   - thread_id      int|null      attach to an existing thread, else NULL
+     *   - to             string|array  CSV or list of addresses (required)
+     *   - cc, bcc        string|array  optional
+     *   - subject        string        required, max 500 chars
+     *   - text_body      string|null
+     *   - html_body      string|null
+     *   - created_by     int|null
+     */
+    public static function createDraft(PDO $pdo, array $opts): int
+    {
+        $to = self::normalizeAddressInput($opts['to'] ?? null);
+        if ($to === array()) {
+            throw new InvalidArgumentException('At least one To address is required.');
+        }
+        $cc = self::normalizeAddressInput($opts['cc'] ?? null);
+        $bcc = self::normalizeAddressInput($opts['bcc'] ?? null);
+        $subject = self::nullableStr((string)($opts['subject'] ?? ''), 500);
+        if ($subject === null) {
+            throw new InvalidArgumentException('Subject is required.');
+        }
+        $threadId = isset($opts['thread_id']) && (int)$opts['thread_id'] > 0 ? (int)$opts['thread_id'] : null;
+        $textBody = self::nullableStr((string)($opts['text_body'] ?? ''));
+        $htmlBody = self::nullableStr((string)($opts['html_body'] ?? ''));
+        if ($textBody === null && $htmlBody === null) {
+            throw new InvalidArgumentException('Message body is required (text or HTML).');
+        }
+        $createdBy = isset($opts['created_by']) && (int)$opts['created_by'] > 0 ? (int)$opts['created_by'] : null;
+
+        $ins = $pdo->prepare(
+            'INSERT INTO ipca_compliance_email_drafts
+                (thread_id, to_json, cc_json, bcc_json, subject, text_body, html_body, status, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $ins->execute(array(
+            $threadId,
+            self::jsonEncode(self::addressListForJson($to)),
+            $cc === array() ? null : self::jsonEncode(self::addressListForJson($cc)),
+            $bcc === array() ? null : self::jsonEncode(self::addressListForJson($bcc)),
+            $subject,
+            $textBody,
+            $htmlBody,
+            'draft',
+            $createdBy,
+        ));
+
+        return (int)$pdo->lastInsertId();
+    }
+
+    /**
+     * @param array<string,mixed> $opts same keys as createDraft()
+     */
+    public static function updateDraft(PDO $pdo, int $draftId, array $opts): void
+    {
+        $draft = self::getDraft($pdo, $draftId);
+        if ($draft === null) {
+            throw new RuntimeException('Draft not found.');
+        }
+        if ((string)$draft['status'] !== 'draft') {
+            throw new RuntimeException('Only drafts in status=draft can be edited.');
+        }
+
+        $to = self::normalizeAddressInput($opts['to'] ?? null);
+        if ($to === array()) {
+            throw new InvalidArgumentException('At least one To address is required.');
+        }
+        $cc = self::normalizeAddressInput($opts['cc'] ?? null);
+        $bcc = self::normalizeAddressInput($opts['bcc'] ?? null);
+        $subject = self::nullableStr((string)($opts['subject'] ?? ''), 500);
+        if ($subject === null) {
+            throw new InvalidArgumentException('Subject is required.');
+        }
+        $textBody = self::nullableStr((string)($opts['text_body'] ?? ''));
+        $htmlBody = self::nullableStr((string)($opts['html_body'] ?? ''));
+        if ($textBody === null && $htmlBody === null) {
+            throw new InvalidArgumentException('Message body is required (text or HTML).');
+        }
+
+        $pdo->prepare(
+            'UPDATE ipca_compliance_email_drafts
+                SET to_json = ?, cc_json = ?, bcc_json = ?,
+                    subject = ?, text_body = ?, html_body = ?
+              WHERE id = ?'
+        )->execute(array(
+            self::jsonEncode(self::addressListForJson($to)),
+            $cc === array() ? null : self::jsonEncode(self::addressListForJson($cc)),
+            $bcc === array() ? null : self::jsonEncode(self::addressListForJson($bcc)),
+            $subject,
+            $textBody,
+            $htmlBody,
+            $draftId,
+        ));
+    }
+
+    public static function getDraft(PDO $pdo, int $draftId): ?array
+    {
+        $st = $pdo->prepare('SELECT * FROM ipca_compliance_email_drafts WHERE id = ? LIMIT 1');
+        $st->execute(array($draftId));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @param array<string,mixed> $filters
+     * @return list<array<string,mixed>>
+     */
+    public static function listDrafts(PDO $pdo, array $filters = array(), int $limit = 200): array
+    {
+        $limit = max(1, min(500, $limit));
+        $sql = 'SELECT d.*, t.subject_normalized AS thread_subject, t.primary_contact_email AS thread_contact
+                  FROM ipca_compliance_email_drafts d
+             LEFT JOIN ipca_compliance_email_threads t ON t.id = d.thread_id
+                 WHERE 1=1';
+        $args = array();
+        if (!empty($filters['status'])) {
+            $sql .= ' AND d.status = ?';
+            $args[] = (string)$filters['status'];
+        }
+        if (!empty($filters['created_by'])) {
+            $sql .= ' AND d.created_by = ?';
+            $args[] = (int)$filters['created_by'];
+        }
+        $sql .= ' ORDER BY d.updated_at DESC, d.id DESC LIMIT ' . $limit;
+
+        $st = $pdo->prepare($sql);
+        $st->execute($args);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    public static function cancelDraft(PDO $pdo, int $draftId, ?int $uid): void
+    {
+        $draft = self::getDraft($pdo, $draftId);
+        if ($draft === null) {
+            throw new RuntimeException('Draft not found.');
+        }
+        if ((string)$draft['status'] === 'sent') {
+            throw new RuntimeException('Cannot cancel a draft that has already been sent.');
+        }
+        $pdo->prepare('UPDATE ipca_compliance_email_drafts SET status = ? WHERE id = ?')
+            ->execute(array('cancelled', $draftId));
+    }
+
+    // ------------------------------------------------------------------
+    // Outbound send
+    // ------------------------------------------------------------------
+
+    /**
+     * Send an outbound email via Postmark and persist it as an
+     * ipca_compliance_emails row with direction='outbound', status='sent'.
+     *
+     * Inputs mirror createDraft(); additionally accepts:
+     *   - draft_id           int|null   if present, the draft is marked sent
+     *                                   and sent_email_id is wired up.
+     *   - reply_to_email_id  int|null   if present, In-Reply-To / References
+     *                                   are derived from that inbound email.
+     *
+     * @param array<string,mixed> $opts
+     * @return array{ok:bool, email_id:int|null, thread_id:int|null,
+     *               postmark_message_id:string|null, error:string|null}
+     */
+    public static function sendOutbound(PDO $pdo, array $opts): array
+    {
+        $serverToken = CompliancePostmarkConfig::serverToken();
+        if ($serverToken === '') {
+            return self::sendErr('POSTMARK_SERVER_TOKEN is not configured on this host.');
+        }
+        $fromAddress = CompliancePostmarkConfig::complianceFromAddress();
+        if ($fromAddress === '') {
+            return self::sendErr('COMPLIANCE_POSTMARK_FROM / COMPLIANCE_INBOX_ADDRESS is not configured.');
+        }
+        $stream = CompliancePostmarkConfig::outboundStream();
+
+        // Normalise inputs.
+        $to = self::normalizeAddressInput($opts['to'] ?? null);
+        if ($to === array()) {
+            return self::sendErr('At least one To address is required.');
+        }
+        $cc = self::normalizeAddressInput($opts['cc'] ?? null);
+        $bcc = self::normalizeAddressInput($opts['bcc'] ?? null);
+        $subject = self::nullableStr((string)($opts['subject'] ?? ''), 500);
+        if ($subject === null) {
+            return self::sendErr('Subject is required.');
+        }
+        $textBody = self::nullableStr((string)($opts['text_body'] ?? ''));
+        $htmlBody = self::nullableStr((string)($opts['html_body'] ?? ''));
+        if ($textBody === null && $htmlBody === null) {
+            return self::sendErr('Message body is required (text or HTML).');
+        }
+        if ($htmlBody !== null) {
+            $htmlBody = (string)preg_replace('#<script\b[^>]*>.*?</script>#is', '', $htmlBody);
+        }
+
+        $createdBy = isset($opts['created_by']) && (int)$opts['created_by'] > 0 ? (int)$opts['created_by'] : null;
+        $draftId = isset($opts['draft_id']) && (int)$opts['draft_id'] > 0 ? (int)$opts['draft_id'] : null;
+        $replyToEmailId = isset($opts['reply_to_email_id']) && (int)$opts['reply_to_email_id'] > 0 ? (int)$opts['reply_to_email_id'] : null;
+        $threadId = isset($opts['thread_id']) && (int)$opts['thread_id'] > 0 ? (int)$opts['thread_id'] : null;
+
+        // Derive threading headers from the reply-target inbound email.
+        $inReplyTo = null;
+        $references = null;
+        if ($replyToEmailId !== null) {
+            $st = $pdo->prepare(
+                'SELECT thread_id, message_id_header, references_header
+                   FROM ipca_compliance_emails WHERE id = ? LIMIT 1'
+            );
+            $st->execute(array($replyToEmailId));
+            $src = $st->fetch(PDO::FETCH_ASSOC);
+            if (is_array($src)) {
+                $inReplyTo = self::nullableStr((string)($src['message_id_header'] ?? ''));
+                $refsPrev = (string)($src['references_header'] ?? '');
+                $references = trim(($refsPrev !== '' ? $refsPrev . ' ' : '') . ($inReplyTo ?? ''));
+                if ($references === '') {
+                    $references = null;
+                }
+                if ($threadId === null && isset($src['thread_id']) && (int)$src['thread_id'] > 0) {
+                    $threadId = (int)$src['thread_id'];
+                }
+            }
+        }
+
+        // Ensure the email lives on a thread.
+        if ($threadId === null) {
+            $subjectNorm = self::normalizeSubject($subject);
+            $primaryRecipient = strtolower((string)($to[0] ?? ''));
+            $thread = self::resolveOrCreateThread(
+                $pdo,
+                null,
+                $inReplyTo,
+                $references,
+                $subjectNorm !== '' ? $subjectNorm : null,
+                $primaryRecipient !== '' ? $primaryRecipient : null
+            );
+            $threadId = (int)$thread['id'];
+        }
+
+        // Generate our own RFC822 Message-Id so future inbound replies thread back.
+        $host = self::messageIdHost($fromAddress);
+        $ourMsgId = '<co-' . bin2hex(random_bytes(16)) . '@' . $host . '>';
+
+        // Build Postmark payload.
+        $headers = array(
+            array('Name' => 'Message-ID', 'Value' => $ourMsgId),
+        );
+        if ($inReplyTo !== null && $inReplyTo !== '') {
+            $headers[] = array('Name' => 'In-Reply-To', 'Value' => $inReplyTo);
+        }
+        if ($references !== null && $references !== '') {
+            $headers[] = array('Name' => 'References', 'Value' => $references);
+        }
+
+        $body = array(
+            'From' => $fromAddress,
+            'To' => implode(', ', $to),
+            'Subject' => $subject,
+            'MessageStream' => $stream,
+            'TrackOpens' => false,
+            'TrackLinks' => 'None',
+            'Headers' => $headers,
+        );
+        if ($cc !== array()) {
+            $body['Cc'] = implode(', ', $cc);
+        }
+        if ($bcc !== array()) {
+            $body['Bcc'] = implode(', ', $bcc);
+        }
+        if ($textBody !== null) {
+            $body['TextBody'] = $textBody;
+        }
+        if ($htmlBody !== null) {
+            $body['HtmlBody'] = $htmlBody;
+        }
+
+        // POST to Postmark.
+        try {
+            $apiResponse = self::postmarkSendEmail($serverToken, $body);
+        } catch (Throwable $e) {
+            // Log a failure event but do NOT throw — the caller wants a structured result.
+            self::logEvent($pdo, null, null, 'webhook_error', array(
+                'scope' => 'outbound_send',
+                'error' => substr($e->getMessage(), 0, 1000),
+                'to' => $to,
+                'subject' => $subject,
+                'thread_id' => $threadId,
+            ));
+
+            return self::sendErr('Postmark API call failed: ' . $e->getMessage());
+        }
+
+        $postmarkMessageId = isset($apiResponse['MessageID']) ? (string)$apiResponse['MessageID'] : null;
+        $submittedAt = isset($apiResponse['SubmittedAt']) ? self::postmarkDateToMysql((string)$apiResponse['SubmittedAt']) : null;
+        $errorCode = isset($apiResponse['ErrorCode']) ? (int)$apiResponse['ErrorCode'] : 0;
+        if ($errorCode !== 0) {
+            self::logEvent($pdo, null, $postmarkMessageId, 'webhook_error', array(
+                'scope' => 'outbound_send',
+                'error_code' => $errorCode,
+                'error_message' => (string)($apiResponse['Message'] ?? ''),
+                'to' => $to,
+            ));
+
+            return self::sendErr('Postmark refused the send: code ' . $errorCode . ' — ' . (string)($apiResponse['Message'] ?? ''));
+        }
+
+        // Persist the outbound row.
+        $ins = $pdo->prepare(
+            'INSERT INTO ipca_compliance_emails (
+                thread_id, direction, postmark_message_id, postmark_record_type,
+                message_id_header, in_reply_to_header, references_header,
+                from_email, from_name,
+                to_json, cc_json, bcc_json,
+                subject, text_body, html_body,
+                headers_json, raw_payload_json,
+                sent_at, status, created_by
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $ins->execute(array(
+            $threadId,
+            'outbound',
+            $postmarkMessageId,
+            'Outbound',
+            $ourMsgId,
+            $inReplyTo,
+            $references,
+            $fromAddress,
+            null,
+            self::jsonEncode(self::addressListForJson($to)),
+            $cc === array() ? null : self::jsonEncode(self::addressListForJson($cc)),
+            $bcc === array() ? null : self::jsonEncode(self::addressListForJson($bcc)),
+            $subject,
+            $textBody,
+            $htmlBody,
+            self::jsonEncode($headers),
+            self::jsonEncode($apiResponse),
+            $submittedAt ?? date('Y-m-d H:i:s'),
+            'sent',
+            $createdBy,
+        ));
+        $emailId = (int)$pdo->lastInsertId();
+
+        // Roll the thread forward.
+        $pdo->prepare(
+            "UPDATE ipca_compliance_email_threads
+                SET last_message_at = NOW(),
+                    status = CASE
+                        WHEN status IN ('open','waiting_internal') THEN 'waiting_external'
+                        ELSE status
+                    END
+              WHERE id = ?"
+        )->execute(array($threadId));
+
+        // Mark the draft sent if applicable.
+        if ($draftId !== null) {
+            $pdo->prepare(
+                "UPDATE ipca_compliance_email_drafts
+                    SET status = 'sent', sent_email_id = ?, approved_by = ?, approved_at = NOW()
+                  WHERE id = ?"
+            )->execute(array($emailId, $createdBy, $draftId));
+        }
+
+        self::logEvent($pdo, $emailId, $postmarkMessageId, 'outbound_send', array(
+            'to' => $to,
+            'cc' => $cc,
+            'subject' => $subject,
+            'thread_id' => $threadId,
+            'in_reply_to' => $inReplyTo,
+            'has_html' => $htmlBody !== null,
+        ));
+
+        ComplianceAutomationDispatch::fire($pdo, 'compliance.inbox.email_sent', array(
+            'email_id' => $emailId,
+            'thread_id' => $threadId,
+            'to' => $to,
+            'subject' => $subject,
+            'postmark_message_id' => $postmarkMessageId,
+            'is_reply' => $inReplyTo !== null,
+        ));
+
+        return array(
+            'ok' => true,
+            'email_id' => $emailId,
+            'thread_id' => $threadId,
+            'postmark_message_id' => $postmarkMessageId,
+            'error' => null,
+        );
+    }
+
+    /**
+     * @param array<string,mixed> $body Postmark email payload.
+     * @return array<string,mixed> Postmark JSON response.
+     */
+    private static function postmarkSendEmail(string $serverToken, array $body): array
+    {
+        if (!function_exists('curl_init')) {
+            throw new RuntimeException('PHP curl extension is required to send via Postmark.');
+        }
+        $ch = curl_init(self::POSTMARK_SEND_URL);
+        if ($ch === false) {
+            throw new RuntimeException('curl_init failed.');
+        }
+        $payload = (string)json_encode($body, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        curl_setopt_array($ch, array(
+            CURLOPT_POST => true,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT => 20,
+            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_HTTPHEADER => array(
+                'Accept: application/json',
+                'Content-Type: application/json',
+                'X-Postmark-Server-Token: ' . $serverToken,
+            ),
+            CURLOPT_POSTFIELDS => $payload,
+        ));
+        $raw = curl_exec($ch);
+        $httpCode = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $err = curl_error($ch);
+        curl_close($ch);
+        if ($raw === false) {
+            throw new RuntimeException('Postmark HTTP transport error: ' . $err);
+        }
+        $decoded = json_decode((string)$raw, true);
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Postmark returned non-JSON (HTTP ' . $httpCode . '): ' . substr((string)$raw, 0, 240));
+        }
+        // Postmark returns ErrorCode=0 on success; non-2xx + ErrorCode!=0 means rejection.
+        if ($httpCode >= 400 && (int)($decoded['ErrorCode'] ?? 0) === 0) {
+            $decoded['ErrorCode'] = $httpCode;
+        }
+
+        return $decoded;
+    }
+
+    // ------------------------------------------------------------------
+    // Postmark tracking webhook (delivery / open / click / bounce / spam)
+    // ------------------------------------------------------------------
+
+    /**
+     * Apply a Postmark tracking webhook payload.
+     *
+     * @param array<string,mixed> $payload  RecordType-keyed Postmark webhook body.
+     * @return array{action:string, event_type:string, email_id:int|null}
+     */
+    public static function processPostmarkEvent(PDO $pdo, array $payload): array
+    {
+        $recordType = (string)($payload['RecordType'] ?? '');
+        $eventType = self::recordTypeToEventType($recordType);
+        if ($eventType === null) {
+            self::logEvent($pdo, null, null, 'webhook_error', array(
+                'scope' => 'tracking_webhook',
+                'error' => 'unsupported_record_type',
+                'record_type' => $recordType,
+            ));
+
+            return array('action' => 'ignored', 'event_type' => $recordType, 'email_id' => null);
+        }
+
+        $postmarkMessageId = self::nullableStr((string)($payload['MessageID'] ?? ''));
+        $emailId = null;
+        if ($postmarkMessageId !== null) {
+            $st = $pdo->prepare('SELECT id FROM ipca_compliance_emails WHERE postmark_message_id = ? LIMIT 1');
+            $st->execute(array($postmarkMessageId));
+            $found = (int)$st->fetchColumn();
+            if ($found > 0) {
+                $emailId = $found;
+            }
+        }
+
+        $recipient = self::nullableStr((string)($payload['Recipient'] ?? $payload['Email'] ?? ''));
+        $eventAt = self::postmarkDateToMysql((string)($payload['ReceivedAt'] ?? $payload['DeliveredAt'] ?? $payload['BouncedAt'] ?? ''));
+
+        self::logEvent($pdo, $emailId, $postmarkMessageId, $eventType, $payload, $recipient, $eventAt);
+
+        if ($emailId !== null) {
+            self::advanceEmailStatus($pdo, $emailId, $eventType);
+        }
+
+        if ($eventType === 'bounce' || $eventType === 'spam_complaint') {
+            ComplianceAutomationDispatch::fire($pdo, 'compliance.inbox.email_bounced', array(
+                'email_id' => $emailId,
+                'postmark_message_id' => $postmarkMessageId,
+                'event_type' => $eventType,
+                'recipient' => $recipient,
+                'bounce_type' => (string)($payload['Type'] ?? ''),
+                'description' => substr((string)($payload['Description'] ?? ''), 0, 500),
+            ));
+        }
+
+        return array(
+            'action' => $emailId !== null ? 'applied' : 'unmatched',
+            'event_type' => $eventType,
+            'email_id' => $emailId,
+        );
+    }
+
+    /**
+     * Advance an email's status to reflect a new event. Status only moves
+     * forward (sent → delivered → opened → clicked); bounced is terminal.
+     */
+    private static function advanceEmailStatus(PDO $pdo, int $emailId, string $eventType): void
+    {
+        $rank = array(
+            'queued' => 0,
+            'sent' => 1,
+            'delivered' => 2,
+            'opened' => 3,
+            'clicked' => 4,
+            'bounced' => 9,
+            'failed' => 9,
+            'archived' => 99,
+            'received' => 0,
+        );
+        $st = $pdo->prepare('SELECT status FROM ipca_compliance_emails WHERE id = ? LIMIT 1');
+        $st->execute(array($emailId));
+        $current = (string)$st->fetchColumn();
+        if ($current === '') {
+            return;
+        }
+        $target = null;
+        switch ($eventType) {
+            case 'delivery':
+                $target = 'delivered';
+                break;
+            case 'open':
+                $target = 'opened';
+                break;
+            case 'click':
+                $target = 'clicked';
+                break;
+            case 'bounce':
+                $target = 'bounced';
+                break;
+            case 'spam_complaint':
+                $target = null;
+                break;
+        }
+        if ($target === null) {
+            return;
+        }
+        // Bounced overrides everything; otherwise only upgrade.
+        if ($target !== 'bounced') {
+            $curR = $rank[$current] ?? 0;
+            $tgtR = $rank[$target] ?? 0;
+            if ($tgtR <= $curR) {
+                return;
+            }
+        }
+        $pdo->prepare('UPDATE ipca_compliance_emails SET status = ? WHERE id = ?')
+            ->execute(array($target, $emailId));
+    }
+
+    private static function recordTypeToEventType(string $recordType): ?string
+    {
+        switch ($recordType) {
+            case 'Delivery':
+                return 'delivery';
+            case 'Open':
+                return 'open';
+            case 'Click':
+                return 'click';
+            case 'Bounce':
+                return 'bounce';
+            case 'SpamComplaint':
+                return 'spam_complaint';
+            default:
+                return null;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Object linking
+    // ------------------------------------------------------------------
+
+    /**
+     * Link an email and/or thread to a compliance object.
+     *
+     * @param array<string,mixed> $opts
+     *   - email_id           int|null
+     *   - thread_id          int|null
+     *   - linked_object_type string  (must be in linkableObjectTypes())
+     *   - linked_object_id   string
+     *   - link_type          string  (must be in linkTypes())
+     *   - created_by         int|null
+     */
+    public static function linkObject(PDO $pdo, array $opts): int
+    {
+        $type = (string)($opts['linked_object_type'] ?? '');
+        $id = trim((string)($opts['linked_object_id'] ?? ''));
+        $linkType = (string)($opts['link_type'] ?? 'context');
+        $emailId = isset($opts['email_id']) && (int)$opts['email_id'] > 0 ? (int)$opts['email_id'] : null;
+        $threadId = isset($opts['thread_id']) && (int)$opts['thread_id'] > 0 ? (int)$opts['thread_id'] : null;
+        $createdBy = isset($opts['created_by']) && (int)$opts['created_by'] > 0 ? (int)$opts['created_by'] : null;
+
+        if ($emailId === null && $threadId === null) {
+            throw new InvalidArgumentException('email_id or thread_id is required.');
+        }
+        if (!array_key_exists($type, self::linkableObjectTypes())) {
+            throw new InvalidArgumentException('Unsupported linked_object_type: ' . $type);
+        }
+        if ($id === '') {
+            throw new InvalidArgumentException('linked_object_id is required.');
+        }
+        if (!array_key_exists($linkType, self::linkTypes())) {
+            $linkType = 'context';
+        }
+
+        $ins = $pdo->prepare(
+            'INSERT INTO ipca_compliance_email_obj_links
+                (email_id, thread_id, linked_object_type, linked_object_id, link_type, created_by)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $ins->execute(array($emailId, $threadId, $type, $id, $linkType, $createdBy));
+
+        return (int)$pdo->lastInsertId();
+    }
+
+    public static function unlinkObject(PDO $pdo, int $linkId): void
+    {
+        $pdo->prepare('DELETE FROM ipca_compliance_email_obj_links WHERE id = ?')
+            ->execute(array($linkId));
+    }
+
+    // ------------------------------------------------------------------
+    // Stage 2 helpers
+    // ------------------------------------------------------------------
+
+    /**
+     * @param mixed $input  CSV string OR list of strings OR list of {Email} dicts.
+     * @return list<string> trimmed, lower-cased, deduped, basic-validated email addresses.
+     */
+    private static function normalizeAddressInput($input): array
+    {
+        if ($input === null) {
+            return array();
+        }
+        $candidates = array();
+        if (is_array($input)) {
+            foreach ($input as $row) {
+                if (is_string($row)) {
+                    $candidates[] = $row;
+                } elseif (is_array($row) && isset($row['Email'])) {
+                    $candidates[] = (string)$row['Email'];
+                }
+            }
+        } else {
+            $candidates = preg_split('/[,;\s]+/', (string)$input) ?: array();
+        }
+        $out = array();
+        foreach ($candidates as $c) {
+            $email = strtolower(trim((string)$c));
+            if ($email === '') {
+                continue;
+            }
+            if (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                continue;
+            }
+            if (!in_array($email, $out, true)) {
+                $out[] = $email;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param list<string> $addresses
+     * @return list<array{Email:string,Name:string,MailboxHash:null}>
+     */
+    private static function addressListForJson(array $addresses): array
+    {
+        $out = array();
+        foreach ($addresses as $a) {
+            $out[] = array('Email' => $a, 'Name' => '', 'MailboxHash' => null);
+        }
+
+        return $out;
+    }
+
+    /**
+     * Derive a sensible hostname for our outbound Message-Id from the
+     * configured "from" address (e.g. compliance@ipca.training → ipca.training).
+     */
+    private static function messageIdHost(string $fromAddress): string
+    {
+        $at = strrpos($fromAddress, '@');
+        if ($at === false) {
+            return 'ipca.training';
+        }
+        $host = substr($fromAddress, $at + 1);
+
+        return $host !== '' ? $host : 'ipca.training';
+    }
+
+    /**
+     * @return array{ok:false, email_id:null, thread_id:null, postmark_message_id:null, error:string}
+     */
+    private static function sendErr(string $msg): array
+    {
+        return array(
+            'ok' => false,
+            'email_id' => null,
+            'thread_id' => null,
+            'postmark_message_id' => null,
+            'error' => $msg,
+        );
     }
 }
