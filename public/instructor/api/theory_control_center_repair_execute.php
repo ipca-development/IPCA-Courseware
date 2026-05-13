@@ -230,23 +230,30 @@ if ($blockerCategory !== 'stale_bug') {
     ), 403);
 }
 
-if ($repairCode === 'recompute_projection') {
-    tcc_repair_json(array(
-        'ok' => false,
-        'error' => 'repair_disabled_pending_engine_verification',
-        'message' => 'recompute_projection is intentionally disabled until a safe engine repair method is verified.'
-    ), 409);
-}
+// Q5 — Narrow recompute_projection re-enable.
+// Allowed ONLY for issue_type='pass_exists_projection_not_completed'. All other usages
+// remain blocked until each is individually verified. The recompute is driven by the
+// engine's recomputeLessonActivityProjectionFromCanonicalPass() and writes a full audit
+// trail.
+$allowedRecomputeIssueTypes = array('pass_exists_projection_not_completed');
 
-if ($repairCode !== 'cleanup_old_active_attempt_after_pass') {
+if ($repairCode === 'recompute_projection') {
+    if (!in_array($issueType, $allowedRecomputeIssueTypes, true)) {
+        tcc_repair_json(array(
+            'ok' => false,
+            'error' => 'repair_disabled_pending_engine_verification',
+            'message' => 'recompute_projection is only enabled for issue_type pass_exists_projection_not_completed.'
+        ), 409);
+    }
+} elseif ($repairCode !== 'cleanup_old_active_attempt_after_pass') {
     tcc_repair_json(array(
         'ok' => false,
         'error' => 'repair_code_not_allowed',
-        'message' => 'This first deployment only allows cleanup_old_active_attempt_after_pass.'
+        'message' => 'Only cleanup_old_active_attempt_after_pass and recompute_projection (for pass_exists_projection_not_completed) are allowed.'
     ), 403);
 }
 
-if ($testId <= 0) {
+if ($repairCode === 'cleanup_old_active_attempt_after_pass' && $testId <= 0) {
     tcc_repair_json(array(
         'ok' => false,
         'error' => 'missing_scan_evidence_test_id',
@@ -256,6 +263,75 @@ if ($testId <= 0) {
 
 if ($recurrenceKey === '') {
     $recurrenceKey = $issueType . '|cohort:' . $cohortId . '|lesson:' . $lessonId;
+}
+
+// Q5 — Branch handler for narrow recompute_projection.
+if ($repairCode === 'recompute_projection') {
+    require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
+
+    try {
+        $beforeStateSnapshot = tcc_repair_fetch_state($pdo, $studentId, $cohortId, $lessonId, 0);
+
+        $engine = new CoursewareProgressionV2($pdo);
+        $recomputeResult = $engine->recomputeLessonActivityProjectionFromCanonicalPass(
+            $studentId,
+            $cohortId,
+            $lessonId
+        );
+
+        $afterStateSnapshot = tcc_repair_fetch_state($pdo, $studentId, $cohortId, $lessonId, 0);
+
+        $result = array(
+            'ok' => true,
+            'repair_code' => $repairCode,
+            'canonical_pass_test_id' => (int)($recomputeResult['canonical_pass_test_id'] ?? 0),
+            'before_completion_status' => (string)($recomputeResult['before']['completion_status'] ?? ''),
+            'after_completion_status' => (string)($recomputeResult['after']['completion_status'] ?? ''),
+            'before_test_pass_status' => (string)($recomputeResult['before']['test_pass_status'] ?? ''),
+            'after_test_pass_status' => (string)($recomputeResult['after']['test_pass_status'] ?? ''),
+            'persist_result' => $recomputeResult['persist_result'] ?? null,
+            'note' => 'Recomputed lesson_activity projection from canonical PASS row. extension_count and final_warning_issued are now in sync (Q7).'
+        );
+
+        tcc_repair_insert_log(
+            $pdo,
+            $repairCode,
+            $issueType,
+            $blockerCategory,
+            $recurrenceKey,
+            $studentId,
+            $cohortId,
+            $lessonId,
+            $detectedEvidence,
+            $beforeStateSnapshot,
+            $afterStateSnapshot,
+            $result,
+            $currentUserId
+        );
+
+        tcc_repair_json(array(
+            'ok' => true,
+            'action' => 'theory_control_center_repair_execute',
+            'repair_code' => $repairCode,
+            'issue_type' => $issueType,
+            'student_id' => $studentId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
+            'canonical_pass_test_id' => $result['canonical_pass_test_id'],
+            'before_completion_status' => $result['before_completion_status'],
+            'after_completion_status' => $result['after_completion_status'],
+            'before_test_pass_status' => $result['before_test_pass_status'],
+            'after_test_pass_status' => $result['after_test_pass_status'],
+            'message' => 'lesson_activity projection recomputed from canonical PASS. Audit log written.'
+        ));
+    } catch (Throwable $e) {
+        error_log('TCC_REPAIR_EXECUTE_ERROR repair_code=' . $repairCode . ' msg=' . $e->getMessage());
+        tcc_repair_json(array(
+            'ok' => false,
+            'error' => 'recompute_projection_failed',
+            'message' => $e->getMessage()
+        ), 500);
+    }
 }
 
 try {
@@ -357,30 +433,29 @@ try {
         ), 409);
     }
 
-    $passCompletedRaw = (string)($passRow['completed_at'] ?? '');
-    $passCompletedTimestamp = strtotime($passCompletedRaw);
-    $targetAnchorRaw = (string)($target['created_at'] ?? '');
-    if ($targetAnchorRaw === '') {
-        $targetAnchorRaw = (string)($target['started_at'] ?? '');
-    }
-    $targetCreatedTimestamp = strtotime($targetAnchorRaw);
+    // Safety net (Q2 / BUG C resolution):
+    // Previously this block compared $target.created_at <= $passRow.completed_at and refused
+    // cleanup when the active attempt was created BEFORE the canonical PASS row completed.
+    // That guard was over-strict and rejected ~78% of legitimate stale sibling attempts in
+    // production (e.g. lesson 931: test 1376 created at 12:55 before test 1375 completed at
+    // 13:14). The real safety property is "the target must not BE the canonical PASS row"
+    // (checked above via $target['id'] === $passRow['id']) plus "the target must not itself
+    // be a PASS row" (checked here).
+    //
+    // We retain a defensive check that the target attempt is not itself a passing row
+    // (formal_result_code != 'PASS' AND pass_gate_met != 1). Combined with the existing
+    // id-mismatch check, this preserves the property that the canonical PASS is never
+    // touched without re-introducing the over-strict timestamp comparison.
 
-    if ($passCompletedTimestamp === false || $targetCreatedTimestamp === false) {
+    $targetFormalResultCode = (string)($target['formal_result_code'] ?? '');
+    $targetPassGateMet = (int)($target['pass_gate_met'] ?? 0);
+
+    if ($targetFormalResultCode === 'PASS' || $targetPassGateMet === 1) {
         $pdo->rollBack();
         tcc_repair_json(array(
             'ok' => false,
-            'error' => 'invalid_pass_or_target_timestamp',
-            'message' => 'Could not validate PASS/target timestamp relationship.'
-        ), 409);
-    }
-
-    // Allow only when the open attempt clearly started after the canonical PASS finished (orphan session).
-    if ($targetCreatedTimestamp <= $passCompletedTimestamp) {
-        $pdo->rollBack();
-        tcc_repair_json(array(
-            'ok' => false,
-            'error' => 'target_not_after_canonical_pass',
-            'message' => 'This active attempt does not start after the canonical PASS completed; not a safe stale cleanup case.'
+            'error' => 'target_is_passing_attempt',
+            'message' => 'Target attempt is itself a PASS result; cannot stale-abort a passing attempt.'
         ), 409);
     }
 

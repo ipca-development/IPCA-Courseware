@@ -10,10 +10,32 @@ final class TimeBasedProgressionCron
     private const LOCK_TIMEOUT_SECONDS = 1;
     private const APPROACHING_WINDOW_HOURS = 48;
 
+    // Q4 / BUG D: orphan-`ready` sweeper threshold.
+    // A `progress_tests_v2` row in status='ready' that has never moved to 'in_progress'
+    // (i.e., the student never clicked Start) is considered abandoned after this many
+    // minutes and is stale-aborted by the cron. The orphan blocks new attempt creation
+    // until cleared, which was the root cause for lesson-930's prolonged block.
+    //
+    // The default is 60 minutes (the upper bound of the user-approved range). A progress
+    // test should take ~max 60 minutes in-progress; the 'ready' state is just the brief
+    // window between generation and Start, so 60min is generous. Tune downward (to 15min)
+    // once we have telemetry on real student start latency.
+    private const ORPHAN_READY_THRESHOLD_MINUTES = 60;
+
     private const EVENT_CODE_DISPATCH_BEFORE = 'cron_dispatch_before';
     private const EVENT_CODE_DISPATCH_AFTER = 'cron_dispatch_after';
     private const EVENT_CODE_SKIPPED_DUPLICATE = 'cron_dispatch_skipped_duplicate';
     private const EVENT_CODE_SKIPPED_STATE_MISMATCH = 'cron_dispatch_skipped_state_mismatch';
+    private const EVENT_CODE_EXISTING_ACTION_REUSED_NO_DEDUPE = 'cron_existing_action_reused_no_dedupe';
+
+    // Q1 / BUG A:
+    // The dedupe key is versioned so that fix-deployment naturally invalidates the old keys
+    // (so any deadline whose action_status changes since the v=1 dispatch will be re-evaluated
+    // exactly once after this deploy ships, then again whenever the status changes). The v=2
+    // key includes the action_status of the currently-relevant required action so that when
+    // a student submits a deadline reason (or an instructor decides on it), the key naturally
+    // changes and the cron re-evaluates instead of being permanently deduped.
+    private const DEDUPE_KEY_VERSION = 'v=2';
 
     /** @var array<string,string> */
     private const TRIGGER_TO_DEDUPE_EVENT_CODE = array(
@@ -54,9 +76,12 @@ final class TimeBasedProgressionCron
             'aggregated_dispatch_attempts' => 0,
             'aggregated_dispatch_successes' => 0,
             'aggregated_dispatch_duplicates_skipped' => 0,
+            'orphan_ready_swept' => 0,
+            'orphan_ready_threshold_minutes' => self::ORPHAN_READY_THRESHOLD_MINUTES,
             'errors' => array(),
             'results' => array(),
             'aggregated_results' => array(),
+            'orphan_ready_sweep_results' => array(),
         );
 
         try {
@@ -69,6 +94,13 @@ final class TimeBasedProgressionCron
             }
 
             $summary['lock_acquired'] = true;
+
+            // Q4 / BUG D: sweep orphan 'ready' rows before the deadline pass. This ensures
+            // any newly-staled rows free up the lesson for a fresh attempt before the same
+            // cron tick evaluates deadlines.
+            $sweepResults = $this->sweepOrphanReadyAttempts();
+            $summary['orphan_ready_sweep_results'] = $sweepResults;
+            $summary['orphan_ready_swept'] = count($sweepResults);
 
             $candidates = $this->loadCandidateRows();
             $summary['candidates_scanned'] = count($candidates);
@@ -174,6 +206,172 @@ final class TimeBasedProgressionCron
         }
 
         $this->lockAcquired = false;
+    }
+
+    /**
+     * Q4 / BUG D: sweep orphan-`ready` attempts older than ORPHAN_READY_THRESHOLD_MINUTES.
+     *
+     * A `progress_tests_v2` row in status='ready' that has never moved to 'in_progress'
+     * (no attempt_started event was ever logged for it) is considered abandoned past the
+     * threshold and is stale-aborted. Without this sweep, orphan 'ready' rows accumulate
+     * indefinitely and block new attempt creation for the same user/cohort/lesson — which
+     * is exactly what caused lesson-930's prolonged block (test 1373 was 'ready' for days
+     * because the student took the deadline-reason path instead of starting it).
+     *
+     * Safety constraints:
+     *  - Only acts on status='ready' AND result_code IS NULL
+     *  - Requires no attempt_started event ever fired for this attempt id (defensive — if
+     *    the student briefly started and the session crashed mid-transition we don't want
+     *    to silently invalidate in-progress work)
+     *  - Skips rows that are tied to a canonical PASS in the same lesson (defensive — the
+     *    presence of a PASS means a different code path should be cleaning these up via
+     *    TCC repair)
+     *  - Writes a full attempt_stale_aborted audit event with the trigger reason
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function sweepOrphanReadyAttempts(): array
+    {
+        $thresholdMinutes = self::ORPHAN_READY_THRESHOLD_MINUTES;
+
+        $candidatesSql = "
+            SELECT
+                pt.id,
+                pt.user_id,
+                pt.cohort_id,
+                pt.lesson_id,
+                pt.status,
+                pt.attempt,
+                pt.created_at,
+                pt.updated_at,
+                pt.formal_result_code,
+                TIMESTAMPDIFF(MINUTE, pt.created_at, UTC_TIMESTAMP()) AS age_minutes
+            FROM progress_tests_v2 pt
+            WHERE pt.status = 'ready'
+              AND pt.formal_result_code IS NULL
+              AND pt.created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL :threshold_minutes MINUTE)
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM training_progression_events ev
+                  WHERE ev.progress_test_id = pt.id
+                    AND ev.event_code IN ('attempt_started','progress_test_started')
+                  LIMIT 1
+              )
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM progress_tests_v2 sibling
+                  WHERE sibling.id != pt.id
+                    AND sibling.user_id = pt.user_id
+                    AND sibling.cohort_id = pt.cohort_id
+                    AND sibling.lesson_id = pt.lesson_id
+                    AND sibling.status = 'completed'
+                    AND sibling.pass_gate_met = 1
+                  LIMIT 1
+              )
+            ORDER BY pt.id ASC
+            LIMIT 200
+        ";
+
+        $stmt = $this->pdo->prepare($candidatesSql);
+        $stmt->bindValue(':threshold_minutes', $thresholdMinutes, PDO::PARAM_INT);
+        $stmt->execute();
+
+        $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+
+        $sweepResults = array();
+
+        foreach ($candidates as $candidate) {
+            $testId = (int)$candidate['id'];
+            $userId = (int)$candidate['user_id'];
+            $cohortId = (int)$candidate['cohort_id'];
+            $lessonId = (int)$candidate['lesson_id'];
+            $ageMinutes = (int)$candidate['age_minutes'];
+
+            try {
+                $this->pdo->beginTransaction();
+
+                $updateStmt = $this->pdo->prepare("
+                    UPDATE progress_tests_v2
+                    SET
+                        status = 'failed',
+                        formal_result_code = 'STALE_ABORTED',
+                        counts_as_unsat = 0,
+                        updated_at = UTC_TIMESTAMP()
+                    WHERE id = :id
+                      AND status = 'ready'
+                      AND formal_result_code IS NULL
+                ");
+                $updateStmt->execute(array(':id' => $testId));
+                $affected = $updateStmt->rowCount();
+
+                if ($affected !== 1) {
+                    $this->pdo->rollBack();
+                    $sweepResults[] = array(
+                        'test_id' => $testId,
+                        'user_id' => $userId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'age_minutes' => $ageMinutes,
+                        'status' => 'skipped_race',
+                        'message' => 'Row state changed between candidate scan and update.',
+                    );
+                    continue;
+                }
+
+                $this->engine->logProgressionEvent(array(
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $testId,
+                    'event_type' => 'progress_test',
+                    'event_code' => 'attempt_stale_aborted',
+                    'event_status' => 'warning',
+                    'actor_type' => 'system',
+                    'actor_user_id' => null,
+                    'event_time' => gmdate('Y-m-d H:i:s'),
+                    'payload' => array(
+                        'progress_test_id' => $testId,
+                        'previous_status' => 'ready',
+                        'new_status' => 'failed',
+                        'formal_result_code' => 'STALE_ABORTED',
+                        'counts_as_unsat' => 0,
+                        'stale_reason' => 'orphan_ready_swept',
+                        'age_minutes' => $ageMinutes,
+                        'threshold_minutes' => $thresholdMinutes,
+                        'attempt' => (int)($candidate['attempt'] ?? 0),
+                        'sweep_source' => 'TimeBasedProgressionCron::sweepOrphanReadyAttempts',
+                    ),
+                    'legal_note' => 'Time-based progression cron stale-aborted an orphan ready progress test attempt older than the configured threshold. No student progress data was lost because the row was never started (Q4 / BUG D).',
+                ));
+
+                $this->pdo->commit();
+
+                $sweepResults[] = array(
+                    'test_id' => $testId,
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'age_minutes' => $ageMinutes,
+                    'status' => 'stale_aborted',
+                );
+            } catch (Throwable $e) {
+                if ($this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+
+                $sweepResults[] = array(
+                    'test_id' => $testId,
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'age_minutes' => $ageMinutes,
+                    'status' => 'error',
+                    'error' => $e->getMessage(),
+                );
+            }
+        }
+
+        return $sweepResults;
     }
 
     private function loadCandidateRows(): array
@@ -358,12 +556,23 @@ final class TimeBasedProgressionCron
                         continue;
                     }
 
+                    // Q1 / BUG A (Option c): Build the v=2 dedupe key including the
+                    // current action_status of the most-relevant required action. When the
+                    // student submits a deadline reason (or an instructor decides on it),
+                    // the status changes and the key naturally changes, releasing dedupe.
+                    $currentActionStatus = $this->fetchCurrentDeadlineActionStatus(
+                        $userId,
+                        $cohortId,
+                        $lessonId
+                    );
+
                     $dedupeKey = $this->buildDedupeKey(
                         $triggerEventKey,
                         $userId,
                         $cohortId,
                         $lessonId,
-                        $effectiveDeadlineUtc
+                        $effectiveDeadlineUtc,
+                        $currentActionStatus
                     );
 
                     if ($this->hasDispatchAlreadyOccurred($userId, $cohortId, $lessonId, $triggerEventKey, $dedupeKey)) {
@@ -393,6 +602,8 @@ final class TimeBasedProgressionCron
                         'payload' => array(
                             'event_key' => $triggerEventKey,
                             'dedupe_key' => $dedupeKey,
+                            'dedupe_key_version' => self::DEDUPE_KEY_VERSION,
+                            'action_status_before' => $currentActionStatus,
                             'effective_deadline_utc' => $effectiveDeadlineUtc,
                         ),
                         'legal_note' => 'Time-based progression cron is delegating canonical missed-deadline handling to CoursewareProgressionV2.',
@@ -403,6 +614,12 @@ final class TimeBasedProgressionCron
                         $cohortId,
                         $lessonId,
                         null
+                    );
+
+                    $actionStatusAfter = $this->fetchCurrentDeadlineActionStatus(
+                        $userId,
+                        $cohortId,
+                        $lessonId
                     );
 
                     $this->engine->logProgressionEvent(array(
@@ -419,31 +636,72 @@ final class TimeBasedProgressionCron
                         'payload' => array(
                             'event_key' => $triggerEventKey,
                             'dedupe_key' => $dedupeKey,
+                            'dedupe_key_version' => self::DEDUPE_KEY_VERSION,
+                            'action_status_before' => $currentActionStatus,
+                            'action_status_after' => $actionStatusAfter,
                             'effective_deadline_utc' => $effectiveDeadlineUtc,
                             'engine_result' => $engineResult,
                         ),
                         'legal_note' => 'Time-based progression cron completed canonical missed-deadline handling through CoursewareProgressionV2.',
                     ));
 
-                    $this->engine->logProgressionEvent(array(
-                        'user_id' => $userId,
-                        'cohort_id' => $cohortId,
-                        'lesson_id' => $lessonId,
-                        'progress_test_id' => null,
-                        'event_type' => 'automation',
-                        'event_code' => $this->getDedupeEventCodeForTrigger($triggerEventKey),
-                        'event_status' => 'info',
-                        'actor_type' => 'system',
-                        'actor_user_id' => null,
-                        'event_time' => gmdate('Y-m-d H:i:s'),
-                        'payload' => array(
-                            'event_key' => $triggerEventKey,
-                            'dedupe_key' => $dedupeKey,
-                            'effective_deadline_utc' => $effectiveDeadlineUtc,
-                            'engine_handled' => 1,
-                        ),
-                        'legal_note' => 'Time-based progression cron recorded missed-deadline handling for dedupe after canonical engine processing.',
-                    ));
+                    // Q1 / BUG A (Option a): Do NOT write a dedupe event when the engine
+                    // outcome was a NO-STATE-CHANGE re-use of an existing action. Writing
+                    // a dedupe event in that case would let it block the very next tick
+                    // even though nothing happened this tick. Instead we log a separate
+                    // info-only event so the audit trail still shows the cron evaluated
+                    // this case.
+                    if ($this->isNoStateChangeEngineOutcome($engineResult)) {
+                        $this->engine->logProgressionEvent(array(
+                            'user_id' => $userId,
+                            'cohort_id' => $cohortId,
+                            'lesson_id' => $lessonId,
+                            'progress_test_id' => null,
+                            'event_type' => 'automation',
+                            'event_code' => self::EVENT_CODE_EXISTING_ACTION_REUSED_NO_DEDUPE,
+                            'event_status' => 'info',
+                            'actor_type' => 'system',
+                            'actor_user_id' => null,
+                            'event_time' => gmdate('Y-m-d H:i:s'),
+                            'payload' => array(
+                                'event_key' => $triggerEventKey,
+                                'dedupe_key' => $dedupeKey,
+                                'dedupe_key_version' => self::DEDUPE_KEY_VERSION,
+                                'action_taken' => (string)($engineResult['action_taken'] ?? ''),
+                                'action_status_before' => $currentActionStatus,
+                                'action_status_after' => $actionStatusAfter,
+                                'effective_deadline_utc' => $effectiveDeadlineUtc,
+                                'engine_handled' => 1,
+                                'dedupe_written' => 0,
+                            ),
+                            'legal_note' => 'Time-based progression cron observed engine re-using an existing required action (no state change); dedupe deliberately NOT written so the next cron tick can re-evaluate immediately when action status changes (Q1 / BUG A).',
+                        ));
+                    } else {
+                        $this->engine->logProgressionEvent(array(
+                            'user_id' => $userId,
+                            'cohort_id' => $cohortId,
+                            'lesson_id' => $lessonId,
+                            'progress_test_id' => null,
+                            'event_type' => 'automation',
+                            'event_code' => $this->getDedupeEventCodeForTrigger($triggerEventKey),
+                            'event_status' => 'info',
+                            'actor_type' => 'system',
+                            'actor_user_id' => null,
+                            'event_time' => gmdate('Y-m-d H:i:s'),
+                            'payload' => array(
+                                'event_key' => $triggerEventKey,
+                                'dedupe_key' => $dedupeKey,
+                                'dedupe_key_version' => self::DEDUPE_KEY_VERSION,
+                                'action_taken' => (string)($engineResult['action_taken'] ?? ''),
+                                'action_status_before' => $currentActionStatus,
+                                'action_status_after' => $actionStatusAfter,
+                                'effective_deadline_utc' => $effectiveDeadlineUtc,
+                                'engine_handled' => 1,
+                                'dedupe_written' => 1,
+                            ),
+                            'legal_note' => 'Time-based progression cron recorded missed-deadline handling for dedupe after canonical engine processing.',
+                        ));
+                    }
 
                     $result['dispatch_successes']++;
                     $result['trigger_results'][] = array(
@@ -560,9 +818,20 @@ final class TimeBasedProgressionCron
         int $userId,
         int $cohortId,
         int $lessonId,
-        string $effectiveDeadlineUtc
+        string $effectiveDeadlineUtc,
+        string $actionStatus = ''
     ): string {
-        return $eventKey
+        // Q1 / BUG A (Option c): The v=2 key includes the action_status of the currently
+        // relevant required action. When the action transitions (e.g., student submits a
+        // deadline reason) the dedupe key naturally changes and the cron re-evaluates
+        // exactly once for the new state, instead of remaining permanently skipped on the
+        // v=1 key. A blank actionStatus (no current required action) is encoded as 'none'
+        // so the key is deterministic.
+        $normalizedStatus = $actionStatus === '' ? 'none' : $actionStatus;
+
+        return self::DEDUPE_KEY_VERSION
+            . '|'
+            . $eventKey
             . '|'
             . $userId
             . '|'
@@ -570,7 +839,69 @@ final class TimeBasedProgressionCron
             . '|'
             . $lessonId
             . '|'
-            . $effectiveDeadlineUtc;
+            . $effectiveDeadlineUtc
+            . '|action_status='
+            . $normalizedStatus;
+    }
+
+    /**
+     * Q1 / BUG A helper.
+     * Returns the current 'pending' / 'opened' action status for the most-relevant required
+     * action for this user/cohort/lesson, or '' if none. Order of relevance:
+     *   1. instructor_approval (final escalation overrides reason flow)
+     *   2. deadline_reason_submission
+     * The status string is what gets baked into the v=2 dedupe key.
+     */
+    private function fetchCurrentDeadlineActionStatus(int $userId, int $cohortId, int $lessonId): string
+    {
+        $sql = "
+            SELECT action_type, status
+            FROM student_required_actions
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+              AND action_type IN ('instructor_approval','deadline_reason_submission')
+            ORDER BY
+                CASE action_type
+                    WHEN 'instructor_approval' THEN 0
+                    WHEN 'deadline_reason_submission' THEN 1
+                    ELSE 2
+                END,
+                id DESC
+            LIMIT 1
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+        ]);
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return '';
+        }
+
+        return (string)$row['action_type'] . ':' . (string)$row['status'];
+    }
+
+    /**
+     * Q1 / BUG A (Option a) helper.
+     * Returns true when the engine's outcome represents a NO-STATE-CHANGE re-use of an
+     * existing required action. For these outcomes we do NOT write a dedupe event because:
+     *   - The action is already in place; nothing happened this run.
+     *   - We want the next cron tick to re-evaluate so that when the action_status changes
+     *     (e.g., student submits a reason), the engine can immediately progress the case.
+     * The v=2 dedupe key change (Option c) alone would also handle this, but suppressing
+     * the event write keeps training_progression_events tidy and avoids accumulating no-op
+     * dedupe rows for every reused action across hours of cron ticks.
+     */
+    private function isNoStateChangeEngineOutcome(array $engineResult): bool
+    {
+        $actionTaken = (string)($engineResult['action_taken'] ?? '');
+        return $actionTaken === 'existing_reason_action_reused'
+            || $actionTaken === 'existing_instructor_action_reused';
     }
 
     private function buildAggregatedDedupeKey(

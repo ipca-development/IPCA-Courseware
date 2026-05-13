@@ -17,14 +17,76 @@ function read_json(string $s): array {
 
 function set_prepare_progress(PDO $pdo, int $testId, int $pct, string $text): void {
     $pct = max(0, min(100, $pct));
+    // Q3 / BUG B guard:
+    // Refuse to write progress updates onto a row that has been moved to a terminal state
+    // (STALE_ABORTED, completed, or failed). Without this guard, a long-running background
+    // test-prep can resurrect a row that the engine has authoritatively staled, producing
+    // the lesson-931-style anomaly (sibling rows in inconsistent states).
     $st = $pdo->prepare("
         UPDATE progress_tests_v2
         SET progress_pct=?,
             status_text=?,
             updated_at=NOW()
         WHERE id=?
+          AND status NOT IN ('completed','failed')
+          AND (formal_result_code IS NULL OR formal_result_code != 'STALE_ABORTED')
     ");
     $st->execute([$pct, $text, $testId]);
+
+    if ($st->rowCount() === 0) {
+        log_bg_skipped_terminal_state($pdo, $testId, 'set_prepare_progress', [
+            'attempted_progress_pct' => $pct,
+            'attempted_status_text' => $text,
+        ]);
+    }
+}
+
+/**
+ * Q3 / BUG B audit helper.
+ * Logs a training_progression_events row whenever the background test-prep refuses to write
+ * because the row is already in a terminal state. Best-effort; never throws.
+ */
+function log_bg_skipped_terminal_state(PDO $pdo, int $testId, string $callSite, array $extra = []): void {
+    try {
+        $info = $pdo->prepare("
+            SELECT id, user_id, cohort_id, lesson_id, status, formal_result_code
+            FROM progress_tests_v2
+            WHERE id = ?
+            LIMIT 1
+        ");
+        $info->execute([$testId]);
+        $row = $info->fetch(PDO::FETCH_ASSOC);
+
+        if (!$row) {
+            return;
+        }
+
+        $payload = array_merge([
+            'progress_test_id' => (int)$row['id'],
+            'call_site' => $callSite,
+            'observed_status' => (string)$row['status'],
+            'observed_formal_result_code' => (string)($row['formal_result_code'] ?? ''),
+        ], $extra);
+
+        $ins = $pdo->prepare("
+            INSERT INTO training_progression_events
+            (user_id, cohort_id, lesson_id, progress_test_id, event_type, event_code, event_status,
+             actor_type, actor_user_id, event_time, payload_json, legal_note)
+            VALUES
+            (:user_id, :cohort_id, :lesson_id, :progress_test_id, 'progress_test', 'bg_skipped_terminal_state', 'info',
+             'system', NULL, UTC_TIMESTAMP(), :payload_json,
+             'test_prepare_run_v2 refused to overwrite a terminal-state row to preserve engine stale-abort decisions (Q3 / BUG B).')
+        ");
+        $ins->execute([
+            ':user_id' => (int)$row['user_id'],
+            ':cohort_id' => (int)$row['cohort_id'],
+            ':lesson_id' => (int)$row['lesson_id'],
+            ':progress_test_id' => (int)$row['id'],
+            ':payload_json' => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ]);
+    } catch (Throwable $e) {
+        error_log('log_bg_skipped_terminal_state failed: ' . $e->getMessage());
+    }
 }
 
 function temp_base_dir(): string {
@@ -839,7 +901,12 @@ try {
         'question_urls'   => $questionUrls
     ];
 
-    $pdo->prepare("
+    // Q3 / BUG B guard:
+    // Only transition to 'ready' if the row is still in a non-terminal state. If the engine
+    // (or the TCC repair button) has staled this attempt during the prep window, we must NOT
+    // resurrect it. The lesson-931 anomaly was caused by this UPDATE running unconditionally
+    // after the engine had already marked the row STALE_ABORTED in a sibling code path.
+    $finalize = $pdo->prepare("
         UPDATE progress_tests_v2
         SET status='ready',
             manifest_json=?,
@@ -847,10 +914,27 @@ try {
             status_text='Progress test ready.',
             updated_at=NOW()
         WHERE id=?
-    ")->execute([
+          AND status NOT IN ('completed','failed')
+          AND (formal_result_code IS NULL OR formal_result_code != 'STALE_ABORTED')
+    ");
+    $finalize->execute([
         json_encode($manifest, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
         $testId
     ]);
+
+    if ($finalize->rowCount() === 0) {
+        log_bg_skipped_terminal_state($pdo, $testId, 'final_ready_update', [
+            'manifest_total_questions' => count($itemIds),
+        ]);
+
+        http_response_code(409);
+        json_ok([
+            'ok'      => false,
+            'error'   => 'attempt_terminal_state_during_prep',
+            'message' => 'This progress test attempt was finalized or staled while it was being prepared. Please refresh and start a new attempt.',
+            'test_id' => $testId,
+        ]);
+    }
 
     json_ok([
         'ok'              => true,

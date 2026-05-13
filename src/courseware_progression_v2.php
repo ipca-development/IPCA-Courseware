@@ -663,6 +663,32 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
         return (int)$stmt->fetchColumn();
     }
 
+    /**
+     * Q7 / BUG E helper.
+     * Returns true if a final-warning extension (override_type = 'extension_2_final') has
+     * been issued for this lesson. Final warning means: the next missed deadline escalates
+     * to instructor approval rather than another automatic extension.
+     */
+    public function hasFinalDeadlineExtensionForLesson(int $userId, int $cohortId, int $lessonId): bool
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT 1
+            FROM student_lesson_deadline_overrides
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+              AND override_type = 'extension_2_final'
+            LIMIT 1
+        ");
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+        ]);
+
+        return (bool)$stmt->fetchColumn();
+    }
+
     public function countDeadlineExtensionsForProgram(int $userId, int $cohortId): int
     {
         $stmt = $this->pdo->prepare("
@@ -1778,6 +1804,11 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
     $this->pdo->beginTransaction();
 
     try {
+        // Q3 / BUG B guard:
+        // Refuse to finalize over a row that has been authoritatively staled or already
+        // finalized by another code path. Without this guard, a late submission can
+        // resurrect a STALE_ABORTED row (the lesson-931 root cause: BG finalize wrote
+        // status=completed/PASS over a row the engine had already staled).
         $stmt = $this->pdo->prepare("
             UPDATE progress_tests_v2
             SET
@@ -1799,6 +1830,8 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
                 completed_at = :completed_at,
                 updated_at = NOW()
             WHERE id = :id
+              AND status NOT IN ('completed','failed')
+              AND (formal_result_code IS NULL OR formal_result_code != 'STALE_ABORTED')
         ");
 
         $stmt->execute([
@@ -1819,6 +1852,50 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
             ':completed_at' => $completedAt,
             ':id' => $progressTestId
         ]);
+
+        if ($stmt->rowCount() === 0) {
+            // Re-read the row to determine the current terminal state for the audit event
+            $currentStmt = $this->pdo->prepare("
+                SELECT id, status, formal_result_code, pass_gate_met
+                FROM progress_tests_v2
+                WHERE id = :id
+                LIMIT 1
+            ");
+            $currentStmt->execute([':id' => $progressTestId]);
+            $currentRow = $currentStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+            $this->logProgressionEvent([
+                'user_id'          => $userId,
+                'cohort_id'        => $cohortId,
+                'lesson_id'        => $lessonId,
+                'progress_test_id' => $progressTestId,
+                'event_type'       => 'progress_test',
+                'event_code'       => 'bg_skipped_terminal_state',
+                'event_status'     => 'info',
+                'actor_type'       => 'system',
+                'actor_user_id'    => null,
+                'event_time'       => gmdate('Y-m-d H:i:s'),
+                'payload'          => [
+                    'call_site' => 'finalizeAssessedProgressTest',
+                    'observed_status' => (string)($currentRow['status'] ?? ''),
+                    'observed_formal_result_code' => (string)($currentRow['formal_result_code'] ?? ''),
+                    'observed_pass_gate_met' => (int)($currentRow['pass_gate_met'] ?? 0),
+                    'attempted_formal_result_code' => (string)($classification['formal_result_code'] ?? ''),
+                    'attempted_pass_gate_met' => (int)($classification['pass_gate_met'] ?? 0),
+                    'attempted_score_pct' => $scorePct,
+                ],
+                'legal_note' => 'finalizeAssessedProgressTest refused to overwrite a terminal-state row to preserve engine stale-abort decisions (Q3 / BUG B).',
+            ]);
+
+            $this->pdo->rollBack();
+
+            throw new RuntimeException(
+                'attempt_terminal_state_at_finalize: progress test ' . $progressTestId
+                . ' is in terminal state (status=' . (string)($currentRow['status'] ?? '')
+                . ', formal_result_code=' . (string)($currentRow['formal_result_code'] ?? '')
+                . '); finalize aborted.'
+            );
+        }
 
         $this->expireSupersededAttemptBoundRequiredActions(
             $userId,
@@ -2246,6 +2323,13 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
         'one_on_one_required',
         'one_on_one_completed',
         'training_suspended',
+        // Q7 / BUG E: extension_count and final_warning_issued are derived from
+        // student_lesson_deadline_overrides. They are recomputed unconditionally on every
+        // projection persist below; callers do not need to provide them. Before this fix
+        // they were never updated, leaving 214+ rows drifting from the canonical source
+        // and making the instructor UI display stale extension counts.
+        'extension_count',
+        'final_warning_issued',
     ];
 
     $fields = [];
@@ -2254,6 +2338,14 @@ public function persistLessonActivityProjection(int $userId, int $cohortId, int 
             $fields[$key] = $projection['fields'][$key];
         }
     }
+
+    // Q7 / BUG E: unconditionally recompute extension_count and final_warning_issued from
+    // the canonical override table so lesson_activity stays in sync. We OVERWRITE any
+    // values the caller may have placed in projection.fields, because the override table
+    // is the single source of truth.
+    $derivedExtensionCount = $this->countDeadlineExtensionsForLesson($userId, $cohortId, $lessonId);
+    $fields['extension_count'] = $derivedExtensionCount;
+    $fields['final_warning_issued'] = $this->hasFinalDeadlineExtensionForLesson($userId, $cohortId, $lessonId) ? 1 : 0;
 
     if (array_key_exists('reason_decision', $fields)) {
         $rd = $fields['reason_decision'];
@@ -5365,6 +5457,186 @@ private function dispatchAutomationEventIfAvailable(
         return array_key_exists($key, $policy);
     }
 
+
+    /**
+     * Q5 — Narrow projection recompute for the `pass_exists_projection_not_completed` blocker.
+     *
+     * Use case: a canonical PASS row exists in progress_tests_v2 (status=completed,
+     * pass_gate_met=1), but lesson_activity does not reflect 'completed' / 'passed'. The
+     * usual cause is BUG B (background finalize overwriting a stale-abort) leaving an
+     * inconsistent projection. There is no naturally re-triggering event after a PASS
+     * is already in place, so the projection cannot self-heal without an explicit
+     * recompute.
+     *
+     * This method:
+     *   - Locks the rows for the user/cohort/lesson tuple
+     *   - Loads the canonical PASS row
+     *   - Builds a 'finalize' projection context from the PASS row and current activity
+     *   - Persists the projection (which now also keeps extension_count / final_warning_issued
+     *     current via the Q7 / BUG E fix)
+     *   - Logs `projection_recomputed_via_repair` for audit
+     *
+     * Returns an array describing the before/after state for the TCC audit log. Throws
+     * if no canonical PASS exists (caller must verify first).
+     */
+    public function recomputeLessonActivityProjectionFromCanonicalPass(int $userId, int $cohortId, int $lessonId): array
+    {
+        $ownsTransaction = !$this->pdo->inTransaction();
+
+        if ($ownsTransaction) {
+            $this->pdo->beginTransaction();
+        }
+
+        try {
+            $this->lockAttemptAndRequiredActionRows($userId, $cohortId, $lessonId);
+
+            $passStmt = $this->pdo->prepare("
+                SELECT *
+                FROM progress_tests_v2
+                WHERE user_id = :user_id
+                  AND cohort_id = :cohort_id
+                  AND lesson_id = :lesson_id
+                  AND status = 'completed'
+                  AND pass_gate_met = 1
+                ORDER BY completed_at DESC, id DESC
+                LIMIT 1
+            ");
+            $passStmt->execute([
+                ':user_id' => $userId,
+                ':cohort_id' => $cohortId,
+                ':lesson_id' => $lessonId,
+            ]);
+            $passRow = $passStmt->fetch(PDO::FETCH_ASSOC);
+
+            if (!$passRow) {
+                throw new RuntimeException('No canonical PASS row exists for this lesson; recompute aborted.');
+            }
+
+            $beforeActivityStmt = $this->pdo->prepare("
+                SELECT *
+                FROM lesson_activity
+                WHERE user_id = :user_id
+                  AND cohort_id = :cohort_id
+                  AND lesson_id = :lesson_id
+                LIMIT 1
+            ");
+            $beforeActivityStmt->execute([
+                ':user_id' => $userId,
+                ':cohort_id' => $cohortId,
+                ':lesson_id' => $lessonId,
+            ]);
+            $beforeActivity = $beforeActivityStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+            $policy = $this->resolveEffectivePolicySet($cohortId);
+            $behaviorMode = $this->resolveBehaviorMode($policy);
+
+            $summaryState = $this->resolveSummaryState($userId, $cohortId, $lessonId, $policy);
+            $attemptState = $this->resolveAttemptPolicyState(
+                $userId,
+                $cohortId,
+                $lessonId,
+                $policy,
+                (int)($passRow['attempt'] ?? 1),
+                $behaviorMode
+            );
+            $deadlineState = $this->resolveDeadlineState($userId, $cohortId, $lessonId);
+
+            $testForClassification = $passRow;
+            $classification = $this->classifyProgressTestResult(
+                $testForClassification,
+                (int)($passRow['score_pct'] ?? 0),
+                $policy,
+                $behaviorMode
+            );
+
+            $context = $this->getProgressionContextForUserLesson($userId, $cohortId, $lessonId);
+
+            $projection = $this->computeLessonActivityProjection([
+                'phase'            => 'finalize',
+                'user_id'          => $userId,
+                'cohort_id'        => $cohortId,
+                'lesson_id'        => $lessonId,
+                'summary_state'    => $summaryState,
+                'attempt_state'    => $attemptState,
+                'deadline_state'   => $deadlineState,
+                'classification'   => $classification,
+                'activity_state'   => $context['activity_state'],
+                'required_actions' => [],
+                'completed_at'     => (string)$passRow['completed_at'],
+            ], [
+                'allowed' => true,
+                'priority_state' => 'normal',
+            ]);
+
+            $persistResult = $this->persistLessonActivityProjection($userId, $cohortId, $lessonId, $projection);
+
+            $afterActivityStmt = $this->pdo->prepare("
+                SELECT *
+                FROM lesson_activity
+                WHERE user_id = :user_id
+                  AND cohort_id = :cohort_id
+                  AND lesson_id = :lesson_id
+                LIMIT 1
+            ");
+            $afterActivityStmt->execute([
+                ':user_id' => $userId,
+                ':cohort_id' => $cohortId,
+                ':lesson_id' => $lessonId,
+            ]);
+            $afterActivity = $afterActivityStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+            $this->logProgressionEvent([
+                'user_id'          => $userId,
+                'cohort_id'        => $cohortId,
+                'lesson_id'        => $lessonId,
+                'progress_test_id' => (int)$passRow['id'],
+                'event_type'       => 'projection',
+                'event_code'       => 'projection_recomputed_via_repair',
+                'event_status'     => 'info',
+                'actor_type'       => 'system',
+                'actor_user_id'    => null,
+                'event_time'       => gmdate('Y-m-d H:i:s'),
+                'payload'          => [
+                    'canonical_pass_test_id' => (int)$passRow['id'],
+                    'canonical_pass_completed_at' => (string)$passRow['completed_at'],
+                    'before' => [
+                        'completion_status' => (string)($beforeActivity['completion_status'] ?? ''),
+                        'test_pass_status' => (string)($beforeActivity['test_pass_status'] ?? ''),
+                        'summary_status' => (string)($beforeActivity['summary_status'] ?? ''),
+                        'completed_at' => (string)($beforeActivity['completed_at'] ?? ''),
+                        'training_suspended' => (int)($beforeActivity['training_suspended'] ?? 0),
+                    ],
+                    'after' => [
+                        'completion_status' => (string)($afterActivity['completion_status'] ?? ''),
+                        'test_pass_status' => (string)($afterActivity['test_pass_status'] ?? ''),
+                        'summary_status' => (string)($afterActivity['summary_status'] ?? ''),
+                        'completed_at' => (string)($afterActivity['completed_at'] ?? ''),
+                        'training_suspended' => (int)($afterActivity['training_suspended'] ?? 0),
+                    ],
+                    'persist_result' => $persistResult,
+                ],
+                'legal_note' => 'lesson_activity projection recomputed from canonical PASS row via TCC repair (Q5 — pass_exists_projection_not_completed).',
+            ]);
+
+            if ($ownsTransaction) {
+                $this->pdo->commit();
+            }
+
+            return [
+                'ok' => true,
+                'canonical_pass_test_id' => (int)$passRow['id'],
+                'before' => $beforeActivity,
+                'after' => $afterActivity,
+                'persist_result' => $persistResult,
+            ];
+        } catch (Throwable $e) {
+            if ($ownsTransaction && $this->pdo->inTransaction()) {
+                $this->pdo->rollBack();
+            }
+
+            throw $e;
+        }
+    }
 
     public function reconcileAttemptAndRequiredActionState(int $userId, int $cohortId, int $lessonId): array
     {
