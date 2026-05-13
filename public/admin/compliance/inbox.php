@@ -7,15 +7,63 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/CompliancePostmarkConfig.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsCenterEngine.php';
 
-compliance_require_access($pdo);
+$user = compliance_require_access($pdo);
+$uid = (int)($user['id'] ?? 0);
 
 /**
  * Compliance → Inbox.
  *
- * Stage 1 of the Compliance Communications Center: thread-based read view of
- * everything that arrives via the Postmark inbound webhook. Outbound (reply
- * compose / send) lands in Stage 2 once inbound is proven.
+ * Thread-based view of everything that arrives via the Postmark inbound
+ * webhook, plus outbound replies and bulk thread-level actions.
+ *
+ * Search:
+ *   ?q=…  runs a full-text search over (subject, text_body); falls back to
+ *         a LIKE scan if the FULLTEXT index hasn't been applied yet. When
+ *         a search string is present, the page shows matching *emails*
+ *         (deep-linking to their threads) instead of the thread list.
+ *
+ * Bulk actions:
+ *   POST with action=bulk_status / bulk_priority + thread_ids[] flips many
+ *   threads at once.
  */
+
+function cmpcc_flash(string $type, string $msg): void
+{
+    $_SESSION['_ipca_compliance_flash_inbox'] = array('type' => $type, 'message' => $msg);
+}
+function cmpcc_flash_take(): ?array
+{
+    if (empty($_SESSION['_ipca_compliance_flash_inbox']) || !is_array($_SESSION['_ipca_compliance_flash_inbox'])) {
+        return null;
+    }
+    $f = $_SESSION['_ipca_compliance_flash_inbox'];
+    unset($_SESSION['_ipca_compliance_flash_inbox']);
+
+    return $f;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = (string)($_POST['action'] ?? '');
+    $threadIds = isset($_POST['thread_ids']) && is_array($_POST['thread_ids'])
+        ? array_map('intval', $_POST['thread_ids'])
+        : array();
+    try {
+        if ($action === 'bulk_status' && $threadIds !== array()) {
+            $newStatus = (string)($_POST['bulk_status_value'] ?? '');
+            $n = ComplianceCommsCenterEngine::bulkUpdateThreadStatus($pdo, $threadIds, $newStatus);
+            cmpcc_flash('success', $n . ' thread(s) set to ' . str_replace('_', ' ', $newStatus) . '.');
+        } elseif ($action === 'bulk_priority' && $threadIds !== array()) {
+            $newPrio = (string)($_POST['bulk_priority_value'] ?? '');
+            $n = ComplianceCommsCenterEngine::bulkUpdateThreadPriority($pdo, $threadIds, $newPrio);
+            cmpcc_flash('success', $n . ' thread(s) set to priority ' . $newPrio . '.');
+        } elseif ($threadIds === array()) {
+            cmpcc_flash('error', 'No threads selected.');
+        }
+    } catch (Throwable $e) {
+        cmpcc_flash('error', $e->getMessage());
+    }
+    redirect('/admin/compliance/inbox.php' . ($_GET ? '?' . http_build_query($_GET) : ''));
+}
 
 $filterStatus = isset($_GET['status']) ? (string)$_GET['status'] : '';
 $filterPriority = isset($_GET['priority']) ? (string)$_GET['priority'] : '';
@@ -46,6 +94,13 @@ $threads = ComplianceCommsCenterEngine::listThreads($pdo, $filters, 200);
 $stats = ComplianceCommsCenterEngine::threadStats($pdo);
 $latest = ComplianceCommsCenterEngine::latestInbound($pdo);
 $summary = CompliancePostmarkConfig::publicSummary();
+$flash = cmpcc_flash_take();
+
+// Full-text search across email bodies — only when the user typed something.
+$searchResults = array();
+if ($filterQuery !== '') {
+    $searchResults = ComplianceCommsCenterEngine::searchEmails($pdo, $filterQuery, 100);
+}
 
 cw_header('Compliance · Inbox');
 ?>
@@ -140,8 +195,8 @@ cw_header('Compliance · Inbox');
   <section class="cmpcc-card">
     <form method="get" style="display:grid;grid-template-columns:1fr 160px 160px 160px auto;gap:10px;align-items:end;">
       <label>
-        <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Search</span>
-        <input class="cmpcc-input" type="search" name="q" placeholder="subject, sender, authority…"
+        <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Search (subject + body)</span>
+        <input class="cmpcc-input" type="search" name="q" placeholder="any phrase — searches inside email bodies…"
                value="<?= h($filterQuery) ?>" style="width:100%;">
       </label>
       <label>
@@ -183,56 +238,175 @@ cw_header('Compliance · Inbox');
     </div>
   </section>
 
+  <?php if ($flash !== null): ?>
+    <div style="margin:0 0 16px;padding:10px 14px;border-radius:10px;font-size:13px;
+                background:<?= $flash['type'] === 'success' ? '#d1fae5' : '#fee2e2' ?>;
+                color:<?= $flash['type'] === 'success' ? '#065f46' : '#991b1b' ?>;
+                border:1px solid <?= $flash['type'] === 'success' ? '#6ee7b7' : '#fca5a5' ?>;">
+      <?= h((string)$flash['message']) ?>
+    </div>
+  <?php endif; ?>
+
+  <?php if ($filterQuery !== '' && $searchResults !== array()): ?>
+    <section class="cmpcc-card">
+      <h2 style="margin:0 0 6px;font-size:16px;">Search results for "<?= h($filterQuery) ?>"</h2>
+      <p style="margin:0 0 12px;color:#64748b;font-size:13px;">
+        Matching individual emails (across subject + body).
+        <a href="/admin/compliance/inbox.php" style="color:#1e3c72;font-weight:700;">Clear search</a>.
+      </p>
+      <table class="cmpcc-table">
+        <thead><tr>
+          <th>Direction</th>
+          <th>Subject</th>
+          <th>Contact / Recipient</th>
+          <th>Status</th>
+          <th>When</th>
+          <th>Thread</th>
+        </tr></thead>
+        <tbody>
+          <?php foreach ($searchResults as $r):
+            $eid = (int)$r['id'];
+            $tid = (int)$r['thread_id'];
+            $direction = (string)$r['direction'];
+            $threadStatus = (string)($r['thread_status'] ?? 'open');
+            $when = (string)($r['received_at'] ?? $r['sent_at'] ?? '');
+          ?>
+            <tr>
+              <td><strong style="font-size:11px;letter-spacing:.05em;color:<?= $direction === 'inbound' ? '#1e3a8a' : '#0f766e' ?>;"><?= h(strtoupper($direction)) ?></strong></td>
+              <td>
+                <a href="/admin/compliance/email_thread.php?email_id=<?= $eid ?>"
+                   style="color:#1e3c72;font-weight:700;text-decoration:none;">
+                  <?= h((string)($r['subject'] ?? '(no subject)')) ?>
+                </a>
+              </td>
+              <td class="cmpcc-mono"><?= h((string)($r['from_email'] ?? $r['thread_contact'] ?? '—')) ?></td>
+              <td><span class="cmpcc-pill s-<?= h($threadStatus) ?>"><?= h(str_replace('_', ' ', $threadStatus)) ?></span></td>
+              <td class="cmpcc-mono"><?= h(substr($when, 0, 16)) ?></td>
+              <td>
+                <?php if ($tid > 0): ?>
+                  <a href="/admin/compliance/email_thread.php?id=<?= $tid ?>"
+                     style="color:#3730a3;font-weight:700;text-decoration:none;font-size:12px;">
+                    thread #<?= $tid ?>
+                  </a>
+                <?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+        </tbody>
+      </table>
+    </section>
+  <?php elseif ($filterQuery !== '' && $searchResults === array()): ?>
+    <section class="cmpcc-card">
+      <div class="cmpcc-empty">
+        No emails match "<?= h($filterQuery) ?>". <a href="/admin/compliance/inbox.php" style="color:#1e3c72;font-weight:700;">Clear search</a>.
+      </div>
+    </section>
+  <?php endif; ?>
+
   <section class="cmpcc-card">
     <?php if ($threads === array()): ?>
       <div class="cmpcc-empty">
         No threads in scope. Either nothing has arrived yet, or your filter excludes everything on file.
       </div>
     <?php else: ?>
-      <table class="cmpcc-table">
-        <thead><tr>
-          <th>Status</th>
-          <th>Subject</th>
-          <th>Contact</th>
-          <th>Last message</th>
-          <th>Msgs</th>
-          <th>Att</th>
-          <th>Links</th>
-          <th>Priority</th>
-        </tr></thead>
-        <tbody>
-          <?php foreach ($threads as $t): ?>
-            <?php
-              $tid = (int)$t['id'];
-              $status = (string)$t['status'];
-              $priority = (string)$t['priority'];
-              $subjectShow = trim((string)($t['last_subject'] ?? '')) !== ''
-                  ? (string)$t['last_subject']
-                  : ((string)($t['subject_normalized'] ?? '(no subject)'));
-            ?>
-            <tr>
-              <td><span class="cmpcc-pill s-<?= h($status) ?>"><?= h(str_replace('_', ' ', $status)) ?></span></td>
-              <td>
-                <a href="/admin/compliance/email_thread.php?id=<?= $tid ?>"
-                   style="color:#1e3c72;font-weight:700;text-decoration:none;">
-                  <?= h($subjectShow !== '' ? $subjectShow : '(no subject)') ?>
-                </a>
-                <?php if (!empty($t['authority_name'])): ?>
-                  <div style="font-size:11px;color:#64748b;">Authority: <?= h((string)$t['authority_name']) ?></div>
-                <?php endif; ?>
-              </td>
-              <td>
-                <div><?= h((string)($t['primary_contact_email'] ?? $t['last_from_email'] ?? '—')) ?></div>
-              </td>
-              <td class="cmpcc-mono"><?= h(substr((string)($t['last_message_at'] ?? $t['created_at'] ?? ''), 0, 16)) ?></td>
-              <td><?= (int)$t['message_count'] ?></td>
-              <td><?= (int)$t['attachment_count'] ?></td>
-              <td><?= (int)$t['link_count'] ?></td>
-              <td><span class="cmpcc-pill p-<?= h($priority) ?>"><?= h($priority) ?></span></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
+      <form method="post" action="/admin/compliance/inbox.php<?= $_GET ? '?' . h(http_build_query($_GET)) : '' ?>" id="inboxBulkForm">
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
+          <strong id="inboxBulkSummary" style="font-size:13px;color:#0f172a;">
+            0 selected
+          </strong>
+          <select name="bulk_status_value" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+            <option value="open">open</option>
+            <option value="waiting_internal">waiting internal</option>
+            <option value="waiting_external">waiting external</option>
+            <option value="closed">closed</option>
+            <option value="archived" selected>archived</option>
+          </select>
+          <button type="submit" name="action" value="bulk_status"
+                  style="background:#1e3c72;color:#fff;border:0;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;"
+                  onclick="return confirm('Apply this status to all selected threads?');">
+            Set status
+          </button>
+          <select name="bulk_priority_value" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;margin-left:8px;">
+            <option value="low">low</option>
+            <option value="normal">normal</option>
+            <option value="high">high</option>
+            <option value="urgent">urgent</option>
+          </select>
+          <button type="submit" name="action" value="bulk_priority"
+                  style="background:#e2e8f0;color:#0f172a;border:0;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;"
+                  onclick="return confirm('Apply this priority to all selected threads?');">
+            Set priority
+          </button>
+        </div>
+        <table class="cmpcc-table">
+          <thead><tr>
+            <th style="width:30px;"><input type="checkbox" id="inboxSelectAll"></th>
+            <th>Status</th>
+            <th>Subject</th>
+            <th>Contact</th>
+            <th>Last message</th>
+            <th>Msgs</th>
+            <th>Att</th>
+            <th>Links</th>
+            <th>Priority</th>
+          </tr></thead>
+          <tbody>
+            <?php foreach ($threads as $t): ?>
+              <?php
+                $tid = (int)$t['id'];
+                $status = (string)$t['status'];
+                $priority = (string)$t['priority'];
+                $subjectShow = trim((string)($t['last_subject'] ?? '')) !== ''
+                    ? (string)$t['last_subject']
+                    : ((string)($t['subject_normalized'] ?? '(no subject)'));
+              ?>
+              <tr>
+                <td>
+                  <input type="checkbox" class="inboxRowCheck"
+                         name="thread_ids[]" value="<?= $tid ?>">
+                </td>
+                <td><span class="cmpcc-pill s-<?= h($status) ?>"><?= h(str_replace('_', ' ', $status)) ?></span></td>
+                <td>
+                  <a href="/admin/compliance/email_thread.php?id=<?= $tid ?>"
+                     style="color:#1e3c72;font-weight:700;text-decoration:none;">
+                    <?= h($subjectShow !== '' ? $subjectShow : '(no subject)') ?>
+                  </a>
+                  <?php if (!empty($t['authority_name'])): ?>
+                    <div style="font-size:11px;color:#64748b;">Authority: <?= h((string)$t['authority_name']) ?></div>
+                  <?php endif; ?>
+                </td>
+                <td>
+                  <div><?= h((string)($t['primary_contact_email'] ?? $t['last_from_email'] ?? '—')) ?></div>
+                </td>
+                <td class="cmpcc-mono"><?= h(substr((string)($t['last_message_at'] ?? $t['created_at'] ?? ''), 0, 16)) ?></td>
+                <td><?= (int)$t['message_count'] ?></td>
+                <td><?= (int)$t['attachment_count'] ?></td>
+                <td><?= (int)$t['link_count'] ?></td>
+                <td><span class="cmpcc-pill p-<?= h($priority) ?>"><?= h($priority) ?></span></td>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
+      </form>
+      <script>
+        (function () {
+          var all = document.getElementById('inboxSelectAll');
+          var rows = document.querySelectorAll('.inboxRowCheck');
+          var summary = document.getElementById('inboxBulkSummary');
+          function recount() {
+            var n = 0;
+            rows.forEach(function (cb) { if (cb.checked) { n++; } });
+            if (summary) { summary.textContent = n + ' selected'; }
+          }
+          if (all) {
+            all.addEventListener('change', function () {
+              rows.forEach(function (cb) { cb.checked = all.checked; });
+              recount();
+            });
+          }
+          rows.forEach(function (cb) { cb.addEventListener('change', recount); });
+        })();
+      </script>
     <?php endif; ?>
   </section>
 

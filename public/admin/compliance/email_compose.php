@@ -120,6 +120,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('/admin/compliance/email_drafts.php');
         }
 
+        if ($action === 'remove_attachment') {
+            $attId = isset($_POST['attachment_id']) ? (int)$_POST['attachment_id'] : 0;
+            if ($postDraftId > 0 && $attId > 0) {
+                ComplianceCommsCenterEngine::removeDraftAttachment($pdo, $attId);
+                cmpose_flash('success', 'Attachment removed.');
+            }
+            redirect('/admin/compliance/email_compose.php?draft_id=' . $postDraftId);
+        }
+
         if ($postDraftId > 0) {
             ComplianceCommsCenterEngine::updateDraft($pdo, $postDraftId, $opts);
             $effectiveDraftId = $postDraftId;
@@ -127,8 +136,43 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $effectiveDraftId = ComplianceCommsCenterEngine::createDraft($pdo, $opts);
         }
 
+        // Process any uploaded attachments before we send/save.
+        $attachmentsAddedNotes = array();
+        if (!empty($_FILES['attachments']) && is_array($_FILES['attachments']['name'])) {
+            $count = count($_FILES['attachments']['name']);
+            for ($i = 0; $i < $count; $i++) {
+                $err = (int)$_FILES['attachments']['error'][$i];
+                if ($err === UPLOAD_ERR_NO_FILE) {
+                    continue;
+                }
+                $upload = array(
+                    'name' => (string)$_FILES['attachments']['name'][$i],
+                    'type' => (string)($_FILES['attachments']['type'][$i] ?? ''),
+                    'tmp_name' => (string)$_FILES['attachments']['tmp_name'][$i],
+                    'size' => (int)($_FILES['attachments']['size'][$i] ?? 0),
+                    'error' => $err,
+                );
+                try {
+                    ComplianceCommsCenterEngine::attachToDraft(
+                        $pdo,
+                        $effectiveDraftId,
+                        $upload,
+                        $uid > 0 ? $uid : null
+                    );
+                    $attachmentsAddedNotes[] = (string)$upload['name'];
+                } catch (Throwable $eAtt) {
+                    cmpose_flash('error', 'Attachment "' . (string)$upload['name'] . '" rejected: ' . $eAtt->getMessage());
+                    redirect('/admin/compliance/email_compose.php?draft_id=' . $effectiveDraftId);
+                }
+            }
+        }
+
         if ($action === 'save_draft') {
-            cmpose_flash('success', 'Draft saved.');
+            $msg = 'Draft saved.';
+            if ($attachmentsAddedNotes !== array()) {
+                $msg .= ' Added attachment(s): ' . implode(', ', $attachmentsAddedNotes) . '.';
+            }
+            cmpose_flash('success', $msg);
             redirect('/admin/compliance/email_compose.php?draft_id=' . $effectiveDraftId);
         }
 
@@ -225,7 +269,7 @@ cw_header('Compliance · Compose');
     </div>
   <?php endif; ?>
 
-  <form method="post" action="/admin/compliance/email_compose.php">
+  <form method="post" action="/admin/compliance/email_compose.php" enctype="multipart/form-data">
     <input type="hidden" name="draft_id" value="<?= (int)$draftId ?>">
     <input type="hidden" name="thread_id" value="<?= (int)($prefill['thread_id'] ?? 0) ?>">
     <input type="hidden" name="reply_to_email_id" value="<?= (int)$replyToEmailId ?>">
@@ -286,6 +330,53 @@ cw_header('Compliance · Compose');
         </div>
       </div>
     </details>
+
+    <div class="cmpec-row" style="margin-top:14px;">
+      <label for="attachments">Attachments</label>
+      <div>
+        <input class="cmpec-input" type="file" id="attachments" name="attachments[]" multiple>
+        <div class="cmpec-note">
+          Each file ≤ 50 MiB. Executable extensions (exe, msi, bat, etc.) are rejected.
+          Existing draft attachments survive Save / Send.
+        </div>
+        <?php
+          $currentAttachments = $draftId > 0
+              ? ComplianceCommsCenterEngine::listDraftAttachments($pdo, $draftId)
+              : array();
+        ?>
+        <?php if ($currentAttachments !== array()): ?>
+          <ul style="list-style:none;padding:0;margin:10px 0 0;display:flex;flex-direction:column;gap:6px;">
+            <?php foreach ($currentAttachments as $att):
+              $isCdn = (string)$att['storage_disk'] === 'spaces' && !empty($att['public_url']);
+            ?>
+              <li style="display:flex;align-items:center;gap:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;font-size:13px;">
+                <?php if ($isCdn): ?>
+                  <a href="<?= h((string)$att['public_url']) ?>" target="_blank" rel="noopener" style="color:#1e3c72;font-weight:700;text-decoration:none;">
+                    <?= h((string)$att['original_filename']) ?>
+                  </a>
+                <?php else: ?>
+                  <strong><?= h((string)$att['original_filename']) ?></strong>
+                <?php endif; ?>
+                <span style="color:#64748b;font-size:12px;font-family:ui-monospace,monospace;">
+                  · <?= h((string)$att['storage_disk']) ?> · <?= (int)$att['size_bytes'] ?> bytes
+                  <?php if (!empty($att['sha256'])): ?>
+                    · <?= h(substr((string)$att['sha256'], 0, 12)) ?>…
+                  <?php endif; ?>
+                </span>
+                <span style="flex:1;"></span>
+                <button type="submit" name="action" value="remove_attachment" formnovalidate
+                        class="cmpec-btn danger"
+                        style="padding:4px 10px;font-size:11px;"
+                        onclick="document.getElementById('attRemoveId').value=<?= (int)$att['id'] ?>;return confirm('Remove this attachment from the draft?');">
+                  Remove
+                </button>
+              </li>
+            <?php endforeach; ?>
+          </ul>
+          <input type="hidden" id="attRemoveId" name="attachment_id" value="0">
+        <?php endif; ?>
+      </div>
+    </div>
 
     <div class="cmpec-actions">
       <button class="cmpec-btn primary" type="submit" name="action" value="send_now"

@@ -101,6 +101,24 @@ if ($filterStatus !== '') {
 $drafts = ComplianceCommsCenterEngine::listDrafts($pdo, $filters, 200);
 $flash = cmpdr_flash_take();
 
+$attachmentCounts = array();
+if ($drafts !== array()) {
+    $draftIds = array_map(static fn($d) => (int)$d['id'], $drafts);
+    $placeholders = implode(',', array_fill(0, count($draftIds), '?'));
+    try {
+        $st = $pdo->prepare(
+            'SELECT draft_id, COUNT(*) AS n FROM ipca_compliance_email_draft_attachments
+              WHERE draft_id IN (' . $placeholders . ') GROUP BY draft_id'
+        );
+        $st->execute($draftIds);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $attachmentCounts[(int)$row['draft_id']] = (int)$row['n'];
+        }
+    } catch (Throwable) {
+        // Phase 8.5 migration not applied yet — silently fall back to no counts.
+    }
+}
+
 cw_header('Compliance · Drafts');
 ?>
 <style>
@@ -179,6 +197,7 @@ cw_header('Compliance · Drafts');
           <th>Subject</th>
           <th>To</th>
           <th>Thread</th>
+          <th>Att</th>
           <th>Updated</th>
           <th>Actions</th>
         </tr></thead>
@@ -212,6 +231,7 @@ cw_header('Compliance · Drafts');
                   <span style="color:#64748b;">—</span>
                 <?php endif; ?>
               </td>
+              <td><?= isset($attachmentCounts[$did]) ? (int)$attachmentCounts[$did] : 0 ?></td>
               <td class="cmpdr-mono"><?= h(substr((string)($d['updated_at'] ?? $d['created_at'] ?? ''), 0, 16)) ?></td>
               <td>
                 <div class="cmpdr-actions">
