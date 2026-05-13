@@ -99,6 +99,17 @@ cw_header('Compliance · Inbox');
     when available, falling back to mailbox-hash or normalised subject + sender.
   </p>
 
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;">
+    <a href="/admin/compliance/email_compose.php"
+       style="background:#1e3c72;color:#fff;padding:9px 16px;border-radius:8px;font-weight:800;text-decoration:none;font-size:13px;">
+      + New message
+    </a>
+    <a href="/admin/compliance/email_drafts.php"
+       style="background:#e2e8f0;color:#0f172a;padding:9px 16px;border-radius:8px;font-weight:800;text-decoration:none;font-size:13px;">
+      Drafts
+    </a>
+  </div>
+
   <div class="cmpcc-kpis">
     <a class="cmpcc-kpi-card" href="/admin/compliance/inbox.php?status=open">
       <div class="cmpcc-kpi-label">Open threads</div>
@@ -265,7 +276,7 @@ cw_header('Compliance · Inbox');
         <tr>
           <td style="font-weight:700;">Tracking webhook URL</td>
           <td class="cmpcc-mono" style="word-break:break-all;">
-            <?= $summary['tracking_webhook_url'] !== '' ? h((string)$summary['tracking_webhook_url']) : '<em style="color:#64748b;">stage 2</em>' ?>
+            <?= $summary['tracking_webhook_url'] !== '' ? h((string)$summary['tracking_webhook_url']) : '<em style="color:#b91c1c;">set CW_PUBLIC_BASE_URL + POSTMARK_TRACKING_WEBHOOK_SECRET</em>' ?>
           </td>
         </tr>
         <tr>
@@ -287,27 +298,28 @@ cw_header('Compliance · Inbox');
     </table>
 
     <div class="cmpcc-help">
-      <strong style="color:#0f172a;">Stage 1 setup checklist</strong>
+      <strong style="color:#0f172a;">Setup checklist</strong>
       <ul>
         <li>Create <code><?= h((string)($summary['inbox_address'] !== '' ? $summary['inbox_address'] : 'compliance@ipca.training')) ?></code> in Google Workspace (MFA, retention, DKIM/SPF/DMARC).</li>
         <li>In Google Workspace, configure a forwarding/copy rule from the mailbox to your Postmark Inbound address (e.g. <code>&lt;hash&gt;@inbound.postmarkapp.com</code>).</li>
         <li>In Postmark → Servers → Inbound, paste the <em>Inbound webhook URL</em> above into "Webhook URL".</li>
+        <li>In Postmark → Servers → Message Streams → outbound → Webhooks, paste the <em>Tracking webhook URL</em> above and enable Delivery, Bounce, Open, Click and Spam Complaint events.</li>
         <li>
           Inject the following variables on the host (no <code>.env</code> file — this platform uses PHP-FPM pool config for web/webhooks
           and <code>/etc/ipca/ipca-courseware-cli.env</code> for CLI):
           <ul style="margin-top:4px;">
-            <li><code>POSTMARK_SERVER_TOKEN</code> &nbsp;— Postmark server API token (used by Stage 2 outbound).</li>
-            <li><code>POSTMARK_INBOUND_WEBHOOK_SECRET</code> &nbsp;— shared secret carried in the webhook URL.</li>
-            <li><code>POSTMARK_TRACKING_WEBHOOK_SECRET</code> &nbsp;— shared secret for delivery/open/bounce webhooks (Stage 2).</li>
+            <li><code>POSTMARK_SERVER_TOKEN</code> &nbsp;— Postmark server API token (used for outbound).</li>
+            <li><code>POSTMARK_INBOUND_WEBHOOK_SECRET</code> &nbsp;— shared secret carried in the inbound webhook URL.</li>
+            <li><code>POSTMARK_TRACKING_WEBHOOK_SECRET</code> &nbsp;— shared secret for delivery / open / bounce events.</li>
             <li><code>COMPLIANCE_INBOX_ADDRESS</code> &nbsp;— public compliance mailbox (e.g. <code>compliance@ipca.training</code>).</li>
             <li><code>COMPLIANCE_POSTMARK_FROM</code> &nbsp;— optional, defaults to <code>COMPLIANCE_INBOX_ADDRESS</code>.</li>
-            <li><code>CW_PUBLIC_BASE_URL</code> &nbsp;— platform base URL (so this panel can render the full webhook URL).</li>
+            <li><code>POSTMARK_OUTBOUND_STREAM</code> &nbsp;— optional, defaults to <code>outbound</code>.</li>
+            <li><code>CW_PUBLIC_BASE_URL</code> &nbsp;— platform base URL (so this panel can render the full webhook URLs).</li>
           </ul>
         </li>
         <li>Reload PHP-FPM after editing the pool file so the webhook process sees the new vars: <code>systemctl reload php8.3-fpm</code>.</li>
-        <li>Send a test email to the mailbox and verify a row lands in this list within a few seconds.</li>
+        <li>Send a test email <em>to</em> the mailbox to verify inbound, then use the <em>New message</em> button to send an outbound test and watch for the Delivery event on the thread.</li>
       </ul>
-      <p style="margin:10px 0 0;">Outbound sending, reply composition, and Postmark tracking event ingestion are deliberately deferred to Stage 2 until inbound is proven on this environment.</p>
     </div>
   </section>
 </section>
