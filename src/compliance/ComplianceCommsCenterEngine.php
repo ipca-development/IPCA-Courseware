@@ -2055,6 +2055,228 @@ final class ComplianceCommsCenterEngine
     }
 
     /**
+     * Build a human-friendly grouped option list of every compliance object
+     * the operator might want to link this email/thread to. Used to back the
+     * combined picker on the thread view's "Linked compliance objects" form.
+     *
+     * Returns:
+     *   list<array{
+     *     type:string,          // matches linkableObjectTypes() machine value
+     *     type_label:string,    // group <optgroup> label
+     *     options:list<array{
+     *       id:string,          // string-encoded id (used as linked_object_id)
+     *       label:string,       // human label e.g. "FND-014 — Bird strike (OPEN)"
+     *     }>
+     *   }>
+     *
+     * Each query is wrapped in try/catch so a missing table degrades to an
+     * empty group without breaking the picker.
+     */
+    public static function listLinkablePickerOptions(PDO $pdo, int $limitPerType = 200): array
+    {
+        $limitPerType = max(1, min(500, $limitPerType));
+        $groups = array();
+
+        // ---- Findings ------------------------------------------------------
+        try {
+            $st = $pdo->query(
+                "SELECT id, finding_code, title, status
+                   FROM ipca_compliance_findings
+                  ORDER BY updated_at DESC, id DESC
+                  LIMIT " . $limitPerType
+            );
+            $opts = array();
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: array() as $r) {
+                $opts[] = array(
+                    'id' => (string)(int)$r['id'],
+                    'label' => self::pickerLabel((string)$r['finding_code'], (string)$r['title'], (string)$r['status']),
+                );
+            }
+            if ($opts !== array()) {
+                $groups[] = array('type' => 'finding', 'type_label' => 'Findings', 'options' => $opts);
+            }
+        } catch (Throwable) { /* table absent */ }
+
+        // ---- Audits --------------------------------------------------------
+        try {
+            $st = $pdo->query(
+                "SELECT id, audit_code, title, status
+                   FROM ipca_compliance_audits
+                  ORDER BY updated_at DESC, id DESC
+                  LIMIT " . $limitPerType
+            );
+            $opts = array();
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: array() as $r) {
+                $opts[] = array(
+                    'id' => (string)(int)$r['id'],
+                    'label' => self::pickerLabel((string)$r['audit_code'], (string)$r['title'], (string)$r['status']),
+                );
+            }
+            if ($opts !== array()) {
+                $groups[] = array('type' => 'audit', 'type_label' => 'Audits', 'options' => $opts);
+            }
+        } catch (Throwable) { /* table absent */ }
+
+        // ---- Corrective actions -------------------------------------------
+        try {
+            $st = $pdo->query(
+                "SELECT id, action_code, title, status
+                   FROM ipca_compliance_corrective_actions
+                  ORDER BY updated_at DESC, id DESC
+                  LIMIT " . $limitPerType
+            );
+            $opts = array();
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: array() as $r) {
+                $opts[] = array(
+                    'id' => (string)(int)$r['id'],
+                    'label' => self::pickerLabel((string)$r['action_code'], (string)$r['title'], (string)$r['status']),
+                );
+            }
+            if ($opts !== array()) {
+                $groups[] = array('type' => 'corrective_action', 'type_label' => 'Corrective Actions', 'options' => $opts);
+            }
+        } catch (Throwable) { /* table absent */ }
+
+        // ---- Manual change requests ---------------------------------------
+        try {
+            $st = $pdo->query(
+                "SELECT id, request_code, title, status
+                   FROM ipca_compliance_manual_change_requests
+                  ORDER BY updated_at DESC, id DESC
+                  LIMIT " . $limitPerType
+            );
+            $opts = array();
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: array() as $r) {
+                $opts[] = array(
+                    'id' => (string)(int)$r['id'],
+                    'label' => self::pickerLabel((string)$r['request_code'], (string)$r['title'], (string)$r['status']),
+                );
+            }
+            if ($opts !== array()) {
+                $groups[] = array('type' => 'manual_change_request', 'type_label' => 'Manual Change Requests', 'options' => $opts);
+            }
+        } catch (Throwable) { /* table absent */ }
+
+        // ---- Compliance cases (MoC and similar) ---------------------------
+        try {
+            $st = $pdo->query(
+                "SELECT id, case_code, title, status, case_type
+                   FROM ipca_compliance_cases
+                  ORDER BY updated_at DESC, id DESC
+                  LIMIT " . $limitPerType
+            );
+            $opts = array();
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: array() as $r) {
+                $caseType = (string)($r['case_type'] ?? '');
+                $statusLabel = trim($caseType . ' / ' . (string)$r['status'], ' /');
+                $opts[] = array(
+                    'id' => (string)(int)$r['id'],
+                    'label' => self::pickerLabel((string)$r['case_code'], (string)$r['title'], $statusLabel),
+                );
+            }
+            if ($opts !== array()) {
+                $groups[] = array('type' => 'compliance_case', 'type_label' => 'Cases / MoC', 'options' => $opts);
+            }
+        } catch (Throwable) { /* table absent */ }
+
+        // ---- Meetings ------------------------------------------------------
+        try {
+            $st = $pdo->query(
+                "SELECT id, title, scheduled_start, status
+                   FROM ipca_compliance_meetings
+                  ORDER BY scheduled_start DESC, id DESC
+                  LIMIT " . $limitPerType
+            );
+            $opts = array();
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: array() as $r) {
+                $when = trim((string)($r['scheduled_start'] ?? ''));
+                $code = $when !== '' ? substr($when, 0, 10) : ('MTG-' . (int)$r['id']);
+                $opts[] = array(
+                    'id' => (string)(int)$r['id'],
+                    'label' => self::pickerLabel($code, (string)$r['title'], (string)($r['status'] ?? '')),
+                );
+            }
+            if ($opts !== array()) {
+                $groups[] = array('type' => 'meeting', 'type_label' => 'Meetings', 'options' => $opts);
+            }
+        } catch (Throwable) { /* table absent */ }
+
+        return $groups;
+    }
+
+    /**
+     * Threads list for the per-object "Attach existing thread" picker.
+     *
+     * @return list<array{id:int,label:string}>
+     */
+    public static function listThreadsForPicker(PDO $pdo, int $limit = 200): array
+    {
+        $limit = max(1, min(500, $limit));
+        try {
+            $st = $pdo->query(
+                "SELECT t.id, t.subject_normalized, t.primary_contact_email, t.status,
+                        t.last_message_at,
+                        (SELECT e.subject FROM ipca_compliance_emails e
+                          WHERE e.thread_id = t.id ORDER BY e.id DESC LIMIT 1) AS last_subject
+                   FROM ipca_compliance_email_threads t
+                  ORDER BY COALESCE(t.last_message_at, t.created_at) DESC, t.id DESC
+                  LIMIT " . $limit
+            );
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        } catch (Throwable) {
+            return array();
+        }
+        $out = array();
+        foreach ($rows as $r) {
+            $tid = (int)$r['id'];
+            $subject = trim((string)($r['last_subject'] ?? '')) !== ''
+                ? (string)$r['last_subject']
+                : (string)($r['subject_normalized'] ?? '(no subject)');
+            $contact = (string)($r['primary_contact_email'] ?? '');
+            $when = substr((string)($r['last_message_at'] ?? ''), 0, 10);
+            $label = '#' . $tid . ' · ' . self::truncate($subject, 60);
+            if ($contact !== '') {
+                $label .= ' — ' . $contact;
+            }
+            if ($when !== '') {
+                $label .= ' (' . $when . ')';
+            }
+            $out[] = array('id' => $tid, 'label' => $label);
+        }
+
+        return $out;
+    }
+
+    private static function pickerLabel(string $code, string $title, string $status): string
+    {
+        $code = trim($code);
+        $title = self::truncate(trim($title), 72);
+        $parts = array();
+        if ($code !== '') {
+            $parts[] = $code;
+        }
+        if ($title !== '') {
+            $parts[] = $title;
+        }
+        $main = implode(' — ', $parts);
+        $status = trim($status);
+        if ($status !== '') {
+            $main .= ' (' . $status . ')';
+        }
+
+        return $main !== '' ? $main : '(unnamed)';
+    }
+
+    private static function truncate(string $s, int $max): string
+    {
+        if (mb_strlen($s) <= $max) {
+            return $s;
+        }
+
+        return mb_substr($s, 0, $max - 1) . '…';
+    }
+
+    /**
      * Lightweight stat for a list-page badge ("3 comms"). One COUNT scan.
      */
     public static function countEmailsForObject(PDO $pdo, string $linkedObjectType, string $linkedObjectId): int

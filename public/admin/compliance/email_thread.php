@@ -120,6 +120,8 @@ if ($thread === null) {
 
 $emails = ComplianceCommsCenterEngine::listEmailsForThread($pdo, $threadId);
 $links = ComplianceCommsCenterEngine::listObjectLinksForThread($pdo, $threadId);
+$pickerGroups = ComplianceCommsCenterEngine::listLinkablePickerOptions($pdo, 200);
+$linkable = ComplianceCommsCenterEngine::linkableObjectTypes();
 $status = (string)$thread['status'];
 $priority = (string)$thread['priority'];
 $flash = cmpth_flash_take();
@@ -281,15 +283,47 @@ foreach (array_reverse($emails) as $e) {
     <p style="margin:0 0 12px;color:#64748b;font-size:13px;">No links yet. Use the form below to link this thread to a case, finding, audit, manual change request, etc.</p>
   <?php else: ?>
     <?php foreach ($links as $l): ?>
+      <?php
+        $linkType = (string)$l['link_type'];
+        $linkedType = (string)$l['linked_object_type'];
+        $linkedId = (string)$l['linked_object_id'];
+        $typeLabel = (string)($linkable[$linkedType] ?? ucfirst(str_replace('_', ' ', $linkedType)));
+        $humanLabel = $linkedId;
+        foreach ($pickerGroups as $pg) {
+            if ($pg['type'] !== $linkedType) {
+                continue;
+            }
+            foreach ($pg['options'] as $opt) {
+                if ((string)$opt['id'] === $linkedId) {
+                    $humanLabel = (string)$opt['label'];
+                    break 2;
+                }
+            }
+        }
+        $deepLinkHref = '';
+        switch ($linkedType) {
+            case 'finding':                 $deepLinkHref = '/admin/compliance/findings.php?id=' . $linkedId; break;
+            case 'audit':                   $deepLinkHref = '/admin/compliance/audits.php?id=' . $linkedId; break;
+            case 'corrective_action':       $deepLinkHref = '/admin/compliance/corrective_actions.php?id=' . $linkedId; break;
+            case 'manual_change_request':   $deepLinkHref = '/admin/compliance/change_requests.php?id=' . $linkedId; break;
+            case 'meeting':                 $deepLinkHref = '/admin/compliance/meetings.php?id=' . $linkedId; break;
+        }
+      ?>
       <div class="cmpth-linkrow">
-        <span class="cmpth-pill p-normal"><?= h((string)$l['link_type']) ?></span>
-        <span class="cmpth-mono"><?= h((string)$l['linked_object_type']) ?></span>
+        <span class="cmpth-pill p-normal"><?= h(str_replace('_', ' ', $linkType)) ?></span>
+        <strong style="color:#0f172a;font-size:12px;text-transform:uppercase;letter-spacing:.04em;"><?= h($typeLabel) ?></strong>
         ·
-        <span class="cmpth-mono"><?= h((string)$l['linked_object_id']) ?></span>
-        <?php if (!empty($l['email_id'])): ?>
-          · email #<?= (int)$l['email_id'] ?>
+        <?php if ($deepLinkHref !== ''): ?>
+          <a href="<?= h($deepLinkHref) ?>" style="color:#1e3c72;font-weight:700;text-decoration:none;">
+            <?= h($humanLabel) ?>
+          </a>
         <?php else: ?>
-          · whole thread
+          <span><?= h($humanLabel) ?></span>
+        <?php endif; ?>
+        <?php if (!empty($l['email_id'])): ?>
+          <span style="color:#64748b;font-size:12px;">· email #<?= (int)$l['email_id'] ?></span>
+        <?php else: ?>
+          <span style="color:#64748b;font-size:12px;">· whole thread</span>
         <?php endif; ?>
         <span style="flex:1;"></span>
         <form method="post" action="/admin/compliance/email_thread.php"
@@ -303,44 +337,82 @@ foreach (array_reverse($emails) as $e) {
     <?php endforeach; ?>
   <?php endif; ?>
 
-  <form method="post" action="/admin/compliance/email_thread.php" style="margin-top:14px;">
+  <?php $pickerHasOptions = false; foreach ($pickerGroups as $pg) { if (!empty($pg['options'])) { $pickerHasOptions = true; break; } } ?>
+  <form method="post" action="/admin/compliance/email_thread.php" id="cmpthLinkForm" style="margin-top:14px;">
     <input type="hidden" name="action" value="link_object">
     <input type="hidden" name="thread_id" value="<?= (int)$thread['id'] ?>">
-    <div class="cmpth-form-grid">
-      <div>
-        <span class="cmpth-label">Object type</span>
-        <select name="linked_object_type" class="cmpth-input" required>
-          <?php foreach (ComplianceCommsCenterEngine::linkableObjectTypes() as $val => $label): ?>
-            <option value="<?= h($val) ?>"><?= h($label) ?></option>
-          <?php endforeach; ?>
-        </select>
+    <input type="hidden" name="linked_object_type" id="cmpthLinkedType" value="">
+    <input type="hidden" name="linked_object_id" id="cmpthLinkedId" value="">
+
+    <?php if (!$pickerHasOptions): ?>
+      <div style="padding:10px 14px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:10px;font-size:13px;">
+        No findings, audits, or other compliance objects on file yet — there's nothing to link this thread to.
       </div>
-      <div>
-        <span class="cmpth-label">Object id</span>
-        <input class="cmpth-input" type="text" name="linked_object_id" required
-               placeholder="case_id / finding_id / audit_id …">
+    <?php else: ?>
+      <div style="display:grid;grid-template-columns:1.6fr 1fr 220px 130px;gap:10px;align-items:end;">
+        <div>
+          <span class="cmpth-label">Compliance object</span>
+          <select id="cmpthPicker" class="cmpth-input" required>
+            <option value="" disabled selected>— Choose a finding, audit, case, …</option>
+            <?php foreach ($pickerGroups as $pg): ?>
+              <optgroup label="<?= h((string)$pg['type_label']) ?>">
+                <?php foreach ($pg['options'] as $opt): ?>
+                  <option value="<?= h((string)$pg['type']) ?>|<?= h((string)$opt['id']) ?>"
+                          data-type="<?= h((string)$pg['type']) ?>"
+                          data-id="<?= h((string)$opt['id']) ?>">
+                    <?= h((string)$opt['label']) ?>
+                  </option>
+                <?php endforeach; ?>
+              </optgroup>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div>
+          <span class="cmpth-label">Email (optional)</span>
+          <select name="email_id" class="cmpth-input">
+            <option value="0">Whole thread</option>
+            <?php foreach ($emails as $eo): ?>
+              <option value="<?= (int)$eo['id'] ?>">
+                #<?= (int)$eo['id'] ?> · <?= h(strtoupper((string)$eo['direction'])) ?> · <?= h(substr((string)($eo['subject'] ?? ''), 0, 40)) ?>
+              </option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div>
+          <span class="cmpth-label">Link role</span>
+          <select name="link_type" class="cmpth-input">
+            <?php foreach (ComplianceCommsCenterEngine::linkTypes() as $val => $label): ?>
+              <option value="<?= h($val) ?>" <?= $val === 'authority_communication' ? 'selected' : '' ?>><?= h($label) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div>
+          <span class="cmpth-label">&nbsp;</span>
+          <button type="submit" class="cmpth-btn primary">Link</button>
+        </div>
       </div>
-      <div>
-        <span class="cmpth-label">Email (optional)</span>
-        <select name="email_id" class="cmpth-input">
-          <option value="0">Whole thread</option>
-          <?php foreach ($emails as $eo): ?>
-            <option value="<?= (int)$eo['id'] ?>">
-              #<?= (int)$eo['id'] ?> · <?= h(strtoupper((string)$eo['direction'])) ?> · <?= h(substr((string)($eo['subject'] ?? ''), 0, 48)) ?>
-            </option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <div>
-        <span class="cmpth-label">Link role</span>
-        <select name="link_type" class="cmpth-input">
-          <?php foreach (ComplianceCommsCenterEngine::linkTypes() as $val => $label): ?>
-            <option value="<?= h($val) ?>" <?= $val === 'authority_communication' ? 'selected' : '' ?>><?= h($label) ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-      <button type="submit" class="cmpth-btn primary">Link</button>
-    </div>
+      <script>
+        (function () {
+          var form = document.getElementById('cmpthLinkForm');
+          var picker = document.getElementById('cmpthPicker');
+          var hiddenType = document.getElementById('cmpthLinkedType');
+          var hiddenId = document.getElementById('cmpthLinkedId');
+          if (!form || !picker) { return; }
+          form.addEventListener('submit', function (ev) {
+            var opt = picker.options[picker.selectedIndex];
+            var type = opt && opt.getAttribute('data-type');
+            var id = opt && opt.getAttribute('data-id');
+            if (!type || !id) {
+              ev.preventDefault();
+              picker.focus();
+              return false;
+            }
+            hiddenType.value = type;
+            hiddenId.value = id;
+          });
+        })();
+      </script>
+    <?php endif; ?>
   </form>
 </section>
 

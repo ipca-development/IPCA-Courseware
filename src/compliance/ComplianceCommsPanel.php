@@ -39,6 +39,7 @@ function compliance_render_comms_panel(PDO $pdo, string $objectType, string $obj
     $emails = ComplianceCommsCenterEngine::listEmailsForObject($pdo, $objectType, $objectId, 50);
     $linkable = ComplianceCommsCenterEngine::linkableObjectTypes();
     $linkRoles = ComplianceCommsCenterEngine::linkTypes();
+    $threadOptions = ComplianceCommsCenterEngine::listThreadsForPicker($pdo, 200);
     $typeLabel = (string)($linkable[$objectType] ?? ucfirst(str_replace('_', ' ', $objectType)));
     $linkFlash = null;
     if (!empty($_SESSION['_ipca_compliance_flash_objlink']) && is_array($_SESSION['_ipca_compliance_flash_objlink'])) {
@@ -151,29 +152,40 @@ function compliance_render_comms_panel(PDO $pdo, string $objectType, string $obj
         </table>
       <?php endif; ?>
 
-      <form method="post" action="/admin/compliance/email_obj_link.php" class="cmpcp-form">
-        <input type="hidden" name="linked_object_type" value="<?= h($objectType) ?>">
-        <input type="hidden" name="linked_object_id" value="<?= h($objectId) ?>">
-        <input type="hidden" name="return_to" value="<?= h((string)($_SERVER['REQUEST_URI'] ?? '')) ?>">
-        <div>
-          <span class="cmpcp-label">Attach existing thread (thread id)</span>
-          <input type="text" name="thread_id" class="cmpcp-input"
-                 placeholder="e.g. 17 — copy from the Inbox or thread view"
-                 inputmode="numeric" pattern="[0-9]+" required>
-        </div>
-        <div>
-          <span class="cmpcp-label">Role</span>
-          <select name="link_type" class="cmpcp-select">
-            <?php foreach ($linkRoles as $val => $label): ?>
-              <option value="<?= h($val) ?>" <?= $val === 'authority_communication' ? 'selected' : '' ?>><?= h($label) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </div>
-        <div>
-          <span class="cmpcp-label">&nbsp;</span>
-          <button type="submit" class="cmpcp-btn primary">Link thread</button>
-        </div>
-      </form>
+      <?php if ($threadOptions === array()): ?>
+        <p style="margin:14px 0 0;color:#64748b;font-size:13px;">
+          No email threads on file yet — once correspondence arrives in the
+          <a href="/admin/compliance/inbox.php" style="color:#1e3c72;font-weight:700;">inbox</a>
+          you'll be able to attach it here.
+        </p>
+      <?php else: ?>
+        <form method="post" action="/admin/compliance/email_obj_link.php" class="cmpcp-form">
+          <input type="hidden" name="linked_object_type" value="<?= h($objectType) ?>">
+          <input type="hidden" name="linked_object_id" value="<?= h($objectId) ?>">
+          <input type="hidden" name="return_to" value="<?= h((string)($_SERVER['REQUEST_URI'] ?? '')) ?>">
+          <div>
+            <span class="cmpcp-label">Attach email thread</span>
+            <select name="thread_id" class="cmpcp-select" required>
+              <option value="" disabled selected>— Choose a thread from the inbox …</option>
+              <?php foreach ($threadOptions as $to): ?>
+                <option value="<?= (int)$to['id'] ?>"><?= h((string)$to['label']) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div>
+            <span class="cmpcp-label">Role</span>
+            <select name="link_type" class="cmpcp-select">
+              <?php foreach ($linkRoles as $val => $label): ?>
+                <option value="<?= h($val) ?>" <?= $val === 'authority_communication' ? 'selected' : '' ?>><?= h($label) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div>
+            <span class="cmpcp-label">&nbsp;</span>
+            <button type="submit" class="cmpcp-btn primary">Link thread</button>
+          </div>
+        </form>
+      <?php endif; ?>
 
       <div class="cmpcp-actions">
         <a class="cmpcp-btn secondary" href="/admin/compliance/email_compose.php">
