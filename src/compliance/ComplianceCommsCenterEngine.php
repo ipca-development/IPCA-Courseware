@@ -1181,6 +1181,19 @@ final class ComplianceCommsCenterEngine
             $body['HtmlBody'] = $htmlBody;
         }
 
+        // Pull staged draft attachments into the Postmark payload.
+        $draftAttachments = array();
+        if ($draftId !== null) {
+            $draftAttachments = self::listDraftAttachments($pdo, $draftId);
+            if ($draftAttachments !== array()) {
+                try {
+                    $body['Attachments'] = self::draftAttachmentsForPostmark($draftAttachments);
+                } catch (Throwable $e) {
+                    return self::sendErr('Attachment preparation failed: ' . $e->getMessage());
+                }
+            }
+        }
+
         // POST to Postmark.
         try {
             $apiResponse = self::postmarkSendEmail($serverToken, $body);
@@ -1258,13 +1271,26 @@ final class ComplianceCommsCenterEngine
               WHERE id = ?"
         )->execute(array($threadId));
 
-        // Mark the draft sent if applicable.
+        // Mark the draft sent if applicable, and carry its staged attachments
+        // onto the outbound email row so the thread view shows them.
         if ($draftId !== null) {
             $pdo->prepare(
                 "UPDATE ipca_compliance_email_drafts
                     SET status = 'sent', sent_email_id = ?, approved_by = ?, approved_at = NOW()
                   WHERE id = ?"
             )->execute(array($emailId, $createdBy, $draftId));
+            $idx = 0;
+            foreach ($draftAttachments as $da) {
+                try {
+                    self::carryDraftAttachmentToEmail($pdo, $emailId, $idx++, $da);
+                } catch (Throwable $e) {
+                    self::logEvent($pdo, $emailId, $postmarkMessageId, 'webhook_error', array(
+                        'scope' => 'outbound_attachment_carry',
+                        'draft_attachment_id' => (int)($da['id'] ?? 0),
+                        'error' => substr($e->getMessage(), 0, 500),
+                    ));
+                }
+            }
         }
 
         self::logEvent($pdo, $emailId, $postmarkMessageId, 'outbound_send', array(
@@ -1611,5 +1637,440 @@ final class ComplianceCommsCenterEngine
             'postmark_message_id' => null,
             'error' => $msg,
         );
+    }
+
+    // ==================================================================
+    //                    STAGE 2+: ATTACHMENTS
+    // ==================================================================
+
+    /**
+     * Store an uploaded file as a draft attachment. The actual bytes go to
+     * Spaces (with local fallback, mirroring inbound attachments). Returns
+     * the new draft_attachment row id.
+     *
+     * @param array{name:string,type?:string,tmp_name:string,size:int,error:int} $upload
+     *        Typical $_FILES['attachment'] element. The caller is responsible
+     *        for the $_FILES envelope check; we validate the $upload itself.
+     * @param int $createdBy
+     */
+    public static function attachToDraft(PDO $pdo, int $draftId, array $upload, ?int $createdBy = null): int
+    {
+        $draft = self::getDraft($pdo, $draftId);
+        if ($draft === null) {
+            throw new RuntimeException('Draft not found.');
+        }
+        if ((string)$draft['status'] !== 'draft') {
+            throw new RuntimeException('Only drafts in status=draft can receive attachments.');
+        }
+
+        $err = (int)($upload['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($err !== UPLOAD_ERR_OK) {
+            throw new RuntimeException('Upload error code ' . $err . '.');
+        }
+        $name = (string)($upload['name'] ?? '');
+        $tmpName = (string)($upload['tmp_name'] ?? '');
+        $size = (int)($upload['size'] ?? 0);
+        if ($tmpName === '' || !is_uploaded_file($tmpName)) {
+            throw new RuntimeException('Upload payload missing or not from POST.');
+        }
+        if ($size <= 0) {
+            throw new RuntimeException('Attachment is empty.');
+        }
+        if ($size > self::MAX_ATTACHMENT_BYTES) {
+            throw new RuntimeException('Attachment exceeds maximum size (' . $size . ' bytes).');
+        }
+        $safeName = self::sanitizeFilename($name);
+        $ext = strtolower(pathinfo($safeName, PATHINFO_EXTENSION));
+        if ($ext !== '' && in_array($ext, self::DANGEROUS_EXTENSIONS, true)) {
+            throw new RuntimeException('Attachment extension blocked by policy: ' . $ext);
+        }
+
+        $bytes = file_get_contents($tmpName);
+        if ($bytes === false || $bytes === '') {
+            throw new RuntimeException('Failed to read upload from disk.');
+        }
+        $sha256 = hash('sha256', $bytes);
+        $contentType = self::nullableStr((string)($upload['type'] ?? ''), 191);
+
+        $yyyy = date('Y');
+        $mm = date('m');
+        $relKey = 'compliance/drafts/' . $yyyy . '/' . $mm . '/' . $draftId . '/' . substr($sha256, 0, 12) . '-' . $safeName;
+
+        $disk = 'spaces';
+        $publicUrl = null;
+        try {
+            $up = self::uploadToSpaces($relKey, $bytes, $contentType ?? 'application/octet-stream');
+            $publicUrl = (string)($up['cdn_url'] ?? '');
+        } catch (Throwable) {
+            $disk = 'local';
+            $localPath = self::storageRoot() . '/' . $relKey;
+            $dir = dirname($localPath);
+            if (!is_dir($dir) && !@mkdir($dir, 0775, true) && !is_dir($dir)) {
+                throw new RuntimeException('Could not create local attachment dir: ' . $dir);
+            }
+            if (file_put_contents($localPath, $bytes) === false) {
+                throw new RuntimeException('Could not write local attachment file.');
+            }
+            $publicUrl = null;
+        }
+
+        $ins = $pdo->prepare(
+            'INSERT INTO ipca_compliance_email_draft_attachments
+                (draft_id, original_filename, content_type, size_bytes,
+                 storage_disk, storage_key, public_url, sha256, created_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $ins->execute(array(
+            $draftId,
+            substr($safeName, 0, 255),
+            $contentType,
+            $size,
+            $disk,
+            $relKey,
+            $publicUrl,
+            $sha256,
+            $createdBy !== null && $createdBy > 0 ? $createdBy : null,
+        ));
+
+        return (int)$pdo->lastInsertId();
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public static function listDraftAttachments(PDO $pdo, int $draftId): array
+    {
+        $st = $pdo->prepare(
+            'SELECT * FROM ipca_compliance_email_draft_attachments
+              WHERE draft_id = ? ORDER BY id ASC'
+        );
+        $st->execute(array($draftId));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    public static function removeDraftAttachment(PDO $pdo, int $attId): void
+    {
+        // We deliberately do NOT delete the underlying Spaces/local file. If
+        // the same content (sha256) is later attached to another draft we
+        // reuse it; the orphaned bytes are negligible and we never want to
+        // accidentally void evidence on a parallel send.
+        $pdo->prepare('DELETE FROM ipca_compliance_email_draft_attachments WHERE id = ?')
+            ->execute(array($attId));
+    }
+
+    /**
+     * Read draft-attachment bytes back from whichever disk they live on.
+     * Returns null if the disk path / Spaces object can't be found.
+     */
+    private static function readDraftAttachmentBytes(array $attRow): ?string
+    {
+        $disk = (string)($attRow['storage_disk'] ?? 'spaces');
+        $key = (string)($attRow['storage_key'] ?? '');
+        if ($key === '') {
+            return null;
+        }
+        if ($disk === 'local') {
+            $path = self::storageRoot() . '/' . $key;
+            if (!is_file($path)) {
+                return null;
+            }
+            $bytes = @file_get_contents($path);
+
+            return $bytes === false ? null : $bytes;
+        }
+        // Spaces fetch via the existing helper if available.
+        $spacesHelper = __DIR__ . '/../spaces.php';
+        if (is_file($spacesHelper)) {
+            require_once $spacesHelper;
+            if (function_exists('cw_spaces_get_object')) {
+                try {
+                    $resp = cw_spaces_get_object($key);
+                    if (is_array($resp) && isset($resp['body'])) {
+                        return (string)$resp['body'];
+                    }
+                    if (is_string($resp)) {
+                        return $resp;
+                    }
+                } catch (Throwable) {
+                    // fall through to URL fetch
+                }
+            }
+        }
+        // Last-ditch: HTTP fetch via the public_url if the CDN gave us one.
+        $url = (string)($attRow['public_url'] ?? '');
+        if ($url !== '' && function_exists('curl_init')) {
+            $ch = curl_init($url);
+            if ($ch !== false) {
+                curl_setopt_array($ch, array(
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_TIMEOUT => 20,
+                    CURLOPT_CONNECTTIMEOUT => 8,
+                ));
+                $raw = curl_exec($ch);
+                $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+                curl_close($ch);
+                if ($raw !== false && $code >= 200 && $code < 300) {
+                    return (string)$raw;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Convert a draft attachment to an outbound-email attachment row,
+     * reusing the same storage location (no re-upload). Returns the new
+     * email_attachment row id.
+     */
+    private static function carryDraftAttachmentToEmail(PDO $pdo, int $emailId, int $index, array $draftAtt): int
+    {
+        $ins = $pdo->prepare(
+            'INSERT INTO ipca_compliance_email_attachments (
+                email_id, original_filename, content_type, size_bytes,
+                postmark_attachment_index, storage_disk,
+                storage_key, public_url, sha256, is_inline
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        );
+        $ins->execute(array(
+            $emailId,
+            substr((string)$draftAtt['original_filename'], 0, 255),
+            isset($draftAtt['content_type']) ? (string)$draftAtt['content_type'] : null,
+            isset($draftAtt['size_bytes']) ? (int)$draftAtt['size_bytes'] : null,
+            $index,
+            (string)$draftAtt['storage_disk'],
+            (string)$draftAtt['storage_key'],
+            isset($draftAtt['public_url']) ? (string)$draftAtt['public_url'] : null,
+            isset($draftAtt['sha256']) ? (string)$draftAtt['sha256'] : null,
+            0,
+        ));
+
+        return (int)$pdo->lastInsertId();
+    }
+
+    /**
+     * @param list<array<string,mixed>> $draftAttachments
+     * @return list<array{Name:string,Content:string,ContentType:string}>
+     */
+    private static function draftAttachmentsForPostmark(array $draftAttachments): array
+    {
+        $out = array();
+        foreach ($draftAttachments as $att) {
+            $bytes = self::readDraftAttachmentBytes($att);
+            if ($bytes === null) {
+                throw new RuntimeException(
+                    'Could not read attachment "' . (string)$att['original_filename'] . '" back from storage.'
+                );
+            }
+            $out[] = array(
+                'Name' => (string)$att['original_filename'],
+                'Content' => base64_encode($bytes),
+                'ContentType' => (string)($att['content_type'] ?? 'application/octet-stream'),
+            );
+        }
+
+        return $out;
+    }
+
+    // ==================================================================
+    //                    STAGE 2+: SEARCH
+    // ==================================================================
+
+    /**
+     * Full-text search across email subject + body. Falls back to a LIKE
+     * scan if the FULLTEXT index isn't applied yet (so the migration is
+     * optional from a runtime perspective).
+     *
+     * @return list<array<string,mixed>> ipca_compliance_emails rows joined
+     *         with their thread.
+     */
+    public static function searchEmails(PDO $pdo, string $query, int $limit = 100): array
+    {
+        $q = trim($query);
+        if ($q === '') {
+            return array();
+        }
+        $limit = max(1, min(500, $limit));
+
+        // Try FULLTEXT first (boolean mode so a multi-word query works as
+        // an implicit AND-style match).
+        try {
+            $sql = 'SELECT e.id, e.thread_id, e.direction, e.status, e.from_email,
+                           e.subject, e.received_at, e.sent_at, e.postmark_message_id,
+                           t.subject_normalized AS thread_subject,
+                           t.primary_contact_email AS thread_contact,
+                           t.status AS thread_status,
+                           MATCH(e.subject, e.text_body) AGAINST (? IN BOOLEAN MODE) AS relevance
+                      FROM ipca_compliance_emails e
+                 LEFT JOIN ipca_compliance_email_threads t ON t.id = e.thread_id
+                     WHERE MATCH(e.subject, e.text_body) AGAINST (? IN BOOLEAN MODE)
+                  ORDER BY relevance DESC, COALESCE(e.received_at, e.sent_at) DESC
+                     LIMIT ' . $limit;
+            $boolQuery = self::buildFulltextBooleanQuery($q);
+            $st = $pdo->prepare($sql);
+            $st->execute(array($boolQuery, $boolQuery));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (is_array($rows) && $rows !== array()) {
+                return $rows;
+            }
+        } catch (Throwable) {
+            // FULLTEXT index missing — fall through to LIKE scan.
+        }
+
+        // LIKE fallback.
+        try {
+            $like = '%' . $q . '%';
+            $sql = 'SELECT e.id, e.thread_id, e.direction, e.status, e.from_email,
+                           e.subject, e.received_at, e.sent_at, e.postmark_message_id,
+                           t.subject_normalized AS thread_subject,
+                           t.primary_contact_email AS thread_contact,
+                           t.status AS thread_status,
+                           NULL AS relevance
+                      FROM ipca_compliance_emails e
+                 LEFT JOIN ipca_compliance_email_threads t ON t.id = e.thread_id
+                     WHERE e.subject LIKE ? OR e.text_body LIKE ? OR e.from_email LIKE ?
+                  ORDER BY COALESCE(e.received_at, e.sent_at) DESC
+                     LIMIT ' . $limit;
+            $st = $pdo->prepare($sql);
+            $st->execute(array($like, $like, $like));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+            return is_array($rows) ? $rows : array();
+        } catch (Throwable) {
+            return array();
+        }
+    }
+
+    private static function buildFulltextBooleanQuery(string $q): string
+    {
+        // Tokenise, strip operators MySQL reserves, require each token with a
+        // '+' prefix and append '*' for prefix matching. Keeps the syntax
+        // safe even if the user types Postmark MessageIDs or hyphenated words.
+        $clean = (string)preg_replace('/[+\-<>~()@*"]/u', ' ', $q);
+        $tokens = preg_split('/\s+/u', trim($clean));
+        if ($tokens === false) {
+            return $q;
+        }
+        $tokens = array_filter($tokens, static fn($t) => $t !== '' && mb_strlen($t) >= 2);
+        if ($tokens === array()) {
+            return $q;
+        }
+        $out = array();
+        foreach ($tokens as $tok) {
+            $out[] = '+' . $tok . '*';
+        }
+
+        return implode(' ', $out);
+    }
+
+    // ==================================================================
+    //                STAGE 2+: BULK THREAD OPERATIONS
+    // ==================================================================
+
+    /**
+     * @param list<int> $threadIds
+     */
+    public static function bulkUpdateThreadStatus(PDO $pdo, array $threadIds, string $status): int
+    {
+        $ids = array_values(array_filter(array_map('intval', $threadIds), static fn($i) => $i > 0));
+        if ($ids === array()) {
+            return 0;
+        }
+        if (!in_array($status, array('open','waiting_internal','waiting_external','closed','archived'), true)) {
+            throw new InvalidArgumentException('Unsupported status: ' . $status);
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $sql = 'UPDATE ipca_compliance_email_threads SET status = ? WHERE id IN (' . $placeholders . ')';
+        $st = $pdo->prepare($sql);
+        $args = array_merge(array($status), $ids);
+        $st->execute($args);
+
+        return (int)$st->rowCount();
+    }
+
+    /**
+     * @param list<int> $threadIds
+     */
+    public static function bulkUpdateThreadPriority(PDO $pdo, array $threadIds, string $priority): int
+    {
+        $ids = array_values(array_filter(array_map('intval', $threadIds), static fn($i) => $i > 0));
+        if ($ids === array()) {
+            return 0;
+        }
+        if (!in_array($priority, array('low','normal','high','urgent'), true)) {
+            throw new InvalidArgumentException('Unsupported priority: ' . $priority);
+        }
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $sql = 'UPDATE ipca_compliance_email_threads SET priority = ? WHERE id IN (' . $placeholders . ')';
+        $st = $pdo->prepare($sql);
+        $args = array_merge(array($priority), $ids);
+        $st->execute($args);
+
+        return (int)$st->rowCount();
+    }
+
+    // ==================================================================
+    //          STAGE 2+: COMMS PER COMPLIANCE OBJECT
+    // ==================================================================
+
+    /**
+     * List the inbound/outbound emails linked to a given compliance object,
+     * either directly (via email_id) OR via a thread the object is linked to.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public static function listEmailsForObject(PDO $pdo, string $linkedObjectType, string $linkedObjectId, int $limit = 50): array
+    {
+        $limit = max(1, min(500, $limit));
+        $sql = "SELECT DISTINCT e.id, e.thread_id, e.direction, e.status, e.from_email,
+                       e.subject, e.received_at, e.sent_at, e.postmark_message_id,
+                       t.subject_normalized AS thread_subject,
+                       t.primary_contact_email AS thread_contact,
+                       t.status AS thread_status,
+                       (
+                         SELECT GROUP_CONCAT(DISTINCT l2.link_type ORDER BY l2.link_type SEPARATOR ',')
+                           FROM ipca_compliance_email_obj_links l2
+                          WHERE l2.linked_object_type = ?
+                            AND l2.linked_object_id = ?
+                            AND (l2.email_id = e.id OR (l2.email_id IS NULL AND l2.thread_id = e.thread_id))
+                       ) AS link_roles
+                  FROM ipca_compliance_emails e
+             LEFT JOIN ipca_compliance_email_threads t ON t.id = e.thread_id
+                 WHERE EXISTS (
+                    SELECT 1
+                      FROM ipca_compliance_email_obj_links l
+                     WHERE l.linked_object_type = ?
+                       AND l.linked_object_id = ?
+                       AND (l.email_id = e.id OR (l.email_id IS NULL AND l.thread_id = e.thread_id))
+                 )
+              ORDER BY COALESCE(e.received_at, e.sent_at, e.created_at) DESC
+                 LIMIT " . $limit;
+        $st = $pdo->prepare($sql);
+        $st->execute(array($linkedObjectType, $linkedObjectId, $linkedObjectType, $linkedObjectId));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        return is_array($rows) ? $rows : array();
+    }
+
+    /**
+     * Lightweight stat for a list-page badge ("3 comms"). One COUNT scan.
+     */
+    public static function countEmailsForObject(PDO $pdo, string $linkedObjectType, string $linkedObjectId): int
+    {
+        $sql = "SELECT COUNT(DISTINCT e.id)
+                  FROM ipca_compliance_emails e
+                  JOIN ipca_compliance_email_obj_links l
+                    ON (l.email_id = e.id OR (l.email_id IS NULL AND l.thread_id = e.thread_id))
+                 WHERE l.linked_object_type = ? AND l.linked_object_id = ?";
+        try {
+            $st = $pdo->prepare($sql);
+            $st->execute(array($linkedObjectType, $linkedObjectId));
+
+            return (int)$st->fetchColumn();
+        } catch (Throwable) {
+            return 0;
+        }
     }
 }
