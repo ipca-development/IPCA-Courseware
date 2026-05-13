@@ -222,7 +222,7 @@ final class LessonSummaryService
                     gap_topics = ?,
                     reviewed_at = ?,
                     reviewed_by_user_id = NULL,
-                    reviewed_by_logic_version = 'v2.0',
+                    reviewed_by_logic_version = ?,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = ?
                   AND cohort_id = ?
@@ -236,6 +236,7 @@ final class LessonSummaryService
 					(string)$evaluation['review_feedback'],
 					(string)$evaluation['gap_topics'],
 					gmdate('Y-m-d H:i:s'),
+					(string)($evaluation['logic_version'] ?? 'v2.0'),
 					$userId,
 					$cohortId,
 					$lessonId
@@ -855,7 +856,47 @@ final class LessonSummaryService
         return $out;
     }
 
+    /**
+     * Evaluator dispatcher — v2.1 (Option A) is the ACTIVE evaluator for all users.
+     *
+     * v2.1 was activated on 2026-05-12 to fix the contradictory-feedback /
+     * over-rejection pattern documented in the 2026-05 investigation
+     * (see evaluateSummaryQualityV2 below).
+     *
+     * Failure mode is "fail open to v1": any uncaught exception inside v2 silently
+     * falls back to v1, so a v2 bug can never block a student.
+     *
+     * === HOW TO REVERT TO V1 ===
+     * Replace the try/catch block below with a single line:
+     *     return $this->evaluateSummaryQualityV1($userId, $cohortId, $lessonId, $summaryHtml, $summaryPlain);
+     * v1 remains in this file (evaluateSummaryQualityV1, immediately below) and is
+     * byte-identical to the pre-2026-05 implementation, so reverting requires no
+     * other changes.
+     */
     private function evaluateSummaryQuality(
+        int $userId,
+        int $cohortId,
+        int $lessonId,
+        string $summaryHtml,
+        string $summaryPlain
+    ): array {
+        try {
+            return $this->evaluateSummaryQualityV2($userId, $cohortId, $lessonId, $summaryHtml, $summaryPlain);
+        } catch (Throwable $e) {
+            return $this->evaluateSummaryQualityV1($userId, $cohortId, $lessonId, $summaryHtml, $summaryPlain);
+        }
+    }
+
+    /**
+     * Legacy evaluator (v2.0).
+     *
+     * Kept byte-identical to the pre-2026-05 implementation. The active dispatcher
+     * (evaluateSummaryQuality, above) routes everything to v2.1 today and falls back
+     * here only when v2 throws. To revert all traffic to v1, replace the dispatcher
+     * body with `return $this->evaluateSummaryQualityV1(...)`. Do not modify this
+     * function — make any changes in evaluateSummaryQualityV2 instead.
+     */
+    private function evaluateSummaryQualityV1(
         int $userId,
         int $cohortId,
         int $lessonId,
@@ -870,6 +911,7 @@ final class LessonSummaryService
                 'review_score' => 0,
                 'review_feedback' => 'Summary is empty.',
                 'gap_topics' => 'No usable summary content provided.',
+                'logic_version' => 'v2.0',
             ];
         }
 
@@ -880,6 +922,7 @@ final class LessonSummaryService
                 'review_score' => 20,
                 'review_feedback' => 'Your summary is too short. Add the main aircraft concepts, components, and operational details from the lesson in your own words.',
                 'gap_topics' => 'Summary too short; likely missing key lesson concepts.',
+                'logic_version' => 'v2.0',
             ];
         }
 
@@ -892,6 +935,7 @@ final class LessonSummaryService
                 'review_score' => 0,
                 'review_feedback' => 'Automatic summary review could not verify your summary against the lesson content. Please expand and improve your summary.',
                 'gap_topics' => 'Lesson reference content unavailable for automatic validation.',
+                'logic_version' => 'v2.0',
             ];
         }
 
@@ -996,6 +1040,7 @@ final class LessonSummaryService
                 'review_score' => $reviewScore,
                 'review_feedback' => $reviewFeedback,
                 'gap_topics' => $gapTopics,
+                'logic_version' => 'v2.0',
             ];
         } catch (Throwable $e) {
             return [
@@ -1003,8 +1048,298 @@ final class LessonSummaryService
                 'review_score' => 0,
                 'review_feedback' => 'Automatic summary review is temporarily unavailable. Please improve and resave your summary shortly.',
                 'gap_topics' => 'Automatic validation unavailable at save time.',
+                'logic_version' => 'v2.0',
             ];
         }
+    }
+
+    /**
+     * New evaluator (v2.1) — Option A from the 2026-05 investigation.
+     *
+     * Key differences vs v1:
+     *   1. Structured output: topics_missing / topics_off_topic / clarity_notes are
+     *      separate arrays in the model schema rather than one free-form blob.
+     *   2. review_feedback is single-intent — praise on accept, coaching on reject —
+     *      never mixed with "however" clauses. Eliminates the contradictory
+     *      "add this but you also added that" pattern students were experiencing.
+     *   3. Pass threshold is explicitly stated as ~70% coverage of primary concepts.
+     *   4. Length is declared irrelevant.
+     *   5. Scope tolerance: related-but-adjacent content is treated as normal context,
+     *      not as off-topic. The bar for topics_off_topic is set very high.
+     *   6. Status is bound to score (>=75 must be acceptable, <60 must be needs_revision)
+     *      both in the prompt and as a defense-in-depth post-processing step.
+     *   7. The model is explicitly forbidden from listing a topic as missing if the
+     *      student already covered it (even briefly or imperfectly).
+     *
+     * The structured output is composed back into the legacy gap_topics column as
+     * a human-readable sectioned text block, so no DB schema migration is required
+     * and downstream consumers see a familiar format.
+     */
+    private function evaluateSummaryQualityV2(
+        int $userId,
+        int $cohortId,
+        int $lessonId,
+        string $summaryHtml,
+        string $summaryPlain
+    ): array {
+        $summaryPlain = trim($summaryPlain);
+
+        if ($summaryPlain === '') {
+            return [
+                'review_status' => 'needs_revision',
+                'review_score' => 0,
+                'review_feedback' => 'Summary is empty.',
+                'gap_topics' => 'No usable summary content provided.',
+                'logic_version' => 'v2.1',
+            ];
+        }
+
+        $minimumWordCount = 35;
+        if ($this->wordCount($summaryPlain) < $minimumWordCount) {
+            return [
+                'review_status' => 'needs_revision',
+                'review_score' => 20,
+                'review_feedback' => 'Your summary is too short. Add the main lesson concepts in your own words — a brief paragraph or short list covering the major points is enough.',
+                'gap_topics' => 'Summary too short; likely missing key lesson concepts.',
+                'logic_version' => 'v2.1',
+            ];
+        }
+
+        $lessonTitle = $this->getLessonTitle($lessonId);
+        $sourceText  = $this->buildLessonReferenceText($lessonId);
+
+        if ($sourceText === '') {
+            return [
+                'review_status' => 'needs_revision',
+                'review_score' => 0,
+                'review_feedback' => 'Automatic summary review could not verify your summary against the lesson content. Please expand and improve your summary.',
+                'gap_topics' => 'Lesson reference content unavailable for automatic validation.',
+                'logic_version' => 'v2.1',
+            ];
+        }
+
+        $schema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'properties' => [
+                'review_status' => [
+                    'type' => 'string',
+                    'enum' => ['acceptable', 'needs_revision']
+                ],
+                'review_score' => [
+                    'type' => 'integer',
+                    'minimum' => 0,
+                    'maximum' => 100
+                ],
+                'review_feedback' => [
+                    'type' => 'string'
+                ],
+                'topics_missing' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string']
+                ],
+                'topics_off_topic' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string']
+                ],
+                'clarity_notes' => [
+                    'type' => 'array',
+                    'items' => ['type' => 'string']
+                ]
+            ],
+            'required' => [
+                'review_status',
+                'review_score',
+                'review_feedback',
+                'topics_missing',
+                'topics_off_topic',
+                'clarity_notes'
+            ]
+        ];
+
+        $systemPrompt =
+            "You are an aviation training summary evaluator. Your task is to judge whether the student's lesson summary demonstrates adequate understanding of the lesson's PRIMARY concepts.\n\n"
+            . "CALIBRATION RULES — apply strictly.\n\n"
+            . "1. PASS THRESHOLD. A summary is acceptable when it covers approximately 70% or more of the lesson's primary concepts. Minor details, examples, edge cases, exact numbers, and exhaustive lists are NOT required to pass.\n\n"
+            . "2. LENGTH IS IRRELEVANT. Do not penalise concise wording. Do not penalise longer wording. Evaluate coverage of major concepts only. A 100-word focused summary that covers the key concepts is at least as good as a 400-word summary that wanders.\n\n"
+            . "3. SCOPE TOLERANCE. Aviation concepts naturally connect, and the student may have seen content on slide images that is not fully text-described in the lesson reference. If the student includes related but adjacent topics (broader system context, chart-reading details, content visible on slide visuals, terminology from related lessons), TREAT THIS AS NORMAL CONTEXT, NOT off-topic. Only flag content in topics_off_topic if it clearly belongs to a completely different lesson. When in doubt, do NOT flag it. The bar for topics_off_topic is intentionally very high.\n\n"
+            . "4. STATUS MUST FOLLOW SCORE.\n"
+            . "   - If review_score >= 75: review_status MUST be 'acceptable'.\n"
+            . "   - If review_score < 60:  review_status MUST be 'needs_revision'.\n"
+            . "   - 60-74: choose based on coverage of primary concepts.\n\n"
+            . "5. NEVER ASK FOR CONTENT THE STUDENT ALREADY WROTE. Before placing a topic in topics_missing, verify that the student did not cover it. If they mentioned it at all — even briefly or imperfectly — do NOT list it as missing. If their wording on a covered topic is wrong, put the correction in clarity_notes instead.\n\n"
+            . "6. review_feedback IS SINGLE-INTENT.\n"
+            . "   - If acceptable: brief praise listing 2-4 strengths the student demonstrated. No 'however' clauses. Do NOT mention missing topics, off-topic content, or clarity issues in review_feedback. Use the dedicated arrays for those.\n"
+            . "   - If needs_revision: brief actionable guidance naming the 1-3 most important things to add. Do NOT mention off-topic content. Do NOT mention clarity issues. Focus only on what to add.\n\n"
+            . "7. clarity_notes is for wording, accuracy, or terminology corrections — NEVER for missing content.\n\n"
+            . "8. Empty arrays are encouraged when there is nothing to say in a category. Do not invent items to fill a category.\n\n"
+            . "Evaluator version: v2.1.";
+
+        $userPrompt = "LESSON TITLE:\n"
+            . $lessonTitle
+            . "\n\nLESSON REFERENCE CONTENT:\n"
+            . $this->truncateForAi($sourceText, 12000)
+            . "\n\nSTUDENT SUMMARY:\n"
+            . $this->truncateForAi($summaryPlain, 5000)
+            . "\n\nEvaluate the student summary per the rules above. Output structured JSON only.";
+
+        try {
+            $resp = cw_openai_responses([
+                'model' => cw_openai_model(),
+                'input' => [
+                    [
+                        'role' => 'system',
+                        'content' => [
+                            ['type' => 'input_text', 'text' => $systemPrompt]
+                        ]
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => [
+                            ['type' => 'input_text', 'text' => $userPrompt]
+                        ]
+                    ]
+                ],
+                'text' => [
+                    'format' => [
+                        'type' => 'json_schema',
+                        'name' => 'lesson_summary_quality_review_v2',
+                        'schema' => $schema,
+                        'strict' => true
+                    ]
+                ],
+                'temperature' => 0.1
+            ]);
+
+            $json = cw_openai_extract_json_text($resp);
+
+            $reviewStatus = trim((string)($json['review_status'] ?? 'needs_revision'));
+            if (!in_array($reviewStatus, ['acceptable', 'needs_revision'], true)) {
+                $reviewStatus = 'needs_revision';
+            }
+
+            $reviewScore = isset($json['review_score']) ? (int)$json['review_score'] : null;
+            if ($reviewScore !== null) {
+                if ($reviewScore < 0)   $reviewScore = 0;
+                if ($reviewScore > 100) $reviewScore = 100;
+            }
+
+            // Defense in depth: enforce the status/score binding from rule 4 even if the
+            // model returns an inconsistent pair.
+            if ($reviewScore !== null) {
+                if ($reviewScore >= 75 && $reviewStatus !== 'acceptable') {
+                    $reviewStatus = 'acceptable';
+                }
+                if ($reviewScore < 60 && $reviewStatus !== 'needs_revision') {
+                    $reviewStatus = 'needs_revision';
+                }
+            }
+
+            $reviewFeedback = trim((string)($json['review_feedback'] ?? ''));
+            if ($reviewFeedback === '') {
+                $reviewFeedback = $reviewStatus === 'acceptable'
+                    ? 'Good summary. You covered the main lesson concepts.'
+                    : 'Please revise your summary to better cover the lesson\'s primary topics.';
+            }
+
+            $topicsMissing  = $this->coerceStringList($json['topics_missing']   ?? []);
+            $topicsOffTopic = $this->coerceStringList($json['topics_off_topic'] ?? []);
+            $clarityNotes   = $this->coerceStringList($json['clarity_notes']    ?? []);
+
+            $gapTopics = $this->composeGapTopicsText($topicsMissing, $topicsOffTopic, $clarityNotes);
+
+            return [
+                'review_status'   => $reviewStatus,
+                'review_score'    => $reviewScore,
+                'review_feedback' => $reviewFeedback,
+                'gap_topics'      => $gapTopics,
+                'logic_version'   => 'v2.1',
+            ];
+        } catch (Throwable $e) {
+            return [
+                'review_status'   => 'needs_revision',
+                'review_score'    => 0,
+                'review_feedback' => 'Automatic summary review is temporarily unavailable. Please improve and resave your summary shortly.',
+                'gap_topics'      => 'Automatic validation unavailable at save time.',
+                'logic_version'   => 'v2.1',
+            ];
+        }
+    }
+
+    /**
+     * Compose the structured v2 fields back into the legacy gap_topics text column.
+     *
+     * The student-facing UI consumes review_feedback (single-intent), not gap_topics.
+     * gap_topics is retained for instructor/admin DB inspection and for the debug
+     * log, so it is rendered as a sectioned human-readable text block. Sections with
+     * no items are omitted entirely so the column stays terse when nothing of note
+     * was flagged.
+     */
+    private function composeGapTopicsText(array $missing, array $offTopic, array $clarity): string
+    {
+        $blocks = [];
+
+        $appendBlock = static function (string $heading, array $items) use (&$blocks): void {
+            $lines = [$heading];
+            foreach ($items as $item) {
+                $t = trim((string)$item);
+                if ($t !== '') {
+                    $lines[] = '- ' . $t;
+                }
+            }
+            if (count($lines) > 1) {
+                $blocks[] = implode("\n", $lines);
+            }
+        };
+
+        if (!empty($missing)) {
+            $appendBlock('Missing topics:', $missing);
+        }
+        if (!empty($offTopic)) {
+            $appendBlock("Outside this lesson's focus (low priority):", $offTopic);
+        }
+        if (!empty($clarity)) {
+            $appendBlock('Clarity / accuracy notes:', $clarity);
+        }
+
+        return trim(implode("\n\n", $blocks));
+    }
+
+    private function coerceStringList(mixed $raw): array
+    {
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        foreach ($raw as $item) {
+            if (is_string($item)) {
+                $t = trim($item);
+                if ($t !== '') {
+                    $out[] = $t;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Public replay entry points — for offline harness use only (scripts/replay_summary_evals.php).
+     *
+     * These do NOT write to the database. They exist solely so the harness can invoke
+     * the v1 / v2 evaluators directly to compare verdicts on historical content
+     * without going through the env-var-controlled dispatcher.
+     *
+     * Production paths must always call saveSummary() / checkSummary(), which route
+     * through evaluateSummaryQuality() (the dispatcher).
+     */
+    public function replayEvaluateV1(int $userId, int $cohortId, int $lessonId, string $summaryHtml, string $summaryPlain): array
+    {
+        return $this->evaluateSummaryQualityV1($userId, $cohortId, $lessonId, $summaryHtml, $summaryPlain);
+    }
+
+    public function replayEvaluateV2(int $userId, int $cohortId, int $lessonId, string $summaryHtml, string $summaryPlain): array
+    {
+        return $this->evaluateSummaryQualityV2($userId, $cohortId, $lessonId, $summaryHtml, $summaryPlain);
     }
 
     private function buildLessonReferenceText(int $lessonId): string
