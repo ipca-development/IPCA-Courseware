@@ -59,6 +59,10 @@ const MAYA_ALLOWED_STAGES = [
 
 const MAYA_ALLOWED_CONTEXTS = ['player', 'lesson_summaries'];
 
+// History storage cap (DB) and per-page slice (lazy-load).
+const MAYA_HISTORY_DB_CAP = 200;
+const MAYA_HISTORY_PAGE_SIZE = 30;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -217,6 +221,133 @@ function maya_decode_json_column($raw): array
     if (!is_string($raw) || trim($raw) === '') return [];
     $j = json_decode($raw, true);
     return is_array($j) ? $j : [];
+}
+
+/**
+ * Fetch the live lesson_summaries row, if any, for adaptive coaching.
+ *
+ * Returns the columns Maya needs to greet the student in a context-aware
+ * way (already accepted? mid-draft? empty?). Always uses the canonical
+ * production table — never duplicates state.
+ */
+function maya_get_summary_snapshot(PDO $pdo, int $userId, int $cohortId, int $lessonId): array
+{
+    if ($cohortId <= 0 || $lessonId <= 0 || $userId <= 0) {
+        return [
+            'exists' => false,
+            'review_status' => 'missing',
+            'student_soft_locked' => 0,
+            'summary_html' => '',
+            'summary_plain' => '',
+            'word_count' => 0,
+        ];
+    }
+    $st = $pdo->prepare("
+        SELECT review_status, student_soft_locked, summary_html, summary_plain
+        FROM lesson_summaries
+        WHERE user_id=? AND cohort_id=? AND lesson_id=?
+        LIMIT 1
+    ");
+    $st->execute([$userId, $cohortId, $lessonId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return [
+            'exists' => false,
+            'review_status' => 'missing',
+            'student_soft_locked' => 0,
+            'summary_html' => '',
+            'summary_plain' => '',
+            'word_count' => 0,
+        ];
+    }
+    $plain = trim((string)($row['summary_plain'] ?? ''));
+    if ($plain === '') {
+        $plain = trim((string)preg_replace('/\s+/u', ' ', strip_tags((string)($row['summary_html'] ?? ''))));
+    }
+    $words = $plain === '' ? 0 : count(preg_split('/\s+/u', $plain) ?: []);
+    return [
+        'exists' => true,
+        'review_status' => (string)($row['review_status'] ?? 'pending'),
+        'student_soft_locked' => (int)($row['student_soft_locked'] ?? 0),
+        'summary_html' => (string)($row['summary_html'] ?? ''),
+        'summary_plain' => $plain,
+        'word_count' => $words,
+    ];
+}
+
+/**
+ * Choose a contextual greeting for start_session based on the canonical
+ * summary state. Returns:
+ *   ['maya_message' => str, 'next_question' => str, 'stage' => str|null]
+ *
+ * stage === null means "do not change persisted stage".
+ *
+ * Pure heuristics — no AI call — so the modal opens fast and free.
+ * Real coaching (with scoring + AI) starts on the first Continue/reply.
+ */
+function maya_compose_initial_greeting(array $snap, int $existingInteractions, string $persistedStage): array
+{
+    $status = (string)($snap['review_status'] ?? 'missing');
+    $locked = (int)($snap['student_soft_locked'] ?? 0) === 1;
+    $words = (int)($snap['word_count'] ?? 0);
+
+    // 1) Already accepted + soft-locked → unlock-first message.
+    if ($status === 'acceptable' && $locked) {
+        return [
+            'maya_message' =>
+                "Nice work — your summary for this lesson has already been accepted. "
+                . "If you want to improve it together, click Unlock first and then come back. "
+                . "Otherwise you're already signed off here.",
+            'next_question' =>
+                "When you're ready, unlock the summary and tell me which part you'd like to strengthen first.",
+            'stage' => MAYA_STAGE_READINESS,
+        ];
+    }
+
+    // 2) Pre-existing draft with real content → continue from where they left off.
+    if ($words >= 80) {
+        return [
+            'maya_message' =>
+                "Good — looks like you've already written a solid draft (~{$words} words). "
+                . "Let's pick up where you left off. Tell me, in your own words, the most "
+                . "important idea you've written so far and why it matters during a real flight.",
+            'next_question' =>
+                "What's the single most important idea in your current summary, and why does it matter in the cockpit?",
+            'stage' => $persistedStage ?: MAYA_STAGE_EXPLAIN,
+        ];
+    }
+
+    if ($words >= 15) {
+        return [
+            'maya_message' =>
+                "I see you've started writing — that's a great start. Let's build on it together. "
+                . "Don't worry about polishing yet; just tell me the main ideas of this lesson "
+                . "in your own words.",
+            'next_question' =>
+                "What are the 3–5 main ideas you want this summary to cover?",
+            'stage' => $persistedStage ?: MAYA_STAGE_STRUCTURE,
+        ];
+    }
+
+    // 3) Returning student with prior coaching turns but no draft yet.
+    if ($existingInteractions >= 1) {
+        return [
+            'maya_message' =>
+                "Welcome back. Your summary editor looks empty right now — let's start "
+                . "by capturing the main ideas of this lesson in your own words.",
+            'next_question' => "What are the 3–5 most important ideas from this lesson?",
+            'stage' => null,
+        ];
+    }
+
+    // 4) Empty draft, fresh session → original onboarding tone.
+    return [
+        'maya_message' =>
+            "Hi! Let's build your summary together. Start by writing the main ideas of "
+            . "this lesson in your own words.",
+        'next_question' => "What are the 3–5 most important ideas from this lesson?",
+        'stage' => null,
+    ];
 }
 
 /**
@@ -546,8 +677,10 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
 
     $userId = (int)$u['id'];
     $session = maya_load_session($pdo, $userId, $lessonId, $cohortId, $summaryId > 0 ? $summaryId : null, $context);
+    $isNewSession = false;
     if (!$session) {
         $session = maya_create_session($pdo, $userId, $lessonId, $cohortId, $summaryId > 0 ? $summaryId : null, $context);
+        $isNewSession = true;
     } elseif ($summaryId > 0 && (int)($session['summary_id'] ?? 0) !== $summaryId) {
         maya_save_session($pdo, (int)$session['id'], ['summary_id' => $summaryId]);
         $session['summary_id'] = $summaryId;
@@ -557,21 +690,60 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
     $readiness = maya_decode_json_column($session['readiness_json'] ?? null);
     $flags     = maya_decode_json_column($session['flags_json']     ?? null);
     $history   = maya_decode_json_column($session['history_json']   ?? null);
+    if (!is_array($history)) $history = [];
 
-    $stage = (string)($session['stage'] ?? MAYA_STAGE_STRUCTURE);
-    $lastQ = trim((string)($session['last_question'] ?? ''));
-    if ($lastQ === '') {
-        $lastQ = "What are the 3–5 most important ideas from this lesson?";
+    $persistedStage = (string)($session['stage'] ?? MAYA_STAGE_STRUCTURE);
+    $interactionCount = (int)($session['interaction_count'] ?? 0);
+
+    // Adaptive greeting based on canonical lesson_summaries state.
+    $snap = maya_get_summary_snapshot($pdo, $userId, $cohortId, $lessonId);
+    $greeting = maya_compose_initial_greeting($snap, $interactionCount, $persistedStage);
+
+    $newStage = $greeting['stage'] !== null ? $greeting['stage'] : $persistedStage;
+    $nextQ    = $greeting['next_question'];
+    $msg      = $greeting['maya_message'];
+
+    // Append the greeting to persisted history so it shows in the chat
+    // when the modal reopens. We mark this Maya turn with a `kind` so the
+    // frontend can recognise greetings vs. coaching turns if it cares.
+    $history[] = [
+        'role' => 'maya',
+        'message' => $msg,
+        'stage' => $newStage,
+        'kind' => 'greeting',
+        'ts' => gmdate('Y-m-d\TH:i:s\Z'),
+    ];
+    if (count($history) > MAYA_HISTORY_DB_CAP) {
+        $history = array_slice($history, -MAYA_HISTORY_DB_CAP);
     }
 
-    $opening = "Hi! Let's build your summary together. Start by writing the main ideas of this lesson in your own words.";
+    maya_save_session($pdo, (int)$session['id'], [
+        'stage' => $newStage,
+        'last_question' => $nextQ,
+        'history_json' => json_encode($history),
+    ]);
+
+    // Page the most recent slice for the chat thread.
+    $total = count($history);
+    $pageStart = max(0, $total - MAYA_HISTORY_PAGE_SIZE);
+    $page = array_slice($history, $pageStart);
+    // Tag with absolute index so the client can request older-than-this.
+    $oldestIndex = $total > 0 ? $pageStart : 0;
+    $hasMore = $pageStart > 0;
 
     return [
         'ok' => true,
         'session_id' => (int)$session['id'],
-        'maya_message' => $opening,
-        'next_question' => $lastQ,
-        'stage' => $stage,
+        'is_new_session' => $isNewSession,
+        'summary_state' => [
+            'exists' => (bool)$snap['exists'],
+            'review_status' => (string)$snap['review_status'],
+            'student_soft_locked' => (int)$snap['student_soft_locked'],
+            'word_count' => (int)$snap['word_count'],
+        ],
+        'maya_message' => $msg,
+        'next_question' => $nextQ,
+        'stage' => $newStage,
         'scores' => $scores ?: [
             'coverage' => 0, 'accuracy' => 0, 'own_wording' => 0,
             'correlation' => 0, 'instructor_confidence' => 0,
@@ -583,10 +755,65 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
             'unresolved_required_question' => true,
         ],
         'flags' => $flags ?: ['major_paste' => false, 'needs_deeper_question' => false],
-        'interaction_count' => (int)($session['interaction_count'] ?? 0),
+        'interaction_count' => $interactionCount,
         'major_paste_flag' => (int)($session['major_paste_flag'] ?? 0) === 1,
-        'history' => $history,
+        'history' => array_values($page),
+        'history_oldest_index' => $oldestIndex,
+        'history_total' => $total,
+        'history_has_more' => $hasMore,
         'student_note_suggestion' => '',
+    ];
+}
+
+/**
+ * Cursor-paginated history loader for lazy scroll-up in the chat thread.
+ * Request: { action:'load_history', lesson_id, cohort_id, context, before_index }
+ * Response: { ok, history:[...], history_oldest_index, history_has_more }
+ */
+function maya_action_load_history(PDO $pdo, array $u, array $payload): array
+{
+    [$_, $lessonId, $cohortId, $summaryId, $context] = maya_extract_common_input($payload);
+    maya_assert_lesson_access($pdo, $u, $cohortId, $lessonId);
+
+    $userId = (int)$u['id'];
+    $session = maya_load_session($pdo, $userId, $lessonId, $cohortId, $summaryId > 0 ? $summaryId : null, $context);
+    if (!$session) {
+        return [
+            'ok' => true,
+            'history' => [],
+            'history_oldest_index' => 0,
+            'history_has_more' => false,
+            'history_total' => 0,
+        ];
+    }
+
+    $beforeIndex = isset($payload['before_index']) ? (int)$payload['before_index'] : 0;
+    if ($beforeIndex < 0) $beforeIndex = 0;
+
+    $history = maya_decode_json_column($session['history_json'] ?? null);
+    if (!is_array($history)) $history = [];
+    $total = count($history);
+
+    if ($beforeIndex <= 0 || $total === 0) {
+        return [
+            'ok' => true,
+            'history' => [],
+            'history_oldest_index' => 0,
+            'history_has_more' => false,
+            'history_total' => $total,
+        ];
+    }
+
+    $end = min($beforeIndex, $total);
+    $start = max(0, $end - MAYA_HISTORY_PAGE_SIZE);
+    $page = array_slice($history, $start, $end - $start);
+
+    return [
+        'ok' => true,
+        'history' => array_values($page),
+        'history_oldest_index' => $start,
+        'history_has_more' => $start > 0,
+        'history_total' => $total,
     ];
 }
 
@@ -754,12 +981,25 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
 
     $appendedHistory = maya_decode_json_column($session['history_json'] ?? null);
     if (!is_array($appendedHistory)) $appendedHistory = [];
+    $nowIso = gmdate('Y-m-d\TH:i:s\Z');
     if ($studentReply !== '') {
-        $appendedHistory[] = ['role' => 'student', 'message' => maya_truncate($studentReply, 800), 'stage' => $coachStage];
+        $appendedHistory[] = [
+            'role' => 'student',
+            'message' => maya_truncate($studentReply, 800),
+            'stage' => $coachStage,
+            'kind' => 'turn',
+            'ts' => $nowIso,
+        ];
     }
-    $appendedHistory[] = ['role' => 'maya', 'message' => maya_truncate($mayaMessage, 800), 'stage' => $newStage];
-    if (count($appendedHistory) > 30) {
-        $appendedHistory = array_slice($appendedHistory, -30);
+    $appendedHistory[] = [
+        'role' => 'maya',
+        'message' => maya_truncate($mayaMessage, 800),
+        'stage' => $newStage,
+        'kind' => 'turn',
+        'ts' => $nowIso,
+    ];
+    if (count($appendedHistory) > MAYA_HISTORY_DB_CAP) {
+        $appendedHistory = array_slice($appendedHistory, -MAYA_HISTORY_DB_CAP);
     }
 
     $persistedFlags = [
@@ -1028,10 +1268,23 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
     // Persist Maya's final review state.
     $appendedHistory = maya_decode_json_column($session['history_json'] ?? null);
     if (!is_array($appendedHistory)) $appendedHistory = [];
-    $appendedHistory[] = ['role' => 'student', 'message' => '[Requested Final Review]', 'stage' => 'readiness'];
-    $appendedHistory[] = ['role' => 'maya', 'message' => maya_truncate($mayaMessage, 800), 'stage' => $newStage];
-    if (count($appendedHistory) > 40) {
-        $appendedHistory = array_slice($appendedHistory, -40);
+    $nowIso = gmdate('Y-m-d\TH:i:s\Z');
+    $appendedHistory[] = [
+        'role' => 'student',
+        'message' => '[Requested Final Review]',
+        'stage' => 'readiness',
+        'kind' => 'system',
+        'ts' => $nowIso,
+    ];
+    $appendedHistory[] = [
+        'role' => 'maya',
+        'message' => maya_truncate($mayaMessage, 800),
+        'stage' => $newStage,
+        'kind' => $approved ? 'final_approved' : 'final_revision',
+        'ts' => $nowIso,
+    ];
+    if (count($appendedHistory) > MAYA_HISTORY_DB_CAP) {
+        $appendedHistory = array_slice($appendedHistory, -MAYA_HISTORY_DB_CAP);
     }
 
     maya_save_session($pdo, $sessionId, [
@@ -1095,6 +1348,10 @@ try {
 
         case 'readiness_check':
             $out = maya_action_readiness_check($pdo, $u, $payload);
+            break;
+
+        case 'load_history':
+            $out = maya_action_load_history($pdo, $u, $payload);
             break;
 
         case 'final_review':

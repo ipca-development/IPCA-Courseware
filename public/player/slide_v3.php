@@ -373,107 +373,206 @@ $isAdminViewer = ($role === 'admin');
     }
     .vbox video{ width:100%; height:auto; display:block; }
 
+    /* v3 (revision 2):
+     *   The drawer is always rendered as a centered, light-blue "modal"
+     *   summary workspace. There is no compact/expand toggle anymore.
+     *   Maya lives on the LEFT, the editor on the RIGHT, in matching
+     *   white rounded cards. */
     .drawer{
       position:fixed;
-      right:14px;
-      bottom:80px;
-      width:min(620px, 94vw);
-      height:min(620px, 80vh);
-      background:#fff;
-      border:1px solid #eee;
-      border-radius:16px;
-      box-shadow:0 16px 50px rgba(0,0,0,0.18);
+      right:50%;
+      transform:translateX(50%);
+      bottom:18px;
+      width:min(1200px, 96vw);
+      height:min(80vh, 860px);
+      background:linear-gradient(180deg, #e9f2ff 0%, #f5f9ff 100%);
+      border:1px solid #cfe0f5;
+      border-radius:18px;
+      box-shadow:0 20px 60px rgba(15, 23, 42, 0.22);
       display:none;
       flex-direction:column;
       z-index:125;
       overflow:hidden;
     }
 
-    /* v3: drawer body holds the editor and the Maya coach side-by-side
-       (when expanded) or stacked (compact). */
+    /* Force-hide controls that were intentionally retired in v3. CSS
+     * !important guarantees these stay hidden even if legacy JS toggles
+     * inline display:'inline-block'. */
+    .drawer #btnCheckSummary,
+    .drawer #btnToggleSummarySize {
+      display:none !important;
+    }
+
+    /* Header (light translucent over the blue background). */
+    .drawer .head{
+      padding:12px 14px;
+      border-bottom:1px solid rgba(15, 23, 42, 0.08);
+      background:rgba(255, 255, 255, 0.55);
+      backdrop-filter:blur(6px);
+      display:grid;
+      grid-template-columns:1fr auto 1fr;
+      align-items:center;
+      gap:12px;
+    }
+    .drawer .head > strong{
+      font-size:15px;
+      letter-spacing:0.01em;
+      color:#0f172a;
+      justify-self:start;
+    }
+    .drawer .head .head-actions{
+      display:flex;
+      gap:8px;
+      align-items:center;
+      justify-self:end;
+    }
+    .drawer .head #sumStatus.head-status-pill{
+      justify-self:center;
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:4px 12px;
+      border-radius:999px;
+      font-size:11.5px;
+      font-weight:800;
+      letter-spacing:0.04em;
+      text-transform:uppercase;
+      background:#e2e8f0;
+      color:#334155;
+      border:1px solid #cbd5e1;
+      max-width:280px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+    .drawer .head #sumStatus.head-status-pill.is-accepted{
+      background:#dcfce7;
+      color:#166534;
+      border-color:#86efac;
+    }
+    .drawer .head #sumStatus.head-status-pill.is-locked{
+      background:#fee2e2;
+      color:#991b1b;
+      border-color:#fecaca;
+    }
+    .drawer .head #sumStatus.head-status-pill.is-revision{
+      background:#fef3c7;
+      color:#92400e;
+      border-color:#fde68a;
+    }
+    .drawer .head #sumStatus.head-status-pill.is-saving{
+      background:#e0e7ff;
+      color:#3730a3;
+      border-color:#c7d2fe;
+    }
+
+    /* X close button in the top-right of the header. */
+    .drawer .drawer-close-x{
+      appearance:none;
+      width:32px;
+      height:32px;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      border-radius:999px;
+      border:1px solid rgba(15, 23, 42, 0.14);
+      background:#ffffff;
+      color:#0f172a;
+      font-size:20px;
+      line-height:1;
+      font-weight:700;
+      cursor:pointer;
+      padding:0;
+      font-family:inherit;
+      transition:background 0.12s ease, transform 0.12s ease;
+    }
+    .drawer .drawer-close-x:hover{ background:#f1f5f9; }
+    .drawer .drawer-close-x:active{ transform:scale(0.96); }
+
+    /* Body: two-column layout — Maya LEFT (~25% wider than the previous
+     * 360px = 450px), editor RIGHT in a white rounded card. */
     .drawer-body{
       flex:1 1 auto;
       min-height:0;
       display:flex;
-      flex-direction:column;
-      gap:0;
+      flex-direction:row;
+      gap:14px;
+      padding:14px;
       overflow:hidden;
-    }
-    .drawer-editor-pane{
-      flex:1 1 auto;
-      min-height:0;
-      display:flex;
-      overflow:hidden;
-      border-bottom:1px solid #eef1f5;
-    }
-    .drawer-editor-pane > .rte{
-      flex:1 1 auto;
-      min-height:0;
     }
     .drawer-coach-pane{
-      flex:0 0 auto;
-      max-height:46%;
-      overflow-y:auto;
-      overflow-x:hidden;
-      padding:10px 12px 12px 12px;
-      background:#f7fbff;
+      flex:0 0 450px;
+      min-width:360px;
+      display:flex;
+      flex-direction:column;
+      background:#ffffff;
+      border:1px solid rgba(15, 23, 42, 0.08);
+      border-radius:14px;
+      box-shadow:0 6px 18px rgba(15, 23, 42, 0.06);
+      overflow:hidden;
     }
     .drawer-coach-pane .maya-coach{
       width:100%;
-    }
-    .drawer.expanded .drawer-body{
-      flex-direction:row;
-    }
-    .drawer.expanded .drawer-editor-pane{
-      border-bottom:none;
-      border-right:1px solid #eef1f5;
-      flex:1 1 60%;
-    }
-    .drawer.expanded .drawer-coach-pane{
-      flex:0 0 360px;
-      max-height:none;
-      padding:14px;
-      background:#f7fbff;
-    }
-    .drawer.expanded #mayaCoachRoot{
-      /* In expanded mode, switch the coach to its richer two-column layout. */
-      /* JS toggles data-coach-mode in syncMayaModeWithDrawer(). */
-    }
-
-    @media (max-width:900px){
-      .drawer.expanded .drawer-body{
-        flex-direction:column;
-      }
-      .drawer.expanded .drawer-editor-pane{
-        border-right:none;
-        border-bottom:1px solid #eef1f5;
-      }
-      .drawer.expanded .drawer-coach-pane{
-        flex:0 0 auto;
-        max-height:50%;
-        overflow-y:auto;
-      }
-    }
-    .drawer .head{
-      padding:10px 12px;
-      border-bottom:1px solid #eee;
+      height:100%;
       display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:10px;
+      flex-direction:column;
+    }
+    .drawer-editor-pane{
+      flex:1 1 auto;
+      min-width:0;
+      display:flex;
+      flex-direction:column;
+      background:#ffffff;
+      border:1px solid rgba(15, 23, 42, 0.08);
+      border-radius:14px;
+      box-shadow:0 6px 18px rgba(15, 23, 42, 0.06);
+      overflow:hidden;
     }
     .drawer .tools{
       display:flex;
       gap:6px;
       flex-wrap:wrap;
-      padding:8px 12px;
-      border-bottom:1px solid #eee;
+      padding:10px 12px;
+      border-bottom:1px solid rgba(15, 23, 42, 0.06);
+      background:#f8fafc;
     }
+    .drawer .rte{
+      flex:1 1 auto;
+      min-height:0;
+      padding:14px 16px;
+      font-size:15px;
+      line-height:1.7;
+      overflow:auto;
+      background:#ffffff;
+    }
+
+    @media (max-width:900px){
+      .drawer{
+        width:96vw;
+        height:88vh;
+        bottom:6vh;
+      }
+      .drawer-body{
+        flex-direction:column;
+        overflow:auto;
+      }
+      .drawer-coach-pane{
+        flex:0 0 auto;
+        max-height:60vh;
+      }
+      .drawer-editor-pane{
+        flex:1 1 auto;
+        min-height:280px;
+      }
+    }
+
+	/* Legacy expanded-mode rules (kept inert; the drawer is always
+	   "expanded" now and the toggle is hidden). */
 	.drawer.expanded{
 	  right:50%;
 	  transform:translateX(50%);
 	  width:min(1200px, 96vw);
-	  height:min(72vh, 820px);
+	  height:min(80vh, 860px);
 	  bottom:18px;
 	}
 
@@ -671,52 +770,51 @@ $isAdminViewer = ($role === 'admin');
 
   <button class="fab" id="btnSummary" title="My Study Summary">📝</button>
 
-  <div class="drawer" id="drawer">
+  <div class="drawer expanded" id="drawer">
     <div class="head">
-      <strong>My Study Summary (Lesson)</strong>
-      <span class="muted" id="sumStatus">Draft</span>
-      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
-		  <!-- v3: production "Check my Summary" button is hidden in favor of the
-		       Maya Summary Coach. Canonical acceptance still happens via the
-		       same LessonSummaryService::checkSummary() path — it is now
-		       triggered by the Maya final_review API endpoint after Maya's
-		       readiness gate is satisfied. The button is kept in the DOM so
-		       the existing JS wiring (checkSummaryNow + helpers) continues to
-		       work unchanged. -->
-		  <button class="btnx" id="btnCheckSummary" style="display:none;" aria-hidden="true" tabindex="-1">Check my Summary</button>
+      <strong>My Summary</strong>
+      <span class="head-status-pill" id="sumStatus">Draft</span>
+      <div class="head-actions">
+		  <!-- v3 (rev 2): the production "Check my Summary" workflow is fully
+		       superseded by the Maya Summary Coach (Request Final Review).
+		       The button + the size toggle are kept in the DOM so the
+		       existing JS wiring (checkSummaryNow + helpers, drawer state
+		       persistence, etc.) continues to work without changes; CSS
+		       above force-hides them with !important so even legacy
+		       inline style.display='inline-block' calls cannot revive them. -->
+		  <button class="btnx" id="btnCheckSummary" aria-hidden="true" tabindex="-1">Check my Summary</button>
 		  <button class="btnx" id="btnUnlockSummary" style="display:none;">Unlock</button>
-		  <button class="btnx" id="btnToggleSummarySize">Expand</button>
-		  <button class="btnx" id="btnCloseDrawer" style="padding:6px 10px;">Close</button>
+		  <button class="btnx" id="btnToggleSummarySize" aria-hidden="true" tabindex="-1">Expand</button>
+		  <button type="button" class="drawer-close-x" id="btnCloseDrawer" aria-label="Close summary">&times;</button>
 	  </div>
     </div>
-<div class="tools">
-  <button class="btnx" type="button" data-cmd="bold">B</button>
-  <button class="btnx" type="button" data-cmd="italic">I</button>
-  <button class="btnx" type="button" data-cmd="underline">U</button>
-  <button class="btnx" type="button" data-cmd="insertUnorderedList">•</button>
-
-  <!-- NEW -->
-  <button class="btnx" type="button" data-size="sm">S</button>
-  <button class="btnx" type="button" data-size="md">M</button>
-  <button class="btnx" type="button" data-size="lg">L</button>
-  <button class="btnx" type="button" id="btnHighlight">Highlight</button>
-</div>
     <div class="drawer-body" id="drawerBody">
-      <div class="drawer-editor-pane">
-        <div id="rte" class="rte" contenteditable="true"></div>
-      </div>
       <div class="drawer-coach-pane" id="drawerCoachPane">
         <div
           class="maya-coach"
           data-summary-coach
           data-coach-host="drawer"
-          data-coach-mode="compact"
+          data-coach-mode="expanded"
+          data-coach-layout="chat"
           data-context="player"
           data-lesson-id="<?= (int)$lessonId ?>"
           data-cohort-id="<?= (int)$cohortId ?>"
           data-summary-id=""
           id="mayaCoachRoot"
         ></div>
+      </div>
+      <div class="drawer-editor-pane">
+        <div class="tools">
+          <button class="btnx" type="button" data-cmd="bold">B</button>
+          <button class="btnx" type="button" data-cmd="italic">I</button>
+          <button class="btnx" type="button" data-cmd="underline">U</button>
+          <button class="btnx" type="button" data-cmd="insertUnorderedList">•</button>
+          <button class="btnx" type="button" data-size="sm">S</button>
+          <button class="btnx" type="button" data-size="md">M</button>
+          <button class="btnx" type="button" data-size="lg">L</button>
+          <button class="btnx" type="button" id="btnHighlight">Highlight</button>
+        </div>
+        <div id="rte" class="rte" contenteditable="true"></div>
       </div>
     </div>
   </div>
@@ -1195,7 +1293,8 @@ const summaryAlertTitle = document.getElementById('summaryAlertTitle');
 const summaryAlertBody = document.getElementById('summaryAlertBody');
 
 function showBanner(message, kind){
-  sumStatus.textContent = message;
+  if (typeof setStatusPill === 'function') setStatusPill(message, '');
+  else sumStatus.textContent = message;
 
   setTimeout(function(){
     updateDrawerLockState();
@@ -1334,14 +1433,24 @@ function updateDrawerLockState() {
   });
 
   if (isLocked) {
-    sumStatus.textContent = 'Locked (Accepted)';
+    setStatusPill('Locked (Accepted)', 'is-locked');
   } else if (currentReviewStatus === 'needs_revision' || currentReviewStatus === 'rejected') {
-    sumStatus.textContent = 'Needs revision';
+    setStatusPill('Needs revision', 'is-revision');
   } else if (currentReviewStatus === 'acceptable') {
-    sumStatus.textContent = 'Accepted';
+    setStatusPill('Accepted', 'is-accepted');
   } else {
-    sumStatus.textContent = 'Draft';
+    setStatusPill('Draft', '');
   }
+}
+
+/* v3 (rev 2): apply pill styling alongside the text. Removes any prior
+ * status modifier classes so we don't accumulate them. */
+function setStatusPill(text, modifier){
+  if (!sumStatus) return;
+  sumStatus.textContent = String(text || '');
+  sumStatus.classList.remove('muted', 'is-locked', 'is-accepted', 'is-revision', 'is-saving');
+  sumStatus.classList.add('head-status-pill');
+  if (modifier) sumStatus.classList.add(modifier);
 }	
 
 async function refreshSummaryStatusOnly(){
@@ -1397,7 +1506,7 @@ function scheduleSave(){
   saveSelection();   
 	
   if (saveTimer) clearTimeout(saveTimer);
-  sumStatus.textContent = 'Saving draft...';
+  setStatusPill('Saving draft…', 'is-saving');
   saveTimer = setTimeout(async ()=>{
     try{
       const res = await fetch('/student/api/summary_save.php', {
@@ -1412,20 +1521,24 @@ function scheduleSave(){
         })
       });
       const j = await res.json();
-      sumStatus.textContent = j.ok ? (j.skipped ? 'Draft unchanged' : 'Draft saved') : 'Save failed';
+      if (j.ok) {
+        setStatusPill(j.skipped ? 'Draft unchanged' : 'Draft saved', '');
+      } else {
+        setStatusPill('Save failed', 'is-revision');
+      }
       if (j.ok) {
           restoreSelection();
 		  refreshSummaryStatusOnly();
       }
     }catch(e){
-      sumStatus.textContent = 'Save failed';
+      setStatusPill('Save failed', 'is-revision');
     }
   }, 800);
 }
 
 async function checkSummaryNow(){
   try{
-    sumStatus.textContent = 'Checking summary...';
+    setStatusPill('Checking summary…', 'is-saving');
 
     const res = await fetch('/student/api/summary_save.php', {
       method:'POST',
@@ -1441,7 +1554,7 @@ async function checkSummaryNow(){
     const j = await res.json();
 
     if (!j.ok) {
-  sumStatus.textContent = 'Check failed';
+  setStatusPill('Check failed', 'is-revision');
   return;
 }
 
@@ -1452,7 +1565,7 @@ async function checkSummaryNow(){
 		renderSummaryAlert(j, { forceShow: true });
 
   } catch(e){
-    sumStatus.textContent = 'Check failed';
+    setStatusPill('Check failed', 'is-revision');
   }
 }
 
@@ -1556,10 +1669,13 @@ function loadSummaryDrawerExpandedState(){
 }
 
 function applySummaryDrawerExpandedState(){
-  const expanded = loadSummaryDrawerExpandedState();
-  drawer.classList.toggle('expanded', expanded);
+  // v3 (rev 2): the drawer is always rendered as an expanded "modal" — the
+  // compact mode is retired. We force-add the expanded class and ignore any
+  // legacy persisted compact state.
+  drawer.classList.add('expanded');
   if (btnToggleSummarySize) {
-    btnToggleSummarySize.textContent = expanded ? 'Compact' : 'Expand';
+    btnToggleSummarySize.textContent = 'Compact';
+    btnToggleSummarySize.disabled = true;
   }
 }
 	
@@ -1601,11 +1717,13 @@ async function flushSummarySaveNow(){
     });
 
     const j = await res.json();
-    sumStatus.textContent = (j && j.ok)
-      ? (j.skipped ? 'Draft unchanged' : 'Draft saved')
-      : 'Save failed';
+    if (j && j.ok) {
+      setStatusPill(j.skipped ? 'Draft unchanged' : 'Draft saved', '');
+    } else {
+      setStatusPill('Save failed', 'is-revision');
+    }
   } catch(e){
-    sumStatus.textContent = 'Save failed';
+    setStatusPill('Save failed', 'is-revision');
   }
 }	
 	
@@ -1677,7 +1795,7 @@ if (j.ok) {
     review_feedback: '',
     review_notes_by_instructor: ''
   }, { suppressPending: true });
-  sumStatus.textContent = 'Unlocked';
+  setStatusPill('Unlocked', '');
 }
 };	
 	
@@ -1819,17 +1937,10 @@ if (e.key === 'ArrowRight') {
 (function () {
   function syncMayaModeWithDrawer() {
     var root = document.getElementById('mayaCoachRoot');
-    if (!root || !drawer) return;
-    var mode = drawer.classList.contains('expanded') ? 'expanded' : 'compact';
-    root.setAttribute('data-coach-mode', mode);
+    if (!root) return;
+    // v3 (rev 2): the drawer is always in expanded mode.
+    root.setAttribute('data-coach-mode', 'expanded');
   }
-
-  // Re-sync mode whenever the drawer toggles size.
-  var origToggle = btnToggleSummarySize.onclick;
-  btnToggleSummarySize.onclick = function () {
-    if (typeof origToggle === 'function') origToggle();
-    syncMayaModeWithDrawer();
-  };
 
   // Auto-save the draft just before Maya checkpoints so the server-side
   // reasoning sees the current text. Maya pulls excerpt locally, but
@@ -1849,8 +1960,9 @@ if (e.key === 'ArrowRight') {
     cohortId: COHORT_ID,
     summaryId: 0,
     editorSelector: '#rte',
-    mode: drawer && drawer.classList.contains('expanded') ? 'expanded' : 'compact',
+    mode: 'expanded',
     host: 'drawer',
+    layout: 'chat',
     avatarUrl: '/assets/avatars/maya.png',
     onCanonicalAccept: function (canonicalCheck /*, mayaResponse */) {
       // Maya approved AND the canonical evaluator accepted the summary.

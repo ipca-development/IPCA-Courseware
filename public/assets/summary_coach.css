@@ -596,3 +596,389 @@
   background: #ffffff;
   box-shadow: none;
 }
+
+/* ============================================================
+ * v3 chat layout (revision 2)
+ *
+ * Adds:
+ *   - .maya-chat-area     iMessage-style scrollable chat (no avatars)
+ *   - .maya-stats-overlay slide-in panel showing horizontal score bars
+ *                         + "Still needed" banner, overlaid on the chat
+ *                         when the student clicks the small left arrow.
+ *   - .maya-stats-toggle  small left-edge arrow button
+ *   - .maya-coach[data-coach-layout="chat"] composes everything together
+ *     and hides the legacy progress grid / readiness card / message /
+ *     question blocks (they live inside the chat thread / overlay now).
+ * ============================================================ */
+
+.maya-coach[data-coach-layout="chat"] > .maya-message,
+.maya-coach[data-coach-layout="chat"] > .maya-next-question,
+.maya-coach[data-coach-layout="chat"] > .maya-progress-grid,
+.maya-coach[data-coach-layout="chat"] > .maya-readiness {
+  display: none !important;
+}
+
+.maya-coach[data-coach-layout="chat"] {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 14px 12px 14px;
+}
+
+.maya-chat-area {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f7fbff;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 14px;
+  overflow: hidden;
+  min-height: 280px;
+}
+
+.maya-stats-toggle {
+  position: absolute;
+  top: 50%;
+  left: 6px;
+  transform: translateY(-50%);
+  z-index: 4;
+  width: 22px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--maya-accent);
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.10);
+  transition: background 0.12s ease, transform 0.15s ease, color 0.12s ease;
+  font-family: inherit;
+}
+.maya-stats-toggle:hover { background: #ffffff; }
+.maya-stats-toggle:focus-visible {
+  outline: 2px solid var(--maya-accent-2);
+  outline-offset: 2px;
+}
+.maya-stats-toggle::before {
+  content: "›";
+  display: inline-block;
+  transition: transform 0.18s ease;
+}
+.maya-coach[data-stats-open="1"] .maya-stats-toggle::before {
+  transform: rotate(180deg);
+}
+
+.maya-chat-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 12px 12px 6px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  scroll-behavior: smooth;
+}
+
+.maya-chat-row {
+  display: flex;
+  width: 100%;
+}
+.maya-chat-row.is-student { justify-content: flex-end; }
+.maya-chat-row.is-maya { justify-content: flex-start; }
+
+.maya-chat-bubble {
+  max-width: min(82%, 520px);
+  border-radius: 16px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.maya-chat-row.is-student .maya-chat-bubble {
+  background: #0b84ff;
+  color: #ffffff;
+  border-top-right-radius: 6px;
+}
+.maya-chat-row.is-maya .maya-chat-bubble {
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #dbe3ee;
+  border-top-left-radius: 6px;
+}
+
+.maya-chat-bubble[data-kind="greeting"] {
+  background: linear-gradient(180deg, #ffffff 0%, #f4f9ff 100%);
+  border-color: #c8dbf4;
+}
+.maya-chat-bubble[data-kind="final_approved"] {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #166534;
+}
+.maya-chat-bubble[data-kind="final_revision"] {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #92400e;
+}
+.maya-chat-bubble[data-kind="system"] {
+  background: #eef2ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.maya-chat-meta {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin-bottom: 3px;
+  opacity: 0.75;
+}
+.maya-chat-row.is-student .maya-chat-meta { color: rgba(255,255,255,0.92); }
+.maya-chat-row.is-maya .maya-chat-meta { color: #475569; }
+
+.maya-chat-thread-empty {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--maya-text-muted);
+  font-size: 12.5px;
+  font-style: italic;
+  padding: 16px;
+  text-align: center;
+}
+
+.maya-chat-sentinel {
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+}
+.maya-chat-load-earlier {
+  text-align: center;
+  margin: 0 0 6px 0;
+}
+.maya-chat-load-earlier-btn {
+  appearance: none;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #ffffff;
+  color: var(--maya-accent);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  font-family: inherit;
+}
+.maya-chat-load-earlier-btn:hover {
+  border-color: rgba(30, 60, 114, 0.30);
+}
+.maya-chat-load-earlier[hidden] { display: none; }
+
+.maya-chat-typing {
+  display: none;
+  align-self: flex-start;
+  background: #ffffff;
+  border: 1px solid #dbe3ee;
+  border-radius: 16px;
+  border-top-left-radius: 6px;
+  padding: 8px 12px;
+  color: #475569;
+  font-size: 12px;
+}
+.maya-chat-typing[data-visible="1"] { display: inline-flex; align-items: center; gap: 6px; }
+.maya-chat-typing-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.maya-chat-typing-dots span {
+  width: 5px; height: 5px; border-radius: 999px;
+  background: #94a3b8;
+  animation: maya-dot 1s ease-in-out infinite;
+}
+.maya-chat-typing-dots span:nth-child(2) { animation-delay: 0.18s; }
+.maya-chat-typing-dots span:nth-child(3) { animation-delay: 0.36s; }
+@keyframes maya-dot {
+  0%, 80%, 100% { transform: scale(0.7); opacity: 0.5; }
+  40% { transform: scale(1.05); opacity: 1; }
+}
+
+.maya-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+.maya-compose .maya-reply { min-height: 60px; }
+.maya-compose .maya-actions { margin-top: 0; }
+
+/* Smaller stage pill so "Current mission: …" stays on one line. */
+.maya-coach[data-coach-layout="chat"] .maya-stage {
+  font-size: 9px;
+  padding: 4px 9px;
+  letter-spacing: 0.10em;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-block;
+}
+
+/* ---------- Stats overlay (slides in over the chat) ---------- */
+.maya-stats-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  background: rgba(247, 251, 255, 0.97);
+  backdrop-filter: blur(4px);
+  padding: 14px 14px 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transform: translateX(-100%);
+  transition: transform 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+  border-radius: 14px;
+  overflow-y: auto;
+}
+.maya-coach[data-stats-open="1"] .maya-stats-overlay {
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.maya-stats-overlay-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--maya-border-soft);
+}
+.maya-stats-overlay-title {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--maya-accent);
+}
+.maya-stats-close {
+  appearance: none;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  background: #ffffff;
+  color: var(--maya-text);
+  border-radius: 999px;
+  width: 26px;
+  height: 26px;
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  font-family: inherit;
+}
+.maya-stats-close:hover { background: #f8fafc; }
+
+.maya-stats-progress {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+.maya-stats-progress .maya-stat {
+  background: #ffffff;
+  border: 1px solid var(--maya-border-soft);
+  border-radius: 12px;
+  padding: 10px 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.maya-stats-progress .maya-stat-label {
+  font-size: 9.5px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--maya-text-muted);
+  line-height: 1.15;
+  word-break: break-word;
+}
+.maya-stats-progress .maya-stat-bar {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: rgba(15, 23, 42, 0.07);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.maya-stats-progress .maya-stat-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: linear-gradient(90deg, #2a5298, #1e3c72);
+  border-radius: 999px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.maya-stats-progress .maya-stat[data-low="1"] .maya-stat-fill {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+.maya-stats-progress .maya-stat[data-pass="1"] .maya-stat-fill {
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+}
+.maya-stats-progress .maya-stat-value {
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--maya-text);
+}
+
+.maya-stats-overlay .maya-readiness {
+  display: block;
+  margin: 0;
+}
+
+@media (max-width: 520px) {
+  .maya-stats-progress {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+/* When the coach is in chat layout inside the slide_v3 drawer, drop the
+ * "ambient" gradient and let the chat box visually own the white space. */
+.maya-coach[data-coach-host="drawer"][data-coach-layout="chat"] {
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  padding: 0;
+  height: 100%;
+}
+.maya-coach[data-coach-host="drawer"][data-coach-layout="chat"] .maya-coach-header {
+  padding: 4px 6px 10px 6px;
+  border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+}
+.maya-coach[data-coach-host="drawer"][data-coach-layout="chat"] .maya-stage {
+  margin: 0 6px;
+}
+.maya-coach[data-coach-host="drawer"][data-coach-layout="chat"] .maya-chat-area {
+  margin: 0 6px;
+  background: #ffffff;
+  border-color: rgba(15, 23, 42, 0.10);
+}
+.maya-coach[data-coach-host="drawer"][data-coach-layout="chat"] .maya-compose {
+  padding: 0 6px 4px 6px;
+}

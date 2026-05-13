@@ -184,6 +184,7 @@
     if (root.getAttribute('data-coach-built') === '1') return;
 
     var avatarUrl = opts.avatarUrl || '/assets/avatars/maya.png';
+    var layout = opts.layout || 'classic';
 
     root.classList.add('maya-coach');
     root.setAttribute('data-summary-coach', '');
@@ -193,6 +194,7 @@
     if (opts.host && !root.getAttribute('data-coach-host')) {
       root.setAttribute('data-coach-host', opts.host);
     }
+    root.setAttribute('data-coach-layout', layout);
 
     root.innerHTML = '';
 
@@ -217,13 +219,136 @@
     var stage = el('div', { cls: 'maya-stage', attrs: { 'data-maya-stage': '' }, text: 'Current mission: Build the structure' });
     root.appendChild(stage);
 
-    // Maya message
+    // Legacy single-message bubble (CSS hides it in chat layout). Keeps
+    // back-compat with embedders that still render the simple flow.
     var msg = el('div', {
       cls: 'maya-message',
       attrs: { 'data-maya-message': '' },
       text: "Hi! Let's build your summary together. Start by writing the main ideas of this lesson in your own words."
     });
     root.appendChild(msg);
+
+    // ---- Chat layout: scrollable thread + lazy-load sentinel + stats overlay ----
+    if (layout === 'chat') {
+      var chatArea = el('div', { cls: 'maya-chat-area', attrs: { 'data-maya-chat-area': '' } });
+
+      // Stats overlay (slides in over the chat).
+      var overlay = el('div', { cls: 'maya-stats-overlay', attrs: { 'data-maya-stats-overlay': '' } });
+      var oHead = el('div', { cls: 'maya-stats-overlay-head' });
+      oHead.appendChild(el('div', { cls: 'maya-stats-overlay-title', text: 'Understanding Progress' }));
+      var closeBtn = el('button', { cls: 'maya-stats-close', attrs: { type: 'button', 'data-maya-stats-close': '', 'aria-label': 'Close progress panel' }, text: '×' });
+      oHead.appendChild(closeBtn);
+      overlay.appendChild(oHead);
+
+      // Horizontal score bars (5 columns).
+      var statsGrid = el('div', { cls: 'maya-stats-progress' });
+      Object.keys(SCORE_LABELS).forEach(function (key) {
+        var stat = el('div', { cls: 'maya-stat', attrs: { 'data-maya-stat': key } });
+        stat.appendChild(el('div', { cls: 'maya-stat-label', text: SCORE_LABELS[key] }));
+        var sBar = el('div', { cls: 'maya-stat-bar' });
+        sBar.appendChild(el('div', { cls: 'maya-stat-fill' }));
+        stat.appendChild(sBar);
+        stat.appendChild(el('div', { cls: 'maya-stat-value', text: '0' }));
+        statsGrid.appendChild(stat);
+      });
+      overlay.appendChild(statsGrid);
+
+      // "Still needed" banner inside the overlay.
+      var ready2 = el('div', {
+        cls: 'maya-readiness',
+        attrs: { 'data-maya-readiness': '' }
+      });
+      ready2.appendChild(el('div', { cls: 'maya-readiness-title', text: 'Still needed' }));
+      ready2.appendChild(el('ul', { cls: 'maya-readiness-list', attrs: { 'data-maya-readiness-list': '' } }));
+      overlay.appendChild(ready2);
+
+      overlay.appendChild(el('div', { cls: 'maya-local-hint', attrs: { 'data-maya-local-hint': '' } }));
+      var noteWrap2 = el('div', { cls: 'maya-note-suggestion', attrs: { 'data-maya-note': '' } });
+      noteWrap2.appendChild(el('div', { cls: 'maya-note-suggestion-label', text: 'Maya suggests adding:' }));
+      noteWrap2.appendChild(el('div', { attrs: { 'data-maya-note-body': '' } }));
+      overlay.appendChild(noteWrap2);
+
+      chatArea.appendChild(overlay);
+
+      // Stats toggle button (left edge).
+      var sToggle = el('button', {
+        cls: 'maya-stats-toggle',
+        attrs: { type: 'button', 'data-maya-stats-toggle': '', 'aria-label': 'Show understanding progress', title: 'Show understanding progress' }
+      });
+      chatArea.appendChild(sToggle);
+
+      // Scrollable thread.
+      var thread = el('div', {
+        cls: 'maya-chat-thread',
+        attrs: { 'data-maya-chat-thread': '', 'aria-label': 'Conversation with Maya' }
+      });
+      // Sentinel + fallback button at top of thread for lazy load.
+      var sentinel = el('div', { cls: 'maya-chat-sentinel', attrs: { 'data-maya-chat-sentinel': '', 'aria-hidden': 'true' } });
+      sentinel.hidden = true;
+      thread.appendChild(sentinel);
+      var earlierWrap = el('div', { cls: 'maya-chat-load-earlier', attrs: { 'data-maya-chat-load-earlier': '' } });
+      earlierWrap.hidden = true;
+      var earlierBtn = el('button', {
+        cls: 'maya-chat-load-earlier-btn',
+        attrs: { type: 'button', 'data-maya-chat-load-earlier-btn': '' },
+        text: 'Load earlier messages'
+      });
+      earlierWrap.appendChild(earlierBtn);
+      thread.appendChild(earlierWrap);
+      var emptyHint = el('div', { cls: 'maya-chat-thread-empty', attrs: { 'data-maya-chat-empty': '' }, text: 'Maya will start coaching you here.' });
+      thread.appendChild(emptyHint);
+      // Typing indicator stays at the bottom of the thread (after messages).
+      var typingRow = el('div', { cls: 'maya-chat-row is-maya', attrs: { 'data-maya-typing-row': '' } });
+      typingRow.style.display = 'none';
+      var typingBubble = el('div', { cls: 'maya-chat-typing', attrs: { 'data-maya-typing': '' } });
+      typingBubble.appendChild(el('span', { text: 'Maya is thinking' }));
+      var dots = el('span', { cls: 'maya-chat-typing-dots' });
+      dots.appendChild(el('span'));
+      dots.appendChild(el('span'));
+      dots.appendChild(el('span'));
+      typingBubble.appendChild(dots);
+      typingRow.appendChild(typingBubble);
+      thread.appendChild(typingRow);
+      chatArea.appendChild(thread);
+
+      root.appendChild(chatArea);
+
+      // Compose row (textarea + buttons) below the chat area.
+      var compose = el('div', { cls: 'maya-compose' });
+      var reply = el('textarea', {
+        cls: 'maya-reply',
+        attrs: {
+          'data-maya-reply': '',
+          placeholder: 'Answer Maya here…',
+          rows: '2'
+        }
+      });
+      compose.appendChild(reply);
+      var acts = el('div', { cls: 'maya-actions' });
+      acts.appendChild(el('button', {
+        cls: 'maya-btn primary',
+        attrs: { type: 'button', 'data-maya-continue': '' },
+        text: 'Continue with Maya'
+      }));
+      acts.appendChild(el('button', {
+        cls: 'maya-btn ghost',
+        attrs: { type: 'button', 'data-maya-final': '', disabled: 'disabled', 'aria-disabled': 'true' },
+        text: 'Request Final Review'
+      }));
+      compose.appendChild(acts);
+      root.appendChild(compose);
+
+      // Legacy nodes (CSS hides) — kept so any external code that queried them
+      // (or future fallbacks) still finds something. Empty placeholders.
+      root.appendChild(el('div', { cls: 'maya-progress-grid', attrs: { 'aria-hidden': 'true' } }));
+      root.appendChild(el('div', { cls: 'maya-next-question', attrs: { 'data-maya-question': '', 'aria-hidden': 'true' } }));
+      root.appendChild(el('div', { cls: 'maya-error', attrs: { 'data-maya-error': '' } }));
+
+      root.setAttribute('data-coach-built', '1');
+      return;
+    }
+
+    // ---- Classic layout (back-compat) ----
 
     // Progress grid
     var prog = el('div', { cls: 'maya-progress-grid' });
@@ -240,11 +365,11 @@
     root.appendChild(prog);
 
     // Question
-    var q = el('div', { cls: 'maya-next-question', attrs: { 'data-maya-question': '' }, text: 'What are the 3–5 most important ideas from this lesson?' });
-    root.appendChild(q);
+    var qC = el('div', { cls: 'maya-next-question', attrs: { 'data-maya-question': '' }, text: 'What are the 3–5 most important ideas from this lesson?' });
+    root.appendChild(qC);
 
     // Reply
-    var reply = el('textarea', {
+    var replyC = el('textarea', {
       cls: 'maya-reply',
       attrs: {
         'data-maya-reply': '',
@@ -252,23 +377,21 @@
         rows: '3'
       }
     });
-    root.appendChild(reply);
+    root.appendChild(replyC);
 
     // Actions
-    var acts = el('div', { cls: 'maya-actions' });
-    var btnContinue = el('button', {
+    var actsC = el('div', { cls: 'maya-actions' });
+    actsC.appendChild(el('button', {
       cls: 'maya-btn primary',
       attrs: { type: 'button', 'data-maya-continue': '' },
       text: 'Continue with Maya'
-    });
-    var btnFinal = el('button', {
+    }));
+    actsC.appendChild(el('button', {
       cls: 'maya-btn ghost',
       attrs: { type: 'button', 'data-maya-final': '', disabled: 'disabled', 'aria-disabled': 'true' },
       text: 'Request Final Review'
-    });
-    acts.appendChild(btnContinue);
-    acts.appendChild(btnFinal);
-    root.appendChild(acts);
+    }));
+    root.appendChild(actsC);
 
     // Local hint
     root.appendChild(el('div', { cls: 'maya-local-hint', attrs: { 'data-maya-local-hint': '' } }));
@@ -348,6 +471,29 @@
     Object.keys(SCORE_LABELS).forEach(function (k) {
       self.scoreRows[k] = $('[data-maya-score="' + k + '"]', self.root);
     });
+
+    // v3 chat layout extras (may be null in classic layout).
+    this.elChatArea     = $('[data-maya-chat-area]', this.root);
+    this.elChatThread   = $('[data-maya-chat-thread]', this.root);
+    this.elChatEmpty    = $('[data-maya-chat-empty]', this.root);
+    this.elChatSentinel = $('[data-maya-chat-sentinel]', this.root);
+    this.elChatLoadEarlier = $('[data-maya-chat-load-earlier]', this.root);
+    this.elChatLoadEarlierBtn = $('[data-maya-chat-load-earlier-btn]', this.root);
+    this.elTypingRow    = $('[data-maya-typing-row]', this.root);
+    this.elTyping       = $('[data-maya-typing]', this.root);
+    this.elStatsOverlay = $('[data-maya-stats-overlay]', this.root);
+    this.elStatsToggle  = $('[data-maya-stats-toggle]', this.root);
+    this.elStatsClose   = $('[data-maya-stats-close]', this.root);
+    this.statRows = {};
+    Object.keys(SCORE_LABELS).forEach(function (k) {
+      self.statRows[k] = $('[data-maya-stat="' + k + '"]', self.root);
+    });
+
+    this.layout = this.root.getAttribute('data-coach-layout') || 'classic';
+    this.historyOldestIndex = 0;
+    this.historyHasMore = false;
+    this.historyLoading = false;
+    this._chatIo = null;
   };
 
   Coach.prototype._wireUi = function () {
@@ -371,6 +517,26 @@
           e.preventDefault();
           self._handleContinue();
         }
+      });
+    }
+
+    // Stats overlay: open / close.
+    if (this.elStatsToggle) {
+      this.elStatsToggle.addEventListener('click', function () {
+        var open = self.root.getAttribute('data-stats-open') === '1';
+        self.root.setAttribute('data-stats-open', open ? '0' : '1');
+      });
+    }
+    if (this.elStatsClose) {
+      this.elStatsClose.addEventListener('click', function () {
+        self.root.setAttribute('data-stats-open', '0');
+      });
+    }
+
+    // Lazy-load older chat messages (button fallback).
+    if (this.elChatLoadEarlierBtn) {
+      this.elChatLoadEarlierBtn.addEventListener('click', function () {
+        self._loadOlderHistory();
       });
     }
   };
@@ -584,6 +750,17 @@
     } else if (this.root.getAttribute('data-coach-state') === 'thinking') {
       this.root.removeAttribute('data-coach-state');
     }
+    // Chat layout: toggle the "Maya is thinking…" bubble at the bottom.
+    if (this.elTypingRow && this.elTyping) {
+      if (v) {
+        this.elTypingRow.style.display = '';
+        this.elTyping.setAttribute('data-visible', '1');
+        this._scrollChatToBottom();
+      } else {
+        this.elTypingRow.style.display = 'none';
+        this.elTyping.removeAttribute('data-visible');
+      }
+    }
     if (this.btnContinue) {
       if (v) {
         this.btnContinue.setAttribute('disabled', 'disabled');
@@ -735,12 +912,13 @@
         self.history = self.history.slice(-16);
       }
 
-      // Clear the reply box if we successfully sent one.
-      if (extra.student_reply && self.elReply) {
+      // Note: in chat layout we clear the reply inside _absorbResponse so
+      // the bubble copy reflects exactly what was sent.
+      if (self.layout !== 'chat' && extra.student_reply && self.elReply) {
         self.elReply.value = '';
       }
 
-      self._absorbResponse(j, {});
+      self._absorbResponse(j, { studentReply: extra.student_reply || '' });
     }).catch(function (e) {
       self._setBusy(false);
       self._showError('Maya had trouble connecting. Your draft is still safe.');
@@ -769,7 +947,7 @@
         self._showError(j && j.error ? j.error : 'Maya could not run the final review.');
         return;
       }
-      self._absorbResponse(j, { isFinalReview: true });
+      self._absorbResponse(j, { isFinalReview: true, studentReply: 'Requested Final Review' });
 
       if (j.approved) {
         // Hand off to the host page so it can refresh its production-side
@@ -826,9 +1004,37 @@
     if (typeof j.next_question === 'string') {
       this.lastQuestion = j.next_question;
     }
-    if (typeof j.maya_message === 'string') {
-      this._setMessage(j.maya_message);
+
+    // ---- Chat layout: render history (start) or append new turns ----
+    if (this.layout === 'chat' && this.elChatThread) {
+      if (opts.isStart) {
+        // Reset thread and load the latest page from history.
+        this._resetThread(j.history || [], !!j.history_has_more, j.history_oldest_index || 0);
+      } else {
+        // Append student reply (if any) and Maya turn.
+        if (typeof opts.studentReply === 'string' && opts.studentReply.trim() !== '') {
+          this._appendBubble({
+            role: 'student',
+            message: opts.studentReply.trim(),
+            kind: opts.isFinalReview ? 'system' : 'turn'
+          });
+        }
+        if (typeof j.maya_message === 'string' && j.maya_message.trim() !== '') {
+          this._appendBubble({
+            role: 'maya',
+            message: j.maya_message,
+            kind: opts.isFinalReview ? (j.approved ? 'final_approved' : 'final_revision') : 'turn'
+          });
+        }
+        if (this.elReply) this.elReply.value = '';
+      }
+    } else {
+      // Classic layout
+      if (typeof j.maya_message === 'string') {
+        this._setMessage(j.maya_message);
+      }
     }
+
     if (typeof j.student_note_suggestion === 'string') {
       this._setNoteSuggestion(j.student_note_suggestion);
     }
@@ -836,6 +1042,179 @@
       this.root.setAttribute('data-coach-state', 'ready');
     }
     this._renderState();
+  };
+
+  // -------------------------------------------------------------------
+  // Chat thread helpers (chat layout only)
+  // -------------------------------------------------------------------
+
+  Coach.prototype._resetThread = function (messages, hasMore, oldestIndex) {
+    if (!this.elChatThread) return;
+
+    // Disconnect any prior IO observer.
+    if (this._chatIo) {
+      try { this._chatIo.disconnect(); } catch (e) { /* noop */ }
+      this._chatIo = null;
+    }
+
+    // Clear existing bubble rows but keep sentinel + load-earlier + empty-hint
+    // + typing-row containers.
+    var nodes = this.elChatThread.querySelectorAll('[data-maya-chat-bubble-row]');
+    for (var i = 0; i < nodes.length; i++) {
+      this.elChatThread.removeChild(nodes[i]);
+    }
+
+    var msgs = Array.isArray(messages) ? messages : [];
+    if (msgs.length === 0 && this.elChatEmpty) {
+      this.elChatEmpty.style.display = '';
+    } else if (this.elChatEmpty) {
+      this.elChatEmpty.style.display = 'none';
+    }
+
+    // Insert messages BEFORE the typing row but AFTER the sentinel/load-earlier/empty.
+    var anchor = this.elTypingRow || null;
+    var self = this;
+    msgs.forEach(function (m) {
+      var row = self._buildBubbleRow(m);
+      if (!row) return;
+      if (anchor) self.elChatThread.insertBefore(row, anchor);
+      else self.elChatThread.appendChild(row);
+    });
+
+    this.historyOldestIndex = oldestIndex || 0;
+    this.historyHasMore = !!hasMore;
+    if (this.elChatLoadEarlier) this.elChatLoadEarlier.hidden = !hasMore;
+    if (this.elChatSentinel) this.elChatSentinel.hidden = !hasMore;
+
+    this._scrollChatToBottom();
+    this._setupChatLazyObserver();
+  };
+
+  Coach.prototype._appendBubble = function (m) {
+    if (!this.elChatThread) return;
+    if (this.elChatEmpty) this.elChatEmpty.style.display = 'none';
+    var row = this._buildBubbleRow(m);
+    if (!row) return;
+    if (this.elTypingRow) this.elChatThread.insertBefore(row, this.elTypingRow);
+    else this.elChatThread.appendChild(row);
+    this._scrollChatToBottom();
+  };
+
+  Coach.prototype._buildBubbleRow = function (m) {
+    if (!m) return null;
+    var role = String(m.role || '').toLowerCase();
+    if (role !== 'student' && role !== 'maya') return null;
+    var text = String(m.message || '').trim();
+    if (text === '') return null;
+
+    var row = document.createElement('div');
+    row.className = 'maya-chat-row ' + (role === 'student' ? 'is-student' : 'is-maya');
+    row.setAttribute('data-maya-chat-bubble-row', '');
+
+    var bubble = document.createElement('div');
+    bubble.className = 'maya-chat-bubble';
+    if (m.kind) bubble.setAttribute('data-kind', String(m.kind));
+
+    var meta = document.createElement('div');
+    meta.className = 'maya-chat-meta';
+    meta.textContent = role === 'student' ? 'You' : 'Maya';
+    bubble.appendChild(meta);
+
+    var body = document.createElement('div');
+    body.className = 'maya-chat-body';
+    body.textContent = text;
+    bubble.appendChild(body);
+
+    row.appendChild(bubble);
+    return row;
+  };
+
+  Coach.prototype._scrollChatToBottom = function () {
+    if (!this.elChatThread) return;
+    try {
+      this.elChatThread.scrollTop = this.elChatThread.scrollHeight;
+    } catch (e) { /* noop */ }
+  };
+
+  Coach.prototype._setupChatLazyObserver = function () {
+    if (!this.elChatThread || !this.elChatSentinel) return;
+    if (!this.historyHasMore) return;
+    if (typeof IntersectionObserver === 'undefined') return; // fallback button only
+    var self = this;
+    try {
+      this._chatIo = new IntersectionObserver(function (entries) {
+        entries.forEach(function (en) {
+          if (en.isIntersecting && en.target === self.elChatSentinel) {
+            self._loadOlderHistory();
+          }
+        });
+      }, { root: this.elChatThread, threshold: 0 });
+      this._chatIo.observe(this.elChatSentinel);
+    } catch (e) {
+      this._chatIo = null;
+    }
+  };
+
+  Coach.prototype._loadOlderHistory = function () {
+    if (!this.elChatThread) return;
+    if (this.historyLoading || !this.historyHasMore) return;
+    if (this.historyOldestIndex <= 0) return;
+    var self = this;
+    this.historyLoading = true;
+    if (this.elChatLoadEarlierBtn) this.elChatLoadEarlierBtn.disabled = true;
+
+    this._postJson({
+      action: 'load_history',
+      lesson_id: this.config.lessonId,
+      cohort_id: this.config.cohortId || 0,
+      summary_id: this.config.summaryId || 0,
+      context: this.config.context || 'player',
+      before_index: this.historyOldestIndex
+    }).then(function (j) {
+      if (!j || j.ok === false) return;
+      self._prependHistoryPage(j.history || [], !!j.history_has_more, j.history_oldest_index || 0);
+    }).catch(function (e) {
+      try { console.warn('[Maya] load_history failed:', e && e.message); } catch (ignored) {}
+    }).then(function () {
+      self.historyLoading = false;
+      if (self.elChatLoadEarlierBtn) self.elChatLoadEarlierBtn.disabled = false;
+    });
+  };
+
+  Coach.prototype._prependHistoryPage = function (msgs, hasMore, oldestIndex) {
+    if (!this.elChatThread) return;
+    var prevHeight = this.elChatThread.scrollHeight;
+
+    // Insert AFTER the sentinel + load-earlier wrappers and BEFORE the
+    // first existing bubble row (or empty hint, if any).
+    var anchor = this.elChatThread.querySelector('[data-maya-chat-bubble-row]') ||
+                 this.elChatEmpty ||
+                 this.elTypingRow ||
+                 null;
+
+    var self = this;
+    (msgs || []).forEach(function (m) {
+      var row = self._buildBubbleRow(m);
+      if (!row) return;
+      if (anchor) self.elChatThread.insertBefore(row, anchor);
+      else self.elChatThread.appendChild(row);
+    });
+
+    this.historyOldestIndex = oldestIndex || 0;
+    this.historyHasMore = !!hasMore;
+    if (this.elChatLoadEarlier) this.elChatLoadEarlier.hidden = !hasMore;
+    if (this.elChatSentinel) this.elChatSentinel.hidden = !hasMore;
+
+    if (!hasMore && this._chatIo) {
+      try { this._chatIo.disconnect(); } catch (e) { /* noop */ }
+      this._chatIo = null;
+    }
+
+    // Preserve scroll anchor so the user does not jump.
+    try {
+      var newHeight = this.elChatThread.scrollHeight;
+      this.elChatThread.scrollTop = Math.max(0, newHeight - prevHeight);
+    } catch (e) { /* noop */ }
   };
 
   Coach.prototype._setMessage = function (text) {
@@ -873,7 +1252,7 @@
       var q = String(this.lastQuestion || '').trim();
       this.elQuestion.textContent = q !== '' ? q : 'What\'s the most important idea so far, and why does it matter in flight?';
     }
-    // Scores
+    // Scores (classic vertical rows)
     var self = this;
     Object.keys(this.scoreRows).forEach(function (key) {
       var row = self.scoreRows[key];
@@ -896,6 +1275,30 @@
         row.removeAttribute('data-low');
       }
     });
+    // Scores (chat-layout horizontal stat tiles in the slide-in overlay)
+    if (this.statRows) {
+      Object.keys(this.statRows).forEach(function (key) {
+        var stat = self.statRows[key];
+        if (!stat) return;
+        var score = clampInt(self.scores[key], 0, 100);
+        var fill = stat.querySelector('.maya-stat-fill');
+        var val = stat.querySelector('.maya-stat-value');
+        if (fill) fill.style.width = score + '%';
+        if (val) val.textContent = String(score);
+        var pass = score >= (SCORE_PASS_THRESHOLDS[key] || 100);
+        var low = score < (SCORE_PASS_THRESHOLDS[key] || 100) * 0.6;
+        if (pass) {
+          stat.setAttribute('data-pass', '1');
+          stat.removeAttribute('data-low');
+        } else if (low) {
+          stat.setAttribute('data-low', '1');
+          stat.removeAttribute('data-pass');
+        } else {
+          stat.removeAttribute('data-pass');
+          stat.removeAttribute('data-low');
+        }
+      });
+    }
 
     // Readiness panel
     if (this.elReadiness) {

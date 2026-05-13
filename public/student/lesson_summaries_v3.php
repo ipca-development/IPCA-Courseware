@@ -885,6 +885,14 @@ cw_header('My Notebook (v3 · Maya Coach)');
 .nb-hidden{
   display:none !important;
 }
+
+/* v3 (rev 2): the legacy "Check my Summary" button is fully retired —
+ * its function is replaced by Maya's Request Final Review. We keep the
+ * element in the DOM so existing scripts that toggle .nb-hidden /
+ * read modalCheckBtn keep working, but force it permanently hidden. */
+#modalCheckBtn{
+  display:none !important;
+}
 	
 .nb-editor .size-sm { font-size:14px; }
 .nb-editor .size-md { font-size:15px; }
@@ -1276,11 +1284,13 @@ body.nb-modal-open{
               data-summary-coach
               data-coach-host="modal-side"
               data-coach-mode="compact"
+              data-coach-layout="chat"
               data-context="lesson_summaries"
               data-lesson-id=""
               data-cohort-id="<?= (int)$selectedCohortId ?>"
               data-summary-id=""
               id="mayaCoachRoot"
+              style="height:520px; max-height:60vh;"
             ></div>
           </div>
 
@@ -2459,6 +2469,7 @@ function bootMayaForCurrentLesson(lessonId) {
     editorSelector: '#modalEditor',
     mode: 'compact',
     host: 'modal-side',
+    layout: 'chat',
     avatarUrl: '/assets/avatars/maya.png',
     rootSelector: '#mayaCoachRoot',
     onCanonicalAccept: function (canonicalCheck /*, mayaResponse */) {
