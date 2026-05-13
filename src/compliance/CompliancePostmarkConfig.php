@@ -4,9 +4,24 @@ declare(strict_types=1);
 /**
  * Compliance Communications Center — configuration helper.
  *
- * Reads every Postmark / Compliance-Inbox related setting from environment
- * variables. Both `CW_*` and bare `*` names are accepted so ops can use
- * either platform-style or vendor-style env names.
+ * Reads every Postmark / Compliance-Inbox related setting via plain `getenv()`
+ * — the same convention used by src/db.php (CW_DB_*) and src/spaces.php
+ * (CW_SPACES_*). On this platform env vars are injected by:
+ *
+ *   - PHP-FPM pool configuration   (e.g. /etc/php/8.3/fpm/pool.d/www.conf)
+ *     for web requests / webhooks, and
+ *   - /etc/ipca/ipca-courseware-cli.env (sourced before CLI scripts)
+ *     for cron jobs / one-shot scripts.
+ *
+ * NO .env file is read. NO dotenv package is loaded.
+ *
+ * Canonical names follow the existing platform convention:
+ *   - Platform/DB/Infra vars carry the CW_* prefix    (CW_DB_HOST, CW_SPACES_*).
+ *   - Third-party integration vars are bare           (POSTMARK_*, OPENAI_API_KEY).
+ *
+ * The helper accepts both the bare name (canonical) AND the CW_-prefixed
+ * variant (legacy alias) so an environment that already uses CW_POSTMARK_*
+ * keeps working. New environments should set the bare names only.
  *
  * NEVER returns raw secrets in helper output that lands in the UI. Callers
  * that need to display a value must use the maskedToken() helper.
@@ -15,34 +30,42 @@ final class CompliancePostmarkConfig
 {
     public static function serverToken(): string
     {
-        return self::firstEnv(array('CW_POSTMARK_SERVER_TOKEN', 'POSTMARK_SERVER_TOKEN'));
+        return self::firstEnv(array('POSTMARK_SERVER_TOKEN', 'CW_POSTMARK_SERVER_TOKEN'));
     }
 
     public static function outboundStream(): string
     {
-        $v = self::firstEnv(array('CW_POSTMARK_OUTBOUND_STREAM', 'POSTMARK_OUTBOUND_STREAM'));
+        $v = self::firstEnv(array('POSTMARK_OUTBOUND_STREAM', 'CW_POSTMARK_OUTBOUND_STREAM'));
 
         return $v !== '' ? $v : 'outbound';
     }
 
     public static function inboundWebhookSecret(): string
     {
-        return self::firstEnv(array('CW_POSTMARK_INBOUND_WEBHOOK_SECRET', 'POSTMARK_INBOUND_WEBHOOK_SECRET'));
+        return self::firstEnv(array(
+            'POSTMARK_INBOUND_WEBHOOK_SECRET',
+            'POSTMARK_WEBHOOK_SECRET',
+            'CW_POSTMARK_INBOUND_WEBHOOK_SECRET',
+        ));
     }
 
     public static function trackingWebhookSecret(): string
     {
-        return self::firstEnv(array('CW_POSTMARK_TRACKING_WEBHOOK_SECRET', 'POSTMARK_TRACKING_WEBHOOK_SECRET'));
+        return self::firstEnv(array(
+            'POSTMARK_TRACKING_WEBHOOK_SECRET',
+            'POSTMARK_WEBHOOK_SECRET',
+            'CW_POSTMARK_TRACKING_WEBHOOK_SECRET',
+        ));
     }
 
     public static function complianceInboxAddress(): string
     {
-        return self::firstEnv(array('CW_COMPLIANCE_INBOX_ADDRESS', 'COMPLIANCE_INBOX_ADDRESS'));
+        return self::firstEnv(array('COMPLIANCE_INBOX_ADDRESS', 'CW_COMPLIANCE_INBOX_ADDRESS'));
     }
 
     public static function complianceFromAddress(): string
     {
-        $v = self::firstEnv(array('CW_COMPLIANCE_POSTMARK_FROM', 'COMPLIANCE_POSTMARK_FROM'));
+        $v = self::firstEnv(array('COMPLIANCE_POSTMARK_FROM', 'CW_COMPLIANCE_POSTMARK_FROM'));
         if ($v !== '') {
             return $v;
         }
@@ -52,7 +75,8 @@ final class CompliancePostmarkConfig
 
     /**
      * Public base URL of the platform, e.g. https://ipca.training. Used to
-     * synthesise webhook URLs for the Settings/Help panel.
+     * synthesise webhook URLs for the Inbox help panel. CW_-prefixed because
+     * this is a platform-infra setting, not a third-party integration.
      */
     public static function publicBaseUrl(): string
     {

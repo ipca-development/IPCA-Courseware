@@ -259,7 +259,7 @@ cw_header('Compliance · Inbox');
         <tr>
           <td style="font-weight:700;">Inbound webhook URL</td>
           <td class="cmpcc-mono" style="word-break:break-all;">
-            <?= $summary['inbound_webhook_url'] !== '' ? h((string)$summary['inbound_webhook_url']) : '<em style="color:#b91c1c;">set CW_PUBLIC_BASE_URL + CW_POSTMARK_INBOUND_WEBHOOK_SECRET</em>' ?>
+            <?= $summary['inbound_webhook_url'] !== '' ? h((string)$summary['inbound_webhook_url']) : '<em style="color:#b91c1c;">set CW_PUBLIC_BASE_URL + POSTMARK_INBOUND_WEBHOOK_SECRET</em>' ?>
           </td>
         </tr>
         <tr>
@@ -292,7 +292,19 @@ cw_header('Compliance · Inbox');
         <li>Create <code><?= h((string)($summary['inbox_address'] !== '' ? $summary['inbox_address'] : 'compliance@ipca.training')) ?></code> in Google Workspace (MFA, retention, DKIM/SPF/DMARC).</li>
         <li>In Google Workspace, configure a forwarding/copy rule from the mailbox to your Postmark Inbound address (e.g. <code>&lt;hash&gt;@inbound.postmarkapp.com</code>).</li>
         <li>In Postmark → Servers → Inbound, paste the <em>Inbound webhook URL</em> above into "Webhook URL".</li>
-        <li>Set environment variables on the platform host: <code>CW_POSTMARK_SERVER_TOKEN</code>, <code>CW_POSTMARK_INBOUND_WEBHOOK_SECRET</code>, <code>CW_PUBLIC_BASE_URL</code>, <code>CW_COMPLIANCE_INBOX_ADDRESS</code>.</li>
+        <li>
+          Inject the following variables on the host (no <code>.env</code> file — this platform uses PHP-FPM pool config for web/webhooks
+          and <code>/etc/ipca/ipca-courseware-cli.env</code> for CLI):
+          <ul style="margin-top:4px;">
+            <li><code>POSTMARK_SERVER_TOKEN</code> &nbsp;— Postmark server API token (used by Stage 2 outbound).</li>
+            <li><code>POSTMARK_INBOUND_WEBHOOK_SECRET</code> &nbsp;— shared secret carried in the webhook URL.</li>
+            <li><code>POSTMARK_TRACKING_WEBHOOK_SECRET</code> &nbsp;— shared secret for delivery/open/bounce webhooks (Stage 2).</li>
+            <li><code>COMPLIANCE_INBOX_ADDRESS</code> &nbsp;— public compliance mailbox (e.g. <code>compliance@ipca.training</code>).</li>
+            <li><code>COMPLIANCE_POSTMARK_FROM</code> &nbsp;— optional, defaults to <code>COMPLIANCE_INBOX_ADDRESS</code>.</li>
+            <li><code>CW_PUBLIC_BASE_URL</code> &nbsp;— platform base URL (so this panel can render the full webhook URL).</li>
+          </ul>
+        </li>
+        <li>Reload PHP-FPM after editing the pool file so the webhook process sees the new vars: <code>systemctl reload php8.3-fpm</code>.</li>
         <li>Send a test email to the mailbox and verify a row lands in this list within a few seconds.</li>
       </ul>
       <p style="margin:10px 0 0;">Outbound sending, reply composition, and Postmark tracking event ingestion are deliberately deferred to Stage 2 until inbound is proven on this environment.</p>
