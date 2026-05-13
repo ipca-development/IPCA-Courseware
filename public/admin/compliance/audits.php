@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAuditEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceChecklistEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -295,6 +296,7 @@ if ($detailId > 0) {
           <?php endif; ?>
         </section>
         <?php
+        compliance_render_comms_panel($pdo, 'audit', (string)$detailId);
     }
 } else {
     $rows = ComplianceAuditEngine::listRecent($pdo);

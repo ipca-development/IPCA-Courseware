@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceMeetingEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAuditEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -522,6 +523,7 @@ if ($detailId > 0) {
     </section>
 
     <?php
+    compliance_render_comms_panel($pdo, 'meeting', (string)$detailId);
     cw_footer();
     return;
 }

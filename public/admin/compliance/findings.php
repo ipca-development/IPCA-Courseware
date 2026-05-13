@@ -8,6 +8,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceFindingEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceRcaCapEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCapEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceRegulatoryLinkEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -680,6 +681,7 @@ if ($detailId > 0) {
           <?php endif; ?>
         </section>
         <?php
+        compliance_render_comms_panel($pdo, 'finding', (string)$detailId);
     }
 } else {
     try {

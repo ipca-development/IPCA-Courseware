@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceManualControlEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -260,6 +261,7 @@ if ($detailId > 0) {
           <a href="/admin/compliance/manual_drafts.php?request_id=<?= (int)$detailId ?>" style="font-weight:700;color:#3730a3;">Open drafts for this request →</a>
         </p>
         <?php
+        compliance_render_comms_panel($pdo, 'manual_change_request', (string)$detailId);
     }
 } else {
     $rows = ComplianceManualControlEngine::listChangeRequests($pdo);
