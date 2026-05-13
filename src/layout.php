@@ -122,6 +122,26 @@ function cw_header(string $title = ''): void
   </div>
 </aside>
 
+<script>
+/* Restore sidebar scroll position synchronously, before first paint, to avoid
+ * the menu jumping back to the top on every page load. Saving is wired up in
+ * the main script at the bottom of the page. */
+(function () {
+  try {
+    var sidebar = document.getElementById('appSidebar');
+    if (!sidebar) return;
+    var nav = sidebar.querySelector('.app-sidebar-nav');
+    if (!nav) return;
+    var saved = sessionStorage.getItem('cw_sidebar_scroll');
+    if (saved === null) return;
+    var pos = parseInt(saved, 10);
+    if (!isNaN(pos) && pos >= 0) {
+      nav.scrollTop = pos;
+    }
+  } catch (e) {}
+})();
+</script>
+
 <div class="app-main-shell">
   <header class="app-topbar">
     <div class="app-topbar-inner">
@@ -179,6 +199,36 @@ function cw_footer(): void
       var overlay = document.getElementById('appMobileOverlay');
       var toggle = document.getElementById('appMobileMenuToggle');
       var mobileQuery = window.matchMedia('(max-width: 820px)');
+
+      /* Persist sidebar scroll position across page navigations so long menus
+       * (e.g. Compliance) don't reset to the top on every refresh. The initial
+       * restore happens earlier via an inline script so it runs before paint. */
+      var sidebarNav = sidebar ? sidebar.querySelector('.app-sidebar-nav') : null;
+      if (sidebarNav) {
+        var saveSidebarScroll = function () {
+          try {
+            sessionStorage.setItem('cw_sidebar_scroll', String(sidebarNav.scrollTop));
+          } catch (e) {}
+        };
+
+        var scrollSaveTimer = null;
+        sidebarNav.addEventListener('scroll', function () {
+          if (scrollSaveTimer) {
+            clearTimeout(scrollSaveTimer);
+          }
+          scrollSaveTimer = setTimeout(saveSidebarScroll, 80);
+        }, { passive: true });
+
+        sidebarNav.addEventListener('click', function (event) {
+          var target = event.target;
+          if (target && typeof target.closest === 'function' && target.closest('a[href]')) {
+            saveSidebarScroll();
+          }
+        }, true);
+
+        window.addEventListener('pagehide', saveSidebarScroll);
+        window.addEventListener('beforeunload', saveSidebarScroll);
+      }
 
       function isMobile() {
         return mobileQuery.matches;
