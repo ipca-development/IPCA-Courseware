@@ -70,6 +70,11 @@ if (!function_exists('tap_theory_event_catalog')) {
             'instructor_decision_recorded' => 'Instructor decision recorded',
             'one_on_one_completed' => 'One-on-one completed',
             'remediation_acknowledged' => 'Remediation acknowledged',
+            // Q8 / Q9 / pending-reason reminder
+            'deadline_pending_reason_decision_escalated' => 'Deadline — pending reason decision escalated to instructor',
+            'deadline_rejected_reason_review_required' => 'Deadline — rejected reason needs further review',
+            'deadline_extension_refused_past_due' => 'Deadline — automatic extension refused (past-due)',
+            'instructor_pending_reason_decision_reminder' => 'Instructor reminder — pending reason decision (daily)',
         );
     }
 }

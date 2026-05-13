@@ -689,6 +689,112 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
         return (bool)$stmt->fetchColumn();
     }
 
+    /**
+     * Q8 helper. Returns lesson_activity.reason_decision for the given lesson, normalized:
+     *   - 'pending'  : student submitted a reason, awaiting instructor decision
+     *   - 'accepted' : instructor accepted (deadline already extended through that path)
+     *   - 'rejected' : instructor rejected the reason
+     *   - ''         : no decision recorded yet (no submission, or row missing)
+     * Empty string is returned for both "no row" and the literal SQL NULL so callers can
+     * treat both as "no pending decision to consider".
+     */
+    public function getLessonActivityReasonDecision(int $userId, int $cohortId, int $lessonId): string
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT reason_decision
+            FROM lesson_activity
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+            LIMIT 1
+        ");
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+        ]);
+
+        $value = $stmt->fetchColumn();
+        if ($value === false || $value === null) {
+            return '';
+        }
+
+        return (string)$value;
+    }
+
+    /**
+     * Q8 helper. Returns context about the most-recently-submitted deadline_reason_submission
+     * required action for the given lesson. Used to enrich automation context (e.g., "submitted
+     * 3 days ago") and audit payloads. Returns null when no completed submission exists.
+     *
+     * @return array{action_id:int,token:string,submitted_at_utc:string,submitted_at_display:string,days_since_submitted:int}|null
+     */
+    public function getMostRecentSubmittedReasonContext(int $userId, int $cohortId, int $lessonId): ?array
+    {
+        $stmt = $this->pdo->prepare("
+            SELECT id, token, completed_at
+            FROM student_required_actions
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+              AND action_type = 'deadline_reason_submission'
+              AND status = 'completed'
+              AND completed_at IS NOT NULL
+            ORDER BY completed_at DESC, id DESC
+            LIMIT 1
+        ");
+        $stmt->execute([
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+        ]);
+
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$row) {
+            return null;
+        }
+
+        $submittedAtUtc = (string)$row['completed_at'];
+        $submittedTs = strtotime($submittedAtUtc);
+        $daysSince = ($submittedTs === false)
+            ? 0
+            : (int)floor((time() - $submittedTs) / 86400);
+
+        return [
+            'action_id' => (int)$row['id'],
+            'token' => (string)$row['token'],
+            'submitted_at_utc' => $submittedAtUtc,
+            'submitted_at_display' => $this->formatUtcForDisplay($submittedAtUtc),
+            'days_since_submitted' => max(0, $daysSince),
+        ];
+    }
+
+    /**
+     * Q8 / Q9 helper. Returns true when the given automation event key represents an
+     * automatic-extension grant (extension_1 or extension_2_final), which is the only
+     * case where the extension counts should be projected as "incremented" in the
+     * automation context after the transaction commits.
+     */
+    private function isAutomaticExtensionEventKey(string $automationEventKey): bool
+    {
+        return $automationEventKey === 'deadline_reason_required_extension_1'
+            || $automationEventKey === 'deadline_reason_required_extension_2_final';
+    }
+
+    /**
+     * Q8 / Q9 helper. Returns true when the given automation event key represents an
+     * instructor-approval escalation outcome. The instructor approval URL belongs in
+     * the automation context for ALL of these escalation outcomes (not just the
+     * legacy 'deadline_missed_instructor_required' key).
+     */
+    private function isInstructorApprovalEscalationEventKey(string $automationEventKey): bool
+    {
+        return $automationEventKey === 'deadline_missed_instructor_required'
+            || $automationEventKey === 'deadline_pending_reason_decision_escalated'
+            || $automationEventKey === 'deadline_rejected_reason_review_required'
+            || $automationEventKey === 'deadline_extension_refused_past_due';
+    }
+
     public function countDeadlineExtensionsForProgram(int $userId, int $cohortId): int
     {
         $stmt = $this->pdo->prepare("
@@ -825,6 +931,59 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
         $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview > 0
         && $programExtensionCountBefore >= $maxProgramDeadlineExtensionsBeforeTrainingSuspensionReview;
 
+    // ----- Q8 / Q9 pre-branching guards -----
+    //
+    // Q8: when the student has already submitted a deadline reason and the instructor has
+    // NOT yet decided (reason_decision='pending'), or has rejected it ('rejected'), the
+    // engine MUST NOT silently grant another automatic extension. Doing so bypasses the
+    // instructor's authority over the case and creates a second student-facing reason
+    // action while the first one is still under review. Route directly to instructor_approval.
+    //
+    // Q9: when the projected new effective deadline for an automatic extension is already
+    // in the past (caused by cron backlog, dedupe poisoning, or delayed first-tick after
+    // the deadline), writing the override would emit a "your new deadline is YYYY-MM-DD"
+    // email whose deadline has already passed. Route directly to instructor_approval so a
+    // human can decide whether to issue a fresh extension (manually rebased) or fail the
+    // lesson.
+    $reasonDecision = $this->getLessonActivityReasonDecision($userId, $cohortId, $lessonId);
+    $hasPendingReasonDecision = ($reasonDecision === 'pending');
+    $hasRejectedReasonDecision = ($reasonDecision === 'rejected');
+    $forceEscalationDueToReasonDecision = $hasPendingReasonDecision || $hasRejectedReasonDecision;
+
+    $nowUtcForGuards = gmdate('Y-m-d H:i:s');
+    $projectedExt1Utc = gmdate(
+        'Y-m-d H:i:s',
+        strtotime($effectiveDeadlineUtc . ' +' . $extension1Hours . ' hours')
+    );
+    $projectedExt2Utc = gmdate(
+        'Y-m-d H:i:s',
+        strtotime($effectiveDeadlineUtc . ' +' . $extension2Hours . ' hours')
+    );
+    $ext1WouldBePastDue = ($projectedExt1Utc <= $nowUtcForGuards);
+    $ext2WouldBePastDue = ($projectedExt2Utc <= $nowUtcForGuards);
+
+    $forceInstructorEscalation =
+        $forceInstructorEscalationByProgramLimit
+        || $forceEscalationDueToReasonDecision;
+
+    // Precedence order matters: pending_reason_decision is the most specific (a student
+    // submission is awaiting decision); rejected_reason_review_required is next (instructor
+    // already said no, escalate); extension_would_be_past_due is third (auto path useless);
+    // program_extension_limit_reached is fourth; extensions_exhausted is the default.
+    $escalationReason = 'extensions_exhausted';
+    if ($hasPendingReasonDecision) {
+        $escalationReason = 'pending_reason_decision';
+    } elseif ($hasRejectedReasonDecision) {
+        $escalationReason = 'rejected_reason_review_required';
+    } elseif (
+        ($lessonExtensionCountBefore === 0 && $allowFirstAutomaticExtension && $ext1WouldBePastDue)
+        || ($lessonExtensionCountBefore === 1 && $requireReasonAfterExtension1Missed && $ext2WouldBePastDue)
+    ) {
+        $escalationReason = 'extension_would_be_past_due';
+    } elseif ($forceInstructorEscalationByProgramLimit) {
+        $escalationReason = 'program_extension_limit_reached';
+    }
+
     $studentRecipient = (array)($progressionContext['student_recipient'] ?? []);
     $chiefRecipient = (array)($progressionContext['chief_instructor_recipient'] ?? []);
 
@@ -849,13 +1008,23 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
     $deadlineReopened = 0;
     $reopenedEffectiveDeadlineUtc = null;
 
+    // Pre-fetch the most-recently-submitted deadline reason so Q8 escalations and the
+    // automation context can include "the reason awaiting decision" details (action token,
+    // submission time, days since submission).
+    $submittedReasonContext = $this->getMostRecentSubmittedReasonContext(
+        $userId,
+        $cohortId,
+        $lessonId
+    );
+
     $this->pdo->beginTransaction();
 
     try {
         if (
-            !$forceInstructorEscalationByProgramLimit
+            !$forceInstructorEscalation
             && $lessonExtensionCountBefore === 0
             && $allowFirstAutomaticExtension
+            && !$ext1WouldBePastDue
         ) {
             $newEffectiveDeadlineUtc = gmdate(
                 'Y-m-d H:i:s',
@@ -944,9 +1113,10 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
             $automationEventKey = 'deadline_reason_required_extension_1';
             $newDeadlineSource = 'student_extension_1';
         } elseif (
-            !$forceInstructorEscalationByProgramLimit
+            !$forceInstructorEscalation
             && $lessonExtensionCountBefore === 1
             && $requireReasonAfterExtension1Missed
+            && !$ext2WouldBePastDue
         ) {
             $newEffectiveDeadlineUtc = gmdate(
                 'Y-m-d H:i:s',
@@ -1066,6 +1236,53 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
 
             $token = bin2hex(random_bytes(32));
 
+            // Q8 / Q9: tailor the instructor-facing action copy + audit event + automation
+            // event key to the precise escalation reason so the instructor UI and any flows
+            // wired in admin/automations get a clear, actionable signal. The submitted reason
+            // context was already pre-fetched before the transaction.
+            switch ($escalationReason) {
+                case 'pending_reason_decision':
+                    $actionTitle = 'Instructor Decision Required - Student Reason Awaiting Review - ' . $lessonTitle;
+                    $actionTextSummary = 'The student submitted a reason for missing the deadline but no decision has been recorded. The current deadline has now also passed. Please accept (re-extend), reject, or escalate further.';
+                    $eventCode = 'deadline_instructor_escalation_pending_reason_decision';
+                    $eventLegalNote = 'Instructor intervention required: student submitted a deadline reason that is still pending instructor decision while the deadline passed again. The engine refuses to auto-extend past a pending decision.';
+                    $automationEventKey = 'deadline_pending_reason_decision_escalated';
+                    break;
+
+                case 'rejected_reason_review_required':
+                    $actionTitle = 'Instructor Decision Required - Reason Rejected - ' . $lessonTitle;
+                    $actionTextSummary = 'A previously submitted reason for missing the deadline was rejected and the deadline has passed again. Please decide whether to allow a further attempt, fail the lesson, or take other corrective action.';
+                    $eventCode = 'deadline_instructor_escalation_rejected_reason_review';
+                    $eventLegalNote = 'Instructor intervention required: a deadline reason was rejected and the deadline expired again. The engine refuses to auto-extend after a rejected reason.';
+                    $automationEventKey = 'deadline_rejected_reason_review_required';
+                    break;
+
+                case 'extension_would_be_past_due':
+                    $actionTitle = 'Instructor Decision Required - Automatic Extension Refused - ' . $lessonTitle;
+                    $actionTextSummary = 'An automatic deadline extension was refused because the new deadline would already be in the past (caused by delayed processing). Please decide whether to issue a fresh manual extension, fail the lesson, or take other corrective action.';
+                    $eventCode = 'deadline_instructor_escalation_extension_refused_past_due';
+                    $eventLegalNote = 'Instructor intervention required: the projected automatic-extension deadline was already past at the time of evaluation. The engine refuses to write past-due automatic extensions.';
+                    $automationEventKey = 'deadline_extension_refused_past_due';
+                    break;
+
+                case 'program_extension_limit_reached':
+                    $actionTitle = 'Instructor Approval Required - Program Extension Limit Reached - ' . $lessonTitle;
+                    $actionTextSummary = 'The student has reached the per-program limit of automatic deadline extensions. Instructor review is required before further progression.';
+                    $eventCode = 'deadline_instructor_escalation_program_limit';
+                    $eventLegalNote = 'Instructor intervention required because the program-wide deadline extension limit has been reached.';
+                    $automationEventKey = 'deadline_missed_instructor_required';
+                    break;
+
+                case 'extensions_exhausted':
+                default:
+                    $actionTitle = 'Instructor Approval Required - Missed Deadline - ' . $lessonTitle;
+                    $actionTextSummary = 'The student missed the final allowed deadline for this lesson. Instructor review is now required before further progression.';
+                    $eventCode = 'deadline_instructor_escalation_required';
+                    $eventLegalNote = 'Instructor intervention required because automatic deadline extension path is exhausted.';
+                    $automationEventKey = 'deadline_missed_instructor_required';
+                    break;
+            }
+
             $createdAction = $this->createOrReuseRequiredActionSafe([
                 'user_id' => $userId,
                 'cohort_id' => $cohortId,
@@ -1073,9 +1290,9 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
                 'progress_test_id' => $progressTestId,
                 'action_type' => 'instructor_approval',
                 'token' => $token,
-                'title' => 'Instructor Approval Required - Missed Deadline - ' . $lessonTitle,
-                'instructions_text' => "The student missed the final allowed deadline for this lesson. Instructor review is now required before further progression.",
-                'instructions_html' => '<p>The student missed the final allowed deadline for this lesson. Instructor review is now required before further progression.</p>',
+                'title' => $actionTitle,
+                'instructions_text' => $actionTextSummary,
+                'instructions_html' => '<p>' . htmlspecialchars($actionTextSummary, ENT_QUOTES | ENT_HTML5, 'UTF-8') . '</p>',
             ]);
 
             $createdActionUrl = $this->buildInternalAppUrl(
@@ -1107,30 +1324,40 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
                 ]
             );
 
+            $eventPayload = [
+                'effective_deadline_utc' => $effectiveDeadlineUtc,
+                'deadline_source' => $deadlineSource,
+                'lesson_extension_count_before' => $lessonExtensionCountBefore,
+                'program_extension_count_before' => $programExtensionCountBefore,
+                'force_instructor_escalation_by_program_limit' => $forceInstructorEscalationByProgramLimit ? 1 : 0,
+                'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
+                'required_action_id' => (int)($createdAction['action_id'] ?? 0),
+                'escalation_reason' => $escalationReason,
+                'reason_decision_at_evaluation' => $reasonDecision,
+                'projected_extension_1_utc' => $projectedExt1Utc,
+                'projected_extension_2_utc' => $projectedExt2Utc,
+                'extension_1_would_be_past_due' => $ext1WouldBePastDue ? 1 : 0,
+                'extension_2_would_be_past_due' => $ext2WouldBePastDue ? 1 : 0,
+            ];
+
+            if ($submittedReasonContext !== null) {
+                $eventPayload['most_recent_submitted_reason'] = $submittedReasonContext;
+            }
+
             $this->logProgressionEvent([
                 'user_id' => $userId,
                 'cohort_id' => $cohortId,
                 'lesson_id' => $lessonId,
                 'progress_test_id' => $progressTestId,
                 'event_type' => 'deadline',
-                'event_code' => 'deadline_instructor_escalation_required',
+                'event_code' => $eventCode,
                 'event_status' => 'warning',
                 'actor_type' => 'system',
                 'actor_user_id' => null,
                 'event_time' => $nowUtc,
-                'payload' => [
-                    'effective_deadline_utc' => $effectiveDeadlineUtc,
-                    'deadline_source' => $deadlineSource,
-                    'lesson_extension_count_before' => $lessonExtensionCountBefore,
-                    'program_extension_count_before' => $programExtensionCountBefore,
-                    'force_instructor_escalation_by_program_limit' => $forceInstructorEscalationByProgramLimit ? 1 : 0,
-                    'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
-                    'required_action_id' => (int)($createdAction['action_id'] ?? 0),
-                ],
-                'legal_note' => 'Instructor intervention required because automatic deadline extension path is exhausted or program deadline extension limit is reached.',
+                'payload' => $eventPayload,
+                'legal_note' => $eventLegalNote,
             ]);
-
-            $automationEventKey = 'deadline_missed_instructor_required';
         }
 
         $this->pdo->commit();
@@ -1167,12 +1394,12 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
         'reopened_effective_deadline_utc' => $reopenedEffectiveDeadlineUtc,
 
         'lesson_extension_count_before' => $lessonExtensionCountBefore,
-        'lesson_extension_count_after' => $createdAction && $automationEventKey !== 'deadline_missed_instructor_required'
+        'lesson_extension_count_after' => $this->isAutomaticExtensionEventKey($automationEventKey) && $createdAction
             ? ($lessonExtensionCountBefore + 1)
             : $lessonExtensionCountBefore,
 
         'program_extension_count_before' => $programExtensionCountBefore,
-        'program_extension_count_after' => $createdAction && $automationEventKey !== 'deadline_missed_instructor_required'
+        'program_extension_count_after' => $this->isAutomaticExtensionEventKey($automationEventKey) && $createdAction
             ? ($programExtensionCountBefore + 1)
             : $programExtensionCountBefore,
 
@@ -1181,8 +1408,20 @@ public function canAccessLessonContent($userId, $cohortId, $lessonId, $courseId,
         'training_suspension_review_recommended' => $trainingSuspensionReviewRecommended ? 1 : 0,
 
         'required_action_id' => (int)($createdAction['action_id'] ?? 0),
-        'reason_submission_url' => $createdActionUrl,
-        'approval_url' => $automationEventKey === 'deadline_missed_instructor_required' ? $createdActionUrl : '',
+        'reason_submission_url' => $this->isAutomaticExtensionEventKey($automationEventKey) ? $createdActionUrl : '',
+        'approval_url' => $this->isInstructorApprovalEscalationEventKey($automationEventKey) ? $createdActionUrl : '',
+
+        // Q8 / Q9 context for template authors and audit:
+        'escalation_reason' => $escalationReason,
+        'reason_decision_at_evaluation' => $reasonDecision,
+        'submitted_reason_action_id' => (int)($submittedReasonContext['action_id'] ?? 0),
+        'submitted_reason_submitted_at_utc' => (string)($submittedReasonContext['submitted_at_utc'] ?? ''),
+        'submitted_reason_submitted_at_display' => (string)($submittedReasonContext['submitted_at_display'] ?? ''),
+        'submitted_reason_days_since_submitted' => (int)($submittedReasonContext['days_since_submitted'] ?? 0),
+        'projected_extension_1_utc' => $projectedExt1Utc,
+        'projected_extension_2_utc' => $projectedExt2Utc,
+        'extension_1_would_be_past_due' => $ext1WouldBePastDue ? 1 : 0,
+        'extension_2_would_be_past_due' => $ext2WouldBePastDue ? 1 : 0,
     ];
 
     $automationResult = null;

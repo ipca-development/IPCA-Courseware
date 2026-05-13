@@ -28,6 +28,14 @@ final class TimeBasedProgressionCron
     private const EVENT_CODE_SKIPPED_STATE_MISMATCH = 'cron_dispatch_skipped_state_mismatch';
     private const EVENT_CODE_EXISTING_ACTION_REUSED_NO_DEDUPE = 'cron_existing_action_reused_no_dedupe';
 
+    // Bonus / Q8-related: once-per-day instructor reminder for un-decided submitted reasons.
+    // The cron sweeps lesson_activity rows in state reason_decision='pending' and dispatches
+    // the 'instructor_pending_reason_decision_reminder' automation event for each, then
+    // records this dedupe code with a YYYY-MM-DD scoped key so the reminder runs at most
+    // once per calendar day per (user,cohort,lesson) until the instructor decides.
+    private const EVENT_CODE_PENDING_REASON_REMINDER_DISPATCHED = 'cron_pending_reason_decision_reminder_dispatched';
+    private const PENDING_REASON_REMINDER_EVENT_KEY = 'instructor_pending_reason_decision_reminder';
+
     // Q1 / BUG A:
     // The dedupe key is versioned so that fix-deployment naturally invalidates the old keys
     // (so any deadline whose action_status changes since the v=1 dispatch will be re-evaluated
@@ -78,10 +86,14 @@ final class TimeBasedProgressionCron
             'aggregated_dispatch_duplicates_skipped' => 0,
             'orphan_ready_swept' => 0,
             'orphan_ready_threshold_minutes' => self::ORPHAN_READY_THRESHOLD_MINUTES,
+            'pending_reason_reminders_scanned' => 0,
+            'pending_reason_reminders_dispatched' => 0,
+            'pending_reason_reminders_skipped_duplicate' => 0,
             'errors' => array(),
             'results' => array(),
             'aggregated_results' => array(),
             'orphan_ready_sweep_results' => array(),
+            'pending_reason_reminder_results' => array(),
         );
 
         try {
@@ -101,6 +113,26 @@ final class TimeBasedProgressionCron
             $sweepResults = $this->sweepOrphanReadyAttempts();
             $summary['orphan_ready_sweep_results'] = $sweepResults;
             $summary['orphan_ready_swept'] = count($sweepResults);
+
+            // Bonus / Q8: nudge instructors about un-decided submitted reasons (once/day).
+            // This dispatches automation events that admin-configured flows turn into emails;
+            // no email logic is hardcoded here — the cron just fires the event with a proper
+            // dedupe so the same lesson does not trigger the reminder more than once per
+            // calendar day.
+            $reminderResults = $this->dispatchPendingReasonDecisionReminders();
+            $summary['pending_reason_reminder_results'] = $reminderResults;
+            $summary['pending_reason_reminders_scanned'] = count($reminderResults);
+            foreach ($reminderResults as $reminderResult) {
+                $status = (string)($reminderResult['status'] ?? '');
+                if ($status === 'dispatched') {
+                    $summary['pending_reason_reminders_dispatched']++;
+                    $summary['dispatch_attempts']++;
+                    $summary['dispatch_successes']++;
+                } elseif ($status === 'skipped_duplicate') {
+                    $summary['pending_reason_reminders_skipped_duplicate']++;
+                    $summary['dispatch_duplicates_skipped']++;
+                }
+            }
 
             $candidates = $this->loadCandidateRows();
             $summary['candidates_scanned'] = count($candidates);
@@ -372,6 +404,279 @@ final class TimeBasedProgressionCron
         }
 
         return $sweepResults;
+    }
+
+    /**
+     * Bonus / Q8-related: once-per-day instructor reminder for submitted reasons that are
+     * still awaiting an instructor decision (lesson_activity.reason_decision = 'pending').
+     *
+     * This method does NOT format or send email itself. It dispatches the canonical
+     * automation event 'instructor_pending_reason_decision_reminder' for each pending
+     * lesson via AutomationRuntime. Admin-managed automation_flows + notification_templates
+     * decide whether (and how) to email the instructor. If no flow is configured for this
+     * event key, no email goes out — the new instructor_approval action created by Q8 in
+     * handleMissedDeadlineForLesson() is still the primary surface area.
+     *
+     * Dedupe: keyed by UTC calendar date so a given lesson triggers at most one reminder
+     * per day until the instructor decides. The dedupe row is recorded in
+     * training_progression_events with event_code = cron_pending_reason_decision_reminder_dispatched.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function dispatchPendingReasonDecisionReminders(): array
+    {
+        $scanSql = "
+            SELECT
+                la.user_id,
+                la.cohort_id,
+                la.lesson_id,
+                la.effective_deadline_utc,
+                la.reason_decision,
+                la.updated_at AS lesson_activity_updated_at
+            FROM lesson_activity la
+            INNER JOIN cohort_students cs
+                ON cs.user_id = la.user_id
+               AND cs.cohort_id = la.cohort_id
+               AND cs.status = 'active'
+            WHERE la.reason_decision = 'pending'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM progress_tests_v2 pt
+                  WHERE pt.user_id = la.user_id
+                    AND pt.cohort_id = la.cohort_id
+                    AND pt.lesson_id = la.lesson_id
+                    AND pt.status = 'completed'
+                    AND pt.pass_gate_met = 1
+                  LIMIT 1
+              )
+            ORDER BY la.updated_at ASC, la.user_id ASC, la.cohort_id ASC, la.lesson_id ASC
+            LIMIT 500
+        ";
+
+        $stmt = $this->pdo->prepare($scanSql);
+        $stmt->execute();
+        $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+
+        $results = array();
+        $todayUtc = gmdate('Y-m-d');
+        $eventKey = self::PENDING_REASON_REMINDER_EVENT_KEY;
+        $dedupeEventCode = self::EVENT_CODE_PENDING_REASON_REMINDER_DISPATCHED;
+
+        foreach ($candidates as $row) {
+            $userId = (int)$row['user_id'];
+            $cohortId = (int)$row['cohort_id'];
+            $lessonId = (int)$row['lesson_id'];
+
+            $dedupeKey = 'date:' . $todayUtc
+                . '|user:' . $userId
+                . '|cohort:' . $cohortId
+                . '|lesson:' . $lessonId;
+
+            try {
+                if ($this->hasPendingReasonReminderAlreadyDispatched(
+                    $userId,
+                    $cohortId,
+                    $lessonId,
+                    $dedupeKey
+                )) {
+                    $results[] = array(
+                        'user_id' => $userId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'dedupe_key' => $dedupeKey,
+                        'status' => 'skipped_duplicate',
+                    );
+                    continue;
+                }
+
+                // Re-confirm reason_decision is still 'pending' before dispatching. A race
+                // between the scan and dispatch (instructor decides in the meantime) should
+                // never produce a reminder email for an already-decided case.
+                $currentDecision = $this->engine->getLessonActivityReasonDecision(
+                    $userId,
+                    $cohortId,
+                    $lessonId
+                );
+                if ($currentDecision !== 'pending') {
+                    $results[] = array(
+                        'user_id' => $userId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'dedupe_key' => $dedupeKey,
+                        'status' => 'skipped_state_mismatch',
+                        'observed_reason_decision' => $currentDecision,
+                    );
+                    continue;
+                }
+
+                $progressionContext = $this->engine->getProgressionContextForUserLesson(
+                    $userId,
+                    $cohortId,
+                    $lessonId
+                );
+
+                $submittedReasonContext = $this->engine->getMostRecentSubmittedReasonContext(
+                    $userId,
+                    $cohortId,
+                    $lessonId
+                );
+
+                $automationContext = $this->buildPendingReasonReminderContext(
+                    $progressionContext,
+                    $submittedReasonContext,
+                    $dedupeKey,
+                    (string)$row['effective_deadline_utc']
+                );
+
+                $this->engine->logProgressionEvent(array(
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => null,
+                    'event_type' => 'automation',
+                    'event_code' => self::EVENT_CODE_DISPATCH_BEFORE,
+                    'event_status' => 'info',
+                    'actor_type' => 'system',
+                    'actor_user_id' => null,
+                    'event_time' => gmdate('Y-m-d H:i:s'),
+                    'payload' => array(
+                        'event_key' => $eventKey,
+                        'dedupe_key' => $dedupeKey,
+                        'source' => 'TimeBasedProgressionCron::dispatchPendingReasonDecisionReminders',
+                    ),
+                    'legal_note' => 'Cron is about to dispatch instructor_pending_reason_decision_reminder automation event.',
+                ));
+
+                $automationResult = $this->automation->dispatchEvent(
+                    $this->pdo,
+                    $eventKey,
+                    $automationContext
+                );
+
+                $this->engine->logProgressionEvent(array(
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => null,
+                    'event_type' => 'automation',
+                    'event_code' => $dedupeEventCode,
+                    'event_status' => 'success',
+                    'actor_type' => 'system',
+                    'actor_user_id' => null,
+                    'event_time' => gmdate('Y-m-d H:i:s'),
+                    'payload' => array(
+                        'event_key' => $eventKey,
+                        'dedupe_key' => $dedupeKey,
+                        'automation_result_ok' => !empty($automationResult['ok']) ? 1 : 0,
+                        'automation_matched_flows' => (int)($automationResult['matched_flows'] ?? 0),
+                        'automation_matched_actions' => (int)($automationResult['matched_actions'] ?? 0),
+                        'automation_executed_actions' => (int)($automationResult['executed_actions'] ?? 0),
+                    ),
+                    'legal_note' => 'Time-based progression cron dispatched the instructor pending-reason-decision reminder automation event. Email delivery is owned by admin-configured automation flows + notification templates (no hardcoded email in cron code).',
+                ));
+
+                $results[] = array(
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'dedupe_key' => $dedupeKey,
+                    'status' => 'dispatched',
+                    'automation_result' => $automationResult,
+                );
+            } catch (Throwable $e) {
+                $results[] = array(
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'dedupe_key' => $dedupeKey,
+                    'status' => 'error',
+                    'error' => $e->getMessage(),
+                );
+            }
+        }
+
+        return $results;
+    }
+
+    private function hasPendingReasonReminderAlreadyDispatched(
+        int $userId,
+        int $cohortId,
+        int $lessonId,
+        string $dedupeKey
+    ): bool {
+        $sql = "
+            SELECT 1
+            FROM training_progression_events
+            WHERE user_id = :user_id
+              AND cohort_id = :cohort_id
+              AND lesson_id = :lesson_id
+              AND event_type = 'automation'
+              AND event_code = :event_code
+              AND payload_json IS NOT NULL
+              AND payload_json LIKE :payload_like
+            LIMIT 1
+        ";
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute(array(
+            ':user_id' => $userId,
+            ':cohort_id' => $cohortId,
+            ':lesson_id' => $lessonId,
+            ':event_code' => self::EVENT_CODE_PENDING_REASON_REMINDER_DISPATCHED,
+            ':payload_like' => '%' . $dedupeKey . '%',
+        ));
+
+        return (bool)$stmt->fetchColumn();
+    }
+
+    private function buildPendingReasonReminderContext(
+        array $progressionContext,
+        ?array $submittedReasonContext,
+        string $dedupeKey,
+        string $effectiveDeadlineUtc
+    ): array {
+        $studentRecipient = (array)($progressionContext['student_recipient'] ?? array());
+        $chiefRecipient = (array)($progressionContext['chief_instructor_recipient'] ?? array());
+
+        $studentName = trim((string)($studentRecipient['name'] ?? ''));
+        if ($studentName === '') {
+            $studentName = 'Student';
+        }
+
+        $chiefInstructorName = trim((string)($chiefRecipient['name'] ?? ''));
+        if ($chiefInstructorName === '') {
+            $chiefInstructorName = 'Chief Instructor';
+        }
+
+        $submittedAt = (string)($submittedReasonContext['submitted_at_utc'] ?? '');
+        $submittedAtDisplay = (string)($submittedReasonContext['submitted_at_display'] ?? '');
+        $daysSince = (int)($submittedReasonContext['days_since_submitted'] ?? 0);
+
+        return array(
+            'user_id' => (int)($progressionContext['user_id'] ?? 0),
+            'cohort_id' => (int)($progressionContext['cohort_id'] ?? 0),
+            'lesson_id' => (int)($progressionContext['lesson_id'] ?? 0),
+            'progress_test_id' => null,
+
+            'event_key' => self::PENDING_REASON_REMINDER_EVENT_KEY,
+            'dedupe_key' => $dedupeKey,
+
+            'student_name' => $studentName,
+            'student_email' => trim((string)($studentRecipient['email'] ?? '')),
+            'chief_instructor_name' => $chiefInstructorName,
+            'chief_instructor_email' => trim((string)($chiefRecipient['email'] ?? '')),
+
+            'lesson_title' => (string)($progressionContext['lesson_title'] ?? ''),
+            'cohort_title' => (string)($progressionContext['cohort_title'] ?? ''),
+
+            'effective_deadline_utc' => $effectiveDeadlineUtc,
+
+            'reason_decision' => 'pending',
+            'submitted_reason_action_id' => (int)($submittedReasonContext['action_id'] ?? 0),
+            'submitted_reason_submitted_at_utc' => $submittedAt,
+            'submitted_reason_submitted_at_display' => $submittedAtDisplay,
+            'submitted_reason_days_since_submitted' => $daysSince,
+        );
     }
 
     private function loadCandidateRows(): array
