@@ -47,72 +47,42 @@ function compliance_render_comms_panel(PDO $pdo, string $objectType, string $obj
         unset($_SESSION['_ipca_compliance_flash_objlink']);
     }
     ?>
-    <style>
-      .cmpcp-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;margin:20px 0;}
-      .cmpcp-h2{margin:0 0 4px;font-size:16px;color:#0f172a;}
-      .cmpcp-sub{margin:0 0 14px;color:#64748b;font-size:13px;}
-      .cmpcp-table{width:100%;border-collapse:collapse;font-size:13px;}
-      .cmpcp-table th{
-        text-align:left;font-size:11px;color:#64748b;font-weight:800;letter-spacing:.05em;
-        text-transform:uppercase;padding:6px 8px;background:#f1f5f9;
-      }
-      .cmpcp-table td{padding:8px;border-top:1px solid #e2e8f0;vertical-align:top;}
-      .cmpcp-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-      .cmpcp-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.04em;}
-      .cmpcp-pill.dir-inbound{background:#dbeafe;color:#1e3a8a;}
-      .cmpcp-pill.dir-outbound{background:#d1fae5;color:#065f46;}
-      .cmpcp-pill.role-evidence{background:#fef3c7;color:#92400e;}
-      .cmpcp-pill.role-authority_communication{background:#dbeafe;color:#1e3a8a;}
-      .cmpcp-pill.role-source{background:#e2e8f0;color:#475569;}
-      .cmpcp-pill.role-follow_up{background:#fef3c7;color:#92400e;}
-      .cmpcp-pill.role-context{background:#e2e8f0;color:#475569;}
-      .cmpcp-empty{padding:12px 16px;color:#64748b;background:#f8fafc;border-radius:10px;font-size:13px;text-align:center;}
-      .cmpcp-form{display:grid;grid-template-columns:1fr 220px auto;gap:10px;align-items:end;margin-top:14px;}
-      .cmpcp-input,.cmpcp-select{
-        width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-size:13px;
-      }
-      .cmpcp-label{display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:3px;}
-      .cmpcp-btn{
-        display:inline-block;padding:8px 14px;border-radius:8px;font-size:12px;font-weight:700;
-        text-decoration:none;border:0;cursor:pointer;line-height:1.2;
-      }
-      .cmpcp-btn.primary{background:#1e3c72;color:#fff;}
-      .cmpcp-btn.secondary{background:#e2e8f0;color:#0f172a;}
-      .cmpcp-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;}
-    </style>
-
-    <section class="cmpcp-card">
-      <h2 class="cmpcp-h2">Communications</h2>
-      <p class="cmpcp-sub">
-        Inbound and outbound compliance emails linked to this
-        <strong><?= h($typeLabel) ?></strong>
-        (<span class="cmpcp-mono"><?= h($objectType) ?>:<?= h($objectId) ?></span>).
-      </p>
+    <section class="cmp-card cmpcp-card">
+      <div class="cmp-card-head">
+        <div>
+          <h2 class="cmp-card-title">Communications</h2>
+          <p class="cmp-card-sub">
+            Inbound and outbound compliance emails linked to this
+            <strong><?= h($typeLabel) ?></strong>
+            <span class="cmp-mono">(<?= h($objectType) ?>:<?= h($objectId) ?>)</span>
+          </p>
+        </div>
+      </div>
 
       <?php if ($linkFlash !== null): ?>
-        <div style="margin:0 0 12px;padding:8px 12px;border-radius:8px;font-size:13px;
-                    background:<?= $linkFlash['type'] === 'success' ? '#d1fae5' : '#fee2e2' ?>;
-                    color:<?= $linkFlash['type'] === 'success' ? '#065f46' : '#991b1b' ?>;
-                    border:1px solid <?= $linkFlash['type'] === 'success' ? '#6ee7b7' : '#fca5a5' ?>;">
+        <div class="cmp-flash <?= $linkFlash['type'] === 'success' ? 'is-ok' : 'is-danger' ?>">
           <?= h((string)$linkFlash['message']) ?>
         </div>
       <?php endif; ?>
 
       <?php if ($emails === array()): ?>
-        <div class="cmpcp-empty">
-          No emails are linked yet. Link an existing thread below, or open the
-          <a href="/admin/compliance/inbox.php" style="color:#1e3c72;font-weight:700;">Inbox</a>
-          and use the per-thread "Link to…" form to attach correspondence here.
+        <div class="cmp-empty">
+          <div class="cmp-empty-title">No correspondence linked yet</div>
+          <p style="margin:0;">
+            Link an existing thread below, or open the
+            <a href="/admin/compliance/inbox.php">Inbox</a>
+            and use the per-thread &ldquo;Link to&hellip;&rdquo; form to attach correspondence here.
+          </p>
         </div>
       <?php else: ?>
-        <table class="cmpcp-table">
+        <table class="cmp-table">
           <thead><tr>
             <th>Dir</th>
             <th>Subject</th>
             <th>Contact / Recipient</th>
             <th>Role</th>
             <th>When</th>
-            <th>Open</th>
+            <th>Thread</th>
           </tr></thead>
           <tbody>
             <?php foreach ($emails as $r):
@@ -124,26 +94,22 @@ function compliance_render_comms_panel(PDO $pdo, string $objectType, string $obj
               $when = (string)($r['received_at'] ?? $r['sent_at'] ?? '');
             ?>
               <tr>
-                <td><span class="cmpcp-pill dir-<?= h($direction) ?>"><?= h(strtoupper($direction)) ?></span></td>
+                <td><span class="cmp-pill dir-<?= h($direction) ?>"><?= h(strtoupper($direction)) ?></span></td>
                 <td>
-                  <a href="/admin/compliance/email_thread.php?email_id=<?= $eid ?>"
-                     style="color:#1e3c72;font-weight:700;text-decoration:none;">
+                  <a href="/admin/compliance/email_thread.php?email_id=<?= $eid ?>">
                     <?= h((string)($r['subject'] ?? '(no subject)')) ?>
                   </a>
                 </td>
-                <td class="cmpcp-mono"><?= h((string)($r['from_email'] ?? $r['thread_contact'] ?? '—')) ?></td>
+                <td class="cmp-mono"><?= h((string)($r['from_email'] ?? $r['thread_contact'] ?? '—')) ?></td>
                 <td>
                   <?php foreach ($rolesList as $role): $role = trim($role); if ($role === '') continue; ?>
-                    <span class="cmpcp-pill role-<?= h($role) ?>" style="margin-right:3px;"><?= h(str_replace('_', ' ', $role)) ?></span>
+                    <span class="cmp-pill cmpcp-pill role-<?= h($role) ?>" style="margin-right:4px;"><?= h(str_replace('_', ' ', $role)) ?></span>
                   <?php endforeach; ?>
                 </td>
-                <td class="cmpcp-mono"><?= h(substr($when, 0, 16)) ?></td>
+                <td class="cmp-mono"><?= h(substr($when, 0, 16)) ?></td>
                 <td>
                   <?php if ($tid > 0): ?>
-                    <a href="/admin/compliance/email_thread.php?id=<?= $tid ?>"
-                       style="color:#3730a3;font-weight:700;text-decoration:none;font-size:12px;">
-                      thread #<?= $tid ?>
-                    </a>
+                    <a href="/admin/compliance/email_thread.php?id=<?= $tid ?>">thread #<?= $tid ?></a>
                   <?php endif; ?>
                 </td>
               </tr>
@@ -153,47 +119,41 @@ function compliance_render_comms_panel(PDO $pdo, string $objectType, string $obj
       <?php endif; ?>
 
       <?php if ($threadOptions === array()): ?>
-        <p style="margin:14px 0 0;color:#64748b;font-size:13px;">
-          No email threads on file yet — once correspondence arrives in the
-          <a href="/admin/compliance/inbox.php" style="color:#1e3c72;font-weight:700;">inbox</a>
-          you'll be able to attach it here.
+        <p style="margin:18px 0 0;">
+          No email threads on file yet &mdash; once correspondence arrives in the
+          <a href="/admin/compliance/inbox.php">inbox</a>
+          you&rsquo;ll be able to attach it here.
         </p>
       <?php else: ?>
-        <form method="post" action="/admin/compliance/email_obj_link.php" class="cmpcp-form">
+        <form method="post" action="/admin/compliance/email_obj_link.php"
+              style="display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) auto;gap:12px;align-items:end;margin-top:18px;">
           <input type="hidden" name="linked_object_type" value="<?= h($objectType) ?>">
           <input type="hidden" name="linked_object_id" value="<?= h($objectId) ?>">
           <input type="hidden" name="return_to" value="<?= h((string)($_SERVER['REQUEST_URI'] ?? '')) ?>">
-          <div>
-            <span class="cmpcp-label">Attach email thread</span>
-            <select name="thread_id" class="cmpcp-select" required>
-              <option value="" disabled selected>— Choose a thread from the inbox …</option>
+          <label>
+            <span>Attach email thread</span>
+            <select name="thread_id" required>
+              <option value="" disabled selected>&mdash; Choose a thread from the inbox &hellip;</option>
               <?php foreach ($threadOptions as $to): ?>
                 <option value="<?= (int)$to['id'] ?>"><?= h((string)$to['label']) ?></option>
               <?php endforeach; ?>
             </select>
-          </div>
-          <div>
-            <span class="cmpcp-label">Role</span>
-            <select name="link_type" class="cmpcp-select">
+          </label>
+          <label>
+            <span>Role</span>
+            <select name="link_type">
               <?php foreach ($linkRoles as $val => $label): ?>
                 <option value="<?= h($val) ?>" <?= $val === 'authority_communication' ? 'selected' : '' ?>><?= h($label) ?></option>
               <?php endforeach; ?>
             </select>
-          </div>
-          <div>
-            <span class="cmpcp-label">&nbsp;</span>
-            <button type="submit" class="cmpcp-btn primary">Link thread</button>
-          </div>
+          </label>
+          <button type="submit">Link thread</button>
         </form>
       <?php endif; ?>
 
-      <div class="cmpcp-actions">
-        <a class="cmpcp-btn secondary" href="/admin/compliance/email_compose.php">
-          + Compose new
-        </a>
-        <a class="cmpcp-btn secondary" href="/admin/compliance/inbox.php">
-          Open inbox
-        </a>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;">
+        <a class="cmp-btn cmp-btn-secondary" href="/admin/compliance/email_compose.php">+ Compose new</a>
+        <a class="cmp-btn cmp-btn-secondary" href="/admin/compliance/inbox.php">Open inbox</a>
       </div>
     </section>
     <?php

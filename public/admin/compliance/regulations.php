@@ -99,74 +99,75 @@ if ($q !== '') {
 
 cw_header('Compliance · Regulations');
 
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
+
 $aimOk = rl_aim_tables_present($pdo);
 $easaOk = ComplianceRegulatoryLinkEngine::easaStagingPresent($pdo);
+
+$regDescription = 'Search indexed FAA AIM paragraphs and EASA Easy Access (staging) nodes, then attach a citation to a finding. Verifier hooks remain the authority for edition freshness — this page only creates regulatory link rows.';
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Regulatory bridge',
+    'title' => 'Regulation search',
+    'description' => $regDescription,
+    'back' => $findingId > 0 ? array(
+        'href' => '/admin/compliance/findings.php?id=' . (int)$findingId,
+        'label' => 'Back to finding',
+        'code' => (string)($findingCtx['finding_code'] ?? ('#' . $findingId)),
+    ) : null,
+    'stats' => array(
+        array('label' => 'FAA AIM',  'value' => $aimOk ? 'OK' : 'Missing',  'tone' => $aimOk ? 'ok' : 'crit'),
+        array('label' => 'EASA',     'value' => $easaOk ? 'OK' : 'Missing', 'tone' => $easaOk ? 'ok' : 'crit'),
+        array('label' => 'Hits',     'value' => count($aimHits) + count($easaHits)),
+    ),
+));
 ?>
-<section class="compliance-reg-search" style="padding:12px 0 48px;">
+<section class="compliance-reg-search">
   <style>
-    .compliance-reg-search .reg-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:20px;max-width:1100px;}
-    .compliance-reg-search .reg-overline{font-size:11px;letter-spacing:.14em;text-transform:uppercase;color:#64748b;font-weight:800;margin-bottom:6px;}
-    .compliance-reg-search h1{margin:0 0 8px;font-size:24px;font-weight:800;color:#0f172a;}
-    .compliance-reg-search .pill{display:inline-block;background:#eef2ff;color:#3730a3;font-size:12px;font-weight:700;padding:4px 10px;border-radius:999px;}
-    .compliance-reg-search table{width:100%;border-collapse:collapse;font-size:13px;margin-top:12px;}
-    .compliance-reg-search th,.compliance-reg-search td{padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:left;vertical-align:top;}
-    .compliance-reg-search th{background:#f8fafc;font-size:12px;color:#475569;}
-    .compliance-reg-search .ex{color:#64748b;font-size:12px;line-height:1.4;margin-top:4px;}
-    .compliance-reg-search input[type=text],.compliance-reg-search select{padding:8px 10px;border-radius:8px;border:1px solid #cbd5e1;}
-    .compliance-reg-search button.attach{background:#1e3c72;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer;font-size:12px;}
+    .compliance-reg-search .ex{color:var(--text-muted);font-size:12px;line-height:1.4;margin-top:4px;}
   </style>
 
-  <div class="reg-card">
-    <div class="reg-overline">Phase 3c — Regulatory bridge</div>
-    <h1>Regulation search</h1>
-    <p style="color:#334155;line-height:1.55;margin:0 0 16px;max-width:820px;">
-      Search indexed FAA AIM paragraphs and EASA Easy Access (staging) nodes, then attach a citation to a finding.
-      Verifier hooks in <code>resource_library_source_verify.php</code> remain the authority for edition freshness — this page only creates <code>ipca_compliance_finding_regulatory_links</code> rows.
-    </p>
-    <p style="margin:0 0 12px;font-size:13px;color:#64748b;">
-      Libraries:
-      <span class="pill"><?= $aimOk ? 'AIM table OK' : 'AIM table missing' ?></span>
-      <span class="pill" style="margin-left:6px;"><?= $easaOk ? 'EASA staging OK' : 'EASA staging missing' ?></span>
-    </p>
-
+  <section class="cmp-card">
     <?php if ($findingCtx): ?>
-      <p style="background:#ecfdf5;border:1px solid #6ee7b7;border-radius:12px;padding:12px 16px;margin:0 0 16px;color:#065f46;font-size:14px;">
-        Attaching to <strong><?= h((string)$findingCtx['finding_code']) ?></strong>
-        — <?= h((string)$findingCtx['title']) ?>
+      <p class="cmp-flash cmp-flash-ok" style="margin:0 0 16px;">
+        Attaching to <strong><?= h((string)$findingCtx['finding_code']) ?></strong> — <?= h((string)$findingCtx['title']) ?>
       </p>
     <?php else: ?>
-      <p style="background:#fffbeb;border:1px solid #fcd34d;border-radius:12px;padding:12px 16px;margin:0 0 16px;color:#92400e;font-size:14px;">
+      <p class="cmp-flash cmp-flash-warn" style="margin:0 0 16px;">
         Open a finding and use <strong>Search regulations & attach</strong>, or add <code>?finding_id=…</code> to this URL to enable attach buttons.
       </p>
     <?php endif; ?>
 
-    <form method="get" action="/admin/compliance/regulations.php" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;margin-bottom:8px;">
+    <form method="get" action="/admin/compliance/regulations.php" class="cmp-toolbar">
       <?php if ($findingId > 0): ?>
         <input type="hidden" name="finding_id" value="<?= (int)$findingId ?>">
       <?php endif; ?>
-      <label style="margin:0;">
-        <span style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px;">Query</span>
-        <input type="text" name="q" value="<?= h($q) ?>" placeholder="e.g. FCL, parallel approaches, fuel…" style="min-width:280px;">
+      <label class="cmp-field" style="min-width:280px;">
+        <span class="cmp-field-label">Query</span>
+        <input type="text" name="q" value="<?= h($q) ?>" placeholder="e.g. FCL, parallel approaches, fuel…">
       </label>
-      <label style="margin:0;">
-        <span style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px;">Corpus</span>
+      <label class="cmp-field" style="min-width:180px;">
+        <span class="cmp-field-label">Corpus</span>
         <select name="corpus">
           <option value="all" <?= $corpus === 'all' ? 'selected' : '' ?>>All available</option>
           <option value="aim" <?= $corpus === 'aim' ? 'selected' : '' ?>>FAA AIM only</option>
           <option value="easa" <?= $corpus === 'easa' ? 'selected' : '' ?>>EASA eRules only</option>
         </select>
       </label>
-      <button type="submit" class="attach" style="background:#0f172a;">Search</button>
+      <button type="submit">Search</button>
     </form>
 
     <?php if ($q !== '' && !$aimOk && !$easaOk): ?>
-      <p class="queue-status is-danger" style="margin-top:12px;">No regulatory tables available — apply resource library SQL migrations.</p>
+      <p class="cmp-flash cmp-flash-danger" style="margin-top:12px;">No regulatory tables available — apply resource library SQL migrations.</p>
     <?php endif; ?>
-  </div>
+  </section>
 
   <?php if ($q !== '' && ($corpus === 'all' || $corpus === 'aim') && $aimOk && $aimHits !== array()): ?>
-    <div class="reg-card">
-      <h2 style="margin:0 0 6px;font-size:18px;">FAA AIM (<?= count($aimHits) ?>)</h2>
+    <section class="cmp-card">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title"><?= compliance_ui_icon('document') ?><span>FAA AIM</span></div>
+        <div class="cmp-count-pill"><?= count($aimHits) ?></div>
+      </div>
       <table>
         <thead><tr><th>Paragraph</th><th>Title / excerpt</th><th></th></tr></thead>
         <tbody>
@@ -178,7 +179,7 @@ $easaOk = ComplianceRegulatoryLinkEngine::easaStagingPresent($pdo);
               $canon = trim((string)($row['canonical_url'] ?? ''));
               ?>
             <tr>
-              <td style="font-family:ui-monospace,monospace;font-size:12px;"><?= h($pn !== '' ? $pn : ('#' . $id)) ?></td>
+              <td class="cmp-mono"><?= h($pn !== '' ? $pn : ('#' . $id)) ?></td>
               <td>
                 <div><strong><?= h($dt !== '' ? $dt : $lab) ?></strong></div>
                 <?php if (!empty($row['excerpt'])): ?>
@@ -199,7 +200,7 @@ $easaOk = ComplianceRegulatoryLinkEngine::easaStagingPresent($pdo);
                     <input type="hidden" name="citation_url" value="<?= h($canon) ?>">
                     <input type="hidden" name="link_type" value="PRIMARY">
                     <input type="hidden" name="confidence" value="MANUAL">
-                    <button type="submit" class="attach">Attach</button>
+                    <button type="submit" style="height:32px;min-height:32px;padding:0 12px;font-size:12px;">Attach</button>
                   </form>
                 <?php else: ?>
                   —
@@ -209,12 +210,15 @@ $easaOk = ComplianceRegulatoryLinkEngine::easaStagingPresent($pdo);
           <?php endforeach; ?>
         </tbody>
       </table>
-    </div>
+    </section>
   <?php endif; ?>
 
   <?php if ($q !== '' && ($corpus === 'all' || $corpus === 'easa') && $easaOk && $easaHits !== array()): ?>
-    <div class="reg-card">
-      <h2 style="margin:0 0 6px;font-size:18px;">EASA eRules staging (<?= count($easaHits) ?>)</h2>
+    <section class="cmp-card">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title"><?= compliance_ui_icon('document') ?><span>EASA eRules staging</span></div>
+        <div class="cmp-count-pill"><?= count($easaHits) ?></div>
+      </div>
       <table>
         <thead><tr><th>Id / ERules</th><th>Title / excerpt</th><th></th></tr></thead>
         <tbody>
@@ -249,7 +253,7 @@ $easaOk = ComplianceRegulatoryLinkEngine::easaStagingPresent($pdo);
                     <input type="hidden" name="citation_label" value="<?= h(function_exists('mb_substr') ? mb_substr($lab, 0, 255) : substr($lab, 0, 255)) ?>">
                     <input type="hidden" name="link_type" value="PRIMARY">
                     <input type="hidden" name="confidence" value="MANUAL">
-                    <button type="submit" class="attach">Attach</button>
+                    <button type="submit" style="height:32px;min-height:32px;padding:0 12px;font-size:12px;">Attach</button>
                   </form>
                 <?php else: ?>
                   —
@@ -259,39 +263,40 @@ $easaOk = ComplianceRegulatoryLinkEngine::easaStagingPresent($pdo);
           <?php endforeach; ?>
         </tbody>
       </table>
-    </div>
+    </section>
   <?php endif; ?>
 
   <?php if ($q !== '' && $aimHits === array() && $easaHits === array() && ($aimOk || $easaOk)): ?>
-    <div class="reg-card">
-      <p style="margin:0;color:#64748b;">No matches — shorten or broaden the query.</p>
-    </div>
+    <section class="cmp-card">
+      <p style="margin:0;color:var(--text-muted);">No matches — shorten or broaden the query.</p>
+    </section>
   <?php endif; ?>
 
-  <div class="reg-card">
-    <h2 style="margin:0 0 8px;font-size:18px;">Attach external https URL</h2>
-    <p style="color:#64748b;font-size:14px;margin:0 0 12px;">For citations outside AIM/EASA (e.g. BCAA portal PDF).</p>
+  <section class="cmp-card">
+    <h2 style="margin:0 0 8px;">Attach external https URL</h2>
+    <p style="color:var(--text-muted);font-size:14px;margin:0 0 12px;">For citations outside AIM/EASA (e.g. BCAA portal PDF).</p>
     <?php if ($findingCtx): ?>
-      <form method="post" action="/admin/compliance/findings.php?id=<?= (int)$findingId ?>" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
+      <form method="post" action="/admin/compliance/findings.php?id=<?= (int)$findingId ?>" class="cmp-toolbar">
         <input type="hidden" name="action" value="attach_regulation_link">
         <input type="hidden" name="finding_id" value="<?= (int)$findingId ?>">
         <input type="hidden" name="source_kind" value="<?= h(ComplianceRegulatoryLinkEngine::KIND_EXTERNAL) ?>">
-        <label style="margin:0;">
-          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px;">https URL *</span>
-          <input type="url" name="external_url" required placeholder="https://…" style="min-width:320px;">
+        <label class="cmp-field" style="min-width:320px;">
+          <span class="cmp-field-label">https URL *</span>
+          <input type="url" name="external_url" required placeholder="https://…">
         </label>
-        <label style="margin:0;">
-          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px;">Label (optional)</span>
-          <input type="text" name="citation_label" placeholder="e.g. BCAA letter 2024-…" style="min-width:240px;">
+        <label class="cmp-field" style="min-width:240px;">
+          <span class="cmp-field-label">Label (optional)</span>
+          <input type="text" name="citation_label" placeholder="e.g. BCAA letter 2024-…">
         </label>
         <input type="hidden" name="link_type" value="SUPPORTING">
         <input type="hidden" name="confidence" value="MANUAL">
-        <button type="submit" class="attach">Attach URL</button>
+        <button type="submit">Attach URL</button>
       </form>
     <?php else: ?>
-      <p style="margin:0;color:#64748b;font-size:14px;">Select a finding first.</p>
+      <p style="margin:0;color:var(--text-muted);font-size:14px;">Select a finding first.</p>
     <?php endif; ?>
-  </div>
+  </section>
 </section>
 <?php
+compliance_page_close();
 cw_footer();

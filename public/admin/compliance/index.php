@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 compliance_require_access($pdo);
 
@@ -167,140 +168,51 @@ $recentAlerts = cw_compliance_rows(
 );
 
 cw_header('Compliance · Dashboard');
+
+compliance_page_open(array(
+    'overline' => 'Compliance Operations',
+    'title' => 'Compliance dashboard',
+    'description' => 'Live view of the compliance posture across audits, findings, corrective actions, manual control and monitoring alerts. Every tile drills through to its detail workspace.',
+    'actions' => array(
+        array('label' => 'New finding', 'href' => '/admin/compliance/findings.php', 'icon' => 'plus'),
+        array('label' => 'Run monitor sweep', 'href' => '/admin/compliance/live_monitoring.php', 'icon' => 'pulse'),
+        array('label' => 'Open inbox', 'href' => '/admin/compliance/inbox.php', 'icon' => 'inbox'),
+    ),
+    'stats' => array(
+        array('label' => 'Open audits',     'value' => (int)$openAudits,    'sub' => (int)$totalAudits . ' total',                                                              'href' => '/admin/compliance/audits.php'),
+        array('label' => 'Open findings',   'value' => (int)$openFindings,  'sub' => (int)$totalFindings . ' total',                                                            'href' => '/admin/compliance/findings.php'),
+        array('label' => 'Open CAPs',       'value' => (int)$openCaps,      'sub' => $overdueCaps > 0 ? ((int)$overdueCaps . ' overdue') : 'on track', 'tone' => $overdueCaps > 0 ? 'warn' : 'ok',  'href' => '/admin/compliance/corrective_actions.php'),
+        array('label' => 'Open alerts',     'value' => (int)$openAlerts,    'sub' => $critAlerts > 0 ? ((int)$critAlerts . ' critical') : 'monitoring', 'tone' => $critAlerts > 0 ? 'crit' : ($openAlerts > 0 ? 'warn' : 'ok'), 'href' => '/admin/compliance/live_monitoring.php'),
+        array('label' => 'Change requests', 'value' => (int)$openCrs,       'sub' => 'in-flight',                                                                               'href' => '/admin/compliance/change_requests.php'),
+        array('label' => 'Manual drafts',   'value' => (int)$activeDrafts,  'sub' => 'active',                                                                                  'href' => '/admin/compliance/manual_drafts.php'),
+        array('label' => 'Release pkgs',    'value' => (int)$openPackages,  'sub' => 'not yet released',                                                                        'href' => '/admin/compliance/manual_approved.php'),
+        array('label' => 'MoC cases',       'value' => (int)$openMocCases,  'sub' => 'open',                                                                                    'href' => '/admin/compliance/moc.php'),
+        array('label' => 'Inbox',           'value' => (int)$openInbox,     'sub' => 'awaiting triage',                                                                         'href' => '/admin/compliance/inbox.php'),
+        array('label' => 'Meetings',        'value' => (int)$openMeetings,  'sub' => 'scheduled / live',                                                                        'href' => '/admin/compliance/meetings.php'),
+    ),
+));
 ?>
 <style>
-  .cmpdash-wrap{padding:8px 0 40px;}
-  .cmpdash-hero h1{margin:0 0 6px;font-size:26px;color:#0f172a;}
-  .cmpdash-hero p{margin:0 0 22px;color:#64748b;max-width:760px;line-height:1.55;}
-  .cmpdash-kpis{
-    display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
-    gap:14px;margin-bottom:28px;max-width:1200px;
-  }
-  .cmpdash-card{
-    background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px 18px;
-    display:block;color:inherit;text-decoration:none;transition:box-shadow .12s ease;
-  }
-  .cmpdash-card:hover{box-shadow:0 4px 16px rgba(15,23,42,.06);}
-  .cmpdash-card-label{
-    font-size:11px;font-weight:800;color:#64748b;
-    text-transform:uppercase;letter-spacing:.08em;
-  }
-  .cmpdash-card-big{font-size:28px;font-weight:800;color:#0f172a;line-height:1.1;margin-top:4px;}
-  .cmpdash-card-sub{font-size:12px;color:#64748b;margin-top:2px;}
-  .cmpdash-card.is-warn .cmpdash-card-big{color:#b45309;}
-  .cmpdash-card.is-crit .cmpdash-card-big{color:#b91c1c;}
   .cmpdash-grid{
     display:grid;grid-template-columns:repeat(auto-fit,minmax(360px,1fr));
-    gap:20px;max-width:1200px;align-items:start;margin-bottom:20px;
+    gap:18px;align-items:start;margin-bottom:18px;
   }
-  .cmpdash-panel{
-    background:#fff;border:1px solid #e2e8f0;border-radius:16px;
-    padding:18px 22px;
-  }
-  .cmpdash-panel h2{margin:0 0 14px;font-size:16px;color:#0f172a;}
-  .cmpdash-table{width:100%;border-collapse:collapse;font-size:13px;}
-  .cmpdash-table th{
-    text-align:left;font-size:11px;font-weight:800;color:#64748b;
-    padding:6px 8px;border-bottom:1px solid #e2e8f0;text-transform:uppercase;letter-spacing:.06em;
-  }
-  .cmpdash-table td{padding:8px;border-bottom:1px solid #f1f5f9;vertical-align:top;}
-  .cmpdash-pill{
-    display:inline-block;padding:1px 8px;border-radius:999px;
-    font-size:11px;font-weight:800;letter-spacing:.04em;
-  }
-  .cmpdash-pill.sev-CRITICAL{background:#fee2e2;color:#991b1b;}
-  .cmpdash-pill.sev-HIGH{background:#ffedd5;color:#9a3412;}
-  .cmpdash-pill.sev-MEDIUM{background:#fef3c7;color:#92400e;}
-  .cmpdash-pill.sev-LOW{background:#d1fae5;color:#065f46;}
-  .cmpdash-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-  .cmpdash-empty{color:#64748b;font-size:13px;margin:0;}
   .cmpdash-bar{
-    display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:6px;
+    display:flex;align-items:center;gap:10px;font-size:13px;margin-bottom:8px;
   }
-  .cmpdash-bar-k{width:130px;color:#0f172a;font-weight:700;}
-  .cmpdash-bar-track{flex:1;background:#f1f5f9;border-radius:6px;height:8px;overflow:hidden;}
-  .cmpdash-bar-fill{display:block;height:100%;background:#1e3c72;border-radius:6px;}
-  .cmpdash-bar-n{width:40px;text-align:right;color:#64748b;font-weight:700;font-size:12px;}
+  .cmpdash-bar-k{width:130px;color:var(--text-strong);font-weight:680;}
+  .cmpdash-bar-track{flex:1;background:#eef2f7;border-radius:999px;height:8px;overflow:hidden;}
+  .cmpdash-bar-fill{display:block;height:100%;background:linear-gradient(90deg,#17345d,#3a6fd0);border-radius:999px;}
+  .cmpdash-bar-n{width:42px;text-align:right;color:var(--text-muted);font-weight:680;font-size:12px;}
   .cmpdash-section-link{
-    margin-top:14px;display:block;font-weight:700;color:#3730a3;text-decoration:none;
+    margin-top:14px;display:inline-block;font-weight:680;color:#1f4079;text-decoration:none;
+    border-bottom:1px solid transparent;transition:border-color .16s ease;
   }
-  .cmpdash-section-link:hover{text-decoration:underline;}
+  .cmpdash-section-link:hover{border-color:rgba(31,64,121,0.35);}
+  .cmpdash-empty{color:var(--text-muted);font-size:13.5px;margin:0;}
 </style>
 
-<section class="cmpdash-wrap">
-  <div class="cmpdash-hero">
-    <h1>Compliance dashboard</h1>
-    <p>
-      Live view of the compliance posture across audits, findings, corrective actions,
-      manual control and monitoring alerts. Every tile drills through to the detail page.
-    </p>
-  </div>
-
-  <div class="cmpdash-kpis">
-    <a class="cmpdash-card" href="/admin/compliance/audits.php">
-      <div class="cmpdash-card-label">Audits</div>
-      <div class="cmpdash-card-big"><?= (int)$openAudits ?></div>
-      <div class="cmpdash-card-sub">open · <?= (int)$totalAudits ?> total</div>
-    </a>
-    <a class="cmpdash-card" href="/admin/compliance/findings.php">
-      <div class="cmpdash-card-label">Findings</div>
-      <div class="cmpdash-card-big"><?= (int)$openFindings ?></div>
-      <div class="cmpdash-card-sub">open · <?= (int)$totalFindings ?> total</div>
-    </a>
-    <a class="cmpdash-card <?= $overdueCaps > 0 ? 'is-warn' : '' ?>" href="/admin/compliance/corrective_actions.php">
-      <div class="cmpdash-card-label">Corrective actions</div>
-      <div class="cmpdash-card-big"><?= (int)$openCaps ?></div>
-      <div class="cmpdash-card-sub">
-        open
-        <?php if ($overdueCaps > 0): ?>
-          · <strong style="color:#b45309;"><?= (int)$overdueCaps ?> overdue</strong>
-        <?php endif; ?>
-      </div>
-    </a>
-    <a class="cmpdash-card <?= $critAlerts > 0 ? 'is-crit' : ($openAlerts > 0 ? 'is-warn' : '') ?>"
-       href="/admin/compliance/live_monitoring.php">
-      <div class="cmpdash-card-label">Alerts</div>
-      <div class="cmpdash-card-big"><?= (int)$openAlerts ?></div>
-      <div class="cmpdash-card-sub">
-        open
-        <?php if ($critAlerts > 0): ?>
-          · <strong style="color:#b91c1c;"><?= (int)$critAlerts ?> critical</strong>
-        <?php endif; ?>
-      </div>
-    </a>
-    <a class="cmpdash-card" href="/admin/compliance/change_requests.php">
-      <div class="cmpdash-card-label">Change requests</div>
-      <div class="cmpdash-card-big"><?= (int)$openCrs ?></div>
-      <div class="cmpdash-card-sub">in-flight</div>
-    </a>
-    <a class="cmpdash-card" href="/admin/compliance/manual_drafts.php">
-      <div class="cmpdash-card-label">Manual drafts</div>
-      <div class="cmpdash-card-big"><?= (int)$activeDrafts ?></div>
-      <div class="cmpdash-card-sub">active</div>
-    </a>
-    <a class="cmpdash-card" href="/admin/compliance/manual_approved.php">
-      <div class="cmpdash-card-label">Release packages</div>
-      <div class="cmpdash-card-big"><?= (int)$openPackages ?></div>
-      <div class="cmpdash-card-sub">not yet released</div>
-    </a>
-    <a class="cmpdash-card" href="/admin/compliance/moc.php">
-      <div class="cmpdash-card-label">MoC cases</div>
-      <div class="cmpdash-card-big"><?= (int)$openMocCases ?></div>
-      <div class="cmpdash-card-sub">open</div>
-    </a>
-    <a class="cmpdash-card" href="/admin/compliance/inbox.php">
-      <div class="cmpdash-card-label">Inbox</div>
-      <div class="cmpdash-card-big"><?= (int)$openInbox ?></div>
-      <div class="cmpdash-card-sub">awaiting triage</div>
-    </a>
-    <a class="cmpdash-card" href="/admin/compliance/meetings.php">
-      <div class="cmpdash-card-label">Meetings</div>
-      <div class="cmpdash-card-big"><?= (int)$openMeetings ?></div>
-      <div class="cmpdash-card-sub">scheduled / live</div>
-    </a>
-  </div>
-
-  <div class="cmpdash-grid">
+<div class="cmpdash-grid">
     <div class="cmpdash-panel">
       <h2>Open findings by severity</h2>
       <?php
@@ -468,6 +380,7 @@ cw_header('Compliance · Dashboard');
       <?php endif; ?>
     </div>
   </div>
-</section>
+
 <?php
+compliance_page_close();
 cw_footer();

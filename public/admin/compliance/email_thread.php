@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsCenterEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -104,16 +105,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 cw_header('Compliance · Thread');
 
 if ($threadId <= 0) {
-    echo '<p style="margin:8px 0 0;">Thread not found.</p>';
-    echo '<p><a href="/admin/compliance/inbox.php" style="color:#1e3c72;font-weight:700;">← Inbox</a></p>';
+    compliance_page_open(array(
+        'overline' => 'Compliance · Comms Center',
+        'title' => 'Thread not found',
+        'description' => 'No thread on file for the provided id.',
+        'back' => array('href' => '/admin/compliance/inbox.php', 'label' => 'Back to inbox'),
+    ));
+    echo '<section class="cmp-card"><p style="margin:0;">Pick a thread from the <a href="/admin/compliance/inbox.php">inbox</a>.</p></section>';
+    compliance_page_close();
     cw_footer();
     return;
 }
 
 $thread = ComplianceCommsCenterEngine::getThread($pdo, $threadId);
 if ($thread === null) {
-    echo '<p style="margin:8px 0 0;">Thread not found.</p>';
-    echo '<p><a href="/admin/compliance/inbox.php" style="color:#1e3c72;font-weight:700;">← Inbox</a></p>';
+    compliance_page_open(array(
+        'overline' => 'Compliance · Comms Center',
+        'title' => 'Thread not found',
+        'description' => 'The thread id ' . (int)$threadId . ' does not exist (or was deleted).',
+        'back' => array('href' => '/admin/compliance/inbox.php', 'label' => 'Back to inbox'),
+    ));
+    echo '<section class="cmp-card"><p style="margin:0;">Pick a thread from the <a href="/admin/compliance/inbox.php">inbox</a>.</p></section>';
+    compliance_page_close();
     cw_footer();
     return;
 }
@@ -135,150 +148,136 @@ foreach (array_reverse($emails) as $e) {
     }
 }
 
+$heroActions = array();
+if ($latestInboundId > 0) {
+    $heroActions[] = array(
+        'label' => 'Reply to latest',
+        'href' => '/admin/compliance/email_compose.php?reply_to_email_id=' . $latestInboundId,
+        'icon' => 'mail',
+    );
+}
+$heroActions[] = array(
+    'label' => 'Compose into this thread',
+    'href' => '/admin/compliance/email_compose.php?thread_id=' . (int)$thread['id'],
+    'icon' => 'plus',
+);
+
+$heroDescription = '';
+if (!empty($thread['authority_name'])) {
+    $heroDescription .= 'Authority ' . (string)$thread['authority_name'] . '. ';
+}
+if (!empty($thread['primary_contact_email'])) {
+    $heroDescription .= 'Contact ' . (string)$thread['primary_contact_email'] . '. ';
+}
+if (!empty($thread['last_message_at'])) {
+    $heroDescription .= 'Last message ' . substr((string)$thread['last_message_at'], 0, 16) . '. ';
+}
+if ($heroDescription === '') {
+    $heroDescription = 'Compliance email thread — inbound and outbound messages, attachments, delivery events and object links.';
+}
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Comms Center',
+    'title' => (string)($thread['subject_normalized'] ?? '(no subject)'),
+    'description' => trim($heroDescription),
+    'actions' => $heroActions,
+    'back' => array(
+        'href' => '/admin/compliance/inbox.php',
+        'label' => 'Inbox',
+        'code' => 'thread #' . (int)$thread['id'],
+    ),
+    'flash' => $flash,
+));
 ?>
 <style>
-  .cmpth-h1{margin:0 0 6px;font-size:22px;color:#0f172a;}
-  .cmpth-sub{margin:0 0 18px;color:#64748b;font-size:14px;}
-  .cmpth-back{color:#1e3c72;font-weight:700;text-decoration:none;}
-  .cmpth-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;margin-bottom:20px;}
-  .cmpth-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.04em;}
-  .cmpth-pill.s-open{background:#fee2e2;color:#991b1b;}
-  .cmpth-pill.s-waiting_internal{background:#fef3c7;color:#92400e;}
-  .cmpth-pill.s-waiting_external{background:#dbeafe;color:#1e3a8a;}
-  .cmpth-pill.s-closed{background:#d1fae5;color:#065f46;}
-  .cmpth-pill.s-archived{background:#e2e8f0;color:#475569;}
-  .cmpth-pill.p-low{background:#e2e8f0;color:#475569;}
-  .cmpth-pill.p-normal{background:#dbeafe;color:#1e3a8a;}
-  .cmpth-pill.p-high{background:#fef3c7;color:#92400e;}
-  .cmpth-pill.p-urgent{background:#fee2e2;color:#991b1b;}
-  .cmpth-pill.e-received{background:#dbeafe;color:#1e3a8a;}
-  .cmpth-pill.e-sent{background:#fef3c7;color:#92400e;}
-  .cmpth-pill.e-queued{background:#fef3c7;color:#92400e;}
-  .cmpth-pill.e-delivered{background:#d1fae5;color:#065f46;}
-  .cmpth-pill.e-opened{background:#dcfce7;color:#15803d;}
-  .cmpth-pill.e-clicked{background:#bbf7d0;color:#166534;}
-  .cmpth-pill.e-bounced{background:#fee2e2;color:#991b1b;}
-  .cmpth-pill.e-failed{background:#fee2e2;color:#991b1b;}
-  .cmpth-pill.e-archived{background:#e2e8f0;color:#475569;}
-  .cmpth-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-  .cmpth-msg{border:1px solid #e2e8f0;border-radius:14px;padding:16px 18px;margin-bottom:18px;background:#fafbfc;}
+  .cmpth-pill{display:inline-flex;align-items:center;padding:0 12px;height:28px;border-radius:999px;font-size:11.5px;font-weight:720;letter-spacing:.04em;border:1px solid rgba(15,23,42,0.08);background:#f3f6fb;color:#324155;}
+  .cmpth-pill.s-open{background:rgba(48,124,183,0.10);color:#246ea9;border-color:rgba(48,124,183,0.20);}
+  .cmpth-pill.s-waiting_internal{background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.20);}
+  .cmpth-pill.s-waiting_external{background:rgba(70,55,179,0.10);color:#473cb3;border-color:rgba(70,55,179,0.20);}
+  .cmpth-pill.s-closed{background:rgba(32,135,90,0.12);color:#1f7a54;border-color:rgba(32,135,90,0.20);}
+  .cmpth-pill.s-archived{background:rgba(86,112,153,0.10);color:#405a82;border-color:rgba(86,112,153,0.18);}
+  .cmpth-pill.p-low{background:rgba(86,112,153,0.10);color:#405a82;border-color:rgba(86,112,153,0.18);}
+  .cmpth-pill.p-normal{background:rgba(48,124,183,0.10);color:#246ea9;border-color:rgba(48,124,183,0.20);}
+  .cmpth-pill.p-high{background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.20);}
+  .cmpth-pill.p-urgent{background:rgba(185,54,54,0.12);color:#9a2424;border-color:rgba(185,54,54,0.22);}
+  .cmpth-pill.e-received{background:rgba(48,124,183,0.10);color:#246ea9;border-color:rgba(48,124,183,0.20);}
+  .cmpth-pill.e-sent{background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.20);}
+  .cmpth-pill.e-queued{background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.20);}
+  .cmpth-pill.e-delivered{background:rgba(32,135,90,0.12);color:#1f7a54;border-color:rgba(32,135,90,0.20);}
+  .cmpth-pill.e-opened{background:rgba(32,135,90,0.14);color:#176f49;border-color:rgba(32,135,90,0.22);}
+  .cmpth-pill.e-clicked{background:rgba(32,135,90,0.16);color:#0f5e3a;border-color:rgba(32,135,90,0.26);}
+  .cmpth-pill.e-bounced{background:rgba(185,54,54,0.12);color:#9a2424;border-color:rgba(185,54,54,0.22);}
+  .cmpth-pill.e-failed{background:rgba(185,54,54,0.12);color:#9a2424;border-color:rgba(185,54,54,0.22);}
+  .cmpth-pill.e-archived{background:rgba(86,112,153,0.10);color:#405a82;border-color:rgba(86,112,153,0.18);}
+  .cmpth-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-muted);}
+  .cmpth-msg{border:1px solid var(--border-soft);border-radius:14px;padding:16px 18px;margin-bottom:14px;background:#fbfcfe;}
   .cmpth-msg.is-inbound{border-left:4px solid #1e3c72;}
-  .cmpth-msg.is-outbound{border-left:4px solid #0f766e;background:#f5fff9;}
-  .cmpth-msg-meta{font-size:12px;color:#64748b;margin-bottom:8px;}
-  .cmpth-msg-meta strong{color:#0f172a;}
-  .cmpth-msg-body{white-space:pre-wrap;font-size:14px;color:#1e293b;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;}
-  .cmpth-msg-htmlnote{font-size:11px;color:#64748b;margin-top:6px;}
+  .cmpth-msg.is-outbound{border-left:4px solid #1f7a54;background:#f5fbf7;}
+  .cmpth-msg-meta{font-size:12px;color:var(--text-muted);margin-bottom:8px;}
+  .cmpth-msg-meta strong{color:var(--text-strong);}
+  .cmpth-msg-body{white-space:pre-wrap;font-size:14px;color:var(--text-strong);background:#fff;border:1px solid var(--border-soft);border-radius:10px;padding:12px 14px;}
+  .cmpth-msg-htmlnote{font-size:11px;color:var(--text-muted);margin-top:6px;}
   .cmpth-att{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
-  .cmpth-att a, .cmpth-att .cmpth-att-row{
-    display:inline-flex;gap:6px;align-items:center;
-    background:#fff;border:1px solid #e2e8f0;border-radius:10px;
-    padding:6px 10px;font-size:12px;color:#0f172a;text-decoration:none;
-  }
-  .cmpth-att .cmpth-att-key{color:#64748b;font-family:ui-monospace,monospace;}
-  .cmpth-table{width:100%;border-collapse:collapse;font-size:13px;}
-  .cmpth-table th{
-    text-align:left;font-size:11px;color:#64748b;font-weight:800;letter-spacing:.05em;
-    text-transform:uppercase;padding:6px 8px;background:#f1f5f9;
-  }
-  .cmpth-table td{padding:8px;border-top:1px solid #e2e8f0;vertical-align:top;}
-  .cmpth-flash{margin:0 0 16px;padding:10px 14px;border-radius:10px;font-size:13px;}
-  .cmpth-flash.is-success{background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;}
-  .cmpth-flash.is-error{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;}
-  .cmpth-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px;}
-  .cmpth-btn{
-    display:inline-block;padding:7px 12px;border-radius:8px;font-size:12px;font-weight:700;
-    text-decoration:none;border:0;cursor:pointer;line-height:1.2;
-  }
-  .cmpth-btn.primary{background:#1e3c72;color:#fff;}
-  .cmpth-btn.secondary{background:#e2e8f0;color:#0f172a;}
-  .cmpth-btn.danger{background:#fee2e2;color:#991b1b;}
-  .cmpth-form-grid{
-    display:grid;grid-template-columns:200px 1fr 1fr 160px auto;gap:10px;align-items:end;
-  }
-  .cmpth-input{padding:8px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-size:13px;width:100%;}
-  .cmpth-label{display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:3px;}
-  .cmpth-quickactions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}
-  .cmpth-quickactions form{display:inline-flex;gap:4px;align-items:center;}
-  .cmpth-quickactions select{padding:5px 7px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;}
-  .cmpth-linkrow{
-    display:flex;flex-wrap:wrap;gap:10px;align-items:center;
-    padding:8px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;
-    margin-bottom:6px;font-size:13px;
-  }
+  .cmpth-att a, .cmpth-att .cmpth-att-row{display:inline-flex;gap:6px;align-items:center;background:#fff;border:1px solid var(--border-soft);border-radius:10px;padding:6px 10px;font-size:12px;color:var(--text-strong);text-decoration:none;}
+  .cmpth-att .cmpth-att-key{color:var(--text-muted);font-family:ui-monospace,monospace;}
+  .cmpth-linkrow{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:10px 14px;background:#f8fafc;border:1px solid var(--border-soft);border-radius:12px;margin-bottom:8px;font-size:13px;}
   .cmpth-linkrow form{display:inline;}
+  .cmpth-quickactions{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;}
+  .cmpth-quickactions form{display:flex;align-items:end;gap:8px;}
+  .cmpth-quickactions .cmpth-label{display:block;font-size:11px;font-weight:720;color:#7787a0;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;}
+  .cmpth-quickactions select{height:42px;min-height:42px;}
 </style>
 
-<p style="margin-bottom:12px;">
-  <a class="cmpth-back" href="/admin/compliance/inbox.php">← Inbox</a>
-  <span style="color:#64748b;margin:0 6px;">|</span>
-  <a class="cmpth-back" href="/admin/compliance/email_drafts.php">Drafts</a>
-  <span style="color:#64748b;margin:0 6px;">|</span>
-  <span class="cmpth-mono">thread #<?= (int)$thread['id'] ?></span>
-</p>
-
-<section class="cmpth-card">
-  <h1 class="cmpth-h1"><?= h((string)($thread['subject_normalized'] ?? '(no subject)')) ?></h1>
-  <p class="cmpth-sub">
-    <span class="cmpth-pill s-<?= h($status) ?>"><?= h(str_replace('_', ' ', $status)) ?></span>
-    · <span class="cmpth-pill p-<?= h($priority) ?>"><?= h($priority) ?></span>
-    <?php if (!empty($thread['authority_name'])): ?>
-      · Authority: <?= h((string)$thread['authority_name']) ?>
-    <?php endif; ?>
-    <?php if (!empty($thread['primary_contact_email'])): ?>
-      · Contact: <?= h((string)$thread['primary_contact_email']) ?>
-    <?php endif; ?>
-    <?php if (!empty($thread['last_message_at'])): ?>
-      · Last message <span class="cmpth-mono"><?= h(substr((string)$thread['last_message_at'], 0, 16)) ?></span>
-    <?php endif; ?>
-  </p>
-
-  <?php if ($flash !== null): ?>
-    <div class="cmpth-flash is-<?= h((string)$flash['type']) ?>"><?= h((string)$flash['message']) ?></div>
-  <?php endif; ?>
-
-  <div class="cmpth-actions">
-    <?php if ($latestInboundId > 0): ?>
-      <a class="cmpth-btn primary"
-         href="/admin/compliance/email_compose.php?reply_to_email_id=<?= $latestInboundId ?>">
-        Reply to latest
-      </a>
-    <?php endif; ?>
-    <a class="cmpth-btn secondary"
-       href="/admin/compliance/email_compose.php?thread_id=<?= (int)$thread['id'] ?>">
-      Compose into this thread
-    </a>
+<section class="cmp-card">
+  <div class="cmp-list-head" style="margin-bottom:14px;">
+    <div class="cmp-list-title">
+      <?= compliance_ui_icon('settings') ?>
+      <span>Thread management</span>
+    </div>
+    <div class="cmpth-quickactions">
+      <span class="cmpth-pill s-<?= h($status) ?>"><?= h(str_replace('_', ' ', $status)) ?></span>
+      <span class="cmpth-pill p-<?= h($priority) ?>"><?= h($priority) ?></span>
+    </div>
   </div>
 
-  <div class="cmpth-quickactions" style="margin-top:14px;">
+  <div class="cmpth-quickactions">
     <form method="post" action="/admin/compliance/email_thread.php">
       <input type="hidden" name="action" value="set_status">
       <input type="hidden" name="thread_id" value="<?= (int)$thread['id'] ?>">
-      <span class="cmpth-label" style="margin:0 4px 0 0;">Set status</span>
-      <select name="status">
-        <?php foreach (array('open','waiting_internal','waiting_external','closed','archived') as $s): ?>
-          <option value="<?= h($s) ?>" <?= $status === $s ? 'selected' : '' ?>>
-            <?= h(str_replace('_', ' ', $s)) ?>
-          </option>
-        <?php endforeach; ?>
-      </select>
-      <button type="submit" class="cmpth-btn secondary">Save</button>
+      <label>
+        <span class="cmpth-label">Set status</span>
+        <select name="status">
+          <?php foreach (array('open','waiting_internal','waiting_external','closed','archived') as $s): ?>
+            <option value="<?= h($s) ?>" <?= $status === $s ? 'selected' : '' ?>><?= h(str_replace('_', ' ', $s)) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </label>
+      <button type="submit" class="cmp-btn-secondary">Save</button>
     </form>
     <form method="post" action="/admin/compliance/email_thread.php">
       <input type="hidden" name="action" value="set_priority">
       <input type="hidden" name="thread_id" value="<?= (int)$thread['id'] ?>">
-      <span class="cmpth-label" style="margin:0 4px 0 0;">Priority</span>
-      <select name="priority">
-        <?php foreach (array('low','normal','high','urgent') as $p): ?>
-          <option value="<?= h($p) ?>" <?= $priority === $p ? 'selected' : '' ?>><?= h($p) ?></option>
-        <?php endforeach; ?>
-      </select>
-      <button type="submit" class="cmpth-btn secondary">Save</button>
+      <label>
+        <span class="cmpth-label">Priority</span>
+        <select name="priority">
+          <?php foreach (array('low','normal','high','urgent') as $p): ?>
+            <option value="<?= h($p) ?>" <?= $priority === $p ? 'selected' : '' ?>><?= h($p) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </label>
+      <button type="submit" class="cmp-btn-secondary">Save</button>
     </form>
   </div>
 </section>
 
-<section class="cmpth-card">
-  <h2 style="margin:0 0 12px;font-size:16px;">Linked compliance objects</h2>
+<section class="cmp-card">
+  <div class="cmp-list-head" style="margin-bottom:14px;">
+    <div class="cmp-list-title">
+      <?= compliance_ui_icon('list') ?>
+      <span>Linked compliance objects</span>
+    </div>
+    <div class="cmp-count-pill"><?= count($links) ?> link<?= count($links) === 1 ? '' : 's' ?></div>
+  </div>
   <?php if ($links === array()): ?>
     <p style="margin:0 0 12px;color:#64748b;font-size:13px;">No links yet. Use the form below to link this thread to a case, finding, audit, manual change request, etc.</p>
   <?php else: ?>
@@ -417,8 +416,8 @@ foreach (array_reverse($emails) as $e) {
 </section>
 
 <?php if ($emails === array()): ?>
-  <section class="cmpth-card">
-    <p style="margin:0;color:#64748b;">This thread has no email rows. (The thread row exists but no message landed — usually a webhook ingestion failure. Check <code>ipca_compliance_email_events</code> for <code>webhook_error</code> rows.)</p>
+  <section class="cmp-card">
+    <p style="margin:0;color:var(--text-muted);">This thread has no email rows. (The thread row exists but no message landed — usually a webhook ingestion failure. Check <code>ipca_compliance_email_events</code> for <code>webhook_error</code> rows.)</p>
   </section>
 <?php else: ?>
   <?php foreach ($emails as $e):
@@ -537,4 +536,5 @@ foreach (array_reverse($emails) as $e) {
 <?php endif; ?>
 
 <?php
+compliance_page_close();
 cw_footer();

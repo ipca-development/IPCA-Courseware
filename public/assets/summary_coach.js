@@ -1,0 +1,997 @@
+/*
+ * Maya Summary Coach (TEST/v3 feature)
+ *
+ * Plain JavaScript module shared by:
+ *   - /public/player/slide_v3.php
+ *   - /public/student/lesson_summaries_v3.php
+ *
+ * Public API:
+ *   window.IPCASummaryCoach.create(opts)        → instance
+ *   window.IPCASummaryCoach.attach(rootEl, opts) → attaches to existing DOM
+ *
+ * Each PHP page sets `window.IPCASummaryCoachConfig` with at least:
+ *   {
+ *     apiUrl: "/student/api/summary_coach.php",
+ *     context: "player" | "lesson_summaries",
+ *     lessonId: <int>,
+ *     cohortId: <int>,
+ *     summaryId: <int|null>,
+ *     editorSelector: "<css selector for the contenteditable / textarea>",
+ *     // optional:
+ *     csrfToken: "...",
+ *     initialStage: "structure",
+ *     initialScores: {...},
+ *     mode: "compact" | "expanded",
+ *     onCanonicalAccept: function(canonicalCheckResult) { ... }
+ *   }
+ *
+ * No jQuery, no framework. Listens to keyboard / paste / idle on the
+ * editor element. Calls the backend only on real triggers (button click,
+ * student answer, large paste, idle pause after meaningful writing,
+ * stage change). Server is the source of truth for scores + readiness;
+ * the readiness button is gated by what the server returns.
+ */
+
+(function (global) {
+  'use strict';
+
+  if (global.IPCASummaryCoach) {
+    return;
+  }
+
+  // ---------------------------------------------------------------------
+  // Constants
+  // ---------------------------------------------------------------------
+
+  // Local observer thresholds.
+  var PASTE_BURST_CHARS_THRESHOLD = 350; // chars inserted within 1s window
+  var PASTE_BURST_WINDOW_MS = 1000;
+  var IDLE_AFTER_TYPING_MS = 4500;       // pause length that triggers a checkpoint
+  var MIN_NEW_TEXT_FOR_IDLE_CHECK = 60;  // chars added since last checkpoint
+  var MIN_INTERVAL_BETWEEN_CHECKPOINTS_MS = 7000;
+  var WALL_OF_TEXT_MIN_CHARS = 700;      // single block w/o paragraph breaks
+  var SUMMARY_EXCERPT_MAX_CHARS = 1800;
+
+  var STAGE_LABELS = {
+    structure: 'Build the structure',
+    explain: 'Explain in your own words',
+    correlate: 'Connect the concepts',
+    operational_example: 'Apply it in flight',
+    readiness: 'Final check with Maya',
+    final_review: 'Final review'
+  };
+
+  var SCORE_PASS_THRESHOLDS = {
+    coverage: 80,
+    accuracy: 75,
+    own_wording: 75,
+    correlation: 70,
+    instructor_confidence: 75
+  };
+
+  var SCORE_LABELS = {
+    coverage: 'Coverage',
+    accuracy: 'Accuracy',
+    own_wording: 'Own wording',
+    correlation: 'Correlation',
+    instructor_confidence: 'Instructor confidence'
+  };
+
+  // ---------------------------------------------------------------------
+  // Utilities
+  // ---------------------------------------------------------------------
+
+  function $(sel, root) {
+    return (root || document).querySelector(sel);
+  }
+  function $$(sel, root) {
+    return Array.prototype.slice.call((root || document).querySelectorAll(sel));
+  }
+  function el(tag, opts) {
+    var node = document.createElement(tag);
+    if (!opts) return node;
+    if (opts.cls) node.className = opts.cls;
+    if (opts.text != null) node.textContent = opts.text;
+    if (opts.html != null) node.innerHTML = opts.html;
+    if (opts.attrs) {
+      Object.keys(opts.attrs).forEach(function (k) {
+        node.setAttribute(k, String(opts.attrs[k]));
+      });
+    }
+    return node;
+  }
+
+  function debounce(fn, ms) {
+    var t = null;
+    return function () {
+      var args = arguments;
+      var ctx = this;
+      if (t) clearTimeout(t);
+      t = setTimeout(function () { fn.apply(ctx, args); }, ms);
+    };
+  }
+
+  function nowMs() { return Date.now(); }
+
+  function clampInt(v, min, max) {
+    v = parseInt(v, 10);
+    if (isNaN(v)) return min;
+    if (v < min) return min;
+    if (v > max) return max;
+    return v;
+  }
+
+  function plainTextFromEditor(editor) {
+    if (!editor) return '';
+    if (editor.value !== undefined && editor.tagName === 'TEXTAREA') {
+      return String(editor.value || '');
+    }
+    if (editor.isContentEditable || editor.getAttribute('contenteditable')) {
+      var clone = editor.cloneNode(true);
+      // Replace block-level closing with newline so paragraph_count works.
+      var html = clone.innerHTML
+        .replace(/<\s*\/(p|div|li|h[1-6]|blockquote|br)\s*>/gi, '\n')
+        .replace(/<br\s*\/?>/gi, '\n');
+      clone.innerHTML = html;
+      var txt = (clone.textContent || clone.innerText || '');
+      return txt;
+    }
+    return String(editor.textContent || '');
+  }
+
+  function htmlFromEditor(editor) {
+    if (!editor) return '';
+    if (editor.tagName === 'TEXTAREA') return '';
+    return String(editor.innerHTML || '');
+  }
+
+  function countWords(s) {
+    s = String(s || '').trim();
+    if (!s) return 0;
+    return s.split(/\s+/).length;
+  }
+
+  function countParagraphs(s) {
+    s = String(s || '').trim();
+    if (!s) return 0;
+    var parts = s.split(/\n{1,}/).filter(function (p) {
+      return p.trim().length > 0;
+    });
+    return parts.length;
+  }
+
+  function sliceFromEnd(s, n) {
+    s = String(s || '');
+    if (s.length <= n) return s;
+    return s.substring(s.length - n);
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  // ---------------------------------------------------------------------
+  // DOM builder — used when host page does not pre-render Maya markup.
+  // Both v3 surfaces ship with the markup pre-rendered, but this lets the
+  // module be embedded easily anywhere.
+  // ---------------------------------------------------------------------
+
+  function ensureCoachStructure(root, opts) {
+    if (root.getAttribute('data-coach-built') === '1') return;
+
+    var avatarUrl = opts.avatarUrl || '/assets/avatars/maya.png';
+
+    root.classList.add('maya-coach');
+    root.setAttribute('data-summary-coach', '');
+    if (!root.getAttribute('data-coach-mode')) {
+      root.setAttribute('data-coach-mode', opts.mode || 'compact');
+    }
+    if (opts.host && !root.getAttribute('data-coach-host')) {
+      root.setAttribute('data-coach-host', opts.host);
+    }
+
+    root.innerHTML = '';
+
+    // Header
+    var header = el('div', { cls: 'maya-coach-header' });
+    var avWrap = el('div', { cls: 'maya-avatar-wrap' });
+    var av = el('img', { cls: 'maya-avatar', attrs: { src: avatarUrl, alt: 'Maya AI Instructor' } });
+    av.addEventListener('error', function () {
+      var fallback = el('div', { cls: 'maya-avatar-fallback', text: 'M' });
+      avWrap.replaceChild(fallback, av);
+    });
+    avWrap.appendChild(av);
+    avWrap.appendChild(el('span', { cls: 'maya-status-dot' }));
+    var headText = el('div', { cls: 'maya-coach-header-text' });
+    headText.appendChild(el('div', { cls: 'maya-title', text: 'Maya Summary Coach' }));
+    headText.appendChild(el('div', { cls: 'maya-subtitle', text: 'Watching your summary grow' }));
+    header.appendChild(avWrap);
+    header.appendChild(headText);
+    root.appendChild(header);
+
+    // Stage
+    var stage = el('div', { cls: 'maya-stage', attrs: { 'data-maya-stage': '' }, text: 'Current mission: Build the structure' });
+    root.appendChild(stage);
+
+    // Maya message
+    var msg = el('div', {
+      cls: 'maya-message',
+      attrs: { 'data-maya-message': '' },
+      text: "Hi! Let's build your summary together. Start by writing the main ideas of this lesson in your own words."
+    });
+    root.appendChild(msg);
+
+    // Progress grid
+    var prog = el('div', { cls: 'maya-progress-grid' });
+    prog.appendChild(el('div', { cls: 'maya-progress-grid-title', text: 'Understanding Progress' }));
+    Object.keys(SCORE_LABELS).forEach(function (key) {
+      var row = el('div', { cls: 'maya-progress-row', attrs: { 'data-maya-score': key } });
+      row.appendChild(el('div', { cls: 'maya-progress-label', text: SCORE_LABELS[key] }));
+      var bar = el('div', { cls: 'maya-progress-bar' });
+      bar.appendChild(el('div', { cls: 'maya-progress-fill' }));
+      row.appendChild(bar);
+      row.appendChild(el('div', { cls: 'maya-progress-value', text: '0' }));
+      prog.appendChild(row);
+    });
+    root.appendChild(prog);
+
+    // Question
+    var q = el('div', { cls: 'maya-next-question', attrs: { 'data-maya-question': '' }, text: 'What are the 3–5 most important ideas from this lesson?' });
+    root.appendChild(q);
+
+    // Reply
+    var reply = el('textarea', {
+      cls: 'maya-reply',
+      attrs: {
+        'data-maya-reply': '',
+        placeholder: 'Answer Maya here…',
+        rows: '3'
+      }
+    });
+    root.appendChild(reply);
+
+    // Actions
+    var acts = el('div', { cls: 'maya-actions' });
+    var btnContinue = el('button', {
+      cls: 'maya-btn primary',
+      attrs: { type: 'button', 'data-maya-continue': '' },
+      text: 'Continue with Maya'
+    });
+    var btnFinal = el('button', {
+      cls: 'maya-btn ghost',
+      attrs: { type: 'button', 'data-maya-final': '', disabled: 'disabled', 'aria-disabled': 'true' },
+      text: 'Request Final Review'
+    });
+    acts.appendChild(btnContinue);
+    acts.appendChild(btnFinal);
+    root.appendChild(acts);
+
+    // Local hint
+    root.appendChild(el('div', { cls: 'maya-local-hint', attrs: { 'data-maya-local-hint': '' } }));
+
+    // Note suggestion
+    var noteWrap = el('div', { cls: 'maya-note-suggestion', attrs: { 'data-maya-note': '' } });
+    noteWrap.appendChild(el('div', { cls: 'maya-note-suggestion-label', text: 'Maya suggests adding:' }));
+    noteWrap.appendChild(el('div', { attrs: { 'data-maya-note-body': '' } }));
+    root.appendChild(noteWrap);
+
+    // Readiness
+    var ready = el('div', {
+      cls: 'maya-readiness',
+      attrs: { 'data-maya-readiness': '' }
+    });
+    ready.appendChild(el('div', { cls: 'maya-readiness-title', text: 'Still needed' }));
+    ready.appendChild(el('ul', { cls: 'maya-readiness-list', attrs: { 'data-maya-readiness-list': '' } }));
+    root.appendChild(ready);
+
+    // Error
+    root.appendChild(el('div', {
+      cls: 'maya-error',
+      attrs: { 'data-maya-error': '' }
+    }));
+
+    root.setAttribute('data-coach-built', '1');
+  }
+
+  // ---------------------------------------------------------------------
+  // Coach instance
+  // ---------------------------------------------------------------------
+
+  function Coach(root, config) {
+    this.root = root;
+    this.config = config;
+    this.editor = null;
+    this.history = [];
+    this.lastQuestion = '';
+    this.stage = config.initialStage || 'structure';
+    this.scores = config.initialScores || { coverage: 0, accuracy: 0, own_wording: 0, correlation: 0, instructor_confidence: 0 };
+    this.flags = { major_paste: false, needs_deeper_question: false };
+    this.readiness = { ready_for_final_review: false, missing: [], minimum_interactions_met: false, unresolved_required_question: true };
+    this.interactionCount = 0;
+    this.busy = false;
+    this.lastCheckpointAt = 0;
+    this.lastTextLen = 0;
+    this.charsSinceLastCheckpoint = 0;
+    this.lastInputAt = 0;
+    this.idleTimer = null;
+    this.pasteWindow = []; // {ts, chars}
+    this.aborted = false;
+    this.startedSession = false;
+
+    this._cacheElements();
+    this._wireUi();
+    this._attachEditor();
+    this._bootstrap();
+  }
+
+  Coach.prototype._cacheElements = function () {
+    this.elMessage = $('[data-maya-message]', this.root);
+    this.elStage = $('[data-maya-stage]', this.root);
+    this.elQuestion = $('[data-maya-question]', this.root);
+    this.elReply = $('[data-maya-reply]', this.root);
+    this.btnContinue = $('[data-maya-continue]', this.root);
+    this.btnFinal = $('[data-maya-final]', this.root);
+    this.elReadiness = $('[data-maya-readiness]', this.root);
+    this.elReadinessList = $('[data-maya-readiness-list]', this.root) ||
+                          (this.elReadiness ? this.elReadiness.querySelector('ul') : null);
+    this.elLocalHint = $('[data-maya-local-hint]', this.root);
+    this.elNote = $('[data-maya-note]', this.root);
+    this.elNoteBody = $('[data-maya-note-body]', this.root) ||
+                     (this.elNote ? this.elNote.querySelector('div:last-child') : null);
+    this.elError = $('[data-maya-error]', this.root);
+    this.scoreRows = {};
+    var self = this;
+    Object.keys(SCORE_LABELS).forEach(function (k) {
+      self.scoreRows[k] = $('[data-maya-score="' + k + '"]', self.root);
+    });
+  };
+
+  Coach.prototype._wireUi = function () {
+    var self = this;
+
+    if (this.btnContinue) {
+      this.btnContinue.addEventListener('click', function () {
+        self._handleContinue();
+      });
+    }
+    if (this.btnFinal) {
+      this.btnFinal.addEventListener('click', function () {
+        self._handleFinalReview();
+      });
+    }
+
+    if (this.elReply) {
+      this.elReply.addEventListener('keydown', function (e) {
+        // Ctrl/Cmd+Enter sends the reply quickly.
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          self._handleContinue();
+        }
+      });
+    }
+  };
+
+  Coach.prototype._resolveEditor = function () {
+    var sel = this.config.editorSelector;
+    if (!sel) return null;
+    if (typeof sel === 'string') return document.querySelector(sel);
+    if (sel && typeof sel.nodeType === 'number') return sel;
+    if (typeof sel === 'function') {
+      try { return sel(); } catch (e) { return null; }
+    }
+    return null;
+  };
+
+  Coach.prototype._attachEditor = function () {
+    var ed = this._resolveEditor();
+    if (!ed) {
+      // Defer once: host page may render the editor lazily (e.g. modal).
+      var self = this;
+      setTimeout(function () {
+        var ed2 = self._resolveEditor();
+        if (ed2) self._bindEditor(ed2);
+      }, 250);
+      return;
+    }
+    this._bindEditor(ed);
+  };
+
+  Coach.prototype._bindEditor = function (ed) {
+    if (this.editor === ed) return;
+    this.editor = ed;
+    var self = this;
+
+    var snapshot = plainTextFromEditor(ed);
+    this.lastTextLen = snapshot.length;
+
+    ed.addEventListener('input', function () {
+      self._onEditorInput();
+    });
+    ed.addEventListener('paste', function (e) {
+      self._onEditorPaste(e);
+    });
+  };
+
+  Coach.prototype.refreshEditor = function () {
+    var ed = this._resolveEditor();
+    if (ed && ed !== this.editor) {
+      this._bindEditor(ed);
+    }
+    if (this.editor) {
+      this.lastTextLen = plainTextFromEditor(this.editor).length;
+    }
+  };
+
+  Coach.prototype.attachEditor = function (editorEl) {
+    if (editorEl) this._bindEditor(editorEl);
+  };
+
+  Coach.prototype.setSummaryId = function (summaryId) {
+    if (typeof summaryId === 'number' && summaryId > 0) {
+      this.config.summaryId = summaryId;
+    }
+  };
+
+  Coach.prototype._onEditorInput = function () {
+    var text = plainTextFromEditor(this.editor);
+    var newLen = text.length;
+    var delta = newLen - this.lastTextLen;
+    this.lastTextLen = newLen;
+    this.lastInputAt = nowMs();
+
+    if (delta > 0) {
+      this.charsSinceLastCheckpoint += delta;
+      this._recordPasteWindow(delta);
+    }
+
+    this._evaluateLocalHints(text);
+
+    var self = this;
+    if (this.idleTimer) clearTimeout(this.idleTimer);
+    this.idleTimer = setTimeout(function () {
+      self._maybeIdleCheckpoint();
+    }, IDLE_AFTER_TYPING_MS);
+  };
+
+  Coach.prototype._onEditorPaste = function (e) {
+    var dt = e && e.clipboardData;
+    var pasted = '';
+    if (dt) {
+      try {
+        pasted = dt.getData('text/plain') || dt.getData('text') || '';
+      } catch (err) {
+        pasted = '';
+      }
+    }
+    var ln = pasted.length;
+    if (ln >= PASTE_BURST_CHARS_THRESHOLD) {
+      this._triggerMajorPaste(ln);
+    } else {
+      // Small paste still counts toward burst window detection in
+      // _recordPasteWindow on the subsequent `input` event.
+      this._recordPasteWindow(ln);
+    }
+  };
+
+  Coach.prototype._recordPasteWindow = function (chars) {
+    var t = nowMs();
+    this.pasteWindow.push({ ts: t, chars: chars });
+    // Drop entries older than the window.
+    while (this.pasteWindow.length && (t - this.pasteWindow[0].ts > PASTE_BURST_WINDOW_MS)) {
+      this.pasteWindow.shift();
+    }
+    var sum = 0;
+    for (var i = 0; i < this.pasteWindow.length; i++) sum += this.pasteWindow[i].chars;
+    if (sum >= PASTE_BURST_CHARS_THRESHOLD) {
+      this._triggerMajorPaste(sum);
+      this.pasteWindow = []; // reset window after triggering
+    }
+  };
+
+  Coach.prototype._triggerMajorPaste = function (chars) {
+    if (this.flags.major_paste) {
+      // Already flagged — don't spam checkpoints.
+      this._showLocalHint('That looks like more pasted text. Explain it in your own words before we move on.');
+      this._renderState();
+      return;
+    }
+    this.flags.major_paste = true;
+    this._showLocalHint('That looks like pasted text. No problem — explain the main idea in your own words before we use it.');
+    this._renderState();
+    this._sendCheckpoint({ trigger: 'paste' });
+  };
+
+  Coach.prototype._maybeIdleCheckpoint = function () {
+    if (this.busy) return;
+    if (this.charsSinceLastCheckpoint < MIN_NEW_TEXT_FOR_IDLE_CHECK) return;
+    if (nowMs() - this.lastCheckpointAt < MIN_INTERVAL_BETWEEN_CHECKPOINTS_MS) return;
+    this._sendCheckpoint({ trigger: 'idle' });
+  };
+
+  Coach.prototype._evaluateLocalHints = function (text) {
+    if (!text) {
+      this._hideLocalHint();
+      return;
+    }
+    if (this.flags.major_paste) {
+      // Keep paste hint dominant.
+      return;
+    }
+    var paragraphs = countParagraphs(text);
+    var words = countWords(text);
+
+    // Wall of text: long single block.
+    var longestBlock = text.split(/\n{1,}/).reduce(function (mx, p) {
+      var L = p.trim().length;
+      return L > mx ? L : mx;
+    }, 0);
+
+    if (longestBlock > WALL_OF_TEXT_MIN_CHARS && paragraphs <= 1) {
+      this._showLocalHint('Try splitting this into smaller sections so each idea is easy to find.');
+      return;
+    }
+
+    if (words > 25 && paragraphs >= 1 && words < 80 && this.stage === 'structure') {
+      this._showLocalHint('Nice start — now add why this matters in flight.');
+      return;
+    }
+
+    if (words >= 80 && this.stage === 'explain') {
+      this._showLocalHint('You are listing facts. Now explain the relationship between them.');
+      return;
+    }
+
+    if (words >= 60 && (this.stage === 'correlate' || this.stage === 'operational_example')) {
+      this._showLocalHint('Add one operational example — what would you do on the ramp or in the cockpit?');
+      return;
+    }
+
+    this._hideLocalHint();
+  };
+
+  Coach.prototype._showLocalHint = function (text) {
+    if (!this.elLocalHint) return;
+    this.elLocalHint.textContent = text;
+    this.elLocalHint.setAttribute('data-visible', '1');
+  };
+  Coach.prototype._hideLocalHint = function () {
+    if (!this.elLocalHint) return;
+    this.elLocalHint.removeAttribute('data-visible');
+  };
+
+  Coach.prototype._showError = function (text) {
+    if (!this.elError) return;
+    this.elError.textContent = text;
+    this.elError.setAttribute('data-visible', '1');
+    this.root.setAttribute('data-coach-state', 'error');
+    var self = this;
+    setTimeout(function () {
+      if (self.elError) self.elError.removeAttribute('data-visible');
+      if (self.root.getAttribute('data-coach-state') === 'error') {
+        self.root.removeAttribute('data-coach-state');
+      }
+    }, 5000);
+  };
+
+  Coach.prototype._setBusy = function (v) {
+    this.busy = !!v;
+    if (v) {
+      this.root.setAttribute('data-coach-state', 'thinking');
+    } else if (this.root.getAttribute('data-coach-state') === 'thinking') {
+      this.root.removeAttribute('data-coach-state');
+    }
+    if (this.btnContinue) {
+      if (v) {
+        this.btnContinue.setAttribute('disabled', 'disabled');
+        this.btnContinue.setAttribute('aria-disabled', 'true');
+      } else {
+        this.btnContinue.removeAttribute('disabled');
+        this.btnContinue.removeAttribute('aria-disabled');
+      }
+    }
+    if (this.btnFinal) {
+      if (v) {
+        this.btnFinal.setAttribute('disabled', 'disabled');
+        this.btnFinal.setAttribute('aria-disabled', 'true');
+      } else {
+        this._renderFinalButton();
+      }
+    }
+  };
+
+  // -------------------------------------------------------------------
+  // API calls
+  // -------------------------------------------------------------------
+
+  Coach.prototype._buildLocalFlags = function () {
+    var text = this.editor ? plainTextFromEditor(this.editor) : '';
+    return {
+      major_paste: !!this.flags.major_paste,
+      wall_of_text: text.split(/\n{1,}/).some(function (p) { return p.trim().length > WALL_OF_TEXT_MIN_CHARS; }),
+      word_count: countWords(text),
+      paragraph_count: countParagraphs(text)
+    };
+  };
+
+  Coach.prototype._buildSummaryExcerpt = function () {
+    if (!this.editor) return '';
+    var text = plainTextFromEditor(this.editor);
+    return sliceFromEnd(text, SUMMARY_EXCERPT_MAX_CHARS);
+  };
+
+  Coach.prototype._buildPayload = function (action, extra) {
+    var p = {
+      action: action,
+      lesson_id: this.config.lessonId,
+      cohort_id: this.config.cohortId || 0,
+      summary_id: this.config.summaryId || 0,
+      context: this.config.context || 'player',
+      coach_stage: this.stage,
+      current_question: this.lastQuestion || '',
+      summary_excerpt: this._buildSummaryExcerpt(),
+      local_flags: this._buildLocalFlags(),
+      coach_history: this.history.slice(-8)
+    };
+    if (extra) {
+      Object.keys(extra).forEach(function (k) { p[k] = extra[k]; });
+    }
+    return p;
+  };
+
+  Coach.prototype._postJson = function (payload) {
+    var url = this.config.apiUrl;
+    if (!url) {
+      return Promise.reject(new Error('summary_coach apiUrl missing'));
+    }
+    var headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    if (this.config.csrfToken) {
+      headers['X-CSRF-Token'] = this.config.csrfToken;
+    }
+    return fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: headers,
+      body: JSON.stringify(payload)
+    }).then(function (res) {
+      return res.text().then(function (text) {
+        var json = null;
+        try { json = JSON.parse(text); } catch (e) { json = null; }
+        if (!res.ok) {
+          var err = (json && json.error) ? json.error : ('HTTP ' + res.status);
+          throw new Error(err);
+        }
+        if (!json) throw new Error('Invalid JSON response');
+        return json;
+      });
+    });
+  };
+
+  Coach.prototype._bootstrap = function () {
+    this._renderState();
+    if (!this.config.lessonId) {
+      this._showError('Maya could not start: missing lesson context.');
+      return;
+    }
+    var self = this;
+    this._postJson({
+      action: 'start_session',
+      lesson_id: this.config.lessonId,
+      cohort_id: this.config.cohortId || 0,
+      summary_id: this.config.summaryId || 0,
+      context: this.config.context || 'player'
+    }).then(function (j) {
+      if (!j || j.ok === false) {
+        self._showError(j && j.error ? j.error : 'Maya could not start.');
+        return;
+      }
+      self.startedSession = true;
+      self._absorbResponse(j, { isStart: true });
+    }).catch(function (e) {
+      self._showError('Maya had trouble connecting. Your draft is still safe.');
+      // Console for dev visibility, never uses user data.
+      try { console.warn('[Maya] start_session failed:', e && e.message); } catch (ignored) {}
+    });
+  };
+
+  Coach.prototype._handleContinue = function () {
+    if (this.busy) return;
+    var reply = this.elReply ? String(this.elReply.value || '').trim() : '';
+    var trigger = reply !== '' ? 'student_reply' : 'micro_checkpoint';
+    this._sendCheckpoint({ trigger: trigger, studentReply: reply });
+  };
+
+  Coach.prototype._sendCheckpoint = function (opts) {
+    if (this.busy) return;
+    opts = opts || {};
+
+    this._setBusy(true);
+    this.lastCheckpointAt = nowMs();
+    this.charsSinceLastCheckpoint = 0;
+
+    var action = (opts.trigger === 'student_reply') ? 'student_reply' : 'micro_checkpoint';
+    var extra = {};
+    if (opts.studentReply !== undefined) extra.student_reply = opts.studentReply;
+
+    var self = this;
+    this._postJson(this._buildPayload(action, extra)).then(function (j) {
+      self._setBusy(false);
+      if (!j || j.ok === false) {
+        self._showError(j && j.error ? j.error : 'Maya had trouble responding.');
+        return;
+      }
+
+      // Compose history client-side from this turn for next prompt.
+      if (extra.student_reply) {
+        self.history.push({ role: 'student', message: extra.student_reply, stage: self.stage });
+      }
+      if (j.maya_message) {
+        self.history.push({ role: 'maya', message: j.maya_message, stage: j.stage || self.stage });
+      }
+      if (self.history.length > 16) {
+        self.history = self.history.slice(-16);
+      }
+
+      // Clear the reply box if we successfully sent one.
+      if (extra.student_reply && self.elReply) {
+        self.elReply.value = '';
+      }
+
+      self._absorbResponse(j, {});
+    }).catch(function (e) {
+      self._setBusy(false);
+      self._showError('Maya had trouble connecting. Your draft is still safe.');
+      try { console.warn('[Maya] checkpoint failed:', e && e.message); } catch (ignored) {}
+    });
+  };
+
+  Coach.prototype._handleFinalReview = function () {
+    if (this.busy) return;
+    if (!this.readiness || !this.readiness.ready_for_final_review) {
+      // Server-side will also reject — show the readiness panel.
+      this._showLocalHint('Final review unlocks once Maya has enough evidence. See "Still needed" below.');
+      return;
+    }
+    this._setBusy(true);
+
+    var payload = this._buildPayload('final_review', {});
+    payload.summary_html = this.editor ? htmlFromEditor(this.editor) : '';
+    payload.summary_excerpt = this.editor ? plainTextFromEditor(this.editor) : '';
+    payload.coach_history = this.history.slice(-12);
+
+    var self = this;
+    this._postJson(payload).then(function (j) {
+      self._setBusy(false);
+      if (!j || j.ok === false) {
+        self._showError(j && j.error ? j.error : 'Maya could not run the final review.');
+        return;
+      }
+      self._absorbResponse(j, { isFinalReview: true });
+
+      if (j.approved) {
+        // Hand off to the host page so it can refresh its production-side
+        // status (which is canonical, not Maya's). The canonical_check
+        // result from the API is the production-engine response.
+        if (typeof self.config.onCanonicalAccept === 'function') {
+          try {
+            self.config.onCanonicalAccept(j.canonical_check || null, j);
+          } catch (e) {
+            try { console.warn('[Maya] onCanonicalAccept handler error:', e && e.message); } catch (ignored) {}
+          }
+        }
+      }
+    }).catch(function (e) {
+      self._setBusy(false);
+      self._showError('Maya had trouble running final review. Your draft is still safe.');
+      try { console.warn('[Maya] final_review failed:', e && e.message); } catch (ignored) {}
+    });
+  };
+
+  // -------------------------------------------------------------------
+  // Apply server response → state → DOM
+  // -------------------------------------------------------------------
+
+  Coach.prototype._absorbResponse = function (j, opts) {
+    opts = opts || {};
+    if (j.stage) this.stage = String(j.stage);
+    if (j.scores && typeof j.scores === 'object') {
+      this.scores = {
+        coverage: clampInt(j.scores.coverage, 0, 100),
+        accuracy: clampInt(j.scores.accuracy, 0, 100),
+        own_wording: clampInt(j.scores.own_wording, 0, 100),
+        correlation: clampInt(j.scores.correlation, 0, 100),
+        instructor_confidence: clampInt(j.scores.instructor_confidence, 0, 100)
+      };
+    }
+    if (j.flags && typeof j.flags === 'object') {
+      this.flags = {
+        major_paste: !!j.flags.major_paste,
+        needs_deeper_question: !!j.flags.needs_deeper_question
+      };
+    }
+    if (j.readiness && typeof j.readiness === 'object') {
+      this.readiness = {
+        ready_for_final_review: !!j.readiness.ready_for_final_review,
+        missing: Array.isArray(j.readiness.missing) ? j.readiness.missing.slice(0) : [],
+        minimum_interactions_met: !!j.readiness.minimum_interactions_met,
+        unresolved_required_question: !!j.readiness.unresolved_required_question
+      };
+    }
+    if (typeof j.interaction_count === 'number') {
+      this.interactionCount = j.interaction_count;
+    }
+    if (typeof j.next_question === 'string') {
+      this.lastQuestion = j.next_question;
+    }
+    if (typeof j.maya_message === 'string') {
+      this._setMessage(j.maya_message);
+    }
+    if (typeof j.student_note_suggestion === 'string') {
+      this._setNoteSuggestion(j.student_note_suggestion);
+    }
+    if (opts.isFinalReview && j.approved) {
+      this.root.setAttribute('data-coach-state', 'ready');
+    }
+    this._renderState();
+  };
+
+  Coach.prototype._setMessage = function (text) {
+    if (!this.elMessage) return;
+    var t = String(text || '').trim();
+    if (t === '') {
+      this.elMessage.textContent = '';
+      this.elMessage.setAttribute('data-empty', '1');
+    } else {
+      this.elMessage.textContent = t;
+      this.elMessage.removeAttribute('data-empty');
+    }
+  };
+
+  Coach.prototype._setNoteSuggestion = function (text) {
+    if (!this.elNote) return;
+    var t = String(text || '').trim();
+    if (t === '') {
+      this.elNote.removeAttribute('data-visible');
+      if (this.elNoteBody) this.elNoteBody.textContent = '';
+      return;
+    }
+    if (this.elNoteBody) this.elNoteBody.textContent = t;
+    this.elNote.setAttribute('data-visible', '1');
+  };
+
+  Coach.prototype._renderState = function () {
+    // Stage label
+    if (this.elStage) {
+      var label = STAGE_LABELS[this.stage] || STAGE_LABELS.structure;
+      this.elStage.textContent = 'Current mission: ' + label;
+    }
+    // Question
+    if (this.elQuestion) {
+      var q = String(this.lastQuestion || '').trim();
+      this.elQuestion.textContent = q !== '' ? q : 'What\'s the most important idea so far, and why does it matter in flight?';
+    }
+    // Scores
+    var self = this;
+    Object.keys(this.scoreRows).forEach(function (key) {
+      var row = self.scoreRows[key];
+      if (!row) return;
+      var score = clampInt(self.scores[key], 0, 100);
+      var fill = row.querySelector('.maya-progress-fill');
+      var val = row.querySelector('.maya-progress-value');
+      if (fill) fill.style.width = score + '%';
+      if (val) val.textContent = String(score);
+      var pass = score >= (SCORE_PASS_THRESHOLDS[key] || 100);
+      var low = score < (SCORE_PASS_THRESHOLDS[key] || 100) * 0.6;
+      if (pass) {
+        row.setAttribute('data-pass', '1');
+        row.removeAttribute('data-low');
+      } else if (low) {
+        row.setAttribute('data-low', '1');
+        row.removeAttribute('data-pass');
+      } else {
+        row.removeAttribute('data-pass');
+        row.removeAttribute('data-low');
+      }
+    });
+
+    // Readiness panel
+    if (this.elReadiness) {
+      this.elReadiness.setAttribute('data-ready', this.readiness.ready_for_final_review ? '1' : '0');
+      var titleEl = this.elReadiness.querySelector('.maya-readiness-title');
+      if (titleEl) {
+        titleEl.textContent = this.readiness.ready_for_final_review
+          ? 'Ready for Final Review'
+          : 'Still needed';
+      }
+      if (this.elReadinessList) {
+        this.elReadinessList.innerHTML = '';
+        if (this.readiness.ready_for_final_review) {
+          var li = document.createElement('li');
+          li.className = 'maya-readiness-empty';
+          li.textContent = 'Maya has enough evidence — request the final review when you are ready.';
+          this.elReadinessList.appendChild(li);
+        } else {
+          var items = (this.readiness.missing || []);
+          if (!items.length) {
+            var liw = document.createElement('li');
+            liw.className = 'maya-readiness-empty';
+            liw.textContent = 'Keep coaching with Maya to unlock final review.';
+            this.elReadinessList.appendChild(liw);
+          } else {
+            items.forEach(function (txt) {
+              var li2 = document.createElement('li');
+              li2.textContent = String(txt || '');
+              self.elReadinessList.appendChild(li2);
+            });
+          }
+        }
+      }
+    }
+
+    // Final button
+    this._renderFinalButton();
+  };
+
+  Coach.prototype._renderFinalButton = function () {
+    if (!this.btnFinal) return;
+    var ready = !!(this.readiness && this.readiness.ready_for_final_review);
+    if (ready && !this.busy) {
+      this.btnFinal.removeAttribute('disabled');
+      this.btnFinal.removeAttribute('aria-disabled');
+      this.btnFinal.classList.remove('ghost');
+      this.btnFinal.classList.add('primary');
+      this.btnFinal.setAttribute('title', 'Run Maya\'s final review');
+    } else {
+      this.btnFinal.setAttribute('disabled', 'disabled');
+      this.btnFinal.setAttribute('aria-disabled', 'true');
+      this.btnFinal.classList.remove('primary');
+      this.btnFinal.classList.add('ghost');
+      var why = (this.readiness && this.readiness.missing && this.readiness.missing.length)
+        ? this.readiness.missing.slice(0, 3).join(' • ')
+        : 'Final review locked. Maya still needs more evidence of understanding.';
+      this.btnFinal.setAttribute('title', why);
+    }
+  };
+
+  // -------------------------------------------------------------------
+  // Module entry points
+  // -------------------------------------------------------------------
+
+  function attach(rootEl, config) {
+    if (!rootEl) return null;
+    config = config || global.IPCASummaryCoachConfig || {};
+    ensureCoachStructure(rootEl, {
+      avatarUrl: config.avatarUrl,
+      mode: config.mode,
+      host: config.host
+    });
+    return new Coach(rootEl, config);
+  }
+
+  function create(config) {
+    config = config || global.IPCASummaryCoachConfig || {};
+    var rootEl = null;
+    if (config.rootSelector) {
+      rootEl = document.querySelector(config.rootSelector);
+    } else if (config.root && config.root.nodeType === 1) {
+      rootEl = config.root;
+    } else {
+      rootEl = document.querySelector('[data-summary-coach]');
+    }
+    if (!rootEl) {
+      try { console.warn('[Maya] no root element found for create()'); } catch (e) {}
+      return null;
+    }
+    return attach(rootEl, config);
+  }
+
+  global.IPCASummaryCoach = {
+    create: create,
+    attach: attach,
+    version: '1.0.0-test'
+  };
+
+})(window);

@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/CompliancePostmarkConfig.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsCenterEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -204,42 +205,26 @@ $flash = cmpose_flash_take();
 $mode = $draftId > 0 ? 'Edit draft' : ($replyToEmailId > 0 ? 'Reply' : 'New message');
 
 cw_header('Compliance · Compose');
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Comms Center',
+    'title' => 'Compose · ' . $mode,
+    'description' => 'Outbound compliance email — routed via Postmark stream ' . (string)$summary['outbound_stream'] . '. Delivery and bounce events land in this thread automatically.',
+    'back' => array('href' => '/admin/compliance/inbox.php', 'label' => 'Inbox'),
+    'flash' => $flash,
+));
 ?>
 <style>
-  .cmpec-h1{margin:0 0 6px;font-size:22px;color:#0f172a;}
-  .cmpec-sub{margin:0 0 18px;color:#64748b;font-size:14px;}
-  .cmpec-back{color:#1e3c72;font-weight:700;text-decoration:none;}
-  .cmpec-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;margin-bottom:20px;}
-  .cmpec-row{display:grid;grid-template-columns:120px 1fr;gap:10px;align-items:start;margin-bottom:12px;}
-  .cmpec-row label{font-size:12px;font-weight:700;color:#475569;padding-top:9px;}
-  .cmpec-input,.cmpec-textarea{
-    width:100%;padding:9px 11px;border:1px solid #cbd5e1;border-radius:8px;
-    box-sizing:border-box;font-size:14px;font-family:inherit;
-  }
-  .cmpec-textarea{min-height:180px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;}
+  .cmpec-row{display:grid;grid-template-columns:140px 1fr;gap:12px;align-items:start;margin-bottom:14px;}
+  .cmpec-row > label{font-size:12px;font-weight:720;color:#7787a0;padding-top:12px;text-transform:uppercase;letter-spacing:.06em;}
+  .cmpec-frombox{background:#f6f9fd;border:1px solid var(--border-soft);border-radius:12px;padding:11px 14px;font-size:13.5px;color:var(--text-strong);font-weight:580;}
+  .cmpec-textarea{min-height:200px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;}
   .cmpec-textarea.is-html{min-height:140px;}
-  .cmpec-frombox{
-    background:#f1f5f9;border:1px solid #e2e8f0;border-radius:8px;
-    padding:8px 12px;font-size:13px;color:#334155;
-  }
-  .cmpec-flash{margin:0 0 16px;padding:10px 14px;border-radius:10px;font-size:13px;}
-  .cmpec-flash.is-success{background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;}
-  .cmpec-flash.is-error{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;}
   .cmpec-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;}
-  .cmpec-btn{
-    padding:10px 18px;border:0;border-radius:8px;font-weight:800;cursor:pointer;
-    font-size:14px;
-  }
-  .cmpec-btn.primary{background:#1e3c72;color:#fff;}
-  .cmpec-btn.secondary{background:#e2e8f0;color:#0f172a;}
-  .cmpec-btn.danger{background:#fee2e2;color:#991b1b;}
-  .cmpec-note{font-size:12px;color:#64748b;margin-top:6px;}
-  .cmpec-warn{
-    margin:0 0 16px;padding:10px 14px;background:#fef3c7;color:#92400e;
-    border:1px solid #fde68a;border-radius:10px;font-size:13px;
-  }
+  .cmpec-note{font-size:12px;color:var(--text-muted);margin-top:6px;}
+  .cmpec-warn{margin:0 0 18px;padding:14px 18px;background:rgba(196,118,11,0.08);color:#a66508;border:1px solid rgba(196,118,11,0.20);border-radius:14px;font-size:13px;font-weight:580;}
   details.cmpec-html{margin-top:10px;}
-  details.cmpec-html summary{cursor:pointer;font-weight:700;color:#3730a3;font-size:13px;}
+  details.cmpec-html summary{cursor:pointer;font-weight:720;color:#1f4079;font-size:13px;}
 
   .cmpec-dropzone-wrap{position:relative;}
   .cmpec-dropzone-label{
@@ -282,24 +267,7 @@ cw_header('Compliance · Compose');
   }
 </style>
 
-<p style="margin-bottom:12px;">
-  <a class="cmpec-back" href="/admin/compliance/inbox.php">← Inbox</a>
-  <span style="color:#64748b;margin:0 6px;">|</span>
-  <a class="cmpec-back" href="/admin/compliance/email_drafts.php">Drafts</a>
-</p>
-
-<section class="cmpec-card">
-  <h1 class="cmpec-h1">Compose · <?= h($mode) ?></h1>
-  <p class="cmpec-sub">
-    Outbound compliance email — routed via Postmark stream
-    <code><?= h((string)$summary['outbound_stream']) ?></code>. Delivery and bounce
-    events will land in this thread automatically.
-  </p>
-
-  <?php if ($flash !== null): ?>
-    <div class="cmpec-flash is-<?= h((string)$flash['type']) ?>"><?= h((string)$flash['message']) ?></div>
-  <?php endif; ?>
-
+<section class="cmp-card">
   <?php if (empty($summary['server_token_set']) || (string)$summary['from_address'] === ''): ?>
     <div class="cmpec-warn">
       Outbound is not fully configured yet —
@@ -605,4 +573,5 @@ cw_header('Compliance · Compose');
 </script>
 
 <?php
+compliance_page_close();
 cw_footer();

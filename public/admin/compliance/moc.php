@@ -71,11 +71,7 @@ $flash = moc_flash_take();
 
 cw_header('Compliance · Management of Change');
 
-if ($flash !== null) {
-    $cls = ($flash['type'] === 'success') ? 'is-ok' : ($flash['type'] === 'warn' ? 'is-warn' : 'is-danger');
-    echo '<div class="queue-status ' . h($cls) . '" style="margin:0 0 16px;padding:12px 16px;border-radius:12px;">'
-        . h((string)$flash['message']) . '</div>';
-}
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $crTotal = moc_count($pdo, 'SELECT COUNT(*) FROM ipca_compliance_manual_change_requests');
 $crOpen = moc_count(
@@ -103,71 +99,60 @@ try {
 }
 
 $recentCr = ComplianceManualControlEngine::listChangeRequests($pdo, 12);
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Management of change',
+    'title' => 'Management of change',
+    'description' => 'Cross-cut view of MoC cases, change requests, drafts in flight, and release packages not yet final. Cases act as envelopes for related findings, audits, change requests and release packages.',
+    'stats' => array(
+        array('label' => 'Change requests', 'value' => (int)$crTotal,        'sub' => (int)$crOpen . ' open / in-flight', 'href' => '/admin/compliance/change_requests.php', 'tone' => $crOpen > 0 ? 'warn' : 'ok'),
+        array('label' => 'Draft manuals',   'value' => (int)$drDraft,        'sub' => 'draft / under review', 'href' => '/admin/compliance/manual_drafts.php'),
+        array('label' => 'Packages',        'value' => (int)$pkgActive,      'sub' => 'in flight', 'href' => '/admin/compliance/manual_approved.php'),
+        array('label' => 'MoC cases',       'value' => count($mocCases),     'sub' => 'on file'),
+    ),
+    'flash' => $flash,
+));
 ?>
-<section style="padding:8px 0 40px;">
-  <h1 style="margin:0 0 8px;font-size:24px;">Management of change</h1>
-  <p style="color:#64748b;margin:0 0 24px;max-width:760px;line-height:1.55;">
-    Cross-cut view of MoC cases, change requests, drafts in flight, and release packages not yet final.
-    Cases live in <code>ipca_compliance_cases</code> and act as envelopes for related findings, audits, change requests and release packages.
-  </p>
-
-  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;margin-bottom:28px;max-width:960px;">
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px 20px;">
-      <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.08em;">Change requests</div>
-      <div style="font-size:28px;font-weight:800;color:#0f172a;"><?= (int)$crTotal ?></div>
-      <div style="font-size:13px;color:#64748b;"><?= (int)$crOpen ?> open / in-flight</div>
-    </div>
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px 20px;">
-      <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.08em;">Draft manuals</div>
-      <div style="font-size:28px;font-weight:800;color:#0f172a;"><?= (int)$drDraft ?></div>
-      <div style="font-size:13px;color:#64748b;">draft / under review</div>
-    </div>
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px 20px;">
-      <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.08em;">Packages</div>
-      <div style="font-size:28px;font-weight:800;color:#0f172a;"><?= (int)$pkgActive ?></div>
-      <div style="font-size:13px;color:#64748b;">not released / superseded</div>
-    </div>
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:18px 20px;">
-      <div style="font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.08em;">MoC cases</div>
-      <div style="font-size:28px;font-weight:800;color:#0f172a;"><?= count($mocCases) ?></div>
-      <div style="font-size:13px;color:#64748b;">on file</div>
-    </div>
-  </div>
-
-  <div style="display:grid;grid-template-columns:1fr 360px;gap:24px;align-items:start;max-width:1200px;margin-bottom:24px;">
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;">
-      <h2 style="margin:0 0 12px;font-size:16px;">MoC cases</h2>
+  <div style="display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start;">
+    <section class="cmp-card">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title">
+          <?= compliance_ui_icon('list') ?>
+          <span>MoC cases</span>
+        </div>
+        <div class="cmp-count-pill"><?= count($mocCases) ?></div>
+      </div>
       <?php if ($mocCases !== array()): ?>
-        <table style="width:100%;font-size:14px;border-collapse:collapse;">
-          <thead><tr style="background:#f1f5f9;text-align:left;">
-            <th style="padding:8px 10px;">Code</th>
-            <th style="padding:8px 10px;">Title</th>
-            <th style="padding:8px 10px;">Status</th>
-            <th style="padding:8px 10px;">Opened</th>
-            <th style="padding:8px 10px;">Due</th>
-            <th style="padding:8px 10px;"></th>
+        <table>
+          <thead><tr>
+            <th>Code</th>
+            <th>Title</th>
+            <th>Status</th>
+            <th>Opened</th>
+            <th>Due</th>
+            <th></th>
           </tr></thead>
           <tbody>
             <?php foreach ($mocCases as $c): ?>
-              <tr style="border-top:1px solid #e2e8f0;">
-                <td style="padding:8px 10px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$c['case_code']) ?></td>
-                <td style="padding:8px 10px;"><?= h((string)$c['title']) ?></td>
-                <td style="padding:8px 10px;">
-                  <?= h((string)$c['status']) ?>
+              <tr>
+                <td class="cmp-mono"><?= h((string)$c['case_code']) ?></td>
+                <td><?= h((string)$c['title']) ?></td>
+                <td>
+                  <span class="cmp-pill"><?= h((string)$c['status']) ?></span>
                   <?php if (!empty($c['locked_at'])): ?>
-                    <span class="queue-status is-warn" style="margin-left:6px;padding:2px 6px;border-radius:6px;">Locked</span>
+                    <span class="cmp-pill" style="margin-left:6px;">Locked</span>
                   <?php endif; ?>
                 </td>
-                <td style="padding:8px 10px;color:#64748b;font-size:12px;"><?= h(substr((string)($c['opened_at'] ?? ''), 0, 10)) ?></td>
-                <td style="padding:8px 10px;color:#64748b;font-size:12px;"><?= h(substr((string)($c['due_at'] ?? ''), 0, 10)) ?></td>
-                <td style="padding:8px 10px;">
+                <td class="cmp-mono"><?= h(substr((string)($c['opened_at'] ?? ''), 0, 10)) ?></td>
+                <td class="cmp-mono"><?= h(substr((string)($c['due_at'] ?? ''), 0, 10)) ?></td>
+                <td>
                   <?php if (empty($c['locked_at']) && (string)$c['status'] !== 'CLOSED'): ?>
                     <form method="post" style="display:inline-flex;gap:6px;align-items:center;"
                       onsubmit="return confirm('Close this MoC case?');">
                       <input type="hidden" name="action" value="update_case_status">
                       <input type="hidden" name="case_id" value="<?= (int)$c['id'] ?>">
                       <input type="hidden" name="status" value="CLOSED">
-                      <button type="submit" style="background:#0f766e;color:#fff;border:0;padding:6px 10px;border-radius:6px;font-weight:700;cursor:pointer;font-size:12px;">Close</button>
+                      <button type="submit" class="cmp-btn-secondary" style="height:32px;min-height:32px;padding:0 12px;font-size:12px;">Close</button>
                     </form>
                   <?php endif; ?>
                 </td>
@@ -176,30 +161,30 @@ $recentCr = ComplianceManualControlEngine::listChangeRequests($pdo, 12);
           </tbody>
         </table>
       <?php else: ?>
-        <p style="color:#64748b;font-size:14px;margin:0;">No MoC cases yet. Use the form on the right to create one.</p>
+        <p style="color:var(--text-muted);font-size:14px;margin:0;">No MoC cases yet. Use the form on the right to create one.</p>
       <?php endif; ?>
-    </div>
+    </section>
 
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;">
-      <h3 style="margin:0 0 14px;font-size:16px;">New MoC case</h3>
+    <section class="cmp-card">
+      <h3 style="margin:0 0 14px;">New MoC case</h3>
       <form method="post" action="/admin/compliance/moc.php">
         <input type="hidden" name="action" value="create_moc_case">
-        <label style="display:block;margin-bottom:10px;">
-          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Title *</span>
-          <input name="title" required style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+        <label class="cmp-field">
+          <span class="cmp-field-label">Title *</span>
+          <input name="title" required>
         </label>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-          <label style="flex:1 1 100px;">
-            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Status</span>
-            <select name="status" style="width:100%;padding:8px;border-radius:8px;">
+        <div class="cmp-field-row">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Status</span>
+            <select name="status">
               <option value="OPEN" selected>OPEN</option>
               <option value="IN_PROGRESS">IN_PROGRESS</option>
               <option value="WAITING_AUTHORITY">WAITING_AUTHORITY</option>
             </select>
           </label>
-          <label style="flex:1 1 100px;">
-            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Severity</span>
-            <select name="severity" style="width:100%;padding:8px;border-radius:8px;">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Severity</span>
+            <select name="severity">
               <option value="">—</option>
               <option value="LOW">LOW</option>
               <option value="MEDIUM">MEDIUM</option>
@@ -208,62 +193,74 @@ $recentCr = ComplianceManualControlEngine::listChangeRequests($pdo, 12);
             </select>
           </label>
         </div>
-        <label style="display:block;margin-bottom:10px;">
-          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Authority</span>
-          <input name="authority" placeholder="BCAA / EASA / INTERNAL" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+        <label class="cmp-field">
+          <span class="cmp-field-label">Authority</span>
+          <input name="authority" placeholder="BCAA / EASA / INTERNAL">
         </label>
-        <label style="display:block;margin-bottom:10px;">
-          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Due date</span>
-          <input type="date" name="due_at" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+        <label class="cmp-field">
+          <span class="cmp-field-label">Due date</span>
+          <input type="date" name="due_at">
         </label>
-        <label style="display:block;margin-bottom:14px;">
-          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Summary</span>
-          <textarea name="summary" rows="4" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"></textarea>
+        <label class="cmp-field">
+          <span class="cmp-field-label">Summary</span>
+          <textarea name="summary" rows="4"></textarea>
         </label>
-        <button type="submit" style="width:100%;background:#1e3c72;color:#fff;border:0;padding:12px;border-radius:10px;font-weight:800;cursor:pointer;">
-          Create MoC case
-        </button>
+        <button type="submit" style="width:100%;">Create MoC case</button>
       </form>
-    </div>
+    </section>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:start;max-width:1200px;">
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;">
-      <h2 style="margin:0 0 12px;font-size:16px;">Recent change requests</h2>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;margin-top:20px;">
+    <section class="cmp-card">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title">
+          <?= compliance_ui_icon('document') ?>
+          <span>Recent change requests</span>
+        </div>
+        <div class="cmp-count-pill"><?= count($recentCr) ?></div>
+      </div>
       <ul style="margin:0;padding:0;list-style:none;font-size:13px;">
         <?php foreach ($recentCr as $r): ?>
-          <li style="padding:10px 0;border-bottom:1px solid #f1f5f9;display:flex;justify-content:space-between;gap:12px;">
-            <span><a href="/admin/compliance/change_requests.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1e3c72;"><?= h((string)$r['request_code']) ?></a>
-              <span style="color:#64748b;"> — <?= h((string)$r['status']) ?></span></span>
+          <li style="padding:10px 0;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;gap:12px;">
+            <span>
+              <a href="/admin/compliance/change_requests.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1f4079;text-decoration:none;"><?= h((string)$r['request_code']) ?></a>
+              <span style="color:var(--text-muted);"> — <?= h((string)$r['status']) ?></span>
+            </span>
           </li>
         <?php endforeach; ?>
         <?php if ($recentCr === array()): ?>
-          <li style="color:#64748b;padding:12px 0;">None yet.</li>
+          <li style="color:var(--text-muted);padding:12px 0;">None yet.</li>
         <?php endif; ?>
       </ul>
-      <p style="margin:14px 0 0;"><a href="/admin/compliance/change_requests.php" style="font-weight:700;color:#3730a3;">All requests →</a></p>
-    </div>
+      <p style="margin:14px 0 0;"><a class="cmp-btn-link" href="/admin/compliance/change_requests.php" style="text-decoration:none;font-weight:700;color:#1f4079;">All requests →</a></p>
+    </section>
 
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;">
-      <h2 style="margin:0 0 12px;font-size:16px;">Upcoming effective dates</h2>
-      <table style="width:100%;font-size:13px;border-collapse:collapse;">
+    <section class="cmp-card">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title">
+          <?= compliance_ui_icon('calendar') ?>
+          <span>Upcoming effective dates</span>
+        </div>
+        <div class="cmp-count-pill"><?= count($upcomingPkgs) ?></div>
+      </div>
+      <table>
         <?php foreach ($upcomingPkgs as $p): ?>
-          <tr style="border-bottom:1px solid #f1f5f9;">
-            <td style="padding:8px 0;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$p['package_code']) ?></td>
-            <td style="padding:8px 0;"><?= h((string)($p['effective_date'] ?? '')) ?></td>
-            <td style="padding:8px 0;color:#64748b;"><?= h((string)$p['status']) ?></td>
+          <tr>
+            <td class="cmp-mono"><?= h((string)$p['package_code']) ?></td>
+            <td class="cmp-mono"><?= h((string)($p['effective_date'] ?? '')) ?></td>
+            <td><span class="cmp-pill"><?= h((string)$p['status']) ?></span></td>
           </tr>
         <?php endforeach; ?>
       </table>
       <?php if ($upcomingPkgs === array()): ?>
-        <p style="color:#64748b;font-size:13px;margin:8px 0 0;">No dated packages ahead.</p>
+        <p style="color:var(--text-muted);font-size:13px;margin:8px 0 0;">No dated packages ahead.</p>
       <?php endif; ?>
       <p style="margin:14px 0 0;">
-        <a href="/admin/compliance/manual_approved.php" style="font-weight:700;color:#3730a3;">Packages →</a>
-        · <a href="/admin/compliance/manual_drafts.php" style="font-weight:700;color:#3730a3;">Drafts →</a>
+        <a href="/admin/compliance/manual_approved.php" style="font-weight:700;color:#1f4079;text-decoration:none;">Packages →</a>
+        · <a href="/admin/compliance/manual_drafts.php" style="font-weight:700;color:#1f4079;text-decoration:none;">Drafts →</a>
       </p>
-    </div>
+    </section>
   </div>
-</section>
 <?php
+compliance_page_close();
 cw_footer();

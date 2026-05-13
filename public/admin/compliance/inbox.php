@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/CompliancePostmarkConfig.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsCenterEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -103,152 +104,97 @@ if ($filterQuery !== '') {
 }
 
 cw_header('Compliance · Inbox');
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Comms Center',
+    'title' => 'Compliance inbox',
+    'description' => 'Every email routed through ' . ($summary['inbox_address'] !== '' ? (string)$summary['inbox_address'] : 'compliance@ipca.training') . ' arrives here via the Postmark inbound webhook. Threads auto-group from In-Reply-To / References headers, falling back to mailbox-hash or normalised subject + sender.',
+    'actions' => array(
+        array('label' => 'New message', 'href' => '/admin/compliance/email_compose.php', 'icon' => 'plus'),
+        array('label' => 'Drafts',      'href' => '/admin/compliance/email_drafts.php', 'icon' => 'doc'),
+    ),
+    'stats' => array(
+        array('label' => 'Open threads',     'value' => (int)$stats['open'],              'href' => '/admin/compliance/inbox.php?status=open',              'tone' => (int)$stats['open'] > 0 ? 'warn' : 'ok'),
+        array('label' => 'Waiting internal', 'value' => (int)$stats['waiting_internal'],  'href' => '/admin/compliance/inbox.php?status=waiting_internal'),
+        array('label' => 'Waiting external', 'value' => (int)$stats['waiting_external'],  'href' => '/admin/compliance/inbox.php?status=waiting_external'),
+        array('label' => 'Unlinked',         'value' => (int)$stats['unlinked'],          'href' => '/admin/compliance/inbox.php?linked=unlinked'),
+        array('label' => 'With attachments', 'value' => (int)$stats['has_attachments'],   'href' => '/admin/compliance/inbox.php?attachments=1'),
+        array('label' => 'Closed',           'value' => (int)$stats['closed'],            'href' => '/admin/compliance/inbox.php?status=closed', 'tone' => 'ok'),
+    ),
+    'flash' => $flash,
+));
 ?>
 <style>
-  .cmpcc-h1{margin:0 0 6px;font-size:24px;color:#0f172a;}
-  .cmpcc-sub{margin:0 0 22px;color:#64748b;max-width:760px;line-height:1.55;}
-  .cmpcc-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;margin-bottom:20px;}
-  .cmpcc-kpis{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;margin-bottom:24px;max-width:1200px;}
-  .cmpcc-kpi-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px 18px;text-decoration:none;color:inherit;display:block;transition:box-shadow .12s ease;}
-  .cmpcc-kpi-card:hover{box-shadow:0 4px 14px rgba(15,23,42,.06);}
-  .cmpcc-kpi-label{font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.08em;}
-  .cmpcc-kpi-big{font-size:26px;font-weight:800;color:#0f172a;margin-top:4px;}
-  .cmpcc-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
-  .cmpcc-tab{
-    background:#e2e8f0;color:#0f172a;padding:6px 12px;border-radius:999px;
-    text-decoration:none;font-size:12px;font-weight:700;
-  }
-  .cmpcc-tab.is-on{background:#1e3c72;color:#fff;}
-  .cmpcc-table{width:100%;border-collapse:collapse;font-size:14px;}
-  .cmpcc-table th{
-    text-align:left;font-size:11px;color:#64748b;font-weight:800;letter-spacing:.05em;
-    text-transform:uppercase;padding:8px;background:#f1f5f9;
-  }
-  .cmpcc-table td{padding:10px 8px;border-top:1px solid #e2e8f0;vertical-align:top;}
-  .cmpcc-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-  .cmpcc-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.04em;}
-  .cmpcc-pill.s-open{background:#fee2e2;color:#991b1b;}
-  .cmpcc-pill.s-waiting_internal{background:#fef3c7;color:#92400e;}
-  .cmpcc-pill.s-waiting_external{background:#dbeafe;color:#1e3a8a;}
-  .cmpcc-pill.s-closed{background:#d1fae5;color:#065f46;}
-  .cmpcc-pill.s-archived{background:#e2e8f0;color:#475569;}
-  .cmpcc-pill.p-low{background:#e2e8f0;color:#475569;}
-  .cmpcc-pill.p-normal{background:#dbeafe;color:#1e3a8a;}
-  .cmpcc-pill.p-high{background:#fef3c7;color:#92400e;}
-  .cmpcc-pill.p-urgent{background:#fee2e2;color:#991b1b;}
-  .cmpcc-input{padding:8px;border:1px solid #cbd5e1;border-radius:8px;box-sizing:border-box;font-size:13px;}
-  .cmpcc-help{background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:18px 20px;font-size:13px;color:#334155;line-height:1.55;}
+  .cmpcc-card{margin-bottom:18px;}
+  .cmpcc-table{width:100%;border-collapse:separate;border-spacing:0;}
+  .cmpcc-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-muted);}
   .cmpcc-help code{background:#eef2ff;color:#3730a3;padding:1px 6px;border-radius:6px;font-size:12px;}
   .cmpcc-help ul{margin:6px 0 0;padding-left:18px;}
   .cmpcc-help li{margin-bottom:4px;}
-  .cmpcc-empty{padding:18px;color:#64748b;text-align:center;background:#f8fafc;border-radius:10px;}
+  .cmpcc-empty{padding:18px;color:var(--text-muted);text-align:center;background:#f6f9fd;border-radius:12px;}
   .cmpcc-flex{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
-  .cmpcc-clear{font-size:12px;font-weight:700;color:#3730a3;text-decoration:none;margin-left:6px;}
+  .cmpcc-clear{font-size:12px;font-weight:700;color:#1f4079;text-decoration:none;margin-left:6px;}
+  .cmpcc-bulk{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
+  .cmpcc-bulk select{height:36px;min-height:36px;padding:0 10px !important;font-size:12px !important;}
+  .cmpcc-bulk button{height:36px;min-height:36px;padding:0 12px !important;font-size:12px !important;}
 </style>
 
-<section style="padding:8px 0 40px;max-width:1200px;">
-  <h1 class="cmpcc-h1">Compliance inbox</h1>
-  <p class="cmpcc-sub">
-    Every email routed through <code><?= h($summary['inbox_address'] !== '' ? (string)$summary['inbox_address'] : 'compliance@ipca.training') ?></code>
-    arrives here via the Postmark inbound webhook. Threads are auto-grouped from <code>In-Reply-To</code> / <code>References</code> headers
-    when available, falling back to mailbox-hash or normalised subject + sender.
-  </p>
-
-  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px;">
-    <a href="/admin/compliance/email_compose.php"
-       style="background:#1e3c72;color:#fff;padding:9px 16px;border-radius:8px;font-weight:800;text-decoration:none;font-size:13px;">
-      + New message
-    </a>
-    <a href="/admin/compliance/email_drafts.php"
-       style="background:#e2e8f0;color:#0f172a;padding:9px 16px;border-radius:8px;font-weight:800;text-decoration:none;font-size:13px;">
-      Drafts
-    </a>
-  </div>
-
-  <div class="cmpcc-kpis">
-    <a class="cmpcc-kpi-card" href="/admin/compliance/inbox.php?status=open">
-      <div class="cmpcc-kpi-label">Open threads</div>
-      <div class="cmpcc-kpi-big"><?= (int)$stats['open'] ?></div>
-    </a>
-    <a class="cmpcc-kpi-card" href="/admin/compliance/inbox.php?status=waiting_internal">
-      <div class="cmpcc-kpi-label">Waiting internal</div>
-      <div class="cmpcc-kpi-big"><?= (int)$stats['waiting_internal'] ?></div>
-    </a>
-    <a class="cmpcc-kpi-card" href="/admin/compliance/inbox.php?status=waiting_external">
-      <div class="cmpcc-kpi-label">Waiting external</div>
-      <div class="cmpcc-kpi-big"><?= (int)$stats['waiting_external'] ?></div>
-    </a>
-    <a class="cmpcc-kpi-card" href="/admin/compliance/inbox.php?linked=unlinked">
-      <div class="cmpcc-kpi-label">Unlinked</div>
-      <div class="cmpcc-kpi-big"><?= (int)$stats['unlinked'] ?></div>
-    </a>
-    <a class="cmpcc-kpi-card" href="/admin/compliance/inbox.php?attachments=1">
-      <div class="cmpcc-kpi-label">With attachments</div>
-      <div class="cmpcc-kpi-big"><?= (int)$stats['has_attachments'] ?></div>
-    </a>
-    <a class="cmpcc-kpi-card" href="/admin/compliance/inbox.php?status=closed">
-      <div class="cmpcc-kpi-label">Closed</div>
-      <div class="cmpcc-kpi-big"><?= (int)$stats['closed'] ?></div>
-    </a>
-  </div>
-
-  <section class="cmpcc-card">
-    <form method="get" style="display:grid;grid-template-columns:1fr 160px 160px 160px auto;gap:10px;align-items:end;">
-      <label>
-        <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Search (subject + body)</span>
-        <input class="cmpcc-input" type="search" name="q" placeholder="any phrase — searches inside email bodies…"
-               value="<?= h($filterQuery) ?>" style="width:100%;">
+<section class="cmp-card cmp-toolbar">
+    <div class="cmp-toolbar-head">
+      <div class="cmp-toolbar-title">
+        <?= compliance_ui_icon('filter') ?>
+        <span>Filter and search</span>
+      </div>
+      <div class="cmp-toolbar-meta">Search inside subject + body, or narrow by status, priority and linkage.</div>
+    </div>
+    <form method="get">
+      <div class="cmp-toolbar-row">
+      <label class="cmp-field">
+        <span>Search (subject + body)</span>
+        <input type="search" name="q" placeholder="any phrase — searches inside email bodies…" value="<?= h($filterQuery) ?>">
       </label>
-      <label>
-        <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Status</span>
-        <select class="cmpcc-input" name="status" style="width:100%;">
+      <label class="cmp-field">
+        <span>Status</span>
+        <select name="status">
           <option value="">All</option>
           <?php foreach (array('open','waiting_internal','waiting_external','closed','archived') as $s): ?>
-            <option value="<?= h($s) ?>" <?= $filterStatus === $s ? 'selected' : '' ?>><?= h($s) ?></option>
+            <option value="<?= h($s) ?>" <?= $filterStatus === $s ? 'selected' : '' ?>><?= h(str_replace('_', ' ', $s)) ?></option>
           <?php endforeach; ?>
         </select>
       </label>
-      <label>
-        <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Priority</span>
-        <select class="cmpcc-input" name="priority" style="width:100%;">
+      <label class="cmp-field">
+        <span>Priority</span>
+        <select name="priority">
           <option value="">All</option>
           <?php foreach (array('low','normal','high','urgent') as $p): ?>
             <option value="<?= h($p) ?>" <?= $filterPriority === $p ? 'selected' : '' ?>><?= h($p) ?></option>
           <?php endforeach; ?>
         </select>
       </label>
-      <label>
-        <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Linked</span>
-        <select class="cmpcc-input" name="linked" style="width:100%;">
+      <label class="cmp-field">
+        <span>Linked</span>
+        <select name="linked">
           <option value="">All</option>
           <option value="linked" <?= $filterLinked === 'linked' ? 'selected' : '' ?>>Linked only</option>
           <option value="unlinked" <?= $filterLinked === 'unlinked' ? 'selected' : '' ?>>Unlinked only</option>
         </select>
       </label>
-      <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 16px;border-radius:8px;font-weight:800;cursor:pointer;">Filter</button>
+      </div>
+      <div class="cmp-toolbar-actions">
+        <button type="submit">Apply filters</button>
+        <?php if ($filterStatus !== '' || $filterPriority !== '' || $filterAttachments || $filterLinked !== '' || $filterQuery !== ''): ?>
+          <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/inbox.php" style="text-decoration:none;">Clear filters</a>
+        <?php endif; ?>
+        <label style="display:inline-flex;gap:6px;align-items:center;font-size:13px;color:var(--text-muted);margin-left:6px;">
+          <input type="checkbox" form="hiddenAttForm" disabled <?= $filterAttachments ? 'checked' : '' ?>>
+          <span>Has attachments</span>
+        </label>
+      </div>
     </form>
-    <div class="cmpcc-flex" style="margin-top:10px;">
-      <label style="display:inline-flex;gap:6px;align-items:center;font-size:13px;color:#334155;">
-        <input type="checkbox" form="hiddenAttForm" disabled <?= $filterAttachments ? 'checked' : '' ?>>
-        Has attachments
-      </label>
-      <?php if ($filterStatus !== '' || $filterPriority !== '' || $filterAttachments || $filterLinked !== '' || $filterQuery !== ''): ?>
-        <a class="cmpcc-clear" href="/admin/compliance/inbox.php">Clear filters</a>
-      <?php endif; ?>
-    </div>
   </section>
 
-  <?php if ($flash !== null): ?>
-    <div style="margin:0 0 16px;padding:10px 14px;border-radius:10px;font-size:13px;
-                background:<?= $flash['type'] === 'success' ? '#d1fae5' : '#fee2e2' ?>;
-                color:<?= $flash['type'] === 'success' ? '#065f46' : '#991b1b' ?>;
-                border:1px solid <?= $flash['type'] === 'success' ? '#6ee7b7' : '#fca5a5' ?>;">
-      <?= h((string)$flash['message']) ?>
-    </div>
-  <?php endif; ?>
-
   <?php if ($filterQuery !== '' && $searchResults !== array()): ?>
-    <section class="cmpcc-card">
+    <section class="cmp-card cmpcc-card">
       <h2 style="margin:0 0 6px;font-size:16px;">Search results for "<?= h($filterQuery) ?>"</h2>
       <p style="margin:0 0 12px;color:#64748b;font-size:13px;">
         Matching individual emails (across subject + body).
@@ -296,25 +242,30 @@ cw_header('Compliance · Inbox');
       </table>
     </section>
   <?php elseif ($filterQuery !== '' && $searchResults === array()): ?>
-    <section class="cmpcc-card">
+    <section class="cmp-card cmpcc-card">
       <div class="cmpcc-empty">
-        No emails match "<?= h($filterQuery) ?>". <a href="/admin/compliance/inbox.php" style="color:#1e3c72;font-weight:700;">Clear search</a>.
+        No emails match "<?= h($filterQuery) ?>". <a href="/admin/compliance/inbox.php" style="color:#1f4079;font-weight:700;">Clear search</a>.
       </div>
     </section>
   <?php endif; ?>
 
-  <section class="cmpcc-card">
+  <section class="cmp-card cmpcc-card">
+    <div class="cmp-list-head" style="margin-bottom:14px;">
+      <div class="cmp-list-title">
+        <?= compliance_ui_icon('inbox') ?>
+        <span>Thread roster</span>
+      </div>
+      <div class="cmp-count-pill"><?= count($threads) ?> thread<?= count($threads) === 1 ? '' : 's' ?></div>
+    </div>
     <?php if ($threads === array()): ?>
       <div class="cmpcc-empty">
         No threads in scope. Either nothing has arrived yet, or your filter excludes everything on file.
       </div>
     <?php else: ?>
       <form method="post" action="/admin/compliance/inbox.php<?= $_GET ? '?' . h(http_build_query($_GET)) : '' ?>" id="inboxBulkForm">
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;">
-          <strong id="inboxBulkSummary" style="font-size:13px;color:#0f172a;">
-            0 selected
-          </strong>
-          <select name="bulk_status_value" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;">
+        <div class="cmpcc-bulk">
+          <strong id="inboxBulkSummary" style="font-size:13px;color:var(--text-strong);">0 selected</strong>
+          <select name="bulk_status_value">
             <option value="open">open</option>
             <option value="waiting_internal">waiting internal</option>
             <option value="waiting_external">waiting external</option>
@@ -322,18 +273,16 @@ cw_header('Compliance · Inbox');
             <option value="archived" selected>archived</option>
           </select>
           <button type="submit" name="action" value="bulk_status"
-                  style="background:#1e3c72;color:#fff;border:0;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;"
                   onclick="return confirm('Apply this status to all selected threads?');">
             Set status
           </button>
-          <select name="bulk_priority_value" style="padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;margin-left:8px;">
+          <select name="bulk_priority_value" style="margin-left:8px;">
             <option value="low">low</option>
             <option value="normal">normal</option>
             <option value="high">high</option>
             <option value="urgent">urgent</option>
           </select>
-          <button type="submit" name="action" value="bulk_priority"
-                  style="background:#e2e8f0;color:#0f172a;border:0;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;"
+          <button type="submit" name="action" value="bulk_priority" class="cmp-btn-secondary"
                   onclick="return confirm('Apply this priority to all selected threads?');">
             Set priority
           </button>
@@ -410,8 +359,8 @@ cw_header('Compliance · Inbox');
     <?php endif; ?>
   </section>
 
-  <section class="cmpcc-card">
-    <h2 style="margin:0 0 12px;font-size:16px;">Webhook & integration status</h2>
+  <section class="cmp-card cmpcc-card">
+    <h2 style="margin:0 0 12px;">Webhook &amp; integration status</h2>
     <table class="cmpcc-table" style="margin-bottom:14px;">
       <tbody>
         <tr>
@@ -496,6 +445,6 @@ cw_header('Compliance · Inbox');
       </ul>
     </div>
   </section>
-</section>
 <?php
+compliance_page_close();
 cw_footer();

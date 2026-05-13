@@ -119,11 +119,7 @@ $detailId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 cw_header('Compliance · Approved Manuals');
 
-if ($flash) {
-    $cls = $flash['type'] === 'success' ? 'is-ok' : 'is-danger';
-    echo '<div class="queue-status ' . h($cls) . '" style="margin:0 0 16px;padding:12px 16px;border-radius:12px;">'
-        . h((string)$flash['message']) . '</div>';
-}
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $pkgStatuses = array('PLANNED', 'DRAFTING', 'REVIEW', 'APPROVED', 'RELEASED', 'SUPERSEDED', 'CANCELLED');
 $decisions = array('PENDING', 'APPROVED', 'REJECTED', 'RECUSED');
@@ -131,42 +127,49 @@ $decisions = array('PENDING', 'APPROVED', 'REJECTED', 'RECUSED');
 if ($detailId > 0) {
     $row = ComplianceManualControlEngine::getPackage($pdo, $detailId);
     if ($row === null) {
-        echo '<p>Not found.</p>';
-    } else {
-        $locked = !empty($row['locked_at']);
-        $apprs = ComplianceManualControlEngine::listPackageApprovals($pdo, $detailId);
-        $selectedDraftIds = ComplianceManualControlEngine::extractDraftIds($row['drafts_json'] ?? null);
-        $availableDrafts = ComplianceManualControlEngine::listReleasableDrafts($pdo);
-        $availableDraftIds = array();
-        foreach ($availableDrafts as $d) {
-            $availableDraftIds[(int)$d['id']] = true;
+        compliance_page_open(array(
+            'overline' => 'Compliance · Manual control',
+            'title' => 'Package not found',
+            'back' => array('href' => '/admin/compliance/manual_approved.php', 'label' => 'All packages'),
+        ));
+        echo '<section class="cmp-card"><p style="margin:0;">No row for that id.</p></section>';
+        compliance_page_close();
+        cw_footer();
+        return;
+    }
+    $locked = !empty($row['locked_at']);
+    $apprs = ComplianceManualControlEngine::listPackageApprovals($pdo, $detailId);
+    $selectedDraftIds = ComplianceManualControlEngine::extractDraftIds($row['drafts_json'] ?? null);
+    $availableDrafts = ComplianceManualControlEngine::listReleasableDrafts($pdo);
+    $availableDraftIds = array();
+    foreach ($availableDrafts as $d) {
+        $availableDraftIds[(int)$d['id']] = true;
+    }
+    $orphanIds = array();
+    foreach ($selectedDraftIds as $sid) {
+        if (!isset($availableDraftIds[$sid])) {
+            $orphanIds[] = $sid;
         }
-        $orphanIds = array();
-        foreach ($selectedDraftIds as $sid) {
-            if (!isset($availableDraftIds[$sid])) {
-                $orphanIds[] = $sid;
-            }
-        }
-        $orphanRows = array();
-        if ($orphanIds !== array()) {
-            $ph = implode(',', array_fill(0, count($orphanIds), '?'));
-            $st = $pdo->prepare(
-                'SELECT id, draft_code, draft_title, status FROM ipca_compliance_manual_drafts WHERE id IN (' . $ph . ')'
-            );
-            $st->execute($orphanIds);
-            $orphanRows = $st->fetchAll(PDO::FETCH_ASSOC) ?: array();
-        }
-        ?>
-        <p><a href="/admin/compliance/manual_approved.php" style="font-weight:700;color:#1e3c72;">← Packages</a></p>
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:16px;max-width:960px;">
-          <h1 style="margin:0 0 6px;font-size:22px;"><?= h((string)$row['package_code']) ?></h1>
-          <p style="color:#64748b;margin:0;"><?= h((string)$row['status']) ?>
-            <?php if ($locked): ?><span class="queue-status is-warn" style="margin-left:8px;">Locked</span><?php endif; ?>
-          </p>
-        </div>
-
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:16px;max-width:960px;">
-          <h2 style="margin:0 0 12px;font-size:18px;">Package</h2>
+    }
+    $orphanRows = array();
+    if ($orphanIds !== array()) {
+        $ph = implode(',', array_fill(0, count($orphanIds), '?'));
+        $st = $pdo->prepare(
+            'SELECT id, draft_code, draft_title, status FROM ipca_compliance_manual_drafts WHERE id IN (' . $ph . ')'
+        );
+        $st->execute($orphanIds);
+        $orphanRows = $st->fetchAll(PDO::FETCH_ASSOC) ?: array();
+    }
+    compliance_page_open(array(
+        'overline' => 'Compliance · Release package',
+        'title' => (string)$row['package_code'],
+        'description' => 'Status: ' . (string)$row['status'] . ($locked ? ' · LOCKED' : ''),
+        'back' => array('href' => '/admin/compliance/manual_approved.php', 'label' => 'All packages'),
+        'flash' => $flash,
+    ));
+    ?>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 12px;">Package</h2>
           <?php if (!$locked): ?>
             <form method="post">
               <input type="hidden" name="action" value="update_pkg">
@@ -294,10 +297,10 @@ if ($detailId > 0) {
               </div>
             <?php endif; ?>
           <?php endif; ?>
-        </div>
+        </section>
 
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:16px;max-width:960px;">
-          <h2 style="margin:0 0 12px;font-size:18px;">PDF release file</h2>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 12px;">PDF release file</h2>
           <?php
             $pdfRel = (string)($row['pdf_storage_relpath'] ?? '');
             $pdfSha = (string)($row['pdf_sha256'] ?? '');
@@ -338,10 +341,10 @@ if ($detailId > 0) {
               </form>
             <?php endif; ?>
           <?php endif; ?>
-        </div>
+        </section>
 
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;max-width:960px;">
-          <h2 style="margin:0 0 12px;font-size:18px;">Approvals</h2>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 12px;">Approvals</h2>
           <table style="width:100%;font-size:13px;border-collapse:collapse;">
             <thead><tr style="background:#f1f5f9;text-align:left;">
               <th style="padding:8px 10px;">Name</th>
@@ -389,21 +392,43 @@ if ($detailId > 0) {
                 <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Comments</span>
                 <input name="comments" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:240px;">
               </label>
-              <button type="submit" style="background:#334155;color:#fff;border:0;padding:10px 14px;border-radius:8px;font-weight:700;cursor:pointer;">Record</button>
+              <button type="submit">Record</button>
             </form>
           <?php endif; ?>
-        </div>
+        </section>
         <?php
-    }
 } else {
     $rows = ComplianceManualControlEngine::listPackages($pdo);
     $availableDrafts = ComplianceManualControlEngine::listReleasableDrafts($pdo);
-    ?>
-    <h1 style="margin:0 0 8px;">Manual release packages</h1>
-    <p style="color:#64748b;margin:0 0 20px;">Phase 4+ — bundle approved drafts for authority sign-off.</p>
 
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:820px;">
-      <h2 style="margin:0 0 12px;font-size:18px;">New package</h2>
+    $pkgCounts = array('open' => 0, 'released' => 0, 'planned' => 0, 'total' => count($rows));
+    foreach ($rows as $r) {
+        $st = (string)$r['status'];
+        if (!in_array($st, array('RELEASED','SUPERSEDED','CANCELLED'), true)) {
+            $pkgCounts['open']++;
+        }
+        if ($st === 'RELEASED') {
+            $pkgCounts['released']++;
+        }
+        if ($st === 'PLANNED' || $st === 'DRAFTING') {
+            $pkgCounts['planned']++;
+        }
+    }
+    compliance_page_open(array(
+        'overline' => 'Compliance · Manual control',
+        'title' => 'Release packages',
+        'description' => 'Bundle approved drafts for authority sign-off. Generate the PDF, route through approvals and lock for release.',
+        'stats' => array(
+            array('label' => 'Open',     'value' => (int)$pkgCounts['open'], 'tone' => $pkgCounts['open'] > 0 ? 'warn' : 'ok'),
+            array('label' => 'Planned',  'value' => (int)$pkgCounts['planned']),
+            array('label' => 'Released', 'value' => (int)$pkgCounts['released'], 'tone' => 'ok'),
+            array('label' => 'Total',    'value' => (int)$pkgCounts['total']),
+        ),
+        'flash' => $flash,
+    ));
+    ?>
+    <section class="cmp-card">
+      <h2 style="margin:0 0 12px;">New package</h2>
       <form method="post">
         <input type="hidden" name="action" value="create_pkg">
         <label style="display:block;margin-bottom:10px;">
@@ -455,44 +480,52 @@ if ($detailId > 0) {
             </div>
           <?php endif; ?>
         </div>
-        <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Create</button>
+        <button type="submit">Create</button>
       </form>
-    </div>
+    </section>
 
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;max-width:1100px;">
-      <table style="width:100%;border-collapse:collapse;font-size:14px;">
-        <thead><tr style="background:#f1f5f9;text-align:left;">
-          <th style="padding:12px 14px;">Code</th>
-          <th style="padding:12px 14px;">Title</th>
-          <th style="padding:12px 14px;">Status</th>
-          <th style="padding:12px 14px;">Effective</th>
-          <th style="padding:12px 14px;">PDF</th>
-          <th style="padding:12px 14px;"></th>
+    <section class="cmp-card" style="overflow:hidden;">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title">
+          <?= compliance_ui_icon('document') ?>
+          <span>Release packages</span>
+        </div>
+        <div class="cmp-count-pill"><?= count($rows) ?> package<?= count($rows) === 1 ? '' : 's' ?></div>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Code</th>
+          <th>Title</th>
+          <th>Status</th>
+          <th>Effective</th>
+          <th>PDF</th>
+          <th></th>
         </tr></thead>
         <tbody>
           <?php if (!$rows): ?>
-            <tr><td colspan="6" style="padding:20px;color:#64748b;">No packages yet.</td></tr>
+            <tr><td colspan="6" style="padding:20px;color:var(--text-muted);">No packages yet.</td></tr>
           <?php endif; ?>
           <?php foreach ($rows as $r): ?>
-            <tr style="border-top:1px solid #e2e8f0;">
-              <td style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$r['package_code']) ?></td>
-              <td style="padding:10px 14px;"><?= h((string)$r['title']) ?></td>
-              <td style="padding:10px 14px;"><?= h((string)$r['status']) ?></td>
-              <td style="padding:10px 14px;color:#64748b;font-size:12px;"><?= h((string)($r['effective_date'] ?? '—')) ?></td>
-              <td style="padding:10px 14px;font-size:12px;">
+            <tr>
+              <td class="cmp-mono"><?= h((string)$r['package_code']) ?></td>
+              <td><?= h((string)$r['title']) ?></td>
+              <td><span class="cmp-pill"><?= h((string)$r['status']) ?></span></td>
+              <td class="cmp-mono"><?= h((string)($r['effective_date'] ?? '—')) ?></td>
+              <td>
                 <?php if (!empty($r['pdf_storage_relpath'])): ?>
-                  <a href="/admin/compliance/manual_release_pdf.php?package_id=<?= (int)$r['id'] ?>" target="_blank" style="color:#0f766e;font-weight:700;">PDF</a>
+                  <a href="/admin/compliance/manual_release_pdf.php?package_id=<?= (int)$r['id'] ?>" target="_blank" style="color:#1f7a54;font-weight:700;">PDF</a>
                 <?php else: ?>
-                  <span style="color:#94a3b8;">—</span>
+                  <span style="color:var(--text-muted);">—</span>
                 <?php endif; ?>
               </td>
-              <td style="padding:10px 14px;"><a href="/admin/compliance/manual_approved.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1e3c72;">Open</a></td>
+              <td><a href="/admin/compliance/manual_approved.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1f4079;">Open</a></td>
             </tr>
           <?php endforeach; ?>
         </tbody>
       </table>
-    </div>
+    </section>
     <?php
 }
 
+compliance_page_close();
 cw_footer();

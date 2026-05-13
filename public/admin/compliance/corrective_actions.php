@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceFindingEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCapEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -132,6 +133,17 @@ $filterStatus = isset($_GET['status']) ? trim((string)$_GET['status']) : '';
 
 cw_header('Compliance · Corrective Actions');
 
+$capStatsHero = array();
+try {
+    $capStatsHero = array(
+        'open'    => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE COALESCE(status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')")->fetchColumn(),
+        'overdue' => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE due_date IS NOT NULL AND due_date < CURDATE() AND COALESCE(status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')")->fetchColumn(),
+        'in_progress' => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE status = 'IN_PROGRESS'")->fetchColumn(),
+        'verified' => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE status = 'VERIFIED'")->fetchColumn(),
+    );
+} catch (Throwable) {
+}
+
 $optionsType = array(
     'CORRECTIVE' => 'Corrective',
     'PREVENTIVE' => 'Preventive',
@@ -156,10 +168,27 @@ $optionsEffort = array(
     'XL' => 'XL',
 );
 
-if ($flash !== null) {
-    $cls = ($flash['type'] === 'success') ? 'is-ok' : 'is-danger';
-    echo '<div class="queue-status ' . h($cls) . '" style="margin-bottom:16px;padding:12px 16px;border-radius:12px;">'
-        . h((string)$flash['message']) . '</div>';
+if ($detailId > 0) {
+    compliance_page_open(array(
+        'overline' => 'Compliance · CAP',
+        'title' => 'Corrective action',
+        'description' => 'Edit the CAP details, track progress and verification, and link communications.',
+        'back' => array('href' => '/admin/compliance/corrective_actions.php', 'label' => 'All corrective actions'),
+        'flash' => $flash,
+    ));
+} else {
+    compliance_page_open(array(
+        'overline' => 'Compliance',
+        'title' => 'Corrective actions',
+        'description' => 'CAP items per finding — optional AI suggestions (human adopt). Filter by finding or status to scope the queue.',
+        'stats' => array(
+            array('label' => 'Open',        'value' => $capStatsHero['open']        ?? 0, 'tone' => ($capStatsHero['open']    ?? 0) > 0 ? 'warn' : 'ok'),
+            array('label' => 'Overdue',     'value' => $capStatsHero['overdue']     ?? 0, 'tone' => ($capStatsHero['overdue'] ?? 0) > 0 ? 'crit' : 'ok'),
+            array('label' => 'In progress', 'value' => $capStatsHero['in_progress'] ?? 0),
+            array('label' => 'Verified',    'value' => $capStatsHero['verified']    ?? 0, 'tone' => 'ok'),
+        ),
+        'flash' => $flash,
+    ));
 }
 
 try {
@@ -185,21 +214,20 @@ if ($detailId > 0) {
         $capLocked = !empty($cap['locked_at']);
         $fidRow = (int)$cap['finding_id'];
         ?>
-        <p style="margin-bottom:20px;">
-          <a href="/admin/compliance/corrective_actions.php" style="color:#1e3c72;font-weight:700;">← All actions</a>
-          <span style="color:#64748b;margin:0 8px;">|</span>
-          <span style="font-family:ui-monospace,monospace;font-size:13px;"><?= h((string)$cap['action_code']) ?></span>
-          <span style="color:#64748b;margin:0 8px;">|</span>
-          <a href="/admin/compliance/findings.php?id=<?= $fidRow ?>" style="color:#0f766e;">Open finding</a>
-          <span style="color:#64748b;margin:0 8px;">|</span>
-          <a href="/admin/compliance/export_rca_cap_pdf.php?finding_id=<?= $fidRow ?>">Export finding PDF</a>
-        </p>
-
-        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
-          <h2 style="margin:0 0 8px;font-size:20px;">Corrective action</h2>
-          <p style="color:#64748b;font-size:14px;margin:0 0 16px;">
-            Finding <strong><?= h((string)$cap['finding_code']) ?></strong>
-            — <?= h((string)$cap['finding_title']) ?>
+        <section class="cmp-card">
+          <div class="cmp-list-head" style="margin-bottom:14px;">
+            <div class="cmp-list-title">
+              <?= compliance_ui_icon('tools') ?>
+              <span><?= h((string)$cap['action_code']) ?></span>
+            </div>
+            <div style="display:flex;gap:10px;flex-wrap:wrap;">
+              <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/findings.php?id=<?= $fidRow ?>" style="text-decoration:none;">Open finding</a>
+              <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/export_rca_cap_pdf.php?finding_id=<?= $fidRow ?>" style="text-decoration:none;">Export PDF</a>
+            </div>
+          </div>
+          <p class="cmp-meta-line">
+            <span>Finding <strong><?= h((string)$cap['finding_code']) ?></strong></span>
+            <span><?= h((string)$cap['finding_title']) ?></span>
           </p>
           <?php if ($capLocked): ?>
             <p class="queue-status is-warn">This row is locked.</p>
@@ -294,48 +322,56 @@ if ($detailId > 0) {
         ? $bundle['options'] : array();
 
     ?>
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:20px;max-width:1200px;">
-      <div>
-        <h2 style="margin:0 0 6px;font-size:20px;">Corrective actions</h2>
-        <p style="margin:0;color:#64748b;font-size:14px;">CAP items per finding — optional AI suggestions (human adopt).</p>
+    <section class="cmp-card cmp-toolbar">
+      <div class="cmp-toolbar-head">
+        <div class="cmp-toolbar-title">
+          <?= compliance_ui_icon('filter') ?>
+          <span>Filter actions</span>
+        </div>
+        <div class="cmp-toolbar-meta">Scope by finding and status; latest activity first.</div>
       </div>
-      <form method="get" action="/admin/compliance/corrective_actions.php" style="display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
-        <label style="margin:0;">
-          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Finding</span>
-          <select name="finding_id" style="padding:8px;border-radius:8px;min-width:220px;">
-            <option value="">All findings</option>
-            <?php foreach ($findingsPick as $f): ?>
-              <option value="<?= (int)$f['id'] ?>" <?= $filterFinding === (int)$f['id'] ? 'selected' : '' ?>>
-                <?= h((string)$f['finding_code'] . ' — ' . (string)$f['title']) ?>
-              </option>
-            <?php endforeach; ?>
-          </select>
-        </label>
-        <label style="margin:0;">
-          <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Status</span>
-          <select name="status" style="padding:8px;border-radius:8px;">
-            <option value="">All</option>
-            <?php foreach ($optionsCapStatus as $k => $lab): ?>
-              <option value="<?= h($k) ?>" <?= $filterStatus === $k ? 'selected' : '' ?>><?= h($lab) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </label>
-        <button type="submit" style="padding:8px 14px;border-radius:8px;border:1px solid #cbd5e1;background:#f8fafc;font-weight:700;cursor:pointer;">
-          Filter
-        </button>
+      <form method="get" action="/admin/compliance/corrective_actions.php">
+        <div class="cmp-toolbar-row">
+          <label class="cmp-field">
+            <span>Finding</span>
+            <select name="finding_id">
+              <option value="">All findings</option>
+              <?php foreach ($findingsPick as $f): ?>
+                <option value="<?= (int)$f['id'] ?>" <?= $filterFinding === (int)$f['id'] ? 'selected' : '' ?>>
+                  <?= h((string)$f['finding_code'] . ' — ' . (string)$f['title']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+          <label class="cmp-field">
+            <span>Status</span>
+            <select name="status">
+              <option value="">All</option>
+              <?php foreach ($optionsCapStatus as $k => $lab): ?>
+                <option value="<?= h($k) ?>" <?= $filterStatus === $k ? 'selected' : '' ?>><?= h($lab) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+        </div>
+        <div class="cmp-toolbar-actions">
+          <button type="submit">Apply filters</button>
+          <?php if ($filterStatus !== '' || $filterFinding > 0): ?>
+            <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/corrective_actions.php" style="text-decoration:none;">Clear</a>
+          <?php endif; ?>
+        </div>
       </form>
-    </div>
+    </section>
 
-    <div style="display:grid;grid-template-columns:1fr 380px;gap:24px;align-items:start;max-width:1200px;">
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
-        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <div style="display:grid;grid-template-columns:1fr 380px;gap:24px;align-items:start;">
+      <section class="cmp-card" style="overflow:hidden;">
+        <table>
           <thead>
-            <tr style="background:#f1f5f9;text-align:left;">
-              <th style="padding:12px 14px;">CAP code</th>
-              <th style="padding:12px 14px;">Finding</th>
-              <th style="padding:12px 14px;">Title</th>
-              <th style="padding:12px 14px;">Status</th>
-              <th style="padding:12px 14px;">Due</th>
+            <tr>
+              <th>CAP code</th>
+              <th>Finding</th>
+              <th>Title</th>
+              <th>Status</th>
+              <th>Due</th>
             </tr>
           </thead>
           <tbody>
@@ -343,31 +379,29 @@ if ($detailId > 0) {
               <tr><td colspan="5" style="padding:20px;color:#64748b;">No matching actions.</td></tr>
             <?php endif; ?>
             <?php foreach ($rows as $r): ?>
-              <tr style="border-top:1px solid #e2e8f0;">
-                <td style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:12px;">
-                  <a href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" style="color:#1e3c72;font-weight:700;">
+              <tr>
+                <td class="cmp-mono">
+                  <a href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" style="color:#1f4079;font-weight:700;">
                     <?= h((string)$r['action_code']) ?>
                   </a>
                 </td>
-                <td style="padding:10px 14px;font-size:12px;">
-                  <a href="/admin/compliance/findings.php?id=<?= (int)$r['finding_id'] ?>" style="color:#0f766e;">
+                <td>
+                  <a href="/admin/compliance/findings.php?id=<?= (int)$r['finding_id'] ?>" style="color:#1f4079;">
                     <?= h((string)$r['finding_code']) ?>
                   </a>
                 </td>
-                <td style="padding:10px 14px;"><?= h((string)$r['title']) ?></td>
-                <td style="padding:10px 14px;"><?= h((string)$r['status']) ?></td>
-                <td style="padding:10px 14px;color:#64748b;font-size:12px;">
-                  <?= !empty($r['due_date']) ? h(substr((string)$r['due_date'], 0, 10)) : '—' ?>
-                </td>
+                <td><?= h((string)$r['title']) ?></td>
+                <td><span class="cmp-pill"><?= h((string)$r['status']) ?></span></td>
+                <td class="cmp-mono"><?= !empty($r['due_date']) ? h(substr((string)$r['due_date'], 0, 10)) : '—' ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
-      </div>
+      </section>
 
-      <div style="display:flex;flex-direction:column;gap:20px;">
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;">
-          <h3 style="margin:0 0 14px;font-size:16px;">New corrective action</h3>
+      <div style="display:flex;flex-direction:column;gap:18px;">
+        <section class="cmp-card">
+          <h3 style="margin:0 0 14px;">New corrective action</h3>
           <form method="post" action="/admin/compliance/corrective_actions.php">
             <input type="hidden" name="action" value="create_cap">
 
@@ -420,15 +454,13 @@ if ($detailId > 0) {
               <input type="date" name="due_date" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
             </label>
 
-            <button type="submit" style="width:100%;background:#1e3c72;color:#fff;border:0;padding:12px;border-radius:10px;font-weight:800;cursor:pointer;">
-              Create action
-            </button>
+            <button type="submit" style="width:100%;">Create action</button>
           </form>
-        </div>
+        </section>
 
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;">
-          <h3 style="margin:0 0 8px;font-size:16px;">AI: suggest CAP options</h3>
-          <p style="margin:0 0 14px;color:#64748b;font-size:13px;line-height:1.45;">
+        <section class="cmp-card">
+          <h3 style="margin:0 0 8px;">AI: suggest CAP options</h3>
+          <p class="cmp-card-sub" style="margin:0 0 14px;">
             Generates A/B/C options (logged as <code>CAP_SUGGEST</code>). RCA improves quality but is not required.
           </p>
           <form method="post" action="/admin/compliance/corrective_actions.php">
@@ -443,8 +475,7 @@ if ($detailId > 0) {
                 <?php endforeach; ?>
               </select>
             </label>
-            <button type="submit" style="width:100%;background:#3730a3;color:#fff;border:0;padding:12px;border-radius:10px;font-weight:800;cursor:pointer;"
-              onclick="return confirm('Request CAP options from AI?');">
+            <button type="submit" style="width:100%;" onclick="return confirm('Request CAP options from AI?');">
               Run AI suggest
             </button>
           </form>
@@ -477,23 +508,21 @@ if ($detailId > 0) {
                       <?php endforeach; ?>
                     </ul>
                   <?php endif; ?>
-                  <form method="post" action="/admin/compliance/corrective_actions.php?finding_id=<?= (int)$bundleFinding ?>"
-                    style="margin-top:10px;">
+                  <form method="post" action="/admin/compliance/corrective_actions.php?finding_id=<?= (int)$bundleFinding ?>" style="margin-top:10px;">
                     <input type="hidden" name="action" value="adopt_cap_option">
                     <input type="hidden" name="finding_id" value="<?= (int)$bundleFinding ?>">
                     <input type="hidden" name="option_index" value="<?= (int)$idx ?>">
-                    <button type="submit" style="background:#0f766e;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer;">
-                      Adopt &amp; create actions
-                    </button>
+                    <button type="submit" class="cmp-btn-success">Adopt &amp; create actions</button>
                   </form>
                 </div>
               <?php endforeach; ?>
             </div>
           <?php endif; ?>
-        </div>
+        </section>
       </div>
     </div>
     <?php
 }
 
+compliance_page_close();
 cw_footer();

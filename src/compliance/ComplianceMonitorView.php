@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ComplianceAccess.php';
 require_once __DIR__ . '/ComplianceMonitorEngine.php';
+require_once __DIR__ . '/ComplianceUi.php';
 
 /**
  * Shared renderer for the per-kind monitoring tab pages
@@ -81,181 +82,142 @@ final class ComplianceMonitorView
         }
 
         cw_header('Compliance · ' . $pageTitle);
+
+        $tone = ($stats['critical'] ?? 0) > 0
+            ? 'crit'
+            : (($stats['open'] ?? 0) > 0 ? 'warn' : 'ok');
+
+        compliance_page_open(array(
+            'overline' => 'Monitoring',
+            'title' => $pageTitle,
+            'description' => $blurb,
+            'flash' => $flash,
+            'stats' => array(
+                array('label' => 'Open', 'value' => (int)$stats['open'], 'tone' => $tone),
+                array('label' => 'Critical (open)', 'value' => (int)$stats['critical'], 'tone' => ($stats['critical'] ?? 0) > 0 ? 'crit' : ''),
+                array('label' => 'Acknowledged', 'value' => (int)$stats['acknowledged']),
+                array('label' => 'Resolved', 'value' => (int)$stats['resolved'], 'tone' => 'ok'),
+            ),
+        ));
         ?>
-<style>
-  .cmpmon-h1{margin:0 0 6px;font-size:24px;color:#0f172a;}
-  .cmpmon-sub{margin:0 0 22px;color:#64748b;max-width:760px;line-height:1.55;}
-  .cmpmon-kpis{
-    display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));
-    gap:14px;margin-bottom:24px;max-width:1100px;
-  }
-  .cmpmon-card{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:16px 18px;}
-  .cmpmon-label{font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.08em;}
-  .cmpmon-big{font-size:28px;font-weight:800;color:#0f172a;line-height:1.1;margin-top:4px;}
-  .cmpmon-card.is-crit .cmpmon-big{color:#b91c1c;}
-  .cmpmon-card.is-warn .cmpmon-big{color:#b45309;}
-  .cmpmon-card.is-ok .cmpmon-big{color:#0f766e;}
-  .cmpmon-panel{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;margin-bottom:20px;max-width:1100px;}
-  .cmpmon-table{width:100%;border-collapse:collapse;font-size:14px;}
-  .cmpmon-table th{
-    text-align:left;font-size:11px;color:#64748b;font-weight:800;letter-spacing:.05em;
-    text-transform:uppercase;padding:6px 8px;background:#f1f5f9;
-  }
-  .cmpmon-table td{padding:8px;border-top:1px solid #e2e8f0;vertical-align:top;}
-  .cmpmon-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-  .cmpmon-pill{
-    display:inline-block;padding:2px 8px;border-radius:999px;
-    font-size:11px;font-weight:800;letter-spacing:.04em;
-  }
-  .cmpmon-pill.sev-CRITICAL{background:#fee2e2;color:#991b1b;}
-  .cmpmon-pill.sev-HIGH{background:#ffedd5;color:#9a3412;}
-  .cmpmon-pill.sev-MEDIUM{background:#fef3c7;color:#92400e;}
-  .cmpmon-pill.sev-LOW{background:#d1fae5;color:#065f46;}
-  .cmpmon-btn{background:#1e3c72;color:#fff;border:0;padding:10px 14px;border-radius:8px;font-weight:800;cursor:pointer;}
-  .cmpmon-btn-small{padding:6px 10px;border:0;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;}
-  .cmpmon-flash{padding:12px 16px;border-radius:12px;margin-bottom:16px;}
-  .cmpmon-flash.is-ok{background:#d1fae5;color:#065f46;}
-  .cmpmon-flash.is-warn{background:#fef3c7;color:#92400e;}
-  .cmpmon-flash.is-danger{background:#fee2e2;color:#991b1b;}
-</style>
 
-<?php if ($flash !== null):
-  $cls = ($flash['type'] === 'success') ? 'is-ok' : ($flash['type'] === 'warn' ? 'is-warn' : 'is-danger'); ?>
-  <div class="cmpmon-flash <?= h($cls) ?>"><?= h((string)$flash['message']) ?></div>
-<?php endif; ?>
-
-<section style="padding:8px 0 40px;">
-  <h1 class="cmpmon-h1"><?= h($pageTitle) ?></h1>
-  <p class="cmpmon-sub"><?= h($blurb) ?></p>
-
-  <div class="cmpmon-kpis">
-    <div class="cmpmon-card <?= $stats['critical'] > 0 ? 'is-crit' : ($stats['open'] > 0 ? 'is-warn' : 'is-ok') ?>">
-      <div class="cmpmon-label">Open</div>
-      <div class="cmpmon-big"><?= (int)$stats['open'] ?></div>
-    </div>
-    <div class="cmpmon-card <?= $stats['critical'] > 0 ? 'is-crit' : '' ?>">
-      <div class="cmpmon-label">Critical (open)</div>
-      <div class="cmpmon-big"><?= (int)$stats['critical'] ?></div>
-    </div>
-    <div class="cmpmon-card">
-      <div class="cmpmon-label">Acknowledged</div>
-      <div class="cmpmon-big"><?= (int)$stats['acknowledged'] ?></div>
-    </div>
-    <div class="cmpmon-card is-ok">
-      <div class="cmpmon-label">Resolved</div>
-      <div class="cmpmon-big"><?= (int)$stats['resolved'] ?></div>
-    </div>
+<section class="cmp-card">
+  <div class="cmp-card-head">
+    <h2 class="cmp-card-title">Open alerts</h2>
+    <form method="post" style="margin:0;">
+      <input type="hidden" name="action" value="run_all">
+      <button type="submit">Run rules now</button>
+    </form>
   </div>
 
-  <div class="cmpmon-panel">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;gap:12px;flex-wrap:wrap;">
-      <h2 style="margin:0;font-size:16px;">Open alerts</h2>
-      <form method="post" style="margin:0;">
-        <input type="hidden" name="action" value="run_all">
-        <button type="submit" class="cmpmon-btn">Run rules now</button>
-      </form>
+  <?php if ($alerts === array()): ?>
+    <div class="cmp-empty">
+      <div class="cmp-empty-title">No open alerts</div>
+      <p style="margin:0;">The monitor sweep is clean for this scope.</p>
     </div>
-    <?php if ($alerts === array()): ?>
-      <p style="color:#64748b;margin:0;">No open alerts — system is clean for this scope.</p>
-    <?php else: ?>
-      <table class="cmpmon-table">
-        <thead><tr>
-          <th>Sev</th><th>Title</th><th>Rule</th><th>Subject</th><th>Raised</th><th></th>
-        </tr></thead>
-        <tbody>
-          <?php foreach ($alerts as $a):
-            $sev = (string)($a['severity'] ?? '');
-            $subjectLink = self::subjectLink((string)$a['subject_type'], (int)$a['subject_id']);
-          ?>
-            <tr>
-              <td><span class="cmpmon-pill sev-<?= h($sev) ?>"><?= h($sev) ?></span></td>
-              <td>
-                <div style="font-weight:700;color:#0f172a;"><?= h((string)$a['title']) ?></div>
-                <?php if (!empty($a['body'])): ?>
-                  <div style="color:#475569;font-size:12px;"><?= h((string)$a['body']) ?></div>
-                <?php endif; ?>
-              </td>
-              <td class="cmpmon-mono">
-                <?= h((string)($a['rule_code'] ?? '—')) ?>
-                <div style="color:#64748b;font-size:11px;"><?= h((string)($a['rule_kind'] ?? '')) ?></div>
-              </td>
-              <td>
-                <?php if ($subjectLink !== ''): ?>
-                  <a href="<?= h($subjectLink) ?>" style="color:#1e3c72;font-weight:700;text-decoration:none;">
-                    <?= h((string)$a['subject_type']) ?> #<?= (int)$a['subject_id'] ?>
-                  </a>
-                <?php else: ?>
-                  <span class="cmpmon-mono"><?= h((string)$a['subject_type']) ?> #<?= (int)$a['subject_id'] ?></span>
-                <?php endif; ?>
-              </td>
-              <td class="cmpmon-mono"><?= h(substr((string)($a['raised_at'] ?? ''), 0, 16)) ?></td>
-              <td style="white-space:nowrap;">
-                <form method="post" style="display:inline-flex;gap:4px;align-items:center;">
-                  <input type="hidden" name="alert_id" value="<?= (int)$a['id'] ?>">
-                  <button type="submit" name="action" value="ack_alert"
-                    class="cmpmon-btn-small" style="background:#e2e8f0;color:#0f172a;">Ack</button>
-                  <button type="submit" name="action" value="resolve_alert"
-                    class="cmpmon-btn-small" style="background:#0f766e;color:#fff;">Resolve</button>
-                  <button type="submit" name="action" value="dismiss_alert"
-                    class="cmpmon-btn-small" style="background:#fee2e2;color:#991b1b;"
-                    onclick="return confirm('Dismiss this alert?');">Dismiss</button>
-                </form>
-              </td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-    <?php endif; ?>
-  </div>
-
-  <div class="cmpmon-panel">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">
-      <h2 style="margin:0;font-size:16px;">Rules in scope</h2>
-      <a href="/admin/compliance/monitoring_rules.php<?= $kind !== null ? '?kind=' . urlencode($kind) : '' ?>"
-         style="font-weight:700;color:#3730a3;">Manage rules →</a>
-    </div>
-    <?php if ($rules === array()): ?>
-      <p style="color:#64748b;margin:0;">No rules defined for this scope yet. Define one in Monitoring Rules.</p>
-    <?php else: ?>
-      <table class="cmpmon-table">
-        <thead><tr>
-          <th>Code</th><th>Title</th><th>Kind</th><th>Severity</th><th>Active</th>
-        </tr></thead>
-        <tbody>
-          <?php foreach ($rules as $r): ?>
-            <tr>
-              <td class="cmpmon-mono"><?= h((string)$r['rule_code']) ?></td>
-              <td><?= h((string)$r['title']) ?></td>
-              <td><?= h((string)$r['monitor_kind']) ?></td>
-              <td><span class="cmpmon-pill sev-<?= h((string)$r['alert_severity']) ?>"><?= h((string)$r['alert_severity']) ?></span></td>
-              <td><?= ((int)$r['is_active'] === 1) ? 'Yes' : '—' ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-    <?php endif; ?>
-  </div>
-
-  <?php if ($runs !== array()): ?>
-    <div class="cmpmon-panel">
-      <h2 style="margin:0 0 14px;font-size:16px;">Recent runs</h2>
-      <table class="cmpmon-table">
-        <thead><tr><th>Started</th><th>Status</th><th>Hits</th><th>Trigger</th></tr></thead>
-        <tbody>
-          <?php foreach ($runs as $r): ?>
-            <tr>
-              <td class="cmpmon-mono"><?= h(substr((string)($r['started_at'] ?? ''), 0, 16)) ?></td>
-              <td><?= h((string)$r['run_status']) ?></td>
-              <td><?= (int)($r['hit_count'] ?? 0) ?></td>
-              <td class="cmpmon-mono"><?= h((string)($r['trigger_source'] ?? '')) ?></td>
-            </tr>
-          <?php endforeach; ?>
-        </tbody>
-      </table>
-    </div>
+  <?php else: ?>
+    <table class="cmp-table">
+      <thead><tr>
+        <th>Severity</th><th>Title</th><th>Rule</th><th>Subject</th><th>Raised</th><th>Actions</th>
+      </tr></thead>
+      <tbody>
+        <?php foreach ($alerts as $a):
+          $sev = (string)($a['severity'] ?? '');
+          $subjectLink = self::subjectLink((string)$a['subject_type'], (int)$a['subject_id']);
+        ?>
+          <tr>
+            <td><span class="cmp-pill sev-<?= h($sev) ?>"><?= h($sev) ?></span></td>
+            <td>
+              <div style="font-weight:680;"><?= h((string)$a['title']) ?></div>
+              <?php if (!empty($a['body'])): ?>
+                <div class="cmp-mono" style="margin-top:4px;"><?= h((string)$a['body']) ?></div>
+              <?php endif; ?>
+            </td>
+            <td class="cmp-mono">
+              <?= h((string)($a['rule_code'] ?? '—')) ?>
+              <div style="margin-top:3px;"><?= h((string)($a['rule_kind'] ?? '')) ?></div>
+            </td>
+            <td>
+              <?php if ($subjectLink !== ''): ?>
+                <a href="<?= h($subjectLink) ?>"><?= h((string)$a['subject_type']) ?> #<?= (int)$a['subject_id'] ?></a>
+              <?php else: ?>
+                <span class="cmp-mono"><?= h((string)$a['subject_type']) ?> #<?= (int)$a['subject_id'] ?></span>
+              <?php endif; ?>
+            </td>
+            <td class="cmp-mono"><?= h(substr((string)($a['raised_at'] ?? ''), 0, 16)) ?></td>
+            <td style="white-space:nowrap;">
+              <form method="post" style="display:inline-flex;gap:6px;align-items:center;">
+                <input type="hidden" name="alert_id" value="<?= (int)$a['id'] ?>">
+                <button type="submit" name="action" value="ack_alert">Ack</button>
+                <button type="submit" name="action" value="resolve_alert">Resolve</button>
+                <button type="submit" name="action" value="dismiss_alert"
+                  onclick="return confirm('Dismiss this alert?');">Dismiss</button>
+              </form>
+            </td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
   <?php endif; ?>
 </section>
+
+<section class="cmp-card">
+  <div class="cmp-card-head">
+    <h2 class="cmp-card-title">Rules in scope</h2>
+    <a class="cmp-btn cmp-btn-secondary"
+       href="/admin/compliance/monitoring_rules.php<?= $kind !== null ? '?kind=' . urlencode($kind) : '' ?>">
+      Manage rules &rarr;
+    </a>
+  </div>
+
+  <?php if ($rules === array()): ?>
+    <div class="cmp-empty">
+      <div class="cmp-empty-title">No rules defined for this scope yet</div>
+      <p style="margin:0;">Define one in Monitoring Rules to start raising alerts.</p>
+    </div>
+  <?php else: ?>
+    <table class="cmp-table">
+      <thead><tr>
+        <th>Code</th><th>Title</th><th>Kind</th><th>Severity</th><th>Active</th>
+      </tr></thead>
+      <tbody>
+        <?php foreach ($rules as $r): ?>
+          <tr>
+            <td class="cmp-mono"><?= h((string)$r['rule_code']) ?></td>
+            <td><?= h((string)$r['title']) ?></td>
+            <td><?= h((string)$r['monitor_kind']) ?></td>
+            <td><span class="cmp-pill sev-<?= h((string)$r['alert_severity']) ?>"><?= h((string)$r['alert_severity']) ?></span></td>
+            <td><?= ((int)$r['is_active'] === 1) ? 'Yes' : '—' ?></td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  <?php endif; ?>
+</section>
+
+<?php if ($runs !== array()): ?>
+  <section class="cmp-card">
+    <div class="cmp-card-head">
+      <h2 class="cmp-card-title">Recent runs</h2>
+    </div>
+    <table class="cmp-table">
+      <thead><tr><th>Started</th><th>Status</th><th>Hits</th><th>Trigger</th></tr></thead>
+      <tbody>
+        <?php foreach ($runs as $r): ?>
+          <tr>
+            <td class="cmp-mono"><?= h(substr((string)($r['started_at'] ?? ''), 0, 16)) ?></td>
+            <td><?= h((string)$r['run_status']) ?></td>
+            <td><?= (int)($r['hit_count'] ?? 0) ?></td>
+            <td class="cmp-mono"><?= h((string)($r['trigger_source'] ?? '')) ?></td>
+          </tr>
+        <?php endforeach; ?>
+      </tbody>
+    </table>
+  </section>
+<?php endif; ?>
+
 <?php
+        compliance_page_close();
         cw_footer();
     }
 

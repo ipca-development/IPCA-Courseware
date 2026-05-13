@@ -117,49 +117,33 @@ if (is_dir($pdfRoot)) {
 }
 
 cw_header('Compliance · Settings');
+
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Settings',
+    'title' => 'Compliance settings',
+    'description' => 'Per-org configuration for the Compliance OS: which admins have access, what data is on file, where artefacts are stored. Org-wide defaults live here so the operational UIs stay focused.',
+    'stats' => array(
+        array('label' => 'Admins on file', 'value' => count($admins)),
+        array('label' => 'PDFs on disk',   'value' => (int)$pdfCount, 'sub' => number_format($pdfBytes / 1024 / 1024, 1) . ' MB'),
+        array('label' => 'Open alerts',    'value' => (int)$counts['Open alerts'], 'tone' => $counts['Open alerts'] > 0 ? 'warn' : 'ok', 'href' => '/admin/compliance/monitoring_rules.php'),
+        array('label' => 'Audits',         'value' => (int)$counts['Audits']),
+    ),
+    'flash' => $flash,
+));
 ?>
-<style>
-  .cstgs-h1{margin:0 0 6px;font-size:24px;color:#0f172a;}
-  .cstgs-sub{margin:0 0 22px;color:#64748b;max-width:760px;line-height:1.55;}
-  .cstgs-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;margin-bottom:20px;max-width:1100px;}
-  .cstgs-h2{margin:0 0 14px;font-size:16px;color:#0f172a;}
-  .cstgs-table{width:100%;border-collapse:collapse;font-size:14px;}
-  .cstgs-table th{
-    text-align:left;font-size:11px;color:#64748b;font-weight:800;letter-spacing:.05em;
-    text-transform:uppercase;padding:6px 8px;background:#f1f5f9;
-  }
-  .cstgs-table td{padding:8px;border-top:1px solid #e2e8f0;vertical-align:middle;}
-  .cstgs-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-  .cstgs-btn-small{padding:6px 10px;border:0;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;}
-  .cstgs-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;}
-  .cstgs-pill.is-on{background:#d1fae5;color:#065f46;}
-  .cstgs-pill.is-off{background:#e2e8f0;color:#475569;}
-  .cstgs-flash{padding:12px 16px;border-radius:12px;margin-bottom:16px;}
-  .cstgs-flash.is-ok{background:#d1fae5;color:#065f46;}
-  .cstgs-flash.is-warn{background:#fef3c7;color:#92400e;}
-  .cstgs-flash.is-danger{background:#fee2e2;color:#991b1b;}
-  .cstgs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;}
-  .cstgs-mini{background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;}
-  .cstgs-mini-k{font-size:11px;font-weight:800;color:#64748b;text-transform:uppercase;letter-spacing:.08em;}
-  .cstgs-mini-v{font-size:22px;font-weight:800;color:#0f172a;}
-</style>
 
-<?php if ($flash !== null):
-  $cls = ($flash['type'] === 'success') ? 'is-ok' : ($flash['type'] === 'warn' ? 'is-warn' : 'is-danger'); ?>
-  <div class="cstgs-flash <?= h($cls) ?>"><?= h((string)$flash['message']) ?></div>
-<?php endif; ?>
-
-<section style="padding:8px 0 40px;">
-  <h1 class="cstgs-h1">Compliance settings</h1>
-  <p class="cstgs-sub">
-    Per-org configuration for the Compliance OS: which admins have access, what data is on file,
-    where artefacts are stored. Org-wide defaults live here so the operational UIs stay focused.
-  </p>
-
-  <section class="cstgs-card">
-    <h2 class="cstgs-h2">Compliance admins</h2>
+  <section class="cmp-card">
+    <div class="cmp-list-head" style="margin-bottom:14px;">
+      <div class="cmp-list-title">
+        <?= compliance_ui_icon('list') ?>
+        <span>Compliance admins</span>
+      </div>
+      <div class="cmp-count-pill"><?= count($admins) ?></div>
+    </div>
     <?php if (!$hasCAFlag): ?>
-      <p style="color:#92400e;font-size:13px;background:#fef3c7;padding:10px 12px;border-radius:8px;">
+      <p style="color:#7a5419;font-size:13px;background:rgba(232,167,72,0.16);padding:10px 12px;border-radius:8px;border:1px solid rgba(232,167,72,0.32);">
         The <code>users.is_compliance_admin</code> column hasn't been added yet. Apply
         <code>scripts/sql/compliance_os_phase_2_5_users_is_compliance_admin.sql</code> to enable
         per-admin compliance gating. Until then every admin has compliance access.
@@ -167,9 +151,9 @@ cw_header('Compliance · Settings');
     <?php endif; ?>
 
     <?php if ($admins === array()): ?>
-      <p style="color:#64748b;margin:0;">No admins on file.</p>
+      <p style="color:var(--text-muted);margin:0;">No admins on file.</p>
     <?php else: ?>
-      <table class="cstgs-table">
+      <table>
         <thead><tr>
           <th>ID</th><th>Name</th><th>Email</th><th>Compliance access</th><th></th>
         </tr></thead>
@@ -178,14 +162,14 @@ cw_header('Compliance · Settings');
             $flag = $hasCAFlag ? (int)($a['is_compliance_admin'] ?? 0) : 1;
           ?>
             <tr>
-              <td class="cstgs-mono"><?= (int)$a['id'] ?></td>
+              <td class="cmp-mono"><?= (int)$a['id'] ?></td>
               <td><?= h((string)($a['name'] ?? '')) ?></td>
-              <td class="cstgs-mono"><?= h((string)($a['email'] ?? '')) ?></td>
+              <td class="cmp-mono"><?= h((string)($a['email'] ?? '')) ?></td>
               <td>
                 <?php if ($flag === 1): ?>
-                  <span class="cstgs-pill is-on">Yes</span>
+                  <span class="cmp-pill cmp-pill-ok">Yes</span>
                 <?php else: ?>
-                  <span class="cstgs-pill is-off">No</span>
+                  <span class="cmp-pill">No</span>
                 <?php endif; ?>
               </td>
               <td>
@@ -194,14 +178,13 @@ cw_header('Compliance · Settings');
                     <input type="hidden" name="action" value="toggle_compliance_admin">
                     <input type="hidden" name="user_id" value="<?= (int)$a['id'] ?>">
                     <input type="hidden" name="flag" value="<?= $flag === 1 ? '0' : '1' ?>">
-                    <button type="submit" class="cstgs-btn-small"
-                      style="background:<?= $flag === 1 ? '#fee2e2' : '#0f766e' ?>;color:<?= $flag === 1 ? '#991b1b' : '#fff' ?>;"
+                    <button type="submit" class="<?= $flag === 1 ? 'cmp-btn-secondary' : '' ?>" style="height:32px;min-height:32px;padding:0 12px;font-size:12px;"
                       onclick="return confirm('<?= $flag === 1 ? 'Revoke compliance access?' : 'Grant compliance access?' ?>');">
                       <?= $flag === 1 ? 'Revoke' : 'Grant' ?>
                     </button>
                   </form>
                 <?php elseif ((int)$a['id'] === $uid): ?>
-                  <span style="color:#64748b;font-size:12px;">(you)</span>
+                  <span style="color:var(--text-muted);font-size:12px;">(you)</span>
                 <?php endif; ?>
               </td>
             </tr>
@@ -211,25 +194,25 @@ cw_header('Compliance · Settings');
     <?php endif; ?>
   </section>
 
-  <section class="cstgs-card">
-    <h2 class="cstgs-h2">System status</h2>
-    <div class="cstgs-grid">
+  <section class="cmp-card">
+    <h2 style="margin:0 0 14px;">System status</h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px;">
       <?php foreach ($counts as $k => $v): ?>
-        <div class="cstgs-mini">
-          <div class="cstgs-mini-k"><?= h((string)$k) ?></div>
-          <div class="cstgs-mini-v"><?= (int)$v ?></div>
+        <div style="background:rgba(48,124,183,0.06);border:1px solid rgba(48,124,183,0.18);border-radius:12px;padding:14px 16px;">
+          <div style="font-size:11px;font-weight:720;color:var(--text-muted);text-transform:uppercase;letter-spacing:.08em;"><?= h((string)$k) ?></div>
+          <div style="font-size:24px;font-weight:720;color:#1f4079;margin-top:4px;"><?= (int)$v ?></div>
         </div>
       <?php endforeach; ?>
     </div>
   </section>
 
-  <section class="cstgs-card">
-    <h2 class="cstgs-h2">Storage</h2>
-    <table class="cstgs-table">
+  <section class="cmp-card">
+    <h2 style="margin:0 0 14px;">Storage</h2>
+    <table>
       <tbody>
         <tr>
           <td style="width:280px;font-weight:700;">Manual-release PDF root</td>
-          <td class="cstgs-mono"><?= h('storage/compliance/manual_releases') ?></td>
+          <td class="cmp-mono"><?= h('storage/compliance/manual_releases') ?></td>
         </tr>
         <tr>
           <td style="font-weight:700;">PDFs on disk</td>
@@ -241,22 +224,22 @@ cw_header('Compliance · Settings');
         </tr>
         <tr>
           <td style="font-weight:700;">Directory exists</td>
-          <td><?= is_dir($pdfRoot) ? '<span class="cstgs-pill is-on">Yes</span>' : '<span class="cstgs-pill is-off">No</span>' ?></td>
+          <td><?= is_dir($pdfRoot) ? '<span class="cmp-pill cmp-pill-ok">Yes</span>' : '<span class="cmp-pill">No</span>' ?></td>
         </tr>
       </tbody>
     </table>
   </section>
 
-  <section class="cstgs-card">
-    <h2 class="cstgs-h2">Reference</h2>
-    <p style="margin:0 0 10px;color:#475569;font-size:14px;">Phase migrations and seed scripts that this module relies on:</p>
+  <section class="cmp-card">
+    <h2 style="margin:0 0 14px;">Reference</h2>
+    <p style="margin:0 0 10px;color:var(--text-muted);font-size:14px;">Phase migrations and seed scripts that this module relies on:</p>
     <ul style="margin:0;padding-left:18px;color:#334155;font-size:13px;line-height:1.7;">
-      <li><span class="cstgs-mono">scripts/sql/compliance_os_phase_1_initial_schema.sql</span> — full ipca_compliance_* schema</li>
-      <li><span class="cstgs-mono">scripts/sql/compliance_os_phase_2_5_users_is_compliance_admin.sql</span> — per-admin compliance access flag</li>
-      <li><span class="cstgs-mono">scripts/sql/seeds/legacy_compliance_tableplus_dump.sql</span> — legacy seed data</li>
-      <li><span class="cstgs-mono">scripts/run_compliance_legacy_seed.sh</span> — idempotent legacy import</li>
+      <li><span class="cmp-mono">scripts/sql/compliance_os_phase_1_initial_schema.sql</span> — full ipca_compliance_* schema</li>
+      <li><span class="cmp-mono">scripts/sql/compliance_os_phase_2_5_users_is_compliance_admin.sql</span> — per-admin compliance access flag</li>
+      <li><span class="cmp-mono">scripts/sql/seeds/legacy_compliance_tableplus_dump.sql</span> — legacy seed data</li>
+      <li><span class="cmp-mono">scripts/run_compliance_legacy_seed.sh</span> — idempotent legacy import</li>
     </ul>
   </section>
-</section>
 <?php
+compliance_page_close();
 cw_footer();

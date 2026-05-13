@@ -91,97 +91,75 @@ $detailId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $rules = ComplianceMonitorEngine::listRules($pdo, $kindFilter !== '' ? $kindFilter : null, 200);
 
 cw_header('Compliance · Monitoring rules');
+
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 ?>
 <style>
-  .cmprl-h1{margin:0 0 6px;font-size:24px;color:#0f172a;}
-  .cmprl-sub{margin:0 0 22px;color:#64748b;max-width:760px;line-height:1.55;}
-  .cmprl-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;margin-bottom:20px;max-width:1100px;}
-  .cmprl-label{display:block;font-size:11px;font-weight:700;color:#64748b;}
-  .cmprl-input{padding:8px;border:1px solid #cbd5e1;border-radius:8px;width:100%;box-sizing:border-box;}
-  .cmprl-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
-  .cmprl-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;}
+  .cmprl-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+  .cmprl-grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;}
   @media (max-width:720px){.cmprl-grid-2,.cmprl-grid-3{grid-template-columns:1fr;}}
-  .cmprl-btn{background:#1e3c72;color:#fff;border:0;padding:10px 14px;border-radius:8px;font-weight:800;cursor:pointer;}
-  .cmprl-btn-small{padding:6px 10px;border:0;border-radius:6px;font-size:12px;font-weight:700;cursor:pointer;}
-  .cmprl-table{width:100%;border-collapse:collapse;font-size:14px;}
-  .cmprl-table th{
-    text-align:left;font-size:11px;color:#64748b;font-weight:800;letter-spacing:.05em;
-    text-transform:uppercase;padding:6px 8px;background:#f1f5f9;
-  }
-  .cmprl-table td{padding:8px;border-top:1px solid #e2e8f0;vertical-align:top;}
-  .cmprl-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-  .cmprl-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;}
-  .cmprl-pill.sev-CRITICAL{background:#fee2e2;color:#991b1b;}
-  .cmprl-pill.sev-HIGH{background:#ffedd5;color:#9a3412;}
-  .cmprl-pill.sev-MEDIUM{background:#fef3c7;color:#92400e;}
-  .cmprl-pill.sev-LOW{background:#d1fae5;color:#065f46;}
-  .cmprl-flash{padding:12px 16px;border-radius:12px;margin-bottom:16px;}
-  .cmprl-flash.is-ok{background:#d1fae5;color:#065f46;}
-  .cmprl-flash.is-warn{background:#fef3c7;color:#92400e;}
-  .cmprl-flash.is-danger{background:#fee2e2;color:#991b1b;}
-  .cmprl-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;}
-  .cmprl-tab{
-    background:#e2e8f0;color:#0f172a;padding:6px 12px;border-radius:999px;
-    text-decoration:none;font-size:12px;font-weight:700;
-  }
-  .cmprl-tab.is-on{background:#1e3c72;color:#fff;}
+  .cmprl-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:18px;}
+  .cmprl-tab{background:rgba(48,124,183,0.08);color:#1f4079;padding:8px 14px;border-radius:999px;text-decoration:none;font-size:12.5px;font-weight:720;letter-spacing:.04em;border:1px solid rgba(48,124,183,0.18);}
+  .cmprl-tab.is-on{background:linear-gradient(120deg,#1f4079 0%,#307cb7 100%);color:#fff;border-color:transparent;}
 </style>
-
-<?php if ($flash !== null):
-  $cls = ($flash['type'] === 'success') ? 'is-ok' : ($flash['type'] === 'warn' ? 'is-warn' : 'is-danger'); ?>
-  <div class="cmprl-flash <?= h($cls) ?>"><?= h((string)$flash['message']) ?></div>
-<?php endif; ?>
 
 <?php
 if ($detailId > 0) {
     $r = ComplianceMonitorEngine::getRule($pdo, $detailId);
     if ($r === null) {
-        echo '<p>Rule not found.</p>';
-        echo '<p><a href="/admin/compliance/monitoring_rules.php" style="color:#1e3c72;font-weight:700;">← All rules</a></p>';
+        compliance_page_open(array(
+            'overline' => 'Compliance · Monitoring rules',
+            'title' => 'Rule not found',
+            'back' => array('href' => '/admin/compliance/monitoring_rules.php', 'label' => 'All rules'),
+        ));
+        echo '<section class="cmp-card"><p style="margin:0;">No row for that rule id.</p></section>';
+        compliance_page_close();
         cw_footer();
         return;
     }
     $threshold = is_string($r['threshold_json'] ?? null) ? (json_decode((string)$r['threshold_json'], true) ?: array()) : array();
     $runs = ComplianceMonitorEngine::listRuns($pdo, $detailId, 10);
+    compliance_page_open(array(
+        'overline' => 'Compliance · Monitoring rule',
+        'title' => (string)$r['title'],
+        'description' => 'Monitor kind: ' . (string)$r['monitor_kind'] . ' · Cadence: ' . (string)($r['cadence'] ?? '—') . ' · ' . ((int)$r['is_active'] === 1 ? 'Active' : 'Inactive'),
+        'back' => array('href' => '/admin/compliance/monitoring_rules.php', 'label' => 'All rules', 'code' => (string)$r['rule_code']),
+        'flash' => $flash,
+    ));
     ?>
-    <p style="margin-bottom:16px;">
-      <a href="/admin/compliance/monitoring_rules.php" style="color:#1e3c72;font-weight:700;text-decoration:none;">← All rules</a>
-      <span style="color:#64748b;margin:0 8px;">|</span>
-      <span class="cmprl-mono"><?= h((string)$r['rule_code']) ?></span>
-    </p>
-    <section class="cmprl-card">
-      <h2 style="margin:0 0 14px;font-size:18px;"><?= h((string)$r['title']) ?></h2>
+    <section class="cmp-card">
+      <h2 style="margin:0 0 14px;"><?= h((string)$r['title']) ?></h2>
       <form method="post">
         <input type="hidden" name="action" value="update_rule">
         <input type="hidden" name="rule_id" value="<?= (int)$detailId ?>">
-        <label style="display:block;margin-bottom:12px;">
-          <span class="cmprl-label">Title *</span>
-          <input class="cmprl-input" name="title" required value="<?= h((string)$r['title']) ?>">
+        <label class="cmp-field">
+          <span class="cmp-field-label">Title *</span>
+          <input name="title" required value="<?= h((string)$r['title']) ?>">
         </label>
-        <label style="display:block;margin-bottom:12px;">
-          <span class="cmprl-label">Description</span>
-          <textarea class="cmprl-input" name="description" rows="3"><?= h((string)($r['description'] ?? '')) ?></textarea>
+        <label class="cmp-field">
+          <span class="cmp-field-label">Description</span>
+          <textarea name="description" rows="3"><?= h((string)($r['description'] ?? '')) ?></textarea>
         </label>
         <div class="cmprl-grid-3" style="margin-bottom:12px;">
-          <label>
-            <span class="cmprl-label">Monitor kind</span>
-            <select class="cmprl-input" name="monitor_kind">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Monitor kind</span>
+            <select name="monitor_kind">
               <?php foreach (ComplianceMonitorEngine::monitorKinds() as $k): ?>
                 <option value="<?= h($k) ?>" <?= ((string)$r['monitor_kind'] === $k) ? 'selected' : '' ?>><?= h($k) ?></option>
               <?php endforeach; ?>
             </select>
           </label>
-          <label>
-            <span class="cmprl-label">Alert severity</span>
-            <select class="cmprl-input" name="alert_severity">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Alert severity</span>
+            <select name="alert_severity">
               <?php foreach (ComplianceMonitorEngine::severities() as $s): ?>
                 <option value="<?= h($s) ?>" <?= ((string)$r['alert_severity'] === $s) ? 'selected' : '' ?>><?= h($s) ?></option>
               <?php endforeach; ?>
             </select>
           </label>
-          <label>
-            <span class="cmprl-label">Cadence</span>
-            <select class="cmprl-input" name="cadence">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Cadence</span>
+            <select name="cadence">
               <option value="">—</option>
               <?php foreach (ComplianceMonitorEngine::cadences() as $c): ?>
                 <option value="<?= h($c) ?>" <?= ((string)($r['cadence'] ?? '') === $c) ? 'selected' : '' ?>><?= h($c) ?></option>
@@ -190,62 +168,63 @@ if ($detailId > 0) {
           </label>
         </div>
         <div class="cmprl-grid-3" style="margin-bottom:12px;">
-          <label>
-            <span class="cmprl-label">Built-in evaluator</span>
-            <select class="cmprl-input" name="builtin_key">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Built-in evaluator</span>
+            <select name="builtin_key">
               <option value="">—</option>
               <?php foreach (ComplianceMonitorEngine::builtinKeys() as $b): ?>
                 <option value="<?= h($b) ?>" <?= (((string)($threshold['builtin_key'] ?? '')) === $b) ? 'selected' : '' ?>><?= h($b) ?></option>
               <?php endforeach; ?>
             </select>
           </label>
-          <label>
-            <span class="cmprl-label">Threshold days (CAP_DUE_SOON)</span>
-            <input class="cmprl-input" type="number" name="threshold_days"
-              value="<?= h((string)($threshold['days'] ?? '')) ?>">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Threshold days (CAP_DUE_SOON)</span>
+            <input type="number" name="threshold_days" value="<?= h((string)($threshold['days'] ?? '')) ?>">
           </label>
-          <label>
-            <span class="cmprl-label">Cron expression</span>
-            <input class="cmprl-input" name="cron_expression" value="<?= h((string)($r['cron_expression'] ?? '')) ?>">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Cron expression</span>
+            <input name="cron_expression" value="<?= h((string)($r['cron_expression'] ?? '')) ?>">
           </label>
         </div>
         <div class="cmprl-grid-2" style="margin-bottom:12px;">
-          <label>
-            <span class="cmprl-label">Event key (for cadence=EVENT)</span>
-            <input class="cmprl-input" name="event_key" value="<?= h((string)($r['event_key'] ?? '')) ?>">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Event key (for cadence=EVENT)</span>
+            <input name="event_key" value="<?= h((string)($r['event_key'] ?? '')) ?>">
           </label>
-          <label>
-            <span class="cmprl-label">Notification keys (CSV)</span>
-            <input class="cmprl-input" name="notification_keys" value="<?= h((string)($r['notification_keys'] ?? '')) ?>">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Notification keys (CSV)</span>
+            <input name="notification_keys" value="<?= h((string)($r['notification_keys'] ?? '')) ?>">
           </label>
         </div>
         <label style="display:inline-flex;gap:8px;align-items:center;margin-bottom:14px;">
           <input type="checkbox" name="is_active" value="1" <?= ((int)$r['is_active'] === 1) ? 'checked' : '' ?>>
           <span style="font-weight:700;color:#0f172a;">Active</span>
         </label>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;">
-          <button type="submit" class="cmprl-btn">Save</button>
-          <button type="submit" name="action" value="run_rule" class="cmprl-btn" style="background:#0f766e;">Run now</button>
-          <button type="submit" name="action" value="delete_rule" class="cmprl-btn"
-            style="background:#b91c1c;"
+        <div class="cmp-toolbar" style="margin:0;">
+          <button type="submit">Save</button>
+          <button type="submit" name="action" value="run_rule" class="cmp-btn-secondary">Run now</button>
+          <button type="submit" name="action" value="delete_rule" class="cmp-btn-secondary"
             onclick="return confirm('Delete this rule? Existing alerts will stay but rule_id will be cleared.');">Delete</button>
         </div>
       </form>
     </section>
 
     <?php if ($runs !== array()): ?>
-      <section class="cmprl-card">
-        <h2 style="margin:0 0 14px;font-size:16px;">Recent runs</h2>
-        <table class="cmprl-table">
+      <section class="cmp-card">
+        <div class="cmp-list-head" style="margin-bottom:14px;">
+          <div class="cmp-list-title"><?= compliance_ui_icon('pulse') ?><span>Recent runs</span></div>
+          <div class="cmp-count-pill"><?= count($runs) ?></div>
+        </div>
+        <table>
           <thead><tr><th>Started</th><th>Completed</th><th>Status</th><th>Hits</th><th>Trigger</th></tr></thead>
           <tbody>
             <?php foreach ($runs as $rr): ?>
               <tr>
-                <td class="cmprl-mono"><?= h(substr((string)($rr['started_at'] ?? ''), 0, 16)) ?></td>
-                <td class="cmprl-mono"><?= h(substr((string)($rr['completed_at'] ?? '—'), 0, 16)) ?></td>
-                <td><?= h((string)$rr['run_status']) ?></td>
+                <td class="cmp-mono"><?= h(substr((string)($rr['started_at'] ?? ''), 0, 16)) ?></td>
+                <td class="cmp-mono"><?= h(substr((string)($rr['completed_at'] ?? '—'), 0, 16)) ?></td>
+                <td><span class="cmp-pill"><?= h((string)$rr['run_status']) ?></span></td>
                 <td><?= (int)($rr['hit_count'] ?? 0) ?></td>
-                <td class="cmprl-mono"><?= h((string)($rr['trigger_source'] ?? '')) ?></td>
+                <td class="cmp-mono"><?= h((string)($rr['trigger_source'] ?? '')) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>
@@ -254,19 +233,27 @@ if ($detailId > 0) {
     <?php endif; ?>
 
     <?php
+    compliance_page_close();
     cw_footer();
     return;
 }
 ?>
 
-<section style="padding:8px 0 40px;">
-  <h1 class="cmprl-h1">Monitoring rules</h1>
-  <p class="cmprl-sub">
-    Define the rules that produce compliance alerts. Each rule is tagged with a
-    monitor kind (CAP / FSTD / Safety / Cyber / Live / Other) and can use a
-    built-in evaluator like <span class="cmprl-mono">CAP_OVERDUE</span> or
-    <span class="cmprl-mono">FINDING_HIGH</span>, or an event key for automation triggers.
-  </p>
+<?php
+$activeRules = count(array_filter($rules, static fn($r) => (int)$r['is_active'] === 1));
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Monitoring',
+    'title' => 'Monitoring rules',
+    'description' => 'Define the rules that produce compliance alerts. Each rule is tagged with a monitor kind (CAP / FSTD / Safety / Cyber / Live / Other) and can use a built-in evaluator or an event key for automation triggers.',
+    'stats' => array(
+        array('label' => 'Total rules', 'value' => count($rules)),
+        array('label' => 'Active',      'value' => $activeRules, 'tone' => 'ok'),
+        array('label' => 'Inactive',    'value' => count($rules) - $activeRules),
+    ),
+    'flash' => $flash,
+));
+?>
 
   <div class="cmprl-tabs">
     <a class="cmprl-tab <?= $kindFilter === '' ? 'is-on' : '' ?>" href="/admin/compliance/monitoring_rules.php">All</a>
@@ -276,38 +263,43 @@ if ($detailId > 0) {
     <?php endforeach; ?>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 380px;gap:24px;align-items:start;">
-    <div class="cmprl-card">
-      <h2 style="margin:0 0 14px;font-size:16px;">Rules</h2>
+  <div style="display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start;">
+    <section class="cmp-card">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title"><?= compliance_ui_icon('pulse') ?><span>Rules</span></div>
+        <div class="cmp-count-pill"><?= count($rules) ?></div>
+      </div>
       <?php if ($rules === array()): ?>
-        <p style="color:#64748b;margin:0;">No rules yet. Define one on the right.</p>
+        <p style="color:var(--text-muted);margin:0;">No rules yet. Define one on the right.</p>
       <?php else: ?>
-        <table class="cmprl-table">
+        <table>
           <thead><tr>
             <th>Code</th><th>Title</th><th>Kind</th><th>Sev</th><th>Active</th><th></th>
           </tr></thead>
           <tbody>
-            <?php foreach ($rules as $r): ?>
+            <?php foreach ($rules as $r):
+              $sev = (string)$r['alert_severity'];
+              $sevClass = $sev === 'CRITICAL' ? 'cmp-pill-crit' : ($sev === 'HIGH' ? 'cmp-pill-warn' : ($sev === 'LOW' ? 'cmp-pill-ok' : ''));
+            ?>
               <tr>
-                <td class="cmprl-mono">
+                <td class="cmp-mono">
                   <a href="/admin/compliance/monitoring_rules.php?id=<?= (int)$r['id'] ?>"
-                     style="color:#1e3c72;font-weight:700;text-decoration:none;"><?= h((string)$r['rule_code']) ?></a>
+                     style="color:#1f4079;font-weight:700;text-decoration:none;"><?= h((string)$r['rule_code']) ?></a>
                 </td>
                 <td>
                   <?= h((string)$r['title']) ?>
                   <?php if (!empty($r['description'])): ?>
-                    <div style="color:#475569;font-size:12px;"><?= h(mb_substr((string)$r['description'], 0, 90)) ?></div>
+                    <div style="color:var(--text-muted);font-size:12px;"><?= h(mb_substr((string)$r['description'], 0, 90)) ?></div>
                   <?php endif; ?>
                 </td>
-                <td><?= h((string)$r['monitor_kind']) ?></td>
-                <td><span class="cmprl-pill sev-<?= h((string)$r['alert_severity']) ?>"><?= h((string)$r['alert_severity']) ?></span></td>
+                <td><span class="cmp-pill"><?= h((string)$r['monitor_kind']) ?></span></td>
+                <td><span class="cmp-pill <?= h($sevClass) ?>"><?= h($sev) ?></span></td>
                 <td>
                   <form method="post" style="display:inline;">
                     <input type="hidden" name="action" value="toggle_rule">
                     <input type="hidden" name="rule_id" value="<?= (int)$r['id'] ?>">
                     <input type="hidden" name="active" value="<?= ((int)$r['is_active'] === 1) ? '0' : '1' ?>">
-                    <button type="submit" class="cmprl-btn-small"
-                      style="background:<?= ((int)$r['is_active'] === 1) ? '#0f766e' : '#e2e8f0' ?>;color:<?= ((int)$r['is_active'] === 1) ? '#fff' : '#0f172a' ?>;">
+                    <button type="submit" class="<?= ((int)$r['is_active'] === 1) ? '' : 'cmp-btn-secondary' ?>" style="height:32px;min-height:32px;padding:0 12px;font-size:12px;">
                       <?= ((int)$r['is_active'] === 1) ? 'Active' : 'Inactive' ?>
                     </button>
                   </form>
@@ -316,7 +308,7 @@ if ($detailId > 0) {
                   <form method="post" style="display:inline;">
                     <input type="hidden" name="action" value="run_rule">
                     <input type="hidden" name="rule_id" value="<?= (int)$r['id'] ?>">
-                    <button type="submit" class="cmprl-btn-small" style="background:#1e3c72;color:#fff;">Run</button>
+                    <button type="submit" style="height:32px;min-height:32px;padding:0 12px;font-size:12px;">Run</button>
                   </form>
                 </td>
               </tr>
@@ -324,32 +316,32 @@ if ($detailId > 0) {
           </tbody>
         </table>
       <?php endif; ?>
-    </div>
+    </section>
 
-    <div class="cmprl-card">
-      <h3 style="margin:0 0 14px;font-size:16px;">New rule</h3>
+    <section class="cmp-card">
+      <h3 style="margin:0 0 14px;">New rule</h3>
       <form method="post">
         <input type="hidden" name="action" value="create_rule">
-        <label style="display:block;margin-bottom:10px;">
-          <span class="cmprl-label">Title *</span>
-          <input class="cmprl-input" name="title" required>
+        <label class="cmp-field">
+          <span class="cmp-field-label">Title *</span>
+          <input name="title" required>
         </label>
-        <label style="display:block;margin-bottom:10px;">
-          <span class="cmprl-label">Description</span>
-          <textarea class="cmprl-input" name="description" rows="2"></textarea>
+        <label class="cmp-field">
+          <span class="cmp-field-label">Description</span>
+          <textarea name="description" rows="2"></textarea>
         </label>
         <div class="cmprl-grid-2" style="margin-bottom:10px;">
-          <label>
-            <span class="cmprl-label">Monitor kind</span>
-            <select class="cmprl-input" name="monitor_kind">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Monitor kind</span>
+            <select name="monitor_kind">
               <?php foreach (ComplianceMonitorEngine::monitorKinds() as $k): ?>
                 <option value="<?= h($k) ?>" <?= ($k === ($kindFilter !== '' ? $kindFilter : 'CAP')) ? 'selected' : '' ?>><?= h($k) ?></option>
               <?php endforeach; ?>
             </select>
           </label>
-          <label>
-            <span class="cmprl-label">Alert severity</span>
-            <select class="cmprl-input" name="alert_severity">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Alert severity</span>
+            <select name="alert_severity">
               <?php foreach (ComplianceMonitorEngine::severities() as $s): ?>
                 <option value="<?= h($s) ?>" <?= ($s === 'MEDIUM') ? 'selected' : '' ?>><?= h($s) ?></option>
               <?php endforeach; ?>
@@ -357,28 +349,28 @@ if ($detailId > 0) {
           </label>
         </div>
         <div class="cmprl-grid-2" style="margin-bottom:10px;">
-          <label>
-            <span class="cmprl-label">Built-in</span>
-            <select class="cmprl-input" name="builtin_key">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Built-in</span>
+            <select name="builtin_key">
               <option value="">—</option>
               <?php foreach (ComplianceMonitorEngine::builtinKeys() as $b): ?>
                 <option value="<?= h($b) ?>"><?= h($b) ?></option>
               <?php endforeach; ?>
             </select>
           </label>
-          <label>
-            <span class="cmprl-label">Threshold days</span>
-            <input class="cmprl-input" type="number" name="threshold_days" placeholder="e.g. 7">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Threshold days</span>
+            <input type="number" name="threshold_days" placeholder="e.g. 7">
           </label>
         </div>
         <label style="display:inline-flex;gap:8px;align-items:center;margin-bottom:14px;">
           <input type="checkbox" name="is_active" value="1" checked>
           <span style="font-weight:700;color:#0f172a;">Active immediately</span>
         </label>
-        <button type="submit" class="cmprl-btn" style="width:100%;">Create rule</button>
+        <button type="submit" style="width:100%;">Create rule</button>
       </form>
-    </div>
+    </section>
   </div>
-</section>
 <?php
+compliance_page_close();
 cw_footer();

@@ -136,11 +136,7 @@ $versionId = isset($_GET['version_id']) ? (int)$_GET['version_id'] : 0;
 
 cw_header('Compliance · Procedures');
 
-if ($flash) {
-    $cls = $flash['type'] === 'success' ? 'is-ok' : 'is-danger';
-    echo '<div class="queue-status ' . h($cls) . '" style="margin-bottom:16px;padding:12px 16px;border-radius:12px;">'
-        . h((string)$flash['message']) . '</div>';
-}
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $itemTypes = array(
     'SECTION' => 'Section',
@@ -155,28 +151,37 @@ $itemTypes = array(
 if ($versionId > 0) {
     $ver = ComplianceChecklistEngine::getVersion($pdo, $versionId);
     if ($ver === null) {
-        echo '<p>Version not found.</p><p><a href="/admin/compliance/procedures.php">← Templates</a></p>';
-    } else {
-        $tpl = ComplianceChecklistEngine::getTemplate($pdo, (int)$ver['template_id']);
-        $items = ComplianceChecklistEngine::listItems($pdo, $versionId);
-        $locked = !empty($ver['locked_at']);
-        $st = strtoupper((string)($ver['status'] ?? ''));
-        ?>
-        <p style="margin-bottom:16px;">
-          <a href="/admin/compliance/procedures.php" style="font-weight:700;color:#1e3c72;">← All templates</a>
-          <?php if ($tpl): ?>
-            <span style="color:#64748b;margin:0 8px;">|</span>
-            <a href="/admin/compliance/procedures.php?template_id=<?= (int)$tpl['id'] ?>" style="color:#1e3c72;">
-              <?= h((string)$tpl['template_code']) ?>
-            </a>
-          <?php endif; ?>
-        </p>
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:20px;max-width:1000px;">
-          <h1 style="margin:0 0 8px;font-size:22px;">Version <?= (int)$ver['version_no'] ?></h1>
-          <p style="color:#64748b;margin:0 0 8px;">
+        compliance_page_open(array(
+            'overline' => 'Compliance · Procedures',
+            'title' => 'Version not found',
+            'back' => array('href' => '/admin/compliance/procedures.php', 'label' => 'Templates'),
+        ));
+        echo '<section class="cmp-card"><p style="margin:0;">No row for that version id.</p></section>';
+        compliance_page_close();
+        cw_footer();
+        return;
+    }
+    $tpl = ComplianceChecklistEngine::getTemplate($pdo, (int)$ver['template_id']);
+    $items = ComplianceChecklistEngine::listItems($pdo, $versionId);
+    $locked = !empty($ver['locked_at']);
+    $st = strtoupper((string)($ver['status'] ?? ''));
+    compliance_page_open(array(
+        'overline' => 'Compliance · Checklist version',
+        'title' => 'Version ' . (int)$ver['version_no'] . ($tpl ? ' · ' . (string)$tpl['template_code'] : ''),
+        'description' => 'Status: ' . $st . ' · Items: ' . (int)$ver['items_count'] . ($locked ? ' · Locked' : ''),
+        'back' => array(
+            'href' => $tpl ? '/admin/compliance/procedures.php?template_id=' . (int)$tpl['id'] : '/admin/compliance/procedures.php',
+            'label' => $tpl ? 'Template ' . (string)$tpl['template_code'] : 'Templates',
+        ),
+        'flash' => $flash,
+    ));
+    ?>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 8px;">Version <?= (int)$ver['version_no'] ?></h2>
+          <p style="color:var(--text-muted);margin:0 0 8px;">
             Status: <strong><?= h($st) ?></strong>
             <?php if ($locked): ?>
-              <span class="queue-status is-warn" style="margin-left:8px;display:inline-block;">Locked</span>
+              <span class="cmp-pill cmp-pill-warn" style="margin-left:8px;">Locked</span>
             <?php endif; ?>
             · Items: <?= (int)$ver['items_count'] ?>
           </p>
@@ -185,33 +190,30 @@ if ($versionId > 0) {
           <?php endif; ?>
 
           <?php if (!$locked && in_array($st, array('DRAFT', 'PENDING_APPROVAL'), true)): ?>
-            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:16px;">
+            <div class="cmp-toolbar" style="margin-bottom:16px;">
               <form method="post" style="display:inline;">
                 <input type="hidden" name="action" value="set_version_status">
                 <input type="hidden" name="version_id" value="<?= (int)$versionId ?>">
                 <input type="hidden" name="status" value="<?= $st === 'DRAFT' ? 'PENDING_APPROVAL' : 'DRAFT' ?>">
-                <button type="submit" style="background:#f59e0b;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer;">
+                <button type="submit" class="cmp-btn-secondary">
                   <?= $st === 'DRAFT' ? 'Submit for approval' : 'Revert to draft' ?>
                 </button>
               </form>
-              <form method="post" style="display:inline;" onsubmit="return confirm('Approve and lock this version?');">
+              <form method="post" class="cmp-toolbar" style="margin:0;" onsubmit="return confirm('Approve and lock this version?');">
                 <input type="hidden" name="action" value="approve_version">
                 <input type="hidden" name="version_id" value="<?= (int)$versionId ?>">
-                <label style="font-size:12px;margin-right:8px;">
-                  Approver
-                  <input name="approver_name" value="<?= h((string)($user['name'] ?? '')) ?>" required
-                    style="padding:6px;border-radius:6px;border:1px solid #cbd5e1;">
+                <label class="cmp-field" style="margin:0;min-width:220px;">
+                  <span class="cmp-field-label">Approver</span>
+                  <input name="approver_name" value="<?= h((string)($user['name'] ?? '')) ?>" required>
                 </label>
-                <button type="submit" style="background:#0f766e;color:#fff;border:0;padding:8px 14px;border-radius:8px;font-weight:700;cursor:pointer;">
-                  Approve & lock
-                </button>
+                <button type="submit">Approve &amp; lock</button>
               </form>
             </div>
           <?php endif; ?>
-        </div>
+        </section>
 
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:1000px;">
-          <h2 style="margin:0 0 16px;font-size:18px;">Items</h2>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 16px;">Items</h2>
           <?php if (!$locked): ?>
             <form method="post" style="margin-bottom:24px;padding:16px;background:#f8fafc;border-radius:12px;border:1px solid #e2e8f0;">
               <input type="hidden" name="action" value="add_item">
@@ -319,19 +321,32 @@ if ($versionId > 0) {
               <?php endif; ?>
             </div>
           <?php endforeach; ?>
-        </div>
+        </section>
         <?php
-    }
 } elseif ($templateId > 0) {
     $tpl = ComplianceChecklistEngine::getTemplate($pdo, $templateId);
     if ($tpl === null) {
-        echo '<p>Template not found.</p>';
-    } else {
-        $vers = ComplianceChecklistEngine::listVersions($pdo, $templateId);
-        ?>
-        <p style="margin-bottom:16px;"><a href="/admin/compliance/procedures.php" style="font-weight:700;color:#1e3c72;">← All templates</a></p>
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:20px;max-width:900px;">
-          <h1 style="margin:0 0 16px;font-size:22px;"><?= h((string)$tpl['template_code']) ?></h1>
+        compliance_page_open(array(
+            'overline' => 'Compliance · Procedures',
+            'title' => 'Template not found',
+            'back' => array('href' => '/admin/compliance/procedures.php', 'label' => 'Templates'),
+        ));
+        echo '<section class="cmp-card"><p style="margin:0;">No row for that template id.</p></section>';
+        compliance_page_close();
+        cw_footer();
+        return;
+    }
+    $vers = ComplianceChecklistEngine::listVersions($pdo, $templateId);
+    compliance_page_open(array(
+        'overline' => 'Compliance · Checklist template',
+        'title' => (string)$tpl['template_code'] . ' · ' . (string)$tpl['title'],
+        'description' => 'Template metadata and version timeline. Versions go DRAFT → PENDING_APPROVAL → APPROVED (locked).',
+        'back' => array('href' => '/admin/compliance/procedures.php', 'label' => 'Templates'),
+        'flash' => $flash,
+    ));
+    ?>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 16px;"><?= h((string)$tpl['template_code']) ?></h2>
           <form method="post">
             <input type="hidden" name="action" value="update_template">
             <input type="hidden" name="template_id" value="<?= (int)$templateId ?>">
@@ -355,51 +370,58 @@ if ($versionId > 0) {
                 </select>
               </label>
             </div>
-            <button type="submit" style="margin-top:12px;background:#1e3c72;color:#fff;border:0;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;">Save template</button>
+            <button type="submit" style="margin-top:12px;">Save template</button>
           </form>
-        </div>
+        </section>
 
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;max-width:900px;">
-          <h2 style="margin:0 0 12px;font-size:18px;">Versions</h2>
-          <form method="post" style="margin-bottom:16px;display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end;">
+        <section class="cmp-card">
+          <div class="cmp-list-head" style="margin-bottom:14px;">
+            <div class="cmp-list-title"><?= compliance_ui_icon('list') ?><span>Versions</span></div>
+            <div class="cmp-count-pill"><?= count($vers) ?></div>
+          </div>
+          <form method="post" class="cmp-toolbar" style="margin-bottom:16px;">
             <input type="hidden" name="action" value="create_version">
             <input type="hidden" name="template_id" value="<?= (int)$templateId ?>">
-            <label>Note (optional)
-              <input name="version_description" placeholder="e.g. BCAA annual scope" style="padding:8px;min-width:280px;">
+            <label class="cmp-field" style="min-width:280px;">
+              <span class="cmp-field-label">Note (optional)</span>
+              <input name="version_description" placeholder="e.g. BCAA annual scope">
             </label>
-            <button type="submit" style="background:#3730a3;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">+ New draft version</button>
+            <button type="submit">+ New draft version</button>
           </form>
-          <table style="width:100%;border-collapse:collapse;font-size:14px;">
-            <thead><tr style="background:#f1f5f9;text-align:left;"><th>Ver</th><th>Status</th><th>Items</th><th>Updated</th><th></th></tr></thead>
+          <table>
+            <thead><tr><th>Ver</th><th>Status</th><th>Items</th><th>Updated</th><th></th></tr></thead>
             <tbody>
               <?php foreach ($vers as $v): ?>
-                <tr style="border-top:1px solid #e2e8f0;">
-                  <td style="padding:10px;"><?= (int)$v['version_no'] ?></td>
-                  <td style="padding:10px;"><?= h((string)$v['status']) ?></td>
-                  <td style="padding:10px;"><?= (int)$v['items_count'] ?></td>
-                  <td style="padding:10px;color:#64748b;font-size:12px;"><?= h((string)$v['updated_at']) ?></td>
-                  <td style="padding:10px;"><a href="/admin/compliance/procedures.php?version_id=<?= (int)$v['id'] ?>" style="font-weight:700;color:#1e3c72;">Open</a></td>
+                <tr>
+                  <td class="cmp-mono"><?= (int)$v['version_no'] ?></td>
+                  <td><span class="cmp-pill"><?= h((string)$v['status']) ?></span></td>
+                  <td><?= (int)$v['items_count'] ?></td>
+                  <td class="cmp-mono"><?= h((string)$v['updated_at']) ?></td>
+                  <td><a href="/admin/compliance/procedures.php?version_id=<?= (int)$v['id'] ?>" style="font-weight:700;color:#1f4079;text-decoration:none;">Open</a></td>
                 </tr>
               <?php endforeach; ?>
               <?php if ($vers === array()): ?>
-                <tr><td colspan="5" style="padding:16px;color:#64748b;">No versions yet.</td></tr>
+                <tr><td colspan="5" style="padding:16px;color:var(--text-muted);">No versions yet.</td></tr>
               <?php endif; ?>
             </tbody>
           </table>
-        </div>
+        </section>
         <?php
-    }
 } else {
     $templates = ComplianceChecklistEngine::listTemplates($pdo);
+    compliance_page_open(array(
+        'overline' => 'Compliance · Procedures',
+        'title' => 'Checklist templates',
+        'description' => 'Author templates, version drafts, approve to lock. Locked versions are the only ones reusable in audits.',
+        'stats' => array(
+            array('label' => 'Templates', 'value' => count($templates)),
+            array('label' => 'Active',    'value' => count(array_filter($templates, static fn($t) => !empty($t['is_active']))), 'tone' => 'ok'),
+        ),
+        'flash' => $flash,
+    ));
     ?>
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:20px;">
-      <div>
-        <h1 style="margin:0 0 6px;font-size:24px;">Checklist templates</h1>
-        <p style="margin:0;color:#64748b;">Phase 4 — author templates, version drafts, approve to lock.</p>
-      </div>
-    </div>
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:640px;">
-      <h2 style="margin:0 0 12px;font-size:18px;">New template</h2>
+    <section class="cmp-card">
+      <h2 style="margin:0 0 12px;">New template</h2>
       <form method="post">
         <input type="hidden" name="action" value="create_template">
         <label style="display:block;margin-bottom:8px;">Code (optional)
@@ -415,29 +437,34 @@ if ($versionId > 0) {
           <label>Authority <input name="authority" placeholder="BCAA" style="padding:8px;width:120px;"></label>
           <label>Tags <input name="scope_tags" placeholder="OPS,SAFETY" style="padding:8px;width:180px;"></label>
         </div>
-        <button type="submit" style="margin-top:12px;background:#1e3c72;color:#fff;border:0;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;">Create</button>
+        <button type="submit" style="margin-top:12px;">Create</button>
       </form>
-    </div>
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;max-width:960px;">
-      <table style="width:100%;border-collapse:collapse;font-size:14px;">
-        <thead><tr style="background:#f1f5f9;text-align:left;"><th>Code</th><th>Title</th><th>Authority</th><th>Active</th><th></th></tr></thead>
+    </section>
+    <section class="cmp-card">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title"><?= compliance_ui_icon('list') ?><span>Templates</span></div>
+        <div class="cmp-count-pill"><?= count($templates) ?></div>
+      </div>
+      <table>
+        <thead><tr><th>Code</th><th>Title</th><th>Authority</th><th>Active</th><th></th></tr></thead>
         <tbody>
           <?php foreach ($templates as $t): ?>
-            <tr style="border-top:1px solid #e2e8f0;">
-              <td style="padding:12px;font-family:monospace;font-size:13px;"><?= h((string)$t['template_code']) ?></td>
-              <td style="padding:12px;"><?= h((string)$t['title']) ?></td>
-              <td style="padding:12px;"><?= h((string)($t['authority'] ?? '—')) ?></td>
-              <td style="padding:12px;"><?= !empty($t['is_active']) ? 'Yes' : 'No' ?></td>
-              <td style="padding:12px;"><a href="/admin/compliance/procedures.php?template_id=<?= (int)$t['id'] ?>" style="font-weight:700;color:#1e3c72;">Open</a></td>
+            <tr>
+              <td class="cmp-mono"><?= h((string)$t['template_code']) ?></td>
+              <td><?= h((string)$t['title']) ?></td>
+              <td><?= h((string)($t['authority'] ?? '—')) ?></td>
+              <td><span class="cmp-pill <?= !empty($t['is_active']) ? 'cmp-pill-ok' : '' ?>"><?= !empty($t['is_active']) ? 'Yes' : 'No' ?></span></td>
+              <td><a href="/admin/compliance/procedures.php?template_id=<?= (int)$t['id'] ?>" style="font-weight:700;color:#1f4079;text-decoration:none;">Open</a></td>
             </tr>
           <?php endforeach; ?>
           <?php if ($templates === array()): ?>
-            <tr><td colspan="5" style="padding:20px;color:#64748b;">No templates yet.</td></tr>
+            <tr><td colspan="5" style="padding:20px;color:var(--text-muted);">No templates yet.</td></tr>
           <?php endif; ?>
         </tbody>
       </table>
-    </div>
+    </section>
     <?php
 }
 
+compliance_page_close();
 cw_footer();

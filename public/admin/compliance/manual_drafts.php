@@ -91,34 +91,33 @@ $filterRequestId = isset($_GET['request_id']) ? (int)$_GET['request_id'] : 0;
 
 cw_header('Compliance · Draft Manuals');
 
-if ($flash) {
-    $cls = $flash['type'] === 'success' ? 'is-ok' : 'is-danger';
-    echo '<div class="queue-status ' . h($cls) . '" style="margin:0 0 16px;padding:12px 16px;border-radius:12px;">'
-        . h((string)$flash['message']) . '</div>';
-}
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $draftStatuses = array('DRAFT', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'PUBLISHED', 'ARCHIVED');
 
 if ($detailId > 0) {
     $row = ComplianceManualControlEngine::getDraft($pdo, $detailId);
     if ($row === null) {
-        echo '<p>Not found.</p>';
-    } else {
-        $locked = !empty($row['locked_at']);
-        ?>
-        <p><a href="/admin/compliance/manual_drafts.php<?= $filterRequestId > 0 ? ('?request_id=' . (int)$filterRequestId) : '' ?>" style="font-weight:700;color:#1e3c72;">← Drafts</a></p>
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:16px;max-width:960px;">
-          <h1 style="margin:0 0 6px;font-size:22px;"><?= h((string)$row['draft_code']) ?></h1>
-          <p style="color:#64748b;margin:0;"><?= h((string)$row['status']) ?>
-            <?php if (!empty($row['request_id'])): ?>
-              · Request #<?= (int)$row['request_id'] ?>
-              (<a href="/admin/compliance/change_requests.php?id=<?= (int)$row['request_id'] ?>">open</a>)
-            <?php endif; ?>
-            <?php if ($locked): ?><span class="queue-status is-warn" style="margin-left:8px;">Locked</span><?php endif; ?>
-          </p>
-        </div>
-
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;max-width:960px;">
+        compliance_page_open(array(
+            'overline' => 'Compliance · Manual control',
+            'title' => 'Draft not found',
+            'back' => array('href' => '/admin/compliance/manual_drafts.php', 'label' => 'All drafts'),
+        ));
+        echo '<section class="cmp-card"><p style="margin:0;">No row for that id.</p></section>';
+        compliance_page_close();
+        cw_footer();
+        return;
+    }
+    $locked = !empty($row['locked_at']);
+    compliance_page_open(array(
+        'overline' => 'Compliance · Manual draft',
+        'title' => (string)$row['draft_code'],
+        'description' => 'Status: ' . (string)$row['status'] . ($locked ? ' · LOCKED' : '') . (!empty($row['request_id']) ? ' · Request #' . (int)$row['request_id'] : ''),
+        'back' => array('href' => '/admin/compliance/manual_drafts.php' . ($filterRequestId > 0 ? ('?request_id=' . (int)$filterRequestId) : ''), 'label' => 'All drafts'),
+        'flash' => $flash,
+    ));
+    ?>
+        <section class="cmp-card">
           <?php if (!$locked): ?>
             <form method="post">
               <input type="hidden" name="action" value="update_draft">
@@ -149,11 +148,11 @@ if ($detailId > 0) {
                 <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Body *</span>
                 <textarea name="draft_body" required rows="16" style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;padding:10px;border-radius:8px;border:1px solid #cbd5e1;"><?= h((string)$row['draft_body']) ?></textarea>
               </label>
-              <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Save</button>
+              <button type="submit">Save</button>
             </form>
 
-            <div style="margin-top:24px;padding-top:20px;border-top:1px dashed #cbd5e1;">
-              <h3 style="margin:0 0 12px;font-size:18px;">Workflow</h3>
+            <div style="margin-top:24px;padding-top:20px;border-top:1px dashed rgba(15,23,42,0.10);">
+              <h3 style="margin:0 0 12px;">Workflow</h3>
               <form method="post" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
                 <input type="hidden" name="action" value="set_draft_status">
                 <input type="hidden" name="draft_id" value="<?= (int)$detailId ?>">
@@ -169,16 +168,15 @@ if ($detailId > 0) {
                   <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Approver name (APPROVED / PUBLISHED)</span>
                   <input name="approver_name" value="<?= h((string)($user['name'] ?? '')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
                 </label>
-                <button type="submit" style="background:#0f766e;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">Apply</button>
+                <button type="submit" class="cmp-btn-success">Apply</button>
               </form>
             </div>
           <?php else: ?>
-            <h2 style="margin:0 0 8px;font-size:20px;"><?= h((string)$row['draft_title']) ?></h2>
-            <pre style="white-space:pre-wrap;font-size:13px;line-height:1.5;background:#f8fafc;padding:16px;border-radius:12px;border:1px solid #e2e8f0;"><?= h((string)$row['draft_body']) ?></pre>
+            <h2 style="margin:0 0 8px;"><?= h((string)$row['draft_title']) ?></h2>
+            <pre style="white-space:pre-wrap;font-size:13px;line-height:1.5;background:#f6f9fd;padding:16px;border-radius:14px;border:1px solid var(--border-soft);"><?= h((string)$row['draft_body']) ?></pre>
           <?php endif; ?>
-        </div>
+        </section>
         <?php
-    }
 } else {
     $all = ComplianceManualControlEngine::listDrafts($pdo);
     $rows = $all;
@@ -187,16 +185,39 @@ if ($detailId > 0) {
             return (int)($r['request_id'] ?? 0) === $filterRequestId;
         }));
     }
+    $mdCounts = array('total' => count($rows), 'draft' => 0, 'approved' => 0, 'published' => 0);
+    foreach ($rows as $r) {
+        $st = (string)$r['status'];
+        if ($st === 'DRAFT' || $st === 'UNDER_REVIEW') {
+            $mdCounts['draft']++;
+        }
+        if ($st === 'APPROVED') {
+            $mdCounts['approved']++;
+        }
+        if ($st === 'PUBLISHED') {
+            $mdCounts['published']++;
+        }
+    }
+    compliance_page_open(array(
+        'overline' => 'Compliance · Manual control',
+        'title' => 'Manual drafts',
+        'description' => $filterRequestId > 0
+            ? 'Drafts filtered to change request #' . (int)$filterRequestId . '.'
+            : 'Proposed manual wording (canonical references only). Author a draft, route it through review and publish to feed a release package.',
+        'actions' => $filterRequestId > 0 ? array(
+            array('label' => 'Show all drafts', 'href' => '/admin/compliance/manual_drafts.php', 'icon' => 'list'),
+        ) : array(),
+        'stats' => array(
+            array('label' => 'Drafts / review', 'value' => (int)$mdCounts['draft']),
+            array('label' => 'Approved',         'value' => (int)$mdCounts['approved'], 'tone' => 'ok'),
+            array('label' => 'Published',        'value' => (int)$mdCounts['published'], 'tone' => 'ok'),
+            array('label' => 'Total',            'value' => (int)$mdCounts['total']),
+        ),
+        'flash' => $flash,
+    ));
     ?>
-    <h1 style="margin:0 0 8px;">Manual drafts</h1>
-    <p style="color:#64748b;margin:0 0 20px;">Phase 4+ — proposed manual wording (canonical refs only).</p>
-    <?php if ($filterRequestId > 0): ?>
-      <p style="margin-bottom:16px;">Filtered to request #<?= (int)$filterRequestId ?> ·
-        <a href="/admin/compliance/manual_drafts.php">Show all</a></p>
-    <?php endif; ?>
-
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:720px;">
-      <h2 style="margin:0 0 12px;font-size:18px;">New draft</h2>
+    <section class="cmp-card">
+      <h2 style="margin:0 0 12px;">New draft</h2>
       <form method="post">
         <input type="hidden" name="action" value="create_draft">
         <?php if ($filterRequestId > 0): ?>
@@ -231,38 +252,46 @@ if ($detailId > 0) {
           <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Body *</span>
           <textarea name="draft_body" required rows="8" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;"></textarea>
         </label>
-        <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Create</button>
+        <button type="submit">Create</button>
       </form>
-    </div>
+    </section>
 
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;max-width:1100px;">
-      <table style="width:100%;border-collapse:collapse;font-size:14px;">
-        <thead><tr style="background:#f1f5f9;text-align:left;">
-          <th style="padding:12px 14px;">Code</th>
-          <th style="padding:12px 14px;">Title</th>
-          <th style="padding:12px 14px;">Status</th>
-          <th style="padding:12px 14px;">Req</th>
-          <th style="padding:12px 14px;">Updated</th>
-          <th style="padding:12px 14px;"></th>
+    <section class="cmp-card" style="overflow:hidden;">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title">
+          <?= compliance_ui_icon('document') ?>
+          <span>Drafts</span>
+        </div>
+        <div class="cmp-count-pill"><?= count($rows) ?> draft<?= count($rows) === 1 ? '' : 's' ?></div>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Code</th>
+          <th>Title</th>
+          <th>Status</th>
+          <th>Req</th>
+          <th>Updated</th>
+          <th></th>
         </tr></thead>
         <tbody>
           <?php if (!$rows): ?>
-            <tr><td colspan="6" style="padding:20px;color:#64748b;">No drafts yet.</td></tr>
+            <tr><td colspan="6" style="padding:20px;color:var(--text-muted);">No drafts yet.</td></tr>
           <?php endif; ?>
           <?php foreach ($rows as $r): ?>
-            <tr style="border-top:1px solid #e2e8f0;">
-              <td style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$r['draft_code']) ?></td>
-              <td style="padding:10px 14px;"><?= h((string)$r['draft_title']) ?></td>
-              <td style="padding:10px 14px;"><?= h((string)$r['status']) ?></td>
-              <td style="padding:10px 14px;"><?= $r['request_id'] !== null ? (int)$r['request_id'] : '—' ?></td>
-              <td style="padding:10px 14px;font-size:12px;color:#64748b;"><?= h((string)$r['updated_at']) ?></td>
-              <td style="padding:10px 14px;"><a href="/admin/compliance/manual_drafts.php?id=<?= (int)$r['id'] ?><?= $filterRequestId > 0 ? ('&request_id=' . (int)$filterRequestId) : '' ?>" style="font-weight:700;color:#1e3c72;">Open</a></td>
+            <tr>
+              <td class="cmp-mono"><?= h((string)$r['draft_code']) ?></td>
+              <td><?= h((string)$r['draft_title']) ?></td>
+              <td><span class="cmp-pill"><?= h((string)$r['status']) ?></span></td>
+              <td><?= $r['request_id'] !== null ? (int)$r['request_id'] : '—' ?></td>
+              <td class="cmp-mono"><?= h((string)$r['updated_at']) ?></td>
+              <td><a href="/admin/compliance/manual_drafts.php?id=<?= (int)$r['id'] ?><?= $filterRequestId > 0 ? ('&request_id=' . (int)$filterRequestId) : '' ?>" style="font-weight:700;color:#1f4079;">Open</a></td>
             </tr>
           <?php endforeach; ?>
         </tbody>
       </table>
-    </div>
+    </section>
     <?php
 }
 
+compliance_page_close();
 cw_footer();

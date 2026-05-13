@@ -1,0 +1,598 @@
+/*
+ * Maya Summary Coach (TEST/v3 feature)
+ *
+ * Shared between:
+ *   - /public/player/slide_v3.php          (compact mode, inside the drawer)
+ *   - /public/student/lesson_summaries_v3.php (expanded mode, modal sidebar)
+ *
+ * Design tokens are deliberately aligned with the existing IPCA app:
+ *   primary navy: #12355f / #1e3c72 / #2a5298
+ *   surfaces:     #ffffff / #fbfcfe / #f8fbff
+ *   text:         #152235 / #243446 / #5f7088 / #64748b
+ *   accents:      #f59e0b warn / #166534 ok / #1d4ed8 info
+ *
+ * Two layout modes are supported via the `data-coach-mode` attribute on the
+ * root `.maya-coach` element:
+ *   - data-coach-mode="compact"  → fits inside narrow side surfaces (~280px)
+ *   - data-coach-mode="expanded" → uses two-column layout when there is room
+ *
+ * The component is style-scoped under `.maya-coach`. We do not leak styles
+ * into surrounding pages.
+ */
+
+.maya-coach {
+  --maya-bg: #ffffff;
+  --maya-surface: #fbfcfe;
+  --maya-surface-alt: #f8fbff;
+  --maya-border: rgba(15, 23, 42, 0.10);
+  --maya-border-soft: rgba(15, 23, 42, 0.06);
+  --maya-text: #152235;
+  --maya-text-soft: #5f7088;
+  --maya-text-muted: #64748b;
+  --maya-accent: #12355f;
+  --maya-accent-2: #2a5298;
+  --maya-accent-soft: #eaf2ff;
+  --maya-ok: #166534;
+  --maya-ok-bg: #f0fdf4;
+  --maya-ok-border: #86efac;
+  --maya-warn: #92400e;
+  --maya-warn-bg: #fffbeb;
+  --maya-warn-border: #fcd34d;
+  --maya-danger: #991b1b;
+  --maya-danger-bg: #fef2f2;
+  --maya-danger-border: #fca5a5;
+  --maya-info: #1d4ed8;
+  --maya-info-bg: #eff6ff;
+  --maya-info-border: #93c5fd;
+
+  box-sizing: border-box;
+  background: var(--maya-bg);
+  color: var(--maya-text);
+  border: 1px solid var(--maya-border);
+  border-radius: 16px;
+  padding: 14px;
+  font-family: Manrope, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.maya-coach *,
+.maya-coach *::before,
+.maya-coach *::after {
+  box-sizing: border-box;
+}
+
+/* ---------- Header ---------- */
+
+.maya-coach-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--maya-border-soft);
+}
+
+.maya-avatar-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.maya-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: linear-gradient(135deg, #1e3c72, #2a5298);
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+  display: block;
+}
+
+/* CSS-only fallback "M" avatar — used when the avatar img element fails to
+ * load and the JS swaps the .maya-avatar element for a .maya-avatar-fallback. */
+.maya-avatar-fallback {
+  width: 40px;
+  height: 40px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #1e3c72, #2a5298);
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+}
+
+.maya-status-dot {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #94a3b8;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.06);
+  transition: background 0.15s ease;
+}
+
+.maya-coach[data-coach-state="thinking"] .maya-status-dot {
+  background: #f59e0b;
+  animation: maya-pulse 1.2s ease-in-out infinite;
+}
+
+.maya-coach[data-coach-state="ready"] .maya-status-dot {
+  background: #22c55e;
+}
+
+.maya-coach[data-coach-state="error"] .maya-status-dot {
+  background: #ef4444;
+}
+
+@keyframes maya-pulse {
+  0%   { transform: scale(0.95); opacity: 0.85; }
+  50%  { transform: scale(1.15); opacity: 1; }
+  100% { transform: scale(0.95); opacity: 0.85; }
+}
+
+.maya-title {
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--maya-text);
+  letter-spacing: 0.005em;
+  line-height: 1.2;
+}
+
+.maya-subtitle {
+  font-size: 11px;
+  color: var(--maya-text-muted);
+  margin-top: 2px;
+  letter-spacing: 0.01em;
+}
+
+.maya-coach-header-text {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/* ---------- Stage banner ---------- */
+
+.maya-stage {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--maya-accent);
+  background: var(--maya-accent-soft);
+  border: 1px solid rgba(30, 60, 114, 0.18);
+  border-radius: 999px;
+  padding: 5px 10px;
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.maya-stage::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--maya-accent-2);
+  display: inline-block;
+}
+
+/* ---------- Maya message ---------- */
+
+.maya-message {
+  background: var(--maya-surface-alt);
+  border: 1px solid var(--maya-border-soft);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--maya-text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.maya-message[data-empty="1"] {
+  color: var(--maya-text-muted);
+  font-style: italic;
+}
+
+/* ---------- Question + reply ---------- */
+
+.maya-next-question {
+  font-weight: 700;
+  font-size: 12.5px;
+  color: var(--maya-text);
+  background: #ffffff;
+  border: 1px dashed rgba(30, 60, 114, 0.28);
+  border-radius: 12px;
+  padding: 10px 12px;
+  position: relative;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.maya-next-question::before {
+  content: "Maya's next question";
+  display: block;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--maya-accent);
+  margin-bottom: 4px;
+}
+
+.maya-reply {
+  width: 100%;
+  min-height: 64px;
+  resize: vertical;
+  border: 1px solid var(--maya-border);
+  border-radius: 12px;
+  padding: 9px 11px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--maya-text);
+  background: #ffffff;
+  outline: none;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.maya-reply::placeholder {
+  color: var(--maya-text-muted);
+}
+
+.maya-reply:focus {
+  border-color: var(--maya-accent-2);
+  box-shadow: 0 0 0 3px rgba(42, 82, 152, 0.12);
+}
+
+/* ---------- Actions ---------- */
+
+.maya-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.maya-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform 0.06s ease, box-shadow 0.12s ease, opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.maya-btn:hover { opacity: 0.96; }
+.maya-btn:active { transform: translateY(1px); }
+.maya-btn:focus-visible {
+  outline: 2px solid var(--maya-accent-2);
+  outline-offset: 2px;
+}
+
+.maya-btn.primary {
+  background: var(--maya-accent);
+  color: #ffffff;
+  box-shadow: 0 6px 14px rgba(18, 53, 95, 0.18);
+}
+.maya-btn.primary:hover { background: var(--maya-accent-2); }
+
+.maya-btn.ghost {
+  background: #ffffff;
+  color: var(--maya-text);
+  border-color: var(--maya-border);
+}
+.maya-btn.ghost:hover {
+  border-color: rgba(30, 60, 114, 0.30);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.05);
+}
+
+.maya-btn.success {
+  background: #f0fdf4;
+  color: #166534;
+  border-color: #86efac;
+}
+
+.maya-btn[disabled],
+.maya-btn[aria-disabled="true"] {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+  filter: grayscale(0.15);
+}
+
+/* ---------- Progress grid ---------- */
+
+.maya-progress-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 6px;
+  background: var(--maya-surface);
+  border: 1px solid var(--maya-border-soft);
+  border-radius: 12px;
+  padding: 10px;
+}
+
+.maya-progress-grid-title {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--maya-text-muted);
+  margin-bottom: 2px;
+}
+
+.maya-progress-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1.4fr) 1fr 36px;
+  align-items: center;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--maya-text);
+}
+
+.maya-progress-label {
+  font-weight: 700;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.maya-progress-bar {
+  position: relative;
+  height: 8px;
+  background: rgba(15, 23, 42, 0.07);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.maya-progress-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: linear-gradient(90deg, #2a5298, #1e3c72);
+  border-radius: 999px;
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.maya-progress-row[data-low="1"] .maya-progress-fill {
+  background: linear-gradient(90deg, #f59e0b, #d97706);
+}
+
+.maya-progress-row[data-pass="1"] .maya-progress-fill {
+  background: linear-gradient(90deg, #22c55e, #16a34a);
+}
+
+.maya-progress-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  font-size: 11.5px;
+  color: var(--maya-text-soft);
+}
+
+/* ---------- Readiness checklist ---------- */
+
+.maya-readiness {
+  background: var(--maya-warn-bg);
+  border: 1px solid var(--maya-warn-border);
+  color: var(--maya-warn);
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.maya-readiness[data-ready="1"] {
+  background: var(--maya-ok-bg);
+  border-color: var(--maya-ok-border);
+  color: var(--maya-ok);
+}
+
+.maya-readiness-title {
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.maya-readiness-title::before {
+  content: "•";
+  font-size: 16px;
+  line-height: 0.5;
+  display: inline-block;
+}
+
+.maya-readiness-list {
+  margin: 4px 0 0 0;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.maya-readiness-list li {
+  margin: 0;
+  padding: 0;
+}
+
+.maya-readiness-empty {
+  font-style: italic;
+  opacity: 0.85;
+}
+
+/* ---------- Local hint / soft warning bar ---------- */
+
+.maya-local-hint {
+  font-size: 12px;
+  color: var(--maya-text-soft);
+  background: var(--maya-info-bg);
+  border: 1px solid var(--maya-info-border);
+  color: var(--maya-info);
+  border-radius: 10px;
+  padding: 7px 10px;
+  display: none;
+}
+
+.maya-local-hint[data-visible="1"] {
+  display: block;
+}
+
+/* ---------- Note suggestion ---------- */
+
+.maya-note-suggestion {
+  font-size: 12px;
+  background: #f8fafc;
+  border: 1px solid var(--maya-border-soft);
+  border-left: 3px solid var(--maya-accent-2);
+  color: var(--maya-text);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: none;
+}
+.maya-note-suggestion[data-visible="1"] {
+  display: block;
+}
+.maya-note-suggestion-label {
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--maya-accent);
+  margin-bottom: 3px;
+}
+
+/* ---------- Error / fallback ---------- */
+
+.maya-error {
+  display: none;
+  font-size: 12px;
+  background: var(--maya-danger-bg);
+  border: 1px solid var(--maya-danger-border);
+  color: var(--maya-danger);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.maya-error[data-visible="1"] {
+  display: block;
+}
+
+/* ---------- Compact mode tweaks ----------
+ * Used when the coach is mounted inside the slide_v3 drawer (~520px wide)
+ * or in a tight sidebar. Keep a single column.
+ */
+.maya-coach[data-coach-mode="compact"] {
+  padding: 12px;
+  font-size: 12.5px;
+  border-radius: 14px;
+}
+
+.maya-coach[data-coach-mode="compact"] .maya-progress-row {
+  grid-template-columns: minmax(96px, 1.2fr) 1fr 32px;
+  font-size: 11px;
+}
+
+.maya-coach[data-coach-mode="compact"] .maya-message {
+  padding: 9px 10px;
+  font-size: 12.5px;
+}
+
+.maya-coach[data-coach-mode="compact"] .maya-reply {
+  min-height: 56px;
+}
+
+/* ---------- Expanded mode ----------
+ * Used when there is more room — e.g. inside the lesson_summaries_v3 modal
+ * sidebar at >=1024px viewports, or in slide_v3's expanded drawer state.
+ * Two-column layout: left = conversation, right = progress + readiness.
+ */
+.maya-coach[data-coach-mode="expanded"] {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+  grid-template-areas:
+    "header     header"
+    "stage      stage"
+    "message    progress"
+    "question   readiness"
+    "reply      readiness"
+    "actions    actions"
+    "hint       hint"
+    "note       note"
+    "error      error";
+  gap: 12px 14px;
+  padding: 16px;
+}
+
+.maya-coach[data-coach-mode="expanded"] .maya-coach-header { grid-area: header; }
+.maya-coach[data-coach-mode="expanded"] .maya-stage         { grid-area: stage; }
+.maya-coach[data-coach-mode="expanded"] .maya-message       { grid-area: message; }
+.maya-coach[data-coach-mode="expanded"] .maya-next-question { grid-area: question; }
+.maya-coach[data-coach-mode="expanded"] .maya-reply         { grid-area: reply; }
+.maya-coach[data-coach-mode="expanded"] .maya-actions       { grid-area: actions; }
+.maya-coach[data-coach-mode="expanded"] .maya-progress-grid { grid-area: progress; }
+.maya-coach[data-coach-mode="expanded"] .maya-readiness     { grid-area: readiness; }
+.maya-coach[data-coach-mode="expanded"] .maya-local-hint    { grid-area: hint; }
+.maya-coach[data-coach-mode="expanded"] .maya-note-suggestion { grid-area: note; }
+.maya-coach[data-coach-mode="expanded"] .maya-error         { grid-area: error; }
+
+/* ---------- Responsive collapse ----------
+ * In tight viewports the expanded layout collapses to a single column so
+ * the host page (modal / drawer) can shrink without breaking.
+ */
+@media (max-width: 720px) {
+  .maya-coach[data-coach-mode="expanded"] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "header"
+      "stage"
+      "message"
+      "progress"
+      "question"
+      "reply"
+      "actions"
+      "readiness"
+      "hint"
+      "note"
+      "error";
+  }
+}
+
+/* Inline shrinkage for slide_v3 drawer when not expanded — the drawer is
+ * ~560px wide so we want the coach to feel ambient, not crowded. */
+.maya-coach[data-coach-host="drawer"] {
+  margin-top: 10px;
+  border-color: rgba(30, 60, 114, 0.18);
+  background: linear-gradient(180deg, #ffffff 0%, #f7fbff 100%);
+}
+
+/* When mounted into the lesson_summaries_v3 modal sidebar, give it a soft
+ * paper-look matching the existing nb-side-card aesthetic. */
+.maya-coach[data-coach-host="modal-side"] {
+  border-color: rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  box-shadow: none;
+}

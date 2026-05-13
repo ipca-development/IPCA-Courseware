@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsCenterEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -119,60 +120,49 @@ if ($drafts !== array()) {
     }
 }
 
+$draftStatusCounts = array('draft' => 0, 'ready_to_send' => 0, 'sent' => 0, 'cancelled' => 0);
+foreach (ComplianceCommsCenterEngine::listDrafts($pdo, array(), 500) as $d) {
+    $k = (string)$d['status'];
+    if (isset($draftStatusCounts[$k])) {
+        $draftStatusCounts[$k]++;
+    }
+}
+
 cw_header('Compliance · Drafts');
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Comms Center',
+    'title' => 'Outbound drafts',
+    'description' => 'Compliance email drafts waiting to be sent (or already sent / cancelled). Hit Send now to dispatch via Postmark immediately.',
+    'actions' => array(
+        array('label' => 'New message', 'href' => '/admin/compliance/email_compose.php', 'icon' => 'plus'),
+    ),
+    'back' => array('href' => '/admin/compliance/inbox.php', 'label' => 'Inbox'),
+    'stats' => array(
+        array('label' => 'Drafts',         'value' => (int)$draftStatusCounts['draft'],         'href' => '/admin/compliance/email_drafts.php?status=draft'),
+        array('label' => 'Ready to send',  'value' => (int)$draftStatusCounts['ready_to_send'], 'href' => '/admin/compliance/email_drafts.php?status=ready_to_send'),
+        array('label' => 'Sent',           'value' => (int)$draftStatusCounts['sent'],          'href' => '/admin/compliance/email_drafts.php?status=sent', 'tone' => 'ok'),
+        array('label' => 'Cancelled',      'value' => (int)$draftStatusCounts['cancelled'],     'href' => '/admin/compliance/email_drafts.php?status=cancelled'),
+    ),
+    'flash' => $flash,
+));
 ?>
 <style>
-  .cmpdr-h1{margin:0 0 6px;font-size:22px;color:#0f172a;}
-  .cmpdr-sub{margin:0 0 18px;color:#64748b;font-size:14px;}
-  .cmpdr-back{color:#1e3c72;font-weight:700;text-decoration:none;}
-  .cmpdr-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;margin-bottom:20px;}
-  .cmpdr-flash{margin:0 0 16px;padding:10px 14px;border-radius:10px;font-size:13px;}
-  .cmpdr-flash.is-success{background:#d1fae5;color:#065f46;border:1px solid #6ee7b7;}
-  .cmpdr-flash.is-error{background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;}
-  .cmpdr-tabs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px;}
-  .cmpdr-tab{
-    background:#e2e8f0;color:#0f172a;padding:6px 12px;border-radius:999px;
-    text-decoration:none;font-size:12px;font-weight:700;
+  .cmpdr-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--text-muted);}
+  .cmpdr-pill{display:inline-flex;align-items:center;padding:0 12px;height:28px;border-radius:999px;font-size:11.5px;font-weight:720;letter-spacing:.04em;border:1px solid rgba(15,23,42,0.08);background:#f3f6fb;color:#324155;}
+  .cmpdr-pill.s-draft{background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.20);}
+  .cmpdr-pill.s-ready_to_send{background:rgba(48,124,183,0.10);color:#246ea9;border-color:rgba(48,124,183,0.20);}
+  .cmpdr-pill.s-sent{background:rgba(32,135,90,0.12);color:#1f7a54;border-color:rgba(32,135,90,0.20);}
+  .cmpdr-pill.s-cancelled{background:rgba(86,112,153,0.10);color:#405a82;border-color:rgba(86,112,153,0.18);}
+  .cmpdr-tabs{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px;}
+  .cmpdr-empty{padding:30px 26px;color:var(--text-muted);text-align:center;background:#f6f9fd;border-radius:14px;}
+  .cmpdr-actions{display:flex;gap:6px;flex-wrap:wrap;}
+  .cmpdr-actions form, .cmpdr-actions form button, .cmpdr-actions a{
+    height:34px !important;min-height:34px !important;padding:0 12px !important;font-size:12px !important;
   }
-  .cmpdr-tab.is-on{background:#1e3c72;color:#fff;}
-  .cmpdr-table{width:100%;border-collapse:collapse;font-size:14px;}
-  .cmpdr-table th{
-    text-align:left;font-size:11px;color:#64748b;font-weight:800;letter-spacing:.05em;
-    text-transform:uppercase;padding:8px;background:#f1f5f9;
-  }
-  .cmpdr-table td{padding:10px 8px;border-top:1px solid #e2e8f0;vertical-align:top;}
-  .cmpdr-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-  .cmpdr-pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:800;letter-spacing:.04em;}
-  .cmpdr-pill.s-draft{background:#fef3c7;color:#92400e;}
-  .cmpdr-pill.s-ready_to_send{background:#dbeafe;color:#1e3a8a;}
-  .cmpdr-pill.s-sent{background:#d1fae5;color:#065f46;}
-  .cmpdr-pill.s-cancelled{background:#e2e8f0;color:#475569;}
-  .cmpdr-btn{
-    display:inline-block;padding:5px 10px;border-radius:8px;font-size:12px;font-weight:700;
-    text-decoration:none;border:0;cursor:pointer;
-  }
-  .cmpdr-btn.primary{background:#1e3c72;color:#fff;}
-  .cmpdr-btn.secondary{background:#e2e8f0;color:#0f172a;}
-  .cmpdr-btn.danger{background:#fee2e2;color:#991b1b;}
-  .cmpdr-empty{padding:18px;color:#64748b;text-align:center;background:#f8fafc;border-radius:10px;}
-  .cmpdr-actions{display:flex;gap:4px;flex-wrap:wrap;}
 </style>
 
-<p style="margin-bottom:12px;">
-  <a class="cmpdr-back" href="/admin/compliance/inbox.php">← Inbox</a>
-</p>
-
-<section style="padding:8px 0 40px;max-width:1200px;">
-  <h1 class="cmpdr-h1">Outbound drafts</h1>
-  <p class="cmpdr-sub">
-    Compliance email drafts waiting to be sent (or already sent / cancelled).
-    Hit <strong>Send now</strong> to dispatch via Postmark immediately.
-  </p>
-
-  <?php if ($flash !== null): ?>
-    <div class="cmpdr-flash is-<?= h((string)$flash['type']) ?>"><?= h((string)$flash['message']) ?></div>
-  <?php endif; ?>
-
+<section class="cmp-card">
   <div class="cmpdr-tabs">
     <a class="cmpdr-tab <?= $filterStatus === '' ? 'is-on' : '' ?>" href="/admin/compliance/email_drafts.php">All</a>
     <?php foreach (array('draft','ready_to_send','sent','cancelled') as $s): ?>
@@ -181,17 +171,14 @@ cw_header('Compliance · Drafts');
         <?= h(str_replace('_', ' ', $s)) ?>
       </a>
     <?php endforeach; ?>
-    <span style="flex:1;"></span>
-    <a class="cmpdr-btn primary" href="/admin/compliance/email_compose.php">+ New message</a>
   </div>
 
-  <section class="cmpdr-card">
-    <?php if ($drafts === array()): ?>
-      <div class="cmpdr-empty">
-        No drafts in scope. <a href="/admin/compliance/email_compose.php" style="color:#1e3c72;font-weight:700;">Compose a new message</a>.
-      </div>
-    <?php else: ?>
-      <table class="cmpdr-table">
+  <?php if ($drafts === array()): ?>
+    <div class="cmpdr-empty">
+      No drafts in scope. <a href="/admin/compliance/email_compose.php" style="color:#1f4079;font-weight:700;">Compose a new message</a>.
+    </div>
+  <?php else: ?>
+    <table>
         <thead><tr>
           <th>Status</th>
           <th>Subject</th>
@@ -212,23 +199,21 @@ cw_header('Compliance · Drafts');
             <tr>
               <td><span class="cmpdr-pill s-<?= h($status) ?>"><?= h(str_replace('_', ' ', $status)) ?></span></td>
               <td>
-                <a href="/admin/compliance/email_compose.php?draft_id=<?= $did ?>"
-                   style="color:#1e3c72;font-weight:700;text-decoration:none;">
+                <a href="/admin/compliance/email_compose.php?draft_id=<?= $did ?>" style="color:#1f4079;font-weight:700;text-decoration:none;">
                   <?= h((string)($d['subject'] ?? '(no subject)')) ?>
                 </a>
               </td>
               <td class="cmpdr-mono"><?= h(implode(', ', array_filter($toEmails))) ?></td>
               <td>
                 <?php if (!empty($d['thread_id'])): ?>
-                  <a href="/admin/compliance/email_thread.php?id=<?= (int)$d['thread_id'] ?>"
-                     style="color:#1e3c72;text-decoration:none;">
+                  <a href="/admin/compliance/email_thread.php?id=<?= (int)$d['thread_id'] ?>" style="color:#1f4079;text-decoration:none;">
                     #<?= (int)$d['thread_id'] ?>
                     <?php if (!empty($d['thread_subject'])): ?>
-                      · <span style="color:#64748b;font-size:12px;"><?= h(substr((string)$d['thread_subject'], 0, 40)) ?></span>
+                      · <span class="cmpdr-mono"><?= h(substr((string)$d['thread_subject'], 0, 40)) ?></span>
                     <?php endif; ?>
                   </a>
                 <?php else: ?>
-                  <span style="color:#64748b;">—</span>
+                  <span style="color:var(--text-muted);">—</span>
                 <?php endif; ?>
               </td>
               <td><?= isset($attachmentCounts[$did]) ? (int)$attachmentCounts[$did] : 0 ?></td>
@@ -240,19 +225,19 @@ cw_header('Compliance · Drafts');
                           onsubmit="return confirm('Send this draft now?');">
                       <input type="hidden" name="action" value="send_now">
                       <input type="hidden" name="draft_id" value="<?= $did ?>">
-                      <button type="submit" class="cmpdr-btn primary">Send</button>
+                      <button type="submit">Send</button>
                     </form>
-                    <a class="cmpdr-btn secondary" href="/admin/compliance/email_compose.php?draft_id=<?= $did ?>">Edit</a>
+                    <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_compose.php?draft_id=<?= $did ?>" style="text-decoration:none;">Edit</a>
                     <form method="post" action="/admin/compliance/email_drafts.php" style="display:inline;"
                           onsubmit="return confirm('Cancel this draft?');">
                       <input type="hidden" name="action" value="cancel">
                       <input type="hidden" name="draft_id" value="<?= $did ?>">
-                      <button type="submit" class="cmpdr-btn danger">Cancel</button>
+                      <button type="submit" class="cmp-btn-danger">Cancel</button>
                     </form>
                   <?php elseif ($status === 'sent' && !empty($d['sent_email_id'])): ?>
-                    <a class="cmpdr-btn secondary" href="/admin/compliance/email_thread.php?email_id=<?= (int)$d['sent_email_id'] ?>">View sent</a>
+                    <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_thread.php?email_id=<?= (int)$d['sent_email_id'] ?>" style="text-decoration:none;">View sent</a>
                   <?php else: ?>
-                    <a class="cmpdr-btn secondary" href="/admin/compliance/email_compose.php?draft_id=<?= $did ?>">View</a>
+                    <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_compose.php?draft_id=<?= $did ?>" style="text-decoration:none;">View</a>
                   <?php endif; ?>
                 </div>
               </td>
@@ -261,8 +246,8 @@ cw_header('Compliance · Drafts');
         </tbody>
       </table>
     <?php endif; ?>
-  </section>
 </section>
 
 <?php
+compliance_page_close();
 cw_footer();

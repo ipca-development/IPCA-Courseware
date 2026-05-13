@@ -9,6 +9,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceRcaCapEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCapEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceRegulatoryLinkEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -263,6 +264,10 @@ $detailId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 cw_header('Compliance · Findings');
 
+/* Page wrapper opens below — for the list view we open it AFTER we know
+   the row count so we can pass it as a stat chip. For the detail view
+   the wrapper is opened with audit context. */
+
 $optionsClass = array(
     'LEVEL_1' => 'Level 1',
     'LEVEL_2' => 'Level 2',
@@ -284,18 +289,10 @@ $optionsStatus = array(
     'CANCELLED' => 'Cancelled',
 );
 
-if ($flash !== null) {
-    $cls = ($flash['type'] === 'success') ? 'is-ok' : 'is-danger';
-    echo '<div class="queue-status ' . h($cls) . '" style="margin-bottom:16px;padding:12px 16px;border-radius:12px;">'
-        . h((string)$flash['message']) . '</div>';
-}
-
 try {
     $audits = ComplianceFindingEngine::listAuditsForSelect($pdo);
 } catch (Throwable $e) {
     $audits = array();
-    echo '<p class="queue-status is-warn" style="padding:12px;">Could not load audits (run Phase 1 migrations?). '
-        . h($e->getMessage()) . '</p>';
 }
 
 if ($detailId > 0) {
@@ -303,12 +300,26 @@ if ($detailId > 0) {
         $finding = ComplianceFindingEngine::getById($pdo, $detailId);
     } catch (Throwable $e) {
         $finding = null;
-        echo '<p class="queue-status is-danger">Database error: ' . h($e->getMessage()) . '</p>';
+        compliance_page_open(array(
+            'overline' => 'Compliance',
+            'title' => 'Database error',
+            'description' => $e->getMessage(),
+            'flash' => $flash,
+            'back' => array('href' => '/admin/compliance/findings.php', 'label' => 'All findings'),
+        ));
+        compliance_page_close();
+        cw_footer();
+        exit;
     }
 
     if ($finding === null) {
-        echo '<p>Finding not found.</p>';
-        echo '<p><a class="nav-link" href="/admin/compliance/findings.php">← All findings</a></p>';
+        compliance_page_open(array(
+            'overline' => 'Compliance',
+            'title' => 'Finding not found',
+            'description' => 'The finding you requested could not be located. It may have been deleted or you may not have access.',
+            'flash' => $flash,
+            'back' => array('href' => '/admin/compliance/findings.php', 'label' => 'All findings'),
+        ));
     } else {
         $rca = null;
         try {
@@ -345,15 +356,23 @@ if ($detailId > 0) {
             $regLinks = array();
         }
 
+        $sev = (string)($finding['severity'] ?? '');
+        $stRaw = (string)($finding['status'] ?? '');
+        compliance_page_open(array(
+            'overline' => 'Compliance · Finding',
+            'title' => (string)$finding['title'],
+            'description' => (string)$finding['classification'] . ' · severity ' . $sev . ' · status ' . $stRaw . ($findingLocked ? ' · LOCKED' : ''),
+            'back' => array(
+                'href' => '/admin/compliance/findings.php',
+                'label' => 'All findings',
+                'code' => (string)$finding['finding_code'],
+            ),
+            'flash' => $flash,
+        ));
         ?>
-        <p style="margin-bottom:20px;">
-          <a href="/admin/compliance/findings.php" style="color:#1e3c72;font-weight:700;">← All findings</a>
-          <span style="color:#64748b;margin:0 8px;">|</span>
-          <span style="font-family:ui-monospace,monospace;font-size:13px;"><?= h((string)$finding['finding_code']) ?></span>
-        </p>
 
-        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
-          <h2 style="margin:0 0 8px;font-size:20px;">Finding details</h2>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 8px;">Finding details</h2>
           <?php if ($findingLocked): ?>
             <p class="queue-status is-warn" style="display:inline-block;">This finding is locked.</p>
           <?php endif; ?>
@@ -475,7 +494,7 @@ if ($detailId > 0) {
           </form>
         </section>
 
-        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
+        <section class="cmp-card">
           <h2 style="margin:0 0 8px;font-size:20px;">Regulatory citations</h2>
           <p style="color:#64748b;font-size:14px;margin:0 0 14px;line-height:1.5;">
             Structured links in <code>ipca_compliance_finding_regulatory_links</code> (AIM paragraphs, EASA eRules nodes, or external https URLs).
@@ -539,7 +558,7 @@ if ($detailId > 0) {
           <?php endif; ?>
         </section>
 
-        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
+        <section class="cmp-card">
           <h2 style="margin:0 0 8px;font-size:20px;">Root cause analysis (5 Whys)</h2>
           <p style="color:#64748b;font-size:14px;margin:0 0 16px;line-height:1.5;">
             AI suggests the <em>next</em> Why step (legacy parity). Each suggestion is logged in
@@ -634,7 +653,7 @@ if ($detailId > 0) {
             $capItems = array();
         }
         ?>
-        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
+        <section class="cmp-card">
           <h2 style="margin:0 0 8px;font-size:20px;">Corrective actions (CAP)</h2>
           <p style="color:#64748b;font-size:14px;margin:0 0 12px;line-height:1.5;">
             Manage CAP items linked to this finding or export a combined PDF (finding + RCA + actions).
@@ -688,61 +707,82 @@ if ($detailId > 0) {
         $rows = ComplianceFindingEngine::listRecent($pdo, 150);
     } catch (Throwable $e) {
         $rows = array();
-        echo '<p class="queue-status is-danger">Could not load findings. Apply Phase 1 SQL migrations first.<br>'
-            . h($e->getMessage()) . '</p>';
     }
 
+    $fCounts = array('open' => 0, 'closed' => 0);
+    foreach ($rows as $r) {
+        $st = (string)$r['status'];
+        if (in_array($st, array('CLOSED', 'VOID', 'CANCELLED'), true)) {
+            $fCounts['closed']++;
+        } else {
+            $fCounts['open']++;
+        }
+    }
+    compliance_page_open(array(
+        'overline' => 'Compliance · Findings',
+        'title' => 'Findings',
+        'description' => 'Create and manage non-conformance reports (NCRs). Open a row for full record incl. 5-Whys RCA, regulatory citations and corrective actions.',
+        'stats' => array(
+            array('label' => 'Open',   'value' => (int)$fCounts['open'],   'tone' => $fCounts['open'] > 0 ? 'warn' : 'ok'),
+            array('label' => 'Closed', 'value' => (int)$fCounts['closed'], 'tone' => 'ok'),
+            array('label' => 'Total',  'value' => count($rows)),
+        ),
+        'flash' => $flash,
+    ));
     ?>
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:24px;max-width:1100px;">
-      <div>
-        <h2 style="margin:0 0 6px;font-size:20px;">Findings</h2>
-        <p style="margin:0;color:#64748b;font-size:14px;">Create and manage NCRs; open a row for 5-Whys RCA.</p>
-      </div>
-    </div>
 
-    <div style="display:grid;grid-template-columns:1fr 360px;gap:24px;align-items:start;max-width:1100px;">
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
-        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+    <div style="display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start;">
+      <section class="cmp-card" style="overflow:hidden;">
+        <div class="cmp-list-head" style="margin-bottom:14px;">
+          <div class="cmp-list-title"><?= compliance_ui_icon('flag') ?><span>Findings</span></div>
+          <div class="cmp-count-pill"><?= count($rows) ?></div>
+        </div>
+        <table>
           <thead>
-            <tr style="background:#f1f5f9;text-align:left;">
-              <th style="padding:12px 14px;">Code</th>
-              <th style="padding:12px 14px;">Title</th>
-              <th style="padding:12px 14px;">Class</th>
-              <th style="padding:12px 14px;">Severity</th>
-              <th style="padding:12px 14px;">Status</th>
-              <th style="padding:12px 14px;">Updated</th>
+            <tr>
+              <th>Code</th>
+              <th>Title</th>
+              <th>Class</th>
+              <th>Severity</th>
+              <th>Status</th>
+              <th>Updated</th>
             </tr>
           </thead>
           <tbody>
             <?php if (!$rows): ?>
-              <tr><td colspan="6" style="padding:20px;color:#64748b;">No findings yet.</td></tr>
+              <tr><td colspan="6" style="padding:20px;color:var(--text-muted);">No findings yet.</td></tr>
             <?php endif; ?>
-            <?php foreach ($rows as $r): ?>
-              <tr style="border-top:1px solid #e2e8f0;">
-                <td style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:12px;">
-                  <a href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>" style="color:#1e3c72;font-weight:700;">
+            <?php foreach ($rows as $r):
+              $sev = (string)$r['severity'];
+              $sevCls = $sev === 'CRITICAL' ? 'cmp-pill-crit' : ($sev === 'HIGH' ? 'cmp-pill-warn' : ($sev === 'LOW' ? 'cmp-pill-ok' : ''));
+              $stRaw = (string)$r['status'];
+              $stCls = in_array($stRaw, array('CLOSED','VOID','CANCELLED'), true) ? 'cmp-pill-ok' : 'cmp-pill-info';
+            ?>
+              <tr>
+                <td class="cmp-mono">
+                  <a href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>" style="color:#1f4079;font-weight:700;text-decoration:none;">
                     <?= h((string)$r['finding_code']) ?>
                   </a>
                 </td>
-                <td style="padding:10px 14px;"><?= h((string)$r['title']) ?></td>
-                <td style="padding:10px 14px;"><?= h((string)$r['classification']) ?></td>
-                <td style="padding:10px 14px;"><?= h((string)$r['severity']) ?></td>
-                <td style="padding:10px 14px;"><?= h((string)$r['status']) ?></td>
-                <td style="padding:10px 14px;color:#64748b;font-size:12px;"><?= h((string)$r['updated_at']) ?></td>
+                <td><?= h((string)$r['title']) ?></td>
+                <td><span class="cmp-pill"><?= h((string)$r['classification']) ?></span></td>
+                <td><span class="cmp-pill <?= h($sevCls) ?>"><?= h($sev) ?></span></td>
+                <td><span class="cmp-pill <?= h($stCls) ?>"><?= h($stRaw) ?></span></td>
+                <td class="cmp-mono"><?= h((string)$r['updated_at']) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
-      </div>
+      </section>
 
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;">
-        <h3 style="margin:0 0 14px;font-size:16px;">New finding</h3>
+      <section class="cmp-card">
+        <h3 style="margin:0 0 14px;">New finding</h3>
         <form method="post" action="/admin/compliance/findings.php">
           <input type="hidden" name="action" value="create_finding">
 
-          <label style="display:block;margin-bottom:10px;">
-            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;margin-bottom:4px;">Audit (optional)</span>
-            <select name="audit_id" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Audit (optional)</span>
+            <select name="audit_id">
               <option value="">— None —</option>
               <?php foreach ($audits as $a): ?>
                 <option value="<?= (int)$a['id'] ?>"><?= h((string)$a['audit_code'] . ' — ' . (string)$a['title']) ?></option>
@@ -750,28 +790,28 @@ if ($detailId > 0) {
             </select>
           </label>
 
-          <label style="display:block;margin-bottom:10px;">
-            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Title *</span>
-            <input name="title" required style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Title *</span>
+            <input name="title" required>
           </label>
 
-          <label style="display:block;margin-bottom:10px;">
-            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Description *</span>
-            <textarea name="description" required rows="5" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"></textarea>
+          <label class="cmp-field">
+            <span class="cmp-field-label">Description *</span>
+            <textarea name="description" required rows="5"></textarea>
           </label>
 
           <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:10px;">
-            <label>
-              <span style="font-size:11px;font-weight:700;color:#64748b;">Classification</span>
-              <select name="classification" style="width:100%;padding:8px;border-radius:8px;">
+            <label class="cmp-field">
+              <span class="cmp-field-label">Classification</span>
+              <select name="classification">
                 <?php foreach ($optionsClass as $k => $lab): ?>
                   <option value="<?= h($k) ?>" <?= $k === 'LEVEL_3' ? 'selected' : '' ?>><?= h($lab) ?></option>
                 <?php endforeach; ?>
               </select>
             </label>
-            <label>
-              <span style="font-size:11px;font-weight:700;color:#64748b;">Severity</span>
-              <select name="severity" style="width:100%;padding:8px;border-radius:8px;">
+            <label class="cmp-field">
+              <span class="cmp-field-label">Severity</span>
+              <select name="severity">
                 <?php foreach ($optionsSev as $k => $lab): ?>
                   <option value="<?= h($k) ?>" <?= $k === 'MEDIUM' ? 'selected' : '' ?>><?= h($lab) ?></option>
                 <?php endforeach; ?>
@@ -779,19 +819,17 @@ if ($detailId > 0) {
             </label>
           </div>
 
-          <label style="display:block;margin-bottom:10px;">
-            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Raised date</span>
-            <input type="date" name="raised_date" value="<?= h(date('Y-m-d')) ?>"
-              style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+          <label class="cmp-field">
+            <span class="cmp-field-label">Raised date</span>
+            <input type="date" name="raised_date" value="<?= h(date('Y-m-d')) ?>">
           </label>
 
-          <button type="submit" style="width:100%;background:#1e3c72;color:#fff;border:0;padding:12px;border-radius:10px;font-weight:800;cursor:pointer;margin-top:8px;">
-            Create finding
-          </button>
+          <button type="submit" style="width:100%;">Create finding</button>
         </form>
-      </div>
+      </section>
     </div>
     <?php
 }
 
+compliance_page_close();
 cw_footer();

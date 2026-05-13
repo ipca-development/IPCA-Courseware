@@ -110,32 +110,34 @@ $detailId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 cw_header('Compliance · Change Requests');
 
-if ($flash) {
-    $cls = $flash['type'] === 'success' ? 'is-ok' : 'is-danger';
-    echo '<div class="queue-status ' . h($cls) . '" style="margin:0 0 16px;padding:12px 16px;border-radius:12px;">'
-        . h((string)$flash['message']) . '</div>';
-}
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $statuses = array('DRAFT', 'SUBMITTED', 'UNDER_REVIEW', 'APPROVED', 'REJECTED', 'RELEASED', 'CANCELLED');
 
 if ($detailId > 0) {
     $row = ComplianceManualControlEngine::getChangeRequest($pdo, $detailId);
     if ($row === null) {
-        echo '<p>Not found.</p><p><a href="/admin/compliance/change_requests.php">← All</a></p>';
-    } else {
-        $locked = !empty($row['locked_at']);
-        $links = ComplianceManualControlEngine::listCrLinks($pdo, $detailId);
-        ?>
-        <p><a href="/admin/compliance/change_requests.php" style="font-weight:700;color:#1e3c72;">← All change requests</a></p>
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:20px;max-width:920px;">
-          <h1 style="margin:0 0 8px;font-size:22px;"><?= h((string)$row['request_code']) ?></h1>
-          <p style="color:#64748b;margin:0;">Status: <strong><?= h((string)$row['status']) ?></strong>
-            · Priority: <?= h((string)$row['priority']) ?>
-            <?php if ($locked): ?><span class="queue-status is-warn" style="margin-left:8px;">Locked</span><?php endif; ?>
-          </p>
-        </div>
-
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:20px;max-width:920px;">
+        compliance_page_open(array(
+            'overline' => 'Compliance · Manual control',
+            'title' => 'Change request not found',
+            'back' => array('href' => '/admin/compliance/change_requests.php', 'label' => 'All change requests'),
+        ));
+        echo '<section class="cmp-card"><p style="margin:0;">No row for that id.</p></section>';
+        compliance_page_close();
+        cw_footer();
+        return;
+    }
+    $locked = !empty($row['locked_at']);
+    $links = ComplianceManualControlEngine::listCrLinks($pdo, $detailId);
+    compliance_page_open(array(
+        'overline' => 'Compliance · Manual change request',
+        'title' => (string)$row['request_code'],
+        'description' => 'Status: ' . (string)$row['status'] . ' · Priority: ' . (string)$row['priority'] . ($locked ? ' · LOCKED' : ''),
+        'back' => array('href' => '/admin/compliance/change_requests.php', 'label' => 'All change requests'),
+        'flash' => $flash,
+    ));
+    ?>
+        <section class="cmp-card">
           <h2 style="margin:0 0 12px;">Details</h2>
           <?php if (!$locked): ?>
             <form method="post">
@@ -188,10 +190,10 @@ if ($detailId > 0) {
           <?php else: ?>
             <p><?= nl2br(h((string)$row['description'])) ?></p>
           <?php endif; ?>
-        </div>
+        </section>
 
         <?php if (!$locked): ?>
-          <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:20px;max-width:920px;">
+          <section class="cmp-card">
             <h2 style="margin:0 0 12px;">Workflow</h2>
             <form method="post" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
               <input type="hidden" name="action" value="set_status">
@@ -208,13 +210,13 @@ if ($detailId > 0) {
                 <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Approver name (if APPROVED)</span>
                 <input name="approver_name" value="<?= h((string)($user['name'] ?? '')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
               </label>
-              <button type="submit" style="background:#0f766e;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">Apply</button>
+              <button type="submit" class="cmp-btn-success">Apply</button>
             </form>
-          </div>
+          </section>
         <?php endif; ?>
 
-        <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:20px;max-width:920px;">
-          <h2 style="margin:0 0 12px;font-size:18px;">Links</h2>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 12px;">Links</h2>
           <table style="width:100%;font-size:13px;border-collapse:collapse;">
             <thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:8px 10px;">Type</th><th style="padding:8px 10px;">Entity</th><th style="padding:8px 10px;">Relation</th></tr></thead>
             <tbody>
@@ -252,25 +254,48 @@ if ($detailId > 0) {
                 <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">relation</span>
                 <input name="relation" placeholder="CAUSED_BY" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:140px;">
               </label>
-              <button type="submit" style="background:#334155;color:#fff;border:0;padding:10px 14px;border-radius:8px;font-weight:700;cursor:pointer;">Add link</button>
+              <button type="submit">Add link</button>
             </form>
           <?php endif; ?>
-        </div>
+        </section>
 
         <p style="margin-top:16px;">
-          <a href="/admin/compliance/manual_drafts.php?request_id=<?= (int)$detailId ?>" style="font-weight:700;color:#3730a3;">Open drafts for this request →</a>
+          <a href="/admin/compliance/manual_drafts.php?request_id=<?= (int)$detailId ?>" style="font-weight:700;color:#1f4079;">Open drafts for this request →</a>
         </p>
         <?php
         compliance_render_comms_panel($pdo, 'manual_change_request', (string)$detailId);
-    }
 } else {
     $rows = ComplianceManualControlEngine::listChangeRequests($pdo);
-    ?>
-    <h1 style="margin:0 0 8px;">Manual change requests</h1>
-    <p style="color:#64748b;margin:0 0 20px;">Phase 4+ — governance metadata targeting canonical manual rows.</p>
 
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:720px;">
-      <h2 style="margin:0 0 12px;font-size:18px;">New request</h2>
+    $crCounts = array('total' => count($rows), 'in_flight' => 0, 'approved' => 0, 'released' => 0);
+    foreach ($rows as $r) {
+        $st = (string)$r['status'];
+        if (!in_array($st, array('RELEASED','CANCELLED','REJECTED'), true)) {
+            $crCounts['in_flight']++;
+        }
+        if ($st === 'APPROVED') {
+            $crCounts['approved']++;
+        }
+        if ($st === 'RELEASED') {
+            $crCounts['released']++;
+        }
+    }
+
+    compliance_page_open(array(
+        'overline' => 'Compliance · Manual control',
+        'title' => 'Manual change requests',
+        'description' => 'Governance metadata targeting canonical manual rows — proposed wording, approval chain and release linkage live here.',
+        'stats' => array(
+            array('label' => 'In flight', 'value' => (int)$crCounts['in_flight'], 'tone' => $crCounts['in_flight'] > 0 ? 'warn' : 'ok'),
+            array('label' => 'Approved',  'value' => (int)$crCounts['approved']),
+            array('label' => 'Released',  'value' => (int)$crCounts['released'],  'tone' => 'ok'),
+            array('label' => 'Total',     'value' => (int)$crCounts['total']),
+        ),
+        'flash' => $flash,
+    ));
+    ?>
+    <section class="cmp-card">
+      <h2 style="margin:0 0 12px;">New request</h2>
       <form method="post">
         <input type="hidden" name="action" value="create_cr">
         <label style="display:block;margin-bottom:10px;">
@@ -323,38 +348,46 @@ if ($detailId > 0) {
           <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Rationale</span>
           <textarea name="rationale" rows="2" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"></textarea>
         </label>
-        <button type="submit" style="margin-top:4px;background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Create</button>
+        <button type="submit">Create</button>
       </form>
-    </div>
+    </section>
 
-    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;max-width:1100px;">
-      <table style="width:100%;border-collapse:collapse;font-size:14px;">
-        <thead><tr style="background:#f1f5f9;text-align:left;">
-          <th style="padding:12px 14px;">Code</th>
-          <th style="padding:12px 14px;">Title</th>
-          <th style="padding:12px 14px;">Status</th>
-          <th style="padding:12px 14px;">Target</th>
-          <th style="padding:12px 14px;">Updated</th>
-          <th style="padding:12px 14px;"></th>
+    <section class="cmp-card" style="overflow:hidden;">
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div class="cmp-list-title">
+          <?= compliance_ui_icon('list') ?>
+          <span>Change requests</span>
+        </div>
+        <div class="cmp-count-pill"><?= count($rows) ?> request<?= count($rows) === 1 ? '' : 's' ?></div>
+      </div>
+      <table>
+        <thead><tr>
+          <th>Code</th>
+          <th>Title</th>
+          <th>Status</th>
+          <th>Target</th>
+          <th>Updated</th>
+          <th></th>
         </tr></thead>
         <tbody>
           <?php if (!$rows): ?>
-            <tr><td colspan="6" style="padding:20px;color:#64748b;">No change requests yet.</td></tr>
+            <tr><td colspan="6" style="padding:20px;color:var(--text-muted);">No change requests yet.</td></tr>
           <?php endif; ?>
           <?php foreach ($rows as $r): ?>
-            <tr style="border-top:1px solid #e2e8f0;">
-              <td style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$r['request_code']) ?></td>
-              <td style="padding:10px 14px;"><?= h((string)$r['title']) ?></td>
-              <td style="padding:10px 14px;"><?= h((string)$r['status']) ?></td>
-              <td style="padding:10px 14px;font-size:12px;color:#64748b;"><?= h((string)($r['manual_label'] ?: $r['manual_ref_id'] ?: '—')) ?></td>
-              <td style="padding:10px 14px;font-size:12px;color:#64748b;"><?= h((string)$r['updated_at']) ?></td>
-              <td style="padding:10px 14px;"><a href="/admin/compliance/change_requests.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1e3c72;">Open</a></td>
+            <tr>
+              <td class="cmp-mono"><?= h((string)$r['request_code']) ?></td>
+              <td><?= h((string)$r['title']) ?></td>
+              <td><span class="cmp-pill"><?= h((string)$r['status']) ?></span></td>
+              <td class="cmp-mono"><?= h((string)($r['manual_label'] ?: $r['manual_ref_id'] ?: '—')) ?></td>
+              <td class="cmp-mono"><?= h((string)$r['updated_at']) ?></td>
+              <td><a href="/admin/compliance/change_requests.php?id=<?= (int)$r['id'] ?>" style="font-weight:700;color:#1f4079;">Open</a></td>
             </tr>
           <?php endforeach; ?>
         </tbody>
       </table>
-    </div>
+    </section>
     <?php
 }
 
+compliance_page_close();
 cw_footer();

@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAuditEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceChecklistEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -102,17 +103,17 @@ $detailId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 cw_header('Compliance · Audits');
 
-if ($flash !== null) {
-    $cls = ($flash['type'] === 'success') ? 'is-ok' : ($flash['type'] === 'warn' ? 'is-warn' : 'is-danger');
-    echo '<div class="queue-status ' . h($cls) . '" style="margin:0 0 16px;padding:12px 16px;border-radius:12px;">'
-        . h((string)$flash['message']) . '</div>';
-}
-
 if ($detailId > 0) {
     $audit = ComplianceAuditEngine::getById($pdo, $detailId);
     if ($audit === null) {
-        echo '<p>Audit not found.</p>';
-        echo '<p><a class="nav-link" href="/admin/compliance/audits.php" style="color:#1e3c72;font-weight:700;">← All audits</a></p>';
+        compliance_page_open(array(
+            'overline' => 'Compliance',
+            'title' => 'Audit not found',
+            'description' => 'The audit you requested could not be located. It may have been deleted or you may not have access.',
+            'flash' => $flash,
+            'back' => array('href' => '/admin/compliance/audits.php', 'label' => 'All audits'),
+        ));
+        compliance_page_close();
     } else {
         $locked = !empty($audit['locked_at']);
         $snapshots = ComplianceChecklistEngine::listSnapshotsForAudit($pdo, $detailId);
@@ -129,142 +130,170 @@ if ($detailId > 0) {
                 );
             }
         }
-        ?>
-        <p style="margin-bottom:16px;">
-          <a href="/admin/compliance/audits.php" style="color:#1e3c72;font-weight:700;">← All audits</a>
-          <span style="color:#64748b;margin:0 8px;">|</span>
-          <span style="font-family:ui-monospace,monospace;font-size:13px;"><?= h((string)$audit['audit_code']) ?></span>
-        </p>
 
-        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
-          <h2 style="margin:0 0 6px;font-size:20px;"><?= h((string)$audit['title']) ?></h2>
-          <p style="margin:0 0 14px;color:#64748b;font-size:14px;">
-            <?= h((string)$audit['authority']) ?>
-            · <?= h((string)$audit['audit_type']) ?>
-            · <?= h((string)$audit['status']) ?>
+        $statusBits = array();
+        if (!empty($audit['authority'])) { $statusBits[] = (string)$audit['authority']; }
+        if (!empty($audit['audit_type'])) { $statusBits[] = (string)$audit['audit_type']; }
+        if (!empty($audit['status'])) { $statusBits[] = (string)$audit['status']; }
+        if ($locked) { $statusBits[] = 'Locked'; }
+
+        compliance_page_open(array(
+            'overline' => 'Audit · ' . (string)$audit['audit_code'],
+            'title' => (string)$audit['title'],
+            'description' => implode('  ·  ', $statusBits),
+            'flash' => $flash,
+            'back' => array(
+                'href' => '/admin/compliance/audits.php',
+                'label' => 'All audits',
+                'code' => (string)$audit['audit_code'],
+            ),
+        ));
+        ?>
+
+        <section class="cmp-card">
+          <div class="cmp-card-head">
+            <h2 class="cmp-card-title">Audit details</h2>
             <?php if ($locked): ?>
-              <span class="queue-status is-warn" style="margin-left:8px;padding:2px 8px;border-radius:8px;">Locked</span>
+              <span class="cmp-pill" style="background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.20);">Locked</span>
             <?php endif; ?>
-          </p>
+          </div>
 
           <?php if ($locked): ?>
-            <dl style="display:grid;grid-template-columns:200px 1fr;gap:6px 16px;font-size:14px;">
-              <dt style="color:#64748b;">Entity</dt><dd><?= h((string)($audit['audit_entity'] ?? '—')) ?></dd>
-              <dt style="color:#64748b;">External ref</dt><dd><?= h((string)($audit['external_ref'] ?? '—')) ?></dd>
-              <dt style="color:#64748b;">Start</dt><dd><?= h((string)($audit['start_date'] ?? '—')) ?></dd>
-              <dt style="color:#64748b;">End</dt><dd><?= h((string)($audit['end_date'] ?? '—')) ?></dd>
-              <dt style="color:#64748b;">Closed</dt><dd><?= h((string)($audit['closed_date'] ?? '—')) ?></dd>
-              <dt style="color:#64748b;">Subject</dt><dd><?= nl2br(h((string)($audit['subject'] ?? '—'))) ?></dd>
+            <dl class="cmp-dl">
+              <dt>Entity</dt><dd><?= h((string)($audit['audit_entity'] ?? '—')) ?></dd>
+              <dt>External ref</dt><dd><?= h((string)($audit['external_ref'] ?? '—')) ?></dd>
+              <dt>Start</dt><dd><?= h((string)($audit['start_date'] ?? '—')) ?></dd>
+              <dt>End</dt><dd><?= h((string)($audit['end_date'] ?? '—')) ?></dd>
+              <dt>Closed</dt><dd><?= h((string)($audit['closed_date'] ?? '—')) ?></dd>
+              <dt>Subject</dt><dd><?= nl2br(h((string)($audit['subject'] ?? '—'))) ?></dd>
             </dl>
+            <style>
+              .cmp-dl{display:grid;grid-template-columns:200px 1fr;gap:10px 20px;margin:0;font-size:14px;}
+              .cmp-dl dt{color:var(--text-muted);font-weight:660;}
+              .cmp-dl dd{margin:0;color:var(--text-strong);font-weight:580;}
+            </style>
           <?php else: ?>
             <form method="post">
               <input type="hidden" name="action" value="update_audit">
               <input type="hidden" name="audit_id" value="<?= (int)$detailId ?>">
-              <label style="display:block;margin-bottom:10px;">
-                <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Title *</span>
-                <input name="title" required value="<?= h((string)$audit['title']) ?>" style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+
+              <label class="cmp-field" style="margin-bottom:14px;max-width:720px;">
+                <span>Title *</span>
+                <input name="title" required value="<?= h((string)$audit['title']) ?>">
               </label>
-              <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px;">
-                <label>
-                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Authority</span>
-                  <select name="authority" style="padding:8px;border-radius:8px;">
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:14px;">
+                <label class="cmp-field">
+                  <span>Authority</span>
+                  <select name="authority">
                     <?php foreach (ComplianceAuditEngine::authorities() as $a): ?>
                       <option value="<?= h($a) ?>" <?= ((string)$audit['authority'] === $a) ? 'selected' : '' ?>><?= h($a) ?></option>
                     <?php endforeach; ?>
                   </select>
                 </label>
-                <label>
-                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Category</span>
-                  <select name="audit_category" style="padding:8px;border-radius:8px;">
+                <label class="cmp-field">
+                  <span>Category</span>
+                  <select name="audit_category">
                     <option value="">—</option>
                     <?php foreach (ComplianceAuditEngine::categories() as $c): ?>
                       <option value="<?= h($c) ?>" <?= ((string)($audit['audit_category'] ?? '') === $c) ? 'selected' : '' ?>><?= h($c) ?></option>
                     <?php endforeach; ?>
                   </select>
                 </label>
-                <label>
-                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Type</span>
-                  <input name="audit_type" value="<?= h((string)$audit['audit_type']) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:160px;">
+                <label class="cmp-field">
+                  <span>Type</span>
+                  <input name="audit_type" value="<?= h((string)$audit['audit_type']) ?>">
                 </label>
-                <label>
-                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Status</span>
-                  <select name="status" style="padding:8px;border-radius:8px;">
+                <label class="cmp-field">
+                  <span>Status</span>
+                  <select name="status">
                     <?php foreach (ComplianceAuditEngine::statuses() as $s): ?>
                       <option value="<?= h($s) ?>" <?= ((string)$audit['status'] === $s) ? 'selected' : '' ?>><?= h($s) ?></option>
                     <?php endforeach; ?>
                   </select>
                 </label>
               </div>
-              <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px;">
-                <label>
-                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Entity</span>
-                  <input name="audit_entity" value="<?= h((string)($audit['audit_entity'] ?? '')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:240px;">
+
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px;margin-bottom:14px;">
+                <label class="cmp-field">
+                  <span>Entity</span>
+                  <input name="audit_entity" value="<?= h((string)($audit['audit_entity'] ?? '')) ?>">
                 </label>
-                <label>
-                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">External ref</span>
-                  <input name="external_ref" value="<?= h((string)($audit['external_ref'] ?? '')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;width:200px;">
+                <label class="cmp-field">
+                  <span>External ref</span>
+                  <input name="external_ref" value="<?= h((string)($audit['external_ref'] ?? '')) ?>">
                 </label>
-                <label>
-                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Start date</span>
-                  <input type="date" name="start_date" value="<?= h(substr((string)($audit['start_date'] ?? ''), 0, 10)) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+                <label class="cmp-field">
+                  <span>Start date</span>
+                  <input type="date" name="start_date" value="<?= h(substr((string)($audit['start_date'] ?? ''), 0, 10)) ?>">
                 </label>
-                <label>
-                  <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">End date</span>
-                  <input type="date" name="end_date" value="<?= h(substr((string)($audit['end_date'] ?? ''), 0, 10)) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+                <label class="cmp-field">
+                  <span>End date</span>
+                  <input type="date" name="end_date" value="<?= h(substr((string)($audit['end_date'] ?? ''), 0, 10)) ?>">
                 </label>
               </div>
-              <label style="display:block;margin-bottom:14px;">
-                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Subject / scope</span>
-                <textarea name="subject" rows="4" style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"><?= h((string)($audit['subject'] ?? '')) ?></textarea>
+
+              <label class="cmp-field" style="margin-bottom:18px;max-width:720px;">
+                <span>Subject / scope</span>
+                <textarea name="subject" rows="4"><?= h((string)($audit['subject'] ?? '')) ?></textarea>
               </label>
-              <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 20px;border-radius:10px;font-weight:700;cursor:pointer;">Save</button>
+
+              <button type="submit">Save audit</button>
             </form>
-            <form method="post" style="margin-top:14px;display:inline-flex;gap:8px;align-items:center;"
+
+            <form method="post" style="margin-top:18px;display:flex;gap:14px;align-items:flex-end;flex-wrap:wrap;"
               onsubmit="return confirm('Close and lock this audit?');">
               <input type="hidden" name="action" value="close_audit">
               <input type="hidden" name="audit_id" value="<?= (int)$detailId ?>">
-              <label>
-                <span style="font-size:11px;font-weight:700;color:#64748b;">Closed date</span>
-                <input type="date" name="closed_date" value="<?= h(date('Y-m-d')) ?>" style="padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+              <label class="cmp-field">
+                <span>Closed date</span>
+                <input type="date" name="closed_date" value="<?= h(date('Y-m-d')) ?>">
               </label>
-              <button type="submit" style="background:#0f766e;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:700;cursor:pointer;">Close audit</button>
+              <button type="submit" class="cmp-btn cmp-btn-success">Close audit</button>
             </form>
           <?php endif; ?>
         </section>
 
-        <section style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:24px 28px;margin-bottom:24px;max-width:960px;">
-          <h3 style="margin:0 0 12px;font-size:18px;">Checklist snapshots</h3>
+        <section class="cmp-card">
+          <div class="cmp-card-head">
+            <h3 class="cmp-card-title">Checklist snapshots</h3>
+          </div>
+
           <?php if (!$snapshots): ?>
-            <p style="margin:0 0 12px;color:#64748b;font-size:14px;">No checklist snapshots attached.</p>
+            <div class="cmp-empty">
+              <div class="cmp-empty-title">No checklist snapshots attached</div>
+              <p style="margin:0;">Attach an approved checklist below to begin auditing.</p>
+            </div>
           <?php else: ?>
-            <table style="width:100%;border-collapse:collapse;font-size:14px;margin-bottom:14px;">
-              <thead><tr style="background:#f1f5f9;text-align:left;">
-                <th style="padding:10px;">Template</th>
-                <th style="padding:10px;">Version</th>
-                <th style="padding:10px;">Items</th>
-                <th style="padding:10px;">Status</th>
-                <th style="padding:10px;">Generated</th>
-                <th style="padding:10px;"></th>
+            <table class="cmp-table" style="margin-bottom:18px;">
+              <thead><tr>
+                <th>Template</th>
+                <th>Version</th>
+                <th>Items</th>
+                <th>Status</th>
+                <th>Generated</th>
+                <th></th>
               </tr></thead>
               <tbody>
                 <?php foreach ($snapshots as $s):
                     $items = ComplianceChecklistEngine::decodeSnapshotItems($s['items_snapshot_json'] ?? null);
                     ?>
-                  <tr style="border-top:1px solid #e2e8f0;">
-                    <td style="padding:10px;">
-                      <code style="font-family:ui-monospace,monospace;font-size:12px;"><?= h((string)$s['template_code']) ?></code>
-                      — <?= h((string)$s['template_title']) ?>
+                  <tr>
+                    <td>
+                      <code><?= h((string)$s['template_code']) ?></code>
+                      &mdash; <?= h((string)$s['template_title']) ?>
                     </td>
-                    <td style="padding:10px;">v<?= (int)$s['version_no'] ?></td>
-                    <td style="padding:10px;"><?= count($items) ?></td>
-                    <td style="padding:10px;"><?= h((string)$s['status']) ?>
+                    <td>v<?= (int)$s['version_no'] ?></td>
+                    <td><?= count($items) ?></td>
+                    <td>
+                      <?= h((string)$s['status']) ?>
                       <?php if (!empty($s['locked_at'])): ?>
-                        <span class="queue-status is-warn" style="margin-left:6px;padding:2px 6px;border-radius:6px;">Locked</span>
+                        <span class="cmp-pill" style="margin-left:6px;background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.20);">Locked</span>
                       <?php endif; ?>
                     </td>
-                    <td style="padding:10px;color:#64748b;font-size:12px;"><?= h((string)$s['generated_at']) ?></td>
-                    <td style="padding:10px;">
-                      <a href="/admin/compliance/audit_checklist.php?snapshot_id=<?= (int)$s['id'] ?>" style="font-weight:700;color:#1e3c72;">Open</a>
+                    <td class="cmp-mono"><?= h((string)$s['generated_at']) ?></td>
+                    <td>
+                      <a href="/admin/compliance/audit_checklist.php?snapshot_id=<?= (int)$s['id'] ?>">Open</a>
                     </td>
                   </tr>
                 <?php endforeach; ?>
@@ -273,119 +302,136 @@ if ($detailId > 0) {
           <?php endif; ?>
 
           <?php if (!$locked && $approvedVersions): ?>
-            <form method="post" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+            <form method="post" style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;">
               <input type="hidden" name="action" value="attach_snapshot">
               <input type="hidden" name="audit_id" value="<?= (int)$detailId ?>">
-              <label>
-                <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Attach approved checklist</span>
-                <select name="version_id" required style="padding:8px;border-radius:8px;min-width:280px;">
+              <label class="cmp-field" style="flex:1 1 320px;">
+                <span>Attach approved checklist</span>
+                <select name="version_id" required>
                   <?php foreach ($approvedVersions as $v): ?>
                     <option value="<?= (int)$v['version_id'] ?>">
-                      <?= h((string)$v['template_code']) ?> — <?= h((string)$v['template_title']) ?>
+                      <?= h((string)$v['template_code']) ?> &mdash; <?= h((string)$v['template_title']) ?>
                     </option>
                   <?php endforeach; ?>
                 </select>
               </label>
-              <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 18px;border-radius:10px;font-weight:700;cursor:pointer;">Attach snapshot</button>
+              <button type="submit">Attach snapshot</button>
             </form>
           <?php elseif (!$locked): ?>
-            <p style="margin:0;color:#64748b;font-size:13px;">
+            <p style="margin:0;color:var(--text-muted);">
               No approved checklist versions available.
-              <a href="/admin/compliance/procedures.php" style="color:#1e3c72;font-weight:700;">Author one →</a>
+              <a href="/admin/compliance/procedures.php">Author one &rarr;</a>
             </p>
           <?php endif; ?>
         </section>
         <?php
         compliance_render_comms_panel($pdo, 'audit', (string)$detailId);
+        compliance_page_close();
     }
 } else {
     $rows = ComplianceAuditEngine::listRecent($pdo);
-    ?>
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:16px;margin-bottom:20px;max-width:1200px;">
-      <div>
-        <h2 style="margin:0 0 6px;font-size:20px;">Audits</h2>
-        <p style="margin:0;color:#64748b;font-size:14px;">Plan and execute internal &amp; authority audits. Attach versioned checklist snapshots.</p>
-      </div>
-    </div>
 
-    <div style="display:grid;grid-template-columns:1fr 360px;gap:24px;align-items:start;max-width:1200px;">
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;overflow:hidden;">
-        <table style="width:100%;border-collapse:collapse;font-size:14px;">
-          <thead><tr style="background:#f1f5f9;text-align:left;">
-            <th style="padding:12px 14px;">Code</th>
-            <th style="padding:12px 14px;">Title</th>
-            <th style="padding:12px 14px;">Authority</th>
-            <th style="padding:12px 14px;">Status</th>
-            <th style="padding:12px 14px;">Window</th>
+    compliance_page_open(array(
+        'overline' => 'Compliance',
+        'title' => 'Audits',
+        'description' => 'Plan and execute internal & authority audits. Attach versioned checklist snapshots and track lifecycle from PLANNED to CLOSED.',
+        'flash' => $flash,
+        'stats' => array(
+            array('label' => 'Total audits', 'value' => count($rows)),
+        ),
+    ));
+    ?>
+
+    <div class="cmp-cols">
+      <section class="cmp-card" style="padding:0;overflow:hidden;">
+        <div style="padding:18px 24px;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;align-items:center;">
+          <h2 class="cmp-card-title" style="margin:0;">Recent audits</h2>
+          <span class="cmp-pill" style="background:#f3f6fb;color:#71809a;"><?= count($rows) ?> result<?= count($rows) === 1 ? '' : 's' ?></span>
+        </div>
+        <table class="cmp-table">
+          <thead><tr>
+            <th>Code</th>
+            <th>Title</th>
+            <th>Authority</th>
+            <th>Status</th>
+            <th>Window</th>
           </tr></thead>
           <tbody>
             <?php if (!$rows): ?>
-              <tr><td colspan="5" style="padding:20px;color:#64748b;">No audits yet.</td></tr>
+              <tr><td colspan="5" style="color:var(--text-muted);">No audits yet.</td></tr>
             <?php endif; ?>
             <?php foreach ($rows as $r): ?>
-              <tr style="border-top:1px solid #e2e8f0;">
-                <td style="padding:10px 14px;font-family:ui-monospace,monospace;font-size:12px;">
-                  <a href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>" style="color:#1e3c72;font-weight:700;"><?= h((string)$r['audit_code']) ?></a>
+              <tr>
+                <td class="cmp-mono">
+                  <a href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>"><?= h((string)$r['audit_code']) ?></a>
                 </td>
-                <td style="padding:10px 14px;"><?= h((string)$r['title']) ?></td>
-                <td style="padding:10px 14px;"><?= h((string)$r['authority']) ?></td>
-                <td style="padding:10px 14px;"><?= h((string)$r['status']) ?></td>
-                <td style="padding:10px 14px;color:#64748b;font-size:12px;">
-                  <?= h((string)($r['start_date'] ?? '—')) ?> → <?= h((string)($r['end_date'] ?? '—')) ?>
+                <td><?= h((string)$r['title']) ?></td>
+                <td><?= h((string)$r['authority']) ?></td>
+                <td><?= h((string)$r['status']) ?></td>
+                <td class="cmp-mono">
+                  <?= h((string)($r['start_date'] ?? '—')) ?> &rarr; <?= h((string)($r['end_date'] ?? '—')) ?>
                 </td>
               </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
-      </div>
+      </section>
 
-      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;">
-        <h3 style="margin:0 0 14px;font-size:16px;">New audit</h3>
-        <form method="post" action="/admin/compliance/audits.php">
+      <section class="cmp-card cmp-side-card">
+        <div class="cmp-card-head">
+          <h3 class="cmp-card-title">New audit</h3>
+        </div>
+        <form method="post" action="/admin/compliance/audits.php" style="display:flex;flex-direction:column;gap:14px;">
           <input type="hidden" name="action" value="create_audit">
-          <label style="display:block;margin-bottom:10px;">
-            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Title *</span>
-            <input name="title" required style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+
+          <label class="cmp-field">
+            <span>Title *</span>
+            <input name="title" required>
           </label>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-            <label style="flex:1 1 130px;">
-              <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Authority</span>
-              <select name="authority" style="width:100%;padding:8px;border-radius:8px;">
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <label class="cmp-field">
+              <span>Authority</span>
+              <select name="authority">
                 <?php foreach (ComplianceAuditEngine::authorities() as $a): ?>
                   <option value="<?= h($a) ?>" <?= $a === 'INTERNAL' ? 'selected' : '' ?>><?= h($a) ?></option>
                 <?php endforeach; ?>
               </select>
             </label>
-            <label style="flex:1 1 130px;">
-              <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Type</span>
-              <input name="audit_type" value="INTERNAL" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+            <label class="cmp-field">
+              <span>Type</span>
+              <input name="audit_type" value="INTERNAL">
             </label>
           </div>
-          <label style="display:block;margin-bottom:10px;">
-            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Entity</span>
-            <input name="audit_entity" placeholder="e.g. ATO Operations" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+
+          <label class="cmp-field">
+            <span>Entity</span>
+            <input name="audit_entity" placeholder="e.g. ATO Operations">
           </label>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
-            <label style="flex:1 1 130px;">
-              <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Start</span>
-              <input type="date" name="start_date" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <label class="cmp-field">
+              <span>Start</span>
+              <input type="date" name="start_date">
             </label>
-            <label style="flex:1 1 130px;">
-              <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">End</span>
-              <input type="date" name="end_date" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
+            <label class="cmp-field">
+              <span>End</span>
+              <input type="date" name="end_date">
             </label>
           </div>
-          <label style="display:block;margin-bottom:14px;">
-            <span style="display:block;font-size:11px;font-weight:700;color:#64748b;">Subject / scope</span>
-            <textarea name="subject" rows="3" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"></textarea>
+
+          <label class="cmp-field">
+            <span>Subject / scope</span>
+            <textarea name="subject" rows="3"></textarea>
           </label>
-          <button type="submit" style="width:100%;background:#1e3c72;color:#fff;border:0;padding:12px;border-radius:10px;font-weight:800;cursor:pointer;">
-            Create audit
-          </button>
+
+          <button type="submit" style="width:100%;">Create audit</button>
         </form>
-      </div>
+      </section>
     </div>
+
     <?php
+    compliance_page_close();
 }
 
 cw_footer();

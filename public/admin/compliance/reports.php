@@ -155,89 +155,77 @@ if ($selected !== '' && isset($REPORTS[$selected]) && $export === 'csv') {
 }
 
 cw_header('Compliance · Reports');
+
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
+
+compliance_page_open(array(
+    'overline' => 'Compliance · Reports',
+    'title' => 'Compliance reports',
+    'description' => 'Standard aggregate views over the compliance dataset. Pick a report on the left, then download a CSV snapshot for the authority pack, board pack or your own analysis.',
+    'stats' => array(
+        array('label' => 'Reports available', 'value' => count($REPORTS)),
+    ),
+));
 ?>
 <style>
-  .cmprep-h1{margin:0 0 6px;font-size:24px;color:#0f172a;}
-  .cmprep-sub{margin:0 0 22px;color:#64748b;max-width:760px;line-height:1.55;}
-  .cmprep-grid{display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:start;max-width:1200px;}
-  @media (max-width:780px){.cmprep-grid{grid-template-columns:1fr;}}
-  .cmprep-side{background:#fff;border:1px solid #e2e8f0;border-radius:14px;padding:14px;}
-  .cmprep-side a{
-    display:block;padding:8px 10px;border-radius:8px;color:#0f172a;
-    text-decoration:none;font-size:14px;font-weight:600;
-  }
-  .cmprep-side a:hover{background:#f1f5f9;}
-  .cmprep-side a.is-on{background:#1e3c72;color:#fff;}
-  .cmprep-card{background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:20px 22px;}
-  .cmprep-table{width:100%;border-collapse:collapse;font-size:14px;}
-  .cmprep-table th{
-    text-align:left;font-size:11px;color:#64748b;font-weight:800;letter-spacing:.05em;
-    text-transform:uppercase;padding:6px 8px;background:#f1f5f9;
-  }
-  .cmprep-table td{padding:8px;border-top:1px solid #e2e8f0;vertical-align:top;}
-  .cmprep-mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;}
-  .cmprep-btn{
-    background:#0f766e;color:#fff;border:0;padding:8px 14px;border-radius:8px;
-    font-weight:800;cursor:pointer;text-decoration:none;display:inline-block;
-  }
+  .cmprep-side{background:#fff;border:1px solid var(--border-soft);border-radius:14px;padding:14px;box-shadow:0 6px 16px rgba(15,28,47,0.04);}
+  .cmprep-side a{display:block;padding:10px 12px;border-radius:10px;color:#0f172a;text-decoration:none;font-size:14px;font-weight:620;}
+  .cmprep-side a:hover{background:var(--row-hover);}
+  .cmprep-side a.is-on{background:linear-gradient(120deg,#1f4079 0%,#307cb7 100%);color:#fff;}
 </style>
 
-<section style="padding:8px 0 40px;">
-  <h1 class="cmprep-h1">Compliance reports</h1>
-  <p class="cmprep-sub">
-    Standard aggregate views over the compliance dataset. Pick a report on the left, then download a
-    CSV snapshot for the authority pack, board pack or your own analysis.
-  </p>
+<div style="display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;">
+  <nav class="cmprep-side">
+    <?php foreach ($REPORTS as $k => $cfg): ?>
+      <a href="/admin/compliance/reports.php?report=<?= urlencode($k) ?>"
+         class="<?= $selected === $k ? 'is-on' : '' ?>"><?= h((string)$cfg['title']) ?></a>
+    <?php endforeach; ?>
+  </nav>
 
-  <div class="cmprep-grid">
-    <nav class="cmprep-side">
-      <?php foreach ($REPORTS as $k => $cfg): ?>
-        <a href="/admin/compliance/reports.php?report=<?= urlencode($k) ?>"
-           class="<?= $selected === $k ? 'is-on' : '' ?>"><?= h((string)$cfg['title']) ?></a>
-      <?php endforeach; ?>
-    </nav>
-
-    <div class="cmprep-card">
-      <?php if ($selected === '' || !isset($REPORTS[$selected])): ?>
-        <h2 style="margin:0 0 8px;font-size:18px;">Pick a report</h2>
-        <p style="margin:0;color:#64748b;">Choose one of the reports on the left to see counts and download a CSV.</p>
-      <?php
-        else:
-          $cfg = $REPORTS[$selected];
-          $rows = rpt_rows($pdo, (string)$cfg['sql']);
-          $mapFn = $cfg['map'];
-      ?>
-        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap;">
-          <div>
-            <h2 style="margin:0 0 4px;font-size:18px;"><?= h((string)$cfg['title']) ?></h2>
-            <p style="margin:0;color:#64748b;font-size:13px;"><?= h((string)$cfg['description']) ?></p>
+  <section class="cmp-card">
+    <?php if ($selected === '' || !isset($REPORTS[$selected])): ?>
+      <h2 style="margin:0 0 8px;">Pick a report</h2>
+      <p style="margin:0;color:var(--text-muted);">Choose one of the reports on the left to see counts and download a CSV.</p>
+    <?php
+      else:
+        $cfg = $REPORTS[$selected];
+        $rows = rpt_rows($pdo, (string)$cfg['sql']);
+        $mapFn = $cfg['map'];
+    ?>
+      <div class="cmp-list-head" style="margin-bottom:14px;">
+        <div>
+          <div class="cmp-list-title">
+            <?= compliance_ui_icon('document') ?>
+            <span><?= h((string)$cfg['title']) ?></span>
           </div>
-          <a class="cmprep-btn" href="/admin/compliance/reports.php?report=<?= urlencode($selected) ?>&export=csv">Download CSV</a>
+          <p style="margin:6px 0 0;color:var(--text-muted);font-size:13px;"><?= h((string)$cfg['description']) ?></p>
         </div>
-        <?php if ($rows === array()): ?>
-          <p style="margin:0;color:#64748b;">No data to show.</p>
-        <?php else: ?>
-          <table class="cmprep-table">
-            <thead><tr>
-              <?php foreach ($cfg['columns'] as $c): ?>
-                <th><?= h((string)$c) ?></th>
-              <?php endforeach; ?>
-            </tr></thead>
-            <tbody>
-              <?php foreach ($rows as $r):
-                $vals = $mapFn($r); ?>
-                <tr>
-                  <?php foreach ($vals as $v): ?>
-                    <td><?= h((string)$v) ?></td>
-                  <?php endforeach; ?>
-                </tr>
-              <?php endforeach; ?>
-            </tbody>
-          </table>
-        <?php endif; ?>
+        <a class="cmp-btn-link" href="/admin/compliance/reports.php?report=<?= urlencode($selected) ?>&export=csv" style="text-decoration:none;">Download CSV</a>
+      </div>
+      <?php if ($rows === array()): ?>
+        <p style="margin:0;color:var(--text-muted);">No data to show.</p>
+      <?php else: ?>
+        <table>
+          <thead><tr>
+            <?php foreach ($cfg['columns'] as $c): ?>
+              <th><?= h((string)$c) ?></th>
+            <?php endforeach; ?>
+          </tr></thead>
+          <tbody>
+            <?php foreach ($rows as $r):
+              $vals = $mapFn($r); ?>
+              <tr>
+                <?php foreach ($vals as $v): ?>
+                  <td><?= h((string)$v) ?></td>
+                <?php endforeach; ?>
+              </tr>
+            <?php endforeach; ?>
+          </tbody>
+        </table>
       <?php endif; ?>
-    </div>
-  </div>
-</section>
+    <?php endif; ?>
+  </section>
+</div>
 <?php
+compliance_page_close();
 cw_footer();
