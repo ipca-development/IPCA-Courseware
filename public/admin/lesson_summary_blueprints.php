@@ -587,13 +587,35 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     if (row) row.classList.remove('lsb-row-working');
   }
 
-  function startElapsedTicker(label, lessonId, lessonTitle) {
+  function estimateLessonSeconds(activeSlideCount) {
+    const slides = Math.max(1, parseInt(activeSlideCount, 10) || 1);
+    return Math.max(45, Math.min(240, 18 + (slides * 9)));
+  }
+
+  function formatEta(seconds) {
+    seconds = Math.max(0, Math.ceil(seconds));
+    if (seconds < 60) return seconds + 's';
+    const minutes = Math.floor(seconds / 60);
+    const rest = seconds % 60;
+    return minutes + 'm ' + String(rest).padStart(2, '0') + 's';
+  }
+
+  function startElapsedTicker(label, lessonId, lessonTitle, activeSlideCount) {
     const started = Date.now();
+    const totalSlides = Math.max(1, parseInt(activeSlideCount, 10) || 1);
+    const estimatedSeconds = estimateLessonSeconds(totalSlides);
     const render = function () {
       const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000));
-      const message = label + ' lesson ' + lessonId + (lessonTitle ? ' - ' + lessonTitle : '') + ' (' + elapsed + 's elapsed)';
+      const progressRatio = Math.min(0.92, elapsed / estimatedSeconds);
+      const analyzedSlides = Math.max(1, Math.min(totalSlides, Math.floor(progressRatio * totalSlides) + 1));
+      const eta = progressRatio >= 0.92
+        ? 'finalizing'
+        : 'ETA about ' + formatEta(estimatedSeconds - elapsed);
+      const message = label + ' lesson ' + lessonId + (lessonTitle ? ' - ' + lessonTitle : '') +
+        ': ' + analyzedSlides + ' of ' + totalSlides + ' slide(s) analyzed, ' + eta +
+        ' (' + elapsed + 's elapsed)';
       setCurrentWork(message);
-      markLessonWorking(lessonId, label.toLowerCase(), elapsed + 's elapsed');
+      markLessonWorking(lessonId, label.toLowerCase(), analyzedSlides + '/' + totalSlides + ' slides · ' + eta);
     };
     render();
     const timer = window.setInterval(render, 1000);
@@ -620,7 +642,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
       const lesson = state.lessons.find(function (l) { return parseInt(l.lesson_id, 10) === lessonId; });
       addLog('Generating lesson ' + lessonId + (lesson ? ' — ' + lesson.title : '') + '...');
       const previousLatestVersionId = await latestVersionIdForLesson(lessonId);
-      const stopTicker = startElapsedTicker('Generating', lessonId, lesson ? lesson.title : '');
+      const stopTicker = startElapsedTicker('Generating', lessonId, lesson ? lesson.title : '', lesson ? lesson.active_slide_count : 1);
       try {
         const json = await apiPost({
           action: 'generate_lesson',
