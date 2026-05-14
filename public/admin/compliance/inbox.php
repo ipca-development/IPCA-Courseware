@@ -103,6 +103,47 @@ if ($filterQuery !== '') {
     $searchResults = ComplianceCommsCenterEngine::searchEmails($pdo, $filterQuery, 100);
 }
 
+$emailTemplateHtml = <<<'HTML'
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IPCA.training Compliance Communication</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#152235;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f6fb;padding:28px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#ffffff;border:1px solid #dfe6f1;border-radius:20px;overflow:hidden;box-shadow:0 10px 24px rgba(15,23,42,0.055);">
+          <tr>
+            <td style="padding:26px 30px;background:#0d1d34;color:#ffffff;">
+              <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.72);font-weight:700;">IPCA.training Compliance</div>
+              <h1 style="margin:10px 0 0;font-size:24px;line-height:1.2;font-weight:760;color:#ffffff;">Compliance Communication</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px;font-size:15px;line-height:1.65;color:#152235;">
+              <p style="margin:0 0 16px;">Dear recipient,</p>
+              <p style="margin:0 0 16px;">Your message content goes here. Keep the wording clear, authority-ready, and concise.</p>
+              <p style="margin:0;">Kind regards,<br><strong>IPCA Compliance Team</strong></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 30px;background:#f7f9fc;border-top:1px solid #e7edf5;color:#728198;font-size:12px;line-height:1.5;">
+              <strong style="color:#152235;">IPCA.training</strong><br>
+              Compliance Operating System<br>
+              This email and any attachments may contain compliance records. Please retain according to the applicable authority and company recordkeeping requirements.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+HTML;
+
 cw_header('Compliance · Inbox');
 
 compliance_page_open(array(
@@ -112,6 +153,7 @@ compliance_page_open(array(
     'actions' => array(
         array('label' => 'New message', 'href' => '/admin/compliance/email_compose.php', 'icon' => 'plus'),
         array('label' => 'Drafts',      'href' => '/admin/compliance/email_drafts.php', 'icon' => 'doc'),
+        array('label' => 'Settings',    'modal' => 'inboxIntegrationModal', 'icon' => 'settings'),
     ),
     'stats' => array(
         array('label' => 'Open threads',     'value' => (int)$stats['open'],              'href' => '/admin/compliance/inbox.php?status=open',              'tone' => (int)$stats['open'] > 0 ? 'warn' : 'ok'),
@@ -137,6 +179,15 @@ compliance_page_open(array(
   .cmpcc-bulk{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
   .cmpcc-bulk select{height:36px;min-height:36px;padding:0 10px !important;font-size:12px !important;}
   .cmpcc-bulk button{height:36px;min-height:36px;padding:0 12px !important;font-size:12px !important;}
+  #inboxIntegrationModal{width:min(980px,calc(100vw - 32px));}
+  .cmpcc-template-card{margin-top:18px;padding:18px;border:1px solid var(--border-soft);border-radius:18px;background:#f8fafd;}
+  .cmpcc-template-preview{margin-top:12px;border:1px solid #dfe6f1;border-radius:18px;overflow:hidden;background:#fff;box-shadow:var(--card-shadow);}
+  .cmpcc-template-preview-head{padding:22px 24px;background:#0d1d34;color:#fff;}
+  .cmpcc-template-preview-kicker{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.72);font-weight:700;}
+  .cmpcc-template-preview-title{margin:8px 0 0;font-size:22px;line-height:1.2;color:#fff;font-weight:760;}
+  .cmpcc-template-preview-body{padding:24px;color:var(--text-strong);font-size:14px;line-height:1.65;}
+  .cmpcc-template-preview-foot{padding:16px 24px;background:#f7f9fc;border-top:1px solid #e7edf5;color:var(--text-muted);font-size:12px;line-height:1.5;}
+  .cmpcc-template-code{margin-top:12px;width:100%;min-height:220px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;}
 </style>
 
 <section class="cmp-card cmp-toolbar">
@@ -363,8 +414,7 @@ compliance_page_open(array(
     <?php endif; ?>
   </section>
 
-  <section class="cmp-card cmpcc-card">
-    <h2 style="margin:0 0 12px;">Webhook &amp; integration status</h2>
+  <?php compliance_modal_open('inboxIntegrationModal', 'Webhook & integration status'); ?>
     <div class="compliance-table-wrap">
     <table class="cmpcc-table compliance-table" style="margin-bottom:14px;">
       <tbody>
@@ -450,7 +500,36 @@ compliance_page_open(array(
         <li>Send a test email <em>to</em> the mailbox to verify inbound, then use the <em>New message</em> button to send an outbound test and watch for the Delivery event on the thread.</li>
       </ul>
     </div>
-  </section>
+    <div class="cmpcc-template-card">
+      <h3 style="margin:0 0 6px;">Styled outbound email HTML template</h3>
+      <p style="margin:0;color:var(--text-muted);font-size:13px;line-height:1.5;">
+        Use this wrapper for authority-ready outbound compliance emails. It includes a branded header, readable content area, and recordkeeping footer.
+      </p>
+      <div class="cmpcc-template-preview" aria-label="Email template preview">
+        <div class="cmpcc-template-preview-head">
+          <div class="cmpcc-template-preview-kicker">IPCA.training Compliance</div>
+          <div class="cmpcc-template-preview-title">Compliance Communication</div>
+        </div>
+        <div class="cmpcc-template-preview-body">
+          <p style="margin:0 0 12px;">Dear recipient,</p>
+          <p style="margin:0 0 12px;">Your message content goes here. Keep the wording clear, authority-ready, and concise.</p>
+          <p style="margin:0;">Kind regards,<br><strong>IPCA Compliance Team</strong></p>
+        </div>
+        <div class="cmpcc-template-preview-foot">
+          <strong style="color:#152235;">IPCA.training</strong><br>
+          Compliance Operating System<br>
+          This email and any attachments may contain compliance records. Please retain according to the applicable authority and company recordkeeping requirements.
+        </div>
+      </div>
+      <label class="cmp-field" style="margin-top:14px;">
+        <span>HTML template source</span>
+        <textarea class="cmpcc-template-code" readonly><?= h($emailTemplateHtml) ?></textarea>
+      </label>
+    </div>
+    <div class="compliance-modal__footer">
+      <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Close</button>
+    </div>
+  <?php compliance_modal_close(); ?>
 <?php
 compliance_page_close();
 cw_footer();
