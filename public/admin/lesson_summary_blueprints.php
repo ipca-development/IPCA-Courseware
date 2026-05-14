@@ -485,6 +485,14 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     return 0;
   }
 
+  function isBackgroundCompletionNetworkDrop(error) {
+    const message = String(error && error.message ? error.message : '').toLowerCase();
+    return message.indexOf('failed to fetch') !== -1 ||
+      message.indexOf('load failed') !== -1 ||
+      message.indexOf('networkerror') !== -1 ||
+      message.indexOf('network error') !== -1;
+  }
+
   async function loadLessons() {
     state.courseId = parseInt(els.course.value, 10) || 0;
     if (!state.courseId) {
@@ -626,7 +634,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
       } catch (e) {
         stopTicker();
         const payload = e.payload || {};
-        if (!payload.error && String(e.message || '').toLowerCase().indexOf('failed to fetch') !== -1) {
+        if (!payload.error && isBackgroundCompletionNetworkDrop(e)) {
           addLog('Lesson ' + lessonId + ' is still processing. Checking for the saved version in the background...');
           setCurrentWork('Lesson ' + lessonId + ' is finishing in the background. Waiting for the saved version...');
           const savedVersionId = await waitForSavedGeneration(lessonId, previousLatestVersionId);
