@@ -1465,7 +1465,12 @@ function maya_system_prompt(): string
         . "69. Close one concept before moving to another.\n"
         . "70. You may suggest highlighted notes, warnings, cautions, mnemonics, rules of thumb, or quotes when educationally useful and short.\n"
         . "71. Enter a polishing phase once content quality is strong: suggest highlights, mnemonics/rules of thumb, and clear notes sparingly.\n"
-        . "72. Never make the summary visually noisy.";
+        . "72. Never make the summary visually noisy.\n"
+        . "91. When you need both a summary-writing task and a chat response, visually and structurally separate them clearly.\n"
+        . "92. Use the exact labels <strong><u>SUMMARY EDITOR</u></strong> and <strong><u>THIS CHAT</u></strong>: bold, underlined, and uppercase.\n"
+        . "93. Put summary instructions and chat instructions on separate lines or paragraphs. Use an arrow (→) or colon separator.\n"
+        . "94. The student should immediately understand what must be written in the summary and what must be answered in chat.\n"
+        . "95. Avoid blended instruction paragraphs such as 'In your summary editor... In chat...' in one continuous sentence.";
 }
 
 function maya_response_schema(bool $isFinalReview): array

@@ -174,6 +174,25 @@
       .replace(/"/g, '&quot;');
   }
 
+  function safeMayaMessageHtml(s) {
+    var html = escapeHtml(s).replace(/\r\n|\r|\n/g, '<br>');
+    var allowed = [
+      ['&lt;strong&gt;', '<strong>'],
+      ['&lt;/strong&gt;', '</strong>'],
+      ['&lt;u&gt;', '<u>'],
+      ['&lt;/u&gt;', '</u>'],
+      ['&lt;em&gt;', '<em>'],
+      ['&lt;/em&gt;', '</em>'],
+      ['&lt;br&gt;', '<br>'],
+      ['&lt;br/&gt;', '<br>'],
+      ['&lt;br /&gt;', '<br>']
+    ];
+    allowed.forEach(function (pair) {
+      html = html.split(pair[0]).join(pair[1]);
+    });
+    return html;
+  }
+
   // ---------------------------------------------------------------------
   // DOM builder — used when host page does not pre-render Maya markup.
   // Both v3 surfaces ship with the markup pre-rendered, but this lets the
@@ -1394,7 +1413,11 @@
 
     var body = document.createElement('div');
     body.className = 'maya-chat-body';
-    body.textContent = text;
+    if (role === 'maya') {
+      body.innerHTML = safeMayaMessageHtml(text);
+    } else {
+      body.textContent = text;
+    }
     bubble.appendChild(body);
 
     row.appendChild(bubble);

@@ -1307,19 +1307,30 @@
 .summary-writing-task {
   margin: 12px 14px 8px 14px;
   position: relative;
+  overflow: hidden;
   z-index: 8;
-  background: rgba(255,255,255,.96);
-  border: 1px solid rgba(30,60,114,.18);
-  border-left: 4px solid #2a5298;
+  background: #fffef7;
+  border: 1px solid rgba(30,60,114,.16);
   border-radius: 12px;
-  padding: 8px 11px;
+  padding: 8px 11px 8px 15px;
   box-shadow: 0 8px 22px rgba(15,23,42,.10);
   color: #152235;
   flex: 0 0 auto;
 }
+.summary-writing-task::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: #2a5298;
+}
 .summary-writing-task[data-awaiting-chat="1"] {
-  border-left-color: #f59e0b;
   background: #fffbeb;
+}
+.summary-writing-task[data-awaiting-chat="1"]::before {
+  background: #f59e0b;
 }
 .maya-writing-task-label {
   font-size: 9px;
