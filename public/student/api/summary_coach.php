@@ -428,6 +428,138 @@ function maya_choose_coaching_focus_from_summary(string $lessonTitle, string $su
     return 'operational application: connect a concept to a cockpit action, flight decision, safety outcome, or cause-and-effect relationship';
 }
 
+function maya_concept_families(): array
+{
+    return [
+        'weather_decision_making' => ['weather', 'visibility', 'ceiling', 'wind', 'storm', 'icing', 'forecast', 'metar', 'taf', 'temperature'],
+        'performance_planning' => ['performance', 'takeoff', 'landing', 'climb', 'density', 'altitude', 'runway', 'distance', 'calculate', 'calculation'],
+        'mass_balance' => ['mass', 'balance', 'weight', 'loading', 'load', 'cg', 'center of gravity'],
+        'flight_readiness' => ['readiness', 'im safe', 'imsafe', 'fitness', 'fatigue', 'stress', 'illness', 'medication', 'personal minimum'],
+        'aircraft_systems' => ['system', 'engine', 'fuel', 'electrical', 'hydraulic', 'control', 'component', 'equipment'],
+        'aerodynamics_control' => ['lift', 'drag', 'stall', 'control', 'pitch', 'roll', 'yaw', 'angle of attack', 'stability'],
+        'regulations_compliance' => ['regulation', 'legal', 'required', 'compliance', 'certificate', 'currency', 'inspection', 'limitation'],
+        'ifr_procedures' => ['instrument', 'ifr', 'approach', 'procedure', 'clearance', 'minimum', 'fix', 'course', 'intercept'],
+        'communication_ops' => ['communication', 'radio', 'atc', 'clearance', 'tower', 'traffic', 'airport', 'runway', 'taxi'],
+        'preflight_inspection' => ['preflight', 'inspection', 'checklist', 'walkaround', 'verify', 'airworthy', 'maintenance'],
+    ];
+}
+
+function maya_detect_concept_key(string $lessonTitle, string $summaryPlain, string $studentReply, string $coachingFocus): string
+{
+    $hay = strtolower($lessonTitle . ' ' . $summaryPlain . ' ' . $studentReply . ' ' . $coachingFocus);
+    $bestKey = 'operational_application';
+    $bestScore = 0;
+    foreach (maya_concept_families() as $key => $terms) {
+        $score = 0;
+        foreach ($terms as $term) {
+            if ($term !== '' && strpos($hay, $term) !== false) $score++;
+        }
+        if ($score > $bestScore) {
+            $bestScore = $score;
+            $bestKey = $key;
+        }
+    }
+    return $bestKey;
+}
+
+function maya_concept_label(string $key): string
+{
+    $label = str_replace('_', ' ', $key);
+    return trim($label) !== '' ? $label : 'operational application';
+}
+
+function maya_reply_demonstrates_operational_understanding(string $reply): bool
+{
+    $r = strtolower($reply);
+    if (trim($r) === '') return false;
+    $opsTerms = [
+        'go/no-go', 'go no go', 'decision', 'decide', 'verify', 'check', 'preflight',
+        'calculate', 'recalculate', 'before flight', 'prior to flight', 'depart',
+        'departure', 'safe', 'safety', 'risk', 'minimum', 'legal', 'required',
+        'cockpit', 'pilot', 'action', 'because', 'therefore', 'effect', 'affect',
+        'consequence', 'performance', 'confirm',
+    ];
+    $hits = 0;
+    foreach ($opsTerms as $term) {
+        if (strpos($r, $term) !== false) $hits++;
+    }
+    return $hits >= 2 && str_word_count($reply) >= 8;
+}
+
+function maya_update_concept_progress(array $existingFlags, string $conceptKey, string $studentReply, array $oldScores, array $newScores): array
+{
+    $progress = is_array($existingFlags['concept_progress'] ?? null) ? $existingFlags['concept_progress'] : [];
+    $current = is_array($progress[$conceptKey] ?? null) ? $progress[$conceptKey] : [
+        'followup_count' => 0,
+        'operational_understanding' => false,
+        'closed' => false,
+    ];
+
+    $understood = maya_reply_demonstrates_operational_understanding($studentReply);
+    $oldCorrelation = (int)($oldScores['correlation'] ?? 0);
+    $newCorrelation = (int)($newScores['correlation'] ?? 0);
+    $correlationImproved = $newCorrelation > $oldCorrelation || $newCorrelation >= MAYA_THRESH_CORRELATION;
+
+    if ($studentReply !== '') {
+        $current['followup_count'] = (int)($current['followup_count'] ?? 0) + 1;
+    }
+    if ($understood) {
+        $current['operational_understanding'] = true;
+    }
+    if ((int)$current['followup_count'] >= 2 && !empty($current['operational_understanding']) && $correlationImproved) {
+        $current['closed'] = true;
+    }
+
+    $current['last_seen_at'] = maya_now_sql();
+    $progress[$conceptKey] = $current;
+
+    return $progress;
+}
+
+function maya_concept_progress_prompt(array $conceptProgress, string $activeConcept): string
+{
+    if (!$conceptProgress) {
+        return "No concept has been saturated yet. Probe once, confirm understanding, then move on when demonstrated.";
+    }
+    $lines = [];
+    foreach ($conceptProgress as $key => $row) {
+        if (!is_array($row)) continue;
+        $lines[] = sprintf(
+            "- %s: followups=%d, operational_understanding=%s, closed=%s%s",
+            maya_concept_label((string)$key),
+            (int)($row['followup_count'] ?? 0),
+            !empty($row['operational_understanding']) ? 'true' : 'false',
+            !empty($row['closed']) ? 'true' : 'false',
+            $key === $activeConcept ? ' (current)' : ''
+        );
+    }
+    return implode("\n", $lines);
+}
+
+function maya_transition_question_for_closed_concept(string $conceptKey, string $summaryPlain): string
+{
+    $s = strtolower($summaryPlain);
+    if ($conceptKey === 'performance_planning' || $conceptKey === 'mass_balance') {
+        if (strpos($s, 'imsafe') !== false || strpos($s, 'readiness') !== false || strpos($s, 'personal') !== false) {
+            return 'You connected the calculation to the departure decision. Let’s move to another part of flight readiness: which personal-readiness item would you verify before departure, and how could it change your go/no-go decision?';
+        }
+        return 'You connected the calculation to the departure decision. Let’s move to another part of this lesson: pick a different readiness item from your summary and explain the pilot action it supports before departure.';
+    }
+    if ($conceptKey === 'weather_decision_making') {
+        return 'You connected weather to the flight decision. Let’s move to another part of readiness: what would you personally verify before deciding the aircraft and pilot are ready to depart?';
+    }
+    if ($conceptKey === 'aircraft_systems' || $conceptKey === 'aerodynamics_control') {
+        return 'You connected that concept to aircraft behavior. Let’s move to preflight use: what would you check or verify before flight to catch a problem related to another concept in your summary?';
+    }
+    if ($conceptKey === 'regulations_compliance') {
+        return 'You connected the rule to pilot responsibility. Let’s move from knowing the rule to using it: what cockpit or preflight action would keep the flight compliant in this lesson scenario?';
+    }
+    if ($conceptKey === 'ifr_procedures') {
+        return 'You connected the procedure to cockpit use. Let’s move to interpretation: what would you verify on the instruments or chart before continuing with the next step?';
+    }
+    return 'Good, that closes the loop on that concept. Pick a different lesson area from your summary and explain the pilot action, preflight check, or decision it supports.';
+}
+
 function maya_decode_json_column($raw): array
 {
     if (!is_string($raw) || trim($raw) === '') return [];
@@ -995,7 +1127,15 @@ function maya_system_prompt(): string
         . "29. Do not make the student feel they missed hidden material that was not taught in this lesson.\n"
         . "30. When unsure, ask about pilot action, preflight verification, operational consequence, or decision-making within the lesson scope.\n"
         . "Scope-safe examples: 'Based on this lesson, what are you trying to confirm before flight by checking mass and balance and performance?' 'What would you personally verify before deciding the aircraft is ready and safe to depart?' 'How does this calculation support the go/no-go decision for this flight?'\n"
-        . "Avoid advanced probes unless explicitly covered by the lesson/reference context, such as detailed handling changes from forward-CG versus aft-CG loading.";
+        . "Avoid advanced probes unless explicitly covered by the lesson/reference context, such as detailed handling changes from forward-CG versus aft-CG loading.\n"
+        . "31. Avoid repeatedly probing the same concept once operational understanding has already been demonstrated.\n"
+        . "32. Before asking a follow-up question, determine whether the student already demonstrated sufficient understanding, whether the current topic is becoming repetitive, and whether the question is too similar to prior questions.\n"
+        . "33. If the student already demonstrated operational understanding, pilot action, safety reasoning, and cause/effect, acknowledge mastery, summarize briefly, and move to another weak or unexplored topic.\n"
+        . "34. Behave like a real instructor: probe, confirm, close the loop, move on.\n"
+        . "35. Avoid asking multiple variations of the same operational question.\n"
+        . "36. Avoid asking two nearly identical questions in one response.\n"
+        . "37. Ask ONE clear question at a time.\n"
+        . "38. When the student demonstrates understanding, transition naturally to another lesson area rather than re-probing the same one.";
 }
 
 function maya_response_schema(bool $isFinalReview): array
@@ -1334,6 +1474,8 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
 
     $existingFlags = maya_decode_json_column($session['flags_json'] ?? null);
     if (!is_array($existingFlags)) $existingFlags = [];
+    $oldScores = maya_decode_json_column($session['scores_json'] ?? null);
+    if (!is_array($oldScores)) $oldScores = [];
     $hadMajorPaste = (int)($session['major_paste_flag'] ?? 0) === 1;
     if ($clientMajorPaste && !$hadMajorPaste) {
         maya_insert_message($pdo, $session, 'system', 'system', 'Large pasted text detected.');
@@ -1362,6 +1504,10 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     );
     $officialReferenceText = trim((string)($referenceBundle['text'] ?? ''));
     $coachingFocus = maya_choose_coaching_focus_from_summary($lessonTitle, $summaryPlainForFocus, $referenceBundle);
+    $activeConcept = maya_detect_concept_key($lessonTitle, $summaryPlainForFocus, $studentReply, $coachingFocus);
+    $conceptProgress = is_array($existingFlags['concept_progress'] ?? null) ? $existingFlags['concept_progress'] : [];
+    $conceptProgressText = maya_concept_progress_prompt($conceptProgress, $activeConcept);
+    $activeConceptClosed = !empty($conceptProgress[$activeConcept]['closed']);
 
     $historyLines = [];
     foreach ($clientHistory as $h) {
@@ -1394,6 +1540,9 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "7. Is the next question within the current lesson scope?\n"
         . "8. Does it deepen what was taught, or does it introduce new material?\n"
         . "9. If it introduces new material, only ask it if the slide/reference context clearly supports it.\n\n"
+        . "10. Has the current concept already been sufficiently demonstrated or closed?\n"
+        . "11. Would another question on this same concept feel repetitive?\n"
+        . "12. If the concept is closed, acknowledge it briefly and transition to another weak or unexplored lesson area.\n\n"
         . "Then ask ONE targeted aviation coaching question.\n\n"
         . "Do NOT ask generic \"most important idea\" questions. Prefer lesson-scope questions about pilot action, preflight verification, operational consequence, or go/no-go decision making.";
 
@@ -1408,9 +1557,14 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "RECENT COACH HISTORY:\n" . $historyText . "\n\n"
         . "COACHING DIAGNOSTIC TASK\n" . $diagnosticTask . "\n\n"
         . "COACHING FOCUS HINT\n" . $coachingFocus . "\n\n"
+        . "CONCEPT PROGRESSION STATE\n"
+        . "Current concept: " . maya_concept_label($activeConcept) . "\n"
+        . "Current concept already closed: " . ($activeConceptClosed ? 'true' : 'false') . "\n"
+        . $conceptProgressText . "\n\n"
         . "STATE:\n" . $stateBlock . "\n\n"
         . "Coach the student per the rules. Pick the most useful next stage. "
         . "Ask like a flight instructor: operational, causal, safety-oriented, and cockpit-aware. "
+        . "If the current concept is closed or saturated, do not ask another variation about it; acknowledge and move to a different lesson area. "
         . "Score honestly. Output structured JSON only.";
 
     try {
@@ -1489,9 +1643,26 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $studentNote = mb_substr($studentNote, 0, 240);
     }
     $summaryInsertions = maya_sanitize_summary_insertions($aiJson['summary_insertions'] ?? [], $studentReply !== '');
+    $updatedConceptProgress = maya_update_concept_progress(
+        $existingFlags,
+        $activeConcept,
+        $studentReply,
+        $oldScores,
+        $scores
+    );
+    $conceptJustClosed = !empty($updatedConceptProgress[$activeConcept]['closed']) && empty($conceptProgress[$activeConcept]['closed']);
+    if ($conceptJustClosed) {
+        $nextQuestion = maya_transition_question_for_closed_concept($activeConcept, $summaryPlainForFocus);
+        $newStage = MAYA_STAGE_CORRELATE;
+        if (stripos($mayaMessage, 'good') === false && stripos($mayaMessage, 'yes') === false && stripos($mayaMessage, 'correct') === false) {
+            $mayaMessage = 'Good — you connected the concept to a real pilot decision. ' . $mayaMessage;
+        }
+    }
     $persistedFlags = [
         'major_paste' => $persistedMajorPaste,
         'needs_deeper_question' => $needsDeeper,
+        'concept_progress' => $updatedConceptProgress,
+        'active_concept' => $activeConcept,
     ];
     $mayaBubbleText = $mayaMessage;
     if ($nextQuestion !== '' && stripos($mayaBubbleText, $nextQuestion) === false) {
