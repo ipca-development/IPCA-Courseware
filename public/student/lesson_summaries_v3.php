@@ -987,6 +987,38 @@ body.nb-modal-open{
     page-break-inside:avoid;
   }	
 }
+
+/* Maya V3 final workspace: this dialog intentionally uses the shared
+   summary-workspace grid instead of the older notebook two-column shell. */
+.nb-editor-modal.open .nb-editor-dialog.summary-workspace{
+  display:flex;
+}
+.nb-editor-dialog.summary-workspace{
+  position:fixed;
+  left:50%;
+  right:auto;
+  bottom:18px;
+  top:auto;
+  transform:translateX(-50%);
+  width:min(1240px, 96vw);
+  height:min(82vh, 860px);
+  max-width:none;
+  max-height:none;
+  padding:0;
+  background:#eaf3ff;
+  border:1px solid #cfe0f5;
+  border-radius:20px;
+  box-shadow:0 24px 70px rgba(15,23,42,.24);
+  overflow:hidden;
+}
+.nb-editor-dialog.summary-workspace .summary-editor-pane{
+  position:relative;
+}
+.nb-editor-dialog.summary-workspace .nb-editor-locked-overlay{
+  top:70px;
+  left:18px;
+  right:18px;
+}
 </style>
 
 <div class="nb-shell">
@@ -1216,126 +1248,62 @@ body.nb-modal-open{
 </div>
 
 <div id="editorModal" class="nb-editor-modal" aria-hidden="true">
-  <div class="nb-editor-dialog" role="dialog" aria-modal="true" aria-labelledby="modalLessonTitle">
-    <div class="nb-editor-top">
-      <div class="nb-editor-topline">
-        <div class="nb-editor-title-wrap">
-          <div class="nb-editor-kicker">Lesson Summary Editor</div>
-          <h2 class="nb-editor-title" id="modalLessonTitle">Summary Editor</h2>
-          <div class="nb-editor-subtitle" id="modalLessonSubtitle">Write, refine, and check your lesson summary.</div>
-        </div>
+  <div class="nb-editor-dialog summary-workspace" id="summaryWorkspace" role="dialog" aria-modal="true" aria-labelledby="modalLessonTitle">
+    <button type="button" class="nb-btn ghost nb-hidden" id="modalSaveBtn">Save Draft</button>
+    <button type="button" class="nb-btn primary nb-hidden" id="modalCheckBtn" style="display:none;" aria-hidden="true" tabindex="-1">Check my Summary</button>
+    <button type="button" class="nb-btn ghost nb-hidden" id="modalCloseBtn">Close</button>
 
-        <div class="nb-editor-top-actions">
-          <span id="modalStatusPill" class="nb-pill pending">Draft Not Yet Checked</span>
-          <button type="button" class="nb-btn ghost" id="modalCloseTopBtn">Close</button>
-        </div>
+    <div class="summary-workspace-header">
+      <div class="summary-workspace-title" id="modalLessonTitle">My Summary</div>
+      <div class="summary-workspace-status">
+        <span id="modalStatusPill" class="summary-status-pill">Draft</span>
       </div>
-
-      <div class="nb-editor-statusbar">
-        <div class="nb-editor-status-left">
-          <span class="nb-editor-status-text" id="modalSaveStatus">Ready</span>
-          <span class="nb-meta-chip" id="modalWordCount">0 words</span>
-          <span class="nb-meta-chip" id="modalLockState">Unlocked</span>
-        </div>
-
-        <div class="nb-editor-status-right">
-          <span class="nb-editor-status-text" id="modalHintText">Use clear structure and your own wording.</span>
-        </div>
+      <div class="summary-workspace-actions">
+        <button type="button" id="modalUnlockBtn" class="summary-unlock-btn" style="display:none;">Unlock</button>
+        <button type="button" id="modalCloseTopBtn" class="summary-close-x" aria-label="Close summary">&times;</button>
       </div>
     </div>
 
-    <div class="nb-editor-body">
-      <div class="nb-editor-main">
-        <div class="nb-editor-toolbar">
-		  <button type="button" class="nb-btn tool" data-modal-cmd="bold"><strong>B</strong></button>
-		  <button type="button" class="nb-btn tool" data-modal-cmd="italic"><em>I</em></button>
-		  <button type="button" class="nb-btn tool" data-modal-cmd="underline"><u>U</u></button>
-		  <button type="button" class="nb-btn tool" data-modal-cmd="insertUnorderedList">•</button>
-		  <button type="button" class="nb-btn tool" data-modal-cmd="indent">Indent</button>
-		  <button type="button" class="nb-btn tool" data-modal-cmd="outdent">Outdent</button>
+    <div class="nb-hidden" id="modalLessonSubtitle">Write, refine, and check your lesson summary.</div>
+    <span class="nb-hidden" id="modalSaveStatus">Ready</span>
+    <span class="nb-hidden" id="modalWordCount">0 words</span>
+    <span class="nb-hidden" id="modalLockState">Unlocked</span>
+    <span class="nb-hidden" id="modalHintText">Use clear structure and your own wording.</span>
+    <div class="nb-hidden" id="modalFeedbackBox"><span class="nb-side-empty">No review feedback yet.</span></div>
+    <div class="nb-hidden" id="modalNotesBox"><span class="nb-side-empty">No instructor notes.</span></div>
+    <div class="nb-hidden" id="modalVersionContext"><span class="nb-side-empty">No version context available.</span></div>
 
-		  <button type="button" class="nb-btn tool size-btn" data-size="sm">Small</button>
-		  <button type="button" class="nb-btn tool size-btn active" data-size="md">Medium</button>
-		  <button type="button" class="nb-btn tool size-btn" data-size="lg">Large</button>
+    <div class="summary-workspace-body">
+      <section class="summary-coach-pane" aria-label="Maya Summary Coach">
+        <div
+          class="maya-coach"
+          data-summary-coach
+          data-coach-layout="cockpit"
+          data-context="lesson_summaries"
+          data-lesson-id=""
+          data-cohort-id="<?= (int)$selectedCohortId ?>"
+          data-summary-id=""
+          id="mayaCoachRoot"
+        ></div>
+      </section>
 
-		  <button type="button" class="nb-btn tool" id="modalHighlightBtn">Highlight</button>
-		  <button type="button" class="nb-btn tool" id="modalClearFormatBtn">Clear</button>
-		</div>
-
-        <div class="nb-editor-canvas">
-          <div class="nb-editor-paper">
-            <div id="modalLockedOverlay" class="nb-editor-locked-overlay">
-              This summary is soft locked. Unlock it to make changes. If you edit it, you will need to check it again.
-            </div>
-            <div id="modalEditor" class="nb-editor size-md" contenteditable="true"></div>
-          </div>
+      <section class="summary-editor-pane" aria-label="Summary Editor">
+        <div class="summary-editor-toolbar">
+          <button type="button" class="summary-tool-btn" data-cmd="bold" data-modal-cmd="bold"><strong>B</strong></button>
+          <button type="button" class="summary-tool-btn" data-cmd="italic" data-modal-cmd="italic"><em>I</em></button>
+          <button type="button" class="summary-tool-btn" data-cmd="underline" data-modal-cmd="underline"><u>U</u></button>
+          <button type="button" class="summary-tool-btn" data-cmd="insertUnorderedList" data-modal-cmd="insertUnorderedList">•</button>
+          <button type="button" class="summary-tool-btn size-btn active" data-size="md">M</button>
+          <button type="button" class="summary-tool-btn size-btn" data-size="sm">S</button>
+          <button type="button" class="summary-tool-btn size-btn" data-size="lg">L</button>
+          <button type="button" class="summary-tool-btn" id="modalHighlightBtn">Highlight</button>
+          <button type="button" class="summary-tool-btn nb-hidden" id="modalClearFormatBtn">Clear</button>
         </div>
-      </div>
-
-      <aside class="nb-editor-side">
-        <div class="nb-editor-side-scroll">
-          <!-- v3: Maya Summary Coach mounts here. The host card replaces the
-               purely-passive "Quick Tips" experience with active coaching while
-               leaving Review Feedback / Instructor Notes / Version Context
-               unchanged below it. -->
-          <div class="nb-side-card" id="mayaCoachHostCard" style="padding:0; background:transparent; border:none;">
-            <div
-              class="maya-coach"
-              data-summary-coach
-              data-coach-host="modal-side"
-              data-coach-mode="compact"
-              data-coach-layout="chat"
-              data-context="lesson_summaries"
-              data-lesson-id=""
-              data-cohort-id="<?= (int)$selectedCohortId ?>"
-              data-summary-id=""
-              id="mayaCoachRoot"
-              style="height:520px; max-height:60vh;"
-            ></div>
-          </div>
-
-          <div class="nb-side-card">
-            <div class="nb-side-label">Review Feedback</div>
-            <div class="nb-side-body" id="modalFeedbackBox"><span class="nb-side-empty">No review feedback yet.</span></div>
-          </div>
-
-          <div class="nb-side-card">
-            <div class="nb-side-label">Instructor Notes</div>
-            <div class="nb-side-body" id="modalNotesBox"><span class="nb-side-empty">No instructor notes.</span></div>
-          </div>
-
-          <div class="nb-side-card">
-            <div class="nb-side-label">Version Context</div>
-            <div class="nb-side-body" id="modalVersionContext"><span class="nb-side-empty">No version context available.</span></div>
-          </div>
-
-          <div class="nb-side-card">
-            <div class="nb-side-label">Coaching Notes</div>
-            <div class="nb-side-body">
-              <div>Maya, your coach above, will guide structure, wording, correlation, and operational understanding.</div>
-              <div>Final review unlocks once Maya has enough evidence; canonical acceptance still flows through the production summary check.</div>
-            </div>
-          </div>
+        <div class="summary-rte nb-editor size-md" id="modalEditor" contenteditable="true"></div>
+        <div id="modalLockedOverlay" class="nb-editor-locked-overlay">
+          This summary is soft locked. Unlock it to make changes. If you edit it, you will need to check it again.
         </div>
-      </aside>
-    </div>
-
-    <div class="nb-editor-footer">
-      <div class="nb-editor-footer-left">
-        <button type="button" class="nb-btn ghost" id="modalSaveBtn">Save Draft</button>
-        <!-- v3: production "Check my Summary" button is hidden in favor of
-             the Maya Summary Coach panel in the sidebar. Canonical
-             acceptance still flows through LessonSummaryService::checkSummary()
-             via the Maya final_review API endpoint. The button remains in the
-             DOM so the existing modal scripts (modalCheckBtn handlers, lock
-             toggling, etc.) continue to work unchanged. -->
-        <button type="button" class="nb-btn primary nb-hidden" id="modalCheckBtn" aria-hidden="true" tabindex="-1">Check my Summary</button>
-      </div>
-
-      <div class="nb-editor-footer-right">
-        <button type="button" class="nb-btn warn" id="modalUnlockBtn">Unlock for Editing</button>
-        <button type="button" class="nb-btn ghost" id="modalCloseBtn">Close</button>
-      </div>
+      </section>
     </div>
   </div>
 </div>
@@ -1416,8 +1384,10 @@ function setLessonLockedState(lessonId, locked) {
 
     // Buttons
     modalUnlockBtn.classList.toggle('nb-hidden', !locked);
-    modalCheckBtn.classList.toggle('nb-hidden', !!locked);
-    modalSaveBtn.classList.toggle('nb-hidden', !!locked);
+    modalUnlockBtn.style.display = locked ? 'inline-flex' : 'none';
+    modalCheckBtn.classList.add('nb-hidden');
+    modalCheckBtn.style.display = 'none';
+    modalSaveBtn.classList.add('nb-hidden');
 
     // Status text
     modalLockState.textContent = locked ? 'Locked' : 'Unlocked';
@@ -1490,7 +1460,10 @@ function setStatusPillOnNode(node, label, klass, selector) {
 
 function setModalStatusPill(label, klass) {
   modalStatusPill.textContent = label;
-  modalStatusPill.className = 'nb-pill ' + klass;
+  modalStatusPill.className = 'summary-status-pill';
+  if (klass === 'ok') modalStatusPill.classList.add('is-accepted');
+  else if (klass === 'warn') modalStatusPill.classList.add('is-revision');
+  else if (klass === 'locked') modalStatusPill.classList.add('is-locked');
 }
 
 function computeStatusDisplay(reviewStatus, attentionReason) {
@@ -1659,6 +1632,21 @@ function updateModalWordCount() {
   modalWordCount.textContent = countWordsFromHtml(modalEditor.innerHTML) + ' words';
 }
 
+function syncMayaSummaryStateForLesson(lessonId) {
+  if (!window.__mayaCoach || typeof window.__mayaCoach.setSummaryState !== 'function') return;
+  const node = lessonNode(lessonId);
+  const reviewStatus = node ? String(node.getAttribute('data-review-status') || 'pending') : 'pending';
+  const locked = lessonIsLocked(lessonId);
+  const wc = countWordsFromHtml(modalEditor.innerHTML || '');
+  window.__mayaCoach.setSummaryState({
+    reviewStatus: reviewStatus,
+    locked: locked,
+    hasText: wc > 0,
+    wordCount: wc,
+    summaryId: 0
+  });
+}
+
 function updateSizeButtons() {
   modalSizeButtons.forEach(function(btn){
     btn.classList.toggle('active', btn.getAttribute('data-size') === modalCurrentSize);
@@ -1746,12 +1734,11 @@ function updateModalChromeForLesson(lessonId) {
   const node = lessonNode(lessonId);
   if (!node) return;
 
-  const lessonTitle = String(node.getAttribute('data-lesson-title') || 'Summary Editor');
   const reviewStatus = String(node.getAttribute('data-review-status') || 'pending');
   const locked = lessonIsLocked(lessonId);
   const statusMeta = computeStatusDisplay(reviewStatus, '');
 
-  modalLessonTitle.textContent = lessonTitle;
+  modalLessonTitle.textContent = 'My Summary';
   modalLessonSubtitle.textContent = 'Write, refine, and check your lesson summary.';
   setModalStatusPill(statusMeta.label, statusMeta.klass);
 
@@ -1765,8 +1752,11 @@ function updateModalChromeForLesson(lessonId) {
   modalLockedOverlay.classList.toggle('show', locked);
 
   modalUnlockBtn.classList.toggle('nb-hidden', !locked);
-  modalSaveBtn.classList.toggle('nb-hidden', locked);
-  modalCheckBtn.classList.toggle('nb-hidden', locked);
+  modalUnlockBtn.style.display = locked ? 'inline-flex' : 'none';
+  modalSaveBtn.classList.add('nb-hidden');
+  modalCheckBtn.classList.add('nb-hidden');
+  modalCheckBtn.style.display = 'none';
+  syncMayaSummaryStateForLesson(lessonId);
 }
 
 function updateLessonAndTocMetadata(lessonId, reviewStatus, html, reviewFeedback, studentSoftLocked) {
@@ -1965,6 +1955,10 @@ async function unlockAcceptedSummary(lessonId) {
   );
 
   setLessonLockedState(lessonId, false);
+  syncMayaSummaryStateForLesson(lessonId);
+  if (window.__mayaCoach && typeof window.__mayaCoach._appendSystemMessage === 'function') {
+    window.__mayaCoach._appendSystemMessage('Summary unlocked for editing.');
+  }
   originalHtml = modalEditor.innerHTML;
   modalSaveStatus.textContent = 'Unlocked';
 
@@ -2111,8 +2105,9 @@ if (String(result.review_status || '') === 'acceptable') {
 
     originalHtml = modalEditor.innerHTML;
 
-    modalSaveBtn.classList.remove('nb-hidden');
-    modalCheckBtn.classList.remove('nb-hidden');
+    modalSaveBtn.classList.add('nb-hidden');
+    modalCheckBtn.classList.add('nb-hidden');
+    modalCheckBtn.style.display = 'none';
     modalUnlockBtn.classList.add('nb-hidden');
     modalSaveStatus.textContent = 'Needs revision';
 
@@ -2467,11 +2462,17 @@ function bootMayaForCurrentLesson(lessonId) {
     cohortId: COHORT_ID,
     summaryId: 0,
     editorSelector: '#modalEditor',
-    mode: 'compact',
+    mode: 'expanded',
     host: 'modal-side',
-    layout: 'chat',
+    layout: 'cockpit',
     avatarUrl: '/assets/avatars/maya.png',
     rootSelector: '#mayaCoachRoot',
+    onInsertSave: function () {
+      try {
+        if (modalEditor) modalEditor.dispatchEvent(new Event('input', { bubbles: true }));
+        if (modalSaveBtn) modalSaveBtn.click();
+      } catch (e) {}
+    },
     onCanonicalAccept: function (canonicalCheck /*, mayaResponse */) {
       try {
         if (canonicalCheck && canonicalCheck.ok && canonicalCheck.review_status === 'acceptable') {
@@ -2518,6 +2519,7 @@ function bootMayaForCurrentLesson(lessonId) {
   window.IPCASummaryCoachConfig = config;
   window.__mayaCoach = window.IPCASummaryCoach.create(config);
   window.__mayaCurrentLessonId = lessonId;
+  syncMayaSummaryStateForLesson(lessonId);
 }
 
 function teardownMayaCoach() {

@@ -770,52 +770,45 @@ $isAdminViewer = ($role === 'admin');
 
   <button class="fab" id="btnSummary" title="My Study Summary">📝</button>
 
-  <div class="drawer expanded" id="drawer">
-    <div class="head">
-      <strong>My Summary</strong>
-      <span class="head-status-pill" id="sumStatus">Draft</span>
-      <div class="head-actions">
-		  <!-- v3 (rev 2): the production "Check my Summary" workflow is fully
-		       superseded by the Maya Summary Coach (Request Final Review).
-		       The button + the size toggle are kept in the DOM so the
-		       existing JS wiring (checkSummaryNow + helpers, drawer state
-		       persistence, etc.) continues to work without changes; CSS
-		       above force-hides them with !important so even legacy
-		       inline style.display='inline-block' calls cannot revive them. -->
-		  <button class="btnx" id="btnCheckSummary" aria-hidden="true" tabindex="-1">Check my Summary</button>
-		  <button class="btnx" id="btnUnlockSummary" style="display:none;">Unlock</button>
-		  <button class="btnx" id="btnToggleSummarySize" aria-hidden="true" tabindex="-1">Expand</button>
-		  <button type="button" class="drawer-close-x" id="btnCloseDrawer" aria-label="Close summary">&times;</button>
-	  </div>
+  <div class="drawer summary-workspace" id="drawer">
+    <button type="button" id="btnCheckSummary" style="display:none;" aria-hidden="true" tabindex="-1">Check my Summary</button>
+    <button type="button" id="btnToggleSummarySize" style="display:none;" aria-hidden="true" tabindex="-1">Expand</button>
+    <div class="summary-workspace-header">
+      <div class="summary-workspace-title">My Summary</div>
+      <div class="summary-workspace-status">
+        <span id="sumStatus" class="summary-status-pill">Draft</span>
+      </div>
+      <div class="summary-workspace-actions">
+        <button type="button" id="btnUnlockSummary" class="summary-unlock-btn" style="display:none;">Unlock</button>
+        <button type="button" id="btnCloseDrawer" class="summary-close-x" aria-label="Close summary">&times;</button>
+      </div>
     </div>
-    <div class="drawer-body" id="drawerBody">
-      <div class="drawer-coach-pane" id="drawerCoachPane">
+    <div class="summary-workspace-body" id="summaryWorkspaceBody">
+      <section class="summary-coach-pane" aria-label="Maya Summary Coach">
         <div
           class="maya-coach"
           data-summary-coach
-          data-coach-host="drawer"
-          data-coach-mode="expanded"
-          data-coach-layout="chat"
+          data-coach-layout="cockpit"
           data-context="player"
           data-lesson-id="<?= (int)$lessonId ?>"
           data-cohort-id="<?= (int)$cohortId ?>"
           data-summary-id=""
           id="mayaCoachRoot"
         ></div>
-      </div>
-      <div class="drawer-editor-pane">
-        <div class="tools">
-          <button class="btnx" type="button" data-cmd="bold">B</button>
-          <button class="btnx" type="button" data-cmd="italic">I</button>
-          <button class="btnx" type="button" data-cmd="underline">U</button>
-          <button class="btnx" type="button" data-cmd="insertUnorderedList">•</button>
-          <button class="btnx" type="button" data-size="sm">S</button>
-          <button class="btnx" type="button" data-size="md">M</button>
-          <button class="btnx" type="button" data-size="lg">L</button>
-          <button class="btnx" type="button" id="btnHighlight">Highlight</button>
+      </section>
+      <section class="summary-editor-pane" aria-label="Summary Editor">
+        <div class="summary-editor-toolbar">
+          <button type="button" class="summary-tool-btn" data-cmd="bold">B</button>
+          <button type="button" class="summary-tool-btn" data-cmd="italic">I</button>
+          <button type="button" class="summary-tool-btn" data-cmd="underline">U</button>
+          <button type="button" class="summary-tool-btn" data-cmd="insertUnorderedList">•</button>
+          <button type="button" class="summary-tool-btn" data-size="sm">S</button>
+          <button type="button" class="summary-tool-btn" data-size="md">M</button>
+          <button type="button" class="summary-tool-btn" data-size="lg">L</button>
+          <button type="button" class="summary-tool-btn" id="btnHighlight">Highlight</button>
         </div>
-        <div id="rte" class="rte" contenteditable="true"></div>
-      </div>
+        <div id="rte" class="summary-rte rte" contenteditable="true"></div>
+      </section>
     </div>
   </div>
 
@@ -1408,6 +1401,7 @@ if (j.ok) {
   isLocked = Number(j.student_soft_locked || 0) === 1;
 
   updateDrawerLockState();
+  syncMayaSummaryState(j);
   renderSummaryAlert(j);
 }
   }catch(e){}
@@ -1419,13 +1413,10 @@ function updateDrawerLockState() {
   rte.style.cursor = isLocked ? 'not-allowed' : 'text';
 
   btnUnlockSummary.style.display = isLocked ? 'inline-block' : 'none';
-  btnCheckSummary.style.display = isLocked ? 'none' : 'inline-block';
+  btnCheckSummary.style.display = 'none';
 
-  document.querySelectorAll('.drawer .tools .btnx').forEach(function(btn){
-    const isUnlockButton = btn.id === 'btnUnlockSummary';
-    const isCloseButton = btn.id === 'btnCloseDrawer';
-
-    if (isLocked && !isUnlockButton && !isCloseButton) {
+  document.querySelectorAll('.summary-editor-toolbar .summary-tool-btn').forEach(function(btn){
+    if (isLocked) {
       btn.classList.add('locked-disabled');
     } else {
       btn.classList.remove('locked-disabled');
@@ -1448,8 +1439,8 @@ function updateDrawerLockState() {
 function setStatusPill(text, modifier){
   if (!sumStatus) return;
   sumStatus.textContent = String(text || '');
-  sumStatus.classList.remove('muted', 'is-locked', 'is-accepted', 'is-revision', 'is-saving');
-  sumStatus.classList.add('head-status-pill');
+  sumStatus.classList.remove('muted', 'head-status-pill', 'is-locked', 'is-accepted', 'is-revision', 'is-saving');
+  sumStatus.classList.add('summary-status-pill');
   if (modifier) sumStatus.classList.add(modifier);
 }	
 
@@ -1461,9 +1452,29 @@ async function refreshSummaryStatusOnly(){
 	  currentReviewStatus = j.review_status || 'pending';
 	  isLocked = Number(j.student_soft_locked || 0) === 1;
 	  updateDrawerLockState();
+	  syncMayaSummaryState(j);
 	  renderSummaryAlert(j);
 	}
   }catch(e){}
+}
+
+function summaryWordCountFromHtml(html){
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html || '';
+  const text = (tmp.textContent || '').trim();
+  return text ? text.split(/\s+/).length : 0;
+}
+
+function syncMayaSummaryState(row){
+  if (!window.__mayaCoach || typeof window.__mayaCoach.setSummaryState !== 'function') return;
+  const wc = summaryWordCountFromHtml((row && row.summary_html) || rte.innerHTML || '');
+  window.__mayaCoach.setSummaryState({
+    reviewStatus: currentReviewStatus,
+    locked: isLocked,
+    hasText: wc > 0,
+    wordCount: wc,
+    summaryId: row && row.summary_id ? Number(row.summary_id) : 0
+  });
 }
 
 	
@@ -1574,7 +1585,7 @@ rte.addEventListener('input', ()=>{
   scheduleSave();
 });
 
-document.querySelectorAll('.drawer .tools button[data-cmd]').forEach(btn=>{
+document.querySelectorAll('.summary-editor-toolbar button[data-cmd]').forEach(btn=>{
 btn.addEventListener('click', ()=>{
   if (isLocked) {
   showBanner('Summary is locked. Unlock to edit.', 'warn');
@@ -1752,22 +1763,9 @@ document.getElementById('btnCloseDrawer').onclick = ()=>{
 };
 	
 	
-btnCheckSummary.onclick = ()=> checkSummaryNow();
+btnCheckSummary.onclick = null;
 
-btnToggleSummarySize.onclick = ()=>{
-  const willExpand = !drawer.classList.contains('expanded');
-  drawer.classList.toggle('expanded', willExpand);
-  saveSummaryDrawerExpandedState(willExpand);
-  btnToggleSummarySize.textContent = willExpand ? 'Compact' : 'Expand';
-
-  saveSummaryUiState();
-
-  if (drawer.style.display === 'flex' && !isLocked) {
-    setTimeout(function(){
-      rte.focus();
-    }, 80);
-  }
-};	
+btnToggleSummarySize.onclick = null;
 	
 btnUnlockSummary.onclick = async ()=>{
   const ok = confirm('Unlock summary for editing? You will need to check again.');
@@ -1796,6 +1794,10 @@ if (j.ok) {
     review_notes_by_instructor: ''
   }, { suppressPending: true });
   setStatusPill('Unlocked', '');
+  syncMayaSummaryState(j);
+  if (window.__mayaCoach && typeof window.__mayaCoach._appendSystemMessage === 'function') {
+    window.__mayaCoach._appendSystemMessage('Summary unlocked for editing.');
+  }
 }
 };	
 	
@@ -1962,8 +1964,11 @@ if (e.key === 'ArrowRight') {
     editorSelector: '#rte',
     mode: 'expanded',
     host: 'drawer',
-    layout: 'chat',
+    layout: 'cockpit',
     avatarUrl: '/assets/avatars/maya.png',
+    onInsertSave: function () {
+      try { scheduleSave(); } catch (e) {}
+    },
     onCanonicalAccept: function (canonicalCheck /*, mayaResponse */) {
       // Maya approved AND the canonical evaluator accepted the summary.
       // Use existing production helpers to refresh the banner + lock state.
@@ -1993,6 +1998,7 @@ if (e.key === 'ArrowRight') {
     syncMayaModeWithDrawer();
     var coach = window.IPCASummaryCoach.create(window.IPCASummaryCoachConfig);
     window.__mayaCoach = coach;
+    syncMayaSummaryState({ summary_html: rte ? rte.innerHTML : '' });
 
     // Re-attach editor when the drawer is opened (it may have been mounted
     // hidden initially — the editor element is the same, but make sure the

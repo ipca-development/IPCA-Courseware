@@ -198,6 +198,125 @@
 
     root.innerHTML = '';
 
+    if (layout === 'cockpit') {
+      var cockpit = el('div', { cls: 'maya-cockpit' });
+
+      var cockpitHeader = el('div', { cls: 'maya-cockpit-header' });
+      var cAvWrap = el('div', { cls: 'maya-avatar-wrap' });
+      var cAv = el('img', { cls: 'maya-avatar', attrs: { src: avatarUrl, alt: 'Maya AI Instructor' } });
+      cAv.addEventListener('error', function () {
+        var fallback = el('div', { cls: 'maya-avatar-fallback', text: 'M' });
+        cAvWrap.replaceChild(fallback, cAv);
+      });
+      cAvWrap.appendChild(cAv);
+      cAvWrap.appendChild(el('span', { cls: 'maya-status-dot' }));
+      var titleBlock = el('div', { cls: 'maya-cockpit-titleblock' });
+      titleBlock.appendChild(el('div', { cls: 'maya-title', text: 'Maya Summary Coach' }));
+      titleBlock.appendChild(el('div', { cls: 'maya-subtitle', text: 'Watching your summary grow' }));
+      cockpitHeader.appendChild(cAvWrap);
+      cockpitHeader.appendChild(titleBlock);
+      cockpit.appendChild(cockpitHeader);
+
+      cockpit.appendChild(el('div', {
+        cls: 'maya-mission-pill',
+        attrs: { 'data-maya-stage': '' },
+        text: 'Current mission: Build the structure'
+      }));
+
+      var chatShell = el('div', { cls: 'maya-chat-shell', attrs: { 'data-maya-chat-area': '' } });
+      chatShell.appendChild(el('button', {
+        cls: 'maya-progress-tab',
+        attrs: { type: 'button', 'data-maya-stats-toggle': '', 'aria-label': 'Show understanding progress' },
+        text: '›'
+      }));
+
+      var drawer = el('aside', { cls: 'maya-progress-drawer', attrs: { 'data-maya-stats-overlay': '' } });
+      var drawerHead = el('div', { cls: 'maya-progress-drawer-head' });
+      drawerHead.appendChild(el('strong', { text: 'Understanding Progress' }));
+      drawerHead.appendChild(el('button', {
+        attrs: { type: 'button', 'data-maya-stats-close': '', 'aria-label': 'Close progress panel' },
+        text: '×'
+      }));
+      drawer.appendChild(drawerHead);
+
+      var scoreCards = el('div', { cls: 'maya-score-cards' });
+      Object.keys(SCORE_LABELS).forEach(function (key) {
+        var card = el('div', { cls: 'maya-score-card', attrs: { 'data-maya-stat': key } });
+        card.appendChild(el('div', { cls: 'maya-score-label', text: SCORE_LABELS[key] }));
+        var cardBar = el('div', { cls: 'maya-score-bar' });
+        cardBar.appendChild(el('div', { cls: 'maya-score-fill' }));
+        card.appendChild(cardBar);
+        card.appendChild(el('div', { cls: 'maya-score-value', text: '0' }));
+        scoreCards.appendChild(card);
+      });
+      drawer.appendChild(scoreCards);
+
+      var still = el('div', { cls: 'maya-still-needed', attrs: { 'data-maya-readiness': '' } });
+      still.appendChild(el('div', { cls: 'maya-still-needed-title', text: 'Still needed' }));
+      still.appendChild(el('ul', { attrs: { 'data-maya-readiness-list': '' } }));
+      drawer.appendChild(still);
+      chatShell.appendChild(drawer);
+
+      var cThread = el('div', {
+        cls: 'maya-chat-thread',
+        attrs: { 'data-maya-chat-thread': '', 'aria-label': 'Conversation with Maya' }
+      });
+      var cSentinel = el('div', { cls: 'maya-chat-sentinel', attrs: { 'data-maya-chat-sentinel': '', 'aria-hidden': 'true' } });
+      cSentinel.hidden = true;
+      cThread.appendChild(cSentinel);
+      var cEarlier = el('div', { cls: 'maya-chat-load-earlier', attrs: { 'data-maya-chat-load-earlier': '' } });
+      cEarlier.hidden = true;
+      cEarlier.appendChild(el('button', {
+        cls: 'maya-chat-load-earlier-btn',
+        attrs: { type: 'button', 'data-maya-chat-load-earlier-btn': '' },
+        text: 'Load earlier messages'
+      }));
+      cThread.appendChild(cEarlier);
+      cThread.appendChild(el('div', {
+        cls: 'maya-chat-thread-empty',
+        attrs: { 'data-maya-chat-empty': '' },
+        text: 'Maya will start coaching you here.'
+      }));
+      var cTypingRow = el('div', { cls: 'maya-chat-row is-maya', attrs: { 'data-maya-typing-row': '' } });
+      cTypingRow.style.display = 'none';
+      var cTyping = el('div', { cls: 'maya-chat-typing', attrs: { 'data-maya-typing': '' } });
+      cTyping.appendChild(el('span', { text: 'Maya is thinking' }));
+      var cDots = el('span', { cls: 'maya-chat-typing-dots' });
+      cDots.appendChild(el('span'));
+      cDots.appendChild(el('span'));
+      cDots.appendChild(el('span'));
+      cTyping.appendChild(cDots);
+      cTypingRow.appendChild(cTyping);
+      cThread.appendChild(cTypingRow);
+      chatShell.appendChild(cThread);
+      cockpit.appendChild(chatShell);
+
+      var composeArea = el('div', { cls: 'maya-compose-area' });
+      composeArea.appendChild(el('textarea', {
+        cls: 'maya-reply',
+        attrs: { 'data-maya-reply': '', placeholder: 'Answer Maya here...', rows: '3' }
+      }));
+      var actionRow = el('div', { cls: 'maya-action-row maya-actions' });
+      actionRow.appendChild(el('button', {
+        cls: 'maya-btn primary',
+        attrs: { type: 'button', 'data-maya-continue': '' },
+        text: 'Send to Maya'
+      }));
+      actionRow.appendChild(el('button', {
+        cls: 'maya-btn ghost',
+        attrs: { type: 'button', 'data-maya-final': '', disabled: 'disabled', 'aria-disabled': 'true' },
+        text: 'Request Final Review'
+      }));
+      composeArea.appendChild(actionRow);
+      composeArea.appendChild(el('div', { cls: 'maya-local-hint', attrs: { 'data-maya-local-hint': '' } }));
+      composeArea.appendChild(el('div', { cls: 'maya-error', attrs: { 'data-maya-error': '' } }));
+      cockpit.appendChild(composeArea);
+
+      root.appendChild(cockpit);
+      root.setAttribute('data-coach-built', '1');
+      return;
+    }
+
     // Header
     var header = el('div', { cls: 'maya-coach-header' });
     var avWrap = el('div', { cls: 'maya-avatar-wrap' });
@@ -434,6 +553,13 @@
     this.scores = config.initialScores || { coverage: 0, accuracy: 0, own_wording: 0, correlation: 0, instructor_confidence: 0 };
     this.flags = { major_paste: false, needs_deeper_question: false };
     this.readiness = { ready_for_final_review: false, missing: [], minimum_interactions_met: false, unresolved_required_question: true };
+    this.summaryState = {
+      reviewStatus: config.reviewStatus || '',
+      locked: !!config.locked,
+      hasText: !!config.hasText,
+      wordCount: config.wordCount || 0,
+      summaryId: config.summaryId || 0
+    };
     this.interactionCount = 0;
     this.busy = false;
     this.lastCheckpointAt = 0;
@@ -599,7 +725,64 @@
   Coach.prototype.setSummaryId = function (summaryId) {
     if (typeof summaryId === 'number' && summaryId > 0) {
       this.config.summaryId = summaryId;
+      this.summaryState.summaryId = summaryId;
     }
+  };
+
+  Coach.prototype._usesThreadLayout = function () {
+    return this.layout === 'chat' || this.layout === 'cockpit';
+  };
+
+  Coach.prototype.setSummaryState = function (state) {
+    state = state || {};
+    this.summaryState.reviewStatus = String(state.reviewStatus || state.review_status || this.summaryState.reviewStatus || '');
+    this.summaryState.locked = !!(state.locked || state.student_soft_locked);
+    this.summaryState.hasText = !!state.hasText;
+    this.summaryState.wordCount = typeof state.wordCount === 'number' ? state.wordCount : (parseInt(state.word_count, 10) || 0);
+    if (state.summaryId || state.summary_id) {
+      this.summaryState.summaryId = parseInt(state.summaryId || state.summary_id, 10) || this.summaryState.summaryId;
+      this.config.summaryId = this.summaryState.summaryId;
+    }
+    this._renderSummaryLockState();
+  };
+
+  Coach.prototype._renderSummaryLockState = function () {
+    var accepted = this.summaryState.reviewStatus === 'acceptable';
+    if (accepted && this.summaryState.locked) {
+      this._setChatDisabled('Unlock your accepted summary before adding new notes.');
+    } else {
+      this._setChatDisabled('');
+    }
+  };
+
+  Coach.prototype._setChatDisabled = function (reason) {
+    var disabled = !!reason;
+    if (this.elReply) {
+      this.elReply.disabled = disabled;
+      this.elReply.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+      this.elReply.placeholder = disabled ? reason : 'Answer Maya here...';
+    }
+    if (this.btnContinue) {
+      if (disabled) {
+        this.btnContinue.setAttribute('disabled', 'disabled');
+        this.btnContinue.setAttribute('aria-disabled', 'true');
+        this.btnContinue.setAttribute('title', reason);
+      } else if (!this.busy) {
+        this.btnContinue.removeAttribute('disabled');
+        this.btnContinue.removeAttribute('aria-disabled');
+        this.btnContinue.removeAttribute('title');
+      }
+    }
+    this.root.setAttribute('data-chat-disabled', disabled ? '1' : '0');
+  };
+
+  Coach.prototype._appendSystemMessage = function (text) {
+    this._appendBubble({
+      role: 'system',
+      message_type: 'system',
+      message_body: text,
+      message: text
+    });
   };
 
   Coach.prototype._onEditorInput = function () {
@@ -667,6 +850,7 @@
     }
     this.flags.major_paste = true;
     this._showLocalHint('That looks like pasted text. No problem — explain the main idea in your own words before we use it.');
+    this._appendSystemMessage('Large pasted text detected.');
     this._renderState();
     this._sendCheckpoint({ trigger: 'paste' });
   };
@@ -766,8 +950,7 @@
         this.btnContinue.setAttribute('disabled', 'disabled');
         this.btnContinue.setAttribute('aria-disabled', 'true');
       } else {
-        this.btnContinue.removeAttribute('disabled');
-        this.btnContinue.removeAttribute('aria-disabled');
+        this._renderSummaryLockState();
       }
     }
     if (this.btnFinal) {
@@ -876,6 +1059,10 @@
 
   Coach.prototype._handleContinue = function () {
     if (this.busy) return;
+    if (this.summaryState.reviewStatus === 'acceptable' && this.summaryState.locked) {
+      this._showLocalHint('Unlock your accepted summary before coaching improvements.');
+      return;
+    }
     var reply = this.elReply ? String(this.elReply.value || '').trim() : '';
     var trigger = reply !== '' ? 'student_reply' : 'micro_checkpoint';
     this._sendCheckpoint({ trigger: trigger, studentReply: reply });
@@ -914,7 +1101,7 @@
 
       // Note: in chat layout we clear the reply inside _absorbResponse so
       // the bubble copy reflects exactly what was sent.
-      if (self.layout !== 'chat' && extra.student_reply && self.elReply) {
+      if (!self._usesThreadLayout() && extra.student_reply && self.elReply) {
         self.elReply.value = '';
       }
 
@@ -974,6 +1161,16 @@
 
   Coach.prototype._absorbResponse = function (j, opts) {
     opts = opts || {};
+    if (j.session_id) this.sessionId = parseInt(j.session_id, 10) || this.sessionId;
+    if (j.summary_state && typeof j.summary_state === 'object') {
+      this.setSummaryState({
+        reviewStatus: j.summary_state.review_status,
+        locked: !!j.summary_state.student_soft_locked,
+        hasText: (j.summary_state.word_count || 0) > 0,
+        wordCount: parseInt(j.summary_state.word_count, 10) || 0,
+        summaryId: j.summary_state.summary_id || this.config.summaryId || 0
+      });
+    }
     if (j.stage) this.stage = String(j.stage);
     if (j.scores && typeof j.scores === 'object') {
       this.scores = {
@@ -1006,25 +1203,34 @@
     }
 
     // ---- Chat layout: render history (start) or append new turns ----
-    if (this.layout === 'chat' && this.elChatThread) {
+    if (this._usesThreadLayout() && this.elChatThread) {
       if (opts.isStart) {
         // Reset thread and load the latest page from history.
-        this._resetThread(j.history || [], !!j.history_has_more, j.history_oldest_index || 0);
+        this._resetThread(j.messages || j.history || [], !!(j.has_more || j.history_has_more), j.oldest_lazy_index || j.history_oldest_index || 0);
       } else {
         // Append student reply (if any) and Maya turn.
         if (typeof opts.studentReply === 'string' && opts.studentReply.trim() !== '') {
           this._appendBubble({
             role: 'student',
-            message: opts.studentReply.trim(),
-            kind: opts.isFinalReview ? 'system' : 'turn'
+            message_body: opts.studentReply.trim(),
+            message_type: opts.isFinalReview ? 'system' : 'chat'
           });
         }
-        if (typeof j.maya_message === 'string' && j.maya_message.trim() !== '') {
-          this._appendBubble({
+        var msg = j.message || null;
+        if (!msg && typeof j.maya_message === 'string' && j.maya_message.trim() !== '') {
+          var body = j.maya_message;
+          if (j.next_question && body.indexOf(j.next_question) === -1) {
+            body += '\n\n' + j.next_question;
+          }
+          msg = {
             role: 'maya',
-            message: j.maya_message,
-            kind: opts.isFinalReview ? (j.approved ? 'final_approved' : 'final_revision') : 'turn'
-          });
+            message_body: body,
+            message_type: opts.isFinalReview ? (j.approved ? 'final_approved' : 'final_revision') : 'chat',
+            summary_insertions: j.summary_insertions || []
+          };
+        }
+        if (msg) {
+          this._appendBubble(msg);
         }
         if (this.elReply) this.elReply.value = '';
       }
@@ -1093,32 +1299,37 @@
   Coach.prototype._appendBubble = function (m) {
     if (!this.elChatThread) return;
     if (this.elChatEmpty) this.elChatEmpty.style.display = 'none';
-    var row = this._buildBubbleRow(m);
+    var row = this._renderMessage(m);
     if (!row) return;
     if (this.elTypingRow) this.elChatThread.insertBefore(row, this.elTypingRow);
     else this.elChatThread.appendChild(row);
     this._scrollChatToBottom();
   };
 
-  Coach.prototype._buildBubbleRow = function (m) {
+  Coach.prototype._renderMessage = function (m) {
     if (!m) return null;
     var role = String(m.role || '').toLowerCase();
-    if (role !== 'student' && role !== 'maya') return null;
-    var text = String(m.message || '').trim();
+    if (role === 'user') role = 'student';
+    if (role !== 'student' && role !== 'maya' && role !== 'system') return null;
+    var text = String(m.message_body || m.message || '').trim();
     if (text === '') return null;
 
     var row = document.createElement('div');
-    row.className = 'maya-chat-row ' + (role === 'student' ? 'is-student' : 'is-maya');
+    row.className = 'maya-chat-row ' + (role === 'student' ? 'is-student' : (role === 'system' ? 'is-system' : 'is-maya'));
     row.setAttribute('data-maya-chat-bubble-row', '');
+    if (m.id) row.setAttribute('data-message-id', String(m.id));
+    if (m.lazy_index) row.setAttribute('data-lazy-index', String(m.lazy_index));
 
     var bubble = document.createElement('div');
     bubble.className = 'maya-chat-bubble';
-    if (m.kind) bubble.setAttribute('data-kind', String(m.kind));
+    if (m.message_type || m.kind) bubble.setAttribute('data-kind', String(m.message_type || m.kind));
 
-    var meta = document.createElement('div');
-    meta.className = 'maya-chat-meta';
-    meta.textContent = role === 'student' ? 'You' : 'Maya';
-    bubble.appendChild(meta);
+    if (role !== 'system') {
+      var meta = document.createElement('div');
+      meta.className = 'maya-chat-meta';
+      meta.textContent = role === 'student' ? 'You' : 'Maya';
+      bubble.appendChild(meta);
+    }
 
     var body = document.createElement('div');
     body.className = 'maya-chat-body';
@@ -1126,7 +1337,81 @@
     bubble.appendChild(body);
 
     row.appendChild(bubble);
+    if (role === 'maya' && Array.isArray(m.summary_insertions) && m.summary_insertions.length) {
+      this._renderInsertionActions(row, m.summary_insertions, m.id || m.lazy_index || 0);
+    }
     return row;
+  };
+
+  Coach.prototype._buildBubbleRow = function (m) {
+    return this._renderMessage(m);
+  };
+
+  Coach.prototype._renderInsertionActions = function (row, insertions, messageId) {
+    var self = this;
+    var wrap = document.createElement('div');
+    wrap.className = 'maya-insertion-actions';
+    insertions.forEach(function (ins) {
+      if (!ins || !ins.id || !ins.label) return;
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'maya-insertion-btn';
+      btn.textContent = ins.inserted ? 'Added' : String(ins.label);
+      btn.disabled = !!ins.inserted;
+      btn.setAttribute('data-insertion-id', String(ins.id));
+      btn.addEventListener('click', function () {
+        self._insertIntoSummary(ins, btn, messageId);
+      });
+      wrap.appendChild(btn);
+    });
+    if (wrap.childNodes.length) row.appendChild(wrap);
+  };
+
+  Coach.prototype._insertIntoSummary = function (insertion, btn, messageId) {
+    if (this.summaryState.reviewStatus === 'acceptable' && this.summaryState.locked) {
+      this._showLocalHint('Unlock your accepted summary before adding new notes.');
+      return;
+    }
+    if (!this.editor || !insertion || !insertion.html) return;
+    var html = String(insertion.html);
+    var inserted = false;
+    try {
+      var sel = window.getSelection ? window.getSelection() : null;
+      if (sel && sel.rangeCount && this.editor.contains(sel.anchorNode)) {
+        var range = sel.getRangeAt(0);
+        range.deleteContents();
+        var frag = range.createContextualFragment(html);
+        range.insertNode(frag);
+        inserted = true;
+      }
+    } catch (e) {
+      inserted = false;
+    }
+    if (!inserted) {
+      this.editor.insertAdjacentHTML('beforeend', html);
+    }
+    this.editor.dispatchEvent(new Event('input', { bubbles: true }));
+    if (typeof this.config.onInsertSave === 'function') {
+      try { this.config.onInsertSave(); } catch (e2) {}
+    } else if (typeof global.scheduleSave === 'function') {
+      try { global.scheduleSave(); } catch (e3) {}
+    }
+    var self = this;
+    this._postJson({
+      action: 'mark_inserted',
+      session_id: this.sessionId || 0,
+      message_id: messageId || 0,
+      insertion_id: insertion.id
+    }).then(function (j) {
+      if (!j || j.ok === false) throw new Error(j && j.error ? j.error : 'mark_inserted failed');
+      if (btn) {
+        btn.textContent = 'Added';
+        btn.disabled = true;
+        btn.classList.add('is-added');
+      }
+    }).catch(function () {
+      self._showError('Added to the summary, but Maya could not mark the note as inserted.');
+    });
   };
 
   Coach.prototype._scrollChatToBottom = function () {
@@ -1165,14 +1450,16 @@
 
     this._postJson({
       action: 'load_history',
+      session_id: this.sessionId || 0,
       lesson_id: this.config.lessonId,
       cohort_id: this.config.cohortId || 0,
       summary_id: this.config.summaryId || 0,
       context: this.config.context || 'player',
-      before_index: this.historyOldestIndex
+      before_lazy_index: this.historyOldestIndex,
+      limit: 25
     }).then(function (j) {
       if (!j || j.ok === false) return;
-      self._prependHistoryPage(j.history || [], !!j.history_has_more, j.history_oldest_index || 0);
+      self._prependHistoryPage(j.messages || j.history || [], !!(j.has_more || j.history_has_more), j.oldest_lazy_index || j.history_oldest_index || 0);
     }).catch(function (e) {
       try { console.warn('[Maya] load_history failed:', e && e.message); } catch (ignored) {}
     }).then(function () {
@@ -1194,6 +1481,8 @@
 
     var self = this;
     (msgs || []).forEach(function (m) {
+      var lazy = m && (m.lazy_index || m.id);
+      if (lazy && self.elChatThread.querySelector('[data-lazy-index="' + String(lazy) + '"]')) return;
       var row = self._buildBubbleRow(m);
       if (!row) return;
       if (anchor) self.elChatThread.insertBefore(row, anchor);
@@ -1281,8 +1570,8 @@
         var stat = self.statRows[key];
         if (!stat) return;
         var score = clampInt(self.scores[key], 0, 100);
-        var fill = stat.querySelector('.maya-stat-fill');
-        var val = stat.querySelector('.maya-stat-value');
+        var fill = stat.querySelector('.maya-stat-fill, .maya-score-fill');
+        var val = stat.querySelector('.maya-stat-value, .maya-score-value');
         if (fill) fill.style.width = score + '%';
         if (val) val.textContent = String(score);
         var pass = score >= (SCORE_PASS_THRESHOLDS[key] || 100);
@@ -1303,7 +1592,7 @@
     // Readiness panel
     if (this.elReadiness) {
       this.elReadiness.setAttribute('data-ready', this.readiness.ready_for_final_review ? '1' : '0');
-      var titleEl = this.elReadiness.querySelector('.maya-readiness-title');
+      var titleEl = this.elReadiness.querySelector('.maya-readiness-title, .maya-still-needed-title');
       if (titleEl) {
         titleEl.textContent = this.readiness.ready_for_final_review
           ? 'Ready for Final Review'
@@ -1341,6 +1630,9 @@
   Coach.prototype._renderFinalButton = function () {
     if (!this.btnFinal) return;
     var ready = !!(this.readiness && this.readiness.ready_for_final_review);
+    if (this.summaryState.reviewStatus === 'acceptable' && this.summaryState.locked) {
+      ready = false;
+    }
     if (ready && !this.busy) {
       this.btnFinal.removeAttribute('disabled');
       this.btnFinal.removeAttribute('aria-disabled');
@@ -1355,6 +1647,9 @@
       var why = (this.readiness && this.readiness.missing && this.readiness.missing.length)
         ? this.readiness.missing.slice(0, 3).join(' • ')
         : 'Final review locked. Maya still needs more evidence of understanding.';
+      if (this.summaryState.reviewStatus === 'acceptable' && this.summaryState.locked) {
+        why = 'Unlock your accepted summary before requesting another review.';
+      }
       this.btnFinal.setAttribute('title', why);
     }
   };
@@ -1369,7 +1664,8 @@
     ensureCoachStructure(rootEl, {
       avatarUrl: config.avatarUrl,
       mode: config.mode,
-      host: config.host
+      host: config.host,
+      layout: config.layout || rootEl.getAttribute('data-coach-layout') || 'classic'
     });
     return new Coach(rootEl, config);
   }
