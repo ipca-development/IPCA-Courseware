@@ -806,7 +806,7 @@ if ($detailId > 0) {
     ?>
 
     <section class="cmp-card">
-      <form method="get" class="compliance-filterbar">
+      <form method="get" class="compliance-filterbar compliance-filterbar--findings">
         <label class="cmp-field compliance-filterbar__search">
           <span>Search</span>
           <input type="search" name="q" value="<?= h($filterQ) ?>" placeholder="NCR code, title, description or reference">
@@ -846,15 +846,15 @@ if ($detailId > 0) {
             <?php endforeach; ?>
           </select>
         </label>
-        <label class="cmp-field">
+        <label class="cmp-field compliance-filterbar__row2">
           <span>From</span>
           <input type="date" name="from" value="<?= h($filterFrom) ?>">
         </label>
-        <label class="cmp-field">
+        <label class="cmp-field compliance-filterbar__row2">
           <span>To</span>
           <input type="date" name="to" value="<?= h($filterTo) ?>">
         </label>
-        <label class="cmp-field">
+        <label class="cmp-field compliance-filterbar__row2">
           <span>Sort</span>
           <select name="sort">
             <option value="updated_desc" <?= $sort === 'updated_desc' ? 'selected' : '' ?>>Recently updated</option>
@@ -863,7 +863,7 @@ if ($detailId > 0) {
             <option value="severity_desc" <?= $sort === 'severity_desc' ? 'selected' : '' ?>>Severity</option>
           </select>
         </label>
-        <div class="cmp-toolbar-actions" style="margin:0;">
+        <div class="cmp-toolbar-actions compliance-filterbar__actions compliance-filterbar__row2">
           <button type="submit">Apply filters</button>
           <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/findings.php">Clear</a>
         </div>

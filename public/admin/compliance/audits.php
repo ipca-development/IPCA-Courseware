@@ -430,20 +430,20 @@ if ($detailId > 0) {
             <option value="title_asc" <?= $sort === 'title_asc' ? 'selected' : '' ?>>Title A-Z</option>
           </select>
         </label>
-        <div class="cmp-toolbar-actions" style="margin:0;">
+        <div class="cmp-toolbar-actions compliance-filterbar__actions">
           <button type="submit">Apply filters</button>
           <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/audits.php">Clear</a>
         </div>
       </form>
     </section>
 
-      <section class="cmp-card compliance-card--full" style="padding:0;overflow:hidden;">
-        <div style="padding:18px 24px;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;align-items:center;">
-          <h2 class="cmp-card-title" style="margin:0;">Recent audits</h2>
-          <span class="cmp-pill" style="background:#f3f6fb;color:#71809a;"><?= count($rows) ?> result<?= count($rows) === 1 ? '' : 's' ?></span>
+      <section class="cmp-card compliance-card--full" style="overflow:hidden;">
+        <div class="cmp-list-head" style="margin-bottom:14px;">
+          <div class="cmp-list-title"><?= compliance_ui_icon('shield') ?><span>Recent audits</span></div>
+          <div class="cmp-count-pill"><?= count($rows) ?> result<?= count($rows) === 1 ? '' : 's' ?></div>
         </div>
         <div class="compliance-table-wrap">
-        <table class="cmp-table compliance-table">
+        <table class="compliance-table">
           <thead><tr>
             <th>Code</th>
             <th>Title</th>

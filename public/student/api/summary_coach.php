@@ -560,6 +560,19 @@ function maya_transition_question_for_closed_concept(string $conceptKey, string 
     return 'Good, that closes the loop on that concept. Pick a different lesson area from your summary and explain the pilot action, preflight check, or decision it supports.';
 }
 
+function maya_concept_allows_summary_insertions(array $conceptProgress, string $conceptKey, string $studentReply, array $oldScores, array $newScores): bool
+{
+    $row = is_array($conceptProgress[$conceptKey] ?? null) ? $conceptProgress[$conceptKey] : [];
+    $followups = (int)($row['followup_count'] ?? 0);
+    $operational = !empty($row['operational_understanding']) || maya_reply_demonstrates_operational_understanding($studentReply);
+    $closed = !empty($row['closed']);
+    $oldCorrelation = (int)($oldScores['correlation'] ?? 0);
+    $newCorrelation = (int)($newScores['correlation'] ?? 0);
+    $correlationImproved = $newCorrelation > $oldCorrelation || $newCorrelation >= MAYA_THRESH_CORRELATION;
+
+    return $closed || ($followups >= 2 && $operational) || ($operational && $correlationImproved);
+}
+
 function maya_decode_json_column($raw): array
 {
     if (!is_string($raw) || trim($raw) === '') return [];
@@ -1135,7 +1148,16 @@ function maya_system_prompt(): string
         . "35. Avoid asking multiple variations of the same operational question.\n"
         . "36. Avoid asking two nearly identical questions in one response.\n"
         . "37. Ask ONE clear question at a time.\n"
-        . "38. When the student demonstrates understanding, transition naturally to another lesson area rather than re-probing the same one.";
+        . "38. When the student demonstrates understanding, transition naturally to another lesson area rather than re-probing the same one.\n"
+        . "39. Do not generate summary_insertions after every student answer.\n"
+        . "40. summary_insertions should only appear after a concept has been sufficiently explored and operational understanding has been demonstrated.\n"
+        . "41. A summary insertion should represent a mature, completed operational idea — not a partial thought.\n"
+        . "42. First probe, clarify, deepen, and operationalize before offering insertion into the formal summary.\n"
+        . "43. Avoid turning the conversation into answer harvesting.\n"
+        . "44. The student should feel they are developing understanding, not collecting bullets.\n"
+        . "45. summary_insertions should usually appear after concept closure, operational understanding, cause/effect reasoning, and pilot-action reasoning.\n"
+        . "46. Intermediate answers should usually NOT produce insertion buttons.\n"
+        . "47. Before generating a summary insertion, ask: Has the student demonstrated enough understanding that this concept is mature enough to become part of the formal summary?";
 }
 
 function maya_response_schema(bool $isFinalReview): array
@@ -1642,7 +1664,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     if (mb_strlen($studentNote) > 240) {
         $studentNote = mb_substr($studentNote, 0, 240);
     }
-    $summaryInsertions = maya_sanitize_summary_insertions($aiJson['summary_insertions'] ?? [], $studentReply !== '');
+    $rawSummaryInsertions = $aiJson['summary_insertions'] ?? [];
     $updatedConceptProgress = maya_update_concept_progress(
         $existingFlags,
         $activeConcept,
@@ -1658,11 +1680,20 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
             $mayaMessage = 'Good — you connected the concept to a real pilot decision. ' . $mayaMessage;
         }
     }
+    $allowSummaryInsertions = maya_concept_allows_summary_insertions(
+        $updatedConceptProgress,
+        $activeConcept,
+        $studentReply,
+        $oldScores,
+        $scores
+    );
+    $summaryInsertions = maya_sanitize_summary_insertions($rawSummaryInsertions, $studentReply !== '' && $allowSummaryInsertions);
     $persistedFlags = [
         'major_paste' => $persistedMajorPaste,
         'needs_deeper_question' => $needsDeeper,
         'concept_progress' => $updatedConceptProgress,
         'active_concept' => $activeConcept,
+        'summary_insertions_allowed' => $allowSummaryInsertions,
     ];
     $mayaBubbleText = $mayaMessage;
     if ($nextQuestion !== '' && stripos($mayaBubbleText, $nextQuestion) === false) {

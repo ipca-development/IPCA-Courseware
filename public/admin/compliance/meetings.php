@@ -567,7 +567,7 @@ compliance_page_open(array(
       <label class="cmp-field"><span>Type</span><select name="type"><option value="">All types</option><?php foreach (ComplianceMeetingEngine::meetingTypes() as $t): ?><option value="<?= h($t) ?>" <?= $filterType === strtoupper($t) ? 'selected' : '' ?>><?= h(compliance_friendly_label($t)) ?></option><?php endforeach; ?></select></label>
       <label class="cmp-field"><span>From</span><input type="date" name="from" value="<?= h($filterFrom) ?>"></label>
       <label class="cmp-field"><span>To</span><input type="date" name="to" value="<?= h($filterTo) ?>"></label>
-      <div class="cmp-toolbar-actions" style="margin:0;"><button type="submit">Apply filters</button><a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/meetings.php">Clear</a></div>
+      <div class="cmp-toolbar-actions compliance-filterbar__actions"><button type="submit">Apply filters</button><a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/meetings.php">Clear</a></div>
     </form>
   </section>
     <section class="cmp-card compliance-card--full">

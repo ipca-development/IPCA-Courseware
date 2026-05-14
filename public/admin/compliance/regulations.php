@@ -137,8 +137,9 @@ compliance_page_open(array(
         Open a finding and use <strong>Search regulations & attach</strong>, or add <code>?finding_id=…</code> to this URL to enable attach buttons.
       </p>
     <?php endif; ?>
+  </section>
 
-    <div style="margin-bottom:16px;">
+    <section class="compliance-resource-library-embed">
       <?php
       $easaApiHref = '/admin/api/resource_library_easa_api.php';
       $easaUserPhotoHref = '';
@@ -159,9 +160,10 @@ compliance_page_open(array(
       }
       require __DIR__ . '/../resource_library_easa_tab.inc.php';
       ?>
-    </div>
+    </section>
 
     <?php if ($findingCtx): ?>
+    <section class="cmp-card">
     <form method="get" action="/admin/compliance/regulations.php" class="cmp-toolbar">
       <?php if ($findingId > 0): ?>
         <input type="hidden" name="finding_id" value="<?= (int)$findingId ?>">
@@ -180,12 +182,12 @@ compliance_page_open(array(
       </label>
       <button type="submit">Search</button>
     </form>
+    </section>
     <?php endif; ?>
 
     <?php if ($q !== '' && !$aimOk && !$easaOk): ?>
-      <p class="cmp-flash cmp-flash-danger" style="margin-top:12px;">No regulatory tables available — apply resource library SQL migrations.</p>
+      <section class="cmp-card"><p class="cmp-flash cmp-flash-danger" style="margin:0;">No regulatory tables available — apply resource library SQL migrations.</p></section>
     <?php endif; ?>
-  </section>
 
   <?php if ($q !== '' && ($corpus === 'all' || $corpus === 'aim') && $aimOk && $aimHits !== array()): ?>
     <section class="cmp-card">
@@ -300,31 +302,6 @@ compliance_page_open(array(
       <p style="margin:0;color:var(--text-muted);">No matches — shorten or broaden the query.</p>
     </section>
   <?php endif; ?>
-
-  <section class="cmp-card">
-    <h2 style="margin:0 0 8px;">Attach external https URL</h2>
-    <p style="color:var(--text-muted);font-size:14px;margin:0 0 12px;">For citations outside AIM/EASA (e.g. BCAA portal PDF).</p>
-    <?php if ($findingCtx): ?>
-      <form method="post" action="/admin/compliance/findings.php?id=<?= (int)$findingId ?>" class="cmp-toolbar">
-        <input type="hidden" name="action" value="attach_regulation_link">
-        <input type="hidden" name="finding_id" value="<?= (int)$findingId ?>">
-        <input type="hidden" name="source_kind" value="<?= h(ComplianceRegulatoryLinkEngine::KIND_EXTERNAL) ?>">
-        <label class="cmp-field" style="min-width:320px;">
-          <span class="cmp-field-label">https URL *</span>
-          <input type="url" name="external_url" required placeholder="https://…">
-        </label>
-        <label class="cmp-field" style="min-width:240px;">
-          <span class="cmp-field-label">Label (optional)</span>
-          <input type="text" name="citation_label" placeholder="e.g. BCAA letter 2024-…">
-        </label>
-        <input type="hidden" name="link_type" value="SUPPORTING">
-        <input type="hidden" name="confidence" value="MANUAL">
-        <button type="submit">Attach URL</button>
-      </form>
-    <?php else: ?>
-      <p style="margin:0;color:var(--text-muted);font-size:14px;">Select a finding first.</p>
-    <?php endif; ?>
-  </section>
 </section>
 <?php
 compliance_page_close();
