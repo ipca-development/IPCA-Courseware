@@ -480,7 +480,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
       if (latest > previousLatestVersionId) {
         return latest;
       }
-      setCurrentWork('Connection dropped while lesson ' + lessonId + ' was running. Checking for saved version... ' + ((i + 1) * 3) + 's');
+      setCurrentWork('Lesson ' + lessonId + ' is still being verified in the background... ' + ((i + 1) * 3) + 's');
     }
     return 0;
   }
@@ -627,12 +627,13 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
         stopTicker();
         const payload = e.payload || {};
         if (!payload.error && String(e.message || '').toLowerCase().indexOf('failed to fetch') !== -1) {
-          addLog('Connection dropped for lesson ' + lessonId + '. Checking whether the server saved a new version...', false);
+          addLog('Lesson ' + lessonId + ' is still processing. Checking for the saved version in the background...');
+          setCurrentWork('Lesson ' + lessonId + ' is finishing in the background. Waiting for the saved version...');
           const savedVersionId = await waitForSavedGeneration(lessonId, previousLatestVersionId);
           if (savedVersionId > 0) {
-            addLog('RECOVERED lesson ' + lessonId + ': new version ' + savedVersionId + ' was saved after the connection dropped.', true);
+            addLog('OK lesson ' + lessonId + ': new version ' + savedVersionId + ' was saved by the background run.', true);
           } else {
-            addLog('FAILED lesson ' + lessonId + ': browser connection dropped and no saved version was detected.', false);
+            addLog('FAILED lesson ' + lessonId + ': background check timed out before a saved version appeared.', false);
           }
         } else {
           addLog('FAILED lesson ' + lessonId + ': ' + (payload.error || e.message), false);
