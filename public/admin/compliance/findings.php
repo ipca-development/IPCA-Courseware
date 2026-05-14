@@ -735,7 +735,7 @@ if ($detailId > 0) {
     ));
     ?>
 
-    <div style="display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start;">
+    <div class="cmp-cols">
       <section class="cmp-card" style="overflow:hidden;">
         <div class="cmp-list-head" style="margin-bottom:14px;">
           <div class="cmp-list-title"><?= compliance_ui_icon('flag') ?><span>Findings</span></div>

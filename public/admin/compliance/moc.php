@@ -113,7 +113,7 @@ compliance_page_open(array(
     'flash' => $flash,
 ));
 ?>
-  <div style="display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start;">
+  <div class="cmp-cols">
     <section class="cmp-card">
       <div class="cmp-list-head" style="margin-bottom:14px;">
         <div class="cmp-list-title">
@@ -212,7 +212,7 @@ compliance_page_open(array(
     </section>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start;margin-top:20px;">
+  <div class="cmp-card-grid" style="margin-top:20px;">
     <section class="cmp-card">
       <div class="cmp-list-head" style="margin-bottom:14px;">
         <div class="cmp-list-title">

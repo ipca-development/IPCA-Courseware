@@ -174,7 +174,7 @@ compliance_page_open(array(
   .cmprep-side a.is-on{background:linear-gradient(120deg,#1f4079 0%,#307cb7 100%);color:#fff;}
 </style>
 
-<div style="display:grid;grid-template-columns:280px 1fr;gap:20px;align-items:start;">
+<div class="cmp-report-layout">
   <nav class="cmprep-side">
     <?php foreach ($REPORTS as $k => $cfg): ?>
       <a href="/admin/compliance/reports.php?report=<?= urlencode($k) ?>"

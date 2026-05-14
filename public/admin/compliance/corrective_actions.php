@@ -362,7 +362,7 @@ if ($detailId > 0) {
       </form>
     </section>
 
-    <div style="display:grid;grid-template-columns:1fr 380px;gap:24px;align-items:start;">
+    <div class="cmp-cols">
       <section class="cmp-card" style="overflow:hidden;">
         <div class="compliance-table-wrap">
         <table class="compliance-table">

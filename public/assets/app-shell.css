@@ -2356,6 +2356,15 @@ a.cmp-card:hover{
   gap:18px;
 }
 
+.cmp-report-layout{
+  display:grid;
+  grid-template-columns:minmax(220px,280px) minmax(0,1fr);
+  gap:20px;
+  align-items:start;
+  min-width:0;
+  max-width:100%;
+}
+
 /* Inline meta lines (e.g. "Status: X · Priority: Y" under a detail header). */
 .cmp-meta-line{
   display:flex;
@@ -2785,7 +2794,8 @@ a.cmp-card:hover{
   .cmp-page [style*="grid-template-columns:1fr 360px"],
   .cmp-page [style*="grid-template-columns:1fr 380px"],
   .cmp-page [style*="grid-template-columns:280px 1fr"],
-  .cmp-page [style*="grid-template-columns:1fr 1fr"]{
+  .cmp-page [style*="grid-template-columns:1fr 1fr"],
+  .cmp-report-layout{
     grid-template-columns:1fr !important;
   }
 

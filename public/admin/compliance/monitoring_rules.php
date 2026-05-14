@@ -265,7 +265,7 @@ compliance_page_open(array(
     <?php endforeach; ?>
   </div>
 
-  <div style="display:grid;grid-template-columns:1fr 380px;gap:20px;align-items:start;">
+  <div class="cmp-cols">
     <section class="cmp-card">
       <div class="cmp-list-head" style="margin-bottom:14px;">
         <div class="cmp-list-title"><?= compliance_ui_icon('pulse') ?><span>Rules</span></div>

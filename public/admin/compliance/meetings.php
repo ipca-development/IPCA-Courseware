@@ -540,7 +540,7 @@ compliance_page_open(array(
     'flash' => $flash,
 ));
 ?>
-  <div style="display:grid;grid-template-columns:1fr 360px;gap:20px;align-items:start;">
+  <div class="cmp-cols">
     <section class="cmp-card">
       <div class="cmp-list-head" style="margin-bottom:14px;">
         <div class="cmp-list-title">
