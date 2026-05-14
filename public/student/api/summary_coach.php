@@ -986,7 +986,16 @@ function maya_system_prompt(): string
         . "20. Do not repeatedly ask the student to identify the most important idea.\n"
         . "21. Use official reference context dynamically from the Resource Library system when available. Use it to guide coaching intelligently, but do not quote large blocks and do not provide copy-ready answers.\n"
         . "22. Use the reference context to detect weak understanding, guide the student toward correct operational reasoning, ask better questions, and identify omissions.\n"
-        . "23. Different official source types imply different coaching focus areas. Let the dynamic source metadata and content guide whether the question should emphasize operational procedures, regulations, IFR procedures, weather, aircraft systems, aerodynamics, communication, safety, legality, performance, or decision making.";
+        . "23. Different official source types imply different coaching focus areas. Let the dynamic source metadata and content guide whether the question should emphasize operational procedures, regulations, IFR procedures, weather, aircraft systems, aerodynamics, communication, safety, legality, performance, or decision making.\n"
+        . "24. Stay within the instructional scope of the current lesson, slide content, and linked official references.\n"
+        . "25. Use official reference context to sharpen coaching, not to expand the lesson into unrelated or advanced material.\n"
+        . "26. You may deepen concepts already present in the lesson or student summary, but must avoid introducing advanced theory, edge cases, or checkride-level material unless the lesson clearly covered it.\n"
+        . "27. Before asking a follow-up, silently classify the question as either A) scope-safe deepening of the current lesson or B) scope-expanding new material. Prefer A. Only use B if the slide/reference context clearly supports it.\n"
+        . "28. If the student mentions a concept briefly, first ask a lesson-level operational question before probing advanced technical details.\n"
+        . "29. Do not make the student feel they missed hidden material that was not taught in this lesson.\n"
+        . "30. When unsure, ask about pilot action, preflight verification, operational consequence, or decision-making within the lesson scope.\n"
+        . "Scope-safe examples: 'Based on this lesson, what are you trying to confirm before flight by checking mass and balance and performance?' 'What would you personally verify before deciding the aircraft is ready and safe to depart?' 'How does this calculation support the go/no-go decision for this flight?'\n"
+        . "Avoid advanced probes unless explicitly covered by the lesson/reference context, such as detailed handling changes from forward-CG versus aft-CG loading.";
 }
 
 function maya_response_schema(bool $isFinalReview): array
@@ -1381,9 +1390,12 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "3. Which parts need operational application?\n"
         . "4. Which parts need cause-and-effect correlation?\n"
         . "5. Which official reference concept would help strengthen understanding?\n"
-        . "6. What would a real instructor ask next?\n\n"
+        . "6. What would a real instructor ask next?\n"
+        . "7. Is the next question within the current lesson scope?\n"
+        . "8. Does it deepen what was taught, or does it introduce new material?\n"
+        . "9. If it introduces new material, only ask it if the slide/reference context clearly supports it.\n\n"
         . "Then ask ONE targeted aviation coaching question.\n\n"
-        . "Do NOT ask generic \"most important idea\" questions.";
+        . "Do NOT ask generic \"most important idea\" questions. Prefer lesson-scope questions about pilot action, preflight verification, operational consequence, or go/no-go decision making.";
 
     $userPrompt =
         "LESSON TITLE\n" . ($lessonTitle !== '' ? $lessonTitle : '(unknown)') . "\n\n"
@@ -1426,7 +1438,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     }
     $nextQuestion = trim((string)($aiJson['next_question'] ?? ''));
     if ($nextQuestion === '') {
-        $nextQuestion = 'Pick one idea from your summary and explain how it would affect a real flight decision, cockpit action, or safety outcome.';
+        $nextQuestion = 'Pick one idea from your summary and explain how it affects a pilot action, preflight check, or go/no-go decision covered by this lesson.';
     }
     $newStage = maya_normalize_stage($aiJson['stage'] ?? $coachStage);
 
