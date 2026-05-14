@@ -3059,8 +3059,11 @@ a.cmp-card:hover{
 
 .compliance-resource-library-embed .rl-easa-tree-section-title,
 .compliance-resource-library-embed .rl-easa-tree-rule-title{
+  display:block !important;
+  flex:1 1 auto !important;
   min-height:0 !important;
   height:auto !important;
+  width:auto !important;
   padding:2px 0 !important;
   border:0 !important;
   border-radius:0 !important;
@@ -3071,11 +3074,29 @@ a.cmp-card:hover{
   line-height:1.4 !important;
   text-align:left !important;
   text-decoration:none !important;
+  justify-content:flex-start !important;
+  transform:none !important;
+  white-space:normal !important;
 }
 
 .compliance-resource-library-embed .rl-easa-tree-section-title:hover,
 .compliance-resource-library-embed .rl-easa-tree-rule-title:hover{
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
   color:#102845 !important;
+  transform:none !important;
+  text-decoration:underline !important;
+}
+
+.compliance-resource-library-embed .rl-easa-tree-section-title:focus,
+.compliance-resource-library-embed .rl-easa-tree-section-title:focus-visible,
+.compliance-resource-library-embed .rl-easa-tree-rule-title:focus,
+.compliance-resource-library-embed .rl-easa-tree-rule-title:focus-visible{
+  background:transparent !important;
+  box-shadow:none !important;
+  color:#102845 !important;
+  outline:none !important;
 }
 
 .compliance-resource-library-embed .rl-easa-tree-row--section .rl-easa-tree-section-title{
@@ -3085,6 +3106,64 @@ a.cmp-card:hover{
 .compliance-resource-library-embed .rl-easa-tree-panel{
   color:#0f172a !important;
   text-align:left !important;
+}
+
+.compliance-resource-library-embed .rl-easa-tree-panel button:not(.btn){
+  background:transparent !important;
+  border-color:transparent !important;
+  box-shadow:none !important;
+  color:#0f172a !important;
+}
+
+.compliance-resource-library-embed .rl-easa-tree-panel button:not(.btn):hover{
+  background:transparent !important;
+  border-color:transparent !important;
+  box-shadow:none !important;
+  color:#102845 !important;
+  transform:none !important;
+}
+
+.compliance-resource-library-embed .rl-easa-maya-ecfr-chip{
+  width:auto !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:flex-start !important;
+  padding:6px 12px !important;
+  border-radius:999px !important;
+  border:1px solid #c7d2fe !important;
+  background:#e0e7ff !important;
+  color:#0f172a !important;
+  box-shadow:none !important;
+  font-size:11px !important;
+  line-height:1.3 !important;
+  font-weight:700 !important;
+  letter-spacing:0 !important;
+  text-decoration:none !important;
+  transform:none !important;
+}
+
+.compliance-resource-library-embed .rl-easa-maya-ecfr-chip:hover,
+.compliance-resource-library-embed .rl-easa-maya-ecfr-chip:focus{
+  background:#dbeafe !important;
+  border-color:#bfdbfe !important;
+  color:#0f172a !important;
+  box-shadow:none !important;
+  text-decoration:none !important;
+  transform:none !important;
+}
+
+.compliance-resource-library-embed .rl-easa-maya-chip-actions .btn.btn-sm{
+  width:auto !important;
+  height:auto !important;
+  min-height:0 !important;
+  padding:6px 12px !important;
+  border-radius:999px !important;
+  font-size:12px !important;
+  line-height:1.2 !important;
+  box-shadow:none !important;
 }
 
 .compliance-resource-library-embed .rl-easa-tree-row{
