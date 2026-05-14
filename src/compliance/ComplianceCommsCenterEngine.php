@@ -1387,6 +1387,7 @@ final class ComplianceCommsCenterEngine
         if ($subject === null) {
             throw new InvalidArgumentException('Subject is required.');
         }
+        $threadId = isset($opts['thread_id']) && (int)$opts['thread_id'] > 0 ? (int)$opts['thread_id'] : null;
         $textBody = self::nullableStr((string)($opts['text_body'] ?? ''));
         $htmlBody = self::nullableStr((string)($opts['html_body'] ?? ''));
         if ($textBody === null && $htmlBody === null) {
@@ -1395,10 +1396,11 @@ final class ComplianceCommsCenterEngine
 
         $pdo->prepare(
             'UPDATE ipca_compliance_email_drafts
-                SET to_json = ?, cc_json = ?, bcc_json = ?,
+                SET thread_id = ?, to_json = ?, cc_json = ?, bcc_json = ?,
                     subject = ?, text_body = ?, html_body = ?
               WHERE id = ?'
         )->execute(array(
+            $threadId,
             self::jsonEncode(self::addressListForJson($to)),
             $cc === array() ? null : self::jsonEncode(self::addressListForJson($cc)),
             $bcc === array() ? null : self::jsonEncode(self::addressListForJson($bcc)),

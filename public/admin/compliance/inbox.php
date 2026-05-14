@@ -286,9 +286,10 @@ compliance_page_open(array(
   .cmpcc-empty{padding:18px;color:var(--text-muted);text-align:center;background:#f6f9fd;border-radius:12px;}
   .cmpcc-flex{display:flex;gap:8px;flex-wrap:wrap;align-items:center;}
   .cmpcc-clear{font-size:12px;font-weight:700;color:#1f4079;text-decoration:none;margin-left:6px;}
-  .cmpcc-bulk{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px;}
-  .cmpcc-bulk select{height:36px;min-height:36px;padding:0 10px !important;font-size:12px !important;}
+  .cmpcc-bulk{display:flex;gap:10px;flex-wrap:nowrap;align-items:center;margin-bottom:10px;}
+  .cmpcc-bulk select{width:auto !important;flex:0 1 220px;height:36px;min-height:36px;padding:0 10px !important;font-size:12px !important;}
   .cmpcc-bulk button{height:36px;min-height:36px;padding:0 12px !important;font-size:12px !important;}
+  @media (max-width:720px){.cmpcc-bulk{flex-wrap:wrap;}.cmpcc-bulk select{flex:1 1 180px;}}
   #inboxIntegrationModal{width:min(980px,calc(100vw - 32px));}
   .cmpcc-template-card{margin-top:18px;padding:18px;border:1px solid var(--border-soft);border-radius:18px;background:#f8fafd;}
   .cmpcc-template-preview{margin-top:12px;border:1px solid #dfe6f1;border-radius:18px;overflow:hidden;background:#fff;box-shadow:var(--card-shadow);}
@@ -450,7 +451,7 @@ compliance_page_open(array(
                   onclick="return confirm('Apply this status to all selected threads?');">
             Set status
           </button>
-          <select name="bulk_priority_value" style="margin-left:8px;">
+          <select name="bulk_priority_value">
             <option value="low">low</option>
             <option value="normal">normal</option>
             <option value="high">high</option>

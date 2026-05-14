@@ -44,6 +44,107 @@ function cmpose_flash_take(): ?array
     return $f;
 }
 
+/**
+ * @return array<string,array{type:string,id:string,label:string}>
+ */
+function cmpose_selected_object_refs(array $pickerGroups): array
+{
+    $valid = array();
+    foreach ($pickerGroups as $group) {
+        foreach (($group['options'] ?? array()) as $opt) {
+            $type = (string)($group['type'] ?? '');
+            $id = (string)($opt['id'] ?? '');
+            if ($type === '' || $id === '') {
+                continue;
+            }
+            $valid[$type . '|' . $id] = array(
+                'type' => $type,
+                'id' => $id,
+                'label' => (string)($opt['label'] ?? $id),
+            );
+        }
+    }
+
+    $posted = isset($_POST['object_refs']) && is_array($_POST['object_refs']) ? $_POST['object_refs'] : array();
+    $selected = array();
+    foreach ($posted as $raw) {
+        $key = (string)$raw;
+        if (isset($valid[$key])) {
+            $selected[$key] = $valid[$key];
+        }
+    }
+
+    return $selected;
+}
+
+/**
+ * @return list<string>
+ */
+function cmpose_current_object_ref_values(PDO $pdo, ?int $threadId): array
+{
+    if ($threadId === null || $threadId <= 0) {
+        return array();
+    }
+    $values = array();
+    foreach (ComplianceCommsCenterEngine::listObjectLinksForThread($pdo, $threadId) as $link) {
+        $type = (string)($link['linked_object_type'] ?? '');
+        $id = (string)($link['linked_object_id'] ?? '');
+        if ($type !== '' && $id !== '') {
+            $values[] = $type . '|' . $id;
+        }
+    }
+    return array_values(array_unique($values));
+}
+
+function cmpose_primary_recipient(string $to): ?string
+{
+    $parts = preg_split('/[,;\s]+/', $to) ?: array();
+    foreach ($parts as $part) {
+        $email = strtolower(trim((string)$part));
+        if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            return $email;
+        }
+    }
+    return null;
+}
+
+/**
+ * @param array<string,array{type:string,id:string,label:string}> $selectedRefs
+ */
+function cmpose_sync_thread_object_refs(PDO $pdo, int $threadId, array $selectedRefs, ?int $uid): void
+{
+    $existingThreadLinks = array();
+    foreach (ComplianceCommsCenterEngine::listObjectLinksForThread($pdo, $threadId) as $link) {
+        if (!empty($link['email_id'])) {
+            continue;
+        }
+        $type = (string)($link['linked_object_type'] ?? '');
+        $id = (string)($link['linked_object_id'] ?? '');
+        if ($type === '' || $id === '') {
+            continue;
+        }
+        $existingThreadLinks[$type . '|' . $id] = (int)$link['id'];
+    }
+
+    foreach ($existingThreadLinks as $key => $linkId) {
+        if (!isset($selectedRefs[$key])) {
+            ComplianceCommsCenterEngine::unlinkObject($pdo, $linkId);
+        }
+    }
+    foreach ($selectedRefs as $key => $ref) {
+        if (isset($existingThreadLinks[$key])) {
+            continue;
+        }
+        ComplianceCommsCenterEngine::linkObject($pdo, array(
+            'thread_id' => $threadId,
+            'linked_object_type' => $ref['type'],
+            'linked_object_id' => $ref['id'],
+            'link_type' => 'authority_communication',
+            'created_by' => $uid,
+        ));
+    }
+}
+
 $draftId = isset($_GET['draft_id']) ? (int)$_GET['draft_id'] : 0;
 $threadIdQs = isset($_GET['thread_id']) ? (int)$_GET['thread_id'] : 0;
 $replyToEmailId = isset($_GET['reply_to_email_id']) ? (int)$_GET['reply_to_email_id'] : 0;
@@ -97,11 +198,14 @@ if ($draftId > 0) {
     }
 }
 
+$pickerGroups = ComplianceCommsCenterEngine::listLinkablePickerOptions($pdo);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     $postDraftId = isset($_POST['draft_id']) ? (int)$_POST['draft_id'] : 0;
     $postReplyToEmailId = isset($_POST['reply_to_email_id']) ? (int)$_POST['reply_to_email_id'] : 0;
     $postThreadId = isset($_POST['thread_id']) ? (int)$_POST['thread_id'] : 0;
+    $selectedObjectRefs = cmpose_selected_object_refs($pickerGroups);
     $opts = array(
         'to' => (string)($_POST['to'] ?? ''),
         'cc' => (string)($_POST['cc'] ?? ''),
@@ -135,6 +239,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $effectiveDraftId = $postDraftId;
         } else {
             $effectiveDraftId = ComplianceCommsCenterEngine::createDraft($pdo, $opts);
+        }
+
+        $effectiveThreadId = isset($opts['thread_id']) && (int)$opts['thread_id'] > 0 ? (int)$opts['thread_id'] : 0;
+        if ($selectedObjectRefs !== array() && $effectiveThreadId <= 0) {
+            $thread = ComplianceCommsCenterEngine::resolveOrCreateThread(
+                $pdo,
+                null,
+                null,
+                null,
+                ComplianceCommsCenterEngine::normalizeSubject((string)$opts['subject']),
+                cmpose_primary_recipient((string)$opts['to'])
+            );
+            $effectiveThreadId = (int)$thread['id'];
+            $opts['thread_id'] = $effectiveThreadId;
+            ComplianceCommsCenterEngine::updateDraft($pdo, $effectiveDraftId, $opts);
+        }
+        if ($effectiveThreadId > 0) {
+            cmpose_sync_thread_object_refs($pdo, $effectiveThreadId, $selectedObjectRefs, $uid > 0 ? $uid : null);
         }
 
         // Process any uploaded attachments before we send/save.
@@ -188,7 +310,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 cmpose_flash('error', 'Send failed: ' . (string)($result['error'] ?? 'unknown error'));
                 redirect('/admin/compliance/email_compose.php?draft_id=' . $effectiveDraftId);
             }
-            cmpose_flash('success', 'Sent. Postmark MessageID ' . (string)($result['postmark_message_id'] ?? '—'));
             redirect('/admin/compliance/email_thread.php?id=' . (int)($result['thread_id'] ?? 0));
         }
     } catch (Throwable $e) {
@@ -202,7 +323,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $summary = CompliancePostmarkConfig::publicSummary();
 $flash = cmpose_flash_take();
+if (
+    $draftId <= 0
+    && $threadIdQs <= 0
+    && $replyToEmailId <= 0
+    && is_array($flash)
+    && (string)($flash['type'] ?? '') === 'success'
+    && str_starts_with((string)($flash['message'] ?? ''), 'Sent. Postmark')
+) {
+    $flash = null;
+}
 $mode = $draftId > 0 ? 'Edit draft' : ($replyToEmailId > 0 ? 'Reply' : 'New message');
+$currentObjectRefValues = cmpose_current_object_ref_values($pdo, isset($prefill['thread_id']) ? (int)$prefill['thread_id'] : null);
+$pickerHasOptions = false;
+foreach ($pickerGroups as $pg) {
+    if (!empty($pg['options'])) {
+        $pickerHasOptions = true;
+        break;
+    }
+}
 
 cw_header('Compliance · Compose');
 
@@ -265,6 +404,9 @@ compliance_page_open(array(
     margin:18px 0 6px;font-size:12px;color:#475569;letter-spacing:.04em;
     text-transform:uppercase;font-weight:800;
   }
+  .cmpec-refbox{border:1px solid var(--border-soft);border-radius:14px;background:#f8fafc;padding:12px;}
+  .cmpec-refselect{min-height:138px !important;padding:8px 10px !important;}
+  .cmpec-refselect option{padding:6px 8px;}
 </style>
 
 <section class="cmp-card">
@@ -316,6 +458,34 @@ compliance_page_open(array(
       <label for="subject">Subject <span style="color:#b91c1c;">*</span></label>
       <input class="cmpec-input" type="text" id="subject" name="subject" maxlength="500"
              required value="<?= h($prefill['subject']) ?>">
+    </div>
+
+    <div class="cmpec-row">
+      <label for="object_refs">Compliance references</label>
+      <div class="cmpec-refbox">
+        <?php if (!$pickerHasOptions): ?>
+          <div class="cmpec-note" style="margin-top:0;">
+            No findings, audits, corrective actions, meetings or MoC cases are available to reference yet.
+          </div>
+        <?php else: ?>
+          <select class="cmpec-input cmpec-refselect" id="object_refs" name="object_refs[]" multiple>
+            <?php foreach ($pickerGroups as $pg): ?>
+              <?php if (empty($pg['options'])) { continue; } ?>
+              <optgroup label="<?= h((string)$pg['type_label']) ?>">
+                <?php foreach ($pg['options'] as $opt): ?>
+                  <?php $refValue = (string)$pg['type'] . '|' . (string)$opt['id']; ?>
+                  <option value="<?= h($refValue) ?>" <?= in_array($refValue, $currentObjectRefValues, true) ? 'selected' : '' ?>>
+                    <?= h((string)$opt['label']) ?>
+                  </option>
+                <?php endforeach; ?>
+              </optgroup>
+            <?php endforeach; ?>
+          </select>
+          <div class="cmpec-note">
+            Hold Cmd/Ctrl to select multiple objects. Selected references are saved to the draft thread and appear as template pills when the email is sent.
+          </div>
+        <?php endif; ?>
+      </div>
     </div>
 
     <div class="cmpec-row">

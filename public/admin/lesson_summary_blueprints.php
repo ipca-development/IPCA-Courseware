@@ -751,6 +751,8 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
       '</div>' +
       versionMeta(selected) +
       renderWarnings(selected) +
+      '<h3>Section status policy</h3>' + renderSectionStatusPolicy(bp.section_status_policy || {}) +
+      '<h3>Maya current task templates</h3>' + renderTaskTemplates(bp.maya_current_task_templates || {}) +
       '<h3>Coaching sequence</h3>' + renderCoachingSequence(bp.coaching_sequence || []) +
       '<h3>Summary structure</h3>' + renderSections(bp.summary_structure || []) +
       '<h3>Slide coverage map</h3>' + renderSlides(bp.slide_coverage_map || []) +
@@ -784,6 +786,22 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
       if (typeof w === 'string') return w;
       return (w.severity ? '[' + w.severity + '] ' : '') + (w.message || JSON.stringify(w));
     }));
+  }
+
+  function renderSectionStatusPolicy(policy) {
+    return '<div class="lsb-section-card">' +
+      '<p><strong>Good enough rule:</strong> ' + esc(policy.good_enough_rule || '') + '</p>' +
+      '<p><strong>Max refinement turns:</strong> ' + esc(policy.max_refinement_turns == null ? '' : policy.max_refinement_turns) + '</p>' +
+      '<p><strong>Do not reopen after complete:</strong> ' + yesNo(policy.do_not_reopen_after_complete) + '</p>' +
+    '</div>';
+  }
+
+  function renderTaskTemplates(templates) {
+    return '<div class="lsb-section-card">' +
+      '<p><strong>Watch slides:</strong> ' + esc(templates.watch_slides || '') + '</p>' +
+      '<p><strong>Write summary:</strong> ' + esc(templates.write_summary || '') + '</p>' +
+      '<p><strong>Chat check:</strong> ' + esc(templates.chat_check || '') + '</p>' +
+    '</div>';
   }
 
   function renderSections(sections) {
