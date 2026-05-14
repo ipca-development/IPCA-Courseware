@@ -85,6 +85,18 @@ $pkgActive = moc_count(
 );
 
 $mocCases = ComplianceCaseEngine::listByType($pdo, 'MANAGEMENT_OF_CHANGE', 50);
+$filterQ = trim((string)($_GET['q'] ?? ''));
+$filterStatus = strtoupper(trim((string)($_GET['status'] ?? '')));
+$filterSeverity = strtoupper(trim((string)($_GET['severity'] ?? '')));
+$mocCases = array_values(array_filter($mocCases, static function (array $c) use ($filterQ, $filterStatus, $filterSeverity): bool {
+    if ($filterQ !== '') {
+        $hay = strtolower((string)($c['case_code'] ?? '') . ' ' . (string)($c['title'] ?? '') . ' ' . (string)($c['authority'] ?? '') . ' ' . (string)($c['summary'] ?? ''));
+        if (strpos($hay, strtolower($filterQ)) === false) { return false; }
+    }
+    if ($filterStatus !== '' && strtoupper((string)($c['status'] ?? '')) !== $filterStatus) { return false; }
+    if ($filterSeverity !== '' && strtoupper((string)($c['severity'] ?? '')) !== $filterSeverity) { return false; }
+    return true;
+}));
 
 $upcomingPkgs = array();
 try {
@@ -104,6 +116,9 @@ compliance_page_open(array(
     'overline' => 'Compliance · Management of change',
     'title' => 'Management of change',
     'description' => 'Cross-cut view of MoC cases, change requests, drafts in flight, and release packages not yet final. Cases act as envelopes for related findings, audits, change requests and release packages.',
+    'actions' => array(
+        array('label' => 'New MoC case', 'modal' => 'moc-create-modal', 'icon' => 'plus'),
+    ),
     'stats' => array(
         array('label' => 'Change requests', 'value' => (int)$crTotal,        'sub' => (int)$crOpen . ' open / in-flight', 'href' => '/admin/compliance/change_requests.php', 'tone' => $crOpen > 0 ? 'warn' : 'ok'),
         array('label' => 'Draft manuals',   'value' => (int)$drDraft,        'sub' => 'draft / under review', 'href' => '/admin/compliance/manual_drafts.php'),
@@ -113,8 +128,15 @@ compliance_page_open(array(
     'flash' => $flash,
 ));
 ?>
-  <div class="cmp-cols">
-    <section class="cmp-card">
+  <section class="cmp-card">
+    <form method="get" class="compliance-filterbar">
+      <label class="cmp-field compliance-filterbar__search"><span>Search</span><input type="search" name="q" value="<?= h($filterQ) ?>" placeholder="Case code, title, authority or summary"></label>
+      <label class="cmp-field"><span>Status</span><select name="status"><option value="">All statuses</option><?php foreach (array('OPEN','IN_PROGRESS','WAITING_AUTHORITY','CLOSED') as $s): ?><option value="<?= h($s) ?>" <?= $filterStatus === $s ? 'selected' : '' ?>><?= h(compliance_friendly_label($s)) ?></option><?php endforeach; ?></select></label>
+      <label class="cmp-field"><span>Severity</span><select name="severity"><option value="">All severities</option><?php foreach (array('LOW','MEDIUM','HIGH','CRITICAL') as $s): ?><option value="<?= h($s) ?>" <?= $filterSeverity === $s ? 'selected' : '' ?>><?= h(compliance_friendly_label($s)) ?></option><?php endforeach; ?></select></label>
+      <div class="cmp-toolbar-actions" style="margin:0;"><button type="submit">Apply filters</button><a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/moc.php">Clear</a></div>
+    </form>
+  </section>
+    <section class="cmp-card compliance-card--full">
       <div class="cmp-list-head" style="margin-bottom:14px;">
         <div class="cmp-list-title">
           <?= compliance_ui_icon('list') ?>
@@ -135,13 +157,13 @@ compliance_page_open(array(
           </tr></thead>
           <tbody>
             <?php foreach ($mocCases as $c): ?>
-              <tr>
+              <tr class="compliance-row-clickable">
                 <td class="cmp-mono"><?= h((string)$c['case_code']) ?></td>
                 <td><?= h((string)$c['title']) ?></td>
                 <td>
-                  <span class="cmp-pill"><?= h((string)$c['status']) ?></span>
+                  <?= compliance_badge((string)$c['status']) ?>
                   <?php if (!empty($c['locked_at'])): ?>
-                    <span class="cmp-pill" style="margin-left:6px;">Locked</span>
+                    <?= compliance_badge('LOCKED') ?>
                   <?php endif; ?>
                 </td>
                 <td class="cmp-mono"><?= h(substr((string)($c['opened_at'] ?? ''), 0, 10)) ?></td>
@@ -163,12 +185,11 @@ compliance_page_open(array(
         </table>
         </div>
       <?php else: ?>
-        <p style="color:var(--text-muted);font-size:14px;margin:0;">No MoC cases yet. Use the form on the right to create one.</p>
+        <p style="color:var(--text-muted);font-size:14px;margin:0;">No MoC cases match this filter.</p>
       <?php endif; ?>
     </section>
 
-    <section class="cmp-card">
-      <h3 style="margin:0 0 14px;">New MoC case</h3>
+    <?php compliance_modal_open('moc-create-modal', 'New MoC case'); ?>
       <form method="post" action="/admin/compliance/moc.php">
         <input type="hidden" name="action" value="create_moc_case">
         <label class="cmp-field">
@@ -179,19 +200,19 @@ compliance_page_open(array(
           <label class="cmp-field">
             <span class="cmp-field-label">Status</span>
             <select name="status">
-              <option value="OPEN" selected>OPEN</option>
-              <option value="IN_PROGRESS">IN_PROGRESS</option>
-              <option value="WAITING_AUTHORITY">WAITING_AUTHORITY</option>
+              <option value="OPEN" selected>Open</option>
+              <option value="IN_PROGRESS">In Progress</option>
+              <option value="WAITING_AUTHORITY">Waiting Authority</option>
             </select>
           </label>
           <label class="cmp-field">
             <span class="cmp-field-label">Severity</span>
             <select name="severity">
               <option value="">—</option>
-              <option value="LOW">LOW</option>
-              <option value="MEDIUM">MEDIUM</option>
-              <option value="HIGH">HIGH</option>
-              <option value="CRITICAL">CRITICAL</option>
+              <option value="LOW">Low</option>
+              <option value="MEDIUM">Medium</option>
+              <option value="HIGH">High</option>
+              <option value="CRITICAL">Critical</option>
             </select>
           </label>
         </div>
@@ -207,10 +228,9 @@ compliance_page_open(array(
           <span class="cmp-field-label">Summary</span>
           <textarea name="summary" rows="4"></textarea>
         </label>
-        <button type="submit" style="width:100%;">Create MoC case</button>
+        <div class="compliance-modal__footer"><button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button><button type="submit">Create MoC case</button></div>
       </form>
-    </section>
-  </div>
+    <?php compliance_modal_close(); ?>
 
   <div class="cmp-card-grid" style="margin-top:20px;">
     <section class="cmp-card">

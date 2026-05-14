@@ -130,6 +130,10 @@ $flash = cap_flash_take();
 $detailId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 $filterFinding = isset($_GET['finding_id']) ? (int)$_GET['finding_id'] : 0;
 $filterStatus = isset($_GET['status']) ? trim((string)$_GET['status']) : '';
+$filterDue = isset($_GET['due']) ? trim((string)$_GET['due']) : '';
+if (!in_array($filterDue, array('', 'overdue', 'due_soon', 'no_due'), true)) {
+    $filterDue = '';
+}
 
 cw_header('Compliance · Corrective Actions');
 
@@ -181,6 +185,9 @@ if ($detailId > 0) {
         'overline' => 'Compliance',
         'title' => 'Corrective actions',
         'description' => 'CAP items per finding — optional AI suggestions (human adopt). Filter by finding or status to scope the queue.',
+        'actions' => array(
+            array('label' => 'New corrective action', 'modal' => 'cap-create-modal', 'icon' => 'plus'),
+        ),
         'stats' => array(
             array('label' => 'Open',        'value' => $capStatsHero['open']        ?? 0, 'tone' => ($capStatsHero['open']    ?? 0) > 0 ? 'warn' : 'ok'),
             array('label' => 'Overdue',     'value' => $capStatsHero['overdue']     ?? 0, 'tone' => ($capStatsHero['overdue'] ?? 0) > 0 ? 'crit' : 'ok'),
@@ -315,6 +322,23 @@ if ($detailId > 0) {
         $rows = array();
         echo '<p class="queue-status is-danger">Could not load actions.<br>' . h($e->getMessage()) . '</p>';
     }
+    if ($filterDue !== '') {
+        $today = date('Y-m-d');
+        $soon = date('Y-m-d', strtotime('+7 days'));
+        $rows = array_values(array_filter($rows, static function (array $r) use ($filterDue, $today, $soon): bool {
+            $due = substr((string)($r['due_date'] ?? ''), 0, 10);
+            if ($filterDue === 'no_due') {
+                return $due === '';
+            }
+            if ($due === '') {
+                return false;
+            }
+            if ($filterDue === 'overdue') {
+                return $due < $today;
+            }
+            return $due >= $today && $due <= $soon;
+        }));
+    }
 
     $bundle = $_SESSION['_ipca_compliance_cap_suggest'] ?? null;
     $bundleFinding = is_array($bundle) ? (int)($bundle['finding_id'] ?? 0) : 0;
@@ -330,8 +354,7 @@ if ($detailId > 0) {
         </div>
         <div class="cmp-toolbar-meta">Scope by finding and status; latest activity first.</div>
       </div>
-      <form method="get" action="/admin/compliance/corrective_actions.php">
-        <div class="cmp-toolbar-row">
+      <form method="get" action="/admin/compliance/corrective_actions.php" class="compliance-filterbar">
           <label class="cmp-field">
             <span>Finding</span>
             <select name="finding_id">
@@ -352,18 +375,25 @@ if ($detailId > 0) {
               <?php endforeach; ?>
             </select>
           </label>
-        </div>
-        <div class="cmp-toolbar-actions">
+          <label class="cmp-field">
+            <span>Due state</span>
+            <select name="due">
+              <option value="" <?= $filterDue === '' ? 'selected' : '' ?>>Any due date</option>
+              <option value="overdue" <?= $filterDue === 'overdue' ? 'selected' : '' ?>>Overdue</option>
+              <option value="due_soon" <?= $filterDue === 'due_soon' ? 'selected' : '' ?>>Due within 7 days</option>
+              <option value="no_due" <?= $filterDue === 'no_due' ? 'selected' : '' ?>>No due date</option>
+            </select>
+          </label>
+        <div class="cmp-toolbar-actions" style="margin:0;">
           <button type="submit">Apply filters</button>
-          <?php if ($filterStatus !== '' || $filterFinding > 0): ?>
+          <?php if ($filterStatus !== '' || $filterFinding > 0 || $filterDue !== ''): ?>
             <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/corrective_actions.php" style="text-decoration:none;">Clear</a>
           <?php endif; ?>
         </div>
       </form>
     </section>
 
-    <div class="cmp-cols">
-      <section class="cmp-card" style="overflow:hidden;">
+      <section class="cmp-card compliance-card--full" style="overflow:hidden;">
         <div class="compliance-table-wrap">
         <table class="compliance-table">
           <thead>
@@ -380,7 +410,7 @@ if ($detailId > 0) {
               <tr><td colspan="5" style="padding:20px;color:#64748b;">No matching actions.</td></tr>
             <?php endif; ?>
             <?php foreach ($rows as $r): ?>
-              <tr>
+              <tr data-href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td class="cmp-mono">
                   <a href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" style="color:#1f4079;font-weight:700;">
                     <?= h((string)$r['action_code']) ?>
@@ -392,8 +422,8 @@ if ($detailId > 0) {
                   </a>
                 </td>
                 <td><?= h((string)$r['title']) ?></td>
-                <td><span class="cmp-pill"><?= h((string)$r['status']) ?></span></td>
-                <td class="cmp-mono"><?= !empty($r['due_date']) ? h(substr((string)$r['due_date'], 0, 10)) : '—' ?></td>
+                <td><?= compliance_badge((string)$r['status']) ?></td>
+                <td class="cmp-mono"><?= compliance_deadline_badge(isset($r['due_date']) ? (string)$r['due_date'] : null) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>
@@ -401,9 +431,7 @@ if ($detailId > 0) {
         </div>
       </section>
 
-      <div style="display:flex;flex-direction:column;gap:18px;">
-        <section class="cmp-card">
-          <h3 style="margin:0 0 14px;">New corrective action</h3>
+      <?php compliance_modal_open('cap-create-modal', 'New corrective action'); ?>
           <form method="post" action="/admin/compliance/corrective_actions.php">
             <input type="hidden" name="action" value="create_cap">
 
@@ -456,9 +484,12 @@ if ($detailId > 0) {
               <input type="date" name="due_date" style="width:100%;padding:8px;border-radius:8px;border:1px solid #cbd5e1;">
             </label>
 
-            <button type="submit" style="width:100%;">Create action</button>
+            <div class="compliance-modal__footer">
+              <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+              <button type="submit">Create action</button>
+            </div>
           </form>
-        </section>
+      <?php compliance_modal_close(); ?>
 
         <section class="cmp-card">
           <h3 style="margin:0 0 8px;">AI: suggest CAP options</h3>
@@ -521,8 +552,6 @@ if ($detailId > 0) {
             </div>
           <?php endif; ?>
         </section>
-      </div>
-    </div>
     <?php
 }
 

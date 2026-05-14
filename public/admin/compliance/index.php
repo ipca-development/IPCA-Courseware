@@ -280,7 +280,7 @@ compliance_page_open(array(
           </tr></thead>
           <tbody>
             <?php foreach ($upcomingCaps as $r): ?>
-              <tr>
+              <tr data-href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td class="cmpdash-mono">
                   <a href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>"
                      style="color:#1e3c72;font-weight:700;text-decoration:none;">
@@ -288,10 +288,10 @@ compliance_page_open(array(
                   </a>
                 </td>
                 <td><?= h((string)($r['title'] ?? '')) ?></td>
-                <td class="cmpdash-mono"><?= h(substr((string)($r['due_date'] ?? ''), 0, 10)) ?></td>
+                <td class="cmpdash-mono"><?= compliance_deadline_badge(isset($r['due_date']) ? (string)$r['due_date'] : null) ?></td>
                 <td>
                   <?php $sev = (string)($r['severity'] ?? ''); if ($sev !== ''): ?>
-                    <span class="cmpdash-pill sev-<?= h($sev) ?>"><?= h($sev) ?></span>
+                    <?= compliance_badge($sev, 'severity') ?>
                   <?php endif; ?>
                 </td>
               </tr>
@@ -303,7 +303,7 @@ compliance_page_open(array(
       <a class="cmpdash-section-link" href="/admin/compliance/cap_monitoring.php">CAP monitoring →</a>
     </div>
 
-    <div class="cmpdash-panel">
+    <div class="cmpdash-panel compliance-card--full">
       <h2>Recently touched audits</h2>
       <?php if ($recentAudits === array()): ?>
         <p class="cmpdash-empty">No audits on file yet.</p>
@@ -315,7 +315,7 @@ compliance_page_open(array(
           </tr></thead>
           <tbody>
             <?php foreach ($recentAudits as $r): ?>
-              <tr>
+              <tr data-href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td class="cmpdash-mono">
                   <a href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>"
                      style="color:#1e3c72;font-weight:700;text-decoration:none;">
@@ -323,7 +323,7 @@ compliance_page_open(array(
                   </a>
                 </td>
                 <td><?= h((string)$r['title']) ?></td>
-                <td><?= h((string)$r['status']) ?></td>
+                <td><?= compliance_badge((string)$r['status']) ?></td>
                 <td><?= h((string)$r['authority']) ?></td>
               </tr>
             <?php endforeach; ?>

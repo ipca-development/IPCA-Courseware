@@ -87,8 +87,11 @@ final class TimeBasedProgressionCron
             'orphan_ready_swept' => 0,
             'orphan_ready_threshold_minutes' => self::ORPHAN_READY_THRESHOLD_MINUTES,
             'pending_reason_reminders_scanned' => 0,
+            'pending_reason_reminders_dispatch_attempts' => 0,
             'pending_reason_reminders_dispatched' => 0,
             'pending_reason_reminders_skipped_duplicate' => 0,
+            'pending_reason_reminders_skipped_state_mismatch' => 0,
+            'pending_reason_reminders_failed' => 0,
             'errors' => array(),
             'results' => array(),
             'aggregated_results' => array(),
@@ -124,13 +127,41 @@ final class TimeBasedProgressionCron
             $summary['pending_reason_reminders_scanned'] = count($reminderResults);
             foreach ($reminderResults as $reminderResult) {
                 $status = (string)($reminderResult['status'] ?? '');
-                if ($status === 'dispatched') {
-                    $summary['pending_reason_reminders_dispatched']++;
+                if ($status === 'dispatched' || $status === 'dispatch_failed') {
+                    $summary['pending_reason_reminders_dispatch_attempts']++;
                     $summary['dispatch_attempts']++;
-                    $summary['dispatch_successes']++;
+                    if ($status === 'dispatched') {
+                        $summary['pending_reason_reminders_dispatched']++;
+                        $summary['dispatch_successes']++;
+                    } else {
+                        $summary['pending_reason_reminders_failed']++;
+                        $summary['errors'][] = array(
+                            'scope' => 'pending_reason_reminder',
+                            'user_id' => (int)($reminderResult['user_id'] ?? 0),
+                            'cohort_id' => (int)($reminderResult['cohort_id'] ?? 0),
+                            'lesson_id' => (int)($reminderResult['lesson_id'] ?? 0),
+                            'message' => 'Automation dispatch returned one or more failed action results.',
+                        );
+                    }
                 } elseif ($status === 'skipped_duplicate') {
                     $summary['pending_reason_reminders_skipped_duplicate']++;
                     $summary['dispatch_duplicates_skipped']++;
+                } elseif ($status === 'skipped_state_mismatch') {
+                    $summary['pending_reason_reminders_skipped_state_mismatch']++;
+                    $summary['dispatch_state_mismatch_skipped']++;
+                } elseif ($status === 'error') {
+                    if (!empty($reminderResult['dispatch_attempted'])) {
+                        $summary['pending_reason_reminders_dispatch_attempts']++;
+                        $summary['dispatch_attempts']++;
+                    }
+                    $summary['pending_reason_reminders_failed']++;
+                    $summary['errors'][] = array(
+                        'scope' => 'pending_reason_reminder',
+                        'user_id' => (int)($reminderResult['user_id'] ?? 0),
+                        'cohort_id' => (int)($reminderResult['cohort_id'] ?? 0),
+                        'lesson_id' => (int)($reminderResult['lesson_id'] ?? 0),
+                        'message' => (string)($reminderResult['error'] ?? 'Unknown pending reason reminder error.'),
+                    );
                 }
             }
 
@@ -466,6 +497,7 @@ final class TimeBasedProgressionCron
             $userId = (int)$row['user_id'];
             $cohortId = (int)$row['cohort_id'];
             $lessonId = (int)$row['lesson_id'];
+            $dispatchAttempted = false;
 
             $dedupeKey = 'date:' . $todayUtc
                 . '|user:' . $userId
@@ -547,11 +579,14 @@ final class TimeBasedProgressionCron
                     'legal_note' => 'Cron is about to dispatch instructor_pending_reason_decision_reminder automation event.',
                 ));
 
+                $dispatchAttempted = true;
                 $automationResult = $this->automation->dispatchEvent(
                     $this->pdo,
                     $eventKey,
                     $automationContext
                 );
+                $automationFailed = empty($automationResult['ok'])
+                    || $this->automationResultHasFailures($automationResult);
 
                 $this->engine->logProgressionEvent(array(
                     'user_id' => $userId,
@@ -560,7 +595,7 @@ final class TimeBasedProgressionCron
                     'progress_test_id' => null,
                     'event_type' => 'automation',
                     'event_code' => $dedupeEventCode,
-                    'event_status' => 'success',
+                    'event_status' => $automationFailed ? 'failure' : 'success',
                     'actor_type' => 'system',
                     'actor_user_id' => null,
                     'event_time' => gmdate('Y-m-d H:i:s'),
@@ -571,6 +606,7 @@ final class TimeBasedProgressionCron
                         'automation_matched_flows' => (int)($automationResult['matched_flows'] ?? 0),
                         'automation_matched_actions' => (int)($automationResult['matched_actions'] ?? 0),
                         'automation_executed_actions' => (int)($automationResult['executed_actions'] ?? 0),
+                        'automation_failed' => $automationFailed ? 1 : 0,
                     ),
                     'legal_note' => 'Time-based progression cron dispatched the instructor pending-reason-decision reminder automation event. Email delivery is owned by admin-configured automation flows + notification templates (no hardcoded email in cron code).',
                 ));
@@ -580,7 +616,7 @@ final class TimeBasedProgressionCron
                     'cohort_id' => $cohortId,
                     'lesson_id' => $lessonId,
                     'dedupe_key' => $dedupeKey,
-                    'status' => 'dispatched',
+                    'status' => $automationFailed ? 'dispatch_failed' : 'dispatched',
                     'automation_result' => $automationResult,
                 );
             } catch (Throwable $e) {
@@ -590,12 +626,41 @@ final class TimeBasedProgressionCron
                     'lesson_id' => $lessonId,
                     'dedupe_key' => $dedupeKey,
                     'status' => 'error',
+                    'dispatch_attempted' => $dispatchAttempted ? 1 : 0,
                     'error' => $e->getMessage(),
                 );
             }
         }
 
         return $results;
+    }
+
+    /**
+     * AutomationRuntime returns a top-level ok=true when dispatch completed, even when
+     * individual flow actions may have failed and are represented inside results[] with
+     * ok=false. For cron observability we treat any failed action result as a failed
+     * pending-reason reminder dispatch, while still recording the daily dedupe event so a
+     * broken template/flow cannot retry on every cron tick.
+     */
+    private function automationResultHasFailures(array $automationResult): bool
+    {
+        foreach ((array)($automationResult['results'] ?? array()) as $flowResult) {
+            if (is_array($flowResult) && array_key_exists('ok', $flowResult) && empty($flowResult['ok'])) {
+                return true;
+            }
+
+            if (
+                is_array($flowResult)
+                && isset($flowResult['result'])
+                && is_array($flowResult['result'])
+                && array_key_exists('ok', $flowResult['result'])
+                && empty($flowResult['result']['ok'])
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function hasPendingReasonReminderAlreadyDispatched(

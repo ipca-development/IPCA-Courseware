@@ -134,7 +134,7 @@ if ($detailId > 0) {
         $statusBits = array();
         if (!empty($audit['authority'])) { $statusBits[] = (string)$audit['authority']; }
         if (!empty($audit['audit_type'])) { $statusBits[] = (string)$audit['audit_type']; }
-        if (!empty($audit['status'])) { $statusBits[] = (string)$audit['status']; }
+        if (!empty($audit['status'])) { $statusBits[] = compliance_friendly_label((string)$audit['status']); }
         if ($locked) { $statusBits[] = 'Locked'; }
 
         compliance_page_open(array(
@@ -154,7 +154,7 @@ if ($detailId > 0) {
           <div class="cmp-card-head">
             <h2 class="cmp-card-title">Audit details</h2>
             <?php if ($locked): ?>
-              <span class="cmp-pill" style="background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.20);">Locked</span>
+              <?= compliance_badge('LOCKED') ?>
             <?php endif; ?>
           </div>
 
@@ -287,7 +287,7 @@ if ($detailId > 0) {
                     <td>v<?= (int)$s['version_no'] ?></td>
                     <td><?= count($items) ?></td>
                     <td>
-                      <?= h((string)$s['status']) ?>
+                      <?= compliance_badge((string)$s['status']) ?>
                       <?php if (!empty($s['locked_at'])): ?>
                         <span class="cmp-pill" style="margin-left:6px;background:rgba(196,118,11,0.10);color:#a66508;border-color:rgba(196,118,11,0.20);">Locked</span>
                       <?php endif; ?>
@@ -332,11 +332,56 @@ if ($detailId > 0) {
     }
 } else {
     $rows = ComplianceAuditEngine::listRecent($pdo);
+    $filterQ = trim((string)($_GET['q'] ?? ''));
+    $filterStatus = strtoupper(trim((string)($_GET['status'] ?? '')));
+    $filterAuthority = strtoupper(trim((string)($_GET['authority'] ?? '')));
+    $filterFrom = trim((string)($_GET['from'] ?? ''));
+    $filterTo = trim((string)($_GET['to'] ?? ''));
+    $sort = (string)($_GET['sort'] ?? 'updated_desc');
+
+    $rows = array_values(array_filter($rows, static function (array $r) use ($filterQ, $filterStatus, $filterAuthority, $filterFrom, $filterTo): bool {
+        if ($filterQ !== '') {
+            $hay = strtolower((string)($r['audit_code'] ?? '') . ' ' . (string)($r['title'] ?? '') . ' ' . (string)($r['audit_entity'] ?? '') . ' ' . (string)($r['external_ref'] ?? ''));
+            if (strpos($hay, strtolower($filterQ)) === false) {
+                return false;
+            }
+        }
+        if ($filterStatus !== '' && strtoupper((string)($r['status'] ?? '')) !== $filterStatus) {
+            return false;
+        }
+        if ($filterAuthority !== '' && strtoupper((string)($r['authority'] ?? '')) !== $filterAuthority) {
+            return false;
+        }
+        $start = substr((string)($r['start_date'] ?? ''), 0, 10);
+        if ($filterFrom !== '' && $start !== '' && $start < $filterFrom) {
+            return false;
+        }
+        if ($filterTo !== '' && $start !== '' && $start > $filterTo) {
+            return false;
+        }
+        return true;
+    }));
+
+    usort($rows, static function (array $a, array $b) use ($sort): int {
+        if ($sort === 'start_asc') {
+            return strcmp((string)($a['start_date'] ?? ''), (string)($b['start_date'] ?? ''));
+        }
+        if ($sort === 'start_desc') {
+            return strcmp((string)($b['start_date'] ?? ''), (string)($a['start_date'] ?? ''));
+        }
+        if ($sort === 'title_asc') {
+            return strcasecmp((string)($a['title'] ?? ''), (string)($b['title'] ?? ''));
+        }
+        return strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? ''));
+    });
 
     compliance_page_open(array(
         'overline' => 'Compliance',
         'title' => 'Audits',
         'description' => 'Plan and execute internal & authority audits. Attach versioned checklist snapshots and track lifecycle from PLANNED to CLOSED.',
+        'actions' => array(
+            array('label' => 'New audit', 'modal' => 'audit-create-modal', 'icon' => 'plus'),
+        ),
         'flash' => $flash,
         'stats' => array(
             array('label' => 'Total audits', 'value' => count($rows)),
@@ -344,8 +389,55 @@ if ($detailId > 0) {
     ));
     ?>
 
-    <div class="cmp-cols">
-      <section class="cmp-card" style="padding:0;overflow:hidden;">
+    <section class="cmp-card">
+      <form method="get" class="compliance-filterbar">
+        <label class="cmp-field compliance-filterbar__search">
+          <span>Search</span>
+          <input type="search" name="q" value="<?= h($filterQ) ?>" placeholder="Audit code, title, entity or reference">
+        </label>
+        <label class="cmp-field">
+          <span>Status</span>
+          <select name="status">
+            <option value="">All statuses</option>
+            <?php foreach (ComplianceAuditEngine::statuses() as $s): ?>
+              <option value="<?= h($s) ?>" <?= $filterStatus === strtoupper($s) ? 'selected' : '' ?>><?= h(compliance_friendly_label($s)) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label class="cmp-field">
+          <span>Authority</span>
+          <select name="authority">
+            <option value="">All authorities</option>
+            <?php foreach (ComplianceAuditEngine::authorities() as $a): ?>
+              <option value="<?= h($a) ?>" <?= $filterAuthority === strtoupper($a) ? 'selected' : '' ?>><?= h($a) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label class="cmp-field">
+          <span>From</span>
+          <input type="date" name="from" value="<?= h($filterFrom) ?>">
+        </label>
+        <label class="cmp-field">
+          <span>To</span>
+          <input type="date" name="to" value="<?= h($filterTo) ?>">
+        </label>
+        <label class="cmp-field">
+          <span>Sort</span>
+          <select name="sort">
+            <option value="updated_desc" <?= $sort === 'updated_desc' ? 'selected' : '' ?>>Recently updated</option>
+            <option value="start_desc" <?= $sort === 'start_desc' ? 'selected' : '' ?>>Start date newest</option>
+            <option value="start_asc" <?= $sort === 'start_asc' ? 'selected' : '' ?>>Start date oldest</option>
+            <option value="title_asc" <?= $sort === 'title_asc' ? 'selected' : '' ?>>Title A-Z</option>
+          </select>
+        </label>
+        <div class="cmp-toolbar-actions" style="margin:0;">
+          <button type="submit">Apply filters</button>
+          <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/audits.php">Clear</a>
+        </div>
+      </form>
+    </section>
+
+      <section class="cmp-card compliance-card--full" style="padding:0;overflow:hidden;">
         <div style="padding:18px 24px;border-bottom:1px solid var(--border-soft);display:flex;justify-content:space-between;align-items:center;">
           <h2 class="cmp-card-title" style="margin:0;">Recent audits</h2>
           <span class="cmp-pill" style="background:#f3f6fb;color:#71809a;"><?= count($rows) ?> result<?= count($rows) === 1 ? '' : 's' ?></span>
@@ -364,13 +456,13 @@ if ($detailId > 0) {
               <tr><td colspan="5" style="color:var(--text-muted);">No audits yet.</td></tr>
             <?php endif; ?>
             <?php foreach ($rows as $r): ?>
-              <tr>
+              <tr data-href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td class="cmp-mono">
                   <a href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>"><?= h((string)$r['audit_code']) ?></a>
                 </td>
                 <td><?= h((string)$r['title']) ?></td>
                 <td><?= h((string)$r['authority']) ?></td>
-                <td><?= h((string)$r['status']) ?></td>
+                <td><?= compliance_badge((string)$r['status']) ?></td>
                 <td class="cmp-mono">
                   <?= h((string)($r['start_date'] ?? '—')) ?> &rarr; <?= h((string)($r['end_date'] ?? '—')) ?>
                 </td>
@@ -381,10 +473,7 @@ if ($detailId > 0) {
         </div>
       </section>
 
-      <section class="cmp-card cmp-side-card">
-        <div class="cmp-card-head">
-          <h3 class="cmp-card-title">New audit</h3>
-        </div>
+      <?php compliance_modal_open('audit-create-modal', 'New audit'); ?>
         <form method="post" action="/admin/compliance/audits.php" style="display:flex;flex-direction:column;gap:14px;">
           <input type="hidden" name="action" value="create_audit">
 
@@ -429,10 +518,12 @@ if ($detailId > 0) {
             <textarea name="subject" rows="3"></textarea>
           </label>
 
-          <button type="submit" style="width:100%;">Create audit</button>
+          <div class="compliance-modal__footer">
+            <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+            <button type="submit">Create audit</button>
+          </div>
         </form>
-      </section>
-    </div>
+      <?php compliance_modal_close(); ?>
 
     <?php
     compliance_page_close();

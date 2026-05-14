@@ -360,8 +360,13 @@ if ($detailId > 0) {
         $stRaw = (string)($finding['status'] ?? '');
         compliance_page_open(array(
             'overline' => 'Compliance · Finding',
-            'title' => (string)$finding['title'],
-            'description' => (string)$finding['classification'] . ' · severity ' . $sev . ' · status ' . $stRaw . ($findingLocked ? ' · LOCKED' : ''),
+            'title' => (string)$finding['finding_code'],
+            'description' => (string)$finding['title'],
+            'stats' => array(
+                array('label' => 'Level', 'value' => compliance_friendly_label((string)$finding['classification']), 'tone' => (string)$finding['classification'] === 'LEVEL_1' ? 'crit' : ((string)$finding['classification'] === 'LEVEL_2' ? 'warn' : 'ok')),
+                array('label' => 'Severity', 'value' => compliance_friendly_label($sev), 'tone' => $sev === 'CRITICAL' || $sev === 'HIGH' ? 'crit' : ($sev === 'MEDIUM' ? 'warn' : 'ok')),
+                array('label' => 'Status', 'value' => compliance_friendly_label($stRaw), 'tone' => in_array($stRaw, array('CLOSED','CANCELLED'), true) ? 'ok' : 'warn'),
+            ),
             'back' => array(
                 'href' => '/admin/compliance/findings.php',
                 'label' => 'All findings',
@@ -372,6 +377,11 @@ if ($detailId > 0) {
         ?>
 
         <section class="cmp-card">
+          <div class="cmp-meta-line" style="margin-bottom:14px;">
+            <?= compliance_badge((string)$finding['classification'], 'level') ?>
+            <?= compliance_badge($sev, 'severity') ?>
+            <?= compliance_badge($stRaw) ?>
+          </div>
           <h2 style="margin:0 0 8px;">Finding details</h2>
           <?php if ($findingLocked): ?>
             <p class="queue-status is-warn" style="display:inline-block;">This finding is locked.</p>
@@ -394,17 +404,15 @@ if ($detailId > 0) {
               </select>
             </label>
 
-            <label style="display:block;margin-bottom:12px;">
+            <label class="cmp-field compliance-field--full" style="margin-bottom:12px;">
               <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Title *</span>
               <input name="title" required value="<?= h((string)$finding['title']) ?>"
-                style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
                 <?= $findingLocked ? 'disabled' : '' ?>>
             </label>
 
-            <label style="display:block;margin-bottom:12px;">
+            <label class="cmp-field compliance-field--full" style="margin-bottom:12px;">
               <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Description *</span>
               <textarea name="description" required rows="6"
-                style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
                 <?= $findingLocked ? 'disabled' : '' ?>><?= h((string)$finding['description']) ?></textarea>
             </label>
 
@@ -458,10 +466,9 @@ if ($detailId > 0) {
               </label>
             </div>
 
-            <label style="display:block;margin:12px 0;">
+            <label class="cmp-field compliance-field--full" style="margin:12px 0;">
               <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Regulation summary (cache / free text)</span>
               <textarea name="regulation_summary" rows="3"
-                style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
                 <?= $findingLocked ? 'disabled' : '' ?>><?= h((string)($finding['regulation_summary'] ?? '')) ?></textarea>
             </label>
 
@@ -479,10 +486,9 @@ if ($detailId > 0) {
                 <?= $findingLocked ? 'disabled' : '' ?>>
             </label>
 
-            <label style="display:block;margin-bottom:16px;">
+            <label class="cmp-field compliance-field--full" style="margin-bottom:16px;">
               <span style="display:block;font-size:12px;font-weight:700;color:#64748b;">Notes</span>
               <textarea name="notes" rows="3"
-                style="width:100%;max-width:720px;padding:8px;border-radius:8px;border:1px solid #cbd5e1;"
                 <?= $findingLocked ? 'disabled' : '' ?>><?= h((string)($finding['notes'] ?? '')) ?></textarea>
             </label>
 
@@ -495,15 +501,14 @@ if ($detailId > 0) {
         </section>
 
         <section class="cmp-card">
-          <h2 style="margin:0 0 8px;font-size:20px;">Regulatory citations</h2>
+          <h2 style="margin:0 0 8px;font-size:20px;">Regulatory References</h2>
           <p style="color:#64748b;font-size:14px;margin:0 0 14px;line-height:1.5;">
-            Structured links in <code>ipca_compliance_finding_regulatory_links</code> (AIM paragraphs, EASA eRules nodes, or external https URLs).
-            Use the regulation search to attach from indexed libraries.
+            Structured references are linked through the existing Resource Library-backed regulatory bridge. Use the regulation search to attach indexed EASA / AIM resources or verified external authority URLs.
           </p>
           <p style="margin:0 0 16px;">
             <a href="/admin/compliance/regulations.php?finding_id=<?= (int)$detailId ?>"
               style="display:inline-block;background:#3730a3;color:#fff;text-decoration:none;padding:10px 18px;border-radius:10px;font-weight:700;">
-              Search regulations & attach
+              Search regulatory references
             </a>
           </p>
           <?php if ($regLinks === array()): ?>
@@ -566,6 +571,13 @@ if ($detailId > 0) {
             AI suggests the <em>next</em> Why step (legacy parity). Each suggestion is logged in
             <code>ipca_compliance_ai_runs</code>. Locking the RCA requires a human approver name — AI cannot lock.
           </p>
+          <?php if ($findingLocked): ?>
+            <p class="cmp-flash is-warn">RCA editing is locked because this finding is locked. Reopen or unlock the finding through the existing finding workflow before changing RCA content.</p>
+          <?php elseif ($rcaLocked): ?>
+            <p class="cmp-flash is-ok">RCA is locked because it was approved by a human approver. The existing workflow does not expose an unlock action here.</p>
+          <?php else: ?>
+            <p class="cmp-flash is-ok">RCA is editable. Save the draft first, then use the visible Lock RCA action when the analysis is ready for approval.</p>
+          <?php endif; ?>
           <?php if ($rcaLocked): ?>
             <p class="queue-status is-ok" style="display:inline-block;margin-bottom:12px;">
               RCA locked<?php
@@ -677,24 +689,24 @@ if ($detailId > 0) {
             <table class="compliance-table" style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
               <thead>
                 <tr style="background:#f8fafc;text-align:left;">
-                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Code</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;width:150px;">Code</th>
                   <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Title</th>
-                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Status</th>
-                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Due</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;width:150px;">Status</th>
+                  <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;width:180px;">Due</th>
                 </tr>
               </thead>
               <tbody>
                 <?php foreach ($capItems as $c): ?>
-                  <tr>
+                  <tr data-href="/admin/compliance/corrective_actions.php?id=<?= (int)$c['id'] ?>" class="compliance-row-clickable">
                     <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;font-family:ui-monospace,monospace;font-size:12px;">
                       <a href="/admin/compliance/corrective_actions.php?id=<?= (int)$c['id'] ?>" style="color:#1e3c72;font-weight:700;">
                         <?= h((string)$c['action_code']) ?>
                       </a>
                     </td>
                     <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= h((string)$c['title']) ?></td>
-                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= h((string)$c['status']) ?></td>
+                    <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;"><?= compliance_badge((string)$c['status']) ?></td>
                     <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#64748b;">
-                      <?= !empty($c['due_date']) ? h(substr((string)$c['due_date'], 0, 10)) : '—' ?>
+                      <?= compliance_deadline_badge(isset($c['due_date']) ? (string)$c['due_date'] : null) ?>
                     </td>
                   </tr>
                 <?php endforeach; ?>
@@ -712,6 +724,17 @@ if ($detailId > 0) {
     } catch (Throwable $e) {
         $rows = array();
     }
+    $filterScope = strtolower((string)($_GET['scope'] ?? 'open'));
+    if (!in_array($filterScope, array('open', 'closed', 'all'), true)) {
+        $filterScope = 'open';
+    }
+    $filterQ = trim((string)($_GET['q'] ?? ''));
+    $filterSeverity = strtoupper(trim((string)($_GET['severity'] ?? '')));
+    $filterLevel = strtoupper(trim((string)($_GET['level'] ?? '')));
+    $filterAudit = isset($_GET['audit_id']) ? (int)$_GET['audit_id'] : 0;
+    $filterFrom = trim((string)($_GET['from'] ?? ''));
+    $filterTo = trim((string)($_GET['to'] ?? ''));
+    $sort = (string)($_GET['sort'] ?? 'updated_desc');
 
     $fCounts = array('open' => 0, 'closed' => 0);
     foreach ($rows as $r) {
@@ -722,10 +745,57 @@ if ($detailId > 0) {
             $fCounts['open']++;
         }
     }
+
+    $authorNames = array();
+    $authorIds = array_values(array_unique(array_filter(array_map(static function (array $r): int {
+        return (int)($r['created_by'] ?? 0);
+    }, $rows))));
+    if ($authorIds !== array()) {
+        try {
+            $in = implode(',', array_fill(0, count($authorIds), '?'));
+            $stUsers = $pdo->prepare('SELECT id, name, email FROM users WHERE id IN (' . $in . ')');
+            $stUsers->execute($authorIds);
+            foreach (($stUsers->fetchAll(PDO::FETCH_ASSOC) ?: array()) as $u) {
+                $name = trim((string)($u['name'] ?? ''));
+                $authorNames[(int)$u['id']] = $name !== '' ? $name : (string)($u['email'] ?? '');
+            }
+        } catch (Throwable $e) {
+            $authorNames = array();
+        }
+    }
+
+    $rows = array_values(array_filter($rows, static function (array $r) use ($filterScope, $filterQ, $filterSeverity, $filterLevel, $filterAudit, $filterFrom, $filterTo): bool {
+        $status = strtoupper((string)($r['status'] ?? ''));
+        $isClosed = in_array($status, array('CLOSED', 'VOID', 'CANCELLED'), true);
+        if ($filterScope === 'open' && $isClosed) { return false; }
+        if ($filterScope === 'closed' && !$isClosed) { return false; }
+        if ($filterSeverity !== '' && strtoupper((string)($r['severity'] ?? '')) !== $filterSeverity) { return false; }
+        if ($filterLevel !== '' && strtoupper((string)($r['classification'] ?? '')) !== $filterLevel) { return false; }
+        if ($filterAudit > 0 && (int)($r['audit_id'] ?? 0) !== $filterAudit) { return false; }
+        if ($filterQ !== '') {
+            $hay = strtolower((string)($r['finding_code'] ?? '') . ' ' . (string)($r['title'] ?? '') . ' ' . (string)($r['description'] ?? '') . ' ' . (string)($r['reference'] ?? '') . ' ' . (string)($r['regulation_summary'] ?? ''));
+            if (strpos($hay, strtolower($filterQ)) === false) { return false; }
+        }
+        $raised = substr((string)($r['raised_date'] ?? ''), 0, 10);
+        if ($filterFrom !== '' && $raised !== '' && $raised < $filterFrom) { return false; }
+        if ($filterTo !== '' && $raised !== '' && $raised > $filterTo) { return false; }
+        return true;
+    }));
+
+    usort($rows, static function (array $a, array $b) use ($sort): int {
+        if ($sort === 'raised_desc') { return strcmp((string)($b['raised_date'] ?? ''), (string)($a['raised_date'] ?? '')); }
+        if ($sort === 'raised_asc') { return strcmp((string)($a['raised_date'] ?? ''), (string)($b['raised_date'] ?? '')); }
+        if ($sort === 'severity_desc') { return strcmp((string)($a['severity'] ?? ''), (string)($b['severity'] ?? '')); }
+        return strcmp((string)($b['updated_at'] ?? ''), (string)($a['updated_at'] ?? ''));
+    });
+
     compliance_page_open(array(
         'overline' => 'Compliance · Findings',
         'title' => 'Findings',
         'description' => 'Create and manage non-conformance reports (NCRs). Open a row for full record incl. 5-Whys RCA, regulatory citations and corrective actions.',
+        'actions' => array(
+            array('label' => 'New finding', 'modal' => 'finding-create-modal', 'icon' => 'plus'),
+        ),
         'stats' => array(
             array('label' => 'Open',   'value' => (int)$fCounts['open'],   'tone' => $fCounts['open'] > 0 ? 'warn' : 'ok'),
             array('label' => 'Closed', 'value' => (int)$fCounts['closed'], 'tone' => 'ok'),
@@ -735,8 +805,72 @@ if ($detailId > 0) {
     ));
     ?>
 
-    <div class="cmp-cols">
-      <section class="cmp-card" style="overflow:hidden;">
+    <section class="cmp-card">
+      <form method="get" class="compliance-filterbar">
+        <label class="cmp-field compliance-filterbar__search">
+          <span>Search</span>
+          <input type="search" name="q" value="<?= h($filterQ) ?>" placeholder="NCR code, title, description or reference">
+        </label>
+        <label class="cmp-field">
+          <span>Scope</span>
+          <select name="scope">
+            <option value="open" <?= $filterScope === 'open' ? 'selected' : '' ?>>Open</option>
+            <option value="closed" <?= $filterScope === 'closed' ? 'selected' : '' ?>>Closed</option>
+            <option value="all" <?= $filterScope === 'all' ? 'selected' : '' ?>>All</option>
+          </select>
+        </label>
+        <label class="cmp-field">
+          <span>Severity</span>
+          <select name="severity">
+            <option value="">All</option>
+            <?php foreach ($optionsSev as $k => $lab): ?>
+              <option value="<?= h($k) ?>" <?= $filterSeverity === $k ? 'selected' : '' ?>><?= h($lab) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label class="cmp-field">
+          <span>Level</span>
+          <select name="level">
+            <option value="">All</option>
+            <?php foreach ($optionsClass as $k => $lab): ?>
+              <option value="<?= h($k) ?>" <?= $filterLevel === $k ? 'selected' : '' ?>><?= h(compliance_friendly_label($k)) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label class="cmp-field">
+          <span>Audit</span>
+          <select name="audit_id">
+            <option value="0">All audits</option>
+            <?php foreach ($audits as $a): ?>
+              <option value="<?= (int)$a['id'] ?>" <?= $filterAudit === (int)$a['id'] ? 'selected' : '' ?>><?= h((string)$a['audit_code']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <label class="cmp-field">
+          <span>From</span>
+          <input type="date" name="from" value="<?= h($filterFrom) ?>">
+        </label>
+        <label class="cmp-field">
+          <span>To</span>
+          <input type="date" name="to" value="<?= h($filterTo) ?>">
+        </label>
+        <label class="cmp-field">
+          <span>Sort</span>
+          <select name="sort">
+            <option value="updated_desc" <?= $sort === 'updated_desc' ? 'selected' : '' ?>>Recently updated</option>
+            <option value="raised_desc" <?= $sort === 'raised_desc' ? 'selected' : '' ?>>Raised newest</option>
+            <option value="raised_asc" <?= $sort === 'raised_asc' ? 'selected' : '' ?>>Raised oldest</option>
+            <option value="severity_desc" <?= $sort === 'severity_desc' ? 'selected' : '' ?>>Severity</option>
+          </select>
+        </label>
+        <div class="cmp-toolbar-actions" style="margin:0;">
+          <button type="submit">Apply filters</button>
+          <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/findings.php">Clear</a>
+        </div>
+      </form>
+    </section>
+
+      <section class="cmp-card compliance-card--full" style="overflow:hidden;">
         <div class="cmp-list-head" style="margin-bottom:14px;">
           <div class="cmp-list-title"><?= compliance_ui_icon('flag') ?><span>Findings</span></div>
           <div class="cmp-count-pill"><?= count($rows) ?></div>
@@ -750,29 +884,33 @@ if ($detailId > 0) {
               <th>Class</th>
               <th>Severity</th>
               <th>Status</th>
+              <th>Added by</th>
+              <th>Reg refs</th>
               <th>Updated</th>
             </tr>
           </thead>
           <tbody>
             <?php if (!$rows): ?>
-              <tr><td colspan="6" style="padding:20px;color:var(--text-muted);">No findings yet.</td></tr>
+              <tr><td colspan="8" style="padding:20px;color:var(--text-muted);">No findings match this filter.</td></tr>
             <?php endif; ?>
             <?php foreach ($rows as $r):
               $sev = (string)$r['severity'];
-              $sevCls = $sev === 'CRITICAL' ? 'cmp-pill-crit' : ($sev === 'HIGH' ? 'cmp-pill-warn' : ($sev === 'LOW' ? 'cmp-pill-ok' : ''));
               $stRaw = (string)$r['status'];
-              $stCls = in_array($stRaw, array('CLOSED','VOID','CANCELLED'), true) ? 'cmp-pill-ok' : 'cmp-pill-info';
+              $authorId = (int)($r['created_by'] ?? 0);
+              $author = $authorId > 0 && isset($authorNames[$authorId]) ? $authorNames[$authorId] : '';
             ?>
-              <tr>
+              <tr data-href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td class="cmp-mono">
                   <a href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>" style="color:#1f4079;font-weight:700;text-decoration:none;">
                     <?= h((string)$r['finding_code']) ?>
                   </a>
                 </td>
                 <td><?= h((string)$r['title']) ?></td>
-                <td><span class="cmp-pill"><?= h((string)$r['classification']) ?></span></td>
-                <td><span class="cmp-pill <?= h($sevCls) ?>"><?= h($sev) ?></span></td>
-                <td><span class="cmp-pill <?= h($stCls) ?>"><?= h($stRaw) ?></span></td>
+                <td><?= compliance_badge((string)$r['classification'], 'level') ?></td>
+                <td><?= compliance_badge($sev, 'severity') ?></td>
+                <td><?= compliance_badge($stRaw) ?></td>
+                <td><?= $author !== '' ? h($author) : '<span style="color:var(--text-muted);">Not recorded</span>' ?></td>
+                <td><?= trim((string)($r['regulation_summary'] ?? '')) !== '' ? '<span class="cmp-pill compliance-badge--status-open">Summary</span>' : '<span style="color:var(--text-muted);">—</span>' ?></td>
                 <td class="cmp-mono"><?= h((string)$r['updated_at']) ?></td>
               </tr>
             <?php endforeach; ?>
@@ -781,8 +919,7 @@ if ($detailId > 0) {
         </div>
       </section>
 
-      <section class="cmp-card">
-        <h3 style="margin:0 0 14px;">New finding</h3>
+      <?php compliance_modal_open('finding-create-modal', 'New finding'); ?>
         <form method="post" action="/admin/compliance/findings.php">
           <input type="hidden" name="action" value="create_finding">
 
@@ -830,10 +967,12 @@ if ($detailId > 0) {
             <input type="date" name="raised_date" value="<?= h(date('Y-m-d')) ?>">
           </label>
 
-          <button type="submit" style="width:100%;">Create finding</button>
+          <div class="compliance-modal__footer">
+            <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+            <button type="submit">Create finding</button>
+          </div>
         </form>
-      </section>
-    </div>
+      <?php compliance_modal_close(); ?>
     <?php
 }
 

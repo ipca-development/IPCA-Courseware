@@ -104,11 +104,11 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 $aimOk = rl_aim_tables_present($pdo);
 $easaOk = ComplianceRegulatoryLinkEngine::easaStagingPresent($pdo);
 
-$regDescription = 'Search indexed FAA AIM paragraphs and EASA Easy Access (staging) nodes, then attach a citation to a finding. Verifier hooks remain the authority for edition freshness — this page only creates regulatory link rows.';
+$regDescription = 'Browse the same EASA Easy Access Rules experience used by the Resource Library, then attach indexed regulatory references to findings without changing the Resource Library page.';
 
 compliance_page_open(array(
     'overline' => 'Compliance · Regulatory bridge',
-    'title' => 'Regulation search',
+    'title' => 'EASA regulation browser',
     'description' => $regDescription,
     'back' => $findingId > 0 ? array(
         'href' => '/admin/compliance/findings.php?id=' . (int)$findingId,
@@ -138,13 +138,37 @@ compliance_page_open(array(
       </p>
     <?php endif; ?>
 
+    <div style="margin-bottom:16px;">
+      <?php
+      $easaApiHref = '/admin/api/resource_library_easa_api.php';
+      $easaUserPhotoHref = '';
+      $easaMayaAvatarHref = '/assets/avatars/maya.png';
+      $easaCu = cw_current_user($pdo);
+      if (is_array($easaCu) && (int)($easaCu['id'] ?? 0) > 0) {
+          try {
+              $easaPhotoStmt = $pdo->prepare('SELECT photo_path FROM users WHERE id = ? LIMIT 1');
+              $easaPhotoStmt->execute(array((int)$easaCu['id']));
+              $easaPhotoRow = $easaPhotoStmt->fetch(PDO::FETCH_ASSOC);
+              $easaPhotoRaw = trim((string)($easaPhotoRow['photo_path'] ?? ''));
+              if ($easaPhotoRaw !== '') {
+                  $easaUserPhotoHref = $easaPhotoRaw[0] === '/' ? $easaPhotoRaw : '/' . $easaPhotoRaw;
+              }
+          } catch (Throwable $e) {
+              $easaUserPhotoHref = '';
+          }
+      }
+      require __DIR__ . '/../resource_library_easa_tab.inc.php';
+      ?>
+    </div>
+
+    <?php if ($findingCtx): ?>
     <form method="get" action="/admin/compliance/regulations.php" class="cmp-toolbar">
       <?php if ($findingId > 0): ?>
         <input type="hidden" name="finding_id" value="<?= (int)$findingId ?>">
       <?php endif; ?>
       <label class="cmp-field" style="min-width:280px;">
-        <span class="cmp-field-label">Query</span>
-        <input type="text" name="q" value="<?= h($q) ?>" placeholder="e.g. FCL, parallel approaches, fuel…">
+        <span class="cmp-field-label">Attach search</span>
+        <input type="text" name="q" value="<?= h($q) ?>" placeholder="Find indexed reference to attach">
       </label>
       <label class="cmp-field" style="min-width:180px;">
         <span class="cmp-field-label">Corpus</span>
@@ -156,6 +180,7 @@ compliance_page_open(array(
       </label>
       <button type="submit">Search</button>
     </form>
+    <?php endif; ?>
 
     <?php if ($q !== '' && !$aimOk && !$easaOk): ?>
       <p class="cmp-flash cmp-flash-danger" style="margin-top:12px;">No regulatory tables available — apply resource library SQL migrations.</p>

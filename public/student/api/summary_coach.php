@@ -24,6 +24,8 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/openai.php';
 require_once __DIR__ . '/../../../src/lesson_summary_service.php';
+require_once __DIR__ . '/../../../src/resource_library_ai.php';
+require_once __DIR__ . '/../../../src/resource_library_catalog.php';
 
 cw_require_login();
 
@@ -214,6 +216,216 @@ function maya_build_lesson_context(PDO $pdo, int $lessonId, int $maxChars): stri
     }
 
     return maya_truncate(trim(implode("\n\n", $parts)), $maxChars);
+}
+
+function maya_table_exists(PDO $pdo, string $table): bool
+{
+    static $cache = [];
+    $key = strtolower($table);
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    try {
+        $st = $pdo->prepare("SHOW TABLES LIKE ?");
+        $st->execute([$table]);
+        $cache[$key] = (bool)$st->fetchColumn();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+    return $cache[$key];
+}
+
+function maya_column_exists(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = strtolower($table . '.' . $column);
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    try {
+        $st = $pdo->prepare("SHOW COLUMNS FROM `{$table}` LIKE ?");
+        $st->execute([$column]);
+        $cache[$key] = (bool)$st->fetchColumn();
+    } catch (Throwable $e) {
+        $cache[$key] = false;
+    }
+    return $cache[$key];
+}
+
+function maya_like_escape(string $s): string
+{
+    return str_replace(['\\', '%', '_'], ['\\\\', '\\%', '\\_'], $s);
+}
+
+/**
+ * Dynamic official reference context for Maya.
+ *
+ * No source names are hardcoded here. We collect slide_references for this
+ * lesson, resolve them against live Resource Library editions using metadata
+ * (resource_type/work_code/title/revision/extra_config_json), and retrieve
+ * compact excerpts through the existing Resource Library AI block search.
+ */
+function maya_build_official_reference_context(PDO $pdo, int $lessonId, string $query, int $maxChars = 3200): array
+{
+    if ($lessonId <= 0 || !maya_table_exists($pdo, 'slide_references') || !maya_table_exists($pdo, 'resource_library_editions')) {
+        return ['text' => '', 'sources' => []];
+    }
+
+    $refRows = [];
+    try {
+        $st = $pdo->prepare("
+            SELECT DISTINCT sr.ref_type, sr.ref_code, sr.ref_title, sr.notes
+            FROM slides s
+            JOIN slide_references sr ON sr.slide_id = s.id
+            WHERE s.lesson_id = ?
+              AND s.is_deleted = 0
+            ORDER BY sr.ref_type, sr.ref_code, sr.ref_title
+            LIMIT 40
+        ");
+        $st->execute([$lessonId]);
+        $refRows = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Throwable $e) {
+        $refRows = [];
+    }
+    if (!$refRows) return ['text' => '', 'sources' => []];
+
+    $hasResourceType = function_exists('rl_catalog_has_resource_type_column')
+        ? rl_catalog_has_resource_type_column($pdo)
+        : maya_column_exists($pdo, 'resource_library_editions', 'resource_type');
+    $hasExtra = maya_column_exists($pdo, 'resource_library_editions', 'extra_config_json');
+
+    $editionSelect = 'id, title, revision_code, revision_date, status, work_code'
+        . ($hasResourceType ? ', resource_type' : '')
+        . ($hasExtra ? ', extra_config_json' : '');
+
+    $sourceBlocks = [];
+    $sourceMeta = [];
+    $seenEditionRef = [];
+
+    foreach ($refRows as $ref) {
+        $refType = trim((string)($ref['ref_type'] ?? ''));
+        $refCode = trim((string)($ref['ref_code'] ?? ''));
+        $refTitle = trim((string)($ref['ref_title'] ?? ''));
+        $notes = trim((string)($ref['notes'] ?? ''));
+        $needles = array_values(array_filter(array_unique([$refType, $refCode, $refTitle])));
+        if (!$needles) continue;
+
+        $where = ["status = 'live'"];
+        $params = [];
+        $needleClauses = [];
+        foreach ($needles as $n) {
+            $like = '%' . maya_like_escape($n) . '%';
+            $needleClauses[] = "(COALESCE(work_code,'') LIKE ? OR COALESCE(title,'') LIKE ? OR COALESCE(revision_code,'') LIKE ?"
+                . ($hasResourceType ? " OR COALESCE(resource_type,'') LIKE ?" : "")
+                . ($hasExtra ? " OR COALESCE(extra_config_json,'') LIKE ?" : "")
+                . ")";
+            $params[] = $like; $params[] = $like; $params[] = $like;
+            if ($hasResourceType) $params[] = $like;
+            if ($hasExtra) $params[] = $like;
+        }
+        $where[] = '(' . implode(' OR ', $needleClauses) . ')';
+
+        try {
+            $sql = "SELECT {$editionSelect}
+                    FROM resource_library_editions
+                    WHERE " . implode(' AND ', $where) . "
+                    ORDER BY sort_order ASC, revision_date DESC, id DESC
+                    LIMIT 4";
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+            $editions = $st->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable $e) {
+            $editions = [];
+        }
+
+        // If no direct metadata match exists, use the reference as a search
+        // query across all live editions with block content. This keeps the
+        // system useful for new resource types without source-name mappings.
+        if (!$editions) {
+            try {
+                $st = $pdo->query("SELECT {$editionSelect}
+                                   FROM resource_library_editions
+                                   WHERE status = 'live'
+                                   ORDER BY sort_order ASC, revision_date DESC, id DESC
+                                   LIMIT 12");
+                $editions = $st ? ($st->fetchAll(PDO::FETCH_ASSOC) ?: []) : [];
+            } catch (Throwable $e) {
+                $editions = [];
+            }
+        }
+
+        $searchQuery = trim(implode(' ', array_filter([$refCode, $refTitle, $notes, $query])));
+        foreach ($editions as $ed) {
+            $editionId = (int)($ed['id'] ?? 0);
+            if ($editionId <= 0) continue;
+            $key = $editionId . '|' . $refType . '|' . $refCode . '|' . $refTitle;
+            if (isset($seenEditionRef[$key])) continue;
+            $seenEditionRef[$key] = true;
+
+            $blocks = [];
+            if (maya_table_exists($pdo, 'resource_library_blocks')) {
+                $blocks = rl_ai_search_resource_blocks($pdo, $editionId, $searchQuery !== '' ? $searchQuery : $query, 2);
+            }
+            if (!$blocks) continue;
+
+            $resourceType = (string)($ed['resource_type'] ?? 'resource');
+            $sourceMeta[] = [
+                'resource_type' => $resourceType,
+                'title' => (string)($ed['title'] ?? ''),
+                'revision_code' => (string)($ed['revision_code'] ?? ''),
+                'work_code' => (string)($ed['work_code'] ?? ''),
+                'ref_type' => $refType,
+                'ref_code' => $refCode,
+                'ref_title' => $refTitle,
+            ];
+
+            foreach ($blocks as $b) {
+                $path = '';
+                $pathJson = (string)($b['section_path_json'] ?? '');
+                if ($pathJson !== '') {
+                    $decoded = json_decode($pathJson, true);
+                    if (is_array($decoded)) $path = implode(' > ', array_map('strval', $decoded));
+                }
+                $excerpt = maya_truncate(trim((string)($b['body_text'] ?? '')), 700);
+                if ($excerpt === '') continue;
+                $sourceBlocks[] =
+                    "[OFFICIAL SOURCE]\n"
+                    . "Type: " . ($resourceType !== '' ? $resourceType : 'resource') . "\n"
+                    . "Title: " . trim((string)($ed['title'] ?? '')) . "\n"
+                    . "Edition: " . trim((string)($ed['revision_code'] ?? '')) . "\n"
+                    . "Reference: " . trim(implode(' ', array_filter([$refType, $refCode, $refTitle]))) . "\n"
+                    . ($path !== '' ? "Section: {$path}\n" : '')
+                    . "Excerpt: {$excerpt}";
+                if (strlen(implode("\n\n", $sourceBlocks)) >= $maxChars) break 3;
+            }
+        }
+    }
+
+    return [
+        'text' => maya_truncate(implode("\n\n", $sourceBlocks), $maxChars),
+        'sources' => $sourceMeta,
+    ];
+}
+
+function maya_choose_coaching_focus_from_summary(string $lessonTitle, string $summaryPlain, array $referenceContext): string
+{
+    $hay = strtolower($lessonTitle . ' ' . $summaryPlain . ' ' . json_encode($referenceContext['sources'] ?? []));
+    $families = [
+        'cockpit interpretation and IFR/procedure decision making' => ['instrument', 'approach', 'procedure', 'clearance', 'altitude', 'minimum', 'navigation', 'chart', 'fix', 'course', 'intercept'],
+        'go/no-go decision making, risk management, and changing conditions' => ['weather', 'visibility', 'ceiling', 'wind', 'storm', 'icing', 'forecast', 'metar', 'taf', 'temperature'],
+        'pilot responsibility, compliance, and required preflight/cockpit action' => ['regulation', 'legal', 'required', 'compliance', 'inspection', 'certificate', 'currency', 'limitation', 'responsibility'],
+        'aircraft behavior, systems understanding, performance, and safety consequence' => ['system', 'engine', 'fuel', 'electrical', 'control', 'lift', 'drag', 'stall', 'performance', 'weight', 'balance', 'aerodynamic'],
+        'communication, coordination, and operational procedure' => ['communication', 'radio', 'atc', 'clearance', 'tower', 'traffic', 'airport', 'runway', 'taxi', 'phraseology'],
+    ];
+    $scores = [];
+    foreach ($families as $focus => $terms) {
+        $scores[$focus] = 0;
+        foreach ($terms as $term) {
+            if (strpos($hay, $term) !== false) $scores[$focus]++;
+        }
+    }
+    arsort($scores);
+    $best = key($scores);
+    if ($best && current($scores) > 0) {
+        return $best;
+    }
+    return 'operational application: connect a concept to a cockpit action, flight decision, safety outcome, or cause-and-effect relationship';
 }
 
 function maya_decode_json_column($raw): array
@@ -525,12 +737,12 @@ function maya_compose_initial_greeting(array $snap, int $existingInteractions, s
     if ($words >= 80) {
         return [
             'maya_message' =>
-                "Good — looks like you've already written a solid draft (~{$words} words). "
-                . "Let's pick up where you left off. Tell me, in your own words, the most "
-                . "important idea you've written so far and why it matters during a real flight.",
+                "Good — you already have a solid draft (~{$words} words). "
+                . "I'm not going to make you restart. Let's strengthen it like an instructor would: "
+                . "we'll look for what is descriptive, what needs deeper explanation, and where you can add real flight application.",
             'next_question' =>
-                "What's the single most important idea in your current summary, and why does it matter in the cockpit?",
-            'stage' => $persistedStage ?: MAYA_STAGE_EXPLAIN,
+                "Pick one section of your summary that feels mostly descriptive, and explain how that knowledge would help you make a better decision before or during a flight.",
+            'stage' => $persistedStage ?: MAYA_STAGE_CORRELATE,
         ];
     }
 
@@ -541,7 +753,7 @@ function maya_compose_initial_greeting(array $snap, int $existingInteractions, s
                 . "Don't worry about polishing yet; just tell me the main ideas of this lesson "
                 . "in your own words.",
             'next_question' =>
-                "What are the 3–5 main ideas you want this summary to cover?",
+                "Pick one idea from your draft and connect it to a real flight decision, cockpit action, or safety outcome.",
             'stage' => $persistedStage ?: MAYA_STAGE_STRUCTURE,
         ];
     }
@@ -551,8 +763,8 @@ function maya_compose_initial_greeting(array $snap, int $existingInteractions, s
         return [
             'maya_message' =>
                 "Welcome back. Your summary editor looks empty right now — let's start "
-                . "by capturing the main ideas of this lesson in your own words.",
-            'next_question' => "What are the 3–5 most important ideas from this lesson?",
+                . "by capturing the lesson concepts you would actually use as a pilot.",
+            'next_question' => "List the main concepts from this lesson, then pick one and connect it to a cockpit action or flight decision.",
             'stage' => null,
         ];
     }
@@ -561,8 +773,8 @@ function maya_compose_initial_greeting(array $snap, int $existingInteractions, s
     return [
         'maya_message' =>
             "Hi! Let's build your summary together. Start by writing the main ideas of "
-            . "this lesson in your own words.",
-        'next_question' => "What are the 3–5 most important ideas from this lesson?",
+            . "this lesson in your own words, with an eye toward how a pilot would use them.",
+        'next_question' => "List the main concepts from this lesson, then pick one and connect it to a cockpit action or flight decision.",
         'stage' => null,
     ];
 }
@@ -623,7 +835,7 @@ function maya_create_session(PDO $pdo, int $userId, int $lessonId, int $cohortId
         'needs_deeper_question' => false,
     ];
 
-    $firstQ = "What are the 3–5 most important ideas from this lesson?";
+    $firstQ = "List the main concepts from this lesson, then pick one and connect it to a cockpit action or flight decision.";
 
     $st->execute([
         $userId,
@@ -749,7 +961,7 @@ function maya_system_prompt(): string
         . "1. Ask exactly one clear question at a time.\n"
         . "2. Keep maya_message under 60 words. Friendly, slightly fun, never childish.\n"
         . "3. Praise specific good effort when appropriate; challenge shallow answers.\n"
-        . "4. Ask 'why', 'how', 'what if', and 'how would this affect a real flight?'\n"
+        . "4. Ask operational 'how', 'what if', and 'what action changes?' questions tied to flying, not generic essay questions.\n"
         . "5. Direct the student where to look in the lesson — not to a paste-able answer.\n"
         . "6. Never provide the full lesson summary. Never provide complete copy-pasteable answers to lesson concepts.\n"
         . "7. Never accept pasted text without probing understanding. If flags.major_paste was true and the student's reply convincingly explains the pasted content in their own words, you MAY clear it; otherwise leave it true.\n"
@@ -763,7 +975,18 @@ function maya_system_prompt(): string
         . "   - instructor_confidence: would you sign this student off on this topic? (operational understanding).\n"
         . "11. Stage progression: structure → explain → correlate → operational_example → readiness.\n"
         . "    Pick the most useful next stage based on what is weakest. Never jump to final_review unless input.action == 'final_review'.\n"
-        . "12. ready_for_final_review is advisory only. The server enforces final thresholds. Be honest, not generous.";
+        . "12. ready_for_final_review is advisory only. The server enforces final thresholds. Be honest, not generous.\n"
+        . "13. Avoid generic school-style questions such as 'What is the single most important idea?', 'Why is this important?', or 'Tell me more' unless the lesson genuinely centers around one core concept.\n"
+        . "14. Prefer aviation coaching questions that connect one concept to cockpit action, pilot decision making, preflight action, go/no-go decisions, safety consequences, aircraft behavior, system understanding, operational use, or cause-and-effect relationships.\n"
+        . "15. If the summary already contains several valid concepts, do not force the student to rank one as most important. Identify what is strong, what is descriptive only, what lacks operational understanding, what lacks correlation, and what lacks cockpit application. Then ask ONE targeted aviation coaching question.\n"
+        . "16. Behave like a flight instructor during an oral discussion, not a school essay grader.\n"
+        . "17. Before asking the next question, silently evaluate: technically correct concepts, shallow concepts, descriptive-only sections, missing operational understanding, missing cause/effect relationships, and missing real pilot actions.\n"
+        . "18. Prefer prompts such as: What would the pilot notice? What cockpit action would change? How would this affect a go/no-go decision? What safety consequence could follow? What would you check during preflight? How would you explain this to another student before flight? What could happen if this was misunderstood?\n"
+        . "19. Avoid repetitive prompting patterns.\n"
+        . "20. Do not repeatedly ask the student to identify the most important idea.\n"
+        . "21. Use official reference context dynamically from the Resource Library system when available. Use it to guide coaching intelligently, but do not quote large blocks and do not provide copy-ready answers.\n"
+        . "22. Use the reference context to detect weak understanding, guide the student toward correct operational reasoning, ask better questions, and identify omissions.\n"
+        . "23. Different official source types imply different coaching focus areas. Let the dynamic source metadata and content guide whether the question should emphasize operational procedures, regulations, IFR procedures, weather, aircraft systems, aerodynamics, communication, safety, legality, performance, or decision making.";
 }
 
 function maya_response_schema(bool $isFinalReview): array
@@ -1108,11 +1331,12 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     }
     $serverMajorPaste = $hadMajorPaste || $clientMajorPaste;
 
-    // Compose user prompt for the model. Keep it tight: lesson title + small
-    // lesson context excerpt + current state + recent coach history + student
-    // input. We DO NOT send the full lesson on every checkpoint.
+    // Compose user prompt for the model. Keep it tight: lesson title + slide
+    // context + dynamic official reference context + current state + recent
+    // coach history + student input. We DO NOT send full resources on every
+    // checkpoint.
     $lessonTitle = maya_get_lesson_title($pdo, $lessonId);
-    $lessonContext = maya_build_lesson_context($pdo, $lessonId, 4500);
+    $lessonContext = maya_build_lesson_context($pdo, $lessonId, 2600);
 
     $excerptForModel = '';
     if ($summaryExcerpt !== '') {
@@ -1120,6 +1344,15 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     } elseif ($summaryPlainFromHtml !== '') {
         $excerptForModel = maya_truncate($summaryPlainFromHtml, 1800);
     }
+    $summaryPlainForFocus = trim($summaryPlainFromHtml !== '' ? $summaryPlainFromHtml : $summaryExcerpt);
+    $referenceBundle = maya_build_official_reference_context(
+        $pdo,
+        $lessonId,
+        trim($lessonTitle . ' ' . $summaryPlainForFocus . ' ' . $studentReply),
+        3200
+    );
+    $officialReferenceText = trim((string)($referenceBundle['text'] ?? ''));
+    $coachingFocus = maya_choose_coaching_focus_from_summary($lessonTitle, $summaryPlainForFocus, $referenceBundle);
 
     $historyLines = [];
     foreach ($clientHistory as $h) {
@@ -1141,15 +1374,31 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . ", word_count={$wordCount}, paragraph_count={$paragraphCount}\n"
         . "Trigger: " . ($explicitStudentReply ? 'student_reply' : 'micro_checkpoint');
 
+    $diagnosticTask =
+        "Before asking your next question, silently evaluate:\n\n"
+        . "1. Which parts of the student summary are technically correct?\n"
+        . "2. Which parts are merely descriptive?\n"
+        . "3. Which parts need operational application?\n"
+        . "4. Which parts need cause-and-effect correlation?\n"
+        . "5. Which official reference concept would help strengthen understanding?\n"
+        . "6. What would a real instructor ask next?\n\n"
+        . "Then ask ONE targeted aviation coaching question.\n\n"
+        . "Do NOT ask generic \"most important idea\" questions.";
+
     $userPrompt =
-        "LESSON TITLE:\n" . ($lessonTitle !== '' ? $lessonTitle : '(unknown)') . "\n\n"
-        . "LESSON REFERENCE CONTEXT (excerpt — do not paste this back to the student):\n"
-        . ($lessonContext !== '' ? $lessonContext : '(no lesson reference text indexed)') . "\n\n"
+        "LESSON TITLE\n" . ($lessonTitle !== '' ? $lessonTitle : '(unknown)') . "\n\n"
+        . "LESSON SLIDE CONTEXT\n"
+        . ($lessonContext !== '' ? $lessonContext : '(no slide context indexed)') . "\n\n"
+        . "OFFICIAL REFERENCE CONTEXT\n"
+        . ($officialReferenceText !== '' ? $officialReferenceText : '(no live official resource excerpts resolved for this checkpoint)') . "\n\n"
         . "STUDENT SUMMARY EXCERPT (current draft):\n"
         . ($excerptForModel !== '' ? $excerptForModel : '(student has not written anything yet)') . "\n\n"
         . "RECENT COACH HISTORY:\n" . $historyText . "\n\n"
+        . "COACHING DIAGNOSTIC TASK\n" . $diagnosticTask . "\n\n"
+        . "COACHING FOCUS HINT\n" . $coachingFocus . "\n\n"
         . "STATE:\n" . $stateBlock . "\n\n"
         . "Coach the student per the rules. Pick the most useful next stage. "
+        . "Ask like a flight instructor: operational, causal, safety-oriented, and cockpit-aware. "
         . "Score honestly. Output structured JSON only.";
 
     try {
@@ -1177,7 +1426,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     }
     $nextQuestion = trim((string)($aiJson['next_question'] ?? ''));
     if ($nextQuestion === '') {
-        $nextQuestion = 'What\'s the most important idea you have written so far, and why does it matter in flight?';
+        $nextQuestion = 'Pick one idea from your summary and explain how it would affect a real flight decision, cockpit action, or safety outcome.';
     }
     $newStage = maya_normalize_stage($aiJson['stage'] ?? $coachStage);
 
@@ -1445,21 +1694,33 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
     $historyText = $historyLines ? implode("\n", $historyLines) : '(no prior turns)';
 
     $lessonTitle = maya_get_lesson_title($pdo, $lessonId);
-    $lessonContext = maya_build_lesson_context($pdo, $lessonId, 8000);
+    $lessonContext = maya_build_lesson_context($pdo, $lessonId, 5000);
+    $referenceBundle = maya_build_official_reference_context(
+        $pdo,
+        $lessonId,
+        trim($lessonTitle . ' ' . $summaryPlain),
+        3600
+    );
+    $officialReferenceText = trim((string)($referenceBundle['text'] ?? ''));
+    $coachingFocus = maya_choose_coaching_focus_from_summary($lessonTitle, $summaryPlain, $referenceBundle);
 
     $userPrompt =
         "FINAL REVIEW.\n"
-        . "LESSON TITLE:\n" . ($lessonTitle !== '' ? $lessonTitle : '(unknown)') . "\n\n"
-        . "LESSON REFERENCE CONTENT:\n"
+        . "LESSON TITLE\n" . ($lessonTitle !== '' ? $lessonTitle : '(unknown)') . "\n\n"
+        . "LESSON SLIDE CONTEXT\n"
         . ($lessonContext !== '' ? $lessonContext : '(no lesson reference text indexed)') . "\n\n"
+        . "OFFICIAL REFERENCE CONTEXT\n"
+        . ($officialReferenceText !== '' ? $officialReferenceText : '(no live official resource excerpts resolved for final review)') . "\n\n"
         . "FULL STUDENT SUMMARY (plain text):\n"
         . maya_truncate($summaryPlain, 6000) . "\n\n"
         . "COACHING HISTORY (most recent):\n" . $historyText . "\n\n"
+        . "COACHING FOCUS HINT\n" . $coachingFocus . "\n\n"
         . "Saved scores at preflight: " . json_encode($scores) . "\n\n"
         . "Perform a deep final review. Set approved=true ONLY if the summary "
         . "demonstrates real operational understanding, correlation between "
         . "concepts, the student's own wording, and good coverage. If not, set "
-        . "approved=false and give one focused next question. Return JSON only.";
+        . "approved=false and give one focused aviation-instructor question about the operational gap. "
+        . "Do not ask generic most-important-idea or tell-me-more questions. Return JSON only.";
 
     try {
         $aiJson = maya_call_openai(

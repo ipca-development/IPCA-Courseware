@@ -31,7 +31,7 @@ if (!function_exists('compliance_page_open')) {
      *   overline?:string,
      *   title:string,
      *   description?:string,
-     *   actions?:array<int,array{label:string,href?:string,icon?:string,variant?:string}>,
+     *   actions?:array<int,array{label:string,href?:string,modal?:string,icon?:string,variant?:string}>,
      *   stats?:array<int,array{label:string,value:int|string,sub?:string,tone?:string,href?:string}>,
      *   back?:array{href:string,label:string,code?:string},
      *   flash?:array{type:string,message:string}|null,
@@ -78,6 +78,7 @@ if (!function_exists('compliance_page_open')) {
                     continue;
                 }
                 $href = (string)($action['href'] ?? '');
+                $modal = (string)($action['modal'] ?? '');
                 $icon = (string)($action['icon'] ?? '');
                 $svg = $icon !== '' ? compliance_ui_icon($icon) : '';
 
@@ -86,6 +87,11 @@ if (!function_exists('compliance_page_open')) {
                     echo $svg;
                     echo '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
                     echo '</a>';
+                } elseif ($modal !== '') {
+                    echo '<button type="button" class="cmp-hero-action compliance-hero__action compliance-btn compliance-btn--secondary" data-compliance-modal-open="' . htmlspecialchars($modal, ENT_QUOTES, 'UTF-8') . '">';
+                    echo $svg;
+                    echo '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
+                    echo '</button>';
                 } else {
                     echo '<button type="button" class="cmp-hero-action compliance-hero__action compliance-btn compliance-btn--secondary">';
                     echo $svg;
@@ -138,9 +144,165 @@ if (!function_exists('compliance_page_open')) {
     }
 }
 
+if (!function_exists('compliance_friendly_label')) {
+    function compliance_friendly_label(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return 'Not set';
+        }
+        if (preg_match('/^LEVEL_(\d+)$/', strtoupper($value), $m)) {
+            return 'LEVEL ' . $m[1];
+        }
+
+        return ucwords(strtolower(str_replace('_', ' ', $value)));
+    }
+}
+
+if (!function_exists('compliance_badge_class')) {
+    function compliance_badge_class(string $value, string $kind = 'status'): string
+    {
+        $v = strtoupper(trim($value));
+        $classes = 'cmp-pill compliance-badge';
+
+        if ($kind === 'level') {
+            if ($v === 'LEVEL_1') { return $classes . ' compliance-badge--level-1'; }
+            if ($v === 'LEVEL_2') { return $classes . ' compliance-badge--level-2'; }
+            if ($v === 'LEVEL_3') { return $classes . ' compliance-badge--level-3'; }
+        }
+
+        if ($kind === 'severity') {
+            if ($v === 'CRITICAL') { return $classes . ' compliance-badge--severity-critical'; }
+            if ($v === 'HIGH') { return $classes . ' compliance-badge--severity-high'; }
+            if ($v === 'MEDIUM') { return $classes . ' compliance-badge--severity-medium'; }
+            if ($v === 'LOW') { return $classes . ' compliance-badge--severity-low'; }
+        }
+
+        if (in_array($v, array('CLOSED', 'COMPLETED', 'RELEASED', 'SENT', 'VERIFIED', 'RESOLVED'), true)) {
+            return $classes . ' compliance-badge--status-closed';
+        }
+        if (in_array($v, array('IN_PROGRESS', 'WAITING_AUTHORITY', 'WAITING_INTERNAL', 'WAITING_EXTERNAL', 'UNDER_REVIEW', 'LIVE', 'SENDING', 'READY_TO_SEND'), true)) {
+            return $classes . ' compliance-badge--status-progress';
+        }
+        if (in_array($v, array('OPEN', 'NEW', 'SCHEDULED'), true)) {
+            return $classes . ' compliance-badge--status-open';
+        }
+        if (in_array($v, array('PLANNED', 'DRAFT', 'PROPOSED', 'PENDING', 'PENDING_APPROVAL'), true)) {
+            return $classes . ' compliance-badge--planned';
+        }
+        if (in_array($v, array('CANCELLED', 'VOID', 'REJECTED', 'FAILED'), true)) {
+            return $classes . ' compliance-badge--status-muted';
+        }
+
+        return $classes;
+    }
+}
+
+if (!function_exists('compliance_badge')) {
+    function compliance_badge(string $value, string $kind = 'status'): string
+    {
+        return '<span class="' . htmlspecialchars(compliance_badge_class($value, $kind), ENT_QUOTES, 'UTF-8') . '">'
+            . htmlspecialchars(compliance_friendly_label($value), ENT_QUOTES, 'UTF-8')
+            . '</span>';
+    }
+}
+
+if (!function_exists('compliance_deadline_badge')) {
+    function compliance_deadline_badge(?string $date): string
+    {
+        $date = trim((string)$date);
+        if ($date === '') {
+            return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">No due date</span>';
+        }
+        try {
+            $today = new DateTimeImmutable(date('Y-m-d'));
+            $due = new DateTimeImmutable(substr($date, 0, 10));
+            $days = (int)$today->diff($due)->format('%r%a');
+        } catch (Throwable $e) {
+            return '<span class="cmp-pill compliance-badge compliance-badge--status-muted">' . htmlspecialchars($date, ENT_QUOTES, 'UTF-8') . '</span>';
+        }
+
+        if ($days < 0) {
+            $label = 'Expired ' . abs($days) . ' day' . (abs($days) === 1 ? '' : 's') . ' ago';
+            $class = 'compliance-badge--deadline-expired';
+        } elseif ($days === 0) {
+            $label = 'Due today';
+            $class = 'compliance-badge--deadline-warning';
+        } elseif ($days <= 7) {
+            $label = 'Due in ' . $days . ' day' . ($days === 1 ? '' : 's');
+            $class = 'compliance-badge--deadline-warning';
+        } else {
+            $label = 'Due in ' . $days . ' days';
+            $class = 'compliance-badge--deadline-ok';
+        }
+
+        return '<span class="cmp-pill compliance-badge ' . $class . '">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
+    }
+}
+
+if (!function_exists('compliance_modal_open')) {
+    function compliance_modal_open(string $id, string $title): void
+    {
+        echo '<dialog class="compliance-modal" id="' . htmlspecialchars($id, ENT_QUOTES, 'UTF-8') . '">';
+        echo '<div class="compliance-modal__panel">';
+        echo '<div class="compliance-modal__header">';
+        echo '<h2 class="compliance-modal__title">' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h2>';
+        echo '<button type="button" class="compliance-modal__close cmp-btn-secondary" data-compliance-modal-close aria-label="Close modal">&times;</button>';
+        echo '</div>';
+        echo '<div class="compliance-modal__body">';
+    }
+}
+
+if (!function_exists('compliance_modal_close')) {
+    function compliance_modal_close(): void
+    {
+        echo '</div></div></dialog>';
+    }
+}
+
+if (!function_exists('compliance_ui_script')) {
+    function compliance_ui_script(): void
+    {
+        static $done = false;
+        if ($done) {
+            return;
+        }
+        $done = true;
+        ?>
+        <script>
+        (function () {
+          if (window.__ipcaComplianceUiReady) { return; }
+          window.__ipcaComplianceUiReady = true;
+          document.addEventListener('click', function (ev) {
+            var opener = ev.target.closest('[data-compliance-modal-open]');
+            if (opener) {
+              var id = opener.getAttribute('data-compliance-modal-open');
+              var modal = id ? document.getElementById(id) : null;
+              if (modal && typeof modal.showModal === 'function') { modal.showModal(); }
+              ev.preventDefault();
+              return;
+            }
+            if (ev.target.matches('[data-compliance-modal-close]')) {
+              var dialog = ev.target.closest('dialog');
+              if (dialog) { dialog.close(); }
+              ev.preventDefault();
+              return;
+            }
+            var row = ev.target.closest('tr[data-href]');
+            if (row && !ev.target.closest('a,button,input,select,textarea,label,form')) {
+              window.location.href = row.getAttribute('data-href');
+            }
+          });
+        })();
+        </script>
+        <?php
+    }
+}
+
 if (!function_exists('compliance_page_close')) {
     function compliance_page_close(): void
     {
+        compliance_ui_script();
         echo '</div>';
     }
 }

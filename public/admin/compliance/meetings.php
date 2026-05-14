@@ -512,6 +512,23 @@ if ($detailId > 0) {
 
 $meetings = ComplianceMeetingEngine::listRecent($pdo, 100);
 $audits = ComplianceAuditEngine::listRecent($pdo, 100);
+$filterQ = trim((string)($_GET['q'] ?? ''));
+$filterStatus = strtoupper(trim((string)($_GET['status'] ?? '')));
+$filterType = strtoupper(trim((string)($_GET['type'] ?? '')));
+$filterFrom = trim((string)($_GET['from'] ?? ''));
+$filterTo = trim((string)($_GET['to'] ?? ''));
+$meetings = array_values(array_filter($meetings, static function (array $m) use ($filterQ, $filterStatus, $filterType, $filterFrom, $filterTo): bool {
+    if ($filterQ !== '') {
+        $hay = strtolower((string)($m['meeting_code'] ?? '') . ' ' . (string)($m['title'] ?? '') . ' ' . (string)($m['location'] ?? ''));
+        if (strpos($hay, strtolower($filterQ)) === false) { return false; }
+    }
+    if ($filterStatus !== '' && strtoupper((string)($m['status'] ?? '')) !== $filterStatus) { return false; }
+    if ($filterType !== '' && strtoupper((string)($m['meeting_type'] ?? '')) !== $filterType) { return false; }
+    $when = substr((string)($m['scheduled_start'] ?? ''), 0, 10);
+    if ($filterFrom !== '' && $when !== '' && $when < $filterFrom) { return false; }
+    if ($filterTo !== '' && $when !== '' && $when > $filterTo) { return false; }
+    return true;
+}));
 
 $mtgCounts = array('scheduled' => 0, 'live' => 0, 'completed' => 0, 'total' => count($meetings));
 foreach ($meetings as $m) {
@@ -531,6 +548,9 @@ compliance_page_open(array(
     'overline' => 'Compliance · Meetings',
     'title' => 'Meetings',
     'description' => 'Schedule, run and lock compliance meetings: audit openings/closings, management reviews, safety reviews. Each meeting captures attendees, decisions and action items, and can be linked to an audit or case.',
+    'actions' => array(
+        array('label' => 'New meeting', 'modal' => 'meeting-create-modal', 'icon' => 'plus'),
+    ),
     'stats' => array(
         array('label' => 'Scheduled', 'value' => (int)$mtgCounts['scheduled']),
         array('label' => 'Live',      'value' => (int)$mtgCounts['live'],      'tone' => $mtgCounts['live'] > 0 ? 'crit' : 'ok'),
@@ -540,8 +560,17 @@ compliance_page_open(array(
     'flash' => $flash,
 ));
 ?>
-  <div class="cmp-cols">
-    <section class="cmp-card">
+  <section class="cmp-card">
+    <form method="get" class="compliance-filterbar">
+      <label class="cmp-field compliance-filterbar__search"><span>Search</span><input type="search" name="q" value="<?= h($filterQ) ?>" placeholder="Meeting code, title or location"></label>
+      <label class="cmp-field"><span>Status</span><select name="status"><option value="">All statuses</option><?php foreach (ComplianceMeetingEngine::statuses() as $s): ?><option value="<?= h($s) ?>" <?= $filterStatus === strtoupper($s) ? 'selected' : '' ?>><?= h(compliance_friendly_label($s)) ?></option><?php endforeach; ?></select></label>
+      <label class="cmp-field"><span>Type</span><select name="type"><option value="">All types</option><?php foreach (ComplianceMeetingEngine::meetingTypes() as $t): ?><option value="<?= h($t) ?>" <?= $filterType === strtoupper($t) ? 'selected' : '' ?>><?= h(compliance_friendly_label($t)) ?></option><?php endforeach; ?></select></label>
+      <label class="cmp-field"><span>From</span><input type="date" name="from" value="<?= h($filterFrom) ?>"></label>
+      <label class="cmp-field"><span>To</span><input type="date" name="to" value="<?= h($filterTo) ?>"></label>
+      <div class="cmp-toolbar-actions" style="margin:0;"><button type="submit">Apply filters</button><a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/meetings.php">Clear</a></div>
+    </form>
+  </section>
+    <section class="cmp-card compliance-card--full">
       <div class="cmp-list-head" style="margin-bottom:14px;">
         <div class="cmp-list-title">
           <?= compliance_ui_icon('calendar') ?>
@@ -550,7 +579,7 @@ compliance_page_open(array(
         <div class="cmp-count-pill"><?= count($meetings) ?></div>
       </div>
       <?php if ($meetings === array()): ?>
-        <p style="color:var(--text-muted);margin:0;">No meetings yet — use the form on the right to create one.</p>
+        <p style="color:var(--text-muted);margin:0;">No meetings match this filter.</p>
       <?php else: ?>
         <div class="compliance-table-wrap">
         <table class="cmpmtg-table compliance-table">
@@ -562,7 +591,7 @@ compliance_page_open(array(
               $st = (string)$m['status'];
               $cls = $st === 'LIVE' ? 'is-live' : ($st === 'COMPLETED' ? 'is-done' : ($st === 'CANCELLED' ? 'is-cancel' : ''));
             ?>
-              <tr>
+              <tr data-href="/admin/compliance/meetings.php?id=<?= (int)$m['id'] ?>" class="compliance-row-clickable">
                 <td class="cmp-mono">
                   <a href="/admin/compliance/meetings.php?id=<?= (int)$m['id'] ?>" style="color:#1f4079;font-weight:700;text-decoration:none;">
                     <?= h((string)$m['meeting_code']) ?>
@@ -570,7 +599,7 @@ compliance_page_open(array(
                 </td>
                 <td><?= h((string)$m['title']) ?></td>
                 <td><?= h((string)$m['meeting_type']) ?></td>
-                <td><span class="cmpmtg-pill <?= h($cls) ?>"><?= h($st) ?></span></td>
+                <td><?= compliance_badge($st) ?></td>
                 <td class="cmp-mono"><?= h(substr((string)($m['scheduled_start'] ?? ''), 0, 16)) ?></td>
                 <td>
                   <a class="cmp-btn-secondary cmp-btn-link cmpmtg-btn-small" href="/admin/compliance/meetings.php?id=<?= (int)$m['id'] ?>" style="text-decoration:none;">Open</a>
@@ -583,8 +612,7 @@ compliance_page_open(array(
       <?php endif; ?>
     </section>
 
-    <section class="cmp-card">
-      <h3 style="margin:0 0 14px;">New meeting</h3>
+    <?php compliance_modal_open('meeting-create-modal', 'New meeting'); ?>
       <form method="post">
         <input type="hidden" name="action" value="create_meeting">
         <label style="display:block;margin-bottom:10px;">
@@ -624,10 +652,9 @@ compliance_page_open(array(
           <span class="cmpmtg-label">Agenda</span>
           <textarea class="cmpmtg-input" name="agenda" rows="4"></textarea>
         </label>
-        <button type="submit" style="width:100%;">Create meeting</button>
+        <div class="compliance-modal__footer"><button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button><button type="submit">Create meeting</button></div>
       </form>
-    </section>
-  </div>
+    <?php compliance_modal_close(); ?>
 <?php
 compliance_page_close();
 cw_footer();

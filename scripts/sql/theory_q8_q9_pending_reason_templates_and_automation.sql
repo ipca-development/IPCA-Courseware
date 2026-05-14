@@ -37,65 +37,19 @@
 --     notification_templates, notification_template_versions,
 --     automation_flows, automation_flow_conditions, automation_flow_actions.
 --
--- Re-runnable: the DELETE blocks below remove all rows seeded by this script
--- so it can be re-applied cleanly. Comment them out to preserve manual edits.
+-- Re-runnable and non-destructive: this script only inserts missing catalog,
+-- template, version, flow, condition, and action rows. It never deletes existing
+-- event keys, flows, templates, or manually edited admin configuration.
 -- =============================================================================
 
 START TRANSACTION;
 
 -- -----------------------------------------------------------------------------
--- Optional: remove previous seed (templates + versions + flows + event defs)
--- -----------------------------------------------------------------------------
-DELETE ntv FROM notification_template_versions ntv
-INNER JOIN notification_templates nt ON nt.id = ntv.notification_template_id
-WHERE nt.notification_key IN (
-    'deadline_pending_reason_decision_escalated_chief',
-    'deadline_rejected_reason_review_required_chief',
-    'deadline_extension_refused_past_due_chief',
-    'instructor_pending_reason_decision_reminder_chief'
-);
-
-DELETE FROM notification_templates
-WHERE notification_key IN (
-    'deadline_pending_reason_decision_escalated_chief',
-    'deadline_rejected_reason_review_required_chief',
-    'deadline_extension_refused_past_due_chief',
-    'instructor_pending_reason_decision_reminder_chief'
-);
-
-DELETE a FROM automation_flow_actions a
-INNER JOIN automation_flows f ON f.id = a.flow_id
-WHERE f.event_key IN (
-    'deadline_pending_reason_decision_escalated',
-    'deadline_rejected_reason_review_required',
-    'deadline_extension_refused_past_due',
-    'instructor_pending_reason_decision_reminder'
-);
-
-DELETE c FROM automation_flow_conditions c
-INNER JOIN automation_flows f ON f.id = c.flow_id
-WHERE f.event_key IN (
-    'deadline_pending_reason_decision_escalated',
-    'deadline_rejected_reason_review_required',
-    'deadline_extension_refused_past_due',
-    'instructor_pending_reason_decision_reminder'
-);
-
-DELETE FROM automation_flows
-WHERE event_key IN (
-    'deadline_pending_reason_decision_escalated',
-    'deadline_rejected_reason_review_required',
-    'deadline_extension_refused_past_due',
-    'instructor_pending_reason_decision_reminder'
-);
-
-DELETE FROM automation_event_definitions
-WHERE event_key IN (
-    'deadline_pending_reason_decision_escalated',
-    'deadline_rejected_reason_review_required',
-    'deadline_extension_refused_past_due',
-    'instructor_pending_reason_decision_reminder'
-);
+-- Safety / idempotency note:
+-- Previous drafts of this seed used DELETE + INSERT to make reruns clean. That is
+-- not architecture-safe because an admin may edit templates/flows after the first
+-- run. This final seed preserves all existing rows and inserts only missing rows.
+-- If you want to reset admin-edited content, do it manually in Admin UI.
 
 -- -----------------------------------------------------------------------------
 -- 1) Register the four new event keys in the admin catalog so they appear in
@@ -107,41 +61,67 @@ SET @theory_cat_id := (
     LIMIT 1
 );
 
+INSERT INTO automation_event_categories
+    (category_key, label, description, sort_order, is_active)
+SELECT
+    'theory_training',
+    'Theory Training',
+    'Progress tests, lesson summaries, theory deadlines, and theory progression events.',
+    20,
+    1
+WHERE @theory_cat_id IS NULL;
+
+SET @theory_cat_id := COALESCE(@theory_cat_id, LAST_INSERT_ID());
+
 INSERT INTO automation_event_definitions
     (event_key, label, description, category_id, sort_order, is_active)
-VALUES
-    (
-        'deadline_pending_reason_decision_escalated',
-        'Deadline — pending reason decision escalated to instructor',
-        'Q8: engine reached missed-deadline handling while the student''s earlier deadline reason submission is still awaiting instructor decision. The engine refuses to auto-extend and creates an instructor_approval action instead.',
-        @theory_cat_id,
-        140,
-        1
-    ),
-    (
-        'deadline_rejected_reason_review_required',
-        'Deadline — rejected reason needs further review',
-        'Q8: engine reached missed-deadline handling after the instructor already rejected a previous reason. Routes to instructor_approval for a fresh corrective-action decision.',
-        @theory_cat_id,
-        145,
-        1
-    ),
-    (
-        'deadline_extension_refused_past_due',
-        'Deadline — automatic extension refused (would be past-due)',
-        'Q9: an automatic extension was refused because the projected new deadline was already in the past at the moment of evaluation (caused by cron backlog or delayed first tick). Engine creates an instructor_approval action so a human can decide whether to issue a manual fresh extension.',
-        @theory_cat_id,
-        150,
-        1
-    ),
-    (
-        'instructor_pending_reason_decision_reminder',
-        'Instructor reminder — pending reason decision',
-        'Daily nudge: lesson_activity.reason_decision is ''pending'' (student submitted, instructor has not yet decided). Dispatched at most once per UTC calendar day per lesson by TimeBasedProgressionCron.',
-        @theory_cat_id,
-        155,
-        1
-    );
+SELECT
+    'deadline_pending_reason_decision_escalated',
+    'Deadline — pending reason decision escalated to instructor',
+    'Q8: engine reached missed-deadline handling while the student''s earlier deadline reason submission is still awaiting instructor decision. The engine refuses to auto-extend and creates an instructor_approval action instead.',
+    @theory_cat_id,
+    140,
+    1
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_event_definitions
+    WHERE event_key = 'deadline_pending_reason_decision_escalated'
+)
+UNION ALL
+SELECT
+    'deadline_rejected_reason_review_required',
+    'Deadline — rejected reason needs further review',
+    'Q8: engine reached missed-deadline handling after the instructor already rejected a previous reason. Routes to instructor_approval for a fresh corrective-action decision.',
+    @theory_cat_id,
+    145,
+    1
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_event_definitions
+    WHERE event_key = 'deadline_rejected_reason_review_required'
+)
+UNION ALL
+SELECT
+    'deadline_extension_refused_past_due',
+    'Deadline — automatic extension refused (would be past-due)',
+    'Q9: an automatic extension was refused because the projected new deadline was already in the past at the moment of evaluation (caused by cron backlog or delayed first tick). Engine creates an instructor_approval action so a human can decide whether to issue a manual fresh extension.',
+    @theory_cat_id,
+    150,
+    1
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_event_definitions
+    WHERE event_key = 'deadline_extension_refused_past_due'
+)
+UNION ALL
+SELECT
+    'instructor_pending_reason_decision_reminder',
+    'Instructor reminder — pending reason decision',
+    'Daily nudge: lesson_activity.reason_decision is ''pending'' (student submitted, instructor has not yet decided). Dispatched at most once per UTC calendar day per lesson by TimeBasedProgressionCron.',
+    @theory_cat_id,
+    155,
+    1
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_event_definitions
+    WHERE event_key = 'instructor_pending_reason_decision_reminder'
+);
 
 -- -----------------------------------------------------------------------------
 -- 2) Shared allowed-variables shape for the chief-instructor templates.
@@ -290,66 +270,112 @@ SET @txt_reminder = '';
 -- -----------------------------------------------------------------------------
 -- 4) Notification templates + versions
 -- -----------------------------------------------------------------------------
+SET @tid_q8_pending := (
+    SELECT id FROM notification_templates
+    WHERE notification_key = 'deadline_pending_reason_decision_escalated_chief'
+      AND channel = 'email'
+    LIMIT 1
+);
+
 INSERT INTO notification_templates (
     notification_key, channel, name, description, is_enabled,
     subject_template, html_template, text_template, allowed_variables_json,
     created_at, updated_at
-) VALUES (
+) SELECT
     'deadline_pending_reason_decision_escalated_chief', 'email',
     'Theory — Pending reason decision escalated (chief)',
     'Chief instructor email when the engine refuses to auto-extend past a pending reason decision.',
     1, @sub_q8_pending, @html_q8_pending, @txt_q8_pending, @allowed_chief,
     UTC_TIMESTAMP(), UTC_TIMESTAMP()
+WHERE @tid_q8_pending IS NULL;
+SET @tid_q8_pending := COALESCE(@tid_q8_pending, LAST_INSERT_ID());
+
+SET @tid_q8_rejected := (
+    SELECT id FROM notification_templates
+    WHERE notification_key = 'deadline_rejected_reason_review_required_chief'
+      AND channel = 'email'
+    LIMIT 1
 );
-SET @tid_q8_pending := LAST_INSERT_ID();
 
 INSERT INTO notification_templates (
     notification_key, channel, name, description, is_enabled,
     subject_template, html_template, text_template, allowed_variables_json,
     created_at, updated_at
-) VALUES (
+) SELECT
     'deadline_rejected_reason_review_required_chief', 'email',
     'Theory — Rejected reason needs review (chief)',
     'Chief instructor email when the engine refuses to auto-extend after a rejected reason and the deadline passed again.',
     1, @sub_q8_rejected, @html_q8_rejected, @txt_q8_rejected, @allowed_chief,
     UTC_TIMESTAMP(), UTC_TIMESTAMP()
+WHERE @tid_q8_rejected IS NULL;
+SET @tid_q8_rejected := COALESCE(@tid_q8_rejected, LAST_INSERT_ID());
+
+SET @tid_q9_past := (
+    SELECT id FROM notification_templates
+    WHERE notification_key = 'deadline_extension_refused_past_due_chief'
+      AND channel = 'email'
+    LIMIT 1
 );
-SET @tid_q8_rejected := LAST_INSERT_ID();
 
 INSERT INTO notification_templates (
     notification_key, channel, name, description, is_enabled,
     subject_template, html_template, text_template, allowed_variables_json,
     created_at, updated_at
-) VALUES (
+) SELECT
     'deadline_extension_refused_past_due_chief', 'email',
     'Theory — Automatic extension refused (past-due) (chief)',
     'Chief instructor email when the engine refuses an automatic extension because the projected new deadline is already in the past.',
     1, @sub_q9_past, @html_q9_past, @txt_q9_past, @allowed_chief,
     UTC_TIMESTAMP(), UTC_TIMESTAMP()
+WHERE @tid_q9_past IS NULL;
+SET @tid_q9_past := COALESCE(@tid_q9_past, LAST_INSERT_ID());
+
+SET @tid_reminder := (
+    SELECT id FROM notification_templates
+    WHERE notification_key = 'instructor_pending_reason_decision_reminder_chief'
+      AND channel = 'email'
+    LIMIT 1
 );
-SET @tid_q9_past := LAST_INSERT_ID();
 
 INSERT INTO notification_templates (
     notification_key, channel, name, description, is_enabled,
     subject_template, html_template, text_template, allowed_variables_json,
     created_at, updated_at
-) VALUES (
+) SELECT
     'instructor_pending_reason_decision_reminder_chief', 'email',
     'Theory — Daily reminder, pending reason decision (chief)',
     'Chief instructor daily nudge for lessons where the student submitted a reason and an instructor decision is still pending.',
     1, @sub_reminder, @html_reminder, @txt_reminder, @allowed_chief,
     UTC_TIMESTAMP(), UTC_TIMESTAMP()
-);
-SET @tid_reminder := LAST_INSERT_ID();
+WHERE @tid_reminder IS NULL;
+SET @tid_reminder := COALESCE(@tid_reminder, LAST_INSERT_ID());
 
 -- versions (required: sends use latest version row)
 INSERT INTO notification_template_versions
     (notification_template_id, version_no, notification_key, subject_template, html_template, text_template, allowed_variables_json, changed_by_user_id, change_note, created_at)
-VALUES
-    (@tid_q8_pending,  1, 'deadline_pending_reason_decision_escalated_chief', @sub_q8_pending,  @html_q8_pending,  @txt_q8_pending,  @allowed_chief, NULL, 'Seed: scripts/sql/theory_q8_q9_pending_reason_templates_and_automation.sql', UTC_TIMESTAMP()),
-    (@tid_q8_rejected, 1, 'deadline_rejected_reason_review_required_chief',   @sub_q8_rejected, @html_q8_rejected, @txt_q8_rejected, @allowed_chief, NULL, 'Seed: scripts/sql/theory_q8_q9_pending_reason_templates_and_automation.sql', UTC_TIMESTAMP()),
-    (@tid_q9_past,     1, 'deadline_extension_refused_past_due_chief',        @sub_q9_past,     @html_q9_past,     @txt_q9_past,     @allowed_chief, NULL, 'Seed: scripts/sql/theory_q8_q9_pending_reason_templates_and_automation.sql', UTC_TIMESTAMP()),
-    (@tid_reminder,    1, 'instructor_pending_reason_decision_reminder_chief',@sub_reminder,    @html_reminder,    @txt_reminder,    @allowed_chief, NULL, 'Seed: scripts/sql/theory_q8_q9_pending_reason_templates_and_automation.sql', UTC_TIMESTAMP());
+SELECT @tid_q8_pending, 1, 'deadline_pending_reason_decision_escalated_chief', @sub_q8_pending, @html_q8_pending, @txt_q8_pending, @allowed_chief, NULL, 'Seed: scripts/sql/theory_q8_q9_pending_reason_templates_and_automation.sql', UTC_TIMESTAMP()
+WHERE NOT EXISTS (
+    SELECT 1 FROM notification_template_versions
+    WHERE notification_template_id = @tid_q8_pending AND version_no = 1
+)
+UNION ALL
+SELECT @tid_q8_rejected, 1, 'deadline_rejected_reason_review_required_chief', @sub_q8_rejected, @html_q8_rejected, @txt_q8_rejected, @allowed_chief, NULL, 'Seed: scripts/sql/theory_q8_q9_pending_reason_templates_and_automation.sql', UTC_TIMESTAMP()
+WHERE NOT EXISTS (
+    SELECT 1 FROM notification_template_versions
+    WHERE notification_template_id = @tid_q8_rejected AND version_no = 1
+)
+UNION ALL
+SELECT @tid_q9_past, 1, 'deadline_extension_refused_past_due_chief', @sub_q9_past, @html_q9_past, @txt_q9_past, @allowed_chief, NULL, 'Seed: scripts/sql/theory_q8_q9_pending_reason_templates_and_automation.sql', UTC_TIMESTAMP()
+WHERE NOT EXISTS (
+    SELECT 1 FROM notification_template_versions
+    WHERE notification_template_id = @tid_q9_past AND version_no = 1
+)
+UNION ALL
+SELECT @tid_reminder, 1, 'instructor_pending_reason_decision_reminder_chief', @sub_reminder, @html_reminder, @txt_reminder, @allowed_chief, NULL, 'Seed: scripts/sql/theory_q8_q9_pending_reason_templates_and_automation.sql', UTC_TIMESTAMP()
+WHERE NOT EXISTS (
+    SELECT 1 FROM notification_template_versions
+    WHERE notification_template_id = @tid_reminder AND version_no = 1
+);
 
 -- -----------------------------------------------------------------------------
 -- 5) Automation flows (one per event_key). Each flow:
@@ -359,99 +385,171 @@ VALUES
 -- -----------------------------------------------------------------------------
 
 -- 5a) Q8 — pending_reason_decision_escalated
+SET @flow_q8_pending := (
+    SELECT id FROM automation_flows
+    WHERE name = 'Theory — Pending reason decision escalated (chief email)'
+      AND event_key = 'deadline_pending_reason_decision_escalated'
+    LIMIT 1
+);
+
 INSERT INTO automation_flows
     (name, description, event_key, is_active, priority, created_at, updated_at)
-VALUES (
+SELECT
     'Theory — Pending reason decision escalated (chief email)',
     'Q8: send chief instructor an email when the engine refuses to auto-extend past a pending reason decision.',
     'deadline_pending_reason_decision_escalated',
     1, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-);
-SET @flow_q8_pending := LAST_INSERT_ID();
+WHERE @flow_q8_pending IS NULL;
+SET @flow_q8_pending := COALESCE(@flow_q8_pending, LAST_INSERT_ID());
 
 INSERT INTO automation_flow_conditions
     (flow_id, field_key, operator, value_text, value_number, sort_order)
-VALUES
-    (@flow_q8_pending, 'chief_instructor_email', 'is_not_empty', NULL, NULL, 10);
+SELECT @flow_q8_pending, 'chief_instructor_email', 'is_not_empty', NULL, NULL, 10
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_flow_conditions
+    WHERE flow_id = @flow_q8_pending
+      AND field_key = 'chief_instructor_email'
+      AND operator = 'is_not_empty'
+);
 
 INSERT INTO automation_flow_actions
     (flow_id, action_key, config_json, sort_order)
-VALUES (
-    @flow_q8_pending, 'send_email',
+SELECT
+    @flow_q8_pending,
+    'send_email',
     '{"notification_key":"deadline_pending_reason_decision_escalated_chief","to_email":"{{chief_instructor_email}}","to_name":"{{chief_instructor_name}}"}',
     10
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_flow_actions
+    WHERE flow_id = @flow_q8_pending
+      AND action_key = 'send_email'
+      AND config_json = '{"notification_key":"deadline_pending_reason_decision_escalated_chief","to_email":"{{chief_instructor_email}}","to_name":"{{chief_instructor_name}}"}'
 );
 
 -- 5b) Q8 — rejected_reason_review_required
+SET @flow_q8_rejected := (
+    SELECT id FROM automation_flows
+    WHERE name = 'Theory — Rejected reason needs review (chief email)'
+      AND event_key = 'deadline_rejected_reason_review_required'
+    LIMIT 1
+);
+
 INSERT INTO automation_flows
     (name, description, event_key, is_active, priority, created_at, updated_at)
-VALUES (
+SELECT
     'Theory — Rejected reason needs review (chief email)',
     'Q8: send chief instructor an email when the engine refuses to auto-extend after a rejected reason.',
     'deadline_rejected_reason_review_required',
     1, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-);
-SET @flow_q8_rejected := LAST_INSERT_ID();
+WHERE @flow_q8_rejected IS NULL;
+SET @flow_q8_rejected := COALESCE(@flow_q8_rejected, LAST_INSERT_ID());
 
 INSERT INTO automation_flow_conditions
     (flow_id, field_key, operator, value_text, value_number, sort_order)
-VALUES
-    (@flow_q8_rejected, 'chief_instructor_email', 'is_not_empty', NULL, NULL, 10);
+SELECT @flow_q8_rejected, 'chief_instructor_email', 'is_not_empty', NULL, NULL, 10
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_flow_conditions
+    WHERE flow_id = @flow_q8_rejected
+      AND field_key = 'chief_instructor_email'
+      AND operator = 'is_not_empty'
+);
 
 INSERT INTO automation_flow_actions
     (flow_id, action_key, config_json, sort_order)
-VALUES (
-    @flow_q8_rejected, 'send_email',
+SELECT
+    @flow_q8_rejected,
+    'send_email',
     '{"notification_key":"deadline_rejected_reason_review_required_chief","to_email":"{{chief_instructor_email}}","to_name":"{{chief_instructor_name}}"}',
     10
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_flow_actions
+    WHERE flow_id = @flow_q8_rejected
+      AND action_key = 'send_email'
+      AND config_json = '{"notification_key":"deadline_rejected_reason_review_required_chief","to_email":"{{chief_instructor_email}}","to_name":"{{chief_instructor_name}}"}'
 );
 
 -- 5c) Q9 — extension_refused_past_due
+SET @flow_q9_past := (
+    SELECT id FROM automation_flows
+    WHERE name = 'Theory — Automatic extension refused (chief email)'
+      AND event_key = 'deadline_extension_refused_past_due'
+    LIMIT 1
+);
+
 INSERT INTO automation_flows
     (name, description, event_key, is_active, priority, created_at, updated_at)
-VALUES (
+SELECT
     'Theory — Automatic extension refused (chief email)',
     'Q9: send chief instructor an email when the engine refuses an automatic extension because the projected new deadline is past-due.',
     'deadline_extension_refused_past_due',
     1, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-);
-SET @flow_q9_past := LAST_INSERT_ID();
+WHERE @flow_q9_past IS NULL;
+SET @flow_q9_past := COALESCE(@flow_q9_past, LAST_INSERT_ID());
 
 INSERT INTO automation_flow_conditions
     (flow_id, field_key, operator, value_text, value_number, sort_order)
-VALUES
-    (@flow_q9_past, 'chief_instructor_email', 'is_not_empty', NULL, NULL, 10);
+SELECT @flow_q9_past, 'chief_instructor_email', 'is_not_empty', NULL, NULL, 10
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_flow_conditions
+    WHERE flow_id = @flow_q9_past
+      AND field_key = 'chief_instructor_email'
+      AND operator = 'is_not_empty'
+);
 
 INSERT INTO automation_flow_actions
     (flow_id, action_key, config_json, sort_order)
-VALUES (
-    @flow_q9_past, 'send_email',
+SELECT
+    @flow_q9_past,
+    'send_email',
     '{"notification_key":"deadline_extension_refused_past_due_chief","to_email":"{{chief_instructor_email}}","to_name":"{{chief_instructor_name}}"}',
     10
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_flow_actions
+    WHERE flow_id = @flow_q9_past
+      AND action_key = 'send_email'
+      AND config_json = '{"notification_key":"deadline_extension_refused_past_due_chief","to_email":"{{chief_instructor_email}}","to_name":"{{chief_instructor_name}}"}'
 );
 
 -- 5d) Daily pending-reason reminder (cron-driven)
+SET @flow_reminder := (
+    SELECT id FROM automation_flows
+    WHERE name = 'Theory — Daily reminder, pending reason decision (chief email)'
+      AND event_key = 'instructor_pending_reason_decision_reminder'
+    LIMIT 1
+);
+
 INSERT INTO automation_flows
     (name, description, event_key, is_active, priority, created_at, updated_at)
-VALUES (
+SELECT
     'Theory — Daily reminder, pending reason decision (chief email)',
     'Daily nudge fired by TimeBasedProgressionCron for lesson_activity rows where reason_decision = ''pending''. Dedupe is once-per-UTC-day per lesson.',
     'instructor_pending_reason_decision_reminder',
     1, 10, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
-);
-SET @flow_reminder := LAST_INSERT_ID();
+WHERE @flow_reminder IS NULL;
+SET @flow_reminder := COALESCE(@flow_reminder, LAST_INSERT_ID());
 
 INSERT INTO automation_flow_conditions
     (flow_id, field_key, operator, value_text, value_number, sort_order)
-VALUES
-    (@flow_reminder, 'chief_instructor_email', 'is_not_empty', NULL, NULL, 10);
+SELECT @flow_reminder, 'chief_instructor_email', 'is_not_empty', NULL, NULL, 10
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_flow_conditions
+    WHERE flow_id = @flow_reminder
+      AND field_key = 'chief_instructor_email'
+      AND operator = 'is_not_empty'
+);
 
 INSERT INTO automation_flow_actions
     (flow_id, action_key, config_json, sort_order)
-VALUES (
-    @flow_reminder, 'send_email',
+SELECT
+    @flow_reminder,
+    'send_email',
     '{"notification_key":"instructor_pending_reason_decision_reminder_chief","to_email":"{{chief_instructor_email}}","to_name":"{{chief_instructor_name}}"}',
     10
+WHERE NOT EXISTS (
+    SELECT 1 FROM automation_flow_actions
+    WHERE flow_id = @flow_reminder
+      AND action_key = 'send_email'
+      AND config_json = '{"notification_key":"instructor_pending_reason_decision_reminder_chief","to_email":"{{chief_instructor_email}}","to_name":"{{chief_instructor_name}}"}'
 );
 
 COMMIT;

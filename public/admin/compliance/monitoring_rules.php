@@ -89,6 +89,19 @@ $kindFilter = isset($_GET['kind']) ? strtoupper((string)$_GET['kind']) : '';
 $detailId = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
 $rules = ComplianceMonitorEngine::listRules($pdo, $kindFilter !== '' ? $kindFilter : null, 200);
+$filterQ = trim((string)($_GET['q'] ?? ''));
+$filterActive = trim((string)($_GET['active'] ?? ''));
+$filterSeverity = strtoupper(trim((string)($_GET['severity'] ?? '')));
+$rules = array_values(array_filter($rules, static function (array $r) use ($filterQ, $filterActive, $filterSeverity): bool {
+    if ($filterQ !== '') {
+        $hay = strtolower((string)($r['rule_code'] ?? '') . ' ' . (string)($r['title'] ?? '') . ' ' . (string)($r['description'] ?? ''));
+        if (strpos($hay, strtolower($filterQ)) === false) { return false; }
+    }
+    if ($filterActive === '1' && (int)($r['is_active'] ?? 0) !== 1) { return false; }
+    if ($filterActive === '0' && (int)($r['is_active'] ?? 0) === 1) { return false; }
+    if ($filterSeverity !== '' && strtoupper((string)($r['alert_severity'] ?? '')) !== $filterSeverity) { return false; }
+    return true;
+}));
 
 cw_header('Compliance · Monitoring rules');
 
@@ -248,6 +261,9 @@ compliance_page_open(array(
     'overline' => 'Compliance · Monitoring',
     'title' => 'Monitoring rules',
     'description' => 'Define the rules that produce compliance alerts. Each rule is tagged with a monitor kind (CAP / FSTD / Safety / Cyber / Live / Other) and can use a built-in evaluator or an event key for automation triggers.',
+    'actions' => array(
+        array('label' => 'New monitoring rule', 'modal' => 'rule-create-modal', 'icon' => 'plus'),
+    ),
     'stats' => array(
         array('label' => 'Total rules', 'value' => count($rules)),
         array('label' => 'Active',      'value' => $activeRules, 'tone' => 'ok'),
@@ -265,14 +281,22 @@ compliance_page_open(array(
     <?php endforeach; ?>
   </div>
 
-  <div class="cmp-cols">
-    <section class="cmp-card">
+  <section class="cmp-card">
+    <form method="get" class="compliance-filterbar">
+      <?php if ($kindFilter !== ''): ?><input type="hidden" name="kind" value="<?= h($kindFilter) ?>"><?php endif; ?>
+      <label class="cmp-field compliance-filterbar__search"><span>Search</span><input type="search" name="q" value="<?= h($filterQ) ?>" placeholder="Rule code, title or description"></label>
+      <label class="cmp-field"><span>State</span><select name="active"><option value="" <?= $filterActive === '' ? 'selected' : '' ?>>All states</option><option value="1" <?= $filterActive === '1' ? 'selected' : '' ?>>Active</option><option value="0" <?= $filterActive === '0' ? 'selected' : '' ?>>Inactive</option></select></label>
+      <label class="cmp-field"><span>Severity</span><select name="severity"><option value="">All severities</option><?php foreach (ComplianceMonitorEngine::severities() as $s): ?><option value="<?= h($s) ?>" <?= $filterSeverity === strtoupper($s) ? 'selected' : '' ?>><?= h(compliance_friendly_label($s)) ?></option><?php endforeach; ?></select></label>
+      <div class="cmp-toolbar-actions" style="margin:0;"><button type="submit">Apply filters</button><a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/monitoring_rules.php">Clear</a></div>
+    </form>
+  </section>
+    <section class="cmp-card compliance-card--full">
       <div class="cmp-list-head" style="margin-bottom:14px;">
         <div class="cmp-list-title"><?= compliance_ui_icon('pulse') ?><span>Rules</span></div>
         <div class="cmp-count-pill"><?= count($rules) ?></div>
       </div>
       <?php if ($rules === array()): ?>
-        <p style="color:var(--text-muted);margin:0;">No rules yet. Define one on the right.</p>
+        <p style="color:var(--text-muted);margin:0;">No rules match this filter.</p>
       <?php else: ?>
         <div class="compliance-table-wrap">
         <table class="compliance-table">
@@ -282,9 +306,8 @@ compliance_page_open(array(
           <tbody>
             <?php foreach ($rules as $r):
               $sev = (string)$r['alert_severity'];
-              $sevClass = $sev === 'CRITICAL' ? 'cmp-pill-crit' : ($sev === 'HIGH' ? 'cmp-pill-warn' : ($sev === 'LOW' ? 'cmp-pill-ok' : ''));
             ?>
-              <tr>
+              <tr data-href="/admin/compliance/monitoring_rules.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td class="cmp-mono">
                   <a href="/admin/compliance/monitoring_rules.php?id=<?= (int)$r['id'] ?>"
                      style="color:#1f4079;font-weight:700;text-decoration:none;"><?= h((string)$r['rule_code']) ?></a>
@@ -295,8 +318,8 @@ compliance_page_open(array(
                     <div style="color:var(--text-muted);font-size:12px;"><?= h(mb_substr((string)$r['description'], 0, 90)) ?></div>
                   <?php endif; ?>
                 </td>
-                <td><span class="cmp-pill"><?= h((string)$r['monitor_kind']) ?></span></td>
-                <td><span class="cmp-pill <?= h($sevClass) ?>"><?= h($sev) ?></span></td>
+                <td><span class="cmp-pill"><?= h(compliance_friendly_label((string)$r['monitor_kind'])) ?></span></td>
+                <td><?= compliance_badge($sev, 'severity') ?></td>
                 <td>
                   <form method="post" style="display:inline;">
                     <input type="hidden" name="action" value="toggle_rule">
@@ -322,8 +345,7 @@ compliance_page_open(array(
       <?php endif; ?>
     </section>
 
-    <section class="cmp-card">
-      <h3 style="margin:0 0 14px;">New rule</h3>
+    <?php compliance_modal_open('rule-create-modal', 'New monitoring rule'); ?>
       <form method="post">
         <input type="hidden" name="action" value="create_rule">
         <label class="cmp-field">
@@ -371,10 +393,9 @@ compliance_page_open(array(
           <input type="checkbox" name="is_active" value="1" checked>
           <span style="font-weight:700;color:#0f172a;">Active immediately</span>
         </label>
-        <button type="submit" style="width:100%;">Create rule</button>
+        <div class="compliance-modal__footer"><button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button><button type="submit">Create rule</button></div>
       </form>
-    </section>
-  </div>
+    <?php compliance_modal_close(); ?>
 <?php
 compliance_page_close();
 cw_footer();
