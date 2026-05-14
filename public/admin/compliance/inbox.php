@@ -43,13 +43,137 @@ function cmpcc_flash_take(): ?array
     return $f;
 }
 
+function cmpcc_default_email_template_subject(): string
+{
+    return '[{{COMPLIANCE_THREAD_CODE}}] {{EMAIL_TITLE}}';
+}
+
+function cmpcc_default_email_template_text(): string
+{
+    return "Dear {{RECIPIENT_NAME}},\n\n{{EMAIL_BODY_TEXT}}\n\nSincerely,\n{{COMPLIANCE_MONITORING_MANAGER_NAME}}\nCompliance Monitoring Manager\nEuroPilot Center B/ATO-17\n\nIMPORTANT NOTES:\nPlease keep the information in this email and any attachments strictly confidential. To preserve the compliance audit trail, please reply directly to this email using your normal Reply button and do not change the subject line, remove the thread reference, or start a new email chain for this matter.\n\nCompliance object references: {{COMPLIANCE_OBJECT_SUMMARY_TEXT}}\nMessage tracking reference: {{COMPLIANCE_THREAD_CODE}}";
+}
+
+function cmpcc_default_email_template_allowed_variables_json(): string
+{
+    return json_encode(array(
+        'EMAIL_TITLE',
+        'RECIPIENT_NAME',
+        'EMAIL_BODY_HTML',
+        'EMAIL_BODY_TEXT',
+        'COMPLIANCE_MONITORING_MANAGER_NAME',
+        'COMPLIANCE_THREAD_CODE',
+        'COMPLIANCE_OBJECT_TYPE_N',
+        'COMPLIANCE_OBJECT_CODE_N',
+        'COMPLIANCE_OBJECT_URL_N',
+        'COMPLIANCE_OBJECT_SUMMARY_TEXT',
+    ), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) ?: '[]';
+}
+
+function cmpcc_default_email_template_html(): string
+{
+    return <<<'HTML'
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>IPCA.training Compliance Communication</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#152235;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f6fb;padding:28px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#ffffff;border:1px solid #dfe6f1;border-radius:20px;overflow:hidden;box-shadow:0 10px 24px rgba(15,23,42,0.055);">
+
+          <tr>
+            <td style="padding:26px 30px;background:#0d1d34;color:#ffffff;">
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+                <tr>
+                  <td style="vertical-align:top;">
+                    <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.72);font-weight:700;">
+                      IPCA.training | Compliance
+                    </div>
+                    <h1 style="margin:10px 0 0;font-size:24px;line-height:1.2;font-weight:760;color:#ffffff;">
+                      {{EMAIL_TITLE}}
+                    </h1>
+                    <div style="margin-top:8px;font-size:12px;color:rgba(255,255,255,0.72);line-height:1.5;">
+                      Thread reference: <strong style="color:#ffffff;">{{COMPLIANCE_THREAD_CODE}}</strong>
+                    </div>
+                  </td>
+                  <td align="right" style="vertical-align:top;width:150px;">
+                    <img src="https://ipca.training/assets/logo/ipca_logo_white.png" alt="IPCA" style="display:block;max-width:130px;height:auto;border:0;">
+                  </td>
+                </tr>
+              </table>
+
+              <div style="margin-top:18px;">
+                <!-- Repeat one pill per linked compliance object. Keep these visible for humans; reply headers remain the primary automated threading mechanism. -->
+                <a href="{{COMPLIANCE_OBJECT_URL_1}}" style="display:inline-block;margin:0 8px 8px 0;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.22);color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">
+                  {{COMPLIANCE_OBJECT_TYPE_1}} · {{COMPLIANCE_OBJECT_CODE_1}}
+                </a>
+                <a href="{{COMPLIANCE_OBJECT_URL_2}}" style="display:inline-block;margin:0 8px 8px 0;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.22);color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">
+                  {{COMPLIANCE_OBJECT_TYPE_2}} · {{COMPLIANCE_OBJECT_CODE_2}}
+                </a>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px;font-size:15px;line-height:1.65;color:#152235;">
+              <p style="margin:0 0 16px;"><strong>Dear {{RECIPIENT_NAME}} –</strong></p>
+              <p style="margin:0 0 16px;">
+                {{EMAIL_BODY_HTML}}
+              </p>
+              <p style="margin:24px 0 0;">
+                Sincerely,<br><br>
+                <strong>{{COMPLIANCE_MONITORING_MANAGER_NAME}}</strong><br>
+                <em>Compliance Monitoring Manager</em><br>
+                EuroPilot Center B/ATO-17
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 30px;background:#f7f9fc;border-top:1px solid #e7edf5;color:#728198;font-size:12px;line-height:1.5;">
+              <strong style="color:#152235;">IMPORTANT NOTES:</strong><br>
+              Please keep the information in this email and any attachments strictly confidential. To preserve the compliance audit trail, please reply directly to this email using your normal Reply button and do not change the subject line, remove the thread reference, or start a new email chain for this matter.
+              <br><br>
+              Compliance object references: {{COMPLIANCE_OBJECT_SUMMARY_TEXT}}<br>
+              Message tracking reference: {{COMPLIANCE_THREAD_CODE}}
+              <br><br>
+              <strong style="color:#152235;">IPCA.training</strong><br>
+              Compliance Operating System<br>
+              This email and any attachments may contain compliance records. Please retain according to the applicable authority and company recordkeeping requirements.
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+HTML;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     $threadIds = isset($_POST['thread_ids']) && is_array($_POST['thread_ids'])
         ? array_map('intval', $_POST['thread_ids'])
         : array();
     try {
-        if ($action === 'bulk_status' && $threadIds !== array()) {
+        if ($action === 'save_email_template') {
+            ComplianceCommsCenterEngine::saveEmailTemplateVersion(
+                $pdo,
+                ComplianceCommsCenterEngine::DEFAULT_EMAIL_TEMPLATE_KEY,
+                'Default outbound compliance email',
+                'Default HTML wrapper used for authority-ready outbound compliance communication.',
+                (string)($_POST['subject_template'] ?? ''),
+                (string)($_POST['html_template'] ?? ''),
+                (string)($_POST['text_template'] ?? ''),
+                (string)($_POST['allowed_variables_json'] ?? '[]'),
+                (string)($_POST['change_note'] ?? ''),
+                $uid > 0 ? $uid : null
+            );
+            cmpcc_flash('success', 'Email template saved as a new version.');
+        } elseif ($action === 'bulk_status' && $threadIds !== array()) {
             $newStatus = (string)($_POST['bulk_status_value'] ?? '');
             $n = ComplianceCommsCenterEngine::bulkUpdateThreadStatus($pdo, $threadIds, $newStatus);
             cmpcc_flash('success', $n . ' thread(s) set to ' . str_replace('_', ' ', $newStatus) . '.');
@@ -97,52 +221,35 @@ $latest = ComplianceCommsCenterEngine::latestInbound($pdo);
 $summary = CompliancePostmarkConfig::publicSummary();
 $flash = cmpcc_flash_take();
 
+$defaultEmailTemplateSubject = cmpcc_default_email_template_subject();
+$defaultEmailTemplateHtml = cmpcc_default_email_template_html();
+$defaultEmailTemplateText = cmpcc_default_email_template_text();
+$defaultEmailTemplateAllowedJson = cmpcc_default_email_template_allowed_variables_json();
+ComplianceCommsCenterEngine::ensureDefaultEmailTemplate(
+    $pdo,
+    $defaultEmailTemplateSubject,
+    $defaultEmailTemplateHtml,
+    $defaultEmailTemplateText,
+    $defaultEmailTemplateAllowedJson,
+    $uid > 0 ? $uid : null
+);
+$emailTemplateTablesPresent = ComplianceCommsCenterEngine::emailTemplateTablesPresent($pdo);
+$storedEmailTemplate = ComplianceCommsCenterEngine::getCurrentEmailTemplate($pdo);
+$emailTemplateVersions = ComplianceCommsCenterEngine::listEmailTemplateVersions($pdo);
+$emailTemplateSubject = is_array($storedEmailTemplate) && !empty($storedEmailTemplate['subject_template'])
+    ? (string)$storedEmailTemplate['subject_template'] : $defaultEmailTemplateSubject;
+$emailTemplateHtml = is_array($storedEmailTemplate) && !empty($storedEmailTemplate['html_template'])
+    ? (string)$storedEmailTemplate['html_template'] : $defaultEmailTemplateHtml;
+$emailTemplateText = is_array($storedEmailTemplate) && !empty($storedEmailTemplate['text_template'])
+    ? (string)$storedEmailTemplate['text_template'] : $defaultEmailTemplateText;
+$emailTemplateAllowedJson = is_array($storedEmailTemplate) && !empty($storedEmailTemplate['allowed_variables_json'])
+    ? (string)$storedEmailTemplate['allowed_variables_json'] : $defaultEmailTemplateAllowedJson;
+
 // Full-text search across email bodies — only when the user typed something.
 $searchResults = array();
 if ($filterQuery !== '') {
     $searchResults = ComplianceCommsCenterEngine::searchEmails($pdo, $filterQuery, 100);
 }
-
-$emailTemplateHtml = <<<'HTML'
-<!doctype html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>IPCA.training Compliance Communication</title>
-</head>
-<body style="margin:0;padding:0;background:#f3f6fb;font-family:Arial,Helvetica,sans-serif;color:#152235;">
-  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#f3f6fb;padding:28px 12px;">
-    <tr>
-      <td align="center">
-        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:720px;background:#ffffff;border:1px solid #dfe6f1;border-radius:20px;overflow:hidden;box-shadow:0 10px 24px rgba(15,23,42,0.055);">
-          <tr>
-            <td style="padding:26px 30px;background:#0d1d34;color:#ffffff;">
-              <div style="font-size:11px;letter-spacing:0.14em;text-transform:uppercase;color:rgba(255,255,255,0.72);font-weight:700;">IPCA.training Compliance</div>
-              <h1 style="margin:10px 0 0;font-size:24px;line-height:1.2;font-weight:760;color:#ffffff;">Compliance Communication</h1>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:30px;font-size:15px;line-height:1.65;color:#152235;">
-              <p style="margin:0 0 16px;">Dear recipient,</p>
-              <p style="margin:0 0 16px;">Your message content goes here. Keep the wording clear, authority-ready, and concise.</p>
-              <p style="margin:0;">Kind regards,<br><strong>IPCA Compliance Team</strong></p>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:18px 30px;background:#f7f9fc;border-top:1px solid #e7edf5;color:#728198;font-size:12px;line-height:1.5;">
-              <strong style="color:#152235;">IPCA.training</strong><br>
-              Compliance Operating System<br>
-              This email and any attachments may contain compliance records. Please retain according to the applicable authority and company recordkeeping requirements.
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-HTML;
 
 cw_header('Compliance · Inbox');
 
@@ -185,9 +292,18 @@ compliance_page_open(array(
   .cmpcc-template-preview-head{padding:22px 24px;background:#0d1d34;color:#fff;}
   .cmpcc-template-preview-kicker{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.72);font-weight:700;}
   .cmpcc-template-preview-title{margin:8px 0 0;font-size:22px;line-height:1.2;color:#fff;font-weight:760;}
+  .cmpcc-template-preview-pills{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;}
+  .cmpcc-template-preview-pill{display:inline-flex;align-items:center;min-height:28px;padding:0 12px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.22);color:#fff;font-size:12px;font-weight:700;text-decoration:none;}
+  .cmpcc-template-vars{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:8px;margin:12px 0 0;padding:0;list-style:none;}
+  .cmpcc-template-vars li{padding:8px 10px;border:1px solid var(--border-soft);border-radius:12px;background:#fff;font-size:12px;color:var(--text-muted);}
+  .cmpcc-template-vars code{display:block;margin-bottom:3px;color:#1f4079;background:#eef2ff;padding:2px 6px;border-radius:7px;font-size:11px;}
   .cmpcc-template-preview-body{padding:24px;color:var(--text-strong);font-size:14px;line-height:1.65;}
   .cmpcc-template-preview-foot{padding:16px 24px;background:#f7f9fc;border-top:1px solid #e7edf5;color:var(--text-muted);font-size:12px;line-height:1.5;}
   .cmpcc-template-code{margin-top:12px;width:100%;min-height:220px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.45;}
+  .cmpcc-template-code.is-small{min-height:120px;}
+  .cmpcc-template-edit-grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:14px;}
+  .cmpcc-template-version-list{margin:12px 0 0;padding:0;list-style:none;display:flex;flex-direction:column;gap:8px;}
+  .cmpcc-template-version-list li{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid var(--border-soft);border-radius:12px;background:#fff;color:var(--text-muted);font-size:12px;}
 </style>
 
 <section class="cmp-card cmp-toolbar">
@@ -503,28 +619,93 @@ compliance_page_open(array(
     <div class="cmpcc-template-card">
       <h3 style="margin:0 0 6px;">Styled outbound email HTML template</h3>
       <p style="margin:0;color:var(--text-muted);font-size:13px;line-height:1.5;">
-        Use this wrapper for authority-ready outbound compliance emails. It includes a branded header, readable content area, and recordkeeping footer.
+        Use this wrapper for authority-ready outbound compliance emails. Header pills make the linked compliance objects visible to the recipient; email reply headers remain the primary automatic thread-tracking mechanism.
       </p>
+      <ul class="cmpcc-template-vars">
+        <li><code>{{COMPLIANCE_THREAD_CODE}}</code> Stable visible thread/reference code, also repeated in the footer.</li>
+        <li><code>{{COMPLIANCE_OBJECT_TYPE_N}}</code> Human label such as Finding, Audit, CAP, MoC.</li>
+        <li><code>{{COMPLIANCE_OBJECT_CODE_N}}</code> Object code such as NCR-2026-0042 or AUD-2026-001.</li>
+        <li><code>{{COMPLIANCE_OBJECT_URL_N}}</code> Internal object URL used by the header pill link.</li>
+        <li><code>{{COMPLIANCE_OBJECT_SUMMARY_TEXT}}</code> Plain-text fallback list for the footer.</li>
+        <li><code>{{EMAIL_BODY_HTML}}</code> Sanitized outbound body content.</li>
+      </ul>
       <div class="cmpcc-template-preview" aria-label="Email template preview">
         <div class="cmpcc-template-preview-head">
-          <div class="cmpcc-template-preview-kicker">IPCA.training Compliance</div>
+          <div class="cmpcc-template-preview-kicker">IPCA.training | Compliance</div>
           <div class="cmpcc-template-preview-title">Compliance Communication</div>
+          <div style="margin-top:8px;font-size:12px;color:rgba(255,255,255,.72);line-height:1.5;">
+            Thread reference: <strong style="color:#fff;">CMT-2026-00042</strong>
+          </div>
+          <div class="cmpcc-template-preview-pills">
+            <span class="cmpcc-template-preview-pill">Finding · NCR-2026-0042</span>
+            <span class="cmpcc-template-preview-pill">Audit · AUD-2026-001</span>
+          </div>
         </div>
         <div class="cmpcc-template-preview-body">
-          <p style="margin:0 0 12px;">Dear recipient,</p>
+          <p style="margin:0 0 12px;"><strong>Dear Recipient –</strong></p>
           <p style="margin:0 0 12px;">Your message content goes here. Keep the wording clear, authority-ready, and concise.</p>
-          <p style="margin:0;">Kind regards,<br><strong>IPCA Compliance Team</strong></p>
+          <p style="margin:18px 0 0;">Sincerely,<br><br><strong>Compliance Monitoring Manager</strong><br><em>Compliance Monitoring Manager</em><br>EuroPilot Center B/ATO-17</p>
         </div>
         <div class="cmpcc-template-preview-foot">
+          <strong style="color:#152235;">IMPORTANT NOTES:</strong><br>
+          Please keep the information in this email and any attachments strictly confidential. To preserve the compliance audit trail, please reply directly to this email using your normal Reply button and do not change the subject line, remove the thread reference, or start a new email chain for this matter.
+          <br><br>
           <strong style="color:#152235;">IPCA.training</strong><br>
           Compliance Operating System<br>
           This email and any attachments may contain compliance records. Please retain according to the applicable authority and company recordkeeping requirements.
         </div>
       </div>
       <label class="cmp-field" style="margin-top:14px;">
-        <span>HTML template source</span>
+        <span>Current HTML template source</span>
         <textarea class="cmpcc-template-code" readonly><?= h($emailTemplateHtml) ?></textarea>
       </label>
+      <?php if (!$emailTemplateTablesPresent): ?>
+        <p class="cmp-flash is-warn" style="margin:14px 0 0;">
+          Template storage is not active yet. Apply <code>scripts/sql/compliance_os_phase_8_6_email_templates.sql</code> to enable editing and version history.
+        </p>
+      <?php else: ?>
+        <form method="post" class="cmpcc-template-edit-grid">
+          <input type="hidden" name="action" value="save_email_template">
+          <label class="cmp-field">
+            <span>Subject template</span>
+            <input name="subject_template" required value="<?= h($emailTemplateSubject) ?>">
+          </label>
+          <label class="cmp-field">
+            <span>Editable HTML template</span>
+            <textarea name="html_template" class="cmpcc-template-code" required><?= h($emailTemplateHtml) ?></textarea>
+          </label>
+          <label class="cmp-field">
+            <span>Plain-text fallback template</span>
+            <textarea name="text_template" class="cmpcc-template-code is-small"><?= h($emailTemplateText) ?></textarea>
+          </label>
+          <label class="cmp-field">
+            <span>Allowed variables JSON</span>
+            <textarea name="allowed_variables_json" class="cmpcc-template-code is-small" required><?= h($emailTemplateAllowedJson) ?></textarea>
+          </label>
+          <label class="cmp-field">
+            <span>Change note</span>
+            <input name="change_note" placeholder="What changed in this version?">
+          </label>
+          <div class="cmp-toolbar-actions" style="margin:0;">
+            <button type="submit">Save new template version</button>
+          </div>
+        </form>
+        <div style="margin-top:16px;">
+          <h4 style="margin:0 0 8px;">Recent versions</h4>
+          <?php if ($emailTemplateVersions === array()): ?>
+            <p style="margin:0;color:var(--text-muted);font-size:13px;">No saved versions yet.</p>
+          <?php else: ?>
+            <ul class="cmpcc-template-version-list">
+              <?php foreach ($emailTemplateVersions as $v): ?>
+                <li>
+                  <span><strong>v<?= (int)$v['version_no'] ?></strong> · <?= h((string)$v['subject_template']) ?></span>
+                  <span><?= h(substr((string)$v['created_at'], 0, 16)) ?><?= !empty($v['change_note']) ? ' · ' . h((string)$v['change_note']) : '' ?></span>
+                </li>
+              <?php endforeach; ?>
+            </ul>
+          <?php endif; ?>
+        </div>
+      <?php endif; ?>
     </div>
     <div class="compliance-modal__footer">
       <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Close</button>

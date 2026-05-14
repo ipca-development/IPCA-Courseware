@@ -27,12 +27,170 @@ require_once __DIR__ . '/CompliancePostmarkConfig.php';
 final class ComplianceCommsCenterEngine
 {
     public const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024; // 50 MiB hard ceiling per attachment.
+    public const DEFAULT_EMAIL_TEMPLATE_KEY = 'compliance_outbound_default';
 
     /** Hosts/extensions we refuse to persist as attachments. */
     private const DANGEROUS_EXTENSIONS = array(
         'exe', 'msi', 'bat', 'cmd', 'com', 'scr', 'pif', 'vbs', 'js', 'jse',
         'ws', 'wsf', 'wsh', 'ps1', 'jar',
     );
+
+    public static function emailTemplateTablesPresent(PDO $pdo): bool
+    {
+        try {
+            $pdo->query('SELECT id FROM ipca_compliance_email_templates LIMIT 0');
+            $pdo->query('SELECT id FROM ipca_compliance_email_template_versions LIMIT 0');
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * @return array<string,mixed>|null
+     */
+    public static function getCurrentEmailTemplate(PDO $pdo, string $templateKey = self::DEFAULT_EMAIL_TEMPLATE_KEY): ?array
+    {
+        if (!self::emailTemplateTablesPresent($pdo)) {
+            return null;
+        }
+        $st = $pdo->prepare(
+            'SELECT t.*, v.version_no, v.subject_template, v.html_template, v.text_template,
+                    v.allowed_variables_json, v.change_note, v.created_at AS version_created_at
+               FROM ipca_compliance_email_templates t
+          LEFT JOIN ipca_compliance_email_template_versions v ON v.id = t.current_version_id
+              WHERE t.template_key = ?
+              LIMIT 1'
+        );
+        $st->execute(array($templateKey));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    public static function listEmailTemplateVersions(PDO $pdo, string $templateKey = self::DEFAULT_EMAIL_TEMPLATE_KEY, int $limit = 12): array
+    {
+        if (!self::emailTemplateTablesPresent($pdo)) {
+            return array();
+        }
+        $limit = max(1, min(50, $limit));
+        $st = $pdo->prepare(
+            'SELECT v.id, v.version_no, v.subject_template, v.change_note, v.created_at, v.created_by
+               FROM ipca_compliance_email_template_versions v
+               JOIN ipca_compliance_email_templates t ON t.id = v.template_id
+              WHERE t.template_key = ?
+              ORDER BY v.version_no DESC
+              LIMIT ' . (int)$limit
+        );
+        $st->execute(array($templateKey));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    public static function ensureDefaultEmailTemplate(PDO $pdo, string $subjectTemplate, string $htmlTemplate, string $textTemplate, string $allowedVariablesJson, ?int $userId = null): void
+    {
+        if (!self::emailTemplateTablesPresent($pdo)) {
+            return;
+        }
+        $current = self::getCurrentEmailTemplate($pdo);
+        if ($current !== null && !empty($current['current_version_id'])) {
+            return;
+        }
+        self::saveEmailTemplateVersion(
+            $pdo,
+            self::DEFAULT_EMAIL_TEMPLATE_KEY,
+            'Default outbound compliance email',
+            'Default HTML wrapper used for authority-ready outbound compliance communication.',
+            $subjectTemplate,
+            $htmlTemplate,
+            $textTemplate,
+            $allowedVariablesJson,
+            'Initial default template',
+            $userId
+        );
+    }
+
+    public static function saveEmailTemplateVersion(
+        PDO $pdo,
+        string $templateKey,
+        string $title,
+        string $description,
+        string $subjectTemplate,
+        string $htmlTemplate,
+        string $textTemplate,
+        string $allowedVariablesJson,
+        string $changeNote,
+        ?int $userId
+    ): int {
+        if (!self::emailTemplateTablesPresent($pdo)) {
+            throw new RuntimeException('Email template tables are not installed. Apply scripts/sql/compliance_os_phase_8_6_email_templates.sql first.');
+        }
+        $templateKey = trim($templateKey);
+        $title = trim($title);
+        $subjectTemplate = trim($subjectTemplate);
+        $htmlTemplate = trim($htmlTemplate);
+        if ($templateKey === '' || $title === '' || $subjectTemplate === '' || $htmlTemplate === '') {
+            throw new InvalidArgumentException('Template key, title, subject and HTML template are required.');
+        }
+        json_decode($allowedVariablesJson);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new InvalidArgumentException('Allowed variables JSON is invalid: ' . json_last_error_msg());
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $st = $pdo->prepare('SELECT id FROM ipca_compliance_email_templates WHERE template_key = ? LIMIT 1');
+            $st->execute(array($templateKey));
+            $templateId = (int)$st->fetchColumn();
+            if ($templateId <= 0) {
+                $ins = $pdo->prepare(
+                    'INSERT INTO ipca_compliance_email_templates
+                        (template_key, title, description, created_by, updated_by)
+                     VALUES (?, ?, ?, ?, ?)'
+                );
+                $ins->execute(array($templateKey, $title, $description, $userId, $userId));
+                $templateId = (int)$pdo->lastInsertId();
+            } else {
+                $pdo->prepare(
+                    'UPDATE ipca_compliance_email_templates
+                        SET title = ?, description = ?, updated_by = ?
+                      WHERE id = ?'
+                )->execute(array($title, $description, $userId, $templateId));
+            }
+
+            $vnSt = $pdo->prepare('SELECT COALESCE(MAX(version_no), 0) + 1 FROM ipca_compliance_email_template_versions WHERE template_id = ?');
+            $vnSt->execute(array($templateId));
+            $versionNo = (int)$vnSt->fetchColumn();
+
+            $insV = $pdo->prepare(
+                'INSERT INTO ipca_compliance_email_template_versions
+                    (template_id, version_no, subject_template, html_template, text_template, allowed_variables_json, change_note, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $insV->execute(array(
+                $templateId,
+                $versionNo,
+                $subjectTemplate,
+                $htmlTemplate,
+                $textTemplate !== '' ? $textTemplate : null,
+                $allowedVariablesJson,
+                trim($changeNote) !== '' ? trim($changeNote) : null,
+                $userId,
+            ));
+            $versionId = (int)$pdo->lastInsertId();
+            $pdo->prepare('UPDATE ipca_compliance_email_templates SET current_version_id = ?, updated_by = ? WHERE id = ?')
+                ->execute(array($versionId, $userId, $templateId));
+            $pdo->commit();
+            return $versionId;
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
 
     /**
      * Ingest a Postmark Inbound payload (already JSON-decoded into an assoc

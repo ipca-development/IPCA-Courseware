@@ -97,6 +97,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             lsb_json(['ok' => true]);
         }
 
+        if ($action === 'activate_lessons') {
+            $lessonIds = lsb_int_list($payload['lesson_ids'] ?? []);
+            lsb_json(['ok' => true] + $svc->activateLatestVersionsForLessons($lessonIds));
+        }
+
         lsb_json(['ok' => false, 'error' => 'Unknown action'], 404);
     } catch (Throwable $e) {
         lsb_json(['ok' => false, 'error' => $e->getMessage()], 500);
@@ -175,8 +180,8 @@ cw_header('Lesson Bulk Enrich');
       <div id="lsbVerifiedSources" class="lsb-check-list"></div>
     </div>
     <div class="lsb-source-group lsb-unverified">
-      <h3>Unverified Resources</h3>
-      <p class="muted">Temporary ACS support sources only. These are separate from verified Resource Library sources and are not canonical.</p>
+      <h3>ACS Official Sources</h3>
+      <p class="muted">Temporary ACS selectors. These remain separate from Resource Library editions, but selected ACS slide references are allowed as official blueprint references.</p>
       <div id="lsbUnverifiedSources" class="lsb-check-list"></div>
     </div>
   </div>
@@ -185,6 +190,7 @@ cw_header('Lesson Bulk Enrich');
     <button type="button" class="btn" id="lsbGenerateMissing" disabled>Generate Missing/Stale for Course</button>
     <button type="button" class="btn secondary" id="lsbRegenerateFull" disabled>Regenerate Full Course</button>
     <button type="button" class="btn secondary" id="lsbGenerateSelected" disabled>Generate Selected Lessons</button>
+    <button type="button" class="btn secondary" id="lsbActivateSelected" disabled>Activate Selected Latest Versions</button>
     <button type="button" class="btn secondary" id="lsbReload" disabled>Refresh</button>
   </div>
 
@@ -194,6 +200,7 @@ cw_header('Lesson Bulk Enrich');
       <span class="muted" id="lsbProgressMeta"></span>
     </div>
     <div class="lsb-progress-bar"><div id="lsbProgressFill"></div></div>
+    <div class="lsb-current-work" id="lsbCurrentWork">Waiting to start...</div>
     <div id="lsbProgressLog" class="lsb-log"></div>
   </div>
 
@@ -256,12 +263,15 @@ cw_header('Lesson Bulk Enrich');
 .lsb-table { width:100%; border-collapse:collapse; font-size:12px; }
 .lsb-table th, .lsb-table td { border-bottom:1px solid #f1f5f9; padding:7px 8px; text-align:left; vertical-align:top; }
 .lsb-table th { position:sticky; top:0; background:#f8fafc; z-index:1; white-space:nowrap; }
-.lsb-table tr:hover { background:#f8fafc; }
+.lsb-table tr.lsb-clickable-row { cursor:pointer; }
+.lsb-table tr.lsb-clickable-row:hover { background:#f8fafc; }
+.lsb-table tr.lsb-row-working { background:#eff6ff; }
 .lsb-status { display:inline-flex; border-radius:999px; padding:2px 8px; font-size:11px; font-weight:700; text-transform:uppercase; }
 .lsb-status-active { background:#dcfce7; color:#166534; }
 .lsb-status-stale, .lsb-status-draft { background:#fef3c7; color:#92400e; }
 .lsb-status-failed { background:#fee2e2; color:#991b1b; }
 .lsb-status-missing { background:#e2e8f0; color:#475569; }
+.lsb-status-generating, .lsb-status-activating { background:#dbeafe; color:#1d4ed8; }
 .lsb-btn-row { display:flex; gap:6px; flex-wrap:wrap; }
 .btn.tiny { font-size:12px; padding:4px 8px; }
 .lsb-alert { border-radius:10px; padding:10px 12px; margin-top:12px; }
@@ -270,6 +280,7 @@ cw_header('Lesson Bulk Enrich');
 .lsb-progress-top { display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:8px; }
 .lsb-progress-bar { height:10px; border-radius:999px; background:#e2e8f0; overflow:hidden; }
 .lsb-progress-bar div { height:100%; width:0; background:linear-gradient(90deg,#2563eb,#22c55e); transition:width .2s ease; }
+.lsb-current-work { margin-top:8px; padding:8px 10px; border-radius:8px; background:#eff6ff; color:#1e3a8a; font-size:13px; font-weight:600; }
 .lsb-log { margin-top:10px; max-height:180px; overflow:auto; font-size:12px; background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:8px; }
 .lsb-log-line { padding:3px 0; border-bottom:1px solid #f8fafc; }
 .lsb-log-ok { color:#047857; }
@@ -325,6 +336,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     generateMissing: document.getElementById('lsbGenerateMissing'),
     regenerateFull: document.getElementById('lsbRegenerateFull'),
     generateSelected: document.getElementById('lsbGenerateSelected'),
+    activateSelected: document.getElementById('lsbActivateSelected'),
     reload: document.getElementById('lsbReload'),
     selectAll: document.getElementById('lsbSelectAll'),
     clearSelection: document.getElementById('lsbClearSelection'),
@@ -333,6 +345,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     progressTitle: document.getElementById('lsbProgressTitle'),
     progressMeta: document.getElementById('lsbProgressMeta'),
     progressFill: document.getElementById('lsbProgressFill'),
+    currentWork: document.getElementById('lsbCurrentWork'),
     progressLog: document.getElementById('lsbProgressLog'),
     modalBackdrop: document.getElementById('lsbModalBackdrop'),
     modal: document.getElementById('lsbModal'),
@@ -360,6 +373,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     els.generateMissing.disabled = !ok;
     els.regenerateFull.disabled = !ok;
     els.generateSelected.disabled = !ok;
+    els.activateSelected.disabled = !ok;
     els.reload.disabled = !enabled;
     els.selectAll.disabled = !enabled;
     els.clearSelection.disabled = !enabled;
@@ -398,7 +412,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
 
     const unverified = Array.isArray(boot.unverifiedResources) ? boot.unverifiedResources : [];
     els.unverified.innerHTML = unverified.map(function (r) {
-      return '<label><input class="lsb-source-unverified" type="checkbox" value="' + esc(r.id) + '"> <span><strong>' + esc(r.label) + '</strong><small>Unverified support source, not a live Resource Library source.</small></span></label>';
+      return '<label><input class="lsb-source-unverified" type="checkbox" value="' + esc(r.id) + '"> <span><strong>' + esc(r.label) + '</strong><small>Temporary official ACS source, separate from live Resource Library editions.</small></span></label>';
     }).join('');
   }
 
@@ -472,10 +486,10 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     els.tbody.innerHTML = state.lessons.map(function (l) {
       const confidence = l.confidence == null ? '-' : Number(l.confidence).toFixed(2);
       const version = l.active_version_number ? ('v' + l.active_version_number) : '-';
-      return '<tr data-lesson-id="' + esc(l.lesson_id) + '">' +
-        '<td><input class="lsb-row-check" type="checkbox" value="' + esc(l.lesson_id) + '"></td>' +
+      return '<tr class="lsb-clickable-row" role="button" tabindex="0" data-lesson-id="' + esc(l.lesson_id) + '" title="Open blueprint details">' +
+        '<td><input class="lsb-row-check" type="checkbox" value="' + esc(l.lesson_id) + '" aria-label="Select lesson ' + esc(l.lesson_id) + '"></td>' +
         '<td>' + esc(l.lesson_id) + '</td>' +
-        '<td><button type="button" class="btn tiny secondary lsb-view-link" data-lesson-id="' + esc(l.lesson_id) + '">' + esc(l.title) + '</button></td>' +
+        '<td><strong>' + esc(l.title) + '</strong></td>' +
         '<td>' + esc(l.external_lesson_id) + '</td>' +
         '<td>' + esc(l.active_slide_count) + '</td>' +
         '<td>' + esc(version) + '</td>' +
@@ -488,7 +502,6 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
         '<td><div class="lsb-btn-row">' +
           '<button type="button" class="btn tiny lsb-generate-one" data-lesson-id="' + esc(l.lesson_id) + '">Generate</button>' +
           '<button type="button" class="btn tiny secondary lsb-regenerate-one" data-lesson-id="' + esc(l.lesson_id) + '">Regenerate</button>' +
-          '<button type="button" class="btn tiny secondary lsb-view-link" data-lesson-id="' + esc(l.lesson_id) + '">View</button>' +
         '</div></td>' +
       '</tr>';
     }).join('');
@@ -507,6 +520,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     els.progressTitle.textContent = title;
     els.progressMeta.textContent = '0 / ' + total;
     els.progressFill.style.width = '0%';
+    els.currentWork.textContent = total > 0 ? 'Queued ' + total + ' lesson(s).' : 'Nothing to process.';
     els.progressLog.innerHTML = '';
   }
 
@@ -514,6 +528,39 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
     els.progressMeta.textContent = done + ' / ' + total;
     els.progressFill.style.width = pct + '%';
+  }
+
+  function setCurrentWork(message) {
+    els.currentWork.textContent = message;
+  }
+
+  function markLessonWorking(lessonId, status, detail) {
+    const row = els.tbody.querySelector('tr[data-lesson-id="' + String(lessonId) + '"]');
+    if (!row) return;
+    row.classList.add('lsb-row-working');
+    const cells = row.querySelectorAll('td');
+    if (cells[6]) cells[6].innerHTML = statusBadge(status);
+    if (cells[11] && detail) cells[11].textContent = detail;
+  }
+
+  function clearLessonWorking(lessonId) {
+    const row = els.tbody.querySelector('tr[data-lesson-id="' + String(lessonId) + '"]');
+    if (row) row.classList.remove('lsb-row-working');
+  }
+
+  function startElapsedTicker(label, lessonId, lessonTitle) {
+    const started = Date.now();
+    const render = function () {
+      const elapsed = Math.max(0, Math.floor((Date.now() - started) / 1000));
+      const message = label + ' lesson ' + lessonId + (lessonTitle ? ' - ' + lessonTitle : '') + ' (' + elapsed + 's elapsed)';
+      setCurrentWork(message);
+      markLessonWorking(lessonId, label.toLowerCase(), elapsed + 's elapsed');
+    };
+    render();
+    const timer = window.setInterval(render, 1000);
+    return function () {
+      window.clearInterval(timer);
+    };
   }
 
   async function generateLessons(lessonIds, reason, onlyMissingStale) {
@@ -533,6 +580,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     for (const lessonId of targets) {
       const lesson = state.lessons.find(function (l) { return parseInt(l.lesson_id, 10) === lessonId; });
       addLog('Generating lesson ' + lessonId + (lesson ? ' — ' + lesson.title : '') + '...');
+      const stopTicker = startElapsedTicker('Generating', lessonId, lesson ? lesson.title : '');
       try {
         const json = await apiPost({
           action: 'generate_lesson',
@@ -541,15 +589,58 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
           verified_resource_ids: selectedVerifiedIds(),
           unverified_resource_ids: selectedUnverifiedIds()
         });
+        stopTicker();
         addLog('OK lesson ' + lessonId + ': ' + json.status + ', confidence ' + Number(json.confidence || 0).toFixed(2) + ', warnings ' + (json.warning_count || 0), true);
       } catch (e) {
+        stopTicker();
         const payload = e.payload || {};
         addLog('FAILED lesson ' + lessonId + ': ' + (payload.error || e.message), false);
+      } finally {
+        clearLessonWorking(lessonId);
       }
       done++;
       updateProgress(done, targets.length);
       await loadLessons();
     }
+    setCurrentWork('Bulk generation finished.');
+  }
+
+  async function activateSelectedLessons() {
+    const targets = selectedLessonIds();
+    if (!targets.length) {
+      startProgress('Bulk activation', 0);
+      addLog('Select one or more lessons to activate.', false);
+      return;
+    }
+
+    startProgress('Bulk activation', targets.length);
+    let done = 0;
+    for (const lessonId of targets) {
+      const lesson = state.lessons.find(function (l) { return parseInt(l.lesson_id, 10) === lessonId; });
+      addLog('Activating latest eligible version for lesson ' + lessonId + (lesson ? ' — ' + lesson.title : '') + '...');
+      const stopTicker = startElapsedTicker('Activating', lessonId, lesson ? lesson.title : '');
+      try {
+        const json = await apiPost({ action: 'activate_lessons', lesson_ids: [lessonId] });
+        stopTicker();
+        if (Array.isArray(json.activated) && json.activated.length) {
+          const v = json.activated[0].version || {};
+          addLog('OK lesson ' + lessonId + ': activated v' + (v.version_number || '?'), true);
+        } else {
+          const failure = Array.isArray(json.failed) && json.failed.length ? json.failed[0].error : 'No eligible version found';
+          addLog('FAILED lesson ' + lessonId + ': ' + failure, false);
+        }
+      } catch (e) {
+        stopTicker();
+        const payload = e.payload || {};
+        addLog('FAILED lesson ' + lessonId + ': ' + (payload.error || e.message), false);
+      } finally {
+        clearLessonWorking(lessonId);
+      }
+      done++;
+      updateProgress(done, targets.length);
+      await loadLessons();
+    }
+    setCurrentWork('Bulk activation finished.');
   }
 
   async function openModal(lessonId) {
@@ -779,14 +870,32 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
   els.generateSelected.addEventListener('click', function () {
     generateLessons(selectedLessonIds(), 'selected_bulk', false);
   });
+  els.activateSelected.addEventListener('click', activateSelectedLessons);
+  els.tbody.addEventListener('click', function (ev) {
+    const target = ev.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('a')) return;
+    const row = target.closest('tr[data-lesson-id]');
+    if (!row) return;
+    const lessonId = parseInt(row.getAttribute('data-lesson-id') || '0', 10);
+    if (lessonId) openModal(lessonId);
+  });
+  els.tbody.addEventListener('keydown', function (ev) {
+    if (ev.key !== 'Enter' && ev.key !== ' ') return;
+    const target = ev.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest('button') || target.closest('input') || target.closest('select') || target.closest('a')) return;
+    const row = target.closest('tr[data-lesson-id]');
+    if (!row) return;
+    ev.preventDefault();
+    const lessonId = parseInt(row.getAttribute('data-lesson-id') || '0', 10);
+    if (lessonId) openModal(lessonId);
+  });
   els.tbody.addEventListener('click', function (ev) {
     const target = ev.target;
     if (!(target instanceof HTMLElement)) return;
     const lessonId = parseInt(target.getAttribute('data-lesson-id') || '0', 10);
     if (!lessonId) return;
-    if (target.classList.contains('lsb-view-link')) {
-      openModal(lessonId);
-    }
     if (target.classList.contains('lsb-generate-one')) {
       generateLessons([lessonId], 'manual_regenerate', false);
     }

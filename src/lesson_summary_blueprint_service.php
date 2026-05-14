@@ -19,17 +19,17 @@ final class LessonSummaryBlueprintService
         'acs_private_pilot' => [
             'id' => 'acs_private_pilot',
             'label' => 'ACS Private Pilot',
-            'verification_status' => 'unverified',
+            'verification_status' => 'temporary_official',
         ],
         'acs_instrument_rating' => [
             'id' => 'acs_instrument_rating',
             'label' => 'ACS Instrument Rating',
-            'verification_status' => 'unverified',
+            'verification_status' => 'temporary_official',
         ],
         'acs_commercial_pilot' => [
             'id' => 'acs_commercial_pilot',
             'label' => 'ACS Commercial Pilot',
-            'verification_status' => 'unverified',
+            'verification_status' => 'temporary_official',
         ],
     ];
 
@@ -318,6 +318,71 @@ final class LessonSummaryBlueprintService
             }
             throw $e;
         }
+    }
+
+    /**
+     * Activate the newest non-failed version for a lesson.
+     *
+     * @return array<string,mixed>
+     */
+    public function activateLatestVersionForLesson(int $lessonId): array
+    {
+        if ($lessonId <= 0) {
+            throw new RuntimeException('Lesson id is required');
+        }
+        if (!$this->schemaReady()) {
+            throw new RuntimeException('Blueprint tables are missing. Run scripts/sql/2026_05_14_lesson_summary_blueprints.sql.');
+        }
+
+        $stmt = $this->pdo->prepare("
+            SELECT v.*
+            FROM lesson_summary_blueprints b
+            INNER JOIN lesson_summary_blueprint_versions v ON v.blueprint_id = b.id
+            WHERE b.lesson_id = ?
+              AND v.status <> 'failed'
+            ORDER BY v.version_number DESC
+            LIMIT 1
+        ");
+        $stmt->execute([$lessonId]);
+        $version = $stmt->fetch();
+        if (!is_array($version)) {
+            throw new RuntimeException('No eligible blueprint version found for activation');
+        }
+
+        $this->activateVersion((int)$version['id']);
+        $activated = $this->fetchVersion((int)$version['id']);
+
+        return [
+            'lesson_id' => $lessonId,
+            'version' => $this->shapeVersionForUi($activated),
+        ];
+    }
+
+    /**
+     * @param list<int> $lessonIds
+     * @return array{activated:list<array<string,mixed>>,failed:list<array<string,mixed>>}
+     */
+    public function activateLatestVersionsForLessons(array $lessonIds): array
+    {
+        $lessonIds = array_values(array_unique(array_filter(array_map('intval', $lessonIds), static fn (int $id): bool => $id > 0)));
+        $activated = [];
+        $failed = [];
+
+        foreach ($lessonIds as $lessonId) {
+            try {
+                $activated[] = $this->activateLatestVersionForLesson($lessonId);
+            } catch (Throwable $e) {
+                $failed[] = [
+                    'lesson_id' => $lessonId,
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+
+        return [
+            'activated' => $activated,
+            'failed' => $failed,
+        ];
     }
 
     /**
@@ -715,9 +780,6 @@ final class LessonSummaryBlueprintService
             $queryParts[] = (string)($slide['plain_text'] ?? '');
             $queryParts[] = (string)($slide['ai_summary'] ?? '');
             $queryParts[] = (string)($slide['narration_en'] ?? '');
-            foreach (($slide['references'] ?? []) as $ref) {
-                $queryParts[] = trim((string)($ref['ref_type'] ?? '') . ' ' . (string)($ref['ref_code'] ?? '') . ' ' . (string)($ref['ref_title'] ?? ''));
-            }
         }
         $query = $this->truncateText(trim(implode("\n", array_filter($queryParts))), 6000);
 
@@ -778,24 +840,39 @@ final class LessonSummaryBlueprintService
                 ];
             }
 
-            if ($blocks === [] && $paragraphs === []) {
-                $candidates[] = [
-                    'verification_status' => 'verified',
-                    'source_type' => $label,
-                    'resource_id' => $editionId,
-                    'edition_id' => $editionId,
-                    'reference_code' => (string)($resource['revision_code'] ?? ''),
-                    'reference_title' => (string)($resource['title'] ?? ''),
-                    'reference_path' => '',
-                    'excerpt' => 'Live Resource Library source selected; no indexed text blocks were found for this lesson query.',
-                    'confidence' => 0.35,
-                ];
-            }
         }
 
-        $unverified = [];
+        $acsSources = [];
         foreach ($unverifiedResourceIds as $id) {
-            $unverified[] = self::UNVERIFIED_ACS[$id];
+            $acsSources[] = self::UNVERIFIED_ACS[$id];
+        }
+
+        if ($acsSources !== []) {
+            foreach ($sourceData['slides'] as $slide) {
+                foreach (($slide['references'] ?? []) as $ref) {
+                    if (strtoupper(trim((string)($ref['ref_type'] ?? ''))) !== 'ACS') {
+                        continue;
+                    }
+                    $code = trim((string)($ref['ref_code'] ?? ''));
+                    $title = trim((string)($ref['ref_title'] ?? ''));
+                    if ($code === '' && $title === '') {
+                        continue;
+                    }
+                    foreach ($acsSources as $acsSource) {
+                        $candidates[] = [
+                            'verification_status' => 'temporary_official',
+                            'source_type' => 'ACS',
+                            'resource_id' => (int)($ref['id'] ?? 0),
+                            'edition_id' => 0,
+                            'reference_code' => $code,
+                            'reference_title' => $title !== '' ? $title : (string)$acsSource['label'],
+                            'reference_path' => (string)$acsSource['label'],
+                            'excerpt' => trim((string)($ref['notes'] ?? '')),
+                            'confidence' => $this->clampConfidence((float)($ref['confidence'] ?? 0.75)),
+                        ];
+                    }
+                }
+            }
         }
 
         return [
@@ -806,7 +883,7 @@ final class LessonSummaryBlueprintService
                 'revision_code' => (string)($r['revision_code'] ?? ''),
                 'resource_type' => (string)($r['resource_type'] ?? ''),
             ], $resources),
-            'unverified_resources' => $unverified,
+            'acs_official_sources' => $acsSources,
             'reference_candidates' => $candidates,
         ];
     }
@@ -1035,12 +1112,13 @@ final class LessonSummaryBlueprintService
                                 . "The structure must be evidence-based from:\n"
                                 . "- slides\n"
                                 . "- enrichment\n"
-                                . "- references\n"
-                                . "- official live resource context\n\n"
+                                . "- selected official Resource Library context\n"
+                                . "- selected ACS reference candidates when ACS is enabled\n\n"
                                 . "Do NOT invent generic aviation headings.\n"
                                 . "Every section must map to supporting slides.\n"
-                                . "Use selected verified Resource Library candidates for official_references. "
-                                . "Unverified ACS support sources may inform boundaries only when selected and must be clearly marked unverified in warnings or reference paths if used.",
+                                . "Use selected Resource Library candidates for official_references when their indexed content supports the lesson. "
+                                . "Use selected ACS reference candidates as official references when they support the lesson. "
+                                . "Do not use stale non-ACS slide metadata references to infer Resource Library mappings.",
                         ],
                     ],
                 ],
@@ -1057,7 +1135,8 @@ final class LessonSummaryBlueprintService
                                     'section_titles_must_be_derived_from_slide_or_resource_evidence' => true,
                                     'no_student_wording_or_complete_summary_text' => true,
                                     'include_deep_reference_paths_when_candidates_support_them' => true,
-                                    'acs_is_unverified_support_only' => true,
+                                    'resource_library_search_is_based_on_lesson_content_not_stale_slide_references' => true,
+                                    'acs_slide_references_are_official_when_selected' => true,
                                 ],
                             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                         ],
@@ -1124,13 +1203,6 @@ final class LessonSummaryBlueprintService
                 'plain_text' => $this->truncateText((string)$slide['plain_text'], 1100),
                 'ai_summary' => $this->truncateText((string)$slide['ai_summary'], 900),
                 'narration_en' => $this->truncateText((string)$slide['narration_en'], 1100),
-                'references' => array_map(static fn (array $r): array => [
-                    'ref_type' => (string)($r['ref_type'] ?? ''),
-                    'ref_code' => (string)($r['ref_code'] ?? ''),
-                    'ref_title' => (string)($r['ref_title'] ?? ''),
-                    'confidence' => isset($r['confidence']) ? (float)$r['confidence'] : null,
-                    'notes' => (string)($r['notes'] ?? ''),
-                ], $slide['references'] ?? []),
             ];
         }
 
