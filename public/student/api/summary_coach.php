@@ -573,6 +573,109 @@ function maya_concept_allows_summary_insertions(array $conceptProgress, string $
     return $closed || ($followups >= 2 && $operational) || ($operational && $correlationImproved);
 }
 
+function maya_section_label_from_concept_key(string $key): string
+{
+    $map = [
+        'weather_decision_making' => 'Weather and flight decisions',
+        'performance_planning' => 'Performance planning',
+        'mass_balance' => 'Mass and balance',
+        'flight_readiness' => 'Pilot readiness',
+        'aircraft_systems' => 'Aircraft systems and equipment',
+        'aerodynamics_control' => 'Aircraft control and behavior',
+        'regulations_compliance' => 'Rules, limitations, and pilot responsibility',
+        'ifr_procedures' => 'Procedures and cockpit verification',
+        'communication_ops' => 'Communication and coordination',
+        'preflight_inspection' => 'Preflight checks and airworthiness',
+    ];
+    return $map[$key] ?? 'Operational application';
+}
+
+function maya_derive_summary_sections(string $lessonTitle, string $lessonContext, string $officialReferenceText): array
+{
+    $hay = strtolower($lessonTitle . ' ' . $lessonContext . ' ' . $officialReferenceText);
+    $scored = [];
+    foreach (maya_concept_families() as $key => $terms) {
+        $score = 0;
+        foreach ($terms as $term) {
+            if ($term !== '' && strpos($hay, $term) !== false) $score++;
+        }
+        if ($score > 0) {
+            $scored[$key] = $score;
+        }
+    }
+    arsort($scored);
+    $sections = [];
+    foreach (array_keys($scored) as $key) {
+        $label = maya_section_label_from_concept_key((string)$key);
+        if (!in_array($label, $sections, true)) $sections[] = $label;
+        if (count($sections) >= 5) break;
+    }
+    $sections = array_slice(array_values(array_unique(array_filter($sections))), 0, 5);
+    return count($sections) >= 3 ? $sections : [];
+}
+
+function maya_summary_structure_html(array $sections): string
+{
+    if (!$sections) return '';
+    $html = '<h3>Summary Structure</h3><ul>';
+    foreach ($sections as $section) {
+        $label = trim((string)$section);
+        if ($label === '') continue;
+        $html .= '<li>' . htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</li>';
+    }
+    return $html . '</ul>';
+}
+
+function maya_make_structure_insertion(array $sections): array
+{
+    $html = maya_summary_structure_html($sections);
+    if ($html === '') return [];
+    return [
+        'id' => maya_generate_insertion_id(),
+        'label' => 'Add structure to summary',
+        'insert_mode' => 'append_html',
+        'insertion_type' => 'structure',
+        'html' => $html,
+        'requires_student_origin' => false,
+        'inserted' => false,
+    ];
+}
+
+function maya_section_progress_from_flags(array $flags, array $fallbackSections = []): array
+{
+    $progress = is_array($flags['section_progress'] ?? null) ? $flags['section_progress'] : [];
+    $sections = is_array($progress['proposed_sections'] ?? null) ? $progress['proposed_sections'] : $fallbackSections;
+    $sections = array_values(array_filter(array_map('strval', $sections)));
+    $completed = is_array($progress['completed_sections'] ?? null) ? array_values(array_filter(array_map('strval', $progress['completed_sections']))) : [];
+    $current = trim((string)($progress['current_section'] ?? ''));
+    if ($current === '' && $sections) {
+        foreach ($sections as $section) {
+            if (!in_array($section, $completed, true)) {
+                $current = $section;
+                break;
+            }
+        }
+    }
+    return [
+        'proposed_sections' => $sections,
+        'current_section' => $current,
+        'completed_sections' => $completed,
+        'current_stage' => trim((string)($progress['current_stage'] ?? MAYA_STAGE_STRUCTURE)),
+    ];
+}
+
+function maya_section_progress_prompt(array $progress): string
+{
+    $sections = $progress['proposed_sections'] ?? [];
+    if (!$sections) {
+        return "No section structure has been established yet.";
+    }
+    return "Proposed sections: " . implode(', ', array_map('strval', $sections)) . "\n"
+        . "Current section: " . ((string)($progress['current_section'] ?? '') ?: '(not selected)') . "\n"
+        . "Completed sections: " . (count($progress['completed_sections'] ?? []) ? implode(', ', array_map('strval', $progress['completed_sections'])) : '(none)') . "\n"
+        . "Current writing stage: " . ((string)($progress['current_stage'] ?? '') ?: MAYA_STAGE_STRUCTURE);
+}
+
 function maya_decode_json_column($raw): array
 {
     if (!is_string($raw) || trim($raw) === '') return [];
@@ -612,9 +715,10 @@ function maya_history_message_kind(array $row): string
     return trim((string)($row['message_type'] ?? $row['kind'] ?? 'chat')) ?: 'chat';
 }
 
-function maya_sanitize_summary_insertions($raw, bool $allow): array
+function maya_sanitize_summary_insertions($raw, bool $allowMatureConcepts, array $allowedEarlyTypes = []): array
 {
-    if (!$allow || !is_array($raw)) return [];
+    if (!is_array($raw)) return [];
+    $allowedEarlyTypes = array_fill_keys($allowedEarlyTypes, true);
     $out = [];
     foreach ($raw as $item) {
         if (!is_array($item)) continue;
@@ -625,6 +729,8 @@ function maya_sanitize_summary_insertions($raw, bool $allow): array
         if (!in_array($type, ['structure', 'mature_concept', 'heading', 'bullet', 'reminder'], true)) {
             $type = 'mature_concept';
         }
+        if ($type === 'mature_concept' && !$allowMatureConcepts) continue;
+        if ($type !== 'mature_concept' && empty($allowedEarlyTypes[$type])) continue;
         if ($label === '' || $html === '') continue;
         // Guardrails: insertions must be short, student-origin notes only.
         if (mb_strlen(maya_strip_html_to_text($html)) > 600) continue;
@@ -638,7 +744,7 @@ function maya_sanitize_summary_insertions($raw, bool $allow): array
             'insert_mode' => $mode,
             'insertion_type' => $type,
             'html' => $html,
-            'requires_student_origin' => true,
+            'requires_student_origin' => !empty($item['requires_student_origin']),
             'inserted' => !empty($item['inserted']),
         ];
         if (count($out) >= 2) break;
@@ -864,11 +970,12 @@ function maya_get_summary_snapshot(PDO $pdo, int $userId, int $cohortId, int $le
  * Pure heuristics — no AI call — so the modal opens fast and free.
  * Real coaching (with scoring + AI) starts on the first Continue/reply.
  */
-function maya_compose_initial_greeting(array $snap, int $existingInteractions, string $persistedStage): array
+function maya_compose_initial_greeting(array $snap, int $existingInteractions, string $persistedStage, array $sections = []): array
 {
     $status = (string)($snap['review_status'] ?? 'missing');
     $locked = (int)($snap['student_soft_locked'] ?? 0) === 1;
     $words = (int)($snap['word_count'] ?? 0);
+    $sectionText = $sections ? implode(', ', array_map('strval', $sections)) : '';
 
     // 1) Already accepted + soft-locked → unlock-first message.
     if ($status === 'acceptable' && $locked) {
@@ -899,11 +1006,9 @@ function maya_compose_initial_greeting(array $snap, int $existingInteractions, s
     if ($words >= 15) {
         return [
             'maya_message' =>
-                "I see you've started writing — that's a great start. Let's build on it together. "
-                . "Don't worry about polishing yet; just tell me the main ideas of this lesson "
-                . "in your own words.",
+                "I see you've started writing — good. Let's turn it into a clear lesson summary structure, then we’ll work one section at a time.",
             'next_question' =>
-                "Pick one idea from your draft and connect it to a real flight decision, cockpit action, or safety outcome.",
+                "Which section of your draft should we strengthen first, and what pilot action should that section include?",
             'stage' => $persistedStage ?: MAYA_STAGE_STRUCTURE,
         ];
     }
@@ -912,9 +1017,11 @@ function maya_compose_initial_greeting(array $snap, int $existingInteractions, s
     if ($existingInteractions >= 1) {
         return [
             'maya_message' =>
-                "Welcome back. Your summary editor looks empty right now — let's start "
-                . "by capturing the lesson concepts you would actually use as a pilot.",
-            'next_question' => "List the main concepts from this lesson, then pick one and connect it to a cockpit action or flight decision.",
+                "Welcome back. Your summary editor looks empty right now — let’s first build the structure, then we’ll work through one section at a time."
+                . ($sectionText !== '' ? " I suggest these sections: {$sectionText}." : ''),
+            'next_question' => $sections
+                ? "Add or write these headings in your summary first, then tell me which section you want to start with."
+                : "What are the 3–5 main areas this lesson covered? We’ll use those as your summary sections.",
             'stage' => null,
         ];
     }
@@ -922,9 +1029,11 @@ function maya_compose_initial_greeting(array $snap, int $existingInteractions, s
     // 4) Empty draft, fresh session → original onboarding tone.
     return [
         'maya_message' =>
-            "Hi! Let's build your summary together. Start by writing the main ideas of "
-            . "this lesson in your own words, with an eye toward how a pilot would use them.",
-        'next_question' => "List the main concepts from this lesson, then pick one and connect it to a cockpit action or flight decision.",
+            "Hi! Let’s build your summary together. First we create the structure, then we’ll work through each section like a flight briefing."
+            . ($sectionText !== '' ? " Based on this lesson, I suggest: {$sectionText}." : ''),
+        'next_question' => $sections
+            ? "Start by adding these headings to your summary. Then we’ll begin with the first section: " . $sections[0] . "."
+            : "What are the 3–5 main areas this lesson covered? We’ll use those as your summary sections.",
         'stage' => null,
     ];
 }
@@ -1116,7 +1225,7 @@ function maya_system_prompt(): string
         . "6. Never provide the full lesson summary. Never provide complete copy-pasteable answers to lesson concepts.\n"
         . "7. Never accept pasted text without probing understanding. If flags.major_paste was true and the student's reply convincingly explains the pasted content in their own words, you MAY clear it; otherwise leave it true.\n"
         . "8. student_note_suggestion must be empty unless it is clearly based on the student's own response, and must not be a full answer or a complete summary paragraph. Use a short bullet or phrase the student can refine, or empty string.\n"
-        . "9. summary_insertions may contain at most two short insertable note snippets, ONLY when based directly on the student's own reply this turn. Never generate full summary content from lesson material alone. Set requires_student_origin=true for each insertion.\n"
+        . "9. summary_insertions may contain at most two short insertable snippets. Structure/heading insertions may be derived from lesson context as editable scaffolding; mature_concept insertions must be based directly on the student's own demonstrated understanding. Never generate full summary content from lesson material alone. Set insertion_type accurately.\n"
         . "10. Score rubric (0-100):\n"
         . "   - coverage: how much of the lesson's primary concepts the summary covers.\n"
         . "   - accuracy: technical correctness of what is written.\n"
@@ -1162,7 +1271,17 @@ function maya_system_prompt(): string
         . "44. The student should feel they are developing understanding, not collecting bullets.\n"
         . "45. summary_insertions should usually appear after concept closure, operational understanding, cause/effect reasoning, and pilot-action reasoning.\n"
         . "46. Intermediate answers should usually NOT produce insertion buttons.\n"
-        . "47. Before generating a summary insertion, ask: Has the student demonstrated enough understanding that this concept is mature enough to become part of the formal summary?";
+        . "47. Before generating a summary insertion, ask: Has the student demonstrated enough understanding that this concept is mature enough to become part of the formal summary?\n"
+        . "48. Actively guide the student in building the structure of the summary, not only ask chat questions.\n"
+        . "49. When the summary is empty or very short, first help create a clear section structure before deep coaching.\n"
+        . "50. Tell the student which part of the summary they are working on.\n"
+        . "51. Periodically give writing guidance, such as: add this under a named section, write one bullet in your own words, include the pilot action, create a heading for this topic, or place this in the right section.\n"
+        . "52. Make it clear when the student should answer in chat, write directly in the summary editor, or use an Add button.\n"
+        . "53. Avoid turning the experience into an endless chat session.\n"
+        . "54. Manage topic progression: build structure, work one section, close that section, then move to the next section.\n"
+        . "55. When a concept is mature but no insertion is offered, explicitly say: Make sure you write this in your summary in your own words.\n"
+        . "56. Add buttons may support mature concepts, but you should also guide manual writing when appropriate.\n"
+        . "57. The student should always understand the current writing task.";
 }
 
 function maya_response_schema(bool $isFinalReview): array
@@ -1224,6 +1343,7 @@ function maya_response_schema(bool $isFinalReview): array
                         'id' => ['type' => 'string'],
                         'label' => ['type' => 'string'],
                         'insert_mode' => ['type' => 'string', 'enum' => ['append_bullets', 'append_html', 'insert_html']],
+                        'insertion_type' => ['type' => 'string', 'enum' => ['structure', 'mature_concept', 'heading', 'bullet', 'reminder']],
                         'html' => ['type' => 'string'],
                         'requires_student_origin' => ['type' => 'boolean'],
                     ],
@@ -1327,7 +1447,18 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
 
     // Adaptive greeting based on canonical lesson_summaries state.
     $snap = maya_get_summary_snapshot($pdo, $userId, $cohortId, $lessonId);
-    $greeting = maya_compose_initial_greeting($snap, $interactionCount, $persistedStage);
+    $sections = [];
+    if ((int)($snap['word_count'] ?? 0) < 30) {
+        $lessonTitleForStructure = maya_get_lesson_title($pdo, $lessonId);
+        $lessonContextForStructure = maya_build_lesson_context($pdo, $lessonId, 1800);
+        $referenceForStructure = maya_build_official_reference_context($pdo, $lessonId, $lessonTitleForStructure, 1200);
+        $sections = maya_derive_summary_sections(
+            $lessonTitleForStructure,
+            $lessonContextForStructure,
+            (string)($referenceForStructure['text'] ?? '')
+        );
+    }
+    $greeting = maya_compose_initial_greeting($snap, $interactionCount, $persistedStage, $sections);
 
     $newStage = $greeting['stage'] !== null ? $greeting['stage'] : $persistedStage;
     $nextQ    = $greeting['next_question'];
@@ -1337,13 +1468,23 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
     // rows. Reopening the modal or refreshing the page returns existing rows.
     $messageCount = maya_message_count($pdo, (int)$session['id']);
     if ($messageCount === 0) {
+        $sectionProgress = maya_section_progress_from_flags($flags ?: [], $sections);
+        $flags = array_merge($flags ?: [], [
+            'section_progress' => $sectionProgress,
+        ]);
+        $initialInsertions = [];
+        if ((int)($snap['word_count'] ?? 0) < 15 && $sections) {
+            $structureInsertion = maya_make_structure_insertion($sections);
+            if ($structureInsertion) $initialInsertions[] = $structureInsertion;
+        }
         $initialBody = $msg;
         if ($nextQ !== '' && stripos($initialBody, $nextQ) === false) {
             $initialBody .= "\n\n" . $nextQ;
         }
-        maya_insert_message($pdo, $session, 'maya', 'greeting', $initialBody, $scores ?: [], $flags ?: []);
+        maya_insert_message($pdo, $session, 'maya', 'greeting', $initialBody, $scores ?: [], $flags ?: [], $initialInsertions);
         maya_save_session($pdo, (int)$session['id'], [
             'stage' => $newStage,
+            'flags_json' => json_encode($flags),
             'last_question' => $nextQ,
         ]);
     } else {
@@ -1535,6 +1676,9 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     $conceptProgress = is_array($existingFlags['concept_progress'] ?? null) ? $existingFlags['concept_progress'] : [];
     $conceptProgressText = maya_concept_progress_prompt($conceptProgress, $activeConcept);
     $activeConceptClosed = !empty($conceptProgress[$activeConcept]['closed']);
+    $derivedSections = maya_derive_summary_sections($lessonTitle, $lessonContext, $officialReferenceText);
+    $sectionProgress = maya_section_progress_from_flags($existingFlags, $derivedSections);
+    $sectionProgressText = maya_section_progress_prompt($sectionProgress);
 
     $historyLines = [];
     foreach ($clientHistory as $h) {
@@ -1569,8 +1713,13 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "9. If it introduces new material, only ask it if the slide/reference context clearly supports it.\n\n"
         . "10. Has the current concept already been sufficiently demonstrated or closed?\n"
         . "11. Would another question on this same concept feel repetitive?\n"
-        . "12. If the concept is closed, acknowledge it briefly and transition to another weak or unexplored lesson area.\n\n"
-        . "Then ask ONE targeted aviation coaching question.\n\n"
+        . "12. If the concept is closed, acknowledge it briefly and transition to another weak or unexplored lesson area.\n"
+        . "13. Is the student still in structure-building mode, section-development mode, writing-guidance mode, or final-readiness mode?\n"
+        . "14. What exact part of the summary should the student work on now?\n"
+        . "15. Should the student answer in chat, write directly in the summary editor, or use an insertion button?\n"
+        . "16. If the draft is empty or very short, can you propose 3–5 editable section headings from the lesson context?\n"
+        . "17. If a concept is mature but no insertion is appropriate, did you tell the student to write it in their own words?\n\n"
+        . "Then give one clear writing task and ask ONE targeted aviation coaching question when a chat answer is needed.\n\n"
         . "Do NOT ask generic \"most important idea\" questions. Prefer lesson-scope questions about pilot action, preflight verification, operational consequence, or go/no-go decision making.";
 
     $userPrompt =
@@ -1588,10 +1737,13 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "Current concept: " . maya_concept_label($activeConcept) . "\n"
         . "Current concept already closed: " . ($activeConceptClosed ? 'true' : 'false') . "\n"
         . $conceptProgressText . "\n\n"
+        . "SECTION PROGRESSION STATE\n"
+        . $sectionProgressText . "\n\n"
         . "STATE:\n" . $stateBlock . "\n\n"
         . "Coach the student per the rules. Pick the most useful next stage. "
         . "Ask like a flight instructor: operational, causal, safety-oriented, and cockpit-aware. "
         . "If the current concept is closed or saturated, do not ask another variation about it; acknowledge and move to a different lesson area. "
+        . "Guide summary construction explicitly: identify the current section, tell the student whether to write in the editor or answer in chat, and avoid endless chat-only coaching. "
         . "Score honestly. Output structured JSON only.";
 
     try {
@@ -1622,6 +1774,16 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $nextQuestion = 'Pick one idea from your summary and explain how it affects a pilot action, preflight check, or go/no-go decision covered by this lesson.';
     }
     $newStage = maya_normalize_stage($aiJson['stage'] ?? $coachStage);
+    if ($wordCount < 15 && $studentReply === '') {
+        $newStage = MAYA_STAGE_STRUCTURE;
+        if ($derivedSections) {
+            $mayaMessage = 'Let’s build your summary structure first. Add these editable headings, then we’ll work through them one by one.';
+            $nextQuestion = 'Start with the first section, ' . $derivedSections[0] . ': what should a pilot understand or do for that part of the lesson?';
+        } else {
+            $mayaMessage = 'Let’s build your summary structure first. Once we have the headings, we’ll develop each section together.';
+            $nextQuestion = 'What are the 3–5 main areas this lesson covered?';
+        }
+    }
 
     $aiScores = is_array($aiJson['scores'] ?? null) ? $aiJson['scores'] : [];
     $scores = [
@@ -1681,6 +1843,17 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     if ($conceptJustClosed) {
         $nextQuestion = maya_transition_question_for_closed_concept($activeConcept, $summaryPlainForFocus);
         $newStage = MAYA_STAGE_CORRELATE;
+        $currentSection = trim((string)($sectionProgress['current_section'] ?? ''));
+        if ($currentSection !== '' && !in_array($currentSection, $sectionProgress['completed_sections'], true)) {
+            $sectionProgress['completed_sections'][] = $currentSection;
+        }
+        foreach ($sectionProgress['proposed_sections'] as $sectionName) {
+            if (!in_array($sectionName, $sectionProgress['completed_sections'], true)) {
+                $sectionProgress['current_section'] = $sectionName;
+                break;
+            }
+        }
+        $sectionProgress['current_stage'] = 'next_section';
         if (stripos($mayaMessage, 'good') === false && stripos($mayaMessage, 'yes') === false && stripos($mayaMessage, 'correct') === false) {
             $mayaMessage = 'Good — you connected the concept to a real pilot decision. ' . $mayaMessage;
         }
@@ -1692,13 +1865,34 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $oldScores,
         $scores
     );
-    $summaryInsertions = maya_sanitize_summary_insertions($rawSummaryInsertions, $studentReply !== '' && $allowSummaryInsertions);
+    $allowedEarlyInsertionTypes = [];
+    if ($newStage === MAYA_STAGE_STRUCTURE || $wordCount < 30) {
+        $allowedEarlyInsertionTypes = ['structure', 'heading'];
+    }
+    if ($newStage !== MAYA_STAGE_FINAL_REVIEW) {
+        $allowedEarlyInsertionTypes[] = 'reminder';
+    }
+    $summaryInsertions = maya_sanitize_summary_insertions(
+        $rawSummaryInsertions,
+        $studentReply !== '' && $allowSummaryInsertions,
+        array_values(array_unique($allowedEarlyInsertionTypes))
+    );
+    if ($wordCount < 15 && $derivedSections && !array_filter($summaryInsertions, static function ($ins) {
+        return is_array($ins) && ($ins['insertion_type'] ?? '') === 'structure';
+    })) {
+        $structureInsertion = maya_make_structure_insertion($derivedSections);
+        if ($structureInsertion) {
+            array_unshift($summaryInsertions, $structureInsertion);
+            $summaryInsertions = array_slice($summaryInsertions, 0, 2);
+        }
+    }
     $persistedFlags = [
         'major_paste' => $persistedMajorPaste,
         'needs_deeper_question' => $needsDeeper,
         'concept_progress' => $updatedConceptProgress,
         'active_concept' => $activeConcept,
         'summary_insertions_allowed' => $allowSummaryInsertions,
+        'section_progress' => array_merge($sectionProgress, ['current_stage' => $newStage]),
     ];
     $mayaBubbleText = $mayaMessage;
     if ($nextQuestion !== '' && stripos($mayaBubbleText, $nextQuestion) === false) {

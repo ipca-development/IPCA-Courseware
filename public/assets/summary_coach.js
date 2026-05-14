@@ -1351,12 +1351,21 @@
     var self = this;
     var wrap = document.createElement('div');
     wrap.className = 'maya-insertion-actions';
+    function labelForInsertion(ins) {
+      if (ins.inserted) return 'Added';
+      var type = String(ins.insertion_type || 'mature_concept');
+      if (type === 'structure') return 'Add structure to summary';
+      if (type === 'heading') return 'Add heading';
+      if (type === 'reminder') return 'Add reminder note';
+      if (type === 'mature_concept') return 'Add completed idea to summary';
+      return ins.label ? String(ins.label) : 'Add note';
+    }
     insertions.forEach(function (ins) {
       if (!ins || !ins.id || !ins.label) return;
       var btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'maya-insertion-btn';
-      btn.textContent = ins.inserted ? 'Added' : String(ins.label);
+      btn.textContent = labelForInsertion(ins);
       btn.disabled = !!ins.inserted;
       btn.setAttribute('data-insertion-id', String(ins.id));
       btn.addEventListener('click', function () {

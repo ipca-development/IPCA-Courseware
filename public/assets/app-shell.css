@@ -2409,7 +2409,7 @@ a.cmp-card:hover{
   width:100%;
   max-width:100%;
   min-width:0;
-  overflow-x:hidden;
+  overflow:visible;
   box-sizing:border-box;
 }
 
@@ -2584,6 +2584,7 @@ a.cmp-card:hover{
   max-width:100%;
   min-width:0;
   overflow:hidden;
+  box-shadow:var(--card-shadow) !important;
 }
 
 .compliance-card__header,
@@ -2930,11 +2931,86 @@ a.cmp-card:hover{
   width:100%;
   max-width:100%;
   min-width:0;
+  margin:0 0 18px;
+  padding:0;
+  background:transparent !important;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+}
+
+.cmp-page .compliance-resource-library-embed,
+.cmp-page .compliance-resource-library-embed:hover{
+  background:transparent !important;
+  border:0 !important;
+  border-radius:0 !important;
+  box-shadow:none !important;
+  padding:0 !important;
 }
 
 .compliance-resource-library-embed .rl-easa-page,
 .compliance-resource-library-embed .rl-easa-page *{
   box-sizing:border-box;
+}
+
+.cmp-page .compliance-resource-library-embed .rl-easa-page{
+  display:flex !important;
+  flex-direction:column !important;
+  gap:14px !important;
+  width:100%;
+  margin:0 !important;
+  padding:0 !important;
+  background:transparent !important;
+  border:0 !important;
+  box-shadow:none !important;
+  text-align:left !important;
+}
+
+.cmp-page .compliance-resource-library-embed section,
+.cmp-page .compliance-resource-library-embed section:hover{
+  background:var(--panel-bg) !important;
+  border:1px solid var(--border-soft) !important;
+  border-radius:20px !important;
+  box-shadow:var(--card-shadow) !important;
+  padding:16px 18px !important;
+  margin:0 0 14px !important;
+  color:var(--text-strong) !important;
+  text-align:left !important;
+}
+
+.cmp-page .compliance-resource-library-embed .rl-easa-metrics{
+  background:var(--panel-bg) !important;
+  border:1px solid var(--border-soft) !important;
+  border-radius:20px !important;
+  box-shadow:var(--card-shadow) !important;
+  padding:16px 18px !important;
+  margin:0 !important;
+}
+
+.cmp-page .compliance-resource-library-embed .rl-easa-maya-chat{
+  margin-top:-14px !important;
+  border-top-left-radius:0 !important;
+  border-top-right-radius:0 !important;
+  border-top:0 !important;
+}
+
+.cmp-page .compliance-resource-library-embed .rl-easa-metrics + .rl-easa-maya-chat{
+  margin-bottom:14px !important;
+}
+
+.cmp-page .compliance-resource-library-embed h1,
+.cmp-page .compliance-resource-library-embed h2,
+.cmp-page .compliance-resource-library-embed h3,
+.cmp-page .compliance-resource-library-embed h4,
+.cmp-page .compliance-resource-library-embed p,
+.cmp-page .compliance-resource-library-embed div,
+.cmp-page .compliance-resource-library-embed li{
+  text-align:left !important;
+}
+
+.cmp-page .compliance-resource-library-embed .rl-easa-tree-toolbar{
+  justify-content:flex-start !important;
+  text-align:left !important;
 }
 
 .compliance-resource-library-embed table,
@@ -2990,8 +3066,25 @@ a.cmp-card:hover{
   border-radius:0 !important;
   background:transparent !important;
   box-shadow:none !important;
+  color:#0f172a !important;
   font-size:13px !important;
   line-height:1.4 !important;
+  text-align:left !important;
+  text-decoration:none !important;
+}
+
+.compliance-resource-library-embed .rl-easa-tree-section-title:hover,
+.compliance-resource-library-embed .rl-easa-tree-rule-title:hover{
+  color:#102845 !important;
+}
+
+.compliance-resource-library-embed .rl-easa-tree-row--section .rl-easa-tree-section-title{
+  font-weight:700 !important;
+}
+
+.compliance-resource-library-embed .rl-easa-tree-panel{
+  color:#0f172a !important;
+  text-align:left !important;
 }
 
 .compliance-resource-library-embed .rl-easa-tree-row{
@@ -3003,6 +3096,20 @@ a.cmp-card:hover{
 .compliance-resource-library-embed .rl-easa-tree-header-row h3{
   font-size:15px !important;
   line-height:1.25 !important;
+}
+
+.cmp-page .cmp-card:hover,
+.cmp-page section:not(.app-section-hero):not(.cmp-hero):hover,
+.cmp-page .cmpdash-panel:hover,
+.cmp-page .cmpdash-card:hover{
+  box-shadow:var(--card-shadow) !important;
+  border-color:var(--border-soft) !important;
+}
+
+.cmp-page a.cmp-card:hover,
+.cmp-page tr[data-href]:hover,
+.cmp-page .compliance-row-clickable:hover{
+  border-color:rgba(15,23,42,0.10) !important;
 }
 
 .cmp-page [style*="grid-template-columns:1fr 360px"],
@@ -3111,4 +3218,57 @@ a.cmp-card:hover{
   .compliance-filterbar__actions{
     flex-wrap:wrap;
   }
+}
+
+/* Final hero-action lock: all Compliance hero buttons must match the dashboard chips. */
+.cmp-page .cmp-hero .cmp-hero-actions .cmp-hero-action,
+.cmp-page .cmp-hero .cmp-hero-actions button.cmp-hero-action,
+.cmp-page .cmp-hero .cmp-hero-actions a.cmp-hero-action,
+.cmp-page .compliance-hero .compliance-hero__actions .compliance-hero__action,
+.cmp-page .compliance-hero .compliance-hero__actions button.compliance-hero__action,
+.cmp-page .compliance-hero .compliance-hero__actions a.compliance-hero__action{
+  width:auto !important;
+  height:40px !important;
+  min-height:40px !important;
+  max-height:40px !important;
+  flex:0 0 auto !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  gap:9px !important;
+  padding:0 16px !important;
+  border-radius:999px !important;
+  border:1px solid rgba(255,255,255,0.14) !important;
+  background:rgba(255,255,255,0.08) !important;
+  color:#fff !important;
+  box-shadow:none !important;
+  font-size:13px !important;
+  line-height:1 !important;
+  font-weight:650 !important;
+  letter-spacing:.01em !important;
+  text-decoration:none !important;
+  white-space:nowrap !important;
+}
+
+.cmp-page .cmp-hero .cmp-hero-actions .cmp-hero-action:hover,
+.cmp-page .compliance-hero .compliance-hero__actions .compliance-hero__action:hover{
+  background:rgba(255,255,255,0.13) !important;
+  border-color:rgba(255,255,255,0.22) !important;
+  color:#fff !important;
+  transform:translateY(-1px) !important;
+  box-shadow:none !important;
+}
+
+.cmp-page .cmp-hero .cmp-hero-actions .cmp-hero-action svg,
+.cmp-page .compliance-hero .compliance-hero__actions .compliance-hero__action svg{
+  width:15px !important;
+  height:15px !important;
+  flex:0 0 15px !important;
+}
+
+.cmp-page .cmp-hero .cmp-hero-actions .cmp-hero-action span,
+.cmp-page .compliance-hero .compliance-hero__actions .compliance-hero__action span{
+  font-size:13px !important;
+  line-height:1 !important;
+  font-weight:650 !important;
 }

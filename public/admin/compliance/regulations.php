@@ -122,24 +122,20 @@ compliance_page_open(array(
     ),
 ));
 ?>
-<section class="compliance-reg-search">
+<div class="compliance-reg-search">
   <style>
     .compliance-reg-search .ex{color:var(--text-muted);font-size:12px;line-height:1.4;margin-top:4px;}
   </style>
 
-  <section class="cmp-card">
-    <?php if ($findingCtx): ?>
+  <?php if ($findingCtx): ?>
+  <div class="cmp-card">
       <p class="cmp-flash cmp-flash-ok" style="margin:0 0 16px;">
         Attaching to <strong><?= h((string)$findingCtx['finding_code']) ?></strong> — <?= h((string)$findingCtx['title']) ?>
       </p>
-    <?php else: ?>
-      <p class="cmp-flash cmp-flash-warn" style="margin:0 0 16px;">
-        Open a finding and use <strong>Search regulations & attach</strong>, or add <code>?finding_id=…</code> to this URL to enable attach buttons.
-      </p>
-    <?php endif; ?>
-  </section>
+  </div>
+  <?php endif; ?>
 
-    <section class="compliance-resource-library-embed">
+    <div class="compliance-resource-library-embed">
       <?php
       $easaApiHref = '/admin/api/resource_library_easa_api.php';
       $easaUserPhotoHref = '';
@@ -160,10 +156,10 @@ compliance_page_open(array(
       }
       require __DIR__ . '/../resource_library_easa_tab.inc.php';
       ?>
-    </section>
+    </div>
 
     <?php if ($findingCtx): ?>
-    <section class="cmp-card">
+    <div class="cmp-card">
     <form method="get" action="/admin/compliance/regulations.php" class="cmp-toolbar">
       <?php if ($findingId > 0): ?>
         <input type="hidden" name="finding_id" value="<?= (int)$findingId ?>">
@@ -182,15 +178,15 @@ compliance_page_open(array(
       </label>
       <button type="submit">Search</button>
     </form>
-    </section>
+    </div>
     <?php endif; ?>
 
     <?php if ($q !== '' && !$aimOk && !$easaOk): ?>
-      <section class="cmp-card"><p class="cmp-flash cmp-flash-danger" style="margin:0;">No regulatory tables available — apply resource library SQL migrations.</p></section>
+      <div class="cmp-card"><p class="cmp-flash cmp-flash-danger" style="margin:0;">No regulatory tables available — apply resource library SQL migrations.</p></div>
     <?php endif; ?>
 
   <?php if ($q !== '' && ($corpus === 'all' || $corpus === 'aim') && $aimOk && $aimHits !== array()): ?>
-    <section class="cmp-card">
+    <div class="cmp-card">
       <div class="cmp-list-head" style="margin-bottom:14px;">
         <div class="cmp-list-title"><?= compliance_ui_icon('document') ?><span>FAA AIM</span></div>
         <div class="cmp-count-pill"><?= count($aimHits) ?></div>
@@ -239,11 +235,11 @@ compliance_page_open(array(
         </tbody>
       </table>
       </div>
-    </section>
+    </div>
   <?php endif; ?>
 
   <?php if ($q !== '' && ($corpus === 'all' || $corpus === 'easa') && $easaOk && $easaHits !== array()): ?>
-    <section class="cmp-card">
+    <div class="cmp-card">
       <div class="cmp-list-head" style="margin-bottom:14px;">
         <div class="cmp-list-title"><?= compliance_ui_icon('document') ?><span>EASA eRules staging</span></div>
         <div class="cmp-count-pill"><?= count($easaHits) ?></div>
@@ -294,15 +290,15 @@ compliance_page_open(array(
         </tbody>
       </table>
       </div>
-    </section>
+    </div>
   <?php endif; ?>
 
   <?php if ($q !== '' && $aimHits === array() && $easaHits === array() && ($aimOk || $easaOk)): ?>
-    <section class="cmp-card">
+    <div class="cmp-card">
       <p style="margin:0;color:var(--text-muted);">No matches — shorten or broaden the query.</p>
-    </section>
+    </div>
   <?php endif; ?>
-</section>
+</div>
 <?php
 compliance_page_close();
 cw_footer();
