@@ -364,7 +364,8 @@ if ($detailId > 0) {
 
     <div style="display:grid;grid-template-columns:1fr 380px;gap:24px;align-items:start;">
       <section class="cmp-card" style="overflow:hidden;">
-        <table>
+        <div class="compliance-table-wrap">
+        <table class="compliance-table">
           <thead>
             <tr>
               <th>CAP code</th>
@@ -397,6 +398,7 @@ if ($detailId > 0) {
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       </section>
 
       <div style="display:flex;flex-direction:column;gap:18px;">

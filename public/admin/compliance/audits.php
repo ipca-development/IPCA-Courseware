@@ -265,7 +265,8 @@ if ($detailId > 0) {
               <p style="margin:0;">Attach an approved checklist below to begin auditing.</p>
             </div>
           <?php else: ?>
-            <table class="cmp-table" style="margin-bottom:18px;">
+            <div class="compliance-table-wrap">
+            <table class="cmp-table compliance-table" style="margin-bottom:18px;">
               <thead><tr>
                 <th>Template</th>
                 <th>Version</th>
@@ -299,6 +300,7 @@ if ($detailId > 0) {
                 <?php endforeach; ?>
               </tbody>
             </table>
+            </div>
           <?php endif; ?>
 
           <?php if (!$locked && $approvedVersions): ?>
@@ -348,7 +350,8 @@ if ($detailId > 0) {
           <h2 class="cmp-card-title" style="margin:0;">Recent audits</h2>
           <span class="cmp-pill" style="background:#f3f6fb;color:#71809a;"><?= count($rows) ?> result<?= count($rows) === 1 ? '' : 's' ?></span>
         </div>
-        <table class="cmp-table">
+        <div class="compliance-table-wrap">
+        <table class="cmp-table compliance-table">
           <thead><tr>
             <th>Code</th>
             <th>Title</th>
@@ -375,6 +378,7 @@ if ($detailId > 0) {
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       </section>
 
       <section class="cmp-card cmp-side-card">

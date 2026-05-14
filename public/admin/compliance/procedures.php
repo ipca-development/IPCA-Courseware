@@ -388,7 +388,8 @@ if ($versionId > 0) {
             </label>
             <button type="submit">+ New draft version</button>
           </form>
-          <table>
+          <div class="compliance-table-wrap">
+          <table class="compliance-table">
             <thead><tr><th>Ver</th><th>Status</th><th>Items</th><th>Updated</th><th></th></tr></thead>
             <tbody>
               <?php foreach ($vers as $v): ?>
@@ -405,6 +406,7 @@ if ($versionId > 0) {
               <?php endif; ?>
             </tbody>
           </table>
+          </div>
         </section>
         <?php
 } else {
@@ -445,7 +447,8 @@ if ($versionId > 0) {
         <div class="cmp-list-title"><?= compliance_ui_icon('list') ?><span>Templates</span></div>
         <div class="cmp-count-pill"><?= count($templates) ?></div>
       </div>
-      <table>
+      <div class="compliance-table-wrap">
+      <table class="compliance-table">
         <thead><tr><th>Code</th><th>Title</th><th>Authority</th><th>Active</th><th></th></tr></thead>
         <tbody>
           <?php foreach ($templates as $t): ?>
@@ -462,6 +465,7 @@ if ($versionId > 0) {
           <?php endif; ?>
         </tbody>
       </table>
+      </div>
     </section>
     <?php
 }

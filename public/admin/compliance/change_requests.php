@@ -217,7 +217,8 @@ if ($detailId > 0) {
 
         <section class="cmp-card">
           <h2 style="margin:0 0 12px;">Links</h2>
-          <table style="width:100%;font-size:13px;border-collapse:collapse;">
+          <div class="compliance-table-wrap">
+          <table class="compliance-table" style="width:100%;font-size:13px;border-collapse:collapse;">
             <thead><tr style="background:#f1f5f9;text-align:left;"><th style="padding:8px 10px;">Type</th><th style="padding:8px 10px;">Entity</th><th style="padding:8px 10px;">Relation</th></tr></thead>
             <tbody>
               <?php foreach ($links as $L): ?>
@@ -229,6 +230,7 @@ if ($detailId > 0) {
               <?php endforeach; ?>
             </tbody>
           </table>
+          </div>
           <?php if (!$locked): ?>
             <form method="post" style="margin-top:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
               <input type="hidden" name="action" value="add_link">
@@ -360,7 +362,8 @@ if ($detailId > 0) {
         </div>
         <div class="cmp-count-pill"><?= count($rows) ?> request<?= count($rows) === 1 ? '' : 's' ?></div>
       </div>
-      <table>
+      <div class="compliance-table-wrap">
+      <table class="compliance-table">
         <thead><tr>
           <th>Code</th>
           <th>Title</th>
@@ -385,6 +388,7 @@ if ($detailId > 0) {
           <?php endforeach; ?>
         </tbody>
       </table>
+      </div>
     </section>
     <?php
 }

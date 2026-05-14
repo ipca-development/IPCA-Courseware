@@ -47,28 +47,28 @@ if (!function_exists('compliance_page_open')) {
         $back = isset($opts['back']) && is_array($opts['back']) ? $opts['back'] : null;
         $flash = isset($opts['flash']) && is_array($opts['flash']) ? $opts['flash'] : null;
 
-        echo '<div class="cmp-page">';
+        echo '<div class="cmp-page compliance-page">';
 
         if ($back !== null && isset($back['href'], $back['label'])) {
             compliance_back_link($back);
         }
 
-        echo '<section class="app-section-hero cmp-hero">';
+        echo '<section class="app-section-hero cmp-hero compliance-hero">';
 
         if ($overline !== '') {
-            echo '<div class="hero-overline">' . htmlspecialchars($overline, ENT_QUOTES, 'UTF-8') . '</div>';
+            echo '<div class="hero-overline compliance-hero__eyebrow">' . htmlspecialchars($overline, ENT_QUOTES, 'UTF-8') . '</div>';
         }
 
-        echo '<div class="cmp-hero-head">';
-        echo '  <div class="cmp-hero-copy">';
-        echo '    <h1 class="cmp-hero-title">' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>';
+        echo '<div class="cmp-hero-head compliance-hero__head">';
+        echo '  <div class="cmp-hero-copy compliance-hero__copy">';
+        echo '    <h1 class="cmp-hero-title compliance-hero__title">' . htmlspecialchars($title, ENT_QUOTES, 'UTF-8') . '</h1>';
         if ($description !== '') {
-            echo '    <p class="cmp-hero-text">' . htmlspecialchars($description, ENT_QUOTES, 'UTF-8') . '</p>';
+            echo '    <p class="cmp-hero-text compliance-hero__text">' . htmlspecialchars($description, ENT_QUOTES, 'UTF-8') . '</p>';
         }
         echo '  </div>';
 
         if ($actions) {
-            echo '  <div class="cmp-hero-actions">';
+            echo '  <div class="cmp-hero-actions compliance-hero__actions">';
             foreach ($actions as $action) {
                 if (!is_array($action)) {
                     continue;
@@ -82,12 +82,12 @@ if (!function_exists('compliance_page_open')) {
                 $svg = $icon !== '' ? compliance_ui_icon($icon) : '';
 
                 if ($href !== '') {
-                    echo '<a class="cmp-hero-action" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '">';
+                    echo '<a class="cmp-hero-action compliance-hero__action compliance-btn compliance-btn--secondary" href="' . htmlspecialchars($href, ENT_QUOTES, 'UTF-8') . '">';
                     echo $svg;
                     echo '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
                     echo '</a>';
                 } else {
-                    echo '<button type="button" class="cmp-hero-action">';
+                    echo '<button type="button" class="cmp-hero-action compliance-hero__action compliance-btn compliance-btn--secondary">';
                     echo $svg;
                     echo '<span>' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</span>';
                     echo '</button>';
@@ -99,7 +99,7 @@ if (!function_exists('compliance_page_open')) {
         echo '</div>'; // .cmp-hero-head
 
         if ($stats) {
-            echo '<div class="cmp-hero-stats">';
+            echo '<div class="cmp-hero-stats compliance-kpi-grid">';
             foreach ($stats as $chip) {
                 if (!is_array($chip)) {
                     continue;
@@ -110,7 +110,7 @@ if (!function_exists('compliance_page_open')) {
                 $tone = (string)($chip['tone'] ?? '');
                 $href = (string)($chip['href'] ?? '');
 
-                $classList = 'cmp-stat-chip';
+                $classList = 'cmp-stat-chip compliance-kpi-card';
                 if (in_array($tone, array('warn', 'crit', 'ok'), true)) {
                     $classList .= ' is-' . $tone;
                 }

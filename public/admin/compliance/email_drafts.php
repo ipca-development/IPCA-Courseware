@@ -178,7 +178,8 @@ compliance_page_open(array(
       No drafts in scope. <a href="/admin/compliance/email_compose.php" style="color:#1f4079;font-weight:700;">Compose a new message</a>.
     </div>
   <?php else: ?>
-    <table>
+    <div class="compliance-table-wrap">
+    <table class="compliance-table">
         <thead><tr>
           <th>Status</th>
           <th>Subject</th>
@@ -245,6 +246,7 @@ compliance_page_open(array(
           <?php endforeach; ?>
         </tbody>
       </table>
+      </div>
     <?php endif; ?>
 </section>
 

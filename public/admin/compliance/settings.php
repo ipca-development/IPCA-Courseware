@@ -153,7 +153,8 @@ compliance_page_open(array(
     <?php if ($admins === array()): ?>
       <p style="color:var(--text-muted);margin:0;">No admins on file.</p>
     <?php else: ?>
-      <table>
+      <div class="compliance-table-wrap">
+      <table class="compliance-table">
         <thead><tr>
           <th>ID</th><th>Name</th><th>Email</th><th>Compliance access</th><th></th>
         </tr></thead>
@@ -191,6 +192,7 @@ compliance_page_open(array(
           <?php endforeach; ?>
         </tbody>
       </table>
+      </div>
     <?php endif; ?>
   </section>
 
@@ -208,7 +210,8 @@ compliance_page_open(array(
 
   <section class="cmp-card">
     <h2 style="margin:0 0 14px;">Storage</h2>
-    <table>
+    <div class="compliance-table-wrap">
+    <table class="compliance-table">
       <tbody>
         <tr>
           <td style="width:280px;font-weight:700;">Manual-release PDF root</td>
@@ -228,6 +231,7 @@ compliance_page_open(array(
         </tr>
       </tbody>
     </table>
+    </div>
   </section>
 
   <section class="cmp-card">

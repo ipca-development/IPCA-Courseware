@@ -75,7 +75,8 @@ function compliance_render_comms_panel(PDO $pdo, string $objectType, string $obj
           </p>
         </div>
       <?php else: ?>
-        <table class="cmp-table">
+        <div class="compliance-table-wrap">
+        <table class="cmp-table compliance-table">
           <thead><tr>
             <th>Dir</th>
             <th>Subject</th>
@@ -116,6 +117,7 @@ function compliance_render_comms_panel(PDO $pdo, string $objectType, string $obj
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php endif; ?>
 
       <?php if ($threadOptions === array()): ?>

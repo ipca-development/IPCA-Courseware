@@ -123,7 +123,8 @@ compliance_page_open(array(
         <div class="cmp-count-pill"><?= count($mocCases) ?></div>
       </div>
       <?php if ($mocCases !== array()): ?>
-        <table>
+        <div class="compliance-table-wrap">
+        <table class="compliance-table">
           <thead><tr>
             <th>Code</th>
             <th>Title</th>
@@ -160,6 +161,7 @@ compliance_page_open(array(
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php else: ?>
         <p style="color:var(--text-muted);font-size:14px;margin:0;">No MoC cases yet. Use the form on the right to create one.</p>
       <?php endif; ?>
@@ -243,7 +245,8 @@ compliance_page_open(array(
         </div>
         <div class="cmp-count-pill"><?= count($upcomingPkgs) ?></div>
       </div>
-      <table>
+      <div class="compliance-table-wrap">
+      <table class="compliance-table">
         <?php foreach ($upcomingPkgs as $p): ?>
           <tr>
             <td class="cmp-mono"><?= h((string)$p['package_code']) ?></td>
@@ -252,6 +255,7 @@ compliance_page_open(array(
           </tr>
         <?php endforeach; ?>
       </table>
+      </div>
       <?php if ($upcomingPkgs === array()): ?>
         <p style="color:var(--text-muted);font-size:13px;margin:8px 0 0;">No dated packages ahead.</p>
       <?php endif; ?>

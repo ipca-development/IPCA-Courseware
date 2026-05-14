@@ -509,7 +509,8 @@ if ($detailId > 0) {
           <?php if ($regLinks === array()): ?>
             <p style="color:#64748b;font-size:14px;margin:0;">No citations attached yet.</p>
           <?php else: ?>
-            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+            <div class="compliance-table-wrap">
+            <table class="compliance-table" style="width:100%;border-collapse:collapse;font-size:13px;">
               <thead>
                 <tr style="background:#f8fafc;text-align:left;">
                   <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Kind</th>
@@ -555,6 +556,7 @@ if ($detailId > 0) {
                 <?php endforeach; ?>
               </tbody>
             </table>
+            </div>
           <?php endif; ?>
         </section>
 
@@ -671,7 +673,8 @@ if ($detailId > 0) {
           <?php if ($capItems === array()): ?>
             <p style="color:#64748b;font-size:14px;margin:0;">No corrective actions yet for this finding.</p>
           <?php else: ?>
-            <table style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
+            <div class="compliance-table-wrap">
+            <table class="compliance-table" style="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px;">
               <thead>
                 <tr style="background:#f8fafc;text-align:left;">
                   <th style="padding:8px 10px;border-bottom:1px solid #e2e8f0;">Code</th>
@@ -697,6 +700,7 @@ if ($detailId > 0) {
                 <?php endforeach; ?>
               </tbody>
             </table>
+            </div>
           <?php endif; ?>
         </section>
         <?php
@@ -737,7 +741,8 @@ if ($detailId > 0) {
           <div class="cmp-list-title"><?= compliance_ui_icon('flag') ?><span>Findings</span></div>
           <div class="cmp-count-pill"><?= count($rows) ?></div>
         </div>
-        <table>
+        <div class="compliance-table-wrap">
+        <table class="compliance-table">
           <thead>
             <tr>
               <th>Code</th>
@@ -773,6 +778,7 @@ if ($detailId > 0) {
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       </section>
 
       <section class="cmp-card">

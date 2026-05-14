@@ -168,7 +168,8 @@ compliance_page_open(array(
         <div class="cmp-list-title"><?= compliance_ui_icon('document') ?><span>FAA AIM</span></div>
         <div class="cmp-count-pill"><?= count($aimHits) ?></div>
       </div>
-      <table>
+      <div class="compliance-table-wrap">
+      <table class="compliance-table">
         <thead><tr><th>Paragraph</th><th>Title / excerpt</th><th></th></tr></thead>
         <tbody>
           <?php foreach ($aimHits as $row):
@@ -210,6 +211,7 @@ compliance_page_open(array(
           <?php endforeach; ?>
         </tbody>
       </table>
+      </div>
     </section>
   <?php endif; ?>
 
@@ -219,7 +221,8 @@ compliance_page_open(array(
         <div class="cmp-list-title"><?= compliance_ui_icon('document') ?><span>EASA eRules staging</span></div>
         <div class="cmp-count-pill"><?= count($easaHits) ?></div>
       </div>
-      <table>
+      <div class="compliance-table-wrap">
+      <table class="compliance-table">
         <thead><tr><th>Id / ERules</th><th>Title / excerpt</th><th></th></tr></thead>
         <tbody>
           <?php foreach ($easaHits as $row):
@@ -263,6 +266,7 @@ compliance_page_open(array(
           <?php endforeach; ?>
         </tbody>
       </table>
+      </div>
     </section>
   <?php endif; ?>
 

@@ -116,7 +116,8 @@ final class ComplianceMonitorView
       <p style="margin:0;">The monitor sweep is clean for this scope.</p>
     </div>
   <?php else: ?>
-    <table class="cmp-table">
+    <div class="compliance-table-wrap">
+    <table class="cmp-table compliance-table">
       <thead><tr>
         <th>Severity</th><th>Title</th><th>Rule</th><th>Subject</th><th>Raised</th><th>Actions</th>
       </tr></thead>
@@ -158,6 +159,7 @@ final class ComplianceMonitorView
         <?php endforeach; ?>
       </tbody>
     </table>
+    </div>
   <?php endif; ?>
 </section>
 
@@ -176,7 +178,8 @@ final class ComplianceMonitorView
       <p style="margin:0;">Define one in Monitoring Rules to start raising alerts.</p>
     </div>
   <?php else: ?>
-    <table class="cmp-table">
+    <div class="compliance-table-wrap">
+    <table class="cmp-table compliance-table">
       <thead><tr>
         <th>Code</th><th>Title</th><th>Kind</th><th>Severity</th><th>Active</th>
       </tr></thead>
@@ -192,6 +195,7 @@ final class ComplianceMonitorView
         <?php endforeach; ?>
       </tbody>
     </table>
+    </div>
   <?php endif; ?>
 </section>
 
@@ -200,7 +204,8 @@ final class ComplianceMonitorView
     <div class="cmp-card-head">
       <h2 class="cmp-card-title">Recent runs</h2>
     </div>
-    <table class="cmp-table">
+    <div class="compliance-table-wrap">
+    <table class="cmp-table compliance-table">
       <thead><tr><th>Started</th><th>Status</th><th>Hits</th><th>Trigger</th></tr></thead>
       <tbody>
         <?php foreach ($runs as $r): ?>
@@ -213,6 +218,7 @@ final class ComplianceMonitorView
         <?php endforeach; ?>
       </tbody>
     </table>
+    </div>
   </section>
 <?php endif; ?>
 

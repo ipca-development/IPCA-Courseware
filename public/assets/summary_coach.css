@@ -992,10 +992,13 @@
   position: fixed;
   left: 50%;
   right: auto;
-  bottom: 18px;
-  transform: translateX(-50%);
-  width: min(1240px, 96vw);
-  height: min(82vh, 860px);
+  top: 50%;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  width: min(1240px, calc(100vw - 32px));
+  height: min(860px, calc(100vh - 32px));
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
   background: #eaf3ff;
   border: 1px solid #cfe0f5;
   border-radius: 20px;
@@ -1003,7 +1006,14 @@
   display: none;
   flex-direction: column;
   overflow: hidden;
-  z-index: 125;
+  z-index: 121;
+}
+
+.summary-workspace-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.38);
+  z-index: 120;
 }
 
 .summary-workspace-header {

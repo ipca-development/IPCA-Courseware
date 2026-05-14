@@ -161,7 +161,8 @@ compliance_page_open(array(
     <div class="cmp-list-title"><?= compliance_ui_icon('check') ?><span>Checklist items</span></div>
     <div class="cmp-count-pill"><?= count($items) ?></div>
   </div>
-  <table>
+  <div class="compliance-table-wrap">
+  <table class="compliance-table">
     <thead>
       <tr>
         <th>#</th>
@@ -230,6 +231,7 @@ compliance_page_open(array(
       <?php endforeach; ?>
     </tbody>
   </table>
+  </div>
 </section>
 
 <?php

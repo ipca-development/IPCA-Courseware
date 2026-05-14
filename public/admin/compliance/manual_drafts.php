@@ -264,7 +264,8 @@ if ($detailId > 0) {
         </div>
         <div class="cmp-count-pill"><?= count($rows) ?> draft<?= count($rows) === 1 ? '' : 's' ?></div>
       </div>
-      <table>
+      <div class="compliance-table-wrap">
+      <table class="compliance-table">
         <thead><tr>
           <th>Code</th>
           <th>Title</th>
@@ -289,6 +290,7 @@ if ($detailId > 0) {
           <?php endforeach; ?>
         </tbody>
       </table>
+      </div>
     </section>
     <?php
 }

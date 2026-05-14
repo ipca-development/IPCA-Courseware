@@ -273,7 +273,8 @@ compliance_page_open(array(
       <?php if ($upcomingCaps === array()): ?>
         <p class="cmpdash-empty">Nothing due in the next month.</p>
       <?php else: ?>
-        <table class="cmpdash-table">
+        <div class="compliance-table-wrap">
+        <table class="cmpdash-table compliance-table">
           <thead><tr>
             <th>Code</th><th>Title</th><th>Due</th><th>Sev</th>
           </tr></thead>
@@ -297,6 +298,7 @@ compliance_page_open(array(
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php endif; ?>
       <a class="cmpdash-section-link" href="/admin/compliance/cap_monitoring.php">CAP monitoring →</a>
     </div>
@@ -306,7 +308,8 @@ compliance_page_open(array(
       <?php if ($recentAudits === array()): ?>
         <p class="cmpdash-empty">No audits on file yet.</p>
       <?php else: ?>
-        <table class="cmpdash-table">
+        <div class="compliance-table-wrap">
+        <table class="cmpdash-table compliance-table">
           <thead><tr>
             <th>Code</th><th>Title</th><th>Status</th><th>Authority</th>
           </tr></thead>
@@ -326,6 +329,7 @@ compliance_page_open(array(
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php endif; ?>
       <a class="cmpdash-section-link" href="/admin/compliance/audits.php">All audits →</a>
     </div>
@@ -335,7 +339,8 @@ compliance_page_open(array(
       <?php if ($recentAlerts === array()): ?>
         <p class="cmpdash-empty">No open alerts.</p>
       <?php else: ?>
-        <table class="cmpdash-table">
+        <div class="compliance-table-wrap">
+        <table class="cmpdash-table compliance-table">
           <thead><tr>
             <th>Sev</th><th>Title</th><th>Kind</th><th>Raised</th>
           </tr></thead>
@@ -354,6 +359,7 @@ compliance_page_open(array(
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php endif; ?>
       <a class="cmpdash-section-link" href="/admin/compliance/live_monitoring.php">Live monitoring →</a>
     </div>

@@ -380,18 +380,22 @@ $isAdminViewer = ($role === 'admin');
      *   white rounded cards. */
     .drawer{
       position:fixed;
-      right:50%;
-      transform:translateX(50%);
-      bottom:18px;
-      width:min(1200px, 96vw);
-      height:min(80vh, 860px);
+      left:50%;
+      right:auto;
+      top:50%;
+      bottom:auto;
+      transform:translate(-50%, -50%);
+      width:min(1240px, calc(100vw - 32px));
+      height:min(860px, calc(100vh - 32px));
+      max-width:calc(100vw - 32px);
+      max-height:calc(100vh - 32px);
       background:linear-gradient(180deg, #e9f2ff 0%, #f5f9ff 100%);
       border:1px solid #cfe0f5;
       border-radius:18px;
       box-shadow:0 20px 60px rgba(15, 23, 42, 0.22);
       display:none;
       flex-direction:column;
-      z-index:125;
+      z-index:121;
       overflow:hidden;
     }
 
@@ -547,11 +551,7 @@ $isAdminViewer = ($role === 'admin');
     }
 
     @media (max-width:900px){
-      .drawer{
-        width:96vw;
-        height:88vh;
-        bottom:6vh;
-      }
+      .drawer{ width:calc(100vw - 32px); height:calc(100vh - 32px); }
       .drawer-body{
         flex-direction:column;
         overflow:auto;
@@ -569,11 +569,15 @@ $isAdminViewer = ($role === 'admin');
 	/* Legacy expanded-mode rules (kept inert; the drawer is always
 	   "expanded" now and the toggle is hidden). */
 	.drawer.expanded{
-	  right:50%;
-	  transform:translateX(50%);
-	  width:min(1200px, 96vw);
-	  height:min(80vh, 860px);
-	  bottom:18px;
+	  left:50%;
+	  right:auto;
+	  top:50%;
+	  bottom:auto;
+	  transform:translate(-50%, -50%);
+	  width:min(1240px, calc(100vw - 32px));
+	  height:min(860px, calc(100vh - 32px));
+	  max-width:calc(100vw - 32px);
+	  max-height:calc(100vh - 32px);
 	}
 
 	.drawer.expanded .rte{
@@ -583,11 +587,13 @@ $isAdminViewer = ($role === 'admin');
 
 @media (max-width: 900px){
   .drawer.expanded{
-    width:min(98vw, 98vw);
-    height:min(78vh, 860px);
-    right:50%;
-    transform:translateX(50%);
-    bottom:10px;
+    width:calc(100vw - 32px);
+    height:calc(100vh - 32px);
+    left:50%;
+    right:auto;
+    top:50%;
+    bottom:auto;
+    transform:translate(-50%, -50%);
   }
 }  
 	  
@@ -770,6 +776,7 @@ $isAdminViewer = ($role === 'admin');
 
   <button class="fab" id="btnSummary" title="My Study Summary">📝</button>
 
+  <div class="summary-workspace-backdrop" id="summaryWorkspaceBackdrop" style="display:none;"></div>
   <div class="drawer summary-workspace" id="drawer">
     <button type="button" id="btnCheckSummary" style="display:none;" aria-hidden="true" tabindex="-1">Check my Summary</button>
     <button type="button" id="btnToggleSummarySize" style="display:none;" aria-hidden="true" tabindex="-1">Expand</button>
@@ -1124,6 +1131,7 @@ const COHORT_ID = <?= (int)$cohortId ?>;
 const LESSON_ID = <?= (int)$lessonId ?>;
 
 const drawer = document.getElementById('drawer');
+const summaryWorkspaceBackdrop = document.getElementById('summaryWorkspaceBackdrop');
 const rte = document.getElementById('rte');
 	
 	
@@ -1239,7 +1247,7 @@ function restoreSummaryUiState(){
   if (!state) return;
 
   if (state.drawerOpen) {
-    drawer.style.display = 'flex';
+    setSummaryWorkspaceOpen(true);
   }
 
   setTimeout(function(){
@@ -1280,6 +1288,13 @@ const sumStatus = document.getElementById('sumStatus');
 const btnCheckSummary = document.getElementById('btnCheckSummary');
 const btnUnlockSummary = document.getElementById('btnUnlockSummary');
 const btnToggleSummarySize = document.getElementById('btnToggleSummarySize');
+
+function setSummaryWorkspaceOpen(open){
+  drawer.style.display = open ? 'flex' : 'none';
+  if (summaryWorkspaceBackdrop) {
+    summaryWorkspaceBackdrop.style.display = open ? 'block' : 'none';
+  }
+}
 const summaryAlert = document.getElementById('summaryAlert');
 const summaryAlertClose = document.getElementById('summaryAlertClose');
 const summaryAlertTitle = document.getElementById('summaryAlertTitle');
@@ -1740,7 +1755,7 @@ async function flushSummarySaveNow(){
 	
 document.getElementById('btnSummary').onclick = ()=>{
   const willOpen = drawer.style.display !== 'flex';
-  drawer.style.display = willOpen ? 'flex' : 'none';
+  setSummaryWorkspaceOpen(willOpen);
 
   if (willOpen) {
     applySummaryDrawerExpandedState();
@@ -1757,10 +1772,17 @@ document.getElementById('btnSummary').onclick = ()=>{
 };
 
 document.getElementById('btnCloseDrawer').onclick = ()=>{
-  drawer.style.display = 'none';
+  setSummaryWorkspaceOpen(false);
   saveSummaryDrawerState(false);
   saveSummaryUiState();
 };
+if (summaryWorkspaceBackdrop) {
+  summaryWorkspaceBackdrop.addEventListener('click', function(){
+    setSummaryWorkspaceOpen(false);
+    saveSummaryDrawerState(false);
+    saveSummaryUiState();
+  });
+}
 	
 	
 btnCheckSummary.onclick = null;
@@ -1805,7 +1827,7 @@ if (j.ok) {
 const initialSummaryUiState = loadSummaryUiState();
 
 if (initialSummaryUiState && initialSummaryUiState.drawerOpen) {
-  drawer.style.display = 'flex';
+  setSummaryWorkspaceOpen(true);
 }
 
 applySummaryDrawerExpandedState();

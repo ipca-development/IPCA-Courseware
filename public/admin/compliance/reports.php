@@ -205,7 +205,8 @@ compliance_page_open(array(
       <?php if ($rows === array()): ?>
         <p style="margin:0;color:var(--text-muted);">No data to show.</p>
       <?php else: ?>
-        <table>
+        <div class="compliance-table-wrap">
+        <table class="compliance-table">
           <thead><tr>
             <?php foreach ($cfg['columns'] as $c): ?>
               <th><?= h((string)$c) ?></th>
@@ -222,6 +223,7 @@ compliance_page_open(array(
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php endif; ?>
     <?php endif; ?>
   </section>

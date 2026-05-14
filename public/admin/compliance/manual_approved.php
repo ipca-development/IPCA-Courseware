@@ -200,7 +200,8 @@ if ($detailId > 0) {
                   </p>
                 <?php else: ?>
                   <div style="border:1px solid #e2e8f0;border-radius:10px;max-height:260px;overflow-y:auto;background:#f8fafc;">
-                    <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                    <div class="compliance-table-wrap">
+                    <table class="compliance-table" style="width:100%;border-collapse:collapse;font-size:13px;">
                       <thead><tr style="background:#f1f5f9;text-align:left;position:sticky;top:0;">
                         <th style="padding:8px 10px;width:32px;"></th>
                         <th style="padding:8px 10px;">Code</th>
@@ -240,6 +241,7 @@ if ($detailId > 0) {
                         <?php endforeach; ?>
                       </tbody>
                     </table>
+                    </div>
                   </div>
                   <p style="margin:6px 0 0;color:#64748b;font-size:12px;">Only drafts in status APPROVED or PUBLISHED can be bundled.</p>
                 <?php endif; ?>
@@ -278,7 +280,8 @@ if ($detailId > 0) {
                 ?>
               <div style="margin-top:14px;">
                 <div style="font-size:11px;font-weight:700;color:#64748b;margin-bottom:6px;">Included drafts</div>
-                <table style="width:100%;font-size:13px;border-collapse:collapse;">
+                <div class="compliance-table-wrap">
+                <table class="compliance-table" style="width:100%;font-size:13px;border-collapse:collapse;">
                   <thead><tr style="background:#f1f5f9;text-align:left;">
                     <th style="padding:8px 10px;">Code</th>
                     <th style="padding:8px 10px;">Title</th>
@@ -294,6 +297,7 @@ if ($detailId > 0) {
                     <?php endforeach; ?>
                   </tbody>
                 </table>
+                </div>
               </div>
             <?php endif; ?>
           <?php endif; ?>
@@ -345,7 +349,8 @@ if ($detailId > 0) {
 
         <section class="cmp-card">
           <h2 style="margin:0 0 12px;">Approvals</h2>
-          <table style="width:100%;font-size:13px;border-collapse:collapse;">
+          <div class="compliance-table-wrap">
+          <table class="compliance-table" style="width:100%;font-size:13px;border-collapse:collapse;">
             <thead><tr style="background:#f1f5f9;text-align:left;">
               <th style="padding:8px 10px;">Name</th>
               <th style="padding:8px 10px;">Role</th>
@@ -368,6 +373,7 @@ if ($detailId > 0) {
               <?php endforeach; ?>
             </tbody>
           </table>
+          </div>
           <?php if (!$locked): ?>
             <form method="post" style="margin-top:16px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
               <input type="hidden" name="action" value="add_approval">
@@ -457,7 +463,8 @@ if ($detailId > 0) {
             </p>
           <?php else: ?>
             <div style="border:1px solid #e2e8f0;border-radius:10px;max-height:220px;overflow-y:auto;background:#f8fafc;">
-              <table style="width:100%;border-collapse:collapse;font-size:13px;">
+              <div class="compliance-table-wrap">
+              <table class="compliance-table" style="width:100%;border-collapse:collapse;font-size:13px;">
                 <thead><tr style="background:#f1f5f9;text-align:left;position:sticky;top:0;">
                   <th style="padding:8px 10px;width:32px;"></th>
                   <th style="padding:8px 10px;">Code</th>
@@ -477,6 +484,7 @@ if ($detailId > 0) {
                   <?php endforeach; ?>
                 </tbody>
               </table>
+              </div>
             </div>
           <?php endif; ?>
         </div>
@@ -492,7 +500,8 @@ if ($detailId > 0) {
         </div>
         <div class="cmp-count-pill"><?= count($rows) ?> package<?= count($rows) === 1 ? '' : 's' ?></div>
       </div>
-      <table>
+      <div class="compliance-table-wrap">
+      <table class="compliance-table">
         <thead><tr>
           <th>Code</th>
           <th>Title</th>
@@ -523,6 +532,7 @@ if ($detailId > 0) {
           <?php endforeach; ?>
         </tbody>
       </table>
+      </div>
     </section>
     <?php
 }

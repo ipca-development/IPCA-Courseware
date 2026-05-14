@@ -200,7 +200,8 @@ compliance_page_open(array(
         Matching individual emails (across subject + body).
         <a href="/admin/compliance/inbox.php" style="color:#1e3c72;font-weight:700;">Clear search</a>.
       </p>
-      <table class="cmpcc-table">
+      <div class="compliance-table-wrap">
+      <table class="cmpcc-table compliance-table">
         <thead><tr>
           <th>Direction</th>
           <th>Subject</th>
@@ -240,6 +241,7 @@ compliance_page_open(array(
           <?php endforeach; ?>
         </tbody>
       </table>
+      </div>
     </section>
   <?php elseif ($filterQuery !== '' && $searchResults === array()): ?>
     <section class="cmp-card cmpcc-card">
@@ -287,7 +289,8 @@ compliance_page_open(array(
             Set priority
           </button>
         </div>
-        <table class="cmpcc-table">
+        <div class="compliance-table-wrap">
+        <table class="cmpcc-table compliance-table">
           <thead><tr>
             <th style="width:30px;"><input type="checkbox" id="inboxSelectAll"></th>
             <th>Status</th>
@@ -336,6 +339,7 @@ compliance_page_open(array(
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       </form>
       <script>
         (function () {
@@ -361,7 +365,8 @@ compliance_page_open(array(
 
   <section class="cmp-card cmpcc-card">
     <h2 style="margin:0 0 12px;">Webhook &amp; integration status</h2>
-    <table class="cmpcc-table" style="margin-bottom:14px;">
+    <div class="compliance-table-wrap">
+    <table class="cmpcc-table compliance-table" style="margin-bottom:14px;">
       <tbody>
         <tr>
           <td style="width:260px;font-weight:700;">Compliance inbox address</td>
@@ -419,6 +424,7 @@ compliance_page_open(array(
         </tr>
       </tbody>
     </table>
+    </div>
 
     <div class="cmpcc-help">
       <strong style="color:#0f172a;">Setup checklist</strong>

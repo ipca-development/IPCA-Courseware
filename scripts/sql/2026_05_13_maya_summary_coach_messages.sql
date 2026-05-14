@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS student_summary_coach_messages (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  session_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  lesson_id BIGINT UNSIGNED NOT NULL,
+  cohort_id BIGINT UNSIGNED NULL,
+  summary_id BIGINT UNSIGNED NULL,
+  role ENUM('maya','student','system') NOT NULL,
+  message_type VARCHAR(64) NOT NULL DEFAULT 'chat',
+  message_body LONGTEXT NOT NULL,
+  summary_insertions_json LONGTEXT NULL,
+  score_snapshot_json LONGTEXT NULL,
+  flags_snapshot_json LONGTEXT NULL,
+  inserted_into_summary TINYINT(1) NOT NULL DEFAULT 0,
+  lazy_index BIGINT UNSIGNED NOT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_session_lazy (session_id, lazy_index),
+  KEY idx_user_lesson (user_id, lesson_id),
+  KEY idx_summary (summary_id),
+  KEY idx_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

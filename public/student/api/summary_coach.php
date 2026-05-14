@@ -336,6 +336,110 @@ function maya_format_history_page(array $history, int $startIndex = 0): array
     return $messages;
 }
 
+function maya_format_message_row(array $row): array
+{
+    $insertions = maya_decode_json_column($row['summary_insertions_json'] ?? null);
+    $scores = maya_decode_json_column($row['score_snapshot_json'] ?? null);
+    $flags = maya_decode_json_column($row['flags_snapshot_json'] ?? null);
+    return [
+        'id' => (int)$row['id'],
+        'lazy_index' => (int)$row['lazy_index'],
+        'role' => maya_normalize_history_role((string)$row['role']),
+        'message_type' => (string)($row['message_type'] ?? 'chat'),
+        'message_body' => (string)($row['message_body'] ?? ''),
+        'message' => (string)($row['message_body'] ?? ''),
+        'created_at' => (string)($row['created_at'] ?? ''),
+        'stage' => '',
+        'score_snapshot' => is_array($scores) ? $scores : [],
+        'flags_snapshot' => is_array($flags) ? $flags : [],
+        'summary_insertions' => is_array($insertions) ? $insertions : [],
+    ];
+}
+
+function maya_message_count(PDO $pdo, int $sessionId): int
+{
+    $st = $pdo->prepare('SELECT COUNT(*) FROM student_summary_coach_messages WHERE session_id=?');
+    $st->execute([$sessionId]);
+    return (int)$st->fetchColumn();
+}
+
+function maya_next_lazy_index(PDO $pdo, int $sessionId): int
+{
+    $st = $pdo->prepare('SELECT COALESCE(MAX(lazy_index), 0) + 1 FROM student_summary_coach_messages WHERE session_id=?');
+    $st->execute([$sessionId]);
+    return (int)$st->fetchColumn();
+}
+
+function maya_insert_message(PDO $pdo, array $session, string $role, string $type, string $body, array $scores = [], array $flags = [], array $insertions = []): array
+{
+    $sessionId = (int)$session['id'];
+    $lazy = maya_next_lazy_index($pdo, $sessionId);
+    $st = $pdo->prepare("
+        INSERT INTO student_summary_coach_messages
+          (session_id, user_id, lesson_id, cohort_id, summary_id, role, message_type,
+           message_body, summary_insertions_json, score_snapshot_json, flags_snapshot_json,
+           inserted_into_summary, lazy_index, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+    ");
+    $st->execute([
+        $sessionId,
+        (int)$session['user_id'],
+        (int)$session['lesson_id'],
+        isset($session['cohort_id']) && $session['cohort_id'] !== null ? (int)$session['cohort_id'] : null,
+        isset($session['summary_id']) && $session['summary_id'] !== null ? (int)$session['summary_id'] : null,
+        maya_normalize_history_role($role),
+        $type !== '' ? $type : 'chat',
+        maya_truncate($body, 3000),
+        $insertions ? json_encode($insertions) : null,
+        $scores ? json_encode($scores) : null,
+        $flags ? json_encode($flags) : null,
+        $lazy,
+        maya_now_sql(),
+    ]);
+    $id = (int)$pdo->lastInsertId();
+    $sel = $pdo->prepare('SELECT * FROM student_summary_coach_messages WHERE id=? LIMIT 1');
+    $sel->execute([$id]);
+    return maya_format_message_row($sel->fetch(PDO::FETCH_ASSOC) ?: []);
+}
+
+function maya_load_latest_messages(PDO $pdo, int $sessionId, int $limit = MAYA_HISTORY_PAGE_SIZE): array
+{
+    $limit = max(1, min(50, $limit));
+    $st = $pdo->prepare("
+        SELECT *
+        FROM student_summary_coach_messages
+        WHERE session_id=?
+        ORDER BY lazy_index DESC
+        LIMIT {$limit}
+    ");
+    $st->execute([$sessionId]);
+    $rows = array_reverse($st->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    return array_map('maya_format_message_row', $rows);
+}
+
+function maya_load_older_messages(PDO $pdo, int $sessionId, int $beforeLazyIndex, int $limit = MAYA_HISTORY_PAGE_SIZE): array
+{
+    $limit = max(1, min(50, $limit));
+    $st = $pdo->prepare("
+        SELECT *
+        FROM student_summary_coach_messages
+        WHERE session_id=? AND lazy_index < ?
+        ORDER BY lazy_index DESC
+        LIMIT {$limit}
+    ");
+    $st->execute([$sessionId, $beforeLazyIndex]);
+    $rows = array_reverse($st->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    return array_map('maya_format_message_row', $rows);
+}
+
+function maya_messages_have_more(PDO $pdo, int $sessionId, int $oldestLazyIndex): bool
+{
+    if ($oldestLazyIndex <= 1) return false;
+    $st = $pdo->prepare('SELECT 1 FROM student_summary_coach_messages WHERE session_id=? AND lazy_index < ? LIMIT 1');
+    $st->execute([$sessionId, $oldestLazyIndex]);
+    return (bool)$st->fetchColumn();
+}
+
 /**
  * Fetch the live lesson_summaries row, if any, for adaptive coaching.
  *
@@ -819,9 +923,6 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
     $scores    = maya_decode_json_column($session['scores_json']    ?? null);
     $readiness = maya_decode_json_column($session['readiness_json'] ?? null);
     $flags     = maya_decode_json_column($session['flags_json']     ?? null);
-    $history   = maya_decode_json_column($session['history_json']   ?? null);
-    if (!is_array($history)) $history = [];
-
     $persistedStage = (string)($session['stage'] ?? MAYA_STAGE_STRUCTURE);
     $interactionCount = (int)($session['interaction_count'] ?? 0);
 
@@ -833,24 +934,18 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
     $nextQ    = $greeting['next_question'];
     $msg      = $greeting['maya_message'];
 
-    // Only create the initial Maya message when no chat exists. Reopening the
-    // modal must not spam another greeting into history.
-    $acceptedLocked = (string)($snap['review_status'] ?? '') === 'acceptable' && (int)($snap['student_soft_locked'] ?? 0) === 1;
-    $latestBody = $history ? maya_history_message_body($history[count($history) - 1]) : '';
-    $needsAcceptedLockNotice = $acceptedLocked && stripos($latestBody, 'already accepted') === false;
-    if (!$history || $needsAcceptedLockNotice) {
+    // Only create the initial Maya message when the session has zero message
+    // rows. Reopening the modal or refreshing the page returns existing rows.
+    $messageCount = maya_message_count($pdo, (int)$session['id']);
+    if ($messageCount === 0) {
         $initialBody = $msg;
         if ($nextQ !== '' && stripos($initialBody, $nextQ) === false) {
             $initialBody .= "\n\n" . $nextQ;
         }
-        $history[] = maya_make_history_message('maya', $initialBody, $newStage, 'greeting', $scores ?: [], $flags ?: []);
-        if (count($history) > MAYA_HISTORY_DB_CAP) {
-            $history = array_slice($history, -MAYA_HISTORY_DB_CAP);
-        }
+        maya_insert_message($pdo, $session, 'maya', 'greeting', $initialBody, $scores ?: [], $flags ?: []);
         maya_save_session($pdo, (int)$session['id'], [
             'stage' => $newStage,
             'last_question' => $nextQ,
-            'history_json' => json_encode($history),
         ]);
     } else {
         // Keep state/current question fresh for accepted-locked transitions,
@@ -861,13 +956,10 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
         ]);
     }
 
-    // Page the most recent slice for the chat thread.
-    $total = count($history);
-    $pageStart = max(0, $total - MAYA_HISTORY_PAGE_SIZE);
-    $page = array_slice($history, $pageStart);
-    $messages = maya_format_history_page($page, $pageStart);
+    $messages = maya_load_latest_messages($pdo, (int)$session['id'], MAYA_HISTORY_PAGE_SIZE);
     $oldestIndex = $messages ? (int)$messages[0]['lazy_index'] : 0;
-    $hasMore = $pageStart > 0;
+    $hasMore = maya_messages_have_more($pdo, (int)$session['id'], $oldestIndex);
+    $total = maya_message_count($pdo, (int)$session['id']);
 
     return [
         'ok' => true,
@@ -946,10 +1038,7 @@ function maya_action_load_history(PDO $pdo, array $u, array $payload): array
     if ($limit < 1) $limit = MAYA_HISTORY_PAGE_SIZE;
     if ($limit > 50) $limit = 50;
 
-    $history = maya_decode_json_column($session['history_json'] ?? null);
-    if (!is_array($history)) $history = [];
-    $total = count($history);
-
+    $total = maya_message_count($pdo, (int)$session['id']);
     if ($beforeLazy <= 1 || $total === 0) {
         return [
             'ok' => true,
@@ -961,13 +1050,9 @@ function maya_action_load_history(PDO $pdo, array $u, array $payload): array
         ];
     }
 
-    // lazy_index is 1-based. Fetch messages older than before_lazy_index.
-    $end = min($beforeLazy - 1, $total);
-    $start = max(0, $end - $limit);
-    $page = array_slice($history, $start, $end - $start);
-    $messages = maya_format_history_page($page, $start);
+    $messages = maya_load_older_messages($pdo, (int)$session['id'], $beforeLazy, $limit);
     $oldest = $messages ? (int)$messages[0]['lazy_index'] : 0;
-    $hasMore = $start > 0;
+    $hasMore = maya_messages_have_more($pdo, (int)$session['id'], $oldest);
 
     return [
         'ok' => true,
@@ -1013,15 +1098,15 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     $wordCount        = isset($localFlagsRaw['word_count'])      ? (int)$localFlagsRaw['word_count']      : 0;
     $paragraphCount   = isset($localFlagsRaw['paragraph_count']) ? (int)$localFlagsRaw['paragraph_count'] : 0;
 
-    $clientHistory = is_array($payload['coach_history'] ?? null) ? $payload['coach_history'] : [];
-    // Trim history to the most recent 10 entries to bound prompt size.
-    if (count($clientHistory) > 10) {
-        $clientHistory = array_slice($clientHistory, -10);
-    }
+    $clientHistory = maya_load_latest_messages($pdo, $sessionId, 10);
 
     $existingFlags = maya_decode_json_column($session['flags_json'] ?? null);
     if (!is_array($existingFlags)) $existingFlags = [];
-    $serverMajorPaste = ((int)($session['major_paste_flag'] ?? 0) === 1) || $clientMajorPaste;
+    $hadMajorPaste = (int)($session['major_paste_flag'] ?? 0) === 1;
+    if ($clientMajorPaste && !$hadMajorPaste) {
+        maya_insert_message($pdo, $session, 'system', 'system', 'Large pasted text detected.');
+    }
+    $serverMajorPaste = $hadMajorPaste || $clientMajorPaste;
 
     // Compose user prompt for the model. Keep it tight: lesson title + small
     // lesson context excerpt + current state + recent coach history + student
@@ -1040,7 +1125,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     foreach ($clientHistory as $h) {
         if (!is_array($h)) continue;
         $role = (string)($h['role'] ?? '');
-        $msg  = trim((string)($h['message'] ?? ''));
+        $msg  = trim((string)($h['message_body'] ?? $h['message'] ?? ''));
         $stg  = (string)($h['stage'] ?? '');
         if ($msg === '' || ($role !== 'maya' && $role !== 'student')) continue;
         $historyLines[] = strtoupper($role) . ($stg !== '' ? ' [' . $stg . ']' : '') . ': ' . maya_truncate($msg, 400);
@@ -1152,23 +1237,16 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $mayaBubbleText .= "\n\n" . $nextQuestion;
     }
 
-    $appendedHistory = maya_decode_json_column($session['history_json'] ?? null);
-    if (!is_array($appendedHistory)) $appendedHistory = [];
     if ($studentReply !== '') {
-        $appendedHistory[] = maya_make_history_message('student', $studentReply, $coachStage);
+        maya_insert_message($pdo, $session, 'student', 'chat', $studentReply);
     }
-    $mayaHistoryMessage = maya_make_history_message('maya', $mayaBubbleText, $newStage, 'chat', $scores, $persistedFlags, $summaryInsertions);
-    $appendedHistory[] = $mayaHistoryMessage;
-    if (count($appendedHistory) > MAYA_HISTORY_DB_CAP) {
-        $appendedHistory = array_slice($appendedHistory, -MAYA_HISTORY_DB_CAP);
-    }
+    $mayaHistoryMessage = maya_insert_message($pdo, $session, 'maya', 'chat', $mayaBubbleText, $scores, $persistedFlags, $summaryInsertions);
 
     maya_save_session($pdo, $sessionId, [
         'stage' => $newStage,
         'scores_json' => json_encode($scores),
         'readiness_json' => json_encode($readinessOut),
         'flags_json' => json_encode($persistedFlags),
-        'history_json' => json_encode($appendedHistory),
         'last_question' => $nextQuestion,
         'interaction_count' => $newInteractionCount,
         'major_paste_flag' => $persistedMajorPaste ? 1 : 0,
@@ -1186,7 +1264,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         'interaction_count' => $newInteractionCount,
         'student_note_suggestion' => $studentNote,
         'summary_insertions' => $summaryInsertions,
-        'message' => maya_format_history_page([$mayaHistoryMessage], count($appendedHistory) - 1)[0] ?? null,
+        'message' => $mayaHistoryMessage,
     ];
 }
 
@@ -1250,46 +1328,46 @@ function maya_action_mark_inserted(PDO $pdo, array $u, array $payload): array
     }
 
     $userId = (int)$u['id'];
+    $sql = "
+        SELECT m.*, s.context
+        FROM student_summary_coach_messages m
+        JOIN student_summary_coach_sessions s ON s.id = m.session_id
+        WHERE m.id=? AND m.user_id=?
+    ";
+    $vals = [$messageId, $userId];
     if ($sessionId > 0) {
-        $st = $pdo->prepare("SELECT * FROM student_summary_coach_sessions WHERE id=? AND user_id=? LIMIT 1");
-        $st->execute([$sessionId, $userId]);
-    } else {
-        $st = $pdo->prepare("
-            SELECT * FROM student_summary_coach_sessions
-            WHERE user_id=? AND history_json LIKE ?
-            ORDER BY updated_at DESC
-            LIMIT 1
-        ");
-        $st->execute([$userId, '%"' . $insertionId . '"%']);
+        $sql .= " AND m.session_id=?";
+        $vals[] = $sessionId;
     }
-    $session = $st->fetch(PDO::FETCH_ASSOC);
-    if (!$session) {
+    $sql .= " LIMIT 1";
+    $st = $pdo->prepare($sql);
+    $st->execute($vals);
+    $message = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$message) {
         maya_fail(404, 'Coaching message not found');
     }
-    maya_assert_lesson_access($pdo, $u, (int)($session['cohort_id'] ?? 0), (int)($session['lesson_id'] ?? 0));
+    maya_assert_lesson_access($pdo, $u, (int)($message['cohort_id'] ?? 0), (int)($message['lesson_id'] ?? 0));
 
-    $history = maya_decode_json_column($session['history_json'] ?? null);
-    if (!is_array($history)) $history = [];
-    $idx = $messageId - 1; // message_id mirrors 1-based lazy_index.
-    if (!isset($history[$idx]) || !is_array($history[$idx])) {
-        maya_fail(404, 'Coaching message not found');
-    }
+    $insertions = maya_decode_json_column($message['summary_insertions_json'] ?? null);
     $changed = false;
-    if (is_array($history[$idx]['summary_insertions'] ?? null)) {
-        foreach ($history[$idx]['summary_insertions'] as &$ins) {
-            if (is_array($ins) && (string)($ins['id'] ?? '') === $insertionId) {
-                $ins['inserted'] = true;
-                $changed = true;
-            }
+    if (is_array($insertions)) {
+        foreach ($insertions as &$ins) {
+            if (!is_array($ins) || (string)($ins['id'] ?? '') !== $insertionId) continue;
+            $ins['inserted'] = true;
+            $changed = true;
         }
         unset($ins);
     }
     if (!$changed) {
         maya_fail(404, 'Insertion not found');
     }
-    maya_save_session($pdo, (int)$session['id'], [
-        'history_json' => json_encode($history),
-    ]);
+    $up = $pdo->prepare("
+        UPDATE student_summary_coach_messages
+        SET summary_insertions_json=?, inserted_into_summary=1
+        WHERE id=? AND user_id=?
+        LIMIT 1
+    ");
+    $up->execute([json_encode($insertions), $messageId, $userId]);
     return ['ok' => true];
 }
 
@@ -1354,18 +1432,12 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
         ];
     }
 
-    $coachHistory = is_array($payload['coach_history'] ?? null) ? $payload['coach_history'] : [];
-    if (!$coachHistory) {
-        $coachHistory = maya_decode_json_column($session['history_json'] ?? null);
-    }
-    if (count($coachHistory) > 16) {
-        $coachHistory = array_slice($coachHistory, -16);
-    }
+    $coachHistory = maya_load_latest_messages($pdo, $sessionId, 16);
     $historyLines = [];
     foreach ($coachHistory as $h) {
         if (!is_array($h)) continue;
         $role = (string)($h['role'] ?? '');
-        $msg  = trim((string)($h['message'] ?? ''));
+        $msg  = trim((string)($h['message_body'] ?? $h['message'] ?? ''));
         $stg  = (string)($h['stage'] ?? '');
         if ($msg === '' || ($role !== 'maya' && $role !== 'student')) continue;
         $historyLines[] = strtoupper($role) . ($stg !== '' ? ' [' . $stg . ']' : '') . ': ' . maya_truncate($msg, 400);
@@ -1476,33 +1548,27 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
         }
     }
 
-    // Persist Maya's final review state.
-    $appendedHistory = maya_decode_json_column($session['history_json'] ?? null);
-    if (!is_array($appendedHistory)) $appendedHistory = [];
-    $appendedHistory[] = maya_make_history_message('system', 'Requested Final Review', 'readiness', 'system', $scores, maya_decode_json_column($session['flags_json'] ?? null) ?: []);
+    // Persist Maya's final review state as individual message rows.
+    maya_insert_message($pdo, $session, 'system', 'system', 'Requested Final Review', $scores, maya_decode_json_column($session['flags_json'] ?? null) ?: []);
     $mayaBubbleText = $mayaMessage;
     if (!$approved && $nextQuestion !== '' && stripos($mayaBubbleText, $nextQuestion) === false) {
         $mayaBubbleText .= "\n\n" . $nextQuestion;
     }
-    $mayaHistoryMessage = maya_make_history_message(
+    $mayaHistoryMessage = maya_insert_message(
+        $pdo,
+        $session,
         'maya',
-        $mayaBubbleText,
-        $newStage,
         $approved ? 'final_approved' : 'final_revision',
+        $mayaBubbleText,
         $finalScores,
         $finalFlags
     );
-    $appendedHistory[] = $mayaHistoryMessage;
-    if (count($appendedHistory) > MAYA_HISTORY_DB_CAP) {
-        $appendedHistory = array_slice($appendedHistory, -MAYA_HISTORY_DB_CAP);
-    }
 
     maya_save_session($pdo, $sessionId, [
         'stage' => $newStage,
         'scores_json' => json_encode($finalScores),
         'readiness_json' => json_encode($finalReadiness),
         'flags_json' => json_encode($finalFlags),
-        'history_json' => json_encode($appendedHistory),
         'last_question' => $approved ? '' : $nextQuestion,
         'major_paste_flag' => $finalFlags['major_paste'] ? 1 : 0,
         'ready_for_final_review' => $finalReadiness['ready_for_final_review'] ? 1 : 0,
@@ -1519,7 +1585,7 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
         'readiness' => $finalReadiness,
         'flags' => $finalFlags,
         'canonical_check' => $canonical,
-        'message' => maya_format_history_page([$mayaHistoryMessage], count($appendedHistory) - 1)[0] ?? null,
+        'message' => $mayaHistoryMessage,
     ];
 }
 

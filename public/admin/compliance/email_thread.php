@@ -508,7 +508,8 @@ compliance_page_open(array(
       <?php if ($events !== array()): ?>
         <details style="margin-top:12px;">
           <summary style="cursor:pointer;font-weight:700;color:#3730a3;font-size:13px;">Postmark events (<?= count($events) ?>)</summary>
-          <table class="cmpth-table" style="margin-top:8px;">
+          <div class="compliance-table-wrap">
+          <table class="cmpth-table compliance-table" style="margin-top:8px;">
             <thead><tr>
               <th>When</th><th>Type</th><th>Recipient</th><th>Payload</th>
             </tr></thead>
@@ -529,6 +530,7 @@ compliance_page_open(array(
               <?php endforeach; ?>
             </tbody>
           </table>
+          </div>
         </details>
       <?php endif; ?>
     </section>

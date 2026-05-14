@@ -275,7 +275,8 @@ if ($detailId > 0) {
     <section id="attendees" class="cmp-card">
       <h2 style="margin:0 0 14px;font-size:16px;">Attendees</h2>
       <?php if ($attendees !== array()): ?>
-        <table class="cmpmtg-table" style="margin-bottom:16px;">
+        <div class="compliance-table-wrap">
+        <table class="cmpmtg-table compliance-table" style="margin-bottom:16px;">
           <thead><tr>
             <th>Name</th><th>Role</th><th>Organisation</th><th>Email</th><th>Attended</th><th></th>
           </tr></thead>
@@ -316,6 +317,7 @@ if ($detailId > 0) {
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php else: ?>
         <p style="color:#64748b;margin:0 0 14px;">No attendees yet.</p>
       <?php endif; ?>
@@ -420,7 +422,8 @@ if ($detailId > 0) {
     <section id="actions" class="cmp-card">
       <h2 style="margin:0 0 14px;font-size:16px;">Action items</h2>
       <?php if ($actions !== array()): ?>
-        <table class="cmpmtg-table" style="margin-bottom:16px;">
+        <div class="compliance-table-wrap">
+        <table class="cmpmtg-table compliance-table" style="margin-bottom:16px;">
           <thead><tr>
             <th>Title</th><th>Responsible</th><th>Due</th><th>Status</th><th></th>
           </tr></thead>
@@ -465,6 +468,7 @@ if ($detailId > 0) {
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php else: ?>
         <p style="color:#64748b;margin:0 0 14px;">No action items yet.</p>
       <?php endif; ?>
@@ -548,7 +552,8 @@ compliance_page_open(array(
       <?php if ($meetings === array()): ?>
         <p style="color:var(--text-muted);margin:0;">No meetings yet — use the form on the right to create one.</p>
       <?php else: ?>
-        <table class="cmpmtg-table">
+        <div class="compliance-table-wrap">
+        <table class="cmpmtg-table compliance-table">
           <thead><tr>
             <th>Code</th><th>Title</th><th>Type</th><th>Status</th><th>When</th><th></th>
           </tr></thead>
@@ -574,6 +579,7 @@ compliance_page_open(array(
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php endif; ?>
     </section>
 

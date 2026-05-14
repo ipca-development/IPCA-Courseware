@@ -215,7 +215,8 @@ if ($detailId > 0) {
           <div class="cmp-list-title"><?= compliance_ui_icon('pulse') ?><span>Recent runs</span></div>
           <div class="cmp-count-pill"><?= count($runs) ?></div>
         </div>
-        <table>
+        <div class="compliance-table-wrap">
+        <table class="compliance-table">
           <thead><tr><th>Started</th><th>Completed</th><th>Status</th><th>Hits</th><th>Trigger</th></tr></thead>
           <tbody>
             <?php foreach ($runs as $rr): ?>
@@ -229,6 +230,7 @@ if ($detailId > 0) {
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       </section>
     <?php endif; ?>
 
@@ -272,7 +274,8 @@ compliance_page_open(array(
       <?php if ($rules === array()): ?>
         <p style="color:var(--text-muted);margin:0;">No rules yet. Define one on the right.</p>
       <?php else: ?>
-        <table>
+        <div class="compliance-table-wrap">
+        <table class="compliance-table">
           <thead><tr>
             <th>Code</th><th>Title</th><th>Kind</th><th>Sev</th><th>Active</th><th></th>
           </tr></thead>
@@ -315,6 +318,7 @@ compliance_page_open(array(
             <?php endforeach; ?>
           </tbody>
         </table>
+        </div>
       <?php endif; ?>
     </section>
 
