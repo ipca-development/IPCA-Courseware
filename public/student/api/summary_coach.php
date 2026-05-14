@@ -676,6 +676,28 @@ function maya_section_progress_prompt(array $progress): string
         . "Current writing stage: " . ((string)($progress['current_stage'] ?? '') ?: MAYA_STAGE_STRUCTURE);
 }
 
+function maya_message_already_contains_question(string $message, string $question): bool
+{
+    $message = trim($message);
+    $question = trim($question);
+    if ($message === '' || $question === '') return false;
+    if (stripos($message, $question) !== false) return true;
+    if (strpos($message, '?') === false) return false;
+
+    $messageTail = mb_strtolower(mb_substr($message, -700));
+    if (strpos($messageTail, 'answer here:') !== false) return true;
+
+    preg_match_all('/[a-z0-9]{4,}/i', mb_strtolower($question), $qMatches);
+    $tokens = array_values(array_unique($qMatches[0] ?? []));
+    if (count($tokens) < 4) return false;
+
+    $hits = 0;
+    foreach ($tokens as $token) {
+        if (strpos($messageTail, $token) !== false) $hits++;
+    }
+    return ($hits / max(1, count($tokens))) >= 0.58;
+}
+
 function maya_decode_json_column($raw): array
 {
     if (!is_string($raw) || trim($raw) === '') return [];
@@ -1895,7 +1917,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         'section_progress' => array_merge($sectionProgress, ['current_stage' => $newStage]),
     ];
     $mayaBubbleText = $mayaMessage;
-    if ($nextQuestion !== '' && stripos($mayaBubbleText, $nextQuestion) === false) {
+    if ($nextQuestion !== '' && !maya_message_already_contains_question($mayaBubbleText, $nextQuestion)) {
         $mayaBubbleText .= "\n\n" . $nextQuestion;
     }
 
@@ -2225,7 +2247,7 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
     // Persist Maya's final review state as individual message rows.
     maya_insert_message($pdo, $session, 'system', 'system', 'Requested Final Review', $scores, maya_decode_json_column($session['flags_json'] ?? null) ?: []);
     $mayaBubbleText = $mayaMessage;
-    if (!$approved && $nextQuestion !== '' && stripos($mayaBubbleText, $nextQuestion) === false) {
+    if (!$approved && $nextQuestion !== '' && !maya_message_already_contains_question($mayaBubbleText, $nextQuestion)) {
         $mayaBubbleText .= "\n\n" . $nextQuestion;
     }
     $mayaHistoryMessage = maya_insert_message(
