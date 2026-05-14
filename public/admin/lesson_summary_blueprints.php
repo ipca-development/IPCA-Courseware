@@ -569,6 +569,12 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     els.progressFill.style.width = pct + '%';
   }
 
+  function updateSlideProgress(analyzedSlides, totalSlides) {
+    const pct = totalSlides > 0 ? Math.round((analyzedSlides / totalSlides) * 100) : 0;
+    els.progressMeta.textContent = analyzedSlides + ' / ' + totalSlides + ' slide(s)';
+    els.progressFill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+  }
+
   function setCurrentWork(message) {
     els.currentWork.textContent = message;
   }
@@ -600,7 +606,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     return minutes + 'm ' + String(rest).padStart(2, '0') + 's';
   }
 
-  function startElapsedTicker(label, lessonId, lessonTitle, activeSlideCount) {
+  function startElapsedTicker(label, lessonId, lessonTitle, activeSlideCount, onSlideProgress) {
     const started = Date.now();
     const totalSlides = Math.max(1, parseInt(activeSlideCount, 10) || 1);
     const estimatedSeconds = estimateLessonSeconds(totalSlides);
@@ -616,6 +622,9 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
         ' (' + elapsed + 's elapsed)';
       setCurrentWork(message);
       markLessonWorking(lessonId, label.toLowerCase(), analyzedSlides + '/' + totalSlides + ' slides · ' + eta);
+      if (typeof onSlideProgress === 'function') {
+        onSlideProgress(analyzedSlides, totalSlides);
+      }
     };
     render();
     const timer = window.setInterval(render, 1000);
@@ -636,13 +645,22 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
       return;
     }
 
-    startProgress('Bulk generation', targets.length);
+    const totalTargetSlides = targets.reduce(function (sum, id) {
+      const lesson = state.lessons.find(function (l) { return parseInt(l.lesson_id, 10) === id; });
+      return sum + Math.max(1, parseInt(lesson && lesson.active_slide_count, 10) || 1);
+    }, 0);
+    startProgress('Bulk generation', totalTargetSlides);
+    els.progressMeta.textContent = '0 / ' + totalTargetSlides + ' slide(s)';
     let done = 0;
+    let completedSlides = 0;
     for (const lessonId of targets) {
       const lesson = state.lessons.find(function (l) { return parseInt(l.lesson_id, 10) === lessonId; });
+      const lessonSlides = Math.max(1, parseInt(lesson && lesson.active_slide_count, 10) || 1);
       addLog('Generating lesson ' + lessonId + (lesson ? ' — ' + lesson.title : '') + '...');
       const previousLatestVersionId = await latestVersionIdForLesson(lessonId);
-      const stopTicker = startElapsedTicker('Generating', lessonId, lesson ? lesson.title : '', lesson ? lesson.active_slide_count : 1);
+      const stopTicker = startElapsedTicker('Generating', lessonId, lesson ? lesson.title : '', lessonSlides, function (analyzedSlides) {
+        updateSlideProgress(Math.min(totalTargetSlides, completedSlides + analyzedSlides), totalTargetSlides);
+      });
       try {
         const json = await apiPost({
           action: 'generate_lesson',
@@ -672,7 +690,8 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
         clearLessonWorking(lessonId);
       }
       done++;
-      updateProgress(done, targets.length);
+      completedSlides = Math.min(totalTargetSlides, completedSlides + lessonSlides);
+      updateSlideProgress(completedSlides, totalTargetSlides);
       await loadLessons();
     }
     setCurrentWork('Bulk generation finished.');
