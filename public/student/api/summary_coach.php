@@ -729,6 +729,15 @@ function maya_section_titles(array $sections): array
     return $titles;
 }
 
+function maya_structure_titles_inline(array $sections): string
+{
+    $parts = [];
+    foreach (maya_section_titles($sections) as $i => $title) {
+        $parts[] = ((int)$i + 1) . ') ' . $title;
+    }
+    return implode(' ', $parts);
+}
+
 function maya_section_progress_from_flags(array $flags, array $fallbackSections = []): array
 {
     $progress = is_array($flags['section_progress'] ?? null) ? $flags['section_progress'] : [];
@@ -1467,7 +1476,7 @@ function maya_system_prompt(): string
         . "71. Enter a polishing phase once content quality is strong: suggest highlights, mnemonics/rules of thumb, and clear notes sparingly.\n"
         . "72. Never make the summary visually noisy.\n"
         . "91. When you need both a summary-writing task and a chat response, visually and structurally separate them clearly.\n"
-        . "92. Use the exact labels <strong><u>SUMMARY EDITOR</u></strong> and <strong><u>THIS CHAT</u></strong>: bold, underlined, and uppercase.\n"
+        . "92. Use the exact labels <strong><u>Summary Editor</u></strong> and <strong><u>This Chat</u></strong>: bold, underlined, and title case.\n"
         . "93. Put summary instructions and chat instructions on separate lines or paragraphs. Use an arrow (→) or colon separator.\n"
         . "94. The student should immediately understand what must be written in the summary and what must be answered in chat.\n"
         . "95. Avoid blended instruction paragraphs such as 'In your summary editor... In chat...' in one continuous sentence.";
@@ -2097,13 +2106,22 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $studentReply !== '' && $allowSummaryInsertions,
         array_values(array_unique($allowedEarlyInsertionTypes))
     );
-    if ($wordCount < 15 && $derivedSections && !array_filter($summaryInsertions, static function ($ins) {
-        return is_array($ins) && ($ins['insertion_type'] ?? '') === 'structure';
-    })) {
+    if ($wordCount < 15 && $derivedSections) {
+        $summaryInsertions = array_values(array_filter($summaryInsertions, static function ($ins) {
+            return !(is_array($ins) && ($ins['insertion_type'] ?? '') === 'structure');
+        }));
         $structureInsertion = maya_make_structure_insertion($derivedSections);
         if ($structureInsertion) {
             array_unshift($summaryInsertions, $structureInsertion);
             $summaryInsertions = array_slice($summaryInsertions, 0, 2);
+        }
+        $headingList = maya_structure_titles_inline($derivedSections);
+        if ($headingList !== '') {
+            $mayaMessage = "Good call — your draft needs structure first. We’ll build it slide-by-slide.\n\n"
+                . "In your <strong><u>Summary Editor</u></strong> → Use the button below to add these exact headings: "
+                . $headingList . ". We will fill each section together.\n\n"
+                . "In <strong><u>This Chat</u></strong> → After the structure is added, go through the first slide and come back when you’re ready to build the first section.";
+            $nextQuestion = '';
         }
     }
     $awaitingChatReply = maya_awaiting_chat_reply($mayaMessage, $nextQuestion);
