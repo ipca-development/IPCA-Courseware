@@ -101,7 +101,7 @@ function cmpcc_default_email_template_html(): string
                     </div>
                   </td>
                   <td align="right" style="vertical-align:top;width:150px;">
-                    <img src="https://ipca.training/assets/logo/ipca_logo_white.png" alt="IPCA" style="display:block;max-width:130px;height:auto;border:0;">
+                    <img src="/assets/logo/ipca_logo_white.png" alt="IPCA" style="display:block;max-width:130px;height:auto;border:0;">
                   </td>
                 </tr>
               </table>
@@ -290,6 +290,8 @@ compliance_page_open(array(
   .cmpcc-template-card{margin-top:18px;padding:18px;border:1px solid var(--border-soft);border-radius:18px;background:#f8fafd;}
   .cmpcc-template-preview{margin-top:12px;border:1px solid #dfe6f1;border-radius:18px;overflow:hidden;background:#fff;box-shadow:var(--card-shadow);}
   .cmpcc-template-preview-head{padding:22px 24px;background:#0d1d34;color:#fff;}
+  .cmpcc-template-preview-headrow{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;}
+  .cmpcc-template-preview-logo{display:block;max-width:130px;height:auto;border:0;flex:0 0 auto;}
   .cmpcc-template-preview-kicker{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:rgba(255,255,255,.72);font-weight:700;}
   .cmpcc-template-preview-title{margin:8px 0 0;font-size:22px;line-height:1.2;color:#fff;font-weight:760;}
   .cmpcc-template-preview-pills{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;}
@@ -631,10 +633,15 @@ compliance_page_open(array(
       </ul>
       <div class="cmpcc-template-preview" aria-label="Email template preview">
         <div class="cmpcc-template-preview-head">
-          <div class="cmpcc-template-preview-kicker">IPCA.training | Compliance</div>
-          <div class="cmpcc-template-preview-title">Compliance Communication</div>
-          <div style="margin-top:8px;font-size:12px;color:rgba(255,255,255,.72);line-height:1.5;">
-            Thread reference: <strong style="color:#fff;">CMT-2026-00042</strong>
+          <div class="cmpcc-template-preview-headrow">
+            <div>
+              <div class="cmpcc-template-preview-kicker">IPCA.training | Compliance</div>
+              <div class="cmpcc-template-preview-title">Compliance Communication</div>
+              <div style="margin-top:8px;font-size:12px;color:rgba(255,255,255,.72);line-height:1.5;">
+                Thread reference: <strong style="color:#fff;">CMT-2026-00042</strong>
+              </div>
+            </div>
+            <img class="cmpcc-template-preview-logo" src="/assets/logo/ipca_logo_white.png" alt="IPCA">
           </div>
           <div class="cmpcc-template-preview-pills">
             <span class="cmpcc-template-preview-pill">Finding · NCR-2026-0042</span>
