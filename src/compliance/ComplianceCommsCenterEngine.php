@@ -210,6 +210,240 @@ final class ComplianceCommsCenterEngine
     }
 
     /**
+     * Apply the currently selected outbound email template to a composed
+     * message. Drafts keep the operator's raw body, while sent messages get
+     * the branded wrapper and the visible compliance thread reference.
+     *
+     * @param list<string> $to
+     * @return array{subject:string,text_body:string|null,html_body:string|null}
+     */
+    private static function renderOutboundEmailTemplate(
+        PDO $pdo,
+        string $subject,
+        ?string $textBody,
+        ?string $htmlBody,
+        int $threadId,
+        array $to
+    ): array {
+        $manager = ComplianceSettings::complianceManager($pdo);
+        $threadCode = self::complianceThreadCode($threadId);
+        $bodyText = $textBody !== null && trim($textBody) !== ''
+            ? $textBody
+            : trim(strip_tags((string)($htmlBody ?? '')));
+        $bodyHtml = $htmlBody !== null && trim($htmlBody) !== ''
+            ? $htmlBody
+            : nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8'));
+
+        $textVars = array(
+            'EMAIL_TITLE' => $subject,
+            'RECIPIENT_NAME' => self::recipientDisplayName($to),
+            'EMAIL_BODY_TEXT' => $bodyText,
+            'EMAIL_BODY_HTML' => $bodyText,
+            'COMPLIANCE_MONITORING_MANAGER_NAME' => (string)$manager['name'],
+            'COMPLIANCE_MONITORING_MANAGER_TITLE' => (string)$manager['title'],
+            'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_TEXT' => (string)$manager['signature'],
+            'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML' => (string)$manager['signature'],
+            'COMPLIANCE_THREAD_CODE' => $threadCode,
+            'COMPLIANCE_OBJECT_SUMMARY_TEXT' => 'No linked compliance objects.',
+        );
+        $htmlVars = array(
+            'EMAIL_TITLE' => htmlspecialchars($subject, ENT_QUOTES, 'UTF-8'),
+            'RECIPIENT_NAME' => htmlspecialchars(self::recipientDisplayName($to), ENT_QUOTES, 'UTF-8'),
+            'EMAIL_BODY_TEXT' => nl2br(htmlspecialchars($bodyText, ENT_QUOTES, 'UTF-8')),
+            'EMAIL_BODY_HTML' => $bodyHtml,
+            'COMPLIANCE_MONITORING_MANAGER_NAME' => htmlspecialchars((string)$manager['name'], ENT_QUOTES, 'UTF-8'),
+            'COMPLIANCE_MONITORING_MANAGER_TITLE' => htmlspecialchars((string)$manager['title'], ENT_QUOTES, 'UTF-8'),
+            'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_TEXT' => nl2br(htmlspecialchars((string)$manager['signature'], ENT_QUOTES, 'UTF-8')),
+            'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML' => nl2br(htmlspecialchars((string)$manager['signature'], ENT_QUOTES, 'UTF-8')),
+            'COMPLIANCE_THREAD_CODE' => htmlspecialchars($threadCode, ENT_QUOTES, 'UTF-8'),
+            'COMPLIANCE_OBJECT_SUMMARY_TEXT' => 'No linked compliance objects.',
+        );
+
+        foreach (self::emailTemplateObjectVariables($pdo, $threadId) as $key => $values) {
+            $textVars[$key] = $values['text'];
+            $htmlVars[$key] = $values['html'];
+        }
+
+        $template = self::getCurrentEmailTemplate($pdo);
+        if ($template === null || trim((string)($template['html_template'] ?? '')) === '') {
+            $subject = self::renderTemplateString($subject, $textVars);
+            return array(
+                'subject' => substr($subject, 0, 500),
+                'text_body' => $textBody !== null ? self::renderTemplateString($textBody, $textVars) : null,
+                'html_body' => $htmlBody !== null ? self::renderTemplateString($htmlBody, $htmlVars) : null,
+            );
+        }
+
+        $subjectTemplate = trim((string)($template['subject_template'] ?? ''));
+        $textTemplate = (string)($template['text_template'] ?? '');
+        $htmlTemplate = (string)$template['html_template'];
+        $htmlTemplate = self::removeUnusedObjectPillAnchors($htmlTemplate, $htmlVars);
+
+        $renderedSubject = $subjectTemplate !== ''
+            ? self::renderTemplateString($subjectTemplate, $textVars)
+            : self::renderTemplateString($subject, $textVars);
+        $renderedText = trim($textTemplate) !== ''
+            ? self::renderTemplateString($textTemplate, $textVars)
+            : self::renderTemplateString($bodyText, $textVars);
+        $renderedHtml = self::renderTemplateString($htmlTemplate, $htmlVars);
+
+        return array(
+            'subject' => substr($renderedSubject, 0, 500),
+            'text_body' => $renderedText !== '' ? $renderedText : null,
+            'html_body' => $renderedHtml !== '' ? $renderedHtml : null,
+        );
+    }
+
+    private static function complianceThreadCode(int $threadId): string
+    {
+        return 'CMP-THREAD-' . str_pad((string)$threadId, 6, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * @param list<string> $to
+     */
+    private static function recipientDisplayName(array $to): string
+    {
+        $email = trim((string)($to[0] ?? ''));
+        if ($email === '') {
+            return 'there';
+        }
+        $local = (string)preg_replace('/@.*/', '', $email);
+        $local = trim((string)preg_replace('/[._-]+/', ' ', $local));
+        return $local !== '' ? ucwords($local) : $email;
+    }
+
+    /**
+     * @return array<string,array{text:string,html:string}>
+     */
+    private static function emailTemplateObjectVariables(PDO $pdo, int $threadId): array
+    {
+        $vars = array();
+        for ($i = 1; $i <= 10; $i++) {
+            $vars['COMPLIANCE_OBJECT_TYPE_' . $i] = array('text' => '', 'html' => '');
+            $vars['COMPLIANCE_OBJECT_CODE_' . $i] = array('text' => '', 'html' => '');
+            $vars['COMPLIANCE_OBJECT_URL_' . $i] = array('text' => '', 'html' => '');
+            $vars['COMPLIANCE_OBJECT_LABEL_' . $i] = array('text' => '', 'html' => '');
+        }
+
+        $links = self::listObjectLinksForThread($pdo, $threadId);
+        if ($links === array()) {
+            $vars['COMPLIANCE_OBJECT_SUMMARY_TEXT'] = array('text' => 'No linked compliance objects.', 'html' => 'No linked compliance objects.');
+            $vars['COMPLIANCE_OBJECT_PILLS_HTML'] = array('text' => '', 'html' => '');
+            return $vars;
+        }
+
+        $typeLabels = self::linkableObjectTypes();
+        $pickerLabels = self::linkableLabelIndex($pdo);
+        $summary = array();
+        $pills = array();
+        $idx = 1;
+        foreach ($links as $link) {
+            if ($idx > 10) {
+                break;
+            }
+            $type = (string)($link['linked_object_type'] ?? '');
+            $id = (string)($link['linked_object_id'] ?? '');
+            $typeLabel = (string)($typeLabels[$type] ?? ucfirst(str_replace('_', ' ', $type)));
+            $humanLabel = (string)($pickerLabels[$type . ':' . $id] ?? $id);
+            $code = self::objectCodeFromLabel($humanLabel, $id);
+            $url = self::complianceObjectUrl($type, $id);
+            $absoluteUrl = self::absoluteComplianceUrl($url);
+            $label = trim($typeLabel . ' · ' . $code);
+
+            $vars['COMPLIANCE_OBJECT_TYPE_' . $idx] = array(
+                'text' => $typeLabel,
+                'html' => htmlspecialchars($typeLabel, ENT_QUOTES, 'UTF-8'),
+            );
+            $vars['COMPLIANCE_OBJECT_CODE_' . $idx] = array(
+                'text' => $code,
+                'html' => htmlspecialchars($code, ENT_QUOTES, 'UTF-8'),
+            );
+            $vars['COMPLIANCE_OBJECT_LABEL_' . $idx] = array(
+                'text' => $label,
+                'html' => htmlspecialchars($label, ENT_QUOTES, 'UTF-8'),
+            );
+            $vars['COMPLIANCE_OBJECT_URL_' . $idx] = array(
+                'text' => $absoluteUrl,
+                'html' => htmlspecialchars($absoluteUrl, ENT_QUOTES, 'UTF-8'),
+            );
+            $summary[] = $label;
+            if ($absoluteUrl !== '') {
+                $pills[] = '<a href="' . htmlspecialchars($absoluteUrl, ENT_QUOTES, 'UTF-8') . '" style="display:inline-block;margin:0 8px 8px 0;padding:7px 12px;border-radius:999px;background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.22);color:#ffffff;text-decoration:none;font-size:12px;font-weight:700;">' . htmlspecialchars($label, ENT_QUOTES, 'UTF-8') . '</a>';
+            }
+            $idx++;
+        }
+
+        $summaryText = $summary !== array() ? implode('; ', $summary) : 'No linked compliance objects.';
+        $vars['COMPLIANCE_OBJECT_SUMMARY_TEXT'] = array(
+            'text' => $summaryText,
+            'html' => htmlspecialchars($summaryText, ENT_QUOTES, 'UTF-8'),
+        );
+        $vars['COMPLIANCE_OBJECT_PILLS_HTML'] = array('text' => '', 'html' => implode('', $pills));
+
+        return $vars;
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private static function linkableLabelIndex(PDO $pdo): array
+    {
+        $index = array();
+        foreach (self::listLinkablePickerOptions($pdo) as $group) {
+            foreach (($group['options'] ?? array()) as $option) {
+                $index[(string)$group['type'] . ':' . (string)$option['id']] = (string)$option['label'];
+            }
+        }
+        return $index;
+    }
+
+    private static function objectCodeFromLabel(string $label, string $fallback): string
+    {
+        $parts = preg_split('/\s+[—-]\s+/', $label, 2) ?: array();
+        $code = trim((string)($parts[0] ?? ''));
+        return $code !== '' ? $code : $fallback;
+    }
+
+    private static function complianceObjectUrl(string $type, string $id): string
+    {
+        switch ($type) {
+            case 'finding': return '/admin/compliance/findings.php?id=' . rawurlencode($id);
+            case 'audit': return '/admin/compliance/audits.php?id=' . rawurlencode($id);
+            case 'corrective_action': return '/admin/compliance/corrective_actions.php?id=' . rawurlencode($id);
+            case 'manual_change_request': return '/admin/compliance/change_requests.php?id=' . rawurlencode($id);
+            case 'meeting': return '/admin/compliance/meetings.php?id=' . rawurlencode($id);
+            case 'compliance_case': return '/admin/compliance/moc.php?id=' . rawurlencode($id);
+            default: return '';
+        }
+    }
+
+    private static function absoluteComplianceUrl(string $path): string
+    {
+        if ($path === '') {
+            return '';
+        }
+        if (preg_match('#^https?://#i', $path)) {
+            return $path;
+        }
+        $base = CompliancePostmarkConfig::publicBaseUrl();
+        return $base !== '' ? $base . $path : $path;
+    }
+
+    private static function removeUnusedObjectPillAnchors(string $html, array $variables): string
+    {
+        for ($i = 1; $i <= 10; $i++) {
+            $value = (string)($variables['COMPLIANCE_OBJECT_URL_' . $i]['text'] ?? '');
+            if ($value !== '') {
+                continue;
+            }
+            $pattern = '#<a\b(?=[^>]*\{\{COMPLIANCE_OBJECT_URL_' . $i . '\}\})[^>]*>.*?</a>#is';
+            $html = (string)preg_replace($pattern, '', $html);
+        }
+        return $html;
+    }
+
+    /**
      * Ingest a Postmark Inbound payload (already JSON-decoded into an assoc
      * array). Returns a small diagnostic for the webhook to log/return.
      *
@@ -1276,25 +1510,6 @@ final class ComplianceCommsCenterEngine
             $htmlBody = (string)preg_replace('#<script\b[^>]*>.*?</script>#is', '', $htmlBody);
         }
 
-        $manager = ComplianceSettings::complianceManager($pdo);
-        $managerTextVars = array(
-            'COMPLIANCE_MONITORING_MANAGER_NAME' => (string)$manager['name'],
-            'COMPLIANCE_MONITORING_MANAGER_TITLE' => (string)$manager['title'],
-            'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_TEXT' => (string)$manager['signature'],
-        );
-        $managerHtmlVars = array(
-            'COMPLIANCE_MONITORING_MANAGER_NAME' => htmlspecialchars((string)$manager['name'], ENT_QUOTES, 'UTF-8'),
-            'COMPLIANCE_MONITORING_MANAGER_TITLE' => htmlspecialchars((string)$manager['title'], ENT_QUOTES, 'UTF-8'),
-            'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML' => nl2br(htmlspecialchars((string)$manager['signature'], ENT_QUOTES, 'UTF-8')),
-        );
-        $subject = self::renderTemplateString($subject, $managerTextVars);
-        if ($textBody !== null) {
-            $textBody = self::renderTemplateString($textBody, $managerTextVars);
-        }
-        if ($htmlBody !== null) {
-            $htmlBody = self::renderTemplateString($htmlBody, $managerHtmlVars);
-        }
-
         $createdBy = isset($opts['created_by']) && (int)$opts['created_by'] > 0 ? (int)$opts['created_by'] : null;
         $draftId = isset($opts['draft_id']) && (int)$opts['draft_id'] > 0 ? (int)$opts['draft_id'] : null;
         $replyToEmailId = isset($opts['reply_to_email_id']) && (int)$opts['reply_to_email_id'] > 0 ? (int)$opts['reply_to_email_id'] : null;
@@ -1337,6 +1552,11 @@ final class ComplianceCommsCenterEngine
             );
             $threadId = (int)$thread['id'];
         }
+
+        $rendered = self::renderOutboundEmailTemplate($pdo, $subject, $textBody, $htmlBody, $threadId, $to);
+        $subject = $rendered['subject'];
+        $textBody = $rendered['text_body'];
+        $htmlBody = $rendered['html_body'];
 
         // Generate our own RFC822 Message-Id so future inbound replies thread back.
         $host = self::messageIdHost($fromAddress);

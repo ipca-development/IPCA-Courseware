@@ -1193,7 +1193,7 @@ final class LessonSummaryBlueprintService
                                 . "- lesson boundaries\n"
                                 . "- minimum completion checks\n"
                                 . "- do-not-ask boundaries\n"
-                                . "- allowed coaching focus\n"
+                                . "- allowed coaching focus as short scope labels, not question text\n"
                                 . "- generic student scaffold\n"
                                 . "- personalization allowed\n"
                                 . "- intro/support slide distinction\n"
@@ -1213,6 +1213,8 @@ final class LessonSummaryBlueprintService
                                 . "The first formal student section should normally be the first teachable concept, not the lesson title/objective.\n"
                                 . "Do not create a required student section for intro-only or support-only slides unless the lesson truly requires it.\n"
                                 . "Student scaffold placeholder_bullets may contain only \"Item 1\" and \"Item 2\"; never include topical hints or prefilled content.\n"
+                                . "allowed_coaching_focus must contain concise focus categories such as identification, basic function, correct terminology, basic sequence, or preflight familiarization. Do not write question prompts there.\n"
+                                . "section_completion_behavior.do_not_reopen_unless must preserve exception-based review only and include student asks, technical error found, and required concept missing.\n"
                                 . "Generate the map Maya uses to coach students into writing their own summary. "
                                 . "Maya must not rename sections, move concepts between sections, reopen completed topics without cause, ask beyond the current slide group, add advanced theory, or ask broad unsupported questions. "
                                 . "Use selected Resource Library candidates for official_references when their indexed content supports the lesson. "
@@ -1477,7 +1479,13 @@ final class LessonSummaryBlueprintService
     {
         $items = $this->stringList($value);
         if ($items !== []) {
-            return $items;
+            $normalized = [];
+            foreach ($items as $item) {
+                $normalized = array_merge($normalized, $this->coachingFocusLabelsFromText($item));
+            }
+            if ($normalized !== []) {
+                return array_values(array_unique($normalized));
+            }
         }
 
         $defaults = ['identification', 'basic function', 'correct terminology'];
@@ -1490,6 +1498,38 @@ final class LessonSummaryBlueprintService
         }
 
         return array_values(array_unique($defaults));
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function coachingFocusLabelsFromText(string $text): array
+    {
+        $hay = strtolower($text);
+        $labels = [];
+        if (str_contains($hay, 'identify') || str_contains($hay, 'name') || str_contains($hay, 'distinguish') || str_contains($hay, 'configuration')) {
+            $labels[] = 'identification';
+        }
+        if (str_contains($hay, 'function') || str_contains($hay, 'role') || str_contains($hay, 'does') || str_contains($hay, 'purpose')) {
+            $labels[] = 'basic function';
+        }
+        if (str_contains($hay, 'term') || str_contains($hay, 'vocabulary') || str_contains($hay, 'language')) {
+            $labels[] = 'correct terminology';
+        }
+        if (str_contains($hay, 'preflight') || str_contains($hay, 'equipment') || str_contains($hay, 'check')) {
+            $labels[] = 'preflight familiarization';
+        }
+        if (str_contains($hay, 'sequence') || str_contains($hay, 'takeoff') || str_contains($hay, 'landing')) {
+            $labels[] = 'basic sequence';
+        }
+        if (str_contains($hay, 'cool') || str_contains($hay, 'alternator') || str_contains($hay, 'magneto') || str_contains($hay, 'engine')) {
+            $labels[] = 'basic systems role';
+        }
+        if ($labels === [] && !str_starts_with(trim($hay), 'ask ')) {
+            $labels[] = $text;
+        }
+
+        return $labels;
     }
 
     /**
@@ -1571,6 +1611,18 @@ final class LessonSummaryBlueprintService
         }
         if ($doNotReopenUnless === []) {
             $doNotReopenUnless = ['student asks', 'technical error found', 'required concept missing'];
+        }
+        foreach (['student asks', 'technical error found', 'required concept missing'] as $standardReason) {
+            $found = false;
+            foreach ($doNotReopenUnless as $reason) {
+                if (strtolower(trim($reason)) === $standardReason) {
+                    $found = true;
+                    break;
+                }
+            }
+            if (!$found) {
+                $doNotReopenUnless[] = $standardReason;
+            }
         }
 
         return [
