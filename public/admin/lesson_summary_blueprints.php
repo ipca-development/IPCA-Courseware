@@ -70,6 +70,12 @@ if (isset($_GET['action'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    session_write_close();
+    ignore_user_abort(true);
+    @set_time_limit(900);
+    @ini_set('max_execution_time', '900');
+    @ini_set('default_socket_timeout', '600');
+
     $raw = file_get_contents('php://input');
     $payload = [];
     if (is_string($raw) && trim($raw) !== '') {
@@ -454,6 +460,31 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     return json;
   }
 
+  async function latestVersionIdForLesson(lessonId) {
+    try {
+      const json = await apiGet({ action: 'lesson_detail', lesson_id: lessonId });
+      const versions = json.detail && Array.isArray(json.detail.versions) ? json.detail.versions : [];
+      if (!versions.length) return 0;
+      return versions.reduce(function (max, v) {
+        return Math.max(max, parseInt(v.id, 10) || 0);
+      }, 0);
+    } catch (e) {
+      return 0;
+    }
+  }
+
+  async function waitForSavedGeneration(lessonId, previousLatestVersionId) {
+    for (let i = 0; i < 30; i++) {
+      await new Promise(function (resolve) { window.setTimeout(resolve, 3000); });
+      const latest = await latestVersionIdForLesson(lessonId);
+      if (latest > previousLatestVersionId) {
+        return latest;
+      }
+      setCurrentWork('Connection dropped while lesson ' + lessonId + ' was running. Checking for saved version... ' + ((i + 1) * 3) + 's');
+    }
+    return 0;
+  }
+
   async function loadLessons() {
     state.courseId = parseInt(els.course.value, 10) || 0;
     if (!state.courseId) {
@@ -580,6 +611,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     for (const lessonId of targets) {
       const lesson = state.lessons.find(function (l) { return parseInt(l.lesson_id, 10) === lessonId; });
       addLog('Generating lesson ' + lessonId + (lesson ? ' — ' + lesson.title : '') + '...');
+      const previousLatestVersionId = await latestVersionIdForLesson(lessonId);
       const stopTicker = startElapsedTicker('Generating', lessonId, lesson ? lesson.title : '');
       try {
         const json = await apiPost({
@@ -594,7 +626,17 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
       } catch (e) {
         stopTicker();
         const payload = e.payload || {};
-        addLog('FAILED lesson ' + lessonId + ': ' + (payload.error || e.message), false);
+        if (!payload.error && String(e.message || '').toLowerCase().indexOf('failed to fetch') !== -1) {
+          addLog('Connection dropped for lesson ' + lessonId + '. Checking whether the server saved a new version...', false);
+          const savedVersionId = await waitForSavedGeneration(lessonId, previousLatestVersionId);
+          if (savedVersionId > 0) {
+            addLog('RECOVERED lesson ' + lessonId + ': new version ' + savedVersionId + ' was saved after the connection dropped.', true);
+          } else {
+            addLog('FAILED lesson ' + lessonId + ': browser connection dropped and no saved version was detected.', false);
+          }
+        } else {
+          addLog('FAILED lesson ' + lessonId + ': ' + (payload.error || e.message), false);
+        }
       } finally {
         clearLessonWorking(lessonId);
       }

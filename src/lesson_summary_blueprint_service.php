@@ -1137,7 +1137,18 @@ final class LessonSummaryBlueprintService
                 'student_personalization_allowed' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'global_do_not_ask' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'confidence' => ['type' => 'number'],
-                'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'warnings' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'properties' => [
+                            'severity' => ['type' => 'string'],
+                            'message' => ['type' => 'string'],
+                        ],
+                        'required' => ['severity', 'message'],
+                    ],
+                ],
             ],
             'required' => [
                 'lesson_id',
@@ -1437,7 +1448,7 @@ final class LessonSummaryBlueprintService
             'student_personalization_allowed' => $this->normalizeStudentPersonalizationAllowed($raw['student_personalization_allowed'] ?? []),
             'global_do_not_ask' => $this->stringList($raw['global_do_not_ask'] ?? []),
             'confidence' => $this->clampConfidence((float)($raw['confidence'] ?? 0.0)),
-            'warnings' => $this->stringList($raw['warnings'] ?? []),
+            'warnings' => $this->warningsFromBlueprint($raw),
         ];
     }
 
@@ -2063,7 +2074,11 @@ final class LessonSummaryBlueprintService
         }
         $out = [];
         foreach ($value as $item) {
-            $s = trim((string)$item);
+            if (is_array($item)) {
+                $s = trim((string)($item['message'] ?? json_encode($item)));
+            } else {
+                $s = trim((string)$item);
+            }
             if ($s !== '') {
                 $out[] = $s;
             }
