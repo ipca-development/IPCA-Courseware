@@ -753,6 +753,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
       renderWarnings(selected) +
       '<h3>Section status policy</h3>' + renderSectionStatusPolicy(bp.section_status_policy || {}) +
       '<h3>Maya current task templates</h3>' + renderTaskTemplates(bp.maya_current_task_templates || {}) +
+      '<h3>Coach mode definitions</h3>' + renderCoachModeDefinitions(bp.coach_mode_definitions || {}) +
       '<h3>Coaching sequence</h3>' + renderCoachingSequence(bp.coaching_sequence || []) +
       '<h3>Summary structure</h3>' + renderSections(bp.summary_structure || []) +
       '<h3>Slide coverage map</h3>' + renderSlides(bp.slide_coverage_map || []) +
@@ -804,6 +805,15 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
     '</div>';
   }
 
+  function renderCoachModeDefinitions(definitions) {
+    return '<div class="lsb-section-card">' +
+      '<p><strong>summary_editor:</strong> ' + esc(definitions.summary_editor || '') + '</p>' +
+      '<p><strong>guided_capture:</strong> ' + esc(definitions.guided_capture || '') + '</p>' +
+      '<p><strong>clarification_check:</strong> ' + esc(definitions.clarification_check || '') + '</p>' +
+      '<p><strong>polishing:</strong> ' + esc(definitions.polishing || '') + '</p>' +
+    '</div>';
+  }
+
   function renderSections(sections) {
     if (!sections.length) return '<p class="muted">No structure in this version.</p>';
     return sections.map(function (s) {
@@ -818,6 +828,7 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
         blockList('Operational focus', s.operational_focus || []) +
         blockList('Allowed coaching focus', s.allowed_coaching_focus || []) +
         blockList('Minimum completion checks', s.minimum_completion_check || []) +
+        renderAcceptanceCriteria(s.section_acceptance_criteria || {}) +
         blockList('Not required', s.not_required || []) +
         blockList('Do not ask', s.do_not_ask || []) +
         '<p><strong>Completion:</strong> why reasoning ' + yesNo(s.completion_requirements && s.completion_requirements.requires_why_reasoning) +
@@ -828,6 +839,15 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
         renderReferences(s.official_references || []) +
       '</div>';
     }).join('');
+  }
+
+  function renderAcceptanceCriteria(criteria) {
+    return '<div class="lsb-section-card" style="background:#fafafa;">' +
+      '<strong>Section acceptance criteria</strong>' +
+      blockList('Must have', criteria.must_have || []) +
+      blockList('Nice to have', criteria.nice_to_have || []) +
+      blockList('Not needed', criteria.not_needed || []) +
+    '</div>';
   }
 
   function renderCoachingSequence(sequence) {

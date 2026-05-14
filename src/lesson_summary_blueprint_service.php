@@ -1016,6 +1016,16 @@ final class LessonSummaryBlueprintService
                             'not_required' => ['type' => 'array', 'items' => ['type' => 'string']],
                             'do_not_ask' => ['type' => 'array', 'items' => ['type' => 'string']],
                             'minimum_completion_check' => ['type' => 'array', 'items' => ['type' => 'string']],
+                            'section_acceptance_criteria' => [
+                                'type' => 'object',
+                                'additionalProperties' => false,
+                                'properties' => [
+                                    'must_have' => ['type' => 'array', 'items' => ['type' => 'string']],
+                                    'nice_to_have' => ['type' => 'array', 'items' => ['type' => 'string']],
+                                    'not_needed' => ['type' => 'array', 'items' => ['type' => 'string']],
+                                ],
+                                'required' => ['must_have', 'nice_to_have', 'not_needed'],
+                            ],
                             'student_summary_scaffold' => [
                                 'type' => 'object',
                                 'additionalProperties' => false,
@@ -1065,6 +1075,7 @@ final class LessonSummaryBlueprintService
                             'not_required',
                             'do_not_ask',
                             'minimum_completion_check',
+                            'section_acceptance_criteria',
                             'student_summary_scaffold',
                             'completion_requirements',
                             'section_completion_behavior',
@@ -1082,7 +1093,10 @@ final class LessonSummaryBlueprintService
                             'section_id' => ['type' => 'string'],
                             'slide_group' => ['type' => 'array', 'items' => ['type' => 'integer']],
                             'instruction_to_student' => ['type' => 'string'],
-                            'coach_mode' => ['type' => 'string'],
+                            'coach_mode' => [
+                                'type' => 'string',
+                                'enum' => ['summary_editor', 'guided_capture', 'clarification_check', 'polishing'],
+                            ],
                             'slide_group_guidance' => [
                                 'type' => 'object',
                                 'additionalProperties' => false,
@@ -1156,6 +1170,17 @@ final class LessonSummaryBlueprintService
                     ],
                     'required' => ['watch_slides', 'write_summary', 'chat_check'],
                 ],
+                'coach_mode_definitions' => [
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'properties' => [
+                        'summary_editor' => ['type' => 'string'],
+                        'guided_capture' => ['type' => 'string'],
+                        'clarification_check' => ['type' => 'string'],
+                        'polishing' => ['type' => 'string'],
+                    ],
+                    'required' => ['summary_editor', 'guided_capture', 'clarification_check', 'polishing'],
+                ],
                 'confidence' => ['type' => 'number'],
                 'warnings' => [
                     'type' => 'array',
@@ -1165,8 +1190,18 @@ final class LessonSummaryBlueprintService
                         'properties' => [
                             'severity' => ['type' => 'string'],
                             'message' => ['type' => 'string'],
+                            'details' => [
+                                'type' => 'object',
+                                'additionalProperties' => false,
+                                'properties' => [
+                                    'reason' => ['type' => 'string'],
+                                    'omitted_count' => ['type' => 'integer'],
+                                    'examples' => ['type' => 'array', 'items' => ['type' => 'string']],
+                                ],
+                                'required' => ['reason', 'omitted_count', 'examples'],
+                            ],
                         ],
-                        'required' => ['severity', 'message'],
+                        'required' => ['severity', 'message', 'details'],
                     ],
                 ],
             ],
@@ -1182,6 +1217,7 @@ final class LessonSummaryBlueprintService
                 'global_do_not_ask',
                 'section_status_policy',
                 'maya_current_task_templates',
+                'coach_mode_definitions',
                 'confidence',
                 'warnings',
             ],
@@ -1214,12 +1250,14 @@ final class LessonSummaryBlueprintService
                                 . "- operational focus\n"
                                 . "- lesson boundaries\n"
                                 . "- minimum completion checks\n"
+                                . "- section acceptance criteria\n"
                                 . "- do-not-ask boundaries\n"
                                 . "- allowed coaching focus as short scope labels, not question text\n"
                                 . "- generic student scaffold\n"
                                 . "- personalization allowed\n"
                                 . "- section status policy\n"
                                 . "- Maya current task templates\n"
+                                . "- coach mode definitions\n"
                                 . "- intro/support slide distinction\n"
                                 . "- common misconceptions\n"
                                 . "- not-required areas\n"
@@ -1238,9 +1276,13 @@ final class LessonSummaryBlueprintService
                                 . "Do not create a required student section for intro-only or support-only slides unless the lesson truly requires it.\n"
                                 . "Student scaffold placeholder_bullets may contain only \"Item 1\" and \"Item 2\"; never include topical hints or prefilled content.\n"
                                 . "Include section_status_policy exactly for good-enough completion and limited refinement. Include maya_current_task_templates to separate watch-slide, summary-editor, and chat-check tasks.\n"
+                                . "maya_current_task_templates must be exactly clear for watch, summary-editor writing, and chat clarification. Use placeholders {slide_group}, {section_title}, and {concept} as appropriate.\n"
+                                . "Include coach_mode_definitions with only summary_editor, guided_capture, clarification_check, and polishing. coaching_sequence[].coach_mode must use one of those values only.\n"
+                                . "Every required student section must include section_acceptance_criteria with must_have, nice_to_have, and not_needed. Maya must know when a section is good enough and when to move on.\n"
                                 . "allowed_coaching_focus must contain concise focus categories such as identification, basic function, correct terminology, basic sequence, or preflight familiarization. Do not write question prompts there.\n"
                                 . "section_completion_behavior.do_not_reopen_unless must preserve exception-based review only and include student asks, technical error found, and required concept missing.\n"
                                 . "Do not stuff broad or loosely related official references into sections. Every official reference must directly support required concepts in that same section. If a selected reference is weakly related, omit it and add a warning.\n"
+                                . "Do not spam warnings. Group repeated warning causes. Broad references may be valid only when directly relevant and justified by the section concepts, especially introductory airplane-parts sections.\n"
                                 . "Do not attach primary flight controls references to an engine, propeller, or accessory section unless that section explicitly covers flight controls.\n"
                                 . "Generate the map Maya uses to coach students into writing their own summary. "
                                 . "Maya must not rename sections, move concepts between sections, reopen completed topics without cause, ask beyond the current slide group, add advanced theory, or ask broad unsupported questions. "
@@ -1271,6 +1313,11 @@ final class LessonSummaryBlueprintService
                                     'do_not_ask_and_allowed_focus_prevent_maya_drift' => true,
                                     'section_status_policy_required' => true,
                                     'maya_current_task_templates_required' => true,
+                                    'coach_mode_definitions_required' => true,
+                                    'coach_modes_must_be_defined' => true,
+                                    'section_acceptance_criteria_required' => true,
+                                    'warnings_must_be_grouped' => true,
+                                    'broad_references_allowed_only_when_directly_relevant' => true,
                                     'official_references_must_support_same_section_required_concepts' => true,
                                     'omit_broad_acs_filler_references' => true,
                                 ],
@@ -1396,6 +1443,12 @@ final class LessonSummaryBlueprintService
             $requiredConcepts = $this->stringList($section['required_concepts'] ?? []);
             $operationalFocus = $this->stringList($section['operational_focus'] ?? []);
             $allowedCoachingFocus = $this->normalizeAllowedCoachingFocus($section['allowed_coaching_focus'] ?? [], $requiredConcepts);
+            $minimumCompletionCheck = $this->normalizeMinimumCompletionChecks(
+                $section['minimum_completion_check'] ?? [],
+                $requiredConcepts,
+                $requiresStudentSection
+            );
+            $doNotAsk = $this->normalizeDoNotAsk($section['do_not_ask'] ?? [], $notRequired);
             $sections[] = [
                 'section_id' => $sid,
                 'order' => (int)($section['order'] ?? (count($sections) + 1)),
@@ -1407,10 +1460,14 @@ final class LessonSummaryBlueprintService
                 'operational_focus' => $operationalFocus,
                 'allowed_coaching_focus' => $allowedCoachingFocus,
                 'not_required' => $notRequired,
-                'do_not_ask' => $this->normalizeDoNotAsk($section['do_not_ask'] ?? [], $notRequired),
-                'minimum_completion_check' => $this->normalizeMinimumCompletionChecks(
-                    $section['minimum_completion_check'] ?? [],
+                'do_not_ask' => $doNotAsk,
+                'minimum_completion_check' => $minimumCompletionCheck,
+                'section_acceptance_criteria' => $this->normalizeSectionAcceptanceCriteria(
+                    $section['section_acceptance_criteria'] ?? [],
                     $requiredConcepts,
+                    $minimumCompletionCheck,
+                    $notRequired,
+                    $doNotAsk,
                     $requiresStudentSection
                 ),
                 'student_summary_scaffold' => $this->normalizeStudentSummaryScaffold($section['student_summary_scaffold'] ?? [], $title, $requiresStudentSection),
@@ -1485,7 +1542,8 @@ final class LessonSummaryBlueprintService
             ];
         }
         usort($coverage, static fn (array $a, array $b): int => ((int)$a['slide_number']) <=> ((int)$b['slide_number']));
-        $coachingSequence = $this->normalizeCoachingSequence($raw['coaching_sequence'] ?? [], $sections);
+        $coachModeDefinitions = $this->normalizeCoachModeDefinitions($raw['coach_mode_definitions'] ?? []);
+        $coachingSequence = $this->normalizeCoachingSequence($raw['coaching_sequence'] ?? [], $sections, $coachModeDefinitions);
 
         return [
             'lesson_id' => (int)($lesson['id'] ?? $raw['lesson_id'] ?? 0),
@@ -1499,6 +1557,7 @@ final class LessonSummaryBlueprintService
             'global_do_not_ask' => $this->stringList($raw['global_do_not_ask'] ?? []),
             'section_status_policy' => $this->normalizeSectionStatusPolicy($raw['section_status_policy'] ?? []),
             'maya_current_task_templates' => $this->normalizeMayaCurrentTaskTemplates($raw['maya_current_task_templates'] ?? []),
+            'coach_mode_definitions' => $coachModeDefinitions,
             'confidence' => $this->clampConfidence((float)($raw['confidence'] ?? 0.0)),
             'warnings' => array_values(array_merge($this->warningsFromBlueprint($raw), $normalizationWarnings)),
         ];
@@ -1683,10 +1742,80 @@ final class LessonSummaryBlueprintService
 
     /**
      * @param mixed $value
+     * @param list<string> $requiredConcepts
+     * @param list<string> $minimumCompletionCheck
+     * @param list<string> $notRequired
+     * @param list<string> $doNotAsk
+     * @return array{must_have:list<string>,nice_to_have:list<string>,not_needed:list<string>}
+     */
+    private function normalizeSectionAcceptanceCriteria(
+        mixed $value,
+        array $requiredConcepts,
+        array $minimumCompletionCheck,
+        array $notRequired,
+        array $doNotAsk,
+        bool $requiresStudentSection
+    ): array {
+        $value = is_array($value) ? $value : [];
+        $mustHave = $this->stringList($value['must_have'] ?? []);
+        $niceToHave = $this->stringList($value['nice_to_have'] ?? []);
+        $notNeeded = $this->stringList($value['not_needed'] ?? []);
+
+        if ($requiresStudentSection && $mustHave === []) {
+            $mustHave = $minimumCompletionCheck !== []
+                ? $minimumCompletionCheck
+                : array_map(static fn (string $concept): string => 'Student covers: ' . rtrim($concept, '.') . '.', array_slice($requiredConcepts, 0, 4));
+        }
+        if ($niceToHave === [] && count($requiredConcepts) > count($mustHave)) {
+            $niceToHave = array_slice($requiredConcepts, count($mustHave), 3);
+        }
+        if ($notNeeded === []) {
+            $notNeeded = array_values(array_unique(array_merge(
+                $notRequired,
+                array_map(static function (string $item): string {
+                    return preg_replace('/^do not ask (about )?/i', '', rtrim($item, '.')) . '.';
+                }, $doNotAsk)
+            )));
+        }
+
+        return [
+            'must_have' => $mustHave,
+            'nice_to_have' => $niceToHave,
+            'not_needed' => $notNeeded,
+        ];
+    }
+
+    /**
+     * @param mixed $value
+     * @return array{summary_editor:string,guided_capture:string,clarification_check:string,polishing:string}
+     */
+    private function normalizeCoachModeDefinitions(mixed $value): array
+    {
+        $value = is_array($value) ? $value : [];
+
+        return [
+            'summary_editor' => trim((string)($value['summary_editor'] ?? '')) !== ''
+                ? trim((string)$value['summary_editor'])
+                : 'Student should mainly write/refine in the summary editor; chat is used only for clarification.',
+            'guided_capture' => trim((string)($value['guided_capture'] ?? '')) !== ''
+                ? trim((string)$value['guided_capture'])
+                : 'Maya guides the student to extract the minimum required concepts from the current slide group.',
+            'clarification_check' => trim((string)($value['clarification_check'] ?? '')) !== ''
+                ? trim((string)$value['clarification_check'])
+                : 'Maya asks one focused chat question because the summary text is unclear or missing a required concept.',
+            'polishing' => trim((string)($value['polishing'] ?? '')) !== ''
+                ? trim((string)$value['polishing'])
+                : 'Maya helps with highlighting, mnemonics, notes, or small formatting improvements after content is complete.',
+        ];
+    }
+
+    /**
+     * @param mixed $value
      * @param list<array<string,mixed>> $sections
+     * @param array<string,string> $coachModeDefinitions
      * @return list<array<string,mixed>>
      */
-    private function normalizeCoachingSequence(mixed $value, array $sections): array
+    private function normalizeCoachingSequence(mixed $value, array $sections, array $coachModeDefinitions): array
     {
         $byId = [];
         foreach ($sections as $section) {
@@ -1710,7 +1839,7 @@ final class LessonSummaryBlueprintService
                     $section,
                     $slideGroup,
                     (string)($step['instruction_to_student'] ?? ''),
-                    (string)($step['coach_mode'] ?? ''),
+                    $this->normalizeCoachMode((string)($step['coach_mode'] ?? ''), $coachModeDefinitions),
                     is_array($step['slide_group_guidance'] ?? null) ? $step['slide_group_guidance'] : []
                 );
             }
@@ -1729,12 +1858,35 @@ final class LessonSummaryBlueprintService
                 $section,
                 $this->normalizeSlideGroup([], $section['covered_by_slides'] ?? []),
                 '',
-                '',
+                'guided_capture',
                 []
             );
         }
 
         return $sequence;
+    }
+
+    /**
+     * @param array<string,string> $coachModeDefinitions
+     */
+    private function normalizeCoachMode(string $mode, array $coachModeDefinitions): string
+    {
+        $mode = trim($mode);
+        if ($mode !== '' && array_key_exists($mode, $coachModeDefinitions)) {
+            return $mode;
+        }
+        $legacy = strtolower($mode);
+        if (str_contains($legacy, 'polish')) {
+            return 'polishing';
+        }
+        if (str_contains($legacy, 'clarif') || str_contains($legacy, 'check')) {
+            return 'clarification_check';
+        }
+        if (str_contains($legacy, 'editor')) {
+            return 'summary_editor';
+        }
+
+        return 'guided_capture';
     }
 
     /**
@@ -1765,7 +1917,7 @@ final class LessonSummaryBlueprintService
             $instruction = 'Go through ' . $slideText . ' first. Then we will build the ' . $title . ' section.';
         }
         if ($coachMode === '') {
-            $coachMode = 'guided_writing';
+            $coachMode = 'guided_capture';
         }
 
         $watchInstruction = trim((string)($guidance['watch_instruction'] ?? ''));
@@ -1873,6 +2025,16 @@ final class LessonSummaryBlueprintService
                 if (($section['minimum_completion_check'] ?? []) === []) {
                     $warnings[] = ['severity' => 'severe', 'message' => 'Required section has no minimum completion checks: ' . (string)($section['title'] ?? '')];
                 }
+                $criteria = is_array($section['section_acceptance_criteria'] ?? null) ? $section['section_acceptance_criteria'] : [];
+                if ($criteria === []) {
+                    $warnings[] = ['severity' => 'severe', 'message' => 'Required section has no section_acceptance_criteria: ' . (string)($section['title'] ?? '')];
+                } elseif (($criteria['must_have'] ?? []) === []) {
+                    $warnings[] = ['severity' => 'severe', 'message' => 'Required section acceptance criteria has empty must_have: ' . (string)($section['title'] ?? '')];
+                }
+                $notNeeded = is_array($criteria['not_needed'] ?? null) ? $criteria['not_needed'] : [];
+                if ($notNeeded === [] && (($section['not_required'] ?? []) !== [] || ($section['do_not_ask'] ?? []) !== [])) {
+                    $warnings[] = ['severity' => 'warning', 'message' => 'Section acceptance criteria not_needed is not aligned with boundaries: ' . (string)($section['title'] ?? '')];
+                }
             }
             if (($section['do_not_ask'] ?? []) === []) {
                 $warnings[] = ['severity' => 'warning', 'message' => 'Section has no do-not-ask boundaries: ' . (string)($section['title'] ?? '')];
@@ -1910,6 +2072,23 @@ final class LessonSummaryBlueprintService
         }
         if (($blueprint['maya_current_task_templates'] ?? []) === []) {
             $warnings[] = ['severity' => 'severe', 'message' => 'Blueprint has no maya_current_task_templates'];
+        }
+        $templates = is_array($blueprint['maya_current_task_templates'] ?? null) ? $blueprint['maya_current_task_templates'] : [];
+        foreach (['watch_slides', 'write_summary', 'chat_check'] as $templateKey) {
+            if (trim((string)($templates[$templateKey] ?? '')) === '') {
+                $warnings[] = ['severity' => 'severe', 'message' => 'maya_current_task_templates missing ' . $templateKey];
+            }
+        }
+        $coachModes = is_array($blueprint['coach_mode_definitions'] ?? null) ? $blueprint['coach_mode_definitions'] : [];
+        foreach (['summary_editor', 'guided_capture', 'clarification_check', 'polishing'] as $modeKey) {
+            if (trim((string)($coachModes[$modeKey] ?? '')) === '') {
+                $warnings[] = ['severity' => 'severe', 'message' => 'coach_mode_definitions missing ' . $modeKey];
+            }
+        }
+        foreach (($blueprint['coaching_sequence'] ?? []) as $step) {
+            if (is_array($step) && !array_key_exists((string)($step['coach_mode'] ?? ''), $coachModes)) {
+                $warnings[] = ['severity' => 'severe', 'message' => 'Undefined coach_mode in coaching_sequence: ' . (string)($step['coach_mode'] ?? '')];
+            }
         }
 
         if (($resourceContext['verified_resources'] ?? []) !== [] && !$this->blueprintHasReferences($blueprint)) {
@@ -1987,16 +2166,45 @@ final class LessonSummaryBlueprintService
             ];
 
             if (!$this->referenceSupportsSection($normalizedRef, $contextText)) {
-                $warnings[] = [
-                    'severity' => 'warning',
-                    'message' => 'Omitted weak official reference from "' . $sectionTitle . '": ' . ($title !== '' ? $title : $code),
-                ];
+                $this->recordGroupedOmittedReferenceWarning($warnings, $title !== '' ? $title : $code);
                 continue;
             }
             $out[] = $normalizedRef;
         }
 
         return array_slice($out, 0, 6);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $warnings
+     */
+    private function recordGroupedOmittedReferenceWarning(array &$warnings, string $example): void
+    {
+        $reason = 'broad_or_weak_section_alignment';
+        foreach ($warnings as $idx => $warning) {
+            $details = is_array($warning['details'] ?? null) ? $warning['details'] : [];
+            if (($details['reason'] ?? '') !== $reason) {
+                continue;
+            }
+            $details['omitted_count'] = ((int)($details['omitted_count'] ?? 0)) + 1;
+            $examples = is_array($details['examples'] ?? null) ? $details['examples'] : [];
+            if ($example !== '' && !in_array($example, $examples, true) && count($examples) < 5) {
+                $examples[] = $example;
+            }
+            $details['examples'] = $examples;
+            $warnings[$idx]['details'] = $details;
+            return;
+        }
+
+        $warnings[] = [
+            'severity' => 'warning',
+            'message' => 'Some broad or weak official references were omitted because they were not specific enough for section-level mapping.',
+            'details' => [
+                'reason' => $reason,
+                'omitted_count' => 1,
+                'examples' => $example !== '' ? [$example] : [],
+            ],
+        ];
     }
 
     /**
@@ -2053,7 +2261,24 @@ final class LessonSummaryBlueprintService
         $broadTitles = ['airplane systems', 'aircraft systems', 'systems'];
         $refTitle = strtolower(trim((string)($ref['reference_title'] ?? '')));
         if (in_array($refTitle, $broadTitles, true)) {
+            if (isset($contextFamilies['engine_propeller'])) {
+                return isset($refFamilies['engine_propeller']);
+            }
+            foreach (['fuselage', 'wings', 'landing_gear', 'flight_controls'] as $introFamily) {
+                if (isset($contextFamilies[$introFamily])) {
+                    return true;
+                }
+            }
+
             return count(array_intersect_key($refFamilies, $contextFamilies)) > 0;
+        }
+
+        if (str_contains($refText, 'main parts') || str_contains($refText, 'components')) {
+            foreach (['fuselage', 'wings', 'landing_gear', 'flight_controls', 'engine_propeller'] as $partFamily) {
+                if (isset($contextFamilies[$partFamily])) {
+                    return true;
+                }
+            }
         }
 
         if ($refFamilies !== []) {
@@ -2126,13 +2351,13 @@ final class LessonSummaryBlueprintService
         return [
             'watch_slides' => trim((string)($value['watch_slides'] ?? '')) !== ''
                 ? trim((string)$value['watch_slides'])
-                : 'Go through slides {slides} first. Then come back and we’ll build {section_title}.',
+                : 'Watch slide(s) {slide_group}. Focus only on the current section: {section_title}. When you are ready, come back to Maya.',
             'write_summary' => trim((string)($value['write_summary'] ?? '')) !== ''
                 ? trim((string)$value['write_summary'])
-                : 'In your SUMMARY EDITOR, under {section_title} -> write one bullet about {concept}.',
+                : 'In your SUMMARY EDITOR, under {section_title} → write your own bullet(s) using the current slide group only.',
             'chat_check' => trim((string)($value['chat_check'] ?? '')) !== ''
                 ? trim((string)$value['chat_check'])
-                : 'In THIS CHAT -> explain why {concept} matters within this lesson.',
+                : 'In THIS CHAT → answer Maya’s question only if she asks for clarification.',
         ];
     }
 
@@ -2195,12 +2420,18 @@ final class LessonSummaryBlueprintService
             if (is_array($warning)) {
                 $msg = trim((string)($warning['message'] ?? json_encode($warning)));
                 $severity = trim((string)($warning['severity'] ?? 'warning'));
+                $details = is_array($warning['details'] ?? null) ? $warning['details'] : [];
             } else {
                 $msg = trim((string)$warning);
                 $severity = 'warning';
+                $details = [];
             }
             if ($msg !== '') {
-                $warnings[] = ['severity' => $severity !== '' ? $severity : 'warning', 'message' => $msg];
+                $warnings[] = [
+                    'severity' => $severity !== '' ? $severity : 'warning',
+                    'message' => $msg,
+                    'details' => $details,
+                ];
             }
         }
 
@@ -2352,6 +2583,7 @@ final class LessonSummaryBlueprintService
             'global_do_not_ask' => [],
             'section_status_policy' => $this->normalizeSectionStatusPolicy([]),
             'maya_current_task_templates' => $this->normalizeMayaCurrentTaskTemplates([]),
+            'coach_mode_definitions' => $this->normalizeCoachModeDefinitions([]),
             'confidence' => 0.0,
             'warnings' => [
                 ['severity' => 'severe', 'message' => $message],
