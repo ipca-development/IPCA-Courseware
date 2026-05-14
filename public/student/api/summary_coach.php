@@ -1347,7 +1347,7 @@ function maya_response_schema(bool $isFinalReview): array
                         'html' => ['type' => 'string'],
                         'requires_student_origin' => ['type' => 'boolean'],
                     ],
-                    'required' => ['id', 'label', 'insert_mode', 'html', 'requires_student_origin'],
+                    'required' => ['id', 'label', 'insert_mode', 'insertion_type', 'html', 'requires_student_origin'],
                 ],
             ],
         ],

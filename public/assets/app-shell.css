@@ -3166,6 +3166,96 @@ a.cmp-card:hover{
   box-shadow:none !important;
 }
 
+.compliance-resource-library-embed .rl-easa-bookmarks-modal button,
+.compliance-resource-library-embed .rl-easa-bookmarks-modal .btn,
+.compliance-resource-library-embed .rl-easa-bookmarks-modal .btn.btn-sm{
+  width:auto !important;
+  height:auto !important;
+  min-height:0 !important;
+  max-height:none !important;
+  display:inline-flex !important;
+  align-items:center !important;
+  justify-content:center !important;
+  padding:4px 10px !important;
+  border-radius:999px !important;
+  font-size:11px !important;
+  line-height:1.2 !important;
+  font-weight:650 !important;
+  letter-spacing:0 !important;
+  box-shadow:none !important;
+  transform:none !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-modal button:hover,
+.compliance-resource-library-embed .rl-easa-bookmarks-modal .btn:hover{
+  box-shadow:none !important;
+  transform:none !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-modal .rl-easa-bookmarks-tab{
+  height:auto !important;
+  min-height:0 !important;
+  padding:10px 16px !important;
+  border-radius:0 !important;
+  border:0 !important;
+  border-bottom:2px solid transparent !important;
+  background:transparent !important;
+  color:#64748b !important;
+  font-size:13px !important;
+  font-weight:600 !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-modal .rl-easa-bookmarks-tab:hover{
+  background:transparent !important;
+  color:#0f172a !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-modal .rl-easa-bookmarks-tab.is-active{
+  color:#0b2a4a !important;
+  border-bottom-color:#0b2a4a !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-cat-list li{
+  align-items:center !important;
+  min-height:0 !important;
+  padding:6px 14px !important;
+  gap:8px !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-cat-list li:hover{
+  background:#e2e8f0 !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-cat-mini-btn{
+  min-width:0 !important;
+  padding:0 4px !important;
+  border:0 !important;
+  background:transparent !important;
+  color:#64748b !important;
+  font-size:11px !important;
+  font-weight:600 !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-cat-mini-btn:hover{
+  background:transparent !important;
+  color:#0f172a !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-cat-add-btn{
+  width:100% !important;
+  justify-content:center !important;
+  border:1px dashed #cbd5e1 !important;
+  background:transparent !important;
+  color:#475569 !important;
+  padding:6px 10px !important;
+}
+
+.compliance-resource-library-embed .rl-easa-bookmarks-row-actions .btn{
+  padding:3px 9px !important;
+  font-size:11px !important;
+  line-height:1.2 !important;
+}
+
 .compliance-resource-library-embed .rl-easa-tree-row{
   gap:4px !important;
   margin:1px 0 !important;
