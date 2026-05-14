@@ -1146,7 +1146,7 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 64px 20px 18px;
+  padding: 14px 20px 18px;
   font-size: 15px;
   line-height: 1.7;
 }
@@ -1304,11 +1304,9 @@
 }
 .maya-score-bar { order: 3; }
 
-.maya-writing-task-overlay {
-  position: absolute;
-  top: 44px;
-  left: 14px;
-  right: 14px;
+.summary-writing-task {
+  margin: 12px 14px 8px 14px;
+  position: relative;
   z-index: 8;
   background: rgba(255,255,255,.96);
   border: 1px solid rgba(30,60,114,.18);
@@ -1317,8 +1315,9 @@
   padding: 8px 11px;
   box-shadow: 0 8px 22px rgba(15,23,42,.10);
   color: #152235;
+  flex: 0 0 auto;
 }
-.maya-writing-task-overlay[data-awaiting-chat="1"] {
+.summary-writing-task[data-awaiting-chat="1"] {
   border-left-color: #f59e0b;
   background: #fffbeb;
 }

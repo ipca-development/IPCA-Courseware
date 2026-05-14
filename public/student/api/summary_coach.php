@@ -697,12 +697,7 @@ function maya_summary_structure_html(array $sections): string
         $label = is_array($section) ? trim((string)($section['title'] ?? '')) : trim((string)$section);
         if ($label === '') continue;
         $html .= '<p><strong><u>' . $n . '. ' . htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</u></strong></p><ul>';
-        $subtopics = is_array($section) && is_array($section['subtopics'] ?? null) ? $section['subtopics'] : ['Item 1', 'Item 2'];
-        $subtopics = array_slice(array_values(array_filter(array_map('strval', $subtopics))), 0, 3);
-        if (!$subtopics) $subtopics = ['Item 1', 'Item 2'];
-        foreach ($subtopics as $subtopic) {
-            $html .= '<li>' . htmlspecialchars($subtopic, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') . '</li>';
-        }
+        $html .= '<li>Item 1</li><li>Item 2</li>';
         $html .= '</ul>';
         $n++;
     }

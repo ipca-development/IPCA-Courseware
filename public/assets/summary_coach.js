@@ -575,6 +575,8 @@
     this.lastInputAt = 0;
     this.idleTimer = null;
     this.pasteWindow = []; // {ts, chars}
+    this.suppressPasteDetectionUntil = 0;
+    this.isProgrammaticInsertion = false;
     this.aborted = false;
     this.startedSession = false;
 
@@ -727,10 +729,10 @@
     if (!pane) return;
     var overlay = $('[data-maya-writing-task]', pane);
     if (!overlay) {
-      overlay = el('div', { cls: 'maya-writing-task-overlay', attrs: { 'data-maya-writing-task': '' } });
+      overlay = el('div', { cls: 'summary-writing-task', attrs: { 'data-maya-writing-task': '' } });
       overlay.appendChild(el('div', { cls: 'maya-writing-task-label', attrs: { 'data-maya-writing-task-label': '' }, text: 'Current writing task' }));
       overlay.appendChild(el('div', { cls: 'maya-writing-task-body', attrs: { 'data-maya-writing-task-body': '' }, text: 'Maya will tell you what to write next.' }));
-      pane.appendChild(overlay);
+      pane.insertBefore(overlay, this.editor);
     }
     this.elWritingTask = overlay;
     this.elWritingTaskBody = $('[data-maya-writing-task-body]', overlay);
@@ -820,6 +822,12 @@
     this.lastTextLen = newLen;
     this.lastInputAt = nowMs();
 
+    if (this._isPasteDetectionSuppressed()) {
+      this.charsSinceLastCheckpoint = 0;
+      this.pasteWindow = [];
+      return;
+    }
+
     if (delta > 0) {
       this.charsSinceLastCheckpoint += delta;
       this._recordPasteWindow(delta);
@@ -835,6 +843,7 @@
   };
 
   Coach.prototype._onEditorPaste = function (e) {
+    if (this._isPasteDetectionSuppressed()) return;
     var dt = e && e.clipboardData;
     var pasted = '';
     if (dt) {
@@ -855,6 +864,7 @@
   };
 
   Coach.prototype._recordPasteWindow = function (chars) {
+    if (this._isPasteDetectionSuppressed()) return;
     var t = nowMs();
     this.pasteWindow.push({ ts: t, chars: chars });
     // Drop entries older than the window.
@@ -870,6 +880,7 @@
   };
 
   Coach.prototype._triggerMajorPaste = function (chars) {
+    if (this._isPasteDetectionSuppressed()) return;
     if (this.flags.major_paste) {
       // Already flagged — don't spam checkpoints.
       this._showLocalHint('That looks like more pasted text. Explain it in your own words before we move on.');
@@ -881,6 +892,11 @@
     this._appendSystemMessage('Large pasted text detected.');
     this._renderState();
     this._sendCheckpoint({ trigger: 'paste' });
+  };
+
+  Coach.prototype._isPasteDetectionSuppressed = function () {
+    if (this.isProgrammaticInsertion) return true;
+    return nowMs() < (this.suppressPasteDetectionUntil || 0);
   };
 
   Coach.prototype._maybeIdleCheckpoint = function () {
@@ -1438,6 +1454,8 @@
     if (!this.editor || !insertion || !insertion.html) return;
     var html = String(insertion.html);
     var inserted = false;
+    this.suppressPasteDetectionUntil = nowMs() + 1500;
+    this.isProgrammaticInsertion = true;
     try {
       var sel = window.getSelection ? window.getSelection() : null;
       if (sel && sel.rangeCount && this.editor.contains(sel.anchorNode)) {
@@ -1454,6 +1472,10 @@
       this.editor.insertAdjacentHTML('beforeend', html);
     }
     this.editor.dispatchEvent(new Event('input', { bubbles: true }));
+    var self = this;
+    setTimeout(function () {
+      self.isProgrammaticInsertion = false;
+    }, 1500);
     if (String(insertion.insertion_type || '') === 'structure') {
       this.coachingState.current_writing_task = 'Go through the first slide, then come back to Maya so you can build the first section in your own words.';
       this.coachingState.awaiting_chat_reply = false;
@@ -1464,7 +1486,6 @@
     } else if (typeof global.scheduleSave === 'function') {
       try { global.scheduleSave(); } catch (e3) {}
     }
-    var self = this;
     this._postJson({
       action: 'mark_inserted',
       session_id: this.sessionId || 0,
@@ -1472,6 +1493,7 @@
       insertion_id: insertion.id,
       insertion_type: insertion.insertion_type || ''
     }).then(function (j) {
+      self.isProgrammaticInsertion = false;
       if (!j || j.ok === false) throw new Error(j && j.error ? j.error : 'mark_inserted failed');
       if (btn) {
         btn.textContent = 'Added';
@@ -1479,6 +1501,7 @@
         btn.classList.add('is-added');
       }
     }).catch(function () {
+      self.isProgrammaticInsertion = false;
       self._showError('Added to the summary, but Maya could not mark the note as inserted.');
     });
   };
