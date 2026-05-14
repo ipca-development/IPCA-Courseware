@@ -621,6 +621,10 @@ function maya_sanitize_summary_insertions($raw, bool $allow): array
         $label = trim((string)($item['label'] ?? ''));
         $html = trim((string)($item['html'] ?? ''));
         $mode = trim((string)($item['insert_mode'] ?? 'append_bullets'));
+        $type = trim((string)($item['insertion_type'] ?? 'mature_concept'));
+        if (!in_array($type, ['structure', 'mature_concept', 'heading', 'bullet', 'reminder'], true)) {
+            $type = 'mature_concept';
+        }
         if ($label === '' || $html === '') continue;
         // Guardrails: insertions must be short, student-origin notes only.
         if (mb_strlen(maya_strip_html_to_text($html)) > 600) continue;
@@ -632,6 +636,7 @@ function maya_sanitize_summary_insertions($raw, bool $allow): array
             'id' => trim((string)($item['id'] ?? '')) ?: maya_generate_insertion_id(),
             'label' => mb_substr($label, 0, 80),
             'insert_mode' => $mode,
+            'insertion_type' => $type,
             'html' => $html,
             'requires_student_origin' => true,
             'inserted' => !empty($item['inserted']),

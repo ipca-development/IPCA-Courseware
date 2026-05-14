@@ -69,8 +69,14 @@ function cw_header(string $title = ''): void
 <link rel="manifest" href="/site.webmanifest">
 	
 
-<link rel="stylesheet" href="/assets/app.css">
-<link rel="stylesheet" href="/assets/app-shell.css">
+<?php
+$appCssPath = __DIR__ . '/../public/assets/app.css';
+$appShellCssPath = __DIR__ . '/../public/assets/app-shell.css';
+$appCssVersion = is_file($appCssPath) ? (string)filemtime($appCssPath) : '1';
+$appShellCssVersion = is_file($appShellCssPath) ? (string)filemtime($appShellCssPath) : '1';
+?>
+<link rel="stylesheet" href="/assets/app.css?v=<?= h($appCssVersion) ?>">
+<link rel="stylesheet" href="/assets/app-shell.css?v=<?= h($appShellCssVersion) ?>">
 </head>
 <body class="app-shell-body">
   <div class="app-shell" id="appShell">
