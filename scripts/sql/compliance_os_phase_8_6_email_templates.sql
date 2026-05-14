@@ -38,6 +38,15 @@ CREATE TABLE IF NOT EXISTS ipca_compliance_email_template_versions (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Compliance Comms Center — immutable email template versions.';
 
+CREATE TABLE IF NOT EXISTS ipca_compliance_settings (
+  setting_key        VARCHAR(120) NOT NULL PRIMARY KEY,
+  setting_value_json JSON NOT NULL,
+  updated_by         INT UNSIGNED NULL,
+  created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Compliance OS — org-level configurable settings.';
+
 -- =============================================================================
 -- END OF FILE
 -- =============================================================================

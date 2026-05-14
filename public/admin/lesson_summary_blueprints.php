@@ -708,9 +708,12 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
       '</div>' +
       versionMeta(selected) +
       renderWarnings(selected) +
+      '<h3>Coaching sequence</h3>' + renderCoachingSequence(bp.coaching_sequence || []) +
       '<h3>Summary structure</h3>' + renderSections(bp.summary_structure || []) +
       '<h3>Slide coverage map</h3>' + renderSlides(bp.slide_coverage_map || []) +
       '<h3>Common misconceptions</h3>' + renderList(bp.common_misconceptions || []) +
+      '<h3>Student personalization allowed</h3>' + renderList(bp.student_personalization_allowed || []) +
+      '<h3>Global do-not-ask boundaries</h3>' + renderList(bp.global_do_not_ask || []) +
       '<h3>Global not-required boundaries</h3>' + renderList(bp.not_required_global || []) +
       '<div id="lsbCompareWrap"></div>' +
       '<div class="lsb-json-wrap lsb-hidden" id="lsbJsonWrap"><h3>Blueprint JSON</h3><textarea readonly>' + esc(JSON.stringify(bp, null, 2)) + '</textarea></div>';
@@ -743,16 +746,41 @@ window.LSB_BOOT = <?= json_encode($embed, JSON_UNESCAPED_UNICODE | JSON_UNESCAPE
   function renderSections(sections) {
     if (!sections.length) return '<p class="muted">No structure in this version.</p>';
     return sections.map(function (s) {
+      const scaffold = s.student_summary_scaffold || {};
+      const behavior = s.section_completion_behavior || {};
       return '<div class="lsb-section-card">' +
         '<h4>' + esc(s.order || '') + '. ' + esc(s.title || '') + ' <code>' + esc(s.section_id || '') + '</code></h4>' +
+        '<p><strong>Requires student section:</strong> ' + yesNo(s.requires_student_section) + ' · <strong>Intro/context:</strong> ' + yesNo(s.is_intro_context) + '</p>' +
         '<p><strong>Covered slides:</strong> ' + esc((s.covered_by_slides || []).join(', ') || '-') + '</p>' +
+        '<p><strong>Student scaffold:</strong> heading "' + esc(scaffold.heading || '') + '", placeholders ' + esc((scaffold.placeholder_bullets || []).join(', ') || 'none') + '</p>' +
         blockList('Required concepts', s.required_concepts || []) +
         blockList('Operational focus', s.operational_focus || []) +
+        blockList('Allowed coaching focus', s.allowed_coaching_focus || []) +
+        blockList('Minimum completion checks', s.minimum_completion_check || []) +
         blockList('Not required', s.not_required || []) +
+        blockList('Do not ask', s.do_not_ask || []) +
         '<p><strong>Completion:</strong> why reasoning ' + yesNo(s.completion_requirements && s.completion_requirements.requires_why_reasoning) +
           ', pilot action ' + yesNo(s.completion_requirements && s.completion_requirements.requires_pilot_action) +
           ', minimum bullets ' + esc(s.completion_requirements ? s.completion_requirements.minimum_student_bullets : 1) + '</p>' +
+        '<p><strong>When complete:</strong> ' + esc(behavior.when_complete || '-') + '</p>' +
+        blockList('Do not reopen unless', behavior.do_not_reopen_unless || []) +
         renderReferences(s.official_references || []) +
+      '</div>';
+    }).join('');
+  }
+
+  function renderCoachingSequence(sequence) {
+    if (!Array.isArray(sequence) || !sequence.length) return '<p class="muted">No coaching sequence in this version.</p>';
+    return sequence.map(function (step) {
+      const guidance = step.slide_group_guidance || {};
+      return '<div class="lsb-section-card">' +
+        '<h4>Step ' + esc(step.step || '') + ' · <code>' + esc(step.section_id || '') + '</code></h4>' +
+        '<p><strong>Slides:</strong> ' + esc((step.slide_group || []).join(', ') || '-') + '</p>' +
+        '<p><strong>Instruction:</strong> ' + esc(step.instruction_to_student || '') + '</p>' +
+        '<p><strong>Coach mode:</strong> ' + esc(step.coach_mode || '') + '</p>' +
+        '<p><strong>Watch instruction:</strong> ' + esc(guidance.watch_instruction || '') + '</p>' +
+        '<p><strong>Why grouped:</strong> ' + esc(guidance.why_grouped || '') + '</p>' +
+        '<p><strong>Ready to write when:</strong> ' + esc(guidance.ready_to_write_when || '') + '</p>' +
       '</div>';
     }).join('');
   }

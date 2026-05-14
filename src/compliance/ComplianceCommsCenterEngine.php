@@ -193,6 +193,22 @@ final class ComplianceCommsCenterEngine
     }
 
     /**
+     * @param array<string,string> $variables
+     */
+    public static function renderTemplateString(string $template, array $variables): string
+    {
+        $replacements = array();
+        foreach ($variables as $key => $value) {
+            $cleanKey = strtoupper(trim($key, " \t\n\r\0\x0B{}"));
+            if ($cleanKey === '') {
+                continue;
+            }
+            $replacements['{{' . $cleanKey . '}}'] = $value;
+        }
+        return strtr($template, $replacements);
+    }
+
+    /**
      * Ingest a Postmark Inbound payload (already JSON-decoded into an assoc
      * array). Returns a small diagnostic for the webhook to log/return.
      *
