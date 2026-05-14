@@ -248,6 +248,22 @@ $emailTemplateText = is_array($storedEmailTemplate) && !empty($storedEmailTempla
     ? (string)$storedEmailTemplate['text_template'] : $defaultEmailTemplateText;
 $emailTemplateAllowedJson = is_array($storedEmailTemplate) && !empty($storedEmailTemplate['allowed_variables_json'])
     ? (string)$storedEmailTemplate['allowed_variables_json'] : $defaultEmailTemplateAllowedJson;
+$emailTemplatePreviewHtml = ComplianceCommsCenterEngine::renderTemplateString($emailTemplateHtml, array(
+    'EMAIL_TITLE' => 'Compliance Communication',
+    'RECIPIENT_NAME' => 'Recipient',
+    'EMAIL_BODY_HTML' => 'Your message content goes here. Keep the wording clear, authority-ready, and concise.',
+    'COMPLIANCE_MONITORING_MANAGER_NAME' => htmlspecialchars((string)$complianceManager['name'], ENT_QUOTES, 'UTF-8'),
+    'COMPLIANCE_MONITORING_MANAGER_TITLE' => htmlspecialchars((string)$complianceManager['title'], ENT_QUOTES, 'UTF-8'),
+    'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML' => nl2br(htmlspecialchars((string)$complianceManager['signature'], ENT_QUOTES, 'UTF-8')),
+    'COMPLIANCE_THREAD_CODE' => 'CMT-2026-00042',
+    'COMPLIANCE_OBJECT_TYPE_1' => 'Finding',
+    'COMPLIANCE_OBJECT_CODE_1' => 'NCR-2026-0042',
+    'COMPLIANCE_OBJECT_URL_1' => '#',
+    'COMPLIANCE_OBJECT_TYPE_2' => 'Audit',
+    'COMPLIANCE_OBJECT_CODE_2' => 'AUD-2026-001',
+    'COMPLIANCE_OBJECT_URL_2' => '#',
+    'COMPLIANCE_OBJECT_SUMMARY_TEXT' => 'Finding NCR-2026-0042; Audit AUD-2026-001',
+));
 
 // Full-text search across email bodies — only when the user typed something.
 $searchResults = array();
@@ -636,35 +652,7 @@ compliance_page_open(array(
         <li><code>{{EMAIL_BODY_HTML}}</code> Sanitized outbound body content.</li>
       </ul>
       <div class="cmpcc-template-preview" aria-label="Email template preview">
-        <div class="cmpcc-template-preview-head">
-          <div class="cmpcc-template-preview-headrow">
-            <div>
-              <div class="cmpcc-template-preview-kicker">IPCA.training | Compliance</div>
-              <div class="cmpcc-template-preview-title">Compliance Communication</div>
-              <div style="margin-top:8px;font-size:12px;color:rgba(255,255,255,.72);line-height:1.5;">
-                Thread reference: <strong style="color:#fff;">CMT-2026-00042</strong>
-              </div>
-            </div>
-            <img class="cmpcc-template-preview-logo" src="/assets/logo/ipca_logo_white.png" alt="IPCA">
-          </div>
-          <div class="cmpcc-template-preview-pills">
-            <span class="cmpcc-template-preview-pill">Finding · NCR-2026-0042</span>
-            <span class="cmpcc-template-preview-pill">Audit · AUD-2026-001</span>
-          </div>
-        </div>
-        <div class="cmpcc-template-preview-body">
-          <p style="margin:0 0 12px;"><strong>Dear Recipient –</strong></p>
-          <p style="margin:0 0 12px;">Your message content goes here. Keep the wording clear, authority-ready, and concise.</p>
-          <p style="margin:18px 0 0;">Sincerely,<br><br><strong><?= h((string)$complianceManager['name']) ?></strong><br><em><?= h((string)$complianceManager['title']) ?></em><br><?= nl2br(h((string)$complianceManager['signature'])) ?></p>
-        </div>
-        <div class="cmpcc-template-preview-foot">
-          <strong style="color:#152235;">IMPORTANT NOTES:</strong><br>
-          Please keep the information in this email and any attachments strictly confidential. To preserve the compliance audit trail, please reply directly to this email using your normal Reply button and do not change the subject line, remove the thread reference, or start a new email chain for this matter.
-          <br><br>
-          <strong style="color:#152235;">IPCA.training</strong><br>
-          Compliance Operating System<br>
-          This email and any attachments may contain compliance records. Please retain according to the applicable authority and company recordkeeping requirements.
-        </div>
+        <?= $emailTemplatePreviewHtml ?>
       </div>
       <label class="cmp-field" style="margin-top:14px;">
         <span>Current HTML template source</span>
