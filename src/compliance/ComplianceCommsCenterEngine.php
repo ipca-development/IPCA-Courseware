@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ComplianceAutomationDispatch.php';
 require_once __DIR__ . '/CompliancePostmarkConfig.php';
+require_once __DIR__ . '/ComplianceSettings.php';
 
 /**
  * Phase 8 — Compliance Communications Center engine.
@@ -1273,6 +1274,25 @@ final class ComplianceCommsCenterEngine
         }
         if ($htmlBody !== null) {
             $htmlBody = (string)preg_replace('#<script\b[^>]*>.*?</script>#is', '', $htmlBody);
+        }
+
+        $manager = ComplianceSettings::complianceManager($pdo);
+        $managerTextVars = array(
+            'COMPLIANCE_MONITORING_MANAGER_NAME' => (string)$manager['name'],
+            'COMPLIANCE_MONITORING_MANAGER_TITLE' => (string)$manager['title'],
+            'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_TEXT' => (string)$manager['signature'],
+        );
+        $managerHtmlVars = array(
+            'COMPLIANCE_MONITORING_MANAGER_NAME' => htmlspecialchars((string)$manager['name'], ENT_QUOTES, 'UTF-8'),
+            'COMPLIANCE_MONITORING_MANAGER_TITLE' => htmlspecialchars((string)$manager['title'], ENT_QUOTES, 'UTF-8'),
+            'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML' => nl2br(htmlspecialchars((string)$manager['signature'], ENT_QUOTES, 'UTF-8')),
+        );
+        $subject = self::renderTemplateString($subject, $managerTextVars);
+        if ($textBody !== null) {
+            $textBody = self::renderTemplateString($textBody, $managerTextVars);
+        }
+        if ($htmlBody !== null) {
+            $htmlBody = self::renderTemplateString($htmlBody, $managerHtmlVars);
         }
 
         $createdBy = isset($opts['created_by']) && (int)$opts['created_by'] > 0 ? (int)$opts['created_by'] : null;

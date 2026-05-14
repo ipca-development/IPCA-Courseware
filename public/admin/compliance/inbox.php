@@ -50,7 +50,7 @@ function cmpcc_default_email_template_subject(): string
 
 function cmpcc_default_email_template_text(): string
 {
-    return "Dear {{RECIPIENT_NAME}},\n\n{{EMAIL_BODY_TEXT}}\n\nSincerely,\n{{COMPLIANCE_MONITORING_MANAGER_NAME}}\nCompliance Monitoring Manager\nEuroPilot Center B/ATO-17\n\nIMPORTANT NOTES:\nPlease keep the information in this email and any attachments strictly confidential. To preserve the compliance audit trail, please reply directly to this email using your normal Reply button and do not change the subject line, remove the thread reference, or start a new email chain for this matter.\n\nCompliance object references: {{COMPLIANCE_OBJECT_SUMMARY_TEXT}}\nMessage tracking reference: {{COMPLIANCE_THREAD_CODE}}";
+    return "Dear {{RECIPIENT_NAME}},\n\n{{EMAIL_BODY_TEXT}}\n\nSincerely,\n{{COMPLIANCE_MONITORING_MANAGER_NAME}}\n{{COMPLIANCE_MONITORING_MANAGER_SIGNATURE_TEXT}}\n\nIMPORTANT NOTES:\nPlease keep the information in this email and any attachments strictly confidential. To preserve the compliance audit trail, please reply directly to this email using your normal Reply button and do not change the subject line, remove the thread reference, or start a new email chain for this matter.\n\nCompliance object references: {{COMPLIANCE_OBJECT_SUMMARY_TEXT}}\nMessage tracking reference: {{COMPLIANCE_THREAD_CODE}}";
 }
 
 function cmpcc_default_email_template_allowed_variables_json(): string
@@ -61,6 +61,9 @@ function cmpcc_default_email_template_allowed_variables_json(): string
         'EMAIL_BODY_HTML',
         'EMAIL_BODY_TEXT',
         'COMPLIANCE_MONITORING_MANAGER_NAME',
+        'COMPLIANCE_MONITORING_MANAGER_TITLE',
+        'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML',
+        'COMPLIANCE_MONITORING_MANAGER_SIGNATURE_TEXT',
         'COMPLIANCE_THREAD_CODE',
         'COMPLIANCE_OBJECT_TYPE_N',
         'COMPLIANCE_OBJECT_CODE_N',
@@ -126,8 +129,8 @@ function cmpcc_default_email_template_html(): string
               <p style="margin:24px 0 0;">
                 Sincerely,<br><br>
                 <strong>{{COMPLIANCE_MONITORING_MANAGER_NAME}}</strong><br>
-                <em>Compliance Monitoring Manager</em><br>
-                EuroPilot Center B/ATO-17
+                <em>{{COMPLIANCE_MONITORING_MANAGER_TITLE}}</em><br>
+                {{COMPLIANCE_MONITORING_MANAGER_SIGNATURE_HTML}}
               </p>
             </td>
           </tr>
@@ -220,6 +223,7 @@ $stats = ComplianceCommsCenterEngine::threadStats($pdo);
 $latest = ComplianceCommsCenterEngine::latestInbound($pdo);
 $summary = CompliancePostmarkConfig::publicSummary();
 $flash = cmpcc_flash_take();
+$complianceManager = ComplianceSettings::complianceManager($pdo);
 
 $defaultEmailTemplateSubject = cmpcc_default_email_template_subject();
 $defaultEmailTemplateHtml = cmpcc_default_email_template_html();
@@ -651,7 +655,7 @@ compliance_page_open(array(
         <div class="cmpcc-template-preview-body">
           <p style="margin:0 0 12px;"><strong>Dear Recipient –</strong></p>
           <p style="margin:0 0 12px;">Your message content goes here. Keep the wording clear, authority-ready, and concise.</p>
-          <p style="margin:18px 0 0;">Sincerely,<br><br><strong>Compliance Monitoring Manager</strong><br><em>Compliance Monitoring Manager</em><br>EuroPilot Center B/ATO-17</p>
+          <p style="margin:18px 0 0;">Sincerely,<br><br><strong><?= h((string)$complianceManager['name']) ?></strong><br><em><?= h((string)$complianceManager['title']) ?></em><br><?= nl2br(h((string)$complianceManager['signature'])) ?></p>
         </div>
         <div class="cmpcc-template-preview-foot">
           <strong style="color:#152235;">IMPORTANT NOTES:</strong><br>
