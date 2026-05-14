@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceSettings.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -49,6 +50,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare('UPDATE users SET is_compliance_admin = ? WHERE id = ? AND role = \'admin\'')
                 ->execute(array($flag, $targetId));
             cstgs_flash('success', $flag === 1 ? 'Compliance access granted.' : 'Compliance access revoked.');
+        } elseif ($action === 'save_compliance_manager') {
+            $managerUserId = (int)($_POST['manager_user_id'] ?? 0);
+            $managerName = trim((string)($_POST['manager_name'] ?? ''));
+            $managerTitle = trim((string)($_POST['manager_title'] ?? 'Compliance Monitoring Manager'));
+            $managerSignature = trim((string)($_POST['manager_signature'] ?? ''));
+            ComplianceSettings::saveJson($pdo, ComplianceSettings::KEY_COMPLIANCE_MANAGER, array(
+                'user_id' => $managerUserId > 0 ? $managerUserId : 0,
+                'name' => $managerName,
+                'title' => $managerTitle,
+                'signature' => $managerSignature,
+            ), $uid > 0 ? $uid : null);
+            cstgs_flash('success', 'Compliance Monitoring Manager settings saved.');
         }
     } catch (Throwable $e) {
         cstgs_flash('error', $e->getMessage());
@@ -57,6 +70,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $flash = cstgs_flash_take();
+$settingsTablePresent = ComplianceSettings::tablePresent($pdo);
+$complianceManager = ComplianceSettings::complianceManager($pdo);
 
 // Load admin users (limit defensive).
 $admins = array();
@@ -67,6 +82,19 @@ try {
     $admins = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) ?: array();
 } catch (Throwable) {
     $admins = array();
+}
+
+$managerUsers = array();
+try {
+    $managerUsers = $pdo->query(
+        "SELECT id, name, email, role
+           FROM users
+          WHERE role IN ('admin','supervisor','instructor','chief_instructor')
+          ORDER BY COALESCE(NULLIF(name,''), email) ASC
+          LIMIT 1000"
+    )->fetchAll(PDO::FETCH_ASSOC) ?: array();
+} catch (Throwable) {
+    $managerUsers = array();
 }
 
 // Compliance row counts for "system health" panel.
@@ -193,6 +221,48 @@ compliance_page_open(array(
         </tbody>
       </table>
       </div>
+    <?php endif; ?>
+  </section>
+
+  <section class="cmp-card">
+    <h2 style="margin:0 0 8px;">Compliance Monitoring Manager</h2>
+    <p style="margin:0 0 14px;color:var(--text-muted);font-size:14px;">
+      This explicit setting is used to render <code>{{COMPLIANCE_MONITORING_MANAGER_NAME}}</code> and related signature fields in outbound compliance email templates.
+    </p>
+    <?php if (!$settingsTablePresent): ?>
+      <p class="cmp-flash is-warn" style="margin:0;">
+        Compliance settings storage is not active yet. Apply <code>scripts/sql/compliance_os_phase_8_6_email_templates.sql</code>.
+      </p>
+    <?php else: ?>
+      <form method="post">
+        <input type="hidden" name="action" value="save_compliance_manager">
+        <div class="cmp-form-grid" style="margin-bottom:14px;">
+          <label class="cmp-field">
+            <span>Selected user</span>
+            <select name="manager_user_id">
+              <option value="0">No user selected</option>
+              <?php foreach ($managerUsers as $mu): ?>
+                <option value="<?= (int)$mu['id'] ?>" <?= (int)$complianceManager['user_id'] === (int)$mu['id'] ? 'selected' : '' ?>>
+                  <?= h(trim((string)($mu['name'] ?? '')) !== '' ? (string)$mu['name'] : (string)$mu['email']) ?> · <?= h((string)$mu['role']) ?>
+                </option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+          <label class="cmp-field">
+            <span>Display name override</span>
+            <input name="manager_name" value="<?= h((string)$complianceManager['name']) ?>" placeholder="Defaults to selected user's name">
+          </label>
+          <label class="cmp-field">
+            <span>Title</span>
+            <input name="manager_title" value="<?= h((string)$complianceManager['title']) ?>">
+          </label>
+          <label class="cmp-field compliance-field--full">
+            <span>Signature block</span>
+            <textarea name="manager_signature" rows="3"><?= h((string)$complianceManager['signature']) ?></textarea>
+          </label>
+        </div>
+        <button type="submit">Save manager settings</button>
+      </form>
     <?php endif; ?>
   </section>
 
