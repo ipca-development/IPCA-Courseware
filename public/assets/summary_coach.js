@@ -241,7 +241,7 @@
 
       var scoreCards = el('div', { cls: 'maya-score-cards' });
       Object.keys(SCORE_LABELS).forEach(function (key) {
-        var card = el('div', { cls: 'maya-score-card', attrs: { 'data-maya-stat': key } });
+        var card = el('div', { cls: 'maya-score-card maya-progress-line', attrs: { 'data-maya-stat': key } });
         card.appendChild(el('div', { cls: 'maya-score-label', text: SCORE_LABELS[key] }));
         var cardBar = el('div', { cls: 'maya-score-bar' });
         cardBar.appendChild(el('div', { cls: 'maya-score-fill' }));
@@ -553,6 +553,13 @@
     this.scores = config.initialScores || { coverage: 0, accuracy: 0, own_wording: 0, correlation: 0, instructor_confidence: 0 };
     this.flags = { major_paste: false, needs_deeper_question: false };
     this.readiness = { ready_for_final_review: false, missing: [], minimum_interactions_met: false, unresolved_required_question: true };
+    this.coachingState = {
+      current_writing_task: '',
+      awaiting_chat_reply: false,
+      current_section: '',
+      current_slide_id: config.currentSlideId || 0,
+      current_slide_number: config.currentSlideNumber || 0
+    };
     this.summaryState = {
       reviewStatus: config.reviewStatus || '',
       locked: !!config.locked,
@@ -592,6 +599,8 @@
     this.elNoteBody = $('[data-maya-note-body]', this.root) ||
                      (this.elNote ? this.elNote.querySelector('div:last-child') : null);
     this.elError = $('[data-maya-error]', this.root);
+    this.elWritingTask = $('[data-maya-writing-task]');
+    this.elWritingTaskBody = this.elWritingTask ? $('[data-maya-writing-task-body]', this.elWritingTask) : null;
     this.scoreRows = {};
     var self = this;
     Object.keys(SCORE_LABELS).forEach(function (k) {
@@ -695,6 +704,7 @@
   Coach.prototype._bindEditor = function (ed) {
     if (this.editor === ed) return;
     this.editor = ed;
+    this._ensureWritingTaskOverlay();
     var self = this;
 
     var snapshot = plainTextFromEditor(ed);
@@ -706,6 +716,24 @@
     ed.addEventListener('paste', function (e) {
       self._onEditorPaste(e);
     });
+    this._renderWritingTask();
+  };
+
+  Coach.prototype._ensureWritingTaskOverlay = function () {
+    if (this.elWritingTask && this.elWritingTaskBody) return;
+    if (!this.editor) return;
+    var pane = this.editor.closest ? this.editor.closest('.summary-editor-pane') : null;
+    if (!pane) pane = this.editor.parentNode;
+    if (!pane) return;
+    var overlay = $('[data-maya-writing-task]', pane);
+    if (!overlay) {
+      overlay = el('div', { cls: 'maya-writing-task-overlay', attrs: { 'data-maya-writing-task': '' } });
+      overlay.appendChild(el('div', { cls: 'maya-writing-task-label', attrs: { 'data-maya-writing-task-label': '' }, text: 'Current writing task' }));
+      overlay.appendChild(el('div', { cls: 'maya-writing-task-body', attrs: { 'data-maya-writing-task-body': '' }, text: 'Maya will tell you what to write next.' }));
+      pane.appendChild(overlay);
+    }
+    this.elWritingTask = overlay;
+    this.elWritingTaskBody = $('[data-maya-writing-task-body]', overlay);
   };
 
   Coach.prototype.refreshEditor = function () {
@@ -990,6 +1018,8 @@
       cohort_id: this.config.cohortId || 0,
       summary_id: this.config.summaryId || 0,
       context: this.config.context || 'player',
+      current_slide_id: this.config.currentSlideId || this.coachingState.current_slide_id || 0,
+      current_slide_number: this.config.currentSlideNumber || this.coachingState.current_slide_number || 0,
       coach_stage: this.stage,
       current_question: this.lastQuestion || '',
       summary_excerpt: this._buildSummaryExcerpt(),
@@ -1187,6 +1217,21 @@
         needs_deeper_question: !!j.flags.needs_deeper_question
       };
     }
+    if (j.coaching_state && typeof j.coaching_state === 'object') {
+      this.coachingState = {
+        current_writing_task: String(j.coaching_state.current_writing_task || ''),
+        awaiting_chat_reply: !!j.coaching_state.awaiting_chat_reply,
+        current_section: String(j.coaching_state.current_section || ''),
+        current_slide_id: parseInt(j.coaching_state.current_slide_id, 10) || 0,
+        current_slide_number: parseInt(j.coaching_state.current_slide_number, 10) || 0
+      };
+    } else if (j.flags && j.flags.section_progress && typeof j.flags.section_progress === 'object') {
+      this.coachingState.current_writing_task = String(j.flags.section_progress.current_writing_task || this.coachingState.current_writing_task || '');
+      this.coachingState.awaiting_chat_reply = !!j.flags.section_progress.awaiting_chat_reply;
+      this.coachingState.current_section = String(j.flags.section_progress.current_section || this.coachingState.current_section || '');
+      this.coachingState.current_slide_id = parseInt(j.flags.section_progress.current_slide_id, 10) || this.coachingState.current_slide_id || 0;
+      this.coachingState.current_slide_number = parseInt(j.flags.section_progress.current_slide_number, 10) || this.coachingState.current_slide_number || 0;
+    }
     if (j.readiness && typeof j.readiness === 'object') {
       this.readiness = {
         ready_for_final_review: !!j.readiness.ready_for_final_review,
@@ -1356,7 +1401,16 @@
       var type = String(ins.insertion_type || 'mature_concept');
       if (type === 'structure') return 'Add structure to summary';
       if (type === 'heading') return 'Add heading';
+      if (type === 'highlighted_note') return 'Add highlighted note';
+      if (type === 'remark') return 'Add remark';
+      if (type === 'warning') return 'Add warning';
+      if (type === 'caution') return 'Add caution';
+      if (type === 'attention') return 'Add attention note';
+      if (type === 'mnemonic') return 'Add mnemonic';
+      if (type === 'quote') return 'Add quote';
+      if (type === 'rule_of_thumb') return 'Add rule of thumb';
       if (type === 'reminder') return 'Add reminder note';
+      if (type === 'bullet') return 'Add bullet';
       if (type === 'mature_concept') return 'Add completed idea to summary';
       return ins.label ? String(ins.label) : 'Add note';
     }
@@ -1400,6 +1454,11 @@
       this.editor.insertAdjacentHTML('beforeend', html);
     }
     this.editor.dispatchEvent(new Event('input', { bubbles: true }));
+    if (String(insertion.insertion_type || '') === 'structure') {
+      this.coachingState.current_writing_task = 'Go through the first slide, then come back to Maya so you can build the first section in your own words.';
+      this.coachingState.awaiting_chat_reply = false;
+      this._renderWritingTask();
+    }
     if (typeof this.config.onInsertSave === 'function') {
       try { this.config.onInsertSave(); } catch (e2) {}
     } else if (typeof global.scheduleSave === 'function') {
@@ -1410,7 +1469,8 @@
       action: 'mark_inserted',
       session_id: this.sessionId || 0,
       message_id: messageId || 0,
-      insertion_id: insertion.id
+      insertion_id: insertion.id,
+      insertion_type: insertion.insertion_type || ''
     }).then(function (j) {
       if (!j || j.ok === false) throw new Error(j && j.error ? j.error : 'mark_inserted failed');
       if (btn) {
@@ -1539,6 +1599,20 @@
     this.elNote.setAttribute('data-visible', '1');
   };
 
+  Coach.prototype._renderWritingTask = function () {
+    this._ensureWritingTaskOverlay();
+    if (!this.elWritingTask || !this.elWritingTaskBody) return;
+    var task = String(this.coachingState.current_writing_task || '').trim();
+    var awaiting = !!this.coachingState.awaiting_chat_reply;
+    if (!task) {
+      task = awaiting ? 'Answer Maya' : 'Maya will tell you what to write next.';
+    }
+    var label = this.elWritingTask.querySelector('[data-maya-writing-task-label]');
+    if (label) label.textContent = awaiting ? 'Answer Maya' : 'Current writing task';
+    this.elWritingTaskBody.textContent = awaiting ? 'Answer Maya in the chat box, then send it back to Maya.' : task;
+    this.elWritingTask.setAttribute('data-awaiting-chat', awaiting ? '1' : '0');
+  };
+
   Coach.prototype._renderState = function () {
     // Stage label
     if (this.elStage) {
@@ -1548,8 +1622,9 @@
     // Question
     if (this.elQuestion) {
       var q = String(this.lastQuestion || '').trim();
-      this.elQuestion.textContent = q !== '' ? q : 'What\'s the most important idea so far, and why does it matter in flight?';
+      this.elQuestion.textContent = q !== '' ? q : 'Follow Maya’s current writing task in the summary editor.';
     }
+    this._renderWritingTask();
     // Scores (classic vertical rows)
     var self = this;
     Object.keys(this.scoreRows).forEach(function (key) {
@@ -1559,7 +1634,7 @@
       var fill = row.querySelector('.maya-progress-fill');
       var val = row.querySelector('.maya-progress-value');
       if (fill) fill.style.width = score + '%';
-      if (val) val.textContent = String(score);
+      if (val) val.textContent = String(score) + '%';
       var pass = score >= (SCORE_PASS_THRESHOLDS[key] || 100);
       var low = score < (SCORE_PASS_THRESHOLDS[key] || 100) * 0.6;
       if (pass) {
@@ -1582,7 +1657,7 @@
         var fill = stat.querySelector('.maya-stat-fill, .maya-score-fill');
         var val = stat.querySelector('.maya-stat-value, .maya-score-value');
         if (fill) fill.style.width = score + '%';
-        if (val) val.textContent = String(score);
+        if (val) val.textContent = String(score) + '%';
         var pass = score >= (SCORE_PASS_THRESHOLDS[key] || 100);
         var low = score < (SCORE_PASS_THRESHOLDS[key] || 100) * 0.6;
         if (pass) {

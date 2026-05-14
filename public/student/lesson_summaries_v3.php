@@ -1000,10 +1000,10 @@ body.nb-modal-open{
   top:50%;
   bottom:auto;
   transform:translate(-50%, -50%);
-  width:min(1240px, calc(100vw - 32px));
-  height:min(860px, calc(100vh - 32px));
-  max-width:calc(100vw - 32px);
-  max-height:calc(100vh - 32px);
+  width:min(1050px, calc(100vw - 64px));
+  height:min(730px, calc(100vh - 64px));
+  max-width:calc(100vw - 64px);
+  max-height:calc(100vh - 64px);
   padding:0;
   background:#eaf3ff;
   border:1px solid #cfe0f5;

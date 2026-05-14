@@ -385,10 +385,10 @@ $isAdminViewer = ($role === 'admin');
       top:50%;
       bottom:auto;
       transform:translate(-50%, -50%);
-      width:min(1240px, calc(100vw - 32px));
-      height:min(860px, calc(100vh - 32px));
-      max-width:calc(100vw - 32px);
-      max-height:calc(100vh - 32px);
+      width:min(1050px, calc(100vw - 64px));
+      height:min(730px, calc(100vh - 64px));
+      max-width:calc(100vw - 64px);
+      max-height:calc(100vh - 64px);
       background:linear-gradient(180deg, #e9f2ff 0%, #f5f9ff 100%);
       border:1px solid #cfe0f5;
       border-radius:18px;
@@ -574,10 +574,10 @@ $isAdminViewer = ($role === 'admin');
 	  top:50%;
 	  bottom:auto;
 	  transform:translate(-50%, -50%);
-	  width:min(1240px, calc(100vw - 32px));
-	  height:min(860px, calc(100vh - 32px));
-	  max-width:calc(100vw - 32px);
-	  max-height:calc(100vh - 32px);
+	  width:min(1050px, calc(100vw - 64px));
+	  height:min(730px, calc(100vh - 64px));
+	  max-width:calc(100vw - 64px);
+	  max-height:calc(100vh - 64px);
 	}
 
 	.drawer.expanded .rte{
@@ -855,6 +855,7 @@ let isLocked = false;
 let currentReviewStatus = 'pending';	
 	
 const SLIDE_ID = <?= (int)$slideId ?>;
+const PAGE_NUM = <?= (int)$pageNum ?>;
 const PREV_ID = <?= (int)$prevId ?>;
 const NEXT_ID = <?= (int)$nextId ?>;
 
@@ -1983,6 +1984,8 @@ if (e.key === 'ArrowRight') {
     lessonId: LESSON_ID,
     cohortId: COHORT_ID,
     summaryId: 0,
+    currentSlideId: SLIDE_ID,
+    currentSlideNumber: PAGE_NUM,
     editorSelector: '#rte',
     mode: 'expanded',
     host: 'drawer',
