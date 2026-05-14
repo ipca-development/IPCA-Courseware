@@ -65,9 +65,15 @@ return [
             ],
             [
                 'key' => 'bulk_enrich',
-                'label' => 'Bulk Enrich',
+                'label' => 'Slide Bulk Enrich',
                 'icon' => 'enrich',
                 'href' => '/admin/bulk_enrich.php',
+            ],
+            [
+                'key' => 'lesson_summary_blueprints',
+                'label' => 'Lesson Bulk Enrich',
+                'icon' => 'enrich',
+                'href' => '/admin/lesson_summary_blueprints.php',
             ],
         ],
     ],
