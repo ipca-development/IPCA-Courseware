@@ -967,11 +967,22 @@
   };
 
   Coach.prototype._showLocalHint = function (text) {
+    if (this.layout === 'cockpit') {
+      this.coachingState.current_writing_task = String(text || '');
+      this.coachingState.awaiting_chat_reply = false;
+      this._renderWritingTask();
+      if (this.elLocalHint) this.elLocalHint.removeAttribute('data-visible');
+      return;
+    }
     if (!this.elLocalHint) return;
     this.elLocalHint.textContent = text;
     this.elLocalHint.setAttribute('data-visible', '1');
   };
   Coach.prototype._hideLocalHint = function () {
+    if (this.layout === 'cockpit') {
+      if (this.elLocalHint) this.elLocalHint.removeAttribute('data-visible');
+      return;
+    }
     if (!this.elLocalHint) return;
     this.elLocalHint.removeAttribute('data-visible');
   };
@@ -1144,6 +1155,7 @@
     var action = (opts.trigger === 'student_reply') ? 'student_reply' : 'micro_checkpoint';
     var extra = {};
     if (opts.studentReply !== undefined) extra.student_reply = opts.studentReply;
+    extra.client_trigger = opts.trigger || action;
 
     var self = this;
     this._postJson(this._buildPayload(action, extra)).then(function (j) {

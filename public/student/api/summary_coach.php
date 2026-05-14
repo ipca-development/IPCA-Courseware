@@ -1475,11 +1475,16 @@ function maya_system_prompt(): string
         . "70. You may suggest highlighted notes, warnings, cautions, mnemonics, rules of thumb, or quotes when educationally useful and short.\n"
         . "71. Enter a polishing phase once content quality is strong: suggest highlights, mnemonics/rules of thumb, and clear notes sparingly.\n"
         . "72. Never make the summary visually noisy.\n"
-        . "91. When you need both a summary-writing task and a chat response, visually and structurally separate them clearly.\n"
-        . "92. Use the exact labels <strong><u>Summary Editor</u></strong> and <strong><u>This Chat</u></strong>: bold, underlined, and title case.\n"
-        . "93. Put summary instructions and chat instructions on separate lines or paragraphs. Use an arrow (→) or colon separator.\n"
-        . "94. The student should immediately understand what must be written in the summary and what must be answered in chat.\n"
-        . "95. Avoid blended instruction paragraphs such as 'In your summary editor... In chat...' in one continuous sentence.";
+        . "91. Choose one primary task per turn: either a summary-editor writing/refinement task OR a chat question. Do not routinely assign both.\n"
+        . "92. When the task is for the editor, use the exact label <strong><u>Summary Editor</u></strong>. When the task is for chat, use the exact label <strong><u>This Chat</u></strong>.\n"
+        . "93. If both labels are truly necessary for a rare transition, put them on separate paragraphs with an arrow (→) or colon separator.\n"
+        . "94. The student should immediately understand whether they must write in the summary or answer in chat.\n"
+        . "95. Avoid blended instruction paragraphs such as 'In your summary editor... In chat...' in one continuous sentence.\n"
+        . "96. When the client trigger is idle/editor writing, evaluate the actual summary text the student wrote. Say whether it is strong enough or needs more depth, then give the next single task.\n"
+        . "97. Do not repeat the previous Maya message after the student has written in the editor.\n"
+        . "98. Stay inside the assigned current slide or slide series. The CURRENT SLIDE CONTEXT is the boundary unless the system explicitly assigns more slides.\n"
+        . "99. If the current slide context does not cover a concept, do not ask about it. Redirect the student back to the current slide content.\n"
+        . "100. Follow this loop: student studies assigned slide(s), writes in their own words, Maya evaluates the summary text, asks one specific chat question only if deeper understanding is needed, then sends the student back to refine the summary.";
 }
 
 function maya_response_schema(bool $isFinalReview): array
@@ -1844,6 +1849,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     $summaryExcerpt  = trim((string)($payload['summary_excerpt'] ?? ''));
     $summaryHtml     = (string)($payload['summary_html'] ?? '');
     $summaryPlainFromHtml = $summaryHtml !== '' ? maya_strip_html_to_text($summaryHtml) : '';
+    $clientTrigger = trim((string)($payload['client_trigger'] ?? ''));
 
     $localFlagsRaw = is_array($payload['local_flags'] ?? null) ? $payload['local_flags'] : [];
     $clientMajorPaste = !empty($localFlagsRaw['major_paste']);
@@ -1897,6 +1903,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     $sectionProgressText = maya_section_progress_prompt($sectionProgress);
 
     $historyLines = [];
+    $lastMayaText = '';
     foreach ($clientHistory as $h) {
         if (!is_array($h)) continue;
         $role = (string)($h['role'] ?? '');
@@ -1904,6 +1911,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $stg  = (string)($h['stage'] ?? '');
         if ($msg === '' || ($role !== 'maya' && $role !== 'student')) continue;
         $historyLines[] = strtoupper($role) . ($stg !== '' ? ' [' . $stg . ']' : '') . ': ' . maya_truncate($msg, 400);
+        if ($role === 'maya') $lastMayaText = $msg;
     }
     $historyText = $historyLines ? implode("\n", $historyLines) : '(no prior turns)';
 
@@ -1916,7 +1924,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . ", word_count={$wordCount}, paragraph_count={$paragraphCount}\n"
         . "Current slide: " . ((int)($slideState['page_number'] ?? 0) ?: '(not set)') . "\n"
         . "Current slide concept hint: " . (string)($slideState['concept'] ?? 'lesson concept') . "\n"
-        . "Trigger: " . ($explicitStudentReply ? 'student_reply' : 'micro_checkpoint');
+        . "Client trigger: " . ($clientTrigger !== '' ? $clientTrigger : ($explicitStudentReply ? 'student_reply' : 'micro_checkpoint'));
 
     $diagnosticTask =
         "Before asking your next question, silently evaluate:\n\n"
@@ -1936,8 +1944,10 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "14. What exact part of the summary should the student work on now?\n"
         . "15. Should the student answer in chat, write directly in the summary editor, or use an insertion button?\n"
         . "16. If the draft is empty or very short, can you propose 3–5 editable section headings from the lesson context?\n"
-        . "17. If a concept is mature but no insertion is appropriate, did you tell the student to write it in their own words?\n\n"
-        . "Then give one clear writing task and ask ONE targeted aviation coaching question when a chat answer is needed.\n\n"
+        . "17. If a concept is mature but no insertion is appropriate, did you tell the student to write it in their own words?\n"
+        . "18. If client_trigger is idle, the student likely wrote in the editor. Evaluate the summary editor text directly instead of repeating the prior question.\n"
+        . "19. Are you staying strictly inside the CURRENT SLIDE CONTEXT or assigned slide series?\n\n"
+        . "Then give ONE primary task only: either a Summary Editor task OR a This Chat question. Do not assign both unless it is a rare transition.\n\n"
         . "Do NOT ask generic \"most important idea\" questions. Prefer lesson-scope questions about pilot action, preflight verification, operational consequence, or go/no-go decision making.";
 
     $userPrompt =
@@ -1949,6 +1959,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "STUDENT SUMMARY EXCERPT (current draft):\n"
         . ($excerptForModel !== '' ? $excerptForModel : '(student has not written anything yet)') . "\n\n"
         . "CURRENT SLIDE CONTEXT\n"
+        . "Scope rule: stay inside this current slide unless an assigned slide series is explicitly provided.\n"
         . "Slide number: " . ((int)($slideState['page_number'] ?? 0) ?: '(not set)') . "\n"
         . "Specific concept hint: " . (string)($slideState['concept'] ?? 'lesson concept') . "\n"
         . "Slide text excerpt: " . ((string)($slideState['text'] ?? '') !== '' ? (string)$slideState['text'] : '(no slide text available)') . "\n\n"
@@ -1967,6 +1978,8 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "If the current concept is closed or saturated, do not ask another variation about it; acknowledge and move to a different lesson area. "
         . "Guide summary construction explicitly: identify the current section, tell the student whether to write in the editor or answer in chat, and avoid endless chat-only coaching. "
         . "Never ask broad slide reflection questions. Give a targeted writing task based on the current slide concept and evaluate the summary text directly. "
+        . "If client_trigger is idle, evaluate what the student wrote in the summary editor and do not repeat your previous chat message. "
+        . "Choose either a Summary Editor task or a This Chat question for this turn, not both. "
         . "Score honestly. Output structured JSON only.";
 
     try {
@@ -2145,6 +2158,13 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     $mayaBubbleText = $mayaMessage;
     if ($nextQuestion !== '' && !maya_message_already_contains_question($mayaBubbleText, $nextQuestion)) {
         $mayaBubbleText .= "\n\n" . $nextQuestion;
+    }
+    if ($clientTrigger === 'idle' && $lastMayaText !== '' && trim($mayaBubbleText) === trim($lastMayaText)) {
+        $sectionName = trim((string)($sectionProgress['current_section'] ?? 'this section'));
+        $slideNo = (int)($slideState['page_number'] ?? 0);
+        $mayaMessage = 'I reviewed what you added in the summary editor. Keep working inside Slide ' . max(1, $slideNo) . ' and ' . $sectionName . ': make sure the bullet includes the concept, why it matters, and the pilot action.';
+        $nextQuestion = '';
+        $mayaBubbleText = $mayaMessage;
     }
 
     if ($studentReply !== '') {
