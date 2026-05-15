@@ -152,7 +152,7 @@ if (!function_exists('compliance_friendly_label')) {
             return 'Not set';
         }
         if (preg_match('/^LEVEL_(\d+)$/', strtoupper($value), $m)) {
-            return 'LEVEL ' . $m[1];
+            return 'Level ' . $m[1];
         }
 
         return ucwords(strtolower(str_replace('_', ' ', $value)));

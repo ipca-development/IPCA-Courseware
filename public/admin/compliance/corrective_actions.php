@@ -83,9 +83,15 @@ function cap_deadline_display(?string $date): string
     if ($date === '') {
         return '<span style="color:var(--text-muted);">—</span>';
     }
+    try {
+        $today = new DateTimeImmutable('today');
+        $target = new DateTimeImmutable(substr($date, 0, 10));
+        $class = $target < $today ? 'compliance-badge--deadline-expired' : 'compliance-badge--deadline-ok';
+    } catch (Throwable) {
+        $class = 'compliance-badge--status-muted';
+    }
     return '<div class="cmp-list-deadline">'
-        . '<span class="cmp-list-date">' . h(substr($date, 0, 10)) . '</span>'
-        . compliance_deadline_badge($date)
+        . '<span class="cmp-pill compliance-badge ' . $class . '">' . h(substr($date, 0, 10)) . '</span>'
         . '</div>';
 }
 
@@ -607,10 +613,12 @@ if ($detailId > 0) {
       <section class="cmp-card compliance-card--full" style="overflow:hidden;">
         <div class="compliance-table-wrap">
         <style>
-          .cmp-cap-list-table th,
-          .cmp-cap-list-table td,
-          .cmp-cap-list-table td:first-child,
-          .cmp-cap-list-table .cmp-mono{
+          .cmp-page .cmp-cap-list-table th,
+          .cmp-page .cmp-cap-list-table td,
+          .cmp-page .cmp-cap-list-table td:first-child,
+          .cmp-page .cmp-cap-list-table .cmp-mono,
+          .cmp-page .cmp-cap-list-table td:first-child a,
+          .cmp-page .cmp-cap-list-table .cmp-ref-link{
             font-family:var(--font-sans,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif) !important;
             font-size:11.5px !important;
             color:#324155 !important;
@@ -632,13 +640,13 @@ if ($detailId > 0) {
         <table class="compliance-table cmp-cap-list-table">
           <thead>
             <tr>
-              <th style="width:130px;">Reference</th>
-              <th style="width:130px;">Finding reference</th>
+              <th style="width:143px;">Reference</th>
+              <th style="width:143px;">Finding ref</th>
               <th>Title</th>
-              <th style="width:105px;">Type</th>
-              <th style="width:115px;">Status</th>
-              <th style="width:115px;">Effectiveness</th>
-              <th style="width:150px;">Deadline</th>
+              <th style="width:116px;">Type</th>
+              <th style="width:127px;">Status</th>
+              <th style="width:127px;">Effectiveness</th>
+              <th style="width:165px;">Deadline</th>
             </tr>
           </thead>
           <tbody>

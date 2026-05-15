@@ -78,10 +78,11 @@ function cmp_finding_target_date_display(?string $date): string
         return '<span style="color:var(--text-muted);">—</span>';
     }
     try {
-        new DateTimeImmutable(substr($date, 0, 10));
+        $today = new DateTimeImmutable('today');
+        $target = new DateTimeImmutable(substr($date, 0, 10));
+        $class = $target < $today ? 'compliance-badge--deadline-expired' : 'compliance-badge--deadline-ok';
         return '<div class="cmp-list-deadline">'
-            . '<span class="cmp-list-date">' . h(substr($date, 0, 10)) . '</span>'
-            . compliance_deadline_badge($date)
+            . '<span class="cmp-pill compliance-badge ' . $class . '">' . h(substr($date, 0, 10)) . '</span>'
             . '</div>';
     } catch (Throwable) {
         return '<span class="cmp-mono">' . h($date) . '</span>';
@@ -998,13 +999,13 @@ if ($detailId > 0) {
         <table class="compliance-table cmp-finding-list-table">
           <thead>
             <tr>
-              <th style="width:130px;">Reference</th>
-              <th style="width:130px;">Audit reference</th>
+              <th style="width:143px;">Reference</th>
+              <th style="width:143px;">Audit ref</th>
               <th>Title</th>
-              <th style="width:105px;">Classification</th>
-              <th style="width:95px;">Severity</th>
-              <th style="width:115px;">Status</th>
-              <th style="width:150px;">Target date</th>
+              <th style="width:116px;">Class</th>
+              <th style="width:105px;">Severity</th>
+              <th style="width:127px;">Status</th>
+              <th style="width:165px;">Target date</th>
             </tr>
           </thead>
           <tbody>

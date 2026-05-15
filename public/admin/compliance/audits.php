@@ -469,9 +469,9 @@ if ($detailId > 0) {
           <thead><tr>
             <th style="width:140px;">Reference</th>
             <th>Title</th>
-            <th style="width:110px;">Authority</th>
-            <th style="width:130px;">Status</th>
-            <th style="width:170px;">Window</th>
+            <th style="width:132px;">Authority</th>
+            <th style="width:156px;">Status</th>
+            <th style="width:204px;">Window</th>
           </tr></thead>
           <tbody>
             <?php if (!$rows): ?>
@@ -483,7 +483,7 @@ if ($detailId > 0) {
                   <a class="cmp-ref-link" href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>"><?= h((string)$r['audit_code']) ?></a>
                 </td>
                 <td><span class="cmp-list-titlecell"><?= h((string)$r['title']) ?></span></td>
-                <td><?= h((string)$r['authority']) ?></td>
+                <td><?= compliance_badge((string)$r['authority']) ?></td>
                 <td><?= compliance_badge((string)$r['status']) ?></td>
                 <td>
                   <?= h((string)($r['start_date'] ?? '—')) ?> &rarr; <?= h((string)($r['end_date'] ?? '—')) ?>
