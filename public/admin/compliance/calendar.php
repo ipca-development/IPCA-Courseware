@@ -81,6 +81,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(cmpcal_return_url());
         }
 
+        if ($action === 'update_manual_event') {
+            $id = (int)($_POST['calendar_event_id'] ?? 0);
+            ComplianceCalendarService::updateManualEvent($pdo, $id, array(
+                'title' => (string)($_POST['title'] ?? ''),
+                'event_type' => (string)($_POST['event_type'] ?? 'other'),
+                'date' => (string)($_POST['date'] ?? ''),
+                'start_time' => (string)($_POST['start_time'] ?? ''),
+                'end_time' => (string)($_POST['end_time'] ?? ''),
+                'timezone' => (string)($_POST['timezone'] ?? 'UTC'),
+                'description' => (string)($_POST['description'] ?? ''),
+                'linked_object_type' => (string)($_POST['linked_object_type'] ?? ''),
+                'linked_object_id' => (int)($_POST['linked_object_id'] ?? 0),
+                'is_all_day' => ((string)($_POST['all_day'] ?? '0') === '1'),
+            ), $uid);
+            cmpcal_flash('success', 'Manual calendar event updated.');
+            redirect(cmpcal_return_url());
+        }
+
         if ($action === 'delete_manual_event') {
             $id = (int)($_POST['calendar_event_id'] ?? 0);
             ComplianceCalendarService::deleteManualEvent($pdo, $id, $uid);
@@ -483,6 +501,44 @@ compliance_page_open(array(
   </form>
 <?php compliance_modal_close(); ?>
 
+<?php compliance_modal_open('calendarEditEventModal', 'Edit manual event'); ?>
+  <form id="cmpcalEditEventForm" method="post">
+    <input type="hidden" name="action" value="update_manual_event">
+    <input type="hidden" name="calendar_event_id" id="cmpcalEditEventId">
+    <input type="hidden" name="return_date" data-cmpcal-return-date>
+    <input type="hidden" name="return_view" data-cmpcal-return-view>
+    <input type="hidden" name="return_scroll" data-cmpcal-return-scroll>
+    <div class="cmpcal-form-grid">
+      <label class="cmpcal-field"><span>Title</span><input name="title" id="cmpcalEditTitle" placeholder="Compliance event title"></label>
+      <label class="cmpcal-field"><span>Event type</span><select name="event_type" id="cmpcalEditType">
+        <?php foreach ($eventTypes as $type): ?><option value="<?= h($type['key']) ?>"><?= h($type['label']) ?></option><?php endforeach; ?>
+      </select></label>
+      <label class="cmpcal-field"><span>Date</span><input type="date" name="date" id="cmpcalEditDate"></label>
+      <label class="cmpcal-field" id="cmpcalEditStartField"><span>Start time</span><input type="text" name="start_time" id="cmpcalEditStart" inputmode="text" autocomplete="off"></label>
+      <label class="cmpcal-field" id="cmpcalEditEndField"><span>End time</span><input type="text" name="end_time" id="cmpcalEditEnd" inputmode="text" autocomplete="off"></label>
+      <label class="cmpcal-field"><span>Timezone</span><select name="timezone" id="cmpcalEditTimezone"></select></label>
+      <label class="cmpcal-field"><span>Link to</span><select name="linked_object_type" id="cmpcalEditLinkedType">
+        <option value="">Not linked</option>
+        <option value="audit">Audit</option>
+        <option value="finding">Finding</option>
+        <option value="corrective_action">Corrective Action</option>
+        <option value="meeting">Meeting</option>
+        <option value="manual_change_request">Manual Change Request</option>
+        <option value="regulatory_review">Regulatory Review</option>
+        <option value="other">Other</option>
+      </select></label>
+      <label class="cmpcal-field"><span>Linked object ID</span><input type="number" min="1" name="linked_object_id" id="cmpcalEditLinkedId" placeholder="Optional"></label>
+      <label class="cmpcal-field"><span>All-day</span><select name="all_day" id="cmpcalEditAllDay"><option value="1">Yes</option><option value="0">No</option></select></label>
+    </div>
+    <label class="cmpcal-field" style="display:block;margin-top:12px;"><span>Description</span><textarea name="description" id="cmpcalEditDescription" placeholder="Governance context, linked record or approval notes"></textarea></label>
+    <div class="cmpcal-modal-note">This edits the manual calendar event record. Source-projected compliance records still use their source workflows or schedule-change requests.</div>
+    <div class="compliance-modal__footer">
+      <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+      <button type="submit" <?= $tableStatus['events'] ? '' : 'disabled' ?>>Save Event</button>
+    </div>
+  </form>
+<?php compliance_modal_close(); ?>
+
 <?php compliance_modal_open('calendarSettingsModal', 'Schedule settings'); ?>
   <p class="cmpcal-muted" style="margin-top:0;">Choose favorite timezones to show in the schedule toolbar. Stored event times are not mutated.</p>
   <div class="cmpcal-settings-list" id="cmpcalFavoriteTimezoneList"></div>
@@ -564,6 +620,7 @@ compliance_page_open(array(
     pendingVisualChange: false,
     suppressEventClick: false,
     suppressScheduleClick: false,
+    selectedEvent: null,
     activeTypes: new Set(typeDefs.map(function (t) { return t.key; }))
   };
   var urlParams = new URLSearchParams(window.location.search);
@@ -704,6 +761,20 @@ compliance_page_open(array(
       input.closest('.cmpcal-field').classList.toggle('is-disabled', allDay);
     });
   }
+  function updateEditAllDayFields(){
+    var allDay = document.getElementById('cmpcalEditAllDay').value === '1';
+    ['cmpcalEditStart', 'cmpcalEditEnd'].forEach(function(id){
+      var input = document.getElementById(id);
+      input.disabled = allDay;
+      input.required = !allDay;
+      input.closest('.cmpcal-field').classList.toggle('is-disabled', allDay);
+    });
+  }
+  function closeDialog(id){
+    var d = document.getElementById(id);
+    if (!d) { return; }
+    if (typeof d.close === 'function') { d.close(); } else { d.removeAttribute('open'); }
+  }
   function suppressNativeDragImage(e){
     if (!e.dataTransfer || typeof e.dataTransfer.setDragImage !== 'function') { return; }
     try {
@@ -826,7 +897,42 @@ compliance_page_open(array(
     document.getElementById('cmpcalNewTimezone').innerHTML = timezoneOptionsHtml();
     showDialog('calendarNewEventModal');
   }
+  function openEditManualModal(ev){
+    if (!ev || String(ev.id).indexOf('manual:') !== 0 || !ev.can_edit_directly || ev.is_locked) {
+      alert('Only unlocked manual calendar events can be edited here. Source records use their source workflow or schedule-change request.');
+      return;
+    }
+    var start = parseDt(ev.starts_at);
+    var end = parseDt(ev.ends_at || ev.starts_at);
+    document.getElementById('cmpcalEditEventId').value = String(ev.id).replace('manual:', '');
+    document.getElementById('cmpcalEditTitle').value = ev.title || '';
+    document.getElementById('cmpcalEditType').value = ev.event_type || 'other';
+    document.getElementById('cmpcalEditDate').value = ymd(start);
+    document.getElementById('cmpcalEditStart').value = formatTimeInput(start.getHours(), start.getMinutes());
+    document.getElementById('cmpcalEditEnd').value = formatTimeInput(end.getHours(), end.getMinutes());
+    document.getElementById('cmpcalEditStart').placeholder = state.timeFormat === '12' ? '9:00 AM' : '09:00';
+    document.getElementById('cmpcalEditEnd').placeholder = state.timeFormat === '12' ? '10:00 AM' : '10:00';
+    document.getElementById('cmpcalEditTimezone').innerHTML = timezoneOptionsHtml();
+    if (ev.timezone && !Array.from(document.getElementById('cmpcalEditTimezone').options).some(function(option){ return option.value === ev.timezone; })) {
+      var option = document.createElement('option');
+      option.value = ev.timezone;
+      option.textContent = 'Event timezone (' + ev.timezone + ')';
+      document.getElementById('cmpcalEditTimezone').appendChild(option);
+    }
+    document.getElementById('cmpcalEditTimezone').value = ev.timezone || state.timezone;
+    if (!document.getElementById('cmpcalEditTimezone').value) {
+      document.getElementById('cmpcalEditTimezone').value = state.timezone;
+    }
+    document.getElementById('cmpcalEditLinkedType').value = ev.linked_object_type || '';
+    document.getElementById('cmpcalEditLinkedId').value = ev.linked_object_id ? String(ev.linked_object_id) : '';
+    document.getElementById('cmpcalEditAllDay').value = ev.is_all_day ? '1' : '0';
+    document.getElementById('cmpcalEditDescription').value = ev.description || '';
+    updateEditAllDayFields();
+    closeDialog('calendarEventViewModal');
+    showDialog('calendarEditEventModal');
+  }
   function openEventModal(ev){
+    state.selectedEvent = ev;
     var details = document.getElementById('cmpcalEventDetails');
     var metadata = ev.metadata || {};
     var linked = ev.linked_object_type ? ev.linked_object_type + ' #' + (ev.linked_object_id || ev.source_id || '') : '';
@@ -847,6 +953,10 @@ compliance_page_open(array(
       'Updated by': ev.updated_by || 'Not available'
     });
     document.getElementById('cmpcalEventGovernanceWarning').hidden = !(ev.is_locked || ev.requires_approval_to_move);
+    var canEditManual = String(ev.id).indexOf('manual:') === 0 && ev.can_edit_directly && !ev.is_locked;
+    var edit = document.getElementById('cmpcalEditEvent');
+    edit.disabled = !canEditManual;
+    edit.textContent = canEditManual ? 'Edit Event' : 'Edit Manual Events Only';
     var open = document.getElementById('cmpcalOpenLinked');
     if (metadata.linked_url) { open.href = metadata.linked_url; open.removeAttribute('aria-disabled'); }
     else { open.href = '#'; open.setAttribute('aria-disabled','true'); }
@@ -1257,6 +1367,7 @@ compliance_page_open(array(
     sel.innerHTML = timezoneOptionsHtml();
     sel.value = state.timezone;
     document.getElementById('cmpcalNewTimezone').innerHTML = timezoneOptionsHtml();
+    document.getElementById('cmpcalEditTimezone').innerHTML = timezoneOptionsHtml();
   }
   function timezoneOptionsHtml(){
     return tzChoices.filter(function(t){ return state.favorites.indexOf(t.key) !== -1; }).map(function(t){
@@ -1304,6 +1415,7 @@ compliance_page_open(array(
   document.getElementById('cmpcalViewSelect').addEventListener('change', function(e){ state.view = e.target.value; localStorage.setItem('ipcaComplianceCalendarView', state.view); renderAll(); });
   document.getElementById('cmpcalTimezoneSelect').addEventListener('change', function(e){ state.timezone = e.target.value; localStorage.setItem('ipcaComplianceCalendarTimezone', state.timezone); renderAll(); });
   document.getElementById('cmpcalNewAllDay').addEventListener('change', updateAllDayFields);
+  document.getElementById('cmpcalEditAllDay').addEventListener('change', updateEditAllDayFields);
   document.getElementById('cmpcalSaveTimezoneSettings').addEventListener('click', function(){
     var selected = Array.from(document.querySelectorAll('#cmpcalFavoriteTimezoneList input:checked')).map(function(i){ return i.value; });
     if (selected.length === 0) { selected = ['browser']; }
@@ -1325,7 +1437,7 @@ compliance_page_open(array(
       renderAll();
     });
   });
-  document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ alert('Use drag/drop or resize to change timing. Manual event field editing will be expanded in the next UI pass.'); });
+  document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ openEditManualModal(state.selectedEvent); });
   document.getElementById('cmpcalLinkEvent').addEventListener('click', function(){ alert('Calendar linking backend is not connected yet.'); });
   document.getElementById('cmpcalNewEventForm').addEventListener('submit', function(e){
     if (document.getElementById('cmpcalNewAllDay').value !== '1') {
@@ -1338,6 +1450,20 @@ compliance_page_open(array(
       }
       document.getElementById('cmpcalNewStart').value = start;
       document.getElementById('cmpcalNewEnd').value = end;
+    }
+    updateReturnFields();
+  });
+  document.getElementById('cmpcalEditEventForm').addEventListener('submit', function(e){
+    if (document.getElementById('cmpcalEditAllDay').value !== '1') {
+      var start = normalizeTimeText(document.getElementById('cmpcalEditStart').value);
+      var end = normalizeTimeText(document.getElementById('cmpcalEditEnd').value);
+      if (!start || !end) {
+        e.preventDefault();
+        alert(state.timeFormat === '12' ? 'Enter times like 9:00 AM and 10:00 AM.' : 'Enter times like 09:00 and 10:00.');
+        return;
+      }
+      document.getElementById('cmpcalEditStart').value = start;
+      document.getElementById('cmpcalEditEnd').value = end;
     }
     updateReturnFields();
   });

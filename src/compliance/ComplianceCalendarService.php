@@ -130,7 +130,9 @@ final class ComplianceCalendarService
             self::normalizeTimezone((string)($data['timezone'] ?? $row['timezone'] ?? 'UTC')),
             self::nullableText((string)($data['description'] ?? $row['description'] ?? '')),
             self::normalizeLinkedType((string)($data['linked_object_type'] ?? $row['linked_object_type'] ?? '')),
-            isset($data['linked_object_id']) && (int)$data['linked_object_id'] > 0 ? (int)$data['linked_object_id'] : ($row['linked_object_id'] ?? null),
+            array_key_exists('linked_object_id', $data)
+                ? ((int)$data['linked_object_id'] > 0 ? (int)$data['linked_object_id'] : null)
+                : ($row['linked_object_id'] ?? null),
             $type,
             self::iconForType($type),
             $userId > 0 ? $userId : null,
