@@ -93,29 +93,63 @@ final class ComplianceDeadlineExtensionEngine
         }
         $previous = trim((string)($data['previous_deadline'] ?? ''));
         $requested = trim((string)($data['requested_deadline'] ?? ''));
+        $reason = trim((string)($data['reason'] ?? ''));
         if ($previous === '' || $requested === '') {
             throw new InvalidArgumentException('Previous and requested deadlines are required.');
+        }
+        if ($reason === '') {
+            throw new InvalidArgumentException('An extension reason is required.');
         }
         $stNo = $pdo->prepare('SELECT COALESCE(MAX(extension_no), 0) + 1 FROM ipca_compliance_corrective_action_deadline_extensions WHERE corrective_action_id = ?');
         $stNo->execute(array($correctiveActionId));
         $extensionNo = (int)$stNo->fetchColumn();
         $st = $pdo->prepare(
             'INSERT INTO ipca_compliance_corrective_action_deadline_extensions
-                (corrective_action_id, extension_no, previous_deadline, requested_deadline, reason, status, submitted_at, email_thread_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+                (corrective_action_id, extension_no, previous_deadline, requested_deadline, approved_deadline,
+                 reason, status, submitted_at, reviewed_at, reviewed_by, review_notes, email_thread_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        $status = in_array((string)($data['status'] ?? 'draft'), array('draft', 'submitted'), true) ? (string)$data['status'] : 'draft';
+        $status = strtolower(trim((string)($data['status'] ?? 'submitted')));
+        if (!in_array($status, array('submitted', 'approved', 'rejected'), true)) {
+            $status = 'submitted';
+        }
+        $reviewedBy = isset($data['reviewed_by']) && (int)$data['reviewed_by'] > 0 ? (int)$data['reviewed_by'] : null;
+        $reviewNotes = trim((string)($data['review_notes'] ?? ''));
+        $approvedDeadline = $status === 'approved' ? substr($requested, 0, 10) : null;
+        $now = date('Y-m-d H:i:s');
         $st->execute(array(
             $correctiveActionId,
             $extensionNo,
             substr($previous, 0, 10),
             substr($requested, 0, 10),
-            trim((string)($data['reason'] ?? '')) !== '' ? trim((string)$data['reason']) : null,
+            $approvedDeadline,
+            $reason,
             $status,
-            $status === 'submitted' ? date('Y-m-d H:i:s') : null,
+            $now,
+            in_array($status, array('approved', 'rejected'), true) ? $now : null,
+            in_array($status, array('approved', 'rejected'), true) ? $reviewedBy : null,
+            $reviewNotes !== '' ? $reviewNotes : null,
             isset($data['email_thread_id']) && (int)$data['email_thread_id'] > 0 ? (int)$data['email_thread_id'] : null,
         ));
-        return (int)$pdo->lastInsertId();
+        $id = (int)$pdo->lastInsertId();
+        if ($status === 'approved') {
+            $pdo->prepare(
+                "UPDATE ipca_compliance_corrective_actions
+                    SET due_date = ?, status = CASE WHEN UPPER(COALESCE(status,'')) IN ('CLOSED','VERIFIED','COMPLETED','EXECUTED','CANCELLED') THEN status ELSE 'EXTENDED' END, updated_at = NOW()
+                  WHERE id = ?"
+            )->execute(array($approvedDeadline, $correctiveActionId));
+        }
+        if (in_array($status, array('approved', 'rejected'), true)) {
+            ComplianceApprovalEngine::record($pdo, array(
+                'object_type' => 'corrective_action_deadline_extension',
+                'object_id' => $id,
+                'approval_type' => 'extension',
+                'decision' => $status === 'approved' ? 'approved' : 'rejected',
+                'reviewed_by' => $reviewedBy,
+                'notes' => $reviewNotes !== '' ? $reviewNotes : $reason,
+            ));
+        }
+        return $id;
     }
 
     public static function recordApprovedCorrectiveActionExtension(

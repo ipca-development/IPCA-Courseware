@@ -121,6 +121,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('/admin/compliance/corrective_actions.php?id=' . $cid);
         }
 
+        if ($action === 'request_extension') {
+            $cid = (int)($_POST['cap_id'] ?? 0);
+            if ($cid <= 0) {
+                throw new RuntimeException('Invalid action.');
+            }
+            $cap = ComplianceCapEngine::getById($pdo, $cid);
+            if ($cap === null) {
+                throw new RuntimeException('Corrective action not found.');
+            }
+            $previous = trim((string)($_POST['previous_deadline'] ?? ''));
+            if ($previous === '') {
+                $previous = trim((string)($cap['due_date'] ?? ''));
+            }
+            ComplianceDeadlineExtensionEngine::requestCorrectiveActionExtension($pdo, $cid, array(
+                'previous_deadline' => $previous,
+                'requested_deadline' => (string)($_POST['requested_deadline'] ?? ''),
+                'status' => (string)($_POST['extension_status'] ?? 'submitted'),
+                'reason' => (string)($_POST['reason'] ?? ''),
+                'review_notes' => (string)($_POST['review_notes'] ?? ''),
+                'reviewed_by' => $uid,
+            ));
+            cap_flash_set('success', 'Deadline extension recorded.');
+            redirect('/admin/compliance/corrective_actions.php?id=' . $cid);
+        }
+
         if ($action === 'suggest_cap_ai') {
             $fid = (int)($_POST['finding_id'] ?? 0);
             if ($fid <= 0) {
@@ -287,6 +312,11 @@ if ($detailId > 0) {
             <div style="display:flex;gap:10px;flex-wrap:wrap;">
               <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/findings.php?id=<?= $fidRow ?>" style="text-decoration:none;">Open finding</a>
               <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/export_rca_cap_pdf.php?finding_id=<?= $fidRow ?>" style="text-decoration:none;">Export PDF</a>
+              <?php if (!$capLocked): ?>
+                <button type="button" class="cmp-btn-secondary" data-compliance-modal-open="cap-extension-modal">
+                  Request extension
+                </button>
+              <?php endif; ?>
             </div>
           </div>
           <p class="cmp-meta-line">
@@ -382,6 +412,11 @@ if ($detailId > 0) {
             <div style="padding:12px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
               <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Effective deadline</div>
               <div><?= $effectiveDue !== null ? compliance_deadline_badge($effectiveDue) : '<span style="color:#64748b;">No deadline</span>' ?></div>
+              <?php if (!$capLocked): ?>
+                <button type="button" class="cmp-btn-secondary" data-compliance-modal-open="cap-extension-modal" style="margin-top:10px;">
+                  Request extension
+                </button>
+              <?php endif; ?>
             </div>
           </div>
           <?php if ($capExtensions === array()): ?>
@@ -406,6 +441,49 @@ if ($detailId > 0) {
             </div>
           <?php endif; ?>
         </section>
+        <?php if (!$capLocked): ?>
+          <?php compliance_modal_open('cap-extension-modal', 'Request deadline extension'); ?>
+            <form method="post" action="/admin/compliance/corrective_actions.php?id=<?= (int)$detailId ?>">
+              <input type="hidden" name="action" value="request_extension">
+              <input type="hidden" name="cap_id" value="<?= (int)$detailId ?>">
+              <input type="hidden" name="previous_deadline" value="<?= h($effectiveDue ?? (string)($cap['due_date'] ?? '')) ?>">
+
+              <label class="cmp-field">
+                <span class="cmp-field-label">Current approved deadline</span>
+                <input value="<?= h($effectiveDue ?? (string)($cap['due_date'] ?? 'No deadline')) ?>" disabled>
+              </label>
+
+              <label class="cmp-field">
+                <span class="cmp-field-label">Requested deadline *</span>
+                <input type="date" name="requested_deadline" required value="<?= h($effectiveDue ?? '') ?>">
+              </label>
+
+              <label class="cmp-field">
+                <span class="cmp-field-label">Decision *</span>
+                <select name="extension_status" required>
+                  <option value="submitted" selected>Submitted</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </label>
+
+              <label class="cmp-field">
+                <span class="cmp-field-label">Reason *</span>
+                <textarea name="reason" rows="4" required placeholder="Explain why the deadline extension is needed."></textarea>
+              </label>
+
+              <label class="cmp-field">
+                <span class="cmp-field-label">Review notes</span>
+                <textarea name="review_notes" rows="3" placeholder="Required for strong governance when approving or rejecting."></textarea>
+              </label>
+
+              <div class="compliance-modal__footer">
+                <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+                <button type="submit">Record extension</button>
+              </div>
+            </form>
+          <?php compliance_modal_close(); ?>
+        <?php endif; ?>
         <?php
         compliance_render_comms_panel($pdo, 'corrective_action', (string)$detailId);
     }

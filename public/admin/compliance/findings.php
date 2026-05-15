@@ -71,6 +71,33 @@ function cmp_finding_target_date(PDO $pdo, int $findingId, ?string $fallback): ?
     return $fallback !== '' ? substr($fallback, 0, 10) : null;
 }
 
+function cmp_finding_target_date_display(?string $date): string
+{
+    $date = $date !== null ? trim($date) : '';
+    if ($date === '') {
+        return '<span style="color:var(--text-muted);">—</span>';
+    }
+    try {
+        $today = new DateTimeImmutable('today');
+        $target = new DateTimeImmutable(substr($date, 0, 10));
+        $days = (int)$today->diff($target)->format('%r%a');
+        if ($days === 0) {
+            $note = 'Due today';
+        } elseif ($days > 0) {
+            $note = $days . ' days left';
+        } else {
+            $note = 'Expired ' . abs($days) . ' days ago';
+        }
+        return '<div style="display:flex;flex-direction:column;gap:4px;">'
+            . '<span class="cmp-mono">' . h(substr($date, 0, 10)) . '</span>'
+            . compliance_deadline_badge($date)
+            . '<span style="font-size:12px;color:var(--text-muted);">' . h($note) . '</span>'
+            . '</div>';
+    } catch (Throwable) {
+        return '<span class="cmp-mono">' . h($date) . '</span>';
+    }
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
 
@@ -986,7 +1013,7 @@ if ($detailId > 0) {
                 <td><?= compliance_badge((string)$r['classification'], 'level') ?></td>
                 <td><?= compliance_badge($sev, 'severity') ?></td>
                 <td><?= compliance_badge($stRaw) ?></td>
-                <td class="cmp-mono"><?= $targetDate !== null ? compliance_deadline_badge($targetDate) : '<span style="color:var(--text-muted);">—</span>' ?></td>
+                <td><?= cmp_finding_target_date_display($targetDate) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>
