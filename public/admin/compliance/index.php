@@ -56,13 +56,13 @@ $totalFindings = cw_compliance_count($pdo, 'SELECT COUNT(*) FROM ipca_compliance
 
 $openCaps = cw_compliance_count(
     $pdo,
-    "SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE COALESCE(status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')"
+    "SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE UPPER(COALESCE(status,'')) NOT IN ('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED')"
 );
 $overdueCaps = cw_compliance_count(
     $pdo,
     "SELECT COUNT(*) FROM ipca_compliance_corrective_actions
       WHERE due_date IS NOT NULL AND due_date < CURDATE()
-        AND COALESCE(status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')"
+        AND UPPER(COALESCE(status,'')) NOT IN ('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED')"
 );
 
 $openCrs = cw_compliance_count(
@@ -134,7 +134,7 @@ $upcomingCaps = cw_compliance_rows(
        FROM ipca_compliance_corrective_actions
       WHERE due_date IS NOT NULL
         AND due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)
-        AND COALESCE(status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')
+        AND UPPER(COALESCE(status,'')) NOT IN ('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED')
       ORDER BY due_date ASC
       LIMIT 10"
 );

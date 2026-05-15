@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/ComplianceFindingEngine.php';
 require_once __DIR__ . '/ComplianceRcaCapEngine.php';
 require_once __DIR__ . '/ComplianceCapEngine.php';
+require_once __DIR__ . '/ComplianceRcaCapSubmissionEngine.php';
 
 /**
  * Stream a regulatory-style PDF bundle (finding + RCA + corrective actions).
@@ -39,12 +40,16 @@ final class CompliancePdfExportService
         }
 
         $caps = ComplianceCapEngine::listForFinding($pdo, $findingId);
+        $submissions = ComplianceRcaCapSubmissionEngine::listForFinding($pdo, $findingId);
+        $currentSubmission = ComplianceRcaCapSubmissionEngine::currentForFinding($pdo, $findingId);
 
         return array(
             'finding' => $finding,
             'rca' => $rca,
             'steps' => $steps,
             'caps' => $caps,
+            'rca_cap_submissions' => $submissions,
+            'current_submission' => $currentSubmission,
             'generated_at' => gmdate('Y-m-d H:i') . ' UTC',
         );
     }

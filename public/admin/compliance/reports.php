@@ -83,7 +83,7 @@ $REPORTS = array(
                LEFT JOIN ipca_compliance_findings f ON f.id = ca.finding_id
                    WHERE ca.due_date IS NOT NULL
                      AND ca.due_date < CURDATE()
-                     AND COALESCE(ca.status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')
+                     AND UPPER(COALESCE(ca.status,'')) NOT IN ('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED')
                    ORDER BY ca.due_date ASC
                    LIMIT 500",
         'map' => static fn(array $r) => array(

@@ -6,6 +6,8 @@ require_once __DIR__ . '/ComplianceAiRunLogger.php';
 require_once __DIR__ . '/ComplianceCaseEvents.php';
 require_once __DIR__ . '/ComplianceFindingEngine.php';
 require_once __DIR__ . '/ComplianceRcaCapEngine.php';
+require_once __DIR__ . '/ComplianceRcaCapSubmissionEngine.php';
+require_once __DIR__ . '/ComplianceDeadlineExtensionEngine.php';
 
 /**
  * Corrective action plan items — CRUD, optional AI option suggestions (logged).
@@ -20,6 +22,8 @@ final class ComplianceCapEngine
     /** @var list<string> */
     private const STATUSES = array(
         'PROPOSED', 'APPROVED', 'IN_PROGRESS', 'COMPLETED', 'VERIFIED', 'INEFFECTIVE', 'CANCELLED',
+        'DRAFT', 'AWAITING_APPROVAL', 'AWAITING_EVIDENCE', 'EXECUTED', 'EFFECTIVENESS_FAILED',
+        'CLOSED', 'OVERDUE', 'EXTENDED',
     );
 
     /** @var list<string> */
@@ -33,7 +37,7 @@ final class ComplianceCapEngine
 
     public static function normalizeStatus(string $v): string
     {
-        $v = strtoupper(trim($v));
+        $v = strtoupper(str_replace('-', '_', trim($v)));
         return in_array($v, self::STATUSES, true) ? $v : 'PROPOSED';
     }
 
@@ -186,6 +190,10 @@ final class ComplianceCapEngine
         if ($aiRunId !== null && $aiRunId <= 0) {
             $aiRunId = null;
         }
+        $submissionId = isset($data['submission_id']) && (int)$data['submission_id'] > 0
+            ? (int)$data['submission_id']
+            : ComplianceRcaCapSubmissionEngine::ensureWorkingSubmission($pdo, $findingId, $userId);
+        $hasSubmissionColumn = ComplianceRcaCapSubmissionEngine::capSubmissionColumnPresent($pdo);
 
         $ownsTx = !$pdo->inTransaction();
         if ($ownsTx) {
@@ -193,19 +201,11 @@ final class ComplianceCapEngine
         }
         try {
             $code = self::generateActionCode($pdo);
-            $stmt = $pdo->prepare(
-                'INSERT INTO ipca_compliance_corrective_actions (
-                    finding_id, case_id, action_code, action_type, title, description,
+            $columns = 'finding_id, case_id, action_code, action_type, title, description,
                     status, effort, responsible_name, due_date,
-                    ai_assisted, ai_run_id, created_by, updated_by
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?,
-                    ?, ?, ?, ?
-                )'
-            );
-
-            $stmt->execute(array(
+                    ai_assisted, ai_run_id, created_by, updated_by';
+            $placeholders = '?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?';
+            $params = array(
                 $findingId,
                 $caseId,
                 $code,
@@ -220,7 +220,17 @@ final class ComplianceCapEngine
                 $aiRunId,
                 $userId,
                 $userId,
-            ));
+            );
+            if ($hasSubmissionColumn) {
+                $columns = 'submission_id, ' . $columns;
+                $placeholders = '?, ' . $placeholders;
+                array_unshift($params, $submissionId);
+            }
+            $stmt = $pdo->prepare(
+                'INSERT INTO ipca_compliance_corrective_actions (' . $columns . ')
+                 VALUES (' . $placeholders . ')'
+            );
+            $stmt->execute($params);
 
             $id = (int)$pdo->lastInsertId();
 
@@ -341,6 +351,18 @@ final class ComplianceCapEngine
             $userId,
             $id,
         ));
+
+        $oldDue = trim((string)($row['due_date'] ?? ''));
+        if ($oldDue !== '' && $dueDate !== null && substr($oldDue, 0, 10) !== substr($dueDate, 0, 10)) {
+            ComplianceDeadlineExtensionEngine::recordApprovedCorrectiveActionExtension(
+                $pdo,
+                $id,
+                $oldDue,
+                $dueDate,
+                $userId,
+                'Deadline updated from corrective-action workspace.'
+            );
+        }
 
         $after = array(
             'title' => $title,

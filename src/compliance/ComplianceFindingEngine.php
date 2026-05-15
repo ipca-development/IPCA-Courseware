@@ -2,6 +2,8 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ComplianceCaseEvents.php';
+require_once __DIR__ . '/ComplianceApprovalEngine.php';
+require_once __DIR__ . '/ComplianceDeadlineExtensionEngine.php';
 
 final class ComplianceFindingEngine
 {
@@ -16,6 +18,9 @@ final class ComplianceFindingEngine
     /** @var list<string> */
     private const STATUSES = array(
         'OPEN', 'IN_PROGRESS', 'WAITING_AUTHORITY', 'CLOSED', 'CANCELLED',
+        'AWAITING_RCA_CAP', 'AWAITING_REVIEW', 'REVISION_REQUIRED',
+        'APPROVED_ACTIONS_PENDING', 'ACTIONS_IN_PROGRESS',
+        'AWAITING_EFFECTIVENESS_REVIEW', 'ESCALATED',
     );
 
     public static function normalizeClassification(string $v): string
@@ -32,7 +37,7 @@ final class ComplianceFindingEngine
 
     public static function normalizeStatus(string $v): string
     {
-        $v = strtoupper(trim($v));
+        $v = strtoupper(str_replace('-', '_', trim($v)));
         return in_array($v, self::STATUSES, true) ? $v : 'OPEN';
     }
 
@@ -356,8 +361,14 @@ final class ComplianceFindingEngine
         self::validateAuditExists($pdo, $auditId);
 
         $closedDate = (string)($row['closed_date'] ?? '');
-        if ($status === 'CLOSED' && ($closedDate === '' || $closedDate === '0000-00-00')) {
-            $closedDate = date('Y-m-d');
+        if ($status === 'CLOSED') {
+            $closure = self::closureReadiness($pdo, $id);
+            if (!$closure['ready']) {
+                throw new RuntimeException('Finding cannot be closed yet: ' . implode(' ', $closure['reasons']));
+            }
+            if ($closedDate === '' || $closedDate === '0000-00-00') {
+                $closedDate = date('Y-m-d');
+            }
         } elseif ($status !== 'CLOSED') {
             $closedDate = null;
         }
@@ -426,6 +437,105 @@ final class ComplianceFindingEngine
             $after,
             null
         );
+
+        if ($status === 'CLOSED') {
+            ComplianceApprovalEngine::record($pdo, array(
+                'object_type' => 'finding',
+                'object_id' => $id,
+                'approval_type' => 'closure',
+                'decision' => 'approved',
+                'reviewed_by' => $userId,
+                'notes' => 'Finding closure passed deterministic RCA/CAP governance checks.',
+            ));
+        }
+    }
+
+    /**
+     * @return array{ready:bool,reasons:list<string>}
+     */
+    public static function closureReadiness(PDO $pdo, int $findingId): array
+    {
+        $caps = self::approvedCorrectiveActions($pdo, $findingId);
+        if ($caps === array()) {
+            return array('ready' => false, 'reasons' => array('No approved corrective actions are recorded.'));
+        }
+        $reasons = array();
+        foreach ($caps as $cap) {
+            $code = (string)($cap['action_code'] ?? ('CAP #' . (int)$cap['id']));
+            $status = strtoupper((string)($cap['status'] ?? ''));
+            if (!in_array($status, array('EXECUTED', 'COMPLETED', 'VERIFIED', 'CLOSED'), true)) {
+                $reasons[] = $code . ' has not been executed.';
+            }
+
+            $deadline = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline(
+                $pdo,
+                (int)$cap['id'],
+                isset($cap['due_date']) ? (string)$cap['due_date'] : null
+            );
+            $executedAt = self::capExecutionDate($cap);
+            if ($deadline !== null) {
+                if ($executedAt === null) {
+                    $reasons[] = $code . ' has no execution/completion date for deadline verification.';
+                } elseif ($executedAt > $deadline) {
+                    $reasons[] = $code . ' was executed after its approved deadline.';
+                }
+            }
+
+            if (!self::capEffectivenessPositive($pdo, (int)$cap['id'], $status)) {
+                $reasons[] = $code . ' does not have a positive effectiveness verification.';
+            }
+        }
+
+        return array('ready' => $reasons === array(), 'reasons' => $reasons);
+    }
+
+    /**
+     * @return list<array<string,mixed>>
+     */
+    private static function approvedCorrectiveActions(PDO $pdo, int $findingId): array
+    {
+        $st = $pdo->prepare(
+            "SELECT *
+               FROM ipca_compliance_corrective_actions
+              WHERE finding_id = ?
+                AND COALESCE(status,'') NOT IN ('CANCELLED','cancelled','DRAFT','draft','PROPOSED','proposed')
+              ORDER BY id ASC"
+        );
+        $st->execute(array($findingId));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    private static function capExecutionDate(array $cap): ?string
+    {
+        foreach (array('verified_at', 'completed_at', 'updated_at') as $key) {
+            $value = trim((string)($cap[$key] ?? ''));
+            if ($value !== '' && $value !== '0000-00-00' && $value !== '0000-00-00 00:00:00') {
+                return substr($value, 0, 10);
+            }
+        }
+        return null;
+    }
+
+    private static function capEffectivenessPositive(PDO $pdo, int $capId, string $capStatus): bool
+    {
+        if (in_array($capStatus, array('VERIFIED', 'CLOSED'), true)) {
+            return true;
+        }
+        try {
+            $st = $pdo->prepare(
+                'SELECT effectiveness
+                   FROM ipca_compliance_effectiveness_reviews
+                  WHERE corrective_action_id = ?
+                  ORDER BY reviewed_at DESC, id DESC
+                  LIMIT 1'
+            );
+            $st->execute(array($capId));
+            $eff = strtoupper((string)$st->fetchColumn());
+            return $eff === 'EFFECTIVE';
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     /**

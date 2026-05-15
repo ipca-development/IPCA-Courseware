@@ -5,6 +5,8 @@ require_once __DIR__ . '/../openai.php';
 require_once __DIR__ . '/ComplianceAiRunLogger.php';
 require_once __DIR__ . '/ComplianceCaseEvents.php';
 require_once __DIR__ . '/ComplianceFindingEngine.php';
+require_once __DIR__ . '/ComplianceRcaCapSubmissionEngine.php';
+require_once __DIR__ . '/ComplianceApprovalEngine.php';
 
 /**
  * Root-cause analysis (5-Whys). Corrective actions live in ComplianceCapEngine.
@@ -135,6 +137,8 @@ final class ComplianceRcaCapEngine
                 null
             );
         }
+
+        ComplianceRcaCapSubmissionEngine::snapshotCurrentDraft($pdo, $findingId, $userId);
     }
 
     /**
@@ -207,6 +211,19 @@ final class ComplianceRcaCapEngine
             array('approved_by_name' => $name),
             null
         );
+
+        $submissionId = ComplianceRcaCapSubmissionEngine::snapshotCurrentDraft($pdo, $findingId, $userId);
+        if ($submissionId !== null) {
+            ComplianceRcaCapSubmissionEngine::review($pdo, $submissionId, 'approved', $userId, $reason);
+        }
+        ComplianceApprovalEngine::record($pdo, array(
+            'object_type' => 'rca',
+            'object_id' => $findingId,
+            'approval_type' => 'rca',
+            'decision' => 'approved',
+            'reviewed_by' => $userId,
+            'notes' => $reason,
+        ));
     }
 
     /**

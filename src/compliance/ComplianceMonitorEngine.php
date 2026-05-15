@@ -371,7 +371,7 @@ final class ComplianceMonitorEngine
                     "SELECT id, action_code AS subject_code, title, due_date
                        FROM ipca_compliance_corrective_actions
                       WHERE due_date IS NOT NULL AND due_date < CURDATE()
-                        AND COALESCE(status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')"
+                        AND UPPER(COALESCE(status,'')) NOT IN ('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED')"
                 );
                 $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: array();
                 $subjectType = 'corrective_action';
@@ -384,7 +384,7 @@ final class ComplianceMonitorEngine
                        FROM ipca_compliance_corrective_actions
                       WHERE due_date IS NOT NULL
                         AND due_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL ? DAY)
-                        AND COALESCE(status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')"
+                        AND UPPER(COALESCE(status,'')) NOT IN ('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED')"
                 );
                 $st->execute(array($d));
                 $rows = $st->fetchAll(PDO::FETCH_ASSOC) ?: array();

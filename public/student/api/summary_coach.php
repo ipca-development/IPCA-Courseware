@@ -882,14 +882,47 @@ function maya_load_active_lesson_blueprint(PDO $pdo, int $lessonId): ?array
         if (!is_array($json) || !is_array($json['summary_structure'] ?? null) || !is_array($json['coaching_sequence'] ?? null)) {
             return null;
         }
+        $slideMap = [];
+        $validPages = [];
+        $slideSt = $pdo->prepare("SELECT id, page_number FROM slides WHERE lesson_id=? AND is_deleted=0 ORDER BY page_number ASC");
+        $slideSt->execute([$lessonId]);
+        foreach ($slideSt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $slideRow) {
+            $sid = (int)($slideRow['id'] ?? 0);
+            $page = (int)($slideRow['page_number'] ?? 0);
+            if ($sid > 0 && $page > 0) {
+                $slideMap[$sid] = $page;
+                $validPages[$page] = true;
+            }
+        }
         return [
             'blueprint_id' => (int)($row['blueprint_id'] ?? 0),
             'version_id' => (int)($row['version_id'] ?? 0),
             'blueprint' => $json,
+            'slide_page_by_id' => $slideMap,
+            'valid_slide_pages' => $validPages,
         ];
     } catch (Throwable $e) {
         return null;
     }
+}
+
+function maya_blueprint_slide_group_pages(?array $bundle, array $slideGroup): array
+{
+    $map = is_array($bundle['slide_page_by_id'] ?? null) ? $bundle['slide_page_by_id'] : [];
+    $validPages = is_array($bundle['valid_slide_pages'] ?? null) ? $bundle['valid_slide_pages'] : [];
+    $pages = [];
+    foreach ($slideGroup as $value) {
+        $n = (int)$value;
+        if ($n <= 0) continue;
+        if (isset($map[$n])) {
+            $pages[] = (int)$map[$n];
+        } elseif (isset($validPages[$n])) {
+            $pages[] = $n;
+        }
+    }
+    $pages = array_values(array_unique(array_filter($pages, static fn (int $v): bool => $v > 0)));
+    sort($pages);
+    return $pages;
 }
 
 function maya_blueprint_required_sections(?array $bundle): array
@@ -942,7 +975,8 @@ function maya_blueprint_state_from_flags(array $flags, ?array $bundle): array
     $firstStep = maya_blueprint_sequence_step($bundle, (int)($saved['current_sequence_step'] ?? 1));
     if (!$firstStep) $firstStep = maya_blueprint_sequence_step($bundle, 1);
     $sectionId = trim((string)($saved['current_section_id'] ?? ($firstStep['section_id'] ?? ($required[0]['section_id'] ?? ''))));
-    $slideGroup = is_array($saved['current_slide_group'] ?? null) ? array_values(array_map('intval', $saved['current_slide_group'])) : array_values(array_map('intval', $firstStep['slide_group'] ?? []));
+    $slideGroupRaw = is_array($saved['current_slide_group'] ?? null) ? array_values(array_map('intval', $saved['current_slide_group'])) : array_values(array_map('intval', $firstStep['slide_group'] ?? []));
+    $slideGroup = maya_blueprint_slide_group_pages($bundle, $slideGroupRaw);
     $sectionStates = is_array($saved['section_states'] ?? null) ? $saved['section_states'] : [];
     foreach ($required as $section) {
         $sid = (string)$section['section_id'];
@@ -980,7 +1014,7 @@ function maya_blueprint_current_task(?array $bundle, array $state, bool $structu
     $sectionId = (string)($state['current_section_id'] ?: ($step['section_id'] ?? ''));
     $section = maya_blueprint_section($bundle, $sectionId);
     $title = (string)($section['title'] ?? $sectionId);
-    $slideGroup = array_values(array_map('intval', $state['current_slide_group'] ?: ($step['slide_group'] ?? [])));
+    $slideGroup = maya_blueprint_slide_group_pages($bundle, array_values(array_map('intval', $state['current_slide_group'] ?: ($step['slide_group'] ?? []))));
     if (!$structureAdded) {
         return [
             'mode' => 'write_summary',

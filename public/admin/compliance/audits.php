@@ -445,7 +445,7 @@ if ($detailId > 0) {
         <div class="compliance-table-wrap">
         <table class="compliance-table">
           <thead><tr>
-            <th>Code</th>
+            <th>Reference</th>
             <th>Title</th>
             <th>Authority</th>
             <th>Status</th>

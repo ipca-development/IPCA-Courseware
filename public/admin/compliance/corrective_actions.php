@@ -6,6 +6,8 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceFindingEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCapEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceRcaCapSubmissionEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceDeadlineExtensionEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 
@@ -34,6 +36,45 @@ function cap_flash_take(): ?array
     $f = $_SESSION['_ipca_compliance_cap_flash'];
     unset($_SESSION['_ipca_compliance_cap_flash']);
     return $f;
+}
+
+function cap_latest_effectiveness(PDO $pdo, int $capId, string $capStatus): string
+{
+    if (in_array(strtoupper($capStatus), array('VERIFIED', 'CLOSED'), true)) {
+        return 'EFFECTIVE';
+    }
+    try {
+        $st = $pdo->prepare(
+            'SELECT effectiveness
+               FROM ipca_compliance_effectiveness_reviews
+              WHERE corrective_action_id = ?
+              ORDER BY reviewed_at DESC, id DESC
+              LIMIT 1'
+        );
+        $st->execute(array($capId));
+        $value = trim((string)$st->fetchColumn());
+        return $value !== '' ? $value : 'NOT_EVALUATED';
+    } catch (Throwable) {
+        return 'NOT_EVALUATED';
+    }
+}
+
+function cap_days_delta(?string $deadline): string
+{
+    $deadline = $deadline !== null ? trim($deadline) : '';
+    if ($deadline === '') {
+        return '—';
+    }
+    $today = new DateTimeImmutable('today');
+    $due = DateTimeImmutable::createFromFormat('Y-m-d', substr($deadline, 0, 10));
+    if (!$due) {
+        return '—';
+    }
+    $days = (int)$today->diff($due)->format('%r%a');
+    if ($days === 0) {
+        return 'Due today';
+    }
+    return $days > 0 ? ($days . ' days left') : (abs($days) . ' days passed');
 }
 
 if (!empty($_SESSION['_ipca_compliance_cap_suggest']['saved_at'])
@@ -140,8 +181,8 @@ cw_header('Compliance · Corrective Actions');
 $capStatsHero = array();
 try {
     $capStatsHero = array(
-        'open'    => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE COALESCE(status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')")->fetchColumn(),
-        'overdue' => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE due_date IS NOT NULL AND due_date < CURDATE() AND COALESCE(status,'') NOT IN ('CLOSED','VERIFIED','CANCELLED')")->fetchColumn(),
+        'open'    => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE UPPER(COALESCE(status,'')) NOT IN ('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED')")->fetchColumn(),
+        'overdue' => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE due_date IS NOT NULL AND due_date < CURDATE() AND UPPER(COALESCE(status,'')) NOT IN ('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED')")->fetchColumn(),
         'in_progress' => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE status = 'IN_PROGRESS'")->fetchColumn(),
         'verified' => (int)$pdo->query("SELECT COUNT(*) FROM ipca_compliance_corrective_actions WHERE status = 'VERIFIED'")->fetchColumn(),
     );
@@ -155,12 +196,20 @@ $optionsType = array(
     'IMMEDIATE' => 'Immediate',
 );
 $optionsCapStatus = array(
+    'DRAFT' => 'Draft',
     'PROPOSED' => 'Proposed',
+    'AWAITING_APPROVAL' => 'Awaiting approval',
     'APPROVED' => 'Approved',
     'IN_PROGRESS' => 'In progress',
+    'AWAITING_EVIDENCE' => 'Awaiting evidence',
+    'EXECUTED' => 'Executed',
     'COMPLETED' => 'Completed',
     'VERIFIED' => 'Verified',
     'INEFFECTIVE' => 'Ineffective',
+    'EFFECTIVENESS_FAILED' => 'Effectiveness failed',
+    'CLOSED' => 'Closed',
+    'OVERDUE' => 'Overdue',
+    'EXTENDED' => 'Extended',
     'CANCELLED' => 'Cancelled',
 );
 $optionsEffort = array(
@@ -220,6 +269,14 @@ if ($detailId > 0) {
     } else {
         $capLocked = !empty($cap['locked_at']);
         $fidRow = (int)$cap['finding_id'];
+        $submissionId = isset($cap['submission_id']) ? (int)$cap['submission_id'] : 0;
+        $submission = $submissionId > 0 ? ComplianceRcaCapSubmissionEngine::getById($pdo, $submissionId) : null;
+        $capExtensions = ComplianceDeadlineExtensionEngine::listForCorrectiveAction($pdo, (int)$cap['id']);
+        $effectiveDue = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline(
+            $pdo,
+            (int)$cap['id'],
+            isset($cap['due_date']) ? (string)$cap['due_date'] : null
+        );
         ?>
         <section class="cmp-card">
           <div class="cmp-list-head" style="margin-bottom:14px;">
@@ -310,6 +367,45 @@ if ($detailId > 0) {
             <?php endif; ?>
           </form>
         </section>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 8px;font-size:20px;">Lifecycle history</h2>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-bottom:14px;">
+            <div style="padding:12px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
+              <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Submission</div>
+              <div style="font-weight:800;color:#0f172a;">
+                <?= $submissionId > 0 ? 'Submission #' . h((string)($submission['submission_no'] ?? $submissionId)) : 'Not versioned' ?>
+              </div>
+              <?php if (is_array($submission)): ?>
+                <div style="margin-top:4px;"><?= compliance_badge((string)$submission['status']) ?></div>
+              <?php endif; ?>
+            </div>
+            <div style="padding:12px;border:1px solid #e2e8f0;border-radius:12px;background:#f8fafc;">
+              <div style="font-size:11px;text-transform:uppercase;color:#64748b;font-weight:800;">Effective deadline</div>
+              <div><?= $effectiveDue !== null ? compliance_deadline_badge($effectiveDue) : '<span style="color:#64748b;">No deadline</span>' ?></div>
+            </div>
+          </div>
+          <?php if ($capExtensions === array()): ?>
+            <p style="color:#64748b;font-size:14px;margin:0;">No deadline extensions have been recorded for this corrective action.</p>
+          <?php else: ?>
+            <div class="compliance-table-wrap">
+              <table class="compliance-table">
+                <thead><tr><th>#</th><th>Previous</th><th>Requested</th><th>Approved</th><th>Status</th><th>Reviewed</th></tr></thead>
+                <tbody>
+                  <?php foreach ($capExtensions as $ext): ?>
+                    <tr>
+                      <td class="cmp-mono"><?= (int)$ext['extension_no'] ?></td>
+                      <td class="cmp-mono"><?= h(substr((string)$ext['previous_deadline'], 0, 10)) ?></td>
+                      <td class="cmp-mono"><?= h(substr((string)$ext['requested_deadline'], 0, 10)) ?></td>
+                      <td class="cmp-mono"><?= !empty($ext['approved_deadline']) ? h(substr((string)$ext['approved_deadline'], 0, 10)) : '—' ?></td>
+                      <td><?= compliance_badge((string)$ext['status']) ?></td>
+                      <td class="cmp-mono"><?= !empty($ext['reviewed_at']) ? h((string)$ext['reviewed_at']) : '—' ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+          <?php endif; ?>
+        </section>
         <?php
         compliance_render_comms_panel($pdo, 'corrective_action', (string)$detailId);
     }
@@ -398,18 +494,24 @@ if ($detailId > 0) {
         <table class="compliance-table">
           <thead>
             <tr>
-              <th>CAP code</th>
-              <th>Finding</th>
+              <th>Reference</th>
+              <th>Finding reference</th>
               <th>Title</th>
+              <th>Type</th>
               <th>Status</th>
-              <th>Due</th>
+              <th>Effectiveness</th>
+              <th>Deadline</th>
+              <th>Days left/passed</th>
             </tr>
           </thead>
           <tbody>
             <?php if (!$rows): ?>
-              <tr><td colspan="5" style="padding:20px;color:#64748b;">No matching actions.</td></tr>
+              <tr><td colspan="8" style="padding:20px;color:#64748b;">No matching actions.</td></tr>
             <?php endif; ?>
-            <?php foreach ($rows as $r): ?>
+            <?php foreach ($rows as $r):
+                $effectiveDue = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline($pdo, (int)$r['id'], isset($r['due_date']) ? (string)$r['due_date'] : null);
+                $eff = cap_latest_effectiveness($pdo, (int)$r['id'], (string)$r['status']);
+                ?>
               <tr data-href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td class="cmp-mono">
                   <a href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" style="color:#1f4079;font-weight:700;">
@@ -422,8 +524,11 @@ if ($detailId > 0) {
                   </a>
                 </td>
                 <td><?= h((string)$r['title']) ?></td>
+                <td><?= h(compliance_friendly_label((string)$r['action_type'])) ?></td>
                 <td><?= compliance_badge((string)$r['status']) ?></td>
-                <td class="cmp-mono"><?= compliance_deadline_badge(isset($r['due_date']) ? (string)$r['due_date'] : null) ?></td>
+                <td><?= compliance_badge($eff) ?></td>
+                <td class="cmp-mono"><?= compliance_deadline_badge($effectiveDue) ?></td>
+                <td class="cmp-mono"><?= h(cap_days_delta($effectiveDue)) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>

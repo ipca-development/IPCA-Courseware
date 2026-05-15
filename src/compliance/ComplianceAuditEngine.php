@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ComplianceAutomationDispatch.php';
+require_once __DIR__ . '/ComplianceApprovalEngine.php';
 
 /**
  * Phase 5 — Audit lifecycle CRUD.
@@ -229,6 +230,10 @@ final class ComplianceAuditEngine
         if (!empty($row['locked_at'])) {
             return;
         }
+        $openFindings = self::openFindingCount($pdo, $id);
+        if ($openFindings > 0) {
+            throw new RuntimeException('Audit cannot be closed while ' . $openFindings . ' finding(s) remain open.');
+        }
         $cd = $closedDate !== null && trim($closedDate) !== '' ? substr(trim($closedDate), 0, 10) : date('Y-m-d');
         $now = date('Y-m-d H:i:s');
         $pdo->prepare(
@@ -239,6 +244,26 @@ final class ComplianceAuditEngine
                 updated_by = ?
              WHERE id = ?'
         )->execute(array($cd, $now, $userId > 0 ? $userId : null, $userId > 0 ? $userId : null, $id));
+        ComplianceApprovalEngine::record($pdo, array(
+            'object_type' => 'audit',
+            'object_id' => $id,
+            'approval_type' => 'closure',
+            'decision' => 'approved',
+            'reviewed_by' => $userId,
+            'notes' => 'Audit closure passed deterministic all-findings-closed check.',
+        ));
+    }
+
+    private static function openFindingCount(PDO $pdo, int $auditId): int
+    {
+        $st = $pdo->prepare(
+            "SELECT COUNT(*)
+               FROM ipca_compliance_findings
+              WHERE audit_id = ?
+                AND UPPER(COALESCE(status,'')) NOT IN ('CLOSED','CANCELLED')"
+        );
+        $st->execute(array($auditId));
+        return (int)$st->fetchColumn();
     }
 
     public static function authorities(): array

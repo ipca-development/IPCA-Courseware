@@ -7,6 +7,8 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceFindingEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceRcaCapEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCapEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceRcaCapSubmissionEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceDeadlineExtensionEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceRegulatoryLinkEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
@@ -57,6 +59,16 @@ function cmp_rca_steps_from_post(): array
         );
     }
     return ComplianceRcaCapEngine::normaliseSteps($steps);
+}
+
+function cmp_finding_target_date(PDO $pdo, int $findingId, ?string $fallback): ?string
+{
+    $date = ComplianceRcaCapSubmissionEngine::approvedCapDeadlineForFinding($pdo, $findingId);
+    if ($date !== null) {
+        return $date;
+    }
+    $fallback = $fallback !== null ? trim($fallback) : '';
+    return $fallback !== '' ? substr($fallback, 0, 10) : null;
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -283,8 +295,15 @@ $optionsSev = array(
 );
 $optionsStatus = array(
     'OPEN' => 'Open',
+    'AWAITING_RCA_CAP' => 'Awaiting RCA/CAP',
+    'AWAITING_REVIEW' => 'Awaiting review',
+    'REVISION_REQUIRED' => 'Revision required',
+    'APPROVED_ACTIONS_PENDING' => 'Approved actions pending',
     'IN_PROGRESS' => 'In progress',
+    'ACTIONS_IN_PROGRESS' => 'Actions in progress',
+    'AWAITING_EFFECTIVENESS_REVIEW' => 'Awaiting effectiveness review',
     'WAITING_AUTHORITY' => 'Waiting authority',
+    'ESCALATED' => 'Escalated',
     'CLOSED' => 'Closed',
     'CANCELLED' => 'Cancelled',
 );
@@ -355,6 +374,8 @@ if ($detailId > 0) {
         } catch (Throwable $e) {
             $regLinks = array();
         }
+        $submissions = ComplianceRcaCapSubmissionEngine::listForFinding($pdo, $detailId);
+        $closureReadiness = ComplianceFindingEngine::closureReadiness($pdo, $detailId);
 
         $sev = (string)($finding['severity'] ?? '');
         $stRaw = (string)($finding['status'] ?? '');
@@ -715,6 +736,58 @@ if ($detailId > 0) {
             </div>
           <?php endif; ?>
         </section>
+        <section class="cmp-card">
+          <h2 style="margin:0 0 8px;font-size:20px;">RCA/CAP Timeline</h2>
+          <p style="color:#64748b;font-size:14px;margin:0 0 14px;line-height:1.5;">
+            Submission attempts are historical governance records. Approved, rejected, submitted and superseded attempts are not overwritten.
+          </p>
+          <?php if ($submissions === array()): ?>
+            <p style="color:#64748b;font-size:14px;margin:0;">No RCA/CAP submission attempts have been recorded yet.</p>
+          <?php else: ?>
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <?php foreach ($submissions as $sub): ?>
+                <?php $sid = (int)$sub['id']; ?>
+                <div style="border:1px solid #e2e8f0;border-radius:14px;padding:14px;background:#f8fafc;">
+                  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+                    <strong style="color:#0f172a;">Submission #<?= (int)$sub['submission_no'] ?></strong>
+                    <?= compliance_badge((string)$sub['status']) ?>
+                    <span class="cmp-mono"><?= h((string)$sub['submission_type']) ?></span>
+                    <?php if (!empty($sub['email_thread_id'])): ?>
+                      <a href="/admin/compliance/email_thread.php?id=<?= (int)$sub['email_thread_id'] ?>" style="color:#1e3c72;font-weight:700;text-decoration:none;">Linked communication</a>
+                    <?php endif; ?>
+                  </div>
+                  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px;color:#64748b;font-size:13px;">
+                    <div><strong>Submitted:</strong> <?= !empty($sub['submitted_at']) ? h((string)$sub['submitted_at']) : 'Draft / not submitted' ?></div>
+                    <div><strong>Reviewed:</strong> <?= !empty($sub['reviewed_at']) ? h((string)$sub['reviewed_at']) : 'Pending' ?></div>
+                    <div><strong>Proposed RCA deadline:</strong> <?= !empty($sub['proposed_rca_deadline']) ? h(substr((string)$sub['proposed_rca_deadline'], 0, 10)) : '—' ?></div>
+                    <div><strong>Approved RCA deadline:</strong> <?= !empty($sub['approved_rca_deadline']) ? h(substr((string)$sub['approved_rca_deadline'], 0, 10)) : '—' ?></div>
+                    <div><strong>Proposed CAP deadline:</strong> <?= !empty($sub['proposed_cap_deadline']) ? h(substr((string)$sub['proposed_cap_deadline'], 0, 10)) : '—' ?></div>
+                    <div><strong>Approved CAP deadline:</strong> <?= !empty($sub['approved_cap_deadline']) ? h(substr((string)$sub['approved_cap_deadline'], 0, 10)) : '—' ?></div>
+                  </div>
+                  <?php if (trim((string)($sub['review_notes'] ?? '')) !== ''): ?>
+                    <p style="margin:10px 0 0;color:#475569;font-size:13px;"><?= h((string)$sub['review_notes']) ?></p>
+                  <?php endif; ?>
+                  <?php $exts = ComplianceDeadlineExtensionEngine::listForSubmission($pdo, $sid); ?>
+                  <?php if ($exts !== array()): ?>
+                    <div style="margin-top:10px;color:#64748b;font-size:13px;">
+                      <strong>Deadline extensions:</strong>
+                      <?php foreach ($exts as $ext): ?>
+                        <span class="cmp-pill" style="margin-left:6px;"><?= h((string)$ext['deadline_type']) ?> #<?= (int)$ext['extension_no'] ?> · <?= h((string)$ext['status']) ?></span>
+                      <?php endforeach; ?>
+                    </div>
+                  <?php endif; ?>
+                </div>
+              <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
+          <?php if (!$closureReadiness['ready']): ?>
+            <div class="cmp-flash is-warn" style="margin-top:14px;">
+              <strong>Closure blocked:</strong> <?= h(implode(' ', $closureReadiness['reasons'])) ?>
+            </div>
+          <?php else: ?>
+            <div class="cmp-flash is-ok" style="margin-top:14px;">Closure checks passed: approved actions are executed on time and effectiveness is positive.</div>
+          <?php endif; ?>
+        </section>
         <?php
         compliance_render_comms_panel($pdo, 'finding', (string)$detailId);
     }
@@ -735,6 +808,10 @@ if ($detailId > 0) {
     $filterFrom = trim((string)($_GET['from'] ?? ''));
     $filterTo = trim((string)($_GET['to'] ?? ''));
     $sort = (string)($_GET['sort'] ?? 'updated_desc');
+    $auditCodeById = array();
+    foreach ($audits as $auditRow) {
+        $auditCodeById[(int)$auditRow['id']] = (string)$auditRow['audit_code'];
+    }
 
     $fCounts = array('open' => 0, 'closed' => 0);
     foreach ($rows as $r) {
@@ -879,25 +956,24 @@ if ($detailId > 0) {
         <table class="compliance-table">
           <thead>
             <tr>
-              <th>Code</th>
+              <th>Reference</th>
+              <th>Audit reference</th>
               <th>Title</th>
-              <th>Class</th>
+              <th>Classification</th>
               <th>Severity</th>
               <th>Status</th>
-              <th>Added by</th>
-              <th>Reg refs</th>
-              <th>Updated</th>
+              <th>Target date</th>
             </tr>
           </thead>
           <tbody>
             <?php if (!$rows): ?>
-              <tr><td colspan="8" style="padding:20px;color:var(--text-muted);">No findings match this filter.</td></tr>
+              <tr><td colspan="7" style="padding:20px;color:var(--text-muted);">No findings match this filter.</td></tr>
             <?php endif; ?>
             <?php foreach ($rows as $r):
               $sev = (string)$r['severity'];
               $stRaw = (string)$r['status'];
-              $authorId = (int)($r['created_by'] ?? 0);
-              $author = $authorId > 0 && isset($authorNames[$authorId]) ? $authorNames[$authorId] : '';
+                $auditIdForRow = (int)($r['audit_id'] ?? 0);
+                $targetDate = cmp_finding_target_date($pdo, (int)$r['id'], isset($r['target_date']) ? (string)$r['target_date'] : null);
             ?>
               <tr data-href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td class="cmp-mono">
@@ -905,13 +981,12 @@ if ($detailId > 0) {
                     <?= h((string)$r['finding_code']) ?>
                   </a>
                 </td>
+                <td class="cmp-mono"><?= $auditIdForRow > 0 && isset($auditCodeById[$auditIdForRow]) ? h($auditCodeById[$auditIdForRow]) : '<span style="color:var(--text-muted);">—</span>' ?></td>
                 <td><?= h((string)$r['title']) ?></td>
                 <td><?= compliance_badge((string)$r['classification'], 'level') ?></td>
                 <td><?= compliance_badge($sev, 'severity') ?></td>
                 <td><?= compliance_badge($stRaw) ?></td>
-                <td><?= $author !== '' ? h($author) : '<span style="color:var(--text-muted);">Not recorded</span>' ?></td>
-                <td><?= trim((string)($r['regulation_summary'] ?? '')) !== '' ? '<span class="cmp-pill compliance-badge--status-open">Summary</span>' : '<span style="color:var(--text-muted);">—</span>' ?></td>
-                <td class="cmp-mono"><?= h((string)$r['updated_at']) ?></td>
+                <td class="cmp-mono"><?= $targetDate !== null ? compliance_deadline_badge($targetDate) : '<span style="color:var(--text-muted);">—</span>' ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>

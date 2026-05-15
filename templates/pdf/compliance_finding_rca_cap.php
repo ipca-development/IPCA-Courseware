@@ -10,6 +10,8 @@ $f = $exportData['finding'] ?? array();
 $rca = $exportData['rca'] ?? null;
 $steps = $exportData['steps'] ?? array();
 $caps = $exportData['caps'] ?? array();
+$submissions = $exportData['rca_cap_submissions'] ?? array();
+$currentSubmission = $exportData['current_submission'] ?? null;
 $generatedAt = (string)($exportData['generated_at'] ?? '');
 ?>
 <style>
@@ -56,6 +58,18 @@ h2          { font-size: 12pt; margin: 16px 0 6px; color: #1e3c72; border-bottom
   <div><?= nl2br(h((string)($f['description'] ?? ''))) ?></div>
 </div>
 
+<?php if (is_array($currentSubmission)): ?>
+  <h2>RCA/CAP submission package</h2>
+  <div class="pbox">
+    <div><strong>Current submission:</strong> #<?= (int)($currentSubmission['submission_no'] ?? 0) ?>
+      &nbsp;·&nbsp; <strong>Status:</strong> <?= h((string)($currentSubmission['status'] ?? '')) ?>
+      &nbsp;·&nbsp; <strong>Type:</strong> <?= h((string)($currentSubmission['submission_type'] ?? '')) ?></div>
+    <?php if (!empty($currentSubmission['review_notes'])): ?>
+      <div class="small" style="margin-top:6px;"><strong>Review notes:</strong> <?= nl2br(h((string)$currentSubmission['review_notes'])) ?></div>
+    <?php endif; ?>
+  </div>
+<?php endif; ?>
+
 <h2>Root cause analysis</h2>
 <?php if (!is_array($rca)): ?>
   <p class="small">No RCA record for this finding.</p>
@@ -88,6 +102,25 @@ h2          { font-size: 12pt; margin: 16px 0 6px; color: #1e3c72; border-bottom
       <div><?= nl2br(h((string)$rca['root_cause_text'])) ?></div>
     </div>
   <?php endif; ?>
+<?php endif; ?>
+
+<?php if (is_array($submissions) && $submissions !== array()): ?>
+  <h2>Submission history</h2>
+  <table class="table">
+    <thead><tr><th>#</th><th>Type</th><th>Status</th><th>Submitted</th><th>Reviewed</th><th>Notes</th></tr></thead>
+    <tbody>
+      <?php foreach ($submissions as $sub): ?>
+        <tr>
+          <td><?= (int)($sub['submission_no'] ?? 0) ?></td>
+          <td><?= h((string)($sub['submission_type'] ?? '')) ?></td>
+          <td><?= h((string)($sub['status'] ?? '')) ?></td>
+          <td><?= !empty($sub['submitted_at']) ? h((string)$sub['submitted_at']) : '—' ?></td>
+          <td><?= !empty($sub['reviewed_at']) ? h((string)$sub['reviewed_at']) : '—' ?></td>
+          <td><?= nl2br(h((string)($sub['review_notes'] ?? ''))) ?></td>
+        </tr>
+      <?php endforeach; ?>
+    </tbody>
+  </table>
 <?php endif; ?>
 
 <h2>Corrective actions (CAP)</h2>

@@ -178,19 +178,19 @@ if (!function_exists('compliance_badge_class')) {
             if ($v === 'LOW') { return $classes . ' compliance-badge--severity-low'; }
         }
 
-        if (in_array($v, array('CLOSED', 'COMPLETED', 'RELEASED', 'SENT', 'VERIFIED', 'RESOLVED'), true)) {
+        if (in_array($v, array('CLOSED', 'COMPLETED', 'RELEASED', 'SENT', 'VERIFIED', 'RESOLVED', 'EXECUTED', 'APPROVED'), true)) {
             return $classes . ' compliance-badge--status-closed';
         }
-        if (in_array($v, array('IN_PROGRESS', 'WAITING_AUTHORITY', 'WAITING_INTERNAL', 'WAITING_EXTERNAL', 'UNDER_REVIEW', 'LIVE', 'SENDING', 'READY_TO_SEND'), true)) {
+        if (in_array($v, array('IN_PROGRESS', 'WAITING_AUTHORITY', 'WAITING_INTERNAL', 'WAITING_EXTERNAL', 'UNDER_REVIEW', 'LIVE', 'SENDING', 'READY_TO_SEND', 'AWAITING_REVIEW', 'ACTIONS_IN_PROGRESS', 'AWAITING_EFFECTIVENESS_REVIEW', 'AWAITING_EVIDENCE'), true)) {
             return $classes . ' compliance-badge--status-progress';
         }
-        if (in_array($v, array('OPEN', 'NEW', 'SCHEDULED'), true)) {
+        if (in_array($v, array('OPEN', 'NEW', 'SCHEDULED', 'AWAITING_RCA_CAP', 'APPROVED_ACTIONS_PENDING'), true)) {
             return $classes . ' compliance-badge--status-open';
         }
-        if (in_array($v, array('PLANNED', 'DRAFT', 'PROPOSED', 'PENDING', 'PENDING_APPROVAL'), true)) {
+        if (in_array($v, array('PLANNED', 'DRAFT', 'PROPOSED', 'PENDING', 'PENDING_APPROVAL', 'AWAITING_APPROVAL'), true)) {
             return $classes . ' compliance-badge--planned';
         }
-        if (in_array($v, array('CANCELLED', 'VOID', 'REJECTED', 'FAILED'), true)) {
+        if (in_array($v, array('CANCELLED', 'VOID', 'REJECTED', 'FAILED', 'REVISION_REQUIRED', 'EFFECTIVENESS_FAILED', 'ESCALATED', 'OVERDUE'), true)) {
             return $classes . ' compliance-badge--status-muted';
         }
 
