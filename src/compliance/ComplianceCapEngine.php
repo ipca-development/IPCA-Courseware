@@ -92,7 +92,7 @@ final class ComplianceCapEngine
     public static function getById(PDO $pdo, int $id): ?array
     {
         $stmt = $pdo->prepare(
-            'SELECT c.*, f.finding_code, f.title AS finding_title, f.status AS finding_status
+            'SELECT c.*, f.finding_code, f.reference AS finding_reference, f.title AS finding_title, f.status AS finding_status
              FROM ipca_compliance_corrective_actions c
              INNER JOIN ipca_compliance_findings f ON f.id = c.finding_id
              WHERE c.id = ? LIMIT 1'
@@ -135,7 +135,7 @@ final class ComplianceCapEngine
             $params[] = $findingId;
         }
 
-        $sql = 'SELECT c.*, f.finding_code, f.title AS finding_title
+        $sql = 'SELECT c.*, f.finding_code, f.reference AS finding_reference, f.title AS finding_title
                 FROM ipca_compliance_corrective_actions c
                 INNER JOIN ipca_compliance_findings f ON f.id = c.finding_id
                 WHERE ' . implode(' AND ', $where) . '

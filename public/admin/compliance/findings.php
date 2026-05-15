@@ -1014,11 +1014,13 @@ if ($detailId > 0) {
               $stRaw = (string)$r['status'];
                 $auditIdForRow = (int)($r['audit_id'] ?? 0);
                 $targetDate = cmp_finding_target_date($pdo, (int)$r['id'], isset($r['target_date']) ? (string)$r['target_date'] : null);
+                $authorityRef = trim((string)($r['reference'] ?? ''));
+                $displayRef = $authorityRef !== '' ? $authorityRef : (string)$r['finding_code'];
             ?>
               <tr data-href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td>
                   <a class="cmp-ref-link" href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>">
-                    <?= h((string)$r['finding_code']) ?>
+                    <?= h($displayRef) ?>
                   </a>
                 </td>
                 <td><?= $auditIdForRow > 0 && isset($auditCodeById[$auditIdForRow]) ? h($auditCodeById[$auditIdForRow]) : '<span style="color:var(--text-muted);">—</span>' ?></td>

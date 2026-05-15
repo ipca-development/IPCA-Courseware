@@ -332,7 +332,7 @@ if ($detailId > 0) {
             </div>
           </div>
           <p class="cmp-meta-line">
-            <span>Finding <strong><?= h((string)$cap['finding_code']) ?></strong></span>
+            <span>Finding <strong><?= h(trim((string)($cap['finding_reference'] ?? '')) !== '' ? (string)$cap['finding_reference'] : (string)$cap['finding_code']) ?></strong></span>
             <span><?= h((string)$cap['finding_title']) ?></span>
           </p>
           <?php if ($capLocked): ?>
@@ -648,6 +648,7 @@ if ($detailId > 0) {
             <?php foreach ($rows as $r):
                 $effectiveDue = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline($pdo, (int)$r['id'], isset($r['due_date']) ? (string)$r['due_date'] : null);
                 $eff = cap_latest_effectiveness($pdo, (int)$r['id'], (string)$r['status']);
+                $findingRef = trim((string)($r['finding_reference'] ?? '')) !== '' ? (string)$r['finding_reference'] : (string)$r['finding_code'];
                 ?>
               <tr data-href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
                 <td>
@@ -657,7 +658,7 @@ if ($detailId > 0) {
                 </td>
                 <td>
                   <a class="cmp-ref-link" href="/admin/compliance/findings.php?id=<?= (int)$r['finding_id'] ?>">
-                    <?= h((string)$r['finding_code']) ?>
+                    <?= h($findingRef) ?>
                   </a>
                 </td>
                 <td><span class="cmp-list-titlecell"><?= h((string)$r['title']) ?></span></td>

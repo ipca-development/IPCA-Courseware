@@ -38,17 +38,11 @@ INSERT INTO ipca_compliance_audits (
 )
 SELECT
   NULL,
-  LEFT(
-    CONCAT(
-      'LEGACY-AUD-',
-      TRIM(BOTH '-' FROM REGEXP_REPLACE(
-        TRIM(COALESCE(NULLIF(a.external_ref, ''), 'IMPORT')),
-        '[^A-Za-z0-9]+',
-        '-'
-      ))
-    ),
-    64
-  ),
+  LEFT(TRIM(BOTH '.' FROM REGEXP_REPLACE(
+    TRIM(COALESCE(NULLIF(a.external_ref, ''), 'IMPORT')),
+    '[^A-Za-z0-9]+',
+    '.'
+  )), 64),
   a.title,
   CASE
     WHEN a.audit_entity LIKE '%BCAA%' THEN 'BCAA'
@@ -78,17 +72,11 @@ SELECT
 FROM legacy_compliance.audits a
 WHERE NOT EXISTS (
   SELECT 1 FROM ipca_compliance_audits t
-  WHERE t.audit_code = LEFT(
-    CONCAT(
-      'LEGACY-AUD-',
-      TRIM(BOTH '-' FROM REGEXP_REPLACE(
-        TRIM(COALESCE(NULLIF(a.external_ref, ''), 'IMPORT')),
-        '[^A-Za-z0-9]+',
-        '-'
-      ))
-    ),
-    64
-  )
+  WHERE t.audit_code = LEFT(TRIM(BOTH '.' FROM REGEXP_REPLACE(
+    TRIM(COALESCE(NULLIF(a.external_ref, ''), 'IMPORT')),
+    '[^A-Za-z0-9]+',
+    '.'
+  )), 64)
 )
 LIMIT 1;
 
@@ -102,17 +90,11 @@ SET @new_audit_id := IF(
     SELECT t.id
     FROM ipca_compliance_audits t
     WHERE t.audit_code = (
-      SELECT LEFT(
-        CONCAT(
-          'LEGACY-AUD-',
-          TRIM(BOTH '-' FROM REGEXP_REPLACE(
-            TRIM(COALESCE(NULLIF(a.external_ref, ''), 'IMPORT')),
-            '[^A-Za-z0-9]+',
-            '-'
-          ))
-        ),
-        64
-      )
+      SELECT LEFT(TRIM(BOTH '.' FROM REGEXP_REPLACE(
+        TRIM(COALESCE(NULLIF(a.external_ref, ''), 'IMPORT')),
+        '[^A-Za-z0-9]+',
+        '.'
+      )), 64)
       FROM legacy_compliance.audits a
       LIMIT 1
     )
