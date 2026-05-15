@@ -6,12 +6,97 @@ require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCalendarRepository.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceCalendarService.php';
 
-compliance_require_access($pdo);
+$user = compliance_require_access($pdo);
+$uid = (int)($user['id'] ?? 0);
+
+function cmpcal_flash(string $type, string $message): void
+{
+    $_SESSION['_ipca_compliance_calendar_flash'] = array('type' => $type, 'message' => $message);
+}
+
+function cmpcal_flash_take(): ?array
+{
+    if (empty($_SESSION['_ipca_compliance_calendar_flash']) || !is_array($_SESSION['_ipca_compliance_calendar_flash'])) {
+        return null;
+    }
+    $flash = $_SESSION['_ipca_compliance_calendar_flash'];
+    unset($_SESSION['_ipca_compliance_calendar_flash']);
+    return $flash;
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = (string)($_POST['action'] ?? '');
+    try {
+        if ($action === 'create_manual_event') {
+            $id = ComplianceCalendarService::createManualEvent($pdo, array(
+                'title' => (string)($_POST['title'] ?? ''),
+                'event_type' => (string)($_POST['event_type'] ?? 'other'),
+                'date' => (string)($_POST['date'] ?? ''),
+                'start_time' => (string)($_POST['start_time'] ?? ''),
+                'end_time' => (string)($_POST['end_time'] ?? ''),
+                'timezone' => (string)($_POST['timezone'] ?? 'UTC'),
+                'description' => (string)($_POST['description'] ?? ''),
+                'linked_object_type' => (string)($_POST['linked_object_type'] ?? ''),
+                'linked_object_id' => (int)($_POST['linked_object_id'] ?? 0),
+                'is_all_day' => ((string)($_POST['all_day'] ?? '0') === '1'),
+            ), $uid);
+            cmpcal_flash('success', 'Manual calendar event created (CAL-' . $id . ').');
+            redirect('/admin/compliance/calendar.php');
+        }
+
+        if ($action === 'calendar_change') {
+            $result = ComplianceCalendarService::requestOrApplyChange($pdo, array(
+                'event_id' => (string)($_POST['event_id'] ?? ''),
+                'proposed_starts_at' => (string)($_POST['proposed_starts_at'] ?? ''),
+                'proposed_ends_at' => (string)($_POST['proposed_ends_at'] ?? ''),
+                'reason' => (string)($_POST['reason'] ?? ''),
+            ), $uid);
+            if ($result['mode'] === 'meeting_updated') {
+                cmpcal_flash('success', 'Meeting schedule updated.');
+            } elseif ($result['mode'] === 'manual_updated') {
+                cmpcal_flash('success', 'Manual calendar event updated.');
+            } else {
+                cmpcal_flash('warn', 'Calendar change request submitted for approval.');
+            }
+            redirect('/admin/compliance/calendar.php');
+        }
+
+        if ($action === 'delete_manual_event') {
+            $id = (int)($_POST['calendar_event_id'] ?? 0);
+            ComplianceCalendarService::deleteManualEvent($pdo, $id, $uid);
+            cmpcal_flash('success', 'Manual calendar event deleted.');
+            redirect('/admin/compliance/calendar.php');
+        }
+
+        if ($action === 'review_change_request') {
+            $applyError = ComplianceCalendarService::reviewChangeRequest(
+                $pdo,
+                (int)($_POST['request_id'] ?? 0),
+                (string)($_POST['decision'] ?? ''),
+                (string)($_POST['reviewer_notes'] ?? ''),
+                $uid
+            );
+            if ($applyError !== null && $applyError !== '') {
+                cmpcal_flash('warn', 'Calendar change request reviewed. ' . $applyError);
+            } else {
+                cmpcal_flash('success', 'Calendar change request reviewed.');
+            }
+            redirect('/admin/compliance/calendar.php');
+        }
+    } catch (Throwable $e) {
+        cmpcal_flash('error', $e->getMessage());
+        redirect('/admin/compliance/calendar.php');
+    }
+}
 
 $events = ComplianceCalendarRepository::listEvents($pdo);
 $stats = ComplianceCalendarRepository::stats($events);
 $sources = ComplianceCalendarRepository::connectedSources($pdo);
+$tableStatus = ComplianceCalendarService::tableStatus($pdo);
+$pendingRequests = ComplianceCalendarService::listChangeRequests($pdo, 'pending', 20);
+$flash = cmpcal_flash_take();
 $futureCounts = array();
 $todayYmd = date('Y-m-d');
 foreach ($events as $event) {
@@ -53,6 +138,7 @@ compliance_page_open(array(
         array('label' => 'Meetings Planned', 'value' => (int)$stats['meetings_planned'], 'sub' => 'scheduled / live'),
         array('label' => 'Overdue Items', 'value' => (int)$stats['overdue_items'], 'sub' => 'requires attention', 'tone' => ((int)$stats['overdue_items'] > 0 ? 'crit' : 'ok')),
     ),
+    'flash' => $flash,
 ));
 ?>
 <style>
@@ -90,6 +176,7 @@ compliance_page_open(array(
   .cmpcal-legend-swatch.is-red{background:#fee2e2;border-color:#ef4444;}
   .cmpcal-legend-swatch.is-yellow{background:#fef3c7;border-color:#f59e0b;}
   .cmpcal-source-empty{margin-top:12px;padding:10px 12px;border-radius:12px;background:#f8fafc;border:1px dashed #cbd5e1;color:#64748b;font-size:12px;line-height:1.45;}
+  .cmpcal-source-empty.is-warn{background:#fffbeb;border-color:#f59e0b;color:#92400e;}
   .cmpcal-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 16px;border-bottom:1px solid #e2e8f0;}
   .cmpcal-toolbar-left,.cmpcal-toolbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
   .cmpcal-range{font-size:15px;font-weight:850;color:#0f172a;min-width:220px;}
@@ -175,6 +262,14 @@ compliance_page_open(array(
   .cmpcal-event-detail dd{margin:0;color:#0f172a;font-weight:650;overflow-wrap:anywhere;}
   .cmpcal-settings-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-top:10px;}
   .cmpcal-settings-list label{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px;font-size:13px;font-weight:720;}
+  .cmpcal-queue{margin-top:18px;}
+  .cmpcal-queue-list{display:grid;gap:10px;}
+  .cmpcal-queue-item{border:1px solid #e2e8f0;border-radius:14px;padding:12px;background:#fff;}
+  .cmpcal-queue-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:8px;}
+  .cmpcal-queue-title{font-weight:850;color:#0f172a;font-size:13px;}
+  .cmpcal-queue-meta{color:#64748b;font-size:12px;line-height:1.45;}
+  .cmpcal-queue-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;margin-top:10px;}
+  .cmpcal-queue-actions textarea{min-width:260px;min-height:42px;border:1px solid #cbd5e1;border-radius:10px;padding:8px 10px;font:inherit;font-size:12px;}
   @media (max-width:1100px){.cmpcal-shell{grid-template-columns:1fr}.cmpcal-side{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));}.cmpcal-toolbar{align-items:flex-start;flex-direction:column}.cmpcal-range{min-width:0}.cmpcal-week-head,.cmpcal-all-day,.cmpcal-timeline{min-width:900px}.cmpcal-main{overflow:auto;}}
 </style>
 
@@ -227,6 +322,12 @@ compliance_page_open(array(
           <?= h(implode(', ', $missing)) ?>.
         </div>
       <?php endif; ?>
+      <?php if (!$tableStatus['events'] || !$tableStatus['change_requests']): ?>
+        <div class="cmpcal-source-empty is-warn">
+          <strong>Calendar wiring tables not installed yet.</strong>
+          Apply <code>scripts/sql/compliance_os_calendar_wiring.sql</code> before saving manual events or change requests.
+        </div>
+      <?php endif; ?>
     </section>
   </aside>
 
@@ -255,6 +356,47 @@ compliance_page_open(array(
   </section>
 </div>
 
+<section class="cmpcal-card cmpcal-card-pad cmpcal-queue">
+  <div class="cmpcal-head">
+    <div>
+      <h2 class="cmpcal-title">Pending Calendar Change Requests</h2>
+      <div class="cmpcal-muted">Governed moves and locked-source changes wait here before any source deadline can be changed.</div>
+    </div>
+    <span class="cmpcal-count"><?= count($pendingRequests) ?></span>
+  </div>
+  <?php if ($pendingRequests === array()): ?>
+    <div class="cmpcal-empty-panel">No pending calendar change requests.</div>
+  <?php else: ?>
+    <div class="cmpcal-queue-list">
+      <?php foreach ($pendingRequests as $request): ?>
+        <article class="cmpcal-queue-item">
+          <div class="cmpcal-queue-top">
+            <div>
+              <div class="cmpcal-queue-title"><?= h((string)$request['title']) ?></div>
+              <div class="cmpcal-queue-meta">
+                <?= h((string)$request['source_event_id']) ?> ·
+                <?= h((string)$request['change_kind']) ?> ·
+                <?= h((string)$request['current_starts_at']) ?> → <?= h((string)$request['proposed_starts_at']) ?>
+              </div>
+              <?php if (!empty($request['reason'])): ?>
+                <div class="cmpcal-queue-meta">Reason: <?= h((string)$request['reason']) ?></div>
+              <?php endif; ?>
+            </div>
+            <span class="cmpcal-type-pill">Awaiting approval</span>
+          </div>
+          <form method="post" class="cmpcal-queue-actions">
+            <input type="hidden" name="action" value="review_change_request">
+            <input type="hidden" name="request_id" value="<?= (int)$request['id'] ?>">
+            <textarea name="reviewer_notes" placeholder="Reviewer notes"></textarea>
+            <button type="submit" name="decision" value="approved">Approve</button>
+            <button type="submit" name="decision" value="rejected" class="cmp-btn-secondary">Reject</button>
+          </form>
+        </article>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
+</section>
+
 <div class="cmpcal-tooltip" id="cmpcalTooltip"></div>
 
 <?php compliance_modal_open('calendarEventViewModal', 'Event details'); ?>
@@ -266,13 +408,18 @@ compliance_page_open(array(
     <button type="button" class="cmp-btn-secondary" id="cmpcalEditEvent">Edit Event</button>
     <button type="button" class="cmp-btn-secondary" id="cmpcalLinkEvent">Link to Case/Finding/Audit/CAP/Meeting</button>
     <a class="cmp-btn-secondary" id="cmpcalOpenLinked" href="#" style="text-decoration:none;">Open Linked Record</a>
-    <button type="button" class="cmp-btn-secondary" id="cmpcalDeleteEvent">Delete Event</button>
+    <form method="post" id="cmpcalDeleteEventForm" style="display:inline;">
+      <input type="hidden" name="action" value="delete_manual_event">
+      <input type="hidden" name="calendar_event_id" id="cmpcalDeleteEventId">
+      <button type="submit" class="cmp-btn-secondary" id="cmpcalDeleteEvent">Delete Event</button>
+    </form>
     <button type="button" data-compliance-modal-close>Close</button>
   </div>
 <?php compliance_modal_close(); ?>
 
 <?php compliance_modal_open('calendarNewEventModal', 'New event'); ?>
-  <form id="cmpcalNewEventForm">
+  <form id="cmpcalNewEventForm" method="post">
+    <input type="hidden" name="action" value="create_manual_event">
     <div class="cmpcal-form-grid">
       <label class="cmpcal-field"><span>Title</span><input name="title" id="cmpcalNewTitle" placeholder="Compliance event title"></label>
       <label class="cmpcal-field"><span>Event type</span><select name="event_type" id="cmpcalNewType">
@@ -282,16 +429,24 @@ compliance_page_open(array(
       <label class="cmpcal-field"><span>Start time</span><input type="time" name="start_time" id="cmpcalNewStart"></label>
       <label class="cmpcal-field"><span>End time</span><input type="time" name="end_time" id="cmpcalNewEnd"></label>
       <label class="cmpcal-field"><span>Timezone</span><select name="timezone" id="cmpcalNewTimezone"></select></label>
-      <label class="cmpcal-field"><span>Link to</span><select name="link_to">
-        <option>Audit</option><option>Finding</option><option>Corrective Action</option><option>Meeting</option><option>Manual Change Request</option><option>Regulatory Review</option><option>Other</option>
+      <label class="cmpcal-field"><span>Link to</span><select name="linked_object_type">
+        <option value="">Not linked</option>
+        <option value="audit">Audit</option>
+        <option value="finding">Finding</option>
+        <option value="corrective_action">Corrective Action</option>
+        <option value="meeting">Meeting</option>
+        <option value="manual_change_request">Manual Change Request</option>
+        <option value="regulatory_review">Regulatory Review</option>
+        <option value="other">Other</option>
       </select></label>
+      <label class="cmpcal-field"><span>Linked object ID</span><input type="number" min="1" name="linked_object_id" placeholder="Optional"></label>
       <label class="cmpcal-field"><span>All-day</span><select name="all_day" id="cmpcalNewAllDay"><option value="1">Yes</option><option value="0">No</option></select></label>
     </div>
     <label class="cmpcal-field" style="display:block;margin-top:12px;"><span>Description</span><textarea name="description" placeholder="Governance context, linked record or approval notes"></textarea></label>
-    <div class="cmpcal-modal-note">Calendar editing backend is not connected yet. This modal is UI-only for confirmation; no event is persisted.</div>
+    <div class="cmpcal-modal-note">Manual events are stored in the calendar projection table. Existing compliance source records are not duplicated.</div>
     <div class="compliance-modal__footer">
       <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
-      <button type="button" disabled>Save disabled in UI confirmation phase</button>
+      <button type="submit" <?= $tableStatus['events'] ? '' : 'disabled' ?>>Save Manual Event</button>
     </div>
   </form>
 <?php compliance_modal_close(); ?>
@@ -307,15 +462,25 @@ compliance_page_open(array(
 <?php compliance_modal_close(); ?>
 
 <?php compliance_modal_open('calendarConfirmChangeModal', 'Confirm schedule change'); ?>
-  <dl class="cmpcal-event-detail" id="cmpcalConfirmDetails"></dl>
-  <div class="cmpcal-modal-note cmpcal-warning" id="cmpcalDeadlineMoveWarning" hidden>
-    This appears to be a governed compliance deadline. Moving this event may require authority/internal approval and deadline-extension logging.
-  </div>
-  <div class="cmpcal-modal-note">Calendar editing backend is not connected yet.</div>
-  <div class="compliance-modal__footer">
-    <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
-    <button type="button" disabled>Confirm Change</button>
-  </div>
+  <form method="post" id="cmpcalConfirmChangeForm">
+    <input type="hidden" name="action" value="calendar_change">
+    <input type="hidden" name="event_id" id="cmpcalChangeEventId">
+    <input type="hidden" name="proposed_starts_at" id="cmpcalChangeStartsAt">
+    <input type="hidden" name="proposed_ends_at" id="cmpcalChangeEndsAt">
+    <dl class="cmpcal-event-detail" id="cmpcalConfirmDetails"></dl>
+    <div class="cmpcal-modal-note cmpcal-warning" id="cmpcalDeadlineMoveWarning" hidden>
+      This appears to be a governed compliance deadline. Moving this event may require authority/internal approval and deadline-extension logging.
+    </div>
+    <label class="cmpcal-field" style="display:block;margin-top:12px;">
+      <span>Reason / approval note</span>
+      <textarea name="reason" id="cmpcalChangeReason" placeholder="Reason for the proposed schedule change"></textarea>
+    </label>
+    <div class="cmpcal-modal-note" id="cmpcalChangeModeNote">Unlocked meetings and manual events can be updated directly. Governed items create a pending approval request.</div>
+    <div class="compliance-modal__footer">
+      <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+      <button type="submit" <?= $tableStatus['change_requests'] ? '' : 'disabled' ?>>Confirm Change</button>
+    </div>
+  </form>
 <?php compliance_modal_close(); ?>
 
 <script>
@@ -378,6 +543,19 @@ compliance_page_open(array(
   function fmtDateTime(dt){
     try { return new Intl.DateTimeFormat('en-GB',{timeZone:state.timezone,dateStyle:'medium',timeStyle:'short'}).format(dt); }
     catch(e){ return dt.toLocaleString('en-GB'); }
+  }
+  function postDateTime(dt){
+    return dt.getFullYear() + '-' + pad(dt.getMonth()+1) + '-' + pad(dt.getDate()) + ' ' + pad(dt.getHours()) + ':' + pad(dt.getMinutes()) + ':00';
+  }
+  function movedDateForEvent(ev, day, useEnd){
+    var base = parseDt(useEnd ? (ev.ends_at || ev.starts_at) : ev.starts_at);
+    var d = startOfDay(day);
+    if (ev.is_all_day) {
+      d.setHours(useEnd ? 23 : 0, useEnd ? 59 : 0, useEnd ? 59 : 0, 0);
+    } else {
+      d.setHours(base.getHours(), base.getMinutes(), 0, 0);
+    }
+    return d;
   }
   function dueText(ev){
     var diff = Math.round((startOfDay(parseDt(ev.starts_at)) - startOfDay(new Date())) / 86400000);
@@ -477,7 +655,8 @@ compliance_page_open(array(
     var open = document.getElementById('cmpcalOpenLinked');
     if (metadata.linked_url) { open.href = metadata.linked_url; open.removeAttribute('aria-disabled'); }
     else { open.href = '#'; open.setAttribute('aria-disabled','true'); }
-    document.getElementById('cmpcalDeleteEvent').disabled = !!ev.is_locked;
+    document.getElementById('cmpcalDeleteEvent').disabled = !ev.can_delete || String(ev.id).indexOf('manual:') !== 0;
+    document.getElementById('cmpcalDeleteEventId').value = String(ev.id).indexOf('manual:') === 0 ? String(ev.id).replace('manual:', '') : '';
     showDialog('calendarEventViewModal');
   }
   function detailRows(obj){
@@ -664,10 +843,13 @@ compliance_page_open(array(
   function confirmChange(eventId, proposedDay){
     var ev = events.find(function(x){ return String(x.id) === String(eventId); });
     if (!ev) { return; }
+    var proposedStart = movedDateForEvent(ev, proposedDay, false);
+    var proposedEnd = movedDateForEvent(ev, proposedDay, true);
+    setChangeForm(ev, proposedStart, proposedEnd);
     document.getElementById('cmpcalConfirmDetails').innerHTML = detailRows({
       'Event': ev.title,
       'Current date/time': fmtDateTime(parseDt(ev.starts_at)),
-      'Proposed date/time': fmtRange(proposedDay),
+      'Proposed date/time': ev.is_all_day ? fmtRange(proposedDay) : fmtDateTime(proposedStart),
       'Governance state': ev.governance_state || 'Not set',
       'Linked object': (ev.linked_object_type || 'Not linked') + ' #' + (ev.linked_object_id || ev.source_id || ''),
     });
@@ -675,6 +857,7 @@ compliance_page_open(array(
     showDialog('calendarConfirmChangeModal');
   }
   function confirmResizeChange(ev, proposedStart, proposedEnd, edge){
+    setChangeForm(ev, proposedStart, proposedEnd);
     document.getElementById('cmpcalConfirmDetails').innerHTML = detailRows({
       'Event': ev.title,
       'Current start': fmtDateTime(parseDt(ev.starts_at)),
@@ -687,6 +870,19 @@ compliance_page_open(array(
     });
     document.getElementById('cmpcalDeadlineMoveWarning').hidden = !(ev.is_locked || ev.requires_approval_to_move || String(ev.event_type || '').indexOf('deadline') !== -1);
     showDialog('calendarConfirmChangeModal');
+  }
+  function setChangeForm(ev, proposedStart, proposedEnd){
+    document.getElementById('cmpcalChangeEventId').value = ev.id;
+    document.getElementById('cmpcalChangeStartsAt').value = postDateTime(proposedStart);
+    document.getElementById('cmpcalChangeEndsAt').value = postDateTime(proposedEnd);
+    document.getElementById('cmpcalChangeReason').value = '';
+    var mode = 'Governed items create a pending approval request.';
+    if (ev.can_edit_directly && String(ev.id).indexOf('manual:') === 0) {
+      mode = 'This unlocked manual event will be updated directly.';
+    } else if (ev.can_edit_directly && ev.source_type === 'meeting') {
+      mode = 'This unlocked meeting will update the meeting schedule directly.';
+    }
+    document.getElementById('cmpcalChangeModeNote').textContent = mode;
   }
   function renderRange(){
     var el = document.getElementById('cmpcalRange');
@@ -754,9 +950,18 @@ compliance_page_open(array(
       renderAll();
     });
   });
-  document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ alert('Calendar editing backend is not connected yet.'); });
+  document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ alert('Use drag/drop or resize to change timing. Manual event field editing will be expanded in the next UI pass.'); });
   document.getElementById('cmpcalLinkEvent').addEventListener('click', function(){ alert('Calendar linking backend is not connected yet.'); });
-  document.getElementById('cmpcalDeleteEvent').addEventListener('click', function(){ alert('Deletion is disabled in this UI confirmation phase. Governed/locked events cannot be deleted casually.'); });
+  document.getElementById('cmpcalDeleteEventForm').addEventListener('submit', function(e){
+    if (!document.getElementById('cmpcalDeleteEventId').value) {
+      e.preventDefault();
+      alert('Only unlocked manual calendar events can be deleted from the schedule.');
+      return;
+    }
+    if (!confirm('Delete this manual calendar event? This cannot delete source compliance records.')) {
+      e.preventDefault();
+    }
+  });
 
   renderAll();
 })();

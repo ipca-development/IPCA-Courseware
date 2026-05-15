@@ -15,6 +15,7 @@ final class ComplianceCalendarRepository
     {
         $events = array();
 
+        foreach (self::manualCalendarEvents($pdo) as $event) { $events[] = $event; }
         foreach (self::auditEvents($pdo) as $event) { $events[] = $event; }
         foreach (self::meetingEvents($pdo) as $event) { $events[] = $event; }
         foreach (self::findingTargetEvents($pdo) as $event) { $events[] = $event; }
@@ -25,6 +26,7 @@ final class ComplianceCalendarRepository
         foreach (self::manualEvents($pdo) as $event) { $events[] = $event; }
         foreach (self::partIsEvents($pdo) as $event) { $events[] = $event; }
         foreach (self::monitoringEvents($pdo) as $event) { $events[] = $event; }
+        foreach (self::pendingChangeRequestEvents($pdo) as $event) { $events[] = $event; }
 
         usort($events, static function (array $a, array $b): int {
             return strcmp((string)$a['starts_at'], (string)$b['starts_at']);
@@ -88,10 +90,54 @@ final class ComplianceCalendarRepository
             'Regulatory Review' => self::tablePresent($pdo, 'ipca_compliance_monitor_rules'),
             'Manual Change' => self::tablePresent($pdo, 'ipca_compliance_manual_release_packages') || self::tablePresent($pdo, 'ipca_compliance_manual_change_requests'),
             'Cyber / Part-IS' => self::tablePresent($pdo, 'ipca_compliance_is_risks'),
-            'Other Event' => self::tablePresent($pdo, 'ipca_compliance_alerts'),
+            'Other Event' => self::tablePresent($pdo, 'ipca_compliance_alerts') || self::tablePresent($pdo, 'ipca_compliance_calendar_events'),
         );
 
         return $sources;
+    }
+
+    /** @return list<array<string,mixed>> */
+    private static function manualCalendarEvents(PDO $pdo): array
+    {
+        if (!self::tablePresent($pdo, 'ipca_compliance_calendar_events')) {
+            return array();
+        }
+        $rows = self::rows($pdo, "SELECT * FROM ipca_compliance_calendar_events ORDER BY starts_at ASC LIMIT 800");
+        $events = array();
+        foreach ($rows as $row) {
+            $type = (string)($row['event_type'] ?? 'other');
+            $locked = !empty($row['is_locked']) || !empty($row['locked_at']);
+            $events[] = self::event(array(
+                'id' => 'manual:' . (int)$row['id'],
+                'source_type' => 'calendar_event',
+                'source_table' => 'ipca_compliance_calendar_events',
+                'source_id' => (int)$row['id'],
+                'title' => (string)$row['title'],
+                'event_type' => $type !== '' ? $type : 'other',
+                'status' => (string)($row['status'] ?? 'SCHEDULED'),
+                'governance_state' => $locked ? 'locked' : (string)($row['governance_state'] ?? 'approved'),
+                'starts_at' => self::dateTime((string)$row['starts_at']),
+                'ends_at' => self::dateTime((string)($row['ends_at'] ?: $row['starts_at'])),
+                'is_all_day' => (int)($row['is_all_day'] ?? 0) === 1,
+                'timezone' => (string)($row['timezone'] ?? 'UTC'),
+                'linked_object_type' => (string)($row['linked_object_type'] ?? ''),
+                'linked_object_id' => isset($row['linked_object_id']) ? (int)$row['linked_object_id'] : 0,
+                'color_key' => (string)($row['color_key'] ?? $type ?: 'other'),
+                'icon_key' => (string)($row['icon_key'] ?? 'calendar'),
+                'is_locked' => $locked,
+                'requires_approval_to_move' => !empty($row['requires_approval_to_move']),
+                'description' => (string)($row['description'] ?? ''),
+                'created_by' => $row['created_by'] ?? null,
+                'updated_by' => $row['updated_by'] ?? null,
+                'can_edit_directly' => !$locked,
+                'can_delete' => !$locked,
+                'metadata' => array(
+                    'code' => 'CAL-' . (int)$row['id'],
+                    'edit_mode' => 'manual',
+                ),
+            ));
+        }
+        return $events;
     }
 
     /** @return list<array<string,mixed>> */
@@ -160,6 +206,7 @@ final class ComplianceCalendarRepository
                 'icon_key' => 'users',
                 'is_locked' => $locked,
                 'requires_approval_to_move' => $locked,
+                'can_edit_directly' => !$locked,
                 'description' => (string)($row['agenda'] ?? ''),
                 'created_by' => $row['created_by'] ?? null,
                 'updated_by' => $row['updated_by'] ?? null,
@@ -167,6 +214,7 @@ final class ComplianceCalendarRepository
                     'code' => (string)($row['meeting_code'] ?? ''),
                     'meeting_type' => (string)($row['meeting_type'] ?? ''),
                     'location' => (string)($row['location'] ?? ''),
+                    'edit_mode' => $locked ? 'request' : 'direct',
                     'linked_url' => '/admin/compliance/meetings.php?id=' . (int)$row['id'],
                 ),
             ));
@@ -196,6 +244,51 @@ final class ComplianceCalendarRepository
                     'code' => (string)($row['finding_code'] ?? ''),
                     'authority' => (string)($row['authority'] ?? ''),
                     'linked_url' => '/admin/compliance/findings.php?id=' . (int)$row['id'],
+                ),
+            ));
+        }
+        return $events;
+    }
+
+    /** @return list<array<string,mixed>> */
+    private static function pendingChangeRequestEvents(PDO $pdo): array
+    {
+        if (!self::tablePresent($pdo, 'ipca_compliance_calendar_change_requests')) {
+            return array();
+        }
+        $rows = self::rows($pdo, "SELECT * FROM ipca_compliance_calendar_change_requests WHERE status = 'pending' ORDER BY proposed_starts_at ASC LIMIT 500");
+        $events = array();
+        foreach ($rows as $row) {
+            $type = (string)($row['event_type'] ?? 'other');
+            $events[] = self::event(array(
+                'id' => 'change-request:' . (int)$row['id'],
+                'source_type' => 'calendar_change_request',
+                'source_table' => 'ipca_compliance_calendar_change_requests',
+                'source_id' => (int)$row['id'],
+                'title' => 'Awaiting approval: ' . (string)$row['title'],
+                'event_type' => $type !== '' ? $type : 'other',
+                'status' => 'PENDING_APPROVAL',
+                'governance_state' => 'pending_approval',
+                'starts_at' => self::dateTime((string)$row['proposed_starts_at']),
+                'ends_at' => self::dateTime((string)($row['proposed_ends_at'] ?: $row['proposed_starts_at'])),
+                'is_all_day' => self::looksAllDay((string)$row['proposed_starts_at'], (string)($row['proposed_ends_at'] ?: '')),
+                'timezone' => (string)($row['timezone'] ?? 'UTC'),
+                'linked_object_type' => (string)($row['linked_object_type'] ?? ''),
+                'linked_object_id' => isset($row['linked_object_id']) ? (int)$row['linked_object_id'] : 0,
+                'color_key' => $type !== '' ? $type : 'other',
+                'icon_key' => 'hourglass',
+                'is_locked' => false,
+                'requires_approval_to_move' => true,
+                'is_pending_approval' => true,
+                'description' => (string)($row['reason'] ?? ''),
+                'created_by' => $row['requested_by'] ?? null,
+                'updated_by' => $row['reviewed_by'] ?? null,
+                'metadata' => array(
+                    'code' => 'CCR-' . (int)$row['id'],
+                    'edit_mode' => 'approval_queue',
+                    'source_event_id' => (string)($row['source_event_id'] ?? ''),
+                    'current_starts_at' => self::dateTime((string)($row['current_starts_at'] ?? '')),
+                    'current_ends_at' => self::dateTime((string)($row['current_ends_at'] ?? '')),
                 ),
             ));
         }
@@ -570,6 +663,8 @@ final class ComplianceCalendarRepository
             'icon_key' => (string)($data['icon_key'] ?? 'circle'),
             'is_locked' => !empty($data['is_locked']),
             'requires_approval_to_move' => !empty($data['requires_approval_to_move']),
+            'can_edit_directly' => !empty($data['can_edit_directly']),
+            'can_delete' => !empty($data['can_delete']),
             'is_overdue' => $isOverdue,
             'is_pending_approval' => $pending,
             'description' => (string)($data['description'] ?? ''),
@@ -618,6 +713,14 @@ final class ComplianceCalendarRepository
             return date('Y-m-d\TH:i:s');
         }
         return str_replace(' ', 'T', substr($v, 0, 19));
+    }
+
+    private static function looksAllDay(string $start, string $end): bool
+    {
+        $start = trim($start);
+        $end = trim($end);
+        return substr($start, 11, 8) === '00:00:00'
+            && ($end === '' || substr($end, 11, 8) === '23:59:59');
     }
 
     private static function safeDate(string $value): ?DateTimeImmutable
