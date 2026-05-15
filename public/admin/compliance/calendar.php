@@ -64,16 +64,18 @@ compliance_page_open(array(
   .cmpcal-title{margin:0;font-size:15px;color:#0f172a;font-weight:800;}
   .cmpcal-muted{color:#64748b;font-size:12.5px;line-height:1.45;}
   .cmpcal-mini-nav{display:flex;gap:6px;}
-  .cmpcal-icon-btn,.cmpcal-toolbar button{border:1px solid #cbd5e1;background:#fff;color:#17345d;border-radius:10px;padding:7px 10px;font-weight:800;cursor:pointer;transition:background .16s ease,border-color .16s ease,transform .16s ease;}
-  .cmpcal-icon-btn:hover,.cmpcal-toolbar button:hover{background:#f8fafc;border-color:#9fb2ce;transform:translateY(-1px);}
+  .cmpcal-icon-btn,.cmpcal-toolbar button{display:inline-flex;align-items:center;justify-content:center;min-height:30px;border:1px solid rgba(23,52,93,.14);background:#f8fafc;color:#17345d;border-radius:999px;padding:0 12px;font-size:11.5px;font-weight:820;cursor:pointer;box-shadow:none;transition:background .16s ease,border-color .16s ease,transform .16s ease;}
+  .cmpcal-icon-btn{width:30px;padding:0;}
+  .cmpcal-icon-btn:hover,.cmpcal-toolbar button:hover{background:#eef4ff;border-color:#b7c9e4;transform:translateY(-1px);}
   .cmpcal-weekdays,.cmpcal-mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
   .cmpcal-weekdays{margin-bottom:6px;color:#64748b;font-size:11px;font-weight:800;text-align:center;}
-  .cmpcal-mini-day{position:relative;min-height:34px;border:1px solid transparent;border-radius:10px;background:#fff;color:#0f172a;font-size:12px;font-weight:760;cursor:pointer;transition:background .15s ease,border-color .15s ease;}
-  .cmpcal-mini-day:hover{background:#f1f5f9;border-color:#dbe4f0;}
-  .cmpcal-mini-day.is-out{color:#a8b3c3;background:#f8fafc;}
-  .cmpcal-mini-day.is-today span{border:2px solid #2f5f9f;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;}
-  .cmpcal-mini-day.is-selected{background:#17345d;color:#fff;border-color:#17345d;}
-  .cmpcal-mini-day.is-selected.is-today span{border-color:#fff;}
+  .cmpcal-mini-day{position:relative;display:flex;align-items:center;justify-content:center;min-height:30px;border:0;border-radius:999px;background:transparent;color:#0f172a;font-size:12px;font-weight:760;cursor:pointer;transition:background .15s ease,color .15s ease;}
+  .cmpcal-mini-day:hover{background:#eef4ff;color:#17345d;}
+  .cmpcal-mini-day.is-out{color:#a8b3c3;background:transparent;}
+  .cmpcal-mini-day span{display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:999px;}
+  .cmpcal-mini-day.is-today span{border:2px solid #2f5f9f;}
+  .cmpcal-mini-day.is-selected span{background:#17345d;color:#fff;}
+  .cmpcal-mini-day.is-selected.is-today span{border-color:#17345d;}
   .cmpcal-dot{position:absolute;left:50%;bottom:4px;width:5px;height:5px;border-radius:999px;background:#3a6fd0;transform:translateX(-50%);}
   .cmpcal-filter-list{display:flex;flex-direction:column;gap:8px;}
   .cmpcal-filter{display:grid;grid-template-columns:18px 18px minmax(0,1fr) auto;gap:8px;align-items:center;}
@@ -102,14 +104,17 @@ compliance_page_open(array(
   .cmpcal-month-day.is-out{background:#f8fafc;color:#94a3b8;}
   .cmpcal-month-day.is-selected{box-shadow:inset 0 0 0 2px rgba(31,64,121,.25);}
   .cmpcal-month-day.is-dense{background:#f5f8fc;}
+  .cmpcal-month-day.is-drop-target,.cmpcal-all-day-cell.is-drop-target,.cmpcal-time-col.is-drop-target{background:#eef4ff !important;box-shadow:inset 0 0 0 2px rgba(31,64,121,.20);}
   .cmpcal-day-number{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border-radius:999px;font-size:12px;font-weight:850;color:#0f172a;}
   .cmpcal-day-number.is-today{border:2px solid #2f5f9f;color:#17345d;}
   .cmpcal-day-number.is-selected{background:#17345d;color:#fff;}
   .cmpcal-events{display:flex;flex-direction:column;gap:4px;margin-top:7px;}
-  .cmpcal-event{--event-bg:#eaf2ff;--event-border:#9fbdec;--event-text:#17345d;display:flex;align-items:center;gap:5px;min-width:0;border-radius:999px;border:1px solid var(--event-border);background:var(--event-bg);color:var(--event-text);padding:3px 7px;font-size:11.5px;font-weight:850;line-height:1.25;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,.05);}
-  .cmpcal-event svg{width:13px;height:13px;flex:0 0 13px;}
+  .cmpcal-event{--event-bg:#eaf2ff;--event-border:#9fbdec;--event-text:#17345d;display:flex;align-items:center;gap:5px;min-width:0;border-radius:999px;border:1px solid var(--event-border);background:var(--event-bg);color:var(--event-text);padding:2px 7px;font-size:11px;font-weight:820;line-height:1.2;cursor:grab;box-shadow:none;min-height:24px;}
+  .cmpcal-event:active{cursor:grabbing;}
+  .cmpcal-event svg{width:12px;height:12px;flex:0 0 12px;}
   .cmpcal-event span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .cmpcal-event.is-pending{border-style:dashed;opacity:.68;}
+  .cmpcal-event.is-dragging{opacity:.55;}
   .cmpcal-event.is-overdue{--event-bg:#fee2e2;--event-border:#ef4444;--event-text:#991b1b;}
   .cmpcal-event.is-awaiting{--event-bg:#fef3c7;--event-border:#f59e0b;--event-text:#92400e;}
   .cmpcal-event.is-locked::after{content:"";width:11px;height:11px;margin-left:auto;background:currentColor;mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M17 9V7A5 5 0 0 0 7 7v2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1ZM9 9V7a3 3 0 0 1 6 0v2H9Z"/></svg>') center/contain no-repeat;}
@@ -143,7 +148,8 @@ compliance_page_open(array(
   .cmpcal-hour::after{content:"";position:absolute;left:70px;right:-4000px;top:0;border-top:1px solid #eef2f7;}
   .cmpcal-time-col{position:relative;border-left:1px solid #e2e8f0;background:linear-gradient(to bottom,#fff 0,#fff 39px,#f8fafc 40px);background-size:100% 40px;}
   .cmpcal-time-col.is-today{background-color:#f8fbff;}
-  .cmpcal-time-event{position:absolute;left:6px;right:6px;border-radius:12px;border:1px solid var(--event-border);background:var(--event-bg);color:var(--event-text);padding:6px 8px;font-size:12px;font-weight:820;overflow:hidden;box-shadow:0 3px 9px rgba(15,23,42,.08);cursor:grab;}
+  .cmpcal-time-event{position:absolute;left:6px;right:6px;border-radius:14px;border:1px solid var(--event-border);background:var(--event-bg);color:var(--event-text);padding:5px 8px;font-size:11.5px;font-weight:820;overflow:hidden;box-shadow:none;cursor:grab;}
+  .cmpcal-time-event:active{cursor:grabbing;}
   .cmpcal-time-event:hover{resize:vertical;}
   .cmpcal-time-event .time{display:block;font-size:10.5px;opacity:.78;margin-top:2px;}
   .cmpcal-now-line{position:absolute;height:2px;background:#dc2626;left:0;right:0;z-index:3;}
@@ -394,14 +400,21 @@ compliance_page_open(array(
     return iconMap[ev.icon_key] || iconMap.circle;
   }
   function eventPill(ev){
-    var btn = document.createElement('button');
-    btn.type = 'button';
+    var btn = document.createElement('div');
+    btn.setAttribute('role', 'button');
+    btn.setAttribute('tabindex', '0');
     btn.className = classesForEvent(ev);
     btn.draggable = true;
     btn.dataset.eventId = ev.id;
     btn.innerHTML = iconForEvent(ev) + '<span>' + escapeHtml(ev.title) + '</span>';
     btn.addEventListener('click', function (e) { e.stopPropagation(); openEventModal(ev); });
-    btn.addEventListener('dragstart', function (e) { e.dataTransfer.setData('text/plain', ev.id); });
+    btn.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openEventModal(ev); } });
+    btn.addEventListener('dragstart', function (e) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', ev.id);
+      btn.classList.add('is-dragging');
+    });
+    btn.addEventListener('dragend', function () { btn.classList.remove('is-dragging'); });
     btn.addEventListener('mouseenter', function (e) { showTooltip(ev, e); });
     btn.addEventListener('mousemove', moveTooltip);
     btn.addEventListener('mouseleave', hideTooltip);
@@ -481,14 +494,16 @@ compliance_page_open(array(
     var start = mondayStart(startOfMonth(state.mini));
     for (var i=0;i<42;i++){
       var d = addDays(start, i);
-      var btn = document.createElement('button');
-      btn.type = 'button';
+      var btn = document.createElement('div');
+      btn.setAttribute('role', 'button');
+      btn.setAttribute('tabindex', '0');
       btn.className = 'cmpcal-mini-day';
       if (d.getMonth() !== state.mini.getMonth()) { btn.className += ' is-out'; }
       if (sameDay(d, new Date())) { btn.className += ' is-today'; }
       if (sameDay(d, state.selected)) { btn.className += ' is-selected'; }
       btn.innerHTML = '<span>' + d.getDate() + '</span>' + (visibleEvents().some(function(ev){return eventTouchesDate(ev,d);}) ? '<i class="cmpcal-dot"></i>' : '');
       btn.addEventListener('click', (function(day){ return function(){ state.selected = day; state.current = day; renderAll(); }; })(d));
+      btn.addEventListener('keydown', (function(day){ return function(e){ if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); state.selected = day; state.current = day; renderAll(); } }; })(d));
       grid.appendChild(btn);
     }
   }
@@ -515,8 +530,9 @@ compliance_page_open(array(
         var more = document.createElement('div'); more.className = 'cmpcal-more'; more.textContent = '+' + (dayEvents.length - 4) + ' more'; list.appendChild(more);
       }
       cell.addEventListener('click', (function(day){ return function(){ state.selected = day; setNewModalDate(day); renderAll(); }; })(d));
-      cell.addEventListener('dragover', function(e){ e.preventDefault(); });
-      cell.addEventListener('drop', (function(day){ return function(e){ e.preventDefault(); confirmChange(e.dataTransfer.getData('text/plain'), day); }; })(d));
+      cell.addEventListener('dragover', function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; cell.classList.add('is-drop-target'); });
+      cell.addEventListener('dragleave', function(){ cell.classList.remove('is-drop-target'); });
+      cell.addEventListener('drop', (function(day){ return function(e){ e.preventDefault(); cell.classList.remove('is-drop-target'); confirmChange(e.dataTransfer.getData('text/plain'), day); }; })(d));
       grid.appendChild(cell);
     }
   }
@@ -539,8 +555,9 @@ compliance_page_open(array(
       var ad = document.createElement('div'); ad.className = 'cmpcal-all-day-cell';
       visibleEvents().filter(function(ev){ return ev.is_all_day && eventTouchesDate(ev,day); }).slice(0,4).forEach(function(ev){ ad.appendChild(eventPill(ev)); });
       ad.addEventListener('click', function(){ setNewModalDate(day); });
-      ad.addEventListener('dragover', function(e){ e.preventDefault(); });
-      ad.addEventListener('drop', function(e){ e.preventDefault(); confirmChange(e.dataTransfer.getData('text/plain'), day); });
+      ad.addEventListener('dragover', function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; ad.classList.add('is-drop-target'); });
+      ad.addEventListener('dragleave', function(){ ad.classList.remove('is-drop-target'); });
+      ad.addEventListener('drop', function(e){ e.preventDefault(); ad.classList.remove('is-drop-target'); confirmChange(e.dataTransfer.getData('text/plain'), day); });
       allDay.appendChild(ad);
       var col = document.createElement('div'); col.className = 'cmpcal-time-col' + (sameDay(day,new Date()) ? ' is-today' : '');
       col.addEventListener('click', function(e){
@@ -549,8 +566,9 @@ compliance_page_open(array(
         var hour = Math.floor(((e.clientY - rect.top) / rect.height) * 24);
         setNewModalDate(day, Math.max(0, Math.min(23, hour)));
       });
-      col.addEventListener('dragover', function(e){ e.preventDefault(); });
-      col.addEventListener('drop', function(e){ e.preventDefault(); confirmChange(e.dataTransfer.getData('text/plain'), day); });
+      col.addEventListener('dragover', function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; col.classList.add('is-drop-target'); });
+      col.addEventListener('dragleave', function(){ col.classList.remove('is-drop-target'); });
+      col.addEventListener('drop', function(e){ e.preventDefault(); col.classList.remove('is-drop-target'); confirmChange(e.dataTransfer.getData('text/plain'), day); });
       var timed = visibleEvents().filter(function(ev){ return !ev.is_all_day && eventTouchesDate(ev,day); });
       timed.forEach(function(ev, idx){
         var s = parseDt(ev.starts_at), e = parseDt(ev.ends_at || ev.starts_at);
@@ -564,7 +582,8 @@ compliance_page_open(array(
         if (timed.length > 1) { box.style.left = (6 + (idx % 3) * 12) + 'px'; box.style.right = (6 + ((timed.length - idx - 1) % 3) * 12) + 'px'; }
         box.innerHTML = iconForEvent(ev) + ' ' + escapeHtml(ev.title) + '<span class="time">' + fmtTime(s) + ' - ' + fmtTime(e) + '</span>';
         box.addEventListener('click', function(x){ x.stopPropagation(); openEventModal(ev); });
-        box.addEventListener('dragstart', function(x){ x.dataTransfer.setData('text/plain', ev.id); });
+        box.addEventListener('dragstart', function(x){ x.dataTransfer.effectAllowed = 'move'; x.dataTransfer.setData('text/plain', ev.id); box.classList.add('is-dragging'); });
+        box.addEventListener('dragend', function(){ box.classList.remove('is-dragging'); });
         box.addEventListener('mouseenter', function(x){ showTooltip(ev,x); });
         box.addEventListener('mousemove', moveTooltip);
         box.addEventListener('mouseleave', hideTooltip);
