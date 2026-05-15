@@ -1264,11 +1264,22 @@
         needs_deeper_question: !!j.flags.needs_deeper_question
       };
     }
+    if (j.current_task && typeof j.current_task === 'object') {
+      this.coachingState = {
+        current_writing_task: String(j.current_task.task_text || ''),
+        awaiting_chat_reply: String(j.current_task.mode || '') === 'answer_chat',
+        current_section: String(j.current_task.section_title || j.current_task.section_id || ''),
+        current_slide_id: this.coachingState.current_slide_id || 0,
+        current_slide_number: Array.isArray(j.current_task.slide_group) && j.current_task.slide_group.length
+          ? (parseInt(j.current_task.slide_group[0], 10) || 0)
+          : (this.coachingState.current_slide_number || 0)
+      };
+    }
     if (j.coaching_state && typeof j.coaching_state === 'object') {
       this.coachingState = {
-        current_writing_task: String(j.coaching_state.current_writing_task || ''),
-        awaiting_chat_reply: !!j.coaching_state.awaiting_chat_reply,
-        current_section: String(j.coaching_state.current_section || ''),
+        current_writing_task: String((j.current_task && j.current_task.task_text) || j.coaching_state.current_writing_task || ''),
+        awaiting_chat_reply: !!j.coaching_state.awaiting_chat_reply || !!(j.current_task && j.current_task.mode === 'answer_chat'),
+        current_section: String((j.current_task && (j.current_task.section_title || j.current_task.section_id)) || j.coaching_state.current_section || ''),
         current_slide_id: parseInt(j.coaching_state.current_slide_id, 10) || 0,
         current_slide_number: parseInt(j.coaching_state.current_slide_number, 10) || 0
       };
@@ -1530,6 +1541,12 @@
     }).then(function (j) {
       self.isProgrammaticInsertion = false;
       if (!j || j.ok === false) throw new Error(j && j.error ? j.error : 'mark_inserted failed');
+      if (j.current_task && typeof j.current_task === 'object') {
+        self.coachingState.current_writing_task = String(j.current_task.task_text || self.coachingState.current_writing_task || '');
+        self.coachingState.awaiting_chat_reply = String(j.current_task.mode || '') === 'answer_chat';
+        self.coachingState.current_section = String(j.current_task.section_title || j.current_task.section_id || self.coachingState.current_section || '');
+        self._renderWritingTask();
+      }
       if (btn) {
         btn.textContent = 'Added';
         btn.disabled = true;
