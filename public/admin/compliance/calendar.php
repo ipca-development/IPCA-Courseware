@@ -1086,7 +1086,8 @@ compliance_page_open(array(
     var lastMinutes = startMinutes;
     var duration = Math.max(15, endMinutes - startMinutes);
     var originalRect = box.getBoundingClientRect();
-    var sourceRect = sourceCol.getBoundingClientRect();
+    var pointerOffsetX = startX - originalRect.left;
+    var pointerOffsetY = startY - originalRect.top;
     var original = {
       position: box.style.position,
       left: box.style.left,
@@ -1095,7 +1096,6 @@ compliance_page_open(array(
       width: box.style.width,
       height: box.style.height
     };
-    var offsetLeft = originalRect.left - sourceRect.left;
     if (typeof box.setPointerCapture === 'function') {
       try { box.setPointerCapture(e.pointerId); } catch (err) {}
     }
@@ -1104,9 +1104,11 @@ compliance_page_open(array(
         node.classList.remove('is-drop-target');
       });
     }
-    function paint(targetCol, minutes, pointerEvent){
+    function paint(targetCol, pointerEvent){
       var colRect = targetCol.getBoundingClientRect();
-      var left = colRect.left + clamp(offsetLeft, 6, Math.max(6, colRect.width - originalRect.width - 6));
+      var left = clamp(pointerEvent.clientX - pointerOffsetX, colRect.left + 6, colRect.right - originalRect.width - 6);
+      var topPx = pointerEvent.clientY - pointerOffsetY - colRect.top;
+      var minutes = snapMinutes((topPx / colRect.height) * 1440);
       box.style.left = left + 'px';
       box.style.top = (colRect.top + (minutes / 1440 * colRect.height)) + 'px';
       box.style.right = 'auto';
@@ -1140,10 +1142,10 @@ compliance_page_open(array(
       clearTargets();
       var targetCol = timeColumnFromPoint(x.clientX, x.clientY);
       if (targetCol && targetCol.dataset.day) {
-        paint(targetCol, minutesFromClientY(x.clientY, targetCol), x);
+        paint(targetCol, x);
       } else {
-        box.style.left = (x.clientX - originalRect.width / 2) + 'px';
-        box.style.top = (x.clientY - 12) + 'px';
+        box.style.left = (x.clientX - pointerOffsetX) + 'px';
+        box.style.top = (x.clientY - pointerOffsetY) + 'px';
       }
     }
     function up(x){
