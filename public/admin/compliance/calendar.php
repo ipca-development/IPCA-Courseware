@@ -26,6 +26,20 @@ function cmpcal_flash_take(): ?array
     return $flash;
 }
 
+function cmpcal_return_url(): string
+{
+    $date = substr(trim((string)($_POST['return_date'] ?? '')), 0, 10);
+    $view = trim((string)($_POST['return_view'] ?? ''));
+    $args = array();
+    if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+        $args['date'] = $date;
+    }
+    if (in_array($view, array('month', 'week', 'day'), true)) {
+        $args['view'] = $view;
+    }
+    return '/admin/compliance/calendar.php' . ($args ? '?' . http_build_query($args) : '');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     try {
@@ -43,7 +57,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'is_all_day' => ((string)($_POST['all_day'] ?? '0') === '1'),
             ), $uid);
             cmpcal_flash('success', 'Manual calendar event created (CAL-' . $id . ').');
-            redirect('/admin/compliance/calendar.php');
+            redirect(cmpcal_return_url());
         }
 
         if ($action === 'calendar_change') {
@@ -60,14 +74,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 cmpcal_flash('warn', 'Calendar change request submitted for approval.');
             }
-            redirect('/admin/compliance/calendar.php');
+            redirect(cmpcal_return_url());
         }
 
         if ($action === 'delete_manual_event') {
             $id = (int)($_POST['calendar_event_id'] ?? 0);
             ComplianceCalendarService::deleteManualEvent($pdo, $id, $uid);
             cmpcal_flash('success', 'Manual calendar event deleted.');
-            redirect('/admin/compliance/calendar.php');
+            redirect(cmpcal_return_url());
         }
 
         if ($action === 'review_change_request') {
@@ -83,11 +97,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 cmpcal_flash('success', 'Calendar change request reviewed.');
             }
-            redirect('/admin/compliance/calendar.php');
+            redirect(cmpcal_return_url());
         }
     } catch (Throwable $e) {
         cmpcal_flash('error', $e->getMessage());
-        redirect('/admin/compliance/calendar.php');
+        redirect(cmpcal_return_url());
     }
 }
 
@@ -387,6 +401,8 @@ compliance_page_open(array(
           <form method="post" class="cmpcal-queue-actions">
             <input type="hidden" name="action" value="review_change_request">
             <input type="hidden" name="request_id" value="<?= (int)$request['id'] ?>">
+            <input type="hidden" name="return_date" data-cmpcal-return-date>
+            <input type="hidden" name="return_view" data-cmpcal-return-view>
             <textarea name="reviewer_notes" placeholder="Reviewer notes"></textarea>
             <button type="submit" name="decision" value="approved">Approve</button>
             <button type="submit" name="decision" value="rejected" class="cmp-btn-secondary">Reject</button>
@@ -411,6 +427,8 @@ compliance_page_open(array(
     <form method="post" id="cmpcalDeleteEventForm" style="display:inline;">
       <input type="hidden" name="action" value="delete_manual_event">
       <input type="hidden" name="calendar_event_id" id="cmpcalDeleteEventId">
+      <input type="hidden" name="return_date" data-cmpcal-return-date>
+      <input type="hidden" name="return_view" data-cmpcal-return-view>
       <button type="submit" class="cmp-btn-secondary" id="cmpcalDeleteEvent">Delete Event</button>
     </form>
     <button type="button" data-compliance-modal-close>Close</button>
@@ -420,14 +438,16 @@ compliance_page_open(array(
 <?php compliance_modal_open('calendarNewEventModal', 'New event'); ?>
   <form id="cmpcalNewEventForm" method="post">
     <input type="hidden" name="action" value="create_manual_event">
+    <input type="hidden" name="return_date" data-cmpcal-return-date>
+    <input type="hidden" name="return_view" data-cmpcal-return-view>
     <div class="cmpcal-form-grid">
       <label class="cmpcal-field"><span>Title</span><input name="title" id="cmpcalNewTitle" placeholder="Compliance event title"></label>
       <label class="cmpcal-field"><span>Event type</span><select name="event_type" id="cmpcalNewType">
         <?php foreach ($eventTypes as $type): ?><option value="<?= h($type['key']) ?>"><?= h($type['label']) ?></option><?php endforeach; ?>
       </select></label>
       <label class="cmpcal-field"><span>Date</span><input type="date" name="date" id="cmpcalNewDate"></label>
-      <label class="cmpcal-field"><span>Start time</span><input type="time" name="start_time" id="cmpcalNewStart"></label>
-      <label class="cmpcal-field"><span>End time</span><input type="time" name="end_time" id="cmpcalNewEnd"></label>
+      <label class="cmpcal-field"><span>Start time</span><input type="text" name="start_time" id="cmpcalNewStart" inputmode="text" autocomplete="off"></label>
+      <label class="cmpcal-field"><span>End time</span><input type="text" name="end_time" id="cmpcalNewEnd" inputmode="text" autocomplete="off"></label>
       <label class="cmpcal-field"><span>Timezone</span><select name="timezone" id="cmpcalNewTimezone"></select></label>
       <label class="cmpcal-field"><span>Link to</span><select name="linked_object_type">
         <option value="">Not linked</option>
@@ -454,6 +474,11 @@ compliance_page_open(array(
 <?php compliance_modal_open('calendarSettingsModal', 'Schedule settings'); ?>
   <p class="cmpcal-muted" style="margin-top:0;">Choose favorite timezones to show in the schedule toolbar. Stored event times are not mutated.</p>
   <div class="cmpcal-settings-list" id="cmpcalFavoriteTimezoneList"></div>
+  <div class="cmpcal-title" style="margin-top:16px;">Time Format</div>
+  <div class="cmpcal-settings-list" id="cmpcalTimeFormatList">
+    <label><input type="radio" name="cmpcal_time_format" value="24"> 24-hour time</label>
+    <label><input type="radio" name="cmpcal_time_format" value="12"> 12-hour time (AM/PM)</label>
+  </div>
   <div class="cmpcal-modal-note">Favorites are stored locally in this browser for UI confirmation only.</div>
   <div class="compliance-modal__footer">
     <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
@@ -464,6 +489,8 @@ compliance_page_open(array(
 <?php compliance_modal_open('calendarConfirmChangeModal', 'Confirm schedule change'); ?>
   <form method="post" id="cmpcalConfirmChangeForm">
     <input type="hidden" name="action" value="calendar_change">
+    <input type="hidden" name="return_date" data-cmpcal-return-date>
+    <input type="hidden" name="return_view" data-cmpcal-return-view>
     <input type="hidden" name="event_id" id="cmpcalChangeEventId">
     <input type="hidden" name="proposed_starts_at" id="cmpcalChangeStartsAt">
     <input type="hidden" name="proposed_ends_at" id="cmpcalChangeEndsAt">
@@ -518,8 +545,22 @@ compliance_page_open(array(
     view: localStorage.getItem('ipcaComplianceCalendarView') || 'month',
     timezone: localStorage.getItem('ipcaComplianceCalendarTimezone') || browserTz,
     favorites: JSON.parse(localStorage.getItem('ipcaComplianceCalendarFavoriteTimezones') || '["browser","belgium","california","utc"]'),
+    timeFormat: localStorage.getItem('ipcaComplianceCalendarTimeFormat') || '24',
+    draggingEventId: '',
     activeTypes: new Set(typeDefs.map(function (t) { return t.key; }))
   };
+  var urlParams = new URLSearchParams(window.location.search);
+  if (urlParams.get('date') && /^\d{4}-\d{2}-\d{2}$/.test(urlParams.get('date'))) {
+    state.current = parseYmd(urlParams.get('date'));
+    state.selected = parseYmd(urlParams.get('date'));
+    state.mini = startOfMonth(state.current);
+  }
+  if (['month','week','day'].indexOf(urlParams.get('view')) !== -1) {
+    state.view = urlParams.get('view');
+  }
+  if (state.timeFormat !== '12') {
+    state.timeFormat = '24';
+  }
 
   document.querySelectorAll('[data-cmpcal-icon]').forEach(function (el) {
     el.innerHTML = iconMap[el.getAttribute('data-cmpcal-icon')] || iconMap.circle;
@@ -528,6 +569,7 @@ compliance_page_open(array(
   function pad(n){ return String(n).padStart(2,'0'); }
   function ymd(d){ return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
   function parseDt(v){ return new Date(String(v || '').replace(' ', 'T')); }
+  function parseYmd(v){ var bits = String(v).split('-').map(Number); return new Date(bits[0], bits[1] - 1, bits[2]); }
   function startOfDay(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
   function startOfMonth(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
   function addDays(d,n){ var x = new Date(d); x.setDate(x.getDate()+n); return x; }
@@ -537,12 +579,18 @@ compliance_page_open(array(
   function monthName(d){ return d.toLocaleDateString('en-GB',{month:'long',year:'numeric'}); }
   function fmtRange(d){ return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
   function fmtTime(dt){
-    try { return new Intl.DateTimeFormat('en-GB',{timeZone:state.timezone,hour:'2-digit',minute:'2-digit'}).format(dt); }
-    catch(e){ return new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit'}).format(dt); }
+    var h = dt.getHours();
+    var m = pad(dt.getMinutes());
+    if (state.timeFormat === '12') {
+      var suffix = h >= 12 ? 'PM' : 'AM';
+      var hour12 = h % 12;
+      if (hour12 === 0) { hour12 = 12; }
+      return hour12 + ':' + m + ' ' + suffix;
+    }
+    return pad(h) + ':' + m;
   }
   function fmtDateTime(dt){
-    try { return new Intl.DateTimeFormat('en-GB',{timeZone:state.timezone,dateStyle:'medium',timeStyle:'short'}).format(dt); }
-    catch(e){ return dt.toLocaleString('en-GB'); }
+    return fmtRange(dt) + ' ' + fmtTime(dt);
   }
   function postDateTime(dt){
     return dt.getFullYear() + '-' + pad(dt.getMonth()+1) + '-' + pad(dt.getDate()) + ' ' + pad(dt.getHours()) + ':' + pad(dt.getMinutes()) + ':00';
@@ -578,6 +626,40 @@ compliance_page_open(array(
     d.setMinutes(clamp(minutes, 0, 1439));
     return d;
   }
+  function addMinutes(d, minutes){
+    var x = new Date(d);
+    x.setMinutes(x.getMinutes() + minutes);
+    return x;
+  }
+  function durationMinutes(ev){
+    var s = parseDt(ev.starts_at);
+    var e = parseDt(ev.ends_at || ev.starts_at);
+    return Math.max(15, Math.round((e - s) / 60000));
+  }
+  function formatTimeInput(hour, minute){
+    var dt = new Date(2000, 0, 1, hour, minute || 0, 0);
+    return fmtTime(dt);
+  }
+  function normalizeTimeText(value){
+    var v = String(value || '').trim().toUpperCase().replace(/\s+/g, ' ');
+    var m = v.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/);
+    if (m) {
+      var h12 = parseInt(m[1], 10);
+      var mm12 = parseInt(m[2], 10);
+      if (h12 < 1 || h12 > 12 || mm12 > 59) { return ''; }
+      var h24 = h12 % 12;
+      if (m[3] === 'PM') { h24 += 12; }
+      return pad(h24) + ':' + pad(mm12);
+    }
+    m = v.match(/^(\d{1,2}):(\d{2})$/);
+    if (m) {
+      var h = parseInt(m[1], 10);
+      var mm = parseInt(m[2], 10);
+      if (h > 23 || mm > 59) { return ''; }
+      return pad(h) + ':' + pad(mm);
+    }
+    return '';
+  }
   function visibleEvents(){
     return events.filter(function (ev) { return state.activeTypes.has(ev.event_type || 'other'); });
   }
@@ -608,9 +690,10 @@ compliance_page_open(array(
     btn.addEventListener('dragstart', function (e) {
       e.dataTransfer.effectAllowed = 'move';
       e.dataTransfer.setData('text/plain', ev.id);
+      state.draggingEventId = ev.id;
       btn.classList.add('is-dragging');
     });
-    btn.addEventListener('dragend', function () { btn.classList.remove('is-dragging'); });
+    btn.addEventListener('dragend', function () { state.draggingEventId = ''; btn.classList.remove('is-dragging'); });
     btn.addEventListener('mouseenter', function (e) { showTooltip(ev, e); });
     btn.addEventListener('mousemove', moveTooltip);
     btn.addEventListener('mouseleave', hideTooltip);
@@ -626,8 +709,10 @@ compliance_page_open(array(
   }
   function setNewModalDate(d, hour){
     document.getElementById('cmpcalNewDate').value = ymd(d);
-    document.getElementById('cmpcalNewStart').value = hour != null ? pad(hour) + ':00' : '09:00';
-    document.getElementById('cmpcalNewEnd').value = hour != null ? pad(Math.min(23, hour + 1)) + ':00' : '10:00';
+    document.getElementById('cmpcalNewStart').value = hour != null ? formatTimeInput(hour, 0) : formatTimeInput(9, 0);
+    document.getElementById('cmpcalNewEnd').value = hour != null ? formatTimeInput(Math.min(23, hour + 1), 0) : formatTimeInput(10, 0);
+    document.getElementById('cmpcalNewStart').placeholder = state.timeFormat === '12' ? '9:00 AM' : '09:00';
+    document.getElementById('cmpcalNewEnd').placeholder = state.timeFormat === '12' ? '10:00 AM' : '10:00';
     document.getElementById('cmpcalNewTimezone').innerHTML = timezoneOptionsHtml();
     showDialog('calendarNewEventModal');
   }
@@ -763,9 +848,18 @@ compliance_page_open(array(
         var hour = Math.floor(((e.clientY - rect.top) / rect.height) * 24);
         setNewModalDate(day, Math.max(0, Math.min(23, hour)));
       });
-      col.addEventListener('dragover', function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; col.classList.add('is-drop-target'); });
+      col.addEventListener('dragover', function(e){
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        col.classList.add('is-drop-target');
+        updateDragPreview(e, col, day);
+      });
       col.addEventListener('dragleave', function(){ col.classList.remove('is-drop-target'); });
-      col.addEventListener('drop', function(e){ e.preventDefault(); col.classList.remove('is-drop-target'); confirmChange(e.dataTransfer.getData('text/plain'), day); });
+      col.addEventListener('drop', function(e){
+        e.preventDefault();
+        col.classList.remove('is-drop-target');
+        confirmChangeAtMinutes(e.dataTransfer.getData('text/plain'), day, minutesFromPointer(e, col));
+      });
       var timed = visibleEvents().filter(function(ev){ return !ev.is_all_day && eventTouchesDate(ev,day); });
       timed.forEach(function(ev, idx){
         var s = parseDt(ev.starts_at), e = parseDt(ev.ends_at || ev.starts_at);
@@ -783,8 +877,9 @@ compliance_page_open(array(
           + '<span class="cmpcal-time-event-title">' + iconForEvent(ev) + escapeHtml(ev.title) + '</span>'
           + '<span class="time">' + fmtTime(s) + ' - ' + fmtTime(e) + '</span>';
         box.addEventListener('click', function(x){ x.stopPropagation(); openEventModal(ev); });
-        box.addEventListener('dragstart', function(x){ x.dataTransfer.effectAllowed = 'move'; x.dataTransfer.setData('text/plain', ev.id); box.classList.add('is-dragging'); });
-        box.addEventListener('dragend', function(){ box.classList.remove('is-dragging'); });
+        box.dataset.eventId = ev.id;
+        box.addEventListener('dragstart', function(x){ x.dataTransfer.effectAllowed = 'move'; x.dataTransfer.setData('text/plain', ev.id); state.draggingEventId = ev.id; box.classList.add('is-dragging'); });
+        box.addEventListener('dragend', function(){ state.draggingEventId = ''; box.classList.remove('is-dragging'); renderAll(); });
         box.querySelectorAll('.cmpcal-resize-handle').forEach(function(handle){
           handle.addEventListener('pointerdown', function(x){ startResize(x, ev, day, col, box, handle.classList.contains('top') ? 'start' : 'end', sm, em); });
         });
@@ -840,16 +935,43 @@ compliance_page_open(array(
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
   }
+  function updateDragPreview(e, col, day){
+    if (!state.draggingEventId) { return; }
+    var ev = events.find(function(x){ return String(x.id) === String(state.draggingEventId); });
+    if (!ev || ev.is_all_day) { return; }
+    var minutes = minutesFromPointer(e, col);
+    var start = dateWithMinutes(day, minutes);
+    var end = addMinutes(start, durationMinutes(ev));
+    document.querySelectorAll('[data-event-id]').forEach(function(node){
+      if (String(node.dataset.eventId) !== String(ev.id)) { return; }
+      var time = node.querySelector('.time');
+      if (time) { time.textContent = fmtTime(start) + ' - ' + fmtTime(end); }
+    });
+  }
   function confirmChange(eventId, proposedDay){
     var ev = events.find(function(x){ return String(x.id) === String(eventId); });
     if (!ev) { return; }
     var proposedStart = movedDateForEvent(ev, proposedDay, false);
     var proposedEnd = movedDateForEvent(ev, proposedDay, true);
+    openChangeConfirm(ev, proposedStart, proposedEnd, ev.is_all_day ? fmtRange(proposedDay) : fmtDateTime(proposedStart));
+  }
+  function confirmChangeAtMinutes(eventId, proposedDay, minutes){
+    var ev = events.find(function(x){ return String(x.id) === String(eventId); });
+    if (!ev) { return; }
+    if (ev.is_all_day) {
+      confirmChange(eventId, proposedDay);
+      return;
+    }
+    var proposedStart = dateWithMinutes(proposedDay, minutes);
+    var proposedEnd = addMinutes(proposedStart, durationMinutes(ev));
+    openChangeConfirm(ev, proposedStart, proposedEnd, fmtDateTime(proposedStart) + ' - ' + fmtTime(proposedEnd));
+  }
+  function openChangeConfirm(ev, proposedStart, proposedEnd, proposedLabel){
     setChangeForm(ev, proposedStart, proposedEnd);
     document.getElementById('cmpcalConfirmDetails').innerHTML = detailRows({
       'Event': ev.title,
       'Current date/time': fmtDateTime(parseDt(ev.starts_at)),
-      'Proposed date/time': ev.is_all_day ? fmtRange(proposedDay) : fmtDateTime(proposedStart),
+      'Proposed date/time': proposedLabel,
       'Governance state': ev.governance_state || 'Not set',
       'Linked object': (ev.linked_object_type || 'Not linked') + ' #' + (ev.linked_object_id || ev.source_id || ''),
     });
@@ -911,6 +1033,13 @@ compliance_page_open(array(
       var checked = state.favorites.indexOf(t.key) !== -1 ? ' checked' : '';
       return '<label><input type="checkbox" value="' + escapeHtml(t.key) + '"' + checked + '> ' + escapeHtml(t.label + ' (' + t.zone + ')') + '</label>';
     }).join('');
+    document.querySelectorAll('#cmpcalTimeFormatList input').forEach(function(input){
+      input.checked = input.value === state.timeFormat;
+    });
+  }
+  function updateReturnFields(){
+    document.querySelectorAll('[data-cmpcal-return-date]').forEach(function(input){ input.value = ymd(state.current); });
+    document.querySelectorAll('[data-cmpcal-return-view]').forEach(function(input){ input.value = state.view; });
   }
   function renderAll(){
     document.getElementById('cmpcalViewSelect').value = state.view;
@@ -923,6 +1052,7 @@ compliance_page_open(array(
     if (state.view === 'week') { renderAgenda('week'); }
     if (state.view === 'day') { renderAgenda('day'); }
     renderSettings();
+    updateReturnFields();
   }
 
   document.getElementById('cmpcalMiniPrev').addEventListener('click', function(){ state.mini = addMonths(state.mini,-1); renderMini(); });
@@ -936,11 +1066,14 @@ compliance_page_open(array(
     var selected = Array.from(document.querySelectorAll('#cmpcalFavoriteTimezoneList input:checked')).map(function(i){ return i.value; });
     if (selected.length === 0) { selected = ['browser']; }
     state.favorites = selected;
+    var selectedTimeFormat = document.querySelector('#cmpcalTimeFormatList input:checked');
+    state.timeFormat = selectedTimeFormat ? selectedTimeFormat.value : '24';
     if (!tzChoices.some(function(t){ return t.zone === state.timezone && selected.indexOf(t.key) !== -1; })) {
       state.timezone = tzChoices.find(function(t){ return t.key === selected[0]; }).zone;
     }
     localStorage.setItem('ipcaComplianceCalendarFavoriteTimezones', JSON.stringify(state.favorites));
     localStorage.setItem('ipcaComplianceCalendarTimezone', state.timezone);
+    localStorage.setItem('ipcaComplianceCalendarTimeFormat', state.timeFormat);
     renderAll();
   });
   document.querySelectorAll('[data-cmpcal-filter]').forEach(function (box) {
@@ -952,7 +1085,24 @@ compliance_page_open(array(
   });
   document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ alert('Use drag/drop or resize to change timing. Manual event field editing will be expanded in the next UI pass.'); });
   document.getElementById('cmpcalLinkEvent').addEventListener('click', function(){ alert('Calendar linking backend is not connected yet.'); });
+  document.getElementById('cmpcalNewEventForm').addEventListener('submit', function(e){
+    var start = normalizeTimeText(document.getElementById('cmpcalNewStart').value);
+    var end = normalizeTimeText(document.getElementById('cmpcalNewEnd').value);
+    if (!start || !end) {
+      e.preventDefault();
+      alert(state.timeFormat === '12' ? 'Enter times like 9:00 AM and 10:00 AM.' : 'Enter times like 09:00 and 10:00.');
+      return;
+    }
+    document.getElementById('cmpcalNewStart').value = start;
+    document.getElementById('cmpcalNewEnd').value = end;
+    updateReturnFields();
+  });
+  document.getElementById('cmpcalConfirmChangeForm').addEventListener('submit', updateReturnFields);
+  document.querySelectorAll('.cmpcal-queue-actions').forEach(function(form){
+    form.addEventListener('submit', updateReturnFields);
+  });
   document.getElementById('cmpcalDeleteEventForm').addEventListener('submit', function(e){
+    updateReturnFields();
     if (!document.getElementById('cmpcalDeleteEventId').value) {
       e.preventDefault();
       alert('Only unlocked manual calendar events can be deleted from the schedule.');
