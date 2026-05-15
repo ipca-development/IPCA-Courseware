@@ -1,0 +1,671 @@
+<?php
+declare(strict_types=1);
+
+require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/layout.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceCalendarRepository.php';
+
+compliance_require_access($pdo);
+
+$events = ComplianceCalendarRepository::listEvents($pdo);
+$stats = ComplianceCalendarRepository::stats($events);
+$sources = ComplianceCalendarRepository::connectedSources($pdo);
+$futureCounts = array();
+$todayYmd = date('Y-m-d');
+foreach ($events as $event) {
+    $key = (string)($event['event_type'] ?? 'other');
+    $start = substr((string)($event['starts_at'] ?? ''), 0, 10);
+    if ($start >= $todayYmd) {
+        $futureCounts[$key] = (int)($futureCounts[$key] ?? 0) + 1;
+    }
+}
+
+$eventTypes = array(
+    array('key' => 'internal_audit', 'label' => 'Internal Audit', 'icon' => 'clipboard-check'),
+    array('key' => 'authority_audit', 'label' => 'Authority Audit', 'icon' => 'shield'),
+    array('key' => 'audit_window', 'label' => 'Audit Window', 'icon' => 'calendar'),
+    array('key' => 'rca_cap_deadline', 'label' => 'RCA/CAP Deadline', 'icon' => 'clock'),
+    array('key' => 'corrective_action_deadline', 'label' => 'Corrective Action Deadline', 'icon' => 'wrench'),
+    array('key' => 'effectiveness_review', 'label' => 'Effectiveness Review', 'icon' => 'clipboard-check'),
+    array('key' => 'meeting', 'label' => 'Compliance Meeting', 'icon' => 'users'),
+    array('key' => 'regulatory_review', 'label' => 'Regulatory Review', 'icon' => 'scale'),
+    array('key' => 'manual_change', 'label' => 'Manual Change', 'icon' => 'book'),
+    array('key' => 'cyber_part_is', 'label' => 'Cyber / Part-IS', 'icon' => 'shield'),
+    array('key' => 'other', 'label' => 'Other Event', 'icon' => 'circle'),
+);
+
+cw_header('Compliance · Schedule');
+
+compliance_page_open(array(
+    'overline' => 'Compliance Operating System',
+    'title' => 'Compliance Schedule',
+    'description' => 'Scheduled audits, meetings, deadlines and governance events.',
+    'actions' => array(
+        array('label' => '+ New Event', 'modal' => 'calendarNewEventModal', 'icon' => 'plus'),
+        array('label' => 'Schedule Settings', 'modal' => 'calendarSettingsModal', 'icon' => 'settings'),
+    ),
+    'stats' => array(
+        array('label' => 'Total Events This Month', 'value' => (int)$stats['month_events'], 'sub' => 'read-only projection'),
+        array('label' => 'Upcoming Audits', 'value' => (int)$stats['upcoming_audits'], 'sub' => 'internal + authority'),
+        array('label' => 'Open Deadlines', 'value' => (int)$stats['open_deadlines'], 'sub' => 'governed dates', 'tone' => ((int)$stats['open_deadlines'] > 0 ? 'warn' : 'ok')),
+        array('label' => 'Meetings Planned', 'value' => (int)$stats['meetings_planned'], 'sub' => 'scheduled / live'),
+        array('label' => 'Overdue Items', 'value' => (int)$stats['overdue_items'], 'sub' => 'requires attention', 'tone' => ((int)$stats['overdue_items'] > 0 ? 'crit' : 'ok')),
+    ),
+));
+?>
+<style>
+  .cmpcal-shell{display:grid;grid-template-columns:310px minmax(0,1fr);gap:18px;align-items:start;}
+  .cmpcal-side{display:flex;flex-direction:column;gap:18px;}
+  .cmpcal-card{background:#fff;border:1px solid #e2e8f0;border-radius:18px;box-shadow:0 4px 18px rgba(15,23,42,.05);}
+  .cmpcal-card-pad{padding:18px;}
+  .cmpcal-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;}
+  .cmpcal-title{margin:0;font-size:15px;color:#0f172a;font-weight:800;}
+  .cmpcal-muted{color:#64748b;font-size:12.5px;line-height:1.45;}
+  .cmpcal-mini-nav{display:flex;gap:6px;}
+  .cmpcal-icon-btn,.cmpcal-toolbar button{border:1px solid #cbd5e1;background:#fff;color:#17345d;border-radius:10px;padding:7px 10px;font-weight:800;cursor:pointer;transition:background .16s ease,border-color .16s ease,transform .16s ease;}
+  .cmpcal-icon-btn:hover,.cmpcal-toolbar button:hover{background:#f8fafc;border-color:#9fb2ce;transform:translateY(-1px);}
+  .cmpcal-weekdays,.cmpcal-mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
+  .cmpcal-weekdays{margin-bottom:6px;color:#64748b;font-size:11px;font-weight:800;text-align:center;}
+  .cmpcal-mini-day{position:relative;min-height:34px;border:1px solid transparent;border-radius:10px;background:#fff;color:#0f172a;font-size:12px;font-weight:760;cursor:pointer;transition:background .15s ease,border-color .15s ease;}
+  .cmpcal-mini-day:hover{background:#f1f5f9;border-color:#dbe4f0;}
+  .cmpcal-mini-day.is-out{color:#a8b3c3;background:#f8fafc;}
+  .cmpcal-mini-day.is-today span{border:2px solid #2f5f9f;border-radius:999px;display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;}
+  .cmpcal-mini-day.is-selected{background:#17345d;color:#fff;border-color:#17345d;}
+  .cmpcal-mini-day.is-selected.is-today span{border-color:#fff;}
+  .cmpcal-dot{position:absolute;left:50%;bottom:4px;width:5px;height:5px;border-radius:999px;background:#3a6fd0;transform:translateX(-50%);}
+  .cmpcal-filter-list{display:flex;flex-direction:column;gap:8px;}
+  .cmpcal-filter{display:grid;grid-template-columns:18px 18px minmax(0,1fr) auto;gap:8px;align-items:center;}
+  .cmpcal-filter input{width:15px;height:15px;accent-color:#17345d;}
+  .cmpcal-svg{width:17px;height:17px;display:inline-flex;color:#284e85;}
+  .cmpcal-type-pill{display:inline-flex;align-items:center;min-width:0;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;color:#17345d;background:#eef4ff;border:1px solid #d7e5fb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .cmpcal-count{font-size:11px;font-weight:850;color:#475569;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:999px;padding:3px 7px;}
+  .cmpcal-legend{border-top:1px dashed #cbd5e1;margin-top:16px;padding-top:14px;display:grid;gap:8px;}
+  .cmpcal-legend-row{display:flex;align-items:center;gap:8px;color:#334155;font-size:12px;font-weight:680;}
+  .cmpcal-legend-swatch{width:28px;height:12px;border-radius:999px;background:#dbeafe;border:1px solid #7aa7e8;}
+  .cmpcal-legend-swatch.is-dashed{border-style:dashed;opacity:.68;}
+  .cmpcal-legend-swatch.is-red{background:#fee2e2;border-color:#ef4444;}
+  .cmpcal-legend-swatch.is-yellow{background:#fef3c7;border-color:#f59e0b;}
+  .cmpcal-source-empty{margin-top:12px;padding:10px 12px;border-radius:12px;background:#f8fafc;border:1px dashed #cbd5e1;color:#64748b;font-size:12px;line-height:1.45;}
+  .cmpcal-toolbar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 16px;border-bottom:1px solid #e2e8f0;}
+  .cmpcal-toolbar-left,.cmpcal-toolbar-right{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+  .cmpcal-range{font-size:15px;font-weight:850;color:#0f172a;min-width:220px;}
+  .cmpcal-select{border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#0f172a;padding:8px 10px;font-size:13px;font-weight:720;}
+  .cmpcal-main{padding:14px;}
+  .cmpcal-view{display:none;}
+  .cmpcal-view.is-active{display:block;}
+  .cmpcal-month-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-top:1px solid #e2e8f0;border-left:1px solid #e2e8f0;border-radius:14px;overflow:hidden;}
+  .cmpcal-month-head{background:#f8fafc;color:#475569;font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.06em;padding:10px;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;}
+  .cmpcal-month-day{min-height:132px;background:#fff;border-right:1px solid #e2e8f0;border-bottom:1px solid #e2e8f0;padding:8px;cursor:pointer;transition:background .15s ease;}
+  .cmpcal-month-day:hover{background:#fbfdff;}
+  .cmpcal-month-day.is-out{background:#f8fafc;color:#94a3b8;}
+  .cmpcal-month-day.is-selected{box-shadow:inset 0 0 0 2px rgba(31,64,121,.25);}
+  .cmpcal-month-day.is-dense{background:#f5f8fc;}
+  .cmpcal-day-number{display:inline-flex;align-items:center;justify-content:center;width:27px;height:27px;border-radius:999px;font-size:12px;font-weight:850;color:#0f172a;}
+  .cmpcal-day-number.is-today{border:2px solid #2f5f9f;color:#17345d;}
+  .cmpcal-day-number.is-selected{background:#17345d;color:#fff;}
+  .cmpcal-events{display:flex;flex-direction:column;gap:4px;margin-top:7px;}
+  .cmpcal-event{--event-bg:#eaf2ff;--event-border:#9fbdec;--event-text:#17345d;display:flex;align-items:center;gap:5px;min-width:0;border-radius:999px;border:1px solid var(--event-border);background:var(--event-bg);color:var(--event-text);padding:3px 7px;font-size:11.5px;font-weight:850;line-height:1.25;cursor:pointer;box-shadow:0 1px 2px rgba(15,23,42,.05);}
+  .cmpcal-event svg{width:13px;height:13px;flex:0 0 13px;}
+  .cmpcal-event span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cmpcal-event.is-pending{border-style:dashed;opacity:.68;}
+  .cmpcal-event.is-overdue{--event-bg:#fee2e2;--event-border:#ef4444;--event-text:#991b1b;}
+  .cmpcal-event.is-awaiting{--event-bg:#fef3c7;--event-border:#f59e0b;--event-text:#92400e;}
+  .cmpcal-event.is-locked::after{content:"";width:11px;height:11px;margin-left:auto;background:currentColor;mask:url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path fill="black" d="M17 9V7A5 5 0 0 0 7 7v2H6a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2h-1ZM9 9V7a3 3 0 0 1 6 0v2H9Z"/></svg>') center/contain no-repeat;}
+  .cmpcal-more{font-size:11px;color:#475569;font-weight:850;margin-top:2px;}
+  .cmpcal-type-internal_audit{--event-bg:#eaf2ff;--event-border:#8fb2e8;--event-text:#17345d;}
+  .cmpcal-type-authority_audit{--event-bg:#eef2ff;--event-border:#818cf8;--event-text:#3730a3;}
+  .cmpcal-type-audit_window{--event-bg:#f1f5f9;--event-border:#94a3b8;--event-text:#334155;}
+  .cmpcal-type-rca_cap_deadline{--event-bg:#fff7ed;--event-border:#fb923c;--event-text:#9a3412;}
+  .cmpcal-type-corrective_action_deadline{--event-bg:#ecfdf5;--event-border:#34d399;--event-text:#065f46;}
+  .cmpcal-type-effectiveness_review{--event-bg:#f0f9ff;--event-border:#38bdf8;--event-text:#075985;}
+  .cmpcal-type-meeting{--event-bg:#f5f3ff;--event-border:#a78bfa;--event-text:#5b21b6;}
+  .cmpcal-type-regulatory_review{--event-bg:#fdf4ff;--event-border:#d946ef;--event-text:#86198f;}
+  .cmpcal-type-manual_change{--event-bg:#f7fee7;--event-border:#a3e635;--event-text:#3f6212;}
+  .cmpcal-type-cyber_part_is{--event-bg:#ecfeff;--event-border:#22d3ee;--event-text:#155e75;}
+  .cmpcal-type-other{--event-bg:#f8fafc;--event-border:#cbd5e1;--event-text:#334155;}
+  .cmpcal-week-shell{border:1px solid #e2e8f0;border-radius:14px;overflow:hidden;background:#fff;}
+  .cmpcal-week-head{display:grid;grid-template-columns:70px repeat(7,minmax(0,1fr));border-bottom:1px solid #e2e8f0;background:#f8fafc;}
+  .cmpcal-week-head.day{grid-template-columns:70px minmax(0,1fr);}
+  .cmpcal-week-label{padding:10px;border-left:1px solid #e2e8f0;text-align:center;color:#334155;font-size:12px;font-weight:850;}
+  .cmpcal-week-label.is-today{background:#edf5ff;}
+  .cmpcal-week-label .num{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:999px;margin-left:4px;}
+  .cmpcal-week-label.is-today .num{border:2px solid #2f5f9f;color:#17345d;}
+  .cmpcal-all-day{display:grid;grid-template-columns:70px repeat(7,minmax(0,1fr));border-bottom:1px solid #e2e8f0;}
+  .cmpcal-all-day.day{grid-template-columns:70px minmax(0,1fr);}
+  .cmpcal-all-day-label{padding:9px;color:#64748b;font-size:11px;font-weight:850;background:#fbfdff;}
+  .cmpcal-all-day-cell{min-height:42px;padding:5px;border-left:1px solid #e2e8f0;}
+  .cmpcal-timeline{display:grid;grid-template-columns:70px repeat(7,minmax(0,1fr));position:relative;height:960px;background:#fff;}
+  .cmpcal-timeline.day{grid-template-columns:70px minmax(0,1fr);}
+  .cmpcal-hours{display:grid;grid-template-rows:repeat(24,40px);border-right:1px solid #e2e8f0;background:#fbfdff;}
+  .cmpcal-hour{position:relative;color:#64748b;font-size:11px;font-weight:740;text-align:right;padding-right:8px;}
+  .cmpcal-hour::after{content:"";position:absolute;left:70px;right:-4000px;top:0;border-top:1px solid #eef2f7;}
+  .cmpcal-time-col{position:relative;border-left:1px solid #e2e8f0;background:linear-gradient(to bottom,#fff 0,#fff 39px,#f8fafc 40px);background-size:100% 40px;}
+  .cmpcal-time-col.is-today{background-color:#f8fbff;}
+  .cmpcal-time-event{position:absolute;left:6px;right:6px;border-radius:12px;border:1px solid var(--event-border);background:var(--event-bg);color:var(--event-text);padding:6px 8px;font-size:12px;font-weight:820;overflow:hidden;box-shadow:0 3px 9px rgba(15,23,42,.08);cursor:grab;}
+  .cmpcal-time-event:hover{resize:vertical;}
+  .cmpcal-time-event .time{display:block;font-size:10.5px;opacity:.78;margin-top:2px;}
+  .cmpcal-now-line{position:absolute;height:2px;background:#dc2626;left:0;right:0;z-index:3;}
+  .cmpcal-now-line::before{content:"";position:absolute;left:-5px;top:-4px;width:10px;height:10px;background:#dc2626;border-radius:999px;}
+  .cmpcal-empty-panel{padding:18px;border:1px dashed #cbd5e1;border-radius:14px;background:#f8fafc;color:#64748b;font-size:13px;}
+  .cmpcal-tooltip{position:fixed;z-index:50;max-width:280px;background:#0f172a;color:#fff;border-radius:12px;padding:10px 12px;box-shadow:0 16px 40px rgba(15,23,42,.25);font-size:12px;line-height:1.4;display:none;pointer-events:none;}
+  .cmpcal-tooltip strong{display:block;font-size:13px;margin-bottom:5px;}
+  .cmpcal-form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;}
+  .cmpcal-field span{display:block;font-size:11px;font-weight:800;color:#64748b;margin-bottom:4px;}
+  .cmpcal-field input,.cmpcal-field select,.cmpcal-field textarea{width:100%;border:1px solid #cbd5e1;border-radius:10px;padding:8px 10px;font:inherit;font-size:13px;}
+  .cmpcal-field textarea{min-height:82px;resize:vertical;}
+  .cmpcal-modal-note{border:1px dashed #cbd5e1;background:#f8fafc;border-radius:12px;padding:10px 12px;color:#475569;font-size:13px;margin:10px 0;}
+  .cmpcal-warning{border-color:#f59e0b;background:#fffbeb;color:#92400e;}
+  .cmpcal-event-detail{display:grid;grid-template-columns:170px minmax(0,1fr);gap:8px 14px;font-size:13px;}
+  .cmpcal-event-detail dt{color:#64748b;font-weight:800;}
+  .cmpcal-event-detail dd{margin:0;color:#0f172a;font-weight:650;overflow-wrap:anywhere;}
+  .cmpcal-settings-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-top:10px;}
+  .cmpcal-settings-list label{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px;font-size:13px;font-weight:720;}
+  @media (max-width:1100px){.cmpcal-shell{grid-template-columns:1fr}.cmpcal-side{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));}.cmpcal-toolbar{align-items:flex-start;flex-direction:column}.cmpcal-range{min-width:0}.cmpcal-week-head,.cmpcal-all-day,.cmpcal-timeline{min-width:900px}.cmpcal-main{overflow:auto;}}
+</style>
+
+<div class="cmpcal-shell" id="cmpcalApp">
+  <aside class="cmpcal-side">
+    <section class="cmpcal-card cmpcal-card-pad">
+      <div class="cmpcal-head">
+        <h2 class="cmpcal-title" id="cmpcalMiniTitle">Month Year</h2>
+        <div class="cmpcal-mini-nav">
+          <button type="button" class="cmpcal-icon-btn" id="cmpcalMiniPrev" aria-label="Previous month">&lt;</button>
+          <button type="button" class="cmpcal-icon-btn" id="cmpcalMiniNext" aria-label="Next month">&gt;</button>
+        </div>
+      </div>
+      <div class="cmpcal-weekdays"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+      <div class="cmpcal-mini-grid" id="cmpcalMiniGrid"></div>
+    </section>
+
+    <section class="cmpcal-card cmpcal-card-pad">
+      <div class="cmpcal-head">
+        <h2 class="cmpcal-title">Event Type Filters</h2>
+      </div>
+      <div class="cmpcal-filter-list">
+        <?php foreach ($eventTypes as $type): ?>
+          <?php $count = (int)($futureCounts[$type['key']] ?? 0); ?>
+          <label class="cmpcal-filter">
+            <input type="checkbox" checked data-cmpcal-filter="<?= h($type['key']) ?>">
+            <span class="cmpcal-svg" data-cmpcal-icon="<?= h($type['icon']) ?>"></span>
+            <span class="cmpcal-type-pill"><?= h($type['label']) ?></span>
+            <span class="cmpcal-count"><?= $count ?></span>
+          </label>
+        <?php endforeach; ?>
+      </div>
+      <div class="cmpcal-legend">
+        <div class="cmpcal-title">Legend</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch is-dashed"></span>Dashed = proposed / awaiting approval</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch"></span>Solid = approved</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-svg" data-cmpcal-icon="lock"></span>Lock = governed/locked date</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch is-red"></span>Red = overdue</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch is-yellow"></span>Yellow = awaiting authority/internal response</div>
+      </div>
+      <?php
+      $missing = array();
+      foreach ($sources as $label => $connected) {
+          if (!$connected) { $missing[] = $label; }
+      }
+      ?>
+      <?php if ($missing): ?>
+        <div class="cmpcal-source-empty">
+          <strong>No connected data source yet:</strong>
+          <?= h(implode(', ', $missing)) ?>.
+        </div>
+      <?php endif; ?>
+    </section>
+  </aside>
+
+  <section class="cmpcal-card">
+    <div class="cmpcal-toolbar">
+      <div class="cmpcal-toolbar-left">
+        <button type="button" id="cmpcalPrev">Previous</button>
+        <button type="button" id="cmpcalToday">Today</button>
+        <button type="button" id="cmpcalNext">Next</button>
+        <div class="cmpcal-range" id="cmpcalRange">Schedule</div>
+      </div>
+      <div class="cmpcal-toolbar-right">
+        <select class="cmpcal-select" id="cmpcalViewSelect" aria-label="Schedule view">
+          <option value="month">Month View</option>
+          <option value="week">Week View</option>
+          <option value="day">Day View</option>
+        </select>
+        <select class="cmpcal-select" id="cmpcalTimezoneSelect" aria-label="Timezone"></select>
+      </div>
+    </div>
+    <div class="cmpcal-main">
+      <div class="cmpcal-view is-active" id="cmpcalMonthView"></div>
+      <div class="cmpcal-view" id="cmpcalWeekView"></div>
+      <div class="cmpcal-view" id="cmpcalDayView"></div>
+    </div>
+  </section>
+</div>
+
+<div class="cmpcal-tooltip" id="cmpcalTooltip"></div>
+
+<?php compliance_modal_open('calendarEventViewModal', 'Event details'); ?>
+  <dl class="cmpcal-event-detail" id="cmpcalEventDetails"></dl>
+  <div class="cmpcal-modal-note cmpcal-warning" id="cmpcalEventGovernanceWarning" hidden>
+    This appears to be a governed compliance deadline. Moving or deleting this event may require authority/internal approval and deadline-extension logging.
+  </div>
+  <div class="compliance-modal__footer">
+    <button type="button" class="cmp-btn-secondary" id="cmpcalEditEvent">Edit Event</button>
+    <button type="button" class="cmp-btn-secondary" id="cmpcalLinkEvent">Link to Case/Finding/Audit/CAP/Meeting</button>
+    <a class="cmp-btn-secondary" id="cmpcalOpenLinked" href="#" style="text-decoration:none;">Open Linked Record</a>
+    <button type="button" class="cmp-btn-secondary" id="cmpcalDeleteEvent">Delete Event</button>
+    <button type="button" data-compliance-modal-close>Close</button>
+  </div>
+<?php compliance_modal_close(); ?>
+
+<?php compliance_modal_open('calendarNewEventModal', 'New event'); ?>
+  <form id="cmpcalNewEventForm">
+    <div class="cmpcal-form-grid">
+      <label class="cmpcal-field"><span>Title</span><input name="title" id="cmpcalNewTitle" placeholder="Compliance event title"></label>
+      <label class="cmpcal-field"><span>Event type</span><select name="event_type" id="cmpcalNewType">
+        <?php foreach ($eventTypes as $type): ?><option value="<?= h($type['key']) ?>"><?= h($type['label']) ?></option><?php endforeach; ?>
+      </select></label>
+      <label class="cmpcal-field"><span>Date</span><input type="date" name="date" id="cmpcalNewDate"></label>
+      <label class="cmpcal-field"><span>Start time</span><input type="time" name="start_time" id="cmpcalNewStart"></label>
+      <label class="cmpcal-field"><span>End time</span><input type="time" name="end_time" id="cmpcalNewEnd"></label>
+      <label class="cmpcal-field"><span>Timezone</span><select name="timezone" id="cmpcalNewTimezone"></select></label>
+      <label class="cmpcal-field"><span>Link to</span><select name="link_to">
+        <option>Audit</option><option>Finding</option><option>Corrective Action</option><option>Meeting</option><option>Manual Change Request</option><option>Regulatory Review</option><option>Other</option>
+      </select></label>
+      <label class="cmpcal-field"><span>All-day</span><select name="all_day" id="cmpcalNewAllDay"><option value="1">Yes</option><option value="0">No</option></select></label>
+    </div>
+    <label class="cmpcal-field" style="display:block;margin-top:12px;"><span>Description</span><textarea name="description" placeholder="Governance context, linked record or approval notes"></textarea></label>
+    <div class="cmpcal-modal-note">Calendar editing backend is not connected yet. This modal is UI-only for confirmation; no event is persisted.</div>
+    <div class="compliance-modal__footer">
+      <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+      <button type="button" disabled>Save disabled in UI confirmation phase</button>
+    </div>
+  </form>
+<?php compliance_modal_close(); ?>
+
+<?php compliance_modal_open('calendarSettingsModal', 'Schedule settings'); ?>
+  <p class="cmpcal-muted" style="margin-top:0;">Choose favorite timezones to show in the schedule toolbar. Stored event times are not mutated.</p>
+  <div class="cmpcal-settings-list" id="cmpcalFavoriteTimezoneList"></div>
+  <div class="cmpcal-modal-note">Favorites are stored locally in this browser for UI confirmation only.</div>
+  <div class="compliance-modal__footer">
+    <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+    <button type="button" id="cmpcalSaveTimezoneSettings">Apply favorites</button>
+  </div>
+<?php compliance_modal_close(); ?>
+
+<?php compliance_modal_open('calendarConfirmChangeModal', 'Confirm schedule change'); ?>
+  <dl class="cmpcal-event-detail" id="cmpcalConfirmDetails"></dl>
+  <div class="cmpcal-modal-note cmpcal-warning" id="cmpcalDeadlineMoveWarning" hidden>
+    This appears to be a governed compliance deadline. Moving this event may require authority/internal approval and deadline-extension logging.
+  </div>
+  <div class="cmpcal-modal-note">Calendar editing backend is not connected yet.</div>
+  <div class="compliance-modal__footer">
+    <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+    <button type="button" disabled>Confirm Change</button>
+  </div>
+<?php compliance_modal_close(); ?>
+
+<script>
+(function () {
+  var events = <?= json_encode($events, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?: '[]' ?>;
+  var typeDefs = <?= json_encode($eventTypes, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?: '[]' ?>;
+  var iconMap = {
+    calendar:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7Zm0 4h14M9 4v3m6-3v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    clock:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    hourglass:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10M7 20h10M8 4c0 4 8 4 8 8s-8 4-8 8M16 4c0 4-8 4-8 8s8 4 8 8" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    shield:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l7 3v5c0 4.4-2.7 8.4-7 10c-4.3-1.6-7-5.6-7-10V6l7-3Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    users:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 19c0-2.2-1.8-4-4-4s-4 1.8-4 4M12 12a3 3 0 1 0 0-6a3 3 0 0 0 0 6Zm6 7c0-1.6-.8-3-2-3.7M16 6.4a2.5 2.5 0 0 1 0 4.2M6 19c0-1.6.8-3 2-3.7M8 6.4a2.5 2.5 0 0 0 0 4.2" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    wrench:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 6a4 4 0 0 1 5.5 5.5l-9 9l-3-3l9-9A4 4 0 0 1 14 6Z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    'clipboard-check':'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5h6M9 4h6v3H9V4ZM7 6H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-1M8 14l2.5 2.5L16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    scale:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M5 6h14M7 6l-4 7h8L7 6Zm10 0l-4 7h8l-4-7ZM9 21h6" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    book:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Zm0 13a3 3 0 0 1 3-3h11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    lock:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 10V8a5 5 0 0 1 10 0v2M6 10h12v10H6V10Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    alert:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4l9 16H3L12 4Zm0 5v5m0 3h.01" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    circle:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>'
+  };
+  var browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+  var tzChoices = [
+    {key:'browser', label:'Browser Local', zone:browserTz},
+    {key:'belgium', label:'Belgium', zone:'Europe/Brussels'},
+    {key:'california', label:'California', zone:'America/Los_Angeles'},
+    {key:'utc', label:'UTC', zone:'UTC'},
+    {key:'london', label:'London', zone:'Europe/London'},
+    {key:'new_york', label:'New York', zone:'America/New_York'},
+    {key:'tokyo', label:'Tokyo', zone:'Asia/Tokyo'}
+  ];
+  var state = {
+    current: startOfDay(new Date()),
+    selected: startOfDay(new Date()),
+    mini: startOfMonth(new Date()),
+    view: localStorage.getItem('ipcaComplianceCalendarView') || 'month',
+    timezone: localStorage.getItem('ipcaComplianceCalendarTimezone') || browserTz,
+    favorites: JSON.parse(localStorage.getItem('ipcaComplianceCalendarFavoriteTimezones') || '["browser","belgium","california","utc"]'),
+    activeTypes: new Set(typeDefs.map(function (t) { return t.key; }))
+  };
+
+  document.querySelectorAll('[data-cmpcal-icon]').forEach(function (el) {
+    el.innerHTML = iconMap[el.getAttribute('data-cmpcal-icon')] || iconMap.circle;
+  });
+
+  function pad(n){ return String(n).padStart(2,'0'); }
+  function ymd(d){ return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()); }
+  function parseDt(v){ return new Date(String(v || '').replace(' ', 'T')); }
+  function startOfDay(d){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  function startOfMonth(d){ return new Date(d.getFullYear(), d.getMonth(), 1); }
+  function addDays(d,n){ var x = new Date(d); x.setDate(x.getDate()+n); return x; }
+  function addMonths(d,n){ var x = new Date(d); x.setMonth(x.getMonth()+n); return x; }
+  function mondayStart(d){ var x = startOfDay(d); var day = (x.getDay()+6)%7; return addDays(x, -day); }
+  function sameDay(a,b){ return ymd(a) === ymd(b); }
+  function monthName(d){ return d.toLocaleDateString('en-GB',{month:'long',year:'numeric'}); }
+  function fmtRange(d){ return d.toLocaleDateString('en-GB',{day:'2-digit',month:'short',year:'numeric'}); }
+  function fmtTime(dt){
+    try { return new Intl.DateTimeFormat('en-GB',{timeZone:state.timezone,hour:'2-digit',minute:'2-digit'}).format(dt); }
+    catch(e){ return new Intl.DateTimeFormat('en-GB',{hour:'2-digit',minute:'2-digit'}).format(dt); }
+  }
+  function fmtDateTime(dt){
+    try { return new Intl.DateTimeFormat('en-GB',{timeZone:state.timezone,dateStyle:'medium',timeStyle:'short'}).format(dt); }
+    catch(e){ return dt.toLocaleString('en-GB'); }
+  }
+  function dueText(ev){
+    var diff = Math.round((startOfDay(parseDt(ev.starts_at)) - startOfDay(new Date())) / 86400000);
+    if (diff < 0) { return Math.abs(diff) + ' days overdue'; }
+    if (diff === 0) { return 'due today'; }
+    return 'due in ' + diff + ' days';
+  }
+  function eventTouchesDate(ev, d){
+    var day = ymd(d);
+    return day >= ymd(parseDt(ev.starts_at)) && day <= ymd(parseDt(ev.ends_at || ev.starts_at));
+  }
+  function visibleEvents(){
+    return events.filter(function (ev) { return state.activeTypes.has(ev.event_type || 'other'); });
+  }
+  function classesForEvent(ev){
+    var cls = 'cmpcal-event cmpcal-type-' + (ev.color_key || ev.event_type || 'other');
+    if (ev.is_pending_approval || ev.governance_state === 'pending_approval' || ev.governance_state === 'pending') { cls += ' is-pending'; }
+    if (ev.is_overdue) { cls += ' is-overdue'; }
+    if (ev.governance_state === 'awaiting_response') { cls += ' is-awaiting'; }
+    if (ev.is_locked) { cls += ' is-locked'; }
+    return cls;
+  }
+  function iconForEvent(ev){
+    if (ev.is_overdue) { return iconMap.alert; }
+    if (ev.is_pending_approval || ev.governance_state === 'awaiting_response') { return iconMap.hourglass; }
+    if (ev.is_locked && String(ev.event_type || '').indexOf('deadline') !== -1) { return iconMap.lock; }
+    return iconMap[ev.icon_key] || iconMap.circle;
+  }
+  function eventPill(ev){
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = classesForEvent(ev);
+    btn.draggable = true;
+    btn.dataset.eventId = ev.id;
+    btn.innerHTML = iconForEvent(ev) + '<span>' + escapeHtml(ev.title) + '</span>';
+    btn.addEventListener('click', function (e) { e.stopPropagation(); openEventModal(ev); });
+    btn.addEventListener('dragstart', function (e) { e.dataTransfer.setData('text/plain', ev.id); });
+    btn.addEventListener('mouseenter', function (e) { showTooltip(ev, e); });
+    btn.addEventListener('mousemove', moveTooltip);
+    btn.addEventListener('mouseleave', hideTooltip);
+    return btn;
+  }
+  function escapeHtml(s){
+    return String(s == null ? '' : s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c];});
+  }
+  function showDialog(id){
+    var d = document.getElementById(id);
+    if (!d) { return; }
+    if (typeof d.showModal === 'function') { d.showModal(); } else { d.setAttribute('open','open'); }
+  }
+  function setNewModalDate(d, hour){
+    document.getElementById('cmpcalNewDate').value = ymd(d);
+    document.getElementById('cmpcalNewStart').value = hour != null ? pad(hour) + ':00' : '09:00';
+    document.getElementById('cmpcalNewEnd').value = hour != null ? pad(Math.min(23, hour + 1)) + ':00' : '10:00';
+    document.getElementById('cmpcalNewTimezone').innerHTML = timezoneOptionsHtml();
+    showDialog('calendarNewEventModal');
+  }
+  function openEventModal(ev){
+    var details = document.getElementById('cmpcalEventDetails');
+    var metadata = ev.metadata || {};
+    var linked = ev.linked_object_type ? ev.linked_object_type + ' #' + (ev.linked_object_id || ev.source_id || '') : '';
+    details.innerHTML = detailRows({
+      'Event title': ev.title,
+      'Event type': labelForType(ev.event_type),
+      'Status': ev.status || 'Not set',
+      'Governance state': ev.governance_state || 'Not set',
+      'Date': fmtDateTime(parseDt(ev.starts_at)),
+      'Start time': ev.is_all_day ? 'All day' : fmtTime(parseDt(ev.starts_at)),
+      'End time': ev.is_all_day ? 'All day' : fmtTime(parseDt(ev.ends_at || ev.starts_at)),
+      'Timezone': state.timezone,
+      'Linked object type': ev.linked_object_type || 'Not linked',
+      'Linked object reference': linked || metadata.code || 'Not linked',
+      'Description': ev.description || 'No description',
+      'Source table/source object': (ev.source_table || 'No connected data source yet') + ' / ' + (ev.source_id || ''),
+      'Created by': ev.created_by || 'Not available',
+      'Updated by': ev.updated_by || 'Not available'
+    });
+    document.getElementById('cmpcalEventGovernanceWarning').hidden = !(ev.is_locked || ev.requires_approval_to_move);
+    var open = document.getElementById('cmpcalOpenLinked');
+    if (metadata.linked_url) { open.href = metadata.linked_url; open.removeAttribute('aria-disabled'); }
+    else { open.href = '#'; open.setAttribute('aria-disabled','true'); }
+    document.getElementById('cmpcalDeleteEvent').disabled = !!ev.is_locked;
+    showDialog('calendarEventViewModal');
+  }
+  function detailRows(obj){
+    return Object.keys(obj).map(function (k) { return '<dt>' + escapeHtml(k) + '</dt><dd>' + escapeHtml(obj[k]) + '</dd>'; }).join('');
+  }
+  function labelForType(key){
+    var found = typeDefs.find(function(t){ return t.key === key; });
+    return found ? found.label : 'Other Event';
+  }
+  function showTooltip(ev, e){
+    var tip = document.getElementById('cmpcalTooltip');
+    var meta = ev.metadata || {};
+    tip.innerHTML = '<strong>' + escapeHtml(ev.title) + '</strong>'
+      + '<div>' + escapeHtml(meta.authority || ev.governance_state || 'internal') + '</div>'
+      + '<div>' + escapeHtml(dueText(ev)) + '</div>'
+      + '<div>' + escapeHtml(meta.code || meta.finding || ev.linked_object_type || 'No linked record') + '</div>'
+      + '<div>Status: ' + escapeHtml(ev.status || 'Not set') + '</div>';
+    tip.style.display = 'block';
+    moveTooltip(e);
+  }
+  function moveTooltip(e){
+    var tip = document.getElementById('cmpcalTooltip');
+    tip.style.left = (e.clientX + 14) + 'px';
+    tip.style.top = (e.clientY + 14) + 'px';
+  }
+  function hideTooltip(){ document.getElementById('cmpcalTooltip').style.display = 'none'; }
+
+  function renderMini(){
+    document.getElementById('cmpcalMiniTitle').textContent = monthName(state.mini);
+    var grid = document.getElementById('cmpcalMiniGrid');
+    grid.innerHTML = '';
+    var start = mondayStart(startOfMonth(state.mini));
+    for (var i=0;i<42;i++){
+      var d = addDays(start, i);
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cmpcal-mini-day';
+      if (d.getMonth() !== state.mini.getMonth()) { btn.className += ' is-out'; }
+      if (sameDay(d, new Date())) { btn.className += ' is-today'; }
+      if (sameDay(d, state.selected)) { btn.className += ' is-selected'; }
+      btn.innerHTML = '<span>' + d.getDate() + '</span>' + (visibleEvents().some(function(ev){return eventTouchesDate(ev,d);}) ? '<i class="cmpcal-dot"></i>' : '');
+      btn.addEventListener('click', (function(day){ return function(){ state.selected = day; state.current = day; renderAll(); }; })(d));
+      grid.appendChild(btn);
+    }
+  }
+  function renderMonth(){
+    var root = document.getElementById('cmpcalMonthView');
+    root.innerHTML = '<div class="cmpcal-month-grid" id="cmpcalMonthGrid"></div>';
+    var grid = document.getElementById('cmpcalMonthGrid');
+    ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'].forEach(function (w) {
+      var h = document.createElement('div'); h.className = 'cmpcal-month-head'; h.textContent = w; grid.appendChild(h);
+    });
+    var start = mondayStart(startOfMonth(state.current));
+    for (var i=0;i<42;i++){
+      var d = addDays(start, i);
+      var dayEvents = visibleEvents().filter(function(ev){ return eventTouchesDate(ev,d); });
+      var cell = document.createElement('div');
+      cell.className = 'cmpcal-month-day';
+      if (d.getMonth() !== state.current.getMonth()) { cell.className += ' is-out'; }
+      if (sameDay(d, state.selected)) { cell.className += ' is-selected'; }
+      if (dayEvents.length > 4) { cell.className += ' is-dense'; }
+      cell.innerHTML = '<span class="cmpcal-day-number ' + (sameDay(d,new Date()) ? 'is-today ' : '') + (sameDay(d,state.selected) ? 'is-selected' : '') + '">' + d.getDate() + '</span><div class="cmpcal-events"></div>';
+      var list = cell.querySelector('.cmpcal-events');
+      dayEvents.slice(0,4).forEach(function(ev){ list.appendChild(eventPill(ev)); });
+      if (dayEvents.length > 4) {
+        var more = document.createElement('div'); more.className = 'cmpcal-more'; more.textContent = '+' + (dayEvents.length - 4) + ' more'; list.appendChild(more);
+      }
+      cell.addEventListener('click', (function(day){ return function(){ state.selected = day; setNewModalDate(day); renderAll(); }; })(d));
+      cell.addEventListener('dragover', function(e){ e.preventDefault(); });
+      cell.addEventListener('drop', (function(day){ return function(e){ e.preventDefault(); confirmChange(e.dataTransfer.getData('text/plain'), day); }; })(d));
+      grid.appendChild(cell);
+    }
+  }
+  function renderAgenda(kind){
+    var isDay = kind === 'day';
+    var root = document.getElementById(isDay ? 'cmpcalDayView' : 'cmpcalWeekView');
+    var start = isDay ? startOfDay(state.current) : mondayStart(state.current);
+    var days = isDay ? [start] : [0,1,2,3,4,5,6].map(function(i){ return addDays(start,i); });
+    root.innerHTML = '<div class="cmpcal-week-shell"><div class="cmpcal-week-head ' + (isDay ? 'day' : '') + '"><div></div></div><div class="cmpcal-all-day ' + (isDay ? 'day' : '') + '"><div class="cmpcal-all-day-label">All-day</div></div><div class="cmpcal-timeline ' + (isDay ? 'day' : '') + '"><div class="cmpcal-hours"></div></div></div>';
+    var head = root.querySelector('.cmpcal-week-head');
+    var allDay = root.querySelector('.cmpcal-all-day');
+    var timeline = root.querySelector('.cmpcal-timeline');
+    var hours = root.querySelector('.cmpcal-hours');
+    for (var h=0;h<24;h++){ var hour = document.createElement('div'); hour.className='cmpcal-hour'; hour.textContent=pad(h)+':00'; hours.appendChild(hour); }
+    days.forEach(function(day){
+      var label = document.createElement('div');
+      label.className = 'cmpcal-week-label' + (sameDay(day,new Date()) ? ' is-today' : '');
+      label.innerHTML = day.toLocaleDateString('en-GB',{weekday:'short'}) + ' <span class="num">' + day.getDate() + '</span>';
+      head.appendChild(label);
+      var ad = document.createElement('div'); ad.className = 'cmpcal-all-day-cell';
+      visibleEvents().filter(function(ev){ return ev.is_all_day && eventTouchesDate(ev,day); }).slice(0,4).forEach(function(ev){ ad.appendChild(eventPill(ev)); });
+      ad.addEventListener('click', function(){ setNewModalDate(day); });
+      ad.addEventListener('dragover', function(e){ e.preventDefault(); });
+      ad.addEventListener('drop', function(e){ e.preventDefault(); confirmChange(e.dataTransfer.getData('text/plain'), day); });
+      allDay.appendChild(ad);
+      var col = document.createElement('div'); col.className = 'cmpcal-time-col' + (sameDay(day,new Date()) ? ' is-today' : '');
+      col.addEventListener('click', function(e){
+        if (e.target !== col) { return; }
+        var rect = col.getBoundingClientRect();
+        var hour = Math.floor(((e.clientY - rect.top) / rect.height) * 24);
+        setNewModalDate(day, Math.max(0, Math.min(23, hour)));
+      });
+      col.addEventListener('dragover', function(e){ e.preventDefault(); });
+      col.addEventListener('drop', function(e){ e.preventDefault(); confirmChange(e.dataTransfer.getData('text/plain'), day); });
+      var timed = visibleEvents().filter(function(ev){ return !ev.is_all_day && eventTouchesDate(ev,day); });
+      timed.forEach(function(ev, idx){
+        var s = parseDt(ev.starts_at), e = parseDt(ev.ends_at || ev.starts_at);
+        var sm = s.getHours()*60 + s.getMinutes();
+        var em = Math.max(sm + 30, e.getHours()*60 + e.getMinutes());
+        var box = document.createElement('div');
+        box.className = 'cmpcal-time-event cmpcal-type-' + (ev.color_key || ev.event_type || 'other') + (ev.is_pending_approval ? ' is-pending' : '') + (ev.is_overdue ? ' is-overdue' : '');
+        box.draggable = true;
+        box.style.top = (sm / 1440 * 960) + 'px';
+        box.style.height = (Math.max(24, (em-sm) / 1440 * 960)) + 'px';
+        if (timed.length > 1) { box.style.left = (6 + (idx % 3) * 12) + 'px'; box.style.right = (6 + ((timed.length - idx - 1) % 3) * 12) + 'px'; }
+        box.innerHTML = iconForEvent(ev) + ' ' + escapeHtml(ev.title) + '<span class="time">' + fmtTime(s) + ' - ' + fmtTime(e) + '</span>';
+        box.addEventListener('click', function(x){ x.stopPropagation(); openEventModal(ev); });
+        box.addEventListener('dragstart', function(x){ x.dataTransfer.setData('text/plain', ev.id); });
+        box.addEventListener('mouseenter', function(x){ showTooltip(ev,x); });
+        box.addEventListener('mousemove', moveTooltip);
+        box.addEventListener('mouseleave', hideTooltip);
+        col.appendChild(box);
+      });
+      if (sameDay(day,new Date())) {
+        var now = new Date();
+        var line = document.createElement('div');
+        line.className = 'cmpcal-now-line';
+        line.style.top = (((now.getHours()*60 + now.getMinutes()) / 1440) * 960) + 'px';
+        col.appendChild(line);
+      }
+      timeline.appendChild(col);
+    });
+  }
+  function confirmChange(eventId, proposedDay){
+    var ev = events.find(function(x){ return x.id === eventId; });
+    if (!ev) { return; }
+    document.getElementById('cmpcalConfirmDetails').innerHTML = detailRows({
+      'Event': ev.title,
+      'Current date/time': fmtDateTime(parseDt(ev.starts_at)),
+      'Proposed date/time': fmtRange(proposedDay),
+      'Governance state': ev.governance_state || 'Not set',
+      'Linked object': (ev.linked_object_type || 'Not linked') + ' #' + (ev.linked_object_id || ev.source_id || ''),
+    });
+    document.getElementById('cmpcalDeadlineMoveWarning').hidden = !(ev.is_locked || ev.requires_approval_to_move || String(ev.event_type || '').indexOf('deadline') !== -1);
+    showDialog('calendarConfirmChangeModal');
+  }
+  function renderRange(){
+    var el = document.getElementById('cmpcalRange');
+    if (state.view === 'month') { el.textContent = monthName(state.current); return; }
+    if (state.view === 'week') {
+      var s = mondayStart(state.current), e = addDays(s,6);
+      el.textContent = fmtRange(s) + ' - ' + fmtRange(e);
+      return;
+    }
+    el.textContent = fmtRange(state.current);
+  }
+  function renderTimezoneSelect(){
+    var sel = document.getElementById('cmpcalTimezoneSelect');
+    sel.innerHTML = timezoneOptionsHtml();
+    sel.value = state.timezone;
+    document.getElementById('cmpcalNewTimezone').innerHTML = timezoneOptionsHtml();
+  }
+  function timezoneOptionsHtml(){
+    return tzChoices.filter(function(t){ return state.favorites.indexOf(t.key) !== -1; }).map(function(t){
+      return '<option value="' + escapeHtml(t.zone) + '">' + escapeHtml(t.label + ' (' + t.zone + ')') + '</option>';
+    }).join('');
+  }
+  function renderSettings(){
+    var root = document.getElementById('cmpcalFavoriteTimezoneList');
+    root.innerHTML = tzChoices.map(function(t){
+      var checked = state.favorites.indexOf(t.key) !== -1 ? ' checked' : '';
+      return '<label><input type="checkbox" value="' + escapeHtml(t.key) + '"' + checked + '> ' + escapeHtml(t.label + ' (' + t.zone + ')') + '</label>';
+    }).join('');
+  }
+  function renderAll(){
+    document.getElementById('cmpcalViewSelect').value = state.view;
+    document.querySelectorAll('.cmpcal-view').forEach(function(el){ el.classList.remove('is-active'); });
+    document.getElementById('cmpcal' + state.view.charAt(0).toUpperCase() + state.view.slice(1) + 'View').classList.add('is-active');
+    renderMini();
+    renderRange();
+    renderTimezoneSelect();
+    if (state.view === 'month') { renderMonth(); }
+    if (state.view === 'week') { renderAgenda('week'); }
+    if (state.view === 'day') { renderAgenda('day'); }
+    renderSettings();
+  }
+
+  document.getElementById('cmpcalMiniPrev').addEventListener('click', function(){ state.mini = addMonths(state.mini,-1); renderMini(); });
+  document.getElementById('cmpcalMiniNext').addEventListener('click', function(){ state.mini = addMonths(state.mini,1); renderMini(); });
+  document.getElementById('cmpcalPrev').addEventListener('click', function(){ state.current = state.view === 'month' ? addMonths(state.current,-1) : addDays(state.current, state.view === 'week' ? -7 : -1); state.selected = state.current; state.mini = startOfMonth(state.current); renderAll(); });
+  document.getElementById('cmpcalNext').addEventListener('click', function(){ state.current = state.view === 'month' ? addMonths(state.current,1) : addDays(state.current, state.view === 'week' ? 7 : 1); state.selected = state.current; state.mini = startOfMonth(state.current); renderAll(); });
+  document.getElementById('cmpcalToday').addEventListener('click', function(){ state.current = startOfDay(new Date()); state.selected = state.current; state.mini = startOfMonth(state.current); renderAll(); });
+  document.getElementById('cmpcalViewSelect').addEventListener('change', function(e){ state.view = e.target.value; localStorage.setItem('ipcaComplianceCalendarView', state.view); renderAll(); });
+  document.getElementById('cmpcalTimezoneSelect').addEventListener('change', function(e){ state.timezone = e.target.value; localStorage.setItem('ipcaComplianceCalendarTimezone', state.timezone); renderAll(); });
+  document.getElementById('cmpcalSaveTimezoneSettings').addEventListener('click', function(){
+    var selected = Array.from(document.querySelectorAll('#cmpcalFavoriteTimezoneList input:checked')).map(function(i){ return i.value; });
+    if (selected.length === 0) { selected = ['browser']; }
+    state.favorites = selected;
+    if (!tzChoices.some(function(t){ return t.zone === state.timezone && selected.indexOf(t.key) !== -1; })) {
+      state.timezone = tzChoices.find(function(t){ return t.key === selected[0]; }).zone;
+    }
+    localStorage.setItem('ipcaComplianceCalendarFavoriteTimezones', JSON.stringify(state.favorites));
+    localStorage.setItem('ipcaComplianceCalendarTimezone', state.timezone);
+    renderAll();
+  });
+  document.querySelectorAll('[data-cmpcal-filter]').forEach(function (box) {
+    box.addEventListener('change', function(){
+      if (box.checked) { state.activeTypes.add(box.getAttribute('data-cmpcal-filter')); }
+      else { state.activeTypes.delete(box.getAttribute('data-cmpcal-filter')); }
+      renderAll();
+    });
+  });
+  document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ alert('Calendar editing backend is not connected yet.'); });
+  document.getElementById('cmpcalLinkEvent').addEventListener('click', function(){ alert('Calendar linking backend is not connected yet.'); });
+  document.getElementById('cmpcalDeleteEvent').addEventListener('click', function(){ alert('Deletion is disabled in this UI confirmation phase. Governed/locked events cannot be deleted casually.'); });
+
+  renderAll();
+})();
+</script>
+<?php
+compliance_page_close();
+cw_footer();

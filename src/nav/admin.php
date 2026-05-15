@@ -120,6 +120,7 @@ return [
         'icon' => 'compliance',
         'match_paths' => [
             '/admin/compliance/index.php',
+            '/admin/compliance/calendar.php',
         ],
         'visible' => static function (): bool {
             if (!function_exists('cw_current_user')) {
@@ -153,6 +154,12 @@ return [
                 'label' => 'Dashboard',
                 'icon' => 'dashboard',
                 'href' => '/admin/compliance/index.php',
+            ],
+            [
+                'key' => 'compliance_schedule',
+                'label' => 'Schedule',
+                'icon' => 'schedule',
+                'href' => '/admin/compliance/calendar.php',
             ],
 
             [
