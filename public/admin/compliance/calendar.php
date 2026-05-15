@@ -562,6 +562,7 @@ compliance_page_open(array(
     dragGhost: null,
     pendingVisualChange: false,
     suppressEventClick: false,
+    suppressScheduleClick: false,
     activeTypes: new Set(typeDefs.map(function (t) { return t.key; }))
   };
   var urlParams = new URLSearchParams(window.location.search);
@@ -741,6 +742,13 @@ compliance_page_open(array(
     }
     state.dragGhost = null;
   }
+  function consumeSuppressedScheduleClick(e){
+    if (!state.suppressScheduleClick) { return false; }
+    e.preventDefault();
+    e.stopPropagation();
+    state.suppressScheduleClick = false;
+    return true;
+  }
   function droppedEventId(e){
     var id = '';
     if (e.dataTransfer && typeof e.dataTransfer.getData === 'function') {
@@ -904,7 +912,7 @@ compliance_page_open(array(
       if (dayEvents.length > 4) {
         var more = document.createElement('div'); more.className = 'cmpcal-more'; more.textContent = '+' + (dayEvents.length - 4) + ' more'; list.appendChild(more);
       }
-      cell.addEventListener('click', (function(day){ return function(){ state.selected = day; setNewModalDate(day); renderAll(); }; })(d));
+      cell.addEventListener('click', (function(day){ return function(e){ if (consumeSuppressedScheduleClick(e)) { return; } state.selected = day; setNewModalDate(day); renderAll(); }; })(d));
       cell.addEventListener('dragover', function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; cell.classList.add('is-drop-target'); });
       cell.addEventListener('dragleave', function(){ cell.classList.remove('is-drop-target'); });
       cell.addEventListener('drop', (function(day){ return function(e){ e.preventDefault(); cell.classList.remove('is-drop-target'); confirmChange(droppedEventId(e), day); }; })(d));
@@ -929,13 +937,14 @@ compliance_page_open(array(
       head.appendChild(label);
       var ad = document.createElement('div'); ad.className = 'cmpcal-all-day-cell';
       visibleEvents().filter(function(ev){ return ev.is_all_day && eventTouchesDate(ev,day); }).slice(0,4).forEach(function(ev){ ad.appendChild(eventPill(ev)); });
-      ad.addEventListener('click', function(){ setNewModalDate(day); });
+      ad.addEventListener('click', function(e){ if (consumeSuppressedScheduleClick(e)) { return; } setNewModalDate(day); });
       ad.addEventListener('dragover', function(e){ e.preventDefault(); e.dataTransfer.dropEffect = 'move'; ad.classList.add('is-drop-target'); });
       ad.addEventListener('dragleave', function(){ ad.classList.remove('is-drop-target'); });
       ad.addEventListener('drop', function(e){ e.preventDefault(); ad.classList.remove('is-drop-target'); confirmChange(droppedEventId(e), day); });
       allDay.appendChild(ad);
       var col = document.createElement('div'); col.className = 'cmpcal-time-col' + (sameDay(day,new Date()) ? ' is-today' : '');
       col.addEventListener('click', function(e){
+        if (consumeSuppressedScheduleClick(e)) { return; }
         if (e.target !== col) { return; }
         var rect = col.getBoundingClientRect();
         var hour = Math.floor(((e.clientY - rect.top) / rect.height) * 24);
@@ -983,6 +992,10 @@ compliance_page_open(array(
         box.addEventListener('drag', function(x){ moveDragGhost(x); });
         box.addEventListener('dragend', function(){ state.draggingEventId = ''; box.classList.remove('is-dragging'); removeDragGhost(); renderAll(); });
         box.querySelectorAll('.cmpcal-resize-handle').forEach(function(handle){
+          handle.addEventListener('click', function(x){
+            x.preventDefault();
+            x.stopPropagation();
+          });
           handle.addEventListener('pointerdown', function(x){ startResize(x, ev, day, col, box, handle.classList.contains('top') ? 'start' : 'end', sm, em); });
         });
         box.addEventListener('mouseenter', function(x){ showTooltip(ev,x); });
@@ -1005,6 +1018,10 @@ compliance_page_open(array(
     e.stopPropagation();
     hideTooltip();
     state.suppressEventClick = true;
+    state.suppressScheduleClick = true;
+    if (e.currentTarget && typeof e.currentTarget.setPointerCapture === 'function') {
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch (err) {}
+    }
     box.draggable = false;
     box.classList.add('is-resizing');
     var nextStart = startMinutes;
@@ -1036,6 +1053,7 @@ compliance_page_open(array(
       } else {
         setTimeout(function(){ state.suppressEventClick = false; }, 0);
       }
+      setTimeout(function(){ state.suppressScheduleClick = false; }, 300);
     }
     document.addEventListener('pointermove', move);
     document.addEventListener('pointerup', up);
