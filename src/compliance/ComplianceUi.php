@@ -290,7 +290,12 @@ if (!function_exists('compliance_ui_script')) {
             }
             if (ev.target.matches('[data-compliance-modal-close]')) {
               var dialog = ev.target.closest('dialog');
-              if (dialog) { dialog.close(); }
+              if (dialog) {
+                if (typeof dialog.close === 'function') {
+                  dialog.close();
+                }
+                dialog.removeAttribute('open');
+              }
               ev.preventDefault();
               return;
             }

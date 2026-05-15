@@ -497,6 +497,15 @@ if ($detailId > 0) {
                   }
                 });
               });
+              modal.querySelectorAll('[data-compliance-modal-close]').forEach(function (btn) {
+                btn.addEventListener('click', function (ev) {
+                  ev.preventDefault();
+                  if (typeof modal.close === 'function') {
+                    modal.close();
+                  }
+                  modal.removeAttribute('open');
+                });
+              });
             })();
           </script>
         <?php endif; ?>
