@@ -78,20 +78,10 @@ function cmp_finding_target_date_display(?string $date): string
         return '<span style="color:var(--text-muted);">—</span>';
     }
     try {
-        $today = new DateTimeImmutable('today');
-        $target = new DateTimeImmutable(substr($date, 0, 10));
-        $days = (int)$today->diff($target)->format('%r%a');
-        if ($days === 0) {
-            $note = 'Due today';
-        } elseif ($days > 0) {
-            $note = $days . ' days left';
-        } else {
-            $note = 'Expired ' . abs($days) . ' days ago';
-        }
-        return '<div style="display:flex;flex-direction:column;gap:4px;">'
-            . '<span class="cmp-mono">' . h(substr($date, 0, 10)) . '</span>'
+        new DateTimeImmutable(substr($date, 0, 10));
+        return '<div class="cmp-list-deadline">'
+            . '<span class="cmp-list-date">' . h(substr($date, 0, 10)) . '</span>'
             . compliance_deadline_badge($date)
-            . '<span style="font-size:12px;color:var(--text-muted);">' . h($note) . '</span>'
             . '</div>';
     } catch (Throwable) {
         return '<span class="cmp-mono">' . h($date) . '</span>';
@@ -980,16 +970,39 @@ if ($detailId > 0) {
           <div class="cmp-count-pill"><?= count($rows) ?></div>
         </div>
         <div class="compliance-table-wrap">
-        <table class="compliance-table">
+        <style>
+          .cmp-finding-list-table th,
+          .cmp-finding-list-table td,
+          .cmp-finding-list-table td:first-child,
+          .cmp-finding-list-table .cmp-mono{
+            font-family:var(--font-sans,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif) !important;
+            font-size:11.5px !important;
+            color:#324155 !important;
+            font-weight:650;
+            letter-spacing:.01em;
+          }
+          .cmp-finding-list-table .cmp-ref-link{color:#324155 !important;font-weight:720;text-decoration:none;}
+          .cmp-finding-list-table .cmp-list-titlecell{
+            max-width:640px;
+            display:-webkit-box;
+            -webkit-line-clamp:2;
+            -webkit-box-orient:vertical;
+            overflow:hidden;
+            line-height:1.35;
+          }
+          .cmp-finding-list-table .cmp-list-deadline{display:flex;flex-direction:column;gap:4px;align-items:flex-start;}
+          .cmp-finding-list-table .cmp-list-date{font-size:11.5px;color:#324155;font-weight:650;}
+        </style>
+        <table class="compliance-table cmp-finding-list-table">
           <thead>
             <tr>
-              <th>Reference</th>
-              <th>Audit reference</th>
+              <th style="width:130px;">Reference</th>
+              <th style="width:130px;">Audit reference</th>
               <th>Title</th>
-              <th>Classification</th>
-              <th>Severity</th>
-              <th>Status</th>
-              <th>Target date</th>
+              <th style="width:105px;">Classification</th>
+              <th style="width:95px;">Severity</th>
+              <th style="width:115px;">Status</th>
+              <th style="width:150px;">Target date</th>
             </tr>
           </thead>
           <tbody>
@@ -1003,13 +1016,13 @@ if ($detailId > 0) {
                 $targetDate = cmp_finding_target_date($pdo, (int)$r['id'], isset($r['target_date']) ? (string)$r['target_date'] : null);
             ?>
               <tr data-href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
-                <td class="cmp-mono">
-                  <a href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>" style="color:#1f4079;font-weight:700;text-decoration:none;">
+                <td>
+                  <a class="cmp-ref-link" href="/admin/compliance/findings.php?id=<?= (int)$r['id'] ?>">
                     <?= h((string)$r['finding_code']) ?>
                   </a>
                 </td>
-                <td class="cmp-mono"><?= $auditIdForRow > 0 && isset($auditCodeById[$auditIdForRow]) ? h($auditCodeById[$auditIdForRow]) : '<span style="color:var(--text-muted);">—</span>' ?></td>
-                <td><?= h((string)$r['title']) ?></td>
+                <td><?= $auditIdForRow > 0 && isset($auditCodeById[$auditIdForRow]) ? h($auditCodeById[$auditIdForRow]) : '<span style="color:var(--text-muted);">—</span>' ?></td>
+                <td><span class="cmp-list-titlecell"><?= h((string)$r['title']) ?></span></td>
                 <td><?= compliance_badge((string)$r['classification'], 'level') ?></td>
                 <td><?= compliance_badge($sev, 'severity') ?></td>
                 <td><?= compliance_badge($stRaw) ?></td>

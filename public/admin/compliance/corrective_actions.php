@@ -77,6 +77,18 @@ function cap_days_delta(?string $deadline): string
     return $days > 0 ? ($days . ' days left') : (abs($days) . ' days passed');
 }
 
+function cap_deadline_display(?string $date): string
+{
+    $date = $date !== null ? trim($date) : '';
+    if ($date === '') {
+        return '<span style="color:var(--text-muted);">—</span>';
+    }
+    return '<div class="cmp-list-deadline">'
+        . '<span class="cmp-list-date">' . h(substr($date, 0, 10)) . '</span>'
+        . compliance_deadline_badge($date)
+        . '</div>';
+}
+
 if (!empty($_SESSION['_ipca_compliance_cap_suggest']['saved_at'])
     && is_numeric($_SESSION['_ipca_compliance_cap_suggest']['saved_at'])
     && time() - (int)$_SESSION['_ipca_compliance_cap_suggest']['saved_at'] > 1800) {
@@ -594,44 +606,65 @@ if ($detailId > 0) {
 
       <section class="cmp-card compliance-card--full" style="overflow:hidden;">
         <div class="compliance-table-wrap">
-        <table class="compliance-table">
+        <style>
+          .cmp-cap-list-table th,
+          .cmp-cap-list-table td,
+          .cmp-cap-list-table td:first-child,
+          .cmp-cap-list-table .cmp-mono{
+            font-family:var(--font-sans,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif) !important;
+            font-size:11.5px !important;
+            color:#324155 !important;
+            font-weight:650;
+            letter-spacing:.01em;
+          }
+          .cmp-cap-list-table .cmp-ref-link{color:#324155 !important;font-weight:720;text-decoration:none;}
+          .cmp-cap-list-table .cmp-list-titlecell{
+            max-width:680px;
+            display:-webkit-box;
+            -webkit-line-clamp:2;
+            -webkit-box-orient:vertical;
+            overflow:hidden;
+            line-height:1.35;
+          }
+          .cmp-cap-list-table .cmp-list-deadline{display:flex;flex-direction:column;gap:4px;align-items:flex-start;}
+          .cmp-cap-list-table .cmp-list-date{font-size:11.5px;color:#324155;font-weight:650;}
+        </style>
+        <table class="compliance-table cmp-cap-list-table">
           <thead>
             <tr>
-              <th>Reference</th>
-              <th>Finding reference</th>
+              <th style="width:130px;">Reference</th>
+              <th style="width:130px;">Finding reference</th>
               <th>Title</th>
-              <th>Type</th>
-              <th>Status</th>
-              <th>Effectiveness</th>
-              <th>Deadline</th>
-              <th>Days left/passed</th>
+              <th style="width:105px;">Type</th>
+              <th style="width:115px;">Status</th>
+              <th style="width:115px;">Effectiveness</th>
+              <th style="width:150px;">Deadline</th>
             </tr>
           </thead>
           <tbody>
             <?php if (!$rows): ?>
-              <tr><td colspan="8" style="padding:20px;color:#64748b;">No matching actions.</td></tr>
+              <tr><td colspan="7" style="padding:20px;color:#64748b;">No matching actions.</td></tr>
             <?php endif; ?>
             <?php foreach ($rows as $r):
                 $effectiveDue = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline($pdo, (int)$r['id'], isset($r['due_date']) ? (string)$r['due_date'] : null);
                 $eff = cap_latest_effectiveness($pdo, (int)$r['id'], (string)$r['status']);
                 ?>
               <tr data-href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
-                <td class="cmp-mono">
-                  <a href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" style="color:#1f4079;font-weight:700;">
+                <td>
+                  <a class="cmp-ref-link" href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>">
                     <?= h((string)$r['action_code']) ?>
                   </a>
                 </td>
                 <td>
-                  <a href="/admin/compliance/findings.php?id=<?= (int)$r['finding_id'] ?>" style="color:#1f4079;">
+                  <a class="cmp-ref-link" href="/admin/compliance/findings.php?id=<?= (int)$r['finding_id'] ?>">
                     <?= h((string)$r['finding_code']) ?>
                   </a>
                 </td>
-                <td><?= h((string)$r['title']) ?></td>
-                <td><?= h(compliance_friendly_label((string)$r['action_type'])) ?></td>
+                <td><span class="cmp-list-titlecell"><?= h((string)$r['title']) ?></span></td>
+                <td><?= compliance_badge((string)$r['action_type']) ?></td>
                 <td><?= compliance_badge((string)$r['status']) ?></td>
                 <td><?= compliance_badge($eff) ?></td>
-                <td class="cmp-mono"><?= compliance_deadline_badge($effectiveDue) ?></td>
-                <td class="cmp-mono"><?= h(cap_days_delta($effectiveDue)) ?></td>
+                <td><?= cap_deadline_display($effectiveDue) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>

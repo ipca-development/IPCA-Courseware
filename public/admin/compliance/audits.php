@@ -443,13 +443,33 @@ if ($detailId > 0) {
           <div class="cmp-count-pill"><?= count($rows) ?> result<?= count($rows) === 1 ? '' : 's' ?></div>
         </div>
         <div class="compliance-table-wrap">
-        <table class="compliance-table">
+        <style>
+          .cmp-audit-list-table th,
+          .cmp-audit-list-table td,
+          .cmp-audit-list-table td:first-child,
+          .cmp-audit-list-table .cmp-mono{
+            font-family:var(--font-sans,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif) !important;
+            font-size:11.5px !important;
+            color:#324155 !important;
+            font-weight:650;
+            letter-spacing:.01em;
+          }
+          .cmp-audit-list-table .cmp-list-titlecell{
+            max-width:520px;
+            display:-webkit-box;
+            -webkit-line-clamp:2;
+            -webkit-box-orient:vertical;
+            overflow:hidden;
+          }
+          .cmp-audit-list-table .cmp-ref-link{color:#324155 !important;font-weight:720;text-decoration:none;}
+        </style>
+        <table class="compliance-table cmp-audit-list-table">
           <thead><tr>
-            <th>Reference</th>
+            <th style="width:140px;">Reference</th>
             <th>Title</th>
-            <th>Authority</th>
-            <th>Status</th>
-            <th>Window</th>
+            <th style="width:110px;">Authority</th>
+            <th style="width:130px;">Status</th>
+            <th style="width:170px;">Window</th>
           </tr></thead>
           <tbody>
             <?php if (!$rows): ?>
@@ -457,13 +477,13 @@ if ($detailId > 0) {
             <?php endif; ?>
             <?php foreach ($rows as $r): ?>
               <tr data-href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
-                <td class="cmp-mono">
-                  <a href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>"><?= h((string)$r['audit_code']) ?></a>
+                <td>
+                  <a class="cmp-ref-link" href="/admin/compliance/audits.php?id=<?= (int)$r['id'] ?>"><?= h((string)$r['audit_code']) ?></a>
                 </td>
-                <td><?= h((string)$r['title']) ?></td>
+                <td><span class="cmp-list-titlecell"><?= h((string)$r['title']) ?></span></td>
                 <td><?= h((string)$r['authority']) ?></td>
                 <td><?= compliance_badge((string)$r['status']) ?></td>
-                <td class="cmp-mono">
+                <td>
                   <?= h((string)($r['start_date'] ?? '—')) ?> &rarr; <?= h((string)($r['end_date'] ?? '—')) ?>
                 </td>
               </tr>
