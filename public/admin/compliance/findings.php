@@ -971,10 +971,12 @@ if ($detailId > 0) {
         </div>
         <div class="compliance-table-wrap">
         <style>
-          .cmp-finding-list-table th,
-          .cmp-finding-list-table td,
-          .cmp-finding-list-table td:first-child,
-          .cmp-finding-list-table .cmp-mono{
+          .cmp-page .cmp-finding-list-table th,
+          .cmp-page .cmp-finding-list-table td,
+          .cmp-page .cmp-finding-list-table td:first-child,
+          .cmp-page .cmp-finding-list-table .cmp-mono,
+          .cmp-page .cmp-finding-list-table td:first-child a,
+          .cmp-page .cmp-finding-list-table .cmp-ref-link{
             font-family:var(--font-sans,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif) !important;
             font-size:11.5px !important;
             color:#324155 !important;

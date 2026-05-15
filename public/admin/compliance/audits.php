@@ -444,10 +444,12 @@ if ($detailId > 0) {
         </div>
         <div class="compliance-table-wrap">
         <style>
-          .cmp-audit-list-table th,
-          .cmp-audit-list-table td,
-          .cmp-audit-list-table td:first-child,
-          .cmp-audit-list-table .cmp-mono{
+          .cmp-page .cmp-audit-list-table th,
+          .cmp-page .cmp-audit-list-table td,
+          .cmp-page .cmp-audit-list-table td:first-child,
+          .cmp-page .cmp-audit-list-table .cmp-mono,
+          .cmp-page .cmp-audit-list-table td:first-child a,
+          .cmp-page .cmp-audit-list-table .cmp-ref-link{
             font-family:var(--font-sans,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif) !important;
             font-size:11.5px !important;
             color:#324155 !important;
