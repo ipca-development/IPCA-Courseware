@@ -259,6 +259,7 @@ compliance_page_open(array(
   .cmpcal-time-event-title{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--event-text);font-weight:850;line-height:1.15;}
   .cmpcal-time-event .time{display:block;font-size:10.5px;opacity:.78;margin-top:2px;}
   .cmpcal-time-event.is-compact .time{display:none;}
+  .cmpcal-time-event.is-moving{position:fixed !important;z-index:80;pointer-events:none;box-shadow:0 18px 36px rgba(15,23,42,.22);opacity:.94;cursor:grabbing;}
   .cmpcal-resize-handle{position:absolute;left:10px;right:10px;height:8px;z-index:4;cursor:ns-resize;}
   .cmpcal-resize-handle.top{top:0;}
   .cmpcal-resize-handle.bottom{bottom:0;}
@@ -644,6 +645,10 @@ compliance_page_open(array(
     d.setMinutes(clamp(minutes, 0, 1439));
     return d;
   }
+  function minutesFromClientY(clientY, col){
+    var rect = col.getBoundingClientRect();
+    return snapMinutes(((clientY - rect.top) / rect.height) * 1440);
+  }
   function addMinutes(d, minutes){
     var x = new Date(d);
     x.setMinutes(x.getMinutes() + minutes);
@@ -755,6 +760,10 @@ compliance_page_open(array(
       id = e.dataTransfer.getData('text/plain');
     }
     return id || state.draggingEventId;
+  }
+  function timeColumnFromPoint(clientX, clientY){
+    var el = document.elementFromPoint(clientX, clientY);
+    return el ? el.closest('.cmpcal-time-col') : null;
   }
   function visibleEvents(){
     return events.filter(function (ev) { return state.activeTypes.has(ev.event_type || 'other'); });
@@ -943,6 +952,7 @@ compliance_page_open(array(
       ad.addEventListener('drop', function(e){ e.preventDefault(); ad.classList.remove('is-drop-target'); confirmChange(droppedEventId(e), day); });
       allDay.appendChild(ad);
       var col = document.createElement('div'); col.className = 'cmpcal-time-col' + (sameDay(day,new Date()) ? ' is-today' : '');
+      col.dataset.day = ymd(day);
       col.addEventListener('click', function(e){
         if (consumeSuppressedScheduleClick(e)) { return; }
         if (e.target !== col) { return; }
@@ -970,7 +980,7 @@ compliance_page_open(array(
         var height = Math.max(24, (em-sm) / 1440 * 960);
         var box = document.createElement('div');
         box.className = 'cmpcal-time-event cmpcal-type-' + (ev.color_key || ev.event_type || 'other') + (ev.is_pending_approval ? ' is-pending' : '') + (ev.is_overdue ? ' is-overdue' : '') + (height < 36 ? ' is-compact' : '');
-        box.draggable = true;
+        box.draggable = false;
         box.style.top = (sm / 1440 * 960) + 'px';
         box.style.height = height + 'px';
         if (timed.length > 1) { box.style.left = (6 + (idx % 3) * 12) + 'px'; box.style.right = (6 + ((timed.length - idx - 1) % 3) * 12) + 'px'; }
@@ -988,9 +998,7 @@ compliance_page_open(array(
           openEventModal(ev);
         });
         box.dataset.eventId = ev.id;
-        box.addEventListener('dragstart', function(x){ x.dataTransfer.effectAllowed = 'move'; x.dataTransfer.setData('text/plain', ev.id); suppressNativeDragImage(x); state.draggingEventId = ev.id; createDragGhost(ev); moveDragGhost(x); box.classList.add('is-dragging'); });
-        box.addEventListener('drag', function(x){ moveDragGhost(x); });
-        box.addEventListener('dragend', function(){ state.draggingEventId = ''; box.classList.remove('is-dragging'); removeDragGhost(); renderAll(); });
+        box.addEventListener('pointerdown', function(x){ startEventMove(x, ev, col, box, sm, em); });
         box.querySelectorAll('.cmpcal-resize-handle').forEach(function(handle){
           handle.addEventListener('click', function(x){
             x.preventDefault();
@@ -1067,6 +1075,109 @@ compliance_page_open(array(
     var start = dateWithMinutes(day, minutes);
     var end = addMinutes(start, durationMinutes(ev));
     updateDragGhostTime(start, end);
+  }
+  function startEventMove(e, ev, sourceCol, box, startMinutes, endMinutes){
+    if (e.button != null && e.button !== 0) { return; }
+    if (e.target.closest('.cmpcal-resize-handle')) { return; }
+    var startX = e.clientX;
+    var startY = e.clientY;
+    var moved = false;
+    var lastCol = sourceCol;
+    var lastMinutes = startMinutes;
+    var duration = Math.max(15, endMinutes - startMinutes);
+    var originalRect = box.getBoundingClientRect();
+    var sourceRect = sourceCol.getBoundingClientRect();
+    var original = {
+      position: box.style.position,
+      left: box.style.left,
+      top: box.style.top,
+      right: box.style.right,
+      width: box.style.width,
+      height: box.style.height
+    };
+    var offsetLeft = originalRect.left - sourceRect.left;
+    if (typeof box.setPointerCapture === 'function') {
+      try { box.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+    function clearTargets(){
+      document.querySelectorAll('.cmpcal-time-col.is-drop-target').forEach(function(node){
+        node.classList.remove('is-drop-target');
+      });
+    }
+    function paint(targetCol, minutes, pointerEvent){
+      var colRect = targetCol.getBoundingClientRect();
+      var left = colRect.left + clamp(offsetLeft, 6, Math.max(6, colRect.width - originalRect.width - 6));
+      box.style.left = left + 'px';
+      box.style.top = (colRect.top + (minutes / 1440 * colRect.height)) + 'px';
+      box.style.right = 'auto';
+      box.style.width = originalRect.width + 'px';
+      box.style.height = originalRect.height + 'px';
+      var day = parseYmd(targetCol.dataset.day || ymd(state.current));
+      var start = dateWithMinutes(day, minutes);
+      var end = addMinutes(start, duration);
+      var time = box.querySelector('.time');
+      if (time) { time.textContent = fmtTime(start) + ' - ' + fmtTime(end); }
+      targetCol.classList.add('is-drop-target');
+      lastCol = targetCol;
+      lastMinutes = minutes;
+    }
+    function move(x){
+      if (!moved && Math.abs(x.clientX - startX) + Math.abs(x.clientY - startY) < 5) { return; }
+      x.preventDefault();
+      if (!moved) {
+        moved = true;
+        hideTooltip();
+        state.suppressEventClick = true;
+        state.suppressScheduleClick = true;
+        box.classList.add('is-moving');
+        box.style.position = 'fixed';
+        box.style.left = originalRect.left + 'px';
+        box.style.top = originalRect.top + 'px';
+        box.style.right = 'auto';
+        box.style.width = originalRect.width + 'px';
+        box.style.height = originalRect.height + 'px';
+      }
+      clearTargets();
+      var targetCol = timeColumnFromPoint(x.clientX, x.clientY);
+      if (targetCol && targetCol.dataset.day) {
+        paint(targetCol, minutesFromClientY(x.clientY, targetCol), x);
+      } else {
+        box.style.left = (x.clientX - originalRect.width / 2) + 'px';
+        box.style.top = (x.clientY - 12) + 'px';
+      }
+    }
+    function up(x){
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup', up);
+      clearTargets();
+      if (typeof box.releasePointerCapture === 'function') {
+        try { box.releasePointerCapture(e.pointerId); } catch (err) {}
+      }
+      if (!moved) { return; }
+      x.preventDefault();
+      box.classList.remove('is-moving');
+      if (lastCol && lastCol.dataset.day) {
+        var day = parseYmd(lastCol.dataset.day);
+        var proposedStart = dateWithMinutes(day, lastMinutes);
+        var proposedEnd = addMinutes(proposedStart, duration);
+        state.pendingVisualChange = true;
+        openChangeConfirm(ev, proposedStart, proposedEnd, proposedEventWindowLabel(proposedStart, proposedEnd, false));
+      } else {
+        box.style.position = original.position;
+        box.style.left = original.left;
+        box.style.top = original.top;
+        box.style.right = original.right;
+        box.style.width = original.width;
+        box.style.height = original.height;
+        renderAll();
+      }
+      setTimeout(function(){
+        state.suppressEventClick = false;
+        state.suppressScheduleClick = false;
+      }, 300);
+    }
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup', up);
   }
   function confirmChange(eventId, proposedDay){
     var ev = events.find(function(x){ return String(x.id) === String(eventId); });
