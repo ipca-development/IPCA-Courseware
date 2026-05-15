@@ -278,7 +278,13 @@ if (!function_exists('compliance_ui_script')) {
             if (opener) {
               var id = opener.getAttribute('data-compliance-modal-open');
               var modal = id ? document.getElementById(id) : null;
-              if (modal && typeof modal.showModal === 'function') { modal.showModal(); }
+              if (modal) {
+                if (typeof modal.showModal === 'function') {
+                  modal.showModal();
+                } else {
+                  modal.setAttribute('open', 'open');
+                }
+              }
               ev.preventDefault();
               return;
             }
