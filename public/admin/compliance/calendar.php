@@ -64,8 +64,8 @@ compliance_page_open(array(
   .cmpcal-title{margin:0;font-size:15px;color:#0f172a;font-weight:800;}
   .cmpcal-muted{color:#64748b;font-size:12.5px;line-height:1.45;}
   .cmpcal-mini-nav{display:flex;gap:6px;}
-  .cmpcal-icon-btn,.cmpcal-toolbar button{display:inline-flex;align-items:center;justify-content:center;min-height:24px;border:1px solid rgba(23,52,93,.14);background:#f8fafc;color:#17345d;border-radius:999px;padding:0 10px;font-size:10.5px;font-weight:820;cursor:pointer;box-shadow:none;transition:background .16s ease,border-color .16s ease,transform .16s ease;}
-  .cmpcal-icon-btn{width:24px;padding:0;}
+  .cmpcal-icon-btn,.cmpcal-toolbar button{display:inline-flex;align-items:center;justify-content:center;min-height:20px;border:1px solid rgba(23,52,93,.14);background:#f8fafc;color:#17345d;border-radius:999px;padding:0 8px;font-size:9.5px;font-weight:820;cursor:pointer;box-shadow:none;transition:background .16s ease,border-color .16s ease,transform .16s ease;}
+  .cmpcal-icon-btn{width:20px;padding:0;}
   .cmpcal-icon-btn:hover,.cmpcal-toolbar button:hover{background:#eef4ff;border-color:#b7c9e4;transform:translateY(-1px);}
   .cmpcal-weekdays,.cmpcal-mini-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:5px;}
   .cmpcal-weekdays{margin-bottom:6px;color:#64748b;font-size:11px;font-weight:800;text-align:center;}
@@ -84,7 +84,7 @@ compliance_page_open(array(
   .cmpcal-type-pill{display:inline-flex;align-items:center;min-width:0;border-radius:999px;padding:5px 9px;font-size:12px;font-weight:800;color:#17345d;background:#eef4ff;border:1px solid #d7e5fb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
   .cmpcal-count{font-size:11px;font-weight:850;color:#475569;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:999px;padding:3px 7px;}
   .cmpcal-legend{border-top:1px dashed #cbd5e1;margin-top:16px;padding-top:14px;display:grid;gap:8px;}
-  .cmpcal-legend-row{display:flex;align-items:center;gap:8px;color:#334155;font-size:12px;font-weight:680;}
+  .cmpcal-legend-row{display:grid;grid-template-columns:36px minmax(0,1fr);align-items:center;column-gap:12px;color:#334155;font-size:12px;font-weight:680;}
   .cmpcal-legend-swatch{width:28px;height:12px;border-radius:999px;background:#dbeafe;border:1px solid #7aa7e8;}
   .cmpcal-legend-swatch.is-dashed{border-style:dashed;opacity:.68;}
   .cmpcal-legend-swatch.is-red{background:#fee2e2;border-color:#ef4444;}
@@ -209,11 +209,11 @@ compliance_page_open(array(
       </div>
       <div class="cmpcal-legend">
         <div class="cmpcal-title">Legend</div>
-        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch is-dashed"></span>Dashed = proposed / awaiting approval</div>
-        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch"></span>Solid = approved</div>
-        <div class="cmpcal-legend-row"><span class="cmpcal-svg" data-cmpcal-icon="lock"></span>Lock = governed/locked date</div>
-        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch is-red"></span>Red = overdue</div>
-        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch is-yellow"></span>Yellow = awaiting authority/internal response</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch is-dashed"></span>Awaiting Approval</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch"></span>Approved</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-svg" data-cmpcal-icon="lock"></span>Locked</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch is-red"></span>Overdue</div>
+        <div class="cmpcal-legend-row"><span class="cmpcal-legend-swatch is-yellow"></span>Awaiting Response</div>
       </div>
       <?php
       $missing = array();
