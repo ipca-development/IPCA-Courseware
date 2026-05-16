@@ -10,6 +10,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
+$isAdmin = strtolower((string)($user['role'] ?? '')) === 'admin';
 
 function mtg_flash(string $type, string $msg): void
 {
@@ -66,6 +67,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'complete_meeting') {
             ComplianceMeetingEngine::complete($pdo, $detailId, $uid);
             mtg_flash('success', 'Meeting completed and locked.');
+            redirect('/admin/compliance/meetings.php?id=' . $detailId);
+        }
+        if ($action === 'unlock_meeting') {
+            if (!$isAdmin) {
+                throw new RuntimeException('Only administrators can unlock meetings.');
+            }
+            ComplianceMeetingEngine::unlock($pdo, $detailId, (string)($_POST['unlock_reason'] ?? ''), $uid);
+            mtg_flash('success', 'Meeting unlocked. The unlock reason was recorded in the audit trail.');
             redirect('/admin/compliance/meetings.php?id=' . $detailId);
         }
         if ($action === 'cancel_meeting') {
@@ -151,6 +160,10 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
   .cmpmtg-grid-2{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
   @media (max-width:720px){ .cmpmtg-grid-2{grid-template-columns:1fr;} }
   .cmpmtg-btn-small{height:32px;min-height:32px;padding:0 12px !important;font-size:12px !important;}
+  .cmpmtg-unlock-box{margin-top:18px;border:1px solid #f59e0b;background:#fffbeb;border-radius:14px;padding:14px;}
+  .cmpmtg-unlock-box summary{cursor:pointer;font-weight:850;color:#92400e;}
+  .cmpmtg-unlock-box textarea{margin-top:10px;min-height:78px;}
+  .cmpmtg-unlock-note{margin:8px 0 12px;color:#92400e;font-size:12px;line-height:1.45;}
 </style>
 
 <?php
@@ -209,6 +222,23 @@ if ($detailId > 0) {
           <dt style="color:#64748b;">Location</dt><dd><?= h((string)($m['location'] ?? '—')) ?></dd>
           <dt style="color:#64748b;">Agenda</dt><dd><?= nl2br(h((string)($m['agenda'] ?? '—'))) ?></dd>
         </dl>
+        <?php if ($isAdmin): ?>
+          <details class="cmpmtg-unlock-box">
+            <summary>Governed unlock meeting</summary>
+            <div class="cmpmtg-unlock-note">
+              Unlocking reopens this completed meeting for corrections. The reason and before/after lock state will be recorded in the compliance audit trail.
+            </div>
+            <form method="post" onsubmit="return confirm('Unlock this meeting and record the reason in the audit trail?');">
+              <input type="hidden" name="action" value="unlock_meeting">
+              <input type="hidden" name="meeting_id" value="<?= (int)$detailId ?>">
+              <label style="display:block;margin-bottom:12px;">
+                <span class="cmpmtg-label">Unlock reason *</span>
+                <textarea class="cmpmtg-input" name="unlock_reason" required placeholder="Explain why this locked meeting must be reopened."></textarea>
+              </label>
+              <button type="submit" class="cmpmtg-btn" style="background:#92400e;">Unlock meeting</button>
+            </form>
+          </details>
+        <?php endif; ?>
       <?php else: ?>
         <form method="post">
           <input type="hidden" name="action" value="update_meeting">

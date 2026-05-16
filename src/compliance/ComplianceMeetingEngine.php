@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ComplianceAutomationDispatch.php';
+require_once __DIR__ . '/ComplianceCaseEvents.php';
 
 /**
  * Phase 7 — Meeting lifecycle CRUD.
@@ -265,6 +266,54 @@ final class ComplianceMeetingEngine
                 updated_by = ?
              WHERE id = ?'
         )->execute(array($now, $now, $userId > 0 ? $userId : null, $userId > 0 ? $userId : null, $id));
+    }
+
+    public static function unlock(PDO $pdo, int $id, string $reason, int $userId): void
+    {
+        $row = self::getById($pdo, $id);
+        if ($row === null) {
+            throw new RuntimeException('Meeting not found.');
+        }
+        if (empty($row['locked_at'])) {
+            throw new RuntimeException('Meeting is not locked.');
+        }
+        $reason = trim($reason);
+        if ($reason === '') {
+            throw new InvalidArgumentException('Unlock reason is required.');
+        }
+
+        $pdo->prepare(
+            'UPDATE ipca_compliance_meetings SET
+                locked_at = NULL,
+                locked_by = NULL,
+                updated_by = ?
+             WHERE id = ?'
+        )->execute(array($userId > 0 ? $userId : null, $id));
+
+        $after = self::getById($pdo, $id);
+        compliance_log_case_event(
+            $pdo,
+            isset($row['case_id']) && (int)$row['case_id'] > 0 ? (int)$row['case_id'] : null,
+            'meeting',
+            $id,
+            'meeting_unlocked',
+            $userId > 0 ? $userId : null,
+            'Meeting unlocked: ' . $reason,
+            $row,
+            $after,
+            array(
+                'reason' => $reason,
+                'previous_locked_at' => (string)($row['locked_at'] ?? ''),
+                'previous_locked_by' => $row['locked_by'] ?? null,
+            )
+        );
+
+        ComplianceAutomationDispatch::fire($pdo, 'compliance.meeting.unlocked', array(
+            'meeting_id' => $id,
+            'meeting_code' => (string)($row['meeting_code'] ?? ''),
+            'reason' => $reason,
+            'unlocked_by_user_id' => $userId,
+        ));
     }
 
     public static function cancel(PDO $pdo, int $id, int $userId): void
