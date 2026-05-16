@@ -677,7 +677,13 @@ if ($detailId > 0) {
         );
     }
     $emailPreview = is_array($_SESSION['_ipca_compliance_cap_email_preview'] ?? null) ? $_SESSION['_ipca_compliance_cap_email_preview'] : null;
-    if ($emailPreview !== null && !empty($emailPreview['draft_id']) && !empty($emailPreview['body'])) {
+    if ($emailPreview !== null) {
+        if (empty($emailPreview['draft_id'])) {
+            unset($_SESSION['_ipca_compliance_cap_email_preview']);
+            $emailPreview = null;
+        }
+    }
+    if ($emailPreview !== null) {
         try {
             $existingDraft = ComplianceCommsCenterEngine::getDraft($pdo, (int)$emailPreview['draft_id']);
             if (!is_array($existingDraft) || (string)($existingDraft['status'] ?? '') !== 'draft') {

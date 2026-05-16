@@ -228,6 +228,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'delete') {
             if ($postDraftId > 0) {
                 ComplianceCommsCenterEngine::deleteDraft($pdo, $postDraftId, $uid);
+                if (isset($_SESSION['_ipca_compliance_cap_email_preview']['draft_id'])
+                    && (int)$_SESSION['_ipca_compliance_cap_email_preview']['draft_id'] === $postDraftId) {
+                    unset($_SESSION['_ipca_compliance_cap_email_preview']);
+                }
                 cmpose_flash('success', 'Draft deleted.');
             }
             redirect('/admin/compliance/email_drafts.php?status=draft');
