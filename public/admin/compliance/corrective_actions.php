@@ -647,6 +647,7 @@ if ($detailId > 0) {
     }
 
     $workflowStatus = ComplianceDeadlineExtensionEngine::workflowTableStatus($pdo);
+    ComplianceDeadlineExtensionEngine::cancelOrphanedPendingEmailBatches($pdo, $uid);
     $latestExtensionItems = ComplianceDeadlineExtensionEngine::indexItemsByAction(ComplianceDeadlineExtensionEngine::latestWorkflowItemsByAction($pdo));
     $deadlineStatesByAction = array();
     $extensionSelectionRows = array();

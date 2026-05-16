@@ -70,6 +70,75 @@ final class ComplianceDeadlineExtensionEngine
         return $out;
     }
 
+    public static function cancelOrphanedPendingEmailBatches(PDO $pdo, int $userId): int
+    {
+        if (!self::tablePresent($pdo, 'ipca_compliance_corrective_action_deadline_extension_batches')
+            || !self::tablePresent($pdo, 'ipca_compliance_corrective_action_deadline_extension_items')) {
+            return 0;
+        }
+        try {
+            $st = $pdo->query(
+                "SELECT b.id, b.audit_id, b.request_reference, b.email_draft_id
+                   FROM ipca_compliance_corrective_action_deadline_extension_batches b
+              LEFT JOIN ipca_compliance_email_drafts d ON d.id = b.email_draft_id
+                  WHERE b.status IN ('draft','submitted','under_review')
+                    AND b.outbound_email_id IS NULL
+                    AND (
+                        b.email_draft_id IS NULL
+                        OR d.id IS NULL
+                        OR d.status <> 'draft'
+                    )"
+            );
+            $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+            if (!is_array($rows) || $rows === array()) {
+                return 0;
+            }
+            $ids = array_map(static fn($r): int => (int)$r['id'], $rows);
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $pdo->prepare(
+                "UPDATE ipca_compliance_corrective_action_deadline_extension_batches
+                    SET status = 'cancelled',
+                        review_notes = COALESCE(review_notes, 'Cancelled because no active outbound draft email is available for review.'),
+                        locked_at = COALESCE(locked_at, NOW()),
+                        updated_at = NOW()
+                  WHERE id IN (" . $placeholders . ")"
+            )->execute($ids);
+            $pdo->prepare(
+                "UPDATE ipca_compliance_corrective_action_deadline_extension_items
+                    SET status = 'cancelled',
+                        review_notes = COALESCE(review_notes, 'Cancelled because no active outbound draft email is available for review.'),
+                        locked_at = COALESCE(locked_at, NOW()),
+                        updated_at = NOW()
+                  WHERE batch_id IN (" . $placeholders . ")
+                    AND status IN ('draft','submitted')"
+            )->execute($ids);
+            if (ComplianceApprovalTokenService::tablePresent($pdo)) {
+                $pdo->prepare(
+                    "UPDATE ipca_compliance_public_approval_tokens
+                        SET revoked_at = COALESCE(revoked_at, NOW())
+                      WHERE token_type = 'deadline_extension'
+                        AND batch_id IN (" . $placeholders . ")
+                        AND revoked_at IS NULL"
+                )->execute($ids);
+            }
+            foreach ($rows as $row) {
+                self::logBatchEvent(
+                    $pdo,
+                    (int)($row['audit_id'] ?? 0),
+                    (int)$row['id'],
+                    'deadline_extension_cancelled',
+                    $userId > 0 ? $userId : null,
+                    'Deadline extension request cancelled because no active outbound draft exists: ' . (string)($row['request_reference'] ?? ('#' . (int)$row['id'])),
+                    null,
+                    array('email_draft_id' => isset($row['email_draft_id']) ? (int)$row['email_draft_id'] : null)
+                );
+            }
+            return count($ids);
+        } catch (Throwable) {
+            return 0;
+        }
+    }
+
     /** @return array{state:string,label:string,days:int|null,item:array<string,mixed>|null} */
     public static function calculateDeadlineStatus(?string $deadline, ?array $latestItem = null): array
     {
