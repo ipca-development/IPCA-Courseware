@@ -99,6 +99,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect(cmpcal_return_url());
         }
 
+        if ($action === 'link_manual_event') {
+            ComplianceCalendarService::linkManualEvent(
+                $pdo,
+                (int)($_POST['calendar_event_id'] ?? 0),
+                (string)($_POST['linked_object_type'] ?? ''),
+                (int)($_POST['linked_object_id'] ?? 0),
+                $uid
+            );
+            cmpcal_flash('success', 'Manual calendar event link updated.');
+            redirect(cmpcal_return_url());
+        }
+
         if ($action === 'delete_manual_event') {
             $id = (int)($_POST['calendar_event_id'] ?? 0);
             ComplianceCalendarService::deleteManualEvent($pdo, $id, $uid);
@@ -450,7 +462,7 @@ compliance_page_open(array(
   </div>
   <div class="compliance-modal__footer">
     <button type="button" class="cmp-btn-secondary" id="cmpcalEditEvent">Edit Event</button>
-    <button type="button" class="cmp-btn-secondary" id="cmpcalLinkEvent">Link to Case/Finding/Audit/CAP/Meeting</button>
+    <button type="button" class="cmp-btn-secondary" id="cmpcalLinkEvent">Link To</button>
     <a class="cmp-btn-secondary" id="cmpcalOpenLinked" href="#" style="text-decoration:none;">Open Linked Record</a>
     <form method="post" id="cmpcalDeleteEventForm" style="display:inline;">
       <input type="hidden" name="action" value="delete_manual_event">
@@ -481,6 +493,7 @@ compliance_page_open(array(
       <label class="cmpcal-field"><span>Timezone</span><select name="timezone" id="cmpcalNewTimezone"></select></label>
       <label class="cmpcal-field"><span>Link to</span><select name="linked_object_type">
         <option value="">Not linked</option>
+        <option value="compliance_case">Case / MoC</option>
         <option value="audit">Audit</option>
         <option value="finding">Finding</option>
         <option value="corrective_action">Corrective Action</option>
@@ -519,6 +532,7 @@ compliance_page_open(array(
       <label class="cmpcal-field"><span>Timezone</span><select name="timezone" id="cmpcalEditTimezone"></select></label>
       <label class="cmpcal-field"><span>Link to</span><select name="linked_object_type" id="cmpcalEditLinkedType">
         <option value="">Not linked</option>
+        <option value="compliance_case">Case / MoC</option>
         <option value="audit">Audit</option>
         <option value="finding">Finding</option>
         <option value="corrective_action">Corrective Action</option>
@@ -535,6 +549,34 @@ compliance_page_open(array(
     <div class="compliance-modal__footer">
       <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
       <button type="submit" <?= $tableStatus['events'] ? '' : 'disabled' ?>>Save Event</button>
+    </div>
+  </form>
+<?php compliance_modal_close(); ?>
+
+<?php compliance_modal_open('calendarLinkEventModal', 'Link To'); ?>
+  <form id="cmpcalLinkEventForm" method="post">
+    <input type="hidden" name="action" value="link_manual_event">
+    <input type="hidden" name="calendar_event_id" id="cmpcalLinkEventId">
+    <input type="hidden" name="return_date" data-cmpcal-return-date>
+    <input type="hidden" name="return_view" data-cmpcal-return-view>
+    <input type="hidden" name="return_scroll" data-cmpcal-return-scroll>
+    <div class="cmpcal-form-grid">
+      <label class="cmpcal-field"><span>Object type</span><select name="linked_object_type" id="cmpcalLinkType">
+        <option value="">Not linked</option>
+        <option value="compliance_case">Case / MoC</option>
+        <option value="audit">Audit</option>
+        <option value="finding">Finding</option>
+        <option value="corrective_action">Corrective Action / CAP</option>
+        <option value="meeting">Meeting</option>
+        <option value="manual_change_request">Manual Change Request</option>
+        <option value="regulatory_review">Regulatory Review</option>
+      </select></label>
+      <label class="cmpcal-field"><span>Object ID</span><input type="number" min="1" name="linked_object_id" id="cmpcalLinkId" placeholder="Leave blank to unlink"></label>
+    </div>
+    <div class="cmpcal-modal-note">Links are stored on the manual calendar event only. The linked compliance record remains owned by its source page.</div>
+    <div class="compliance-modal__footer">
+      <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+      <button type="submit" <?= $tableStatus['events'] ? '' : 'disabled' ?>>Save Link</button>
     </div>
   </form>
 <?php compliance_modal_close(); ?>
@@ -931,6 +973,17 @@ compliance_page_open(array(
     closeDialog('calendarEventViewModal');
     showDialog('calendarEditEventModal');
   }
+  function openLinkManualModal(ev){
+    if (!ev || String(ev.id).indexOf('manual:') !== 0 || !ev.can_edit_directly || ev.is_locked) {
+      alert('Only unlocked manual calendar events can be linked here. Source-projected compliance events are already linked to their source records.');
+      return;
+    }
+    document.getElementById('cmpcalLinkEventId').value = String(ev.id).replace('manual:', '');
+    document.getElementById('cmpcalLinkType').value = ev.linked_object_type || '';
+    document.getElementById('cmpcalLinkId').value = ev.linked_object_id ? String(ev.linked_object_id) : '';
+    closeDialog('calendarEventViewModal');
+    showDialog('calendarLinkEventModal');
+  }
   function openEventModal(ev){
     state.selectedEvent = ev;
     var details = document.getElementById('cmpcalEventDetails');
@@ -957,6 +1010,9 @@ compliance_page_open(array(
     var edit = document.getElementById('cmpcalEditEvent');
     edit.disabled = !canEditManual;
     edit.textContent = canEditManual ? 'Edit Event' : 'Edit Manual Events Only';
+    var link = document.getElementById('cmpcalLinkEvent');
+    link.disabled = !canEditManual;
+    link.textContent = 'Link To';
     var open = document.getElementById('cmpcalOpenLinked');
     if (metadata.linked_url) { open.href = metadata.linked_url; open.removeAttribute('aria-disabled'); }
     else { open.href = '#'; open.setAttribute('aria-disabled','true'); }
@@ -1438,7 +1494,7 @@ compliance_page_open(array(
     });
   });
   document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ openEditManualModal(state.selectedEvent); });
-  document.getElementById('cmpcalLinkEvent').addEventListener('click', function(){ alert('Calendar linking backend is not connected yet.'); });
+  document.getElementById('cmpcalLinkEvent').addEventListener('click', function(){ openLinkManualModal(state.selectedEvent); });
   document.getElementById('cmpcalNewEventForm').addEventListener('submit', function(e){
     if (document.getElementById('cmpcalNewAllDay').value !== '1') {
       var start = normalizeTimeText(document.getElementById('cmpcalNewStart').value);
@@ -1464,6 +1520,19 @@ compliance_page_open(array(
       }
       document.getElementById('cmpcalEditStart').value = start;
       document.getElementById('cmpcalEditEnd').value = end;
+    }
+    updateReturnFields();
+  });
+  document.getElementById('cmpcalLinkEventForm').addEventListener('submit', function(e){
+    var type = document.getElementById('cmpcalLinkType').value;
+    var id = document.getElementById('cmpcalLinkId').value;
+    if (type !== '' && (!id || parseInt(id, 10) <= 0)) {
+      e.preventDefault();
+      alert('Choose an object ID, or set Object type to Not linked to clear the link.');
+      return;
+    }
+    if (type === '') {
+      document.getElementById('cmpcalLinkId').value = '';
     }
     updateReturnFields();
   });

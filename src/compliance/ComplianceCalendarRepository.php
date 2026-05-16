@@ -134,10 +134,36 @@ final class ComplianceCalendarRepository
                 'metadata' => array(
                     'code' => 'CAL-' . (int)$row['id'],
                     'edit_mode' => 'manual',
+                    'linked_url' => self::linkedUrl((string)($row['linked_object_type'] ?? ''), (int)($row['linked_object_id'] ?? 0)),
                 ),
             ));
         }
         return $events;
+    }
+
+    private static function linkedUrl(string $type, int $id): string
+    {
+        if ($id <= 0) {
+            return '';
+        }
+        switch ($type) {
+            case 'compliance_case':
+                return '/admin/compliance/moc.php?id=' . $id;
+            case 'audit':
+                return '/admin/compliance/audits.php?id=' . $id;
+            case 'finding':
+                return '/admin/compliance/findings.php?id=' . $id;
+            case 'corrective_action':
+                return '/admin/compliance/corrective_actions.php?id=' . $id;
+            case 'meeting':
+                return '/admin/compliance/meetings.php?id=' . $id;
+            case 'manual_change_request':
+                return '/admin/compliance/change_requests.php?id=' . $id;
+            case 'regulatory_review':
+                return '/admin/compliance/monitoring_rules.php?id=' . $id;
+            default:
+                return '';
+        }
     }
 
     /** @return list<array<string,mixed>> */

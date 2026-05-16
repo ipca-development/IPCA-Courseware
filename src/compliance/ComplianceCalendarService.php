@@ -153,6 +153,35 @@ final class ComplianceCalendarService
         $pdo->prepare('DELETE FROM ipca_compliance_calendar_events WHERE id = ?')->execute(array($id));
     }
 
+    public static function linkManualEvent(PDO $pdo, int $id, string $linkedType, int $linkedId, int $userId): void
+    {
+        self::assertTable($pdo, 'ipca_compliance_calendar_events');
+        $row = self::manualEvent($pdo, $id);
+        if ($row === null) {
+            throw new RuntimeException('Calendar event not found.');
+        }
+        if (!empty($row['is_locked']) || !empty($row['locked_at'])) {
+            throw new RuntimeException('This calendar event is locked.');
+        }
+
+        $type = self::normalizeLinkedType($linkedType);
+        $objectId = $type !== null && $linkedId > 0 ? $linkedId : null;
+        if ($type !== null && $objectId === null) {
+            throw new InvalidArgumentException('Linked object ID is required.');
+        }
+
+        $pdo->prepare(
+            'UPDATE ipca_compliance_calendar_events
+                SET linked_object_type = ?, linked_object_id = ?, updated_by = ?
+              WHERE id = ?'
+        )->execute(array(
+            $type,
+            $objectId,
+            $userId > 0 ? $userId : null,
+            $id,
+        ));
+    }
+
     /**
      * @param array<string,mixed> $data
      * @return array{mode:string,id:int|null}
@@ -458,7 +487,7 @@ final class ComplianceCalendarService
         if ($type === '' || $type === 'other') {
             return $type === 'other' ? 'other' : null;
         }
-        $allowed = array('audit', 'finding', 'corrective_action', 'meeting', 'manual_change_request', 'regulatory_review', 'other');
+        $allowed = array('compliance_case', 'audit', 'finding', 'corrective_action', 'meeting', 'manual_change_request', 'regulatory_review', 'other');
         return in_array($type, $allowed, true) ? $type : 'other';
     }
 
