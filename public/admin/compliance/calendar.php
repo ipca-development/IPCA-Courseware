@@ -7,6 +7,7 @@ require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCalendarRepository.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCalendarService.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceCommsCenterEngine.php';
 
 $user = compliance_require_access($pdo);
 $uid = (int)($user['id'] ?? 0);
@@ -42,6 +43,22 @@ function cmpcal_return_url(): string
         $args['scroll'] = $scroll;
     }
     return '/admin/compliance/calendar.php' . ($args ? '?' . http_build_query($args) : '');
+}
+
+function cmpcal_picker_label(string $code, string $title, string $status): string
+{
+    $parts = array();
+    if (trim($code) !== '') {
+        $parts[] = trim($code);
+    }
+    if (trim($title) !== '') {
+        $parts[] = trim($title);
+    }
+    $label = implode(' — ', $parts);
+    if (trim($status) !== '') {
+        $label .= ' (' . trim($status) . ')';
+    }
+    return $label !== '' ? $label : 'Record';
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -144,6 +161,28 @@ $stats = ComplianceCalendarRepository::stats($events);
 $sources = ComplianceCalendarRepository::connectedSources($pdo);
 $tableStatus = ComplianceCalendarService::tableStatus($pdo);
 $pendingRequests = ComplianceCalendarService::listChangeRequests($pdo, 'pending', 20);
+$linkableGroups = ComplianceCommsCenterEngine::listLinkablePickerOptions($pdo, 300);
+try {
+    $st = $pdo->query(
+        "SELECT id, rule_code, title, monitor_kind, is_active
+           FROM ipca_compliance_monitor_rules
+          ORDER BY updated_at DESC, id DESC
+          LIMIT 300"
+    );
+    $opts = array();
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) ?: array() as $row) {
+        $status = ((int)($row['is_active'] ?? 0) === 1 ? 'Active' : 'Inactive') . ' / ' . (string)($row['monitor_kind'] ?? '');
+        $opts[] = array(
+            'id' => (string)(int)$row['id'],
+            'label' => cmpcal_picker_label((string)($row['rule_code'] ?? ''), (string)($row['title'] ?? ''), $status),
+        );
+    }
+    if ($opts !== array()) {
+        $linkableGroups[] = array('type' => 'regulatory_review', 'type_label' => 'Regulatory Reviews', 'options' => $opts);
+    }
+} catch (Throwable) {
+    // Optional picker source; ignore missing monitoring tables.
+}
 $flash = cmpcal_flash_take();
 $futureCounts = array();
 $todayYmd = date('Y-m-d');
@@ -561,7 +600,7 @@ compliance_page_open(array(
     <input type="hidden" name="return_view" data-cmpcal-return-view>
     <input type="hidden" name="return_scroll" data-cmpcal-return-scroll>
     <div class="cmpcal-form-grid">
-      <label class="cmpcal-field"><span>Object type</span><select name="linked_object_type" id="cmpcalLinkType">
+      <label class="cmpcal-field"><span>Type</span><select name="linked_object_type" id="cmpcalLinkType">
         <option value="">Not linked</option>
         <option value="compliance_case">Case / MoC</option>
         <option value="audit">Audit</option>
@@ -571,7 +610,7 @@ compliance_page_open(array(
         <option value="manual_change_request">Manual Change Request</option>
         <option value="regulatory_review">Regulatory Review</option>
       </select></label>
-      <label class="cmpcal-field"><span>Object ID</span><input type="number" min="1" name="linked_object_id" id="cmpcalLinkId" placeholder="Leave blank to unlink"></label>
+      <label class="cmpcal-field"><span>Details</span><select name="linked_object_id" id="cmpcalLinkId"><option value="">Select a type first</option></select></label>
     </div>
     <div class="cmpcal-modal-note">Links are stored on the manual calendar event only. The linked compliance record remains owned by its source page.</div>
     <div class="compliance-modal__footer">
@@ -625,6 +664,7 @@ compliance_page_open(array(
 (function () {
   var events = <?= json_encode($events, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?: '[]' ?>;
   var typeDefs = <?= json_encode($eventTypes, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?: '[]' ?>;
+  var linkableGroups = <?= json_encode($linkableGroups, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?: '[]' ?>;
   var iconMap = {
     calendar:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V7Zm0 4h14M9 4v3m6-3v3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
     clock:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 7v5l3 2" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -874,6 +914,33 @@ compliance_page_open(array(
     }
     return id || state.draggingEventId;
   }
+  function linkOptionsForType(type){
+    var group = linkableGroups.find(function(item){ return item.type === type; });
+    return group && Array.isArray(group.options) ? group.options : [];
+  }
+  function populateLinkDetails(type, selectedId, selectedLabel){
+    var sel = document.getElementById('cmpcalLinkId');
+    sel.innerHTML = '';
+    if (!type) {
+      sel.disabled = true;
+      sel.innerHTML = '<option value="">No linked record</option>';
+      return;
+    }
+    sel.disabled = false;
+    var options = linkOptionsForType(type);
+    if (options.length === 0) {
+      sel.innerHTML = '<option value="">No records available for this type</option>';
+      return;
+    }
+    sel.appendChild(new Option('Select details', ''));
+    options.forEach(function(option){
+      sel.appendChild(new Option(option.label || ('Record #' + option.id), option.id));
+    });
+    if (selectedId && !options.some(function(option){ return String(option.id) === String(selectedId); })) {
+      sel.appendChild(new Option(selectedLabel || ('Current linked record #' + selectedId), String(selectedId)));
+    }
+    sel.value = selectedId ? String(selectedId) : '';
+  }
   function timeColumnFromPoint(clientX, clientY){
     var el = document.elementFromPoint(clientX, clientY);
     return el ? el.closest('.cmpcal-time-col') : null;
@@ -980,7 +1047,7 @@ compliance_page_open(array(
     }
     document.getElementById('cmpcalLinkEventId').value = String(ev.id).replace('manual:', '');
     document.getElementById('cmpcalLinkType').value = ev.linked_object_type || '';
-    document.getElementById('cmpcalLinkId').value = ev.linked_object_id ? String(ev.linked_object_id) : '';
+    populateLinkDetails(ev.linked_object_type || '', ev.linked_object_id ? String(ev.linked_object_id) : '', '');
     closeDialog('calendarEventViewModal');
     showDialog('calendarLinkEventModal');
   }
@@ -1495,6 +1562,9 @@ compliance_page_open(array(
   });
   document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ openEditManualModal(state.selectedEvent); });
   document.getElementById('cmpcalLinkEvent').addEventListener('click', function(){ openLinkManualModal(state.selectedEvent); });
+  document.getElementById('cmpcalLinkType').addEventListener('change', function(e){
+    populateLinkDetails(e.target.value, '', '');
+  });
   document.getElementById('cmpcalNewEventForm').addEventListener('submit', function(e){
     if (document.getElementById('cmpcalNewAllDay').value !== '1') {
       var start = normalizeTimeText(document.getElementById('cmpcalNewStart').value);
@@ -1528,7 +1598,7 @@ compliance_page_open(array(
     var id = document.getElementById('cmpcalLinkId').value;
     if (type !== '' && (!id || parseInt(id, 10) <= 0)) {
       e.preventDefault();
-      alert('Choose an object ID, or set Object type to Not linked to clear the link.');
+      alert('Choose details, or set Type to Not linked to clear the link.');
       return;
     }
     if (type === '') {
