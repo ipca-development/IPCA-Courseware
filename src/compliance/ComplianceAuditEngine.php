@@ -25,6 +25,14 @@ final class ComplianceAuditEngine
     /** @var list<string> */
     private const CATEGORIES = array('SAFETY', 'COMPLIANCE', 'QUALITY', 'SECURITY', 'OPERATIONAL', 'OTHER');
 
+    /** @var array<string,string> */
+    private const CONTACT_POSITIONS = array(
+        'LEAD_AUDITOR' => 'Lead Auditor',
+        'AUDITOR' => 'Auditor',
+        'SPECIALIST' => 'Specialist',
+        'ATTENDEE' => 'Attendee',
+    );
+
     public static function normalizeStatus(string $v): string
     {
         $u = strtoupper(trim($v));
@@ -252,6 +260,128 @@ final class ComplianceAuditEngine
             'reviewed_by' => $userId,
             'notes' => 'Audit closure passed deterministic all-findings-closed check.',
         ));
+    }
+
+    /** @return array<string,string> */
+    public static function contactPositions(): array
+    {
+        return self::CONTACT_POSITIONS;
+    }
+
+    public static function normalizeContactPosition(string $value): string
+    {
+        $value = strtoupper(str_replace(array(' ', '-'), '_', trim($value)));
+        return array_key_exists($value, self::CONTACT_POSITIONS) ? $value : 'AUDITOR';
+    }
+
+    /** @return list<array<string,mixed>> */
+    public static function listAuditContacts(PDO $pdo, int $auditId): array
+    {
+        if ($auditId <= 0 || !self::auditAssignmentsSupportContacts($pdo)) {
+            return array();
+        }
+        $st = $pdo->prepare(
+            'SELECT aa.*,
+                    u.first_name, u.last_name, u.name AS user_name, u.email AS user_email
+               FROM ipca_compliance_audit_assignments aa
+          LEFT JOIN users u ON u.id = aa.user_id
+              WHERE aa.audit_id = ?
+                AND aa.revoked_at IS NULL
+              ORDER BY FIELD(COALESCE(aa.position, aa.role), \'LEAD_AUDITOR\', \'AUDITOR\', \'SPECIALIST\', \'ATTENDEE\'), aa.id ASC'
+        );
+        $st->execute(array($auditId));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (!is_array($rows)) {
+            return array();
+        }
+        foreach ($rows as &$row) {
+            $name = trim((string)($row['display_name'] ?? ''));
+            if ($name === '') {
+                $firstLast = trim((string)($row['first_name'] ?? '') . ' ' . (string)($row['last_name'] ?? ''));
+                $name = $firstLast !== '' ? $firstLast : (string)($row['user_name'] ?? '');
+            }
+            $email = trim((string)($row['email'] ?? ''));
+            if ($email === '') {
+                $email = trim((string)($row['user_email'] ?? ''));
+            }
+            $position = self::normalizeContactPosition((string)($row['position'] ?? $row['role'] ?? 'AUDITOR'));
+            $row['contact_name'] = $name;
+            $row['contact_email'] = $email;
+            $row['contact_position'] = $position;
+            $row['contact_position_label'] = self::CONTACT_POSITIONS[$position];
+        }
+        unset($row);
+        return $rows;
+    }
+
+    /** @param list<array<string,mixed>> $contacts */
+    public static function saveAuditContacts(PDO $pdo, int $auditId, array $contacts, int $userId): void
+    {
+        $audit = self::getById($pdo, $auditId);
+        if ($audit === null) {
+            throw new RuntimeException('Audit not found.');
+        }
+        if (!empty($audit['locked_at'])) {
+            throw new RuntimeException('Audit is locked.');
+        }
+        if (!self::auditAssignmentsSupportContacts($pdo)) {
+            throw new RuntimeException('Audit contact assignment migration is not installed.');
+        }
+
+        $clean = array();
+        foreach ($contacts as $contact) {
+            $name = trim((string)($contact['display_name'] ?? ''));
+            $email = strtolower(trim((string)($contact['email'] ?? '')));
+            $position = self::normalizeContactPosition((string)($contact['position'] ?? 'AUDITOR'));
+            if ($name === '' && $email === '') {
+                continue;
+            }
+            if ($name === '') {
+                throw new InvalidArgumentException('Name is required for each audit contact.');
+            }
+            if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                throw new InvalidArgumentException('A valid email is required for ' . $name . '.');
+            }
+            $clean[] = array('name' => $name, 'email' => $email, 'position' => $position);
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare(
+                'UPDATE ipca_compliance_audit_assignments
+                    SET revoked_at = NOW(), revoked_by = ?
+                  WHERE audit_id = ? AND revoked_at IS NULL'
+            )->execute(array($userId > 0 ? $userId : null, $auditId));
+            $ins = $pdo->prepare(
+                'INSERT INTO ipca_compliance_audit_assignments
+                    (audit_id, user_id, display_name, email, position, role, assigned_by)
+                 VALUES (?, NULL, ?, ?, ?, ?, ?)'
+            );
+            foreach ($clean as $contact) {
+                $ins->execute(array(
+                    $auditId,
+                    substr($contact['name'], 0, 255),
+                    substr($contact['email'], 0, 255),
+                    $contact['position'],
+                    $contact['position'],
+                    $userId > 0 ? $userId : null,
+                ));
+            }
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    public static function auditAssignmentsSupportContacts(PDO $pdo): bool
+    {
+        try {
+            $pdo->query('SELECT display_name, email, position FROM ipca_compliance_audit_assignments LIMIT 0');
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 
     private static function openFindingCount(PDO $pdo, int $auditId): int

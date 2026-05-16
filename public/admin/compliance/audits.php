@@ -70,6 +70,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             aud_flash('success', 'Audit closed and locked.');
             redirect('/admin/compliance/audits.php?id=' . $id);
         }
+        if ($action === 'save_audit_contacts') {
+            $id = (int)($_POST['audit_id'] ?? 0);
+            $names = $_POST['contact_name'] ?? array();
+            $emails = $_POST['contact_email'] ?? array();
+            $positions = $_POST['contact_position'] ?? array();
+            if (!is_array($names)) {
+                $names = array();
+            }
+            if (!is_array($emails)) {
+                $emails = array();
+            }
+            if (!is_array($positions)) {
+                $positions = array();
+            }
+            $contacts = array();
+            $max = max(count($names), count($emails), count($positions));
+            for ($i = 0; $i < $max; $i++) {
+                $contacts[] = array(
+                    'display_name' => (string)($names[$i] ?? ''),
+                    'email' => (string)($emails[$i] ?? ''),
+                    'position' => (string)($positions[$i] ?? 'AUDITOR'),
+                );
+            }
+            ComplianceAuditEngine::saveAuditContacts($pdo, $id, $contacts, $uid);
+            aud_flash('success', 'Audit contacts saved.');
+            redirect('/admin/compliance/audits.php?id=' . $id);
+        }
         if ($action === 'attach_snapshot') {
             $id = (int)($_POST['audit_id'] ?? 0);
             $vid = (int)($_POST['version_id'] ?? 0);
@@ -117,6 +144,7 @@ if ($detailId > 0) {
     } else {
         $locked = !empty($audit['locked_at']);
         $snapshots = ComplianceChecklistEngine::listSnapshotsForAudit($pdo, $detailId);
+        $auditContacts = ComplianceAuditEngine::listAuditContacts($pdo, $detailId);
         $templates = ComplianceChecklistEngine::listTemplates($pdo);
         $approvedVersions = array();
         foreach ($templates as $t) {
@@ -250,6 +278,69 @@ if ($detailId > 0) {
                 <input type="date" name="closed_date" value="<?= h(date('Y-m-d')) ?>">
               </label>
               <button type="submit" class="cmp-btn cmp-btn-success">Close audit</button>
+            </form>
+          <?php endif; ?>
+        </section>
+
+        <section class="cmp-card">
+          <div class="cmp-card-head">
+            <h3 class="cmp-card-title">Audit contacts</h3>
+          </div>
+          <p class="cmp-card-sub" style="margin:0 0 14px;">
+            These contacts are used for audit correspondence. Deadline-extension drafts use the Lead Auditor as To, Auditors and Specialists as Cc.
+          </p>
+          <?php if ($locked): ?>
+            <?php if ($auditContacts === array()): ?>
+              <p style="margin:0;color:var(--text-muted);">No audit contacts recorded.</p>
+            <?php else: ?>
+              <div class="compliance-table-wrap">
+                <table class="compliance-table">
+                  <thead><tr><th>Name</th><th>E-mail</th><th>Position</th></tr></thead>
+                  <tbody>
+                    <?php foreach ($auditContacts as $contact): ?>
+                      <tr>
+                        <td><?= h((string)$contact['contact_name']) ?></td>
+                        <td><?= h((string)$contact['contact_email']) ?></td>
+                        <td><?= compliance_badge((string)$contact['contact_position_label']) ?></td>
+                      </tr>
+                    <?php endforeach; ?>
+                  </tbody>
+                </table>
+              </div>
+            <?php endif; ?>
+          <?php else: ?>
+            <?php
+              $contactRows = $auditContacts;
+              for ($i = count($contactRows); $i < count($auditContacts) + 3; $i++) {
+                  $contactRows[] = array('contact_name' => '', 'contact_email' => '', 'contact_position' => 'AUDITOR');
+              }
+            ?>
+            <form method="post">
+              <input type="hidden" name="action" value="save_audit_contacts">
+              <input type="hidden" name="audit_id" value="<?= (int)$detailId ?>">
+              <div class="compliance-table-wrap">
+                <table class="compliance-table">
+                  <thead><tr><th>Name</th><th>E-mail</th><th style="width:190px;">Position</th></tr></thead>
+                  <tbody>
+                    <?php foreach ($contactRows as $contact): ?>
+                      <tr>
+                        <td><input name="contact_name[]" value="<?= h((string)($contact['contact_name'] ?? '')) ?>" placeholder="Name" style="width:100%;"></td>
+                        <td><input type="email" name="contact_email[]" value="<?= h((string)($contact['contact_email'] ?? '')) ?>" placeholder="name@example.com" style="width:100%;"></td>
+                        <td>
+                          <select name="contact_position[]" style="width:100%;">
+                            <?php foreach (ComplianceAuditEngine::contactPositions() as $position => $label): ?>
+                              <option value="<?= h($position) ?>" <?= (string)($contact['contact_position'] ?? 'AUDITOR') === $position ? 'selected' : '' ?>>
+                                <?= h($label) ?>
+                              </option>
+                            <?php endforeach; ?>
+                          </select>
+                        </td>
+                      </tr>
+                    <?php endforeach; ?>
+                  </tbody>
+                </table>
+              </div>
+              <button type="submit" style="margin-top:12px;">Save audit contacts</button>
             </form>
           <?php endif; ?>
         </section>

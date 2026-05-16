@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/ComplianceApprovalEngine.php';
 require_once __DIR__ . '/ComplianceApprovalTokenService.php';
+require_once __DIR__ . '/ComplianceAuditEngine.php';
 require_once __DIR__ . '/ComplianceCaseEvents.php';
 require_once __DIR__ . '/ComplianceCommsCenterEngine.php';
 
@@ -115,9 +116,6 @@ final class ComplianceDeadlineExtensionEngine
             throw new InvalidArgumentException('Select at least one corrective action.');
         }
         $recipientEmail = trim((string)($data['recipient_email'] ?? ''));
-        if (filter_var($recipientEmail, FILTER_VALIDATE_EMAIL) === false) {
-            throw new InvalidArgumentException('A valid reviewer email is required.');
-        }
 
         $caps = array();
         $auditId = 0;
@@ -159,6 +157,12 @@ final class ComplianceDeadlineExtensionEngine
             $cap['_explanation_category'] = trim((string)($item['explanation_category'] ?? ''));
             $caps[] = $cap;
         }
+        $recipientFallback = filter_var($recipientEmail, FILTER_VALIDATE_EMAIL) !== false ? $recipientEmail : '';
+        $primaryRecipients = self::draftRecipientsForAudit($pdo, $auditId, $recipientFallback, $userId)['to'];
+        if ($primaryRecipients === array()) {
+            throw new InvalidArgumentException('A lead auditor e-mail or valid fallback reviewer e-mail is required.');
+        }
+        $recipientEmail = $primaryRecipients[0];
 
         $pdo->beginTransaction();
         try {
@@ -284,13 +288,18 @@ final class ComplianceDeadlineExtensionEngine
         $batch = $context['batch'];
         $items = $context['items'];
         $draft = self::emailDraftForBatch($batch, $items, $reviewUrl);
+        $htmlBody = self::emailDraftHtmlForBatch($draft['body'], $reviewUrl);
+        $recipients = self::draftRecipientsForAudit($pdo, (int)$batch['audit_id'], (string)($batch['recipient_email'] ?? ''), $userId);
         $draftId = ComplianceCommsCenterEngine::createDraft($pdo, array(
-            'to' => (string)($batch['recipient_email'] ?? ''),
+            'to' => $recipients['to'],
+            'cc' => $recipients['cc'],
+            'bcc' => $recipients['bcc'],
             'subject' => $draft['subject'],
             'text_body' => $draft['body'],
-            'html_body' => '',
+            'html_body' => $htmlBody,
             'created_by' => $userId > 0 ? $userId : null,
         ));
+        self::storeBatchEmailDraftId($pdo, $batchId, $draftId);
 
         self::logBatchEvent(
             $pdo,
@@ -300,7 +309,7 @@ final class ComplianceDeadlineExtensionEngine
             $userId > 0 ? $userId : null,
             'Deadline extension email draft created: ' . (string)$batch['request_reference'],
             null,
-            array('draft_id' => $draftId, 'recipient_email' => (string)($batch['recipient_email'] ?? ''))
+            array('draft_id' => $draftId, 'to' => $recipients['to'], 'cc' => $recipients['cc'], 'bcc' => $recipients['bcc'])
         );
 
         return array(
@@ -308,7 +317,83 @@ final class ComplianceDeadlineExtensionEngine
             'subject' => $draft['subject'],
             'body' => $draft['body'],
             'review_url' => $reviewUrl,
+            'to' => implode(', ', $recipients['to']),
+            'cc' => implode(', ', $recipients['cc']),
+            'bcc' => implode(', ', $recipients['bcc']),
         );
+    }
+
+    /** @return array{to:list<string>,cc:list<string>,bcc:list<string>} */
+    private static function draftRecipientsForAudit(PDO $pdo, int $auditId, string $fallbackTo, int $userId): array
+    {
+        $to = array();
+        $cc = array();
+        foreach (ComplianceAuditEngine::listAuditContacts($pdo, $auditId) as $contact) {
+            $email = strtolower(trim((string)($contact['contact_email'] ?? '')));
+            if ($email === '' || filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
+                continue;
+            }
+            $position = (string)($contact['contact_position'] ?? '');
+            if ($position === 'LEAD_AUDITOR') {
+                $to[] = $email;
+            } elseif (in_array($position, array('AUDITOR', 'SPECIALIST'), true)) {
+                $cc[] = $email;
+            }
+        }
+        if ($to === array()) {
+            $fallbackTo = strtolower(trim($fallbackTo));
+            if (filter_var($fallbackTo, FILTER_VALIDATE_EMAIL) !== false) {
+                $to[] = $fallbackTo;
+            }
+        }
+        $bcc = array();
+        $userEmail = self::userEmail($pdo, $userId);
+        if ($userEmail !== null) {
+            $bcc[] = $userEmail;
+        }
+        return array(
+            'to' => array_values(array_unique($to)),
+            'cc' => array_values(array_diff(array_unique($cc), $to)),
+            'bcc' => array_values(array_diff(array_unique($bcc), $to, $cc)),
+        );
+    }
+
+    private static function userEmail(PDO $pdo, int $userId): ?string
+    {
+        if ($userId <= 0) {
+            return null;
+        }
+        try {
+            $st = $pdo->prepare('SELECT email FROM users WHERE id = ? LIMIT 1');
+            $st->execute(array($userId));
+            $email = strtolower(trim((string)$st->fetchColumn()));
+            return filter_var($email, FILTER_VALIDATE_EMAIL) !== false ? $email : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private static function emailDraftHtmlForBatch(string $body, string $reviewUrl): string
+    {
+        $escaped = nl2br(htmlspecialchars($body, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
+        $link = htmlspecialchars($reviewUrl, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        return '<div>' . $escaped . '</div>'
+            . '<p style="margin:18px 0;">'
+            . '<a href="' . $link . '" style="display:inline-block;background:#1e3c72;color:#ffffff;text-decoration:none;padding:10px 16px;border-radius:10px;font-weight:700;">Open secure review page</a>'
+            . '</p>';
+    }
+
+    private static function storeBatchEmailDraftId(PDO $pdo, int $batchId, int $draftId): void
+    {
+        try {
+            $pdo->prepare(
+                'UPDATE ipca_compliance_corrective_action_deadline_extension_batches
+                    SET email_draft_id = ?, updated_at = NOW()
+                  WHERE id = ?'
+            )->execute(array($draftId, $batchId));
+        } catch (Throwable) {
+            // Older databases may not have the tracking column until the migration is applied.
+        }
     }
 
     /** @return array{ok:bool,email_id:int|null,thread_id:int|null,postmark_message_id:string|null,error:string|null} */

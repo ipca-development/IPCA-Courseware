@@ -227,12 +227,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'batch_id' => (int)$result['batch_id'],
                 'draft_id' => (int)$draft['draft_id'],
                 'review_url' => (string)$draft['review_url'],
-                'recipient_email' => (string)($_POST['recipient_email'] ?? ''),
+                'recipient_email' => (string)($draft['to'] ?? ($_POST['recipient_email'] ?? '')),
+                'cc' => (string)($draft['cc'] ?? ''),
+                'bcc' => (string)($draft['bcc'] ?? ''),
                 'recipient_name' => (string)($_POST['recipient_name'] ?? ''),
                 'subject' => (string)$draft['subject'],
                 'body' => (string)$draft['body'],
             );
-            cap_flash_set('success', 'Deadline extension request created and saved to the e-mail drafts inbox.');
+            cap_flash_set('success', 'Deadline extension request created and saved to the Draft Outbox.');
             redirect('/admin/compliance/corrective_actions.php');
         }
 
@@ -675,6 +677,26 @@ if ($detailId > 0) {
         );
     }
     $emailPreview = is_array($_SESSION['_ipca_compliance_cap_email_preview'] ?? null) ? $_SESSION['_ipca_compliance_cap_email_preview'] : null;
+    if ($emailPreview !== null && !empty($emailPreview['draft_id']) && !empty($emailPreview['body'])) {
+        try {
+            $existingDraft = ComplianceCommsCenterEngine::getDraft($pdo, (int)$emailPreview['draft_id']);
+            if (is_array($existingDraft)
+                && trim((string)($existingDraft['text_body'] ?? '')) === ''
+                && trim((string)($existingDraft['html_body'] ?? '')) === '') {
+                ComplianceCommsCenterEngine::updateDraft($pdo, (int)$emailPreview['draft_id'], array(
+                    'to' => (string)($emailPreview['recipient_email'] ?? ''),
+                    'cc' => (string)($emailPreview['cc'] ?? ''),
+                    'bcc' => (string)($emailPreview['bcc'] ?? ''),
+                    'subject' => (string)($emailPreview['subject'] ?? ''),
+                    'text_body' => (string)$emailPreview['body'],
+                    'html_body' => '<div>' . nl2br(h((string)$emailPreview['body'])) . '</div>',
+                    'thread_id' => isset($existingDraft['thread_id']) && (int)$existingDraft['thread_id'] > 0 ? (int)$existingDraft['thread_id'] : null,
+                ));
+            }
+        } catch (Throwable) {
+            // Non-blocking repair for drafts generated before HTML/text body hardening.
+        }
+    }
 
     $bundle = $_SESSION['_ipca_compliance_cap_suggest'] ?? null;
     $bundleFinding = is_array($bundle) ? (int)($bundle['finding_id'] ?? 0) : 0;
@@ -738,7 +760,7 @@ if ($detailId > 0) {
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
             <span class="cmp-pill compliance-badge compliance-badge--deadline-ok">Saved to drafts</span>
-            <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_drafts.php?status=draft" style="text-decoration:none;">Open draft inbox</a>
+            <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_drafts.php?status=draft" style="text-decoration:none;">Draft Outbox</a>
             <?php if (!empty($emailPreview['draft_id'])): ?>
               <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_compose.php?draft_id=<?= (int)$emailPreview['draft_id'] ?>" style="text-decoration:none;">Edit draft</a>
             <?php endif; ?>
@@ -746,6 +768,8 @@ if ($detailId > 0) {
         </div>
         <div style="display:grid;grid-template-columns:100px 1fr;gap:8px 14px;font-size:13px;">
           <strong>To</strong><span><?= h((string)$emailPreview['recipient_email']) ?></span>
+          <?php if (!empty($emailPreview['cc'])): ?><strong>Cc</strong><span><?= h((string)$emailPreview['cc']) ?></span><?php endif; ?>
+          <?php if (!empty($emailPreview['bcc'])): ?><strong>Bcc</strong><span><?= h((string)$emailPreview['bcc']) ?></span><?php endif; ?>
           <strong>Subject</strong><span><?= h((string)$emailPreview['subject']) ?></span>
           <strong>Review link</strong><a href="<?= h((string)$emailPreview['review_url']) ?>" target="_blank" rel="noopener"><?= h((string)$emailPreview['review_url']) ?></a>
         </div>
@@ -925,8 +949,9 @@ if ($detailId > 0) {
             </label>
           </div>
           <label class="cmp-field">
-            <span class="cmp-field-label">Recipient email *</span>
-            <input type="email" name="recipient_email" required placeholder="authority@example.com">
+            <span class="cmp-field-label">Fallback reviewer email</span>
+            <input type="email" name="recipient_email" placeholder="Used only when no Lead Auditor is configured">
+            <small style="display:block;margin-top:4px;color:#64748b;">The draft uses the audit Lead Auditor as To, Auditors/Specialists as Cc, and you as Bcc.</small>
           </label>
           <label class="cmp-field">
             <span class="cmp-field-label">Collective summary explanation</span>

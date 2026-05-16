@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS ipca_compliance_corrective_action_deadline_extension_
   recipient_name        VARCHAR(255) NULL,
   summary_explanation   LONGTEXT NULL,
   email_thread_id       BIGINT UNSIGNED NULL,
+  email_draft_id        BIGINT UNSIGNED NULL,
   outbound_email_id     BIGINT UNSIGNED NULL,
   submitted_at          DATETIME NULL,
   submitted_by          BIGINT UNSIGNED NULL,
@@ -32,6 +33,21 @@ CREATE TABLE IF NOT EXISTS ipca_compliance_corrective_action_deadline_extension_
   KEY idx_ipcacapext_batch_reference (request_reference)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Compliance OS — collective corrective-action deadline extension requests.';
+
+SET @col_exists := (
+  SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE()
+     AND TABLE_NAME = 'ipca_compliance_corrective_action_deadline_extension_batches'
+     AND COLUMN_NAME = 'email_draft_id'
+);
+SET @sql_add_col := IF(@col_exists = 0,
+  'ALTER TABLE ipca_compliance_corrective_action_deadline_extension_batches
+     ADD COLUMN email_draft_id BIGINT UNSIGNED NULL AFTER email_thread_id',
+  'SELECT 1');
+PREPARE stmt_add_email_draft_id FROM @sql_add_col;
+EXECUTE stmt_add_email_draft_id;
+DEALLOCATE PREPARE stmt_add_email_draft_id;
 
 CREATE TABLE IF NOT EXISTS ipca_compliance_corrective_action_deadline_extension_items (
   id                         BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
