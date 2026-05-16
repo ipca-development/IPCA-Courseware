@@ -604,7 +604,7 @@ compliance_page_open(array(
     <input type="hidden" name="return_view" data-cmpcal-return-view>
     <input type="hidden" name="return_scroll" data-cmpcal-return-scroll>
     <div class="cmpcal-form-grid">
-      <label class="cmpcal-field"><span>Type</span><select name="linked_object_type" id="cmpcalLinkType">
+      <label class="cmpcal-field"><span id="cmpcalLinkTypeLabel">Type</span><select name="linked_object_type" id="cmpcalLinkType">
         <option value="">Not linked</option>
         <option value="compliance_case">Case / MoC</option>
         <option value="audit">Audit</option>
@@ -614,7 +614,7 @@ compliance_page_open(array(
         <option value="manual_change_request">Manual Change Request</option>
         <option value="regulatory_review">Regulatory Review</option>
       </select></label>
-      <label class="cmpcal-field"><span>Details</span><select name="linked_object_id" id="cmpcalLinkId"><option value="">Select a type first</option></select></label>
+      <label class="cmpcal-field"><span id="cmpcalLinkDetailsLabel">Details</span><select name="linked_object_id" id="cmpcalLinkId"><option value="">Select a type first</option></select></label>
     </div>
     <div class="cmpcal-modal-note">Links are stored on the manual calendar event only. The linked compliance record remains owned by its source page.</div>
     <div class="compliance-modal__footer">
@@ -922,7 +922,12 @@ compliance_page_open(array(
     var group = linkableGroups.find(function(item){ return item.type === type; });
     return group && Array.isArray(group.options) ? group.options : [];
   }
+  function normalizeLinkModalLabels(){
+    document.getElementById('cmpcalLinkTypeLabel').textContent = 'Type';
+    document.getElementById('cmpcalLinkDetailsLabel').textContent = 'Details';
+  }
   function populateLinkDetails(type, selectedId, selectedLabel){
+    normalizeLinkModalLabels();
     var sel = document.getElementById('cmpcalLinkId');
     sel.innerHTML = '';
     if (!type) {
@@ -1049,6 +1054,7 @@ compliance_page_open(array(
       alert('Only unlocked manual calendar events can be linked here. Source-projected compliance events are already linked to their source records.');
       return;
     }
+    normalizeLinkModalLabels();
     document.getElementById('cmpcalLinkEventId').value = String(ev.id).replace('manual:', '');
     document.getElementById('cmpcalLinkType').value = ev.linked_object_type || '';
     populateLinkDetails(ev.linked_object_type || '', ev.linked_object_id ? String(ev.linked_object_id) : '', '');
@@ -1573,6 +1579,8 @@ compliance_page_open(array(
   });
   document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ openEditManualModal(state.selectedEvent); });
   document.getElementById('cmpcalLinkEvent').addEventListener('click', function(){ openLinkManualModal(state.selectedEvent); });
+  normalizeLinkModalLabels();
+  populateLinkDetails(document.getElementById('cmpcalLinkType').value, document.getElementById('cmpcalLinkId').value, '');
   document.getElementById('cmpcalLinkType').addEventListener('change', function(e){
     populateLinkDetails(e.target.value, '', '');
   });
