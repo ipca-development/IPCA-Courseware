@@ -163,7 +163,7 @@ final class ComplianceCalendarRepository
             return array();
         }
         $rows = self::rows($pdo, "
-            SELECT a.calendar_event_id, a.event_kind, a.summary, a.occurred_at,
+            SELECT a.calendar_event_id, a.event_kind, a.summary, a.before_json, a.after_json, a.occurred_at,
                    COALESCE(NULLIF(CONCAT(TRIM(COALESCE(u.first_name,'')), ' ', TRIM(COALESCE(u.last_name,''))), ' '), NULLIF(u.name,''), u.email) AS actor_name
               FROM ipca_compliance_calendar_event_audit a
          LEFT JOIN users u ON u.id = a.actor_user_id
@@ -182,6 +182,8 @@ final class ComplianceCalendarRepository
             $out[$eventId][] = array(
                 'event_kind' => (string)($row['event_kind'] ?? ''),
                 'summary' => (string)($row['summary'] ?? ''),
+                'before_json' => (string)($row['before_json'] ?? ''),
+                'after_json' => (string)($row['after_json'] ?? ''),
                 'occurred_at' => trim((string)($row['occurred_at'] ?? '')) !== '' ? self::dateTime((string)$row['occurred_at']) : '',
                 'actor_name' => (string)($row['actor_name'] ?? ''),
             );

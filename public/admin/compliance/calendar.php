@@ -363,11 +363,14 @@ compliance_page_open(array(
   .cmpcal-detail-pill.is-status{background:#ecfdf5;border-color:#bbf7d0;color:#166534;}
   .cmpcal-detail-pill.is-governance{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
   .cmpcal-detail-pill.is-timezone{background:#f8fafc;border-color:#cbd5e1;color:#334155;}
+  .cmpcal-detail-pill.is-linked-record{max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;}
   .cmpcal-linked-pills{display:flex;flex-wrap:wrap;gap:6px;}
   .cmpcal-audit-trail{grid-column:1 / -1;margin-top:8px;border-top:1px solid #e2e8f0;padding-top:10px;}
   .cmpcal-audit-trail summary{cursor:pointer;font-weight:900;color:#17345d;}
   .cmpcal-audit-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:7px;}
   .cmpcal-audit-list li{border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;padding:8px 10px;color:#334155;font-size:13px;font-weight:650;}
+  .cmpcal-audit-diff{margin-top:6px;display:grid;gap:4px;color:#475569;font-size:12px;font-weight:650;}
+  .cmpcal-audit-diff span{display:block;}
   .cmpcal-footer-link{display:inline-flex;align-items:center;justify-content:center;min-height:40px;border-radius:12px;padding:0 16px;text-decoration:none;font-weight:800;border:1px solid #cbd5e1;background:#e5e7eb;color:#64748b;cursor:not-allowed;pointer-events:none;}
   .cmpcal-footer-link.is-active{background:#12355f;border-color:#12355f;color:#fff;cursor:pointer;pointer-events:auto;}
   .cmpcal-footer-link.is-active:hover{background:#1f4079;border-color:#1f4079;color:#fff;}
@@ -1055,6 +1058,59 @@ compliance_page_open(array(
     var found = options.find(function(option){ return String(option.id) === String(id); });
     return found ? String(found.label || '') : '';
   }
+  function shortLinkedRecordLabel(label){
+    var text = String(label || '').replace(/\s*\([^)]*\)\s*$/g, '').trim();
+    if (text.length > 58) {
+      text = text.slice(0, 55).trim() + '...';
+    }
+    return text;
+  }
+  function parseAuditJson(value){
+    if (!value) { return null; }
+    try { return JSON.parse(value); } catch (err) { return null; }
+  }
+  function auditFieldLabel(field){
+    var labels = {
+      title: 'Title',
+      event_type: 'Event type',
+      starts_at: 'Start',
+      ends_at: 'End',
+      is_all_day: 'All-day',
+      timezone: 'Timezone',
+      description: 'Description',
+      linked_object_type: 'Linked type',
+      linked_object_id: 'Linked item'
+    };
+    return labels[field] || titleCaseText(field);
+  }
+  function auditValue(field, value, row){
+    if (value == null || value === '') { return 'empty'; }
+    if (field === 'event_type') { return labelForType(value); }
+    if (field === 'linked_object_type') { return labelForLinkedType(value); }
+    if (field === 'linked_object_id') {
+      var linkedType = row && row.linked_object_type ? row.linked_object_type : '';
+      return shortLinkedRecordLabel(labelForLinkedRecord(linkedType, value) || ('#' + value));
+    }
+    if (field === 'is_all_day') { return String(value) === '1' || value === true ? 'Yes' : 'No'; }
+    if ((field === 'starts_at' || field === 'ends_at') && String(value).length >= 10) {
+      return String(value).replace('T', ' ').slice(0, 16);
+    }
+    return String(value);
+  }
+  function auditDiffHtml(item){
+    var before = parseAuditJson(item.before_json);
+    var after = parseAuditJson(item.after_json);
+    if (!after || String(item.event_kind || '') === 'created') { return ''; }
+    var fields = ['title','event_type','starts_at','ends_at','is_all_day','timezone','description','linked_object_type','linked_object_id'];
+    var rows = [];
+    fields.forEach(function(field){
+      var oldValue = before ? before[field] : null;
+      var newValue = after[field];
+      if (String(oldValue == null ? '' : oldValue) === String(newValue == null ? '' : newValue)) { return; }
+      rows.push('<span>' + escapeHtml(auditFieldLabel(field)) + ': ' + escapeHtml(auditValue(field, oldValue, before || after)) + ' -> ' + escapeHtml(auditValue(field, newValue, after)) + '</span>');
+    });
+    return rows.length ? '<div class="cmpcal-audit-diff">' + rows.join('') + '</div>' : '';
+  }
   function auditSummaryText(item){
     var summary = String(item.summary || '').trim();
     if (summary !== '') { return summary; }
@@ -1176,15 +1232,15 @@ compliance_page_open(array(
     var ends = parseDt(ev.ends_at || ev.starts_at);
     var eventTimezone = ev.timezone || state.timezone || 'UTC';
     var linkedId = ev.linked_object_id || ev.source_id || '';
-    var linkedTitle = labelForLinkedRecord(ev.linked_object_type || '', linkedId) || (linkedId ? labelForLinkedType(ev.linked_object_type) + ' #' + linkedId : '');
+    var linkedTitle = shortLinkedRecordLabel(labelForLinkedRecord(ev.linked_object_type || '', linkedId) || (linkedId ? labelForLinkedType(ev.linked_object_type) + ' #' + linkedId : ''));
     var linkedHtml = ev.linked_object_type
       ? '<div class="cmpcal-linked-pills">'
         + detailPill(iconForLinkedType(ev.linked_object_type) + escapeHtml(labelForLinkedType(ev.linked_object_type)), 'cmpcal-type-' + (ev.event_type || 'other'))
-        + textPill(linkedTitle || 'Linked record', 'is-timezone')
+        + textPill(linkedTitle || 'Linked record', 'is-timezone is-linked-record')
         + '</div>'
       : textPill('Not linked', 'is-timezone');
     var audit = Array.isArray(metadata.audit_trail) ? metadata.audit_trail.map(function(item){
-      return fmtAuditStamp(parseDt(item.occurred_at), eventTimezone) + ' &ndash; ' + escapeHtml(auditSummaryText(item)) + ' by ' + escapeHtml(item.actor_name || 'Unknown user');
+      return fmtAuditStamp(parseDt(item.occurred_at), eventTimezone) + ' &ndash; ' + escapeHtml(auditSummaryText(item)) + ' by ' + escapeHtml(item.actor_name || 'Unknown user') + auditDiffHtml(item);
     }) : [];
     if (audit.length === 0 && metadata.updated_at && metadata.updated_at !== metadata.created_at) {
       audit.push(fmtAuditStamp(parseDt(metadata.updated_at), eventTimezone) + ' &ndash; Event Updated by ' + escapeHtml(metadata.updated_by_name || 'Unknown user'));
