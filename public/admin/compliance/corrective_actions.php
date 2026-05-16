@@ -95,10 +95,43 @@ function cap_deadline_display(?string $date): string
         . '</div>';
 }
 
+/** @param array{state:string,label:string,days:int|null,item:array<string,mixed>|null} $status */
+function cap_deadline_status_display(array $status, ?string $approvedDeadline): string
+{
+    $state = (string)$status['state'];
+    $item = is_array($status['item'] ?? null) ? $status['item'] : null;
+    if ($state === 'extension_pending' && $item !== null) {
+        return '<div class="cmp-deadline-status">'
+            . '<div>Approved deadline: <span class="cmp-pill compliance-badge compliance-badge--deadline-ok">' . h(substr((string)$item['previous_approved_deadline'], 0, 10)) . '</span></div>'
+            . '<div>Proposed deadline: <span class="cmp-pill cmp-pill--deadline-pending">' . h(substr((string)$item['requested_deadline'], 0, 10)) . '</span></div>'
+            . '<div><span class="cmp-pill cmp-pill--deadline-pending">Extension Pending</span></div>'
+            . '</div>';
+    }
+    if ($state === 'extension_approved' && $item !== null) {
+        return '<div class="cmp-deadline-status">'
+            . '<div>Approved extended deadline: <span class="cmp-pill cmp-pill--deadline-approved">' . h(substr((string)($item['approved_deadline'] ?: $item['requested_deadline']), 0, 10)) . '</span></div>'
+            . '<div><span class="cmp-pill cmp-pill--deadline-approved">Extension Approved</span></div>'
+            . '</div>';
+    }
+    if ($state === 'extension_rejected' && $item !== null) {
+        return '<div class="cmp-deadline-status">'
+            . '<div>Requested deadline: <span class="cmp-pill cmp-pill--deadline-rejected">' . h(substr((string)$item['requested_deadline'], 0, 10)) . '</span></div>'
+            . '<div><span class="cmp-pill cmp-pill--deadline-rejected">Extension Rejected</span></div>'
+            . '</div>';
+    }
+    $class = $state === 'overdue' ? 'cmp-pill--deadline-rejected' : ($state === 'warning' ? 'cmp-pill--deadline-warning' : 'compliance-badge--deadline-ok');
+    return '<span class="cmp-pill compliance-badge ' . $class . '">' . h((string)$status['label']) . '</span>';
+}
+
 if (!empty($_SESSION['_ipca_compliance_cap_suggest']['saved_at'])
     && is_numeric($_SESSION['_ipca_compliance_cap_suggest']['saved_at'])
     && time() - (int)$_SESSION['_ipca_compliance_cap_suggest']['saved_at'] > 1800) {
     unset($_SESSION['_ipca_compliance_cap_suggest']);
+}
+if (!empty($_SESSION['_ipca_compliance_cap_email_preview']['saved_at'])
+    && is_numeric($_SESSION['_ipca_compliance_cap_email_preview']['saved_at'])
+    && time() - (int)$_SESSION['_ipca_compliance_cap_email_preview']['saved_at'] > 3600) {
+    unset($_SESSION['_ipca_compliance_cap_email_preview']);
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -162,6 +195,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ));
             cap_flash_set('success', 'Deadline extension recorded.');
             redirect('/admin/compliance/corrective_actions.php?id=' . $cid);
+        }
+
+        if ($action === 'create_deadline_extension_batch') {
+            $capIds = $_POST['cap_ids'] ?? array();
+            if (!is_array($capIds)) {
+                $capIds = array();
+            }
+            $items = array();
+            foreach ($capIds as $rawId) {
+                $capId = (int)$rawId;
+                if ($capId <= 0) {
+                    continue;
+                }
+                $items[] = array(
+                    'corrective_action_id' => $capId,
+                    'requested_deadline' => (string)($_POST['requested_deadline'][$capId] ?? ''),
+                    'explanation_category' => (string)($_POST['explanation_category'][$capId] ?? ''),
+                    'explanation' => (string)($_POST['explanation'][$capId] ?? ''),
+                );
+            }
+            $result = ComplianceDeadlineExtensionEngine::createExtensionBatch($pdo, $items, array(
+                'request_type' => (string)($_POST['request_type'] ?? 'authority'),
+                'recipient_email' => (string)($_POST['recipient_email'] ?? ''),
+                'recipient_name' => (string)($_POST['recipient_name'] ?? ''),
+                'summary_explanation' => (string)($_POST['summary_explanation'] ?? ''),
+            ), $uid);
+            $context = ComplianceDeadlineExtensionEngine::batchContext($pdo, (int)$result['batch_id']);
+            $_SESSION['_ipca_compliance_cap_email_preview'] = array(
+                'saved_at' => time(),
+                'batch_id' => (int)$result['batch_id'],
+                'review_url' => (string)$result['review_url'],
+                'recipient_email' => (string)($_POST['recipient_email'] ?? ''),
+                'recipient_name' => (string)($_POST['recipient_name'] ?? ''),
+                'subject' => ComplianceDeadlineExtensionEngine::emailDraftForBatch($context['batch'], $context['items'], (string)$result['review_url'])['subject'],
+                'body' => ComplianceDeadlineExtensionEngine::emailDraftForBatch($context['batch'], $context['items'], (string)$result['review_url'])['body'],
+            );
+            cap_flash_set('success', 'Deadline extension request created. Review the email draft before sending.');
+            redirect('/admin/compliance/corrective_actions.php');
         }
 
         if ($action === 'suggest_cap_ai') {
@@ -541,7 +612,7 @@ if ($detailId > 0) {
     }
     if ($filterDue !== '') {
         $today = date('Y-m-d');
-        $soon = date('Y-m-d', strtotime('+7 days'));
+        $soon = date('Y-m-d', strtotime('+' . ComplianceDeadlineExtensionEngine::WARNING_THRESHOLD_DAYS . ' days'));
         $rows = array_values(array_filter($rows, static function (array $r) use ($filterDue, $today, $soon): bool {
             $due = substr((string)($r['due_date'] ?? ''), 0, 10);
             if ($filterDue === 'no_due') {
@@ -556,6 +627,38 @@ if ($detailId > 0) {
             return $due >= $today && $due <= $soon;
         }));
     }
+
+    $workflowStatus = ComplianceDeadlineExtensionEngine::workflowTableStatus($pdo);
+    $latestExtensionItems = ComplianceDeadlineExtensionEngine::indexItemsByAction(ComplianceDeadlineExtensionEngine::latestWorkflowItemsByAction($pdo));
+    $deadlineStatesByAction = array();
+    $extensionSelectionRows = array();
+    $approachingCount = 0;
+    $overdueCount = 0;
+    $pendingCount = 0;
+    foreach ($rows as $r) {
+        $capIdForStatus = (int)$r['id'];
+        $effectiveDueForStatus = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline($pdo, $capIdForStatus, isset($r['due_date']) ? (string)$r['due_date'] : null);
+        $deadlineStatus = ComplianceDeadlineExtensionEngine::calculateDeadlineStatus($effectiveDueForStatus, $latestExtensionItems[$capIdForStatus] ?? null);
+        $deadlineStatesByAction[$capIdForStatus] = array('effective_due' => $effectiveDueForStatus, 'status' => $deadlineStatus);
+        if ($deadlineStatus['state'] === 'warning') {
+            $approachingCount++;
+        } elseif ($deadlineStatus['state'] === 'overdue') {
+            $overdueCount++;
+        } elseif ($deadlineStatus['state'] === 'extension_pending') {
+            $pendingCount++;
+        }
+        $isClosed = in_array(strtoupper((string)($r['status'] ?? '')), array('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED'), true);
+        $eligible = $workflowStatus['batches'] && $workflowStatus['items'] && $workflowStatus['tokens']
+            && !$isClosed
+            && $effectiveDueForStatus !== null
+            && in_array($deadlineStatus['state'], array('warning', 'overdue', 'extension_rejected'), true);
+        $extensionSelectionRows[$capIdForStatus] = array(
+            'eligible' => $eligible,
+            'disabled_reason' => $deadlineStatus['state'] === 'extension_pending' ? 'Extension already pending' : ($eligible ? '' : 'Not eligible for extension request'),
+            'deadline_label' => (string)$deadlineStatus['label'],
+        );
+    }
+    $emailPreview = is_array($_SESSION['_ipca_compliance_cap_email_preview'] ?? null) ? $_SESSION['_ipca_compliance_cap_email_preview'] : null;
 
     $bundle = $_SESSION['_ipca_compliance_cap_suggest'] ?? null;
     $bundleFinding = is_array($bundle) ? (int)($bundle['finding_id'] ?? 0) : 0;
@@ -610,6 +713,66 @@ if ($detailId > 0) {
       </form>
     </section>
 
+    <?php if ($emailPreview !== null): ?>
+      <section class="cmp-card" style="border-color:#bfdbfe;background:#eff6ff;">
+        <div class="cmp-list-head" style="margin-bottom:10px;">
+          <div class="cmp-list-title">
+            <?= compliance_ui_icon('mail') ?>
+            <span>Email draft generated</span>
+          </div>
+          <span class="cmp-pill compliance-badge compliance-badge--deadline-ok">Not sent yet</span>
+        </div>
+        <div style="display:grid;grid-template-columns:100px 1fr;gap:8px 14px;font-size:13px;">
+          <strong>To</strong><span><?= h((string)$emailPreview['recipient_email']) ?></span>
+          <strong>Subject</strong><span><?= h((string)$emailPreview['subject']) ?></span>
+          <strong>Review link</strong><a href="<?= h((string)$emailPreview['review_url']) ?>" target="_blank" rel="noopener"><?= h((string)$emailPreview['review_url']) ?></a>
+        </div>
+        <textarea readonly rows="12" style="margin-top:12px;width:100%;box-sizing:border-box;border:1px solid #bfdbfe;border-radius:12px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;"><?= h((string)$emailPreview['body']) ?></textarea>
+      </section>
+    <?php endif; ?>
+
+    <?php if ($approachingCount > 0 || $overdueCount > 0 || $pendingCount > 0): ?>
+      <?php
+        if ($approachingCount > 0 && $overdueCount > 0) {
+            $warningCopy = 'Some corrective actions are approaching or have passed their deadlines. Close the actions soon or request a deadline extension.';
+        } elseif ($overdueCount > 0) {
+            $warningCopy = 'Some corrective actions are overdue. Immediate closure or an approved deadline extension is required.';
+        } else {
+            $warningCopy = 'Some corrective actions are approaching their deadlines. Close the actions soon or request a deadline extension.';
+        }
+      ?>
+      <section class="cmp-card" style="border-color:#f59e0b;background:#fffbeb;">
+        <div class="cmp-list-head" style="margin-bottom:8px;">
+          <div class="cmp-list-title">
+            <?= compliance_ui_icon('alert') ?>
+            <span>Deadline attention required</span>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <?php if ($approachingCount > 0): ?><span class="cmp-pill cmp-pill--deadline-warning"><?= (int)$approachingCount ?> approaching</span><?php endif; ?>
+            <?php if ($overdueCount > 0): ?><span class="cmp-pill cmp-pill--deadline-rejected"><?= (int)$overdueCount ?> overdue</span><?php endif; ?>
+            <?php if ($pendingCount > 0): ?><span class="cmp-pill cmp-pill--deadline-pending"><?= (int)$pendingCount ?> pending extension</span><?php endif; ?>
+          </div>
+        </div>
+        <p style="margin:0 0 12px;color:#92400e;font-weight:700;"><?= h($warningCopy) ?></p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;">
+          <button type="button" class="cmp-btn-secondary" id="capBulkOpenFromWarning">Request Extension</button>
+          <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/corrective_actions.php?due=due_soon" style="text-decoration:none;">Show affected actions</a>
+        </div>
+      </section>
+    <?php endif; ?>
+
+    <section class="cmp-card" id="capBulkToolbar" style="display:none;border-color:#bfdbfe;background:#eff6ff;">
+      <div class="cmp-list-head">
+        <div class="cmp-list-title">
+          <?= compliance_ui_icon('check') ?>
+          <span><span id="capSelectedCount">0</span> selected</span>
+        </div>
+        <button type="button" id="capBulkOpen" style="background:#1e3c72;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:800;cursor:pointer;">
+          Request Deadline Extension
+        </button>
+      </div>
+    </section>
+
       <section class="cmp-card compliance-card--full" style="overflow:hidden;">
         <div class="compliance-table-wrap">
         <style>
@@ -636,10 +799,17 @@ if ($detailId > 0) {
           }
           .cmp-cap-list-table .cmp-list-deadline{display:flex;flex-direction:column;gap:4px;align-items:flex-start;}
           .cmp-cap-list-table .cmp-list-date{font-size:11.5px;color:#324155;font-weight:650;}
+          .cmp-cap-list-table .cmp-selector-cell{width:44px;text-align:center;}
+          .cmp-deadline-status{display:flex;flex-direction:column;gap:5px;align-items:flex-start;}
+          .cmp-pill--deadline-warning{border-color:#f59e0b !important;background:#fffbeb !important;color:#92400e !important;}
+          .cmp-pill--deadline-pending{border:1px dashed #f59e0b !important;background:#fff7ed !important;color:#92400e !important;}
+          .cmp-pill--deadline-approved{border-color:#86efac !important;background:#ecfdf5 !important;color:#166534 !important;}
+          .cmp-pill--deadline-rejected{border-color:#fecaca !important;background:#fef2f2 !important;color:#991b1b !important;}
         </style>
         <table class="compliance-table cmp-cap-list-table">
           <thead>
             <tr>
+              <th class="cmp-selector-cell"></th>
               <th style="width:143px;">Reference</th>
               <th style="width:143px;">Finding ref</th>
               <th>Title</th>
@@ -647,18 +817,35 @@ if ($detailId > 0) {
               <th style="width:127px;">Status</th>
               <th style="width:127px;">Effectiveness</th>
               <th style="width:165px;">Deadline</th>
+              <th style="width:210px;">Deadline Status</th>
             </tr>
           </thead>
           <tbody>
             <?php if (!$rows): ?>
-              <tr><td colspan="7" style="padding:20px;color:#64748b;">No matching actions.</td></tr>
+              <tr><td colspan="9" style="padding:20px;color:#64748b;">No matching actions.</td></tr>
             <?php endif; ?>
             <?php foreach ($rows as $r):
-                $effectiveDue = ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline($pdo, (int)$r['id'], isset($r['due_date']) ? (string)$r['due_date'] : null);
+                $effectiveDue = $deadlineStatesByAction[(int)$r['id']]['effective_due'] ?? ComplianceDeadlineExtensionEngine::effectiveCorrectiveActionDeadline($pdo, (int)$r['id'], isset($r['due_date']) ? (string)$r['due_date'] : null);
+                $deadlineStatus = $deadlineStatesByAction[(int)$r['id']]['status'] ?? ComplianceDeadlineExtensionEngine::calculateDeadlineStatus($effectiveDue, $latestExtensionItems[(int)$r['id']] ?? null);
+                $selectMeta = $extensionSelectionRows[(int)$r['id']] ?? array('eligible' => false, 'disabled_reason' => 'Not eligible for extension request');
                 $eff = cap_latest_effectiveness($pdo, (int)$r['id'], (string)$r['status']);
                 $findingRef = trim((string)($r['finding_reference'] ?? '')) !== '' ? (string)$r['finding_reference'] : (string)$r['finding_code'];
                 ?>
               <tr data-href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>" class="compliance-row-clickable">
+                <td class="cmp-selector-cell">
+                  <?php if (!empty($selectMeta['eligible'])): ?>
+                    <input type="checkbox"
+                      class="cap-extension-select"
+                      value="<?= (int)$r['id'] ?>"
+                      data-action-code="<?= h((string)$r['action_code']) ?>"
+                      data-finding-reference="<?= h($findingRef) ?>"
+                      data-title="<?= h((string)$r['title']) ?>"
+                      data-current-deadline="<?= h((string)$effectiveDue) ?>"
+                      data-deadline-label="<?= h((string)$deadlineStatus['label']) ?>">
+                  <?php else: ?>
+                    <span title="<?= h((string)($selectMeta['disabled_reason'] ?? 'Not eligible')) ?>" style="color:#cbd5e1;">—</span>
+                  <?php endif; ?>
+                </td>
                 <td>
                   <a class="cmp-ref-link" href="/admin/compliance/corrective_actions.php?id=<?= (int)$r['id'] ?>">
                     <?= h((string)$r['action_code']) ?>
@@ -674,12 +861,48 @@ if ($detailId > 0) {
                 <td><?= compliance_badge((string)$r['status']) ?></td>
                 <td><?= compliance_badge($eff) ?></td>
                 <td><?= cap_deadline_display($effectiveDue) ?></td>
+                <td><?= cap_deadline_status_display($deadlineStatus, $effectiveDue) ?></td>
               </tr>
             <?php endforeach; ?>
           </tbody>
         </table>
         </div>
       </section>
+
+      <?php compliance_modal_open('cap-bulk-extension-modal', 'Request Corrective Action Deadline Extension'); ?>
+        <form method="post" action="/admin/compliance/corrective_actions.php" id="capBulkExtensionForm">
+          <input type="hidden" name="action" value="create_deadline_extension_batch">
+          <p style="margin:0 0 14px;color:#64748b;font-size:13px;">
+            Proposed deadlines remain pending until the authority/internal reviewer approves the request from the secure review link.
+          </p>
+          <div id="capBulkExtensionRows" style="display:flex;flex-direction:column;gap:12px;margin-bottom:14px;"></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+            <label class="cmp-field">
+              <span class="cmp-field-label">Recipient type</span>
+              <select name="request_type">
+                <option value="authority">Authority / external</option>
+                <option value="internal">Internal reviewer</option>
+              </select>
+            </label>
+            <label class="cmp-field">
+              <span class="cmp-field-label">Recipient name</span>
+              <input name="recipient_name" placeholder="Reviewer name">
+            </label>
+          </div>
+          <label class="cmp-field">
+            <span class="cmp-field-label">Recipient email *</span>
+            <input type="email" name="recipient_email" required placeholder="authority@example.com">
+          </label>
+          <label class="cmp-field">
+            <span class="cmp-field-label">Collective summary explanation</span>
+            <textarea name="summary_explanation" rows="3" placeholder="Optional summary for the overall request."></textarea>
+          </label>
+          <div class="compliance-modal__footer">
+            <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+            <button type="submit">Create request and email draft</button>
+          </div>
+        </form>
+      <?php compliance_modal_close(); ?>
 
       <?php compliance_modal_open('cap-create-modal', 'New corrective action'); ?>
           <form method="post" action="/admin/compliance/corrective_actions.php">
@@ -740,6 +963,129 @@ if ($detailId > 0) {
             </div>
           </form>
       <?php compliance_modal_close(); ?>
+
+      <script>
+        (function () {
+          var checks = Array.prototype.slice.call(document.querySelectorAll('.cap-extension-select'));
+          var toolbar = document.getElementById('capBulkToolbar');
+          var countEl = document.getElementById('capSelectedCount');
+          var modal = document.getElementById('cap-bulk-extension-modal');
+          var rowsEl = document.getElementById('capBulkExtensionRows');
+          var openBtn = document.getElementById('capBulkOpen');
+          var warningBtn = document.getElementById('capBulkOpenFromWarning');
+          var categories = [
+            'Awaiting authority input',
+            'Supplier delay',
+            'Resource limitation',
+            'Technical issue',
+            'Aircraft/FSTD downtime',
+            'Manual revision pending',
+            'Dependency on another corrective action',
+            'External contractor delay',
+            'Other'
+          ];
+          function selected() {
+            return checks.filter(function (box) { return box.checked; });
+          }
+          function refreshToolbar() {
+            var count = selected().length;
+            if (countEl) { countEl.textContent = String(count); }
+            if (toolbar) { toolbar.style.display = count > 0 ? '' : 'none'; }
+          }
+          function addDays(dateText, days) {
+            var parts = String(dateText || '').split('-');
+            if (parts.length !== 3) { return ''; }
+            var d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+            d.setDate(d.getDate() + days);
+            return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+          }
+          function field(name, value) {
+            var input = document.createElement('input');
+            input.type = 'hidden';
+            input.name = name;
+            input.value = value;
+            return input;
+          }
+          function openModalFromSelection() {
+            var chosen = selected();
+            if (!chosen.length) {
+              alert('Select at least one eligible corrective action first.');
+              return;
+            }
+            rowsEl.innerHTML = '';
+            chosen.forEach(function (box) {
+              var id = box.value;
+              var current = box.getAttribute('data-current-deadline') || '';
+              var card = document.createElement('div');
+              card.style.cssText = 'border:1px solid #e2e8f0;border-radius:14px;background:#f8fafc;padding:12px;';
+              card.appendChild(field('cap_ids[]', id));
+              card.innerHTML += ''
+                + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">'
+                + '<span class="cmp-pill compliance-badge">' + escapeHtml(box.getAttribute('data-action-code') || '') + '</span>'
+                + '<span class="cmp-pill compliance-badge">' + escapeHtml(box.getAttribute('data-finding-reference') || '') + '</span>'
+                + '<span class="cmp-pill cmp-pill--deadline-warning">' + escapeHtml(box.getAttribute('data-deadline-label') || '') + '</span>'
+                + '</div>'
+                + '<div style="font-weight:800;color:#0f172a;margin-bottom:8px;">' + escapeHtml(box.getAttribute('data-title') || '') + '</div>'
+                + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'
+                + '<label class="cmp-field"><span class="cmp-field-label">Current approved deadline</span><input value="' + escapeHtml(current) + '" disabled></label>'
+                + '<label class="cmp-field"><span class="cmp-field-label">Proposed new deadline *</span><input type="date" name="requested_deadline[' + id + ']" required min="' + escapeHtml(addDays(current, 1)) + '" value="' + escapeHtml(addDays(current, 14)) + '"></label>'
+                + '</div>';
+              var category = document.createElement('label');
+              category.className = 'cmp-field';
+              category.innerHTML = '<span class="cmp-field-label">Explanation category</span>';
+              var select = document.createElement('select');
+              select.name = 'explanation_category[' + id + ']';
+              categories.forEach(function (label) {
+                var opt = document.createElement('option');
+                opt.value = label;
+                opt.textContent = label;
+                select.appendChild(opt);
+              });
+              category.appendChild(select);
+              card.appendChild(category);
+              var explanation = document.createElement('label');
+              explanation.className = 'cmp-field';
+              explanation.innerHTML = '<span class="cmp-field-label">Explanation *</span><textarea name="explanation[' + id + ']" rows="3" required placeholder="Explain why this corrective action needs a deadline extension."></textarea>';
+              card.appendChild(explanation);
+              rowsEl.appendChild(card);
+            });
+            if (typeof modal.showModal === 'function') {
+              modal.showModal();
+            } else {
+              modal.setAttribute('open', 'open');
+            }
+          }
+          function escapeHtml(value) {
+            return String(value).replace(/[&<>"']/g, function (c) {
+              return ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'})[c];
+            });
+          }
+          checks.forEach(function (box) {
+            box.addEventListener('click', function (ev) { ev.stopPropagation(); });
+            box.addEventListener('change', refreshToolbar);
+          });
+          if (openBtn) { openBtn.addEventListener('click', openModalFromSelection); }
+          if (warningBtn) {
+            warningBtn.addEventListener('click', function () {
+              if (!selected().length) {
+                checks.forEach(function (box) { box.checked = true; });
+                refreshToolbar();
+              }
+              openModalFromSelection();
+            });
+          }
+          if (modal) {
+            modal.querySelectorAll('[data-compliance-modal-close]').forEach(function (btn) {
+              btn.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                if (typeof modal.close === 'function') { modal.close(); }
+                modal.removeAttribute('open');
+              });
+            });
+          }
+          refreshToolbar();
+        })();
+      </script>
 
         <section class="cmp-card">
           <h3 style="margin:0 0 8px;">AI: suggest CAP options</h3>

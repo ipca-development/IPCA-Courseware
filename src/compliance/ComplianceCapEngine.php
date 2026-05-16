@@ -135,7 +135,7 @@ final class ComplianceCapEngine
             $params[] = $findingId;
         }
 
-        $sql = 'SELECT c.*, f.finding_code, f.reference AS finding_reference, f.title AS finding_title
+        $sql = 'SELECT c.*, f.finding_code, f.reference AS finding_reference, f.title AS finding_title, f.audit_id
                 FROM ipca_compliance_corrective_actions c
                 INNER JOIN ipca_compliance_findings f ON f.id = c.finding_id
                 WHERE ' . implode(' AND ', $where) . '

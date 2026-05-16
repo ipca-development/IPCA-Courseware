@@ -2,9 +2,23 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/ComplianceApprovalEngine.php';
+require_once __DIR__ . '/ComplianceApprovalTokenService.php';
+require_once __DIR__ . '/ComplianceCaseEvents.php';
 
 final class ComplianceDeadlineExtensionEngine
 {
+    public const WARNING_THRESHOLD_DAYS = 10;
+
+    /** @return array<string,bool> */
+    public static function workflowTableStatus(PDO $pdo): array
+    {
+        return array(
+            'batches' => self::tablePresent($pdo, 'ipca_compliance_corrective_action_deadline_extension_batches'),
+            'items' => self::tablePresent($pdo, 'ipca_compliance_corrective_action_deadline_extension_items'),
+            'tokens' => ComplianceApprovalTokenService::tablePresent($pdo),
+        );
+    }
+
     public static function rcaCapTablePresent(PDO $pdo): bool
     {
         try {
@@ -23,6 +37,243 @@ final class ComplianceDeadlineExtensionEngine
         } catch (Throwable) {
             return false;
         }
+    }
+
+    /** @return list<array<string,mixed>> */
+    public static function latestWorkflowItemsByAction(PDO $pdo): array
+    {
+        if (!self::tablePresent($pdo, 'ipca_compliance_corrective_action_deadline_extension_items')) {
+            return array();
+        }
+        $rows = self::rows($pdo, "
+            SELECT i.*, b.request_reference, b.status AS batch_status
+              FROM ipca_compliance_corrective_action_deadline_extension_items i
+              JOIN (
+                    SELECT corrective_action_id, MAX(id) AS max_id
+                      FROM ipca_compliance_corrective_action_deadline_extension_items
+                     GROUP BY corrective_action_id
+              ) latest ON latest.max_id = i.id
+         LEFT JOIN ipca_compliance_corrective_action_deadline_extension_batches b ON b.id = i.batch_id
+        ");
+        return $rows;
+    }
+
+    /** @param list<array<string,mixed>> $items @return array<int,array<string,mixed>> */
+    public static function indexItemsByAction(array $items): array
+    {
+        $out = array();
+        foreach ($items as $item) {
+            $out[(int)$item['corrective_action_id']] = $item;
+        }
+        return $out;
+    }
+
+    /** @return array{state:string,label:string,days:int|null,item:array<string,mixed>|null} */
+    public static function calculateDeadlineStatus(?string $deadline, ?array $latestItem = null): array
+    {
+        if ($latestItem !== null) {
+            $status = (string)($latestItem['status'] ?? '');
+            if ($status === 'submitted' || $status === 'draft') {
+                return array('state' => 'extension_pending', 'label' => 'Extension Pending', 'days' => null, 'item' => $latestItem);
+            }
+            if ($status === 'approved') {
+                return array('state' => 'extension_approved', 'label' => 'Extension Approved', 'days' => null, 'item' => $latestItem);
+            }
+            if ($status === 'rejected') {
+                return array('state' => 'extension_rejected', 'label' => 'Extension Rejected', 'days' => null, 'item' => $latestItem);
+            }
+        }
+
+        $deadline = $deadline !== null ? substr(trim($deadline), 0, 10) : '';
+        if ($deadline === '') {
+            return array('state' => 'none', 'label' => 'No approved deadline', 'days' => null, 'item' => null);
+        }
+        $today = new DateTimeImmutable('today');
+        $due = DateTimeImmutable::createFromFormat('Y-m-d', $deadline);
+        if (!$due) {
+            return array('state' => 'none', 'label' => 'No approved deadline', 'days' => null, 'item' => null);
+        }
+        $days = (int)$today->diff($due)->format('%r%a');
+        if ($days < 0) {
+            return array('state' => 'overdue', 'label' => abs($days) . ' days overdue', 'days' => $days, 'item' => null);
+        }
+        if ($days <= self::WARNING_THRESHOLD_DAYS) {
+            return array('state' => 'warning', 'label' => $days . ' days remaining', 'days' => $days, 'item' => null);
+        }
+        return array('state' => 'normal', 'label' => $days . ' days remaining', 'days' => $days, 'item' => null);
+    }
+
+    /** @param list<array<string,mixed>> $items @return array{batch_id:int,token:string,token_id:int,review_url:string} */
+    public static function createExtensionBatch(PDO $pdo, array $items, array $data, int $userId): array
+    {
+        $status = self::workflowTableStatus($pdo);
+        if (!$status['batches'] || !$status['items'] || !$status['tokens']) {
+            throw new RuntimeException('Deadline extension workflow tables are not installed.');
+        }
+        if ($items === array()) {
+            throw new InvalidArgumentException('Select at least one corrective action.');
+        }
+        $recipientEmail = trim((string)($data['recipient_email'] ?? ''));
+        if (filter_var($recipientEmail, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException('A valid reviewer email is required.');
+        }
+
+        $caps = array();
+        $auditId = 0;
+        foreach ($items as $item) {
+            $capId = (int)($item['corrective_action_id'] ?? 0);
+            $requested = substr(trim((string)($item['requested_deadline'] ?? '')), 0, 10);
+            $explanation = trim((string)($item['explanation'] ?? ''));
+            if ($capId <= 0 || $requested === '' || $explanation === '') {
+                throw new InvalidArgumentException('Every selected action needs a proposed deadline and explanation.');
+            }
+            $cap = self::correctiveActionContext($pdo, $capId);
+            if ($cap === null) {
+                throw new RuntimeException('Corrective action not found.');
+            }
+            if (in_array(strtoupper((string)$cap['status']), array('CLOSED','VERIFIED','CANCELLED','COMPLETED','EXECUTED'), true)) {
+                throw new RuntimeException('Closed corrective actions cannot be included.');
+            }
+            $previous = substr((string)($cap['due_date'] ?? ''), 0, 10);
+            if ($previous === '') {
+                throw new RuntimeException('Corrective action ' . (string)$cap['action_code'] . ' has no approved deadline.');
+            }
+            if (strtotime($requested) <= strtotime($previous)) {
+                throw new InvalidArgumentException('Requested deadline must be later than current approved deadline for ' . (string)$cap['action_code'] . '.');
+            }
+            if (self::pendingWorkflowItemExists($pdo, $capId)) {
+                throw new RuntimeException('Corrective action ' . (string)$cap['action_code'] . ' already has a pending extension.');
+            }
+            $rowAuditId = (int)($cap['audit_id'] ?? 0);
+            if ($rowAuditId <= 0) {
+                throw new RuntimeException('Corrective action ' . (string)$cap['action_code'] . ' is not linked to an audit.');
+            }
+            if ($auditId === 0) {
+                $auditId = $rowAuditId;
+            } elseif ($auditId !== $rowAuditId) {
+                throw new RuntimeException('All selected corrective actions must belong to the same audit.');
+            }
+            $cap['_requested_deadline'] = $requested;
+            $cap['_explanation'] = $explanation;
+            $cap['_explanation_category'] = trim((string)($item['explanation_category'] ?? ''));
+            $caps[] = $cap;
+        }
+
+        $pdo->beginTransaction();
+        try {
+            $reference = self::generateBatchReference($pdo);
+            $st = $pdo->prepare(
+                'INSERT INTO ipca_compliance_corrective_action_deadline_extension_batches
+                    (audit_id, request_reference, request_type, status, recipient_email, recipient_name,
+                     summary_explanation, submitted_at, submitted_by, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), ?, ?)'
+            );
+            $st->execute(array(
+                $auditId,
+                $reference,
+                (string)($data['request_type'] ?? 'authority') === 'internal' ? 'internal' : 'authority',
+                'submitted',
+                $recipientEmail,
+                trim((string)($data['recipient_name'] ?? '')) !== '' ? trim((string)$data['recipient_name']) : null,
+                trim((string)($data['summary_explanation'] ?? '')) !== '' ? trim((string)$data['summary_explanation']) : null,
+                $userId > 0 ? $userId : null,
+                $userId > 0 ? $userId : null,
+            ));
+            $batchId = (int)$pdo->lastInsertId();
+            $itemSt = $pdo->prepare(
+                'INSERT INTO ipca_compliance_corrective_action_deadline_extension_items
+                    (batch_id, corrective_action_id, finding_id, previous_approved_deadline, requested_deadline,
+                     explanation_category, explanation, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($caps as $cap) {
+                $itemSt->execute(array(
+                    $batchId,
+                    (int)$cap['id'],
+                    (int)$cap['finding_id'],
+                    substr((string)$cap['due_date'], 0, 10),
+                    (string)$cap['_requested_deadline'],
+                    (string)$cap['_explanation_category'] !== '' ? (string)$cap['_explanation_category'] : null,
+                    (string)$cap['_explanation'],
+                    'submitted',
+                ));
+            }
+
+            $token = ComplianceApprovalTokenService::createToken($pdo, array(
+                'token_type' => 'deadline_extension',
+                'batch_id' => $batchId,
+                'audit_id' => $auditId,
+                'recipient_email' => $recipientEmail,
+                'recipient_name' => (string)($data['recipient_name'] ?? ''),
+            ), $userId);
+
+            self::logBatchEvent($pdo, $auditId, $batchId, 'deadline_extension_submitted', $userId, 'Deadline extension request submitted: ' . $reference, null, array('items' => count($caps)));
+            self::logBatchEvent($pdo, $auditId, $batchId, 'deadline_extension_token_created', $userId, 'Secure review token created: ' . $reference, null, array('token_id' => $token['id']));
+
+            $pdo->commit();
+            return array(
+                'batch_id' => $batchId,
+                'token' => $token['token'],
+                'token_id' => $token['id'],
+                'review_url' => self::reviewUrl($token['token']),
+            );
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /** @return array<string,mixed> */
+    public static function batchContext(PDO $pdo, int $batchId): array
+    {
+        $st = $pdo->prepare(
+            'SELECT b.*, a.audit_code, a.title AS audit_title, a.authority, a.start_date, a.end_date
+               FROM ipca_compliance_corrective_action_deadline_extension_batches b
+          LEFT JOIN ipca_compliance_audits a ON a.id = b.audit_id
+              WHERE b.id = ? LIMIT 1'
+        );
+        $st->execute(array($batchId));
+        $batch = $st->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($batch)) {
+            throw new RuntimeException('Deadline extension request not found.');
+        }
+        $items = self::batchItems($pdo, $batchId);
+        return array('batch' => $batch, 'items' => $items, 'email' => self::emailDraftForBatch($batch, $items, ''));
+    }
+
+    /** @return array<string,string> */
+    public static function emailDraftForBatch(array $batch, array $items, string $reviewUrl): array
+    {
+        $auditRef = (string)($batch['audit_code'] ?? ('Audit #' . (int)($batch['audit_id'] ?? 0)));
+        $lines = array();
+        $current = array();
+        $requested = array();
+        foreach ($items as $item) {
+            $lines[] = '- ' . (string)$item['action_code'] . ' / ' . (string)$item['finding_code']
+                . ': current ' . substr((string)$item['previous_approved_deadline'], 0, 10)
+                . ', requested ' . substr((string)$item['requested_deadline'], 0, 10)
+                . ' — ' . (string)$item['explanation'];
+            $current[] = substr((string)$item['previous_approved_deadline'], 0, 10);
+            $requested[] = substr((string)$item['requested_deadline'], 0, 10);
+        }
+        sort($current);
+        sort($requested);
+        $body = "Dear " . ((string)($batch['recipient_name'] ?? '') !== '' ? (string)$batch['recipient_name'] : 'Reviewer') . ",\n\n"
+            . "A deadline extension request has been submitted for corrective actions related to Audit " . $auditRef . ".\n\n"
+            . "Summary:\n"
+            . "- Audit: " . $auditRef . " - " . (string)($batch['audit_title'] ?? '') . "\n"
+            . "- Number of corrective actions: " . count($items) . "\n"
+            . "- Current earliest deadline: " . ($current[0] ?? 'n/a') . "\n"
+            . "- Requested latest deadline: " . ($requested !== array() ? end($requested) : 'n/a') . "\n\n"
+            . implode("\n", $lines) . "\n\n"
+            . "Please review the request using the secure link below:\n\n"
+            . $reviewUrl . "\n\n"
+            . "The review page contains the relevant audit, findings, corrective actions, and extension explanations.\n\n"
+            . "Sincerely,\n\nCompliance Monitoring\n";
+        return array(
+            'subject' => 'Deadline Extension Request - Audit ' . $auditRef,
+            'body' => $body,
+        );
     }
 
     /**
@@ -198,5 +449,186 @@ final class ComplianceDeadlineExtensionEngine
             'notes' => $note,
         ));
         return $id;
+    }
+
+    /** @return array<string,mixed> */
+    public static function reviewContextByToken(PDO $pdo, string $token): array
+    {
+        $tokenRow = ComplianceApprovalTokenService::validateToken($pdo, $token, 'deadline_extension');
+        ComplianceApprovalTokenService::markViewed($pdo, (int)$tokenRow['id']);
+        $context = self::batchContext($pdo, (int)$tokenRow['batch_id']);
+        self::logBatchEvent($pdo, (int)$tokenRow['audit_id'], (int)$tokenRow['batch_id'], 'deadline_extension_token_viewed', null, 'Deadline extension review page viewed', null, array('token_id' => (int)$tokenRow['id']));
+        $context['token'] = $tokenRow;
+        return $context;
+    }
+
+    public static function decideBatchByToken(PDO $pdo, string $token, string $decision, string $reviewerName, string $reviewerEmail, string $notes): void
+    {
+        $tokenRow = ComplianceApprovalTokenService::validateToken($pdo, $token, 'deadline_extension');
+        $decision = strtolower(trim($decision));
+        if (!in_array($decision, array('approved', 'rejected'), true)) {
+            throw new InvalidArgumentException('Unsupported review decision.');
+        }
+        $reviewerName = trim($reviewerName);
+        $reviewerEmail = trim($reviewerEmail);
+        if ($reviewerName === '' || filter_var($reviewerEmail, FILTER_VALIDATE_EMAIL) === false) {
+            throw new InvalidArgumentException('Reviewer name and valid email are required.');
+        }
+        $batchId = (int)$tokenRow['batch_id'];
+        $context = self::batchContext($pdo, $batchId);
+        $batch = $context['batch'];
+        if (!in_array((string)$batch['status'], array('submitted','under_review'), true)) {
+            throw new RuntimeException('This extension request has already been reviewed or is no longer active.');
+        }
+        $pdo->beginTransaction();
+        try {
+            if ($decision === 'approved') {
+                $pdo->prepare(
+                    "UPDATE ipca_compliance_corrective_action_deadline_extension_batches
+                        SET status = 'approved', reviewed_at = NOW(), reviewed_by_name = ?, reviewed_by_email = ?,
+                            review_notes = ?, locked_at = NOW()
+                      WHERE id = ?"
+                )->execute(array($reviewerName, $reviewerEmail, trim($notes) !== '' ? trim($notes) : null, $batchId));
+                $pdo->prepare(
+                    "UPDATE ipca_compliance_corrective_action_deadline_extension_items
+                        SET status = 'approved', approved_deadline = requested_deadline, reviewed_at = NOW(),
+                            review_notes = ?, locked_at = NOW()
+                      WHERE batch_id = ?"
+                )->execute(array(trim($notes) !== '' ? trim($notes) : null, $batchId));
+                foreach ($context['items'] as $item) {
+                    $pdo->prepare(
+                        "UPDATE ipca_compliance_corrective_actions
+                            SET due_date = ?, status = CASE WHEN UPPER(COALESCE(status,'')) IN ('CLOSED','VERIFIED','COMPLETED','EXECUTED','CANCELLED') THEN status ELSE 'EXTENDED' END,
+                                updated_at = NOW()
+                          WHERE id = ?"
+                    )->execute(array((string)$item['requested_deadline'], (int)$item['corrective_action_id']));
+                    ComplianceApprovalEngine::record($pdo, array(
+                        'object_type' => 'corrective_action_deadline_extension_batch',
+                        'object_id' => $batchId,
+                        'approval_type' => 'extension',
+                        'decision' => 'approved',
+                        'notes' => trim($notes) !== '' ? trim($notes) : 'Approved by ' . $reviewerName . ' via public token review.',
+                    ));
+                    self::logBatchEvent($pdo, (int)$batch['audit_id'], $batchId, 'corrective_action_deadline_updated', null, 'Corrective action deadline updated: ' . (string)$item['action_code'], $item, array('reviewer_name' => $reviewerName, 'reviewer_email' => $reviewerEmail));
+                }
+                self::logBatchEvent($pdo, (int)$batch['audit_id'], $batchId, 'deadline_extension_approved', null, 'Deadline extension request approved: ' . (string)$batch['request_reference'], $batch, array('reviewer_name' => $reviewerName, 'reviewer_email' => $reviewerEmail, 'notes' => $notes));
+            } else {
+                $pdo->prepare(
+                    "UPDATE ipca_compliance_corrective_action_deadline_extension_batches
+                        SET status = 'rejected', reviewed_at = NOW(), reviewed_by_name = ?, reviewed_by_email = ?,
+                            review_notes = ?, locked_at = NOW()
+                      WHERE id = ?"
+                )->execute(array($reviewerName, $reviewerEmail, trim($notes) !== '' ? trim($notes) : null, $batchId));
+                $pdo->prepare(
+                    "UPDATE ipca_compliance_corrective_action_deadline_extension_items
+                        SET status = 'rejected', reviewed_at = NOW(), review_notes = ?, locked_at = NOW()
+                      WHERE batch_id = ?"
+                )->execute(array(trim($notes) !== '' ? trim($notes) : null, $batchId));
+                ComplianceApprovalEngine::record($pdo, array(
+                    'object_type' => 'corrective_action_deadline_extension_batch',
+                    'object_id' => $batchId,
+                    'approval_type' => 'extension',
+                    'decision' => 'rejected',
+                    'notes' => trim($notes) !== '' ? trim($notes) : 'Rejected by ' . $reviewerName . ' via public token review.',
+                ));
+                self::logBatchEvent($pdo, (int)$batch['audit_id'], $batchId, 'deadline_extension_rejected', null, 'Deadline extension request rejected: ' . (string)$batch['request_reference'], $batch, array('reviewer_name' => $reviewerName, 'reviewer_email' => $reviewerEmail, 'notes' => $notes));
+            }
+            ComplianceApprovalTokenService::markUsed($pdo, (int)$tokenRow['id']);
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    /** @return list<array<string,mixed>> */
+    public static function batchItems(PDO $pdo, int $batchId): array
+    {
+        $st = $pdo->prepare(
+            'SELECT i.*, c.action_code, c.title AS action_title, c.action_type, c.status AS action_status,
+                    f.finding_code, f.reference AS finding_reference, f.title AS finding_title
+               FROM ipca_compliance_corrective_action_deadline_extension_items i
+          LEFT JOIN ipca_compliance_corrective_actions c ON c.id = i.corrective_action_id
+          LEFT JOIN ipca_compliance_findings f ON f.id = i.finding_id
+              WHERE i.batch_id = ?
+              ORDER BY i.id ASC'
+        );
+        $st->execute(array($batchId));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        return is_array($rows) ? $rows : array();
+    }
+
+    /** @return array<string,mixed>|null */
+    private static function correctiveActionContext(PDO $pdo, int $capId): ?array
+    {
+        $st = $pdo->prepare(
+            'SELECT c.*, f.finding_code, f.reference AS finding_reference, f.title AS finding_title,
+                    f.audit_id, f.case_id, a.audit_code, a.title AS audit_title
+               FROM ipca_compliance_corrective_actions c
+               JOIN ipca_compliance_findings f ON f.id = c.finding_id
+          LEFT JOIN ipca_compliance_audits a ON a.id = f.audit_id
+              WHERE c.id = ? LIMIT 1'
+        );
+        $st->execute(array($capId));
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return is_array($row) ? $row : null;
+    }
+
+    private static function pendingWorkflowItemExists(PDO $pdo, int $capId): bool
+    {
+        if (!self::tablePresent($pdo, 'ipca_compliance_corrective_action_deadline_extension_items')) {
+            return false;
+        }
+        $st = $pdo->prepare("SELECT id FROM ipca_compliance_corrective_action_deadline_extension_items WHERE corrective_action_id = ? AND status IN ('draft','submitted') LIMIT 1");
+        $st->execute(array($capId));
+        return (int)$st->fetchColumn() > 0;
+    }
+
+    private static function generateBatchReference(PDO $pdo): string
+    {
+        $prefix = 'DEX-' . date('Y') . '-';
+        $st = $pdo->prepare('SELECT request_reference FROM ipca_compliance_corrective_action_deadline_extension_batches WHERE request_reference LIKE ? ORDER BY id DESC LIMIT 50');
+        $st->execute(array($prefix . '%'));
+        $max = 0;
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) ?: array() as $ref) {
+            $n = (int)substr((string)$ref, strlen($prefix));
+            $max = max($max, $n);
+        }
+        return $prefix . str_pad((string)($max + 1), 4, '0', STR_PAD_LEFT);
+    }
+
+    private static function reviewUrl(string $token): string
+    {
+        $scheme = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+        $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+        return $scheme . '://' . $host . '/compliance/review-deadline-extension.php?token=' . rawurlencode($token);
+    }
+
+    /** @param array<string,mixed>|null $before @param array<string,mixed>|null $meta */
+    private static function logBatchEvent(PDO $pdo, int $auditId, int $batchId, string $kind, ?int $actorUserId, string $summary, ?array $before = null, ?array $meta = null): void
+    {
+        compliance_log_case_event($pdo, null, 'deadline_extension_batch', $batchId, $kind, $actorUserId, $summary, $before, null, array_merge(array('audit_id' => $auditId), $meta ?? array()));
+    }
+
+    /** @return list<array<string,mixed>> */
+    private static function rows(PDO $pdo, string $sql): array
+    {
+        try {
+            $st = $pdo->query($sql);
+            $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
+            return is_array($rows) ? $rows : array();
+        } catch (Throwable) {
+            return array();
+        }
+    }
+
+    private static function tablePresent(PDO $pdo, string $table): bool
+    {
+        try {
+            $pdo->query('SELECT 1 FROM ' . $table . ' LIMIT 0');
+            return true;
+        } catch (Throwable) {
+            return false;
+        }
     }
 }
