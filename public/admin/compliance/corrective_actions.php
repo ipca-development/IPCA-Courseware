@@ -221,18 +221,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'recipient_name' => (string)($_POST['recipient_name'] ?? ''),
                 'summary_explanation' => (string)($_POST['summary_explanation'] ?? ''),
             ), $uid);
-            $context = ComplianceDeadlineExtensionEngine::batchContext($pdo, (int)$result['batch_id']);
+            $draft = ComplianceDeadlineExtensionEngine::createEmailDraftForBatch($pdo, (int)$result['batch_id'], (string)$result['review_url'], $uid);
             $_SESSION['_ipca_compliance_cap_email_preview'] = array(
                 'saved_at' => time(),
                 'batch_id' => (int)$result['batch_id'],
-                'review_url' => (string)$result['review_url'],
+                'draft_id' => (int)$draft['draft_id'],
+                'review_url' => (string)$draft['review_url'],
                 'recipient_email' => (string)($_POST['recipient_email'] ?? ''),
                 'recipient_name' => (string)($_POST['recipient_name'] ?? ''),
-                'subject' => ComplianceDeadlineExtensionEngine::emailDraftForBatch($context['batch'], $context['items'], (string)$result['review_url'])['subject'],
-                'body' => ComplianceDeadlineExtensionEngine::emailDraftForBatch($context['batch'], $context['items'], (string)$result['review_url'])['body'],
+                'subject' => (string)$draft['subject'],
+                'body' => (string)$draft['body'],
             );
-            cap_flash_set('success', 'Deadline extension request created. Review the email draft before sending.');
+            cap_flash_set('success', 'Deadline extension request created and saved to the e-mail drafts inbox.');
             redirect('/admin/compliance/corrective_actions.php');
+        }
+
+        if ($action === 'send_deadline_extension_email_draft') {
+            $batchId = (int)($_POST['batch_id'] ?? 0);
+            $draftId = (int)($_POST['draft_id'] ?? 0);
+            if ($batchId <= 0 || $draftId <= 0) {
+                throw new RuntimeException('Missing extension request draft.');
+            }
+            $result = ComplianceDeadlineExtensionEngine::sendEmailDraftForBatch($pdo, $batchId, $draftId, $uid);
+            if (empty($result['ok'])) {
+                throw new RuntimeException('Send failed: ' . (string)($result['error'] ?? 'unknown error'));
+            }
+            unset($_SESSION['_ipca_compliance_cap_email_preview']);
+            cap_flash_set('success', 'Deadline extension e-mail sent.');
+            redirect('/admin/compliance/email_thread.php?id=' . (int)($result['thread_id'] ?? 0));
         }
 
         if ($action === 'suggest_cap_ai') {
@@ -720,14 +736,33 @@ if ($detailId > 0) {
             <?= compliance_ui_icon('mail') ?>
             <span>Email draft generated</span>
           </div>
-          <span class="cmp-pill compliance-badge compliance-badge--deadline-ok">Not sent yet</span>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+            <span class="cmp-pill compliance-badge compliance-badge--deadline-ok">Saved to drafts</span>
+            <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_drafts.php?status=draft" style="text-decoration:none;">Open draft inbox</a>
+            <?php if (!empty($emailPreview['draft_id'])): ?>
+              <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_compose.php?draft_id=<?= (int)$emailPreview['draft_id'] ?>" style="text-decoration:none;">Edit draft</a>
+            <?php endif; ?>
+          </div>
         </div>
         <div style="display:grid;grid-template-columns:100px 1fr;gap:8px 14px;font-size:13px;">
           <strong>To</strong><span><?= h((string)$emailPreview['recipient_email']) ?></span>
           <strong>Subject</strong><span><?= h((string)$emailPreview['subject']) ?></span>
           <strong>Review link</strong><a href="<?= h((string)$emailPreview['review_url']) ?>" target="_blank" rel="noopener"><?= h((string)$emailPreview['review_url']) ?></a>
         </div>
+        <p style="margin:12px 0 0;color:#1e3a8a;font-size:13px;font-weight:700;">
+          This draft will be sent through the Compliance Comms Center template wrapper with the standard header and footer.
+        </p>
         <textarea readonly rows="12" style="margin-top:12px;width:100%;box-sizing:border-box;border:1px solid #bfdbfe;border-radius:12px;padding:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;"><?= h((string)$emailPreview['body']) ?></textarea>
+        <?php if (!empty($emailPreview['draft_id']) && !empty($emailPreview['batch_id'])): ?>
+          <form method="post" action="/admin/compliance/corrective_actions.php" style="margin-top:12px;display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;"
+                onsubmit="return confirm('Send this deadline extension request e-mail now?');">
+            <input type="hidden" name="action" value="send_deadline_extension_email_draft">
+            <input type="hidden" name="batch_id" value="<?= (int)$emailPreview['batch_id'] ?>">
+            <input type="hidden" name="draft_id" value="<?= (int)$emailPreview['draft_id'] ?>">
+            <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_compose.php?draft_id=<?= (int)$emailPreview['draft_id'] ?>" style="text-decoration:none;">Review in composer</a>
+            <button type="submit" style="background:#1e3c72;color:#fff;border:0;padding:10px 16px;border-radius:10px;font-weight:800;cursor:pointer;">Send now</button>
+          </form>
+        <?php endif; ?>
       </section>
     <?php endif; ?>
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/ComplianceApprovalEngine.php';
 require_once __DIR__ . '/ComplianceApprovalTokenService.php';
 require_once __DIR__ . '/ComplianceCaseEvents.php';
+require_once __DIR__ . '/ComplianceCommsCenterEngine.php';
 
 final class ComplianceDeadlineExtensionEngine
 {
@@ -274,6 +275,91 @@ final class ComplianceDeadlineExtensionEngine
             'subject' => 'Deadline Extension Request - Audit ' . $auditRef,
             'body' => $body,
         );
+    }
+
+    /** @return array{draft_id:int,subject:string,body:string,review_url:string} */
+    public static function createEmailDraftForBatch(PDO $pdo, int $batchId, string $reviewUrl, int $userId): array
+    {
+        $context = self::batchContext($pdo, $batchId);
+        $batch = $context['batch'];
+        $items = $context['items'];
+        $draft = self::emailDraftForBatch($batch, $items, $reviewUrl);
+        $draftId = ComplianceCommsCenterEngine::createDraft($pdo, array(
+            'to' => (string)($batch['recipient_email'] ?? ''),
+            'subject' => $draft['subject'],
+            'text_body' => $draft['body'],
+            'html_body' => '',
+            'created_by' => $userId > 0 ? $userId : null,
+        ));
+
+        self::logBatchEvent(
+            $pdo,
+            (int)$batch['audit_id'],
+            $batchId,
+            'deadline_extension_email_draft_created',
+            $userId > 0 ? $userId : null,
+            'Deadline extension email draft created: ' . (string)$batch['request_reference'],
+            null,
+            array('draft_id' => $draftId, 'recipient_email' => (string)($batch['recipient_email'] ?? ''))
+        );
+
+        return array(
+            'draft_id' => $draftId,
+            'subject' => $draft['subject'],
+            'body' => $draft['body'],
+            'review_url' => $reviewUrl,
+        );
+    }
+
+    /** @return array{ok:bool,email_id:int|null,thread_id:int|null,postmark_message_id:string|null,error:string|null} */
+    public static function sendEmailDraftForBatch(PDO $pdo, int $batchId, int $draftId, int $userId): array
+    {
+        $context = self::batchContext($pdo, $batchId);
+        $batch = $context['batch'];
+        $draft = ComplianceCommsCenterEngine::getDraft($pdo, $draftId);
+        if ($draft === null || (int)$draft['id'] !== $draftId) {
+            throw new RuntimeException('Email draft not found.');
+        }
+        if ((string)$draft['status'] !== 'draft') {
+            throw new RuntimeException('Only drafts in status=draft can be sent.');
+        }
+        $to = self::draftAddresses($draft, 'to_json');
+        $cc = self::draftAddresses($draft, 'cc_json');
+        $bcc = self::draftAddresses($draft, 'bcc_json');
+        $result = ComplianceCommsCenterEngine::sendOutbound($pdo, array(
+            'thread_id' => isset($draft['thread_id']) && (int)$draft['thread_id'] > 0 ? (int)$draft['thread_id'] : null,
+            'to' => $to,
+            'cc' => $cc,
+            'bcc' => $bcc,
+            'subject' => (string)($draft['subject'] ?? ''),
+            'text_body' => (string)($draft['text_body'] ?? ''),
+            'html_body' => (string)($draft['html_body'] ?? ''),
+            'created_by' => $userId > 0 ? $userId : null,
+            'draft_id' => $draftId,
+        ));
+        if (!empty($result['ok'])) {
+            $pdo->prepare(
+                'UPDATE ipca_compliance_corrective_action_deadline_extension_batches
+                    SET email_thread_id = ?, outbound_email_id = ?, updated_at = NOW()
+                  WHERE id = ?'
+            )->execute(array(
+                isset($result['thread_id']) && (int)$result['thread_id'] > 0 ? (int)$result['thread_id'] : null,
+                isset($result['email_id']) && (int)$result['email_id'] > 0 ? (int)$result['email_id'] : null,
+                $batchId,
+            ));
+            self::logBatchEvent(
+                $pdo,
+                (int)$batch['audit_id'],
+                $batchId,
+                'deadline_extension_email_sent',
+                $userId > 0 ? $userId : null,
+                'Deadline extension email sent: ' . (string)$batch['request_reference'],
+                null,
+                array('draft_id' => $draftId, 'email_id' => $result['email_id'] ?? null, 'thread_id' => $result['thread_id'] ?? null)
+            );
+        }
+
+        return $result;
     }
 
     /**
@@ -595,6 +681,22 @@ final class ComplianceDeadlineExtensionEngine
             $max = max($max, $n);
         }
         return $prefix . str_pad((string)($max + 1), 4, '0', STR_PAD_LEFT);
+    }
+
+    /** @return list<string> */
+    private static function draftAddresses(array $draft, string $column): array
+    {
+        $rows = json_decode((string)($draft[$column] ?? '[]'), true);
+        if (!is_array($rows)) {
+            return array();
+        }
+        $out = array();
+        foreach ($rows as $row) {
+            if (is_array($row) && !empty($row['Email'])) {
+                $out[] = (string)$row['Email'];
+            }
+        }
+        return $out;
     }
 
     private static function reviewUrl(string $token): string
