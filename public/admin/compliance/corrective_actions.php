@@ -101,10 +101,19 @@ function cap_deadline_status_display(array $status, ?string $approvedDeadline): 
     $state = (string)$status['state'];
     $item = is_array($status['item'] ?? null) ? $status['item'] : null;
     if ($state === 'extension_pending' && $item !== null) {
+        $batchId = (int)($item['batch_id'] ?? 0);
+        $cancelForm = $batchId > 0
+            ? '<form method="post" action="/admin/compliance/corrective_actions.php" style="margin-top:6px;" onsubmit="return confirm(\'Cancel this pending deadline extension request?\');">'
+                . '<input type="hidden" name="action" value="cancel_deadline_extension_batch">'
+                . '<input type="hidden" name="batch_id" value="' . $batchId . '">'
+                . '<button type="submit" class="cmp-btn-secondary" style="height:26px;min-height:26px;padding:0 9px;font-size:11px;border-radius:8px;">Cancel request</button>'
+                . '</form>'
+            : '';
         return '<div class="cmp-deadline-status">'
             . '<div>Approved deadline: <span class="cmp-pill compliance-badge compliance-badge--deadline-ok">' . h(substr((string)$item['previous_approved_deadline'], 0, 10)) . '</span></div>'
             . '<div>Proposed deadline: <span class="cmp-pill cmp-pill--deadline-pending">' . h(substr((string)$item['requested_deadline'], 0, 10)) . '</span></div>'
             . '<div><span class="cmp-pill cmp-pill--deadline-pending">Extension Pending</span></div>'
+            . $cancelForm
             . '</div>';
     }
     if ($state === 'extension_approved' && $item !== null) {
@@ -251,6 +260,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             unset($_SESSION['_ipca_compliance_cap_email_preview']);
             cap_flash_set('success', 'Deadline extension e-mail sent.');
             redirect('/admin/compliance/email_thread.php?id=' . (int)($result['thread_id'] ?? 0));
+        }
+
+        if ($action === 'cancel_deadline_extension_batch') {
+            $batchId = (int)($_POST['batch_id'] ?? 0);
+            ComplianceDeadlineExtensionEngine::cancelPendingBatch(
+                $pdo,
+                $batchId,
+                $uid,
+                'Cancelled manually because the outbound draft email is no longer available.'
+            );
+            if (isset($_SESSION['_ipca_compliance_cap_email_preview']['batch_id'])
+                && (int)$_SESSION['_ipca_compliance_cap_email_preview']['batch_id'] === $batchId) {
+                unset($_SESSION['_ipca_compliance_cap_email_preview']);
+            }
+            cap_flash_set('success', 'Pending deadline extension request cancelled.');
+            redirect('/admin/compliance/corrective_actions.php');
         }
 
         if ($action === 'suggest_cap_ai') {

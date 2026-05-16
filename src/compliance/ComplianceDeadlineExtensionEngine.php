@@ -77,18 +77,23 @@ final class ComplianceDeadlineExtensionEngine
             return 0;
         }
         try {
-            $st = $pdo->query(
-                "SELECT b.id, b.audit_id, b.request_reference, b.email_draft_id
-                   FROM ipca_compliance_corrective_action_deadline_extension_batches b
-              LEFT JOIN ipca_compliance_email_drafts d ON d.id = b.email_draft_id
-                  WHERE b.status IN ('draft','submitted','under_review')
-                    AND b.outbound_email_id IS NULL
-                    AND (
-                        b.email_draft_id IS NULL
-                        OR d.id IS NULL
-                        OR d.status <> 'draft'
-                    )"
-            );
+            $hasDraftColumn = self::columnPresent($pdo, 'ipca_compliance_corrective_action_deadline_extension_batches', 'email_draft_id');
+            $sql = $hasDraftColumn
+                ? "SELECT b.id, b.audit_id, b.request_reference, b.email_draft_id
+                     FROM ipca_compliance_corrective_action_deadline_extension_batches b
+                LEFT JOIN ipca_compliance_email_drafts d ON d.id = b.email_draft_id
+                    WHERE b.status IN ('draft','submitted','under_review')
+                      AND b.outbound_email_id IS NULL
+                      AND (
+                          b.email_draft_id IS NULL
+                          OR d.id IS NULL
+                          OR d.status <> 'draft'
+                      )"
+                : "SELECT b.id, b.audit_id, b.request_reference, NULL AS email_draft_id
+                     FROM ipca_compliance_corrective_action_deadline_extension_batches b
+                    WHERE b.status IN ('draft','submitted','under_review')
+                      AND b.outbound_email_id IS NULL";
+            $st = $pdo->query($sql);
             $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : array();
             if (!is_array($rows) || $rows === array()) {
                 return 0;
@@ -136,6 +141,62 @@ final class ComplianceDeadlineExtensionEngine
             return count($ids);
         } catch (Throwable) {
             return 0;
+        }
+    }
+
+    public static function cancelPendingBatch(PDO $pdo, int $batchId, int $userId, string $reason = ''): void
+    {
+        if ($batchId <= 0) {
+            throw new InvalidArgumentException('Invalid extension request.');
+        }
+        $context = self::batchContext($pdo, $batchId);
+        $batch = $context['batch'];
+        if (!in_array((string)$batch['status'], array('draft', 'submitted', 'under_review'), true)) {
+            throw new RuntimeException('Only pending extension requests can be cancelled.');
+        }
+        $note = trim($reason) !== '' ? trim($reason) : 'Cancelled before authority review.';
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare(
+                "UPDATE ipca_compliance_corrective_action_deadline_extension_batches
+                    SET status = 'cancelled',
+                        review_notes = ?,
+                        locked_at = COALESCE(locked_at, NOW()),
+                        updated_at = NOW()
+                  WHERE id = ?"
+            )->execute(array($note, $batchId));
+            $pdo->prepare(
+                "UPDATE ipca_compliance_corrective_action_deadline_extension_items
+                    SET status = 'cancelled',
+                        review_notes = ?,
+                        locked_at = COALESCE(locked_at, NOW()),
+                        updated_at = NOW()
+                  WHERE batch_id = ?
+                    AND status IN ('draft','submitted')"
+            )->execute(array($note, $batchId));
+            if (ComplianceApprovalTokenService::tablePresent($pdo)) {
+                $pdo->prepare(
+                    "UPDATE ipca_compliance_public_approval_tokens
+                        SET revoked_at = COALESCE(revoked_at, NOW())
+                      WHERE token_type = 'deadline_extension'
+                        AND batch_id = ?
+                        AND revoked_at IS NULL"
+                )->execute(array($batchId));
+            }
+            self::logBatchEvent(
+                $pdo,
+                (int)($batch['audit_id'] ?? 0),
+                $batchId,
+                'deadline_extension_cancelled',
+                $userId > 0 ? $userId : null,
+                'Deadline extension request cancelled: ' . (string)($batch['request_reference'] ?? ('#' . $batchId)),
+                $batch,
+                array('reason' => $note)
+            );
+            $pdo->commit();
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
         }
     }
 
@@ -883,6 +944,23 @@ final class ComplianceDeadlineExtensionEngine
         try {
             $pdo->query('SELECT 1 FROM ' . $table . ' LIMIT 0');
             return true;
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private static function columnPresent(PDO $pdo, string $table, string $column): bool
+    {
+        try {
+            $st = $pdo->prepare(
+                'SELECT COUNT(*)
+                   FROM information_schema.COLUMNS
+                  WHERE TABLE_SCHEMA = DATABASE()
+                    AND TABLE_NAME = ?
+                    AND COLUMN_NAME = ?'
+            );
+            $st->execute(array($table, $column));
+            return (int)$st->fetchColumn() > 0;
         } catch (Throwable) {
             return false;
         }
