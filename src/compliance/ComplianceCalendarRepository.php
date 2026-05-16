@@ -102,7 +102,16 @@ final class ComplianceCalendarRepository
         if (!self::tablePresent($pdo, 'ipca_compliance_calendar_events')) {
             return array();
         }
-        $rows = self::rows($pdo, "SELECT * FROM ipca_compliance_calendar_events ORDER BY starts_at ASC LIMIT 800");
+        $rows = self::rows($pdo, "
+            SELECT e.*,
+                   COALESCE(NULLIF(CONCAT(TRIM(COALESCE(cu.first_name,'')), ' ', TRIM(COALESCE(cu.last_name,''))), ' '), NULLIF(cu.name,''), cu.email) AS created_by_name,
+                   COALESCE(NULLIF(CONCAT(TRIM(COALESCE(uu.first_name,'')), ' ', TRIM(COALESCE(uu.last_name,''))), ' '), NULLIF(uu.name,''), uu.email) AS updated_by_name
+              FROM ipca_compliance_calendar_events e
+         LEFT JOIN users cu ON cu.id = e.created_by
+         LEFT JOIN users uu ON uu.id = e.updated_by
+             ORDER BY e.starts_at ASC
+             LIMIT 800
+        ");
         $events = array();
         foreach ($rows as $row) {
             $type = (string)($row['event_type'] ?? 'other');
@@ -135,6 +144,10 @@ final class ComplianceCalendarRepository
                     'code' => 'CAL-' . (int)$row['id'],
                     'edit_mode' => 'manual',
                     'linked_url' => self::linkedUrl((string)($row['linked_object_type'] ?? ''), (int)($row['linked_object_id'] ?? 0)),
+                    'created_at' => trim((string)($row['created_at'] ?? '')) !== '' ? self::dateTime((string)$row['created_at']) : '',
+                    'updated_at' => trim((string)($row['updated_at'] ?? '')) !== '' ? self::dateTime((string)$row['updated_at']) : '',
+                    'created_by_name' => (string)($row['created_by_name'] ?? ''),
+                    'updated_by_name' => (string)($row['updated_by_name'] ?? ''),
                 ),
             ));
         }

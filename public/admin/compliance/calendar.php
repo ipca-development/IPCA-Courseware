@@ -352,6 +352,19 @@ compliance_page_open(array(
   .cmpcal-event-detail{display:grid;grid-template-columns:170px minmax(0,1fr);gap:8px 14px;font-size:13px;}
   .cmpcal-event-detail dt{color:#64748b;font-weight:800;}
   .cmpcal-event-detail dd{margin:0;color:#0f172a;font-weight:650;overflow-wrap:anywhere;}
+  .cmpcal-event-detail .is-title{font-size:15px;font-weight:900;color:#0f172a;}
+  .cmpcal-event-detail .is-time{font-size:15px;font-weight:900;color:#0f172a;}
+  .cmpcal-detail-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;border:1px solid #d7e5fb;background:#eef4ff;color:#17345d;padding:5px 9px;font-size:12px;font-weight:850;line-height:1.1;vertical-align:middle;}
+  .cmpcal-detail-pill[class*="cmpcal-type-"]{background:var(--event-bg);border-color:var(--event-border);color:var(--event-text);}
+  .cmpcal-detail-pill svg{width:13px;height:13px;flex:0 0 13px;}
+  .cmpcal-detail-pill.is-status{background:#ecfdf5;border-color:#bbf7d0;color:#166534;}
+  .cmpcal-detail-pill.is-governance{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
+  .cmpcal-detail-pill.is-timezone{background:#f8fafc;border-color:#cbd5e1;color:#334155;}
+  .cmpcal-linked-pills{display:flex;flex-wrap:wrap;gap:6px;}
+  .cmpcal-audit-trail{grid-column:1 / -1;margin-top:8px;border-top:1px solid #e2e8f0;padding-top:10px;}
+  .cmpcal-audit-trail summary{cursor:pointer;font-weight:900;color:#17345d;}
+  .cmpcal-audit-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:7px;}
+  .cmpcal-audit-list li{border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;padding:8px 10px;color:#334155;font-size:13px;font-weight:650;}
   .cmpcal-footer-link{display:inline-flex;align-items:center;justify-content:center;min-height:40px;border-radius:12px;padding:0 16px;text-decoration:none;font-weight:800;border:1px solid #cbd5e1;background:#e5e7eb;color:#64748b;cursor:not-allowed;pointer-events:none;}
   .cmpcal-footer-link.is-active{background:#12355f;border-color:#12355f;color:#fff;cursor:pointer;pointer-events:auto;}
   .cmpcal-footer-link.is-active:hover{background:#1f4079;border-color:#1f4079;color:#fff;}
@@ -752,6 +765,22 @@ compliance_page_open(array(
   function fmtDateTime(dt){
     return fmtRange(dt) + ' ' + fmtTime(dt);
   }
+  function fmtLongDate(dt){
+    return dt.toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric', year:'numeric'}).replace(',', '');
+  }
+  function fmtAuditStamp(dt, timezone){
+    return fmtLongDate(dt) + ' at ' + fmtTime(dt) + ' ' + (timezone || state.timezone || 'UTC');
+  }
+  function durationLabel(start, end){
+    var minutes = Math.max(0, Math.round((end - start) / 60000));
+    var hours = Math.floor(minutes / 60);
+    var mins = minutes % 60;
+    var parts = [];
+    if (hours > 0) { parts.push(hours + ' ' + (hours === 1 ? 'hour' : 'hours')); }
+    if (mins > 0) { parts.push(mins + ' ' + (mins === 1 ? 'minute' : 'minutes')); }
+    if (parts.length === 0) { parts.push('0 minutes'); }
+    return parts.length === 2 ? parts[0] + ' and ' + parts[1] : parts[0];
+  }
   function postDateTime(dt){
     return dt.getFullYear() + '-' + pad(dt.getMonth()+1) + '-' + pad(dt.getDate()) + ' ' + pad(dt.getHours()) + ':' + pad(dt.getMinutes()) + ':00';
   }
@@ -992,6 +1021,40 @@ compliance_page_open(array(
     if (ev.is_locked && String(ev.event_type || '').indexOf('deadline') !== -1) { return iconMap.lock; }
     return iconMap[ev.icon_key] || iconMap.circle;
   }
+  function iconForLinkedType(type){
+    var map = {
+      compliance_case: 'book',
+      audit: 'clipboard-check',
+      finding: 'alert',
+      corrective_action: 'wrench',
+      meeting: 'users',
+      manual_change_request: 'book',
+      regulatory_review: 'scale'
+    };
+    return iconMap[map[type] || 'circle'] || iconMap.circle;
+  }
+  function labelForLinkedType(type){
+    var labels = {
+      compliance_case: 'Case / MoC',
+      audit: 'Audit',
+      finding: 'Finding',
+      corrective_action: 'Corrective Action',
+      meeting: 'Meeting',
+      manual_change_request: 'Manual Change Request',
+      regulatory_review: 'Regulatory Review',
+      other: 'Other'
+    };
+    return labels[type] || 'Not linked';
+  }
+  function titleCaseText(value){
+    return String(value || '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, function(c){ return c.toUpperCase(); });
+  }
+  function detailPill(content, cls){
+    return '<span class="cmpcal-detail-pill ' + (cls || '') + '">' + content + '</span>';
+  }
+  function textPill(text, cls){
+    return detailPill(escapeHtml(text), cls);
+  }
   function eventPill(ev){
     var btn = document.createElement('div');
     btn.setAttribute('role', 'button');
@@ -1088,23 +1151,40 @@ compliance_page_open(array(
     state.selectedEvent = ev;
     var details = document.getElementById('cmpcalEventDetails');
     var metadata = ev.metadata || {};
-    var linked = ev.linked_object_type ? ev.linked_object_type + ' #' + (ev.linked_object_id || ev.source_id || '') : '';
-    details.innerHTML = detailRows({
-      'Event title': ev.title,
-      'Event type': labelForType(ev.event_type),
-      'Status': ev.status || 'Not set',
-      'Governance state': ev.governance_state || 'Not set',
-      'Date': fmtDateTime(parseDt(ev.starts_at)),
-      'Start time': ev.is_all_day ? 'All day' : fmtTime(parseDt(ev.starts_at)),
-      'End time': ev.is_all_day ? 'All day' : fmtTime(parseDt(ev.ends_at || ev.starts_at)),
-      'Timezone': state.timezone,
-      'Linked object type': ev.linked_object_type || 'Not linked',
-      'Linked object reference': linked || metadata.code || 'Not linked',
-      'Description': ev.description || 'No description',
-      'Source table/source object': (ev.source_table || 'No connected data source yet') + ' / ' + (ev.source_id || ''),
-      'Created by': ev.created_by || 'Not available',
-      'Updated by': ev.updated_by || 'Not available'
-    });
+    var starts = parseDt(ev.starts_at);
+    var ends = parseDt(ev.ends_at || ev.starts_at);
+    var eventTimezone = ev.timezone || state.timezone || 'UTC';
+    var linkedId = ev.linked_object_id || ev.source_id || '';
+    var linkedHtml = ev.linked_object_type
+      ? '<div class="cmpcal-linked-pills">'
+        + detailPill(iconForLinkedType(ev.linked_object_type) + escapeHtml(labelForLinkedType(ev.linked_object_type)), 'cmpcal-type-' + (ev.event_type || 'other'))
+        + textPill('#' + linkedId, 'is-timezone')
+        + '</div>'
+      : textPill('Not linked', 'is-timezone');
+    var audit = [];
+    if (metadata.updated_at && metadata.updated_at !== metadata.created_at) {
+      audit.push(fmtAuditStamp(parseDt(metadata.updated_at), eventTimezone) + ' &ndash; Event Updated by ' + escapeHtml(metadata.updated_by_name || 'Unknown user'));
+    }
+    if (metadata.created_at) {
+      audit.push(fmtAuditStamp(parseDt(metadata.created_at), eventTimezone) + ' &ndash; Event Created by ' + escapeHtml(metadata.created_by_name || 'Unknown user'));
+    }
+    if (audit.length === 0) {
+      audit.push('No audit trail entries available for this event.');
+    }
+    details.innerHTML = ''
+      + '<dt>Event title</dt><dd class="is-title">' + escapeHtml(ev.title) + '</dd>'
+      + '<dt>Event type</dt><dd>' + detailPill(iconForEvent(ev) + escapeHtml(labelForType(ev.event_type)), 'cmpcal-type-' + (ev.color_key || ev.event_type || 'other')) + '</dd>'
+      + '<dt>Status</dt><dd>' + textPill(titleCaseText(ev.status || 'Scheduled'), 'is-status') + '</dd>'
+      + '<dt>Governance state</dt><dd>' + textPill(titleCaseText(ev.governance_state || 'Approved'), 'is-governance') + '</dd>'
+      + '<dt>Date</dt><dd>' + escapeHtml(fmtLongDate(starts)) + '</dd>'
+      + '<dt>Start time</dt><dd class="is-time">' + escapeHtml(ev.is_all_day ? 'All day' : fmtTime(starts)) + '</dd>'
+      + '<dt>End time</dt><dd class="is-time">' + escapeHtml(ev.is_all_day ? 'All day' : fmtTime(ends) + ' (' + durationLabel(starts, ends) + ')') + '</dd>'
+      + '<dt>Time Zone</dt><dd>' + textPill(eventTimezone, 'is-timezone') + '</dd>'
+      + '<dt>Linked to:</dt><dd>' + linkedHtml + '</dd>'
+      + '<dt>Description</dt><dd>' + escapeHtml(ev.description || 'No description') + '</dd>'
+      + '<div class="cmpcal-audit-trail"><details><summary>Audit trail</summary><ul class="cmpcal-audit-list">'
+      + audit.map(function(item){ return '<li>' + item + '</li>'; }).join('')
+      + '</ul></details></div>';
     document.getElementById('cmpcalEventGovernanceWarning').hidden = !(ev.is_locked || ev.requires_approval_to_move);
     var canEditManual = String(ev.id).indexOf('manual:') === 0 && ev.can_edit_directly && !ev.is_locked;
     var edit = document.getElementById('cmpcalEditEvent');
