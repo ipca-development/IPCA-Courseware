@@ -102,6 +102,7 @@ final class ComplianceCalendarRepository
         if (!self::tablePresent($pdo, 'ipca_compliance_calendar_events')) {
             return array();
         }
+        $auditByEvent = self::manualCalendarEventAudit($pdo);
         $rows = self::rows($pdo, "
             SELECT e.*,
                    COALESCE(NULLIF(CONCAT(TRIM(COALESCE(cu.first_name,'')), ' ', TRIM(COALESCE(cu.last_name,''))), ' '), NULLIF(cu.name,''), cu.email) AS created_by_name,
@@ -148,10 +149,44 @@ final class ComplianceCalendarRepository
                     'updated_at' => trim((string)($row['updated_at'] ?? '')) !== '' ? self::dateTime((string)$row['updated_at']) : '',
                     'created_by_name' => (string)($row['created_by_name'] ?? ''),
                     'updated_by_name' => (string)($row['updated_by_name'] ?? ''),
+                    'audit_trail' => $auditByEvent[(int)$row['id']] ?? array(),
                 ),
             ));
         }
         return $events;
+    }
+
+    /** @return array<int,list<array<string,string>>> */
+    private static function manualCalendarEventAudit(PDO $pdo): array
+    {
+        if (!self::tablePresent($pdo, 'ipca_compliance_calendar_event_audit')) {
+            return array();
+        }
+        $rows = self::rows($pdo, "
+            SELECT a.calendar_event_id, a.event_kind, a.summary, a.occurred_at,
+                   COALESCE(NULLIF(CONCAT(TRIM(COALESCE(u.first_name,'')), ' ', TRIM(COALESCE(u.last_name,''))), ' '), NULLIF(u.name,''), u.email) AS actor_name
+              FROM ipca_compliance_calendar_event_audit a
+         LEFT JOIN users u ON u.id = a.actor_user_id
+             ORDER BY a.calendar_event_id ASC, a.occurred_at DESC, a.id DESC
+             LIMIT 2000
+        ");
+        $out = array();
+        foreach ($rows as $row) {
+            $eventId = (int)($row['calendar_event_id'] ?? 0);
+            if ($eventId <= 0) {
+                continue;
+            }
+            if (!isset($out[$eventId])) {
+                $out[$eventId] = array();
+            }
+            $out[$eventId][] = array(
+                'event_kind' => (string)($row['event_kind'] ?? ''),
+                'summary' => (string)($row['summary'] ?? ''),
+                'occurred_at' => trim((string)($row['occurred_at'] ?? '')) !== '' ? self::dateTime((string)$row['occurred_at']) : '',
+                'actor_name' => (string)($row['actor_name'] ?? ''),
+            );
+        }
+        return $out;
     }
 
     private static function linkedUrl(string $type, int $id): string

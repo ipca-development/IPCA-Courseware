@@ -28,6 +28,7 @@ final class ComplianceCalendarService
         return array(
             'events' => self::tablePresent($pdo, 'ipca_compliance_calendar_events'),
             'change_requests' => self::tablePresent($pdo, 'ipca_compliance_calendar_change_requests'),
+            'event_audit' => self::tablePresent($pdo, 'ipca_compliance_calendar_event_audit'),
         );
     }
 
@@ -87,7 +88,9 @@ final class ComplianceCalendarService
             $userId > 0 ? $userId : null,
         ));
 
-        return (int)$pdo->lastInsertId();
+        $id = (int)$pdo->lastInsertId();
+        self::logManualEventAudit($pdo, $id, 'created', 'Event Created', null, self::manualEvent($pdo, $id), $userId);
+        return $id;
     }
 
     /** @param array<string,mixed> $data */
@@ -115,6 +118,7 @@ final class ComplianceCalendarService
             $endsAt = $startsAt;
         }
 
+        $before = $row;
         $pdo->prepare(
             'UPDATE ipca_compliance_calendar_events SET
                 title = ?, event_type = ?, starts_at = ?, ends_at = ?, is_all_day = ?,
@@ -138,6 +142,7 @@ final class ComplianceCalendarService
             $userId > 0 ? $userId : null,
             $id,
         ));
+        self::logManualEventAudit($pdo, $id, 'updated', 'Event Updated', $before, self::manualEvent($pdo, $id), $userId);
     }
 
     public static function deleteManualEvent(PDO $pdo, int $id, int $userId): void
@@ -170,6 +175,7 @@ final class ComplianceCalendarService
             throw new InvalidArgumentException('Linked object ID is required.');
         }
 
+        $before = $row;
         $pdo->prepare(
             'UPDATE ipca_compliance_calendar_events
                 SET linked_object_type = ?, linked_object_id = ?, updated_by = ?
@@ -180,6 +186,7 @@ final class ComplianceCalendarService
             $userId > 0 ? $userId : null,
             $id,
         ));
+        self::logManualEventAudit($pdo, $id, $type === null ? 'unlinked' : 'linked', $type === null ? 'Event Unlinked' : 'Event Linked', $before, self::manualEvent($pdo, $id), $userId);
     }
 
     /**
@@ -351,11 +358,13 @@ final class ComplianceCalendarService
         if (!empty($row['is_locked']) || !empty($row['locked_at'])) {
             throw new RuntimeException('This calendar event is locked.');
         }
+        $before = $row;
         $pdo->prepare(
             'UPDATE ipca_compliance_calendar_events
                 SET starts_at = ?, ends_at = ?, updated_by = ?
               WHERE id = ?'
         )->execute(array($startsAt, $endsAt, $userId > 0 ? $userId : null, $id));
+        self::logManualEventAudit($pdo, $id, 'moved', 'Event Schedule Changed', $before, self::manualEvent($pdo, $id), $userId);
     }
 
     private static function rescheduleMeeting(PDO $pdo, int $meetingId, string $startsAt, string $endsAt, int $userId): void
@@ -513,6 +522,27 @@ final class ComplianceCalendarService
             default:
                 return 'calendar';
         }
+    }
+
+    /** @param array<string,mixed>|null $before @param array<string,mixed>|null $after */
+    private static function logManualEventAudit(PDO $pdo, int $eventId, string $kind, string $summary, ?array $before, ?array $after, int $userId): void
+    {
+        if (!self::tablePresent($pdo, 'ipca_compliance_calendar_event_audit')) {
+            return;
+        }
+        $st = $pdo->prepare(
+            'INSERT INTO ipca_compliance_calendar_event_audit
+                (calendar_event_id, event_kind, summary, before_json, after_json, actor_user_id)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $st->execute(array(
+            $eventId,
+            substr($kind, 0, 32),
+            substr($summary, 0, 255),
+            $before !== null ? json_encode($before, JSON_UNESCAPED_SLASHES) : null,
+            $after !== null ? json_encode($after, JSON_UNESCAPED_SLASHES) : null,
+            $userId > 0 ? $userId : null,
+        ));
     }
 
     private static function nullableText(string $value): ?string

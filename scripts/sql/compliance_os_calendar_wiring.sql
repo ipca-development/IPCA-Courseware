@@ -71,3 +71,17 @@ CREATE TABLE IF NOT EXISTS ipca_compliance_calendar_change_requests (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   COMMENT='Compliance OS — pending/approved calendar change requests for governed projected events.';
 
+CREATE TABLE IF NOT EXISTS ipca_compliance_calendar_event_audit (
+  id                    BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+  calendar_event_id     BIGINT UNSIGNED NOT NULL,
+  event_kind            VARCHAR(32) NOT NULL,
+  summary               VARCHAR(255) NOT NULL,
+  before_json           JSON NULL,
+  after_json            JSON NULL,
+  actor_user_id         INT UNSIGNED NULL,
+  occurred_at           DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_ipcacal_audit_event_time (calendar_event_id, occurred_at),
+  KEY idx_ipcacal_audit_actor_time (actor_user_id, occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+  COMMENT='Compliance OS — audit trail for manual calendar event create/edit/link/move actions.';
+
