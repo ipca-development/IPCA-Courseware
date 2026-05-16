@@ -680,8 +680,10 @@ if ($detailId > 0) {
     if ($emailPreview !== null && !empty($emailPreview['draft_id']) && !empty($emailPreview['body'])) {
         try {
             $existingDraft = ComplianceCommsCenterEngine::getDraft($pdo, (int)$emailPreview['draft_id']);
-            if (is_array($existingDraft)
-                && trim((string)($existingDraft['text_body'] ?? '')) === ''
+            if (!is_array($existingDraft) || (string)($existingDraft['status'] ?? '') !== 'draft') {
+                unset($_SESSION['_ipca_compliance_cap_email_preview']);
+                $emailPreview = null;
+            } elseif (trim((string)($existingDraft['text_body'] ?? '')) === ''
                 && trim((string)($existingDraft['html_body'] ?? '')) === '') {
                 ComplianceCommsCenterEngine::updateDraft($pdo, (int)$emailPreview['draft_id'], array(
                     'to' => (string)($emailPreview['recipient_email'] ?? ''),
@@ -694,7 +696,8 @@ if ($detailId > 0) {
                 ));
             }
         } catch (Throwable) {
-            // Non-blocking repair for drafts generated before HTML/text body hardening.
+            unset($_SESSION['_ipca_compliance_cap_email_preview']);
+            $emailPreview = null;
         }
     }
 

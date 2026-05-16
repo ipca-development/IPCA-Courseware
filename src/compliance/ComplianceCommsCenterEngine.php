@@ -1462,6 +1462,28 @@ final class ComplianceCommsCenterEngine
             ->execute(array('cancelled', $draftId));
     }
 
+    public static function deleteDraft(PDO $pdo, int $draftId, ?int $uid): void
+    {
+        $draft = self::getDraft($pdo, $draftId);
+        if ($draft === null) {
+            throw new RuntimeException('Draft not found.');
+        }
+        if ((string)$draft['status'] === 'sent') {
+            throw new RuntimeException('Sent draft records cannot be deleted from the draft outbox.');
+        }
+        $pdo->prepare('DELETE FROM ipca_compliance_email_drafts WHERE id = ?')
+            ->execute(array($draftId));
+        try {
+            $pdo->prepare(
+                'UPDATE ipca_compliance_corrective_action_deadline_extension_batches
+                    SET email_draft_id = NULL, updated_at = NOW()
+                  WHERE email_draft_id = ?'
+            )->execute(array($draftId));
+        } catch (Throwable) {
+            // Deadline-extension tracking migration may not be installed.
+        }
+    }
+
     // ------------------------------------------------------------------
     // Outbound send
     // ------------------------------------------------------------------

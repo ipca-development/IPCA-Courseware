@@ -88,6 +88,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             cmpdr_flash('success', 'Draft cancelled.');
             redirect('/admin/compliance/email_drafts.php');
         }
+        if ($action === 'delete' && $draftId > 0) {
+            ComplianceCommsCenterEngine::deleteDraft($pdo, $draftId, $uid);
+            cmpdr_flash('success', 'Draft deleted.');
+            redirect('/admin/compliance/email_drafts.php?status=draft');
+        }
     } catch (Throwable $e) {
         cmpdr_flash('error', $e->getMessage());
         redirect('/admin/compliance/email_drafts.php');
@@ -235,10 +240,22 @@ compliance_page_open(array(
                       <input type="hidden" name="draft_id" value="<?= $did ?>">
                       <button type="submit" class="cmp-btn-danger">Cancel</button>
                     </form>
+                    <form method="post" action="/admin/compliance/email_drafts.php" style="display:inline;"
+                          onsubmit="return confirm('Delete this draft permanently?');">
+                      <input type="hidden" name="action" value="delete">
+                      <input type="hidden" name="draft_id" value="<?= $did ?>">
+                      <button type="submit" class="cmp-btn-danger">Delete</button>
+                    </form>
                   <?php elseif ($status === 'sent' && !empty($d['sent_email_id'])): ?>
                     <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_thread.php?email_id=<?= (int)$d['sent_email_id'] ?>" style="text-decoration:none;">View sent</a>
                   <?php else: ?>
                     <a class="cmp-btn-secondary cmp-btn-link" href="/admin/compliance/email_compose.php?draft_id=<?= $did ?>" style="text-decoration:none;">View</a>
+                    <form method="post" action="/admin/compliance/email_drafts.php" style="display:inline;"
+                          onsubmit="return confirm('Delete this draft permanently?');">
+                      <input type="hidden" name="action" value="delete">
+                      <input type="hidden" name="draft_id" value="<?= $did ?>">
+                      <button type="submit" class="cmp-btn-danger">Delete</button>
+                    </form>
                   <?php endif; ?>
                 </div>
               </td>

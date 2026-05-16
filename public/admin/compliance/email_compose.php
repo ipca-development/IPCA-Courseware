@@ -225,6 +225,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('/admin/compliance/email_drafts.php');
         }
 
+        if ($action === 'delete') {
+            if ($postDraftId > 0) {
+                ComplianceCommsCenterEngine::deleteDraft($pdo, $postDraftId, $uid);
+                cmpose_flash('success', 'Draft deleted.');
+            }
+            redirect('/admin/compliance/email_drafts.php?status=draft');
+        }
+
         if ($action === 'remove_attachment') {
             $attId = isset($_POST['attachment_id']) ? (int)$_POST['attachment_id'] : 0;
             if ($postDraftId > 0 && $attId > 0) {
@@ -578,6 +586,10 @@ compliance_page_open(array(
         <button class="cmpec-btn danger" type="submit" name="action" value="cancel"
                 onclick="return confirm('Cancel this draft? You can still see it filtered as Cancelled in the drafts list.');">
           Cancel draft
+        </button>
+        <button class="cmpec-btn danger" type="submit" name="action" value="delete"
+                onclick="return confirm('Delete this draft permanently?');">
+          Delete draft
         </button>
       <?php endif; ?>
       <a class="cmpec-btn secondary" href="/admin/compliance/email_drafts.php" style="text-decoration:none;display:inline-block;line-height:1.2;">
