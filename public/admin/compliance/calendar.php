@@ -352,6 +352,10 @@ compliance_page_open(array(
   .cmpcal-event-detail{display:grid;grid-template-columns:170px minmax(0,1fr);gap:8px 14px;font-size:13px;}
   .cmpcal-event-detail dt{color:#64748b;font-weight:800;}
   .cmpcal-event-detail dd{margin:0;color:#0f172a;font-weight:650;overflow-wrap:anywhere;}
+  .cmpcal-footer-link{display:inline-flex;align-items:center;justify-content:center;min-height:40px;border-radius:12px;padding:0 16px;text-decoration:none;font-weight:800;border:1px solid #cbd5e1;background:#e5e7eb;color:#64748b;cursor:not-allowed;pointer-events:none;}
+  .cmpcal-footer-link.is-active{background:#12355f;border-color:#12355f;color:#fff;cursor:pointer;pointer-events:auto;}
+  .cmpcal-footer-link.is-active:hover{background:#1f4079;border-color:#1f4079;color:#fff;}
+  #cmpcalDeleteEvent:hover:not(:disabled){background:#dc2626;border-color:#dc2626;color:#fff;}
   .cmpcal-settings-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-top:10px;}
   .cmpcal-settings-list label{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px;font-size:13px;font-weight:720;}
   .cmpcal-queue{margin-top:18px;}
@@ -502,7 +506,7 @@ compliance_page_open(array(
   <div class="compliance-modal__footer">
     <button type="button" class="cmp-btn-secondary" id="cmpcalEditEvent">Edit Event</button>
     <button type="button" class="cmp-btn-secondary" id="cmpcalLinkEvent">Link To</button>
-    <a class="cmp-btn-secondary" id="cmpcalOpenLinked" href="#" style="text-decoration:none;">Open Linked Record</a>
+    <a class="cmpcal-footer-link" id="cmpcalOpenLinked" href="#" aria-disabled="true">Open Linked Record</a>
     <form method="post" id="cmpcalDeleteEventForm" style="display:inline;">
       <input type="hidden" name="action" value="delete_manual_event">
       <input type="hidden" name="calendar_event_id" id="cmpcalDeleteEventId">
@@ -1081,8 +1085,15 @@ compliance_page_open(array(
     link.disabled = !canEditManual;
     link.textContent = 'Link To';
     var open = document.getElementById('cmpcalOpenLinked');
-    if (metadata.linked_url) { open.href = metadata.linked_url; open.removeAttribute('aria-disabled'); }
-    else { open.href = '#'; open.setAttribute('aria-disabled','true'); }
+    if (metadata.linked_url) {
+      open.href = metadata.linked_url;
+      open.removeAttribute('aria-disabled');
+      open.classList.add('is-active');
+    } else {
+      open.href = '#';
+      open.setAttribute('aria-disabled','true');
+      open.classList.remove('is-active');
+    }
     document.getElementById('cmpcalDeleteEvent').disabled = !ev.can_delete || String(ev.id).indexOf('manual:') !== 0;
     document.getElementById('cmpcalDeleteEventId').value = String(ev.id).indexOf('manual:') === 0 ? String(ev.id).replace('manual:', '') : '';
     showDialog('calendarEventViewModal');
@@ -1634,7 +1645,7 @@ compliance_page_open(array(
       alert('Only unlocked manual calendar events can be deleted from the schedule.');
       return;
     }
-    if (!confirm('Delete this manual calendar event? This cannot delete source compliance records.')) {
+    if (!confirm('Are yous sure you want to delete this event?')) {
       e.preventDefault();
     }
   });
