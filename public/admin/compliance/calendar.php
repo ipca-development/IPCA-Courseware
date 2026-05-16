@@ -354,6 +354,8 @@ compliance_page_open(array(
   .cmpcal-event-detail dd{margin:0;color:#0f172a;font-weight:650;overflow-wrap:anywhere;}
   .cmpcal-event-detail .is-title{font-size:15px;font-weight:900;color:#0f172a;}
   .cmpcal-event-detail .is-time{font-size:15px;font-weight:900;color:#0f172a;}
+  .cmpcal-detail-inline{display:flex;align-items:center;flex-wrap:wrap;gap:8px;}
+  .cmpcal-detail-description{font-size:15px;font-weight:900;color:#0f172a;line-height:1.45;}
   .cmpcal-detail-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;border:1px solid #d7e5fb;background:#eef4ff;color:#17345d;padding:5px 9px;font-size:12px;font-weight:850;line-height:1.1;vertical-align:middle;}
   .cmpcal-detail-pill[class*="cmpcal-type-"]{background:var(--event-bg);border-color:var(--event-border);color:var(--event-text);}
   .cmpcal-detail-pill svg{width:13px;height:13px;flex:0 0 13px;}
@@ -1046,6 +1048,12 @@ compliance_page_open(array(
     };
     return labels[type] || 'Not linked';
   }
+  function labelForLinkedRecord(type, id){
+    if (!type || !id) { return ''; }
+    var options = linkOptionsForType(type);
+    var found = options.find(function(option){ return String(option.id) === String(id); });
+    return found ? String(found.label || '') : '';
+  }
   function titleCaseText(value){
     return String(value || '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, function(c){ return c.toUpperCase(); });
   }
@@ -1155,10 +1163,11 @@ compliance_page_open(array(
     var ends = parseDt(ev.ends_at || ev.starts_at);
     var eventTimezone = ev.timezone || state.timezone || 'UTC';
     var linkedId = ev.linked_object_id || ev.source_id || '';
+    var linkedTitle = labelForLinkedRecord(ev.linked_object_type || '', linkedId) || (linkedId ? labelForLinkedType(ev.linked_object_type) + ' #' + linkedId : '');
     var linkedHtml = ev.linked_object_type
       ? '<div class="cmpcal-linked-pills">'
         + detailPill(iconForLinkedType(ev.linked_object_type) + escapeHtml(labelForLinkedType(ev.linked_object_type)), 'cmpcal-type-' + (ev.event_type || 'other'))
-        + textPill('#' + linkedId, 'is-timezone')
+        + textPill(linkedTitle || 'Linked record', 'is-timezone')
         + '</div>'
       : textPill('Not linked', 'is-timezone');
     var audit = [];
@@ -1172,16 +1181,13 @@ compliance_page_open(array(
       audit.push('No audit trail entries available for this event.');
     }
     details.innerHTML = ''
-      + '<dt>Event title</dt><dd class="is-title">' + escapeHtml(ev.title) + '</dd>'
-      + '<dt>Event type</dt><dd>' + detailPill(iconForEvent(ev) + escapeHtml(labelForType(ev.event_type)), 'cmpcal-type-' + (ev.color_key || ev.event_type || 'other')) + '</dd>'
-      + '<dt>Status</dt><dd>' + textPill(titleCaseText(ev.status || 'Scheduled'), 'is-status') + '</dd>'
-      + '<dt>Governance state</dt><dd>' + textPill(titleCaseText(ev.governance_state || 'Approved'), 'is-governance') + '</dd>'
-      + '<dt>Date</dt><dd>' + escapeHtml(fmtLongDate(starts)) + '</dd>'
+      + '<dt>Event:</dt><dd class="cmpcal-detail-inline"><span class="is-title">' + escapeHtml(ev.title) + '</span>' + detailPill(iconForEvent(ev) + escapeHtml(labelForType(ev.event_type)), 'cmpcal-type-' + (ev.color_key || ev.event_type || 'other')) + '</dd>'
+      + '<dt>Status:</dt><dd class="cmpcal-detail-inline">' + textPill(titleCaseText(ev.status || 'Scheduled'), 'is-status') + textPill(titleCaseText(ev.governance_state || 'Approved'), 'is-governance') + '</dd>'
+      + '<dt>Date:</dt><dd class="is-time cmpcal-detail-inline">' + escapeHtml(fmtLongDate(starts)) + textPill(eventTimezone, 'is-timezone') + '</dd>'
       + '<dt>Start time</dt><dd class="is-time">' + escapeHtml(ev.is_all_day ? 'All day' : fmtTime(starts)) + '</dd>'
       + '<dt>End time</dt><dd class="is-time">' + escapeHtml(ev.is_all_day ? 'All day' : fmtTime(ends) + ' (' + durationLabel(starts, ends) + ')') + '</dd>'
-      + '<dt>Time Zone</dt><dd>' + textPill(eventTimezone, 'is-timezone') + '</dd>'
       + '<dt>Linked to:</dt><dd>' + linkedHtml + '</dd>'
-      + '<dt>Description</dt><dd>' + escapeHtml(ev.description || 'No description') + '</dd>'
+      + '<dt>Description:</dt><dd class="cmpcal-detail-description">' + escapeHtml(ev.description || 'No description') + '</dd>'
       + '<div class="cmpcal-audit-trail"><details><summary>Audit trail</summary><ul class="cmpcal-audit-list">'
       + audit.map(function(item){ return '<li>' + item + '</li>'; }).join('')
       + '</ul></details></div>';
