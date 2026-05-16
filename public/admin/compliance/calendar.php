@@ -349,32 +349,53 @@ compliance_page_open(array(
   .cmpcal-field textarea{min-height:82px;resize:vertical;}
   .cmpcal-modal-note{border:1px dashed #cbd5e1;background:#f8fafc;border-radius:12px;padding:10px 12px;color:#475569;font-size:13px;margin:10px 0;}
   .cmpcal-warning{border-color:#f59e0b;background:#fffbeb;color:#92400e;}
-  .cmpcal-event-detail{display:grid;grid-template-columns:110px minmax(0,1fr);gap:8px 14px;font-size:13px;}
-  .cmpcal-event-detail dt{color:#64748b;font-weight:800;}
-  .cmpcal-event-detail dd{margin:0;color:#0f172a;font-weight:650;overflow-wrap:anywhere;}
-  .cmpcal-event-detail .is-title{font-size:15px;font-weight:900;color:#0f172a;}
-  .cmpcal-event-detail .is-time{font-size:15px;font-weight:900;color:#0f172a;}
-  .cmpcal-detail-inline{display:flex;align-items:center;flex-wrap:wrap;gap:8px;}
-  .cmpcal-detail-description{font-size:15px;font-weight:900;color:#0f172a;line-height:1.45;}
-  .cmpcal-detail-spacer{grid-column:1 / -1;height:6px;}
-  .cmpcal-detail-pill{display:inline-flex;align-items:center;gap:6px;border-radius:999px;border:1px solid #d7e5fb;background:#eef4ff;color:#17345d;padding:5px 9px;font-size:12px;font-weight:850;line-height:1.1;vertical-align:middle;}
+  #calendarEventViewModal::backdrop{background:rgba(15,23,42,.42);backdrop-filter:blur(3px);}
+  #calendarEventViewModal .compliance-modal__panel{max-width:860px;border:1px solid rgba(148,163,184,.24);border-radius:22px;box-shadow:0 28px 80px rgba(15,23,42,.28);overflow:hidden;background:linear-gradient(180deg,#fff 0,#fbfdff 100%);}
+  #calendarEventViewModal .compliance-modal__header{padding:18px 22px;border-bottom:1px solid #e8edf5;background:#f8fafc;align-items:center;}
+  #calendarEventViewModal .compliance-modal__title{font-size:20px;letter-spacing:-.02em;color:#0f2748;}
+  #calendarEventViewModal .compliance-modal__close{width:34px;height:34px;min-height:34px;padding:0;border-radius:12px;background:#fff;border:1px solid #dbe4ef;color:#64748b;box-shadow:0 4px 14px rgba(15,23,42,.06);}
+  #calendarEventViewModal .compliance-modal__close:hover{background:#eef4ff;color:#17345d;border-color:#bfd2ee;}
+  #calendarEventViewModal .compliance-modal__body{padding:0;}
+  .cmpcal-event-detail{display:grid;grid-template-columns:160px minmax(0,1fr);gap:0;border-bottom:1px solid #e8edf5;background:#fff;}
+  .cmpcal-event-detail dt{padding:13px 18px 13px 22px;border-top:1px solid #eef2f7;color:#64748b;font-size:12px;font-weight:850;letter-spacing:.01em;}
+  .cmpcal-event-detail dd{margin:0;padding:12px 22px 12px 0;border-top:1px solid #eef2f7;color:#0f172a;font-size:13px;font-weight:720;overflow-wrap:anywhere;min-width:0;}
+  .cmpcal-event-detail dt:first-child,.cmpcal-event-detail dt:first-child+dd{border-top:0;}
+  .cmpcal-event-detail .is-title{font-size:16px;font-weight:900;color:#0f172a;letter-spacing:-.01em;}
+  .cmpcal-event-detail .is-time{font-size:15px;font-weight:880;color:#0f172a;}
+  .cmpcal-detail-inline{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;}
+  .cmpcal-detail-description{font-size:14px;font-weight:680;color:#334155;line-height:1.55;background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:10px 12px;}
+  .cmpcal-detail-spacer{grid-column:1 / -1;height:8px;background:#fbfdff;border-top:1px solid #eef2f7;}
+  .cmpcal-detail-pill{display:inline-flex;align-items:center;gap:6px;min-height:28px;border-radius:999px;border:1px solid #d7e5fb;background:#f3f7fc;color:#17345d;padding:5px 10px;font-size:12px;font-weight:850;line-height:1;vertical-align:middle;max-width:100%;}
   .cmpcal-detail-pill[class*="cmpcal-type-"]{background:var(--event-bg);border-color:var(--event-border);color:var(--event-text);}
   .cmpcal-detail-pill svg{width:13px;height:13px;flex:0 0 13px;}
-  .cmpcal-detail-pill.is-status{background:#ecfdf5;border-color:#bbf7d0;color:#166534;}
-  .cmpcal-detail-pill.is-governance{background:#eff6ff;border-color:#bfdbfe;color:#1d4ed8;}
-  .cmpcal-detail-pill.is-timezone{background:#f8fafc;border-color:#cbd5e1;color:#334155;}
-  .cmpcal-detail-pill.is-linked-record{max-width:360px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;}
-  .cmpcal-linked-pills{display:flex;flex-wrap:wrap;gap:6px;}
-  .cmpcal-audit-trail{grid-column:1 / -1;margin-top:8px;border-top:1px solid #e2e8f0;padding-top:10px;}
-  .cmpcal-audit-trail summary{cursor:pointer;font-weight:900;color:#17345d;}
-  .cmpcal-audit-list{list-style:none;margin:10px 0 0;padding:0;display:grid;gap:7px;}
-  .cmpcal-audit-list li{border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc;padding:8px 10px;color:#334155;font-size:13px;font-weight:650;}
-  .cmpcal-audit-diff{margin-top:6px;display:grid;gap:4px;color:#475569;font-size:12px;font-weight:650;}
-  .cmpcal-audit-diff span{display:block;}
-  .cmpcal-footer-link{display:inline-flex;align-items:center;justify-content:center;min-height:40px;border-radius:12px;padding:0 16px;text-decoration:none;font-weight:800;border:1px solid #cbd5e1;background:#e5e7eb;color:#64748b;cursor:not-allowed;pointer-events:none;}
-  .cmpcal-footer-link.is-active{background:#12355f;border-color:#12355f;color:#fff;cursor:pointer;pointer-events:auto;}
+  .cmpcal-detail-pill.is-status{background:#eefaf3;border-color:#c7ecd5;color:#176139;}
+  .cmpcal-detail-pill.is-governance{background:#eef5ff;border-color:#c7dcfb;color:#1f4f93;}
+  .cmpcal-detail-pill.is-timezone{background:#f8fafc;border-color:#d9e2ec;color:#334155;}
+  .cmpcal-detail-pill.is-linked-record{max-width:430px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:inline-block;line-height:16px;}
+  .cmpcal-linked-pills{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;}
+  .cmpcal-audit-trail{grid-column:1 / -1;border-top:1px solid #e8edf5;background:#fbfdff;}
+  .cmpcal-audit-trail details{padding:0;}
+  .cmpcal-audit-trail summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:10px;padding:14px 22px;color:#17345d;font-weight:900;font-size:13px;user-select:none;}
+  .cmpcal-audit-trail summary::-webkit-details-marker{display:none;}
+  .cmpcal-audit-trail summary::before{content:"";width:8px;height:8px;border-right:2px solid #64748b;border-bottom:2px solid #64748b;transform:rotate(-45deg);transition:transform .16s ease;}
+  .cmpcal-audit-trail details[open] summary::before{transform:rotate(45deg);}
+  .cmpcal-audit-trail summary:hover{background:#f1f5f9;}
+  .cmpcal-audit-list{list-style:none;margin:0;padding:0 22px 18px 34px;display:grid;gap:0;position:relative;}
+  .cmpcal-audit-list::before{content:"";position:absolute;left:42px;top:4px;bottom:22px;width:2px;background:#dbe4ef;}
+  .cmpcal-audit-list li{position:relative;margin:0 0 10px 0;border:1px solid #e2e8f0;border-radius:14px;background:#fff;padding:11px 12px 11px 18px;color:#334155;font-size:13px;font-weight:650;box-shadow:0 6px 18px rgba(15,23,42,.04);}
+  .cmpcal-audit-list li::before{content:"";position:absolute;left:-30px;top:16px;width:10px;height:10px;border-radius:50%;background:#17345d;border:3px solid #eaf2ff;box-shadow:0 0 0 1px #b7c9e5;}
+  .cmpcal-audit-title{font-weight:900;color:#0f172a;}
+  .cmpcal-audit-meta{margin-top:3px;color:#64748b;font-size:12px;font-weight:720;}
+  .cmpcal-audit-diff{margin-top:8px;display:grid;gap:5px;color:#475569;font-size:12px;font-weight:650;}
+  .cmpcal-audit-diff span{display:block;background:#f8fafc;border:1px solid #e8edf5;border-radius:9px;padding:5px 7px;}
+  #calendarEventViewModal .cmpcal-event-footer{display:flex;justify-content:flex-end;align-items:center;gap:10px;padding:14px 22px;border-top:1px solid #e8edf5;background:#fff;}
+  #calendarEventViewModal .cmpcal-event-footer button,#calendarEventViewModal .cmpcal-event-footer a{min-height:38px;border-radius:12px;padding:0 14px;font-size:13px;font-weight:850;text-decoration:none;}
+  .cmpcal-footer-link{display:inline-flex;align-items:center;justify-content:center;border:1px solid #cbd5e1;background:#e5e7eb;color:#64748b;cursor:not-allowed;pointer-events:none;}
+  .cmpcal-footer-link.is-active{background:#12355f;border-color:#12355f;color:#fff;cursor:pointer;pointer-events:auto;box-shadow:0 8px 18px rgba(18,53,95,.16);}
   .cmpcal-footer-link.is-active:hover{background:#1f4079;border-color:#1f4079;color:#fff;}
+  #cmpcalDeleteEvent{border-color:#fecaca;color:#991b1b;background:#fff;}
   #cmpcalDeleteEvent:hover:not(:disabled){background:#dc2626;border-color:#dc2626;color:#fff;}
+  @media (max-width:760px){.cmpcal-event-detail{grid-template-columns:1fr}.cmpcal-event-detail dt{padding:12px 18px 3px}.cmpcal-event-detail dd{padding:0 18px 12px;border-top:0}.cmpcal-event-detail dt:first-child+dd{border-top:0}.cmpcal-detail-pill.is-linked-record{max-width:100%}#calendarEventViewModal .cmpcal-event-footer{justify-content:flex-start;flex-wrap:wrap}.cmpcal-audit-list{padding-left:30px}.cmpcal-audit-list::before{left:38px}}
   .cmpcal-settings-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:9px;margin-top:10px;}
   .cmpcal-settings-list label{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid #e2e8f0;border-radius:10px;font-size:13px;font-weight:720;}
   .cmpcal-queue{margin-top:18px;}
@@ -522,10 +543,10 @@ compliance_page_open(array(
   <div class="cmpcal-modal-note cmpcal-warning" id="cmpcalEventGovernanceWarning" hidden>
     This appears to be a governed compliance deadline. Moving or deleting this event may require authority/internal approval and deadline-extension logging.
   </div>
-  <div class="compliance-modal__footer">
+  <div class="compliance-modal__footer cmpcal-event-footer">
+    <a class="cmpcal-footer-link" id="cmpcalOpenLinked" href="#" aria-disabled="true">Open Linked Record</a>
     <button type="button" class="cmp-btn-secondary" id="cmpcalEditEvent">Edit Event</button>
     <button type="button" class="cmp-btn-secondary" id="cmpcalLinkEvent">Link To</button>
-    <a class="cmpcal-footer-link" id="cmpcalOpenLinked" href="#" aria-disabled="true">Open Linked Record</a>
     <form method="post" id="cmpcalDeleteEventForm" style="display:inline;">
       <input type="hidden" name="action" value="delete_manual_event">
       <input type="hidden" name="calendar_event_id" id="cmpcalDeleteEventId">
@@ -1115,13 +1136,27 @@ compliance_page_open(array(
     var summary = String(item.summary || '').trim();
     if (summary !== '') { return summary; }
     switch (String(item.event_kind || '')) {
-      case 'created': return 'Event Created';
-      case 'updated': return 'Event Updated';
-      case 'linked': return 'Event Linked';
-      case 'unlinked': return 'Event Unlinked';
-      case 'moved': return 'Event Schedule Changed';
-      default: return 'Event Changed';
+      case 'created': return 'Event created';
+      case 'scheduled': return 'Event scheduled';
+      case 'approved': return 'Event approved';
+      case 'updated': return 'Event updated';
+      case 'linked': return 'Linked record changed';
+      case 'unlinked': return 'Linked record removed';
+      case 'schedule_changed': return 'Date/time changed';
+      case 'status_changed': return 'Status changed';
+      case 'approval_changed': return 'Approval state changed';
+      case 'description_changed': return 'Description changed';
+      case 'deleted': return 'Event deleted';
+      default: return 'Event changed';
     }
+  }
+  function auditEntryHtml(item, timezone){
+    var when = item.occurred_at ? fmtAuditStamp(parseDt(item.occurred_at), timezone) : 'Time not available';
+    var actor = item.actor_name || 'Unknown user';
+    return '<li><div class="cmpcal-audit-title">' + escapeHtml(auditSummaryText(item)) + '</div>'
+      + '<div class="cmpcal-audit-meta">' + escapeHtml(when) + ' by ' + escapeHtml(actor) + '</div>'
+      + auditDiffHtml(item)
+      + '</li>';
   }
   function titleCaseText(value){
     return String(value || '').replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, function(c){ return c.toUpperCase(); });
@@ -1240,16 +1275,16 @@ compliance_page_open(array(
         + '</div>'
       : textPill('Not linked', 'is-timezone');
     var audit = Array.isArray(metadata.audit_trail) ? metadata.audit_trail.map(function(item){
-      return fmtAuditStamp(parseDt(item.occurred_at), eventTimezone) + ' &ndash; ' + escapeHtml(auditSummaryText(item)) + ' by ' + escapeHtml(item.actor_name || 'Unknown user') + auditDiffHtml(item);
+      return auditEntryHtml(item, eventTimezone);
     }) : [];
     if (audit.length === 0 && metadata.updated_at && metadata.updated_at !== metadata.created_at) {
-      audit.push(fmtAuditStamp(parseDt(metadata.updated_at), eventTimezone) + ' &ndash; Event Updated by ' + escapeHtml(metadata.updated_by_name || 'Unknown user'));
+      audit.push('<li><div class="cmpcal-audit-title">Event updated</div><div class="cmpcal-audit-meta">' + escapeHtml(fmtAuditStamp(parseDt(metadata.updated_at), eventTimezone)) + ' by ' + escapeHtml(metadata.updated_by_name || 'Unknown user') + '</div></li>');
     }
     if (audit.length === 0 && metadata.created_at) {
-      audit.push(fmtAuditStamp(parseDt(metadata.created_at), eventTimezone) + ' &ndash; Event Created by ' + escapeHtml(metadata.created_by_name || 'Unknown user'));
+      audit.push('<li><div class="cmpcal-audit-title">Event created</div><div class="cmpcal-audit-meta">' + escapeHtml(fmtAuditStamp(parseDt(metadata.created_at), eventTimezone)) + ' by ' + escapeHtml(metadata.created_by_name || 'Unknown user') + '</div></li>');
     }
     if (audit.length === 0) {
-      audit.push('No audit trail entries available for this event.');
+      audit.push('<li><div class="cmpcal-audit-title">No audit trail entries available</div></li>');
     }
     details.innerHTML = ''
       + '<dt>Event:</dt><dd class="cmpcal-detail-inline"><span class="is-title">' + escapeHtml(ev.title) + '</span>' + detailPill(iconForEvent(ev) + escapeHtml(labelForType(ev.event_type)), 'cmpcal-type-' + (ev.color_key || ev.event_type || 'other')) + '</dd>'
@@ -1261,7 +1296,7 @@ compliance_page_open(array(
       + '<div class="cmpcal-detail-spacer"></div>'
       + '<dt>Description:</dt><dd class="cmpcal-detail-description">' + escapeHtml(ev.description || 'No description') + '</dd>'
       + '<div class="cmpcal-audit-trail"><details><summary>Audit trail</summary><ul class="cmpcal-audit-list">'
-      + audit.map(function(item){ return '<li>' + item + '</li>'; }).join('')
+      + audit.join('')
       + '</ul></details></div>';
     document.getElementById('cmpcalEventGovernanceWarning').hidden = !(ev.is_locked || ev.requires_approval_to_move);
     var canEditManual = String(ev.id).indexOf('manual:') === 0 && ev.can_edit_directly && !ev.is_locked;

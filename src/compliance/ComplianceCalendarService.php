@@ -89,7 +89,13 @@ final class ComplianceCalendarService
         ));
 
         $id = (int)$pdo->lastInsertId();
-        self::logManualEventAudit($pdo, $id, 'created', 'Event Created', null, self::manualEvent($pdo, $id), $userId);
+        $created = self::manualEvent($pdo, $id);
+        self::logManualEventAudit($pdo, $id, 'created', 'Event created', null, $created, $userId);
+        self::logManualEventAudit($pdo, $id, 'scheduled', 'Event scheduled', null, $created, $userId);
+        self::logManualEventAudit($pdo, $id, 'approved', 'Event approved', null, $created, $userId);
+        if ($linkedType !== null && $linkedId !== null) {
+            self::logManualEventAudit($pdo, $id, 'linked', 'Linked record added', null, $created, $userId);
+        }
         return $id;
     }
 
@@ -142,7 +148,7 @@ final class ComplianceCalendarService
             $userId > 0 ? $userId : null,
             $id,
         ));
-        self::logManualEventAudit($pdo, $id, 'updated', 'Event Updated', $before, self::manualEvent($pdo, $id), $userId);
+        self::logManualEventChanges($pdo, $id, $before, self::manualEvent($pdo, $id), $userId);
     }
 
     public static function deleteManualEvent(PDO $pdo, int $id, int $userId): void
@@ -155,6 +161,7 @@ final class ComplianceCalendarService
         if (!empty($row['is_locked']) || !empty($row['locked_at'])) {
             throw new RuntimeException('This calendar event is locked.');
         }
+        self::logManualEventAudit($pdo, $id, 'deleted', 'Event deleted', $row, null, $userId);
         $pdo->prepare('DELETE FROM ipca_compliance_calendar_events WHERE id = ?')->execute(array($id));
     }
 
@@ -186,7 +193,7 @@ final class ComplianceCalendarService
             $userId > 0 ? $userId : null,
             $id,
         ));
-        self::logManualEventAudit($pdo, $id, $type === null ? 'unlinked' : 'linked', $type === null ? 'Event Unlinked' : 'Event Linked', $before, self::manualEvent($pdo, $id), $userId);
+        self::logManualEventAudit($pdo, $id, $type === null ? 'unlinked' : 'linked', $type === null ? 'Linked record removed' : 'Linked record changed', $before, self::manualEvent($pdo, $id), $userId);
     }
 
     /**
@@ -364,7 +371,7 @@ final class ComplianceCalendarService
                 SET starts_at = ?, ends_at = ?, updated_by = ?
               WHERE id = ?'
         )->execute(array($startsAt, $endsAt, $userId > 0 ? $userId : null, $id));
-        self::logManualEventAudit($pdo, $id, 'moved', 'Event Schedule Changed', $before, self::manualEvent($pdo, $id), $userId);
+        self::logManualEventAudit($pdo, $id, 'schedule_changed', 'Date/time changed', $before, self::manualEvent($pdo, $id), $userId);
     }
 
     private static function rescheduleMeeting(PDO $pdo, int $meetingId, string $startsAt, string $endsAt, int $userId): void
@@ -543,6 +550,48 @@ final class ComplianceCalendarService
             $after !== null ? json_encode($after, JSON_UNESCAPED_SLASHES) : null,
             $userId > 0 ? $userId : null,
         ));
+    }
+
+    /** @param array<string,mixed>|null $before @param array<string,mixed>|null $after */
+    private static function logManualEventChanges(PDO $pdo, int $eventId, ?array $before, ?array $after, int $userId): void
+    {
+        if ($before === null || $after === null) {
+            self::logManualEventAudit($pdo, $eventId, 'updated', 'Event updated', $before, $after, $userId);
+            return;
+        }
+
+        $changes = array(
+            'title' => array('kind' => 'updated', 'summary' => 'Event title changed'),
+            'event_type' => array('kind' => 'updated', 'summary' => 'Event type changed'),
+            'starts_at' => array('kind' => 'schedule_changed', 'summary' => 'Date/time changed'),
+            'ends_at' => array('kind' => 'schedule_changed', 'summary' => 'Date/time changed'),
+            'is_all_day' => array('kind' => 'schedule_changed', 'summary' => 'All-day setting changed'),
+            'timezone' => array('kind' => 'schedule_changed', 'summary' => 'Timezone changed'),
+            'description' => array('kind' => 'description_changed', 'summary' => 'Description changed'),
+            'linked_object_type' => array('kind' => 'linked', 'summary' => 'Linked record changed'),
+            'linked_object_id' => array('kind' => 'linked', 'summary' => 'Linked record changed'),
+            'status' => array('kind' => 'status_changed', 'summary' => 'Status changed'),
+            'governance_state' => array('kind' => 'approval_changed', 'summary' => 'Approval state changed'),
+        );
+
+        $logged = array();
+        foreach ($changes as $field => $meta) {
+            $old = (string)($before[$field] ?? '');
+            $new = (string)($after[$field] ?? '');
+            if ($old === $new) {
+                continue;
+            }
+            $key = (string)$meta['summary'];
+            if (isset($logged[$key])) {
+                continue;
+            }
+            self::logManualEventAudit($pdo, $eventId, (string)$meta['kind'], $key, $before, $after, $userId);
+            $logged[$key] = true;
+        }
+
+        if ($logged === array()) {
+            self::logManualEventAudit($pdo, $eventId, 'updated', 'Event updated', $before, $after, $userId);
+        }
     }
 
     private static function nullableText(string $value): ?string
