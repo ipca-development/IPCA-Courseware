@@ -363,7 +363,7 @@ compliance_page_open(array(
   .cmpcal-event-detail .is-title{font-size:16px;font-weight:900;color:#0f172a;letter-spacing:-.01em;}
   .cmpcal-event-detail .is-time{font-size:15px;font-weight:880;color:#0f172a;}
   .cmpcal-detail-inline{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0;}
-  .cmpcal-detail-description{font-size:14px;font-weight:680;color:#334155;line-height:1.55;background:#f8fafc;border:1px solid #e2e8f0;border-radius:14px;padding:10px 12px;}
+  .cmpcal-detail-description{font-size:14px;font-weight:680;color:#334155;line-height:1.55;}
   .cmpcal-detail-spacer{grid-column:1 / -1;height:8px;background:#fbfdff;border-top:1px solid #eef2f7;}
   .cmpcal-detail-pill{display:inline-flex;align-items:center;gap:6px;min-height:28px;border-radius:999px;border:1px solid #d7e5fb;background:#f3f7fc;color:#17345d;padding:5px 10px;font-size:12px;font-weight:850;line-height:1;vertical-align:middle;max-width:100%;}
   .cmpcal-detail-pill[class*="cmpcal-type-"]{background:var(--event-bg);border-color:var(--event-border);color:var(--event-text);}
