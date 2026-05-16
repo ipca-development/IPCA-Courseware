@@ -534,18 +534,17 @@ compliance_page_open(array(
       <label class="cmpcal-field" id="cmpcalNewStartField"><span>Start time</span><input type="text" name="start_time" id="cmpcalNewStart" inputmode="text" autocomplete="off"></label>
       <label class="cmpcal-field" id="cmpcalNewEndField"><span>End time</span><input type="text" name="end_time" id="cmpcalNewEnd" inputmode="text" autocomplete="off"></label>
       <label class="cmpcal-field"><span>Timezone</span><select name="timezone" id="cmpcalNewTimezone"></select></label>
-      <label class="cmpcal-field"><span>Link to</span><select name="linked_object_type">
+      <label class="cmpcal-field"><span id="cmpcalNewLinkedTypeLabel">Type</span><select name="linked_object_type" id="cmpcalNewLinkedType">
         <option value="">Not linked</option>
         <option value="compliance_case">Case / MoC</option>
         <option value="audit">Audit</option>
         <option value="finding">Finding</option>
-        <option value="corrective_action">Corrective Action</option>
+        <option value="corrective_action">Corrective Action / CAP</option>
         <option value="meeting">Meeting</option>
         <option value="manual_change_request">Manual Change Request</option>
         <option value="regulatory_review">Regulatory Review</option>
-        <option value="other">Other</option>
       </select></label>
-      <label class="cmpcal-field"><span>Linked object ID</span><input type="number" min="1" name="linked_object_id" placeholder="Optional"></label>
+      <label class="cmpcal-field"><span id="cmpcalNewLinkedDetailsLabel">Details</span><select name="linked_object_id" id="cmpcalNewLinkedId"><option value="">Select a type first</option></select></label>
       <label class="cmpcal-field"><span>All-day</span><select name="all_day" id="cmpcalNewAllDay"><option value="1">Yes</option><option value="0">No</option></select></label>
     </div>
     <label class="cmpcal-field" style="display:block;margin-top:12px;"><span>Description</span><textarea name="description" placeholder="Governance context, linked record or approval notes"></textarea></label>
@@ -573,18 +572,17 @@ compliance_page_open(array(
       <label class="cmpcal-field" id="cmpcalEditStartField"><span>Start time</span><input type="text" name="start_time" id="cmpcalEditStart" inputmode="text" autocomplete="off"></label>
       <label class="cmpcal-field" id="cmpcalEditEndField"><span>End time</span><input type="text" name="end_time" id="cmpcalEditEnd" inputmode="text" autocomplete="off"></label>
       <label class="cmpcal-field"><span>Timezone</span><select name="timezone" id="cmpcalEditTimezone"></select></label>
-      <label class="cmpcal-field"><span>Link to</span><select name="linked_object_type" id="cmpcalEditLinkedType">
+      <label class="cmpcal-field"><span id="cmpcalEditLinkedTypeLabel">Type</span><select name="linked_object_type" id="cmpcalEditLinkedType">
         <option value="">Not linked</option>
         <option value="compliance_case">Case / MoC</option>
         <option value="audit">Audit</option>
         <option value="finding">Finding</option>
-        <option value="corrective_action">Corrective Action</option>
+        <option value="corrective_action">Corrective Action / CAP</option>
         <option value="meeting">Meeting</option>
         <option value="manual_change_request">Manual Change Request</option>
         <option value="regulatory_review">Regulatory Review</option>
-        <option value="other">Other</option>
       </select></label>
-      <label class="cmpcal-field"><span>Linked object ID</span><input type="number" min="1" name="linked_object_id" id="cmpcalEditLinkedId" placeholder="Optional"></label>
+      <label class="cmpcal-field"><span id="cmpcalEditLinkedDetailsLabel">Details</span><select name="linked_object_id" id="cmpcalEditLinkedId"><option value="">Select a type first</option></select></label>
       <label class="cmpcal-field"><span>All-day</span><select name="all_day" id="cmpcalEditAllDay"><option value="1">Yes</option><option value="0">No</option></select></label>
     </div>
     <label class="cmpcal-field" style="display:block;margin-top:12px;"><span>Description</span><textarea name="description" id="cmpcalEditDescription" placeholder="Governance context, linked record or approval notes"></textarea></label>
@@ -923,12 +921,19 @@ compliance_page_open(array(
     return group && Array.isArray(group.options) ? group.options : [];
   }
   function normalizeLinkModalLabels(){
-    document.getElementById('cmpcalLinkTypeLabel').textContent = 'Type';
-    document.getElementById('cmpcalLinkDetailsLabel').textContent = 'Details';
+    ['cmpcalNewLinkedTypeLabel', 'cmpcalEditLinkedTypeLabel', 'cmpcalLinkTypeLabel'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) { el.textContent = 'Type'; }
+    });
+    ['cmpcalNewLinkedDetailsLabel', 'cmpcalEditLinkedDetailsLabel', 'cmpcalLinkDetailsLabel'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) { el.textContent = 'Details'; }
+    });
   }
-  function populateLinkDetails(type, selectedId, selectedLabel){
+  function populateLinkedDetails(selectId, type, selectedId, selectedLabel){
     normalizeLinkModalLabels();
-    var sel = document.getElementById('cmpcalLinkId');
+    var sel = document.getElementById(selectId);
+    if (!sel) { return; }
     sel.innerHTML = '';
     if (!type) {
       sel.disabled = true;
@@ -949,6 +954,22 @@ compliance_page_open(array(
       sel.appendChild(new Option(selectedLabel || ('Current linked record #' + selectedId), String(selectedId)));
     }
     sel.value = selectedId ? String(selectedId) : '';
+  }
+  function populateLinkDetails(type, selectedId, selectedLabel){
+    populateLinkedDetails('cmpcalLinkId', type, selectedId, selectedLabel);
+  }
+  function validateLinkedDetails(typeId, detailsId){
+    var type = document.getElementById(typeId).value;
+    var details = document.getElementById(detailsId);
+    var id = details ? details.value : '';
+    if (type !== '' && (!id || parseInt(id, 10) <= 0)) {
+      alert('Choose details, or set Type to Not linked to clear the link.');
+      return false;
+    }
+    if (type === '' && details) {
+      details.value = '';
+    }
+    return true;
   }
   function timeColumnFromPoint(clientX, clientY){
     var el = document.elementFromPoint(clientX, clientY);
@@ -1013,6 +1034,8 @@ compliance_page_open(array(
     document.getElementById('cmpcalNewAllDay').value = '1';
     updateAllDayFields();
     document.getElementById('cmpcalNewTimezone').innerHTML = timezoneOptionsHtml();
+    document.getElementById('cmpcalNewLinkedType').value = '';
+    populateLinkedDetails('cmpcalNewLinkedId', '', '', '');
     showDialog('calendarNewEventModal');
   }
   function openEditManualModal(ev){
@@ -1042,7 +1065,7 @@ compliance_page_open(array(
       document.getElementById('cmpcalEditTimezone').value = state.timezone;
     }
     document.getElementById('cmpcalEditLinkedType').value = ev.linked_object_type || '';
-    document.getElementById('cmpcalEditLinkedId').value = ev.linked_object_id ? String(ev.linked_object_id) : '';
+    populateLinkedDetails('cmpcalEditLinkedId', ev.linked_object_type || '', ev.linked_object_id ? String(ev.linked_object_id) : '', '');
     document.getElementById('cmpcalEditAllDay').value = ev.is_all_day ? '1' : '0';
     document.getElementById('cmpcalEditDescription').value = ev.description || '';
     updateEditAllDayFields();
@@ -1580,11 +1603,23 @@ compliance_page_open(array(
   document.getElementById('cmpcalEditEvent').addEventListener('click', function(){ openEditManualModal(state.selectedEvent); });
   document.getElementById('cmpcalLinkEvent').addEventListener('click', function(){ openLinkManualModal(state.selectedEvent); });
   normalizeLinkModalLabels();
+  populateLinkedDetails('cmpcalNewLinkedId', document.getElementById('cmpcalNewLinkedType').value, document.getElementById('cmpcalNewLinkedId').value, '');
+  populateLinkedDetails('cmpcalEditLinkedId', document.getElementById('cmpcalEditLinkedType').value, document.getElementById('cmpcalEditLinkedId').value, '');
   populateLinkDetails(document.getElementById('cmpcalLinkType').value, document.getElementById('cmpcalLinkId').value, '');
+  document.getElementById('cmpcalNewLinkedType').addEventListener('change', function(e){
+    populateLinkedDetails('cmpcalNewLinkedId', e.target.value, '', '');
+  });
+  document.getElementById('cmpcalEditLinkedType').addEventListener('change', function(e){
+    populateLinkedDetails('cmpcalEditLinkedId', e.target.value, '', '');
+  });
   document.getElementById('cmpcalLinkType').addEventListener('change', function(e){
     populateLinkDetails(e.target.value, '', '');
   });
   document.getElementById('cmpcalNewEventForm').addEventListener('submit', function(e){
+    if (!validateLinkedDetails('cmpcalNewLinkedType', 'cmpcalNewLinkedId')) {
+      e.preventDefault();
+      return;
+    }
     if (document.getElementById('cmpcalNewAllDay').value !== '1') {
       var start = normalizeTimeText(document.getElementById('cmpcalNewStart').value);
       var end = normalizeTimeText(document.getElementById('cmpcalNewEnd').value);
@@ -1599,6 +1634,10 @@ compliance_page_open(array(
     updateReturnFields();
   });
   document.getElementById('cmpcalEditEventForm').addEventListener('submit', function(e){
+    if (!validateLinkedDetails('cmpcalEditLinkedType', 'cmpcalEditLinkedId')) {
+      e.preventDefault();
+      return;
+    }
     if (document.getElementById('cmpcalEditAllDay').value !== '1') {
       var start = normalizeTimeText(document.getElementById('cmpcalEditStart').value);
       var end = normalizeTimeText(document.getElementById('cmpcalEditEnd').value);
@@ -1613,15 +1652,9 @@ compliance_page_open(array(
     updateReturnFields();
   });
   document.getElementById('cmpcalLinkEventForm').addEventListener('submit', function(e){
-    var type = document.getElementById('cmpcalLinkType').value;
-    var id = document.getElementById('cmpcalLinkId').value;
-    if (type !== '' && (!id || parseInt(id, 10) <= 0)) {
+    if (!validateLinkedDetails('cmpcalLinkType', 'cmpcalLinkId')) {
       e.preventDefault();
-      alert('Choose details, or set Type to Not linked to clear the link.');
       return;
-    }
-    if (type === '') {
-      document.getElementById('cmpcalLinkId').value = '';
     }
     updateReturnFields();
   });
