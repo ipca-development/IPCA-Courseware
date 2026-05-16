@@ -1471,6 +1471,7 @@ final class ComplianceCommsCenterEngine
         if ((string)$draft['status'] === 'sent') {
             throw new RuntimeException('Sent draft records cannot be deleted from the draft outbox.');
         }
+        self::cancelDeadlineExtensionForDeletedDraft($pdo, $draftId, $uid);
         $pdo->prepare('DELETE FROM ipca_compliance_email_drafts WHERE id = ?')
             ->execute(array($draftId));
         try {
@@ -1481,6 +1482,76 @@ final class ComplianceCommsCenterEngine
             )->execute(array($draftId));
         } catch (Throwable) {
             // Deadline-extension tracking migration may not be installed.
+        }
+    }
+
+    private static function cancelDeadlineExtensionForDeletedDraft(PDO $pdo, int $draftId, ?int $uid): void
+    {
+        try {
+            $st = $pdo->prepare(
+                "SELECT id, audit_id, request_reference
+                   FROM ipca_compliance_corrective_action_deadline_extension_batches
+                  WHERE email_draft_id = ?
+                    AND status IN ('draft','submitted','under_review')
+                  LIMIT 20"
+            );
+            $st->execute(array($draftId));
+            $batches = $st->fetchAll(PDO::FETCH_ASSOC);
+            if (!is_array($batches) || $batches === array()) {
+                return;
+            }
+            $batchIds = array_map(static fn($r): int => (int)$r['id'], $batches);
+            $placeholders = implode(',', array_fill(0, count($batchIds), '?'));
+            $pdo->prepare(
+                "UPDATE ipca_compliance_corrective_action_deadline_extension_batches
+                    SET status = 'cancelled',
+                        review_notes = COALESCE(review_notes, 'Cancelled because the outbound draft email was deleted before review.'),
+                        locked_at = NOW(),
+                        updated_at = NOW()
+                  WHERE id IN (" . $placeholders . ")"
+            )->execute($batchIds);
+            $pdo->prepare(
+                "UPDATE ipca_compliance_corrective_action_deadline_extension_items
+                    SET status = 'cancelled',
+                        review_notes = COALESCE(review_notes, 'Cancelled because the outbound draft email was deleted before review.'),
+                        locked_at = NOW(),
+                        updated_at = NOW()
+                  WHERE batch_id IN (" . $placeholders . ")
+                    AND status IN ('draft','submitted')"
+            )->execute($batchIds);
+            $pdo->prepare(
+                "UPDATE ipca_compliance_public_approval_tokens
+                    SET revoked_at = COALESCE(revoked_at, NOW())
+                  WHERE token_type = 'deadline_extension'
+                    AND batch_id IN (" . $placeholders . ")
+                    AND revoked_at IS NULL"
+            )->execute($batchIds);
+            foreach ($batches as $batch) {
+                self::logDeadlineExtensionCancellation($pdo, (int)$batch['id'], (int)($batch['audit_id'] ?? 0), (string)($batch['request_reference'] ?? ''), $uid, $draftId);
+            }
+        } catch (Throwable) {
+            // Deadline-extension workflow tables may not be installed on every environment.
+        }
+    }
+
+    private static function logDeadlineExtensionCancellation(PDO $pdo, int $batchId, int $auditId, string $reference, ?int $uid, int $draftId): void
+    {
+        try {
+            require_once __DIR__ . '/ComplianceCaseEvents.php';
+            compliance_log_case_event(
+                $pdo,
+                null,
+                'deadline_extension_batch',
+                $batchId,
+                'deadline_extension_cancelled',
+                $uid !== null && $uid > 0 ? $uid : null,
+                'Deadline extension request cancelled after draft deletion: ' . ($reference !== '' ? $reference : ('#' . $batchId)),
+                null,
+                null,
+                array('audit_id' => $auditId, 'email_draft_id' => $draftId)
+            );
+        } catch (Throwable) {
+            // Audit-event logging should not block draft deletion.
         }
     }
 
