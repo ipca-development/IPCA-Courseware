@@ -371,6 +371,31 @@ if ($detailId > 0) {
             </div>
           </form>
         <?php compliance_modal_close(); ?>
+        <script>
+          (function () {
+            var modal = document.getElementById('audit-document-upload-modal');
+            if (!modal) { return; }
+            document.querySelectorAll('[data-compliance-modal-open="audit-document-upload-modal"]').forEach(function (btn) {
+              btn.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                if (typeof modal.showModal === 'function') {
+                  modal.showModal();
+                } else {
+                  modal.setAttribute('open', 'open');
+                }
+              });
+            });
+            modal.querySelectorAll('[data-compliance-modal-close]').forEach(function (btn) {
+              btn.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                if (typeof modal.close === 'function') {
+                  modal.close();
+                }
+                modal.removeAttribute('open');
+              });
+            });
+          })();
+        </script>
 
         <section class="cmp-card">
           <div class="cmp-card-head">

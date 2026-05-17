@@ -626,6 +626,31 @@ if ($detailId > 0) {
             </div>
           </form>
         <?php compliance_modal_close(); ?>
+        <script>
+          (function () {
+            var modal = document.getElementById('finding-document-upload-modal');
+            if (!modal) { return; }
+            document.querySelectorAll('[data-compliance-modal-open="finding-document-upload-modal"]').forEach(function (btn) {
+              btn.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                if (typeof modal.showModal === 'function') {
+                  modal.showModal();
+                } else {
+                  modal.setAttribute('open', 'open');
+                }
+              });
+            });
+            modal.querySelectorAll('[data-compliance-modal-close]').forEach(function (btn) {
+              btn.addEventListener('click', function (ev) {
+                ev.preventDefault();
+                if (typeof modal.close === 'function') {
+                  modal.close();
+                }
+                modal.removeAttribute('open');
+              });
+            });
+          })();
+        </script>
 
         <section class="cmp-card">
           <h2 style="margin:0 0 8px;font-size:20px;">Regulatory References</h2>
