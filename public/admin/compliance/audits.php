@@ -316,15 +316,18 @@ if ($detailId > 0) {
                 <thead><tr><th style="width:72px;">Preview</th><th>Document</th><th style="width:150px;">Received</th><th>Notes</th></tr></thead>
                 <tbody>
                   <?php foreach ($auditDocuments as $doc): ?>
+                    <?php $docUrl = '/admin/compliance/document.php?scope=audit&id=' . (int)$doc['id']; ?>
                     <tr data-href="/admin/compliance/document.php?scope=audit&id=<?= (int)$doc['id'] ?>" class="compliance-row-clickable">
                       <td>
-                        <a href="/admin/compliance/document.php?scope=audit&id=<?= (int)$doc['id'] ?>" target="_blank" rel="noopener"
-                          style="display:inline-flex;align-items:center;justify-content:center;width:46px;height:58px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#b91c1c;font-size:11px;font-weight:900;text-decoration:none;">
-                          PDF
+                        <a href="<?= h($docUrl) ?>" target="_blank" rel="noopener"
+                          style="display:block;width:64px;height:78px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;overflow:hidden;text-decoration:none;">
+                          <object data="<?= h($docUrl) ?>#page=1&toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" width="64" height="78" style="pointer-events:none;">
+                            <span style="display:flex;align-items:center;justify-content:center;width:64px;height:78px;color:#b91c1c;font-size:11px;font-weight:900;">PDF</span>
+                          </object>
                         </a>
                       </td>
                       <td>
-                        <a href="/admin/compliance/document.php?scope=audit&id=<?= (int)$doc['id'] ?>" target="_blank" rel="noopener"
+                        <a href="<?= h($docUrl) ?>" target="_blank" rel="noopener"
                           style="color:#1e3c72;font-weight:800;text-decoration:none;">
                           <?= h(ComplianceAuthorityDocumentService::friendlyKind('audit', (string)$doc['doc_kind'])) ?>
                         </a>

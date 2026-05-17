@@ -158,9 +158,9 @@ final class ComplianceAuthorityDocumentService
             return null;
         }
         if ($scope === 'audit') {
-            $st = $pdo->prepare('SELECT *, "audit" AS scope FROM ipca_compliance_audit_documents WHERE id = ? LIMIT 1');
+            $st = $pdo->prepare("SELECT *, 'audit' AS scope FROM ipca_compliance_audit_documents WHERE id = ? LIMIT 1");
         } elseif ($scope === 'finding') {
-            $st = $pdo->prepare('SELECT *, "finding" AS scope FROM ipca_compliance_finding_documents WHERE id = ? LIMIT 1');
+            $st = $pdo->prepare("SELECT *, 'finding' AS scope FROM ipca_compliance_finding_documents WHERE id = ? LIMIT 1");
         } else {
             return null;
         }
