@@ -360,10 +360,11 @@ if ($detailId > 0) {
               <span>Notes</span>
               <textarea name="notes" rows="3"></textarea>
             </label>
-            <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:28px 16px;border:2px dashed #cbd5e1;border-radius:14px;background:#f8fafc;color:#475569;text-align:center;margin:12px 0;cursor:pointer;">
+            <label class="cmpdoc-dropzone" data-cmpdoc-dropzone style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:28px 16px;border:2px dashed #cbd5e1;border-radius:14px;background:#f8fafc;color:#475569;text-align:center;margin:12px 0;cursor:pointer;">
               <strong>Drop PDF here or click to browse</strong>
               <span style="font-size:12px;color:#64748b;">Official authority audit report PDF, max 50 MiB.</span>
-              <input type="file" name="document_file" accept="application/pdf,.pdf" required style="margin-top:8px;">
+              <input type="file" name="document_file" accept="application/pdf,.pdf" required style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;">
+              <span data-cmpdoc-filename style="margin-top:8px;font-size:12px;font-weight:800;color:#1e3c72;">No file selected</span>
             </label>
             <div class="compliance-modal__footer">
               <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
@@ -375,6 +376,36 @@ if ($detailId > 0) {
           (function () {
             var modal = document.getElementById('audit-document-upload-modal');
             if (!modal) { return; }
+            function bindDropzone() {
+              modal.querySelectorAll('[data-cmpdoc-dropzone]').forEach(function (zone) {
+                var input = zone.querySelector('input[type="file"]');
+                var name = zone.querySelector('[data-cmpdoc-filename]');
+                if (!input) { return; }
+                function showFile() {
+                  name.textContent = input.files && input.files[0] ? input.files[0].name : 'No file selected';
+                }
+                zone.addEventListener('dragover', function (ev) {
+                  ev.preventDefault();
+                  zone.style.background = '#eef2ff';
+                  zone.style.borderColor = '#1e3c72';
+                });
+                zone.addEventListener('dragleave', function () {
+                  zone.style.background = '#f8fafc';
+                  zone.style.borderColor = '#cbd5e1';
+                });
+                zone.addEventListener('drop', function (ev) {
+                  ev.preventDefault();
+                  zone.style.background = '#f8fafc';
+                  zone.style.borderColor = '#cbd5e1';
+                  if (ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files.length) {
+                    input.files = ev.dataTransfer.files;
+                    showFile();
+                  }
+                });
+                input.addEventListener('change', showFile);
+              });
+            }
+            bindDropzone();
             document.querySelectorAll('[data-compliance-modal-open="audit-document-upload-modal"]').forEach(function (btn) {
               btn.addEventListener('click', function (ev) {
                 ev.preventDefault();

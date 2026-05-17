@@ -75,31 +75,38 @@ final class ComplianceAuthorityDocumentService
         if (!self::tablePresent($pdo, 'ipca_compliance_audit_documents')) {
             throw new RuntimeException('Audit document table is not installed.');
         }
-        if (!self::columnPresent($pdo, 'ipca_compliance_audit_documents', 'received_on')) {
-            throw new RuntimeException('Audit document received_on migration is not installed.');
-        }
         self::assertAuditExists($pdo, $auditId);
         $stored = self::storeUploadedPdf($file, 'audit', $auditId);
         $kind = self::normalizeKind((string)($data['doc_kind'] ?? 'AUDIT_REPORT'), self::auditDocumentTypes(), 'AUDIT_REPORT');
         $received = self::normalizeDate((string)($data['received_on'] ?? ''));
         $notes = trim((string)($data['notes'] ?? ''));
-        $st = $pdo->prepare(
-            'INSERT INTO ipca_compliance_audit_documents
-                (audit_id, doc_kind, storage_relpath, original_name, mime_type, file_size, received_on, sha256, uploaded_by, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        $st->execute(array(
+        $hasReceived = self::columnPresent($pdo, 'ipca_compliance_audit_documents', 'received_on');
+        $columns = 'audit_id, doc_kind, storage_relpath, original_name, mime_type, file_size, ';
+        $values = '?, ?, ?, ?, ?, ?, ';
+        $params = array(
             $auditId,
             $kind,
             $stored['relpath'],
             $stored['original_name'],
             $stored['mime_type'],
             $stored['file_size'],
-            $received,
-            $stored['sha256'],
-            $userId > 0 ? $userId : null,
-            $notes !== '' ? $notes : null,
-        ));
+        );
+        if ($hasReceived) {
+            $columns .= 'received_on, ';
+            $values .= '?, ';
+            $params[] = $received;
+        }
+        $columns .= 'sha256, uploaded_by, notes';
+        $values .= '?, ?, ?';
+        $params[] = $stored['sha256'];
+        $params[] = $userId > 0 ? $userId : null;
+        $params[] = $notes !== '' ? $notes : null;
+        $st = $pdo->prepare(
+            'INSERT INTO ipca_compliance_audit_documents
+                (' . $columns . ')
+             VALUES (' . $values . ')'
+        );
+        $st->execute($params);
         return (int)$pdo->lastInsertId();
     }
 
@@ -114,23 +121,33 @@ final class ComplianceAuthorityDocumentService
         $kind = self::normalizeKind((string)($data['doc_kind'] ?? 'FINDING_REPORT'), self::findingDocumentTypes(), 'FINDING_REPORT');
         $received = self::normalizeDate((string)($data['received_on'] ?? ''));
         $notes = trim((string)($data['notes'] ?? ''));
-        $st = $pdo->prepare(
-            'INSERT INTO ipca_compliance_finding_documents
-                (finding_id, doc_kind, storage_relpath, original_name, mime_type, file_size, received_on, sha256, uploaded_by, notes)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-        $st->execute(array(
+        $hasReceived = self::columnPresent($pdo, 'ipca_compliance_finding_documents', 'received_on');
+        $columns = 'finding_id, doc_kind, storage_relpath, original_name, mime_type, file_size, ';
+        $values = '?, ?, ?, ?, ?, ?, ';
+        $params = array(
             $findingId,
             $kind,
             $stored['relpath'],
             $stored['original_name'],
             $stored['mime_type'],
             $stored['file_size'],
-            $received,
-            $stored['sha256'],
-            $userId > 0 ? $userId : null,
-            $notes !== '' ? $notes : null,
-        ));
+        );
+        if ($hasReceived) {
+            $columns .= 'received_on, ';
+            $values .= '?, ';
+            $params[] = $received;
+        }
+        $columns .= 'sha256, uploaded_by, notes';
+        $values .= '?, ?, ?';
+        $params[] = $stored['sha256'];
+        $params[] = $userId > 0 ? $userId : null;
+        $params[] = $notes !== '' ? $notes : null;
+        $st = $pdo->prepare(
+            'INSERT INTO ipca_compliance_finding_documents
+                (' . $columns . ')
+             VALUES (' . $values . ')'
+        );
+        $st->execute($params);
         return (int)$pdo->lastInsertId();
     }
 
