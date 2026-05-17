@@ -79,6 +79,7 @@ final class ComplianceAuthorityDocumentService
         if ($table === null || $id <= 0 || !self::tablePresent($pdo, $table)) {
             throw new RuntimeException('Document not found.');
         }
+        self::ensureMetadataColumns($pdo, $table);
         $types = $scope === 'finding' ? self::findingDocumentTypes() : self::auditDocumentTypes();
         $fallback = $scope === 'finding' ? 'FINDING_REPORT' : 'AUDIT_REPORT';
         $kind = self::normalizeKind((string)($data['doc_kind'] ?? $fallback), $types, $fallback);
@@ -122,6 +123,7 @@ final class ComplianceAuthorityDocumentService
         if (!self::tablePresent($pdo, 'ipca_compliance_audit_documents')) {
             throw new RuntimeException('Audit document table is not installed.');
         }
+        self::ensureMetadataColumns($pdo, 'ipca_compliance_audit_documents');
         self::assertAuditExists($pdo, $auditId);
         $stored = self::storeUploadedPdf($file, 'audit', $auditId);
         $kind = self::normalizeKind((string)($data['doc_kind'] ?? 'AUDIT_REPORT'), self::auditDocumentTypes(), 'AUDIT_REPORT');
@@ -163,6 +165,7 @@ final class ComplianceAuthorityDocumentService
         if (!self::tablePresent($pdo, 'ipca_compliance_finding_documents')) {
             throw new RuntimeException('Finding document table is not installed.');
         }
+        self::ensureMetadataColumns($pdo, 'ipca_compliance_finding_documents');
         self::assertFindingExists($pdo, $findingId);
         $stored = self::storeUploadedPdf($file, 'finding', $findingId);
         $kind = self::normalizeKind((string)($data['doc_kind'] ?? 'FINDING_REPORT'), self::findingDocumentTypes(), 'FINDING_REPORT');
@@ -293,6 +296,30 @@ final class ComplianceAuthorityDocumentService
             return 'ipca_compliance_finding_documents';
         }
         return null;
+    }
+
+    private static function ensureMetadataColumns(PDO $pdo, string $table): void
+    {
+        if (!in_array($table, array('ipca_compliance_audit_documents', 'ipca_compliance_finding_documents'), true)) {
+            return;
+        }
+        try {
+            if (!self::columnPresent($pdo, $table, 'received_on')) {
+                $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN received_on DATE NULL AFTER file_size');
+            }
+        } catch (Throwable) {
+            // If the DB user cannot ALTER, the migration must be applied manually.
+        }
+        try {
+            if (!self::columnPresent($pdo, $table, 'deleted_at')) {
+                $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN deleted_at DATETIME NULL AFTER notes');
+            }
+            if (!self::columnPresent($pdo, $table, 'deleted_by')) {
+                $pdo->exec('ALTER TABLE ' . $table . ' ADD COLUMN deleted_by INT UNSIGNED NULL AFTER deleted_at');
+            }
+        } catch (Throwable) {
+            // Soft-delete reports a clear error if the migration is unavailable.
+        }
     }
 
     private static function normalizeDate(string $date): ?string

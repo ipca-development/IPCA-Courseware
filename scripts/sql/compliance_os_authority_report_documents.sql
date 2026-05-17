@@ -74,6 +74,20 @@ SET @col_exists := (
     FROM information_schema.COLUMNS
    WHERE TABLE_SCHEMA = DATABASE()
      AND TABLE_NAME = 'ipca_compliance_finding_documents'
+     AND COLUMN_NAME = 'received_on'
+);
+SET @sql_add_finding_received_on := IF(@col_exists = 0,
+  'ALTER TABLE ipca_compliance_finding_documents ADD COLUMN received_on DATE NULL AFTER file_size',
+  'SELECT 1');
+PREPARE stmt_add_finding_received_on FROM @sql_add_finding_received_on;
+EXECUTE stmt_add_finding_received_on;
+DEALLOCATE PREPARE stmt_add_finding_received_on;
+
+SET @col_exists := (
+  SELECT COUNT(*)
+    FROM information_schema.COLUMNS
+   WHERE TABLE_SCHEMA = DATABASE()
+     AND TABLE_NAME = 'ipca_compliance_finding_documents'
      AND COLUMN_NAME = 'deleted_at'
 );
 SET @sql_add_deleted_at := IF(@col_exists = 0,
