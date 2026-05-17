@@ -406,7 +406,11 @@ if ($detailId > 0) {
         }
         $submissions = ComplianceRcaCapSubmissionEngine::listForFinding($pdo, $detailId);
         $closureReadiness = ComplianceFindingEngine::closureReadiness($pdo, $detailId);
-        $findingDocuments = ComplianceAuthorityDocumentService::listFindingDocuments($pdo, $detailId);
+        try {
+            $findingDocuments = ComplianceAuthorityDocumentService::listFindingDocuments($pdo, $detailId);
+        } catch (Throwable) {
+            $findingDocuments = array();
+        }
 
         $sev = (string)($finding['severity'] ?? '');
         $stRaw = (string)($finding['status'] ?? '');

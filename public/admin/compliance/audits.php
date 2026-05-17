@@ -156,7 +156,11 @@ if ($detailId > 0) {
         $locked = !empty($audit['locked_at']);
         $snapshots = ComplianceChecklistEngine::listSnapshotsForAudit($pdo, $detailId);
         $auditContacts = ComplianceAuditEngine::listAuditContacts($pdo, $detailId);
-        $auditDocuments = ComplianceAuthorityDocumentService::listAuditDocuments($pdo, $detailId);
+        try {
+            $auditDocuments = ComplianceAuthorityDocumentService::listAuditDocuments($pdo, $detailId);
+        } catch (Throwable) {
+            $auditDocuments = array();
+        }
         $templates = ComplianceChecklistEngine::listTemplates($pdo);
         $approvedVersions = array();
         foreach ($templates as $t) {
@@ -186,6 +190,9 @@ if ($detailId > 0) {
                 'href' => '/admin/compliance/audits.php',
                 'label' => 'All audits',
                 'code' => (string)$audit['audit_code'],
+            ),
+            'actions' => array(
+                array('label' => 'Upload new Audit Document', 'modal' => 'audit-document-upload-modal', 'icon' => 'plus'),
             ),
         ));
         ?>

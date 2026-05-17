@@ -50,15 +50,23 @@ final class ComplianceAuthorityDocumentService
         if ($findingId <= 0 || !self::tablePresent($pdo, 'ipca_compliance_finding_documents')) {
             return array();
         }
-        $st = $pdo->prepare(
-            'SELECT *
-               FROM ipca_compliance_finding_documents
-              WHERE finding_id = ?
-              ORDER BY COALESCE(received_on, DATE(uploaded_at)) DESC, uploaded_at DESC, id DESC'
-        );
-        $st->execute(array($findingId));
-        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-        return is_array($rows) ? $rows : array();
+        try {
+            $hasReceived = self::columnPresent($pdo, 'ipca_compliance_finding_documents', 'received_on');
+            $receivedExpr = $hasReceived ? 'received_on' : 'NULL AS received_on';
+            $orderExpr = $hasReceived ? 'COALESCE(received_on, DATE(uploaded_at)) DESC,' : '';
+            $st = $pdo->prepare(
+                'SELECT id, finding_id, doc_kind, storage_relpath, original_name, mime_type, file_size, '
+                . $receivedExpr . ', sha256, uploaded_by, uploaded_at, notes
+                   FROM ipca_compliance_finding_documents
+                  WHERE finding_id = ?
+                  ORDER BY ' . $orderExpr . ' uploaded_at DESC, id DESC'
+            );
+            $st->execute(array($findingId));
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            return is_array($rows) ? $rows : array();
+        } catch (Throwable) {
+            return array();
+        }
     }
 
     /** @param array{name?:string,tmp_name?:string,type?:string,size?:int,error?:int} $file */
