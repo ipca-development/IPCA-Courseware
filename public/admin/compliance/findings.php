@@ -161,6 +161,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             redirect('/admin/compliance/findings.php?id=' . $fid);
         }
 
+        if ($action === 'update_finding_document') {
+            $fid = (int)($_POST['finding_id'] ?? 0);
+            $docId = (int)($_POST['document_id'] ?? 0);
+            ComplianceAuthorityDocumentService::updateDocumentMetadata($pdo, 'finding', $docId, array(
+                'doc_kind' => (string)($_POST['doc_kind'] ?? 'FINDING_REPORT'),
+                'received_on' => (string)($_POST['received_on'] ?? ''),
+                'notes' => (string)($_POST['notes'] ?? ''),
+            ));
+            cmp_flash_set('success', 'Finding document updated.');
+            redirect('/admin/compliance/findings.php?id=' . $fid);
+        }
+
+        if ($action === 'soft_delete_finding_document') {
+            $fid = (int)($_POST['finding_id'] ?? 0);
+            $docId = (int)($_POST['document_id'] ?? 0);
+            ComplianceAuthorityDocumentService::softDeleteDocument($pdo, 'finding', $docId, $uid);
+            cmp_flash_set('success', 'Finding document removed from active view.');
+            redirect('/admin/compliance/findings.php?id=' . $fid);
+        }
+
         if ($action === 'save_rca') {
             $fid = (int)($_POST['finding_id'] ?? 0);
             if ($fid <= 0) {
@@ -568,7 +588,7 @@ if ($detailId > 0) {
           <?php else: ?>
             <div class="compliance-table-wrap">
               <table class="compliance-table">
-                <thead><tr><th style="width:72px;">Preview</th><th>Document</th><th style="width:150px;">Received</th><th>Notes</th></tr></thead>
+                <thead><tr><th style="width:72px;">Preview</th><th>Document</th><th style="width:150px;">Received</th><th>Notes</th><th style="width:110px;">Actions</th></tr></thead>
                 <tbody>
                   <?php foreach ($findingDocuments as $doc): ?>
                     <?php $docUrl = '/admin/compliance/document.php?scope=finding&id=' . (int)$doc['id']; ?>
@@ -590,6 +610,9 @@ if ($detailId > 0) {
                       </td>
                       <td class="cmp-mono"><?= !empty($doc['received_on']) ? h(substr((string)$doc['received_on'], 0, 10)) : '—' ?></td>
                       <td><?= trim((string)($doc['notes'] ?? '')) !== '' ? nl2br(h((string)$doc['notes'])) : '<span style="color:#94a3b8;">—</span>' ?></td>
+                      <td>
+                        <button type="button" class="cmp-btn-secondary" data-compliance-modal-open="finding-document-edit-modal-<?= (int)$doc['id'] ?>" style="height:30px;min-height:30px;padding:0 10px;font-size:12px;">Edit</button>
+                      </td>
                     </tr>
                   <?php endforeach; ?>
                 </tbody>
@@ -597,6 +620,37 @@ if ($detailId > 0) {
             </div>
           <?php endif; ?>
         </section>
+
+        <?php foreach ($findingDocuments as $doc): ?>
+          <?php compliance_modal_open('finding-document-edit-modal-' . (int)$doc['id'], 'Edit Finding Document'); ?>
+            <form method="post" action="/admin/compliance/findings.php?id=<?= (int)$detailId ?>">
+              <input type="hidden" name="finding_id" value="<?= (int)$detailId ?>">
+              <input type="hidden" name="document_id" value="<?= (int)$doc['id'] ?>">
+              <label class="cmp-field">
+                <span>Document Type</span>
+                <select name="doc_kind" required>
+                  <?php foreach (ComplianceAuthorityDocumentService::findingDocumentTypes() as $kind => $label): ?>
+                    <option value="<?= h($kind) ?>" <?= (string)$doc['doc_kind'] === $kind ? 'selected' : '' ?>><?= h($label) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <label class="cmp-field">
+                <span>Document Received on</span>
+                <input type="date" name="received_on" value="<?= !empty($doc['received_on']) ? h(substr((string)$doc['received_on'], 0, 10)) : '' ?>">
+              </label>
+              <label class="cmp-field">
+                <span>Notes</span>
+                <textarea name="notes" rows="4"><?= h((string)($doc['notes'] ?? '')) ?></textarea>
+              </label>
+              <div class="compliance-modal__footer">
+                <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+                <button type="submit" name="action" value="soft_delete_finding_document" class="cmp-btn-danger"
+                  onclick="return confirm('Remove this document from the active finding view? It will be retained for future retrieval.');">Soft-delete</button>
+                <button type="submit" name="action" value="update_finding_document">Save changes</button>
+              </div>
+            </form>
+          <?php compliance_modal_close(); ?>
+        <?php endforeach; ?>
 
         <?php compliance_modal_open('finding-document-upload-modal', 'Upload new Finding Document'); ?>
           <form method="post" enctype="multipart/form-data" action="/admin/compliance/findings.php?id=<?= (int)$detailId ?>">
@@ -664,23 +718,27 @@ if ($detailId > 0) {
               });
             }
             bindDropzone();
-            document.querySelectorAll('[data-compliance-modal-open="finding-document-upload-modal"]').forEach(function (btn) {
+            document.querySelectorAll('[data-compliance-modal-open^="finding-document-"]').forEach(function (btn) {
               btn.addEventListener('click', function (ev) {
                 ev.preventDefault();
-                if (typeof modal.showModal === 'function') {
-                  modal.showModal();
+                var target = document.getElementById(btn.getAttribute('data-compliance-modal-open'));
+                if (!target) { return; }
+                if (typeof target.showModal === 'function') {
+                  target.showModal();
                 } else {
-                  modal.setAttribute('open', 'open');
+                  target.setAttribute('open', 'open');
                 }
               });
             });
-            modal.querySelectorAll('[data-compliance-modal-close]').forEach(function (btn) {
+            document.querySelectorAll('dialog[id^="finding-document-"] [data-compliance-modal-close]').forEach(function (btn) {
               btn.addEventListener('click', function (ev) {
                 ev.preventDefault();
-                if (typeof modal.close === 'function') {
-                  modal.close();
+                var dialog = btn.closest('dialog');
+                if (!dialog) { return; }
+                if (typeof dialog.close === 'function') {
+                  dialog.close();
                 }
-                modal.removeAttribute('open');
+                dialog.removeAttribute('open');
               });
             });
           })();

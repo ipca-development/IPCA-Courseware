@@ -126,6 +126,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             aud_flash('success', 'Audit document uploaded.');
             redirect('/admin/compliance/audits.php?id=' . $id);
         }
+        if ($action === 'update_audit_document') {
+            $id = (int)($_POST['audit_id'] ?? 0);
+            $docId = (int)($_POST['document_id'] ?? 0);
+            ComplianceAuthorityDocumentService::updateDocumentMetadata($pdo, 'audit', $docId, array(
+                'doc_kind' => (string)($_POST['doc_kind'] ?? 'AUDIT_REPORT'),
+                'received_on' => (string)($_POST['received_on'] ?? ''),
+                'notes' => (string)($_POST['notes'] ?? ''),
+            ));
+            aud_flash('success', 'Audit document updated.');
+            redirect('/admin/compliance/audits.php?id=' . $id);
+        }
+        if ($action === 'soft_delete_audit_document') {
+            $id = (int)($_POST['audit_id'] ?? 0);
+            $docId = (int)($_POST['document_id'] ?? 0);
+            ComplianceAuthorityDocumentService::softDeleteDocument($pdo, 'audit', $docId, $uid);
+            aud_flash('success', 'Audit document removed from active view.');
+            redirect('/admin/compliance/audits.php?id=' . $id);
+        }
     } catch (Throwable $e) {
         aud_flash('error', $e->getMessage());
         $id = (int)($_POST['audit_id'] ?? 0);
@@ -313,7 +331,7 @@ if ($detailId > 0) {
           <?php else: ?>
             <div class="compliance-table-wrap">
               <table class="compliance-table">
-                <thead><tr><th style="width:72px;">Preview</th><th>Document</th><th style="width:150px;">Received</th><th>Notes</th></tr></thead>
+                <thead><tr><th style="width:72px;">Preview</th><th>Document</th><th style="width:150px;">Received</th><th>Notes</th><th style="width:110px;">Actions</th></tr></thead>
                 <tbody>
                   <?php foreach ($auditDocuments as $doc): ?>
                     <?php $docUrl = '/admin/compliance/document.php?scope=audit&id=' . (int)$doc['id']; ?>
@@ -335,6 +353,9 @@ if ($detailId > 0) {
                       </td>
                       <td class="cmp-mono"><?= !empty($doc['received_on']) ? h(substr((string)$doc['received_on'], 0, 10)) : '—' ?></td>
                       <td><?= trim((string)($doc['notes'] ?? '')) !== '' ? nl2br(h((string)$doc['notes'])) : '<span style="color:#94a3b8;">—</span>' ?></td>
+                      <td>
+                        <button type="button" class="cmp-btn-secondary" data-compliance-modal-open="audit-document-edit-modal-<?= (int)$doc['id'] ?>" style="height:30px;min-height:30px;padding:0 10px;font-size:12px;">Edit</button>
+                      </td>
                     </tr>
                   <?php endforeach; ?>
                 </tbody>
@@ -342,6 +363,37 @@ if ($detailId > 0) {
             </div>
           <?php endif; ?>
         </section>
+
+        <?php foreach ($auditDocuments as $doc): ?>
+          <?php compliance_modal_open('audit-document-edit-modal-' . (int)$doc['id'], 'Edit Audit Document'); ?>
+            <form method="post" action="/admin/compliance/audits.php?id=<?= (int)$detailId ?>">
+              <input type="hidden" name="audit_id" value="<?= (int)$detailId ?>">
+              <input type="hidden" name="document_id" value="<?= (int)$doc['id'] ?>">
+              <label class="cmp-field">
+                <span>Document Type</span>
+                <select name="doc_kind" required>
+                  <?php foreach (ComplianceAuthorityDocumentService::auditDocumentTypes() as $kind => $label): ?>
+                    <option value="<?= h($kind) ?>" <?= (string)$doc['doc_kind'] === $kind ? 'selected' : '' ?>><?= h($label) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <label class="cmp-field">
+                <span>Document Received on</span>
+                <input type="date" name="received_on" value="<?= !empty($doc['received_on']) ? h(substr((string)$doc['received_on'], 0, 10)) : '' ?>">
+              </label>
+              <label class="cmp-field">
+                <span>Notes</span>
+                <textarea name="notes" rows="4"><?= h((string)($doc['notes'] ?? '')) ?></textarea>
+              </label>
+              <div class="compliance-modal__footer">
+                <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+                <button type="submit" name="action" value="soft_delete_audit_document" class="cmp-btn-danger"
+                  onclick="return confirm('Remove this document from the active audit view? It will be retained for future retrieval.');">Soft-delete</button>
+                <button type="submit" name="action" value="update_audit_document">Save changes</button>
+              </div>
+            </form>
+          <?php compliance_modal_close(); ?>
+        <?php endforeach; ?>
 
         <?php compliance_modal_open('audit-document-upload-modal', 'Upload new Audit Document'); ?>
           <form method="post" enctype="multipart/form-data" action="/admin/compliance/audits.php?id=<?= (int)$detailId ?>">
@@ -409,23 +461,27 @@ if ($detailId > 0) {
               });
             }
             bindDropzone();
-            document.querySelectorAll('[data-compliance-modal-open="audit-document-upload-modal"]').forEach(function (btn) {
+            document.querySelectorAll('[data-compliance-modal-open^="audit-document-"]').forEach(function (btn) {
               btn.addEventListener('click', function (ev) {
                 ev.preventDefault();
-                if (typeof modal.showModal === 'function') {
-                  modal.showModal();
+                var target = document.getElementById(btn.getAttribute('data-compliance-modal-open'));
+                if (!target) { return; }
+                if (typeof target.showModal === 'function') {
+                  target.showModal();
                 } else {
-                  modal.setAttribute('open', 'open');
+                  target.setAttribute('open', 'open');
                 }
               });
             });
-            modal.querySelectorAll('[data-compliance-modal-close]').forEach(function (btn) {
+            document.querySelectorAll('dialog[id^="audit-document-"] [data-compliance-modal-close]').forEach(function (btn) {
               btn.addEventListener('click', function (ev) {
                 ev.preventDefault();
-                if (typeof modal.close === 'function') {
-                  modal.close();
+                var dialog = btn.closest('dialog');
+                if (!dialog) { return; }
+                if (typeof dialog.close === 'function') {
+                  dialog.close();
                 }
-                modal.removeAttribute('open');
+                dialog.removeAttribute('open');
               });
             });
           })();

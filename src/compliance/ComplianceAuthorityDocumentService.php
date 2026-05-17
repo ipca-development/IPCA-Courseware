@@ -30,13 +30,15 @@ final class ComplianceAuthorityDocumentService
             return array();
         }
         $hasReceived = self::columnPresent($pdo, 'ipca_compliance_audit_documents', 'received_on');
+        $hasDeleted = self::columnPresent($pdo, 'ipca_compliance_audit_documents', 'deleted_at');
         $receivedExpr = $hasReceived ? 'received_on' : 'NULL AS received_on';
         $orderExpr = $hasReceived ? 'COALESCE(received_on, DATE(uploaded_at)) DESC,' : '';
+        $deletedWhere = $hasDeleted ? ' AND deleted_at IS NULL' : '';
         $st = $pdo->prepare(
             'SELECT id, audit_id, doc_kind, storage_relpath, original_name, mime_type, file_size, '
             . $receivedExpr . ', sha256, uploaded_by, uploaded_at, notes
                FROM ipca_compliance_audit_documents
-              WHERE audit_id = ?
+              WHERE audit_id = ?' . $deletedWhere . '
               ORDER BY ' . $orderExpr . ' uploaded_at DESC, id DESC'
         );
         $st->execute(array($auditId));
@@ -52,13 +54,15 @@ final class ComplianceAuthorityDocumentService
         }
         try {
             $hasReceived = self::columnPresent($pdo, 'ipca_compliance_finding_documents', 'received_on');
+            $hasDeleted = self::columnPresent($pdo, 'ipca_compliance_finding_documents', 'deleted_at');
             $receivedExpr = $hasReceived ? 'received_on' : 'NULL AS received_on';
             $orderExpr = $hasReceived ? 'COALESCE(received_on, DATE(uploaded_at)) DESC,' : '';
+            $deletedWhere = $hasDeleted ? ' AND deleted_at IS NULL' : '';
             $st = $pdo->prepare(
                 'SELECT id, finding_id, doc_kind, storage_relpath, original_name, mime_type, file_size, '
                 . $receivedExpr . ', sha256, uploaded_by, uploaded_at, notes
                    FROM ipca_compliance_finding_documents
-                  WHERE finding_id = ?
+                  WHERE finding_id = ?' . $deletedWhere . '
                   ORDER BY ' . $orderExpr . ' uploaded_at DESC, id DESC'
             );
             $st->execute(array($findingId));
@@ -67,6 +71,49 @@ final class ComplianceAuthorityDocumentService
         } catch (Throwable) {
             return array();
         }
+    }
+
+    public static function updateDocumentMetadata(PDO $pdo, string $scope, int $id, array $data): void
+    {
+        $table = self::tableForScope($scope);
+        if ($table === null || $id <= 0 || !self::tablePresent($pdo, $table)) {
+            throw new RuntimeException('Document not found.');
+        }
+        $types = $scope === 'finding' ? self::findingDocumentTypes() : self::auditDocumentTypes();
+        $fallback = $scope === 'finding' ? 'FINDING_REPORT' : 'AUDIT_REPORT';
+        $kind = self::normalizeKind((string)($data['doc_kind'] ?? $fallback), $types, $fallback);
+        $received = self::normalizeDate((string)($data['received_on'] ?? ''));
+        $notes = trim((string)($data['notes'] ?? ''));
+        $sets = array('doc_kind = ?', 'notes = ?');
+        $params = array($kind, $notes !== '' ? $notes : null);
+        if (self::columnPresent($pdo, $table, 'received_on')) {
+            $sets[] = 'received_on = ?';
+            $params[] = $received;
+        }
+        $params[] = $id;
+        $pdo->prepare('UPDATE ' . $table . ' SET ' . implode(', ', $sets) . ' WHERE id = ? LIMIT 1')
+            ->execute($params);
+    }
+
+    public static function softDeleteDocument(PDO $pdo, string $scope, int $id, int $userId): void
+    {
+        $table = self::tableForScope($scope);
+        if ($table === null || $id <= 0 || !self::tablePresent($pdo, $table)) {
+            throw new RuntimeException('Document not found.');
+        }
+        if (self::columnPresent($pdo, $table, 'deleted_at')) {
+            $sets = array('deleted_at = NOW()');
+            $params = array();
+            if (self::columnPresent($pdo, $table, 'deleted_by')) {
+                $sets[] = 'deleted_by = ?';
+                $params[] = $userId > 0 ? $userId : null;
+            }
+            $params[] = $id;
+            $pdo->prepare('UPDATE ' . $table . ' SET ' . implode(', ', $sets) . ' WHERE id = ? LIMIT 1')
+                ->execute($params);
+            return;
+        }
+        throw new RuntimeException('Soft-delete migration is not installed.');
     }
 
     /** @param array{name?:string,tmp_name?:string,type?:string,size?:int,error?:int} $file */
@@ -235,6 +282,17 @@ final class ComplianceAuthorityDocumentService
     {
         $kind = strtoupper(str_replace(array(' ', '-'), '_', trim($kind)));
         return array_key_exists($kind, $allowed) ? $kind : $fallback;
+    }
+
+    private static function tableForScope(string $scope): ?string
+    {
+        if ($scope === 'audit') {
+            return 'ipca_compliance_audit_documents';
+        }
+        if ($scope === 'finding') {
+            return 'ipca_compliance_finding_documents';
+        }
+        return null;
     }
 
     private static function normalizeDate(string $date): ?string
