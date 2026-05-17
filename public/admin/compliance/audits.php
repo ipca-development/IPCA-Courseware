@@ -5,6 +5,7 @@ require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/layout.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAccess.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceAuditEngine.php';
+require_once __DIR__ . '/../../../src/compliance/ComplianceAuthorityDocumentService.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceChecklistEngine.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceCommsPanel.php';
 require_once __DIR__ . '/../../../src/compliance/ComplianceUi.php';
@@ -115,6 +116,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             redirect('/admin/compliance/audits.php?id=' . $id);
         }
+        if ($action === 'upload_audit_document') {
+            $id = (int)($_POST['audit_id'] ?? 0);
+            ComplianceAuthorityDocumentService::uploadAuditDocument($pdo, $id, $_FILES['document_file'] ?? array(), array(
+                'doc_kind' => (string)($_POST['doc_kind'] ?? 'AUDIT_REPORT'),
+                'received_on' => (string)($_POST['received_on'] ?? ''),
+                'notes' => (string)($_POST['notes'] ?? ''),
+            ), $uid);
+            aud_flash('success', 'Audit document uploaded.');
+            redirect('/admin/compliance/audits.php?id=' . $id);
+        }
     } catch (Throwable $e) {
         aud_flash('error', $e->getMessage());
         $id = (int)($_POST['audit_id'] ?? 0);
@@ -145,6 +156,7 @@ if ($detailId > 0) {
         $locked = !empty($audit['locked_at']);
         $snapshots = ComplianceChecklistEngine::listSnapshotsForAudit($pdo, $detailId);
         $auditContacts = ComplianceAuditEngine::listAuditContacts($pdo, $detailId);
+        $auditDocuments = ComplianceAuthorityDocumentService::listAuditDocuments($pdo, $detailId);
         $templates = ComplianceChecklistEngine::listTemplates($pdo);
         $approvedVersions = array();
         foreach ($templates as $t) {
@@ -281,6 +293,77 @@ if ($detailId > 0) {
             </form>
           <?php endif; ?>
         </section>
+
+        <section class="cmp-card">
+          <div class="cmp-card-head">
+            <h3 class="cmp-card-title">Authority Audit Reports</h3>
+            <button type="button" class="cmp-btn-secondary" data-compliance-modal-open="audit-document-upload-modal">
+              Upload new Audit Document
+            </button>
+          </div>
+          <?php if ($auditDocuments === array()): ?>
+            <p style="margin:0;color:var(--text-muted);">No authority audit reports uploaded yet.</p>
+          <?php else: ?>
+            <div class="compliance-table-wrap">
+              <table class="compliance-table">
+                <thead><tr><th style="width:72px;">Preview</th><th>Document</th><th style="width:150px;">Received</th><th>Notes</th></tr></thead>
+                <tbody>
+                  <?php foreach ($auditDocuments as $doc): ?>
+                    <tr data-href="/admin/compliance/document.php?scope=audit&id=<?= (int)$doc['id'] ?>" class="compliance-row-clickable">
+                      <td>
+                        <a href="/admin/compliance/document.php?scope=audit&id=<?= (int)$doc['id'] ?>" target="_blank" rel="noopener"
+                          style="display:inline-flex;align-items:center;justify-content:center;width:46px;height:58px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#b91c1c;font-size:11px;font-weight:900;text-decoration:none;">
+                          PDF
+                        </a>
+                      </td>
+                      <td>
+                        <a href="/admin/compliance/document.php?scope=audit&id=<?= (int)$doc['id'] ?>" target="_blank" rel="noopener"
+                          style="color:#1e3c72;font-weight:800;text-decoration:none;">
+                          <?= h(ComplianceAuthorityDocumentService::friendlyKind('audit', (string)$doc['doc_kind'])) ?>
+                        </a>
+                        <div style="font-size:12px;color:#64748b;margin-top:3px;"><?= h((string)$doc['original_name']) ?></div>
+                      </td>
+                      <td class="cmp-mono"><?= !empty($doc['received_on']) ? h(substr((string)$doc['received_on'], 0, 10)) : '—' ?></td>
+                      <td><?= trim((string)($doc['notes'] ?? '')) !== '' ? nl2br(h((string)$doc['notes'])) : '<span style="color:#94a3b8;">—</span>' ?></td>
+                    </tr>
+                  <?php endforeach; ?>
+                </tbody>
+              </table>
+            </div>
+          <?php endif; ?>
+        </section>
+
+        <?php compliance_modal_open('audit-document-upload-modal', 'Upload new Audit Document'); ?>
+          <form method="post" enctype="multipart/form-data" action="/admin/compliance/audits.php?id=<?= (int)$detailId ?>">
+            <input type="hidden" name="action" value="upload_audit_document">
+            <input type="hidden" name="audit_id" value="<?= (int)$detailId ?>">
+            <label class="cmp-field">
+              <span>Document Type</span>
+              <select name="doc_kind" required>
+                <?php foreach (ComplianceAuthorityDocumentService::auditDocumentTypes() as $kind => $label): ?>
+                  <option value="<?= h($kind) ?>"><?= h($label) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </label>
+            <label class="cmp-field">
+              <span>Document Received on</span>
+              <input type="date" name="received_on">
+            </label>
+            <label class="cmp-field">
+              <span>Notes</span>
+              <textarea name="notes" rows="3"></textarea>
+            </label>
+            <label style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:28px 16px;border:2px dashed #cbd5e1;border-radius:14px;background:#f8fafc;color:#475569;text-align:center;margin:12px 0;cursor:pointer;">
+              <strong>Drop PDF here or click to browse</strong>
+              <span style="font-size:12px;color:#64748b;">Official authority audit report PDF, max 50 MiB.</span>
+              <input type="file" name="document_file" accept="application/pdf,.pdf" required style="margin-top:8px;">
+            </label>
+            <div class="compliance-modal__footer">
+              <button type="button" class="cmp-btn-secondary" data-compliance-modal-close>Cancel</button>
+              <button type="submit">Upload document</button>
+            </div>
+          </form>
+        <?php compliance_modal_close(); ?>
 
         <section class="cmp-card">
           <div class="cmp-card-head">
