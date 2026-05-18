@@ -724,6 +724,42 @@ function maya_summary_structure_html(array $sections): string
     return $html;
 }
 
+function maya_summary_has_official_structure(array $sections, string $summaryPlain, array $sectionProgress = []): bool
+{
+    if (!$sections) return false;
+    if (!empty($sectionProgress['summary_structure_added'])) return true;
+    $plain = strtolower(preg_replace('/\s+/u', ' ', maya_strip_html_to_text($summaryPlain)));
+    if (trim($plain) === '') return false;
+    $titles = maya_section_titles($sections);
+    if (!$titles) return false;
+    $hits = 0;
+    foreach ($titles as $title) {
+        $needle = strtolower(trim((string)$title));
+        if ($needle !== '' && strpos($plain, $needle) !== false) $hits++;
+    }
+    return $hits >= max(1, (int)ceil(count($titles) * 0.7));
+}
+
+function maya_student_asks_for_structure(string $studentReply): bool
+{
+    $text = strtolower(trim($studentReply));
+    if ($text === '') return false;
+    $structureWords = ['structure', 'outline', 'headings', 'sections', 'skeleton'];
+    $summaryWords = ['summary', 'lesson', 'write'];
+    $hasStructure = false;
+    foreach ($structureWords as $word) {
+        if (strpos($text, $word) !== false) {
+            $hasStructure = true;
+            break;
+        }
+    }
+    if (!$hasStructure) return false;
+    foreach ($summaryWords as $word) {
+        if (strpos($text, $word) !== false) return true;
+    }
+    return preg_match('/\b(can|could|give|add|show|need|what)\b/u', $text) === 1;
+}
+
 function maya_make_structure_insertion(array $sections): array
 {
     $html = maya_summary_structure_html($sections);
@@ -1688,9 +1724,10 @@ function maya_system_prompt(): string
         . "4. Ask operational 'how', 'what if', and 'what action changes?' questions tied to flying, not generic essay questions.\n"
         . "5. Direct the student where to look in the lesson — not to a paste-able answer.\n"
         . "6. Never provide the full lesson summary. Never provide complete copy-pasteable answers to lesson concepts.\n"
+        . "6a. Maya may provide the official summary structure only: headings/subheadings and empty Item slots. Structure is the map; it must not contain completed explanations, pilot actions, answer text, or lesson content disguised as headings.\n"
         . "7. Never accept pasted text without probing understanding. If flags.major_paste was true and the student's reply convincingly explains the pasted content in their own words, you MAY clear it; otherwise leave it true.\n"
         . "8. student_note_suggestion must be empty unless it is clearly based on the student's own response, and must not be a full answer or a complete summary paragraph. Use a short bullet or phrase the student can refine, or empty string.\n"
-        . "9. summary_insertions may contain at most two short insertable snippets. Structure/heading insertions may be derived from lesson context as editable scaffolding; mature_concept insertions must be based directly on the student's own demonstrated understanding. Never generate full summary content from lesson material alone. Set insertion_type accurately.\n"
+        . "9. summary_insertions may contain at most two short insertable snippets. Structure insertions are allowed only as empty scaffolding from the official blueprint; mature_concept insertions must be based directly on the student's own demonstrated understanding. Never generate full summary content from lesson material alone. Set insertion_type accurately.\n"
         . "10. Score rubric (0-100):\n"
         . "   - coverage: how much of the lesson's primary concepts the summary covers.\n"
         . "   - accuracy: technical correctness of what is written.\n"
@@ -1750,6 +1787,8 @@ function maya_system_prompt(): string
         . "58. Guide the summary slide-by-slide whenever the student is building a new or incomplete summary.\n"
         . "59. Do not coach the entire lesson at once.\n"
         . "60. First help build summary structure before deep coaching.\n"
+        . "60a. If the editor is empty, missing the official structure, or the student asks for the summary structure, first offer the official structure only. Say that you will add headings and empty item slots, not answers. Then coach the first incomplete item.\n"
+        . "60b. After the student answers a coaching question, tell them: Good. Now write that under Item X in your summary in your own words. Let me know when you are done. Then stop and wait.\n"
         . "61. Identify the specific concept on the current slide and give a targeted writing task.\n"
         . "62. Tell the student exactly where the content belongs in the summary.\n"
         . "63. Evaluate the actual summary editor text, not only chat replies.\n"
@@ -1965,13 +2004,14 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
         $blueprintState = maya_blueprint_state_from_flags($flags ?: [], $blueprintBundle);
         $currentTask = maya_blueprint_current_task($blueprintBundle, $blueprintState, !empty($sectionProgress['summary_structure_added']), (string)($snap['summary_plain'] ?? ''));
         $slideState = maya_current_slide_state($pdo, $lessonId, $sectionProgress, $payload);
+        $structurePresent = maya_summary_has_official_structure($sections, (string)($snap['summary_plain'] ?? ''), $sectionProgress);
         $sectionProgress['current_slide_id'] = (int)($slideState['id'] ?? 0);
         $sectionProgress['current_slide_number'] = (int)($slideState['page_number'] ?? 0);
         $sectionProgress['current_writing_task'] = (string)($currentTask['task_text'] ?? maya_default_writing_task($sectionProgress, $slideState, $newStage));
         $sectionProgress['awaiting_chat_reply'] = ($currentTask['mode'] ?? '') === 'answer_chat';
-        if ($blueprintBundle && (int)($snap['word_count'] ?? 0) < 15 && $sections) {
-            $msg = "Let's build this lesson using the official structure. We'll keep your wording personal, but the section order stays fixed.";
-            $nextQ = 'Use the structure button first. Then Maya will tell you which slide group to watch.';
+        if ($blueprintBundle && !$structurePresent && $sections) {
+            $msg = "Before we write the summary, let’s add the official structure first. I will only add the headings and empty item slots, not the answers. Then we’ll fill each item together in your own words.";
+            $nextQ = 'Use the structure button first. Then Maya will coach the first incomplete item.';
         }
         $flags = array_merge($flags ?: [], [
             'section_progress' => $sectionProgress,
@@ -1979,7 +2019,7 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
             'blueprint_missing' => !$blueprintBundle,
         ]);
         $initialInsertions = [];
-        if ((int)($snap['word_count'] ?? 0) < 15 && $sections) {
+        if (!$structurePresent && $sections) {
             $structureInsertion = maya_make_structure_insertion($sections);
             if ($structureInsertion) $initialInsertions[] = $structureInsertion;
         }
@@ -2207,6 +2247,9 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     $sectionProgress = maya_section_progress_from_flags($existingFlags, $derivedSections);
     $blueprintState = maya_blueprint_state_from_flags($existingFlags, $blueprintBundle);
     $currentTask = maya_blueprint_current_task($blueprintBundle, $blueprintState, !empty($sectionProgress['summary_structure_added']), $summaryPlainForFocus);
+    $structurePresent = maya_summary_has_official_structure($derivedSections, $summaryPlainForFocus, $sectionProgress);
+    $structureRequested = maya_student_asks_for_structure($studentReply);
+    $shouldOfferStructure = $derivedSections && (!$structurePresent || $structureRequested);
     if (!empty($currentTask['section_title'])) {
         $sectionProgress['current_section'] = (string)$currentTask['section_title'];
     }
@@ -2246,6 +2289,8 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "Current slide concept hint: " . (string)($slideState['concept'] ?? 'lesson concept') . "\n"
         . "Blueprint missing: " . ($blueprintBundle ? 'false' : 'true') . "\n"
         . "Blueprint version mismatch: " . (!empty($blueprintState['blueprint_version_mismatch']) ? 'true' : 'false') . "\n"
+        . "Official summary structure present: " . ($structurePresent ? 'true' : 'false') . "\n"
+        . "Student asked for structure: " . ($structureRequested ? 'true' : 'false') . "\n"
         . "Client trigger: " . ($clientTrigger !== '' ? $clientTrigger : ($explicitStudentReply ? 'student_reply' : 'micro_checkpoint'));
 
     $diagnosticTask =
@@ -2270,6 +2315,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "18. If client_trigger is idle, the student likely wrote in the editor. Evaluate the summary editor text directly instead of repeating the prior question.\n"
         . "19. Are you staying strictly inside the CURRENT SLIDE CONTEXT or assigned slide series?\n\n"
         . "20. Are you obeying the ACTIVE LESSON SUMMARY BLUEPRINT exactly, including section titles, order, slide_group, must_have, and do_not_ask boundaries?\n\n"
+        . "21. If the official structure is missing/incomplete or the student asks for structure, provide only the map: headings/subheadings and empty Item slots. Do not provide answer content, examples, explanations, or pilot actions as summary text.\n\n"
         . "Then give ONE primary task only: either a Summary Editor task OR a This Chat question. Do not assign both unless it is a rare transition.\n\n"
         . "Use the canonical coach state as the operational state machine: STATE_REFLECT means ask/listen for a short student reflection; STATE_WAITING_FOR_SUMMARY_WRITE means stop talking and let the student write in the Summary Editor; STATE_VERIFYING_SUMMARY means evaluate the current draft against the blueprint; STATE_REMEDIATION means correct one missing or weak must-have; STATE_ADVANCE_TOPIC means close the current topic and move to the next blueprint section or slide group.\n\n"
         . "Do NOT ask generic \"most important idea\" questions. Prefer lesson-scope questions about pilot action, preflight verification, operational consequence, or go/no-go decision making.";
@@ -2307,6 +2353,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "If client_trigger is idle, evaluate what the student wrote in the summary editor and do not repeat your previous chat message. "
         . "Choose either a Summary Editor task or a This Chat question for this turn, not both. "
         . "Do not invent, rename, reorder, or move blueprint sections or concepts. The active blueprint is the coaching map. "
+        . "Maya may give the map, but must not drive the airplane for the student: structure is OK, completed answers are not OK. "
         . "Score honestly. Output structured JSON only.";
 
     try {
@@ -2337,11 +2384,11 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $nextQuestion = 'Pick one idea from your summary and explain how it affects a pilot action, preflight check, or go/no-go decision covered by this lesson.';
     }
     $newStage = maya_normalize_stage($aiJson['stage'] ?? $coachStage);
-    if ($wordCount < 15 && $studentReply === '') {
+    if ($shouldOfferStructure && ($studentReply === '' || $structureRequested)) {
         $newStage = MAYA_STAGE_STRUCTURE;
         if ($derivedSections) {
-            $mayaMessage = 'Let’s build your summary structure first. Add these editable headings, then we’ll work through them one by one.';
-            $nextQuestion = 'Start with the first section, ' . $derivedSections[0] . ': what should a pilot understand or do for that part of the lesson?';
+            $mayaMessage = 'Before we write the summary, let’s add the official structure first. I will only add the headings and empty item slots, not the answers. Then we’ll fill each item together in your own words.';
+            $nextQuestion = '';
         } else {
             $mayaMessage = 'Let’s build your summary structure first. Once we have the headings, we’ll develop each section together.';
             $nextQuestion = 'What are the 3–5 main areas this lesson covered?';
@@ -2446,23 +2493,17 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $studentReply !== '' && $allowSummaryInsertions,
         array_values(array_unique($allowedEarlyInsertionTypes))
     );
-    if ($wordCount < 15 && $derivedSections) {
-        $summaryInsertions = array_values(array_filter($summaryInsertions, static function ($ins) {
-            return !(is_array($ins) && ($ins['insertion_type'] ?? '') === 'structure');
-        }));
+    if ($shouldOfferStructure) {
+        $summaryInsertions = [];
         $structureInsertion = maya_make_structure_insertion($derivedSections);
         if ($structureInsertion) {
-            array_unshift($summaryInsertions, $structureInsertion);
-            $summaryInsertions = array_slice($summaryInsertions, 0, 2);
+            $summaryInsertions[] = $structureInsertion;
         }
         $headingList = maya_structure_titles_inline($derivedSections);
         if ($headingList !== '') {
-            $mayaMessage = $blueprintBundle
-                ? "Let’s build this lesson using the official structure. We’ll keep your wording personal, but the section order stays fixed.\n\n"
-                : "Good call — your draft needs structure first. We’ll build it slide-by-slide.\n\n";
+            $mayaMessage = "Before we write the summary, let’s add the official structure first. I will only add the headings and empty item slots, not the answers. Then we’ll fill each item together in your own words.\n\n";
             $mayaMessage .= "In your <strong><u>Summary Editor</u></strong> → Use the button below to add these exact headings: "
-                . $headingList . ". We will fill each section together.\n\n"
-                . "In <strong><u>This Chat</u></strong> → After the structure is added, go through the first slide and come back when you’re ready to build the first section.";
+                . $headingList . ". We will fill the empty Item slots together.";
             $nextQuestion = '';
         }
     }
@@ -2470,8 +2511,8 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     $writingTask = $awaitingChatReply
         ? 'Answer Maya'
         : (string)($currentTask['task_text'] ?? maya_default_writing_task($sectionProgress, $slideState, $newStage));
-    if ($wordCount < 15 && $derivedSections) {
-        $writingTask = 'Add the lesson structure to your summary, then go through Slide ' . max(1, (int)($slideState['page_number'] ?? 1)) . ' before building the first section.';
+    if ($shouldOfferStructure) {
+        $writingTask = 'Add the official lesson structure to your summary. Maya will only add headings and empty Item slots.';
         $awaitingChatReply = false;
     }
     $sectionProgress['current_writing_task'] = $writingTask;
