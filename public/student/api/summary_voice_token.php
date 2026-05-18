@@ -150,6 +150,7 @@ try {
         . "Ask one focused question at a time, stay inside the current section and slide group, and do not reopen completed sections.\n"
         . "Use supportive, natural spoken coaching. Good enough is good enough; do not over-refine.\n"
         . "If you need state, ask for get_current_coaching_state. If summary text is weak, request analyze_summary_draft.\n\n"
+        . "Internal safety identifier: {$safeUser}\n\n"
         . sv_compact_blueprint_context($bundle);
 
     $model = getenv('CW_OPENAI_REALTIME_MODEL') ?: 'gpt-realtime';
@@ -157,12 +158,6 @@ try {
         'model' => $model,
         'voice' => getenv('CW_OPENAI_REALTIME_VOICE') ?: 'alloy',
         'instructions' => $instructions,
-        'metadata' => [
-            'safe_user' => $safeUser,
-            'voice_session_id' => (string)$voiceSessionId,
-            'lesson_id' => (string)$lessonId,
-            'blueprint_version_id' => (string)$bundle['version_id'],
-        ],
         'input_audio_transcription' => [
             'model' => 'whisper-1',
         ],
