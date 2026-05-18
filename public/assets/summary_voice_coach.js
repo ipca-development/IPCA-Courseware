@@ -160,7 +160,7 @@
       self.btnMute.disabled = false;
       self.btnEnd.disabled = false;
       self._setStatus('Listening');
-      self._sendResponseCreate('Start the voice coaching call. Greet the student briefly and ask what they are working on, using the active blueprint state if needed.');
+      self._sendResponseCreate('Start the voice coaching call by calling get_current_coaching_state first. Then follow the returned coach_state exactly. If STATE_WAITING_FOR_SUMMARY_WRITE, give one brief instruction and let the student write.');
     }).catch(function (err) {
       self._setStatus('Ended');
       self.btnStart.disabled = false;
@@ -280,6 +280,7 @@
       summary_excerpt: truncate(plainTextFromEditor(this.editor), 1800)
     }).then(function (out) {
       if (out && out.current_task) self._applyCurrentTask(out.current_task);
+      if (out && out.coach_state) self._applyCoachState(out.coach_state);
       self._sendToolOutput(callId, out || { ok: true });
     }).catch(function (err) {
       self._sendToolOutput(callId, { ok: false, error: err && err.message ? err.message : String(err) });
@@ -344,7 +345,15 @@
     if (this.textCoach && this.textCoach.coachingState) {
       this.textCoach.coachingState.current_writing_task = String(task.task_text || '');
       this.textCoach.coachingState.awaiting_chat_reply = String(task.mode || '') === 'answer_chat';
+      this.textCoach.coachingState.coach_state = String(task.coach_state || this.textCoach.coachingState.coach_state || '');
       this.textCoach.coachingState.current_section = String(task.section_title || task.section_id || '');
+      if (typeof this.textCoach._renderWritingTask === 'function') this.textCoach._renderWritingTask();
+    }
+  };
+
+  VoiceCoach.prototype._applyCoachState = function (coachState) {
+    if (this.textCoach && this.textCoach.coachingState) {
+      this.textCoach.coachingState.coach_state = String(coachState || '');
       if (typeof this.textCoach._renderWritingTask === 'function') this.textCoach._renderWritingTask();
     }
   };

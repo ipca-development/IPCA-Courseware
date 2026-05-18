@@ -50,6 +50,20 @@ const MAYA_STAGE_OPERATIONAL_EXAMPLE = 'operational_example';
 const MAYA_STAGE_READINESS           = 'readiness';
 const MAYA_STAGE_FINAL_REVIEW        = 'final_review';
 
+const MAYA_COACH_STATE_REFLECT                   = 'STATE_REFLECT';
+const MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE = 'STATE_WAITING_FOR_SUMMARY_WRITE';
+const MAYA_COACH_STATE_VERIFYING_SUMMARY         = 'STATE_VERIFYING_SUMMARY';
+const MAYA_COACH_STATE_REMEDIATION               = 'STATE_REMEDIATION';
+const MAYA_COACH_STATE_ADVANCE_TOPIC             = 'STATE_ADVANCE_TOPIC';
+
+const MAYA_ALLOWED_COACH_STATES = [
+    MAYA_COACH_STATE_REFLECT,
+    MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE,
+    MAYA_COACH_STATE_VERIFYING_SUMMARY,
+    MAYA_COACH_STATE_REMEDIATION,
+    MAYA_COACH_STATE_ADVANCE_TOPIC,
+];
+
 const MAYA_ALLOWED_STAGES = [
     MAYA_STAGE_STRUCTURE,
     MAYA_STAGE_EXPLAIN,
@@ -117,6 +131,12 @@ function maya_normalize_stage($s): string
 {
     $s = is_string($s) ? trim($s) : '';
     return in_array($s, MAYA_ALLOWED_STAGES, true) ? $s : MAYA_STAGE_STRUCTURE;
+}
+
+function maya_normalize_coach_state($s): string
+{
+    $s = is_string($s) ? trim($s) : '';
+    return in_array($s, MAYA_ALLOWED_COACH_STATES, true) ? $s : '';
 }
 
 function maya_truncate(string $text, int $maxChars): string
@@ -1062,6 +1082,42 @@ function maya_blueprint_current_task(?array $bundle, array $state, bool $structu
     ];
 }
 
+function maya_coach_state_for_task(
+    array $task,
+    string $stage,
+    array $readiness = [],
+    array $flags = [],
+    string $summaryPlain = ''
+): string {
+    $saved = maya_normalize_coach_state($flags['coach_state'] ?? null);
+    $mode = (string)($task['mode'] ?? '');
+    if (!empty($flags['needs_deeper_question']) || !empty($readiness['missing'])) {
+        return MAYA_COACH_STATE_REMEDIATION;
+    }
+    if ($saved === MAYA_COACH_STATE_ADVANCE_TOPIC) {
+        return MAYA_COACH_STATE_ADVANCE_TOPIC;
+    }
+    if ($stage === MAYA_STAGE_FINAL_REVIEW || $stage === MAYA_STAGE_READINESS) {
+        return MAYA_COACH_STATE_VERIFYING_SUMMARY;
+    }
+    if ($saved === MAYA_COACH_STATE_REMEDIATION || $saved === MAYA_COACH_STATE_VERIFYING_SUMMARY) {
+        return $saved;
+    }
+    if ($mode === 'answer_chat') {
+        return MAYA_COACH_STATE_REFLECT;
+    }
+    if ($saved === MAYA_COACH_STATE_REFLECT || $saved === MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE) {
+        return $saved;
+    }
+    if (in_array($mode, ['write_summary', 'watch_slides'], true)) {
+        return MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+    }
+    if (trim($summaryPlain) !== '') {
+        return MAYA_COACH_STATE_VERIFYING_SUMMARY;
+    }
+    return MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+}
+
 function maya_blueprint_prompt_context(?array $bundle, array $state, array $task): string
 {
     if (!$bundle) return "No active lesson blueprint loaded. blueprint_missing=true. Use conservative lesson/slide scope only.";
@@ -1952,6 +2008,8 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
     $startProgress = maya_section_progress_from_flags($freshFlags ?: [], $sections);
     $startBlueprintState = maya_blueprint_state_from_flags($freshFlags ?: [], $blueprintBundle);
     $startTask = maya_blueprint_current_task($blueprintBundle, $startBlueprintState, !empty($startProgress['summary_structure_added']), (string)($snap['summary_plain'] ?? ''));
+    $startCoachState = maya_coach_state_for_task($startTask, $newStage, $readiness ?: [], $freshFlags ?: [], (string)($snap['summary_plain'] ?? ''));
+    $startTask['coach_state'] = $startCoachState;
     $oldestIndex = $messages ? (int)$messages[0]['lazy_index'] : 0;
     $hasMore = maya_messages_have_more($pdo, (int)$session['id'], $oldestIndex);
     $total = maya_message_count($pdo, (int)$session['id']);
@@ -1969,6 +2027,7 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
         'maya_message' => $msg,
         'next_question' => $nextQ,
         'stage' => $newStage,
+        'coach_state' => $startCoachState,
         'scores' => $scores ?: [
             'coverage' => 0, 'accuracy' => 0, 'own_wording' => 0,
             'correlation' => 0, 'instructor_confidence' => 0,
@@ -1984,6 +2043,7 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
         'coaching_state' => [
             'current_writing_task' => (string)($startTask['task_text'] ?? ($startProgress['current_writing_task'] ?? '')),
             'awaiting_chat_reply' => (($startTask['mode'] ?? '') === 'answer_chat') || !empty($startProgress['awaiting_chat_reply']),
+            'coach_state' => $startCoachState,
             'current_section' => (string)($startTask['section_title'] ?? ($startProgress['current_section'] ?? '')),
             'current_slide_id' => (int)($startProgress['current_slide_id'] ?? 0),
             'current_slide_number' => (int)($startProgress['current_slide_number'] ?? 0),
@@ -2158,6 +2218,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     $sectionProgress['current_slide_id'] = (int)($slideState['id'] ?? 0);
     $sectionProgress['current_slide_number'] = (int)($slideState['page_number'] ?? 0);
     $sectionProgressText = maya_section_progress_prompt($sectionProgress);
+    $coachState = maya_coach_state_for_task($currentTask, $coachStage, [], $existingFlags, $summaryPlainForFocus);
 
     $historyLines = [];
     $lastMayaText = '';
@@ -2174,6 +2235,8 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
 
     $stateBlock =
         "Current stage: {$coachStage}\n"
+        . "Canonical coach state: {$coachState}\n"
+        . "Allowed coach states: " . implode(', ', MAYA_ALLOWED_COACH_STATES) . "\n"
         . "Maya's current question: " . ($currentQuestion !== '' ? $currentQuestion : '(none)') . "\n"
         . "Student reply this turn: " . ($studentReply !== '' ? $studentReply : '(none)') . "\n"
         . "Local observer flags: major_paste=" . ($serverMajorPaste ? 'true' : 'false')
@@ -2208,6 +2271,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "19. Are you staying strictly inside the CURRENT SLIDE CONTEXT or assigned slide series?\n\n"
         . "20. Are you obeying the ACTIVE LESSON SUMMARY BLUEPRINT exactly, including section titles, order, slide_group, must_have, and do_not_ask boundaries?\n\n"
         . "Then give ONE primary task only: either a Summary Editor task OR a This Chat question. Do not assign both unless it is a rare transition.\n\n"
+        . "Use the canonical coach state as the operational state machine: STATE_REFLECT means ask/listen for a short student reflection; STATE_WAITING_FOR_SUMMARY_WRITE means stop talking and let the student write in the Summary Editor; STATE_VERIFYING_SUMMARY means evaluate the current draft against the blueprint; STATE_REMEDIATION means correct one missing or weak must-have; STATE_ADVANCE_TOPIC means close the current topic and move to the next blueprint section or slide group.\n\n"
         . "Do NOT ask generic \"most important idea\" questions. Prefer lesson-scope questions about pilot action, preflight verification, operational consequence, or go/no-go decision making.";
 
     $userPrompt =
@@ -2412,12 +2476,24 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     }
     $sectionProgress['current_writing_task'] = $writingTask;
     $sectionProgress['awaiting_chat_reply'] = $awaitingChatReply;
+    $coachState = maya_coach_state_for_task(
+        $currentTask,
+        $newStage,
+        $readinessOut,
+        ['needs_deeper_question' => $needsDeeper],
+        $summaryPlainForFocus
+    );
+    if ($awaitingChatReply) $coachState = MAYA_COACH_STATE_REFLECT;
+    if ($clientTrigger === 'idle' && $wordCount >= 15) $coachState = MAYA_COACH_STATE_VERIFYING_SUMMARY;
+    $sectionProgress['coach_state'] = $coachState;
+    $currentTask['coach_state'] = $coachState;
     $persistedFlags = [
         'major_paste' => $persistedMajorPaste,
         'needs_deeper_question' => $needsDeeper,
         'concept_progress' => $updatedConceptProgress,
         'active_concept' => $activeConcept,
         'summary_insertions_allowed' => $allowSummaryInsertions,
+        'coach_state' => $coachState,
         'section_progress' => array_merge($sectionProgress, ['current_stage' => $newStage]),
         'blueprint_state' => $blueprintState,
         'blueprint_missing' => !$blueprintBundle,
@@ -2456,6 +2532,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         'maya_message' => $mayaMessage,
         'next_question' => $nextQuestion,
         'stage' => $newStage,
+        'coach_state' => $coachState,
         'scores' => $scores,
         'readiness' => $readinessOut,
         'flags' => $persistedFlags,
@@ -2463,6 +2540,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         'coaching_state' => [
             'current_writing_task' => $writingTask,
             'awaiting_chat_reply' => $awaitingChatReply,
+            'coach_state' => $coachState,
             'current_section' => (string)($sectionProgress['current_section'] ?? ''),
             'current_slide_id' => (int)($sectionProgress['current_slide_id'] ?? 0),
             'current_slide_number' => (int)($sectionProgress['current_slide_number'] ?? 0),
@@ -2621,12 +2699,15 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
     $progress = maya_section_progress_from_flags($flags, maya_blueprint_required_sections($blueprintBundle));
     $summaryText = trim((string)($args['summary_excerpt'] ?? $payload['summary_excerpt'] ?? ''));
     $currentTask = maya_blueprint_current_task($blueprintBundle, $blueprintState, !empty($progress['summary_structure_added']), $summaryText);
+    $currentCoachState = maya_coach_state_for_task($currentTask, (string)($session['stage'] ?? MAYA_STAGE_STRUCTURE), [], $flags, $summaryText);
+    $currentTask['coach_state'] = $currentCoachState;
 
     if ($tool === 'get_current_coaching_state') {
         $section = maya_blueprint_section($blueprintBundle, (string)($currentTask['section_id'] ?? ''));
         return [
             'ok' => true,
             'lesson_title' => maya_get_lesson_title($pdo, $lessonId),
+            'coach_state' => $currentCoachState,
             'current_task' => $currentTask,
             'current_section' => [
                 'section_id' => (string)($currentTask['section_id'] ?? ''),
@@ -2660,13 +2741,15 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
             elseif ($hits < 2) $weak[] = (string)$must;
         }
         $maxTurns = (int)($blueprintBundle['blueprint']['section_status_policy']['max_refinement_turns'] ?? 2);
+        $goodEnough = !$missing || (int)($blueprintState['section_states'][$sectionId]['refinement_turns'] ?? 0) >= $maxTurns;
         return [
             'ok' => true,
+            'coach_state' => $goodEnough ? MAYA_COACH_STATE_ADVANCE_TOPIC : MAYA_COACH_STATE_REMEDIATION,
             'section_id' => $sectionId,
             'missing_must_have' => $missing,
             'weak_concepts' => $weak,
             'technical_errors' => [],
-            'good_enough' => !$missing || (int)($blueprintState['section_states'][$sectionId]['refinement_turns'] ?? 0) >= $maxTurns,
+            'good_enough' => $goodEnough,
             'suggested_next_coaching_move' => $missing ? 'Ask one focused question about the first missing must-have concept. Do not write the answer.' : 'Send the student back to refine the summary in their own words or mark the section complete.',
         ];
     }
@@ -2674,15 +2757,22 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
     if ($tool === 'set_current_task') {
         $mode = trim((string)($args['mode'] ?? 'write_summary'));
         $taskText = trim((string)($args['task_text'] ?? ''));
+        $nextCoachState = maya_normalize_coach_state($args['coach_state'] ?? null);
+        if ($nextCoachState === '') {
+            $nextCoachState = $mode === 'answer_chat' ? MAYA_COACH_STATE_REFLECT : MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+        }
         if ($taskText === '') $taskText = (string)($currentTask['task_text'] ?? '');
         $progress['current_writing_task'] = $taskText;
         $progress['awaiting_chat_reply'] = $mode === 'answer_chat';
+        $progress['coach_state'] = $nextCoachState;
+        $flags['coach_state'] = $nextCoachState;
         $flags['section_progress'] = $progress;
         $flags['blueprint_state'] = $blueprintState;
         maya_save_session($pdo, (int)$session['id'], ['flags_json' => json_encode($flags)]);
         $currentTask['mode'] = $mode;
         $currentTask['task_text'] = $taskText;
-        return ['ok' => true, 'current_task' => $currentTask];
+        $currentTask['coach_state'] = $nextCoachState;
+        return ['ok' => true, 'coach_state' => $nextCoachState, 'current_task' => $currentTask];
     }
 
     if ($tool === 'mark_section_complete' || $tool === 'move_to_next_section') {
@@ -2701,12 +2791,15 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
             }
         }
         $nextTask = maya_blueprint_current_task($blueprintBundle, $blueprintState, true, $summaryText);
+        $nextTask['coach_state'] = MAYA_COACH_STATE_ADVANCE_TOPIC;
         $progress['current_writing_task'] = (string)$nextTask['task_text'];
         $progress['awaiting_chat_reply'] = ($nextTask['mode'] ?? '') === 'answer_chat';
+        $progress['coach_state'] = MAYA_COACH_STATE_ADVANCE_TOPIC;
+        $flags['coach_state'] = MAYA_COACH_STATE_ADVANCE_TOPIC;
         $flags['blueprint_state'] = $blueprintState;
         $flags['section_progress'] = $progress;
         maya_save_session($pdo, (int)$session['id'], ['flags_json' => json_encode($flags)]);
-        return ['ok' => true, 'current_task' => $nextTask, 'blueprint_state' => $blueprintState];
+        return ['ok' => true, 'coach_state' => MAYA_COACH_STATE_ADVANCE_TOPIC, 'current_task' => $nextTask, 'blueprint_state' => $blueprintState];
     }
 
     if ($tool === 'save_voice_transcript_event') {
@@ -2731,7 +2824,7 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
                     $role,
                     $text,
                     trim((string)($args['event_type'] ?? 'transcript')) ?: 'transcript',
-                    json_encode(['current_task' => $currentTask, 'blueprint_state' => $blueprintState]),
+                    json_encode(['coach_state' => $currentCoachState, 'current_task' => $currentTask, 'blueprint_state' => $blueprintState]),
                 ]);
             }
         }
