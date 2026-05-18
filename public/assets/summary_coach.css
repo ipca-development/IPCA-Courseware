@@ -1368,6 +1368,92 @@
   padding-left: 18px;
 }
 
+.maya-voice-card {
+  border: 1px solid rgba(30,60,114,.14);
+  border-radius: 14px;
+  background: #f8fbff;
+  padding: 10px;
+  box-shadow: 0 4px 14px rgba(15,23,42,.05);
+}
+.maya-voice-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.maya-voice-title {
+  font-weight: 850;
+  color: #12355f;
+  font-size: 12px;
+}
+.maya-voice-status {
+  border-radius: 999px;
+  background: #e2e8f0;
+  color: #334155;
+  padding: 3px 8px;
+  font-size: 10px;
+  font-weight: 850;
+}
+.maya-voice-card[data-voice-status="listening"] .maya-voice-status,
+.maya-voice-card[data-voice-status="maya_speaking"] .maya-voice-status {
+  background: #dcfce7;
+  color: #166534;
+}
+.maya-voice-card[data-voice-status="connecting"] .maya-voice-status,
+.maya-voice-card[data-voice-status="paused"] .maya-voice-status {
+  background: #fffbeb;
+  color: #92400e;
+}
+.maya-voice-privacy {
+  color: #64748b;
+  font-size: 11px;
+  line-height: 1.35;
+  margin-bottom: 8px;
+}
+.maya-voice-controls {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+}
+.maya-voice-btn {
+  appearance: none;
+  border: 1px solid rgba(30,60,114,.18);
+  border-radius: 10px;
+  background: #fff;
+  color: #12355f;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 850;
+  cursor: pointer;
+}
+.maya-voice-btn.primary {
+  background: #12355f;
+  color: #fff;
+  border-color: #12355f;
+}
+.maya-voice-btn.danger {
+  color: #991b1b;
+  border-color: #fecaca;
+}
+.maya-voice-btn:disabled {
+  opacity: .45;
+  cursor: not-allowed;
+}
+.maya-voice-transcript {
+  margin-top: 8px;
+  max-height: 86px;
+  overflow: auto;
+  border-top: 1px solid rgba(15,23,42,.08);
+  padding-top: 7px;
+  font-size: 11px;
+  color: #334155;
+}
+.maya-voice-transcript-row {
+  margin-bottom: 5px;
+}
+
 .maya-cockpit .maya-chat-thread {
   flex: 1;
   min-height: 0;

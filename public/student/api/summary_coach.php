@@ -2603,6 +2603,144 @@ function maya_action_mark_inserted(PDO $pdo, array $u, array $payload): array
     return $out;
 }
 
+function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
+{
+    [$_, $lessonId, $cohortId, $summaryId, $context] = maya_extract_common_input($payload);
+    maya_assert_lesson_access($pdo, $u, $cohortId, $lessonId);
+    $tool = trim((string)($payload['tool_name'] ?? $payload['tool'] ?? ''));
+    $args = is_array($payload['arguments'] ?? null) ? $payload['arguments'] : [];
+    $userId = (int)$u['id'];
+    $session = maya_load_session($pdo, $userId, $lessonId, $cohortId, $summaryId > 0 ? $summaryId : null, $context);
+    if (!$session) {
+        $session = maya_create_session($pdo, $userId, $lessonId, $cohortId, $summaryId > 0 ? $summaryId : null, $context);
+    }
+    $flags = maya_decode_json_column($session['flags_json'] ?? null);
+    $blueprintBundle = maya_load_active_lesson_blueprint($pdo, $lessonId);
+    if (!$blueprintBundle) return ['ok' => false, 'error' => 'No active lesson summary blueprint exists for this lesson.'];
+    $blueprintState = maya_blueprint_state_from_flags($flags, $blueprintBundle);
+    $progress = maya_section_progress_from_flags($flags, maya_blueprint_required_sections($blueprintBundle));
+    $summaryText = trim((string)($args['summary_excerpt'] ?? $payload['summary_excerpt'] ?? ''));
+    $currentTask = maya_blueprint_current_task($blueprintBundle, $blueprintState, !empty($progress['summary_structure_added']), $summaryText);
+
+    if ($tool === 'get_current_coaching_state') {
+        $section = maya_blueprint_section($blueprintBundle, (string)($currentTask['section_id'] ?? ''));
+        return [
+            'ok' => true,
+            'lesson_title' => maya_get_lesson_title($pdo, $lessonId),
+            'current_task' => $currentTask,
+            'current_section' => [
+                'section_id' => (string)($currentTask['section_id'] ?? ''),
+                'title' => (string)($currentTask['section_title'] ?? ''),
+                'required_concepts' => array_values(array_map('strval', $section['required_concepts'] ?? [])),
+                'must_have' => array_values(array_map('strval', $section['section_acceptance_criteria']['must_have'] ?? [])),
+                'nice_to_have' => array_values(array_map('strval', $section['section_acceptance_criteria']['nice_to_have'] ?? [])),
+                'not_needed' => array_values(array_map('strval', $section['section_acceptance_criteria']['not_needed'] ?? [])),
+                'do_not_ask' => array_values(array_map('strval', $section['do_not_ask'] ?? [])),
+            ],
+            'completed_sections' => $blueprintState['completed_sections'],
+            'summary_excerpt' => $summaryText,
+            'blueprint_version_id' => (int)($blueprintBundle['version_id'] ?? 0),
+        ];
+    }
+
+    if ($tool === 'analyze_summary_draft') {
+        $sectionId = trim((string)($args['section_id'] ?? $currentTask['section_id'] ?? ''));
+        $section = maya_blueprint_section($blueprintBundle, $sectionId);
+        $plain = strtolower(maya_strip_html_to_text((string)($args['summary_html'] ?? '')) . ' ' . $summaryText);
+        $missing = [];
+        $weak = [];
+        foreach (($section['section_acceptance_criteria']['must_have'] ?? []) as $must) {
+            $words = preg_split('/\s+/u', strtolower((string)$must)) ?: [];
+            $hits = 0;
+            foreach ($words as $w) {
+                $w = trim($w, ".,;:()[]{} \t\n\r\0\x0B");
+                if (strlen($w) >= 5 && strpos($plain, $w) !== false) $hits++;
+            }
+            if ($hits === 0) $missing[] = (string)$must;
+            elseif ($hits < 2) $weak[] = (string)$must;
+        }
+        $maxTurns = (int)($blueprintBundle['blueprint']['section_status_policy']['max_refinement_turns'] ?? 2);
+        return [
+            'ok' => true,
+            'section_id' => $sectionId,
+            'missing_must_have' => $missing,
+            'weak_concepts' => $weak,
+            'technical_errors' => [],
+            'good_enough' => !$missing || (int)($blueprintState['section_states'][$sectionId]['refinement_turns'] ?? 0) >= $maxTurns,
+            'suggested_next_coaching_move' => $missing ? 'Ask one focused question about the first missing must-have concept. Do not write the answer.' : 'Send the student back to refine the summary in their own words or mark the section complete.',
+        ];
+    }
+
+    if ($tool === 'set_current_task') {
+        $mode = trim((string)($args['mode'] ?? 'write_summary'));
+        $taskText = trim((string)($args['task_text'] ?? ''));
+        if ($taskText === '') $taskText = (string)($currentTask['task_text'] ?? '');
+        $progress['current_writing_task'] = $taskText;
+        $progress['awaiting_chat_reply'] = $mode === 'answer_chat';
+        $flags['section_progress'] = $progress;
+        $flags['blueprint_state'] = $blueprintState;
+        maya_save_session($pdo, (int)$session['id'], ['flags_json' => json_encode($flags)]);
+        $currentTask['mode'] = $mode;
+        $currentTask['task_text'] = $taskText;
+        return ['ok' => true, 'current_task' => $currentTask];
+    }
+
+    if ($tool === 'mark_section_complete' || $tool === 'move_to_next_section') {
+        $sectionId = trim((string)($args['section_id'] ?? $currentTask['section_id'] ?? ''));
+        if ($sectionId !== '' && !in_array($sectionId, $blueprintState['completed_sections'], true)) {
+            $blueprintState['completed_sections'][] = $sectionId;
+            $blueprintState['section_states'][$sectionId]['state'] = 'complete';
+            $blueprintState['section_states'][$sectionId]['completed_at'] = maya_now_sql();
+        }
+        if ($tool === 'move_to_next_section') {
+            $blueprintState['current_sequence_step'] = (int)$blueprintState['current_sequence_step'] + 1;
+            $nextStep = maya_blueprint_sequence_step($blueprintBundle, (int)$blueprintState['current_sequence_step']);
+            if ($nextStep) {
+                $blueprintState['current_section_id'] = (string)($nextStep['section_id'] ?? $blueprintState['current_section_id']);
+                $blueprintState['current_slide_group'] = maya_blueprint_slide_group_pages($blueprintBundle, array_map('intval', $nextStep['slide_group'] ?? []));
+            }
+        }
+        $nextTask = maya_blueprint_current_task($blueprintBundle, $blueprintState, true, $summaryText);
+        $progress['current_writing_task'] = (string)$nextTask['task_text'];
+        $progress['awaiting_chat_reply'] = ($nextTask['mode'] ?? '') === 'answer_chat';
+        $flags['blueprint_state'] = $blueprintState;
+        $flags['section_progress'] = $progress;
+        maya_save_session($pdo, (int)$session['id'], ['flags_json' => json_encode($flags)]);
+        return ['ok' => true, 'current_task' => $nextTask, 'blueprint_state' => $blueprintState];
+    }
+
+    if ($tool === 'save_voice_transcript_event') {
+        if (maya_table_exists($pdo, 'student_summary_voice_transcript_messages')) {
+            $voiceSessionId = (int)($payload['voice_session_id'] ?? $args['voice_session_id'] ?? 0);
+            $role = trim((string)($args['role'] ?? 'system'));
+            if (!in_array($role, ['student', 'maya', 'system'], true)) $role = 'system';
+            $text = trim((string)($args['transcript_text'] ?? ''));
+            if ($voiceSessionId > 0 && $text !== '') {
+                $st = $pdo->prepare("
+                    INSERT INTO student_summary_voice_transcript_messages
+                      (voice_session_id, user_id, cohort_id, lesson_id, blueprint_version_id, section_id, role, transcript_text, event_type, state_snapshot_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ");
+                $st->execute([
+                    $voiceSessionId,
+                    $userId,
+                    $cohortId > 0 ? $cohortId : null,
+                    $lessonId,
+                    (int)($blueprintBundle['version_id'] ?? 0),
+                    trim((string)($args['section_id'] ?? $currentTask['section_id'] ?? '')) ?: null,
+                    $role,
+                    $text,
+                    trim((string)($args['event_type'] ?? 'transcript')) ?: 'transcript',
+                    json_encode(['current_task' => $currentTask, 'blueprint_state' => $blueprintState]),
+                ]);
+            }
+        }
+        return ['ok' => true];
+    }
+
+    return ['ok' => false, 'error' => 'Unknown voice tool'];
+}
+
 function maya_action_final_review(PDO $pdo, array $u, array $payload): array
 {
     [$_, $lessonId, $cohortId, $summaryId, $context] = maya_extract_common_input($payload);
@@ -2881,6 +3019,10 @@ try {
 
         case 'mark_inserted':
             $out = maya_action_mark_inserted($pdo, $u, $payload);
+            break;
+
+        case 'voice_tool':
+            $out = maya_action_voice_tool($pdo, $u, $payload);
             break;
 
         case 'final_review':

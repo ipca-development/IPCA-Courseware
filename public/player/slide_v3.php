@@ -849,6 +849,7 @@ $isAdminViewer = ($role === 'admin');
 <!-- v3: Maya Summary Coach loader. Must be parsed BEFORE the inline init
      script below so window.IPCASummaryCoach is defined when bootMaya() runs. -->
 <script src="/assets/summary_coach.js"></script>
+<script src="/assets/summary_voice_coach.js"></script>
 
 <script>
 let isLocked = false;
@@ -2023,6 +2024,13 @@ if (e.key === 'ArrowRight') {
     syncMayaModeWithDrawer();
     var coach = window.IPCASummaryCoach.create(window.IPCASummaryCoachConfig);
     window.__mayaCoach = coach;
+    if (window.IPCASummaryVoiceCoach) {
+      window.__mayaVoiceCoach = window.IPCASummaryVoiceCoach.attach(
+        document.getElementById('mayaCoachRoot'),
+        window.IPCASummaryCoachConfig,
+        coach
+      );
+    }
     syncMayaSummaryState({ summary_html: rte ? rte.innerHTML : '' });
 
     // Re-attach editor when the drawer is opened (it may have been mounted

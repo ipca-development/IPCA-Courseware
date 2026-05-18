@@ -2518,6 +2518,13 @@ function bootMayaForCurrentLesson(lessonId) {
 
   window.IPCASummaryCoachConfig = config;
   window.__mayaCoach = window.IPCASummaryCoach.create(config);
+  if (window.IPCASummaryVoiceCoach) {
+    window.__mayaVoiceCoach = window.IPCASummaryVoiceCoach.attach(
+      document.getElementById('mayaCoachRoot'),
+      config,
+      window.__mayaCoach
+    );
+  }
   window.__mayaCurrentLessonId = lessonId;
   syncMayaSummaryStateForLesson(lessonId);
 }
@@ -2568,5 +2575,6 @@ if (editorModal.classList.contains('open') && activeLessonId !== null) {
      modal can only open via user interaction, which happens after this
      script tag is parsed). -->
 <script src="/assets/summary_coach.js"></script>
+<script src="/assets/summary_voice_coach.js"></script>
 
 <?php cw_footer(); ?>	
