@@ -823,6 +823,18 @@ function restoreAfterUploadFailure() {
   }
 }
 
+function enableFinalizeRetry(message) {
+  setPrep(100);
+  setSys(message || 'Evaluation failed. Please retry.');
+  answerBtns.style.display = 'flex';
+  answerWrap.style.display = 'none';
+  btnPTT.disabled = true;
+  btnReplay.disabled = true;
+  btnNext.textContent = 'Retry Evaluation';
+  btnNext.disabled = false;
+  btnNext.style.display = 'block';
+}
+
 async function startCam(){
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
     camStatus.textContent = 'Camera not supported.';
@@ -1199,6 +1211,10 @@ btnNext.addEventListener('click', async ()=>{
   btnNext.disabled = true;
   btnReplay.disabled = true;
   READY_FOR_NEXT = false;
+  if (CUR_POS > TOTAL_QUESTIONS) {
+    await finalizeTest();
+    return;
+  }
   await playCurrentQuestion();
 });
 
@@ -1211,6 +1227,7 @@ async function uploadAnswerBlob(blob, timeoutOnly){
   btnReplay.disabled = true;
   btnNext.disabled = true;
   btnNext.style.display = 'none';
+  btnNext.textContent = 'Next Question';
   setSys('STEP 1: Saving your answer...');
 
   const fd = new FormData();
@@ -1224,7 +1241,7 @@ async function uploadAnswerBlob(blob, timeoutOnly){
   }
 
   const controller = new AbortController();
-  const timeoutMs = 15000;
+  const timeoutMs = 60000;
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
@@ -1284,7 +1301,7 @@ async function uploadAnswerBlob(blob, timeoutOnly){
 
     let msg = 'STEP X: Upload failed.';
     if (err && err.name === 'AbortError') {
-      msg = 'STEP X: Upload timed out after 15 seconds.';
+      msg = 'STEP X: Upload timed out after 60 seconds.';
     } else if (err && err.message) {
       msg = 'STEP X: Upload failed: ' + err.message;
     }
@@ -1299,6 +1316,7 @@ async function finalizeTest(){
   btnReplay.disabled = true;
   btnReady.disabled = true;
   btnNext.disabled = true;
+  btnNext.textContent = 'Next Question';
   prepLabel.textContent = 'Evaluation progress';
   setPrep(10);
   setSys('I am evaluating your answers... please standby.');
@@ -1309,22 +1327,25 @@ async function finalizeTest(){
     setPrep(p);
   }, 300);
 
-  const res = await fetch('/student/api/test_finalize_v2.php', {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    credentials:'same-origin',
-    body: JSON.stringify({ test_id: TEST_ID })
-  });
-
-  clearInterval(tick);
-
-  const txt = await res.text();
   let j = null;
-  try { j = JSON.parse(txt); } catch(e) { j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)}; }
+  try {
+    const res = await fetch('/student/api/test_finalize_v2.php', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      credentials:'same-origin',
+      body: JSON.stringify({ test_id: TEST_ID })
+    });
+
+    const txt = await res.text();
+    try { j = JSON.parse(txt); } catch(e) { j = {ok:false,error:'Non-JSON: ' + txt.slice(0,200)}; }
+  } catch (err) {
+    j = {ok:false,error:(err && err.message) ? err.message : 'Network error'};
+  } finally {
+    clearInterval(tick);
+  }
 
   if (!j.ok) {
-    setPrep(100);
-    setSys('Evaluation failed: ' + (j.error || 'Unknown error'));
+    enableFinalizeRetry('Evaluation failed: ' + (j.error || 'Unknown error'));
     return;
   }
 

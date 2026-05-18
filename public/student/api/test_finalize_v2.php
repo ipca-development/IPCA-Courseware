@@ -777,13 +777,8 @@ function grade_item(array $item, string $transcript): array
     $options = json_decode((string)($item['options_json'] ?? '[]'), true) ?: [];
     $correct = json_decode((string)($item['correct_json'] ?? '{}'), true) ?: [];
 
-    if ($transcript === '[TIMEOUT]') {
-        return [
-            'is_correct'   => 0,
-            'score_points' => 0,
-            'max_points'   => ($kind === 'open') ? max(1, (int)($correct['min_points_to_pass'] ?? 2)) : 1,
-            'feedback'     => 'No answer recorded.'
-        ];
+    if (in_array($transcript, ['[TIMEOUT]', '[NO AUDIO]'], true)) {
+        return no_answer_grade($kind, $correct, 'No answer recorded.');
     }
 
     if ($kind === 'yesno') {
@@ -795,6 +790,37 @@ function grade_item(array $item, string $transcript): array
     }
 
     return grade_open_with_ai($item, $transcript);
+}
+
+function no_answer_grade(string $kind, array $correct, string $feedback): array
+{
+    return [
+        'is_correct'   => 0,
+        'score_points' => 0,
+        'max_points'   => ($kind === 'open') ? max(1, (int)($correct['min_points_to_pass'] ?? 2)) : 1,
+        'feedback'     => $feedback
+    ];
+}
+
+function reset_finalize_for_retry(PDO $pdo, int $testId, Throwable $e): void
+{
+    try {
+        error_log('Progress test evaluation failed for test ' . $testId . ': ' . $e->getMessage());
+
+        $st = $pdo->prepare("
+            UPDATE progress_tests_v2
+            SET status='ready',
+                status_text=?,
+                updated_at=NOW()
+            WHERE id=?
+              AND status='processing'
+              AND completed_at IS NULL
+              AND (formal_result_code IS NULL OR formal_result_code != 'STALE_ABORTED')
+        ");
+        $st->execute(['Evaluation failed; please retry.', $testId]);
+    } catch (Throwable $ignored) {
+        error_log('reset_finalize_for_retry failed: ' . $ignored->getMessage());
+    }
 }
 
 try {
@@ -847,7 +873,13 @@ try {
     $ttsModel = getenv('CW_OPENAI_TTS_MODEL') ?: 'gpt-4o-mini-tts';
     $ttsVoice = getenv('CW_OPENAI_TTS_VOICE') ?: 'marin';
 
-    $pdo->prepare("UPDATE progress_tests_v2 SET status='processing', updated_at=NOW() WHERE id=?")->execute([$testId]);
+    $pdo->prepare("
+        UPDATE progress_tests_v2
+        SET status='processing',
+            status_text='Evaluating progress test...',
+            updated_at=NOW()
+        WHERE id=?
+    ")->execute([$testId]);
 
     $itemsSt = $pdo->prepare("SELECT * FROM progress_test_items_v2 WHERE test_id=? ORDER BY idx ASC");
     $itemsSt->execute([$testId]);
@@ -876,9 +908,11 @@ try {
             $sourceUrl = is_full_url($audioRel) ? $audioRel : spaces_public_url_for_path($audioRel);
             $localAudio = $tmpDir . '/answer_' . (int)$item['idx'] . '.webm';
 
-            if (download_to_temp($sourceUrl, $localAudio)) {
-                $transcript = transcribe_file($apiKey, $localAudio);
+            if (!download_to_temp($sourceUrl, $localAudio)) {
+                throw new RuntimeException('Could not download answer audio for question ' . (int)$item['idx']);
             }
+
+            $transcript = transcribe_file($apiKey, $localAudio);
         }
 
         if ($transcript === '') {
@@ -1035,24 +1069,29 @@ TXT;
     } catch (Throwable $e) {
     }
 
+    $resultAudioUrl = '';
     $resultAudioLocal = $tmpDir . '/result.mp3';
     $name = trim((string)($u['name'] ?? 'student'));
     if ($name === '') {
         $name = 'student';
     }
 
-    $resultSpeech = "Thank you {$name}. Your score is {$scorePct} percent. {$spoken}";
-    tts_write_file($apiKey, $ttsModel, $ttsVoice, $resultSpeech, $resultAudioLocal);
+    try {
+        $resultSpeech = "Thank you {$name}. Your score is {$scorePct} percent. {$spoken}";
+        tts_write_file($apiKey, $ttsModel, $ttsVoice, $resultSpeech, $resultAudioLocal);
 
-    $cookieHeader = !empty($_SERVER['HTTP_COOKIE']) ? (string)$_SERVER['HTTP_COOKIE'] : '';
+        $cookieHeader = !empty($_SERVER['HTTP_COOKIE']) ? (string)$_SERVER['HTTP_COOKIE'] : '';
 
-    $resultPresign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
-        'test_id' => $testId,
-        'kind'    => 'result',
-        'ext'     => 'mp3'
-    ]);
-    upload_file_to_presigned_put((string)$resultPresign['url'], $resultAudioLocal, 'audio/mpeg');
-    $resultAudioUrl = (string)$resultPresign['public_url'];
+        $resultPresign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
+            'test_id' => $testId,
+            'kind'    => 'result',
+            'ext'     => 'mp3'
+        ]);
+        upload_file_to_presigned_put((string)$resultPresign['url'], $resultAudioLocal, 'audio/mpeg');
+        $resultAudioUrl = (string)$resultPresign['public_url'];
+    } catch (Throwable $e) {
+        error_log('Progress test result audio failed for test ' . $testId . ': ' . $e->getMessage());
+    }
 
     $finalizeResult = $engine->finalizeAssessedProgressTest($testId, [
         'score_pct' => $scorePct,
@@ -1096,6 +1135,10 @@ TXT;
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
+    }
+
+    if (isset($testId) && (int)$testId > 0) {
+        reset_finalize_for_retry($pdo, (int)$testId, $e);
     }
 
     http_response_code(400);
