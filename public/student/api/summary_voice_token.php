@@ -152,7 +152,7 @@ try {
         . "If you need state, ask for get_current_coaching_state. If summary text is weak, request analyze_summary_draft.\n\n"
         . sv_compact_blueprint_context($bundle);
 
-    $model = getenv('CW_OPENAI_REALTIME_MODEL') ?: 'gpt-4o-realtime-preview';
+    $model = getenv('CW_OPENAI_REALTIME_MODEL') ?: 'gpt-realtime';
     $body = [
         'model' => $model,
         'voice' => getenv('CW_OPENAI_REALTIME_VOICE') ?: 'alloy',
@@ -180,6 +180,7 @@ try {
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'Authorization: Bearer ' . cw_openai_key(),
         'Content-Type: application/json',
+        'OpenAI-Beta: realtime=v1',
     ]);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);

@@ -136,7 +136,7 @@
       if (!token || token.ok === false) throw new Error(token && token.error ? token.error : 'Voice token failed');
       self.voiceSessionId = parseInt(token.voice_session_id, 10) || 0;
       self.blueprintVersionId = parseInt(token.blueprint_version_id, 10) || 0;
-      self.realtimeModel = token.realtime_model || 'gpt-4o-realtime-preview';
+      self.realtimeModel = token.realtime_model || 'gpt-realtime';
       return self._connectRealtime(token.client_secret);
     }).then(function () {
       self.connected = true;
@@ -176,12 +176,19 @@
         method: 'POST',
         headers: {
           Authorization: 'Bearer ' + clientSecret,
+          'OpenAI-Beta': 'realtime=v1',
           'Content-Type': 'application/sdp'
         },
         body: offer.sdp
       });
     }).then(function (res) {
-      if (!res.ok) return res.text().then(function (t) { throw new Error(t || ('Realtime HTTP ' + res.status)); });
+      if (!res.ok) {
+        return res.text().then(function (t) {
+          var detail = String(t || '').trim();
+          if (detail.length > 500) detail = detail.slice(0, 500);
+          throw new Error('Realtime SDP exchange failed (HTTP ' + res.status + ')' + (detail ? ': ' + detail : ''));
+        });
+      }
       return res.text();
     }).then(function (answerSdp) {
       return self.pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
