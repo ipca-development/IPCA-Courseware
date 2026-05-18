@@ -47,6 +47,10 @@
     } catch (e) {}
   }
 
+  function eventKey(msg) {
+    return String(msg && (msg.event_id || msg.item_id || msg.response_id || msg.call_id) || '');
+  }
+
   function VoiceCoach(root, config, textCoach) {
     this.root = root;
     this.config = config || {};
@@ -64,6 +68,11 @@
     this.muted = false;
     this.summaryTimer = null;
     this.lastSummarySentAt = 0;
+    this.realtimeResponseInProgress = false;
+    this.pendingResponseInstructions = '';
+    this.processedRealtimeEvents = {};
+    this.processedToolCalls = {};
+    this.processedTranscripts = {};
     this.status = 'Ready';
     this.lastLiveMessage = '';
     this._buildUi();
@@ -175,7 +184,7 @@
     }).catch(function (err) {
       self._setStatus('Ended');
       self.btnStart.disabled = false;
-      self._appendMainConversation('system', 'Voice could not start: ' + (err && err.message ? err.message : String(err)));
+      debug('voice start failed', err && err.message ? err.message : String(err));
     });
   };
 
@@ -241,37 +250,68 @@
     var type = String(msg.type || '');
     if (type === 'error') {
       debug('realtime error', msg.error || msg);
-      this._appendMainConversation('system', 'Realtime error: ' + ((msg.error && msg.error.message) || 'unknown error'));
+      if (msg.error && String(msg.error.message || '').indexOf('active response in progress') !== -1) {
+        this.realtimeResponseInProgress = true;
+        this.pendingResponseInstructions = '';
+      }
       return;
     }
     debug('event', type);
+    if (type === 'response.created') {
+      this.realtimeResponseInProgress = true;
+      debug('response lock set from response.created');
+    }
     if (type === 'response.output_audio_transcript.done' && msg.transcript) {
+      if (this._isDuplicateTranscriptEvent(msg, 'maya')) return;
       this._appendMainConversation('maya', msg.transcript);
       this._saveTranscript('maya', msg.transcript, 'audio_transcript');
     }
     if (type === 'conversation.item.input_audio_transcription.completed' && msg.transcript) {
+      if (this._isDuplicateTranscriptEvent(msg, 'student')) return;
       this._appendMainConversation('student', msg.transcript);
       this._saveTranscript('student', msg.transcript, 'audio_transcript');
     }
     if (type === 'response.function_call_arguments.done') {
       this._runTool(msg.name, msg.arguments || '{}', msg.call_id || '');
     }
-    if (type === 'response.done') {
-      this._handleResponseDone(msg);
+    if (type === 'response.done' || type === 'response.failed' || type === 'response.cancelled' || type === 'response.canceled') {
+      this._releaseResponseLock(false);
+      var createdFollowup = type === 'response.done' ? this._handleResponseDone(msg) : false;
+      if (!createdFollowup) this._drainPendingResponse();
       this._setStatus('Listening');
     }
   };
 
   VoiceCoach.prototype._handleResponseDone = function (msg) {
     var outputs = msg && msg.response && Array.isArray(msg.response.output) ? msg.response.output : [];
+    var ranTool = false;
     for (var i = 0; i < outputs.length; i += 1) {
       if (outputs[i] && outputs[i].type === 'function_call') {
-        this._runTool(outputs[i].name, outputs[i].arguments || '{}', outputs[i].call_id || '');
+        ranTool = this._runTool(outputs[i].name, outputs[i].arguments || '{}', outputs[i].call_id || '') || ranTool;
       }
     }
+    return ranTool;
+  };
+
+  VoiceCoach.prototype._isDuplicateTranscriptEvent = function (msg, role) {
+    var transcript = String(msg.transcript || '').trim();
+    if (!transcript) return true;
+    var key = eventKey(msg) || (role + ':' + transcript.toLowerCase().replace(/\s+/g, ' ').slice(0, 220));
+    if (this.processedTranscripts[key]) {
+      debug('duplicate transcript ignored', { role: role, key: key });
+      return true;
+    }
+    this.processedTranscripts[key] = Date.now();
+    return false;
   };
 
   VoiceCoach.prototype._runTool = function (name, argString, callId) {
+    var toolKey = String(callId || name + ':' + argString);
+    if (toolKey && this.processedToolCalls[toolKey]) {
+      debug('duplicate tool call ignored', { name: name, call_id: callId || '' });
+      return false;
+    }
+    if (toolKey) this.processedToolCalls[toolKey] = Date.now();
     var args = {};
     try { args = JSON.parse(argString || '{}'); } catch (e) { args = {}; }
     if (name === 'get_current_coaching_state' || name === 'analyze_summary_draft') {
@@ -296,6 +336,7 @@
     }).catch(function (err) {
       self._sendToolOutput(callId, { ok: false, error: err && err.message ? err.message : String(err) });
     });
+    return true;
   };
 
   VoiceCoach.prototype._sendToolOutput = function (callId, output) {
@@ -313,13 +354,33 @@
 
   VoiceCoach.prototype._sendResponseCreate = function (instructions) {
     if (!this.dc || this.dc.readyState !== 'open') return;
+    instructions = instructions || 'Continue coaching the student using the active blueprint.';
+    if (this.realtimeResponseInProgress) {
+      this.pendingResponseInstructions = instructions;
+      debug('response.create queued because response is active');
+      return;
+    }
+    this.realtimeResponseInProgress = true;
+    debug('response.create sent');
     this.dc.send(JSON.stringify({
       type: 'response.create',
       response: {
         output_modalities: ['audio'],
-        instructions: instructions || 'Continue coaching the student using the active blueprint.'
+        instructions: instructions
       }
     }));
+  };
+
+  VoiceCoach.prototype._releaseResponseLock = function () {
+    if (this.realtimeResponseInProgress) debug('response lock released');
+    this.realtimeResponseInProgress = false;
+  };
+
+  VoiceCoach.prototype._drainPendingResponse = function () {
+    if (!this.pendingResponseInstructions) return;
+    var instructions = this.pendingResponseInstructions;
+    this.pendingResponseInstructions = '';
+    this._sendResponseCreate(instructions);
   };
 
   VoiceCoach.prototype.sendSummaryObservation = function () {
@@ -393,6 +454,8 @@
 
   VoiceCoach.prototype.end = function () {
     this.connected = false;
+    this.realtimeResponseInProgress = false;
+    this.pendingResponseInstructions = '';
     if (this.dc) { try { this.dc.close(); } catch (e) {} }
     if (this.pc) { try { this.pc.close(); } catch (e2) {} }
     if (this.localStream) this.localStream.getTracks().forEach(function (t) { t.stop(); });
