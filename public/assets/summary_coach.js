@@ -1536,6 +1536,14 @@
     } else if (typeof global.scheduleSave === 'function') {
       try { global.scheduleSave(); } catch (e3) {}
     }
+    if (!messageId) {
+      if (btn) {
+        btn.textContent = 'Added';
+        btn.disabled = true;
+        btn.classList.add('is-added');
+      }
+      return;
+    }
     this._postJson({
       action: 'mark_inserted',
       session_id: this.sessionId || 0,

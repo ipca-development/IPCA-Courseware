@@ -163,6 +163,7 @@ try {
         . "Use supportive, natural spoken coaching. Good enough is good enough; do not over-refine.\n"
         . "Use this exact state machine: STATE_REFLECT, STATE_WAITING_FOR_SUMMARY_WRITE, STATE_VERIFYING_SUMMARY, STATE_REMEDIATION, STATE_ADVANCE_TOPIC.\n"
         . "STATE_REFLECT: ask or listen for one short concept reflection. STATE_WAITING_FOR_SUMMARY_WRITE: stop talking and let the student write in the Summary Editor. STATE_VERIFYING_SUMMARY: evaluate the current draft against the blueprint. STATE_REMEDIATION: coach one weak or missing must-have. STATE_ADVANCE_TOPIC: close the current topic and move to the next blueprint section or slide group.\n"
+        . "If the student asks for the summary structure, call insert_official_summary_structure. Do not put structure text into set_current_task.\n"
         . "If you need state, ask for get_current_coaching_state. If summary text is weak, request analyze_summary_draft.\n\n"
         . "Internal safety identifier: {$safeUser}\n\n"
         . sv_compact_blueprint_context($bundle);
@@ -201,6 +202,7 @@ try {
                 ['type' => 'function', 'name' => 'get_current_coaching_state', 'description' => 'Fetch current blueprint-bound coaching state.', 'parameters' => ['type' => 'object', 'properties' => new stdClass(), 'additionalProperties' => false]],
                 ['type' => 'function', 'name' => 'analyze_summary_draft', 'description' => 'Analyze the current summary draft against blueprint must-have criteria without rewriting it.', 'parameters' => ['type' => 'object', 'properties' => ['section_id' => ['type' => 'string'], 'summary_excerpt' => ['type' => 'string']], 'required' => ['section_id', 'summary_excerpt'], 'additionalProperties' => false]],
                 ['type' => 'function', 'name' => 'save_voice_transcript_event', 'description' => 'Persist a transcript or coaching marker.', 'parameters' => ['type' => 'object', 'properties' => ['role' => ['type' => 'string'], 'transcript_text' => ['type' => 'string'], 'event_type' => ['type' => 'string'], 'section_id' => ['type' => 'string']], 'required' => ['role', 'transcript_text'], 'additionalProperties' => false]],
+                ['type' => 'function', 'name' => 'insert_official_summary_structure', 'description' => 'Insert the official blueprint summary structure into the Summary Editor as headings and empty Item slots only.', 'parameters' => ['type' => 'object', 'properties' => new stdClass(), 'additionalProperties' => false]],
                 ['type' => 'function', 'name' => 'set_current_task', 'description' => 'Update the current writing task box and canonical coach state.', 'parameters' => ['type' => 'object', 'properties' => ['mode' => ['type' => 'string'], 'task_text' => ['type' => 'string'], 'section_id' => ['type' => 'string'], 'coach_state' => ['type' => 'string', 'enum' => ['STATE_REFLECT', 'STATE_WAITING_FOR_SUMMARY_WRITE', 'STATE_VERIFYING_SUMMARY', 'STATE_REMEDIATION', 'STATE_ADVANCE_TOPIC']]], 'required' => ['mode', 'task_text'], 'additionalProperties' => false]],
             ],
             'tool_choice' => 'auto',

@@ -330,6 +330,7 @@
       context: this.config.context || 'player',
       summary_excerpt: truncate(plainTextFromEditor(this.editor), 1800)
     }).then(function (out) {
+      if (out && out.structure_insertion) self._insertStructureFromVoice(out.structure_insertion);
       if (out && out.current_task) self._applyCurrentTask(out.current_task);
       if (out && out.coach_state) self._applyCoachState(out.coach_state);
       self._sendToolOutput(callId, out || { ok: true });
@@ -420,6 +421,23 @@
       this.textCoach.coachingState.coach_state = String(task.coach_state || this.textCoach.coachingState.coach_state || '');
       this.textCoach.coachingState.current_section = String(task.section_title || task.section_id || '');
       if (typeof this.textCoach._renderWritingTask === 'function') this.textCoach._renderWritingTask();
+    }
+  };
+
+  VoiceCoach.prototype._insertStructureFromVoice = function (insertion) {
+    if (!insertion || !insertion.html) return;
+    if (this.textCoach && typeof this.textCoach._insertIntoSummary === 'function') {
+      this.textCoach._insertIntoSummary(insertion, null, 0);
+      this._postJson(this.config.apiUrl || '/student/api/summary_coach.php', {
+        action: 'voice_tool',
+        tool_name: 'mark_structure_inserted',
+        voice_session_id: this.voiceSessionId,
+        lesson_id: this.config.lessonId,
+        cohort_id: this.config.cohortId || 0,
+        summary_id: this.config.summaryId || 0,
+        context: this.config.context || 'player',
+        arguments: { summary_excerpt: truncate(plainTextFromEditor(this.editor), 1800) }
+      }).catch(function () {});
     }
   };
 

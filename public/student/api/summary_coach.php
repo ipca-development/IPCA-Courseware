@@ -760,6 +760,22 @@ function maya_student_asks_for_structure(string $studentReply): bool
     return preg_match('/\b(can|could|give|add|show|need|what)\b/u', $text) === 1;
 }
 
+function maya_text_looks_like_structure_outline(string $text): bool
+{
+    $plain = trim(maya_strip_html_to_text($text));
+    if ($plain === '') return false;
+    $lower = strtolower($plain);
+    $itemHits = preg_match_all('/\bitem\s*\d+\b/u', $lower) ?: 0;
+    if ($itemHits >= 2) return true;
+    if (preg_match('/summary\s*[:\-].*\bitem\b/u', $lower) === 1) return true;
+    $lines = preg_split('/\R/u', $plain) ?: [];
+    $headingHits = 0;
+    foreach ($lines as $line) {
+        if (preg_match('/^\s*\d+[\.\)]\s+\S+/u', $line) === 1) $headingHits++;
+    }
+    return $headingHits >= 2;
+}
+
 function maya_make_structure_insertion(array $sections): array
 {
     $html = maya_summary_structure_html($sections);
@@ -2795,9 +2811,69 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
         ];
     }
 
+    if ($tool === 'insert_official_summary_structure') {
+        $sections = maya_blueprint_required_sections($blueprintBundle);
+        $structureInsertion = maya_make_structure_insertion($sections);
+        if (!$structureInsertion) return ['ok' => false, 'error' => 'No official summary structure is available for this lesson.'];
+        $progress['awaiting_chat_reply'] = false;
+        $progress['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+        $progress['current_writing_task'] = 'Official structure added. Start with Item 1 in the first section and write it in your own words.';
+        $flags['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+        $flags['section_progress'] = $progress;
+        $flags['blueprint_state'] = $blueprintState;
+        maya_save_session($pdo, (int)$session['id'], ['flags_json' => json_encode($flags)]);
+        $currentTask['mode'] = 'write_summary';
+        $currentTask['task_text'] = (string)$progress['current_writing_task'];
+        $currentTask['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+        return [
+            'ok' => true,
+            'coach_state' => MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE,
+            'structure_insertion' => $structureInsertion,
+            'current_task' => $currentTask,
+        ];
+    }
+
+    if ($tool === 'mark_structure_inserted') {
+        $progress['summary_structure_added'] = true;
+        $progress['awaiting_chat_reply'] = false;
+        $progress['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+        $progress['current_writing_task'] = 'Start with Item 1 in the first section and write it in your own words. Let Maya know when you are done.';
+        $flags['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+        $flags['section_progress'] = $progress;
+        $flags['blueprint_state'] = $blueprintState;
+        maya_save_session($pdo, (int)$session['id'], ['flags_json' => json_encode($flags)]);
+        $currentTask['mode'] = 'write_summary';
+        $currentTask['task_text'] = (string)$progress['current_writing_task'];
+        $currentTask['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+        return ['ok' => true, 'coach_state' => MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE, 'current_task' => $currentTask];
+    }
+
     if ($tool === 'set_current_task') {
         $mode = trim((string)($args['mode'] ?? 'write_summary'));
         $taskText = trim((string)($args['task_text'] ?? ''));
+        if (maya_text_looks_like_structure_outline($taskText)) {
+            $sections = maya_blueprint_required_sections($blueprintBundle);
+            $structureInsertion = maya_make_structure_insertion($sections);
+            $taskText = 'Add the official structure to the Summary Editor. Maya will only add headings and empty Item slots.';
+            $mode = 'write_summary';
+            $nextCoachState = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
+            $progress['current_writing_task'] = $taskText;
+            $progress['awaiting_chat_reply'] = false;
+            $progress['coach_state'] = $nextCoachState;
+            $flags['coach_state'] = $nextCoachState;
+            $flags['section_progress'] = $progress;
+            $flags['blueprint_state'] = $blueprintState;
+            maya_save_session($pdo, (int)$session['id'], ['flags_json' => json_encode($flags)]);
+            $currentTask['mode'] = $mode;
+            $currentTask['task_text'] = $taskText;
+            $currentTask['coach_state'] = $nextCoachState;
+            return [
+                'ok' => true,
+                'coach_state' => $nextCoachState,
+                'structure_insertion' => $structureInsertion,
+                'current_task' => $currentTask,
+            ];
+        }
         $nextCoachState = maya_normalize_coach_state($args['coach_state'] ?? null);
         if ($nextCoachState === '') {
             $nextCoachState = $mode === 'answer_chat' ? MAYA_COACH_STATE_REFLECT : MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
