@@ -2803,11 +2803,11 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
     }
 
     if ($tool === 'save_voice_transcript_event') {
+        $voiceSessionId = (int)($payload['voice_session_id'] ?? $args['voice_session_id'] ?? 0);
+        $role = trim((string)($args['role'] ?? 'system'));
+        if (!in_array($role, ['student', 'maya', 'system'], true)) $role = 'system';
+        $text = trim((string)($args['transcript_text'] ?? ''));
         if (maya_table_exists($pdo, 'student_summary_voice_transcript_messages')) {
-            $voiceSessionId = (int)($payload['voice_session_id'] ?? $args['voice_session_id'] ?? 0);
-            $role = trim((string)($args['role'] ?? 'system'));
-            if (!in_array($role, ['student', 'maya', 'system'], true)) $role = 'system';
-            $text = trim((string)($args['transcript_text'] ?? ''));
             if ($voiceSessionId > 0 && $text !== '') {
                 $st = $pdo->prepare("
                     INSERT INTO student_summary_voice_transcript_messages
@@ -2827,6 +2827,9 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
                     json_encode(['coach_state' => $currentCoachState, 'current_task' => $currentTask, 'blueprint_state' => $blueprintState]),
                 ]);
             }
+        }
+        if ($text !== '' && in_array($role, ['student', 'maya'], true)) {
+            maya_insert_message($pdo, $session, $role, 'voice_transcript', $text, [], $flags);
         }
         return ['ok' => true];
     }

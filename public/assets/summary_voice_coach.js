@@ -32,6 +32,12 @@
     return el;
   }
 
+  function setIconButton(button, label, svgPath) {
+    button.setAttribute('aria-label', label);
+    button.setAttribute('title', label);
+    button.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="' + svgPath + '"></path></svg>';
+  }
+
   function debug() {
     try {
       if (!global.localStorage || global.localStorage.getItem('mayaVoiceDebug') !== '1') return;
@@ -59,6 +65,7 @@
     this.summaryTimer = null;
     this.lastSummarySentAt = 0;
     this.status = 'Ready';
+    this.lastLiveMessage = '';
     this._buildUi();
     this._bindEditor();
     this._wire();
@@ -83,22 +90,25 @@
     box.appendChild(note);
 
     var controls = createEl('div', 'maya-voice-controls');
-    this.btnStart = createEl('button', 'maya-voice-btn primary', 'Talk with Maya');
+    this.btnStart = createEl('button', 'maya-voice-btn primary');
     this.btnStart.type = 'button';
-    this.btnMute = createEl('button', 'maya-voice-btn', 'Mute');
+    setIconButton(this.btnStart, 'Start call', 'M6.6 10.8c1.5 3 3.6 5.1 6.6 6.6l2.2-2.2c.3-.3.8-.4 1.2-.3 1.3.4 2.6.6 4 .6.7 0 1.2.5 1.2 1.2v3.5c0 .7-.5 1.2-1.2 1.2C10.4 22 2 13.6 2 3.4 2 2.7 2.5 2.2 3.2 2.2h3.5c.7 0 1.2.5 1.2 1.2 0 1.4.2 2.7.6 4 .1.4 0 .9-.3 1.2l-1.6 2.2z');
+    this.btnMute = createEl('button', 'maya-voice-btn');
     this.btnMute.type = 'button';
+    setIconButton(this.btnMute, 'Mute microphone', 'M12 14c1.7 0 3-1.3 3-3V5c0-1.7-1.3-3-3-3S9 3.3 9 5v6c0 1.7 1.3 3 3 3zm5.3-3c0 3-2.5 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.4 2.7 6.2 6 6.7V21h2v-3.3c3.3-.5 6-3.3 6-6.7h-1.7z');
     this.btnMute.disabled = true;
-    this.btnEnd = createEl('button', 'maya-voice-btn danger', 'End call');
+    this.btnEnd = createEl('button', 'maya-voice-btn danger');
     this.btnEnd.type = 'button';
+    setIconButton(this.btnEnd, 'End call', 'M12 9c-2.9 0-5.6.9-7.8 2.4-.7.5-1.1 1.2-1.1 2.1v2.2c0 .7.5 1.2 1.2 1.2h3.5c.7 0 1.2-.5 1.2-1.2v-1.8c1.9-.6 4.1-.6 6 0v1.8c0 .7.5 1.2 1.2 1.2h3.5c.7 0 1.2-.5 1.2-1.2v-2.2c0-.8-.4-1.6-1.1-2.1C17.6 9.9 14.9 9 12 9z');
     this.btnEnd.disabled = true;
     controls.appendChild(this.btnStart);
     controls.appendChild(this.btnMute);
     controls.appendChild(this.btnEnd);
     box.appendChild(controls);
 
-    this.transcript = createEl('div', 'maya-voice-transcript');
-    this.transcript.hidden = true;
-    box.appendChild(this.transcript);
+    this.liveEl = createEl('div', 'maya-voice-live', 'Idle');
+    this.liveEl.setAttribute('data-maya-voice-live', '');
+    box.appendChild(this.liveEl);
 
     var cockpit = $('.maya-cockpit', this.root) || this.root;
     var compose = $('.maya-compose-area', this.root);
@@ -128,6 +138,7 @@
   VoiceCoach.prototype._setStatus = function (status) {
     this.status = status;
     if (this.statusEl) this.statusEl.textContent = status;
+    if (this.liveEl) this.liveEl.textContent = status === 'Ready' ? 'Idle' : status + '...';
     if (this.el) this.el.setAttribute('data-voice-status', status.toLowerCase().replace(/\s+/g, '_'));
   };
 
@@ -164,7 +175,7 @@
     }).catch(function (err) {
       self._setStatus('Ended');
       self.btnStart.disabled = false;
-      self._appendTranscript('system', 'Voice could not start: ' + (err && err.message ? err.message : String(err)));
+      self._appendMainConversation('system', 'Voice could not start: ' + (err && err.message ? err.message : String(err)));
     });
   };
 
@@ -230,16 +241,16 @@
     var type = String(msg.type || '');
     if (type === 'error') {
       debug('realtime error', msg.error || msg);
-      this._appendTranscript('system', 'Realtime error: ' + ((msg.error && msg.error.message) || 'unknown error'));
+      this._appendMainConversation('system', 'Realtime error: ' + ((msg.error && msg.error.message) || 'unknown error'));
       return;
     }
     debug('event', type);
     if (type === 'response.output_audio_transcript.done' && msg.transcript) {
-      this._appendTranscript('maya', msg.transcript);
+      this._appendMainConversation('maya', msg.transcript);
       this._saveTranscript('maya', msg.transcript, 'audio_transcript');
     }
     if (type === 'conversation.item.input_audio_transcription.completed' && msg.transcript) {
-      this._appendTranscript('student', msg.transcript);
+      this._appendMainConversation('student', msg.transcript);
       this._saveTranscript('student', msg.transcript, 'audio_transcript');
     }
     if (type === 'response.function_call_arguments.done') {
@@ -358,13 +369,17 @@
     }
   };
 
-  VoiceCoach.prototype._appendTranscript = function (role, text) {
-    if (!this.transcript) return;
-    this.transcript.hidden = false;
-    var row = createEl('div', 'maya-voice-transcript-row is-' + role);
-    row.textContent = (role === 'maya' ? 'Maya: ' : role === 'student' ? 'You: ' : '') + text;
-    this.transcript.appendChild(row);
-    this.transcript.scrollTop = this.transcript.scrollHeight;
+  VoiceCoach.prototype._appendMainConversation = function (role, text) {
+    text = String(text || '').trim();
+    if (!text) return;
+    if (this.textCoach && typeof this.textCoach._appendBubble === 'function') {
+      this.textCoach._appendBubble({
+        role: role,
+        message_type: role === 'system' ? 'voice_system' : 'voice_transcript',
+        message_body: text,
+        message: text
+      });
+    }
   };
 
   VoiceCoach.prototype.toggleMute = function () {
@@ -372,7 +387,7 @@
     if (this.localStream) {
       this.localStream.getAudioTracks().forEach(function (track) { track.enabled = !this.muted; }, this);
     }
-    this.btnMute.textContent = this.muted ? 'Unmute' : 'Mute';
+    setIconButton(this.btnMute, this.muted ? 'Unmute microphone' : 'Mute microphone', this.muted ? 'M4.3 3 3 4.3 8.7 10H8c0 2.2 1.8 4 4 4 .7 0 1.3-.2 1.9-.5l1.5 1.5c-1 .7-2.2 1.1-3.4 1.1-2.8 0-5.3-2.1-5.3-5.1H5c0 3.4 2.7 6.2 6 6.7V21h2v-3.3c1.5-.2 2.9-.9 4-1.9l2.7 2.7 1.3-1.3L5.6 1.7 4.3 3zM15 11.2V5c0-1.7-1.3-3-3-3-1.1 0-2 .6-2.6 1.5L15 9.1v2.1zm4-.2h-1.7c0 .8-.2 1.5-.5 2.2l1.2 1.2c.6-1 .9-2.1 1-3.4z' : 'M12 14c1.7 0 3-1.3 3-3V5c0-1.7-1.3-3-3-3S9 3.3 9 5v6c0 1.7 1.3 3 3 3zm5.3-3c0 3-2.5 5.1-5.3 5.1S6.7 14 6.7 11H5c0 3.4 2.7 6.2 6 6.7V21h2v-3.3c3.3-.5 6-3.3 6-6.7h-1.7z');
     this._setStatus(this.muted ? 'Paused' : 'Listening');
   };
 

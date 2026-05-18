@@ -1413,20 +1413,29 @@
 }
 .maya-voice-controls {
   display: flex;
-  gap: 7px;
-  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
 }
 .maya-voice-btn {
   appearance: none;
   border: 1px solid rgba(30,60,114,.18);
-  border-radius: 10px;
+  border-radius: 999px;
   background: #fff;
   color: #12355f;
-  padding: 6px 9px;
-  font: inherit;
-  font-size: 12px;
-  font-weight: 850;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   cursor: pointer;
+}
+.maya-voice-btn svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  display: block;
 }
 .maya-voice-btn.primary {
   background: #12355f;
@@ -1441,17 +1450,11 @@
   opacity: .45;
   cursor: not-allowed;
 }
-.maya-voice-transcript {
-  margin-top: 8px;
-  max-height: 86px;
-  overflow: auto;
-  border-top: 1px solid rgba(15,23,42,.08);
-  padding-top: 7px;
+.maya-voice-live {
+  margin-top: 7px;
   font-size: 11px;
-  color: #334155;
-}
-.maya-voice-transcript-row {
-  margin-bottom: 5px;
+  color: #64748b;
+  line-height: 1.25;
 }
 
 .maya-cockpit .maya-chat-thread {
