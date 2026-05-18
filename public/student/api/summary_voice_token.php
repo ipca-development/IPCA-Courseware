@@ -16,6 +16,17 @@ function sv_fail(int $code, string $message): void
     exit;
 }
 
+function sv_debug(string $message, array $context = []): void
+{
+    if ((string)getenv('CW_OPENAI_REALTIME_DEBUG') !== '1') return;
+    $safeContext = [];
+    foreach ($context as $key => $value) {
+        if (preg_match('/secret|token|key|authorization/i', (string)$key)) continue;
+        $safeContext[$key] = $value;
+    }
+    error_log('[maya_voice_realtime] ' . $message . ($safeContext ? ' ' . json_encode($safeContext, JSON_UNESCAPED_SLASHES) : ''));
+}
+
 function sv_read_json(): array
 {
     $raw = file_get_contents('php://input');
@@ -153,29 +164,53 @@ try {
         . "Internal safety identifier: {$safeUser}\n\n"
         . sv_compact_blueprint_context($bundle);
 
+    $endpoint = 'https://api.openai.com/v1/realtime/client_secrets';
     $model = getenv('CW_OPENAI_REALTIME_MODEL') ?: 'gpt-realtime';
+    $voice = getenv('CW_OPENAI_REALTIME_VOICE') ?: 'marin';
     $body = [
-        'model' => $model,
-        'voice' => getenv('CW_OPENAI_REALTIME_VOICE') ?: 'alloy',
-        'instructions' => $instructions,
-        'input_audio_transcription' => [
-            'model' => 'whisper-1',
+        'expires_after' => [
+            'anchor' => 'created_at',
+            'seconds' => 600,
         ],
-        'tools' => [
-            ['type' => 'function', 'name' => 'get_current_coaching_state', 'description' => 'Fetch current blueprint-bound coaching state.', 'parameters' => ['type' => 'object', 'properties' => new stdClass(), 'additionalProperties' => false]],
-            ['type' => 'function', 'name' => 'analyze_summary_draft', 'description' => 'Analyze the current summary draft against blueprint must-have criteria without rewriting it.', 'parameters' => ['type' => 'object', 'properties' => ['section_id' => ['type' => 'string'], 'summary_excerpt' => ['type' => 'string']], 'required' => ['section_id', 'summary_excerpt'], 'additionalProperties' => false]],
-            ['type' => 'function', 'name' => 'save_voice_transcript_event', 'description' => 'Persist a transcript or coaching marker.', 'parameters' => ['type' => 'object', 'properties' => ['role' => ['type' => 'string'], 'transcript_text' => ['type' => 'string'], 'event_type' => ['type' => 'string'], 'section_id' => ['type' => 'string']], 'required' => ['role', 'transcript_text'], 'additionalProperties' => false]],
-            ['type' => 'function', 'name' => 'set_current_task', 'description' => 'Update the current writing task box.', 'parameters' => ['type' => 'object', 'properties' => ['mode' => ['type' => 'string'], 'task_text' => ['type' => 'string'], 'section_id' => ['type' => 'string']], 'required' => ['mode', 'task_text'], 'additionalProperties' => false]],
+        'session' => [
+            'type' => 'realtime',
+            'model' => $model,
+            'instructions' => $instructions,
+            'output_modalities' => ['audio'],
+            'audio' => [
+                'input' => [
+                    'transcription' => [
+                        'model' => 'whisper-1',
+                    ],
+                    'turn_detection' => [
+                        'type' => 'server_vad',
+                        'create_response' => true,
+                        'interrupt_response' => true,
+                        'prefix_padding_ms' => 300,
+                        'silence_duration_ms' => 650,
+                    ],
+                ],
+                'output' => [
+                    'voice' => $voice,
+                ],
+            ],
+            'tools' => [
+                ['type' => 'function', 'name' => 'get_current_coaching_state', 'description' => 'Fetch current blueprint-bound coaching state.', 'parameters' => ['type' => 'object', 'properties' => new stdClass(), 'additionalProperties' => false]],
+                ['type' => 'function', 'name' => 'analyze_summary_draft', 'description' => 'Analyze the current summary draft against blueprint must-have criteria without rewriting it.', 'parameters' => ['type' => 'object', 'properties' => ['section_id' => ['type' => 'string'], 'summary_excerpt' => ['type' => 'string']], 'required' => ['section_id', 'summary_excerpt'], 'additionalProperties' => false]],
+                ['type' => 'function', 'name' => 'save_voice_transcript_event', 'description' => 'Persist a transcript or coaching marker.', 'parameters' => ['type' => 'object', 'properties' => ['role' => ['type' => 'string'], 'transcript_text' => ['type' => 'string'], 'event_type' => ['type' => 'string'], 'section_id' => ['type' => 'string']], 'required' => ['role', 'transcript_text'], 'additionalProperties' => false]],
+                ['type' => 'function', 'name' => 'set_current_task', 'description' => 'Update the current writing task box.', 'parameters' => ['type' => 'object', 'properties' => ['mode' => ['type' => 'string'], 'task_text' => ['type' => 'string'], 'section_id' => ['type' => 'string']], 'required' => ['mode', 'task_text'], 'additionalProperties' => false]],
+            ],
+            'tool_choice' => 'auto',
         ],
-        'tool_choice' => 'auto',
     ];
 
-    $ch = curl_init('https://api.openai.com/v1/realtime/sessions');
+    sv_debug('creating client secret', ['endpoint' => $endpoint, 'model' => $model, 'voice' => $voice]);
+    $ch = curl_init($endpoint);
     curl_setopt($ch, CURLOPT_POST, true);
     curl_setopt($ch, CURLOPT_HTTPHEADER, [
         'Authorization: Bearer ' . cw_openai_key(),
         'Content-Type: application/json',
-        'OpenAI-Beta: realtime=v1',
+        'OpenAI-Safety-Identifier: ' . hash('sha256', $safeUser),
     ]);
     curl_setopt($ch, CURLOPT_POSTFIELDS, json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
@@ -186,21 +221,28 @@ try {
     curl_close($ch);
     if ($resp === false) throw new RuntimeException('OpenAI Realtime request failed: ' . $err);
     $json = json_decode((string)$resp, true);
+    sv_debug('client secret response', [
+        'http_code' => $code,
+        'has_value' => is_array($json) && isset($json['value']),
+        'session_id' => is_array($json) ? (string)($json['session']['id'] ?? '') : '',
+    ]);
     if (!is_array($json) || $code < 200 || $code >= 300) {
         $msg = is_array($json) ? (string)($json['error']['message'] ?? ('HTTP ' . $code)) : substr((string)$resp, 0, 200);
         throw new RuntimeException('OpenAI Realtime error: ' . $msg);
     }
-    $secret = (string)($json['client_secret']['value'] ?? $json['client_secret'] ?? '');
+    $secret = (string)($json['value'] ?? $json['client_secret']['value'] ?? $json['client_secret'] ?? '');
     if ($secret === '') throw new RuntimeException('OpenAI Realtime response did not include a client secret.');
-    sv_update_realtime_id($pdo, $voiceSessionId, (string)($json['id'] ?? ''));
+    $realtimeSessionId = (string)($json['session']['id'] ?? '');
+    sv_update_realtime_id($pdo, $voiceSessionId, $realtimeSessionId);
 
     echo json_encode([
         'ok' => true,
         'client_secret' => $secret,
-        'session_id' => (string)($json['id'] ?? ''),
+        'session_id' => $realtimeSessionId,
         'voice_session_id' => $voiceSessionId,
         'blueprint_version_id' => (int)$bundle['version_id'],
         'realtime_model' => $model,
+        'realtime_endpoint' => 'https://api.openai.com/v1/realtime/calls',
     ]);
 } catch (Throwable $e) {
     sv_fail(500, $e->getMessage());

@@ -32,6 +32,15 @@
     return el;
   }
 
+  function debug() {
+    try {
+      if (!global.localStorage || global.localStorage.getItem('mayaVoiceDebug') !== '1') return;
+      var args = Array.prototype.slice.call(arguments);
+      args.unshift('[maya-voice]');
+      global.console.debug.apply(global.console, args);
+    } catch (e) {}
+  }
+
   function VoiceCoach(root, config, textCoach) {
     this.root = root;
     this.config = config || {};
@@ -44,6 +53,7 @@
     this.voiceSessionId = 0;
     this.blueprintVersionId = 0;
     this.realtimeModel = '';
+    this.realtimeEndpoint = 'https://api.openai.com/v1/realtime/calls';
     this.connected = false;
     this.muted = false;
     this.summaryTimer = null;
@@ -137,6 +147,13 @@
       self.voiceSessionId = parseInt(token.voice_session_id, 10) || 0;
       self.blueprintVersionId = parseInt(token.blueprint_version_id, 10) || 0;
       self.realtimeModel = token.realtime_model || 'gpt-realtime';
+      self.realtimeEndpoint = token.realtime_endpoint || 'https://api.openai.com/v1/realtime/calls';
+      debug('token received', {
+        model: self.realtimeModel,
+        endpoint: self.realtimeEndpoint,
+        session_id: token.session_id || '',
+        voice_session_id: self.voiceSessionId
+      });
       return self._connectRealtime(token.client_secret);
     }).then(function () {
       self.connected = true;
@@ -154,6 +171,11 @@
   VoiceCoach.prototype._connectRealtime = function (clientSecret) {
     var self = this;
     this.pc = new RTCPeerConnection();
+    this.pc.onconnectionstatechange = function () {
+      debug('peer connection state', self.pc.connectionState);
+      if (self.pc.connectionState === 'failed' || self.pc.connectionState === 'disconnected') self._setStatus('Connection issue');
+    };
+    this.pc.oniceconnectionstatechange = function () { debug('ice connection state', self.pc.iceConnectionState); };
     this.remoteAudio = document.createElement('audio');
     this.remoteAudio.autoplay = true;
     this.remoteAudio.setAttribute('playsinline', 'playsinline');
@@ -162,7 +184,12 @@
       self._setStatus('Maya speaking');
     };
     this.dc = this.pc.createDataChannel('oai-events');
-    this.dc.onopen = function () { self._setStatus('Listening'); };
+    this.dc.onopen = function () {
+      debug('data channel open');
+      self._setStatus('Listening');
+    };
+    this.dc.onclose = function () { debug('data channel close'); };
+    this.dc.onerror = function (event) { debug('data channel error', event); };
     this.dc.onmessage = function (event) { self._handleRealtimeEvent(event); };
 
     return navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
@@ -172,11 +199,12 @@
     }).then(function (offer) {
       return self.pc.setLocalDescription(offer).then(function () { return offer; });
     }).then(function (offer) {
-      return fetch('https://api.openai.com/v1/realtime?model=' + encodeURIComponent(self.realtimeModel), {
+      var endpoint = self.realtimeEndpoint || 'https://api.openai.com/v1/realtime/calls';
+      debug('posting sdp offer', { endpoint: endpoint, model: self.realtimeModel });
+      return fetch(endpoint, {
         method: 'POST',
         headers: {
           Authorization: 'Bearer ' + clientSecret,
-          'OpenAI-Beta': 'realtime=v1',
           'Content-Type': 'application/sdp'
         },
         body: offer.sdp
@@ -191,6 +219,7 @@
       }
       return res.text();
     }).then(function (answerSdp) {
+      debug('sdp answer received', { length: String(answerSdp || '').length });
       return self.pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
     });
   };
@@ -199,18 +228,36 @@
     var msg = null;
     try { msg = JSON.parse(event.data); } catch (e) { return; }
     var type = String(msg.type || '');
-    if (type === 'response.audio_transcript.done' && msg.transcript) {
+    if (type === 'error') {
+      debug('realtime error', msg.error || msg);
+      this._appendTranscript('system', 'Realtime error: ' + ((msg.error && msg.error.message) || 'unknown error'));
+      return;
+    }
+    debug('event', type);
+    if (type === 'response.output_audio_transcript.done' && msg.transcript) {
       this._appendTranscript('maya', msg.transcript);
       this._saveTranscript('maya', msg.transcript, 'audio_transcript');
     }
-    if ((type === 'conversation.item.input_audio_transcription.completed' || type === 'input_audio_transcription.completed') && msg.transcript) {
+    if (type === 'conversation.item.input_audio_transcription.completed' && msg.transcript) {
       this._appendTranscript('student', msg.transcript);
       this._saveTranscript('student', msg.transcript, 'audio_transcript');
     }
     if (type === 'response.function_call_arguments.done') {
       this._runTool(msg.name, msg.arguments || '{}', msg.call_id || '');
     }
-    if (type === 'response.done') this._setStatus('Listening');
+    if (type === 'response.done') {
+      this._handleResponseDone(msg);
+      this._setStatus('Listening');
+    }
+  };
+
+  VoiceCoach.prototype._handleResponseDone = function (msg) {
+    var outputs = msg && msg.response && Array.isArray(msg.response.output) ? msg.response.output : [];
+    for (var i = 0; i < outputs.length; i += 1) {
+      if (outputs[i] && outputs[i].type === 'function_call') {
+        this._runTool(outputs[i].name, outputs[i].arguments || '{}', outputs[i].call_id || '');
+      }
+    }
   };
 
   VoiceCoach.prototype._runTool = function (name, argString, callId) {
@@ -257,7 +304,7 @@
     this.dc.send(JSON.stringify({
       type: 'response.create',
       response: {
-        modalities: ['audio', 'text'],
+        output_modalities: ['audio'],
         instructions: instructions || 'Continue coaching the student using the active blueprint.'
       }
     }));
