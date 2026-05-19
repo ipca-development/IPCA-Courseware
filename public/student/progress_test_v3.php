@@ -74,6 +74,17 @@ cw_header('Progress Test V3');
 
     <div class="maya-stage" data-ptv3-stage>Preparing questions</div>
 
+    <section class="ptv3-video-card" aria-label="Student recording preview">
+      <div class="ptv3-video-frame">
+        <video data-ptv3-video autoplay playsinline muted></video>
+        <div class="ptv3-video-fallback" data-ptv3-video-fallback>Camera preview</div>
+      </div>
+      <div class="ptv3-video-copy">
+        <div class="ptv3-video-title"><?= h($firstName) ?></div>
+        <div class="ptv3-recording-pill" data-ptv3-recording>Not recording yet</div>
+      </div>
+    </section>
+
     <section class="ptv3-progress-card" aria-label="Progress test progress">
       <div class="ptv3-progress-top">
         <div>

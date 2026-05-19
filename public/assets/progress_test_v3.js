@@ -29,7 +29,10 @@
     textMode: $('[data-ptv3-text]'),
     textBox: $('[data-ptv3-text-box]'),
     textAnswer: $('[data-ptv3-text-answer]'),
-    submitText: $('[data-ptv3-submit-text]')
+    submitText: $('[data-ptv3-submit-text]'),
+    video: $('[data-ptv3-video]'),
+    videoFallback: $('[data-ptv3-video-fallback]'),
+    recording: $('[data-ptv3-recording]')
   };
 
   var state = null;
@@ -63,6 +66,9 @@
   var answerSettleMs = 4200;
   var prepTimer = null;
   var prepPct = 0;
+  var lastBubbleKey = '';
+  var lastBubbleAt = 0;
+  var donePromptShownForAnswer = '';
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -98,6 +104,12 @@
   }
 
   function addBubble(role, label, message, kind) {
+    message = String(message || '').trim();
+    var bubbleKey = role + '|' + (kind || '') + '|' + message.toLowerCase().replace(/\s+/g, ' ');
+    var now = Date.now();
+    if (message && bubbleKey === lastBubbleKey && now - lastBubbleAt < 2500) return null;
+    lastBubbleKey = bubbleKey;
+    lastBubbleAt = now;
     if (els.empty) els.empty.style.display = 'none';
     var row = document.createElement('div');
     row.className = 'maya-chat-row ' + (role === 'student' ? 'is-student' : 'is-maya');
@@ -108,7 +120,7 @@
     meta.className = 'maya-chat-meta';
     meta.textContent = label || (role === 'student' ? 'Student' : 'Maya');
     var body = document.createElement('div');
-    body.textContent = message || '';
+    body.textContent = message;
     bubble.appendChild(meta);
     bubble.appendChild(body);
     row.appendChild(bubble);
@@ -122,14 +134,28 @@
     if (!state) return;
     attemptId = parseInt(state.attempt_id || attemptId || 0, 10) || 0;
     var total = parseInt(state.total_questions || 0, 10) || 0;
-    var evaluated = parseInt(state.evaluated_count || 0, 10) || 0;
-    var idx = parseInt(state.current_idx || 0, 10) || 0;
-    var scoreProgress = state.score_progress == null ? '--' : String(state.score_progress) + '%';
+    var items = Array.isArray(state.items) ? state.items : [];
+    var evaluated = items.filter(function (item) { return !!item.evaluated; }).length;
+    if (!items.length) evaluated = parseInt(state.evaluated_count || 0, 10) || 0;
+    var idx = 0;
+    var currentId = parseInt(state.current_item_id || 0, 10) || 0;
+    var scoreSum = 0;
+    var scoreCount = 0;
+    items.forEach(function (item) {
+      if (parseInt(item.id, 10) === currentId) idx = parseInt(item.idx || 0, 10) || 0;
+      if (item.evaluated && item.score_pct != null && item.score_pct !== '') {
+        scoreSum += parseFloat(item.score_pct) || 0;
+        scoreCount += 1;
+      }
+    });
+    if (!idx) idx = parseInt(state.current_idx || 0, 10) || 0;
+    var computedScoreProgress = scoreCount ? Math.round((scoreSum / scoreCount) * 10) / 10 : null;
+    var scoreProgress = computedScoreProgress == null ? '--' : String(computedScoreProgress) + '%';
     var finalScore = state.score_pct == null ? scoreProgress : String(state.score_pct) + '%';
     text(els.title, 'Progress Test V3');
     text(els.attempt, 'Attempt status: ' + (state.formal_result_label || state.attempt_status || state.status || 'Ready'));
     text(els.score, 'Score: ' + finalScore);
-    text(els.ready, String(state.ready_questions || total || 0));
+    text(els.ready, total ? String(total) : '0');
     text(els.current, total ? (idx + '/' + total) : '0/0');
     text(els.evaluated, String(evaluated));
     text(els.final, finalScore);
@@ -138,9 +164,25 @@
       els.bar.style.width = clamp(pct, 0, 100) + '%';
     }
     currentItem = null;
-    (state.items || []).forEach(function (item) {
+    items.forEach(function (item) {
       if (parseInt(item.id, 10) === parseInt(state.current_item_id, 10)) currentItem = item;
     });
+  }
+
+  function setRecording(active, label) {
+    if (!els.recording) return;
+    els.recording.textContent = label || (active ? 'Recording in Progress' : 'Not recording yet');
+    els.recording.setAttribute('data-recording', active ? '1' : '0');
+  }
+
+  function startCameraPreview(stream) {
+    if (!els.video || !stream) return;
+    try {
+      els.video.srcObject = stream;
+      if (els.videoFallback) els.videoFallback.hidden = true;
+      var p = els.video.play();
+      if (p && typeof p.catch === 'function') p.catch(function () {});
+    } catch (e) {}
   }
 
   function setProgressBarPct(pct) {
@@ -254,8 +296,12 @@
     };
     dc.onclose = function () { if (connected) handleDisconnect(); };
 
-    return navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+    return navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } }).catch(function () {
+      return navigator.mediaDevices.getUserMedia({ audio: true });
+    }).then(function (stream) {
       localStream = stream;
+      startCameraPreview(stream);
+      setRecording(true, 'Recording in Progress');
       stream.getTracks().forEach(function (track) { pc.addTrack(track, stream); });
       return pc.createOffer();
     }).then(function (offer) {
@@ -411,6 +457,7 @@
     answerSegments = [];
     awaitingDoneConfirmation = false;
     doneConfirmationText = '';
+    donePromptShownForAnswer = '';
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
     answerSettleTimer = null;
   }
@@ -422,6 +469,7 @@
   }
 
   function scheduleAnswerSettle() {
+    if (awaitingDoneConfirmation) return;
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
     answerSettleTimer = setTimeout(function () {
       answerSettleTimer = null;
@@ -431,7 +479,10 @@
   }
 
   function promptDoneConfirmation() {
-    if (!awaitingAnswer || responseInProgress || awaitingDoneConfirmation || !combinedAnswerText('')) return;
+    var answerText = combinedAnswerText('');
+    if (!awaitingAnswer || responseInProgress || awaitingDoneConfirmation || !answerText) return;
+    if (donePromptShownForAnswer === answerText) return;
+    donePromptShownForAnswer = answerText;
     awaitingDoneConfirmation = true;
     awaitingAnswer = false;
     doneConfirmationText = 'I heard your answer. Are you finished, or do you want to add more? Say "done" to score it, or continue answering.';
@@ -451,6 +502,16 @@
     setStatus('Waiting for readiness confirmation. Say "ready" when you want to begin.', 'Readiness check');
     addBubble('maya', 'Maya', 'I heard you, but I will not start the scored test until you say "ready".', 'warning');
     sendResponse('Do not ask a test question yet. Briefly say: "I heard you, but I will not start the scored test until you say ready."', 'audio_check');
+  }
+
+  function isMayaEchoTranscript(transcript) {
+    var t = String(transcript || '').toLowerCase().replace(/\s+/g, ' ').trim();
+    return t.indexOf('i heard your answer') !== -1
+      || t.indexOf('are you finished') !== -1
+      || t.indexOf('say done to score') !== -1
+      || t.indexOf('do you want to add more') !== -1
+      || t.indexOf('i heard you, but i will not start') !== -1
+      || t.indexOf('hello ' + String(cfg.firstName || '').toLowerCase()) === 0;
   }
 
   function askCurrentQuestion() {
@@ -505,6 +566,7 @@
   function handleStudentTranscript(msg) {
     var transcript = String(msg.transcript || '').trim();
     if (!transcript) return;
+    if (isMayaEchoTranscript(transcript)) return;
     var key = transcriptKey(msg);
     if (processedTranscripts[key]) return;
     processedTranscripts[key] = true;
@@ -527,20 +589,22 @@
         var finalAnswer = combinedAnswerText('');
         if (!finalAnswer) return;
         awaitingDoneConfirmation = false;
-        if (activeStudentBubble) activeStudentBubble.body.textContent = finalAnswer;
+        if (activeStudentBubble && activeStudentBubble.body) activeStudentBubble.body.textContent = finalAnswer;
         evaluateBufferedAnswer(finalAnswer);
         return;
       }
       if (isContinueSpeech(transcript)) {
         awaitingDoneConfirmation = false;
+        donePromptShownForAnswer = '';
         setStatus('Keep going. Maya will wait.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
         scheduleAnswerSettle();
         return;
       }
       awaitingDoneConfirmation = false;
+      donePromptShownForAnswer = '';
     }
     answerSegments.push(transcript);
-    if (activeStudentBubble) {
+    if (activeStudentBubble && activeStudentBubble.body) {
       activeStudentBubble.body.textContent = combinedAnswerText('');
     } else {
       activeStudentBubble = addBubble('student', 'Student', combinedAnswerText(''), 'answer');
@@ -630,6 +694,9 @@
       localStream.getTracks().forEach(function (track) { track.stop(); });
       localStream = null;
     }
+    if (els.video) els.video.srcObject = null;
+    if (els.videoFallback) els.videoFallback.hidden = false;
+    setRecording(false, notifyBackend ? 'Voice ended' : 'Recording stopped');
     if (dc) {
       try { dc.close(); } catch (e) {}
       dc = null;
