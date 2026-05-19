@@ -73,9 +73,21 @@
   var feedbackPlaybackTimer = null;
   var pendingNextQuestionAfterFeedback = false;
   var pendingCompleteAfterFeedback = false;
+  var phase = 'idle';
+  var answerCaptureActive = false;
+  var submitAfterFlushTimer = null;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
+  }
+
+  function setMayaSpeaking(active) {
+    root.setAttribute('data-maya-speaking', active ? '1' : '0');
+  }
+
+  function setStudentAnswering(active) {
+    answerCaptureActive = !!active;
+    root.setAttribute('data-student-answering', active ? '1' : '0');
   }
 
   function setStatus(message, stage) {
@@ -116,11 +128,14 @@
     activeStudentBubble = null;
     activeAnswerItemId = 0;
     if (els.finish) els.finish.disabled = true;
-    setFinishButton('Finished Answer', true, 'answer');
+    setFinishButton('Start Answer', true, 'answer');
     awaitingAnswer = false;
     awaitingClarification = false;
     audioCheckActive = false;
     awaitingAudioCheck = false;
+    setStudentAnswering(false);
+    setMayaSpeaking(false);
+    phase = 'preparing';
     if (els.thread) {
       els.thread.innerHTML = '';
       if (els.empty) {
@@ -212,6 +227,13 @@
     els.finish.setAttribute('data-action-mode', mode || 'answer');
   }
 
+  function setMicEnabled(enabled) {
+    if (!localStream) return;
+    localStream.getAudioTracks().forEach(function (track) {
+      track.enabled = !!enabled && !muted;
+    });
+  }
+
   function startCameraPreview(stream) {
     if (!els.video || !stream || !stream.getVideoTracks || stream.getVideoTracks().length === 0) return;
     try {
@@ -278,6 +300,7 @@
 
   function loadQuestions() {
     resetClientConversation();
+    phase = 'preparing';
     setCoachState('thinking');
     setStatus('Generating/loading questions. Microphone is closed.', 'Preparing questions');
     startPrepProgress();
@@ -289,6 +312,7 @@
       setProgressBarPct(100);
       updateProgress(out.state);
       setCoachState('ready');
+      phase = 'ready';
       setStatus(out.state && out.state.resume_mode === 'resumed' ? 'Resumed existing attempt. Microphone is still closed.' : 'Ready to start a new/reset attempt. Microphone is still closed.', 'Ready to start');
       els.start.disabled = false;
       addBubble('maya', 'Maya', (out.state && out.state.resume_mode === 'resumed') ? 'I found an unfinished progress test attempt. Click Start Progress Test to resume from the current question.' : 'Ready to start. I have loaded your generated progress test questions. Click Start Progress Test when you are ready.', 'greeting');
@@ -354,6 +378,7 @@
     return navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function (stream) {
       localStream = stream;
       setRecording(true, 'Recording in Progress');
+      setMicEnabled(true);
       stream.getTracks().forEach(function (track) { pc.addTrack(track, stream); });
       return pc.createOffer();
     }).then(function (offer) {
@@ -397,6 +422,7 @@
       els.end.disabled = false;
       setFinishButton('Finished Answer', true, 'answer');
       setCoachState('ready');
+      phase = 'readiness';
       startAudioCheck();
     }).catch(function (err) {
       els.start.disabled = false;
@@ -416,6 +442,7 @@
     }
     mayaTurnPurpose = purpose || '';
     responseInProgress = true;
+    setMayaSpeaking(true);
     dc.send(JSON.stringify({
       type: 'response.create',
       response: {
@@ -429,6 +456,7 @@
     var finishedPurpose = mayaTurnPurpose;
     mayaTurnPurpose = '';
     responseInProgress = false;
+    setMayaSpeaking(false);
     if (pendingInstructions) {
       var next = pendingInstructions;
       var nextPurpose = pendingPurpose;
@@ -440,14 +468,19 @@
     if ((finishedPurpose === 'question' || finishedPurpose === 'clarification') && acceptAnswerAfterMaya) {
       acceptAnswerAfterMaya = false;
       awaitingAnswer = true;
+      phase = 'answering';
+      setStudentAnswering(false);
+      setMicEnabled(false);
+      setFinishButton('Start Answer', false, 'answer');
       setCoachState('ready');
-      setStatus('Listening for your answer now.', finishedPurpose === 'clarification' ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+      setStatus('Tap Start Answer when you are ready to speak.', finishedPurpose === 'clarification' ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       return;
     }
     if (finishedPurpose === 'feedback' && nextQuestionAfterFeedback) {
       nextQuestionAfterFeedback = false;
       if (pendingNextQuestionAfterFeedback) {
         pendingNextQuestionAfterFeedback = false;
+        phase = 'next_ready';
         setFinishButton('Next Question', false, 'next');
         setStatus('Maya finished explaining. Tap Next Question when ready.', 'Ready for next question');
       }
@@ -457,6 +490,7 @@
       completeAfterFeedback = false;
       if (pendingCompleteAfterFeedback) {
         pendingCompleteAfterFeedback = false;
+        phase = 'completing';
         completeTest();
       }
       return;
@@ -481,10 +515,12 @@
 
   function startAudioCheck() {
     audioCheckActive = true;
+    phase = 'readiness';
     awaitingAudioCheck = false;
     awaitingAnswer = false;
     acceptAnswerAfterMaya = false;
     activeStudentBubble = null;
+    setStudentAnswering(false);
     var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
     var readyPrompt = 'Hello ' + firstName + ', are you ready for your progress test?';
     setStatus('Maya is confirming you are ready. This is not scored.', 'Readiness check');
@@ -531,9 +567,9 @@
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
     answerSettleTimer = setTimeout(function () {
       answerSettleTimer = null;
-      setStatus('Use Finished Answer when you are ready to score this answer.', 'Answer captured');
+      setStatus('Click End Answer when you are finished.', 'Answer captured');
     }, answerSettleMs);
-    setStatus('Listening. Tap Finished Answer when you are done.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+    setStatus('Recording your answer. Click End Answer when finished.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
   }
 
   function handleAudioCheckTranscript(transcript) {
@@ -541,6 +577,7 @@
     if (audioCheckConfirmsReady(transcript)) {
       audioCheckActive = false;
       awaitingAudioCheck = false;
+      phase = 'asking';
       addBubble('maya', 'Maya', 'Great, I can hear you. Starting Question 1 now.', 'transition');
       askCurrentQuestion();
       return;
@@ -562,6 +599,7 @@
 
   function askCurrentQuestion() {
     if (!currentItem) return;
+    phase = 'asking';
     resetAnswerBuffer();
     awaitingAnswer = false;
     acceptAnswerAfterMaya = true;
@@ -570,6 +608,9 @@
     clarificationQuestion = '';
     activeStudentBubble = null;
     activeAnswerItemId = 0;
+    setStudentAnswering(false);
+    setMicEnabled(false);
+    setFinishButton('Start Answer', true, 'answer');
     setStatus('Maya is asking question ' + currentItem.idx + '.', 'Question ' + currentItem.idx + '/' + state.total_questions);
     addBubble('maya', 'Maya', currentItem.spoken_question || ('Question ' + currentItem.idx + '. ' + currentItem.prompt), 'question');
     api('save_transcript_segment', {
@@ -622,6 +663,7 @@
       handleAudioCheckTranscript(transcript);
       return;
     }
+    if (phase !== 'answering' || !answerCaptureActive) return;
     if (!awaitingAnswer || responseInProgress || !currentItem) return;
     if (isSetupOrHoldSpeech(transcript)) {
       resetAnswerBuffer();
@@ -641,7 +683,7 @@
         awaitingDoneConfirmation = false;
         donePromptShownForAnswer = '';
         ignoreTranscriptsUntil = 0;
-        setStatus('Keep going. Maya will wait.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+        setStatus('Keep going. Click End Answer when finished.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
         scheduleAnswerSettle();
         return;
       }
@@ -659,7 +701,7 @@
     } else {
       activeStudentBubble = addBubble('student', 'Student', combinedAnswerText(''), 'answer');
     }
-    setFinishButton('Finished Answer', false, 'answer');
+    setFinishButton('End Answer', false, 'recording');
     api('save_transcript_segment', {
       item_id: currentItem.id,
       role: 'student',
@@ -671,18 +713,45 @@
 
   function finishCurrentAnswer() {
     if (els.finish && els.finish.getAttribute('data-action-mode') === 'next') {
-      setFinishButton('Finished Answer', true, 'answer');
+      if (phase !== 'next_ready') return;
+      phase = 'asking';
+      setFinishButton('Start Answer', true, 'answer');
       addBubble('maya', 'Maya', 'OK, let’s go to question ' + (state.current_idx || '') + '.', 'transition');
       askCurrentQuestion();
       return;
     }
+    if (phase === 'answering' && !answerCaptureActive) {
+      setStudentAnswering(true);
+      setMicEnabled(true);
+      setFinishButton('End Answer', false, 'recording');
+      setStatus('Recording your answer. Click End Answer when finished.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+      return;
+    }
+    if (phase === 'answering' && answerCaptureActive) {
+      setStudentAnswering(false);
+      setMicEnabled(false);
+      setFinishButton('Submitting...', true, 'wait');
+      if (submitAfterFlushTimer) clearTimeout(submitAfterFlushTimer);
+      submitAfterFlushTimer = setTimeout(function () {
+        submitAfterFlushTimer = null;
+        submitCurrentBufferedAnswer();
+      }, 900);
+      return;
+    }
+  }
+
+  function submitCurrentBufferedAnswer() {
     var finalAnswer = combinedAnswerText('');
-    if (!currentItem || !finalAnswer || responseInProgress) return;
+    if (phase !== 'answering' || !currentItem || !finalAnswer || responseInProgress) {
+      setFinishButton('Start Answer', false, 'answer');
+      return;
+    }
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
     answerSettleTimer = null;
     awaitingDoneConfirmation = false;
     ignoreTranscriptsUntil = 0;
     setFinishButton('Maya Explaining...', true, 'wait');
+    phase = 'evaluating';
     if (activeStudentBubble && activeStudentBubble.body) activeStudentBubble.body.textContent = finalAnswer;
     evaluateBufferedAnswer(finalAnswer);
   }
@@ -727,19 +796,22 @@
       if (out.next_action === 'complete_test') {
         completeAfterFeedback = true;
         pendingCompleteAfterFeedback = true;
+        phase = 'feedback';
         sendResponse('Say this backend score and feedback concisely. Do not add your own score: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
       } else {
         nextQuestionAfterFeedback = true;
         pendingNextQuestionAfterFeedback = true;
+        phase = 'feedback';
         sendResponse('Say this backend score and feedback concisely. Do not add your own score: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
         if (feedbackPlaybackTimer) clearTimeout(feedbackPlaybackTimer);
         feedbackPlaybackTimer = null;
       }
     }).catch(function (err) {
       awaitingAnswer = true;
+      phase = 'answering';
       setCoachState('error');
       setStatus('Evaluation failed. Please retry by voice.', 'Evaluation issue');
-      setFinishButton('Finished Answer', false, 'answer');
+      setFinishButton('Start Answer', false, 'answer');
       addBubble('maya', 'System', 'Evaluation failed: ' + err.message, 'warning');
     });
   }
@@ -753,6 +825,7 @@
       sendResponse('Say this short final progress test summary exactly and naturally: "' + (out.summary || 'Progress test complete.') + '"', 'final');
       setCoachState('ready');
       setStatus('Completed.', 'Complete');
+      phase = 'completed';
       els.mute.disabled = true;
       els.end.disabled = true;
     }).catch(function (err) {
@@ -802,7 +875,7 @@
   function toggleMute() {
     if (!localStream) return;
     muted = !muted;
-    localStream.getAudioTracks().forEach(function (track) { track.enabled = !muted; });
+    setMicEnabled(answerCaptureActive || phase === 'readiness');
     text(els.mute, muted ? 'Unmute Microphone' : 'Mute Microphone');
   }
 
@@ -811,6 +884,7 @@
   els.mute.addEventListener('click', toggleMute);
   els.end.addEventListener('click', function () {
     resetAnswerBuffer();
+    phase = 'aborted';
     stopRealtime(false);
     api('end_oral_test_without_penalty').then(function () {
       attemptId = 0;
