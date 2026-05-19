@@ -24,6 +24,7 @@
     empty: $('[data-ptv3-empty]'),
     liveRow: $('[data-ptv3-live-row]'),
     start: $('[data-ptv3-start]'),
+    finish: $('[data-ptv3-finish]'),
     mute: $('[data-ptv3-mute]'),
     end: $('[data-ptv3-end]'),
     video: $('[data-ptv3-video]'),
@@ -69,6 +70,7 @@
   var donePromptShownForAnswer = '';
   var ignoreTranscriptsUntil = 0;
   var activeAnswerItemId = 0;
+  var feedbackPlaybackTimer = null;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -111,6 +113,7 @@
     recentBubbleKeys = {};
     activeStudentBubble = null;
     activeAnswerItemId = 0;
+    if (els.finish) els.finish.disabled = true;
     awaitingAnswer = false;
     awaitingClarification = false;
     audioCheckActive = false;
@@ -508,25 +511,12 @@
   }
 
   function scheduleAnswerSettle() {
-    if (awaitingDoneConfirmation) return;
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
     answerSettleTimer = setTimeout(function () {
       answerSettleTimer = null;
-      promptDoneConfirmation();
+      setStatus('Use Finished Answer when you are ready to score this answer.', 'Answer captured');
     }, answerSettleMs);
-    setStatus('Listening. Pause when you are done; Maya will confirm before scoring.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
-  }
-
-  function promptDoneConfirmation() {
-    var answerText = combinedAnswerText('');
-    if (!awaitingAnswer || responseInProgress || awaitingDoneConfirmation || !answerText) return;
-    if (donePromptShownForAnswer === answerText) return;
-    donePromptShownForAnswer = answerText;
-    awaitingDoneConfirmation = true;
-    awaitingAnswer = true;
-    doneConfirmationText = 'I heard your answer. Are you finished, or do you want to add more? Say "done" to score it, or continue answering.';
-    addBubble('maya', 'Maya', doneConfirmationText, 'transition');
-    setStatus('Confirm when you are finished. Say "done" to score, or continue answering.', 'Confirm answer');
+    setStatus('Listening. Tap Finished Answer when you are done.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
   }
 
   function handleAudioCheckTranscript(transcript) {
@@ -627,12 +617,7 @@
     }
     if (awaitingDoneConfirmation) {
       if (isDoneSpeech(transcript)) {
-        var finalAnswer = combinedAnswerText('');
-        if (!finalAnswer) return;
-        awaitingDoneConfirmation = false;
-        ignoreTranscriptsUntil = 0;
-        if (activeStudentBubble && activeStudentBubble.body) activeStudentBubble.body.textContent = finalAnswer;
-        evaluateBufferedAnswer(finalAnswer);
+        finishCurrentAnswer();
         return;
       }
       if (isContinueSpeech(transcript)) {
@@ -657,6 +642,7 @@
     } else {
       activeStudentBubble = addBubble('student', 'Student', combinedAnswerText(''), 'answer');
     }
+    if (els.finish) els.finish.disabled = false;
     api('save_transcript_segment', {
       item_id: currentItem.id,
       role: 'student',
@@ -664,6 +650,23 @@
       transcript_text: transcript
     }).catch(function () {});
     scheduleAnswerSettle();
+  }
+
+  function estimateSpeechMs(textValue) {
+    var words = String(textValue || '').trim().split(/\s+/).filter(Boolean).length;
+    return Math.max(2500, Math.min(11000, Math.round((words / 2.4) * 1000) + 900));
+  }
+
+  function finishCurrentAnswer() {
+    var finalAnswer = combinedAnswerText('');
+    if (!currentItem || !finalAnswer || responseInProgress) return;
+    if (answerSettleTimer) clearTimeout(answerSettleTimer);
+    answerSettleTimer = null;
+    awaitingDoneConfirmation = false;
+    ignoreTranscriptsUntil = 0;
+    if (els.finish) els.finish.disabled = true;
+    if (activeStudentBubble && activeStudentBubble.body) activeStudentBubble.body.textContent = finalAnswer;
+    evaluateBufferedAnswer(finalAnswer);
   }
 
   function evaluateBufferedAnswer(finalAnswer) {
@@ -700,14 +703,21 @@
       }
 
       var scoreLine = 'You scored ' + Math.round(out.score_pct || 0) + '% on this question.';
-      addBubble('maya', 'Maya', scoreLine + '\n' + (out.feedback_for_student || ''), 'score');
+      var feedbackText = scoreLine + '\n' + (out.feedback_for_student || '');
+      addBubble('maya', 'Maya', feedbackText, 'score');
 
       if (out.next_action === 'complete_test') {
         completeAfterFeedback = true;
         sendResponse('Say this backend score and feedback concisely. Do not add your own score: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
       } else {
-        nextQuestionAfterFeedback = true;
+        nextQuestionAfterFeedback = false;
         sendResponse('Say this backend score and feedback concisely. Do not add your own score: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
+        if (feedbackPlaybackTimer) clearTimeout(feedbackPlaybackTimer);
+        feedbackPlaybackTimer = setTimeout(function () {
+          feedbackPlaybackTimer = null;
+          addBubble('maya', 'Maya', 'OK, let’s go to question ' + (state.current_idx || '') + '.', 'transition');
+          askCurrentQuestion();
+        }, estimateSpeechMs(feedbackText));
       }
     }).catch(function (err) {
       awaitingAnswer = true;
@@ -780,6 +790,7 @@
   }
 
   els.start.addEventListener('click', startTest);
+  els.finish.addEventListener('click', finishCurrentAnswer);
   els.mute.addEventListener('click', toggleMute);
   els.end.addEventListener('click', function () {
     resetAnswerBuffer();

@@ -118,6 +118,7 @@ cw_header('Progress Test V3');
 
     <section class="ptv3-controls" aria-label="Progress test controls">
       <button class="ptv3-btn primary" type="button" data-ptv3-start disabled>Start Progress Test</button>
+      <button class="ptv3-btn success" type="button" data-ptv3-finish disabled>Finished Answer</button>
       <button class="ptv3-btn" type="button" data-ptv3-mute disabled>Mute Microphone</button>
       <button class="ptv3-btn danger" type="button" data-ptv3-end disabled>End Test</button>
     </section>

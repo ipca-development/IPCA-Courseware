@@ -211,7 +211,6 @@
   min-height: 0;
   overflow-y: auto;
 }
-}
 
 .ptv3-remote-audio {
   position: fixed;
@@ -247,6 +246,15 @@
   transform: translateY(-1px);
 }
 
+.ptv3-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.ptv3-btn:focus-visible {
+  outline: 3px solid rgba(42, 82, 152, 0.24);
+  outline-offset: 2px;
+}
+
 .ptv3-btn:disabled {
   opacity: 0.52;
   cursor: not-allowed;
@@ -258,10 +266,37 @@
   border-color: #12355f;
 }
 
+.ptv3-btn.primary:hover:not(:disabled),
+.ptv3-btn.primary:active:not(:disabled) {
+  background: #1e3c72;
+  color: #ffffff;
+  border-color: #1e3c72;
+}
+
 .ptv3-btn.danger {
   color: #991b1b;
   border-color: #fecaca;
   background: #fef2f2;
+}
+
+.ptv3-btn.danger:hover:not(:disabled),
+.ptv3-btn.danger:active:not(:disabled) {
+  color: #7f1d1d;
+  border-color: #fca5a5;
+  background: #fee2e2;
+}
+
+.ptv3-btn.success {
+  color: #166534;
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.ptv3-btn.success:hover:not(:disabled),
+.ptv3-btn.success:active:not(:disabled) {
+  color: #14532d;
+  border-color: #4ade80;
+  background: #dcfce7;
 }
 
 .ptv3-btn.ghost {
