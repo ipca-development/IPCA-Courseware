@@ -73,6 +73,7 @@
     this.processedRealtimeEvents = {};
     this.processedToolCalls = {};
     this.processedTranscripts = {};
+    this.finalReviewInProgress = false;
     this.status = 'Ready';
     this.lastLiveMessage = '';
     this._buildUi();
@@ -278,13 +279,17 @@
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript) {
       if (this._isDuplicateTranscriptEvent(msg, 'maya')) return;
-      this._appendMainConversation('maya', msg.transcript);
-      this._saveTranscript('maya', msg.transcript, 'audio_transcript');
+      var mayaTranscript = this._sanitizeNoncanonicalAcceptanceText(msg.transcript);
+      this._appendMainConversation('maya', mayaTranscript);
+      this._saveTranscript('maya', mayaTranscript, 'audio_transcript');
     }
     if (type === 'conversation.item.input_audio_transcription.completed' && msg.transcript) {
       if (this._isDuplicateTranscriptEvent(msg, 'student')) return;
       this._appendMainConversation('student', msg.transcript);
       this._saveTranscript('student', msg.transcript, 'audio_transcript');
+      if (this._isOfficialFinalReviewRequest(msg.transcript)) {
+        this._runOfficialFinalReviewFromVoice(msg.transcript);
+      }
     }
     if (type === 'response.function_call_arguments.done') {
       this._runTool(msg.name, msg.arguments || '{}', msg.call_id || '');
@@ -329,7 +334,7 @@
     if (toolKey) this.processedToolCalls[toolKey] = Date.now();
     var args = {};
     try { args = JSON.parse(argString || '{}'); } catch (e) { args = {}; }
-    if (name === 'get_current_coaching_state' || name === 'analyze_summary_draft') {
+    if (name === 'get_current_coaching_state' || name === 'analyze_summary_draft' || name === 'request_final_review') {
       args.summary_excerpt = args.summary_excerpt || truncate(plainTextFromEditor(this.editor), 1800);
       args.summary_html = args.summary_html || htmlFromEditor(this.editor);
     }
@@ -349,14 +354,21 @@
       if (out && out.active_assignment) self._applyActiveAssignment(out.active_assignment);
       if (out && out.current_task) self._applyCurrentTask(out.current_task);
       if (out && out.coach_state) self._applyCoachState(out.coach_state);
-      self._sendToolOutput(callId, out || { ok: true });
+      if (out && (out.readiness || out.review_status || out.canonical_check)) self._applyReviewResult(out);
+      self._sendToolOutput(
+        callId,
+        out || { ok: true },
+        name === 'request_final_review'
+          ? 'Report the official final review result exactly. If canonical_accepted=true, say the summary is accepted and the student can continue. If canonical_check_ran=true but canonical_accepted=false, say the official check did not accept it yet and point to the feedback/blockers. If canonical_check_ran=false, do not use accepted, validated, complete, progress-test, or move-forward wording.'
+          : 'Continue the voice coaching naturally using the tool result. Do not write the student summary for them.'
+      );
     }).catch(function (err) {
       self._sendToolOutput(callId, { ok: false, error: err && err.message ? err.message : String(err) });
     });
     return true;
   };
 
-  VoiceCoach.prototype._sendToolOutput = function (callId, output) {
+  VoiceCoach.prototype._sendToolOutput = function (callId, output, followupInstructions) {
     if (!this.dc || this.dc.readyState !== 'open' || !callId) return;
     this.dc.send(JSON.stringify({
       type: 'conversation.item.create',
@@ -366,7 +378,83 @@
         output: JSON.stringify(output)
       }
     }));
-    this._sendResponseCreate('Continue the voice coaching naturally using the tool result. Do not write the student summary for them.');
+    this._sendResponseCreate(followupInstructions || 'Continue the voice coaching naturally using the tool result. Do not write the student summary for them.');
+  };
+
+  VoiceCoach.prototype._isOfficialFinalReviewRequest = function (text) {
+    text = String(text || '').toLowerCase();
+    return /validate my summary|finalize my summary|review my summary|final review|progress test|move to progress|move forward|still shows? draft|summary still says draft|why does it still show draft|why is it draft|are you going to take care of this|do i have to end the call|ready for you to review/.test(text);
+  };
+
+  VoiceCoach.prototype._sanitizeNoncanonicalAcceptanceText = function (text) {
+    text = String(text || '');
+    var accepted = !!(this.textCoach && this.textCoach.summaryState && this.textCoach.summaryState.reviewStatus === 'acceptable');
+    if (accepted) return text;
+    if (!/\b(validated|finalized|accepted|ready for (?:the )?progress test|you can move forward|you(?:'re| are) all set|all set to move forward|summary is complete|summary(?:'s| is) complete|move on to the next part|next part of your training)\b/i.test(text)) {
+      return text;
+    }
+    return 'Your summary appears ready. I can run the official final review now.';
+  };
+
+  VoiceCoach.prototype._runOfficialFinalReviewFromVoice = function (studentText) {
+    if (this.finalReviewInProgress) return;
+    this.finalReviewInProgress = true;
+    this._setStatus('Running final review');
+    var self = this;
+    this._postJson(this.config.apiUrl || '/student/api/summary_coach.php', {
+      action: 'final_review',
+      lesson_id: this.config.lessonId,
+      cohort_id: this.config.cohortId || 0,
+      summary_id: this.config.summaryId || 0,
+      context: this.config.context || 'player',
+      summary_excerpt: truncate(plainTextFromEditor(this.editor), 2200),
+      summary_html: htmlFromEditor(this.editor),
+      coach_history: this.textCoach && Array.isArray(this.textCoach.history) ? this.textCoach.history.slice(-12) : []
+    }).then(function (out) {
+      self.finalReviewInProgress = false;
+      self._setStatus('Listening');
+      if (!out || out.ok === false) return;
+      self._applyReviewResult(out);
+      if (self.textCoach && typeof self.textCoach._absorbResponse === 'function') {
+        self.textCoach._absorbResponse(out, { isFinalReview: true, studentReply: '' });
+      } else if (out.maya_message) {
+        self._appendMainConversation('maya', out.maya_message);
+      }
+      if (self.dc && self.dc.readyState === 'open') {
+        var instruction = out.canonical_accepted
+          ? 'The official final review accepted the summary. Tell the student clearly that it is accepted and they can continue. Do not continue section coaching.'
+          : 'The official final review did not accept the summary yet or the deterministic precheck blocked it. Tell the student the exact result and do not continue section coaching.';
+        self._sendResponseCreate(instruction);
+      }
+    }).catch(function () {
+      self.finalReviewInProgress = false;
+      self._setStatus('Listening');
+    });
+  };
+
+  VoiceCoach.prototype._applyReviewResult = function (out) {
+    if (!out || !this.textCoach) return;
+    if (out.readiness) {
+      this.textCoach.readiness = {
+        ready_for_final_review: !!out.readiness.ready_for_final_review,
+        missing: Array.isArray(out.readiness.missing) ? out.readiness.missing.slice(0) : [],
+        minimum_interactions_met: !!out.readiness.minimum_interactions_met,
+        unresolved_required_question: !!out.readiness.unresolved_required_question
+      };
+    }
+    if (typeof out.review_status === 'string' && out.review_status && typeof this.textCoach.setSummaryState === 'function') {
+      this.textCoach.setSummaryState({
+        reviewStatus: out.review_status,
+        locked: !!out.student_soft_locked,
+        hasText: this.textCoach.summaryState ? this.textCoach.summaryState.hasText : true,
+        wordCount: this.textCoach.summaryState ? this.textCoach.summaryState.wordCount : 0,
+        summaryId: this.textCoach.summaryState ? this.textCoach.summaryState.summaryId : (this.config.summaryId || 0)
+      });
+    }
+    if ((out.canonical_check_ran || out.canonical_accepted) && typeof this.config.onCanonicalAccept === 'function') {
+      try { this.config.onCanonicalAccept(out.canonical_check || null, out); } catch (e) {}
+    }
+    if (typeof this.textCoach._renderState === 'function') this.textCoach._renderState();
   };
 
   VoiceCoach.prototype._sendResponseCreate = function (instructions) {

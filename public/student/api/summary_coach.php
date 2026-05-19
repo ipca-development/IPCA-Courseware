@@ -3572,6 +3572,26 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
         ];
     }
 
+    if ($tool === 'request_final_review') {
+        $reviewPayload = $payload;
+        $reviewPayload['action'] = 'final_review';
+        $reviewPayload['summary_excerpt'] = trim((string)($args['summary_excerpt'] ?? $payload['summary_excerpt'] ?? ''));
+        $reviewPayload['summary_html'] = (string)($args['summary_html'] ?? $payload['summary_html'] ?? '');
+        $out = maya_action_final_review($pdo, $u, $reviewPayload);
+        $out['ok'] = true;
+        $out['tool_result'] = 'request_final_review';
+        if (!empty($out['canonical_accepted'])) {
+            $out['spoken_instruction'] = 'Accepted. Your summary is complete and you can continue.';
+        } elseif (!empty($out['canonical_check_ran'])) {
+            $out['spoken_instruction'] = 'The official final review ran and did not accept the summary yet. Check the feedback and revise the listed blockers.';
+        } elseif (!empty($out['precheck_ready'])) {
+            $out['spoken_instruction'] = 'Your summary appears ready, but the official check has not accepted it yet.';
+        } else {
+            $out['spoken_instruction'] = (string)($out['maya_message'] ?? 'Not ready yet. Review the blockers shown in Maya.');
+        }
+        return $out;
+    }
+
     if ($tool === 'analyze_summary_draft') {
         $sectionId = trim((string)($args['section_id'] ?? $currentTask['section_id'] ?? ''));
         $section = maya_blueprint_section($blueprintBundle, $sectionId);
@@ -3799,6 +3819,9 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
                     json_encode(['coach_state' => $currentCoachState, 'current_task' => $currentTask, 'blueprint_state' => $blueprintState]),
                 ]);
             }
+        }
+        if ($role === 'maya' && (int)($session['approved_by_maya'] ?? 0) !== 1) {
+            $text = maya_sanitize_noncanonical_acceptance_text($text);
         }
         if ($text !== '' && in_array($role, ['student', 'maya'], true)) {
             maya_insert_message($pdo, $session, $role, 'voice_transcript', $text, [], $flags);
