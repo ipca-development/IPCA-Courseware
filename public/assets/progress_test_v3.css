@@ -115,6 +115,14 @@
   min-height: 360px;
 }
 
+.ptv3-remote-audio {
+  position: fixed;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .ptv3-controls {
   display: flex;
   flex-wrap: wrap;
