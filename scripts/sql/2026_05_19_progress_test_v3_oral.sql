@@ -1,0 +1,40 @@
+CREATE TABLE IF NOT EXISTS progress_test_oral_item_responses (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  attempt_id BIGINT UNSIGNED NOT NULL,
+  item_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  question_text TEXT NOT NULL,
+  maya_spoken_question_text TEXT NOT NULL,
+  student_answer_text TEXT NOT NULL,
+  clarification_question_text TEXT NULL,
+  clarification_answer_text TEXT NULL,
+  evaluated_answer_text TEXT NOT NULL,
+  score_pct DECIMAL(5,2) NULL,
+  is_correct TINYINT(1) NULL,
+  feedback_text TEXT NULL,
+  detected_concepts_json LONGTEXT NULL,
+  missing_concepts_json LONGTEXT NULL,
+  weak_areas_json LONGTEXT NULL,
+  answered_at DATETIME NULL,
+  evaluated_at DATETIME NULL,
+  created_at DATETIME NOT NULL,
+  updated_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  UNIQUE KEY uq_progress_test_oral_attempt_item (attempt_id, item_id),
+  KEY idx_progress_test_oral_user_attempt (user_id, attempt_id),
+  KEY idx_progress_test_oral_item (item_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS progress_test_voice_events (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  attempt_id BIGINT UNSIGNED NOT NULL,
+  item_id BIGINT UNSIGNED NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  role ENUM('maya','student','system') NOT NULL,
+  event_type VARCHAR(64) NOT NULL,
+  transcript_text TEXT NULL,
+  created_at DATETIME NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_progress_test_voice_events_attempt (attempt_id, created_at),
+  KEY idx_progress_test_voice_events_item (item_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

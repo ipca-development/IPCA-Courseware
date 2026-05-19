@@ -151,10 +151,24 @@
     if (this.el) this.el.setAttribute('data-voice-status', status.toLowerCase().replace(/\s+/g, '_'));
   };
 
+  VoiceCoach.prototype._setVoiceModeActive = function (active) {
+    if (this.root) this.root.setAttribute('data-voice-active', active ? '1' : '0');
+    if (this.textCoach && this.textCoach.elReply) {
+      this.textCoach.elReply.disabled = !!active;
+      this.textCoach.elReply.setAttribute('aria-disabled', active ? 'true' : 'false');
+      if (active) this.textCoach.elReply.blur();
+    }
+    if (this.textCoach && this.textCoach.btnContinue) {
+      this.textCoach.btnContinue.disabled = !!active;
+      this.textCoach.btnContinue.setAttribute('aria-disabled', active ? 'true' : 'false');
+    }
+  };
+
   VoiceCoach.prototype.start = function () {
     if (this.connected) return;
     var self = this;
     this._setStatus('Connecting');
+    this._setVoiceModeActive(true);
     this.btnStart.disabled = true;
 
     this._postJson(this.config.voiceTokenUrl || '/student/api/summary_voice_token.php', {
@@ -183,6 +197,7 @@
       self._sendResponseCreate('Start the voice coaching call by calling get_current_coaching_state first. Then follow the returned coach_state exactly. If STATE_WAITING_FOR_SUMMARY_WRITE, give one brief instruction and let the student write.');
     }).catch(function (err) {
       self._setStatus('Ended');
+      self._setVoiceModeActive(false);
       self.btnStart.disabled = false;
       debug('voice start failed', err && err.message ? err.message : String(err));
     });
@@ -386,20 +401,7 @@
   };
 
   VoiceCoach.prototype.sendSummaryObservation = function () {
-    if (!this.dc || this.dc.readyState !== 'open') return;
-    if (Date.now() - this.lastSummarySentAt < 5000) return;
-    this.lastSummarySentAt = Date.now();
-    this.dc.send(JSON.stringify({
-      type: 'conversation.item.create',
-      item: {
-        type: 'message',
-        role: 'user',
-        content: [{
-          type: 'input_text',
-          text: 'Summary editor update. Do not interrupt unless helpful. Current excerpt: ' + truncate(plainTextFromEditor(this.editor), 1400)
-        }]
-      }
-    }));
+    return;
   };
 
   VoiceCoach.prototype._saveTranscript = function (role, text, eventType) {
@@ -419,7 +421,7 @@
     if (this.textCoach && this.textCoach.coachingState) {
       var assignment = this.textCoach.coachingState.active_assignment || null;
       this.textCoach.coachingState.current_writing_task = assignment && !assignment.completed
-        ? String(assignment.instruction_text || '')
+        ? String(assignment.short_task_label || assignment.instruction_text || '')
         : String(task.task_text || '');
       this.textCoach.coachingState.awaiting_chat_reply = String(task.mode || '') === 'answer_chat';
       this.textCoach.coachingState.coach_state = String(task.coach_state || this.textCoach.coachingState.coach_state || '');
@@ -432,7 +434,7 @@
     if (this.textCoach && this.textCoach.coachingState) {
       this.textCoach.coachingState.active_assignment = assignment || null;
       this.textCoach.coachingState.current_writing_task = assignment && !assignment.completed
-        ? String(assignment.instruction_text || '')
+        ? String(assignment.short_task_label || assignment.instruction_text || '')
         : '';
       if (typeof this.textCoach._renderWritingTask === 'function') this.textCoach._renderWritingTask();
     }
@@ -494,6 +496,7 @@
     this.btnStart.disabled = false;
     this.btnMute.disabled = true;
     this.btnEnd.disabled = true;
+    this._setVoiceModeActive(false);
     this._setStatus('Ended');
     this._saveTranscript('system', 'Voice coaching ended.', 'ended');
   };

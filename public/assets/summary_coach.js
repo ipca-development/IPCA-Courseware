@@ -854,13 +854,7 @@
       this._recordPasteWindow(delta);
     }
 
-    this._evaluateLocalHints(text);
-
-    var self = this;
     if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(function () {
-      self._maybeIdleCheckpoint();
-    }, IDLE_AFTER_TYPING_MS);
   };
 
   Coach.prototype._onEditorPaste = function (e) {
@@ -903,16 +897,11 @@
   Coach.prototype._triggerMajorPaste = function (chars) {
     if (this._isPasteDetectionSuppressed()) return;
     if (this.flags.major_paste) {
-      // Already flagged — don't spam checkpoints.
-      this._showLocalHint('That looks like more pasted text. Explain it in your own words before we move on.');
       this._renderState();
       return;
     }
     this.flags.major_paste = true;
-    this._showLocalHint('That looks like pasted text. No problem — explain the main idea in your own words before we use it.');
-    this._appendSystemMessage('Large pasted text detected.');
     this._renderState();
-    this._sendCheckpoint({ trigger: 'paste' });
   };
 
   Coach.prototype._isPasteDetectionSuppressed = function () {
@@ -921,10 +910,7 @@
   };
 
   Coach.prototype._maybeIdleCheckpoint = function () {
-    if (this.busy) return;
-    if (this.charsSinceLastCheckpoint < MIN_NEW_TEXT_FOR_IDLE_CHECK) return;
-    if (nowMs() - this.lastCheckpointAt < MIN_INTERVAL_BETWEEN_CHECKPOINTS_MS) return;
-    this._sendCheckpoint({ trigger: 'idle' });
+    return;
   };
 
   Coach.prototype._evaluateLocalHints = function (text) {
@@ -1266,7 +1252,7 @@
     }
     if (j.current_task && typeof j.current_task === 'object') {
       var assignmentText = j.active_assignment && !j.active_assignment.completed
-        ? String(j.active_assignment.instruction_text || '')
+        ? String(j.active_assignment.short_task_label || j.active_assignment.instruction_text || '')
         : '';
       this.coachingState = {
         current_writing_task: assignmentText || String(j.current_task.task_text || ''),
@@ -1283,7 +1269,7 @@
     if (j.coaching_state && typeof j.coaching_state === 'object') {
       var stateAssignment = j.coaching_state.active_assignment || j.active_assignment || null;
       var stateAssignmentText = stateAssignment && !stateAssignment.completed
-        ? String(stateAssignment.instruction_text || '')
+        ? String(stateAssignment.short_task_label || stateAssignment.instruction_text || '')
         : '';
       this.coachingState = {
         current_writing_task: stateAssignmentText || String(j.coaching_state.current_writing_task || (j.current_task && j.current_task.task_text) || ''),
@@ -1298,7 +1284,7 @@
       var flagAssignment = j.flags.active_assignment || j.flags.section_progress.active_assignment || null;
       this.coachingState.active_assignment = flagAssignment || this.coachingState.active_assignment || null;
       this.coachingState.current_writing_task = flagAssignment && !flagAssignment.completed
-        ? String(flagAssignment.instruction_text || '')
+        ? String(flagAssignment.short_task_label || flagAssignment.instruction_text || '')
         : String(j.flags.section_progress.current_writing_task || this.coachingState.current_writing_task || '');
       this.coachingState.awaiting_chat_reply = !!j.flags.section_progress.awaiting_chat_reply;
       this.coachingState.coach_state = String(j.flags.section_progress.coach_state || j.flags.coach_state || this.coachingState.coach_state || '');
@@ -1569,7 +1555,7 @@
       if (j.current_task && typeof j.current_task === 'object') {
         self.coachingState.active_assignment = j.active_assignment || self.coachingState.active_assignment || null;
         self.coachingState.current_writing_task = self.coachingState.active_assignment && !self.coachingState.active_assignment.completed
-          ? String(self.coachingState.active_assignment.instruction_text || '')
+          ? String(self.coachingState.active_assignment.short_task_label || self.coachingState.active_assignment.instruction_text || '')
           : String(j.current_task.task_text || '');
         self.coachingState.awaiting_chat_reply = String(j.current_task.mode || '') === 'answer_chat';
         self.coachingState.current_section = String(j.current_task.section_title || j.current_task.section_id || self.coachingState.current_section || '');

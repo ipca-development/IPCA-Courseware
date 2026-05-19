@@ -1534,6 +1534,24 @@
   min-height: 74px;
   resize: vertical;
 }
+.maya-coach[data-voice-active="1"] .maya-compose-area .maya-reply,
+.maya-coach[data-voice-active="1"] .maya-compose-area .maya-action-row,
+.maya-coach[data-voice-active="1"] .maya-compose .maya-reply,
+.maya-coach[data-voice-active="1"] .maya-compose .maya-actions {
+  display: none;
+}
+.maya-coach[data-voice-active="1"] .maya-compose-area::before,
+.maya-coach[data-voice-active="1"] .maya-compose::before {
+  content: "Speaking with Maya...";
+  display: block;
+  border: 1px solid rgba(30,60,114,.12);
+  border-radius: 14px;
+  background: #f8fbff;
+  color: #64748b;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 750;
+}
 .maya-action-row {
   display: flex;
   gap: 8px;

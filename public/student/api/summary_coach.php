@@ -920,6 +920,7 @@ function maya_assignment_from_flags(array $flags): array
         'section_id' => trim((string)($assignment['section_id'] ?? '')),
         'concept_id' => trim((string)($assignment['concept_id'] ?? '')),
         'instruction_text' => $text,
+        'short_task_label' => trim((string)($assignment['short_task_label'] ?? '')) ?: maya_short_task_label($text),
         'status' => trim((string)($assignment['status'] ?? 'assigned')) ?: 'assigned',
         'assigned_at' => trim((string)($assignment['assigned_at'] ?? '')),
         'completed' => !empty($assignment['completed']),
@@ -979,6 +980,23 @@ function maya_assignment_is_generic(string $text): bool
     return str_word_count($plain) < 6;
 }
 
+function maya_short_task_label(string $instruction): string
+{
+    $text = trim(maya_strip_html_to_text(maya_strip_legacy_instruction_labels($instruction)));
+    if ($text === '') return '';
+    $text = preg_replace('/\b(Good|Great|Nice|Okay|Ok)\.?\s*/iu', '', $text) ?? $text;
+    $text = preg_replace('/\b(now|please|why don\'t you|let\'s)\b\s*/iu', '', $text) ?? $text;
+    $parts = preg_split('/(?<=[.!?])\s+|\bthen\b|\blet me\b|\blet maya\b|\bstop after that\b/iu', $text) ?: [$text];
+    $text = trim((string)($parts[0] ?? $text));
+    $text = preg_replace('/\s+/u', ' ', $text) ?? $text;
+    $text = trim($text, " \t\n\r\0\x0B.-");
+    if ($text === '') return '';
+    if (mb_strlen($text) > 96) {
+        $text = rtrim(mb_substr($text, 0, 93), " \t\n\r\0\x0B,.;:") . '...';
+    }
+    return ucfirst($text);
+}
+
 function maya_strip_legacy_instruction_labels(string $text): string
 {
     $text = preg_replace('/<strong><u>\s*Summary Editor\s*<\/u><\/strong>\s*(?:→|:|-)?\s*/iu', '', $text) ?? $text;
@@ -1013,6 +1031,7 @@ function maya_extract_active_assignment(string $mayaMessage, string $nextQuestio
         'section_id' => (string)($currentTask['section_id'] ?? ''),
         'concept_id' => $conceptId,
         'instruction_text' => $instruction,
+        'short_task_label' => maya_short_task_label($instruction),
         'status' => 'assigned',
         'assigned_at' => maya_now_sql(),
         'completed' => false,
@@ -1925,7 +1944,7 @@ function maya_system_prompt(): string
         . "93. If assigning writing, state the exact section and one precise bullet/item to write, then tell the student to stop and let Maya review it.\n"
         . "94. The student should immediately understand whether they must write in the summary or answer Maya in conversation.\n"
         . "95. Avoid detached editor-system instruction phrasing. Everything the student must write should originate in Maya's conversational message.\n"
-        . "96. When the client trigger is idle/editor writing, evaluate the actual summary text the student wrote. Say whether it is strong enough or needs more depth, then give the next single task.\n"
+        . "96. When the student explicitly asks for review or says they are done, evaluate the actual summary text the student wrote. Say whether it is strong enough or needs more depth, then give the next single task only if needed.\n"
         . "97. Do not repeat the previous Maya message after the student has written in the editor.\n"
         . "98. Stay inside the assigned current slide or slide series. The CURRENT SLIDE CONTEXT is the boundary unless the system explicitly assigns more slides.\n"
         . "99. If the current slide context does not cover a concept, do not ask about it. Redirect the student back to the current slide content.\n"
@@ -2138,6 +2157,7 @@ function maya_action_start_session(PDO $pdo, array $u, array $payload): array
                 'section_id' => (string)($currentTask['section_id'] ?? ''),
                 'concept_id' => 'official_structure',
                 'instruction_text' => 'Add the official lesson structure to your summary. Maya will only add headings and empty Item slots.',
+                'short_task_label' => 'Add official summary structure',
                 'status' => 'assigned',
                 'assigned_at' => maya_now_sql(),
                 'completed' => false,
@@ -2466,7 +2486,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "15. Should the student answer in chat, write directly in the summary editor, or use an insertion button?\n"
         . "16. If the draft is empty or very short, can you propose 3–5 editable section headings from the lesson context?\n"
         . "17. If a concept is mature but no insertion is appropriate, did you tell the student to write it in their own words?\n"
-        . "18. If client_trigger is idle, the student likely wrote in the editor. Evaluate the summary editor text directly instead of repeating the prior question.\n"
+        . "18. If the student says they are done or asks for review, evaluate the summary editor text directly instead of repeating the prior question.\n"
         . "19. Are you staying strictly inside the CURRENT SLIDE CONTEXT or assigned slide series?\n\n"
         . "20. Are you obeying the ACTIVE LESSON SUMMARY BLUEPRINT exactly, including section titles, order, slide_group, must_have, and do_not_ask boundaries?\n\n"
         . "21. If the official structure is missing/incomplete or the student asks for structure, provide only the map: headings/subheadings and empty Item slots. Do not provide answer content, examples, explanations, or pilot actions as summary text.\n\n"
@@ -2505,7 +2525,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         . "If the current concept is closed or saturated, do not ask another variation about it; acknowledge and move to a different lesson area. "
         . "Guide summary construction explicitly: identify the current section, tell the student whether to write in the editor or answer in chat, and avoid endless chat-only coaching. "
         . "Never ask broad slide reflection questions. Give a targeted writing task based on the current slide concept and evaluate the summary text directly. "
-        . "If client_trigger is idle, evaluate what the student wrote in the summary editor and do not repeat your previous chat message. "
+        . "If the student says they are done or asks for review, evaluate what they wrote in the summary editor and do not repeat your previous chat message. "
         . "Choose either one concrete writing assignment or one chat question for this turn, not both. "
         . "Do not invent, rename, reorder, or move blueprint sections or concepts. The active blueprint is the coaching map. "
         . "Maya may give the map, but must not drive the airplane for the student: structure is OK, completed answers are not OK. "
@@ -2676,6 +2696,7 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
             'section_id' => (string)($currentTask['section_id'] ?? ''),
             'concept_id' => 'official_structure',
             'instruction_text' => 'Add the official lesson structure to your summary. Maya will only add headings and empty Item slots.',
+            'short_task_label' => 'Add official summary structure',
             'status' => 'assigned',
             'assigned_at' => maya_now_sql(),
             'completed' => false,
@@ -2993,6 +3014,7 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
             'section_id' => (string)($currentTask['section_id'] ?? ''),
             'concept_id' => 'official_structure',
             'instruction_text' => (string)$progress['current_writing_task'],
+            'short_task_label' => 'Start Item 1 in first section',
             'status' => 'assigned',
             'assigned_at' => maya_now_sql(),
             'completed' => false,
@@ -3024,6 +3046,7 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
             'section_id' => (string)($currentTask['section_id'] ?? ''),
             'concept_id' => 'first_item',
             'instruction_text' => (string)$progress['current_writing_task'],
+            'short_task_label' => 'Start Item 1 in first section',
             'status' => 'assigned',
             'assigned_at' => maya_now_sql(),
             'completed' => false,
@@ -3056,6 +3079,7 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
                 'section_id' => (string)($currentTask['section_id'] ?? ''),
                 'concept_id' => 'official_structure',
                 'instruction_text' => $taskText,
+                'short_task_label' => 'Add official summary structure',
                 'status' => 'assigned',
                 'assigned_at' => maya_now_sql(),
                 'completed' => false,
@@ -3090,6 +3114,7 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
                 'section_id' => trim((string)($args['section_id'] ?? $currentTask['section_id'] ?? '')),
                 'concept_id' => '',
                 'instruction_text' => $taskText,
+                'short_task_label' => trim((string)($args['short_task_label'] ?? '')) ?: maya_short_task_label($taskText),
                 'status' => 'assigned',
                 'assigned_at' => maya_now_sql(),
                 'completed' => false,
