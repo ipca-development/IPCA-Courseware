@@ -71,6 +71,8 @@
   var ignoreTranscriptsUntil = 0;
   var activeAnswerItemId = 0;
   var feedbackPlaybackTimer = null;
+  var pendingNextQuestionAfterFeedback = false;
+  var pendingCompleteAfterFeedback = false;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -114,6 +116,7 @@
     activeStudentBubble = null;
     activeAnswerItemId = 0;
     if (els.finish) els.finish.disabled = true;
+    setFinishButton('Finished Answer', true, 'answer');
     awaitingAnswer = false;
     awaitingClarification = false;
     audioCheckActive = false;
@@ -200,6 +203,13 @@
     if (!els.recording) return;
     els.recording.textContent = label || (active ? 'Recording in Progress' : 'Not recording yet');
     els.recording.setAttribute('data-recording', active ? '1' : '0');
+  }
+
+  function setFinishButton(label, disabled, mode) {
+    if (!els.finish) return;
+    els.finish.textContent = label;
+    els.finish.disabled = !!disabled;
+    els.finish.setAttribute('data-action-mode', mode || 'answer');
   }
 
   function startCameraPreview(stream) {
@@ -385,6 +395,7 @@
       connected = true;
       els.mute.disabled = false;
       els.end.disabled = false;
+      setFinishButton('Finished Answer', true, 'answer');
       setCoachState('ready');
       startAudioCheck();
     }).catch(function (err) {
@@ -435,13 +446,19 @@
     }
     if (finishedPurpose === 'feedback' && nextQuestionAfterFeedback) {
       nextQuestionAfterFeedback = false;
-      addBubble('maya', 'Maya', 'OK, let’s go to question ' + (state.current_idx || '') + '.', 'transition');
-      askCurrentQuestion();
+      if (pendingNextQuestionAfterFeedback) {
+        pendingNextQuestionAfterFeedback = false;
+        setFinishButton('Next Question', false, 'next');
+        setStatus('Maya finished explaining. Tap Next Question when ready.', 'Ready for next question');
+      }
       return;
     }
     if (finishedPurpose === 'feedback' && completeAfterFeedback) {
       completeAfterFeedback = false;
-      completeTest();
+      if (pendingCompleteAfterFeedback) {
+        pendingCompleteAfterFeedback = false;
+        completeTest();
+      }
       return;
     }
     if (finishedPurpose === 'final') {
@@ -642,7 +659,7 @@
     } else {
       activeStudentBubble = addBubble('student', 'Student', combinedAnswerText(''), 'answer');
     }
-    if (els.finish) els.finish.disabled = false;
+    setFinishButton('Finished Answer', false, 'answer');
     api('save_transcript_segment', {
       item_id: currentItem.id,
       role: 'student',
@@ -652,19 +669,20 @@
     scheduleAnswerSettle();
   }
 
-  function estimateSpeechMs(textValue) {
-    var words = String(textValue || '').trim().split(/\s+/).filter(Boolean).length;
-    return Math.max(2500, Math.min(11000, Math.round((words / 2.4) * 1000) + 900));
-  }
-
   function finishCurrentAnswer() {
+    if (els.finish && els.finish.getAttribute('data-action-mode') === 'next') {
+      setFinishButton('Finished Answer', true, 'answer');
+      addBubble('maya', 'Maya', 'OK, let’s go to question ' + (state.current_idx || '') + '.', 'transition');
+      askCurrentQuestion();
+      return;
+    }
     var finalAnswer = combinedAnswerText('');
     if (!currentItem || !finalAnswer || responseInProgress) return;
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
     answerSettleTimer = null;
     awaitingDoneConfirmation = false;
     ignoreTranscriptsUntil = 0;
-    if (els.finish) els.finish.disabled = true;
+    setFinishButton('Maya Explaining...', true, 'wait');
     if (activeStudentBubble && activeStudentBubble.body) activeStudentBubble.body.textContent = finalAnswer;
     evaluateBufferedAnswer(finalAnswer);
   }
@@ -708,21 +726,20 @@
 
       if (out.next_action === 'complete_test') {
         completeAfterFeedback = true;
+        pendingCompleteAfterFeedback = true;
         sendResponse('Say this backend score and feedback concisely. Do not add your own score: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
       } else {
-        nextQuestionAfterFeedback = false;
+        nextQuestionAfterFeedback = true;
+        pendingNextQuestionAfterFeedback = true;
         sendResponse('Say this backend score and feedback concisely. Do not add your own score: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
         if (feedbackPlaybackTimer) clearTimeout(feedbackPlaybackTimer);
-        feedbackPlaybackTimer = setTimeout(function () {
-          feedbackPlaybackTimer = null;
-          addBubble('maya', 'Maya', 'OK, let’s go to question ' + (state.current_idx || '') + '.', 'transition');
-          askCurrentQuestion();
-        }, estimateSpeechMs(feedbackText));
+        feedbackPlaybackTimer = null;
       }
     }).catch(function (err) {
       awaitingAnswer = true;
       setCoachState('error');
       setStatus('Evaluation failed. Please retry by voice.', 'Evaluation issue');
+      setFinishButton('Finished Answer', false, 'answer');
       addBubble('maya', 'System', 'Evaluation failed: ' + err.message, 'warning');
     });
   }
