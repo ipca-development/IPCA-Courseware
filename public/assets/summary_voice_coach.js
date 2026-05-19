@@ -405,6 +405,7 @@
   };
 
   VoiceCoach.prototype._saveTranscript = function (role, text, eventType) {
+    var self = this;
     this._postJson(this.config.apiUrl || '/student/api/summary_coach.php', {
       action: 'voice_tool',
       tool_name: 'save_voice_transcript_event',
@@ -413,7 +414,18 @@
       cohort_id: this.config.cohortId || 0,
       summary_id: this.config.summaryId || 0,
       context: this.config.context || 'player',
+      summary_excerpt: truncate(plainTextFromEditor(this.editor), 2200),
       arguments: { role: role, transcript_text: text, event_type: eventType || 'transcript' }
+    }).then(function (out) {
+      if (out && out.readiness && self.textCoach) {
+        self.textCoach.readiness = {
+          ready_for_final_review: !!out.readiness.ready_for_final_review,
+          missing: Array.isArray(out.readiness.missing) ? out.readiness.missing.slice(0) : [],
+          minimum_interactions_met: !!out.readiness.minimum_interactions_met,
+          unresolved_required_question: !!out.readiness.unresolved_required_question
+        };
+        if (typeof self.textCoach._renderState === 'function') self.textCoach._renderState();
+      }
     }).catch(function () {});
   };
 

@@ -1840,6 +1840,42 @@ function maya_compute_readiness(array $scores, int $interactionCount, bool $majo
     ];
 }
 
+function maya_floor_scores_for_final_review(array $scores): array
+{
+    $scores['coverage'] = max((int)($scores['coverage'] ?? 0), MAYA_THRESH_COVERAGE);
+    $scores['accuracy'] = max((int)($scores['accuracy'] ?? 0), MAYA_THRESH_ACCURACY);
+    $scores['own_wording'] = max((int)($scores['own_wording'] ?? 0), MAYA_THRESH_OWN_WORDING);
+    $scores['correlation'] = max((int)($scores['correlation'] ?? 0), MAYA_THRESH_CORRELATION);
+    $scores['instructor_confidence'] = max((int)($scores['instructor_confidence'] ?? 0), MAYA_THRESH_INSTRUCTOR_CONFIDENCE);
+    return $scores;
+}
+
+function maya_signals_final_review_ready(string $mayaText, array $aiReadiness, array $scores, string $summaryPlain, bool $majorPaste): bool
+{
+    if ($majorPaste) return false;
+    if (str_word_count(maya_strip_html_to_text($summaryPlain)) < 80) return false;
+    if (!empty($aiReadiness['ready_for_final_review'])) return true;
+    $text = strtolower(maya_strip_html_to_text($mayaText));
+    $signals = [
+        'summary looks solid',
+        'looks solid',
+        'meets the must-haves',
+        'meets the must haves',
+        'ready for final review',
+        'request final review',
+        'can consider it accepted',
+        'consider it accepted',
+        'accepted and move forward',
+        'sign this off',
+    ];
+    foreach ($signals as $signal) {
+        if (strpos($text, $signal) !== false) return true;
+    }
+    $confidence = (int)($scores['instructor_confidence'] ?? 0);
+    $coverage = (int)($scores['coverage'] ?? 0);
+    return $confidence >= MAYA_THRESH_INSTRUCTOR_CONFIDENCE && $coverage >= MAYA_THRESH_COVERAGE && strpos($text, 'good job') !== false;
+}
+
 // ---------------------------------------------------------------------------
 // OpenAI prompt + schema builders
 // ---------------------------------------------------------------------------
@@ -2611,6 +2647,14 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $persistedMajorPaste,
         $unresolved
     );
+    $mayaReadinessText = trim($mayaMessage . "\n" . $nextQuestion);
+    if (maya_signals_final_review_ready($mayaReadinessText, $aiReadiness, $scores, $summaryPlainForFocus, $persistedMajorPaste)) {
+        $scores = maya_floor_scores_for_final_review($scores);
+        $newInteractionCount = max($newInteractionCount, MAYA_MIN_INTERACTIONS);
+        $persistedMajorPaste = false;
+        $unresolved = false;
+        $readinessOut = maya_compute_readiness($scores, $newInteractionCount, false, false);
+    }
 
     $studentNote = trim((string)($aiJson['student_note_suggestion'] ?? ''));
     // Hard cap so this can never become a paste-able full answer.
@@ -3197,6 +3241,18 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
         }
         if ($text !== '' && in_array($role, ['student', 'maya'], true)) {
             maya_insert_message($pdo, $session, $role, 'voice_transcript', $text, [], $flags);
+        }
+        if ($role === 'maya' && $text !== '' && maya_signals_final_review_ready($text, [], maya_decode_json_column($session['scores_json'] ?? null), $summaryText, (int)($session['major_paste_flag'] ?? 0) === 1)) {
+            $scores = maya_floor_scores_for_final_review(maya_decode_json_column($session['scores_json'] ?? null));
+            $readinessOut = maya_compute_readiness($scores, MAYA_MIN_INTERACTIONS, false, false);
+            maya_save_session($pdo, (int)$session['id'], [
+                'scores_json' => json_encode($scores),
+                'readiness_json' => json_encode($readinessOut),
+                'interaction_count' => max((int)($session['interaction_count'] ?? 0), MAYA_MIN_INTERACTIONS),
+                'major_paste_flag' => 0,
+                'ready_for_final_review' => 1,
+            ]);
+            return ['ok' => true, 'readiness' => $readinessOut, 'scores' => $scores];
         }
         return ['ok' => true];
     }

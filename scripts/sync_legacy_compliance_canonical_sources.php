@@ -44,6 +44,7 @@ $legacy = legacy_db();
 $requirements = fetch_all_by_key($legacy, 'SELECT * FROM mccf_requirements ORDER BY mccf_row_id', 'requirement_key');
 $excerpts = fetch_all_by_key($legacy, 'SELECT * FROM manual_excerpts ORDER BY manual_code, manual_part, section_ref, excerpt_id', 'excerpt_id');
 $links = fetch_all_by_key($legacy, 'SELECT * FROM mccf_excerpt_links ORDER BY link_id', 'link_id');
+$inventoryHash = inventory_hash($requirements, $excerpts, $links);
 
 $observed = array(
     'requirements' => count($requirements),
@@ -87,14 +88,14 @@ if ($missingExcerpts !== array()) {
 }
 
 $sourceId = ensure_source($target);
-$sourceSets = ensure_source_sets($target, $sourceId, !$apply, inventory_hash($requirements, $excerpts, $links));
+$sourceSets = ensure_source_sets($target, $sourceId, !$apply, $inventoryHash);
 $runId = create_sync_run($target, $sourceId, null, !$apply, $expected, $observed, $warnings, $errors, array(
     'apply' => $apply,
     'allow_count_mismatch' => $allowCountMismatch,
 ));
 
 if ($errors !== array()) {
-    finish_sync_run($target, $runId, 'failed', array(), $warnings, $errors, inventory_hash($requirements, $excerpts, $links));
+    finish_sync_run($target, $runId, 'failed', array(), $warnings, $errors, $inventoryHash);
     report($apply, $observed, array(), $warnings, $errors);
     exit(1);
 }
@@ -127,12 +128,12 @@ try {
         deactivate_missing($target, $runId, 'ipca_canonical_requirement_excerpt_links', 'source_link_id', array_keys($links), $apply)
     );
 
-    finish_sync_run($target, $runId, $apply ? 'success' : 'dry_run', $actions, $warnings, array(), inventory_hash($requirements, $excerpts, $links));
+    finish_sync_run($target, $runId, $apply ? 'success' : 'dry_run', $actions, $warnings, array(), $inventoryHash);
     $target->commit();
     report($apply, $observed, $actions, $warnings, array());
 } catch (Throwable $e) {
     $target->rollBack();
-    finish_sync_run($target, $runId, 'failed', array(), $warnings, array($e->getMessage()), inventory_hash($requirements, $excerpts, $links));
+    finish_sync_run($target, $runId, 'failed', array(), $warnings, array($e->getMessage()), $inventoryHash);
     fwrite(STDERR, "Sync failed: {$e->getMessage()}\n");
     exit(1);
 }
@@ -401,6 +402,7 @@ function sync_requirements(PDO $pdo, int $runId, array $requirements, array $sou
              :manual_part, :item_no, :sub_item_no, :subject, :requirement_text, :regulation_ref, :manual_section_ref,
              :legacy_excerpt_id, :applicable, :remarks, :finding_ref, :source_hash, 'active', CURRENT_TIMESTAMP)
         ON DUPLICATE KEY UPDATE
+            id = LAST_INSERT_ID(id),
             source_set_id = VALUES(source_set_id),
             source_document_id = VALUES(source_document_id),
             source_mccf_row_id = VALUES(source_mccf_row_id),
@@ -455,8 +457,11 @@ function sync_requirements(PDO $pdo, int $runId, array $requirements, array $sou
                 ':finding_ref' => $row['finding_ref'],
                 ':source_hash' => $hash,
             ));
+            $localId = (int)$pdo->lastInsertId();
+        } else {
+            $localId = $existing[$key]['id'] ?? null;
         }
-        write_row_map($pdo, $runId, $sourceSets[$sourceSetKey] ?: null, 'ipca_canonical_requirements', $apply ? local_id($pdo, 'ipca_canonical_requirements', 'requirement_key', $key) : ($existing[$key]['id'] ?? null), 'mccf_requirements', (string)$row['mccf_row_id'], $key, $hash, $action);
+        write_row_map($pdo, $runId, $sourceSets[$sourceSetKey] ?: null, 'ipca_canonical_requirements', $localId, 'mccf_requirements', (string)$row['mccf_row_id'], $key, $hash, $action);
     }
     return $counts;
 }
@@ -479,6 +484,7 @@ function sync_excerpts(PDO $pdo, int $runId, array $excerpts, array $sourceSets,
             (:source_set_id, :source_document_id, :excerpt_key, :excerpt_key_norm, :manual_code, :manual_rev, :manual_part, :section_ref,
              :title, :body_text, :source_file, :source_sha256, :content_hash, 'manual_excerpts', :source_hash, 'active', CURRENT_TIMESTAMP)
         ON DUPLICATE KEY UPDATE
+            id = LAST_INSERT_ID(id),
             source_set_id = VALUES(source_set_id),
             source_document_id = VALUES(source_document_id),
             excerpt_key_norm = VALUES(excerpt_key_norm),
@@ -521,8 +527,11 @@ function sync_excerpts(PDO $pdo, int $runId, array $excerpts, array $sourceSets,
                 ':content_hash' => hash('sha256', normalize_text((string)$row['text'])),
                 ':source_hash' => $hash,
             ));
+            $localId = (int)$pdo->lastInsertId();
+        } else {
+            $localId = $existing[$key]['id'] ?? null;
         }
-        write_row_map($pdo, $runId, $sourceSets[$sourceSetKey] ?: null, 'ipca_canonical_excerpts', $apply ? local_id($pdo, 'ipca_canonical_excerpts', 'excerpt_key', $key) : ($existing[$key]['id'] ?? null), 'manual_excerpts', $key, $key, $hash, $action);
+        write_row_map($pdo, $runId, $sourceSets[$sourceSetKey] ?: null, 'ipca_canonical_excerpts', $localId, 'manual_excerpts', $key, $key, $hash, $action);
     }
     return $counts;
 }
@@ -547,6 +556,7 @@ function sync_links(PDO $pdo, int $runId, array $links, array $requirements, arr
             (:source_set_id, :source_document_id, :requirement_id, :excerpt_id, :requirement_key, :excerpt_key, :link_type, :confidence,
              :notes, :verified_by_source, :verified_on, :source_link_id, :source_hash, 'active', CURRENT_TIMESTAMP)
         ON DUPLICATE KEY UPDATE
+            id = LAST_INSERT_ID(id),
             source_set_id = VALUES(source_set_id),
             source_document_id = VALUES(source_document_id),
             requirement_id = VALUES(requirement_id),
@@ -588,8 +598,11 @@ function sync_links(PDO $pdo, int $runId, array $links, array $requirements, arr
                 ':source_link_id' => $row['link_id'],
                 ':source_hash' => $hash,
             ));
+            $localId = (int)$pdo->lastInsertId();
+        } else {
+            $localId = $existing[$linkId]['id'] ?? null;
         }
-        write_row_map($pdo, $runId, $sourceSets[$sourceSetKey] ?: null, 'ipca_canonical_requirement_excerpt_links', $apply ? local_id($pdo, 'ipca_canonical_requirement_excerpt_links', 'source_link_id', (string)$linkId) : ($existing[$linkId]['id'] ?? null), 'mccf_excerpt_links', (string)$row['link_id'], (string)$linkId, $hash, $action);
+        write_row_map($pdo, $runId, $sourceSets[$sourceSetKey] ?: null, 'ipca_canonical_requirement_excerpt_links', $localId, 'mccf_excerpt_links', (string)$row['link_id'], (string)$linkId, $hash, $action);
     }
     return $counts;
 }
