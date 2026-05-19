@@ -1179,8 +1179,7 @@
   Coach.prototype._handleFinalReview = function () {
     if (this.busy) return;
     if (!this.readiness || !this.readiness.ready_for_final_review) {
-      // Server-side will also reject — show the readiness panel.
-      this._showLocalHint('Final review unlocks once Maya has enough evidence. See "Still needed" below.');
+      this._runFinalReviewPrecheck();
       return;
     }
     this._setBusy(true);
@@ -1215,6 +1214,31 @@
       self._setBusy(false);
       self._showError('Maya had trouble running final review. Your draft is still safe.');
       try { console.warn('[Maya] final_review failed:', e && e.message); } catch (ignored) {}
+    });
+  };
+
+  Coach.prototype._runFinalReviewPrecheck = function () {
+    if (this.busy) return;
+    this._setBusy(true);
+    var payload = this._buildPayload('final_review_precheck', {});
+    payload.summary_html = this.editor ? htmlFromEditor(this.editor) : '';
+    payload.summary_excerpt = this.editor ? plainTextFromEditor(this.editor) : '';
+    payload.coach_history = this.history.slice(-12);
+    var self = this;
+    this._postJson(payload).then(function (j) {
+      self._setBusy(false);
+      if (!j || j.ok === false) {
+        self._showError(j && j.error ? j.error : 'Maya could not check final review readiness.');
+        return;
+      }
+      self._absorbResponse(j, { studentReply: 'Requested Final Review' });
+      if (j.blocked_reasons && j.blocked_reasons.length) {
+        self._showLocalHint(j.blocked_reasons.slice(0, 3).join(' • '));
+      }
+    }).catch(function (e) {
+      self._setBusy(false);
+      self._showError('Maya had trouble checking final review readiness. Your draft is still safe.');
+      try { console.warn('[Maya] final_review_precheck failed:', e && e.message); } catch (ignored) {}
     });
   };
 
@@ -1299,6 +1323,9 @@
         minimum_interactions_met: !!j.readiness.minimum_interactions_met,
         unresolved_required_question: !!j.readiness.unresolved_required_question
       };
+    }
+    if (Array.isArray(j.blocked_reasons) && j.blocked_reasons.length) {
+      this.readiness.missing = j.blocked_reasons.slice(0);
     }
     if (typeof j.interaction_count === 'number') {
       this.interactionCount = j.interaction_count;

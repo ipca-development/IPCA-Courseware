@@ -730,6 +730,7 @@ function maya_summary_has_official_structure(array $sections, string $summaryPla
     if (!empty($sectionProgress['summary_structure_added'])) return true;
     $plain = strtolower(preg_replace('/\s+/u', ' ', maya_strip_html_to_text($summaryPlain)));
     if (trim($plain) === '') return false;
+    if (str_word_count($plain) >= 80) return true;
     $titles = maya_section_titles($sections);
     if (!$titles) return false;
     $hits = 0;
@@ -758,6 +759,24 @@ function maya_student_asks_for_structure(string $studentReply): bool
         if (strpos($text, $word) !== false) return true;
     }
     return preg_match('/\b(can|could|give|add|show|need|what)\b/u', $text) === 1;
+}
+
+function maya_student_says_structure_exists(string $studentReply): bool
+{
+    $text = strtolower(trim($studentReply));
+    return $text !== ''
+        && preg_match('/\b(already|have|has|there|exists|added)\b/u', $text) === 1
+        && preg_match('/\bstructure|outline|headings|sections\b/u', $text) === 1;
+}
+
+function maya_student_requests_status_check(string $studentReply): bool
+{
+    $text = strtolower(trim($studentReply));
+    if ($text === '') return false;
+    foreach (['already did', 'already covered', 'you are repeating', 'covered this', 'we covered', 'i am confused', "i'm confused", 'what is missing', 'review my summary', 'we are done', 'i think we are done', 'get accepted', 'final review'] as $needle) {
+        if (strpos($text, $needle) !== false) return true;
+    }
+    return false;
 }
 
 function maya_text_looks_like_structure_outline(string $text): bool
@@ -1204,8 +1223,34 @@ function maya_blueprint_current_task(?array $bundle, array $state, bool $structu
             'task_text' => '',
         ];
     }
-    $step = maya_blueprint_sequence_step($bundle, (int)($state['current_sequence_step'] ?? 1));
+    $bp = is_array($bundle['blueprint'] ?? null) ? $bundle['blueprint'] : [];
+    $doNotReopen = (bool)($bp['section_status_policy']['do_not_reopen_after_complete'] ?? true);
+    $completed = array_fill_keys(array_map('strval', is_array($state['completed_sections'] ?? null) ? $state['completed_sections'] : []), true);
+    $stepNo = (int)($state['current_sequence_step'] ?? 1);
+    $step = maya_blueprint_sequence_step($bundle, $stepNo);
+    if ($doNotReopen) {
+        $guard = 0;
+        while ($step && isset($completed[(string)($step['section_id'] ?? '')]) && $guard < 100) {
+            $stepNo++;
+            $next = maya_blueprint_sequence_step($bundle, $stepNo);
+            if (!$next || (int)($next['step'] ?? 0) < $stepNo) break;
+            $step = $next;
+            $guard++;
+        }
+    }
     $sectionId = (string)($state['current_section_id'] ?: ($step['section_id'] ?? ''));
+    if ($doNotReopen && isset($completed[$sectionId])) {
+        $sectionId = (string)($step['section_id'] ?? $sectionId);
+    }
+    if ($doNotReopen && isset($completed[$sectionId])) {
+        return [
+            'mode' => 'ready_for_final_review',
+            'section_id' => '',
+            'section_title' => '',
+            'slide_group' => [],
+            'task_text' => 'Ready for final review.',
+        ];
+    }
     $section = maya_blueprint_section($bundle, $sectionId);
     $title = (string)($section['title'] ?? $sectionId);
     $slideGroup = maya_blueprint_slide_group_pages($bundle, array_values(array_map('intval', $state['current_slide_group'] ?: ($step['slide_group'] ?? []))));
@@ -1312,6 +1357,197 @@ function maya_blueprint_prompt_context(?array $bundle, array $state, array $task
         . "Not required global: " . implode('; ', array_map('strval', $bp['not_required_global'] ?? [])) . "\n"
         . "Current task mode: " . (string)($task['mode'] ?? '') . "\n"
         . "Current task text: " . (string)($task['task_text'] ?? '');
+}
+
+function maya_status_tokens(string $text): array
+{
+    $text = strtolower(maya_strip_html_to_text($text));
+    preg_match_all('/[a-z0-9]{4,}/u', $text, $matches);
+    $stop = array_fill_keys([
+        'that', 'this', 'with', 'from', 'have', 'must', 'should', 'before', 'after',
+        'section', 'summary', 'student', 'pilot', 'flight', 'every', 'your', 'into',
+        'what', 'when', 'where', 'which', 'will', 'would', 'could', 'there',
+    ], true);
+    $tokens = [];
+    foreach ($matches[0] ?? [] as $token) {
+        if (isset($stop[$token])) continue;
+        if (strlen($token) > 6 && substr($token, -3) === 'ing') $token = substr($token, 0, -3);
+        if (strlen($token) > 5 && substr($token, -2) === 'ed') $token = substr($token, 0, -2);
+        $tokens[$token] = true;
+    }
+    return array_keys($tokens);
+}
+
+function maya_summary_covers_requirement(string $summaryPlain, string $requirement): bool
+{
+    $summary = strtolower(maya_strip_html_to_text($summaryPlain));
+    $req = strtolower(maya_strip_html_to_text($requirement));
+    if ($summary === '' || $req === '') return false;
+    if (strpos($req, 'pilot') !== false && strpos($req, 'every flight') !== false) {
+        return strpos($summary, 'pilot') !== false
+            && (strpos($summary, 'must assess') !== false || strpos($summary, 'responsib') !== false || strpos($summary, 'fitness') !== false)
+            && strpos($summary, 'every flight') !== false;
+    }
+    if (strpos($req, 'imsafe') !== false) {
+        return strpos($summary, 'imsafe') !== false
+            || (strpos($summary, 'illness') !== false && strpos($summary, 'stress') !== false && strpos($summary, 'fatigue') !== false);
+    }
+    $tokens = maya_status_tokens($requirement);
+    if (!$tokens) return true;
+    $hits = 0;
+    foreach ($tokens as $token) {
+        if (strpos($summary, $token) !== false) $hits++;
+    }
+    return $hits >= max(2, (int)ceil(count($tokens) * 0.45));
+}
+
+function maya_section_heading_exists(array $section, string $summaryPlain): bool
+{
+    $title = strtolower(trim((string)($section['title'] ?? '')));
+    $sid = strtolower(str_replace(['_', '-'], ' ', (string)($section['section_id'] ?? '')));
+    $summary = strtolower(maya_strip_html_to_text($summaryPlain));
+    if ($title !== '' && strpos($summary, $title) !== false) return true;
+    if ($sid !== '' && strpos($summary, $sid) !== false) return true;
+    $tokens = maya_status_tokens($title ?: $sid);
+    if (!$tokens) return false;
+    $hits = 0;
+    foreach ($tokens as $token) {
+        if (strpos($summary, $token) !== false) $hits++;
+    }
+    return $hits >= max(1, (int)ceil(count($tokens) * 0.6));
+}
+
+function maya_blueprint_deterministic_status(?array $bundle, string $summaryPlain, array $flags = []): array
+{
+    $sections = maya_blueprint_required_sections($bundle);
+    $progress = maya_section_progress_from_flags($flags, $sections);
+    $blueprintState = maya_blueprint_state_from_flags($flags, $bundle);
+    $bp = is_array($bundle['blueprint'] ?? null) ? $bundle['blueprint'] : [];
+    $doNotReopen = (bool)($bp['section_status_policy']['do_not_reopen_after_complete'] ?? true);
+    $wordCount = str_word_count(maya_strip_html_to_text($summaryPlain));
+    $structureAdded = !empty($progress['summary_structure_added'])
+        || !empty($blueprintState['structure_added'])
+        || !empty($flags['structure_added'])
+        || maya_summary_has_official_structure($sections, $summaryPlain, $progress)
+        || $wordCount >= 80;
+
+    $missingBySection = [];
+    $completedSections = [];
+    $sectionStates = is_array($blueprintState['section_states'] ?? null) ? $blueprintState['section_states'] : [];
+    foreach ($sections as $sectionRow) {
+        $sectionId = (string)($sectionRow['section_id'] ?? '');
+        $section = maya_blueprint_section($bundle, $sectionId);
+        $missing = [];
+        $alreadyComplete = in_array($sectionId, array_map('strval', $blueprintState['completed_sections'] ?? []), true)
+            || (string)($sectionStates[$sectionId]['state'] ?? '') === 'complete';
+        if (!maya_section_heading_exists($sectionRow, $summaryPlain) && !$structureAdded) {
+            $missing[] = 'Section heading: ' . (string)($sectionRow['title'] ?? $sectionId);
+        }
+        $requirements = array_values(array_unique(array_filter(array_map('strval', array_merge(
+            is_array($section['section_acceptance_criteria']['must_have'] ?? null) ? $section['section_acceptance_criteria']['must_have'] : [],
+            is_array($section['minimum_completion_check'] ?? null) ? $section['minimum_completion_check'] : []
+        )))));
+        $mustHaveStatus = [];
+        foreach ($requirements as $req) {
+            $covered = maya_summary_covers_requirement($summaryPlain, $req);
+            $mustHaveStatus[$req] = $covered;
+            if (!$covered) $missing[] = $req;
+        }
+        if ($alreadyComplete && $doNotReopen) {
+            $completedSections[] = $sectionId;
+            $sectionStates[$sectionId] = array_merge(is_array($sectionStates[$sectionId] ?? null) ? $sectionStates[$sectionId] : [], [
+                'state' => 'complete',
+                'completed_at' => (string)($sectionStates[$sectionId]['completed_at'] ?? maya_now_sql()),
+                'must_have_status' => $mustHaveStatus,
+                'locked_complete' => true,
+            ]);
+            continue;
+        }
+        if (!$missing) {
+            $completedSections[] = $sectionId;
+            $sectionStates[$sectionId] = array_merge(is_array($sectionStates[$sectionId] ?? null) ? $sectionStates[$sectionId] : [], [
+                'state' => 'complete',
+                'completed_at' => (string)($sectionStates[$sectionId]['completed_at'] ?? maya_now_sql()),
+                'must_have_status' => $mustHaveStatus,
+                'locked_complete' => true,
+            ]);
+        } else {
+            $sectionStates[$sectionId] = array_merge(is_array($sectionStates[$sectionId] ?? null) ? $sectionStates[$sectionId] : [], [
+                'state' => (string)($sectionStates[$sectionId]['state'] ?? 'open') === 'complete' ? 'complete' : 'open',
+                'must_have_status' => $mustHaveStatus,
+            ]);
+            $missingBySection[] = [
+                'section_id' => $sectionId,
+                'section_title' => (string)($sectionRow['title'] ?? $sectionId),
+                'missing' => array_values($missing),
+            ];
+        }
+    }
+    $blocked = [];
+    if (!$structureAdded) $blocked[] = 'Official summary structure is missing.';
+    foreach ($missingBySection as $row) {
+        foreach ($row['missing'] as $missing) {
+            $blocked[] = (string)$row['section_title'] . ' - ' . (string)$missing;
+        }
+    }
+    $allComplete = !$missingBySection && (count($sections) > 0 || $wordCount >= 80);
+    $finalReady = $structureAdded && $allComplete && $wordCount >= 80;
+    if ($structureAdded && $allComplete && $wordCount < 80) {
+        $blocked[] = 'Summary needs more meaningful student-written content before final review.';
+    }
+    return [
+        'ok' => true,
+        'structure_added' => $structureAdded,
+        'all_sections_complete' => $allComplete,
+        'final_ready' => $finalReady,
+        'completed_sections' => array_values(array_unique($completedSections)),
+        'missing_by_section' => $missingBySection,
+        'blocked_reasons' => $blocked,
+        'section_states' => $sectionStates,
+        'current_task' => [
+            'mode' => $finalReady ? 'ready_for_final_review' : 'fix_blockers',
+            'task_text' => $finalReady ? 'Ready for final review.' : ('Fix ' . count($blocked) . ' item' . (count($blocked) === 1 ? '' : 's') . ' before final review: ' . (string)($blocked[0] ?? 'Complete missing blueprint items.')),
+        ],
+        'readiness' => [
+            'ready_for_final_review' => $finalReady,
+            'missing' => $blocked,
+            'minimum_interactions_met' => true,
+            'unresolved_required_question' => false,
+        ],
+    ];
+}
+
+function maya_status_missing_text(array $status): string
+{
+    $rows = is_array($status['missing_by_section'] ?? null) ? $status['missing_by_section'] : [];
+    $parts = [];
+    foreach ($rows as $row) {
+        if (!is_array($row)) continue;
+        $missing = array_values(array_map('strval', is_array($row['missing'] ?? null) ? $row['missing'] : []));
+        if (!$missing) continue;
+        $parts[] = (string)($row['section_title'] ?? $row['section_id'] ?? 'Section') . ' - ' . implode(', ', $missing);
+    }
+    if (!$parts && is_array($status['blocked_reasons'] ?? null)) {
+        $parts = array_values(array_map('strval', $status['blocked_reasons']));
+    }
+    return $parts ? implode('; ', $parts) : 'No missing blueprint items found.';
+}
+
+function maya_apply_deterministic_status_to_flags(array $flags, array $blueprintState, array $sectionProgress, array $status): array
+{
+    $flags['structure_added'] = !empty($status['structure_added']);
+    $flags['blueprint_state'] = array_merge($blueprintState, [
+        'structure_added' => !empty($status['structure_added']),
+        'final_review_requested' => !empty($blueprintState['final_review_requested']),
+        'completed_sections' => array_values(array_map('strval', is_array($status['completed_sections'] ?? null) ? $status['completed_sections'] : [])),
+        'section_states' => is_array($status['section_states'] ?? null) ? $status['section_states'] : [],
+    ]);
+    $flags['section_progress'] = array_merge($sectionProgress, [
+        'summary_structure_added' => !empty($status['structure_added']),
+        'completed_sections' => array_values(array_map('strval', is_array($status['completed_sections'] ?? null) ? $status['completed_sections'] : [])),
+        'current_writing_task' => (string)($status['current_task']['task_text'] ?? ''),
+    ]);
+    return $flags;
 }
 
 function maya_decode_json_column($raw): array
@@ -2456,8 +2692,67 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     $sectionProgress['active_assignment'] = $activeAssignment;
     $sectionProgress['current_writing_task'] = (!$activeAssignment || !empty($activeAssignment['completed'])) ? '' : (string)$activeAssignment['instruction_text'];
     $structurePresent = maya_summary_has_official_structure($derivedSections, $summaryPlainForFocus, $sectionProgress);
+    if (maya_student_says_structure_exists($studentReply)) {
+        $structurePresent = true;
+        $sectionProgress['summary_structure_added'] = true;
+        $existingFlags['structure_added'] = true;
+    }
     $structureRequested = maya_student_asks_for_structure($studentReply);
     $shouldOfferStructure = $derivedSections && (!$structurePresent || $structureRequested);
+    $deterministicStatus = $blueprintBundle ? maya_blueprint_deterministic_status($blueprintBundle, $summaryPlainForFocus, $existingFlags) : null;
+    if ($deterministicStatus && !empty($deterministicStatus['structure_added'])) {
+        $structurePresent = true;
+        $shouldOfferStructure = $structureRequested && !$deterministicStatus['structure_added'];
+    }
+    $conceptRepeatLimitHit = (int)($conceptProgress[$activeConcept]['followup_count'] ?? 0) >= 2
+        || !empty($conceptProgress[$activeConcept]['closed']);
+    $maxRefinementTurns = (int)($blueprintBundle['blueprint']['section_status_policy']['max_refinement_turns'] ?? 2);
+    if ($maxRefinementTurns <= 0) $maxRefinementTurns = 2;
+    $currentSectionRefinementTurns = (int)($blueprintState['section_states'][(string)($currentTask['section_id'] ?? '')]['refinement_turns'] ?? 0);
+    $sectionRepeatLimitHit = $currentSectionRefinementTurns >= $maxRefinementTurns;
+    if ($deterministicStatus && (maya_student_requests_status_check($studentReply) || $clientTrigger === 'final_review_precheck' || ($explicitStudentReply && ($conceptRepeatLimitHit || $sectionRepeatLimitHit)))) {
+        $readinessOut = $deterministicStatus['readiness'];
+        $scoresForStatus = !empty($deterministicStatus['final_ready']) ? maya_floor_scores_for_final_review($oldScores) : $oldScores;
+        $flagsForStatus = maya_apply_deterministic_status_to_flags($existingFlags, $blueprintState, $sectionProgress, $deterministicStatus);
+        $mayaMessage = $deterministicStatus['final_ready']
+            ? 'Your summary is ready for final review. I found all required sections and must-have concepts. Click Request Final Review now.'
+            : 'Not ready yet. Missing: ' . maya_status_missing_text($deterministicStatus);
+        if ($studentReply !== '') maya_insert_message($pdo, $session, 'student', 'chat', $studentReply);
+        $msg = maya_insert_message($pdo, $session, 'maya', 'readiness_check', $mayaMessage, $scoresForStatus, $flagsForStatus, []);
+        maya_save_session($pdo, $sessionId, [
+            'scores_json' => json_encode($scoresForStatus),
+            'readiness_json' => json_encode($readinessOut),
+            'flags_json' => json_encode($flagsForStatus),
+            'last_question' => '',
+            'ready_for_final_review' => !empty($deterministicStatus['final_ready']) ? 1 : 0,
+        ]);
+        return [
+            'ok' => true,
+            'maya_message' => $mayaMessage,
+            'next_question' => '',
+            'stage' => !empty($deterministicStatus['final_ready']) ? MAYA_STAGE_READINESS : $coachStage,
+            'scores' => $scoresForStatus,
+            'readiness' => $readinessOut,
+            'flags' => $flagsForStatus,
+            'current_task' => $deterministicStatus['current_task'],
+            'coaching_state' => [
+                'current_writing_task' => (string)$deterministicStatus['current_task']['task_text'],
+                'awaiting_chat_reply' => false,
+                'coach_state' => !empty($deterministicStatus['final_ready']) ? MAYA_COACH_STATE_VERIFYING_SUMMARY : MAYA_COACH_STATE_REMEDIATION,
+                'active_assignment' => [],
+                'current_section' => '',
+                'current_slide_id' => (int)($sectionProgress['current_slide_id'] ?? 0),
+                'current_slide_number' => (int)($sectionProgress['current_slide_number'] ?? 0),
+            ],
+            'summary_insertions' => [],
+            'message' => $msg,
+            'structure_added' => $deterministicStatus['structure_added'],
+            'all_sections_complete' => $deterministicStatus['all_sections_complete'],
+            'final_ready' => $deterministicStatus['final_ready'],
+            'missing_by_section' => $deterministicStatus['missing_by_section'],
+            'blocked_reasons' => $deterministicStatus['blocked_reasons'],
+        ];
+    }
     if (!empty($currentTask['section_title'])) {
         $sectionProgress['current_section'] = (string)$currentTask['section_title'];
     }
@@ -2748,6 +3043,15 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $awaitingChatReply = false;
     }
     $writingTask = (!$newActiveAssignment || !empty($newActiveAssignment['completed'])) ? '' : (string)$newActiveAssignment['instruction_text'];
+    if ($deterministicStatus && !empty($deterministicStatus['final_ready'])) {
+        $newActiveAssignment = [];
+        $writingTask = 'Ready for final review.';
+        $awaitingChatReply = false;
+        $readinessOut = $deterministicStatus['readiness'];
+        $scores = maya_floor_scores_for_final_review($scores);
+    } elseif ($deterministicStatus && !$deterministicStatus['final_ready'] && !empty($deterministicStatus['blocked_reasons']) && maya_student_requests_status_check($studentReply)) {
+        $writingTask = (string)$deterministicStatus['current_task']['task_text'];
+    }
     $sectionProgress['current_writing_task'] = $writingTask;
     $sectionProgress['awaiting_chat_reply'] = $awaitingChatReply;
     $sectionProgress['active_assignment'] = $newActiveAssignment;
@@ -2763,12 +3067,29 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
     if ($clientTrigger === 'idle' && $wordCount >= 15) $coachState = MAYA_COACH_STATE_VERIFYING_SUMMARY;
     $sectionProgress['coach_state'] = $coachState;
     $currentTask['coach_state'] = $coachState;
+    if ($deterministicStatus) {
+        $blueprintState['structure_added'] = !empty($deterministicStatus['structure_added']);
+        $blueprintState['completed_sections'] = array_values(array_map('strval', $deterministicStatus['completed_sections'] ?? []));
+        $blueprintState['section_states'] = is_array($deterministicStatus['section_states'] ?? null) ? $deterministicStatus['section_states'] : [];
+        $sectionProgress['summary_structure_added'] = !empty($deterministicStatus['structure_added']);
+        $sectionProgress['completed_sections'] = $blueprintState['completed_sections'];
+    }
+    $currentSectionId = trim((string)($currentTask['section_id'] ?? $blueprintState['current_section_id'] ?? ''));
+    if ($explicitStudentReply && $currentSectionId !== '') {
+        if (!is_array($blueprintState['section_states'][$currentSectionId] ?? null)) {
+            $blueprintState['section_states'][$currentSectionId] = ['state' => 'open', 'refinement_turns' => 0, 'completed_at' => null];
+        }
+        if ((string)($blueprintState['section_states'][$currentSectionId]['state'] ?? '') !== 'complete') {
+            $blueprintState['section_states'][$currentSectionId]['refinement_turns'] = (int)($blueprintState['section_states'][$currentSectionId]['refinement_turns'] ?? 0) + 1;
+        }
+    }
     $persistedFlags = [
         'major_paste' => $persistedMajorPaste,
         'needs_deeper_question' => $needsDeeper,
         'concept_progress' => $updatedConceptProgress,
         'active_concept' => $activeConcept,
         'summary_insertions_allowed' => $allowSummaryInsertions,
+        'structure_added' => $structurePresent || !empty($deterministicStatus['structure_added']),
         'active_assignment' => $newActiveAssignment,
         'coach_state' => $coachState,
         'section_progress' => array_merge($sectionProgress, ['current_stage' => $newStage]),
@@ -2857,6 +3178,31 @@ function maya_action_readiness_check(PDO $pdo, array $u, array $payload): array
     $flags  = maya_decode_json_column($session['flags_json']  ?? null);
     if (!is_array($scores)) $scores = [];
     if (!is_array($flags))  $flags  = [];
+    $summaryPlain = trim((string)($payload['summary_excerpt'] ?? ''));
+    if ($summaryPlain === '' && (string)($payload['summary_html'] ?? '') !== '') {
+        $summaryPlain = maya_strip_html_to_text((string)$payload['summary_html']);
+    }
+    $blueprintBundle = maya_load_active_lesson_blueprint($pdo, $lessonId);
+    if ($blueprintBundle) {
+        $status = maya_blueprint_deterministic_status($blueprintBundle, $summaryPlain, $flags);
+        $blueprintState = maya_blueprint_state_from_flags($flags, $blueprintBundle);
+        $progress = maya_section_progress_from_flags($flags, maya_blueprint_required_sections($blueprintBundle));
+        $flags = maya_apply_deterministic_status_to_flags($flags, $blueprintState, $progress, $status);
+        $readinessOut = $status['readiness'];
+        $scores = $status['final_ready'] ? maya_floor_scores_for_final_review($scores) : $scores;
+        maya_save_session($pdo, (int)$session['id'], [
+            'scores_json' => json_encode($scores),
+            'readiness_json' => json_encode($readinessOut),
+            'flags_json' => json_encode($flags),
+            'ready_for_final_review' => $status['final_ready'] ? 1 : 0,
+        ]);
+        return $status + [
+            'scores' => $scores,
+            'flags' => $flags,
+            'interaction_count' => (int)($session['interaction_count'] ?? 0),
+            'stage' => (string)($session['stage'] ?? MAYA_STAGE_STRUCTURE),
+        ];
+    }
 
     $unresolved = false;
     $readinessExisting = maya_decode_json_column($session['readiness_json'] ?? null);
@@ -3054,6 +3400,7 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
         $progress['awaiting_chat_reply'] = false;
         $progress['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
         $progress['current_writing_task'] = 'Official structure added. Start with Item 1 in the first section and write it in your own words.';
+        $blueprintState['structure_added'] = true;
         $activeAssignment = [
             'section_id' => (string)($currentTask['section_id'] ?? ''),
             'concept_id' => 'official_structure',
@@ -3065,6 +3412,7 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
         ];
         $progress['active_assignment'] = $activeAssignment;
         $flags['active_assignment'] = $activeAssignment;
+        $flags['structure_added'] = true;
         $flags['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
         $flags['section_progress'] = $progress;
         $flags['blueprint_state'] = $blueprintState;
@@ -3086,6 +3434,7 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
         $progress['awaiting_chat_reply'] = false;
         $progress['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
         $progress['current_writing_task'] = 'Start with Item 1 in the first section and write it in your own words. Let Maya know when you are done.';
+        $blueprintState['structure_added'] = true;
         $activeAssignment = [
             'section_id' => (string)($currentTask['section_id'] ?? ''),
             'concept_id' => 'first_item',
@@ -3097,6 +3446,7 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
         ];
         $progress['active_assignment'] = $activeAssignment;
         $flags['active_assignment'] = $activeAssignment;
+        $flags['structure_added'] = true;
         $flags['coach_state'] = MAYA_COACH_STATE_WAITING_FOR_SUMMARY_WRITE;
         $flags['section_progress'] = $progress;
         $flags['blueprint_state'] = $blueprintState;
@@ -3190,6 +3540,8 @@ function maya_action_voice_tool(PDO $pdo, array $u, array $payload): array
             $blueprintState['completed_sections'][] = $sectionId;
             $blueprintState['section_states'][$sectionId]['state'] = 'complete';
             $blueprintState['section_states'][$sectionId]['completed_at'] = maya_now_sql();
+            $blueprintState['section_states'][$sectionId]['locked_complete'] = true;
+            $blueprintState['section_states'][$sectionId]['refinement_turns'] = min(2, (int)($blueprintState['section_states'][$sectionId]['refinement_turns'] ?? 0));
         }
         if ($tool === 'move_to_next_section') {
             $blueprintState['current_sequence_step'] = (int)$blueprintState['current_sequence_step'] + 1;
@@ -3271,22 +3623,79 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
         $session = maya_create_session($pdo, $userId, $lessonId, $cohortId, $summaryId > 0 ? $summaryId : null, $context);
     }
     $sessionId = (int)$session['id'];
+    $summaryHtml = (string)($payload['summary_html'] ?? '');
+    $summaryPlain = $summaryHtml !== ''
+        ? maya_strip_html_to_text($summaryHtml)
+        : trim((string)($payload['summary_excerpt'] ?? ''));
 
-    // Server-side preflight: never let a student trigger expensive final review
-    // unless saved coaching state already meets thresholds.
     $scores = maya_decode_json_column($session['scores_json'] ?? null);
     if (!is_array($scores)) $scores = [];
+    $flags = maya_decode_json_column($session['flags_json'] ?? null);
+    if (!is_array($flags)) $flags = [];
+    $deterministicReady = false;
+    $deterministicReadiness = null;
+    $blueprintBundle = maya_load_active_lesson_blueprint($pdo, $lessonId);
+    if ($blueprintBundle) {
+        $det = maya_blueprint_deterministic_status($blueprintBundle, $summaryPlain, $flags);
+        if (!$det['final_ready']) {
+            $blueprintState = maya_blueprint_state_from_flags($flags, $blueprintBundle);
+            $progress = maya_section_progress_from_flags($flags, maya_blueprint_required_sections($blueprintBundle));
+            $flags = maya_apply_deterministic_status_to_flags($flags, $blueprintState, $progress, $det);
+            maya_save_session($pdo, $sessionId, [
+                'readiness_json' => json_encode($det['readiness']),
+                'flags_json' => json_encode($flags),
+                'ready_for_final_review' => 0,
+            ]);
+            $msg = 'Not ready yet. Missing: ' . maya_status_missing_text($det);
+            return [
+                'ok' => true,
+                'approved' => false,
+                'maya_message' => $msg,
+                'next_question' => '',
+                'stage' => (string)($session['stage'] ?? MAYA_STAGE_STRUCTURE),
+                'scores' => $scores,
+                'readiness' => $det['readiness'],
+                'flags' => $flags,
+                'current_task' => $det['current_task'],
+                'gated_by' => 'deterministic_precheck',
+                'structure_added' => $det['structure_added'],
+                'all_sections_complete' => $det['all_sections_complete'],
+                'final_ready' => false,
+                'missing_by_section' => $det['missing_by_section'],
+                'blocked_reasons' => $det['blocked_reasons'],
+            ];
+        }
+        $scores = maya_floor_scores_for_final_review($scores);
+        $deterministicReady = true;
+        $deterministicReadiness = $det['readiness'];
+        $blueprintState = maya_blueprint_state_from_flags($flags, $blueprintBundle);
+        $progress = maya_section_progress_from_flags($flags, maya_blueprint_required_sections($blueprintBundle));
+        $flags = maya_apply_deterministic_status_to_flags($flags, $blueprintState, $progress, $det);
+        maya_save_session($pdo, $sessionId, [
+            'scores_json' => json_encode($scores),
+            'readiness_json' => json_encode($det['readiness']),
+            'flags_json' => json_encode($flags),
+            'interaction_count' => max((int)($session['interaction_count'] ?? 0), MAYA_MIN_INTERACTIONS),
+            'major_paste_flag' => 0,
+            'ready_for_final_review' => 1,
+        ]);
+    }
+
+    // Server-side preflight: never let a student trigger expensive final review
+    // unless deterministic or saved coaching state meets thresholds.
     $unresolvedSaved = false;
     $readSaved = maya_decode_json_column($session['readiness_json'] ?? null);
     if (is_array($readSaved) && isset($readSaved['unresolved_required_question'])) {
         $unresolvedSaved = (bool)$readSaved['unresolved_required_question'];
     }
-    $preflight = maya_compute_readiness(
-        $scores,
-        (int)($session['interaction_count'] ?? 0),
-        (int)($session['major_paste_flag'] ?? 0) === 1,
-        $unresolvedSaved
-    );
+    $preflight = $deterministicReady && is_array($deterministicReadiness)
+        ? $deterministicReadiness
+        : maya_compute_readiness(
+            $scores,
+            (int)($session['interaction_count'] ?? 0),
+            (int)($session['major_paste_flag'] ?? 0) === 1,
+            $unresolvedSaved
+        );
 
     if (!$preflight['ready_for_final_review']) {
         return [
@@ -3302,11 +3711,6 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
         ];
     }
 
-    $summaryHtml = (string)($payload['summary_html'] ?? '');
-    $summaryPlain = $summaryHtml !== ''
-        ? maya_strip_html_to_text($summaryHtml)
-        : trim((string)($payload['summary_excerpt'] ?? ''));
-
     if ($summaryPlain === '') {
         return [
             'ok' => true,
@@ -3318,6 +3722,50 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
             'readiness' => $preflight,
             'flags' => ['major_paste' => false, 'needs_deeper_question' => false],
             'gated_by' => 'empty_summary',
+        ];
+    }
+
+    if ($deterministicReady) {
+        $canonical = null;
+        try {
+            $service = new LessonSummaryService($pdo);
+            $canonical = $service->checkSummary($userId, $cohortId, $lessonId, 'student');
+        } catch (Throwable $e) {
+            $canonical = ['ok' => false, 'error' => $e->getMessage()];
+        }
+        $approved = $canonical && ($canonical['ok'] ?? false) && ((string)($canonical['review_status'] ?? '') === 'acceptable');
+        $message = $approved
+            ? 'Accepted. Good work — your summary is complete.'
+            : 'Your summary is ready for final review, but the official acceptance check still needs attention. Open the canonical feedback to see the exact revision.';
+        $finalReadiness = $preflight;
+        if (!$approved) {
+            $finalReadiness['ready_for_final_review'] = false;
+            $finalReadiness['missing'][] = 'Canonical summary check requested revisions';
+        }
+        $flags = maya_decode_json_column($session['flags_json'] ?? null) ?: ['major_paste' => false, 'needs_deeper_question' => false];
+        maya_insert_message($pdo, $session, 'system', 'system', 'Requested Final Review', $scores, $flags);
+        $mayaHistoryMessage = maya_insert_message($pdo, $session, 'maya', $approved ? 'final_approved' : 'final_revision', $message, $scores, $flags);
+        maya_save_session($pdo, $sessionId, [
+            'stage' => MAYA_STAGE_FINAL_REVIEW,
+            'scores_json' => json_encode($scores),
+            'readiness_json' => json_encode($finalReadiness),
+            'flags_json' => json_encode($flags),
+            'last_question' => '',
+            'major_paste_flag' => 0,
+            'ready_for_final_review' => $finalReadiness['ready_for_final_review'] ? 1 : 0,
+            'approved_by_maya' => $approved ? 1 : 0,
+        ]);
+        return [
+            'ok' => true,
+            'approved' => $approved,
+            'maya_message' => $message,
+            'next_question' => '',
+            'stage' => MAYA_STAGE_FINAL_REVIEW,
+            'scores' => $scores,
+            'readiness' => $finalReadiness,
+            'flags' => $flags,
+            'canonical_check' => $canonical,
+            'message' => $mayaHistoryMessage,
         ];
     }
 
@@ -3529,7 +3977,14 @@ try {
             break;
 
         case 'readiness_check':
+        case 'final_review_precheck':
+        case 'get_section_status':
             $out = maya_action_readiness_check($pdo, $u, $payload);
+            break;
+
+        case 'suppress_structure_offer':
+            $payload['student_reply'] = 'we already have the structure';
+            $out = maya_action_checkpoint($pdo, $u, $payload, true);
             break;
 
         case 'load_history':
@@ -3541,6 +3996,12 @@ try {
             break;
 
         case 'voice_tool':
+            $out = maya_action_voice_tool($pdo, $u, $payload);
+            break;
+
+        case 'mark_section_complete':
+            $payload['tool_name'] = 'mark_section_complete';
+            $payload['arguments'] = is_array($payload['arguments'] ?? null) ? $payload['arguments'] : ['section_id' => (string)($payload['section_id'] ?? '')];
             $out = maya_action_voice_tool($pdo, $u, $payload);
             break;
 
