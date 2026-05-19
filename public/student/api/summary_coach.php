@@ -1378,27 +1378,159 @@ function maya_status_tokens(string $text): array
     return array_keys($tokens);
 }
 
-function maya_summary_covers_requirement(string $summaryPlain, string $requirement): bool
+function maya_semantic_phrase_bank(): array
+{
+    return [
+        'weather_review' => ['weather', 'metar', 'taf', 'forecast', 'actual weather', 'current weather', 'destination weather', 'departure weather', 'airport weather'],
+        'current_forecast' => ['current', 'actual', 'forecast', 'forecasted', 'metar', 'taf'],
+        'preflight_check' => ['before flight', 'preflight', 'before departure', 'prior to flight', 'checked', 'reviewed', 'check', 'review'],
+        'weight_limits' => ['weight', 'overweight', 'maximum weight', 'max weight', 'limit', 'limits', 'reduce weight', 'within limits', 'loading'],
+        'weight_action' => ['reduce weight', 'remove weight', 'offload', 'within limits', 'not overweight', 'below maximum', 'under maximum'],
+        'performance_planning' => ['performance', 'calculation', 'calculate', 'takeoff', 'take off', 'landing', 'runway', 'obstacle', 'distance'],
+        'runway_obstacle' => ['runway', 'obstacle', 'clearance', 'takeoff distance', 'landing distance', 'available distance', 'takeoff', 'landing'],
+        'pilot_responsibility' => ['pilot', 'responsibility', 'responsible', 'must assess', 'fitness', 'fit to fly', 'every flight', 'before every flight'],
+        'imsafe' => ['imsafe', 'illness', 'medication', 'stress', 'alcohol', 'fatigue', 'emotion', 'eating', 'fitness'],
+    ];
+}
+
+function maya_semantic_expected_clusters(string $concept, array $sectionContext = []): array
+{
+    $hay = strtolower(maya_strip_html_to_text($concept . ' ' . implode(' ', array_map('strval', $sectionContext))));
+    $clusters = [];
+    foreach (maya_semantic_phrase_bank() as $cluster => $terms) {
+        foreach ($terms as $term) {
+            if ($term !== '' && strpos($hay, $term) !== false) {
+                $clusters[$cluster] = true;
+                break;
+            }
+        }
+    }
+    if (strpos($hay, 'weather') !== false) {
+        $clusters['weather_review'] = true;
+        if (strpos($hay, 'forecast') !== false || strpos($hay, 'current') !== false) $clusters['current_forecast'] = true;
+    }
+    if (strpos($hay, 'maximum') !== false || strpos($hay, 'overweight') !== false || strpos($hay, 'weight limit') !== false) {
+        $clusters['weight_limits'] = true;
+    }
+    if (strpos($hay, 'performance') !== false || strpos($hay, 'runway') !== false || strpos($hay, 'obstacle') !== false) {
+        $clusters['performance_planning'] = true;
+    }
+    return array_keys($clusters);
+}
+
+function maya_semantic_best_excerpt(string $summaryPlain, array $terms): string
+{
+    $plain = trim(preg_replace('/\s+/u', ' ', maya_strip_html_to_text($summaryPlain)) ?? '');
+    if ($plain === '') return '';
+    $parts = preg_split('/(?<=[.!?;])\s+|\n+/u', $plain) ?: [$plain];
+    $best = '';
+    $bestHits = 0;
+    foreach ($parts as $part) {
+        $part = trim($part);
+        if ($part === '') continue;
+        $lower = strtolower($part);
+        $hits = 0;
+        foreach ($terms as $term) {
+            if ($term !== '' && strpos($lower, strtolower($term)) !== false) $hits++;
+        }
+        if ($hits > $bestHits) {
+            $bestHits = $hits;
+            $best = $part;
+        }
+    }
+    if ($best === '') $best = mb_substr($plain, 0, 180);
+    return mb_strlen($best) > 220 ? mb_substr($best, 0, 220) : $best;
+}
+
+function maya_semantic_concept_satisfied(string $concept, string $summaryPlain, array $sectionContext = []): array
 {
     $summary = strtolower(maya_strip_html_to_text($summaryPlain));
-    $req = strtolower(maya_strip_html_to_text($requirement));
-    if ($summary === '' || $req === '') return false;
-    if (strpos($req, 'pilot') !== false && strpos($req, 'every flight') !== false) {
-        return strpos($summary, 'pilot') !== false
-            && (strpos($summary, 'must assess') !== false || strpos($summary, 'responsib') !== false || strpos($summary, 'fitness') !== false)
-            && strpos($summary, 'every flight') !== false;
+    $conceptText = strtolower(maya_strip_html_to_text($concept));
+    $expected = maya_semantic_expected_clusters($concept, $sectionContext);
+    $bank = maya_semantic_phrase_bank();
+    $matchedClusters = [];
+    $evidenceTerms = [];
+
+    foreach ($expected as $cluster) {
+        $terms = $bank[$cluster] ?? [];
+        foreach ($terms as $term) {
+            if ($term !== '' && strpos($summary, strtolower($term)) !== false) {
+                $matchedClusters[$cluster] = true;
+                $evidenceTerms[] = $term;
+                break;
+            }
+        }
     }
-    if (strpos($req, 'imsafe') !== false) {
-        return strpos($summary, 'imsafe') !== false
-            || (strpos($summary, 'illness') !== false && strpos($summary, 'stress') !== false && strpos($summary, 'fatigue') !== false);
+
+    $specialConfidence = 0.0;
+    if (strpos($conceptText, 'weather') !== false) {
+        $hasWeather = preg_match('/\b(weather|metar|taf)\b/u', $summary) === 1;
+        $hasCurrentForecast = preg_match('/\b(actual|current|forecast|forecasted|metar|taf)\b/u', $summary) === 1;
+        $hasCheck = preg_match('/\b(check|checked|review|reviewed|before|preflight|departure|destination)\b/u', $summary) === 1;
+        if ($hasWeather && $hasCurrentForecast && $hasCheck) {
+            $matchedClusters['weather_review'] = true;
+            $matchedClusters['current_forecast'] = true;
+            $matchedClusters['preflight_check'] = true;
+            $evidenceTerms = array_merge($evidenceTerms, ['weather', 'actual/forecast', 'checked']);
+            $specialConfidence = max($specialConfidence, 0.94);
+        }
     }
-    $tokens = maya_status_tokens($requirement);
-    if (!$tokens) return true;
+    if (preg_match('/\b(maximum|max|limit|overweight|weight)\b/u', $conceptText) === 1) {
+        $hasWeight = preg_match('/\b(weight|overweight|loading|load|mass)\b/u', $summary) === 1;
+        $hasAction = preg_match('/\b(reduce|remove|offload|under|below|within|limit|limits|maximum|max)\b/u', $summary) === 1;
+        if ($hasWeight && $hasAction) {
+            $matchedClusters['weight_limits'] = true;
+            $matchedClusters['weight_action'] = true;
+            $evidenceTerms = array_merge($evidenceTerms, ['weight/overweight', 'reduce/limits']);
+            $specialConfidence = max($specialConfidence, 0.92);
+        }
+    }
+    if (preg_match('/\b(performance|runway|obstacle|takeoff|landing)\b/u', $conceptText) === 1) {
+        $hasPerformance = preg_match('/\b(performance|calculate|calculation|planning)\b/u', $summary) === 1;
+        $hasTakeoffLanding = preg_match('/\b(takeoff|take off|landing|runway|distance|obstacle)\b/u', $summary) === 1;
+        if ($hasPerformance && $hasTakeoffLanding) {
+            $matchedClusters['performance_planning'] = true;
+            $matchedClusters['runway_obstacle'] = true;
+            $evidenceTerms = array_merge($evidenceTerms, ['performance calculation', 'takeoff/landing']);
+            $specialConfidence = max($specialConfidence, 0.88);
+        }
+    }
+    if (strpos($conceptText, 'imsafe') !== false || (strpos($conceptText, 'pilot') !== false && strpos($conceptText, 'fitness') !== false)) {
+        $hasPilotFitness = preg_match('/\b(pilot|fitness|fit|imsafe|illness|stress|fatigue|medication)\b/u', $summary) === 1;
+        $hasEveryFlight = preg_match('/\b(every flight|before flight|before every flight|preflight|prior to flight)\b/u', $summary) === 1;
+        if ($hasPilotFitness && $hasEveryFlight) {
+            $matchedClusters['pilot_responsibility'] = true;
+            $matchedClusters['imsafe'] = true;
+            $evidenceTerms = array_merge($evidenceTerms, ['pilot fitness', 'before/every flight']);
+            $specialConfidence = max($specialConfidence, 0.94);
+        }
+    }
+
+    $conceptTokens = maya_status_tokens($concept);
+    $summaryTokens = array_fill_keys(maya_status_tokens($summary), true);
     $hits = 0;
-    foreach ($tokens as $token) {
-        if (strpos($summary, $token) !== false) $hits++;
+    foreach ($conceptTokens as $token) {
+        if (isset($summaryTokens[$token])) $hits++;
     }
-    return $hits >= max(2, (int)ceil(count($tokens) * 0.45));
+    $tokenConfidence = $conceptTokens ? min(0.86, $hits / max(1, count($conceptTokens))) : 0.0;
+    $clusterConfidence = $expected ? count($matchedClusters) / max(1, count($expected)) : 0.0;
+    $confidence = max($specialConfidence, $clusterConfidence >= 0.5 ? min(0.9, 0.62 + ($clusterConfidence * 0.28)) : 0.0, $tokenConfidence);
+    $matched = $confidence >= 0.72 || ($specialConfidence >= 0.88);
+    $termsForExcerpt = array_values(array_unique(array_merge($evidenceTerms, $conceptTokens)));
+
+    return [
+        'concept' => $concept,
+        'confidence' => round($confidence, 2),
+        'matched_text_excerpt' => maya_semantic_best_excerpt($summaryPlain, $termsForExcerpt),
+        'matched_semantically' => $matched,
+        'evidence_clusters' => array_values(array_keys($matchedClusters)),
+    ];
+}
+
+function maya_summary_covers_requirement(string $summaryPlain, string $requirement, array $sectionContext = []): bool
+{
+    $result = maya_semantic_concept_satisfied($requirement, $summaryPlain, $sectionContext);
+    return !empty($result['matched_semantically']);
 }
 
 function maya_section_heading_exists(array $section, string $summaryPlain): bool
@@ -1448,10 +1580,15 @@ function maya_blueprint_deterministic_status(?array $bundle, string $summaryPlai
             is_array($section['minimum_completion_check'] ?? null) ? $section['minimum_completion_check'] : []
         )))));
         $mustHaveStatus = [];
+        $sectionContext = array_values(array_filter(array_map('strval', [
+            $sectionRow['title'] ?? '',
+            $sectionRow['section_id'] ?? '',
+            implode(' ', array_map('strval', is_array($section['allowed_coaching_focus'] ?? null) ? $section['allowed_coaching_focus'] : [])),
+        ])));
         foreach ($requirements as $req) {
-            $covered = maya_summary_covers_requirement($summaryPlain, $req);
-            $mustHaveStatus[$req] = $covered;
-            if (!$covered) $missing[] = $req;
+            $semantic = maya_semantic_concept_satisfied($req, $summaryPlain, $sectionContext);
+            $mustHaveStatus[$req] = $semantic;
+            if (empty($semantic['matched_semantically'])) $missing[] = $req;
         }
         if ($alreadyComplete && $doNotReopen) {
             $completedSections[] = $sectionId;
@@ -1490,11 +1627,8 @@ function maya_blueprint_deterministic_status(?array $bundle, string $summaryPlai
             $blocked[] = (string)$row['section_title'] . ' - ' . (string)$missing;
         }
     }
-    $allComplete = !$missingBySection && (count($sections) > 0 || $wordCount >= 80);
-    $finalReady = $structureAdded && $allComplete && $wordCount >= 80;
-    if ($structureAdded && $allComplete && $wordCount < 80) {
-        $blocked[] = 'Summary needs more meaningful student-written content before final review.';
-    }
+    $allComplete = !$missingBySection && (count($sections) > 0 || $wordCount >= 30);
+    $finalReady = $structureAdded && $allComplete;
     return [
         'ok' => true,
         'structure_added' => $structureAdded,
