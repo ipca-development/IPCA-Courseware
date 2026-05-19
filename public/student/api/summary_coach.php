@@ -779,6 +779,57 @@ function maya_student_requests_status_check(string $studentReply): bool
     return false;
 }
 
+function maya_student_requests_official_finalization(string $studentReply): bool
+{
+    $text = strtolower(trim($studentReply));
+    if ($text === '') return false;
+    foreach ([
+        'validate my summary',
+        'finalize my summary',
+        'review my summary',
+        'progress test',
+        'move to progress',
+        'move forward',
+        'still show draft',
+        'still shows draft',
+        'summary still says draft',
+        'why does it still show draft',
+        'why is it draft',
+        'accepted',
+        'official check',
+        'final review',
+    ] as $needle) {
+        if (strpos($text, $needle) !== false) return true;
+    }
+    return false;
+}
+
+function maya_sanitize_noncanonical_acceptance_text(string $text): string
+{
+    if (trim($text) === '') return $text;
+    $forbidden = '/\b(validated|finalized|accepted|ready for (?:the )?progress test|you can move forward|you(?:\'re| are) all set|summary is complete|summary(?:\'s| is) complete)\b/iu';
+    if (preg_match($forbidden, $text) !== 1) return $text;
+    return 'Your summary appears ready. Click Request Final Review to run the official check.';
+}
+
+function maya_canonical_summary_check(PDO $pdo, int $userId, int $cohortId, int $lessonId): array
+{
+    try {
+        $service = new LessonSummaryService($pdo);
+        $canonical = $service->checkSummary($userId, $cohortId, $lessonId, 'student');
+        if (!is_array($canonical)) $canonical = ['ok' => false, 'error' => 'Canonical summary check returned no result'];
+    } catch (Throwable $e) {
+        $canonical = ['ok' => false, 'error' => $e->getMessage()];
+    }
+    $status = (string)($canonical['review_status'] ?? 'pending');
+    return [
+        'canonical' => $canonical,
+        'accepted' => !empty($canonical['ok']) && $status === 'acceptable',
+        'review_status' => $status !== '' ? $status : 'pending',
+        'student_soft_locked' => (int)($canonical['student_soft_locked'] ?? 0),
+    ];
+}
+
 function maya_text_looks_like_structure_outline(string $text): bool
 {
     $plain = trim(maya_strip_html_to_text($text));
@@ -2849,7 +2900,9 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $scoresForStatus = !empty($deterministicStatus['final_ready']) ? maya_floor_scores_for_final_review($oldScores) : $oldScores;
         $flagsForStatus = maya_apply_deterministic_status_to_flags($existingFlags, $blueprintState, $sectionProgress, $deterministicStatus);
         $mayaMessage = $deterministicStatus['final_ready']
-            ? 'Your summary is ready for final review. I found all required sections and must-have concepts. Click Request Final Review now.'
+            ? (maya_student_requests_official_finalization($studentReply)
+                ? 'You’re right — it is not officially accepted yet. I need to run the official final review now.'
+                : 'Your summary appears ready. Click Request Final Review to run the official check.')
             : 'Not ready yet. Missing: ' . maya_status_missing_text($deterministicStatus);
         if ($studentReply !== '') maya_insert_message($pdo, $session, 'student', 'chat', $studentReply);
         $msg = maya_insert_message($pdo, $session, 'maya', 'readiness_check', $mayaMessage, $scoresForStatus, $flagsForStatus, []);
@@ -2883,6 +2936,12 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
             'structure_added' => $deterministicStatus['structure_added'],
             'all_sections_complete' => $deterministicStatus['all_sections_complete'],
             'final_ready' => $deterministicStatus['final_ready'],
+            'precheck_ready' => $deterministicStatus['final_ready'],
+            'official_final_review_required' => !empty($deterministicStatus['final_ready']) && maya_student_requests_official_finalization($studentReply),
+            'canonical_check_ran' => false,
+            'canonical_accepted' => false,
+            'review_status' => 'pending',
+            'student_soft_locked' => 0,
             'missing_by_section' => $deterministicStatus['missing_by_section'],
             'blocked_reasons' => $deterministicStatus['blocked_reasons'],
         ];
@@ -3183,6 +3242,8 @@ function maya_action_checkpoint(PDO $pdo, array $u, array $payload, bool $explic
         $awaitingChatReply = false;
         $readinessOut = $deterministicStatus['readiness'];
         $scores = maya_floor_scores_for_final_review($scores);
+        $mayaMessage = maya_sanitize_noncanonical_acceptance_text($mayaMessage);
+        $nextQuestion = maya_sanitize_noncanonical_acceptance_text($nextQuestion);
     } elseif ($deterministicStatus && !$deterministicStatus['final_ready'] && !empty($deterministicStatus['blocked_reasons']) && maya_student_requests_status_check($studentReply)) {
         $writingTask = (string)$deterministicStatus['current_task']['task_text'];
     }
@@ -3316,6 +3377,7 @@ function maya_action_readiness_check(PDO $pdo, array $u, array $payload): array
     if ($summaryPlain === '' && (string)($payload['summary_html'] ?? '') !== '') {
         $summaryPlain = maya_strip_html_to_text((string)$payload['summary_html']);
     }
+    $studentReply = trim((string)($payload['student_reply'] ?? ''));
     $blueprintBundle = maya_load_active_lesson_blueprint($pdo, $lessonId);
     if ($blueprintBundle) {
         $status = maya_blueprint_deterministic_status($blueprintBundle, $summaryPlain, $flags);
@@ -3330,7 +3392,20 @@ function maya_action_readiness_check(PDO $pdo, array $u, array $payload): array
             'flags_json' => json_encode($flags),
             'ready_for_final_review' => $status['final_ready'] ? 1 : 0,
         ]);
+        $mayaMessage = '';
+        if (maya_student_requests_official_finalization($studentReply)) {
+            $mayaMessage = !empty($status['final_ready'])
+                ? 'You’re right — it is not officially accepted yet. I need to run the official final review now.'
+                : 'Not ready yet. Missing: ' . maya_status_missing_text($status);
+        }
         return $status + [
+            'precheck_ready' => !empty($status['final_ready']),
+            'canonical_check_ran' => false,
+            'canonical_accepted' => false,
+            'review_status' => 'pending',
+            'student_soft_locked' => 0,
+            'maya_message' => $mayaMessage,
+            'next_question' => '',
             'scores' => $scores,
             'flags' => $flags,
             'interaction_count' => (int)($session['interaction_count'] ?? 0),
@@ -3783,6 +3858,11 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
             $msg = 'Not ready yet. Missing: ' . maya_status_missing_text($det);
             return [
                 'ok' => true,
+                'precheck_ready' => false,
+                'canonical_check_ran' => false,
+                'canonical_accepted' => false,
+                'review_status' => 'pending',
+                'student_soft_locked' => 0,
                 'approved' => false,
                 'maya_message' => $msg,
                 'next_question' => '',
@@ -3834,9 +3914,14 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
     if (!$preflight['ready_for_final_review']) {
         return [
             'ok' => true,
+            'precheck_ready' => false,
+            'canonical_check_ran' => false,
+            'canonical_accepted' => false,
+            'review_status' => 'pending',
+            'student_soft_locked' => 0,
             'approved' => false,
-            'maya_message' => 'You\'re not quite ready for final review yet. Let\'s close the gaps below before I sign this off.',
-            'next_question' => trim((string)($session['last_question'] ?? '')) ?: 'Pick the weakest area below and explain it in your own words.',
+            'maya_message' => 'Not ready yet. Missing: ' . implode('; ', array_map('strval', $preflight['missing'] ?? ['Complete the remaining required items.'])),
+            'next_question' => '',
             'stage' => (string)($session['stage'] ?? MAYA_STAGE_STRUCTURE),
             'scores' => $scores,
             'readiness' => $preflight,
@@ -3848,6 +3933,11 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
     if ($summaryPlain === '') {
         return [
             'ok' => true,
+            'precheck_ready' => false,
+            'canonical_check_ran' => false,
+            'canonical_accepted' => false,
+            'review_status' => 'pending',
+            'student_soft_locked' => 0,
             'approved' => false,
             'maya_message' => 'I need to see your full summary before I can do a final review.',
             'next_question' => 'Open the summary editor and write the full draft, then come back.',
@@ -3860,17 +3950,12 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
     }
 
     if ($deterministicReady) {
-        $canonical = null;
-        try {
-            $service = new LessonSummaryService($pdo);
-            $canonical = $service->checkSummary($userId, $cohortId, $lessonId, 'student');
-        } catch (Throwable $e) {
-            $canonical = ['ok' => false, 'error' => $e->getMessage()];
-        }
-        $approved = $canonical && ($canonical['ok'] ?? false) && ((string)($canonical['review_status'] ?? '') === 'acceptable');
+        $canonicalResult = maya_canonical_summary_check($pdo, $userId, $cohortId, $lessonId);
+        $canonical = $canonicalResult['canonical'];
+        $approved = $canonicalResult['accepted'];
         $message = $approved
-            ? 'Accepted. Good work — your summary is complete.'
-            : 'Your summary is ready for final review, but the official acceptance check still needs attention. Open the canonical feedback to see the exact revision.';
+            ? 'Accepted. Your summary is complete and you can continue.'
+            : 'The official final review ran and did not accept the summary yet. Open the canonical feedback to see the exact revision.';
         $finalReadiness = $preflight;
         if (!$approved) {
             $finalReadiness['ready_for_final_review'] = false;
@@ -3891,6 +3976,11 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
         ]);
         return [
             'ok' => true,
+            'precheck_ready' => true,
+            'canonical_check_ran' => true,
+            'canonical_accepted' => $approved,
+            'review_status' => $canonicalResult['review_status'],
+            'student_soft_locked' => $canonicalResult['student_soft_locked'],
             'approved' => $approved,
             'maya_message' => $message,
             'next_question' => '',
@@ -4006,33 +4096,30 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
     // If the model approved AND server thresholds still hold AND the model's
     // readiness aligns, delegate canonical acceptance to the production path.
     $canonical = null;
+    $canonicalAccepted = false;
+    $canonicalReviewStatus = 'pending';
+    $canonicalSoftLocked = 0;
     if ($approved && $finalReadiness['ready_for_final_review']) {
-        try {
-            $service = new LessonSummaryService($pdo);
-            $canonical = $service->checkSummary(
-                $userId,
-                $cohortId,
-                $lessonId,
-                'student'
-            );
-        } catch (Throwable $e) {
-            // Do not fake acceptance. Report Maya's verdict but flag canonical
-            // failure so the UI does not pretend the summary was accepted.
-            $canonical = ['ok' => false, 'error' => $e->getMessage()];
-        }
+        $canonicalResult = maya_canonical_summary_check($pdo, $userId, $cohortId, $lessonId);
+        $canonical = $canonicalResult['canonical'];
+        $canonicalAccepted = $canonicalResult['accepted'];
+        $canonicalReviewStatus = $canonicalResult['review_status'];
+        $canonicalSoftLocked = $canonicalResult['student_soft_locked'];
 
         // If canonical evaluator did not accept it, downgrade Maya's verdict.
-        if (!$canonical || !($canonical['ok'] ?? false)
-            || ((string)($canonical['review_status'] ?? '') !== 'acceptable')) {
+        if (!$canonicalAccepted) {
             $approved = false;
-            if ($mayaMessage === '' || $approved) {
-                $mayaMessage = 'I felt good about this, but the official summary check came back as needing revision. Open the canonical feedback and tighten it up.';
-            } else {
-                $mayaMessage .= ' Note: the official check came back as needing revision — open the canonical feedback to see why.';
-            }
+            $mayaMessage = 'The official final review ran and did not accept the summary yet. Open the canonical feedback to see the exact revision.';
+            $nextQuestion = '';
             $finalReadiness['ready_for_final_review'] = false;
             $finalReadiness['missing'][] = 'Canonical summary check requested revisions';
+        } else {
+            $mayaMessage = 'Accepted. Your summary is complete and you can continue.';
+            $nextQuestion = '';
         }
+    } else {
+        $mayaMessage = maya_sanitize_noncanonical_acceptance_text($mayaMessage);
+        $nextQuestion = maya_sanitize_noncanonical_acceptance_text($nextQuestion);
     }
 
     // Persist Maya's final review state as individual message rows.
@@ -4064,6 +4151,11 @@ function maya_action_final_review(PDO $pdo, array $u, array $payload): array
 
     return [
         'ok' => true,
+        'precheck_ready' => $finalReadiness['ready_for_final_review'],
+        'canonical_check_ran' => is_array($canonical),
+        'canonical_accepted' => $canonicalAccepted,
+        'review_status' => $canonicalReviewStatus,
+        'student_soft_locked' => $canonicalSoftLocked,
         'approved' => $approved,
         'maya_message' => $mayaMessage,
         'next_question' => $approved ? '' : $nextQuestion,

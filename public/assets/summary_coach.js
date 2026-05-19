@@ -1126,8 +1126,17 @@
       return;
     }
     var reply = this.elReply ? String(this.elReply.value || '').trim() : '';
+    if (reply && this._isOfficialFinalReviewRequest(reply)) {
+      this._runFinalReviewPrecheck(reply);
+      return;
+    }
     var trigger = reply !== '' ? 'student_reply' : 'micro_checkpoint';
     this._sendCheckpoint({ trigger: trigger, studentReply: reply });
+  };
+
+  Coach.prototype._isOfficialFinalReviewRequest = function (text) {
+    text = String(text || '').toLowerCase();
+    return /validate my summary|finalize my summary|review my summary|progress test|move to progress|move forward|still shows? draft|summary still says draft|why does it still show draft|why is it draft|official check|final review/.test(text);
   };
 
   Coach.prototype._sendCheckpoint = function (opts) {
@@ -1169,6 +1178,9 @@
       }
 
       self._absorbResponse(j, { studentReply: extra.student_reply || '' });
+      if (j && j.official_final_review_required && j.precheck_ready && !j.canonical_check_ran) {
+        self._handleFinalReview();
+      }
     }).catch(function (e) {
       self._setBusy(false);
       self._showError('Maya had trouble connecting. Your draft is still safe.');
@@ -1198,7 +1210,7 @@
       }
       self._absorbResponse(j, { isFinalReview: true, studentReply: 'Requested Final Review' });
 
-      if (j.approved) {
+      if (j.canonical_check_ran || j.canonical_accepted || j.approved) {
         // Hand off to the host page so it can refresh its production-side
         // status (which is canonical, not Maya's). The canonical_check
         // result from the API is the production-engine response.
@@ -1217,13 +1229,14 @@
     });
   };
 
-  Coach.prototype._runFinalReviewPrecheck = function () {
+  Coach.prototype._runFinalReviewPrecheck = function (studentReply) {
     if (this.busy) return;
     this._setBusy(true);
     var payload = this._buildPayload('final_review_precheck', {});
     payload.summary_html = this.editor ? htmlFromEditor(this.editor) : '';
     payload.summary_excerpt = this.editor ? plainTextFromEditor(this.editor) : '';
     payload.coach_history = this.history.slice(-12);
+    if (studentReply) payload.student_reply = String(studentReply || '');
     var self = this;
     this._postJson(payload).then(function (j) {
       self._setBusy(false);
@@ -1231,9 +1244,12 @@
         self._showError(j && j.error ? j.error : 'Maya could not check final review readiness.');
         return;
       }
-      self._absorbResponse(j, { studentReply: 'Requested Final Review' });
+      self._absorbResponse(j, { studentReply: studentReply || 'Requested Final Review' });
       if (j.blocked_reasons && j.blocked_reasons.length) {
         self._showLocalHint(j.blocked_reasons.slice(0, 3).join(' • '));
+      }
+      if (j.precheck_ready && !j.canonical_check_ran) {
+        self._handleFinalReview();
       }
     }).catch(function (e) {
       self._setBusy(false);
@@ -1256,6 +1272,15 @@
         hasText: (j.summary_state.word_count || 0) > 0,
         wordCount: parseInt(j.summary_state.word_count, 10) || 0,
         summaryId: j.summary_state.summary_id || this.config.summaryId || 0
+      });
+    }
+    if (typeof j.review_status === 'string' && j.review_status) {
+      this.setSummaryState({
+        reviewStatus: j.review_status,
+        locked: !!j.student_soft_locked,
+        hasText: this.summaryState.hasText,
+        wordCount: this.summaryState.wordCount,
+        summaryId: this.summaryState.summaryId || this.config.summaryId || 0
       });
     }
     if (j.stage) this.stage = String(j.stage);
@@ -1837,7 +1862,7 @@
   Coach.prototype._renderFinalButton = function () {
     if (!this.btnFinal) return;
     var ready = !!(this.readiness && this.readiness.ready_for_final_review);
-    if (this.summaryState.reviewStatus === 'acceptable' && this.summaryState.locked) {
+    if (this.summaryState.reviewStatus === 'acceptable') {
       ready = false;
     }
     if (ready && !this.busy) {
@@ -1854,8 +1879,8 @@
       var why = (this.readiness && this.readiness.missing && this.readiness.missing.length)
         ? this.readiness.missing.slice(0, 3).join(' • ')
         : 'Final review locked. Maya still needs more evidence of understanding.';
-      if (this.summaryState.reviewStatus === 'acceptable' && this.summaryState.locked) {
-        why = 'Unlock your accepted summary before requesting another review.';
+      if (this.summaryState.reviewStatus === 'acceptable') {
+        why = 'Accepted. Official final review is complete.';
       }
       this.btnFinal.setAttribute('title', why);
     }
