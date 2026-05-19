@@ -269,38 +269,6 @@
   background: #f8fafc;
 }
 
-.ptv3-text-fallback {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  border: 1px solid rgba(15, 23, 42, 0.08);
-  background: #ffffff;
-  border-radius: 14px;
-  padding: 12px;
-  flex: 0 0 auto;
-}
-
-.ptv3-text-fallback[hidden] {
-  display: none;
-}
-
-.ptv3-text-fallback label {
-  font-size: 12px;
-  font-weight: 900;
-  color: #12355f;
-}
-
-.ptv3-text-fallback textarea {
-  width: 100%;
-  resize: vertical;
-  max-height: 120px;
-  border: 1px solid rgba(15, 23, 42, 0.14);
-  border-radius: 12px;
-  padding: 10px 12px;
-  font: inherit;
-  line-height: 1.45;
-}
-
 .maya-chat-bubble[data-kind="score"] {
   border-color: #93c5fd;
   background: #eff6ff;

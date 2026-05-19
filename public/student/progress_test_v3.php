@@ -50,7 +50,7 @@ if ($firstName === '') {
 
 cw_header('Progress Test V3');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v3.css?v=1">
+<link rel="stylesheet" href="/assets/progress_test_v3.css?v=2">
 
 <div class="ptv3-page">
   <section
@@ -120,13 +120,6 @@ cw_header('Progress Test V3');
       <button class="ptv3-btn primary" type="button" data-ptv3-start disabled>Start Progress Test</button>
       <button class="ptv3-btn" type="button" data-ptv3-mute disabled>Mute Microphone</button>
       <button class="ptv3-btn danger" type="button" data-ptv3-end disabled>End Test</button>
-      <button class="ptv3-btn ghost" type="button" data-ptv3-text disabled>Continue in Text Mode</button>
-    </section>
-
-    <section class="ptv3-text-fallback" data-ptv3-text-box hidden>
-      <label for="ptv3TextAnswer">Text mode answer</label>
-      <textarea id="ptv3TextAnswer" data-ptv3-text-answer rows="4" placeholder="Type your answer for the current question..."></textarea>
-      <button class="ptv3-btn primary" type="button" data-ptv3-submit-text>Submit Text Answer</button>
     </section>
   </section>
 </div>
@@ -138,5 +131,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=1"></script>
+<script src="/assets/progress_test_v3.js?v=2"></script>
 <?php cw_footer(); ?>

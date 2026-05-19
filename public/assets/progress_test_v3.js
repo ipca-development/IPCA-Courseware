@@ -26,10 +26,6 @@
     start: $('[data-ptv3-start]'),
     mute: $('[data-ptv3-mute]'),
     end: $('[data-ptv3-end]'),
-    textMode: $('[data-ptv3-text]'),
-    textBox: $('[data-ptv3-text-box]'),
-    textAnswer: $('[data-ptv3-text-answer]'),
-    submitText: $('[data-ptv3-submit-text]'),
     video: $('[data-ptv3-video]'),
     videoFallback: $('[data-ptv3-video-fallback]'),
     recording: $('[data-ptv3-recording]')
@@ -41,6 +37,7 @@
   var pc = null;
   var dc = null;
   var localStream = null;
+  var cameraStream = null;
   var remoteAudio = null;
   var connected = false;
   var muted = false;
@@ -69,6 +66,7 @@
   var lastBubbleKey = '';
   var lastBubbleAt = 0;
   var donePromptShownForAnswer = '';
+  var ignoreTranscriptsUntil = 0;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -101,6 +99,25 @@
     payload.action = action;
     if (attemptId && !payload.attempt_id) payload.attempt_id = attemptId;
     return postJson('/student/api/progress_test_v3_oral.php', payload);
+  }
+
+  function resetClientConversation() {
+    resetAnswerBuffer();
+    processedTranscripts = {};
+    lastBubbleKey = '';
+    lastBubbleAt = 0;
+    activeStudentBubble = null;
+    awaitingAnswer = false;
+    awaitingClarification = false;
+    audioCheckActive = false;
+    awaitingAudioCheck = false;
+    if (els.thread) {
+      els.thread.innerHTML = '';
+      if (els.empty) {
+        els.empty.style.display = '';
+        els.thread.appendChild(els.empty);
+      }
+    }
   }
 
   function addBubble(role, label, message, kind) {
@@ -152,8 +169,9 @@
     var computedScoreProgress = scoreCount ? Math.round((scoreSum / scoreCount) * 10) / 10 : null;
     var scoreProgress = computedScoreProgress == null ? '--' : String(computedScoreProgress) + '%';
     var finalScore = state.score_pct == null ? scoreProgress : String(state.score_pct) + '%';
+    var modeLabel = state.resume_mode === 'resumed' && evaluated > 0 ? 'Resumed attempt' : 'New/reset attempt';
     text(els.title, 'Progress Test V3');
-    text(els.attempt, 'Attempt status: ' + (state.formal_result_label || state.attempt_status || state.status || 'Ready'));
+    text(els.attempt, modeLabel + ' · Attempt status: ' + (state.formal_result_label || state.attempt_status || state.status || 'Ready'));
     text(els.score, 'Score: ' + finalScore);
     text(els.ready, total ? String(total) : '0');
     text(els.current, total ? (idx + '/' + total) : '0/0');
@@ -176,13 +194,31 @@
   }
 
   function startCameraPreview(stream) {
-    if (!els.video || !stream) return;
+    if (!els.video || !stream || !stream.getVideoTracks || stream.getVideoTracks().length === 0) return;
     try {
       els.video.srcObject = stream;
       if (els.videoFallback) els.videoFallback.hidden = true;
       var p = els.video.play();
       if (p && typeof p.catch === 'function') p.catch(function () {});
     } catch (e) {}
+  }
+
+  function startCameraOnlyPreview() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia || !els.video) {
+      if (els.videoFallback) els.videoFallback.textContent = 'Camera unavailable';
+      return Promise.resolve(null);
+    }
+    return navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false }).then(function (stream) {
+      cameraStream = stream;
+      startCameraPreview(stream);
+      return stream;
+    }).catch(function () {
+      if (els.videoFallback) {
+        els.videoFallback.hidden = false;
+        els.videoFallback.textContent = 'Camera unavailable';
+      }
+      return null;
+    });
   }
 
   function setProgressBarPct(pct) {
@@ -222,6 +258,7 @@
   }
 
   function loadQuestions() {
+    resetClientConversation();
     setCoachState('thinking');
     setStatus('Generating/loading questions. Microphone is closed.', 'Preparing questions');
     startPrepProgress();
@@ -233,10 +270,9 @@
       setProgressBarPct(100);
       updateProgress(out.state);
       setCoachState('ready');
-      setStatus('Ready to start. Microphone is still closed.', 'Ready to start');
+      setStatus(out.state && out.state.resume_mode === 'resumed' ? 'Resumed existing attempt. Microphone is still closed.' : 'Ready to start a new/reset attempt. Microphone is still closed.', 'Ready to start');
       els.start.disabled = false;
-      els.textMode.disabled = false;
-      addBubble('maya', 'Maya', 'Ready to start. I have loaded your generated progress test questions. Click Start Progress Test when you are ready.', 'greeting');
+      addBubble('maya', 'Maya', (out.state && out.state.resume_mode === 'resumed') ? 'I found an unfinished progress test attempt. Click Start Progress Test to resume from the current question.' : 'Ready to start. I have loaded your generated progress test questions. Click Start Progress Test when you are ready.', 'greeting');
     }).catch(function (err) {
       stopPrepProgress();
       setProgressBarPct(100);
@@ -296,11 +332,8 @@
     };
     dc.onclose = function () { if (connected) handleDisconnect(); };
 
-    return navigator.mediaDevices.getUserMedia({ audio: true, video: { facingMode: 'user' } }).catch(function () {
-      return navigator.mediaDevices.getUserMedia({ audio: true });
-    }).then(function (stream) {
+    return navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(function (stream) {
       localStream = stream;
-      startCameraPreview(stream);
       setRecording(true, 'Recording in Progress');
       stream.getTracks().forEach(function (track) { pc.addTrack(track, stream); });
       return pc.createOffer();
@@ -335,21 +368,21 @@
     unlockAudioPlayback();
     setCoachState('thinking');
     setStatus('Opening microphone and realtime voice...', 'Connecting');
-    postJson('/student/api/progress_test_voice_token.php', { attempt_id: attemptId }).then(function (token) {
+    startCameraOnlyPreview().then(function () {
+      return postJson('/student/api/progress_test_voice_token.php', { attempt_id: attemptId });
+    }).then(function (token) {
       return connectRealtime(token.client_secret, token.realtime_endpoint);
     }).then(function () {
       connected = true;
       els.mute.disabled = false;
       els.end.disabled = false;
-      els.textMode.disabled = false;
       setCoachState('ready');
       startAudioCheck();
     }).catch(function (err) {
       els.start.disabled = false;
-      els.textMode.disabled = false;
       setCoachState('error');
-      setStatus('Voice failed. Continue in text mode is available.', 'Voice unavailable');
-      addBubble('maya', 'System', 'Voice failed: ' + err.message + '\nYou can continue in text mode without penalty.', 'warning');
+      setStatus('Voice failed. Restart the voice session when ready.', 'Voice unavailable');
+      addBubble('maya', 'System', 'Voice failed: ' + err.message + '\nThis did not penalize the attempt. Restart voice when ready.', 'warning');
       api('abort_voice_session_without_penalty', {}).catch(function () {});
     });
   }
@@ -486,6 +519,7 @@
     awaitingDoneConfirmation = true;
     awaitingAnswer = false;
     doneConfirmationText = 'I heard your answer. Are you finished, or do you want to add more? Say "done" to score it, or continue answering.';
+    ignoreTranscriptsUntil = Date.now() + 2200;
     addBubble('maya', 'Maya', doneConfirmationText, 'transition');
     sendResponse('Do not score yet. Ask this concise confirmation only: "' + doneConfirmationText + '"', 'done_check');
   }
@@ -566,6 +600,7 @@
   function handleStudentTranscript(msg) {
     var transcript = String(msg.transcript || '').trim();
     if (!transcript) return;
+    if (Date.now() < ignoreTranscriptsUntil) return;
     if (isMayaEchoTranscript(transcript)) return;
     var key = transcriptKey(msg);
     if (processedTranscripts[key]) return;
@@ -589,6 +624,7 @@
         var finalAnswer = combinedAnswerText('');
         if (!finalAnswer) return;
         awaitingDoneConfirmation = false;
+        ignoreTranscriptsUntil = 0;
         if (activeStudentBubble && activeStudentBubble.body) activeStudentBubble.body.textContent = finalAnswer;
         evaluateBufferedAnswer(finalAnswer);
         return;
@@ -596,12 +632,14 @@
       if (isContinueSpeech(transcript)) {
         awaitingDoneConfirmation = false;
         donePromptShownForAnswer = '';
+        ignoreTranscriptsUntil = 0;
         setStatus('Keep going. Maya will wait.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
         scheduleAnswerSettle();
         return;
       }
       awaitingDoneConfirmation = false;
       donePromptShownForAnswer = '';
+      ignoreTranscriptsUntil = 0;
     }
     answerSegments.push(transcript);
     if (activeStudentBubble && activeStudentBubble.body) {
@@ -664,7 +702,7 @@
     }).catch(function (err) {
       awaitingAnswer = true;
       setCoachState('error');
-      setStatus('Evaluation failed. You can retry or continue in text mode.', 'Evaluation issue');
+      setStatus('Evaluation failed. Please retry by voice.', 'Evaluation issue');
       addBubble('maya', 'System', 'Evaluation failed: ' + err.message, 'warning');
     });
   }
@@ -680,7 +718,6 @@
       setStatus('Completed.', 'Complete');
       els.mute.disabled = true;
       els.end.disabled = true;
-      els.textMode.disabled = true;
     }).catch(function (err) {
       setCoachState('error');
       setStatus('Completion failed: ' + err.message, 'Completion issue');
@@ -688,11 +725,15 @@
     });
   }
 
-  function stopRealtime(notifyBackend) {
+  function stopRealtime(notifyBackend, action) {
     connected = false;
     if (localStream) {
       localStream.getTracks().forEach(function (track) { track.stop(); });
       localStream = null;
+    }
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(function (track) { track.stop(); });
+      cameraStream = null;
     }
     if (els.video) els.video.srcObject = null;
     if (els.videoFallback) els.videoFallback.hidden = false;
@@ -705,19 +746,20 @@
       try { pc.close(); } catch (e) {}
       pc = null;
     }
-    if (notifyBackend) api('abort_voice_session_without_penalty', {}).catch(function () {});
+    if (notifyBackend) api(action || 'abort_voice_session_without_penalty', {}).then(function (out) {
+      if (out && out.state) updateProgress(out.state);
+    }).catch(function () {});
   }
 
   function handleDisconnect() {
     if (!connected) return;
     stopRealtime(true);
     setCoachState('error');
-    setStatus('Voice disconnected. Continue in text mode is available.', 'Voice disconnected');
-    addBubble('maya', 'System', 'Voice disconnected. Your attempt was not failed; continue in text mode or restart voice.', 'warning');
+    setStatus('Voice disconnected. Restart voice when ready.', 'Voice disconnected');
+    addBubble('maya', 'System', 'Voice disconnected. Your attempt was not failed; restart voice when ready.', 'warning');
     els.start.disabled = false;
     els.mute.disabled = true;
     els.end.disabled = true;
-    els.textMode.disabled = false;
   }
 
   function toggleMute() {
@@ -727,39 +769,21 @@
     text(els.mute, muted ? 'Unmute Microphone' : 'Mute Microphone');
   }
 
-  function showTextMode() {
-    els.textBox.hidden = false;
-    els.textMode.disabled = true;
-    stopRealtime(true);
-    if (currentItem && !awaitingAnswer) awaitingAnswer = true;
-    setStatus('Text fallback enabled.', 'Text mode');
-  }
-
-  function submitTextAnswer() {
-    if (!currentItem) return;
-    var answer = String(els.textAnswer.value || '').trim();
-    if (!answer) return;
-    addBubble('student', 'Student', answer, 'answer');
-    els.textAnswer.value = '';
-    if (awaitingClarification) {
-      evaluateAnswer(originalAnswer, clarificationQuestion, answer);
-    } else {
-      evaluateAnswer(answer, '', '');
-    }
-  }
-
   els.start.addEventListener('click', startTest);
   els.mute.addEventListener('click', toggleMute);
   els.end.addEventListener('click', function () {
-    stopRealtime(true);
-    setStatus('Voice ended without penalty. You can continue in text mode.', 'Voice ended');
-    addBubble('maya', 'System', 'Voice session ended without penalty. Continue in text mode if needed.', 'warning');
+    resetAnswerBuffer();
+    stopRealtime(false);
+    api('end_oral_test_without_penalty').then(function () {
+      attemptId = 0;
+      return loadQuestions();
+    }).catch(function () {});
+    setStatus('Test ended without penalty. Progress was reset and you can restart.', 'Voice ended');
+    addBubble('maya', 'System', 'Test ended without penalty. Partial answers were reset; restart when ready.', 'warning');
     els.start.disabled = false;
     els.mute.disabled = true;
     els.end.disabled = true;
   });
-  els.textMode.addEventListener('click', showTextMode);
-  els.submitText.addEventListener('click', submitTextAnswer);
 
   loadQuestions();
 })();

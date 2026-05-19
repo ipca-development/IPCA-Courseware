@@ -375,6 +375,7 @@ function ptv3_state_payload(PDO $pdo, array $attempt): array
         'score_progress' => $scoreProgress,
         'current_item_id' => $current ? (int)$current['id'] : 0,
         'current_idx' => $current ? (int)$current['idx'] : 0,
+        'resume_mode' => $evaluated > 0 ? 'resumed' : 'new_or_reset',
         'items' => $itemPayload,
     ];
 }
@@ -562,6 +563,25 @@ try {
             $en->execute([$cohortId, $studentUserId]);
             if (!$en->fetchColumn()) ptv3_json(['ok' => false, 'error' => 'Not actively enrolled'], 403);
         }
+
+        $stale = $pdo->prepare("
+            UPDATE progress_tests_v2
+            SET status = 'failed',
+                formal_result_code = 'STALE_ABORTED',
+                formal_result_label = 'Aborted (stale technical session)',
+                counts_as_unsat = 0,
+                pass_gate_met = 0,
+                timing_status = 'unknown',
+                status_text = 'Old realtime oral session was closed as a no-penalty technical abort.',
+                updated_at = NOW()
+            WHERE user_id = ?
+              AND cohort_id = ?
+              AND lesson_id = ?
+              AND status IN ('preparing','ready','in_progress','processing')
+              AND updated_at < (NOW() - INTERVAL 6 HOUR)
+              AND (formal_result_code IS NULL OR formal_result_code != 'STALE_ABORTED')
+        ");
+        $stale->execute([$studentUserId, $cohortId, $lessonId]);
 
         $existing = $pdo->prepare("
             SELECT *
@@ -771,12 +791,51 @@ try {
         $pdo->prepare("
             UPDATE progress_tests_v2
             SET status = CASE WHEN status = 'preparing' THEN 'ready' ELSE status END,
-                status_text = 'Voice disconnected. You can resume or continue in text mode.',
+                status_text = 'Voice disconnected. You can resume the realtime oral test.',
                 updated_at = NOW()
             WHERE id = ?
               AND status NOT IN ('completed','failed')
         ")->execute([$attemptId]);
         ptv3_log_event($pdo, $attemptId, null, $attemptUserId, 'system', 'voice_disconnected', 'Voice session ended without penalty.');
+        ptv3_json(['ok' => true, 'state' => ptv3_state_payload($pdo, ptv3_load_attempt($pdo, $u, $attemptId))]);
+    }
+
+    if ($action === 'end_oral_test_without_penalty') {
+        $pdo->beginTransaction();
+        try {
+            $pdo->prepare("DELETE FROM progress_test_oral_item_responses WHERE attempt_id = ?")->execute([$attemptId]);
+            $pdo->prepare("
+                UPDATE progress_test_items_v2
+                SET transcript_text = NULL,
+                    is_correct = NULL,
+                    score_points = NULL,
+                    max_points = NULL,
+                    updated_at = NOW()
+                WHERE test_id = ?
+            ")->execute([$attemptId]);
+            $pdo->prepare("
+                UPDATE progress_tests_v2
+                SET status = 'failed',
+                    score_pct = NULL,
+                    progress_pct = 0,
+                    status_text = 'Realtime oral test ended without penalty due to student/technical abort.',
+                    formal_result_code = 'STALE_ABORTED',
+                    formal_result_label = 'Aborted (technical/no penalty)',
+                    counts_as_unsat = 0,
+                    pass_gate_met = 0,
+                    timing_status = 'unknown',
+                    completed_at = NULL,
+                    updated_at = NOW()
+                WHERE id = ?
+                  AND status NOT IN ('completed','failed')
+            ")->execute([$attemptId]);
+            ptv3_log_event($pdo, $attemptId, null, $attemptUserId, 'system', 'oral_test_ended_without_penalty', 'Student ended realtime oral test; partial oral responses were reset.');
+            $pdo->commit();
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+
         ptv3_json(['ok' => true, 'state' => ptv3_state_payload($pdo, ptv3_load_attempt($pdo, $u, $attemptId))]);
     }
 
