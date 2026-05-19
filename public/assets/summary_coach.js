@@ -576,6 +576,7 @@
       current_writing_task: '',
       awaiting_chat_reply: false,
       coach_state: '',
+      active_assignment: null,
       current_section: '',
       current_slide_id: config.currentSlideId || 0,
       current_slide_number: config.currentSlideNumber || 0
@@ -751,7 +752,7 @@
     if (!overlay) {
       overlay = el('div', { cls: 'summary-writing-task', attrs: { 'data-maya-writing-task': '' } });
       overlay.appendChild(el('div', { cls: 'maya-writing-task-label', attrs: { 'data-maya-writing-task-label': '' }, text: 'Current writing task' }));
-      overlay.appendChild(el('div', { cls: 'maya-writing-task-body', attrs: { 'data-maya-writing-task-body': '' }, text: 'Maya will tell you what to write next.' }));
+      overlay.appendChild(el('div', { cls: 'maya-writing-task-body', attrs: { 'data-maya-writing-task-body': '' } }));
       pane.insertBefore(overlay, this.editor);
     }
     this.elWritingTask = overlay;
@@ -969,8 +970,6 @@
 
   Coach.prototype._showLocalHint = function (text) {
     if (this.layout === 'cockpit') {
-      this.coachingState.current_writing_task = String(text || '');
-      this.coachingState.awaiting_chat_reply = false;
       this._renderWritingTask();
       if (this.elLocalHint) this.elLocalHint.removeAttribute('data-visible');
       return;
@@ -1266,10 +1265,14 @@
       };
     }
     if (j.current_task && typeof j.current_task === 'object') {
+      var assignmentText = j.active_assignment && !j.active_assignment.completed
+        ? String(j.active_assignment.instruction_text || '')
+        : '';
       this.coachingState = {
-        current_writing_task: String(j.current_task.task_text || ''),
+        current_writing_task: assignmentText || String(j.current_task.task_text || ''),
         awaiting_chat_reply: String(j.current_task.mode || '') === 'answer_chat',
         coach_state: String(j.coach_state || (j.current_task && j.current_task.coach_state) || this.coachingState.coach_state || ''),
+        active_assignment: j.active_assignment || null,
         current_section: String(j.current_task.section_title || j.current_task.section_id || ''),
         current_slide_id: this.coachingState.current_slide_id || 0,
         current_slide_number: Array.isArray(j.current_task.slide_group) && j.current_task.slide_group.length
@@ -1278,16 +1281,25 @@
       };
     }
     if (j.coaching_state && typeof j.coaching_state === 'object') {
+      var stateAssignment = j.coaching_state.active_assignment || j.active_assignment || null;
+      var stateAssignmentText = stateAssignment && !stateAssignment.completed
+        ? String(stateAssignment.instruction_text || '')
+        : '';
       this.coachingState = {
-        current_writing_task: String((j.current_task && j.current_task.task_text) || j.coaching_state.current_writing_task || ''),
+        current_writing_task: stateAssignmentText || String(j.coaching_state.current_writing_task || (j.current_task && j.current_task.task_text) || ''),
         awaiting_chat_reply: !!j.coaching_state.awaiting_chat_reply || !!(j.current_task && j.current_task.mode === 'answer_chat'),
         coach_state: String(j.coaching_state.coach_state || j.coach_state || this.coachingState.coach_state || ''),
+        active_assignment: stateAssignment,
         current_section: String((j.current_task && (j.current_task.section_title || j.current_task.section_id)) || j.coaching_state.current_section || ''),
         current_slide_id: parseInt(j.coaching_state.current_slide_id, 10) || 0,
         current_slide_number: parseInt(j.coaching_state.current_slide_number, 10) || 0
       };
     } else if (j.flags && j.flags.section_progress && typeof j.flags.section_progress === 'object') {
-      this.coachingState.current_writing_task = String(j.flags.section_progress.current_writing_task || this.coachingState.current_writing_task || '');
+      var flagAssignment = j.flags.active_assignment || j.flags.section_progress.active_assignment || null;
+      this.coachingState.active_assignment = flagAssignment || this.coachingState.active_assignment || null;
+      this.coachingState.current_writing_task = flagAssignment && !flagAssignment.completed
+        ? String(flagAssignment.instruction_text || '')
+        : String(j.flags.section_progress.current_writing_task || this.coachingState.current_writing_task || '');
       this.coachingState.awaiting_chat_reply = !!j.flags.section_progress.awaiting_chat_reply;
       this.coachingState.coach_state = String(j.flags.section_progress.coach_state || j.flags.coach_state || this.coachingState.coach_state || '');
       this.coachingState.current_section = String(j.flags.section_progress.current_section || this.coachingState.current_section || '');
@@ -1527,7 +1539,8 @@
       self.isProgrammaticInsertion = false;
     }, 1500);
     if (String(insertion.insertion_type || '') === 'structure') {
-      this.coachingState.current_writing_task = 'Go through the first slide, then come back to Maya so you can build the first section in your own words.';
+      this.coachingState.current_writing_task = '';
+      this.coachingState.active_assignment = null;
       this.coachingState.awaiting_chat_reply = false;
       this._renderWritingTask();
     }
@@ -1554,7 +1567,10 @@
       self.isProgrammaticInsertion = false;
       if (!j || j.ok === false) throw new Error(j && j.error ? j.error : 'mark_inserted failed');
       if (j.current_task && typeof j.current_task === 'object') {
-        self.coachingState.current_writing_task = String(j.current_task.task_text || self.coachingState.current_writing_task || '');
+        self.coachingState.active_assignment = j.active_assignment || self.coachingState.active_assignment || null;
+        self.coachingState.current_writing_task = self.coachingState.active_assignment && !self.coachingState.active_assignment.completed
+          ? String(self.coachingState.active_assignment.instruction_text || '')
+          : String(j.current_task.task_text || '');
         self.coachingState.awaiting_chat_reply = String(j.current_task.mode || '') === 'answer_chat';
         self.coachingState.current_section = String(j.current_task.section_title || j.current_task.section_id || self.coachingState.current_section || '');
         self._renderWritingTask();
@@ -1690,13 +1706,20 @@
     this._ensureWritingTaskOverlay();
     if (!this.elWritingTask || !this.elWritingTaskBody) return;
     var task = String(this.coachingState.current_writing_task || '').trim();
+    var assignment = this.coachingState.active_assignment || null;
+    if (assignment && assignment.completed) task = '';
     var awaiting = !!this.coachingState.awaiting_chat_reply;
     if (!task) {
-      task = awaiting ? 'Answer Maya' : 'Maya will tell you what to write next.';
+      this.elWritingTask.hidden = true;
+      this.elWritingTask.setAttribute('aria-hidden', 'true');
+      this.elWritingTaskBody.textContent = '';
+      return;
     }
+    this.elWritingTask.hidden = false;
+    this.elWritingTask.removeAttribute('aria-hidden');
     var label = this.elWritingTask.querySelector('[data-maya-writing-task-label]');
-    if (label) label.textContent = awaiting ? 'Answer Maya' : 'Current writing task';
-    this.elWritingTaskBody.textContent = awaiting ? 'Answer Maya in the chat box, then send it back to Maya.' : task;
+    if (label) label.textContent = 'Current writing task';
+    this.elWritingTaskBody.textContent = task;
     this.elWritingTask.setAttribute('data-awaiting-chat', awaiting ? '1' : '0');
   };
 
