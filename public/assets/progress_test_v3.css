@@ -204,7 +204,7 @@
 .ptv3-chat {
   flex: 1 1 auto;
   min-height: 0;
-  height: clamp(300px, 42vh, 440px);
+  height: clamp(220px, 32vh, 320px);
 }
 
 .ptv3-chat .maya-chat-thread {
@@ -341,8 +341,9 @@
   }
 
   .ptv3-chat {
-    height: auto;
-    flex: 1 1 auto;
+    height: 34vh;
+    max-height: 300px;
+    flex: 0 0 auto;
   }
 
   .maya-chat-bubble {

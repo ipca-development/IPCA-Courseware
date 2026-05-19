@@ -65,8 +65,10 @@
   var prepPct = 0;
   var lastBubbleKey = '';
   var lastBubbleAt = 0;
+  var recentBubbleKeys = {};
   var donePromptShownForAnswer = '';
   var ignoreTranscriptsUntil = 0;
+  var activeAnswerItemId = 0;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -106,7 +108,9 @@
     processedTranscripts = {};
     lastBubbleKey = '';
     lastBubbleAt = 0;
+    recentBubbleKeys = {};
     activeStudentBubble = null;
+    activeAnswerItemId = 0;
     awaitingAnswer = false;
     awaitingClarification = false;
     audioCheckActive = false;
@@ -125,8 +129,10 @@
     var bubbleKey = role + '|' + (kind || '') + '|' + message.toLowerCase().replace(/\s+/g, ' ');
     var now = Date.now();
     if (message && bubbleKey === lastBubbleKey && now - lastBubbleAt < 2500) return null;
+    if (message && recentBubbleKeys[bubbleKey] && now - recentBubbleKeys[bubbleKey] < 45000) return null;
     lastBubbleKey = bubbleKey;
     lastBubbleAt = now;
+    if (message) recentBubbleKeys[bubbleKey] = now;
     if (els.empty) els.empty.style.display = 'none';
     var row = document.createElement('div');
     row.className = 'maya-chat-row ' + (role === 'student' ? 'is-student' : 'is-maya');
@@ -517,11 +523,10 @@
     if (donePromptShownForAnswer === answerText) return;
     donePromptShownForAnswer = answerText;
     awaitingDoneConfirmation = true;
-    awaitingAnswer = false;
+    awaitingAnswer = true;
     doneConfirmationText = 'I heard your answer. Are you finished, or do you want to add more? Say "done" to score it, or continue answering.';
-    ignoreTranscriptsUntil = Date.now() + 2200;
     addBubble('maya', 'Maya', doneConfirmationText, 'transition');
-    sendResponse('Do not score yet. Ask this concise confirmation only: "' + doneConfirmationText + '"', 'done_check');
+    setStatus('Confirm when you are finished. Say "done" to score, or continue answering.', 'Confirm answer');
   }
 
   function handleAudioCheckTranscript(transcript) {
@@ -557,6 +562,7 @@
     originalAnswer = '';
     clarificationQuestion = '';
     activeStudentBubble = null;
+    activeAnswerItemId = 0;
     setStatus('Maya is asking question ' + currentItem.idx + '.', 'Question ' + currentItem.idx + '/' + state.total_questions);
     addBubble('maya', 'Maya', currentItem.spoken_question || ('Question ' + currentItem.idx + '. ' + currentItem.prompt), 'question');
     api('save_transcript_segment', {
@@ -642,6 +648,10 @@
       ignoreTranscriptsUntil = 0;
     }
     answerSegments.push(transcript);
+    if (activeAnswerItemId !== parseInt(currentItem.id, 10)) {
+      activeStudentBubble = null;
+      activeAnswerItemId = parseInt(currentItem.id, 10);
+    }
     if (activeStudentBubble && activeStudentBubble.body) {
       activeStudentBubble.body.textContent = combinedAnswerText('');
     } else {
