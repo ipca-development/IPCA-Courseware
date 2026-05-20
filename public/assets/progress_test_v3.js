@@ -138,6 +138,12 @@
     return clamp(Math.round(words * 360 + 900), 1600, 90000);
   }
 
+  function mayaPlaybackTailMs() {
+    var text = liveMayaText || preparedMayaText || '';
+    var full = estimateMayaSpeechMs(text);
+    return clamp(Math.round(full * 0.9), 2200, 90000);
+  }
+
   function completeMayaTurn() {
     if (!pendingFinishPurpose) return;
     var purpose = pendingFinishPurpose;
@@ -153,10 +159,10 @@
     pendingFinishPurpose = purpose;
     var text = liveMayaText || preparedMayaText || '';
     if (mayaTranscriptDone) {
-      mayaTurnTailTimer = setTimeout(completeMayaTurn, 750);
+      mayaTurnTailTimer = setTimeout(completeMayaTurn, mayaPlaybackTailMs());
       return;
     }
-    mayaTurnMaxTimer = setTimeout(completeMayaTurn, estimateMayaSpeechMs(text) + 1200);
+    mayaTurnMaxTimer = setTimeout(completeMayaTurn, estimateMayaSpeechMs(text) + 1500);
   }
 
   function onMayaTranscriptDone(transcript) {
@@ -164,7 +170,7 @@
     liveMayaText = String(transcript || '').trim();
     if (!pendingFinishPurpose || responseInProgress) return;
     stopMayaTurnTimers();
-    mayaTurnTailTimer = setTimeout(completeMayaTurn, 750);
+    mayaTurnTailTimer = setTimeout(completeMayaTurn, mayaPlaybackTailMs());
   }
 
   function stopAnswerTimer() {
@@ -612,12 +618,8 @@
       els.end.disabled = false;
       setFinishButton('START', true, 'answer');
       setCoachState('ready');
-      if (state && state.resume_mode === 'resumed') {
-        startResumeIntro();
-      } else {
-        phase = 'readiness';
-        startAudioCheck();
-      }
+      phase = 'readiness';
+      startAudioCheck(!!(state && state.resume_mode === 'resumed'));
     }).catch(function (err) {
       els.start.disabled = false;
       setCoachState('error');
@@ -728,11 +730,6 @@
       setStatus('Tap START and say "ready" when you are ready to begin. This is not scored.', 'Readiness check');
       return;
     }
-    if (finishedPurpose === 'resume_intro') {
-      phase = 'asking';
-      askCurrentQuestion();
-      return;
-    }
     if (finishedPurpose === 'done_check') {
       awaitingAnswer = true;
       setCoachState('ready');
@@ -782,7 +779,7 @@
     });
   }
 
-  function startAudioCheck() {
+  function startAudioCheck(isResume) {
     audioCheckActive = true;
     phase = 'readiness';
     awaitingAudioCheck = false;
@@ -790,27 +787,13 @@
     acceptAnswerAfterMaya = false;
     activeStudentBubble = null;
     setStudentAnswering(false);
+    stopAnswerTimer();
     var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
-    var readyPrompt = 'Hello ' + firstName + ', are you ready for your progress test?';
+    var readyPrompt = isResume
+      ? 'Welcome back ' + firstName + ', are you ready to resume your progress test?'
+      : 'Hello ' + firstName + ', are you ready for your progress test?';
     setStatus('Maya is confirming you are ready. This is not scored.', 'Readiness check');
     sendResponse('This is a non-scored readiness check before the test. Say exactly, naturally: "' + readyPrompt + '" Then stop speaking and wait.', 'audio_check');
-  }
-
-  function startResumeIntro() {
-    phase = 'resume_intro';
-    awaitingAudioCheck = false;
-    audioCheckActive = false;
-    awaitingAnswer = false;
-    acceptAnswerAfterMaya = false;
-    activeStudentBubble = null;
-    setStudentAnswering(false);
-    setMicEnabled(false);
-    setFinishButton('START', true, 'answer');
-    setFinishPulse(false);
-    var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
-    var prompt = 'Welcome back ' + firstName + ', let’s resume your test now.';
-    setStatus('Maya is resuming your test at the next unanswered question.', 'Resuming');
-    sendResponse('Read this exact sentence and nothing else: "' + prompt + '"', 'resume_intro');
   }
 
   function audioCheckConfirmsReady(transcript) {
@@ -933,7 +916,10 @@
       || t.indexOf('say done to score') !== -1
       || t.indexOf('do you want to add more') !== -1
       || t.indexOf('i heard you, but i will not start') !== -1
-      || t.indexOf('hello ' + String(cfg.firstName || '').toLowerCase()) === 0;
+      || t.indexOf('hello ' + String(cfg.firstName || '').toLowerCase()) === 0
+      || t.indexOf('welcome back ' + String(cfg.firstName || '').toLowerCase()) === 0
+      || t.indexOf('are you ready for your progress test') !== -1
+      || t.indexOf('are you ready to resume your progress test') !== -1;
   }
 
   function askCurrentQuestion() {
