@@ -328,6 +328,14 @@
     return postJson('/student/api/progress_test_v3_oral.php', payload);
   }
 
+  // #region agent log
+  function agentDebugLog(runId, hypothesisId, location, message, data) {
+    try {
+      fetch('http://127.0.0.1:7592/ingest/0937572b-7766-4cbb-9260-7806246cc339', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aeedb8' }, body: JSON.stringify({ sessionId: 'aeedb8', runId: runId, hypothesisId: hypothesisId, location: location, message: message, data: data || {}, timestamp: Date.now() }) }).catch(function () {});
+    } catch (e) {}
+  }
+  // #endregion
+
   function resetClientConversation() {
     stopAnswerTimer();
     stopMayaTurnTimers();
@@ -701,6 +709,16 @@
     setMicEnabled(false);
     setStudentAnswering(false);
     if (responseInProgress) {
+      // #region agent log
+      agentDebugLog('initial', 'H1', 'public/assets/progress_test_v3.js:707', 'sendResponse queued behind active turn', {
+        requestedPurpose: purpose || '',
+        activePurpose: mayaTurnPurpose || '',
+        pendingFinishPurpose: pendingFinishPurpose || '',
+        phase: phase,
+        textLength: textToSpeak.length,
+        dcState: dc ? dc.readyState : 'none'
+      });
+      // #endregion
       pendingInstructions = textToSpeak;
       pendingPurpose = purpose || '';
       return;
@@ -718,15 +736,34 @@
     setMayaSpeaking(true);
     ensureExpectedMayaBubble();
     if (!dc || dc.readyState !== 'open') {
+      // #region agent log
+      agentDebugLog('initial', 'H5', 'public/assets/progress_test_v3.js:735', 'sendResponse using no-data-channel fallback', {
+        purpose: purpose || '',
+        phase: phase,
+        textLength: textToSpeak.length,
+        dcState: dc ? dc.readyState : 'none'
+      });
+      // #endregion
       window.setTimeout(function () { drainResponse(); }, estimateMayaSpeechMs(textToSpeak));
       return;
     }
+    // #region agent log
+    agentDebugLog('initial', 'H1,H3,H5', 'public/assets/progress_test_v3.js:744', 'sendResponse creating realtime response', {
+      purpose: purpose || '',
+      phase: phase,
+      textLength: textToSpeak.length,
+      dcState: dc ? dc.readyState : 'none'
+    });
+    // #endregion
     dc.send(JSON.stringify({
       type: 'response.create',
       response: {
         conversation: 'none',
         output_modalities: ['audio'],
-        instructions: 'Speak in English only. Say exactly this English text and stop. No translation. No language switching. No acknowledgement. No preface. No explanation.\n' + JSON.stringify(textToSpeak)
+        instructions: (purpose === 'final'
+          ? 'FINAL PROGRESS TEST SUMMARY. Ignore all previous question feedback. Speak only the exact overall progress test summary below and stop. Do not explain the last question. Do not add anything.\n'
+          : 'Speak in English only. Say exactly this English text and stop. No translation. No language switching. No acknowledgement. No preface. No explanation.\n')
+          + JSON.stringify(textToSpeak)
       }
     }));
   }
@@ -735,8 +772,22 @@
     sendResponse(textToSpeak, purpose);
   }
 
+  function speakFinalSummary(textToSpeak) {
+    sendResponse(String(textToSpeak || 'Progress test complete.').trim(), 'final');
+  }
+
   function drainResponse() {
     var finishedPurpose = mayaTurnPurpose;
+    // #region agent log
+    agentDebugLog('initial', 'H1,H2', 'public/assets/progress_test_v3.js:769', 'drainResponse resolving current turn', {
+      finishedPurpose: finishedPurpose || '',
+      pendingPurpose: pendingPurpose || '',
+      hasPendingInstructions: !!pendingInstructions,
+      pendingFinishPurpose: pendingFinishPurpose || '',
+      phase: phase,
+      responseInProgress: responseInProgress
+    });
+    // #endregion
     mayaTurnPurpose = '';
     responseInProgress = false;
     if (pendingInstructions) {
@@ -751,6 +802,17 @@
   }
 
   function finishMayaTurn(finishedPurpose) {
+    // #region agent log
+    agentDebugLog('initial', 'H1,H2', 'public/assets/progress_test_v3.js:786', 'finishMayaTurn state transition', {
+      finishedPurpose: finishedPurpose || '',
+      phase: phase,
+      nextQuestionAfterFeedback: nextQuestionAfterFeedback,
+      completeAfterFeedback: completeAfterFeedback,
+      pendingNextQuestionAfterFeedback: pendingNextQuestionAfterFeedback,
+      pendingCompleteAfterFeedback: pendingCompleteAfterFeedback,
+      finalEvaluationReady: finalEvaluationReady
+    });
+    // #endregion
     if ((finishedPurpose === 'question' || finishedPurpose === 'clarification' || finishedPurpose === 'retry_answer') && acceptAnswerAfterMaya) {
       acceptAnswerAfterMaya = false;
       awaitingAnswer = true;
@@ -1075,6 +1137,14 @@
       return;
     }
     if (type === 'response.created') {
+      // #region agent log
+      agentDebugLog('initial', 'H2,H5', 'public/assets/progress_test_v3.js:1129', 'realtime response.created received', {
+        mayaTurnPurpose: mayaTurnPurpose || '',
+        pendingFinishPurpose: pendingFinishPurpose || '',
+        phase: phase,
+        responseInProgress: responseInProgress
+      });
+      // #endregion
       responseInProgress = true;
       setMayaSpeaking(true);
       stopAnswerTimer();
@@ -1082,6 +1152,16 @@
       return;
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
+      // #region agent log
+      agentDebugLog('initial', 'H2,H3', 'public/assets/progress_test_v3.js:1141', 'maya transcript done received', {
+        mayaTurnPurpose: mayaTurnPurpose || '',
+        pendingFinishPurpose: pendingFinishPurpose || '',
+        phase: phase,
+        transcriptLength: String(msg.transcript || '').length,
+        expectedLength: String(mayaExpectedText || preparedMayaText || '').length,
+        isDrift: isMayaTranscriptDrift(String(msg.transcript || ''))
+      });
+      // #endregion
       if (isMayaTranscriptDrift(String(msg.transcript || ''))) {
         mayaDriftDetected = true;
         ensureExpectedMayaBubble();
@@ -1104,6 +1184,15 @@
       if (mayaDriftDetected) return;
       var nextMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
       if (isMayaTranscriptDrift(nextMayaText)) {
+        // #region agent log
+        agentDebugLog('initial', 'H3', 'public/assets/progress_test_v3.js:1165', 'maya transcript drift detected on delta', {
+          mayaTurnPurpose: mayaTurnPurpose || '',
+          pendingFinishPurpose: pendingFinishPurpose || '',
+          phase: phase,
+          actualLength: nextMayaText.length,
+          expectedLength: String(mayaExpectedText || preparedMayaText || '').length
+        });
+        // #endregion
         mayaDriftDetected = true;
         ensureExpectedMayaBubble();
         onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
@@ -1359,8 +1448,17 @@
     setCoachState('thinking');
     setStatus('Completing test through canonical attempt state...', 'Completing');
     api('complete_test', {}).then(function (out) {
+      // #region agent log
+      agentDebugLog('initial', 'H4', 'public/assets/progress_test_v3.js:1429', 'complete_test returned', {
+        phase: phase,
+        summaryLength: String(out.summary || '').length,
+        hasState: !!out.state,
+        stateStatus: out.state ? String(out.state.attempt_status || out.state.status || '') : '',
+        stateScore: out.state && out.state.score_pct != null ? String(out.state.score_pct) : ''
+      });
+      // #endregion
       updateProgress(out.state);
-      speakExact(out.summary || 'Progress test complete.', 'final');
+      speakFinalSummary(out.summary || 'Progress test complete.');
       setCoachState('ready');
       setStatus('Maya is reading your final evaluation.', 'Final review');
       phase = 'final_playing';
