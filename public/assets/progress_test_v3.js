@@ -208,6 +208,18 @@
     liveMayaText = '';
   }
 
+  function ensureExpectedMayaBubble() {
+    var expected = mayaExpectedText || preparedMayaText || '';
+    if (!expected) return;
+    if (!liveMayaBubble) {
+      liveMayaBubble = addBubble('maya', 'Maya', expected, 'live');
+    } else if (liveMayaBubble.body) {
+      liveMayaBubble.body.textContent = expected;
+    }
+    liveMayaText = expected;
+    if (els.thread) els.thread.scrollTop = els.thread.scrollHeight;
+  }
+
   function stopAnswerTimer() {
     if (answerTimerInterval) clearInterval(answerTimerInterval);
     answerTimerInterval = null;
@@ -260,7 +272,9 @@
 
   function setTyping(label, visible, role) {
     if (!els.liveRow) return;
-    if (els.thread && els.liveRow.parentNode !== els.thread) {
+    if (visible && els.thread) {
+      els.thread.appendChild(els.liveRow);
+    } else if (els.thread && els.liveRow.parentNode !== els.thread) {
       els.thread.appendChild(els.liveRow);
     }
     var labelEl = els.liveRow.querySelector('span');
@@ -373,6 +387,9 @@
     bubble.appendChild(body);
     row.appendChild(bubble);
     els.thread.appendChild(row);
+    if (els.liveRow && els.liveRow.parentNode === els.thread && els.liveRow.getAttribute('data-visible') === '1') {
+      els.thread.appendChild(els.liveRow);
+    }
     els.thread.scrollTop = els.thread.scrollHeight;
     return { row: row, bubble: bubble, body: body };
   }
@@ -1051,9 +1068,6 @@
       return;
     }
     if (type === 'response.created' && !mayaTurnPurpose) {
-      if (dc && dc.readyState === 'open') {
-        try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
-      }
       return;
     }
     if (type === 'response.created') {
@@ -1061,15 +1075,13 @@
       setMayaSpeaking(true);
       stopAnswerTimer();
       if (preparedMayaText && !liveMayaBubble) {
-        liveMayaBubble = addBubble('maya', 'Maya', '', 'live');
-        liveMayaText = '';
+        ensureExpectedMayaBubble();
       }
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
       if (isMayaTranscriptDrift(String(msg.transcript || ''))) {
         mayaDriftDetected = true;
-        removeLiveMayaBubble();
-        setStatus('Maya voice drift was blocked. Continuing with backend-controlled flow.', 'Voice guard');
+        ensureExpectedMayaBubble();
         onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
         return;
       }
@@ -1086,16 +1098,14 @@
     }
     if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text) && (mayaTurnPurpose || pendingFinishPurpose)) {
       if (mayaDriftDetected) return;
-      liveMayaText += String(msg.delta || msg.text || '');
-      if (isMayaTranscriptDrift(liveMayaText)) {
+      var nextMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
+      if (isMayaTranscriptDrift(nextMayaText)) {
         mayaDriftDetected = true;
-        removeLiveMayaBubble();
-        if (dc && dc.readyState === 'open') {
-          try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
-        }
+        ensureExpectedMayaBubble();
         onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
         return;
       }
+      liveMayaText = nextMayaText;
       if (!liveMayaBubble) liveMayaBubble = addBubble('maya', 'Maya', '', 'live');
       if (liveMayaBubble && liveMayaBubble.body) {
         liveMayaBubble.body.textContent = liveMayaText;
