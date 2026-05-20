@@ -76,6 +76,9 @@
   var phase = 'idle';
   var answerCaptureActive = false;
   var submitAfterFlushTimer = null;
+  var audioContext = null;
+  var liveMayaBubble = null;
+  var liveMayaText = '';
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -93,6 +96,26 @@
   function setStatus(message, stage) {
     text(els.status, message);
     if (stage) text(els.stage, stage);
+  }
+
+  function playBeep(kind) {
+    try {
+      var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return;
+      audioContext = audioContext || new AudioContextCtor();
+      if (audioContext.state === 'suspended') audioContext.resume();
+      var oscillator = audioContext.createOscillator();
+      var gain = audioContext.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = kind === 'start' ? 880 : 330;
+      gain.gain.setValueAtTime(0.001, audioContext.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.16, audioContext.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.5);
+      oscillator.connect(gain);
+      gain.connect(audioContext.destination);
+      oscillator.start();
+      oscillator.stop(audioContext.currentTime + 0.52);
+    } catch (e) {}
   }
 
   function postJson(url, payload) {
@@ -225,6 +248,11 @@
     els.finish.textContent = label;
     els.finish.disabled = !!disabled;
     els.finish.setAttribute('data-action-mode', mode || 'answer');
+  }
+
+  function setFinishPulse(active) {
+    if (!els.finish) return;
+    els.finish.setAttribute('data-next-action', active ? '1' : '0');
   }
 
   function setMicEnabled(enabled) {
@@ -440,6 +468,8 @@
       pendingPurpose = purpose || '';
       return;
     }
+    liveMayaBubble = null;
+    liveMayaText = '';
     mayaTurnPurpose = purpose || '';
     responseInProgress = true;
     setMayaSpeaking(true);
@@ -472,6 +502,7 @@
       setStudentAnswering(false);
       setMicEnabled(false);
       setFinishButton('Start Answer', false, 'answer');
+      setFinishPulse(true);
       setCoachState('ready');
       setStatus('Tap Start Answer when you are ready to speak.', finishedPurpose === 'clarification' ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       return;
@@ -569,7 +600,7 @@
       answerSettleTimer = null;
       setStatus('Click End Answer when you are finished.', 'Answer captured');
     }, answerSettleMs);
-    setStatus('Recording your answer. Click End Answer when finished.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+    setStatus('Recording your answer. Click STOP when finished.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
   }
 
   function handleAudioCheckTranscript(transcript) {
@@ -611,8 +642,8 @@
     setStudentAnswering(false);
     setMicEnabled(false);
     setFinishButton('Start Answer', true, 'answer');
+    setFinishPulse(false);
     setStatus('Maya is asking question ' + currentItem.idx + '.', 'Question ' + currentItem.idx + '/' + state.total_questions);
-    addBubble('maya', 'Maya', currentItem.spoken_question || ('Question ' + currentItem.idx + '. ' + currentItem.prompt), 'question');
     api('save_transcript_segment', {
       item_id: currentItem.id,
       role: 'maya',
@@ -632,12 +663,23 @@
     }
     if (type === 'response.created') responseInProgress = true;
     if (type === 'response.output_audio_transcript.done' && msg.transcript) {
+      if (liveMayaBubble && liveMayaBubble.body) {
+        liveMayaBubble.body.textContent = String(msg.transcript || '');
+      }
       api('save_transcript_segment', {
         item_id: currentItem ? currentItem.id : 0,
         role: 'maya',
         event_type: 'audio_transcript',
         transcript_text: String(msg.transcript || '')
       }).catch(function () {});
+    }
+    if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text)) {
+      liveMayaText += String(msg.delta || msg.text || '');
+      if (!liveMayaBubble) liveMayaBubble = addBubble('maya', 'Maya', '', 'live');
+      if (liveMayaBubble && liveMayaBubble.body) {
+        liveMayaBubble.body.textContent = liveMayaText;
+        els.thread.scrollTop = els.thread.scrollHeight;
+      }
     }
     if (type === 'conversation.item.input_audio_transcription.completed' && msg.transcript) {
       handleStudentTranscript(msg);
@@ -723,13 +765,16 @@
     if (phase === 'answering' && !answerCaptureActive) {
       setStudentAnswering(true);
       setMicEnabled(true);
-      setFinishButton('End Answer', false, 'recording');
-      setStatus('Recording your answer. Click End Answer when finished.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+      setFinishButton('STOP', false, 'recording');
+      setFinishPulse(false);
+      playBeep('start');
+      setStatus('Recording your answer. Click STOP when finished.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       return;
     }
     if (phase === 'answering' && answerCaptureActive) {
       setStudentAnswering(false);
       setMicEnabled(false);
+      playBeep('stop');
       setFinishButton('Submitting...', true, 'wait');
       if (submitAfterFlushTimer) clearTimeout(submitAfterFlushTimer);
       submitAfterFlushTimer = setTimeout(function () {
