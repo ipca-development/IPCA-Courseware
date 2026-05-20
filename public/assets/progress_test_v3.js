@@ -81,7 +81,6 @@
   var answerCaptureActive = false;
   var submitAfterFlushTimer = null;
   var audioContext = null;
-  var mayaSpeechUtterance = null;
   var liveMayaBubble = null;
   var liveMayaText = '';
   var preparedMayaText = '';
@@ -209,17 +208,6 @@
     liveMayaText = '';
   }
 
-  function chooseEnglishVoice() {
-    if (!window.speechSynthesis || !window.speechSynthesis.getVoices) return null;
-    var voices = window.speechSynthesis.getVoices() || [];
-    var preferred = voices.filter(function (voice) {
-      return /^en(-|_)?/i.test(String(voice.lang || ''));
-    });
-    return preferred.find(function (voice) { return /female|samantha|victoria|allison|ava|serena|karen|moira/i.test(voice.name); })
-      || preferred[0]
-      || null;
-  }
-
   function ensureExpectedMayaBubble() {
     var expected = mayaExpectedText || preparedMayaText || '';
     if (!expected) return;
@@ -230,31 +218,6 @@
     }
     liveMayaText = expected;
     if (els.thread) els.thread.scrollTop = els.thread.scrollHeight;
-  }
-
-  function speakMayaLocally(textToSpeak, purpose) {
-    ensureExpectedMayaBubble();
-    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
-      window.setTimeout(function () { drainResponse(); }, estimateMayaSpeechMs(textToSpeak));
-      return;
-    }
-    try { window.speechSynthesis.cancel(); } catch (e) {}
-    mayaSpeechUtterance = new SpeechSynthesisUtterance(textToSpeak);
-    mayaSpeechUtterance.lang = 'en-US';
-    mayaSpeechUtterance.rate = 0.95;
-    mayaSpeechUtterance.pitch = 1;
-    var voice = chooseEnglishVoice();
-    if (voice) mayaSpeechUtterance.voice = voice;
-    var finished = false;
-    var finish = function () {
-      if (finished) return;
-      finished = true;
-      drainResponse();
-    };
-    mayaSpeechUtterance.onend = finish;
-    mayaSpeechUtterance.onerror = finish;
-    window.speechSynthesis.speak(mayaSpeechUtterance);
-    window.setTimeout(finish, estimateMayaSpeechMs(textToSpeak) + 1500);
   }
 
   function stopAnswerTimer() {
@@ -622,9 +585,9 @@
   function ensureRemoteAudio() {
     if (remoteAudio) return remoteAudio;
     remoteAudio = document.createElement('audio');
-    remoteAudio.autoplay = false;
-    remoteAudio.muted = true;
-    remoteAudio.volume = 0;
+    remoteAudio.autoplay = true;
+    remoteAudio.muted = false;
+    remoteAudio.volume = 1;
     remoteAudio.setAttribute('playsinline', 'playsinline');
     remoteAudio.className = 'ptv3-remote-audio';
     document.body.appendChild(remoteAudio);
@@ -633,10 +596,11 @@
 
   function unlockAudioPlayback() {
     var audio = ensureRemoteAudio();
-    audio.muted = true;
-    audio.volume = 0;
+    audio.muted = false;
+    audio.volume = 1;
     try {
-      audio.pause();
+      var p = audio.play();
+      if (p && typeof p.catch === 'function') p.catch(function () {});
     } catch (e) {}
   }
 
@@ -651,9 +615,7 @@
     });
     pc.ontrack = function (event) {
       remoteAudio.srcObject = event.streams[0];
-      remoteAudio.muted = true;
-      remoteAudio.volume = 0;
-      try { remoteAudio.pause(); } catch (e) {}
+      unlockAudioPlayback();
       setCoachState('thinking');
     };
     pc.onconnectionstatechange = function () {
@@ -708,6 +670,7 @@
     if (connected || !attemptId) return;
     els.start.disabled = true;
     setStartPulse(false);
+    unlockAudioPlayback();
     setCoachState('thinking');
     setStatus('Opening microphone and realtime voice...', 'Connecting');
     setMicEnabled(false);
@@ -753,7 +716,19 @@
     stopMayaTurnTimers();
     responseInProgress = true;
     setMayaSpeaking(true);
-    speakMayaLocally(textToSpeak, purpose);
+    ensureExpectedMayaBubble();
+    if (!dc || dc.readyState !== 'open') {
+      window.setTimeout(function () { drainResponse(); }, estimateMayaSpeechMs(textToSpeak));
+      return;
+    }
+    dc.send(JSON.stringify({
+      type: 'response.create',
+      response: {
+        conversation: 'none',
+        output_modalities: ['audio'],
+        instructions: 'Speak in English only. Say exactly this English text and stop. No translation. No language switching. No acknowledgement. No preface. No explanation.\n' + JSON.stringify(textToSpeak)
+      }
+    }));
   }
 
   function speakExact(textToSpeak, purpose) {
@@ -1099,7 +1074,48 @@
       setStatus('Realtime voice error.', 'Connection issue');
       return;
     }
-    if (type.indexOf('response.') === 0) return;
+    if (type === 'response.created') {
+      responseInProgress = true;
+      setMayaSpeaking(true);
+      stopAnswerTimer();
+      ensureExpectedMayaBubble();
+      return;
+    }
+    if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
+      if (isMayaTranscriptDrift(String(msg.transcript || ''))) {
+        mayaDriftDetected = true;
+        ensureExpectedMayaBubble();
+        onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
+        return;
+      }
+      if (liveMayaBubble && liveMayaBubble.body) {
+        liveMayaBubble.body.textContent = String(msg.transcript || '');
+      }
+      onMayaTranscriptDone(String(msg.transcript || ''));
+      api('save_transcript_segment', {
+        item_id: currentItem ? currentItem.id : 0,
+        role: 'maya',
+        event_type: 'audio_transcript',
+        transcript_text: String(msg.transcript || '')
+      }).catch(function () {});
+      return;
+    }
+    if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text) && (mayaTurnPurpose || pendingFinishPurpose)) {
+      if (mayaDriftDetected) return;
+      var nextMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
+      if (isMayaTranscriptDrift(nextMayaText)) {
+        mayaDriftDetected = true;
+        ensureExpectedMayaBubble();
+        onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
+        return;
+      }
+      liveMayaText = nextMayaText;
+      if (liveMayaBubble && liveMayaBubble.body) {
+        liveMayaBubble.body.textContent = liveMayaText;
+        els.thread.scrollTop = els.thread.scrollHeight;
+      }
+      return;
+    }
     if (type === 'conversation.item.input_audio_transcription.completed' && msg.transcript) {
       handleStudentTranscript(msg);
     }
@@ -1358,10 +1374,6 @@
 
   function stopRealtime(notifyBackend, action) {
     stopMayaTurnTimers();
-    try {
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
-    } catch (e) {}
-    mayaSpeechUtterance = null;
     pendingFinishPurpose = '';
     mayaTranscriptDone = false;
     stopAnswerTimer();
