@@ -97,7 +97,9 @@ if ($role === 'student') {
     $cohortId = (int)($c->fetchColumn() ?: 0);
 }
 
-$backUrl = $cohortId > 0 ? ('/student/course.php?cohort_id='.(int)$cohortId) : '/student/dashboard.php';
+$backUrl = $cohortId > 0
+    ? ('/student/course.php?cohort_id=' . (int)$cohortId . '#progress-test-lesson-' . (int)$lessonId)
+    : '/student/dashboard.php';
 
 $imgUrl = cdn_url($CDN_BASE, (string)$slide['image_path']);
 

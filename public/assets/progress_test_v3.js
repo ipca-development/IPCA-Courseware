@@ -95,6 +95,8 @@
   var mayaTurnMaxTimer = null;
   var mayaTranscriptDone = false;
   var pendingFinishPurpose = '';
+  var mayaExpectedText = '';
+  var mayaDriftDetected = false;
   var answerTimerInterval = null;
   var answerTimerDeadline = 0;
   var answerTimerHandled = false;
@@ -174,6 +176,38 @@
     mayaTurnTailTimer = setTimeout(completeMayaTurn, mayaPlaybackTailMs());
   }
 
+  function normalizeCompareText(value) {
+    return String(value || '').toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function isMayaTranscriptDrift(transcript) {
+    var expected = normalizeCompareText(mayaExpectedText || preparedMayaText);
+    var actual = normalizeCompareText(transcript);
+    if (!expected || !actual) return false;
+    if (/^(understood|okay|ok|sure|got it|certainly|of course|yes)$/.test(actual)) return true;
+    if (/^(understood|okay|ok|sure|got it|certainly|of course|yes)\b/.test(actual) && expected.indexOf(actual) !== 0) return true;
+    if (actual === expected) return false;
+    if (actual.indexOf(expected) !== -1 && actual.length <= expected.length + 12) return false;
+    if (expected.indexOf(actual) !== -1 && actual.length >= Math.max(12, expected.length * 0.8)) return false;
+    var expectedWords = expected.split(' ').filter(Boolean);
+    var actualWords = actual.split(' ').filter(Boolean);
+    if (!expectedWords.length || !actualWords.length) return false;
+    var actualSet = {};
+    actualWords.forEach(function (word) { actualSet[word] = true; });
+    var hits = 0;
+    expectedWords.forEach(function (word) { if (actualSet[word]) hits += 1; });
+    var coverage = hits / expectedWords.length;
+    return coverage < 0.82 || actualWords.length > expectedWords.length + 12;
+  }
+
+  function removeLiveMayaBubble() {
+    if (liveMayaBubble && liveMayaBubble.row && liveMayaBubble.row.parentNode) {
+      liveMayaBubble.row.parentNode.removeChild(liveMayaBubble.row);
+    }
+    liveMayaBubble = null;
+    liveMayaText = '';
+  }
+
   function stopAnswerTimer() {
     if (answerTimerInterval) clearInterval(answerTimerInterval);
     answerTimerInterval = null;
@@ -226,6 +260,9 @@
 
   function setTyping(label, visible, role) {
     if (!els.liveRow) return;
+    if (els.thread && els.liveRow.parentNode !== els.thread) {
+      els.thread.appendChild(els.liveRow);
+    }
     var labelEl = els.liveRow.querySelector('span');
     if (labelEl) labelEl.textContent = label || 'Working';
     els.liveRow.setAttribute('data-role', role || 'maya');
@@ -304,6 +341,10 @@
       if (els.empty) {
         els.empty.style.display = '';
         els.thread.appendChild(els.empty);
+      }
+      if (els.liveRow) {
+        els.liveRow.setAttribute('data-visible', '0');
+        els.thread.appendChild(els.liveRow);
       }
     }
   }
@@ -648,6 +689,8 @@
     liveMayaBubble = null;
     liveMayaText = '';
     preparedMayaText = textToSpeak;
+    mayaExpectedText = textToSpeak;
+    mayaDriftDetected = false;
     mayaTurnPurpose = purpose || '';
     mayaTranscriptDone = false;
     pendingFinishPurpose = '';
@@ -659,11 +702,7 @@
       response: {
         conversation: 'none',
         output_modalities: ['audio'],
-        instructions: JSON.stringify({
-          task: 'text_to_speech',
-          rule: 'Speak the value of text exactly. Do not add, remove, refuse, explain, or answer anything.',
-          text: textToSpeak
-        })
+        instructions: 'Say exactly this and stop. No acknowledgement. No preface. No explanation.\n' + JSON.stringify(textToSpeak)
       }
     }));
   }
@@ -1022,11 +1061,18 @@
       setMayaSpeaking(true);
       stopAnswerTimer();
       if (preparedMayaText && !liveMayaBubble) {
-        liveMayaBubble = addBubble('maya', 'Maya', preparedMayaText, 'live');
-        liveMayaText = preparedMayaText;
+        liveMayaBubble = addBubble('maya', 'Maya', '', 'live');
+        liveMayaText = '';
       }
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
+      if (isMayaTranscriptDrift(String(msg.transcript || ''))) {
+        mayaDriftDetected = true;
+        removeLiveMayaBubble();
+        setStatus('Maya voice drift was blocked. Continuing with backend-controlled flow.', 'Voice guard');
+        onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
+        return;
+      }
       if (liveMayaBubble && liveMayaBubble.body) {
         liveMayaBubble.body.textContent = String(msg.transcript || '');
       }
@@ -1039,7 +1085,17 @@
       }).catch(function () {});
     }
     if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text) && (mayaTurnPurpose || pendingFinishPurpose)) {
+      if (mayaDriftDetected) return;
       liveMayaText += String(msg.delta || msg.text || '');
+      if (isMayaTranscriptDrift(liveMayaText)) {
+        mayaDriftDetected = true;
+        removeLiveMayaBubble();
+        if (dc && dc.readyState === 'open') {
+          try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
+        }
+        onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
+        return;
+      }
       if (!liveMayaBubble) liveMayaBubble = addBubble('maya', 'Maya', '', 'live');
       if (liveMayaBubble && liveMayaBubble.body) {
         liveMayaBubble.body.textContent = liveMayaText;
