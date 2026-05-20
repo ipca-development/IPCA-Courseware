@@ -552,10 +552,10 @@
       phase = 'answering';
       setStudentAnswering(false);
       setMicEnabled(false);
-      setFinishButton('START', false, 'answer');
+      setFinishButton(finishedPurpose === 'clarification' ? 'ANSWER CLARIFICATION' : 'START', false, 'answer');
       setFinishPulse(true);
       setCoachState('ready');
-      setStatus('Tap START when you are ready to speak.', finishedPurpose === 'clarification' ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+      setStatus(finishedPurpose === 'clarification' ? 'Tap ANSWER CLARIFICATION and add your follow-up answer.' : 'Tap START when you are ready to speak.', finishedPurpose === 'clarification' ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       return;
     }
     if (finishedPurpose === 'feedback' && nextQuestionAfterFeedback) {
@@ -950,7 +950,7 @@
       setFinishButton('STOP', false, 'recording');
       setFinishPulse(false);
       playBeep('start');
-      setStatus('Recording your answer. Click STOP when finished.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+      setStatus(awaitingClarification ? 'Recording your clarification answer. Click STOP when finished.' : 'Recording your answer. Click STOP when finished.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       return;
     }
     if (phase === 'answering' && answerCaptureActive) {
@@ -1016,24 +1016,24 @@
         clarificationQuestion = out.feedback_for_student || 'Good start, but that is not complete yet. Say a little more.';
         activeStudentBubble = null;
         setStatus('Maya is asking one clarification.', 'Clarification');
-        sendResponse('Read this exact clarification prompt and nothing else. Do not give the answer, do not list missing checklist items, do not say let us move on, and do not tutor. Exact words to read: "' + clarificationQuestion + '"', 'clarification');
+        sendResponse('Read this exact clarification prompt and nothing else. Do not give the answer. Do not provide examples. Do not ask a different question. Do not say correct, exactly, well done, let us move on, next question, or anything about the rubric. Exact words to read: "' + clarificationQuestion + '"', 'clarification');
         return;
       }
 
       var scoreLine = 'You scored ' + Math.round(out.score_pct || 0) + '% on this question.';
-      var feedbackText = scoreLine + '\n' + (out.feedback_for_student || '');
+      var feedbackForStudent = String(out.feedback_for_student || '').replace(/\brubric\b/ig, 'expected answer');
 
       if (out.next_action === 'complete_test') {
         completeAfterFeedback = true;
         pendingCompleteAfterFeedback = true;
         phase = 'feedback';
         setCloseTestMode('Close Test');
-        sendResponse('Read this exact backend score and feedback only. Do not ask a new question, do not say thanks, do not answer the question for the student, and do not add transition text: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
+        sendResponse('Read this exact backend score and feedback only. Do not ask a new question, do not say thanks, do not answer the question for the student, do not mention the rubric, and do not add transition text: "' + scoreLine + ' ' + feedbackForStudent + '"', 'feedback');
       } else {
         nextQuestionAfterFeedback = true;
         pendingNextQuestionAfterFeedback = true;
         phase = 'feedback';
-        sendResponse('Read this exact backend score and feedback only. Do not ask the next question, do not answer any student acknowledgement, and do not add transition text: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
+        sendResponse('Read this exact backend score and feedback only. Do not ask the next question, do not answer any student acknowledgement, do not mention the rubric, and do not add transition text: "' + scoreLine + ' ' + feedbackForStudent + '"', 'feedback');
         if (feedbackPlaybackTimer) clearTimeout(feedbackPlaybackTimer);
         feedbackPlaybackTimer = null;
       }

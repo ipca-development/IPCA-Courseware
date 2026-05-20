@@ -562,7 +562,7 @@ function ptv3_grade_item(PDO $pdo, array $item, string $answer): array
         'required' => ['score_points', 'max_points', 'is_correct', 'feedback', 'detected_concepts', 'missing_concepts', 'weak_areas'],
     ];
 
-    $system = ptv3_ai_prompt($pdo, 'progress_test_open_grading_system', 'Grade like a supportive but standards-based flight instructor. Use only the question rubric and transcript. Do not invent facts. Reward correct operational understanding and give partial credit for incomplete but correct answers.');
+    $system = ptv3_ai_prompt($pdo, 'progress_test_open_grading_system', 'Grade like a supportive but standards-based flight instructor. Use only the internal scoring criteria and transcript. Do not invent facts. Reward correct operational understanding and give partial credit for incomplete but correct answers. Student-facing feedback must never use the word rubric.');
     $userPrompt = "QUESTION:\n" . (string)$item['prompt']
         . "\n\nRUBRIC KEY POINTS:\n- " . implode("\n- ", array_map('strval', $keyPoints))
         . "\n\nMIN POINTS TO PASS: {$minPts}\n\nSTUDENT TRANSCRIPT:\n{$answer}";
@@ -590,6 +590,7 @@ function ptv3_grade_item(PDO $pdo, array $item, string $answer): array
     if ($feedback === '') {
         $feedback = $isCorrect ? 'Good answer. You covered the required concept well enough.' : 'Good start, but the answer is incomplete. Review the missing required concepts.';
     }
+    $feedback = ptv3_student_feedback_text($feedback);
 
     return [
         'score_pct' => $scorePct,
@@ -599,6 +600,15 @@ function ptv3_grade_item(PDO $pdo, array $item, string $answer): array
         'missing' => is_array($j['missing_concepts'] ?? null) ? $j['missing_concepts'] : $missing,
         'weak' => is_array($j['weak_areas'] ?? null) ? $j['weak_areas'] : $missing,
     ];
+}
+
+function ptv3_student_feedback_text(string $feedback): string
+{
+    $feedback = trim($feedback);
+    $feedback = (string)preg_replace('/\bthe\s+rubric\s+(requires|expects|says|asks for)\b/i', 'the expected answer $1', $feedback);
+    $feedback = (string)preg_replace('/\brubric\b/i', 'expected answer', $feedback);
+    $feedback = (string)preg_replace('/\baccording to the expected answer\b/i', 'for this question', $feedback);
+    return trim($feedback);
 }
 
 function ptv3_log_event(PDO $pdo, int $attemptId, ?int $itemId, int $userId, string $role, string $type, string $text): void
@@ -791,7 +801,7 @@ try {
         $clarificationAllowed = !$isComplete && $scorePct >= 30 && $scorePct < 70 && $existingClarification === '' && $clarificationQuestion === '';
         $nextAction = $clarificationAllowed ? 'clarify' : 'next_question';
 
-        $feedback = (string)$grade['feedback'];
+        $feedback = ptv3_student_feedback_text((string)$grade['feedback']);
         if (!$clarificationAllowed) {
             $up = $pdo->prepare("
                 INSERT INTO progress_test_oral_item_responses
@@ -846,7 +856,7 @@ try {
             ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'student', 'answer_final', $evaluatedAnswer);
             ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'maya', 'backend_feedback', $feedback);
         } else {
-            $clarificationText = 'Good start, but that is not complete yet. Add one or two more important points from the question, without changing topics.';
+            $clarificationText = 'You scored ' . (int)round($scorePct) . ' percent so far. This answer is partly correct, but not complete. Please add one or two more important points from the question.';
             $feedback = 'Partial answer. One clarification is allowed before scoring this question.';
             $up = $pdo->prepare("
                 INSERT INTO progress_test_oral_item_responses
