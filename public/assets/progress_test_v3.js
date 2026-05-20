@@ -177,6 +177,21 @@
     mayaTurnTailTimer = setTimeout(completeMayaTurn, mayaPlaybackTailMs());
   }
 
+  function clearRealtimeTurnState() {
+    pendingInstructions = '';
+    pendingPurpose = '';
+    pendingFinishPurpose = '';
+    mayaTurnPurpose = '';
+    mayaTranscriptDone = false;
+    responseInProgress = false;
+    stopMayaTurnTimers();
+    setMayaSpeaking(false);
+    if (dc && dc.readyState === 'open') {
+      try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
+      try { dc.send(JSON.stringify({ type: 'input_audio_buffer.clear' })); } catch (e) {}
+    }
+  }
+
   function normalizeCompareText(value) {
     return String(value || '').toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
   }
@@ -1214,6 +1229,7 @@
       return;
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
+      var canonicalMayaText = mayaExpectedText || preparedMayaText || '';
       // #region agent log
       agentDebugLog('initial', 'H2,H3', 'public/assets/progress_test_v3.js:1141', 'maya transcript done received', {
         mayaTurnPurpose: mayaTurnPurpose || '',
@@ -1230,15 +1246,13 @@
         onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
         return;
       }
-      if (liveMayaBubble && liveMayaBubble.body) {
-        liveMayaBubble.body.textContent = String(msg.transcript || '');
-      }
-      onMayaTranscriptDone(String(msg.transcript || ''));
+      ensureExpectedMayaBubble();
+      onMayaTranscriptDone(canonicalMayaText);
       api('save_transcript_segment', {
         item_id: currentItem ? currentItem.id : 0,
         role: 'maya',
         event_type: 'audio_transcript',
-        transcript_text: String(msg.transcript || '')
+        transcript_text: canonicalMayaText || String(msg.transcript || '')
       }).catch(function () {});
       return;
     }
@@ -1260,11 +1274,7 @@
         onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
         return;
       }
-      liveMayaText = nextMayaText;
-      if (liveMayaBubble && liveMayaBubble.body) {
-        liveMayaBubble.body.textContent = liveMayaText;
-        els.thread.scrollTop = els.thread.scrollHeight;
-      }
+      ensureExpectedMayaBubble();
       return;
     }
     if (type === 'conversation.item.input_audio_transcription.completed' && msg.transcript) {
@@ -1349,6 +1359,7 @@
     if (els.finish && els.finish.getAttribute('data-action-mode') === 'next') {
       if (phase === 'final_ready' && finalEvaluationReady) {
         finalEvaluationReady = false;
+        clearRealtimeTurnState();
         setFinishPulse(false);
         setFinishButton('Preparing Evaluation...', true, 'wait');
         phase = 'completing';
@@ -1520,11 +1531,12 @@
       });
       // #endregion
       updateProgress(out.state);
-      speakFinalSummary(out.summary || 'Progress test complete.');
-      setCoachState('ready');
       setStatus('Maya is reading your final evaluation.', 'Final review');
       phase = 'final_playing';
       setCloseTestMode('Close Test', false);
+      setCoachState('ready');
+      clearRealtimeTurnState();
+      speakFinalSummary(out.summary || 'Progress test complete.');
     }).catch(function (err) {
       setCoachState('error');
       setStatus('Completion failed: ' + err.message, 'Completion issue');
