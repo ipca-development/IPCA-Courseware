@@ -96,7 +96,7 @@ if ($firstName === '') {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v3.css?v=16">
+<link rel="stylesheet" href="/assets/progress_test_v3.css?v=17">
 
 <div class="ptv3-page">
   <section
@@ -107,27 +107,34 @@ cw_header('Progress Test');
     data-ptv3-root
   >
     <header class="maya-coach-header ptv3-header">
-      <div class="maya-avatar-wrap">
-        <img class="maya-avatar" src="/assets/avatars/maya.png" alt="Maya">
-        <span class="maya-status-dot" aria-hidden="true"></span>
-      </div>
       <div class="maya-coach-header-text">
         <div class="maya-title">Progress Test</div>
         <div class="maya-subtitle" data-ptv3-status>Loading generated questions...</div>
       </div>
     </header>
 
-    <div class="maya-stage ptv3-stage-hidden" data-ptv3-stage>Preparing questions</div>
-
-    <section class="ptv3-video-card" aria-label="Student recording preview">
-      <div class="ptv3-video-frame">
-        <video data-ptv3-video autoplay playsinline muted></video>
-        <div class="ptv3-video-fallback" data-ptv3-video-fallback>Camera preview</div>
+    <section class="ptv3-avatars-card" aria-label="Maya and student avatars">
+      <div class="ptv3-avatar-slot">
+        <div class="ptv3-avatar-frame" data-ptv3-maya-frame>
+          <img class="ptv3-avatar-img" src="/assets/avatars/maya.png" alt="Maya">
+        </div>
+        <div class="ptv3-avatar-label">Maya</div>
       </div>
-      <div class="ptv3-video-copy">
-        <div class="ptv3-video-title"><?= h($firstName) ?></div>
+      <div class="ptv3-avatar-slot">
+        <div class="ptv3-avatar-frame" data-ptv3-student-frame>
+          <video data-ptv3-video autoplay playsinline muted></video>
+          <div class="ptv3-video-fallback" data-ptv3-video-fallback>Camera preview</div>
+        </div>
+        <div class="ptv3-avatar-label"><?= h($firstName) ?></div>
         <div class="ptv3-recording-pill" data-ptv3-recording>Not recording yet</div>
       </div>
+    </section>
+
+    <section class="ptv3-answer-timer" data-ptv3-answer-timer hidden aria-label="Answer start timer">
+      <div class="ptv3-timer-pill">
+        <div class="ptv3-timer-fill" data-ptv3-timer-fill></div>
+      </div>
+      <div class="ptv3-timer-status" data-ptv3-timer-status></div>
     </section>
 
     <section class="ptv3-progress-card" aria-label="Progress test progress">
@@ -176,5 +183,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=16"></script>
+<script src="/assets/progress_test_v3.js?v=17"></script>
 <?php cw_footer(); ?>

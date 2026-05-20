@@ -28,7 +28,10 @@
     end: $('[data-ptv3-end]'),
     video: $('[data-ptv3-video]'),
     videoFallback: $('[data-ptv3-video-fallback]'),
-    recording: $('[data-ptv3-recording]')
+    recording: $('[data-ptv3-recording]'),
+    answerTimer: $('[data-ptv3-answer-timer]'),
+    timerFill: $('[data-ptv3-timer-fill]'),
+    timerStatus: $('[data-ptv3-timer-status]')
   };
 
   var state = null;
@@ -87,6 +90,12 @@
   var transcriptWaitStartedAt = 0;
   var transcriptQuietMs = 1300;
   var transcriptMaxWaitMs = 8000;
+  var mayaAudioWatchId = 0;
+  var mayaAudioWatchStartedAt = 0;
+  var answerTimerInterval = null;
+  var answerTimerDeadline = 0;
+  var answerTimerHandled = false;
+  var ANSWER_START_LIMIT_MS = 30000;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -94,6 +103,102 @@
 
   function setMayaSpeaking(active) {
     root.setAttribute('data-maya-speaking', active ? '1' : '0');
+    syncAnswerButtonState();
+  }
+
+  function isMayaSpeaking() {
+    return root.getAttribute('data-maya-speaking') === '1' || responseInProgress;
+  }
+
+  function syncAnswerButtonState() {
+    if (!els.finish) return;
+    var mode = els.finish.getAttribute('data-action-mode') || '';
+    var label = String(els.finish.textContent || '').trim();
+    if (mode !== 'answer') return;
+    if (label !== 'START' && label !== 'ANSWER CLARIFICATION') return;
+    if (isMayaSpeaking()) {
+      els.finish.disabled = true;
+      setFinishPulse(false);
+    }
+  }
+
+  function stopMayaAudioWatch() {
+    if (mayaAudioWatchId) cancelAnimationFrame(mayaAudioWatchId);
+    mayaAudioWatchId = 0;
+    mayaAudioWatchStartedAt = 0;
+  }
+
+  function beginMayaAudioWatch(callback) {
+    stopMayaAudioWatch();
+    var audio = ensureRemoteAudio();
+    var sawPlayback = false;
+    var quietSince = 0;
+    mayaAudioWatchStartedAt = Date.now();
+    function tick() {
+      var playing = !!(audio.srcObject && !audio.paused && !audio.ended && audio.currentTime > 0.02);
+      if (playing) {
+        sawPlayback = true;
+        quietSince = 0;
+        setMayaSpeaking(true);
+      } else if (sawPlayback) {
+        quietSince = quietSince || Date.now();
+        if (Date.now() - quietSince >= 280) {
+          stopMayaAudioWatch();
+          callback();
+          return;
+        }
+      } else if (Date.now() - mayaAudioWatchStartedAt >= 4500) {
+        stopMayaAudioWatch();
+        callback();
+        return;
+      }
+      if (Date.now() - mayaAudioWatchStartedAt >= 120000) {
+        stopMayaAudioWatch();
+        callback();
+        return;
+      }
+      mayaAudioWatchId = requestAnimationFrame(tick);
+    }
+    mayaAudioWatchId = requestAnimationFrame(tick);
+  }
+
+  function stopAnswerTimer() {
+    if (answerTimerInterval) clearInterval(answerTimerInterval);
+    answerTimerInterval = null;
+    answerTimerDeadline = 0;
+    answerTimerHandled = false;
+    if (els.answerTimer) els.answerTimer.hidden = true;
+    if (els.timerFill) {
+      els.timerFill.style.width = '0%';
+      els.timerFill.setAttribute('data-danger', '0');
+    }
+  }
+
+  function tickAnswerTimer() {
+    if (!answerTimerDeadline) return;
+    var remain = Math.max(0, answerTimerDeadline - Date.now());
+    var pct = (remain / ANSWER_START_LIMIT_MS) * 100;
+    if (els.timerFill) {
+      els.timerFill.style.width = clamp(pct, 0, 100) + '%';
+      els.timerFill.setAttribute('data-danger', pct <= 35 ? '1' : '0');
+    }
+    var secs = Math.max(0, Math.ceil(remain / 1000));
+    text(els.timerStatus, secs + ' second' + (secs === 1 ? '' : 's') + ' left to start your answer');
+    if (remain <= 0 && !answerTimerHandled) {
+      answerTimerHandled = true;
+      handleAnswerTimeout();
+    }
+  }
+
+  function startAnswerTimer() {
+    stopAnswerTimer();
+    if (phase !== 'answering' || !awaitingAnswer || answerCaptureActive || isMayaSpeaking()) return;
+    if (!els.answerTimer) return;
+    answerTimerHandled = false;
+    els.answerTimer.hidden = false;
+    answerTimerDeadline = Date.now() + ANSWER_START_LIMIT_MS;
+    tickAnswerTimer();
+    answerTimerInterval = setInterval(tickAnswerTimer, 100);
   }
 
   function setStudentAnswering(active) {
@@ -159,6 +264,8 @@
   }
 
   function resetClientConversation() {
+    stopAnswerTimer();
+    stopMayaAudioWatch();
     resetAnswerBuffer();
     processedTranscripts = {};
     lastBubbleKey = '';
@@ -262,8 +369,13 @@
   function setFinishButton(label, disabled, mode) {
     if (!els.finish) return;
     els.finish.textContent = label;
-    els.finish.disabled = !!disabled;
     els.finish.setAttribute('data-action-mode', mode || 'answer');
+    var forceDisabled = !!disabled;
+    if ((mode || 'answer') === 'answer' && (label === 'START' || label === 'ANSWER CLARIFICATION') && isMayaSpeaking()) {
+      forceDisabled = true;
+    }
+    els.finish.disabled = forceDisabled;
+    syncAnswerButtonState();
   }
 
   function setStartPulse(active) {
@@ -542,7 +654,6 @@
     var finishedPurpose = mayaTurnPurpose;
     mayaTurnPurpose = '';
     responseInProgress = false;
-    setMayaSpeaking(false);
     if (pendingInstructions) {
       var next = pendingInstructions;
       var nextPurpose = pendingPurpose;
@@ -551,6 +662,13 @@
       sendResponse(next, nextPurpose);
       return;
     }
+    beginMayaAudioWatch(function () {
+      setMayaSpeaking(false);
+      finishMayaTurn(finishedPurpose);
+    });
+  }
+
+  function finishMayaTurn(finishedPurpose) {
     if ((finishedPurpose === 'question' || finishedPurpose === 'clarification') && acceptAnswerAfterMaya) {
       acceptAnswerAfterMaya = false;
       awaitingAnswer = true;
@@ -561,6 +679,7 @@
       setFinishPulse(true);
       setCoachState('ready');
       setStatus(finishedPurpose === 'clarification' ? 'Tap ANSWER CLARIFICATION and add your follow-up answer.' : 'Tap START when you are ready to speak.', finishedPurpose === 'clarification' ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+      startAnswerTimer();
       return;
     }
     if (finishedPurpose === 'feedback' && nextQuestionAfterFeedback) {
@@ -613,6 +732,47 @@
       setStatus('Say "done" to score, or continue answering.', 'Confirm answer');
       return;
     }
+  }
+
+  function handleAnswerTimeout() {
+    if (!currentItem || phase !== 'answering' || !awaitingAnswer) return;
+    stopAnswerTimer();
+    awaitingAnswer = false;
+    awaitingClarification = false;
+    resetAnswerBuffer();
+    setStudentAnswering(false);
+    setMicEnabled(false);
+    setFinishButton('Timed out', true, 'wait');
+    setCoachState('thinking');
+    setStatus('Time expired. Maya is scoring this question as 0%.', 'Timed out');
+    phase = 'evaluating';
+    api('evaluate_item_timeout', { item_id: currentItem.id }).then(function (out) {
+      updateProgress(out.state);
+      var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
+      var timeoutSpeech = 'Sorry ' + firstName + ', that took you too long to give an answer. You have 0% on this question. Let\'s go to the next question when you are ready.';
+      addBubble('maya', 'Maya', timeoutSpeech, 'score');
+      if (out.next_action === 'complete_test') {
+        completeAfterFeedback = true;
+        pendingCompleteAfterFeedback = true;
+        phase = 'feedback';
+        setCloseTestMode('Close Test');
+        speakExact(timeoutSpeech, 'feedback');
+      } else {
+        nextQuestionAfterFeedback = true;
+        pendingNextQuestionAfterFeedback = true;
+        phase = 'feedback';
+        speakExact(timeoutSpeech, 'feedback');
+      }
+    }).catch(function (err) {
+      phase = 'answering';
+      awaitingAnswer = true;
+      setCoachState('error');
+      setStatus('Timeout scoring failed: ' + err.message, 'Evaluation issue');
+      setFinishButton('START', false, 'answer');
+      setFinishPulse(true);
+      startAnswerTimer();
+      addBubble('maya', 'System', 'Timeout scoring failed: ' + err.message, 'warning');
+    });
   }
 
   function startAudioCheck() {
@@ -777,6 +937,7 @@
       return;
     }
     phase = 'asking';
+    stopAnswerTimer();
     resetAnswerBuffer();
     awaitingAnswer = false;
     acceptAnswerAfterMaya = true;
@@ -814,6 +975,8 @@
     }
     if (type === 'response.created') {
       responseInProgress = true;
+      setMayaSpeaking(true);
+      stopAnswerTimer();
       if (preparedMayaText && !liveMayaBubble) {
         liveMayaBubble = addBubble('maya', 'Maya', preparedMayaText, 'live');
         liveMayaText = preparedMayaText;
@@ -879,6 +1042,7 @@
       return;
     }
     if (isSetupOrHoldSpeech(transcript)) {
+      stopAnswerTimer();
       resetAnswerBuffer();
       awaitingAnswer = false;
       acceptAnswerAfterMaya = true;
@@ -929,6 +1093,7 @@
         return;
       }
       if (phase !== 'next_ready') return;
+      stopAnswerTimer();
       phase = 'asking';
       setFinishButton('START', true, 'answer');
       askCurrentQuestion();
@@ -956,6 +1121,7 @@
       return;
     }
     if (phase === 'answering' && !answerCaptureActive) {
+      stopAnswerTimer();
       setStudentAnswering(true);
       setMicEnabled(true);
       setFinishButton('STOP', false, 'recording');
@@ -1006,6 +1172,7 @@
   }
 
   function evaluateAnswer(answer, clarificationQ, clarificationA) {
+    stopAnswerTimer();
     resetAnswerBuffer();
     setTyping('Maya is thinking', true);
     awaitingAnswer = false;
@@ -1079,6 +1246,8 @@
   }
 
   function stopRealtime(notifyBackend, action) {
+    stopMayaAudioWatch();
+    stopAnswerTimer();
     connected = false;
     if (localStream) {
       localStream.getTracks().forEach(function (track) { track.stop(); });

@@ -20,49 +20,26 @@
   display: none;
 }
 
-.ptv3-header .maya-avatar-wrap {
-  width: 58px;
-  height: 58px;
+.ptv3-avatars-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
-  border-radius: 999px;
-  transition: box-shadow 0.15s ease;
-}
-
-.ptv3-header .maya-avatar {
-  width: 52px;
-  height: 52px;
-}
-
-.ptv3-shell[data-maya-speaking="1"] .ptv3-header .maya-avatar-wrap {
-  box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.22), 0 0 22px rgba(34, 197, 94, 0.55);
-}
-
-.ptv3-mode-pill {
-  flex: 0 0 auto;
-  border: 1px solid rgba(30, 60, 114, 0.16);
-  background: #eaf2ff;
-  color: #12355f;
-  border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 10px;
-  font-weight: 900;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.ptv3-video-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
+  gap: 28px;
   border: 1px solid rgba(15, 23, 42, 0.08);
   background: #ffffff;
   border-radius: 14px;
-  padding: 10px 12px;
+  padding: 14px 16px;
 }
 
-.ptv3-video-frame {
+.ptv3-avatar-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.ptv3-avatar-frame {
   position: relative;
   width: 74px;
   height: 74px;
@@ -70,10 +47,12 @@
   border-radius: 999px;
   background: #0f172a;
   flex: 0 0 auto;
-  transition: box-shadow 0.15s ease;
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
 }
 
-.ptv3-video-frame video {
+.ptv3-avatar-img,
+.ptv3-avatar-frame video {
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -87,30 +66,89 @@
   align-items: center;
   justify-content: center;
   color: rgba(255,255,255,0.82);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 900;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
+  text-align: center;
+  padding: 6px;
   background: linear-gradient(135deg, #1e3c72, #2a5298);
   border-radius: 999px;
-}
-
-.ptv3-shell[data-student-answering="1"] .ptv3-video-frame {
-  box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.22), 0 0 24px rgba(239, 68, 68, 0.58);
 }
 
 .ptv3-video-fallback[hidden] {
   display: none;
 }
 
-.ptv3-video-copy {
-  min-width: 0;
+.ptv3-avatar-label {
+  color: #12355f;
+  font-size: 13px;
+  font-weight: 900;
 }
 
-.ptv3-video-title {
-  color: #12355f;
-  font-size: 14px;
-  font-weight: 900;
+.ptv3-shell[data-maya-speaking="1"] [data-ptv3-maya-frame] {
+  animation: ptv3-maya-glow-pulse 1.1s ease-in-out infinite;
+}
+
+.ptv3-shell[data-student-answering="1"] [data-ptv3-student-frame] {
+  animation: ptv3-student-glow-pulse 1.1s ease-in-out infinite;
+}
+
+@keyframes ptv3-maya-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12), 0 0 0 3px rgba(34, 197, 94, 0.20), 0 0 14px rgba(34, 197, 94, 0.35);
+  }
+  50% {
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12), 0 0 0 5px rgba(34, 197, 94, 0.38), 0 0 28px rgba(34, 197, 94, 0.72);
+  }
+}
+
+@keyframes ptv3-student-glow-pulse {
+  0%, 100% {
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12), 0 0 0 3px rgba(239, 68, 68, 0.20), 0 0 14px rgba(239, 68, 68, 0.38);
+  }
+  50% {
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12), 0 0 0 5px rgba(239, 68, 68, 0.40), 0 0 28px rgba(239, 68, 68, 0.72);
+  }
+}
+
+.ptv3-answer-timer {
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 10px 12px;
+}
+
+.ptv3-answer-timer[hidden] {
+  display: none;
+}
+
+.ptv3-timer-pill {
+  height: 12px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #e8eef6;
+  border: 1px solid rgba(15, 23, 42, 0.06);
+}
+
+.ptv3-timer-fill {
+  height: 100%;
+  width: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1e3c72, #0b84ff);
+  transition: width 0.1s linear, background 0.2s ease;
+}
+
+.ptv3-timer-fill[data-danger="1"] {
+  background: linear-gradient(90deg, #dc2626, #f87171);
+}
+
+.ptv3-timer-status {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 800;
+  color: #475569;
+  text-align: center;
 }
 
 .ptv3-recording-pill {
@@ -418,17 +456,17 @@
     padding-bottom: 7px;
   }
 
-  .ptv3-mode-pill,
   .ptv3-progress-title,
   .ptv3-progress-subtitle {
     display: none;
   }
 
-  .ptv3-video-card {
-    padding: 8px;
+  .ptv3-avatars-card {
+    gap: 18px;
+    padding: 10px 12px;
   }
 
-  .ptv3-video-frame {
+  .ptv3-avatar-frame {
     width: 64px;
     height: 64px;
   }
