@@ -102,6 +102,7 @@ try {
     $safeUser = 'ipca_progress_test_v3_user_' . (int)($attempt['user_id'] ?? 0) . '_attempt_' . $attemptId;
     $instructions =
         "You are Maya, a calm voice for an oral progress test.\n"
+        . "Always speak English only. Do not switch languages, even if the student speaks another language.\n"
         . "When a response request contains JSON with a text field, speak only that text value verbatim.\n"
         . "Never mention meta-instructions, source labels, refusal language, limitation language, or prefatory remarks unless those words are inside the JSON text value.\n"
         . "Start immediately with the JSON text value and stop immediately after it.\n"
@@ -127,6 +128,7 @@ try {
                 'input' => [
                     'transcription' => [
                         'model' => 'whisper-1',
+                        'language' => 'en',
                     ],
                     'turn_detection' => [
                         'type' => 'server_vad',

@@ -719,7 +719,7 @@
       response: {
         conversation: 'none',
         output_modalities: ['audio'],
-        instructions: 'Say exactly this and stop. No acknowledgement. No preface. No explanation.\n' + JSON.stringify(textToSpeak)
+        instructions: 'Speak in English only. Say exactly this English text and stop. No translation. No language switching. No acknowledgement. No preface. No explanation.\n' + JSON.stringify(textToSpeak)
       }
     }));
   }
