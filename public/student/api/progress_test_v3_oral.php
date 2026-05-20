@@ -434,10 +434,12 @@ function ptv3_state_payload(PDO $pdo, array $attempt): array
 
     $current = $current ?: ($items[$total - 1] ?? null);
     $scoreProgress = $evaluated > 0 ? round($scoreSum / max(1, $evaluated), 1) : null;
+    $status = (string)($attempt['status'] ?? '');
+    $resumeMode = $evaluated > 0 || in_array($status, ['in_progress', 'processing'], true) ? 'resumed' : 'new_or_reset';
 
     return [
         'attempt_id' => $attemptId,
-        'status' => (string)($attempt['status'] ?? ''),
+        'status' => $status,
         'attempt_status' => (string)($attempt['formal_result_label'] ?? ($attempt['status_text'] ?? '')),
         'score_pct' => $attempt['score_pct'] !== null ? (int)$attempt['score_pct'] : null,
         'pass_gate_met' => isset($attempt['pass_gate_met']) ? (int)$attempt['pass_gate_met'] : null,
@@ -448,7 +450,7 @@ function ptv3_state_payload(PDO $pdo, array $attempt): array
         'score_progress' => $scoreProgress,
         'current_item_id' => $current ? (int)$current['id'] : 0,
         'current_idx' => $current ? (int)$current['idx'] : 0,
-        'resume_mode' => $evaluated > 0 ? 'resumed' : 'new_or_reset',
+        'resume_mode' => $resumeMode,
         'items' => $itemPayload,
     ];
 }
@@ -707,15 +709,22 @@ try {
             }
         }
 
+        $nextStatus = (int)count(ptv3_load_responses($pdo, $attemptId)) > 0 || in_array((string)($attempt['status'] ?? ''), ['in_progress', 'processing'], true)
+            ? 'in_progress'
+            : 'ready';
+        $statusText = $nextStatus === 'in_progress'
+            ? 'Realtime oral progress test interrupted; ready to resume.'
+            : 'Ready to start realtime oral progress test.';
+
         $pdo->prepare("
             UPDATE progress_tests_v2
-            SET status = 'ready',
+            SET status = ?,
                 progress_pct = 100,
-                status_text = 'Ready to start realtime oral progress test.',
+                status_text = ?,
                 updated_at = NOW()
             WHERE id = ?
               AND status != 'completed'
-        ")->execute([$attemptId]);
+        ")->execute([$nextStatus, $statusText, $attemptId]);
 
         $attempt = ptv3_load_attempt($pdo, $u, $attemptId);
         ptv3_json(['ok' => true, 'state' => ptv3_state_payload($pdo, $attempt)]);

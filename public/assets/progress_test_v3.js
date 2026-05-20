@@ -495,8 +495,12 @@
       els.end.disabled = false;
       setFinishButton('START', true, 'answer');
       setCoachState('ready');
-      phase = 'readiness';
-      startAudioCheck();
+      if (state && state.resume_mode === 'resumed') {
+        startResumeIntro();
+      } else {
+        phase = 'readiness';
+        startAudioCheck();
+      }
     }).catch(function (err) {
       els.start.disabled = false;
       setCoachState('error');
@@ -599,6 +603,11 @@
       setStatus('Tap START and say "ready" when you are ready to begin. This is not scored.', 'Readiness check');
       return;
     }
+    if (finishedPurpose === 'resume_intro') {
+      phase = 'asking';
+      askCurrentQuestion();
+      return;
+    }
     if (finishedPurpose === 'done_check') {
       awaitingAnswer = true;
       setCoachState('ready');
@@ -619,6 +628,23 @@
     var readyPrompt = 'Hello ' + firstName + ', are you ready for your progress test?';
     setStatus('Maya is confirming you are ready. This is not scored.', 'Readiness check');
     sendResponse('This is a non-scored readiness check before the test. Say exactly, naturally: "' + readyPrompt + '" Then stop speaking and wait.', 'audio_check');
+  }
+
+  function startResumeIntro() {
+    phase = 'resume_intro';
+    awaitingAudioCheck = false;
+    audioCheckActive = false;
+    awaitingAnswer = false;
+    acceptAnswerAfterMaya = false;
+    activeStudentBubble = null;
+    setStudentAnswering(false);
+    setMicEnabled(false);
+    setFinishButton('START', true, 'answer');
+    setFinishPulse(false);
+    var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
+    var prompt = 'Welcome back ' + firstName + ', let’s resume your test now.';
+    setStatus('Maya is resuming your test at the next unanswered question.', 'Resuming');
+    sendResponse('Read this exact sentence and nothing else: "' + prompt + '"', 'resume_intro');
   }
 
   function audioCheckConfirmsReady(transcript) {
