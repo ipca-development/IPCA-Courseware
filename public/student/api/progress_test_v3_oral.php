@@ -31,6 +31,55 @@ function ptv3_normalize_text(string $text): string
     return trim($text);
 }
 
+function ptv3_truth_text(PDO $pdo, int $lessonId): string
+{
+    $nq = $pdo->prepare("
+        SELECT s.page_number, e.narration_en
+        FROM slides s
+        JOIN slide_enrichment e ON e.slide_id = s.id
+        WHERE s.lesson_id = ?
+          AND s.is_deleted = 0
+          AND e.narration_en IS NOT NULL
+          AND e.narration_en <> ''
+        ORDER BY s.page_number ASC
+    ");
+    $nq->execute([$lessonId]);
+    $truth = '';
+    foreach ($nq->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $truth .= 'Slide ' . (int)$row['page_number'] . ': ' . trim((string)$row['narration_en']) . "\n\n";
+    }
+    return trim($truth);
+}
+
+function ptv3_question_has_grounding(string $prompt, string $truth): bool
+{
+    $p = ptv3_normalize_text($prompt);
+    $t = ptv3_normalize_text($truth);
+    if ($p === '' || $t === '') return false;
+
+    $blocked = [
+        'mona lisa', 'painted the mona lisa', 'leonardo da vinci', 'capital of france',
+        'largest planet', 'world war', 'shakespeare', 'hamlet', 'einstein',
+    ];
+    foreach ($blocked as $phrase) {
+        if (strpos($p, $phrase) !== false && strpos($t, $phrase) === false) return false;
+    }
+
+    $words = array_values(array_unique(array_filter(explode(' ', $p), static function (string $word): bool {
+        return strlen($word) >= 5 && !in_array($word, [
+            'question', 'answer', 'briefly', 'explain', 'correct', 'phrase', 'which',
+            'what', 'where', 'when', 'using', 'student', 'spoken', 'short',
+        ], true);
+    })));
+    if (!$words) return false;
+
+    $hits = 0;
+    foreach ($words as $word) {
+        if (strpos($t, $word) !== false) $hits++;
+    }
+    return $hits >= max(1, min(2, (int)ceil(count($words) * 0.2)));
+}
+
 function ptv3_table_exists(PDO $pdo, string $table): bool
 {
     try {
@@ -223,22 +272,10 @@ function ptv3_normalize_questions(array $questions, int $target): array
 
 function ptv3_generate_questions(PDO $pdo, int $lessonId, int $userId, int $cohortId): array
 {
-    $nq = $pdo->prepare("
-        SELECT s.page_number, e.narration_en
-        FROM slides s
-        JOIN slide_enrichment e ON e.slide_id = s.id
-        WHERE s.lesson_id = ?
-          AND s.is_deleted = 0
-          AND e.narration_en IS NOT NULL
-          AND e.narration_en <> ''
-        ORDER BY s.page_number ASC
-    ");
-    $nq->execute([$lessonId]);
-    $truth = '';
-    foreach ($nq->fetchAll(PDO::FETCH_ASSOC) as $row) {
-        $truth .= 'Slide ' . (int)$row['page_number'] . ': ' . trim((string)$row['narration_en']) . "\n\n";
+    $truth = ptv3_truth_text($pdo, $lessonId);
+    if ($truth === '') {
+        throw new RuntimeException('Cannot generate progress test questions: lesson narration is missing.');
     }
-    if (trim($truth) === '') $truth = '(No narration scripts available.)';
 
     $sq = $pdo->prepare("SELECT summary_plain FROM lesson_summaries WHERE user_id = ? AND cohort_id = ? AND lesson_id = ? LIMIT 1");
     $sq->execute([$userId, $cohortId, $lessonId]);
@@ -276,8 +313,11 @@ TXT);
     $resp = cw_openai_responses($payload);
     $json = ptv3_read_json_text($resp);
     $questions = ptv3_normalize_questions(is_array($json['questions'] ?? null) ? $json['questions'] : [], $target);
+    $questions = array_values(array_filter($questions, static function (array $q) use ($truth): bool {
+        return ptv3_question_has_grounding((string)($q['prompt'] ?? ''), $truth);
+    }));
     if (!$questions) {
-        throw new RuntimeException('Question generation returned no usable questions.');
+        throw new RuntimeException('Question generation returned no lesson-grounded questions.');
     }
     return $questions;
 }
@@ -310,6 +350,17 @@ function ptv3_load_items(PDO $pdo, int $attemptId): array
     $st = $pdo->prepare("SELECT * FROM progress_test_items_v2 WHERE test_id = ? ORDER BY idx ASC");
     $st->execute([$attemptId]);
     return $st->fetchAll(PDO::FETCH_ASSOC);
+}
+
+function ptv3_items_are_lesson_grounded(array $items, string $truth): bool
+{
+    if (!$items || trim($truth) === '') return false;
+    foreach ($items as $item) {
+        if (!ptv3_question_has_grounding((string)($item['prompt'] ?? ''), $truth)) {
+            return false;
+        }
+    }
+    return true;
 }
 
 function ptv3_load_responses(PDO $pdo, int $attemptId): array
@@ -607,6 +658,30 @@ try {
 
         $attemptId = (int)$attempt['id'];
         $items = ptv3_load_items($pdo, $attemptId);
+        $truth = ptv3_truth_text($pdo, (int)$attempt['lesson_id']);
+        if ($items && !ptv3_items_are_lesson_grounded($items, $truth)) {
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("DELETE FROM progress_test_oral_item_responses WHERE attempt_id = ?")->execute([$attemptId]);
+                $pdo->prepare("DELETE FROM progress_test_voice_events WHERE attempt_id = ?")->execute([$attemptId]);
+                $pdo->prepare("DELETE FROM progress_test_items_v2 WHERE test_id = ?")->execute([$attemptId]);
+                $pdo->prepare("
+                    UPDATE progress_tests_v2
+                    SET status = 'preparing',
+                        progress_pct = 20,
+                        score_pct = NULL,
+                        status_text = 'Discarded ungrounded oral questions; regenerating from lesson narration.',
+                        updated_at = NOW()
+                    WHERE id = ?
+                ")->execute([$attemptId]);
+                $pdo->commit();
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                throw $e;
+            }
+            $items = [];
+            ptv3_log_event($pdo, $attemptId, null, (int)$attempt['user_id'], 'system', 'ungrounded_questions_discarded', 'Progress Test V3 discarded non-lesson-grounded questions before start.');
+        }
         if (!$items) {
             $pdo->prepare("UPDATE progress_tests_v2 SET status = 'preparing', progress_pct = 20, status_text = 'Generating oral questions...', updated_at = NOW() WHERE id = ?")->execute([$attemptId]);
             $questions = ptv3_generate_questions($pdo, (int)$attempt['lesson_id'], (int)$attempt['user_id'], (int)$attempt['cohort_id']);

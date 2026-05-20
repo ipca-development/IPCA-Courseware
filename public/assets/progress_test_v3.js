@@ -655,7 +655,12 @@
   }
 
   function askCurrentQuestion() {
-    if (!currentItem) return;
+    if (!currentItem || !currentItem.prompt) {
+      setCoachState('error');
+      setStatus('No lesson-grounded progress test question is available. Please reload to regenerate.', 'Question unavailable');
+      addBubble('maya', 'System', 'No lesson-grounded progress test question is available. This attempt was not scored.', 'warning');
+      return;
+    }
     phase = 'asking';
     resetAnswerBuffer();
     awaitingAnswer = false;
@@ -676,7 +681,13 @@
       event_type: 'question',
       transcript_text: currentItem.spoken_question || currentItem.prompt
     }).catch(function () {});
-    sendResponse('Ask exactly this progress test question, naturally and briefly, then stop speaking and listen for the answer: "' + (currentItem.spoken_question || currentItem.prompt) + '"', 'question');
+    sendResponse(
+      'You must ask only this stored backend progress-test item. '
+      + 'Do not ask any other question. Do not add trivia, general knowledge, or examples. '
+      + 'If you cannot use this exact item, say only: "I cannot load the progress test question." '
+      + 'item_id=' + currentItem.id + '; question_text="' + (currentItem.spoken_question || currentItem.prompt) + '"',
+      'question'
+    );
   }
 
   function handleRealtimeEvent(event) {
