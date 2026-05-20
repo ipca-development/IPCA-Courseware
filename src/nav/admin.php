@@ -93,8 +93,10 @@ return [
         'key' => 'operations',
         'label' => 'Operations',
         'icon' => 'operations',
-        'href' => null,
-        'coming_soon' => true,
+        'href' => '/admin/tv_screens/index.php',
+        'match_paths' => [
+            '/admin/tv_screens/index.php',
+        ],
     ],
     [
         'key' => 'user_accounts',

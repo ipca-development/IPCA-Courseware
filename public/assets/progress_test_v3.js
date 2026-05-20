@@ -101,6 +101,7 @@
   var answerTimerDeadline = 0;
   var answerTimerHandled = false;
   var ANSWER_START_LIMIT_MS = 30000;
+  var replayingMayaAfterDrift = false;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -190,6 +191,35 @@
       try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
       try { dc.send(JSON.stringify({ type: 'input_audio_buffer.clear' })); } catch (e) {}
     }
+  }
+
+  function cancelRealtimeAudioOnly() {
+    stopMayaTurnTimers();
+    if (dc && dc.readyState === 'open') {
+      try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
+      try { dc.send(JSON.stringify({ type: 'input_audio_buffer.clear' })); } catch (e) {}
+    }
+    if (remoteAudio) {
+      try { remoteAudio.pause(); } catch (e) {}
+      try { remoteAudio.currentTime = 0; } catch (e) {}
+    }
+  }
+
+  function replayExpectedMayaAfterDrift() {
+    if (replayingMayaAfterDrift) return;
+    var expected = mayaExpectedText || preparedMayaText || '';
+    var purpose = mayaTurnPurpose || pendingFinishPurpose || '';
+    if (!expected || !purpose) return;
+    replayingMayaAfterDrift = true;
+    cancelRealtimeAudioOnly();
+    ensureExpectedMayaBubble();
+    mayaDriftDetected = false;
+    mayaTranscriptDone = false;
+    pendingFinishPurpose = '';
+    responseInProgress = false;
+    mayaTurnPurpose = '';
+    sendResponse(expected, purpose);
+    replayingMayaAfterDrift = false;
   }
 
   function normalizeCompareText(value) {
@@ -1243,7 +1273,7 @@
       if (isMayaTranscriptDrift(String(msg.transcript || ''))) {
         mayaDriftDetected = true;
         ensureExpectedMayaBubble();
-        onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
+        replayExpectedMayaAfterDrift();
         return;
       }
       ensureExpectedMayaBubble();
@@ -1271,7 +1301,7 @@
         // #endregion
         mayaDriftDetected = true;
         ensureExpectedMayaBubble();
-        onMayaTranscriptDone(mayaExpectedText || preparedMayaText || '');
+        replayExpectedMayaAfterDrift();
         return;
       }
       ensureExpectedMayaBubble();

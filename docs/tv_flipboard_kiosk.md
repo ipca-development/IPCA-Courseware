@@ -1,0 +1,72 @@
+# Airport Operations Flip Board Kiosk
+
+## Routes
+
+- Kiosk display: `/tv/flipboard.php?screen=main`
+- Admin control: `/admin/tv_screens/index.php`
+- Active message API: `/tv/api/messages.php?screen_key=main`
+
+## Database Setup
+
+Apply the migration:
+
+```bash
+mysql "$CW_DB_NAME" < scripts/sql/2026_05_20_tv_screen_messages.sql
+```
+
+Use the same MySQL connection settings as the application environment. The API reads active messages where `starts_at` and `ends_at` include the current UTC time. Urgent messages are any `message_type = 'urgent'` or `priority >= 90`; when present, they override normal rotation.
+
+## Message Modes
+
+- `standard`: rotating operational announcements.
+- `urgent`: interrupting high-priority operational override.
+- `schedule`: departure-board style rows. Put one row per line in the body, using `TITLE | STATUS`.
+- `night`: normal board content with dimmed kiosk lighting when opened with `mode=night`.
+
+## Audio
+
+The board uses Web Audio API synthesis for mechanical flap clicks, randomized rattle, settling impacts, and a three-note airport chime. Optional production samples can be added here:
+
+- `/public/tv/assets/audio/flaps/click-01.mp3`
+- `/public/tv/assets/audio/flaps/click-02.mp3`
+- `/public/tv/assets/audio/flaps/rattle-01.mp3`
+- `/public/tv/assets/audio/flaps/settle-01.mp3`
+- `/public/tv/assets/audio/chimes/airport-chime.mp3`
+
+Announcement MP3 files should be referenced by `audio_url` in the admin UI. The `voice_text` field stores the future OpenAI TTS input text, but kiosk playback intentionally uses pre-generated MP3 URLs instead of browser speech synthesis.
+
+Chrome requires a user gesture before audio playback on many configurations. The kiosk route includes an `Enable Airport PA Audio` control; for unattended Mac Mini deployment, configure Chrome autoplay policy as shown below.
+
+## Chrome Kiosk Launch
+
+Example command:
+
+```bash
+/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+  --kiosk "https://IPCA.training/tv/flipboard.php?screen=main" \
+  --autoplay-policy=no-user-gesture-required \
+  --disable-session-crashed-bubble \
+  --disable-infobars \
+  --no-first-run
+```
+
+For a local/staging URL, replace the domain with the deployed app URL. Use the `screen` query value to target a different message group, for example `screen=dispatch` or `screen=lobby`.
+
+## macOS Startup Automation
+
+1. Create an Automator application or LaunchAgent that runs the Chrome kiosk command.
+2. Add it to System Settings -> General -> Login Items for the kiosk user.
+3. Disable display sleep and enable automatic login only for the dedicated kiosk account.
+4. Connect the Mac Mini audio output to the display or PA input and verify Chrome is allowed to play audio.
+5. Set the TV to the native resolution and disable overscan or motion smoothing.
+
+## Fullscreen Setup
+
+- Use Chrome kiosk mode for production.
+- Keep display scaling at default/native resolution.
+- Confirm the board is not browser-zoomed; set Chrome zoom to 100%.
+- For night operations, open `/tv/flipboard.php?screen=main&mode=night`.
+
+## Long-Running Notes
+
+The frontend polls every seven seconds, hashes message payloads, and only re-renders when content changes or the rotation advances. Character tiles are reused rather than recreated during normal operation to reduce garbage collection. The API uses prepared statements and returns only active messages.
