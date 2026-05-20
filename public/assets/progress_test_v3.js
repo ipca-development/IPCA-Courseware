@@ -179,11 +179,12 @@
     answerTimerInterval = null;
     answerTimerDeadline = 0;
     answerTimerHandled = false;
-    if (els.answerTimer) els.answerTimer.hidden = true;
+    if (els.answerTimer) els.answerTimer.setAttribute('data-active', '0');
     if (els.timerFill) {
-      els.timerFill.style.width = '0%';
+      els.timerFill.style.width = '100%';
       els.timerFill.setAttribute('data-danger', '0');
     }
+    text(els.timerStatus, '');
   }
 
   function tickAnswerTimer() {
@@ -207,7 +208,7 @@
     if (phase !== 'answering' || !awaitingAnswer || answerCaptureActive || isMayaSpeaking()) return;
     if (!els.answerTimer) return;
     answerTimerHandled = false;
-    els.answerTimer.hidden = false;
+    els.answerTimer.setAttribute('data-active', '1');
     answerTimerDeadline = Date.now() + ANSWER_START_LIMIT_MS;
     tickAnswerTimer();
     answerTimerInterval = setInterval(tickAnswerTimer, 100);
@@ -223,10 +224,11 @@
     if (stage) text(els.stage, stage);
   }
 
-  function setTyping(label, visible) {
+  function setTyping(label, visible, role) {
     if (!els.liveRow) return;
     var labelEl = els.liveRow.querySelector('span');
     if (labelEl) labelEl.textContent = label || 'Working';
+    els.liveRow.setAttribute('data-role', role || 'maya');
     els.liveRow.setAttribute('data-visible', visible ? '1' : '0');
     if (visible && els.thread) els.thread.scrollTop = els.thread.scrollHeight;
   }
@@ -631,44 +633,43 @@
     });
   }
 
-  function sendResponse(instructions, purpose) {
+  function sendResponse(textToSpeak, purpose) {
     if (!dc || dc.readyState !== 'open') return;
+    textToSpeak = String(textToSpeak || '').trim();
+    if (!textToSpeak) return;
     setTyping('', false);
     setMicEnabled(false);
     setStudentAnswering(false);
     if (responseInProgress) {
-      pendingInstructions = instructions;
+      pendingInstructions = textToSpeak;
       pendingPurpose = purpose || '';
       return;
     }
     liveMayaBubble = null;
     liveMayaText = '';
-    preparedMayaText = '';
+    preparedMayaText = textToSpeak;
     mayaTurnPurpose = purpose || '';
     mayaTranscriptDone = false;
     pendingFinishPurpose = '';
     stopMayaTurnTimers();
     responseInProgress = true;
     setMayaSpeaking(true);
-    var backendOnlyInstructions = [
-      'CRITICAL: You are not having an open conversation. You are a voice renderer for the browser/backend only.',
-      'Do not answer the student. Do not grade. Do not say good job, perfect, exactly right, need more help, or move on unless those exact words are inside the browser-provided text below.',
-      'Do not invent, repeat, or modify progress-test questions. Do not use conversation history. Speak only what the browser instruction below explicitly asks you to speak.',
-      instructions
-    ].join('\n');
     dc.send(JSON.stringify({
       type: 'response.create',
       response: {
         conversation: 'none',
         output_modalities: ['audio'],
-        instructions: backendOnlyInstructions
+        instructions: JSON.stringify({
+          task: 'text_to_speech',
+          rule: 'Speak the value of text exactly. Do not add, remove, refuse, explain, or answer anything.',
+          text: textToSpeak
+        })
       }
     }));
   }
 
   function speakExact(textToSpeak, purpose) {
-    preparedMayaText = String(textToSpeak || '').trim();
-    sendResponse('Read this exact text verbatim and nothing else. Include every number and percent sign exactly as written: "' + preparedMayaText + '"', purpose);
+    sendResponse(textToSpeak, purpose);
   }
 
   function drainResponse() {
@@ -803,7 +804,7 @@
       ? 'Welcome back ' + firstName + ', are you ready to resume your progress test?'
       : 'Hello ' + firstName + ', are you ready for your progress test?';
     setStatus('Maya is confirming you are ready. This is not scored.', 'Readiness check');
-    sendResponse('This is a non-scored readiness check before the test. Say exactly, naturally: "' + readyPrompt + '" Then stop speaking and wait.', 'audio_check');
+    speakExact(readyPrompt, 'audio_check');
   }
 
   function audioCheckConfirmsReady(transcript) {
@@ -877,7 +878,7 @@
       return;
     }
     setStatus('Waiting for readiness confirmation. Say "ready" when you want to begin.', 'Readiness check');
-    sendResponse('Do not ask a test question yet. Briefly say: "I heard you, but I will not start the scored test until you say ready."', 'audio_check');
+    speakExact('I heard you, but I will not start the scored test until you say ready.', 'audio_check');
   }
 
   function retryCurrentAnswer(message) {
@@ -909,7 +910,7 @@
     clarificationQuestion = prompt || 'Can you clarify this part of your answer?';
     activeStudentBubble = null;
     setStatus(clarificationMode === 'transcript_ambiguity' ? 'Maya is checking a possible transcription issue.' : 'Maya is asking one clarification.', 'Clarification');
-    sendResponse('Read this exact clarification prompt and nothing else. Do not give the answer. Do not provide examples. Do not ask a different question. Do not say correct, exactly, well done, let us move on, next question, or anything about the expected answer. Exact words to read: "' + clarificationQuestion + '"', 'clarification');
+    speakExact(clarificationQuestion, 'clarification');
   }
 
   function captureStudentTranscript(transcript, kind) {
@@ -951,7 +952,7 @@
           retryCurrentAnswer('I am sorry ' + firstName + ', I did not hear you well. Let me give you another chance to answer properly or check your audio connection.');
           return;
         }
-        setTyping('Maya is thinking', true);
+        setTyping('Maya is thinking', true, 'maya');
         submitCurrentBufferedAnswer();
       }
     }, delay);
@@ -999,12 +1000,7 @@
       event_type: 'question',
       transcript_text: currentItem.spoken_question || currentItem.prompt
     }).catch(function () {});
-    sendResponse(
-      'Read this exact backend progress-test question and nothing else. '
-      + 'Do not say you cannot load it. Do not substitute, explain, answer, tutor, or mention another topic. '
-      + 'Exact words to read: "' + (currentItem.spoken_question || currentItem.prompt) + '"',
-      'question'
-    );
+    speakExact(currentItem.spoken_question || currentItem.prompt, 'question');
   }
 
   function handleRealtimeEvent(event) {
@@ -1160,7 +1156,7 @@
       transcriptFlushUntil = Date.now() + transcriptMaxWaitMs;
       playBeep('stop');
       setFinishButton('Checking...', true, 'wait');
-      setTyping('Transcribing', true);
+      setTyping('Transcribing', true, 'student');
       setStatus('Transcribing your readiness response...', 'Readiness check');
       if (submitAfterFlushTimer) clearTimeout(submitAfterFlushTimer);
       scheduleTranscriptSubmit('readiness');
@@ -1182,7 +1178,7 @@
       transcriptFlushUntil = Date.now() + transcriptMaxWaitMs;
       playBeep('stop');
       setFinishButton('Transcribing...', true, 'wait');
-      setTyping('Transcribing', true);
+      setTyping('Transcribing', true, 'student');
       setStatus('Transcribing your answer. Maya will evaluate after the text appears.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       if (submitAfterFlushTimer) clearTimeout(submitAfterFlushTimer);
       scheduleTranscriptSubmit('answer');
@@ -1240,7 +1236,7 @@
   function evaluateAnswer(answer, clarificationQ, clarificationA, clarificationModeValue) {
     stopAnswerTimer();
     resetAnswerBuffer();
-    setTyping('Maya is thinking', true);
+    setTyping('Maya is thinking', true, 'maya');
     awaitingAnswer = false;
     setCoachState('thinking');
     setStatus('Backend is evaluating the answer...', 'Evaluating');
@@ -1294,7 +1290,7 @@
     setStatus('Completing test through canonical attempt state...', 'Completing');
     api('complete_test', {}).then(function (out) {
       updateProgress(out.state);
-      sendResponse('Say this short final progress test summary exactly and naturally: "' + (out.summary || 'Progress test complete.') + '"', 'final');
+      speakExact(out.summary || 'Progress test complete.', 'final');
       setCoachState('ready');
       setStatus('Maya is reading your final evaluation.', 'Final review');
       phase = 'final_playing';

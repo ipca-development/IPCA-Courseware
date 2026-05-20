@@ -117,10 +117,13 @@
   background: #ffffff;
   border-radius: 14px;
   padding: 10px 12px;
+  opacity: 0.34;
+  transition: opacity 0.18s ease, border-color 0.18s ease;
 }
 
-.ptv3-answer-timer[hidden] {
-  display: none;
+.ptv3-answer-timer[data-active="1"] {
+  opacity: 1;
+  border-color: rgba(30, 60, 114, 0.16);
 }
 
 .ptv3-timer-pill {
@@ -149,6 +152,7 @@
   font-weight: 800;
   color: #475569;
   text-align: center;
+  min-height: 18px;
 }
 
 .ptv3-recording-pill {
@@ -271,12 +275,42 @@
 .ptv3-chat {
   flex: 1 1 auto;
   min-height: 0;
-  height: clamp(220px, 32vh, 320px);
+  height: clamp(165px, 24vh, 240px);
 }
 
 .ptv3-chat .maya-chat-thread {
   min-height: 0;
   overflow-y: auto;
+}
+
+.ptv3-chat .maya-chat-typing {
+  max-width: 76%;
+  min-width: 54px;
+  margin-top: 2px;
+  margin-bottom: 2px;
+  padding: 9px 13px;
+}
+
+.ptv3-chat .maya-chat-typing[data-role="maya"] {
+  align-self: flex-start;
+  background: #ffffff;
+  border-color: #dbe3ee;
+  color: #475569;
+  border-radius: 16px;
+  border-top-left-radius: 6px;
+}
+
+.ptv3-chat .maya-chat-typing[data-role="student"] {
+  align-self: flex-end;
+  background: linear-gradient(135deg, #1e3c72, #2a5298);
+  border-color: rgba(30, 60, 114, 0.18);
+  color: #ffffff;
+  border-radius: 16px;
+  border-top-right-radius: 6px;
+}
+
+.ptv3-chat .maya-chat-typing[data-role="student"] .maya-chat-typing-dots span {
+  background: rgba(255, 255, 255, 0.88);
 }
 
 .ptv3-remote-audio {
@@ -494,8 +528,8 @@
   }
 
   .ptv3-chat {
-    height: 34vh;
-    max-height: 300px;
+    height: 25.5vh;
+    max-height: 225px;
     flex: 0 0 auto;
   }
 
