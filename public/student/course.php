@@ -842,7 +842,6 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
 		$canTest = false;
 	}
 
-    $ptUrlV2 = '/student/progress_test_v2.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
     $ptUrlV3 = '/student/progress_test_v3.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
     $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc, $cohortTimezone);
 
@@ -900,7 +899,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'attempts_left' => $attemptsLeft,
         'can_test' => $canTest,
         'instructor_decision' => $instructorDecision,
-        'progress_test_url' => $hasActiveProgressTest ? $ptUrlV3 : $ptUrlV2,
+        'progress_test_url' => $ptUrlV3,
         'progress_test_url_v3' => $ptUrlV3,
         'has_active_progress_test' => $hasActiveProgressTest,
         'first_slide_id' => $firstSlideId,

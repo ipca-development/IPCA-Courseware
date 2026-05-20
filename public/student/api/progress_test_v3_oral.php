@@ -837,8 +837,7 @@ try {
             ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'student', 'answer_final', $evaluatedAnswer);
             ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'maya', 'backend_feedback', $feedback);
         } else {
-            $missing = is_array($grade['missing']) && $grade['missing'] ? implode(', ', array_slice(array_map('strval', $grade['missing']), 0, 2)) : 'the required concept';
-            $clarificationText = 'Good start, but that is not complete yet. Say a little more about ' . $missing . '.';
+            $clarificationText = 'Good start, but that is not complete yet. Add one or two more important points from the question, without changing topics.';
             $feedback = 'Partial answer. One clarification is allowed before scoring this question.';
             $up = $pdo->prepare("
                 INSERT INTO progress_test_oral_item_responses

@@ -87,6 +87,7 @@
   var transcriptWaitStartedAt = 0;
   var transcriptQuietMs = 1300;
   var transcriptMaxWaitMs = 8000;
+  var finalCloseTimer = null;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -578,7 +579,13 @@
       return;
     }
     if (finishedPurpose === 'final') {
-      stopRealtime(false);
+      setStatus('Final evaluation complete. Tap Close Test to return to the course.', 'Complete');
+      setCloseTestMode('Close Test');
+      if (finalCloseTimer) clearTimeout(finalCloseTimer);
+      finalCloseTimer = setTimeout(function () {
+        finalCloseTimer = null;
+        stopRealtime(false);
+      }, 5000);
       return;
     }
     if (finishedPurpose === 'audio_check' && audioCheckActive) {
@@ -632,6 +639,11 @@
   function isContinueSpeech(transcript) {
     var t = String(transcript || '').toLowerCase().replace(/[^\w\s']/g, ' ');
     return /\b(not done|not finished|wait|hold on|one more thing|continue|still answering|i'm still answering|i am still answering|let me finish|more to add)\b/.test(t);
+  }
+
+  function isCourtesyOnlySpeech(transcript) {
+    var t = String(transcript || '').toLowerCase().replace(/[^\w\s']/g, ' ').trim();
+    return /^(ok|okay|thanks|thank you|ok thank you|okay thank you|all right|alright|got it|understood|yes thanks|yes thank you)$/.test(t);
   }
 
   function resetAnswerBuffer() {
@@ -760,10 +772,9 @@
       transcript_text: currentItem.spoken_question || currentItem.prompt
     }).catch(function () {});
     sendResponse(
-      'You must ask only this stored backend progress-test item. '
-      + 'Do not ask any other question. Do not add trivia, general knowledge, or examples. '
-      + 'If you cannot use this exact item, say only: "I cannot load the progress test question." '
-      + 'item_id=' + currentItem.id + '; question_text="' + (currentItem.spoken_question || currentItem.prompt) + '"',
+      'Read this exact backend progress-test question and nothing else. '
+      + 'Do not say you cannot load it. Do not substitute, explain, answer, tutor, or mention another topic. '
+      + 'Exact words to read: "' + (currentItem.spoken_question || currentItem.prompt) + '"',
       'question'
     );
   }
@@ -828,6 +839,14 @@
     }
     if (phase !== 'answering' || !(answerCaptureActive || Date.now() < transcriptFlushUntil)) return;
     if (!awaitingAnswer || responseInProgress || !currentItem) return;
+    if (isCourtesyOnlySpeech(transcript)) {
+      if (awaitingClarification) {
+        setStatus('That sounded like an acknowledgement. Tap START and add your clarification, or End Test if needed.', 'Clarification answer');
+      } else {
+        setStatus('That sounded like an acknowledgement. Use the available button for the next step.', 'Question ' + currentItem.idx + '/' + state.total_questions);
+      }
+      return;
+    }
     if (isSetupOrHoldSpeech(transcript)) {
       resetAnswerBuffer();
       awaitingAnswer = false;
@@ -977,7 +996,7 @@
         clarificationQuestion = out.feedback_for_student || 'Good start, but that is not complete yet. Say a little more.';
         activeStudentBubble = null;
         setStatus('Maya is asking one clarification.', 'Clarification');
-        sendResponse('Ask this one clarification only, without giving away the answer: "' + clarificationQuestion + '" Then stop speaking and listen.', 'clarification');
+        sendResponse('Read this exact clarification prompt and nothing else. Do not give the answer, do not list missing checklist items, do not say let us move on, and do not tutor. Exact words to read: "' + clarificationQuestion + '"', 'clarification');
         return;
       }
 
@@ -989,12 +1008,12 @@
         pendingCompleteAfterFeedback = true;
         phase = 'feedback';
         setCloseTestMode('Close Test');
-        sendResponse('Say this backend score and feedback concisely. Do not add your own score: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
+        sendResponse('Read this exact backend score and feedback only. Do not ask a new question, do not say thanks, do not answer the question for the student, and do not add transition text: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
       } else {
         nextQuestionAfterFeedback = true;
         pendingNextQuestionAfterFeedback = true;
         phase = 'feedback';
-        sendResponse('Say this backend score and feedback concisely. Do not add your own score: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
+        sendResponse('Read this exact backend score and feedback only. Do not ask the next question, do not answer any student acknowledgement, and do not add transition text: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
         if (feedbackPlaybackTimer) clearTimeout(feedbackPlaybackTimer);
         feedbackPlaybackTimer = null;
       }
