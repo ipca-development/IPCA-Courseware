@@ -334,6 +334,11 @@
       fetch('http://127.0.0.1:7592/ingest/0937572b-7766-4cbb-9260-7806246cc339', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aeedb8' }, body: JSON.stringify({ sessionId: 'aeedb8', runId: runId, hypothesisId: hypothesisId, location: location, message: message, data: data || {}, timestamp: Date.now() }) }).catch(function () {});
     } catch (e) {}
   }
+  agentDebugLog('initial', 'H6', 'public/assets/progress_test_v3.js:331', 'progress test v3 script loaded', {
+    scriptVersion: 'debug-aeedb8',
+    phase: phase,
+    hasRoot: !!root
+  });
   // #endregion
 
   function resetClientConversation() {
@@ -599,6 +604,14 @@
     remoteAudio.setAttribute('playsinline', 'playsinline');
     remoteAudio.className = 'ptv3-remote-audio';
     document.body.appendChild(remoteAudio);
+    // #region agent log
+    agentDebugLog('initial', 'H6,H7', 'public/assets/progress_test_v3.js:604', 'remote audio element created', {
+      muted: remoteAudio.muted,
+      volume: remoteAudio.volume,
+      autoplay: remoteAudio.autoplay,
+      paused: remoteAudio.paused
+    });
+    // #endregion
     return remoteAudio;
   }
 
@@ -608,8 +621,41 @@
     audio.volume = 1;
     try {
       var p = audio.play();
-      if (p && typeof p.catch === 'function') p.catch(function () {});
-    } catch (e) {}
+      // #region agent log
+      agentDebugLog('initial', 'H7', 'public/assets/progress_test_v3.js:620', 'remote audio play requested', {
+        hasSrcObject: !!audio.srcObject,
+        muted: audio.muted,
+        volume: audio.volume,
+        paused: audio.paused,
+        playPromise: !!p
+      });
+      // #endregion
+      if (p && typeof p.then === 'function') p.then(function () {
+        // #region agent log
+        agentDebugLog('initial', 'H7', 'public/assets/progress_test_v3.js:628', 'remote audio play resolved', {
+          hasSrcObject: !!audio.srcObject,
+          paused: audio.paused,
+          readyState: audio.readyState
+        });
+        // #endregion
+      }).catch(function (err) {
+        // #region agent log
+        agentDebugLog('initial', 'H7', 'public/assets/progress_test_v3.js:636', 'remote audio play rejected', {
+          name: err && err.name ? String(err.name) : '',
+          message: err && err.message ? String(err.message).slice(0, 160) : '',
+          hasSrcObject: !!audio.srcObject,
+          paused: audio.paused
+        });
+        // #endregion
+      });
+    } catch (e) {
+      // #region agent log
+      agentDebugLog('initial', 'H7', 'public/assets/progress_test_v3.js:646', 'remote audio play threw', {
+        name: e && e.name ? String(e.name) : '',
+        message: e && e.message ? String(e.message).slice(0, 160) : ''
+      });
+      // #endregion
+    }
   }
 
   function connectRealtime(clientSecret, endpoint) {
@@ -623,6 +669,15 @@
     });
     pc.ontrack = function (event) {
       remoteAudio.srcObject = event.streams[0];
+      // #region agent log
+      agentDebugLog('initial', 'H6,H7,H8', 'public/assets/progress_test_v3.js:660', 'peer connection remote track received', {
+        streamCount: event.streams ? event.streams.length : 0,
+        trackKind: event.track ? String(event.track.kind || '') : '',
+        trackMuted: event.track ? !!event.track.muted : null,
+        trackReadyState: event.track ? String(event.track.readyState || '') : '',
+        audioTracks: event.streams && event.streams[0] && event.streams[0].getAudioTracks ? event.streams[0].getAudioTracks().length : 0
+      });
+      // #endregion
       unlockAudioPlayback();
       setCoachState('thinking');
     };
