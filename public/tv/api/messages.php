@@ -10,6 +10,19 @@ $screenKey = trim((string)($_GET['screen_key'] ?? 'main'));
 $screenKey = preg_replace('/[^a-zA-Z0-9_-]/', '', $screenKey) ?: 'main';
 
 try {
+    $tableCheck = $pdo->query("SHOW TABLES LIKE 'tv_screen_messages'");
+    if ($tableCheck === false || $tableCheck->fetchColumn() === false) {
+        echo json_encode(array(
+            'ok' => true,
+            'screen_key' => $screenKey,
+            'urgent_override' => false,
+            'server_time' => gmdate('c'),
+            'messages' => array(),
+            'setup_required' => true,
+        ), JSON_UNESCAPED_SLASHES);
+        exit;
+    }
+
     $stmt = $pdo->prepare("
         SELECT
             id,

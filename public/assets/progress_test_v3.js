@@ -199,10 +199,6 @@
       try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
       try { dc.send(JSON.stringify({ type: 'input_audio_buffer.clear' })); } catch (e) {}
     }
-    if (remoteAudio) {
-      try { remoteAudio.pause(); } catch (e) {}
-      try { remoteAudio.currentTime = 0; } catch (e) {}
-    }
   }
 
   function replayExpectedMayaAfterDrift() {
@@ -865,6 +861,7 @@
       dcState: dc ? dc.readyState : 'none'
     });
     // #endregion
+    unlockAudioPlayback();
     dc.send(JSON.stringify({
       type: 'response.create',
       response: {

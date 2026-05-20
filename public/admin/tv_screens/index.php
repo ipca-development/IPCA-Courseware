@@ -43,14 +43,29 @@ function tv_clean_enum(string $value, array $allowed, string $fallback): string
     return in_array($value, $allowed, true) ? $value : $fallback;
 }
 
+function tv_messages_table_ready(PDO $pdo): bool
+{
+    try {
+        $stmt = $pdo->query("SHOW TABLES LIKE 'tv_screen_messages'");
+        return $stmt !== false && $stmt->fetchColumn() !== false;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 $editingId = max(0, (int)($_GET['edit'] ?? 0));
 $notice = '';
 $error = '';
+$tableReady = tv_messages_table_ready($pdo);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
 
     try {
+        if (!$tableReady) {
+            throw new RuntimeException('TV screen database table is not installed yet. Apply scripts/sql/2026_05_20_tv_screen_messages.sql first.');
+        }
+
         if ($action === 'delete') {
             $id = (int)($_POST['id'] ?? 0);
             if ($id <= 0) {
@@ -174,26 +189,37 @@ if (isset($_GET['deleted'])) {
 }
 
 $editRow = null;
-if ($editingId > 0) {
-    $stmt = $pdo->prepare('SELECT * FROM tv_screen_messages WHERE id = ? LIMIT 1');
-    $stmt->execute([$editingId]);
-    $editRow = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+if ($tableReady && $editingId > 0) {
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM tv_screen_messages WHERE id = ? LIMIT 1');
+        $stmt->execute([$editingId]);
+        $editRow = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    } catch (Throwable $e) {
+        $error = 'Unable to load this TV message: ' . $e->getMessage();
+    }
 }
 
-$stmt = $pdo->query("
-    SELECT
-        m.*,
-        u.name AS creator_name
-    FROM tv_screen_messages m
-    LEFT JOIN users u ON u.id = m.created_by
-    ORDER BY
-      CASE WHEN m.status = 'active' THEN 0 WHEN m.status = 'draft' THEN 1 ELSE 2 END ASC,
-      CASE WHEN m.message_type = 'urgent' OR m.priority >= 90 THEN 0 ELSE 1 END ASC,
-      m.priority DESC,
-      m.updated_at DESC,
-      m.id DESC
-");
-$messages = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
+$messages = array();
+if ($tableReady) {
+    try {
+        $stmt = $pdo->query("
+            SELECT
+                m.*,
+                u.name AS creator_name
+            FROM tv_screen_messages m
+            LEFT JOIN users u ON u.id = m.created_by
+            ORDER BY
+              CASE WHEN m.status = 'active' THEN 0 WHEN m.status = 'draft' THEN 1 ELSE 2 END ASC,
+              CASE WHEN m.message_type = 'urgent' OR m.priority >= 90 THEN 0 ELSE 1 END ASC,
+              m.priority DESC,
+              m.updated_at DESC,
+              m.id DESC
+        ");
+        $messages = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : array();
+    } catch (Throwable $e) {
+        $error = 'Unable to load TV messages: ' . $e->getMessage();
+    }
+}
 
 $defaults = array(
     'id' => 0,
@@ -305,6 +331,11 @@ cw_header('TV Flip Board Screens');
 
 <?php if ($notice !== ''): ?><div class="tv-alert ok"><?= h($notice) ?></div><?php endif; ?>
 <?php if ($error !== ''): ?><div class="tv-alert err"><?= h($error) ?></div><?php endif; ?>
+<?php if (!$tableReady): ?>
+  <div class="tv-alert err">
+    TV screen messages are not installed yet. Apply <code>scripts/sql/2026_05_20_tv_screen_messages.sql</code>, then reload this page.
+  </div>
+<?php endif; ?>
 
 <div class="tv-admin">
   <section class="tv-panel">
