@@ -498,6 +498,22 @@ function ptv3_grade_item(PDO $pdo, array $item, string $answer): array
         return ['score_pct' => 0, 'is_correct' => 0, 'feedback' => 'No answer was captured.', 'detected' => [], 'missing' => [], 'weak' => ['No answer captured.']];
     }
 
+    $promptNorm = ptv3_normalize_text((string)$item['prompt']);
+    $answerNorm = ptv3_normalize_text($answer);
+    if (strpos($promptNorm, 'wind direction') !== false && strpos($promptNorm, 'coming from') !== false) {
+        $ok = (bool)preg_match('/\b(coming|comes|come)\s+from\b|\bfrom\s+where\s+it\s+(comes|is\s+coming)\b|\bdirection\s+it\s+is\s+coming\s+from\b/', $answerNorm);
+        if ($ok) {
+            return [
+                'score_pct' => 100,
+                'is_correct' => 1,
+                'feedback' => 'Correct. Wind direction is reported by the direction it is coming from.',
+                'detected' => ['Wind direction is reported from where it is coming from'],
+                'missing' => [],
+                'weak' => [],
+            ];
+        }
+    }
+
     if ($kind === 'yesno') {
         $t = ptv3_normalize_text($answer);
         $yes = preg_match('/\b(yes|true|correct|it is|it does|there is|there are)\b/', $t) ? 1 : 0;
@@ -610,6 +626,19 @@ function ptv3_grade_item(PDO $pdo, array $item, string $answer): array
         'missing' => is_array($j['missing_concepts'] ?? null) ? $j['missing_concepts'] : $missing,
         'weak' => is_array($j['weak_areas'] ?? null) ? $j['weak_areas'] : $missing,
     ];
+}
+
+function ptv3_transcript_ambiguity_prompt(array $grade, string $answer, string $clarificationAnswer): string
+{
+    if (trim($clarificationAnswer) !== '') return '';
+    $feedback = strtolower((string)($grade['feedback'] ?? ''));
+    $answerNorm = ptv3_normalize_text($answer);
+    $mentionsSlip = (bool)preg_match('/\b(mislabel|mislabeled|misheard|transcri|terminology slip|naming error|said\s+[a-z]\s+for|instead of)\b/', $feedback);
+    if (!$mentionsSlip) return '';
+    if (strpos($feedback, 'emotion') !== false && preg_match('/\b(i\s*m\s*safe|imsafe|i\s*am\s*safe|illness|medication|stress|alcohol|fatigue|emotion|emotional|safe acronym)\b/', $answerNorm)) {
+        return 'I may have heard one word incorrectly. What exactly did you mean for the final E in IMSAFE?';
+    }
+    return 'I may have heard one part of your answer incorrectly. Can you clarify this part of your answer?';
 }
 
 function ptv3_student_feedback_text(string $feedback): string
@@ -870,6 +899,7 @@ try {
         $answer = trim((string)($data['student_answer_text'] ?? ''));
         $clarificationQuestion = trim((string)($data['clarification_question_text'] ?? ''));
         $clarificationAnswer = trim((string)($data['clarification_answer_text'] ?? ''));
+        $clarificationMode = trim((string)($data['clarification_mode'] ?? ''));
         if ($itemId <= 0 || $answer === '') ptv3_json(['ok' => false, 'error' => 'item_id and student_answer_text required'], 400);
 
         $itemSt = $pdo->prepare("SELECT * FROM progress_test_items_v2 WHERE id = ? AND test_id = ? LIMIT 1");
@@ -891,15 +921,26 @@ try {
         $grade = ptv3_grade_item($pdo, $item, $evaluatedAnswer);
         $scorePct = (float)$grade['score_pct'];
         $isComplete = $scorePct >= 70 || !empty($grade['is_correct']);
+        if ($clarificationMode === 'transcript_ambiguity' && $clarificationAnswer !== '' && $scorePct >= 70) {
+            $scorePct = 100.0;
+            $grade['score_pct'] = 100;
+            $grade['is_correct'] = 1;
+            $grade['feedback'] = 'Thanks for clarifying. The earlier issue was a transcription ambiguity, and your answer covered the required concept.';
+            $grade['weak'] = [];
+            $grade['missing'] = [];
+            $isComplete = true;
+        }
 
         $existingSt = $pdo->prepare("SELECT clarification_question_text FROM progress_test_oral_item_responses WHERE attempt_id = ? AND item_id = ? LIMIT 1");
         $existingSt->execute([$attemptId, $itemId]);
         $existingClarification = trim((string)$existingSt->fetchColumn());
-        $clarificationAllowed = !$isComplete && $scorePct >= 30 && $scorePct < 70 && $existingClarification === '' && $clarificationQuestion === '';
-        $nextAction = $clarificationAllowed ? 'clarify' : 'next_question';
+        $ambiguityClarificationText = ptv3_transcript_ambiguity_prompt($grade, $answer, $clarificationAnswer);
+        $ambiguityClarificationAllowed = $ambiguityClarificationText !== '' && $existingClarification === '' && $clarificationQuestion === '';
+        $clarificationAllowed = !$ambiguityClarificationAllowed && !$isComplete && $scorePct >= 30 && $scorePct < 70 && $existingClarification === '' && $clarificationQuestion === '';
+        $nextAction = ($ambiguityClarificationAllowed || $clarificationAllowed) ? 'clarify' : 'next_question';
 
         $feedback = ptv3_student_feedback_text((string)$grade['feedback']);
-        if (!$clarificationAllowed) {
+        if (!$clarificationAllowed && !$ambiguityClarificationAllowed) {
             $up = $pdo->prepare("
                 INSERT INTO progress_test_oral_item_responses
                     (attempt_id, item_id, user_id, question_text, maya_spoken_question_text, student_answer_text,
@@ -953,7 +994,9 @@ try {
             ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'student', 'answer_final', $evaluatedAnswer);
             ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'maya', 'backend_feedback', $feedback);
         } else {
-            $clarificationText = 'That answer is partly correct, but not complete yet. Please add one or two more important points from the question.';
+            $clarificationText = $ambiguityClarificationAllowed
+                ? $ambiguityClarificationText
+                : 'That answer is partly correct, but not complete yet. Please add one or two more important points from the question.';
             $feedback = 'Partial answer. One clarification is allowed before scoring this question.';
             $up = $pdo->prepare("
                 INSERT INTO progress_test_oral_item_responses
@@ -988,7 +1031,8 @@ try {
             'detected_concepts' => $grade['detected'],
             'missing_concepts' => $grade['missing'],
             'weak_areas' => $grade['weak'],
-            'clarification_allowed' => $clarificationAllowed,
+            'clarification_allowed' => ($clarificationAllowed || $ambiguityClarificationAllowed),
+            'clarification_mode' => $ambiguityClarificationAllowed ? 'transcript_ambiguity' : ($clarificationAllowed ? 'weak' : ''),
             'next_action' => $nextAction,
             'state' => $state,
         ]);

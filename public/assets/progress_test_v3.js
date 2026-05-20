@@ -46,6 +46,7 @@
   var muted = false;
   var awaitingAnswer = false;
   var awaitingClarification = false;
+  var clarificationMode = '';
   var originalAnswer = '';
   var clarificationQuestion = '';
   var activeStudentBubble = null;
@@ -290,6 +291,7 @@
     setFinishButton('START', true, 'answer');
     awaitingAnswer = false;
     awaitingClarification = false;
+    clarificationMode = '';
     audioCheckActive = false;
     awaitingAudioCheck = false;
     setStudentAnswering(false);
@@ -792,6 +794,7 @@
     awaitingAudioCheck = false;
     awaitingAnswer = false;
     acceptAnswerAfterMaya = false;
+    clarificationMode = '';
     activeStudentBubble = null;
     setStudentAnswering(false);
     stopAnswerTimer();
@@ -892,6 +895,23 @@
     speakExact(message, 'retry_answer');
   }
 
+  function setClarificationTurn(answer, prompt, mode) {
+    nextQuestionAfterFeedback = false;
+    pendingNextQuestionAfterFeedback = false;
+    completeAfterFeedback = false;
+    pendingCompleteAfterFeedback = false;
+    finalEvaluationReady = false;
+    awaitingAnswer = false;
+    acceptAnswerAfterMaya = true;
+    awaitingClarification = true;
+    clarificationMode = mode || 'weak';
+    originalAnswer = answer;
+    clarificationQuestion = prompt || 'Can you clarify this part of your answer?';
+    activeStudentBubble = null;
+    setStatus(clarificationMode === 'transcript_ambiguity' ? 'Maya is checking a possible transcription issue.' : 'Maya is asking one clarification.', 'Clarification');
+    sendResponse('Read this exact clarification prompt and nothing else. Do not give the answer. Do not provide examples. Do not ask a different question. Do not say correct, exactly, well done, let us move on, next question, or anything about the expected answer. Exact words to read: "' + clarificationQuestion + '"', 'clarification');
+  }
+
   function captureStudentTranscript(transcript, kind) {
     answerSegments.push(transcript);
     if (activeStudentBubble && activeStudentBubble.body) {
@@ -963,6 +983,7 @@
     awaitingAnswer = false;
     acceptAnswerAfterMaya = true;
     awaitingClarification = false;
+    clarificationMode = '';
     originalAnswer = '';
     clarificationQuestion = '';
     activeStudentBubble = null;
@@ -1210,13 +1231,13 @@
 
   function evaluateBufferedAnswer(finalAnswer) {
     if (awaitingClarification) {
-      evaluateAnswer(originalAnswer, clarificationQuestion, finalAnswer);
+      evaluateAnswer(originalAnswer, clarificationQuestion, finalAnswer, clarificationMode);
     } else {
-      evaluateAnswer(finalAnswer, '', '');
+      evaluateAnswer(finalAnswer, '', '', '');
     }
   }
 
-  function evaluateAnswer(answer, clarificationQ, clarificationA) {
+  function evaluateAnswer(answer, clarificationQ, clarificationA, clarificationModeValue) {
     stopAnswerTimer();
     resetAnswerBuffer();
     setTyping('Maya is thinking', true);
@@ -1227,26 +1248,16 @@
       item_id: currentItem.id,
       student_answer_text: answer,
       clarification_question_text: clarificationQ,
-      clarification_answer_text: clarificationA
+      clarification_answer_text: clarificationA,
+      clarification_mode: clarificationModeValue || ''
     }).then(function (out) {
       setTyping('', false);
       updateProgress(out.state);
       if (out.next_action === 'clarify') {
-        nextQuestionAfterFeedback = false;
-        pendingNextQuestionAfterFeedback = false;
-        completeAfterFeedback = false;
-        pendingCompleteAfterFeedback = false;
-        finalEvaluationReady = false;
-        awaitingAnswer = false;
-        acceptAnswerAfterMaya = true;
-        awaitingClarification = true;
-        originalAnswer = answer;
-        clarificationQuestion = out.feedback_for_student || 'Good start, but that is not complete yet. Say a little more.';
-        activeStudentBubble = null;
-        setStatus('Maya is asking one clarification.', 'Clarification');
-        sendResponse('Read this exact clarification prompt and nothing else. Do not give the answer. Do not provide examples. Do not ask a different question. Do not say correct, exactly, well done, let us move on, next question, or anything about the rubric. Exact words to read: "' + clarificationQuestion + '"', 'clarification');
+        setClarificationTurn(answer, out.feedback_for_student || 'Good start, but that is not complete yet. Say a little more.', out.clarification_mode || 'weak');
         return;
       }
+      clarificationMode = '';
 
       var scoreLine = 'You scored ' + Math.round(out.score_pct || 0) + ' percent on this question.';
       var feedbackForStudent = String(out.feedback_for_student || '').replace(/\brubric\b/ig, 'expected answer');
