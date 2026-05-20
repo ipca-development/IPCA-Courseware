@@ -96,7 +96,7 @@ if ($firstName === '') {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v3.css?v=26">
+<link rel="stylesheet" href="/assets/progress_test_v3.css?v=27">
 
 <div class="ptv3-page">
   <section
@@ -161,10 +161,10 @@ cw_header('Progress Test');
         <div class="maya-chat-thread-empty" data-ptv3-empty>
           Questions are being generated. Microphone access will start only after you click Start Progress Test.
         </div>
-      </div>
-      <div class="maya-chat-typing" data-ptv3-live-row data-role="maya" data-visible="0">
-        <span>Listening</span>
-        <span class="maya-chat-typing-dots"><span></span><span></span><span></span></span>
+        <div class="maya-chat-typing" data-ptv3-live-row data-role="maya" data-visible="0">
+          <span>Listening</span>
+          <span class="maya-chat-typing-dots"><span></span><span></span><span></span></span>
+        </div>
       </div>
     </section>
 
@@ -183,5 +183,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=26"></script>
+<script src="/assets/progress_test_v3.js?v=27"></script>
 <?php cw_footer(); ?>
