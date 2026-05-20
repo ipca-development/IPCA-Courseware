@@ -73,6 +73,7 @@
   var feedbackPlaybackTimer = null;
   var pendingNextQuestionAfterFeedback = false;
   var pendingCompleteAfterFeedback = false;
+  var finalEvaluationReady = false;
   var phase = 'idle';
   var answerCaptureActive = false;
   var submitAfterFlushTimer = null;
@@ -567,8 +568,12 @@
       completeAfterFeedback = false;
       if (pendingCompleteAfterFeedback) {
         pendingCompleteAfterFeedback = false;
-        phase = 'completing';
-        completeTest();
+        finalEvaluationReady = true;
+        phase = 'final_ready';
+        setFinishButton('Test Evaluation', false, 'next');
+        setFinishPulse(true);
+        setCloseTestMode('Close Test');
+        setStatus('Maya finished the last question feedback. Tap Test Evaluation for the final result.', 'Ready for final evaluation');
       }
       return;
     }
@@ -865,6 +870,14 @@
 
   function finishCurrentAnswer() {
     if (els.finish && els.finish.getAttribute('data-action-mode') === 'next') {
+      if (phase === 'final_ready' && finalEvaluationReady) {
+        finalEvaluationReady = false;
+        setFinishPulse(false);
+        setFinishButton('Preparing Evaluation...', true, 'wait');
+        phase = 'completing';
+        completeTest();
+        return;
+      }
       if (phase !== 'next_ready') return;
       phase = 'asking';
       setFinishButton('START', true, 'answer');
@@ -1064,7 +1077,7 @@
   els.finish.addEventListener('click', finishCurrentAnswer);
   els.mute.addEventListener('click', toggleMute);
   els.end.addEventListener('click', function () {
-    if (phase === 'completed' || phase === 'completing' || completeAfterFeedback || pendingCompleteAfterFeedback || (state && parseInt(state.evaluated_count || 0, 10) >= parseInt(state.total_questions || 0, 10) && parseInt(state.total_questions || 0, 10) > 0)) {
+    if (phase === 'completed' || phase === 'completing' || phase === 'final_ready' || finalEvaluationReady || completeAfterFeedback || pendingCompleteAfterFeedback || (state && parseInt(state.evaluated_count || 0, 10) >= parseInt(state.total_questions || 0, 10) && parseInt(state.total_questions || 0, 10) > 0)) {
       leaveCompletedTest();
       return;
     }

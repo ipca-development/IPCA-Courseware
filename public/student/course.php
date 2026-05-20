@@ -200,6 +200,8 @@ function summary_quality_meta(array $summaryState) {
 
 
 function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
+    expire_stale_progress_test_v3_attempts($pdo, (int)$userId, (int)$cohortId, (int)$lessonId);
+
     $nonStaleFilter = "
         AND NOT (
             COALESCE(formal_result_code, '') = 'STALE_ABORTED'
@@ -209,7 +211,7 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
     ";
 
     $st = $pdo->prepare("
-        SELECT attempt, status, score_pct, started_at, completed_at
+        SELECT id, attempt, status, score_pct, started_at, completed_at, status_text, updated_at, formal_result_code
         FROM progress_tests_v2
         WHERE user_id=?
           AND cohort_id=?
@@ -265,6 +267,27 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
         'best_score' => $bestScore,
         'passed' => $passed
     ];
+}
+
+function expire_stale_progress_test_v3_attempts(PDO $pdo, int $userId, int $cohortId, int $lessonId): void {
+    $st = $pdo->prepare("
+        UPDATE progress_tests_v2
+        SET status = 'failed',
+            formal_result_code = 'STALE_ABORTED',
+            formal_result_label = 'Aborted (stale technical session)',
+            counts_as_unsat = 0,
+            pass_gate_met = 0,
+            timing_status = 'unknown',
+            status_text = 'Realtime oral test was interrupted and expired after the 15-minute resume window.',
+            updated_at = NOW()
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id = ?
+          AND status IN ('preparing','ready','in_progress','processing')
+          AND updated_at < (NOW() - INTERVAL 15 MINUTE)
+          AND (formal_result_code IS NULL OR formal_result_code != 'STALE_ABORTED')
+    ");
+    $st->execute([$userId, $cohortId, $lessonId]);
 }
 
 
@@ -799,12 +822,13 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
 
     $testPassed = !empty($test['passed']);
     $bestScore = $test['best_score'];
+    $hasActiveProgressTest = $last && in_array((string)($last['status'] ?? ''), ['preparing', 'ready', 'in_progress', 'processing'], true);
 
   	$canTest = true;
 	if ($role === 'student' && $locked) $canTest = false;
 	if ($role === 'student' && !$summaryOk) $canTest = false;
 	if ($role === 'student' && $testPassed) $canTest = false;
-	if ($role === 'student' && $attemptsLeft <= 0) $canTest = false;
+	if ($role === 'student' && $attemptsLeft <= 0 && !$hasActiveProgressTest) $canTest = false;
 	if ($role === 'student' && (int)$instructorDecision['training_suspended'] === 1) $canTest = false;
 	if ($role === 'student' && $pendingDeadlineReason) $canTest = false;
 	if ($role === 'student' && $pendingRemediation) $canTest = false;
@@ -819,6 +843,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
 	}
 
     $ptUrlV2 = '/student/progress_test_v2.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
+    $ptUrlV3 = '/student/progress_test_v3.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
     $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc, $cohortTimezone);
 
     if ($bestScore !== null) {
@@ -875,7 +900,9 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'attempts_left' => $attemptsLeft,
         'can_test' => $canTest,
         'instructor_decision' => $instructorDecision,
-        'progress_test_url' => $ptUrlV2,
+        'progress_test_url' => $hasActiveProgressTest ? $ptUrlV3 : $ptUrlV2,
+        'progress_test_url_v3' => $ptUrlV3,
+        'has_active_progress_test' => $hasActiveProgressTest,
         'first_slide_id' => $firstSlideId,
 		'activity_state' => $activityState,
     ];
@@ -1741,7 +1768,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     $testBtnClass = 'warn';
 } elseif (!empty($lx['can_test'])) {
     $testHref = (string)$lx['progress_test_url'];
-    $testLabel = 'Start Progress Test';
+    $testLabel = !empty($lx['has_active_progress_test']) ? 'Resume Progress Test' : 'Start Progress Test';
     $testBtnClass = 'primary';
 } else {
     $testLabel = 'Start Progress Test';

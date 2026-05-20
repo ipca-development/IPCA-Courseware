@@ -363,6 +363,28 @@ function ptv3_items_are_lesson_grounded(array $items, string $truth): bool
     return true;
 }
 
+function ptv3_mark_stale_interrupted_attempts(PDO $pdo, int $userId, int $cohortId, int $lessonId): void
+{
+    $st = $pdo->prepare("
+        UPDATE progress_tests_v2
+        SET status = 'failed',
+            formal_result_code = 'STALE_ABORTED',
+            formal_result_label = 'Aborted (stale technical session)',
+            counts_as_unsat = 0,
+            pass_gate_met = 0,
+            timing_status = 'unknown',
+            status_text = 'Realtime oral test was interrupted and expired after the 15-minute resume window.',
+            updated_at = NOW()
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id = ?
+          AND status IN ('preparing','ready','in_progress','processing')
+          AND updated_at < (NOW() - INTERVAL 15 MINUTE)
+          AND (formal_result_code IS NULL OR formal_result_code != 'STALE_ABORTED')
+    ");
+    $st->execute([$userId, $cohortId, $lessonId]);
+}
+
 function ptv3_load_responses(PDO $pdo, int $attemptId): array
 {
     $st = $pdo->prepare("SELECT * FROM progress_test_oral_item_responses WHERE attempt_id = ? ORDER BY item_id ASC");
@@ -615,24 +637,7 @@ try {
             if (!$en->fetchColumn()) ptv3_json(['ok' => false, 'error' => 'Not actively enrolled'], 403);
         }
 
-        $stale = $pdo->prepare("
-            UPDATE progress_tests_v2
-            SET status = 'failed',
-                formal_result_code = 'STALE_ABORTED',
-                formal_result_label = 'Aborted (stale technical session)',
-                counts_as_unsat = 0,
-                pass_gate_met = 0,
-                timing_status = 'unknown',
-                status_text = 'Old realtime oral session was closed as a no-penalty technical abort.',
-                updated_at = NOW()
-            WHERE user_id = ?
-              AND cohort_id = ?
-              AND lesson_id = ?
-              AND status IN ('preparing','ready','in_progress','processing')
-              AND updated_at < (NOW() - INTERVAL 6 HOUR)
-              AND (formal_result_code IS NULL OR formal_result_code != 'STALE_ABORTED')
-        ");
-        $stale->execute([$studentUserId, $cohortId, $lessonId]);
+        ptv3_mark_stale_interrupted_attempts($pdo, $studentUserId, $cohortId, $lessonId);
 
         $existing = $pdo->prepare("
             SELECT *
@@ -733,6 +738,14 @@ try {
         if ($itemId <= 0 || $text === '') ptv3_json(['ok' => false, 'error' => 'item_id and transcript_text required'], 400);
         if (!in_array($roleIn, ['maya', 'student', 'system'], true)) $roleIn = 'student';
         ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, $roleIn, $eventType, $text);
+        $pdo->prepare("
+            UPDATE progress_tests_v2
+            SET status = CASE WHEN status IN ('preparing','ready') THEN 'in_progress' ELSE status END,
+                status_text = 'Realtime oral progress test in progress.',
+                updated_at = NOW()
+            WHERE id = ?
+              AND status NOT IN ('completed','failed')
+        ")->execute([$attemptId]);
         ptv3_json(['ok' => true]);
     }
 
@@ -747,6 +760,14 @@ try {
         $itemSt->execute([$itemId, $attemptId]);
         $item = $itemSt->fetch(PDO::FETCH_ASSOC);
         if (!$item) ptv3_json(['ok' => false, 'error' => 'Question item not found'], 404);
+        $pdo->prepare("
+            UPDATE progress_tests_v2
+            SET status = 'in_progress',
+                status_text = 'Realtime oral progress test in progress.',
+                updated_at = NOW()
+            WHERE id = ?
+              AND status NOT IN ('completed','failed')
+        ")->execute([$attemptId]);
 
         $total = count(ptv3_load_items($pdo, $attemptId));
         $spoken = ptv3_spoken_question($item, $total);
@@ -865,8 +886,8 @@ try {
     if ($action === 'abort_voice_session_without_penalty') {
         $pdo->prepare("
             UPDATE progress_tests_v2
-            SET status = CASE WHEN status = 'preparing' THEN 'ready' ELSE status END,
-                status_text = 'Voice disconnected. You can resume the realtime oral test.',
+            SET status = 'in_progress',
+                status_text = 'Voice disconnected. You can resume the realtime oral test within 15 minutes.',
                 updated_at = NOW()
             WHERE id = ?
               AND status NOT IN ('completed','failed')
