@@ -50,7 +50,7 @@ if ($firstName === '') {
 
 cw_header('Progress Test V3');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v3.css?v=5">
+<link rel="stylesheet" href="/assets/progress_test_v3.css?v=6">
 
 <div class="ptv3-page">
   <section
@@ -118,7 +118,7 @@ cw_header('Progress Test V3');
 
     <section class="ptv3-controls" aria-label="Progress test controls">
       <button class="ptv3-btn primary" type="button" data-ptv3-start disabled>Start Progress Test</button>
-      <button class="ptv3-btn success" type="button" data-ptv3-finish disabled>Start Answer</button>
+      <button class="ptv3-btn success" type="button" data-ptv3-finish disabled>START</button>
       <button class="ptv3-btn" type="button" data-ptv3-mute disabled>Mute Microphone</button>
       <button class="ptv3-btn danger" type="button" data-ptv3-end disabled>End Test</button>
     </section>
@@ -132,5 +132,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=5"></script>
+<script src="/assets/progress_test_v3.js?v=6"></script>
 <?php cw_footer(); ?>
