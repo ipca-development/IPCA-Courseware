@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/openai.php';
+require_once __DIR__ . '/../../../src/progress_test_access.php';
 
 cw_require_login();
 
@@ -50,6 +51,12 @@ try {
     $attempt = $st->fetch(PDO::FETCH_ASSOC);
     if (!$attempt) {
         ptv3_token_fail(404, 'Progress test attempt not found');
+    }
+    if ($role !== 'admin') {
+        $access = cw_progress_test_access_state($pdo, (int)$attempt['user_id'], (int)$attempt['cohort_id']);
+        if (empty($access['allowed'])) {
+            ptv3_token_fail(403, 'Progress test access code required');
+        }
     }
 
     $status = (string)($attempt['status'] ?? '');

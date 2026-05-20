@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
+require_once __DIR__ . '/../../src/progress_test_access.php';
 
 cw_require_login();
 
@@ -37,6 +38,51 @@ if ($role === 'student') {
     }
 }
 
+$gateError = '';
+$accessState = cw_progress_test_access_state($pdo, $studentContextId, $cohortId);
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['progress_test_pin'])) {
+    if (cw_progress_test_verify_submitted_pin($pdo, $studentContextId, $cohortId, (string)$_POST['progress_test_pin'])) {
+        header('Location: ' . strtok((string)($_SERVER['REQUEST_URI'] ?? ''), '#'));
+        exit;
+    }
+    $gateError = 'Invalid access code.';
+    $accessState = cw_progress_test_access_state($pdo, $studentContextId, $cohortId);
+}
+
+if (empty($accessState['allowed'])) {
+    $mode = (string)($accessState['mode'] ?? 'pin');
+    cw_header('Progress Test Access');
+    ?>
+    <style>
+      body{ background:#fff; }
+      .gate-wrap{ max-width:980px; margin:0 auto; padding:18px 12px; }
+      .gate-card{ max-width:560px; margin:38px auto; padding:24px; border:1px solid #e8e8e8; border-radius:18px; background:#fff; box-shadow:0 10px 30px rgba(0,0,0,0.06); }
+      .gate-title{ font-size:24px; font-weight:900; color:#1e3c72; margin-bottom:8px; }
+      .gate-text{ color:#334155; line-height:1.5; }
+      .gate-input{ width:100%; margin-top:14px; padding:14px 16px; border:1px solid #d6d6d6; border-radius:12px; font-size:16px; box-sizing:border-box; }
+      .gate-btn{ width:100%; margin-top:14px; padding:16px 14px; border-radius:16px; border:2px solid rgba(30,60,114,0.25); background:rgba(30,60,114,0.08); color:#1e3c72; font-weight:900; font-size:18px; cursor:pointer; }
+      .gate-error{ margin-top:12px; color:#b91c1c; font-weight:800; }
+    </style>
+    <div class="gate-wrap">
+      <div class="gate-card">
+        <div class="gate-title">Progress Test Access Required</div>
+        <?php if ($mode === 'school_ip'): ?>
+          <div class="gate-text">This progress test normally requires the approved school network.<br>Since you are not on the approved IP, enter the access code to continue.</div>
+        <?php else: ?>
+          <div class="gate-text">Enter the progress test access code to continue.</div>
+        <?php endif; ?>
+        <form method="post">
+          <input class="gate-input" type="password" name="progress_test_pin" placeholder="Access code" autofocus>
+          <button class="gate-btn" type="submit">Continue</button>
+        </form>
+        <?php if ($gateError !== ''): ?><div class="gate-error"><?= h($gateError) ?></div><?php endif; ?>
+      </div>
+    </div>
+    <?php
+    cw_footer();
+    exit;
+}
+
 $nameSt = $pdo->prepare('SELECT name FROM users WHERE id = ? LIMIT 1');
 $nameSt->execute([$studentContextId]);
 $userName = trim((string)$nameSt->fetchColumn());
@@ -48,9 +94,9 @@ if ($firstName === '') {
     $firstName = 'Student';
 }
 
-cw_header('Progress Test V3');
+cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v3.css?v=15">
+<link rel="stylesheet" href="/assets/progress_test_v3.css?v=16">
 
 <div class="ptv3-page">
   <section
@@ -66,13 +112,12 @@ cw_header('Progress Test V3');
         <span class="maya-status-dot" aria-hidden="true"></span>
       </div>
       <div class="maya-coach-header-text">
-        <div class="maya-title">Progress Test V3</div>
+        <div class="maya-title">Progress Test</div>
         <div class="maya-subtitle" data-ptv3-status>Loading generated questions...</div>
       </div>
-      <div class="ptv3-mode-pill">Realtime oral mode</div>
     </header>
 
-    <div class="maya-stage" data-ptv3-stage>Preparing questions</div>
+    <div class="maya-stage ptv3-stage-hidden" data-ptv3-stage>Preparing questions</div>
 
     <section class="ptv3-video-card" aria-label="Student recording preview">
       <div class="ptv3-video-frame">
@@ -119,7 +164,6 @@ cw_header('Progress Test V3');
     <section class="ptv3-controls" aria-label="Progress test controls">
       <button class="ptv3-btn primary" type="button" data-ptv3-start disabled>Start Progress Test</button>
       <button class="ptv3-btn success" type="button" data-ptv3-finish disabled>START</button>
-      <button class="ptv3-btn" type="button" data-ptv3-mute disabled>Mute Microphone</button>
       <button class="ptv3-btn danger" type="button" data-ptv3-end disabled>End Test</button>
     </section>
   </section>
@@ -132,5 +176,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=15"></script>
+<script src="/assets/progress_test_v3.js?v=16"></script>
 <?php cw_footer(); ?>

@@ -16,6 +16,10 @@
   align-items: center;
 }
 
+.ptv3-stage-hidden {
+  display: none;
+}
+
 .ptv3-header .maya-avatar-wrap {
   width: 58px;
   height: 58px;

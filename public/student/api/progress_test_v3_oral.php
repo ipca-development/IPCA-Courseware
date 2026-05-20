@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/openai.php';
 require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
+require_once __DIR__ . '/../../../src/progress_test_access.php';
 
 cw_require_login();
 
@@ -15,6 +16,15 @@ function ptv3_json(array $payload, int $code = 200): void
     http_response_code($code);
     echo json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     exit;
+}
+
+function ptv3_require_progress_test_access(PDO $pdo, array $user, int $cohortId, int $studentUserId): void
+{
+    if ((string)($user['role'] ?? '') === 'admin') return;
+    $access = cw_progress_test_access_state($pdo, $studentUserId, $cohortId);
+    if (empty($access['allowed'])) {
+        ptv3_json(['ok' => false, 'error' => 'Progress test access code required.', 'access_required' => true], 403);
+    }
 }
 
 function ptv3_body(): array
@@ -648,6 +658,7 @@ try {
             $en->execute([$cohortId, $studentUserId]);
             if (!$en->fetchColumn()) ptv3_json(['ok' => false, 'error' => 'Not actively enrolled'], 403);
         }
+        ptv3_require_progress_test_access($pdo, $u, $cohortId, $studentUserId);
 
         ptv3_mark_stale_interrupted_attempts($pdo, $studentUserId, $cohortId, $lessonId);
 
@@ -744,6 +755,7 @@ try {
     if ($attemptId <= 0) ptv3_json(['ok' => false, 'error' => 'attempt_id required'], 400);
     $attempt = ptv3_load_attempt($pdo, $u, $attemptId);
     $attemptUserId = (int)$attempt['user_id'];
+    ptv3_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], $attemptUserId);
 
     if ($action === 'get_state') {
         ptv3_json(['ok' => true, 'state' => ptv3_state_payload($pdo, $attempt)]);

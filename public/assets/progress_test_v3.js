@@ -25,7 +25,6 @@
     liveRow: $('[data-ptv3-live-row]'),
     start: $('[data-ptv3-start]'),
     finish: $('[data-ptv3-finish]'),
-    mute: $('[data-ptv3-mute]'),
     end: $('[data-ptv3-end]'),
     video: $('[data-ptv3-video]'),
     videoFallback: $('[data-ptv3-video-fallback]'),
@@ -80,6 +79,7 @@
   var audioContext = null;
   var liveMayaBubble = null;
   var liveMayaText = '';
+  var preparedMayaText = '';
   var transcriptFlushUntil = 0;
   var transcriptWaitTimer = null;
   var pendingTranscriptSubmit = false;
@@ -236,7 +236,7 @@
     var scoreProgress = computedScoreProgress == null ? '--' : String(computedScoreProgress) + '%';
     var finalScore = state.score_pct == null ? scoreProgress : String(state.score_pct) + '%';
     var modeLabel = state.resume_mode === 'resumed' && evaluated > 0 ? 'Resumed attempt' : 'New/reset attempt';
-    text(els.title, 'Progress Test V3');
+    text(els.title, 'Progress Test');
     text(els.attempt, modeLabel + ' · Attempt status: ' + (state.formal_result_label || state.attempt_status || state.status || 'Ready'));
     text(els.score, 'Score: ' + finalScore);
     text(els.ready, total ? String(total) : '0');
@@ -490,7 +490,6 @@
       return connectRealtime(token.client_secret, token.realtime_endpoint);
     }).then(function () {
       connected = true;
-      els.mute.disabled = false;
       els.end.disabled = false;
       setFinishButton('START', true, 'answer');
       setCoachState('ready');
@@ -521,6 +520,7 @@
     }
     liveMayaBubble = null;
     liveMayaText = '';
+    preparedMayaText = '';
     mayaTurnPurpose = purpose || '';
     responseInProgress = true;
     setMayaSpeaking(true);
@@ -531,6 +531,11 @@
         instructions: instructions
       }
     }));
+  }
+
+  function speakExact(textToSpeak, purpose) {
+    preparedMayaText = String(textToSpeak || '').trim();
+    sendResponse('Read this exact text and nothing else: "' + preparedMayaText + '"', purpose);
   }
 
   function drainResponse() {
@@ -807,7 +812,13 @@
       setStatus('Realtime voice error.', 'Connection issue');
       return;
     }
-    if (type === 'response.created') responseInProgress = true;
+    if (type === 'response.created') {
+      responseInProgress = true;
+      if (preparedMayaText && !liveMayaBubble) {
+        liveMayaBubble = addBubble('maya', 'Maya', preparedMayaText, 'live');
+        liveMayaText = preparedMayaText;
+      }
+    }
     if (type === 'response.output_audio_transcript.done' && msg.transcript) {
       if (liveMayaBubble && liveMayaBubble.body) {
         liveMayaBubble.body.textContent = String(msg.transcript || '');
@@ -1022,18 +1033,19 @@
 
       var scoreLine = 'You scored ' + Math.round(out.score_pct || 0) + '% on this question.';
       var feedbackForStudent = String(out.feedback_for_student || '').replace(/\brubric\b/ig, 'expected answer');
+      var exactFeedbackText = scoreLine + ' ' + feedbackForStudent;
 
       if (out.next_action === 'complete_test') {
         completeAfterFeedback = true;
         pendingCompleteAfterFeedback = true;
         phase = 'feedback';
         setCloseTestMode('Close Test');
-        sendResponse('Read this exact backend score and feedback only. Do not ask a new question, do not say thanks, do not answer the question for the student, do not mention the rubric, and do not add transition text: "' + scoreLine + ' ' + feedbackForStudent + '"', 'feedback');
+        speakExact(exactFeedbackText, 'feedback');
       } else {
         nextQuestionAfterFeedback = true;
         pendingNextQuestionAfterFeedback = true;
         phase = 'feedback';
-        sendResponse('Read this exact backend score and feedback only. Do not ask the next question, do not answer any student acknowledgement, do not mention the rubric, and do not add transition text: "' + scoreLine + ' ' + feedbackForStudent + '"', 'feedback');
+        speakExact(exactFeedbackText, 'feedback');
         if (feedbackPlaybackTimer) clearTimeout(feedbackPlaybackTimer);
         feedbackPlaybackTimer = null;
       }
@@ -1058,7 +1070,6 @@
       setCoachState('ready');
       setStatus('Completed.', 'Complete');
       phase = 'completed';
-      els.mute.disabled = true;
       setCloseTestMode('Close Test');
     }).catch(function (err) {
       setCoachState('error');
@@ -1101,20 +1112,11 @@
     addBubble('maya', 'System', 'Voice disconnected. Your attempt was not failed; restart voice when ready.', 'warning');
     els.start.disabled = false;
     setStartPulse(true);
-    els.mute.disabled = true;
     els.end.disabled = true;
-  }
-
-  function toggleMute() {
-    if (!localStream) return;
-    muted = !muted;
-    setMicEnabled(answerCaptureActive);
-    text(els.mute, muted ? 'Unmute Microphone' : 'Mute Microphone');
   }
 
   els.start.addEventListener('click', startTest);
   els.finish.addEventListener('click', finishCurrentAnswer);
-  els.mute.addEventListener('click', toggleMute);
   els.end.addEventListener('click', function () {
     if (phase === 'completed' || phase === 'completing' || phase === 'final_ready' || finalEvaluationReady || completeAfterFeedback || pendingCompleteAfterFeedback || (state && parseInt(state.evaluated_count || 0, 10) >= parseInt(state.total_questions || 0, 10) && parseInt(state.total_questions || 0, 10) > 0)) {
       leaveCompletedTest();
@@ -1131,7 +1133,6 @@
     addBubble('maya', 'System', 'Test ended without penalty. Partial answers were reset; restart when ready.', 'warning');
     els.start.disabled = false;
     setStartPulse(true);
-    els.mute.disabled = true;
     els.end.disabled = true;
   });
 
