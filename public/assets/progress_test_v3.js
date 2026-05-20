@@ -330,8 +330,10 @@
 
   // #region agent log
   function agentDebugLog(runId, hypothesisId, location, message, data) {
+    var payload = { sessionId: 'aeedb8', runId: runId, hypothesisId: hypothesisId, location: location, message: message, data: data || {}, timestamp: Date.now() };
     try {
-      fetch('http://127.0.0.1:7592/ingest/0937572b-7766-4cbb-9260-7806246cc339', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aeedb8' }, body: JSON.stringify({ sessionId: 'aeedb8', runId: runId, hypothesisId: hypothesisId, location: location, message: message, data: data || {}, timestamp: Date.now() }) }).catch(function () {});
+      fetch('http://127.0.0.1:7592/ingest/0937572b-7766-4cbb-9260-7806246cc339', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aeedb8' }, body: JSON.stringify(payload) }).catch(function () {});
+      fetch('/student/api/progress_test_v3_oral.php', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'agent_debug_log', attempt_id: attemptId || 1, log: payload }) }).catch(function () {});
     } catch (e) {}
   }
   agentDebugLog('initial', 'H6', 'public/assets/progress_test_v3.js:331', 'progress test v3 script loaded', {

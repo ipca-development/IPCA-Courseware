@@ -95,8 +95,12 @@ if ($firstName === '') {
 }
 
 // #region agent log
+$agentDebugDir = __DIR__ . '/../../.cursor';
+if (!is_dir($agentDebugDir)) {
+    @mkdir($agentDebugDir, 0775, true);
+}
 @file_put_contents(
-    __DIR__ . '/../../.cursor/debug-aeedb8.log',
+    $agentDebugDir . '/debug-aeedb8.log',
     json_encode([
         'sessionId' => 'aeedb8',
         'runId' => 'initial',
@@ -104,7 +108,7 @@ if ($firstName === '') {
         'location' => 'public/student/progress_test_v3.php:98',
         'message' => 'progress test v3 page rendered',
         'data' => [
-            'assetVersion' => '39',
+            'assetVersion' => '40',
             'cohortId' => $cohortId,
             'lessonId' => $lessonId,
             'role' => $role,
@@ -117,7 +121,7 @@ if ($firstName === '') {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v3.css?v=39">
+<link rel="stylesheet" href="/assets/progress_test_v3.css?v=40">
 
 <div class="ptv3-page">
   <section
@@ -204,5 +208,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=39"></script>
+<script src="/assets/progress_test_v3.js?v=40"></script>
 <?php cw_footer(); ?>

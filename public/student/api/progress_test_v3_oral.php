@@ -663,6 +663,26 @@ function ptv3_log_event(PDO $pdo, int $attemptId, ?int $itemId, int $userId, str
     }
 }
 
+// #region agent log
+function ptv3_agent_debug_log(array $payload): void
+{
+    $dir = __DIR__ . '/../../../.cursor';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0775, true);
+    }
+    $safe = [
+        'sessionId' => 'aeedb8',
+        'runId' => (string)($payload['runId'] ?? 'initial'),
+        'hypothesisId' => (string)($payload['hypothesisId'] ?? ''),
+        'location' => (string)($payload['location'] ?? 'public/student/api/progress_test_v3_oral.php'),
+        'message' => (string)($payload['message'] ?? ''),
+        'data' => is_array($payload['data'] ?? null) ? $payload['data'] : [],
+        'timestamp' => (int)round(microtime(true) * 1000),
+    ];
+    @file_put_contents($dir . '/debug-aeedb8.log', json_encode($safe, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n", FILE_APPEND | LOCK_EX);
+}
+// #endregion
+
 try {
     $u = cw_current_user($pdo);
     $role = (string)($u['role'] ?? '');
@@ -675,6 +695,13 @@ try {
     $data = $_SERVER['REQUEST_METHOD'] === 'GET' ? $_GET : ptv3_body();
     $action = (string)($data['action'] ?? 'get_state');
     $actorUserId = (int)($u['id'] ?? 0);
+
+    // #region agent log
+    if ($action === 'agent_debug_log') {
+        ptv3_agent_debug_log(is_array($data['log'] ?? null) ? $data['log'] : $data);
+        ptv3_json(['ok' => true]);
+    }
+    // #endregion
 
     if ($action === 'start_oral_test') {
         $cohortId = (int)($data['cohort_id'] ?? 0);

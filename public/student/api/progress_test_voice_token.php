@@ -24,6 +24,29 @@ function ptv3_token_body(): array
     return is_array($data) ? $data : [];
 }
 
+// #region agent log
+function ptv3_token_debug_log(array $data): void
+{
+    $dir = __DIR__ . '/../../../.cursor';
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0775, true);
+    }
+    @file_put_contents(
+        $dir . '/debug-aeedb8.log',
+        json_encode([
+            'sessionId' => 'aeedb8',
+            'runId' => 'initial',
+            'hypothesisId' => (string)($data['hypothesisId'] ?? 'H10,H11'),
+            'location' => (string)($data['location'] ?? 'public/student/api/progress_test_voice_token.php'),
+            'message' => (string)($data['message'] ?? ''),
+            'data' => is_array($data['data'] ?? null) ? $data['data'] : [],
+            'timestamp' => (int)round(microtime(true) * 1000),
+        ], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) . "\n",
+        FILE_APPEND | LOCK_EX
+    );
+}
+// #endregion
+
 try {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
         ptv3_token_fail(405, 'POST required');
@@ -144,6 +167,22 @@ try {
             ],
         ],
     ];
+
+    // #region agent log
+    ptv3_token_debug_log([
+        'message' => 'realtime client secret requested',
+        'data' => [
+            'attemptId' => $attemptId,
+            'model' => $model,
+            'voice' => $voice,
+            'outputModalities' => $body['session']['output_modalities'],
+            'turnDetectionType' => $body['session']['audio']['input']['turn_detection']['type'],
+            'turnCreateResponse' => $body['session']['audio']['input']['turn_detection']['create_response'],
+            'turnInterruptResponse' => $body['session']['audio']['input']['turn_detection']['interrupt_response'],
+            'instructionsLength' => strlen($instructions),
+        ],
+    ]);
+    // #endregion
 
     $ch = curl_init($endpoint);
     curl_setopt_array($ch, [
