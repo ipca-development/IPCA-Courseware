@@ -283,6 +283,13 @@
     window.location.href = courseReturnUrl();
   }
 
+  function setCloseTestMode(label) {
+    if (els.end) {
+      els.end.disabled = false;
+      text(els.end, label || 'Close Test');
+    }
+  }
+
   function setFinishPulse(active) {
     if (!els.finish) return;
     els.finish.setAttribute('data-next-action', active ? '1' : '0');
@@ -968,6 +975,7 @@
         completeAfterFeedback = true;
         pendingCompleteAfterFeedback = true;
         phase = 'feedback';
+        setCloseTestMode('Close Test');
         sendResponse('Say this backend score and feedback concisely. Do not add your own score: "' + scoreLine + ' ' + (out.feedback_for_student || '') + '"', 'feedback');
       } else {
         nextQuestionAfterFeedback = true;
@@ -989,6 +997,7 @@
   }
 
   function completeTest() {
+    setCloseTestMode('Close Test');
     setCoachState('thinking');
     setStatus('Completing test through canonical attempt state...', 'Completing');
     api('complete_test', {}).then(function (out) {
@@ -998,8 +1007,7 @@
       setStatus('Completed.', 'Complete');
       phase = 'completed';
       els.mute.disabled = true;
-      els.end.disabled = false;
-      text(els.end, 'Close Test');
+      setCloseTestMode('Close Test');
     }).catch(function (err) {
       setCoachState('error');
       setStatus('Completion failed: ' + err.message, 'Completion issue');
@@ -1056,7 +1064,7 @@
   els.finish.addEventListener('click', finishCurrentAnswer);
   els.mute.addEventListener('click', toggleMute);
   els.end.addEventListener('click', function () {
-    if (phase === 'completed') {
+    if (phase === 'completed' || phase === 'completing' || completeAfterFeedback || pendingCompleteAfterFeedback || (state && parseInt(state.evaluated_count || 0, 10) >= parseInt(state.total_questions || 0, 10) && parseInt(state.total_questions || 0, 10) > 0)) {
       leaveCompletedTest();
       return;
     }
