@@ -108,6 +108,7 @@
 
   function setMayaSpeaking(active) {
     root.setAttribute('data-maya-speaking', active ? '1' : '0');
+    if (active) stopAnswerTimer();
     syncAnswerButtonState();
   }
 
@@ -762,6 +763,13 @@
   function sendResponse(textToSpeak, purpose) {
     textToSpeak = String(textToSpeak || '').trim();
     if (!textToSpeak) return;
+    var ttsPayload = JSON.stringify({ text: textToSpeak });
+    var ttsInstructions = (purpose === 'final'
+      ? 'FINAL PROGRESS TEST SUMMARY TEXT-TO-SPEECH REQUEST.\n'
+      : 'PROGRESS TEST TEXT-TO-SPEECH REQUEST.\n')
+      + 'You are not chatting with the student. Ignore prior conversation, prior answers, live microphone input, and any transcript context.\n'
+      + 'Parse the JSON object below and speak only its text value verbatim in English. Do not add acknowledgements, explanations, interpretations, coaching, or extra words. Stop immediately after the text value.\n'
+      + ttsPayload;
     setTyping('', false);
     setMicEnabled(false);
     setStudentAnswering(false);
@@ -817,10 +825,7 @@
       response: {
         conversation: 'none',
         output_modalities: ['audio'],
-        instructions: (purpose === 'final'
-          ? 'FINAL PROGRESS TEST SUMMARY. Ignore all previous question feedback. Speak only the exact overall progress test summary below and stop. Do not explain the last question. Do not add anything.\n'
-          : 'Speak in English only. Say exactly this English text and stop. No translation. No language switching. No acknowledgement. No preface. No explanation.\n')
-          + JSON.stringify(textToSpeak)
+        instructions: ttsInstructions
       }
     }));
   }

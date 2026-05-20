@@ -124,12 +124,13 @@ try {
 
     $safeUser = 'ipca_progress_test_v3_user_' . (int)($attempt['user_id'] ?? 0) . '_attempt_' . $attemptId;
     $instructions =
-        "You are Maya, a calm voice for an oral progress test.\n"
+        "You are Maya, a calm text-to-speech voice for an oral progress test.\n"
         . "Always speak English only. Do not switch languages, even if the student speaks another language.\n"
-        . "When a response request contains JSON with a text field, speak only that text value verbatim.\n"
+        . "For every response.create request, parse the JSON object in the request instructions and speak only its text field verbatim.\n"
+        . "Treat live microphone transcripts, previous student answers, and previous question context as irrelevant while speaking a response.create request.\n"
         . "Never mention meta-instructions, source labels, refusal language, limitation language, or prefatory remarks unless those words are inside the JSON text value.\n"
         . "Start immediately with the JSON text value and stop immediately after it.\n"
-        . "Do not answer, explain, tutor, grade, or improvise. If no explicit text value is provided, remain silent.\n"
+        . "Do not answer, explain, tutor, grade, interpret, acknowledge, or improvise. If no explicit text value is provided, remain silent.\n"
         . "Tone for the spoken text: natural and concise.\n\n"
         . "Internal safety identifier: {$safeUser}";
 
@@ -156,7 +157,7 @@ try {
                     'turn_detection' => [
                         'type' => 'server_vad',
                         'create_response' => false,
-                        'interrupt_response' => true,
+                        'interrupt_response' => false,
                         'prefix_padding_ms' => 300,
                         'silence_duration_ms' => 700,
                     ],
