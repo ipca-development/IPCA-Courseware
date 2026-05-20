@@ -80,6 +80,12 @@
   var liveMayaBubble = null;
   var liveMayaText = '';
   var transcriptFlushUntil = 0;
+  var transcriptWaitTimer = null;
+  var pendingTranscriptSubmit = false;
+  var pendingTranscriptKind = '';
+  var transcriptWaitStartedAt = 0;
+  var transcriptQuietMs = 1300;
+  var transcriptMaxWaitMs = 8000;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -97,6 +103,14 @@
   function setStatus(message, stage) {
     text(els.status, message);
     if (stage) text(els.stage, stage);
+  }
+
+  function setTyping(label, visible) {
+    if (!els.liveRow) return;
+    var labelEl = els.liveRow.querySelector('span');
+    if (labelEl) labelEl.textContent = label || 'Working';
+    els.liveRow.setAttribute('data-visible', visible ? '1' : '0');
+    if (visible && els.thread) els.thread.scrollTop = els.thread.scrollHeight;
   }
 
   function playBeep(kind) {
@@ -472,6 +486,7 @@
 
   function sendResponse(instructions, purpose) {
     if (!dc || dc.readyState !== 'open') return;
+    setTyping('', false);
     setMicEnabled(false);
     setStudentAnswering(false);
     if (responseInProgress) {
@@ -601,6 +616,13 @@
     donePromptShownForAnswer = '';
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
     answerSettleTimer = null;
+    if (transcriptWaitTimer) clearTimeout(transcriptWaitTimer);
+    transcriptWaitTimer = null;
+    pendingTranscriptSubmit = false;
+    pendingTranscriptKind = '';
+    transcriptWaitStartedAt = 0;
+    transcriptFlushUntil = 0;
+    setTyping('', false);
   }
 
   function combinedAnswerText(extra) {
@@ -622,6 +644,7 @@
     setStudentAnswering(false);
     setMicEnabled(false);
     transcriptFlushUntil = 0;
+    setTyping('', false);
     setFinishButton('Checking...', true, 'wait');
     if (audioCheckConfirmsReady(transcript)) {
       audioCheckActive = false;
@@ -642,6 +665,36 @@
     } else {
       activeStudentBubble = addBubble('student', 'Student', combinedAnswerText(''), kind || 'answer');
     }
+    if (pendingTranscriptSubmit) scheduleTranscriptSubmit(pendingTranscriptKind);
+  }
+
+  function scheduleTranscriptSubmit(kind) {
+    pendingTranscriptSubmit = true;
+    pendingTranscriptKind = kind || 'answer';
+    if (!transcriptWaitStartedAt) transcriptWaitStartedAt = Date.now();
+    if (transcriptWaitTimer) clearTimeout(transcriptWaitTimer);
+    var elapsed = Date.now() - transcriptWaitStartedAt;
+    var hasText = combinedAnswerText('') !== '';
+    var delay = hasText || elapsed >= transcriptMaxWaitMs ? transcriptQuietMs : 500;
+    transcriptWaitTimer = setTimeout(function () {
+      transcriptWaitTimer = null;
+      elapsed = Date.now() - transcriptWaitStartedAt;
+      if (!hasText && elapsed < transcriptMaxWaitMs) {
+        scheduleTranscriptSubmit(kind);
+        return;
+      }
+      pendingTranscriptSubmit = false;
+      pendingTranscriptKind = '';
+      transcriptWaitStartedAt = 0;
+      transcriptFlushUntil = 0;
+      if (kind === 'readiness') {
+        setTyping('', false);
+        handleAudioCheckTranscript(combinedAnswerText(''));
+      } else {
+        setTyping('Maya is thinking', true);
+        submitCurrentBufferedAnswer();
+      }
+    }, delay);
   }
 
   function isMayaEchoTranscript(transcript) {
@@ -810,14 +863,13 @@
     if (phase === 'readiness' && answerCaptureActive) {
       setStudentAnswering(false);
       setMicEnabled(false);
-      transcriptFlushUntil = Date.now() + 1800;
+      transcriptFlushUntil = Date.now() + transcriptMaxWaitMs;
       playBeep('stop');
       setFinishButton('Checking...', true, 'wait');
+      setTyping('Transcribing', true);
+      setStatus('Transcribing your readiness response...', 'Readiness check');
       if (submitAfterFlushTimer) clearTimeout(submitAfterFlushTimer);
-      submitAfterFlushTimer = setTimeout(function () {
-        submitAfterFlushTimer = null;
-        handleAudioCheckTranscript(combinedAnswerText(''));
-      }, 900);
+      scheduleTranscriptSubmit('readiness');
       return;
     }
     if (phase === 'answering' && !answerCaptureActive) {
@@ -832,14 +884,13 @@
     if (phase === 'answering' && answerCaptureActive) {
       setStudentAnswering(false);
       setMicEnabled(false);
-      transcriptFlushUntil = Date.now() + 1800;
+      transcriptFlushUntil = Date.now() + transcriptMaxWaitMs;
       playBeep('stop');
-      setFinishButton('Submitting...', true, 'wait');
+      setFinishButton('Transcribing...', true, 'wait');
+      setTyping('Transcribing', true);
+      setStatus('Transcribing your answer. Maya will evaluate after the text appears.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       if (submitAfterFlushTimer) clearTimeout(submitAfterFlushTimer);
-      submitAfterFlushTimer = setTimeout(function () {
-        submitAfterFlushTimer = null;
-        submitCurrentBufferedAnswer();
-      }, 900);
+      scheduleTranscriptSubmit('answer');
       return;
     }
   }
@@ -847,7 +898,10 @@
   function submitCurrentBufferedAnswer() {
     var finalAnswer = combinedAnswerText('');
     if (phase !== 'answering' || !currentItem || !finalAnswer || responseInProgress) {
+      setTyping('', false);
       setFinishButton('START', false, 'answer');
+      setFinishPulse(true);
+      setStatus('I did not receive a transcript yet. Tap START and try your answer again.', awaitingClarification ? 'Clarification answer' : ('Question ' + (currentItem ? currentItem.idx : '') + '/' + state.total_questions));
       return;
     }
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
@@ -870,6 +924,7 @@
 
   function evaluateAnswer(answer, clarificationQ, clarificationA) {
     resetAnswerBuffer();
+    setTyping('Maya is thinking', true);
     awaitingAnswer = false;
     setCoachState('thinking');
     setStatus('Backend is evaluating the answer...', 'Evaluating');
@@ -879,6 +934,7 @@
       clarification_question_text: clarificationQ,
       clarification_answer_text: clarificationA
     }).then(function (out) {
+      setTyping('', false);
       updateProgress(out.state);
       if (out.next_action === 'clarify') {
         awaitingAnswer = false;
@@ -909,6 +965,7 @@
         feedbackPlaybackTimer = null;
       }
     }).catch(function (err) {
+      setTyping('', false);
       awaitingAnswer = true;
       phase = 'answering';
       setCoachState('error');
