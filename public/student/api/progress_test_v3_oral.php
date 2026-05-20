@@ -953,7 +953,7 @@ try {
             ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'student', 'answer_final', $evaluatedAnswer);
             ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'maya', 'backend_feedback', $feedback);
         } else {
-            $clarificationText = 'You scored ' . (int)round($scorePct) . ' percent so far. This answer is partly correct, but not complete. Please add one or two more important points from the question.';
+            $clarificationText = 'That answer is partly correct, but not complete yet. Please add one or two more important points from the question.';
             $feedback = 'Partial answer. One clarification is allowed before scoring this question.';
             $up = $pdo->prepare("
                 INSERT INTO progress_test_oral_item_responses

@@ -409,9 +409,9 @@
     window.location.href = courseReturnUrl();
   }
 
-  function setCloseTestMode(label) {
+  function setCloseTestMode(label, enabled) {
     if (els.end) {
-      els.end.disabled = false;
+      els.end.disabled = enabled !== true;
       text(els.end, label || 'Close Test');
     }
   }
@@ -615,7 +615,7 @@
       return connectRealtime(token.client_secret, token.realtime_endpoint);
     }).then(function () {
       connected = true;
-      els.end.disabled = false;
+      els.end.disabled = true;
       setFinishButton('START', true, 'answer');
       setCoachState('ready');
       phase = 'readiness';
@@ -659,7 +659,7 @@
 
   function speakExact(textToSpeak, purpose) {
     preparedMayaText = String(textToSpeak || '').trim();
-    sendResponse('Read this exact text and nothing else: "' + preparedMayaText + '"', purpose);
+    sendResponse('Read this exact text verbatim and nothing else. Include every number and percent sign exactly as written: "' + preparedMayaText + '"', purpose);
   }
 
   function drainResponse() {
@@ -678,16 +678,16 @@
   }
 
   function finishMayaTurn(finishedPurpose) {
-    if ((finishedPurpose === 'question' || finishedPurpose === 'clarification') && acceptAnswerAfterMaya) {
+    if ((finishedPurpose === 'question' || finishedPurpose === 'clarification' || finishedPurpose === 'retry_answer') && acceptAnswerAfterMaya) {
       acceptAnswerAfterMaya = false;
       awaitingAnswer = true;
       phase = 'answering';
       setStudentAnswering(false);
       setMicEnabled(false);
-      setFinishButton(finishedPurpose === 'clarification' ? 'ANSWER CLARIFICATION' : 'START', false, 'answer');
+      setFinishButton(awaitingClarification ? 'ANSWER CLARIFICATION' : 'START', false, 'answer');
       setFinishPulse(true);
       setCoachState('ready');
-      setStatus(finishedPurpose === 'clarification' ? 'Tap ANSWER CLARIFICATION and add your follow-up answer.' : 'Tap START when you are ready to speak.', finishedPurpose === 'clarification' ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+      setStatus(awaitingClarification ? 'Tap ANSWER CLARIFICATION and add your follow-up answer.' : 'Tap START when you are ready to speak.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       startAnswerTimer();
       return;
     }
@@ -709,14 +709,15 @@
         phase = 'final_ready';
         setFinishButton('Test Evaluation', false, 'next');
         setFinishPulse(true);
-        setCloseTestMode('Close Test');
+        setCloseTestMode('Close Test', false);
         setStatus('Maya finished the last question feedback. Tap Test Evaluation for the final result.', 'Ready for final evaluation');
       }
       return;
     }
     if (finishedPurpose === 'final') {
       setStatus('Final evaluation complete. Tap Close Test to return to the course.', 'Complete');
-      setCloseTestMode('Close Test');
+      phase = 'completed';
+      setCloseTestMode('Close Test', true);
       return;
     }
     if (finishedPurpose === 'audio_check' && audioCheckActive) {
@@ -754,12 +755,11 @@
       updateProgress(out.state);
       var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
       var timeoutSpeech = 'Sorry ' + firstName + ', that took you too long to give an answer. You have 0% on this question. Let\'s go to the next question when you are ready.';
-      addBubble('maya', 'Maya', timeoutSpeech, 'score');
       if (out.next_action === 'complete_test') {
         completeAfterFeedback = true;
         pendingCompleteAfterFeedback = true;
         phase = 'feedback';
-        setCloseTestMode('Close Test');
+        setCloseTestMode('Close Test', false);
         speakExact(timeoutSpeech, 'feedback');
       } else {
         nextQuestionAfterFeedback = true;
@@ -1029,7 +1029,7 @@
     if (!awaitingAnswer || responseInProgress || !currentItem) return;
     if (isCourtesyOnlySpeech(transcript)) {
       if (awaitingClarification) {
-        setStatus('That sounded like an acknowledgement. Tap START and add your clarification, or End Test if needed.', 'Clarification answer');
+        setStatus('That sounded like an acknowledgement. Tap ANSWER CLARIFICATION and add your clarification.', 'Clarification answer');
       } else {
         setStatus('That sounded like an acknowledgement. Use the available button for the next step.', 'Question ' + currentItem.idx + '/' + state.total_questions);
       }
@@ -1142,9 +1142,12 @@
     var finalAnswer = combinedAnswerText('');
     if (phase !== 'answering' || !currentItem || !finalAnswer || responseInProgress) {
       setTyping('', false);
-      setFinishButton('START', false, 'answer');
-      setFinishPulse(true);
-      setStatus('I did not receive a transcript yet. Tap START and try your answer again.', awaitingClarification ? 'Clarification answer' : ('Question ' + (currentItem ? currentItem.idx : '') + '/' + state.total_questions));
+      handleUnreadableAnswerRetry();
+      return;
+    }
+    if (isUnreadableAnswer(finalAnswer)) {
+      setTyping('', false);
+      handleUnreadableAnswerRetry();
       return;
     }
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
@@ -1155,6 +1158,33 @@
     phase = 'evaluating';
     if (activeStudentBubble && activeStudentBubble.body) activeStudentBubble.body.textContent = finalAnswer;
     evaluateBufferedAnswer(finalAnswer);
+  }
+
+  function isUnreadableAnswer(answer) {
+    var t = String(answer || '').toLowerCase().replace(/[^\w\s']/g, ' ').replace(/\s+/g, ' ').trim();
+    if (!t) return true;
+    var words = t.split(' ').filter(Boolean);
+    if (words.length < 3) return true;
+    if (/^(um|uh|ah|hmm|noise|inaudible|unintelligible|silence|static|you|the|a|i)+$/i.test(t.replace(/\s+/g, ''))) return true;
+    if (/\b(inaudible|unintelligible|silence|static|background noise|no audio)\b/.test(t)) return true;
+    return false;
+  }
+
+  function handleUnreadableAnswerRetry() {
+    if (!currentItem) return;
+    var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
+    var message = 'I am sorry ' + firstName + ', I did not hear you well. Let me give you another chance to answer properly or check your audio connection.';
+    resetAnswerBuffer();
+    awaitingAnswer = false;
+    acceptAnswerAfterMaya = true;
+    activeStudentBubble = null;
+    setStudentAnswering(false);
+    setMicEnabled(false);
+    setFinishButton('START', true, 'answer');
+    setFinishPulse(false);
+    phase = 'retrying';
+    setStatus('Maya is giving you another chance to answer.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+    speakExact(message, 'retry_answer');
   }
 
   function evaluateBufferedAnswer(finalAnswer) {
@@ -1181,6 +1211,11 @@
       setTyping('', false);
       updateProgress(out.state);
       if (out.next_action === 'clarify') {
+        nextQuestionAfterFeedback = false;
+        pendingNextQuestionAfterFeedback = false;
+        completeAfterFeedback = false;
+        pendingCompleteAfterFeedback = false;
+        finalEvaluationReady = false;
         awaitingAnswer = false;
         acceptAnswerAfterMaya = true;
         awaitingClarification = true;
@@ -1192,7 +1227,7 @@
         return;
       }
 
-      var scoreLine = 'You scored ' + Math.round(out.score_pct || 0) + '% on this question.';
+      var scoreLine = 'You scored ' + Math.round(out.score_pct || 0) + ' percent on this question.';
       var feedbackForStudent = String(out.feedback_for_student || '').replace(/\brubric\b/ig, 'expected answer');
       var exactFeedbackText = scoreLine + ' ' + feedbackForStudent;
 
@@ -1200,7 +1235,7 @@
         completeAfterFeedback = true;
         pendingCompleteAfterFeedback = true;
         phase = 'feedback';
-        setCloseTestMode('Close Test');
+        setCloseTestMode('Close Test', false);
         speakExact(exactFeedbackText, 'feedback');
       } else {
         nextQuestionAfterFeedback = true;
@@ -1222,16 +1257,16 @@
   }
 
   function completeTest() {
-    setCloseTestMode('Close Test');
+    setCloseTestMode('Close Test', false);
     setCoachState('thinking');
     setStatus('Completing test through canonical attempt state...', 'Completing');
     api('complete_test', {}).then(function (out) {
       updateProgress(out.state);
       sendResponse('Say this short final progress test summary exactly and naturally: "' + (out.summary || 'Progress test complete.') + '"', 'final');
       setCoachState('ready');
-      setStatus('Completed.', 'Complete');
-      phase = 'completed';
-      setCloseTestMode('Close Test');
+      setStatus('Maya is reading your final evaluation.', 'Final review');
+      phase = 'final_playing';
+      setCloseTestMode('Close Test', false);
     }).catch(function (err) {
       setCoachState('error');
       setStatus('Completion failed: ' + err.message, 'Completion issue');
@@ -1283,22 +1318,9 @@
   els.start.addEventListener('click', startTest);
   els.finish.addEventListener('click', finishCurrentAnswer);
   els.end.addEventListener('click', function () {
-    if (phase === 'completed' || phase === 'completing' || phase === 'final_ready' || finalEvaluationReady || completeAfterFeedback || pendingCompleteAfterFeedback || (state && parseInt(state.evaluated_count || 0, 10) >= parseInt(state.total_questions || 0, 10) && parseInt(state.total_questions || 0, 10) > 0)) {
+    if (phase === 'completed') {
       leaveCompletedTest();
-      return;
     }
-    resetAnswerBuffer();
-    phase = 'aborted';
-    stopRealtime(false);
-    api('end_oral_test_without_penalty').then(function () {
-      attemptId = 0;
-      return loadQuestions();
-    }).catch(function () {});
-    setStatus('Test ended without penalty. Progress was reset and you can restart.', 'Voice ended');
-    addBubble('maya', 'System', 'Test ended without penalty. Partial answers were reset; restart when ready.', 'warning');
-    els.start.disabled = false;
-    setStartPulse(true);
-    els.end.disabled = true;
   });
 
   loadQuestions();
