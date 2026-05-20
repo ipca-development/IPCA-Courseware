@@ -90,8 +90,10 @@
   var transcriptWaitStartedAt = 0;
   var transcriptQuietMs = 1300;
   var transcriptMaxWaitMs = 8000;
-  var mayaAudioWatchId = 0;
-  var mayaAudioWatchStartedAt = 0;
+  var mayaTurnTailTimer = null;
+  var mayaTurnMaxTimer = null;
+  var mayaTranscriptDone = false;
+  var pendingFinishPurpose = '';
   var answerTimerInterval = null;
   var answerTimerDeadline = 0;
   var answerTimerHandled = false;
@@ -122,44 +124,47 @@
     }
   }
 
-  function stopMayaAudioWatch() {
-    if (mayaAudioWatchId) cancelAnimationFrame(mayaAudioWatchId);
-    mayaAudioWatchId = 0;
-    mayaAudioWatchStartedAt = 0;
+  function stopMayaTurnTimers() {
+    if (mayaTurnTailTimer) clearTimeout(mayaTurnTailTimer);
+    if (mayaTurnMaxTimer) clearTimeout(mayaTurnMaxTimer);
+    mayaTurnTailTimer = null;
+    mayaTurnMaxTimer = null;
   }
 
-  function beginMayaAudioWatch(callback) {
-    stopMayaAudioWatch();
-    var audio = ensureRemoteAudio();
-    var sawPlayback = false;
-    var quietSince = 0;
-    mayaAudioWatchStartedAt = Date.now();
-    function tick() {
-      var playing = !!(audio.srcObject && !audio.paused && !audio.ended && audio.currentTime > 0.02);
-      if (playing) {
-        sawPlayback = true;
-        quietSince = 0;
-        setMayaSpeaking(true);
-      } else if (sawPlayback) {
-        quietSince = quietSince || Date.now();
-        if (Date.now() - quietSince >= 280) {
-          stopMayaAudioWatch();
-          callback();
-          return;
-        }
-      } else if (Date.now() - mayaAudioWatchStartedAt >= 4500) {
-        stopMayaAudioWatch();
-        callback();
-        return;
-      }
-      if (Date.now() - mayaAudioWatchStartedAt >= 120000) {
-        stopMayaAudioWatch();
-        callback();
-        return;
-      }
-      mayaAudioWatchId = requestAnimationFrame(tick);
+  function estimateMayaSpeechMs(text) {
+    var t = String(text || '').trim();
+    if (!t) return 2200;
+    var words = t.split(/\s+/).filter(Boolean).length;
+    return clamp(Math.round(words * 360 + 900), 1600, 90000);
+  }
+
+  function completeMayaTurn() {
+    if (!pendingFinishPurpose) return;
+    var purpose = pendingFinishPurpose;
+    pendingFinishPurpose = '';
+    mayaTranscriptDone = false;
+    stopMayaTurnTimers();
+    setMayaSpeaking(false);
+    finishMayaTurn(purpose);
+  }
+
+  function scheduleMayaTurnComplete(purpose) {
+    stopMayaTurnTimers();
+    pendingFinishPurpose = purpose;
+    var text = liveMayaText || preparedMayaText || '';
+    if (mayaTranscriptDone) {
+      mayaTurnTailTimer = setTimeout(completeMayaTurn, 750);
+      return;
     }
-    mayaAudioWatchId = requestAnimationFrame(tick);
+    mayaTurnMaxTimer = setTimeout(completeMayaTurn, estimateMayaSpeechMs(text) + 1200);
+  }
+
+  function onMayaTranscriptDone(transcript) {
+    mayaTranscriptDone = true;
+    liveMayaText = String(transcript || '').trim();
+    if (!pendingFinishPurpose || responseInProgress) return;
+    stopMayaTurnTimers();
+    mayaTurnTailTimer = setTimeout(completeMayaTurn, 750);
   }
 
   function stopAnswerTimer() {
@@ -265,7 +270,9 @@
 
   function resetClientConversation() {
     stopAnswerTimer();
-    stopMayaAudioWatch();
+    stopMayaTurnTimers();
+    pendingFinishPurpose = '';
+    mayaTranscriptDone = false;
     resetAnswerBuffer();
     processedTranscripts = {};
     lastBubbleKey = '';
@@ -634,6 +641,9 @@
     liveMayaText = '';
     preparedMayaText = '';
     mayaTurnPurpose = purpose || '';
+    mayaTranscriptDone = false;
+    pendingFinishPurpose = '';
+    stopMayaTurnTimers();
     responseInProgress = true;
     setMayaSpeaking(true);
     dc.send(JSON.stringify({
@@ -662,10 +672,7 @@
       sendResponse(next, nextPurpose);
       return;
     }
-    beginMayaAudioWatch(function () {
-      setMayaSpeaking(false);
-      finishMayaTurn(finishedPurpose);
-    });
+    scheduleMayaTurnComplete(finishedPurpose);
   }
 
   function finishMayaTurn(finishedPurpose) {
@@ -986,6 +993,7 @@
       if (liveMayaBubble && liveMayaBubble.body) {
         liveMayaBubble.body.textContent = String(msg.transcript || '');
       }
+      onMayaTranscriptDone(String(msg.transcript || ''));
       api('save_transcript_segment', {
         item_id: currentItem ? currentItem.id : 0,
         role: 'maya',
@@ -1246,7 +1254,9 @@
   }
 
   function stopRealtime(notifyBackend, action) {
-    stopMayaAudioWatch();
+    stopMayaTurnTimers();
+    pendingFinishPurpose = '';
+    mayaTranscriptDone = false;
     stopAnswerTimer();
     connected = false;
     if (localStream) {

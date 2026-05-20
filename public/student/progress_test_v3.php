@@ -96,7 +96,7 @@ if ($firstName === '') {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v3.css?v=17">
+<link rel="stylesheet" href="/assets/progress_test_v3.css?v=18">
 
 <div class="ptv3-page">
   <section
@@ -183,5 +183,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=17"></script>
+<script src="/assets/progress_test_v3.js?v=18"></script>
 <?php cw_footer(); ?>
