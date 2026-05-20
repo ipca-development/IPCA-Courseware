@@ -94,9 +94,30 @@ if ($firstName === '') {
     $firstName = 'Student';
 }
 
+// #region agent log
+@file_put_contents(
+    __DIR__ . '/../../.cursor/debug-aeedb8.log',
+    json_encode([
+        'sessionId' => 'aeedb8',
+        'runId' => 'initial',
+        'hypothesisId' => 'H6,H9',
+        'location' => 'public/student/progress_test_v3.php:98',
+        'message' => 'progress test v3 page rendered',
+        'data' => [
+            'assetVersion' => '39',
+            'cohortId' => $cohortId,
+            'lessonId' => $lessonId,
+            'role' => $role,
+        ],
+        'timestamp' => (int)round(microtime(true) * 1000),
+    ], JSON_UNESCAPED_SLASHES) . "\n",
+    FILE_APPEND | LOCK_EX
+);
+// #endregion
+
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v3.css?v=38">
+<link rel="stylesheet" href="/assets/progress_test_v3.css?v=39">
 
 <div class="ptv3-page">
   <section
@@ -183,5 +204,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=38"></script>
+<script src="/assets/progress_test_v3.js?v=39"></script>
 <?php cw_footer(); ?>
