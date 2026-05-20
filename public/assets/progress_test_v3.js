@@ -648,11 +648,18 @@
     stopMayaTurnTimers();
     responseInProgress = true;
     setMayaSpeaking(true);
+    var backendOnlyInstructions = [
+      'CRITICAL: You are not having an open conversation. You are a voice renderer for the browser/backend only.',
+      'Do not answer the student. Do not grade. Do not say good job, perfect, exactly right, need more help, or move on unless those exact words are inside the browser-provided text below.',
+      'Do not invent, repeat, or modify progress-test questions. Do not use conversation history. Speak only what the browser instruction below explicitly asks you to speak.',
+      instructions
+    ].join('\n');
     dc.send(JSON.stringify({
       type: 'response.create',
       response: {
+        conversation: 'none',
         output_modalities: ['audio'],
-        instructions: instructions
+        instructions: backendOnlyInstructions
       }
     }));
   }
@@ -870,6 +877,21 @@
     sendResponse('Do not ask a test question yet. Briefly say: "I heard you, but I will not start the scored test until you say ready."', 'audio_check');
   }
 
+  function retryCurrentAnswer(message) {
+    if (!currentItem) return;
+    resetAnswerBuffer();
+    awaitingAnswer = false;
+    acceptAnswerAfterMaya = true;
+    activeStudentBubble = null;
+    setStudentAnswering(false);
+    setMicEnabled(false);
+    setFinishButton(awaitingClarification ? 'ANSWER CLARIFICATION' : 'START', true, 'answer');
+    setFinishPulse(false);
+    phase = 'retrying';
+    setStatus('Maya is giving you another chance to answer.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+    speakExact(message, 'retry_answer');
+  }
+
   function captureStudentTranscript(transcript, kind) {
     answerSegments.push(transcript);
     if (activeStudentBubble && activeStudentBubble.body) {
@@ -903,6 +925,12 @@
         setTyping('', false);
         handleAudioCheckTranscript(combinedAnswerText(''));
       } else {
+        if (!hasText) {
+          setTyping('', false);
+          var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
+          retryCurrentAnswer('I am sorry ' + firstName + ', I did not hear you well. Let me give you another chance to answer properly or check your audio connection.');
+          return;
+        }
         setTyping('Maya is thinking', true);
         submitCurrentBufferedAnswer();
       }
@@ -966,6 +994,12 @@
       setStatus('Realtime voice error.', 'Connection issue');
       return;
     }
+    if (type === 'response.created' && !mayaTurnPurpose) {
+      if (dc && dc.readyState === 'open') {
+        try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
+      }
+      return;
+    }
     if (type === 'response.created') {
       responseInProgress = true;
       setMayaSpeaking(true);
@@ -975,7 +1009,7 @@
         liveMayaText = preparedMayaText;
       }
     }
-    if (type === 'response.output_audio_transcript.done' && msg.transcript) {
+    if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
       if (liveMayaBubble && liveMayaBubble.body) {
         liveMayaBubble.body.textContent = String(msg.transcript || '');
       }
@@ -987,7 +1021,7 @@
         transcript_text: String(msg.transcript || '')
       }).catch(function () {});
     }
-    if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text)) {
+    if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text) && (mayaTurnPurpose || pendingFinishPurpose)) {
       liveMayaText += String(msg.delta || msg.text || '');
       if (!liveMayaBubble) liveMayaBubble = addBubble('maya', 'Maya', '', 'live');
       if (liveMayaBubble && liveMayaBubble.body) {
@@ -1037,11 +1071,8 @@
     }
     if (isSetupOrHoldSpeech(transcript)) {
       stopAnswerTimer();
-      resetAnswerBuffer();
-      awaitingAnswer = false;
-      acceptAnswerAfterMaya = true;
-      activeStudentBubble = null;
-      sendResponse('The student is not ready or had an audio/setup issue. Do not score this. Repeat the exact current question clearly: "' + (currentItem.spoken_question || currentItem.prompt) + '"', awaitingClarification ? 'clarification' : 'question');
+      var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
+      retryCurrentAnswer('I am sorry ' + firstName + ', I did not hear you well. Let me give you another chance to answer properly or check your audio connection.');
       return;
     }
     if (awaitingDoneConfirmation) {
@@ -1174,17 +1205,7 @@
     if (!currentItem) return;
     var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
     var message = 'I am sorry ' + firstName + ', I did not hear you well. Let me give you another chance to answer properly or check your audio connection.';
-    resetAnswerBuffer();
-    awaitingAnswer = false;
-    acceptAnswerAfterMaya = true;
-    activeStudentBubble = null;
-    setStudentAnswering(false);
-    setMicEnabled(false);
-    setFinishButton('START', true, 'answer');
-    setFinishPulse(false);
-    phase = 'retrying';
-    setStatus('Maya is giving you another chance to answer.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
-    speakExact(message, 'retry_answer');
+    retryCurrentAnswer(message);
   }
 
   function evaluateBufferedAnswer(finalAnswer) {

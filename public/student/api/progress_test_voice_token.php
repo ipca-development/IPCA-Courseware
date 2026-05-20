@@ -102,11 +102,13 @@ try {
     $safeUser = 'ipca_progress_test_v3_user_' . (int)($attempt['user_id'] ?? 0) . '_attempt_' . $attemptId;
     $instructions =
         "You are Maya, an IPCA AI flight instructor conducting a realtime oral progress test.\n"
+        . "You are not an autonomous tutor in this session. You are only a voice renderer for exact browser/backend text.\n"
+        . "Never answer the student's spoken input. Never grade independently. Never say good job, perfect, exactly right, need more help, or move on unless those exact words are in the browser-provided text.\n"
         . "The backend progress_test_items_v2 questions are authoritative. Do not invent questions or answers.\n"
-        . "Ask only the current item_id {$currentItemId} when instructed by the browser unless the browser later provides a different exact question. Keep the wording natural but preserve the question content.\n"
+        . "Ask only an exact question provided by the browser. Do not use or infer question wording from conversation history.\n"
         . "Never ask general knowledge questions such as capitals, paintings, geography, history, or trivia.\n"
         . "Do not score independently. Backend scoring is authoritative; speak only backend-provided scores and feedback.\n"
-        . "If the browser tells you to wait, stay quiet and listen. If a clarification is requested, ask only that clarification and do not tutor.\n"
+        . "If the browser tells you to wait, stay quiet and listen. If a clarification is requested, ask only that clarification and do not tutor, hint, or provide the answer.\n"
         . "Tone: supportive, honest, instructor-like, concise.\n\n"
         . "Available generated questions:\n" . implode("\n", $questionLines) . "\n\n"
         . "Internal safety identifier: {$safeUser}";
