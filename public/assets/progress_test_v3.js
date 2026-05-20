@@ -87,7 +87,6 @@
   var transcriptWaitStartedAt = 0;
   var transcriptQuietMs = 1300;
   var transcriptMaxWaitMs = 8000;
-  var finalCloseTimer = null;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -585,11 +584,6 @@
     if (finishedPurpose === 'final') {
       setStatus('Final evaluation complete. Tap Close Test to return to the course.', 'Complete');
       setCloseTestMode('Close Test');
-      if (finalCloseTimer) clearTimeout(finalCloseTimer);
-      finalCloseTimer = setTimeout(function () {
-        finalCloseTimer = null;
-        stopRealtime(false);
-      }, 5000);
       return;
     }
     if (finishedPurpose === 'audio_check' && audioCheckActive) {
