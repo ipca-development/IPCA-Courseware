@@ -1749,7 +1749,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 					  
 					  
                     ?>
-                    <tr class="<?= h($rowClass) ?>">
+                    <tr id="progress-test-lesson-<?= (int)$lx['lesson_id'] ?>" class="<?= h($rowClass) ?>">
                       <td>
                         <div class="lesson-title-line">
                           <span class="lesson-seq"><?= (int)($lessonIndex + 1) ?>.</span>
@@ -1820,5 +1820,19 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     </div>
   <?php endif; ?>
 </div>
+
+<script>
+(function () {
+  var hash = window.location.hash || '';
+  if (hash.indexOf('#progress-test-lesson-') !== 0) return;
+  var row = document.getElementById(hash.slice(1));
+  if (!row) return;
+  var details = row.closest ? row.closest('details') : null;
+  if (details) details.open = true;
+  window.setTimeout(function () {
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, 80);
+})();
+</script>
 
 <?php cw_footer(); ?>

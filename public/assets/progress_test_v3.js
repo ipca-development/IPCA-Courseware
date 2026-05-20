@@ -270,6 +270,19 @@
     els.start.setAttribute('data-next-action', active ? '1' : '0');
   }
 
+  function courseReturnUrl() {
+    var cohortId = parseInt(cfg.cohortId || 0, 10) || 0;
+    var lessonId = parseInt(cfg.lessonId || 0, 10) || 0;
+    var url = '/student/course.php?cohort_id=' + encodeURIComponent(String(cohortId));
+    if (lessonId > 0) url += '#progress-test-lesson-' + encodeURIComponent(String(lessonId));
+    return url;
+  }
+
+  function leaveCompletedTest() {
+    stopRealtime(false);
+    window.location.href = courseReturnUrl();
+  }
+
   function setFinishPulse(active) {
     if (!els.finish) return;
     els.finish.setAttribute('data-next-action', active ? '1' : '0');
@@ -985,7 +998,8 @@
       setStatus('Completed.', 'Complete');
       phase = 'completed';
       els.mute.disabled = true;
-      els.end.disabled = true;
+      els.end.disabled = false;
+      text(els.end, 'Close Test');
     }).catch(function (err) {
       setCoachState('error');
       setStatus('Completion failed: ' + err.message, 'Completion issue');
@@ -1042,6 +1056,10 @@
   els.finish.addEventListener('click', finishCurrentAnswer);
   els.mute.addEventListener('click', toggleMute);
   els.end.addEventListener('click', function () {
+    if (phase === 'completed') {
+      leaveCompletedTest();
+      return;
+    }
     resetAnswerBuffer();
     phase = 'aborted';
     stopRealtime(false);
