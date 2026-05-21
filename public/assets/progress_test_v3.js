@@ -101,8 +101,6 @@
   var answerTimerDeadline = 0;
   var answerTimerHandled = false;
   var ANSWER_START_LIMIT_MS = 30000;
-  var mayaDriftReplayUsed = false;
-  var skipNextDrainResponse = false;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -154,10 +152,11 @@
     if (!pendingFinishPurpose) return;
     var purpose = pendingFinishPurpose;
     pendingFinishPurpose = '';
+    mayaDriftDetected = false;
+    mayaTurnPurpose = '';
     mayaTranscriptDone = false;
     stopMayaTurnTimers();
     setMayaSpeaking(false);
-    mayaDriftReplayUsed = false;
     finishMayaTurn(purpose);
   }
 
@@ -186,8 +185,6 @@
     pendingFinishPurpose = '';
     mayaTurnPurpose = '';
     mayaTranscriptDone = false;
-    mayaDriftReplayUsed = false;
-    skipNextDrainResponse = false;
     mayaDriftDetected = false;
     responseInProgress = false;
     stopMayaTurnTimers();
@@ -206,29 +203,36 @@
     }
   }
 
-  function finishMayaTurnWithCanonicalText() {
-    var canonical = mayaExpectedText || preparedMayaText || '';
-    ensureExpectedMayaBubble();
-    mayaDriftDetected = false;
-    onMayaTranscriptDone(canonical);
+  function prepareRealtimeForScriptedSpeech() {
+    cancelRealtimeAudioOnly();
   }
 
-  function replayExpectedMayaAfterDrift() {
-    var expected = mayaExpectedText || preparedMayaText || '';
-    var purpose = mayaTurnPurpose || pendingFinishPurpose || '';
-    if (!expected || !purpose) return;
-    if (mayaDriftReplayUsed) {
-      finishMayaTurnWithCanonicalText();
-      return;
+  function escapeScriptQuote(text) {
+    return String(text || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function buildTurnInstructions(text, purpose) {
+    var script = escapeScriptQuote(String(text || '').trim());
+    if (!script) return '';
+    if (purpose === 'question') {
+      return 'Read this exact backend progress-test question and nothing else. Do not say you cannot load it. Do not substitute, explain, answer, tutor, or mention another topic. Exact words to read: "' + script + '"';
     }
-    mayaDriftReplayUsed = true;
-    skipNextDrainResponse = true;
-    cancelRealtimeAudioOnly();
-    ensureExpectedMayaBubble();
-    mayaDriftDetected = false;
-    mayaTranscriptDone = false;
-    responseInProgress = false;
-    sendResponse(expected, purpose);
+    if (purpose === 'clarification') {
+      return 'Read this exact clarification prompt and nothing else. Do not give the answer. Do not provide examples. Do not ask a different question. Do not say correct, exactly, well done, let us move on, next question, or anything about the rubric. Exact words to read: "' + script + '"';
+    }
+    if (purpose === 'feedback') {
+      return 'Read this exact progress-test feedback and nothing else. Include every number and percent sign exactly as written. Do not tutor, reassure, explain the lesson, or refer to previous answers or questions. Exact words to read: "' + script + '"';
+    }
+    if (purpose === 'final') {
+      return 'Read this exact final progress test summary and nothing else. Do not discuss any question or student answer. Exact words to read: "' + script + '"';
+    }
+    if (purpose === 'audio_check') {
+      return 'This is a non-scored readiness check. Say exactly: "' + script + '" Then stop speaking and wait.';
+    }
+    if (purpose === 'retry_answer') {
+      return 'Read this retry prompt exactly and nothing else. Do not answer the question. Exact words to read: "' + script + '"';
+    }
+    return 'Read this exact text verbatim and nothing else. Include every number and percent sign exactly as written. Exact words to read: "' + script + '"';
   }
 
   function normalizeCompareText(value) {
@@ -240,62 +244,17 @@
     return /\b(i can help|let me help|happy to help|no problem|not sure what you|if you are unsure|there is no problem|there s no problem|i am here to help|i m here to help|dive into|materials deeper|ready to dive|let s review|lets review|let me explain|would you like|feel free|great question|good question|shall we)\b/.test(actual);
   }
 
-  function isMayaCoachingTailSpeech(transcript) {
-    return isMayaOffScriptSpeech(transcript);
-  }
-
-  function expectedOpeningPrefix(expected) {
-    var words = expected.split(' ').filter(Boolean);
-    return words.slice(0, Math.min(5, words.length)).join(' ');
-  }
-
-  function isMayaTranscriptPreambleDrift(transcript) {
-    var expected = normalizeCompareText(mayaExpectedText || preparedMayaText);
-    var actual = normalizeCompareText(transcript);
-    if (!expected || !actual || actual.length < 18) return false;
-    if (actual.indexOf(expected) === 0) return false;
-    if (isMayaOffScriptSpeech(actual)) return true;
-    var opening = expectedOpeningPrefix(expected);
-    if (opening.length >= 10 && actual.indexOf(opening) === 0) return false;
-    if (opening.length >= 10 && actual.indexOf(opening) === -1 && actual.length >= 20) return true;
-    var expectedWords = expected.split(' ').filter(Boolean).slice(0, 4);
-    var actualWords = actual.split(' ').filter(Boolean).slice(0, 4);
-    if (!expectedWords.length || actualWords.length < 3) return false;
-    var overlap = 0;
-    for (var i = 0; i < Math.min(expectedWords.length, actualWords.length); i += 1) {
-      if (actualWords[i] === expectedWords[i]) overlap += 1;
-    }
-    return overlap < 2;
-  }
-
-  function isMayaAcknowledgementPrefixOnly(transcript) {
-    var actual = normalizeCompareText(transcript);
-    return /^(understood|okay|ok|sure|got it|certainly|of course|yes)\b/.test(actual) && actual.length < 28;
-  }
-
-  function isMayaTranscriptTailExtension(transcript) {
-    var expected = normalizeCompareText(mayaExpectedText || preparedMayaText);
-    var actual = normalizeCompareText(transcript);
-    if (!expected || !actual || actual.length <= expected.length) return false;
-    if (actual.indexOf(expected) === 0) {
-      var expectedWords = expected.split(' ').filter(Boolean);
-      var actualWords = actual.split(' ').filter(Boolean);
-      return actual.length > expected.length + 18 || actualWords.length > expectedWords.length + 6;
-    }
-    return isMayaCoachingTailSpeech(actual) && actual.length > expected.length + 12;
-  }
-
-  function isMayaTranscriptDrift(transcript) {
+  function isMayaSpeechDrift(transcript) {
     var expected = normalizeCompareText(mayaExpectedText || preparedMayaText);
     var actual = normalizeCompareText(transcript);
     if (!expected || !actual) return false;
-    if (isMayaTranscriptTailExtension(transcript)) return true;
-    if (isMayaTranscriptPreambleDrift(transcript)) return true;
     if (isMayaOffScriptSpeech(actual)) return true;
-    if (/^(understood|okay|ok|sure|got it|certainly|of course|yes)$/.test(actual)) return true;
     if (/^(understood|okay|ok|sure|got it|certainly|of course|yes)\b/.test(actual) && expected.indexOf(actual) !== 0) return true;
     if (actual === expected) return false;
-    if (expected.indexOf(actual) !== -1 && actual.length >= Math.max(12, expected.length * 0.8)) return false;
+    if (expected.indexOf(actual) !== -1 && actual.length >= Math.max(12, expected.length * 0.75)) return false;
+    if (actual.indexOf(expected) === 0) {
+      return actual.length > expected.length + 24;
+    }
     var expectedWords = expected.split(' ').filter(Boolean);
     var actualWords = actual.split(' ').filter(Boolean);
     if (!expectedWords.length || !actualWords.length) return false;
@@ -304,33 +263,22 @@
     var hits = 0;
     expectedWords.forEach(function (word) { if (actualSet[word]) hits += 1; });
     var coverage = hits / expectedWords.length;
-    return coverage < 0.82 || actualWords.length > expectedWords.length + 8;
+    return coverage < 0.78 || actualWords.length > expectedWords.length + 6;
   }
 
-  function shouldStopMayaDriftEarly(partial) {
-    var expected = String(mayaExpectedText || preparedMayaText || '').trim();
-    var actual = String(partial || '').trim();
-    if (!expected || !actual) return false;
-    if (isMayaTranscriptPreambleDrift(actual)) return true;
-    if (isMayaOffScriptSpeech(actual)) return true;
-    if (actual.length < Math.max(24, expected.length * 0.5)) return false;
-    return actual.length > expected.length + 28;
-  }
-
-  function stopMayaTailDrift() {
+  function abortMayaSpeechDrift() {
     if (mayaDriftDetected) return;
-    mayaDriftDetected = true;
     var purpose = mayaTurnPurpose || pendingFinishPurpose || '';
-    skipNextDrainResponse = true;
+    if (!purpose) return;
+    mayaDriftDetected = true;
     cancelRealtimeAudioOnly();
     ensureExpectedMayaBubble();
     responseInProgress = false;
     mayaTranscriptDone = true;
     liveMayaText = mayaExpectedText || preparedMayaText || '';
-    if (!purpose) return;
     pendingFinishPurpose = purpose;
     stopMayaTurnTimers();
-    mayaTurnTailTimer = setTimeout(completeMayaTurn, 500);
+    mayaTurnTailTimer = setTimeout(completeMayaTurn, 650);
   }
 
   function removeLiveMayaBubble() {
@@ -461,20 +409,6 @@
     return postJson('/student/api/progress_test_v3_oral.php', payload);
   }
 
-  // #region agent log
-  function agentDebugLog(runId, hypothesisId, location, message, data) {
-    var payload = { sessionId: 'aeedb8', runId: runId, hypothesisId: hypothesisId, location: location, message: message, data: data || {}, timestamp: Date.now() };
-    try {
-      fetch('http://127.0.0.1:7592/ingest/0937572b-7766-4cbb-9260-7806246cc339', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'aeedb8' }, body: JSON.stringify(payload) }).catch(function () {});
-      fetch('/student/api/progress_test_v3_oral.php', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'agent_debug_log', attempt_id: attemptId || 1, log: payload }) }).catch(function () {});
-    } catch (e) {}
-  }
-  agentDebugLog('initial', 'H6', 'public/assets/progress_test_v3.js:331', 'progress test v3 script loaded', {
-    scriptVersion: 'debug-aeedb8',
-    phase: phase,
-    hasRoot: !!root
-  });
-  // #endregion
 
   function resetClientConversation() {
     stopAnswerTimer();
@@ -739,14 +673,6 @@
     remoteAudio.setAttribute('playsinline', 'playsinline');
     remoteAudio.className = 'ptv3-remote-audio';
     document.body.appendChild(remoteAudio);
-    // #region agent log
-    agentDebugLog('initial', 'H6,H7', 'public/assets/progress_test_v3.js:604', 'remote audio element created', {
-      muted: remoteAudio.muted,
-      volume: remoteAudio.volume,
-      autoplay: remoteAudio.autoplay,
-      paused: remoteAudio.paused
-    });
-    // #endregion
     return remoteAudio;
   }
 
@@ -756,40 +682,10 @@
     audio.volume = 1;
     try {
       var p = audio.play();
-      // #region agent log
-      agentDebugLog('initial', 'H7', 'public/assets/progress_test_v3.js:620', 'remote audio play requested', {
-        hasSrcObject: !!audio.srcObject,
-        muted: audio.muted,
-        volume: audio.volume,
-        paused: audio.paused,
-        playPromise: !!p
-      });
-      // #endregion
       if (p && typeof p.then === 'function') p.then(function () {
-        // #region agent log
-        agentDebugLog('initial', 'H7', 'public/assets/progress_test_v3.js:628', 'remote audio play resolved', {
-          hasSrcObject: !!audio.srcObject,
-          paused: audio.paused,
-          readyState: audio.readyState
-        });
-        // #endregion
       }).catch(function (err) {
-        // #region agent log
-        agentDebugLog('initial', 'H7', 'public/assets/progress_test_v3.js:636', 'remote audio play rejected', {
-          name: err && err.name ? String(err.name) : '',
-          message: err && err.message ? String(err.message).slice(0, 160) : '',
-          hasSrcObject: !!audio.srcObject,
-          paused: audio.paused
-        });
-        // #endregion
       });
     } catch (e) {
-      // #region agent log
-      agentDebugLog('initial', 'H7', 'public/assets/progress_test_v3.js:646', 'remote audio play threw', {
-        name: e && e.name ? String(e.name) : '',
-        message: e && e.message ? String(e.message).slice(0, 160) : ''
-      });
-      // #endregion
     }
   }
 
@@ -804,15 +700,6 @@
     });
     pc.ontrack = function (event) {
       remoteAudio.srcObject = event.streams[0];
-      // #region agent log
-      agentDebugLog('initial', 'H6,H7,H8', 'public/assets/progress_test_v3.js:660', 'peer connection remote track received', {
-        streamCount: event.streams ? event.streams.length : 0,
-        trackKind: event.track ? String(event.track.kind || '') : '',
-        trackMuted: event.track ? !!event.track.muted : null,
-        trackReadyState: event.track ? String(event.track.readyState || '') : '',
-        audioTracks: event.streams && event.streams[0] && event.streams[0].getAudioTracks ? event.streams[0].getAudioTracks().length : 0
-      });
-      // #endregion
       unlockAudioPlayback();
       setCoachState('thinking');
     };
@@ -892,38 +779,19 @@
     });
   }
 
-  function sendResponse(textToSpeak, purpose) {
-    textToSpeak = String(textToSpeak || '').trim();
-    if (!textToSpeak) return;
-    var ttsPayload = JSON.stringify({ text: textToSpeak });
-    var ttsInstructions = (purpose === 'final'
-      ? 'FINAL PROGRESS TEST SUMMARY TEXT-TO-SPEECH REQUEST.\n'
-      : 'PROGRESS TEST TEXT-TO-SPEECH REQUEST.\n')
-      + 'You are not chatting with the student. Ignore prior conversation, prior answers, live microphone input, and any transcript context.\n'
-      + 'Parse the JSON object below and speak only its text value verbatim in English. Your first spoken word must be the first word of the text value. Do not add a preface, greeting, acknowledgement, explanation, interpretation, coaching, reassurance, examples, or offers to help. Stop immediately after the final word of the text value.\n'
-      + ttsPayload;
+  function sendResponse(instructions, purpose) {
+    instructions = String(instructions || '').trim();
+    if (!instructions) return;
     setTyping('', false);
     setMicEnabled(false);
     setStudentAnswering(false);
     if (responseInProgress) {
-      // #region agent log
-      agentDebugLog('initial', 'H1', 'public/assets/progress_test_v3.js:707', 'sendResponse queued behind active turn', {
-        requestedPurpose: purpose || '',
-        activePurpose: mayaTurnPurpose || '',
-        pendingFinishPurpose: pendingFinishPurpose || '',
-        phase: phase,
-        textLength: textToSpeak.length,
-        dcState: dc ? dc.readyState : 'none'
-      });
-      // #endregion
-      pendingInstructions = textToSpeak;
+      pendingInstructions = instructions;
       pendingPurpose = purpose || '';
       return;
     }
     liveMayaBubble = null;
     liveMayaText = '';
-    preparedMayaText = textToSpeak;
-    mayaExpectedText = textToSpeak;
     mayaDriftDetected = false;
     mayaTurnPurpose = purpose || '';
     mayaTranscriptDone = false;
@@ -932,62 +800,47 @@
     responseInProgress = true;
     setMayaSpeaking(true);
     ensureExpectedMayaBubble();
+    prepareRealtimeForScriptedSpeech();
+    var backendOnlyInstructions = [
+      'CRITICAL: You are not having an open conversation. You are a voice renderer for the progress test browser/backend only.',
+      'Do not answer the student. Do not grade. Do not tutor. Do not invent, repeat, or modify progress-test questions.',
+      'Do not use conversation history, prior student answers, prior questions, or live microphone input.',
+      'Speak only what the browser instruction below explicitly asks you to speak, then stop.',
+      instructions
+    ].join('\n');
     if (!dc || dc.readyState !== 'open') {
-      // #region agent log
-      agentDebugLog('initial', 'H5', 'public/assets/progress_test_v3.js:735', 'sendResponse using no-data-channel fallback', {
-        purpose: purpose || '',
-        phase: phase,
-        textLength: textToSpeak.length,
-        dcState: dc ? dc.readyState : 'none'
-      });
-      // #endregion
-      window.setTimeout(function () { drainResponse(); }, estimateMayaSpeechMs(textToSpeak));
+      window.setTimeout(function () { drainResponse(); }, estimateMayaSpeechMs(preparedMayaText || mayaExpectedText || ''));
       return;
     }
-    // #region agent log
-    agentDebugLog('initial', 'H1,H3,H5', 'public/assets/progress_test_v3.js:744', 'sendResponse creating realtime response', {
-      purpose: purpose || '',
-      phase: phase,
-      textLength: textToSpeak.length,
-      dcState: dc ? dc.readyState : 'none'
-    });
-    // #endregion
     unlockAudioPlayback();
     dc.send(JSON.stringify({
       type: 'response.create',
       response: {
         conversation: 'none',
         output_modalities: ['audio'],
-        instructions: ttsInstructions
+        instructions: backendOnlyInstructions
       }
     }));
   }
 
   function speakExact(textToSpeak, purpose) {
-    sendResponse(textToSpeak, purpose);
+    textToSpeak = String(textToSpeak || '').trim();
+    if (!textToSpeak) return;
+    preparedMayaText = textToSpeak;
+    mayaExpectedText = textToSpeak;
+    sendResponse(buildTurnInstructions(textToSpeak, purpose || ''), purpose || '');
   }
 
   function speakFinalSummary(textToSpeak) {
-    sendResponse(String(textToSpeak || 'Progress test complete.').trim(), 'final');
+    speakExact(String(textToSpeak || 'Progress test complete.').trim(), 'final');
   }
 
   function drainResponse() {
-    if (skipNextDrainResponse) {
-      skipNextDrainResponse = false;
+    if (mayaDriftDetected) {
       responseInProgress = false;
       return;
     }
     var finishedPurpose = mayaTurnPurpose;
-    // #region agent log
-    agentDebugLog('initial', 'H1,H2', 'public/assets/progress_test_v3.js:769', 'drainResponse resolving current turn', {
-      finishedPurpose: finishedPurpose || '',
-      pendingPurpose: pendingPurpose || '',
-      hasPendingInstructions: !!pendingInstructions,
-      pendingFinishPurpose: pendingFinishPurpose || '',
-      phase: phase,
-      responseInProgress: responseInProgress
-    });
-    // #endregion
     mayaTurnPurpose = '';
     responseInProgress = false;
     if (pendingInstructions) {
@@ -1002,17 +855,6 @@
   }
 
   function finishMayaTurn(finishedPurpose) {
-    // #region agent log
-    agentDebugLog('initial', 'H1,H2', 'public/assets/progress_test_v3.js:786', 'finishMayaTurn state transition', {
-      finishedPurpose: finishedPurpose || '',
-      phase: phase,
-      nextQuestionAfterFeedback: nextQuestionAfterFeedback,
-      completeAfterFeedback: completeAfterFeedback,
-      pendingNextQuestionAfterFeedback: pendingNextQuestionAfterFeedback,
-      pendingCompleteAfterFeedback: pendingCompleteAfterFeedback,
-      finalEvaluationReady: finalEvaluationReady
-    });
-    // #endregion
     if ((finishedPurpose === 'question' || finishedPurpose === 'clarification' || finishedPurpose === 'retry_answer') && acceptAnswerAfterMaya) {
       acceptAnswerAfterMaya = false;
       awaitingAnswer = true;
@@ -1336,15 +1178,13 @@
       setStatus('Realtime voice error.', 'Connection issue');
       return;
     }
+    if (type === 'response.created' && !mayaTurnPurpose) {
+      if (dc && dc.readyState === 'open') {
+        try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
+      }
+      return;
+    }
     if (type === 'response.created') {
-      // #region agent log
-      agentDebugLog('initial', 'H2,H5', 'public/assets/progress_test_v3.js:1129', 'realtime response.created received', {
-        mayaTurnPurpose: mayaTurnPurpose || '',
-        pendingFinishPurpose: pendingFinishPurpose || '',
-        phase: phase,
-        responseInProgress: responseInProgress
-      });
-      // #endregion
       responseInProgress = true;
       setMayaSpeaking(true);
       stopAnswerTimer();
@@ -1353,24 +1193,8 @@
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
       var canonicalMayaText = mayaExpectedText || preparedMayaText || '';
-      // #region agent log
-      agentDebugLog('initial', 'H2,H3', 'public/assets/progress_test_v3.js:1141', 'maya transcript done received', {
-        mayaTurnPurpose: mayaTurnPurpose || '',
-        pendingFinishPurpose: pendingFinishPurpose || '',
-        phase: phase,
-        transcriptLength: String(msg.transcript || '').length,
-        expectedLength: String(mayaExpectedText || preparedMayaText || '').length,
-        isDrift: isMayaTranscriptDrift(String(msg.transcript || ''))
-      });
-      // #endregion
-      if (isMayaTranscriptDrift(String(msg.transcript || ''))) {
-        if (isMayaAcknowledgementPrefixOnly(String(msg.transcript || '')) && !mayaDriftReplayUsed) {
-          mayaDriftDetected = true;
-          ensureExpectedMayaBubble();
-          replayExpectedMayaAfterDrift();
-        } else {
-          stopMayaTailDrift();
-        }
+      if (isMayaSpeechDrift(String(msg.transcript || ''))) {
+        abortMayaSpeechDrift();
         return;
       }
       ensureExpectedMayaBubble();
@@ -1385,12 +1209,12 @@
     }
     if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text) && (mayaTurnPurpose || pendingFinishPurpose)) {
       if (!mayaDriftDetected) {
+        var expectedLen = String(mayaExpectedText || preparedMayaText || '').length;
         var partialMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
-        if (shouldStopMayaDriftEarly(partialMayaText)) {
-          stopMayaTailDrift();
+        if (isMayaOffScriptSpeech(partialMayaText) || (expectedLen > 30 && partialMayaText.length > expectedLen * 1.45)) {
+          abortMayaSpeechDrift();
           return;
         }
-        liveMayaText = partialMayaText;
       }
       ensureExpectedMayaBubble();
       return;
@@ -1639,15 +1463,6 @@
     setCoachState('thinking');
     setStatus('Completing test through canonical attempt state...', 'Completing');
     api('complete_test', {}).then(function (out) {
-      // #region agent log
-      agentDebugLog('initial', 'H4', 'public/assets/progress_test_v3.js:1429', 'complete_test returned', {
-        phase: phase,
-        summaryLength: String(out.summary || '').length,
-        hasState: !!out.state,
-        stateStatus: out.state ? String(out.state.attempt_status || out.state.status || '') : '',
-        stateScore: out.state && out.state.score_pct != null ? String(out.state.score_pct) : ''
-      });
-      // #endregion
       updateProgress(out.state);
       setStatus('Maya is reading your final evaluation.', 'Final review');
       phase = 'final_playing';
