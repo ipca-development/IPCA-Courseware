@@ -207,6 +207,18 @@
     cancelRealtimeAudioOnly();
   }
 
+  function reinforceNarratorSession() {
+    if (!dc || dc.readyState !== 'open') return;
+    try {
+      dc.send(JSON.stringify({
+        type: 'session.update',
+        session: {
+          instructions: 'You are an exam proctor voice narrator for an oral progress test. Read quoted scripts aloud to the student. Never refuse and never say you cannot answer or cannot load. Do not solve exam questions yourself.'
+        }
+      }));
+    } catch (e) {}
+  }
+
   function escapeScriptQuote(text) {
     return String(text || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   }
@@ -214,25 +226,40 @@
   function buildTurnInstructions(text, purpose) {
     var script = escapeScriptQuote(String(text || '').trim());
     if (!script) return '';
+    var noRefusal = 'Never refuse, apologize, or say you cannot answer, cannot load, or are unable to help. You are only reading a script aloud.';
     if (purpose === 'question') {
-      return 'Read this exact backend progress-test question and nothing else. Do not say you cannot load it. Do not substitute, explain, answer, tutor, or mention another topic. Exact words to read: "' + script + '"';
+      return 'ROLE: Exam proctor voice narrator. TASK: Read the following exam question aloud TO the student, word-for-word. '
+        + 'You are NOT the student and you are NOT being asked to solve this question—only read it aloud. '
+        + noRefusal + ' Do not substitute, explain, tutor, or mention another topic. '
+        + 'Exact script to read aloud: "' + script + '"';
     }
     if (purpose === 'clarification') {
-      return 'Read this exact clarification prompt and nothing else. Do not give the answer. Do not provide examples. Do not ask a different question. Do not say correct, exactly, well done, let us move on, next question, or anything about the rubric. Exact words to read: "' + script + '"';
+      return 'ROLE: Exam proctor voice narrator. TASK: Read this clarification prompt aloud TO the student, word-for-word. '
+        + 'Do not reveal the correct answer, examples, or a different question. ' + noRefusal + ' '
+        + 'Exact script to read aloud: "' + script + '"';
     }
     if (purpose === 'feedback') {
-      return 'Read this exact progress-test feedback and nothing else. Include every number and percent sign exactly as written. Do not tutor, reassure, explain the lesson, or refer to previous answers or questions. Exact words to read: "' + script + '"';
+      return 'ROLE: Exam proctor voice narrator. TASK: Read this scored feedback aloud TO the student, word-for-word. '
+        + 'Include every number and percent sign exactly as written. ' + noRefusal + ' '
+        + 'Do not tutor, reassure, explain the lesson, or refer to previous answers or questions. '
+        + 'Exact script to read aloud: "' + script + '"';
     }
     if (purpose === 'final') {
-      return 'Read this exact final progress test summary and nothing else. Do not discuss any question or student answer. Exact words to read: "' + script + '"';
+      return 'ROLE: Exam proctor voice narrator. TASK: Read this final progress test summary aloud, word-for-word. '
+        + noRefusal + ' Do not discuss any question or student answer. '
+        + 'Exact script to read aloud: "' + script + '"';
     }
     if (purpose === 'audio_check') {
-      return 'This is a non-scored readiness check. Say exactly: "' + script + '" Then stop speaking and wait.';
+      return 'ROLE: Exam proctor voice narrator. This is a non-scored readiness check. ' + noRefusal + ' '
+        + 'Say exactly: "' + script + '" Then stop speaking and wait.';
     }
     if (purpose === 'retry_answer') {
-      return 'Read this retry prompt exactly and nothing else. Do not answer the question. Exact words to read: "' + script + '"';
+      return 'ROLE: Exam proctor voice narrator. TASK: Read this retry prompt aloud TO the student, word-for-word. '
+        + 'You are NOT solving the exam question—only read the prompt. ' + noRefusal + ' '
+        + 'Exact script to read aloud: "' + script + '"';
     }
-    return 'Read this exact text verbatim and nothing else. Include every number and percent sign exactly as written. Exact words to read: "' + script + '"';
+    return 'ROLE: Exam proctor voice narrator. Read this script aloud, word-for-word. ' + noRefusal + ' '
+      + 'Exact script to read aloud: "' + script + '"';
   }
 
   function normalizeCompareText(value) {
@@ -241,7 +268,7 @@
 
   function isMayaOffScriptSpeech(transcript) {
     var actual = normalizeCompareText(transcript);
-    return /\b(i can help|let me help|happy to help|no problem|not sure what you|if you are unsure|there is no problem|there s no problem|i am here to help|i m here to help|dive into|materials deeper|ready to dive|let s review|lets review|let me explain|would you like|feel free|great question|good question|shall we)\b/.test(actual);
+    return /\b(i can help|let me help|happy to help|no problem|not sure what you|if you are unsure|there is no problem|there s no problem|i am here to help|i m here to help|dive into|materials deeper|ready to dive|let s review|lets review|let me explain|would you like|feel free|great question|good question|shall we|cannot answer|can t answer|unable to answer|won t answer|not able to answer|sorry i cannot|sorry i can t|i cannot answer|i can t answer)\b/.test(actual);
   }
 
   function isMayaSpeechDrift(transcript) {
@@ -801,11 +828,15 @@
     setMayaSpeaking(true);
     ensureExpectedMayaBubble();
     prepareRealtimeForScriptedSpeech();
+    if (purpose === 'question' || purpose === 'clarification') {
+      reinforceNarratorSession();
+    }
     var backendOnlyInstructions = [
-      'CRITICAL: You are not having an open conversation. You are a voice renderer for the progress test browser/backend only.',
-      'Do not answer the student. Do not grade. Do not tutor. Do not invent, repeat, or modify progress-test questions.',
+      'CRITICAL: You are an exam proctor voice narrator, not a chat assistant.',
+      'Read scripts aloud to the student. Do not solve exam questions, grade, or tutor.',
+      'Never refuse or say you cannot answer—those phrases are forbidden.',
       'Do not use conversation history, prior student answers, prior questions, or live microphone input.',
-      'Speak only what the browser instruction below explicitly asks you to speak, then stop.',
+      'Speak only what the browser instruction below explicitly asks you to read aloud, then stop.',
       instructions
     ].join('\n');
     if (!dc || dc.readyState !== 'open') {
@@ -1167,6 +1198,7 @@
       event_type: 'question',
       transcript_text: currentItem.spoken_question || currentItem.prompt
     }).catch(function () {});
+    clearRealtimeTurnState();
     speakExact(currentItem.spoken_question || currentItem.prompt, 'question');
   }
 

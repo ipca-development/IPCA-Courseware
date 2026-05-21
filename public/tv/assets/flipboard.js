@@ -275,57 +275,95 @@
     this.el = document.createElement('div');
     this.el.className = 'fb-tile' + (this.char === ' ' ? ' is-space' : '');
     this.el.innerHTML =
-      '<div class="fb-clip fb-clip-top"><span class="fb-char"></span></div>' +
-      '<div class="fb-clip fb-clip-bottom"><span class="fb-char"></span></div>' +
-      '<div class="fb-flip-leaf">' +
-        '<div class="fb-flip-face fb-flip-front"><span class="fb-char"></span></div>' +
-        '<div class="fb-flip-face fb-flip-back"><span class="fb-char"></span></div>' +
+      '<div class="fb-clip fb-clip-top fb-display-top"><span class="fb-char"></span></div>' +
+      '<div class="fb-clip fb-clip-bottom fb-display-bottom"><span class="fb-char"></span></div>' +
+      '<div class="fb-flap-stack fb-flap-upper">' +
+        '<div class="fb-flap-face fb-flap-front"><div class="fb-clip fb-clip-top"><span class="fb-char"></span></div></div>' +
+        '<div class="fb-flap-face fb-flap-back"><div class="fb-clip fb-clip-top"><span class="fb-char"></span></div></div>' +
+      '</div>' +
+      '<div class="fb-flap-stack fb-flap-lower">' +
+        '<div class="fb-flap-face fb-flap-front"><div class="fb-clip fb-clip-bottom"><span class="fb-char"></span></div></div>' +
+        '<div class="fb-flap-face fb-flap-back"><div class="fb-clip fb-clip-bottom"><span class="fb-char"></span></div></div>' +
       '</div>';
-    this.topChar = this.el.querySelector('.fb-clip-top .fb-char');
-    this.bottomChar = this.el.querySelector('.fb-clip-bottom .fb-char');
-    this.flipFront = this.el.querySelector('.fb-flip-front .fb-char');
-    this.flipBack = this.el.querySelector('.fb-flip-back .fb-char');
-    this.flipLeaf = this.el.querySelector('.fb-flip-leaf');
+    this.displayTop = this.el.querySelector('.fb-display-top .fb-char');
+    this.displayBottom = this.el.querySelector('.fb-display-bottom .fb-char');
+    this.upperFront = this.el.querySelector('.fb-flap-upper .fb-flap-front .fb-char');
+    this.upperBack = this.el.querySelector('.fb-flap-upper .fb-flap-back .fb-char');
+    this.lowerFront = this.el.querySelector('.fb-flap-lower .fb-flap-front .fb-char');
+    this.lowerBack = this.el.querySelector('.fb-flap-lower .fb-flap-back .fb-char');
+    this.flapUpper = this.el.querySelector('.fb-flap-upper');
+    this.flapLower = this.el.querySelector('.fb-flap-lower');
     this.setChar(this.char);
   }
 
   FlipTile.prototype.setChar = function (char) {
     this.char = char || ' ';
-    this.topChar.textContent = this.char;
-    this.bottomChar.textContent = this.char;
-    this.flipFront.textContent = this.char;
-    this.flipBack.textContent = this.char;
+    this.displayTop.textContent = this.char;
+    this.displayBottom.textContent = this.char;
+    this.upperFront.textContent = this.char;
+    this.upperBack.textContent = this.char;
+    this.lowerFront.textContent = this.char;
+    this.lowerBack.textContent = this.char;
     this.el.classList.toggle('is-space', this.char === ' ');
   };
 
-  FlipTile.prototype.flipOnce = function (nextChar, stepMs, options, audio) {
+  FlipTile.prototype.resetFlapMotion = function () {
+    this.flapUpper.style.animation = 'none';
+    this.flapLower.style.animation = 'none';
+    this.flapUpper.style.transform = '';
+    this.flapLower.style.transform = '';
+    void this.flapUpper.offsetWidth;
+    this.flapUpper.style.animation = '';
+    this.flapLower.style.animation = '';
+  };
+
+  FlipTile.prototype.flipOnce = function (nextChar, duration, options, audio) {
     var self = this;
     return new Promise(function (resolve) {
       if (nextChar === self.char) {
         resolve();
         return;
       }
-      self.flipFront.textContent = self.char;
-      self.flipBack.textContent = nextChar;
-      self.el.style.setProperty('--flip-ms', stepMs + 'ms');
+
+      var fromChar = self.char;
+      self.upperFront.textContent = fromChar;
+      self.lowerFront.textContent = fromChar;
+      self.upperBack.textContent = nextChar;
+      self.lowerBack.textContent = nextChar;
+      self.el.style.setProperty('--flip-duration', duration + 'ms');
+      self.el.style.setProperty('--tile-h', self.el.offsetHeight + 'px');
+      self.resetFlapMotion();
 
       var done = false;
       function finish() {
         if (done) return;
         done = true;
         self.el.classList.remove('is-flipping');
-        self.flipLeaf.style.animation = 'none';
-        void self.flipLeaf.offsetWidth;
-        self.flipLeaf.style.animation = '';
+        self.resetFlapMotion();
         self.setChar(nextChar);
+        self.el.classList.add('is-settling');
+        window.setTimeout(function () {
+          self.el.classList.remove('is-settling');
+        }, 220);
         resolve();
       }
 
+      self.el.classList.remove('is-settling');
       self.el.classList.add('is-flipping');
-      if (audio) audio.flap(options.urgent ? 1.2 : 1);
 
-      self.flipLeaf.addEventListener('animationend', finish, { once: true });
-      window.setTimeout(finish, stepMs + 80);
+      if (audio) {
+        audio.flap(options.urgent ? 1.3 : 1);
+        window.setTimeout(function () {
+          if (Math.random() > 0.5) audio.flap(options.urgent ? 1.15 : 0.9);
+        }, duration * randomBetween(0.4, 0.55));
+      }
+
+      window.setTimeout(function () {
+        self.displayBottom.textContent = nextChar;
+      }, duration * 0.48);
+
+      self.flapUpper.addEventListener('animationend', finish, { once: true });
+      window.setTimeout(finish, duration + 120);
     });
   };
 
@@ -335,26 +373,23 @@
     target = target || ' ';
     if (target === this.char && !options.force) return Promise.resolve();
 
-    var extra = options.urgent
-      ? (Math.random() > 0.55 ? 1 : 0)
-      : (Math.random() > 0.93 ? 1 : 0);
+    var duration = Math.floor(randomBetween(480, 980) * (options.urgent ? 0.72 : 1));
+    var extraFlaps = options.urgent
+      ? Math.floor(randomBetween(1, 4))
+      : (Math.random() > 0.86 ? Math.floor(randomBetween(1, 3)) : 0);
     var steps = [];
-    var idx = TILE_CHARS.indexOf(this.char);
-    if (idx < 0) idx = 0;
+    var currentIndex = TILE_CHARS.indexOf(this.char);
+    if (currentIndex < 0) currentIndex = 0;
     var i;
-    for (i = 0; i < extra; i += 1) {
-      steps.push(TILE_CHARS[(idx + i + 1 + Math.floor(Math.random() * 4)) % TILE_CHARS.length]);
+    for (i = 0; i < extraFlaps; i += 1) {
+      steps.push(TILE_CHARS[(currentIndex + i + 1 + Math.floor(Math.random() * 7)) % TILE_CHARS.length]);
     }
     steps.push(target);
 
     return steps.reduce(function (chain, nextChar) {
       return chain.then(function () {
-        var stepMs = Math.floor(randomBetween(70, 140) * (options.urgent ? 0.88 : 1));
-        return new Promise(function (resolve) {
-          window.setTimeout(function () {
-            self.flipOnce(nextChar, stepMs, options, audio).then(resolve);
-          }, randomBetween(40, 120));
-        });
+        var localDuration = Math.floor(duration * randomBetween(0.85, 1.08));
+        return self.flipOnce(nextChar, localDuration, options, audio);
       });
     }, Promise.resolve());
   };
@@ -374,11 +409,12 @@
   FlipLine.prototype.setText = function (text, options, audio, rowDelayBase) {
     var fitted = fitText(text, this.length);
     var jobs = [];
-    var self = this;
     this.tiles.forEach(function (tile, idx) {
       var char = fitted.charAt(idx);
       if (char === tile.char && !options.force) return;
-      var delay = rowDelayBase + idx * randomBetween(120, 300) + randomBetween(0, 160);
+      var delay = rowDelayBase + ((options && options.urgent)
+        ? randomBetween(0, 150)
+        : idx * randomBetween(7, 22) + randomBetween(0, 260));
       jobs.push(new Promise(function (resolve) {
         window.setTimeout(function () {
           tile.flipTo(char, options, audio).then(resolve);
@@ -568,12 +604,10 @@
     var options = { urgent: urgent, force: urgent };
     var self = this;
 
-    return this.lines.reduce(function (chain, line, idx) {
-      return chain.then(function () {
-        var rowDelay = idx * randomBetween(180, 320);
-        return line.setText(rows[idx] || '', options, self.audio, rowDelay);
-      });
-    }, Promise.resolve());
+    return Promise.all(this.lines.map(function (line, idx) {
+      var rowDelay = idx * randomBetween(80, 140);
+      return line.setText(rows[idx] || '', options, self.audio, rowDelay);
+    }));
   };
 
   FlipBoard.prototype.renderSchedule = function (message, urgent) {
@@ -584,16 +618,14 @@
     var options = { urgent: urgent, force: urgent };
     var self = this;
 
-    return this.scheduleRows.reduce(function (chain, row, idx) {
-      return chain.then(function () {
-        var item = rows[idx] || { title: '', status: '' };
-        var rowDelay = idx * randomBetween(180, 320);
-        return Promise.all([
-          row.title.setText(item.title, options, self.audio, rowDelay),
-          row.status.setText(item.status, options, self.audio, rowDelay + 80)
-        ]);
-      });
-    }, Promise.resolve());
+    return Promise.all(this.scheduleRows.map(function (row, idx) {
+      var item = rows[idx] || { title: '', status: '' };
+      var rowDelay = idx * randomBetween(80, 140);
+      return Promise.all([
+        row.title.setText(item.title, options, self.audio, rowDelay),
+        row.status.setText(item.status, options, self.audio, rowDelay + 40)
+      ]);
+    }));
   };
 
   FlipBoard.prototype.parseScheduleRows = function (message) {
