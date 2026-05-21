@@ -231,16 +231,16 @@
     this.el = document.createElement('div');
     this.el.className = 'fb-tile' + (this.char === ' ' ? ' is-space' : '');
     this.el.innerHTML =
-      '<div class="fb-half fb-half-top"><span></span></div>' +
-      '<div class="fb-half fb-half-bottom"><span></span></div>' +
+      '<div class="fb-half fb-half-top"><span class="fb-char"></span></div>' +
+      '<div class="fb-half fb-half-bottom"><span class="fb-char"></span></div>' +
       '<div class="fb-flip-top">' +
-        '<div class="fb-flip-face fb-flip-front"><span></span></div>' +
-        '<div class="fb-flip-face fb-flip-back"><span></span></div>' +
+        '<div class="fb-flip-face fb-flip-front"><span class="fb-char"></span></div>' +
+        '<div class="fb-flip-face fb-flip-back"><span class="fb-char"></span></div>' +
       '</div>';
-    this.halfTop = this.el.querySelector('.fb-half-top span');
-    this.halfBottom = this.el.querySelector('.fb-half-bottom span');
-    this.flipFront = this.el.querySelector('.fb-flip-front span');
-    this.flipBack = this.el.querySelector('.fb-flip-back span');
+    this.halfTop = this.el.querySelector('.fb-half-top .fb-char');
+    this.halfBottom = this.el.querySelector('.fb-half-bottom .fb-char');
+    this.flipFront = this.el.querySelector('.fb-flip-front .fb-char');
+    this.flipBack = this.el.querySelector('.fb-flip-back .fb-char');
     this.flipTop = this.el.querySelector('.fb-flip-top');
     this.setChar(this.char);
     if (lineClass) this.el.classList.add(lineClass);
@@ -416,10 +416,10 @@
 
   FlipBoard.prototype.buildMessageBoard = function () {
     var specs = [
-      { len: 26, cls: 'is-body' },
-      { len: 26, cls: 'is-body' },
-      { len: 26, cls: 'is-body' },
-      { len: 26, cls: 'is-body' }
+      { len: 24, cls: 'is-body' },
+      { len: 24, cls: 'is-body' },
+      { len: 24, cls: 'is-body' },
+      { len: 24, cls: 'is-body' }
     ];
     var self = this;
     specs.forEach(function (spec) {
@@ -524,10 +524,10 @@
     this.scheduleBoard.hidden = true;
     var combined = normalizeText((message.title || '') + '  ' + (message.body || '').replace(/\r?\n/g, '  '));
     var segments = [
-      combined.slice(0, 26),
-      combined.slice(26, 52),
-      combined.slice(52, 78),
-      combined.slice(78, 104)
+      combined.slice(0, 24),
+      combined.slice(24, 48),
+      combined.slice(48, 72),
+      combined.slice(72, 96)
     ];
     return Promise.all(this.lines.map(function (line, idx) {
       return line.setText(segments[idx] || '', { urgent: urgent, force: urgent }, this.audio);

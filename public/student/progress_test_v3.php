@@ -108,7 +108,7 @@ if (!is_dir($agentDebugDir)) {
         'location' => 'public/student/progress_test_v3.php:98',
         'message' => 'progress test v3 page rendered',
         'data' => [
-            'assetVersion' => '46',
+            'assetVersion' => '47',
             'cohortId' => $cohortId,
             'lessonId' => $lessonId,
             'role' => $role,
@@ -121,7 +121,7 @@ if (!is_dir($agentDebugDir)) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v3.css?v=46">
+<link rel="stylesheet" href="/assets/progress_test_v3.css?v=47">
 
 <div class="ptv3-page">
   <section
@@ -208,5 +208,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=46"></script>
+<script src="/assets/progress_test_v3.js?v=47"></script>
 <?php cw_footer(); ?>

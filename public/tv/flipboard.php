@@ -39,12 +39,11 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
     <main class="fb-board-shell" aria-label="IPCA operations flip board">
       <header class="fb-board-header">
         <div class="fb-brand-stack">
-          <div class="fb-brand-title">IPCA.training</div>
           <img
             class="fb-brand-logo"
             src="/assets/logo/ipca_logo_white.png"
-            alt="IPCA"
-            width="220"
+            alt="IPCA International Pilot Center Alliance"
+            width="240"
             height="auto">
         </div>
         <div class="fb-status-cluster">

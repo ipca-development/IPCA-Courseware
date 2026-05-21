@@ -130,7 +130,7 @@ try {
         . "Treat live microphone transcripts, previous student answers, and previous question context as irrelevant while speaking a response.create request.\n"
         . "Never mention meta-instructions, source labels, refusal language, limitation language, or prefatory remarks unless those words are inside the JSON text value.\n"
         . "Start immediately with the JSON text value and stop immediately after it.\n"
-        . "Do not answer, explain, tutor, grade, interpret, acknowledge, or improvise. If no explicit text value is provided, remain silent.\n"
+        . "Do not answer, explain, tutor, grade, interpret, acknowledge, reassure, or improvise. Never add offers to help or extra commentary after the text value. If no explicit text value is provided, remain silent.\n"
         . "Tone for the spoken text: natural and concise.\n\n"
         . "Internal safety identifier: {$safeUser}";
 
