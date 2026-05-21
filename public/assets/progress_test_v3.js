@@ -205,7 +205,32 @@
   }
 
   function prepareRealtimeForScriptedSpeech() {
-    cancelRealtimeAudioOnly();
+    if (responseInProgress) {
+      cancelRealtimeAudioOnly();
+      return;
+    }
+    if (dc && dc.readyState === 'open') {
+      try { dc.send(JSON.stringify({ type: 'input_audio_buffer.clear' })); } catch (e) {}
+    }
+  }
+
+  function realtimeErrorText(msg) {
+    var err = msg && msg.error ? msg.error : msg;
+    return String((err && (err.message || err.code)) || msg.message || '').toLowerCase();
+  }
+
+  function isBenignRealtimeError(msg) {
+    var text = realtimeErrorText(msg);
+    if (!text) return true;
+    if (text.indexOf('no active response') !== -1) return true;
+    if (text.indexOf('no response') !== -1 && text.indexOf('cancel') !== -1) return true;
+    if (text.indexOf('already cancelled') !== -1 || text.indexOf('already canceled') !== -1) return true;
+    if (text.indexOf('response_cancel') !== -1) return true;
+    if (text.indexOf('cancelled') !== -1 || text.indexOf('canceled') !== -1) return true;
+    if (text.indexOf('audio runtime') !== -1) return true;
+    if (text.indexOf('runtime error') !== -1 && text.indexOf('audio') !== -1) return true;
+    if (text.indexOf('buffer') !== -1 && text.indexOf('empty') !== -1) return true;
+    return false;
   }
 
   function escapeScriptQuote(text) {
@@ -1230,7 +1255,11 @@
     try { msg = JSON.parse(event.data); } catch (e) { return; }
     var type = String(msg.type || '');
     if (type === 'error') {
-      setStatus('Realtime voice error.', 'Connection issue');
+      if (isBenignRealtimeError(msg)) return;
+      console.warn('Progress test realtime error', msg);
+      if (connected && !responseInProgress) {
+        setStatus('Voice connection notice. Continue if audio is working.', 'Connection notice');
+      }
       return;
     }
     if (type === 'response.created' && !mayaTurnPurpose) {
