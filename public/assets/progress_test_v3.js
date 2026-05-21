@@ -235,9 +235,42 @@
     return String(value || '').toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
-  function isMayaCoachingTailSpeech(transcript) {
+  function isMayaOffScriptSpeech(transcript) {
     var actual = normalizeCompareText(transcript);
-    return /\b(i can help|let me help|happy to help|no problem|not sure what you|if you are unsure|there is no problem|there s no problem|i am here to help|i m here to help)\b/.test(actual);
+    return /\b(i can help|let me help|happy to help|no problem|not sure what you|if you are unsure|there is no problem|there s no problem|i am here to help|i m here to help|dive into|materials deeper|ready to dive|let s review|lets review|let me explain|would you like|feel free|great question|good question|shall we)\b/.test(actual);
+  }
+
+  function isMayaCoachingTailSpeech(transcript) {
+    return isMayaOffScriptSpeech(transcript);
+  }
+
+  function expectedOpeningPrefix(expected) {
+    var words = expected.split(' ').filter(Boolean);
+    return words.slice(0, Math.min(5, words.length)).join(' ');
+  }
+
+  function isMayaTranscriptPreambleDrift(transcript) {
+    var expected = normalizeCompareText(mayaExpectedText || preparedMayaText);
+    var actual = normalizeCompareText(transcript);
+    if (!expected || !actual || actual.length < 18) return false;
+    if (actual.indexOf(expected) === 0) return false;
+    if (isMayaOffScriptSpeech(actual)) return true;
+    var opening = expectedOpeningPrefix(expected);
+    if (opening.length >= 10 && actual.indexOf(opening) === 0) return false;
+    if (opening.length >= 10 && actual.indexOf(opening) === -1 && actual.length >= 20) return true;
+    var expectedWords = expected.split(' ').filter(Boolean).slice(0, 4);
+    var actualWords = actual.split(' ').filter(Boolean).slice(0, 4);
+    if (!expectedWords.length || actualWords.length < 3) return false;
+    var overlap = 0;
+    for (var i = 0; i < Math.min(expectedWords.length, actualWords.length); i += 1) {
+      if (actualWords[i] === expectedWords[i]) overlap += 1;
+    }
+    return overlap < 2;
+  }
+
+  function isMayaAcknowledgementPrefixOnly(transcript) {
+    var actual = normalizeCompareText(transcript);
+    return /^(understood|okay|ok|sure|got it|certainly|of course|yes)\b/.test(actual) && actual.length < 28;
   }
 
   function isMayaTranscriptTailExtension(transcript) {
@@ -257,6 +290,8 @@
     var actual = normalizeCompareText(transcript);
     if (!expected || !actual) return false;
     if (isMayaTranscriptTailExtension(transcript)) return true;
+    if (isMayaTranscriptPreambleDrift(transcript)) return true;
+    if (isMayaOffScriptSpeech(actual)) return true;
     if (/^(understood|okay|ok|sure|got it|certainly|of course|yes)$/.test(actual)) return true;
     if (/^(understood|okay|ok|sure|got it|certainly|of course|yes)\b/.test(actual) && expected.indexOf(actual) !== 0) return true;
     if (actual === expected) return false;
@@ -272,11 +307,13 @@
     return coverage < 0.82 || actualWords.length > expectedWords.length + 8;
   }
 
-  function shouldStopMayaTailDriftEarly(partial) {
+  function shouldStopMayaDriftEarly(partial) {
     var expected = String(mayaExpectedText || preparedMayaText || '').trim();
     var actual = String(partial || '').trim();
-    if (!expected || actual.length < Math.max(24, expected.length * 0.5)) return false;
-    if (isMayaCoachingTailSpeech(actual)) return true;
+    if (!expected || !actual) return false;
+    if (isMayaTranscriptPreambleDrift(actual)) return true;
+    if (isMayaOffScriptSpeech(actual)) return true;
+    if (actual.length < Math.max(24, expected.length * 0.5)) return false;
     return actual.length > expected.length + 28;
   }
 
@@ -863,7 +900,7 @@
       ? 'FINAL PROGRESS TEST SUMMARY TEXT-TO-SPEECH REQUEST.\n'
       : 'PROGRESS TEST TEXT-TO-SPEECH REQUEST.\n')
       + 'You are not chatting with the student. Ignore prior conversation, prior answers, live microphone input, and any transcript context.\n'
-      + 'Parse the JSON object below and speak only its text value verbatim in English. Do not add acknowledgements, explanations, interpretations, coaching, reassurance, examples, or offers to help. Stop immediately after the final word of the text value.\n'
+      + 'Parse the JSON object below and speak only its text value verbatim in English. Your first spoken word must be the first word of the text value. Do not add a preface, greeting, acknowledgement, explanation, interpretation, coaching, reassurance, examples, or offers to help. Stop immediately after the final word of the text value.\n'
       + ttsPayload;
     setTyping('', false);
     setMicEnabled(false);
@@ -1327,12 +1364,12 @@
       });
       // #endregion
       if (isMayaTranscriptDrift(String(msg.transcript || ''))) {
-        if (isMayaTranscriptTailExtension(String(msg.transcript || ''))) {
-          stopMayaTailDrift();
-        } else {
+        if (isMayaAcknowledgementPrefixOnly(String(msg.transcript || '')) && !mayaDriftReplayUsed) {
           mayaDriftDetected = true;
           ensureExpectedMayaBubble();
           replayExpectedMayaAfterDrift();
+        } else {
+          stopMayaTailDrift();
         }
         return;
       }
@@ -1349,7 +1386,7 @@
     if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text) && (mayaTurnPurpose || pendingFinishPurpose)) {
       if (!mayaDriftDetected) {
         var partialMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
-        if (shouldStopMayaTailDriftEarly(partialMayaText)) {
+        if (shouldStopMayaDriftEarly(partialMayaText)) {
           stopMayaTailDrift();
           return;
         }
