@@ -101,7 +101,8 @@
   var answerTimerDeadline = 0;
   var answerTimerHandled = false;
   var ANSWER_START_LIMIT_MS = 30000;
-  var replayingMayaAfterDrift = false;
+  var mayaDriftReplayUsed = false;
+  var skipNextDrainResponse = false;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -156,6 +157,7 @@
     mayaTranscriptDone = false;
     stopMayaTurnTimers();
     setMayaSpeaking(false);
+    mayaDriftReplayUsed = false;
     finishMayaTurn(purpose);
   }
 
@@ -184,6 +186,9 @@
     pendingFinishPurpose = '';
     mayaTurnPurpose = '';
     mayaTranscriptDone = false;
+    mayaDriftReplayUsed = false;
+    skipNextDrainResponse = false;
+    mayaDriftDetected = false;
     responseInProgress = false;
     stopMayaTurnTimers();
     setMayaSpeaking(false);
@@ -201,21 +206,29 @@
     }
   }
 
+  function finishMayaTurnWithCanonicalText() {
+    var canonical = mayaExpectedText || preparedMayaText || '';
+    ensureExpectedMayaBubble();
+    mayaDriftDetected = false;
+    onMayaTranscriptDone(canonical);
+  }
+
   function replayExpectedMayaAfterDrift() {
-    if (replayingMayaAfterDrift) return;
     var expected = mayaExpectedText || preparedMayaText || '';
     var purpose = mayaTurnPurpose || pendingFinishPurpose || '';
     if (!expected || !purpose) return;
-    replayingMayaAfterDrift = true;
+    if (mayaDriftReplayUsed) {
+      finishMayaTurnWithCanonicalText();
+      return;
+    }
+    mayaDriftReplayUsed = true;
+    skipNextDrainResponse = true;
     cancelRealtimeAudioOnly();
     ensureExpectedMayaBubble();
     mayaDriftDetected = false;
     mayaTranscriptDone = false;
-    pendingFinishPurpose = '';
     responseInProgress = false;
-    mayaTurnPurpose = '';
     sendResponse(expected, purpose);
-    replayingMayaAfterDrift = false;
   }
 
   function normalizeCompareText(value) {
@@ -881,6 +894,11 @@
   }
 
   function drainResponse() {
+    if (skipNextDrainResponse) {
+      skipNextDrainResponse = false;
+      responseInProgress = false;
+      return;
+    }
     var finishedPurpose = mayaTurnPurpose;
     // #region agent log
     agentDebugLog('initial', 'H1,H2', 'public/assets/progress_test_v3.js:769', 'drainResponse resolving current turn', {
@@ -1284,23 +1302,6 @@
       return;
     }
     if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text) && (mayaTurnPurpose || pendingFinishPurpose)) {
-      if (mayaDriftDetected) return;
-      var nextMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
-      if (isMayaTranscriptDrift(nextMayaText)) {
-        // #region agent log
-        agentDebugLog('initial', 'H3', 'public/assets/progress_test_v3.js:1165', 'maya transcript drift detected on delta', {
-          mayaTurnPurpose: mayaTurnPurpose || '',
-          pendingFinishPurpose: pendingFinishPurpose || '',
-          phase: phase,
-          actualLength: nextMayaText.length,
-          expectedLength: String(mayaExpectedText || preparedMayaText || '').length
-        });
-        // #endregion
-        mayaDriftDetected = true;
-        ensureExpectedMayaBubble();
-        replayExpectedMayaAfterDrift();
-        return;
-      }
       ensureExpectedMayaBubble();
       return;
     }
