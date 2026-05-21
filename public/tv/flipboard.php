@@ -23,8 +23,8 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="theme-color" content="#050505">
-  <title>IPCA Airport Operations Flip Board</title>
+  <meta name="theme-color" content="#0d1d34">
+  <title>IPCA Flip Board</title>
   <link rel="stylesheet" href="/tv/assets/flipboard.css?v=<?= h($cssVersion) ?>">
 </head>
 <body class="fb-kiosk <?= $mode === 'night' ? 'is-night' : '' ?>">
@@ -34,15 +34,18 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
     data-screen-key="<?= h($screenKey) ?>"
     data-initial-mode="<?= h($mode) ?>"
     data-api-url="/tv/api/messages.php"
-    data-poll-ms="7000">
-    <div class="fb-ambient fb-ambient-left"></div>
-    <div class="fb-ambient fb-ambient-right"></div>
-
-    <main class="fb-board-shell" aria-label="IPCA airport operations board">
+    data-poll-ms="7000"
+    data-auto-audio="1">
+    <main class="fb-board-shell" aria-label="IPCA operations flip board">
       <header class="fb-board-header">
         <div class="fb-brand-stack">
-          <div class="fb-brand-kicker">IPCA.TRAINING</div>
-          <h1>AIRPORT OPERATIONS</h1>
+          <div class="fb-brand-title">IPCA.training</div>
+          <img
+            class="fb-brand-logo"
+            src="/assets/logo/ipca_logo_white.png"
+            alt="IPCA"
+            width="220"
+            height="auto">
         </div>
         <div class="fb-status-cluster">
           <div class="fb-status-light" id="fbStatusLight" aria-hidden="true"></div>
@@ -70,9 +73,8 @@ $jsVersion = is_file($jsPath) ? (string)filemtime($jsPath) : '1';
         </div>
         <div class="fb-footer-item">
           <span>AUDIO</span>
-          <strong id="fbAudioState">ARMING</strong>
+          <strong id="fbAudioState">STARTING</strong>
         </div>
-        <button class="fb-audio-arm" id="fbAudioArm" type="button">Enable Airport PA Audio</button>
       </footer>
     </main>
   </div>

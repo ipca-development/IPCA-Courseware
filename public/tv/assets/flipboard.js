@@ -7,7 +7,7 @@
       id: 'fallback-standard',
       message_type: 'standard',
       title: 'IPCA OPERATIONS',
-      body: 'MONITORING ACTIVE TRAINING OPERATIONS',
+      body: 'TRAINING CENTER OPEN  CHECK DISPATCH BOARD',
       priority: 10,
       display_duration_seconds: 10,
       announce_audio_enabled: false,
@@ -70,23 +70,15 @@
     if (!this.ctx) {
       this.ctx = new AudioContextCtor();
       this.master = this.ctx.createGain();
-      this.master.gain.value = 0.42;
+      this.master.gain.value = 0.72;
       this.master.connect(this.ctx.destination);
       this.loadOptionalSamples();
     }
     if (this.ctx.state === 'suspended') {
       this.ctx.resume();
     }
-    this.armed = true;
-    return true;
-  };
-
-  BoardAudio.prototype.frame = function (callback) {
-    if (window.requestAnimationFrame) {
-      window.requestAnimationFrame(callback);
-      return;
-    }
-    window.setTimeout(callback, 16);
+    this.armed = this.ctx.state === 'running';
+    return this.armed;
   };
 
   BoardAudio.prototype.loadOptionalSamples = function () {
@@ -129,29 +121,28 @@
     var now = this.ctx.currentTime;
     var osc = this.ctx.createOscillator();
     var noise = this.ctx.createBufferSource();
-    var noiseBuffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * 0.032), this.ctx.sampleRate);
+    var noiseBuffer = this.ctx.createBuffer(1, Math.floor(this.ctx.sampleRate * 0.028), this.ctx.sampleRate);
     var data = noiseBuffer.getChannelData(0);
     var i;
     for (i = 0; i < data.length; i += 1) {
-      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 1.8);
+      data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 2.2);
     }
     var clickGain = this.ctx.createGain();
     var noiseGain = this.ctx.createGain();
     var filter = this.ctx.createBiquadFilter();
-    var pitch = randomBetween(210, 440) * (weight || 1);
+    var pitch = randomBetween(280, 520) * (weight || 1);
 
     osc.type = 'square';
     osc.frequency.setValueAtTime(pitch, now);
-    osc.frequency.exponentialRampToValueAtTime(Math.max(70, pitch * 0.34), now + 0.045);
-    clickGain.gain.setValueAtTime(randomBetween(0.018, 0.052) * (weight || 1), now);
-    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + randomBetween(0.035, 0.07));
+    osc.frequency.exponentialRampToValueAtTime(Math.max(90, pitch * 0.25), now + 0.028);
+    clickGain.gain.setValueAtTime(randomBetween(0.06, 0.14) * (weight || 1), now);
+    clickGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.05);
 
     noise.buffer = noiseBuffer;
-    filter.type = 'bandpass';
-    filter.frequency.value = randomBetween(900, 2400);
-    filter.Q.value = randomBetween(1.4, 4.2);
-    noiseGain.gain.setValueAtTime(randomBetween(0.03, 0.085) * (weight || 1), now);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+    filter.type = 'highpass';
+    filter.frequency.value = randomBetween(1200, 3200);
+    noiseGain.gain.setValueAtTime(randomBetween(0.08, 0.18) * (weight || 1), now);
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.035);
 
     osc.connect(clickGain);
     clickGain.connect(this.master);
@@ -160,20 +151,20 @@
     noiseGain.connect(this.master);
     osc.start(now);
     noise.start(now);
-    osc.stop(now + 0.08);
-    noise.stop(now + 0.05);
+    osc.stop(now + 0.06);
+    noise.stop(now + 0.04);
   };
 
   BoardAudio.prototype.flap = function (intensity) {
     if (!this.armed) return;
     var nowMs = performance.now();
-    if (nowMs - this.lastClickAt < 18) return;
+    if (nowMs - this.lastClickAt < 10) return;
     this.lastClickAt = nowMs;
-    if (this.flapSamples.length > 0 && Math.random() > 0.35) {
+    if (this.flapSamples.length > 0 && Math.random() > 0.4) {
       this.playBuffer(
         this.flapSamples[Math.floor(Math.random() * this.flapSamples.length)],
-        randomBetween(0.06, 0.16) * (intensity || 1),
-        randomBetween(0.82, 1.24)
+        randomBetween(0.12, 0.28) * (intensity || 1),
+        randomBetween(0.9, 1.18)
       );
     } else {
       this.syntheticClick(intensity || 1);
@@ -183,9 +174,9 @@
   BoardAudio.prototype.settle = function () {
     if (!this.armed) return;
     var self = this;
-    [0, 42, 96].forEach(function (delay, idx) {
+    [0, 28, 58].forEach(function (delay, idx) {
       window.setTimeout(function () {
-        self.syntheticClick(idx === 2 ? 1.5 : 1.05);
+        self.syntheticClick(idx === 2 ? 1.35 : 1.1);
       }, delay);
     });
   };
@@ -240,19 +231,62 @@
     this.el = document.createElement('div');
     this.el.className = 'fb-tile' + (this.char === ' ' ? ' is-space' : '');
     this.el.innerHTML =
-      '<div class="fb-flap fb-flap-upper"><span></span></div>' +
-      '<div class="fb-flap fb-flap-lower"><span></span></div>';
-    this.upper = this.el.querySelector('.fb-flap-upper span');
-    this.lower = this.el.querySelector('.fb-flap-lower span');
+      '<div class="fb-half fb-half-top"><span></span></div>' +
+      '<div class="fb-half fb-half-bottom"><span></span></div>' +
+      '<div class="fb-flip-top">' +
+        '<div class="fb-flip-face fb-flip-front"><span></span></div>' +
+        '<div class="fb-flip-face fb-flip-back"><span></span></div>' +
+      '</div>';
+    this.halfTop = this.el.querySelector('.fb-half-top span');
+    this.halfBottom = this.el.querySelector('.fb-half-bottom span');
+    this.flipFront = this.el.querySelector('.fb-flip-front span');
+    this.flipBack = this.el.querySelector('.fb-flip-back span');
+    this.flipTop = this.el.querySelector('.fb-flip-top');
     this.setChar(this.char);
     if (lineClass) this.el.classList.add(lineClass);
   }
 
   FlipTile.prototype.setChar = function (char) {
     this.char = char || ' ';
-    this.upper.textContent = this.char;
-    this.lower.textContent = this.char;
+    this.halfTop.textContent = this.char;
+    this.halfBottom.textContent = this.char;
+    this.flipFront.textContent = this.char;
+    this.flipBack.textContent = this.char;
     this.el.classList.toggle('is-space', this.char === ' ');
+  };
+
+  FlipTile.prototype.flipOnce = function (nextChar, duration, options, audio) {
+    var self = this;
+    return new Promise(function (resolve) {
+      self.flipFront.textContent = self.char;
+      self.flipBack.textContent = nextChar;
+      self.el.style.setProperty('--flip-ms', duration + 'ms');
+      self.el.style.setProperty('--tile-h', self.el.offsetHeight + 'px');
+
+      var done = false;
+      function finish() {
+        if (done) return;
+        done = true;
+        self.el.classList.remove('is-flipping');
+        self.flipTop.style.animation = 'none';
+        void self.flipTop.offsetWidth;
+        self.flipTop.style.animation = '';
+        self.setChar(nextChar);
+        resolve();
+      }
+
+      self.el.classList.remove('is-settling');
+      self.el.classList.add('is-flipping');
+      if (audio) {
+        audio.flap(options.urgent ? 1.45 : 1.15);
+        window.setTimeout(function () {
+          if (Math.random() > 0.35) audio.flap(options.urgent ? 1.2 : 0.95);
+        }, duration * 0.45);
+      }
+
+      self.flipTop.addEventListener('animationend', finish, { once: true });
+      window.setTimeout(finish, duration + 50);
+    });
   };
 
   FlipTile.prototype.flipTo = function (target, options, audio) {
@@ -260,44 +294,25 @@
     options = options || {};
     target = target || ' ';
     if (target === this.char && !options.force) return Promise.resolve();
-    var duration = Math.floor(randomBetween(480, 980) * (options.urgent ? 0.72 : 1));
-    var extraFlaps = options.urgent ? Math.floor(randomBetween(1, 4)) : (Math.random() > 0.86 ? Math.floor(randomBetween(1, 3)) : 0);
+
+    var baseDuration = Math.floor(randomBetween(105, 185) * (options.urgent ? 0.82 : 1));
+    var extraFlaps = options.urgent
+      ? Math.floor(randomBetween(1, 3))
+      : (Math.random() > 0.88 ? Math.floor(randomBetween(1, 2)) : 0);
     var steps = [];
     var currentIndex = TILE_CHARS.indexOf(this.char);
     if (currentIndex < 0) currentIndex = 0;
+
     for (var i = 0; i < extraFlaps; i += 1) {
-      steps.push(TILE_CHARS[(currentIndex + i + 1 + Math.floor(Math.random() * 7)) % TILE_CHARS.length]);
+      steps.push(TILE_CHARS[(currentIndex + i + 1 + Math.floor(Math.random() * 5)) % TILE_CHARS.length]);
     }
     steps.push(target);
 
     return steps.reduce(function (chain, nextChar, idx) {
       return chain.then(function () {
-        return new Promise(function (resolve) {
-          var localDuration = Math.floor(duration * randomBetween(0.72, 1.08));
-          var startFlip = function () {
-            self.el.style.setProperty('--flip-duration', localDuration + 'ms');
-            self.el.style.setProperty('--tile-height', self.el.offsetHeight + 'px');
-            self.el.classList.remove('is-settling');
-            self.el.classList.add('is-flipping');
-            if (audio) audio.flap(options.urgent ? 1.35 : 1);
-            window.setTimeout(function () {
-              self.setChar(nextChar);
-              if (audio && Math.random() > 0.45) audio.flap(options.urgent ? 1.22 : 0.9);
-            }, localDuration * randomBetween(0.42, 0.58));
-            window.setTimeout(function () {
-              self.el.classList.remove('is-flipping');
-              self.el.classList.add('is-settling');
-              if (audio && idx === steps.length - 1) audio.settle();
-              resolve();
-            }, localDuration);
-          };
-          if (audio && typeof audio.frame === 'function') {
-            audio.frame(startFlip);
-          } else if (window.requestAnimationFrame) {
-            window.requestAnimationFrame(startFlip);
-          } else {
-            startFlip();
-          }
+        var dur = Math.floor(baseDuration * randomBetween(0.88, 1.05));
+        return self.flipOnce(nextChar, dur, options, audio).then(function () {
+          if (audio && idx === steps.length - 1) audio.settle();
         });
       });
     }, Promise.resolve());
@@ -321,8 +336,8 @@
     for (var i = 0; i < this.tiles.length; i += 1) {
       (function (tile, char, idx) {
         var delay = (options && options.urgent)
-          ? randomBetween(0, 150)
-          : idx * randomBetween(7, 22) + randomBetween(0, 260);
+          ? randomBetween(0, 120)
+          : idx * randomBetween(6, 16) + randomBetween(0, 220);
         jobs.push(new Promise(function (resolve) {
           window.setTimeout(function () {
             tile.flipTo(char, options, audio).then(resolve);
@@ -341,14 +356,15 @@
     this.statusLight = root.querySelector('#fbStatusLight');
     this.clock = root.querySelector('#fbClock');
     this.audioState = root.querySelector('#fbAudioState');
-    this.audioButton = root.querySelector('#fbAudioArm');
     this.screenKey = root.getAttribute('data-screen-key') || 'main';
     this.mode = root.getAttribute('data-initial-mode') || 'standard';
     this.apiUrl = root.getAttribute('data-api-url') || '/tv/api/messages.php';
     this.pollMs = clamp(parseInt(root.getAttribute('data-poll-ms') || '7000', 10), 5000, 10000);
+    this.autoAudio = root.getAttribute('data-auto-audio') === '1';
     this.audio = new BoardAudio(root);
     this.lines = [];
     this.scheduleRows = [];
+    this.scheduleBuilt = false;
     this.messages = DEFAULT_MESSAGES.slice();
     this.messageHash = '';
     this.activeIndex = 0;
@@ -360,7 +376,6 @@
 
   FlipBoard.prototype.init = function () {
     this.buildMessageBoard();
-    this.buildScheduleBoard();
     this.bindAudio();
     this.tickClock();
     this.renderCurrent(true);
@@ -371,19 +386,27 @@
 
   FlipBoard.prototype.bindAudio = function () {
     var self = this;
-    this.audioButton.addEventListener('click', function () {
+    var markLive = function () {
       if (self.audio.arm()) {
-        self.audioButton.classList.add('is-armed');
         self.audioState.textContent = 'LIVE';
       }
+    };
+
+    if (this.autoAudio) {
+      markLive();
+      var tries = 0;
+      var retry = window.setInterval(function () {
+        markLive();
+        tries += 1;
+        if (self.audio.armed || tries > 24) window.clearInterval(retry);
+      }, 400);
+    }
+
+    document.addEventListener('pointerdown', markLive, { once: true });
+    document.addEventListener('keydown', markLive, { once: true });
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) markLive();
     });
-    document.addEventListener('pointerdown', function armOnce() {
-      if (self.audio.arm()) {
-        self.audioButton.classList.add('is-armed');
-        self.audioState.textContent = 'LIVE';
-      }
-      document.removeEventListener('pointerdown', armOnce);
-    }, { once: true });
   };
 
   FlipBoard.prototype.tickClock = function () {
@@ -393,7 +416,7 @@
 
   FlipBoard.prototype.buildMessageBoard = function () {
     var specs = [
-      { len: 20, cls: 'is-title' },
+      { len: 26, cls: 'is-body' },
       { len: 26, cls: 'is-body' },
       { len: 26, cls: 'is-body' },
       { len: 26, cls: 'is-body' }
@@ -406,7 +429,9 @@
     });
   };
 
-  FlipBoard.prototype.buildScheduleBoard = function () {
+  FlipBoard.prototype.ensureScheduleBoard = function () {
+    if (this.scheduleBuilt) return;
+    this.scheduleBuilt = true;
     var self = this;
     for (var i = 0; i < 8; i += 1) {
       var row = document.createElement('div');
@@ -470,7 +495,7 @@
 
     var announcePromise = Promise.resolve();
     if (message.announce_audio_enabled && (message.audio_url || message.voice_text || urgent)) {
-      announcePromise = new Promise(function (resolve) { window.setTimeout(resolve, urgent ? 160 : 460); })
+      announcePromise = new Promise(function (resolve) { window.setTimeout(resolve, urgent ? 120 : 400); })
         .then(function () { return self.audio.playAnnouncement(message); });
     }
 
@@ -497,12 +522,12 @@
   FlipBoard.prototype.renderMessage = function (message, urgent) {
     this.messageBoard.hidden = false;
     this.scheduleBoard.hidden = true;
-    var body = normalizeText(message.body || '');
+    var combined = normalizeText((message.title || '') + '  ' + (message.body || '').replace(/\r?\n/g, '  '));
     var segments = [
-      message.title || 'IPCA OPERATIONS',
-      body.slice(0, 26),
-      body.slice(26, 52),
-      body.slice(52, 78)
+      combined.slice(0, 26),
+      combined.slice(26, 52),
+      combined.slice(52, 78),
+      combined.slice(78, 104)
     ];
     return Promise.all(this.lines.map(function (line, idx) {
       return line.setText(segments[idx] || '', { urgent: urgent, force: urgent }, this.audio);
@@ -510,6 +535,7 @@
   };
 
   FlipBoard.prototype.renderSchedule = function (message, urgent) {
+    this.ensureScheduleBoard();
     this.messageBoard.hidden = true;
     this.scheduleBoard.hidden = false;
     var rows = this.parseScheduleRows(message);
