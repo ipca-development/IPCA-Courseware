@@ -98,20 +98,54 @@
   }
 
   BoardAudio.prototype.arm = function () {
+    var self = this;
     var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextCtor) return false;
-    if (!this.ctx) {
-      this.ctx = new AudioContextCtor();
-      this.master = this.ctx.createGain();
-      this.master.gain.value = 0.55;
-      this.master.connect(this.ctx.destination);
-      this.loadOptionalSamples();
+    if (!AudioContextCtor) {
+      return Promise.resolve(false);
     }
+
+    try {
+      if (!this.ctx) {
+        this.ctx = new AudioContextCtor();
+        this.master = this.ctx.createGain();
+        this.master.gain.value = 0.55;
+        this.master.connect(this.ctx.destination);
+        this.loadOptionalSamples();
+      }
+    } catch (e) {
+      this.armed = false;
+      return Promise.resolve(false);
+    }
+
+    function markRunning() {
+      self.armed = !!(self.ctx && self.ctx.state === 'running');
+      if (!self.armed) return false;
+      try {
+        var buffer = self.ctx.createBuffer(1, 1, self.ctx.sampleRate);
+        var source = self.ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(self.ctx.destination);
+        source.start(0);
+      } catch (e) {}
+      return true;
+    }
+
+    if (this.ctx.state === 'running') {
+      this.armed = true;
+      return Promise.resolve(true);
+    }
+
     if (this.ctx.state === 'suspended') {
-      this.ctx.resume();
+      return this.ctx.resume().then(function () {
+        return markRunning();
+      }).catch(function () {
+        self.armed = false;
+        return false;
+      });
     }
-    this.armed = this.ctx.state === 'running';
-    return this.armed;
+
+    this.armed = false;
+    return Promise.resolve(false);
   };
 
   BoardAudio.prototype.loadOptionalSamples = function () {
@@ -460,24 +494,56 @@
     window.setInterval(this.tickClock.bind(this), 1000);
   };
 
+  FlipBoard.prototype.updateAudioStatus = function () {
+    if (!this.audioState) return;
+    if (!window.AudioContext && !window.webkitAudioContext) {
+      this.audioState.textContent = 'UNSUPPORTED';
+      return;
+    }
+    if (this.audio.armed) {
+      this.audioState.textContent = 'LIVE';
+      return;
+    }
+    if (this.audio.ctx && this.audio.ctx.state === 'suspended') {
+      this.audioState.textContent = 'TAP TO ENABLE';
+      return;
+    }
+    if (this.audio.ctx) {
+      this.audioState.textContent = this.audio.ctx.state.toUpperCase();
+      return;
+    }
+    this.audioState.textContent = 'STARTING';
+  };
+
   FlipBoard.prototype.bindAudio = function () {
     var self = this;
-    var markLive = function () {
-      if (self.audio.arm()) self.audioState.textContent = 'LIVE';
+    var tryArm = function () {
+      return self.audio.arm().then(function (armed) {
+        self.updateAudioStatus();
+        return armed;
+      });
     };
+
+    this.updateAudioStatus();
+
     if (this.autoAudio) {
-      markLive();
+      tryArm();
       var tries = 0;
       var retry = window.setInterval(function () {
-        markLive();
-        tries += 1;
-        if (self.audio.armed || tries > 24) window.clearInterval(retry);
-      }, 400);
+        tryArm().then(function (armed) {
+          tries += 1;
+          if (armed || tries >= 40) window.clearInterval(retry);
+        });
+      }, 500);
     }
-    document.addEventListener('pointerdown', markLive, { once: true });
+
+    var unlock = function () { tryArm(); };
+    document.addEventListener('pointerdown', unlock, { passive: true });
+    document.addEventListener('keydown', unlock, { once: true });
     document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) markLive();
+      if (!document.hidden) tryArm();
     });
+    this.root.addEventListener('click', unlock, { passive: true });
   };
 
   FlipBoard.prototype.tickClock = function () {

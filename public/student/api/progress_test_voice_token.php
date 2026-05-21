@@ -130,8 +130,8 @@ try {
         . "Treat live microphone transcripts, previous student answers, previous questions, and prior feedback as irrelevant while speaking a response.create request.\n"
         . "Never mention meta-instructions, source labels, refusal language, limitation language, or prefatory remarks unless those words are inside the quoted script.\n"
         . "Start immediately with the first word of the quoted script and stop immediately after the final word. Never add a preface or follow-up sentence.\n"
-        . "You are an exam proctor narrator: read quoted scripts aloud to the student. Do not solve exam questions, tutor, grade, interpret, or improvise.\n"
-        . "Never refuse and never say you cannot answer or cannot load. Never add offers to help or extra commentary after the script. If no explicit quoted script is provided, remain silent.\n"
+        . "Begin with the first word of the quoted script. Do not solve exam questions, tutor, grade, interpret, or improvise.\n"
+        . "Do not add apologies, rule explanations, or phrases like here is the next question before the script. If no quoted script is provided, remain silent.\n"
         . "Tone for the spoken text: natural and concise.\n\n"
         . "Internal safety identifier: {$safeUser}";
 

@@ -101,6 +101,7 @@
   var answerTimerDeadline = 0;
   var answerTimerHandled = false;
   var ANSWER_START_LIMIT_MS = 30000;
+  var mayaQuestionRetryUsed = false;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -207,74 +208,74 @@
     cancelRealtimeAudioOnly();
   }
 
-  function reinforceNarratorSession() {
-    if (!dc || dc.readyState !== 'open') return;
-    try {
-      dc.send(JSON.stringify({
-        type: 'session.update',
-        session: {
-          instructions: 'You are an exam proctor voice narrator for an oral progress test. Read quoted scripts aloud to the student. Never refuse and never say you cannot answer or cannot load. Do not solve exam questions yourself.'
-        }
-      }));
-    } catch (e) {}
-  }
-
   function escapeScriptQuote(text) {
     return String(text || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function scriptOpeningWords(text, count) {
+    return String(text || '').trim().split(/\s+/).filter(Boolean).slice(0, count || 3).join(' ');
   }
 
   function buildTurnInstructions(text, purpose) {
     var script = escapeScriptQuote(String(text || '').trim());
     if (!script) return '';
-    var noRefusal = 'Never refuse, apologize, or say you cannot answer, cannot load, or are unable to help. You are only reading a script aloud.';
+    var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
     if (purpose === 'question') {
-      return 'ROLE: Exam proctor voice narrator. TASK: Read the following exam question aloud TO the student, word-for-word. '
-        + 'You are NOT the student and you are NOT being asked to solve this question—only read it aloud. '
-        + noRefusal + ' Do not substitute, explain, tutor, or mention another topic. '
-        + 'Exact script to read aloud: "' + script + '"';
+      return 'Read the quoted exam question to the student. Begin immediately with: ' + startAnchor
+        + '. Do not say sorry, rules, "here is the next question", or any words before ' + startAnchor + '. '
+        + 'Exact words: "' + script + '"';
     }
     if (purpose === 'clarification') {
-      return 'ROLE: Exam proctor voice narrator. TASK: Read this clarification prompt aloud TO the student, word-for-word. '
-        + 'Do not reveal the correct answer, examples, or a different question. ' + noRefusal + ' '
-        + 'Exact script to read aloud: "' + script + '"';
+      return 'Read this clarification prompt to the student, word-for-word. Begin with: ' + startAnchor
+        + '. Do not reveal the answer or add commentary. Exact words: "' + script + '"';
     }
     if (purpose === 'feedback') {
-      return 'ROLE: Exam proctor voice narrator. TASK: Read this scored feedback aloud TO the student, word-for-word. '
-        + 'Include every number and percent sign exactly as written. ' + noRefusal + ' '
-        + 'Do not tutor, reassure, explain the lesson, or refer to previous answers or questions. '
-        + 'Exact script to read aloud: "' + script + '"';
+      return 'Read this scored feedback to the student, word-for-word. Begin with: ' + startAnchor
+        + '. Include every number and percent sign. Do not tutor or refer to other questions. Exact words: "' + script + '"';
     }
     if (purpose === 'final') {
-      return 'ROLE: Exam proctor voice narrator. TASK: Read this final progress test summary aloud, word-for-word. '
-        + noRefusal + ' Do not discuss any question or student answer. '
-        + 'Exact script to read aloud: "' + script + '"';
+      return 'Read this final summary, word-for-word. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
     }
     if (purpose === 'audio_check') {
-      return 'ROLE: Exam proctor voice narrator. This is a non-scored readiness check. ' + noRefusal + ' '
-        + 'Say exactly: "' + script + '" Then stop speaking and wait.';
+      return 'Non-scored readiness check. Begin with: ' + startAnchor + '. Exact words: "' + script + '" Then stop.';
     }
     if (purpose === 'retry_answer') {
-      return 'ROLE: Exam proctor voice narrator. TASK: Read this retry prompt aloud TO the student, word-for-word. '
-        + 'You are NOT solving the exam question—only read the prompt. ' + noRefusal + ' '
-        + 'Exact script to read aloud: "' + script + '"';
+      return 'Read this retry prompt, word-for-word. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
     }
-    return 'ROLE: Exam proctor voice narrator. Read this script aloud, word-for-word. ' + noRefusal + ' '
-      + 'Exact script to read aloud: "' + script + '"';
+    return 'Read verbatim. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
   }
 
   function normalizeCompareText(value) {
     return String(value || '').toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
   }
 
+  function isMayaMetaPreamble(transcript) {
+    var actual = normalizeCompareText(transcript);
+    return /\b(here is the next question|the next question|can only read|only read the script|read the script aloud|read the script|cannot assist right now|cannot assist|i am sorry but|i am sorry i|sorry but i can)\b/.test(actual);
+  }
+
+  function hasMayaMetaPreambleBeforeScript(transcript) {
+    if (!isMayaMetaPreamble(transcript)) return false;
+    var expected = normalizeCompareText(mayaExpectedText || preparedMayaText);
+    var actual = normalizeCompareText(transcript);
+    if (!expected) return true;
+    var opening = expected.split(' ').filter(Boolean).slice(0, 3).join(' ');
+    if (opening.length < 4) return true;
+    var idx = actual.indexOf(opening);
+    return idx === -1 || idx > 6;
+  }
+
   function isMayaOffScriptSpeech(transcript) {
     var actual = normalizeCompareText(transcript);
-    return /\b(i can help|let me help|happy to help|no problem|not sure what you|if you are unsure|there is no problem|there s no problem|i am here to help|i m here to help|dive into|materials deeper|ready to dive|let s review|lets review|let me explain|would you like|feel free|great question|good question|shall we|cannot answer|can t answer|unable to answer|won t answer|not able to answer|sorry i cannot|sorry i can t|i cannot answer|i can t answer)\b/.test(actual);
+    return isMayaMetaPreamble(transcript)
+      || /\b(i can help|let me help|happy to help|no problem|not sure what you|if you are unsure|there is no problem|there s no problem|i am here to help|i m here to help|dive into|materials deeper|ready to dive|let s review|lets review|let me explain|would you like|feel free|great question|good question|shall we|cannot answer|can t answer|unable to answer|won t answer|not able to answer|sorry i cannot|sorry i can t|i cannot answer|i can t answer)\b/.test(actual);
   }
 
   function isMayaSpeechDrift(transcript) {
     var expected = normalizeCompareText(mayaExpectedText || preparedMayaText);
     var actual = normalizeCompareText(transcript);
     if (!expected || !actual) return false;
+    if (hasMayaMetaPreambleBeforeScript(transcript)) return true;
     if (isMayaOffScriptSpeech(actual)) return true;
     if (/^(understood|okay|ok|sure|got it|certainly|of course|yes)\b/.test(actual) && expected.indexOf(actual) !== 0) return true;
     if (actual === expected) return false;
@@ -291,6 +292,32 @@
     expectedWords.forEach(function (word) { if (actualSet[word]) hits += 1; });
     var coverage = hits / expectedWords.length;
     return coverage < 0.78 || actualWords.length > expectedWords.length + 6;
+  }
+
+  function retryQuestionWithoutPreamble() {
+    var text = mayaExpectedText || preparedMayaText || '';
+    if (!text) return false;
+    mayaDriftDetected = true;
+    mayaTranscriptDone = false;
+    responseInProgress = false;
+    cancelRealtimeAudioOnly();
+    ensureExpectedMayaBubble();
+    var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
+    var script = escapeScriptQuote(text);
+    sendResponse(
+      'Text-to-speech. Start immediately with: ' + startAnchor + '. No words before that. Exact text: "' + script + '"',
+      'question'
+    );
+    return true;
+  }
+
+  function handleQuestionPreambleDrift() {
+    if (mayaTurnPurpose === 'question' && !mayaQuestionRetryUsed) {
+      mayaQuestionRetryUsed = true;
+      return retryQuestionWithoutPreamble();
+    }
+    abortMayaSpeechDrift();
+    return false;
   }
 
   function abortMayaSpeechDrift() {
@@ -828,15 +855,10 @@
     setMayaSpeaking(true);
     ensureExpectedMayaBubble();
     prepareRealtimeForScriptedSpeech();
-    if (purpose === 'question' || purpose === 'clarification') {
-      reinforceNarratorSession();
-    }
     var backendOnlyInstructions = [
-      'CRITICAL: You are an exam proctor voice narrator, not a chat assistant.',
-      'Read scripts aloud to the student. Do not solve exam questions, grade, or tutor.',
-      'Never refuse or say you cannot answer—those phrases are forbidden.',
+      'CRITICAL: Text-to-speech renderer only. No conversation.',
+      'Begin with the first word of the quoted script below. No preface, apology, rule explanation, or follow-up.',
       'Do not use conversation history, prior student answers, prior questions, or live microphone input.',
-      'Speak only what the browser instruction below explicitly asks you to read aloud, then stop.',
       instructions
     ].join('\n');
     if (!dc || dc.readyState !== 'open') {
@@ -859,6 +881,7 @@
     if (!textToSpeak) return;
     preparedMayaText = textToSpeak;
     mayaExpectedText = textToSpeak;
+    if ((purpose || '') === 'question') mayaQuestionRetryUsed = false;
     sendResponse(buildTurnInstructions(textToSpeak, purpose || ''), purpose || '');
   }
 
@@ -1226,7 +1249,11 @@
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
       var canonicalMayaText = mayaExpectedText || preparedMayaText || '';
       if (isMayaSpeechDrift(String(msg.transcript || ''))) {
-        abortMayaSpeechDrift();
+        if (hasMayaMetaPreambleBeforeScript(String(msg.transcript || ''))) {
+          handleQuestionPreambleDrift();
+        } else {
+          abortMayaSpeechDrift();
+        }
         return;
       }
       ensureExpectedMayaBubble();
@@ -1243,6 +1270,10 @@
       if (!mayaDriftDetected) {
         var expectedLen = String(mayaExpectedText || preparedMayaText || '').length;
         var partialMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
+        if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(partialMayaText)) {
+          handleQuestionPreambleDrift();
+          return;
+        }
         if (isMayaOffScriptSpeech(partialMayaText) || (expectedLen > 30 && partialMayaText.length > expectedLen * 1.45)) {
           abortMayaSpeechDrift();
           return;
