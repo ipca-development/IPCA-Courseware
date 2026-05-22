@@ -2385,6 +2385,9 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
     } else {
         if (!empty($classification['counts_as_unsat'])) {
             $currentAttemptNumber = (int)($attempt['current_attempt_number'] ?? 1);
+            $nextAttemptNumber = (int)($attempt['next_attempt_number'] ?? ($currentAttemptNumber + 1));
+            $effectiveAllowedAttempts = (int)($attempt['effective_allowed_attempts'] ?? 0);
+            $initialAttemptLimit = (int)($attempt['initial_attempt_limit'] ?? PHP_INT_MAX);
             $remediationTriggerAttempt = (int)($attempt['remediation_trigger_attempt'] ?? PHP_INT_MAX);
             $instructorEscalationAttempt = (int)($attempt['instructor_escalation_attempt'] ?? PHP_INT_MAX);
             $maxTotalAttemptsWithoutAdminOverride = (int)($attempt['max_total_attempts_without_admin_override'] ?? PHP_INT_MAX);
@@ -2407,8 +2410,20 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
                 && $currentAttemptNumber === $remediationTriggerAttempt
             ) {
                 $remediationRequired = true;
-            } elseif ($currentAttemptNumber >= $instructorEscalationAttempt) {
-                $instructorRequired = true;
+            } elseif ($nextAttemptNumber > $effectiveAllowedAttempts) {
+                // Mirror prepare_start: instructor only when the attempt pool is exhausted.
+                if ($nextAttemptNumber >= $instructorEscalationAttempt) {
+                    $instructorRequired = true;
+                } elseif (!$remediationCompleted) {
+                    $remediationRequired = true;
+                } else {
+                    $instructorRequired = true;
+                }
+            } elseif (
+                $nextAttemptNumber > $initialAttemptLimit
+                && !$remediationCompleted
+            ) {
+                $remediationRequired = true;
             }
         }
     }
