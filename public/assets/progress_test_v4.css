@@ -261,8 +261,13 @@
 }
 
 .ptv4-prestart,
-.ptv4-greeting {
+.ptv4-greeting,
+.ptv4-lesson-menu {
   margin-bottom: 14px;
+}
+
+.ptv4-lesson-menu[hidden] {
+  display: none;
 }
 
 .ptv4-greeting-copy {
@@ -514,6 +519,12 @@
   flex: 1 1 140px;
   min-height: 44px;
   padding: 10px 12px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  text-align: center;
   border-radius: 14px;
   border: 2px solid rgba(30, 60, 114, 0.18);
   background: rgba(30, 60, 114, 0.06);

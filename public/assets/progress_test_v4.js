@@ -33,6 +33,8 @@
     evaluated: $('[data-ptv4-evaluated]'),
     final: $('[data-ptv4-final]'),
     prestart: $('[data-ptv4-prestart]'),
+    lessonMenu: $('[data-ptv4-lesson-menu]'),
+    lessonMenuLink: $('[data-ptv4-lesson-menu-link]'),
     greeting: $('[data-ptv4-greeting]'),
     greetingCopy: $('[data-ptv4-greeting-copy]'),
     card: $('[data-ptv4-card]'),
@@ -121,6 +123,50 @@
   function getRecordingMs() {
     if (!recordingStartedAt) return 0;
     return Math.max(0, Date.now() - recordingStartedAt);
+  }
+
+  function courseReturnUrl() {
+    if (cfg.courseReturnUrl) return cfg.courseReturnUrl;
+    var cohortId = parseInt(cfg.cohortId || 0, 10) || 0;
+    var lessonId = parseInt(cfg.lessonId || 0, 10) || 0;
+    var url = '/student/course.php?cohort_id=' + encodeURIComponent(String(cohortId));
+    if (lessonId > 0) url += '#progress-test-lesson-' + encodeURIComponent(String(lessonId));
+    return url;
+  }
+
+  function leaveToLessonMenu() {
+    window.location.href = courseReturnUrl();
+  }
+
+  function isAttemptClosed(s) {
+    if (!s) return false;
+    var st = String(s.status || '');
+    return st === 'completed' || st === 'failed';
+  }
+
+  function syncLessonMenu() {
+    if (!els.lessonMenu) return;
+    var url = courseReturnUrl();
+    if (els.lessonMenuLink) els.lessonMenuLink.setAttribute('href', url);
+
+    var closed = isAttemptClosed(state);
+    var show = !testStarted || closed;
+
+    els.lessonMenu.hidden = !show;
+
+    if (els.lessonMenuLink) {
+      if (closed) {
+        els.lessonMenuLink.classList.add('primary');
+        els.lessonMenuLink.classList.remove('ptv4-btn-outline');
+      } else {
+        els.lessonMenuLink.classList.remove('primary');
+        els.lessonMenuLink.classList.add('ptv4-btn-outline');
+      }
+    }
+
+    if (els.prestart) {
+      els.prestart.hidden = closed && !testStarted;
+    }
   }
 
   function hideRetry() {
@@ -454,6 +500,7 @@
       if (parseInt(item.id, 10) === parseInt(state.current_item_id, 10)) currentItem = item;
     });
     if (currentItem && oralQuestionsStarted) renderCard(currentItem);
+    syncLessonMenu();
     syncButtons();
   }
 
@@ -837,7 +884,8 @@
         greetingReady = false;
         if (els.card) els.card.hidden = true;
         if (els.greeting) els.greeting.hidden = true;
-        if (els.prestart) els.prestart.hidden = false;
+        if (els.prestart) els.prestart.hidden = true;
+        syncLessonMenu();
         syncButtons();
       });
     }
@@ -891,9 +939,11 @@
       }
       if (prepTimer) clearTimeout(prepTimer);
       setStatus('Ready. Questions are prepared — start when you are.');
+      syncLessonMenu();
       syncButtons();
     }).catch(function (err) {
       setStatus('Unable to prepare test: ' + err.message);
+      syncLessonMenu();
     });
   }
 
@@ -911,6 +961,7 @@
       if (els.beginTest) els.beginTest.disabled = true;
       updateProgress(out.state);
       playGreeting();
+      syncLessonMenu();
       syncButtons();
     }).catch(function (err) {
       setStatus('Could not start test: ' + err.message);
@@ -982,11 +1033,18 @@
       stopStudentAnalyser();
       if (els.card) els.card.hidden = true;
       if (els.greeting) els.greeting.hidden = true;
-      if (els.prestart) els.prestart.hidden = false;
       updateProgress(out.state);
       setStatus('Test ended. You may start again when ready.');
+      syncLessonMenu();
     });
   });
+
+  if (els.lessonMenuLink) {
+    els.lessonMenuLink.addEventListener('click', function (ev) {
+      ev.preventDefault();
+      leaveToLessonMenu();
+    });
+  }
 
   window.addEventListener('beforeunload', function () {
     if (testStarted && attemptId) {
@@ -998,4 +1056,5 @@
   });
 
   ensurePrepared();
+  syncLessonMenu();
 })();

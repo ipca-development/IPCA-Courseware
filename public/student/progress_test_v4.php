@@ -92,7 +92,7 @@ if ($userName === '') $userName = trim((string)($u['name'] ?? 'Student'));
 $firstName = trim(explode(' ', $userName)[0] ?? 'Student');
 if ($firstName === '') $firstName = 'Student';
 
-$courseReturnUrl = '/student/course.php?cohort_id=' . (int)$cohortId;
+$courseReturnUrl = '/student/course.php?cohort_id=' . (int)$cohortId . '#progress-test-lesson-' . (int)$lessonId;
 $prepBlocked = false;
 $prepBlockedLabel = 'Preparing Progress Test…';
 if ($role === 'student') {
@@ -128,7 +128,7 @@ if ($prepBlocked) {
           Your progress test is still being prepared. Current status: <strong><?= h($prepBlockedLabel) ?></strong><br><br>
           Please return to your course page and start the test once preparation is complete.
         </div>
-        <a class="gate-btn" href="<?= h($courseReturnUrl) ?>">Return to Course</a>
+        <a class="gate-btn" href="<?= h($courseReturnUrl) ?>">Back to Lesson Menu</a>
       </div>
     </div>
     <?php
@@ -138,7 +138,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=6">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=7">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -203,6 +203,10 @@ cw_header('Progress Test');
     <button class="ptv4-btn primary ptv4-btn-block" type="button" data-ptv4-start-test disabled>Start Progress Test</button>
   </section>
 
+  <section class="ptv4-lesson-menu" data-ptv4-lesson-menu>
+    <a class="ptv4-btn ptv4-btn-outline ptv4-btn-block" data-ptv4-lesson-menu-link href="<?= h($courseReturnUrl) ?>">Back to Lesson Menu</a>
+  </section>
+
   <section class="ptv4-greeting" data-ptv4-greeting hidden>
     <p class="ptv4-greeting-copy" data-ptv4-greeting-copy>Maya will greet you, then you can begin the oral test.</p>
     <button class="ptv4-btn primary ptv4-btn-block" type="button" data-ptv4-begin-test disabled>Start my Progress Test</button>
@@ -259,9 +263,10 @@ cw_header('Progress Test');
 window.IPCAProgressTestV4Config = {
   cohortId: <?= (int)$cohortId ?>,
   lessonId: <?= (int)$lessonId ?>,
+  courseReturnUrl: <?= json_encode($courseReturnUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>,
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>,
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=6"></script>
+<script src="/assets/progress_test_v4.js?v=7"></script>
 <?php cw_footer(); ?>
