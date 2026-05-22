@@ -260,14 +260,6 @@
   50% { height: 16px; opacity: 1; }
 }
 
-.ptv4-lesson-menu {
-  margin-bottom: 14px;
-}
-
-.ptv4-lesson-menu[hidden] {
-  display: none;
-}
-
 .ptv4-btn-block {
   width: 100%;
 }

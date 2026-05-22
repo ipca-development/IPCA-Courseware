@@ -33,8 +33,6 @@
     current: $('[data-ptv4-current]'),
     evaluated: $('[data-ptv4-evaluated]'),
     final: $('[data-ptv4-final]'),
-    lessonMenu: $('[data-ptv4-lesson-menu]'),
-    lessonMenuLink: $('[data-ptv4-lesson-menu-link]'),
     card: $('[data-ptv4-card]'),
     statePill: $('[data-ptv4-state-pill]'),
     qnum: $('[data-ptv4-qnum]'),
@@ -217,33 +215,6 @@
     window.location.href = courseReturnUrl();
   }
 
-  function isAttemptClosed(s) {
-    if (!s) return false;
-    var st = String(s.status || '');
-    return st === 'completed' || st === 'failed';
-  }
-
-  function syncLessonMenu() {
-    if (!els.lessonMenu) return;
-    var url = courseReturnUrl();
-    if (els.lessonMenuLink) els.lessonMenuLink.setAttribute('href', url);
-
-    var closed = isAttemptClosed(state);
-    var show = !testStarted || closed;
-
-    els.lessonMenu.hidden = !show;
-
-    if (els.lessonMenuLink) {
-      if (closed) {
-        els.lessonMenuLink.classList.add('primary');
-        els.lessonMenuLink.classList.remove('ptv4-btn-outline');
-      } else {
-        els.lessonMenuLink.classList.remove('primary');
-        els.lessonMenuLink.classList.add('ptv4-btn-outline');
-      }
-    }
-  }
-
   function hideRetry() {
     if (els.retry) {
       els.retry.classList.remove('is-visible');
@@ -307,6 +278,12 @@
     }
   }
 
+  function isAttemptClosed(s) {
+    if (!s) return false;
+    var st = String(s.status || '');
+    return st === 'completed' || st === 'failed';
+  }
+
   function syncButtons() {
     var prepared = state && state.prepared;
     var allDone = state && state.evaluated_count >= state.total_questions;
@@ -335,7 +312,7 @@
     if (els.replay) els.replay.disabled = !testStarted || !oralQuestionsStarted || !currentItem || cardState === CARD.EVALUATING;
     if (els.clarify) els.clarify.disabled = !clarificationPending || cardState !== CARD.CLARIFICATION || !clarificationQuestion;
     if (els.next) els.next.disabled = cardState !== CARD.COMPLETE || allDone;
-    if (els.end) els.end.disabled = !testStarted;
+    if (els.end) els.end.disabled = !!sessionConnecting;
     var actions = page.querySelector('.ptv4-card-actions');
     if (actions) actions.classList.toggle('is-session-active', !!testStarted);
   }
@@ -584,7 +561,6 @@
       if (parseInt(item.id, 10) === parseInt(state.current_item_id, 10)) currentItem = item;
     });
     if (currentItem && oralQuestionsStarted) renderCard(currentItem);
-    syncLessonMenu();
     syncButtons();
   }
 
@@ -964,7 +940,6 @@
         oralQuestionsStarted = false;
         greetingReady = false;
         setBeginTestVisible(false);
-        syncLessonMenu();
         syncButtons();
       });
     }
@@ -1018,11 +993,9 @@
       setStatus('Ready. Questions are prepared — start when you are.');
       startCamera();
       renderIdleLayout();
-      syncLessonMenu();
       syncButtons();
     }).catch(function (err) {
       setStatus('Unable to prepare test: ' + err.message);
-      syncLessonMenu();
     });
   }
 
@@ -1040,7 +1013,6 @@
       testStarted = true;
       updateProgress(out.state);
       playGreeting();
-      syncLessonMenu();
       syncButtons();
     }).catch(function (err) {
       sessionConnecting = false;
@@ -1113,27 +1085,16 @@
     stopAnswerCapture(false);
   });
   if (els.end) els.end.addEventListener('click', function () {
+    if (sessionConnecting) return;
+    if (!testStarted || isAttemptClosed(state)) {
+      leaveToLessonMenu();
+      return;
+    }
     if (!window.confirm('Exit this progress test? Partial answers on the current attempt will be reset.')) return;
-    apiJson('end_oral_test_without_penalty', {}).then(function (out) {
-      testStarted = false;
-      greetingReady = false;
-      oralQuestionsStarted = false;
-      stopTimer();
-      stopMayaBarMotion();
-      stopStudentAnalyser();
-      updateProgress(out.state);
-      renderIdleLayout();
-      setStatus('Test ended. You may start again when ready.');
-      syncLessonMenu();
-    });
-  });
-
-  if (els.lessonMenuLink) {
-    els.lessonMenuLink.addEventListener('click', function (ev) {
-      ev.preventDefault();
+    apiJson('end_oral_test_without_penalty', {}).then(function () {
       leaveToLessonMenu();
     });
-  }
+  });
 
   window.addEventListener('beforeunload', function () {
     if (testStarted && attemptId) {
@@ -1145,6 +1106,5 @@
   });
 
   ensurePrepared();
-  syncLessonMenu();
   syncButtons();
 })();

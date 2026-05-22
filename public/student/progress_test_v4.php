@@ -138,7 +138,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=9">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=10">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -199,10 +199,6 @@ cw_header('Progress Test');
     </div>
   </section>
 
-  <section class="ptv4-lesson-menu" data-ptv4-lesson-menu>
-    <a class="ptv4-btn ptv4-btn-outline ptv4-btn-block" data-ptv4-lesson-menu-link href="<?= h($courseReturnUrl) ?>">Back to Lesson Menu</a>
-  </section>
-
   <section class="ptv4-card" data-ptv4-card data-card-state="ready" aria-label="Progress test workspace">
     <div class="ptv4-card-head">
       <div class="ptv4-card-state-pill" data-ptv4-state-pill>Ready</div>
@@ -261,5 +257,5 @@ window.IPCAProgressTestV4Config = {
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=9"></script>
+<script src="/assets/progress_test_v4.js?v=10"></script>
 <?php cw_footer(); ?>
