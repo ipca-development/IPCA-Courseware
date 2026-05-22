@@ -58,6 +58,15 @@ function ptv4_ensure_tables(PDO $pdo): void
             }
         }
     }
+    $sqlImprove = __DIR__ . '/../scripts/sql/2026_05_22_progress_test_v4_improvements.sql';
+    if (is_file($sqlImprove)) {
+        $sql = (string)file_get_contents($sqlImprove);
+        foreach (array_filter(array_map('trim', explode(';', $sql))) as $stmt) {
+            if ($stmt !== '') {
+                try { $pdo->exec($stmt); } catch (Throwable $e) {}
+            }
+        }
+    }
 }
 
 function ptv4_normalize_text(string $text): string
@@ -1090,5 +1099,255 @@ function ptv4_evaluation_response(PDO $pdo, array $u, array $attempt, array $ite
         'next_action' => $nextAction,
         'is_complete' => true,
         'state' => $state,
+    ];
+}
+
+function ptv4_log_debug_event(PDO $pdo, int $userId, string $type, string $detail = '', ?array $meta = null, ?int $attemptId = null, ?int $itemId = null, ?int $cohortId = null, ?int $lessonId = null): void
+{
+    try {
+        $st = $pdo->prepare("
+            INSERT INTO progress_test_v4_debug_events
+              (attempt_id, user_id, cohort_id, lesson_id, item_id, event_type, event_detail, meta_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        ");
+        $st->execute([
+            $attemptId ?: null,
+            $userId,
+            $cohortId ?: null,
+            $lessonId ?: null,
+            $itemId ?: null,
+            $type,
+            $detail,
+            $meta ? json_encode($meta, JSON_UNESCAPED_UNICODE) : null,
+        ]);
+    } catch (Throwable $e) {}
+    if ($attemptId) {
+        ptv4_log_event($pdo, $attemptId, $itemId, $userId, 'system', $type, mb_substr($detail, 0, 2000));
+    }
+}
+
+function ptv4_save_user_feedback(PDO $pdo, array $u, array $data): array
+{
+    $userId = (int)($u['id'] ?? 0);
+    $type = trim((string)($data['type'] ?? ''));
+    if ($type === '') $type = 'Progress Test AI Modal Maya';
+    $rating = $data['rating_json'] ?? $data['ratings'] ?? [];
+    if (!is_array($rating)) $rating = [];
+    $st = $pdo->prepare("
+        INSERT INTO user_feedback (user_id, cohort_id, lesson_id, attempt_id, type, rating_json, free_text, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+    ");
+    $st->execute([
+        $userId,
+        (int)($data['cohort_id'] ?? 0) ?: null,
+        (int)($data['lesson_id'] ?? 0) ?: null,
+        (int)($data['attempt_id'] ?? 0) ?: null,
+        $type,
+        json_encode($rating, JSON_UNESCAPED_UNICODE),
+        trim((string)($data['free_text'] ?? '')),
+    ]);
+    return ['ok' => true, 'feedback_id' => (int)$pdo->lastInsertId()];
+}
+
+function ptv4_report_payload(PDO $pdo, array $attempt, array $u): array
+{
+    $attemptId = (int)$attempt['id'];
+    $items = ptv4_load_items($pdo, $attemptId);
+    $responses = ptv4_load_responses($pdo, $attemptId);
+    $nameSt = $pdo->prepare("SELECT COALESCE(NULLIF(TRIM(name), ''), email, CONCAT('User #', id)) FROM users WHERE id = ? LIMIT 1");
+    $nameSt->execute([(int)$attempt['user_id']]);
+    $studentName = trim((string)$nameSt->fetchColumn());
+    $firstName = trim(explode(' ', $studentName)[0] ?? 'Student') ?: 'Student';
+    $lessonSt = $pdo->prepare("SELECT title FROM lessons WHERE id = ? LIMIT 1");
+    $lessonSt->execute([(int)$attempt['lesson_id']]);
+    $lessonTitle = trim((string)$lessonSt->fetchColumn()) ?: 'Lesson';
+    $questions = [];
+    foreach ($items as $item) {
+        $itemId = (int)$item['id'];
+        $resp = $responses[$itemId] ?? null;
+        $questions[] = [
+            'idx' => (int)$item['idx'],
+            'question' => (string)$item['prompt'],
+            'student_answer' => $resp ? (string)($resp['student_answer_text'] ?? '') : '',
+            'score_pct' => $resp ? (int)round((float)($resp['score_pct'] ?? 0)) : null,
+            'feedback' => $resp ? (string)($resp['feedback_text'] ?? '') : '',
+            'clarification_question' => $resp ? (string)($resp['clarification_question_text'] ?? '') : '',
+            'clarification_answer' => $resp ? (string)($resp['clarification_answer_text'] ?? '') : '',
+        ];
+    }
+    $scorePct = $attempt['score_pct'] !== null ? (int)$attempt['score_pct'] : null;
+    $passed = !empty($attempt['pass_gate_met']);
+    $weak = trim((string)($attempt['weak_areas'] ?? ''));
+    $summary = trim((string)($attempt['ai_summary'] ?? ''));
+    $recommendation = $passed
+        ? 'Continue building on your strengths while reviewing ' . ($weak !== '' ? $weak : 'the concepts you missed') . '. Rehearse brief spoken explanations out loud before your next lesson test.'
+        : 'Focus your next study session on ' . ($weak !== '' ? $weak : 'the weak areas above') . '. Practice answering each concept aloud in complete English sentences, then retry when you feel ready.';
+    return [
+        'attempt_id' => $attemptId,
+        'first_name' => $firstName,
+        'lesson_title' => $lessonTitle,
+        'score_pct' => $scorePct,
+        'passed' => $passed,
+        'formal_result_label' => (string)($attempt['formal_result_label'] ?? ''),
+        'motivation' => 'Good job ' . $firstName . ', you completed your oral progress test. Here is what went well and what to improve next.',
+        'summary' => $summary,
+        'recommendation' => $recommendation,
+        'questions' => $questions,
+    ];
+}
+
+function ptv4_normalize_integrity_analysis(array $analysis): array
+{
+    foreach (['official_references', 'integrity_concern_weak_points', 'integrity_concern_suggestions', 'general_understanding_notes', 'correlation_notes'] as $k) {
+        if (!isset($analysis[$k]) || !is_array($analysis[$k])) {
+            $analysis[$k] = isset($analysis[$k]) && $analysis[$k] !== '' ? [(string)$analysis[$k]] : [];
+        }
+    }
+    return $analysis;
+}
+
+function ptv4_generate_integrity_review(PDO $pdo, array $attempt): array
+{
+    $attemptId = (int)$attempt['id'];
+    $existing = $pdo->prepare("SELECT analysis_json, summary_text, model, generated_at FROM progress_test_oral_integrity_reviews WHERE attempt_id = ? LIMIT 1");
+    $existing->execute([$attemptId]);
+    $row = $existing->fetch(PDO::FETCH_ASSOC);
+    if ($row) {
+        $analysis = json_decode((string)($row['analysis_json'] ?? '{}'), true) ?: [];
+        return [
+            'ok' => true,
+            'cached' => true,
+            'analysis' => ptv4_normalize_integrity_analysis($analysis),
+            'summary_text' => (string)($row['summary_text'] ?? ''),
+            'model' => (string)($row['model'] ?? ''),
+            'generated_at' => (string)($row['generated_at'] ?? ''),
+        ];
+    }
+
+    $items = ptv4_load_items($pdo, $attemptId);
+    $responses = ptv4_load_responses($pdo, $attemptId);
+    $snippets = [];
+    foreach ($items as $item) {
+        $resp = $responses[(int)$item['id']] ?? null;
+        $t = trim((string)($resp['student_answer_text'] ?? $item['transcript_text'] ?? ''));
+        if ($t !== '') {
+            $snippets[] = [
+                'question' => mb_substr((string)$item['prompt'], 0, 180),
+                'answer_excerpt' => mb_substr($t, 0, 600),
+                'score_pct' => $resp ? (int)round((float)($resp['score_pct'] ?? 0)) : null,
+            ];
+        }
+    }
+    if (!$snippets) {
+        return ['ok' => false, 'error' => 'no_transcripts'];
+    }
+
+    $system = <<<'TXT'
+You are an aviation oral-test integrity reviewer for instructors. Return JSON only.
+Use concise likelihood language (Low/Medium/High/Not evaluated). Do not accuse the student.
+Evaluate natural speech, script reading indicators, other voices/outside help, overall integrity risk,
+general understanding, correlation with questions, consistency, hesitation patterns, frustration/disengagement,
+motivation/effort, and any oral-test integrity concerns.
+Include a short human-readable summary in summary_text.
+TXT;
+    $userPrompt = json_encode([
+        'attempt_id' => $attemptId,
+        'score_pct' => $attempt['score_pct'] ?? null,
+        'items' => $snippets,
+        'required_fields' => [
+            'natural_speech_likelihood', 'script_reading_likelihood', 'multiple_voices_or_coaching_likelihood',
+            'overall_integrity_risk', 'general_understanding', 'correlation_with_questions', 'consistency_with_question',
+            'hesitation_patterns', 'frustration_or_disengagement', 'motivation_effort', 'integrity_concerns',
+            'official_references', 'integrity_concern_weak_points', 'integrity_concern_suggestions', 'summary_text',
+        ],
+    ], JSON_UNESCAPED_UNICODE);
+
+    $schema = [
+        'type' => 'object',
+        'additionalProperties' => false,
+        'properties' => [
+            'natural_speech_likelihood' => ['type' => 'string'],
+            'script_reading_likelihood' => ['type' => 'string'],
+            'multiple_voices_or_coaching_likelihood' => ['type' => 'string'],
+            'overall_integrity_risk' => ['type' => 'string'],
+            'general_understanding' => ['type' => 'string'],
+            'correlation_with_questions' => ['type' => 'string'],
+            'consistency_with_question' => ['type' => 'string'],
+            'hesitation_patterns' => ['type' => 'string'],
+            'frustration_or_disengagement' => ['type' => 'string'],
+            'motivation_effort' => ['type' => 'string'],
+            'integrity_concerns' => ['type' => 'string'],
+            'official_references' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'integrity_concern_weak_points' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'integrity_concern_suggestions' => ['type' => 'array', 'items' => ['type' => 'string']],
+            'summary_text' => ['type' => 'string'],
+        ],
+        'required' => [
+            'natural_speech_likelihood', 'script_reading_likelihood', 'multiple_voices_or_coaching_likelihood',
+            'overall_integrity_risk', 'general_understanding', 'correlation_with_questions', 'consistency_with_question',
+            'hesitation_patterns', 'frustration_or_disengagement', 'motivation_effort', 'integrity_concerns',
+            'official_references', 'integrity_concern_weak_points', 'integrity_concern_suggestions', 'summary_text',
+        ],
+    ];
+
+    $model = cw_openai_model();
+    $analysis = [];
+    try {
+        $resp = cw_openai_responses([
+            'model' => $model,
+            'input' => [
+                ['role' => 'system', 'content' => [['type' => 'input_text', 'text' => $system]]],
+                ['role' => 'user', 'content' => [['type' => 'input_text', 'text' => $userPrompt]]],
+            ],
+            'text' => ['format' => ['type' => 'json_schema', 'name' => 'ptv4_integrity_review', 'schema' => $schema, 'strict' => true]],
+            'temperature' => 0.2,
+            'max_output_tokens' => 900,
+        ]);
+        $analysis = cw_openai_extract_json_text($resp) ?: [];
+    } catch (Throwable $e) {
+        return ['ok' => false, 'error' => $e->getMessage()];
+    }
+
+    $analysis = ptv4_normalize_integrity_analysis($analysis);
+    $summaryText = trim((string)($analysis['summary_text'] ?? ''));
+    $st = $pdo->prepare("
+        INSERT INTO progress_test_oral_integrity_reviews
+          (attempt_id, user_id, cohort_id, lesson_id, analysis_json, summary_text, model, generated_at, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
+    ");
+    $st->execute([
+        $attemptId,
+        (int)$attempt['user_id'],
+        (int)$attempt['cohort_id'],
+        (int)$attempt['lesson_id'],
+        json_encode($analysis, JSON_UNESCAPED_UNICODE),
+        $summaryText,
+        $model,
+    ]);
+    ptv4_log_debug_event($pdo, (int)$attempt['user_id'], 'integrity_review_generated', $summaryText, ['attempt_id' => $attemptId], $attemptId, null, (int)$attempt['cohort_id'], (int)$attempt['lesson_id']);
+
+    return [
+        'ok' => true,
+        'cached' => false,
+        'analysis' => $analysis,
+        'summary_text' => $summaryText,
+        'model' => $model,
+        'generated_at' => gmdate('Y-m-d H:i:s'),
+    ];
+}
+
+function ptv4_get_stored_integrity_for_attempt(PDO $pdo, int $attemptId): ?array
+{
+    $st = $pdo->prepare("SELECT analysis_json, summary_text, model, generated_at FROM progress_test_oral_integrity_reviews WHERE attempt_id = ? LIMIT 1");
+    $st->execute([$attemptId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) return null;
+    $analysis = json_decode((string)($row['analysis_json'] ?? '{}'), true) ?: [];
+    return [
+        'analysis' => ptv4_normalize_integrity_analysis($analysis),
+        'summary_text' => (string)($row['summary_text'] ?? ''),
+        'model' => (string)($row['model'] ?? ''),
+        'generated_at' => (string)($row['generated_at'] ?? ''),
+        'attempt_id' => $attemptId,
     ];
 }

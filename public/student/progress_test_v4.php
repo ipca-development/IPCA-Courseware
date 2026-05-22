@@ -85,6 +85,23 @@ $lessonSt->execute([$lessonId]);
 $lessonTitle = trim((string)$lessonSt->fetchColumn());
 if ($lessonTitle === '') $lessonTitle = 'Lesson';
 
+$lessonNumber = 1;
+$orderedLessonsSt = $pdo->prepare("
+  SELECT l.id
+  FROM cohort_lesson_deadlines d
+  JOIN lessons l ON l.id = d.lesson_id
+  JOIN courses c ON c.id = l.course_id
+  WHERE d.cohort_id = ?
+  ORDER BY c.sort_order, c.id, d.sort_order, d.id
+");
+$orderedLessonsSt->execute([$cohortId]);
+foreach ($orderedLessonsSt->fetchAll(PDO::FETCH_COLUMN) as $i => $orderedLessonId) {
+    if ((int)$orderedLessonId === $lessonId) {
+        $lessonNumber = $i + 1;
+        break;
+    }
+}
+
 $nameSt = $pdo->prepare('SELECT name FROM users WHERE id = ? LIMIT 1');
 $nameSt->execute([$studentContextId]);
 $userName = trim((string)$nameSt->fetchColumn());
@@ -138,15 +155,14 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=10">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=11">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
     <div class="ptv4-hero-grid">
       <div class="ptv4-hero-left">
-        <div class="ptv4-hero-eyebrow">Oral Progress Test</div>
-        <h1 class="ptv4-hero-title">Progress Test</h1>
-        <div class="ptv4-hero-lesson"><?= h($lessonTitle) ?></div>
+        <div class="ptv4-hero-eyebrow">Lesson <?= (int)$lessonNumber ?> Progress Test</div>
+        <h1 class="ptv4-hero-title"><?= h($lessonTitle) ?></h1>
         <div class="ptv4-hero-status" data-ptv4-status>Preparing your test...</div>
         <div class="ptv4-hero-stats">
           <div class="ptv4-stat-chip" data-ptv4-score>Score: --</div>
@@ -163,12 +179,13 @@ cw_header('Progress Test');
       </div>
 
       <div class="ptv4-hero-avatars" aria-label="Maya and student">
+        <div class="ptv4-hero-avatar-row">
         <div class="ptv4-avatar-block">
           <div class="ptv4-avatar-row">
             <div class="ptv4-audio-bars ptv4-audio-bars-maya" data-ptv4-maya-bars aria-hidden="true">
               <span></span><span></span><span></span><span></span>
             </div>
-            <div class="ptv4-avatar-frame" data-ptv4-maya-frame>
+            <div class="ptv4-avatar-frame" data-ptv4-maya-frame data-ptv4-maya-click>
               <img src="/assets/avatars/maya.png" alt="Maya">
             </div>
             <div class="ptv4-audio-bars ptv4-audio-bars-maya" data-ptv4-maya-bars-right aria-hidden="true">
@@ -195,16 +212,13 @@ cw_header('Progress Test');
           <div class="ptv4-avatar-name"><?= h($firstName) ?></div>
           <div class="ptv4-status-pill ptv4-status-student" data-ptv4-student-status>Standby</div>
         </div>
+        </div>
+        <button class="ptv4-exit-btn ptv4-hero-exit" type="button" data-ptv4-end>Exit Test</button>
       </div>
     </div>
   </section>
 
   <section class="ptv4-card" data-ptv4-card data-card-state="ready" aria-label="Progress test workspace">
-    <div class="ptv4-card-head">
-      <div class="ptv4-card-state-pill" data-ptv4-state-pill>Ready</div>
-      <button class="ptv4-exit-btn" type="button" data-ptv4-end disabled>Exit Test</button>
-    </div>
-
     <div class="ptv4-card-body">
       <div class="ptv4-question-row">
         <div class="ptv4-question-text" data-ptv4-question>Progress Test ready</div>
@@ -219,13 +233,22 @@ cw_header('Progress Test');
       </div>
 
       <div class="ptv4-transcript-box">
-        <div class="ptv4-transcript-label">Your answer transcript</div>
-        <div class="ptv4-transcript" data-ptv4-transcript data-state="status">Your answer transcript will appear here after you answer a question.</div>
+        <div class="ptv4-transcript-label">Your answer</div>
+        <div class="ptv4-transcript" data-ptv4-transcript data-state="status">Your spoken answer will appear here after you stop recording.</div>
+        <div class="ptv4-processing" data-ptv4-processing hidden>
+          <div class="ptv4-processing-label" data-ptv4-processing-label>Processing your answer… 0%</div>
+          <div class="ptv4-processing-bar"><div class="ptv4-processing-fill" data-ptv4-processing-fill></div></div>
+        </div>
+      </div>
+
+      <div class="ptv4-feedback-panel" data-ptv4-feedback-panel aria-hidden="true">
+        <div class="ptv4-feedback-score" data-ptv4-feedback-score></div>
+        <div class="ptv4-feedback-text" data-ptv4-feedback-text></div>
       </div>
 
       <div class="ptv4-message-slot">
         <div class="ptv4-hint is-visible" data-ptv4-hint>
-          Tap <strong>Start my Progress Test</strong> when you are ready. Maya will greet you before the first question.
+          Tap <strong>Start</strong> when you are ready. Maya will greet you before the first question.
         </div>
         <div class="ptv4-hint ptv4-hint-warn" data-ptv4-record-hint aria-hidden="true">
           Recording limit: 45 seconds maximum. Recording will stop automatically at 45 seconds.
@@ -235,27 +258,89 @@ cw_header('Progress Test');
     </div>
 
     <div class="ptv4-card-actions" aria-label="Progress test controls">
-      <button class="ptv4-btn primary ptv4-btn-session is-visible" type="button" data-ptv4-begin-test disabled>Start my Progress Test</button>
+      <button class="ptv4-btn primary ptv4-btn-session is-visible" type="button" data-ptv4-begin-test disabled>Start</button>
       <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-replay disabled>Replay Question</button>
       <button class="ptv4-btn primary" type="button" data-ptv4-start-answer disabled>Start Answer</button>
       <button class="ptv4-btn danger" type="button" data-ptv4-stop-answer disabled>Stop Answer</button>
       <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-clarify disabled>Request Clarification</button>
       <button class="ptv4-btn ptv4-btn-muted" type="button" data-ptv4-next disabled>Next Question</button>
+      <button class="ptv4-btn primary" type="button" data-ptv4-my-report hidden>My Report</button>
       <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-retry aria-hidden="true">Retry</button>
     </div>
 
     <div class="ptv4-card-footnote">You will be allowed one clarification if needed. Please answer in English.</div>
   </section>
+
+<div class="ptv4-modal-backdrop" data-ptv4-report-modal hidden>
+  <div class="ptv4-modal" role="dialog" aria-modal="true" aria-label="Progress test report">
+    <div class="ptv4-modal-head">
+      <div class="ptv4-modal-title-wrap">
+        <img src="/assets/avatars/maya.png" alt="" class="ptv4-modal-maya">
+        <div>
+          <div class="ptv4-modal-title">Progress Test Report</div>
+          <div class="ptv4-modal-sub" data-ptv4-report-subtitle></div>
+        </div>
+      </div>
+      <button class="ptv4-modal-close" type="button" data-ptv4-report-close aria-label="Close">&times;</button>
+    </div>
+    <div class="ptv4-modal-tabs">
+      <button type="button" class="is-active" data-ptv4-tab="score">Score Report</button>
+      <button type="button" data-ptv4-tab="feedback">Feedback</button>
+    </div>
+    <div class="ptv4-modal-body">
+      <div class="ptv4-tab-panel is-active" data-ptv4-tab-panel="score">
+        <div class="ptv4-report-motivation" data-ptv4-report-motivation></div>
+        <div class="ptv4-report-summary" data-ptv4-report-summary></div>
+        <div class="ptv4-report-questions" data-ptv4-report-questions></div>
+        <div class="ptv4-report-recommendation" data-ptv4-report-recommendation></div>
+      </div>
+      <div class="ptv4-tab-panel" data-ptv4-tab-panel="feedback">
+        <form data-ptv4-feedback-form>
+          <div class="ptv4-feedback-q" data-ptv4-fb-q="maya_clear"><div class="ptv4-feedback-q-label">Maya’s questions were clear.</div><div class="ptv4-feedback-q-options"></div></div>
+          <div class="ptv4-feedback-q" data-ptv4-fb-q="audio_quality"><div class="ptv4-feedback-q-label">The audio quality was good.</div><div class="ptv4-feedback-q-options"></div></div>
+          <div class="ptv4-feedback-q" data-ptv4-fb-q="felt_fair"><div class="ptv4-feedback-q-label">The test felt fair.</div><div class="ptv4-feedback-q-options"></div></div>
+          <div class="ptv4-feedback-q" data-ptv4-fb-q="recording_worked"><div class="ptv4-feedback-q-label">The answer recording worked well.</div><div class="ptv4-feedback-q-options"></div></div>
+          <div class="ptv4-feedback-q" data-ptv4-fb-q="feedback_helped"><div class="ptv4-feedback-q-label">Maya’s feedback helped me understand what to improve.</div><div class="ptv4-feedback-q-options"></div></div>
+          <div class="ptv4-feedback-q" data-ptv4-fb-q="felt_motivating"><div class="ptv4-feedback-q-label">The Progress Test felt motivating.</div><div class="ptv4-feedback-q-options"></div></div>
+          <div class="ptv4-feedback-q" data-ptv4-fb-q="went_wrong"><div class="ptv4-feedback-q-label">Did anything go wrong?</div><div class="ptv4-feedback-q-options" data-ptv4-fb-issue></div></div>
+          <label class="ptv4-feedback-free">Anything else you want to tell us?<textarea rows="3" data-ptv4-fb-free></textarea></label>
+          <button class="ptv4-btn primary ptv4-btn-block" type="submit">Send Feedback</button>
+          <div class="ptv4-feedback-sent" data-ptv4-feedback-sent hidden>Thank you — your feedback was sent.</div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="ptv4-modal-backdrop" data-ptv4-debug-modal hidden>
+  <div class="ptv4-modal ptv4-debug-modal" role="dialog" aria-modal="true" aria-label="Progress test debug">
+    <div class="ptv4-modal-head">
+      <div class="ptv4-modal-title">Progress Test Debug</div>
+      <button class="ptv4-modal-close" type="button" data-ptv4-debug-close aria-label="Close">&times;</button>
+    </div>
+    <div class="ptv4-modal-body">
+      <div data-ptv4-debug-pin-view>
+        <p>Enter support PIN for detailed debug view, or send a bug report.</p>
+        <input type="password" inputmode="numeric" maxlength="8" data-ptv4-debug-pin placeholder="PIN">
+        <button class="ptv4-btn primary ptv4-btn-block" type="button" data-ptv4-debug-unlock>Unlock Debug View</button>
+        <button class="ptv4-btn ptv4-btn-outline ptv4-btn-block" type="button" data-ptv4-bug-report>Send Bug Report</button>
+        <div class="ptv4-bug-sent" data-ptv4-bug-sent hidden>Bug report sent. Thank you.</div>
+      </div>
+      <pre class="ptv4-debug-log" data-ptv4-debug-log hidden></pre>
+    </div>
+  </div>
+</div>
 </div>
 
 <script>
 window.IPCAProgressTestV4Config = {
   cohortId: <?= (int)$cohortId ?>,
   lessonId: <?= (int)$lessonId ?>,
+  lessonNumber: <?= (int)$lessonNumber ?>,
   courseReturnUrl: <?= json_encode($courseReturnUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>,
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>,
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=10"></script>
+<script src="/assets/progress_test_v4.js?v=11"></script>
 <?php cw_footer(); ?>

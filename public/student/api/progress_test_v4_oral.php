@@ -187,10 +187,18 @@ try {
 
         $recordingMs = max(0, (int)($data['recording_ms'] ?? 0));
         $cookieHeader = (string)($_SERVER['HTTP_COOKIE'] ?? '');
-        $finalized = ptv4_finalize_transcript($pdo, $attemptId, $itemId, $recordingMs, $cookieHeader);
         $answer = trim((string)($data['student_answer_text'] ?? ''));
         if ($answer === '') {
+            $finalized = ptv4_finalize_transcript($pdo, $attemptId, $itemId, $recordingMs, $cookieHeader);
             $answer = (string)$finalized['transcript_final'];
+        } else {
+            $finalized = [
+                'transcript_final' => $answer,
+                'has_audio' => true,
+                'audio_received' => true,
+                'transcription_failed' => false,
+                'upload_failed' => false,
+            ];
         }
         $hasAudio = !empty($finalized['has_audio']);
         $audioReceived = !empty($finalized['audio_received']);
@@ -338,6 +346,9 @@ try {
             );
         }
 
+        ptv4_generate_integrity_review($pdo, $attempt);
+        $report = ptv4_report_payload($pdo, $attempt, $u);
+
         ptv4_json([
             'ok' => true,
             'score_pct' => $scorePct,
@@ -346,9 +357,74 @@ try {
             'strongest_areas' => $strong,
             'weak_areas' => $weak,
             'summary' => $summary,
+            'report' => $report,
             'state' => ptv4_state_payload($pdo, $attempt),
             'automation_result' => $finalize['automation_result'] ?? null,
         ]);
+    }
+
+    if ($action === 'get_report') {
+        ptv4_json(['ok' => true, 'report' => ptv4_report_payload($pdo, $attempt, $u)]);
+    }
+
+    if ($action === 'log_debug_events') {
+        $events = $data['events'] ?? [];
+        if (!is_array($events)) $events = [];
+        foreach ($events as $ev) {
+            if (!is_array($ev)) continue;
+            ptv4_log_debug_event(
+                $pdo,
+                (int)$attempt['user_id'],
+                (string)($ev['type'] ?? 'client_event'),
+                (string)($ev['detail'] ?? ''),
+                is_array($ev['meta'] ?? null) ? $ev['meta'] : null,
+                $attemptId,
+                (int)($ev['item_id'] ?? 0) ?: null,
+                (int)$attempt['cohort_id'],
+                (int)$attempt['lesson_id']
+            );
+        }
+        ptv4_json(['ok' => true, 'logged' => count($events)]);
+    }
+
+    if ($action === 'submit_feedback') {
+        $payload = ptv4_save_user_feedback($pdo, $u, array_merge($data, [
+            'cohort_id' => (int)$attempt['cohort_id'],
+            'lesson_id' => (int)$attempt['lesson_id'],
+            'attempt_id' => $attemptId,
+            'type' => 'Progress Test AI Modal Maya',
+        ]));
+        ptv4_json($payload);
+    }
+
+    if ($action === 'submit_bug_report') {
+        $events = $data['events'] ?? [];
+        if (!is_array($events)) $events = [];
+        foreach ($events as $ev) {
+            if (!is_array($ev)) continue;
+            ptv4_log_debug_event(
+                $pdo,
+                (int)$attempt['user_id'],
+                (string)($ev['type'] ?? 'bug_report_event'),
+                (string)($ev['detail'] ?? ''),
+                is_array($ev['meta'] ?? null) ? $ev['meta'] : null,
+                $attemptId,
+                (int)($ev['item_id'] ?? 0) ?: null,
+                (int)$attempt['cohort_id'],
+                (int)$attempt['lesson_id']
+            );
+        }
+        $body = "Progress Test V4 bug report\n"
+            . "Attempt: {$attemptId}\nUser: " . (int)$attempt['user_id'] . "\n"
+            . "Cohort: " . (int)$attempt['cohort_id'] . " Lesson: " . (int)$attempt['lesson_id'] . "\n\n"
+            . json_encode($events, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
+        require_once __DIR__ . '/../../../src/mailer.php';
+        cw_send_mail([
+            'to' => 'info@ipca.aero',
+            'subject' => 'Progress Test V4 Bug Report (Attempt ' . $attemptId . ')',
+            'body_text' => $body,
+        ]);
+        ptv4_json(['ok' => true, 'message' => 'Bug report sent. Thank you.']);
     }
 
     ptv4_json(['ok' => false, 'error' => 'Unknown action'], 400);

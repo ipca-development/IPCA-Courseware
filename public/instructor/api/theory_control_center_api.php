@@ -3114,6 +3114,34 @@ foreach ($pending as $p) {
         $attempts = $data['attempts'] ?? [];
         $fp = (string)($data['attempts_fingerprint'] ?? tcc_attempts_cache_fingerprint($attempts));
         $force = (string)($_GET['force'] ?? '') === '1';
+
+        require_once __DIR__ . '/../../../src/progress_test_v4_oral.php';
+        foreach ($attempts as $attemptRow) {
+            if (!is_array($attemptRow)) continue;
+            if ((string)($attemptRow['status'] ?? '') !== 'completed') continue;
+            $stored = ptv4_get_stored_integrity_for_attempt($pdo, (int)($attemptRow['attempt_id'] ?? $attemptRow['id'] ?? 0));
+            if ($stored) {
+                $analysisOut = tcc_normalize_progress_test_ai_response(array_merge($stored['analysis'], [
+                    'analysis_status' => 'stored_at_test_end',
+                    'stored_generated_at' => $stored['generated_at'],
+                    'stored_summary_text' => $stored['summary_text'],
+                    'stored_model' => $stored['model'],
+                    'stored_attempt_id' => $stored['attempt_id'],
+                ]));
+                tcc_json([
+                    'ok' => true,
+                    'action' => 'ai_progress_test_analysis',
+                    'from_cache' => true,
+                    'from_stored_attempt_review' => true,
+                    'advisory_only' => true,
+                    'student_id' => $studentId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'analysis' => $analysisOut,
+                ]);
+            }
+        }
+
         if (!$force) {
             $cachedRow = tcc_ai_cache_get($pdo, $cohortId, $studentId, $lessonId, 'progress_test');
             if ($cachedRow && hash_equals((string)($cachedRow['fingerprint'] ?? ''), $fp)) {

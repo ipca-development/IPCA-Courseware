@@ -7,7 +7,7 @@
   var RECORDING_MS = 45000;
   var CHUNK_MS = 1500;
   var TRANSCRIPT = {
-    preidle: 'Your answer transcript will appear here after you answer a question.',
+    preidle: 'Your spoken answer will appear here after you stop recording.',
     idle: 'Your spoken answer will appear here after you stop recording.',
     recording: 'Recording your answer…',
     listening: 'Listening carefully…',
@@ -17,6 +17,10 @@
     uploadFailed: 'Audio upload failed. Please try again.'
   };
   var DEBUG_PTV4 = true;
+
+  var DEBUG_PIN = '5014';
+  var LIKERT = ['Strongly agree', 'Agree', 'Neutral', 'Disagree', 'Strongly disagree'];
+  var ISSUE_OPTS = ['No', 'Audio problem', 'Transcript problem', 'Question unclear', 'Page got stuck', 'Other'];
 
   var page = document.querySelector('[data-ptv4-root]');
   if (!page) return;
@@ -34,10 +38,15 @@
     evaluated: $('[data-ptv4-evaluated]'),
     final: $('[data-ptv4-final]'),
     card: $('[data-ptv4-card]'),
-    statePill: $('[data-ptv4-state-pill]'),
     qnum: $('[data-ptv4-qnum]'),
     question: $('[data-ptv4-question]'),
     transcript: $('[data-ptv4-transcript]'),
+    processing: $('[data-ptv4-processing]'),
+    processingLabel: $('[data-ptv4-processing-label]'),
+    processingFill: $('[data-ptv4-processing-fill]'),
+    feedbackPanel: $('[data-ptv4-feedback-panel]'),
+    feedbackScore: $('[data-ptv4-feedback-score]'),
+    feedbackText: $('[data-ptv4-feedback-text]'),
     feedback: $('[data-ptv4-feedback]'),
     hint: $('[data-ptv4-hint]'),
     recordHint: $('[data-ptv4-record-hint]'),
@@ -47,6 +56,7 @@
     timerNote: $('[data-ptv4-timer-note]'),
     mayaStatus: $('[data-ptv4-maya-status]'),
     studentStatus: $('[data-ptv4-student-status]'),
+    mayaFrame: $('[data-ptv4-maya-click]'),
     video: $('[data-ptv4-video]'),
     videoFallback: $('[data-ptv4-video-fallback]'),
     beginTest: $('[data-ptv4-begin-test]'),
@@ -55,8 +65,26 @@
     replay: $('[data-ptv4-replay]'),
     clarify: $('[data-ptv4-clarify]'),
     next: $('[data-ptv4-next]'),
+    myReport: $('[data-ptv4-my-report]'),
     retry: $('[data-ptv4-retry]'),
-    end: $('[data-ptv4-end]')
+    end: $('[data-ptv4-end]'),
+    reportModal: $('[data-ptv4-report-modal]'),
+    reportClose: $('[data-ptv4-report-close]'),
+    reportSubtitle: $('[data-ptv4-report-subtitle]'),
+    reportMotivation: $('[data-ptv4-report-motivation]'),
+    reportSummary: $('[data-ptv4-report-summary]'),
+    reportQuestions: $('[data-ptv4-report-questions]'),
+    reportRecommendation: $('[data-ptv4-report-recommendation]'),
+    feedbackForm: $('[data-ptv4-feedback-form]'),
+    feedbackSent: $('[data-ptv4-feedback-sent]'),
+    debugModal: $('[data-ptv4-debug-modal]'),
+    debugClose: $('[data-ptv4-debug-close]'),
+    debugPin: $('[data-ptv4-debug-pin]'),
+    debugUnlock: $('[data-ptv4-debug-unlock]'),
+    debugLog: $('[data-ptv4-debug-log]'),
+    debugPinView: $('[data-ptv4-debug-pin-view]'),
+    bugReport: $('[data-ptv4-bug-report]'),
+    bugSent: $('[data-ptv4-bug-sent]')
   };
 
   var state = null;
@@ -98,6 +126,20 @@
   var micAnalyserRaf = 0;
   var mayaBarTimer = null;
   var studentBarEls = [];
+  var awaitingNextQuestion = false;
+  var feedbackSpeechDone = false;
+  var testCompleteReady = false;
+  var displayItem = null;
+  var lastReport = null;
+  var processingTimer = null;
+  var processingPct = 0;
+  var debugEvents = [];
+  var mayaClickCount = 0;
+  var mayaClickTimer = null;
+  var wordRevealWords = [];
+  var wordRevealIndex = 0;
+  var wordRevealTimer = null;
+  var dcOpenPromise = null;
 
   function text(el, v) { if (el) el.textContent = v; }
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
@@ -107,6 +149,138 @@
     if (!DEBUG_PTV4) return;
     var args = ['[PTV4]'].concat([].slice.call(arguments));
     console.log.apply(console, args);
+  }
+
+  function logEvent(type, detail, meta) {
+    var ev = {
+      ts: new Date().toISOString(),
+      type: type,
+      detail: detail || '',
+      meta: meta || {},
+      item_id: currentItem ? currentItem.id : null
+    };
+    debugEvents.push(ev);
+    dbg(type, detail, meta || {});
+  }
+
+  function playBeep(kind) {
+    try {
+      var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return;
+      audioCtx = audioCtx || new AudioContextCtor();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+      var oscillator = audioCtx.createOscillator();
+      var gain = audioCtx.createGain();
+      oscillator.type = 'sine';
+      oscillator.frequency.value = kind === 'start' ? 880 : 330;
+      gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.16, audioCtx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
+      oscillator.connect(gain);
+      gain.connect(audioCtx.destination);
+      oscillator.start();
+      oscillator.stop(audioCtx.currentTime + 0.52);
+    } catch (e) {}
+  }
+
+  function waitForDataChannel() {
+    if (dc && dc.readyState === 'open') return Promise.resolve();
+    if (!dcOpenPromise) {
+      dcOpenPromise = new Promise(function (resolve) {
+        if (!dc) { resolve(); return; }
+        if (dc.readyState === 'open') { resolve(); return; }
+        dc.addEventListener('open', function () { resolve(); }, { once: true });
+        window.setTimeout(resolve, 4000);
+      });
+    }
+    return dcOpenPromise;
+  }
+
+  function stopWordReveal() {
+    if (wordRevealTimer) clearInterval(wordRevealTimer);
+    wordRevealTimer = null;
+    questionAudio.ontimeupdate = null;
+  }
+
+  function startWordReveal(fullText, audioEl) {
+    stopWordReveal();
+    wordRevealWords = String(fullText || '').split(/\s+/).filter(Boolean);
+    wordRevealIndex = 0;
+    text(els.question, '');
+    if (!wordRevealWords.length) return;
+    if (audioEl) {
+      audioEl.ontimeupdate = function () {
+        if (!audioEl.duration || !isFinite(audioEl.duration)) return;
+        var target = Math.max(1, Math.ceil((audioEl.currentTime / audioEl.duration) * wordRevealWords.length));
+        if (target > wordRevealIndex) {
+          wordRevealIndex = target;
+          text(els.question, wordRevealWords.slice(0, wordRevealIndex).join(' '));
+        }
+      };
+      return;
+    }
+    var ms = Math.max(120, Math.min(320, Math.floor(7000 / Math.max(1, wordRevealWords.length))));
+    wordRevealTimer = setInterval(function () {
+      wordRevealIndex++;
+      text(els.question, wordRevealWords.slice(0, wordRevealIndex).join(' '));
+      if (wordRevealIndex >= wordRevealWords.length) stopWordReveal();
+    }, ms);
+  }
+
+  function finishWordReveal(fullText) {
+    stopWordReveal();
+    text(els.question, fullText || wordRevealWords.join(' '));
+  }
+
+  function startProcessingProgress(labelPrefix) {
+    processingPct = 5;
+    if (els.processing) els.processing.hidden = false;
+    if (els.transcript) els.transcript.hidden = true;
+    updateProcessingProgress(labelPrefix, processingPct);
+    if (processingTimer) clearInterval(processingTimer);
+    processingTimer = setInterval(function () {
+      if (processingPct < 92) {
+        processingPct += Math.random() * 8 + 2;
+        updateProcessingProgress(labelPrefix, Math.min(92, Math.round(processingPct)));
+      }
+    }, 450);
+  }
+
+  function updateProcessingProgress(labelPrefix, pct) {
+    var label = (labelPrefix || 'Processing your answer') + '… ' + pct + '%';
+    text(els.processingLabel, label);
+    if (els.processingFill) els.processingFill.style.width = clamp(pct, 0, 100) + '%';
+  }
+
+  function finishProcessingProgress(labelPrefix) {
+    if (processingTimer) clearInterval(processingTimer);
+    processingTimer = null;
+    updateProcessingProgress(labelPrefix || 'Processing your answer', 100);
+    window.setTimeout(function () {
+      if (els.processing) els.processing.hidden = true;
+      if (els.transcript) els.transcript.hidden = false;
+    }, 250);
+  }
+
+  function setFeedbackPanel(scorePct, feedback, answerText) {
+    if (!els.feedbackPanel) return;
+    var tone = scorePct >= 70 ? 'pass' : (scorePct >= 30 ? 'partial' : 'fail');
+    if (els.feedbackScore) {
+      els.feedbackScore.setAttribute('data-tone', tone);
+      text(els.feedbackScore, Math.round(scorePct) + '%');
+    }
+    if (els.feedbackText) {
+      var answerBlock = answerText ? ('Your answer: “' + answerText + '”\n\n') : '';
+      els.feedbackText.textContent = answerBlock + (feedback || '');
+    }
+    els.feedbackPanel.setAttribute('aria-hidden', 'false');
+    setFeedbackVisible(false);
+  }
+
+  function hideFeedbackPanel() {
+    if (els.feedbackPanel) els.feedbackPanel.setAttribute('aria-hidden', 'true');
+    if (els.feedbackScore) text(els.feedbackScore, '');
+    if (els.feedbackText) text(els.feedbackText, '');
   }
 
   function setTranscriptDisplay(mode, customText) {
@@ -168,13 +342,9 @@
     return 'Good evening';
   }
 
-  function greetingScript(resume) {
+  function greetingScript() {
     var name = cfg.firstName || 'there';
-    var tod = timeOfDaySalutation();
-    if (resume) {
-      return tod + ' ' + name + ', I am ready to resume your progress test. Click the button below to continue.';
-    }
-    return tod + ' ' + name + ', I am ready to start your progress test. Click the button below to begin.';
+    return timeOfDaySalutation() + ' ' + name + ', click Ready when you want to start your progress test.';
   }
 
   function renderIdleLayout() {
@@ -187,10 +357,11 @@
     }
     setTranscriptDisplay('preidle');
     setCardState(CARD.READY);
-    setHintContent('Tap <strong>Start my Progress Test</strong> when you are ready. Maya will greet you before the first question.', true);
+    setHintContent('Tap <strong>Start</strong> when you are ready. Maya will greet you before the first question.', true);
     setRecordHintVisible(false);
-    setFeedbackVisible(false);
+    hideFeedbackPanel();
     hideRetry();
+    if (els.beginTest) text(els.beginTest, 'Start');
     setBeginTestVisible(true);
     if (els.timer) els.timer.setAttribute('data-active', '0');
     text(els.timerLabel, '\u00a0');
@@ -255,15 +426,6 @@
   function setCardState(next) {
     cardState = next;
     if (els.card) els.card.setAttribute('data-card-state', next);
-    var labels = {
-      ready: testStarted ? 'In Progress' : 'Ready',
-      asking: 'In Progress',
-      listening: 'In Progress',
-      evaluating: 'Evaluating',
-      clarification: 'Clarification',
-      complete: 'Complete'
-    };
-    text(els.statePill, labels[next] || next);
     setAvatarVisuals();
     syncButtons();
     if (currentItem && attemptId && oralQuestionsStarted) {
@@ -290,7 +452,7 @@
     var closed = isAttemptClosed(state);
     var retryVisible = els.retry && els.retry.classList.contains('is-visible');
     if (els.beginTest) {
-      var showBegin = !oralQuestionsStarted && !allDone && !closed;
+      var showBegin = !oralQuestionsStarted && !allDone && !closed && !testCompleteReady;
       setBeginTestVisible(showBegin);
       var canBegin = false;
       if (!testStarted) {
@@ -299,6 +461,9 @@
         canBegin = true;
       }
       els.beginTest.disabled = !showBegin || !canBegin;
+      if (showBegin) {
+        text(els.beginTest, testStarted && greetingReady ? 'Ready' : 'Start');
+      }
     }
     if (els.startAnswer) {
       var canAnswer = cardState === CARD.READY || cardState === CARD.CLARIFICATION || retryVisible;
@@ -311,7 +476,10 @@
     if (els.stopAnswer) els.stopAnswer.disabled = cardState !== CARD.LISTENING && cardState !== CARD.CLARIFICATION;
     if (els.replay) els.replay.disabled = !testStarted || !oralQuestionsStarted || !currentItem || cardState === CARD.EVALUATING;
     if (els.clarify) els.clarify.disabled = !clarificationPending || cardState !== CARD.CLARIFICATION || !clarificationQuestion;
-    if (els.next) els.next.disabled = cardState !== CARD.COMPLETE || allDone;
+    if (els.next) els.next.disabled = !feedbackSpeechDone || cardState !== CARD.COMPLETE || allDone || testCompleteReady;
+    if (els.myReport) {
+      if (els.myReport.hidden !== !testCompleteReady) els.myReport.hidden = !testCompleteReady;
+    }
     if (els.end) els.end.disabled = !!sessionConnecting;
     var actions = page.querySelector('.ptv4-card-actions');
     if (actions) actions.classList.toggle('is-session-active', !!testStarted);
@@ -557,19 +725,26 @@
     if (els.bar) els.bar.style.width = clamp(total ? Math.round((evaluated / total) * 100) : 0, 0, 100) + '%';
 
     currentItem = null;
-    (state.items || []).forEach(function (item) {
-      if (parseInt(item.id, 10) === parseInt(state.current_item_id, 10)) currentItem = item;
-    });
-    if (currentItem && oralQuestionsStarted) renderCard(currentItem);
+    if (!awaitingNextQuestion) {
+      (state.items || []).forEach(function (item) {
+        if (parseInt(item.id, 10) === parseInt(state.current_item_id, 10)) currentItem = item;
+      });
+    } else if (displayItem) {
+      currentItem = displayItem;
+    }
+    if (currentItem && oralQuestionsStarted && !awaitingNextQuestion) renderCard(currentItem);
     syncButtons();
   }
 
   function renderCard(item) {
+    displayItem = item;
     text(els.qnum, 'Question ' + item.idx + ' of ' + (state.total_questions || '?'));
-    text(els.question, item.prompt || item.spoken_question || '');
+    if (cardState !== CARD.ASKING) {
+      text(els.question, item.prompt || item.spoken_question || '');
+    }
     liveTranscript = item.live_transcript || item.student_answer_text || '';
-    if (liveTranscript) setTranscriptDisplay('final', liveTranscript);
-    else setTranscriptDisplay('idle');
+    if (liveTranscript && cardState === CARD.COMPLETE) setTranscriptDisplay('final', liveTranscript);
+    else if (!awaitingNextQuestion) setTranscriptDisplay('idle');
     clarificationPending = item.card_state === CARD.CLARIFICATION || !!item.clarification_question_text;
     if (item.card_state === CARD.CLARIFICATION || item.clarification_question_text) {
       clarificationQuestion = item.clarification_question_text || clarificationQuestion;
@@ -601,6 +776,7 @@
     hideRetry();
     clarificationPending = false;
     clarificationMode = false;
+    hideFeedbackPanel();
     setRecordHintVisible(false);
     setHintContent('Listen to the question carefully. Tap <strong>Start Answer</strong> and speak clearly.', true);
     if (!currentItem) return;
@@ -610,19 +786,26 @@
       setTranscriptDisplay('idle');
     }
 
+    var qText = currentItem.prompt || currentItem.spoken_question || '';
     setCardState(CARD.ASKING);
     startMayaBarMotion();
     setStatus('Maya is asking the question.');
+    logEvent('question_audio_start', qText.slice(0, 120));
 
     function doneAsking() {
+      finishWordReveal(qText);
+      stopMayaBarMotion();
+      logEvent('question_audio_end');
       onQuestionFinished();
     }
 
     if (!currentItem.question_audio_url) {
+      startWordReveal(qText, null);
       speakScript(currentItem.spoken_question, 'question', doneAsking);
       return;
     }
 
+    startWordReveal(qText, questionAudio);
     questionAudio.onended = doneAsking;
     questionAudio.onerror = function () {
       speakScript(currentItem.spoken_question, 'question', doneAsking);
@@ -634,47 +817,59 @@
   }
 
   function speakScript(script, purpose, onDone) {
-    if (!dc || dc.readyState !== 'open') {
-      if (onDone) onDone();
-      return;
-    }
     script = String(script || '').trim();
     if (!script) {
       if (onDone) onDone();
       return;
     }
-    if (purpose === 'clarification') {
-      setCardState(CARD.CLARIFICATION);
-      clarificationPending = true;
-    } else if (purpose === 'question' || purpose === 'greeting') {
-      setCardState(CARD.ASKING);
-      startMayaBarMotion();
-    }
-    var instructions = [
-      'Audio output only. English only. Verbatim text-to-speech renderer.',
-      'Do not add words before or after the text. Speak exactly once, then stop.',
-      'Text: "' + script.replace(/"/g, '\\"') + '"'
-    ].join('\n');
-    dc._ptv4OnSpeechDone = onDone || null;
-    dc.send(JSON.stringify({
-      type: 'response.create',
-      response: {
-        conversation: 'none',
-        input: [],
-        output_modalities: ['audio'],
-        temperature: 0.6,
-        instructions: instructions
+    return waitForDataChannel().then(function () {
+      if (!dc || dc.readyState !== 'open') {
+        logEvent('tts_unavailable', purpose);
+        if (onDone) onDone();
+        return;
       }
-    }));
+      if (purpose === 'clarification') {
+        setCardState(CARD.CLARIFICATION);
+        clarificationPending = true;
+      } else if (purpose === 'question' || purpose === 'greeting' || purpose === 'feedback' || purpose === 'final') {
+        setCardState(CARD.ASKING);
+        startMayaBarMotion();
+      }
+      logEvent('tts_request', purpose, { chars: script.length });
+      var instructions = [
+        'Audio output only. English only. Verbatim text-to-speech renderer.',
+        'Do not add words before or after the text. Speak exactly once, then stop.',
+        'Text: "' + script.replace(/"/g, '\\"') + '"'
+      ].join('\n');
+      dc._ptv4OnSpeechDone = onDone || null;
+      dc.send(JSON.stringify({
+        type: 'response.create',
+        response: {
+          conversation: 'none',
+          input: [],
+          output_modalities: ['audio'],
+          temperature: 0.6,
+          instructions: instructions
+        }
+      }));
+    });
   }
 
   function connectVoice() {
+    dcOpenPromise = null;
     return postJson('/student/api/progress_test_v4_voice_token.php', { attempt_id: attemptId }).then(function (tok) {
       pc = new RTCPeerConnection();
       remoteAudio = document.createElement('audio');
       remoteAudio.autoplay = true;
       pc.ontrack = function (ev) { remoteAudio.srcObject = ev.streams[0]; };
       dc = pc.createDataChannel('oai-events');
+      dcOpenPromise = new Promise(function (resolve) {
+        dc.addEventListener('open', function () {
+          logEvent('voice_datachannel_open');
+          resolve();
+        }, { once: true });
+        window.setTimeout(resolve, 5000);
+      });
       dc.onmessage = function (ev) {
         var msg;
         try { msg = JSON.parse(ev.data); } catch (e) { return; }
@@ -703,6 +898,8 @@
     var type = String(msg.type || '');
 
     if (type === 'response.done' || type === 'response.output_audio.done') {
+      logEvent('tts_complete', type);
+      stopMayaBarMotion();
       if (dc && typeof dc._ptv4OnSpeechDone === 'function') {
         var cb = dc._ptv4OnSpeechDone;
         dc._ptv4OnSpeechDone = null;
@@ -751,6 +948,8 @@
       chunkUploadChain = Promise.resolve();
     }
     recordingStartedAt = Date.now();
+    playBeep('start');
+    logEvent('recording_start', '', { item_id: currentItem.id });
     setTranscriptDisplay(clarificationMode ? 'listening' : 'recording');
     setHintContent('', false);
     setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.LISTENING);
@@ -805,11 +1004,13 @@
     pendingEvalOpts = opts;
     hideRetry();
     setCardState(CARD.EVALUATING);
-    setTranscriptDisplay('processing');
+    startProcessingProgress('Processing your answer');
     setStatus('Processing your answer...');
+    logEvent('evaluation_start');
 
     return flushRecordingUploads()
       .then(function () {
+        updateProcessingProgress('Processing your answer', 55);
         if (!opts.timedOutStart && chunksUploaded <= 0 && !hasRecordedAudio) {
           throw new Error('AUDIO_NOT_RECEIVED');
         }
@@ -826,7 +1027,9 @@
         });
       })
       .then(function (tr) {
+        updateProcessingProgress('Processing your answer', 72);
         dbg('finalize transcript response', tr);
+        logEvent('transcription_complete', tr.transcript_final ? 'ok' : 'empty', tr);
         if (!opts.timedOutStart && (!tr.audio_received || (tr.chunk_count || 0) <= 0)) {
           throw new Error('AUDIO_NOT_RECEIVED');
         }
@@ -846,6 +1049,7 @@
           throw new Error('AUDIO_NOT_RECEIVED');
         }
         setStatus(opts.evalStatusMessage || 'Evaluating your answer...');
+        updateProcessingProgress('Processing your answer', 88);
         return apiJson('finalize_item_answer', {
           item_id: currentItem.id,
           student_answer_text: liveTranscript,
@@ -856,9 +1060,14 @@
           recording_ms: getRecordingMs()
         });
       })
-      .then(handleEvaluationResult)
+      .then(function (out) {
+        finishProcessingProgress('Processing your answer');
+        return handleEvaluationResult(out);
+      })
       .catch(function (err) {
+        finishProcessingProgress('Processing your answer');
         dbg('submitAnswerEvaluation failed', err.message || err);
+        logEvent('evaluation_failed', err.message || String(err));
         handleUploadFailure(err, opts);
       })
       .finally(function () {
@@ -892,15 +1101,24 @@
   function handleEvaluationResult(out) {
     pendingEvalOpts = null;
     hideRetry();
+    feedbackSpeechDone = false;
+    awaitingNextQuestion = true;
+    displayItem = currentItem;
     updateProgress(out.state);
     var ev = out.evaluation || {};
     var feedback = out.feedback_for_student || ev.feedback_for_student || '';
-    setFeedbackVisible(!!feedback, feedback);
+    var scorePct = Math.round(out.score_pct || ev.score_pct || 0);
+    if (liveTranscript) setTranscriptDisplay('final', liveTranscript);
+    setFeedbackPanel(scorePct, feedback, liveTranscript);
+    logEvent('evaluation_complete', feedback.slice(0, 120), { score_pct: scorePct });
 
     if (out.next_action === 'retry_english') {
+      awaitingNextQuestion = false;
+      feedbackSpeechDone = true;
       clarificationPending = false;
       clarificationMode = false;
       liveTranscript = '';
+      hideFeedbackPanel();
       setTranscriptDisplay('idle');
       speakScript('Please answer this question again in English.', 'question', function () {
         onQuestionFinished();
@@ -909,11 +1127,14 @@
     }
 
     if (out.next_action === 'clarify') {
+      awaitingNextQuestion = false;
+      feedbackSpeechDone = true;
       clarificationQuestion = out.clarification_question || feedback;
       originalAnswer = liveTranscript;
       clarificationPending = true;
       clarificationMode = false;
       liveTranscript = '';
+      hideFeedbackPanel();
       setTranscriptDisplay('idle');
       speakScript(clarificationQuestion, 'clarification', function () {
         setCardState(CARD.CLARIFICATION);
@@ -924,22 +1145,24 @@
     }
 
     clarificationPending = false;
-    var scoreLine = 'You scored ' + Math.round(out.score_pct || ev.score_pct || 0) + ' percent on this question.';
-    speakScript(scoreLine + ' ' + feedback, 'feedback');
+    var scoreLine = 'You scored ' + scorePct + ' percent for this question.';
     setCardState(CARD.COMPLETE);
-    setStatus('Question complete.');
+    setStatus('Question complete. Listen to Maya’s feedback.');
+    speakScript(scoreLine + ' ' + feedback, 'feedback', function () {
+      stopMayaBarMotion();
+      feedbackSpeechDone = true;
+      setStatus('Tap Next Question when you are ready.');
+      syncButtons();
+    });
 
     if (out.next_action === 'complete_test') {
       return apiJson('complete_test', {}).then(function (done) {
+        lastReport = done.report || null;
+        testCompleteReady = true;
         updateProgress(done.state);
-        setStatus(done.summary || 'Test complete.');
-        text(els.question, done.summary || 'Your progress test is complete.');
-        setCardState(CARD.COMPLETE);
-        speakScript(done.summary || 'Your progress test is complete.', 'final');
-        testStarted = false;
-        oralQuestionsStarted = false;
-        greetingReady = false;
-        setBeginTestVisible(false);
+        setStatus('Progress test complete. Open My Report when you are ready.');
+        if (els.next) els.next.hidden = true;
+        if (els.myReport) els.myReport.hidden = false;
         syncButtons();
       });
     }
@@ -949,21 +1172,22 @@
   function playGreeting() {
     greetingReady = false;
     oralQuestionsStarted = false;
-    var resume = state && state.resume_mode === 'resumed';
-    var greeting = greetingScript(resume);
+    var greeting = greetingScript();
     text(els.question, 'Progress Test ready');
     setTranscriptDisplay('preidle');
-    setHintContent('Listen to Maya, then tap <strong>Start my Progress Test</strong>.', true);
+    setHintContent('Listen to Maya, then tap <strong>Ready</strong>.', true);
     setBeginTestVisible(true);
     setCardState(CARD.ASKING);
     startMayaBarMotion();
     setStatus('Maya is greeting you.');
+    logEvent('greeting_start');
     speakScript(greeting, 'greeting', function () {
       stopMayaBarMotion();
       greetingReady = true;
       setCardState(CARD.READY);
-      setHintContent('Tap <strong>Start my Progress Test</strong> to begin Question 1.', true);
-      setStatus('Tap Start my Progress Test when you are ready.');
+      setHintContent('Tap <strong>Ready</strong> to begin Question 1.', true);
+      setStatus('Tap Ready when you want to start your progress test.');
+      logEvent('greeting_complete');
       syncButtons();
     });
   }
@@ -972,10 +1196,14 @@
     if (!currentItem) return;
     oralQuestionsStarted = true;
     greetingReady = true;
+    awaitingNextQuestion = false;
+    feedbackSpeechDone = false;
     setBeginTestVisible(false);
     hideRetry();
+    hideFeedbackPanel();
     renderCard(currentItem);
     setStatus('Professional oral check in progress.');
+    logEvent('oral_questions_start');
     playQuestionAudio();
     syncButtons();
   }
@@ -1007,6 +1235,8 @@
     syncButtons();
     setStatus('Connecting oral exam session...');
     Promise.all([startCamera(), connectVoice()]).then(function () {
+      return waitForDataChannel();
+    }).then(function () {
       return apiJson('start_oral_test', {});
     }).then(function (out) {
       sessionConnecting = false;
@@ -1032,7 +1262,10 @@
   }
 
   function nextQuestion() {
-    if (!state || !currentItem) return;
+    if (!state || !currentItem || !feedbackSpeechDone) return;
+    awaitingNextQuestion = false;
+    feedbackSpeechDone = false;
+    hideFeedbackPanel();
     clarificationMode = false;
     clarificationPending = false;
     originalAnswer = '';
@@ -1044,6 +1277,8 @@
     setTranscriptDisplay('idle');
     setFeedbackVisible(false);
     setRecordHintVisible(false);
+    logEvent('next_question_click');
+    if (els.next) els.next.hidden = false;
     return apiJson('advance_item', {}).then(function (out) {
       updateProgress(out.state);
       if (state.evaluated_count >= state.total_questions) {
@@ -1054,6 +1289,72 @@
     });
   }
 
+  function renderReportModal(report) {
+    report = report || lastReport;
+    if (!report || !els.reportModal) return;
+    text(els.reportSubtitle, (report.lesson_title || cfg.lessonTitle || '') + ' · Score ' + (report.score_pct == null ? '--' : report.score_pct + '%'));
+    text(els.reportMotivation, report.motivation || '');
+    text(els.reportSummary, (report.passed ? 'Result: Pass · ' : 'Result: Not yet passed · ') + (report.formal_result_label || '') + (report.score_pct != null ? (' · Overall score ' + report.score_pct + '%') : ''));
+    text(els.reportRecommendation, report.recommendation || '');
+    if (els.reportQuestions) {
+      els.reportQuestions.innerHTML = '';
+      (report.questions || []).forEach(function (q) {
+        var block = document.createElement('div');
+        block.className = 'ptv4-report-q';
+        block.innerHTML = '<div class="ptv4-report-q-score">Question ' + q.idx + ' · ' + (q.score_pct == null ? '--' : q.score_pct + '%') + '</div>'
+          + '<div><strong>Question:</strong> ' + (q.question || '') + '</div>'
+          + '<div style="margin-top:6px"><strong>Your answer:</strong> ' + (q.student_answer || '—') + '</div>'
+          + (q.clarification_question ? '<div style="margin-top:6px"><strong>Clarification:</strong> ' + q.clarification_question + '</div>' : '')
+          + (q.clarification_answer ? '<div style="margin-top:6px"><strong>Clarification answer:</strong> ' + q.clarification_answer + '</div>' : '')
+          + '<div style="margin-top:6px"><strong>Maya feedback:</strong> ' + (q.feedback || '') + '</div>';
+        els.reportQuestions.appendChild(block);
+      });
+    }
+    els.reportModal.hidden = false;
+  }
+
+  function closeReportModal() {
+    if (els.reportModal) els.reportModal.hidden = true;
+  }
+
+  function openDebugModal() {
+    if (!els.debugModal) return;
+    if (els.debugLog) els.debugLog.hidden = true;
+    if (els.debugPinView) els.debugPinView.hidden = false;
+    if (els.bugSent) els.bugSent.hidden = true;
+    if (els.debugPin) els.debugPin.value = '';
+    els.debugModal.hidden = false;
+  }
+
+  function closeDebugModal() {
+    if (els.debugModal) els.debugModal.hidden = true;
+  }
+
+  function initFeedbackForm() {
+    $all('[data-ptv4-fb-q]').forEach(function (block) {
+      var key = block.getAttribute('data-ptv4-fb-q');
+      var optsWrap = block.querySelector('.ptv4-feedback-q-options');
+      if (!optsWrap) return;
+      var opts = key === 'went_wrong' ? ISSUE_OPTS : LIKERT;
+      opts.forEach(function (label, i) {
+        var id = 'ptv4-fb-' + key + '-' + i;
+        var lab = document.createElement('label');
+        lab.innerHTML = '<input type="radio" name="ptv4-fb-' + key + '" value="' + label.replace(/"/g, '&quot;') + '"> ' + label;
+        optsWrap.appendChild(lab);
+      });
+    });
+  }
+
+  function collectFeedbackRatings() {
+    var out = {};
+    $all('[data-ptv4-fb-q]').forEach(function (block) {
+      var key = block.getAttribute('data-ptv4-fb-q');
+      var checked = block.querySelector('input[type="radio"]:checked');
+      if (checked) out[key] = checked.value;
+    });
+    return out;
+  }
+
   if (els.beginTest) els.beginTest.addEventListener('click', onBeginTestClick);
   if (els.startAnswer) els.startAnswer.addEventListener('click', startAnswerCapture);
   if (els.stopAnswer) els.stopAnswer.addEventListener('click', function () { stopAnswerCapture(false); });
@@ -1062,6 +1363,71 @@
     if (clarificationQuestion) speakScript(clarificationQuestion, 'clarification');
   });
   if (els.next) els.next.addEventListener('click', nextQuestion);
+  if (els.myReport) els.myReport.addEventListener('click', function () {
+    if (lastReport) {
+      renderReportModal(lastReport);
+      return;
+    }
+    apiJson('get_report', {}).then(function (out) {
+      lastReport = out.report;
+      renderReportModal(out.report);
+    });
+  });
+  if (els.reportClose) els.reportClose.addEventListener('click', closeReportModal);
+  if (els.reportModal) els.reportModal.addEventListener('click', function (ev) {
+    if (ev.target === els.reportModal) closeReportModal();
+  });
+  $all('[data-ptv4-tab]').forEach(function (tabBtn) {
+    tabBtn.addEventListener('click', function () {
+      var tab = tabBtn.getAttribute('data-ptv4-tab');
+      $all('[data-ptv4-tab]').forEach(function (b) { b.classList.toggle('is-active', b === tabBtn); });
+      $all('[data-ptv4-tab-panel]').forEach(function (p) {
+        p.classList.toggle('is-active', p.getAttribute('data-ptv4-tab-panel') === tab);
+      });
+    });
+  });
+  if (els.feedbackForm) {
+    els.feedbackForm.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      apiJson('submit_feedback', {
+        rating_json: collectFeedbackRatings(),
+        free_text: ($('[data-ptv4-fb-free]') || {}).value || ''
+      }).then(function () {
+        if (els.feedbackSent) els.feedbackSent.hidden = false;
+      });
+    });
+  }
+  if (els.mayaFrame) {
+    els.mayaFrame.addEventListener('click', function () {
+      mayaClickCount++;
+      if (mayaClickTimer) clearTimeout(mayaClickTimer);
+      mayaClickTimer = setTimeout(function () { mayaClickCount = 0; }, 1200);
+      if (mayaClickCount >= 3) {
+        mayaClickCount = 0;
+        openDebugModal();
+      }
+    });
+  }
+  if (els.debugClose) els.debugClose.addEventListener('click', closeDebugModal);
+  if (els.debugUnlock) els.debugUnlock.addEventListener('click', function () {
+    var pin = els.debugPin ? els.debugPin.value : '';
+    if (pin !== DEBUG_PIN) {
+      alert('Incorrect PIN.');
+      return;
+    }
+    if (els.debugPinView) els.debugPinView.hidden = true;
+    if (els.debugLog) {
+      els.debugLog.hidden = false;
+      els.debugLog.textContent = debugEvents.map(function (ev) {
+        return ev.ts + ' [' + ev.type + '] ' + ev.detail + (ev.meta && Object.keys(ev.meta).length ? ' ' + JSON.stringify(ev.meta) : '');
+      }).join('\n');
+    }
+  });
+  if (els.bugReport) els.bugReport.addEventListener('click', function () {
+    apiJson('submit_bug_report', { events: debugEvents }).then(function () {
+      if (els.bugSent) els.bugSent.hidden = false;
+    });
+  });
   if (els.retry) els.retry.addEventListener('click', function () {
     var kind = els.retry.dataset.retryKind || 'evaluation';
     hideRetry();
@@ -1105,6 +1471,7 @@
     }
   });
 
+  initFeedbackForm();
   ensurePrepared();
   syncButtons();
 })();
