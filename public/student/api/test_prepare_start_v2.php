@@ -18,38 +18,13 @@ function read_json(string $s): array {
 }
 
 function build_background_run_url(int $testId): string {
-    return 'https://ipca.training/student/api/test_prepare_run_v2.php?test_id=' . urlencode((string)$testId);
+    $host = getenv('CW_APP_BASE_URL') ?: 'https://ipca.training';
+    return rtrim($host, '/') . '/student/api/test_prepare_run_v2.php?test_id=' . urlencode((string)$testId);
 }
 
 function fire_and_forget_prepare_run(int $testId): void {
-    $url = build_background_run_url($testId);
-
-    $cookieHeader = '';
-    if (!empty($_SERVER['HTTP_COOKIE'])) {
-        $cookieHeader = (string)$_SERVER['HTTP_COOKIE'];
-    }
-
-    $headers = [];
-    if ($cookieHeader !== '') {
-        $headers[] = 'Cookie: ' . $cookieHeader;
-    }
-
-    $ch = curl_init($url);
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_HEADER => false,
-        CURLOPT_NOBODY => false,
-        CURLOPT_POST => false,
-        CURLOPT_TIMEOUT_MS => 3000,
-        CURLOPT_CONNECTTIMEOUT_MS => 5000,
-        CURLOPT_FRESH_CONNECT => true,
-        CURLOPT_FORBID_REUSE => true,
-        CURLOPT_FOLLOWLOCATION => true,
-        CURLOPT_HTTPHEADER => $headers,
-    ]);
-
-    @curl_exec($ch);
-    @curl_close($ch);
+    require_once __DIR__ . '/../../../src/progress_test_prep.php';
+    pt_prep_fire_background_run($testId, (string)($_SERVER['HTTP_COOKIE'] ?? ''));
 }
 
 try {

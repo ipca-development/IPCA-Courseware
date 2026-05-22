@@ -1,6 +1,7 @@
 <?php
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/openai.php';
+require_once __DIR__ . '/../../../src/progress_test_prep.php';
 
 cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
@@ -841,6 +842,7 @@ try {
 
     $questionUrls = [];
     $itemIds = [];
+    $totalQuestions = count($itemRows);
     $totalAudio = 1 + count($itemRows);
     $doneAudio = 0;
 
@@ -864,15 +866,15 @@ try {
         $itemId = (int)$it['id'];
         $itemIds[] = $itemId;
 
-        $kind = (string)$it['kind'];
-        $spoken = "Question {$it['idx']}. " . trim((string)$it['prompt']);
+        $spoken = pt_prep_spoken_question($it, $totalQuestions);
+        $cached = pt_prep_question_audio_cache_get($pdo, $spoken);
 
-        if ($kind === 'yesno') {
-            $spoken .= " Please answer yes or no, and briefly explain.";
-        } elseif ($kind === 'mcq') {
-            $spoken .= " Please answer with the correct phrase.";
-        } else {
-            $spoken .= " Please answer in a short spoken explanation.";
+        if ($cached && trim((string)$cached['audio_url']) !== '') {
+            $questionUrls[$itemId] = (string)$cached['audio_url'];
+            $doneAudio++;
+            $pct = 58 + (int)floor(($doneAudio / $totalAudio) * 40);
+            set_prepare_progress($pdo, $testId, $pct, 'Using cached audio ' . $doneAudio . ' of ' . $totalAudio . '...');
+            continue;
         }
 
         $localFile = $testDir . '/q_' . $itemId . '.mp3';
@@ -886,7 +888,9 @@ try {
         ]);
         upload_file_to_presigned_put((string)$presign['url'], $localFile, 'audio/mpeg');
 
-        $questionUrls[$itemId] = (string)$presign['public_url'];
+        $publicUrl = (string)$presign['public_url'];
+        $questionUrls[$itemId] = $publicUrl;
+        pt_prep_question_audio_cache_store($pdo, $spoken, $publicUrl);
 
         $doneAudio++;
         $pct = 58 + (int)floor(($doneAudio / $totalAudio) * 40);

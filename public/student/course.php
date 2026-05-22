@@ -200,7 +200,7 @@ function summary_quality_meta(array $summaryState) {
 
 
 function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
-    expire_stale_progress_test_v3_attempts($pdo, (int)$userId, (int)$cohortId, (int)$lessonId);
+    expire_stale_progress_test_attempts($pdo, (int)$userId, (int)$cohortId, (int)$lessonId);
 
     $nonStaleFilter = "
         AND NOT (
@@ -269,7 +269,7 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
     ];
 }
 
-function expire_stale_progress_test_v3_attempts(PDO $pdo, int $userId, int $cohortId, int $lessonId): void {
+function expire_stale_progress_test_attempts(PDO $pdo, int $userId, int $cohortId, int $lessonId): void {
     $st = $pdo->prepare("
         UPDATE progress_tests_v2
         SET status = 'failed',
@@ -278,7 +278,7 @@ function expire_stale_progress_test_v3_attempts(PDO $pdo, int $userId, int $coho
             counts_as_unsat = 0,
             pass_gate_met = 0,
             timing_status = 'unknown',
-            status_text = 'Realtime oral test was interrupted and expired after the 15-minute resume window.',
+            status_text = 'Oral progress test was interrupted and expired after the 15-minute resume window.',
             updated_at = NOW()
         WHERE user_id = ?
           AND cohort_id = ?
@@ -842,7 +842,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
 		$canTest = false;
 	}
 
-    $ptUrlV3 = '/student/progress_test_v3.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
+    $ptUrlV4 = '/student/progress_test_v4.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
     $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc, $cohortTimezone);
 
     if ($bestScore !== null) {
@@ -899,8 +899,9 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'attempts_left' => $attemptsLeft,
         'can_test' => $canTest,
         'instructor_decision' => $instructorDecision,
-        'progress_test_url' => $ptUrlV3,
-        'progress_test_url_v3' => $ptUrlV3,
+        'progress_test_url' => $ptUrlV4,
+        'progress_test_url_v4' => $ptUrlV4,
+        'progress_test_url_v3' => '/student/progress_test_v3.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId,
         'has_active_progress_test' => $hasActiveProgressTest,
         'first_slide_id' => $firstSlideId,
 		'activity_state' => $activityState,

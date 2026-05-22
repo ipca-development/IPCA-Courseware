@@ -272,6 +272,17 @@ final class LessonSummaryService
 
 				$this->pdo->commit();
 
+            if ((string)$evaluation['review_status'] === 'acceptable') {
+                require_once __DIR__ . '/progress_test_prep.php';
+                pt_prep_schedule_on_summary_accept(
+                    $this->pdo,
+                    $userId,
+                    $cohortId,
+                    $lessonId,
+                    (string)($_SERVER['HTTP_COOKIE'] ?? '')
+                );
+            }
+
             return [
                 'ok' => true,
                 'review_status' => (string)$evaluation['review_status'],
