@@ -104,6 +104,9 @@
   var answerTimerHandled = false;
   var ANSWER_START_LIMIT_MS = 30000;
   var mayaQuestionRetryUsed = false;
+  var mayaRetryAnswerUsed = false;
+  var mayaSpeechSettleMs = 220;
+  var mayaIdlePollTimer = null;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -338,6 +341,25 @@
     return true;
   }
 
+  function retryAnswerWithoutPreamble() {
+    var text = mayaExpectedText || preparedMayaText || '';
+    if (!text) return false;
+    mayaDriftDetected = true;
+    mayaTranscriptDone = false;
+    responseInProgress = false;
+    cancelRealtimeAudioOnly();
+    ensureExpectedMayaBubble();
+    var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
+    var script = escapeScriptQuote(text);
+    window.setTimeout(function () {
+      sendResponse(
+        'Text-to-speech retry prompt. Start immediately with: ' + startAnchor + '. No words before that. Exact text: "' + script + '"',
+        'retry_answer'
+      );
+    }, mayaSpeechSettleMs);
+    return true;
+  }
+
   function handleQuestionPreambleDrift() {
     if (mayaTurnPurpose === 'question' && !mayaQuestionRetryUsed) {
       mayaQuestionRetryUsed = true;
@@ -345,6 +367,43 @@
     }
     abortMayaSpeechDrift();
     return false;
+  }
+
+  function handleRetryAnswerDrift() {
+    if (mayaTurnPurpose === 'retry_answer' && !mayaRetryAnswerUsed) {
+      mayaRetryAnswerUsed = true;
+      return retryAnswerWithoutPreamble();
+    }
+    abortMayaSpeechDrift();
+    return false;
+  }
+
+  function clearMayaIdlePoll() {
+    if (mayaIdlePollTimer) clearTimeout(mayaIdlePollTimer);
+    mayaIdlePollTimer = null;
+  }
+
+  function speakExactWhenIdle(textToSpeak, purpose) {
+    textToSpeak = String(textToSpeak || '').trim();
+    if (!textToSpeak) return;
+    clearMayaIdlePoll();
+    cancelRealtimeAudioOnly();
+    pendingInstructions = '';
+    pendingPurpose = '';
+    var attempts = 0;
+    function startWhenIdle() {
+      if (responseInProgress && attempts < 60) {
+        attempts += 1;
+        mayaIdlePollTimer = setTimeout(startWhenIdle, 100);
+        return;
+      }
+      clearMayaIdlePoll();
+      mayaIdlePollTimer = setTimeout(function () {
+        mayaIdlePollTimer = null;
+        speakExact(textToSpeak, purpose);
+      }, mayaSpeechSettleMs);
+    }
+    startWhenIdle();
   }
 
   function abortMayaSpeechDrift() {
@@ -925,6 +984,7 @@
     preparedMayaText = textToSpeak;
     mayaExpectedText = textToSpeak;
     if ((purpose || '') === 'question') mayaQuestionRetryUsed = false;
+    if ((purpose || '') === 'retry_answer') mayaRetryAnswerUsed = false;
     sendResponse(buildTurnInstructions(textToSpeak, purpose || ''), purpose || '');
   }
 
@@ -1036,12 +1096,12 @@
         pendingCompleteAfterFeedback = true;
         phase = 'feedback';
         setCloseTestMode('Close Test', false);
-        speakExact(timeoutSpeech, 'feedback');
+        speakExactWhenIdle(timeoutSpeech, 'feedback');
       } else {
         nextQuestionAfterFeedback = true;
         pendingNextQuestionAfterFeedback = true;
         phase = 'feedback';
-        speakExact(timeoutSpeech, 'feedback');
+        speakExactWhenIdle(timeoutSpeech, 'feedback');
       }
     }).catch(function (err) {
       phase = 'answering';
@@ -1161,7 +1221,7 @@
     setFinishPulse(false);
     phase = 'retrying';
     setStatus('Maya is giving you another chance to answer.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
-    speakExact(message, 'retry_answer');
+    speakExactWhenIdle(message, 'retry_answer');
   }
 
   function setClarificationTurn(answer, prompt, mode) {
@@ -1178,7 +1238,7 @@
     clarificationQuestion = prompt || 'Can you clarify this part of your answer?';
     activeStudentBubble = null;
     setStatus(clarificationMode === 'transcript_ambiguity' ? 'Maya is checking a possible transcription issue.' : 'Maya is asking one clarification.', 'Clarification');
-    speakExact(clarificationQuestion, 'clarification');
+    speakExactWhenIdle(clarificationQuestion, 'clarification');
   }
 
   function captureStudentTranscript(transcript, kind) {
@@ -1324,7 +1384,7 @@
       transcript_text: currentItem.spoken_question || currentItem.prompt
     }).catch(function () {});
     clearRealtimeTurnState();
-    speakExact(currentItem.spoken_question || currentItem.prompt, 'question');
+    speakExactWhenIdle(currentItem.spoken_question || currentItem.prompt, 'question');
   }
 
   function handleRealtimeEvent(event) {
@@ -1355,8 +1415,10 @@
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
       var canonicalMayaText = mayaExpectedText || preparedMayaText || '';
       if (isMayaSpeechDrift(String(msg.transcript || ''))) {
-        if (hasMayaMetaPreambleBeforeScript(String(msg.transcript || ''))) {
+        if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(String(msg.transcript || ''))) {
           handleQuestionPreambleDrift();
+        } else if (mayaTurnPurpose === 'retry_answer') {
+          handleRetryAnswerDrift();
         } else {
           abortMayaSpeechDrift();
         }
@@ -1381,7 +1443,11 @@
           return;
         }
         if (isMayaOffScriptSpeech(partialMayaText) || (expectedLen > 30 && partialMayaText.length > expectedLen * 1.45)) {
-          abortMayaSpeechDrift();
+          if (mayaTurnPurpose === 'retry_answer') {
+            handleRetryAnswerDrift();
+          } else {
+            abortMayaSpeechDrift();
+          }
           return;
         }
       }
@@ -1627,12 +1693,12 @@
         pendingCompleteAfterFeedback = true;
         phase = 'feedback';
         setCloseTestMode('Close Test', false);
-        speakExact(exactFeedbackText, 'feedback');
+        speakExactWhenIdle(exactFeedbackText, 'feedback');
       } else {
         nextQuestionAfterFeedback = true;
         pendingNextQuestionAfterFeedback = true;
         phase = 'feedback';
-        speakExact(exactFeedbackText, 'feedback');
+        speakExactWhenIdle(exactFeedbackText, 'feedback');
         if (feedbackPlaybackTimer) clearTimeout(feedbackPlaybackTimer);
         feedbackPlaybackTimer = null;
       }
@@ -1667,6 +1733,7 @@
   }
 
   function stopRealtime(notifyBackend, action) {
+    clearMayaIdlePoll();
     stopMayaTurnTimers();
     pendingFinishPurpose = '';
     mayaTranscriptDone = false;
