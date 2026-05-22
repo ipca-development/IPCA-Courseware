@@ -130,19 +130,7 @@
   }
 
   function isMayaSpeaking() {
-    return root.getAttribute('data-maya-speaking') === '1' || responseInProgress || isMayaPlaybackGuardActive();
-  }
-
-  function isMayaPlaybackGuardActive() {
-    return Date.now() < mayaPlaybackGuardUntil;
-  }
-
-  function markMayaPlaybackGuard(text) {
-    mayaPlaybackGuardUntil = Date.now() + mayaPlaybackTailMs(String(text || mayaExpectedText || preparedMayaText || ''));
-  }
-
-  function clearMayaPlaybackGuard() {
-    mayaPlaybackGuardUntil = 0;
+    return root.getAttribute('data-maya-speaking') === '1' || responseInProgress;
   }
 
   function syncAnswerButtonState() {
@@ -423,16 +411,13 @@
   }
 
   function handleScriptedSpeechDrift(partialMayaText) {
-    if (mayaTurnPurpose === 'retry_answer') {
+    if (mayaTurnPurpose === 'retry_answer' || mayaTurnPurpose === 'audio_check') {
       abortMayaSpeechDrift();
       return;
     }
-    if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(partialMayaText)) {
+    if (mayaTurnPurpose === 'question') {
       if (retryScriptedSpeechWithoutPreamble()) return;
-      abortMayaSpeechDrift();
-      return;
     }
-    if (retryScriptedSpeechWithoutPreamble()) return;
     abortMayaSpeechDrift();
   }
 
@@ -545,8 +530,7 @@
     liveMayaText = mayaExpectedText || preparedMayaText || '';
     pendingFinishPurpose = purpose;
     stopMayaTurnTimers();
-    markMayaPlaybackGuard(liveMayaText);
-    mayaTurnTailTimer = setTimeout(completeMayaTurn, Math.min(mayaPlaybackTailMs(liveMayaText), 4000));
+    mayaTurnTailTimer = setTimeout(completeMayaTurn, 650);
   }
 
   function removeLiveMayaBubble() {
@@ -574,7 +558,8 @@
     answerTimerInterval = null;
     answerTimerDeadline = 0;
     answerTimerHandled = false;
-    stopAnswerTimerWait();
+    if (answerTimerWaitHandle) clearTimeout(answerTimerWaitHandle);
+    answerTimerWaitHandle = null;
     if (els.answerTimer) els.answerTimer.setAttribute('data-active', '0');
     if (els.timerFill) {
       els.timerFill.style.width = '100%';
@@ -587,10 +572,6 @@
     if (!answerTimerDeadline) return;
     if (answerCaptureActive) {
       stopAnswerTimer();
-      return;
-    }
-    if (isMayaSpeaking()) {
-      answerTimerDeadline += 100;
       return;
     }
     var remain = Math.max(0, answerTimerDeadline - Date.now());
@@ -607,25 +588,9 @@
     }
   }
 
-  function stopAnswerTimerWait() {
-    if (answerTimerWaitHandle) clearTimeout(answerTimerWaitHandle);
-    answerTimerWaitHandle = null;
-  }
-
-  function startAnswerTimerWhenReady() {
-    stopAnswerTimerWait();
-    if (phase !== 'answering' || !awaitingAnswer || answerCaptureActive) return;
-    if (isMayaSpeaking()) {
-      answerTimerWaitHandle = setTimeout(startAnswerTimerWhenReady, 200);
-      return;
-    }
-    startAnswerTimer();
-  }
-
   function startAnswerTimer() {
     stopAnswerTimer();
-    stopAnswerTimerWait();
-    if (phase !== 'answering' || !awaitingAnswer || answerCaptureActive || isMayaSpeaking()) return;
+    if (phase !== 'answering' || !awaitingAnswer || answerCaptureActive || responseInProgress) return;
     if (!els.answerTimer) return;
     answerTimerHandled = false;
     els.answerTimer.setAttribute('data-active', '1');
@@ -1153,7 +1118,6 @@
       'Do not use conversation history, prior student answers, prior questions, or live microphone input.',
       instructions
     ].join('\n');
-    markMayaPlaybackGuard(preparedMayaText || mayaExpectedText || '');
     if (!dc || dc.readyState !== 'open') {
       window.setTimeout(function () { drainResponse(); }, estimateMayaSpeechMs(preparedMayaText || mayaExpectedText || ''));
       return;
@@ -1220,7 +1184,7 @@
       setCoachState('ready');
       setStatus(awaitingClarification ? 'Tap ANSWER CLARIFICATION and add your follow-up answer.' : 'Tap START when you are ready to speak.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       answerStopWasQuick = false;
-      startAnswerTimerWhenReady();
+      startAnswerTimer();
       return;
     }
     if (finishedPurpose === 'feedback' && nextQuestionAfterFeedback) {
@@ -1337,7 +1301,7 @@
       setStatus('Timeout scoring failed: ' + err.message, 'Evaluation issue');
       setFinishButton('START', false, 'answer');
       setFinishPulse(true);
-      startAnswerTimerWhenReady();
+      startAnswerTimer();
       addBubble('maya', 'System', 'Timeout scoring failed: ' + err.message, 'warning');
     });
   }
@@ -1367,7 +1331,7 @@
 
   function isSetupOrHoldSpeech(transcript) {
     var t = String(transcript || '').toLowerCase();
-    return /\b(can you hear me|do you hear me|hello|wait|hold on|not ready|i am not ready|i'm not ready|haven't asked|have not asked|you didn't ask|you have not asked|you haven't asked|repeat|say that again|i can't hear|i cannot hear|no audio|audio is not working)\b/.test(t);
+    return /\b(can you hear me|do you hear me|wait|hold on|not ready|i am not ready|i'm not ready|haven't asked|have not asked|you didn't ask|you have not asked|you haven't asked|repeat|say that again|i can't hear|i cannot hear|no audio|audio is not working)\b/.test(t);
   }
 
   function isDoneSpeech(transcript) {
@@ -1560,6 +1524,15 @@
       clearTranscriptSubmitTimers();
       transcriptFlushUntil = 0;
       setTyping('', false);
+      if (!transcriptStopAt) {
+        if (phase === 'answering') {
+          awaitingAnswer = true;
+          setFinishButton(awaitingClarification ? 'ANSWER CLARIFICATION' : 'START', false, 'answer');
+          setFinishPulse(true);
+          startAnswerTimer();
+        }
+        return;
+      }
       var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
       retryCurrentAnswer('I am sorry ' + firstName + ', I did not hear you well. Let me give you another chance to answer properly or check your audio connection.');
       return;
@@ -1658,7 +1631,6 @@
       transcript_text: currentItem.spoken_question || currentItem.prompt
     }).catch(function () {});
     stopMayaSpeechForNewScript();
-    ignoreTranscriptsUntil = Date.now() + 3000;
     speakExactWhenIdle(currentItem.spoken_question || currentItem.prompt, 'question');
   }
 
@@ -1684,25 +1656,15 @@
       responseInProgress = true;
       setMayaSpeaking(true);
       stopAnswerTimer();
-      markMayaPlaybackGuard(mayaExpectedText || preparedMayaText || '');
       ensureExpectedMayaBubble();
       return;
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
       var canonicalMayaText = mayaExpectedText || preparedMayaText || '';
       var spokenTranscript = String(msg.transcript || '');
-      if (canonicalMayaText && looksLikeNonEnglishScript(spokenTranscript, canonicalMayaText)) {
-        if (retryScriptedSpeechInEnglish()) return;
-        abortMayaSpeechDrift();
-        return;
-      }
       if (isMayaSpeechDrift(spokenTranscript)) {
-        if (mayaTurnPurpose === 'question' && (hasMayaMetaPreambleBeforeScript(spokenTranscript) || isMayaConversationalIntro(spokenTranscript))) {
+        if (mayaTurnPurpose === 'question') {
           handleQuestionPreambleDrift();
-        } else if (mayaTurnPurpose === 'retry_answer') {
-          abortMayaSpeechDrift();
-        } else if (retryScriptedSpeechWithoutPreamble()) {
-          return;
         } else {
           abortMayaSpeechDrift();
         }
@@ -1719,41 +1681,14 @@
       return;
     }
     if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text) && (mayaTurnPurpose || pendingFinishPurpose)) {
-      if (!mayaDriftDetected) {
-        var expectedLen = String(mayaExpectedText || preparedMayaText || '').length;
+      if (!mayaDriftDetected && mayaTurnPurpose === 'question') {
         var partialMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
-        if (mayaTurnPurpose === 'retry_answer') {
-          ensureExpectedMayaBubble();
-          return;
-        }
-        var expectedScript = mayaExpectedText || preparedMayaText || '';
-        if (mayaTurnPurpose === 'question' && partialMayaText.length >= 4) {
-          if (isMayaConversationalIntro(partialMayaText) || !isBuildingExpectedScriptOpening(partialMayaText)) {
-            handleQuestionPreambleDrift();
-            return;
-          }
-        }
-        if ((mayaTurnPurpose === 'feedback' || mayaTurnPurpose === 'clarification' || mayaTurnPurpose === 'final') && partialMayaText.length >= 4) {
-          if (isMayaConversationalIntro(partialMayaText) || !isBuildingExpectedScriptOpening(partialMayaText)) {
-            handleScriptedSpeechDrift(partialMayaText);
-            return;
-          }
-        }
-        if (expectedScript && partialMayaText.length > 10 && looksLikeNonEnglishScript(partialMayaText, expectedScript)) {
-          if (retryScriptedSpeechInEnglish()) return;
-          abortMayaSpeechDrift();
-          return;
-        }
-        if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(partialMayaText)) {
+        if (partialMayaText.length >= 4 && (isMayaConversationalIntro(partialMayaText) || !isBuildingExpectedScriptOpening(partialMayaText))) {
           handleQuestionPreambleDrift();
           return;
         }
-        if (partialMayaText.length > 6 && !hasExpectedScriptOpening(partialMayaText)) {
-          handleScriptedSpeechDrift(partialMayaText);
-          return;
-        }
-        if (isMayaOffScriptSpeech(partialMayaText) || (expectedLen > 30 && partialMayaText.length > expectedLen * 1.45)) {
-          handleScriptedSpeechDrift(partialMayaText);
+        if (hasMayaMetaPreambleBeforeScript(partialMayaText)) {
+          handleQuestionPreambleDrift();
           return;
         }
       }
@@ -1792,7 +1727,7 @@
     }
     if (phase !== 'answering' || !(answerCaptureActive || Date.now() < transcriptFlushUntil)) return;
     if (!awaitingAnswer || !currentItem) return;
-    if (responseInProgress && !(Date.now() < transcriptFlushUntil)) return;
+    if (responseInProgress && !answerCaptureActive && !(Date.now() < transcriptFlushUntil)) return;
     if (isCourtesyOnlySpeech(transcript)) {
       if (awaitingClarification) {
         setStatus('That sounded like an acknowledgement. Tap ANSWER CLARIFICATION and add your clarification.', 'Clarification answer');
