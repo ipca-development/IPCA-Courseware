@@ -138,7 +138,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=8">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=9">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -199,10 +199,6 @@ cw_header('Progress Test');
     </div>
   </section>
 
-  <section class="ptv4-prestart" data-ptv4-prestart>
-    <button class="ptv4-btn primary ptv4-btn-block" type="button" data-ptv4-start-test disabled>Start Progress Test</button>
-  </section>
-
   <section class="ptv4-lesson-menu" data-ptv4-lesson-menu>
     <a class="ptv4-btn ptv4-btn-outline ptv4-btn-block" data-ptv4-lesson-menu-link href="<?= h($courseReturnUrl) ?>">Back to Lesson Menu</a>
   </section>
@@ -233,7 +229,7 @@ cw_header('Progress Test');
 
       <div class="ptv4-message-slot">
         <div class="ptv4-hint is-visible" data-ptv4-hint>
-          Tap <strong>Start Progress Test</strong> when you are ready. Maya will greet you before the first question.
+          Tap <strong>Start my Progress Test</strong> when you are ready. Maya will greet you before the first question.
         </div>
         <div class="ptv4-hint ptv4-hint-warn" data-ptv4-record-hint aria-hidden="true">
           Recording limit: 45 seconds maximum. Recording will stop automatically at 45 seconds.
@@ -243,7 +239,7 @@ cw_header('Progress Test');
     </div>
 
     <div class="ptv4-card-actions" aria-label="Progress test controls">
-      <button class="ptv4-btn primary ptv4-btn-session" type="button" data-ptv4-begin-test disabled>Start my Progress Test</button>
+      <button class="ptv4-btn primary ptv4-btn-session is-visible" type="button" data-ptv4-begin-test disabled>Start my Progress Test</button>
       <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-replay disabled>Replay Question</button>
       <button class="ptv4-btn primary" type="button" data-ptv4-start-answer disabled>Start Answer</button>
       <button class="ptv4-btn danger" type="button" data-ptv4-stop-answer disabled>Stop Answer</button>
@@ -265,5 +261,5 @@ window.IPCAProgressTestV4Config = {
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=8"></script>
+<script src="/assets/progress_test_v4.js?v=9"></script>
 <?php cw_footer(); ?>

@@ -33,7 +33,6 @@
     current: $('[data-ptv4-current]'),
     evaluated: $('[data-ptv4-evaluated]'),
     final: $('[data-ptv4-final]'),
-    prestart: $('[data-ptv4-prestart]'),
     lessonMenu: $('[data-ptv4-lesson-menu]'),
     lessonMenuLink: $('[data-ptv4-lesson-menu-link]'),
     card: $('[data-ptv4-card]'),
@@ -52,7 +51,6 @@
     studentStatus: $('[data-ptv4-student-status]'),
     video: $('[data-ptv4-video]'),
     videoFallback: $('[data-ptv4-video-fallback]'),
-    startTest: $('[data-ptv4-start-test]'),
     beginTest: $('[data-ptv4-begin-test]'),
     startAnswer: $('[data-ptv4-start-answer]'),
     stopAnswer: $('[data-ptv4-stop-answer]'),
@@ -68,6 +66,7 @@
   var currentItem = null;
   var cardState = CARD.READY;
   var testStarted = false;
+  var sessionConnecting = false;
   var greetingReady = false;
   var oralQuestionsStarted = false;
   var clarificationMode = false;
@@ -190,11 +189,11 @@
     }
     setTranscriptDisplay('preidle');
     setCardState(CARD.READY);
-    setHintContent('Tap <strong>Start Progress Test</strong> when you are ready. Maya will greet you before the first question.', true);
+    setHintContent('Tap <strong>Start my Progress Test</strong> when you are ready. Maya will greet you before the first question.', true);
     setRecordHintVisible(false);
     setFeedbackVisible(false);
     hideRetry();
-    setBeginTestVisible(false);
+    setBeginTestVisible(true);
     if (els.timer) els.timer.setAttribute('data-active', '0');
     text(els.timerLabel, '\u00a0');
     setTimerNoteVisible(false);
@@ -242,10 +241,6 @@
         els.lessonMenuLink.classList.remove('primary');
         els.lessonMenuLink.classList.add('ptv4-btn-outline');
       }
-    }
-
-    if (els.prestart) {
-      els.prestart.hidden = closed && !testStarted;
     }
   }
 
@@ -315,12 +310,18 @@
   function syncButtons() {
     var prepared = state && state.prepared;
     var allDone = state && state.evaluated_count >= state.total_questions;
+    var closed = isAttemptClosed(state);
     var retryVisible = els.retry && els.retry.classList.contains('is-visible');
-    if (els.startTest) els.startTest.disabled = !prepared || testStarted || allDone;
     if (els.beginTest) {
-      var showBegin = testStarted && !oralQuestionsStarted;
+      var showBegin = !oralQuestionsStarted && !allDone && !closed;
       setBeginTestVisible(showBegin);
-      els.beginTest.disabled = !showBegin || !greetingReady;
+      var canBegin = false;
+      if (!testStarted) {
+        canBegin = !!prepared && !sessionConnecting;
+      } else if (greetingReady) {
+        canBegin = true;
+      }
+      els.beginTest.disabled = !showBegin || !canBegin;
     }
     if (els.startAnswer) {
       var canAnswer = cardState === CARD.READY || cardState === CARD.CLARIFICATION || retryVisible;
@@ -963,7 +964,6 @@
         oralQuestionsStarted = false;
         greetingReady = false;
         setBeginTestVisible(false);
-        if (els.prestart) els.prestart.hidden = true;
         syncLessonMenu();
         syncButtons();
       });
@@ -1010,7 +1010,6 @@
     return apiJson('ensure_prepared', { cohort_id: cfg.cohortId, lesson_id: cfg.lessonId }).then(function (out) {
       updateProgress(out.state);
       if (out.preparing || !out.state.prepared) {
-        if (els.startTest) els.startTest.disabled = true;
         prepTimer = setTimeout(ensurePrepared, 2500);
         setStatus(out.state.status_text || 'Generating questions and caching audio...');
         return;
@@ -1028,21 +1027,36 @@
   }
 
   function startTestFlow() {
+    if (sessionConnecting || testStarted) return;
     greetingReady = false;
     oralQuestionsStarted = false;
+    sessionConnecting = true;
+    syncButtons();
     setStatus('Connecting oral exam session...');
     Promise.all([startCamera(), connectVoice()]).then(function () {
       return apiJson('start_oral_test', {});
     }).then(function (out) {
+      sessionConnecting = false;
       testStarted = true;
-      if (els.prestart) els.prestart.hidden = true;
       updateProgress(out.state);
       playGreeting();
       syncLessonMenu();
       syncButtons();
     }).catch(function (err) {
+      sessionConnecting = false;
+      syncButtons();
       setStatus('Could not start test: ' + err.message);
     });
+  }
+
+  function onBeginTestClick() {
+    if (!testStarted) {
+      startTestFlow();
+      return;
+    }
+    if (greetingReady && !oralQuestionsStarted) {
+      beginOralQuestions();
+    }
   }
 
   function nextQuestion() {
@@ -1068,8 +1082,7 @@
     });
   }
 
-  if (els.startTest) els.startTest.addEventListener('click', startTestFlow);
-  if (els.beginTest) els.beginTest.addEventListener('click', beginOralQuestions);
+  if (els.beginTest) els.beginTest.addEventListener('click', onBeginTestClick);
   if (els.startAnswer) els.startAnswer.addEventListener('click', startAnswerCapture);
   if (els.stopAnswer) els.stopAnswer.addEventListener('click', function () { stopAnswerCapture(false); });
   if (els.replay) els.replay.addEventListener('click', playQuestionAudio);
@@ -1110,7 +1123,6 @@
       stopStudentAnalyser();
       updateProgress(out.state);
       renderIdleLayout();
-      if (els.prestart) els.prestart.hidden = false;
       setStatus('Test ended. You may start again when ready.');
       syncLessonMenu();
     });
@@ -1134,4 +1146,5 @@
 
   ensurePrepared();
   syncLessonMenu();
+  syncButtons();
 })();
