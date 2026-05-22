@@ -121,7 +121,6 @@
   var answerTimerWaitHandle = null;
   var handledMayaResponseDoneKeys = {};
   var handledMayaTranscriptDoneKeys = {};
-  var MAYA_RENDERER_INSTRUCTIONS = 'Read the user message aloud verbatim in English. Do not add, remove, translate, or repeat words. No preamble or closing remarks. Stop after the final word.';
 
   function clearMayaResponseDedupe() {
     handledMayaTranscriptDoneKeys = {};
@@ -295,8 +294,20 @@
     return String(text || '').trim().split(/\s+/).filter(Boolean).slice(0, count || 3).join(' ');
   }
 
-  function buildTurnInstructions(text) {
-    return String(text || '').trim();
+  function buildRendererInstructions(textToSpeak, purpose) {
+    var script = escapeScriptQuote(String(textToSpeak || '').trim());
+    if (!script) return '';
+    var start = escapeScriptQuote(scriptOpeningWords(textToSpeak, 3));
+    var lines = [
+      'Audio output only. English only. Verbatim text-to-speech renderer.',
+      'Do not answer, solve, explain, tutor, grade, or respond to the text.',
+      'Do not add words before or after the text. Speak the text exactly once, then stop.'
+    ];
+    if (purpose === 'question' || purpose === 'clarification') {
+      lines.push('The text is an oral exam question for the student. Never give the answer, hints, or examples.');
+    }
+    lines.push('Begin with: ' + start + '. Text: "' + script + '"');
+    return lines.join('\n');
   }
 
   function normalizeCompareText(value) {
@@ -1131,17 +1142,13 @@
       return;
     }
     unlockAudioPlayback();
+    var rendererInstructions = buildRendererInstructions(textToSpeak, purpose || '');
     dc.send(JSON.stringify({
       type: 'response.create',
       response: {
         conversation: 'none',
         output_modalities: ['audio'],
-        instructions: MAYA_RENDERER_INSTRUCTIONS,
-        input: [{
-          type: 'message',
-          role: 'user',
-          content: [{ type: 'input_text', text: textToSpeak }]
-        }]
+        instructions: rendererInstructions
       }
     }));
   }
