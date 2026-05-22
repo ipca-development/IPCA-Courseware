@@ -115,7 +115,8 @@
   var MIN_AUDIO_COMMIT_MS = 400;
   var answerStopWasQuick = false;
   var answerRetryOfferedForItem = 0;
-  var mayaPlaybackGuardUntil = 0;
+  var mayaAudioEndsAt = 0;
+  var mayaSpeechStartedAt = 0;
   var mayaScriptRetryUsed = {};
   var answerTimerWaitHandle = null;
 
@@ -130,7 +131,24 @@
   }
 
   function isMayaSpeaking() {
-    return root.getAttribute('data-maya-speaking') === '1' || responseInProgress;
+    return root.getAttribute('data-maya-speaking') === '1' || responseInProgress || isMayaAudioPlaybackActive();
+  }
+
+  function isMayaAudioPlaybackActive() {
+    return Date.now() < mayaAudioEndsAt;
+  }
+
+  function scheduleMayaAudioEnd(text, resetStart) {
+    var tail = mayaPlaybackTailMs(String(text || mayaExpectedText || preparedMayaText || ''));
+    if (resetStart || !mayaSpeechStartedAt) {
+      mayaSpeechStartedAt = Date.now();
+    }
+    mayaAudioEndsAt = mayaSpeechStartedAt + tail;
+  }
+
+  function clearMayaAudioEnd() {
+    mayaAudioEndsAt = 0;
+    mayaSpeechStartedAt = 0;
   }
 
   function syncAnswerButtonState() {
@@ -142,6 +160,9 @@
     if (isMayaSpeaking()) {
       els.finish.disabled = true;
       setFinishPulse(false);
+    } else if (!answerCaptureActive) {
+      els.finish.disabled = false;
+      if (phase === 'answering' && awaitingAnswer) setFinishPulse(true);
     }
   }
 
@@ -167,12 +188,18 @@
 
   function completeMayaTurn() {
     if (!pendingFinishPurpose) return;
+    if (isMayaAudioPlaybackActive() || responseInProgress) {
+      syncAnswerButtonState();
+      mayaTurnTailTimer = setTimeout(completeMayaTurn, 150);
+      return;
+    }
     var purpose = pendingFinishPurpose;
     pendingFinishPurpose = '';
     mayaDriftDetected = false;
     mayaTurnPurpose = '';
     mayaTranscriptDone = false;
     stopMayaTurnTimers();
+    clearMayaAudioEnd();
     setMayaSpeaking(false);
     finishMayaTurn(purpose);
   }
@@ -180,20 +207,17 @@
   function scheduleMayaTurnComplete(purpose) {
     stopMayaTurnTimers();
     pendingFinishPurpose = purpose;
-    var text = liveMayaText || preparedMayaText || '';
-    if (mayaTranscriptDone) {
-      mayaTurnTailTimer = setTimeout(completeMayaTurn, mayaPlaybackTailMs());
-      return;
-    }
-    mayaTurnMaxTimer = setTimeout(completeMayaTurn, estimateMayaSpeechMs(text) + 1500);
+    scheduleMayaAudioEnd(liveMayaText || preparedMayaText || '');
+    completeMayaTurn();
   }
 
   function onMayaTranscriptDone(transcript) {
     mayaTranscriptDone = true;
     liveMayaText = String(transcript || '').trim();
+    scheduleMayaAudioEnd(liveMayaText || mayaExpectedText || preparedMayaText);
     if (!pendingFinishPurpose || responseInProgress) return;
     stopMayaTurnTimers();
-    mayaTurnTailTimer = setTimeout(completeMayaTurn, mayaPlaybackTailMs());
+    completeMayaTurn();
   }
 
   function clearRealtimeTurnState() {
@@ -205,6 +229,7 @@
     mayaDriftDetected = false;
     responseInProgress = false;
     stopMayaTurnTimers();
+    clearMayaAudioEnd();
     setMayaSpeaking(false);
     if (dc && dc.readyState === 'open') {
       try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
@@ -490,6 +515,7 @@
     pendingPurpose = '';
     pendingFinishPurpose = '';
     mayaDriftDetected = false;
+    clearMayaAudioEnd();
     cancelRealtimeAudioOnly();
     responseInProgress = false;
     setMayaSpeaking(false);
@@ -530,7 +556,8 @@
     liveMayaText = mayaExpectedText || preparedMayaText || '';
     pendingFinishPurpose = purpose;
     stopMayaTurnTimers();
-    mayaTurnTailTimer = setTimeout(completeMayaTurn, 650);
+    clearMayaAudioEnd();
+    completeMayaTurn();
   }
 
   function removeLiveMayaBubble() {
@@ -574,6 +601,10 @@
       stopAnswerTimer();
       return;
     }
+    if (isMayaAudioPlaybackActive() || responseInProgress) {
+      answerTimerDeadline += 100;
+      return;
+    }
     var remain = Math.max(0, answerTimerDeadline - Date.now());
     var pct = (remain / ANSWER_START_LIMIT_MS) * 100;
     if (els.timerFill) {
@@ -588,9 +619,21 @@
     }
   }
 
+  function startAnswerTimerAfterPlayback() {
+    if (answerTimerWaitHandle) clearTimeout(answerTimerWaitHandle);
+    syncAnswerButtonState();
+    if (phase !== 'answering' || !awaitingAnswer || answerCaptureActive) return;
+    if (responseInProgress || isMayaAudioPlaybackActive()) {
+      answerTimerWaitHandle = setTimeout(startAnswerTimerAfterPlayback, 150);
+      return;
+    }
+    syncAnswerButtonState();
+    startAnswerTimer();
+  }
+
   function startAnswerTimer() {
     stopAnswerTimer();
-    if (phase !== 'answering' || !awaitingAnswer || answerCaptureActive || responseInProgress) return;
+    if (phase !== 'answering' || !awaitingAnswer || answerCaptureActive || responseInProgress || isMayaAudioPlaybackActive()) return;
     if (!els.answerTimer) return;
     answerTimerHandled = false;
     els.answerTimer.setAttribute('data-active', '1');
@@ -1184,7 +1227,7 @@
       setCoachState('ready');
       setStatus(awaitingClarification ? 'Tap ANSWER CLARIFICATION and add your follow-up answer.' : 'Tap START when you are ready to speak.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       answerStopWasQuick = false;
-      startAnswerTimer();
+      startAnswerTimerAfterPlayback();
       return;
     }
     if (finishedPurpose === 'feedback' && nextQuestionAfterFeedback) {
@@ -1301,7 +1344,7 @@
       setStatus('Timeout scoring failed: ' + err.message, 'Evaluation issue');
       setFinishButton('START', false, 'answer');
       setFinishPulse(true);
-      startAnswerTimer();
+      startAnswerTimerAfterPlayback();
       addBubble('maya', 'System', 'Timeout scoring failed: ' + err.message, 'warning');
     });
   }
@@ -1529,7 +1572,7 @@
           awaitingAnswer = true;
           setFinishButton(awaitingClarification ? 'ANSWER CLARIFICATION' : 'START', false, 'answer');
           setFinishPulse(true);
-          startAnswerTimer();
+          startAnswerTimerAfterPlayback();
         }
         return;
       }
@@ -1656,18 +1699,19 @@
       responseInProgress = true;
       setMayaSpeaking(true);
       stopAnswerTimer();
+      scheduleMayaAudioEnd(mayaExpectedText || preparedMayaText || '', true);
       ensureExpectedMayaBubble();
       return;
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
       var canonicalMayaText = mayaExpectedText || preparedMayaText || '';
       var spokenTranscript = String(msg.transcript || '');
-      if (isMayaSpeechDrift(spokenTranscript)) {
-        if (mayaTurnPurpose === 'question') {
-          handleQuestionPreambleDrift();
-        } else {
-          abortMayaSpeechDrift();
-        }
+      if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(spokenTranscript)) {
+        handleQuestionPreambleDrift();
+        return;
+      }
+      if (mayaTurnPurpose !== 'question' && isMayaSpeechDrift(spokenTranscript)) {
+        abortMayaSpeechDrift();
         return;
       }
       ensureExpectedMayaBubble();
@@ -1818,6 +1862,7 @@
       return;
     }
     if ((phase === 'answering' || phase === 'retrying') && !answerCaptureActive) {
+      if (responseInProgress || isMayaAudioPlaybackActive()) return;
       if (phase === 'retrying') phase = 'answering';
       answerRetryOfferedForItem = 0;
       answerStopWasQuick = false;
