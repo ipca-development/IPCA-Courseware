@@ -73,16 +73,17 @@ try {
         }
 
         $transcript = ptv4_transcribe_audio_file($path);
+        $recordedAt = gmdate('Y-m-d H:i:s');
         $st = $pdo->prepare("
             INSERT INTO progress_test_v4_answer_chunks
               (attempt_id, item_id, user_id, chunk_index, storage_path, transcript_text, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, NOW())
-            ON DUPLICATE KEY UPDATE storage_path = VALUES(storage_path), transcript_text = VALUES(transcript_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE storage_path = VALUES(storage_path), transcript_text = VALUES(transcript_text), created_at = VALUES(created_at)
         ");
-        $st->execute([$attemptId, $itemId, (int)$attempt['user_id'], $chunkIndex, $path, $transcript !== '' ? $transcript : null]);
+        $st->execute([$attemptId, $itemId, (int)$attempt['user_id'], $chunkIndex, $path, $transcript !== '' ? $transcript : null, $recordedAt]);
 
-        $partial = ptv4_merge_chunk_transcripts($pdo, $attemptId, $itemId);
-        ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'listening', $partial);
+        ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'listening', null);
+        ptv4_touch_answer_chunk_count($pdo, $attemptId, $itemId);
         if ($transcript !== '') {
             ptv4_log_event($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'student', 'answer_chunk', $transcript);
         }
@@ -95,8 +96,7 @@ try {
         ptv4_json([
             'ok' => true,
             'chunk_index' => $chunkIndex,
-            'transcript_partial' => $partial,
-            'chunk_transcript' => $transcript,
+            'chunk_count' => ptv4_answer_chunk_count($pdo, $attemptId, $itemId),
         ]);
     }
 
@@ -139,9 +139,9 @@ try {
 
     if ($action === 'finalize_transcript') {
         $itemId = (int)($data['item_id'] ?? 0);
-        $liveTranscript = trim((string)($data['live_transcript'] ?? ''));
+        $recordingMs = max(0, (int)($data['recording_ms'] ?? 0));
         if ($itemId <= 0) ptv4_json(['ok' => false, 'error' => 'item_id required'], 400);
-        $finalized = ptv4_finalize_transcript($pdo, $attemptId, $itemId, $liveTranscript);
+        $finalized = ptv4_finalize_transcript($pdo, $attemptId, $itemId, $recordingMs);
         if ($finalized['transcript_final'] !== '') {
             ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'listening', $finalized['transcript_final']);
         }
@@ -171,11 +171,13 @@ try {
         $item = $itemSt->fetch(PDO::FETCH_ASSOC);
         if (!$item) ptv4_json(['ok' => false, 'error' => 'Question item not found'], 404);
 
-        ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'evaluating', $liveTranscript);
+        ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'evaluating', null);
 
-        $finalized = ptv4_finalize_transcript($pdo, $attemptId, $itemId, $liveTranscript);
+        $recordingMs = max(0, (int)($data['recording_ms'] ?? 0));
+        $finalized = ptv4_finalize_transcript($pdo, $attemptId, $itemId, $recordingMs);
         $answer = (string)$finalized['transcript_final'];
         $hasAudio = !empty($finalized['has_audio']);
+        $transcriptionFailed = !empty($finalized['transcription_failed']);
 
         $cards = ptv4_load_card_sessions($pdo, $attemptId);
         $clarificationUsed = !empty($cards[$itemId]['clarification_used']);
@@ -194,7 +196,7 @@ try {
         }
 
         if ($answer === '' && !$timedOutStart) {
-            if ($hasAudio) {
+            if ($hasAudio || $transcriptionFailed) {
                 $eval = ptv4_validate_evaluator_json([
                     'score_pct' => 0,
                     'result' => 'clarify',

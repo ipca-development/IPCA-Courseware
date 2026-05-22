@@ -6,6 +6,13 @@
   var START_ANSWER_MS = 30000;
   var RECORDING_MS = 45000;
   var CHUNK_MS = 1500;
+  var TRANSCRIPT = {
+    idle: 'Your spoken answer will appear here after you stop recording.',
+    recording: 'Recording your answer…',
+    listening: 'Listening carefully…',
+    processing: 'Processing your answer…',
+    failed: 'We could not clearly transcribe your answer. Please try again.'
+  };
 
   var page = document.querySelector('[data-ptv4-root]');
   if (!page) return;
@@ -64,9 +71,9 @@
   var originalAnswer = '';
   var clarificationQuestion = '';
   var liveTranscript = '';
-  var realtimeTranscript = '';
   var chunkIndex = 0;
   var hasRecordedAudio = false;
+  var recordingStartedAt = 0;
   var mediaRecorder = null;
   var micStream = null;
   var cameraStream = null;
@@ -92,6 +99,18 @@
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
   function setStatus(msg) { text(els.status, msg); }
 
+  function setTranscriptDisplay(mode, customText) {
+    if (!els.transcript) return;
+    var msg = customText || TRANSCRIPT[mode] || TRANSCRIPT.idle;
+    text(els.transcript, msg);
+    els.transcript.setAttribute('data-state', mode === 'final' ? 'final' : (mode === 'failed' ? 'failed' : 'status'));
+  }
+
+  function getRecordingMs() {
+    if (!recordingStartedAt) return 0;
+    return Math.max(0, Date.now() - recordingStartedAt);
+  }
+
   function hideRetry() {
     if (els.retry) {
       els.retry.hidden = true;
@@ -109,18 +128,6 @@
       els.retry.dataset.retryKind = kind;
       els.retry.textContent = kind === 'evaluation' ? 'Retry Evaluation' : (kind === 'upload' ? 'Retry Upload' : 'Retry Answer');
     }
-  }
-
-  function appendTranscript(part) {
-    part = String(part || '').trim();
-    if (!part) return;
-    liveTranscript = liveTranscript ? (liveTranscript + ' ' + part) : part;
-    text(els.transcript, liveTranscript);
-  }
-
-  function trimDisplayTranscript() {
-    var merged = (liveTranscript + ' ' + realtimeTranscript).trim();
-    return merged || 'Listening...';
   }
 
   function setAvatarVisuals() {
@@ -156,10 +163,13 @@
     setAvatarVisuals();
     syncButtons();
     if (currentItem && attemptId && oralQuestionsStarted) {
+      var persistTranscript = liveTranscript && cardState !== CARD.LISTENING && cardState !== CARD.EVALUATING
+        ? liveTranscript
+        : '';
       apiJson('save_card_state', {
         item_id: currentItem.id,
         card_state: next,
-        live_transcript: liveTranscript
+        live_transcript: persistTranscript
       }).catch(function () {});
     }
   }
@@ -230,12 +240,6 @@
         });
       }).then(function (out) {
         hasRecordedAudio = true;
-        if (out.transcript_partial) {
-          liveTranscript = out.transcript_partial;
-          text(els.transcript, liveTranscript);
-        } else if (out.chunk_transcript) {
-          appendTranscript(out.chunk_transcript);
-        }
         return out;
       });
     });
@@ -412,7 +416,8 @@
     text(els.qnum, 'Question ' + item.idx + ' of ' + (state.total_questions || '?'));
     text(els.question, item.prompt || item.spoken_question || '');
     liveTranscript = item.live_transcript || item.student_answer_text || '';
-    text(els.transcript, liveTranscript || 'Your spoken answer will appear here.');
+    if (liveTranscript) setTranscriptDisplay('final', liveTranscript);
+    else setTranscriptDisplay('idle');
     clarificationPending = item.card_state === CARD.CLARIFICATION || !!item.clarification_question_text;
     if (item.card_state === CARD.CLARIFICATION || item.clarification_question_text) {
       clarificationQuestion = item.clarification_question_text || clarificationQuestion;
@@ -449,6 +454,11 @@
     if (els.recordHint) els.recordHint.hidden = true;
     if (els.hint) els.hint.hidden = false;
     if (!currentItem) return;
+
+    if (cardState !== CARD.COMPLETE) {
+      liveTranscript = '';
+      setTranscriptDisplay('idle');
+    }
 
     setCardState(CARD.ASKING);
     startMayaBarMotion();
@@ -541,29 +551,6 @@
 
   function handleRealtime(msg) {
     var type = String(msg.type || '');
-    var activeCapture = cardState === CARD.LISTENING || cardState === CARD.CLARIFICATION;
-
-    if (type.indexOf('input_audio_transcription') >= 0 && activeCapture) {
-      if (type.indexOf('delta') >= 0) {
-        var delta = String(msg.delta || '').trim();
-        if (delta) {
-          realtimeTranscript += (realtimeTranscript && !/\s$/.test(realtimeTranscript) ? ' ' : '') + delta;
-          text(els.transcript, trimDisplayTranscript());
-        }
-      }
-      if (type.indexOf('completed') >= 0) {
-        var completed = String(msg.transcript || realtimeTranscript || '').trim();
-        realtimeTranscript = '';
-        if (completed) {
-          appendTranscript(completed);
-          apiJson('save_transcript_segment', {
-            item_id: currentItem.id,
-            transcript_text: liveTranscript,
-            event_type: clarificationMode ? 'clarification_answer' : 'answer'
-          }).catch(function () {});
-        }
-      }
-    }
 
     if (type === 'response.done' || type === 'response.output_audio.done') {
       if (dc && typeof dc._ptv4OnSpeechDone === 'function') {
@@ -592,7 +579,6 @@
     if (!currentItem || !micStream) return;
     hideRetry();
     stopTimer();
-    realtimeTranscript = '';
     clarificationMode = cardState === CARD.CLARIFICATION || clarificationPending;
     if (!clarificationMode) {
       originalAnswer = '';
@@ -601,15 +587,16 @@
       chunkIndex = 0;
       hasRecordedAudio = false;
       chunkUploadChain = Promise.resolve();
-      text(els.transcript, 'Listening...');
+      setTranscriptDisplay('idle');
     } else if (originalAnswer === '') {
       originalAnswer = liveTranscript;
       liveTranscript = '';
       chunkIndex = 0;
       hasRecordedAudio = false;
       chunkUploadChain = Promise.resolve();
-      text(els.transcript, 'Listening for clarification...');
     }
+    recordingStartedAt = Date.now();
+    setTranscriptDisplay(clarificationMode ? 'listening' : 'recording');
     if (els.hint) els.hint.hidden = true;
     setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.LISTENING);
     initStudentAnalyser();
@@ -630,30 +617,36 @@
     pendingEvalOpts = opts;
     hideRetry();
     setCardState(CARD.EVALUATING);
-    setStatus(opts.statusMessage || 'Evaluating your answer...');
+    setTranscriptDisplay('processing');
+    setStatus('Processing your answer...');
 
     return stopMediaRecorder()
       .then(function () { return chunkUploadChain; })
       .then(function () {
         return apiJson('finalize_transcript', {
           item_id: currentItem.id,
-          live_transcript: liveTranscript
+          recording_ms: getRecordingMs()
         });
       })
       .then(function (tr) {
         if (tr.transcript_final) {
           liveTranscript = tr.transcript_final;
-          text(els.transcript, liveTranscript);
+          setTranscriptDisplay('final', liveTranscript);
+        } else if (tr.transcription_failed) {
+          liveTranscript = '';
+          setTranscriptDisplay('failed');
+        } else {
+          liveTranscript = '';
         }
+        setStatus(opts.evalStatusMessage || 'Evaluating your answer...');
         return apiJson('finalize_item_answer', {
           item_id: currentItem.id,
           student_answer_text: liveTranscript,
           original_answer_text: opts.originalAnswer || originalAnswer,
-          clarification_answer_text: opts.clarificationAnswer != null
-            ? opts.clarificationAnswer
-            : (clarificationMode ? liveTranscript : ''),
+          clarification_answer_text: opts.clarificationMode ? liveTranscript : '',
           clarification_question_text: clarificationQuestion,
-          timed_out_start: opts.timedOutStart ? 1 : 0
+          timed_out_start: opts.timedOutStart ? 1 : 0,
+          recording_ms: getRecordingMs()
         });
       })
       .then(handleEvaluationResult)
@@ -661,6 +654,7 @@
         var kind = String(err.message || '').toLowerCase().indexOf('chunk') >= 0 ? 'upload'
           : (String(err.message || '').toLowerCase().indexOf('transcript') >= 0 ? 'answer' : 'evaluation');
         showRetry(kind, err.message || 'Something went wrong while evaluating your answer.');
+        setTranscriptDisplay('failed');
         setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.READY);
         setStatus('Could not complete evaluation.');
       });
@@ -669,11 +663,11 @@
   function finalizeWithoutRecording(timedOutStart) {
     stopTimer();
     stopStudentAnalyser();
+    recordingStartedAt = 0;
     if (els.recordHint) els.recordHint.hidden = true;
     submitAnswerEvaluation({
       timedOutStart: timedOutStart,
-      statusMessage: timedOutStart ? 'No answer started in time. Evaluating...' : 'Evaluating...',
-      clarificationAnswer: ''
+      evalStatusMessage: timedOutStart ? 'No answer started in time. Evaluating...' : 'Evaluating...'
     });
   }
 
@@ -682,9 +676,9 @@
     stopStudentAnalyser();
     if (els.recordHint) els.recordHint.hidden = true;
     submitAnswerEvaluation({
-      statusMessage: timedOutRecording ? 'Recording limit reached. Evaluating...' : 'Finalizing transcript...',
+      evalStatusMessage: timedOutRecording ? 'Recording limit reached. Evaluating...' : 'Evaluating your answer...',
       originalAnswer: originalAnswer,
-      clarificationAnswer: clarificationMode ? liveTranscript : ''
+      clarificationMode: clarificationMode
     });
   }
 
@@ -703,7 +697,7 @@
       clarificationPending = false;
       clarificationMode = false;
       liveTranscript = '';
-      text(els.transcript, 'Please answer again in English.');
+      setTranscriptDisplay('idle');
       speakScript('Please answer this question again in English.', 'question', function () {
         onQuestionFinished();
       });
@@ -716,7 +710,7 @@
       clarificationPending = true;
       clarificationMode = false;
       liveTranscript = '';
-      text(els.transcript, 'Please clarify your answer in English.');
+      setTranscriptDisplay('idle');
       speakScript(clarificationQuestion, 'clarification', function () {
         setCardState(CARD.CLARIFICATION);
         setStatus('One clarification allowed. Tap Start Answer.');
@@ -828,8 +822,10 @@
     originalAnswer = '';
     clarificationQuestion = '';
     liveTranscript = '';
+    recordingStartedAt = 0;
     stopTimer();
     hideRetry();
+    setTranscriptDisplay('idle');
     if (els.feedback) { els.feedback.hidden = true; els.feedback.textContent = ''; }
     if (els.recordHint) els.recordHint.hidden = true;
     return apiJson('advance_item', {}).then(function (out) {
@@ -858,6 +854,7 @@
       liveTranscript = '';
       chunkIndex = 0;
       hasRecordedAudio = false;
+      recordingStartedAt = 0;
       chunkUploadChain = Promise.resolve();
       startAnswerCapture();
       return;

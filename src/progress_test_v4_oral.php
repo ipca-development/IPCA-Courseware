@@ -611,10 +611,72 @@ function ptv4_merge_chunk_transcripts(PDO $pdo, int $attemptId, int $itemId): st
         $txt = trim((string)$txt);
         if ($txt !== '') $parts[] = $txt;
     }
-    return trim(implode(' ', $parts));
+    return ptv4_dedupe_transcript_parts($parts);
 }
 
-function ptv4_answer_has_audio(PDO $pdo, int $attemptId, int $itemId): bool
+function ptv4_dedupe_transcript_parts(array $parts): string
+{
+    $out = '';
+    foreach ($parts as $part) {
+        $part = trim((string)$part);
+        if ($part === '') continue;
+        if ($out === '') {
+            $out = $part;
+            continue;
+        }
+        $wordsOut = preg_split('/\s+/', $out, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $wordsPart = preg_split('/\s+/', $part, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $maxOverlap = min(count($wordsOut), count($wordsPart), 8);
+        $overlap = 0;
+        for ($i = $maxOverlap; $i >= 1; $i--) {
+            $suffix = implode(' ', array_slice($wordsOut, -$i));
+            $prefix = implode(' ', array_slice($wordsPart, 0, $i));
+            if (strcasecmp($suffix, $prefix) === 0) {
+                $overlap = $i;
+                break;
+            }
+        }
+        if ($overlap > 0) {
+            $out .= ' ' . implode(' ', array_slice($wordsPart, $overlap));
+        } else {
+            $out .= ' ' . $part;
+        }
+    }
+    return trim($out);
+}
+
+function ptv4_clean_final_transcript(string $text): string
+{
+    $text = trim((string)preg_replace('/\s+/', ' ', $text));
+    return trim($text);
+}
+
+function ptv4_ensure_chunk_transcripts(PDO $pdo, int $attemptId, int $itemId): void
+{
+    $st = $pdo->prepare("
+        SELECT chunk_index, storage_path, transcript_text
+        FROM progress_test_v4_answer_chunks
+        WHERE attempt_id = ? AND item_id = ?
+        ORDER BY chunk_index ASC
+    ");
+    $st->execute([$attemptId, $itemId]);
+    $up = $pdo->prepare("
+        UPDATE progress_test_v4_answer_chunks
+        SET transcript_text = ?
+        WHERE attempt_id = ? AND item_id = ? AND chunk_index = ?
+    ");
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $path = (string)($row['storage_path'] ?? '');
+        if (!is_file($path) || filesize($path) <= 0) continue;
+        if (trim((string)($row['transcript_text'] ?? '')) !== '') continue;
+        $transcript = ptv4_transcribe_audio_file($path);
+        if ($transcript !== '') {
+            $up->execute([$transcript, $attemptId, $itemId, (int)$row['chunk_index']]);
+        }
+    }
+}
+
+function ptv4_answer_chunk_count(PDO $pdo, int $attemptId, int $itemId): int
 {
     try {
         $st = $pdo->prepare("
@@ -622,24 +684,65 @@ function ptv4_answer_has_audio(PDO $pdo, int $attemptId, int $itemId): bool
             WHERE attempt_id = ? AND item_id = ?
         ");
         $st->execute([$attemptId, $itemId]);
-        return ((int)$st->fetchColumn()) > 0;
+        return (int)$st->fetchColumn();
     } catch (Throwable $e) {
-        return false;
+        return 0;
     }
 }
 
-function ptv4_finalize_transcript(PDO $pdo, int $attemptId, int $itemId, string $liveTranscript = ''): array
+function ptv4_answer_has_audio(PDO $pdo, int $attemptId, int $itemId): bool
 {
-    $merged = ptv4_merge_chunk_transcripts($pdo, $attemptId, $itemId);
-    $final = $merged !== '' ? $merged : trim($liveTranscript);
-    if ($final === '') {
-        $cards = ptv4_load_card_sessions($pdo, $attemptId);
-        $final = trim((string)($cards[$itemId]['live_transcript'] ?? ''));
+    return ptv4_answer_chunk_count($pdo, $attemptId, $itemId) > 0;
+}
+
+function ptv4_answer_has_usable_audio(PDO $pdo, int $attemptId, int $itemId, int $recordingMs = 0): bool
+{
+    if ($recordingMs > 0 && $recordingMs < 400) return false;
+    try {
+        $st = $pdo->prepare("
+            SELECT storage_path FROM progress_test_v4_answer_chunks
+            WHERE attempt_id = ? AND item_id = ?
+            ORDER BY chunk_index ASC
+        ");
+        $st->execute([$attemptId, $itemId]);
+        $totalBytes = 0;
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $path) {
+            if (is_file((string)$path)) $totalBytes += (int)filesize((string)$path);
+        }
+        return $totalBytes >= 800;
+    } catch (Throwable $e) {
+        return ptv4_answer_has_audio($pdo, $attemptId, $itemId);
     }
+}
+
+function ptv4_touch_answer_chunk_count(PDO $pdo, int $attemptId, int $itemId): void
+{
+    try {
+        $count = ptv4_answer_chunk_count($pdo, $attemptId, $itemId);
+        $pdo->prepare("
+            UPDATE progress_test_v4_card_sessions
+            SET answer_chunk_count = ?, updated_at = NOW()
+            WHERE attempt_id = ? AND item_id = ?
+        ")->execute([$count, $attemptId, $itemId]);
+    } catch (Throwable $e) {
+    }
+}
+
+function ptv4_finalize_transcript(PDO $pdo, int $attemptId, int $itemId, int $recordingMs = 0): array
+{
+    ptv4_ensure_chunk_transcripts($pdo, $attemptId, $itemId);
+    $merged = ptv4_merge_chunk_transcripts($pdo, $attemptId, $itemId);
+    $final = ptv4_clean_final_transcript($merged);
+    $hasAudio = ptv4_answer_has_usable_audio($pdo, $attemptId, $itemId, $recordingMs);
+    $chunkCount = ptv4_answer_chunk_count($pdo, $attemptId, $itemId);
+    $usable = $final !== '' && !ptv4_transcript_looks_corrupted($final);
+
     return [
         'transcript_final' => $final,
-        'has_audio' => ptv4_answer_has_audio($pdo, $attemptId, $itemId),
-        'chunk_transcript' => $merged,
+        'has_audio' => $hasAudio,
+        'chunk_count' => $chunkCount,
+        'transcript_usable' => $usable,
+        'transcription_failed' => $hasAudio && !$usable,
     ];
 }
 

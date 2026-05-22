@@ -138,7 +138,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=4">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=5">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -229,7 +229,7 @@ cw_header('Progress Test');
 
       <div class="ptv4-transcript-box">
         <div class="ptv4-transcript-label">Your answer transcript</div>
-        <div class="ptv4-transcript" data-ptv4-transcript>Your spoken answer will appear here.</div>
+        <div class="ptv4-transcript" data-ptv4-transcript data-state="status">Your spoken answer will appear here after you stop recording.</div>
       </div>
 
       <div class="ptv4-hint" data-ptv4-hint>
@@ -263,5 +263,5 @@ window.IPCAProgressTestV4Config = {
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=4"></script>
+<script src="/assets/progress_test_v4.js?v=5"></script>
 <?php cw_footer(); ?>

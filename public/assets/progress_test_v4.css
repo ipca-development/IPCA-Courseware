@@ -402,6 +402,23 @@
   color: #243446;
 }
 
+.ptv4-transcript[data-state="status"] {
+  color: #64748b;
+  font-style: italic;
+}
+
+.ptv4-transcript[data-state="final"] {
+  color: #152235;
+  font-style: normal;
+  font-weight: 600;
+}
+
+.ptv4-transcript[data-state="failed"] {
+  color: #b45309;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .ptv4-hint {
   padding: 10px 12px;
   border-radius: 12px;
