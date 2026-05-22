@@ -23,6 +23,8 @@
     evaluated: $('[data-ptv4-evaluated]'),
     final: $('[data-ptv4-final]'),
     prestart: $('[data-ptv4-prestart]'),
+    greeting: $('[data-ptv4-greeting]'),
+    greetingCopy: $('[data-ptv4-greeting-copy]'),
     card: $('[data-ptv4-card]'),
     statePill: $('[data-ptv4-state-pill]'),
     qnum: $('[data-ptv4-qnum]'),
@@ -40,11 +42,13 @@
     video: $('[data-ptv4-video]'),
     videoFallback: $('[data-ptv4-video-fallback]'),
     startTest: $('[data-ptv4-start-test]'),
+    beginTest: $('[data-ptv4-begin-test]'),
     startAnswer: $('[data-ptv4-start-answer]'),
     stopAnswer: $('[data-ptv4-stop-answer]'),
     replay: $('[data-ptv4-replay]'),
     clarify: $('[data-ptv4-clarify]'),
     next: $('[data-ptv4-next]'),
+    retry: $('[data-ptv4-retry]'),
     end: $('[data-ptv4-end]')
   };
 
@@ -53,16 +57,21 @@
   var currentItem = null;
   var cardState = CARD.READY;
   var testStarted = false;
+  var greetingReady = false;
+  var oralQuestionsStarted = false;
   var clarificationMode = false;
   var clarificationPending = false;
   var originalAnswer = '';
   var clarificationQuestion = '';
   var liveTranscript = '';
+  var realtimeTranscript = '';
   var chunkIndex = 0;
+  var hasRecordedAudio = false;
   var mediaRecorder = null;
   var micStream = null;
   var cameraStream = null;
   var chunkUploadChain = Promise.resolve();
+  var pendingEvalOpts = null;
   var pc = null;
   var dc = null;
   var remoteAudio = null;
@@ -83,10 +92,41 @@
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
   function setStatus(msg) { text(els.status, msg); }
 
+  function hideRetry() {
+    if (els.retry) {
+      els.retry.hidden = true;
+      els.retry.dataset.retryKind = '';
+    }
+  }
+
+  function showRetry(kind, message) {
+    if (els.feedback) {
+      els.feedback.hidden = false;
+      els.feedback.textContent = message;
+    }
+    if (els.retry) {
+      els.retry.hidden = false;
+      els.retry.dataset.retryKind = kind;
+      els.retry.textContent = kind === 'evaluation' ? 'Retry Evaluation' : (kind === 'upload' ? 'Retry Upload' : 'Retry Answer');
+    }
+  }
+
+  function appendTranscript(part) {
+    part = String(part || '').trim();
+    if (!part) return;
+    liveTranscript = liveTranscript ? (liveTranscript + ' ' + part) : part;
+    text(els.transcript, liveTranscript);
+  }
+
+  function trimDisplayTranscript() {
+    var merged = (liveTranscript + ' ' + realtimeTranscript).trim();
+    return merged || 'Listening...';
+  }
+
   function setAvatarVisuals() {
-    var mayaSpeaking = cardState === CARD.ASKING;
+    var mayaSpeaking = cardState === CARD.ASKING || (greetingReady && !oralQuestionsStarted);
     var studentActive = cardState === CARD.LISTENING || cardState === CARD.CLARIFICATION;
-    var studentListening = testStarted && cardState === CARD.READY && timerMode === 'start';
+    var studentListening = testStarted && oralQuestionsStarted && cardState === CARD.READY && timerMode === 'start';
 
     if (els.root) {
       els.root.setAttribute('data-maya-speaking', mayaSpeaking ? '1' : '0');
@@ -115,7 +155,7 @@
     text(els.statePill, labels[next] || next);
     setAvatarVisuals();
     syncButtons();
-    if (currentItem && attemptId) {
+    if (currentItem && attemptId && oralQuestionsStarted) {
       apiJson('save_card_state', {
         item_id: currentItem.id,
         card_state: next,
@@ -128,15 +168,18 @@
     var prepared = state && state.prepared;
     var allDone = state && state.evaluated_count >= state.total_questions;
     if (els.startTest) els.startTest.disabled = !prepared || testStarted || allDone;
+    if (els.beginTest) {
+      els.beginTest.disabled = !testStarted || !greetingReady || oralQuestionsStarted;
+    }
     if (els.startAnswer) {
-      els.startAnswer.disabled = !testStarted
+      els.startAnswer.disabled = !testStarted || !oralQuestionsStarted
         || (cardState !== CARD.READY && cardState !== CARD.CLARIFICATION)
         || cardState === CARD.LISTENING
         || cardState === CARD.EVALUATING
         || cardState === CARD.ASKING;
     }
     if (els.stopAnswer) els.stopAnswer.disabled = cardState !== CARD.LISTENING && cardState !== CARD.CLARIFICATION;
-    if (els.replay) els.replay.disabled = !testStarted || !currentItem || cardState === CARD.EVALUATING;
+    if (els.replay) els.replay.disabled = !testStarted || !oralQuestionsStarted || !currentItem || cardState === CARD.EVALUATING;
     if (els.clarify) els.clarify.disabled = !clarificationPending || cardState !== CARD.CLARIFICATION || !clarificationQuestion;
     if (els.next) els.next.disabled = cardState !== CARD.COMPLETE || allDone;
     if (els.end) els.end.disabled = !testStarted;
@@ -178,14 +221,51 @@
         method: 'POST',
         credentials: 'same-origin',
         body: fd
-      }).then(function (res) { return res.json(); }).then(function (out) {
-        if (out.ok && out.transcript_partial) {
+      }).then(function (res) {
+        return res.text().then(function (txt) {
+          var out;
+          try { out = JSON.parse(txt); } catch (e) { throw new Error('Chunk upload returned invalid JSON'); }
+          if (!res.ok || !out.ok) throw new Error(out.error || ('Chunk upload failed (HTTP ' + res.status + ')'));
+          return out;
+        });
+      }).then(function (out) {
+        hasRecordedAudio = true;
+        if (out.transcript_partial) {
           liveTranscript = out.transcript_partial;
           text(els.transcript, liveTranscript);
+        } else if (out.chunk_transcript) {
+          appendTranscript(out.chunk_transcript);
         }
+        return out;
       });
     });
     return chunkUploadChain;
+  }
+
+  function stopMediaRecorder() {
+    return new Promise(function (resolve) {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        resolve();
+        return;
+      }
+      var finished = false;
+      function done() {
+        if (finished) return;
+        finished = true;
+        resolve();
+      }
+      mediaRecorder.onstop = done;
+      try {
+        if (mediaRecorder.state === 'recording') mediaRecorder.requestData();
+      } catch (e) {}
+      try {
+        mediaRecorder.stop();
+      } catch (e) {
+        done();
+        return;
+      }
+      setTimeout(done, 4000);
+    });
   }
 
   function stopTimer() {
@@ -289,7 +369,7 @@
     var bars = [];
     $all('[data-ptv4-maya-bars] span, [data-ptv4-maya-bars-right] span').forEach(function (el) { bars.push(el); });
     mayaBarTimer = setInterval(function () {
-      if (cardState !== CARD.ASKING) return;
+      if (cardState !== CARD.ASKING && !(greetingReady && !oralQuestionsStarted)) return;
       bars.forEach(function (bar, i) {
         var h = 6 + Math.round(Math.random() * 12);
         bar.style.height = h + 'px';
@@ -324,7 +404,7 @@
     (state.items || []).forEach(function (item) {
       if (parseInt(item.id, 10) === parseInt(state.current_item_id, 10)) currentItem = item;
     });
-    if (currentItem) renderCard(currentItem);
+    if (currentItem && oralQuestionsStarted) renderCard(currentItem);
     syncButtons();
   }
 
@@ -342,7 +422,7 @@
       if (item.evaluated && item.feedback_text) {
         els.feedback.hidden = false;
         els.feedback.textContent = item.feedback_text;
-      } else {
+      } else if (!els.retry || els.retry.hidden) {
         els.feedback.hidden = true;
         els.feedback.textContent = '';
       }
@@ -363,6 +443,7 @@
 
   function playQuestionAudio() {
     stopTimer();
+    hideRetry();
     clarificationPending = false;
     clarificationMode = false;
     if (els.recordHint) els.recordHint.hidden = true;
@@ -405,7 +486,7 @@
     if (purpose === 'clarification') {
       setCardState(CARD.CLARIFICATION);
       clarificationPending = true;
-    } else if (purpose === 'question') {
+    } else if (purpose === 'question' || purpose === 'greeting') {
       setCardState(CARD.ASKING);
       startMayaBarMotion();
     }
@@ -460,17 +541,30 @@
 
   function handleRealtime(msg) {
     var type = String(msg.type || '');
-    if (type.indexOf('input_audio_transcription.completed') >= 0 || type === 'conversation.item.input_audio_transcription.completed') {
-      var transcript = String(msg.transcript || '').trim();
-      if (!transcript || (cardState !== CARD.LISTENING && cardState !== CARD.CLARIFICATION)) return;
-      liveTranscript = liveTranscript ? (liveTranscript + ' ' + transcript) : transcript;
-      text(els.transcript, liveTranscript);
-      apiJson('save_transcript_segment', {
-        item_id: currentItem.id,
-        transcript_text: liveTranscript,
-        event_type: clarificationMode ? 'clarification_answer' : 'answer'
-      }).catch(function () {});
+    var activeCapture = cardState === CARD.LISTENING || cardState === CARD.CLARIFICATION;
+
+    if (type.indexOf('input_audio_transcription') >= 0 && activeCapture) {
+      if (type.indexOf('delta') >= 0) {
+        var delta = String(msg.delta || '').trim();
+        if (delta) {
+          realtimeTranscript += (realtimeTranscript && !/\s$/.test(realtimeTranscript) ? ' ' : '') + delta;
+          text(els.transcript, trimDisplayTranscript());
+        }
+      }
+      if (type.indexOf('completed') >= 0) {
+        var completed = String(msg.transcript || realtimeTranscript || '').trim();
+        realtimeTranscript = '';
+        if (completed) {
+          appendTranscript(completed);
+          apiJson('save_transcript_segment', {
+            item_id: currentItem.id,
+            transcript_text: liveTranscript,
+            event_type: clarificationMode ? 'clarification_answer' : 'answer'
+          }).catch(function () {});
+        }
+      }
     }
+
     if (type === 'response.done' || type === 'response.output_audio.done') {
       if (dc && typeof dc._ptv4OnSpeechDone === 'function') {
         var cb = dc._ptv4OnSpeechDone;
@@ -496,16 +590,25 @@
 
   function startAnswerCapture() {
     if (!currentItem || !micStream) return;
+    hideRetry();
     stopTimer();
+    realtimeTranscript = '';
     clarificationMode = cardState === CARD.CLARIFICATION || clarificationPending;
     if (!clarificationMode) {
       originalAnswer = '';
       clarificationQuestion = '';
       liveTranscript = '';
       chunkIndex = 0;
+      hasRecordedAudio = false;
+      chunkUploadChain = Promise.resolve();
       text(els.transcript, 'Listening...');
     } else if (originalAnswer === '') {
       originalAnswer = liveTranscript;
+      liveTranscript = '';
+      chunkIndex = 0;
+      hasRecordedAudio = false;
+      chunkUploadChain = Promise.resolve();
+      text(els.transcript, 'Listening for clarification...');
     }
     if (els.hint) els.hint.hidden = true;
     setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.LISTENING);
@@ -522,51 +625,72 @@
     syncButtons();
   }
 
+  function submitAnswerEvaluation(opts) {
+    opts = opts || {};
+    pendingEvalOpts = opts;
+    hideRetry();
+    setCardState(CARD.EVALUATING);
+    setStatus(opts.statusMessage || 'Evaluating your answer...');
+
+    return stopMediaRecorder()
+      .then(function () { return chunkUploadChain; })
+      .then(function () {
+        return apiJson('finalize_transcript', {
+          item_id: currentItem.id,
+          live_transcript: liveTranscript
+        });
+      })
+      .then(function (tr) {
+        if (tr.transcript_final) {
+          liveTranscript = tr.transcript_final;
+          text(els.transcript, liveTranscript);
+        }
+        return apiJson('finalize_item_answer', {
+          item_id: currentItem.id,
+          student_answer_text: liveTranscript,
+          original_answer_text: opts.originalAnswer || originalAnswer,
+          clarification_answer_text: opts.clarificationAnswer != null
+            ? opts.clarificationAnswer
+            : (clarificationMode ? liveTranscript : ''),
+          clarification_question_text: clarificationQuestion,
+          timed_out_start: opts.timedOutStart ? 1 : 0
+        });
+      })
+      .then(handleEvaluationResult)
+      .catch(function (err) {
+        var kind = String(err.message || '').toLowerCase().indexOf('chunk') >= 0 ? 'upload'
+          : (String(err.message || '').toLowerCase().indexOf('transcript') >= 0 ? 'answer' : 'evaluation');
+        showRetry(kind, err.message || 'Something went wrong while evaluating your answer.');
+        setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.READY);
+        setStatus('Could not complete evaluation.');
+      });
+  }
+
   function finalizeWithoutRecording(timedOutStart) {
     stopTimer();
     stopStudentAnalyser();
     if (els.recordHint) els.recordHint.hidden = true;
-    setCardState(CARD.EVALUATING);
-    setStatus(timedOutStart ? 'No answer started in time. Evaluating...' : 'Evaluating...');
-    liveTranscript = liveTranscript || '';
-    chunkUploadChain.then(function () {
-      return apiJson('finalize_item_answer', {
-        item_id: currentItem.id,
-        student_answer_text: liveTranscript,
-        original_answer_text: originalAnswer,
-        clarification_answer_text: '',
-        clarification_question_text: clarificationQuestion,
-        timed_out_start: timedOutStart ? 1 : 0
-      });
-    }).then(handleEvaluationResult).catch(function (err) {
-      setStatus('Evaluation failed: ' + err.message);
-      setCardState(CARD.READY);
+    submitAnswerEvaluation({
+      timedOutStart: timedOutStart,
+      statusMessage: timedOutStart ? 'No answer started in time. Evaluating...' : 'Evaluating...',
+      clarificationAnswer: ''
     });
   }
 
   function stopAnswerCapture(timedOutRecording) {
     stopTimer();
     stopStudentAnalyser();
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop();
     if (els.recordHint) els.recordHint.hidden = true;
-    setCardState(CARD.EVALUATING);
-    setStatus(timedOutRecording ? 'Recording limit reached. Evaluating...' : 'Evaluating your answer...');
-
-    chunkUploadChain.then(function () {
-      return apiJson('finalize_item_answer', {
-        item_id: currentItem.id,
-        student_answer_text: liveTranscript,
-        original_answer_text: originalAnswer,
-        clarification_answer_text: clarificationMode ? liveTranscript : '',
-        clarification_question_text: clarificationQuestion
-      });
-    }).then(handleEvaluationResult).catch(function (err) {
-      setStatus('Evaluation failed: ' + err.message);
-      setCardState(CARD.READY);
+    submitAnswerEvaluation({
+      statusMessage: timedOutRecording ? 'Recording limit reached. Evaluating...' : 'Finalizing transcript...',
+      originalAnswer: originalAnswer,
+      clarificationAnswer: clarificationMode ? liveTranscript : ''
     });
   }
 
   function handleEvaluationResult(out) {
+    pendingEvalOpts = null;
+    hideRetry();
     updateProgress(out.state);
     var ev = out.evaluation || {};
     var feedback = out.feedback_for_student || ev.feedback_for_student || '';
@@ -613,11 +737,49 @@
         setStatus(done.summary || 'Test complete.');
         speakScript(done.summary || 'Your progress test is complete.', 'final');
         testStarted = false;
+        oralQuestionsStarted = false;
+        greetingReady = false;
         if (els.card) els.card.hidden = true;
+        if (els.greeting) els.greeting.hidden = true;
         if (els.prestart) els.prestart.hidden = false;
         syncButtons();
       });
     }
+    syncButtons();
+  }
+
+  function playGreeting() {
+    greetingReady = false;
+    oralQuestionsStarted = false;
+    var resume = state && state.resume_mode === 'resumed';
+    var greeting = resume
+      ? ('Hi ' + (cfg.firstName || 'there') + ', I am ready to resume your progress test.')
+      : ('Hi ' + (cfg.firstName || 'there') + ', I am ready to start your progress test.');
+    if (els.greetingCopy) {
+      text(els.greetingCopy, resume ? 'Maya is ready to resume your progress test.' : 'Maya is ready to start your progress test.');
+    }
+    setCardState(CARD.ASKING);
+    startMayaBarMotion();
+    setStatus('Maya is greeting you.');
+    speakScript(greeting, 'greeting', function () {
+      stopMayaBarMotion();
+      greetingReady = true;
+      setCardState(CARD.READY);
+      setStatus('Tap Start my Progress Test when you are ready.');
+      syncButtons();
+    });
+  }
+
+  function beginOralQuestions() {
+    if (!currentItem) return;
+    oralQuestionsStarted = true;
+    greetingReady = true;
+    if (els.greeting) els.greeting.hidden = true;
+    if (els.card) els.card.hidden = false;
+    hideRetry();
+    renderCard(currentItem);
+    setStatus('Professional oral check in progress.');
+    playQuestionAudio();
     syncButtons();
   }
 
@@ -640,16 +802,19 @@
   }
 
   function startTestFlow() {
+    greetingReady = false;
+    oralQuestionsStarted = false;
     setStatus('Connecting oral exam session...');
     Promise.all([startCamera(), connectVoice()]).then(function () {
       return apiJson('start_oral_test', {});
     }).then(function (out) {
       testStarted = true;
       if (els.prestart) els.prestart.hidden = true;
-      if (els.card) els.card.hidden = false;
+      if (els.card) els.card.hidden = true;
+      if (els.greeting) els.greeting.hidden = false;
+      if (els.beginTest) els.beginTest.disabled = true;
       updateProgress(out.state);
-      setStatus('Professional oral check in progress.');
-      playQuestionAudio();
+      playGreeting();
       syncButtons();
     }).catch(function (err) {
       setStatus('Could not start test: ' + err.message);
@@ -664,6 +829,7 @@
     clarificationQuestion = '';
     liveTranscript = '';
     stopTimer();
+    hideRetry();
     if (els.feedback) { els.feedback.hidden = true; els.feedback.textContent = ''; }
     if (els.recordHint) els.recordHint.hidden = true;
     return apiJson('advance_item', {}).then(function (out) {
@@ -677,6 +843,7 @@
   }
 
   if (els.startTest) els.startTest.addEventListener('click', startTestFlow);
+  if (els.beginTest) els.beginTest.addEventListener('click', beginOralQuestions);
   if (els.startAnswer) els.startAnswer.addEventListener('click', startAnswerCapture);
   if (els.stopAnswer) els.stopAnswer.addEventListener('click', function () { stopAnswerCapture(false); });
   if (els.replay) els.replay.addEventListener('click', playQuestionAudio);
@@ -684,14 +851,34 @@
     if (clarificationQuestion) speakScript(clarificationQuestion, 'clarification');
   });
   if (els.next) els.next.addEventListener('click', nextQuestion);
+  if (els.retry) els.retry.addEventListener('click', function () {
+    var kind = els.retry.dataset.retryKind || 'evaluation';
+    hideRetry();
+    if (kind === 'answer') {
+      liveTranscript = '';
+      chunkIndex = 0;
+      hasRecordedAudio = false;
+      chunkUploadChain = Promise.resolve();
+      startAnswerCapture();
+      return;
+    }
+    if (pendingEvalOpts) {
+      submitAnswerEvaluation(pendingEvalOpts);
+      return;
+    }
+    stopAnswerCapture(false);
+  });
   if (els.end) els.end.addEventListener('click', function () {
     if (!window.confirm('Exit this progress test? Partial answers on the current attempt will be reset.')) return;
     apiJson('end_oral_test_without_penalty', {}).then(function (out) {
       testStarted = false;
+      greetingReady = false;
+      oralQuestionsStarted = false;
       stopTimer();
       stopMayaBarMotion();
       stopStudentAnalyser();
       if (els.card) els.card.hidden = true;
+      if (els.greeting) els.greeting.hidden = true;
       if (els.prestart) els.prestart.hidden = false;
       updateProgress(out.state);
       setStatus('Test ended. You may start again when ready.');

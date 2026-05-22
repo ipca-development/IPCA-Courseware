@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/courseware_progression_v2.php';
+require_once __DIR__ . '/../../src/progress_test_prep.php';
 
 $progression = new CoursewareProgressionV2($pdo);
 
@@ -193,6 +194,35 @@ function summary_quality_meta(array $summaryState) {
     }
 
     return ['label' => 'Draft saved', 'class' => 'info', 'sub' => 'Draft', 'pct' => 44];
+}
+
+function progress_test_prep_meta(
+    PDO $pdo,
+    int $userId,
+    int $cohortId,
+    int $lessonId,
+    bool $summaryOk,
+    bool $canTest,
+    string $cookieHeader,
+    string $progressTestUrl
+): array {
+    $empty = [
+        'show_bar' => false,
+        'show_button' => false,
+        'button_href' => '',
+        'button_label' => 'Start Progress Test',
+        'prepared' => false,
+        'preparing' => false,
+        'resume' => false,
+        'label' => '',
+        'sub' => 'Progress Test',
+        'class' => 'neutral',
+        'pct' => 0,
+    ];
+    if (!$summaryOk || !$canTest) {
+        return $empty;
+    }
+    return pt_prep_course_status($pdo, $userId, $cohortId, $lessonId, $cookieHeader, $progressTestUrl);
 }
 
 
@@ -843,6 +873,19 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
 	}
 
     $ptUrlV4 = '/student/progress_test_v4.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
+    $ptPrepMeta = progress_test_prep_meta(
+        $pdo,
+        (int)$userId,
+        (int)$cohortId,
+        $lessonId,
+        $summaryOk,
+        $canTest,
+        (string)($_SERVER['HTTP_COOKIE'] ?? ''),
+        $ptUrlV4
+    );
+    if (!empty($ptPrepMeta['resume'])) {
+        $hasActiveProgressTest = true;
+    }
     $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc, $cohortTimezone);
 
     if ($bestScore !== null) {
@@ -903,6 +946,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'progress_test_url_v4' => $ptUrlV4,
         'progress_test_url_v3' => '/student/progress_test_v3.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId,
         'has_active_progress_test' => $hasActiveProgressTest,
+        'progress_test_prep' => $ptPrepMeta,
         'first_slide_id' => $firstSlideId,
 		'activity_state' => $activityState,
     ];
@@ -1767,8 +1811,19 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     $testLabel = 'Complete Action';
     $testBtnClass = 'warn';
 } elseif (!empty($lx['can_test'])) {
-    $testHref = (string)$lx['progress_test_url'];
-    $testLabel = !empty($lx['has_active_progress_test']) ? 'Resume Progress Test' : 'Start Progress Test';
+    if (!empty($lx['progress_test_prep']['show_button']) && !empty($lx['progress_test_prep']['button_href'])) {
+        $testHref = (string)$lx['progress_test_prep']['button_href'];
+        $testLabel = (string)($lx['progress_test_prep']['button_label'] ?: 'Start Progress Test');
+    } elseif (!empty($lx['progress_test_prep']['preparing'])) {
+        $testHref = '';
+        $testLabel = 'Start Progress Test';
+    } elseif (!empty($lx['progress_test_prep']['prepared'])) {
+        $testHref = (string)$lx['progress_test_url'];
+        $testLabel = !empty($lx['has_active_progress_test']) ? 'Resume Progress Test' : 'Start Progress Test';
+    } else {
+        $testHref = '';
+        $testLabel = 'Start Progress Test';
+    }
     $testBtnClass = 'primary';
 } else {
     $testLabel = 'Start Progress Test';
@@ -1817,6 +1872,15 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
                       </td>
 
                       <td class="td-center">
+                        <?php if (!empty($lx['progress_test_prep']['show_bar'])): ?>
+                          <div class="summary-compact">
+                            <div class="summary-head"><?= h($lx['progress_test_prep']['sub']) ?></div>
+                            <div class="summary-bar-shell">
+                              <div class="summary-bar-fill <?= h($lx['progress_test_prep']['class']) ?>" style="width:<?= (int)$lx['progress_test_prep']['pct'] ?>%;"></div>
+                            </div>
+                            <div class="summary-label <?= h($lx['progress_test_prep']['class']) ?>"><?= h($lx['progress_test_prep']['label']) ?></div>
+                          </div>
+                        <?php else: ?>
                         <div class="cell-action">
                           <?php if ($testHref !== ''): ?>
                             <a class="action-btn <?= h($testBtnClass) ?>" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
@@ -1824,6 +1888,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
                             <span class="action-btn disabled"><?= h($testLabel) ?></span>
                           <?php endif; ?>
                         </div>
+                        <?php endif; ?>
                       </td>
 
                       <td class="score-cell td-center">

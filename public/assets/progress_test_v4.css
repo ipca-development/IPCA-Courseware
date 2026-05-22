@@ -260,8 +260,20 @@
   50% { height: 16px; opacity: 1; }
 }
 
-.ptv4-prestart {
+.ptv4-prestart,
+.ptv4-greeting {
   margin-bottom: 14px;
+}
+
+.ptv4-greeting-copy {
+  margin: 0 0 12px;
+  color: #475569;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.ptv4-btn-block {
+  width: 100%;
 }
 
 .ptv4-card {

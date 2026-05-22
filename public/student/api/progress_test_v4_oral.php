@@ -137,6 +137,17 @@ try {
         ptv4_json(['ok' => true, 'transcript_partial' => $text]);
     }
 
+    if ($action === 'finalize_transcript') {
+        $itemId = (int)($data['item_id'] ?? 0);
+        $liveTranscript = trim((string)($data['live_transcript'] ?? ''));
+        if ($itemId <= 0) ptv4_json(['ok' => false, 'error' => 'item_id required'], 400);
+        $finalized = ptv4_finalize_transcript($pdo, $attemptId, $itemId, $liveTranscript);
+        if ($finalized['transcript_final'] !== '') {
+            ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'listening', $finalized['transcript_final']);
+        }
+        ptv4_json(['ok' => true] + $finalized);
+    }
+
     if ($action === 'start_oral_test') {
         if (!(bool)ptv4_state_payload($pdo, $attempt)['prepared']) {
             ptv4_json(['ok' => false, 'error' => 'Progress test is not prepared yet.'], 409);
@@ -162,12 +173,9 @@ try {
 
         ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'evaluating', $liveTranscript);
 
-        $chunkTranscript = ptv4_merge_chunk_transcripts($pdo, $attemptId, $itemId);
-        $answer = $liveTranscript !== '' ? $liveTranscript : $chunkTranscript;
-        if ($answer === '') {
-            $cards = ptv4_load_card_sessions($pdo, $attemptId);
-            $answer = trim((string)($cards[$itemId]['live_transcript'] ?? ''));
-        }
+        $finalized = ptv4_finalize_transcript($pdo, $attemptId, $itemId, $liveTranscript);
+        $answer = (string)$finalized['transcript_final'];
+        $hasAudio = !empty($finalized['has_audio']);
 
         $cards = ptv4_load_card_sessions($pdo, $attemptId);
         $clarificationUsed = !empty($cards[$itemId]['clarification_used']);
@@ -178,12 +186,25 @@ try {
             $answer = '[timeout: no answer started within 30 seconds]';
         }
 
-        if ($clarificationAnswer !== '' && $originalAnswer !== '') {
-            $eval = ptv4_grade_item($pdo, $item, $originalAnswer, $clarificationAnswer);
-            ptv4_json(ptv4_evaluation_response($pdo, $u, $attempt, $item, $eval, $originalAnswer, true));
+        if ($clarificationAnswer !== '' && ($originalAnswer !== '' || $clarificationUsed)) {
+            $baseAnswer = $originalAnswer !== '' ? $originalAnswer : $answer;
+            $combined = trim($baseAnswer . ($baseAnswer !== '' && $clarificationAnswer !== '' ? ' ' : '') . $clarificationAnswer);
+            $eval = ptv4_grade_item($pdo, $item, $baseAnswer, $clarificationAnswer);
+            ptv4_json(ptv4_evaluation_response($pdo, $u, $attempt, $item, $eval, $combined, true));
         }
 
         if ($answer === '' && !$timedOutStart) {
+            if ($hasAudio) {
+                $eval = ptv4_validate_evaluator_json([
+                    'score_pct' => 0,
+                    'result' => 'clarify',
+                    'missing_concepts' => ['Transcript unavailable'],
+                    'clarification_question' => ptv4_default_clarification_text(),
+                    'feedback_for_student' => 'I may not have heard that correctly. Please answer again in English.',
+                    'safety_critical_issue' => false,
+                ]);
+                ptv4_json(ptv4_evaluation_response($pdo, $u, $attempt, $item, $eval, $answer, $clarificationUsed));
+            }
             ptv4_json(['ok' => false, 'error' => 'No answer captured'], 400);
         }
 
@@ -272,6 +293,22 @@ try {
         $summary = $passed
             ? 'You passed with ' . $scorePct . '%. Strongest areas: ' . $strongText . '. Review ' . $weakText . ' before moving on.'
             : 'You did not pass this attempt. Main weak areas: ' . $weakText . '. Study those before re-attempting.';
+
+        if (!$passed) {
+            require_once __DIR__ . '/../../../src/progress_test_prep.php';
+            $cookieHeader = (string)($_SERVER['HTTP_COOKIE'] ?? '');
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                session_write_close();
+            }
+            pt_prep_schedule_progress_test(
+                $pdo,
+                (int)$attempt['user_id'],
+                (int)$attempt['cohort_id'],
+                (int)$attempt['lesson_id'],
+                'after_failed_attempt',
+                $cookieHeader
+            );
+        }
 
         ptv4_json([
             'ok' => true,

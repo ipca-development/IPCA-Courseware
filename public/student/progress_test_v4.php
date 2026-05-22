@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/progress_test_access.php';
+require_once __DIR__ . '/../../src/progress_test_prep.php';
 
 cw_require_login();
 
@@ -91,9 +92,53 @@ if ($userName === '') $userName = trim((string)($u['name'] ?? 'Student'));
 $firstName = trim(explode(' ', $userName)[0] ?? 'Student');
 if ($firstName === '') $firstName = 'Student';
 
+$courseReturnUrl = '/student/course.php?cohort_id=' . (int)$cohortId;
+$prepBlocked = false;
+$prepBlockedLabel = 'Preparing Progress Test…';
+if ($role === 'student') {
+    $prepStatus = pt_prep_course_status(
+        $pdo,
+        $studentContextId,
+        $cohortId,
+        $lessonId,
+        (string)($_SERVER['HTTP_COOKIE'] ?? ''),
+        $courseReturnUrl
+    );
+    if (empty($prepStatus['prepared'])) {
+        $prepBlocked = true;
+        $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Preparing Progress Test…');
+    }
+}
+
+if ($prepBlocked) {
+    cw_header('Progress Test');
+    ?>
+    <style>
+      body{ background:#fff; }
+      .gate-wrap{ max-width:980px; margin:0 auto; padding:18px 12px; }
+      .gate-card{ max-width:560px; margin:38px auto; padding:24px; border:1px solid #e8e8e8; border-radius:18px; background:#fff; box-shadow:0 10px 30px rgba(0,0,0,0.06); }
+      .gate-title{ font-size:24px; font-weight:900; color:#1e3c72; margin-bottom:8px; }
+      .gate-text{ color:#334155; line-height:1.5; }
+      .gate-btn{ display:inline-block; margin-top:14px; padding:14px 18px; border-radius:16px; border:2px solid rgba(30,60,114,0.25); background:rgba(30,60,114,0.08); color:#1e3c72; font-weight:900; font-size:16px; text-decoration:none; }
+    </style>
+    <div class="gate-wrap">
+      <div class="gate-card">
+        <div class="gate-title">Progress Test Not Ready Yet</div>
+        <div class="gate-text">
+          Your progress test is still being prepared. Current status: <strong><?= h($prepBlockedLabel) ?></strong><br><br>
+          Please return to your course page and start the test once preparation is complete.
+        </div>
+        <a class="gate-btn" href="<?= h($courseReturnUrl) ?>">Return to Course</a>
+      </div>
+    </div>
+    <?php
+    cw_footer();
+    exit;
+}
+
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=3">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=4">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -158,6 +203,11 @@ cw_header('Progress Test');
     <button class="ptv4-btn primary ptv4-btn-block" type="button" data-ptv4-start-test disabled>Start Progress Test</button>
   </section>
 
+  <section class="ptv4-greeting" data-ptv4-greeting hidden>
+    <p class="ptv4-greeting-copy" data-ptv4-greeting-copy>Maya will greet you, then you can begin the oral test.</p>
+    <button class="ptv4-btn primary ptv4-btn-block" type="button" data-ptv4-begin-test disabled>Start my Progress Test</button>
+  </section>
+
   <section class="ptv4-card" data-ptv4-card data-card-state="ready" hidden aria-label="Current question">
     <div class="ptv4-card-head">
       <div class="ptv4-card-state-pill" data-ptv4-state-pill>Ready</div>
@@ -198,6 +248,7 @@ cw_header('Progress Test');
       <button class="ptv4-btn danger" type="button" data-ptv4-stop-answer disabled>Stop Answer</button>
       <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-clarify disabled>Request Clarification</button>
       <button class="ptv4-btn ptv4-btn-muted" type="button" data-ptv4-next disabled>Next Question</button>
+      <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-retry hidden>Retry</button>
     </div>
 
     <div class="ptv4-card-footnote">You will be allowed one clarification if needed. Please answer in English.</div>
@@ -212,5 +263,5 @@ window.IPCAProgressTestV4Config = {
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=3"></script>
+<script src="/assets/progress_test_v4.js?v=4"></script>
 <?php cw_footer(); ?>

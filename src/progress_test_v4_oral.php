@@ -298,7 +298,7 @@ function ptv4_save_card_state(PDO $pdo, int $attemptId, int $itemId, int $userId
 
 function ptv4_default_clarification_text(): string
 {
-    return 'I may not have heard that correctly. Please clarify your answer in English.';
+    return 'I may not have heard that correctly. Please answer again in English.';
 }
 
 function ptv4_word_count(string $text): int
@@ -612,6 +612,35 @@ function ptv4_merge_chunk_transcripts(PDO $pdo, int $attemptId, int $itemId): st
         if ($txt !== '') $parts[] = $txt;
     }
     return trim(implode(' ', $parts));
+}
+
+function ptv4_answer_has_audio(PDO $pdo, int $attemptId, int $itemId): bool
+{
+    try {
+        $st = $pdo->prepare("
+            SELECT COUNT(*) FROM progress_test_v4_answer_chunks
+            WHERE attempt_id = ? AND item_id = ?
+        ");
+        $st->execute([$attemptId, $itemId]);
+        return ((int)$st->fetchColumn()) > 0;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function ptv4_finalize_transcript(PDO $pdo, int $attemptId, int $itemId, string $liveTranscript = ''): array
+{
+    $merged = ptv4_merge_chunk_transcripts($pdo, $attemptId, $itemId);
+    $final = $merged !== '' ? $merged : trim($liveTranscript);
+    if ($final === '') {
+        $cards = ptv4_load_card_sessions($pdo, $attemptId);
+        $final = trim((string)($cards[$itemId]['live_transcript'] ?? ''));
+    }
+    return [
+        'transcript_final' => $final,
+        'has_audio' => ptv4_answer_has_audio($pdo, $attemptId, $itemId),
+        'chunk_transcript' => $merged,
+    ];
 }
 
 function ptv4_fire_background_prepare(int $testId, string $cookieHeader = ''): void

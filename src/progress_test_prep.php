@@ -245,3 +245,144 @@ function pt_prep_schedule_on_summary_accept(PDO $pdo, int $userId, int $cohortId
 {
     pt_prep_schedule_progress_test($pdo, $userId, $cohortId, $lessonId, 'summary_accepted', $cookieHeader);
 }
+
+function pt_prep_get_open_attempt(PDO $pdo, int $userId, int $cohortId, int $lessonId): ?array
+{
+    $st = $pdo->prepare("
+        SELECT * FROM progress_tests_v2
+        WHERE user_id = ? AND cohort_id = ? AND lesson_id = ?
+          AND status IN ('preparing','ready','in_progress','processing')
+        ORDER BY id DESC LIMIT 1
+    ");
+    $st->execute([$userId, $cohortId, $lessonId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    return $row ?: null;
+}
+
+function pt_prep_attempt_is_resumable(PDO $pdo, int $testId): bool
+{
+    if (pt_prep_attempt_has_oral_progress($pdo, $testId)) return true;
+    try {
+        $st = $pdo->prepare("
+            SELECT COUNT(*) FROM progress_test_v4_card_sessions
+            WHERE attempt_id = ?
+              AND card_state IN ('asking','listening','evaluating','clarification')
+        ");
+        $st->execute([$testId]);
+        return ((int)$st->fetchColumn()) > 0;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function pt_prep_progress_label(array $attempt, PDO $pdo): array
+{
+    $pct = max(0, min(100, (int)($attempt['progress_pct'] ?? 0)));
+    $text = strtolower(trim((string)($attempt['status_text'] ?? '')));
+
+    if (pt_prep_attempt_is_prepared($attempt, $pdo)) {
+        return ['label' => 'Progress Test ready', 'class' => 'ok', 'pct' => 100, 'sub' => 'Ready'];
+    }
+
+    if (strpos($text, 'quality') !== false) {
+        return ['label' => 'Checking question quality…', 'class' => 'info', 'pct' => max($pct, 75), 'sub' => 'Preparing'];
+    }
+    if (strpos($text, 'audio') !== false) {
+        return ['label' => 'Preparing Progress Test…', 'class' => 'info', 'pct' => max($pct, 55), 'sub' => 'Preparing'];
+    }
+    if (strpos($text, 'oral') !== false || strpos($text, 'generat') !== false) {
+        return ['label' => 'Generating oral questions…', 'class' => 'info', 'pct' => max($pct, 35), 'sub' => 'Preparing'];
+    }
+
+    return ['label' => 'Preparing Progress Test…', 'class' => 'info', 'pct' => max($pct, 10), 'sub' => 'Preparing'];
+}
+
+/**
+ * Course-page preparation status. Schedules background prep when eligible and not yet prepared.
+ */
+function pt_prep_course_status(
+    PDO $pdo,
+    int $userId,
+    int $cohortId,
+    int $lessonId,
+    string $cookieHeader = '',
+    string $progressTestUrl = ''
+): array {
+    $empty = [
+        'show_bar' => false,
+        'show_button' => false,
+        'button_href' => '',
+        'button_label' => 'Start Progress Test',
+        'prepared' => false,
+        'preparing' => false,
+        'resume' => false,
+        'label' => '',
+        'sub' => 'Progress Test',
+        'class' => 'neutral',
+        'pct' => 0,
+        'attempt_id' => null,
+    ];
+
+    if (pt_prep_has_canonical_pass($pdo, $userId, $cohortId, $lessonId)) {
+        return array_merge($empty, [
+            'prepared' => true,
+            'label' => 'Passed',
+            'class' => 'ok',
+            'pct' => 100,
+            'sub' => 'Complete',
+        ]);
+    }
+
+    $attempt = pt_prep_get_open_attempt($pdo, $userId, $cohortId, $lessonId);
+    if (!$attempt) {
+        pt_prep_schedule_progress_test($pdo, $userId, $cohortId, $lessonId, 'course_page', $cookieHeader);
+        $attempt = pt_prep_get_open_attempt($pdo, $userId, $cohortId, $lessonId);
+    }
+
+    if (!$attempt) {
+        return $empty;
+    }
+
+    $testId = (int)$attempt['id'];
+    $prepared = pt_prep_attempt_is_prepared($attempt, $pdo);
+    $meta = pt_prep_progress_label($attempt, $pdo);
+
+    if ($prepared) {
+        $resume = pt_prep_attempt_is_resumable($pdo, $testId);
+        return [
+            'show_bar' => false,
+            'show_button' => true,
+            'button_href' => $progressTestUrl,
+            'button_label' => $resume ? 'Resume Progress Test' : 'Start Progress Test',
+            'prepared' => true,
+            'preparing' => false,
+            'resume' => $resume,
+            'label' => $meta['label'],
+            'sub' => $meta['sub'],
+            'class' => $meta['class'],
+            'pct' => $meta['pct'],
+            'attempt_id' => $testId,
+        ];
+    }
+
+    if ((string)($attempt['status'] ?? '') === 'preparing' && (int)($attempt['progress_pct'] ?? 0) < 5) {
+        pt_prep_schedule_progress_test($pdo, $userId, $cohortId, $lessonId, 'course_page_retry', $cookieHeader);
+        $attempt = pt_prep_get_open_attempt($pdo, $userId, $cohortId, $lessonId) ?: $attempt;
+        $meta = pt_prep_progress_label($attempt, $pdo);
+    }
+
+    return [
+        'show_bar' => true,
+        'show_button' => false,
+        'button_href' => '',
+        'button_label' => 'Start Progress Test',
+        'prepared' => false,
+        'preparing' => true,
+        'resume' => false,
+        'label' => $meta['label'],
+        'sub' => $meta['sub'],
+        'class' => $meta['class'],
+        'pct' => $meta['pct'],
+        'attempt_id' => $testId,
+    ];
+}
