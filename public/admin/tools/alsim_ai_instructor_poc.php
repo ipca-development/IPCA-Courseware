@@ -421,6 +421,7 @@ declare(strict_types=1);
           Last spoken message
           <span id="lastSpoken">—</span>
         </div>
+        <p class="status-line" id="voiceStatus">AI voice: OpenAI TTS (marin) · off</p>
         <div class="event-log" id="eventLog" aria-label="Instructor event log"></div>
       </div>
     </section>
@@ -452,6 +453,7 @@ declare(strict_types=1);
 
   const ALSIM_WS_URL = 'ws://192.168.0.31:15380/';
   const ALSIM_WS_PROTOCOL = 'datastore';
+  const TTS_ENDPOINT = 'alsim_ai_instructor_tts.php';
 
   const TELEMETRY_KEYS = [
     'd_FM_ktAircraftTrueAirspeed',
@@ -490,6 +492,9 @@ declare(strict_types=1);
   const spokenCooldowns = {};
   let lastSpokenAt = 0;
   let lastInstructorText = '';
+  let currentAudio = null;
+  let currentAudioUrl = null;
+  let ttsRequestId = 0;
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
   const el = {
@@ -508,6 +513,7 @@ declare(strict_types=1);
     telLatLon: document.getElementById('telLatLon'),
     instructorMessage: document.getElementById('instructorMessage'),
     lastSpoken: document.getElementById('lastSpoken'),
+    voiceStatus: document.getElementById('voiceStatus'),
     eventLog: document.getElementById('eventLog')
   };
 
@@ -745,7 +751,7 @@ declare(strict_types=1);
       evaluateTimer = null;
     }
 
-    window.speechSynthesis.cancel();
+    stopInstructorAudio();
   }
 
   function resetInstructorState() {
@@ -766,13 +772,73 @@ declare(strict_types=1);
     el.instructorMessage.className = 'instructor-msg instructor-msg--idle';
   }
 
+  function updateVoiceStatus(note) {
+    const suffix = note ? ' · ' + note : (voiceEnabled ? ' · on' : ' · off');
+    el.voiceStatus.textContent = 'AI voice: OpenAI TTS (marin)' + suffix;
+  }
+
   function toggleVoice() {
     voiceEnabled = !voiceEnabled;
     el.btnVoice.textContent = voiceEnabled ? 'Enable Voice ON' : 'Enable Voice OFF';
     el.btnVoice.className = voiceEnabled ? 'btn btn--voice-on' : 'btn';
     if (!voiceEnabled) {
-      window.speechSynthesis.cancel();
+      stopInstructorAudio();
     }
+    updateVoiceStatus();
+  }
+
+  function stopInstructorAudio() {
+    ttsRequestId += 1;
+    if (currentAudio) {
+      currentAudio.pause();
+      currentAudio.removeAttribute('src');
+      currentAudio.load();
+      currentAudio = null;
+    }
+    if (currentAudioUrl) {
+      URL.revokeObjectURL(currentAudioUrl);
+      currentAudioUrl = null;
+    }
+  }
+
+  function playInstructorAudio(text) {
+    stopInstructorAudio();
+    const requestId = ttsRequestId;
+
+    updateVoiceStatus('generating…');
+
+    fetch(TTS_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text, speed: 1.0 })
+    })
+      .then(function (res) {
+        if (!res.ok) {
+          throw new Error('TTS HTTP ' + res.status);
+        }
+        return res.blob();
+      })
+      .then(function (blob) {
+        if (requestId !== ttsRequestId || !voiceEnabled || !scenarioRunning) {
+          return;
+        }
+        currentAudioUrl = URL.createObjectURL(blob);
+        currentAudio = new Audio(currentAudioUrl);
+        currentAudio.onended = function () {
+          if (currentAudioUrl) {
+            URL.revokeObjectURL(currentAudioUrl);
+            currentAudioUrl = null;
+          }
+          currentAudio = null;
+          updateVoiceStatus();
+        };
+        updateVoiceStatus('speaking…');
+        return currentAudio.play();
+      })
+      .catch(function (err) {
+        console.warn('AI voice playback failed:', err);
+        updateVoiceStatus('error');
+      });
   }
 
   // ── Instructor output ─────────────────────────────────────────────────────
@@ -797,12 +863,8 @@ declare(strict_types=1);
 
     logInstructorEvent(text);
 
-    if (voiceEnabled && 'speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.rate = 0.95;
-      utter.pitch = 1;
-      window.speechSynthesis.speak(utter);
+    if (voiceEnabled) {
+      playInstructorAudio(text);
     }
   }
 
@@ -971,6 +1033,7 @@ declare(strict_types=1);
   window.toggleVoice = toggleVoice;
 
   setScenarioBadge(false);
+  updateVoiceStatus();
 })();
 </script>
 </body>

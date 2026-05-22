@@ -208,5 +208,5 @@ window.IPCAProgressTestV3Config = {
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v3.js?v=52"></script>
+<script src="/assets/progress_test_v3.js?v=53"></script>
 <?php cw_footer(); ?>

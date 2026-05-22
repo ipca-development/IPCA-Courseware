@@ -89,7 +89,9 @@
   var pendingTranscriptSubmit = false;
   var pendingTranscriptKind = '';
   var transcriptWaitStartedAt = 0;
-  var transcriptQuietMs = 1300;
+  var transcriptLastSegmentAt = 0;
+  var pendingTranscriptSubmitAfterMaya = false;
+  var transcriptQuietMs = 2000;
   var transcriptMaxWaitMs = 8000;
   var mayaTurnTailTimer = null;
   var mayaTurnMaxTimer = null;
@@ -651,6 +653,22 @@
     });
   }
 
+  function commitStudentAudioBuffer() {
+    if (dc && dc.readyState === 'open') {
+      try { dc.send(JSON.stringify({ type: 'input_audio_buffer.commit' })); } catch (e) {}
+    }
+  }
+
+  function clearTranscriptSubmitTimers() {
+    if (transcriptWaitTimer) clearTimeout(transcriptWaitTimer);
+    transcriptWaitTimer = null;
+    pendingTranscriptSubmit = false;
+    pendingTranscriptKind = '';
+    pendingTranscriptSubmitAfterMaya = false;
+    transcriptWaitStartedAt = 0;
+    transcriptLastSegmentAt = 0;
+  }
+
   function startCameraPreview(stream) {
     if (!els.video || !stream || !stream.getVideoTracks || stream.getVideoTracks().length === 0) return;
     try {
@@ -917,6 +935,7 @@
   function drainResponse() {
     if (mayaDriftDetected) {
       responseInProgress = false;
+      resumePendingTranscriptSubmit();
       return;
     }
     var finishedPurpose = mayaTurnPurpose;
@@ -931,6 +950,7 @@
       return;
     }
     scheduleMayaTurnComplete(finishedPurpose);
+    resumePendingTranscriptSubmit();
   }
 
   function finishMayaTurn(finishedPurpose) {
@@ -1089,7 +1109,9 @@
     transcriptWaitTimer = null;
     pendingTranscriptSubmit = false;
     pendingTranscriptKind = '';
+    pendingTranscriptSubmitAfterMaya = false;
     transcriptWaitStartedAt = 0;
+    transcriptLastSegmentAt = 0;
     transcriptFlushUntil = 0;
     setTyping('', false);
   }
@@ -1161,12 +1183,72 @@
 
   function captureStudentTranscript(transcript, kind) {
     answerSegments.push(transcript);
+    transcriptLastSegmentAt = Date.now();
     if (activeStudentBubble && activeStudentBubble.body) {
       activeStudentBubble.body.textContent = combinedAnswerText('');
     } else {
       activeStudentBubble = addBubble('student', 'Student', combinedAnswerText(''), kind || 'answer');
     }
     if (pendingTranscriptSubmit) scheduleTranscriptSubmit(pendingTranscriptKind);
+  }
+
+  function transcriptSubmitDelayMs(hasText, elapsed) {
+    if (!hasText) return elapsed >= transcriptMaxWaitMs ? 0 : 500;
+    if (!transcriptLastSegmentAt) return transcriptQuietMs;
+    var quietRemain = transcriptQuietMs - (Date.now() - transcriptLastSegmentAt);
+    if (quietRemain > 0 && elapsed < transcriptMaxWaitMs) return Math.min(quietRemain, 400);
+    return 0;
+  }
+
+  function finalizeTranscriptSubmit(kind) {
+    var elapsed = Date.now() - transcriptWaitStartedAt;
+    var bufferText = combinedAnswerText('');
+    var hasText = bufferText !== '';
+    var quietRemain = transcriptLastSegmentAt ? Math.max(0, transcriptQuietMs - (Date.now() - transcriptLastSegmentAt)) : 0;
+
+    if (!hasText && elapsed < transcriptMaxWaitMs) {
+      scheduleTranscriptSubmit(kind);
+      return;
+    }
+    if (hasText && quietRemain > 0 && elapsed < transcriptMaxWaitMs) {
+      scheduleTranscriptSubmit(kind);
+      return;
+    }
+
+    if (kind === 'readiness') {
+      clearTranscriptSubmitTimers();
+      transcriptFlushUntil = 0;
+      setTyping('', false);
+      handleAudioCheckTranscript(bufferText);
+      return;
+    }
+
+    if (!hasText) {
+      clearTranscriptSubmitTimers();
+      transcriptFlushUntil = 0;
+      setTyping('', false);
+      var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
+      retryCurrentAnswer('I am sorry ' + firstName + ', I did not hear you well. Let me give you another chance to answer properly or check your audio connection.');
+      return;
+    }
+
+    if (responseInProgress) {
+      pendingTranscriptSubmitAfterMaya = true;
+      setStatus('Finishing transcription, then evaluating your answer.', awaitingClarification ? 'Clarification answer' : ('Question ' + (currentItem ? currentItem.idx : '') + '/' + (state ? state.total_questions : '')));
+      if (transcriptWaitTimer) clearTimeout(transcriptWaitTimer);
+      transcriptWaitTimer = setTimeout(function () {
+        transcriptWaitTimer = null;
+        finalizeTranscriptSubmit(kind);
+      }, 300);
+      return;
+    }
+
+    pendingTranscriptSubmit = false;
+    pendingTranscriptKind = '';
+    pendingTranscriptSubmitAfterMaya = false;
+    transcriptWaitStartedAt = 0;
+    setTyping('Maya is thinking', true, 'maya');
+    submitCurrentBufferedAnswer();
   }
 
   function scheduleTranscriptSubmit(kind) {
@@ -1176,32 +1258,27 @@
     if (transcriptWaitTimer) clearTimeout(transcriptWaitTimer);
     var elapsed = Date.now() - transcriptWaitStartedAt;
     var hasText = combinedAnswerText('') !== '';
-    var delay = hasText || elapsed >= transcriptMaxWaitMs ? transcriptQuietMs : 500;
+    var delay = transcriptSubmitDelayMs(hasText, elapsed);
     transcriptWaitTimer = setTimeout(function () {
       transcriptWaitTimer = null;
-      elapsed = Date.now() - transcriptWaitStartedAt;
-      if (!hasText && elapsed < transcriptMaxWaitMs) {
-        scheduleTranscriptSubmit(kind);
-        return;
-      }
-      pendingTranscriptSubmit = false;
-      pendingTranscriptKind = '';
-      transcriptWaitStartedAt = 0;
-      transcriptFlushUntil = 0;
-      if (kind === 'readiness') {
-        setTyping('', false);
-        handleAudioCheckTranscript(combinedAnswerText(''));
-      } else {
-        if (!hasText) {
-          setTyping('', false);
-          var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
-          retryCurrentAnswer('I am sorry ' + firstName + ', I did not hear you well. Let me give you another chance to answer properly or check your audio connection.');
-          return;
-        }
-        setTyping('Maya is thinking', true, 'maya');
-        submitCurrentBufferedAnswer();
-      }
+      finalizeTranscriptSubmit(kind);
     }, delay);
+  }
+
+  function resumePendingTranscriptSubmit() {
+    if (!pendingTranscriptSubmitAfterMaya) return;
+    if (responseInProgress) return;
+    if (phase !== 'answering' && phase !== 'readiness') {
+      pendingTranscriptSubmitAfterMaya = false;
+      return;
+    }
+    var kind = pendingTranscriptKind || 'answer';
+    if (!combinedAnswerText('')) {
+      pendingTranscriptSubmitAfterMaya = false;
+      return;
+    }
+    pendingTranscriptSubmit = true;
+    finalizeTranscriptSubmit(kind);
   }
 
   function isMayaEchoTranscript(transcript) {
@@ -1331,7 +1408,7 @@
     var key = transcriptKey(msg);
     if (processedTranscripts[key]) return;
     processedTranscripts[key] = true;
-    if ((audioCheckActive || awaitingAudioCheck) && phase === 'readiness' && (answerCaptureActive || Date.now() < transcriptFlushUntil) && !responseInProgress) {
+    if ((audioCheckActive || awaitingAudioCheck) && phase === 'readiness' && (answerCaptureActive || Date.now() < transcriptFlushUntil) && (!responseInProgress || Date.now() < transcriptFlushUntil)) {
       captureStudentTranscript(transcript, 'readiness_answer');
       api('save_transcript_segment', {
         item_id: currentItem ? currentItem.id : 0,
@@ -1342,7 +1419,8 @@
       return;
     }
     if (phase !== 'answering' || !(answerCaptureActive || Date.now() < transcriptFlushUntil)) return;
-    if (!awaitingAnswer || responseInProgress || !currentItem) return;
+    if (!awaitingAnswer || !currentItem) return;
+    if (responseInProgress && !(Date.now() < transcriptFlushUntil)) return;
     if (isCourtesyOnlySpeech(transcript)) {
       if (awaitingClarification) {
         setStatus('That sounded like an acknowledgement. Tap ANSWER CLARIFICATION and add your clarification.', 'Clarification answer');
@@ -1351,7 +1429,7 @@
       }
       return;
     }
-    if (isSetupOrHoldSpeech(transcript)) {
+    if (isSetupOrHoldSpeech(transcript) && answerCaptureActive) {
       stopAnswerTimer();
       var firstName = String(cfg.firstName || 'Student').trim() || 'Student';
       retryCurrentAnswer('I am sorry ' + firstName + ', I did not hear you well. Let me give you another chance to answer properly or check your audio connection.');
@@ -1417,6 +1495,7 @@
       return;
     }
     if (phase === 'readiness' && answerCaptureActive) {
+      commitStudentAudioBuffer();
       setStudentAnswering(false);
       setMicEnabled(false);
       transcriptFlushUntil = Date.now() + transcriptMaxWaitMs;
@@ -1439,13 +1518,14 @@
       return;
     }
     if (phase === 'answering' && answerCaptureActive) {
+      commitStudentAudioBuffer();
       setStudentAnswering(false);
       setMicEnabled(false);
       transcriptFlushUntil = Date.now() + transcriptMaxWaitMs;
       playBeep('stop');
       setFinishButton('Transcribing...', true, 'wait');
       setTyping('Transcribing', true, 'student');
-      setStatus('Transcribing your answer. Maya will evaluate after the text appears.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
+      setStatus('Transcribing your answer. Waiting for the full transcript before scoring.', awaitingClarification ? 'Clarification answer' : ('Question ' + currentItem.idx + '/' + state.total_questions));
       if (submitAfterFlushTimer) clearTimeout(submitAfterFlushTimer);
       scheduleTranscriptSubmit('answer');
       return;
@@ -1454,7 +1534,22 @@
 
   function submitCurrentBufferedAnswer() {
     var finalAnswer = combinedAnswerText('');
-    if (phase !== 'answering' || !currentItem || !finalAnswer || responseInProgress) {
+    if (phase !== 'answering' || !currentItem) {
+      setTyping('', false);
+      if (!finalAnswer) handleUnreadableAnswerRetry();
+      return;
+    }
+    if (responseInProgress) {
+      if (finalAnswer) {
+        pendingTranscriptSubmitAfterMaya = true;
+        pendingTranscriptKind = 'answer';
+        return;
+      }
+      setTyping('', false);
+      handleUnreadableAnswerRetry();
+      return;
+    }
+    if (!finalAnswer) {
       setTyping('', false);
       handleUnreadableAnswerRetry();
       return;
@@ -1464,6 +1559,8 @@
       handleUnreadableAnswerRetry();
       return;
     }
+    clearTranscriptSubmitTimers();
+    transcriptFlushUntil = 0;
     if (answerSettleTimer) clearTimeout(answerSettleTimer);
     answerSettleTimer = null;
     awaitingDoneConfirmation = false;
