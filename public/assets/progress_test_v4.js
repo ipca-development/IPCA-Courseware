@@ -11,8 +11,11 @@
     recording: 'Recording your answer…',
     listening: 'Listening carefully…',
     processing: 'Processing your answer…',
-    failed: 'We could not clearly transcribe your answer. Please try again.'
+    failed: 'We could not clearly transcribe your answer. Please try again.',
+    noAudio: 'Audio was not received. Please try again.',
+    uploadFailed: 'Audio upload failed. Please try again.'
   };
+  var DEBUG_PTV4 = true;
 
   var page = document.querySelector('[data-ptv4-root]');
   if (!page) return;
@@ -75,9 +78,12 @@
   var hasRecordedAudio = false;
   var recordingStartedAt = 0;
   var mediaRecorder = null;
+  var recordStream = null;
   var micStream = null;
   var cameraStream = null;
   var chunkUploadChain = Promise.resolve();
+  var chunksReceived = 0;
+  var chunksUploaded = 0;
   var pendingEvalOpts = null;
   var pc = null;
   var dc = null;
@@ -98,6 +104,12 @@
   function text(el, v) { if (el) el.textContent = v; }
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
   function setStatus(msg) { text(els.status, msg); }
+
+  function dbg() {
+    if (!DEBUG_PTV4) return;
+    var args = ['[PTV4]'].concat([].slice.call(arguments));
+    console.log.apply(console, args);
+  }
 
   function setTranscriptDisplay(mode, customText) {
     if (!els.transcript) return;
@@ -128,6 +140,7 @@
       els.retry.dataset.retryKind = kind;
       els.retry.textContent = kind === 'evaluation' ? 'Retry Evaluation' : (kind === 'upload' ? 'Retry Upload' : 'Retry Answer');
     }
+    syncButtons();
   }
 
   function setAvatarVisuals() {
@@ -177,13 +190,15 @@
   function syncButtons() {
     var prepared = state && state.prepared;
     var allDone = state && state.evaluated_count >= state.total_questions;
+    var retryVisible = els.retry && !els.retry.hidden;
     if (els.startTest) els.startTest.disabled = !prepared || testStarted || allDone;
     if (els.beginTest) {
       els.beginTest.disabled = !testStarted || !greetingReady || oralQuestionsStarted;
     }
     if (els.startAnswer) {
+      var canAnswer = cardState === CARD.READY || cardState === CARD.CLARIFICATION || retryVisible;
       els.startAnswer.disabled = !testStarted || !oralQuestionsStarted
-        || (cardState !== CARD.READY && cardState !== CARD.CLARIFICATION)
+        || !canAnswer
         || cardState === CARD.LISTENING
         || cardState === CARD.EVALUATING
         || cardState === CARD.ASKING;
@@ -218,57 +233,87 @@
     return postJson('/student/api/progress_test_v4_oral.php', payload);
   }
 
-  function uploadChunk(blob) {
+  function uploadChunk(blob, isFinal) {
+    if (!currentItem || !attemptId) {
+      dbg('chunk upload skipped — missing attempt/item', { attemptId: attemptId, itemId: currentItem && currentItem.id });
+      return Promise.reject(new Error('Missing attempt or question context for chunk upload'));
+    }
     var idx = chunkIndex++;
+    chunksReceived++;
+    dbg('chunk received', { index: idx, size: blob.size, final: !!isFinal });
+
     var fd = new FormData();
     fd.append('action', 'upload_answer_chunk');
     fd.append('attempt_id', String(attemptId));
     fd.append('item_id', String(currentItem.id));
     fd.append('chunk_index', String(idx));
     fd.append('chunk', blob, 'chunk_' + idx + '.webm');
-    chunkUploadChain = chunkUploadChain.then(function () {
-      return fetch('/student/api/progress_test_v4_oral.php?action=upload_answer_chunk', {
-        method: 'POST',
-        credentials: 'same-origin',
-        body: fd
-      }).then(function (res) {
-        return res.text().then(function (txt) {
-          var out;
-          try { out = JSON.parse(txt); } catch (e) { throw new Error('Chunk upload returned invalid JSON'); }
-          if (!res.ok || !out.ok) throw new Error(out.error || ('Chunk upload failed (HTTP ' + res.status + ')'));
-          return out;
-        });
-      }).then(function (out) {
+
+    dbg('chunk upload request sent', { index: idx, attemptId: attemptId, itemId: currentItem.id });
+
+    var uploadOne = fetch('/student/api/progress_test_v4_oral.php?action=upload_answer_chunk', {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: fd
+    }).then(function (res) {
+      return res.text().then(function (txt) {
+        var out;
+        try { out = JSON.parse(txt); } catch (e) { throw new Error('Chunk upload returned invalid JSON'); }
+        dbg('chunk upload response', { index: idx, ok: out.ok, status: res.status, chunkCount: out.chunk_count, bytes: out.bytes });
+        if (!res.ok || !out.ok) throw new Error(out.error || ('Chunk upload failed (HTTP ' + res.status + ')'));
+        chunksUploaded++;
         hasRecordedAudio = true;
         return out;
       });
     });
-    return chunkUploadChain;
+
+    chunkUploadChain = chunkUploadChain.then(function () { return uploadOne; });
+    return uploadOne;
   }
 
-  function stopMediaRecorder() {
-    return new Promise(function (resolve) {
+  function stopRecordStream() {
+    if (recordStream) {
+      recordStream.getTracks().forEach(function (track) {
+        try { track.stop(); } catch (e) {}
+      });
+      recordStream = null;
+    }
+  }
+
+  function flushRecordingUploads() {
+    dbg('flush recording uploads start', { chunksReceived: chunksReceived, chunksUploaded: chunksUploaded });
+    return new Promise(function (resolve, reject) {
       if (!mediaRecorder || mediaRecorder.state === 'inactive') {
-        resolve();
+        chunkUploadChain.then(resolve).catch(reject);
         return;
       }
-      var finished = false;
-      function done() {
-        if (finished) return;
-        finished = true;
-        resolve();
-      }
-      mediaRecorder.onstop = done;
+
+      mediaRecorder.onstop = function () {
+        dbg('recorder stopped', { chunksReceived: chunksReceived, chunksUploaded: chunksUploaded });
+        window.setTimeout(function () {
+          chunkUploadChain.then(function () {
+            dbg('all chunk uploads complete', { chunksReceived: chunksReceived, chunksUploaded: chunksUploaded });
+            resolve();
+          }).catch(reject);
+        }, 100);
+      };
+
       try {
-        if (mediaRecorder.state === 'recording') mediaRecorder.requestData();
-      } catch (e) {}
+        if (mediaRecorder.state === 'recording') {
+          dbg('requestData before stop');
+          mediaRecorder.requestData();
+        }
+      } catch (e) {
+        dbg('requestData failed', e.message || e);
+      }
+
       try {
         mediaRecorder.stop();
+        dbg('recorder stop issued');
       } catch (e) {
-        done();
-        return;
+        dbg('recorder stop failed', e.message || e);
+        chunkUploadChain.then(resolve).catch(reject);
       }
-      setTimeout(done, 4000);
     });
   }
 
@@ -579,6 +624,7 @@
     if (!currentItem || !micStream) return;
     hideRetry();
     stopTimer();
+    stopRecordStream();
     clarificationMode = cardState === CARD.CLARIFICATION || clarificationPending;
     if (!clarificationMode) {
       originalAnswer = '';
@@ -586,6 +632,8 @@
       liveTranscript = '';
       chunkIndex = 0;
       hasRecordedAudio = false;
+      chunksReceived = 0;
+      chunksUploaded = 0;
       chunkUploadChain = Promise.resolve();
       setTranscriptDisplay('idle');
     } else if (originalAnswer === '') {
@@ -593,6 +641,8 @@
       liveTranscript = '';
       chunkIndex = 0;
       hasRecordedAudio = false;
+      chunksReceived = 0;
+      chunksUploaded = 0;
       chunkUploadChain = Promise.resolve();
     }
     recordingStartedAt = Date.now();
@@ -602,14 +652,47 @@
     initStudentAnalyser();
     startRecordingTimer();
 
+    recordStream = new MediaStream();
+    micStream.getAudioTracks().forEach(function (track) {
+      try {
+        recordStream.addTrack(track.clone());
+      } catch (e) {
+        recordStream.addTrack(track);
+      }
+    });
+
     var mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-    mediaRecorder = new MediaRecorder(micStream, { mimeType: mime });
+    mediaRecorder = new MediaRecorder(recordStream, { mimeType: mime });
     mediaRecorder.ondataavailable = function (ev) {
-      if (ev.data && ev.data.size > 0) uploadChunk(ev.data);
+      if (ev.data && ev.data.size > 0) {
+        dbg('dataavailable during recording', { size: ev.data.size, state: mediaRecorder ? mediaRecorder.state : 'none' });
+        uploadChunk(ev.data, mediaRecorder && mediaRecorder.state === 'inactive');
+      }
+    };
+    mediaRecorder.onerror = function (ev) {
+      dbg('MediaRecorder error', ev.error || ev);
     };
     mediaRecorder.start(CHUNK_MS);
+    dbg('recorder started', { mime: mime, chunkMs: CHUNK_MS, attemptId: attemptId, itemId: currentItem.id });
     setStatus(clarificationMode ? 'Recording clarification in English.' : 'Recording your answer.');
     syncButtons();
+  }
+
+  function handleUploadFailure(err, opts) {
+    pendingEvalOpts = opts || pendingEvalOpts;
+    var msg = String(err && err.message ? err.message : err || '');
+    if (msg.indexOf('No audio received') >= 0 || msg === 'AUDIO_NOT_RECEIVED') {
+      setTranscriptDisplay('noAudio');
+      showRetry('answer', TRANSCRIPT.noAudio);
+    } else if (msg.toLowerCase().indexOf('upload') >= 0 || msg.toLowerCase().indexOf('chunk') >= 0) {
+      setTranscriptDisplay('uploadFailed');
+      showRetry('upload', TRANSCRIPT.uploadFailed);
+    } else {
+      setTranscriptDisplay('failed');
+      showRetry('evaluation', msg || TRANSCRIPT.failed);
+    }
+    setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.READY);
+    setStatus('Could not complete answer processing.');
   }
 
   function submitAnswerEvaluation(opts) {
@@ -620,15 +703,31 @@
     setTranscriptDisplay('processing');
     setStatus('Processing your answer...');
 
-    return stopMediaRecorder()
-      .then(function () { return chunkUploadChain; })
+    return flushRecordingUploads()
       .then(function () {
+        if (!opts.timedOutStart && chunksUploaded <= 0 && !hasRecordedAudio) {
+          throw new Error('AUDIO_NOT_RECEIVED');
+        }
+        dbg('finalize transcript called', {
+          attemptId: attemptId,
+          itemId: currentItem && currentItem.id,
+          recordingMs: getRecordingMs(),
+          chunksReceived: chunksReceived,
+          chunksUploaded: chunksUploaded
+        });
         return apiJson('finalize_transcript', {
           item_id: currentItem.id,
           recording_ms: getRecordingMs()
         });
       })
       .then(function (tr) {
+        dbg('finalize transcript response', tr);
+        if (!opts.timedOutStart && (!tr.audio_received || (tr.chunk_count || 0) <= 0)) {
+          throw new Error('AUDIO_NOT_RECEIVED');
+        }
+        if (tr.upload_failed) {
+          throw new Error('Audio upload failed');
+        }
         if (tr.transcript_final) {
           liveTranscript = tr.transcript_final;
           setTranscriptDisplay('final', liveTranscript);
@@ -637,6 +736,9 @@
           setTranscriptDisplay('failed');
         } else {
           liveTranscript = '';
+        }
+        if (!opts.timedOutStart && !liveTranscript && !tr.transcription_failed && !tr.has_audio) {
+          throw new Error('AUDIO_NOT_RECEIVED');
         }
         setStatus(opts.evalStatusMessage || 'Evaluating your answer...');
         return apiJson('finalize_item_answer', {
@@ -651,12 +753,12 @@
       })
       .then(handleEvaluationResult)
       .catch(function (err) {
-        var kind = String(err.message || '').toLowerCase().indexOf('chunk') >= 0 ? 'upload'
-          : (String(err.message || '').toLowerCase().indexOf('transcript') >= 0 ? 'answer' : 'evaluation');
-        showRetry(kind, err.message || 'Something went wrong while evaluating your answer.');
-        setTranscriptDisplay('failed');
-        setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.READY);
-        setStatus('Could not complete evaluation.');
+        dbg('submitAnswerEvaluation failed', err.message || err);
+        handleUploadFailure(err, opts);
+      })
+      .finally(function () {
+        stopRecordStream();
+        mediaRecorder = null;
       });
   }
 
@@ -850,12 +952,16 @@
   if (els.retry) els.retry.addEventListener('click', function () {
     var kind = els.retry.dataset.retryKind || 'evaluation';
     hideRetry();
-    if (kind === 'answer') {
+    if (kind === 'answer' || kind === 'upload') {
       liveTranscript = '';
       chunkIndex = 0;
       hasRecordedAudio = false;
+      chunksReceived = 0;
+      chunksUploaded = 0;
       recordingStartedAt = 0;
       chunkUploadChain = Promise.resolve();
+      stopRecordStream();
+      mediaRecorder = null;
       startAnswerCapture();
       return;
     }

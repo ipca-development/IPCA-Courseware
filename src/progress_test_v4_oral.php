@@ -568,9 +568,162 @@ function ptv4_state_payload(PDO $pdo, array $attempt): array
 
 function ptv4_answer_chunk_dir(int $attemptId, int $itemId): string
 {
-    $dir = '/tmp/progress_tests_v4/' . $attemptId . '/' . $itemId;
-    if (!is_dir($dir)) @mkdir($dir, 0777, true);
+    $base = getenv('CW_PROGRESS_TEST_V4_AUDIO_DIR') ?: (sys_get_temp_dir() . '/progress_tests_v4');
+    $dir = rtrim($base, '/') . '/' . $attemptId . '/' . $itemId;
+    if (!is_dir($dir) && !@mkdir($dir, 0777, true) && !is_dir($dir)) {
+        throw new RuntimeException('Could not create answer audio directory.');
+    }
     return $dir;
+}
+
+function ptv4_ensure_v4_chunk_table(PDO $pdo): void
+{
+    try {
+        $pdo->exec("
+            CREATE TABLE IF NOT EXISTS progress_test_v4_answer_chunks (
+              id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+              attempt_id BIGINT UNSIGNED NOT NULL,
+              item_id BIGINT UNSIGNED NOT NULL,
+              user_id BIGINT UNSIGNED NOT NULL,
+              chunk_index INT UNSIGNED NOT NULL,
+              storage_path VARCHAR(512) NOT NULL,
+              transcript_text TEXT NULL,
+              created_at DATETIME NOT NULL,
+              PRIMARY KEY (id),
+              UNIQUE KEY uq_ptv4_chunk (attempt_id, item_id, chunk_index),
+              KEY idx_ptv4_chunks_item (attempt_id, item_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+    } catch (Throwable $e) {
+    }
+}
+
+function ptv4_merge_chunk_audio_files(PDO $pdo, int $attemptId, int $itemId): ?string
+{
+    $st = $pdo->prepare("
+        SELECT storage_path FROM progress_test_v4_answer_chunks
+        WHERE attempt_id = ? AND item_id = ?
+        ORDER BY chunk_index ASC
+    ");
+    $st->execute([$attemptId, $itemId]);
+    $paths = array_values(array_filter(array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN))));
+    if (!$paths) return null;
+
+    $dir = ptv4_answer_chunk_dir($attemptId, $itemId);
+    $mergedPath = $dir . '/answer_merged.webm';
+    $out = @fopen($mergedPath, 'wb');
+    if (!$out) return null;
+
+    $bytes = 0;
+    foreach ($paths as $path) {
+        if (!is_file($path) || filesize($path) <= 0) continue;
+        $in = @fopen($path, 'rb');
+        if (!$in) continue;
+        stream_copy_to_stream($in, $out);
+        $bytes += (int)filesize($path);
+        fclose($in);
+    }
+    fclose($out);
+
+    if ($bytes <= 0 || !is_file($mergedPath) || filesize($mergedPath) <= 0) {
+        @unlink($mergedPath);
+        return null;
+    }
+
+    return $mergedPath;
+}
+
+function ptv4_spaces_presign_answer(int $testId, int $idx, string $cookieHeader = ''): array
+{
+    $host = getenv('CW_APP_BASE_URL') ?: 'https://ipca.training';
+    $url = rtrim($host, '/') . '/student/api/progress_test_spaces_presign.php';
+    $payload = json_encode([
+        'test_id' => $testId,
+        'kind' => 'answer',
+        'idx' => $idx,
+        'ext' => 'webm',
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    $headers = ['Content-Type: application/json'];
+    if ($cookieHeader !== '') $headers[] = 'Cookie: ' . $cookieHeader;
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => $headers,
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_TIMEOUT => 60,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    $json = json_decode((string)$resp, true);
+    if (!is_array($json) || $code < 200 || $code >= 300 || empty($json['ok'])) {
+        $msg = is_array($json) ? (string)($json['error'] ?? ('HTTP ' . $code)) : substr((string)$resp, 0, 200);
+        throw new RuntimeException('Answer audio presign failed: ' . $msg);
+    }
+    return $json;
+}
+
+function ptv4_upload_file_to_presigned_put(string $putUrl, string $localPath, string $contentType = 'audio/webm'): void
+{
+    if (!is_file($localPath)) {
+        throw new RuntimeException('Merged answer audio file not found.');
+    }
+    $fh = fopen($localPath, 'rb');
+    if (!$fh) {
+        throw new RuntimeException('Cannot open merged answer audio for upload.');
+    }
+    $size = filesize($localPath);
+    $ch = curl_init($putUrl);
+    curl_setopt_array($ch, [
+        CURLOPT_CUSTOMREQUEST => 'PUT',
+        CURLOPT_UPLOAD => true,
+        CURLOPT_INFILE => $fh,
+        CURLOPT_INFILESIZE => $size,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: ' . $contentType,
+            'Content-Length: ' . $size,
+            'x-amz-acl: public-read',
+        ],
+        CURLOPT_TIMEOUT => 300,
+    ]);
+    $resp = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    fclose($fh);
+    if ($resp === false || $code < 200 || $code >= 300) {
+        throw new RuntimeException('Answer audio upload to storage failed (HTTP ' . $code . ').');
+    }
+}
+
+function ptv4_persist_item_answer_audio(PDO $pdo, int $attemptId, int $itemId, string $cookieHeader = ''): ?string
+{
+    $itemSt = $pdo->prepare("SELECT id, idx FROM progress_test_items_v2 WHERE id = ? AND test_id = ? LIMIT 1");
+    $itemSt->execute([$itemId, $attemptId]);
+    $item = $itemSt->fetch(PDO::FETCH_ASSOC);
+    if (!$item) return null;
+
+    $mergedPath = ptv4_merge_chunk_audio_files($pdo, $attemptId, $itemId);
+    if ($mergedPath === null) return null;
+
+    try {
+        $presign = ptv4_spaces_presign_answer($attemptId, (int)$item['idx'], $cookieHeader);
+        ptv4_upload_file_to_presigned_put((string)$presign['url'], $mergedPath, 'audio/webm');
+        $spacesKey = (string)$presign['key'];
+        $pdo->prepare("
+            UPDATE progress_test_items_v2
+            SET audio_path = ?, updated_at = NOW()
+            WHERE id = ?
+        ")->execute([$spacesKey, $itemId]);
+        return $spacesKey;
+    } catch (Throwable $e) {
+        error_log('ptv4_persist_item_answer_audio failed: ' . $e->getMessage());
+        return null;
+    }
 }
 
 function ptv4_transcribe_audio_file(string $path): string
@@ -728,21 +881,33 @@ function ptv4_touch_answer_chunk_count(PDO $pdo, int $attemptId, int $itemId): v
     }
 }
 
-function ptv4_finalize_transcript(PDO $pdo, int $attemptId, int $itemId, int $recordingMs = 0): array
+function ptv4_finalize_transcript(PDO $pdo, int $attemptId, int $itemId, int $recordingMs = 0, string $cookieHeader = ''): array
 {
-    ptv4_ensure_chunk_transcripts($pdo, $attemptId, $itemId);
-    $merged = ptv4_merge_chunk_transcripts($pdo, $attemptId, $itemId);
-    $final = ptv4_clean_final_transcript($merged);
-    $hasAudio = ptv4_answer_has_usable_audio($pdo, $attemptId, $itemId, $recordingMs);
     $chunkCount = ptv4_answer_chunk_count($pdo, $attemptId, $itemId);
+    $audioReceived = $chunkCount > 0;
+    $audioPath = null;
+
+    if ($audioReceived) {
+        $audioPath = ptv4_persist_item_answer_audio($pdo, $attemptId, $itemId, $cookieHeader);
+        ptv4_ensure_chunk_transcripts($pdo, $attemptId, $itemId);
+    }
+
+    $mergedPath = $audioReceived ? ptv4_merge_chunk_audio_files($pdo, $attemptId, $itemId) : null;
+    $mergedTranscript = $mergedPath ? ptv4_transcribe_audio_file($mergedPath) : '';
+    $chunkMerged = $audioReceived ? ptv4_merge_chunk_transcripts($pdo, $attemptId, $itemId) : '';
+    $final = ptv4_clean_final_transcript($mergedTranscript !== '' ? $mergedTranscript : $chunkMerged);
+    $hasAudio = ptv4_answer_has_usable_audio($pdo, $attemptId, $itemId, $recordingMs);
     $usable = $final !== '' && !ptv4_transcript_looks_corrupted($final);
 
     return [
         'transcript_final' => $final,
         'has_audio' => $hasAudio,
+        'audio_received' => $audioReceived,
         'chunk_count' => $chunkCount,
+        'audio_path' => $audioPath,
         'transcript_usable' => $usable,
         'transcription_failed' => $hasAudio && !$usable,
+        'upload_failed' => $audioReceived && $audioPath === null,
     ];
 }
 
