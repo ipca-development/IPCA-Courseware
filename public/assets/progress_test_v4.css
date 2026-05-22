@@ -261,20 +261,12 @@
 }
 
 .ptv4-prestart,
-.ptv4-greeting,
 .ptv4-lesson-menu {
   margin-bottom: 14px;
 }
 
 .ptv4-lesson-menu[hidden] {
   display: none;
-}
-
-.ptv4-greeting-copy {
-  margin: 0 0 12px;
-  color: #475569;
-  font-size: 14px;
-  line-height: 1.5;
 }
 
 .ptv4-btn-block {
@@ -288,8 +280,6 @@
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
   overflow: hidden;
 }
-
-.ptv4-card[hidden] { display: none; }
 
 .ptv4-card-head {
   display: flex;
@@ -355,6 +345,9 @@
 
 .ptv4-card-body {
   padding: 16px;
+  min-height: 380px;
+  display: flex;
+  flex-direction: column;
 }
 
 .ptv4-question-row {
@@ -363,6 +356,7 @@
   gap: 14px;
   align-items: start;
   margin-bottom: 14px;
+  min-height: 88px;
 }
 
 .ptv4-question-text {
@@ -370,6 +364,7 @@
   line-height: 1.35;
   font-weight: 800;
   color: #152235;
+  min-height: 72px;
 }
 
 .ptv4-qmeta {
@@ -401,7 +396,7 @@
 }
 
 .ptv4-transcript {
-  min-height: 56px;
+  min-height: 72px;
   font-size: 14px;
   line-height: 1.5;
   color: #243446;
@@ -424,6 +419,27 @@
   font-weight: 700;
 }
 
+.ptv4-message-slot {
+  position: relative;
+  min-height: 132px;
+  margin-bottom: 12px;
+  flex: 0 0 auto;
+}
+
+.ptv4-message-slot > .ptv4-hint,
+.ptv4-message-slot > .ptv4-hint-warn,
+.ptv4-message-slot > .ptv4-feedback {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  margin-bottom: 0;
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
 .ptv4-hint {
   padding: 10px 12px;
   border-radius: 12px;
@@ -432,7 +448,6 @@
   color: #1e40af;
   font-size: 13px;
   line-height: 1.45;
-  margin-bottom: 10px;
 }
 
 .ptv4-hint-warn {
@@ -441,11 +456,15 @@
   color: #9a3412;
 }
 
-.ptv4-hint[hidden],
-.ptv4-hint-warn[hidden] { display: none; }
+.ptv4-hint.is-visible,
+.ptv4-hint-warn.is-visible,
+.ptv4-feedback.is-visible {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
 
 .ptv4-feedback {
-  margin-top: 4px;
   padding: 12px 14px;
   border-radius: 14px;
   background: #eff6ff;
@@ -455,8 +474,6 @@
   line-height: 1.5;
   font-weight: 600;
 }
-
-.ptv4-feedback[hidden] { display: none; }
 
 .ptv4-timer {
   opacity: 0.35;
@@ -489,6 +506,7 @@
   font-weight: 700;
   color: #64748b;
   line-height: 1.35;
+  min-height: 15px;
 }
 
 .ptv4-timer-note {
@@ -496,15 +514,21 @@
   font-size: 10px;
   color: #94a3b8;
   font-weight: 600;
+  min-height: 14px;
+  visibility: hidden;
 }
 
-.ptv4-timer-note[hidden] { display: none; }
+.ptv4-timer-note.is-visible {
+  visibility: visible;
+}
 
 .ptv4-card-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   padding: 0 16px 14px;
+  min-height: 108px;
+  align-content: flex-start;
 }
 
 .ptv4-card-footnote {
@@ -537,6 +561,26 @@
 
 .ptv4-btn:hover:not(:disabled) { background: rgba(30, 60, 114, 0.11); }
 .ptv4-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.ptv4-btn-session:not(.is-visible) {
+  display: none;
+}
+
+.ptv4-card-actions [data-ptv4-retry]:not(.is-visible) {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.ptv4-card-actions [data-ptv4-retry].is-visible {
+  visibility: visible;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.ptv4-card-actions.is-session-active {
+  min-height: 152px;
+}
 
 .ptv4-btn-block { width: 100%; flex: 1 1 100%; }
 

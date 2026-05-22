@@ -138,7 +138,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=7">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=8">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -207,52 +207,49 @@ cw_header('Progress Test');
     <a class="ptv4-btn ptv4-btn-outline ptv4-btn-block" data-ptv4-lesson-menu-link href="<?= h($courseReturnUrl) ?>">Back to Lesson Menu</a>
   </section>
 
-  <section class="ptv4-greeting" data-ptv4-greeting hidden>
-    <p class="ptv4-greeting-copy" data-ptv4-greeting-copy>Maya will greet you, then you can begin the oral test.</p>
-    <button class="ptv4-btn primary ptv4-btn-block" type="button" data-ptv4-begin-test disabled>Start my Progress Test</button>
-  </section>
-
-  <section class="ptv4-card" data-ptv4-card data-card-state="ready" hidden aria-label="Current question">
+  <section class="ptv4-card" data-ptv4-card data-card-state="ready" aria-label="Progress test workspace">
     <div class="ptv4-card-head">
       <div class="ptv4-card-state-pill" data-ptv4-state-pill>Ready</div>
-      <button class="ptv4-exit-btn" type="button" data-ptv4-end>Exit Test</button>
+      <button class="ptv4-exit-btn" type="button" data-ptv4-end disabled>Exit Test</button>
     </div>
 
     <div class="ptv4-card-body">
       <div class="ptv4-question-row">
-        <div class="ptv4-question-text" data-ptv4-question>Loading question...</div>
+        <div class="ptv4-question-text" data-ptv4-question>Progress Test ready</div>
         <div class="ptv4-qmeta">
-          <div class="ptv4-qnum" data-ptv4-qnum>Question 1 of 5</div>
+          <div class="ptv4-qnum" data-ptv4-qnum>—</div>
           <div class="ptv4-timer" data-ptv4-timer data-active="0">
             <div class="ptv4-timer-pill"><div class="ptv4-timer-fill" data-ptv4-timer-fill></div></div>
-            <div class="ptv4-timer-label" data-ptv4-timer-label></div>
-            <div class="ptv4-timer-note" data-ptv4-timer-note hidden>Timer starts after the question is asked.</div>
+            <div class="ptv4-timer-label" data-ptv4-timer-label>&nbsp;</div>
+            <div class="ptv4-timer-note" data-ptv4-timer-note aria-hidden="true">Timer starts after the question is asked.</div>
           </div>
         </div>
       </div>
 
       <div class="ptv4-transcript-box">
         <div class="ptv4-transcript-label">Your answer transcript</div>
-        <div class="ptv4-transcript" data-ptv4-transcript data-state="status">Your spoken answer will appear here after you stop recording.</div>
+        <div class="ptv4-transcript" data-ptv4-transcript data-state="status">Your answer transcript will appear here after you answer a question.</div>
       </div>
 
-      <div class="ptv4-hint" data-ptv4-hint>
-        Listen to the question carefully. Tap <strong>Start Answer</strong> and speak clearly.
+      <div class="ptv4-message-slot">
+        <div class="ptv4-hint is-visible" data-ptv4-hint>
+          Tap <strong>Start Progress Test</strong> when you are ready. Maya will greet you before the first question.
+        </div>
+        <div class="ptv4-hint ptv4-hint-warn" data-ptv4-record-hint aria-hidden="true">
+          Recording limit: 45 seconds maximum. Recording will stop automatically at 45 seconds.
+        </div>
+        <div class="ptv4-feedback" data-ptv4-feedback aria-hidden="true"></div>
       </div>
-      <div class="ptv4-hint ptv4-hint-warn" data-ptv4-record-hint hidden>
-        Recording limit: 45 seconds maximum. Recording will stop automatically at 45 seconds.
-      </div>
-
-      <div class="ptv4-feedback" data-ptv4-feedback hidden></div>
     </div>
 
-    <div class="ptv4-card-actions" aria-label="Question controls">
+    <div class="ptv4-card-actions" aria-label="Progress test controls">
+      <button class="ptv4-btn primary ptv4-btn-session" type="button" data-ptv4-begin-test disabled>Start my Progress Test</button>
       <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-replay disabled>Replay Question</button>
       <button class="ptv4-btn primary" type="button" data-ptv4-start-answer disabled>Start Answer</button>
       <button class="ptv4-btn danger" type="button" data-ptv4-stop-answer disabled>Stop Answer</button>
       <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-clarify disabled>Request Clarification</button>
       <button class="ptv4-btn ptv4-btn-muted" type="button" data-ptv4-next disabled>Next Question</button>
-      <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-retry hidden>Retry</button>
+      <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-retry aria-hidden="true">Retry</button>
     </div>
 
     <div class="ptv4-card-footnote">You will be allowed one clarification if needed. Please answer in English.</div>
@@ -268,5 +265,5 @@ window.IPCAProgressTestV4Config = {
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=7"></script>
+<script src="/assets/progress_test_v4.js?v=8"></script>
 <?php cw_footer(); ?>
