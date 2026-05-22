@@ -1,19 +1,26 @@
 .ptv4-page {
   max-width: 980px;
   margin: 0 auto;
-  padding: 18px 12px 32px;
+  padding: 12px 12px 20px;
   font-family: Manrope, "Segoe UI", system-ui, -apple-system, Arial, sans-serif;
   color: #152235;
   overflow-x: hidden;
 }
 
 .ptv4-hero {
-  background: linear-gradient(135deg, #12355f, #1f4079);
+  position: relative;
+  overflow: hidden;
   color: #fff;
-  border-radius: 22px;
-  padding: 20px 22px;
-  box-shadow: 0 18px 45px rgba(18, 53, 95, 0.22);
-  margin-bottom: 14px;
+  border-radius: 24px;
+  padding: 22px 24px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0) 100%),
+    linear-gradient(180deg, var(--sidebar-bg, #0d1d34) 0%, var(--sidebar-bg-2, #102440) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 18px 40px rgba(13, 29, 52, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 12px;
 }
 
 .ptv4-hero-grid {
@@ -35,27 +42,14 @@
   margin: 6px 0 0;
   font-size: 28px;
   letter-spacing: -0.03em;
-  font-weight: 800;
-}
-
-.ptv4-hero-lesson {
-  margin-top: 6px;
-  font-size: 15px;
-  color: rgba(255, 255, 255, 0.86);
-}
-
-.ptv4-hero-status {
-  margin-top: 10px;
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.92);
-  font-weight: 600;
+  font-weight: 760;
 }
 
 .ptv4-hero-stats {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 10px;
 }
 
 .ptv4-stat-chip {
@@ -119,13 +113,31 @@
 
 .ptv4-hero-exit {
   align-self: flex-end;
-  min-width: 118px;
-  background: rgba(255, 255, 255, 0.12);
-  border-color: rgba(255, 255, 255, 0.28);
-  color: #fff;
 }
 
-.ptv4-hero-exit:hover { background: rgba(255, 255, 255, 0.18); }
+.ptv4-hero-action {
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: background 0.16s ease, transform 0.16s ease, border-color 0.16s ease;
+}
+
+.ptv4-hero-action:hover {
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.22);
+  transform: translateY(-1px);
+}
 
 .ptv4-avatar-block {
   display: flex;
@@ -349,30 +361,27 @@
   cursor: pointer;
 }
 
-.ptv4-exit-btn:hover { background: #f8fafc; }
-
 .ptv4-card-body {
-  padding: 16px;
-  min-height: 380px;
+  padding: 14px 16px 16px;
   display: flex;
   flex-direction: column;
+  gap: 10px;
 }
 
 .ptv4-question-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 180px;
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) 160px;
+  gap: 12px;
   align-items: start;
-  margin-bottom: 14px;
-  min-height: 88px;
+  min-height: 64px;
 }
 
 .ptv4-question-text {
-  font-size: 22px;
-  line-height: 1.35;
+  font-size: 20px;
+  line-height: 1.32;
   font-weight: 800;
   color: #152235;
-  min-height: 72px;
+  min-height: 56px;
 }
 
 .ptv4-qmeta {
@@ -390,23 +399,24 @@
   border: 1px solid rgba(15, 23, 42, 0.08);
   border-radius: 14px;
   background: #fbfcfe;
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  padding: 10px 12px;
 }
 
 .ptv4-transcript-label {
-  font-size: 11px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-weight: 800;
   color: #64748b;
-  margin-bottom: 6px;
+  margin-bottom: 4px;
 }
 
 .ptv4-transcript {
-  min-height: 72px;
-  font-size: 14px;
-  line-height: 1.5;
+  min-height: 44px;
+  max-height: 72px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.45;
   color: #243446;
 }
 
@@ -429,8 +439,8 @@
 
 .ptv4-message-slot {
   position: relative;
-  min-height: 132px;
-  margin-bottom: 12px;
+  min-height: 64px;
+  max-height: 64px;
   flex: 0 0 auto;
 }
 
@@ -441,7 +451,9 @@
   left: 0;
   right: 0;
   top: 0;
+  bottom: 0;
   margin-bottom: 0;
+  overflow-y: auto;
   visibility: hidden;
   opacity: 0;
   pointer-events: none;
@@ -449,13 +461,13 @@
 }
 
 .ptv4-hint {
-  padding: 10px 12px;
+  padding: 8px 10px;
   border-radius: 12px;
   background: #eff6ff;
   border: 1px solid #bfdbfe;
   color: #1e40af;
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .ptv4-hint-warn {
@@ -534,9 +546,26 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  padding: 0 16px 14px;
-  min-height: 108px;
+  padding: 0;
+  min-height: 0;
   align-content: flex-start;
+}
+
+.ptv4-card-actions .app-btn {
+  flex: 1 1 calc(50% - 4px);
+  min-height: 42px;
+}
+
+.ptv4-card-actions .ptv4-btn-session {
+  flex: 1 1 100%;
+}
+
+.ptv4-btn-muted {
+  opacity: 0.55;
+}
+
+.ptv4-btn-muted:not(:disabled) {
+  opacity: 1;
 }
 
 .ptv4-card-footnote {
@@ -575,15 +604,11 @@
 }
 
 .ptv4-card-actions [data-ptv4-retry]:not(.is-visible) {
-  visibility: hidden;
-  opacity: 0;
-  pointer-events: none;
+  display: none;
 }
 
 .ptv4-card-actions [data-ptv4-retry].is-visible {
-  visibility: visible;
-  opacity: 1;
-  pointer-events: auto;
+  display: inline-flex;
 }
 
 .ptv4-card-actions.is-session-active {
@@ -619,6 +644,55 @@
   background: #f1f5f9;
   border-color: #e2e8f0;
   color: #94a3b8;
+}
+
+.ptv4-card-actions.is-session-active {
+  min-height: 0;
+}
+
+@media (max-width: 1024px), (max-height: 820px) {
+  .ptv4-page {
+    padding: 8px 10px 14px;
+  }
+
+  .ptv4-hero {
+    padding: 16px 18px;
+    margin-bottom: 10px;
+  }
+
+  .ptv4-hero-title {
+    font-size: 24px;
+  }
+
+  .ptv4-hero-progress,
+  .ptv4-progress-meta {
+    display: none;
+  }
+
+  .ptv4-question-text {
+    font-size: 18px;
+    min-height: 48px;
+  }
+
+  .ptv4-question-row {
+    min-height: 52px;
+  }
+
+  .ptv4-transcript {
+    max-height: 56px;
+    min-height: 40px;
+  }
+
+  .ptv4-message-slot {
+    min-height: 56px;
+    max-height: 56px;
+  }
+
+  .ptv4-card-actions .app-btn {
+    min-height: 40px;
+    font-size: 12px;
+    padding: 0 10px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -669,12 +743,14 @@
 }
 
 .ptv4-feedback-panel {
-  margin-top: 12px;
-  padding: 14px;
+  margin-top: 0;
+  padding: 12px;
   border-radius: 14px;
   border: 1px solid #93c5fd;
   background: #eff6ff;
-  min-height: 88px;
+  min-height: 72px;
+  max-height: 120px;
+  overflow-y: auto;
 }
 
 .ptv4-feedback-panel[aria-hidden="true"] {
@@ -702,10 +778,18 @@
 .ptv4-feedback-score[data-tone="fail"] { color: #b91c1c; }
 
 .ptv4-feedback-text {
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 12px;
+  line-height: 1.45;
   color: #1e3a8a;
   font-weight: 600;
+}
+
+.ptv4-remote-audio {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .ptv4-modal-backdrop {

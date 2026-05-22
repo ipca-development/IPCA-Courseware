@@ -155,7 +155,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=11">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=12">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -163,7 +163,6 @@ cw_header('Progress Test');
       <div class="ptv4-hero-left">
         <div class="ptv4-hero-eyebrow">Lesson <?= (int)$lessonNumber ?> Progress Test</div>
         <h1 class="ptv4-hero-title"><?= h($lessonTitle) ?></h1>
-        <div class="ptv4-hero-status" data-ptv4-status>Preparing your test...</div>
         <div class="ptv4-hero-stats">
           <div class="ptv4-stat-chip" data-ptv4-score>Score: --</div>
           <div class="ptv4-stat-chip muted" data-ptv4-attempt>Attempt status: loading</div>
@@ -213,7 +212,7 @@ cw_header('Progress Test');
           <div class="ptv4-status-pill ptv4-status-student" data-ptv4-student-status>Standby</div>
         </div>
         </div>
-        <button class="ptv4-exit-btn ptv4-hero-exit" type="button" data-ptv4-end>Exit Test</button>
+        <button class="ptv4-hero-action ptv4-hero-exit" type="button" data-ptv4-end>Exit Test</button>
       </div>
     </div>
   </section>
@@ -241,11 +240,6 @@ cw_header('Progress Test');
         </div>
       </div>
 
-      <div class="ptv4-feedback-panel" data-ptv4-feedback-panel aria-hidden="true">
-        <div class="ptv4-feedback-score" data-ptv4-feedback-score></div>
-        <div class="ptv4-feedback-text" data-ptv4-feedback-text></div>
-      </div>
-
       <div class="ptv4-message-slot">
         <div class="ptv4-hint is-visible" data-ptv4-hint>
           Tap <strong>Start</strong> when you are ready. Maya will greet you before the first question.
@@ -255,20 +249,23 @@ cw_header('Progress Test');
         </div>
         <div class="ptv4-feedback" data-ptv4-feedback aria-hidden="true"></div>
       </div>
-    </div>
 
-    <div class="ptv4-card-actions" aria-label="Progress test controls">
-      <button class="ptv4-btn primary ptv4-btn-session is-visible" type="button" data-ptv4-begin-test disabled>Start</button>
-      <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-replay disabled>Replay Question</button>
-      <button class="ptv4-btn primary" type="button" data-ptv4-start-answer disabled>Start Answer</button>
-      <button class="ptv4-btn danger" type="button" data-ptv4-stop-answer disabled>Stop Answer</button>
-      <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-clarify disabled>Request Clarification</button>
-      <button class="ptv4-btn ptv4-btn-muted" type="button" data-ptv4-next disabled>Next Question</button>
-      <button class="ptv4-btn primary" type="button" data-ptv4-my-report hidden>My Report</button>
-      <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-retry aria-hidden="true">Retry</button>
-    </div>
+      <div class="ptv4-feedback-panel" data-ptv4-feedback-panel aria-hidden="true">
+        <div class="ptv4-feedback-score" data-ptv4-feedback-score></div>
+        <div class="ptv4-feedback-text" data-ptv4-feedback-text></div>
+      </div>
 
-    <div class="ptv4-card-footnote">You will be allowed one clarification if needed. Please answer in English.</div>
+      <div class="ptv4-card-actions" aria-label="Progress test controls">
+        <button class="app-btn app-btn-primary ptv4-btn-session is-visible" type="button" data-ptv4-begin-test disabled>Start</button>
+        <button class="app-btn app-btn-secondary" type="button" data-ptv4-replay disabled>Replay Question</button>
+        <button class="app-btn app-btn-primary" type="button" data-ptv4-start-answer disabled>Start Answer</button>
+        <button class="app-btn app-btn-danger" type="button" data-ptv4-stop-answer disabled>Stop Answer</button>
+        <button class="app-btn app-btn-secondary" type="button" data-ptv4-clarify disabled>Request Clarification</button>
+        <button class="app-btn app-btn-secondary ptv4-btn-muted" type="button" data-ptv4-next disabled>Next Question</button>
+        <button class="app-btn app-btn-primary" type="button" data-ptv4-my-report hidden>My Report</button>
+        <button class="app-btn app-btn-secondary" type="button" data-ptv4-retry aria-hidden="true">Retry</button>
+      </div>
+    </div>
   </section>
 
 <div class="ptv4-modal-backdrop" data-ptv4-report-modal hidden>
@@ -342,5 +339,5 @@ window.IPCAProgressTestV4Config = {
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=11"></script>
+<script src="/assets/progress_test_v4.js?v=12"></script>
 <?php cw_footer(); ?>

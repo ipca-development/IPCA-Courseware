@@ -30,7 +30,6 @@
 
   var els = {
     root: page,
-    status: $('[data-ptv4-status]'),
     score: $('[data-ptv4-score]'),
     attempt: $('[data-ptv4-attempt]'),
     bar: $('[data-ptv4-bar]'),
@@ -143,12 +142,34 @@
 
   function text(el, v) { if (el) el.textContent = v; }
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
-  function setStatus(msg) { text(els.status, msg); }
+  function setStatus(msg) { /* hero status line removed — use stat chips only */ }
 
   function dbg() {
     if (!DEBUG_PTV4) return;
     var args = ['[PTV4]'].concat([].slice.call(arguments));
     console.log.apply(console, args);
+  }
+
+  function ensureRemoteAudio() {
+    if (remoteAudio) return remoteAudio;
+    remoteAudio = document.createElement('audio');
+    remoteAudio.autoplay = true;
+    remoteAudio.muted = false;
+    remoteAudio.volume = 1;
+    remoteAudio.setAttribute('playsinline', 'playsinline');
+    remoteAudio.className = 'ptv4-remote-audio';
+    document.body.appendChild(remoteAudio);
+    return remoteAudio;
+  }
+
+  function unlockAudioPlayback() {
+    var audio = ensureRemoteAudio();
+    audio.muted = false;
+    audio.volume = 1;
+    try {
+      var p = audio.play();
+      if (p && typeof p.catch === 'function') p.catch(function () {});
+    } catch (e) {}
   }
 
   function logEvent(type, detail, meta) {
@@ -828,6 +849,7 @@
         if (onDone) onDone();
         return;
       }
+      unlockAudioPlayback();
       if (purpose === 'clarification') {
         setCardState(CARD.CLARIFICATION);
         clarificationPending = true;
@@ -859,9 +881,12 @@
     dcOpenPromise = null;
     return postJson('/student/api/progress_test_v4_voice_token.php', { attempt_id: attemptId }).then(function (tok) {
       pc = new RTCPeerConnection();
-      remoteAudio = document.createElement('audio');
-      remoteAudio.autoplay = true;
-      pc.ontrack = function (ev) { remoteAudio.srcObject = ev.streams[0]; };
+      ensureRemoteAudio();
+      pc.ontrack = function (ev) {
+        remoteAudio.srcObject = ev.streams[0];
+        unlockAudioPlayback();
+        logEvent('remote_audio_track');
+      };
       dc = pc.createDataChannel('oai-events');
       dcOpenPromise = new Promise(function (resolve) {
         dc.addEventListener('open', function () {
@@ -1209,26 +1234,24 @@
   }
 
   function ensurePrepared() {
-    setStatus('Preparing questions and audio...');
     return apiJson('ensure_prepared', { cohort_id: cfg.cohortId, lesson_id: cfg.lessonId }).then(function (out) {
       updateProgress(out.state);
       if (out.preparing || !out.state.prepared) {
         prepTimer = setTimeout(ensurePrepared, 2500);
-        setStatus(out.state.status_text || 'Generating questions and caching audio...');
         return;
       }
       if (prepTimer) clearTimeout(prepTimer);
-      setStatus('Ready. Questions are prepared — start when you are.');
       startCamera();
       renderIdleLayout();
       syncButtons();
-    }).catch(function (err) {
-      setStatus('Unable to prepare test: ' + err.message);
+    }).catch(function () {
+      syncButtons();
     });
   }
 
   function startTestFlow() {
     if (sessionConnecting || testStarted) return;
+    unlockAudioPlayback();
     greetingReady = false;
     oralQuestionsStarted = false;
     sessionConnecting = true;
@@ -1252,6 +1275,7 @@
   }
 
   function onBeginTestClick() {
+    unlockAudioPlayback();
     if (!testStarted) {
       startTestFlow();
       return;
