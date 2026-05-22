@@ -83,6 +83,37 @@ function ptv3_parse_yesno_direction(string $answer): ?bool
     return null;
 }
 
+function ptv3_recovered_student_answer(PDO $pdo, int $attemptId, int $itemId, array $item): string
+{
+    $transcript = trim((string)($item['transcript_text'] ?? ''));
+    if ($transcript !== '' && strpos($transcript, '[timeout:') !== 0) {
+        return $transcript;
+    }
+
+    $st = $pdo->prepare("
+        SELECT transcript_text
+        FROM progress_test_voice_events
+        WHERE attempt_id = ?
+          AND item_id = ?
+          AND role = 'student'
+          AND event_type IN ('answer', 'clarification_answer')
+          AND transcript_text IS NOT NULL
+          AND TRIM(transcript_text) <> ''
+          AND transcript_text NOT LIKE '[timeout:%'
+        ORDER BY id ASC
+    ");
+    $st->execute([$attemptId, $itemId]);
+    $parts = [];
+    foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $text) {
+        $text = trim((string)$text);
+        if ($text !== '') {
+            $parts[] = $text;
+        }
+    }
+
+    return trim(implode(' ', $parts));
+}
+
 function ptv3_truth_text(PDO $pdo, int $lessonId): string
 {
     $nq = $pdo->prepare("
@@ -881,6 +912,84 @@ try {
         $itemSt->execute([$itemId, $attemptId]);
         $item = $itemSt->fetch(PDO::FETCH_ASSOC);
         if (!$item) ptv3_json(['ok' => false, 'error' => 'Question item not found'], 404);
+
+        $recoveredAnswer = ptv3_recovered_student_answer($pdo, $attemptId, $itemId, $item);
+        if ($recoveredAnswer !== '') {
+            $total = count(ptv3_load_items($pdo, $attemptId));
+            $spoken = ptv3_spoken_question($item, $total);
+            $grade = ptv3_grade_item($pdo, $item, $recoveredAnswer);
+            $scorePct = (float)$grade['score_pct'];
+            $feedback = ptv3_student_feedback_text((string)$grade['feedback']);
+            $isComplete = $scorePct >= 70 || !empty($grade['is_correct']);
+
+            $up = $pdo->prepare("
+                INSERT INTO progress_test_oral_item_responses
+                    (attempt_id, item_id, user_id, question_text, maya_spoken_question_text, student_answer_text,
+                     evaluated_answer_text, score_pct, is_correct, feedback_text,
+                     detected_concepts_json, missing_concepts_json, weak_areas_json, answered_at, evaluated_at, created_at, updated_at)
+                VALUES
+                    (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW(), NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    student_answer_text = VALUES(student_answer_text),
+                    evaluated_answer_text = VALUES(evaluated_answer_text),
+                    score_pct = VALUES(score_pct),
+                    is_correct = VALUES(is_correct),
+                    feedback_text = VALUES(feedback_text),
+                    detected_concepts_json = VALUES(detected_concepts_json),
+                    missing_concepts_json = VALUES(missing_concepts_json),
+                    weak_areas_json = VALUES(weak_areas_json),
+                    answered_at = VALUES(answered_at),
+                    evaluated_at = VALUES(evaluated_at),
+                    updated_at = NOW()
+            ");
+            $up->execute([
+                $attemptId,
+                $itemId,
+                $attemptUserId,
+                (string)$item['prompt'],
+                $spoken,
+                $recoveredAnswer,
+                $recoveredAnswer,
+                $scorePct,
+                (int)$grade['is_correct'],
+                $feedback,
+                json_encode($grade['detected'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                json_encode($grade['missing'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+                json_encode($grade['weak'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            ]);
+
+            $itemUpd = $pdo->prepare("
+                UPDATE progress_test_items_v2
+                SET transcript_text = ?,
+                    is_correct = ?,
+                    score_points = ?,
+                    max_points = 100,
+                    updated_at = NOW()
+                WHERE id = ?
+            ");
+            $itemUpd->execute([$recoveredAnswer, (int)$grade['is_correct'], (int)round($scorePct), $itemId]);
+            ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'student', 'answer_recovered_from_timeout', $recoveredAnswer);
+            ptv3_log_event($pdo, $attemptId, $itemId, $attemptUserId, 'maya', 'backend_feedback', $feedback);
+
+            $state = ptv3_state_payload($pdo, ptv3_load_attempt($pdo, $u, $attemptId));
+            $nextAction = (int)$state['evaluated_count'] >= (int)$state['total_questions'] ? 'complete_test' : 'next_question';
+
+            ptv3_json([
+                'ok' => true,
+                'item_id' => $itemId,
+                'score_pct' => $scorePct,
+                'is_correct' => !empty($grade['is_correct']),
+                'is_complete' => $isComplete,
+                'feedback_for_student' => $feedback,
+                'detected_concepts' => $grade['detected'],
+                'missing_concepts' => $grade['missing'],
+                'weak_areas' => $grade['weak'],
+                'clarification_allowed' => false,
+                'next_action' => $nextAction,
+                'recovered_from_timeout' => true,
+                'state' => $state,
+            ]);
+        }
 
         $pdo->prepare("
             UPDATE progress_tests_v2
