@@ -105,6 +105,7 @@
   var ANSWER_START_LIMIT_MS = 30000;
   var mayaQuestionRetryUsed = false;
   var mayaRetryAnswerUsed = false;
+  var mayaEnglishRetryUsed = {};
   var mayaSpeechSettleMs = 220;
   var mayaIdlePollTimer = null;
   var transcriptStopAt = 0;
@@ -246,33 +247,38 @@
     return String(text || '').trim().split(/\s+/).filter(Boolean).slice(0, count || 3).join(' ');
   }
 
+  function englishOnlyGuard() {
+    return 'Speak English only. The quoted script is already English. Do not translate it into Dutch or any other language.';
+  }
+
   function buildTurnInstructions(text, purpose) {
     var script = escapeScriptQuote(String(text || '').trim());
     if (!script) return '';
     var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
+    var guard = englishOnlyGuard();
     if (purpose === 'question') {
-      return 'Read the quoted exam question to the student. Begin immediately with: ' + startAnchor
+      return guard + ' Read the quoted exam question to the student. Begin immediately with: ' + startAnchor
         + '. Do not say sorry, rules, "here is the next question", or any words before ' + startAnchor + '. '
         + 'Exact words: "' + script + '"';
     }
     if (purpose === 'clarification') {
-      return 'Read this clarification prompt to the student, word-for-word. Begin with: ' + startAnchor
+      return guard + ' Read this clarification prompt to the student, word-for-word. Begin with: ' + startAnchor
         + '. Do not reveal the answer or add commentary. Exact words: "' + script + '"';
     }
     if (purpose === 'feedback') {
-      return 'Read this scored feedback to the student, word-for-word. Begin with: ' + startAnchor
+      return guard + ' Read this scored feedback to the student, word-for-word. Begin with: ' + startAnchor
         + '. Include every number and percent sign. Do not tutor or refer to other questions. Exact words: "' + script + '"';
     }
     if (purpose === 'final') {
-      return 'Read this final summary, word-for-word. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
+      return guard + ' Read this final summary, word-for-word. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
     }
     if (purpose === 'audio_check') {
-      return 'Non-scored readiness check. Begin with: ' + startAnchor + '. Exact words: "' + script + '" Then stop.';
+      return guard + ' Non-scored readiness check. Begin with: ' + startAnchor + '. Exact words: "' + script + '" Then stop.';
     }
     if (purpose === 'retry_answer') {
-      return 'Read this retry prompt, word-for-word. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
+      return guard + ' Read this retry prompt, word-for-word. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
     }
-    return 'Read verbatim. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
+    return guard + ' Read verbatim. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
   }
 
   function normalizeCompareText(value) {
@@ -310,9 +316,51 @@
     return actual.indexOf(opening) === 0;
   }
 
+  function englishWordOverlapScore(transcript, expected) {
+    var act = normalizeCompareText(transcript).split(' ').filter(Boolean);
+    var expSet = {};
+    normalizeCompareText(expected).split(' ').filter(Boolean).forEach(function (word) { expSet[word] = true; });
+    if (!act.length) return 1;
+    var hits = 0;
+    act.forEach(function (word) { if (expSet[word]) hits += 1; });
+    return hits / act.length;
+  }
+
+  function looksLikeNonEnglishScript(transcript, expected) {
+    var act = normalizeCompareText(transcript);
+    var exp = normalizeCompareText(expected);
+    if (!act || !exp) return false;
+    if (/^(je|jij|u|het|de|een)\b/.test(act)) return true;
+    if (/\b(je hebt|jij hebt|u hebt|niet duidelijk|niet correct|voor deze vraag|op deze vraag|zou moeten|zouden bespreken|vliegles|in het engels|in het nederlands)\b/.test(act)) return true;
+    if (act.split(' ').length >= 4 && englishWordOverlapScore(transcript, expected) < 0.42) return true;
+    return false;
+  }
+
+  function retryScriptedSpeechInEnglish() {
+    var text = mayaExpectedText || preparedMayaText || '';
+    var purpose = mayaTurnPurpose || pendingFinishPurpose || '';
+    if (!text || !purpose) return false;
+    if (mayaEnglishRetryUsed[purpose]) return false;
+    mayaEnglishRetryUsed[purpose] = true;
+    mayaDriftDetected = true;
+    mayaTranscriptDone = false;
+    stopMayaSpeechForNewScript();
+    ensureExpectedMayaBubble();
+    var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
+    var script = escapeScriptQuote(text);
+    window.setTimeout(function () {
+      mayaDriftDetected = false;
+      sendResponse(
+        englishOnlyGuard() + ' CRITICAL: Speak the English quoted script exactly as written. Do NOT translate. Start immediately with: ' + startAnchor + '. Exact English text: "' + script + '"',
+        purpose
+      );
+    }, mayaSpeechSettleMs);
+    return true;
+  }
+
   function handleScriptedSpeechDrift(partialMayaText) {
     if (mayaTurnPurpose === 'retry_answer') {
-      handleRetryAnswerDrift();
+      abortMayaSpeechDrift();
       return;
     }
     if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(partialMayaText)) {
@@ -1018,6 +1066,7 @@
     prepareRealtimeForScriptedSpeech();
     var backendOnlyInstructions = [
       'CRITICAL: Text-to-speech renderer only. No conversation.',
+      'LANGUAGE: English only. Never translate the quoted script into Dutch or any other language.',
       'Begin with the first word of the quoted script below. No preface, apology, rule explanation, or follow-up.',
       'Do not use conversation history, prior student answers, prior questions, or live microphone input.',
       instructions
@@ -1044,6 +1093,7 @@
     mayaExpectedText = textToSpeak;
     if ((purpose || '') === 'question') mayaQuestionRetryUsed = false;
     if ((purpose || '') === 'retry_answer') mayaRetryAnswerUsed = false;
+    if (purpose) mayaEnglishRetryUsed[purpose] = false;
     sendResponse(buildTurnInstructions(textToSpeak, purpose || ''), purpose || '');
   }
 
@@ -1332,6 +1382,7 @@
 
   function retryCurrentAnswer(message) {
     if (!currentItem) return;
+    if (phase === 'retrying' && (responseInProgress || mayaTurnPurpose === 'retry_answer')) return;
     stopMayaSpeechForNewScript();
     resetAnswerBuffer();
     awaitingAnswer = false;
@@ -1542,11 +1593,17 @@
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
       var canonicalMayaText = mayaExpectedText || preparedMayaText || '';
-      if (isMayaSpeechDrift(String(msg.transcript || ''))) {
-        if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(String(msg.transcript || ''))) {
+      var spokenTranscript = String(msg.transcript || '');
+      if (canonicalMayaText && looksLikeNonEnglishScript(spokenTranscript, canonicalMayaText)) {
+        if (retryScriptedSpeechInEnglish()) return;
+        abortMayaSpeechDrift();
+        return;
+      }
+      if (isMayaSpeechDrift(spokenTranscript)) {
+        if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(spokenTranscript)) {
           handleQuestionPreambleDrift();
         } else if (mayaTurnPurpose === 'retry_answer') {
-          handleRetryAnswerDrift();
+          abortMayaSpeechDrift();
         } else {
           abortMayaSpeechDrift();
         }
@@ -1566,6 +1623,16 @@
       if (!mayaDriftDetected) {
         var expectedLen = String(mayaExpectedText || preparedMayaText || '').length;
         var partialMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
+        if (mayaTurnPurpose === 'retry_answer') {
+          ensureExpectedMayaBubble();
+          return;
+        }
+        var expectedScript = mayaExpectedText || preparedMayaText || '';
+        if (expectedScript && partialMayaText.length > 10 && looksLikeNonEnglishScript(partialMayaText, expectedScript)) {
+          if (retryScriptedSpeechInEnglish()) return;
+          abortMayaSpeechDrift();
+          return;
+        }
         if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(partialMayaText)) {
           handleQuestionPreambleDrift();
           return;
