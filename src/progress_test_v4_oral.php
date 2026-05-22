@@ -296,6 +296,45 @@ function ptv4_save_card_state(PDO $pdo, int $attemptId, int $itemId, int $userId
     $st->execute([$attemptId, $itemId, $userId, $state, $liveTranscript, $state, $liveTranscript, $clarVal, $state]);
 }
 
+function ptv4_default_clarification_text(): string
+{
+    return 'I may not have heard that correctly. Please clarify your answer in English.';
+}
+
+function ptv4_word_count(string $text): int
+{
+    $norm = ptv4_normalize_text($text);
+    if ($norm === '') return 0;
+    return count(array_filter(explode(' ', $norm)));
+}
+
+function ptv4_transcript_looks_corrupted(string $answer): bool
+{
+    if (trim($answer) === '') return true;
+    if (preg_match('/\b(inaudible|unintelligible|static|background noise|\[timeout)\b/i', $answer)) return true;
+    if (preg_match('/^[\[\(]/', trim($answer))) return true;
+    return false;
+}
+
+function ptv4_clarification_eligible(string $answer, array $eval): bool
+{
+    if (($eval['result'] ?? '') === 'clarify') return true;
+    if (ptv4_transcript_looks_corrupted($answer)) return true;
+    if (ptv4_word_count($answer) <= 3 && (int)($eval['score_pct'] ?? 0) < 70) return true;
+    if (($eval['result'] ?? '') === 'partial') {
+        $q = trim((string)($eval['clarification_question'] ?? ''));
+        if ($q !== '') return true;
+        if (ptv4_word_count($answer) <= 5) return true;
+    }
+    return false;
+}
+
+function ptv4_is_english_retry_eval(array $eval): bool
+{
+    return in_array('English-only answer required', $eval['missing_concepts'] ?? [], true)
+        || stripos((string)($eval['feedback_for_student'] ?? ''), 'again in English') !== false;
+}
+
 function ptv4_is_likely_non_english(string $text): bool
 {
     $t = trim($text);
@@ -485,7 +524,6 @@ function ptv4_state_payload(PDO $pdo, array $attempt): array
             'kind' => (string)$item['kind'],
             'prompt' => (string)$item['prompt'],
             'spoken_question' => ptv4_spoken_question($item, $total),
-            'expected_concepts' => ptv4_expected_concepts($item),
             'question_audio_url' => (string)($questionUrls[(string)$itemId] ?? $questionUrls[$itemId] ?? ''),
             'evaluated' => $isEvaluated,
             'card_state' => $cardState,
@@ -497,8 +535,6 @@ function ptv4_state_payload(PDO $pdo, array $attempt): array
             'student_answer_text' => $response ? (string)($response['student_answer_text'] ?? '') : '',
             'clarification_question_text' => $response ? (string)($response['clarification_question_text'] ?? '') : '',
             'clarification_answer_text' => $response ? (string)($response['clarification_answer_text'] ?? '') : '',
-            'detected_concepts' => $response ? json_decode((string)($response['detected_concepts_json'] ?? '[]'), true) ?: [] : [],
-            'missing_concepts' => $response ? json_decode((string)($response['missing_concepts_json'] ?? '[]'), true) ?: [] : [],
         ];
     }
 
@@ -701,30 +737,41 @@ function ptv4_evaluation_response(PDO $pdo, array $u, array $attempt, array $ite
     $total = count(ptv4_load_items($pdo, $attemptId));
     $spoken = ptv4_spoken_question($item, $total);
     $nextAction = 'next_question';
-    $clarificationAllowed = false;
-    $clarificationText = '';
 
-    if ($eval['result'] === 'clarify' || ($eval['result'] === 'partial' && !$clarificationUsed && (int)$eval['score_pct'] >= 30 && (int)$eval['score_pct'] < 70)) {
-        $clarificationText = $eval['clarification_question'] !== ''
-            ? $eval['clarification_question']
-            : 'That answer is partly correct, but not complete yet. Please add one or two more important points.';
-        if (!$clarificationUsed) {
-            $clarificationAllowed = true;
-            $nextAction = 'clarify';
-            ptv4_store_evaluation($pdo, $attempt, $item, $eval, $answer, $spoken, $clarificationText, '', false);
-            ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'clarification', $answer, true);
-            ptv4_log_event($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'maya', 'clarification_question', $clarificationText);
-            return [
-                'ok' => true,
-                'item_id' => $itemId,
-                'evaluation' => $eval,
-                'clarification_allowed' => true,
-                'clarification_question' => $clarificationText,
-                'next_action' => 'clarify',
-                'is_complete' => false,
-                'state' => ptv4_state_payload($pdo, ptv4_load_attempt($pdo, $u, $attemptId)),
-            ];
+    if (!$clarificationUsed && ptv4_is_english_retry_eval($eval)) {
+        return [
+            'ok' => true,
+            'item_id' => $itemId,
+            'evaluation' => $eval,
+            'score_pct' => 0,
+            'result' => 'fail',
+            'feedback_for_student' => 'Please answer this question again in English.',
+            'missing_concepts' => ['English-only answer required'],
+            'clarification_allowed' => false,
+            'next_action' => 'retry_english',
+            'is_complete' => false,
+            'state' => ptv4_state_payload($pdo, ptv4_load_attempt($pdo, $u, $attemptId)),
+        ];
+    }
+
+    if (!$clarificationUsed && ptv4_clarification_eligible($answer, $eval)) {
+        $clarificationText = trim((string)($eval['clarification_question'] ?? ''));
+        if ($clarificationText === '') {
+            $clarificationText = ptv4_default_clarification_text();
         }
+        ptv4_store_evaluation($pdo, $attempt, $item, $eval, $answer, $spoken, $clarificationText, '', false);
+        ptv4_save_card_state($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'clarification', $answer, true);
+        ptv4_log_event($pdo, $attemptId, $itemId, (int)$attempt['user_id'], 'maya', 'clarification_question', $clarificationText);
+        return [
+            'ok' => true,
+            'item_id' => $itemId,
+            'evaluation' => $eval,
+            'clarification_allowed' => true,
+            'clarification_question' => $clarificationText,
+            'next_action' => 'clarify',
+            'is_complete' => false,
+            'state' => ptv4_state_payload($pdo, ptv4_load_attempt($pdo, $u, $attemptId)),
+        ];
     }
 
     ptv4_store_evaluation($pdo, $attempt, $item, $eval, $answer, $spoken, '', '', true);

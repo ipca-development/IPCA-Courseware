@@ -172,9 +172,19 @@ try {
         $cards = ptv4_load_card_sessions($pdo, $attemptId);
         $clarificationUsed = !empty($cards[$itemId]['clarification_used']);
         $originalAnswer = trim((string)($data['original_answer_text'] ?? ''));
+        $timedOutStart = !empty($data['timed_out_start']);
+
+        if ($timedOutStart && $answer === '') {
+            $answer = '[timeout: no answer started within 30 seconds]';
+        }
+
         if ($clarificationAnswer !== '' && $originalAnswer !== '') {
             $eval = ptv4_grade_item($pdo, $item, $originalAnswer, $clarificationAnswer);
             ptv4_json(ptv4_evaluation_response($pdo, $u, $attempt, $item, $eval, $originalAnswer, true));
+        }
+
+        if ($answer === '' && !$timedOutStart) {
+            ptv4_json(['ok' => false, 'error' => 'No answer captured'], 400);
         }
 
         $eval = ptv4_grade_item($pdo, $item, $answer);

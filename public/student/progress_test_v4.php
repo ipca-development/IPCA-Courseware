@@ -93,83 +93,114 @@ if ($firstName === '') $firstName = 'Student';
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=1">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=3">
 
-<div class="ptv4-page">
+<div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
-    <div class="ptv4-hero-main">
-      <div class="ptv4-hero-eyebrow">Oral Progress Test</div>
-      <h1 class="ptv4-hero-title">Progress Test</h1>
-      <div class="ptv4-hero-lesson"><?= h($lessonTitle) ?></div>
-      <div class="ptv4-hero-status" data-ptv4-status>Preparing your test...</div>
-    </div>
-    <div class="ptv4-hero-stats">
-      <div class="ptv4-stat-chip" data-ptv4-score>Score: --</div>
-      <div class="ptv4-stat-chip muted" data-ptv4-attempt>Attempt status: loading</div>
-    </div>
-    <div class="ptv4-hero-progress" aria-hidden="true">
-      <div class="ptv4-bar"><div class="ptv4-bar-fill" data-ptv4-bar></div></div>
-      <div class="ptv4-progress-meta">
-        <span><strong data-ptv4-current>0/0</strong> question</span>
-        <span><strong data-ptv4-evaluated>0</strong> evaluated</span>
-        <span>Score progress <strong data-ptv4-final>--</strong></span>
+    <div class="ptv4-hero-grid">
+      <div class="ptv4-hero-left">
+        <div class="ptv4-hero-eyebrow">Oral Progress Test</div>
+        <h1 class="ptv4-hero-title">Progress Test</h1>
+        <div class="ptv4-hero-lesson"><?= h($lessonTitle) ?></div>
+        <div class="ptv4-hero-status" data-ptv4-status>Preparing your test...</div>
+        <div class="ptv4-hero-stats">
+          <div class="ptv4-stat-chip" data-ptv4-score>Score: --</div>
+          <div class="ptv4-stat-chip muted" data-ptv4-attempt>Attempt status: loading</div>
+        </div>
+        <div class="ptv4-hero-progress" aria-hidden="true">
+          <div class="ptv4-bar"><div class="ptv4-bar-fill" data-ptv4-bar></div></div>
+          <div class="ptv4-progress-meta">
+            <span><strong data-ptv4-current>0/0</strong> question</span>
+            <span><strong data-ptv4-evaluated>0</strong> evaluated</span>
+            <span>Score progress <strong data-ptv4-final>--</strong></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="ptv4-hero-avatars" aria-label="Maya and student">
+        <div class="ptv4-avatar-block">
+          <div class="ptv4-avatar-row">
+            <div class="ptv4-audio-bars ptv4-audio-bars-maya" data-ptv4-maya-bars aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </div>
+            <div class="ptv4-avatar-frame" data-ptv4-maya-frame>
+              <img src="/assets/avatars/maya.png" alt="Maya">
+            </div>
+            <div class="ptv4-audio-bars ptv4-audio-bars-maya" data-ptv4-maya-bars-right aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+          <div class="ptv4-avatar-name">Maya</div>
+          <div class="ptv4-status-pill ptv4-status-maya" data-ptv4-maya-status>Standby</div>
+        </div>
+
+        <div class="ptv4-avatar-block">
+          <div class="ptv4-avatar-row">
+            <div class="ptv4-audio-bars ptv4-audio-bars-student" data-ptv4-student-bars aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </div>
+            <div class="ptv4-avatar-frame" data-ptv4-student-frame>
+              <video data-ptv4-video autoplay playsinline muted></video>
+              <div class="ptv4-video-fallback" data-ptv4-video-fallback>Camera</div>
+            </div>
+            <div class="ptv4-audio-bars ptv4-audio-bars-student" data-ptv4-student-bars-right aria-hidden="true">
+              <span></span><span></span><span></span><span></span>
+            </div>
+          </div>
+          <div class="ptv4-avatar-name"><?= h($firstName) ?></div>
+          <div class="ptv4-status-pill ptv4-status-student" data-ptv4-student-status>Standby</div>
+        </div>
       </div>
     </div>
   </section>
 
-  <section class="ptv4-card" data-ptv4-card data-card-state="ready" aria-label="Current question">
+  <section class="ptv4-prestart" data-ptv4-prestart>
+    <button class="ptv4-btn primary ptv4-btn-block" type="button" data-ptv4-start-test disabled>Start Progress Test</button>
+  </section>
+
+  <section class="ptv4-card" data-ptv4-card data-card-state="ready" hidden aria-label="Current question">
     <div class="ptv4-card-head">
       <div class="ptv4-card-state-pill" data-ptv4-state-pill>Ready</div>
-      <div class="ptv4-card-question-num" data-ptv4-qnum>Question</div>
+      <button class="ptv4-exit-btn" type="button" data-ptv4-end>Exit Test</button>
     </div>
 
     <div class="ptv4-card-body">
-      <div class="ptv4-avatars">
-        <div class="ptv4-avatar-col">
-          <div class="ptv4-avatar-frame" data-ptv4-maya-frame>
-            <img src="/assets/avatars/maya.png" alt="Maya">
+      <div class="ptv4-question-row">
+        <div class="ptv4-question-text" data-ptv4-question>Loading question...</div>
+        <div class="ptv4-qmeta">
+          <div class="ptv4-qnum" data-ptv4-qnum>Question 1 of 5</div>
+          <div class="ptv4-timer" data-ptv4-timer data-active="0">
+            <div class="ptv4-timer-pill"><div class="ptv4-timer-fill" data-ptv4-timer-fill></div></div>
+            <div class="ptv4-timer-label" data-ptv4-timer-label></div>
+            <div class="ptv4-timer-note" data-ptv4-timer-note hidden>Timer starts after the question is asked.</div>
           </div>
-          <div class="ptv4-avatar-name">Maya</div>
-        </div>
-        <div class="ptv4-avatar-col">
-          <div class="ptv4-avatar-frame" data-ptv4-student-frame>
-            <video data-ptv4-video autoplay playsinline muted></video>
-            <div class="ptv4-video-fallback" data-ptv4-video-fallback>Camera</div>
-          </div>
-          <div class="ptv4-avatar-name"><?= h($firstName) ?></div>
-          <div class="ptv4-rec-pill" data-ptv4-recording>Standby</div>
         </div>
       </div>
-
-      <div class="ptv4-question-text" data-ptv4-question>Loading question...</div>
 
       <div class="ptv4-transcript-box">
         <div class="ptv4-transcript-label">Your answer transcript</div>
         <div class="ptv4-transcript" data-ptv4-transcript>Your spoken answer will appear here.</div>
       </div>
 
-      <div class="ptv4-concepts">
-        <div class="ptv4-concepts-label">Expected concepts</div>
-        <div class="ptv4-concept-list" data-ptv4-concepts></div>
+      <div class="ptv4-hint" data-ptv4-hint>
+        Listen to the question carefully. Tap <strong>Start Answer</strong> and speak clearly.
+      </div>
+      <div class="ptv4-hint ptv4-hint-warn" data-ptv4-record-hint hidden>
+        Recording limit: 45 seconds maximum. Recording will stop automatically at 45 seconds.
       </div>
 
       <div class="ptv4-feedback" data-ptv4-feedback hidden></div>
     </div>
 
-    <div class="ptv4-timer" data-ptv4-timer data-active="0">
-      <div class="ptv4-timer-pill"><div class="ptv4-timer-fill" data-ptv4-timer-fill></div></div>
-      <div class="ptv4-timer-label" data-ptv4-timer-label></div>
+    <div class="ptv4-card-actions" aria-label="Question controls">
+      <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-replay disabled>Replay Question</button>
+      <button class="ptv4-btn primary" type="button" data-ptv4-start-answer disabled>Start Answer</button>
+      <button class="ptv4-btn danger" type="button" data-ptv4-stop-answer disabled>Stop Answer</button>
+      <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-clarify disabled>Request Clarification</button>
+      <button class="ptv4-btn ptv4-btn-muted" type="button" data-ptv4-next disabled>Next Question</button>
     </div>
-  </section>
 
-  <section class="ptv4-actions" aria-label="Progress test controls">
-    <button class="ptv4-btn primary" type="button" data-ptv4-start-test disabled>Start Progress Test</button>
-    <button class="ptv4-btn success" type="button" data-ptv4-start-answer disabled>Start Answer</button>
-    <button class="ptv4-btn danger" type="button" data-ptv4-stop-answer disabled>Stop Answer</button>
-    <button class="ptv4-btn" type="button" data-ptv4-replay disabled>Replay Question</button>
-    <button class="ptv4-btn" type="button" data-ptv4-clarify disabled>Submit Clarification</button>
-    <button class="ptv4-btn" type="button" data-ptv4-next disabled>Next Question</button>
-    <button class="ptv4-btn warn" type="button" data-ptv4-end disabled>End Test</button>
+    <div class="ptv4-card-footnote">You will be allowed one clarification if needed. Please answer in English.</div>
   </section>
 </div>
 
@@ -181,5 +212,5 @@ window.IPCAProgressTestV4Config = {
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=1"></script>
+<script src="/assets/progress_test_v4.js?v=3"></script>
 <?php cw_footer(); ?>
