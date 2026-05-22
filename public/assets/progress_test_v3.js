@@ -107,6 +107,7 @@
   var mayaRetryAnswerUsed = false;
   var mayaSpeechSettleMs = 220;
   var mayaIdlePollTimer = null;
+  var transcriptStopAt = 0;
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -210,10 +211,6 @@
   }
 
   function prepareRealtimeForScriptedSpeech() {
-    if (responseInProgress) {
-      cancelRealtimeAudioOnly();
-      return;
-    }
     if (dc && dc.readyState === 'open') {
       try { dc.send(JSON.stringify({ type: 'input_audio_buffer.clear' })); } catch (e) {}
     }
@@ -346,12 +343,15 @@
     if (!text) return false;
     mayaDriftDetected = true;
     mayaTranscriptDone = false;
+    pendingFinishPurpose = '';
+    stopMayaTurnTimers();
     responseInProgress = false;
     cancelRealtimeAudioOnly();
     ensureExpectedMayaBubble();
     var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
     var script = escapeScriptQuote(text);
     window.setTimeout(function () {
+      mayaDriftDetected = false;
       sendResponse(
         'Text-to-speech retry prompt. Start immediately with: ' + startAnchor + '. No words before that. Exact text: "' + script + '"',
         'retry_answer'
@@ -387,21 +387,28 @@
     textToSpeak = String(textToSpeak || '').trim();
     if (!textToSpeak) return;
     clearMayaIdlePoll();
-    cancelRealtimeAudioOnly();
     pendingInstructions = '';
     pendingPurpose = '';
+    var needsCancel = false;
     var attempts = 0;
     function startWhenIdle() {
       if (responseInProgress && attempts < 60) {
+        needsCancel = true;
         attempts += 1;
         mayaIdlePollTimer = setTimeout(startWhenIdle, 100);
         return;
       }
       clearMayaIdlePoll();
+      if (needsCancel || responseInProgress) {
+        cancelRealtimeAudioOnly();
+        pendingInstructions = '';
+        pendingPurpose = '';
+      }
+      var settleMs = needsCancel ? mayaSpeechSettleMs : 0;
       mayaIdlePollTimer = setTimeout(function () {
         mayaIdlePollTimer = null;
         speakExact(textToSpeak, purpose);
-      }, mayaSpeechSettleMs);
+      }, settleMs);
     }
     startWhenIdle();
   }
@@ -726,6 +733,7 @@
     pendingTranscriptSubmitAfterMaya = false;
     transcriptWaitStartedAt = 0;
     transcriptLastSegmentAt = 0;
+    transcriptStopAt = 0;
   }
 
   function startCameraPreview(stream) {
@@ -953,6 +961,7 @@
     mayaTranscriptDone = false;
     pendingFinishPurpose = '';
     stopMayaTurnTimers();
+    cancelRealtimeAudioOnly();
     responseInProgress = true;
     setMayaSpeaking(true);
     ensureExpectedMayaBubble();
@@ -1172,14 +1181,35 @@
     pendingTranscriptSubmitAfterMaya = false;
     transcriptWaitStartedAt = 0;
     transcriptLastSegmentAt = 0;
+    transcriptStopAt = 0;
     transcriptFlushUntil = 0;
     setTyping('', false);
+  }
+
+  function beginTranscriptStopCapture() {
+    transcriptStopAt = Date.now();
+    transcriptLastSegmentAt = 0;
   }
 
   function combinedAnswerText(extra) {
     var parts = answerSegments.slice();
     if (extra && String(extra).trim() !== '') parts.push(String(extra).trim());
     return parts.join(' ').replace(/\s+/g, ' ').trim();
+  }
+
+  function hasPostStopTranscriptSegment() {
+    return transcriptStopAt > 0 && transcriptLastSegmentAt >= transcriptStopAt;
+  }
+
+  function awaitingPostStopTranscript() {
+    return transcriptStopAt > 0 && !hasPostStopTranscriptSegment();
+  }
+
+  function transcriptQuietRemainMs() {
+    if (awaitingPostStopTranscript()) return transcriptQuietMs;
+    if (!transcriptLastSegmentAt) return transcriptQuietMs;
+    if (transcriptStopAt > 0 && transcriptLastSegmentAt < transcriptStopAt) return transcriptQuietMs;
+    return Math.max(0, transcriptQuietMs - (Date.now() - transcriptLastSegmentAt));
   }
 
   function scheduleAnswerSettle() {
@@ -1253,9 +1283,9 @@
   }
 
   function transcriptSubmitDelayMs(hasText, elapsed) {
+    if (awaitingPostStopTranscript()) return elapsed >= transcriptMaxWaitMs ? 0 : Math.min(transcriptQuietMs, 400);
     if (!hasText) return elapsed >= transcriptMaxWaitMs ? 0 : 500;
-    if (!transcriptLastSegmentAt) return transcriptQuietMs;
-    var quietRemain = transcriptQuietMs - (Date.now() - transcriptLastSegmentAt);
+    var quietRemain = transcriptQuietRemainMs();
     if (quietRemain > 0 && elapsed < transcriptMaxWaitMs) return Math.min(quietRemain, 400);
     return 0;
   }
@@ -1264,8 +1294,12 @@
     var elapsed = Date.now() - transcriptWaitStartedAt;
     var bufferText = combinedAnswerText('');
     var hasText = bufferText !== '';
-    var quietRemain = transcriptLastSegmentAt ? Math.max(0, transcriptQuietMs - (Date.now() - transcriptLastSegmentAt)) : 0;
+    var quietRemain = transcriptQuietRemainMs();
 
+    if (awaitingPostStopTranscript() && elapsed < transcriptMaxWaitMs) {
+      scheduleTranscriptSubmit(kind);
+      return;
+    }
     if (!hasText && elapsed < transcriptMaxWaitMs) {
       scheduleTranscriptSubmit(kind);
       return;
@@ -1307,6 +1341,7 @@
     pendingTranscriptKind = '';
     pendingTranscriptSubmitAfterMaya = false;
     transcriptWaitStartedAt = 0;
+    transcriptStopAt = 0;
     setTyping('Maya is thinking', true, 'maya');
     submitCurrentBufferedAnswer();
   }
@@ -1561,6 +1596,7 @@
       return;
     }
     if (phase === 'readiness' && answerCaptureActive) {
+      beginTranscriptStopCapture();
       commitStudentAudioBuffer();
       setStudentAnswering(false);
       setMicEnabled(false);
@@ -1584,6 +1620,7 @@
       return;
     }
     if (phase === 'answering' && answerCaptureActive) {
+      beginTranscriptStopCapture();
       commitStudentAudioBuffer();
       setStudentAnswering(false);
       setMicEnabled(false);

@@ -41,6 +41,48 @@ function ptv3_normalize_text(string $text): string
     return trim($text);
 }
 
+function ptv3_yesno_lead_text(string $answer): string
+{
+    $answer = trim($answer);
+    if ($answer === '') return '';
+    if (preg_match('/^([^.!?]+[.!?])/', $answer, $m)) {
+        return trim((string)$m[1]);
+    }
+    $words = preg_split('/\s+/', $answer, -1, PREG_SPLIT_NO_EMPTY);
+    if (!is_array($words) || !$words) return $answer;
+    return implode(' ', array_slice($words, 0, 15));
+}
+
+function ptv3_parse_yesno_direction(string $answer): ?bool
+{
+    $t = ptv3_normalize_text(ptv3_yesno_lead_text($answer));
+    if ($t === '') return null;
+
+    if (preg_match('/^(no|nope|false)\b/u', $t)) return false;
+    if (preg_match('/^(yes|yeah|yep|true)\b/u', $t)) return true;
+
+    $yesPos = null;
+    $noPos = null;
+    if (preg_match('/\b(yes|yeah|yep|true)\b/u', $t, $m, PREG_OFFSET_CAPTURE)) {
+        $yesPos = (int)$m[0][1];
+    }
+    if (preg_match('/\b(no|nope|false)\b/u', $t, $m, PREG_OFFSET_CAPTURE)) {
+        $noPos = (int)$m[0][1];
+    }
+    if ($yesPos !== null && ($noPos === null || $yesPos <= $noPos)) return true;
+    if ($noPos !== null && ($yesPos === null || $noPos < $yesPos)) return false;
+
+    if (preg_match('/\b(that is correct|that s correct|correct|right|it is|it does)\b/u', $t)
+        && !preg_match('/\b(not correct|incorrect|not right|that is not|that s not)\b/u', $t)) {
+        return true;
+    }
+    if (preg_match('/\b(not correct|incorrect|not right|that is not|that s not)\b/u', $t)) {
+        return false;
+    }
+
+    return null;
+}
+
 function ptv3_truth_text(PDO $pdo, int $lessonId): string
 {
     $nq = $pdo->prepare("
@@ -335,7 +377,7 @@ TXT);
 function ptv3_spoken_question(array $item, int $total): string
 {
     $text = 'Question ' . (int)$item['idx'] . ' of ' . $total . '. ' . trim((string)$item['prompt']);
-    if ((string)$item['kind'] === 'yesno') return $text . ' Please answer yes or no, and briefly explain.';
+    if ((string)$item['kind'] === 'yesno') return $text . ' Please answer yes or no only.';
     if ((string)$item['kind'] === 'mcq') return $text . ' Please answer with the correct phrase.';
     return $text . ' Please answer in a short spoken explanation.';
 }
@@ -515,17 +557,12 @@ function ptv3_grade_item(PDO $pdo, array $item, string $answer): array
     }
 
     if ($kind === 'yesno') {
-        $t = ptv3_normalize_text($answer);
-        $yes = preg_match('/\b(yes|true|correct|it is|it does|there is|there are)\b/', $t) ? 1 : 0;
-        $no = preg_match('/\b(no|false|not|never|does not|do not|is not|are not)\b/', $t) ? 1 : 0;
-        $student = null;
-        if ($yes > $no) $student = true;
-        if ($no > $yes) $student = false;
+        $student = ptv3_parse_yesno_direction($answer);
         $ok = ($student !== null && $student === (bool)($correct['value'] ?? false)) ? 1 : 0;
         return [
             'score_pct' => $ok ? 100 : 0,
             'is_correct' => $ok,
-            'feedback' => $ok ? 'Correct direction. Keep the explanation concise and operational.' : 'That is not exactly right. Review the concept and the yes/no direction.',
+            'feedback' => $ok ? 'Correct. You gave the right yes or no answer.' : 'That is not exactly right. Review the concept and answer yes or no.',
             'detected' => $ok ? ['Correct yes/no direction'] : [],
             'missing' => $ok ? [] : ['Correct yes/no direction'],
             'weak' => $ok ? [] : ['Question concept'],
