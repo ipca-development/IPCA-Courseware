@@ -119,6 +119,8 @@
   var mayaSpeechStartedAt = 0;
   var mayaScriptRetryUsed = {};
   var answerTimerWaitHandle = null;
+  var SPEAK_MARKER_START = '<<<SPEAK>>>';
+  var SPEAK_MARKER_END = '<<<END>>>';
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -284,40 +286,10 @@
     return String(text || '').trim().split(/\s+/).filter(Boolean).slice(0, count || 3).join(' ');
   }
 
-  function englishOnlyGuard() {
-    return 'Speak English only. The quoted script is already English. Do not translate it into Dutch or any other language.';
-  }
-
-  function buildTurnInstructions(text, purpose) {
-    var script = escapeScriptQuote(String(text || '').trim());
+  function buildTurnInstructions(text) {
+    var script = String(text || '').trim();
     if (!script) return '';
-    var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
-    var guard = englishOnlyGuard();
-    if (purpose === 'question') {
-      return guard + ' Read the quoted exam question to the student. Begin immediately with: ' + startAnchor
-        + '. Do not say got it, okay, let us start, crucial question, moving on, or any introduction before the script.'
-        + ' Do not say sorry, rules, "here is the next question", or any words before ' + startAnchor + '. '
-        + 'Exact words: "' + script + '"';
-    }
-    if (purpose === 'clarification') {
-      return guard + ' Read this clarification prompt to the student, word-for-word. Begin with: ' + startAnchor
-        + '. Do not reveal the answer or add commentary. Exact words: "' + script + '"';
-    }
-    if (purpose === 'feedback') {
-      return guard + ' Read this scored feedback to the student, word-for-word. Begin with: ' + startAnchor
-        + '. Include every number and percent sign. Do not tutor, paraphrase, add advice, or refer to other questions.'
-        + ' Do not say got it, okay, let us start, or any introduction before the script. Exact words: "' + script + '"';
-    }
-    if (purpose === 'final') {
-      return guard + ' Read this final summary, word-for-word. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
-    }
-    if (purpose === 'audio_check') {
-      return guard + ' Non-scored readiness check. Begin with: ' + startAnchor + '. Exact words: "' + script + '" Then stop.';
-    }
-    if (purpose === 'retry_answer') {
-      return guard + ' Read this retry prompt, word-for-word. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
-    }
-    return guard + ' Read verbatim. Begin with: ' + startAnchor + '. Exact words: "' + script + '"';
+    return SPEAK_MARKER_START + '\n' + script + '\n' + SPEAK_MARKER_END;
   }
 
   function normalizeCompareText(value) {
@@ -326,7 +298,7 @@
 
   function isMayaMetaPreamble(transcript) {
     var actual = normalizeCompareText(transcript);
-    return /\b(here is the next question|the next question|can only read|only read the script|read the script aloud|read the script|cannot assist right now|cannot assist|i am sorry but|i am sorry i|sorry but i can)\b/.test(actual);
+    return /\b(here is the next question|here is the quoted|quoted script|for your progress test|progress test script|the next question|can only read|only read the script|read the script aloud|read the script|text to speech|exact words|exact text|cannot assist right now|cannot assist|i am sorry but|i am sorry i|sorry but i can)\b/.test(actual);
   }
 
   function hasMayaMetaPreambleBeforeScript(transcript) {
@@ -359,6 +331,17 @@
     var actual = normalizeCompareText(partial);
     if (!expected || !actual) return true;
     return expected.indexOf(actual) === 0;
+  }
+
+  function spokenScriptAnchorMatches(transcript) {
+    var expected = normalizeCompareText(mayaExpectedText || preparedMayaText || '');
+    var actual = normalizeCompareText(transcript);
+    if (!expected || !actual) return false;
+    if (actual === expected || expected.indexOf(actual) === 0 || actual.indexOf(expected) === 0) return true;
+    var opening = expected.split(' ').filter(Boolean).slice(0, 3).join(' ');
+    if (opening.length < 4) return false;
+    var idx = actual.indexOf(opening);
+    return idx >= 0 && idx <= 8;
   }
 
   function hasExpectedScriptOpening(partial) {
@@ -397,14 +380,9 @@
     mayaTranscriptDone = false;
     stopMayaSpeechForNewScript();
     ensureExpectedMayaBubble();
-    var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
-    var script = escapeScriptQuote(text);
     window.setTimeout(function () {
       mayaDriftDetected = false;
-      sendResponse(
-        englishOnlyGuard() + ' CRITICAL: Speak the English quoted script exactly as written. Do NOT translate. Start immediately with: ' + startAnchor + '. Exact English text: "' + script + '"',
-        purpose
-      );
+      sendResponse(buildTurnInstructions(text), purpose);
     }, mayaSpeechSettleMs);
     return true;
   }
@@ -420,17 +398,9 @@
     responseInProgress = false;
     stopMayaSpeechForNewScript();
     ensureExpectedMayaBubble();
-    var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
-    var script = escapeScriptQuote(text);
-    var introBan = purpose === 'question'
-      ? ' Do not say got it, okay, let us start, crucial question, or any introduction.'
-      : ' Do not paraphrase, tutor, or add any introduction.';
     window.setTimeout(function () {
       mayaDriftDetected = false;
-      sendResponse(
-        englishOnlyGuard() + ' Text-to-speech. Start immediately with: ' + startAnchor + '. No words before that.' + introBan + ' Exact text: "' + script + '"',
-        purpose
-      );
+      sendResponse(buildTurnInstructions(text), purpose);
     }, mayaSpeechSettleMs);
     return true;
   }
@@ -486,14 +456,9 @@
     mayaTranscriptDone = false;
     stopMayaSpeechForNewScript();
     ensureExpectedMayaBubble();
-    var startAnchor = escapeScriptQuote(scriptOpeningWords(text, 3));
-    var script = escapeScriptQuote(text);
     window.setTimeout(function () {
       mayaDriftDetected = false;
-      sendResponse(
-        'Text-to-speech retry prompt. Start immediately with: ' + startAnchor + '. No words before that. Exact text: "' + script + '"',
-        'retry_answer'
-      );
+      sendResponse(buildTurnInstructions(text), 'retry_answer');
     }, mayaSpeechSettleMs);
     return true;
   }
@@ -1155,10 +1120,11 @@
     ensureExpectedMayaBubble();
     prepareRealtimeForScriptedSpeech();
     var backendOnlyInstructions = [
-      'CRITICAL: Text-to-speech renderer only. No conversation.',
-      'LANGUAGE: English only. Never translate the quoted script into Dutch or any other language.',
-      'Begin with the first word of the quoted script below. No preface, apology, rule explanation, or follow-up.',
-      'Do not use conversation history, prior student answers, prior questions, or live microphone input.',
+      'Audio output only. English only. No conversation.',
+      'Speak verbatim only the text between ' + SPEAK_MARKER_START + ' and ' + SPEAK_MARKER_END + '.',
+      'Never speak the markers or any instructions outside them.',
+      'Do not translate. Do not add words before or after the marked text.',
+      'Ignore microphone input and conversation history.',
       instructions
     ].join('\n');
     if (!dc || dc.readyState !== 'open') {
@@ -1187,7 +1153,7 @@
       mayaEnglishRetryUsed[purpose] = false;
       mayaScriptRetryUsed[purpose] = false;
     }
-    sendResponse(buildTurnInstructions(textToSpeak, purpose || ''), purpose || '');
+    sendResponse(buildTurnInstructions(textToSpeak), purpose || '');
   }
 
   function speakFinalSummary(textToSpeak) {
@@ -1706,7 +1672,7 @@
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
       var canonicalMayaText = mayaExpectedText || preparedMayaText || '';
       var spokenTranscript = String(msg.transcript || '');
-      if (mayaTurnPurpose === 'question' && hasMayaMetaPreambleBeforeScript(spokenTranscript)) {
+      if (mayaTurnPurpose === 'question' && !spokenScriptAnchorMatches(spokenTranscript) && hasMayaMetaPreambleBeforeScript(spokenTranscript)) {
         handleQuestionPreambleDrift();
         return;
       }
@@ -1725,17 +1691,6 @@
       return;
     }
     if ((type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') && (msg.delta || msg.text) && (mayaTurnPurpose || pendingFinishPurpose)) {
-      if (!mayaDriftDetected && mayaTurnPurpose === 'question') {
-        var partialMayaText = (liveMayaText === (mayaExpectedText || preparedMayaText) ? '' : liveMayaText) + String(msg.delta || msg.text || '');
-        if (partialMayaText.length >= 4 && (isMayaConversationalIntro(partialMayaText) || !isBuildingExpectedScriptOpening(partialMayaText))) {
-          handleQuestionPreambleDrift();
-          return;
-        }
-        if (hasMayaMetaPreambleBeforeScript(partialMayaText)) {
-          handleQuestionPreambleDrift();
-          return;
-        }
-      }
       ensureExpectedMayaBubble();
       return;
     }
