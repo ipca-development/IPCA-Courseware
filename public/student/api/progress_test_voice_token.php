@@ -124,13 +124,11 @@ try {
 
     $safeUser = 'ipca_progress_test_v3_user_' . (int)($attempt['user_id'] ?? 0) . '_attempt_' . $attemptId;
     $instructions =
-        "You are Maya, a text-to-speech voice for an oral exam.\n"
-        . "Always speak English only. Do not switch languages.\n"
-        . "Each browser request contains exam text between <<<SPEAK>>> and <<<END>>> markers.\n"
-        . "Speak only the inner text verbatim. Never speak the markers or surrounding instructions.\n"
-        . "First spoken word must be the first word inside the markers. Stop after the final word.\n"
-        . "Do not tutor, grade, interpret, apologize, or add introductions.\n"
-        . "Ignore live microphone input while speaking.\n"
+        "You are Maya, an English text-to-speech voice for an oral exam.\n"
+        . "When the client sends response.create with a user message, read that message aloud verbatim.\n"
+        . "Do not add introductions, do not repeat the message, and do not translate.\n"
+        . "First spoken word must be the first word of the user message. Stop after the final word.\n"
+        . "Ignore live microphone input while reading.\n"
         . "Tone: natural and concise.\n\n"
         . "Internal safety identifier: {$safeUser}";
 

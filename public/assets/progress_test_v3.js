@@ -51,7 +51,7 @@
   var clarificationQuestion = '';
   var activeStudentBubble = null;
   var responseInProgress = false;
-  var pendingInstructions = '';
+  var pendingSpeakText = '';
   var processedTranscripts = {};
   var mayaTurnPurpose = '';
   var pendingPurpose = '';
@@ -119,8 +119,17 @@
   var mayaSpeechStartedAt = 0;
   var mayaScriptRetryUsed = {};
   var answerTimerWaitHandle = null;
-  var SPEAK_MARKER_START = '<<<SPEAK>>>';
-  var SPEAK_MARKER_END = '<<<END>>>';
+  var handledMayaResponseDoneKeys = {};
+  var handledMayaTranscriptDoneKeys = {};
+  var MAYA_RENDERER_INSTRUCTIONS = 'Read the user message aloud verbatim in English. Do not add, remove, translate, or repeat words. No preamble or closing remarks. Stop after the final word.';
+
+  function clearMayaResponseDedupe() {
+    handledMayaTranscriptDoneKeys = {};
+  }
+
+  function mayaResponseEventKey(msg) {
+    return String((msg && msg.response && msg.response.id) || msg.response_id || msg.event_id || '').trim();
+  }
 
   function setCoachState(name) {
     root.setAttribute('data-coach-state', name);
@@ -223,7 +232,7 @@
   }
 
   function clearRealtimeTurnState() {
-    pendingInstructions = '';
+    pendingSpeakText = '';
     pendingPurpose = '';
     pendingFinishPurpose = '';
     mayaTurnPurpose = '';
@@ -287,9 +296,7 @@
   }
 
   function buildTurnInstructions(text) {
-    var script = String(text || '').trim();
-    if (!script) return '';
-    return SPEAK_MARKER_START + '\n' + script + '\n' + SPEAK_MARKER_END;
+    return String(text || '').trim();
   }
 
   function normalizeCompareText(value) {
@@ -382,7 +389,7 @@
     ensureExpectedMayaBubble();
     window.setTimeout(function () {
       mayaDriftDetected = false;
-      sendResponse(buildTurnInstructions(text), purpose);
+      sendSpokenText(text, purpose);
     }, mayaSpeechSettleMs);
     return true;
   }
@@ -400,7 +407,7 @@
     ensureExpectedMayaBubble();
     window.setTimeout(function () {
       mayaDriftDetected = false;
-      sendResponse(buildTurnInstructions(text), purpose);
+      sendSpokenText(text, purpose);
     }, mayaSpeechSettleMs);
     return true;
   }
@@ -458,7 +465,7 @@
     ensureExpectedMayaBubble();
     window.setTimeout(function () {
       mayaDriftDetected = false;
-      sendResponse(buildTurnInstructions(text), 'retry_answer');
+      sendSpokenText(text, 'retry_answer');
     }, mayaSpeechSettleMs);
     return true;
   }
@@ -476,7 +483,7 @@
   function stopMayaSpeechForNewScript() {
     clearMayaIdlePoll();
     stopMayaTurnTimers();
-    pendingInstructions = '';
+    pendingSpeakText = '';
     pendingPurpose = '';
     pendingFinishPurpose = '';
     mayaDriftDetected = false;
@@ -490,7 +497,7 @@
     textToSpeak = String(textToSpeak || '').trim();
     if (!textToSpeak) return;
     clearMayaIdlePoll();
-    pendingInstructions = '';
+    pendingSpeakText = '';
     pendingPurpose = '';
     var attempts = 0;
     function startWhenIdle() {
@@ -1096,14 +1103,14 @@
     });
   }
 
-  function sendResponse(instructions, purpose) {
-    instructions = String(instructions || '').trim();
-    if (!instructions) return;
+  function sendSpokenText(textToSpeak, purpose) {
+    textToSpeak = String(textToSpeak || '').trim();
+    if (!textToSpeak) return;
     setTyping('', false);
     setMicEnabled(false);
     setStudentAnswering(false);
     if (responseInProgress) {
-      pendingInstructions = instructions;
+      pendingSpeakText = textToSpeak;
       pendingPurpose = purpose || '';
       return;
     }
@@ -1114,21 +1121,13 @@
     mayaTranscriptDone = false;
     pendingFinishPurpose = '';
     stopMayaTurnTimers();
-    cancelRealtimeAudioOnly();
+    clearMayaResponseDedupe();
     responseInProgress = true;
     setMayaSpeaking(true);
     ensureExpectedMayaBubble();
     prepareRealtimeForScriptedSpeech();
-    var backendOnlyInstructions = [
-      'Audio output only. English only. No conversation.',
-      'Speak verbatim only the text between ' + SPEAK_MARKER_START + ' and ' + SPEAK_MARKER_END + '.',
-      'Never speak the markers or any instructions outside them.',
-      'Do not translate. Do not add words before or after the marked text.',
-      'Ignore microphone input and conversation history.',
-      instructions
-    ].join('\n');
     if (!dc || dc.readyState !== 'open') {
-      window.setTimeout(function () { drainResponse(); }, estimateMayaSpeechMs(preparedMayaText || mayaExpectedText || ''));
+      window.setTimeout(function () { drainResponse(); }, estimateMayaSpeechMs(textToSpeak));
       return;
     }
     unlockAudioPlayback();
@@ -1137,7 +1136,12 @@
       response: {
         conversation: 'none',
         output_modalities: ['audio'],
-        instructions: backendOnlyInstructions
+        instructions: MAYA_RENDERER_INSTRUCTIONS,
+        input: [{
+          type: 'message',
+          role: 'user',
+          content: [{ type: 'input_text', text: textToSpeak }]
+        }]
       }
     }));
   }
@@ -1153,7 +1157,7 @@
       mayaEnglishRetryUsed[purpose] = false;
       mayaScriptRetryUsed[purpose] = false;
     }
-    sendResponse(buildTurnInstructions(textToSpeak), purpose || '');
+    sendSpokenText(textToSpeak, purpose || '');
   }
 
   function speakFinalSummary(textToSpeak) {
@@ -1169,12 +1173,12 @@
     var finishedPurpose = mayaTurnPurpose;
     mayaTurnPurpose = '';
     responseInProgress = false;
-    if (pendingInstructions) {
-      var next = pendingInstructions;
+    if (pendingSpeakText) {
+      var next = pendingSpeakText;
       var nextPurpose = pendingPurpose;
-      pendingInstructions = '';
+      pendingSpeakText = '';
       pendingPurpose = '';
-      sendResponse(next, nextPurpose);
+      sendSpokenText(next, nextPurpose);
       return;
     }
     scheduleMayaTurnComplete(finishedPurpose);
@@ -1670,16 +1674,10 @@
       return;
     }
     if (type === 'response.output_audio_transcript.done' && msg.transcript && (mayaTurnPurpose || pendingFinishPurpose)) {
+      var transcriptKey = mayaResponseEventKey(msg) || String(msg.transcript || '').slice(0, 220);
+      if (transcriptKey && handledMayaTranscriptDoneKeys[transcriptKey]) return;
+      if (transcriptKey) handledMayaTranscriptDoneKeys[transcriptKey] = 1;
       var canonicalMayaText = mayaExpectedText || preparedMayaText || '';
-      var spokenTranscript = String(msg.transcript || '');
-      if (mayaTurnPurpose === 'question' && !spokenScriptAnchorMatches(spokenTranscript) && hasMayaMetaPreambleBeforeScript(spokenTranscript)) {
-        handleQuestionPreambleDrift();
-        return;
-      }
-      if (mayaTurnPurpose !== 'question' && isMayaSpeechDrift(spokenTranscript)) {
-        abortMayaSpeechDrift();
-        return;
-      }
       ensureExpectedMayaBubble();
       onMayaTranscriptDone(canonicalMayaText);
       api('save_transcript_segment', {
@@ -1698,6 +1696,9 @@
       handleStudentTranscript(msg);
     }
     if (type === 'response.done' || type === 'response.failed' || type === 'response.cancelled' || type === 'response.canceled') {
+      var doneKey = mayaResponseEventKey(msg);
+      if (doneKey && handledMayaResponseDoneKeys[doneKey]) return;
+      if (doneKey) handledMayaResponseDoneKeys[doneKey] = 1;
       drainResponse();
     }
   }
