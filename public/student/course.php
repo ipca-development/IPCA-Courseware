@@ -1873,7 +1873,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 
                       <td class="td-center">
                         <?php if (!empty($lx['progress_test_prep']['show_bar'])): ?>
-                          <div class="summary-compact">
+                          <div class="summary-compact pt-prep-status" data-test-id="<?= (int)($lx['progress_test_prep']['attempt_id'] ?? 0) ?>">
                             <div class="summary-head"><?= h($lx['progress_test_prep']['sub']) ?></div>
                             <div class="summary-bar-shell">
                               <div class="summary-bar-fill <?= h($lx['progress_test_prep']['class']) ?>" style="width:<?= (int)$lx['progress_test_prep']['pct'] ?>%;"></div>
@@ -1916,14 +1916,79 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 <script>
 (function () {
   var hash = window.location.hash || '';
-  if (hash.indexOf('#progress-test-lesson-') !== 0) return;
-  var row = document.getElementById(hash.slice(1));
-  if (!row) return;
-  var details = row.closest ? row.closest('details') : null;
-  if (details) details.open = true;
-  window.setTimeout(function () {
-    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, 80);
+  if (hash.indexOf('#progress-test-lesson-') === 0) {
+    var row = document.getElementById(hash.slice(1));
+    if (row) {
+      var details = row.closest ? row.closest('details') : null;
+      if (details) details.open = true;
+      window.setTimeout(function () {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 80);
+    }
+  }
+})();
+
+(function () {
+  var nodes = document.querySelectorAll('.pt-prep-status[data-test-id]');
+  if (!nodes.length) return;
+
+  function applyPrepDisplay(node, display) {
+    if (!display) return;
+    var fill = node.querySelector('.summary-bar-fill');
+    var label = node.querySelector('.summary-label');
+    var head = node.querySelector('.summary-head');
+    var pct = Math.max(0, Math.min(100, parseInt(display.pct, 10) || 0));
+    var cssClass = String(display.class || 'info');
+
+    if (fill) {
+      fill.style.width = pct + '%';
+      fill.className = 'summary-bar-fill ' + cssClass;
+    }
+    if (label) {
+      label.textContent = String(display.label || '');
+      label.className = 'summary-label ' + cssClass;
+    }
+    if (head) {
+      head.textContent = String(display.sub || 'Preparing');
+    }
+  }
+
+  function pollPrepNode(node) {
+    var testId = parseInt(node.getAttribute('data-test-id') || '0', 10);
+    if (testId <= 0) return;
+
+    fetch('/student/api/test_prepare_status_v2.php?test_id=' + encodeURIComponent(String(testId)), {
+      method: 'GET',
+      credentials: 'same-origin',
+      cache: 'no-store'
+    })
+      .then(function (res) { return res.text(); })
+      .then(function (txt) {
+        var j = null;
+        try {
+          j = JSON.parse(txt);
+        } catch (e) {
+          return;
+        }
+        if (!j || !j.ok) return;
+
+        applyPrepDisplay(node, j.display);
+
+        if (j.prepared || String(j.status || '') === 'ready') {
+          window.location.reload();
+        }
+      })
+      .catch(function () {});
+  }
+
+  function pollAllPrepNodes() {
+    nodes.forEach(function (node) {
+      pollPrepNode(node);
+    });
+  }
+
+  pollAllPrepNodes();
+  window.setInterval(pollAllPrepNodes, 2000);
 })();
 </script>
 

@@ -139,6 +139,12 @@
   var wordRevealIndex = 0;
   var wordRevealTimer = null;
   var dcOpenPromise = null;
+  var responseInProgress = false;
+  var mayaTurnPurpose = '';
+  var mayaExpectedText = '';
+  var mayaAudioEndsAt = 0;
+  var mayaSpeechStartedAt = 0;
+  var mayaTurnTailTimer = null;
 
   function text(el, v) { if (el) el.textContent = v; }
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
@@ -168,8 +174,136 @@
     audio.volume = 1;
     try {
       var p = audio.play();
-      if (p && typeof p.catch === 'function') p.catch(function () {});
-    } catch (e) {}
+      if (p && typeof p.then === 'function') {
+        p.then(function () {
+          logEvent('remote_audio_play_ok');
+        }).catch(function (err) {
+          logEvent('remote_audio_play_blocked', String(err && err.message || err));
+        });
+      }
+    } catch (e) {
+      logEvent('remote_audio_play_error', String(e && e.message || e));
+    }
+  }
+
+  function isMayaAudioPlaybackActive() {
+    return Date.now() < mayaAudioEndsAt;
+  }
+
+  function estimateMayaSpeechMs(text) {
+    var t = String(text || '').trim();
+    if (!t) return 2200;
+    var words = t.split(/\s+/).filter(Boolean).length;
+    return clamp(Math.round(words * 360 + 900), 1600, 90000);
+  }
+
+  function mayaPlaybackTailMs(text) {
+    return clamp(Math.round(estimateMayaSpeechMs(text) * 0.9), 2200, 90000);
+  }
+
+  function scheduleMayaAudioEnd(text, resetStart) {
+    var tail = mayaPlaybackTailMs(text);
+    if (resetStart || !mayaSpeechStartedAt) mayaSpeechStartedAt = Date.now();
+    mayaAudioEndsAt = mayaSpeechStartedAt + tail;
+  }
+
+  function clearMayaAudioEnd() {
+    mayaAudioEndsAt = 0;
+    mayaSpeechStartedAt = 0;
+  }
+
+  function stopMayaTurnTimers() {
+    if (mayaTurnTailTimer) clearTimeout(mayaTurnTailTimer);
+    mayaTurnTailTimer = null;
+  }
+
+  function prepareRealtimeForScriptedSpeech() {
+    if (dc && dc.readyState === 'open') {
+      try { dc.send(JSON.stringify({ type: 'input_audio_buffer.clear' })); } catch (e) {}
+    }
+  }
+
+  function escapeScriptQuote(text) {
+    return String(text || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+  }
+
+  function scriptOpeningWords(text, count) {
+    return String(text || '').trim().split(/\s+/).filter(Boolean).slice(0, count || 3).join(' ');
+  }
+
+  function buildRendererInstructions(textToSpeak, purpose) {
+    var script = escapeScriptQuote(String(textToSpeak || '').trim());
+    if (!script) return '';
+    var start = escapeScriptQuote(scriptOpeningWords(textToSpeak, 3));
+    var lines = [
+      'Audio output only. English only. Verbatim text-to-speech renderer.',
+      'Ignore all prior conversation, prior questions, and prior student answers completely.',
+      'Do not answer, solve, explain, tutor, grade, affirm, or respond to anything except reading the text.',
+      'Do not add words before or after the text. Speak the text exactly once, then stop.'
+    ];
+    if (purpose === 'question' || purpose === 'clarification') {
+      lines.push('The text is an oral exam question for the student. Never give the answer, hints, or examples.');
+    }
+    if (purpose === 'feedback' || purpose === 'final') {
+      lines.push('The text is scored exam feedback. Read it verbatim. Do not reference other questions or lesson topics.');
+    }
+    if (purpose === 'greeting') {
+      lines.push('The text is a short greeting before the exam begins. Read it verbatim.');
+    }
+    lines.push('Forbidden before the text: understood, okay, got it, sure, let us, moving on, next question.');
+    lines.push('Begin with: ' + start + '. Text: "' + script + '"');
+    return lines.join('\n');
+  }
+
+  function realtimeErrorText(msg) {
+    var err = msg && msg.error ? msg.error : msg;
+    var code = String((err && err.code) || '').toLowerCase();
+    var message = String((err && err.message) || msg.message || '').toLowerCase();
+    return (code + ' ' + message).trim();
+  }
+
+  function isBenignRealtimeError(msg) {
+    var text = realtimeErrorText(msg);
+    if (!text) return true;
+    if (text.indexOf('no active response') !== -1) return true;
+    if (text.indexOf('no response') !== -1 && text.indexOf('cancel') !== -1) return true;
+    if (text.indexOf('already cancelled') !== -1 || text.indexOf('already canceled') !== -1) return true;
+    if (text.indexOf('response_cancel') !== -1) return true;
+    if (text.indexOf('cancelled') !== -1 || text.indexOf('canceled') !== -1) return true;
+    if (text.indexOf('audio runtime') !== -1) return true;
+    if (text.indexOf('runtime error') !== -1 && text.indexOf('audio') !== -1) return true;
+    if (text.indexOf('buffer') !== -1 && text.indexOf('empty') !== -1) return true;
+    if (text.indexOf('input_audio_buffer_commit') !== -1) return true;
+    if (text.indexOf('commit_empty') !== -1) return true;
+    if (text.indexOf('buffer too small') !== -1) return true;
+    if (text.indexOf('0.00ms') !== -1) return true;
+    return false;
+  }
+
+  function finishSpeechTurn(onDone) {
+    stopMayaTurnTimers();
+    clearMayaAudioEnd();
+    stopMayaBarMotion();
+    if (typeof onDone === 'function') onDone();
+  }
+
+  function completeSpeechTurn(onDone) {
+    if (isMayaAudioPlaybackActive() || responseInProgress) {
+      mayaTurnTailTimer = window.setTimeout(function () {
+        completeSpeechTurn(onDone);
+      }, 150);
+      return;
+    }
+    finishSpeechTurn(onDone);
+  }
+
+  function drainSpeechResponse() {
+    var onDone = dc && typeof dc._ptv4OnSpeechDone === 'function' ? dc._ptv4OnSpeechDone : null;
+    if (!onDone && !responseInProgress && !mayaTurnPurpose) return;
+    if (dc) dc._ptv4OnSpeechDone = null;
+    responseInProgress = false;
+    mayaTurnPurpose = '';
+    completeSpeechTurn(onDone);
   }
 
   function logEvent(type, detail, meta) {
@@ -204,17 +338,18 @@
     } catch (e) {}
   }
 
-  function waitForDataChannel() {
+  function waitForDataChannel(timeoutMs) {
+    timeoutMs = timeoutMs || 15000;
     if (dc && dc.readyState === 'open') return Promise.resolve();
-    if (!dcOpenPromise) {
-      dcOpenPromise = new Promise(function (resolve) {
-        if (!dc) { resolve(); return; }
-        if (dc.readyState === 'open') { resolve(); return; }
-        dc.addEventListener('open', function () { resolve(); }, { once: true });
-        window.setTimeout(resolve, 4000);
-      });
-    }
-    return dcOpenPromise;
+    if (!dcOpenPromise) return Promise.reject(new Error('Voice session is not initialized'));
+    return Promise.race([
+      dcOpenPromise,
+      new Promise(function (_, reject) {
+        window.setTimeout(function () {
+          reject(new Error('Voice data channel timed out'));
+        }, timeoutMs);
+      })
+    ]);
   }
 
   function stopWordReveal() {
@@ -841,15 +976,18 @@
     script = String(script || '').trim();
     if (!script) {
       if (onDone) onDone();
-      return;
+      return Promise.resolve();
     }
     return waitForDataChannel().then(function () {
       if (!dc || dc.readyState !== 'open') {
         logEvent('tts_unavailable', purpose);
-        if (onDone) onDone();
-        return;
+        throw new Error('Voice connection is not ready. Exit and try again.');
       }
       unlockAudioPlayback();
+      prepareRealtimeForScriptedSpeech();
+      mayaTurnPurpose = purpose || '';
+      mayaExpectedText = script;
+      responseInProgress = true;
       if (purpose === 'clarification') {
         setCardState(CARD.CLARIFICATION);
         clarificationPending = true;
@@ -858,11 +996,6 @@
         startMayaBarMotion();
       }
       logEvent('tts_request', purpose, { chars: script.length });
-      var instructions = [
-        'Audio output only. English only. Verbatim text-to-speech renderer.',
-        'Do not add words before or after the text. Speak exactly once, then stop.',
-        'Text: "' + script.replace(/"/g, '\\"') + '"'
-      ].join('\n');
       dc._ptv4OnSpeechDone = onDone || null;
       dc.send(JSON.stringify({
         type: 'response.create',
@@ -871,7 +1004,7 @@
           input: [],
           output_modalities: ['audio'],
           temperature: 0.6,
-          instructions: instructions
+          instructions: buildRendererInstructions(script, purpose || '')
         }
       }));
     });
@@ -882,19 +1015,31 @@
     return postJson('/student/api/progress_test_v4_voice_token.php', { attempt_id: attemptId }).then(function (tok) {
       pc = new RTCPeerConnection();
       ensureRemoteAudio();
+      var dcOpenResolve;
+      var dcOpenReject;
+      dcOpenPromise = new Promise(function (resolve, reject) {
+        dcOpenResolve = resolve;
+        dcOpenReject = reject;
+      });
       pc.ontrack = function (ev) {
         remoteAudio.srcObject = ev.streams[0];
         unlockAudioPlayback();
         logEvent('remote_audio_track');
       };
+      pc.onconnectionstatechange = function () {
+        if (!pc) return;
+        if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          logEvent('voice_connection_lost', pc.connectionState);
+        }
+      };
       dc = pc.createDataChannel('oai-events');
-      dcOpenPromise = new Promise(function (resolve) {
-        dc.addEventListener('open', function () {
-          logEvent('voice_datachannel_open');
-          resolve();
-        }, { once: true });
-        window.setTimeout(resolve, 5000);
-      });
+      dc.onopen = function () {
+        logEvent('voice_datachannel_open');
+        dcOpenResolve();
+      };
+      dc.onerror = function () {
+        dcOpenReject(new Error('Realtime data channel failed to open'));
+      };
       dc.onmessage = function (ev) {
         var msg;
         try { msg = JSON.parse(ev.data); } catch (e) { return; }
@@ -913,8 +1058,18 @@
           headers: { Authorization: 'Bearer ' + tok.client_secret, 'Content-Type': 'application/sdp' },
           body: pc.localDescription.sdp
         });
-      }).then(function (res) { return res.text(); }).then(function (answer) {
-        return pc.setRemoteDescription({ type: 'answer', sdp: answer });
+      }).then(function (res) {
+        if (!res.ok) {
+          return res.text().then(function (body) {
+            throw new Error('Realtime SDP exchange failed (HTTP ' + res.status + '): ' + body.slice(0, 240));
+          });
+        }
+        return res.text();
+      }).then(function (answerSdp) {
+        return pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+      }).then(function () {
+        if (dc.readyState === 'open') return null;
+        return waitForDataChannel();
       });
     });
   }
@@ -922,16 +1077,33 @@
   function handleRealtime(msg) {
     var type = String(msg.type || '');
 
-    if (type === 'response.done' || type === 'response.output_audio.done') {
-      logEvent('tts_complete', type);
-      stopMayaBarMotion();
-      if (dc && typeof dc._ptv4OnSpeechDone === 'function') {
-        var cb = dc._ptv4OnSpeechDone;
-        dc._ptv4OnSpeechDone = null;
-        cb();
-      } else if (cardState === CARD.ASKING) {
-        onQuestionFinished();
+    if (type === 'error') {
+      if (isBenignRealtimeError(msg)) return;
+      logEvent('realtime_error', realtimeErrorText(msg));
+      return;
+    }
+
+    if (type === 'response.created') {
+      if (!mayaTurnPurpose) {
+        if (dc && dc.readyState === 'open') {
+          try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
+        }
+        return;
       }
+      responseInProgress = true;
+      scheduleMayaAudioEnd(mayaExpectedText, true);
+      startMayaBarMotion();
+      return;
+    }
+
+    if (type === 'response.output_audio_transcript.done' && msg.transcript && mayaTurnPurpose) {
+      scheduleMayaAudioEnd(mayaExpectedText || String(msg.transcript || ''));
+      return;
+    }
+
+    if (type === 'response.done' || type === 'response.failed' || type === 'response.cancelled' || type === 'response.canceled') {
+      logEvent('tts_complete', type);
+      drainSpeechResponse();
     }
   }
 
@@ -1206,13 +1378,20 @@
     startMayaBarMotion();
     setStatus('Maya is greeting you.');
     logEvent('greeting_start');
-    speakScript(greeting, 'greeting', function () {
-      stopMayaBarMotion();
+    return speakScript(greeting, 'greeting', function () {
       greetingReady = true;
       setCardState(CARD.READY);
       setHintContent('Tap <strong>Ready</strong> to begin Question 1.', true);
       setStatus('Tap Ready when you want to start your progress test.');
       logEvent('greeting_complete');
+      syncButtons();
+    }).catch(function (err) {
+      stopMayaBarMotion();
+      testStarted = false;
+      setCardState(CARD.READY);
+      greetingReady = false;
+      setHintContent('Maya audio could not start. Check your speakers and microphone permission, then tap <strong>Start</strong> again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Voice unavailable') + '</span>', true);
+      logEvent('greeting_failed', err.message || 'Voice unavailable');
       syncButtons();
     });
   }
@@ -1258,19 +1437,20 @@
     syncButtons();
     setStatus('Connecting oral exam session...');
     Promise.all([startCamera(), connectVoice()]).then(function () {
-      return waitForDataChannel();
-    }).then(function () {
       return apiJson('start_oral_test', {});
     }).then(function (out) {
       sessionConnecting = false;
       testStarted = true;
       updateProgress(out.state);
-      playGreeting();
+      return playGreeting();
+    }).then(function () {
       syncButtons();
     }).catch(function (err) {
       sessionConnecting = false;
+      testStarted = false;
       syncButtons();
-      setStatus('Could not start test: ' + err.message);
+      setHintContent('Could not start the voice session. Check microphone permission and try again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Connection failed') + '</span>', true);
+      logEvent('start_flow_failed', err.message || 'Connection failed');
     });
   }
 

@@ -754,10 +754,7 @@
 }
 
 .ptv4-feedback-panel[aria-hidden="true"] {
-  visibility: hidden;
-  opacity: 0;
-  min-height: 88px;
-  pointer-events: none;
+  display: none;
 }
 
 .ptv4-feedback-panel:not([aria-hidden="true"]) {

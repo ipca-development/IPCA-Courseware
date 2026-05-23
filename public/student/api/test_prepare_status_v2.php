@@ -1,5 +1,6 @@
 <?php
 require_once __DIR__ . '/../../../src/bootstrap.php';
+require_once __DIR__ . '/../../../src/progress_test_prep.php';
 
 cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
@@ -57,6 +58,9 @@ try {
         }
     }
 
+    $prepared = pt_prep_attempt_is_prepared($row, $pdo);
+    $display = pt_prep_progress_label($row, $pdo);
+
     json_ok([
         'ok'           => true,
         'test_id'      => (int)$row['id'],
@@ -64,7 +68,9 @@ try {
         'progress_pct' => (int)($row['progress_pct'] ?? 0),
         'status_text'  => (string)($row['status_text'] ?? ''),
         'updated_at'   => (string)($row['updated_at'] ?? ''),
-        'manifest'     => $manifest
+        'manifest'     => $manifest,
+        'prepared'     => $prepared,
+        'display'      => $display,
     ]);
 
 } catch (Throwable $e) {
