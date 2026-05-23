@@ -331,7 +331,7 @@ cw_header('Progress Test');
           <label class="ptv4-feedback-free">Anything else you want to tell us?<textarea rows="3" data-ptv4-fb-free maxlength="500"></textarea><span class="ptv4-feedback-char-count" data-ptv4-fb-count>0 / 500</span></label>
           <div class="ptv4-feedback-reward" data-ptv4-feedback-reward>
             <div class="ptv4-feedback-reward-badge" aria-hidden="true">AI</div>
-            <div>As a thank you, you’ll earn the <strong>AI Contributor</strong> badge when you send your feedback.</div>
+            <div>As a thank you, you’ll earn the <strong>Maya's Copilot</strong> badge when you send your feedback.</div>
           </div>
           <div class="ptv4-feedback-actions">
             <button class="ptv4-btn primary" type="submit">Send Feedback</button>
@@ -340,7 +340,7 @@ cw_header('Progress Test');
             <div class="ptv4-feedback-sent-title">Thank you for helping improve the IPCA AI training system.</div>
             <div class="ptv4-feedback-sent-badge" data-ptv4-feedback-sent-badge hidden>
               <span class="ptv4-badge-emblem ptv4-badge-emblem-contributor">AI</span>
-              <span>AI Contributor badge unlocked</span>
+              <span>Maya's Copilot badge unlocked</span>
             </div>
           </div>
         </form>
@@ -380,5 +380,5 @@ window.IPCAProgressTestV4Config = {
   progressTestPassPct: <?= (int)$progressTestPassPct ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=25"></script>
+<script src="/assets/progress_test_v4.js?v=26"></script>
 <?php cw_footer(); ?>

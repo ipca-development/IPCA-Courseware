@@ -1188,7 +1188,7 @@ function ptv4_badge_catalog(): array
 {
     return [
         'ready_for_departure' => [
-            'name' => 'Ready for Departure',
+            'name' => 'Wheels Up',
             'description' => 'First successful pass on your first attempt.',
             'theme' => 'departure',
         ],
@@ -1198,12 +1198,12 @@ function ptv4_badge_catalog(): array
             'theme' => 'pattern',
         ],
         'ifr_precision_pilot' => [
-            'name' => 'IFR Precision Pilot',
+            'name' => 'Elite Aviator',
             'description' => 'Three consecutive progress tests with 100% on first attempt.',
             'theme' => 'ifr',
         ],
         'captain_consistency' => [
-            'name' => 'Captain Consistency',
+            'name' => 'Platinum Wings',
             'description' => 'Five consecutive progress tests with 100% on first attempt.',
             'theme' => 'captain',
         ],
@@ -1213,7 +1213,7 @@ function ptv4_badge_catalog(): array
             'theme' => 'master',
         ],
         'ai_contributor' => [
-            'name' => 'AI Contributor',
+            'name' => "Maya's Copilot",
             'description' => 'Shared feedback to help improve Maya and IPCA training.',
             'theme' => 'contributor',
         ],
