@@ -1490,7 +1490,15 @@ cw_header('Course');
   .action-btn.danger{background:#fef2f2;color:#991b1b;border-color:#fecaca}
   .action-btn:hover{opacity:.95}
   .action-btn.disabled{opacity:.45;pointer-events:none}
-  button.action-btn{cursor:pointer;font:inherit}
+  button.action-btn{
+    cursor:pointer;
+    appearance:none;
+    -webkit-appearance:none;
+    margin:0;
+    box-sizing:border-box;
+    font-family:inherit;
+    line-height:normal;
+  }
 
   .cell-action{display:flex;align-items:center;justify-content:center}
   .score-cell{text-align:center !important}
@@ -1921,9 +1929,9 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
                         <?php else: ?>
                         <div class="cell-action">
                           <?php if ($showPrepareButton): ?>
-                            <button type="button" class="action-btn primary pt-prep-trigger"
+                            <a href="#" class="action-btn primary pt-prep-trigger"
                               data-cohort-id="<?= (int)$cohortId ?>"
-                              data-lesson-id="<?= (int)$lx['lesson_id'] ?>"><?= h($testLabel) ?></button>
+                              data-lesson-id="<?= (int)$lx['lesson_id'] ?>"><?= h($testLabel) ?></a>
                           <?php elseif ($testHref !== ''): ?>
                             <a class="action-btn <?= h($testBtnClass) ?>" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
                           <?php else: ?>
@@ -2035,13 +2043,16 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 
 (function () {
   document.querySelectorAll('.pt-prep-trigger').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-      if (btn.disabled) return;
-      btn.disabled = true;
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      if (btn.disabled || btn.getAttribute('aria-disabled') === 'true') return;
+      btn.setAttribute('aria-disabled', 'true');
+      btn.classList.add('disabled');
       var cohortId = parseInt(btn.getAttribute('data-cohort-id') || '0', 10);
       var lessonId = parseInt(btn.getAttribute('data-lesson-id') || '0', 10);
       if (cohortId <= 0 || lessonId <= 0) {
-        btn.disabled = false;
+        btn.removeAttribute('aria-disabled');
+        btn.classList.remove('disabled');
         return;
       }
 
@@ -2054,14 +2065,16 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
         .then(function (res) { return res.json(); })
         .then(function (j) {
           if (!j || !j.ok) {
-            btn.disabled = false;
+            btn.removeAttribute('aria-disabled');
+            btn.classList.remove('disabled');
             alert(j && j.error ? j.error : 'Could not start preparation.');
             return;
           }
           window.location.reload();
         })
         .catch(function () {
-          btn.disabled = false;
+          btn.removeAttribute('aria-disabled');
+          btn.classList.remove('disabled');
           alert('Could not start preparation.');
         });
     });
