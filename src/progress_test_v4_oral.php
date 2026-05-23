@@ -1202,40 +1202,114 @@ function ptv4_save_user_feedback(PDO $pdo, array $u, array $data): array
     return ['ok' => true, 'feedback_id' => (int)$pdo->lastInsertId()];
 }
 
-function ptv4_badge_catalog(): array
+function ptv4_badge_catalog_defaults(): array
 {
     return [
         'ready_for_departure' => [
             'name' => 'Wheels Up',
             'description' => 'First successful pass on your first attempt.',
             'theme' => 'departure',
+            'image_path' => '/assets/badges/01_wheels_up.png',
+            'sort_order' => 1,
         ],
         'perfect_pattern' => [
             'name' => 'Perfect Pattern',
             'description' => 'Scored 100% on a first attempt for the first time.',
             'theme' => 'pattern',
+            'image_path' => '/assets/badges/02_perfect_pattern.png',
+            'sort_order' => 2,
         ],
         'ifr_precision_pilot' => [
             'name' => 'Elite Aviator',
             'description' => 'Three consecutive progress tests with 100% on first attempt.',
             'theme' => 'ifr',
+            'image_path' => '/assets/badges/03_elite_aviator.png',
+            'sort_order' => 3,
         ],
         'captain_consistency' => [
             'name' => 'Platinum Wings',
             'description' => 'Five consecutive progress tests with 100% on first attempt.',
             'theme' => 'captain',
+            'image_path' => '/assets/badges/04_platinum_wings.png',
+            'sort_order' => 4,
         ],
         'ipca_sky_master' => [
             'name' => 'IPCA Sky Master',
             'description' => 'Ten consecutive progress tests with 100% on first attempt.',
             'theme' => 'master',
+            'image_path' => '/assets/badges/05_ipca_skymaster.png',
+            'sort_order' => 5,
         ],
         'ai_contributor' => [
             'name' => "Maya's Copilot",
             'description' => 'Shared feedback to help improve Maya and IPCA training.',
             'theme' => 'contributor',
+            'image_path' => '/assets/badges/06_mayas_copilot.png',
+            'sort_order' => 6,
         ],
     ];
+}
+
+function ptv4_badge_catalog(?PDO $pdo = null): array
+{
+    static $cache = [];
+
+    $cacheKey = $pdo ? 'db' : 'default';
+    if (isset($cache[$cacheKey])) {
+        return $cache[$cacheKey];
+    }
+
+    $defaults = ptv4_badge_catalog_defaults();
+    if (!$pdo) {
+        $cache[$cacheKey] = $defaults;
+        return $defaults;
+    }
+
+    try {
+        $st = $pdo->query("
+            SELECT badge_key, name, description, image_path, theme, sort_order
+            FROM progress_test_badge_definitions
+            WHERE is_active = 1
+            ORDER BY sort_order ASC, badge_key ASC
+        ");
+        $rows = $st ? $st->fetchAll(PDO::FETCH_ASSOC) : [];
+        if (!$rows) {
+            $cache[$cacheKey] = $defaults;
+            return $defaults;
+        }
+
+        $out = [];
+        foreach ($rows as $row) {
+            $key = (string)($row['badge_key'] ?? '');
+            if ($key === '') {
+                continue;
+            }
+            $fallback = $defaults[$key] ?? [];
+            $out[$key] = [
+                'name' => (string)($row['name'] ?? ($fallback['name'] ?? $key)),
+                'description' => (string)($row['description'] ?? ($fallback['description'] ?? '')),
+                'theme' => (string)($row['theme'] ?? ($fallback['theme'] ?? 'default')),
+                'image_path' => (string)($row['image_path'] ?? ($fallback['image_path'] ?? '')),
+                'sort_order' => (int)($row['sort_order'] ?? ($fallback['sort_order'] ?? 0)),
+            ];
+        }
+
+        foreach ($defaults as $key => $def) {
+            if (!isset($out[$key])) {
+                $out[$key] = $def;
+            }
+        }
+
+        uasort($out, static function (array $a, array $b): int {
+            return ((int)($a['sort_order'] ?? 0)) <=> ((int)($b['sort_order'] ?? 0));
+        });
+
+        $cache[$cacheKey] = $out;
+        return $out;
+    } catch (Throwable $e) {
+        $cache[$cacheKey] = $defaults;
+        return $defaults;
+    }
 }
 
 function ptv4_load_user_badges(PDO $pdo, int $userId): array
@@ -1260,7 +1334,7 @@ function ptv4_load_user_badges(PDO $pdo, int $userId): array
 
 function ptv4_award_badge(PDO $pdo, int $userId, string $badgeKey, array $ctx = []): bool
 {
-    if (!isset(ptv4_badge_catalog()[$badgeKey])) {
+    if (!isset(ptv4_badge_catalog($pdo)[$badgeKey])) {
         return false;
     }
     try {
@@ -1360,7 +1434,7 @@ function ptv4_award_feedback_badge(PDO $pdo, int $userId, array $ctx = []): bool
 
 function ptv4_report_badges_payload(PDO $pdo, int $userId, array $newlyEarned = []): array
 {
-    $catalog = ptv4_badge_catalog();
+    $catalog = ptv4_badge_catalog($pdo);
     $earned = ptv4_load_user_badges($pdo, $userId);
     $newSet = array_fill_keys($newlyEarned, true);
     $out = [];
@@ -1371,6 +1445,7 @@ function ptv4_report_badges_payload(PDO $pdo, int $userId, array $newlyEarned = 
             'name' => $def['name'],
             'description' => $def['description'],
             'theme' => $def['theme'],
+            'image_path' => (string)($def['image_path'] ?? ''),
             'earned' => $row !== null,
             'newly_earned' => !empty($newSet[$key]),
             'earned_at' => $row ? (string)($row['earned_at'] ?? '') : null,

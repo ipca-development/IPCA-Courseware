@@ -1879,6 +1879,14 @@
     return 'ptv4-badge-emblem ptv4-badge-emblem-' + (theme || 'departure');
   }
 
+  function renderBadgeImageHtml(badge) {
+    var url = String((badge && badge.image_path) || '').trim();
+    if (url) {
+      return '<span class="ptv4-badge-image-wrap"><img class="ptv4-badge-image" src="' + escapeHtml(url) + '" alt="' + escapeHtml((badge && badge.name) || 'Badge') + '"></span>';
+    }
+    return '<span class="' + badgeEmblemClass(badge && badge.theme) + '">?</span>';
+  }
+
   function renderScoreRing(scorePct, passPct, passed) {
     var score = scorePct == null ? 0 : parseInt(scorePct, 10);
     var tone = reportScoreTone(score, passPct);
@@ -1976,13 +1984,10 @@
     if (!els.reportBadges) return;
     els.reportBadges.innerHTML = '';
     (report.badges || []).forEach(function (badge) {
-      var emblem = badge.badge_key === 'ai_contributor'
-        ? 'AI'
-        : String(badge.name || '').split(' ').map(function (p) { return p[0]; }).join('').slice(0, 3).toUpperCase();
       var card = document.createElement('div');
       card.className = 'ptv4-badge-card' + (badge.earned ? ' is-earned' : ' is-locked') + (badge.newly_earned ? ' is-new' : '');
       card.innerHTML = ''
-        + '<span class="' + badgeEmblemClass(badge.theme) + '">' + escapeHtml(emblem) + '</span>'
+        + renderBadgeImageHtml(badge)
         + '<div class="ptv4-badge-copy"><strong>' + escapeHtml(badge.name || '') + '</strong><span>' + escapeHtml(badge.description || '') + '</span>'
         + '<div class="ptv4-badge-status ' + (badge.earned ? 'is-earned' : 'is-locked') + '">' + (badge.earned ? 'UNLOCKED' : 'LOCKED') + '</div></div>';
       els.reportBadges.appendChild(card);

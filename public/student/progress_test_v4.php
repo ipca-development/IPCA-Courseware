@@ -165,9 +165,11 @@ if ($prepBlocked) {
     exit;
 }
 
+$copilotBadgeImage = '/assets/badges/06_mayas_copilot.png';
+
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=28">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=30">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -335,7 +337,7 @@ cw_header('Progress Test');
           <div class="ptv4-feedback-q ptv4-feedback-q-issue" data-ptv4-fb-q="went_wrong"><div class="ptv4-feedback-q-label">Did anything go wrong?</div><div class="ptv4-feedback-q-options" data-ptv4-fb-issue></div></div>
           <label class="ptv4-feedback-free">Anything else you want to tell us?<textarea rows="3" data-ptv4-fb-free maxlength="500"></textarea><span class="ptv4-feedback-char-count" data-ptv4-fb-count>0 / 500</span></label>
           <div class="ptv4-feedback-reward" data-ptv4-feedback-reward>
-            <div class="ptv4-feedback-reward-badge" aria-hidden="true">AI</div>
+            <img src="<?= h($copilotBadgeImage) ?>" alt="Maya's Copilot" class="ptv4-feedback-reward-badge-img">
             <div>As a thank you, you’ll earn the <strong>Maya's Copilot</strong> badge when you send your feedback.</div>
           </div>
           <div class="ptv4-feedback-actions">
@@ -344,7 +346,7 @@ cw_header('Progress Test');
           <div class="ptv4-feedback-sent" data-ptv4-feedback-sent hidden>
             <div class="ptv4-feedback-sent-title">Thank you for helping improve the IPCA AI training system.</div>
             <div class="ptv4-feedback-sent-badge" data-ptv4-feedback-sent-badge hidden>
-              <span class="ptv4-badge-emblem ptv4-badge-emblem-contributor">AI</span>
+              <img src="<?= h($copilotBadgeImage) ?>" alt="Maya's Copilot" class="ptv4-feedback-reward-badge-img">
               <span>Maya's Copilot badge unlocked</span>
             </div>
           </div>
@@ -386,5 +388,5 @@ window.IPCAProgressTestV4Config = {
   progressTestPassPct: <?= (int)$progressTestPassPct ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=29"></script>
+<script src="/assets/progress_test_v4.js?v=30"></script>
 <?php cw_footer(); ?>

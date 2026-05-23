@@ -1339,8 +1339,16 @@
 }
 
 .ptv4-badge-card.is-locked {
-  opacity: 0.55;
-  filter: grayscale(0.35);
+  background: linear-gradient(180deg, #f8fafc, #f1f5f9);
+  border-color: #e2e8f0;
+}
+
+.ptv4-badge-card.is-locked .ptv4-badge-copy strong {
+  color: #64748b;
+}
+
+.ptv4-badge-card.is-locked .ptv4-badge-copy span {
+  color: #94a3b8;
 }
 
 .ptv4-badge-card.is-new {
@@ -1382,6 +1390,38 @@
 .ptv4-badge-emblem-captain { background: linear-gradient(135deg, #334155, #64748b); }
 .ptv4-badge-emblem-master { background: linear-gradient(135deg, #854d0e, #f59e0b); }
 .ptv4-badge-emblem-contributor { background: linear-gradient(135deg, #12355f, #0ea5e9); }
+
+.ptv4-badge-image-wrap {
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ptv4-badge-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  filter: drop-shadow(0 4px 10px rgba(15, 23, 42, 0.14));
+  transition: filter 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+}
+
+.ptv4-badge-card.is-locked .ptv4-badge-image {
+  opacity: 0.38;
+  filter: grayscale(1) brightness(0.92);
+}
+
+.ptv4-badge-card.is-earned .ptv4-badge-image {
+  opacity: 1;
+  filter: drop-shadow(0 6px 14px rgba(15, 23, 42, 0.18));
+}
+
+.ptv4-badge-card.is-new .ptv4-badge-image {
+  transform: scale(1.03);
+}
 
 .ptv4-badge-copy strong {
   display: block;
@@ -1640,6 +1680,15 @@
   font-size: 12px;
   line-height: 1.45;
   color: #334155;
+}
+
+.ptv4-feedback-reward-badge-img,
+.ptv4-feedback-sent-badge .ptv4-feedback-reward-badge-img {
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 4px 10px rgba(15, 23, 42, 0.14));
 }
 
 .ptv4-feedback-reward-badge {
