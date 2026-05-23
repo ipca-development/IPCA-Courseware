@@ -985,40 +985,16 @@ function ptv4_ensure_prepared_attempt(PDO $pdo, array $u, int $cohortId, int $le
     ptv4_mark_stale_interrupted_attempts($pdo, (int)$u['id'], $cohortId, $lessonId);
     $studentUserId = (int)$u['id'];
 
-    $scheduled = pt_prep_schedule_progress_test(
-        $pdo,
-        $studentUserId,
-        $cohortId,
-        $lessonId,
-        'v4_page',
-        $cookieHeader,
-        (string)($u['role'] ?? '') === 'admin' ? 'admin' : 'student',
-        (int)$u['id']
-    );
-    if (!empty($scheduled['skipped']) && ($scheduled['reason'] ?? '') !== 'already_prepared' && empty($scheduled['scheduled'])) {
-        if (($scheduled['reason'] ?? '') === 'canonical_pass_exists') {
-            return ['ok' => false, 'blocked' => true, 'reason' => 'canonical_pass_already_recorded'];
-        }
-        if (!empty($scheduled['reason']) && $scheduled['reason'] !== 'already_prepared') {
-            return ['ok' => false, 'blocked' => true, 'reason' => (string)$scheduled['reason']];
-        }
+    if (pt_prep_has_canonical_pass($pdo, $studentUserId, $cohortId, $lessonId)) {
+        return ['ok' => false, 'blocked' => true, 'reason' => 'canonical_pass_already_recorded'];
     }
 
-    $attemptId = (int)($scheduled['test_id'] ?? 0);
-    if ($attemptId <= 0) {
-        $existing = $pdo->prepare("
-            SELECT * FROM progress_tests_v2
-            WHERE user_id = ? AND cohort_id = ? AND lesson_id = ?
-              AND status IN ('preparing','ready','in_progress','processing')
-            ORDER BY id DESC LIMIT 1
-        ");
-        $existing->execute([$studentUserId, $cohortId, $lessonId]);
-        $row = $existing->fetch(PDO::FETCH_ASSOC);
-        $attemptId = $row ? (int)$row['id'] : 0;
+    $attempt = pt_prep_get_open_attempt($pdo, $studentUserId, $cohortId, $lessonId);
+    if (!$attempt) {
+        return ['ok' => false, 'blocked' => true, 'reason' => 'not_prepared'];
     }
-    if ($attemptId <= 0) {
-        return ['ok' => false, 'error' => 'Could not locate progress test attempt for preparation.'];
-    }
+
+    $attemptId = (int)$attempt['id'];
 
     $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
     $prepared = pt_prep_attempt_is_prepared($attempt, $pdo);

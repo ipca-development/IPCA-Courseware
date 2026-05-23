@@ -348,22 +348,6 @@ try {
             ? 'You passed with ' . $scorePct . '%. Strongest areas: ' . $strongText . '. Review ' . $weakText . ' before moving on.'
             : 'You did not pass this attempt. Main weak areas: ' . $weakText . '. Study those before re-attempting.';
 
-        if (!$passed) {
-            require_once __DIR__ . '/../../../src/progress_test_prep.php';
-            $cookieHeader = (string)($_SERVER['HTTP_COOKIE'] ?? '');
-            if (session_status() === PHP_SESSION_ACTIVE) {
-                session_write_close();
-            }
-            pt_prep_schedule_progress_test(
-                $pdo,
-                (int)$attempt['user_id'],
-                (int)$attempt['cohort_id'],
-                (int)$attempt['lesson_id'],
-                'after_failed_attempt',
-                $cookieHeader
-            );
-        }
-
         ptv4_generate_integrity_review($pdo, $attempt);
         $newlyEarnedBadges = ptv4_evaluate_and_award_badges($pdo, $attempt);
         $report = ptv4_report_payload($pdo, $attempt, $u, $newlyEarnedBadges);

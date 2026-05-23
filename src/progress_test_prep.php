@@ -298,7 +298,7 @@ function pt_prep_progress_label(array $attempt, PDO $pdo): array
 }
 
 /**
- * Course-page preparation status. Schedules background prep when eligible and not yet prepared.
+ * Course-page preparation status. Prep starts only when the student clicks Prepare (manual API).
  */
 function pt_prep_course_status(
     PDO $pdo,
@@ -311,6 +311,7 @@ function pt_prep_course_status(
     $empty = [
         'show_bar' => false,
         'show_button' => false,
+        'show_prepare_button' => false,
         'button_href' => '',
         'button_label' => 'Start Progress Test',
         'prepared' => false,
@@ -321,6 +322,8 @@ function pt_prep_course_status(
         'class' => 'neutral',
         'pct' => 0,
         'attempt_id' => null,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
     ];
 
     if (pt_prep_has_canonical_pass($pdo, $userId, $cohortId, $lessonId)) {
@@ -335,12 +338,11 @@ function pt_prep_course_status(
 
     $attempt = pt_prep_get_open_attempt($pdo, $userId, $cohortId, $lessonId);
     if (!$attempt) {
-        pt_prep_schedule_progress_test($pdo, $userId, $cohortId, $lessonId, 'course_page', $cookieHeader);
-        $attempt = pt_prep_get_open_attempt($pdo, $userId, $cohortId, $lessonId);
-    }
-
-    if (!$attempt) {
-        return $empty;
+        return array_merge($empty, [
+            'show_prepare_button' => true,
+            'label' => 'Not prepared yet',
+            'sub' => 'Progress Test',
+        ]);
     }
 
     $testId = (int)$attempt['id'];
@@ -352,6 +354,7 @@ function pt_prep_course_status(
         return [
             'show_bar' => false,
             'show_button' => true,
+            'show_prepare_button' => false,
             'button_href' => $progressTestUrl,
             'button_label' => $resume ? 'Resume Progress Test' : 'Start Progress Test',
             'prepared' => true,
@@ -362,6 +365,8 @@ function pt_prep_course_status(
             'class' => $meta['class'],
             'pct' => $meta['pct'],
             'attempt_id' => $testId,
+            'cohort_id' => $cohortId,
+            'lesson_id' => $lessonId,
         ];
     }
 
@@ -381,6 +386,7 @@ function pt_prep_course_status(
     return [
         'show_bar' => true,
         'show_button' => false,
+        'show_prepare_button' => false,
         'button_href' => '',
         'button_label' => 'Start Progress Test',
         'prepared' => false,
@@ -391,5 +397,7 @@ function pt_prep_course_status(
         'class' => $meta['class'],
         'pct' => $meta['pct'],
         'attempt_id' => $testId,
+        'cohort_id' => $cohortId,
+        'lesson_id' => $lessonId,
     ];
 }

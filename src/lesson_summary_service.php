@@ -272,16 +272,7 @@ final class LessonSummaryService
 
 				$this->pdo->commit();
 
-            if ((string)$evaluation['review_status'] === 'acceptable') {
-                require_once __DIR__ . '/progress_test_prep.php';
-                pt_prep_schedule_on_summary_accept(
-                    $this->pdo,
-                    $userId,
-                    $cohortId,
-                    $lessonId,
-                    (string)($_SERVER['HTTP_COOKIE'] ?? '')
-                );
-            }
+            // Progress test prep is started manually from the course page (Prepare Progress Test).
 
             return [
                 'ok' => true,

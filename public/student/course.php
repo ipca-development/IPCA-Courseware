@@ -209,6 +209,7 @@ function progress_test_prep_meta(
     $empty = [
         'show_bar' => false,
         'show_button' => false,
+        'show_prepare_button' => false,
         'button_href' => '',
         'button_label' => 'Start Progress Test',
         'prepared' => false,
@@ -1489,6 +1490,7 @@ cw_header('Course');
   .action-btn.danger{background:#fef2f2;color:#991b1b;border-color:#fecaca}
   .action-btn:hover{opacity:.95}
   .action-btn.disabled{opacity:.45;pointer-events:none}
+  button.action-btn{cursor:pointer;font:inherit}
 
   .cell-action{display:flex;align-items:center;justify-content:center}
   .score-cell{text-align:center !important}
@@ -1833,6 +1835,7 @@ if ((int)$lx['first_slide_id'] > 0 && empty($lx['locked'])) {
 $testHref = '';
 $testLabel = '';
 $testBtnClass = 'primary';
+$showPrepareButton = false;
 
 if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])) {
     $testHref = (string)$lx['action_required_url'];
@@ -1846,6 +1849,9 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     if (!empty($lx['progress_test_prep']['show_button']) && !empty($lx['progress_test_prep']['button_href'])) {
         $testHref = (string)$lx['progress_test_prep']['button_href'];
         $testLabel = (string)($lx['progress_test_prep']['button_label'] ?: 'Start Progress Test');
+    } elseif (!empty($lx['progress_test_prep']['show_prepare_button'])) {
+        $showPrepareButton = true;
+        $testLabel = 'Prepare Progress Test';
     } elseif (!empty($lx['progress_test_prep']['preparing'])) {
         $testHref = '';
         $testLabel = 'Start Progress Test';
@@ -1914,7 +1920,11 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
                           </div>
                         <?php else: ?>
                         <div class="cell-action">
-                          <?php if ($testHref !== ''): ?>
+                          <?php if ($showPrepareButton): ?>
+                            <button type="button" class="action-btn primary pt-prep-trigger"
+                              data-cohort-id="<?= (int)$cohortId ?>"
+                              data-lesson-id="<?= (int)$lx['lesson_id'] ?>"><?= h($testLabel) ?></button>
+                          <?php elseif ($testHref !== ''): ?>
                             <a class="action-btn <?= h($testBtnClass) ?>" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
                           <?php else: ?>
                             <span class="action-btn disabled"><?= h($testLabel) ?></span>
@@ -2021,6 +2031,41 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 
   pollAllPrepNodes();
   window.setInterval(pollAllPrepNodes, 2000);
+})();
+
+(function () {
+  document.querySelectorAll('.pt-prep-trigger').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      var cohortId = parseInt(btn.getAttribute('data-cohort-id') || '0', 10);
+      var lessonId = parseInt(btn.getAttribute('data-lesson-id') || '0', 10);
+      if (cohortId <= 0 || lessonId <= 0) {
+        btn.disabled = false;
+        return;
+      }
+
+      fetch('/student/api/progress_test_prepare_manual.php', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cohort_id: cohortId, lesson_id: lessonId })
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) {
+            btn.disabled = false;
+            alert(j && j.error ? j.error : 'Could not start preparation.');
+            return;
+          }
+          window.location.reload();
+        })
+        .catch(function () {
+          btn.disabled = false;
+          alert('Could not start preparation.');
+        });
+    });
+  });
 })();
 </script>
 

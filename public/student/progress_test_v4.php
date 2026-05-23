@@ -124,6 +124,7 @@ if ($progressTestPassPct <= 0) {
 }
 $prepBlocked = false;
 $prepBlockedLabel = 'Preparing Progress Test…';
+$prepBlockedMode = 'generic';
 if ($role === 'student') {
     $prepStatus = pt_prep_course_status(
         $pdo,
@@ -135,7 +136,15 @@ if ($role === 'student') {
     );
     if (empty($prepStatus['prepared'])) {
         $prepBlocked = true;
-        $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Preparing Progress Test…');
+        if (!empty($prepStatus['preparing'])) {
+            $prepBlockedMode = 'preparing';
+            $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Preparing Progress Test…');
+        } elseif (!empty($prepStatus['show_prepare_button'])) {
+            $prepBlockedMode = 'manual';
+            $prepBlockedLabel = 'Not prepared yet';
+        } else {
+            $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Not ready');
+        }
     }
 }
 
@@ -154,8 +163,14 @@ if ($prepBlocked) {
       <div class="gate-card">
         <div class="gate-title">Progress Test Not Ready Yet</div>
         <div class="gate-text">
-          Your progress test is still being prepared. Current status: <strong><?= h($prepBlockedLabel) ?></strong><br><br>
-          Please return to your course page and start the test once preparation is complete.
+          <?php if ($prepBlockedMode === 'preparing'): ?>
+            Your progress test is still being prepared. Current status: <strong><?= h($prepBlockedLabel) ?></strong><br><br>
+            Please return to your course page and start the test once preparation is complete.
+          <?php elseif ($prepBlockedMode === 'manual'): ?>
+            Go back to your course page and click <strong>Prepare Progress Test</strong> before starting this test.
+          <?php else: ?>
+            Please return to your course page to prepare or start your progress test.
+          <?php endif; ?>
         </div>
         <a class="gate-btn" href="<?= h($courseReturnUrl) ?>">Back to Lesson Menu</a>
       </div>
