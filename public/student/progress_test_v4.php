@@ -162,7 +162,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=18">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=20">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -265,8 +265,8 @@ cw_header('Progress Test');
       <div class="ptv4-card-actions" aria-label="Progress test controls">
         <button class="app-btn app-btn-primary ptv4-action-primary" type="button" data-ptv4-primary-action disabled>Start Progress Test</button>
         <button class="app-btn app-btn-secondary ptv4-action-next ptv4-btn-muted" type="button" data-ptv4-next disabled>Next Question</button>
-        <button class="app-btn app-btn-secondary ptv4-action-replay" type="button" data-ptv4-replay disabled>Replay Question</button>
-        <button class="app-btn app-btn-secondary ptv4-action-clarify" type="button" data-ptv4-clarify disabled>Request Clarification</button>
+        <button class="app-btn app-btn-secondary ptv4-action-replay ptv4-btn-muted" type="button" data-ptv4-replay disabled>Replay Question</button>
+        <button class="app-btn app-btn-secondary ptv4-action-clarify ptv4-btn-muted" type="button" data-ptv4-clarify disabled>Request Clarification</button>
         <button class="app-btn app-btn-primary ptv4-action-report" type="button" data-ptv4-my-report hidden>My Report</button>
         <button class="app-btn app-btn-secondary ptv4-action-retry" type="button" data-ptv4-retry aria-hidden="true">Retry</button>
       </div>
@@ -345,5 +345,5 @@ window.IPCAProgressTestV4Config = {
   progressTestPassPct: <?= (int)$progressTestPassPct ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=18"></script>
+<script src="/assets/progress_test_v4.js?v=20"></script>
 <?php cw_footer(); ?>
