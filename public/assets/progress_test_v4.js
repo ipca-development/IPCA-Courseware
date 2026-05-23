@@ -1853,6 +1853,28 @@
     return (parts[0][0] + parts[1][0]).toUpperCase();
   }
 
+  function studentPhotoUrl(source) {
+    return String((source && source.photo_path) || (source && source.studentPhotoUrl) || cfg.studentPhotoUrl || '').trim();
+  }
+
+  function renderReportStudentAvatar(firstName, photoUrl) {
+    var url = String(photoUrl || '').trim();
+    if (url) {
+      return '<div class="ptv4-report-student-avatar ptv4-report-student-avatar-photo">'
+        + '<img src="' + escapeHtml(url) + '" alt="' + escapeHtml(firstName || 'Student') + '">'
+        + '</div>';
+    }
+    return '<div class="ptv4-report-student-avatar">' + escapeHtml(studentInitials(firstName)) + '</div>';
+  }
+
+  function renderReportMiniStudentAvatar(firstName, photoUrl) {
+    var url = String(photoUrl || '').trim();
+    if (url) {
+      return '<img class="ptv4-report-mini-avatar ptv4-report-mini-avatar-photo" src="' + escapeHtml(url) + '" alt="' + escapeHtml(firstName || 'Student') + '">';
+    }
+    return '<span class="ptv4-report-mini-avatar">' + escapeHtml(studentInitials(firstName)) + '</span>';
+  }
+
   function badgeEmblemClass(theme) {
     return 'ptv4-badge-emblem ptv4-badge-emblem-' + (theme || 'departure');
   }
@@ -1880,14 +1902,15 @@
   function renderReportHero(report) {
     if (!els.reportHero) return;
     var firstName = report.first_name || cfg.firstName || 'Student';
+    var photoUrl = studentPhotoUrl(report);
     els.reportHero.innerHTML = ''
       + '<div class="ptv4-report-hero-maya">'
-      + '<img src="/assets/avatars/maya.png" alt="Maya">'
+      + '<div class="ptv4-report-avatar-frame"><img src="/assets/avatars/maya.png" alt="Maya"></div>'
       + '<div class="ptv4-report-hero-quote">' + escapeHtml(report.motivation || '') + '</div>'
       + '</div>'
       + '<div>' + renderScoreRing(report.score_pct, report.pass_threshold_pct, !!report.passed) + '</div>'
       + '<div class="ptv4-report-hero-student">'
-      + '<div class="ptv4-report-student-avatar">' + escapeHtml(studentInitials(firstName)) + '</div>'
+      + renderReportStudentAvatar(firstName, photoUrl)
       + '<div class="ptv4-report-student-name">' + escapeHtml(firstName) + '</div>'
       + '</div>';
   }
@@ -1907,10 +1930,11 @@
     }).join('');
   }
 
-  function renderReportQuestionCard(q, passPct, firstName) {
+  function renderReportQuestionCard(q, passPct, firstName, photoUrl) {
     var score = q.score_pct == null ? 0 : parseInt(q.score_pct, 10);
     var tone = q.performance_tone || reportScoreTone(score, passPct);
     var label = q.performance_label || 'Performance';
+    var miniAvatar = renderReportMiniStudentAvatar(firstName, photoUrl);
     var card = document.createElement('div');
     card.className = 'ptv4-report-qcard';
     card.innerHTML = ''
@@ -1923,10 +1947,10 @@
       + '</button>'
       + '<div class="ptv4-report-qcard-body">'
       + '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><span>Question</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.question || '') + '</div></div>'
-      + '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><span class="ptv4-report-mini-avatar">' + escapeHtml(studentInitials(firstName)) + '</span><span>Your Answer</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.student_answer || '—') + '</div></div>'
-      + (q.clarification_question ? '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><img src="/assets/avatars/maya.png" alt=""><span>Clarification</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.clarification_question) + '</div></div>' : '')
-      + (q.clarification_answer ? '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><span class="ptv4-report-mini-avatar">' + escapeHtml(studentInitials(firstName)) + '</span><span>Clarification Answer</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.clarification_answer) + '</div></div>' : '')
-      + '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><img src="/assets/avatars/maya.png" alt=""><span>Maya Feedback</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.feedback || '') + '</div></div>'
+      + '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head">' + miniAvatar + '<span>Your Answer</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.student_answer || '—') + '</div></div>'
+      + (q.clarification_question ? '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><div class="ptv4-report-avatar-frame ptv4-report-avatar-frame-sm"><img src="/assets/avatars/maya.png" alt="Maya"></div><span>Clarification</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.clarification_question) + '</div></div>' : '')
+      + (q.clarification_answer ? '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head">' + miniAvatar + '<span>Clarification Answer</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.clarification_answer) + '</div></div>' : '')
+      + '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><div class="ptv4-report-avatar-frame ptv4-report-avatar-frame-sm"><img src="/assets/avatars/maya.png" alt="Maya"></div><span>Maya Feedback</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.feedback || '') + '</div></div>'
       + '</div>';
     var head = card.querySelector('.ptv4-report-qcard-head');
     if (head) {
@@ -2003,8 +2027,10 @@
     renderReportStats(report);
     if (els.reportQuestions) {
       els.reportQuestions.innerHTML = '';
+      var reportFirstName = report.first_name || cfg.firstName || 'Student';
+      var reportPhotoUrl = studentPhotoUrl(report);
       (report.questions || []).forEach(function (q) {
-        els.reportQuestions.appendChild(renderReportQuestionCard(q, report.pass_threshold_pct || cfg.progressTestPassPct || 70, report.first_name || cfg.firstName || 'Student'));
+        els.reportQuestions.appendChild(renderReportQuestionCard(q, report.pass_threshold_pct || cfg.progressTestPassPct || 70, reportFirstName, reportPhotoUrl));
       });
     }
     renderReportBadges(report);

@@ -12,6 +12,24 @@ function ptv4_json(array $payload, int $code = 200): void
     exit;
 }
 
+function ptv4_user_photo_url(?string $photoPath): string
+{
+    $value = trim((string)$photoPath);
+    if ($value === '') {
+        return '';
+    }
+
+    if (preg_match('~^https?://~i', $value)) {
+        return $value;
+    }
+
+    if (strpos($value, '/') === 0) {
+        return $value;
+    }
+
+    return '/' . ltrim($value, '/');
+}
+
 function ptv4_require_progress_test_access(PDO $pdo, array $user, int $cohortId, int $studentUserId): void
 {
     if ((string)($user['role'] ?? '') === 'admin') return;
@@ -1403,10 +1421,12 @@ function ptv4_report_payload(PDO $pdo, array $attempt, array $u, array $newlyEar
     $attemptId = (int)$attempt['id'];
     $items = ptv4_load_items($pdo, $attemptId);
     $responses = ptv4_load_responses($pdo, $attemptId);
-    $nameSt = $pdo->prepare("SELECT COALESCE(NULLIF(TRIM(name), ''), email, CONCAT('User #', id)) FROM users WHERE id = ? LIMIT 1");
+    $nameSt = $pdo->prepare("SELECT COALESCE(NULLIF(TRIM(name), ''), email, CONCAT('User #', id)) AS name, photo_path FROM users WHERE id = ? LIMIT 1");
     $nameSt->execute([(int)$attempt['user_id']]);
-    $studentName = trim((string)$nameSt->fetchColumn());
+    $userRow = $nameSt->fetch(PDO::FETCH_ASSOC) ?: [];
+    $studentName = trim((string)($userRow['name'] ?? ''));
     $firstName = trim(explode(' ', $studentName)[0] ?? 'Student') ?: 'Student';
+    $studentPhotoUrl = ptv4_user_photo_url(isset($userRow['photo_path']) ? (string)$userRow['photo_path'] : '');
     $lessonSt = $pdo->prepare("SELECT title FROM lessons WHERE id = ? LIMIT 1");
     $lessonSt->execute([(int)$attempt['lesson_id']]);
     $lessonTitle = trim((string)$lessonSt->fetchColumn()) ?: 'Lesson';
@@ -1476,6 +1496,7 @@ function ptv4_report_payload(PDO $pdo, array $attempt, array $u, array $newlyEar
     return [
         'attempt_id' => $attemptId,
         'first_name' => $firstName,
+        'photo_path' => $studentPhotoUrl,
         'lesson_title' => $lessonTitle,
         'lesson_number' => $lessonNumber,
         'score_pct' => $scorePct,

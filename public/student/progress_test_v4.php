@@ -103,12 +103,17 @@ foreach ($orderedLessonsSt->fetchAll(PDO::FETCH_COLUMN) as $i => $orderedLessonI
     }
 }
 
-$nameSt = $pdo->prepare('SELECT name FROM users WHERE id = ? LIMIT 1');
+$nameSt = $pdo->prepare('SELECT name, photo_path FROM users WHERE id = ? LIMIT 1');
 $nameSt->execute([$studentContextId]);
-$userName = trim((string)$nameSt->fetchColumn());
+$userRow = $nameSt->fetch(PDO::FETCH_ASSOC) ?: [];
+$userName = trim((string)($userRow['name'] ?? ''));
 if ($userName === '') $userName = trim((string)($u['name'] ?? 'Student'));
 $firstName = trim(explode(' ', $userName)[0] ?? 'Student');
 if ($firstName === '') $firstName = 'Student';
+$studentPhotoRaw = trim((string)($userRow['photo_path'] ?? ''));
+$studentPhotoUrl = $studentPhotoRaw !== ''
+    ? (preg_match('~^https?://~i', $studentPhotoRaw) ? $studentPhotoRaw : ((strpos($studentPhotoRaw, '/') === 0) ? $studentPhotoRaw : '/' . ltrim($studentPhotoRaw, '/')))
+    : '';
 
 $courseReturnUrl = '/student/course.php?cohort_id=' . (int)$cohortId . '#progress-test-lesson-' . (int)$lessonId;
 
@@ -162,7 +167,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=25">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=27">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -376,9 +381,10 @@ window.IPCAProgressTestV4Config = {
   lessonNumber: <?= (int)$lessonNumber ?>,
   courseReturnUrl: <?= json_encode($courseReturnUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>,
   firstName: <?= json_encode($firstName, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>,
+  studentPhotoUrl: <?= json_encode($studentPhotoUrl, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>,
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>,
   progressTestPassPct: <?= (int)$progressTestPassPct ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=26"></script>
+<script src="/assets/progress_test_v4.js?v=27"></script>
 <?php cw_footer(); ?>
