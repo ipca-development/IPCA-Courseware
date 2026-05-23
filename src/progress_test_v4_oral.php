@@ -760,6 +760,41 @@ function ptv4_transcribe_audio_file(string $path): string
     return trim((string)($j['text'] ?? ''));
 }
 
+function ptv4_synthesize_speech_mp3(string $text): string
+{
+    $text = trim($text);
+    if ($text === '') return '';
+
+    $model = getenv('CW_OPENAI_TTS_MODEL') ?: 'gpt-4o-mini-tts';
+    $voice = getenv('CW_OPENAI_TTS_VOICE') ?: (getenv('CW_OPENAI_REALTIME_VOICE') ?: 'marin');
+    $payload = json_encode([
+        'model' => $model,
+        'voice' => $voice,
+        'format' => 'mp3',
+        'input' => $text,
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+    $ch = curl_init('https://api.openai.com/v1/audio/speech');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . cw_openai_key(),
+            'Content-Type: application/json',
+        ],
+        CURLOPT_POSTFIELDS => $payload,
+        CURLOPT_TIMEOUT => 120,
+    ]);
+    $audio = curl_exec($ch);
+    $code = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+
+    if ($audio === false || $code < 200 || $code >= 300) {
+        return '';
+    }
+    return (string)$audio;
+}
+
 function ptv4_merge_chunk_transcripts(PDO $pdo, int $attemptId, int $itemId): string
 {
     $st = $pdo->prepare("

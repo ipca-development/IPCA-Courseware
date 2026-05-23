@@ -171,6 +171,24 @@ try {
         ptv4_json(['ok' => true, 'state' => ptv4_state_payload($pdo, ptv4_load_attempt($pdo, $u, $attemptId))]);
     }
 
+    if ($action === 'synthesize_feedback_speech') {
+        $speechText = trim((string)($data['speech_text'] ?? ''));
+        if ($speechText === '') {
+            ptv4_json(['ok' => false, 'error' => 'speech_text required'], 400);
+        }
+        if (strlen($speechText) > 4000) {
+            $speechText = substr($speechText, 0, 4000);
+        }
+        $mp3 = ptv4_synthesize_speech_mp3($speechText);
+        if ($mp3 === '') {
+            ptv4_json(['ok' => false, 'error' => 'Could not synthesize feedback audio.'], 502);
+        }
+        ptv4_json([
+            'ok' => true,
+            'audio_data_url' => 'data:audio/mpeg;base64,' . base64_encode($mp3),
+        ]);
+    }
+
     if ($action === 'finalize_item_answer') {
         $itemId = (int)($data['item_id'] ?? 0);
         $liveTranscript = trim((string)($data['student_answer_text'] ?? ''));

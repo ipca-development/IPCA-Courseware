@@ -112,7 +112,8 @@
 }
 
 .ptv4-hero-exit {
-  align-self: flex-end;
+  align-self: flex-start;
+  margin-top: 10px;
   height: 27px;
   padding: 0 11px;
   font-size: 11px;
@@ -442,9 +443,16 @@
 
 .ptv4-message-slot {
   position: relative;
+  flex: 0 0 auto;
+}
+
+.ptv4-message-slot:not(:has(.is-visible)) {
+  display: none;
+}
+
+.ptv4-message-slot:has(.is-visible) {
   min-height: 64px;
   max-height: 64px;
-  flex: 0 0 auto;
 }
 
 .ptv4-message-slot > .ptv4-hint,
@@ -559,7 +567,15 @@
   min-height: 42px;
 }
 
-.ptv4-card-actions .ptv4-btn-session {
+.ptv4-card-actions .ptv4-action-primary,
+.ptv4-card-actions .ptv4-action-next,
+.ptv4-card-actions .ptv4-action-replay,
+.ptv4-card-actions .ptv4-action-clarify {
+  flex: 1 1 calc(50% - 4px);
+}
+
+.ptv4-card-actions .ptv4-action-report,
+.ptv4-card-actions .ptv4-action-retry {
   flex: 1 1 100%;
 }
 
@@ -601,10 +617,6 @@
 
 .ptv4-btn:hover:not(:disabled) { background: rgba(30, 60, 114, 0.11); }
 .ptv4-btn:disabled { opacity: 0.45; cursor: not-allowed; }
-
-.ptv4-btn-session:not(.is-visible) {
-  display: none;
-}
 
 .ptv4-card-actions [data-ptv4-retry]:not(.is-visible) {
   display: none;
@@ -686,7 +698,7 @@
     min-height: 40px;
   }
 
-  .ptv4-message-slot {
+  .ptv4-message-slot:has(.is-visible) {
     min-height: 56px;
     max-height: 56px;
   }
@@ -709,7 +721,7 @@
     padding-top: 8px;
     border-top: 1px solid rgba(255, 255, 255, 0.14);
   }
-  .ptv4-hero-exit { align-self: center; }
+  .ptv4-hero-exit { align-self: flex-start; }
   .ptv4-question-row {
     grid-template-columns: 1fr;
   }
@@ -751,9 +763,28 @@
   border-radius: 14px;
   border: 1px solid #93c5fd;
   background: #eff6ff;
-  min-height: 72px;
+  min-height: 0;
   max-height: 120px;
   overflow-y: auto;
+}
+
+.ptv4-feedback-panel[data-tone="pass"] {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.ptv4-feedback-panel[data-tone="partial"] {
+  border-color: #fcd34d;
+  background: #fffbeb;
+}
+
+.ptv4-feedback-panel[data-tone="fail"] {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.ptv4-transcript-box + .ptv4-feedback-panel:not([aria-hidden="true"]) {
+  margin-top: -2px;
 }
 
 .ptv4-feedback-panel[aria-hidden="true"] {
@@ -783,6 +814,10 @@
   color: #1e3a8a;
   font-weight: 600;
 }
+
+.ptv4-feedback-panel[data-tone="pass"] .ptv4-feedback-text { color: #166534; }
+.ptv4-feedback-panel[data-tone="partial"] .ptv4-feedback-text { color: #92400e; }
+.ptv4-feedback-panel[data-tone="fail"] .ptv4-feedback-text { color: #991b1b; }
 
 .ptv4-remote-audio {
   position: absolute;

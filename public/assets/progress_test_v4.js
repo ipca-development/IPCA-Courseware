@@ -58,9 +58,7 @@
     mayaFrame: $('[data-ptv4-maya-click]'),
     video: $('[data-ptv4-video]'),
     videoFallback: $('[data-ptv4-video-fallback]'),
-    beginTest: $('[data-ptv4-begin-test]'),
-    startAnswer: $('[data-ptv4-start-answer]'),
-    stopAnswer: $('[data-ptv4-stop-answer]'),
+    primaryAction: $('[data-ptv4-primary-action]'),
     replay: $('[data-ptv4-replay]'),
     clarify: $('[data-ptv4-clarify]'),
     next: $('[data-ptv4-next]'),
@@ -133,6 +131,7 @@
   var lastReport = null;
   var processingTimer = null;
   var processingPct = 0;
+  var processingPctShown = 0;
   var debugEvents = [];
   var mayaClickCount = 0;
   var mayaClickTimer = null;
@@ -468,27 +467,30 @@
 
   function startProcessingProgress(labelPrefix) {
     processingPct = 5;
+    processingPctShown = 5;
     if (els.processing) els.processing.hidden = false;
     if (els.transcript) els.transcript.hidden = true;
-    updateProcessingProgress(labelPrefix, processingPct);
+    updateProcessingProgress(labelPrefix, processingPctShown);
     if (processingTimer) clearInterval(processingTimer);
     processingTimer = setInterval(function () {
-      if (processingPct < 92) {
-        processingPct += Math.random() * 8 + 2;
-        updateProcessingProgress(labelPrefix, Math.min(92, Math.round(processingPct)));
+      if (processingPctShown < 92) {
+        processingPctShown = Math.min(92, processingPctShown + Math.round(Math.random() * 4 + 1));
+        updateProcessingProgress(labelPrefix, processingPctShown);
       }
     }, 450);
   }
 
   function updateProcessingProgress(labelPrefix, pct) {
-    var label = (labelPrefix || 'Processing your answer') + '… ' + pct + '%';
+    processingPctShown = Math.max(processingPctShown, Math.round(pct));
+    var label = (labelPrefix || 'Processing your answer') + '… ' + processingPctShown + '%';
     text(els.processingLabel, label);
-    if (els.processingFill) els.processingFill.style.width = clamp(pct, 0, 100) + '%';
+    if (els.processingFill) els.processingFill.style.width = clamp(processingPctShown, 0, 100) + '%';
   }
 
   function finishProcessingProgress(labelPrefix) {
     if (processingTimer) clearInterval(processingTimer);
     processingTimer = null;
+    processingPctShown = 100;
     updateProcessingProgress(labelPrefix || 'Processing your answer', 100);
     window.setTimeout(function () {
       if (els.processing) els.processing.hidden = true;
@@ -500,9 +502,18 @@
     return 'Question ' + idx + '/' + (total || '?') + ':';
   }
 
+  function feedbackTone(scorePct) {
+    var passPct = parseInt(cfg.progressTestPassPct, 10);
+    if (!passPct || passPct <= 0) passPct = 70;
+    if (scorePct >= passPct) return 'pass';
+    if (scorePct >= 50) return 'partial';
+    return 'fail';
+  }
+
   function setFeedbackPanel(scorePct, feedback) {
     if (!els.feedbackPanel) return;
-    var tone = scorePct >= 70 ? 'pass' : (scorePct >= 30 ? 'partial' : 'fail');
+    var tone = feedbackTone(scorePct);
+    els.feedbackPanel.setAttribute('data-tone', tone);
     if (els.feedbackScore) {
       els.feedbackScore.setAttribute('data-tone', tone);
       text(els.feedbackScore, Math.round(scorePct) + '%');
@@ -510,12 +521,17 @@
     if (els.feedbackText) {
       els.feedbackText.textContent = feedback || '';
     }
+    setHintContent('', false);
+    setRecordHintVisible(false);
     els.feedbackPanel.setAttribute('aria-hidden', 'false');
     setFeedbackVisible(false);
   }
 
   function hideFeedbackPanel() {
-    if (els.feedbackPanel) els.feedbackPanel.setAttribute('aria-hidden', 'true');
+    if (els.feedbackPanel) {
+      els.feedbackPanel.setAttribute('aria-hidden', 'true');
+      els.feedbackPanel.removeAttribute('data-tone');
+    }
     if (els.feedbackScore) text(els.feedbackScore, '');
     if (els.feedbackText) text(els.feedbackText, '');
   }
@@ -560,10 +576,10 @@
     }
   }
 
-  function setBeginTestVisible(show) {
-    if (!els.beginTest) return;
-    els.beginTest.classList.toggle('is-visible', !!show);
-    els.beginTest.setAttribute('aria-hidden', show ? 'false' : 'true');
+  function setPrimaryActionVisible(show) {
+    if (!els.primaryAction) return;
+    els.primaryAction.hidden = !show;
+    els.primaryAction.setAttribute('aria-hidden', show ? 'false' : 'true');
   }
 
   function setTimerNoteVisible(show) {
@@ -581,7 +597,7 @@
 
   function greetingScript() {
     var name = cfg.firstName || 'there';
-    return timeOfDaySalutation() + ' ' + name + ', click Ready when you want to start your progress test.';
+    return timeOfDaySalutation() + ' ' + name + ', click Start Progress Test when you want to begin your progress test.';
   }
 
   function renderIdleLayout() {
@@ -594,12 +610,12 @@
     }
     setTranscriptDisplay('preidle');
     setCardState(CARD.READY);
-    setHintContent('Tap <strong>Start</strong> when you are ready. Maya will greet you before the first question.', true);
+    setHintContent('Tap <strong>Start Progress Test</strong> when you are ready. Maya will greet you before the first question.', true);
     setRecordHintVisible(false);
     hideFeedbackPanel();
     hideRetry();
-    if (els.beginTest) text(els.beginTest, 'Start');
-    setBeginTestVisible(true);
+    if (els.primaryAction) text(els.primaryAction, 'Start Progress Test');
+    setPrimaryActionVisible(true);
     if (els.timer) els.timer.setAttribute('data-active', '0');
     text(els.timerLabel, '\u00a0');
     setTimerNoteVisible(false);
@@ -643,7 +659,7 @@
   }
 
   function setAvatarVisuals() {
-    var mayaSpeaking = cardState === CARD.ASKING;
+    var mayaSpeaking = cardState === CARD.ASKING || !!mayaBarTimer;
     var studentActive = cardState === CARD.LISTENING || cardState === CARD.CLARIFICATION;
     var studentListening = testStarted && oralQuestionsStarted && cardState === CARD.READY && timerMode === 'start';
 
@@ -688,33 +704,37 @@
     var allDone = state && state.evaluated_count >= state.total_questions;
     var closed = isAttemptClosed(state);
     var retryVisible = els.retry && els.retry.classList.contains('is-visible');
-    if (els.beginTest) {
-      var showBegin = !oralQuestionsStarted && !allDone && !closed && !testCompleteReady;
-      setBeginTestVisible(showBegin);
+    var isRecording = cardState === CARD.LISTENING
+      || (mediaRecorder && mediaRecorder.state !== 'inactive');
+    if (els.primaryAction) {
+      var showPrimary = !allDone && !closed && !testCompleteReady;
+      setPrimaryActionVisible(showPrimary);
       var canBegin = false;
       if (!testStarted) {
         canBegin = !!prepared && !sessionConnecting;
-      } else if (greetingReady) {
+      } else if (greetingReady && !oralQuestionsStarted) {
         canBegin = true;
       }
-      els.beginTest.disabled = !showBegin || !canBegin;
-      if (showBegin) {
-        text(els.beginTest, testStarted && greetingReady ? 'Ready' : 'Start');
+      var canAnswer = oralQuestionsStarted
+        && (cardState === CARD.READY || cardState === CARD.CLARIFICATION || retryVisible)
+        && !isRecording;
+      var canStop = isRecording;
+      var primaryEnabled = false;
+      var primaryLabel = 'Start Progress Test';
+      if (canStop) {
+        primaryEnabled = true;
+        primaryLabel = 'Stop Answer';
+      } else if (canAnswer) {
+        primaryEnabled = true;
+        primaryLabel = 'Start Answer';
+      } else if (showPrimary && ((!testStarted && canBegin) || (testStarted && greetingReady && !oralQuestionsStarted))) {
+        primaryEnabled = true;
+        primaryLabel = 'Start Progress Test';
       }
-    }
-    if (els.startAnswer) {
-      var isRecording = cardState === CARD.LISTENING
-        || (mediaRecorder && mediaRecorder.state !== 'inactive');
-      var canAnswer = (cardState === CARD.READY || cardState === CARD.CLARIFICATION || retryVisible) && !isRecording;
-      els.startAnswer.disabled = !testStarted || !oralQuestionsStarted
-        || !canAnswer
-        || cardState === CARD.EVALUATING
-        || cardState === CARD.ASKING
-        || cardState === CARD.COMPLETE;
-    }
-    if (els.stopAnswer) {
-      els.stopAnswer.disabled = cardState !== CARD.LISTENING
-        && !(mediaRecorder && mediaRecorder.state !== 'inactive');
+      els.primaryAction.disabled = !showPrimary || !primaryEnabled;
+      text(els.primaryAction, primaryLabel);
+      els.primaryAction.classList.toggle('app-btn-danger', canStop);
+      els.primaryAction.classList.toggle('app-btn-primary', !canStop);
     }
     if (els.replay) {
       var questionLocked = cardState === CARD.COMPLETE
@@ -847,6 +867,8 @@
     timerMode = '';
     timerDeadline = 0;
     if (els.timer) els.timer.setAttribute('data-active', '0');
+    if (els.timerFill) els.timerFill.style.width = '0%';
+    text(els.timerLabel, '\u00a0');
     setTimerNoteVisible(false);
     setAvatarVisuals();
   }
@@ -941,8 +963,9 @@
     if (mayaBarTimer) clearInterval(mayaBarTimer);
     var bars = [];
     $all('[data-ptv4-maya-bars] span, [data-ptv4-maya-bars-right] span').forEach(function (el) { bars.push(el); });
+    setAvatarVisuals();
     mayaBarTimer = setInterval(function () {
-      if (cardState !== CARD.ASKING && !(testStarted && !oralQuestionsStarted && cardState === CARD.ASKING)) return;
+      if (cardState !== CARD.ASKING && cardState !== CARD.COMPLETE && !(testStarted && !oralQuestionsStarted && cardState === CARD.ASKING)) return;
       bars.forEach(function (bar, i) {
         var h = 6 + Math.round(Math.random() * 12);
         bar.style.height = h + 'px';
@@ -955,6 +978,7 @@
   function stopMayaBarMotion() {
     if (mayaBarTimer) clearInterval(mayaBarTimer);
     mayaBarTimer = null;
+    setAvatarVisuals();
   }
 
   function updateProgress(nextState) {
@@ -1018,6 +1042,48 @@
     setStatus('Tap Start Answer within 30 seconds.');
     setHintContent('Listen to the question carefully. Tap <strong>Start Answer</strong> and speak clearly.', true);
     startStartAnswerTimer();
+  }
+
+  function playMayaServerSpeech(speechText, logPurpose, onDone) {
+    onDone = onDone || function () {};
+    speechText = String(speechText || '').trim();
+    if (!speechText) {
+      onDone();
+      return Promise.resolve();
+    }
+
+    startMayaBarMotion();
+    logEvent('server_speech_start', logPurpose || 'speech', { chars: speechText.length });
+
+    var finished = false;
+    function finish(reason) {
+      if (finished) return;
+      finished = true;
+      if (fallbackTimer) clearTimeout(fallbackTimer);
+      stopMayaBarMotion();
+      logEvent('server_speech_complete', (logPurpose || 'speech') + ':' + (reason || 'done'));
+      onDone();
+    }
+
+    var fallbackTimer = window.setTimeout(function () {
+      finish('timeout');
+    }, estimateMayaSpeechMs(speechText) + 5000);
+
+    return apiJson('synthesize_feedback_speech', { speech_text: speechText })
+      .then(function (out) {
+        if (!out.audio_data_url) throw new Error('Missing synthesized audio');
+        return playPreparedAudio(out.audio_data_url, function () {
+          finish('audio');
+        });
+      })
+      .catch(function (err) {
+        logEvent('server_speech_failed', (logPurpose || 'speech') + ':' + (err.message || 'TTS failed'));
+        finish('error');
+      });
+  }
+
+  function playMayaFeedbackSpeech(speechText, onDone) {
+    return playMayaServerSpeech(speechText, 'feedback', onDone);
   }
 
   function playQuestionAudio() {
@@ -1098,7 +1164,6 @@
           conversation: 'none',
           input: [],
           output_modalities: ['audio'],
-          temperature: 0.6,
           instructions: buildRendererInstructions(script, purpose || '')
         }
       }));
@@ -1415,7 +1480,7 @@
       liveTranscript = '';
       hideFeedbackPanel();
       setTranscriptDisplay('idle');
-      speakScript('Please answer this question again in English.', 'question', function () {
+      playMayaServerSpeech('Please answer this question again in English.', 'retry_english', function () {
         onQuestionFinished();
       });
       return;
@@ -1431,7 +1496,7 @@
       liveTranscript = '';
       hideFeedbackPanel();
       setTranscriptDisplay('idle');
-      speakScript(clarificationQuestion, 'clarification', function () {
+      playMayaServerSpeech(clarificationQuestion, 'clarification', function () {
         setCardState(CARD.CLARIFICATION);
         setStatus('One clarification allowed. Tap Start Answer.');
         startStartAnswerTimer();
@@ -1443,20 +1508,12 @@
     var scoreLine = 'You scored ' + scorePct + ' percent for this question.';
     var feedbackSpeech = scoreLine + ' ' + feedback;
     setCardState(CARD.COMPLETE);
-    setStatus('Question complete. Listen to Maya’s feedback.');
-    ensureVoiceConnected()
-      .then(function () { return speakScript(feedbackSpeech, 'feedback', function () {
-        stopMayaBarMotion();
-        setCardState(CARD.COMPLETE);
-        feedbackSpeechDone = true;
-        setStatus('Tap Next Question when you are ready.');
-        syncButtons();
-      }); })
-      .catch(function (err) {
-        logEvent('feedback_speech_failed', err.message || 'Voice unavailable');
-        feedbackSpeechDone = true;
-        syncButtons();
-      });
+    stopTimer();
+    playMayaFeedbackSpeech(feedbackSpeech, function () {
+      setCardState(CARD.COMPLETE);
+      feedbackSpeechDone = true;
+      syncButtons();
+    });
 
     if (out.next_action === 'complete_test') {
       return apiJson('complete_test', {}).then(function (done) {
@@ -1478,8 +1535,8 @@
     var greeting = greetingScript();
     text(els.question, 'Progress Test ready');
     setTranscriptDisplay('preidle');
-    setHintContent('Listen to Maya, then tap <strong>Ready</strong>.', true);
-    setBeginTestVisible(true);
+    setHintContent('Listen to Maya, then tap <strong>Start Progress Test</strong>.', true);
+    setPrimaryActionVisible(true);
     setCardState(CARD.ASKING);
     startMayaBarMotion();
     logEvent('greeting_start');
@@ -1487,7 +1544,7 @@
     function finishGreeting() {
       greetingReady = true;
       setCardState(CARD.READY);
-      setHintContent('Tap <strong>Ready</strong> to begin Question 1.', true);
+      setHintContent('Tap <strong>Start Progress Test</strong> to begin Question 1.', true);
       logEvent('greeting_complete');
       syncButtons();
     }
@@ -1497,7 +1554,7 @@
       testStarted = false;
       setCardState(CARD.READY);
       greetingReady = false;
-      setHintContent('Maya audio could not start. Check your speakers and microphone permission, then tap <strong>Start</strong> again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Voice unavailable') + '</span>', true);
+      setHintContent('Maya audio could not start. Check your speakers and microphone permission, then tap <strong>Start Progress Test</strong> again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Voice unavailable') + '</span>', true);
       logEvent('greeting_failed', err.message || 'Voice unavailable');
       syncButtons();
     }
@@ -1522,7 +1579,6 @@
     greetingReady = true;
     awaitingNextQuestion = false;
     feedbackSpeechDone = false;
-    setBeginTestVisible(false);
     hideRetry();
     hideFeedbackPanel();
     renderCard(currentItem);
@@ -1578,14 +1634,24 @@
     });
   }
 
-  function onBeginTestClick() {
+  function onPrimaryActionClick() {
     unlockAudioPlayback();
+    var isRecording = cardState === CARD.LISTENING
+      || (mediaRecorder && mediaRecorder.state !== 'inactive');
+    if (isRecording) {
+      stopAnswerCapture(false);
+      return;
+    }
     if (!testStarted) {
       startTestFlow();
       return;
     }
     if (greetingReady && !oralQuestionsStarted) {
       beginOralQuestions();
+      return;
+    }
+    if (oralQuestionsStarted) {
+      startAnswerCapture();
     }
   }
 
@@ -1683,12 +1749,10 @@
     return out;
   }
 
-  if (els.beginTest) els.beginTest.addEventListener('click', onBeginTestClick);
-  if (els.startAnswer) els.startAnswer.addEventListener('click', startAnswerCapture);
-  if (els.stopAnswer) els.stopAnswer.addEventListener('click', function () { stopAnswerCapture(false); });
+  if (els.primaryAction) els.primaryAction.addEventListener('click', onPrimaryActionClick);
   if (els.replay) els.replay.addEventListener('click', playQuestionAudio);
   if (els.clarify) els.clarify.addEventListener('click', function () {
-    if (clarificationQuestion) speakScript(clarificationQuestion, 'clarification');
+    if (clarificationQuestion) playMayaServerSpeech(clarificationQuestion, 'clarification');
   });
   if (els.next) els.next.addEventListener('click', nextQuestion);
   if (els.myReport) els.myReport.addEventListener('click', function () {
