@@ -915,20 +915,26 @@
   background: #fbfcfe;
 }
 
-.ptv4-modal-tabs button {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #475569;
-  border-radius: 999px;
-  padding: 8px 14px;
-  font-weight: 800;
-  cursor: pointer;
+.ptv4-report-modal .app-btn {
+  min-height: 42px;
 }
 
-.ptv4-modal-tabs button.is-active {
-  background: #12355f;
-  border-color: #12355f;
-  color: #fff;
+.ptv4-modal-tabs .app-btn {
+  flex: 1 1 0;
+}
+
+.ptv4-report-expand-all.app-btn {
+  min-height: 36px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.ptv4-report-foot .app-btn {
+  min-width: 180px;
+}
+
+.ptv4-feedback-actions .app-btn {
+  min-width: 180px;
 }
 
 .ptv4-modal-body {
@@ -1159,14 +1165,7 @@
 }
 
 .ptv4-report-expand-all {
-  border: 1px solid #cbd5e1;
-  background: #fff;
-  color: #475569;
-  border-radius: 999px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
+  flex: 0 0 auto;
 }
 
 /* Question cards */

@@ -2131,7 +2131,12 @@
   $all('[data-ptv4-tab]').forEach(function (tabBtn) {
     tabBtn.addEventListener('click', function () {
       var tab = tabBtn.getAttribute('data-ptv4-tab');
-      $all('[data-ptv4-tab]').forEach(function (b) { b.classList.toggle('is-active', b === tabBtn); });
+      $all('[data-ptv4-tab]').forEach(function (b) {
+        var active = b === tabBtn;
+        b.classList.toggle('is-active', active);
+        b.classList.toggle('app-btn-primary', active);
+        b.classList.toggle('app-btn-secondary', !active);
+      });
       $all('[data-ptv4-tab-panel]').forEach(function (p) {
         p.classList.toggle('is-active', p.getAttribute('data-ptv4-tab-panel') === tab);
       });

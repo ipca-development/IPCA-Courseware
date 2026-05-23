@@ -167,7 +167,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=27">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=28">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -291,8 +291,8 @@ cw_header('Progress Test');
       <button class="ptv4-modal-close" type="button" data-ptv4-report-close aria-label="Close">&times;</button>
     </div>
     <div class="ptv4-modal-tabs">
-      <button type="button" class="is-active" data-ptv4-tab="score">Score Report</button>
-      <button type="button" data-ptv4-tab="feedback">Feedback</button>
+      <button type="button" class="app-btn app-btn-primary is-active" data-ptv4-tab="score">Score Report</button>
+      <button type="button" class="app-btn app-btn-secondary" data-ptv4-tab="feedback">Feedback</button>
     </div>
     <div class="ptv4-modal-body ptv4-report-modal-body">
       <div class="ptv4-tab-panel is-active" data-ptv4-tab-panel="score">
@@ -302,7 +302,7 @@ cw_header('Progress Test');
           <div class="ptv4-report-main">
             <div class="ptv4-report-section-head">
               <div class="ptv4-report-section-title">Question Results</div>
-              <button class="ptv4-report-expand-all" type="button" data-ptv4-report-expand-all>Expand All</button>
+              <button class="app-btn app-btn-secondary ptv4-report-expand-all" type="button" data-ptv4-report-expand-all>Expand All</button>
             </div>
             <div class="ptv4-report-questions" data-ptv4-report-questions></div>
             <div class="ptv4-report-metrics" data-ptv4-report-metrics hidden></div>
@@ -314,7 +314,7 @@ cw_header('Progress Test');
         </div>
         <div class="ptv4-report-focus" data-ptv4-report-focus></div>
         <div class="ptv4-report-foot">
-          <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-report-close-bottom>Close Report</button>
+          <button class="app-btn app-btn-secondary" type="button" data-ptv4-report-close-bottom>Close Report</button>
         </div>
       </div>
       <div class="ptv4-tab-panel" data-ptv4-tab-panel="feedback">
@@ -339,7 +339,7 @@ cw_header('Progress Test');
             <div>As a thank you, you’ll earn the <strong>Maya's Copilot</strong> badge when you send your feedback.</div>
           </div>
           <div class="ptv4-feedback-actions">
-            <button class="ptv4-btn primary" type="submit">Send Feedback</button>
+            <button class="app-btn app-btn-primary" type="submit">Send Feedback</button>
           </div>
           <div class="ptv4-feedback-sent" data-ptv4-feedback-sent hidden>
             <div class="ptv4-feedback-sent-title">Thank you for helping improve the IPCA AI training system.</div>
@@ -386,5 +386,5 @@ window.IPCAProgressTestV4Config = {
   progressTestPassPct: <?= (int)$progressTestPassPct ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=27"></script>
+<script src="/assets/progress_test_v4.js?v=28"></script>
 <?php cw_footer(); ?>
