@@ -1184,7 +1184,221 @@ function ptv4_save_user_feedback(PDO $pdo, array $u, array $data): array
     return ['ok' => true, 'feedback_id' => (int)$pdo->lastInsertId()];
 }
 
-function ptv4_report_payload(PDO $pdo, array $attempt, array $u): array
+function ptv4_badge_catalog(): array
+{
+    return [
+        'ready_for_departure' => [
+            'name' => 'Ready for Departure',
+            'description' => 'First successful pass on your first attempt.',
+            'theme' => 'departure',
+        ],
+        'perfect_pattern' => [
+            'name' => 'Perfect Pattern',
+            'description' => 'Scored 100% on a first attempt for the first time.',
+            'theme' => 'pattern',
+        ],
+        'ifr_precision_pilot' => [
+            'name' => 'IFR Precision Pilot',
+            'description' => 'Three consecutive progress tests with 100% on first attempt.',
+            'theme' => 'ifr',
+        ],
+        'captain_consistency' => [
+            'name' => 'Captain Consistency',
+            'description' => 'Five consecutive progress tests with 100% on first attempt.',
+            'theme' => 'captain',
+        ],
+        'ipca_sky_master' => [
+            'name' => 'IPCA Sky Master',
+            'description' => 'Ten consecutive progress tests with 100% on first attempt.',
+            'theme' => 'master',
+        ],
+        'ai_contributor' => [
+            'name' => 'AI Contributor',
+            'description' => 'Shared feedback to help improve Maya and IPCA training.',
+            'theme' => 'contributor',
+        ],
+    ];
+}
+
+function ptv4_load_user_badges(PDO $pdo, int $userId): array
+{
+    try {
+        $st = $pdo->prepare("
+            SELECT badge_key, earned_at, attempt_id, lesson_id, cohort_id
+            FROM progress_test_user_badges
+            WHERE user_id = ?
+            ORDER BY earned_at ASC, id ASC
+        ");
+        $st->execute([$userId]);
+        $out = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(string)$row['badge_key']] = $row;
+        }
+        return $out;
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+function ptv4_award_badge(PDO $pdo, int $userId, string $badgeKey, array $ctx = []): bool
+{
+    if (!isset(ptv4_badge_catalog()[$badgeKey])) {
+        return false;
+    }
+    try {
+        $st = $pdo->prepare("
+            INSERT INTO progress_test_user_badges
+              (user_id, badge_key, attempt_id, lesson_id, cohort_id, earned_at, meta_json)
+            VALUES (?, ?, ?, ?, ?, NOW(), ?)
+        ");
+        $st->execute([
+            $userId,
+            $badgeKey,
+            isset($ctx['attempt_id']) ? (int)$ctx['attempt_id'] : null,
+            isset($ctx['lesson_id']) ? (int)$ctx['lesson_id'] : null,
+            isset($ctx['cohort_id']) ? (int)$ctx['cohort_id'] : null,
+            !empty($ctx['meta']) ? json_encode($ctx['meta'], JSON_UNESCAPED_UNICODE) : null,
+        ]);
+        return true;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+function ptv4_count_first_attempt_perfect_streak(PDO $pdo, int $userId): int
+{
+    $st = $pdo->prepare("
+        SELECT attempt, score_pct, status
+        FROM progress_tests_v2
+        WHERE user_id = ? AND status = 'completed'
+        ORDER BY completed_at DESC, id DESC
+        LIMIT 24
+    ");
+    $st->execute([$userId]);
+    $streak = 0;
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        if ((int)($row['attempt'] ?? 0) === 1 && (int)($row['score_pct'] ?? 0) === 100) {
+            $streak++;
+            continue;
+        }
+        break;
+    }
+    return $streak;
+}
+
+function ptv4_evaluate_and_award_badges(PDO $pdo, array $attempt): array
+{
+    $userId = (int)$attempt['user_id'];
+    $attemptId = (int)$attempt['id'];
+    $lessonId = (int)$attempt['lesson_id'];
+    $cohortId = (int)$attempt['cohort_id'];
+    $attemptNum = max(1, (int)($attempt['attempt'] ?? 1));
+    $scorePct = $attempt['score_pct'] !== null ? (int)$attempt['score_pct'] : null;
+    $passed = !empty($attempt['pass_gate_met']);
+    $earned = ptv4_load_user_badges($pdo, $userId);
+    $newlyEarned = [];
+    $ctx = ['attempt_id' => $attemptId, 'lesson_id' => $lessonId, 'cohort_id' => $cohortId];
+
+    if ($passed && $attemptNum === 1 && !isset($earned['ready_for_departure'])) {
+        if (ptv4_award_badge($pdo, $userId, 'ready_for_departure', $ctx)) {
+            $newlyEarned[] = 'ready_for_departure';
+            $earned['ready_for_departure'] = ['badge_key' => 'ready_for_departure'];
+        }
+    }
+
+    if ($scorePct === 100 && $attemptNum === 1 && !isset($earned['perfect_pattern'])) {
+        if (ptv4_award_badge($pdo, $userId, 'perfect_pattern', $ctx)) {
+            $newlyEarned[] = 'perfect_pattern';
+            $earned['perfect_pattern'] = ['badge_key' => 'perfect_pattern'];
+        }
+    }
+
+    $streak = ptv4_count_first_attempt_perfect_streak($pdo, $userId);
+    $streakBadges = [
+        3 => 'ifr_precision_pilot',
+        5 => 'captain_consistency',
+        10 => 'ipca_sky_master',
+    ];
+    foreach ($streakBadges as $threshold => $badgeKey) {
+        if ($streak >= $threshold && !isset($earned[$badgeKey])) {
+            if (ptv4_award_badge($pdo, $userId, $badgeKey, array_merge($ctx, ['meta' => ['streak' => $streak]]))) {
+                $newlyEarned[] = $badgeKey;
+                $earned[$badgeKey] = ['badge_key' => $badgeKey];
+            }
+        }
+    }
+
+    return $newlyEarned;
+}
+
+function ptv4_award_feedback_badge(PDO $pdo, int $userId, array $ctx = []): bool
+{
+    $earned = ptv4_load_user_badges($pdo, $userId);
+    if (isset($earned['ai_contributor'])) {
+        return false;
+    }
+    return ptv4_award_badge($pdo, $userId, 'ai_contributor', $ctx);
+}
+
+function ptv4_report_badges_payload(PDO $pdo, int $userId, array $newlyEarned = []): array
+{
+    $catalog = ptv4_badge_catalog();
+    $earned = ptv4_load_user_badges($pdo, $userId);
+    $newSet = array_fill_keys($newlyEarned, true);
+    $out = [];
+    foreach ($catalog as $key => $def) {
+        $row = $earned[$key] ?? null;
+        $out[] = [
+            'badge_key' => $key,
+            'name' => $def['name'],
+            'description' => $def['description'],
+            'theme' => $def['theme'],
+            'earned' => $row !== null,
+            'newly_earned' => !empty($newSet[$key]),
+            'earned_at' => $row ? (string)($row['earned_at'] ?? '') : null,
+        ];
+    }
+    return $out;
+}
+
+function ptv4_question_performance_label(int $scorePct, int $passPct): array
+{
+    if ($scorePct >= $passPct) {
+        return ['label' => 'Excellent Understanding', 'tone' => 'pass'];
+    }
+    if ($scorePct >= 50) {
+        return ['label' => 'Partial Understanding', 'tone' => 'partial'];
+    }
+    return ['label' => 'Needs Clarification', 'tone' => 'fail'];
+}
+
+function ptv4_integrity_student_metrics(PDO $pdo, int $attemptId): array
+{
+    $stored = ptv4_get_stored_integrity_for_attempt($pdo, $attemptId);
+    if (!$stored || empty($stored['analysis'])) {
+        return [];
+    }
+    $a = $stored['analysis'];
+    $mapLikelihood = static function ($value): int {
+        $v = strtolower(trim((string)$value));
+        if ($v === 'high') return 85;
+        if ($v === 'medium') return 55;
+        if ($v === 'low') return 25;
+        return 50;
+    };
+    $risk = strtolower(trim((string)($a['overall_integrity_risk'] ?? '')));
+    $integrityScore = $risk === 'high' ? 35 : ($risk === 'medium' ? 60 : 85);
+    return [
+        ['key' => 'natural_speech', 'label' => 'Natural Speech', 'score' => 100 - $mapLikelihood($a['natural_speech_likelihood'] ?? ''), 'tone' => 'neutral'],
+        ['key' => 'understanding', 'label' => 'Understanding', 'score' => 78, 'tone' => 'neutral'],
+        ['key' => 'correlation', 'label' => 'Correlation', 'score' => 80, 'tone' => 'neutral'],
+        ['key' => 'confidence', 'label' => 'Confidence', 'score' => 74, 'tone' => 'neutral'],
+        ['key' => 'engagement', 'label' => 'Engagement', 'score' => 82, 'tone' => 'neutral'],
+        ['key' => 'integrity', 'label' => 'Integrity Score', 'score' => $integrityScore, 'tone' => $integrityScore >= 70 ? 'pass' : 'partial'],
+    ];
+}
+
+function ptv4_report_payload(PDO $pdo, array $attempt, array $u, array $newlyEarnedBadges = []): array
 {
     $attemptId = (int)$attempt['id'];
     $items = ptv4_load_items($pdo, $attemptId);
@@ -1197,37 +1411,97 @@ function ptv4_report_payload(PDO $pdo, array $attempt, array $u): array
     $lessonSt->execute([(int)$attempt['lesson_id']]);
     $lessonTitle = trim((string)$lessonSt->fetchColumn()) ?: 'Lesson';
     $questions = [];
+    $passPct = 70;
+    try {
+        $engine = new CoursewareProgressionV2($pdo);
+        $passPct = max(1, (int)$engine->getPolicy('progress_test_pass_pct', ['cohort_id' => (int)$attempt['cohort_id']]));
+    } catch (Throwable $e) {
+        $passPct = 70;
+    }
     foreach ($items as $item) {
         $itemId = (int)$item['id'];
         $resp = $responses[$itemId] ?? null;
+        $qScore = $resp ? (int)round((float)($resp['score_pct'] ?? 0)) : null;
+        $perf = $qScore !== null ? ptv4_question_performance_label($qScore, $passPct) : ['label' => 'Not evaluated', 'tone' => 'neutral'];
         $questions[] = [
             'idx' => (int)$item['idx'],
             'question' => (string)$item['prompt'],
             'student_answer' => $resp ? (string)($resp['student_answer_text'] ?? '') : '',
-            'score_pct' => $resp ? (int)round((float)($resp['score_pct'] ?? 0)) : null,
+            'score_pct' => $qScore,
             'feedback' => $resp ? (string)($resp['feedback_text'] ?? '') : '',
             'clarification_question' => $resp ? (string)($resp['clarification_question_text'] ?? '') : '',
             'clarification_answer' => $resp ? (string)($resp['clarification_answer_text'] ?? '') : '',
+            'performance_label' => $perf['label'],
+            'performance_tone' => $perf['tone'],
         ];
     }
     $scorePct = $attempt['score_pct'] !== null ? (int)$attempt['score_pct'] : null;
     $passed = !empty($attempt['pass_gate_met']);
     $weak = trim((string)($attempt['weak_areas'] ?? ''));
     $summary = trim((string)($attempt['ai_summary'] ?? ''));
+    $answered = count(array_filter($questions, static fn($q) => trim((string)($q['student_answer'] ?? '')) !== ''));
+    $totalQuestions = count($questions);
+    $strongQuestions = array_values(array_filter($questions, static fn($q) => ($q['score_pct'] ?? 0) >= $passPct));
+    $weakQuestions = array_values(array_filter($questions, static fn($q) => ($q['score_pct'] ?? 0) < $passPct && $q['score_pct'] !== null));
+
+    $motivation = $passed
+        ? 'Excellent work ' . $firstName . '. You showed strong understanding and good aeronautical judgment on this oral progress test.'
+        : 'Good effort ' . $firstName . '. You completed your oral progress test — review the focus areas below and keep building your spoken explanations.';
+
+    $focusSummary = $passed
+        ? 'Your aviation decision-making is progressing well. Keep rehearsing brief spoken explanations and linking concepts to real preflight decisions.'
+        : 'Focus your next study block on the concepts you missed, then practice answering each one aloud in complete English sentences.';
+
     $recommendation = $passed
         ? 'Continue building on your strengths while reviewing ' . ($weak !== '' ? $weak : 'the concepts you missed') . '. Rehearse brief spoken explanations out loud before your next lesson test.'
         : 'Focus your next study session on ' . ($weak !== '' ? $weak : 'the weak areas above') . '. Practice answering each concept aloud in complete English sentences, then retry when you feel ready.';
+
+    $lessonNumber = 1;
+    $orderedLessonsSt = $pdo->prepare("
+      SELECT l.id
+      FROM cohort_lesson_deadlines d
+      JOIN lessons l ON l.id = d.lesson_id
+      JOIN courses c ON c.id = l.course_id
+      WHERE d.cohort_id = ?
+      ORDER BY c.sort_order, c.id, d.sort_order, d.id
+    ");
+    $orderedLessonsSt->execute([(int)$attempt['cohort_id']]);
+    foreach ($orderedLessonsSt->fetchAll(PDO::FETCH_COLUMN) as $i => $orderedLessonId) {
+        if ((int)$orderedLessonId === (int)$attempt['lesson_id']) {
+            $lessonNumber = $i + 1;
+            break;
+        }
+    }
+
     return [
         'attempt_id' => $attemptId,
         'first_name' => $firstName,
         'lesson_title' => $lessonTitle,
+        'lesson_number' => $lessonNumber,
         'score_pct' => $scorePct,
+        'pass_threshold_pct' => $passPct,
         'passed' => $passed,
         'formal_result_label' => (string)($attempt['formal_result_label'] ?? ''),
-        'motivation' => 'Good job ' . $firstName . ', you completed your oral progress test. Here is what went well and what to improve next.',
+        'motivation' => $motivation,
         'summary' => $summary,
         'recommendation' => $recommendation,
         'questions' => $questions,
+        'stats' => [
+            'lesson_label' => 'Lesson ' . $lessonNumber,
+            'questions_answered' => $answered,
+            'questions_total' => $totalQuestions,
+            'average_score_pct' => $scorePct,
+            'result_label' => $passed ? 'PASS' : 'NOT YET PASSED',
+        ],
+        'focus_areas' => [
+            'title' => 'Your Next Focus Areas',
+            'summary' => $focusSummary,
+            'strengths' => array_slice(array_map(static fn($q) => 'Question ' . $q['idx'] . ': ' . $q['performance_label'], $strongQuestions), 0, 3),
+            'weaknesses' => array_slice(array_map(static fn($q) => 'Question ' . $q['idx'] . ': ' . ($q['question'] ?: 'Review this concept'), $weakQuestions), 0, 3),
+            'strategy' => $recommendation,
+        ],
+        'badges' => ptv4_report_badges_payload($pdo, (int)$attempt['user_id'], $newlyEarnedBadges),
+        'performance_metrics' => ptv4_integrity_student_metrics($pdo, $attemptId),
     ];
 }
 

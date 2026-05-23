@@ -162,7 +162,7 @@ if ($prepBlocked) {
 
 cw_header('Progress Test');
 ?>
-<link rel="stylesheet" href="/assets/progress_test_v4.css?v=20">
+<link rel="stylesheet" href="/assets/progress_test_v4.css?v=25">
 
 <div class="ptv4-page" data-ptv4-root data-maya-speaking="0" data-student-answering="0" data-maya-audio-active="0" data-student-audio-active="0">
   <section class="ptv4-hero" aria-label="Progress test header">
@@ -263,7 +263,7 @@ cw_header('Progress Test');
       </div>
 
       <div class="ptv4-card-actions" aria-label="Progress test controls">
-        <button class="app-btn app-btn-primary ptv4-action-primary" type="button" data-ptv4-primary-action disabled>Start Progress Test</button>
+        <button class="app-btn app-btn-primary ptv4-action-primary" type="button" data-ptv4-primary-action disabled>Ready</button>
         <button class="app-btn app-btn-secondary ptv4-action-next ptv4-btn-muted" type="button" data-ptv4-next disabled>Next Question</button>
         <button class="app-btn app-btn-secondary ptv4-action-replay ptv4-btn-muted" type="button" data-ptv4-replay disabled>Replay Question</button>
         <button class="app-btn app-btn-secondary ptv4-action-clarify ptv4-btn-muted" type="button" data-ptv4-clarify disabled>Request Clarification</button>
@@ -274,7 +274,7 @@ cw_header('Progress Test');
   </section>
 
 <div class="ptv4-modal-backdrop" data-ptv4-report-modal hidden>
-  <div class="ptv4-modal" role="dialog" aria-modal="true" aria-label="Progress test report">
+  <div class="ptv4-modal ptv4-report-modal" role="dialog" aria-modal="true" aria-label="Progress test report">
     <div class="ptv4-modal-head">
       <div class="ptv4-modal-title-wrap">
         <img src="/assets/avatars/maya.png" alt="" class="ptv4-modal-maya">
@@ -289,25 +289,60 @@ cw_header('Progress Test');
       <button type="button" class="is-active" data-ptv4-tab="score">Score Report</button>
       <button type="button" data-ptv4-tab="feedback">Feedback</button>
     </div>
-    <div class="ptv4-modal-body">
+    <div class="ptv4-modal-body ptv4-report-modal-body">
       <div class="ptv4-tab-panel is-active" data-ptv4-tab-panel="score">
-        <div class="ptv4-report-motivation" data-ptv4-report-motivation></div>
-        <div class="ptv4-report-summary" data-ptv4-report-summary></div>
-        <div class="ptv4-report-questions" data-ptv4-report-questions></div>
-        <div class="ptv4-report-recommendation" data-ptv4-report-recommendation></div>
+        <div class="ptv4-report-hero" data-ptv4-report-hero></div>
+        <div class="ptv4-report-stats" data-ptv4-report-stats></div>
+        <div class="ptv4-report-grid">
+          <div class="ptv4-report-main">
+            <div class="ptv4-report-section-head">
+              <div class="ptv4-report-section-title">Question Results</div>
+              <button class="ptv4-report-expand-all" type="button" data-ptv4-report-expand-all>Expand All</button>
+            </div>
+            <div class="ptv4-report-questions" data-ptv4-report-questions></div>
+            <div class="ptv4-report-metrics" data-ptv4-report-metrics hidden></div>
+          </div>
+          <aside class="ptv4-report-side">
+            <div class="ptv4-report-section-title">Achievements Unlocked</div>
+            <div class="ptv4-report-badges" data-ptv4-report-badges></div>
+          </aside>
+        </div>
+        <div class="ptv4-report-focus" data-ptv4-report-focus></div>
+        <div class="ptv4-report-foot">
+          <button class="ptv4-btn ptv4-btn-outline" type="button" data-ptv4-report-close-bottom>Close Report</button>
+        </div>
       </div>
       <div class="ptv4-tab-panel" data-ptv4-tab-panel="feedback">
-        <form data-ptv4-feedback-form>
+        <div class="ptv4-feedback-hero">
+          <img src="/assets/avatars/maya.png" alt="" class="ptv4-feedback-hero-maya">
+          <div>
+            <div class="ptv4-feedback-hero-title">Help Improve Maya</div>
+            <div class="ptv4-feedback-hero-text">Your feedback helps me become a better instructor for future pilots. Thank you for helping improve the IPCA AI training system.</div>
+          </div>
+        </div>
+        <form data-ptv4-feedback-form class="ptv4-feedback-form">
           <div class="ptv4-feedback-q" data-ptv4-fb-q="maya_clear"><div class="ptv4-feedback-q-label">Maya’s questions were clear.</div><div class="ptv4-feedback-q-options"></div></div>
           <div class="ptv4-feedback-q" data-ptv4-fb-q="audio_quality"><div class="ptv4-feedback-q-label">The audio quality was good.</div><div class="ptv4-feedback-q-options"></div></div>
           <div class="ptv4-feedback-q" data-ptv4-fb-q="felt_fair"><div class="ptv4-feedback-q-label">The test felt fair.</div><div class="ptv4-feedback-q-options"></div></div>
           <div class="ptv4-feedback-q" data-ptv4-fb-q="recording_worked"><div class="ptv4-feedback-q-label">The answer recording worked well.</div><div class="ptv4-feedback-q-options"></div></div>
           <div class="ptv4-feedback-q" data-ptv4-fb-q="feedback_helped"><div class="ptv4-feedback-q-label">Maya’s feedback helped me understand what to improve.</div><div class="ptv4-feedback-q-options"></div></div>
           <div class="ptv4-feedback-q" data-ptv4-fb-q="felt_motivating"><div class="ptv4-feedback-q-label">The Progress Test felt motivating.</div><div class="ptv4-feedback-q-options"></div></div>
-          <div class="ptv4-feedback-q" data-ptv4-fb-q="went_wrong"><div class="ptv4-feedback-q-label">Did anything go wrong?</div><div class="ptv4-feedback-q-options" data-ptv4-fb-issue></div></div>
-          <label class="ptv4-feedback-free">Anything else you want to tell us?<textarea rows="3" data-ptv4-fb-free></textarea></label>
-          <button class="ptv4-btn primary ptv4-btn-block" type="submit">Send Feedback</button>
-          <div class="ptv4-feedback-sent" data-ptv4-feedback-sent hidden>Thank you — your feedback was sent.</div>
+          <div class="ptv4-feedback-q ptv4-feedback-q-issue" data-ptv4-fb-q="went_wrong"><div class="ptv4-feedback-q-label">Did anything go wrong?</div><div class="ptv4-feedback-q-options" data-ptv4-fb-issue></div></div>
+          <label class="ptv4-feedback-free">Anything else you want to tell us?<textarea rows="3" data-ptv4-fb-free maxlength="500"></textarea><span class="ptv4-feedback-char-count" data-ptv4-fb-count>0 / 500</span></label>
+          <div class="ptv4-feedback-reward" data-ptv4-feedback-reward>
+            <div class="ptv4-feedback-reward-badge" aria-hidden="true">AI</div>
+            <div>As a thank you, you’ll earn the <strong>AI Contributor</strong> badge when you send your feedback.</div>
+          </div>
+          <div class="ptv4-feedback-actions">
+            <button class="ptv4-btn primary" type="submit">Send Feedback</button>
+          </div>
+          <div class="ptv4-feedback-sent" data-ptv4-feedback-sent hidden>
+            <div class="ptv4-feedback-sent-title">Thank you for helping improve the IPCA AI training system.</div>
+            <div class="ptv4-feedback-sent-badge" data-ptv4-feedback-sent-badge hidden>
+              <span class="ptv4-badge-emblem ptv4-badge-emblem-contributor">AI</span>
+              <span>AI Contributor badge unlocked</span>
+            </div>
+          </div>
         </form>
       </div>
     </div>
@@ -345,5 +380,5 @@ window.IPCAProgressTestV4Config = {
   progressTestPassPct: <?= (int)$progressTestPassPct ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=21"></script>
+<script src="/assets/progress_test_v4.js?v=25"></script>
 <?php cw_footer(); ?>

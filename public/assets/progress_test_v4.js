@@ -6,6 +6,7 @@
   var START_ANSWER_MS = 30000;
   var RECORDING_MS = 45000;
   var CHUNK_MS = 1500;
+  var MIN_RECORDING_MS = 2500;
   var TRANSCRIPT = {
     preidle: 'Your spoken answer will appear here after you stop recording.',
     idle: 'Your spoken answer will appear here after you stop recording.',
@@ -67,13 +68,20 @@
     end: $('[data-ptv4-end]'),
     reportModal: $('[data-ptv4-report-modal]'),
     reportClose: $('[data-ptv4-report-close]'),
+    reportCloseBottom: $('[data-ptv4-report-close-bottom]'),
     reportSubtitle: $('[data-ptv4-report-subtitle]'),
-    reportMotivation: $('[data-ptv4-report-motivation]'),
-    reportSummary: $('[data-ptv4-report-summary]'),
+    reportHero: $('[data-ptv4-report-hero]'),
+    reportStats: $('[data-ptv4-report-stats]'),
     reportQuestions: $('[data-ptv4-report-questions]'),
-    reportRecommendation: $('[data-ptv4-report-recommendation]'),
+    reportBadges: $('[data-ptv4-report-badges]'),
+    reportFocus: $('[data-ptv4-report-focus]'),
+    reportMetrics: $('[data-ptv4-report-metrics]'),
+    reportExpandAll: $('[data-ptv4-report-expand-all]'),
     feedbackForm: $('[data-ptv4-feedback-form]'),
     feedbackSent: $('[data-ptv4-feedback-sent]'),
+    feedbackSentBadge: $('[data-ptv4-feedback-sent-badge]'),
+    feedbackReward: $('[data-ptv4-feedback-reward]'),
+    feedbackCount: $('[data-ptv4-fb-count]'),
     debugModal: $('[data-ptv4-debug-modal]'),
     debugClose: $('[data-ptv4-debug-close]'),
     debugPin: $('[data-ptv4-debug-pin]'),
@@ -119,6 +127,7 @@
   var timerDeadline = 0;
   var timerTotalMs = 0;
   var timerMode = '';
+  var pausedAnswerTimer = null;
   var audioCtx = null;
   var micAnalyser = null;
   var micAnalyserRaf = 0;
@@ -409,7 +418,7 @@
       var oscillator = audioCtx.createOscillator();
       var gain = audioCtx.createGain();
       oscillator.type = 'sine';
-      oscillator.frequency.value = kind === 'start' ? 880 : 330;
+      oscillator.frequency.value = kind === 'start' ? 880 : (kind === 'stop' ? 220 : 330);
       gain.gain.setValueAtTime(0.001, audioCtx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.16, audioCtx.currentTime + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.5);
@@ -418,6 +427,74 @@
       oscillator.start();
       oscillator.stop(audioCtx.currentTime + 0.52);
     } catch (e) {}
+  }
+
+  function isMayaSpeaking() {
+    return !!mayaBarTimer
+      || cardState === CARD.ASKING
+      || (questionAudio && !questionAudio.paused && !questionAudio.ended && questionAudio.currentTime > 0);
+  }
+
+  function pauseAnswerTimerIfRunning() {
+    if (timerMode === 'start' && timerDeadline > Date.now()) {
+      pausedAnswerTimer = { deadline: timerDeadline, totalMs: timerTotalMs };
+      return;
+    }
+    pausedAnswerTimer = null;
+  }
+
+  function restoreAnswerTimerIfAny() {
+    if (pausedAnswerTimer && pausedAnswerTimer.deadline > Date.now()) {
+      startTimer('start', pausedAnswerTimer.totalMs, 'Time to answer', function () {
+        finalizeWithoutRecording(true);
+      }, pausedAnswerTimer.deadline);
+    } else if (cardState === CARD.READY || cardState === CARD.CLARIFICATION) {
+      startStartAnswerTimer();
+    }
+    pausedAnswerTimer = null;
+  }
+
+  function abortActiveRecording() {
+    return new Promise(function (resolve) {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+        stopRecordStream();
+        mediaRecorder = null;
+        resolve();
+        return;
+      }
+      mediaRecorder.onstop = function () {
+        stopRecordStream();
+        mediaRecorder = null;
+        resolve();
+      };
+      try {
+        if (mediaRecorder.state === 'recording') mediaRecorder.requestData();
+        mediaRecorder.stop();
+      } catch (e) {
+        stopRecordStream();
+        mediaRecorder = null;
+        resolve();
+      }
+    });
+  }
+
+  function cancelAnswerCapture(reason) {
+    return abortActiveRecording().then(function () {
+      stopStudentAnalyser();
+      setRecordHintVisible(false);
+      recordingStartedAt = 0;
+      chunkIndex = 0;
+      hasRecordedAudio = false;
+      chunksReceived = 0;
+      chunksUploaded = 0;
+      chunkUploadChain = Promise.resolve();
+      setTranscriptDisplay('idle');
+      setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.READY);
+      restoreAnswerTimerIfAny();
+      setHintContent(reason || 'Your answer was not submitted. Tap <strong>Start Answer</strong> when you are ready.', true);
+      logEvent('recording_cancelled', reason || 'too_short');
+      syncButtons();
+    });
   }
 
   function waitForDataChannel(timeoutMs) {
@@ -616,7 +693,7 @@
 
   function greetingScript() {
     var name = cfg.firstName || 'there';
-    return timeOfDaySalutation() + ' ' + name + ', click Start Progress Test when you want to begin your progress test.';
+    return timeOfDaySalutation() + ' ' + name + ', click Ready when you want to start your progress test.';
   }
 
   function renderIdleLayout() {
@@ -629,11 +706,11 @@
     }
     setTranscriptDisplay('preidle');
     setCardState(CARD.READY);
-    setHintContent('Tap <strong>Start Progress Test</strong> when you are ready. Maya will greet you before the first question.', true);
+    setHintContent('Tap <strong>Ready</strong> when you are prepared. Maya will greet you before the first question.', true);
     setRecordHintVisible(false);
     hideFeedbackPanel();
     hideRetry();
-    if (els.primaryAction) text(els.primaryAction, 'Start Progress Test');
+    if (els.primaryAction) text(els.primaryAction, 'Ready');
     if (els.timer) els.timer.setAttribute('data-active', '0');
     text(els.timerLabel, '\u00a0');
     setTimerNoteVisible(false);
@@ -677,7 +754,7 @@
   }
 
   function setAvatarVisuals() {
-    var mayaSpeaking = cardState === CARD.ASKING || !!mayaBarTimer
+    var mayaSpeaking = isMayaSpeaking()
       || (awaitingNextQuestion && cardState === CARD.COMPLETE && !feedbackSpeechDone);
     var studentActive = cardState === CARD.LISTENING || cardState === CARD.CLARIFICATION;
     var studentListening = testStarted && oralQuestionsStarted && cardState === CARD.READY && timerMode === 'start';
@@ -724,6 +801,7 @@
     var closed = isAttemptClosed(state);
     var retryVisible = els.retry && els.retry.classList.contains('is-visible');
     var feedbackPending = awaitingNextQuestion && cardState === CARD.COMPLETE && !feedbackSpeechDone;
+    var mayaSpeaking = isMayaSpeaking();
     var isRecording = cardState === CARD.LISTENING
       || (mediaRecorder && mediaRecorder.state !== 'inactive');
     if (els.primaryAction) {
@@ -736,10 +814,10 @@
       }
       var canAnswer = oralQuestionsStarted
         && (cardState === CARD.READY || cardState === CARD.CLARIFICATION || retryVisible)
-        && !isRecording;
+        && !isRecording && !mayaSpeaking;
       var canStop = isRecording;
       var primaryEnabled = false;
-      var primaryLabel = 'Start Progress Test';
+      var primaryLabel = 'Ready';
       if (canStop) {
         primaryEnabled = true;
         primaryLabel = 'Stop Answer';
@@ -748,10 +826,10 @@
         primaryLabel = 'Start Answer';
       } else if (!testStarted && canBegin) {
         primaryEnabled = true;
-        primaryLabel = 'Start Progress Test';
+        primaryLabel = 'Ready';
       } else if (testStarted && greetingReady && !oralQuestionsStarted) {
         primaryEnabled = true;
-        primaryLabel = 'Start Progress Test';
+        primaryLabel = 'Ready';
       } else if (oralQuestionsStarted) {
         primaryLabel = 'Start Answer';
       }
@@ -773,7 +851,8 @@
       els.replay.classList.toggle('ptv4-btn-muted', !replayEnabled);
     }
     if (els.clarify) {
-      var clarifyEnabled = clarificationPending && cardState === CARD.CLARIFICATION && !!clarificationQuestion;
+      var clarifyEnabled = clarificationPending && cardState === CARD.CLARIFICATION
+        && !!clarificationQuestion && !mayaSpeaking && !isRecording;
       els.clarify.disabled = !clarifyEnabled;
       els.clarify.classList.toggle('ptv4-btn-muted', !clarifyEnabled);
     }
@@ -923,11 +1002,13 @@
     return mm + ':' + ss + ' / ' + tmm + ':' + tss;
   }
 
-  function startTimer(mode, totalMs, labelPrefix, onExpire) {
+  function startTimer(mode, totalMs, labelPrefix, onExpire, existingDeadline) {
     stopTimer();
     timerMode = mode;
     timerTotalMs = totalMs;
-    timerDeadline = Date.now() + totalMs;
+    timerDeadline = existingDeadline && existingDeadline > Date.now()
+      ? existingDeadline
+      : Date.now() + totalMs;
     if (els.timer) els.timer.setAttribute('data-active', '1');
     setTimerNoteVisible(mode === 'start');
     setAvatarVisuals();
@@ -1333,7 +1414,9 @@
     if (!currentItem || !micStream) return;
     if (cardState === CARD.LISTENING || cardState === CARD.EVALUATING) return;
     if (mediaRecorder && mediaRecorder.state !== 'inactive') return;
+    if (isMayaSpeaking()) return;
     hideRetry();
+    pauseAnswerTimerIfRunning();
     stopTimer();
     stopRecordStream();
     clarificationMode = cardState === CARD.CLARIFICATION || clarificationPending;
@@ -1497,9 +1580,15 @@
   }
 
   function stopAnswerCapture(timedOutRecording) {
+    if (!timedOutRecording && recordingStartedAt > 0 && getRecordingMs() < MIN_RECORDING_MS) {
+      cancelAnswerCapture('Please speak for at least a few seconds before stopping. Your answer was not submitted.');
+      return;
+    }
+    playBeep('stop');
     stopTimer();
     stopStudentAnalyser();
     setRecordHintVisible(false);
+    pausedAnswerTimer = null;
     submitAnswerEvaluation({
       evalStatusMessage: timedOutRecording ? 'Recording limit reached. Evaluating...' : 'Evaluating your answer...',
       originalAnswer: originalAnswer,
@@ -1546,6 +1635,7 @@
       hideFeedbackPanel();
       setTranscriptDisplay('idle');
       finishProcessingProgress('Processing your answer');
+      pausedAnswerTimer = null;
       playMayaServerSpeech(clarificationQuestion, 'clarification', function () {
         setCardState(CARD.CLARIFICATION);
         setStatus('One clarification allowed. Tap Start Answer.');
@@ -1592,7 +1682,7 @@
     var greeting = greetingScript();
     text(els.question, 'Progress Test ready');
     setTranscriptDisplay('preidle');
-    setHintContent('Listen to Maya, then tap <strong>Start Progress Test</strong>.', true);
+    setHintContent('Listen to Maya, then tap <strong>Ready</strong>.', true);
     setCardState(CARD.ASKING);
     startMayaBarMotion();
     logEvent('greeting_start');
@@ -1600,7 +1690,7 @@
     function finishGreeting() {
       greetingReady = true;
       setCardState(CARD.READY);
-      setHintContent('Tap <strong>Start Progress Test</strong> to begin Question 1.', true);
+      setHintContent('Tap <strong>Ready</strong> to begin Question 1.', true);
       logEvent('greeting_complete');
       syncButtons();
     }
@@ -1610,7 +1700,7 @@
       testStarted = false;
       setCardState(CARD.READY);
       greetingReady = false;
-      setHintContent('Maya audio could not start. Check your speakers and microphone permission, then tap <strong>Start Progress Test</strong> again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Voice unavailable') + '</span>', true);
+      setHintContent('Maya audio could not start. Check your speakers and microphone permission, then tap <strong>Ready</strong> again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Voice unavailable') + '</span>', true);
       logEvent('greeting_failed', err.message || 'Voice unavailable');
       syncButtons();
     }
@@ -1706,7 +1796,7 @@
       beginOralQuestions();
       return;
     }
-    if (oralQuestionsStarted) {
+    if (oralQuestionsStarted && !isMayaSpeaking()) {
       startAnswerCapture();
     }
   }
@@ -1739,27 +1829,188 @@
     });
   }
 
+  function escapeHtml(str) {
+    return String(str || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function reportScoreTone(scorePct, passPct) {
+    var pass = parseInt(passPct, 10) || 70;
+    var score = parseInt(scorePct, 10);
+    if (isNaN(score)) return 'partial';
+    if (score >= pass) return 'pass';
+    if (score >= 50) return 'partial';
+    return 'fail';
+  }
+
+  function studentInitials(name) {
+    var parts = String(name || 'S').trim().split(/\s+/).filter(Boolean);
+    if (!parts.length) return 'S';
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+    return (parts[0][0] + parts[1][0]).toUpperCase();
+  }
+
+  function badgeEmblemClass(theme) {
+    return 'ptv4-badge-emblem ptv4-badge-emblem-' + (theme || 'departure');
+  }
+
+  function renderScoreRing(scorePct, passPct, passed) {
+    var score = scorePct == null ? 0 : parseInt(scorePct, 10);
+    var tone = reportScoreTone(score, passPct);
+    var pct = clamp(score, 0, 100);
+    var radius = 46;
+    var circumference = 2 * Math.PI * radius;
+    var offset = circumference - ((pct / 100) * circumference);
+    return ''
+      + '<div class="ptv4-report-score-ring">'
+      + '<svg viewBox="0 0 118 118" aria-hidden="true">'
+      + '<circle class="ptv4-report-score-ring-bg" cx="59" cy="59" r="' + radius + '"></circle>'
+      + '<circle class="ptv4-report-score-ring-fill" data-tone="' + tone + '" cx="59" cy="59" r="' + radius + '" stroke-dasharray="' + circumference.toFixed(2) + '" stroke-dashoffset="' + offset.toFixed(2) + '"></circle>'
+      + '</svg>'
+      + '<div class="ptv4-report-score-center">'
+      + '<div class="ptv4-report-score-value">' + (scorePct == null ? '--' : score + '%') + '</div>'
+      + '<div class="ptv4-report-score-label">' + (passed ? 'PASS' : 'RESULT') + '</div>'
+      + '</div></div>'
+      + '<div class="ptv4-report-score-caption">Overall Score</div>';
+  }
+
+  function renderReportHero(report) {
+    if (!els.reportHero) return;
+    var firstName = report.first_name || cfg.firstName || 'Student';
+    els.reportHero.innerHTML = ''
+      + '<div class="ptv4-report-hero-maya">'
+      + '<img src="/assets/avatars/maya.png" alt="Maya">'
+      + '<div class="ptv4-report-hero-quote">' + escapeHtml(report.motivation || '') + '</div>'
+      + '</div>'
+      + '<div>' + renderScoreRing(report.score_pct, report.pass_threshold_pct, !!report.passed) + '</div>'
+      + '<div class="ptv4-report-hero-student">'
+      + '<div class="ptv4-report-student-avatar">' + escapeHtml(studentInitials(firstName)) + '</div>'
+      + '<div class="ptv4-report-student-name">' + escapeHtml(firstName) + '</div>'
+      + '</div>';
+  }
+
+  function renderReportStats(report) {
+    if (!els.reportStats) return;
+    var stats = report.stats || {};
+    var resultTone = report.passed ? 'pass' : '';
+    els.reportStats.innerHTML = [
+      { label: 'Lesson', value: stats.lesson_label || ('Lesson ' + (report.lesson_number || '')) },
+      { label: 'Questions', value: (stats.questions_answered == null ? '0' : stats.questions_answered) + '/' + (stats.questions_total || (report.questions || []).length) + ' Answered' },
+      { label: 'Average Score', value: (stats.average_score_pct == null ? '--' : stats.average_score_pct + '%') },
+      { label: 'Result', value: stats.result_label || (report.passed ? 'PASS' : 'NOT YET PASSED'), tone: resultTone }
+    ].map(function (item) {
+      return '<div class="ptv4-report-stat"><div class="ptv4-report-stat-label">' + escapeHtml(item.label) + '</div>'
+        + '<div class="ptv4-report-stat-value"' + (item.tone ? ' data-tone="' + item.tone + '"' : '') + '>' + escapeHtml(item.value) + '</div></div>';
+    }).join('');
+  }
+
+  function renderReportQuestionCard(q, passPct, firstName) {
+    var score = q.score_pct == null ? 0 : parseInt(q.score_pct, 10);
+    var tone = q.performance_tone || reportScoreTone(score, passPct);
+    var label = q.performance_label || 'Performance';
+    var card = document.createElement('div');
+    card.className = 'ptv4-report-qcard';
+    card.innerHTML = ''
+      + '<button class="ptv4-report-qcard-head" type="button" aria-expanded="false">'
+      + '<span class="ptv4-report-qcard-title">Question ' + q.idx + '</span>'
+      + '<span class="ptv4-report-qcard-score" data-tone="' + tone + '">' + (q.score_pct == null ? '--' : score + '%') + '</span>'
+      + '<span class="ptv4-report-qbar"><span class="ptv4-report-qbar-fill" data-tone="' + tone + '" style="width:' + clamp(score, 0, 100) + '%"></span></span>'
+      + '<span class="ptv4-report-qcard-pill" data-tone="' + tone + '">' + escapeHtml(label) + '</span>'
+      + '<span class="ptv4-report-qcard-chevron" aria-hidden="true">▾</span>'
+      + '</button>'
+      + '<div class="ptv4-report-qcard-body">'
+      + '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><span>Question</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.question || '') + '</div></div>'
+      + '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><span class="ptv4-report-mini-avatar">' + escapeHtml(studentInitials(firstName)) + '</span><span>Your Answer</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.student_answer || '—') + '</div></div>'
+      + (q.clarification_question ? '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><img src="/assets/avatars/maya.png" alt=""><span>Clarification</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.clarification_question) + '</div></div>' : '')
+      + (q.clarification_answer ? '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><span class="ptv4-report-mini-avatar">' + escapeHtml(studentInitials(firstName)) + '</span><span>Clarification Answer</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.clarification_answer) + '</div></div>' : '')
+      + '<div class="ptv4-report-qblock"><div class="ptv4-report-qblock-head"><img src="/assets/avatars/maya.png" alt=""><span>Maya Feedback</span></div><div class="ptv4-report-qblock-text">' + escapeHtml(q.feedback || '') + '</div></div>'
+      + '</div>';
+    var head = card.querySelector('.ptv4-report-qcard-head');
+    if (head) {
+      head.addEventListener('click', function () {
+        var open = card.classList.toggle('is-open');
+        head.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+    }
+    return card;
+  }
+
+  function setAllQuestionCards(open) {
+    if (!els.reportQuestions) return;
+    els.reportQuestions.querySelectorAll('.ptv4-report-qcard').forEach(function (card) {
+      card.classList.toggle('is-open', !!open);
+      var head = card.querySelector('.ptv4-report-qcard-head');
+      if (head) head.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    if (els.reportExpandAll) text(els.reportExpandAll, open ? 'Collapse All' : 'Expand All');
+  }
+
+  function renderReportBadges(report) {
+    if (!els.reportBadges) return;
+    els.reportBadges.innerHTML = '';
+    (report.badges || []).filter(function (badge) {
+      return badge.badge_key !== 'ai_contributor';
+    }).forEach(function (badge) {
+      var card = document.createElement('div');
+      card.className = 'ptv4-badge-card' + (badge.earned ? ' is-earned' : ' is-locked') + (badge.newly_earned ? ' is-new' : '');
+      card.innerHTML = ''
+        + '<span class="' + badgeEmblemClass(badge.theme) + '">' + escapeHtml((badge.badge_key === 'ai_contributor' ? 'AI' : String(badge.name || '').split(' ').map(function (p) { return p[0]; }).join('').slice(0, 3).toUpperCase())) + '</span>'
+        + '<div class="ptv4-badge-copy"><strong>' + escapeHtml(badge.name || '') + '</strong><span>' + escapeHtml(badge.description || '') + '</span>'
+        + '<div class="ptv4-badge-status ' + (badge.earned ? 'is-earned' : 'is-locked') + '">' + (badge.earned ? 'UNLOCKED' : 'LOCKED') + '</div></div>';
+      els.reportBadges.appendChild(card);
+    });
+  }
+
+  function renderReportFocus(report) {
+    if (!els.reportFocus) return;
+    var focus = report.focus_areas || {};
+    var strengths = focus.strengths || [];
+    var weaknesses = focus.weaknesses || [];
+    els.reportFocus.innerHTML = ''
+      + '<div class="ptv4-report-focus-title">' + escapeHtml(focus.title || 'Your Next Focus Areas') + '</div>'
+      + '<div class="ptv4-report-focus-summary">' + escapeHtml(focus.summary || report.recommendation || '') + '</div>'
+      + '<div class="ptv4-report-focus-lists">'
+      + '<div class="ptv4-report-focus-list"><h4>Strengths</h4><ul>' + (strengths.length ? strengths.map(function (s) { return '<li>' + escapeHtml(s) + '</li>'; }).join('') : '<li>Keep building on the concepts you answered confidently.</li>') + '</ul></div>'
+      + '<div class="ptv4-report-focus-list"><h4>Focus Next</h4><ul>' + (weaknesses.length ? weaknesses.map(function (s) { return '<li>' + escapeHtml(s) + '</li>'; }).join('') : '<li>Review the question feedback and rehearse complete spoken answers.</li>') + '</ul></div>'
+      + '</div>'
+      + '<div class="ptv4-report-focus-strategy">' + escapeHtml(focus.strategy || report.recommendation || '') + '</div>';
+  }
+
+  function renderReportMetrics(report) {
+    if (!els.reportMetrics) return;
+    var metrics = report.performance_metrics || [];
+    if (!metrics.length) {
+      els.reportMetrics.hidden = true;
+      els.reportMetrics.innerHTML = '';
+      return;
+    }
+    els.reportMetrics.hidden = false;
+    els.reportMetrics.innerHTML = '<div class="ptv4-report-section-title">Performance Signals</div><div class="ptv4-report-metrics-grid">'
+      + metrics.map(function (m) {
+        return '<div class="ptv4-report-metric"><label>' + escapeHtml(m.label || '') + '</label><div class="ptv4-report-metric-bar"><div class="ptv4-report-metric-fill" style="width:' + clamp(parseInt(m.score, 10) || 0, 0, 100) + '%"></div></div></div>';
+      }).join('')
+      + '</div>';
+  }
+
   function renderReportModal(report) {
     report = report || lastReport;
     if (!report || !els.reportModal) return;
     text(els.reportSubtitle, (report.lesson_title || cfg.lessonTitle || '') + ' · Score ' + (report.score_pct == null ? '--' : report.score_pct + '%'));
-    text(els.reportMotivation, report.motivation || '');
-    text(els.reportSummary, (report.passed ? 'Result: Pass · ' : 'Result: Not yet passed · ') + (report.formal_result_label || '') + (report.score_pct != null ? (' · Overall score ' + report.score_pct + '%') : ''));
-    text(els.reportRecommendation, report.recommendation || '');
+    renderReportHero(report);
+    renderReportStats(report);
     if (els.reportQuestions) {
       els.reportQuestions.innerHTML = '';
       (report.questions || []).forEach(function (q) {
-        var block = document.createElement('div');
-        block.className = 'ptv4-report-q';
-        block.innerHTML = '<div class="ptv4-report-q-score">Question ' + q.idx + ' · ' + (q.score_pct == null ? '--' : q.score_pct + '%') + '</div>'
-          + '<div><strong>Question:</strong> ' + (q.question || '') + '</div>'
-          + '<div style="margin-top:6px"><strong>Your answer:</strong> ' + (q.student_answer || '—') + '</div>'
-          + (q.clarification_question ? '<div style="margin-top:6px"><strong>Clarification:</strong> ' + q.clarification_question + '</div>' : '')
-          + (q.clarification_answer ? '<div style="margin-top:6px"><strong>Clarification answer:</strong> ' + q.clarification_answer + '</div>' : '')
-          + '<div style="margin-top:6px"><strong>Maya feedback:</strong> ' + (q.feedback || '') + '</div>';
-        els.reportQuestions.appendChild(block);
+        els.reportQuestions.appendChild(renderReportQuestionCard(q, report.pass_threshold_pct || cfg.progressTestPassPct || 70, report.first_name || cfg.firstName || 'Student'));
       });
     }
+    renderReportBadges(report);
+    renderReportFocus(report);
+    renderReportMetrics(report);
+    setAllQuestionCards(false);
     els.reportModal.hidden = false;
   }
 
@@ -1785,14 +2036,24 @@
       var key = block.getAttribute('data-ptv4-fb-q');
       var optsWrap = block.querySelector('.ptv4-feedback-q-options');
       if (!optsWrap) return;
+      optsWrap.innerHTML = '';
       var opts = key === 'went_wrong' ? ISSUE_OPTS : LIKERT;
       opts.forEach(function (label, i) {
         var id = 'ptv4-fb-' + key + '-' + i;
         var lab = document.createElement('label');
-        lab.innerHTML = '<input type="radio" name="ptv4-fb-' + key + '" value="' + label.replace(/"/g, '&quot;') + '"> ' + label;
+        lab.className = 'ptv4-feedback-option';
+        lab.innerHTML = '<input type="radio" name="ptv4-fb-' + key + '" id="' + id + '" value="' + label.replace(/"/g, '&quot;') + '"><span>' + escapeHtml(label) + '</span>';
         optsWrap.appendChild(lab);
       });
     });
+    var free = $('[data-ptv4-fb-free]');
+    if (free && els.feedbackCount) {
+      var syncCount = function () {
+        text(els.feedbackCount, String(free.value.length) + ' / 500');
+      };
+      free.addEventListener('input', syncCount);
+      syncCount();
+    }
   }
 
   function collectFeedbackRatings() {
@@ -1808,7 +2069,16 @@
   if (els.primaryAction) els.primaryAction.addEventListener('click', onPrimaryActionClick);
   if (els.replay) els.replay.addEventListener('click', function () { playQuestionAudio(true); });
   if (els.clarify) els.clarify.addEventListener('click', function () {
-    if (clarificationQuestion) playMayaServerSpeech(clarificationQuestion, 'clarification');
+    if (!clarificationQuestion || isMayaSpeaking()) return;
+    if (cardState === CARD.LISTENING || (mediaRecorder && mediaRecorder.state !== 'inactive')) return;
+    pauseAnswerTimerIfRunning();
+    stopTimer();
+    playMayaServerSpeech(clarificationQuestion, 'clarification', function () {
+      setCardState(CARD.CLARIFICATION);
+      setStatus('One clarification allowed. Tap Start Answer.');
+      restoreAnswerTimerIfAny();
+      syncButtons();
+    });
   });
   if (els.next) els.next.addEventListener('click', nextQuestion);
   if (els.myReport) els.myReport.addEventListener('click', function () {
@@ -1822,6 +2092,13 @@
     });
   });
   if (els.reportClose) els.reportClose.addEventListener('click', closeReportModal);
+  if (els.reportCloseBottom) els.reportCloseBottom.addEventListener('click', closeReportModal);
+  if (els.reportExpandAll) {
+    els.reportExpandAll.addEventListener('click', function () {
+      var anyClosed = els.reportQuestions && els.reportQuestions.querySelector('.ptv4-report-qcard:not(.is-open)');
+      setAllQuestionCards(!!anyClosed);
+    });
+  }
   if (els.reportModal) els.reportModal.addEventListener('click', function (ev) {
     if (ev.target === els.reportModal) closeReportModal();
   });
@@ -1840,8 +2117,18 @@
       apiJson('submit_feedback', {
         rating_json: collectFeedbackRatings(),
         free_text: ($('[data-ptv4-fb-free]') || {}).value || ''
-      }).then(function () {
+      }).then(function (out) {
+        if (els.feedbackForm) els.feedbackForm.hidden = true;
+        if (els.feedbackReward) els.feedbackReward.hidden = true;
         if (els.feedbackSent) els.feedbackSent.hidden = false;
+        if (els.feedbackSentBadge) {
+          els.feedbackSentBadge.hidden = !(out && out.contributor_badge_earned);
+        }
+        if (out && out.contributor_badge_earned && lastReport) {
+          apiJson('get_report', {}).then(function (reportOut) {
+            lastReport = reportOut.report;
+          }).catch(function () {});
+        }
       });
     });
   }

@@ -365,7 +365,8 @@ try {
         }
 
         ptv4_generate_integrity_review($pdo, $attempt);
-        $report = ptv4_report_payload($pdo, $attempt, $u);
+        $newlyEarnedBadges = ptv4_evaluate_and_award_badges($pdo, $attempt);
+        $report = ptv4_report_payload($pdo, $attempt, $u, $newlyEarnedBadges);
 
         ptv4_json([
             'ok' => true,
@@ -382,7 +383,7 @@ try {
     }
 
     if ($action === 'get_report') {
-        ptv4_json(['ok' => true, 'report' => ptv4_report_payload($pdo, $attempt, $u)]);
+        ptv4_json(['ok' => true, 'report' => ptv4_report_payload($pdo, $attempt, $u, [])]);
     }
 
     if ($action === 'log_debug_events') {
@@ -412,6 +413,12 @@ try {
             'attempt_id' => $attemptId,
             'type' => 'Progress Test AI Modal Maya',
         ]));
+        $earnedContributor = ptv4_award_feedback_badge($pdo, (int)$attempt['user_id'], [
+            'attempt_id' => $attemptId,
+            'lesson_id' => (int)$attempt['lesson_id'],
+            'cohort_id' => (int)$attempt['cohort_id'],
+        ]);
+        $payload['contributor_badge_earned'] = $earnedContributor ? 1 : 0;
         ptv4_json($payload);
     }
 
