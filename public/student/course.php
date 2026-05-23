@@ -247,11 +247,26 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
           AND cohort_id=?
           AND lesson_id=?
           {$nonStaleFilter}
+          AND status NOT IN ('preparing','ready','in_progress','processing')
         ORDER BY attempt DESC, id DESC
         LIMIT 1
     ");
     $st->execute([$userId, $cohortId, $lessonId]);
     $row = $st->fetch(PDO::FETCH_ASSOC);
+
+    $openSt = $pdo->prepare("
+        SELECT id, attempt, status, score_pct, started_at, completed_at, status_text, updated_at, formal_result_code
+        FROM progress_tests_v2
+        WHERE user_id=?
+          AND cohort_id=?
+          AND lesson_id=?
+          {$nonStaleFilter}
+          AND status IN ('preparing','ready','in_progress','processing')
+        ORDER BY id DESC
+        LIMIT 1
+    ");
+    $openSt->execute([$userId, $cohortId, $lessonId]);
+    $openRow = $openSt->fetch(PDO::FETCH_ASSOC);
 
     $mx = $pdo->prepare("
         SELECT MAX(attempt)
@@ -294,6 +309,7 @@ function get_test_status_v2(PDO $pdo, $userId, $cohortId, $lessonId) {
     return [
         'max_attempt' => $maxAttempt,
         'last' => $row ?: null,
+        'open' => $openRow ?: null,
         'best_score' => $bestScore,
         'passed' => $passed
     ];
@@ -522,9 +538,24 @@ function score_badge_meta($testPassed, $bestScore, $last, $attemptsLeft) {
     }
 
     if ($last && (string)$last['status'] !== 'completed') {
+        $status = strtolower(trim((string)($last['status'] ?? '')));
+        if (in_array($status, ['in_progress', 'processing'], true)) {
+            return [
+                'label' => 'In progress',
+                'class' => 'info'
+            ];
+        }
+
+        if ($bestScore !== null) {
+            return [
+                'label' => (int)$bestScore . '%',
+                'class' => 'danger'
+            ];
+        }
+
         return [
-            'label' => 'In progress',
-            'class' => 'info'
+            'label' => '—',
+            'class' => 'neutral'
         ];
     }
 
@@ -818,6 +849,7 @@ if ($role === 'student') {
         : get_test_status_v2($pdo, $userId, $cohortId, $lessonId);
 
     $last = $test['last'];
+    $openAttempt = $test['open'] ?? null;
     $attemptsUsed = (int)$test['max_attempt'];
 
     $instructorDecision = ($role === 'admin')
@@ -852,7 +884,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
 
     $testPassed = !empty($test['passed']);
     $bestScore = $test['best_score'];
-    $hasActiveProgressTest = $last && in_array((string)($last['status'] ?? ''), ['preparing', 'ready', 'in_progress', 'processing'], true);
+    $hasActiveProgressTest = $openAttempt && in_array((string)($openAttempt['status'] ?? ''), ['preparing', 'ready', 'in_progress', 'processing'], true);
 
   	$canTest = true;
 	if ($role === 'student' && $locked) $canTest = false;

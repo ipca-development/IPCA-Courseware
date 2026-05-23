@@ -141,6 +141,7 @@ if (!$apply) {
     echo "  - delete badges earned on this attempt\n";
     echo "  - reset progress_test_items_v2 scoring/transcripts for this test\n";
     echo "  - set progress_tests_v2 back to status='ready' for oral retake\n";
+    echo "  - revert lesson_activity to awaiting_test_completion\n";
     echo "\nRe-run with --apply to execute.\n";
     exit(0);
 }
@@ -173,11 +174,26 @@ try {
             status_text = 'Progress test ready (reset for retake).',
             ai_summary = NULL,
             weak_areas = NULL,
+            started_at = NULL,
             completed_at = NULL,
             timing_status = 'unknown',
             updated_at = NOW()
         WHERE id = ?
     ")->execute([$attemptId]);
+
+    $pdo->prepare("
+        UPDATE lesson_activity
+        SET test_pass_status = 'in_progress',
+            completion_status = 'awaiting_test_completion',
+            status = 'awaiting_test_completion',
+            completed_at = NULL,
+            next_lesson_unlocked_at = NULL,
+            last_state_eval_at = NOW(),
+            updated_at = NOW()
+        WHERE user_id = ?
+          AND cohort_id = ?
+          AND lesson_id = ?
+    ")->execute([$userId, (int)$attempt['cohort_id'], (int)$attempt['lesson_id']]);
     $pdo->commit();
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) {
