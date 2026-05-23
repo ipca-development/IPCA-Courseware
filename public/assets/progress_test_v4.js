@@ -1975,13 +1975,14 @@
   function renderReportBadges(report) {
     if (!els.reportBadges) return;
     els.reportBadges.innerHTML = '';
-    (report.badges || []).filter(function (badge) {
-      return badge.badge_key !== 'ai_contributor';
-    }).forEach(function (badge) {
+    (report.badges || []).forEach(function (badge) {
+      var emblem = badge.badge_key === 'ai_contributor'
+        ? 'AI'
+        : String(badge.name || '').split(' ').map(function (p) { return p[0]; }).join('').slice(0, 3).toUpperCase();
       var card = document.createElement('div');
       card.className = 'ptv4-badge-card' + (badge.earned ? ' is-earned' : ' is-locked') + (badge.newly_earned ? ' is-new' : '');
       card.innerHTML = ''
-        + '<span class="' + badgeEmblemClass(badge.theme) + '">' + escapeHtml((badge.badge_key === 'ai_contributor' ? 'AI' : String(badge.name || '').split(' ').map(function (p) { return p[0]; }).join('').slice(0, 3).toUpperCase())) + '</span>'
+        + '<span class="' + badgeEmblemClass(badge.theme) + '">' + escapeHtml(emblem) + '</span>'
         + '<div class="ptv4-badge-copy"><strong>' + escapeHtml(badge.name || '') + '</strong><span>' + escapeHtml(badge.description || '') + '</span>'
         + '<div class="ptv4-badge-status ' + (badge.earned ? 'is-earned' : 'is-locked') + '">' + (badge.earned ? 'UNLOCKED' : 'LOCKED') + '</div></div>';
       els.reportBadges.appendChild(card);
