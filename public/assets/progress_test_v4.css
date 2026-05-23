@@ -69,7 +69,7 @@
 }
 
 .ptv4-hero-progress {
-  margin-top: 12px;
+  margin-top: 22px;
 }
 
 .ptv4-bar {
@@ -113,6 +113,9 @@
 
 .ptv4-hero-exit {
   align-self: flex-end;
+  height: 27px;
+  padding: 0 11px;
+  font-size: 11px;
 }
 
 .ptv4-hero-action {

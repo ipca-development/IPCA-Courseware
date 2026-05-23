@@ -496,7 +496,11 @@
     }, 250);
   }
 
-  function setFeedbackPanel(scorePct, feedback, answerText) {
+  function formatQuestionNum(idx, total) {
+    return 'Question ' + idx + '/' + (total || '?') + ':';
+  }
+
+  function setFeedbackPanel(scorePct, feedback) {
     if (!els.feedbackPanel) return;
     var tone = scorePct >= 70 ? 'pass' : (scorePct >= 30 ? 'partial' : 'fail');
     if (els.feedbackScore) {
@@ -504,8 +508,7 @@
       text(els.feedbackScore, Math.round(scorePct) + '%');
     }
     if (els.feedbackText) {
-      var answerBlock = answerText ? ('Your answer: “' + answerText + '”\n\n') : '';
-      els.feedbackText.textContent = answerBlock + (feedback || '');
+      els.feedbackText.textContent = feedback || '';
     }
     els.feedbackPanel.setAttribute('aria-hidden', 'false');
     setFeedbackVisible(false);
@@ -585,7 +588,7 @@
     text(els.question, 'Progress Test ready');
     if (state && state.total_questions) {
       var idx = parseInt(state.current_idx || 1, 10) || 1;
-      text(els.qnum, 'Question ' + idx + ' of ' + state.total_questions);
+      text(els.qnum, formatQuestionNum(idx, state.total_questions));
     } else {
       text(els.qnum, '—');
     }
@@ -700,15 +703,27 @@
       }
     }
     if (els.startAnswer) {
-      var canAnswer = cardState === CARD.READY || cardState === CARD.CLARIFICATION || retryVisible;
+      var isRecording = cardState === CARD.LISTENING
+        || (mediaRecorder && mediaRecorder.state !== 'inactive');
+      var canAnswer = (cardState === CARD.READY || cardState === CARD.CLARIFICATION || retryVisible) && !isRecording;
       els.startAnswer.disabled = !testStarted || !oralQuestionsStarted
         || !canAnswer
+        || cardState === CARD.EVALUATING
+        || cardState === CARD.ASKING
+        || cardState === CARD.COMPLETE;
+    }
+    if (els.stopAnswer) {
+      els.stopAnswer.disabled = cardState !== CARD.LISTENING
+        && !(mediaRecorder && mediaRecorder.state !== 'inactive');
+    }
+    if (els.replay) {
+      var questionLocked = cardState === CARD.COMPLETE
         || cardState === CARD.LISTENING
         || cardState === CARD.EVALUATING
-        || cardState === CARD.ASKING;
+        || awaitingNextQuestion
+        || (currentItem && currentItem.evaluated);
+      els.replay.disabled = !testStarted || !oralQuestionsStarted || !currentItem || questionLocked;
     }
-    if (els.stopAnswer) els.stopAnswer.disabled = cardState !== CARD.LISTENING && cardState !== CARD.CLARIFICATION;
-    if (els.replay) els.replay.disabled = !testStarted || !oralQuestionsStarted || !currentItem || cardState === CARD.EVALUATING;
     if (els.clarify) els.clarify.disabled = !clarificationPending || cardState !== CARD.CLARIFICATION || !clarificationQuestion;
     if (els.next) els.next.disabled = !feedbackSpeechDone || cardState !== CARD.COMPLETE || allDone || testCompleteReady;
     if (els.myReport) {
@@ -972,7 +987,7 @@
 
   function renderCard(item) {
     displayItem = item;
-    text(els.qnum, 'Question ' + item.idx + ' of ' + (state.total_questions || '?'));
+    text(els.qnum, formatQuestionNum(item.idx, state.total_questions || '?'));
     if (cardState !== CARD.ASKING) {
       text(els.question, item.prompt || item.spoken_question || '');
     }
@@ -1006,6 +1021,7 @@
   }
 
   function playQuestionAudio() {
+    if (!currentItem || currentItem.evaluated || cardState === CARD.COMPLETE || awaitingNextQuestion) return;
     stopTimer();
     hideRetry();
     clarificationPending = false;
@@ -1021,25 +1037,23 @@
     }
 
     var qText = currentItem.prompt || currentItem.spoken_question || '';
+    text(els.question, qText);
     setCardState(CARD.ASKING);
     startMayaBarMotion();
     setStatus('Maya is asking the question.');
     logEvent('question_audio_start', qText.slice(0, 120));
 
     function doneAsking() {
-      finishWordReveal(qText);
       stopMayaBarMotion();
       logEvent('question_audio_end');
       onQuestionFinished();
     }
 
     if (!currentItem.question_audio_url) {
-      startWordReveal(qText, null);
       speakScript(currentItem.spoken_question, 'question', doneAsking);
       return;
     }
 
-    startWordReveal(qText, questionAudio);
     questionAudio.onended = doneAsking;
     questionAudio.onerror = function () {
       speakScript(currentItem.spoken_question, 'question', doneAsking);
@@ -1203,6 +1217,8 @@
 
   function startAnswerCapture() {
     if (!currentItem || !micStream) return;
+    if (cardState === CARD.LISTENING || cardState === CARD.EVALUATING) return;
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') return;
     hideRetry();
     stopTimer();
     stopRecordStream();
@@ -1231,7 +1247,7 @@
     logEvent('recording_start', '', { item_id: currentItem.id });
     setTranscriptDisplay(clarificationMode ? 'listening' : 'recording');
     setHintContent('', false);
-    setCardState(clarificationMode ? CARD.CLARIFICATION : CARD.LISTENING);
+    setCardState(CARD.LISTENING);
     initStudentAnalyser();
     startRecordingTimer();
 
@@ -1388,7 +1404,7 @@
     var feedback = out.feedback_for_student || ev.feedback_for_student || '';
     var scorePct = Math.round(out.score_pct || ev.score_pct || 0);
     if (liveTranscript) setTranscriptDisplay('final', liveTranscript);
-    setFeedbackPanel(scorePct, feedback, liveTranscript);
+    setFeedbackPanel(scorePct, feedback);
     logEvent('evaluation_complete', feedback.slice(0, 120), { score_pct: scorePct });
 
     if (out.next_action === 'retry_english') {
@@ -1425,14 +1441,22 @@
 
     clarificationPending = false;
     var scoreLine = 'You scored ' + scorePct + ' percent for this question.';
+    var feedbackSpeech = scoreLine + ' ' + feedback;
     setCardState(CARD.COMPLETE);
     setStatus('Question complete. Listen to Maya’s feedback.');
-    speakScript(scoreLine + ' ' + feedback, 'feedback', function () {
-      stopMayaBarMotion();
-      feedbackSpeechDone = true;
-      setStatus('Tap Next Question when you are ready.');
-      syncButtons();
-    });
+    ensureVoiceConnected()
+      .then(function () { return speakScript(feedbackSpeech, 'feedback', function () {
+        stopMayaBarMotion();
+        setCardState(CARD.COMPLETE);
+        feedbackSpeechDone = true;
+        setStatus('Tap Next Question when you are ready.');
+        syncButtons();
+      }); })
+      .catch(function (err) {
+        logEvent('feedback_speech_failed', err.message || 'Voice unavailable');
+        feedbackSpeechDone = true;
+        syncButtons();
+      });
 
     if (out.next_action === 'complete_test') {
       return apiJson('complete_test', {}).then(function (done) {
