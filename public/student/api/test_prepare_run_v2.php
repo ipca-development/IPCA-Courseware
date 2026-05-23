@@ -846,7 +846,7 @@ try {
     $totalAudio = 1 + count($itemRows);
     $doneAudio = 0;
 
-    $introText = "Hello {$firstName}. I will now conduct your progress test.";
+    $introText = "Hello {$firstName}. Click Ready when you want to start your progress test.";
     $introLocal = $testDir . '/intro.mp3';
     tts_generate_local($introText, $introLocal);
 

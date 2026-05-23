@@ -339,5 +339,5 @@ window.IPCAProgressTestV4Config = {
   lessonTitle: <?= json_encode($lessonTitle, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>
 };
 </script>
-<script src="/assets/progress_test_v4.js?v=13"></script>
+<script src="/assets/progress_test_v4.js?v=14"></script>
 <?php cw_footer(); ?>

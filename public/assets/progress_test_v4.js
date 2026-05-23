@@ -115,6 +115,7 @@
   var remoteAudio = null;
   var questionAudio = new Audio();
   questionAudio.preload = 'auto';
+  questionAudio.setAttribute('playsinline', 'playsinline');
   var prepTimer = null;
   var timerInterval = null;
   var timerDeadline = 0;
@@ -145,6 +146,9 @@
   var mayaAudioEndsAt = 0;
   var mayaSpeechStartedAt = 0;
   var mayaTurnTailTimer = null;
+  var voiceConnectPromise = null;
+  var remoteTrackReady = false;
+  var remoteTrackWaiters = [];
 
   function text(el, v) { if (el) el.textContent = v; }
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
@@ -304,6 +308,80 @@
     responseInProgress = false;
     mayaTurnPurpose = '';
     completeSpeechTurn(onDone);
+  }
+
+  function resetRemoteTrackWait() {
+    remoteTrackReady = false;
+    remoteTrackWaiters = [];
+  }
+
+  function notifyRemoteTrackReady() {
+    if (remoteTrackReady) return;
+    remoteTrackReady = true;
+    remoteTrackWaiters.slice().forEach(function (resolve) { resolve(); });
+    remoteTrackWaiters = [];
+  }
+
+  function waitForRemoteTrack(timeoutMs) {
+    timeoutMs = timeoutMs || 15000;
+    if (remoteTrackReady && remoteAudio && remoteAudio.srcObject) return Promise.resolve();
+    return new Promise(function (resolve, reject) {
+      remoteTrackWaiters.push(resolve);
+      window.setTimeout(function () {
+        reject(new Error('Maya audio channel not ready'));
+      }, timeoutMs);
+    });
+  }
+
+  function disconnectVoice() {
+    stopMayaTurnTimers();
+    clearMayaAudioEnd();
+    mayaTurnPurpose = '';
+    responseInProgress = false;
+    if (dc) {
+      try { dc.close(); } catch (e) {}
+      dc = null;
+    }
+    if (pc) {
+      try { pc.close(); } catch (e) {}
+      pc = null;
+    }
+    dcOpenPromise = null;
+    resetRemoteTrackWait();
+  }
+
+  function ensureVoiceConnected() {
+    if (pc && dc && dc.readyState === 'open' && remoteTrackReady) return Promise.resolve();
+    if (!voiceConnectPromise) {
+      voiceConnectPromise = connectVoice().catch(function (err) {
+        voiceConnectPromise = null;
+        throw err;
+      });
+    }
+    return voiceConnectPromise;
+  }
+
+  function playPreparedAudio(url, onDone) {
+    url = String(url || '').trim();
+    if (!url) return Promise.reject(new Error('Missing audio URL'));
+    unlockAudioPlayback();
+    questionAudio.pause();
+    questionAudio.currentTime = 0;
+    return new Promise(function (resolve, reject) {
+      questionAudio.onended = function () {
+        stopMayaBarMotion();
+        if (onDone) onDone();
+        resolve();
+      };
+      questionAudio.onerror = function () {
+        reject(new Error('Prepared audio playback failed'));
+      };
+      questionAudio.src = url;
+      var playPromise = questionAudio.play();
+      if (playPromise && typeof playPromise.then === 'function') {
+        playPromise.catch(reject);
+      }
+    });
   }
 
   function logEvent(type, detail, meta) {
@@ -978,7 +1056,10 @@
       if (onDone) onDone();
       return Promise.resolve();
     }
-    return waitForDataChannel().then(function () {
+    return ensureVoiceConnected()
+      .then(waitForDataChannel)
+      .then(waitForRemoteTrack)
+      .then(function () {
       if (!dc || dc.readyState !== 'open') {
         logEvent('tts_unavailable', purpose);
         throw new Error('Voice connection is not ready. Exit and try again.');
@@ -1011,7 +1092,7 @@
   }
 
   function connectVoice() {
-    dcOpenPromise = null;
+    disconnectVoice();
     return postJson('/student/api/progress_test_v4_voice_token.php', { attempt_id: attemptId }).then(function (tok) {
       pc = new RTCPeerConnection();
       ensureRemoteAudio();
@@ -1023,6 +1104,7 @@
       });
       pc.ontrack = function (ev) {
         remoteAudio.srcObject = ev.streams[0];
+        notifyRemoteTrackReady();
         unlockAudioPlayback();
         logEvent('remote_audio_track');
       };
@@ -1376,16 +1458,17 @@
     setBeginTestVisible(true);
     setCardState(CARD.ASKING);
     startMayaBarMotion();
-    setStatus('Maya is greeting you.');
     logEvent('greeting_start');
-    return speakScript(greeting, 'greeting', function () {
+
+    function finishGreeting() {
       greetingReady = true;
       setCardState(CARD.READY);
       setHintContent('Tap <strong>Ready</strong> to begin Question 1.', true);
-      setStatus('Tap Ready when you want to start your progress test.');
       logEvent('greeting_complete');
       syncButtons();
-    }).catch(function (err) {
+    }
+
+    function failGreeting(err) {
       stopMayaBarMotion();
       testStarted = false;
       setCardState(CARD.READY);
@@ -1393,7 +1476,20 @@
       setHintContent('Maya audio could not start. Check your speakers and microphone permission, then tap <strong>Start</strong> again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Voice unavailable') + '</span>', true);
       logEvent('greeting_failed', err.message || 'Voice unavailable');
       syncButtons();
-    });
+    }
+
+    var introUrl = state && state.intro_audio_url;
+    if (introUrl) {
+      logEvent('greeting_audio_start', 'intro_url');
+      return playPreparedAudio(introUrl, finishGreeting).catch(function () {
+        return ensureVoiceConnected()
+          .then(function () { return speakScript(greeting, 'greeting', finishGreeting); });
+      }).catch(failGreeting);
+    }
+
+    return ensureVoiceConnected()
+      .then(function () { return speakScript(greeting, 'greeting', finishGreeting); })
+      .catch(failGreeting);
   }
 
   function beginOralQuestions() {
@@ -1435,10 +1531,12 @@
     oralQuestionsStarted = false;
     sessionConnecting = true;
     syncButtons();
-    setStatus('Connecting oral exam session...');
-    Promise.all([startCamera(), connectVoice()]).then(function () {
-      return apiJson('start_oral_test', {});
-    }).then(function (out) {
+    voiceConnectPromise = connectVoice().catch(function (err) {
+      logEvent('voice_connect_failed', err.message || 'connect failed');
+      voiceConnectPromise = null;
+    });
+    Promise.all([startCamera(), apiJson('start_oral_test', {})]).then(function (results) {
+      var out = results[1];
       sessionConnecting = false;
       testStarted = true;
       updateProgress(out.state);
@@ -1448,6 +1546,8 @@
     }).catch(function (err) {
       sessionConnecting = false;
       testStarted = false;
+      voiceConnectPromise = null;
+      disconnectVoice();
       syncButtons();
       setHintContent('Could not start the voice session. Check microphone permission and try again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Connection failed') + '</span>', true);
       logEvent('start_flow_failed', err.message || 'Connection failed');
@@ -1664,15 +1764,6 @@
     apiJson('end_oral_test_without_penalty', {}).then(function () {
       leaveToLessonMenu();
     });
-  });
-
-  window.addEventListener('beforeunload', function () {
-    if (testStarted && attemptId) {
-      navigator.sendBeacon('/student/api/progress_test_v4_oral.php', new Blob([JSON.stringify({
-        action: 'abort_voice_session_without_penalty',
-        attempt_id: attemptId
-      })], { type: 'application/json' }));
-    }
   });
 
   initFeedbackForm();

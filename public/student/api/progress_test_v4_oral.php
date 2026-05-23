@@ -166,7 +166,7 @@ try {
         }
         $pdo->prepare("
             UPDATE progress_tests_v2 SET status='in_progress', status_text='Oral progress test in progress.', updated_at=NOW()
-            WHERE id=? AND status IN ('ready','preparing')
+            WHERE id=? AND status NOT IN ('completed','failed')
         ")->execute([$attemptId]);
         ptv4_json(['ok' => true, 'state' => ptv4_state_payload($pdo, ptv4_load_attempt($pdo, $u, $attemptId))]);
     }
