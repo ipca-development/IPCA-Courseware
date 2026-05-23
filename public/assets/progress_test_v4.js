@@ -1076,12 +1076,15 @@
     else if (testStarted) setCardState(CARD.READY);
   }
 
-  function onQuestionFinished() {
+  function onQuestionFinished(options) {
+    options = options || {};
     stopMayaBarMotion();
     setCardState(CARD.READY);
     setStatus('Tap Start Answer within 30 seconds.');
     setHintContent('Listen to the question carefully. Tap <strong>Start Answer</strong> and speak clearly.', true);
-    startStartAnswerTimer();
+    if (!options.keepTimer) {
+      startStartAnswerTimer();
+    }
   }
 
   function playMayaServerSpeech(speechText, logPurpose, onDone, hooks) {
@@ -1130,9 +1133,11 @@
     return playMayaServerSpeech(speechText, 'feedback', onDone, hooks);
   }
 
-  function playQuestionAudio() {
+  function playQuestionAudio(isReplay) {
     if (!currentItem || currentItem.evaluated || cardState === CARD.COMPLETE || awaitingNextQuestion) return;
-    stopTimer();
+    if (!isReplay) {
+      stopTimer();
+    }
     hideRetry();
     clarificationPending = false;
     clarificationMode = false;
@@ -1151,12 +1156,12 @@
     setCardState(CARD.ASKING);
     startMayaBarMotion();
     setStatus('Maya is asking the question.');
-    logEvent('question_audio_start', qText.slice(0, 120));
+    logEvent('question_audio_start', qText.slice(0, 120), { replay: !!isReplay });
 
     function doneAsking() {
       stopMayaBarMotion();
-      logEvent('question_audio_end');
-      onQuestionFinished();
+      logEvent('question_audio_end', isReplay ? 'replay' : 'initial');
+      onQuestionFinished({ keepTimer: !!isReplay });
     }
 
     if (!currentItem.question_audio_url) {
@@ -1801,7 +1806,7 @@
   }
 
   if (els.primaryAction) els.primaryAction.addEventListener('click', onPrimaryActionClick);
-  if (els.replay) els.replay.addEventListener('click', playQuestionAudio);
+  if (els.replay) els.replay.addEventListener('click', function () { playQuestionAudio(true); });
   if (els.clarify) els.clarify.addEventListener('click', function () {
     if (clarificationQuestion) playMayaServerSpeech(clarificationQuestion, 'clarification');
   });
