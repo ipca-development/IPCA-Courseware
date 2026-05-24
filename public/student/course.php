@@ -2110,7 +2110,22 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
   pollAllPrepNodes();
   window.setInterval(pollAllPrepNodes, 2000);
 })();
+</script>
 
+<div id="courseRemoteCodeModal" class="course-remote-modal-overlay" aria-hidden="true">
+  <div class="course-remote-modal" role="dialog" aria-modal="true" aria-labelledby="courseRemoteCodeTitle">
+    <h3 id="courseRemoteCodeTitle">Enter Progress Test Code</h3>
+    <p>Enter the six-digit code shown on the remote authentication page. Your official progress test attempt starts only after this code is verified.</p>
+    <input id="courseRemoteCodeInput" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">
+    <div id="courseRemoteCodeError" class="course-remote-modal-error"></div>
+    <div class="course-remote-modal-actions">
+      <button type="button" class="action-btn" data-close-remote-modal>Cancel</button>
+      <button type="button" class="action-btn primary" id="courseRemoteCodeSubmit">Verify &amp; Start</button>
+    </div>
+  </div>
+</div>
+
+<script>
 (function () {
   document.querySelectorAll('.pt-prep-trigger').forEach(function (btn) {
     btn.addEventListener('click', function (e) {
@@ -2260,18 +2275,5 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
   }
 })();
 </script>
-
-<div id="courseRemoteCodeModal" class="course-remote-modal-overlay" aria-hidden="true">
-  <div class="course-remote-modal" role="dialog" aria-modal="true" aria-labelledby="courseRemoteCodeTitle">
-    <h3 id="courseRemoteCodeTitle">Enter Progress Test Code</h3>
-    <p>Enter the six-digit code shown on the remote authentication page. Your official progress test attempt starts only after this code is verified.</p>
-    <input id="courseRemoteCodeInput" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">
-    <div id="courseRemoteCodeError" class="course-remote-modal-error"></div>
-    <div class="course-remote-modal-actions">
-      <button type="button" class="action-btn" data-close-remote-modal>Cancel</button>
-      <button type="button" class="action-btn primary" id="courseRemoteCodeSubmit">Verify &amp; Start</button>
-    </div>
-  </div>
-</div>
 
 <?php cw_footer(); ?>
