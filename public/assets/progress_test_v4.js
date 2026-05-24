@@ -158,6 +158,10 @@
   var voiceConnectPromise = null;
   var remoteTrackReady = false;
   var remoteTrackWaiters = [];
+  var oralSessionStarted = false;
+  var debugSentCount = 0;
+  var debugFlushTimer = null;
+  var debugFlushInFlight = false;
 
   function text(el, v) { if (el) el.textContent = v; }
   function clamp(n, a, b) { return Math.max(a, Math.min(b, n)); }
@@ -407,6 +411,104 @@
     };
     debugEvents.push(ev);
     dbg(type, detail, meta || {});
+    scheduleDebugFlush();
+  }
+
+  function scheduleDebugFlush() {
+    if (debugFlushTimer) return;
+    debugFlushTimer = window.setTimeout(function () {
+      debugFlushTimer = null;
+      flushDebugEventsToServer(false);
+    }, 600);
+  }
+
+  function flushDebugEventsToServer(forceSync) {
+    if (debugFlushInFlight || debugSentCount >= debugEvents.length) {
+      return forceSync ? Promise.resolve() : undefined;
+    }
+    var batch = debugEvents.slice(debugSentCount);
+    debugSentCount = debugEvents.length;
+    var payload = {
+      action: 'log_debug_events',
+      cohort_id: cfg.cohortId,
+      lesson_id: cfg.lessonId,
+      events: batch
+    };
+    if (attemptId) payload.attempt_id = attemptId;
+
+    debugFlushInFlight = true;
+    var done = function () {
+      debugFlushInFlight = false;
+      if (debugSentCount < debugEvents.length) scheduleDebugFlush();
+    };
+
+    if (forceSync && navigator.sendBeacon) {
+      try {
+        navigator.sendBeacon(
+          '/student/api/progress_test_v4_oral.php',
+          new Blob([JSON.stringify(payload)], { type: 'application/json' })
+        );
+      } catch (e) {}
+      done();
+      return Promise.resolve();
+    }
+
+    return postJson('/student/api/progress_test_v4_oral.php', payload)
+      .catch(function () {
+        debugSentCount -= batch.length;
+      })
+      .then(done);
+  }
+
+  function stopGreetingPlayback() {
+    try {
+      questionAudio.pause();
+      questionAudio.currentTime = 0;
+    } catch (e) {}
+    stopMayaBarMotion();
+    stopWordReveal();
+    mayaTurnPurpose = '';
+    responseInProgress = false;
+    if (dc && dc.readyState === 'open') {
+      try { dc.send(JSON.stringify({ type: 'response.cancel' })); } catch (e) {}
+    }
+  }
+
+  function skipGreetingIfNeeded() {
+    if (greetingReady) return;
+    stopGreetingPlayback();
+    greetingReady = true;
+    setCardState(CARD.READY);
+    setHintContent('Tap <strong>Ready</strong> to begin Question 1.', true);
+    logEvent('greeting_skipped');
+    syncButtons();
+  }
+
+  function ensureOralSessionStarted() {
+    if (oralSessionStarted) return Promise.resolve();
+    return apiJson('start_oral_test', {}).then(function (out) {
+      oralSessionStarted = true;
+      updateProgress(out.state);
+      logEvent('oral_session_started');
+      return out;
+    });
+  }
+
+  function rollbackOralSessionBeacon(reason) {
+    if (!attemptId || !oralSessionStarted) return;
+    if (oralQuestionsStarted || (state && (state.evaluated_count || 0) > 0)) return;
+    var payload = JSON.stringify({
+      action: 'rollback_oral_session',
+      attempt_id: attemptId,
+      reason: reason || 'page_unload'
+    });
+    if (navigator.sendBeacon) {
+      navigator.sendBeacon(
+        '/student/api/progress_test_v4_oral.php',
+        new Blob([payload], { type: 'application/json' })
+      );
+    }
+    oralSessionStarted = false;
   }
 
   function playBeep(kind) {
@@ -827,9 +929,9 @@
       } else if (!testStarted && canBegin) {
         primaryEnabled = true;
         primaryLabel = 'Ready';
-      } else if (testStarted && greetingReady && !oralQuestionsStarted) {
+      } else if (testStarted && !oralQuestionsStarted) {
         primaryEnabled = true;
-        primaryLabel = 'Ready';
+        primaryLabel = greetingReady ? 'Ready' : 'Ready';
       } else if (oralQuestionsStarted) {
         primaryLabel = 'Start Answer';
       }
@@ -1106,6 +1208,9 @@
     state = nextState || state;
     if (!state) return;
     attemptId = parseInt(state.attempt_id || attemptId, 10) || 0;
+    if (attemptId && (String(state.status || '') === 'in_progress' || String(state.status || '') === 'processing')) {
+      oralSessionStarted = true;
+    }
     var total = parseInt(state.total_questions || 0, 10) || 0;
     var evaluated = parseInt(state.evaluated_count || 0, 10) || 0;
     var idx = parseInt(state.current_idx || 0, 10) || 0;
@@ -1127,7 +1232,24 @@
       currentItem = displayItem;
     }
     if (currentItem && oralQuestionsStarted && !awaitingNextQuestion) renderCard(currentItem);
+    applyLoadedSessionState();
     syncButtons();
+  }
+
+  function applyLoadedSessionState() {
+    if (!state || !state.prepared) return;
+    var st = String(state.status || '');
+    var evaluated = parseInt(state.evaluated_count || 0, 10) || 0;
+    if (st !== 'in_progress' && st !== 'processing') return;
+    oralSessionStarted = true;
+    testStarted = true;
+    greetingReady = true;
+    if (evaluated > 0) {
+      oralQuestionsStarted = true;
+      return;
+    }
+    oralQuestionsStarted = false;
+    setHintContent('Welcome back. Tap <strong>Ready</strong> to begin Question 1.', true);
   }
 
   function renderCard(item) {
@@ -1693,6 +1815,11 @@
       setHintContent('Tap <strong>Ready</strong> to begin Question 1.', true);
       logEvent('greeting_complete');
       syncButtons();
+      ensureOralSessionStarted().catch(function (err) {
+        logEvent('oral_session_start_failed', err.message || 'start failed');
+        setHintContent('Could not mark the test as started. Tap <strong>Ready</strong> to try again.<br><span style="font-size:12px;opacity:.85">' + (err.message || '') + '</span>', true);
+        syncButtons();
+      });
     }
 
     function failGreeting(err) {
@@ -1755,17 +1882,17 @@
     unlockAudioPlayback();
     greetingReady = false;
     oralQuestionsStarted = false;
+    oralSessionStarted = false;
     sessionConnecting = true;
     syncButtons();
     voiceConnectPromise = connectVoice().catch(function (err) {
       logEvent('voice_connect_failed', err.message || 'connect failed');
       voiceConnectPromise = null;
     });
-    Promise.all([startCamera(), apiJson('start_oral_test', {})]).then(function (results) {
-      var out = results[1];
+    Promise.all([startCamera(), voiceConnectPromise.catch(function () { return null; })]).then(function () {
       sessionConnecting = false;
       testStarted = true;
-      updateProgress(out.state);
+      syncButtons();
       return playGreeting();
     }).then(function () {
       syncButtons();
@@ -1777,6 +1904,17 @@
       syncButtons();
       setHintContent('Could not start the voice session. Check microphone permission and try again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Connection failed') + '</span>', true);
       logEvent('start_flow_failed', err.message || 'Connection failed');
+    });
+  }
+
+  function beginQuestionsFromReady() {
+    skipGreetingIfNeeded();
+    ensureOralSessionStarted().then(function () {
+      beginOralQuestions();
+    }).catch(function (err) {
+      setHintContent('Could not start the oral session. Tap <strong>Ready</strong> to try again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Start failed') + '</span>', true);
+      logEvent('oral_session_start_failed', err.message || 'start failed');
+      syncButtons();
     });
   }
 
@@ -1792,8 +1930,8 @@
       startTestFlow();
       return;
     }
-    if (greetingReady && !oralQuestionsStarted) {
-      beginOralQuestions();
+    if (!oralQuestionsStarted) {
+      beginQuestionsFromReady();
       return;
     }
     if (oralQuestionsStarted && !isMayaSpeaking()) {
@@ -2237,4 +2375,16 @@
   initFeedbackForm();
   ensurePrepared();
   syncButtons();
+
+  window.addEventListener('pagehide', function () {
+    flushDebugEventsToServer(true);
+    if (testStarted && !oralQuestionsStarted) {
+      rollbackOralSessionBeacon('page_unload');
+    }
+  });
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') {
+      flushDebugEventsToServer(true);
+    }
+  });
 })();

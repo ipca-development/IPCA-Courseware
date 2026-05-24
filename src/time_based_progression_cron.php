@@ -19,6 +19,9 @@ final class TimeBasedProgressionCron
     // The default is 60 minutes (the upper bound of the user-approved range). A progress
     // test should take ~max 60 minutes in-progress; the 'ready' state is just the brief
     // window between generation and Start, so 60min is generous. Tune downward (to 15min)
+    // Stale-abort preparing / in_progress / processing rows after this many idle minutes.
+    private const STALE_INTERRUPTED_THRESHOLD_MINUTES = 15;
+
     // once we have telemetry on real student start latency.
     private const ORPHAN_READY_THRESHOLD_MINUTES = 60;
 
@@ -86,6 +89,9 @@ final class TimeBasedProgressionCron
             'aggregated_dispatch_duplicates_skipped' => 0,
             'orphan_ready_swept' => 0,
             'orphan_ready_threshold_minutes' => self::ORPHAN_READY_THRESHOLD_MINUTES,
+            'stale_interrupted_swept' => 0,
+            'stale_interrupted_threshold_minutes' => self::STALE_INTERRUPTED_THRESHOLD_MINUTES,
+            'stale_interrupted_sweep_results' => array(),
             'pending_reason_reminders_scanned' => 0,
             'pending_reason_reminders_dispatch_attempts' => 0,
             'pending_reason_reminders_dispatched' => 0,
@@ -116,6 +122,15 @@ final class TimeBasedProgressionCron
             $sweepResults = $this->sweepOrphanReadyAttempts();
             $summary['orphan_ready_sweep_results'] = $sweepResults;
             $summary['orphan_ready_swept'] = count($sweepResults);
+
+            $staleInterruptedResults = $this->sweepStaleInterruptedAttempts();
+            $summary['stale_interrupted_sweep_results'] = $staleInterruptedResults;
+            $summary['stale_interrupted_swept'] = count(array_filter(
+                $staleInterruptedResults,
+                static function (array $row): bool {
+                    return (string)($row['status'] ?? '') === 'stale_aborted';
+                }
+            ));
 
             // Bonus / Q8: nudge instructors about un-decided submitted reasons (once/day).
             // This dispatches automation events that admin-configured flows turn into emails;
@@ -428,6 +443,141 @@ final class TimeBasedProgressionCron
                     'cohort_id' => $cohortId,
                     'lesson_id' => $lessonId,
                     'age_minutes' => $ageMinutes,
+                    'status' => 'error',
+                    'error' => $e->getMessage(),
+                );
+            }
+        }
+
+        return $sweepResults;
+    }
+
+    /**
+     * Stale-abort preparing / in_progress / processing oral attempts with no recent activity.
+     * Mirrors expire_stale_progress_test_attempts() on the course page so students are not
+     * blocked until they revisit the lesson menu.
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function sweepStaleInterruptedAttempts(): array
+    {
+        $thresholdMinutes = self::STALE_INTERRUPTED_THRESHOLD_MINUTES;
+
+        $candidatesSql = "
+            SELECT
+                pt.id,
+                pt.user_id,
+                pt.cohort_id,
+                pt.lesson_id,
+                pt.status,
+                pt.attempt,
+                pt.updated_at,
+                pt.formal_result_code,
+                TIMESTAMPDIFF(MINUTE, pt.updated_at, UTC_TIMESTAMP()) AS idle_minutes
+            FROM progress_tests_v2 pt
+            WHERE pt.status IN ('preparing', 'in_progress', 'processing')
+              AND pt.updated_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL :threshold_minutes MINUTE)
+              AND (pt.formal_result_code IS NULL OR pt.formal_result_code != 'STALE_ABORTED')
+            ORDER BY pt.id ASC
+            LIMIT 200
+        ";
+
+        $stmt = $this->pdo->prepare($candidatesSql);
+        $stmt->bindValue(':threshold_minutes', $thresholdMinutes, PDO::PARAM_INT);
+        $stmt->execute();
+        $candidates = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: array();
+        $sweepResults = array();
+
+        foreach ($candidates as $candidate) {
+            $testId = (int)$candidate['id'];
+            $userId = (int)$candidate['user_id'];
+            $cohortId = (int)$candidate['cohort_id'];
+            $lessonId = (int)$candidate['lesson_id'];
+            $idleMinutes = (int)($candidate['idle_minutes'] ?? 0);
+            $previousStatus = (string)($candidate['status'] ?? '');
+
+            try {
+                $this->pdo->beginTransaction();
+
+                $updateStmt = $this->pdo->prepare("
+                    UPDATE progress_tests_v2
+                    SET
+                        status = 'failed',
+                        formal_result_code = 'STALE_ABORTED',
+                        formal_result_label = 'Aborted (stale technical session)',
+                        counts_as_unsat = 0,
+                        pass_gate_met = 0,
+                        timing_status = 'unknown',
+                        status_text = 'Oral progress test expired after the 15-minute resume window.',
+                        updated_at = UTC_TIMESTAMP()
+                    WHERE id = :id
+                      AND status IN ('preparing', 'in_progress', 'processing')
+                      AND (formal_result_code IS NULL OR formal_result_code != 'STALE_ABORTED')
+                ");
+                $updateStmt->execute(array(':id' => $testId));
+                $affected = $updateStmt->rowCount();
+
+                if ($affected !== 1) {
+                    $this->pdo->rollBack();
+                    $sweepResults[] = array(
+                        'test_id' => $testId,
+                        'user_id' => $userId,
+                        'cohort_id' => $cohortId,
+                        'lesson_id' => $lessonId,
+                        'idle_minutes' => $idleMinutes,
+                        'status' => 'skipped_race',
+                    );
+                    continue;
+                }
+
+                $this->engine->logProgressionEvent(array(
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'progress_test_id' => $testId,
+                    'event_type' => 'progress_test',
+                    'event_code' => 'attempt_stale_aborted',
+                    'event_status' => 'warning',
+                    'actor_type' => 'system',
+                    'actor_user_id' => null,
+                    'event_time' => gmdate('Y-m-d H:i:s'),
+                    'payload' => array(
+                        'progress_test_id' => $testId,
+                        'previous_status' => $previousStatus,
+                        'new_status' => 'failed',
+                        'formal_result_code' => 'STALE_ABORTED',
+                        'counts_as_unsat' => 0,
+                        'stale_reason' => 'interrupted_session_swept',
+                        'idle_minutes' => $idleMinutes,
+                        'threshold_minutes' => $thresholdMinutes,
+                        'attempt' => (int)($candidate['attempt'] ?? 0),
+                        'sweep_source' => 'TimeBasedProgressionCron::sweepStaleInterruptedAttempts',
+                    ),
+                    'legal_note' => 'Time-based progression cron stale-aborted an interrupted oral progress test attempt after the configured inactivity threshold.',
+                ));
+
+                $this->pdo->commit();
+
+                $sweepResults[] = array(
+                    'test_id' => $testId,
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'idle_minutes' => $idleMinutes,
+                    'previous_status' => $previousStatus,
+                    'status' => 'stale_aborted',
+                );
+            } catch (Throwable $e) {
+                if ($this->pdo->inTransaction()) {
+                    $this->pdo->rollBack();
+                }
+
+                $sweepResults[] = array(
+                    'test_id' => $testId,
+                    'user_id' => $userId,
+                    'cohort_id' => $cohortId,
+                    'lesson_id' => $lessonId,
+                    'idle_minutes' => $idleMinutes,
                     'status' => 'error',
                     'error' => $e->getMessage(),
                 );

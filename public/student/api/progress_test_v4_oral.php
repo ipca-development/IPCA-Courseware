@@ -52,6 +52,68 @@ try {
         ptv4_json($out);
     }
 
+    if ($action === 'log_debug_events') {
+        $attemptId = (int)($data['attempt_id'] ?? 0);
+        $cohortId = (int)($data['cohort_id'] ?? 0);
+        $lessonId = (int)($data['lesson_id'] ?? 0);
+        $studentUserId = $role === 'admin' ? (int)($data['user_id'] ?? $u['id']) : (int)$u['id'];
+
+        if ($attemptId > 0) {
+            $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
+            ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id']);
+            $cohortId = (int)$attempt['cohort_id'];
+            $lessonId = (int)$attempt['lesson_id'];
+            $studentUserId = (int)$attempt['user_id'];
+        } elseif ($cohortId > 0 && $lessonId > 0) {
+            if ($role === 'student') {
+                $en = $pdo->prepare("SELECT 1 FROM cohort_students WHERE cohort_id = ? AND user_id = ? AND status = 'active' LIMIT 1");
+                $en->execute([$cohortId, $studentUserId]);
+                if (!$en->fetchColumn()) {
+                    ptv4_json(['ok' => false, 'error' => 'Not actively enrolled'], 403);
+                }
+            }
+            ptv4_require_progress_test_access($pdo, $u, $cohortId, $studentUserId);
+        } else {
+            ptv4_json(['ok' => false, 'error' => 'attempt_id or cohort_id+lesson_id required'], 400);
+        }
+
+        $events = $data['events'] ?? [];
+        if (!is_array($events)) {
+            $events = [];
+        }
+        $logged = 0;
+        foreach ($events as $ev) {
+            if (!is_array($ev)) {
+                continue;
+            }
+            ptv4_log_debug_event(
+                $pdo,
+                $studentUserId,
+                (string)($ev['type'] ?? 'client_event'),
+                (string)($ev['detail'] ?? ''),
+                is_array($ev['meta'] ?? null) ? $ev['meta'] : null,
+                $attemptId > 0 ? $attemptId : null,
+                (int)($ev['item_id'] ?? 0) ?: null,
+                $cohortId > 0 ? $cohortId : null,
+                $lessonId > 0 ? $lessonId : null
+            );
+            $logged++;
+        }
+        ptv4_json(['ok' => true, 'logged' => $logged]);
+    }
+
+    if ($action === 'rollback_oral_session') {
+        $attemptId = (int)($data['attempt_id'] ?? 0);
+        if ($attemptId <= 0) {
+            ptv4_json(['ok' => false, 'error' => 'attempt_id required'], 400);
+        }
+        $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
+        ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id']);
+        $result = ptv4_rollback_prepared_session($pdo, $attempt, (string)($data['reason'] ?? 'client_rollback'));
+        $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
+        ptv4_json(['ok' => true] + $result + ['state' => ptv4_state_payload($pdo, $attempt)]);
+    }
+
     if ($action === 'upload_answer_chunk') {
         $attemptId = (int)($_POST['attempt_id'] ?? 0);
         $itemId = (int)($_POST['item_id'] ?? 0);
@@ -368,26 +430,6 @@ try {
 
     if ($action === 'get_report') {
         ptv4_json(['ok' => true, 'report' => ptv4_report_payload($pdo, $attempt, $u, [])]);
-    }
-
-    if ($action === 'log_debug_events') {
-        $events = $data['events'] ?? [];
-        if (!is_array($events)) $events = [];
-        foreach ($events as $ev) {
-            if (!is_array($ev)) continue;
-            ptv4_log_debug_event(
-                $pdo,
-                (int)$attempt['user_id'],
-                (string)($ev['type'] ?? 'client_event'),
-                (string)($ev['detail'] ?? ''),
-                is_array($ev['meta'] ?? null) ? $ev['meta'] : null,
-                $attemptId,
-                (int)($ev['item_id'] ?? 0) ?: null,
-                (int)$attempt['cohort_id'],
-                (int)$attempt['lesson_id']
-            );
-        }
-        ptv4_json(['ok' => true, 'logged' => count($events)]);
     }
 
     if ($action === 'submit_feedback') {

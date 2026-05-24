@@ -979,6 +979,73 @@ function ptv4_fire_background_prepare(int $testId, string $cookieHeader = ''): v
     pt_prep_fire_background_run($testId, $cookieHeader);
 }
 
+function ptv4_attempt_has_evaluated_responses(PDO $pdo, int $attemptId): bool
+{
+    try {
+        $st = $pdo->prepare("
+            SELECT COUNT(*) FROM progress_test_oral_item_responses
+            WHERE attempt_id = ? AND evaluated_at IS NOT NULL
+        ");
+        $st->execute([$attemptId]);
+        return ((int)$st->fetchColumn()) > 0;
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+/**
+ * Roll an oral session back to prepared/ready when no evaluated answers exist yet.
+ */
+function ptv4_rollback_prepared_session(PDO $pdo, array $attempt, string $reason = 'client_rollback'): array
+{
+    $attemptId = (int)$attempt['id'];
+    $status = (string)($attempt['status'] ?? '');
+    if (in_array($status, ['completed', 'failed'], true)) {
+        return ['ok' => true, 'skipped' => true, 'reason' => 'terminal_status'];
+    }
+    if (ptv4_attempt_has_evaluated_responses($pdo, $attemptId)) {
+        return ['ok' => true, 'skipped' => true, 'reason' => 'has_evaluated_responses'];
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare('DELETE FROM progress_test_oral_item_responses WHERE attempt_id = ?')->execute([$attemptId]);
+        $pdo->prepare('DELETE FROM progress_test_v4_card_sessions WHERE attempt_id = ?')->execute([$attemptId]);
+        $pdo->prepare('DELETE FROM progress_test_v4_answer_chunks WHERE attempt_id = ?')->execute([$attemptId]);
+        $pdo->prepare("
+            UPDATE progress_test_items_v2
+            SET transcript_text = NULL, is_correct = NULL, score_points = NULL, max_points = NULL, updated_at = NOW()
+            WHERE test_id = ?
+        ")->execute([$attemptId]);
+        $pdo->prepare("
+            UPDATE progress_tests_v2
+            SET status = 'ready',
+                score_pct = NULL,
+                progress_pct = 100,
+                pass_gate_met = 0,
+                counts_as_unsat = 0,
+                formal_result_code = NULL,
+                formal_result_label = NULL,
+                status_text = 'Progress test ready (session rolled back).',
+                started_at = NULL,
+                completed_at = NULL,
+                timing_status = 'unknown',
+                updated_at = NOW()
+            WHERE id = ?
+              AND status NOT IN ('completed','failed')
+        ")->execute([$attemptId]);
+        ptv4_log_event($pdo, $attemptId, null, (int)$attempt['user_id'], 'system', 'oral_session_rolled_back', $reason);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+
+    return ['ok' => true, 'rolled_back' => true, 'reason' => $reason];
+}
+
 function ptv4_ensure_prepared_attempt(PDO $pdo, array $u, int $cohortId, int $lessonId, string $cookieHeader = ''): array
 {
     require_once __DIR__ . '/progress_test_prep.php';
