@@ -43,7 +43,7 @@ function cw_header(string $title = ''): void
     $navRole = cw_effective_navigation_role($u);
     $navStudentPreviewId = cw_admin_navigation_student_preview_id($pdo, $u);
 
-    $navHtml = cw_render_navigation($navRole, $path, $roleLabel, $navStudentPreviewId);
+    $navHtml = cw_render_navigation($navRole, $path, $roleLabel, $navStudentPreviewId, $pdo, is_array($u) ? $u : null);
     ?>
 <!doctype html>
 <html>

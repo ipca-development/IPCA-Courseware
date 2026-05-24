@@ -1,5 +1,3 @@
--- Remote progress test authorization (off-site school network)
-
 CREATE TABLE IF NOT EXISTS student_remote_test_permissions (
   id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   student_id BIGINT UNSIGNED NOT NULL,

@@ -29,9 +29,15 @@ function cw_nav_is_current(string $href, string $currentPath): bool
 
 function cw_nav_item_is_current(array $item, string $currentPath): bool
 {
+    $matchQuery = isset($item['match_query']) && is_array($item['match_query'])
+        ? $item['match_query']
+        : null;
+
     $href = (string)($item['href'] ?? '');
     if ($href !== '' && cw_nav_is_current($href, $currentPath)) {
-        return true;
+        if ($matchQuery === null || cw_nav_query_params_match($matchQuery)) {
+            return true;
+        }
     }
 
     $matchPaths = isset($item['match_paths']) && is_array($item['match_paths'])
@@ -43,12 +49,156 @@ function cw_nav_item_is_current(array $item, string $currentPath): bool
             continue;
         }
 
-        if (rtrim($matchPath, '/') === rtrim($currentPath, '/')) {
+        if (rtrim($matchPath, '/') !== rtrim($currentPath, '/')) {
+            continue;
+        }
+
+        if ($matchQuery === null || cw_nav_query_params_match($matchQuery)) {
             return true;
         }
     }
 
     return false;
+}
+
+function cw_nav_current_query_params(): array
+{
+    $query = parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_QUERY);
+    if (!is_string($query) || $query === '') {
+        return [];
+    }
+
+    parse_str($query, $params);
+    return is_array($params) ? $params : [];
+}
+
+function cw_nav_query_params_match(array $required): bool
+{
+    $current = cw_nav_current_query_params();
+    foreach ($required as $key => $value) {
+        if (!array_key_exists($key, $current) || (string)$current[$key] !== (string)$value) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function cw_nav_program_label(array $row): string
+{
+    $label = trim((string)($row['program_name'] ?? ''));
+    if ($label === '') {
+        $label = trim((string)($row['program_key'] ?? ''));
+    }
+    if ($label === '') {
+        $label = 'Training Program';
+    }
+
+    return $label;
+}
+
+function cw_nav_student_program_course_items(PDO $pdo, int $userId): array
+{
+    if ($userId <= 0) {
+        return [];
+    }
+
+    $stmt = $pdo->prepare("
+        SELECT
+            co.id AS cohort_id,
+            co.name AS cohort_name,
+            p.name AS program_name,
+            p.program_key
+        FROM cohort_students cs
+        JOIN cohorts co ON co.id = cs.cohort_id
+        LEFT JOIN programs p ON p.id = co.program_id
+        WHERE cs.user_id = ?
+        ORDER BY p.name ASC, co.name ASC, co.id DESC
+    ");
+    $stmt->execute([$userId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) {
+        return [];
+    }
+
+    $items = [];
+    $labelCounts = [];
+
+    foreach ($rows as $row) {
+        $cohortId = (int)($row['cohort_id'] ?? 0);
+        if ($cohortId <= 0) {
+            continue;
+        }
+
+        $baseLabel = cw_nav_program_label($row);
+        $labelCounts[$baseLabel] = (int)($labelCounts[$baseLabel] ?? 0) + 1;
+    }
+
+    foreach ($rows as $row) {
+        $cohortId = (int)($row['cohort_id'] ?? 0);
+        if ($cohortId <= 0) {
+            continue;
+        }
+
+        $baseLabel = cw_nav_program_label($row);
+        $label = $baseLabel;
+        if (($labelCounts[$baseLabel] ?? 0) > 1) {
+            $cohortName = trim((string)($row['cohort_name'] ?? ''));
+            $label = $cohortName !== '' ? ($baseLabel . ' · ' . $cohortName) : ($baseLabel . ' #' . $cohortId);
+        }
+
+        $items[] = [
+            'key' => 'course_cohort_' . $cohortId,
+            'label' => $label,
+            'icon' => 'theory',
+            'href' => '/student/course.php?cohort_id=' . $cohortId,
+            'match_paths' => [
+                '/student/course.php',
+            ],
+            'match_query' => [
+                'cohort_id' => (string)$cohortId,
+            ],
+        ];
+    }
+
+    return $items;
+}
+
+function cw_nav_inject_student_program_links(array $entries, PDO $pdo, int $userId): array
+{
+    $programItems = cw_nav_student_program_course_items($pdo, $userId);
+    if (!$programItems) {
+        return $entries;
+    }
+
+    foreach ($entries as $index => $entry) {
+        if (($entry['key'] ?? '') !== 'theory_training') {
+            continue;
+        }
+
+        $children = cw_nav_child_items($entry);
+        if (!$children) {
+            continue;
+        }
+
+        $newChildren = [];
+        foreach ($children as $child) {
+            $newChildren[] = $child;
+            if (($child['key'] ?? '') === 'my_courses') {
+                foreach ($programItems as $programItem) {
+                    $newChildren[] = $programItem;
+                }
+            }
+        }
+
+        if (isset($entry['children']) && is_array($entry['children'])) {
+            $entries[$index]['children'] = $newChildren;
+        } elseif (isset($entry['items']) && is_array($entry['items'])) {
+            $entries[$index]['items'] = $newChildren;
+        }
+    }
+
+    return $entries;
 }
 
 function cw_nav_child_items(array $item): array
@@ -166,9 +316,20 @@ function cw_nav_filter_items(array $items): array
     return $filtered;
 }
 
-function cw_render_navigation(string $role, string $currentPath, string $roleLabel = '', int $adminStudentPreviewUserId = 0): string
+function cw_render_navigation(
+    string $role,
+    string $currentPath,
+    string $roleLabel = '',
+    int $adminStudentPreviewUserId = 0,
+    ?PDO $pdo = null,
+    ?array $navUser = null
+): string
 {
     $entries = cw_nav_items_for_role($role);
+    if ($role === 'student' && $pdo instanceof PDO && is_array($navUser)) {
+        $studentUserId = cw_student_view_user_id($pdo, $navUser);
+        $entries = cw_nav_inject_student_program_links($entries, $pdo, $studentUserId);
+    }
     $entries = cw_nav_filter_items($entries);
 
     if (!$entries) {

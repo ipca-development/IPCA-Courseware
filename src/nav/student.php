@@ -36,7 +36,6 @@ return [
                 'href' => '/student/courses.php',
                 'match_paths' => [
                     '/student/courses.php',
-                    '/student/course.php',
                 ],
             ],
             [
