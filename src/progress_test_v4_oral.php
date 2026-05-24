@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/openai.php';
 require_once __DIR__ . '/courseware_progression_v2.php';
 require_once __DIR__ . '/progress_test_access.php';
+require_once __DIR__ . '/progress_test_bank.php';
 
 function ptv4_json(array $payload, int $code = 200): void
 {
@@ -1129,6 +1130,11 @@ function ptv4_store_evaluation(PDO $pdo, array $attempt, array $item, array $eva
             WHERE id = ?
         ")->execute([$evaluatedAnswer, $isCorrect, (int)round($scorePct), $itemId]);
         ptv4_save_card_state($pdo, $attemptId, $itemId, $userId, 'complete', $evaluatedAnswer);
+
+        $bankQuestionId = (int)($item['bank_question_id'] ?? 0);
+        if ($bankQuestionId > 0) {
+            pt_bank_record_first_attempt($pdo, $bankQuestionId, $userId, $attemptId, $scorePct);
+        }
     }
 }
 

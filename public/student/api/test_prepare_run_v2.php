@@ -2,6 +2,8 @@
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/openai.php';
 require_once __DIR__ . '/../../../src/progress_test_prep.php';
+require_once __DIR__ . '/../../../src/progress_test_questions.php';
+require_once __DIR__ . '/../../../src/progress_test_bank.php';
 
 cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
@@ -160,348 +162,31 @@ function tts_generate_local(string $text, string $file): void {
 }
 
 function clamp_questions(array $questions, int $target): array {
-    $out = [];
-    foreach ($questions as $q) {
-        if (!is_array($q)) continue;
-        $out[] = $q;
-    }
-    if (count($out) > $target) $out = array_slice($out, 0, $target);
-    return $out;
+    return ptq_clamp_questions($questions, $target);
 }
 
 function get_progress_test_question_count(PDO $pdo): int {
-    try {
-        $st = $pdo->prepare("
-            SELECT value_text
-            FROM system_policy_values
-            WHERE policy_key = 'progress_test_question_count'
-              AND is_active = 1
-              AND scope_type = 'global'
-              AND scope_id IS NULL
-            ORDER BY id DESC
-            LIMIT 1
-        ");
-        $st->execute();
-
-        $raw = $st->fetchColumn();
-        $val = (int)trim((string)$raw);
-
-        if ($val >= 1 && $val <= 20) {
-            return $val;
-        }
-    } catch (Throwable $e) {}
-
-    return 5;
+    return ptq_get_question_count($pdo);
 }
 
 function normalize_generated_questions(array $questions): array {
-    $out = [];
-    foreach ($questions as $q) {
-        if (!is_array($q)) continue;
-
-        $kind = trim((string)($q['kind'] ?? 'yesno'));
-        if (!in_array($kind, ['yesno', 'mcq', 'open'], true)) {
-            $kind = 'open';
-        }
-
-        $prompt = trim((string)($q['prompt'] ?? ''));
-        if ($prompt === '') continue;
-
-        $options = $q['options'] ?? [];
-        if (!is_array($options)) $options = [];
-
-        $correct = $q['correct'] ?? [];
-        if (!is_array($correct)) $correct = [];
-
-        $correct = array_merge([
-            'value' => null,
-            'answer_text' => null,
-            'alternatives' => [],
-            'type' => null,
-            'key_points' => [],
-            'min_points_to_pass' => null
-        ], $correct);
-
-        if (!is_array($correct['alternatives'])) $correct['alternatives'] = [];
-        if (!is_array($correct['key_points'])) $correct['key_points'] = [];
-
-        if ($kind === 'yesno') {
-            $options = [];
-            $correct['answer_text'] = null;
-            $correct['alternatives'] = [];
-            $correct['type'] = null;
-            $correct['key_points'] = [];
-            $correct['min_points_to_pass'] = null;
-            $correct['value'] = (bool)$correct['value'];
-        } elseif ($kind === 'mcq') {
-            if (count($options) > 2) $options = array_slice($options, 0, 2);
-            $correct['value'] = null;
-            $correct['type'] = 'oral_choice';
-            $correct['key_points'] = [];
-            $correct['min_points_to_pass'] = null;
-        } else {
-            $options = [];
-            $correct['value'] = null;
-            $correct['answer_text'] = null;
-            $correct['alternatives'] = [];
-            $correct['type'] = 'rubric';
-            if (count($correct['key_points']) > 6) {
-                $correct['key_points'] = array_slice($correct['key_points'], 0, 6);
-            }
-            if ((int)$correct['min_points_to_pass'] < 1) {
-                $correct['min_points_to_pass'] = max(1, min(3, count($correct['key_points'])));
-            } else {
-                $correct['min_points_to_pass'] = (int)$correct['min_points_to_pass'];
-            }
-        }
-
-        $out[] = [
-            'kind' => $kind,
-            'prompt' => $prompt,
-            'options' => array_values($options),
-            'correct' => $correct
-        ];
-    }
-    return $out;
+    return ptq_normalize_questions($questions);
 }
 
 function question_schema(): array {
-    return [
-        "type" => "object",
-        "additionalProperties" => false,
-        "properties" => [
-            "questions" => [
-                "type" => "array",
-                "items" => [
-                    "type" => "object",
-                    "additionalProperties" => false,
-                    "properties" => [
-                        "kind" => [
-                            "type" => "string",
-                            "enum" => ["yesno", "mcq", "open"]
-                        ],
-                        "prompt" => [
-                            "type" => "string"
-                        ],
-                        "options" => [
-                            "type" => "array",
-                            "items" => ["type" => "string"]
-                        ],
-                        "correct" => [
-                            "type" => "object",
-                            "additionalProperties" => false,
-                            "properties" => [
-                                "value" => ["type" => ["boolean", "null"]],
-                                "answer_text" => ["type" => ["string", "null"]],
-                                "alternatives" => [
-                                    "type" => "array",
-                                    "items" => ["type" => "string"]
-                                ],
-                                "type" => ["type" => ["string", "null"]],
-                                "key_points" => [
-                                    "type" => "array",
-                                    "items" => ["type" => "string"]
-                                ],
-                                "min_points_to_pass" => ["type" => ["integer", "null"]]
-                            ],
-                            "required" => ["value", "answer_text", "alternatives", "type", "key_points", "min_points_to_pass"]
-                        ]
-                    ],
-                    "required" => ["kind", "prompt", "options", "correct"]
-                ]
-            ]
-        ],
-        "required" => ["questions"]
-    ];
+    return ptq_question_schema();
 }
 
 function ai_prompt_fetch(PDO $pdo, string $promptKey, string $fallback): string {
-    try {
-        $st = $pdo->prepare("
-            SELECT prompt_text
-            FROM ai_prompts
-            WHERE prompt_key = ?
-            ORDER BY id DESC
-            LIMIT 1
-        ");
-        $st->execute([$promptKey]);
-        $txt = $st->fetchColumn();
-        if (is_string($txt) && trim($txt) !== '') {
-            return trim($txt);
-        }
-    } catch (Throwable $e) {
-        // keep fallback silently
-    }
-    return $fallback;
+    return ptq_ai_prompt_fetch($pdo, $promptKey, $fallback);
 }
 
 function generate_oral_questions(PDO $pdo, string $truth, string $summary): array {
-    $systemFallback = <<<'TXT'
-You are generating an oral aviation progress test.
-
-Create exactly {{QUESTION_COUNT}} oral-friendly questions.
-Use ONLY the lesson narration text as truth.
-Use summary only to detect misconceptions.
-
-CRITICAL RULES:
-- Do NOT create classic A/B/C/D letter-answer questions.
-- Do NOT create questions where the student would answer only with one letter.
-- Do NOT leak the answer inside the wording.
-- Do NOT create ambiguous yes/no questions.
-- Do NOT ask trick questions.
-- Keep them natural for spoken answers.
-
-Use only these kinds:
-1. yesno
-2. mcq
-3. open
-
-FORMAT RULES:
-- yesno:
-  answer should be yes/no and ideally a short explanation
-  options = []
-  correct.value = true/false
-  correct.answer_text = null
-  correct.alternatives = []
-  correct.type = null
-  correct.key_points = []
-  correct.min_points_to_pass = null
-
-- mcq:
-  exactly 2 spoken options
-  student should answer with the actual concept/term, not a letter
-  this is an oral-choice question, not an A/B/C/D question
-  correct.value = null
-  correct.answer_text = preferred exact spoken answer
-  correct.alternatives = close valid spoken variants
-  correct.type = oral_choice
-  correct.key_points = []
-  correct.min_points_to_pass = null
-
-- open:
-  options = []
-  correct.value = null
-  correct.answer_text = null
-  correct.alternatives = []
-  correct.type = rubric
-  correct.key_points = 3 to 6 short rubric items
-  correct.min_points_to_pass = integer
-
-TARGET MIX:
-- balanced mix of yesno, mcq, and open
-- prefer more open questions for higher counts
-TXT;
-
-    $target = get_progress_test_question_count($pdo);
-
-    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_generate_questions_system', $systemFallback);
-    $systemPrompt = str_replace('{{QUESTION_COUNT}}', (string)$target, $systemPrompt);
-
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            [
-                "role" => "system",
-                "content" => [
-                    ["type" => "input_text", "text" => $systemPrompt]
-                ]
-            ],
-            [
-                "role" => "user",
-                "content" => [
-                    ["type" => "input_text", "text" =>
-                        "LESSON NARRATION:\n" . $truth . "\n\nSUMMARY:\n" . $summary
-                    ]
-                ]
-            ]
-        ],
-        "text" => [
-            "format" => [
-                "type" => "json_schema",
-                "name" => "ipca_questions_first_pass",
-                "schema" => question_schema(),
-                "strict" => true
-            ]
-        ]
-    ];
-
-    $r = cw_openai_responses($payload);
-    $j = cw_openai_extract_json_text($r);
-    $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
-
-    return normalize_generated_questions(clamp_questions($q, $target));
+    return ptq_generate_oral_questions($pdo, $truth, $summary);
 }
 
 function validate_and_rewrite_questions(PDO $pdo, string $truth, array $questions): array {
-    $systemFallback = <<<'TXT'
-You are reviewing oral aviation test questions for quality.
-
-You will receive candidate questions.
-Your job is to return a corrected final set of {{QUESTION_COUNT}} questions.
-
-REVIEW RULES:
-- Remove ambiguity.
-- Remove answer leakage.
-- Remove leading wording.
-- Remove questions that already contain the answer.
-- Remove awkward oral phrasing.
-- Remove questions where multiple interpretations could unfairly score the student wrong.
-- Keep the question answerable from the lesson narration only.
-- Keep each question concise and orally natural.
-- Preserve the same schema.
-- If a question is good, keep it.
-- If a question is weak, rewrite it.
-- Do not invent facts outside the narration.
-
-IMPORTANT:
-- Never include the answer in the prompt.
-- Never use A/B/C/D style.
-- Prefer precise spoken questions.
-- For nuanced concepts, prefer open or mcq over weak yes/no.
-
-Return exactly {{QUESTION_COUNT}} final cleaned questions.
-TXT;
-
-    $target = get_progress_test_question_count($pdo);
-
-    $systemPrompt = ai_prompt_fetch($pdo, 'progress_test_validate_questions_system', $systemFallback);
-    $systemPrompt = str_replace('{{QUESTION_COUNT}}', (string)$target, $systemPrompt);
-
-    $payload = [
-        "model" => cw_openai_model(),
-        "input" => [
-            [
-                "role" => "system",
-                "content" => [
-                    ["type" => "input_text", "text" => $systemPrompt]
-                ]
-            ],
-            [
-                "role" => "user",
-                "content" => [
-                    ["type" => "input_text", "text" =>
-                        "LESSON NARRATION:\n" . $truth .
-                        "\n\nCANDIDATE QUESTIONS JSON:\n" .
-                        json_encode(['questions' => $questions], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-                    ]
-                ]
-            ]
-        ],
-        "text" => [
-            "format" => [
-                "type" => "json_schema",
-                "name" => "ipca_questions_second_pass",
-                "schema" => question_schema(),
-                "strict" => true
-            ]
-        ]
-    ];
-
-    $r = cw_openai_responses($payload);
-    $j = cw_openai_extract_json_text($r);
-    $q = is_array($j['questions'] ?? null) ? $j['questions'] : [];
-
-    return normalize_generated_questions(clamp_questions($q, $target));
+    return ptq_validate_and_rewrite_questions($pdo, $truth, $questions);
 }
 
 function presign_spaces_put_via_internal_endpoint(string $cookieHeader, array $payload): array {
@@ -698,131 +383,171 @@ try {
     if ($summary === '') $summary = "(No student summary.)";
 
     $target = get_progress_test_question_count($pdo);
+    $bankRows = [];
+    $usedBank = false;
 
-    set_prepare_progress($pdo, $testId, 15, 'Generating oral questions...');
-    $q = generate_oral_questions($pdo, $truth, $summary);
-
-    if (count($q) < (int)floor($target * 0.5)) {
-        set_prepare_progress($pdo, $testId, 30, 'Low question count detected, applying fallback...');
-    }
-
-    set_prepare_progress($pdo, $testId, 35, 'Checking question quality...');
-
-    if (count($q) >= 3) {
-        $q2 = validate_and_rewrite_questions($pdo, $truth, $q);
-
-        if (count($q2) >= count($q)) {
-            $q = $q2;
+    set_prepare_progress($pdo, $testId, 12, 'Checking lesson question bank...');
+    $bankReady = pt_bank_is_ready_for_prep($pdo, $lessonId);
+    if ($bankReady['ready']) {
+        try {
+            $bankRows = pt_bank_sample_for_attempt($pdo, $lessonId, $userId, $target);
+            if (count($bankRows) >= $target) {
+                $usedBank = true;
+                set_prepare_progress($pdo, $testId, 45, 'Sampling questions from lesson bank...');
+            }
+        } catch (Throwable $e) {
+            $bankRows = [];
         }
     }
 
-    set_prepare_progress($pdo, $testId, 50, 'Saving questions...');
-
-    if (!is_array($q) || count($q) < 1) {
-        throw new RuntimeException('AI returned zero valid questions.');
-    }
-
-    if (count($q) < $target) {
-        $fallback = [
-            [
-                'kind' => 'yesno',
-                'prompt' => 'Is the checklist used to reduce errors? Answer yes or no, and briefly explain.',
-                'options' => [],
-                'correct' => [
-                    'value' => true,
-                    'answer_text' => null,
-                    'alternatives' => [],
-                    'type' => null,
-                    'key_points' => [],
-                    'min_points_to_pass' => null
-                ]
-            ],
-            [
-                'kind' => 'mcq',
-                'prompt' => 'Is the role of the wings to produce lift or to turn the airplane left and right?',
-                'options' => ['produce lift', 'turn the airplane left and right'],
-                'correct' => [
-                    'value' => null,
-                    'answer_text' => 'produce lift',
-                    'alternatives' => ['lift', 'to produce lift'],
-                    'type' => 'oral_choice',
-                    'key_points' => [],
-                    'min_points_to_pass' => null
-                ]
-            ],
-            [
-                'kind' => 'open',
-                'prompt' => 'Explain why pilots use checklists.',
-                'options' => [],
-                'correct' => [
-                    'value' => null,
-                    'answer_text' => null,
-                    'alternatives' => [],
-                    'type' => 'rubric',
-                    'key_points' => ['reduce errors', 'standardize', 'safety'],
-                    'min_points_to_pass' => 2
-                ]
-            ],
-        ];
-
-        $i = 0;
-        while (count($q) < $target) {
-            $q[] = $fallback[$i % count($fallback)];
-            $i++;
+    if (!$usedBank) {
+        if (!$bankReady['ready']) {
+            set_prepare_progress($pdo, $testId, 15, 'Question bank not ready — generating questions...');
         }
 
-        $q = normalize_generated_questions($q);
+        set_prepare_progress($pdo, $testId, 15, 'Generating oral questions...');
+        $q = generate_oral_questions($pdo, $truth, $summary);
+
+        if (count($q) < (int)floor($target * 0.5)) {
+            set_prepare_progress($pdo, $testId, 30, 'Low question count detected, applying fallback...');
+        }
+
+        set_prepare_progress($pdo, $testId, 35, 'Checking question quality...');
+
+        if (count($q) >= 3) {
+            $q2 = validate_and_rewrite_questions($pdo, $truth, $q);
+
+            if (count($q2) >= count($q)) {
+                $q = $q2;
+            }
+        }
+
+        set_prepare_progress($pdo, $testId, 50, 'Saving questions...');
+
+        if (!is_array($q) || count($q) < 1) {
+            throw new RuntimeException('AI returned zero valid questions.');
+        }
+
+        if (count($q) < $target) {
+            $fallback = [
+                [
+                    'kind' => 'yesno',
+                    'prompt' => 'Is the checklist used to reduce errors? Answer yes or no, and briefly explain.',
+                    'options' => [],
+                    'correct' => [
+                        'value' => true,
+                        'answer_text' => null,
+                        'alternatives' => [],
+                        'type' => null,
+                        'key_points' => [],
+                        'min_points_to_pass' => null
+                    ]
+                ],
+                [
+                    'kind' => 'mcq',
+                    'prompt' => 'Is the role of the wings to produce lift or to turn the airplane left and right?',
+                    'options' => ['produce lift', 'turn the airplane left and right'],
+                    'correct' => [
+                        'value' => null,
+                        'answer_text' => 'produce lift',
+                        'alternatives' => ['lift', 'to produce lift'],
+                        'type' => 'oral_choice',
+                        'key_points' => [],
+                        'min_points_to_pass' => null
+                    ]
+                ],
+                [
+                    'kind' => 'open',
+                    'prompt' => 'Explain why pilots use checklists.',
+                    'options' => [],
+                    'correct' => [
+                        'value' => null,
+                        'answer_text' => null,
+                        'alternatives' => [],
+                        'type' => 'rubric',
+                        'key_points' => ['reduce errors', 'standardize', 'safety'],
+                        'min_points_to_pass' => 2
+                    ]
+                ],
+            ];
+
+            $i = 0;
+            while (count($q) < $target) {
+                $q[] = $fallback[$i % count($fallback)];
+                $i++;
+            }
+
+            $q = normalize_generated_questions($q);
+        }
+    } else {
+        set_prepare_progress($pdo, $testId, 50, 'Saving bank questions...');
     }
 
     $pdo->prepare("DELETE FROM progress_test_items_v2 WHERE test_id=?")->execute([$testId]);
 
     $ins = $pdo->prepare("
         INSERT INTO progress_test_items_v2
-        (test_id, idx, kind, prompt, options_json, correct_json)
-        VALUES (?,?,?,?,?,?)
+        (test_id, idx, kind, prompt, options_json, correct_json, bank_question_id)
+        VALUES (?,?,?,?,?,?,?)
     ");
 
     $idx = 1;
-    foreach ($q as $qq) {
-        $kind = trim((string)($qq['kind'] ?? 'yesno'));
-        $prompt = trim((string)($qq['prompt'] ?? ''));
-        if ($prompt === '') $prompt = 'Question ' . $idx;
+    if ($usedBank) {
+        foreach ($bankRows as $bq) {
+            $kind = trim((string)($bq['kind'] ?? 'open'));
+            $prompt = trim((string)($bq['prompt'] ?? ''));
+            if ($prompt === '') $prompt = 'Question ' . $idx;
+            $options = (string)($bq['options_json'] ?? '[]');
+            $correct = (string)($bq['correct_json'] ?? '{}');
+            $bankQid = (int)($bq['id'] ?? 0);
 
-        $optionsArr = $qq['options'] ?? [];
-        if (!is_array($optionsArr)) $optionsArr = [];
-
-        $correctArr = $qq['correct'] ?? [];
-        if (!is_array($correctArr)) {
-            $correctArr = [
-                'value' => null,
-                'answer_text' => null,
-                'alternatives' => [],
-                'type' => null,
-                'key_points' => [],
-                'min_points_to_pass' => null
-            ];
+            $ins->execute([$testId, $idx, $kind, $prompt, $options ?: '[]', $correct ?: '{}', $bankQid > 0 ? $bankQid : null]);
+            $idx++;
+            if ($idx > $target) break;
         }
+    } else {
+        foreach ($q as $qq) {
+            $kind = trim((string)($qq['kind'] ?? 'yesno'));
+            $prompt = trim((string)($qq['prompt'] ?? ''));
+            if ($prompt === '') $prompt = 'Question ' . $idx;
 
-        $options = json_encode($optionsArr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $correct = json_encode($correctArr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $optionsArr = $qq['options'] ?? [];
+            if (!is_array($optionsArr)) $optionsArr = [];
 
-        $ins->execute([
-            $testId,
-            $idx,
-            $kind,
-            $prompt,
-            $options ?: '[]',
-            $correct ?: '{}'
-        ]);
+            $correctArr = $qq['correct'] ?? [];
+            if (!is_array($correctArr)) {
+                $correctArr = [
+                    'value' => null,
+                    'answer_text' => null,
+                    'alternatives' => [],
+                    'type' => null,
+                    'key_points' => [],
+                    'min_points_to_pass' => null
+                ];
+            }
 
-        $idx++;
-        if ($idx > $target) break;
+            $options = json_encode($optionsArr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $correct = json_encode($correctArr, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+            $ins->execute([
+                $testId,
+                $idx,
+                $kind,
+                $prompt,
+                $options ?: '[]',
+                $correct ?: '{}',
+                null
+            ]);
+
+            $idx++;
+            if ($idx > $target) break;
+        }
     }
 
     set_prepare_progress($pdo, $testId, 58, 'Preparing audio files...');
 
     $items = $pdo->prepare("
-        SELECT id, idx, prompt, kind, options_json
+        SELECT id, idx, prompt, kind, options_json, bank_question_id
         FROM progress_test_items_v2
         WHERE test_id=?
         ORDER BY idx
@@ -846,6 +571,59 @@ try {
     $totalAudio = 1 + count($itemRows);
     $doneAudio = 0;
 
+    if ($usedBank) {
+        set_prepare_progress($pdo, $testId, 58, 'Using cached bank audio...');
+        try {
+            $introUrl = pt_bank_ensure_generic_intro($pdo);
+        } catch (Throwable $e) {
+            $introText = pt_bank_generic_intro_text();
+            $introLocal = $testDir . '/intro.mp3';
+            tts_generate_local($introText, $introLocal);
+            $introPresign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
+                'test_id' => $testId,
+                'kind'    => 'intro',
+                'ext'     => 'mp3'
+            ]);
+            upload_file_to_presigned_put((string)$introPresign['url'], $introLocal, 'audio/mpeg');
+            $introUrl = (string)$introPresign['public_url'];
+        }
+
+        $bankAudioById = [];
+        foreach ($bankRows as $bq) {
+            $bankAudioById[(int)$bq['id']] = trim((string)($bq['audio_url'] ?? ''));
+        }
+
+        $doneAudio = 1;
+        foreach ($itemRows as $it) {
+            $itemId = (int)$it['id'];
+            $itemIds[] = $itemId;
+            $bankQid = (int)($it['bank_question_id'] ?? 0);
+            $url = $bankQid > 0 ? ($bankAudioById[$bankQid] ?? '') : '';
+            if ($url === '') {
+                $spoken = pt_prep_spoken_question($it, $totalQuestions);
+                $cached = pt_prep_question_audio_cache_get($pdo, $spoken);
+                if ($cached && trim((string)$cached['audio_url']) !== '') {
+                    $url = (string)$cached['audio_url'];
+                } else {
+                    $localFile = $testDir . '/q_' . $itemId . '.mp3';
+                    tts_generate_local($spoken, $localFile);
+                    $presign = presign_spaces_put_via_internal_endpoint($cookieHeader, [
+                        'test_id' => $testId,
+                        'kind'    => 'question',
+                        'item_id' => $itemId,
+                        'ext'     => 'mp3'
+                    ]);
+                    upload_file_to_presigned_put((string)$presign['url'], $localFile, 'audio/mpeg');
+                    $url = (string)$presign['public_url'];
+                    pt_prep_question_audio_cache_store($pdo, $spoken, $url);
+                }
+            }
+            $questionUrls[$itemId] = $url;
+            $doneAudio++;
+            $pct = 58 + (int)floor(($doneAudio / $totalAudio) * 40);
+            set_prepare_progress($pdo, $testId, $pct, 'Prepared audio ' . $doneAudio . ' of ' . $totalAudio . '...');
+        }
+    } else {
     $introText = "Hello {$firstName}. Click Ready when you want to start your progress test.";
     $introLocal = $testDir . '/intro.mp3';
     tts_generate_local($introText, $introLocal);
@@ -895,6 +673,7 @@ try {
         $doneAudio++;
         $pct = 58 + (int)floor(($doneAudio / $totalAudio) * 40);
         set_prepare_progress($pdo, $testId, $pct, 'Uploading audio ' . $doneAudio . ' of ' . $totalAudio . '...');
+    }
     }
 
     $manifest = [

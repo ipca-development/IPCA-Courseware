@@ -157,6 +157,7 @@ cw_header('Bulk enrich');
       <label><input type="checkbox" id="becDoNarrEs" checked> 4) Spanish narration (translate narration EN → ES)</label>
       <label><input type="checkbox" id="becDoRefs" checked> 5) PHAK + ACS references</label>
       <label><input type="checkbox" id="becDoHotspots" checked> 6) Video hotspots (manifest)</label>
+      <label><input type="checkbox" id="becDoPtBank"> 7) Progress test question bank (audio pool)</label>
       <label class="muted" style="grid-column:1/-1; font-size:12px;">Slide Spanish (2) and narration Spanish (4) are independent. Legacy API clients that only send <code>do_narration</code> + <code>do_es</code> still imply Spanish narration.</label>
       <label><input type="checkbox" id="becSkipExisting" checked> Skip slides that already have EN extract</label>
       <p class="muted" style="grid-column:1/-1; font-size:12px; margin:0;">
@@ -170,6 +171,7 @@ cw_header('Bulk enrich');
       <button type="button" class="btn secondary" id="becBtnReload">Refresh list</button>
       <button type="button" class="btn secondary" id="becBtnPipeline">Run recommended 3‑phase pipeline</button>
       <button type="button" class="btn" id="becBtnRun">Start enrichment (selected actions)</button>
+      <button type="button" class="btn secondary" id="becBtnPtBank">Build progress test banks</button>
     </div>
     <p class="muted" style="font-size:12px;margin-top:8px;">
       <strong>Phase 1</strong> vision: English + English narration + references (no slide ES / no narr ES / no hotspots).
@@ -182,6 +184,54 @@ cw_header('Bulk enrich');
     <div class="bec-run-title">Run status</div>
     <div id="becRunStatus" class="bec-run-status">Idle.</div>
     <pre id="becRunLog" class="bec-run-log"></pre>
+  </div>
+
+  <div id="becPtBankWrap" class="bec-hidden" style="margin-top:16px;">
+    <h3 style="margin:0 0 8px; font-size:1rem;">Progress test question banks</h3>
+    <p class="muted" style="font-size:12px;margin:0 0 10px;">
+      Pre-generated oral questions per lesson (5–20 pool). Review quality, listen to audio, retire bad items, and replace one-by-one.
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;">
+      <button type="button" class="btn secondary" id="becPtBankReload">Refresh banks</button>
+      <button type="button" class="btn secondary" id="becPtBankDeleteBad">Delete suggested bad (selected lesson)</button>
+      <span class="muted" id="becPtBankHint"></span>
+    </div>
+    <div class="bec-table-scroll">
+      <table class="bec-grid-table" id="becPtBankTable">
+        <thead>
+          <tr>
+            <th>Lesson</th>
+            <th>Active / target</th>
+            <th>Bank status</th>
+            <th>Student ready</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="becPtBankTbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="ptqModal" class="ptq-modal bec-hidden" aria-hidden="true">
+    <div class="ptq-modal-backdrop" data-ptq-close="1"></div>
+    <div class="ptq-modal-panel" role="dialog" aria-labelledby="ptqModalTitle">
+      <div class="ptq-modal-head">
+        <div>
+          <h3 id="ptqModalTitle" style="margin:0;font-size:1.05rem;">Progress test bank</h3>
+          <div class="muted" id="ptqModalSub" style="font-size:12px;margin-top:4px;"></div>
+        </div>
+        <button type="button" class="btn secondary tiny" data-ptq-close="1">Close</button>
+      </div>
+      <div class="ptq-modal-toolbar">
+        <button type="button" class="btn secondary tiny" id="ptqSelectSuggested">Select suggested bad</button>
+        <button type="button" class="btn secondary tiny" id="ptqClearSel">Clear selection</button>
+        <button type="button" class="btn secondary tiny" id="ptqDeleteSelected">Delete selected</button>
+        <button type="button" class="btn tiny" id="ptqReplaceOne">Replace 1 question</button>
+        <button type="button" class="btn tiny" id="ptqReplaceGap">Replace to target</button>
+      </div>
+      <div id="ptqBanner" class="ptq-banner bec-hidden"></div>
+      <div class="ptq-modal-body" id="ptqCardList"></div>
+    </div>
   </div>
 
   <div id="becTableWrap" class="bec-hidden" style="margin-top:16px;">
@@ -256,6 +306,30 @@ cw_header('Bulk enrich');
 .bec-hidden { display:none !important; }
 .bec-row-flagged { background:#fffbeb; }
 .btn.tiny { font-size:12px; padding:4px 8px; }
+.ptq-modal { position:fixed; inset:0; z-index:1200; display:flex; align-items:center; justify-content:center; padding:16px; }
+.ptq-modal-backdrop { position:absolute; inset:0; background:rgba(15,23,42,.45); }
+.ptq-modal-panel { position:relative; width:min(920px,100%); max-height:90vh; background:#fff; border-radius:12px; box-shadow:0 20px 50px #0003; display:flex; flex-direction:column; overflow:hidden; }
+.ptq-modal-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; padding:14px 16px; border-bottom:1px solid #e2e8f0; }
+.ptq-modal-toolbar { display:flex; flex-wrap:wrap; gap:8px; padding:10px 16px; border-bottom:1px solid #f1f5f9; background:#f8fafc; }
+.ptq-modal-body { overflow:auto; padding:12px 16px 16px; }
+.ptq-banner { margin:0 16px; padding:8px 10px; border-radius:8px; background:#eff6ff; color:#1e3a8a; font-size:13px; }
+.ptq-card { border:1px solid #e2e8f0; border-radius:10px; padding:12px; margin-bottom:10px; background:#fff; }
+.ptq-card-head { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:8px; }
+.ptq-prompt { font-size:14px; line-height:1.45; color:#0f172a; white-space:normal; word-break:break-word; }
+.ptq-stats { font-size:12px; color:#64748b; margin-top:8px; }
+.ptq-type { font-size:11px; font-weight:600; padding:3px 8px; border-radius:999px; background:#e2e8f0; color:#334155; }
+.ptq-type-open { background:#dbeafe; color:#1d4ed8; }
+.ptq-type-choice { background:#ede9fe; color:#6d28d9; }
+.ptq-type-yesno { background:#dcfce7; color:#166534; }
+.ptq-pill { font-size:11px; font-weight:700; padding:3px 8px; border-radius:999px; }
+.ptq-pill-ok { background:#dcfce7; color:#166534; }
+.ptq-pill-easy { background:#fef3c7; color:#b45309; }
+.ptq-pill-hard { background:#fee2e2; color:#b91c1c; }
+.ptq-pill-bad { background:#e5e7eb; color:#374151; }
+.ptq-pill-new { background:#dbeafe; color:#1d4ed8; }
+.ptq-tone-bad { color:#b91c1c; font-weight:700; }
+.ptq-tone-warn { color:#b45309; font-weight:700; }
+.ptq-tone-ok { color:#047857; font-weight:700; }
 </style>
 
 <script>
@@ -277,7 +351,11 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     pageSize: 100,
     lastPayload: null,
     running: false,
-    abortRun: false
+    abortRun: false,
+    ptBankLessons: [],
+    ptqLessonId: 0,
+    ptqLessonTitle: '',
+    ptqQuestions: []
   };
 
   function el(id) { return document.getElementById(id); }
@@ -506,6 +584,7 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
         el('becPageHint').textContent = 'Showing ' + (pag.returned || 0) + ' of ' + (pag.filtered_total || 0)
           + (pag.has_more ? ' · more available' : '');
         scrollToFocusSlideFromUrl();
+        loadPtBankLessons();
       })
       .catch(function () { alert('Network error loading coverage'); });
   }
@@ -597,6 +676,196 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     el('becRunStatus').textContent = msg || (on ? 'Working…' : 'Idle.');
   }
 
+  function ptBankLessonsUrl() {
+    var q = [];
+    if (state.programId > 0) q.push('program_id=' + encodeURIComponent(String(state.programId)));
+    if (state.courseId > 0) q.push('course_id=' + encodeURIComponent(String(state.courseId)));
+    if (state.lessonId > 0) q.push('lesson_id=' + encodeURIComponent(String(state.lessonId)));
+    return '/admin/api/progress_test_bank_lessons.php?' + q.join('&');
+  }
+
+  function ptqTypeClass(kind) {
+    if (kind === 'open') return 'ptq-type-open';
+    if (kind === 'mcq') return 'ptq-type-choice';
+    if (kind === 'yesno') return 'ptq-type-yesno';
+    return '';
+  }
+
+  function ptqPillClass(tone) {
+    return 'ptq-pill ptq-pill-' + (tone || 'new');
+  }
+
+  function loadPtBankLessons() {
+    if (state.programId <= 0 && state.courseId <= 0) {
+      setHidden('becPtBankWrap', true);
+      return;
+    }
+    fetch(ptBankLessonsUrl(), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        state.ptBankLessons = data.lessons || [];
+        renderPtBankLessons();
+        setHidden('becPtBankWrap', false);
+      })
+      .catch(function () {});
+  }
+
+  function renderPtBankLessons() {
+    var tb = el('becPtBankTbody');
+    if (!tb) return;
+    tb.innerHTML = '';
+    state.ptBankLessons.forEach(function (row) {
+      var tr = document.createElement('tr');
+      var toneCls = row.tone === 'bad' ? 'ptq-tone-bad' : (row.tone === 'warn' ? 'ptq-tone-warn' : 'ptq-tone-ok');
+      var ratio = row.active_count + ' / ' + row.recommended_pool_size;
+      tr.innerHTML =
+        '<td><strong>L' + esc(row.external_lesson_id) + '</strong> ' + esc(row.lesson_title) +
+        '<div class="muted" style="font-size:11px;">' + esc(row.course_title) + '</div></td>' +
+        '<td class="' + toneCls + '">' + esc(ratio) + '</td>' +
+        '<td>' + esc(row.bank_status) + (row.fingerprint_ok ? '' : ' · stale content') + '</td>' +
+        '<td>' + (row.ready_for_students ? '<span class="bec-yes">Yes</span>' : '<span class="bec-no">No</span>') + '</td>' +
+        '<td><button type="button" class="btn secondary tiny bec-pt-review" data-lesson="' + row.lesson_id + '" data-title="' + esc(row.lesson_title) + '">Review bank</button></td>';
+      tb.appendChild(tr);
+    });
+    el('becPtBankHint').textContent = state.ptBankLessons.length + ' lesson(s) in scope';
+  }
+
+  function openPtqModal(lessonId, title) {
+    state.ptqLessonId = lessonId;
+    state.ptqLessonTitle = title || ('Lesson ' + lessonId);
+    el('ptqModalTitle').textContent = 'Progress test bank — ' + state.ptqLessonTitle;
+    setHidden('ptqBanner', true);
+    el('ptqModal').classList.remove('bec-hidden');
+    el('ptqModal').setAttribute('aria-hidden', 'false');
+    refreshPtqModal();
+  }
+
+  function closePtqModal() {
+    el('ptqModal').classList.add('bec-hidden');
+    el('ptqModal').setAttribute('aria-hidden', 'true');
+    state.ptqLessonId = 0;
+    loadPtBankLessons();
+  }
+
+  function refreshPtqModal() {
+    if (state.ptqLessonId <= 0) return;
+    fetch('/admin/api/progress_test_bank_list.php?lesson_id=' + encodeURIComponent(String(state.ptqLessonId)), { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) {
+          alert(data && data.error ? data.error : 'Failed to load bank');
+          return;
+        }
+        state.ptqQuestions = data.questions || [];
+        var bank = data.bank || {};
+        el('ptqModalSub').textContent =
+          'Recommended pool: ' + (bank.recommended_pool_size || '—') +
+          ' · Active: ' + (bank.active_count || 0) +
+          ' · Status: ' + (bank.status || '—');
+        renderPtqCards();
+      });
+  }
+
+  function renderPtqCards() {
+    var list = el('ptqCardList');
+    list.innerHTML = '';
+    if (!state.ptqQuestions.length) {
+      list.innerHTML = '<p class="muted">No active questions in this bank yet. Run “Build progress test banks” first.</p>';
+      return;
+    }
+    state.ptqQuestions.forEach(function (q) {
+      var card = document.createElement('div');
+      card.className = 'ptq-card';
+      var quality = q.quality || {};
+      var avg = q.avg_first_score_pct == null ? '—' : (q.avg_first_score_pct + '%');
+      var audio = q.audio_url
+        ? ('<audio controls preload="none" src="' + esc(q.audio_url) + '" style="max-width:100%;height:32px;"></audio>')
+        : '<span class="muted">No audio</span>';
+      card.innerHTML =
+        '<div class="ptq-card-head">' +
+        '<label><input type="checkbox" class="ptq-sel" data-id="' + q.id + '"></label>' +
+        '<span class="' + ptqPillClass(quality.tone) + '">' + esc(quality.label || '—') + '</span>' +
+        '<span class="ptq-type ' + ptqTypeClass(q.kind) + '">' + esc(q.kind_label || q.kind) + '</span>' +
+        '</div>' +
+        '<div class="ptq-prompt">' + esc(q.prompt) + '</div>' +
+        '<div class="ptq-stats">Avg first try: <strong>' + esc(avg) + '</strong> · ' + esc(String(q.first_attempt_count || 0)) + ' students' +
+        (q.validation_score != null ? (' · Admin quality: ' + esc(String(q.validation_score))) : '') +
+        '</div>' +
+        '<div style="margin-top:8px;">' + audio + '</div>';
+      list.appendChild(card);
+    });
+  }
+
+  function ptqSelectedIds() {
+    var ids = [];
+    document.querySelectorAll('#ptqCardList .ptq-sel:checked').forEach(function (c) {
+      var id = parseInt(c.getAttribute('data-id'), 10);
+      if (id > 0) ids.push(id);
+    });
+    return ids;
+  }
+
+  function ptqPostJson(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    }).then(function (r) { return r.json(); });
+  }
+
+  function runPtBankSSE(forceRebuild) {
+    if (state.programId <= 0 && state.courseId <= 0) {
+      alert('Select a program or course first.');
+      return Promise.reject();
+    }
+    setHidden('becRunPanel', false);
+    setRun(true, 'Building progress test banks…');
+    appendLog('PT bank run start…');
+    var fd = new FormData();
+    if (state.programId > 0) fd.append('program_id', String(state.programId));
+    if (state.courseId > 0) fd.append('course_id', String(state.courseId));
+    if (state.lessonId > 0) fd.append('lesson_id', String(state.lessonId));
+    fd.append('batch_offset', '0');
+    fd.append('batch_size', '5');
+    if (forceRebuild) fd.append('force_rebuild', '1');
+
+    return fetch('/admin/api/progress_test_bank_run_sse.php', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (resp) {
+        if (!resp.ok || !resp.body) throw new Error('SSE failed');
+        var reader = resp.body.getReader();
+        var dec = new TextDecoder();
+        var buf = '';
+        function pump() {
+          return reader.read().then(function (chunk) {
+            if (chunk.done) { setRun(false, 'Bank build finished.'); loadPtBankLessons(); return; }
+            buf += dec.decode(chunk.value, { stream: true });
+            var parts = buf.split('\n\n');
+            buf = parts.pop() || '';
+            parts.forEach(function (block) {
+              var evName = 'message';
+              var dataLine = '';
+              block.split('\n').forEach(function (line) {
+                if (line.indexOf('event:') === 0) evName = line.slice(6).trim();
+                if (line.indexOf('data:') === 0) dataLine = line.slice(5).trim();
+              });
+              if (!dataLine) return;
+              try {
+                var data = JSON.parse(dataLine);
+                if (evName === 'step') appendLog('[PT] ' + (data.message || JSON.stringify(data)));
+                if (evName === 'lesson_done') appendLog('[PT] Lesson ' + data.lesson_id + ': +' + (data.added || 0) + ' (active ' + (data.active_count || 0) + ')');
+                if (evName === 'lesson_error') appendLog('[PT] Lesson ' + data.lesson_id + ' error: ' + (data.message || ''));
+                if (evName === 'run_error') appendLog('[PT] Error: ' + (data.message || ''));
+              } catch (e) {}
+            });
+            return pump();
+          });
+        }
+        return pump();
+      });
+  }
+
   function mirrorActions(fd, flags) {
     flags = flags || {};
     function pick(key, elId) {
@@ -617,6 +886,10 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
     if (useNarrEs) fd.append('do_narration_es', '1');
     if (useRefs) fd.append('do_refs', '1');
     if (useHot) fd.append('do_hotspots', '1');
+    var usePtBank = Object.prototype.hasOwnProperty.call(flags || {}, 'pt_bank')
+      ? flags.pt_bank
+      : el('becDoPtBank').checked;
+    if (usePtBank) fd.append('do_pt_bank', '1');
     var skip = Object.prototype.hasOwnProperty.call(flags, 'skip_existing')
       ? flags.skip_existing
       : el('becSkipExisting').checked;
@@ -837,8 +1110,16 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
       function next() {
         if (state.abortRun) { setRun(false, 'Aborted.'); return; }
         if (i >= queue.length) {
-          setRun(false, 'All queued courses finished.');
-          loadCoverage(false);
+          var afterSlides = function () {
+            setRun(false, 'All queued courses finished.');
+            loadCoverage(false);
+          };
+          if (el('becDoPtBank').checked) {
+            appendLog('Starting progress test bank build…');
+            runPtBankSSE(false).then(afterSlides).catch(afterSlides);
+          } else {
+            afterSlides();
+          }
           return;
         }
         var job = queue[i];
@@ -1049,6 +1330,121 @@ var BEC_DATA = <?= json_encode($becEmbed, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG 
       runBatchSSE(fd).then(function () { appendLog('Done slide ' + id); loadCoverage(false); });
     }
   });
+
+  el('becBtnPtBank').onclick = function () {
+    if (!confirm('Build progress test question banks for lessons in scope? Uses AI + TTS.')) return;
+    runPtBankSSE(false);
+  };
+
+  el('becPtBankReload').onclick = function () { loadPtBankLessons(); };
+
+  el('becPtBankDeleteBad').onclick = function () {
+    var lessonId = state.lessonId;
+    if (lessonId <= 0) {
+      alert('Select a single lesson in the toolbar to delete suggested bad questions for that lesson.');
+      return;
+    }
+    openPtqModal(lessonId, '');
+    fetch('/admin/api/progress_test_bank_list.php?lesson_id=' + lessonId, { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) return;
+        var badIds = (data.questions || []).filter(function (q) { return q.suggested_bad; }).map(function (q) { return q.id; });
+        if (!badIds.length) { alert('No suggested bad questions for this lesson.'); return; }
+        if (!confirm('Retire ' + badIds.length + ' suggested bad question(s)?')) return;
+        return ptqPostJson('/admin/api/progress_test_bank_retire.php', { lesson_id: lessonId, question_ids: badIds })
+          .then(function (j) {
+            if (!j || !j.ok) throw new Error((j && j.error) || 'Retire failed');
+            refreshPtqModal();
+            loadPtBankLessons();
+          });
+      })
+      .catch(function (e) { alert(e.message || 'Failed'); });
+  };
+
+  document.getElementById('becPtBankTbody').addEventListener('click', function (ev) {
+    var t = ev.target;
+    if (t.classList.contains('bec-pt-review')) {
+      openPtqModal(parseInt(t.getAttribute('data-lesson'), 10), t.getAttribute('data-title') || '');
+    }
+  });
+
+  document.querySelectorAll('[data-ptq-close]').forEach(function (n) {
+    n.addEventListener('click', closePtqModal);
+  });
+
+  el('ptqSelectSuggested').onclick = function () {
+    document.querySelectorAll('#ptqCardList .ptq-sel').forEach(function (c) {
+      var id = parseInt(c.getAttribute('data-id'), 10);
+      var q = state.ptqQuestions.find(function (x) { return x.id === id; });
+      c.checked = !!(q && q.suggested_bad);
+    });
+  };
+
+  el('ptqClearSel').onclick = function () {
+    document.querySelectorAll('#ptqCardList .ptq-sel').forEach(function (c) { c.checked = false; });
+  };
+
+  el('ptqDeleteSelected').onclick = function () {
+    var ids = ptqSelectedIds();
+    if (!ids.length) { alert('Select at least one question.'); return; }
+    if (!confirm('Retire ' + ids.length + ' selected question(s)?')) return;
+    ptqPostJson('/admin/api/progress_test_bank_retire.php', { lesson_id: state.ptqLessonId, question_ids: ids })
+      .then(function (j) {
+        if (!j || !j.ok) throw new Error((j && j.error) || 'Delete failed');
+        state.ptqQuestions = j.questions || [];
+        var bank = j.bank || {};
+        var gap = Math.max(0, (bank.recommended_pool_size || 0) - (bank.active_count || 0));
+        if (gap > 0) {
+          el('ptqBanner').textContent = ids.length + ' retired. Active: ' + (bank.active_count || 0) + '/' + (bank.recommended_pool_size || 0) + '. Replace ' + gap + ' to restore pool.';
+          setHidden('ptqBanner', false);
+        } else {
+          setHidden('ptqBanner', true);
+        }
+        renderPtqCards();
+        loadPtBankLessons();
+      })
+      .catch(function (e) { alert(e.message || 'Delete failed'); });
+  };
+
+  el('ptqReplaceOne').onclick = function () {
+    if (state.ptqLessonId <= 0) return;
+    el('ptqReplaceOne').disabled = true;
+    ptqPostJson('/admin/api/progress_test_bank_replace_one.php', { lesson_id: state.ptqLessonId, count: 1 })
+      .then(function (j) {
+        if (!j || !j.ok) throw new Error((j && j.error) || 'Replace failed');
+        state.ptqQuestions = j.questions || [];
+        setHidden('ptqBanner', true);
+        renderPtqCards();
+        loadPtBankLessons();
+      })
+      .catch(function (e) { alert(e.message || 'Replace failed'); })
+      .finally(function () { el('ptqReplaceOne').disabled = false; });
+  };
+
+  el('ptqReplaceGap').onclick = function () {
+    if (state.ptqLessonId <= 0) return;
+    var bank = state.ptqQuestions.length ? null : null;
+    fetch('/admin/api/progress_test_bank_list.php?lesson_id=' + state.ptqLessonId, { credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (!data || !data.ok) throw new Error((data && data.error) || 'Load failed');
+        var gap = Math.max(0, (data.bank.recommended_pool_size || 0) - (data.bank.active_count || 0));
+        if (gap <= 0) { alert('Pool is already at or above target.'); return; }
+        if (!confirm('Generate ' + gap + ' replacement question(s)?')) return;
+        el('ptqReplaceGap').disabled = true;
+        return ptqPostJson('/admin/api/progress_test_bank_replace_one.php', { lesson_id: state.ptqLessonId, count: gap })
+          .then(function (j) {
+            if (!j || !j.ok) throw new Error((j && j.error) || 'Replace failed');
+            state.ptqQuestions = j.questions || [];
+            setHidden('ptqBanner', true);
+            renderPtqCards();
+            loadPtBankLessons();
+          })
+          .finally(function () { el('ptqReplaceGap').disabled = false; });
+      })
+      .catch(function (e) { alert(e.message || 'Replace failed'); });
+  };
 
   (function initPageSize() {
     var saved = parseInt(localStorage.getItem(BEC_LIST_LIMIT_KEY) || '100', 10);
