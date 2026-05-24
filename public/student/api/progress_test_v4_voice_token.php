@@ -40,8 +40,9 @@ try {
     if (!$attempt) ptv4_token_fail(404, 'Progress test attempt not found');
 
     if ($role !== 'admin') {
-        $access = cw_progress_test_access_state($pdo, (int)$attempt['user_id'], (int)$attempt['cohort_id']);
-        if (empty($access['allowed'])) ptv4_token_fail(403, 'Progress test access code required');
+        if (!cw_progress_test_v4_access_allowed($pdo, (int)$attempt['user_id'], (int)$attempt['cohort_id'], (int)$attempt['lesson_id'])) {
+            ptv4_token_fail(403, 'Progress test access code required');
+        }
     }
 
     $status = (string)($attempt['status'] ?? '');

@@ -41,7 +41,7 @@ try {
             $en->execute([$cohortId, $studentUserId]);
             if (!$en->fetchColumn()) ptv4_json(['ok' => false, 'error' => 'Not actively enrolled'], 403);
         }
-        ptv4_require_progress_test_access($pdo, $u, $cohortId, $studentUserId);
+        ptv4_require_progress_test_access($pdo, $u, $cohortId, $studentUserId, $lessonId);
 
         $cookieHeader = (string)($_SERVER['HTTP_COOKIE'] ?? '');
         if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
@@ -60,7 +60,7 @@ try {
 
         if ($attemptId > 0) {
             $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
-            ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id']);
+            ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id'], (int)$attempt['lesson_id']);
             $cohortId = (int)$attempt['cohort_id'];
             $lessonId = (int)$attempt['lesson_id'];
             $studentUserId = (int)$attempt['user_id'];
@@ -72,7 +72,7 @@ try {
                     ptv4_json(['ok' => false, 'error' => 'Not actively enrolled'], 403);
                 }
             }
-            ptv4_require_progress_test_access($pdo, $u, $cohortId, $studentUserId);
+            ptv4_require_progress_test_access($pdo, $u, $cohortId, $studentUserId, $lessonId);
         } else {
             ptv4_json(['ok' => false, 'error' => 'attempt_id or cohort_id+lesson_id required'], 400);
         }
@@ -108,7 +108,7 @@ try {
             ptv4_json(['ok' => false, 'error' => 'attempt_id required'], 400);
         }
         $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
-        ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id']);
+        ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id'], (int)$attempt['lesson_id']);
         $result = ptv4_rollback_prepared_session($pdo, $attempt, (string)($data['reason'] ?? 'client_rollback'));
         $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
         ptv4_json(['ok' => true] + $result + ['state' => ptv4_state_payload($pdo, $attempt)]);
@@ -126,7 +126,7 @@ try {
         }
 
         $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
-        ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id']);
+        ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id'], (int)$attempt['lesson_id']);
 
         ptv4_ensure_v4_chunk_table($pdo);
 
@@ -180,7 +180,7 @@ try {
 
     if ($attemptId > 0) {
         $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
-        ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id']);
+        ptv4_require_progress_test_access($pdo, $u, (int)$attempt['cohort_id'], (int)$attempt['user_id'], (int)$attempt['lesson_id']);
     }
 
     if ($action === 'get_state') {

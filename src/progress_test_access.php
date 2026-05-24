@@ -145,3 +145,34 @@ function cw_progress_test_save_global_allowed_cidrs(PDO $pdo, string $allowedCid
     }
     return ['ok' => true, 'allowed_cidrs' => $allowedCidrs, 'admin_user_id' => $adminUserId];
 }
+
+function cw_progress_test_v4_access_allowed(PDO $pdo, int $studentUserId, int $cohortId, int $lessonId = 0): bool
+{
+    $access = cw_progress_test_access_state($pdo, $studentUserId, $cohortId);
+    if (!empty($access['allowed'])) {
+        return true;
+    }
+
+    if ($lessonId <= 0) {
+        $st = $pdo->prepare("
+            SELECT lesson_id
+            FROM progress_tests_v2
+            WHERE user_id = ? AND cohort_id = ?
+              AND status IN ('preparing','ready','in_progress','processing')
+            ORDER BY id DESC
+            LIMIT 1
+        ");
+        $st->execute([$studentUserId, $cohortId]);
+        $lessonId = (int)$st->fetchColumn();
+    }
+
+    if ($lessonId <= 0) {
+        return false;
+    }
+
+    require_once __DIR__ . '/courseware_progression_v2.php';
+    $engine = new CoursewareProgressionV2($pdo);
+    $pageAccess = $engine->resolveProgressTestPageAccess($studentUserId, $cohortId, $lessonId);
+
+    return !empty($pageAccess['allowed']);
+}

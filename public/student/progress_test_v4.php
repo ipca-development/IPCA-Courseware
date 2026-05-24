@@ -166,15 +166,20 @@ if ($role === 'student') {
         $courseReturnUrl
     );
     if (empty($prepStatus['prepared'])) {
-        $prepBlocked = true;
-        if (!empty($prepStatus['preparing'])) {
-            $prepBlockedMode = 'preparing';
-            $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Preparing Progress Test…');
-        } elseif (!empty($prepStatus['show_prepare_button'])) {
-            $prepBlockedMode = 'manual';
-            $prepBlockedLabel = 'Not prepared yet';
-        } else {
-            $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Not ready');
+        $allowRemotePreparingPage = $hasRemotePermission
+            && !empty($prepStatus['attempt_id'])
+            && !empty($prepStatus['preparing']);
+        if (!$allowRemotePreparingPage) {
+            $prepBlocked = true;
+            if (!empty($prepStatus['preparing'])) {
+                $prepBlockedMode = 'preparing';
+                $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Preparing Progress Test…');
+            } elseif (!empty($prepStatus['show_prepare_button'])) {
+                $prepBlockedMode = 'manual';
+                $prepBlockedLabel = 'Not prepared yet';
+            } else {
+                $prepBlockedLabel = (string)($prepStatus['label'] ?: 'Not ready');
+            }
         }
     }
 }
@@ -307,7 +312,7 @@ cw_header('Progress Test');
 
       <div class="ptv4-message-slot">
         <div class="ptv4-hint is-visible" data-ptv4-hint>
-          Tap <strong>Start</strong> when you are ready. Maya will greet you before the first question.
+          Tap <strong>Ready</strong> when you are ready. Maya will greet you before the first question.
         </div>
         <div class="ptv4-hint ptv4-hint-warn" data-ptv4-record-hint aria-hidden="true">
           Recording limit: 45 seconds maximum. Recording will stop automatically at 45 seconds.

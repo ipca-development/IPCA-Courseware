@@ -31,13 +31,13 @@ function ptv4_user_photo_url(?string $photoPath): string
     return '/' . ltrim($value, '/');
 }
 
-function ptv4_require_progress_test_access(PDO $pdo, array $user, int $cohortId, int $studentUserId): void
+function ptv4_require_progress_test_access(PDO $pdo, array $user, int $cohortId, int $studentUserId, int $lessonId = 0): void
 {
     if ((string)($user['role'] ?? '') === 'admin') return;
-    $access = cw_progress_test_access_state($pdo, $studentUserId, $cohortId);
-    if (empty($access['allowed'])) {
-        ptv4_json(['ok' => false, 'error' => 'Progress test access code required.', 'access_required' => true], 403);
+    if (cw_progress_test_v4_access_allowed($pdo, $studentUserId, $cohortId, $lessonId)) {
+        return;
     }
+    ptv4_json(['ok' => false, 'error' => 'Progress test access code required.', 'access_required' => true], 403);
 }
 
 function ptv4_body(): array
@@ -1068,6 +1068,17 @@ function ptv4_ensure_prepared_attempt(PDO $pdo, array $u, int $cohortId, int $le
     $prepared = pt_prep_attempt_is_prepared($attempt, $pdo);
 
     if (!$prepared) {
+        pt_prep_schedule_progress_test(
+            $pdo,
+            $studentUserId,
+            $cohortId,
+            $lessonId,
+            'v4_ensure_prepared',
+            $cookieHeader,
+            'student',
+            $studentUserId
+        );
+        $attempt = ptv4_load_attempt($pdo, $u, $attemptId);
         return ['ok' => true, 'preparing' => true, 'attempt_id' => $attemptId, 'state' => ptv4_state_payload($pdo, $attempt)];
     }
 
