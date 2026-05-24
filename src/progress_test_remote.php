@@ -44,6 +44,34 @@ function ptr_remote_auth_email_text(): string
     return "Dear {{student_name}},\n\nYou requested remote progress test authentication for {{lesson_title}} in {{course_title}}.\n\nOpen your authentication page: {{auth_link}}\n\nThis link expires at {{expires_at}}.\n\nIf you did not request this email, contact {{support_email}}.\n\nBest regards,\nKay Vereeken\nHead of Training\n";
 }
 
+function ptr_remote_auth_allowed_variables_json(): string
+{
+    return json_encode([
+        ['name' => 'student_name', 'label' => 'Student name', 'type' => 'text', 'safe_mode' => 'escaped', 'required' => true, 'sample_value' => 'John Smith', 'description' => ''],
+        ['name' => 'lesson_title', 'label' => 'Lesson title', 'type' => 'text', 'safe_mode' => 'escaped', 'required' => true, 'sample_value' => 'Aerodynamics Basics', 'description' => ''],
+        ['name' => 'course_title', 'label' => 'Course title', 'type' => 'text', 'safe_mode' => 'escaped', 'required' => true, 'sample_value' => 'Private Pilot', 'description' => ''],
+        ['name' => 'auth_link', 'label' => 'Authentication link', 'type' => 'text', 'safe_mode' => 'escaped', 'required' => true, 'sample_value' => 'https://ipca.training/student/progress_test_auth.php?token=example', 'description' => ''],
+        ['name' => 'expires_at', 'label' => 'Link expiry', 'type' => 'text', 'safe_mode' => 'escaped', 'required' => true, 'sample_value' => '2026-06-03 22:00 UTC', 'description' => ''],
+        ['name' => 'support_email', 'label' => 'Support email', 'type' => 'text', 'safe_mode' => 'escaped', 'required' => false, 'sample_value' => 'support@ipca.training', 'description' => ''],
+        ['name' => 'student_email', 'label' => 'Student email', 'type' => 'text', 'safe_mode' => 'escaped', 'required' => false, 'sample_value' => 'student@example.com', 'description' => ''],
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?: '[]';
+}
+
+function ptr_template_variables_are_canonical(string $json): bool
+{
+    $decoded = json_decode($json, true);
+    if (!is_array($decoded)) {
+        return false;
+    }
+    foreach ($decoded as $row) {
+        if (is_array($row) && trim((string)($row['name'] ?? '')) !== '') {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 function ptr_ensure_remote_email_automation(PDO $pdo): void
 {
     static $done = false;
@@ -56,7 +84,7 @@ function ptr_ensure_remote_email_automation(PDO $pdo): void
     $subject = 'Your IPCA Progress Test Authentication Link';
     $html = ptr_remote_auth_email_html();
     $text = ptr_remote_auth_email_text();
-    $allowedVars = '["student_name","lesson_title","course_title","auth_link","expires_at","support_email","student_email"]';
+    $allowedVars = ptr_remote_auth_allowed_variables_json();
 
     $st = $pdo->prepare("SELECT id FROM notification_templates WHERE notification_key = ? AND channel = 'email' LIMIT 1");
     $st->execute([$notificationKey]);
@@ -73,19 +101,34 @@ function ptr_ensure_remote_email_automation(PDO $pdo): void
     } else {
         $pdo->prepare("
             UPDATE notification_templates
-            SET html_template = ?, text_template = ?, subject_template = ?, is_enabled = 1, updated_at = UTC_TIMESTAMP()
+            SET html_template = ?, text_template = ?, subject_template = ?, allowed_variables_json = ?, is_enabled = 1, updated_at = UTC_TIMESTAMP()
             WHERE id = ?
-        ")->execute([$html, $text, $subject, $templateId]);
+        ")->execute([$html, $text, $subject, $allowedVars, $templateId]);
     }
 
-    $verSt = $pdo->prepare('SELECT COUNT(*) FROM notification_template_versions WHERE notification_template_id = ?');
-    $verSt->execute([$templateId]);
-    if ((int)$verSt->fetchColumn() === 0) {
+    $latestVerSt = $pdo->prepare("
+        SELECT id, allowed_variables_json, version_no
+        FROM notification_template_versions
+        WHERE notification_template_id = ?
+        ORDER BY version_no DESC, id DESC
+        LIMIT 1
+    ");
+    $latestVerSt->execute([$templateId]);
+    $latestVersion = $latestVerSt->fetch(PDO::FETCH_ASSOC) ?: null;
+
+    if (!$latestVersion) {
         $pdo->prepare("
             INSERT INTO notification_template_versions
               (notification_template_id, version_no, notification_key, subject_template, html_template, text_template, allowed_variables_json, changed_by_user_id, change_note, created_at)
             VALUES (?, 1, ?, ?, ?, ?, ?, NULL, 'Bootstrap: remote progress test auth email', UTC_TIMESTAMP())
         ")->execute([$templateId, $notificationKey, $subject, $html, $text, $allowedVars]);
+    } elseif (!ptr_template_variables_are_canonical((string)($latestVersion['allowed_variables_json'] ?? ''))) {
+        $nextVersion = ((int)($latestVersion['version_no'] ?? 0)) + 1;
+        $pdo->prepare("
+            INSERT INTO notification_template_versions
+              (notification_template_id, version_no, notification_key, subject_template, html_template, text_template, allowed_variables_json, changed_by_user_id, change_note, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'Bootstrap: fix remote progress test template variables', UTC_TIMESTAMP())
+        ")->execute([$templateId, $nextVersion, $notificationKey, $subject, $html, $text, $allowedVars]);
     }
 
     $flowSt = $pdo->prepare("SELECT id FROM automation_flows WHERE event_key = 'remote_progress_test_requested' LIMIT 1");

@@ -1469,6 +1469,23 @@ final class NotificationService
 
         $out = [];
         foreach ($decoded as $row) {
+            if (is_string($row)) {
+                $name = trim($row);
+                if ($name === '') {
+                    continue;
+                }
+                $out[] = [
+                    'name' => $name,
+                    'label' => $name,
+                    'type' => 'text',
+                    'safe_mode' => 'escaped',
+                    'required' => false,
+                    'sample_value' => '',
+                    'description' => '',
+                ];
+                continue;
+            }
+
             if (!is_array($row)) {
                 continue;
             }
