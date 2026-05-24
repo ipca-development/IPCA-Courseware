@@ -626,32 +626,29 @@ trait CoursewareProgressionV2RemoteTrait
             throw new RuntimeException('Incorrect Progress Test Code.');
         }
 
-        $this->pdo->beginTransaction();
-        try {
-            $created = $this->createProgressTestAttempt($studentId, $cohortId, $lessonId, 'student', $studentId, 'remote_auth_' . (int)$auth['id']);
-            if (!empty($created['blocked'])) {
-                throw new RuntimeException('Progress test cannot be started: ' . (string)($created['reason'] ?? 'blocked'));
-            }
-            $testId = (int)$created['test_id'];
-
-            $this->pdo->prepare("
-                UPDATE progress_test_remote_authorizations
-                SET status = 'USED',
-                    progress_test_id = ?,
-                    progress_test_attempt_id = ?,
-                    code_verified_at = UTC_TIMESTAMP(),
-                    used_at = UTC_TIMESTAMP(),
-                    updated_at = UTC_TIMESTAMP()
-                WHERE id = ?
-            ")->execute([$testId, $testId, (int)$auth['id']]);
-
-            $this->pdo->commit();
-        } catch (Throwable $e) {
-            if ($this->pdo->inTransaction()) {
-                $this->pdo->rollBack();
-            }
-            throw $e;
+        $created = $this->createProgressTestAttempt(
+            $studentId,
+            $cohortId,
+            $lessonId,
+            'student',
+            $studentId,
+            'remote_auth_' . (int)$auth['id']
+        );
+        if (!empty($created['blocked'])) {
+            throw new RuntimeException('Progress test cannot be started: ' . (string)($created['reason'] ?? 'blocked'));
         }
+        $testId = (int)$created['test_id'];
+
+        $this->pdo->prepare("
+            UPDATE progress_test_remote_authorizations
+            SET status = 'USED',
+                progress_test_id = ?,
+                progress_test_attempt_id = ?,
+                code_verified_at = UTC_TIMESTAMP(),
+                used_at = UTC_TIMESTAMP(),
+                updated_at = UTC_TIMESTAMP()
+            WHERE id = ?
+        ")->execute([$testId, $testId, (int)$auth['id']]);
 
         $this->logProgressionEvent([
             'user_id' => $studentId,
