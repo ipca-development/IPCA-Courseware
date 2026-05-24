@@ -75,6 +75,7 @@ if (!function_exists('tap_theory_event_catalog')) {
             'deadline_rejected_reason_review_required' => 'Deadline — rejected reason needs further review',
             'deadline_extension_refused_past_due' => 'Deadline — automatic extension refused (past-due)',
             'instructor_pending_reason_decision_reminder' => 'Instructor reminder — pending reason decision (daily)',
+            'remote_progress_test_requested' => 'Remote progress test — authentication email requested',
         );
     }
 }
@@ -157,6 +158,11 @@ if (!function_exists('tap_theory_automation_context_cheat_sheet')) {
                 . 'weak_areas_text/html, written_debrief_text/html, summary_status, review_notes_text. '
                 . 'Use notification templates instructor_approval_decision_student (to {{student_email}}) and optionally '
                 . 'instructor_approval_decision_chief (to {{chief_instructor_email}}).';
+        }
+        if ($eventKey === 'remote_progress_test_requested') {
+            return 'Context from remote progress test authorization request (no attempt created): student_name, student_email, '
+                . 'lesson_title, course_title, auth_link, expires_at, support_email, authorization_id, user_id, cohort_id, lesson_id. '
+                . 'Use notification template remote_progress_test_auth_request with send_email to {{student_email}}.';
         }
 
         return '';

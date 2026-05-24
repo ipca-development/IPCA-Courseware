@@ -33,6 +33,7 @@ if (!function_exists('ttnp_is_theory_notification')) {
             'reason_rejected',
             'summary_needs_revision',
             'summary_approved',
+            'remote_progress_test_auth_request',
         );
 
         if (in_array($key, $explicitKeys, true)) {

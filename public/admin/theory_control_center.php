@@ -333,6 +333,7 @@ uksort($groupedPolicies, function ($a, $b) {
 $ptGlobalPolicy = cw_progress_test_load_global_policy($pdo);
 $ptAllowedCidrs = is_array($ptGlobalPolicy) ? (string)($ptGlobalPolicy['allowed_cidrs'] ?? '') : '';
 $ptAccessMode = is_array($ptGlobalPolicy) ? (string)($ptGlobalPolicy['mode'] ?? 'school_ip') : 'school_ip';
+$ptCurrentClientIp = cw_progress_test_client_ip();
 
 $engine = new CoursewareProgressionV2($pdo);
 $policySnapshot = $engine->getAllPolicies(array());
@@ -588,6 +589,15 @@ cw_header('Theory Control Center');
                 <input type="hidden" name="action" value="save_progress_test_networks">
                 <input type="hidden" name="tab" value="policies">
                 <div class="tcc-muted" style="margin-bottom:8px;">Current mode: <?php echo tcc_h($ptAccessMode); ?></div>
+                <?php if ($ptCurrentClientIp !== ''): ?>
+                    <div class="tcc-muted" style="margin-bottom:10px;line-height:1.6;">
+                        Your current IP (as detected for progress test access):
+                        <strong style="color:#102845;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;"><?php echo tcc_h($ptCurrentClientIp); ?></strong>.
+                        Enter this value exactly in the list below (for example <code><?php echo tcc_h($ptCurrentClientIp); ?></code> or <code><?php echo tcc_h($ptCurrentClientIp); ?>/32</code>).
+                    </div>
+                <?php else: ?>
+                    <div class="tcc-muted" style="margin-bottom:10px;">Could not detect your current IP from this request. Check proxy or CDN headers if students on this network should be treated as on-site.</div>
+                <?php endif; ?>
                 <textarea class="tcc-textarea" name="allowed_cidrs" rows="5" placeholder="203.0.113.0/24, 198.51.100.42"><?php echo tcc_h($ptAllowedCidrs); ?></textarea>
                 <div class="tcc-muted" style="margin-top:8px;">Enter comma- or newline-separated IPv4 addresses or CIDR blocks.</div>
                 <input class="tcc-input" type="text" name="change_reason_text" placeholder="Optional change reason" style="margin-top:10px;">
