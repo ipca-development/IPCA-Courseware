@@ -1535,6 +1535,32 @@ cw_header('Course');
   }
   .nb-banner.ok{background:#f0fdf4;color:#166534;border-color:#86efac}
 
+  .pt-remote-toast{
+    position:fixed;
+    left:50%;
+    top:50%;
+    transform:translate(-50%,-50%);
+    z-index:320;
+    width:min(92vw,420px);
+    padding:16px 18px;
+    border-radius:14px;
+    font-size:13px;
+    font-weight:800;
+    line-height:1.5;
+    text-align:center;
+    border:1px solid #86efac;
+    background:#f0fdf4;
+    color:#166534;
+    box-shadow:0 18px 40px rgba(15,23,42,.18);
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .18s ease;
+  }
+  .pt-remote-toast.show{
+    opacity:1;
+    pointer-events:auto;
+  }
+
   .course-remote-modal-overlay{
     display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200;align-items:center;justify-content:center;padding:16px;
   }
@@ -1581,11 +1607,7 @@ cw_header('Course');
     </div>
   <?php endif; ?>
 
-  <?php if ((int)($_GET['remote_requested'] ?? 0) === 1): ?>
-    <div class="nb-banner ok" style="display:block;">
-      Your progress test request was received. Check your email for the authentication link in a few moments.
-    </div>
-  <?php endif; ?>
+  <div id="ptRemoteRequestToast" class="pt-remote-toast" role="status" aria-live="polite"></div>
 
   <div class="hero-grid">
     <div class="card hero-card">
@@ -2130,6 +2152,19 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 })();
 
 (function () {
+  function showRemoteRequestToast(message) {
+    var toast = document.getElementById('ptRemoteRequestToast');
+    if (!toast) return;
+    toast.textContent = message || 'Your progress test request was received. Check your email for the authentication link in a few moments.';
+    toast.classList.add('show');
+    if (toast._hideTimer) {
+      window.clearTimeout(toast._hideTimer);
+    }
+    toast._hideTimer = window.setTimeout(function () {
+      toast.classList.remove('show');
+    }, 5000);
+  }
+
   document.querySelectorAll('.pt-remote-request').forEach(function (btn) {
     btn.addEventListener('click', function () {
       if (btn.disabled) return;
@@ -2149,7 +2184,7 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
             alert(j && j.error ? j.error : 'Could not submit request.');
             return;
           }
-          window.location.href = '/student/course.php?cohort_id=' + encodeURIComponent(String(cohortId)) + '&remote_requested=1#progress-test-lesson-' + encodeURIComponent(String(lessonId));
+          showRemoteRequestToast(j.message || 'Your progress test request was received. Check your email for the authentication link in a few moments.');
         })
         .catch(function () {
           btn.disabled = false;
