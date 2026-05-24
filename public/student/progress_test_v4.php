@@ -6,6 +6,7 @@ require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/progress_test_access.php';
 require_once __DIR__ . '/../../src/progress_test_prep.php';
 require_once __DIR__ . '/../../src/courseware_progression_v2.php';
+require_once __DIR__ . '/../../src/progress_test_remote.php';
 
 cw_require_login();
 
@@ -37,17 +38,48 @@ if ($role === 'student') {
 }
 
 $gateError = '';
-$accessState = cw_progress_test_access_state($pdo, $studentContextId, $cohortId);
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['progress_test_pin'])) {
-    if (cw_progress_test_verify_submitted_pin($pdo, $studentContextId, $cohortId, (string)$_POST['progress_test_pin'])) {
-        header('Location: ' . strtok((string)($_SERVER['REQUEST_URI'] ?? ''), '#'));
-        exit;
-    }
-    $gateError = 'Invalid access code.';
-    $accessState = cw_progress_test_access_state($pdo, $studentContextId, $cohortId);
+$progressionEngine = new CoursewareProgressionV2($pdo);
+$pageAccess = $progressionEngine->resolveProgressTestPageAccess($studentContextId, $cohortId, $lessonId);
+$hasRemotePermission = $progressionEngine->hasRemoteTestingPermission($studentContextId, $cohortId);
+$trustedSchoolNetwork = cw_progress_test_is_trusted_school_network($pdo, $studentContextId, $cohortId);
+$skipLegacyPinGate = $trustedSchoolNetwork || in_array((string)($pageAccess['mode'] ?? ''), ['active_attempt', 'prepared_attempt', 'trusted_ip'], true);
+
+if ($role === 'student' && ($pageAccess['mode'] ?? '') === 'remote_required') {
+    cw_header('Progress Test Access');
+    ?>
+    <style>
+      body{ background:#fff; }
+      .gate-wrap{ max-width:980px; margin:0 auto; padding:18px 12px; }
+      .gate-card{ max-width:560px; margin:38px auto; padding:24px; border:1px solid #e8e8e8; border-radius:18px; background:#fff; box-shadow:0 10px 30px rgba(0,0,0,0.06); }
+      .gate-title{ font-size:24px; font-weight:900; color:#1e3c72; margin-bottom:8px; }
+      .gate-text{ color:#334155; line-height:1.5; }
+      .gate-btn{ display:inline-block; margin-top:14px; padding:16px 18px; border-radius:16px; border:2px solid rgba(30,60,114,0.25); background:#12355f; color:#fff; font-weight:900; font-size:16px; text-decoration:none; }
+    </style>
+    <div class="gate-wrap">
+      <div class="gate-card">
+        <div class="gate-title">Remote Authorization Required</div>
+        <div class="gate-text"><?= h((string)($pageAccess['message'] ?? 'Complete remote progress test authorization on the course page before starting the test.')) ?></div>
+        <a class="gate-btn" href="/student/course.php?cohort_id=<?= (int)$cohortId ?>#progress-test-lesson-<?= (int)$lessonId ?>">Return to course page</a>
+      </div>
+    </div>
+    <?php
+    cw_footer();
+    exit;
 }
 
-if (empty($accessState['allowed'])) {
+$accessState = cw_progress_test_access_state($pdo, $studentContextId, $cohortId);
+if (!$skipLegacyPinGate && !$hasRemotePermission) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['progress_test_pin'])) {
+        if (cw_progress_test_verify_submitted_pin($pdo, $studentContextId, $cohortId, (string)$_POST['progress_test_pin'])) {
+            header('Location: ' . strtok((string)($_SERVER['REQUEST_URI'] ?? ''), '#'));
+            exit;
+        }
+        $gateError = 'Invalid access code.';
+        $accessState = cw_progress_test_access_state($pdo, $studentContextId, $cohortId);
+    }
+}
+
+if (!$skipLegacyPinGate && !$hasRemotePermission && empty($accessState['allowed'])) {
     $mode = (string)($accessState['mode'] ?? 'pin');
     cw_header('Progress Test Access');
     ?>
@@ -117,7 +149,6 @@ $studentPhotoUrl = $studentPhotoRaw !== ''
 
 $courseReturnUrl = '/student/course.php?cohort_id=' . (int)$cohortId . '#progress-test-lesson-' . (int)$lessonId;
 
-$progressionEngine = new CoursewareProgressionV2($pdo);
 $progressTestPassPct = (int)$progressionEngine->getPolicy('progress_test_pass_pct', ['cohort_id' => $cohortId]);
 if ($progressTestPassPct <= 0) {
     $progressTestPassPct = 70;

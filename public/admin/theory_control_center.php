@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
 require_once __DIR__ . '/../../src/courseware_progression_v2.php';
+require_once __DIR__ . '/../../src/progress_test_access.php';
 
 cw_require_admin();
 
@@ -231,6 +232,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             tcc_redirect('policies', 'success', 'Policy updated successfully.');
         }
 
+        if ($postAction === 'save_progress_test_networks') {
+            $allowedCidrs = trim((string)($_POST['allowed_cidrs'] ?? ''));
+            $reasonText = trim((string)($_POST['change_reason_text'] ?? ''));
+            $actorUserId = (int)($u['id'] ?? 0);
+            $oldPolicy = cw_progress_test_load_global_policy($pdo);
+            $oldCidrs = is_array($oldPolicy) ? (string)($oldPolicy['allowed_cidrs'] ?? '') : '';
+
+            cw_progress_test_save_global_allowed_cidrs($pdo, $allowedCidrs, $actorUserId);
+
+            $engine = new CoursewareProgressionV2($pdo);
+            $engine->logProgressionEvent([
+                'user_id' => 0,
+                'cohort_id' => 0,
+                'lesson_id' => 0,
+                'event_type' => 'progress_test',
+                'event_code' => 'PROGRESS_TEST_NETWORKS_UPDATED',
+                'event_status' => 'info',
+                'actor_type' => 'admin',
+                'actor_user_id' => $actorUserId,
+                'payload' => [
+                    'old_allowed_cidrs' => $oldCidrs,
+                    'new_allowed_cidrs' => $allowedCidrs,
+                    'reason' => $reasonText !== '' ? $reasonText : null,
+                ],
+                'legal_note' => 'Admin updated global approved school IP/CIDR list for progress tests.',
+            ]);
+
+            tcc_redirect('policies', 'success', 'Approved progress test networks updated.');
+        }
+
         throw new RuntimeException('Unknown action.');
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {
@@ -298,6 +329,10 @@ foreach ($policyDefinitions as $row) {
 uksort($groupedPolicies, function ($a, $b) {
     return tcc_policy_category_sort((string)$a) <=> tcc_policy_category_sort((string)$b);
 });
+
+$ptGlobalPolicy = cw_progress_test_load_global_policy($pdo);
+$ptAllowedCidrs = is_array($ptGlobalPolicy) ? (string)($ptGlobalPolicy['allowed_cidrs'] ?? '') : '';
+$ptAccessMode = is_array($ptGlobalPolicy) ? (string)($ptGlobalPolicy['mode'] ?? 'school_ip') : 'school_ip';
 
 $engine = new CoursewareProgressionV2($pdo);
 $policySnapshot = $engine->getAllPolicies(array());
@@ -542,6 +577,25 @@ cw_header('Theory Control Center');
                 </section>
             <?php endforeach; ?>
         </div>
+
+        <section class="card tcc-policy-group" style="margin-top:18px;">
+            <h2 class="tcc-group-title">Progress Test — Approved School Networks</h2>
+            <p class="tcc-muted" style="margin:0 0 14px 0;line-height:1.6;">
+                Students on these IP addresses or CIDR ranges use the on-site <strong>Prepare Progress Test</strong> flow.
+                Off-site students need remote testing permission and the email authentication flow unless they enter a legacy break-glass PIN on the test page.
+            </p>
+            <form method="post">
+                <input type="hidden" name="action" value="save_progress_test_networks">
+                <input type="hidden" name="tab" value="policies">
+                <div class="tcc-muted" style="margin-bottom:8px;">Current mode: <?php echo tcc_h($ptAccessMode); ?></div>
+                <textarea class="tcc-textarea" name="allowed_cidrs" rows="5" placeholder="203.0.113.0/24, 198.51.100.42"><?php echo tcc_h($ptAllowedCidrs); ?></textarea>
+                <div class="tcc-muted" style="margin-top:8px;">Enter comma- or newline-separated IPv4 addresses or CIDR blocks.</div>
+                <input class="tcc-input" type="text" name="change_reason_text" placeholder="Optional change reason" style="margin-top:10px;">
+                <div style="margin-top:12px;">
+                    <button class="tcc-btn" type="submit">Save Approved Networks</button>
+                </div>
+            </form>
+        </section>
     <?php endif; ?>
 
     <?php if ($activeTab === 'logic_map'): ?>

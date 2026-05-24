@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../src/bootstrap.php';
 require_once __DIR__ . '/../../src/layout.php';
+require_once __DIR__ . '/../../src/courseware_progression_v2.php';
 
 cw_require_login();
 
@@ -187,6 +188,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $msgType = 'success';
         }
     }
+
+    if ($action === 'set_remote_testing_permission') {
+        $uid = (int)($_POST['user_id'] ?? 0);
+        $enabled = (int)($_POST['enabled'] ?? 0) === 1;
+        $notes = trim((string)($_POST['notes'] ?? ''));
+        if ($uid <= 0) {
+            $msg = 'Missing student.';
+            $msgType = 'error';
+        } else {
+            $engine = new CoursewareProgressionV2($pdo);
+            $engine->setRemoteTestingPermission($uid, $cohortId, $enabled, (int)($u['id'] ?? 0), $notes !== '' ? $notes : null);
+            $msg = $enabled
+                ? 'Remote progress testing enabled for this student.'
+                : 'Remote progress testing disabled for this student.';
+            $msgType = 'success';
+        }
+    }
 }
 
 $userSearchSql = "
@@ -240,6 +258,26 @@ $studentsStmt = $pdo->prepare("
 ");
 $studentsStmt->execute(array($cohortId));
 $students = $studentsStmt->fetchAll(PDO::FETCH_ASSOC);
+
+$remotePermByUser = array();
+if ($students) {
+    require_once __DIR__ . '/../../src/progress_test_remote.php';
+    ptr_ensure_tables($pdo);
+    $uids = array();
+    foreach ($students as $s) {
+        $uids[] = (int)$s['user_id'];
+    }
+    $ph = implode(',', array_fill(0, count($uids), '?'));
+    $permStmt = $pdo->prepare("
+        SELECT student_id, remote_testing_enabled
+        FROM student_remote_test_permissions
+        WHERE cohort_id = ? AND student_id IN ($ph)
+    ");
+    $permStmt->execute(array_merge(array($cohortId), $uids));
+    foreach ($permStmt->fetchAll(PDO::FETCH_ASSOC) as $permRow) {
+        $remotePermByUser[(int)$permRow['student_id']] = (int)$permRow['remote_testing_enabled'] === 1;
+    }
+}
 
 $lessonStatsStmt = $pdo->prepare("
     SELECT
@@ -595,6 +633,23 @@ cw_header('Theory Training');
                                     <div class="cs-snapshot-label">Avg score</div>
                                     <div class="cs-snapshot-value"><?php echo cs_h($avgBestScore); ?></div>
                                     <div class="cs-snapshot-sub">Average best_score across lesson_activity.</div>
+                                </div>
+                            </div>
+
+                            <?php $remoteEnabled = !empty($remotePermByUser[$uid]); ?>
+                            <div style="margin-top:14px;padding-top:14px;border-top:1px solid rgba(15,23,42,.06);">
+                                <form method="post" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0;">
+                                    <input type="hidden" name="action" value="set_remote_testing_permission">
+                                    <input type="hidden" name="user_id" value="<?php echo $uid; ?>">
+                                    <input type="hidden" name="enabled" value="0">
+                                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#334155;cursor:pointer;">
+                                        <input type="checkbox" name="enabled" value="1" <?php echo $remoteEnabled ? 'checked' : ''; ?>>
+                                        Allow Remote Progress Testing
+                                    </label>
+                                    <button class="cs-btn cs-btn-secondary" type="submit">Save</button>
+                                </form>
+                                <div style="margin-top:6px;font-size:12px;color:#64748b;line-height:1.5;">
+                                    Off-site students with this permission use email authentication, photo verification, and a progress test code before an attempt is created.
                                 </div>
                             </div>
                         </div>

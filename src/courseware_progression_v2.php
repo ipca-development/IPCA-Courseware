@@ -1,9 +1,12 @@
 <?php
 declare(strict_types=1);
 
+require_once __DIR__ . '/courseware_progression_v2_remote.php';
 
 final class CoursewareProgressionV2
 {
+    use CoursewareProgressionV2RemoteTrait;
+
     public const LOGIC_VERSION = 'v2.0';
     public const NOTIFICATION_CHANNEL_EMAIL = 'email';
 
@@ -2299,6 +2302,10 @@ public function finalizeAssessedProgressTest(int $progressTestId, array $assessm
                 'queued_email_ids' => $queuedEmailIds
             ],
         ]);
+
+        if (empty($classification['pass_gate_met'])) {
+            $this->invalidateRemoteAuthAfterFailedAttempt($progressTestId);
+        }
 
         $this->pdo->commit();
 

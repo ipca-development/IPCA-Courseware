@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../../../src/bootstrap.php';
 require_once __DIR__ . '/../../../src/progress_test_prep.php';
 require_once __DIR__ . '/../../../src/courseware_progression_v2.php';
+require_once __DIR__ . '/../../../src/progress_test_remote.php';
 
 cw_require_login();
 header('Content-Type: application/json; charset=utf-8');
@@ -56,6 +57,15 @@ try {
         if (!$en->fetchColumn()) {
             pt_manual_json(['ok' => false, 'error' => 'Not actively enrolled'], 403);
         }
+    }
+
+    if ($role === 'student' && !cw_progress_test_is_trusted_school_network($pdo, $userId, $cohortId)) {
+        pt_manual_json([
+            'ok' => false,
+            'blocked' => true,
+            'reason' => 'remote_required',
+            'error' => 'Prepare Progress Test is only available on an approved school network. Off-site students must use Request Progress Test and complete remote authentication.',
+        ], 409);
     }
 
     $cookieHeader = (string)($_SERVER['HTTP_COOKIE'] ?? '');

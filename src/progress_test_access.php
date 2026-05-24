@@ -110,3 +110,38 @@ function cw_progress_test_verify_submitted_pin(PDO $pdo, int $userId, int $cohor
     $_SESSION[cw_progress_test_access_session_key($cohortId)] = 1;
     return true;
 }
+
+function cw_progress_test_load_global_policy(PDO $pdo): ?array
+{
+    $st = $pdo->query("
+        SELECT *
+        FROM progress_test_access_policy
+        WHERE scope_type = 'global' AND scope_id IS NULL
+        LIMIT 1
+    ");
+    $row = $st ? $st->fetch(PDO::FETCH_ASSOC) : false;
+    return $row ?: null;
+}
+
+function cw_progress_test_save_global_allowed_cidrs(PDO $pdo, string $allowedCidrs, int $adminUserId): array
+{
+    $allowedCidrs = str_replace(["\r\n", "\r", "\n", ';'], ',', $allowedCidrs);
+    $allowedCidrs = trim(preg_replace('/\s+/', ' ', $allowedCidrs) ?? '');
+    $row = cw_progress_test_load_global_policy($pdo);
+    if ($row) {
+        $up = $pdo->prepare("
+            UPDATE progress_test_access_policy
+            SET allowed_cidrs = ?, mode = 'school_ip'
+            WHERE id = ?
+        ");
+        $up->execute([$allowedCidrs, (int)$row['id']]);
+    } else {
+        $ins = $pdo->prepare("
+            INSERT INTO progress_test_access_policy
+              (scope_type, scope_id, mode, allowed_cidrs, pin_hash)
+            VALUES ('global', NULL, 'school_ip', ?, '')
+        ");
+        $ins->execute([$allowedCidrs]);
+    }
+    return ['ok' => true, 'allowed_cidrs' => $allowedCidrs, 'admin_user_id' => $adminUserId];
+}

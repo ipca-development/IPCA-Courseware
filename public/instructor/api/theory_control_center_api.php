@@ -1617,6 +1617,7 @@ function tcc_lesson_attempts_detail(PDO $pdo, int $cohortId, int $studentId, int
         'oral_analysis' => $oralAnalysis,
         'oral_analysis_stale' => $oralStale,
         'knowledge_feedback' => $knowledgeFeedback,
+        'remote_requests' => (new CoursewareProgressionV2($pdo))->getRemoteProgressTestRequestsForInstructor($studentId, $cohortId, $lessonId),
     ];
 }
 

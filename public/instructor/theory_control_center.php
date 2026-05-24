@@ -1099,12 +1099,43 @@ cw_header('Instructor Theory Control Center');
         return html;
     }
 
+    function renderRemoteProgressTestRequests(items) {
+        var html = '<div class="tcc-modal-section full"><div class="tcc-modal-section-title">Remote Progress Test Requests</div>';
+        if (!items || !items.length) {
+            return html + '<div class="tcc-modal-muted">No remote authorization requests recorded for this lesson.</div></div>';
+        }
+        html += '<div class="tcc-intervention-list">';
+        items.forEach(function (item) {
+            var statusClass = item.pill_class || 'new';
+            var meta = [
+                item.requested_at ? ('Requested ' + niceDateTime(item.requested_at)) : '',
+                item.authenticated_at ? ('Authenticated ' + niceDateTime(item.authenticated_at)) : '',
+                item.code_verified_at ? ('Code verified ' + niceDateTime(item.code_verified_at)) : '',
+                item.requested_ip ? ('IP ' + item.requested_ip) : '',
+                item.progress_test_attempt_id ? ('Attempt #' + item.progress_test_attempt_id) : ''
+            ].filter(Boolean).join(' · ');
+            var photo = item.photo_url
+                ? ('<a href="' + escapeHtml(item.photo_url) + '" target="_blank" rel="noopener"><img src="' + escapeHtml(item.photo_url) + '" alt="Student authentication photo" style="width:72px;height:72px;object-fit:cover;border-radius:12px;border:1px solid rgba(15,23,42,.08);"></a>')
+                : '<div class="tcc-modal-muted" style="width:72px;text-align:center;">No photo</div>';
+            html += '<div class="tcc-intervention-item" style="display:flex;gap:12px;align-items:flex-start;">'
+                + photo
+                + '<div style="flex:1;min-width:0;">'
+                + '<div class="tcc-intervention-title">' + escapeHtml(item.status_label || item.status || 'Request') + ' <span class="state-pill ' + escapeHtml(statusClass) + '">' + escapeHtml(item.status || '') + '</span></div>'
+                + '<div class="tcc-intervention-meta">' + escapeHtml(meta || '—') + '</div>'
+                + (item.attempt_result_code ? ('<div class="tcc-intervention-meta">Result: ' + escapeHtml(item.attempt_result_code) + (item.attempt_score_pct != null ? (' · ' + escapeHtml(String(item.attempt_score_pct)) + '%') : '') + '</div>') : '')
+                + '</div></div>';
+        });
+        html += '</div></div>';
+        return html;
+    }
+
     function buildProgressTestModalHtml(d, oralAnalysis, aiLoading) {
         var lesson = d.lesson || {};
         var sub = escapeHtml((lesson.course_title || 'Module') + ' · ' + (lesson.lesson_title || 'Lesson'));
         var mergedK = mergeKnowledgeFeedbackWithOral(d.knowledge_feedback || {}, oralAnalysis || {});
         var oralBlock = renderProgressTestOralAndKnowledgeSection(oralAnalysis || {}, mergedK, !!aiLoading);
         return '<div class="tcc-modal-section full tcc-progress-test-lesson-spacer"><div class="tcc-modal-section-title">Lesson</div><div class="tcc-modal-muted">' + sub + '</div></div>'
+            + renderRemoteProgressTestRequests(d.remote_requests || [])
             + '<div class="tcc-oral-ai-panel"><div class="tcc-modal-section-title">AI oral integrity review</div>' + oralBlock + '</div>'
             + renderAttemptCards(d.attempts || []);
     }

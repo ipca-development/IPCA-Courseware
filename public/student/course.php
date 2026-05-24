@@ -887,38 +887,42 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
     $bestScore = $test['best_score'];
     $hasActiveProgressTest = $openAttempt && in_array((string)($openAttempt['status'] ?? ''), ['preparing', 'ready', 'in_progress', 'processing'], true);
 
-  	$canTest = true;
-	if ($role === 'student' && $locked) $canTest = false;
-	if ($role === 'student' && !$summaryOk) $canTest = false;
-	if ($role === 'student' && $testPassed) $canTest = false;
-	if ($role === 'student' && $attemptsLeft <= 0 && !$hasActiveProgressTest) $canTest = false;
-	if ($role === 'student' && (int)$instructorDecision['training_suspended'] === 1) $canTest = false;
-	if ($role === 'student' && $pendingDeadlineReason) $canTest = false;
-	if ($role === 'student' && $pendingRemediation) $canTest = false;
-	if ($role === 'student' && $pendingInstructorApproval) $canTest = false;
-	if ($role === 'student' && !empty($effectiveDeadlineState['deadline_passed'])) $canTest = false;
-	if (
-		$role === 'student' &&
-		(int)$instructorDecision['one_on_one_required'] === 1 &&
-		(int)$instructorDecision['one_on_one_completed'] !== 1
-	) {
-		$canTest = false;
-	}
-
     $ptUrlV4 = '/student/progress_test_v4.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId;
-    $ptPrepMeta = progress_test_prep_meta(
-        $pdo,
+    $ptButtonState = $progression->getProgressTestButtonState(
         (int)$userId,
         (int)$cohortId,
         $lessonId,
-        $summaryOk,
-        $canTest,
-        (string)($_SERVER['HTTP_COOKIE'] ?? ''),
-        $ptUrlV4
+        (string)($_SERVER['HTTP_COOKIE'] ?? '')
     );
+    $ptPrepMeta = (array)($ptButtonState['prep'] ?? []);
+    if (!empty($ptButtonState['show_bar']) && !empty($ptPrepMeta)) {
+        $ptPrepMeta['show_bar'] = true;
+    } elseif (!empty($ptButtonState['show_bar'])) {
+        $ptPrepMeta = array_merge([
+            'show_bar' => true,
+            'show_button' => false,
+            'show_prepare_button' => false,
+            'button_href' => '',
+            'button_label' => 'Start Progress Test',
+            'prepared' => false,
+            'preparing' => true,
+            'resume' => false,
+            'label' => '',
+            'sub' => 'Preparing',
+            'class' => 'info',
+            'pct' => 0,
+            'attempt_id' => (int)($ptButtonState['attempt_id'] ?? 0),
+        ], $ptPrepMeta);
+    } else {
+        $ptPrepMeta['show_bar'] = false;
+    }
+    if (($ptButtonState['mode'] ?? '') === 'continue' || !empty($ptButtonState['attempt_id'])) {
+        $hasActiveProgressTest = true;
+    }
     if (!empty($ptPrepMeta['resume'])) {
         $hasActiveProgressTest = true;
     }
+    $canTest = ($ptButtonState['mode'] ?? 'blocked') !== 'blocked';
     $deadline = deadline_progress_meta((string)$cohort['start_date'], $effectiveDeadlineUtc, $cohortTimezone);
 
     if ($bestScore !== null) {
@@ -980,6 +984,7 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         'progress_test_url_v3' => '/student/progress_test_v3.php?cohort_id=' . (int)$cohortId . '&lesson_id=' . $lessonId,
         'has_active_progress_test' => $hasActiveProgressTest,
         'progress_test_prep' => $ptPrepMeta,
+        'progress_test_button' => $ptButtonState,
         'first_slide_id' => $firstSlideId,
 		'activity_state' => $activityState,
     ];
@@ -1486,6 +1491,8 @@ cw_header('Course');
     letter-spacing:.01em;
   }
   .action-btn.primary{background:#12355f;color:#fff;border-color:#12355f}
+  .action-btn.remote{background:#f59e0b;color:#fff;border-color:#f59e0b}
+  .action-btn.remote:hover{background:#d97706;border-color:#d97706}
   .action-btn.warn{background:#fff7ed;color:#92400e;border-color:#fed7aa}
   .action-btn.danger{background:#fef2f2;color:#991b1b;border-color:#fecaca}
   .action-btn:hover{opacity:.95}
@@ -1516,6 +1523,34 @@ cw_header('Course');
     font-size:14px;
   }
 
+  .nb-banner{
+    display:block;
+    padding:13px 15px;
+    border-radius:14px;
+    margin-bottom:18px;
+    font-size:13px;
+    font-weight:800;
+    border:1px solid transparent;
+    box-shadow:0 10px 28px rgba(15,23,42,0.08);
+  }
+  .nb-banner.ok{background:#f0fdf4;color:#166534;border-color:#86efac}
+
+  .course-remote-modal-overlay{
+    display:none;position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200;align-items:center;justify-content:center;padding:16px;
+  }
+  .course-remote-modal-overlay.open{display:flex;}
+  .course-remote-modal{
+    width:100%;max-width:460px;background:#fff;border-radius:18px;padding:22px;border:1px solid rgba(15,23,42,.08);box-shadow:0 18px 40px rgba(15,23,42,.18);
+  }
+  .course-remote-modal h3{margin:0 0 8px;font-size:20px;font-weight:900;color:#102845;}
+  .course-remote-modal p{margin:0 0 14px;color:#475569;font-size:13px;line-height:1.5;}
+  .course-remote-modal input{
+    width:100%;box-sizing:border-box;padding:14px 16px;border:1px solid #d6d6d6;border-radius:12px;font-size:18px;letter-spacing:.18em;text-align:center;
+  }
+  .course-remote-modal-actions{display:flex;gap:10px;margin-top:14px;}
+  .course-remote-modal-actions .action-btn{flex:1;min-height:38px;font-size:12px;}
+  .course-remote-modal-error{margin-top:10px;color:#b91c1c;font-weight:800;font-size:12px;display:none;}
+
   @media (max-width: 1320px){
     .hero-grid{grid-template-columns:1fr}
     .top-grid{grid-template-columns:1fr}
@@ -1543,6 +1578,12 @@ cw_header('Course');
       <div style="font-size:14px;font-weight:800;color:#9a3412;">
         <?= h($blockedLessonMessage) ?>
       </div>
+    </div>
+  <?php endif; ?>
+
+  <?php if ((int)($_GET['remote_requested'] ?? 0) === 1): ?>
+    <div class="nb-banner ok" style="display:block;">
+      Your progress test request was received. Check your email for the authentication link in a few moments.
     </div>
   <?php endif; ?>
 
@@ -1844,6 +1885,13 @@ $testHref = '';
 $testLabel = '';
 $testBtnClass = 'primary';
 $showPrepareButton = false;
+$showRemoteRequestButton = false;
+$showCodeModalButton = false;
+$ptBtnDisabled = false;
+$ptBtnMessage = '';
+
+$ptBtn = (array)($lx['progress_test_button'] ?? []);
+$ptBtnMode = (string)($ptBtn['mode'] ?? 'blocked');
 
 if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])) {
     $testHref = (string)$lx['action_required_url'];
@@ -1853,26 +1901,18 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     $testHref = (string)$lx['action_required_url'];
     $testLabel = 'Complete Action';
     $testBtnClass = 'warn';
-} elseif (!empty($lx['can_test'])) {
-    if (!empty($lx['progress_test_prep']['show_button']) && !empty($lx['progress_test_prep']['button_href'])) {
-        $testHref = (string)$lx['progress_test_prep']['button_href'];
-        $testLabel = (string)($lx['progress_test_prep']['button_label'] ?: 'Start Progress Test');
-    } elseif (!empty($lx['progress_test_prep']['show_prepare_button'])) {
-        $showPrepareButton = true;
-        $testLabel = 'Prepare Progress Test';
-    } elseif (!empty($lx['progress_test_prep']['preparing'])) {
-        $testHref = '';
-        $testLabel = 'Start Progress Test';
-    } elseif (!empty($lx['progress_test_prep']['prepared'])) {
-        $testHref = (string)$lx['progress_test_url'];
-        $testLabel = !empty($lx['has_active_progress_test']) ? 'Resume Progress Test' : 'Start Progress Test';
-    } else {
-        $testHref = '';
-        $testLabel = 'Start Progress Test';
-    }
-    $testBtnClass = 'primary';
+} elseif ($ptBtnMode !== 'blocked') {
+    $testLabel = (string)($ptBtn['label'] ?? 'Start Progress Test');
+    $testBtnClass = (string)($ptBtn['button_class'] ?? 'primary');
+    $ptBtnDisabled = !empty($ptBtn['disabled']);
+    $showPrepareButton = !empty($ptBtn['show_prepare_button']);
+    $showRemoteRequestButton = ($ptBtnMode === 'remote_request');
+    $showCodeModalButton = !empty($ptBtn['show_code_modal']);
+    $testHref = (string)($ptBtn['href'] ?? ($lx['progress_test_url'] ?? ''));
 } else {
-    $testLabel = 'Start Progress Test';
+    $testLabel = (string)($ptBtn['label'] ?? 'Start Progress Test');
+    $ptBtnDisabled = true;
+    $ptBtnMessage = (string)($ptBtn['message'] ?? '');
 } 
 					  
 					  
@@ -1932,10 +1972,18 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
                             <a href="#" class="action-btn primary pt-prep-trigger"
                               data-cohort-id="<?= (int)$cohortId ?>"
                               data-lesson-id="<?= (int)$lx['lesson_id'] ?>"><?= h($testLabel) ?></a>
+                          <?php elseif ($showRemoteRequestButton): ?>
+                            <button type="button" class="action-btn remote pt-remote-request"
+                              data-cohort-id="<?= (int)$cohortId ?>"
+                              data-lesson-id="<?= (int)$lx['lesson_id'] ?>"><?= h($testLabel) ?></button>
+                          <?php elseif ($showCodeModalButton): ?>
+                            <button type="button" class="action-btn primary pt-remote-code-open"
+                              data-cohort-id="<?= (int)$cohortId ?>"
+                              data-lesson-id="<?= (int)$lx['lesson_id'] ?>"><?= h($testLabel) ?></button>
                           <?php elseif ($testHref !== ''): ?>
                             <a class="action-btn <?= h($testBtnClass) ?>" href="<?= h($testHref) ?>"><?= h($testLabel) ?></a>
                           <?php else: ?>
-                            <span class="action-btn disabled"><?= h($testLabel) ?></span>
+                            <span class="action-btn disabled" title="<?= h($ptBtnMessage) ?>"><?= h($testLabel) ?></span>
                           <?php endif; ?>
                         </div>
                         <?php endif; ?>
@@ -2080,6 +2128,115 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     });
   });
 })();
+
+(function () {
+  document.querySelectorAll('.pt-remote-request').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      var cohortId = parseInt(btn.getAttribute('data-cohort-id') || '0', 10);
+      var lessonId = parseInt(btn.getAttribute('data-lesson-id') || '0', 10);
+      fetch('/student/api/progress_test_remote_request.php', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cohort_id: cohortId, lesson_id: lessonId })
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) {
+            btn.disabled = false;
+            alert(j && j.error ? j.error : 'Could not submit request.');
+            return;
+          }
+          window.location.href = '/student/course.php?cohort_id=' + encodeURIComponent(String(cohortId)) + '&remote_requested=1#progress-test-lesson-' + encodeURIComponent(String(lessonId));
+        })
+        .catch(function () {
+          btn.disabled = false;
+          alert('Could not submit request.');
+        });
+    });
+  });
+
+  var overlay = document.getElementById('courseRemoteCodeModal');
+  var codeInput = document.getElementById('courseRemoteCodeInput');
+  var codeError = document.getElementById('courseRemoteCodeError');
+  var codeSubmit = document.getElementById('courseRemoteCodeSubmit');
+  var activeCohortId = 0;
+  var activeLessonId = 0;
+
+  function closeRemoteModal() {
+    if (!overlay) return;
+    overlay.classList.remove('open');
+    overlay.setAttribute('aria-hidden', 'true');
+    activeCohortId = 0;
+    activeLessonId = 0;
+    if (codeInput) codeInput.value = '';
+    if (codeError) { codeError.style.display = 'none'; codeError.textContent = ''; }
+  }
+
+  document.querySelectorAll('.pt-remote-code-open').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      activeCohortId = parseInt(btn.getAttribute('data-cohort-id') || '0', 10);
+      activeLessonId = parseInt(btn.getAttribute('data-lesson-id') || '0', 10);
+      if (!overlay || activeCohortId <= 0 || activeLessonId <= 0) return;
+      overlay.classList.add('open');
+      overlay.setAttribute('aria-hidden', 'false');
+      if (codeInput) codeInput.focus();
+    });
+  });
+
+  document.querySelectorAll('[data-close-remote-modal]').forEach(function (el) {
+    el.addEventListener('click', closeRemoteModal);
+  });
+
+  if (codeSubmit) {
+    codeSubmit.addEventListener('click', function () {
+      var code = codeInput ? String(codeInput.value || '').trim() : '';
+      if (!code || activeCohortId <= 0 || activeLessonId <= 0) {
+        if (codeError) {
+          codeError.style.display = 'block';
+          codeError.textContent = 'Enter your Progress Test Code.';
+        }
+        return;
+      }
+      codeSubmit.disabled = true;
+      fetch('/student/api/progress_test_remote_verify_code.php', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cohort_id: activeCohortId, lesson_id: activeLessonId, code: code })
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (j) {
+          if (!j || !j.ok) {
+            throw new Error((j && j.error) ? j.error : 'Verification failed.');
+          }
+          window.location.href = j.redirect_url || ('/student/progress_test_v4.php?cohort_id=' + activeCohortId + '&lesson_id=' + activeLessonId);
+        })
+        .catch(function (e) {
+          codeSubmit.disabled = false;
+          if (codeError) {
+            codeError.style.display = 'block';
+            codeError.textContent = e.message || 'Verification failed.';
+          }
+        });
+    });
+  }
+})();
 </script>
+
+<div id="courseRemoteCodeModal" class="course-remote-modal-overlay" aria-hidden="true">
+  <div class="course-remote-modal" role="dialog" aria-modal="true" aria-labelledby="courseRemoteCodeTitle">
+    <h3 id="courseRemoteCodeTitle">Enter Progress Test Code</h3>
+    <p>Enter the six-digit code shown on the remote authentication page. Your official progress test attempt starts only after this code is verified.</p>
+    <input id="courseRemoteCodeInput" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="000000">
+    <div id="courseRemoteCodeError" class="course-remote-modal-error"></div>
+    <div class="course-remote-modal-actions">
+      <button type="button" class="action-btn" data-close-remote-modal>Cancel</button>
+      <button type="button" class="action-btn primary" id="courseRemoteCodeSubmit">Verify &amp; Start</button>
+    </div>
+  </div>
+</div>
 
 <?php cw_footer(); ?>

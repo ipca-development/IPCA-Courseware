@@ -132,6 +132,8 @@ final class TimeBasedProgressionCron
                 }
             ));
 
+            $summary['remote_auth_expired'] = $this->engine->expireStaleRemoteAuthorizations();
+
             // Bonus / Q8: nudge instructors about un-decided submitted reasons (once/day).
             // This dispatches automation events that admin-configured flows turn into emails;
             // no email logic is hardcoded here — the cron just fires the event with a proper
