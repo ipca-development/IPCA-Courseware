@@ -390,7 +390,7 @@ trait CoursewareProgressionV2RemoteTrait
 
         $authLink = ptr_app_base_url() . '/student/progress_test_auth.php?token=' . urlencode($rawToken);
 
-        $stUser = $this->pdo->prepare('SELECT COALESCE(NULLIF(TRIM(name), ""), email) AS student_name, email FROM users WHERE id = ? LIMIT 1');
+        $stUser = $this->pdo->prepare("SELECT COALESCE(NULLIF(TRIM(name), ''), email) AS student_name, email FROM users WHERE id = ? LIMIT 1");
         $stUser->execute([$studentId]);
         $userRow = $stUser->fetch(PDO::FETCH_ASSOC) ?: [];
         $studentEmail = trim((string)($userRow['email'] ?? ''));
