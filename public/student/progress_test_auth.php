@@ -243,11 +243,29 @@ cw_header('Remote Progress Test Authentication');
             ts: Date.now()
           }));
         } catch (e) {}
-        if (window.opener && !window.opener.closed) {
+        (function notifyCourseTabRemoteAuthComplete() {
+          var payload = {
+            type: 'remote_progress_test_authenticated',
+            cohort_id: <?= (int)$cohortId ?>,
+            lesson_id: <?= (int)$lessonId ?>,
+            ts: Date.now()
+          };
           try {
-            window.opener.postMessage({ type: 'remote_progress_test_authenticated', cohort_id: <?= (int)$cohortId ?>, lesson_id: <?= (int)$lessonId ?> }, window.location.origin);
+            localStorage.setItem('pt_remote_auth_refresh', JSON.stringify(payload));
           } catch (e) {}
-        }
+          try {
+            if (typeof BroadcastChannel !== 'undefined') {
+              var channel = new BroadcastChannel('ipca_pt_remote_auth');
+              channel.postMessage(payload);
+              channel.close();
+            }
+          } catch (e) {}
+          if (window.opener && !window.opener.closed) {
+            try {
+              window.opener.postMessage(payload, window.location.origin);
+            } catch (e) {}
+          }
+        })();
       })
       .catch(function (e) {
         submitBtn.disabled = false;

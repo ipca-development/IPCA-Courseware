@@ -2070,11 +2070,11 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
 })();
 
 (function () {
-  window.addEventListener('message', function (ev) {
-    if (!ev || !ev.data || ev.data.type !== 'remote_progress_test_authenticated') return;
-    if (ev.origin !== window.location.origin) return;
-    var cohortId = parseInt(ev.data.cohort_id || '0', 10);
-    var lessonId = parseInt(ev.data.lesson_id || '0', 10);
+  var remoteAuthReloading = false;
+
+  function redirectCourseForRemoteAuth(cohortId, lessonId) {
+    if (remoteAuthReloading) return;
+    remoteAuthReloading = true;
     if (cohortId <= 0 || lessonId <= 0) {
       window.location.replace('/student/course.php?_ts=' + Date.now());
       return;
@@ -2084,7 +2084,56 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
       + '&pt_remote_auth=1'
       + '&_ts=' + Date.now();
     window.location.replace('/student/course.php?' + qs + '#progress-test-lesson-' + lessonId);
+  }
+
+  function handleRemoteAuthComplete(data) {
+    if (!data || data.type !== 'remote_progress_test_authenticated') return;
+    try {
+      localStorage.removeItem('pt_remote_auth_refresh');
+    } catch (e) {}
+    redirectCourseForRemoteAuth(
+      parseInt(data.cohort_id || '0', 10),
+      parseInt(data.lesson_id || '0', 10)
+    );
+  }
+
+  window.addEventListener('message', function (ev) {
+    if (!ev || !ev.data || ev.data.type !== 'remote_progress_test_authenticated') return;
+    if (ev.origin !== window.location.origin) return;
+    handleRemoteAuthComplete(ev.data);
   });
+
+  window.addEventListener('storage', function (ev) {
+    if (ev.key !== 'pt_remote_auth_refresh' || !ev.newValue) return;
+    try {
+      handleRemoteAuthComplete(JSON.parse(ev.newValue));
+    } catch (e) {}
+  });
+
+  try {
+    if (typeof BroadcastChannel !== 'undefined') {
+      var remoteAuthChannel = new BroadcastChannel('ipca_pt_remote_auth');
+      remoteAuthChannel.onmessage = function (ev) {
+        handleRemoteAuthComplete(ev.data);
+      };
+    }
+  } catch (e) {}
+
+  (function checkStoredRemoteAuthRefresh() {
+    try {
+      var params = new URLSearchParams(window.location.search || '');
+      if (params.get('pt_remote_auth') === '1') return;
+      var raw = localStorage.getItem('pt_remote_auth_refresh');
+      if (!raw) return;
+      var data = JSON.parse(raw);
+      if (!data || data.type !== 'remote_progress_test_authenticated') return;
+      if (Date.now() - (parseInt(data.ts, 10) || 0) > 30 * 60 * 1000) {
+        localStorage.removeItem('pt_remote_auth_refresh');
+        return;
+      }
+      handleRemoteAuthComplete(data);
+    } catch (e) {}
+  })();
 })();
 
 (function () {
