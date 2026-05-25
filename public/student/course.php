@@ -910,6 +910,18 @@ $attemptsLeft = max(0, (int)($attemptState['remaining_attempts'] ?? 0));
         $ptPrepMeta['preparing'] = false;
         $ptPrepMeta['show_button'] = false;
         $ptPrepMeta['show_prepare_button'] = false;
+    } elseif (in_array(($ptButtonState['mode'] ?? ''), ['remote_preparing', 'on_site_preparing'], true)) {
+        $prepFromBtn = (array)($ptButtonState['prep'] ?? []);
+        if ($prepFromBtn) {
+            $ptPrepMeta = array_merge($ptPrepMeta, $prepFromBtn);
+        }
+        $ptPrepMeta['show_bar'] = true;
+        $ptPrepMeta['preparing'] = true;
+        $ptPrepMeta['show_button'] = false;
+        $ptPrepMeta['show_prepare_button'] = false;
+        if (!empty($ptButtonState['attempt_id'])) {
+            $ptPrepMeta['attempt_id'] = (int)$ptButtonState['attempt_id'];
+        }
     }
     if (($ptButtonState['mode'] ?? '') === 'continue' || !empty($ptButtonState['attempt_id'])) {
         $hasActiveProgressTest = true;
@@ -1925,7 +1937,10 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     $ptBtnDisabled = !empty($ptBtn['disabled']);
     $showPrepareButton = !empty($ptBtn['show_prepare_button']);
     $showRemoteRequestButton = ($ptBtnMode === 'remote_request');
-    $showCodeModalButton = !empty($ptBtn['show_code_modal']) || ($ptBtnMode === 'remote_code_entry');
+    $lxPrep = (array)($lx['progress_test_prep'] ?? []);
+    $showCodeModalButton = ($ptBtnMode === 'remote_code_entry' || !empty($ptBtn['show_code_modal']))
+        && empty($lxPrep['show_bar'])
+        && !in_array($ptBtnMode, ['remote_preparing', 'on_site_preparing', 'remote_start', 'on_site_start'], true);
     $testHref = (string)($ptBtn['href'] ?? ($lx['progress_test_url'] ?? ''));
 } else {
     $testLabel = (string)($ptBtn['label'] ?? 'Start Progress Test');
@@ -2280,6 +2295,15 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
     }
   }
 
+  function courseLessonUrl(cohortId, lessonId, extraParams) {
+    var qs = 'cohort_id=' + encodeURIComponent(String(cohortId));
+    extraParams = extraParams || {};
+    Object.keys(extraParams).forEach(function (key) {
+      qs += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(String(extraParams[key]));
+    });
+    return '/student/course.php?' + qs + '#progress-test-lesson-' + lessonId;
+  }
+
   function submitRemoteCode() {
     var ctx = readActiveLessonContext();
     var code = codeInput ? String(codeInput.value || '').replace(/\D+/g, '') : '';
@@ -2317,7 +2341,10 @@ if (!empty($lx['pending_deadline_reason']) && !empty($lx['action_required_url'])
       })
       .then(function (j) {
         closeRemoteModal();
-        window.location.href = j.redirect_url || ('/student/course.php?cohort_id=' + ctx.cohortId + '#progress-test-lesson-' + ctx.lessonId);
+        window.location.replace(courseLessonUrl(ctx.cohortId, ctx.lessonId, {
+          pt_code_verified: 1,
+          _ts: Date.now()
+        }));
       })
       .catch(function (e) {
         setCodeSubmitLoading(false);

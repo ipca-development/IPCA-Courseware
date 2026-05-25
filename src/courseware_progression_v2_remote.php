@@ -315,6 +315,21 @@ trait CoursewareProgressionV2RemoteTrait
 
         $auth = $this->ptr_get_active_remote_auth($studentId, $cohortId, $lessonId);
         if ($auth && (string)$auth['status'] === 'AUTHENTICATED' && !empty($auth['verification_code_hash'])) {
+            $openPrep = $this->ptr_get_open_attempt($studentId, $cohortId, $lessonId);
+            if ($openPrep && !pt_prep_attempt_is_prepared($openPrep, $this->pdo)) {
+                return [
+                    'mode' => 'remote_preparing',
+                    'label' => 'Start Progress Test',
+                    'button_class' => 'primary',
+                    'disabled' => true,
+                    'show_bar' => true,
+                    'preparing' => true,
+                    'prep' => $prep,
+                    'show_code_modal' => false,
+                    'progress_test_url' => $ptUrl,
+                    'attempt_id' => (int)$openPrep['id'],
+                ];
+            }
             return [
                 'mode' => 'remote_code_entry',
                 'label' => 'Enter Progress Test Code',
@@ -694,7 +709,7 @@ trait CoursewareProgressionV2RemoteTrait
             'legal_note' => 'Official progress_tests_v2 attempt created only after remote code verification.',
         ]);
 
-        $courseUrl = '/student/course.php?cohort_id=' . $cohortId . '#progress-test-lesson-' . $lessonId;
+        $courseUrl = '/student/course.php?cohort_id=' . $cohortId . '&pt_code_verified=1#progress-test-lesson-' . $lessonId;
 
         return [
             'ok' => true,

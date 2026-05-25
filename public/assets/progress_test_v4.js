@@ -220,6 +220,9 @@
 
   function scheduleMayaAudioEnd(text, resetStart) {
     var tail = mayaPlaybackTailMs(text);
+    if (mayaTurnPurpose === 'greeting') {
+      tail = Math.max(tail, 6500);
+    }
     if (resetStart || !mayaSpeechStartedAt) mayaSpeechStartedAt = Date.now();
     mayaAudioEndsAt = mayaSpeechStartedAt + tail;
   }
@@ -319,8 +322,10 @@
     if (!onDone && !responseInProgress && !mayaTurnPurpose) return;
     if (dc) dc._ptv4OnSpeechDone = null;
     responseInProgress = false;
-    mayaTurnPurpose = '';
-    completeSpeechTurn(onDone);
+    completeSpeechTurn(function () {
+      mayaTurnPurpose = '';
+      if (typeof onDone === 'function') onDone();
+    });
   }
 
   function resetRemoteTrackWait() {
@@ -1401,10 +1406,14 @@
       mayaTurnPurpose = purpose || '';
       mayaExpectedText = script;
       responseInProgress = true;
-      if (purpose === 'clarification') {
+      scheduleMayaAudioEnd(script, true);
+      if (purpose === 'greeting') {
+        text(els.question, script);
+        startWordReveal(script);
+      } else if (purpose === 'clarification') {
         setCardState(CARD.CLARIFICATION);
         clarificationPending = true;
-      } else if (purpose === 'question' || purpose === 'greeting' || purpose === 'feedback' || purpose === 'final') {
+      } else if (purpose === 'question' || purpose === 'feedback' || purpose === 'final') {
         setCardState(CARD.ASKING);
         startMayaBarMotion();
       }
@@ -1511,6 +1520,9 @@
 
     if (type === 'response.output_audio_transcript.done' && msg.transcript && mayaTurnPurpose) {
       scheduleMayaAudioEnd(mayaExpectedText || String(msg.transcript || ''));
+      if (mayaTurnPurpose === 'greeting') {
+        finishWordReveal(mayaExpectedText || String(msg.transcript || ''));
+      }
       return;
     }
 
@@ -1802,7 +1814,7 @@
     greetingReady = false;
     oralQuestionsStarted = false;
     var greeting = greetingScript();
-    text(els.question, 'Progress Test ready');
+    text(els.question, greeting);
     setTranscriptDisplay('preidle');
     setHintContent('Listen to Maya, then tap <strong>Ready</strong>.', true);
     setCardState(CARD.ASKING);
@@ -1810,6 +1822,7 @@
     logEvent('greeting_start');
 
     function finishGreeting() {
+      finishWordReveal(greeting);
       greetingReady = true;
       setCardState(CARD.READY);
       setHintContent('Tap <strong>Ready</strong> to begin Question 1.', true);
@@ -1823,6 +1836,7 @@
     }
 
     function failGreeting(err) {
+      stopWordReveal(greeting);
       stopMayaBarMotion();
       testStarted = false;
       setCardState(CARD.READY);
@@ -1830,15 +1844,6 @@
       setHintContent('Maya audio could not start. Check your speakers and microphone permission, then tap <strong>Ready</strong> again.<br><span style="font-size:12px;opacity:.85">' + (err.message || 'Voice unavailable') + '</span>', true);
       logEvent('greeting_failed', err.message || 'Voice unavailable');
       syncButtons();
-    }
-
-    var introUrl = state && state.intro_audio_url;
-    if (introUrl) {
-      logEvent('greeting_audio_start', 'intro_url');
-      return playPreparedAudio(introUrl, finishGreeting).catch(function () {
-        return ensureVoiceConnected()
-          .then(function () { return speakScript(greeting, 'greeting', finishGreeting); });
-      }).catch(failGreeting);
     }
 
     return ensureVoiceConnected()

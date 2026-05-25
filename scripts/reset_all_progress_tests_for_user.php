@@ -192,15 +192,24 @@ foreach ($pairSt->fetchAll(PDO::FETCH_ASSOC) as $pair) {
 }
 
 $deletedPhotos = 0;
+$photoPathsInDb = 0;
+$photoFilesMissing = 0;
 $pdo->beginTransaction();
 try {
-    $photoSt = $pdo->prepare('SELECT student_photo_path FROM progress_test_remote_authorizations WHERE student_id = ?');
+    $photoSt = $pdo->prepare('SELECT id, student_photo_path FROM progress_test_remote_authorizations WHERE student_id = ?');
     $photoSt->execute([$userId]);
-    foreach ($photoSt->fetchAll(PDO::FETCH_COLUMN) as $photoPath) {
-        $abs = ptr_photo_absolute_path((string)$photoPath);
+    foreach ($photoSt->fetchAll(PDO::FETCH_ASSOC) as $photoRow) {
+        $photoPath = trim((string)($photoRow['student_photo_path'] ?? ''));
+        if ($photoPath === '') {
+            continue;
+        }
+        $photoPathsInDb++;
+        $abs = ptr_photo_absolute_path($photoPath);
         if ($abs && is_file($abs)) {
             @unlink($abs);
             $deletedPhotos++;
+        } else {
+            $photoFilesMissing++;
         }
     }
 
@@ -246,6 +255,12 @@ try {
 
 echo "Reset complete.\n";
 echo "Deleted progress test attempts: {$deletedAttempts}\n";
-echo "Deleted auth photo files: {$deletedPhotos}\n";
+echo "Auth rows with photo path in DB: {$photoPathsInDb}\n";
+echo "Deleted auth photo files on this host: {$deletedPhotos}\n";
+if ($photoFilesMissing > 0) {
+    echo "Auth photo files not found on this host: {$photoFilesMissing}\n";
+    echo "Note: photos are stored under storage/remote_progress_test_photos/ on the web server.\n";
+    echo "Run this reset script on the production app host (or delete orphans there) to remove image files.\n";
+}
 echo "Reset lesson_activity rows: " . count($lessonPairs) . "\n";
 echo "\nReload your course page — remote lessons should show Request Progress Test (off-site).\n";
